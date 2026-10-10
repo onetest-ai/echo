@@ -14,3 +14,7 @@ CLAUDE.local.md
 
 # manual test run logs may contain real call details
 /tests/runs/
+
+# local agent skills (installed per machine)
+/.agents/
+/skills-lock.json
