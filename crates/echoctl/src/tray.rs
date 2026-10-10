@@ -747,7 +747,7 @@ impl Ui {
             }
             Action::ConnectClaude => {
                 std::thread::spawn(|| match app::connect_claude("user", None) {
-                    Ok(()) => app::notify("Claude Code connected", "Open a new Claude Code session, then run /echo:setup."),
+                    Ok(()) => app::notify("Claude Code connected", "New Claude Code sessions now write your call notes."),
                     Err(e) => app::notify("Could not connect Claude Code", &format!("{e:#}")),
                 });
             }

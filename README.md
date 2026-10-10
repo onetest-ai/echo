@@ -89,7 +89,8 @@ Click a meeting for details, notes from last time, and the Record button.
 Notes, action items and follow-ups are written by [Claude Code](https://claude.com/claude-code).
 
 1. Menu → **Claude Code → Connect Claude Code**. This installs the Echo plugin.
-2. Start a Claude Code session and run `/echo:setup` once.
+2. Start a new Claude Code session. Nothing else to set up: `/echo:doctor` checks Echo and fixes
+   what's missing if something doesn't work.
 
 From then on, notes come two ways:
 
@@ -104,7 +105,7 @@ From then on, notes come two ways:
 The model is `sonnet` by default. Change it under menu → Claude Code → **Notes model**: `opus`,
 `haiku`, a full model name, or `default` to use whatever your Claude Code is set up with (local
 models, a gateway, Bedrock or Vertex). During a
-call, `/echo:live` shows the transcript as it happens, and `/echo:note` adds your own notes.
+call, `/echo:live` shows the transcript as it happens, and menu → **Add a note…** adds your own notes.
 
 <details>
 <summary>Install the plugin by hand, or for one project</summary>

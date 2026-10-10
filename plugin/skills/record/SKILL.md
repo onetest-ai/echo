@@ -1,19 +1,22 @@
 ---
 name: record
-description: Record the current Teams call now, or the next call the user joins. Use when the user says "record", "record this call", "start recording", or wants an unscheduled/off-calendar call captured.
-argument-hint: "[language: en|uk|ru|es…] [title]"
+description: Start or stop recording a Teams call with Echo. Use when the user says "record", "record this call", "record in Ukrainian", "stop recording", "stop", or "don't record this" (stop also cancels a pending arm).
+argument-hint: "[stop] | [language: en|uk|ru|es…] [title]"
 ---
 
-# echo: record this call
+# echo: record / stop
 
-CLI: `${CLAUDE_PLUGIN_ROOT}/scripts/echoctl` (below: `echoctl`).
+CLI: `${CLAUDE_PLUGIN_ROOT}/scripts/echoctl` (below: `echoctl`). Record only when the user asked
+for this call.
 
+**Stop** ("stop", "don't record this"): `echoctl stop` and report its one-line output. The app
+transcribes the call and the notes follow by themselves.
+
+**Record:**
 1. `echoctl status`. If `watcher` is null the app isn't running: `echoctl app start` (if that
-   fails, run the `setup` skill), then continue.
-2. Arm: `echoctl arm` — add `--title "<title>"` if the user gave one, and
-   `--languages <codes>` if they named the call's language(s) ("record in Ukrainian", "uk",
-   "en+uk" → `--languages uk` / `--languages en,uk`). The watcher attaches the overlapping
-   calendar meeting by itself. (The same as Record in the menu-bar icon.)
-3. Report in one line, from the command's output:
-   - call in progress → "● Recording" (the `recording_started` event follows within a second);
-   - no call yet → "Armed — recording starts when your next Teams call begins (15 min)".
+   fails, run the `doctor` skill).
+2. `echoctl arm`, with `--title "<title>"` if the user gave one and `--languages <codes>` if they
+   named the language ("in Ukrainian" → `--languages uk`, "en+uk" → `--languages en,uk`). The
+   app attaches the calendar meeting by itself.
+3. One line from the output: a call in progress → "● Recording"; no call yet → "Armed —
+   recording starts when your next Teams call begins (15 min)".

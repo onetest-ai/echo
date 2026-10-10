@@ -12,20 +12,21 @@
 **Expected**
 - A "Claude Code connected" notification.
 - `claude plugin list` shows `echo@echo`.
-- The session offers `/echo:setup`, `/echo:record`, `/echo:stop`, `/echo:note`, `/echo:live`,
-  `/echo:process-call`.
+- The session offers `/echo:process-call`, `/echo:live`, `/echo:record` and `/echo:doctor`.
 
 ---
 
-### TC-CLA-002 · Setup in a session
+### TC-CLA-002 · Doctor in a session
 **Priority:** P1 · **Platform:** macOS
 
 **Steps**
-1. Run `/echo:setup`.
+1. On a set-up machine, run `/echo:doctor`.
+2. Turn off Echo's microphone permission in System Settings; run `/echo:doctor` again.
 
 **Expected**
-- Claude finds the app and the data folder, reports the permission state and the model, and
-  does not ask for anything the app already has.
+- Step 1: one line that Echo is fine; nothing is asked or downloaded.
+- Step 2: Claude names the missing permission, opens its settings page and explains what to
+  click; it never changes the setting itself.
 
 ---
 
@@ -101,8 +102,8 @@
 **Priority:** P2 · **Platform:** macOS
 
 **Steps**
-1. During a recorded call, run `/echo:note` with a point you want kept ("ask legal about the
-   contract").
+1. During a recorded call, menu → **Add a note…** with a point you want kept ("ask legal about
+   the contract").
 
 **Expected**
 - After the call, the final notes keep that point and use it as part of their structure.
@@ -182,3 +183,17 @@
 **Expected**
 - The window says a Claude Code session is writing the notes right now; only one set of notes is
   written.
+
+---
+
+### TC-CLA-014 · Record and stop from a chat
+**Priority:** P2 · **Platform:** macOS
+
+**Steps**
+1. In a session with no call going, type "record my next call in Ukrainian".
+2. Join a Teams call; after a minute, type "stop recording".
+
+**Expected**
+- Step 1: "Armed — recording starts when your next Teams call begins"; the octopus turns green.
+- The recording starts with the call, pinned to Ukrainian; "stop recording" ends it and the
+  transcript follows.

@@ -45,7 +45,7 @@ struct Cli {
 enum Cmd {
     /// Check OS permissions needed for capture and explain how to grant them
     Doctor {
-        /// Emit machine-readable JSON (used by the /echo:setup skill)
+        /// Emit machine-readable JSON (used by the /echo:doctor skill)
         #[arg(long)]
         json: bool,
         /// Trigger the OS permission prompts that can be triggered programmatically
@@ -738,9 +738,9 @@ fn main() -> Result<()> {
                 "failing": failing,
                 "model": cfg.model,
                 "agenda_meetings": watch::agenda().len(),
-                "next": if !paths::home_chosen() || cfg.model.is_none() { "run the setup skill" }
+                "next": if !paths::home_chosen() || cfg.model.is_none() { "run the doctor skill" }
                         else if running.is_none() { "the app is not running: `echoctl app start` (see app.log if it fails)" }
-                        else if doctor["ready"] != true { "run the setup skill (permissions)" }
+                        else if doctor["ready"] != true { "run the doctor skill (permissions)" }
                         else { "nothing — Echo is running" },
             }))?);
             Ok(())

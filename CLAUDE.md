@@ -35,9 +35,10 @@ Notes/actions are written only by a Claude session (the app writes transcripts, 
 - `plugin/` — the Claude Code plugin; ships no binary: `plugin/scripts/echoctl[.cmd]` finds the
   CLI (`$ECHOCTL_BIN` → `plugin/bin` dev build from `scripts/build-plugin.sh` → PATH →
   Echo.app). Skills:
-  `setup` (install app, data folder, autostart, permissions, languages, model), `start` (`echoctl up`),
-  `process-call` (notes → actions → vocabulary → follow-ups),
-  `record` / `stop` (manual arm / stop), `note` (user's own notes during a call → `my-notes.md`).
+  `process-call` (notes → actions → vocabulary → follow-ups), `live` (the mod opens the pane),
+  `record` (arm / stop from chat), `doctor` (`echoctl up` + fix what's missing: data folder,
+  permissions, model, languages; first run itself is the app's). The user's own notes during a
+  call come from the tray's "Add a note…" (`echoctl note` → `my-notes.md`).
   Note templates: `crates/echoctl/templates/*.md`, compiled in (user overrides in `<home>/.echo/templates/`).
   Post-call facts come from `echoctl context <call>` (gate: ≥ 3 min and ≥ 2,500 chars; heading
   budget by length; colleagues vs external by email domain; previous notes of a recurring meeting).

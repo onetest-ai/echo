@@ -107,7 +107,7 @@ pub fn hardware() -> Hardware {
     }
 }
 
-/// Recommendation + one-line reason, shown to the user by the setup skill.
+/// Recommendation + one-line reason, shown by first run and the doctor skill.
 pub fn recommend(hw: &Hardware) -> (&'static str, String) {
     let ram = hw.ram_gb.unwrap_or(8);
     if ram < 8 {
@@ -330,7 +330,7 @@ pub fn active_model_path() -> Result<PathBuf> {
     let cfg = Config::load()?;
     let name = cfg
         .model
-        .ok_or_else(|| anyhow!("no transcription model yet — run /echo:setup (or `echoctl model list`)"))?;
+        .ok_or_else(|| anyhow!("no transcription model yet — choose one in the menu → Speech models (or `echoctl model list`)"))?;
     let m = find(&name)?;
     let p = model_path(m);
     if !p.exists() {
