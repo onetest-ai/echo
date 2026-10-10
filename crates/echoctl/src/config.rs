@@ -70,6 +70,34 @@ pub struct Config {
     /// None = any session with the plugin.
     #[serde(default)]
     pub notes_in: Option<PathBuf>,
+    /// Model Claude Code uses when the app writes notes itself (`echoctl notes`): an alias
+    /// (`sonnet`, `opus`, `haiku`), a full model id, or `default` for Claude Code's own setting
+    /// (local models, gateways, Bedrock / Vertex). None = sonnet.
+    #[serde(default)]
+    pub notes_model: Option<String>,
+    /// Model for the live pane's rolling summary and quick questions during a call (a fast
+    /// one). None = haiku.
+    #[serde(default)]
+    pub live_model: Option<String>,
+}
+
+pub const DEFAULT_NOTES_MODEL: &str = "sonnet";
+pub const DEFAULT_LIVE_MODEL: &str = "haiku";
+
+impl Config {
+    /// The `--model` value for notes runs; None = leave the choice to Claude Code.
+    pub fn notes_model_arg(&self) -> Option<String> {
+        match self.notes_model.as_deref().map(str::trim) {
+            None | Some("") => Some(DEFAULT_NOTES_MODEL.into()),
+            Some("default") => None,
+            Some(m) => Some(m.to_string()),
+        }
+    }
+
+    /// The model as the user set it, for display.
+    pub fn notes_model_label(&self) -> String {
+        self.notes_model.clone().filter(|m| !m.trim().is_empty()).unwrap_or_else(|| DEFAULT_NOTES_MODEL.into())
+    }
 }
 
 fn path() -> PathBuf {

@@ -185,6 +185,7 @@ struct Model {
     /// The model being downloaded, with percent
     downloading: Option<(&'static str, u8)>,
     notes_in: Option<PathBuf>,
+    notes_model: String,
     has_claude: bool,
     plugin_installed: bool,
     cli_installed: bool,
@@ -276,6 +277,7 @@ fn load_model(health: &[(String, String, Option<String>)]) -> Model {
         recommended: models::recommend(&models::hardware()).0,
         downloading: app::downloading(),
         notes_in: cfg.notes_in.clone(),
+        notes_model: cfg.notes_model_label(),
         has_claude: !claude["claude"].is_null(),
         plugin_installed: claude["plugin_installed"] == true,
         cli_installed: app::cli_installed(),
@@ -349,6 +351,7 @@ enum Action {
     CalendarLogout,
     CalendarSync,
     CalendarClientId,
+    NotesModel,
     Recheck,
     AskPermissions,
     OpenUrl(String),
@@ -576,6 +579,8 @@ impl Ui {
         }
         let choose = self.item("   Choose a folder…", true, Some(Action::NotesChoose));
         let _ = claude.append(&choose);
+        let notes_model = self.item(&format!("Notes model: {}…", model.notes_model), model.has_claude, Some(Action::NotesModel));
+        let _ = claude.append_items(&[&sep(), &notes_model]);
 
         // Health
         let all_ok = model.health.iter().all(|(_, s, _)| s == "✓");
@@ -783,6 +788,19 @@ impl Ui {
                         let Ok(mut cfg) = Config::load() else { return };
                         let id = id.trim().to_string();
                         cfg.graph_client_id = (!id.eq_ignore_ascii_case("default") && id != crate::graph::DEFAULT_CLIENT_ID).then_some(id);
+                        let _ = cfg.save();
+                    }
+                });
+                return;
+            }
+            Action::NotesModel => {
+                std::thread::spawn(|| {
+                    let current = Config::load().unwrap_or_default().notes_model_label();
+                    let msg = "Model Claude Code uses when Echo writes call notes:\n\nsonnet, opus or haiku, a full model name, or \"default\" to use Claude Code's own setting (local models, a gateway, Bedrock or Vertex).";
+                    if let Some(m) = app::ask_text(msg, &current, "Save") {
+                        let Ok(mut cfg) = Config::load() else { return };
+                        let m = m.trim().to_string();
+                        cfg.notes_model = (!m.is_empty() && m != crate::config::DEFAULT_NOTES_MODEL).then_some(m);
                         let _ = cfg.save();
                     }
                 });

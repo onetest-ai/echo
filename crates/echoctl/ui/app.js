@@ -246,7 +246,7 @@ function tabBody(c, segs, chat, frames, actions) {
     return `<div class="frames">${frames.map((f) => `<button class="frame" data-frame="${esc(f.url)}"><img src="${esc(f.url)}" alt="Shared screen at ${clock(f.t || 0)}" loading="lazy"><span>${clock(f.t || 0)}</span></button>`).join('')}</div>`
   }
   if (S.tab === 'actions') {
-    if (!actions) return claudeHint(c, 'No action items yet', 'Action items are written by Claude Code together with the notes.')
+    if (!actions) return claudeHint(c, 'No action items yet', 'Action items are written together with the notes.')
     if (!actions.length) return `<p style="color:var(--text-3)">No action items in this call.</p>`
     return `<div class="todo">${actions.map((a, i) => {
       const done = a.status === 'done'
@@ -264,14 +264,38 @@ function tabBody(c, segs, chat, frames, actions) {
   // notes
   if (c.notes) return `<article class="doc">${markdown(c.notes)}</article>`
   if (c.status === 'recording') return `<p style="color:var(--text-3)">Notes are written after the call. Follow it live in the Transcript tab.</p>`
-  return claudeHint(c, 'No notes yet', c.status === 'transcribing' ? 'Transcribing now. Notes come after that.' : 'Notes are written by Claude Code after the call.')
+  return claudeHint(c, 'No notes yet', c.status === 'transcribing' ? 'Transcribing now. Notes come after that.' : 'The transcript is ready.')
 }
 
+/** No notes (or no action items) yet: Write notes runs Claude Code from the app (the same
+ *  process-call skill a session runs); the run's state and log come with the call. */
 function claudeHint(c, heading, lead) {
+  const n = (S.state && S.state.notes) || {}
+  const run = c.notes_run
   const cmd = `/echo:process-call ${c.name}`
-  return `<div class="empty" style="height:auto;padding:40px 0"><div>${mark()}<h3>${esc(heading)}</h3>
-    <p>${esc(lead)} A Claude Code session with the Echo plugin picks this call up by itself, or run:</p>
-    <p><code>${esc(cmd)}</code></p><button class="btn" data-copy="${esc(cmd)}">Copy command</button></div></div>`
+  const log = c.has_log ? '<button class="btn ghost" data-cmd="show-log">Show log</button>' : ''
+  const box = (h, p, buttons, busy) => `<div class="empty" style="height:auto;padding:40px 0"><div>${mark(busy ? 'busy' : '')}<h3>${esc(h)}</h3>
+    ${p}${buttons ? `<div class="notes-actions">${buttons}</div>` : ''}</div></div>`
+  if (run && run.state === 'running') {
+    return box('Writing notes…', `<p>Claude Code is writing the notes and action items with <b>${esc(run.model || n.model || 'sonnet')}</b>. It takes a minute or two; you can close this window.</p>`, log, true)
+  }
+  if (c.status === 'recording' || c.status === 'transcribing') return box(heading, `<p>${esc(lead)}</p>`, '')
+  const why = {
+    needs_login: ['Claude Code needs you to sign in', run && run.message],
+    failed: ["Couldn't write notes", run && run.message],
+    skipped: ['No notes for this call', run && run.message],
+  }[run && run.state]
+  if (why) [heading, lead] = [why[0], why[1] || lead]
+  const session = `<p class="alt">Or in a Claude Code session: <code>${esc(cmd)}</code> <button class="btn ghost" data-copy="${esc(cmd)}">Copy</button></p>`
+  if (!n.claude) {
+    return box(heading, `<p>${esc(lead)}</p><p>Notes and action items are written by Claude Code. Install it from <a href="https://claude.com/claude-code" data-ext="1">claude.com/claude-code</a>, then come back here.</p>`, log)
+  }
+  if (!n.plugin) {
+    return box(heading, `<p>${esc(lead)}</p><p>Connect Claude Code first: menu → Claude Code → Connect Claude Code.</p>`, log)
+  }
+  const label = why && run.state !== 'skipped' ? 'Try again' : 'Write notes'
+  return box(heading, `<p>${esc(lead)}</p><p class="alt">Claude Code writes them on this computer with <b>${esc(n.model || 'sonnet')}</b> (menu → Claude Code → Notes model).</p>`,
+    `<button class="btn primary" data-cmd="write-notes">${label}</button>${log}`) + session
 }
 
 // ── calendar: today, or a rolling week (yesterday, today, 5 days ahead) ───────────────────
@@ -486,6 +510,11 @@ document.addEventListener('click', (e) => {
     case 'record': return send({ cmd: 'record' })
     case 'stop': return send({ cmd: 'stop' })
     case 'reveal': return send({ cmd: 'reveal', call: S.selected })
+    case 'show-log': return send({ cmd: 'show_log', call: S.selected })
+    case 'write-notes':
+      send({ cmd: 'write_notes', call: S.selected })
+      if (S.call) { S.call.notes_run = { state: 'running', model: (S.state.notes || {}).model }; render() }
+      return
     case 'ask-delete': S.confirmDelete = true; return render()
     case 'cancel-delete': S.confirmDelete = false; return render()
     case 'delete': {
@@ -532,7 +561,8 @@ async function tick() {
   if (changed || ticks % 3 === 0) await loadCalls()
   if (S.view === 'today' && ticks % 15 === 0) await loadAgenda()
   if (S.view === 'calendar' && ticks % 30 === 0) await loadCalendar()
-  const live = S.selected && S.call && (S.call.status === 'recording' || S.call.status === 'transcribing')
+  const live = S.selected && S.call && (S.call.status === 'recording' || S.call.status === 'transcribing' ||
+    (S.call.notes_run && S.call.notes_run.state === 'running'))
   if (S.selected && (live || changed)) await loadCall(S.selected)
   if (fingerprint() !== lastPrint && (!document.querySelector('input:focus') || changed)) render()
 }

@@ -91,8 +91,19 @@ Notes, action items and follow-ups are written by [Claude Code](https://claude.c
 1. Menu → **Claude Code → Connect Claude Code**. This installs the Echo plugin.
 2. Start a Claude Code session and run `/echo:setup` once.
 
-From then on, when a call ends, Claude writes the notes and offers follow-ups, such as a recap
-email or tasks for your action items. **Nothing is sent without your explicit yes.** During a
+From then on, notes come two ways:
+
+- **With a Claude Code session open**, it writes the notes when the call ends and offers
+  follow-ups, such as a recap email or tasks for your action items. **Nothing is sent without
+  your explicit yes.**
+- **Without one**, Echo tells you the transcript is ready. Open the call and click **Write
+  notes**: Echo runs Claude Code in the background on your Mac, and the notes and action items
+  appear a minute or two later. If it fails (for example, Claude Code is signed out), the call
+  says why and **Show log** shows what happened.
+
+The model is `sonnet` by default. Change it under menu → Claude Code → **Notes model**: `opus`,
+`haiku`, a full model name, or `default` to use whatever your Claude Code is set up with (local
+models, a gateway, Bedrock or Vertex). During a
 call, `/echo:live` shows the transcript as it happens, and `/echo:note` adds your own notes.
 
 <details>

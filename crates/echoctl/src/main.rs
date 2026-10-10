@@ -14,6 +14,7 @@ mod graph;
 #[cfg(feature = "transcribe")]
 mod live;
 mod meeting;
+mod notes;
 mod models;
 mod paths;
 mod permissions;
@@ -132,6 +133,22 @@ enum Cmd {
         /// Entra tenant for the sign-in: common | organizations | <tenant id>
         #[arg(long)]
         graph_tenant: Option<String>,
+        /// Model Claude Code uses when Echo writes notes: sonnet | opus | haiku | <model id> |
+        /// default (Claude Code's own setting)
+        #[arg(long)]
+        notes_model: Option<String>,
+        /// Model for the live pane's summary and quick questions: haiku | <model id>
+        #[arg(long)]
+        live_model: Option<String>,
+    },
+    /// Write notes and action items for a call with Claude Code (headless, the same
+    /// process-call skill a session runs); the running app does it unless --wait
+    Notes {
+        /// Call folder or name, or "latest"
+        call: String,
+        /// Run here and wait for it, instead of handing it to the app
+        #[arg(long)]
+        wait: bool,
     },
     /// Vocabulary (names/terms Whisper should spell right), learned automatically
     Vocab {
@@ -471,8 +488,14 @@ fn main() -> Result<()> {
             ModelCmd::Use { name } => models::use_model(&name),
             ModelCmd::Remove { name, force } => models::remove(&name, force),
         },
-        Cmd::Config { languages, vocabulary, unscheduled, keep_audio, scheduled, me_name, me_email, notes_in, capture_frames, capture_ui, graph_client_id, graph_tenant } => {
+        Cmd::Config { languages, vocabulary, unscheduled, keep_audio, scheduled, me_name, me_email, notes_in, capture_frames, capture_ui, graph_client_id, graph_tenant, notes_model, live_model } => {
             let mut cfg = config::Config::load()?;
+            if let Some(m) = live_model {
+                cfg.live_model = Some(m.trim().to_string()).filter(|m| !m.is_empty() && m != config::DEFAULT_LIVE_MODEL && m != "default");
+            }
+            if let Some(m) = notes_model {
+                cfg.notes_model = Some(m.trim().to_string()).filter(|m| !m.is_empty() && m != config::DEFAULT_NOTES_MODEL);
+            }
             if let Some(id) = graph_client_id {
                 cfg.graph_client_id = (id != "default" && !id.trim().is_empty()).then(|| id.trim().to_string());
             }
@@ -665,6 +688,7 @@ fn main() -> Result<()> {
                 Ok(())
             }
         },
+        Cmd::Notes { call, wait } => notes::request(&call, wait),
         Cmd::Pending { session } => calls::pending(session.as_deref()),
         Cmd::Claim { call, session } => calls::claim(&call, session.as_deref()),
         Cmd::Claude { cmd } => match cmd {

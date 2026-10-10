@@ -369,3 +369,11 @@ button { font: inherit; color: inherit; }
 .detail .why { color: var(--text-3); font-size: 12px; }
 .detail ul { margin: 0; padding-left: 16px; color: var(--text-2); font-size: 12.5px; }
 .detail .close { align-self: flex-end; margin: -6px -6px 0 0; }
+
+/* Write notes: buttons under the empty state, the run in progress */
+.notes-actions { display: flex; gap: 8px; justify-content: center; margin-top: 14px; }
+.empty p.alt, p.alt { color: var(--text-3); font-size: 12.5px; }
+p.alt { text-align: center; margin-top: 4px; }
+.empty .logo.busy { animation: echo-pulse 1.6s ease-in-out infinite; }
+@keyframes echo-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .55; transform: scale(.94); } }
+@media (prefers-reduced-motion: reduce) { .empty .logo.busy { animation: none; } }

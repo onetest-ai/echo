@@ -12,7 +12,7 @@ what they can't: permissions, real audio, Microsoft 365, Claude Code, installs a
 | [04-transcription.md](04-transcription.md) | Transcript quality, languages, audio removal |
 | [05-window.md](05-window.md) | The Echo window: calls, tabs, calendar views |
 | [06-calendar-chat.md](06-calendar-chat.md) | Microsoft 365 sign-in, scheduled recordings, meeting chat |
-| [07-claude-plugin.md](07-claude-plugin.md) | Claude Code plugin: setup, notes, live pane |
+| [07-claude-plugin.md](07-claude-plugin.md) | Claude Code plugin: setup, notes, live pane, Write notes |
 | [08-cli.md](08-cli.md) | `echoctl` on the PATH |
 | [09-lifecycle-updates.md](09-lifecycle-updates.md) | Start at login, quit, single instance, updates |
 | [10-windows.md](10-windows.md) | Windows build |

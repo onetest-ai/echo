@@ -329,7 +329,8 @@ fn session_allowed(session: Option<&Path>) -> Result<bool> {
 /// `echoctl pending [--for <session cwd>]`: those calls as JSON (`[{dir, name}]`); empty for
 /// a session that isn't the one chosen for notes.
 pub fn pending(session: Option<&Path>) -> Result<()> {
-    let calls = if session_allowed(session)? { pending_calls() } else { vec![] };
+    // Inside a run Echo started for one call, the mod must not pick up others.
+    let calls = if session_allowed(session)? && !crate::notes::headless() { pending_calls() } else { vec![] };
     let out: Vec<Value> = calls
         .iter()
         .map(|d| json!({ "dir": d.display().to_string(), "name": d.file_name().map(|n| n.to_string_lossy().into_owned()) }))
@@ -341,6 +342,9 @@ pub fn pending(session: Option<&Path>) -> Result<()> {
 /// `echoctl claim <call>`: atomically take a call for notes. Fails if another session has it,
 /// so several open Claude sessions never process the same call twice.
 pub fn claim(call: &str, session: Option<&Path>) -> Result<()> {
+    if crate::notes::headless() {
+        bail!("this is a run Echo started for one call; it was claimed already");
+    }
     if !session_allowed(session)? {
         bail!("notes are written only in sessions opened in the folder set by `echoctl config --notes-in`");
     }

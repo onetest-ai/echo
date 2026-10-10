@@ -58,6 +58,8 @@ let eventsOffset: number | null = null
 let summarizing = false
 let lastSummaryAt = 0
 let didAutostart = false
+/** Model for the live summary and quick questions (`echoctl config --live-model`). */
+let LIVE_MODEL = 'haiku'
 let lastCallsLoad = 0
 
 type CliResult = { exitCode: number; stdout: string; stderr: string }
@@ -86,6 +88,8 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     IS_WINDOWS = /^[A-Za-z]:[\\/]/.test(e.cwd)
     SESSION_CWD = e.cwd
+    // A run Echo started for one call (`echoctl notes`): no pane, no catch-up, no claims.
+    if (await $.env.get('ECHOCTL_HEADLESS')) return next(e)
     // `/echo:live` is a skill of the plugin (mods can't register names with a colon); the
     // command.run hook below answers it before the model sees it, so it costs no context.
     void connect($)
@@ -209,10 +213,10 @@ export const register: Register = on => {
               <Box flexDirection="column" gap={1}>
                 <Text dimColor>No action items yet.</Text>
                 {br.generating === 'actions' ? (
-                  <Text color="warning">… proposing action items from the transcript</Text>
+                  <Text color="warning">… Claude Code is writing the notes and action items (a minute or two)</Text>
                 ) : br.transcript.length > 0 ? (
                   <Box>
-                    <Button key="gen-actions" label="Propose actions" hotkey="p" variant="primary"
+                    <Button key="gen-actions" label="Write notes and actions" hotkey="p" variant="primary"
                       onPress={() => generate($, br.selected!, 'actions')} />
                   </Box>
                 ) : null}
@@ -249,10 +253,10 @@ export const register: Register = on => {
           <Box flexDirection="column" gap={1}>
             <Text dimColor>No notes for this call yet.</Text>
             {br.generating === 'notes' ? (
-              <Text color="warning">… writing notes from the transcript (about a minute)</Text>
+              <Text color="warning">… Claude Code is writing the notes and action items (a minute or two)</Text>
             ) : br.transcript.length > 0 ? (
               <Box>
-                <Button key="gen-notes" label="Generate notes" hotkey="g" variant="primary"
+                <Button key="gen-notes" label="Write notes and actions" hotkey="g" variant="primary"
                   onPress={() => generate($, br.selected!, 'notes')} />
               </Box>
             ) : (
@@ -429,7 +433,7 @@ export const register: Register = on => {
 
 /** Find the app's data folder, start the app if it is set up, pick up calls without notes. */
 async function connect($: any): Promise<void> {
-  let info: { home?: string; home_source?: string; running?: number | null } = {}
+  let info: { home?: string; home_source?: string; running?: number | null; live_model?: string } = {}
   try {
     const r = await cli($, ['app'])
     if (r.exitCode !== 0) return // app not installed: the plugin stays quiet until setup
@@ -438,6 +442,7 @@ async function connect($: any): Promise<void> {
     return
   }
   if (!info.home) return
+  if (info.live_model) LIVE_MODEL = info.live_model
   HOME = info.home.replace(/\\/g, '/')
   const setUp = info.home_source !== 'default'
   if (setUp && !info.running && !didAutostart) {
@@ -530,74 +535,34 @@ async function selectCall($: any, dir: string, tab: DocTab): Promise<void> {
   }))
 }
 
-const NOTES_RULES = `You write meeting notes from a machine transcript of a call.
-Speakers: "Me" is the user; other labels are remote participants ("Remote" when unknown).
-Rules:
-- Ground every line in the transcript; leave a section out rather than pad it. Never invent.
-- Start with "# <title>" and one line: date, duration, participants.
-- Use the given sections (heading + instruction), at most the given number of headings.
-- If the user's own notes are given, they are the backbone: keep every point, expand from the transcript, use their headings first.
-- Name a remote person only when the transcript makes it unambiguous; otherwise "someone on the call".
-- End each summary, decision, open-question and action bullet with the transcript time it rests on, as [mm:ss] (from the [hh:mm:ss] speaker headers; drop a 0 hour).
-- Follow the user's profile, if given, for tone and emphasis.
-- Write in the given language. Keep names, products and figures as said. Output Markdown only.`
-
-const ACTIONS_RULES = `You extract action items from a machine transcript of a call.
-"Me" is the user. Output ONLY a JSON array, no prose:
-[{"task": "...", "owner": "Me" | "<name>" | null, "due": "<as stated>" | null, "confidence": "high" | "low", "quote": "<short supporting quote>", "t": <seconds into the call where it was said>, "status": "todo"}]
-- Only commitments someone actually made or was clearly asked to do. "high" only for clear commitments ("I'll send it by Friday").
-- Empty array if there are none. Never invent owners or dates.`
-
-/** Generate notes or action items for a call right in the pane (no session turn needed). */
+/** Notes and action items for a call: the app runs the same process-call skill with Claude
+ *  Code (`echoctl notes`, headless, the model set under menu → Claude Code → Notes model), so
+ *  this session's own turn isn't used. The tick follows `notes-run.json` until it finishes. */
 async function generate($: any, dir: string, what: 'notes' | 'actions'): Promise<void> {
   await update($, browse, (b): Browse => ({ ...b, generating: what }))
-  try {
-    const base = `${callsDir()}/${dir}`
-    const transcript = String(await $.fs.read(`${base}/transcript.md`)).slice(0, 120_000)
-    let ctx: Record<string, any> = {}
-    try {
-      const r = await cli($, ['context', dir])
-      if (r.exitCode === 0) ctx = JSON.parse(r.stdout)
-    } catch {
-      /* context is a help, not a requirement */
-    }
-    const userNotes = ctx.user_notes ? String(await $.fs.read(ctx.user_notes).catch(() => '')) : ''
-    const facts = [
-      `Title: ${ctx.title ?? dir}`,
-      `Recorded: ${ctx.started_at ?? ''} · ${ctx.duration_min ?? '?'} min`,
-      `Me: ${ctx.me?.name ?? 'the user'}`,
-      `Participants: ${[...(ctx.colleagues ?? []), ...(ctx.external ?? [])].join(', ') || 'unknown'}`,
-      `Language: ${ctx.dominant_language ?? 'as spoken'}`,
-    ].join('\n')
-    if (what === 'notes') {
-      const sections = (ctx.template?.sections ?? [])
-        .map((s: { heading: string; instruction: string }) => `## ${s.heading}: ${s.instruction}`)
-        .join('\n')
-      const prompt =
-        `${facts}\nMax headings: ${ctx.heading_budget ?? 5}\nSections:\n${sections || '## Summary\n## Decisions\n## Action items\n## Open questions'}\n\n` +
-        (userNotes ? `User's own notes:\n${userNotes}\n\n` : '') +
-        (ctx.me_profile ? `User's profile:\n${ctx.me_profile}\n\n` : '') +
-        (Array.isArray(ctx.chat) && ctx.chat.length
-          ? `Meeting chat (t = seconds into the call; add an "In the chat" section for what was written but not said):\n${ctx.chat.map((m: ChatLine) => `[${m.t ?? '?'}s] ${m.from}: ${m.text}${m.files.length ? ` (files: ${m.files.join(', ')})` : ''}`).join('\n')}\n\n`
-          : '') +
-        `Transcript:\n${transcript}`
-      const r = await $.model.complete({ model: 'sonnet', system: NOTES_RULES, prompt, maxTokens: 4000, timeoutMs: 180_000 })
-      if (!r.isAnswered) throw new Error(r.reason ?? 'no answer')
-      await $.fs.write(`${base}/notes.md`, r.text.trim() + '\n')
-    } else {
-      const r = await $.model.complete({ model: 'sonnet', system: ACTIONS_RULES, prompt: `${facts}\n\nTranscript:\n${transcript}`, maxTokens: 2000, timeoutMs: 120_000 })
-      if (!r.isAnswered) throw new Error(r.reason ?? 'no answer')
-      const text = r.text.slice(r.text.indexOf('['), r.text.lastIndexOf(']') + 1)
-      const items = JSON.parse(text || '[]')
-      if (!Array.isArray(items)) throw new Error('reply was not a list')
-      await $.fs.write(`${base}/actions.json`, JSON.stringify(items, null, 2) + '\n')
-    }
-    $.ui.toast(what === 'notes' ? 'Notes written.' : 'Action items proposed.')
-  } catch (err) {
-    $.ui.toast(`echo: couldn't generate ${what} — ${String(err)}`)
+  const r = await cli($, ['notes', dir], 25 * 60_000).catch((err: unknown) => ({ exitCode: 1, stdout: '', stderr: String(err) }))
+  if (r.exitCode !== 0) {
+    $.ui.toast(`echo: couldn't write notes — ${String(r.stderr).trim().split('\n').pop()?.replace(/^Error: /, '') ?? 'error'}`)
+    await update($, browse, (b): Browse => ({ ...b, generating: null }))
   }
-  await update($, browse, (b): Browse => ({ ...b, generating: null }))
-  await selectCall($, dir, what)
+}
+
+/** While the app writes notes for the selected call: done → show them; failed → say why. */
+async function followNotesRun($: any): Promise<void> {
+  const b = await read($, browse)
+  if (!b.generating || !b.selected) return
+  let run: { state?: string; message?: string } = {}
+  try {
+    run = JSON.parse(String(await $.fs.read(`${callsDir()}/${b.selected}/notes-run.json`)))
+  } catch {
+    return // not started yet
+  }
+  if (run.state === 'running') return
+  const tab = b.generating
+  await update($, browse, (x): Browse => ({ ...x, generating: null }))
+  if (run.state === 'done') $.ui.toast('Notes and action items written.')
+  else $.ui.toast(`echo: ${run.state === 'skipped' ? 'no notes' : "couldn't write notes"} — ${run.message ?? run.state}`, { timeoutMs: 10_000 })
+  await selectCall($, b.selected, tab)
   lastCallsLoad = 0
 }
 
@@ -707,6 +672,7 @@ async function tick($: any): Promise<void> {
     lastCallsLoad = Date.now()
     await loadCalls($)
   }
+  await followNotesRun($)
 
   const v = await read($, live)
   if (v.dir && v.phase !== 'recording' && v.phase !== 'done') await refreshPhase($, v)
@@ -834,7 +800,7 @@ async function quickAction($: any, kind: 'missed' | 'question'): Promise<void> {
     const v = await read($, live)
     const last = v.lines.at(-1)?.end ?? 0
     const recent = transcriptText(v.lines.filter(l => l.end >= last - q.window)).slice(-12_000)
-    const r = await $.model.complete({ model: 'haiku', system: q.system, prompt: recent, maxTokens: 500, timeoutMs: 30_000, effort: 'low' })
+    const r = await $.model.complete({ model: LIVE_MODEL, system: q.system, prompt: recent, maxTokens: 500, timeoutMs: 30_000, effort: 'low' })
     const text = r.isAnswered ? String(r.text).trim() : `No answer (${r.reason ?? 'unknown'})`
     await update($, insight, (i): Insight => ({ ...i, asking: null, answer: { title: q.title, text } }))
   } catch (err) {
@@ -863,7 +829,7 @@ async function maybeSummarize($: any, lines: LiveLine[]): Promise<void> {
       (prev.updatedAt
         ? `Previous notes (update them; keep what still holds):\n${JSON.stringify({ summary: prev.summary, highlights: prev.highlights, actions: prev.actions })}\n\n`
         : '') + `Transcript so far${recent.length < all.length ? ' (latest part)' : ''}:\n${recent}`
-    const r = await $.model.complete({ model: 'haiku', system, prompt, maxTokens: 800, timeoutMs: 30_000, effort: 'low' })
+    const r = await $.model.complete({ model: LIVE_MODEL, system, prompt, maxTokens: 800, timeoutMs: 30_000, effort: 'low' })
     if (!r.isAnswered) return
     const parsed = extractJson(r.text) as Record<string, unknown>
     await update($, insight, (cur): Insight => ({

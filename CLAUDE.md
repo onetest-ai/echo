@@ -153,6 +153,23 @@ the mod intercepts in `command.run` (mods can't register names with a colon).
 A call can pin languages (`arm --languages uk`, tray Record ▸ Only …) → `meta.json.languages`
 overrides the configured list in live and final transcription.
 
+## Notes from the app (`notes.rs`)
+Write notes (window Notes/Actions tabs, the pane's buttons, `echoctl notes <call>`) runs the same
+`/echo:process-call` skill headless: `claude -p … --output-format stream-json`, through the
+user's login shell (`$SHELL -l -i -c`, their env: gateways, `ANTHROPIC_*`, Bedrock/Vertex), cwd
+= `notes_in` or the data folder, `--plugin-dir` = the plugin shipped in the app
+(`Echo.app/Contents/Resources/plugin`; dev: repo `plugin/`; else the installed one), model =
+`config.notes_model` (default sonnet; `default` = Claude Code's own; menu → Claude Code → Notes
+model). `--permission-mode dontAsk` + an allowlist (Read/Glob/Grep in the data folder,
+Edit/Write in `calls/`, `Bash(echoctl:*)`, the skill): transcripts are others' words and the
+user's own default mode (auto / bypass) must not apply. `ECHOCTL_HEADLESS=1` inside: the mod
+does nothing, `pending`/`claim` refuse. The CLI hands the run to the running app
+(`notes-<call>.request`) unless `--wait`. State in `<call>/notes-run.json` (running / done /
+skipped / failed / needs_login — "Not logged in · Please run /login" etc.), readable log in
+`<call>/claude.log` (window → Show log). Failure releases `.claimed`. After transcription with
+no live session (`mod.json` heartbeat < 10 s) the app notifies "Transcript ready — click Write
+notes". Live pane model: `config.live_model` (default haiku).
+
 ## Robustness, per-call extras, updates
 - Recovery at app start (`watch::recover`): recordings never closed get their WAV headers fixed
   (`audio::repair_wav`) and are transcribed; `.transcribing` holds the pid, stale markers are

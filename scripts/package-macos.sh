@@ -42,6 +42,9 @@ rm -rf "$APP" dist/echo.iconset
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/echoctl"
 cp LICENSE.md "$APP/Contents/Resources/LICENSE.md"
+# The plugin travels with the app: `echoctl notes` runs Claude Code with --plugin-dir on it,
+# so the process-call skill always matches this CLI (no dev binary inside).
+rsync -a --exclude bin --exclude node_modules --exclude '.claude-plugin/types' --exclude '*.test.ts' plugin/ "$APP/Contents/Resources/plugin/"
 python3 scripts/third-party.py --texts "$APP/Contents/Resources/THIRD-PARTY-LICENSES.txt"
 # CFBundleShortVersionString stays numeric (0.1.1); the pre-release tag lives in the DMG name.
 sed -e "s/__VERSION__/${VERSION%%-*}/" -e "s/__BUILD__/$BUILD/" packaging/macos/Info.plist > "$APP/Contents/Info.plist"

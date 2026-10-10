@@ -296,6 +296,8 @@ fn call_detail(dir: &Path) -> Value {
     v["actions"] = read_json(&dir.join("actions.json"));
     v["meeting"] = read_json(&dir.join("meeting.json"));
     v["path"] = json!(dir.display().to_string());
+    v["notes_run"] = json!(crate::notes::status(dir));
+    v["has_log"] = json!(dir.join(crate::notes::LOG).exists());
     v
 }
 
@@ -432,6 +434,7 @@ fn state() -> Value {
         "home": paths::home(),
         "calendar": crate::graph::account(),
         "platform": std::env::consts::OS,
+        "notes": crate::notes::readiness(),
     })
 }
 
@@ -459,6 +462,17 @@ pub fn handle(msg: &str) -> bool {
         "reveal" => {
             if let Some(d) = call {
                 crate::app::reveal(&d);
+            }
+            false
+        }
+        "write_notes" => {
+            let Some(d) = call else { return false };
+            crate::notes::start_in_background(d);
+            true
+        }
+        "show_log" => {
+            if let Some(d) = call {
+                open_file(&d.join(crate::notes::LOG));
             }
             false
         }
@@ -493,6 +507,17 @@ pub fn handle(msg: &str) -> bool {
         }
         _ => false,
     }
+}
+
+/// A text file in the user's default editor.
+fn open_file(path: &Path) {
+    if !path.is_file() {
+        return;
+    }
+    #[cfg(target_os = "macos")]
+    let _ = std::process::Command::new("open").arg("-t").arg(path).spawn();
+    #[cfg(windows)]
+    let _ = std::process::Command::new("notepad").arg(path).spawn();
 }
 
 fn copy_to_clipboard(text: &str) {

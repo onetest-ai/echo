@@ -12,6 +12,8 @@ New-Item -ItemType Directory $stage | Out-Null
 Copy-Item target\release\echoctl.exe $stage
 Copy-Item README.md $stage
 Copy-Item LICENSE.md $stage
+# The plugin travels with the app (`echoctl notes` runs Claude Code with --plugin-dir on it).
+robocopy plugin "$stage\plugin" /E /XD bin node_modules "plugin\.claude-plugin\types" /XF *.test.ts | Out-Null
 python scripts/third-party.py --texts "$stage\THIRD-PARTY-LICENSES.txt"
 New-Item -ItemType Directory dist -Force | Out-Null
 $zip = "dist\echo-$version-windows-x64.zip"

@@ -9,6 +9,11 @@ Runs **unattended**: it is triggered automatically when a recording stops. Do ev
 without asking the user anything; the only thing that waits for them is the follow-up offers at
 the end, and nothing is ever sent without an explicit yes.
 
+**Started by the Echo app** (Write notes; `ECHOCTL_HEADLESS` is set, nobody is watching): the
+app claimed the call already, `echoctl` is on PATH, and only the Echo CLI, reading the data folder
+and writing inside `calls/` are allowed. Run `echoctl …` as one plain command per Bash call (no
+variables, `cd`, pipes or redirects), write files with Write / Edit, and skip step 8's offers.
+
 CLI: `${CLAUDE_PLUGIN_ROOT}/scripts/echoctl` (below: `echoctl`) — the installed Echo
 app's CLI. Calls live in the app's data folder (`echoctl app` → `calls`), one folder per
 call; `latest` works wherever a call is expected. All paths below are inside that call folder.

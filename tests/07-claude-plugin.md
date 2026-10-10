@@ -106,3 +106,79 @@
 
 **Expected**
 - After the call, the final notes keep that point and use it as part of their structure.
+
+---
+
+### TC-CLA-009 · Write notes from the window (no session open)
+**Priority:** P1 · **Platform:** macOS
+
+**Preconditions:** Claude Code installed and signed in; no Claude Code session open.
+
+**Steps**
+1. Record a 4-minute test call with a decision and a task.
+2. Wait for the "Transcript ready" notification.
+3. Open the call → Notes → **Write notes**.
+
+**Expected**
+- The notification says the transcript is ready and to click Write notes.
+- The tab shows "Writing notes…" with the model name, then the notes, within about two minutes.
+- The Actions tab fills in at the same time. A "Notes ready" notification appears.
+- **Show log** opens `claude.log`: the commands Claude ran, the time taken and the cost.
+
+---
+
+### TC-CLA-010 · Claude Code signed out
+**Priority:** P1 · **Platform:** macOS
+
+**Steps**
+1. In a terminal: `claude` → `/logout`.
+2. Open a transcribed call without notes → **Write notes**.
+3. Sign in again (`claude` → `/login`), then click **Try again**.
+
+**Expected**
+- Within seconds: "Claude Code needs you to sign in", with what to do, a notification, and
+  **Try again** / **Show log**.
+- After signing in, Try again writes the notes.
+
+---
+
+### TC-CLA-011 · Notes model
+**Priority:** P2 · **Platform:** macOS
+
+**Steps**
+1. Menu → Claude Code → **Notes model…** → enter `haiku`; write notes for a call.
+2. Enter a name that doesn't exist (`no-such-model`); write notes again.
+3. Enter `default`.
+
+**Expected**
+- Step 1: the log's first lines show the haiku model.
+- Step 2: the run fails with "Claude Code can't use the model…" and where to change it.
+- Step 3: the run uses whatever Claude Code itself is set to (for example a gateway or local
+  model configured in `~/.claude/settings.json` or the shell profile).
+
+---
+
+### TC-CLA-012 · The run can only touch the call
+**Priority:** P1 · **Platform:** macOS
+
+**Steps**
+1. Set Claude Code's own default permission mode to `auto` or `bypassPermissions`.
+2. Write notes for a call; open **Show log**.
+
+**Expected**
+- The log shows only `echoctl` commands, reads in the data folder and writes in the call folder.
+- Anything else (web, other shell commands, files elsewhere) appears as "Not allowed" and is
+  not done, whatever the user's own default mode is.
+
+---
+
+### TC-CLA-013 · A session and Write notes at once
+**Priority:** P2 · **Platform:** macOS
+
+**Steps**
+1. With a session open in the notes folder, finish a call; while that session writes the notes,
+   click **Write notes** in the window.
+
+**Expected**
+- The window says a Claude Code session is writing the notes right now; only one set of notes is
+  written.

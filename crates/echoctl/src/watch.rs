@@ -692,6 +692,20 @@ fn notify_notes_ready() {
     });
 }
 
+/// Is the watcher waiting for this call's notes (it says "Notes ready" when they appear)?
+pub fn awaiting_notes(dir: &std::path::Path) -> bool {
+    AWAITING_NOTES.lock().unwrap_or_else(|e| e.into_inner()).iter().any(|(d, _)| d == dir)
+}
+
+/// A Claude Code session with the Echo plugin is open (the mod heartbeats every second).
+fn session_open() -> bool {
+    fs::metadata(paths::state_dir().join("mod.json"))
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.elapsed().ok())
+        .is_some_and(|age| age < Duration::from_secs(10))
+}
+
 /// Set on the transcription child the watcher starts: the call it names is closed.
 pub const FROM_WATCHER: &str = "ECHOCTL_TRANSCRIBE_FROM_WATCHER";
 
@@ -723,6 +737,12 @@ fn transcribe_now(dir: &std::path::Path) {
     if ok {
         let _ = fs::remove_file(dir.join(TRANSCRIBE_ERROR));
         AWAITING_NOTES.lock().unwrap_or_else(|e| e.into_inner()).push((dir.to_path_buf(), Instant::now()));
+        // No session will pick it up now: say where the notes come from.
+        if !session_open() && crate::app::claude_bin().is_some() && crate::calls::pending_calls().iter().any(|d| d == dir) {
+            let meta: serde_json::Value = fs::read(dir.join("meta.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+            let title = meta["title"].as_str().filter(|t| !t.is_empty()).unwrap_or("Your call");
+            crate::app::notify("Transcript ready", &format!("{title} — open Echo and click Write notes"));
+        }
     } else {
         let _ = fs::write(dir.join(TRANSCRIBE_ERROR), &detail);
         crate::app::notify("Transcription failed", &detail);

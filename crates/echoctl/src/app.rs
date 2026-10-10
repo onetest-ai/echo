@@ -314,6 +314,7 @@ pub fn handle_requests(stop: &AtomicBool) {
         let (request, probe) = (req["request"].as_bool().unwrap_or(false), req["probe"].as_bool().unwrap_or(false));
         std::thread::spawn(move || write_health(id, request, probe));
     }
+    crate::notes::handle_requests();
 }
 
 /// Trigger the permission prompts for the app (tray: Health → Ask for permissions).
@@ -556,6 +557,8 @@ pub fn info() -> Value {
         "autostart": autostart_enabled(),
         "cli_installed": cli_installed(),
         "notes_in": crate::config::Config::load().ok().and_then(|c| c.notes_in),
+        "notes_model": crate::config::Config::load().unwrap_or_default().notes_model_label(),
+        "live_model": crate::config::Config::load().ok().and_then(|c| c.live_model).unwrap_or_else(|| crate::config::DEFAULT_LIVE_MODEL.into()),
         "version": env!("CARGO_PKG_VERSION"),
     })
 }
@@ -600,7 +603,7 @@ fn marketplace_source() -> String {
 }
 const MARKETPLACE: &str = "echo";
 
-fn claude_bin() -> Option<PathBuf> {
+pub fn claude_bin() -> Option<PathBuf> {
     let p = PathBuf::from(find_program("claude"));
     p.is_file().then_some(p)
 }
@@ -618,6 +621,22 @@ fn plugin_installs() -> Vec<(String, Option<String>)> {
         .flat_map(|(_, list)| list.as_array().cloned().unwrap_or_default())
         .map(|i| (i["scope"].as_str().unwrap_or("?").to_string(), i["projectPath"].as_str().map(str::to_owned)))
         .collect()
+}
+
+/// Where Claude Code installed the Echo plugin (the newest user-scope install, else any).
+pub fn plugin_root() -> Option<PathBuf> {
+    let path = user_home().join(".claude/plugins/installed_plugins.json");
+    let v: Value = fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    let plugins = v.get("plugins").unwrap_or(&v);
+    let mut installs: Vec<Value> = plugins
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter(|(k, _)| k.starts_with("echo@"))
+        .flat_map(|(_, list)| list.as_array().cloned().unwrap_or_default())
+        .collect();
+    installs.sort_by_key(|i| i["scope"].as_str() != Some("user"));
+    installs.iter().filter_map(|i| i["installPath"].as_str()).map(PathBuf::from).find(|p| p.is_dir())
 }
 
 /// `echoctl claude`: is Claude Code installed, and is the plugin?
