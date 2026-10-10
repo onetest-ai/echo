@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+"""Third-party notices for the components compiled into echoctl.
+
+    scripts/third-party.py                 # rewrite THIRD-PARTY-NOTICES.md (the list, in the repo)
+    scripts/third-party.py --texts <file>  # also write every crate's license files (for the app bundle)
+
+Reads `cargo metadata` for the macOS and Windows targets; workspace crates are skipped.
+"""
+import glob, json, os, re, subprocess, sys, urllib.request
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+TARGETS = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-pc-windows-msvc"]
+# Not crates, but shipped or used: the C++ engine inside whisper-rs-sys and the downloaded models.
+EXTRA = [
+    ("whisper.cpp", "(bundled in whisper-rs-sys)", "MIT", "https://github.com/ggml-org/whisper.cpp"),
+    ("Whisper models (downloaded at setup)", "", "MIT", "https://github.com/openai/whisper"),
+]
+
+
+def packages():
+    seen = {}
+    for t in TARGETS:
+        out = subprocess.run(["cargo", "metadata", "--format-version", "1", "--filter-platform", t],
+                             cwd=ROOT, check=True, capture_output=True, text=True).stdout
+        m = json.loads(out)
+        nodes = {n["id"] for n in m["resolve"]["nodes"]}
+        for p in m["packages"]:
+            if p["id"] in m["workspace_members"] or p["id"] not in nodes or p["source"] is None:
+                continue
+            seen[(p["name"], p["version"])] = p
+    return [seen[k] for k in sorted(seen)]
+
+
+def license_files(p):
+    d = os.path.dirname(p["manifest_path"])
+    files = [f for pat in ("LICEN[CS]E*", "COPYING*", "NOTICE*", "UNLICENSE*") for f in glob.glob(os.path.join(d, pat))]
+    if p.get("license_file"):
+        files.append(os.path.join(d, p["license_file"]))
+    return sorted({f for f in files if os.path.isfile(f)})
+
+
+def main():
+    pkgs = packages()
+    rows = [(p["name"], p["version"], p.get("license") or "see crate", p.get("repository") or "") for p in pkgs]
+    with open(os.path.join(ROOT, "THIRD-PARTY-NOTICES.md"), "w") as f:
+        f.write("# Third-party notices\n\n"
+                "Echo is built on the open-source components below. Each remains under its own license; "
+                "the full license texts ship inside the app (`Echo.app/Contents/Resources/THIRD-PARTY-LICENSES.txt`).\n"
+                "Regenerate with `scripts/third-party.py`.\n\n"
+                "| Component | Version | License | Source |\n|---|---|---|---|\n")
+        for name, ver, lic, repo in [*EXTRA, *rows]:
+            f.write(f"| {name} | {ver} | {lic} | {repo} |\n")
+    if "--texts" in sys.argv:
+        out = sys.argv[sys.argv.index("--texts") + 1]
+        missing = set()
+        with open(out, "w") as f:
+            f.write("Licenses of the third-party components in Echo.\n\n")
+            for p in pkgs:
+                f.write(f"{'=' * 78}\n{p['name']} {p['version']}  ({p.get('license') or 'see below'})\n"
+                        f"{p.get('repository') or ''}\n{'=' * 78}\n\n")
+                texts = license_files(p)
+                for t in texts:
+                    f.write(open(t, encoding="utf-8", errors="replace").read().rstrip() + "\n\n")
+                if not texts:
+                    ids = re.findall(r"[A-Za-z0-9.-]+", (p.get("license") or "").replace("/", " OR "))
+                    ids = [i for i in ids if i not in ("OR", "AND", "WITH")]
+                    missing.update(ids)
+                    f.write(f"Licensed under {p.get('license')}; the standard text is in the last section.\n\n")
+            # Crates that publish no license file: the standard SPDX texts of their licenses.
+            f.write(f"{'=' * 78}\nStandard license texts\n{'=' * 78}\n\n")
+            for i in sorted(missing):
+                url = f"https://raw.githubusercontent.com/spdx/license-list-data/main/text/{i}.txt"
+                f.write(f"--- {i} ---\n\n{urllib.request.urlopen(url, timeout=30).read().decode().rstrip()}\n\n")
+    print(f"{len(pkgs)} crates")
+
+
+if __name__ == "__main__":
+    main()

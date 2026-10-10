@@ -1,0 +1,13 @@
+{
+  "name": "echo",
+  "owner": {
+    "name": "onetest.ai"
+  },
+  "plugins": [
+    {
+      "name": "echo",
+      "source": "./plugin",
+      "description": "Claude Code client of the echoctl app: live call pane, call notes, action items and follow-ups"
+    }
+  ]
+}

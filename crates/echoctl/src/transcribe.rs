@@ -1,0 +1,891 @@
+//! On-device transcription of a recorded call with whisper.cpp.
+//!
+//! Each track is transcribed separately, which gives speaker attribution for free ("Me" =
+//! mic, "Remote" = the app). Tracks are cut into utterances at pauses, and the language is
+//! detected *per utterance* restricted to the workspace's `languages` list — Whisper's
+//! default (one language per 30 s window, any of 99) mislabels Ukrainian as Russian and
+//! translates code-switched speech instead of transcribing it.
+
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::Instant;
+
+use anyhow::{anyhow, bail, Context, Result};
+use serde::{Deserialize, Serialize};
+use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperState};
+
+use crate::audio::{downmix, Resampler};
+use crate::config::Config;
+use crate::meeting::MeetingContext;
+use crate::models;
+
+pub(crate) const RATE: usize = 16_000;
+/// Whisper's window. Utterances are kept shorter than this.
+const MAX_UTTERANCE_S: f64 = 25.0;
+/// Below this, language detection is unreliable; reuse the track's previous language.
+const SHORT_UTTERANCE_S: f64 = 1.5;
+/// Live transcription (no guard): utterances shorter than this skip the vocabulary hint.
+const PROMPT_MIN_S: f64 = 3.0;
+/// Final transcription: hinted utterances from this length are checked against an unhinted
+/// decode: the hint is kept only if the text length stays within
+/// GUARD_MIN_RATIO × … GUARD_MAX_RATIO × + GUARD_SLACK chars of the plain text — otherwise
+/// the hint made Whisper add (listed names in silence) or drop words.
+const GUARD_MIN_S: f64 = 1.0;
+const GUARD_MIN_RATIO: f64 = 0.6;
+const GUARD_MAX_RATIO: f64 = 1.8;
+const GUARD_SLACK: f64 = 80.0;
+/// Model used only for language identification, when downloaded.
+const DETECTOR_MODEL: &str = "large-v3-turbo-q5_0";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Segment {
+    /// "me" | "remote"
+    pub speaker: String,
+    pub start: f64,
+    pub end: f64,
+    pub lang: String,
+    pub text: String,
+    /// Who it is, when known (remote: the other person on a 1:1 invite)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+pub use crate::calls::resolve_call;
+
+/// Read any WAV (old recordings are 24/48 kHz float) as 16 kHz mono f32.
+fn load_16k(path: &Path) -> Result<Vec<f32>> {
+    let mut r = hound::WavReader::open(path).with_context(|| format!("opening {}", path.display()))?;
+    let spec = r.spec();
+    let raw: Vec<f32> = match spec.sample_format {
+        hound::SampleFormat::Float => r.samples::<f32>().collect::<Result<_, _>>()?,
+        hound::SampleFormat::Int => {
+            let scale = (1u64 << (spec.bits_per_sample - 1)) as f32;
+            r.samples::<i32>().map(|s| s.map(|v| v as f32 / scale)).collect::<Result<_, _>>()?
+        }
+    };
+    let mono = downmix(&raw, spec.channels as usize);
+    Ok(Resampler::new(spec.sample_rate, RATE as u32).process(&mono))
+}
+
+/// Energy-based voice activity: (start, end) sample ranges of speech.
+pub(crate) fn utterances(audio: &[f32]) -> Vec<(usize, usize)> {
+    const FRAME: usize = RATE * 30 / 1000;
+    let db: Vec<f32> = audio
+        .chunks(FRAME)
+        .map(|f| {
+            let rms = (f.iter().map(|s| s * s).sum::<f32>() / f.len() as f32).sqrt();
+            20.0 * rms.max(1e-9).log10()
+        })
+        .collect();
+    if db.is_empty() {
+        return vec![];
+    }
+    // Adaptive threshold: 12 dB above the noise floor (20th percentile), kept within
+    // [-55, -35] dBFS so near-silent tracks and wall-to-wall speech both work.
+    let mut sorted = db.clone();
+    sorted.sort_by(|a, b| a.total_cmp(b));
+    let floor = sorted[sorted.len() / 5];
+    let thresh = (floor + 12.0).clamp(-55.0, -35.0);
+
+    // In 30 ms frames: an utterance ends after 800 ms of silence, is padded by ~250 ms on both
+    // sides (word onsets/tails are quiet), and needs ≥ 200 ms of speech.
+    let (hangover, pad, min_len) = (800 / 30, 256 / 30, 200 / 30);
+    let mut spans: Vec<(usize, usize)> = vec![];
+    let mut i = 0;
+    while i < db.len() {
+        if db[i] < thresh {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        let mut end = i;
+        let mut quiet = 0;
+        while i < db.len() && quiet <= hangover {
+            if db[i] >= thresh {
+                end = i;
+                quiet = 0;
+            } else {
+                quiet += 1;
+            }
+            i += 1;
+        }
+        if end + 1 - start >= min_len {
+            spans.push((start.saturating_sub(pad), (end + 1 + pad).min(db.len())));
+        }
+    }
+    // Split long spans at their quietest frame so each fits Whisper's window.
+    let max_frames = (MAX_UTTERANCE_S * 1000.0 / 30.0) as usize;
+    let mut out = vec![];
+    let mut stack: Vec<(usize, usize)> = spans.into_iter().rev().collect();
+    while let Some((s, e)) = stack.pop() {
+        if e - s <= max_frames {
+            out.push((s * FRAME, (e * FRAME).min(audio.len())));
+            continue;
+        }
+        let (lo, hi) = (s + max_frames / 3, s + max_frames);
+        let cut = (lo..hi).min_by(|a, b| db[*a].total_cmp(&db[*b])).unwrap_or(hi);
+        stack.push((cut, e));
+        stack.push((s, cut));
+    }
+    out
+}
+
+/// Phrases Whisper inserts from its training subtitles, removed wherever they appear in a segment
+/// (they also show up glued to real speech, e.g. "Subtitles by the Amara.org community How …").
+const INLINE_HALLUCINATIONS: &[&str] = &[
+    "subtitles by the amara.org community",
+    "subtítulos realizados por la comunidad de amara.org",
+    "субтитры сделал dimatorzok",
+    "субтитры создавал dimatorzok",
+    "редактор субтитров а.семкин корректор а.егорова",
+    "продолжение следует...",
+    "thanks for watching!",
+    "thank you for watching.",
+];
+
+/// Remove inline hallucinated phrases and ALL-CAPS sound captions ("BELL RINGS", "MUSIC").
+pub(crate) fn clean_text(text: &str) -> String {
+    let mut t = text.to_string();
+    for phrase in INLINE_HALLUCINATIONS {
+        while let Some(i) = t.to_lowercase().find(phrase) {
+            // byte offsets match: the phrases are lowercase-stable (ASCII / Cyrillic)
+            t.replace_range(i..i + phrase.len(), "");
+        }
+    }
+    // Sound captions, e.g. "BELL RINGS", "MUSIC PLAYING", "APPLAUSE": 2–3 all-caps words whose
+    // last word ends in S/ING, or a lone caption word. Real acronym pairs ("IPAM SSO") stay.
+    let words: Vec<&str> = t.split_whitespace().collect();
+    let bare = |w: &str| w.chars().filter(|c| c.is_alphabetic()).collect::<String>();
+    let caps = |w: &str| {
+        let b = bare(w);
+        b.chars().count() >= 3 && b.chars().all(|c| c.is_ascii_uppercase())
+    };
+    const LONE: &[&str] = &["MUSIC", "APPLAUSE", "LAUGHTER", "SILENCE", "INAUDIBLE"];
+    let mut keep = vec![true; words.len()];
+    let mut i = 0;
+    while i < words.len() {
+        let mut j = i;
+        while j < words.len() && caps(words[j]) {
+            j += 1;
+        }
+        let run = &words[i..j];
+        let last = run.last().map(|w| bare(w)).unwrap_or_default();
+        let caption = (2..=3).contains(&run.len()) && (last.ends_with('S') || last.ends_with("ING"))
+            || (run.len() == 1 && LONE.contains(&last.as_str()));
+        if caption {
+            keep[i..j].iter_mut().for_each(|k| *k = false);
+        }
+        i = j.max(i + 1);
+    }
+    words
+        .iter()
+        .zip(keep)
+        .filter(|(_, k)| *k)
+        .map(|(w, _)| *w)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Whisper's well-known hallucinations on silence/noise (incl. its Russian/Ukrainian classics).
+fn is_hallucination(text: &str) -> bool {
+    const KNOWN: &[&str] = &[
+        "thank you.",
+        "thanks for watching!",
+        "thanks for watching.",
+        "thank you for watching.",
+        "thank you for watching!",
+        "please subscribe.",
+        "you",
+        "продолжение следует...",
+        "субтитры сделал dimatorzok",
+        "субтитры создавал dimatorzok",
+        "редактор субтитров а.семкин корректор а.егорова",
+        "дякую за перегляд!",
+        "дякую за увагу!",
+        "спасибо за просмотр!",
+        "¡gracias por ver!",
+        "gracias.",
+        "subtítulos realizados por la comunidad de amara.org",
+    ];
+    let t = text.trim().to_lowercase();
+    // Lone filler words are what Whisper "hears" in near-silence (worse with a prompt).
+    let bare: String = t.chars().filter(|c| c.is_alphanumeric() || c.is_whitespace()).collect();
+    const FILLERS: &[&str] = &["you", "the", "a", "and", "so", "uh", "um", "bye", "ну", "и", "і", "y"];
+    if FILLERS.contains(&bare.trim()) {
+        return true;
+    }
+    // Sound annotations Whisper emits for noise/music: "*Song*", "[Music]", "(applause)", "♪".
+    let annotation = |open: char, close: char| t.starts_with(open) && t.ends_with(close);
+    t.is_empty()
+        || KNOWN.iter().any(|k| t == *k)
+        || t.chars().all(|c| !c.is_alphanumeric())
+        || annotation('*', '*')
+        || annotation('[', ']')
+        || annotation('(', ')')
+        || t.contains('♪')
+}
+
+/// Allowed languages ranked by detection probability, for audio already in `state`'s mel.
+fn rank_languages(state: &mut WhisperState, allowed: &[i32], threads: usize) -> Result<Vec<(i32, f32)>> {
+    let (best_any, probs) = state.lang_detect(0, threads)?;
+    if std::env::var_os("ECHOCTL_DEBUG").is_some() {
+        let mut top: Vec<(i32, f32)> = probs.iter().enumerate().map(|(i, p)| (i as i32, *p)).collect();
+        top.sort_by(|a, b| b.1.total_cmp(&a.1));
+        let fmt: Vec<String> = top[..4.min(top.len())]
+            .iter()
+            .map(|(i, p)| format!("{}={:.2}", whisper_rs::get_lang_str(*i).unwrap_or("?"), p))
+            .collect();
+        eprintln!("\n  debug: lang probs {}", fmt.join(" "));
+    }
+    if allowed.is_empty() {
+        return Ok(vec![(best_any, probs.get(best_any as usize).copied().unwrap_or(0.0))]);
+    }
+    let mut ranked: Vec<(i32, f32)> = allowed
+        .iter()
+        .filter(|id| (**id as usize) < probs.len())
+        .map(|id| (*id, probs[*id as usize]))
+        .collect();
+    ranked.sort_by(|a, b| b.1.total_cmp(&a.1));
+    Ok(ranked)
+}
+
+/// A detection is "confident" when the top allowed language clearly wins. When it doesn't,
+/// the track keeps its previous language if that is a close runner-up: forcing the wrong
+/// language makes Whisper *translate* (accented English → fluent Ukrainian/Russian).
+/// Note: comparing decode log-probs across languages does NOT work — translations and
+/// hallucinations score higher than faithful transcriptions (tested, 2026-10-09).
+const CONFIDENT_PROB: f32 = 0.6;
+const CONFIDENT_MARGIN: f32 = 0.3;
+
+/// Pick the language for one utterance from ranked candidates.
+fn choose_language(ranked: &[(i32, f32)], prev: Option<i32>) -> Option<i32> {
+    let (top, p1) = *ranked.first()?;
+    let p2 = ranked.get(1).map(|r| r.1).unwrap_or(0.0);
+    if p1 >= CONFIDENT_PROB && p1 - p2 >= CONFIDENT_MARGIN {
+        return Some(top);
+    }
+    match prev {
+        Some(prev) if ranked.iter().take(2).any(|(id, _)| *id == prev) => Some(prev),
+        _ => Some(top),
+    }
+}
+
+/// Whisper hint: a language-neutral, comma-separated term list (people, products, acronyms).
+/// A sentence-style English prompt would bias Ukrainian/Russian utterances toward English
+/// (i.e. translation), so only bare terms are passed. Capped: long prompts invite Whisper to
+/// "hear" the listed names in silence.
+pub(crate) fn build_prompt(cfg: &Config, meeting: Option<&MeetingContext>) -> Option<String> {
+    const MAX_CHARS: usize = 400;
+    const MAX_TERMS: usize = 30;
+    const MAX_TERM_CHARS: usize = 50;
+    let mut terms: Vec<String> = vec![];
+    let mut add = |t: &str| {
+        let t = t.trim();
+        if !t.is_empty() && t.chars().count() <= MAX_TERM_CHARS && terms.len() < MAX_TERMS && !terms.iter().any(|x| x.eq_ignore_ascii_case(t)) {
+            terms.push(t.to_string());
+        }
+    };
+    if let Some(m) = meeting {
+        m.people().iter().for_each(|p| add(p));
+        m.vocabulary.iter().for_each(|v| add(v));
+    }
+    cfg.vocabulary.iter().for_each(|v| add(v));
+    let mut prompt = String::new();
+    for t in terms {
+        if prompt.len() + t.len() + 2 > MAX_CHARS {
+            break;
+        }
+        if !prompt.is_empty() {
+            prompt.push_str(", ");
+        }
+        prompt.push_str(&t);
+    }
+    (!prompt.is_empty()).then_some(prompt)
+}
+
+fn allowed_languages(cfg: &Config) -> Result<Vec<i32>> {
+    cfg.languages
+        .iter()
+        .map(|l| whisper_rs::get_lang_id(l).ok_or_else(|| anyhow!("unknown language code '{l}' in config")))
+        .collect()
+}
+
+pub(crate) struct Transcriber {
+    ctx: WhisperContext,
+    /// Separate language-ID model (turbo): its detection is far more decisive than large-v3's.
+    detector: Option<WhisperContext>,
+    allowed: Vec<i32>,
+    threads: usize,
+    prompt: Option<String>,
+    /// Check hinted decodes against plain ones (final pass; too slow for live).
+    guard: bool,
+}
+
+/// Keep the hinted decode? Only when its length is in line with the unhinted one.
+pub(crate) fn hint_is_sane(hinted: &str, plain: &str) -> bool {
+    let (h, p) = (hinted.chars().count() as f64, plain.chars().count() as f64);
+    h >= p * GUARD_MIN_RATIO && h <= p * GUARD_MAX_RATIO + GUARD_SLACK
+}
+
+/// Decoded pieces of one utterance: (start, end, text), seconds relative to the utterance.
+pub(crate) type Decoded = Vec<(f64, f64, String)>;
+
+/// Per-track decoding state, reused across utterances.
+pub(crate) struct TrackState {
+    state: WhisperState,
+    det_state: Option<WhisperState>,
+    prev_lang: Option<i32>,
+}
+
+impl Transcriber {
+    /// One model doing both language ID and decoding (used live, with turbo).
+    pub(crate) fn single(model_path: &Path, cfg: &Config, prompt: Option<String>) -> Result<Self> {
+        whisper_rs::install_logging_hooks();
+        let allowed = allowed_languages(cfg)?;
+        let ctx = WhisperContext::new_with_params(model_path, WhisperContextParameters { use_gpu: true, ..Default::default() })
+            .context("loading model")?;
+        let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(4);
+        Ok(Transcriber { ctx, detector: None, allowed, threads, prompt, guard: false })
+    }
+
+    pub(crate) fn track_state(&self) -> Result<TrackState> {
+        Ok(TrackState {
+            state: self.ctx.create_state()?,
+            det_state: match &self.detector {
+                Some(d) => Some(d.create_state()?),
+                None => None,
+            },
+            prev_lang: None,
+        })
+    }
+
+    /// Detect the language (restricted, sticky per track) and decode one utterance.
+    /// Returns the language code and (start, end, text) relative to the chunk.
+    pub(crate) fn utterance(&self, ts: &mut TrackState, chunk: &[f32]) -> Result<(String, Decoded)> {
+        let dur = chunk.len() as f64 / RATE as f64;
+        let lang_id = match ts.prev_lang {
+            Some(prev) if dur < SHORT_UTTERANCE_S => Some(prev),
+            _ => {
+                let st = ts.det_state.as_mut().unwrap_or(&mut ts.state);
+                st.pcm_to_mel(chunk, self.threads)?;
+                let ranked = rank_languages(st, &self.allowed, self.threads)?;
+                choose_language(&ranked, ts.prev_lang)
+            }
+        };
+        ts.prev_lang = lang_id.or(ts.prev_lang);
+        let lang = lang_id.and_then(whisper_rs::get_lang_str).unwrap_or("auto").to_string();
+        let dur = chunk.len() as f64 / RATE as f64;
+        let segs = match self.prompt.as_deref() {
+            Some(hint) if self.guard && dur >= GUARD_MIN_S => {
+                let hinted = self.decode(&mut ts.state, chunk, &lang, Some(hint))?;
+                let plain = self.decode(&mut ts.state, chunk, &lang, None)?;
+                let text = |d: &Decoded| d.iter().map(|(_, _, t)| t.as_str()).collect::<Vec<_>>().join(" ");
+                if hint_is_sane(&text(&hinted), &text(&plain)) { hinted } else { plain }
+            }
+            // Live: short utterances ("okay", "yes") rarely contain jargon, and on them the
+            // hint makes Whisper produce filler or hint words instead of what was said.
+            Some(hint) if !self.guard && dur >= PROMPT_MIN_S => self.decode(&mut ts.state, chunk, &lang, Some(hint))?,
+            _ => self.decode(&mut ts.state, chunk, &lang, None)?,
+        };
+        Ok((lang, segs))
+    }
+
+    fn decode(&self, state: &mut WhisperState, chunk: &[f32], lang: &str, hint: Option<&str>) -> Result<Decoded> {
+        let mut p = FullParams::new(SamplingStrategy::BeamSearch { beam_size: 5, patience: -1.0 });
+        p.set_n_threads(self.threads as i32);
+        p.set_language(Some(lang));
+        p.set_translate(false);
+        p.set_no_context(true); // don't carry text (or a wrong language) across utterances
+        p.set_temperature(0.0);
+        // Per-token times: segments are split into sentences with their own start/end, so a
+        // short answer isn't stamped with the start of the longer utterance it sits in.
+        p.set_token_timestamps(true);
+        p.set_suppress_blank(true);
+        p.set_suppress_nst(true); // no "(music)", "[laughs]" or ♪ tokens
+        p.set_print_progress(false);
+        p.set_print_realtime(false);
+        p.set_print_timestamps(false);
+        p.set_print_special(false);
+        if let Some(hint) = hint {
+            p.set_initial_prompt(hint);
+        }
+        state.full(p, chunk)?;
+        let mut segs = vec![];
+        for seg in state.as_iter() {
+            let text = clean_text(seg.to_str_lossy()?.trim());
+            if seg.no_speech_probability() > 0.6 || is_hallucination(&text) {
+                continue;
+            }
+            let (t0, t1) = (seg.start_timestamp() as f64 / 100.0, seg.end_timestamp() as f64 / 100.0);
+            let tokens: Vec<Tok> = (0..seg.n_tokens())
+                .filter_map(|i| seg.get_token(i))
+                .filter_map(|t| {
+                    let bytes = t.to_bytes().ok()?.to_vec();
+                    let d = t.token_data();
+                    Some(Tok { bytes, t0: d.t0 as f64 / 100.0, t1: d.t1 as f64 / 100.0 })
+                })
+                .collect();
+            for (a, b, sentence) in split_sentences(&tokens, t0, t1) {
+                let sentence = clean_text(&sentence);
+                if !sentence.is_empty() && !is_hallucination(&sentence) {
+                    segs.push((a, b, sentence));
+                }
+            }
+        }
+        Ok(segs)
+    }
+
+    fn track(&self, speaker: &str, audio: &[f32]) -> Result<Vec<Segment>> {
+        let mut ts = self.track_state()?;
+        let spans = utterances(audio);
+        let mut out = vec![];
+        let tty = std::io::IsTerminal::is_terminal(&std::io::stderr());
+        for (n, (s, e)) in spans.iter().enumerate() {
+            let (lang, segs) = self.utterance(&mut ts, &audio[*s..*e])?;
+            let offset = *s as f64 / RATE as f64;
+            for (st, en, text) in segs {
+                out.push(Segment { speaker: speaker.into(), start: offset + st, end: offset + en, lang: lang.clone(), text, name: None });
+            }
+            if tty {
+                eprint!("\r  {speaker}: {}/{} utterances", n + 1, spans.len());
+            }
+        }
+        if tty && !spans.is_empty() {
+            eprintln!();
+        } else if !tty {
+            eprintln!("  {speaker}: {} utterances", spans.len());
+        }
+        Ok(out)
+    }
+}
+
+/// One decoded token: its raw bytes (a UTF-8 character can span tokens) and times (seconds).
+pub(crate) struct Tok {
+    bytes: Vec<u8>,
+    t0: f64,
+    t1: f64,
+}
+
+/// Split a segment into sentences, each timed by its own first and last token. Special tokens
+/// (`[_BEG_]`, `<|…|>`) are skipped; a sentence ends at `.?!…` once it has ≥ 12 characters. If
+/// the token times are unusable the segment comes back whole with its own times.
+pub(crate) fn split_sentences(tokens: &[Tok], seg_t0: f64, seg_t1: f64) -> Vec<(f64, f64, String)> {
+    let mut out = vec![];
+    let (mut buf, mut start, mut end): (Vec<u8>, Option<f64>, f64) = (vec![], None, seg_t0);
+    let sane = |t: f64| t >= seg_t0 - 0.5 && t <= seg_t1 + 0.5;
+    for t in tokens {
+        if t.bytes.starts_with(b"[_") || t.bytes.starts_with(b"<|") {
+            continue;
+        }
+        buf.extend_from_slice(&t.bytes);
+        let text = String::from_utf8_lossy(&buf);
+        // The sentence starts at its first token with a letter (not at stray punctuation).
+        if start.is_none() && text.chars().any(char::is_alphanumeric) && sane(t.t0) {
+            start = Some(t.t0);
+        }
+        if sane(t.t1) {
+            end = end.max(t.t1);
+        }
+        let trimmed = text.trim();
+        if trimmed.chars().count() >= 12 && trimmed.ends_with(['.', '?', '!', '…']) {
+            out.push((start.unwrap_or(seg_t0), end, trimmed.to_string()));
+            buf.clear();
+            start = None;
+        }
+    }
+    let rest = String::from_utf8_lossy(&buf).trim().to_string();
+    if !rest.is_empty() {
+        out.push((start.unwrap_or(seg_t0), end.max(seg_t1), rest));
+    }
+    if out.is_empty() {
+        return vec![];
+    }
+    // Times must not run backwards or past the segment.
+    for o in out.iter_mut() {
+        o.0 = o.0.clamp(seg_t0, seg_t1);
+        o.1 = o.1.clamp(o.0, seg_t1.max(o.0));
+    }
+    out
+}
+
+/// Order the merged transcript. By start time, except that when two people's lines start
+/// within ~half a second and overlap, the one that ends later goes second: a reply finishes
+/// after the question it answers, while Whisper's start times are only accurate to ~1 s.
+pub(crate) fn order_turns(segs: &mut [Segment]) {
+    segs.sort_by(|a, b| a.start.total_cmp(&b.start));
+    for _ in 0..3 {
+        let mut swapped = false;
+        for i in 0..segs.len().saturating_sub(1) {
+            let (a, b) = (&segs[i], &segs[i + 1]);
+            let near = b.start - a.start < 0.6;
+            let overlap = b.start < a.end;
+            if a.speaker != b.speaker && near && overlap && a.end > b.end + 0.3 {
+                segs.swap(i, i + 1);
+                swapped = true;
+            }
+        }
+        if !swapped {
+            break;
+        }
+    }
+}
+
+fn words(t: &str) -> Vec<String> {
+    t.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Share of `a`'s words that also appear in `b`.
+fn overlap(a: &[String], b: &[String]) -> f64 {
+    if a.is_empty() {
+        return 0.0;
+    }
+    a.iter().filter(|w| b.contains(w)).count() as f64 / a.len() as f64
+}
+
+/// Drop mic segments that are echo of the remote side: when the user is on speakers, the mic
+/// re-records the call, producing near-duplicate "Me" lines a moment after "Remote" ones.
+fn remove_echo(segs: Vec<Segment>) -> (Vec<Segment>, usize) {
+    const WINDOW_S: f64 = 4.0;
+    const SIMILAR: f64 = 0.6;
+    let remote: Vec<(f64, f64, Vec<String>)> = segs
+        .iter()
+        .filter(|s| s.speaker == "remote")
+        .map(|s| (s.start, s.end, words(&s.text)))
+        .collect();
+    let before = segs.len();
+    let kept: Vec<Segment> = segs
+        .into_iter()
+        .filter(|s| {
+            if s.speaker != "me" {
+                return true;
+            }
+            let w = words(&s.text);
+            !remote.iter().any(|(rs, re, rw)| {
+                s.start < re + WINDOW_S && s.end > rs - WINDOW_S && overlap(&w, rw) >= SIMILAR
+            })
+        })
+        .collect();
+    let dropped = before - kept.len();
+    (kept, dropped)
+}
+
+fn hms(t: f64) -> String {
+    let t = t.max(0.0) as u64;
+    format!("{:02}:{:02}:{:02}", t / 3600, t / 60 % 60, t % 60)
+}
+
+fn render_markdown(
+    dir: &Path,
+    meta: &serde_json::Value,
+    meeting: Option<&MeetingContext>,
+    model: &str,
+    segs: &[Segment],
+) -> String {
+    let title = meeting
+        .and_then(|m| m.subject.as_deref())
+        .or(meta["title"].as_str())
+        .unwrap_or("Call");
+    let started = meta["started_at"].as_str().unwrap_or("");
+    let duration = segs.iter().map(|s| s.end).fold(0.0, f64::max);
+    let mut md = format!(
+        "# {title}\n\n- **Recorded:** {started}\n- **Duration (speech):** {}\n- **Model:** {model}\n- **Folder:** `{}`\n\n",
+        hms(duration),
+        dir.file_name().unwrap().to_string_lossy()
+    );
+    if let Some(people) = meeting.map(|m| m.people()).filter(|p| !p.is_empty()) {
+        md.insert_str(md.len() - 1, &format!("- **Invited:** {}\n", people.join(", ")));
+    }
+    // Merge consecutive segments of the same speaker (and language) into one paragraph.
+    let mut i = 0;
+    while i < segs.len() {
+        let s = &segs[i];
+        let mut text = s.text.clone();
+        let mut j = i + 1;
+        while j < segs.len() && segs[j].speaker == s.speaker && segs[j].lang == s.lang && segs[j].start - segs[j - 1].end < 2.0 {
+            text.push(' ');
+            text.push_str(&segs[j].text);
+            j += 1;
+        }
+        let who = if s.speaker == "me" { "Me" } else { s.name.as_deref().unwrap_or("Remote") };
+        md.push_str(&format!("**{who}** [{}] _{}_\n{text}\n\n", hms(s.start), s.lang));
+        i = j;
+    }
+    md
+}
+
+/// Marks a call as being transcribed (shown as "transcribing…" in the tray).
+pub const IN_PROGRESS: &str = ".transcribing";
+
+struct InProgress(PathBuf);
+impl Drop for InProgress {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
+/// Create the in-progress marker exclusively (it holds our pid); a marker left by a process
+/// that is gone is taken over, a live one means another transcription is running.
+fn take_marker(dir: &Path) -> Result<InProgress> {
+    let path = dir.join(IN_PROGRESS);
+    for _ in 0..2 {
+        match fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(mut f) => {
+                use std::io::Write;
+                write!(f, "{}", std::process::id())?;
+                return Ok(InProgress(path));
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                let pid = fs::read_to_string(&path).ok().and_then(|p| p.trim().parse::<u32>().ok());
+                if pid.is_some_and(crate::app::process_alive) {
+                    bail!("{} is already being transcribed (pid {})", dir.display(), pid.unwrap());
+                }
+                let _ = fs::remove_file(&path);
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+    bail!("could not mark {} as being transcribed", dir.display())
+}
+
+pub fn transcribe(call: &str, model_override: Option<&str>, keep_audio: bool) -> Result<()> {
+    let dir = resolve_call(call)?;
+    if !dir.join("mic.wav").exists() && !dir.join("remote.wav").exists() {
+        bail!("{} has no audio (it was already transcribed and the audio deleted)", dir.display());
+    }
+    // The pid lets the app tell a live transcription from one a crash left behind.
+    // Never the call being recorded right now. One a crash left open is closed here first.
+    let from_watcher = std::env::var_os(crate::watch::FROM_WATCHER).is_some_and(|d| Path::new(&d) == dir);
+    let recording = crate::watch::running_watcher().and_then(|w| w.recording).map(PathBuf::from);
+    if !from_watcher && recording.is_some_and(|r| r == dir || r.ends_with(dir.file_name().unwrap_or_default())) {
+        bail!("{} is still being recorded — it is transcribed when it stops", dir.display());
+    }
+    crate::watch::close_unfinished(&dir)?;
+    let _marker = take_marker(&dir)?;
+    let cfg = Config::load()?;
+    let (model_name, model_path) = match model_override {
+        Some(name) => {
+            let m = models::find(name)?;
+            (m.name.to_string(), models::model_path(m))
+        }
+        None => (cfg.model.clone().unwrap_or_default(), models::active_model_path()?),
+    };
+    if !model_path.exists() {
+        bail!("model {model_name} is not downloaded — run `echoctl model download {model_name}`");
+    }
+    // A call can pin its own languages (chosen when it was armed).
+    let mut cfg = cfg;
+    let call_meta: serde_json::Value = serde_json::from_slice(&fs::read(dir.join("meta.json"))?)?;
+    if let Some(l) = call_meta["languages"].as_array().filter(|a| !a.is_empty()) {
+        cfg.languages = l.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect();
+    }
+    let allowed = allowed_languages(&cfg)?;
+
+    whisper_rs::install_logging_hooks(); // routes whisper.cpp's chatter to `log` (unset = silent)
+    let t = Instant::now();
+    eprintln!("transcribing {} with {model_name} (languages: {})", dir.display(),
+        if cfg.languages.is_empty() { "any".into() } else { cfg.languages.join(", ") });
+    let cp = WhisperContextParameters { use_gpu: true, ..Default::default() };
+    let ctx = WhisperContext::new_with_params(&model_path, cp).context("loading model")?;
+    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(8);
+    // Language ID with turbo when available (and different from the transcription model).
+    let det_model = models::find(DETECTOR_MODEL)?;
+    let det_path = models::model_path(det_model);
+    let detector = if det_path.exists() && det_path != model_path {
+        eprintln!("  language detection: {DETECTOR_MODEL}");
+        Some(WhisperContext::new_with_params(&det_path, WhisperContextParameters { use_gpu: true, ..Default::default() })?)
+    } else {
+        None
+    };
+    let meeting = MeetingContext::load(&dir)?;
+    let prompt = build_prompt(&cfg, meeting.as_ref());
+    if let Some(p) = &prompt {
+        eprintln!("  vocabulary hint: {p}");
+    }
+    let tr = Transcriber { ctx, detector, allowed, threads, prompt, guard: true };
+
+    let mut segs = vec![];
+    let remote = dir.join("remote.wav").exists().then(|| load_16k(&dir.join("remote.wav"))).transpose()?;
+    if dir.join("mic.wav").exists() {
+        let mut mic = load_16k(&dir.join("mic.wav"))?;
+        // On speakers the mic re-records the others: cancel that echo first (headphones: no-op).
+        if let (Some(r), true) = (&remote, cfg.echo_cancel.unwrap_or(true)) {
+            match crate::aec::cancel(&mic, r) {
+                Ok(Some((clean, delay))) => {
+                    eprintln!("  echo cancellation: on (speaker → mic delay ≈ {delay} ms)");
+                    mic = clean;
+                }
+                Ok(None) => eprintln!("  echo cancellation: no echo (headphones)"),
+                Err(e) => eprintln!("  echo cancellation skipped: {e:#}"),
+            }
+        }
+        segs.extend(tr.track("me", &mic)?);
+    }
+    if let Some(r) = &remote {
+        segs.extend(tr.track("remote", r)?);
+    }
+    order_turns(&mut segs);
+    let (mut segs, echoes) = remove_echo(segs);
+    if let Some(name) = MeetingContext::load(&dir).ok().flatten().and_then(|m| m.sole_other(cfg.me.as_ref())) {
+        for s in segs.iter_mut().filter(|s| s.speaker == "remote") {
+            s.name = Some(name.clone());
+        }
+    }
+    if echoes > 0 {
+        eprintln!("  dropped {echoes} mic segment(s) that echoed the remote side");
+    }
+
+    let meta: serde_json::Value = serde_json::from_slice(&fs::read(dir.join("meta.json"))?)?;
+    let suffix = model_override.map(|m| format!(".{m}")).unwrap_or_default();
+    fs::write(dir.join(format!("segments{suffix}.json")), serde_json::to_vec_pretty(&segs)?)?;
+    let md_path = dir.join(format!("transcript{suffix}.md"));
+    fs::write(&md_path, render_markdown(&dir, &meta, meeting.as_ref(), &model_name, &segs))?;
+    eprintln!("done in {:.0}s — {} segments", t.elapsed().as_secs_f64(), segs.len());
+
+    // Text only: the audio goes once the transcript is safely on disk (kept on failure above,
+    // since any error returns before this point).
+    // A comparison run (--model) must leave the audio for the real transcript.
+    if !(keep_audio || cfg.keep_audio || model_override.is_some()) {
+        for f in ["mic.wav", "remote.wav"] {
+            let _ = fs::remove_file(dir.join(f));
+        }
+        let mut meta = meta;
+        meta["audio"] = serde_json::json!("deleted after transcription");
+        fs::write(dir.join("meta.json"), serde_json::to_vec_pretty(&meta)?)?;
+        eprintln!("audio deleted (only text is kept; `--keep-audio` or `config --keep-audio true` to keep it)");
+    }
+    println!("{}", md_path.display());
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vad_finds_speech_between_silence() {
+        let mut a = vec![0.0005f32; RATE]; // 1 s near-silence
+        a.extend((0..RATE).map(|i| 0.3 * (i as f32 * 0.05).sin())); // 1 s tone
+        a.extend(vec![0.0005f32; RATE]);
+        let u = utterances(&a);
+        assert_eq!(u.len(), 1);
+        let (s, e) = u[0];
+        assert!((s as i64 - RATE as i64).abs() < (RATE / 3) as i64, "start {s}");
+        assert!((e as i64 - 2 * RATE as i64).abs() < (RATE / 3) as i64, "end {e}");
+    }
+
+    #[test]
+    fn vad_splits_long_speech() {
+        let a: Vec<f32> = (0..RATE * 60).map(|i| 0.3 * (i as f32 * 0.05).sin()).collect();
+        assert!(utterances(&a).iter().all(|(s, e)| (e - s) as f64 / RATE as f64 <= MAX_UTTERANCE_S + 0.5));
+    }
+
+    #[test]
+    fn uncertain_detection_keeps_track_language() {
+        let (en, uk, ru) = (0, 1, 2);
+        // large-v3 on accented English: uk 0.41 / ru 0.27 / en 0.25, track was English
+        assert_eq!(choose_language(&[(uk, 0.41), (ru, 0.27), (en, 0.25)], Some(en)), Some(uk)); // en not top-2
+        assert_eq!(choose_language(&[(uk, 0.36), (en, 0.34)], Some(en)), Some(en));
+        assert_eq!(choose_language(&[(uk, 0.90), (en, 0.05)], Some(en)), Some(uk)); // confident switch
+        assert_eq!(choose_language(&[], None), None);
+    }
+
+    #[test]
+    fn replies_follow_the_question_they_answer() {
+        // From a real call: the answer was stamped 0.27 s before the question.
+        let seg = |speaker: &str, start: f64, end: f64, text: &str| Segment {
+            speaker: speaker.into(), start, end, lang: "en".into(), text: text.into(), name: None,
+        };
+        let mut s = vec![
+            seg("me", 171.12, 176.28, "No, no, like, she's on leave, so..."),
+            seg("remote", 171.39, 174.43, "Yeah, is Priya joining or not?"),
+            seg("me", 182.0, 183.0, "Later."),
+        ];
+        order_turns(&mut s);
+        assert_eq!(s[0].speaker, "remote");
+        assert_eq!(s[1].speaker, "me");
+        // Far apart starts keep plain start order.
+        let mut t = vec![seg("me", 10.0, 20.0, "long"), seg("remote", 12.0, 13.0, "short")];
+        order_turns(&mut t);
+        assert_eq!(t[0].speaker, "me");
+    }
+
+    #[test]
+    fn segments_split_into_timed_sentences() {
+        let tok = |s: &str, t0: f64, t1: f64| Tok { bytes: s.as_bytes().to_vec(), t0, t1 };
+        let toks = vec![
+            tok("[_BEG_]", 0.0, 0.0), tok(" Yep", 0.2, 0.5), tok(", yep. That works", 0.5, 1.2), tok(".", 1.2, 1.3),
+            tok(" No, no, she's on leave", 3.1, 4.6), tok(", so...", 4.6, 5.0),
+        ];
+        let out = split_sentences(&toks, 0.0, 5.2);
+        assert_eq!(out.len(), 2, "{out:?}");
+        assert_eq!(out[0].2, "Yep, yep. That works.");
+        assert!((out[1].0 - 3.1).abs() < 1e-6, "second sentence starts at its own first token");
+        // Cyrillic split mid-character across tokens survives.
+        let bytes = "Привіт, як справи?".as_bytes();
+        let (a, b) = bytes.split_at(3);
+        let out = split_sentences(&[Tok { bytes: a.to_vec(), t0: 0.0, t1: 0.3 }, Tok { bytes: b.to_vec(), t0: 0.3, t1: 1.0 }], 0.0, 1.0);
+        assert_eq!(out[0].2, "Привіт, як справи?");
+    }
+
+    #[test]
+    fn hint_guard_rejects_runaway_or_lost_text() {
+        assert!(hint_is_sane("We use ServiceNow for operations", "We use as no for operations"));
+        assert!(!hint_is_sane("", "We talked about the migration plan for a while"));
+        assert!(!hint_is_sane(&"Pat O, Miro, IPAM, ".repeat(10), "yes"));
+        assert!(hint_is_sane("Okay.", "Okay."));
+    }
+
+    #[test]
+    fn prompt_is_bare_deduplicated_terms() {
+        let cfg = Config { vocabulary: vec!["ServiceNow".into(), "Miro".into()], ..Default::default() };
+        let m = MeetingContext {
+            organizer: Some(crate::meeting::Person { name: "Pat O".into(), email: None }),
+            attendees: vec![crate::meeting::Person { name: "Pat O".into(), email: None }],
+            vocabulary: vec!["miro".into(), "IPAM".into()],
+            ..Default::default()
+        };
+        assert_eq!(build_prompt(&cfg, Some(&m)).unwrap(), "Pat O, miro, IPAM, ServiceNow");
+        assert_eq!(build_prompt(&Config::default(), None), None);
+    }
+
+    #[test]
+    fn echo_of_remote_on_mic_is_dropped() {
+        let seg = |speaker: &str, start: f64, text: &str| Segment {
+            speaker: speaker.into(), start, end: start + 2.0, lang: "en".into(), text: text.into(), name: None,
+        };
+        let (kept, dropped) = remove_echo(vec![
+            seg("remote", 19.0, "No, we know where."),
+            seg("me", 15.5, "No, we know"),
+            seg("me", 30.0, "Okay, let's move on to the backlog."),
+        ]);
+        assert_eq!(dropped, 1);
+        assert_eq!(kept.len(), 2);
+    }
+
+    #[test]
+    fn inline_hallucinations_and_sound_captions_are_removed() {
+        assert_eq!(
+            clean_text("Subtitles by the Amara.org community How short the message should be. BELL RINGS If you're happy"),
+            "How short the message should be. If you're happy"
+        );
+        assert_eq!(clean_text("We use IPAM and ServiceNow"), "We use IPAM and ServiceNow");
+        assert_eq!(clean_text("Move IPAM SSO first"), "Move IPAM SSO first"); // acronym pair stays
+        assert_eq!(clean_text("MUSIC PLAYING Hello"), "Hello");
+    }
+
+    #[test]
+    fn known_hallucinations_are_dropped() {
+        assert!(is_hallucination("Продолжение следует..."));
+        assert!(is_hallucination("  ... "));
+        assert!(is_hallucination("*Song*"));
+        assert!(is_hallucination("[Music]"));
+        assert!(is_hallucination("you."));
+        assert!(is_hallucination(" The "));
+        assert!(!is_hallucination("Okay."));
+        assert!(!is_hallucination("Давайте почнемо з архітектури"));
+    }
+}

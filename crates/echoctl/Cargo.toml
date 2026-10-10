@@ -1,0 +1,64 @@
+[package]
+name = "echoctl"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["transcribe", "tray"]
+# Menu-bar (macOS) / notification-area (Windows) icon shown by `echoctl watch`.
+tray = ["dep:tray-icon", "dep:tao", "dep:wry"]
+# On-device transcription (whisper.cpp). Needs a C/C++ toolchain + cmake for the target, so
+# cross-checks from macOS to Windows run with --no-default-features.
+transcribe = ["dep:whisper-rs"]
+
+[dependencies]
+# Echo cancellation of the mic track against the call app's track (pure-Rust WebRTC AEC3 port).
+aec3 = "0.4"
+anyhow = "1"
+clap = { version = "4.6", features = ["derive"] }
+# PKCE verifier / OAuth state for the Microsoft 365 sign-in.
+getrandom = "0.3"
+cpal = "0.18"
+hound = "3.5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+ctrlc = { version = "3", features = ["termination"] }
+sha2 = "0.10"
+tray-icon = { version = "0.26", optional = true }
+tao = { version = "0.37", optional = true }
+# The Echo window (calls, notes, transcript, settings): the system webview (WKWebView / WebView2)
+# on the tray's own tao event loop.
+wry = { version = "0.57", default-features = false, optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSString", "NSArray", "NSDictionary", "NSUUID", "NSValue", "NSObject", "NSData"] }
+# The Dock icon while the Echo window is open (dev builds have no bundle icon).
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSImage"] }
+objc2-core-audio = { version = "0.3", features = ["AudioHardware", "objc2", "objc2-foundation", "objc2-core-audio-types"] }
+objc2-core-audio-types = "0.3"
+objc2-core-foundation = { version = "0.3", features = ["CFDictionary", "CFString"] }
+objc2-av-foundation = { version = "0.3", features = ["AVCaptureDevice", "AVMediaFormat", "block2"] }
+block2 = "0.6"
+libc = "0.2"
+whisper-rs = { version = "0.16", features = ["metal"], optional = true }
+# Shared-screen key frames: decode the window capture, compare thumbnails, save JPEGs.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+whisper-rs = { version = "0.16", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-core = "0.62"
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_Media_Audio",
+  "Win32_System_Com",
+  "Win32_System_Com_StructuredStorage",
+  "Win32_System_Console",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_Threading",
+  "Win32_System_Variant",
+] }

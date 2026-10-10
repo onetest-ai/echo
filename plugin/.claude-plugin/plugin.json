@@ -1,0 +1,11 @@
+{
+  "name": "echo",
+  "version": "0.1.3-beta",
+  "description": "Record Teams calls you're in (your mic + the app's audio) and turn them into local AI transcripts — no Teams recording needed.",
+  "author": {
+    "name": "Artyom Rozumenko"
+  },
+  "types": "./types/index.d.ts",
+  "license": "FSL-1.1-ALv2",
+  "homepage": "https://github.com/onetest-ai/echo"
+}

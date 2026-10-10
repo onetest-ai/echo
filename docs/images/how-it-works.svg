@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 250" width="1000" height="250" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+  <title>How Echo works</title>
+  <rect width="1000" height="250" rx="18" fill="#f7f5ff"/>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 10 5 0 10z" fill="#8b62ff"/></marker>
+  </defs>
+  <g fill="#ffffff" stroke="#e1d9ff" stroke-width="1.5">
+    <rect x="20" y="40" width="228" height="170" rx="14"/>
+    <rect x="264" y="40" width="228" height="170" rx="14"/>
+    <rect x="508" y="40" width="228" height="170" rx="14"/>
+    <rect x="752" y="40" width="228" height="170" rx="14"/>
+  </g>
+  <g stroke="#8b62ff" stroke-width="2.5" marker-end="url(#a)">
+    <line x1="249" y1="125" x2="261" y2="125"/><line x1="493" y1="125" x2="505" y2="125"/><line x1="737" y1="125" x2="749" y2="125"/>
+  </g>
+  <g fill="#8b62ff"><circle cx="54" cy="76" r="16"/><circle cx="298" cy="76" r="16"/><circle cx="542" cy="76" r="16"/><circle cx="786" cy="76" r="16"/></g>
+  <g fill="#fff" font-size="15" font-weight="700" text-anchor="middle"><text x="54" y="81">1</text><text x="298" y="81">2</text><text x="542" y="81">3</text><text x="786" y="81">4</text></g>
+  <g fill="#18181d" font-size="16" font-weight="650">
+    <text x="80" y="82">You join a call</text><text x="324" y="82">Echo records</text><text x="568" y="82">It transcribes</text><text x="812" y="82">You get notes</text>
+  </g>
+  <g fill="#55555f" font-size="13">
+    <text x="40" y="118">A Teams meeting or call.</text><text x="40" y="138">You click Record, or pick it</text><text x="40" y="158">in the calendar ahead of time.</text>
+    <text x="284" y="118">Your microphone and the</text><text x="284" y="138">Teams app only. No bot joins,</text><text x="284" y="158">nothing else on your Mac.</text>
+    <text x="528" y="118">On your Mac, right after the</text><text x="528" y="138">call. The audio is deleted;</text><text x="528" y="158">only the text is kept.</text>
+    <text x="772" y="118">Summary, decisions, action</text><text x="772" y="138">items, chat and shared screens,</text><text x="772" y="158">written by Claude Code.</text>
+  </g>
+</svg>

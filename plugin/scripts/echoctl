@@ -1,0 +1,17 @@
+#!/bin/sh
+# The plugin's way to the Echo CLI. The plugin ships no binary: the CLI is the installed
+# echoctl app's own executable (Echo.app on macOS). Lookup order:
+#   $ECHOCTL_BIN → plugin/bin/echoctl (a dev build from scripts/build-plugin.sh) →
+#   echoctl on PATH → /Applications/Echo.app → ~/Applications/Echo.app
+here=$(cd "$(dirname "$0")/.." && pwd)
+for c in "${ECHOCTL_BIN:-}" "$here/bin/echoctl"; do
+  [ -n "$c" ] && [ -x "$c" ] && exec "$c" "$@"
+done
+if command -v echoctl >/dev/null 2>&1 && [ "$(command -v echoctl)" != "$0" ]; then
+  exec echoctl "$@"
+fi
+for c in /Applications/Echo.app/Contents/MacOS/echoctl "$HOME/Applications/Echo.app/Contents/MacOS/echoctl"; do
+  [ -x "$c" ] && exec "$c" "$@"
+done
+echo "echoctl app is not installed — install it (see the Echo README), then retry" >&2
+exit 127

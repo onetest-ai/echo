@@ -1,0 +1,936 @@
+//! The watcher loop of the echoctl app (`app.rs`): records the calls the user opted in to.
+//!
+//! Every second it checks the agenda, whether the call app holds the mic, and control files;
+//! it records only when the user armed it (tray, `echoctl arm` / `join`, or a "Record?"
+//! dialog). Events are appended to `<home>/.echo/events.jsonl` for any client (the Claude
+//! Code mod, `echoctl events --follow`).
+//!
+//! Timings: offer at T−58 s, until 4 min after the
+//! start; a call has ended once the mic has been released for 2 s, and we wait a further grace
+//! period for a rejoin before closing the recording.
+
+use std::collections::HashSet;
+use std::fs::{self, OpenOptions};
+use std::io::{BufRead, BufReader, Seek, SeekFrom, Write};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use anyhow::{bail, Result};
+use chrono::{DateTime, Local, Utc};
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+
+use crate::apps::TargetApp;
+use crate::audio;
+use crate::meeting::MeetingContext;
+use crate::paths;
+use crate::recorder::Recording;
+
+const TICK: Duration = Duration::from_millis(250);
+const OFFER_BEFORE: chrono::Duration = chrono::Duration::seconds(58);
+const OFFER_UNTIL_AFTER_START: chrono::Duration = chrono::Duration::minutes(4);
+/// Mic released this long = the call app left the call (filters device-switch blips).
+const MIC_RELEASE_DEBOUNCE: Duration = Duration::from_secs(2);
+/// After the call ends, keep the recording open this long in case the user rejoins.
+const REJOIN_GRACE: Duration = Duration::from_secs(10);
+/// An arm with no call appearing within this window expires.
+const ARM_EXPIRES: Duration = Duration::from_secs(15 * 60);
+/// A watcher whose heartbeat is older than this is considered dead.
+const HEARTBEAT_STALE: chrono::Duration = chrono::Duration::seconds(5);
+const EVENTS_MAX_BYTES: u64 = 5_000_000;
+/// Mute button unreadable this long → record the mic again; this long → look for Teams anew.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const MUTE_BLIND_UNMUTE: Duration = Duration::from_secs(5);
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const MUTE_BLIND_RESET: Duration = Duration::from_secs(10);
+/// How often the meeting chat is read during a recording.
+const CHAT_POLL: Duration = Duration::from_secs(30);
+/// Chat kept from this long before the call started to this long after it ended.
+const CHAT_MARGIN: chrono::Duration = chrono::Duration::minutes(2);
+/// How long to look for an ad-hoc call's chat after the recording starts.
+const CHAT_FIND_FOR: Duration = Duration::from_secs(5 * 60);
+/// How often the call app's window text is read during a recording.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const UI_POLL: Duration = Duration::from_millis(1000);
+/// A wall-clock jump this large between ticks means the computer slept.
+const SLEEP_GAP: Duration = Duration::from_secs(30);
+/// Recovery looks at calls this recent.
+const RECOVER_DAYS: i64 = 7;
+/// How often the watcher refreshes today's agenda from the calendar.
+const AGENDA_SYNC_EVERY: Duration = Duration::from_secs(15 * 60);
+
+fn file(name: &str) -> PathBuf {
+    paths::state_dir().join(name)
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Armed {
+    pub armed_at: DateTime<Utc>,
+    pub title: Option<String>,
+    pub meeting: Option<MeetingContext>,
+    /// Languages pinned for this call; None = workspace list
+    #[serde(default)]
+    pub languages: Option<Vec<String>>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct WatchState {
+    pub pid: u32,
+    pub heartbeat: DateTime<Utc>,
+    pub app: TargetApp,
+    /// None = this platform can't tell (Windows, for now)
+    pub in_call: Option<bool>,
+    pub armed: bool,
+    pub recording: Option<String>,
+}
+
+fn read_json<T: for<'de> Deserialize<'de>>(name: &str) -> Option<T> {
+    serde_json::from_slice(&fs::read(file(name)).ok()?).ok()
+}
+
+fn write_json<T: Serialize>(name: &str, v: &T) -> Result<()> {
+    fs::create_dir_all(paths::state_dir())?;
+    let tmp = file(&format!("{name}.tmp"));
+    fs::write(&tmp, serde_json::to_vec_pretty(v)?)?;
+    fs::rename(tmp, file(name))?;
+    Ok(())
+}
+
+/// Live watcher state, or None if no watcher is running.
+pub fn running_watcher() -> Option<WatchState> {
+    let s: WatchState = read_json("watch.json")?;
+    (Utc::now() - s.heartbeat < HEARTBEAT_STALE).then_some(s)
+}
+
+fn emit(event: &str, mut data: serde_json::Value) {
+    if let Some(obj) = data.as_object_mut() {
+        obj.insert("event".into(), json!(event));
+        obj.insert("ts".into(), json!(Local::now().to_rfc3339()));
+    }
+    let line = data.to_string();
+    println!("{line}");
+    let _ = fs::create_dir_all(paths::state_dir());
+    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(file("events.jsonl")) {
+        let _ = writeln!(f, "{line}");
+    }
+}
+
+fn parse_time(s: &Option<String>) -> Option<DateTime<Utc>> {
+    let s = s.as_deref()?;
+    DateTime::parse_from_rfc3339(s)
+        .map(|d| d.with_timezone(&Utc))
+        .ok()
+        .or_else(|| s.parse::<DateTime<Utc>>().ok())
+        // Graph often returns naive UTC like "2026-10-09T13:30:00.0000000"
+        .or_else(|| {
+            chrono::NaiveDateTime::parse_from_str(s.trim_end_matches('Z'), "%Y-%m-%dT%H:%M:%S%.f")
+                .ok()
+                .map(|n| n.and_utc())
+        })
+}
+
+/// The agenda the watcher offers meetings from.
+pub fn agenda() -> Vec<MeetingContext> {
+    read_json("agenda.json").unwrap_or_default()
+}
+
+/// A meeting's start time, if parseable.
+pub fn meeting_start(m: &MeetingContext) -> Option<DateTime<Utc>> {
+    parse_time(&m.start)
+}
+
+fn meeting_summary(m: &MeetingContext) -> serde_json::Value {
+    json!({
+        "id": m.id, "subject": m.subject, "start": m.start, "end": m.end,
+        "join_url": m.join_url, "attendees": m.attendees.len(),
+    })
+}
+
+/// What the tray icon shows.
+#[derive(Debug, Clone, PartialEq)]
+pub enum UiState {
+    Idle { in_call: Option<bool> },
+    Armed,
+    Recording { title: Option<String>, since: DateTime<Local> },
+}
+
+/// The watcher loop. Returns once `stop` is set, after closing any recording.
+pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState)) -> Result<()> {
+    // Keep the event log bounded (clients follow it from the end and survive truncation).
+    if fs::metadata(file("events.jsonl")).is_ok_and(|m| m.len() > EVENTS_MAX_BYTES) {
+        let _ = fs::rename(file("events.jsonl"), file("events.1.jsonl"));
+    }
+    // Requests left by a previous run (a timed-out quit, say) must not act on this one.
+    for f in ["stop.request", "quit.request", "doctor.request", "open.request"] {
+        let _ = fs::remove_file(file(f));
+    }
+    let detects_calls = audio::app_in_call(app).is_some();
+    emit("watch_started", json!({ "app": app, "pid": std::process::id(), "detects_calls": detects_calls }));
+
+    let mut announced: HashSet<String> = HashSet::new();
+    let mut rec: Option<Recording> = None;
+    let mut in_call = false;
+    let mut mic_released_at: Option<Instant> = None;
+    let mut call_ended_at: Option<Instant> = None;
+    let mut last_check = Instant::now() - Duration::from_secs(1);
+    let mut mute_alive: Option<Arc<AtomicBool>> = None;
+    let mut ui_alive: Option<Arc<AtomicBool>> = None;
+    let mut frames_alive: Option<Arc<AtomicBool>> = None;
+    let mut chat_alive: Option<Arc<AtomicBool>> = None;
+    // Keep today's agenda fresh from the calendar (if one is configured), off the main loop.
+    let mut last_sync: Option<Instant> = None;
+    // Sleep shows up as wall-clock time passing faster than the monotonic clock.
+    let mut wall = std::time::SystemTime::now();
+    let mut mono = Instant::now();
+    let app_started = Utc::now();
+    std::thread::spawn(move || recover(app_started));
+
+    while !stop.load(Ordering::SeqCst) {
+        std::thread::sleep(TICK);
+        crate::app::handle_requests(&stop);
+        let slept = wall.elapsed().unwrap_or_default().saturating_sub(mono.elapsed()) > SLEEP_GAP;
+        wall = std::time::SystemTime::now();
+        mono = Instant::now();
+        if slept {
+            // The call is over (or long interrupted): close it rather than glue two halves.
+            if let Some(r) = rec.take() {
+                stop_mute_sync(&mut mute_alive);
+                stop_flag(&mut ui_alive);
+                stop_flag(&mut frames_alive);
+                stop_flag(&mut chat_alive);
+                finish(r, "computer_slept");
+            }
+            in_call = false;
+            call_ended_at = None;
+            mic_released_at = None;
+            emit("woke", json!({}));
+        }
+        if let Some(r) = rec.as_mut() {
+            r.poll();
+        }
+        if last_check.elapsed() < Duration::from_secs(1) {
+            continue;
+        }
+        last_check = Instant::now();
+        let now = Utc::now();
+        if now.timestamp() % 5 == 0 {
+            notify_notes_ready();
+        }
+        if last_sync.is_none_or(|t| t.elapsed() >= AGENDA_SYNC_EVERY) && rec.is_none() {
+            last_sync = Some(Instant::now());
+            std::thread::spawn(|| {
+                let _ = crate::calendar::sync(true);
+            });
+        }
+        let mut armed: Option<Armed> = read_json("armed.json");
+        // A meeting chosen ahead of time ("Record when it starts"): arm it ~1 min before.
+        if armed.is_none() && rec.is_none() {
+            if let Some(m) = crate::schedule::due(now) {
+                let subject = m.subject.clone();
+                if arm(subject.clone(), Some(m), None).is_ok() {
+                    emit("scheduled_armed", json!({ "subject": subject }));
+                    armed = read_json("armed.json");
+                }
+            }
+        }
+
+        // 1. Agenda → offer "join & record" once per meeting, from T−58 s to T+4 min.
+        let agenda: Vec<MeetingContext> = read_json("agenda.json").unwrap_or_default();
+        for m in &agenda {
+            let Some(start) = parse_time(&m.start) else { continue };
+            // No join link (some calendar sources omit it) still gets an offer: arming then
+            // records the call when the user joins from Teams/Outlook themselves.
+            if now < start - OFFER_BEFORE || now > start + OFFER_UNTIL_AFTER_START {
+                continue;
+            }
+            let key = format!("{}@{}", m.id.clone().unwrap_or_default(), start);
+            // Only count it as offered when it was: a meeting coming up while another is being
+            // recorded is offered once that recording ends (still within the window).
+            if armed.is_none() && rec.is_none() && announced.insert(key) {
+                let mut ev = meeting_summary(m);
+                // `ask` (config `scheduled`): the app asks with a dialog; `previous_notes`:
+                // recurring recap, for clients.
+                let ask = crate::config::Config::load().map(|c| c.ask_scheduled()).unwrap_or(true);
+                ev["ask"] = json!(ask);
+                if ask {
+                    crate::app::offer_meeting(m.clone());
+                }
+                if let Some(subject) = &m.subject {
+                    ev["previous_notes"] = json!(crate::calls::previous_with_notes(subject, None)
+                        .map(|p| p.join("notes.md").display().to_string()));
+                }
+                emit("meeting_soon", ev);
+            }
+        }
+
+        // 2. Call presence (mic held by the app), debounced on release.
+        let detected = audio::app_in_call(app);
+        match detected {
+            Some(true) => {
+                mic_released_at = None;
+                if !in_call {
+                    in_call = true;
+                    call_ended_at = None;
+                    if rec.is_none() {
+                        // `ask`: whether Claude should prompt for an unscheduled call (config).
+                        let ask = armed.is_none()
+                            && crate::config::Config::load().map(|c| c.ask_unscheduled()).unwrap_or(true);
+                        emit("call_started", json!({ "app": app, "armed": armed.is_some(), "ask": ask }));
+                        if ask {
+                            crate::app::offer_call(app);
+                        }
+                    } else {
+                        emit("call_resumed", json!({ "app": app }));
+                    }
+                }
+            }
+            Some(false) if in_call => {
+                let since = *mic_released_at.get_or_insert_with(Instant::now);
+                if since.elapsed() >= MIC_RELEASE_DEBOUNCE {
+                    in_call = false;
+                    call_ended_at = Some(Instant::now());
+                    emit("call_ended", json!({ "app": app, "recording": rec.is_some() }));
+                }
+            }
+            _ => {}
+        }
+        // Platforms that can't detect calls start on arm and stop on `echoctl stop`.
+        let call_active = detected.map(|_| in_call).unwrap_or(true);
+
+        // 3. Start: armed + call active.
+        if rec.is_none() && call_active {
+            if let Some(a) = &armed {
+                // No meeting given: attach the agenda meeting this call overlaps, if any.
+                let meeting = a.meeting.clone().or_else(|| crate::calendar::meeting_now(Utc::now()));
+                match Recording::start(app, a.title.as_deref(), meeting.as_ref(), a.languages.clone()) {
+                    Ok(r) => {
+                        // A scheduled meeting is done once its recording starts (stopping it
+                        // must not re-arm it).
+                        if let Some(id) = meeting.as_ref().and_then(|m| m.id.as_deref()) {
+                            let _ = crate::schedule::remove_id(id);
+                        }
+                        mute_alive = start_mute_sync();
+                        ui_alive = start_ui_capture(&r.dir, r.t0);
+                        frames_alive = start_frame_capture(&r.dir, r.t0);
+                        chat_alive = start_chat_capture(&r.dir, r.started_at, meeting.as_ref());
+                        emit("recording_started", json!({
+                            "dir": r.dir.display().to_string(),
+                            "title": a.title.clone().or_else(|| a.meeting.as_ref().and_then(|m| m.subject.clone())),
+                        }));
+                        rec = Some(r);
+                    }
+                    Err(e) => {
+                        // Disarm: retrying every second would only repeat the error (and the
+                        // notification) until the arm expires.
+                        let _ = fs::remove_file(file("armed.json"));
+                        emit("error", json!({ "message": format!("could not start recording: {e:#}") }));
+                        crate::app::notify("Could not start recording", &format!("{e:#} — click Record to try again"));
+                    }
+                }
+            }
+        }
+        if let (None, Some(a)) = (&rec, &armed) {
+            let age = (now - a.armed_at).to_std().unwrap_or_default();
+            if age > ARM_EXPIRES {
+                let _ = fs::remove_file(file("armed.json"));
+                emit("arm_expired", json!({ "title": a.title }));
+            }
+        }
+
+        // 4. Stop: user request, or the call ended and no rejoin within the grace period.
+        let user_stop = file("stop.request").exists();
+        let ended = call_ended_at.is_some_and(|t| t.elapsed() >= REJOIN_GRACE) && !in_call;
+        if rec.is_some() && (user_stop || ended) {
+            stop_mute_sync(&mut mute_alive);
+            stop_flag(&mut ui_alive);
+            stop_flag(&mut frames_alive);
+            stop_flag(&mut chat_alive);
+            finish(rec.take().unwrap(), if user_stop { "user" } else { "call_ended" });
+            call_ended_at = None;
+        }
+        if user_stop {
+            let _ = fs::remove_file(file("stop.request"));
+            let _ = fs::remove_file(file("armed.json"));
+        }
+
+        let armed_now = file("armed.json").exists();
+        on_state(match &rec {
+            Some(r) => UiState::Recording { title: r.title.clone(), since: r.started_at },
+            None if armed_now => UiState::Armed,
+            None => UiState::Idle { in_call: detected.map(|_| in_call) },
+        });
+        let _ = write_json("watch.json", &WatchState {
+            pid: std::process::id(),
+            heartbeat: Utc::now(),
+            app,
+            in_call: detected.map(|_| in_call),
+            armed: armed_now,
+            recording: rec.as_ref().map(|r| r.dir.display().to_string()),
+        });
+    }
+
+    if let Some(r) = rec.take() {
+        stop_mute_sync(&mut mute_alive);
+        stop_flag(&mut ui_alive);
+        stop_flag(&mut frames_alive);
+        stop_flag(&mut chat_alive);
+        finish(r, "watch_stopped");
+    }
+    let _ = fs::remove_file(file("watch.json"));
+    emit("watch_stopped", json!({}));
+    Ok(())
+}
+
+fn finish(r: Recording, reason: &str) {
+    let secs = r.t0.elapsed().as_secs();
+    match r.finish(reason) {
+        Ok((dir, _)) => {
+            emit("recording_stopped", json!({
+                "dir": dir.display().to_string(), "duration_s": secs, "reason": reason,
+            }));
+            transcribe_in_background(dir);
+        }
+        Err(e) => emit("error", json!({ "message": format!("finishing recording failed: {e:#}") })),
+    }
+    // An arm is single-use: the next meeting needs a new opt-in.
+    let _ = fs::remove_file(file("armed.json"));
+}
+
+/// Follow the call app's mute button while recording (macOS, Accessibility): muted ⇒ the mic
+/// track records silence. Emits `mic_muted` / `mic_unmuted` on changes.
+fn start_mute_sync() -> Option<Arc<AtomicBool>> {
+    use crate::audio::mic::MUTED;
+    MUTED.store(false, Ordering::SeqCst);
+    if !crate::config::Config::load().map(|c| c.follow_app_mute.unwrap_or(true)).unwrap_or(true) {
+        return None;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let alive = Arc::new(AtomicBool::new(true));
+        let a = alive.clone();
+        std::thread::spawn(move || {
+            let mut watch = crate::ax::MuteWatch::teams();
+            let mut last: Option<bool> = None;
+            let mut seen = Instant::now();
+            while a.load(Ordering::SeqCst) {
+                if watch.is_none() {
+                    watch = crate::ax::MuteWatch::teams();
+                }
+                match watch.as_mut().and_then(|w| w.poll()) {
+                    Some(state) => {
+                        seen = Instant::now();
+                        MUTED.store(state, Ordering::SeqCst);
+                        if last != Some(state) {
+                            emit(if state { "mic_muted" } else { "mic_unmuted" }, json!({}));
+                            last = Some(state);
+                        }
+                    }
+                    None => {
+                        // Can't see the button (layout change, Teams restarted): fail open — losing
+                        // the user's speech is worse than transcribing a muted moment — and
+                        // re-find Teams after a while.
+                        if seen.elapsed() > MUTE_BLIND_UNMUTE && last == Some(true) {
+                            MUTED.store(false, Ordering::SeqCst);
+                            emit("mic_unmuted", json!({ "reason": "mute state unknown" }));
+                            last = None;
+                        }
+                        if seen.elapsed() > MUTE_BLIND_RESET {
+                            watch = None;
+                            seen = Instant::now();
+                        }
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(400));
+            }
+            MUTED.store(false, Ordering::SeqCst);
+        });
+        Some(alive)
+    }
+    #[cfg(not(target_os = "macos"))]
+    None // TODO(windows): UI Automation on the Teams mute button
+}
+
+/// Record the call app's window text during the call (macOS, Accessibility): the raw material
+/// for naming remote speakers. Config `capture_ui` (default on). Text only, kept in the call.
+fn start_ui_capture(dir: &std::path::Path, t0: Instant) -> Option<Arc<AtomicBool>> {
+    if !crate::config::Config::load().map(|c| c.capture_ui.unwrap_or(true)).unwrap_or(true) {
+        return None;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let alive = Arc::new(AtomicBool::new(true));
+        let a = alive.clone();
+        let dir = dir.to_path_buf();
+        std::thread::spawn(move || {
+            let mut rec = None;
+            while a.load(Ordering::SeqCst) {
+                let started = Instant::now();
+                if rec.is_none() {
+                    rec = crate::ax::UiRecorder::teams(&dir, t0);
+                }
+                if let Some(r) = rec.as_mut() {
+                    if !r.poll() {
+                        break;
+                    }
+                }
+                std::thread::sleep(UI_POLL.saturating_sub(started.elapsed()));
+            }
+        });
+        Some(alive)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (dir, t0); // TODO(windows): UI Automation
+        None
+    }
+}
+
+/// Follow the meeting's Teams chat during the call (Microsoft 365 sign-in, `Chat.Read`): what is
+/// written but not said — links, files, questions. `<call>/chat.json`, rewritten when it
+/// changes; one last read 60 s after the call for late messages. Config `capture_chat`.
+fn start_chat_capture(dir: &std::path::Path, started: DateTime<Local>, meeting: Option<&MeetingContext>) -> Option<Arc<AtomicBool>> {
+    if !crate::config::Config::load().map(|c| c.capture_chat.unwrap_or(true)).unwrap_or(true) || crate::graph::account().is_none() {
+        return None;
+    }
+    let known = meeting.and_then(|m| m.join_url.as_deref()).and_then(crate::graph::chat_id_from_join_url);
+    // Only what was written around the call: a recurring meeting keeps one chat for all its
+    // occurrences, and a group chat goes on for months.
+    let scheduled = meeting.and_then(meeting_start).map(|s| s.with_timezone(&Local));
+    let alive = Arc::new(AtomicBool::new(true));
+    let a = alive.clone();
+    let dir = dir.to_path_buf();
+    std::thread::spawn(move || {
+        let wait = |a: &AtomicBool, d: Duration| {
+            for _ in 0..(d.as_millis() / 250) {
+                if !a.load(Ordering::SeqCst) {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(250));
+            }
+        };
+        // Which chat: the meeting's (join link), or for an ad-hoc call the chat whose "call
+        // started" event matches — looked for during the first minutes (the event can lag).
+        let (chat_id, call_start) = match known {
+            Some(id) => (id, scheduled.map(|s| s.min(started)).unwrap_or(started)),
+            None => {
+                let t0 = Instant::now();
+                loop {
+                    match crate::graph::find_call_chat(started.with_timezone(&Utc)) {
+                        Ok(Some((id, at))) => break (id, at.with_timezone(&Local).min(started)),
+                        Ok(None) => {}
+                        Err(e) => eprintln!("call chat: {e:#}"),
+                    }
+                    if t0.elapsed() > CHAT_FIND_FOR || !a.load(Ordering::SeqCst) {
+                        return;
+                    }
+                    wait(&a, CHAT_POLL);
+                }
+            }
+        };
+        let _ = fs::write(dir.join("chat.id"), &chat_id);
+        let since = (call_start - CHAT_MARGIN).with_timezone(&Utc);
+        let mut last = String::new();
+        while a.load(Ordering::SeqCst) {
+            if let Err(e) = write_chat(&dir, &chat_id, since, Utc::now(), started, &mut last) {
+                eprintln!("meeting chat: {e:#}");
+            }
+            wait(&a, CHAT_POLL);
+        }
+        // The call ended: one last read for messages sent right after it.
+        let ended = Utc::now();
+        std::thread::sleep(Duration::from_secs(60));
+        if let Err(e) = write_chat(&dir, &chat_id, since, ended + CHAT_MARGIN, started, &mut last) {
+            eprintln!("meeting chat: {e:#}");
+        }
+    });
+    Some(alive)
+}
+
+/// Read the chat and rewrite `<dir>/chat.json` if it changed; returns the message count.
+fn write_chat(
+    dir: &std::path::Path,
+    chat_id: &str,
+    since: DateTime<Utc>,
+    until: DateTime<Utc>,
+    started: DateTime<Local>,
+    last: &mut String,
+) -> Result<usize> {
+    let msgs = crate::graph::chat_messages(chat_id, since, until)?;
+    let lines: Vec<serde_json::Value> = msgs.iter().map(|m| chat_line(m, started)).collect();
+    let text = serde_json::to_string_pretty(&lines)?;
+    if text != *last {
+        fs::write(dir.join("chat.json"), &text)?;
+        *last = text;
+    }
+    Ok(lines.len())
+}
+
+/// `echoctl calendar chat <call>`: fetch the chat of a recorded call (backfill). A calendar
+/// meeting's chat comes from its join link (looked up in that day's calendar if missing); an
+/// ad-hoc call's from the chat whose "call started" event matches the recording.
+pub fn fetch_call_chat(call: &str) -> Result<()> {
+    let dir = crate::calls::resolve_call(call)?;
+    let meta: serde_json::Value = serde_json::from_slice(&fs::read(dir.join("meta.json"))?)?;
+    let time = |k: &str| meta[k].as_str().and_then(|s| DateTime::parse_from_rfc3339(s).ok());
+    let started = time("started_at").map(|d| d.with_timezone(&Local)).unwrap_or_else(Local::now);
+    let ended = time("ended_at").map(|d| d.with_timezone(&Utc)).unwrap_or_else(Utc::now);
+    let mut meeting = MeetingContext::load(&dir)?;
+    if let Some(m) = meeting.as_mut().filter(|m| m.join_url.is_none()) {
+        // Attached without a link: find the call's calendar event (same day, same subject).
+        let day = started.date_naive().and_hms_opt(0, 0, 0).and_then(|d| d.and_local_timezone(Local).earliest()).map(|d| d.with_timezone(&Utc));
+        let subject = m.subject.clone().unwrap_or_default().to_lowercase();
+        if let Some(day) = day {
+            let events = crate::graph::calendar_view(day, day + chrono::Duration::days(1))?;
+            m.join_url = events
+                .iter()
+                .find(|e| e["subject"].as_str().is_some_and(|s| s.trim().to_lowercase() == subject.trim()))
+                .and_then(|e| e["onlineMeeting"]["joinUrl"].as_str().map(str::to_owned));
+            if m.join_url.is_some() {
+                m.save(&dir)?;
+            }
+        }
+    }
+    let linked = meeting.as_ref().and_then(|m| m.join_url.as_deref()).and_then(crate::graph::chat_id_from_join_url);
+    let (chat_id, call_start) = match linked {
+        Some(id) => {
+            let scheduled = meeting.as_ref().and_then(meeting_start).map(|s| s.with_timezone(&Local));
+            (id, scheduled.map(|s| s.min(started)).unwrap_or(started))
+        }
+        None => match crate::graph::find_call_chat(started.with_timezone(&Utc))? {
+            Some((id, at)) => (id, at.with_timezone(&Local).min(started)),
+            None => bail!("no chat found for this call (no meeting link, and no chat had a call running at {})", started.format("%H:%M")),
+        },
+    };
+    let _ = fs::write(dir.join("chat.id"), &chat_id);
+    let since = (call_start - CHAT_MARGIN).with_timezone(&Utc);
+    let n = write_chat(&dir, &chat_id, since, ended + CHAT_MARGIN, started, &mut String::new())?;
+    println!("{n} chat message(s) from {} to {} → {}", since.with_timezone(&Local).format("%H:%M"), (ended + CHAT_MARGIN).with_timezone(&Local).format("%H:%M"), dir.join("chat.json").display());
+    Ok(())
+}
+
+/// One chat message as the notes and the pane read it: `t` = seconds from the recording start
+/// (negative before it), sender, text, attached files.
+fn chat_line(m: &serde_json::Value, started: DateTime<Local>) -> serde_json::Value {
+    let at = m["createdDateTime"].as_str().and_then(|t| DateTime::parse_from_rfc3339(t).ok());
+    let body = m["body"]["content"].as_str().unwrap_or("");
+    let text = if m["body"]["contentType"] == "html" { crate::graph::html_to_text(body) } else { body.trim().to_string() };
+    let files: Vec<&str> = m["attachments"].as_array().into_iter().flatten().filter_map(|a| a["name"].as_str()).collect();
+    json!({
+        "t": at.map(|a| (a.with_timezone(&Local) - started).num_seconds()),
+        "at": m["createdDateTime"],
+        "from": m["from"]["user"]["displayName"].as_str().unwrap_or("someone"),
+        "text": text,
+        "files": files,
+    })
+}
+
+/// Save key frames of the meeting window during the call (shared screens; macOS, Screen
+/// Recording). Config `capture_frames` (default off).
+fn start_frame_capture(dir: &std::path::Path, t0: Instant) -> Option<Arc<AtomicBool>> {
+    if !crate::config::Config::load().map(|c| c.capture_frames).unwrap_or(false) {
+        return None;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let alive = Arc::new(AtomicBool::new(true));
+        let a = alive.clone();
+        let dir = dir.to_path_buf();
+        std::thread::spawn(move || {
+            let mut rec = None;
+            while a.load(Ordering::SeqCst) {
+                let started = Instant::now();
+                if rec.is_none() {
+                    rec = crate::frames::FrameRecorder::teams(&dir, t0);
+                }
+                if let Some(r) = rec.as_mut() {
+                    if !r.poll() {
+                        break;
+                    }
+                }
+                std::thread::sleep(crate::frames::POLL.saturating_sub(started.elapsed()));
+            }
+        });
+        Some(alive)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (dir, t0); // TODO(windows): Windows.Graphics.Capture on the Teams window
+        None
+    }
+}
+
+fn stop_flag(alive: &mut Option<Arc<AtomicBool>>) {
+    if let Some(a) = alive.take() {
+        a.store(false, Ordering::SeqCst);
+    }
+}
+
+fn stop_mute_sync(alive: &mut Option<Arc<AtomicBool>>) {
+    if let Some(a) = alive.take() {
+        a.store(false, Ordering::SeqCst);
+    }
+    crate::audio::mic::MUTED.store(false, Ordering::SeqCst);
+}
+
+/// Transcribed calls whose notes (written by a Claude session) haven't appeared yet.
+static AWAITING_NOTES: std::sync::Mutex<Vec<(PathBuf, Instant)>> = std::sync::Mutex::new(Vec::new());
+const NOTES_WAIT: Duration = Duration::from_secs(3 * 3600);
+
+/// "Notes ready" once a session has written them (checked every few seconds).
+fn notify_notes_ready() {
+    let mut list = AWAITING_NOTES.lock().unwrap_or_else(|e| e.into_inner());
+    list.retain(|(dir, since)| {
+        if dir.join("notes.md").exists() {
+            let meta: serde_json::Value = fs::read(dir.join("meta.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+            let title = meta["title"].as_str().map(str::to_owned).unwrap_or_else(|| "your call".into());
+            crate::app::notify("Notes ready", &title);
+            return false;
+        }
+        since.elapsed() < NOTES_WAIT
+    });
+}
+
+/// Set on the transcription child the watcher starts: the call it names is closed.
+pub const FROM_WATCHER: &str = "ECHOCTL_TRANSCRIBE_FROM_WATCHER";
+
+/// One transcription at a time: whisper on two long calls at once would starve the machine.
+static TRANSCRIBING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// Written when transcription fails, so recovery doesn't retry it at every start.
+const TRANSCRIBE_ERROR: &str = "transcribe.error";
+
+/// Run `echoctl transcribe <dir>` as a child process and emit `transcribed`.
+fn transcribe_now(dir: &std::path::Path) {
+    let _one = TRANSCRIBING.lock().unwrap_or_else(|e| e.into_inner());
+    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("echoctl"));
+    let out = std::process::Command::new(exe)
+        .arg("transcribe")
+        .arg(dir)
+        .current_dir(paths::home())
+        // The recording is closed (meta has ended_at) even if watch.json hasn't caught up yet.
+        .env(FROM_WATCHER, dir)
+        .output();
+    let (ok, detail) = match out {
+        Ok(o) if o.status.success() => (true, String::new()),
+        Ok(o) => (false, String::from_utf8_lossy(&o.stderr).lines().last().unwrap_or("").to_string()),
+        Err(e) => (false, e.to_string()),
+    };
+    // Someone else (a manual `echoctl transcribe`) is on it: not a failure of ours.
+    if !ok && detail.contains("already being transcribed") {
+        return;
+    }
+    if ok {
+        let _ = fs::remove_file(dir.join(TRANSCRIBE_ERROR));
+        AWAITING_NOTES.lock().unwrap_or_else(|e| e.into_inner()).push((dir.to_path_buf(), Instant::now()));
+    } else {
+        let _ = fs::write(dir.join(TRANSCRIBE_ERROR), &detail);
+        crate::app::notify("Transcription failed", &detail);
+    }
+    emit("transcribed", json!({ "dir": dir.display().to_string(), "ok": ok, "error": detail }));
+}
+
+/// Transcription needs no Claude turn, so the watcher runs it right away as a child process
+/// (`echoctl transcribe`), then emits `transcribed`; only the notes step waits for the session.
+fn transcribe_in_background(dir: PathBuf) {
+    std::thread::spawn(move || transcribe_now(&dir));
+}
+
+/// Close a recording a crash left open: fix the WAV headers and date the end by the last
+/// write. True if it was unfinished.
+pub fn close_unfinished(dir: &std::path::Path) -> Result<bool> {
+    let meta_path = dir.join("meta.json");
+    let mut meta: serde_json::Value = serde_json::from_slice(&fs::read(&meta_path)?)?;
+    if !meta["ended_at"].is_null() {
+        return Ok(false);
+    }
+    let wavs: Vec<PathBuf> = ["mic.wav", "remote.wav"].iter().map(|f| dir.join(f)).filter(|p| p.exists()).collect();
+    for w in &wavs {
+        let _ = audio::repair_wav(w);
+    }
+    let ended = wavs
+        .iter()
+        .filter_map(|w| fs::metadata(w).and_then(|m| m.modified()).ok())
+        .max()
+        .map(DateTime::<Local>::from)
+        .unwrap_or_else(Local::now);
+    meta["ended_at"] = json!(ended.to_rfc3339());
+    meta["stop_reason"] = json!("recovered");
+    fs::write(&meta_path, serde_json::to_vec_pretty(&meta)?)?;
+    Ok(true)
+}
+
+/// At start: finish what a crash, a kill or a power loss left behind — recordings never closed
+/// (their WAV headers say 0 bytes), stale "transcribing" markers, and calls with audio but no
+/// transcript (last 7 days; ones that already failed are left alone).
+fn recover(app_started: DateTime<Utc>) {
+    let cutoff = Utc::now() - chrono::Duration::days(RECOVER_DAYS);
+    let mut queue = vec![];
+    for dir in crate::calls::all_calls() {
+        let marker = dir.join(crate::transcribe_marker());
+        if let Ok(pid) = fs::read_to_string(&marker) {
+            match pid.trim().parse::<u32>() {
+                Ok(pid) if crate::app::process_alive(pid) => continue, // still transcribing
+                _ => drop(fs::remove_file(&marker)),
+            }
+        }
+        let wavs: Vec<PathBuf> = ["mic.wav", "remote.wav"].iter().map(|f| dir.join(f)).filter(|p| p.exists()).collect();
+        if wavs.is_empty() || dir.join("transcript.md").exists() || dir.join(TRANSCRIBE_ERROR).exists() {
+            continue;
+        }
+        let meta: serde_json::Value = fs::read(dir.join("meta.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        let started = meta["started_at"].as_str().and_then(|s| DateTime::parse_from_rfc3339(s).ok());
+        if started.is_none_or(|s| s.with_timezone(&Utc) < cutoff) {
+            continue;
+        }
+        // A recording started by this run (the first tick can beat this scan) is live, not lost.
+        if started.is_some_and(|s| s.with_timezone(&Utc) >= app_started) {
+            continue;
+        }
+        if meta["ended_at"].is_null() && close_unfinished(&dir).unwrap_or(false) {
+            emit("recording_recovered", json!({ "dir": dir.display().to_string() }));
+        }
+        queue.push(dir);
+    }
+    for dir in queue {
+        transcribe_now(&dir);
+    }
+}
+
+/// `echoctl arm`: opt in to recording the current/next call.
+pub fn arm(title: Option<String>, meeting: Option<MeetingContext>, languages: Option<Vec<String>>) -> Result<()> {
+    let languages = languages.map(|l| l.into_iter().map(|x| x.trim().to_lowercase()).filter(|x| !x.is_empty()).collect::<Vec<_>>())
+        .filter(|l| !l.is_empty());
+    write_json("armed.json", &Armed { armed_at: Utc::now(), title, meeting, languages })?;
+    match running_watcher() {
+        Some(w) if w.in_call == Some(true) => println!("armed — call in progress, recording starts within a second"),
+        Some(_) => println!("armed — recording starts when the call begins (expires in 15 min)"),
+        None => println!("armed, but the echoctl app is not running — start it with `echoctl app start`"),
+    }
+    Ok(())
+}
+
+/// `echoctl stop`: end the current recording (and cancel an arm).
+pub fn stop() -> Result<()> {
+    match running_watcher() {
+        Some(w) if w.recording.is_some() => {
+            fs::write(file("stop.request"), b"")?;
+            println!("stopping {}", w.recording.unwrap());
+        }
+        _ => {
+            // Cancelling a scheduled meeting's arm cancels the schedule too.
+            if let Some(id) = read_json::<Armed>("armed.json").and_then(|a| a.meeting).and_then(|m| m.id) {
+                let _ = crate::schedule::remove_id(&id);
+            }
+            let disarmed = fs::remove_file(file("armed.json")).is_ok();
+            println!("{}", if disarmed { "disarmed (nothing was recording)" } else { "nothing to stop" });
+        }
+    }
+    Ok(())
+}
+
+/// Turn a Teams https join link into the `msteams:` scheme so it opens the desktop app
+/// directly instead of a browser tab.
+pub fn desktop_join_url(url: &str) -> String {
+    const HOSTS: &[&str] = &["teams.microsoft.com", "teams.live.com", "teams.cloud.microsoft"];
+    for h in HOSTS {
+        if let Some(rest) = url.strip_prefix(&format!("https://{h}")) {
+            if rest.starts_with('/') {
+                return format!("msteams:{rest}");
+            }
+        }
+    }
+    url.to_string()
+}
+
+/// `echoctl join`: open the meeting in the desktop app and arm recording for it.
+pub fn join(meeting: MeetingContext) -> Result<()> {
+    let Some(url) = meeting.join_url.clone() else { bail!("meeting has no join_url") };
+    let url = desktop_join_url(&url);
+    #[cfg(target_os = "macos")]
+    std::process::Command::new("open").arg(&url).status()?;
+    #[cfg(windows)]
+    std::process::Command::new("cmd").args(["/C", "start", "", &url]).status()?;
+    let title = meeting.subject.clone();
+    arm(title, Some(meeting), None)
+}
+
+pub fn write_agenda(meetings: &[MeetingContext]) -> Result<()> {
+    write_json("agenda.json", &meetings)
+}
+
+/// `echoctl agenda set`: replace the agenda the watcher offers meetings from.
+pub fn set_agenda(meetings: Vec<MeetingContext>) -> Result<()> {
+    write_agenda(&meetings)?;
+    println!("agenda: {} meeting(s)", meetings.len());
+    Ok(())
+}
+
+/// `echoctl status`: watcher, arm and agenda state as JSON.
+pub fn status() -> Result<()> {
+    let agenda: Vec<MeetingContext> = read_json("agenda.json").unwrap_or_default();
+    let armed: Option<Armed> = read_json("armed.json");
+    let out = json!({
+        "watcher": running_watcher(),
+        "armed": armed.map(|a| json!({ "armed_at": a.armed_at, "title": a.title })),
+        "agenda": agenda.iter().map(meeting_summary).collect::<Vec<_>>(),
+    });
+    println!("{}", serde_json::to_string_pretty(&out)?);
+    Ok(())
+}
+
+/// `echoctl events --follow`: print event lines as they are appended (cross-platform tail).
+/// Starts at the end of the file, so re-arming a Monitor never replays old events.
+pub fn follow_events() -> Result<()> {
+    let path = file("events.jsonl");
+    fs::create_dir_all(paths::state_dir())?;
+    OpenOptions::new().create(true).append(true).open(&path)?;
+    let mut f = fs::File::open(&path)?;
+    let mut pos = f.seek(SeekFrom::End(0))?;
+    let mut out = std::io::stdout();
+    loop {
+        let len = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        if len < pos {
+            pos = 0; // truncated/rotated
+        }
+        if len > pos {
+            f.seek(SeekFrom::Start(pos))?;
+            let mut reader = BufReader::new(&f);
+            let mut line = String::new();
+            while reader.read_line(&mut line)? > 0 {
+                if line.ends_with('\n') {
+                    write!(out, "{line}")?;
+                    out.flush()?;
+                    pos += line.len() as u64;
+                } else {
+                    break; // partial line: wait for the rest
+                }
+                line.clear();
+            }
+            f = fs::File::open(&path)?;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn teams_links_open_in_desktop_app() {
+        assert_eq!(
+            desktop_join_url("https://teams.microsoft.com/l/meetup-join/19%3ameeting_x%40thread.v2/0?context=%7b%7d"),
+            "msteams:/l/meetup-join/19%3ameeting_x%40thread.v2/0?context=%7b%7d"
+        );
+        assert_eq!(desktop_join_url("https://teams.live.com/meet/123"), "msteams:/meet/123");
+        assert_eq!(desktop_join_url("https://zoom.us/j/1"), "https://zoom.us/j/1");
+    }
+
+    #[test]
+    fn graph_style_times_parse() {
+        assert!(parse_time(&Some("2026-10-09T13:30:00.0000000".into())).is_some());
+        assert!(parse_time(&Some("2026-10-09T16:30:00+03:00".into())).is_some());
+        assert!(parse_time(&Some("2026-10-09T13:30:00Z".into())).is_some());
+    }
+}
