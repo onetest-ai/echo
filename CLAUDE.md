@@ -74,6 +74,7 @@ Notes/actions are written only by a Claude session (the app writes transcripts, 
   (1.5 s global tap, peak > 0 ⇒ granted). The first tap started is what triggers the prompt.
   `ECHOCTL_DEBUG=1` prints raw preflight / probe values.
 - Windows 10 2004+: WASAPI process loopback on root `ms-teams.exe`, include-process-tree mode.
+  What's missing or untested on Windows: `docs/windows-todo.md`.
 
 ## Capture model
 `audio::Track` supervises one `Source` (mic / app tap / loopback): polls `health()` every 250 ms
