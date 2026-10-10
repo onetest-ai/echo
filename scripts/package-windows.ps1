@@ -55,5 +55,11 @@ python scripts/third-party.py --texts "$stage\THIRD-PARTY-LICENSES.txt"
 if ($LASTEXITCODE -ne 0) { throw "third-party.py failed" }
 New-Item -ItemType Directory dist -Force | Out-Null
 $zip = "dist\echo-$version-windows-x64.zip"
-Compress-Archive -Path "$stage\*" -DestinationPath $zip -Force
+# Windows' bsdtar, not Compress-Archive: PowerShell 5.1 writes backslash separators, which
+# other unzip tools take as part of the file name (plugin\scripts\...).
+# By full path: Git's GNU tar (first on PATH in Git Bash) can't write zips.
+Remove-Item $zip -ErrorAction SilentlyContinue
+$entries = (Get-ChildItem $stage).Name
+& "$env:SystemRoot\System32\tar.exe" -a -c -f $zip -C $stage @entries
+if ($LASTEXITCODE -ne 0) { throw "creating $zip failed" }
 Write-Output $zip
