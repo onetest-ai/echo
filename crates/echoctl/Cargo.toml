@@ -11,6 +11,9 @@ tray = ["dep:tray-icon", "dep:tao", "dep:wry"]
 # On-device transcription (whisper.cpp). Needs a C/C++ toolchain + cmake for the target, so
 # cross-checks from macOS to Windows run with --no-default-features.
 transcribe = ["dep:whisper-rs"]
+# Windows / Linux: whisper.cpp on the GPU through Vulkan (NVIDIA, AMD, Intel). Building needs the
+# Vulkan SDK (VULKAN_SDK); running needs vulkan-1.dll, which GPU drivers install.
+vulkan = ["transcribe", "whisper-rs/vulkan"]
 
 [dependencies]
 # Echo cancellation of the mic track against the call app's track (pure-Rust WebRTC AEC3 port).
@@ -20,6 +23,8 @@ clap = { version = "4.6", features = ["derive"] }
 # PKCE verifier / OAuth state for the Microsoft 365 sign-in.
 getrandom = "0.3"
 cpal = "0.18"
+# Canonical paths without Windows' `\?\` prefix (they are stored and passed to other tools).
+dunce = "1"
 hound = "3.5"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -52,15 +57,29 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 whisper-rs = { version = "0.16", optional = true }
 
+# Echo's icon in echoctl.exe (build.rs; a host dependency, so only Windows builds compile it).
+[target.'cfg(windows)'.build-dependencies]
+embed-resource = "3"
+
 [target.'cfg(windows)'.dependencies]
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 windows-core = "0.62"
 windows = { version = "0.62", features = [
+  "Data_Xml_Dom",
+  "Foundation",
+  "UI_Notifications",
   "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_Storage_Xps",
   "Win32_Media_Audio",
   "Win32_System_Com",
   "Win32_System_Com_StructuredStorage",
   "Win32_System_Console",
   "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_Ole",
+  "Win32_System_Registry",
   "Win32_System_Threading",
   "Win32_System_Variant",
+  "Win32_UI_Accessibility",
+  "Win32_UI_WindowsAndMessaging",
 ] }

@@ -17,6 +17,7 @@ use objc2::rc::Retained;
 use objc2_foundation::NSString;
 use serde_json::{json, Map, Value};
 
+use super::{mute_state_from_labels, UI_LOG_MAX_BYTES, UI_TREES_AT};
 use crate::paths;
 
 type CFTypeRef = *const c_void;
@@ -223,24 +224,6 @@ fn texts(e: &Element) -> Vec<String> {
         .collect()
 }
 
-/// Muted? from a microphone button's label: "Unmute …" ⇒ muted, "Mute …" ⇒ live.
-/// Labels about notifications, speakers or other people are ignored.
-pub fn mute_state_from_labels(labels: &[String]) -> Option<bool> {
-    let ignore = ["notification", "speaker", "everyone", "all ", "attendee", "participant", "chat", "camera", "video"];
-    for t in labels {
-        if ignore.iter().any(|w| t.contains(w)) {
-            continue;
-        }
-        if t.contains("unmute") {
-            return Some(true);
-        }
-        if t.contains("mute") {
-            return Some(false);
-        }
-    }
-    None
-}
-
 fn find_mute_button(e: Element, depth: usize) -> Option<Element> {
     let role = e.string("AXRole").unwrap_or_default();
     if BUTTON_ROLES.contains(&role.as_str()) && mute_state_from_labels(&texts(&e)).is_some() {
@@ -307,10 +290,6 @@ fn ui_lines(e: &Element, depth: usize, out: &mut Vec<String>, budget: &mut usize
         }
     }
 }
-
-const UI_LOG_MAX_BYTES: u64 = 40_000_000;
-/// Full window trees saved at these offsets into the call (structure for building the reader).
-const UI_TREES_AT: &[u64] = &[10, 120, 600];
 
 /// Records Teams' window text while a call is recorded: `<call>/ui.jsonl` holds
 /// `{t, add, del}` lines (t = seconds since the recording started, aligned with the audio),
@@ -392,20 +371,4 @@ pub fn mic_probe(seconds: u64) -> Result<()> {
         std::thread::sleep(Duration::from_millis(400));
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn mute_labels_read_both_ways() {
-        let l = |s: &str| vec![s.to_lowercase()];
-        assert_eq!(mute_state_from_labels(&l("Unmute (⌘+Shift+M)")), Some(true));
-        assert_eq!(mute_state_from_labels(&l("Mute (⌘+Shift+M)")), Some(false));
-        assert_eq!(mute_state_from_labels(&l("Mic: Mute")), Some(false));
-        assert_eq!(mute_state_from_labels(&l("Mute notifications")), None);
-        assert_eq!(mute_state_from_labels(&l("Mute all attendees")), None);
-        assert_eq!(mute_state_from_labels(&l("Share")), None);
-    }
 }

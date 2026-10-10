@@ -14,6 +14,7 @@ TARGETS = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-pc-windows-msv
 EXTRA = [
     ("whisper.cpp", "(bundled in whisper-rs-sys)", "MIT", "https://github.com/ggml-org/whisper.cpp"),
     ("Whisper models (downloaded at setup)", "", "MIT", "https://github.com/openai/whisper"),
+    ("Vulkan loader (vulkan-1.dll, Windows zip)", "", "Apache-2.0", "https://github.com/KhronosGroup/Vulkan-Loader"),
 ]
 
 
@@ -21,7 +22,7 @@ def packages():
     seen = {}
     for t in TARGETS:
         out = subprocess.run(["cargo", "metadata", "--format-version", "1", "--filter-platform", t],
-                             cwd=ROOT, check=True, capture_output=True, text=True).stdout
+                             cwd=ROOT, check=True, capture_output=True, text=True, encoding="utf-8").stdout
         m = json.loads(out)
         nodes = {n["id"] for n in m["resolve"]["nodes"]}
         for p in m["packages"]:
@@ -42,7 +43,7 @@ def license_files(p):
 def main():
     pkgs = packages()
     rows = [(p["name"], p["version"], p.get("license") or "see crate", p.get("repository") or "") for p in pkgs]
-    with open(os.path.join(ROOT, "THIRD-PARTY-NOTICES.md"), "w") as f:
+    with open(os.path.join(ROOT, "THIRD-PARTY-NOTICES.md"), "w", encoding="utf-8", newline="\n") as f:
         f.write("# Third-party notices\n\n"
                 "Echo is built on the open-source components below. Each remains under its own license; "
                 "the full license texts ship inside the app (`Echo.app/Contents/Resources/THIRD-PARTY-LICENSES.txt`).\n"
@@ -53,7 +54,7 @@ def main():
     if "--texts" in sys.argv:
         out = sys.argv[sys.argv.index("--texts") + 1]
         missing = set()
-        with open(out, "w") as f:
+        with open(out, "w", encoding="utf-8") as f:
             f.write("Licenses of the third-party components in Echo.\n\n")
             for p in pkgs:
                 f.write(f"{'=' * 78}\n{p['name']} {p['version']}  ({p.get('license') or 'see below'})\n"

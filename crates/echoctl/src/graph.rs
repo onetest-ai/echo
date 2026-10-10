@@ -11,6 +11,7 @@
 //! Tokens live in `<config dir>/graph.json` (mode 0600) — like `gh` and the msgraph skill; the
 //! Keychain would re-prompt after every re-signed build.
 
+use crate::app::NoWindow;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
@@ -145,7 +146,7 @@ fn query_param(query: &str, key: &str) -> Option<String> {
 // ── HTTP via curl (tokens never on the command line: curl reads its config from stdin) ─────
 
 fn curl(config: &str) -> Result<Value> {
-    let mut child = Command::new("curl")
+    let mut child = Command::new("curl").no_window()
         .args(["-sS", "-K", "-"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

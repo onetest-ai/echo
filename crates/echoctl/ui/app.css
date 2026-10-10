@@ -265,9 +265,6 @@ button { font: inherit; color: inherit; }
 .item .uncertain { font-style: italic; }
 
 /* today */
-.today { padding: 26px 32px; overflow-y: auto; }
-.today h1 { margin: 0 0 4px; font-size: 22px; font-weight: 650; letter-spacing: -0.02em; }
-.today .sub { color: var(--text-3); margin: 0 0 22px; }
 .meeting { display: grid; grid-template-columns: 64px 1fr auto; gap: 16px; padding: 14px 0; border-top: 1px solid var(--line); max-width: 820px; }
 .meeting:first-of-type { border-top: 0; }
 .meeting time { font-family: var(--mono); font-size: 13px; font-weight: 600; padding-top: 1px; font-variant-numeric: tabular-nums; }

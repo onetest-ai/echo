@@ -36,7 +36,7 @@ fn state_file(name: &str) -> PathBuf {
 
 /// The .app bundle this binary runs from, if any (macOS).
 pub fn bundle_path() -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok()?.canonicalize().ok()?;
+    let exe = dunce::canonicalize(std::env::current_exe().ok()?).ok()?;
     // Echo.app/Contents/MacOS/echoctl
     let bundle = exe.parent()?.parent()?.parent()?;
     bundle.extension().is_some_and(|e| e == "app").then(|| bundle.to_path_buf())
@@ -177,6 +177,25 @@ fn detach_output() {
     }
 }
 
+/// Windows: console programs started by the background app (which has no console) would each
+/// open a console window; this runs them windowless. In a terminal they keep sharing it.
+pub trait NoWindow {
+    fn no_window(self) -> Self;
+}
+
+impl NoWindow for Command {
+    #[allow(unused_mut)]
+    fn no_window(mut self) -> Self {
+        #[cfg(windows)]
+        if unsafe { windows::Win32::System::Console::GetConsoleWindow() }.is_invalid() {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            self.creation_flags(CREATE_NO_WINDOW);
+        }
+        self
+    }
+}
+
 /// Start the app without waiting for it (the bundle via LaunchServices when installed, so
 /// macOS attributes permissions to Echo.app).
 /// `restart`: the new instance waits up to 15 s for a previous one's lock instead of giving up
@@ -231,7 +250,7 @@ pub fn process_alive(pid: u32) -> bool {
     #[cfg(unix)]
     return unsafe { libc::kill(pid as i32, 0) } == 0;
     #[cfg(windows)]
-    return Command::new("tasklist")
+    return Command::new("tasklist").no_window()
         .args(["/FI", &format!("PID eq {pid}"), "/NH"])
         .output()
         .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()));
@@ -481,7 +500,7 @@ pub fn autostart_enabled() -> bool {
     #[cfg(target_os = "macos")]
     return launch_agent().exists();
     #[cfg(windows)]
-    return Command::new("reg")
+    return Command::new("reg").no_window()
         .args(["query", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run", "/v", "Echo"])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -522,9 +541,9 @@ pub fn set_autostart(on: bool) -> Result<()> {
         let status = if on {
             let exe = std::env::current_exe()?;
             let value = format!("\"{}\" app run --background", exe.display());
-            Command::new("reg").args(["add", key, "/v", "Echo", "/t", "REG_SZ", "/d", &value, "/f"]).status()?
+            Command::new("reg").no_window().args(["add", key, "/v", "Echo", "/t", "REG_SZ", "/d", &value, "/f"]).status()?
         } else {
-            Command::new("reg").args(["delete", key, "/v", "Echo", "/f"]).status()?
+            Command::new("reg").no_window().args(["delete", key, "/v", "Echo", "/f"]).status()?
         };
         if on && !status.success() {
             bail!("could not write the Run registry key");
@@ -660,7 +679,7 @@ pub fn connect_claude(scope: &str, project: Option<&Path>) -> Result<()> {
         None => std::env::current_dir().unwrap_or_else(|_| user_home()),
     };
     let run = |args: &[&str]| -> Result<String> {
-        let out = Command::new(&claude).args(args).current_dir(&cwd).output()?;
+        let out = Command::new(&claude).no_window().args(args).current_dir(&cwd).output()?;
         let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
         if !out.status.success() {
             bail!("`claude {}` failed: {}", args.join(" "), text.trim());
@@ -728,7 +747,7 @@ pub fn install_cli() -> Result<()> {
              if (($p -split ';') -notcontains '{d}') {{ [Environment]::SetEnvironmentVariable('Path', ($p.TrimEnd(';') + ';{d}'), 'User') }}",
             d = dir.replace('\'', "''")
         );
-        let ok = Command::new("powershell").args(["-NoProfile", "-Command", &script]).status()?.success();
+        let ok = Command::new("powershell").no_window().args(["-NoProfile", "-Command", &script]).status()?.success();
         if !ok {
             bail!("could not update the user PATH");
         }
@@ -782,7 +801,7 @@ pub fn ask(message: &str, buttons: &[&str], default: &str) -> Option<String> {
             "(New-Object -ComObject WScript.Shell).Popup('{}', 120, 'echo', 4 + 32)",
             message.replace('\'', "''").replace('\n', " ")
         );
-        let out = Command::new("powershell").args(["-NoProfile", "-Command", &script]).output().ok()?;
+        let out = Command::new("powershell").no_window().args(["-NoProfile", "-Command", &script]).output().ok()?;
         let code = String::from_utf8_lossy(&out.stdout).trim().to_string();
         return (code == "6").then(|| default.to_string());
     }
@@ -809,7 +828,7 @@ pub fn choose_folder(prompt: &str) -> Option<PathBuf> {
              $d.Description = '{}'; if ($d.ShowDialog() -eq 'OK') {{ $d.SelectedPath }}",
             prompt.replace('\'', "''")
         );
-        let out = Command::new("powershell").args(["-NoProfile", "-STA", "-Command", &script]).output().ok()?;
+        let out = Command::new("powershell").no_window().args(["-NoProfile", "-STA", "-Command", &script]).output().ok()?;
         let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
         return (!p.is_empty()).then(|| PathBuf::from(p));
     }
@@ -844,7 +863,7 @@ pub fn ask_text(message: &str, default: &str, ok: &str) -> Option<String> {
             default.replace('\'', "''")
         );
         let _ = ok;
-        let out = Command::new("powershell").args(["-NoProfile", "-Command", &script]).output().ok()?;
+        let out = Command::new("powershell").no_window().args(["-NoProfile", "-Command", &script]).output().ok()?;
         let t = String::from_utf8_lossy(&out.stdout).trim().to_string();
         return (!t.is_empty()).then_some(t);
     }
@@ -868,9 +887,96 @@ pub fn notify(title: &str, body: &str) {
         let script = format!("display notification {} with title \"Echo\" subtitle {}", applescript_str(body), applescript_str(title));
         let _ = Command::new("osascript").args(["-e", &script]).status();
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    notifications::post(title, body);
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
-        let _ = (title, body); // TODO(windows): tray balloon / toast
+        let _ = (title, body);
+    }
+}
+
+/// Windows toasts as "Echo" (an AppUserModelID registered under HKCU with Echo's name and
+/// icon, which unpackaged apps need): a click opens the Echo window while the app runs.
+#[cfg(windows)]
+pub mod notifications {
+    use std::sync::{Mutex, OnceLock};
+
+    use windows::core::HSTRING;
+    use windows::Data::Xml::Dom::XmlDocument;
+    use windows::Foundation::TypedEventHandler;
+    use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
+    use windows::Win32::System::Registry::{RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ};
+
+    const AUMID: &str = "onetest.Echo";
+    static ICON: &[u8] = include_bytes!("../../../packaging/macos/onetest-logo-1024.png");
+    /// Posted toasts keep their click handler only while they are alive.
+    static LIVE: Mutex<Vec<ToastNotification>> = Mutex::new(Vec::new());
+
+    fn set(name: &str, value: &str) -> bool {
+        let key = HSTRING::from(format!(r"Software\Classes\AppUserModelId\{AUMID}"));
+        let wide: Vec<u16> = value.encode_utf16().chain([0]).collect();
+        unsafe {
+            RegSetKeyValueW(
+                HKEY_CURRENT_USER,
+                &key,
+                &HSTRING::from(name),
+                REG_SZ.0,
+                Some(wide.as_ptr() as *const _),
+                (wide.len() * 2) as u32,
+            )
+        }
+        .is_ok()
+    }
+
+    /// Once per process: Echo's icon in the config dir + the AppUserModelID's name and icon.
+    fn registered() -> bool {
+        static DONE: OnceLock<bool> = OnceLock::new();
+        *DONE.get_or_init(|| {
+            let icon = crate::paths::config_dir().join("echo.png");
+            if std::fs::read(&icon).ok().as_deref() != Some(ICON) {
+                let _ = std::fs::create_dir_all(icon.parent().unwrap());
+                let _ = std::fs::write(&icon, ICON);
+            }
+            set("DisplayName", "Echo") && set("IconUri", &icon.display().to_string())
+        })
+    }
+
+    fn xml_escape(s: &str) -> String {
+        s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+    }
+
+    pub fn post(title: &str, body: &str) {
+        if let Err(e) = try_post(title, body) {
+            if std::env::var_os("ECHOCTL_DEBUG").is_some() {
+                eprintln!("toast failed: {e}");
+            }
+        }
+    }
+
+    fn try_post(title: &str, body: &str) -> windows::core::Result<()> {
+        if !registered() {
+            return Err(windows::core::Error::from_hresult(windows::core::HRESULT(0x8000_4005u32 as i32)));
+        }
+        let xml = format!(
+            "<toast><visual><binding template=\"ToastGeneric\"><text>{}</text><text>{}</text></binding></visual></toast>",
+            xml_escape(title),
+            xml_escape(body)
+        );
+        let doc = XmlDocument::new()?;
+        doc.LoadXml(&HSTRING::from(xml))?;
+        let toast = ToastNotification::CreateToastNotification(&doc)?;
+        toast.Activated(&TypedEventHandler::new(|_, _| {
+            *super::OPEN_WINDOW.lock().unwrap_or_else(|e| e.into_inner()) = Some(None);
+            Ok(())
+        }))?;
+        ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(AUMID))?.Show(&toast)?;
+        let mut live = LIVE.lock().unwrap_or_else(|e| e.into_inner());
+        live.push(toast);
+        let n = live.len();
+        if n > 20 {
+            live.drain(..n - 20);
+        }
+        Ok(())
     }
 }
 

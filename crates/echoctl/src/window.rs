@@ -8,6 +8,8 @@
 //! data folder, `frames/` inside it, no `..`). Actions (mark done, delete, record, …) come back as
 //! IPC messages and run through the same functions the CLI and the tray use.
 
+#[cfg(windows)]
+use crate::app::NoWindow;
 use std::borrow::Cow;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -68,16 +70,36 @@ impl EchoWindow {
     }
 }
 
+/// One size of `packaging/windows/echo.ico` (its entries are PNGs), as a window icon.
+#[cfg(windows)]
+fn exe_icon(size: u32) -> Option<tao::window::Icon> {
+    static ICO: &[u8] = include_bytes!("../../../packaging/windows/echo.ico");
+    let count = u16::from_le_bytes([ICO[4], ICO[5]]) as usize;
+    let entry = (0..count).map(|i| &ICO[6 + 16 * i..22 + 16 * i]).find(|e| e[0] as u32 == size % 256)?;
+    let len = u32::from_le_bytes(entry[8..12].try_into().ok()?) as usize;
+    let at = u32::from_le_bytes(entry[12..16].try_into().ok()?) as usize;
+    let img = image::load_from_memory(ICO.get(at..at + len)?).ok()?.to_rgba8();
+    tao::window::Icon::from_rgba(img.into_raw(), size, size).ok()
+}
+
 /// Open the window. `ipc` receives each message the page posts (JSON text).
 pub fn open<T: 'static>(
     target: &EventLoopWindowTarget<T>,
     start_call: Option<&str>,
     ipc: impl Fn(String) + 'static,
 ) -> wry::Result<EchoWindow> {
-    let window = WindowBuilder::new()
+    let builder = WindowBuilder::new()
         .with_title("Echo")
         .with_inner_size(LogicalSize::new(1180.0, 760.0))
-        .with_min_inner_size(LogicalSize::new(760.0, 480.0))
+        .with_min_inner_size(LogicalSize::new(760.0, 480.0));
+    // Windows: Echo's icon (the one in echoctl.exe) on the title bar and the taskbar button
+    // (macOS takes the bundle's).
+    #[cfg(windows)]
+    let builder = {
+        use tao::platform::windows::WindowBuilderExtWindows;
+        builder.with_window_icon(exe_icon(32)).with_taskbar_icon(exe_icon(256))
+    };
+    let window = builder
         .build(target)
         .map_err(|e| wry::Error::Io(std::io::Error::other(e.to_string())))?;
     let url = match start_call {
@@ -525,7 +547,7 @@ fn copy_to_clipboard(text: &str) {
     #[cfg(target_os = "macos")]
     let cmd = std::process::Command::new("pbcopy").stdin(std::process::Stdio::piped()).spawn();
     #[cfg(windows)]
-    let cmd = std::process::Command::new("clip").stdin(std::process::Stdio::piped()).spawn();
+    let cmd = std::process::Command::new("clip").no_window().stdin(std::process::Stdio::piped()).spawn();
     #[cfg(not(any(target_os = "macos", windows)))]
     let cmd: std::io::Result<std::process::Child> = Err(std::io::Error::other("no clipboard"));
     if let Ok(mut child) = cmd {

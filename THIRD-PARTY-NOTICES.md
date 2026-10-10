@@ -7,6 +7,7 @@ Regenerate with `scripts/third-party.py`.
 |---|---|---|---|
 | whisper.cpp | (bundled in whisper-rs-sys) | MIT | https://github.com/ggml-org/whisper.cpp |
 | Whisper models (downloaded at setup) |  | MIT | https://github.com/openai/whisper |
+| Vulkan loader (vulkan-1.dll, Windows zip) |  | Apache-2.0 | https://github.com/KhronosGroup/Vulkan-Loader |
 | adler2 | 2.0.1 | 0BSD OR MIT OR Apache-2.0 | https://github.com/oyvindln/adler2 |
 | aec3 | 0.4.0 | MIT OR BSD-3-Clause | https://github.com/RubyBit/aec3-rs |
 | aho-corasick | 1.1.5 | Unlicense OR MIT | https://github.com/BurntSushi/aho-corasick |

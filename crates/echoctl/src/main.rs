@@ -3,12 +3,12 @@ mod aec;
 mod app;
 mod apps;
 mod audio;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 mod ax;
 mod calendar;
 mod calls;
 mod config;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 mod frames;
 mod graph;
 #[cfg(feature = "transcribe")]
@@ -262,15 +262,19 @@ enum Cmd {
     #[cfg(feature = "transcribe")]
     #[command(hide = true)]
     LiveReplay { wav: std::path::PathBuf, out: std::path::PathBuf },
-    /// (dev, macOS) Snapshot Teams' accessibility tree to .echo/ax/ — to find speaker info
-    #[cfg(target_os = "macos")]
+    /// (dev) Snapshot Teams' accessibility tree to .echo/ax/ — to find speaker info
+    #[cfg(any(target_os = "macos", windows))]
     #[command(hide = true)]
     AxDump {
         #[arg(long, default_value_t = 20)]
         seconds: u64,
     },
-    /// (dev, macOS) Show what the Teams mute detector sees, for N seconds
-    #[cfg(target_os = "macos")]
+    /// (dev) Capture the Teams call window once, as the frame recorder would, to a PNG/JPEG
+    #[cfg(any(target_os = "macos", windows))]
+    #[command(hide = true)]
+    FrameGrab { out: std::path::PathBuf },
+    /// (dev) Show what the Teams mute detector sees, for N seconds
+    #[cfg(any(target_os = "macos", windows))]
     #[command(hide = true)]
     AxMic {
         #[arg(long, default_value_t = 30)]
@@ -289,7 +293,7 @@ enum Cmd {
         #[arg(long)]
         export: Option<std::path::PathBuf>,
     },
-    /// (build) Write the app icon as an .iconset folder for `iconutil`
+    /// (build) Write the app icon: an .iconset folder for `iconutil`, or a Windows <file>.ico
     #[cfg(feature = "tray")]
     #[command(hide = true)]
     DevIcon {
@@ -514,7 +518,7 @@ fn main() -> Result<()> {
             if let Some(dir) = notes_in {
                 cfg.notes_in = match dir.as_str() {
                     "any" | "" => None,
-                    d => Some(std::fs::canonicalize(d).map_err(|e| anyhow::anyhow!("{d}: {e}"))?),
+                    d => Some(dunce::canonicalize(d).map_err(|e| anyhow::anyhow!("{d}: {e}"))?),
                 };
             }
             if let Some(langs) = languages {
@@ -579,9 +583,11 @@ fn main() -> Result<()> {
         Cmd::Restore { name } => calls::restore(&name),
         #[cfg(feature = "transcribe")]
         Cmd::LiveReplay { wav, out } => live::replay(&wav, &out),
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", windows))]
         Cmd::AxDump { seconds } => ax::dump(seconds),
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", windows))]
+        Cmd::FrameGrab { out } => frames::grab(&out),
+        #[cfg(any(target_os = "macos", windows))]
         Cmd::AxMic { seconds } => ax::mic_probe(seconds),
         Cmd::Notify { title, body } => {
             app::notify(&title, &body);

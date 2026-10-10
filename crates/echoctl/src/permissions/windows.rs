@@ -1,6 +1,7 @@
-//! Windows: only the microphone privacy toggle can block us. Process loopback and UI Automation
+//! Windows: only the microphone privacy toggle can block us. Loopback capture and UI Automation
 //! (speaker names) need no consent.
 
+use crate::app::NoWindow;
 use std::process::Command;
 
 use anyhow::Result;
@@ -11,7 +12,7 @@ const MIC_URL: &str = "ms-settings:privacy-microphone";
 const CONSENT: &str = r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone";
 
 fn reg_value(key: &str, name: &str) -> Option<String> {
-    let out = Command::new("reg").args(["query", key, "/v", name]).output().ok()?;
+    let out = Command::new("reg").no_window().args(["query", key, "/v", name]).output().ok()?;
     let text = String::from_utf8_lossy(&out.stdout);
     text.lines()
         .find(|l| l.trim_start().starts_with(name))
@@ -56,6 +57,17 @@ pub fn report() -> Result<Report> {
               'Let desktop apps access your microphone'"
             .into(),
         settings_url: Some(MIC_URL),
+    }, Check {
+        // Not a permission: what the 'remote' track contains on Windows (audio/windows.rs).
+        id: "call_audio",
+        name: "Teams audio (from its output device)",
+        status: Status::Granted,
+        required: false,
+        why: "the 'remote' track records the speakers or headset Teams plays on — other sounds \
+              on that device (other apps, notifications) are recorded too; Windows can't isolate \
+              Teams' audio",
+        how: "keep other audio off the device Teams uses during calls".into(),
+        settings_url: None,
     }];
     let os_ok = build >= 19041;
     let ready = os_ok && checks.iter().all(|c| c.status != Status::Denied);

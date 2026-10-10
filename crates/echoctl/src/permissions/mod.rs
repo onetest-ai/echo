@@ -65,7 +65,8 @@ pub fn open_settings(url: &str) -> Result<()> {
     #[cfg(target_os = "macos")]
     std::process::Command::new("open").arg(url).status()?;
     #[cfg(windows)]
-    std::process::Command::new("cmd").args(["/C", "start", "", url]).status()?;
+    // Not `cmd /C start`: cmd would split the URL at `&`.
+    std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", url]).status()?;
     Ok(())
 }
 

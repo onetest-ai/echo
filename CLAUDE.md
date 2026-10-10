@@ -40,7 +40,7 @@ Notes/actions are written only by a Claude session (the app writes transcripts, 
   permissions, model, languages; first run itself is the app's). The user's own notes during a
   call come from the tray's "Add a note…" (`echoctl note` → `my-notes.md`).
   Note templates: `crates/echoctl/templates/*.md`, compiled in (user overrides in `<home>/.echo/templates/`).
-  Post-call facts come from `echoctl context <call>` (gate: ≥ 3 min and ≥ 2,500 chars; heading
+  Post-call facts come from `echoctl context <call>` (gate: ≥ 3 min and ≥ 1,500 chars, or any saved frames; heading
   budget by length; colleagues vs external by email domain; previous notes of a recurring meeting).
 - `<home>/calls/<ts>-<slug>/` — `meta.json`, `transcript.md`, `segments.json`, `notes.md` (git-ignored). `mic.wav`/`remote.wav`
   exist only until transcription succeeds, then are deleted (`config.keep_audio`, default false) — text only.
@@ -73,7 +73,30 @@ Notes/actions are written only by a Claude session (the app writes transcripts, 
   denied tap still delivers frames — all zeros. The only reliable check is `doctor --probe`
   (1.5 s global tap, peak > 0 ⇒ granted). The first tap started is what triggers the prompt.
   `ECHOCTL_DEBUG=1` prints raw preflight / probe values.
-- Windows 10 2004+: WASAPI process loopback on root `ms-teams.exe`, include-process-tree mode.
+- Windows 10 2004+: remote track = WASAPI **output-device loopback** of the device Teams plays on
+  (its playback sessions; follows device switches; never while Teams isn't running). New Teams is
+  blind to process loopback (exact zeros although its media process has an active playback
+  session), so other sounds on that device are recorded too — said in the README and `doctor`.
+  `ECHOCTL_LOOPBACK=process` / `ECHOCTL_LOOPBACK_PID` for diagnostics; `echoctl procs` lists
+  capture and playback sessions. Call presence = an active capture session in Teams' tree.
+  `ax/windows.rs` = UI Automation (mute sync, `ui.jsonl`): Teams windows via `EnumWindows` (UIA's
+  desktop children wait seconds on hung windows), one cached subtree call per window; WebView2's
+  tree appears only after the first request. Teams' mic button = AutomationId
+  `microphone-button` ("Mute mic"/"Unmute mic"), in the call window (a separate window from the
+  main one, which shows chats). `ax::CallWindow` finds it once (~60 ms) and keeps it (re-checked
+  every 10 s); `ui.jsonl` and frames (`PrintWindow(PW_RENDERFULLCONTENT)`) read that window only.
+  Per-tick queries are shared: Teams' process tree (one snapshot, 2 s) and its mic sessions
+  (0.9 s) serve call detection and both tracks. Claude Code's Bash doesn't see the PATH a notes run gets: on Windows the prompt names
+  the plugin launcher by its forward-slash path. A folder can't be renamed while a file in it is
+  open: the notes run retitles the call folder after closing its log.
+  Toasts: AppUserModelID `onetest.Echo` registered under HKCU. Build needs LLVM (`LIBCLANG_PATH`,
+  bindgen only) and Rust ≥ 1.90. whisper.cpp build options live in `packaging/windows/whisper.cmake`
+  (via `.cargo/config.toml`, MSVC target only): AVX2 not native (a native build crashes on CPUs
+  without the build machine's AVX-512), `/O2` (the cmake crate drops it → /Od, ~10× slower), and
+  `+crt-static` (no VC++ Redistributable). Release zips build `--features vulkan` (Vulkan SDK;
+  short `--target-dir`: the shader generator's nested CMake hits MAX_PATH) and ship LunarG's signed
+  `vulkan-1.dll`; no GPU driver ⇒ whisper.cpp falls back to the CPU. 11 s test call: CPU 49 s,
+  Vulkan 12 s (a desktop with an NVIDIA GPU).
   What's missing or untested on Windows: `docs/windows-todo.md`.
 
 ## Capture model
@@ -90,7 +113,8 @@ holds the mic (2 s release debounce); records only when `.echo/armed.json` exist
 Events → `<home>/.echo/events.jsonl`; clients follow them (the mod, or `events --follow`).
 `config.scheduled` / `unscheduled` = `ask` → the app shows its own "Record?" dialog (osascript /
 WScript popup); clients don't ask.
-Windows can't detect calls yet (`app_in_call` → None): arm starts recording, `stop` ends it.
+Windows detects calls from WASAPI: an active capture session owned by the Teams process tree
+(`echoctl procs` lists them); that session's endpoint is the mic track's device.
 Tray (`tray` feature, default; `app run --no-tray` to disable): the app's menu-bar/tray icon
 (the onetest octopus simplified to a silhouette that reads at 18 pt — round head, two big
 eyes, two arms waving up, four chunky flaring tentacles; no smile/spots/tuft — drawn from signed-distance shapes in
@@ -152,8 +176,8 @@ replays), and: on `recording_started` opens the `echo-live` pane; on `transcribe
 the call and submits `/echo:process-call <dir>` (unattended processing). The pane shows `<call>/live.jsonl` (written by `live.rs` during recording: turbo,
 utterance decoded after 0.8 s of silence) plus a rolling summary/highlights/actions from
 `$.model.complete` (haiku, ≤ every 90 s, ≥ 400 new chars). `echoctl live-replay <wav> <dir>` (hidden) tests live transcription.
-Mute sync (macOS): while recording, the watcher polls Teams' microphone button via Accessibility
-(`ax::MuteWatch`, label "Unmute…" ⇒ muted) every 400 ms; muted ⇒ `audio::mic::MUTED` makes the mic
+Mute sync: while recording, the watcher polls Teams' microphone button via Accessibility / UI
+Automation (`ax::MuteWatch`, label "Unmute…" ⇒ muted) every 400 ms; muted ⇒ `audio::mic::MUTED` makes the mic
 track record silence; events `mic_muted`/`mic_unmuted` drive the band. `config.follow_app_mute`
 (default on). `echoctl ax-mic` (hidden) shows what the detector sees. `/echo:live` is a skill
 the mod intercepts in `command.run` (mods can't register names with a colon).
@@ -188,10 +212,19 @@ notes". Live pane model: `config.live_model` (default haiku).
   every 1 s on the audio clock + `ui-tree-{10,120,600}s.json` — raw material for speaker names
   (participant tiles read via AX; no screenshots).
 - `<call>/frames/*.jpg` + `frames.jsonl` (`frames.rs`, `config.capture_frames`, default off,
-  needs full Screen Recording): Teams window via `screencapture -l` every 3 s, kept when settled
-  and ≥ 12 % of a 64×36 thumbnail changed (≥ 8 s apart, ≤ 150). `context.frames` → the notes'
-  "On screen" section; process-call then prunes to the cited frames
-  (`echoctl frames <call> --keep …|none`), so only useful ones stay.
+  macOS needs full Screen Recording): the call window every few seconds (macOS `screencapture -l`;
+  Windows `PrintWindow`, **only while someone else shares**: the stage's
+  `popout-content-button` (any language; absent while you present) → frames, the English
+  "Content shared by <name>" → `shared_by`; nothing while you present — Teams doesn't say which
+  window). Kept when settled and new vs **every** kept frame. Tuned per platform: Windows
+  (share-only) 128×72, ≥ 4 % new (a slide is ~30 % of the window; a repeated title slide
+  ~1–2 %), every 2 s, ≥ 4 s apart; macOS (whole call, video tiles included) keeps 64×36, 12 %,
+  3 s, 8 s. ≤ 150 per call. A call with frames always gets notes (`context`'s gate).
+  `context.frames` → the notes' "On screen" section; process-call then prunes to the cited
+  frames (`echoctl frames <call> --keep …|none`), which **moves** the rest, with their index
+  lines, to `<home>/.echo/trash/<call>.frames/` (purged after 30 days, also on each prune) —
+  never deleted outright. Restoring them is manual: move the files back into `<call>/frames/`
+  and append the lines to `frames.jsonl` (`echoctl restore` is for whole calls).
 - `<call>/chat.json` (`watch::start_chat_capture`, `config.capture_chat`, default on with a
   Microsoft 365 sign-in): the meeting's Teams chat via Graph `Chat.Read` — chat id parsed from
   the join link (`19:meeting_…@thread.v2`); ad-hoc calls (no link) → `graph::find_call_chat`:
@@ -218,7 +251,8 @@ notes". Live pane model: `config.live_model` (default haiku).
 
 ## Transcription
 Per track (mic = Me, remote = Remote) → energy VAD into ≤25 s utterances → language detected per
-utterance, restricted to `config.languages` (stops uk↔ru confusion), using **turbo as the
+utterance, restricted to `config.languages` (a new data folder starts with en, uk, ru, es; `[]` =
+any; stops uk↔ru confusion), using **turbo as the
 language-ID model** when downloaded (large-v3's detection is indecisive on accented English:
 `uk 0.41/ru 0.27/en 0.25`, and forcing the wrong language makes Whisper *translate*; turbo said
 en 0.99). Uncertain detections keep the track's previous language. Do NOT pick languages by

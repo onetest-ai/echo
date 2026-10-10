@@ -81,7 +81,13 @@ impl Source for MicSource {
         let lost = Arc::new(AtomicBool::new(false));
         let callbacks = Arc::new(AtomicU64::new(0));
         let (l, c) = (lost.clone(), callbacks.clone());
-        let err = move |e| {
+        let err = move |e: cpal::Error| {
+            // An overrun is a glitch (samples dropped; the writer pads the gap) and the stream
+            // goes on — WASAPI flags one whenever a packet is late. A dead device shows up as a
+            // real error, or as a stall.
+            if matches!(e.kind(), cpal::ErrorKind::Xrun) {
+                return;
+            }
             eprintln!("  mic stream error: {e}");
             l.store(true, Ordering::SeqCst);
         };

@@ -14,6 +14,7 @@
 //!   no web, no other shell commands and no files elsewhere.
 //! - `<call>/notes-run.json` holds the state (running / done / skipped / failed / needs_login);
 //!   `<call>/claude.log` a readable log of what Claude did.
+use crate::app::NoWindow;
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
@@ -73,7 +74,7 @@ fn save(dir: &Path, r: &Run) {
 /// The plugin this app ships: inside the bundle, next to the binary (Windows zip), or the
 /// repo's `plugin/` for a dev build; else wherever Claude Code installed it.
 pub fn plugin_dir() -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok().and_then(|e| e.canonicalize().ok())?;
+    let exe = std::env::current_exe().ok().and_then(|e| dunce::canonicalize(e).ok())?;
     let near = [
         exe.parent().and_then(Path::parent).map(|c| c.join("Resources/plugin")), // Echo.app/Contents/MacOS/echoctl
         exe.parent().map(|d| d.join("plugin")),                                  // Windows: next to echoctl.exe
@@ -106,7 +107,7 @@ pub fn request(call: &str, wait: bool) -> Result<()> {
         println!("Echo is writing the notes with Claude Code. Log: {}", dir.join(LOG).display());
         return Ok(());
     }
-    run(&dir)?;
+    let dir = run(&dir)?;
     let r = status(&dir).unwrap_or_default();
     match r.state.as_str() {
         "done" => println!("Notes written: {}", dir.join("notes.md").display()),
@@ -138,7 +139,7 @@ pub fn start_in_background(dir: PathBuf) {
             return;
         }
         match run(&dir) {
-            Ok(()) => notify_outcome(&dir),
+            Ok(dir) => notify_outcome(&dir),
             // Refused before Claude Code started (a session has the call, …): only the reason.
             Err(e) => crate::app::notify("Couldn't write notes", &format!("{e:#}")),
         }
@@ -197,8 +198,9 @@ fn claim(dir: &Path) -> Result<()> {
 }
 
 /// The run itself (blocking). Errors before Claude Code starts are returned; everything after
-/// is recorded in `notes-run.json` and the log.
-pub fn run(dir: &Path) -> Result<()> {
+/// is recorded in `notes-run.json` and the log. Returns the call's folder afterwards (the run
+/// may have retitled it).
+pub fn run(dir: &Path) -> Result<PathBuf> {
     check(dir)?;
     claim(dir)?;
     let cfg = Config::load().unwrap_or_default();
@@ -226,7 +228,7 @@ pub fn run(dir: &Path) -> Result<()> {
             r.finished_at = Some(Local::now());
             save(dir, &r);
             let _ = fs::remove_file(dir.join(calls::CLAIMED));
-            return Ok(());
+            return Ok(dir.to_path_buf());
         }
     };
     r.pid = Some(child.id());
@@ -342,7 +344,9 @@ pub fn run(dir: &Path) -> Result<()> {
         let _ = fs::remove_file(dir.join(calls::CLAIMED));
     }
     save(dir, &r);
-    Ok(())
+    // A title set during the run: Windows couldn't rename the folder while the log was open.
+    drop(log);
+    Ok(calls::rename_to_title(dir).unwrap_or_else(|_| dir.to_path_buf()))
 }
 
 fn stamp() -> String {
@@ -361,19 +365,40 @@ fn needs_login(text: &str) -> bool {
         .any(|p| t.contains(p))
 }
 
+/// A path as Claude Code's permission rules compare it. On Windows that is POSIX-style with a
+/// lower-case drive: `C:\Users\me` → `/c/Users/me` (measured: `/C:\…` and `/C:/…` never match,
+/// so a run in don't-ask mode was refused every Write). Elsewhere the path as it is.
+fn rule_path(p: &Path) -> String {
+    let s = p.display().to_string().replace('\\', "/");
+    match s.as_bytes() {
+        [d, b':', rest @ ..] if d.is_ascii_alphabetic() => format!("/{}{}", (*d as char).to_ascii_lowercase(), String::from_utf8_lossy(rest)),
+        _ => s,
+    }
+}
+
 /// The arguments for `claude`.
 fn args(dir: &Path, home: &Path, plugin: &Path, model: Option<&str>) -> Vec<String> {
     let calls = paths::calls_dir();
-    let abs = |p: &Path| format!("/{}", p.display()); // permission rules spell absolute paths `//…`
+    let abs = |p: &Path| format!("/{}", rule_path(p)); // permission rules spell absolute paths `//…`
+    // Windows: Claude Code's Bash doesn't see the PATH this run gets, so the plugin's launcher
+    // by its full path (forward slashes, as allowed below).
+    // Forward slashes: Bash (Git Bash on Windows) drops the backslashes of a `C:\…` path.
+    let fwd = |p: &Path| p.display().to_string().replace('\\', "/");
+    let launcher = format!("{}/scripts/echoctl", fwd(plugin));
+    let cli = if cfg!(windows) {
+        format!("`{launcher} …` (the plugin's launcher, by this exact path)")
+    } else {
+        "plain `echoctl …` (it is on PATH)".to_string()
+    };
     let prompt = format!(
         "/echo:process-call {}\n\n\
          This run was started from the Echo app and nobody is watching it: do every step without \
          asking anything. Echo has already claimed this call for this run, so don't claim it again. \
-         Run the Echo CLI as plain `echoctl …` (it is on PATH): one command per Bash call, with no \
+         Run the Echo CLI as {cli}: one command per Bash call, with no \
          variables, `cd`, pipes, redirects or `&&`. Write and edit files with the Write and Edit \
          tools, never through the shell. Skip the follow-up offers at the end; finish with a \
          two-line report.",
-        dir.display()
+        fwd(dir)
     );
     let mut a: Vec<String> = vec!["-p".into(), prompt, "--output-format".into(), "stream-json".into(), "--verbose".into()];
     if let Some(m) = model {
@@ -392,6 +417,7 @@ fn args(dir: &Path, home: &Path, plugin: &Path, model: Option<&str>) -> Vec<Stri
         format!("Edit({}/**)", abs(&calls)),
         format!("Write({}/**)", abs(&calls)),
         format!("Bash({}/scripts/echoctl:*)", plugin.display()),
+        format!("Bash({launcher}:*)"),
         "Bash(echoctl:*)".into(),
         "Skill(echo:process-call)".into(),
     ]);
@@ -408,7 +434,7 @@ fn command(claude: &Path, args: &[String], cwd: &Path) -> Result<std::process::C
         c.args(["-l", "-i", "-c", "export PATH=\"$ECHOCTL_BIN_DIR:$PATH\"; exec \"$0\" \"$@\""]).arg(claude).args(args);
         c
     } else {
-        let mut c = Command::new(claude);
+        let mut c = Command::new(claude).no_window();
         c.args(args);
         c
     };
@@ -435,7 +461,7 @@ fn kill(pid: u32) {
         libc::kill(pid as i32, libc::SIGTERM);
     }
     #[cfg(windows)]
-    let _ = Command::new("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"]).status();
+    let _ = Command::new("taskkill").no_window().args(["/PID", &pid.to_string(), "/T", "/F"]).status();
 }
 
 /// One stream-json event as log lines a person can follow.
@@ -498,6 +524,13 @@ fn describe(ev: &Value) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn permission_rule_paths_are_posix_with_a_lower_case_drive() {
+        assert_eq!(rule_path(Path::new(r"C:\Users\User\Echo\calls")), "/c/Users/User/Echo/calls");
+        assert_eq!(rule_path(Path::new("D:/data/echo")), "/d/data/echo");
+        assert_eq!(rule_path(Path::new("/Users/me/Echo")), "/Users/me/Echo");
+    }
 
     #[test]
     fn sign_in_errors_are_recognised() {

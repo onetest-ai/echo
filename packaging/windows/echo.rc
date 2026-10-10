@@ -1,0 +1,3 @@
+// Echo's icon in echoctl.exe (Explorer, pinned taskbar buttons, Alt-Tab), embedded by
+// crates/echoctl/build.rs. echo.ico comes from `echoctl dev-icon packaging/windows/echo.ico`.
+1 ICON "echo.ico"

@@ -9,6 +9,7 @@
 //! start; a call has ended once the mic has been released for 2 s, and we wait a further grace
 //! period for a rejoin before closing the recording.
 
+use crate::app::NoWindow;
 use std::collections::HashSet;
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Seek, SeekFrom, Write};
@@ -398,7 +399,8 @@ fn finish(r: Recording, reason: &str) {
     let _ = fs::remove_file(file("armed.json"));
 }
 
-/// Follow the call app's mute button while recording (macOS, Accessibility): muted ⇒ the mic
+/// Follow the call app's mute button while recording (macOS Accessibility, Windows UI
+/// Automation): muted ⇒ the mic
 /// track records silence. Emits `mic_muted` / `mic_unmuted` on changes.
 fn start_mute_sync() -> Option<Arc<AtomicBool>> {
     use crate::audio::mic::MUTED;
@@ -406,7 +408,7 @@ fn start_mute_sync() -> Option<Arc<AtomicBool>> {
     if !crate::config::Config::load().map(|c| c.follow_app_mute.unwrap_or(true)).unwrap_or(true) {
         return None;
     }
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     {
         let alive = Arc::new(AtomicBool::new(true));
         let a = alive.clone();
@@ -448,17 +450,17 @@ fn start_mute_sync() -> Option<Arc<AtomicBool>> {
         });
         Some(alive)
     }
-    #[cfg(not(target_os = "macos"))]
-    None // TODO(windows): UI Automation on the Teams mute button
+    #[cfg(not(any(target_os = "macos", windows)))]
+    None
 }
 
-/// Record the call app's window text during the call (macOS, Accessibility): the raw material
+/// Record the call app's window text during the call (Accessibility / UI Automation): the raw material
 /// for naming remote speakers. Config `capture_ui` (default on). Text only, kept in the call.
 fn start_ui_capture(dir: &std::path::Path, t0: Instant) -> Option<Arc<AtomicBool>> {
     if !crate::config::Config::load().map(|c| c.capture_ui.unwrap_or(true)).unwrap_or(true) {
         return None;
     }
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     {
         let alive = Arc::new(AtomicBool::new(true));
         let a = alive.clone();
@@ -480,9 +482,9 @@ fn start_ui_capture(dir: &std::path::Path, t0: Instant) -> Option<Arc<AtomicBool
         });
         Some(alive)
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
-        let _ = (dir, t0); // TODO(windows): UI Automation
+        let _ = (dir, t0);
         None
     }
 }
@@ -626,13 +628,13 @@ fn chat_line(m: &serde_json::Value, started: DateTime<Local>) -> serde_json::Val
     })
 }
 
-/// Save key frames of the meeting window during the call (shared screens; macOS, Screen
+/// Save key frames of the meeting window during the call (shared screens; macOS needs Screen
 /// Recording). Config `capture_frames` (default off).
 fn start_frame_capture(dir: &std::path::Path, t0: Instant) -> Option<Arc<AtomicBool>> {
     if !crate::config::Config::load().map(|c| c.capture_frames).unwrap_or(false) {
         return None;
     }
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     {
         let alive = Arc::new(AtomicBool::new(true));
         let a = alive.clone();
@@ -654,9 +656,9 @@ fn start_frame_capture(dir: &std::path::Path, t0: Instant) -> Option<Arc<AtomicB
         });
         Some(alive)
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
-        let _ = (dir, t0); // TODO(windows): Windows.Graphics.Capture on the Teams window
+        let _ = (dir, t0);
         None
     }
 }
@@ -718,7 +720,7 @@ const TRANSCRIBE_ERROR: &str = "transcribe.error";
 fn transcribe_now(dir: &std::path::Path) {
     let _one = TRANSCRIBING.lock().unwrap_or_else(|e| e.into_inner());
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("echoctl"));
-    let out = std::process::Command::new(exe)
+    let out = std::process::Command::new(exe).no_window()
         .arg("transcribe")
         .arg(dir)
         .current_dir(paths::home())
@@ -870,7 +872,8 @@ pub fn join(meeting: MeetingContext) -> Result<()> {
     #[cfg(target_os = "macos")]
     std::process::Command::new("open").arg(&url).status()?;
     #[cfg(windows)]
-    std::process::Command::new("cmd").args(["/C", "start", "", &url]).status()?;
+    // Not `cmd /C start`: cmd would split the URL at `&`.
+    std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", &url]).status()?;
     let title = meeting.subject.clone();
     arm(title, Some(meeting), None)
 }

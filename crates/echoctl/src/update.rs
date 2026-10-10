@@ -6,6 +6,7 @@
 //! new Echo.app is signed by our Developer ID team, then a small detached script swaps the
 //! bundle once this process has exited and opens the new one. Never while recording.
 
+use crate::app::NoWindow;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 #[cfg(target_os = "macos")]
@@ -63,14 +64,14 @@ fn asset_suffix() -> &'static str {
 
 fn latest_json() -> Result<Value> {
     let api = format!("https://api.github.com/repos/{REPO}/releases/latest");
-    if let Ok(out) = Command::new("curl").args(["-fsSL", "-H", "Accept: application/vnd.github+json", &api]).output() {
+    if let Ok(out) = Command::new("curl").no_window().args(["-fsSL", "-H", "Accept: application/vnd.github+json", &api]).output() {
         if out.status.success() {
             return Ok(serde_json::from_slice(&out.stdout)?);
         }
     }
     // Private repository: anonymous requests get 404; use the GitHub CLI's login.
     let gh = crate::app::find_program("gh");
-    let out = Command::new(&gh)
+    let out = Command::new(&gh).no_window()
         .args(["api", &format!("repos/{REPO}/releases/latest")])
         .output()
         .context("no access to GitHub releases (install the GitHub CLI and run `gh auth login`)")?;
@@ -85,7 +86,7 @@ pub fn check() -> Result<Option<Release>> {
     let v = latest_json().or_else(|_| -> Result<Value> {
         // /latest skips pre-releases: fall back to the newest of all releases.
         let gh = crate::app::find_program("gh");
-        let out = Command::new(&gh).args(["api", &format!("repos/{REPO}/releases?per_page=5")]).output()?;
+        let out = Command::new(&gh).no_window().args(["api", &format!("repos/{REPO}/releases?per_page=5")]).output()?;
         let all: Value = serde_json::from_slice(&out.stdout)?;
         all.as_array().and_then(|a| a.first().cloned()).ok_or_else(|| anyhow!("no releases"))
     })?;
@@ -125,12 +126,12 @@ fn download(r: &Release, dir: &Path) -> Result<PathBuf> {
     let dest = dir.join(&r.asset);
     let _ = std::fs::remove_file(&dest);
     if let Some(url) = &r.url {
-        if Command::new("curl").args(["-fsSL", "-o"]).arg(&dest).arg(url).status().is_ok_and(|s| s.success()) {
+        if Command::new("curl").no_window().args(["-fsSL", "-o"]).arg(&dest).arg(url).status().is_ok_and(|s| s.success()) {
             return Ok(dest);
         }
     }
     let gh = crate::app::find_program("gh");
-    let ok = Command::new(&gh)
+    let ok = Command::new(&gh).no_window()
         .args(["release", "download", &r.tag, "--repo", REPO, "--pattern", &r.asset, "--dir"])
         .arg(dir)
         .status()

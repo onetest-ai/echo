@@ -167,7 +167,10 @@ Checks: `cargo clippy`, `cargo test`, `cargo check --target x86_64-pc-windows-ms
 --no-default-features`, `scripts/check-mod.sh`. See `CLAUDE.md` for the design.
 
 Windows 10 2004+: unzip to `%LOCALAPPDATA%\Programs\echo`, run
-`echoctl.exe app autostart on`, then double-click `echoctl.exe`.
+`echoctl.exe app autostart on`, then double-click `echoctl.exe`. On Windows the other people
+in the call are recorded from the speakers or headset Teams plays on, so other sounds on that
+device (other apps, notifications) are recorded too: Windows can't isolate Teams' audio the
+way macOS does.
 </details>
 
 ## License

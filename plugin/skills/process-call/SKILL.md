@@ -33,9 +33,9 @@ nobody processed, `echoctl claim <dir>` first (it fails if another session has i
 `me_profile` (if set) is the user's own description — role, team, the people and terms they
 deal with, how they like notes and follow-ups written. Follow it for tone, emphasis and naming.
 
-- If `summarize` is false: don't write notes. If `frames` is non-empty, drop them
-  (`echoctl frames <dir> --keep none`). Tell the user in one line (`skip_reason`) and stop
-  after step 6 (title).
+- If `summarize` is false: don't write notes, and leave any frames alone. A call with frames
+  is always summarized: the shared screens are content even when little was said. Tell the
+  user in one line (`skip_reason`) and stop after step 6 (title).
 
 ## 3. Template
 `context` already picked it: `template.sections` is the list of `heading` + `instruction` to
@@ -69,7 +69,7 @@ slide, names on a diagram, the agenda) and add a short **On screen** section: on
 meaningful frame, `[mm:ss]` + what it showed, only facts visible in the image. Skip frames that
 are just video tiles or the Teams UI.
 
-Then prune: keep exactly the frames the **On screen** section cites and delete the rest (video
+Then prune: keep exactly the frames the **On screen** section cites and move the rest to Echo's trash (video
 tiles, Teams UI, near-duplicates of a kept slide) — `echoctl frames <dir> --keep
 <file1>,<file2>,…` (names as in `frames`), or `--keep none` if none was useful. Frames you
 didn't look at (more than 12) are judged by their neighbours: keep one per distinct slide.

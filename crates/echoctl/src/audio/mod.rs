@@ -11,7 +11,7 @@ pub mod mic;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(windows)]
-mod windows;
+pub(crate) mod windows;
 
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -429,9 +429,11 @@ pub fn app_source(app: TargetApp) -> Box<dyn Source> {
 pub fn app_in_call(app: TargetApp) -> Option<bool> {
     #[cfg(target_os = "macos")]
     return Some(macos::app_processes(app).map(|ps| ps.iter().any(|p| p.running_input)).unwrap_or(false));
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    return Some(windows::app_in_call(app));
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
-        let _ = app; // TODO(windows): WASAPI capture sessions owned by ms-teams*.exe
+        let _ = app;
         None
     }
 }
@@ -441,9 +443,11 @@ pub fn app_in_call(app: TargetApp) -> Option<bool> {
 pub fn app_input_device(app: TargetApp) -> Option<(String, String)> {
     #[cfg(target_os = "macos")]
     return macos::app_input_device(app);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    return windows::app_input_device(app);
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
-        let _ = app; // TODO(windows): WASAPI capture sessions → endpoint id
+        let _ = app;
         None
     }
 }

@@ -225,6 +225,13 @@ fn is_hallucination(text: &str) -> bool {
         || t.contains('♪')
 }
 
+/// whisper.cpp threads for the final pass: on macOS Metal does the work; a CPU-only build
+/// scales to about the physical cores (half the logical ones).
+fn final_threads() -> usize {
+    let n = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+    if cfg!(target_os = "macos") { n.min(8) } else { (n / 2).clamp(4, 16) }
+}
+
 /// Allowed languages ranked by detection probability, for audio already in `state`'s mel.
 fn rank_languages(state: &mut WhisperState, allowed: &[i32], threads: usize) -> Result<Vec<(i32, f32)>> {
     let (best_any, probs) = state.lang_detect(0, threads)?;
@@ -690,7 +697,7 @@ pub fn transcribe(call: &str, model_override: Option<&str>, keep_audio: bool) ->
         if cfg.languages.is_empty() { "any".into() } else { cfg.languages.join(", ") });
     let cp = WhisperContextParameters { use_gpu: true, ..Default::default() };
     let ctx = WhisperContext::new_with_params(&model_path, cp).context("loading model")?;
-    let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(8);
+    let threads = final_threads();
     // Language ID with turbo when available (and different from the transcription model).
     let det_model = models::find(DETECTOR_MODEL)?;
     let det_path = models::model_path(det_model);

@@ -35,9 +35,11 @@ enum UiEvent {
 
 const SIZE: u32 = 36;
 
-/// Recording: warm orange; armed: green; idle: black as a template (follows the menu bar).
+/// Recording: warm orange; armed: green; idle: black as a template (follows the menu bar),
+/// white on a dark Windows taskbar.
 const ORANGE: [u8; 3] = [0xD9, 0x77, 0x57];
 const BLACK: [u8; 3] = [0, 0, 0];
+const WHITE: [u8; 3] = [0xFF, 0xFF, 0xFF];
 const GREEN: [u8; 3] = [52, 199, 89];
 
 /// The octopus mark (`mark.rs`) in `color`, SIZE×SIZE.
@@ -105,10 +107,60 @@ const ICONSET: [(&str, u32); 10] = [
     ("icon_512x512", 512), ("icon_512x512@2x", 1024),
 ];
 
+/// `echoctl dev-icon <file>.ico [--from logo.png]`: the Windows app icon (embedded in
+/// echoctl.exe by build.rs) at 16…256 px, each a PNG entry (Windows Vista+ reads those). With
+/// `--from` (the onetest logo) it is the macOS icon's artwork — the octopus on the logo's purple
+/// rounded square — without Apple's margin, so it fills the tile like other Windows icons;
+/// otherwise the drawn mark.
+fn write_ico(path: &std::path::Path, from: Option<&std::path::Path>) -> anyhow::Result<()> {
+    const SIZES: [u32; 6] = [16, 24, 32, 48, 64, 256];
+    use image::ImageEncoder;
+    let art = match from {
+        Some(src) => {
+            let (_, art) = logo_icon(&image::open(src)?.to_rgba8(), 1024, true);
+            let m = (1024 - 824) / 2; // logo_icon draws macOS's 824/1024 body
+            Some(image::imageops::crop_imm(&art, m, m, 824, 824).to_image())
+        }
+        None => None,
+    };
+    let pngs = SIZES
+        .iter()
+        .map(|&s| {
+            let rgba = match &art {
+                Some(a) => image::imageops::resize(a, s, s, image::imageops::FilterType::Lanczos3).into_raw(),
+                None => app_icon_rgba(s),
+            };
+            let mut buf = vec![];
+            image::codecs::png::PngEncoder::new(&mut buf).write_image(&rgba, s, s, image::ExtendedColorType::Rgba8)?;
+            Ok(buf)
+        })
+        .collect::<anyhow::Result<Vec<Vec<u8>>>>()?;
+    let mut out = vec![0, 0, 1, 0];
+    out.extend((SIZES.len() as u16).to_le_bytes());
+    let mut offset = 6 + 16 * SIZES.len() as u32;
+    for (&s, data) in SIZES.iter().zip(&pngs) {
+        let side = if s >= 256 { 0 } else { s as u8 }; // 0 means 256
+        out.extend([side, side, 0, 0]);
+        out.extend(1u16.to_le_bytes()); // colour planes
+        out.extend(32u16.to_le_bytes()); // bits per pixel
+        out.extend((data.len() as u32).to_le_bytes());
+        out.extend(offset.to_le_bytes());
+        offset += data.len() as u32;
+    }
+    for data in pngs {
+        out.extend(data);
+    }
+    std::fs::write(path, out)?;
+    Ok(())
+}
+
 /// `echoctl dev-icon <dir> [--from logo.png]`: write an .iconset (for `iconutil`), or with a
 /// `<dir>.icon` path an Icon Composer document (for `actool`, macOS 26's native icon). With
 /// `--from`, the icon is built from that image (the onetest logo); otherwise the drawn mark.
 pub fn write_iconset(dir: &std::path::Path, from: Option<&std::path::Path>) -> anyhow::Result<()> {
+    if dir.extension().is_some_and(|e| e == "ico") {
+        return write_ico(dir, from);
+    }
     std::fs::create_dir_all(dir)?;
     #[cfg(target_os = "macos")]
     if let Some(src) = from {
@@ -151,7 +203,7 @@ pub fn write_iconset(dir: &std::path::Path, from: Option<&std::path::Path>) -> a
 /// as large as fits. `squircle`: the whole icon, the octopus on a purple rounded square in
 /// Apple's 824/1024 grid (the .icns for macOS before 26). Otherwise only the octopus, white on
 /// transparent, for an Icon Composer layer. Returns the logo's purple too.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 fn logo_icon(logo: &image::RgbaImage, px: u32, squircle: bool) -> (image::Rgba<u8>, image::RgbaImage) {
     let (w, h) = logo.dimensions();
     let purple = *logo.get_pixel(w / 2, h / 40); // inside the disc, above the octopus
@@ -216,13 +268,38 @@ fn logo_icon(logo: &image::RgbaImage, px: u32, squircle: bool) -> (image::Rgba<u
 
 /// (icon, is_template). Idle is a template icon (follows the macOS menu-bar light/dark look);
 /// armed is green and recording is Claude orange so the state reads at a glance.
-/// (Windows has no templates: idle is drawn black — TODO(windows): white on a dark taskbar.)
+/// (Windows has no templates: idle is black, or white on a dark taskbar.)
 fn icon_for(state: &UiState) -> (Icon, bool) {
     match state {
+        UiState::Idle { .. } if taskbar_dark() => (logo(WHITE), true),
         UiState::Idle { .. } => (logo(BLACK), true),
         UiState::Armed => (logo(GREEN), false),
         UiState::Recording { .. } => (logo(ORANGE), false),
     }
+}
+
+/// Windows: is the taskbar dark? (The system theme, not the apps' one, colours the taskbar.)
+fn taskbar_dark() -> bool {
+    #[cfg(windows)]
+    unsafe {
+        use windows::core::w;
+        use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
+        let mut light = 1u32;
+        let mut len = 4u32;
+        let ok = RegGetValueW(
+            HKEY_CURRENT_USER,
+            w!(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"),
+            w!("SystemUsesLightTheme"),
+            RRF_RT_REG_DWORD,
+            None,
+            Some(&mut light as *mut u32 as *mut _),
+            Some(&mut len),
+        )
+        .is_ok();
+        return ok && light == 0;
+    }
+    #[allow(unreachable_code)]
+    false
 }
 
 fn status_text(state: &UiState) -> String {
@@ -452,6 +529,8 @@ struct Ui {
     note: MenuItem,
     actions: HashMap<MenuId, Action>,
     state: Option<UiState>,
+    /// The taskbar theme the icon was drawn for (Windows: the idle icon follows it).
+    dark: bool,
     model: Option<Model>,
     health: Vec<(String, String, Option<String>)>,
     last_refresh: Instant,
@@ -490,6 +569,7 @@ impl Ui {
             note: MenuItem::new("", false, None),
             actions: HashMap::new(),
             state: None,
+            dark: taskbar_dark(),
             model: None,
             health: health(),
             last_refresh: Instant::now(),
@@ -583,11 +663,8 @@ impl Ui {
         let manual = self.check("   Only when I click Record", model.unscheduled_manual, Action::SetUnscheduled("manual"));
         let _ = settings.append_items(&[&ask, &manual, &sep()]);
         let keep = self.check("Keep audio after transcription", model.keep_audio, Action::ToggleKeepAudio);
-        #[cfg(target_os = "macos")]
-        {
-            let frames = self.check("Save snapshots of shared screens", model.capture_frames, Action::ToggleFrames);
-            let _ = settings.append(&frames);
-        }
+        let frames = self.check("Save snapshots of shared screens", model.capture_frames, Action::ToggleFrames);
+        let _ = settings.append(&frames);
         let _ = settings.append_items(&[&keep, &sep()]);
         let langs = if model.languages.is_empty() { "any".to_string() } else { model.languages.join(", ") };
         let _ = settings.append_items(&[&sep(), &MenuItem::new(format!("Languages: {langs}"), false, None)]);
@@ -721,9 +798,11 @@ impl Ui {
     }
 
     fn apply(&mut self, state: UiState) {
-        if self.state.as_ref() == Some(&state) {
+        let dark = taskbar_dark();
+        if self.state.as_ref() == Some(&state) && self.dark == dark {
             return;
         }
+        self.dark = dark;
         let (icon, template) = icon_for(&state);
         #[cfg(target_os = "macos")]
         let _ = if template { self.tray.set_icon_templated(Some(icon)) } else { self.tray.set_icon(Some(icon)) };
@@ -821,7 +900,7 @@ impl Ui {
                 std::thread::spawn(|| {
                     if let Some(dir) = app::choose_folder("Claude Code sessions opened in this folder write the call notes") {
                         let Ok(mut cfg) = Config::load() else { return };
-                        cfg.notes_in = Some(dir.canonicalize().unwrap_or(dir));
+                        cfg.notes_in = Some(dunce::canonicalize(&dir).unwrap_or(dir));
                         let _ = cfg.save();
                     }
                 });

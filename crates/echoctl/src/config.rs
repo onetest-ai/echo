@@ -8,14 +8,31 @@ use serde::{Deserialize, Serialize};
 
 use crate::paths;
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+/// Call languages a new data folder starts with (the team's: English, Ukrainian, Russian,
+/// Spanish). `echoctl config --languages any` clears them.
+pub const DEFAULT_LANGUAGES: &[&str] = &["en", "uk", "ru", "es"];
+
+fn default_languages() -> Vec<String> {
+    DEFAULT_LANGUAGES.iter().map(|l| l.to_string()).collect()
+}
+
+/// The settings of a folder that has none yet: the serde defaults, so a missing file, a
+/// missing field and `unwrap_or_default()` all agree (languages included).
+impl Default for Config {
+    fn default() -> Self {
+        serde_json::from_str("{}").expect("every Config field has a default")
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Config {
     /// Active transcription model (a catalog name, e.g. "large-v3-turbo-q5_0")
     pub model: Option<String>,
     /// Languages spoken in this workspace's calls (ISO codes, e.g. ["en", "uk", "ru"]).
     /// Language detection runs per utterance and may only pick from this list, which stops
-    /// Whisper confusing close languages (uk/ru) or drifting to unrelated ones. Empty = any.
-    #[serde(default)]
+    /// Whisper confusing close languages (uk/ru) or drifting to unrelated ones. Empty = any;
+    /// a new data folder (no setting yet) starts with `DEFAULT_LANGUAGES`.
+    #[serde(default = "default_languages")]
     pub languages: Vec<String>,
     /// Workspace-wide glossary (names, products, acronyms) passed to Whisper as a hint.
     #[serde(default)]
@@ -174,6 +191,15 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn new_folders_get_the_default_languages_but_any_stays_any() {
+        let new: Config = serde_json::from_str("{}").unwrap();
+        assert_eq!(new.languages, ["en", "uk", "ru", "es"]);
+        assert_eq!(Config::default().languages, new.languages);
+        let any: Config = serde_json::from_str(r#"{"languages": []}"#).unwrap();
+        assert!(any.languages.is_empty());
+    }
 
     #[test]
     fn learning_dedupes_validates_and_caps() {

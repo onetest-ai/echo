@@ -7,6 +7,7 @@
 //!
 //! Also matches a recording to the agenda meeting it overlaps (used when recording starts).
 
+use crate::app::NoWindow;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -163,7 +164,7 @@ pub fn sync(quiet: bool) -> Result<()> {
         }
         return Ok(());
     };
-    let out = Command::new(&cmd[0]).args(&cmd[1..]).output();
+    let out = Command::new(&cmd[0]).no_window().args(&cmd[1..]).output();
     let events: Vec<Value> = match out {
         Ok(o) if o.status.success() => match serde_json::from_slice::<Value>(&o.stdout) {
             Ok(Value::Array(a)) => a,

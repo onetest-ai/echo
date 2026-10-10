@@ -10,28 +10,37 @@ Code markers: `git grep "TODO(windows)"`.
 
 ## Not built yet
 
-1. **Notifications** — `app::notify` (`app.rs`) does nothing on Windows, so "Transcript ready",
-   "Notes ready", "Couldn't write notes", "Update available" never show. Wanted: a Windows
-   toast (WinRT `ToastNotificationManager`) from the app with Echo's name and icon, and a click
-   that opens the Echo window (`app::OPEN_WINDOW`), like macOS's UserNotifications in
-   `app::notifications`. Unpackaged apps need an AppUserModelID (set on a Start-menu shortcut
-   or registered under `HKCU\Software\Classes\AppUserModelId\<id>`); the tray's balloon is the
-   fallback.
-2. **Call detection** — `audio::app_in_call` returns `None` (`audio/mod.rs`), so arming starts
-   recording at once and Stop ends it; no `call_started`/`call_ended`, no auto-stop 10 s after
-   the call, no "Record?" prompt for unscheduled calls. Wanted: the WASAPI capture sessions
-   owned by `ms-teams*.exe` (Teams holds the mic during a call), same 2 s release debounce as
-   macOS. Also `audio/mod.rs:446`: the endpoint id of that session for the mic track.
-3. **Mute sync** — `watch.rs` (`start_mute_sync`): UI Automation on Teams' microphone button
-   ("Unmute" label ⇒ muted) → `audio::mic::MUTED`, events `mic_muted`/`mic_unmuted`.
-4. **Teams UI capture** (`ui.jsonl`, participant names) — `watch.rs` (`start_ui_capture`): UI
-   Automation text of the Teams window, the same diff format as `ax::UiRecorder`.
-5. **Screen frames** (`config.capture_frames`) — `watch.rs` (`start_frame_capture`):
-   Windows.Graphics.Capture on the Teams window, same keep rules as `frames.rs`.
-6. **Tray icon in dark mode** — idle is drawn black (`tray.rs`, `icon_for`); it should be white
-   on a dark taskbar (read `AppsUseLightTheme` / `SystemUsesLightTheme`).
-7. **Signed builds and updates** — the zip is unsigned, so `update.rs` opens the release page
+1. **Signed builds and updates** — the zip is unsigned, so `update.rs` opens the release page
    instead of installing. Needs code signing, then a verified swap like macOS's.
+
+## Known limits (follow-ups)
+
+- **Teams' UI language:** share detection works in any language (the `popout-content-button`
+  automation id), but the presenter's name (`shared_by`, from "Content shared by <name>") and
+  detecting that *you* present ("Stop sharing") read English labels. Check a non-English Teams.
+- **Frames while you present:** nothing is captured — the call window is a compact view and
+  Teams doesn't say which window you share.
+- **One call-window reader:** frames and `ui.jsonl` each keep their own `ax::CallWindow` (on
+  their own threads; UI Automation objects are thread-bound), so the call window's tree is
+  read for both. Sharing one needs a single UIA thread serving both.
+
+## Built, needs a live Teams call to confirm
+
+- **Call detection** (`audio/windows.rs`): an active WASAPI capture session owned by the Teams
+  process tree ⇒ in a call; its endpoint is the mic track's device. `echoctl procs` shows the
+  sessions. Unknown: does Teams keep the session active while muted / on hold?
+- **Mute sync** and **Teams UI text** (`ax/windows.rs`, UI Automation): the Teams windows via
+  `EnumWindows` (asking UIA for the desktop's children waited ~6 s on a hung window), each
+  subtree fetched in one cached call (~80 ms, ~700 nodes). WebView2 builds its accessibility
+  tree only after the first request, so the first read is nearly empty. `echoctl ax-mic`,
+  `echoctl ax-dump`. Confirm the call window's button label ("Mute (Ctrl+Shift+M)").
+- **Screen frames** (`frames.rs`): `PrintWindow(PW_RENDERFULLCONTENT)` of the largest visible
+  Teams window (works behind other windows, not minimized). `echoctl frame-grab <file>`.
+- **Notifications** (`app::notifications`): WinRT toasts as AppUserModelID `onetest.Echo`,
+  registered under `HKCU\Software\Classes\AppUserModelId` with Echo's logo
+  (`%APPDATA%\echo\echo.png`); a click opens the window while the app runs (a toast posted by
+  a CLI process that has exited does nothing on click).
+- **Tray icon**: idle is white when `SystemUsesLightTheme` = 0, re-checked on each tick.
 
 ## Built but never run on Windows
 

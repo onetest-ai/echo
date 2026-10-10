@@ -53,7 +53,7 @@ pub fn home_source() -> &'static str {
 
 fn chosen_home() -> Option<PathBuf> {
     let p: Pointer = serde_json::from_slice(&fs::read(pointer_file()).ok()?).ok()?;
-    Some(p.home)
+    Some(dunce::simplified(&p.home).to_path_buf())
 }
 
 /// The data folder: calls + state.
@@ -71,11 +71,13 @@ pub fn set_home(dir: &Path) -> Result<PathBuf> {
     let dir = if dir.is_absolute() { dir.to_path_buf() } else { std::env::current_dir()?.join(dir) };
     fs::create_dir_all(dir.join("calls")).with_context(|| format!("creating {}", dir.display()))?;
     fs::create_dir_all(dir.join(".echo"))?;
-    let dir = dir.canonicalize().unwrap_or(dir);
+    // dunce: no `\?` verbatim paths on Windows (shown to the user, handed to other tools).
+    let dir = dunce::canonicalize(&dir).unwrap_or(dir);
     fs::create_dir_all(config_dir())?;
     let tmp = config_dir().join("home.json.tmp");
     fs::write(&tmp, serde_json::to_vec_pretty(&Pointer { home: dir.clone() })?)?;
     fs::rename(tmp, pointer_file())?;
+    crate::models::adopt_downloaded();
     Ok(dir)
 }
 

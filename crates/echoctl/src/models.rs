@@ -4,6 +4,7 @@
 //! whisper.cpp Hugging Face repo; the expected SHA-256 is read from the Hub's API at download
 //! time and checked after the download.
 
+use crate::app::NoWindow;
 use std::fs;
 use std::io::Read;
 use std::path::PathBuf;
@@ -86,7 +87,7 @@ fn ram_bytes() -> Option<u64> {
     let out = if cfg!(target_os = "macos") {
         Command::new("sysctl").args(["-n", "hw.memsize"]).output().ok()?
     } else if cfg!(windows) {
-        Command::new("powershell")
+        Command::new("powershell").no_window()
             .args(["-NoProfile", "-Command", "(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory"])
             .output()
             .ok()?
@@ -173,7 +174,7 @@ pub fn list(json: bool) -> Result<()> {
 
 /// Expected SHA-256 for a repo file, from the Hugging Face API (LFS object id).
 fn expected_sha256(file: &str) -> Result<String> {
-    let out = Command::new("curl")
+    let out = Command::new("curl").no_window()
         .args(["-fsSL", &format!("https://huggingface.co/api/models/{REPO}/tree/main")])
         .output()
         .context("running curl (needed to download models)")?;
@@ -209,7 +210,7 @@ pub static PROGRESS: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::
 /// pipes) print a line every 10% so logs and the conversation stay readable.
 fn curl_with_progress(part: &PathBuf, url: &str, expected_bytes: u64) -> Result<std::process::ExitStatus> {
     use std::io::IsTerminal;
-    let mut cmd = Command::new("curl");
+    let mut cmd = Command::new("curl").no_window();
     cmd.args(["-fL", "-C", "-", "-o"]).arg(part).arg(url);
     if std::io::stderr().is_terminal() {
         return cmd.arg("--progress-bar").status().context("running curl");
@@ -322,6 +323,21 @@ pub fn remove(name: &str, force: bool) -> Result<()> {
     }
     println!("{}", if removed { format!("removed {}", m.name) } else { format!("{} was not downloaded", m.name) });
     Ok(())
+}
+
+/// A data folder without a model choice adopts a downloaded model (the catalog lists the
+/// preferred ones first): models are shared by all data folders, the choice is per folder, so
+/// a new folder would otherwise have none although one is on disk. Called when the data folder
+/// is set (first run, `home set`, Settings → data folder).
+pub fn adopt_downloaded() {
+    let Ok(mut cfg) = Config::load() else { return };
+    if cfg.model.is_some() {
+        return;
+    }
+    if let Some(m) = CATALOG.iter().find(|m| model_path(m).exists()) {
+        cfg.model = Some(m.name.to_string());
+        let _ = cfg.save();
+    }
 }
 
 /// The active model's file, or a message that sends the user to setup.

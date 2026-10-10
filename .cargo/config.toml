@@ -1,0 +1,9 @@
+[env]
+# whisper.cpp's Windows build options (portable CPU code, optimization): see the file. Read only
+# for the MSVC target; elsewhere whisper-rs-sys passes it to CMake as an unused variable.
+CMAKE_TOOLCHAIN_FILE_x86_64_pc_windows_msvc = { value = "packaging/windows/whisper.cmake", relative = true }
+
+# One exe with no Visual C++ Redistributable needed (MSVCP140 / VCRUNTIME140): the C runtime is
+# linked in, for Rust and (via cc's /MT) for whisper.cpp.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

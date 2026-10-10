@@ -16,7 +16,7 @@ use crate::paths;
 
 /// Below these, a call is too thin to summarize.
 const MIN_SUMMARY_MINUTES: f64 = 3.0;
-const MIN_SUMMARY_CHARS: usize = 2_500;
+const MIN_SUMMARY_CHARS: usize = 1_500;
 pub const USER_NOTES: &str = "my-notes.md";
 /// In a trashed call: when it was deleted (its mtime ages the trash entry).
 const DELETED_AT: &str = ".deleted_at";
@@ -251,12 +251,16 @@ pub fn context(call: &str) -> Result<()> {
         .filter(|h| !h.is_empty())
         .collect();
 
+    // Shared screens make a call worth notes however short the talk: the slides are the content.
+    let frames = frames_of(&dir);
     let summarize = if segs.is_empty() {
         Some("no transcript yet — run `echoctl transcribe` first")
+    } else if !frames.is_empty() {
+        None
     } else if duration_min < MIN_SUMMARY_MINUTES {
         Some("shorter than 3 minutes")
     } else if chars < MIN_SUMMARY_CHARS {
-        Some("less than 2,500 characters of transcript")
+        Some("less than 1,500 characters of transcript")
     } else {
         None
     };
@@ -284,7 +288,7 @@ pub fn context(call: &str) -> Result<()> {
         "skip_reason": summarize,
         "previous_notes": previous.map(|p| p.join("notes.md").display().to_string()),
         "template": pick_template(subject_of(&dir).as_deref()),
-        "frames": frames_of(&dir),
+        "frames": frames,
         "chat": fs::read(dir.join("chat.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).unwrap_or(json!([])),
         "me_profile": fs::read_to_string(me_profile_path()).ok().filter(|t| !t.trim().is_empty() && t.trim() != ME_TEMPLATE.trim()),
         "vocabulary": cfg.vocabulary,
@@ -410,29 +414,46 @@ pub fn prune_frames(call: &str, keep: &[String]) -> Result<()> {
     let dir = resolve_call(call)?;
     let name = |p: &str| Path::new(p).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let keep: std::collections::HashSet<String> = keep.iter().filter(|k| k.as_str() != "none").map(|k| name(k)).collect();
+    // Never deleted outright: what is pruned goes to `.echo/trash/<call>.frames/` (with its
+    // index lines) of the data folder the call is in, purged after 30 days like deleted calls
+    // — a wrong prune can be undone.
+    let home_trash = dir.parent().and_then(Path::parent).map(|home| home.join(".echo").join("trash"));
+    let bin = home_trash.unwrap_or_else(trash_dir).join(format!("{}.frames", dir.file_name().unwrap().to_string_lossy()));
     let (mut kept, mut removed) = (0, 0);
     if let Ok(rd) = fs::read_dir(dir.join("frames")) {
         for f in rd.filter_map(|e| e.ok().map(|e| e.path())) {
             if keep.contains(&name(&f.to_string_lossy())) {
                 kept += 1;
-            } else if fs::remove_file(&f).is_ok() {
+            } else if fs::create_dir_all(&bin).is_ok() && fs::rename(&f, bin.join(name(&f.to_string_lossy()))).is_ok() {
                 removed += 1;
             }
         }
     }
-    let index: Vec<String> = fs::read_to_string(dir.join("frames.jsonl"))
-        .unwrap_or_default()
-        .lines()
-        .filter(|l| serde_json::from_str::<Value>(l).ok().and_then(|v| v["file"].as_str().map(name)).is_some_and(|f| keep.contains(&f)))
-        .map(str::to_owned)
-        .collect();
+    let lines: Vec<String> = fs::read_to_string(dir.join("frames.jsonl")).unwrap_or_default().lines().map(str::to_owned).collect();
+    let kept_line = |l: &String| serde_json::from_str::<Value>(l).ok().and_then(|v| v["file"].as_str().map(name)).is_some_and(|f| keep.contains(&f));
+    let (index, pruned): (Vec<String>, Vec<String>) = lines.into_iter().partition(kept_line);
+    if removed > 0 {
+        let mut f = fs::OpenOptions::new().create(true).append(true).open(bin.join("frames.jsonl"))?;
+        for l in &pruned {
+            use std::io::Write;
+            writeln!(f, "{l}")?;
+        }
+        fs::write(bin.join(DELETED_AT), chrono::Local::now().to_rfc3339())?;
+    }
     if index.is_empty() {
         let _ = fs::remove_file(dir.join("frames.jsonl"));
         let _ = fs::remove_dir(dir.join("frames"));
     } else {
         fs::write(dir.join("frames.jsonl"), index.join("\n") + "\n")?;
     }
-    println!("frames: kept {kept}, removed {removed}");
+    if let Some(trash) = bin.parent() {
+        purge_trash_in(trash);
+    }
+    if removed > 0 {
+        println!("frames: kept {kept}, moved {removed} to {} (30 days)", bin.display());
+    } else {
+        println!("frames: kept {kept}");
+    }
     Ok(())
 }
 
@@ -476,22 +497,35 @@ pub fn set_title(call: &str, title: &str) -> Result<()> {
     let mut meta = read_json(&dir.join("meta.json"));
     meta["title"] = json!(title);
     fs::write(dir.join("meta.json"), serde_json::to_vec_pretty(&meta)?)?;
+    // The title is what counts; the folder name only follows it. Windows refuses to rename a
+    // folder with a file open inside (a notes run's own claude.log): the run renames it when
+    // it ends.
+    match rename_to_title(&dir) {
+        Ok(d) => println!("{}", d.display()),
+        Err(e) => {
+            eprintln!("title set; the folder is renamed to match when files in it are no longer open ({e:#})");
+            println!("{}", dir.display());
+        }
+    }
+    Ok(())
+}
+
+/// Rename a call's folder to `<stamp>-<slug of its title>` (not while it is recording).
+/// Returns the folder's path afterwards.
+pub fn rename_to_title(dir: &Path) -> Result<PathBuf> {
+    let Some(title) = read_json(&dir.join("meta.json"))["title"].as_str().map(str::to_owned) else {
+        return Ok(dir.to_path_buf());
+    };
     let name = dir.file_name().unwrap().to_string_lossy().into_owned();
     let stamp = name.get(..17).unwrap_or(&name); // "YYYY-MM-DD_HHMMSS"
     let slug = crate::recorder::slugify(&title);
     let new_dir = dir.with_file_name(if slug.is_empty() { stamp.to_string() } else { format!("{stamp}-{slug}") });
-    if new_dir != dir {
-        let recording = crate::watch::running_watcher()
-            .and_then(|w| w.recording)
-            .is_some_and(|r| Path::new(&r) == dir);
-        if !recording {
-            fs::rename(&dir, &new_dir).with_context(|| format!("renaming {}", dir.display()))?;
-            println!("{}", new_dir.display());
-            return Ok(());
-        }
+    let recording = crate::watch::running_watcher().and_then(|w| w.recording).is_some_and(|r| Path::new(&r) == dir);
+    if new_dir == dir || recording {
+        return Ok(dir.to_path_buf());
     }
-    println!("{}", dir.display());
-    Ok(())
+    fs::rename(dir, &new_dir).with_context(|| format!("renaming {}", dir.display()))?;
+    Ok(new_dir)
 }
 
 /// `echoctl note <text>`: append the user's own note to the call being recorded, stamped
@@ -575,7 +609,12 @@ pub fn restore(name: &str) -> Result<()> {
 }
 
 fn purge_trash() {
-    let Ok(rd) = fs::read_dir(trash_dir()) else { return };
+    purge_trash_in(&trash_dir());
+}
+
+/// Entries of a trash folder deleted more than 30 days ago (calls, pruned frames).
+fn purge_trash_in(trash: &Path) {
+    let Ok(rd) = fs::read_dir(trash) else { return };
     let max_age = std::time::Duration::from_secs(TRASH_DAYS * 24 * 3600);
     for e in rd.flatten() {
         let stamp = e.path().join(DELETED_AT);
@@ -620,7 +659,8 @@ mod tests {
     #[test]
     fn frames_are_pruned_to_the_ones_kept() {
         let home = std::env::temp_dir().join(format!("echo-frames-{}", std::process::id()));
-        let dir = home.join("call");
+        let dir = home.join("calls").join("call");
+        let bin = home.join(".echo").join("trash").join("call.frames");
         fs::create_dir_all(dir.join("frames")).unwrap();
         fs::write(dir.join("meta.json"), "{}").unwrap();
         for f in ["00m10s.jpg", "02m00s.jpg", "05m30s.jpg"] {
@@ -632,8 +672,12 @@ mod tests {
         assert!(!dir.join("frames/00m10s.jpg").exists());
         assert!(dir.join("frames/02m00s.jpg").exists() && dir.join("frames/05m30s.jpg").exists());
         assert_eq!(fs::read_to_string(dir.join("frames.jsonl")).unwrap().lines().count(), 2);
+        // Pruned, not deleted: in the call's own data folder's trash, with its index line.
+        assert!(bin.join("00m10s.jpg").exists());
+        assert_eq!(fs::read_to_string(bin.join("frames.jsonl")).unwrap().lines().count(), 1);
         prune_frames(dir.to_str().unwrap(), &["none".into()]).unwrap();
         assert!(!dir.join("frames").exists() && !dir.join("frames.jsonl").exists());
+        assert!(bin.join("02m00s.jpg").exists() && bin.join("05m30s.jpg").exists());
         let _ = fs::remove_dir_all(&home);
     }
 
