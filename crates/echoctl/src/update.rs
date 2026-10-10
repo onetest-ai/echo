@@ -106,9 +106,18 @@ pub fn check() -> Result<Option<Release>> {
         url: a["browser_download_url"].as_str().map(str::to_owned),
         notes_url: v["html_url"].as_str().unwrap_or_default().to_string(),
     });
-    let release = release.filter(|r| newer(&r.version, env!("CARGO_PKG_VERSION")));
+    let release = release.filter(|r| newer(&r.version, env!("CARGO_PKG_VERSION")) && can_install());
     *AVAILABLE.lock().unwrap() = release.clone();
     Ok(release)
+}
+
+/// Only offer what can be installed: on macOS that needs an Echo.app to swap. A development
+/// build with no app installed updates with git.
+fn can_install() -> bool {
+    #[cfg(target_os = "macos")]
+    return crate::app::installed_app().is_some();
+    #[allow(unreachable_code)]
+    true
 }
 
 fn download(r: &Release, dir: &Path) -> Result<PathBuf> {
