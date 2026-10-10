@@ -1,5 +1,6 @@
 {
-  "name": "echo",
+  "name": "onetest",
+  "description": "Claude Code plugins from onetest.ai",
   "owner": {
     "name": "onetest.ai"
   },

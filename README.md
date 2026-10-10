@@ -112,7 +112,7 @@ call, `/echo:live` shows the transcript as it happens, and menu → **Add a note
 
 ```sh
 claude plugin marketplace add onetest-ai/echo
-claude plugin install echo@echo --scope user      # or: project (shared) / local (just you)
+claude plugin install echo@onetest --scope user      # or: project (shared) / local (just you)
 ```
 To keep call notes out of your coding sessions, pick one folder under
 menu → Claude Code → Write call notes in.

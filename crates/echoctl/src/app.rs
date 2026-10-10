@@ -601,7 +601,7 @@ pub fn find_program(name: &str) -> String {
 fn marketplace_source() -> String {
     std::env::var("ECHOCTL_MARKETPLACE").unwrap_or_else(|_| "onetest-ai/echo".into())
 }
-const MARKETPLACE: &str = "echo";
+const MARKETPLACE: &str = "onetest";
 
 pub fn claude_bin() -> Option<PathBuf> {
     let p = PathBuf::from(find_program("claude"));

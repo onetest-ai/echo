@@ -11,7 +11,7 @@
 
 **Expected**
 - A "Claude Code connected" notification.
-- `claude plugin list` shows `echo@echo`.
+- `claude plugin list` shows `echo@onetest`.
 - The session offers `/echo:process-call`, `/echo:live`, `/echo:record` and `/echo:doctor`.
 
 ---

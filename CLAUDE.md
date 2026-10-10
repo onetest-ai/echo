@@ -28,7 +28,7 @@ Notes/actions are written only by a Claude session (the app writes transcripts, 
   hardened runtime, notarize + staple the app, signed (not notarized) dmg; notary creds via `APPLE_API_KEY`/`_KEY_ID`/`_ISSUER` (API key) or keychain profile `echo-notary`).
   `scripts/package-windows.ps1` (zip; unsigned for now).
 - Marketplace `echoctl` (`.claude-plugin/marketplace.json`): `claude plugin marketplace add
-  onetest-ai/echo` + `claude plugin install echo@echo --scope user|project|local`
+  onetest-ai/echo` + `claude plugin install echo@onetest --scope user|project|local`
   (what `echoctl claude connect` runs; `ECHOCTL_MARKETPLACE` overrides the source).
 - CLI on PATH (`app install-cli`): macOS `/usr/local/bin/echoctl` → the app's binary (admin
   prompt via osascript); Windows: app folder appended to the user PATH.
