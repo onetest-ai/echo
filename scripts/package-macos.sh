@@ -48,9 +48,22 @@ rsync -a --exclude bin --exclude node_modules --exclude '.claude-plugin/types' -
 python3 scripts/third-party.py --texts "$APP/Contents/Resources/THIRD-PARTY-LICENSES.txt"
 # CFBundleShortVersionString stays numeric (0.1.1); the pre-release tag lives in the DMG name.
 sed -e "s/__VERSION__/${VERSION%%-*}/" -e "s/__BUILD__/$BUILD/" packaging/macos/Info.plist > "$APP/Contents/Info.plist"
-"$BIN" dev-icon dist/echo.iconset --from packaging/macos/onetest-logo-1024.png
-iconutil -c icns dist/echo.iconset -o "$APP/Contents/Resources/echo.icns"
-rm -rf dist/echo.iconset
+# App icon: an Icon Composer document compiled by actool (Xcode 26) into Assets.car — macOS
+# 26 draws the shape, edge and shadow itself — plus echo.icns for older macOS. Without that
+# actool, our own rounded-square .icns (macOS 26 then puts it on a tile).
+rm -rf dist/echo.icon dist/icon-out dist/echo.iconset
+"$BIN" dev-icon dist/echo.icon --from packaging/macos/onetest-logo-1024.png
+mkdir -p dist/icon-out
+if xcrun actool dist/echo.icon --compile dist/icon-out --platform macosx --target-device mac \
+    --minimum-deployment-target 14.2 --app-icon echo --output-partial-info-plist dist/icon-out/partial.plist \
+    --errors --output-format human-readable-text >/dev/null 2>&1 && [[ -f dist/icon-out/Assets.car ]]; then
+  cp dist/icon-out/Assets.car dist/icon-out/echo.icns "$APP/Contents/Resources/"
+else
+  echo "warning: actool couldn't compile the icon (needs Xcode 26); using the plain .icns" >&2
+  "$BIN" dev-icon dist/echo.iconset --from packaging/macos/onetest-logo-1024.png
+  iconutil -c icns dist/echo.iconset -o "$APP/Contents/Resources/echo.icns"
+fi
+rm -rf dist/echo.icon dist/icon-out dist/echo.iconset
 
 echo "signing with: $SIGN_ID"
 codesign --force --timestamp --options runtime \

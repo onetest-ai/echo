@@ -105,23 +105,37 @@ const ICONSET: [(&str, u32); 10] = [
     ("icon_512x512", 512), ("icon_512x512@2x", 1024),
 ];
 
-/// `echoctl dev-icon <dir> [--from logo.png]`: write an .iconset (for `iconutil`). With
-/// `--from`, the icon is that image (the onetest logo) sized to the macOS icon grid; otherwise
-/// the drawn mark.
+/// `echoctl dev-icon <dir> [--from logo.png]`: write an .iconset (for `iconutil`), or with a
+/// `<dir>.icon` path an Icon Composer document (for `actool`, macOS 26's native icon). With
+/// `--from`, the icon is built from that image (the onetest logo); otherwise the drawn mark.
 pub fn write_iconset(dir: &std::path::Path, from: Option<&std::path::Path>) -> anyhow::Result<()> {
     std::fs::create_dir_all(dir)?;
     #[cfg(target_os = "macos")]
     if let Some(src) = from {
-        use image::imageops::{overlay, FilterType};
-        let logo = image::open(src)?;
+        let logo = image::open(src)?.to_rgba8();
+        if dir.extension().is_some_and(|e| e == "icon") {
+            // The purple fill comes from icon.json; the octopus is the one layer, and macOS
+            // draws the shape, margins and edge itself.
+            let (purple, layer) = logo_icon(&logo, 1024, false);
+            std::fs::create_dir_all(dir.join("Assets"))?;
+            layer.save(dir.join("Assets/octopus.png"))?;
+            let c = |i: usize| format!("{:.5}", purple[i] as f32 / 255.0);
+            let doc = serde_json::json!({
+                "fill": { "solid": format!("srgb:{},{},{},1.00000", c(0), c(1), c(2)) },
+                "groups": [{
+                    "layers": [{ "image-name": "octopus.png", "name": "octopus", "glass": false }],
+                    "shadow": { "kind": "neutral", "opacity": 0.5 },
+                    "translucency": { "enabled": false, "value": 0.5 }
+                }],
+                "supported-platforms": { "squares": ["macOS"] }
+            });
+            std::fs::write(dir.join("icon.json"), serde_json::to_vec_pretty(&doc)?)?;
+            return Ok(());
+        }
+        let (_, art) = logo_icon(&logo, 1024, true);
         for (name, px) in ICONSET {
-            // macOS icons sit in an 824/1024 body with a transparent margin.
-            let inner = (px as f32 * 824.0 / 1024.0).round() as u32;
-            let scaled = logo.resize_exact(inner, inner, FilterType::Lanczos3).to_rgba8();
-            let mut canvas = image::RgbaImage::new(px, px);
-            let off = ((px - inner) / 2) as i64;
-            overlay(&mut canvas, &scaled, off, off);
-            canvas.save(dir.join(format!("{name}.png")))?;
+            let img = image::imageops::resize(&art, px, px, image::imageops::FilterType::Lanczos3);
+            img.save(dir.join(format!("{name}.png")))?;
         }
         return Ok(());
     }
@@ -131,6 +145,73 @@ pub fn write_iconset(dir: &std::path::Path, from: Option<&std::path::Path>) -> a
         std::fs::write(dir.join(format!("{name}.png")), png(&app_icon_rgba(px), px))?;
     }
     Ok(())
+}
+
+/// The app icon from the round onetest logo (white octopus on a purple disc), with the octopus
+/// as large as fits. `squircle`: the whole icon, the octopus on a purple rounded square in
+/// Apple's 824/1024 grid (the .icns for macOS before 26). Otherwise only the octopus, white on
+/// transparent, for an Icon Composer layer. Returns the logo's purple too.
+#[cfg(target_os = "macos")]
+fn logo_icon(logo: &image::RgbaImage, px: u32, squircle: bool) -> (image::Rgba<u8>, image::RgbaImage) {
+    let (w, h) = logo.dimensions();
+    let purple = *logo.get_pixel(w / 2, h / 40); // inside the disc, above the octopus
+    // How white a logo pixel is (the octopus), 0..1, from the green channel (purple is low).
+    let base = purple[1] as f32;
+    let white = |x: u32, y: u32| {
+        let p = logo.get_pixel(x, y);
+        (((p[1] as f32 - base) / (255.0 - base)).clamp(0.0, 1.0)) * (p[3] as f32 / 255.0)
+    };
+    let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0, 0);
+    for y in 0..h {
+        for x in 0..w {
+            if white(x, y) > 0.5 {
+                (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
+            }
+        }
+    }
+    // The body is the icon's shape: 824/1024 of the .icns, the whole Icon Composer canvas.
+    let body = if squircle { px as f32 * 824.0 / 1024.0 } else { px as f32 };
+    let margin = (px as f32 - body) / 2.0;
+    let (ow, oh) = ((x1 - x0 + 1) as f32, (y1 - y0 + 1) as f32);
+    let scale = body * if squircle { 0.84 } else { 0.80 } / ow.max(oh);
+    let (ox, oy) = ((px as f32 - ow * scale) / 2.0, (px as f32 - oh * scale) / 2.0);
+    let mut out = image::RgbaImage::new(px, px);
+    const SS: u32 = 4; // supersampling for smooth edges
+    for y in 0..px {
+        for x in 0..px {
+            let (mut cover, mut wsum) = (0.0f32, 0.0f32);
+            for sy in 0..SS {
+                for sx in 0..SS {
+                    let fx = x as f32 + (sx as f32 + 0.5) / SS as f32;
+                    let fy = y as f32 + (sy as f32 + 0.5) / SS as f32;
+                    // Superellipse (n = 5), close to Apple's continuous-corner shape.
+                    let u = ((fx - px as f32 / 2.0) / (body / 2.0)).abs();
+                    let v = ((fy - px as f32 / 2.0) / (body / 2.0)).abs();
+                    if squircle && (u.powi(5) + v.powi(5) > 1.0 || fx < margin || fy < margin) {
+                        continue;
+                    }
+                    cover += 1.0;
+                    let lx = x0 as f32 + (fx - ox) / scale;
+                    let ly = y0 as f32 + (fy - oy) / scale;
+                    if lx >= x0 as f32 && ly >= y0 as f32 && lx < (x1 + 1) as f32 && ly < (y1 + 1) as f32 {
+                        wsum += white(lx as u32, ly as u32);
+                    }
+                }
+            }
+            let n = (SS * SS) as f32;
+            if !squircle {
+                if wsum > 0.0 {
+                    out.put_pixel(x, y, image::Rgba([255, 255, 255, (wsum / n * 255.0).round() as u8]));
+                }
+            } else if cover > 0.0 {
+                let t = wsum / cover;
+                let mix = |c: u8| (c as f32 * (1.0 - t) + 255.0 * t).round() as u8;
+                let a = (cover / n * 255.0).round() as u8;
+                out.put_pixel(x, y, image::Rgba([mix(purple[0]), mix(purple[1]), mix(purple[2]), a]));
+            }
+        }
+    }
+    (purple, out)
 }
 
 /// (icon, is_template). Idle is a template icon (follows the macOS menu-bar light/dark look);
@@ -876,10 +957,13 @@ fn set_dock_icon(target: &tao::event_loop::EventLoopWindowTarget<UiEvent>, visib
     let _ = (target, visible);
 }
 
-/// The onetest logo as the app's Dock icon (a dev build has no bundle icon; a bundle's icns
-/// shows the same logo).
+/// The onetest logo as the Dock icon of a dev build, which has no bundle icon. Echo.app keeps
+/// its icns (the full rounded-square icon).
 #[cfg(target_os = "macos")]
 fn set_app_icon() {
+    if crate::app::bundle_path().is_some() {
+        return;
+    }
     use objc2::AllocAnyThread;
     use objc2_app_kit::{NSApplication, NSImage};
     use objc2_foundation::{MainThreadMarker, NSData};
@@ -902,6 +986,7 @@ pub fn run(app: TargetApp, stop: Arc<AtomicBool>) -> ! {
     {
         use tao::platform::macos::{ActivationPolicy, EventLoopExtMacOS};
         event_loop.set_activation_policy(ActivationPolicy::Accessory); // no Dock icon
+        crate::app::notifications::init();
     }
 
     let proxy = event_loop.create_proxy();

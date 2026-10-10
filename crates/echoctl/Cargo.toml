@@ -34,7 +34,9 @@ wry = { version = "0.57", default-features = false, optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSString", "NSArray", "NSDictionary", "NSUUID", "NSValue", "NSObject", "NSData"] }
+objc2-foundation = { version = "0.3", features = ["NSString", "NSArray", "NSDictionary", "NSUUID", "NSValue", "NSObject", "NSData", "NSError"] }
+# Notifications posted as Echo (its icon; a click opens the window). osascript's show as Script Editor.
+objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "bitflags", "block2", "UNUserNotificationCenter", "UNNotification", "UNNotificationContent", "UNNotificationRequest", "UNNotificationResponse", "UNNotificationTrigger"] }
 # The Dock icon while the Echo window is open (dev builds have no bundle icon).
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSImage"] }
 objc2-core-audio = { version = "0.3", features = ["AudioHardware", "objc2", "objc2-foundation", "objc2-core-audio-types"] }

@@ -12,6 +12,9 @@
   <string>echoctl</string>
   <key>CFBundleIconFile</key>
   <string>echo</string>
+  <!-- macOS 26: the Icon Composer icon in Assets.car; older macOS uses echo.icns. -->
+  <key>CFBundleIconName</key>
+  <string>echo</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>

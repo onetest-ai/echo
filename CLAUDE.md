@@ -94,9 +94,14 @@ Tray (`tray` feature, default; `app run --no-tray` to disable): the app's menu-b
 (the onetest octopus simplified to a silhouette that reads at 18 pt — round head, two big
 eyes, two arms waving up, four chunky flaring tentacles; no smile/spots/tuft — drawn from signed-distance shapes in
 `mark.rs`; `assets/octopus.svg` is the same shape). Idle = template mark, armed = green,
-recording = orange. The Dock / app icon is the onetest logo itself (`packaging/macos/onetest-logo-1024.png`
-→ `echoctl dev-icon --from`, 824/1024 grid; the window and Dock icon at runtime use
-`assets/onetest-logo*.png`); the Dock icon shows only while the Echo window is open. Menu: status, Record, Stop,
+recording = orange. The app icon comes from the onetest logo (`packaging/macos/onetest-logo-1024.png`):
+`echoctl dev-icon dist/echo.icon --from …` writes an Icon Composer document (purple fill + the
+octopus as one layer) that `actool` (Xcode 26) compiles into `Assets.car` (`CFBundleIconName`)
++ `echo.icns` — macOS 26 puts any other icon on a grey tile. No such actool → our own
+rounded-square `.iconset`. Dev builds (no bundle) set the round logo as the Dock icon at
+runtime; the Dock icon shows only while the Echo window is open. Notifications (macOS) go
+through UserNotifications as Echo.app (its icon; a click opens the window; asks permission at
+first start); dev builds fall back to osascript, which macOS shows as Script Editor. Menu: status, Record, Stop,
 recent calls, Settings (data folder, start at login, install CLI), Speech models (use / download
 with % / remove), Claude Code (connect = install plugin at user scope; where notes are written),
 Health (Ask for permissions),

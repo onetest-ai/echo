@@ -858,12 +858,118 @@ pub fn ask_text(message: &str, default: &str, ok: &str) -> Option<String> {
 /// A passive notification (no buttons).
 pub fn notify(title: &str, body: &str) {
     #[cfg(target_os = "macos")]
+    if bundle_path().is_some() {
+        notifications::post(title, body);
+        return;
+    }
+    #[cfg(target_os = "macos")]
     {
+        // A dev build outside Echo.app has no bundle to post as.
         let script = format!("display notification {} with title \"Echo\" subtitle {}", applescript_str(body), applescript_str(title));
         let _ = Command::new("osascript").args(["-e", &script]).status();
     }
     #[cfg(not(target_os = "macos"))]
     {
         let _ = (title, body); // TODO(windows): tray balloon / toast
+    }
+}
+
+/// macOS notifications through UserNotifications, posted as Echo.app (bundle builds only):
+/// they carry Echo's icon and a click opens the Echo window.
+#[cfg(target_os = "macos")]
+pub mod notifications {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    use block2::{DynBlock, RcBlock};
+    use objc2::rc::Retained;
+    use objc2::runtime::{Bool, NSObject, NSObjectProtocol, ProtocolObject};
+    use objc2::{define_class, msg_send, AllocAnyThread};
+    use objc2_foundation::{NSError, NSString, NSUUID};
+    use objc2_user_notifications::{
+        UNAuthorizationOptions, UNMutableNotificationContent, UNNotification, UNNotificationPresentationOptions,
+        UNNotificationRequest, UNNotificationResponse, UNUserNotificationCenter, UNUserNotificationCenterDelegate,
+    };
+
+    /// Set in the app process (which keeps running); a CLI process waits for its post instead.
+    static IN_APP: AtomicBool = AtomicBool::new(false);
+
+    define_class!(
+        #[unsafe(super(NSObject))]
+        #[name = "EchoNotificationDelegate"]
+        struct Delegate;
+
+        unsafe impl NSObjectProtocol for Delegate {}
+
+        unsafe impl UNUserNotificationCenterDelegate for Delegate {
+            // Show banners while the Echo window is in front too.
+            #[unsafe(method(userNotificationCenter:willPresentNotification:withCompletionHandler:))]
+            fn will_present(
+                &self,
+                _center: &UNUserNotificationCenter,
+                _notification: &UNNotification,
+                handler: &DynBlock<dyn Fn(UNNotificationPresentationOptions)>,
+            ) {
+                handler.call((UNNotificationPresentationOptions::Banner | UNNotificationPresentationOptions::List,));
+            }
+
+            #[unsafe(method(userNotificationCenter:didReceiveNotificationResponse:withCompletionHandler:))]
+            fn did_receive(&self, _center: &UNUserNotificationCenter, _response: &UNNotificationResponse, handler: &DynBlock<dyn Fn()>) {
+                *super::OPEN_WINDOW.lock().unwrap_or_else(|e| e.into_inner()) = Some(None);
+                handler.call(());
+            }
+        }
+    );
+
+    /// At app start (inside Echo.app): handle clicks, and ask for permission up front.
+    #[cfg_attr(not(feature = "tray"), allow(dead_code))]
+    pub fn init() {
+        if super::bundle_path().is_none() {
+            return;
+        }
+        IN_APP.store(true, Ordering::SeqCst);
+        let center = UNUserNotificationCenter::currentNotificationCenter();
+        let delegate: Retained<Delegate> = unsafe { msg_send![Delegate::alloc(), init] };
+        center.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
+        std::mem::forget(delegate); // the center holds it weakly; it lives as long as the app
+        center.requestAuthorizationWithOptions_completionHandler(
+            UNAuthorizationOptions::Alert,
+            &RcBlock::new(|granted: Bool, err: *mut NSError| debug_permission("at start", granted, err)),
+        );
+    }
+
+    /// `ECHOCTL_DEBUG=1`: macOS's answer (a missing setting reads "not allowed for this application").
+    fn debug_permission(when: &str, granted: Bool, err: *mut NSError) {
+        if std::env::var_os("ECHOCTL_DEBUG").is_some() {
+            // SAFETY: the completion handler's error is nil or a valid NSError.
+            let err = unsafe { err.as_ref() }.map(|e| e.localizedDescription().to_string());
+            eprintln!("notification permission {when}: granted={} error={err:?}", granted.as_bool());
+        }
+    }
+
+    pub fn post(title: &str, body: &str) {
+        let center = UNUserNotificationCenter::currentNotificationCenter();
+        let content = UNMutableNotificationContent::new();
+        content.setTitle(&NSString::from_str(title));
+        content.setBody(&NSString::from_str(body));
+        let request = UNNotificationRequest::requestWithIdentifier_content_trigger(&NSUUID::new().UUIDString(), &content, None);
+        let (tx, rx) = mpsc::channel::<()>();
+        let poster = center.clone();
+        // Authorization is asked once (the first time this shows the system prompt); after that
+        // it answers at once. Denied: nothing is shown, as the user chose.
+        let then = RcBlock::new(move |granted: Bool, err: *mut NSError| {
+            debug_permission("", granted, err);
+            if granted.as_bool() {
+                let done = tx.clone();
+                poster.addNotificationRequest_withCompletionHandler(&request, Some(&RcBlock::new(move |_: *mut NSError| { let _ = done.send(()); })));
+            } else {
+                let _ = tx.send(());
+            }
+        });
+        center.requestAuthorizationWithOptions_completionHandler(UNAuthorizationOptions::Alert, &then);
+        if !IN_APP.load(Ordering::SeqCst) {
+            let _ = rx.recv_timeout(Duration::from_secs(5));
+        }
     }
 }

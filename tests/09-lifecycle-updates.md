@@ -94,3 +94,20 @@
 
 **Expected**
 - On the newest version there is no Update item and no notification.
+
+---
+
+### TC-LIFE-006 · Notifications come from Echo
+**Priority:** P1 · **Platform:** macOS
+
+**Steps**
+1. On a fresh Mac, open Echo for the first time; answer **Allow** when macOS asks to send
+   notifications.
+2. Trigger a notification (finish a recording, or Menu → Claude Code → Connect Claude Code).
+3. Click the notification.
+
+**Expected**
+- The banner shows Echo's icon (purple rounded square with the octopus), not a blank
+  Script Editor icon; the Dock icon while the window is open is the same.
+- Clicking it opens the Echo window.
+- With notifications turned off for Echo in System Settings, nothing is shown.

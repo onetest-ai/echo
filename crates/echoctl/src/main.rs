@@ -276,6 +276,9 @@ enum Cmd {
         #[arg(long, default_value_t = 30)]
         seconds: u64,
     },
+    /// (dev) Show a notification the way the app does
+    #[command(hide = true)]
+    Notify { title: String, body: String },
     /// (dev) Open the Echo window on its own; --selftest checks echo:// + IPC and exits
     #[cfg(feature = "tray")]
     #[command(hide = true)]
@@ -580,6 +583,10 @@ fn main() -> Result<()> {
         Cmd::AxDump { seconds } => ax::dump(seconds),
         #[cfg(target_os = "macos")]
         Cmd::AxMic { seconds } => ax::mic_probe(seconds),
+        Cmd::Notify { title, body } => {
+            app::notify(&title, &body);
+            Ok(())
+        }
         Cmd::Procs => audio::print_audio_processes(),
         #[cfg(feature = "tray")]
         Cmd::DevIcon { dir, from } => tray::write_iconset(&dir, from.as_deref()),
