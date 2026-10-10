@@ -11,3 +11,6 @@
 /dist
 /docs/local/
 CLAUDE.local.md
+
+# manual test run logs may contain real call details
+/tests/runs/

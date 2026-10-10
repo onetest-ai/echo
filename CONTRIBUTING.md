@@ -6,6 +6,8 @@ Thanks for helping. Bug reports and ideas are welcome as GitHub issues; pull req
   device, and only text is kept.
 - Before a pull request, run the checks: `cargo clippy`, `cargo test`,
   `cargo check --target x86_64-pc-windows-msvc --no-default-features` and `scripts/check-mod.sh`.
+- Before a release, run the manual test cases in [`tests/`](tests/README.md) (the P0 ones at
+  least) and keep the run log.
 - Never attach real call data (transcripts, chat, screenshots of real meetings) to an issue or
   a test. Use made-up people and companies.
 
