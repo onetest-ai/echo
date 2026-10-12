@@ -6,6 +6,7 @@
 //! the CPU. The answer is kept in `<config dir>/gpu.json`; `config.use_gpu` overrides it.
 
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -31,6 +32,46 @@ struct Checked {
 
 /// This process's answer, once the check has run (not before a model exists).
 static ANSWER: Mutex<Option<bool>> = Mutex::new(None);
+/// A re-test (Health → Re-test GPU) is running.
+static TESTING: AtomicBool = AtomicBool::new(false);
+
+fn cached() -> Option<Checked> {
+    std::fs::read(paths::config_dir().join(FILE))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Checked>(&b).ok())
+        .filter(|c| c.version == env!("CARGO_PKG_VERSION"))
+}
+
+/// What whisper.cpp runs on, for the Health menu. Never runs the check itself.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn status() -> String {
+    if let Some(v) = Config::load().ok().and_then(|c| c.use_gpu) {
+        return format!("{} (set in config: use_gpu)", if v { "GPU" } else { "CPU" });
+    }
+    if cfg!(target_os = "macos") {
+        return "GPU (Metal)".into();
+    }
+    if TESTING.load(Ordering::SeqCst) {
+        return "testing the GPU…".into();
+    }
+    match cached() {
+        Some(c) if c.ok => "GPU (Vulkan)".into(),
+        Some(c) => format!("CPU — GPU test failed ({})", c.detail),
+        None => "not tested yet (CPU until it is)".into(),
+    }
+}
+
+/// Health → Re-test GPU (after a driver update): forget the answer and test again. Returns the
+/// new answer.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn retest() -> bool {
+    TESTING.store(true, Ordering::SeqCst);
+    let _ = std::fs::remove_file(paths::config_dir().join(FILE));
+    *ANSWER.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    let ok = allowed();
+    TESTING.store(false, Ordering::SeqCst);
+    ok
+}
 
 /// Use the GPU for whisper.cpp?
 pub fn allowed() -> bool {
@@ -46,7 +87,7 @@ pub fn allowed() -> bool {
     }
     let file = paths::config_dir().join(FILE);
     let version = env!("CARGO_PKG_VERSION");
-    if let Some(c) = std::fs::read(&file).ok().and_then(|b| serde_json::from_slice::<Checked>(&b).ok()).filter(|c| c.version == version) {
+    if let Some(c) = cached() {
         *answer = Some(c.ok);
         return c.ok;
     }

@@ -101,7 +101,9 @@ Notes/actions are written only by a Claude session (the app writes transcripts, 
   `+crt-static` (no VC++ Redistributable). GPU (`gpu.rs`): a Vulkan driver crashed the process
   inside whisper.cpp (0xC0000409 at recording start, no discrete GPU), so the GPU is tried once
   per version in a child (`echoctl gpu-check`, at app start) → `<config dir>/gpu.json`; failed or
-  died ⇒ CPU. `config.use_gpu` overrides; macOS always uses Metal. Release zips build `--features vulkan` (Vulkan SDK;
+  died ⇒ CPU. `config.use_gpu` overrides; macOS always uses Metal. Tray → Health shows
+  "Speech engine: …" (`gpu::status`, never runs the check) and, on Windows, Re-test GPU
+  (`gpu::retest`: forget `gpu.json`, test again, notify). Release zips build `--features vulkan` (Vulkan SDK;
   short `--target-dir`: the shader generator's nested CMake hits MAX_PATH) and ship LunarG's signed
   `vulkan-1.dll`; no GPU driver ⇒ whisper.cpp falls back to the CPU. 11 s test call: CPU 49 s,
   Vulkan 12 s (a desktop with an NVIDIA GPU).

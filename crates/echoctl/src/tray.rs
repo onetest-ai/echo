@@ -513,6 +513,8 @@ enum Action {
     NotesModel,
     Recheck,
     AskPermissions,
+    #[cfg_attr(not(feature = "transcribe"), allow(dead_code))]
+    RetestGpu,
     OpenUrl(String),
     ChangeHome,
     ToggleAutostart,
@@ -752,6 +754,16 @@ impl Ui {
         let askp = self.item("Ask for permissions…", !all_ok, Some(Action::AskPermissions));
         let recheck = self.item("Re-check permissions", true, Some(Action::Recheck));
         let _ = health.append_items(&[&sep(), &askp, &recheck]);
+        // What transcription runs on (Windows: the GPU unless its test failed, `gpu.rs`).
+        #[cfg(feature = "transcribe")]
+        {
+            let engine = MenuItem::new(format!("Speech engine: {}", crate::gpu::status()), false, None);
+            let _ = health.append_items(&[&sep(), &engine]);
+            if cfg!(windows) {
+                let retest = self.item("Re-test GPU", true, Some(Action::RetestGpu));
+                let _ = health.append(&retest);
+            }
+        }
         // Calendar: the app's own Microsoft 365 sign-in (read-only).
         let calendar = Submenu::new(if model.calendar_account.is_some() { "Calendar ✓" } else { "Calendar" }, true);
         match &model.calendar_account {
@@ -1010,6 +1022,14 @@ impl Ui {
             }
             Action::Recheck => self.health = health(),
             Action::AskPermissions => app::request_permissions(),
+            Action::RetestGpu => {
+                #[cfg(feature = "transcribe")]
+                std::thread::spawn(|| {
+                    let ok = crate::gpu::retest();
+                    app::notify("GPU test", if ok { "Transcription runs on the GPU." } else { "The GPU test failed: transcription runs on the CPU." });
+                });
+                return;
+            }
             Action::DownloadModel(name) => app::download_model_in_background(name),
             Action::ToggleAutostart => drop(app::set_autostart(!app::autostart_enabled())),
             Action::ChangeHome => {
