@@ -1,7 +1,7 @@
 # Windows
 
 Windows 10 2004+ or Windows 11, Teams (new) installed. Known limits for this beta: the build is
-unsigned; updates open the release page.
+unsigned (updates are checked against the release's SHA-256 instead).
 
 ### TC-WINOS-001 · Build
 **Priority:** P0 · **Platform:** Windows
@@ -129,5 +129,6 @@ Vulkan SDK (`VULKAN_SDK`), Python.
 **Priority:** P2 · **Platform:** Windows
 
 **Expected**
-- With a newer release out, the tray offers it and opens the release page (no automatic
-  install on Windows).
+- With a newer release out, the tray offers it; Update downloads the MSI, checks its SHA-256,
+  installs it silently (no admin prompt) and Echo restarts on the new version
+  (`%TEMP%\echo-update-<version>\install.log`).

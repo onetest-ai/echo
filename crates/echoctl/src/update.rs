@@ -4,7 +4,10 @@
 //! read from the public API, or — while the repository is private — through the `gh` CLI when it
 //! is installed and signed in. Installing (macOS): download the .dmg, mount it, verify that the
 //! new Echo.app is signed by our Developer ID team, then a small detached script swaps the
-//! bundle once this process has exited and opens the new one. Never while recording.
+//! bundle once this process has exited and opens the new one. Windows (unsigned builds): the
+//! release's per-user MSI, checked against the SHA-256 digest GitHub publishes for it, installed
+//! silently by msiexec (the MSI quits Echo, replaces the files and starts it again). Every
+//! download is checked against that digest. Never while recording.
 
 use crate::app::NoWindow;
 use std::path::{Path, PathBuf};
@@ -27,6 +30,8 @@ pub struct Release {
     pub asset: String,
     pub url: Option<String>,
     pub notes_url: String,
+    /// The asset's SHA-256 (hex) from the release API, read over HTTPS.
+    pub sha256: Option<String>,
 }
 
 /// The newest release found by the last check, if it is newer than this build.
@@ -54,7 +59,7 @@ pub fn newer(candidate: &str, current: &str) -> bool {
 
 fn asset_suffix() -> &'static str {
     if cfg!(windows) {
-        "windows-x64.zip"
+        "windows-x64.msi"
     } else if cfg!(target_arch = "aarch64") {
         "macos-arm64.dmg"
     } else {
@@ -106,19 +111,39 @@ pub fn check() -> Result<Option<Release>> {
         asset: a["name"].as_str().unwrap_or_default().to_string(),
         url: a["browser_download_url"].as_str().map(str::to_owned),
         notes_url: v["html_url"].as_str().unwrap_or_default().to_string(),
+        sha256: a["digest"].as_str().and_then(parse_digest),
     });
     let release = release.filter(|r| newer(&r.version, env!("CARGO_PKG_VERSION")) && can_install());
     *AVAILABLE.lock().unwrap() = release.clone();
     Ok(release)
 }
 
-/// Only offer what can be installed: on macOS that needs an Echo.app to swap. A development
-/// build with no app installed updates with git.
+/// "sha256:<64 hex>" → the hex, lower case.
+fn parse_digest(d: &str) -> Option<String> {
+    let hex = d.strip_prefix("sha256:")?;
+    (hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit())).then(|| hex.to_ascii_lowercase())
+}
+
+/// Only offer what can be installed: on macOS that needs an Echo.app to swap; on Windows, Echo
+/// running from the MSI's folder (a copy elsewhere would end up next to a second install). A
+/// development build updates with git.
 fn can_install() -> bool {
     #[cfg(target_os = "macos")]
     return crate::app::installed_app().is_some();
+    #[cfg(windows)]
+    return msi_folder().is_some_and(|dir| {
+        let exe_dir = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf));
+        let canon = |p: &Path| dunce::canonicalize(p).ok();
+        exe_dir.is_some_and(|e| canon(&e).is_some() && canon(&e) == canon(&dir))
+    });
     #[allow(unreachable_code)]
     true
+}
+
+/// Where the MSI installs Echo (packaging/windows/echo.wxs).
+#[cfg(windows)]
+fn msi_folder() -> Option<PathBuf> {
+    std::env::var_os("LOCALAPPDATA").map(|d| PathBuf::from(d).join("Programs").join("echo"))
 }
 
 fn download(r: &Release, dir: &Path) -> Result<PathBuf> {
@@ -142,6 +167,23 @@ fn download(r: &Release, dir: &Path) -> Result<PathBuf> {
     Ok(dest)
 }
 
+/// The download must match the digest the release API gave. Windows builds aren't signed, so
+/// there the digest is required; macOS also checks the signature afterwards.
+fn verify_digest(r: &Release, file: &PathBuf) -> Result<()> {
+    let Some(want) = &r.sha256 else {
+        if cfg!(windows) {
+            bail!("the release gives no checksum for {} — not installed", r.asset);
+        }
+        return Ok(());
+    };
+    let got = crate::models::sha256_file(file)?;
+    if &got != want {
+        let _ = std::fs::remove_file(file);
+        bail!("{} doesn't match the release's checksum — not installed", r.asset);
+    }
+    Ok(())
+}
+
 /// Download, verify and stage the update. A detached script swaps it in once the app process
 /// (`wait_pid`) has exited and starts the new version; the caller then stops the app.
 pub fn install(r: &Release, wait_pid: u32) -> Result<()> {
@@ -150,6 +192,7 @@ pub fn install(r: &Release, wait_pid: u32) -> Result<()> {
     }
     let work = std::env::temp_dir().join(format!("echo-update-{}", r.version));
     let file = download(r, &work)?;
+    verify_digest(r, &file)?;
     platform_install(&file, &work, wait_pid)
 }
 
@@ -191,11 +234,24 @@ open -g "$2"
     spawn_detached_sh(script, &[&wait_pid.to_string(), &target.display().to_string(), &staged.display().to_string()])
 }
 
-/// Windows builds aren't code-signed yet, so a downloaded exe can't be verified: open the
-/// release page instead of installing it.
+/// Run the (checksum-verified) MSI silently. It is per-user, so no elevation; its own custom
+/// actions quit the running Echo (`app quit` waits for it) before replacing the files and start
+/// the new one afterwards, so `wait_pid` isn't needed. msiexec outlives this process.
 #[cfg(windows)]
-fn platform_install(_: &Path, _: &Path, _: u32) -> Result<()> {
-    bail!("automatic updates need a signed Windows build — download it from the release page")
+fn platform_install(msi: &Path, work: &Path, _wait_pid: u32) -> Result<()> {
+    use std::os::windows::process::CommandExt;
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    let msiexec = std::env::var_os("SystemRoot").map(|r| PathBuf::from(r).join("System32").join("msiexec.exe")).unwrap_or_else(|| "msiexec.exe".into());
+    Command::new(msiexec)
+        .arg("/i")
+        .arg(msi)
+        .args(["/qn", "/norestart", "/l*v"])
+        .arg(work.join("install.log"))
+        .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
+        .spawn()
+        .context("could not start the Windows installer")?;
+    Ok(())
 }
 
 #[cfg(not(any(target_os = "macos", windows)))]
@@ -244,6 +300,13 @@ mod tests {
     fn only_plain_versions_are_accepted() {
         assert!(valid_version("0.1.1") && valid_version("1.20.3-beta.2"));
         assert!(!valid_version("9.9.9$(touch x)") && !valid_version("1.2") && !valid_version("1.2.3-") && !valid_version("1.2.3 x"));
+    }
+
+    #[test]
+    fn digests_are_plain_sha256() {
+        let hex = "60d5062f1013306fff356ce4a0ecb1c9ceca176f4ac65d53a7b31e020e96758b";
+        assert_eq!(parse_digest(&format!("sha256:{}", hex.to_uppercase())).as_deref(), Some(hex));
+        assert!(parse_digest(hex).is_none() && parse_digest("sha256:abc").is_none() && parse_digest(&format!("sha1:{hex}")).is_none());
     }
 
     #[test]

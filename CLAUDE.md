@@ -271,10 +271,14 @@ notes". Live pane model: `config.live_model` (default haiku).
   `<config dir>/app.lock`, not just the heartbeat); `Config::save` is atomic and nothing saves
   after a failed load; `transcribe` refuses a call still recording and takes `.transcribing`
   exclusively; call folders are never reused (`-2` suffix); release tags must be plain semver
-  and reach the swap script only as `"$1"…` arguments; Windows updates open the release page
-  (unsigned builds can't be verified); the transcription worker is never joined on the watcher's thread.
+  and reach the swap script only as `"$1"…` arguments; Windows updates (unsigned) install only an MSI
+  matching the release's SHA-256 digest; the transcription worker is never joined on the watcher's thread.
 - Updates (`update.rs`): GitHub release check at start + every 6 h (public API, else `gh`);
-  install mounts the dmg, requires our team id signature, swaps the bundle after exit.
+  install mounts the dmg, requires our team id signature, swaps the bundle after exit. Windows:
+  the release's MSI (offered only to Echo in `%LOCALAPPDATA%\Programs\echo`), checked against
+  the asset's `digest` from the API (required: the builds are unsigned), run by `msiexec /qn`
+  (per-user, no elevation; the MSI quits Echo, replaces the files, starts it). Every platform
+  checks the digest when the API gives one. Code signing would add a publisher check on top.
 - `me.md` profile → `context.me_profile`; `echoctl compose` opens a mailto draft (never sends);
   `calls::recap` (deterministic "last time" bullets) in the Record dialog and Upcoming menu;
   tray "Add a note…" while recording; "Notes ready" notification.

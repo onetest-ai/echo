@@ -10,8 +10,9 @@ Code markers: `git grep "TODO(windows)"`.
 
 ## Not built yet
 
-1. **Signed builds and updates** — the MSI and zip are unsigned, so `update.rs` opens the release page
-   instead of installing. Needs code signing, then a verified swap like macOS's.
+1. **Signed builds** — the MSI and zip are unsigned (SmartScreen says "unknown publisher").
+   Updates install without it (the MSI is checked against the release's SHA-256); signing would
+   add a publisher check on top (Azure Artifact Signing or an OV certificate + `signtool`).
 
 ## Known limits (follow-ups)
 

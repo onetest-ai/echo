@@ -189,7 +189,7 @@ fn expected_sha256(file: &str) -> Result<String> {
         .ok_or_else(|| anyhow!("{file} not found in {REPO}"))
 }
 
-fn sha256_file(path: &PathBuf) -> Result<String> {
+pub(crate) fn sha256_file(path: &PathBuf) -> Result<String> {
     let mut f = fs::File::open(path)?;
     let mut h = Sha256::new();
     let mut buf = vec![0u8; 1 << 20];

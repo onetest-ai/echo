@@ -555,12 +555,11 @@ function calendarView() {
   // Layout end: at least 20 min, so a short meeting is still a readable block.
   blocks.forEach((b) => lanes(b.map((x) => Object.assign(x, { end: Math.max(x.real, x.s + 20 * 60000) }))))
 
-  // Hours shown: the working day, stretched to fit the events.
-  const hoursOf = blocks.flat().flatMap((x) => [new Date(x.s).getHours(), new Date(x.real - 1).getHours() + 1])
-  const h0 = Math.max(0, Math.min(8, ...hoursOf)), h1 = Math.min(24, Math.max(19, ...hoursOf))
-  // Fill the window: hours stretch to the available height (min 40 px, then the grid scrolls).
+  // The whole day, scrolling; an hour is sized so the working day (08:00–19:00) fills the
+  // window (min 40 px).
+  const h0 = 0, h1 = 24
   const reserved = 112 + (allday.some((a) => a.length) ? 30 : 0) + (note ? 34 : 0)
-  const HOUR = Math.max(40, Math.floor((window.innerHeight - reserved) / (h1 - h0)))
+  const HOUR = Math.max(40, Math.floor((window.innerHeight - reserved) / 11))
   const cols = `grid-template-columns: repeat(${days}, minmax(0, 1fr))`
   const dayHead = `<div class="days" style="${cols}">${dayList.map((x) => `<div class="${sameDay(x, now) ? 'today' : ''}">${esc(x.toLocaleDateString([], { weekday: 'short' }))}<b>${x.getDate()}</b></div>`).join('')}</div>`
   const alldayRow = allday.some((a) => a.length) ? `<div class="allday" style="${cols}">${allday.map((a) => `<div>${a.map((e) => `<span title="${esc(e.subject)}">${esc(e.subject)}</span>`).join('')}</div>`).join('')}</div>` : ''
@@ -586,7 +585,7 @@ function calendarView() {
   }).join('')
   const empty = !blocks.some((b) => b.length) && !allday.some((a) => a.length)
     ? `<p style="position:absolute;top:40%;left:0;right:0;text-align:center;color:var(--text-3);pointer-events:none">${days === 1 ? 'Nothing on the calendar this day.' : 'Nothing on the calendar these days.'}</p>` : ''
-  const grid = `<div class="grid-wrap" id="calgrid"><div class="grid" style="grid-template-columns: 56px repeat(${days}, minmax(0, 1fr))"><div class="hours" style="height:${(h1 - h0) * HOUR}px">${hourLabels}</div>${colHtml}</div>${empty}</div>`
+  const grid = `<div class="grid-wrap" id="calgrid" data-hour="${HOUR}"><div class="grid" style="grid-template-columns: 56px repeat(${days}, minmax(0, 1fr))"><div class="hours" style="height:${(h1 - h0) * HOUR}px">${hourLabels}</div>${colHtml}</div>${empty}</div>`
   const sel = S.cal.selected && (d.events || []).find((e) => e.id === S.cal.selected)
   return `<div class="cal">${head}${note}<div style="display:grid;grid-template-rows:auto auto 1fr;min-height:0">${dayHead}${alldayRow}${grid}</div>${sel ? eventDetail(sel, now) : ''}</div>`
 }
@@ -624,7 +623,8 @@ function render() {
     const grid = $('#calgrid'), keep = grid ? grid.scrollTop : null
     app.innerHTML = `<div class="shell no-list">${sidebar()}<main class="main">${calendarView()}</main></div>`
     const g = $('#calgrid')
-    if (g) g.scrollTop = keep != null ? keep : Math.max(0, ($('.now') ? $('.now').offsetTop : 0) - 120)
+    // First open: around now, or 08:00 on a week without today.
+    if (g) g.scrollTop = keep != null ? keep : Math.max(0, ($('.now') ? $('.now').offsetTop - 120 : 8 * Number(g.dataset.hour)))
   } else {
     app.innerHTML = `<div class="shell">${sidebar()}${list()}<main class="main">${doc()}</main></div>`
   }
