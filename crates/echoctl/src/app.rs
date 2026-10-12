@@ -97,7 +97,7 @@ fn check_updates() {
     loop {
         if let Ok(Some(r)) = crate::update::check() {
             if told.as_deref() != Some(r.version.as_str()) {
-                notify("Update available", &format!("Echo {} — install it from the menu.", r.version));
+                notify_click("Update available", &format!("Echo {} — click to install.", r.version), Click::Update);
                 told = Some(r.version);
             }
         }
@@ -874,11 +874,45 @@ pub fn ask_text(message: &str, default: &str, ok: &str) -> Option<String> {
     }
 }
 
-/// A passive notification (no buttons).
+/// What clicking a notification does (while the app runs).
+#[derive(Clone, Copy, PartialEq)]
+pub enum Click {
+    OpenWindow,
+    /// The same as the menu's "Update to …": asks, then installs.
+    Update,
+}
+
+/// Set by a click on an "Update available" notification; taken by the tray loop.
+static UPDATE_REQUEST: AtomicBool = AtomicBool::new(false);
+
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn take_update_request() -> bool {
+    UPDATE_REQUEST.swap(false, Ordering::SeqCst)
+}
+
+/// Ask the tray loop to start the update ("Check for updates" found one).
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn request_update() {
+    UPDATE_REQUEST.store(true, Ordering::SeqCst);
+}
+
+fn clicked(c: Click) {
+    match c {
+        Click::OpenWindow => *OPEN_WINDOW.lock().unwrap_or_else(|e| e.into_inner()) = Some(None),
+        Click::Update => UPDATE_REQUEST.store(true, Ordering::SeqCst),
+    }
+}
+
+/// A passive notification (no buttons); a click opens the Echo window.
 pub fn notify(title: &str, body: &str) {
+    notify_click(title, body, Click::OpenWindow)
+}
+
+/// A notification whose click does `click`.
+pub fn notify_click(title: &str, body: &str, click: Click) {
     #[cfg(target_os = "macos")]
     if bundle_path().is_some() {
-        notifications::post(title, body);
+        notifications::post(title, body, click);
         return;
     }
     #[cfg(target_os = "macos")]
@@ -888,10 +922,10 @@ pub fn notify(title: &str, body: &str) {
         let _ = Command::new("osascript").args(["-e", &script]).status();
     }
     #[cfg(windows)]
-    notifications::post(title, body);
+    notifications::post(title, body, click);
     #[cfg(not(any(target_os = "macos", windows)))]
     {
-        let _ = (title, body);
+        let _ = (title, body, click);
     }
 }
 
@@ -945,15 +979,15 @@ pub mod notifications {
         s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
     }
 
-    pub fn post(title: &str, body: &str) {
-        if let Err(e) = try_post(title, body) {
+    pub fn post(title: &str, body: &str, click: super::Click) {
+        if let Err(e) = try_post(title, body, click) {
             if std::env::var_os("ECHOCTL_DEBUG").is_some() {
                 eprintln!("toast failed: {e}");
             }
         }
     }
 
-    fn try_post(title: &str, body: &str) -> windows::core::Result<()> {
+    fn try_post(title: &str, body: &str, click: super::Click) -> windows::core::Result<()> {
         if !registered() {
             return Err(windows::core::Error::from_hresult(windows::core::HRESULT(0x8000_4005u32 as i32)));
         }
@@ -965,8 +999,8 @@ pub mod notifications {
         let doc = XmlDocument::new()?;
         doc.LoadXml(&HSTRING::from(xml))?;
         let toast = ToastNotification::CreateToastNotification(&doc)?;
-        toast.Activated(&TypedEventHandler::new(|_, _| {
-            *super::OPEN_WINDOW.lock().unwrap_or_else(|e| e.into_inner()) = Some(None);
+        toast.Activated(&TypedEventHandler::new(move |_, _| {
+            super::clicked(click);
             Ok(())
         }))?;
         ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(AUMID))?.Show(&toast)?;
@@ -998,6 +1032,9 @@ pub mod notifications {
         UNNotificationRequest, UNNotificationResponse, UNUserNotificationCenter, UNUserNotificationCenterDelegate,
     };
 
+    /// Marks a notification whose click starts the update (`Click::Update`).
+    const UPDATE_CATEGORY: &str = "update";
+
     /// Set in the app process (which keeps running); a CLI process waits for its post instead.
     static IN_APP: AtomicBool = AtomicBool::new(false);
 
@@ -1021,8 +1058,9 @@ pub mod notifications {
             }
 
             #[unsafe(method(userNotificationCenter:didReceiveNotificationResponse:withCompletionHandler:))]
-            fn did_receive(&self, _center: &UNUserNotificationCenter, _response: &UNNotificationResponse, handler: &DynBlock<dyn Fn()>) {
-                *super::OPEN_WINDOW.lock().unwrap_or_else(|e| e.into_inner()) = Some(None);
+            fn did_receive(&self, _center: &UNUserNotificationCenter, response: &UNNotificationResponse, handler: &DynBlock<dyn Fn()>) {
+                let category = response.notification().request().content().categoryIdentifier().to_string();
+                super::clicked(if category == UPDATE_CATEGORY { super::Click::Update } else { super::Click::OpenWindow });
                 handler.call(());
             }
         }
@@ -1054,11 +1092,14 @@ pub mod notifications {
         }
     }
 
-    pub fn post(title: &str, body: &str) {
+    pub fn post(title: &str, body: &str, click: super::Click) {
         let center = UNUserNotificationCenter::currentNotificationCenter();
         let content = UNMutableNotificationContent::new();
         content.setTitle(&NSString::from_str(title));
         content.setBody(&NSString::from_str(body));
+        if click == super::Click::Update {
+            content.setCategoryIdentifier(&NSString::from_str(UPDATE_CATEGORY));
+        }
         let request = UNNotificationRequest::requestWithIdentifier_content_trigger(&NSUUID::new().UUIDString(), &content, None);
         let (tx, rx) = mpsc::channel::<()>();
         let poster = center.clone();

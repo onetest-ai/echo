@@ -485,6 +485,7 @@ fn language_name(code: &str) -> String {
 #[derive(Clone)]
 enum Action {
     Record,
+    CheckUpdates,
     RecordIn(String),
     Stop,
     ArmMeeting(Box<MeetingContext>),
@@ -771,10 +772,11 @@ impl Ui {
         let change = self.item("Change app (client) ID…", true, Some(Action::CalendarClientId));
         let _ = calendar.append(&change);
         let _ = menu.append_items(&[&settings, &models_menu, &calendar, &claude, &health, &sep()]);
-        if let Some(v) = &model.update {
-            let up = self.item(&format!("Update to {v}…"), true, Some(Action::Update));
-            let _ = menu.append_items(&[&up, &sep()]);
-        }
+        let up = match &model.update {
+            Some(v) => self.item(&format!("Update to {v}…"), true, Some(Action::Update)),
+            None => self.item("Check for updates…", true, Some(Action::CheckUpdates)),
+        };
+        let _ = menu.append_items(&[&up, &sep()]);
         // Quit: stops the watcher (a recording in progress is finished and saved first).
         self.quit = self.item("Quit Echo", true, Some(Action::Quit));
         let _ = menu.append_items(&[&self.quit, &MenuItem::new(format!("Echo {}", env!("CARGO_PKG_VERSION")), false, None)]);
@@ -838,6 +840,22 @@ impl Ui {
             });
         }
         self.state = Some(state);
+    }
+
+    /// "Update to …" (menu, or a click on the "Update available" notification): ask, install.
+    fn start_update(&self) {
+        let Some(r) = crate::update::AVAILABLE.lock().unwrap().clone() else { return };
+        let stop = self.stop_flag.clone();
+        std::thread::spawn(move || {
+            let msg = format!("Install Echo {}?\n\nEcho restarts; nothing is recorded meanwhile.", r.version);
+            if app::ask(&msg, &["Later", "Update"], "Update").as_deref() != Some("Update") {
+                return;
+            }
+            match crate::update::install(&r, std::process::id()) {
+                Ok(()) => stop.store(true, std::sync::atomic::Ordering::SeqCst), // the swap runs after exit
+                Err(e) => app::notify("Update failed", &format!("{e:#}")),
+            }
+        });
     }
 
     fn click(&mut self, id: &MenuId) {
@@ -912,17 +930,15 @@ impl Ui {
                 });
             }
             Action::Update => {
-                let Some(r) = crate::update::AVAILABLE.lock().unwrap().clone() else { return };
-                let stop = self.stop_flag.clone();
-                std::thread::spawn(move || {
-                    let msg = format!("Install Echo {}?\n\nEcho restarts; nothing is recorded meanwhile.", r.version);
-                    if app::ask(&msg, &["Later", "Update"], "Update").as_deref() != Some("Update") {
-                        return;
-                    }
-                    match crate::update::install(&r, std::process::id()) {
-                        Ok(()) => stop.store(true, std::sync::atomic::Ordering::SeqCst), // the swap runs after exit
-                        Err(e) => app::notify("Update failed", &format!("{e:#}")),
-                    }
+                self.start_update();
+                return;
+            }
+            Action::CheckUpdates => {
+                // Found: the same prompt as "Update to …" (the tray loop starts it).
+                std::thread::spawn(|| match crate::update::check() {
+                    Ok(Some(_)) => app::request_update(),
+                    Ok(None) => app::notify("Echo is up to date", &format!("Echo {} is the latest version.", env!("CARGO_PKG_VERSION"))),
+                    Err(e) => app::notify("Couldn't check for updates", &format!("{e:#}")),
                 });
                 return;
             }
@@ -1112,6 +1128,9 @@ pub fn run(app: TargetApp, stop: Arc<AtomicBool>) -> ! {
                 if let Some(u) = ui.as_mut() {
                     u.apply(s);
                     u.refresh_model(false);
+                    if app::take_update_request() {
+                        u.start_update();
+                    }
                     if let Some(call) = app::take_open_request() {
                         u.open_window = Some(call);
                         let _ = proxy.send_event(UiEvent::Menu(MenuId::new("echo-open-window")));

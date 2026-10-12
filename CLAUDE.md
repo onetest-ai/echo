@@ -125,12 +125,13 @@ octopus as one layer) that `actool` (Xcode 26) compiles into `Assets.car` (`CFBu
 + `echo.icns` — macOS 26 puts any other icon on a grey tile. No such actool → our own
 rounded-square `.iconset`. Dev builds (no bundle) set the round logo as the Dock icon at
 runtime; the Dock icon shows only while the Echo window is open. Notifications (macOS) go
-through UserNotifications as Echo.app (its icon; a click opens the window; asks permission at
+through UserNotifications as Echo.app (its icon; a click opens the window — "Update available" asks to
+install instead, `app::Click`; asks permission at
 first start); dev builds fall back to osascript, which macOS shows as Script Editor. Menu: status, Record, Stop,
 recent calls, Settings (data folder, start at login, install CLI), Speech models (use / download
 with % / remove), Claude Code (connect = install plugin at user scope; where notes are written),
 Health (Ask for permissions),
-Quit — clicks call the same `arm`/`stop` as the CLI, so every client sees the same events.
+Check for updates… (or Update to <version>… once one is found), Quit — clicks call the same `arm`/`stop` as the CLI, so every client sees the same events.
 macOS needs the event loop on the main thread, so `run_loop` runs on a worker thread.
 Prompts follow `config.scheduled` (calendar meetings) and `config.unscheduled` (other calls), each
 `ask` | `manual`; this user uses `manual` for both — nothing prompts, the user arms explicitly.
