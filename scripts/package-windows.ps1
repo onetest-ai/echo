@@ -1,6 +1,7 @@
-# Build Echo for Windows beta testers: release build -> zip with echoctl.exe.
-# Install: unzip to %LOCALAPPDATA%\Programs\echo, run `echoctl.exe app autostart on`
-# and double-click echoctl.exe (or `echoctl app start`).
+# Build Echo for Windows beta testers: release build -> dist\echo-<version>-windows-x64.msi
+# (per-user installer: Start menu, PATH, start at login; packaging/windows/echo.wxs) and the
+# same files as a .zip (unzip to %LOCALAPPDATA%\Programs\echo, `echoctl.exe app autostart on`,
+# double-click echoctl.exe).
 #
 # Needs: Rust (MSVC), Visual Studio Build Tools (C++; CMake comes with them), LLVM
 # (LIBCLANG_PATH) and the Vulkan SDK (VULKAN_SDK) - build machine only. The zip runs on any
@@ -63,3 +64,23 @@ $entries = (Get-ChildItem $stage).Name
 & "$env:SystemRoot\System32\tar.exe" -a -c -f $zip -C $stage @entries
 if ($LASTEXITCODE -ne 0) { throw "creating $zip failed" }
 Write-Output $zip
+
+# The installer (packaging/windows/echo.wxs): the same files, per user, no admin rights.
+# WiX 5 (MS-RL; later versions add a maintenance-fee EULA), either installed (admin):
+#   winget install WiXToolset.WiXCLI --version 5.0.2.0
+# or, without admin rights, the NuGet tool package run on any .NET >= 6 runtime:
+#   unzip https://www.nuget.org/api/v2/package/wix/5.0.2 to %LOCALAPPDATA%\wix5-tool
+$wix = @(Get-Command wix -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source)
+if (-not $wix) { $wix = @(Get-ChildItem "$env:ProgramFiles\WiX Toolset v5*\bin\wix.exe" -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName) }
+if (-not $wix -and (Test-Path "$env:LOCALAPPDATA\wix5-tool\tools\net6.0\any\wix.dll")) {
+    $env:DOTNET_ROLL_FORWARD = "Major"
+    $wix = @("dotnet", "$env:LOCALAPPDATA\wix5-tool\tools\net6.0\any\wix.dll")
+}
+if (-not $wix) { throw "WiX 5 is not installed - winget install WiXToolset.WiXCLI --version 5.0.2.0" }
+$msi = "dist\echo-$version-windows-x64.msi"
+$msiVersion = ($version -split '-')[0] # MSI versions are numeric only
+$wixArgs = @($wix | Select-Object -Skip 1) + @("build", "packaging\windows\echo.wxs", "-arch", "x64", "-d", "Version=$msiVersion", "-d", "Stage=$stage", "-o", $msi)
+& $wix[0] @wixArgs
+if ($LASTEXITCODE -ne 0) { throw "building $msi failed" }
+Remove-Item "dist\echo-$version-windows-x64.wixpdb" -ErrorAction SilentlyContinue
+Write-Output $msi

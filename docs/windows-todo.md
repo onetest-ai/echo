@@ -10,7 +10,7 @@ Code markers: `git grep "TODO(windows)"`.
 
 ## Not built yet
 
-1. **Signed builds and updates** — the zip is unsigned, so `update.rs` opens the release page
+1. **Signed builds and updates** — the MSI and zip are unsigned, so `update.rs` opens the release page
    instead of installing. Needs code signing, then a verified swap like macOS's.
 
 ## Known limits (follow-ups)

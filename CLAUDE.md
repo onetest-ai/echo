@@ -26,7 +26,10 @@ Notes/actions are written only by a Claude session (the app writes transcripts, 
   Never the cwd or a Claude workspace.
 - `packaging/macos/` (Info.plist, entitlements) + `scripts/package-macos.sh` (Developer ID,
   hardened runtime, notarize + staple the app, signed (not notarized) dmg; notary creds via `APPLE_API_KEY`/`_KEY_ID`/`_ISSUER` (API key) or keychain profile `echo-notary`).
-  `scripts/package-windows.ps1` (zip; unsigned for now).
+  `scripts/package-windows.ps1` (unsigned for now): a per-user MSI (`packaging/windows/echo.wxs`, WiX 5 —
+  later WiX versions carry a maintenance-fee EULA; the NuGet tool package in `%LOCALAPPDATA%\wix5-tool` needs no
+  admin) → `%LOCALAPPDATA%\Programs\echo`, Start menu shortcut (AUMID `onetest.Echo`), user PATH, Run key;
+  `app quit` before files are replaced, `app start` after; uninstall keeps data. Plus the same files as a zip.
 - Marketplace `echoctl` (`.claude-plugin/marketplace.json`): `claude plugin marketplace add
   onetest-ai/echo` + `claude plugin install echo@onetest --scope user|project|local`
   (what `echoctl claude connect` runs; `ECHOCTL_MARKETPLACE` overrides the source).

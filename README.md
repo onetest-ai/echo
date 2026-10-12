@@ -161,13 +161,15 @@ your PATH; on macOS it lives at `/Applications/Echo.app/Contents/MacOS/echoctl`)
 scripts/build-plugin.sh          # dev build into plugin/bin (the plugin's launcher prefers it)
 claude --plugin-dir plugin       # or install it from the repo's marketplace
 scripts/package-macos.sh         # signed + notarized Echo.app in a .dmg (see the script header)
-scripts/package-windows.ps1      # zip for Windows
+scripts/package-windows.ps1      # .msi installer + .zip for Windows
 ```
 Checks: `cargo clippy`, `cargo test`, `cargo check --target x86_64-pc-windows-msvc
 --no-default-features`, `scripts/check-mod.sh`. See `CLAUDE.md` for the design.
 
-Windows 10 2004+: unzip to `%LOCALAPPDATA%\Programs\echo`, run
-`echoctl.exe app autostart on`, then double-click `echoctl.exe`. On Windows the other people
+Windows 10 2004+: double-click `echo-<version>-windows-x64.msi` (per user, no administrator
+rights: Start menu, PATH, start at login; upgrades quit and restart Echo; uninstall from
+Settings → Apps keeps your calls). The `.zip` has the same files for a manual install.
+On Windows the other people
 in the call are recorded from the speakers or headset Teams plays on, so other sounds on that
 device (other apps, notifications) are recorded too: Windows can't isolate Teams' audio the
 way macOS does.

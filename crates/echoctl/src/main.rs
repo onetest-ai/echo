@@ -506,6 +506,10 @@ fn launched_as_app() -> bool {
 
 fn main() -> Result<()> {
     if launched_as_app() {
+        // Opened again (Start menu, a second double-click) while it runs: show its window.
+        if watch::running_watcher().is_some() {
+            return app::open_window(None);
+        }
         return app::run(apps::TargetApp::Teams, true, true);
     }
     match Cli::parse().cmd {

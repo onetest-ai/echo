@@ -64,9 +64,10 @@ pub fn allowed() -> bool {
 
 fn run_child() -> (bool, String) {
     let exe = std::env::current_exe().unwrap_or_else(|_| "echoctl".into());
-    let mut cmd = Command::new(exe);
+    let cmd = Command::new(exe);
     #[cfg(windows)]
-    cmd.no_window();
+    let cmd = cmd.no_window();
+    let mut cmd = cmd;
     let child = cmd.arg("gpu-check").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
     let mut child = match child {
         Ok(c) => c,
