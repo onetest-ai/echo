@@ -315,6 +315,9 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
                         mute_alive = start_mute_sync();
                         ui_alive = start_ui_capture(&r.dir, r.t0);
                         frames_alive = start_frame_capture(&r.dir, r.t0);
+                        if meeting.is_none() {
+                            find_call_people(&r.dir);
+                        }
                         chat_alive = start_chat_capture(&r.dir, r.started_at, meeting.as_ref());
                         emit("recording_started", json!({
                             "dir": r.dir.display().to_string(),
@@ -387,11 +390,14 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
 fn finish(r: Recording, reason: &str) {
     let secs = r.t0.elapsed().as_secs();
     match r.finish(reason) {
-        Ok((dir, _)) => {
+        Ok((dir, _, live)) => {
             emit("recording_stopped", json!({
                 "dir": dir.display().to_string(), "duration_s": secs, "reason": reason,
             }));
-            transcribe_in_background(dir);
+            match live {
+                Some(live) => finish_transcript(dir, live),
+                None => transcribe_in_background(dir),
+            }
         }
         Err(e) => emit("error", json!({ "message": format!("finishing recording failed: {e:#}") })),
     }
@@ -452,6 +458,54 @@ fn start_mute_sync() -> Option<Arc<AtomicBool>> {
     }
     #[cfg(not(any(target_os = "macos", windows)))]
     None
+}
+
+/// An ad-hoc call (no invite): who it is with, from Teams' call window title — the chat it was
+/// started from — matched to that chat in Microsoft 365 (its members, with emails; and its id
+/// for chat capture: a call from a chat posts no "call started" event). Without a sign-in, a
+/// title that is a person's name. Written as the call's `meeting.json` (source `teams-call`),
+/// which names the remote side of a 1:1 call and lists the participants in the notes.
+fn find_call_people(dir: &std::path::Path) {
+    #[cfg(any(target_os = "macos", windows))]
+    {
+        let dir = dir.to_path_buf();
+        std::thread::spawn(move || {
+            // The call window can take a few seconds to appear.
+            let name = (0..20).find_map(|i| {
+                if i > 0 {
+                    std::thread::sleep(Duration::from_secs(3));
+                }
+                crate::ax::call_title().as_deref().and_then(crate::ax::call_name)
+            });
+            let Some(name) = name else { return };
+            let chat = crate::graph::account().and_then(|_| match crate::graph::chat_named(&name) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("call chat by name: {e:#}");
+                    None
+                }
+            });
+            let meeting = match chat {
+                Some((id, topic, attendees)) => {
+                    if !dir.join("chat.id").exists() {
+                        let _ = fs::write(dir.join("chat.id"), &id);
+                    }
+                    MeetingContext { subject: topic, attendees, source: Some("teams-call".into()), ..Default::default() }
+                }
+                None if crate::ax::is_person_name(&name) => MeetingContext {
+                    attendees: vec![crate::meeting::Person { name, email: None }],
+                    source: Some("teams-call".into()),
+                    ..Default::default()
+                },
+                None => return,
+            };
+            if !dir.join(crate::meeting::FILE).exists() {
+                let _ = meeting.save(&dir);
+            }
+        });
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
+    let _ = dir;
 }
 
 /// Record the call app's window text during the call (Accessibility / UI Automation): the raw material
@@ -519,6 +573,10 @@ fn start_chat_capture(dir: &std::path::Path, started: DateTime<Local>, meeting: 
             None => {
                 let t0 = Instant::now();
                 loop {
+                    // Found by name (`find_call_people`): a call started from a chat.
+                    if let Some(id) = fs::read_to_string(dir.join("chat.id")).ok().filter(|i| !i.trim().is_empty()) {
+                        break (id.trim().to_string(), started);
+                    }
                     match crate::graph::find_call_chat(started.with_timezone(&Utc)) {
                         Ok(Some((id, at))) => break (id, at.with_timezone(&Local).min(started)),
                         Ok(None) => {}
@@ -600,9 +658,12 @@ pub fn fetch_call_chat(call: &str) -> Result<()> {
             let scheduled = meeting.as_ref().and_then(meeting_start).map(|s| s.with_timezone(&Local));
             (id, scheduled.map(|s| s.min(started)).unwrap_or(started))
         }
-        None => match crate::graph::find_call_chat(started.with_timezone(&Utc))? {
-            Some((id, at)) => (id, at.with_timezone(&Local).min(started)),
-            None => bail!("no chat found for this call (no meeting link, and no chat had a call running at {})", started.format("%H:%M")),
+        None => match fs::read_to_string(dir.join("chat.id")).ok().map(|i| i.trim().to_string()).filter(|i| !i.is_empty()) {
+            Some(id) => (id, started),
+            None => match crate::graph::find_call_chat(started.with_timezone(&Utc))? {
+                Some((id, at)) => (id, at.with_timezone(&Local).min(started)),
+                None => bail!("no chat found for this call (no meeting link, and no chat had a call running at {})", started.format("%H:%M")),
+            },
         },
     };
     let _ = fs::write(dir.join("chat.id"), &chat_id);
@@ -736,6 +797,11 @@ fn transcribe_now(dir: &std::path::Path) {
     if !ok && detail.contains("already being transcribed") {
         return;
     }
+    transcribed(dir, ok, &detail);
+}
+
+/// A call's transcript is written (or failed): notify, and emit `transcribed` for the clients.
+fn transcribed(dir: &std::path::Path, ok: bool, detail: &str) {
     if ok {
         let _ = fs::remove_file(dir.join(TRANSCRIBE_ERROR));
         AWAITING_NOTES.lock().unwrap_or_else(|e| e.into_inner()).push((dir.to_path_buf(), Instant::now()));
@@ -746,10 +812,40 @@ fn transcribe_now(dir: &std::path::Path) {
             crate::app::notify("Transcript ready", &format!("{title} — open Echo and click Write notes"));
         }
     } else {
-        let _ = fs::write(dir.join(TRANSCRIBE_ERROR), &detail);
-        crate::app::notify("Transcription failed", &detail);
+        let _ = fs::write(dir.join(TRANSCRIBE_ERROR), detail);
+        crate::app::notify("Transcription failed", detail);
     }
     emit("transcribed", json!({ "dir": dir.display().to_string(), "ok": ok, "error": detail }));
+}
+
+/// The call was transcribed while it was recorded: wait for the worker's last utterances and
+/// write the transcript. Any failure falls back to the full pass (`echoctl transcribe`).
+#[cfg(feature = "transcribe")]
+fn finish_transcript(dir: PathBuf, live: crate::recorder::Live) {
+    std::thread::spawn(move || {
+        let t = Instant::now();
+        let written = (|| -> Result<PathBuf> {
+            let _marker = crate::transcribe::take_marker(&dir)?;
+            let (segs, model) = live.join()?;
+            let cfg = crate::config::Config::load()?;
+            crate::transcribe::write_transcript(&dir, &cfg, &model, segs, "", false)
+        })();
+        match written {
+            Ok(_) => {
+                eprintln!("transcript of {} written {:.0}s after the call", dir.display(), t.elapsed().as_secs_f64());
+                transcribed(&dir, true, "");
+            }
+            Err(e) => {
+                eprintln!("transcription during the call failed ({e:#}); transcribing the recording again");
+                transcribe_now(&dir);
+            }
+        }
+    });
+}
+
+#[cfg(not(feature = "transcribe"))]
+fn finish_transcript(_dir: PathBuf, live: crate::recorder::Live) {
+    match live {}
 }
 
 /// Transcription needs no Claude turn, so the watcher runs it right away as a child process
@@ -792,7 +888,22 @@ fn recover(app_started: DateTime<Utc>) {
         let marker = dir.join(crate::transcribe_marker());
         if let Ok(pid) = fs::read_to_string(&marker) {
             match pid.trim().parse::<u32>() {
-                Ok(pid) if crate::app::process_alive(pid) => continue, // still transcribing
+                // Still transcribing (a child of the app that ran before): if it dies without a
+                // transcript, nobody else would pick the call up.
+                Ok(pid) if crate::app::process_alive(pid) => {
+                    let dir = dir.clone();
+                    std::thread::spawn(move || {
+                        while crate::app::process_alive(pid) {
+                            std::thread::sleep(Duration::from_secs(5));
+                        }
+                        let wavs = ["mic.wav", "remote.wav"].iter().any(|f| dir.join(f).exists());
+                        if wavs && !dir.join("transcript.md").exists() && !dir.join(TRANSCRIBE_ERROR).exists() {
+                            let _ = fs::remove_file(dir.join(crate::transcribe_marker()));
+                            transcribe_now(&dir);
+                        }
+                    });
+                    continue;
+                }
                 _ => drop(fs::remove_file(&marker)),
             }
         }

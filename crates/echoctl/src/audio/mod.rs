@@ -113,11 +113,9 @@ pub struct Track {
 impl Track {
     /// Start a track. If the source can't open yet (e.g. Teams isn't playing audio), the track
     /// keeps retrying every second instead of failing.
-    pub fn start(name: &'static str, path: &Path, source: Box<dyn Source>, t0: Instant, live: Option<LiveFeed>) -> Result<Self> {
-        // Live lines use the transcript's speaker names: the mic track is "me".
-        let speaker = if name == "mic" { "me" } else { "remote" };
+    pub fn start(name: &'static str, path: &Path, source: Box<dyn Source>, t0: Instant) -> Result<Self> {
         let signal = Arc::new(Signal::default());
-        let (tx, writer) = spawn_writer(path, t0, live.map(|f| (speaker, f)), signal.clone())?;
+        let (tx, writer) = spawn_writer(path, t0, signal.clone())?;
         let mut t = Track {
             name,
             source,
@@ -245,16 +243,9 @@ impl Track {
 /// (frames written, of which padding)
 type WriterHandle = JoinHandle<Result<(u64, u64)>>;
 
-/// Where a track's resampled audio is also sent while recording (live transcription).
-#[cfg(feature = "transcribe")]
-pub type LiveFeed = std::sync::mpsc::SyncSender<crate::live::LiveChunk>;
-#[cfg(not(feature = "transcribe"))]
-pub type LiveFeed = ();
-
 fn spawn_writer(
     path: &Path,
     t0: Instant,
-    live: Option<(&'static str, LiveFeed)>,
     signal: Arc<Signal>,
 ) -> Result<(Sender<Chunk>, WriterHandle)> {
     let spec = hound::WavSpec {
@@ -266,9 +257,6 @@ fn spawn_writer(
     let mut wav = hound::WavWriter::create(path, spec).with_context(|| format!("creating {}", path.display()))?;
     let (tx, rx) = mpsc::channel::<Chunk>();
     let handle = std::thread::spawn(move || -> Result<(u64, u64)> {
-        // Owned by the thread and dropped with it, which closes the live feed when the track ends.
-        #[cfg(not(feature = "transcribe"))]
-        let _ = &live;
         let (mut written, mut padded) = (0u64, 0u64);
         let mut epoch = 0u32;
         let mut rs = Resampler::new(TRACK_RATE, TRACK_RATE);
@@ -296,11 +284,6 @@ fn spawn_writer(
             }
             for s in &out {
                 wav.write_sample((s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16)?;
-            }
-            #[cfg(feature = "transcribe")]
-            if let Some((speaker, feed)) = &live {
-                // Never block the writer: when live is behind, it skips this audio.
-                let _ = feed.try_send(crate::live::LiveChunk { speaker, start: written, samples: out.clone() });
             }
             written += out.len() as u64;
         }

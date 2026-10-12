@@ -173,9 +173,10 @@ starts the app if it is set up but not running, and catches up: `echoctl pending
 status. Pane: transcript left / summary-highlights-actions right (stacked under 100 cols). Every
 1 s it heartbeats `<home>/.echo/mod.json`, tails `events.jsonl` (from the end, never
 replays), and: on `recording_started` opens the `echo-live` pane; on `transcribed` claims
-the call and submits `/echo:process-call <dir>` (unattended processing). The pane shows `<call>/live.jsonl` (written by `live.rs` during recording: turbo,
-utterance decoded after 0.8 s of silence) plus a rolling summary/highlights/actions from
-`$.model.complete` (haiku, ≤ every 90 s, ≥ 400 new chars). `echoctl live-replay <wav> <dir>` (hidden) tests live transcription.
+the call and submits `/echo:process-call <dir>` (unattended processing). The pane shows `<call>/live.jsonl` (written by `live.rs` during recording: the
+call's one transcription pass, an utterance decoded after 0.8 s of silence — see Transcription) plus a rolling summary/highlights/actions from
+`$.model.complete` (haiku, ≤ every 90 s, ≥ 400 new chars). `echoctl live-replay <wav> <dir>` (hidden) plays a WAV in as a growing recording (10×)
+and writes the transcript, as after a call.
 Mute sync: while recording, the watcher polls Teams' microphone button via Accessibility / UI
 Automation (`ax::MuteWatch`, label "Unmute…" ⇒ muted) every 400 ms; muted ⇒ `audio::mic::MUTED` makes the mic
 track record silence; events `mic_muted`/`mic_unmuted` drive the band. `config.follow_app_mute`
@@ -204,27 +205,39 @@ notes". Live pane model: `config.live_model` (default haiku).
 ## Robustness, per-call extras, updates
 - Recovery at app start (`watch::recover`): recordings never closed get their WAV headers fixed
   (`audio::repair_wav`) and are transcribed; `.transcribing` holds the pid, stale markers are
-  removed; failures leave `transcribe.error` (not retried). One transcription at a time.
+  removed; failures leave `transcribe.error` (not retried). One full pass at a time. A marker
+  whose process is still alive (a transcription child of the app that ran before) is watched
+  until it exits, and the call is transcribed then if it left no transcript.
 - Sleep = wall clock outrunning the monotonic clock (> 30 s) → the recording is closed.
 - Track restarts back off 1 s → 30 s (slow after 20, reset after 5 min stable); the remote
   track reopens after 5 min of exact digital zeros (≤ 10×; also what revoked TCC looks like).
-- `<call>/ui.jsonl` (`ax::UiRecorder`, `config.capture_ui`, default on): Teams window text diffs
+- `<call>/ui.jsonl` (`ax::UiRecorder`, `config.capture_ui`, default on): Teams' call window
+  (`ax::CallWindow`, both platforms: the window holding `microphone-button` — AXDOMIdentifier on
+  macOS, Teams' web UI is the same in WebView2; never the main window with chats) text diffs
   every 1 s on the audio clock + `ui-tree-{10,120,600}s.json` — raw material for speaker names
   (participant tiles read via AX; no screenshots).
 - `<call>/frames/*.jpg` + `frames.jsonl` (`frames.rs`, `config.capture_frames`, default off,
-  macOS needs full Screen Recording): the call window every few seconds (macOS `screencapture -l`;
-  Windows `PrintWindow`, **only while someone else shares**: the stage's
+  macOS needs full Screen Recording + Accessibility): the call window every 2 s (macOS
+  `screencapture -l` on its CGWindowID from `_AXUIElementGetWindow`; Windows `PrintWindow`),
+  **only while someone else shares** (`ax::Sharing`, shared logic in `ax/mod.rs`): the stage's
   `popout-content-button` (any language; absent while you present) → frames, the English
   "Content shared by <name>" → `shared_by`; nothing while you present — Teams doesn't say which
-  window). Kept when settled and new vs **every** kept frame. Tuned per platform: Windows
-  (share-only) 128×72, ≥ 4 % new (a slide is ~30 % of the window; a repeated title slide
-  ~1–2 %), every 2 s, ≥ 4 s apart; macOS (whole call, video tiles included) keeps 64×36, 12 %,
-  3 s, 8 s. ≤ 150 per call. A call with frames always gets notes (`context`'s gate).
+  window. Kept when settled and new vs **every** kept frame: 128×72 thumbnail, ≥ 4 % new (a
+  slide is ~30 % of the window; a repeated title slide ~1–2 %), ≥ 4 s apart (measured on
+  Windows; same on macOS). ≤ 150 per call. A call with frames always gets notes (`context`'s gate).
   `context.frames` → the notes' "On screen" section; process-call then prunes to the cited
   frames (`echoctl frames <call> --keep …|none`), which **moves** the rest, with their index
   lines, to `<home>/.echo/trash/<call>.frames/` (purged after 30 days, also on each prune) —
   never deleted outright. Restoring them is manual: move the files back into `<call>/frames/`
   and append the lines to `frames.jsonl` (`echoctl restore` is for whole calls).
+- Ad-hoc calls (no invite, no agenda match) → `watch::find_call_people`: the Teams call
+  window's title (`ax::call_title`, retried ~1 min) → `ax::call_name` (first " | " part: the chat
+  the call was started from) → `graph::chat_named` (a recent group chat with that topic, or a
+  1:1 chat with that person) → `<call>/meeting.json` (`source: teams-call`: members with emails,
+  topic as subject) + `chat.id` for chat capture (a call from a chat posts no "call started"
+  event). No sign-in: the title alone, if it looks like a person's name. Only when no
+  `meeting.json` exists. Dev: `echoctl call-people [--name …]`. Names found this way miss the
+  in-call vocabulary hint (built at start) but name the remote side and fill the notes.
 - `<call>/chat.json` (`watch::start_chat_capture`, `config.capture_chat`, default on with a
   Microsoft 365 sign-in): the meeting's Teams chat via Graph `Chat.Read` — chat id parsed from
   the join link (`19:meeting_…@thread.v2`); ad-hoc calls (no link) → `graph::find_call_chat`:
@@ -239,7 +252,7 @@ notes". Live pane model: `config.live_model` (default haiku).
   after a failed load; `transcribe` refuses a call still recording and takes `.transcribing`
   exclusively; call folders are never reused (`-2` suffix); release tags must be plain semver
   and reach the swap script only as `"$1"…` arguments; Windows updates open the release page
-  (unsigned builds can't be verified); live transcription is bounded and never joined at stop.
+  (unsigned builds can't be verified); the transcription worker is never joined on the watcher's thread.
 - Updates (`update.rs`): GitHub release check at start + every 6 h (public API, else `gh`);
   install mounts the dmg, requires our team id signature, swaps the bundle after exit.
 - `me.md` profile → `context.me_profile`; `echoctl compose` opens a mailto draft (never sends);
@@ -250,6 +263,17 @@ notes". Live pane model: `config.live_model` (default haiku).
   a question (haiku over the last 5/10 min).
 
 ## Transcription
+**One pass, during the call** (`live.rs`): a worker reads `mic.wav` / `remote.wav` as the track
+writers grow them (the WAVs on disk are the queue — nothing dropped when decoding falls behind;
+≤ 60 s buffered per track; 4 threads) and decodes each finished utterance with the final
+transcriber (`transcribe::final_transcriber`) → `live.jsonl`. When the recording stops the
+worker decodes the rest; `watch::finish_transcript` (holding `.transcribing`) writes the
+transcript (`transcribe::write_transcript`: order, echo filter, names, audio deleted) — seconds
+after the call. Whole-call step: echo cancellation — on speakers the mic is cancelled and
+decoded again at the end; on headphones nothing is redone. Any failure, no model when the
+recording started, recovery after a crash, and `echoctl transcribe` run the full pass over the
+WAVs (same steps). Release build on this Mac: 115 s of speech in ~21 s per track (model load
+included).
 Per track (mic = Me, remote = Remote) → energy VAD into ≤25 s utterances → language detected per
 utterance, restricted to `config.languages` (a new data folder starts with en, uk, ru, es; `[]` =
 any; stops uk↔ru confusion), using **turbo as the

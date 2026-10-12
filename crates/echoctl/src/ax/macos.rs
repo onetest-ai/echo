@@ -1,7 +1,7 @@
 //! macOS Accessibility (AX) reading of the call app's window — the basis for naming remote
 //! speakers (Teams' participant tiles expose names and
 //! a speaking state through accessibility; text only, no screenshots). During every recording
-//! `UiRecorder` logs the window's text changes into the call folder, which is what the speaker
+//! `UiRecorder` logs the call window's text changes into the call folder, which is what the speaker
 //! reader is built and tuned from; `MuteWatch` follows the mute button. `echoctl ax-dump`
 //! remains a dev tool.
 //!
@@ -17,7 +17,7 @@ use objc2::rc::Retained;
 use objc2_foundation::NSString;
 use serde_json::{json, Map, Value};
 
-use super::{mute_state_from_labels, UI_LOG_MAX_BYTES, UI_TREES_AT};
+use super::{mute_state_from_labels, ShareSeen, Sharing, MIC_BUTTON_ID, UI_LOG_MAX_BYTES, UI_TREES_AT};
 use crate::paths;
 
 type CFTypeRef = *const c_void;
@@ -30,6 +30,8 @@ extern "C" {
     fn AXUIElementSetAttributeValue(e: AXUIElementRef, attr: CFTypeRef, value: CFTypeRef) -> i32;
     fn AXUIElementGetTypeID() -> usize;
     fn AXIsProcessTrusted() -> bool;
+    /// The CGWindowID behind an AX window (private, stable since 10.x; what window managers use).
+    fn _AXUIElementGetWindow(e: AXUIElementRef, id: *mut u32) -> i32;
 }
 
 #[link(name = "CoreFoundation", kind = "framework")]
@@ -270,6 +272,79 @@ impl MuteWatch {
     }
 }
 
+// ── the call window ────────────────────────────────────────────────────────────────────────
+
+/// Holds Teams' microphone button (by its id only: a "Mute …" label also appears elsewhere).
+fn holds_mic_button(e: &Element, depth: usize) -> bool {
+    e.string("AXDOMIdentifier").as_deref() == Some(MIC_BUTTON_ID) || depth < MAX_DEPTH && e.children("AXChildren").iter().any(|c| holds_mic_button(c, depth + 1))
+}
+
+/// Teams' call window, found once and kept: a call's UI text and frames come from it alone
+/// (the main window shows chats). Finding it walks every Teams window's tree, so it is looked
+/// for again only every few seconds, or when the window closes.
+pub struct CallWindow {
+    app: Element,
+    window: Option<Element>,
+    looked_at: Option<Instant>,
+}
+
+impl CallWindow {
+    pub fn teams() -> Option<Self> {
+        if !unsafe { AXIsProcessTrusted() } {
+            return None;
+        }
+        let app = Element::application(app_pid(TEAMS_EXECUTABLE)?)?;
+        app.enable_web_accessibility();
+        Some(CallWindow { app, window: None, looked_at: None })
+    }
+
+    /// The call window, if Teams has one open.
+    pub fn window(&mut self) -> Option<&Element> {
+        let every = if self.window.is_some() { Duration::from_secs(10) } else { Duration::from_secs(3) };
+        let closed = self.window.as_ref().is_some_and(|w| w.string("AXRole").is_none());
+        if closed || self.looked_at.is_none_or(|t| t.elapsed() >= every) {
+            self.window = self.app.children("AXWindows").into_iter().find(|w| holds_mic_button(w, 0));
+            self.looked_at = Some(Instant::now());
+        }
+        self.window.as_ref()
+    }
+
+    /// The call window's title.
+    pub fn title(&mut self) -> Option<String> {
+        self.window()?.string("AXTitle")
+    }
+
+    /// The call window's CGWindowID (for `screencapture -l`).
+    pub fn window_id(&mut self) -> Option<u32> {
+        let w = self.window()?;
+        let mut id = 0u32;
+        (unsafe { _AXUIElementGetWindow(w.0, &mut id) } == 0 && id != 0).then_some(id)
+    }
+
+    /// Who is presenting in the call, from the call window: the same ids and labels as on
+    /// Windows (Teams' web UI is the same) — see `Sharing`.
+    pub fn sharing(&mut self) -> Sharing {
+        let Some(w) = self.window() else { return Sharing::Nobody };
+        fn walk(e: &Element, depth: usize, seen: &mut ShareSeen) {
+            let id = e.string("AXDOMIdentifier").unwrap_or_default();
+            for a in ["AXTitle", "AXDescription", "AXValue"] {
+                if let Some(label) = e.string(a) {
+                    seen.see(&id, &label);
+                }
+            }
+            seen.see(&id, "");
+            if depth < MAX_DEPTH {
+                for c in e.children("AXChildren") {
+                    walk(&c, depth + 1, seen);
+                }
+            }
+        }
+        let mut seen = ShareSeen::default();
+        walk(w, 0, &mut seen);
+        seen.sharing()
+    }
+}
+
 // ── per-call UI timeline (for speaker names) ───────────────────────────────────────────────
 
 /// One line per text-bearing node: "depth|role|subrole|title|description|value". Diffing these
@@ -291,11 +366,12 @@ fn ui_lines(e: &Element, depth: usize, out: &mut Vec<String>, budget: &mut usize
     }
 }
 
-/// Records Teams' window text while a call is recorded: `<call>/ui.jsonl` holds
+/// Records the text of Teams' call window (not the main window, which shows chats) while a
+/// call is recorded: `<call>/ui.jsonl` holds
 /// `{t, add, del}` lines (t = seconds since the recording started, aligned with the audio),
 /// `<call>/ui-tree-<s>.json` a few full trees. Text only — no screenshots.
 pub struct UiRecorder {
-    app: Element,
+    window: CallWindow,
     dir: PathBuf,
     t0: Instant,
     out: std::fs::File,
@@ -306,23 +382,19 @@ pub struct UiRecorder {
 
 impl UiRecorder {
     pub fn teams(dir: &std::path::Path, t0: Instant) -> Option<Self> {
-        if !unsafe { AXIsProcessTrusted() } {
-            return None;
-        }
-        let app = Element::application(app_pid(TEAMS_EXECUTABLE)?)?;
-        app.enable_web_accessibility();
+        let window = CallWindow::teams()?;
         let out = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("ui.jsonl")).ok()?;
-        Some(UiRecorder { app, dir: dir.to_path_buf(), t0, out, bytes: 0, prev: Default::default(), trees_done: 0 })
+        Some(UiRecorder { window, dir: dir.to_path_buf(), t0, out, bytes: 0, prev: Default::default(), trees_done: 0 })
     }
 
-    /// Read the tree once and append what changed. Returns false once the log is full.
+    /// Read the call window once and append what changed. Returns false once the log is full.
     pub fn poll(&mut self) -> bool {
         use std::io::Write;
         if self.bytes > UI_LOG_MAX_BYTES {
             return false;
         }
         let t = self.t0.elapsed().as_secs_f64();
-        let windows = self.app.children("AXWindows");
+        let windows: Vec<&Element> = self.window.window().into_iter().collect();
         let mut lines = vec![];
         let mut budget = MAX_NODES;
         for w in &windows {

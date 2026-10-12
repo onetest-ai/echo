@@ -24,9 +24,7 @@ pub(crate) const RATE: usize = 16_000;
 const MAX_UTTERANCE_S: f64 = 25.0;
 /// Below this, language detection is unreliable; reuse the track's previous language.
 const SHORT_UTTERANCE_S: f64 = 1.5;
-/// Live transcription (no guard): utterances shorter than this skip the vocabulary hint.
-const PROMPT_MIN_S: f64 = 3.0;
-/// Final transcription: hinted utterances from this length are checked against an unhinted
+/// Hinted utterances from this length are checked against an unhinted
 /// decode: the hint is kept only if the text length stays within
 /// GUARD_MIN_RATIO × … GUARD_MAX_RATIO × + GUARD_SLACK chars of the plain text — otherwise
 /// the hint made Whisper add (listed names in silence) or drop words.
@@ -53,7 +51,7 @@ pub struct Segment {
 pub use crate::calls::resolve_call;
 
 /// Read any WAV (old recordings are 24/48 kHz float) as 16 kHz mono f32.
-fn load_16k(path: &Path) -> Result<Vec<f32>> {
+pub(crate) fn load_16k(path: &Path) -> Result<Vec<f32>> {
     let mut r = hound::WavReader::open(path).with_context(|| format!("opening {}", path.display()))?;
     let spec = r.spec();
     let raw: Vec<f32> = match spec.sample_format {
@@ -227,7 +225,7 @@ fn is_hallucination(text: &str) -> bool {
 
 /// whisper.cpp threads for the final pass: on macOS Metal does the work; a CPU-only build
 /// scales to about the physical cores (half the logical ones).
-fn final_threads() -> usize {
+pub(crate) fn final_threads() -> usize {
     let n = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
     if cfg!(target_os = "macos") { n.min(8) } else { (n / 2).clamp(4, 16) }
 }
@@ -324,8 +322,6 @@ pub(crate) struct Transcriber {
     allowed: Vec<i32>,
     threads: usize,
     prompt: Option<String>,
-    /// Check hinted decodes against plain ones (final pass; too slow for live).
-    guard: bool,
 }
 
 /// Keep the hinted decode? Only when its length is in line with the unhinted one.
@@ -345,16 +341,6 @@ pub(crate) struct TrackState {
 }
 
 impl Transcriber {
-    /// One model doing both language ID and decoding (used live, with turbo).
-    pub(crate) fn single(model_path: &Path, cfg: &Config, prompt: Option<String>) -> Result<Self> {
-        whisper_rs::install_logging_hooks();
-        let allowed = allowed_languages(cfg)?;
-        let ctx = WhisperContext::new_with_params(model_path, WhisperContextParameters { use_gpu: true, ..Default::default() })
-            .context("loading model")?;
-        let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(4);
-        Ok(Transcriber { ctx, detector: None, allowed, threads, prompt, guard: false })
-    }
-
     pub(crate) fn track_state(&self) -> Result<TrackState> {
         Ok(TrackState {
             state: self.ctx.create_state()?,
@@ -383,15 +369,12 @@ impl Transcriber {
         let lang = lang_id.and_then(whisper_rs::get_lang_str).unwrap_or("auto").to_string();
         let dur = chunk.len() as f64 / RATE as f64;
         let segs = match self.prompt.as_deref() {
-            Some(hint) if self.guard && dur >= GUARD_MIN_S => {
+            Some(hint) if dur >= GUARD_MIN_S => {
                 let hinted = self.decode(&mut ts.state, chunk, &lang, Some(hint))?;
                 let plain = self.decode(&mut ts.state, chunk, &lang, None)?;
                 let text = |d: &Decoded| d.iter().map(|(_, _, t)| t.as_str()).collect::<Vec<_>>().join(" ");
                 if hint_is_sane(&text(&hinted), &text(&plain)) { hinted } else { plain }
             }
-            // Live: short utterances ("okay", "yes") rarely contain jargon, and on them the
-            // hint makes Whisper produce filler or hint words instead of what was said.
-            Some(hint) if !self.guard && dur >= PROMPT_MIN_S => self.decode(&mut ts.state, chunk, &lang, Some(hint))?,
             _ => self.decode(&mut ts.state, chunk, &lang, None)?,
         };
         Ok((lang, segs))
@@ -442,7 +425,7 @@ impl Transcriber {
         Ok(segs)
     }
 
-    fn track(&self, speaker: &str, audio: &[f32]) -> Result<Vec<Segment>> {
+    pub(crate) fn track(&self, speaker: &str, audio: &[f32]) -> Result<Vec<Segment>> {
         let mut ts = self.track_state()?;
         let spans = utterances(audio);
         let mut out = vec![];
@@ -627,7 +610,7 @@ fn render_markdown(
 /// Marks a call as being transcribed (shown as "transcribing…" in the tray).
 pub const IN_PROGRESS: &str = ".transcribing";
 
-struct InProgress(PathBuf);
+pub(crate) struct InProgress(PathBuf);
 impl Drop for InProgress {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.0);
@@ -636,7 +619,7 @@ impl Drop for InProgress {
 
 /// Create the in-progress marker exclusively (it holds our pid); a marker left by a process
 /// that is gone is taken over, a live one means another transcription is running.
-fn take_marker(dir: &Path) -> Result<InProgress> {
+pub(crate) fn take_marker(dir: &Path) -> Result<InProgress> {
     let path = dir.join(IN_PROGRESS);
     for _ in 0..2 {
         match fs::OpenOptions::new().write(true).create_new(true).open(&path) {
@@ -658,6 +641,71 @@ fn take_marker(dir: &Path) -> Result<InProgress> {
     bail!("could not mark {} as being transcribed", dir.display())
 }
 
+/// The final pass's transcriber: the configured model (or `model_override`), with turbo for
+/// language ID when it is downloaded. Returns it with the model's name.
+pub(crate) fn final_transcriber(cfg: &Config, model_override: Option<&str>, prompt: Option<String>, threads: usize) -> Result<(Transcriber, String)> {
+    let (model_name, model_path) = match model_override {
+        Some(name) => {
+            let m = models::find(name)?;
+            (m.name.to_string(), models::model_path(m))
+        }
+        None => (cfg.model.clone().unwrap_or_default(), models::active_model_path()?),
+    };
+    if !model_path.exists() {
+        bail!("model {model_name} is not downloaded — run `echoctl model download {model_name}`");
+    }
+    let allowed = allowed_languages(cfg)?;
+    whisper_rs::install_logging_hooks(); // routes whisper.cpp's chatter to `log` (unset = silent)
+    eprintln!("  model: {model_name}");
+    let cp = WhisperContextParameters { use_gpu: true, ..Default::default() };
+    let ctx = WhisperContext::new_with_params(&model_path, cp).context("loading model")?;
+    // Language ID with turbo when available (and different from the transcription model).
+    let det_path = models::model_path(models::find(DETECTOR_MODEL)?);
+    let detector = if det_path.exists() && det_path != model_path {
+        eprintln!("  language detection: {DETECTOR_MODEL}");
+        Some(WhisperContext::new_with_params(&det_path, WhisperContextParameters { use_gpu: true, ..Default::default() })?)
+    } else {
+        None
+    };
+    if let Some(p) = &prompt {
+        eprintln!("  vocabulary hint: {p}");
+    }
+    Ok((Transcriber { ctx, detector, allowed, threads, prompt }, model_name))
+}
+
+/// Order the segments, drop the mic's echo of the remote side, name the remote speaker when the
+/// invite says who it is, and write `segments<suffix>.json` + `transcript<suffix>.md`. Then the
+/// audio is deleted (text only) unless `keep_audio` / `config.keep_audio`.
+pub(crate) fn write_transcript(dir: &Path, cfg: &Config, model_name: &str, mut segs: Vec<Segment>, suffix: &str, keep_audio: bool) -> Result<PathBuf> {
+    order_turns(&mut segs);
+    let (mut segs, echoes) = remove_echo(segs);
+    let meeting = MeetingContext::load(dir)?;
+    if let Some(name) = meeting.as_ref().and_then(|m| m.sole_other(cfg.me.as_ref())) {
+        for s in segs.iter_mut().filter(|s| s.speaker == "remote") {
+            s.name = Some(name.clone());
+        }
+    }
+    if echoes > 0 {
+        eprintln!("  dropped {echoes} mic segment(s) that echoed the remote side");
+    }
+    let meta: serde_json::Value = serde_json::from_slice(&fs::read(dir.join("meta.json"))?)?;
+    fs::write(dir.join(format!("segments{suffix}.json")), serde_json::to_vec_pretty(&segs)?)?;
+    let md_path = dir.join(format!("transcript{suffix}.md"));
+    fs::write(&md_path, render_markdown(dir, &meta, meeting.as_ref(), model_name, &segs))?;
+    eprintln!("  {} segments", segs.len());
+    // Text only: the audio goes once the transcript is safely on disk (kept on any error above).
+    if !(keep_audio || cfg.keep_audio) {
+        for f in ["mic.wav", "remote.wav"] {
+            let _ = fs::remove_file(dir.join(f));
+        }
+        let mut meta = meta;
+        meta["audio"] = serde_json::json!("deleted after transcription");
+        fs::write(dir.join("meta.json"), serde_json::to_vec_pretty(&meta)?)?;
+        eprintln!("audio deleted (only text is kept; `--keep-audio` or `config --keep-audio true` to keep it)");
+    }
+    Ok(md_path)
+}
+
 pub fn transcribe(call: &str, model_override: Option<&str>, keep_audio: bool) -> Result<()> {
     let dir = resolve_call(call)?;
     if !dir.join("mic.wav").exists() && !dir.join("remote.wav").exists() {
@@ -672,47 +720,17 @@ pub fn transcribe(call: &str, model_override: Option<&str>, keep_audio: bool) ->
     }
     crate::watch::close_unfinished(&dir)?;
     let _marker = take_marker(&dir)?;
-    let cfg = Config::load()?;
-    let (model_name, model_path) = match model_override {
-        Some(name) => {
-            let m = models::find(name)?;
-            (m.name.to_string(), models::model_path(m))
-        }
-        None => (cfg.model.clone().unwrap_or_default(), models::active_model_path()?),
-    };
-    if !model_path.exists() {
-        bail!("model {model_name} is not downloaded — run `echoctl model download {model_name}`");
-    }
+    let mut cfg = Config::load()?;
     // A call can pin its own languages (chosen when it was armed).
-    let mut cfg = cfg;
     let call_meta: serde_json::Value = serde_json::from_slice(&fs::read(dir.join("meta.json"))?)?;
     if let Some(l) = call_meta["languages"].as_array().filter(|a| !a.is_empty()) {
         cfg.languages = l.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect();
     }
-    let allowed = allowed_languages(&cfg)?;
-
-    whisper_rs::install_logging_hooks(); // routes whisper.cpp's chatter to `log` (unset = silent)
-    let t = Instant::now();
-    eprintln!("transcribing {} with {model_name} (languages: {})", dir.display(),
-        if cfg.languages.is_empty() { "any".into() } else { cfg.languages.join(", ") });
-    let cp = WhisperContextParameters { use_gpu: true, ..Default::default() };
-    let ctx = WhisperContext::new_with_params(&model_path, cp).context("loading model")?;
-    let threads = final_threads();
-    // Language ID with turbo when available (and different from the transcription model).
-    let det_model = models::find(DETECTOR_MODEL)?;
-    let det_path = models::model_path(det_model);
-    let detector = if det_path.exists() && det_path != model_path {
-        eprintln!("  language detection: {DETECTOR_MODEL}");
-        Some(WhisperContext::new_with_params(&det_path, WhisperContextParameters { use_gpu: true, ..Default::default() })?)
-    } else {
-        None
-    };
     let meeting = MeetingContext::load(&dir)?;
-    let prompt = build_prompt(&cfg, meeting.as_ref());
-    if let Some(p) = &prompt {
-        eprintln!("  vocabulary hint: {p}");
-    }
-    let tr = Transcriber { ctx, detector, allowed, threads, prompt, guard: true };
+    let t = Instant::now();
+    eprintln!("transcribing {} (languages: {})", dir.display(),
+        if cfg.languages.is_empty() { "any".into() } else { cfg.languages.join(", ") });
+    let (tr, model_name) = final_transcriber(&cfg, model_override, build_prompt(&cfg, meeting.as_ref()), final_threads())?;
 
     let mut segs = vec![];
     let remote = dir.join("remote.wav").exists().then(|| load_16k(&dir.join("remote.wav"))).transpose()?;
@@ -734,36 +752,10 @@ pub fn transcribe(call: &str, model_override: Option<&str>, keep_audio: bool) ->
     if let Some(r) = &remote {
         segs.extend(tr.track("remote", r)?);
     }
-    order_turns(&mut segs);
-    let (mut segs, echoes) = remove_echo(segs);
-    if let Some(name) = MeetingContext::load(&dir).ok().flatten().and_then(|m| m.sole_other(cfg.me.as_ref())) {
-        for s in segs.iter_mut().filter(|s| s.speaker == "remote") {
-            s.name = Some(name.clone());
-        }
-    }
-    if echoes > 0 {
-        eprintln!("  dropped {echoes} mic segment(s) that echoed the remote side");
-    }
-
-    let meta: serde_json::Value = serde_json::from_slice(&fs::read(dir.join("meta.json"))?)?;
     let suffix = model_override.map(|m| format!(".{m}")).unwrap_or_default();
-    fs::write(dir.join(format!("segments{suffix}.json")), serde_json::to_vec_pretty(&segs)?)?;
-    let md_path = dir.join(format!("transcript{suffix}.md"));
-    fs::write(&md_path, render_markdown(&dir, &meta, meeting.as_ref(), &model_name, &segs))?;
-    eprintln!("done in {:.0}s — {} segments", t.elapsed().as_secs_f64(), segs.len());
-
-    // Text only: the audio goes once the transcript is safely on disk (kept on failure above,
-    // since any error returns before this point).
     // A comparison run (--model) must leave the audio for the real transcript.
-    if !(keep_audio || cfg.keep_audio || model_override.is_some()) {
-        for f in ["mic.wav", "remote.wav"] {
-            let _ = fs::remove_file(dir.join(f));
-        }
-        let mut meta = meta;
-        meta["audio"] = serde_json::json!("deleted after transcription");
-        fs::write(dir.join("meta.json"), serde_json::to_vec_pretty(&meta)?)?;
-        eprintln!("audio deleted (only text is kept; `--keep-audio` or `config --keep-audio true` to keep it)");
-    }
+    let md_path = write_transcript(&dir, &cfg, &model_name, segs, &suffix, keep_audio || model_override.is_some())?;
+    eprintln!("done in {:.0}s", t.elapsed().as_secs_f64());
     println!("{}", md_path.display());
     Ok(())
 }

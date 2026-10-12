@@ -280,6 +280,14 @@ enum Cmd {
         #[arg(long, default_value_t = 30)]
         seconds: u64,
     },
+    /// (dev) Who an ad-hoc call is with: the Teams call window's title and the chat it matches
+    /// (`--name` skips the window, to check the chat match)
+    #[cfg(any(target_os = "macos", windows))]
+    #[command(hide = true)]
+    CallPeople {
+        #[arg(long)]
+        name: Option<String>,
+    },
     /// (dev) Show a notification the way the app does
     #[command(hide = true)]
     Notify { title: String, body: String },
@@ -589,6 +597,28 @@ fn main() -> Result<()> {
         Cmd::FrameGrab { out } => frames::grab(&out),
         #[cfg(any(target_os = "macos", windows))]
         Cmd::AxMic { seconds } => ax::mic_probe(seconds),
+        #[cfg(any(target_os = "macos", windows))]
+        Cmd::CallPeople { name } => {
+            let name = match name {
+                Some(n) => n,
+                None => {
+                    let title = ax::call_title().ok_or_else(|| anyhow::anyhow!("no Teams call window (or Accessibility not granted)"))?;
+                    println!("call window: {title}");
+                    ax::call_name(&title).ok_or_else(|| anyhow::anyhow!("the title names nobody"))?
+                }
+            };
+            println!("name: {name} (looks like a person: {})", ax::is_person_name(&name));
+            match graph::chat_named(&name)? {
+                Some((_, topic, members)) => {
+                    println!("chat: {}", topic.as_deref().unwrap_or("(1:1)"));
+                    for m in members {
+                        println!("  {}{}", m.name, m.email.map(|e| format!(" <{e}>")).unwrap_or_default());
+                    }
+                }
+                None => println!("no recent chat with that name"),
+            }
+            Ok(())
+        }
         Cmd::Notify { title, body } => {
             app::notify(&title, &body);
             Ok(())

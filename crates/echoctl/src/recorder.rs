@@ -54,9 +54,14 @@ fn call_dir(started: &DateTime<Local>, title: Option<&str>) -> PathBuf {
     (2..).map(|n| paths::calls_dir().join(format!("{name}-{n}"))).find(|p| !p.exists()).unwrap_or(base)
 }
 
+/// The call's transcription worker (`live.rs`), when transcription is built in.
+#[cfg(feature = "transcribe")]
+pub type Live = crate::live::Live;
+#[cfg(not(feature = "transcribe"))]
+pub enum Live {}
+
 pub struct Recording {
-    #[cfg(feature = "transcribe")]
-    live: Option<std::thread::JoinHandle<()>>,
+    live: Option<Live>,
     pub dir: PathBuf,
     pub t0: Instant,
     pub title: Option<String>,
@@ -94,17 +99,17 @@ impl Recording {
         }
         // Both tracks share t0, so their timelines line up sample-for-sample.
         let t0 = Instant::now();
+        let remote = Track::start("remote", &dir.join("remote.wav"), audio::app_source(app), t0)?;
+        let mic = Track::start("mic", &dir.join("mic.wav"), Box::new(MicSource { app: Some(app) }), t0)?;
+        // Transcribes the tracks as they are written (reads the WAVs, so it starts after them).
         #[cfg(feature = "transcribe")]
-        let (feed, live) = match crate::live::start(&dir, meeting, languages) {
-            Some((tx, h)) => (Some(tx), Some(h)),
-            None => (None, None),
-        };
+        let live = crate::live::start(&dir, meeting, languages);
         #[cfg(not(feature = "transcribe"))]
-        let feed: Option<audio::LiveFeed> = None;
-        let remote = Track::start("remote", &dir.join("remote.wav"), audio::app_source(app), t0, feed.clone())?;
-        let mic = Track::start("mic", &dir.join("mic.wav"), Box::new(MicSource { app: Some(app) }), t0, feed)?;
+        let live = {
+            let _ = languages;
+            None
+        };
         Ok(Recording {
-            #[cfg(feature = "transcribe")]
             live,
             dir,
             t0,
@@ -122,20 +127,24 @@ impl Recording {
         self.mic.poll();
     }
 
-    pub fn finish(mut self, reason: &str) -> Result<(PathBuf, Vec<TrackInfo>)> {
+    /// Close the tracks. Returns the call's folder, its tracks and the transcription worker
+    /// (now finishing the last utterances; `Live::join` waits for it), if one ran.
+    pub fn finish(mut self, reason: &str) -> Result<(PathBuf, Vec<TrackInfo>, Option<Live>)> {
         // Stop both captures at the same instant so the tracks end together.
         self.remote.halt();
         self.mic.halt();
         self.meta.tracks.push(self.remote.finish()?);
         self.meta.tracks.push(self.mic.finish()?);
-        // The tracks closed their live feeds; the live worker finishes on its own (not
-        // joined: a slow decoder must not hold up the watcher, the tray or the heartbeat).
+        // The WAVs are complete: the worker decodes what is left. Not joined here: a slow
+        // decoder must not hold up the watcher, the tray or the heartbeat.
         #[cfg(feature = "transcribe")]
-        drop(self.live.take());
+        if let Some(l) = &self.live {
+            l.close();
+        }
         self.meta.ended_at = Some(Local::now());
         self.meta.stop_reason = Some(reason.to_string());
         fs::write(self.dir.join("meta.json"), serde_json::to_vec_pretty(&self.meta)?)?;
-        Ok((self.dir, self.meta.tracks))
+        Ok((self.dir, self.meta.tracks, self.live.take()))
     }
 }
 
@@ -159,7 +168,8 @@ pub fn capture(
         rec.poll();
     }
 
-    let (dir, tracks) = rec.finish(if stop.load(Ordering::SeqCst) { "user" } else { "duration" })?;
+    // `capture` leaves transcription to `echoctl transcribe` (the worker ends with the process).
+    let (dir, tracks, _live) = rec.finish(if stop.load(Ordering::SeqCst) { "user" } else { "duration" })?;
     for t in &tracks {
         let restarts = t.events.iter().filter(|e| e.kind == "restarting").count();
         eprintln!(

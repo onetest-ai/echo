@@ -15,9 +15,9 @@ use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitiali
 use windows::core::BOOL;
 use windows::Win32::Foundation::{HWND, LPARAM};
 use windows::Win32::UI::Accessibility::*;
-use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowThreadProcessId, IsWindow, IsWindowVisible};
+use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowTextW, GetWindowThreadProcessId, IsWindow, IsWindowVisible};
 
-use super::{mute_state_from_labels, UI_LOG_MAX_BYTES, UI_TREES_AT};
+use super::{mute_state_from_labels, ShareSeen, Sharing, MIC_BUTTON_ID, UI_LOG_MAX_BYTES, UI_TREES_AT};
 use crate::apps::TargetApp;
 use crate::paths;
 
@@ -197,6 +197,14 @@ impl CallWindow {
         self.hwnd
     }
 
+    /// The call window's title.
+    pub fn title(&mut self) -> Option<String> {
+        let h = self.hwnd()?;
+        let mut buf = [0u16; 512];
+        let n = unsafe { GetWindowTextW(h, &mut buf) };
+        (n > 0).then(|| String::from_utf16_lossy(&buf[..n as usize]))
+    }
+
     /// The call window's subtree (cached), if there is one.
     fn tree(&mut self) -> Option<Node> {
         let h = self.hwnd()?;
@@ -210,48 +218,18 @@ impl CallWindow {
     /// share: the `share-button` reads "Stop sharing" (English only).
     pub fn sharing(&mut self) -> Sharing {
         let Some(tree) = self.tree() else { return Sharing::Nobody };
-        #[derive(Default)]
-        struct Seen {
-            popout: bool,
-            by: Option<String>,
-            mine: bool,
-        }
-        fn walk(n: &Node, depth: usize, seen: &mut Seen) {
-            let (id, name) = (n.automation_id(), n.name());
-            seen.popout |= id == POPOUT_ID;
-            seen.mine |= id == SHARE_BUTTON_ID && name == STOP_SHARING;
-            if let Some(who) = name.strip_prefix(SHARED_BY) {
-                seen.by = Some(who.trim().to_string());
-            }
+        fn walk(n: &Node, depth: usize, seen: &mut ShareSeen) {
+            seen.see(&n.automation_id(), &n.name());
             if depth < MAX_DEPTH {
                 for c in n.children() {
                     walk(&c, depth + 1, seen);
                 }
             }
         }
-        let mut seen = Seen::default();
+        let mut seen = ShareSeen::default();
         walk(&tree, 0, &mut seen);
-        match seen {
-            Seen { mine: true, .. } => Sharing::Me,
-            Seen { popout, by, .. } if popout || by.is_some() => Sharing::Them(by),
-            _ => Sharing::Nobody,
-        }
+        seen.sharing()
     }
-}
-
-const POPOUT_ID: &str = "popout-content-button";
-const SHARED_BY: &str = "Content shared by ";
-const SHARE_BUTTON_ID: &str = "share-button";
-const STOP_SHARING: &str = "Stop sharing";
-
-/// Screen sharing in the call.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Sharing {
-    Nobody,
-    /// Someone else presents (their name when Teams is in English).
-    Them(Option<String>),
-    /// You present (detected in English Teams only).
-    Me,
 }
 
 /// Visible top-level windows owned by these processes.
@@ -315,10 +293,9 @@ pub fn dump(seconds: u64) -> Result<()> {
 
 // ── Teams mute state ───────────────────────────────────────────────────────────────────────
 
-/// Teams' own microphone button in the call window (labelled "Mute mic" / "Unmute mic"). Only
-/// this one: a label match would also take a roster's "Mute <name>" (an organizer's view).
-const MIC_BUTTON_ID: &str = "microphone-button";
-
+/// Teams' own microphone button in the call window (`MIC_BUTTON_ID`, labelled "Mute mic" /
+/// "Unmute mic"). Only this one: a label match would also take a roster's "Mute <name>" (an
+/// organizer's view).
 fn find_mute_button(n: Node, depth: usize) -> Option<Node> {
     if n.automation_id() == MIC_BUTTON_ID {
         return Some(n);

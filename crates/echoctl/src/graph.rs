@@ -480,6 +480,42 @@ pub fn recent_call_events(since: DateTime<Utc>) -> Result<Vec<(String, &'static 
     Ok(out)
 }
 
+/// A chat: its id, topic (group chats) and members.
+pub type ChatInfo = (String, Option<String>, Vec<crate::meeting::Person>);
+
+/// The chat an ad-hoc call was started from, by the name Teams gives the call (`ax::call_name`):
+/// among the recently active chats, a group chat with that topic or a 1:1 chat with that
+/// person. Calls from a chat post no "call started" event, so `find_call_chat` can't see them.
+pub fn chat_named(name: &str) -> Result<Option<ChatInfo>> {
+    let token = access_token()?;
+    let me = account().unwrap_or_default();
+    let chats = graph_get(&token, &format!("{GRAPH}/me/chats?$top=20&$orderby=lastMessagePreview/createdDateTime%20desc&$expand=members"))?;
+    for c in chats["value"].as_array().into_iter().flatten() {
+        let Some(id) = c["id"].as_str() else { continue };
+        let members: Vec<crate::meeting::Person> = c["members"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|m| {
+                let name = m["displayName"].as_str()?.trim().to_string();
+                let email = m["email"].as_str().filter(|e| !e.is_empty()).map(str::to_owned);
+                Some(crate::meeting::Person { name, email })
+            })
+            .collect();
+        let topic = c["topic"].as_str().map(str::trim).filter(|t| !t.is_empty());
+        let others: Vec<&crate::meeting::Person> = members.iter().filter(|p| !p.email.as_deref().is_some_and(|e| e.eq_ignore_ascii_case(&me))).collect();
+        let matches = match (c["chatType"].as_str(), topic) {
+            (_, Some(t)) => t.eq_ignore_ascii_case(name),
+            (Some("oneOnOne"), None) => others.len() == 1 && others[0].name.eq_ignore_ascii_case(name),
+            _ => false,
+        };
+        if matches {
+            return Ok(Some((id.to_string(), topic.map(str::to_owned), members)));
+        }
+    }
+    Ok(None)
+}
+
 /// The chat whose call is in progress at `recording_start`: an ad-hoc call ("Meet now", a call
 /// from a group or 1:1 chat) has no join link, but Teams posts "call started" / "call ended"
 /// events into its chat. Picks the chat with the latest call start before the recording (with

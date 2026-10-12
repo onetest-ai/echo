@@ -15,11 +15,15 @@ Code markers: `git grep "TODO(windows)"`.
 
 ## Known limits (follow-ups)
 
-- **Teams' UI language:** share detection works in any language (the `popout-content-button`
-  automation id), but the presenter's name (`shared_by`, from "Content shared by <name>") and
+- **Teams' UI language** (both platforms): share detection works in any language (the `popout-content-button`
+  id), but the presenter's name (`shared_by`, from "Content shared by <name>") and
   detecting that *you* present ("Stop sharing") read English labels. Check a non-English Teams.
 - **Frames while you present:** nothing is captured — the call window is a compact view and
   Teams doesn't say which window you share.
+- **Transcription during the call** (`live.rs`): a CPU-only build decodes slower than real time
+  (11 s test call: CPU 49 s, Vulkan 12 s), so the worker falls behind during long calls. Nothing
+  is lost (it reads the WAVs on disk) and it finishes after the call, but it competes with the
+  call for the CPU meanwhile (4 threads). Measure on a real call; maybe a lighter model on CPU.
 - **One call-window reader:** frames and `ui.jsonl` each keep their own `ax::CallWindow` (on
   their own threads; UI Automation objects are thread-bound), so the call window's tree is
   read for both. Sharing one needs a single UIA thread serving both.
@@ -34,8 +38,8 @@ Code markers: `git grep "TODO(windows)"`.
   subtree fetched in one cached call (~80 ms, ~700 nodes). WebView2 builds its accessibility
   tree only after the first request, so the first read is nearly empty. `echoctl ax-mic`,
   `echoctl ax-dump`. Confirm the call window's button label ("Mute (Ctrl+Shift+M)").
-- **Screen frames** (`frames.rs`): `PrintWindow(PW_RENDERFULLCONTENT)` of the largest visible
-  Teams window (works behind other windows, not minimized). `echoctl frame-grab <file>`.
+- **Screen frames** (`frames.rs`): `PrintWindow(PW_RENDERFULLCONTENT)` of the call window while
+  someone else shares (works behind other windows, not minimized). `echoctl frame-grab <file>`.
 - **Notifications** (`app::notifications`): WinRT toasts as AppUserModelID `onetest.Echo`,
   registered under `HKCU\Software\Classes\AppUserModelId` with Echo's logo
   (`%APPDATA%\echo\echo.png`); a click opens the window while the app runs (a toast posted by

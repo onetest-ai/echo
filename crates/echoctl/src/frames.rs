@@ -1,18 +1,21 @@
 //! Key frames of the meeting window: what was on screen — shared slides, documents, demos —
 //! saved as JPEGs while a call is recorded, so the notes can use them.
 //!
-//! Every few seconds the Teams meeting window is captured (macOS: `screencapture -l <window>`;
-//! Windows: `PrintWindow` with full content), which works while the window is behind others,
-//! not when minimized. Windows captures only while someone else shares their screen (Teams'
-//! content pop-out button, `popout-content-button`); otherwise a call's frames would be video
-//! tiles. A frame is kept only when it has settled (barely differs from the previous capture)
-//! and differs from *every* kept frame — on a small grayscale thumbnail of the whole window
-//! (tuned per platform, see below), so a slide shown again is not kept twice. Kept
+//! Every few seconds Teams' call window (the one holding the mic button, found through
+//! accessibility — never the main window, which shows chats) is captured (macOS:
+//! `screencapture -l <window>`; Windows: `PrintWindow` with full content), which works while the
+//! window is behind others, not when minimized — only while someone else shares their screen
+//! (Teams' content pop-out button, `popout-content-button`); otherwise a call's frames would be
+//! video tiles. While you present, the call window shows only a compact view and Teams doesn't
+//! say which window you share: nothing is captured. A frame is kept only when it has settled
+//! (barely differs from the previous capture) and differs from *every* kept frame — on a small
+//! grayscale thumbnail of the whole window, so a slide shown again is not kept twice. Kept
 //! frames go to `<call>/frames/<mm>m<ss>s.jpg`, indexed in `<call>/frames.jsonl`
 //! (`{t, file, change, shared_by}`).
 //!
 //! macOS needs the Screen Recording permission (the full one: "System Audio Recording Only"
-//! does not cover window captures); Windows needs none. Off by default: `config.capture_frames`.
+//! does not cover window captures) and Accessibility (to find the call window and the share);
+//! Windows needs none. Off by default: `config.capture_frames`.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -29,37 +32,22 @@ pub use self::macos::{permitted, request};
 #[cfg(windows)]
 use self::windows::{capture, Target};
 
-// Two tunings. Windows captures only while someone else shares, so it can afford to be
-// sensitive: sized from a live call, the shared slide is ~30 % of the call window, the next
-// slide changes ~6–10 % of it, two title slides with different subtitles ~1–2 % (the timer,
-// the cursor and speaking indicators < 1 %). macOS captures the whole call (no share
-// detection there yet), video tiles included, so it keeps the coarser tuning: 4 % would let
-// settled webcam movement fill the frame cap.
+// Sized from a live call (Windows; the same Teams web UI on macOS): the shared slide is ~30 %
+// of the call window, the next slide changes ~6–10 % of it, two title slides with different
+// subtitles ~1–2 % (the timer, the cursor and speaking indicators < 1 %). Sensitive is
+// affordable because only shares are captured, not webcam tiles.
 
 /// How often the window is captured.
-#[cfg(windows)]
 pub const POLL: Duration = Duration::from_secs(2);
-#[cfg(not(windows))]
-pub const POLL: Duration = Duration::from_secs(3);
-#[cfg(windows)]
-const THUMB: (u32, u32) = (128, 72);
-#[cfg(not(windows))]
-const THUMB: (u32, u32) = (64, 36);
-const THUMB_W: u32 = THUMB.0;
-const THUMB_H: u32 = THUMB.1;
+const THUMB_W: u32 = 128;
+const THUMB_H: u32 = 72;
 /// A thumbnail cell counts as changed when its brightness moved by more than this.
 const CELL_DELTA: i16 = 24;
 /// Kept: differs from every kept frame in ≥ this share of cells…
-#[cfg(windows)]
 const NEW_CONTENT: f32 = 0.04;
-#[cfg(not(windows))]
-const NEW_CONTENT: f32 = 0.12;
 /// …and has settled: differs from the previous capture in < this share (not mid-animation).
 const SETTLED: f32 = 0.03;
-#[cfg(windows)]
 const MIN_GAP: Duration = Duration::from_secs(4);
-#[cfg(not(windows))]
-const MIN_GAP: Duration = Duration::from_secs(8);
 /// Captures before this point are the join screen / lobby.
 const SKIP_FIRST: Duration = Duration::from_secs(5);
 const MAX_FRAMES: usize = 150;
@@ -111,7 +99,8 @@ pub struct Capture {
     shared_by: Option<String>,
 }
 
-/// macOS: the Teams process's largest on-screen window, via `screencapture`.
+/// macOS: Teams' call window (found through Accessibility), via `screencapture`, while someone
+/// else shares their screen.
 #[cfg(target_os = "macos")]
 mod macos {
     use std::ffi::c_void;
@@ -163,39 +152,32 @@ mod macos {
         CFNumberGetValue(v, K_CF_NUMBER_F64, (&mut d as *mut f64).cast()).then_some(d)
     }
 
-    /// The call app's main window: the largest normal (layer 0) on-screen window of `pid`.
-    pub(super) fn meeting_window(pid: i32) -> Option<u32> {
+    /// On screen (not minimized, not on another Space) and big enough to be the call window.
+    fn on_screen(id: u32) -> bool {
         unsafe {
             let list = CGWindowListCopyWindowInfo(K_CG_WINDOW_LIST_ON_SCREEN_ONLY | K_CG_WINDOW_LIST_EXCLUDE_DESKTOP, 0);
             if list.is_null() {
-                return None;
+                return false;
             }
-            let mut best: Option<(f64, u32)> = None;
+            let mut found = false;
             for i in 0..CFArrayGetCount(list) {
                 let w = CFArrayGetValueAtIndex(list, i);
-                if number(w, "kCGWindowOwnerPID") != Some(pid as f64) || number(w, "kCGWindowLayer") != Some(0.0) {
+                if number(w, "kCGWindowNumber") != Some(id as f64) {
                     continue;
                 }
                 let k: Retained<NSString> = NSString::from_str("kCGWindowBounds");
                 let bounds = CFDictionaryGetValue(w, Retained::as_ptr(&k).cast());
-                let area = if bounds.is_null() {
-                    0.0
-                } else {
-                    number(bounds, "Width").unwrap_or(0.0) * number(bounds, "Height").unwrap_or(0.0)
-                };
-                let id = number(w, "kCGWindowNumber").unwrap_or(0.0) as u32;
-                if area > 200.0 * 200.0 && best.is_none_or(|(a, _)| area > a) {
-                    best = Some((area, id));
-                }
+                found = !bounds.is_null() && number(bounds, "Width").unwrap_or(0.0) >= 200.0 && number(bounds, "Height").unwrap_or(0.0) >= 200.0;
+                break;
             }
             CFRelease(list);
-            best.map(|(_, id)| id)
+            found
         }
     }
 
-    /// What to capture: the Teams process + a temp file for `screencapture`.
+    /// Teams' call window + a temp file for `screencapture`.
     pub struct Target {
-        pid: i32,
+        call: crate::ax::CallWindow,
         tmp: PathBuf,
     }
 
@@ -204,14 +186,15 @@ mod macos {
             if !permitted() {
                 return None;
             }
-            let pid = crate::ax::app_pid(crate::ax::TEAMS_EXECUTABLE)?;
+            let call = crate::ax::CallWindow::teams()?;
             let tmp = std::env::temp_dir().join(format!("echo-frame-{}.png", std::process::id()));
-            Some(Target { pid, tmp })
+            Some(Target { call, tmp })
         }
     }
 
     pub fn capture(target: &mut Target) -> Option<super::Capture> {
-        let window = meeting_window(target.pid)?;
+        let crate::ax::Sharing::Them(who) = target.call.sharing() else { return None };
+        let window = target.call.window_id().filter(|&id| on_screen(id))?;
         let ok = Command::new("screencapture")
             .args(["-x", "-o", "-t", "png", &format!("-l{window}")])
             .arg(&target.tmp)
@@ -219,7 +202,7 @@ mod macos {
             .is_ok_and(|s| s.success());
         let img = ok.then(|| image::open(&target.tmp).ok()).flatten();
         let _ = std::fs::remove_file(&target.tmp);
-        img.map(|img| super::Capture { img, shared_by: None })
+        img.map(|img| super::Capture { img, shared_by: who })
     }
 }
 
@@ -306,7 +289,7 @@ pub struct FrameRecorder {
 }
 
 impl FrameRecorder {
-    /// None if Screen Recording isn't granted or Teams isn't running (macOS).
+    /// None if Teams isn't running, or (macOS) Screen Recording or Accessibility isn't granted.
     pub fn teams(dir: &Path, t0: Instant) -> Option<Self> {
         let target = Target::teams()?;
         std::fs::create_dir_all(dir.join("frames")).ok()?;
@@ -359,8 +342,6 @@ mod tests {
     fn flat(v: u8) -> GrayImage {
         GrayImage::from_pixel(THUMB_W, THUMB_H, image::Luma([v]))
     }
-
-    // Times in these tests follow the platform's MIN_GAP (4 s on Windows, 8 s on macOS).
 
     #[test]
     fn keeps_settled_new_content_only() {
