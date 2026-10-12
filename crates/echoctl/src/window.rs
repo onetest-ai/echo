@@ -26,6 +26,8 @@ use crate::{calls, paths, watch};
 const INDEX: &str = include_str!("../ui/index.html");
 const APP_JS: &str = include_str!("../ui/app.js");
 const APP_CSS: &str = include_str!("../ui/app.css");
+/// Diagrams in notes (```mermaid): mermaid 11.4.1, MIT, loaded by the page on first use.
+const MERMAID_JS: &str = include_str!("../ui/vendor/mermaid.min.js");
 const OCTOPUS_SVG: &str = include_str!("../assets/octopus.svg");
 /// The onetest logo (violet disc, the full octopus character), 192 px, for the window.
 const LOGO_PNG: &[u8] = include_bytes!("../assets/onetest-logo.png");
@@ -182,6 +184,7 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
         "/" | "/index.html" => reply(200, "text/html; charset=utf-8", index_html().into_bytes()),
         "/assets/app.js" => reply(200, "text/javascript; charset=utf-8", APP_JS.as_bytes().to_vec()),
         "/assets/app.css" => reply(200, "text/css; charset=utf-8", APP_CSS.as_bytes().to_vec()),
+        "/assets/mermaid.js" => reply(200, "text/javascript; charset=utf-8", MERMAID_JS.as_bytes().to_vec()),
         "/assets/logo.png" => reply(200, "image/png", LOGO_PNG.to_vec()),
         "/api/state" => json_reply(state()),
         "/api/calls" => json_reply(Value::Array(calls::all_calls().iter().rev().map(|d| call_summary(d)).collect())),
@@ -572,7 +575,7 @@ pub fn export(dir: &Path) -> anyhow::Result<()> {
         Ok(())
     };
     write("index.html", get("/"))?;
-    for p in ["/assets/app.js", "/assets/app.css", "/assets/logo.png", "/api/state", "/api/calls", "/api/agenda"] {
+    for p in ["/assets/app.js", "/assets/app.css", "/assets/mermaid.js", "/assets/logo.png", "/api/state", "/api/calls", "/api/agenda"] {
         write(p, get(p))?;
     }
     let week_start = (chrono::Local::now() - chrono::Duration::days(1)).format("%Y-%m-%d");

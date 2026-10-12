@@ -159,7 +159,14 @@ the `echo://` protocol (`http://echo.localhost` on Windows): compiled-in `ui/ind
 `app.js`, `app.css` (vanilla, no npm/CDN; the octopus symbol is injected from
 `assets/octopus.svg`), `/api/{state,calls,agenda,call/<name>}` JSON, `/file/<call>/frames/<img>`
 after a path check; strict CSP; everything rendered is escaped (chat/transcripts are others'
-text). Actions go back over IPC (`window::handle`: toggle action, delete, reveal, record, stop,
+text). Notes Markdown (`markdown()` in app.js, our own parser: headings, nested and task lists,
+tables, quotes, rules, fences, inline code/bold/italic/strike, https links, `![](frames/x.jpg)` of
+that call only, `[mm:ss]` anchors; text escaped before markup). A ```` ```mermaid ```` fence is drawn by
+the vendored mermaid 11.4.1 (`ui/vendor/mermaid.min.js`, `/assets/mermaid.js`, ~2.5 MB, loaded on
+first use, `securityLevel: 'strict'`, no eval, so the CSP holds), themed from the CSS tokens and
+cached per source + theme so the 2 s refresh doesn't redraw it. A diagram that fails shows its
+source and the error. Parser helpers are `md*`: app.js is one global scope (a `list()` there
+is the calls list). Actions go back over IPC (`window::handle`: toggle action, delete, reveal, record, stop,
 arm/join meeting, copy) through the same functions as the CLI. The page polls the local API
 every 2 s and re-renders only when the data changed (keeps selection/scroll). Closing the
 window keeps the app in the menu bar; macOS shows a Dock icon only while it is open. Notes need

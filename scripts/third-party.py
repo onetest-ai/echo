@@ -15,6 +15,7 @@ EXTRA = [
     ("whisper.cpp", "(bundled in whisper-rs-sys)", "MIT", "https://github.com/ggml-org/whisper.cpp"),
     ("Whisper models (downloaded at setup)", "", "MIT", "https://github.com/openai/whisper"),
     ("Vulkan loader (vulkan-1.dll, Windows zip)", "", "Apache-2.0", "https://github.com/KhronosGroup/Vulkan-Loader"),
+    ("mermaid (diagrams in the Echo window; license in ui/vendor/mermaid.min.js)", "11.4.1", "MIT", "https://github.com/mermaid-js/mermaid"),
 ]
 
 

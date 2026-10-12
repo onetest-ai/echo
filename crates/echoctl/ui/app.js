@@ -51,13 +51,23 @@ const STATUS = {
 }
 const speaker = (seg) => (seg.speaker === 'me' || seg.speaker === 'mic') ? 'Me' : (seg.name || 'Remote')
 
-// ── tiny, safe Markdown (headings, lists, bold, italic, code, links, [mm:ss] anchors) ──────
-function inline(text) {
+// ── safe Markdown: headings, paragraphs, nested + task lists, tables, quotes, rules, code
+//    fences (```mermaid → a diagram), inline code / bold / italic / strike, https links, the
+//    call's own frames as images, [mm:ss] anchors. Text is escaped before any markup is added.
+function inline(text, ctx = {}) {
+  // Code spans first: nothing inside them is markup.
+  return String(text).split(/(`[^`]+`)/).map((part, i) => i % 2 ? `<code>${esc(part.slice(1, -1))}</code>` : rich(part, ctx)).join('')
+}
+function rich(text, ctx) {
   let s = esc(text)
-  s = s.replace(/`([^`]+)`/g, '<code>$1</code>')
-  s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-  s = s.replace(/(^|[^*])\*([^*]+)\*/g, '$1<em>$2</em>')
+  s = s.replace(/!\[([^\]]*)\]\((frames\/[\w.-]+\.(?:jpe?g|png))\)/g, (_, alt, path) => ctx.call
+    ? `<button class="doc-img" data-frame="file/${encodeURIComponent(ctx.call)}/${path}"><img src="file/${encodeURIComponent(ctx.call)}/${path}" alt="${alt}" loading="lazy"></button>`
+    : alt)
   s = s.replace(/\[([^\]]+)\]\((https:\/\/[^)\s]+)\)/g, (_, label, url) => `<a href="${url}" data-ext="1">${label}</a>`)
+  s = s.replace(/\*\*([^*]+)\*\*|__([^_]+)__/g, (_, a, b) => `<strong>${a || b}</strong>`)
+  s = s.replace(/(^|[^*\w])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>')
+  s = s.replace(/(^|[^\w])_([^_\s][^_]*)_(?!\w)/g, '$1<em>$2</em>')
+  s = s.replace(/~~([^~]+)~~/g, '<del>$1</del>')
   s = s.replace(/\[((?:\d{1,2}:)?\d{1,2}:\d{2})\]/g, (_, t) => {
     const p = t.split(':').map(Number)
     const sec = p.length === 3 ? p[0] * 3600 + p[1] * 60 + p[2] : p[0] * 60 + p[1]
@@ -65,22 +75,190 @@ function inline(text) {
   })
   return s
 }
-function markdown(md) {
+
+const ITEM = /^(\s*)([-*+]|\d{1,9}[.)])\s+(.*)$/
+const FENCE = /^\s*(`{3,}|~{3,})\s*([\w+-]*)/
+const RULE = /^\s{0,3}([-*_])(\s*\1){2,}\s*$/
+const TABLE_SEP = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/
+const cells = (line) => {
+  let s = line.trim()
+  if (s.startsWith('|')) s = s.slice(1)
+  if (s.endsWith('|')) s = s.slice(0, -1)
+  return s.split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, '|'))
+}
+
+function markdown(md, ctx = {}) {
+  const lines = String(md).replace(/\r\n?/g, '\n').split('\n')
   const out = []
-  let list = null
-  const flush = () => { if (list) { out.push(`</${list}>`); list = null } }
-  for (const raw of String(md).split('\n')) {
-    const line = raw.replace(/\s+$/, '')
+  let para = []
+  const flush = () => { if (para.length) { out.push(`<p>${inline(para.join(' '), ctx)}</p>`); para = [] } }
+  let i = 0
+  while (i < lines.length) {
+    const line = lines[i]
     let m
-    if (!line.trim()) { flush(); continue }
-    if ((m = line.match(/^(#{1,3})\s+(.*)$/))) { flush(); out.push(`<h${m[1].length}>${inline(m[2])}</h${m[1].length}>`); continue }
-    if ((m = line.match(/^\s*[-*]\s+(.*)$/))) { if (list !== 'ul') { flush(); out.push('<ul>'); list = 'ul' } out.push(`<li>${inline(m[1])}</li>`); continue }
-    if ((m = line.match(/^\s*\d+[.)]\s+(.*)$/))) { if (list !== 'ol') { flush(); out.push('<ol>'); list = 'ol' } out.push(`<li>${inline(m[1])}</li>`); continue }
-    flush()
-    out.push(`<p>${inline(line)}</p>`)
+    if ((m = line.match(FENCE))) {
+      flush()
+      const close = new RegExp(`^\\s*${m[1][0] === '`' ? '`' : '~'}{${m[1].length},}\\s*$`)
+      const body = []
+      for (i++; i < lines.length && !close.test(lines[i]); i++) body.push(lines[i])
+      i++
+      out.push(codeBlock(body.join('\n'), m[2].toLowerCase()))
+      continue
+    }
+    if (!line.trim()) { flush(); i++; continue }
+    if ((m = line.match(/^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/))) {
+      flush()
+      const n = m[1].length
+      out.push(`<h${n}>${inline(m[2], ctx)}</h${n}>`)
+      i++
+      continue
+    }
+    if (RULE.test(line)) { flush(); out.push('<hr>'); i++; continue }
+    if (/^\s{0,3}>/.test(line)) {
+      flush()
+      const inner = []
+      for (; i < lines.length && /^\s{0,3}>/.test(lines[i]); i++) inner.push(lines[i].replace(/^\s{0,3}>\s?/, ''))
+      out.push(`<blockquote>${markdown(inner.join('\n'), ctx)}</blockquote>`)
+      continue
+    }
+    if (line.includes('|') && i + 1 < lines.length && TABLE_SEP.test(lines[i + 1])) {
+      flush()
+      const head = cells(line)
+      const align = cells(lines[i + 1]).map((c) => c.endsWith(':') ? (c.startsWith(':') ? 'center' : 'right') : '')
+      const td = (tag, c, k) => `<${tag}${align[k] ? ` style="text-align:${align[k]}"` : ''}>${inline(c, ctx)}</${tag}>`
+      const rows = []
+      for (i += 2; i < lines.length && lines[i].includes('|') && lines[i].trim(); i++) rows.push(cells(lines[i]))
+      out.push(`<div class="table"><table><thead><tr>${head.map((c, k) => td('th', c, k)).join('')}</tr></thead><tbody>${
+        rows.map((r) => `<tr>${head.map((_, k) => td('td', r[k] || '', k)).join('')}</tr>`).join('')}</tbody></table></div>`)
+      continue
+    }
+    if (ITEM.test(line)) { flush(); const [html, next] = mdList(lines, i, ctx); out.push(html); i = next; continue }
+    para.push(line.trim())
+    i++
   }
   flush()
   return out.join('')
+}
+
+/** A list and everything nested in it (by indentation), up to the first line that isn't part
+ *  of it. Returns the HTML and the next line's index. */
+function mdList(lines, i, ctx) {
+  const root = { indent: -1, children: [] }
+  const stack = [root]
+  while (i < lines.length) {
+    const line = lines[i]
+    const m = line.match(ITEM)
+    if (m && !RULE.test(line)) {
+      const indent = m[1].replace(/\t/g, '    ').length
+      while (stack.length > 1 && stack[stack.length - 1].indent >= indent) stack.pop()
+      const node = { indent, ordered: /\d/.test(m[2]), start: parseInt(m[2], 10) || 1, text: [m[3]], children: [] }
+      stack[stack.length - 1].children.push(node)
+      stack.push(node)
+      i++
+      continue
+    }
+    if (!line.trim()) {
+      // A blank line ends the list unless more of it follows.
+      let j = i + 1
+      while (j < lines.length && !lines[j].trim()) j++
+      if (j < lines.length && (ITEM.test(lines[j]) || /^\s{2,}\S/.test(lines[j]))) { i = j; continue }
+      break
+    }
+    if (/^\s+\S/.test(line) && stack.length > 1 && !FENCE.test(line)) { stack[stack.length - 1].text.push(line.trim()); i++; continue }
+    break
+  }
+  return [mdItems(root.children, ctx), i]
+}
+function mdItems(nodes, ctx) {
+  let html = ''
+  for (let k = 0; k < nodes.length;) {
+    const ordered = nodes[k].ordered
+    const group = []
+    while (k < nodes.length && nodes[k].ordered === ordered) group.push(nodes[k++])
+    const tag = ordered ? 'ol' : 'ul'
+    const start = ordered && group[0].start !== 1 ? ` start="${group[0].start}"` : ''
+    html += `<${tag}${start}>${group.map((n) => {
+      let text = n.text.join(' ')
+      const task = text.match(/^\[([ xX])\]\s+(.*)$/)
+      if (task) text = task[2]
+      const box = task ? `<span class="check${task[1] !== ' ' ? ' done' : ''}" aria-hidden="true"></span>` : ''
+      return `<li${task ? ' class="task-item"' : ''}>${box}${inline(text, ctx)}${n.children.length ? mdItems(n.children, ctx) : ''}</li>`
+    }).join('')}</${tag}>`
+  }
+  return html
+}
+
+// Mermaid diagrams: drawn after the page is rendered (the library loads on first use), kept by
+// source + theme so a background refresh shows the same SVG at once.
+const diagrams = new Map()
+// The system switching light/dark redraws them in the new colours.
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => render())
+const darkMode = () => {
+  const t = document.documentElement.dataset.theme
+  return t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches
+}
+function codeBlock(code, lang) {
+  if (lang === 'mermaid') {
+    const svg = diagrams.get(`${darkMode()}|${code}`)
+    return svg
+      ? `<figure class="diagram">${svg}</figure>`
+      : `<figure class="diagram pending" data-src="${esc(code)}"><pre class="code"><code>${esc(code)}</code></pre></figure>`
+  }
+  return `<pre class="code"${lang ? ` data-lang="${esc(lang)}"` : ''}><code>${esc(code)}</code></pre>`
+}
+let mermaidReady = null
+function loadMermaid() {
+  if (!mermaidReady) {
+    mermaidReady = new Promise((resolve, reject) => {
+      const s = document.createElement('script')
+      s.src = 'assets/mermaid.js'
+      s.onload = () => resolve(window.mermaid)
+      s.onerror = () => reject(new Error('could not load the diagram renderer'))
+      document.head.appendChild(s)
+    })
+  }
+  return mermaidReady
+}
+let diagramSeq = 0
+async function drawDiagrams() {
+  const pending = [...document.querySelectorAll('figure.diagram.pending:not([data-busy])')]
+  if (!pending.length) return
+  let mermaid
+  try { mermaid = await loadMermaid() } catch { return }
+  const dark = darkMode()
+  const css = getComputedStyle(document.documentElement)
+  const v = (name) => css.getPropertyValue(name).trim()
+  mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: 'strict', // labels are text, no links or scripts in diagrams
+    theme: 'base',
+    fontFamily: getComputedStyle(document.body).fontFamily,
+    themeVariables: {
+      darkMode: dark,
+      background: v('--surface') || (dark ? '#1b1b21' : '#ffffff'),
+      primaryColor: dark ? '#2a2540' : '#efeaff',
+      primaryBorderColor: v('--accent') || '#8b62ff',
+      primaryTextColor: v('--text') || (dark ? '#ececf1' : '#18181d'),
+      lineColor: v('--text-3') || '#74747f',
+      secondaryColor: dark ? '#3a2f1a' : '#fff4e0',
+      tertiaryColor: dark ? '#22222a' : '#f6f6f8',
+      fontSize: '13px',
+    },
+    flowchart: { htmlLabels: false, curve: 'basis' },
+  })
+  for (const fig of pending) {
+    fig.dataset.busy = '1'
+    const src = fig.dataset.src
+    try {
+      const { svg } = await mermaid.render(`diagram-${++diagramSeq}`, src)
+      diagrams.set(`${dark}|${src}`, svg)
+      if (fig.isConnected) { fig.innerHTML = svg; fig.classList.remove('pending') }
+    } catch (e) {
+      fig.classList.remove('pending')
+      fig.classList.add('failed')
+      fig.insertAdjacentHTML('beforeend', `<figcaption>This diagram couldn't be drawn: ${esc(String((e && e.message) || e).split('\n')[0])}</figcaption>`)
+    }
+  }
 }
 
 // ── brand: the onetest logo (the full octopus character on its violet disc) ────────────────
@@ -262,7 +440,7 @@ function tabBody(c, segs, chat, frames, actions) {
     }).join('')}</div>`
   }
   // notes
-  if (c.notes) return `<article class="doc">${markdown(c.notes)}</article>`
+  if (c.notes) return `<article class="doc">${markdown(c.notes, { call: c.name })}</article>`
   if (c.status === 'recording') return `<p style="color:var(--text-3)">Notes are written after the call. Follow it live in the Transcript tab.</p>`
   return claudeHint(c, 'No notes yet', c.status === 'transcribing' ? 'Transcribing now. Notes come after that.' : 'The transcript is ready.')
 }
@@ -463,6 +641,7 @@ function render() {
   const g = $('#calgrid')
   if (g) g.addEventListener('scroll', placeDetail, { passive: true })
   lastPrint = fingerprint()
+  drawDiagrams()
 }
 
 /** Put the event card next to the event it belongs to: right of it if there is room, else

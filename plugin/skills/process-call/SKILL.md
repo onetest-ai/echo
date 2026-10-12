@@ -55,6 +55,10 @@ follow (user templates in `<data folder>/.echo/templates/` override the built-in
 - If `previous_notes` exists, read it and add a short "Since last time" line when there is real
   continuity (a decision revisited, an action item followed up). Skip it otherwise.
 - Ground every line in the transcript. Leave a section out rather than pad it.
+- **Diagrams:** when a process, flow or architecture was walked through (or the user asks for
+  one), draw it as a ```` ```mermaid ```` block (`flowchart TD`; one short line per node, `<br>` for
+  breaks, `{{…}}` for human decisions). The Echo window draws it. Only steps that were said or
+  shown.
 - **Cite the moment.** End each summary, decision, open-question and action bullet with the
   transcript time it rests on, as `[mm:ss]` (from the `**Speaker** [hh:mm:ss]` headers in
   `transcript.md`; drop the hour when it is 0). One anchor per bullet, the most specific one.
