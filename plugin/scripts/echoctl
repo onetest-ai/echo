@@ -1,17 +1,35 @@
 #!/bin/sh
 # The plugin's way to the Echo CLI. The plugin ships no binary: the CLI is the installed
-# echoctl app's own executable (Echo.app on macOS). Lookup order:
-#   $ECHOCTL_BIN → plugin/bin/echoctl (a dev build from scripts/build-plugin.sh) →
-#   echoctl on PATH → /Applications/Echo.app → ~/Applications/Echo.app
+# echoctl app's own executable (Echo.app on macOS, echoctl.exe on Windows — where Claude Code's
+# Bash is Git Bash, so this script runs there too). Lookup order:
+#   $ECHOCTL_BIN → plugin/bin/echoctl[.exe] (a dev build from scripts/build-plugin.sh) →
+#   the app's own path (<config dir>/app-path, written at each app start: any install folder) →
+#   echoctl on PATH → /Applications/Echo.app → ~/Applications/Echo.app →
+#   %LOCALAPPDATA%\Programs\echo\echoctl.exe
 here=$(cd "$(dirname "$0")/.." && pwd)
-for c in "${ECHOCTL_BIN:-}" "$here/bin/echoctl"; do
+for c in "${ECHOCTL_BIN:-}" "$here/bin/echoctl" "$here/bin/echoctl.exe"; do
   [ -n "$c" ] && [ -x "$c" ] && exec "$c" "$@"
 done
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) windows=1; cfg=${ECHOCTL_CONFIG_DIR:-${APPDATA:-}/echo} ;;
+  Darwin) windows=; cfg=${ECHOCTL_CONFIG_DIR:-$HOME/Library/Application Support/echo} ;;
+  *) windows=; cfg=${ECHOCTL_CONFIG_DIR:-$HOME/.config/echo} ;;
+esac
+if [ -f "$cfg/app-path" ]; then
+  c=$(cat "$cfg/app-path")
+  [ -n "$windows" ] && command -v cygpath >/dev/null 2>&1 && c=$(cygpath -u "$c")
+  [ -n "$c" ] && [ -x "$c" ] && exec "$c" "$@"
+fi
 if command -v echoctl >/dev/null 2>&1 && [ "$(command -v echoctl)" != "$0" ]; then
   exec echoctl "$@"
 fi
 for c in /Applications/Echo.app/Contents/MacOS/echoctl "$HOME/Applications/Echo.app/Contents/MacOS/echoctl"; do
   [ -x "$c" ] && exec "$c" "$@"
 done
-echo "echoctl app is not installed — install it (see the Echo README), then retry" >&2
+if [ -n "$windows" ] && [ -n "${LOCALAPPDATA:-}" ]; then
+  c="$LOCALAPPDATA/Programs/echo/echoctl.exe"
+  command -v cygpath >/dev/null 2>&1 && c=$(cygpath -u "$c")
+  [ -x "$c" ] && exec "$c" "$@"
+fi
+echo "echoctl app is not installed — install it (see the Echo README) and start it once, then retry" >&2
 exit 127

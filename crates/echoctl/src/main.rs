@@ -10,6 +10,8 @@ mod calls;
 mod config;
 #[cfg(any(target_os = "macos", windows))]
 mod frames;
+#[cfg(feature = "transcribe")]
+mod gpu;
 mod graph;
 #[cfg(feature = "transcribe")]
 mod live;
@@ -212,6 +214,10 @@ enum Cmd {
         #[arg(long)]
         keep_audio: bool,
     },
+    /// (internal) Try whisper.cpp on the GPU once: the app runs this as a child (`gpu.rs`)
+    #[cfg(feature = "transcribe")]
+    #[command(hide = true)]
+    GpuCheck,
     /// (old name of `app run`)
     #[command(hide = true)]
     Watch {
@@ -287,6 +293,13 @@ enum Cmd {
     CallPeople {
         #[arg(long)]
         name: Option<String>,
+    },
+    /// (dev, macOS) Follow the call window and who shares, as the frame recorder does
+    #[cfg(target_os = "macos")]
+    #[command(hide = true)]
+    AxShare {
+        #[arg(long, default_value_t = 10)]
+        seconds: u64,
     },
     /// (dev) Show a notification the way the app does
     #[command(hide = true)]
@@ -559,6 +572,8 @@ fn main() -> Result<()> {
             Ok(())
         }
         #[cfg(feature = "transcribe")]
+        Cmd::GpuCheck => gpu::check(),
+        #[cfg(feature = "transcribe")]
         Cmd::Transcribe { call, model, keep_audio } => transcribe::transcribe(&call, model.as_deref(), keep_audio),
         Cmd::Vocab { cmd } => {
             let mut cfg = config::Config::load()?;
@@ -619,6 +634,8 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
+        #[cfg(target_os = "macos")]
+        Cmd::AxShare { seconds } => ax::share_probe(seconds),
         Cmd::Notify { title, body } => {
             app::notify(&title, &body);
             Ok(())

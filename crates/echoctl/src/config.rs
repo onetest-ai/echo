@@ -53,6 +53,10 @@ pub struct Config {
     /// msgraph skill's CLI when installed. Empty = use the default.
     #[serde(default)]
     pub calendar_command: Option<Vec<String>>,
+    /// Run whisper.cpp on the GPU: true / false; unset = the GPU unless it failed its check
+    /// (Windows, `gpu.rs`).
+    #[serde(default)]
+    pub use_gpu: Option<bool>,
     /// Follow the call app's mute button: while muted, the mic track records silence. Default on.
     #[serde(default)]
     pub follow_app_mute: Option<bool>,

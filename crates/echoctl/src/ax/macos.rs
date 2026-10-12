@@ -303,8 +303,21 @@ impl CallWindow {
         let every = if self.window.is_some() { Duration::from_secs(10) } else { Duration::from_secs(3) };
         let closed = self.window.as_ref().is_some_and(|w| w.string("AXRole").is_none());
         if closed || self.looked_at.is_none_or(|t| t.elapsed() >= every) {
-            self.window = self.app.children("AXWindows").into_iter().find(|w| holds_mic_button(w, 0));
+            let had = self.window.is_some();
+            // A fresh handle, web accessibility asked for again: Chromium exposes a window opened
+            // after the first request (the call window opens after the recording starts) only
+            // then — a handle kept from before never saw it (live call, 2026-10-12).
+            if let Some(app) = app_pid(TEAMS_EXECUTABLE).and_then(Element::application) {
+                app.enable_web_accessibility();
+                self.app = app;
+            }
+            let windows = self.app.children("AXWindows");
+            let n = windows.len();
+            self.window = windows.into_iter().find(|w| holds_mic_button(w, 0));
             self.looked_at = Some(Instant::now());
+            if had != self.window.is_some() || (!had && self.window.is_none() && std::env::var_os("ECHOCTL_DEBUG").is_some()) {
+                eprintln!("teams call window: {} ({n} windows)", if self.window.is_some() { "found" } else { "none" });
+            }
         }
         self.window.as_ref()
     }
@@ -421,6 +434,21 @@ impl UiRecorder {
         }
         true
     }
+}
+
+/// `echoctl ax-share`: follow the call window and the share as the frame recorder does (one
+/// `CallWindow` kept for the whole run).
+pub fn share_probe(seconds: u64) -> Result<()> {
+    let mut w = CallWindow::teams().ok_or_else(|| anyhow!("Teams not running, or Accessibility not granted"))?;
+    let t0 = Instant::now();
+    while t0.elapsed() < Duration::from_secs(seconds) {
+        let t = Instant::now();
+        let id = w.window_id();
+        let share = w.sharing();
+        println!("[{:5.1}s] window {:?}  {:?}  ({} ms)", t0.elapsed().as_secs_f64(), id, share, t.elapsed().as_millis());
+        std::thread::sleep(Duration::from_millis(1000));
+    }
+    Ok(())
 }
 
 /// `echoctl ax-mic`: show what the mute detector sees (run during a Teams call).

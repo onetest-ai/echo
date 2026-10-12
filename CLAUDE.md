@@ -33,8 +33,10 @@ Notes/actions are written only by a Claude session (the app writes transcripts, 
 - CLI on PATH (`app install-cli`): macOS `/usr/local/bin/echoctl` → the app's binary (admin
   prompt via osascript); Windows: app folder appended to the user PATH.
 - `plugin/` — the Claude Code plugin; ships no binary: `plugin/scripts/echoctl[.cmd]` finds the
-  CLI (`$ECHOCTL_BIN` → `plugin/bin` dev build from `scripts/build-plugin.sh` → PATH →
-  Echo.app). Skills:
+  CLI (`$ECHOCTL_BIN` → `plugin/bin` dev build from `scripts/build-plugin.sh` → the app's own
+  path in `<config dir>/app-path` (written at each app start: any install folder) → PATH →
+  Echo.app / `%LOCALAPPDATA%\Programs\echo`). On Windows Claude Code's Bash is Git Bash, so
+  the skills run the **sh** launcher there too (it handles MINGW paths via `cygpath`). Skills:
   `process-call` (notes → actions → vocabulary → follow-ups), `live` (the mod opens the pane),
   `record` (arm / stop from chat), `doctor` (`echoctl up` + fix what's missing: data folder,
   permissions, model, languages; first run itself is the app's). The user's own notes during a
@@ -93,7 +95,10 @@ Notes/actions are written only by a Claude session (the app writes transcripts, 
   bindgen only) and Rust ≥ 1.90. whisper.cpp build options live in `packaging/windows/whisper.cmake`
   (via `.cargo/config.toml`, MSVC target only): AVX2 not native (a native build crashes on CPUs
   without the build machine's AVX-512), `/O2` (the cmake crate drops it → /Od, ~10× slower), and
-  `+crt-static` (no VC++ Redistributable). Release zips build `--features vulkan` (Vulkan SDK;
+  `+crt-static` (no VC++ Redistributable). GPU (`gpu.rs`): a Vulkan driver crashed the process
+  inside whisper.cpp (0xC0000409 at recording start, no discrete GPU), so the GPU is tried once
+  per version in a child (`echoctl gpu-check`, at app start) → `<config dir>/gpu.json`; failed or
+  died ⇒ CPU. `config.use_gpu` overrides; macOS always uses Metal. Release zips build `--features vulkan` (Vulkan SDK;
   short `--target-dir`: the shader generator's nested CMake hits MAX_PATH) and ship LunarG's signed
   `vulkan-1.dll`; no GPU driver ⇒ whisper.cpp falls back to the CPU. 11 s test call: CPU 49 s,
   Vulkan 12 s (a desktop with an NVIDIA GPU).
@@ -282,12 +287,13 @@ language-ID model** when downloaded (large-v3's detection is indecisive on accen
 `uk 0.41/ru 0.27/en 0.25`, and forcing the wrong language makes Whisper *translate*; turbo said
 en 0.99). Uncertain detections keep the track's previous language. Do NOT pick languages by
 decode log-prob: translations/hallucinations score higher than faithful text. → whisper beam search with
-that language pinned, `no_context` → drop high no-speech-prob segments and known hallucinations
+that language pinned, `no_context` → drop silence (no-speech > 0.6, or > 0.2 with mean token log-prob < −1: Whisper's rule), bare
+word lists ("Varkin, Node, Cage, Fork": `is_word_list`) and known hallucinations
 (incl. Russian subtitle credits, `*Song*`-style annotations, lone fillers) → drop mic segments
 that echo remote text within ±4 s (user on speakers) → merge by time into transcript.md.
 Vocabulary hint (people + meeting terms + glossary; ≤ 30 terms ≤ 50 chars) is a bare comma list.
 Final pass: every hinted utterance ≥ 1 s is also decoded without it, and the hinted text is kept
-only within 0.6×…1.8×+80 chars of the plain one (`hint_is_sane`); live keeps the "≥ 3 s" rule.
+only within 0.6×…1.8×+80 chars of the plain one (`hint_is_sane`) and when hint words the plain decode lacks are under half of it (`hint_adds_terms`); live keeps the "≥ 3 s" rule.
 Decode: beam 5, temperature 0, suppress non-speech tokens, token timestamps; VAD 800 ms silence
 cut, ~250 ms pad, ≥ 200 ms speech. Ordering: Whisper's segment starts are
 only ~1 s accurate, so segments are split into sentences timed by their own tokens

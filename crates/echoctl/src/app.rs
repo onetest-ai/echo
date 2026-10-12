@@ -71,6 +71,7 @@ pub fn run(app: TargetApp, tray: bool, background: bool) -> Result<()> {
     if background {
         detach_output();
     }
+    record_app_path();
     if !paths::home_chosen() {
         first_run();
     }
@@ -79,6 +80,9 @@ pub fn run(app: TargetApp, tray: bool, background: bool) -> Result<()> {
     ctrlc::set_handler(move || s.store(true, Ordering::SeqCst))?; // SIGINT + SIGTERM
     std::thread::spawn(|| write_health(None, false, false));
     std::thread::spawn(check_updates);
+    // Windows: try the GPU now (in a child process), not when the first recording loads a model.
+    #[cfg(all(windows, feature = "transcribe"))]
+    std::thread::spawn(crate::gpu::allowed);
     #[cfg(feature = "tray")]
     if tray {
         crate::tray::run(app, stop); // never returns
@@ -89,6 +93,20 @@ pub fn run(app: TargetApp, tray: bool, background: bool) -> Result<()> {
         let _ = spawn_app(true);
     }
     Ok(())
+}
+
+/// Where the plugin's launchers find this app wherever it is installed (any folder on Windows):
+/// `<config dir>/app-path` holds this executable's path, rewritten at each start.
+pub const APP_PATH_FILE: &str = "app-path";
+
+fn record_app_path() {
+    let Ok(exe) = std::env::current_exe() else { return };
+    let exe = dunce::canonicalize(&exe).unwrap_or(exe);
+    let dir = paths::config_dir();
+    let _ = fs::create_dir_all(&dir);
+    if fs::read_to_string(dir.join(APP_PATH_FILE)).ok().as_deref() != Some(&*exe.to_string_lossy()) {
+        let _ = fs::write(dir.join(APP_PATH_FILE), exe.to_string_lossy().as_bytes());
+    }
 }
 
 /// Look for a new release at start and every 6 h; notify once per version.

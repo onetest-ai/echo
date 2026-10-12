@@ -373,7 +373,8 @@ impl Transcriber {
                 let hinted = self.decode(&mut ts.state, chunk, &lang, Some(hint))?;
                 let plain = self.decode(&mut ts.state, chunk, &lang, None)?;
                 let text = |d: &Decoded| d.iter().map(|(_, _, t)| t.as_str()).collect::<Vec<_>>().join(" ");
-                if hint_is_sane(&text(&hinted), &text(&plain)) { hinted } else { plain }
+                let (ht, pt) = (text(&hinted), text(&plain));
+                if hint_is_sane(&ht, &pt) && !hint_adds_terms(&ht, &pt, hint) { hinted } else { plain }
             }
             _ => self.decode(&mut ts.state, chunk, &lang, None)?,
         };
@@ -403,21 +404,27 @@ impl Transcriber {
         let mut segs = vec![];
         for seg in state.as_iter() {
             let text = clean_text(seg.to_str_lossy()?.trim());
-            if seg.no_speech_probability() > 0.6 || is_hallucination(&text) {
-                continue;
-            }
-            let (t0, t1) = (seg.start_timestamp() as f64 / 100.0, seg.end_timestamp() as f64 / 100.0);
             let tokens: Vec<Tok> = (0..seg.n_tokens())
                 .filter_map(|i| seg.get_token(i))
                 .filter_map(|t| {
                     let bytes = t.to_bytes().ok()?.to_vec();
                     let d = t.token_data();
-                    Some(Tok { bytes, t0: d.t0 as f64 / 100.0, t1: d.t1 as f64 / 100.0 })
+                    Some(Tok { bytes, t0: d.t0 as f64 / 100.0, t1: d.t1 as f64 / 100.0, plog: d.plog })
                 })
                 .collect();
+            let words: Vec<f32> = tokens.iter().filter(|t| !t.is_special()).map(|t| t.plog).collect();
+            let confidence = if words.is_empty() { 0.0 } else { words.iter().sum::<f32>() / words.len() as f32 };
+            let no_speech = seg.no_speech_probability();
+            if std::env::var_os("ECHOCTL_DEBUG").is_some() {
+                eprintln!("  debug: no_speech {no_speech:.2} logprob {confidence:.2} {text}");
+            }
+            if is_silence(no_speech, confidence) || is_hallucination(&text) {
+                continue;
+            }
+            let (t0, t1) = (seg.start_timestamp() as f64 / 100.0, seg.end_timestamp() as f64 / 100.0);
             for (a, b, sentence) in split_sentences(&tokens, t0, t1) {
                 let sentence = clean_text(&sentence);
-                if !sentence.is_empty() && !is_hallucination(&sentence) {
+                if !sentence.is_empty() && !is_hallucination(&sentence) && !is_word_list(&sentence) {
                     segs.push((a, b, sentence));
                 }
             }
@@ -454,6 +461,43 @@ pub(crate) struct Tok {
     bytes: Vec<u8>,
     t0: f64,
     t1: f64,
+    /// Log-probability Whisper gave this token.
+    plog: f32,
+}
+
+impl Tok {
+    fn is_special(&self) -> bool {
+        self.bytes.starts_with(b"[_") || self.bytes.starts_with(b"<|")
+    }
+}
+
+/// Whisper's own test for "this was silence, the text is made up": a likely no-speech window
+/// whose words are low-confidence (mean token log-prob below -1, Whisper's threshold), or a
+/// very likely one regardless. Quiet or distant speech is where it invents lists of names.
+fn is_silence(no_speech: f32, mean_logprob: f32) -> bool {
+    no_speech > 0.6 || (no_speech > 0.2 && mean_logprob < -1.0)
+}
+
+/// A bare list of short items, no sentence ("Varkin, Node, Cage, Fork",
+/// "Миро, Даша, Тайма, Аквара, …"): what Whisper invents from the vocabulary hint or noise.
+/// Real lists come inside sentences, so a list is dropped only when it is nearly all there is.
+fn is_word_list(text: &str) -> bool {
+    let parts: Vec<&str> = text.trim_end_matches(['.', '!', '?', '…']).split(',').map(str::trim).filter(|p| !p.is_empty()).collect();
+    if parts.len() < 4 {
+        return false;
+    }
+    let short = parts.iter().filter(|p| p.split_whitespace().count() <= 2).count();
+    short * 4 >= parts.len() * 3 && text.split_whitespace().count() <= parts.len() * 2 + 2
+}
+
+/// The hint made Whisper "hear" its own terms: most of the hinted text is hint words the plain
+/// decode doesn't have ("Miro, IPAM, Ravi" over silence). A hint term in place of a misheard
+/// word ("ServiceNow" for "service now") is the hint doing its job and is kept.
+fn hint_adds_terms(hinted: &str, plain: &str, hint: &str) -> bool {
+    let (h, p) = (words(hinted), words(plain));
+    let terms: std::collections::HashSet<String> = hint.split(',').flat_map(words).collect();
+    let added = h.iter().filter(|w| terms.contains(*w) && !p.contains(w)).count();
+    !h.is_empty() && added * 2 >= h.len()
 }
 
 /// Split a segment into sentences, each timed by its own first and last token. Special tokens
@@ -657,13 +701,15 @@ pub(crate) fn final_transcriber(cfg: &Config, model_override: Option<&str>, prom
     let allowed = allowed_languages(cfg)?;
     whisper_rs::install_logging_hooks(); // routes whisper.cpp's chatter to `log` (unset = silent)
     eprintln!("  model: {model_name}");
-    let cp = WhisperContextParameters { use_gpu: true, ..Default::default() };
+    // GPU unless it failed its check (`gpu.rs`: a Vulkan driver can crash the process).
+    let use_gpu = crate::gpu::allowed();
+    let cp = WhisperContextParameters { use_gpu, ..Default::default() };
     let ctx = WhisperContext::new_with_params(&model_path, cp).context("loading model")?;
     // Language ID with turbo when available (and different from the transcription model).
     let det_path = models::model_path(models::find(DETECTOR_MODEL)?);
     let detector = if det_path.exists() && det_path != model_path {
         eprintln!("  language detection: {DETECTOR_MODEL}");
-        Some(WhisperContext::new_with_params(&det_path, WhisperContextParameters { use_gpu: true, ..Default::default() })?)
+        Some(WhisperContext::new_with_params(&det_path, WhisperContextParameters { use_gpu, ..Default::default() })?)
     } else {
         None
     };
@@ -814,7 +860,7 @@ mod tests {
 
     #[test]
     fn segments_split_into_timed_sentences() {
-        let tok = |s: &str, t0: f64, t1: f64| Tok { bytes: s.as_bytes().to_vec(), t0, t1 };
+        let tok = |s: &str, t0: f64, t1: f64| Tok { bytes: s.as_bytes().to_vec(), t0, t1, plog: 0.0 };
         let toks = vec![
             tok("[_BEG_]", 0.0, 0.0), tok(" Yep", 0.2, 0.5), tok(", yep. That works", 0.5, 1.2), tok(".", 1.2, 1.3),
             tok(" No, no, she's on leave", 3.1, 4.6), tok(", so...", 4.6, 5.0),
@@ -826,7 +872,7 @@ mod tests {
         // Cyrillic split mid-character across tokens survives.
         let bytes = "Привіт, як справи?".as_bytes();
         let (a, b) = bytes.split_at(3);
-        let out = split_sentences(&[Tok { bytes: a.to_vec(), t0: 0.0, t1: 0.3 }, Tok { bytes: b.to_vec(), t0: 0.3, t1: 1.0 }], 0.0, 1.0);
+        let out = split_sentences(&[Tok { bytes: a.to_vec(), t0: 0.0, t1: 0.3, plog: 0.0 }, Tok { bytes: b.to_vec(), t0: 0.3, t1: 1.0, plog: 0.0 }], 0.0, 1.0);
         assert_eq!(out[0].2, "Привіт, як справи?");
     }
 
@@ -836,6 +882,22 @@ mod tests {
         assert!(!hint_is_sane("", "We talked about the migration plan for a while"));
         assert!(!hint_is_sane(&"Pat O, Miro, IPAM, ".repeat(10), "yes"));
         assert!(hint_is_sane("Okay.", "Okay."));
+    }
+
+    #[test]
+    fn made_up_lists_and_hint_words_are_caught() {
+        assert!(is_word_list("Varkin, Node, Cage, Fork"));
+        assert!(is_word_list("Миро, Даша, Тайма, Аквара, Атаке, Ападинья, и то и то, и меседник."));
+        assert!(!is_word_list("We need the export, the report, the cluster and the budget done by Friday, okay?"));
+        assert!(!is_word_list("Да, да, конечно."));
+        assert!(!is_word_list("Ну, смотри, я думаю, что это надо сделать завтра утром, до встречи с ними."));
+        let hint = "ServiceNow, Miro, IPAM, Ravi Mehta";
+        assert!(hint_adds_terms("Miro, IPAM, Ravi Mehta", "", hint));
+        assert!(!hint_adds_terms("We moved it to ServiceNow", "We moved it to service now", hint));
+        assert!(hint_adds_terms("Ravi Mehta, Miro.", "Okay.", hint));
+        assert!(!hint_adds_terms("Open Miro and draw it", "Open Miro and draw it", hint));
+        assert!(!hint_adds_terms("Давай посмотрим", "Давай посмотрим", hint));
+        assert!(is_silence(0.7, -0.2) && is_silence(0.3, -1.3) && !is_silence(0.3, -0.4) && !is_silence(0.1, -1.5));
     }
 
     #[test]
