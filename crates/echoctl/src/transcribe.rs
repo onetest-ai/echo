@@ -8,7 +8,8 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -315,13 +316,13 @@ fn allowed_languages(cfg: &Config) -> Result<Vec<i32>> {
         .collect()
 }
 
-pub(crate) struct Transcriber {
+/// whisper.cpp with the model loaded: the transcription model and, when downloaded, turbo for
+/// language ID. Shared by this computer's transcriber and the transcription server (`remote.rs`).
+pub(crate) struct Engine {
     ctx: WhisperContext,
     /// Separate language-ID model (turbo): its detection is far more decisive than large-v3's.
     detector: Option<WhisperContext>,
-    allowed: Vec<i32>,
     threads: usize,
-    prompt: Option<String>,
 }
 
 /// Keep the hinted decode? Only when its length is in line with the unhinted one.
@@ -333,52 +334,73 @@ pub(crate) fn hint_is_sane(hinted: &str, plain: &str) -> bool {
 /// Decoded pieces of one utterance: (start, end, text), seconds relative to the utterance.
 pub(crate) type Decoded = Vec<(f64, f64, String)>;
 
-/// Per-track decoding state, reused across utterances.
-pub(crate) struct TrackState {
+/// An engine's decoding state, reused across utterances.
+pub(crate) struct EngineState {
     state: WhisperState,
     det_state: Option<WhisperState>,
-    prev_lang: Option<i32>,
 }
 
-impl Transcriber {
-    pub(crate) fn track_state(&self) -> Result<TrackState> {
-        Ok(TrackState {
+impl Engine {
+    /// Load `model_path` (GPU unless it failed its check, `gpu.rs`) and turbo for language ID
+    /// when it is downloaded and different.
+    pub(crate) fn load(model_path: &Path, threads: usize) -> Result<Engine> {
+        whisper_rs::install_logging_hooks(); // routes whisper.cpp's chatter to `log` (unset = silent)
+        let use_gpu = crate::gpu::allowed();
+        let cp = WhisperContextParameters { use_gpu, ..Default::default() };
+        let ctx = WhisperContext::new_with_params(model_path, cp).context("loading model")?;
+        let det_path = models::model_path(models::find(DETECTOR_MODEL)?);
+        let detector = if det_path.exists() && det_path != model_path {
+            eprintln!("  language detection: {DETECTOR_MODEL}");
+            Some(WhisperContext::new_with_params(&det_path, WhisperContextParameters { use_gpu, ..Default::default() })?)
+        } else {
+            None
+        };
+        Ok(Engine { ctx, detector, threads })
+    }
+
+    pub(crate) fn state(&self) -> Result<EngineState> {
+        Ok(EngineState {
             state: self.ctx.create_state()?,
             det_state: match &self.detector {
                 Some(d) => Some(d.create_state()?),
                 None => None,
             },
-            prev_lang: None,
         })
     }
 
-    /// Detect the language (restricted, sticky per track) and decode one utterance.
-    /// Returns the language code and (start, end, text) relative to the chunk.
-    pub(crate) fn utterance(&self, ts: &mut TrackState, chunk: &[f32]) -> Result<(String, Decoded)> {
+    /// Detect the language (restricted to `allowed`, sticky: `prev` is the track's last one) and
+    /// decode one utterance. Returns the detected language (None: uncertain), its code for the
+    /// segments, and (start, end, text) relative to the chunk.
+    pub(crate) fn utterance(
+        &self,
+        st: &mut EngineState,
+        prev: Option<i32>,
+        allowed: &[i32],
+        prompt: Option<&str>,
+        chunk: &[f32],
+    ) -> Result<(Option<i32>, String, Decoded)> {
         let dur = chunk.len() as f64 / RATE as f64;
-        let lang_id = match ts.prev_lang {
+        let lang_id = match prev {
             Some(prev) if dur < SHORT_UTTERANCE_S => Some(prev),
             _ => {
-                let st = ts.det_state.as_mut().unwrap_or(&mut ts.state);
-                st.pcm_to_mel(chunk, self.threads)?;
-                let ranked = rank_languages(st, &self.allowed, self.threads)?;
-                choose_language(&ranked, ts.prev_lang)
+                let s = st.det_state.as_mut().unwrap_or(&mut st.state);
+                s.pcm_to_mel(chunk, self.threads)?;
+                let ranked = rank_languages(s, allowed, self.threads)?;
+                choose_language(&ranked, prev)
             }
         };
-        ts.prev_lang = lang_id.or(ts.prev_lang);
-        let lang = lang_id.and_then(whisper_rs::get_lang_str).unwrap_or("auto").to_string();
-        let dur = chunk.len() as f64 / RATE as f64;
-        let segs = match self.prompt.as_deref() {
+        let lang = lang_id.or(prev).and_then(whisper_rs::get_lang_str).unwrap_or("auto").to_string();
+        let segs = match prompt {
             Some(hint) if dur >= GUARD_MIN_S => {
-                let hinted = self.decode(&mut ts.state, chunk, &lang, Some(hint))?;
-                let plain = self.decode(&mut ts.state, chunk, &lang, None)?;
+                let hinted = self.decode(&mut st.state, chunk, &lang, Some(hint))?;
+                let plain = self.decode(&mut st.state, chunk, &lang, None)?;
                 let text = |d: &Decoded| d.iter().map(|(_, _, t)| t.as_str()).collect::<Vec<_>>().join(" ");
                 let (ht, pt) = (text(&hinted), text(&plain));
                 if hint_is_sane(&ht, &pt) && !hint_adds_terms(&ht, &pt, hint) { hinted } else { plain }
             }
-            _ => self.decode(&mut ts.state, chunk, &lang, None)?,
+            _ => self.decode(&mut st.state, chunk, &lang, None)?,
         };
-        Ok((lang, segs))
+        Ok((lang_id, lang, segs))
     }
 
     fn decode(&self, state: &mut WhisperState, chunk: &[f32], lang: &str, hint: Option<&str>) -> Result<Decoded> {
@@ -430,6 +452,100 @@ impl Transcriber {
             }
         }
         Ok(segs)
+    }
+
+}
+
+/// Where utterances are decoded: this computer, or a transcription server on the local network
+/// (`remote.rs`) with this computer as the fallback while it can't be reached.
+enum Backend {
+    Local(Engine),
+    Remote {
+        server: crate::remote::Client,
+        /// This computer's model, loaded the first time the server can't be reached.
+        fallback: Option<PathBuf>,
+        local: OnceLock<Option<Engine>>,
+        threads: usize,
+        /// The server failed: decode here until then.
+        down_until: Mutex<Option<Instant>>,
+    },
+}
+
+/// A server that failed is tried again after this.
+const SERVER_RETRY: Duration = Duration::from_secs(60);
+/// No local model to fall back on: how long to keep waiting for the server.
+const SERVER_WAIT: Duration = Duration::from_secs(15 * 60);
+
+pub(crate) struct Transcriber {
+    backend: Backend,
+    allowed: Vec<i32>,
+    prompt: Option<String>,
+}
+
+/// Per-track decoding state, reused across utterances.
+pub(crate) struct TrackState {
+    /// Created when this computer decodes (always, or the first time the server fails).
+    local: Option<EngineState>,
+    prev_lang: Option<i32>,
+}
+
+impl Transcriber {
+    pub(crate) fn track_state(&self) -> Result<TrackState> {
+        let local = match &self.backend {
+            Backend::Local(e) => Some(e.state()?),
+            Backend::Remote { .. } => None,
+        };
+        Ok(TrackState { local, prev_lang: None })
+    }
+
+    /// Detect the language (restricted, sticky per track) and decode one utterance.
+    /// Returns the language code and (start, end, text) relative to the chunk.
+    pub(crate) fn utterance(&self, ts: &mut TrackState, chunk: &[f32]) -> Result<(String, Decoded)> {
+        let (lang_id, lang, segs) = match &self.backend {
+            Backend::Local(e) => self.local(e, ts, chunk)?,
+            Backend::Remote { server, fallback, local, threads, down_until } => {
+                let waiting = Instant::now();
+                loop {
+                    let down = down_until.lock().unwrap_or_else(|e| e.into_inner()).is_some_and(|t| Instant::now() < t);
+                    if !down {
+                        match server.utterance(chunk, ts.prev_lang, &self.allowed, self.prompt.as_deref()) {
+                            Ok(r) => break r,
+                            Err(e) if e.downcast_ref::<crate::remote::Refused>().is_some() => return Err(e),
+                            Err(e) => {
+                                eprintln!("  transcription server: {e:#} — this computer decodes for {}s", SERVER_RETRY.as_secs());
+                                *down_until.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now() + SERVER_RETRY);
+                            }
+                        }
+                    }
+                    let engine = local.get_or_init(|| {
+                        let path = fallback.as_ref()?;
+                        Engine::load(path, *threads).map_err(|e| eprintln!("  this computer's model: {e:#}")).ok()
+                    });
+                    if let Some(e) = engine {
+                        break self.local(e, ts, chunk)?;
+                    }
+                    // No model here: the WAVs keep the audio, so wait for the server.
+                    if waiting.elapsed() < Duration::from_secs(1) {
+                        eprintln!("  no speech model on this computer: waiting for the transcription server");
+                    }
+                    if waiting.elapsed() > SERVER_WAIT {
+                        bail!("the transcription server can't be reached and this computer has no speech model");
+                    }
+                    std::thread::sleep(Duration::from_secs(10));
+                    *down_until.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                }
+            }
+        };
+        ts.prev_lang = lang_id.or(ts.prev_lang);
+        Ok((lang, segs))
+    }
+
+    fn local(&self, e: &Engine, ts: &mut TrackState, chunk: &[f32]) -> Result<(Option<i32>, String, Decoded)> {
+        if ts.local.is_none() {
+            ts.local = Some(e.state()?);
+        }
+        let st = ts.local.as_mut().expect("just set");
+        e.utterance(st, ts.prev_lang, &self.allowed, self.prompt.as_deref(), chunk)
     }
 
     pub(crate) fn track(&self, speaker: &str, audio: &[f32]) -> Result<Vec<Segment>> {
@@ -686,8 +802,29 @@ pub(crate) fn take_marker(dir: &Path) -> Result<InProgress> {
 }
 
 /// The final pass's transcriber: the configured model (or `model_override`), with turbo for
-/// language ID when it is downloaded. Returns it with the model's name.
+/// language ID when it is downloaded — or the transcription server when one is set
+/// (`echoctl server use`; never with `model_override`). Returns it with the model's name.
 pub(crate) fn final_transcriber(cfg: &Config, model_override: Option<&str>, prompt: Option<String>, threads: usize) -> Result<(Transcriber, String)> {
+    let allowed = allowed_languages(cfg)?;
+    if let Some(p) = &prompt {
+        eprintln!("  vocabulary hint: {p}");
+    }
+    if let (None, Some(server)) = (model_override, crate::remote::Client::configured()) {
+        let fallback = models::active_model_path().ok().filter(|p| p.exists());
+        let name = match server.hello() {
+            Ok(h) => format!("{} on {}", h.model, h.name),
+            Err(e) => {
+                eprintln!("  transcription server: {e:#}");
+                match &fallback {
+                    Some(_) => format!("{} (server not reachable)", cfg.model.clone().unwrap_or_default()),
+                    None => format!("transcription server {}", server.url()),
+                }
+            }
+        };
+        eprintln!("  model: {name}");
+        let backend = Backend::Remote { server, fallback, local: OnceLock::new(), threads, down_until: Mutex::new(None) };
+        return Ok((Transcriber { backend, allowed, prompt }, name));
+    }
     let (model_name, model_path) = match model_override {
         Some(name) => {
             let m = models::find(name)?;
@@ -698,25 +835,9 @@ pub(crate) fn final_transcriber(cfg: &Config, model_override: Option<&str>, prom
     if !model_path.exists() {
         bail!("model {model_name} is not downloaded — run `echoctl model download {model_name}`");
     }
-    let allowed = allowed_languages(cfg)?;
-    whisper_rs::install_logging_hooks(); // routes whisper.cpp's chatter to `log` (unset = silent)
     eprintln!("  model: {model_name}");
-    // GPU unless it failed its check (`gpu.rs`: a Vulkan driver can crash the process).
-    let use_gpu = crate::gpu::allowed();
-    let cp = WhisperContextParameters { use_gpu, ..Default::default() };
-    let ctx = WhisperContext::new_with_params(&model_path, cp).context("loading model")?;
-    // Language ID with turbo when available (and different from the transcription model).
-    let det_path = models::model_path(models::find(DETECTOR_MODEL)?);
-    let detector = if det_path.exists() && det_path != model_path {
-        eprintln!("  language detection: {DETECTOR_MODEL}");
-        Some(WhisperContext::new_with_params(&det_path, WhisperContextParameters { use_gpu, ..Default::default() })?)
-    } else {
-        None
-    };
-    if let Some(p) = &prompt {
-        eprintln!("  vocabulary hint: {p}");
-    }
-    Ok((Transcriber { ctx, detector, allowed, threads, prompt }, model_name))
+    let engine = Engine::load(&model_path, threads)?;
+    Ok((Transcriber { backend: Backend::Local(engine), allowed, prompt }, model_name))
 }
 
 /// Order the segments, drop the mic's echo of the remote side, name the remote speaker when the

@@ -124,7 +124,9 @@ menu → Claude Code → Write call notes in.
 
 - **Opt-in per call.** Echo records only calls you armed. Meetings tagged `no_notetakers` are
   marked so you know.
-- **On your Mac.** Speech is turned into text locally with [whisper.cpp](https://github.com/ggml-org/whisper.cpp).
+- **On your Mac.** Speech is turned into text locally with [whisper.cpp](https://github.com/ggml-org/whisper.cpp),
+  unless you connect Echo to a transcription server yourself (see the FAQ). Then that computer
+  hears the audio, and nothing is kept there.
 - **Text only.** Audio is deleted once the transcript exists. Calls live in the folder you
   picked, as plain Markdown and JSON.
 - **You are responsible for consent.** Tell the people on the call you are taking notes.
@@ -137,6 +139,19 @@ Permissions belong to Echo in System Settings → Privacy & Security.
 **Can I use another language?** Yes. Echo detects the language for each sentence. Menu →
 Settings → Languages limits it to the ones you speak, which avoids mix-ups between similar
 languages.
+
+**Transcription is slow on my laptop.** Without a graphics card, transcribing takes a long
+time. You can let a faster computer on your network do it, such as a Mac with Apple Silicon or
+a PC with a graphics card.
+1. On the fast computer, open the Echo menu and choose **Settings → Transcribe for other
+   computers**. Echo shows a URL and an API key.
+2. On the laptop, choose **Settings → Connect to a transcription server…** and enter them.
+
+Each sentence of the call's audio is then sent to that computer, and the text comes back.
+The fast computer keeps no audio or text. The connection isn't encrypted, so use it only on a
+network you trust. Echo also accepts an `https://` URL, for a server behind a TLS proxy. If the
+server can't be reached, the laptop transcribes the call itself. From a terminal, use
+`echoctl server use <url> --key <key>` or `echoctl server share on`.
 
 **Where are my files?** In the folder you picked, under `calls/`. Menu → **Open calls folder**.
 

@@ -542,7 +542,7 @@ fn open_file(path: &Path) {
     let _ = std::process::Command::new("notepad").arg(path).spawn();
 }
 
-fn copy_to_clipboard(text: &str) {
+pub(crate) fn copy_to_clipboard(text: &str) {
     use std::io::Write;
     #[cfg(target_os = "macos")]
     let cmd = std::process::Command::new("pbcopy").stdin(std::process::Stdio::piped()).spawn();

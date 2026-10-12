@@ -58,14 +58,17 @@ impl Live {
     }
 }
 
-/// Start the worker for a call. None when no model is downloaded (the call is then transcribed
+/// Start the worker for a call. None when no model is downloaded and no server is set (the call is then transcribed
 /// after it ends, as before).
 pub fn start(dir: &Path, meeting: Option<&MeetingContext>, languages: Option<Vec<String>>) -> Option<Live> {
     let mut cfg = Config::load().ok()?;
     if let Some(l) = languages.filter(|l| !l.is_empty()) {
         cfg.languages = l; // pinned for this call
     }
-    models::active_model_path().ok().filter(|p| p.exists())?;
+    // A model here, or a transcription server to send the audio to.
+    if crate::remote::Client::configured().is_none() {
+        models::active_model_path().ok().filter(|p| p.exists())?;
+    }
     let prompt = build_prompt(&cfg, meeting);
     let remote_name = meeting.and_then(|m| m.sole_other(cfg.me.as_ref()));
     let done = Arc::new(AtomicBool::new(false));

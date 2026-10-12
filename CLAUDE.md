@@ -11,7 +11,9 @@ Notes/actions are written only by a Claude session (the app writes transcripts, 
 - macOS **and** Windows. Platform code lives behind `#[cfg]` in `audio/{macos,windows}.rs` and
   `permissions/{macos,windows}.rs`; shared code must not use platform APIs.
 - Recording is opt-in per meeting (join-and-record), never automatic for every call.
-- Transcription is on-device (whisper.cpp via whisper-rs, `transcribe` feature).
+- Transcription is on-device (whisper.cpp via whisper-rs, `transcribe` feature), or on a
+  transcription server the user connects to themselves (`remote.rs`, below). Never a cloud
+  service by default.
 
 ## Layout
 - `crates/echoctl` — one binary: the app (`app run`, or no arguments inside Echo.app /
@@ -285,6 +287,24 @@ decoded again at the end; on headphones nothing is redone. Any failure, no model
 recording started, recovery after a crash, and `echoctl transcribe` run the full pass over the
 WAVs (same steps). Release build on this Mac: 115 s of speech in ~21 s per track (model load
 included).
+Transcription server (`remote.rs`, for laptops without a usable GPU): `transcribe::Engine` is
+whisper.cpp with the models loaded (`utterance`: language ID + decode + guards); `Transcriber`
+decodes on a local `Engine` or sends each utterance to a server (`remote::Client`: a URL,
+`http://` or `https://` (ureq + rustls, the OS's certificate store), plus an API key in
+`<config dir>/transcription-server.json`, 0600). Voice detection, the filters, echo
+cancellation and the transcript stay on the client. Server down ⇒ the local model for 60 s,
+then the server is tried again. No local model ⇒ wait for the server (≤ 15 min; the WAVs hold
+the audio). A 401 or 400 is final. Server = any Echo with Settings → Transcribe for other
+computers (`echoctl server share on` → `<config dir>/transcription-serve.json` {on, port 47800,
+key}; the app's `remote::run_in_app` thread follows that file every 2 s). It is a plain-HTTP
+std listener: ≤ 8 connections, one utterance at a time, its own active model loaded at the
+first request and dropped after 10 min idle, a wrong key answered after 1 s. Protocol:
+`GET /v1/hello`, `POST /v1/utterance` (u32 LE JSON length + `{languages, prev, prompt}` + PCM
+s16le) → `{lang_id, lang, segs}`. The key is 16 characters without look-alike characters,
+compared without case or dashes. Plain HTTP was the user's choice for the local network; https
+works through a proxy. `echoctl server [status|use <url> --key|off|share on|off [--new-key]|run]`.
+Tested on this Mac: a client with no model got the transcript 3 s after the end, using almost
+no CPU of its own; with the server down, it decoded locally.
 Per track (mic = Me, remote = Remote) → energy VAD into ≤25 s utterances → language detected per
 utterance, restricted to `config.languages` (a new data folder starts with en, uk, ru, es; `[]` =
 any; stops uk↔ru confusion), using **turbo as the

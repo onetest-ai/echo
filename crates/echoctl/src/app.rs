@@ -83,6 +83,9 @@ pub fn run(app: TargetApp, tray: bool, background: bool) -> Result<()> {
     // Windows: try the GPU now (in a child process), not when the first recording loads a model.
     #[cfg(all(windows, feature = "transcribe"))]
     std::thread::spawn(crate::gpu::allowed);
+    // Transcribes for other computers while Settings says so (`remote.rs`).
+    #[cfg(feature = "transcribe")]
+    std::thread::spawn(crate::remote::run_in_app);
     #[cfg(feature = "tray")]
     if tray {
         crate::tray::run(app, stop); // never returns
@@ -826,6 +829,34 @@ pub fn ask(message: &str, buttons: &[&str], default: &str) -> Option<String> {
     #[allow(unreachable_code)]
     {
         let _ = (message, buttons, default);
+        None
+    }
+}
+
+/// An information dialog: the clicked label (macOS: `buttons`, the last one the default;
+/// Windows: one OK button, which counts as the first label).
+#[cfg_attr(not(all(feature = "tray", feature = "transcribe")), allow(dead_code))]
+pub fn message(text: &str, buttons: &[&str]) -> Option<String> {
+    #[cfg(target_os = "macos")]
+    {
+        let list = buttons.iter().map(|b| applescript_str(b)).collect::<Vec<_>>().join(", ");
+        let default = buttons.last().copied().unwrap_or("OK");
+        let script = format!("display dialog {} with title \"Echo\" buttons {{{list}}} default button {}", applescript_str(text), applescript_str(default));
+        let out = Command::new("osascript").args(["-e", &script]).output().ok()?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        return text.split("button returned:").nth(1).map(|r| r.split(',').next().unwrap_or("").trim().to_string());
+    }
+    #[cfg(windows)]
+    {
+        // Line breaks survive as PowerShell "`n" between single-quoted pieces.
+        let lines = text.split('\n').map(|l| format!("'{}'", l.replace('\'', "''"))).collect::<Vec<_>>().join(" + \"`n\" + ");
+        let script = format!("$null = (New-Object -ComObject WScript.Shell).Popup(({lines}), 0, 'Echo', 64)");
+        Command::new("powershell").no_window().args(["-NoProfile", "-Command", &script]).status().ok()?;
+        return buttons.first().map(|b| b.to_string());
+    }
+    #[allow(unreachable_code)]
+    {
+        let _ = (text, buttons);
         None
     }
 }

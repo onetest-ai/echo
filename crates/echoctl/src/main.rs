@@ -21,6 +21,8 @@ mod models;
 mod paths;
 mod permissions;
 mod recorder;
+#[cfg(feature = "transcribe")]
+mod remote;
 mod schedule;
 mod watch;
 #[cfg(feature = "transcribe")]
@@ -213,6 +215,13 @@ enum Cmd {
         /// Keep the WAV files afterwards (default: deleted once the transcript is written)
         #[arg(long)]
         keep_audio: bool,
+    },
+    /// Transcription on another computer (local network): use a server (URL + API key), or let
+    /// other computers transcribe on this one
+    #[cfg(feature = "transcribe")]
+    Server {
+        #[command(subcommand)]
+        cmd: Option<ServerCmd>,
     },
     /// (internal) Try whisper.cpp on the GPU once: the app runs this as a child (`gpu.rs`)
     #[cfg(feature = "transcribe")]
@@ -458,6 +467,35 @@ enum MeetingCmd {
     },
 }
 
+#[cfg(feature = "transcribe")]
+#[derive(Subcommand)]
+enum ServerCmd {
+    /// The server this computer uses, and whether it serves others
+    Status,
+    /// Transcribe on this server: http(s)://host:port and its API key (checked before it is kept)
+    Use {
+        url: String,
+        #[arg(long)]
+        key: String,
+    },
+    /// Stop using the server: transcribe on this computer again
+    Off,
+    /// Let other computers transcribe on this one (on | off); prints the URL and API key
+    Share {
+        #[arg(value_parser = ["on", "off"])]
+        state: String,
+        /// Replace the API key (computers using the old one must connect again)
+        #[arg(long)]
+        new_key: bool,
+    },
+    /// Serve in the foreground until Ctrl-C (testing)
+    #[command(hide = true)]
+    Run {
+        #[arg(long)]
+        port: Option<u16>,
+    },
+}
+
 #[derive(Subcommand)]
 enum ModelCmd {
     /// Show the catalog, what's downloaded/active, and the recommendation for this machine
@@ -577,6 +615,31 @@ fn main() -> Result<()> {
         }
         #[cfg(feature = "transcribe")]
         Cmd::GpuCheck => gpu::check(),
+        #[cfg(feature = "transcribe")]
+        Cmd::Server { cmd } => match cmd.unwrap_or(ServerCmd::Status) {
+            ServerCmd::Status => remote::print_status(),
+            ServerCmd::Use { url, key } => {
+                let h = remote::connect(&url, &key)?;
+                println!("transcribing on {} ({}, {}, Echo {})", h.name, h.model, h.engine, h.version);
+                Ok(())
+            }
+            ServerCmd::Off => {
+                remote::disconnect()?;
+                println!("transcribing on this computer");
+                Ok(())
+            }
+            ServerCmd::Share { state, new_key } => {
+                let s = remote::set_serving(state == "on", new_key)?;
+                if s.on {
+                    println!("other computers can transcribe here (while Echo runs):\n  URL      {}\n  API key  {}", remote::serve_url(&s), s.key);
+                    println!("audio is sent over the network unencrypted; nothing is kept here");
+                } else {
+                    println!("not serving other computers");
+                }
+                Ok(())
+            }
+            ServerCmd::Run { port } => remote::run_foreground(port),
+        },
         #[cfg(feature = "transcribe")]
         Cmd::Transcribe { call, model, keep_audio } => transcribe::transcribe(&call, model.as_deref(), keep_audio),
         Cmd::Vocab { cmd } => {

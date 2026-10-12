@@ -18,6 +18,7 @@ Regenerate with `scripts/third-party.py`.
 | anstyle-wincon | 3.0.11 | MIT OR Apache-2.0 | https://github.com/rust-cli/anstyle.git |
 | anyhow | 1.0.104 | MIT OR Apache-2.0 | https://github.com/dtolnay/anyhow |
 | autocfg | 1.5.1 | Apache-2.0 OR MIT | https://github.com/cuviper/autocfg |
+| base64 | 0.23.1 | MIT OR Apache-2.0 | https://github.com/marshallpierce/rust-base64 |
 | bindgen | 0.72.1 | BSD-3-Clause | https://github.com/rust-lang/rust-bindgen |
 | bitflags | 2.13.2 | MIT OR Apache-2.0 | https://github.com/bitflags/bitflags |
 | block-buffer | 0.10.4 | MIT OR Apache-2.0 | https://github.com/RustCrypto/utils |
@@ -71,12 +72,14 @@ Regenerate with `scripts/third-party.py`.
 | form_urlencoded | 1.2.2 | MIT OR Apache-2.0 | https://github.com/servo/rust-url |
 | fs_extra | 1.3.0 | MIT | https://github.com/webdesus/fs_extra |
 | generic-array | 0.14.7 | MIT | https://github.com/fizyk20/generic-array.git |
+| getrandom | 0.2.17 | MIT OR Apache-2.0 | https://github.com/rust-random/getrandom |
 | getrandom | 0.3.4 | MIT OR Apache-2.0 | https://github.com/rust-random/getrandom |
 | glob | 0.3.4 | MIT OR Apache-2.0 | https://github.com/rust-lang/glob |
 | hashbrown | 0.17.1 | MIT OR Apache-2.0 | https://github.com/rust-lang/hashbrown |
 | heck | 0.5.0 | MIT OR Apache-2.0 | https://github.com/withoutboats/heck |
 | hound | 3.5.1 | Apache-2.0 | https://github.com/ruuda/hound |
 | http | 1.5.0 | MIT OR Apache-2.0 | https://github.com/hyperium/http |
+| httparse | 1.10.1 | MIT OR Apache-2.0 | https://github.com/seanmonstar/httparse |
 | iana-time-zone | 0.1.65 | MIT OR Apache-2.0 | https://github.com/strawlab/iana-time-zone |
 | icu_collections | 2.3.0 | Unicode-3.0 | https://github.com/unicode-org/icu4x |
 | icu_locale_core | 2.3.0 | Unicode-3.0 | https://github.com/unicode-org/icu4x |
@@ -150,10 +153,17 @@ Regenerate with `scripts/third-party.py`.
 | regex | 1.13.1 | MIT OR Apache-2.0 | https://github.com/rust-lang/regex |
 | regex-automata | 0.4.18 | MIT OR Apache-2.0 | https://github.com/rust-lang/regex |
 | regex-syntax | 0.8.11 | MIT OR Apache-2.0 | https://github.com/rust-lang/regex |
+| ring | 0.17.14 | Apache-2.0 AND ISC | https://github.com/briansmith/ring |
 | rustc-hash | 2.1.3 | Apache-2.0 OR MIT | https://github.com/rust-lang/rustc-hash |
 | rustc_version | 0.4.1 | MIT OR Apache-2.0 | https://github.com/djc/rustc-version-rs |
 | rustfft | 6.4.1 | MIT OR Apache-2.0 | https://github.com/ejmahler/RustFFT |
+| rustls | 0.23.45 | Apache-2.0 OR ISC OR MIT | https://github.com/rustls/rustls |
+| rustls-pki-types | 1.15.1 | MIT OR Apache-2.0 | https://github.com/rustls/pki-types |
+| rustls-platform-verifier | 0.7.1 | MIT OR Apache-2.0 | https://github.com/rustls/rustls-platform-verifier |
+| rustls-webpki | 0.103.15 | ISC | https://github.com/rustls/webpki |
 | scopeguard | 1.2.0 | MIT OR Apache-2.0 | https://github.com/bluss/scopeguard |
+| security-framework | 3.7.0 | MIT OR Apache-2.0 | https://github.com/kornelski/rust-security-framework |
+| security-framework-sys | 2.17.0 | MIT OR Apache-2.0 | https://github.com/kornelski/rust-security-framework |
 | semver | 1.0.28 | MIT OR Apache-2.0 | https://github.com/dtolnay/semver |
 | serde | 1.0.229 | MIT OR Apache-2.0 | https://github.com/serde-rs/serde |
 | serde_core | 1.0.229 | MIT OR Apache-2.0 | https://github.com/serde-rs/serde |
@@ -168,6 +178,7 @@ Regenerate with `scripts/third-party.py`.
 | stable_deref_trait | 1.2.1 | MIT OR Apache-2.0 | https://github.com/storyyeller/stable_deref_trait |
 | strength_reduce | 0.2.4 | MIT OR Apache-2.0 | http://github.com/ejmahler/strength_reduce |
 | strsim | 0.11.1 | MIT | https://github.com/rapidfuzz/strsim-rs |
+| subtle | 2.6.1 | BSD-3-Clause | https://github.com/dalek-cryptography/subtle |
 | syn | 2.0.119 | MIT OR Apache-2.0 | https://github.com/dtolnay/syn |
 | syn | 3.0.6 | MIT OR Apache-2.0 | https://github.com/dtolnay/syn |
 | synstructure | 0.14.0 | MIT | https://github.com/mystor/synstructure |
@@ -187,12 +198,17 @@ Regenerate with `scripts/third-party.py`.
 | typenum | 1.20.1 | MIT OR Apache-2.0 | https://github.com/paholg/typenum |
 | unicode-ident | 1.0.26 | (MIT OR Apache-2.0) AND Unicode-3.0 | https://github.com/dtolnay/unicode-ident |
 | unicode-segmentation | 1.13.3 | MIT OR Apache-2.0 | https://github.com/unicode-rs/unicode-segmentation |
+| untrusted | 0.9.0 | ISC | https://github.com/briansmith/untrusted |
+| ureq | 3.4.2 | MIT OR Apache-2.0 | https://github.com/algesten/ureq |
+| ureq-proto | 0.6.4 | MIT OR Apache-2.0 | https://github.com/algesten/ureq-proto |
 | url | 2.5.8 | MIT OR Apache-2.0 | https://github.com/servo/rust-url |
+| utf8-zero | 0.8.1 | MIT OR Apache-2.0 | https://github.com/algesten/utf8-zero |
 | utf8_iter | 1.0.4 | Apache-2.0 OR MIT | https://github.com/hsivonen/utf8_iter |
 | utf8parse | 0.2.2 | Apache-2.0 OR MIT | https://github.com/alacritty/vte |
 | version_check | 0.9.5 | MIT/Apache-2.0 | https://github.com/SergioBenitez/version_check |
 | vswhom | 0.1.0 | MIT | https://github.com/nabijaczleweli/vswhom.rs |
 | vswhom-sys | 0.1.3 | MIT | https://github.com/nabijaczleweli/vswhom-sys.rs |
+| webpki-roots | 1.0.9 | CDLA-Permissive-2.0 | https://github.com/rustls/webpki-roots |
 | webview2-com | 0.39.1 | MIT | https://github.com/wravery/webview2-rs |
 | webview2-com-macros | 0.8.1 | MIT | https://github.com/wravery/webview2-rs |
 | webview2-com-sys | 0.39.1 | MIT | https://github.com/wravery/webview2-rs |
@@ -219,6 +235,7 @@ Regenerate with `scripts/third-party.py`.
 | yoke-derive | 0.8.4 | Unicode-3.0 | https://github.com/unicode-org/icu4x |
 | zerofrom | 0.1.8 | Unicode-3.0 | https://github.com/unicode-org/icu4x |
 | zerofrom-derive | 0.1.8 | Unicode-3.0 | https://github.com/unicode-org/icu4x |
+| zeroize | 1.9.1 | Apache-2.0 OR MIT | https://github.com/RustCrypto/utils |
 | zerotrie | 0.2.5 | Unicode-3.0 | https://github.com/unicode-org/icu4x |
 | zerovec | 0.11.8 | Unicode-3.0 | https://github.com/unicode-org/icu4x |
 | zerovec-derive | 0.11.6 | Unicode-3.0 | https://github.com/unicode-org/icu4x |

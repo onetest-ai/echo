@@ -347,6 +347,10 @@ struct Model {
     has_claude: bool,
     plugin_installed: bool,
     cli_installed: bool,
+    /// The transcription server this computer uses ("<name> (<url>)").
+    server: Option<String>,
+    /// This computer transcribes for others: the URL they connect to.
+    serving: Option<String>,
     update: Option<String>,
     calendar_account: Option<String>,
     graph_client: (String, bool),
@@ -439,6 +443,14 @@ fn load_model(health: &[(String, String, Option<String>)]) -> Model {
         has_claude: !claude["claude"].is_null(),
         plugin_installed: claude["plugin_installed"] == true,
         cli_installed: app::cli_installed(),
+        #[cfg(feature = "transcribe")]
+        server: crate::remote::client_label(),
+        #[cfg(not(feature = "transcribe"))]
+        server: None,
+        #[cfg(feature = "transcribe")]
+        serving: Some(crate::remote::serve_settings()).filter(|s| s.on).map(|s| crate::remote::serve_url(&s)),
+        #[cfg(not(feature = "transcribe"))]
+        serving: None,
         calendar_account: crate::graph::account(),
         graph_client: {
             let (id, _) = crate::graph::app_registration();
@@ -515,6 +527,14 @@ enum Action {
     AskPermissions,
     #[cfg_attr(not(feature = "transcribe"), allow(dead_code))]
     RetestGpu,
+    #[cfg_attr(not(feature = "transcribe"), allow(dead_code))]
+    ConnectServer,
+    #[cfg_attr(not(feature = "transcribe"), allow(dead_code))]
+    DisconnectServer,
+    #[cfg_attr(not(feature = "transcribe"), allow(dead_code))]
+    ToggleServing,
+    #[cfg_attr(not(feature = "transcribe"), allow(dead_code))]
+    ShowServing,
     OpenUrl(String),
     ChangeHome,
     ToggleAutostart,
@@ -543,6 +563,38 @@ struct Ui {
 
 fn local_hm(m: &MeetingContext) -> String {
     watch::meeting_start(m).map(|s| s.with_timezone(&Local).format("%H:%M").to_string()).unwrap_or_default()
+}
+
+/// Settings → Connect to a transcription server…: its URL, then its API key; checked before
+/// it is kept.
+#[cfg(feature = "transcribe")]
+fn connect_server() {
+    let Some(url) = app::ask_text(
+        "Transcription server URL (http:// or https://).\n\nAnother Echo shows it under Settings → Show URL and API key…",
+        "http://",
+        "Next",
+    ) else {
+        return;
+    };
+    let Some(key) = app::ask_text("API key for this server:", "", "Connect") else { return };
+    match crate::remote::connect(&url, &key) {
+        Ok(h) => app::notify("Transcription server", &format!("Calls are transcribed on {} ({}, {}).", h.name, h.model, h.engine)),
+        Err(e) => app::notify("Could not connect", &format!("{e:#}")),
+    }
+}
+
+/// What other computers enter to transcribe here; the dialog's Copy button copies both lines.
+#[cfg(feature = "transcribe")]
+fn show_serving(s: &crate::remote::ServeSettings) {
+    let (url, key) = (crate::remote::serve_url(s), s.key.clone());
+    let text = format!(
+        "Other computers can transcribe their calls on this one while Echo runs here.\n\n\
+         In their Echo: Settings → Connect to a transcription server…\n\nURL:  {url}\nAPI key:  {key}\n\n\
+         The audio of each utterance is sent over your network unencrypted. Nothing is kept on this computer."
+    );
+    if app::message(&text, &["Copy", "OK"]).as_deref() == Some("Copy") {
+        crate::window::copy_to_clipboard(&format!("URL: {url}\nAPI key: {key}"));
+    }
 }
 
 fn ellipsize(s: &str, n: usize) -> String {
@@ -685,6 +737,29 @@ impl Ui {
             let cli = self.item("Install command-line tool (Echo)…", true, Some(Action::InstallCli));
             let _ = settings.append(&cli);
         }
+        // Transcription on another computer (`remote.rs`).
+        #[cfg(feature = "transcribe")]
+        {
+            let _ = settings.append_items(&[&sep(), &MenuItem::new("Transcription server", false, None)]);
+            match &model.server {
+                Some(label) => {
+                    let using = MenuItem::new(format!("   Using {}", ellipsize(label, 44)), false, None);
+                    let off = self.item("   Stop using it (transcribe here)", true, Some(Action::DisconnectServer));
+                    let change = self.item("   Connect to another server…", true, Some(Action::ConnectServer));
+                    let _ = settings.append_items(&[&using, &change, &off]);
+                }
+                None => {
+                    let connect = self.item("   Connect to a transcription server…", true, Some(Action::ConnectServer));
+                    let _ = settings.append(&connect);
+                }
+            }
+            let serve = self.check("   Transcribe for other computers", model.serving.is_some(), Action::ToggleServing);
+            let _ = settings.append(&serve);
+            if model.serving.is_some() {
+                let show = self.item("   Show URL and API key…", true, Some(Action::ShowServing));
+                let _ = settings.append(&show);
+            }
+        }
 
         // Speech models: every catalog entry with Use / Download / Remove.
         let models_menu = Submenu::new("Speech models", true);
@@ -757,7 +832,11 @@ impl Ui {
         // What transcription runs on (Windows: the GPU unless its test failed, `gpu.rs`).
         #[cfg(feature = "transcribe")]
         {
-            let engine = MenuItem::new(format!("Speech engine: {}", crate::gpu::status()), false, None);
+            let what = match &model.server {
+                Some(label) => format!("server {label}"),
+                None => crate::gpu::status(),
+            };
+            let engine = MenuItem::new(format!("Speech engine: {what}"), false, None);
             let _ = health.append_items(&[&sep(), &engine]);
             if cfg!(windows) {
                 let retest = self.item("Re-test GPU", true, Some(Action::RetestGpu));
@@ -1022,6 +1101,33 @@ impl Ui {
             }
             Action::Recheck => self.health = health(),
             Action::AskPermissions => app::request_permissions(),
+            Action::ConnectServer => {
+                #[cfg(feature = "transcribe")]
+                std::thread::spawn(connect_server);
+                return;
+            }
+            Action::DisconnectServer => {
+                #[cfg(feature = "transcribe")]
+                if let Err(e) = crate::remote::disconnect() {
+                    app::notify("Transcription server", &format!("{e:#}"));
+                }
+            }
+            Action::ToggleServing => {
+                #[cfg(feature = "transcribe")]
+                {
+                    let on = !crate::remote::serve_settings().on;
+                    match crate::remote::set_serving(on, false) {
+                        Ok(s) if s.on => drop(std::thread::spawn(move || show_serving(&s))),
+                        Ok(_) => {}
+                        Err(e) => app::notify("Transcription server", &format!("{e:#}")),
+                    }
+                }
+            }
+            Action::ShowServing => {
+                #[cfg(feature = "transcribe")]
+                std::thread::spawn(|| show_serving(&crate::remote::serve_settings()));
+                return;
+            }
             Action::RetestGpu => {
                 #[cfg(feature = "transcribe")]
                 std::thread::spawn(|| {

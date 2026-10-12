@@ -10,7 +10,7 @@ default = ["transcribe", "tray"]
 tray = ["dep:tray-icon", "dep:tao", "dep:wry"]
 # On-device transcription (whisper.cpp). Needs a C/C++ toolchain + cmake for the target, so
 # cross-checks from macOS to Windows run with --no-default-features.
-transcribe = ["dep:whisper-rs"]
+transcribe = ["dep:whisper-rs", "dep:ureq"]
 # Windows / Linux: whisper.cpp on the GPU through Vulkan (NVIDIA, AMD, Intel). Building needs the
 # Vulkan SDK (VULKAN_SDK); running needs vulkan-1.dll, which GPU drivers install.
 vulkan = ["transcribe", "whisper-rs/vulkan"]
@@ -31,6 +31,9 @@ serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
 ctrlc = { version = "3", features = ["termination"] }
 sha2 = "0.10"
+# Transcription server client (`remote.rs`): http or https (rustls; the OS's certificate store, so
+# company TLS proxies work).
+ureq = { version = "3.4", default-features = false, features = ["rustls", "platform-verifier"], optional = true }
 tray-icon = { version = "0.26", optional = true }
 tao = { version = "0.37", optional = true }
 # The Echo window (calls, notes, transcript, settings): the system webview (WKWebView / WebView2)

@@ -24,6 +24,11 @@ Code markers: `git grep "TODO(windows)"`.
   (11 s test call: CPU 49 s, Vulkan 12 s), so the worker falls behind during long calls. Nothing
   is lost (it reads the WAVs on disk) and it finishes after the call, but it competes with the
   call for the CPU meanwhile (4 threads). Measure on a real call; maybe a lighter model on CPU.
+- **Transcription server** (`remote.rs`): a CPU laptop can send its utterances to another
+  computer's Echo (Settings → Connect to a transcription server…). Untested on Windows:
+  - the Windows Firewall prompt when a Windows Echo serves (the server binds 0.0.0.0:47800);
+  - `app::message` (a WScript popup);
+  - ring and rustls building with MSVC in the release build.
 - **One call-window reader:** frames and `ui.jsonl` each keep their own `ax::CallWindow` (on
   their own threads; UI Automation objects are thread-bound), so the call window's tree is
   read for both. Sharing one needs a single UIA thread serving both.
