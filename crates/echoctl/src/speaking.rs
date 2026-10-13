@@ -17,6 +17,19 @@ use crate::transcribe::Segment;
 
 pub const FILE: &str = "speaking.jsonl";
 
+/// Teams' own speaking marker as of 2026-10: the speaker's video tile gets a child element with
+/// this class (the ring around the tile), whatever the UI language and without the
+/// participants pane — seen in recorded trees on exactly the speaking person's tile. Preferred
+/// when it fits the call; the calibration still measures the delay and finds a renamed marker
+/// after a Teams update.
+const KNOWN_MARKERS: &[&str] = &["vdi-frame-occlusion"];
+/// The previous speaker lit again this soon gets the floor back.
+const BOUNCE_S: f64 = 2.5;
+/// A ring lit this much of this window is stuck, not speech.
+const STUCK_WINDOW_S: f64 = 30.0;
+/// A known marker is kept unless another token fits this much better.
+const KNOWN_MARGIN: f64 = 0.15;
+
 /// A calibration is used only from this F1 (lit time vs speech time).
 const MIN_SCORE: f64 = 0.45;
 /// Each side needs this much speech to calibrate on.
@@ -68,7 +81,19 @@ impl Track {
                 seen.entry(t).or_default().1 += 1;
             }
         }
-        seen.into_iter().filter(|(_, (on, off))| *on >= 1 && *off >= 1).map(|(t, _)| t.to_string()).collect()
+        // Element ids (`id:`) only serve the raised-hand check; they are never the marker.
+        seen.into_iter().filter(|(t, (on, off))| *on >= 1 && *off >= 1 && !t.starts_with("id:")).map(|(t, _)| t.to_string()).collect()
+    }
+
+    /// When the hand was raised: an element id with "raisehand" (Teams' HTML), or the label
+    /// saying so (English).
+    fn hand_raised(&self, end: f64) -> Spans {
+        let tokens: BTreeSet<&String> = self.states.iter().flat_map(|s| s.1.iter()).collect();
+        let hand = |t: &str| {
+            let t = t.to_lowercase();
+            t.contains("raisehand") || (t.starts_with("t:") && t.contains("raised") && t.contains("hand"))
+        };
+        union(tokens.into_iter().filter(|t| hand(t)).flat_map(|t| self.present(t, end)).collect())
     }
 }
 
@@ -169,6 +194,7 @@ impl Timeline {
         let end = segs.iter().map(|s| s.end).fold(0.0, f64::max).max(tracks.values().flat_map(|t| t.states.last()).map(|s| s.0).fold(0.0, f64::max)) + 1.0;
         let (mine, theirs) = (speech(segs, false), speech(segs, true));
         let mut lit: BTreeMap<String, Spans> = BTreeMap::new();
+        let mut hands: BTreeMap<String, Spans> = BTreeMap::new();
         let mut learned = vec![];
         for kind in ["tile:", "roster:"] {
             let group: Vec<&Track> = tracks.iter().filter(|(k, _)| k.starts_with(kind)).map(|(_, t)| t).collect();
@@ -176,13 +202,15 @@ impl Timeline {
             learned.push((kind.trim_end_matches(':').to_string(), token.clone(), lag, score));
             for t in group.iter().filter(|t| !t.me) {
                 lit.entry(t.name.clone()).or_default().extend(shift(&t.present(&token, end), lag));
+                hands.entry(t.name.clone()).or_default().extend(shift(&t.hand_raised(end), lag));
             }
         }
         if lit.is_empty() {
             return None;
         }
-        let lit = lit.into_iter().map(|(n, s)| (n, union(s))).collect();
-        Some(Timeline { lit, learned })
+        let lit: BTreeMap<String, Spans> = lit.into_iter().map(|(n, s)| (n, union(s))).collect();
+        let hands: BTreeMap<String, Spans> = hands.into_iter().map(|(n, s)| (n, union(s))).collect();
+        Some(Timeline { lit: floor(&lit, &hands, &theirs, end), learned })
     }
 
     /// Who was lit during [a, b]: the participant with the most lit time around it; None when
@@ -199,6 +227,68 @@ impl Timeline {
     }
 }
 
+/// The floor: who holds it from moment to moment, when several tiles are lit at once.
+/// - The holder keeps it while still lit (suspicion only decides who takes a free floor).
+/// - The previous holder, lit again within `BOUNCE_S` of losing it, gets it back (a flicker
+///   of someone else's ring).
+/// - Otherwise the one lit most recently: a new voice.
+/// - Suspect tiles take it only when nobody else is lit: a raised hand; a ring stuck on (lit
+///   ≥ 90 % of the last 30 s); a tile lit at least as much in silence as in speech (a noisy
+///   open mic).
+fn floor(lit: &BTreeMap<String, Spans>, hands: &BTreeMap<String, Spans>, speech: &Spans, end: f64) -> BTreeMap<String, Spans> {
+    let mut cuts: Vec<f64> = lit.values().chain(hands.values()).flatten().flat_map(|(a, b)| [*a, *b]).collect();
+    cuts.sort_by(|a, b| a.total_cmp(b));
+    cuts.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+    let covers = |s: &Spans, t: f64| s.iter().any(|(a, b)| *a <= t && t < *b);
+    let silence = (end - total(speech)).max(0.0);
+    let noisy: BTreeSet<&String> = lit
+        .iter()
+        .filter(|(_, s)| {
+            let in_speech = intersect(s, speech);
+            let in_silence = total(s) - in_speech;
+            total(speech) >= 8.0 && silence >= 5.0 && in_silence / silence >= in_speech / total(speech).max(1e-9)
+        })
+        .map(|(n, _)| n)
+        .collect();
+    let mut out: BTreeMap<String, Spans> = BTreeMap::new();
+    let (mut cur, mut prev, mut lost_at): (Option<&String>, Option<&String>, f64) = (None, None, f64::MIN);
+    for w in cuts.windows(2) {
+        let (a, b) = (w[0], w[1]);
+        let mid = (a + b) / 2.0;
+        let lit_now: Vec<&String> = lit.iter().filter(|(_, s)| covers(s, mid)).map(|(n, _)| n).collect();
+        let suspect = |n: &String| {
+            let stuck = mid >= STUCK_WINDOW_S && intersect(&lit[n], &vec![(mid - STUCK_WINDOW_S, mid)]) >= 0.9 * STUCK_WINDOW_S;
+            noisy.contains(n) || stuck || hands.get(n).is_some_and(|h| covers(h, mid))
+        };
+        let clean: Vec<&String> = lit_now.iter().copied().filter(|n| !suspect(n)).collect();
+        let cands = if clean.is_empty() { lit_now.clone() } else { clean };
+        let started = |n: &String| lit[n].iter().filter(|(s, _)| *s <= mid).map(|(s, _)| *s).fold(f64::MIN, f64::max);
+        // The holder keeps the floor while lit, suspect or not (a long monologue looks "stuck").
+        let holder = if cur.is_some_and(|c| lit_now.contains(&c)) {
+            cur
+        } else if prev.is_some_and(|p| cands.contains(&p)) && a - lost_at <= BOUNCE_S {
+            prev
+        } else {
+            cands.iter().copied().max_by(|x, y| started(x).total_cmp(&started(y)))
+        };
+        if holder != cur {
+            if cur.is_some() {
+                prev = cur;
+                lost_at = a;
+            }
+            cur = holder;
+        }
+        if let Some(h) = holder {
+            let spans = out.entry(h.clone()).or_default();
+            match spans.last_mut() {
+                Some(l) if (l.1 - a).abs() < 1e-9 => l.1 = b,
+                _ => spans.push((a, b)),
+            }
+        }
+    }
+    out
+}
+
 /// The token and delay that best explain speech on one kind of element: the user's own
 /// element against the mic's speech, the others' (together) against the remote track's.
 fn calibrate(group: &[&Track], mine: &Spans, theirs: &Spans, end: f64) -> Option<(String, f64, f64)> {
@@ -211,7 +301,9 @@ fn calibrate(group: &[&Track], mine: &Spans, theirs: &Spans, end: f64) -> Option
     }
     let candidates: BTreeSet<String> = group.iter().flat_map(|t| t.toggled()).collect();
     let mut best: Option<(String, f64, f64)> = None;
+    let mut known: Option<(String, f64, f64)> = None;
     for token in candidates {
+        let is_known = KNOWN_MARKERS.contains(&token.as_str());
         let me_raw = union(selfs.iter().flat_map(|t| t.present(&token, end)).collect());
         let them_raw = union(others.iter().flat_map(|t| t.present(&token, end)).collect());
         // A style that is simply on (a layout class) is lit nearly all the time.
@@ -231,9 +323,15 @@ fn calibrate(group: &[&Track], mine: &Spans, theirs: &Spans, end: f64) -> Option
             if best.as_ref().is_none_or(|b| score > b.2 + 1e-9) {
                 best = Some((token.clone(), lag, score));
             }
+            if is_known && known.as_ref().is_none_or(|b| score > b.2 + 1e-9) {
+                known = Some((token.clone(), lag, score));
+            }
         }
     }
-    best.filter(|b| b.2 >= MIN_SCORE)
+    match (known, best) {
+        (Some(k), Some(b)) if k.2 >= MIN_SCORE && b.2 < k.2 + KNOWN_MARGIN => Some(k),
+        (_, b) => b.filter(|b| b.2 >= MIN_SCORE),
+    }
 }
 
 /// The one other person in the call, when Teams showed exactly one: a remote video tile, or a
@@ -317,6 +415,52 @@ mod tests {
         assert_eq!(tl.who(5.0, 6.0), None, "the user's own tile never names remote speech");
         assert_eq!(sole_remote(&dir, None), None, "two others were on screen");
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn teams_known_ring_is_preferred_over_a_lookalike() {
+        let dir = std::env::temp_dir().join(format!("echo-known-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        // Two tokens follow Dana's speech; the known marker is chosen, delay learned.
+        let mut lines = vec![];
+        for (k, n) in [("tile:Dana", "Dana Lin"), ("tile:Lee", "Lee Park")] {
+            lines.push(serde_json::json!({ "t": 0.0, "k": k, "n": n, "add": ["tile"], "del": [] }).to_string());
+        }
+        for (k, n, a, b) in [("tile:Dana", "Dana Lin", 0.0, 20.0), ("tile:Lee", "Lee Park", 20.0, 40.0)] {
+            lines.push(serde_json::json!({ "t": a + 0.4, "k": k, "n": n, "add": ["vdi-frame-occlusion", "___x"], "del": [] }).to_string());
+            lines.push(serde_json::json!({ "t": b + 0.4, "k": k, "n": n, "add": [], "del": ["vdi-frame-occlusion", "___x"] }).to_string());
+        }
+        fs::write(dir.join(FILE), lines.join("\n")).unwrap();
+        let tl = Timeline::learn(&dir, &[seg("remote", 0.0, 20.0), seg("remote", 20.0, 40.0)], None).unwrap();
+        assert_eq!(tl.learned[0].1, "vdi-frame-occlusion");
+        assert!((tl.learned[0].2 - 0.4).abs() < 1e-9);
+        assert_eq!(tl.who(5.0, 6.0), Some("Dana Lin"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_floor_keeps_its_holder_bounces_back_and_skips_suspect_tiles() {
+        let m = |v: &[(&str, &[(f64, f64)])]| v.iter().map(|(n, s)| (n.to_string(), s.to_vec())).collect::<BTreeMap<_, _>>();
+        let speech: Spans = vec![(0.0, 100.0)];
+        // Dana speaks 0–20; Lee's ring flickers 10–11 (Dana still lit) — Dana keeps it.
+        // Lee takes over at 20; Dana flickers at 21–22 — Lee keeps it.
+        // Lee stops 40; Kim lit 40–41, Lee lit again 41.5–60: bounce back to Lee, Kim's blip is
+        // a second.
+        let lit = m(&[("Dana", &[(0.0, 20.0), (21.0, 22.0)]), ("Lee", &[(10.0, 11.0), (20.0, 40.0), (41.5, 60.0)]), ("Kim", &[(40.0, 41.0), (60.0, 61.0)])]);
+        let f = floor(&lit, &BTreeMap::new(), &speech, 100.0);
+        let tl = Timeline { lit: f, learned: vec![] };
+        assert_eq!(tl.who(10.2, 10.8), Some("Dana"));
+        assert_eq!(tl.who(21.2, 21.8), Some("Lee"));
+        assert_eq!(tl.who(45.0, 46.0), Some("Lee"));
+        // A raised hand lit alongside the speaker never takes the floor from them.
+        let lit = m(&[("Dana", &[(0.0, 50.0)]), ("Raj", &[(5.0, 50.0)])]);
+        let hands = m(&[("Raj", &[(4.0, 50.0)])]);
+        let tl = Timeline { lit: floor(&lit, &hands, &speech, 100.0), learned: vec![] };
+        assert_eq!(tl.who(20.0, 21.0), Some("Dana"));
+        // A long monologue keeps the floor past the stuck-ring window while others flicker.
+        let lit = m(&[("Dana", &[(0.0, 90.0)]), ("Lee", &[(50.0, 51.0)])]);
+        let tl = Timeline { lit: floor(&lit, &BTreeMap::new(), &speech, 100.0), learned: vec![] };
+        assert_eq!(tl.who(50.2, 50.8), Some("Dana"));
     }
 
     #[test]

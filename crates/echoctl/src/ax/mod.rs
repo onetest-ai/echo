@@ -139,8 +139,12 @@ fn tile_name(label: &str) -> Option<(String, bool, Vec<String>)> {
     None
 }
 
+/// Classes of a subtree, and its element ids as `id:<id>` (a raised hand shows as one).
 fn subtree_classes(n: &UiNode, depth: usize, out: &mut std::collections::BTreeSet<String>) {
     out.extend(n.classes.iter().cloned());
+    if !n.id.is_empty() {
+        out.insert(format!("id:{}", n.id));
+    }
     if depth < 8 {
         for k in &n.kids {
             subtree_classes(k, depth + 1, out);

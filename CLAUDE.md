@@ -358,17 +358,25 @@ changes only). The class names are generated and change between Teams versions, 
 call the marker is learned per call, separately for tiles and list rows: of the tokens that
 toggled, the one (and UI delay 0–1.5 s) whose lit time best matches the user's own mic speech
 on their element and the remote track's speech on everyone else's (F1 ≥ 0.45). Remote words
-then go to whoever was lit (±0.15 s; two about equal ⇒ abstain). With the speaker model: a
+then go to whoever holds the floor (±0.15 s; two about equal ⇒ abstain). The floor (`speaking::floor`): the
+holder keeps it while lit; the previous holder lit again within 2.5 s gets it back; else the
+most recently lit; suspect tiles (raised hand — an `id:` with "raisehand" or the label; lit ≥ 90 %
+of the last 30 s; lit as much in silence as in speech) take a free floor only when nobody else
+is lit. Element ids are recorded as `id:` tokens for the hand check and never become the marker. With the speaker model: a
 voice takes the name ≥ 60 % of its named words carry (≥ 3 words, named ≥ 25 % of its words;
 two voices on one name ⇒ "Name (Speaker N)"); without it, segments are split by the lit name
 (words < 0.7 s apart continue the previous one). Manual names (`speakers.json`) win; the
 process-call skill (step 4a) names only the leftover "Speaker N", or the user runs
 `echoctl speakers <call> 2="Name"` (segments + transcript.md re-rendered). Dev:
 `echoctl ax-speaking [--tree ui-tree-120s.json]` (live: tokens flipping per participant),
-`echoctl speaking <call>` (the marker learned and who it lights). Live finding (2026-10-13,
-Teams 2-person compact view): nothing at all changes in the call window's AX tree while people
-talk (only the call timer) — the marker exists only where Teams draws it on an exposed element
-(the participants list's avatar flipped class in a gallery call's snapshots; unconfirmed live).
+`echoctl speaking <call>` (the marker learned and who it lights). **The marker** (Teams
+2026-10): the speaker's video tile (the `AXMenuItem` "<Name>, …") gets a direct child with the
+class `vdi-frame-occlusion` — the ring; language-independent, no participants pane needed.
+Confirmed in recorded trees: at each snapshot exactly one tile had it, the person speaking
+then (and the participants list's avatar flipped class at the same moments). It is
+`KNOWN_MARKERS` in `speaking.rs`: chosen when it fits (calibration still learns the delay,
+and finds a successor class if Teams renames it). Teams' 2-person compact view shows no ring
+(live, 2026-10-13: only the call timer changed while both talked) — covered by the rule below.
 So also: **one other person in the call** (`speaking::sole_remote`: exactly one remote video
 tile, or one participants-list row that is muted/unmuted — invitees not in the call are listed
 as "No response") ⇒ the whole remote track is them, before any splitting, whatever the invite
