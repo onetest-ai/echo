@@ -46,6 +46,19 @@ cp LICENSE.md "$APP/Contents/Resources/LICENSE.md"
 # so the process-call skill always matches this CLI (no dev binary inside).
 rsync -a --exclude bin --exclude node_modules --exclude '.claude-plugin/types' --exclude '*.test.ts' plugin/ "$APP/Contents/Resources/plugin/"
 python3 scripts/third-party.py --texts "$APP/Contents/Resources/THIRD-PARTY-LICENSES.txt"
+# NVIDIA's NeMo-Speech runtime for the Nemotron models (loaded at runtime, `nemo.rs`): the
+# libraries in Frameworks/nemo-speech, signed below; their licenses in Resources. Apple Silicon
+# only (the pinned build is arm64 + Metal): a universal build ships without it.
+if [[ "$ARCH" == arm64 ]]; then
+  rm -rf dist/nemo-speech
+  scripts/fetch-nemo-speech.sh dist/nemo-speech
+  mkdir -p "$APP/Contents/Frameworks/nemo-speech" "$APP/Contents/Resources/nemo-speech"
+  mv dist/nemo-speech/licenses "$APP/Contents/Resources/nemo-speech/licenses"
+  cp dist/nemo-speech/*.dylib "$APP/Contents/Frameworks/nemo-speech/"
+  rm -rf dist/nemo-speech
+else
+  echo "warning: $ARCH build: no NeMo-Speech runtime, so no Nemotron models" >&2
+fi
 # CFBundleShortVersionString stays numeric (0.1.1); the pre-release tag lives in the DMG name.
 sed -e "s/__VERSION__/${VERSION%%-*}/" -e "s/__BUILD__/$BUILD/" packaging/macos/Info.plist > "$APP/Contents/Info.plist"
 # App icon: an Icon Composer document compiled by actool (Xcode 26) into Assets.car — macOS
@@ -66,6 +79,10 @@ fi
 rm -rf dist/echo.icon dist/icon-out dist/echo.iconset
 
 echo "signing with: $SIGN_ID"
+# Nested code first (the hardened runtime loads only libraries signed by this team).
+for lib in "$APP"/Contents/Frameworks/nemo-speech/*.dylib; do
+  [[ -e "$lib" ]] && codesign --force --timestamp --options runtime --sign "$SIGN_ID" "$lib"
+done
 codesign --force --timestamp --options runtime \
   --entitlements packaging/macos/echo.entitlements --sign "$SIGN_ID" "$APP"
 codesign --verify --strict --verbose=2 "$APP"

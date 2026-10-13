@@ -932,6 +932,8 @@ fn recover(app_started: DateTime<Utc>) {
 
 /// `echoctl arm`: opt in to recording the current/next call.
 pub fn arm(title: Option<String>, meeting: Option<MeetingContext>, languages: Option<Vec<String>>) -> Result<()> {
+    // A meeting scheduled or joined with a language (the window's Record ▾) carries it.
+    let languages = languages.or_else(|| meeting.as_ref().map(|m| m.languages.clone()));
     let languages = languages.map(|l| l.into_iter().map(|x| x.trim().to_lowercase()).filter(|x| !x.is_empty()).collect::<Vec<_>>())
         .filter(|l| !l.is_empty());
     write_json("armed.json", &Armed { armed_at: Utc::now(), title, meeting, languages })?;

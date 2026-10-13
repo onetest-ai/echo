@@ -50,6 +50,28 @@ if ($sig.Status -ne "Valid" -or $sig.SignerCertificate.Subject -notmatch 'CN="Lu
 Copy-Item $loader.FullName $stage
 Copy-Item (Get-ChildItem $rtDir -Recurse -Filter VulkanRT-License.txt | Select-Object -First 1).FullName "$stage\VULKAN-RUNTIME-LICENSE.txt"
 
+# NVIDIA's NeMo-Speech runtime for the Nemotron models (crates/echoctl/src/nemo.rs loads it from
+# nemo-speech\ next to echoctl.exe): the pinned CPU build - the point is laptops without a GPU -
+# its ASR DLLs, the C++ runtime DLLs they import (app-local, as NVIDIA ships them) and licenses.
+# Same version as scripts/fetch-nemo-speech.sh.
+$nemoVersion = "0.2.0"
+$nemoAsset = "nemo-speech-$nemoVersion-windows-x86_64-cpu"
+$nemoSha256 = "82c80451086e86194aba9af19f800da77cd66d1c28d993d0efceffd6cdb49bb8"
+$nemoZip = Join-Path $env:TEMP "$nemoAsset.zip"
+$nemoDir = Join-Path $env:TEMP $nemoAsset
+if (-not (Test-Path $nemoZip) -or (Get-FileHash $nemoZip -Algorithm SHA256).Hash -ne $nemoSha256) {
+    Invoke-WebRequest "https://github.com/NVIDIA/NeMo-Speech.cpp/releases/download/v$nemoVersion/$nemoAsset.zip" -OutFile $nemoZip
+}
+if ((Get-FileHash $nemoZip -Algorithm SHA256).Hash -ne $nemoSha256) { throw "checksum mismatch for $nemoAsset.zip" }
+Remove-Item -Recurse -Force $nemoDir -ErrorAction SilentlyContinue
+Expand-Archive $nemoZip -DestinationPath $env:TEMP
+New-Item -ItemType Directory "$stage\nemo-speech\licenses" -Force | Out-Null
+$nemoDlls = @("nemo_speech_asr_c.dll", "nemo_speech_asr.dll", "ggml.dll", "ggml-base.dll", "ggml-cpu.dll",
+    "msvcp140.dll", "msvcp140_1.dll", "msvcp140_2.dll", "msvcp140_atomic_wait.dll", "msvcp140_codecvt_ids.dll",
+    "vcruntime140.dll", "vcruntime140_1.dll", "vcomp140.dll", "concrt140.dll")
+foreach ($dll in $nemoDlls) { Copy-Item "$nemoDir\bin\$dll" "$stage\nemo-speech\" }
+Copy-Item "$nemoDir\share\licenses\nemo-speech\*" "$stage\nemo-speech\licenses\" -Recurse
+
 # The plugin travels with the app (`echoctl notes` runs Claude Code with --plugin-dir on it).
 robocopy plugin "$stage\plugin" /E /XD bin node_modules "plugin\.claude-plugin\types" /XF *.test.ts | Out-Null
 python scripts/third-party.py --texts "$stage\THIRD-PARTY-LICENSES.txt"

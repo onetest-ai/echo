@@ -17,6 +17,7 @@
   --text-3: #8a8a95;
   --me: #0f8a5f;
   --remote: #5b34d6;
+  --spk2: #b4590b; --spk3: #0b72a0; --spk4: #b0306a; --spk5: #66740a; --spk6: #7a5a2e;
   --warn: #b25b00;
   --danger: #c4314b;
   --recording: #d97757;
@@ -45,6 +46,7 @@
     --text-3: #74747f;
     --me: #3ccf91;
     --remote: #b39cff;
+    --spk2: #f0a24a; --spk3: #6cc4f0; --spk4: #f48fb8; --spk5: #c6d36a; --spk6: #d9b38c;
     --warn: #f0a24a;
     --danger: #ff6b81;
     --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 28px rgb(0 0 0 / 0.35);
@@ -53,7 +55,7 @@
 :root[data-theme="dark"] {
   --accent: #9b78ff; --accent-strong: #ae92ff; --accent-soft: rgb(155 120 255 / 0.16); --accent-ink: #c4b0ff;
   --bg: #141418; --surface: #1b1b21; --sidebar: #17171c; --line: rgb(255 255 255 / 0.07); --line-strong: rgb(255 255 255 / 0.13);
-  --text: #ececf1; --text-2: #a9a9b4; --text-3: #74747f; --me: #3ccf91; --remote: #b39cff; --warn: #f0a24a; --danger: #ff6b81;
+  --text: #ececf1; --text-2: #a9a9b4; --text-3: #74747f; --me: #3ccf91; --remote: #b39cff; --spk2: #f0a24a; --spk3: #6cc4f0; --spk4: #f48fb8; --spk5: #c6d36a; --spk6: #d9b38c; --warn: #f0a24a; --danger: #ff6b81;
   --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 28px rgb(0 0 0 / 0.35);
 }
 
@@ -135,6 +137,19 @@ button { font: inherit; color: inherit; }
 .btn:focus-visible, .nav button:focus-visible, .row:focus-visible, .tab:focus-visible, input:focus-visible {
   outline: 2px solid var(--accent); outline-offset: 1px;
 }
+
+/* Record ▾: the action, and the call's language on its right (a native select over it). */
+.split { display: flex; min-width: 0; }
+.split .split-main { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.split .split-lang {
+  position: relative; flex: none; gap: 4px; padding: 0 8px;
+  border-top-left-radius: 0; border-bottom-left-radius: 0; border-left-width: 0;
+  box-shadow: inset 1px 0 0 color-mix(in srgb, currentColor 28%, transparent);
+  font-size: 11px; font-weight: 600; letter-spacing: 0.02em;
+}
+.split .split-lang select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: default; font-size: 13px; }
+.split .split-lang:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+.detail .acts .split .btn { justify-content: center; }
 
 /* ── call list ───────────────────────────────────────────────────────── */
 .list { border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; background: var(--surface); }
@@ -255,6 +270,12 @@ button { font: inherit; color: inherit; }
 .turn .who { font-size: 12px; font-weight: 650; margin-bottom: 1px; }
 .turn.me .who { color: var(--me); }
 .turn.remote .who { color: var(--remote); }
+/* Detected speakers on the remote track: Speaker 1 keeps the remote color, the rest rotate. */
+.turn.spk2 .who { color: var(--spk2); }
+.turn.spk3 .who { color: var(--spk3); }
+.turn.spk4 .who { color: var(--spk4); }
+.turn.spk5 .who { color: var(--spk5); }
+.turn.spk6 .who { color: var(--spk6); }
 .turn .lang { font-weight: 500; color: var(--text-3); margin-left: 6px; font-size: 11px; }
 .turn p { margin: 0; line-height: 1.6; font-size: 13.5px; }
 .turn.hit { background: var(--accent-soft); border-radius: var(--r-panel); margin: -6px -10px; padding: 6px 10px; }

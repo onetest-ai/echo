@@ -37,7 +37,8 @@ That's it. The octopus is now in your menu bar.
 Echo never records on its own. You decide, per call, in one of two ways:
 
 - **Right now:** click the octopus, then **Record next call**. Echo starts when the Teams call
-  starts and stops when it ends.
+  starts and stops when it ends. In the Echo window, the small **EN ▾** on the button picks the
+  call's language (or **Detect**, to let Echo pick among your languages).
 - **Ahead of time:** open the calendar (step 4) and click **Record** on a meeting. Echo arms
   itself a minute before it starts.
 
@@ -55,8 +56,10 @@ Click **Open Echo…** in the menu. Every recorded call is in the list, newest f
 
 ![Notes for a call](docs/images/notes.jpg)
 
-**Transcript**: who said what and when. *Me* is you; the others are named when Teams shows
-who is speaking.
+**Transcript**: who said what and when. *Me* is you. In a call with one other person, they are
+named from the invite. In a bigger call, download **Speech models → Speaker detection** (107 MB)
+and Echo tells the voices apart: *Speaker 1*, *Speaker 2*, … Claude names them in the notes
+when someone introduces themselves or is addressed by name.
 
 ![Transcript](docs/images/transcript.jpg)
 
@@ -124,8 +127,8 @@ menu → Claude Code → Write call notes in.
 
 - **Opt-in per call.** Echo records only calls you armed. Meetings tagged `no_notetakers` are
   marked so you know.
-- **On your Mac.** Speech is turned into text locally with [whisper.cpp](https://github.com/ggml-org/whisper.cpp),
-  unless you connect Echo to a transcription server yourself (see the FAQ). Then that computer
+- **On your Mac.** Speech is turned into text locally with [whisper.cpp](https://github.com/ggml-org/whisper.cpp)
+  (or NVIDIA's [Nemotron](https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b), if you pick it), unless you connect Echo to a transcription server yourself (see the FAQ). Then that computer
   hears the audio, and nothing is kept there.
 - **Text only.** Audio is deleted once the transcript exists. Calls live in the folder you
   picked, as plain Markdown and JSON.
@@ -140,14 +143,19 @@ Permissions belong to Echo in System Settings → Privacy & Security.
 Settings → Languages limits it to the ones you speak, which avoids mix-ups between similar
 languages.
 
-**Transcription is slow on my laptop.** Without a graphics card, transcribing takes a long
-time. You can let a faster computer on your network do it, such as a Mac with Apple Silicon or
-a PC with a graphics card.
-1. On the fast computer, open the Echo menu and choose **Settings → Transcribe for other
-   computers**. Echo shows a URL and an API key.
-2. On the laptop, choose **Settings → Connect to a transcription server…** and enter them.
+**Transcription is slow on my laptop.** Without a graphics card, Whisper takes a long time.
+Two ways out:
 
-Each sentence of the call's audio is then sent to that computer, and the text comes back.
+- **A faster model.** Menu → **Speech models → NVIDIA Nemotron → nemotron-3.5-0.6b**: download
+  it (742 MB) and choose **Use this model**. It runs several times faster than real time on a
+  plain CPU and covers English, Spanish, Russian, Ukrainian and about 20 other languages.
+- **A faster computer** on your network, such as a Mac with Apple Silicon or a PC with a
+  graphics card, does the work:
+  1. On the fast computer, open the Echo menu and choose **Settings → Transcribe for other
+     computers**. Echo shows a URL and an API key.
+  2. On the laptop, choose **Settings → Connect to a transcription server…** and enter them.
+
+With a server, each sentence of the call's audio is then sent to that computer, and the text comes back.
 The fast computer keeps no audio or text. The connection isn't encrypted, so use it only on a
 network you trust. Echo also accepts an `https://` URL, for a server behind a TLS proxy. If the
 server can't be reached, the laptop transcribes the call itself. From a terminal, use

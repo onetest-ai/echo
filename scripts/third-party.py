@@ -15,6 +15,8 @@ EXTRA = [
     ("whisper.cpp", "(bundled in whisper-rs-sys)", "MIT", "https://github.com/ggml-org/whisper.cpp"),
     ("Whisper models (downloaded at setup)", "", "MIT", "https://github.com/openai/whisper"),
     ("Vulkan loader (vulkan-1.dll, Windows zip)", "", "Apache-2.0", "https://github.com/KhronosGroup/Vulkan-Loader"),
+    ("NeMo-Speech.cpp runtime (Nemotron models; its components' licenses ship in nemo-speech/licenses)", "0.2.0", "Apache-2.0", "https://github.com/NVIDIA/NeMo-Speech.cpp"),
+    ("Nemotron speech models (downloaded when chosen)", "", "OpenMDW-1.1", "https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b"),
     ("mermaid (diagrams in the Echo window; license in ui/vendor/mermaid.min.js)", "11.4.1", "MIT", "https://github.com/mermaid-js/mermaid"),
 ]
 

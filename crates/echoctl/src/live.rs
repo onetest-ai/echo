@@ -204,7 +204,7 @@ fn run(dir: &Path, cfg: &Config, prompt: Option<String>, remote_name: Option<Str
 fn drain(tr: &Transcriber, t: &mut TrackReader, name: Option<&str>, flush: bool, out: &Path, segs: &mut Vec<Segment>) -> Result<()> {
     let spans = utterances(&t.audio);
     let mut consumed = 0;
-    for (s, e) in spans {
+    for &(s, e) in &spans {
         let finished = flush || t.audio.len().saturating_sub(e) >= SETTLE || e - s >= FORCE;
         if !finished {
             break;
@@ -212,8 +212,8 @@ fn drain(tr: &Transcriber, t: &mut TrackReader, name: Option<&str>, flush: bool,
         let (lang, decoded) = tr.utterance(&mut t.state, &t.audio[s..e])?;
         let offset = (t.base + s as u64) as f64 / RATE as f64;
         let mut f = OpenOptions::new().create(true).append(true).open(out)?;
-        for (st, en, text) in decoded {
-            let seg = Segment { speaker: t.speaker.into(), start: offset + st, end: offset + en, lang: lang.clone(), text, name: name.map(str::to_owned) };
+        for p in decoded {
+            let seg = Segment::from_piece(t.speaker, offset, &lang, p, name);
             writeln!(f, "{}", json!(seg))?;
             segs.push(seg);
         }
@@ -222,8 +222,11 @@ fn drain(tr: &Transcriber, t: &mut TrackReader, name: Option<&str>, flush: bool,
     if flush {
         consumed = t.audio.len();
     } else if consumed == 0 && t.audio.len() > FORCE {
-        // Long stretch with no speech: drop it, keeping a second for an utterance starting now.
-        consumed = t.audio.len() - RATE;
+        // A long buffer with nothing finished: drop the silence before the speech still going
+        // on (all of it when there is none, keeping a second for an utterance starting now).
+        // Never the speech itself: a fast engine reads the buffer while a 20 s utterance is
+        // still growing after a pause.
+        consumed = spans.first().map_or(t.audio.len() - RATE, |s| s.0);
     }
     if consumed > 0 {
         t.audio.drain(..consumed);

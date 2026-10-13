@@ -61,6 +61,18 @@ pub fn status() -> String {
     }
 }
 
+/// The engine of the active model and what it runs on: "whisper.cpp, GPU (Metal)",
+/// "Nemotron, CPU" (Health menu, the transcription server's hello).
+pub fn engine_status() -> String {
+    let nemo = models::active_model_path().is_ok_and(|p| models::engine_of(&p) == models::Engine::Nemo);
+    if !nemo {
+        return format!("whisper.cpp, {}", status());
+    }
+    // Nemotron: Metal on macOS unless use_gpu is off; the CPU runtime on Windows.
+    let gpu = cfg!(target_os = "macos") && Config::load().ok().and_then(|c| c.use_gpu) != Some(false);
+    format!("Nemotron, {}", if gpu { "GPU (Metal)" } else { "CPU" })
+}
+
 /// Health → Re-test GPU (after a driver update): forget the answer and test again. Returns the
 /// new answer.
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
@@ -91,8 +103,9 @@ pub fn allowed() -> bool {
         *answer = Some(c.ok);
         return c.ok;
     }
-    // Nothing to check with yet: CPU for now, check again once a model is downloaded.
-    if !models::active_model_path().is_ok_and(|p| p.exists()) {
+    // Nothing to check with yet: CPU for now, check again once a Whisper model is active (the
+    // check is whisper.cpp's; Nemotron runs on the CPU on Windows).
+    if !models::active_model_path().is_ok_and(|p| p.exists() && models::engine_of(&p) == models::Engine::Whisper) {
         return false;
     }
     let (ok, detail) = run_child();
@@ -132,8 +145,8 @@ fn run_child() -> (bool, String) {
 /// `echoctl gpu-check` (the child): load the active model on the GPU and decode 1 s of silence.
 pub fn check() -> Result<()> {
     let model = models::active_model_path()?;
-    if !model.exists() {
-        bail!("no speech model downloaded");
+    if !model.exists() || models::engine_of(&model) != models::Engine::Whisper {
+        bail!("no Whisper model to check with");
     }
     whisper_rs::install_logging_hooks();
     let ctx = WhisperContext::new_with_params(&model, WhisperContextParameters { use_gpu: true, ..Default::default() })?;

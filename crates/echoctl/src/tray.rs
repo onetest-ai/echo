@@ -763,7 +763,15 @@ impl Ui {
 
         // Speech models: every catalog entry with Use / Download / Remove.
         let models_menu = Submenu::new("Speech models", true);
-        for m in models::CATALOG {
+        // Whisper models first, then the other engines under their name, then speaker
+        // detection (only what this build can run).
+        let mut section = models::Engine::Whisper.label();
+        for m in models::CATALOG.iter().filter(|m| models::runnable(m)) {
+            let this = if m.role == models::Role::Speakers { "Speaker detection" } else { m.engine.label() };
+            if this != section {
+                section = this;
+                let _ = models_menu.append_items(&[&sep(), &MenuItem::new(section, false, None)]);
+            }
             let downloaded = model.downloaded_models.contains(&m.name);
             let active = model.active_model.as_deref() == Some(m.name);
             let mark = if active { "✓ " } else if downloaded { "   " } else { "↓ " };
@@ -778,6 +786,10 @@ impl Ui {
             let _ = sub.append(&sep());
             if active {
                 let _ = sub.append(&MenuItem::new("In use", false, None));
+            } else if downloaded && m.role == models::Role::Speakers {
+                let on = MenuItem::new("On: the remote side is split by speaker", false, None);
+                let remove = self.item(&format!("Remove ({} MB)…", m.size_mb), true, Some(Action::RemoveModel(m.name)));
+                let _ = sub.append_items(&[&on, &remove]);
             } else if downloaded {
                 let use_it = self.item("Use this model", true, Some(Action::UseModel(m.name)));
                 let remove = self.item(&format!("Remove ({} MB)…", m.size_mb), true, Some(Action::RemoveModel(m.name)));
@@ -834,7 +846,7 @@ impl Ui {
         {
             let what = match &model.server {
                 Some(label) => format!("server {label}"),
-                None => crate::gpu::status(),
+                None => crate::gpu::engine_status(),
             };
             let engine = MenuItem::new(format!("Speech engine: {what}"), false, None);
             let _ = health.append_items(&[&sep(), &engine]);

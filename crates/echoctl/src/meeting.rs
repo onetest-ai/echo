@@ -40,6 +40,9 @@ pub struct MeetingContext {
     /// Where this came from, e.g. "msgraph"
     #[serde(default)]
     pub source: Option<String>,
+    /// Languages chosen for this recording (the window's Record ▾ menu); empty = the configured ones.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub languages: Vec<String>,
 }
 
 pub const FILE: &str = "meeting.json";

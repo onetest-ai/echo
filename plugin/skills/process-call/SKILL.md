@@ -49,9 +49,11 @@ follow (user templates in `<data folder>/.echo/templates/` override the built-in
 - Otherwise use the template's sections, at most `heading_budget` headings in total (merge or
   drop the least relevant). Follow each section's instruction.
 - Write in `dominant_language`. Keep names, products and figures exactly as said.
-- Remote speakers are one track labelled "Remote": attribute a statement to a named person only
-  when the transcript makes it unambiguous (they introduce themselves, or answer when addressed
-  by name). Otherwise say "someone on the call". "Me" is the user (`me.name` if set).
+- Remote speakers share one track. It is labelled "Remote", or, when Echo told the voices apart,
+  "Speaker 1", "Speaker 2", … (one label per voice, across the whole call). Attribute a
+  statement to a named person only when the transcript makes it unambiguous (they introduce
+  themselves, or answer when addressed by name); a speaker you named in step 4a counts as that
+  person everywhere. Otherwise say "someone on the call". "Me" is the user (`me.name` if set).
 - If `previous_notes` exists, read it and add a short "Since last time" line when there is real
   continuity (a decision revisited, an action item followed up). Skip it otherwise.
 - Ground every line in the transcript. Leave a section out rather than pad it.
@@ -86,6 +88,15 @@ written, not said. Use it — links and files shared, questions asked in writing
 for anything not already covered by the spoken notes. Written commitments are action items too.
 Senders are real names: they can also confirm who a remote speaker was when the transcript
 shows the same point being made. Skip greetings and "joining in 2 min".
+
+### 4a. Name the speakers (only if the transcript has "Speaker N" labels)
+`echoctl speakers <dir>` lists them: `id`, speaking time, first lines. Give a speaker a name when
+the transcript is clear about it — they introduce themselves ("this is Lena"), or someone
+addresses them by name and that speaker answers — and the name is one of the attendees
+(`colleagues` / `external`) or said in full on the call. Then run
+`echoctl speakers <dir> 2="Lena Varga" 3="Kim Ito"` (it rewrites the transcript's labels).
+Leave the others as "Speaker N"; never guess from who talked most or from the invite order. Do
+this before writing the notes, and use the names in them.
 
 ## 5. Write `<dir>/actions.json`
 The action items from the notes, as a JSON array:

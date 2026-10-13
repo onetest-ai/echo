@@ -1,8 +1,9 @@
-//! Whisper model catalog, hardware-based recommendation and verified downloads.
+//! Speech model catalog, hardware-based recommendation and verified downloads.
 //!
-//! Only multilingual models are offered (calls mix languages). Files come from the
-//! whisper.cpp Hugging Face repo; the expected SHA-256 is read from the Hub's API at download
-//! time and checked after the download.
+//! Only multilingual models are offered (calls mix languages). Each model names its engine:
+//! whisper.cpp, or NVIDIA Nemotron through NeMo-Speech.cpp (`nemo.rs`) — choosing a model is
+//! choosing the engine. Files come from Hugging Face; the expected SHA-256 is read from the
+//! Hub's API at download time and checked after the download.
 
 use crate::app::NoWindow;
 use std::fs;
@@ -17,7 +18,38 @@ use sha2::{Digest, Sha256};
 use crate::config::Config;
 use crate::paths;
 
-const REPO: &str = "ggerganov/whisper.cpp";
+const WHISPER_REPO: &str = "ggerganov/whisper.cpp";
+
+/// The speech engine a model runs on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Engine {
+    /// whisper.cpp (linked in).
+    Whisper,
+    /// NVIDIA NeMo-Speech.cpp (its runtime ships with the app, `nemo.rs`).
+    Nemo,
+}
+
+impl Engine {
+    /// Its name in menus.
+    #[cfg_attr(not(feature = "tray"), allow(dead_code))]
+    pub fn label(self) -> &'static str {
+        match self {
+            Engine::Whisper => "Whisper (whisper.cpp)",
+            Engine::Nemo => "NVIDIA Nemotron",
+        }
+    }
+}
+
+/// What a model is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Role {
+    /// Speech to text: one of these is the active model.
+    Transcribe,
+    /// Who speaks when on the remote track (`speakers.rs`): used whenever it is downloaded.
+    Speakers,
+}
 
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct Model {
@@ -25,6 +57,11 @@ pub struct Model {
     pub file: &'static str,
     pub size_mb: u32,
     pub summary: &'static str,
+    pub engine: Engine,
+    /// Hugging Face repository the file is downloaded from.
+    #[serde(skip)]
+    pub repo: &'static str,
+    pub role: Role,
 }
 
 pub const CATALOG: &[Model] = &[
@@ -33,26 +70,80 @@ pub const CATALOG: &[Model] = &[
         file: "ggml-large-v3-turbo-q5_0.bin",
         size_mb: 574,
         summary: "best speed/accuracy balance; near large-v3 quality, multilingual",
+        engine: Engine::Whisper,
+        repo: WHISPER_REPO,
+        role: Role::Transcribe,
     },
     Model {
         name: "large-v3-turbo-q8_0",
         file: "ggml-large-v3-turbo-q8_0.bin",
         size_mb: 874,
         summary: "slightly more accurate than q5_0, same speed class",
+        engine: Engine::Whisper,
+        repo: WHISPER_REPO,
+        role: Role::Transcribe,
     },
     Model {
         name: "large-v3-q5_0",
         file: "ggml-large-v3-q5_0.bin",
         size_mb: 1081,
         summary: "most accurate (accents, noisy calls); several times slower than turbo",
+        engine: Engine::Whisper,
+        repo: WHISPER_REPO,
+        role: Role::Transcribe,
     },
     Model {
         name: "small-q8_0",
         file: "ggml-small-q8_0.bin",
         size_mb: 264,
         summary: "fast on weak hardware; noticeably more errors",
+        engine: Engine::Whisper,
+        repo: WHISPER_REPO,
+        role: Role::Transcribe,
+    },
+    Model {
+        name: "nemotron-3.5-0.6b",
+        file: "nemotron-3.5-asr-streaming-0.6b.q8_0.gguf",
+        size_mb: 742,
+        summary: "NVIDIA Nemotron: fast on a CPU, 40 languages (en, es, ru, uk among the best)",
+        engine: Engine::Nemo,
+        repo: "nvidia/nemotron-3.5-asr-streaming-0.6b",
+        role: Role::Transcribe,
+    },
+    Model {
+        name: "speakers-nemotron-3",
+        file: "Nemotron-3-Diarization.q8_0.gguf",
+        size_mb: 107,
+        summary: "tells the other people on the call apart (Speaker 1, 2, …; up to 8), with either engine",
+        engine: Engine::Nemo,
+        repo: "nvidia/Nemotron-3-Diarization",
+        role: Role::Speakers,
     },
 ];
+
+/// The speaker detection model, if downloaded and runnable here.
+#[cfg_attr(not(feature = "transcribe"), allow(dead_code))]
+pub fn speakers_model() -> Option<PathBuf> {
+    CATALOG.iter().find(|m| m.role == Role::Speakers && runnable(m)).map(model_path).filter(|p| p.exists())
+}
+
+/// The engine for a model file (by its catalog entry; unknown files are Whisper's).
+#[cfg_attr(not(feature = "transcribe"), allow(dead_code))]
+pub fn engine_of(path: &std::path::Path) -> Engine {
+    let file = path.file_name().and_then(|f| f.to_str()).unwrap_or_default();
+    CATALOG.iter().find(|m| m.file == file).map(|m| m.engine).unwrap_or(Engine::Whisper)
+}
+
+/// Can this computer run the model's engine? (Nemotron needs the runtime the app ships.)
+pub fn runnable(m: &Model) -> bool {
+    match m.engine {
+        Engine::Whisper => true,
+        #[cfg(feature = "transcribe")]
+        Engine::Nemo => crate::nemo::available(),
+        #[cfg(not(feature = "transcribe"))]
+        Engine::Nemo => false,
+    }
+}
 
 pub fn find(name: &str) -> Result<&'static Model> {
     CATALOG.iter().find(|m| m.name == name).ok_or_else(|| {
@@ -130,6 +221,8 @@ struct ListEntry {
     downloaded: bool,
     active: bool,
     recommended: bool,
+    /// This build can run its engine (Nemotron needs the runtime the app ships).
+    runnable: bool,
 }
 
 #[derive(Serialize)]
@@ -151,6 +244,7 @@ pub fn list(json: bool) -> Result<()> {
             downloaded: model_path(m).exists(),
             active: cfg.model.as_deref() == Some(m.name),
             recommended: m.name == rec,
+            runnable: runnable(m),
         })
         .collect();
     let r = ListReport { hardware: hw, recommended: rec, reason, models };
@@ -160,7 +254,7 @@ pub fn list(json: bool) -> Result<()> {
     }
     println!("recommended: {} ({})\n", r.recommended, r.reason);
     for e in &r.models {
-        let flags = [(e.active, "active"), (e.downloaded, "downloaded"), (e.recommended, "recommended")]
+        let flags = [(e.active, "active"), (e.downloaded, "downloaded"), (e.recommended, "recommended"), (!e.runnable, "not in this build")]
             .iter()
             .filter(|(on, _)| *on)
             .map(|(_, l)| *l)
@@ -173,9 +267,10 @@ pub fn list(json: bool) -> Result<()> {
 }
 
 /// Expected SHA-256 for a repo file, from the Hugging Face API (LFS object id).
-fn expected_sha256(file: &str) -> Result<String> {
+fn expected_sha256(m: &Model) -> Result<String> {
+    let (repo, file) = (m.repo, m.file);
     let out = Command::new("curl").no_window()
-        .args(["-fsSL", &format!("https://huggingface.co/api/models/{REPO}/tree/main")])
+        .args(["-fsSL", &format!("https://huggingface.co/api/models/{repo}/tree/main")])
         .output()
         .context("running curl (needed to download models)")?;
     if !out.status.success() {
@@ -186,7 +281,7 @@ fn expected_sha256(file: &str) -> Result<String> {
         .and_then(|a| a.iter().find(|f| f["path"] == file))
         .and_then(|f| f["lfs"]["oid"].as_str())
         .map(str::to_owned)
-        .ok_or_else(|| anyhow!("{file} not found in {REPO}"))
+        .ok_or_else(|| anyhow!("{file} not found in {repo}"))
 }
 
 pub(crate) fn sha256_file(path: &PathBuf) -> Result<String> {
@@ -237,7 +332,10 @@ pub fn download(name: &str) -> Result<()> {
     let m = find(name)?;
     let dest = model_path(m);
     fs::create_dir_all(dest.parent().unwrap_or(&paths::models_dir()))?;
-    let expected = expected_sha256(m.file)?;
+    if !runnable(m) {
+        bail!("{} needs the NeMo-Speech runtime, which this build of Echo doesn't include", m.name);
+    }
+    let expected = expected_sha256(m)?;
 
     if dest.exists() && sha256_file(&dest)? == expected {
         eprintln!("{} already downloaded and verified", m.name);
@@ -253,7 +351,7 @@ pub fn download(name: &str) -> Result<()> {
             }
             let _ = fs::remove_file(&part); // full size but wrong: start over
         }
-        let url = format!("https://huggingface.co/{REPO}/resolve/main/{}", m.file);
+        let url = format!("https://huggingface.co/{}/resolve/main/{}", m.repo, m.file);
         eprintln!("downloading {} ({} MB) → {}", m.name, m.size_mb, dest.display());
         let status = curl_with_progress(&part, &url, m.size_mb as u64 * 1_000_000)?;
         if !status.success() {
@@ -271,10 +369,10 @@ pub fn download(name: &str) -> Result<()> {
     finish_download(m, &dest)
 }
 
-/// The first downloaded model becomes the active one.
+/// The first downloaded transcription model becomes the active one.
 fn finish_download(m: &Model, dest: &std::path::Path) -> Result<()> {
     let mut cfg = Config::load()?;
-    if cfg.model.is_none() {
+    if cfg.model.is_none() && m.role == Role::Transcribe {
         cfg.model = Some(m.name.to_string());
         cfg.save()?;
         eprintln!("active model: {}", m.name);
@@ -285,8 +383,14 @@ fn finish_download(m: &Model, dest: &std::path::Path) -> Result<()> {
 
 pub fn use_model(name: &str) -> Result<()> {
     let m = find(name)?;
+    if m.role != Role::Transcribe {
+        bail!("{} isn't a transcription model: it is used whenever it is downloaded", m.name);
+    }
     if !model_path(m).exists() {
         bail!("{} is not downloaded — run `echoctl model download {}`", m.name, m.name);
+    }
+    if !runnable(m) {
+        bail!("{} needs the NeMo-Speech runtime, which this build of Echo doesn't include", m.name);
     }
     let mut cfg = Config::load()?;
     cfg.model = Some(m.name.to_string());
@@ -334,7 +438,7 @@ pub fn adopt_downloaded() {
     if cfg.model.is_some() {
         return;
     }
-    if let Some(m) = CATALOG.iter().find(|m| model_path(m).exists()) {
+    if let Some(m) = CATALOG.iter().find(|m| m.role == Role::Transcribe && model_path(m).exists() && runnable(m)) {
         cfg.model = Some(m.name.to_string());
         let _ = cfg.save();
     }

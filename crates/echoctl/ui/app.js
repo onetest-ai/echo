@@ -292,6 +292,35 @@ function route() {
 }
 const go = (hash) => { if (location.hash.slice(1) !== hash) location.hash = hash; else render() }
 
+// ── language of the next recording (Record ▾) ──────────────────────────────────────────────
+// Per viewer, remembered in this webview; English unless chosen otherwise. '' = auto: Echo
+// detects among the configured languages (Settings → Languages).
+const LANG_KEY = 'echo.recordLanguage'
+function recordLang() {
+  try { const v = localStorage.getItem(LANG_KEY); if (v !== null) return v } catch { /* storage off */ }
+  return 'en'
+}
+function setRecordLang(v) { try { localStorage.setItem(LANG_KEY, v) } catch { /* storage off */ } }
+const LANG_NAMES = (() => { try { return new Intl.DisplayNames(['en'], { type: 'language' }) } catch { return null } })()
+const langName = (c) => { try { return (LANG_NAMES && LANG_NAMES.of(c)) || c.toUpperCase() } catch { return c.toUpperCase() } }
+/** The languages on offer: English, then the configured ones; and the current choice. */
+function langChoices() {
+  const configured = (S.state && S.state.languages) || []
+  const opts = [...new Set(['en', ...configured])]
+  const cur = recordLang()
+  return { configured, opts, cur: cur === '' || opts.includes(cur) ? cur : 'en' }
+}
+/** A record button with the language picker on its right (a native select over the caret). */
+function recordButton(attrs, label, primary = true) {
+  const { configured, opts, cur } = langChoices()
+  const cls = primary ? 'btn primary' : 'btn'
+  const auto = configured.length > 1 ? `Detect (${configured.map((c) => c.toUpperCase()).join(', ')})` : 'Detect the language'
+  const options = opts.map((c) => `<option value="${esc(c)}"${c === cur ? ' selected' : ''}>${esc(langName(c))}</option>`).join('')
+    + `<option value=""${cur === '' ? ' selected' : ''}>${esc(auto)}</option>`
+  const title = cur ? `Transcribed as ${langName(cur)}` : 'Echo detects the language'
+  return `<span class="split"><button class="${cls} split-main" ${attrs}>${esc(label)}</button><label class="${cls} split-lang" title="${esc(title)}"><span>${cur ? esc(cur.toUpperCase()) : 'Auto'}</span><svg viewBox="0 0 10 6" width="8" height="5" aria-hidden="true"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg><select data-reclang aria-label="Language of the call">${options}</select></label></span>`
+}
+
 // ── views ──────────────────────────────────────────────────────────────────────────────────
 function sidebar() {
   const st = S.state || {}
@@ -302,7 +331,7 @@ function sidebar() {
     ? `<div class="status-card recording"><div class="status-line"><b>Recording</b><span>${esc(titleOf(st.recording))}</span></div><button class="btn" data-cmd="stop">Stop recording</button></div>`
     : armed
       ? `<div class="status-card armed"><div class="status-line"><b>Armed</b><span>Recording starts with the next Teams call</span></div><button class="btn" data-cmd="stop">Cancel</button></div>`
-      : `<div class="status-card"><div class="status-line"><b>${st.in_call ? 'Teams call in progress' : 'Not recording'}</b><span>${st.in_call ? 'It is not being recorded' : 'Echo records only the calls you choose'}</span></div><button class="btn primary" data-cmd="record">${st.in_call ? 'Record this call' : 'Record next call'}</button></div>`
+      : `<div class="status-card"><div class="status-line"><b>${st.in_call ? 'Teams call in progress' : 'Not recording'}</b><span>${st.in_call ? 'It is not being recorded' : 'Echo records only the calls you choose'}</span></div>${recordButton('data-cmd="record"', st.in_call ? 'Record this call' : 'Record next call')}</div>`
   return `<aside class="sidebar">
     <div class="brand">${mark()}<b>Echo</b></div>
     <nav class="nav">
@@ -405,13 +434,15 @@ function tabBody(c, segs, chat, frames, actions) {
     for (const s of segs) {
       const last = turns[turns.length - 1]
       if (last && last.who === speaker(s) && s.start - last.end < 8) { last.text += ' ' + s.text; last.end = s.end }
-      else turns.push({ who: speaker(s), me: speaker(s) === 'Me', start: s.start, end: s.end, lang: s.lang, text: s.text })
+      else turns.push({ who: speaker(s), me: speaker(s) === 'Me', spk: s.speaker_id, start: s.start, end: s.end, lang: s.lang, text: s.text })
     }
     const jumpIdx = S.jump == null ? -1 : Math.max(0, turns.findIndex((t) => t.end >= S.jump - 2))
     return `<div class="from-bar"><input class="search" id="find" placeholder="Find in transcript" value="${esc(S.find)}" style="max-width:280px" aria-label="Find in transcript"></div>
       <div class="transcript">${turns.map((t, i) => {
         const hit = (q && t.text.toLowerCase().includes(q)) || i === jumpIdx
-        return `<div class="turn ${t.me ? 'me' : 'remote'}${hit ? ' hit' : ''}" ${i === jumpIdx ? 'id="jump"' : ''}>
+        // Detected remote speakers each get a color of their own (speakers.rs numbers them).
+        const spk = !t.me && t.spk ? ` spk${((t.spk - 1) % 6) + 1}` : ''
+        return `<div class="turn ${t.me ? 'me' : 'remote'}${spk}${hit ? ' hit' : ''}" ${i === jumpIdx ? 'id="jump"' : ''}>
           <time>${clock(t.start)}</time>
           <div><div class="who">${esc(t.who)}${t.lang ? `<span class="lang">${esc(t.lang)}</span>` : ''}</div><p>${esc(t.text)}</p></div></div>`
       }).join('')}</div>`
@@ -595,8 +626,9 @@ function eventDetail(e, now) {
   const when = `${st.s.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })}, ${hm(st.s)} to ${hm(st.en)}`
   let acts = ''
   if (e.recorded) acts = `<button class="btn primary" data-call="${esc(e.recorded.name)}">Open notes</button>`
-  else if (st.recordable && e.scheduled) acts = `<button class="btn" data-unschedule="${esc(e.id)}">Don't record</button><p class="why">Echo arms itself a minute before it starts.</p>`
-  else if (st.recordable) acts = `${st.live && e.join_url ? `<button class="btn primary" data-join="${esc(e.id)}">Join and record</button>` : ''}<button class="btn${st.live && e.join_url ? '' : ' primary'}" data-schedule="${esc(e.id)}">${st.live ? 'Record it' : 'Record when it starts'}</button>`
+  else if (st.recordable && e.scheduled) acts = `<button class="btn" data-unschedule="${esc(e.id)}">Don't record</button><p class="why">Echo arms itself a minute before it starts${e.scheduled_languages ? `, transcribed as ${esc(e.scheduled_languages.map(langName).join(', '))}` : ''}.</p>`
+  else if (st.recordable && st.live && e.join_url) acts = `${recordButton(`data-join="${esc(e.id)}"`, 'Join and record')}<button class="btn" data-schedule="${esc(e.id)}">Record it</button>`
+  else if (st.recordable) acts = recordButton(`data-schedule="${esc(e.id)}"`, st.live ? 'Record it' : 'Record when it starts')
   const why = e.recorded ? '' : e.no_notetakers ? 'The organizer asked for no notetakers.' : e.declined ? 'You declined this meeting.' : e.cancelled ? 'This meeting was cancelled.' : !e.online ? 'Not a Teams meeting.' : st.past ? 'This meeting is over and was not recorded.' : ''
   return `<aside class="detail">
     <button class="btn ghost close" data-calclose="1" aria-label="Close">Close</button>
@@ -670,7 +702,7 @@ document.addEventListener('click', (e) => {
   if (t.dataset.calclose) { S.cal.selected = null; return render() }
   if (t.dataset.calmode) { S.cal.mode = t.dataset.calmode; S.cal.offset = 0; S.cal.data = null; go(`calendar/${S.cal.mode}`); return loadCalendar().then(render) }
   if (t.dataset.calnav !== undefined) { const n = Number(t.dataset.calnav); S.cal.offset = n === 0 ? 0 : S.cal.offset + n; S.cal.data = null; render(); return loadCalendar().then(render) }
-  if (t.dataset.schedule) { send({ cmd: 'schedule', id: t.dataset.schedule }); const e = (S.cal.data.events || []).find((x) => x.id === t.dataset.schedule); if (e) e.scheduled = true; return render() }
+  if (t.dataset.schedule) { send({ cmd: 'schedule', id: t.dataset.schedule, languages: recordLang() }); const e = (S.cal.data.events || []).find((x) => x.id === t.dataset.schedule); if (e) e.scheduled = true; return render() }
   if (t.dataset.unschedule) { send({ cmd: 'unschedule', id: t.dataset.unschedule }); const e = (S.cal.data.events || []).find((x) => x.id === t.dataset.unschedule); if (e) e.scheduled = false; return render() }
   if (t.dataset.call) return go(`call/${t.dataset.call}/${S.tab}`)
   if (t.dataset.tab) return go(`call/${S.selected}/${t.dataset.tab}`)
@@ -683,10 +715,10 @@ document.addEventListener('click', (e) => {
     if (a) { a.status = a.status === 'done' ? 'todo' : 'done'; render() } // optimistic; the file follows
     return send({ cmd: 'toggle_action', call: S.selected, index: Number(t.dataset.toggle) })
   }
-  if (t.dataset.arm !== undefined) return send({ cmd: 'arm_meeting', id: t.dataset.arm })
-  if (t.dataset.join !== undefined) return send({ cmd: 'join_meeting', id: t.dataset.join })
+  if (t.dataset.arm !== undefined) return send({ cmd: 'arm_meeting', id: t.dataset.arm, languages: recordLang() })
+  if (t.dataset.join !== undefined) return send({ cmd: 'join_meeting', id: t.dataset.join, languages: recordLang() })
   switch (t.dataset.cmd) {
-    case 'record': return send({ cmd: 'record' })
+    case 'record': return send({ cmd: 'record', languages: recordLang() })
     case 'stop': return send({ cmd: 'stop' })
     case 'reveal': return send({ cmd: 'reveal', call: S.selected })
     case 'show-log': return send({ cmd: 'show_log', call: S.selected })
@@ -709,6 +741,10 @@ document.addEventListener('click', (e) => {
 document.addEventListener('input', (e) => {
   if (e.target.id === 'q') { S.query = e.target.value; render() }
   if (e.target.id === 'find') { S.find = e.target.value; render() }
+})
+
+document.addEventListener('change', (e) => {
+  if (e.target.matches('[data-reclang]')) { setRecordLang(e.target.value); render() }
 })
 
 document.addEventListener('keydown', (e) => {

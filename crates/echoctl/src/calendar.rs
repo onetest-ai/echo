@@ -134,6 +134,7 @@ pub fn to_meeting(ev: &Value) -> Option<MeetingContext> {
         join_url: ev.pointer("/onlineMeeting/joinUrl").and_then(Value::as_str).map(str::to_owned),
         vocabulary: vec![],
         source: Some("calendar".into()),
+        languages: vec![],
     })
 }
 

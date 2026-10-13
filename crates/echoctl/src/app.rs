@@ -424,7 +424,7 @@ fn first_run() {
     }
 
     let cfg = crate::config::Config::load().unwrap_or_default();
-    if cfg.model.is_none() && !models::CATALOG.iter().any(|m| models::model_path(m).exists()) {
+    if cfg.model.is_none() && !models::CATALOG.iter().any(|m| m.role == models::Role::Transcribe && models::model_path(m).exists()) {
         let (rec, _) = models::recommend(&models::hardware());
         let size = models::find(rec).map(|m| m.size_mb).unwrap_or(0);
         let yes = ask(

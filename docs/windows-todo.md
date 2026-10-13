@@ -30,6 +30,11 @@ Code markers: `git grep "TODO(windows)"`.
   - the Windows Firewall prompt when a Windows Echo serves (the server binds 0.0.0.0:47800);
   - `app::message` (a WScript popup);
   - ring and rustls building with MSVC in the release build.
+- **Nemotron** (`nemo.rs`, model `nemotron-3.5-0.6b`): NVIDIA's NeMo-Speech CPU runtime in
+  `nemo-speech\` next to echoctl.exe (package-windows.ps1 fetches it). Untested on Windows:
+  loading it (`LOAD_WITH_ALTERED_SEARCH_PATH`, its app-local MSVC runtime DLLs next to our
+  static-CRT exe), its speed on a CPU laptop (on this Mac's CPU: 115 s of speech in ~11 s) and
+  whether the live worker keeps up during a call. Its Vulkan/CUDA builds aren't used yet.
 - **One call-window reader:** frames and `ui.jsonl` each keep their own `ax::CallWindow` (on
   their own threads; UI Automation objects are thread-bound), so the call window's tree is
   read for both. Sharing one needs a single UIA thread serving both.

@@ -22,7 +22,11 @@ mod paths;
 mod permissions;
 mod recorder;
 #[cfg(feature = "transcribe")]
+mod nemo;
+#[cfg(feature = "transcribe")]
 mod remote;
+#[cfg(feature = "transcribe")]
+mod speakers;
 mod schedule;
 mod watch;
 #[cfg(feature = "transcribe")]
@@ -215,6 +219,15 @@ enum Cmd {
         /// Keep the WAV files afterwards (default: deleted once the transcript is written)
         #[arg(long)]
         keep_audio: bool,
+    },
+    /// Remote speakers a call's speaker detection found (id, time, first lines); with N=Name
+    /// pairs, name them in the transcript (N= clears a name)
+    #[cfg(feature = "transcribe")]
+    Speakers {
+        /// Call folder (path or name under calls/), or "latest"
+        call: String,
+        /// N=Name, e.g. 2="Daniel Osei"
+        names: Vec<String>,
     },
     /// Transcription on another computer (local network): use a server (URL + API key), or let
     /// other computers transcribe on this one
@@ -642,6 +655,8 @@ fn main() -> Result<()> {
         },
         #[cfg(feature = "transcribe")]
         Cmd::Transcribe { call, model, keep_audio } => transcribe::transcribe(&call, model.as_deref(), keep_audio),
+        #[cfg(feature = "transcribe")]
+        Cmd::Speakers { call, names } => speakers::command(&call, &names),
         Cmd::Vocab { cmd } => {
             let mut cfg = config::Config::load()?;
             match cmd {

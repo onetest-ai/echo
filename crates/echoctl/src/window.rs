@@ -404,7 +404,7 @@ fn calendar(q: &str) -> Value {
         .collect();
     let recording = watch::running_watcher().and_then(|w| w.recording);
     let mut used = vec![false; calls.len()];
-    let scheduled: Vec<String> = crate::schedule::load().into_iter().filter_map(|m| m.id).collect();
+    let scheduled: Vec<(String, Vec<String>)> = crate::schedule::load().into_iter().filter_map(|m| Some((m.id?, m.languages))).collect();
     let mut out = vec![];
     for mut e in events {
         let (es, ee) = (rfc(&e["start"]), rfc(&e["end"]));
@@ -426,7 +426,11 @@ fn calendar(q: &str) -> Value {
             let dir = paths::calls_dir().join(name);
             e["recorded"] = json!({ "name": name, "status": status(&dir, recording.as_deref()), "minutes": minutes(meta) });
         }
-        e["scheduled"] = json!(e["id"].as_str().is_some_and(|id| scheduled.iter().any(|s| s == id)));
+        let sched = e["id"].as_str().and_then(|id| scheduled.iter().find(|s| s.0 == id));
+        e["scheduled"] = json!(sched.is_some());
+        if let Some((_, l)) = sched.filter(|s| !s.1.is_empty()) {
+            e["scheduled_languages"] = json!(l);
+        }
         if e["recorded"].is_null() {
             let recap = e["subject"].as_str().map(calls::recap).unwrap_or_default();
             if !recap.is_empty() {
@@ -460,10 +464,16 @@ fn state() -> Value {
         "calendar": crate::graph::account(),
         "platform": std::env::consts::OS,
         "notes": crate::notes::readiness(),
+        "languages": crate::config::Config::load().map(|c| c.languages).unwrap_or_default(),
     })
 }
 
 // ── actions from the page ───────────────────────────────────────────────────────────────────
+
+/// The language the page picked for a recording (`languages: "en"`); none = the configured ones.
+fn languages(v: &Value) -> Option<Vec<String>> {
+    v["languages"].as_str().filter(|l| !l.is_empty()).map(|l| vec![l.to_string()])
+}
 
 /// Run an action the page posted; true if the page should refresh.
 pub fn handle(msg: &str) -> bool {
@@ -501,7 +511,7 @@ pub fn handle(msg: &str) -> bool {
             }
             false
         }
-        "record" => watch::arm(None, None, v["languages"].as_str().map(|l| vec![l.to_string()])).is_ok(),
+        "record" => watch::arm(None, None, languages(&v)).is_ok(),
         "stop" => watch::stop().is_ok(),
         "schedule" | "unschedule" => {
             let Some(id) = v["id"].as_str() else { return false };
@@ -511,7 +521,10 @@ pub fn handle(msg: &str) -> bool {
             let raw = RAW_EVENTS.lock().unwrap_or_else(|e| e.into_inner()).iter().find(|e| e["id"].as_str() == Some(id)).cloned();
             let meeting = raw.as_ref().and_then(crate::calendar::to_meeting)
                 .or_else(|| watch::agenda().into_iter().find(|m| m.id.as_deref() == Some(id)));
-            meeting.is_some_and(|m| crate::schedule::add(m).is_ok())
+            meeting.is_some_and(|mut m| {
+                m.languages = languages(&v).unwrap_or_default();
+                crate::schedule::add(m).is_ok()
+            })
         }
         "copy" => {
             if let Some(text) = v["text"].as_str() {
@@ -521,7 +534,8 @@ pub fn handle(msg: &str) -> bool {
         }
         "arm_meeting" | "join_meeting" => {
             let id = v["id"].as_str().unwrap_or("");
-            let Some(m) = watch::agenda().into_iter().find(|m| m.id.as_deref() == Some(id)) else { return false };
+            let Some(mut m) = watch::agenda().into_iter().find(|m| m.id.as_deref() == Some(id)) else { return false };
+            m.languages = languages(&v).unwrap_or_default();
             if v["cmd"] == "join_meeting" { watch::join(m).is_ok() } else { watch::arm(m.subject.clone(), Some(m), None).is_ok() }
         }
         "open_url" => {

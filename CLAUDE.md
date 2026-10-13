@@ -11,9 +11,9 @@ Notes/actions are written only by a Claude session (the app writes transcripts, 
 - macOS **and** Windows. Platform code lives behind `#[cfg]` in `audio/{macos,windows}.rs` and
   `permissions/{macos,windows}.rs`; shared code must not use platform APIs.
 - Recording is opt-in per meeting (join-and-record), never automatic for every call.
-- Transcription is on-device (whisper.cpp via whisper-rs, `transcribe` feature), or on a
-  transcription server the user connects to themselves (`remote.rs`, below). Never a cloud
-  service by default.
+- Transcription is on-device (whisper.cpp via whisper-rs, or NVIDIA Nemotron via NeMo-Speech.cpp;
+  `transcribe` feature), or on a transcription server the user connects to themselves
+  (`remote.rs`, below). Never a cloud service by default.
 
 ## Layout
 - `crates/echoctl` — one binary: the app (`app run`, or no arguments inside Echo.app /
@@ -202,8 +202,11 @@ Automation (`ax::MuteWatch`, label "Unmute…" ⇒ muted) every 400 ms; muted �
 track record silence; events `mic_muted`/`mic_unmuted` drive the band. `config.follow_app_mute`
 (default on). `echoctl ax-mic` (hidden) shows what the detector sees. `/echo:live` is a skill
 the mod intercepts in `command.run` (mods can't register names with a colon).
-A call can pin languages (`arm --languages uk`, tray Record ▸ Only …) → `meta.json.languages`
-overrides the configured list in live and final transcription.
+A call can pin languages (`arm --languages uk`, tray Record ▸ Only …, the window's Record
+button's language menu — a native `<select>` over its right part; default English, remembered
+in the webview, "Detect" = the configured list; scheduled / joined meetings carry it as
+`MeetingContext.languages`) → `meta.json.languages` overrides the configured list in live and
+final transcription.
 
 ## Notes from the app (`notes.rs`)
 Write notes (window Notes/Actions tabs, the pane's buttons, `echoctl notes <call>`) runs the same
@@ -316,6 +319,37 @@ compared without case or dashes. Plain HTTP was the user's choice for the local 
 works through a proxy. `echoctl server [status|use <url> --key|off|share on|off [--new-key]|run]`.
 Tested on this Mac: a client with no model got the transcript 3 s after the end, using almost
 no CPU of its own; with the server down, it decoded locally.
+Speech engines: choosing a model chooses its engine (`models::Engine` on each catalog entry;
+`transcribe::Engine` is an enum with the same `utterance` contract — another engine is one more
+variant + catalog entries). Whisper (whisper.cpp, linked in) is described below. **Nemotron**
+(`nemo.rs`, model `nemotron-3.5-0.6b`, NVIDIA's 0.6B RNN-T, 742 MB GGUF, OpenMDW license):
+NeMo-Speech.cpp's C ABI (`nemo_speech/asr.h`) loaded at runtime with libloading — no link-time
+dependency, and its ggml (shared libraries) stays apart from whisper.cpp's (static). Runtime:
+`ECHOCTL_NEMO_DIR` → `Echo.app/Contents/Frameworks/nemo-speech` (macOS, Metal; signed by
+package-macos.sh — the hardened runtime loads only our team's libraries) or `<app>\nemo-speech`
+(Windows, the CPU build) → `<config dir>/nemo-speech`; `scripts/fetch-nemo-speech.sh` pins
+v0.2.0 by SHA-256. A build without it hides the model. One offline `recognize` per utterance
+(word times in ms → sentences). Language: one allowed language ⇒ pinned; else an `auto` decode
+of the first 4 s, restricted + sticky as with Whisper, uk vs ru settled by the letters it wrote
+(і ї є ґ / ы э ё ъ — its own tags say `ru-RU, uk-UA` for Ukrainian and it writes the first
+words in Russian), then the utterance is decoded with that locale pinned. Vocabulary = boosted
+phrases (boost 3; no prompt, so no hint guard). It never translates and doesn't invent text in
+silence like Whisper. This Mac: 115 s of speech in ~11 s on the CPU alone, ~3 s on Metal.
+**Speaker detection** (`speakers.rs`, model `speakers-nemotron-3`: NVIDIA's Nemotron 3
+Diarization, Sortformer, ≤ 8 speakers, 107 MB, through the same NeMo-Speech runtime; on
+whenever it is downloaded, with either engine): in `write_transcript`, unless a 1:1 invite
+names the remote side, the remote track is diarized once (preset `v3-offline` on the streaming
+state machine, the WAV fed in 10 s pieces; a 30 s two-speaker test: 0.1 s) and each remote
+segment gets the speaker overlapping it most, numbered by first appearance → `speaker_id` +
+name "Speaker N". A sentence two people share is split between its words (`Segment.words`,
+word times kept in memory only: Whisper tokens / Nemotron words; one-word runs the neighbour's
+turn also covers join it; on overlapping speech the one who just started wins). Word times
+are corrected per engine first (Whisper +0.3 s, Nemotron −0.4 s, measured against reference
+turns) — without it the first words of each turn went to the previous speaker. One voice ⇒
+plain "Remote". Names are judgment: the process-call skill (step 4a) or the user runs
+`echoctl speakers <call> 2="Name"` → `<call>/speakers.json`, segments + transcript.md
+re-rendered. The window colors speakers 2–6 apart. Teams' AX tree has no "is speaking"
+signal (only per-participant muted/unmuted), so names don't come from there.
 Per track (mic = Me, remote = Remote) → energy VAD into ≤25 s utterances → language detected per
 utterance, restricted to `config.languages` (a new data folder starts with en, uk, ru, es; `[]` =
 any; stops uk↔ru confusion), using **turbo as the

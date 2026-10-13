@@ -44,9 +44,33 @@ pub struct Segment {
     pub end: f64,
     pub lang: String,
     pub text: String,
-    /// Who it is, when known (remote: the other person on a 1:1 invite)
+    /// Who it is, when known (remote: the other person on a 1:1 invite, or a detected speaker:
+    /// "Speaker 2" until named, `speakers.rs`)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Remote speaker number from speaker detection (1-based), when it ran.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaker_id: Option<u32>,
+    /// Word times (absolute), one per word of `text`: lets speaker detection split a sentence
+    /// two people share. In memory only.
+    #[serde(skip)]
+    pub words: Vec<[f64; 2]>,
+}
+
+impl Segment {
+    /// A decoded sentence of an utterance that starts `offset` seconds into the track.
+    pub(crate) fn from_piece(speaker: &str, offset: f64, lang: &str, p: Piece, name: Option<&str>) -> Segment {
+        Segment {
+            speaker: speaker.into(),
+            start: offset + p.start,
+            end: offset + p.end,
+            lang: lang.into(),
+            text: p.text,
+            name: name.map(str::to_owned),
+            speaker_id: None,
+            words: p.words.iter().map(|[a, b]| [offset + a, offset + b]).collect(),
+        }
+    }
 }
 
 pub use crate::calls::resolve_call;
@@ -317,8 +341,8 @@ fn allowed_languages(cfg: &Config) -> Result<Vec<i32>> {
 }
 
 /// whisper.cpp with the model loaded: the transcription model and, when downloaded, turbo for
-/// language ID. Shared by this computer's transcriber and the transcription server (`remote.rs`).
-pub(crate) struct Engine {
+/// language ID.
+pub(crate) struct Whisper {
     ctx: WhisperContext,
     /// Separate language-ID model (turbo): its detection is far more decisive than large-v3's.
     detector: Option<WhisperContext>,
@@ -331,19 +355,37 @@ pub(crate) fn hint_is_sane(hinted: &str, plain: &str) -> bool {
     h >= p * GUARD_MIN_RATIO && h <= p * GUARD_MAX_RATIO + GUARD_SLACK
 }
 
-/// Decoded pieces of one utterance: (start, end, text), seconds relative to the utterance.
-pub(crate) type Decoded = Vec<(f64, f64, String)>;
+/// One decoded sentence: seconds relative to the utterance, and its words' (start, end) —
+/// one pair per whitespace-separated word of `text`, or none when they don't line up.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Piece {
+    pub start: f64,
+    pub end: f64,
+    pub text: String,
+    pub words: Vec<[f64; 2]>,
+}
 
-/// An engine's decoding state, reused across utterances.
-pub(crate) struct EngineState {
+impl Piece {
+    /// Keep the word times only if they still match the (cleaned) text.
+    pub(crate) fn new(start: f64, end: f64, text: String, words: Vec<[f64; 2]>) -> Piece {
+        let words = if text.split_whitespace().count() == words.len() { words } else { vec![] };
+        Piece { start, end, text, words }
+    }
+}
+
+/// Decoded sentences of one utterance.
+pub(crate) type Decoded = Vec<Piece>;
+
+/// whisper.cpp's decoding state, reused across utterances.
+pub(crate) struct WhisperStates {
     state: WhisperState,
     det_state: Option<WhisperState>,
 }
 
-impl Engine {
+impl Whisper {
     /// Load `model_path` (GPU unless it failed its check, `gpu.rs`) and turbo for language ID
     /// when it is downloaded and different.
-    pub(crate) fn load(model_path: &Path, threads: usize) -> Result<Engine> {
+    fn load(model_path: &Path, threads: usize) -> Result<Whisper> {
         whisper_rs::install_logging_hooks(); // routes whisper.cpp's chatter to `log` (unset = silent)
         let use_gpu = crate::gpu::allowed();
         let cp = WhisperContextParameters { use_gpu, ..Default::default() };
@@ -355,11 +397,11 @@ impl Engine {
         } else {
             None
         };
-        Ok(Engine { ctx, detector, threads })
+        Ok(Whisper { ctx, detector, threads })
     }
 
-    pub(crate) fn state(&self) -> Result<EngineState> {
-        Ok(EngineState {
+    fn state(&self) -> Result<WhisperStates> {
+        Ok(WhisperStates {
             state: self.ctx.create_state()?,
             det_state: match &self.detector {
                 Some(d) => Some(d.create_state()?),
@@ -371,9 +413,9 @@ impl Engine {
     /// Detect the language (restricted to `allowed`, sticky: `prev` is the track's last one) and
     /// decode one utterance. Returns the detected language (None: uncertain), its code for the
     /// segments, and (start, end, text) relative to the chunk.
-    pub(crate) fn utterance(
+    fn utterance(
         &self,
-        st: &mut EngineState,
+        st: &mut WhisperStates,
         prev: Option<i32>,
         allowed: &[i32],
         prompt: Option<&str>,
@@ -394,7 +436,7 @@ impl Engine {
             Some(hint) if dur >= GUARD_MIN_S => {
                 let hinted = self.decode(&mut st.state, chunk, &lang, Some(hint))?;
                 let plain = self.decode(&mut st.state, chunk, &lang, None)?;
-                let text = |d: &Decoded| d.iter().map(|(_, _, t)| t.as_str()).collect::<Vec<_>>().join(" ");
+                let text = |d: &Decoded| d.iter().map(|p| p.text.as_str()).collect::<Vec<_>>().join(" ");
                 let (ht, pt) = (text(&hinted), text(&plain));
                 if hint_is_sane(&ht, &pt) && !hint_adds_terms(&ht, &pt, hint) { hinted } else { plain }
             }
@@ -444,16 +486,192 @@ impl Engine {
                 continue;
             }
             let (t0, t1) = (seg.start_timestamp() as f64 / 100.0, seg.end_timestamp() as f64 / 100.0);
-            for (a, b, sentence) in split_sentences(&tokens, t0, t1) {
-                let sentence = clean_text(&sentence);
+            for p in split_sentences(&tokens, t0, t1) {
+                let sentence = clean_text(&p.text);
                 if !sentence.is_empty() && !is_hallucination(&sentence) && !is_word_list(&sentence) {
-                    segs.push((a, b, sentence));
+                    segs.push(Piece::new(p.start, p.end, sentence, shift(p.words, WHISPER_WORD_LAG)));
                 }
             }
         }
         Ok(segs)
     }
 
+}
+
+/// A speech engine with its model loaded: whisper.cpp, or NVIDIA Nemotron (`nemo.rs`), picked by
+/// the model (`models::Engine`). Shared by this computer's transcriber and the transcription
+/// server (`remote.rs`). Another engine is one more variant here and a catalog entry.
+pub(crate) enum Engine {
+    Whisper(Whisper),
+    Nemo(Nemo),
+}
+
+/// An engine's decoding state, reused across utterances (Nemotron keeps none).
+pub(crate) enum EngineState {
+    Whisper(WhisperStates),
+    Nemo,
+}
+
+impl Engine {
+    /// Load `model_path` with the engine its catalog entry names.
+    pub(crate) fn load(model_path: &Path, threads: usize) -> Result<Engine> {
+        Ok(match models::engine_of(model_path) {
+            models::Engine::Whisper => Engine::Whisper(Whisper::load(model_path, threads)?),
+            models::Engine::Nemo => Engine::Nemo(Nemo::load(model_path)?),
+        })
+    }
+
+    pub(crate) fn state(&self) -> Result<EngineState> {
+        Ok(match self {
+            Engine::Whisper(w) => EngineState::Whisper(w.state()?),
+            Engine::Nemo(_) => EngineState::Nemo,
+        })
+    }
+
+    /// Detect the language (restricted to `allowed`, sticky: `prev` is the track's last one) and
+    /// decode one utterance. Returns the detected language (None: uncertain), its code for the
+    /// segments, and (start, end, text) relative to the chunk.
+    pub(crate) fn utterance(
+        &self,
+        st: &mut EngineState,
+        prev: Option<i32>,
+        allowed: &[i32],
+        prompt: Option<&str>,
+        chunk: &[f32],
+    ) -> Result<(Option<i32>, String, Decoded)> {
+        match (self, st) {
+            (Engine::Whisper(w), EngineState::Whisper(s)) => w.utterance(s, prev, allowed, prompt, chunk),
+            (Engine::Nemo(n), _) => n.utterance(prev, allowed, prompt, chunk),
+            (Engine::Whisper(w), st) => {
+                *st = EngineState::Whisper(w.state()?);
+                self.utterance(st, prev, allowed, prompt, chunk)
+            }
+        }
+    }
+}
+
+/// Nemotron hears the language from this much of an utterance (a decode in `auto` mode); the
+/// utterance is then decoded with that language pinned. `auto` alone mixes Russian into
+/// Ukrainian ("Так я сгоден", tested 2026-10-13); pinned, it doesn't.
+const NEMO_DETECT_S: f64 = 4.0;
+/// Word times against the audio, measured on a two-speaker recording with reference turns
+/// (2026-10-13): Whisper's token times run ~0.3–0.5 s early, Nemotron's streaming decoder
+/// emits words ~0.4–0.5 s late. Corrected in the word times only, which serve speaker
+/// detection (a word near a turn change otherwise goes to the wrong person); sentence times
+/// are left as decoded (both tracks share the engine, so their order is unaffected).
+const WHISPER_WORD_LAG: f64 = 0.3;
+const NEMO_WORD_LAG: f64 = -0.4;
+
+/// Weight of the vocabulary's words in Nemotron's decoder (NVIDIA's example value; the library
+/// caps it so a boosted word can't repeat).
+const NEMO_BOOST: f32 = 3.0;
+
+/// NVIDIA Nemotron (NeMo-Speech.cpp) with the model loaded.
+pub(crate) struct Nemo {
+    model: crate::nemo::Model,
+}
+
+impl Nemo {
+    fn load(model_path: &Path) -> Result<Nemo> {
+        // Metal on macOS. Windows ships the CPU runtime (the point is laptops without a GPU).
+        let gpu = cfg!(target_os = "macos") && crate::gpu::allowed();
+        if let Some(v) = crate::nemo::version() {
+            eprintln!("  NeMo-Speech {v} on the {}", if gpu { "GPU" } else { "CPU" });
+        }
+        Ok(Nemo { model: crate::nemo::Model::load(model_path, gpu)? })
+    }
+
+    fn utterance(&self, prev: Option<i32>, allowed: &[i32], prompt: Option<&str>, chunk: &[f32]) -> Result<(Option<i32>, String, Decoded)> {
+        let dur = chunk.len() as f64 / RATE as f64;
+        let phrases: Vec<String> = prompt.map(|p| p.split(", ").map(str::to_owned).collect()).unwrap_or_default();
+        let codes: Vec<&str> = allowed.iter().filter_map(|l| whisper_rs::get_lang_str(*l)).collect();
+        let prev_code = prev.and_then(whisper_rs::get_lang_str);
+        let mut detected = None;
+        let lang: Option<&str> = match (codes.as_slice(), prev_code) {
+            ([only], _) => Some(only),
+            (_, Some(p)) if dur < SHORT_UTTERANCE_S => Some(p),
+            _ => {
+                let n = chunk.len().min((NEMO_DETECT_S * RATE as f64) as usize);
+                let r = self.model.recognize(&chunk[..n], None, &phrases, NEMO_BOOST)?;
+                let heard: Vec<&str> = r.languages.iter().map(|l| crate::nemo::code(l)).collect();
+                let ok = |c: &&str| codes.is_empty() || codes.contains(c);
+                let pick = match prev_code {
+                    // Sticky, as with Whisper: the track's language when the model heard it too.
+                    Some(p) if heard.contains(&p) && ok(&p) => Some(p),
+                    _ => heard.iter().copied().find(ok).or(prev_code).or(codes.first().copied()),
+                };
+                let text: String = r.words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(" ");
+                let pick = match (pick, cyrillic_hint(&text)) {
+                    (Some("uk" | "ru"), Some(c)) if ok(&c) => Some(c),
+                    (p, _) => p,
+                };
+                let pick = pick.and_then(|c| whisper_rs::get_lang_id(c).and_then(whisper_rs::get_lang_str));
+                if n == chunk.len() && heard.len() == 1 && pick == heard.first().copied() {
+                    detected = Some(r); // the whole utterance, in one language: no second pass
+                }
+                pick
+            }
+        };
+        let r = match detected {
+            Some(r) => r,
+            None => self.model.recognize(chunk, lang.and_then(crate::nemo::locale), &phrases, NEMO_BOOST)?,
+        };
+        if std::env::var_os("ECHOCTL_DEBUG").is_some() {
+            eprintln!("  debug: nemotron {dur:.1}s {lang:?} heard {:?}, {} words: {}", r.languages, r.words.len(),
+                r.words.iter().take(12).map(|w| format!("{}@{:.1}", w.text, w.start)).collect::<Vec<_>>().join(" "));
+        }
+        let lang_id = lang.and_then(whisper_rs::get_lang_id);
+        let segs = nemo_sentences(&r.words)
+            .into_iter()
+            .map(|p| Piece::new(p.start, p.end, clean_text(&p.text), shift(p.words, NEMO_WORD_LAG)))
+            .filter(|p| !p.text.is_empty() && !is_hallucination(&p.text) && !is_word_list(&p.text))
+            .collect();
+        Ok((lang_id, lang.unwrap_or("auto").to_string(), segs))
+    }
+}
+
+/// Ukrainian or Russian, from letters only one of them has (і ї є ґ / ы э ё ъ). Nemotron's own
+/// detection tags Ukrainian speech `ru-RU, uk-UA` and writes its first words in Russian; the
+/// letters it wrote still give the language away.
+fn cyrillic_hint(text: &str) -> Option<&'static str> {
+    let count = |set: &str| text.chars().flat_map(char::to_lowercase).filter(|c| set.contains(*c)).count();
+    let (uk, ru) = (count("іїєґ"), count("ыэёъ"));
+    if uk > ru * 2 && uk >= 1 {
+        Some("uk")
+    } else if ru > uk * 2 && ru >= 1 {
+        Some("ru")
+    } else {
+        None
+    }
+}
+
+fn shift(words: Vec<[f64; 2]>, by: f64) -> Vec<[f64; 2]> {
+    words.into_iter().map(|[a, b]| [(a + by).max(0.0), (b + by).max(0.0)]).collect()
+}
+
+/// Nemotron's words → sentences, each timed by its own words (as `split_sentences` does for
+/// Whisper's tokens).
+fn nemo_sentences(words: &[crate::nemo::Word]) -> Vec<Piece> {
+    let mut out = vec![];
+    let mut cur: Option<Piece> = None;
+    for w in words {
+        let t = w.text.trim();
+        if t.is_empty() || t.contains(char::is_whitespace) {
+            continue;
+        }
+        let c = cur.get_or_insert_with(|| Piece { start: w.start, end: w.end, text: String::new(), words: vec![] });
+        if !c.text.is_empty() {
+            c.text.push(' ');
+        }
+        c.text.push_str(t);
+        c.end = w.end.max(c.start);
+        c.words.push([w.start, w.end.max(w.start)]);
+        if t.ends_with(['.', '?', '!', '…']) {
+            out.extend(cur.take());
+        }
+    }
+    out.extend(cur);
+    out
 }
 
 /// Where utterances are decoded: this computer, or a transcription server on the local network
@@ -556,8 +774,8 @@ impl Transcriber {
         for (n, (s, e)) in spans.iter().enumerate() {
             let (lang, segs) = self.utterance(&mut ts, &audio[*s..*e])?;
             let offset = *s as f64 / RATE as f64;
-            for (st, en, text) in segs {
-                out.push(Segment { speaker: speaker.into(), start: offset + st, end: offset + en, lang: lang.clone(), text, name: None });
+            for p in segs {
+                out.push(Segment::from_piece(speaker, offset, &lang, p, None));
             }
             if tty {
                 eprint!("\r  {speaker}: {}/{} utterances", n + 1, spans.len());
@@ -619,13 +837,27 @@ fn hint_adds_terms(hinted: &str, plain: &str, hint: &str) -> bool {
 /// Split a segment into sentences, each timed by its own first and last token. Special tokens
 /// (`[_BEG_]`, `<|…|>`) are skipped; a sentence ends at `.?!…` once it has ≥ 12 characters. If
 /// the token times are unusable the segment comes back whole with its own times.
-pub(crate) fn split_sentences(tokens: &[Tok], seg_t0: f64, seg_t1: f64) -> Vec<(f64, f64, String)> {
-    let mut out = vec![];
+pub(crate) fn split_sentences(tokens: &[Tok], seg_t0: f64, seg_t1: f64) -> Vec<Piece> {
+    let mut out: Vec<Piece> = vec![];
     let (mut buf, mut start, mut end): (Vec<u8>, Option<f64>, f64) = (vec![], None, seg_t0);
+    // Word times: a token that starts with a space starts a word; others extend it.
+    let mut words: Vec<[f64; 2]> = vec![];
     let sane = |t: f64| t >= seg_t0 - 0.5 && t <= seg_t1 + 0.5;
+    let clamp = |t: f64| t.clamp(seg_t0, seg_t1);
     for t in tokens {
         if t.bytes.starts_with(b"[_") || t.bytes.starts_with(b"<|") {
             continue;
+        }
+        let mut blank = buf.last().is_none_or(|b| b.is_ascii_whitespace());
+        for b in &t.bytes {
+            if b.is_ascii_whitespace() {
+                blank = true;
+            } else if blank || words.is_empty() {
+                words.push([clamp(t.t0), clamp(t.t1.max(t.t0))]);
+                blank = false;
+            } else if let Some(w) = words.last_mut() {
+                w[1] = w[1].max(clamp(t.t1));
+            }
         }
         buf.extend_from_slice(&t.bytes);
         let text = String::from_utf8_lossy(&buf);
@@ -638,22 +870,19 @@ pub(crate) fn split_sentences(tokens: &[Tok], seg_t0: f64, seg_t1: f64) -> Vec<(
         }
         let trimmed = text.trim();
         if trimmed.chars().count() >= 12 && trimmed.ends_with(['.', '?', '!', '…']) {
-            out.push((start.unwrap_or(seg_t0), end, trimmed.to_string()));
+            out.push(Piece::new(start.unwrap_or(seg_t0), end, trimmed.to_string(), std::mem::take(&mut words)));
             buf.clear();
             start = None;
         }
     }
     let rest = String::from_utf8_lossy(&buf).trim().to_string();
     if !rest.is_empty() {
-        out.push((start.unwrap_or(seg_t0), end.max(seg_t1), rest));
-    }
-    if out.is_empty() {
-        return vec![];
+        out.push(Piece::new(start.unwrap_or(seg_t0), end.max(seg_t1), rest, words));
     }
     // Times must not run backwards or past the segment.
     for o in out.iter_mut() {
-        o.0 = o.0.clamp(seg_t0, seg_t1);
-        o.1 = o.1.clamp(o.0, seg_t1.max(o.0));
+        o.start = o.start.clamp(seg_t0, seg_t1);
+        o.end = o.end.clamp(o.start, seg_t1.max(o.start));
     }
     out
 }
@@ -728,7 +957,7 @@ fn hms(t: f64) -> String {
     format!("{:02}:{:02}:{:02}", t / 3600, t / 60 % 60, t % 60)
 }
 
-fn render_markdown(
+pub(crate) fn render_markdown(
     dir: &Path,
     meta: &serde_json::Value,
     meeting: Option<&MeetingContext>,
@@ -755,7 +984,7 @@ fn render_markdown(
         let s = &segs[i];
         let mut text = s.text.clone();
         let mut j = i + 1;
-        while j < segs.len() && segs[j].speaker == s.speaker && segs[j].lang == s.lang && segs[j].start - segs[j - 1].end < 2.0 {
+        while j < segs.len() && segs[j].speaker == s.speaker && segs[j].name == s.name && segs[j].lang == s.lang && segs[j].start - segs[j - 1].end < 2.0 {
             text.push(' ');
             text.push_str(&segs[j].text);
             j += 1;
@@ -851,6 +1080,10 @@ pub(crate) fn write_transcript(dir: &Path, cfg: &Config, model_name: &str, mut s
         for s in segs.iter_mut().filter(|s| s.speaker == "remote") {
             s.name = Some(name.clone());
         }
+    } else if let Err(e) = crate::speakers::label(dir, &mut segs) {
+        // A 1:1 call is named from the invite; anything bigger is split by voice when the
+        // speaker model is downloaded.
+        eprintln!("  speaker detection skipped: {e:#}");
     }
     if echoes > 0 {
         eprintln!("  dropped {echoes} mic segment(s) that echoed the remote side");
@@ -963,7 +1196,7 @@ mod tests {
     fn replies_follow_the_question_they_answer() {
         // From a real call: the answer was stamped 0.27 s before the question.
         let seg = |speaker: &str, start: f64, end: f64, text: &str| Segment {
-            speaker: speaker.into(), start, end, lang: "en".into(), text: text.into(), name: None,
+            speaker: speaker.into(), start, end, lang: "en".into(), text: text.into(), name: None, speaker_id: None, words: vec![],
         };
         let mut s = vec![
             seg("me", 171.12, 176.28, "No, no, like, she's on leave, so..."),
@@ -988,13 +1221,14 @@ mod tests {
         ];
         let out = split_sentences(&toks, 0.0, 5.2);
         assert_eq!(out.len(), 2, "{out:?}");
-        assert_eq!(out[0].2, "Yep, yep. That works.");
-        assert!((out[1].0 - 3.1).abs() < 1e-6, "second sentence starts at its own first token");
+        assert_eq!(out[0].text, "Yep, yep. That works.");
+        assert_eq!(out[0].words.len(), 4, "{out:?}");
+        assert!((out[1].start - 3.1).abs() < 1e-6, "second sentence starts at its own first token");
         // Cyrillic split mid-character across tokens survives.
         let bytes = "Привіт, як справи?".as_bytes();
         let (a, b) = bytes.split_at(3);
         let out = split_sentences(&[Tok { bytes: a.to_vec(), t0: 0.0, t1: 0.3, plog: 0.0 }, Tok { bytes: b.to_vec(), t0: 0.3, t1: 1.0, plog: 0.0 }], 0.0, 1.0);
-        assert_eq!(out[0].2, "Привіт, як справи?");
+        assert_eq!(out[0].text, "Привіт, як справи?");
     }
 
     #[test]
@@ -1037,7 +1271,7 @@ mod tests {
     #[test]
     fn echo_of_remote_on_mic_is_dropped() {
         let seg = |speaker: &str, start: f64, text: &str| Segment {
-            speaker: speaker.into(), start, end: start + 2.0, lang: "en".into(), text: text.into(), name: None,
+            speaker: speaker.into(), start, end: start + 2.0, lang: "en".into(), text: text.into(), name: None, speaker_id: None, words: vec![],
         };
         let (kept, dropped) = remove_echo(vec![
             seg("remote", 19.0, "No, we know where."),
@@ -1069,5 +1303,26 @@ mod tests {
         assert!(is_hallucination(" The "));
         assert!(!is_hallucination("Okay."));
         assert!(!is_hallucination("Давайте почнемо з архітектури"));
+    }
+
+    #[test]
+    fn ukrainian_and_russian_told_apart_by_letters() {
+        assert_eq!(cyrillic_hint("Так я сгоден. Давайте перенесимо зустріч на четвер."), Some("uk"));
+        assert_eq!(cyrillic_hint("Первый этап нужно закончить. Есть вопросы?"), Some("ru"));
+        assert_eq!(cyrillic_hint("Добрый день, коллеги"), Some("ru"));
+        assert_eq!(cyrillic_hint("Так, добре"), None);
+        assert_eq!(cyrillic_hint("Good morning"), None);
+    }
+
+    #[test]
+    fn nemotron_words_become_timed_sentences() {
+        let w = |text: &str, start: f64, end: f64| crate::nemo::Word { text: text.into(), start, end };
+        let words = [w("Good", 0.4, 0.6), w("morning.", 0.7, 1.2), w("Are", 2.0, 2.1), w("you", 2.2, 2.3), w("there?", 2.4, 2.8), w("Yes", 3.5, 3.7)];
+        let s = nemo_sentences(&words);
+        assert_eq!(s.len(), 3);
+        assert_eq!((s[0].start, s[0].end, s[0].text.as_str()), (0.4, 1.2, "Good morning."));
+        assert_eq!((s[1].start, s[1].end, s[1].text.as_str()), (2.0, 2.8, "Are you there?"));
+        assert_eq!(s[1].words, [[2.0, 2.1], [2.2, 2.3], [2.4, 2.8]]);
+        assert_eq!(s[2].text, "Yes");
     }
 }

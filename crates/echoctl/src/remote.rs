@@ -30,7 +30,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::config::Config;
-use crate::transcribe::{Decoded, Engine, EngineState};
+use crate::transcribe::{Decoded, Engine, EngineState, Piece};
 use crate::{models, paths};
 
 const CLIENT_FILE: &str = "transcription-server.json";
@@ -156,15 +156,21 @@ impl Client {
         let text = r.body_mut().read_to_string()?;
         Self::check(r.status().as_u16(), &text)?;
         let v: Answer = serde_json::from_str(&text).context("unexpected answer from the server")?;
-        Ok((v.lang_id.as_deref().and_then(whisper_rs::get_lang_id), v.lang, v.segs))
+        let mut words = v.words.into_iter();
+        let segs = v.segs.into_iter().map(|(a, b, t)| Piece::new(a, b, t, words.next().unwrap_or_default())).collect();
+        Ok((v.lang_id.as_deref().and_then(whisper_rs::get_lang_id), v.lang, segs))
     }
 }
 
+/// The server's answer. `words` (per sentence, its words' times) came later: older servers
+/// leave it out, older clients ignore it.
 #[derive(Serialize, Deserialize)]
 struct Answer {
     lang_id: Option<String>,
     lang: String,
-    segs: Decoded,
+    segs: Vec<(f64, f64, String)>,
+    #[serde(default)]
+    words: Vec<Vec<[f64; 2]>>,
 }
 
 fn load_client() -> Option<ClientSettings> {
@@ -307,16 +313,6 @@ fn lan_ip() -> Option<String> {
 /// The URL to give other computers.
 pub fn serve_url(s: &ServeSettings) -> String {
     format!("http://{}:{}", lan_ip().unwrap_or_else(|| "<this computer's address>".into()), s.port)
-}
-
-fn engine_label() -> &'static str {
-    if cfg!(target_os = "macos") {
-        "GPU (Metal)"
-    } else if crate::gpu::allowed() {
-        "GPU (Vulkan)"
-    } else {
-        "CPU"
-    }
 }
 
 struct Loaded {
@@ -475,7 +471,7 @@ fn handle(stream: &TcpStream, key: &str) -> Result<()> {
     match (method.as_str(), path.as_str()) {
         ("GET", "/v1/hello") => {
             let model = Config::load().ok().and_then(|c| c.model).unwrap_or_default();
-            let hello = Hello { name: computer_name(), model, engine: engine_label().into(), version: env!("CARGO_PKG_VERSION").into() };
+            let hello = Hello { name: computer_name(), model, engine: crate::gpu::engine_status(), version: env!("CARGO_PKG_VERSION").into() };
             respond(stream, 200, &serde_json::to_string(&hello)?)
         }
         ("POST", "/v1/utterance") => {
@@ -538,7 +534,9 @@ fn decode_request(body: &[u8]) -> Result<Answer> {
     let l = g.as_mut().expect("just loaded");
     l.used = Instant::now();
     let (lang_id, lang, segs) = l.engine.utterance(&mut l.state, prev, &allowed, req.prompt.as_deref(), &audio)?;
-    Ok(Answer { lang_id: lang_id.and_then(whisper_rs::get_lang_str).map(str::to_owned), lang, segs })
+    let words = segs.iter().map(|p| p.words.clone()).collect();
+    let segs = segs.into_iter().map(|p| (p.start, p.end, p.text)).collect();
+    Ok(Answer { lang_id: lang_id.and_then(whisper_rs::get_lang_str).map(str::to_owned), lang, segs, words })
 }
 
 #[cfg(test)]
