@@ -57,9 +57,11 @@ Click **Open Echo…** in the menu. Every recorded call is in the list, newest f
 ![Notes for a call](docs/images/notes.jpg)
 
 **Transcript**: who said what and when. *Me* is you. In a call with one other person, they are
-named from the invite. In a bigger call, download **Speech models → Speaker detection** (107 MB)
-and Echo tells the voices apart: *Speaker 1*, *Speaker 2*, … Claude names them in the notes
-when someone introduces themselves or is addressed by name.
+named from the invite. In a bigger call, Echo names people from Teams itself: it watches who
+Teams shows as speaking (this needs the *Accessibility* permission). Download **Speech models →
+Speaker detection** (107 MB) too, and Echo also tells the voices apart, so a voice Teams didn't
+name still gets its own label (*Speaker 2*). Claude names those in the notes when someone
+introduces themselves or is addressed by name.
 
 ![Transcript](docs/images/transcript.jpg)
 

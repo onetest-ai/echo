@@ -61,6 +61,11 @@ impl Node {
         unsafe { self.0.CachedAutomationId() }.map(|b| b.to_string()).unwrap_or_default()
     }
 
+    /// Chromium (WebView2) reports the element's HTML class attribute as its ClassName.
+    fn class_name(&self) -> String {
+        unsafe { self.0.CachedClassName() }.map(|b| b.to_string()).unwrap_or_default()
+    }
+
     fn help(&self) -> String {
         unsafe { self.0.CachedHelpText() }.map(|b| b.to_string()).unwrap_or_default()
     }
@@ -135,6 +140,7 @@ impl Reader {
                 UIA_ControlTypePropertyId,
                 UIA_AutomationIdPropertyId,
                 UIA_HelpTextPropertyId,
+                UIA_ClassNamePropertyId,
                 UIA_ValueValuePropertyId,
                 UIA_ProcessIdPropertyId,
             ] {
@@ -203,6 +209,18 @@ impl CallWindow {
         let mut buf = [0u16; 512];
         let n = unsafe { GetWindowTextW(h, &mut buf) };
         (n > 0).then(|| String::from_utf16_lossy(&buf[..n as usize]))
+    }
+
+    /// The participants the call window shows right now (`echoctl ax-speaking`).
+    pub fn participants(&mut self) -> Vec<super::Participant> {
+        self.tree_node().map(|t| super::participants(&t)).unwrap_or_default()
+    }
+
+    /// The call window as a light tree.
+    pub fn tree_node(&mut self) -> Option<super::UiNode> {
+        let tree = self.tree()?;
+        let (mut lines, mut budget) = (vec![], MAX_NODES);
+        Some(ui_lines(&tree, 0, &mut lines, &mut budget))
     }
 
     /// The call window's subtree (cached), if there is one.
@@ -372,22 +390,30 @@ pub fn mic_probe(seconds: u64) -> Result<()> {
 // ── per-call UI timeline (for speaker names) ───────────────────────────────────────────────
 
 /// One line per text-bearing node: "depth|role|automation id|name|help|value" — the same
-/// shape as macOS's "depth|role|subrole|title|description|value".
-fn ui_lines(n: &Node, depth: usize, out: &mut Vec<String>, budget: &mut usize) {
+/// shape as macOS's "depth|role|subrole|title|description|value". The same walk returns a light
+/// copy of the tree (with class names) for the participant reader.
+fn ui_lines(n: &Node, depth: usize, out: &mut Vec<String>, budget: &mut usize) -> super::UiNode {
+    let mut node = super::UiNode::default();
     if *budget == 0 {
-        return;
+        return node;
     }
     *budget -= 1;
-    let clean = |s: String| s.chars().take(160).collect::<String>().replace(['|', '\n'], " ");
-    let (name, help, value) = (clean(n.name()), clean(n.help()), clean(n.value()));
+    let clean = |s: &str| s.chars().take(160).collect::<String>().replace(['|', '\n'], " ");
+    let (name, help, value, id) = (n.name(), n.help(), n.value(), n.automation_id());
+    let role = n.role();
     if !(name.is_empty() && help.is_empty() && value.is_empty()) {
-        out.push(format!("{depth}|{}|{}|{name}|{help}|{value}", n.role(), clean(n.automation_id())));
+        out.push(format!("{depth}|{role}|{}|{}|{}|{}", clean(&id), clean(&name), clean(&help), clean(&value)));
     }
+    node.label = name.chars().take(300).collect();
+    node.classes = n.class_name().split_whitespace().map(str::to_owned).collect();
+    node.id = id;
+    node.role = role;
     if depth < MAX_DEPTH {
         for c in n.children() {
-            ui_lines(&c, depth + 1, out, budget);
+            node.kids.push(ui_lines(&c, depth + 1, out, budget));
         }
     }
+    node
 }
 
 /// Records the text of Teams' call window (not the main window, which shows chats) while a
@@ -395,6 +421,7 @@ fn ui_lines(n: &Node, depth: usize, out: &mut Vec<String>, budget: &mut usize) {
 /// recording started, aligned with the audio), `<call>/ui-tree-<s>.json` a few full trees.
 /// Text only — no screenshots.
 pub struct UiRecorder {
+    speaking: Option<super::SpeakingLog>,
     dir: PathBuf,
     t0: Instant,
     out: std::fs::File,
@@ -411,7 +438,8 @@ impl UiRecorder {
             return None;
         }
         let out = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("ui.jsonl")).ok()?;
-        Some(UiRecorder { dir: dir.to_path_buf(), t0, out, bytes: 0, prev: Default::default(), trees_done: 0, window })
+        let speaking = super::SpeakingLog::open(dir);
+        Some(UiRecorder { speaking, dir: dir.to_path_buf(), t0, out, bytes: 0, prev: Default::default(), trees_done: 0, window })
     }
 
     /// Read the call window once and append what changed. Returns false once the log is full.
@@ -424,8 +452,12 @@ impl UiRecorder {
         let windows: Vec<Node> = self.window.tree().into_iter().collect();
         let mut lines = vec![];
         let mut budget = MAX_NODES;
+        let mut people = vec![];
         for w in &windows {
-            ui_lines(w, 0, &mut lines, &mut budget);
+            people.extend(super::participants(&ui_lines(w, 0, &mut lines, &mut budget)));
+        }
+        if let (Some(log), false) = (self.speaking.as_mut(), windows.is_empty()) {
+            log.record(t, people);
         }
         let now: BTreeSet<String> = lines.into_iter().collect();
         let add: Vec<&String> = now.difference(&self.prev).collect();

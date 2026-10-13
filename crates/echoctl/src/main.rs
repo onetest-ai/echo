@@ -19,6 +19,7 @@ mod meeting;
 mod notes;
 mod models;
 mod paths;
+mod vocab;
 mod permissions;
 mod recorder;
 #[cfg(feature = "transcribe")]
@@ -27,6 +28,8 @@ mod nemo;
 mod remote;
 #[cfg(feature = "transcribe")]
 mod speakers;
+#[cfg(feature = "transcribe")]
+mod speaking;
 mod schedule;
 mod watch;
 #[cfg(feature = "transcribe")]
@@ -301,6 +304,25 @@ enum Cmd {
     #[cfg(any(target_os = "macos", windows))]
     #[command(hide = true)]
     FrameGrab { out: std::path::PathBuf },
+    /// (dev) Teams participants as the speaker reader sees them; live, every token that flips on
+    /// them (talk, pause, talk), or what a saved window tree (--tree ui-tree-120s.json) holds
+    #[cfg(any(target_os = "macos", windows))]
+    #[command(hide = true)]
+    AxSpeaking {
+        #[arg(long, default_value_t = 60)]
+        seconds: u64,
+        #[arg(long)]
+        tree: Option<std::path::PathBuf>,
+        /// Every change anywhere in the call window, not just on participants
+        #[arg(long)]
+        all: bool,
+    },
+    /// (dev) Teams' speaking marker learned for a recorded call, and who it names
+    #[cfg(feature = "transcribe")]
+    #[command(hide = true)]
+    Speaking {
+        call: String,
+    },
     /// (dev) Show what the Teams mute detector sees, for N seconds
     #[cfg(any(target_os = "macos", windows))]
     #[command(hide = true)]
@@ -447,11 +469,20 @@ enum HomeCmd {
 
 #[derive(Subcommand)]
 enum VocabCmd {
-    /// Add terms (2–50 chars, ≤ 6 words; capped at 100, oldest dropped)
-    Add { terms: Vec<String> },
-    /// Remove terms
+    /// Learn terms from a call (2–50 chars, ≤ 6 words): used again only in calls with its
+    /// subject or people, or whose invite names them. --always: in every call
+    Add {
+        terms: Vec<String>,
+        /// The call they come from (default: the call whose notes were written last, < 3 h ago)
+        #[arg(long)]
+        call: Option<String>,
+        /// Use in every call (names, products you always need)
+        #[arg(long, conflicts_with = "call")]
+        always: bool,
+    },
+    /// Remove terms (from both lists)
     Remove { terms: Vec<String> },
-    /// Print the vocabulary
+    /// The always-on terms and the learned ones with where they apply
     List,
 }
 
@@ -660,17 +691,17 @@ fn main() -> Result<()> {
         Cmd::Vocab { cmd } => {
             let mut cfg = config::Config::load()?;
             match cmd {
-                VocabCmd::Add { terms } => {
-                    let added = cfg.learn_terms(&terms);
+                VocabCmd::Add { terms, call, always } => {
+                    let msg = vocab::add(&mut cfg, &terms, call.as_deref(), always)?;
                     cfg.save()?;
-                    println!("added: {}", if added.is_empty() { "nothing new".into() } else { added.join(", ") });
+                    println!("{msg}");
                 }
                 VocabCmd::Remove { terms } => {
-                    cfg.vocabulary.retain(|v| !terms.iter().any(|t| t.eq_ignore_ascii_case(v)));
+                    vocab::remove(&mut cfg, &terms);
                     cfg.save()?;
-                    println!("vocabulary: {}", cfg.vocabulary.join(", "));
+                    print!("{}", vocab::list(&cfg));
                 }
-                VocabCmd::List => println!("{}", cfg.vocabulary.join("\n")),
+                VocabCmd::List => print!("{}", vocab::list(&cfg)),
             }
             Ok(())
         }
@@ -694,6 +725,10 @@ fn main() -> Result<()> {
         Cmd::FrameGrab { out } => frames::grab(&out),
         #[cfg(any(target_os = "macos", windows))]
         Cmd::AxMic { seconds } => ax::mic_probe(seconds),
+        #[cfg(any(target_os = "macos", windows))]
+        Cmd::AxSpeaking { seconds, tree, all } => ax::speaking_probe(seconds, tree.as_deref(), all),
+        #[cfg(feature = "transcribe")]
+        Cmd::Speaking { call } => speaking::report(&call),
         #[cfg(any(target_os = "macos", windows))]
         Cmd::CallPeople { name } => {
             let name = match name {

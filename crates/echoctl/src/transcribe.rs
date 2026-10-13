@@ -319,7 +319,8 @@ pub(crate) fn build_prompt(cfg: &Config, meeting: Option<&MeetingContext>) -> Op
         m.people().iter().for_each(|p| add(p));
         m.vocabulary.iter().for_each(|v| add(v));
     }
-    cfg.vocabulary.iter().for_each(|v| add(v));
+    // The always-on terms, then the learned ones that belong to this meeting (`vocab.rs`).
+    crate::vocab::for_meeting(cfg, meeting).iter().for_each(|v| add(v));
     let mut prompt = String::new();
     for t in terms {
         if prompt.len() + t.len() + 2 > MAX_CHARS {
@@ -438,7 +439,8 @@ impl Whisper {
                 let plain = self.decode(&mut st.state, chunk, &lang, None)?;
                 let text = |d: &Decoded| d.iter().map(|p| p.text.as_str()).collect::<Vec<_>>().join(" ");
                 let (ht, pt) = (text(&hinted), text(&plain));
-                if hint_is_sane(&ht, &pt) && !hint_adds_terms(&ht, &pt, hint) { hinted } else { plain }
+                let terms: Vec<String> = hint.split(", ").map(str::to_owned).collect();
+                if hint_is_sane(&ht, &pt) && !hint_adds_terms(&ht, &pt, hint) && boost_is_heard(&ht, &pt, &terms) { hinted } else { plain }
             }
             _ => self.decode(&mut st.state, chunk, &lang, None)?,
         };
@@ -562,9 +564,11 @@ const NEMO_DETECT_S: f64 = 4.0;
 const WHISPER_WORD_LAG: f64 = 0.3;
 const NEMO_WORD_LAG: f64 = -0.4;
 
-/// Weight of the vocabulary's words in Nemotron's decoder (NVIDIA's example value; the library
-/// caps it so a boosted word can't repeat).
-const NEMO_BOOST: f32 = 3.0;
+/// Weight of the vocabulary's words in Nemotron's decoder. Measured with a 24-term vocabulary
+/// (2026-10-13): 0.5 fixes terms that were said ("service now" → ServiceNow, Karen Ortiz)
+/// and inserts nothing; 1 already garbles a sentence; 2 puts terms into speech that has none;
+/// 3 (NVIDIA's example value, used at first) writes "Flow Studio" over every few words.
+const NEMO_BOOST: f32 = 0.5;
 
 /// NVIDIA Nemotron (NeMo-Speech.cpp) with the model loaded.
 pub(crate) struct Nemo {
@@ -592,7 +596,7 @@ impl Nemo {
             (_, Some(p)) if dur < SHORT_UTTERANCE_S => Some(p),
             _ => {
                 let n = chunk.len().min((NEMO_DETECT_S * RATE as f64) as usize);
-                let r = self.model.recognize(&chunk[..n], None, &phrases, NEMO_BOOST)?;
+                let r = self.model.recognize(&chunk[..n], None, &[], NEMO_BOOST)?;
                 let heard: Vec<&str> = r.languages.iter().map(|l| crate::nemo::code(l)).collect();
                 let ok = |c: &&str| codes.is_empty() || codes.contains(c);
                 let pick = match prev_code {
@@ -612,9 +616,20 @@ impl Nemo {
                 pick
             }
         };
-        let r = match detected {
+        let locale = lang.and_then(crate::nemo::locale);
+        let plain = match detected {
             Some(r) => r,
-            None => self.model.recognize(chunk, lang.and_then(crate::nemo::locale), &phrases, NEMO_BOOST)?,
+            None => self.model.recognize(chunk, locale, &[], NEMO_BOOST)?,
+        };
+        // The vocabulary boost, kept only when every term it adds sounds like what the plain
+        // decode heard there: boosting alone put "Flow Studio" and "ServiceNow" into a call that
+        // never mentioned them, dozens of times (2026-10-13).
+        let r = if phrases.is_empty() {
+            plain
+        } else {
+            let boosted = self.model.recognize(chunk, locale, &phrases, NEMO_BOOST)?;
+            let text = |r: &crate::nemo::Recognized| r.words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(" ");
+            if boost_is_heard(&text(&boosted), &text(&plain), &phrases) { boosted } else { plain }
         };
         if std::env::var_os("ECHOCTL_DEBUG").is_some() {
             eprintln!("  debug: nemotron {dur:.1}s {lang:?} heard {:?}, {} words: {}", r.languages, r.words.len(),
@@ -628,6 +643,79 @@ impl Nemo {
             .collect();
         Ok((lang_id, lang.unwrap_or("auto").to_string(), segs))
     }
+}
+
+/// Cyrillic (Ukrainian, Russian) spelled in Latin letters, lowercased, letters and digits only:
+/// enough to compare how a word sounds across scripts ("сервис нау" ~ "ServiceNow").
+fn latin(text: &str) -> String {
+    let mut out = String::new();
+    for c in text.chars().flat_map(char::to_lowercase) {
+        let t = match c {
+            'а' => "a", 'б' => "b", 'в' => "v", 'г' | 'ґ' => "g", 'д' => "d", 'е' | 'ё' | 'є' | 'э' => "e",
+            'ж' => "zh", 'з' => "z", 'и' | 'і' | 'ї' | 'й' | 'ы' => "i", 'к' => "k", 'л' => "l", 'м' => "m",
+            'н' => "n", 'о' => "o", 'п' => "p", 'р' => "r", 'с' => "s", 'т' => "t", 'у' => "u", 'ф' => "f",
+            'х' => "h", 'ц' => "ts", 'ч' => "ch", 'ш' => "sh", 'щ' => "sch", 'ю' => "yu", 'я' => "ya",
+            'ъ' | 'ь' => "",
+            c if c.is_ascii_alphanumeric() => {
+                out.push(c);
+                continue;
+            }
+            _ => continue,
+        };
+        out.push_str(t);
+    }
+    out
+}
+
+fn edit_distance(a: &[char], b: &[char]) -> usize {
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.iter().enumerate() {
+        let mut prev = row[0];
+        row[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let cur = row[j + 1];
+            row[j + 1] = (prev + usize::from(ca != cb)).min(row[j] + 1).min(cur + 1);
+            prev = cur;
+        }
+    }
+    row[b.len()]
+}
+
+/// Does the plain decode hold something that sounds like `term`? The best stretch of its
+/// words (in Latin letters) within half the term's length of distance.
+fn sounds_heard(term: &str, plain_words: &[String]) -> bool {
+    let t: Vec<char> = latin(term).chars().collect();
+    if t.is_empty() {
+        return true;
+    }
+    for i in 0..plain_words.len() {
+        let mut stretch = String::new();
+        for w in &plain_words[i..] {
+            stretch.push_str(w);
+            let s: Vec<char> = stretch.chars().collect();
+            if edit_distance(&t, &s) * 2 <= t.len() {
+                return true;
+            }
+            if s.len() > t.len() + 3 {
+                break;
+            }
+        }
+    }
+    false
+}
+
+/// Keep a vocabulary-boosted decode? Only when each vocabulary term it has and the plain decode
+/// lacks replaced something that sounds like it ("сервис нау" → ServiceNow), not words that
+/// don't ("ха они" → Flow Studio).
+fn boost_is_heard(boosted: &str, plain: &str, phrases: &[String]) -> bool {
+    let plain_l = plain.to_lowercase();
+    let boosted_l = boosted.to_lowercase();
+    let plain_words: Vec<String> = plain.split_whitespace().map(latin).filter(|w| !w.is_empty()).collect();
+    phrases.iter().all(|p| {
+        let term = p.to_lowercase();
+        let added = boosted_l.matches(term.as_str()).count().saturating_sub(plain_l.matches(term.as_str()).count());
+        added == 0 || sounds_heard(p, &plain_words)
+    })
 }
 
 /// Ukrainian or Russian, from letters only one of them has (і ї є ґ / ы э ё ъ). Nemotron's own
@@ -1080,7 +1168,7 @@ pub(crate) fn write_transcript(dir: &Path, cfg: &Config, model_name: &str, mut s
         for s in segs.iter_mut().filter(|s| s.speaker == "remote") {
             s.name = Some(name.clone());
         }
-    } else if let Err(e) = crate::speakers::label(dir, &mut segs) {
+    } else if let Err(e) = crate::speakers::label(dir, &mut segs, cfg.me.as_ref().map(|m| m.name.as_str())) {
         // A 1:1 call is named from the invite; anything bigger is split by voice when the
         // speaker model is downloaded.
         eprintln!("  speaker detection skipped: {e:#}");
@@ -1303,6 +1391,21 @@ mod tests {
         assert!(is_hallucination(" The "));
         assert!(!is_hallucination("Okay."));
         assert!(!is_hallucination("Давайте почнемо з архітектури"));
+    }
+
+    #[test]
+    fn a_boosted_term_must_sound_like_what_was_heard() {
+        let v = |xs: &[&str]| xs.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let vocab = v(&["ServiceNow", "Flow Studio", "Call Insights"]);
+        // The boost corrected a misheard name: kept.
+        assert!(boost_is_heard("мы заводим тикет в ServiceNow", "мы заводим тикет в сервис нау", &vocab));
+        assert!(boost_is_heard("open it in ServiceNow", "open it in service now", &vocab));
+        // The boost put a term over unrelated words: dropped.
+        assert!(!boost_is_heard("и дальше Ха Flow Studio сами уточняют", "и дальше они сами уточняют", &vocab));
+        assert!(!boost_is_heard("this is Flow Studio in Springfield", "this is Lena in Springfield", &vocab));
+        // Nothing added: nothing to check.
+        assert!(boost_is_heard("same words", "same words", &vocab));
+        assert_eq!(latin("Сервіс Нау"), "servisnau");
     }
 
     #[test]

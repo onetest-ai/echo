@@ -35,6 +35,10 @@ Code markers: `git grep "TODO(windows)"`.
   loading it (`LOAD_WITH_ALTERED_SEARCH_PATH`, its app-local MSVC runtime DLLs next to our
   static-CRT exe), its speed on a CPU laptop (on this Mac's CPU: 115 s of speech in ~11 s) and
   whether the live worker keeps up during a call. Its Vulkan/CUDA builds aren't used yet.
+- **Names from Teams' speaking marker** (`speaking.rs`, `ax::participants`): on Windows the
+  element classes come from UIA's ClassName (Chromium reports the HTML class there; untested
+  with WebView2 Teams), and tiles are found by control type MenuItem. Check with
+  `echoctl ax-speaking` in a call (talk, pause, talk) that tiles appear and a token flips.
 - **One call-window reader:** frames and `ui.jsonl` each keep their own `ax::CallWindow` (on
   their own threads; UI Automation objects are thread-bound), so the call window's tree is
   read for both. Sharing one needs a single UIA thread serving both.

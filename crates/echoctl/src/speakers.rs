@@ -5,10 +5,11 @@
 //! overlaps it most: "Speaker 1", "Speaker 2", … numbered by who speaks first. It works the
 //! same whichever engine transcribed the call (it reads the audio, not the text).
 //!
-//! Names are a judgment call (who introduced themselves, who was addressed by name), so they
-//! come from the notes run or the user: `echoctl speakers <call> 2="Daniel Osei"` writes
-//! `<call>/speakers.json` (`{"2": "Daniel Osei"}`) and re-renders the transcript. A 1:1 call is
-//! still named from its invite and is never split.
+//! Names come first from Teams itself: it rings whoever speaks, and `speaking.rs` turns that
+//! into a timeline (see `label`). Voices it can't name stay "Speaker N" for the notes run or the
+//! user: `echoctl speakers <call> 2="Daniel Osei"` writes `<call>/speakers.json`
+//! (`{"2": "Daniel Osei"}`) and re-renders the transcript. A 1:1 call is still named from its
+//! invite and is never split.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -32,13 +33,58 @@ fn display(id: u32, names: &BTreeMap<u32, String>) -> String {
     names.get(&id).cloned().unwrap_or_else(|| format!("Speaker {id}"))
 }
 
-/// Diarize `<dir>/remote.wav` and label the remote segments (nothing to do without the model,
-/// the audio or remote speech).
-pub fn label(dir: &Path, segs: &mut Vec<Segment>) -> Result<()> {
-    let Some(model) = models::speakers_model() else { return Ok(()) };
-    let wav = dir.join("remote.wav");
-    if !wav.exists() || !segs.iter().any(|s| s.speaker == "remote") {
+/// Name the remote side of a group call. Two sources, either or both:
+/// - Teams' own speaking marker (`speaking.rs`, from `<call>/speaking.jsonl`) names words
+///   directly;
+/// - the speaker model (when downloaded) splits the track by voice: each voice gets a manual
+///   name (`speakers.json`), else the name its words were lit for (`vote`), else "Speaker N".
+///
+/// Without the model, segments are named from the timeline alone.
+pub fn label(dir: &Path, segs: &mut Vec<Segment>, me: Option<&str>) -> Result<()> {
+    if !segs.iter().any(|s| s.speaker == "remote") {
         return Ok(());
+    }
+    // Only one other person in the call (whatever the invite says): the remote track is them.
+    if let Some(name) = crate::speaking::sole_remote(dir, me) {
+        eprintln!("  remote side: {name} (the only other person in the call)");
+        segs.iter_mut().filter(|s| s.speaker == "remote").for_each(|s| s.name = Some(name.clone()));
+        return Ok(());
+    }
+    let timeline = crate::speaking::Timeline::learn(dir, segs, me);
+    if let Some(tl) = &timeline {
+        for (kind, token, lag, score) in &tl.learned {
+            eprintln!("  teams speaking marker ({kind}s): {token}, {lag:.1}s behind the voice (fit {score:.2})");
+        }
+    }
+    let Some(turns) = diarize(dir)? else {
+        if let Some(tl) = &timeline {
+            split_by_timeline(segs, tl);
+        }
+        return Ok(());
+    };
+    let n = assign(segs, &turns);
+    let manual = names(dir);
+    let voted = timeline.as_ref().map(|tl| vote(segs, tl)).unwrap_or_default();
+    if n <= 1 && manual.is_empty() && voted.is_empty() {
+        // One voice (or none found): "Remote" says as much as "Speaker 1".
+        segs.iter_mut().for_each(|s| s.speaker_id = None);
+    } else {
+        for s in segs.iter_mut().filter(|s| s.speaker == "remote") {
+            if let Some(id) = s.speaker_id {
+                s.name = Some(manual.get(&id).or(voted.get(&id)).cloned().unwrap_or_else(|| format!("Speaker {id}")));
+            }
+        }
+    }
+    eprintln!("  speakers: {n} on the remote track, {} named from Teams", voted.len());
+    Ok(())
+}
+
+/// The speaker model's turns on `<dir>/remote.wav` (None without the model or the audio).
+fn diarize(dir: &Path) -> Result<Option<Vec<crate::nemo::Turn>>> {
+    let Some(model) = models::speakers_model() else { return Ok(None) };
+    let wav = dir.join("remote.wav");
+    if !wav.exists() {
+        return Ok(None);
     }
     let t = Instant::now();
     let gpu = cfg!(target_os = "macos") && crate::gpu::allowed();
@@ -47,20 +93,8 @@ pub fn label(dir: &Path, segs: &mut Vec<Segment>) -> Result<()> {
     if std::env::var_os("ECHOCTL_DEBUG").is_some() {
         eprintln!("  debug: speaker turns {}", turns.iter().map(|(a, b, w)| format!("{w}:{a:.1}-{b:.1}")).collect::<Vec<_>>().join(" "));
     }
-    let n = assign(segs, &turns);
-    if n <= 1 {
-        // One voice (or none found): "Remote" says as much as "Speaker 1".
-        segs.iter_mut().for_each(|s| s.speaker_id = None);
-    } else {
-        let names = names(dir);
-        for s in segs.iter_mut().filter(|s| s.speaker == "remote") {
-            if let Some(id) = s.speaker_id {
-                s.name = Some(display(id, &names));
-            }
-        }
-    }
-    eprintln!("  speakers: {n} on the remote track ({:.1}s)", t.elapsed().as_secs_f64());
-    Ok(())
+    eprintln!("  speaker model: {:.1}s", t.elapsed().as_secs_f64());
+    Ok(Some(turns))
 }
 
 /// The WAV in 10 s pieces (the recorder writes 16 kHz mono 16-bit; anything else is converted
@@ -158,12 +192,17 @@ fn split(seg: Segment, turns: &[crate::nemo::Turn]) -> Vec<(Segment, Option<u32>
             _ => merged.push(r),
         }
     }
-    if merged.len() == 1 {
-        let w = merged[0].2;
+    cut(seg, merged)
+}
+
+/// Cut a segment into word runs `(from, to, label)`; one run keeps the segment whole.
+fn cut<T: Clone>(seg: Segment, runs: Vec<(usize, usize, Option<T>)>) -> Vec<(Segment, Option<T>)> {
+    if runs.len() == 1 {
+        let w = runs[0].2.clone();
         return vec![(seg, w)];
     }
-    merged
-        .into_iter()
+    let words: Vec<&str> = seg.text.split_whitespace().collect();
+    runs.into_iter()
         .map(|(i, j, id)| {
             let piece = Segment {
                 start: seg.words[i][0],
@@ -175,6 +214,86 @@ fn split(seg: Segment, turns: &[crate::nemo::Turn]) -> Vec<(Segment, Option<u32>
             (piece, id)
         })
         .collect()
+}
+
+/// Words within this of the previous one continue its speaker (one voice unit).
+const UNIT_GAP: f64 = 0.7;
+
+/// No speaker model: name remote words straight from Teams' timeline, splitting a segment
+/// where the lit person changes. A word nobody was lit for continues the word before it when
+/// it follows closely; otherwise it stays unnamed ("Remote").
+fn split_by_timeline(segs: &mut Vec<Segment>, tl: &crate::speaking::Timeline) {
+    let mut out = vec![];
+    for seg in segs.drain(..) {
+        if seg.speaker != "remote" {
+            out.push(seg);
+            continue;
+        }
+        let aligned = !seg.words.is_empty() && seg.words.len() == seg.text.split_whitespace().count();
+        if !aligned {
+            let name = tl.who(seg.start, seg.end).map(str::to_owned);
+            out.push(Segment { name, ..seg });
+            continue;
+        }
+        let mut labels: Vec<Option<String>> = seg.words.iter().map(|[a, b]| tl.who(*a, *b).map(str::to_owned)).collect();
+        for i in 1..labels.len() {
+            if labels[i].is_none() && seg.words[i][0] - seg.words[i - 1][1] < UNIT_GAP {
+                labels[i] = labels[i - 1].clone();
+            }
+        }
+        let mut runs: Vec<(usize, usize, Option<String>)> = vec![];
+        for (i, l) in labels.into_iter().enumerate() {
+            match runs.last_mut() {
+                Some(r) if r.2 == l => r.1 = i + 1,
+                _ => runs.push((i, i + 1, l)),
+            }
+        }
+        for (mut piece, name) in cut(seg, runs) {
+            piece.name = name;
+            out.push(piece);
+        }
+    }
+    *segs = out;
+}
+
+/// Names for detected speakers from Teams' timeline: a voice takes the name most of its words
+/// were lit for — at least 3 words, at least 60 % of its named words, and named words at least
+/// a quarter of all its words. Two voices on one name (people sharing a room's tile) become
+/// "Name (Speaker N)".
+fn vote(segs: &[Segment], tl: &crate::speaking::Timeline) -> BTreeMap<u32, String> {
+    let mut words: BTreeMap<u32, (usize, BTreeMap<String, usize>)> = BTreeMap::new();
+    for s in segs.iter().filter(|s| s.speaker == "remote") {
+        let Some(id) = s.speaker_id else { continue };
+        let e = words.entry(id).or_default();
+        let n = s.text.split_whitespace().count();
+        e.0 += n;
+        if !s.words.is_empty() && s.words.len() == n {
+            for [a, b] in &s.words {
+                if let Some(name) = tl.who(*a, *b) {
+                    *e.1.entry(name.to_string()).or_default() += 1;
+                }
+            }
+        } else if let Some(name) = tl.who(s.start, s.end) {
+            *e.1.entry(name.to_string()).or_default() += n;
+        }
+    }
+    let mut out: BTreeMap<u32, String> = BTreeMap::new();
+    for (id, (all, by)) in words {
+        let named: usize = by.values().sum();
+        if let Some((name, top)) = by.into_iter().max_by_key(|x| x.1) {
+            if top >= 3 && top as f64 >= 0.6 * named as f64 && named as f64 >= 0.25 * all as f64 {
+                out.insert(id, name);
+            }
+        }
+    }
+    let mut count: BTreeMap<String, usize> = BTreeMap::new();
+    out.values().for_each(|n| *count.entry(n.clone()).or_default() += 1);
+    for (id, name) in out.iter_mut() {
+        if count[name.as_str()] > 1 {
+            *name = format!("{name} (Speaker {id})");
+        }
+    }
+    out
 }
 
 /// Give each remote segment its speaker (splitting segments two people share), numbered 1, 2,
@@ -216,16 +335,24 @@ pub fn command(call: &str, assignments: &[String]) -> Result<()> {
     }
     if assignments.is_empty() {
         let mut out: BTreeMap<u32, (f64, Vec<serde_json::Value>)> = BTreeMap::new();
+        let mut shown: BTreeMap<u32, String> = BTreeMap::new();
         for s in segs.iter().filter(|s| s.speaker_id.is_some()) {
-            let e = out.entry(s.speaker_id.unwrap_or(0)).or_default();
+            let id = s.speaker_id.unwrap_or(0);
+            if let Some(n) = &s.name {
+                shown.entry(id).or_insert_with(|| n.clone());
+            }
+            let e = out.entry(id).or_default();
             e.0 += s.end - s.start;
             if e.1.len() < 4 {
                 e.1.push(json!({ "t": s.start.round(), "text": s.text }));
             }
         }
         let names = names(&dir);
+        // `label`: what the transcript shows (a manual name, the name Teams lit, or "Speaker N");
+        // `name`: set by hand (`speakers.json`).
         let list: Vec<_> = out.into_iter().map(|(id, (secs, lines))| json!({
-            "id": id, "name": names.get(&id), "label": display(id, &names), "seconds": secs.round(), "first_lines": lines,
+            "id": id, "name": names.get(&id), "label": shown.get(&id).cloned().unwrap_or_else(|| display(id, &names)),
+            "seconds": secs.round(), "first_lines": lines,
         })).collect();
         println!("{}", serde_json::to_string_pretty(&json!({ "speakers": list }))?);
         return Ok(());
@@ -292,5 +419,56 @@ mod tests {
         assert_eq!(s.len(), 2, "{s:?}");
         assert_eq!((s[0].text.as_str(), s[0].speaker_id, s[0].end), ("Hello there.", Some(1), 1.0));
         assert_eq!((s[1].text.as_str(), s[1].speaker_id, s[1].start), ("Hi, how are you doing", Some(2), 2.0));
+    }
+
+    #[test]
+    fn without_the_speaker_model_teams_names_and_splits_the_remote_words() {
+        let dir = std::env::temp_dir().join(format!("echo-speakers-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        // Dana's ring 0.5–8.5 (lit late by 0.5 s), Lee's 8.5–20.5; the user's tile 20.5–40.5.
+        let line = |t: f64, k: &str, n: &str, add: &[&str], del: &[&str], me: bool| {
+            let mut v = json!({ "t": t, "k": k, "n": n, "add": add, "del": del });
+            if me {
+                v["me"] = true.into();
+            }
+            v.to_string()
+        };
+        let log = [
+            line(0.0, "tile:Dana", "Dana Lin", &["tile"], &[], false),
+            line(0.0, "tile:Lee", "Lee Park", &["tile"], &[], false),
+            line(0.0, "tile:Jane", "Jane Doe", &["tile"], &[], true),
+            line(0.5, "tile:Dana", "Dana Lin", &["ring"], &[], false),
+            line(8.5, "tile:Dana", "Dana Lin", &[], &["ring"], false),
+            line(8.5, "tile:Lee", "Lee Park", &["ring"], &[], false),
+            line(20.5, "tile:Lee", "Lee Park", &[], &["ring"], false),
+            line(20.5, "tile:Jane", "Jane Doe", &["ring"], &[], true),
+            line(40.5, "tile:Jane", "Jane Doe", &[], &["ring"], true),
+        ];
+        fs::write(dir.join(crate::speaking::FILE), log.join("\n")).unwrap();
+        let mut a = seg("remote", 0.0, 12.0);
+        a.text = "So that is the plan. Sounds good to me".into();
+        a.words = vec![[0.5, 1.0], [1.2, 1.5], [1.6, 1.8], [1.9, 2.1], [2.2, 7.9], [8.6, 9.0], [9.1, 9.5], [9.6, 9.8], [9.9, 12.0]];
+        let mut b = seg("remote", 13.0, 20.0);
+        b.text = "Let us ship it".into();
+        let mut segs = vec![a, b, seg("me", 20.0, 40.0)];
+        let tl = crate::speaking::Timeline::learn(&dir, &segs, None).expect("calibrated");
+        split_by_timeline(&mut segs, &tl);
+        let got: Vec<(&str, Option<&str>)> = segs.iter().map(|s| (s.text.as_str(), s.name.as_deref())).collect();
+        assert_eq!(got, [
+            ("So that is the plan.", Some("Dana Lin")),
+            ("Sounds good to me", Some("Lee Park")),
+            ("Let us ship it", Some("Lee Park")),
+            ("x", None),
+        ]);
+        // With voices from the speaker model, a voice takes the name its words were lit for.
+        let mut v = vec![seg("remote", 0.5, 8.0), seg("remote", 9.0, 20.0)];
+        v[0].text = "one two three four".into();
+        v[1].text = "five six seven eight".into();
+        v[0].speaker_id = Some(1);
+        v[1].speaker_id = Some(2);
+        let voted = vote(&v, &tl);
+        assert_eq!(voted.get(&1).map(String::as_str), Some("Dana Lin"));
+        assert_eq!(voted.get(&2).map(String::as_str), Some("Lee Park"));
+        let _ = fs::remove_dir_all(&dir);
     }
 }

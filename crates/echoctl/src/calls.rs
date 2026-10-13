@@ -291,7 +291,8 @@ pub fn context(call: &str) -> Result<()> {
         "frames": frames,
         "chat": fs::read(dir.join("chat.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).unwrap_or(json!([])),
         "me_profile": fs::read_to_string(me_profile_path()).ok().filter(|t| !t.trim().is_empty() && t.trim() != ME_TEMPLATE.trim()),
-        "vocabulary": cfg.vocabulary,
+        // This call's terms (always-on + learned for this meeting); learning: `vocab add --call`.
+        "vocabulary": crate::vocab::for_meeting(&cfg, meeting.as_ref()),
     });
     println!("{}", serde_json::to_string_pretty(&out)?);
     Ok(())

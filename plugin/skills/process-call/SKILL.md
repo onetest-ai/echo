@@ -49,8 +49,9 @@ follow (user templates in `<data folder>/.echo/templates/` override the built-in
 - Otherwise use the template's sections, at most `heading_budget` headings in total (merge or
   drop the least relevant). Follow each section's instruction.
 - Write in `dominant_language`. Keep names, products and figures exactly as said.
-- Remote speakers share one track. It is labelled "Remote", or, when Echo told the voices apart,
-  "Speaker 1", "Speaker 2", … (one label per voice, across the whole call). Attribute a
+- Remote speakers share one track. It is labelled "Remote", or with people's names where Teams
+  showed who was speaking, or "Speaker 1", "Speaker 2", … where Echo told voices apart without a
+  name (one label per voice, across the whole call). Names Echo put there are reliable. Attribute a
   statement to a named person only when the transcript makes it unambiguous (they introduce
   themselves, or answer when addressed by name); a speaker you named in step 4a counts as that
   person everywhere. Otherwise say "someone on the call". "Me" is the user (`me.name` if set).
@@ -90,7 +91,9 @@ Senders are real names: they can also confirm who a remote speaker was when the 
 shows the same point being made. Skip greetings and "joining in 2 min".
 
 ### 4a. Name the speakers (only if the transcript has "Speaker N" labels)
-`echoctl speakers <dir>` lists them: `id`, speaking time, first lines. Give a speaker a name when
+Echo already names voices from Teams' own speaking marker where it could; the rest are
+"Speaker N". `echoctl speakers <dir>` lists them: `id`, `label` (what the transcript shows),
+speaking time, first lines. Never rename a speaker whose label is already a person's name. Give a "Speaker N" a name when
 the transcript is clear about it — they introduce themselves ("this is Lena"), or someone
 addresses them by name and that speaker answers — and the name is one of the attendees
 (`colleagues` / `external`) or said in full on the call. Then run
@@ -112,15 +115,19 @@ specific one-line title (≤ 60 chars, no trailing punctuation) and run
 `echoctl title <dir> "<title>"` — it renames the folder; use the new path afterwards.
 
 ## 7. Vocabulary (automatic — never ask)
-Whisper spells names and jargon better when they are in the vocabulary. Learn from
+Echo spells names and jargon better when they are in the call's vocabulary. A term you learn
+here is used again only in calls with this meeting's subject or mostly these people, or whose
+invite names it (`context.vocabulary` is this call's list). Learn from
 this call: names of people, products, tools, companies, projects and acronyms that the
 transcript **misspelled or garbled**, when you are confident of the right spelling (it appears
 in `meeting`/invite, it is a well-known product clearly meant from context — e.g. "as no is used
 internally for operations" → ServiceNow — or the speakers spell it out). Also add correctly
 transcribed but rare names that will recur (e.g. a project codename).
-- Add them yourself: `echoctl vocab add "ServiceNow" "Miro" …` (it validates: 2–50 chars,
-  ≤ 6 words, deduped, capped at 100 with the oldest dropped).
-- Don't add common words, guesses, or anything only said once in passing.
+- Add them yourself: `echoctl vocab add --call <dir> "ServiceNow" "Miro" …` (it validates: 2–50
+  chars, ≤ 6 words, deduped, capped at 100 with the oldest dropped). Never `--always`: that list
+  is the user's.
+- Don't add common words, guesses, anything only said once in passing, or a term that was only
+  *written* by the transcript (it appears where it makes no sense: the recognizer put it there).
 - Never edit `transcript.md`; corrections go only into `transcript.corrected.md` if the user
   later asks for one.
 

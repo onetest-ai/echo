@@ -333,7 +333,7 @@ v0.2.0 by SHA-256. A build without it hides the model. One offline `recognize` p
 of the first 4 s, restricted + sticky as with Whisper, uk vs ru settled by the letters it wrote
 (і ї є ґ / ы э ё ъ — its own tags say `ru-RU, uk-UA` for Ukrainian and it writes the first
 words in Russian), then the utterance is decoded with that locale pinned. Vocabulary = boosted
-phrases (boost 3; no prompt, so no hint guard). It never translates and doesn't invent text in
+phrases (boost 0.5: 0.5 fixes said terms and adds none, 1 garbles, 2–3 insert terms into unrelated speech — measured with the 24-term vocabulary), decoded plain too and kept only when every vocabulary term the boost adds sounds like what the plain decode heard there (`boost_is_heard`: Latin-letter edit distance ≤ half the term; Cyrillic transliterated) — unguarded, the boost wrote "Flow Studio" / "ServiceNow" dozens of times into a Russian call that never mentioned them (2026-10-13). Whisper's hint gets the same check on top of its own. It never translates and doesn't invent text in
 silence like Whisper. This Mac: 115 s of speech in ~11 s on the CPU alone, ~3 s on Metal.
 **Speaker detection** (`speakers.rs`, model `speakers-nemotron-3`: NVIDIA's Nemotron 3
 Diarization, Sortformer, ≤ 8 speakers, 107 MB, through the same NeMo-Speech runtime; on
@@ -346,10 +346,33 @@ word times kept in memory only: Whisper tokens / Nemotron words; one-word runs t
 turn also covers join it; on overlapping speech the one who just started wins). Word times
 are corrected per engine first (Whisper +0.3 s, Nemotron −0.4 s, measured against reference
 turns) — without it the first words of each turn went to the previous speaker. One voice ⇒
-plain "Remote". Names are judgment: the process-call skill (step 4a) or the user runs
-`echoctl speakers <call> 2="Name"` → `<call>/speakers.json`, segments + transcript.md
-re-rendered. The window colors speakers 2–6 apart. Teams' AX tree has no "is speaking"
-signal (only per-participant muted/unmuted), so names don't come from there.
+plain "Remote". The window colors speakers 2–6 apart.
+**Names from Teams** (`speaking.rs`): Teams rings whoever speaks, and accessibility shows that
+only as a class toggling on the tile / participants-list avatar (no "speaking" text; seen in
+the AX tree's AXDOMClassList — UIA ClassName on Windows). During the call `ax::participants`
+(same walk as `ui.jsonl`, every 500 ms) reads the video tiles (menu items labelled
+"<Name>, …"; "Myself video, <Name>, …" = the user) and the participants list
+(`calling-roster-item-<id>`), each with all classes of its subtree (tiles: + 3 ancestors) and
+its label's state words → `<call>/speaking.jsonl` (per participant `{t, k, n, me?, add, del}`,
+changes only). The class names are generated and change between Teams versions, so after the
+call the marker is learned per call, separately for tiles and list rows: of the tokens that
+toggled, the one (and UI delay 0–1.5 s) whose lit time best matches the user's own mic speech
+on their element and the remote track's speech on everyone else's (F1 ≥ 0.45). Remote words
+then go to whoever was lit (±0.15 s; two about equal ⇒ abstain). With the speaker model: a
+voice takes the name ≥ 60 % of its named words carry (≥ 3 words, named ≥ 25 % of its words;
+two voices on one name ⇒ "Name (Speaker N)"); without it, segments are split by the lit name
+(words < 0.7 s apart continue the previous one). Manual names (`speakers.json`) win; the
+process-call skill (step 4a) names only the leftover "Speaker N", or the user runs
+`echoctl speakers <call> 2="Name"` (segments + transcript.md re-rendered). Dev:
+`echoctl ax-speaking [--tree ui-tree-120s.json]` (live: tokens flipping per participant),
+`echoctl speaking <call>` (the marker learned and who it lights). Live finding (2026-10-13,
+Teams 2-person compact view): nothing at all changes in the call window's AX tree while people
+talk (only the call timer) — the marker exists only where Teams draws it on an exposed element
+(the participants list's avatar flipped class in a gallery call's snapshots; unconfirmed live).
+So also: **one other person in the call** (`speaking::sole_remote`: exactly one remote video
+tile, or one participants-list row that is muted/unmuted — invitees not in the call are listed
+as "No response") ⇒ the whole remote track is them, before any splitting, whatever the invite
+says.
 Per track (mic = Me, remote = Remote) → energy VAD into ≤25 s utterances → language detected per
 utterance, restricted to `config.languages` (a new data folder starts with en, uk, ru, es; `[]` =
 any; stops uk↔ru confusion), using **turbo as the
@@ -361,7 +384,15 @@ that language pinned, `no_context` → drop silence (no-speech > 0.6, or > 0.2 w
 word lists ("Varkin, Node, Cage, Fork": `is_word_list`) and known hallucinations
 (incl. Russian subtitle credits, `*Song*`-style annotations, lone fillers) → drop mic segments
 that echo remote text within ±4 s (user on speakers) → merge by time into transcript.md.
-Vocabulary hint (people + meeting terms + glossary; ≤ 30 terms ≤ 50 chars) is a bare comma list.
+Vocabulary hint (people + meeting terms + this call's vocabulary; ≤ 30 terms ≤ 50 chars) is a bare
+comma list. The vocabulary (`vocab.rs`): `config.vocabulary` = the user's always-on terms
+(`vocab add --always`); `config.learned` = terms the notes run learned (`vocab add --call <dir>`),
+each with the meeting subjects (normalised: no digits/punctuation) and other people (email) it
+came up with, used again only when a call shares a subject, has mostly those people (≥ half of
+its other people), or its invite names the term. One list for all calls boosted one project's
+terms into every other call (2026-10-13); the old list was migrated once (in `Config::load`):
+each term scoped to the calls whose **notes** mention it (not transcripts — they can hold the
+insertions), unmatched ones only by invite.
 Final pass: every hinted utterance ≥ 1 s is also decoded without it, and the hinted text is kept
 only within 0.6×…1.8×+80 chars of the plain one (`hint_is_sane`) and when hint words the plain decode lacks are under half of it (`hint_adds_terms`); live keeps the "≥ 3 s" rule.
 Decode: beam 5, temperature 0, suppress non-speech tokens, token timestamps; VAD 800 ms silence

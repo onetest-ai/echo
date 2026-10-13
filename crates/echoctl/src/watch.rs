@@ -54,7 +54,9 @@ const CHAT_MARGIN: chrono::Duration = chrono::Duration::minutes(2);
 const CHAT_FIND_FOR: Duration = Duration::from_secs(5 * 60);
 /// How often the call app's window text is read during a recording.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-const UI_POLL: Duration = Duration::from_millis(1000);
+/// Twice a second: who is lit in Teams' tiles changes at the pace of a conversation
+/// (`speaking.jsonl`), and the UI already lags the audio by ~0.5 s.
+const UI_POLL: Duration = Duration::from_millis(500);
 /// A wall-clock jump this large between ticks means the computer slept.
 const SLEEP_GAP: Duration = Duration::from_secs(30);
 /// Recovery looks at calls this recent.

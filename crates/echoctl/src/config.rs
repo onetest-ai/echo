@@ -34,9 +34,14 @@ pub struct Config {
     /// a new data folder (no setting yet) starts with `DEFAULT_LANGUAGES`.
     #[serde(default = "default_languages")]
     pub languages: Vec<String>,
-    /// Workspace-wide glossary (names, products, acronyms) passed to Whisper as a hint.
+    /// Terms for every call (names, products, acronyms the user wants always): `echoctl vocab
+    /// add --always`. Learned terms live in `learned`, each tied to its meetings (`vocab.rs`).
     #[serde(default)]
     pub vocabulary: Vec<String>,
+    /// Terms learned from calls, each with the subjects and people it came up with; used only
+    /// in calls like those. None = not yet migrated from the old one-list `vocabulary`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub learned: Option<Vec<crate::vocab::Learned>>,
     /// Calls not on the agenda: "ask" (prompt when the call starts) or "manual" (never prompt;
     /// the user says "record" → `echoctl arm`). Default: ask.
     #[serde(default)]
@@ -125,37 +130,13 @@ fn path() -> PathBuf {
     paths::state_dir().join("config.json")
 }
 
-/// Vocabulary limits: 2–50 chars, ≤ 6 words, ≤ 100 terms.
-pub const VOCAB_MAX: usize = 100;
-
+/// A vocabulary term: 2–50 chars, ≤ 6 words.
 pub fn valid_term(t: &str) -> bool {
     let n = t.chars().count();
     (2..=50).contains(&n) && t.split_whitespace().count() <= 6
 }
 
 impl Config {
-    /// Add terms (newest last), dropping duplicates (case-insensitive) and invalid entries;
-    /// beyond the cap the oldest are dropped. Returns the terms actually added.
-    pub fn learn_terms(&mut self, terms: &[String]) -> Vec<String> {
-        let mut added = vec![];
-        for t in terms.iter().map(|t| t.trim()) {
-            if !valid_term(t) {
-                continue;
-            }
-            if let Some(i) = self.vocabulary.iter().position(|v| v.eq_ignore_ascii_case(t)) {
-                // Re-learning refreshes the term (moves it to newest) but keeps its spelling.
-                let existing = self.vocabulary.remove(i);
-                self.vocabulary.push(existing);
-            } else {
-                added.push(t.to_string());
-                self.vocabulary.push(t.to_string());
-            }
-        }
-        let excess = self.vocabulary.len().saturating_sub(VOCAB_MAX);
-        self.vocabulary.drain(..excess);
-        added
-    }
-
     /// Prompt the user when an unscheduled call starts?
     pub fn ask_unscheduled(&self) -> bool {
         self.unscheduled.as_deref() != Some("manual")
@@ -175,7 +156,14 @@ impl Config {
 
     pub fn load() -> Result<Self> {
         match fs::read(path()) {
-            Ok(b) => Ok(serde_json::from_slice(&b)?),
+            Ok(b) => {
+                let mut cfg: Config = serde_json::from_slice(&b)?;
+                // Once: the old one-list vocabulary is scoped to the calls it came from.
+                if crate::vocab::migrate(&mut cfg) {
+                    cfg.save()?;
+                }
+                Ok(cfg)
+            }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(e) => Err(e.into()),
         }
@@ -203,18 +191,6 @@ mod tests {
         assert_eq!(Config::default().languages, new.languages);
         let any: Config = serde_json::from_str(r#"{"languages": []}"#).unwrap();
         assert!(any.languages.is_empty());
-    }
-
-    #[test]
-    fn learning_dedupes_validates_and_caps() {
-        let mut c = Config::default();
-        let added = c.learn_terms(&["ServiceNow".into(), "servicenow".into(), "x".into(), "Miro".into()]);
-        assert_eq!(added, vec!["ServiceNow", "Miro"]);
-        assert_eq!(c.vocabulary, vec!["ServiceNow", "Miro"]); // re-learned: same spelling kept
-        let many: Vec<String> = (0..150).map(|i| format!("term{i}")).collect();
-        c.learn_terms(&many);
-        assert_eq!(c.vocabulary.len(), VOCAB_MAX);
-        assert_eq!(c.vocabulary.last().unwrap(), "term149");
     }
 
     #[test]

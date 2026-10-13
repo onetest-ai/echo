@@ -327,6 +327,18 @@ impl CallWindow {
         self.window()?.string("AXTitle")
     }
 
+    /// The participants the call window shows right now (`echoctl ax-speaking`).
+    pub fn participants(&mut self) -> Vec<super::Participant> {
+        self.tree_node().map(|t| super::participants(&t)).unwrap_or_default()
+    }
+
+    /// The call window as a light tree.
+    pub fn tree_node(&mut self) -> Option<super::UiNode> {
+        let w = self.window()?;
+        let (mut lines, mut budget) = (vec![], MAX_NODES);
+        Some(ui_lines(w, 0, &mut lines, &mut budget))
+    }
+
     /// The call window's CGWindowID (for `screencapture -l`).
     pub fn window_id(&mut self) -> Option<u32> {
         let w = self.window()?;
@@ -362,21 +374,32 @@ impl CallWindow {
 
 /// One line per text-bearing node: "depth|role|subrole|title|description|value". Diffing these
 /// between polls shows what changes when someone speaks (a tile's label, a "speaking" state).
-fn ui_lines(e: &Element, depth: usize, out: &mut Vec<String>, budget: &mut usize) {
+/// The same walk returns a light copy of the tree (with class lists) for the participant reader.
+fn ui_lines(e: &Element, depth: usize, out: &mut Vec<String>, budget: &mut usize) -> super::UiNode {
+    let mut node = super::UiNode::default();
     if *budget == 0 {
-        return;
+        return node;
     }
     *budget -= 1;
-    let get = |a: &str| e.string(a).map(|t| t.chars().take(160).collect::<String>().replace(['|', '\n'], " ")).unwrap_or_default();
-    let (title, desc, value) = (get("AXTitle"), get("AXDescription"), get("AXValue"));
+    let raw = |a: &str| e.string(a).unwrap_or_default();
+    let (title, desc, value) = (raw("AXTitle"), raw("AXDescription"), raw("AXValue"));
+    let clean = |t: &str| t.chars().take(160).collect::<String>().replace(['|', '\n'], " ");
+    let (role, subrole) = (raw("AXRole"), raw("AXSubrole"));
     if !(title.is_empty() && desc.is_empty() && value.is_empty()) {
-        out.push(format!("{depth}|{}|{}|{title}|{desc}|{value}", get("AXRole"), get("AXSubrole")));
+        out.push(format!("{depth}|{role}|{subrole}|{}|{}|{}", clean(&title), clean(&desc), clean(&value)));
     }
+    node.label = [title, desc, value].into_iter().find(|t| !t.is_empty()).unwrap_or_default().chars().take(300).collect();
+    node.id = raw("AXDOMIdentifier");
+    if let Some(Attr::Json(Value::Array(c))) = e.attr("AXDOMClassList") {
+        node.classes = c.into_iter().filter_map(|v| v.as_str().map(str::to_owned)).collect();
+    }
+    node.role = role;
     if depth < MAX_DEPTH {
         for c in e.children("AXChildren") {
-            ui_lines(&c, depth + 1, out, budget);
+            node.kids.push(ui_lines(&c, depth + 1, out, budget));
         }
     }
+    node
 }
 
 /// Records the text of Teams' call window (not the main window, which shows chats) while a
@@ -385,6 +408,7 @@ fn ui_lines(e: &Element, depth: usize, out: &mut Vec<String>, budget: &mut usize
 /// `<call>/ui-tree-<s>.json` a few full trees. Text only — no screenshots.
 pub struct UiRecorder {
     window: CallWindow,
+    speaking: Option<super::SpeakingLog>,
     dir: PathBuf,
     t0: Instant,
     out: std::fs::File,
@@ -397,7 +421,8 @@ impl UiRecorder {
     pub fn teams(dir: &std::path::Path, t0: Instant) -> Option<Self> {
         let window = CallWindow::teams()?;
         let out = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("ui.jsonl")).ok()?;
-        Some(UiRecorder { window, dir: dir.to_path_buf(), t0, out, bytes: 0, prev: Default::default(), trees_done: 0 })
+        let speaking = super::SpeakingLog::open(dir);
+        Some(UiRecorder { window, speaking, dir: dir.to_path_buf(), t0, out, bytes: 0, prev: Default::default(), trees_done: 0 })
     }
 
     /// Read the call window once and append what changed. Returns false once the log is full.
@@ -410,8 +435,12 @@ impl UiRecorder {
         let windows: Vec<&Element> = self.window.window().into_iter().collect();
         let mut lines = vec![];
         let mut budget = MAX_NODES;
+        let mut people = vec![];
         for w in &windows {
-            ui_lines(w, 0, &mut lines, &mut budget);
+            people.extend(super::participants(&ui_lines(w, 0, &mut lines, &mut budget)));
+        }
+        if let (Some(log), false) = (self.speaking.as_mut(), windows.is_empty()) {
+            log.record(t, people);
         }
         let now: std::collections::BTreeSet<String> = lines.into_iter().collect();
         let add: Vec<&String> = now.difference(&self.prev).collect();
