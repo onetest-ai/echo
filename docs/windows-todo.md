@@ -39,6 +39,10 @@ Code markers: `git grep "TODO(windows)"`.
   element classes come from UIA's ClassName (Chromium reports the HTML class there; untested
   with WebView2 Teams), and tiles are found by control type MenuItem. Check with
   `echoctl ax-speaking` in a call (talk, pause, talk) that tiles appear and a token flips.
+  Dialogs (the share panel) are skipped only on macOS (`UiNode.dialog` from the subrole): find
+  what UIA reports for Teams' "Share content" panel and set it in `ax/windows.rs`, or its
+  "Browse OneDrive" item counts as a second person and the 1:1 naming is lost. The call timer
+  (`ax::call_elapsed`) is read from the same tree: check `ui.jsonl` shows a bare "36:28" text.
 - **One call-window reader:** frames and `ui.jsonl` each keep their own `ax::CallWindow` (on
   their own threads; UI Automation objects are thread-bound), so the call window's tree is
   read for both. Sharing one needs a single UIA thread serving both.

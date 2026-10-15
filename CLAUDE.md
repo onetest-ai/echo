@@ -265,7 +265,14 @@ notes". Live pane model: `config.live_model` (default haiku).
   Microsoft 365 sign-in): the meeting's Teams chat via Graph `Chat.Read` — chat id parsed from
   the join link (`19:meeting_…@thread.v2`); ad-hoc calls (no link) → `graph::find_call_chat`:
   the recently active chat whose "call started" system event precedes the recording with no
-  "call ended" in between (retried 5 min). Kept: messages from 2 min before the call started to
+  "call ended" in between (retried 5 min), and within 3 min of when Teams' call timer says the
+  call began (`ax::call_elapsed`: the call window's "36:28" text, counted from the call's start,
+  not your join; any language) — a big meeting left hours ago never posted "call ended", and its
+  chat was taken for a 1:1 call that posts no events (2026-10-15). Timer unreadable ⇒ the call must have
+  started after you last left one (`call_ended` in `events.jsonl` followed by ≥ 60 s out of calls):
+  no chat beats another meeting's. The title's view name comes
+  off first ("Meeting compact view | Jane Doe | …" → Jane Doe). `calendar chat` backfills the
+  same way (title in `ui-tree-10s.json`, timer in `ui.jsonl`). Kept: messages from 2 min before the call started to
   2 min after it ended (recurring meetings share one chat) — polled every 30 s, final read 60 s
   after the end. `[{t, from, text, files}]`, `t` on the audio clock; `<call>/chat.id`.
   `context.chat` → the notes' "In the chat" section; pane: Chat section (live) + Chat tab (`h`).
@@ -352,7 +359,8 @@ only as a class toggling on the tile / participants-list avatar (no "speaking" t
 the AX tree's AXDOMClassList — UIA ClassName on Windows). During the call `ax::participants`
 (same walk as `ui.jsonl`, every 500 ms) reads the video tiles (menu items labelled
 "<Name>, …"; "Myself video, <Name>, …" = the user) and the participants list
-(`calling-roster-item-<id>`), each with all classes of its subtree (tiles: + 3 ancestors) and
+(`calling-roster-item-<id>`; nothing inside a dialog: the share panel's "Browse OneDrive" is a
+menu item too), each with all classes of its subtree (tiles: + 3 ancestors) and
 its label's state words → `<call>/speaking.jsonl` (per participant `{t, k, n, me?, add, del}`,
 changes only). The class names are generated and change between Teams versions, so after the
 call the marker is learned per call, separately for tiles and list rows: of the tokens that

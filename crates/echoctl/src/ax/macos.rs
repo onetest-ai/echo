@@ -393,6 +393,7 @@ fn ui_lines(e: &Element, depth: usize, out: &mut Vec<String>, budget: &mut usize
     if let Some(Attr::Json(Value::Array(c))) = e.attr("AXDOMClassList") {
         node.classes = c.into_iter().filter_map(|v| v.as_str().map(str::to_owned)).collect();
     }
+    node.dialog = subrole == "AXApplicationDialog";
     node.role = role;
     if depth < MAX_DEPTH {
         for c in e.children("AXChildren") {

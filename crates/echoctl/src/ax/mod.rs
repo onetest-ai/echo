@@ -66,9 +66,15 @@ impl ShareSeen {
 
 /// Who the call is with, from the call window's title: Teams titles it after the chat it was
 /// started from (a 1:1 chat: the other person; a group chat: its name) or the meeting, with
-/// " | "-separated suffixes (tenant, account, "Microsoft Teams"). Returns the first part.
+/// " | "-separated suffixes (tenant, account, "Microsoft Teams"). Returns the first part —
+/// after the view's name when Teams puts one first ("Meeting compact view | Jane Doe | …",
+/// the small window shown while you share or work in another app).
 pub fn call_name(title: &str) -> Option<String> {
-    let first = title.split(" | ").next()?.trim();
+    let mut parts = title.split(" | ").map(str::trim);
+    let mut first = parts.next()?;
+    if first.to_lowercase().ends_with(" view") {
+        first = parts.next()?;
+    }
     let name = ["Call with ", "Meeting with ", "Meeting in "]
         .iter()
         .find_map(|p| first.strip_prefix(p))
@@ -93,13 +99,15 @@ pub fn is_person_name(s: &str) -> bool {
 /// A light copy of one node of the call window (both platforms): what the participant reader
 /// needs. `id`: AXDOMIdentifier / AutomationId (the HTML id); `classes`: AXDOMClassList /
 /// UIA ClassName (the HTML class attribute); `label`: the first of title / description / value
-/// (macOS) or the name (Windows).
+/// (macOS) or the name (Windows); `dialog`: a dialog's root (macOS subrole AXApplicationDialog,
+/// e.g. Teams' "Share content" panel, whose menu items aren't people).
 #[derive(Debug, Default, Clone)]
 pub struct UiNode {
     pub role: String,
     pub id: String,
     pub classes: Vec<String>,
     pub label: String,
+    pub dialog: bool,
     pub kids: Vec<UiNode>,
 }
 
@@ -159,6 +167,10 @@ const ROSTER_ITEM: &str = "calling-roster-item-";
 /// and, when the participants pane is open, its rows.
 pub fn participants(root: &UiNode) -> Vec<Participant> {
     fn walk<'a>(n: &'a UiNode, chain: &mut Vec<&'a UiNode>, out: &mut Vec<Participant>) {
+        if n.dialog {
+            // The share panel lists "Browse OneDrive" as a menu item: a name to `tile_name`.
+            return;
+        }
         let role = n.role.to_lowercase();
         if n.id.starts_with(ROSTER_ITEM) {
             let label = if n.label.is_empty() { chain.last().map(|p| p.label.as_str()).unwrap_or("") } else { &n.label };
@@ -261,7 +273,7 @@ pub fn from_dump(v: &serde_json::Value) -> UiNode {
         _ => str_of("ClassName").split_whitespace().map(str::to_owned).collect(),
     };
     let kids = v["children"].as_array().map(|k| k.iter().map(from_dump).collect()).unwrap_or_default();
-    UiNode { role: str_of("Role"), id, classes, label, kids }
+    UiNode { role: str_of("Role"), id, classes, label, dialog: str_of("Subrole") == "AXApplicationDialog", kids }
 }
 
 /// `echoctl ax-speaking`: the participants the reader finds and, live, every token that flips
@@ -327,6 +339,38 @@ pub fn speaking_probe(seconds: u64, tree: Option<&std::path::Path>, all: bool) -
     Ok(())
 }
 
+/// Teams' call timer text ("36:28", "1:02:03") in seconds. It counts from when the call began,
+/// not from when you joined (joined 80 s into a meeting, it read 1:30), the same in every UI
+/// language.
+pub fn timer_seconds(s: &str) -> Option<u64> {
+    let parts: Vec<&str> = s.trim().split(':').collect();
+    let digits = |p: &&str| !p.is_empty() && p.len() <= 2 && p.bytes().all(|b| b.is_ascii_digit());
+    if !(2..=3).contains(&parts.len()) || !parts.iter().all(digits) || parts[1..].iter().any(|p| p.len() != 2) {
+        return None;
+    }
+    let n: Vec<u64> = parts.iter().filter_map(|p| p.parse().ok()).collect();
+    (n[1..].iter().all(|&x| x < 60)).then(|| n.iter().fold(0, |a, x| a * 60 + x))
+}
+
+fn timer_in(n: &UiNode) -> Option<u64> {
+    timer_seconds(&n.label).or_else(|| n.kids.iter().find_map(timer_in))
+}
+
+/// How long the call in Teams' call window has been going, in seconds.
+pub fn call_elapsed() -> Option<u64> {
+    timer_in(&CallWindow::teams()?.tree_node()?)
+}
+
+/// When the recorded call began, in seconds from the recording start (negative: before it),
+/// from the first timer reading in `<call>/ui.jsonl`.
+pub fn call_began_in(dir: &std::path::Path) -> Option<f64> {
+    let text = std::fs::read_to_string(dir.join("ui.jsonl")).ok()?;
+    text.lines().filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok()).find_map(|v| {
+        let t = v["t"].as_f64()?;
+        v["add"].as_array()?.iter().filter_map(|x| x.as_str()).find_map(|x| x.split('|').skip(2).find_map(timer_seconds)).map(|e| t - e as f64)
+    })
+}
+
 /// The call window's title right now (`echoctl` dev aid and the call's names).
 pub fn call_title() -> Option<String> {
     CallWindow::teams()?.title()
@@ -373,6 +417,18 @@ mod tests {
         assert_eq!(call_name("Weekly sync | Microsoft Teams").as_deref(), Some("Weekly sync"));
         assert_eq!(call_name("Microsoft Teams"), None);
         assert_eq!(call_name("Meeting | Microsoft Teams"), None);
+        assert_eq!(call_name("Meeting compact view | Jane Doe | Contoso | jane@contoso.com | Microsoft Teams").as_deref(), Some("Jane Doe"));
+        assert_eq!(call_name("Meeting compact view | Microsoft Teams"), None);
+    }
+
+    #[test]
+    fn call_timer_reads_minutes_and_hours() {
+        assert_eq!(timer_seconds("36:28"), Some(36 * 60 + 28));
+        assert_eq!(timer_seconds("1:02:03"), Some(3723));
+        assert_eq!(timer_seconds("07:23"), Some(443));
+        for s in ["", "36", "3:6", "36:60", "Elapsed time 36:08", "1:2:3", "a1:00"] {
+            assert_eq!(timer_seconds(s), None, "{s}");
+        }
         assert!(is_person_name("Jane Doe") && is_person_name("Mary-Ann O'Neil"));
         assert!(!is_person_name("Weekly sync") && !is_person_name("Jane") && !is_person_name("Q3 Planning Review"));
     }
@@ -380,7 +436,7 @@ mod tests {
     #[test]
     fn participants_from_tiles_and_the_roster() {
         let node = |role: &str, id: &str, label: &str, classes: &[&str], kids: Vec<UiNode>| UiNode {
-            role: role.into(), id: id.into(), label: label.into(), classes: classes.iter().map(|c| c.to_string()).collect(), kids,
+            role: role.into(), id: id.into(), label: label.into(), classes: classes.iter().map(|c| c.to_string()).collect(), kids, dialog: false,
         };
         let tree = node("AXGroup", "", "", &["stage"], vec![
             node("AXGroup", "", "", &["frame", "lit"], vec![node("AXMenuItem", "", "Daniel Osei, video is on, muted, Context menu is available", &["tile"], vec![
@@ -390,6 +446,7 @@ mod tests {
             node("AXMenuItem", "", "Osei, Daniel (Contoso), muted", &["tile"], vec![]),
             node("AXMenuItem", "", "Share", &[], vec![]),
             node("AXMenuItem", "", "Maren Ortiz", &["compact"], vec![]),
+            UiNode { dialog: true, ..node("AXGroup", "", "Share content", &[], vec![node("AXMenuItem", "", "Browse OneDrive", &[], vec![])]) },
             node("AXImage", "", "Myself video, Jane Doe, Unmuted", &[], vec![]),
             node("AXImage", "", "Profile picture of Lee Park", &[], vec![]),
             node("AXRow", "", "Priya Nair, Unmuted", &[], vec![node("AXGroup", "calling-roster-item-8:orgid:abc", "", &["item"], vec![

@@ -516,11 +516,22 @@ pub fn chat_named(name: &str) -> Result<Option<ChatInfo>> {
     Ok(None)
 }
 
+/// How far a chat's "call started" may be from the start Teams' call timer gives.
+const CALL_START_SLACK: chrono::Duration = chrono::Duration::minutes(3);
+
 /// The chat whose call is in progress at `recording_start`: an ad-hoc call ("Meet now", a call
 /// from a group or 1:1 chat) has no join link, but Teams posts "call started" / "call ended"
 /// events into its chat. Picks the chat with the latest call start before the recording (with
 /// a little slack) and no end in between. Returns (chat id, call start).
-pub fn find_call_chat(recording_start: DateTime<Utc>) -> Result<Option<(String, DateTime<Utc>)>> {
+///
+/// `began`: when the call began by Teams' own timer. When known, only a start within
+/// `CALL_START_SLACK` of it counts: a meeting left hours ago whose "call ended" never came (a
+/// big meeting goes on without you) otherwise looks like a call still running, and its chat
+/// was taken for a 1:1 call that posts no events at all (2026-10-15). No timer (the window
+/// unreadable): `left` — when you last left a call before this one — bounds it instead: a call
+/// that started before you left one isn't this one (rejoining it after a while finds no chat:
+/// none is better than another meeting's).
+pub fn find_call_chat(recording_start: DateTime<Utc>, began: Option<DateTime<Utc>>, left: Option<DateTime<Utc>>) -> Result<Option<(String, DateTime<Utc>)>> {
     let token = access_token()?;
     let window = recording_start - chrono::Duration::hours(4);
     let slack = recording_start + chrono::Duration::minutes(3);
@@ -541,7 +552,10 @@ pub fn find_call_chat(recording_start: DateTime<Utc>) -> Result<Option<(String, 
                 _ => {}
             }
         }
-        if let Some(t) = started {
+        if let Some(t) = started.filter(|t| match began {
+            Some(b) => (*t - b).abs() <= CALL_START_SLACK,
+            None => left.is_none_or(|l| *t > l),
+        }) {
             if best.as_ref().is_none_or(|(_, b)| t > *b) {
                 best = Some((id.to_string(), t));
             }

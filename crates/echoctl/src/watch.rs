@@ -574,15 +574,23 @@ fn start_chat_capture(dir: &std::path::Path, started: DateTime<Local>, meeting: 
             Some(id) => (id, scheduled.map(|s| s.min(started)).unwrap_or(started)),
             None => {
                 let t0 = Instant::now();
+                let mut began = None;
                 loop {
                     // Found by name (`find_call_people`): a call started from a chat.
                     if let Some(id) = fs::read_to_string(dir.join("chat.id")).ok().filter(|i| !i.trim().is_empty()) {
                         break (id.trim().to_string(), started);
                     }
-                    match crate::graph::find_call_chat(started.with_timezone(&Utc)) {
-                        Ok(Some((id, at))) => break (id, at.with_timezone(&Local).min(started)),
-                        Ok(None) => {}
-                        Err(e) => eprintln!("call chat: {e:#}"),
+                    // When the call began by Teams' timer: without it a meeting left hours ago
+                    // can pass for this call. Not readable yet ⇒ look again next time.
+                    if began.is_none() {
+                        began = crate::ax::call_elapsed().map(|e| Utc::now() - chrono::Duration::seconds(e as i64));
+                    }
+                    if began.is_some() || t0.elapsed() > CHAT_POLL {
+                        match crate::graph::find_call_chat(started.with_timezone(&Utc), began, left_a_call_before(started.with_timezone(&Utc))) {
+                            Ok(Some((id, at))) => break (id, at.with_timezone(&Local).min(started)),
+                            Ok(None) => {}
+                            Err(e) => eprintln!("call chat: {e:#}"),
+                        }
                     }
                     if t0.elapsed() > CHAT_FIND_FOR || !a.load(Ordering::SeqCst) {
                         return;
@@ -662,9 +670,15 @@ pub fn fetch_call_chat(call: &str) -> Result<()> {
         }
         None => match fs::read_to_string(dir.join("chat.id")).ok().map(|i| i.trim().to_string()).filter(|i| !i.is_empty()) {
             Some(id) => (id, started),
-            None => match crate::graph::find_call_chat(started.with_timezone(&Utc))? {
-                Some((id, at)) => (id, at.with_timezone(&Local).min(started)),
-                None => bail!("no chat found for this call (no meeting link, and no chat had a call running at {})", started.format("%H:%M")),
+            None => match chat_by_title(&dir)? {
+                Some(id) => (id, started),
+                None => {
+                    let began = crate::ax::call_began_in(&dir).map(|s| started.with_timezone(&Utc) + chrono::Duration::milliseconds((s * 1000.0) as i64));
+                    match crate::graph::find_call_chat(started.with_timezone(&Utc), began, left_a_call_before(started.with_timezone(&Utc)))? {
+                        Some((id, at)) => (id, at.with_timezone(&Local).min(started)),
+                        None => bail!("no chat found for this call (no meeting link, and no chat had a call running at {})", started.format("%H:%M")),
+                    }
+                }
             },
         },
     };
@@ -673,6 +687,46 @@ pub fn fetch_call_chat(call: &str) -> Result<()> {
     let n = write_chat(&dir, &chat_id, since, ended + CHAT_MARGIN, started, &mut String::new())?;
     println!("{n} chat message(s) from {} to {} → {}", since.with_timezone(&Local).format("%H:%M"), (ended + CHAT_MARGIN).with_timezone(&Local).format("%H:%M"), dir.join("chat.json").display());
     Ok(())
+}
+
+/// When you last left a call before `t`, from the watcher's `call_started` / `call_ended`
+/// events: the last end followed by a real gap (≥ 60 s, not a dropout it rejoined).
+fn left_a_call_before(t: DateTime<Utc>) -> Option<DateTime<Utc>> {
+    let text = fs::read_to_string(file("events.jsonl")).ok()?;
+    let marks: Vec<(DateTime<Utc>, bool)> = text
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .filter_map(|v| {
+            let ended = match v["event"].as_str()? {
+                "call_started" => false,
+                "call_ended" => true,
+                _ => return None,
+            };
+            Some((DateTime::parse_from_rfc3339(v["ts"].as_str()?).ok()?.with_timezone(&Utc), ended))
+        })
+        .filter(|(at, _)| *at < t)
+        .collect();
+    left_from(&marks)
+}
+
+fn left_from(marks: &[(DateTime<Utc>, bool)]) -> Option<DateTime<Utc>> {
+    marks.iter().enumerate().rev().find_map(|(i, (at, ended))| {
+        let next_start = marks[i + 1..].iter().find(|m| !m.1).map(|m| m.0);
+        (*ended && next_start.is_some_and(|n| n - *at >= chrono::Duration::seconds(60))).then_some(*at)
+    })
+}
+
+/// Backfill for an ad-hoc call: the chat named in the recorded call window's title (what
+/// `find_call_people` does during the call), saving the people it finds if the call has none.
+fn chat_by_title(dir: &std::path::Path) -> Result<Option<String>> {
+    let tree: Option<serde_json::Value> = fs::read(dir.join("ui-tree-10s.json")).ok().and_then(|b| serde_json::from_slice(&b).ok());
+    let title = tree.as_ref().and_then(|t| t["windows"][0]["Title"].as_str().or(t["windows"][0]["Name"].as_str()));
+    let Some(name) = title.and_then(crate::ax::call_name) else { return Ok(None) };
+    let Some((id, topic, attendees)) = crate::graph::chat_named(&name)? else { return Ok(None) };
+    if !dir.join(crate::meeting::FILE).exists() {
+        MeetingContext { subject: topic, attendees, source: Some("teams-call".into()), ..Default::default() }.save(dir)?;
+    }
+    Ok(Some(id))
 }
 
 /// One chat message as the notes and the pane read it: `t` = seconds from the recording start
@@ -1054,6 +1108,23 @@ pub fn follow_events() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn last_call_left_skips_dropouts() {
+        let at = |s: &str| DateTime::parse_from_rfc3339(&format!("2026-10-15T{s}+03:00")).unwrap().with_timezone(&Utc);
+        // The day this was written: the 1:1 call began at 13:32 and dropped for 5 s at 13:40.
+        let marks = [
+            (at("11:20:48"), false),
+            (at("12:25:25"), true),
+            (at("12:30:39"), false),
+            (at("13:10:34"), true),
+            (at("13:32:23"), false),
+            (at("13:40:00"), true),
+            (at("13:40:05"), false),
+        ];
+        assert_eq!(left_from(&marks), Some(at("13:10:34")));
+        assert_eq!(left_from(&marks[..1]), None);
+    }
 
     #[test]
     fn teams_links_open_in_desktop_app() {
