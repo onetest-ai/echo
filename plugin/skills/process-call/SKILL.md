@@ -42,6 +42,7 @@ deal with, how they like notes and follow-ups written. Follow it for tone, empha
 follow (user templates in `<data folder>/.echo/templates/` override the built-in ones).
 
 ## 4. Write `<dir>/notes.md`
+Name the speakers first (4a, if the transcript has "Speaker N" labels), then write:
 - Start with `# {title}` and one line: date, duration, participants (colleagues, then external).
 - **If the user took notes** (`user_notes`): their notes are the backbone. Keep every point
   they wrote, expand it from the transcript, and use their `user_headings` as section headings
@@ -64,7 +65,9 @@ follow (user templates in `<data folder>/.echo/templates/` override the built-in
   shown.
 - **Cite the moment.** End each summary, decision, open-question and action bullet with the
   transcript time it rests on, as `[mm:ss]` (from the `**Speaker** [hh:mm:ss]` headers in
-  `transcript.md`; drop the hour when it is 0). One anchor per bullet, the most specific one.
+  `transcript.md`; drop the hour when it is 0). One anchor per bullet, never a range: the turn
+  that supports exactly that point — for a decision, where it was agreed; for an action, where
+  it was committed — and of equally good turns, the first.
   The live pane turns these into jumps into the transcript.
 
 ### Shared screens (`frames`)
@@ -73,8 +76,11 @@ each with `t` (seconds into the call, same clock as the transcript). Look at the
 all of them if ≤ 12, otherwise the ones nearest to decisions, numbers and "as you can see"
 moments plus an even spread. Use what they show to fill gaps the audio leaves (figures on a
 slide, names on a diagram, the agenda) and add a short **On screen** section: one bullet per
-meaningful frame, `[mm:ss]` + what it showed, only facts visible in the image. Skip frames that
-are just video tiles or the Teams UI.
+meaningful frame, `[mm:ss]` + what it showed, only facts visible in the image: describe what
+you can actually read or see in it, never what the conversation at that moment suggests it
+should show; if you can't tell, write "shared screen" and nothing more. A frame's `shared_by`
+says whose screen it was, not who presented it. Skip frames that are just video tiles or the
+Teams UI.
 
 Then prune: keep exactly the frames the **On screen** section cites and move the rest to Echo's trash (video
 tiles, Teams UI, near-duplicates of a kept slide) — `echoctl frames <dir> --keep
@@ -107,6 +113,9 @@ The action items from the notes, as a JSON array:
    "confidence": "high" | "low", "quote": "<short supporting quote>",
    "t": <seconds into the call where it was said>, "status": "todo"}]`
 (`status` is the user's to change — `todo` / `done` — in the pane; never reset it on a re-run.)
+`owner` is whoever committed. A spoken "I will…" belongs to the speaker who said it: `"Me"` only
+when the user's own track ("Me") said it. A commitment written in the chat belongs to its sender:
+`"Me"` when that is the user (`me.name`). `null` when nobody took it.
 `high` only when someone clearly committed ("I'll send it by Friday"). Empty array if none.
 
 ## 6. Title (unscheduled calls only)
