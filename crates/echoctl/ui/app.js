@@ -87,12 +87,40 @@ const cells = (line) => {
   return s.split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, '|'))
 }
 
+// YAML frontmatter (the minutes format): `key: value` and `key:` + `  - item` lines, as a small
+// two-column table. Values are shown as written, without their quotes.
+const MD_KEY = /^([\w-]+):(?:\s+(.*))?$/
+function mdFrontmatter(lines) {
+  const rows = []
+  for (const l of lines) {
+    let m
+    if ((m = l.match(MD_KEY))) rows.push([m[1], m[2] ? [m[2]] : []])
+    else if ((m = l.match(/^\s+-\s+(.*)$/)) && rows.length) rows[rows.length - 1][1].push(m[1])
+  }
+  if (!rows.length) return ''
+  const unquote = (v) => v.trim().replace(/^(["'])(.*)\1$/, '$2')
+  return `<div class="table"><table class="frontmatter"><tbody>${
+    rows.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v.map(unquote).join(', '))}</td></tr>`).join('')}</tbody></table></div>`
+}
+
 function markdown(md, ctx = {}) {
   const lines = String(md).replace(/\r\n?/g, '\n').split('\n')
   const out = []
   let para = []
   const flush = () => { if (para.length) { out.push(`<p>${inline(para.join(' '), ctx)}</p>`); para = [] } }
   let i = 0
+  if (lines[0].trim() === '---') {
+    // Only a block of `key: value` lines (and, after a key, `  - item` lines) is frontmatter; else
+    // the `---` is a rule and the block is content (as in calls::split_frontmatter).
+    const end = lines.findIndex((l, k) => k > 0 && l.trim() === '---')
+    const body = lines.slice(1, end)
+    let key = false
+    const yaml = body.every((l) => !l.trim() || (MD_KEY.test(l) ? (key = true) : key && /^\s+-\s/.test(l)))
+    if (end > 1 && key && yaml) {
+      out.push(mdFrontmatter(body))
+      i = end + 1
+    }
+  }
   while (i < lines.length) {
     const line = lines[i]
     let m

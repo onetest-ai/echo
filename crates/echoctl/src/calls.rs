@@ -78,25 +78,59 @@ pub fn recap(subject: &str) -> Vec<String> {
 }
 
 pub fn recap_from_notes(md: &str) -> Vec<String> {
+    let md = strip_frontmatter(md);
     let clean = |l: &str| -> String {
         let t = l.trim().trim_start_matches(['-', '*', '•']).trim().replace("**", "");
         // drop [mm:ss] anchors
         let t = t.split(" [").next().unwrap_or(&t).trim().to_string();
         if t.chars().count() > 88 { format!("{}…", t.chars().take(87).collect::<String>()) } else { t }
     };
+    // Not content: rules between sections, "_None recorded._", a table cell left "TBD" / "N/A".
+    let filler = |t: &str| {
+        let t = t.trim().trim_matches(['_', '*', '.', ' ']).to_lowercase();
+        t.is_empty() || t.chars().all(|c| c == '-') || ["none recorded", "tbd", "n/a", "not stated"].contains(&t.as_str())
+    };
+    let lines: Vec<&str> = md.lines().collect();
     let section = |want: &[&str]| -> Vec<String> {
         let mut inside = false;
+        // In a table (the minutes format's Decisions): the column whose header names the section.
+        let mut column: Option<usize> = None;
         let mut out = vec![];
-        for l in md.lines() {
+        for (i, &l) in lines.iter().enumerate() {
             if let Some(h) = l.strip_prefix("## ") {
                 inside = want.iter().any(|w| h.to_lowercase().contains(w));
+                column = None;
                 continue;
             }
-            if inside && (l.trim_start().starts_with("- ") || l.trim_start().starts_with("* ")) {
-                out.push(clean(l));
-            } else if inside && !l.trim().is_empty() && out.is_empty() && !l.starts_with('#') {
+            if !l.contains('|') {
+                column = None; // a table ends at the first line that isn't a row: blank, a rule, text
+            }
+            if l.trim().is_empty() || !inside || filler(l) {
+                continue;
+            }
+            if l.contains('|') && lines.get(i + 1).is_some_and(|n| is_table_sep(n)) {
+                // "Decision" itself before "Decision ID" / "Decision owner"; else the first named column.
+                let head: Vec<String> = table_cells(l).iter().map(|c| c.trim_matches(['*', '_', ' ']).to_lowercase()).collect();
+                column = head.iter().position(|c| want.iter().any(|w| c == w || *c == format!("{w}s")))
+                    .or_else(|| head.iter().position(|c| want.iter().any(|w| c.contains(w))))
+                    .or_else(|| head.iter().position(|c| !c.is_empty() && c != "#"));
+                continue;
+            }
+            // Placeholders are judged once cleaned: "- TBD", "TBD [04:12]".
+            if let Some(c) = column {
+                if l.contains('|') {
+                    if !is_table_sep(l) {
+                        out.extend(table_cells(l).get(c).map(|cell| clean(cell)).filter(|t| !filler(t)));
+                    }
+                    continue;
+                }
+                column = None;
+            }
+            if l.trim_start().starts_with("- ") || l.trim_start().starts_with("* ") {
+                out.extend(Some(clean(l)).filter(|t| !filler(t)));
+            } else if out.is_empty() && !l.starts_with('#') {
                 // a summary paragraph: its first sentence
-                out.push(clean(l.split(". ").next().unwrap_or(l)));
+                out.extend(Some(clean(l.split(". ").next().unwrap_or(l))).filter(|t| !filler(t)));
             }
         }
         out
@@ -106,9 +140,68 @@ pub fn recap_from_notes(md: &str) -> Vec<String> {
         got = section(&["summary"]);
     }
     if got.is_empty() {
-        got = md.lines().filter(|l| l.trim_start().starts_with("- ")).map(clean).collect();
+        got = md.lines().filter(|l| l.trim_start().starts_with("- ")).map(clean).filter(|t| !filler(t)).collect();
     }
     got.into_iter().filter(|b| !b.is_empty()).take(3).collect()
+}
+
+/// Notes without their YAML frontmatter (`---` … `---` at the very top), if they have one.
+fn strip_frontmatter(md: &str) -> &str {
+    split_frontmatter(md).1
+}
+
+/// Notes' YAML frontmatter (the lines between the `---`s) and the rest. Only `key: value` lines
+/// and, after a key, `  - item` lines count, so notes that merely start with a rule keep it all.
+fn split_frontmatter(md: &str) -> (Option<&str>, &str) {
+    let key = |l: &str| l.split_once(':').is_some_and(|(k, v)| {
+        !k.is_empty() && k.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') && (v.is_empty() || v.starts_with([' ', '\t']))
+    });
+    let mut lines = md.split_inclusive('\n');
+    let Some(first) = lines.next().filter(|l| l.trim_end() == "---") else { return (None, md) };
+    let (mut at, mut keys) = (first.len(), 0);
+    for l in lines {
+        let start = at;
+        at += l.len();
+        let l = l.trim_end();
+        if l == "---" {
+            return if keys > 0 { (Some(&md[first.len()..start]), &md[at..]) } else { (None, md) };
+        }
+        let item = l.starts_with([' ', '\t']) && l.trim_start().starts_with("- ");
+        if key(l) {
+            keys += 1;
+        } else if !(l.trim().is_empty() || item && keys > 0) {
+            return (None, md);
+        }
+    }
+    (None, md)
+}
+
+/// The cells of a Markdown table row: `| a | b |` → ["a", "b"] (`\|` is a pipe inside a cell, as
+/// in the window's parser).
+fn table_cells(line: &str) -> Vec<String> {
+    let t = line.trim();
+    let t = t.strip_prefix('|').unwrap_or(t);
+    let t = t.strip_suffix('|').unwrap_or(t);
+    let (mut cells, mut cell, mut escaped) = (vec![], String::new(), false);
+    for c in t.chars() {
+        match c {
+            '|' if !escaped => cells.push(std::mem::take(&mut cell).trim().to_string()),
+            '|' => {
+                cell.pop();
+                cell.push('|');
+            }
+            _ => cell.push(c),
+        }
+        escaped = c == '\\';
+    }
+    cells.push(cell.trim().to_string());
+    cells
+}
+
+/// A table's header separator row: `|---|:--:|`.
+fn is_table_sep(line: &str) -> bool {
+    let t = line.trim();
+    t.contains('|') && t.contains("--") && t.chars().all(|c| matches!(c, '|' | '-' | ':' | ' '))
 }
 
 pub fn previous_with_notes(subject: &str, before: Option<&Path>) -> Option<PathBuf> {
@@ -655,6 +748,36 @@ mod tests {
         assert_eq!(recap_from_notes(md), vec!["Keep X out", "Meet weekly"]);
         let md = "# T\n\n## Summary\nWe agreed on the plan. Then more.\n";
         assert_eq!(recap_from_notes(md), vec!["We agreed on the plan"]);
+    }
+
+    #[test]
+    fn recap_reads_the_minutes_format() {
+        let head = "---\ndate: 2026-10-22\nattendees:\n  - \"Lena Varga\"\n---\n\n# Meeting Minutes: Atlas\n\n";
+        let decisions = "## Decisions\n\n| # | Decision | Options Considered | Agreed Option | Rationale | ADR Reference |\n\
+            |---|---|---|---|---|---|\n| 1 | Migrate in **two phases** [04:12] | Big bang, phased | Phased | Lower risk | ADR-TBD |\n\
+            | 2 | Keep Kafka [07:30] | Not stated | Kafka | Not stated | N/A |\n\n---\n\n## Action Items\n\n- not this\n";
+        assert_eq!(recap_from_notes(&format!("{head}{decisions}")), vec!["Migrate in two phases", "Keep Kafka"]);
+        // No decisions: the summary's first line, never a rule, a placeholder or the frontmatter.
+        let none = "## Decisions\n\n_None recorded._\n\n---\n\n## Discussion Summary\n\n### Scope\n\n**Outcome:** Parked. More.\n";
+        assert_eq!(recap_from_notes(&format!("{head}{none}")), vec!["Outcome: Parked"]);
+        // Placeholders, however they are dressed, fall through to the summary too.
+        let tbd = "## Decisions\n\n| # | Decision |\n|---|---|\n| 1 | TBD [04:12] |\n\n- TBD\n- _None recorded._\n\n## Summary\nThe plan holds. More.\n";
+        assert_eq!(recap_from_notes(tbd), vec!["The plan holds"]);
+        assert_eq!(table_cells("| 1 | Use A \\| B | x |"), vec!["1", "Use A | B", "x"]);
+        // A rule at the top isn't frontmatter: nothing between it and the next rule is dropped.
+        let ruled = "---\n\n## Decisions\n- Keep it\n\n---\n";
+        assert_eq!(strip_frontmatter(ruled), ruled);
+        assert_eq!(strip_frontmatter("---\r\ndate: x\r\n---\r\nrest"), "rest");
+        assert_eq!(split_frontmatter("---\ndate: x\nlist:\n  - a\n---\nrest"), (Some("date: x\nlist:\n  - a\n"), "rest"));
+        assert!(is_table_sep("|---|:--:|") && !is_table_sep("---") && !is_table_sep("| a | b |"));
+        // An orphan list item before any key isn't frontmatter: the block stays content.
+        let orphan = "---\n  - Keep this decision\ndate: today\n---\nrest";
+        assert_eq!(split_frontmatter(orphan), (None, orphan));
+        // The "Decision" column itself, not "Decision ID"; a table ends at its blank line.
+        let ids = "## Decisions\n\n| Decision ID | Decision | Owner |\n|---|---|---|\n| D1 | Ship on Tuesday | Ann |\n\n- Keep `A | B` syntax\n";
+        assert_eq!(recap_from_notes(ids), vec!["Ship on Tuesday", "Keep `A | B` syntax"]);
+        let ruled = ids.replace(" | Ann |\n\n- Keep", " | Ann |\n---\n- Keep");
+        assert_eq!(recap_from_notes(&ruled), vec!["Ship on Tuesday", "Keep `A | B` syntax"]);
     }
 
     #[test]

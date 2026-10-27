@@ -163,6 +163,30 @@ network you trust. Echo also accepts an `https://` URL, for a server behind a TL
 server can't be reached, the laptop transcribes the call itself. From a terminal, use
 `echoctl server use <url> --key <key>` or `echoctl server share on`.
 
+**Can a model on my Mac write the notes?** Yes, through [Ollama](https://ollama.com): then
+writing the notes sends nothing off your Mac.
+
+1. In Ollama, use a model that can call tools (Qwen 3.6, for example) with a context of at least
+   64K tokens: Ollama → Settings → Context length, or a model of your own whose Modelfile says
+   `PARAMETER num_ctx 131072`.
+2. In the folder Echo writes notes in (your data folder, or the one under menu → Claude Code →
+   Write call notes in), create `.claude/settings.json`:
+   ```json
+   { "env": {
+       "ANTHROPIC_BASE_URL": "http://localhost:11434",
+       "ANTHROPIC_AUTH_TOKEN": "ollama",
+       "ANTHROPIC_API_KEY": "",
+       "ANTHROPIC_DEFAULT_HAIKU_MODEL": "<the Ollama model>" } }
+   ```
+3. `echoctl config --notes-model <the Ollama model>`.
+
+Notes then take a few minutes, and a local model follows Echo's instructions less closely than
+Claude: read them before you share them. Two things still use the model of an open Claude Code
+session: a session in another folder writes the notes itself, unless menu → Claude Code → Write
+call notes in names the folder from step 2 (then use **Write notes**); and during a call, a
+session with the Echo plugin sums up the live transcript for its pane. To keep a call entirely on
+your Mac, have no other Claude Code session with the Echo plugin open while it records.
+
 **Where are my files?** In the folder you picked, under `calls/`. Menu → **Open calls folder**.
 
 **How do I update?** When a new version is out, the menu shows **Update to …**. One click

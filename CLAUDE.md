@@ -230,6 +230,14 @@ skipped / failed / needs_login — "Not logged in · Please run /login" etc.), r
 `<call>/claude.log` (window → Show log). Failure releases `.claimed`. After transcription with
 no live session (`mod.json` heartbeat < 10 s) the app notifies "Transcript ready — click Write
 notes". Live pane model: `config.live_model` (default haiku).
+A local notes model: the run's cwd (`notes_in`, else the data folder) gets a `.claude/settings.json`
+whose `env` points Claude Code at Ollama's Anthropic API (`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`,
+the default-model vars) and `notes_model` names the Ollama model (one with `num_ctx` ≥ 64K: Claude
+Code's prompt + an hour's transcript). Claude Code warns `unrecognized_model` for any model it
+doesn't know, so that counts as a failure only when the run failed (`model_rejected`).
+Notes in other shapes (a user template with tables or YAML frontmatter): `calls::recap_from_notes`
+skips frontmatter, reads a Decision table's cells and drops placeholders (`TBD`, `_None recorded._`);
+the window shows a frontmatter as a small key/value table (`mdFrontmatter`).
 
 ## Robustness, per-call extras, updates
 - Recovery at app start (`watch::recover`): recordings never closed get their WAV headers fixed

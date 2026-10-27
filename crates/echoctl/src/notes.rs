@@ -310,7 +310,7 @@ pub fn run(dir: &Path) -> Result<PathBuf> {
     } else if needs_login(&all) {
         r.state = "needs_login".into();
         r.message = Some("Claude Code isn't signed in. Open Terminal, run claude, type /login, then click Try again.".into());
-    } else if all.contains("unrecognized_model") || all.contains("issue with the selected model") {
+    } else if model_rejected(is_error, &all) {
         r.state = "failed".into();
         r.message = Some(format!(
             "Claude Code can't use the model \"{}\". Change it under menu → Claude Code → Notes model (\"default\" uses Claude Code's own setting).",
@@ -363,6 +363,13 @@ fn needs_login(text: &str) -> bool {
     ["not logged in", "please run /login", "invalid api key", "oauth token has expired", "authentication_error", "credit balance is too low"]
         .iter()
         .any(|p| t.contains(p))
+}
+
+/// Claude Code refused the notes model. Only when the run failed: it warns `unrecognized_model`
+/// for any model it doesn't know (a local one through Ollama, a gateway's) even when it works, and
+/// a call too short for notes would otherwise be reported as a model problem.
+fn model_rejected(is_error: bool, text: &str) -> bool {
+    is_error && (text.contains("unrecognized_model") || text.contains("issue with the selected model"))
 }
 
 /// A path as Claude Code's permission rules compare it. On Windows that is POSIX-style with a
@@ -537,6 +544,16 @@ mod tests {
         assert!(needs_login("Not logged in · Please run /login"));
         assert!(needs_login("API Error: 401 {\"type\":\"error\",\"error\":{\"type\":\"authentication_error\"}}"));
         assert!(!needs_login("Notes written to notes.md"));
+    }
+
+    #[test]
+    fn an_unknown_model_fails_only_a_failed_run() {
+        let warn = "[claude-code:unrecognized_model] {\"model\":\"qwen3.6:35b-a3b\",\"query_source\":\"sdk\"}";
+        // A local model that worked, on a call too short for notes: skipped, not a model problem.
+        assert!(!model_rejected(false, warn));
+        assert!(model_rejected(true, warn));
+        assert!(model_rejected(true, "There's an issue with the selected model (x)."));
+        assert!(!model_rejected(true, "Not logged in · Please run /login"));
     }
 
     #[test]
