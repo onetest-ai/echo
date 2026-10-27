@@ -47,7 +47,7 @@ fn read_json(p: &Path) -> Value {
     fs::read(p).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or(Value::Null)
 }
 
-fn subject_of(dir: &Path) -> Option<String> {
+pub(crate) fn subject_of(dir: &Path) -> Option<String> {
     MeetingContext::load(dir)
         .ok()
         .flatten()
@@ -152,7 +152,7 @@ fn strip_frontmatter(md: &str) -> &str {
 
 /// Notes' YAML frontmatter (the lines between the `---`s) and the rest. Only `key: value` lines
 /// and, after a key, `  - item` lines count, so notes that merely start with a rule keep it all.
-fn split_frontmatter(md: &str) -> (Option<&str>, &str) {
+pub(crate) fn split_frontmatter(md: &str) -> (Option<&str>, &str) {
     let key = |l: &str| l.split_once(':').is_some_and(|(k, v)| {
         !k.is_empty() && k.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') && (v.is_empty() || v.starts_with([' ', '\t']))
     });

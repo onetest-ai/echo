@@ -26,8 +26,8 @@ use crate::{calls, paths, watch};
 const INDEX: &str = include_str!("../ui/index.html");
 const APP_JS: &str = include_str!("../ui/app.js");
 const APP_CSS: &str = include_str!("../ui/app.css");
-/// Diagrams in notes (```mermaid): mermaid 11.4.1, MIT, loaded by the page on first use.
-const MERMAID_JS: &str = include_str!("../ui/vendor/mermaid.min.js");
+/// Diagrams in notes (```mermaid), loaded by the page on first use; shared with the minutes page.
+use crate::minutes::MERMAID_JS;
 const OCTOPUS_SVG: &str = include_str!("../assets/octopus.svg");
 /// The onetest logo (violet disc, the full octopus character), 192 px, for the window.
 const LOGO_PNG: &[u8] = include_bytes!("../assets/onetest-logo.png");

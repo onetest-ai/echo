@@ -346,7 +346,18 @@ pub fn run(dir: &Path) -> Result<PathBuf> {
     save(dir, &r);
     // A title set during the run: Windows couldn't rename the folder while the log was open.
     drop(log);
-    Ok(calls::rename_to_title(dir).unwrap_or_else(|_| dir.to_path_buf()))
+    let dir = calls::rename_to_title(dir).unwrap_or_else(|_| dir.to_path_buf());
+    // The minutes page (opt-in), under the call's final title.
+    if r.state == "done" && cfg.minutes_page {
+        let line = match crate::minutes::write(&dir) {
+            Ok(page) => format!("Minutes page: {}", page.display()),
+            Err(e) => format!("No minutes page: {e:#}"),
+        };
+        if let Ok(mut log) = fs::OpenOptions::new().append(true).open(dir.join(LOG)) {
+            let _ = writeln!(log, "{}  {line}", stamp());
+        }
+    }
+    Ok(dir)
 }
 
 fn stamp() -> String {

@@ -239,6 +239,18 @@ Notes in other shapes (a user template with tables or YAML frontmatter): `calls:
 skips frontmatter, reads a Decision table's cells and drops placeholders (`TBD`, `_None recorded._`);
 the window shows a frontmatter as a small key/value table (`mdFrontmatter`).
 
+## Minutes page (`minutes.rs`)
+Opt-in (`config.minutes_page`; menu → Claude Code → Write a minutes page; `echoctl config
+--minutes-page true`): when notes are written, `notes.md` → `<call>/<title>-minutes.html`, one
+self-contained file — header block from the `> **Label:** value` lines under the title + a
+frontmatter's type / facilitator, tables, `[mm:ss]` as timestamps, `![…](frames/x.jpg)` embedded
+(base64) and the other kept frames under Screens, mermaid inlined only when a diagram is drawn
+(`securityLevel: 'strict'`), click to enlarge, light/dark, print. A run from the app writes it
+after `done` (under the final title); a session's skill runs `echoctl html <call> --auto` (writes
+only when on); `echoctl html <call> [--open]` writes it any time. pulldown-cmark parses; our own
+writer escapes everything (raw HTML shown as text, https links only, images only this call's
+frames). A renamed call's old page (generator meta) is replaced, never another file.
+
 ## Robustness, per-call extras, updates
 - Recovery at app start (`watch::recover`): recordings never closed get their WAV headers fixed
   (`audio::repair_wav`) and are transcribed; `.transcribing` holds the pid, stale markers are

@@ -16,6 +16,7 @@ mod graph;
 #[cfg(feature = "transcribe")]
 mod live;
 mod meeting;
+mod minutes;
 mod notes;
 mod models;
 mod paths;
@@ -120,6 +121,9 @@ enum Cmd {
         /// Keep call audio after transcription (default false: text only)
         #[arg(long)]
         keep_audio: Option<bool>,
+        /// Also write the minutes page (<title>-minutes.html) when notes are written
+        #[arg(long)]
+        minutes_page: Option<bool>,
         /// Calendar meetings: "ask" (prompt ~1 min before) or "manual" (only when you record)
         #[arg(long, value_parser = ["ask", "manual"])]
         scheduled: Option<String>,
@@ -195,6 +199,18 @@ enum Cmd {
         /// Frame files to keep (names or paths), comma-separated; "none" deletes all
         #[arg(long, value_delimiter = ',', required = true)]
         keep: Vec<String>,
+    },
+    /// Write the call's minutes as one self-contained HTML page next to its notes (<title>-minutes.html)
+    Html {
+        /// Call folder (path or name under calls/), or "latest"
+        #[arg(default_value = "latest")]
+        call: String,
+        /// Open the page in the default browser afterwards
+        #[arg(long)]
+        open: bool,
+        /// Only if the minutes-page setting is on (what the notes skill runs)
+        #[arg(long)]
+        auto: bool,
     },
     /// Move a call to .echo/trash (recoverable for 30 days)
     Delete { call: String },
@@ -602,7 +618,7 @@ fn main() -> Result<()> {
             ModelCmd::Use { name } => models::use_model(&name),
             ModelCmd::Remove { name, force } => models::remove(&name, force),
         },
-        Cmd::Config { languages, vocabulary, unscheduled, keep_audio, scheduled, me_name, me_email, notes_in, capture_frames, capture_ui, graph_client_id, graph_tenant, notes_model, live_model } => {
+        Cmd::Config { languages, vocabulary, unscheduled, keep_audio, minutes_page, scheduled, me_name, me_email, notes_in, capture_frames, capture_ui, graph_client_id, graph_tenant, notes_model, live_model } => {
             let mut cfg = config::Config::load()?;
             if let Some(m) = live_model {
                 cfg.live_model = Some(m.trim().to_string()).filter(|m| !m.is_empty() && m != config::DEFAULT_LIVE_MODEL && m != "default");
@@ -636,6 +652,9 @@ fn main() -> Result<()> {
             }
             if let Some(k) = keep_audio {
                 cfg.keep_audio = k;
+            }
+            if let Some(m) = minutes_page {
+                cfg.minutes_page = m;
             }
             if scheduled.is_some() {
                 cfg.scheduled = scheduled;
@@ -711,6 +730,7 @@ fn main() -> Result<()> {
         Cmd::Previous { subject } => calls::previous(&subject),
         Cmd::Delete { call } => calls::delete(&call),
         Cmd::Frames { call, keep } => calls::prune_frames(&call, &keep),
+        Cmd::Html { call, open, auto } => minutes::command(&call, open, auto),
         Cmd::Compose { to, cc, subject, body_file } => calls::compose(&to, &cc, &subject, &body_file),
         Cmd::Me => {
             println!("{}", calls::ensure_me_profile()?.display());

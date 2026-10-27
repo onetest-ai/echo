@@ -50,6 +50,10 @@ pub struct Config {
     /// (transcript, segments, notes) is kept.
     #[serde(default)]
     pub keep_audio: bool,
+    /// When notes are written, also write the minutes page: notes.md as one self-contained HTML
+    /// file next to it, screenshots embedded (`minutes.rs`). Default: false.
+    #[serde(default)]
+    pub minutes_page: bool,
     /// Calendar meetings: "ask" (offer "record?" ~1 min before) or "manual" (never prompt; the
     /// user arms from the tray or `/echo:record`). Default: ask.
     #[serde(default)]

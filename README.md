@@ -67,6 +67,11 @@ introduces themselves or is addressed by name.
 
 **Actions**: the to-dos from the call, with owner and due date. Tick them off as you go.
 
+To share the notes, turn on menu → Claude Code → **Write a minutes page**: with every call's notes,
+Echo then also writes `<title>-minutes.html` in the call's folder, one file with the notes, the
+shared screens and diagrams, that opens in any browser and prints well. Mind what is on those
+screens before you send it on. `echoctl html <call> --open` writes it for any call.
+
 ![Action items](docs/images/actions.jpg)
 
 **Chat**: what people wrote in the meeting chat while the call was on, including the files they

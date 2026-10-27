@@ -41,6 +41,9 @@ tao = { version = "0.37", optional = true }
 # The Echo window (calls, notes, transcript, settings): the system webview (WKWebView / WebView2)
 # on the tray's own tao event loop.
 wry = { version = "0.57", default-features = false, optional = true }
+# The minutes page (`minutes.rs`): Markdown parsed (our own writer escapes), screenshots embedded.
+pulldown-cmark = { version = "0.13", default-features = false }
+base64 = "0.22"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

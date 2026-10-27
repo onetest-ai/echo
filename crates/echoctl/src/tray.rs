@@ -344,6 +344,7 @@ struct Model {
     unscheduled_manual: bool,
     scheduled_manual: bool,
     keep_audio: bool,
+    minutes_page: bool,
     capture_frames: bool,
     active_model: Option<String>,
     downloaded_models: Vec<&'static str>,
@@ -441,6 +442,7 @@ fn load_model(health: &[(String, String, Option<String>)]) -> Model {
         unscheduled_manual: !cfg.ask_unscheduled(),
         scheduled_manual: !cfg.ask_scheduled(),
         keep_audio: cfg.keep_audio,
+        minutes_page: cfg.minutes_page,
         capture_frames: cfg.capture_frames,
         active_model: cfg.model.clone(),
         downloaded_models,
@@ -518,6 +520,7 @@ enum Action {
     SetUnscheduled(&'static str),
     SetScheduled(&'static str),
     ToggleKeepAudio,
+    ToggleMinutesPage,
     ToggleFrames,
     UseModel(&'static str),
     RemoveModel(&'static str),
@@ -843,7 +846,8 @@ impl Ui {
         let choose = self.item("   Choose a folder…", true, Some(Action::NotesChoose));
         let _ = claude.append(&choose);
         let notes_model = self.item(&format!("Notes model: {}…", model.notes_model), model.has_claude, Some(Action::NotesModel));
-        let _ = claude.append_items(&[&sep(), &notes_model]);
+        let page = self.check("Write a minutes page (HTML) with the notes", model.minutes_page, Action::ToggleMinutesPage);
+        let _ = claude.append_items(&[&sep(), &notes_model, &page]);
 
         // Health
         let all_ok = model.health.iter().all(|(_, s, _)| s == "✓");
@@ -1019,6 +1023,11 @@ impl Ui {
             Action::ToggleKeepAudio => {
                 let Ok(mut cfg) = Config::load() else { return };
                 cfg.keep_audio = !cfg.keep_audio;
+                let _ = cfg.save();
+            }
+            Action::ToggleMinutesPage => {
+                let Ok(mut cfg) = Config::load() else { return };
+                cfg.minutes_page = !cfg.minutes_page;
                 let _ = cfg.save();
             }
             Action::UseModel(name) => drop(models::use_model(name)),

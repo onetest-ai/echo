@@ -141,8 +141,13 @@ transcribed but rare names that will recur (e.g. a project codename).
   later asks for one.
 
 ## 8. Report + follow-up offers
-A few lines: title, duration, the summary, action items (owner — task), where the files are, and
-one line "Learned: X, Y (undo: `echoctl vocab remove X`)" if step 7 added terms.
+If notes were written, run `echoctl html <dir> --auto` (skip it when started by the Echo app — the
+app does it itself): when the user turned the minutes page on, it writes the notes as one
+self-contained HTML page next to them and prints its path; otherwise it says it is off.
+
+A few lines: title, duration, the summary, action items (owner — task), where the files are (and
+the minutes page, if one was written), and one line "Learned: X, Y (undo: `echoctl vocab remove X`)"
+if step 7 added terms.
 
 Then **always** offer concrete follow-ups, numbered, tailored to this call — for example:
 1. post the notes to the meeting's Teams chat;
