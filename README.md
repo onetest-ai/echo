@@ -186,6 +186,8 @@ your PATH; on macOS it lives at `/Applications/Echo.app/Contents/MacOS/echoctl`)
 scripts/build-plugin.sh          # dev build into plugin/bin (the plugin's launcher prefers it)
 claude --plugin-dir plugin       # or install it from the repo's marketplace
 scripts/package-macos.sh         # signed + notarized Echo.app in a .dmg (see the script header)
+LOCAL=1 scripts/package-macos.sh # no Apple developer account: an ad-hoc signed dist/Echo.app
+                                 # for this Mac (macOS asks for its permissions again per build)
 scripts/package-windows.ps1      # .msi installer + .zip for Windows
 ```
 Checks: `cargo clippy`, `cargo test`, `cargo check --target x86_64-pc-windows-msvc

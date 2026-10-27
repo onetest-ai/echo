@@ -28,6 +28,9 @@ Notes/actions are written only by a Claude session (the app writes transcripts, 
   Never the cwd or a Claude workspace.
 - `packaging/macos/` (Info.plist, entitlements) + `scripts/package-macos.sh` (Developer ID,
   hardened runtime, notarize + staple the app, signed (not notarized) dmg; notary creds via `APPLE_API_KEY`/`_KEY_ID`/`_ISSUER` (API key) or keychain profile `echo-notary`).
+  `LOCAL=1`: no developer account — ad-hoc signature, no notarization or dmg, plus
+  `disable-library-validation` (an ad-hoc signature has no Team ID, and the hardened runtime would
+  refuse the NeMo-Speech libraries). TCC keys permissions to the signature: re-granted per build.
   `scripts/package-windows.ps1` (unsigned for now): a per-user MSI (`packaging/windows/echo.wxs`, WiX 5 —
   later WiX versions carry a maintenance-fee EULA; the NuGet tool package in `%LOCALAPPDATA%\wix5-tool` needs no
   admin) → `%LOCALAPPDATA%\Programs\echo`, Start menu shortcut (AUMID `onetest.Echo`), user PATH, Run key;

@@ -7,6 +7,15 @@
 #   scripts/package-macos.sh              # host architecture
 #   UNIVERSAL=1 scripts/package-macos.sh  # arm64 + x86_64 (rustup target add x86_64-apple-darwin)
 #   NOTARIZE=0 scripts/package-macos.sh   # signed but not notarized (local testing)
+#   LOCAL=1 scripts/package-macos.sh      # no Apple developer account: dist/Echo.app for this Mac
+#
+# LOCAL=1: an ad-hoc signature, no notarization, no .dmg. An ad-hoc signature has no Team ID, so
+# the hardened runtime's library validation would refuse the bundled NeMo-Speech libraries: the
+# local build adds com.apple.security.cs.disable-library-validation. macOS keys its permissions
+# (Microphone, System Audio Recording, Accessibility, Screen Recording) to the signature, which
+# changes with every build, so it asks again after each one; a stale Accessibility or Screen
+# Recording switch that stays on without working is cleared with
+# `tccutil reset Accessibility ai.onetest.echo` (and `ScreenCapture`).
 #
 # Notarization credentials, either:
 #   App Store Connect API key (preferred):
@@ -17,13 +26,43 @@
 #
 # Env: ECHOCTL_SIGN_ID (default: the first "Developer ID Application" identity).
 set -euo pipefail
-cd "$(dirname "$0")/.."
+# -P: the physical path, as lsof reports a running Echo's executable (not a symlinked alias).
+cd -P "$(dirname "$0")/.."
+
+LOCAL=${LOCAL:-0}
+APP=dist/Echo.app
+# The bundle is rebuilt from scratch: never from under an Echo running from it. Asked of the
+# kernel: lsof gives each running echoctl's executable file, whatever path started it (relative,
+# through a symlink, another spelling of the same folder).
+refuse_if_running() {
+  local exe="$PWD/$APP/Contents/MacOS/echoctl" running
+  [[ -e "$exe" ]] || return 0
+  # All of lsof's answer first: a pipe into `grep -q` could cut it short, and pipefail would then
+  # read the match as a failure.
+  running=$(lsof -a -c echoctl -d txt -Fn 2>/dev/null) || true
+  if grep -qxF "n$exe" <<<"$running"; then
+    echo "Echo is running from $APP: quit it first ($APP/Contents/MacOS/echoctl app quit)" >&2
+    exit 1
+  fi
+}
+refuse_if_running
 
 VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 BUILD=$(git rev-list --count HEAD 2>/dev/null || echo 1)
-SIGN_ID=${ECHOCTL_SIGN_ID:-$(security find-identity -v -p codesigning | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -1)}
 PROFILE=${ECHOCTL_NOTARY_PROFILE:-echo-notary}
-[[ -n "$SIGN_ID" ]] || { echo "no Developer ID Application identity in the keychain" >&2; exit 1; }
+ENTITLEMENTS=packaging/macos/echo.entitlements
+if [[ "$LOCAL" == 1 ]]; then
+  SIGN_ID=- TIMESTAMP=--timestamp=none NOTARIZE=0
+  ENTITLEMENTS_DIR=$(mktemp -d)
+  trap 'rm -rf "$ENTITLEMENTS_DIR"' EXIT
+  ENTITLEMENTS=$ENTITLEMENTS_DIR/echo.entitlements
+  cp packaging/macos/echo.entitlements "$ENTITLEMENTS"
+  /usr/libexec/PlistBuddy -c "Add :com.apple.security.cs.disable-library-validation bool true" "$ENTITLEMENTS"
+else
+  SIGN_ID=${ECHOCTL_SIGN_ID:-$(security find-identity -v -p codesigning | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -1)}
+  TIMESTAMP=--timestamp
+  [[ -n "$SIGN_ID" ]] || { echo "no Developer ID Application identity in the keychain (LOCAL=1 builds without one)" >&2; exit 1; }
+fi
 
 if [[ "${UNIVERSAL:-0}" == 1 ]]; then
   cargo build --release -p echoctl --target aarch64-apple-darwin
@@ -37,7 +76,7 @@ else
   BIN=target/release/echoctl; ARCH=$(uname -m)
 fi
 
-APP=dist/Echo.app
+refuse_if_running # again: Echo may have started during the build
 rm -rf "$APP" dist/echo.iconset
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/echoctl"
@@ -81,11 +120,15 @@ rm -rf dist/echo.icon dist/icon-out dist/echo.iconset
 echo "signing with: $SIGN_ID"
 # Nested code first (the hardened runtime loads only libraries signed by this team).
 for lib in "$APP"/Contents/Frameworks/nemo-speech/*.dylib; do
-  [[ -e "$lib" ]] && codesign --force --timestamp --options runtime --sign "$SIGN_ID" "$lib"
+  [[ -e "$lib" ]] && codesign --force "$TIMESTAMP" --options runtime --sign "$SIGN_ID" "$lib"
 done
-codesign --force --timestamp --options runtime \
-  --entitlements packaging/macos/echo.entitlements --sign "$SIGN_ID" "$APP"
+codesign --force "$TIMESTAMP" --options runtime \
+  --entitlements "$ENTITLEMENTS" --sign "$SIGN_ID" "$APP"
 codesign --verify --strict --verbose=2 "$APP"
+if [[ "$LOCAL" == 1 ]]; then
+  echo "$APP (ad-hoc signed for this Mac: open $APP)"
+  exit 0
+fi
 
 notarize() { # file
   if [[ -n "${APPLE_API_KEY:-}" && -n "${APPLE_API_KEY_ID:-}" && -n "${APPLE_API_ISSUER:-}" ]]; then
