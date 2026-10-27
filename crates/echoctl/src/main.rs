@@ -842,9 +842,12 @@ fn main() -> Result<()> {
                 Ok(())
             }
             Some(CalendarCmd::Events { days }) => {
-                let today = chrono::Local::now().date_naive().and_hms_opt(0, 0, 0).unwrap();
-                let from = today.and_local_timezone(chrono::Local).earliest().unwrap_or_else(chrono::Local::now).with_timezone(&chrono::Utc);
-                let events = graph::calendar_view(from, from + chrono::Duration::days(days.clamp(1, 14)))?;
+                let today = chrono::Local::now().date_naive();
+                let after = today.checked_add_days(chrono::Days::new(days.clamp(1, 14) as u64));
+                let (Some(from), Some(to)) = (calendar::local_midnight(today), after.and_then(calendar::local_midnight)) else {
+                    anyhow::bail!("can't tell where today starts")
+                };
+                let events = graph::calendar_view(from, to)?;
                 for e in &events {
                     let online = e["onlineMeeting"]["joinUrl"].as_str().is_some();
                     println!(

@@ -428,7 +428,8 @@ track, only when their loudness envelopes correlate (speakers, not headphones); 
 ## Checks
 - `cargo clippy`, `cargo test` (macOS) and `cargo check --target x86_64-pc-windows-msvc --no-default-features`
   must all be clean. (`--no-default-features` drops whisper.cpp, which can't cross-compile C++ to MSVC.)
-- Mod: `scripts/check-mod.sh` (plugin validate + `claude plugin test` + tsc against the engine's types).
+- Mod: `scripts/check-mod.sh` (plugin validate + `claude plugin test` + the window calendar's node test,
+  `crates/echoctl/ui/calendar-dates.test.mjs` + tsc against the engine's types).
   Mod patterns used here: band button,
   `command.run` returning `{}` (no context), `ui.open({columns: 400})`, sizing from
   `e.props.bodyColumns` / `e.props.scroll.bodyRows`, `$.ui.mount` tests.

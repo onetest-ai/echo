@@ -649,10 +649,11 @@ pub fn fetch_call_chat(call: &str) -> Result<()> {
     let mut meeting = MeetingContext::load(&dir)?;
     if let Some(m) = meeting.as_mut().filter(|m| m.join_url.is_none()) {
         // Attached without a link: find the call's calendar event (same day, same subject).
-        let day = started.date_naive().and_hms_opt(0, 0, 0).and_then(|d| d.and_local_timezone(Local).earliest()).map(|d| d.with_timezone(&Utc));
+        let day = started.date_naive();
+        let range = crate::calendar::local_midnight(day).zip(day.succ_opt().and_then(crate::calendar::local_midnight));
         let subject = m.subject.clone().unwrap_or_default().to_lowercase();
-        if let Some(day) = day {
-            let events = crate::graph::calendar_view(day, day + chrono::Duration::days(1))?;
+        if let Some((from, to)) = range {
+            let events = crate::graph::calendar_view(from, to)?;
             m.join_url = events
                 .iter()
                 .find(|e| e["subject"].as_str().is_some_and(|s| s.trim().to_lowercase() == subject.trim()))

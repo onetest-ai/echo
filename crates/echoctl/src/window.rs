@@ -362,12 +362,11 @@ fn rfc(v: &Value) -> Option<chrono::DateTime<chrono::Utc>> {
 /// time, each with `recorded` (the call made of it) and `scheduled`, plus recordings that match
 /// no event. Without a Microsoft 365 sign-in: today's agenda only (`source: "agenda"`).
 fn calendar(q: &str) -> Value {
-    use chrono::{Local, NaiveDate, TimeZone};
+    use chrono::{Local, NaiveDate};
     let start = query_param(q, "start").and_then(|s| NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok()).unwrap_or_else(|| Local::now().date_naive());
     let days = query_param(q, "days").and_then(|d| d.parse::<i64>().ok()).unwrap_or(1).clamp(1, 14);
-    let from = Local.from_local_datetime(&start.and_hms_opt(0, 0, 0).unwrap()).earliest().map(|d| d.with_timezone(&chrono::Utc));
-    let Some(from) = from else { return json!({ "error": "bad date" }) };
-    let to = from + chrono::Duration::days(days);
+    let to = start.checked_add_days(chrono::Days::new(days as u64)).and_then(crate::calendar::local_midnight);
+    let (Some(from), Some(to)) = (crate::calendar::local_midnight(start), to) else { return json!({ "error": "bad date" }) };
     let signed_in = crate::graph::account().is_some();
 
     let (events, source, error): (Vec<Value>, &str, Option<String>) = if signed_in {
@@ -592,7 +591,7 @@ pub fn export(dir: &Path) -> anyhow::Result<()> {
     for p in ["/assets/app.js", "/assets/app.css", "/assets/mermaid.js", "/assets/logo.png", "/api/state", "/api/calls", "/api/agenda"] {
         write(p, get(p))?;
     }
-    let week_start = (chrono::Local::now() - chrono::Duration::days(1)).format("%Y-%m-%d");
+    let week_start = chrono::Local::now().date_naive().pred_opt().unwrap_or_default().format("%Y-%m-%d");
     write("/api/calendar", get(&format!("/api/calendar?start={week_start}&days=7")))?;
     for d in calls::all_calls() {
         let name = d.file_name().unwrap().to_string_lossy().into_owned();

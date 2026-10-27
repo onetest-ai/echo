@@ -508,13 +508,51 @@ function claudeHint(c, heading, lead) {
 }
 
 // ── calendar: today, or a rolling week (yesterday, today, 5 days ahead) ───────────────────
-const DAY_MS = 86400000
+// Days and hours by the local calendar and clock, never by adding 24 h: a day the clocks change
+// isn't 24 hours long (a week across one showed a day twice and drew the later days' events at
+// midnight).
 const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 const midnight = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x }
+const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n)
+const sameDay = (a, b) => midnight(a).getTime() === midnight(b).getTime()
+/** Where time `t` (ms) is on `day`'s clock, in hours: 0 before the day, 24 after it. */
+const clockHours = (t, day) => {
+  const d = new Date(t)
+  return sameDay(d, day) ? d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600 : t < day.getTime() ? 0 : 24
+}
+
+/** Side-by-side lanes for overlapping blocks in one day column, by their drawn hours `y0`..`y1`. */
+function lanes(items) {
+  items.sort((a, b) => a.y0 - b.y0 || b.y1 - a.y1)
+  const cols = []
+  let group = [], groupEnd = 0
+  const flush = () => { const n = Math.max(1, ...group.map((x) => x.lane + 1)); group.forEach((x) => (x.lanes = n)); group = [] }
+  for (const it of items) {
+    if (group.length && it.y0 >= groupEnd) { flush(); cols.length = 0 }
+    let lane = cols.findIndex((end) => end <= it.y0)
+    if (lane < 0) { lane = cols.length; cols.push(0) }
+    cols[lane] = it.y1
+    it.lane = lane
+    group.push(it)
+    groupEnd = Math.max(groupEnd, it.y1)
+  }
+  if (group.length) flush()
+  return items
+}
+/** One day column's blocks (`s`, `real`: start and end, ms) where they are drawn: `y0`..`y1` in
+ *  clock hours on `day`, at least 20 min so a short meeting is still a readable block, in lanes by
+ *  those hours (the hour a day the clocks go back repeats would put two meetings an hour apart in
+ *  one place). Counted in whole seconds, so a block ending when the next starts never overlaps it. */
+const layoutDay = (items, day) => lanes(items.map((x) => {
+  const sec = (t) => Math.round(clockHours(t, day) * 3600)
+  const s0 = sec(x.s)
+  return Object.assign(x, { y0: s0 / 3600, y1: Math.max(sec(x.real), s0 + 1200) / 3600 })
+}))
+// end of the calendar's helpers (calendar-dates.test.mjs runs app.js from `const ymd` to here)
 function calRange() {
   const today = midnight(new Date())
-  if (S.cal.mode === 'day') return { start: new Date(today.getTime() + S.cal.offset * DAY_MS), days: 1 }
-  return { start: new Date(today.getTime() + (S.cal.offset * 7 - 1) * DAY_MS), days: 7 }
+  if (S.cal.mode === 'day') return { start: addDays(today, S.cal.offset), days: 1 }
+  return { start: addDays(today, S.cal.offset * 7 - 1), days: 7 }
 }
 async function loadCalendar(fresh) {
   const { start, days } = calRange()
@@ -523,26 +561,6 @@ async function loadCalendar(fresh) {
     S.cal.data = await get(`api/calendar?start=${ymd(start)}&days=${days}${fresh ? '&fresh=1' : ''}`)
   } catch (e) { S.cal.data = { error: String(e), events: [], calls: [] } }
   S.cal.loading = false
-}
-const sameDay = (a, b) => midnight(a).getTime() === midnight(b).getTime()
-
-/** Side-by-side lanes for overlapping blocks in one day column. */
-function lanes(items) {
-  items.sort((a, b) => a.s - b.s || b.end - a.end)
-  const cols = []
-  let group = [], groupEnd = 0
-  const flush = () => { const n = Math.max(1, ...group.map((x) => x.lane + 1)); group.forEach((x) => (x.lanes = n)); group = [] }
-  for (const it of items) {
-    if (group.length && it.s >= groupEnd) { flush(); cols.length = 0 }
-    let lane = cols.findIndex((end) => end <= it.s)
-    if (lane < 0) { lane = cols.length; cols.push(0) }
-    cols[lane] = it.end
-    it.lane = lane
-    group.push(it)
-    groupEnd = Math.max(groupEnd, it.end)
-  }
-  if (group.length) flush()
-  return items
 }
 
 function eventState(e, now) {
@@ -556,7 +574,7 @@ function calendarView() {
   const d = S.cal.data
   const { start, days } = calRange()
   const now = new Date()
-  const dayList = Array.from({ length: days }, (_, i) => new Date(start.getTime() + i * DAY_MS))
+  const dayList = Array.from({ length: days }, (_, i) => addDays(start, i))
   const title = days === 1
     ? start.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })
     : `${dayList[0].toLocaleDateString([], { day: 'numeric', month: 'short' })} to ${dayList[days - 1].toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })}`
@@ -583,8 +601,7 @@ function calendarView() {
     const di = dayList.findIndex((x) => sameDay(x, s))
     if (di >= 0) blocks[di].push({ kind: 'call', c, s: s.getTime(), real: en.getTime() })
   }
-  // Layout end: at least 20 min, so a short meeting is still a readable block.
-  blocks.forEach((b) => lanes(b.map((x) => Object.assign(x, { end: Math.max(x.real, x.s + 20 * 60000) }))))
+  blocks.forEach((b, di) => layoutDay(b, dayList[di]))
 
   // The whole day, scrolling; an hour is sized so the working day (08:00–19:00) fills the
   // window (min 40 px).
@@ -595,13 +612,12 @@ function calendarView() {
   const dayHead = `<div class="days" style="${cols}">${dayList.map((x) => `<div class="${sameDay(x, now) ? 'today' : ''}">${esc(x.toLocaleDateString([], { weekday: 'short' }))}<b>${x.getDate()}</b></div>`).join('')}</div>`
   const alldayRow = allday.some((a) => a.length) ? `<div class="allday" style="${cols}">${allday.map((a) => `<div>${a.map((e) => `<span title="${esc(e.subject)}">${esc(e.subject)}</span>`).join('')}</div>`).join('')}</div>` : ''
   const hourLabels = Array.from({ length: h1 - h0 }, (_, i) => `<span style="top:${i * HOUR}px">${i === 0 ? '' : String(h0 + i).padStart(2, '0') + ':00'}</span>`).join('')
-  const top = (t) => ((t - h0 * 3600000) / 3600000) * HOUR
+  const top = (hours) => (hours - h0) * HOUR
   const colHtml = dayList.map((day, di) => {
-    const base = day.getTime()
     const lines = Array.from({ length: h1 - h0 }, (_, i) => `<div class="hourline" style="top:${i * HOUR}px"></div>`).join('')
-    const nowLine = sameDay(day, now) ? `<div class="now" style="top:${top(now.getTime() - base)}px"></div>` : ''
+    const nowLine = sameDay(day, now) ? `<div class="now" style="top:${top(clockHours(now.getTime(), day))}px"></div>` : ''
     const items = blocks[di].map((x) => {
-      const y = Math.max(0, top(x.s - base)), h = Math.max(22, top(x.end - base) - top(x.s - base) - 2)
+      const y = top(x.y0), h = Math.max(22, top(x.y1) - y - 2)
       const w = 100 / x.lanes, left = x.lane * w
       const style = `top:${y}px;height:${h}px;left:calc(${left}% + 2px);width:calc(${w}% - 4px)`
       if (x.kind === 'call') {

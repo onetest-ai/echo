@@ -138,15 +138,30 @@ pub fn to_meeting(ev: &Value) -> Option<MeetingContext> {
     })
 }
 
+/// The start of `day` here, in UTC: local midnight (the earlier one when the clock goes back over
+/// it, where the gap ends when it skips it). Days are counted on the calendar, never as 24 h: a day
+/// the clocks change isn't 24 hours long.
+pub fn local_midnight(day: chrono::NaiveDate) -> Option<DateTime<Utc>> {
+    let midnight = day.and_hms_opt(0, 0, 0)?;
+    match midnight.and_local_timezone(Local) {
+        chrono::LocalResult::Single(d) => Some(d.with_timezone(&Utc)),
+        // Not `earliest()`: on Unix chrono lists the smaller offset first, the later instant. And it
+        // also counts the instant the clock goes back at midnight (24:00 → 23:00), whose clock shows
+        // 23:00: keep only the candidates that read midnight, then the earlier one.
+        chrono::LocalResult::Ambiguous(a, b) => {
+            [a, b].into_iter().filter(|d| d.with_timezone(&Local).naive_local() == midnight).min().map(|d| d.with_timezone(&Utc))
+        }
+        chrono::LocalResult::None => None,
+    }
+}
+
 /// `echoctl agenda sync`: refresh today's agenda from the calendar command, if any.
 /// Prints one JSON line; never fails just because no calendar is available.
 pub fn sync(quiet: bool) -> Result<()> {
     // The app's own Microsoft 365 sign-in, when there is one.
     if crate::graph::account().is_some() {
         let today = Local::now().date_naive();
-        let from = today.and_hms_opt(0, 0, 0).and_then(|d| d.and_local_timezone(Local).earliest()).map(|d| d.with_timezone(&Utc));
-        let to = from.map(|f| f + Duration::days(1));
-        let (Some(from), Some(to)) = (from, to) else { return Ok(()) };
+        let (Some(from), Some(to)) = (local_midnight(today), today.succ_opt().and_then(local_midnight)) else { return Ok(()) };
         return match crate::graph::calendar_view(from, to) {
             Ok(events) => store(&events, quiet),
             Err(e) => {
