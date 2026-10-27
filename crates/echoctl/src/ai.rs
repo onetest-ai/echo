@@ -208,7 +208,7 @@ impl Settings {
             bail!("no AI profile could be chosen when this call started (the AI settings couldn't be read) — choose one for this call in the Echo window");
         }
         self.profiles.iter().find(|p| p.id == id).cloned().ok_or_else(|| {
-            anyhow!("the AI profile \"{id}\" doesn't exist on this computer — choose another for this call in the Echo window (Live tab or Write notes)")
+            anyhow!("the AI profile \"{id}\" doesn't exist on this computer — choose another for this call in the Echo window (Live tab or Write minutes)")
         })
     }
 }
@@ -236,7 +236,7 @@ fn system_profile() -> Profile {
 pub fn system_folder() -> Result<PathBuf> {
     let cfg = Config::load().map_err(|e| anyhow!("the data folder's settings (config.json) can't be read: {e:#}"))?;
     match cfg.notes_in {
-        Some(d) if !d.is_dir() => bail!("the folder call notes are written in ({}) isn't there — menu → Claude Code → Write call notes in", d.display()),
+        Some(d) if !d.is_dir() => bail!("the folder Echo runs Claude Code in for minutes ({}) isn't there — menu → Claude Code → Echo runs Claude Code for minutes in", d.display()),
         Some(d) => Ok(d),
         None => Ok(paths::home()),
     }
@@ -1244,7 +1244,7 @@ fn login_with(p: &Profile, claude: &Path, terminal: bool, stopped: &dyn Fn() -> 
             Some(l) => break l,
             None if stopped() => bail!("stopped — {} isn't signed in", p.name),
             None if t.elapsed() < Duration::from_secs(10) => std::thread::sleep(Duration::from_millis(200)),
-            None => bail!("{} is being signed in already, or Echo is using it (writing notes) — try again in a moment", p.name),
+            None => bail!("{} is being signed in already, or Echo is using it (writing minutes) — try again in a moment", p.name),
         }
     };
     fs::create_dir_all(p.config_folder())?;

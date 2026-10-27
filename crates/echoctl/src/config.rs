@@ -54,6 +54,14 @@ pub struct Config {
     /// file next to it, screenshots embedded (`minutes.rs`). Default: false.
     #[serde(default)]
     pub minutes_page: bool,
+    /// The app writes a call's minutes by itself, 15 minutes after the call ends or after the
+    /// user's last note (`notes::auto_due`). Default: on. Off: minutes are written only when asked.
+    #[serde(default = "yes")]
+    pub auto_minutes: bool,
+    /// Calls that ended before this are never written automatically (set when the switch is first
+    /// on, and again on each off → on), so turning it on doesn't send a backlog of calls to a model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_minutes_since: Option<chrono::DateTime<chrono::Utc>>,
     /// Calendar meetings: "ask" (offer "record?" ~1 min before) or "manual" (never prompt; the
     /// user arms from the tray or `/echo:record`). Default: ask.
     #[serde(default)]
@@ -96,8 +104,9 @@ pub struct Config {
     /// (`<call>/frames/`, macOS, needs Screen Recording). Default off.
     #[serde(default)]
     pub capture_frames: bool,
-    /// Only Claude Code sessions opened in this folder (or below) write notes automatically.
-    /// None = any session with the plugin.
+    /// The folder Echo runs Claude Code in for minutes (the data folder when None; with the built-in
+    /// `system` AI profile its `.claude/settings.json` applies), and the only one (or below) whose
+    /// sessions `echoctl claim --for` accepts.
     #[serde(default)]
     pub notes_in: Option<PathBuf>,
     /// Model Claude Code uses when the app writes notes itself (`echoctl notes`): an alias
@@ -109,6 +118,10 @@ pub struct Config {
     /// one). None = haiku.
     #[serde(default)]
     pub live_model: Option<String>,
+}
+
+fn yes() -> bool {
+    true
 }
 
 pub const DEFAULT_NOTES_MODEL: &str = "sonnet";
@@ -151,7 +164,16 @@ impl Config {
         self.scheduled.as_deref() != Some("manual")
     }
 
-    /// May a Claude Code session working in `cwd` write notes automatically?
+    /// Turn automatic minutes on or off. A real off → on starts counting from now; setting it on
+    /// when it is on keeps the boundary (calls waiting for their minutes stay due).
+    pub fn set_auto_minutes(&mut self, on: bool) {
+        if on && (!self.auto_minutes || self.auto_minutes_since.is_none()) {
+            self.auto_minutes_since = Some(chrono::Utc::now());
+        }
+        self.auto_minutes = on;
+    }
+
+    /// May a Claude Code session working in `cwd` claim a call (`echoctl claim --for`)?
     pub fn notes_allowed(&self, cwd: &std::path::Path) -> bool {
         let Some(dir) = &self.notes_in else { return true };
         let norm = |p: &std::path::Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
@@ -187,6 +209,21 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn automatic_minutes_count_from_when_they_were_turned_on() {
+        let mut cfg = Config::default();
+        assert!(cfg.auto_minutes && cfg.auto_minutes_since.is_none(), "on by default, its start set by the app");
+        cfg.set_auto_minutes(true);
+        let since = cfg.auto_minutes_since.expect("set when first on");
+        cfg.set_auto_minutes(true);
+        assert_eq!(cfg.auto_minutes_since, Some(since), "on again: calls waiting stay due");
+        cfg.set_auto_minutes(false);
+        assert_eq!(cfg.auto_minutes_since, Some(since));
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        cfg.set_auto_minutes(true);
+        assert!(cfg.auto_minutes_since.unwrap() > since, "off → on: counted from now");
+    }
 
     #[test]
     fn new_folders_get_the_default_languages_but_any_stays_any() {

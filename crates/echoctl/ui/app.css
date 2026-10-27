@@ -213,17 +213,13 @@ label.split-lang:focus-within { outline: 2px solid var(--accent); outline-offset
 .pane { overflow-y: auto; flex: 1; padding: 22px 32px 48px; }
 .pane > * { max-width: 760px; }
 
-/* notes (rendered Markdown) */
+/* text written by the app (the Live tab's live notes) */
 .doc { font-size: 14px; line-height: 1.65; color: var(--text); }
-.doc h1 { display: none; } /* the title is already in the header */
-.doc h2 { font-size: 15px; font-weight: 650; margin: 26px 0 8px; letter-spacing: -0.01em; }
 .doc h3 { font-size: 14px; font-weight: 650; margin: 20px 0 6px; }
 .doc p { margin: 0 0 10px; }
-.doc ul, .doc ol { margin: 0 0 12px; padding-left: 20px; }
+.doc ul { margin: 0 0 12px; padding-left: 20px; }
 .doc li { margin: 3px 0; }
 .doc li::marker { color: var(--text-3); }
-.doc strong { font-weight: 650; }
-.doc code { font-family: var(--mono); font-size: 12px; background: var(--line); padding: 1px 5px; border-radius: 4px; }
 .doc a { color: var(--accent-ink); text-decoration: none; }
 .doc a:hover { text-decoration: underline; }
 .doc .at {
@@ -231,42 +227,36 @@ label.split-lang:focus-within { outline: 2px solid var(--accent); outline-offset
   background: var(--accent-soft); padding: 0 5px; border-radius: 4px; margin-left: 2px;
   cursor: pointer; text-decoration: none;
 }
-.doc .lead { color: var(--text-2); }
-.doc h4, .doc h5, .doc h6 { font-size: 13px; font-weight: 650; margin: 16px 0 4px; color: var(--text-2); }
-.doc li > ul, .doc li > ol { margin: 2px 0 4px; }
-.doc del { color: var(--text-3); }
-.doc hr { border: 0; border-top: 1px solid var(--line-strong); margin: 22px 0; }
-.doc blockquote { margin: 0 0 12px; padding: 2px 0 2px 14px; border-left: 3px solid var(--accent-soft); color: var(--text-2); }
-.doc blockquote p:last-child { margin-bottom: 0; }
-.doc li.task-item { list-style: none; margin-left: -20px; display: flex; gap: 8px; align-items: baseline; }
-.doc li.task-item > ul, .doc li.task-item > ol { flex-basis: 100%; }
-.doc .check {
-  flex: none; width: 13px; height: 13px; border: 1.5px solid var(--text-3); border-radius: 4px;
-  transform: translateY(2px);
+
+/* the call view's regions (render() replaces each only when its HTML changed) */
+.region { display: contents; }
+
+/* Notes: the user's own notes, an editor over my-notes.md */
+.mynotes { display: flex; flex-direction: column; gap: 10px; height: 100%; max-width: 760px; }
+.mynotes .hint { margin: 0; font-size: 12.5px; color: var(--text-2); display: flex; align-items: center; gap: 10px; }
+.mynotes textarea {
+  flex: 1; min-height: 260px; width: 100%; resize: none; padding: 14px 16px; border: 1px solid var(--line-strong);
+  border-radius: 10px; background: var(--surface); color: var(--text); font: inherit; font-size: 14px; line-height: 1.6;
 }
-.doc .check.done { background: var(--accent); border-color: var(--accent); }
-.doc pre.code {
-  margin: 0 0 14px; padding: 12px 14px; overflow-x: auto; background: var(--line); border-radius: 8px;
-  font-family: var(--mono); font-size: 12px; line-height: 1.5; white-space: pre; tab-size: 4;
-}
-.doc pre.code code { background: none; padding: 0; font-size: inherit; }
-.doc .table { overflow-x: auto; margin: 0 0 14px; }
-.doc table { border-collapse: collapse; font-size: 13px; min-width: 50%; }
-.doc th, .doc td { padding: 6px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
-.doc th { font-weight: 650; color: var(--text-2); border-bottom-color: var(--line-strong); }
-.doc table.frontmatter { font-size: 12px; color: var(--text-2); }
-.doc table.frontmatter th, .doc table.frontmatter td { padding: 3px 12px 3px 0; border-bottom: none; }
-.doc table.frontmatter th { font-weight: 500; color: var(--text-3); }
-.doc figure.diagram {
-  margin: 4px 0 16px; padding: 16px; border: 1px solid var(--line); border-radius: 10px;
-  background: var(--surface); overflow-x: auto; text-align: center;
-}
-.doc figure.diagram svg { max-width: 100%; height: auto; }
-.doc figure.diagram.pending pre.code { text-align: left; margin: 0; opacity: 0.55; }
-.doc figure.diagram.failed { text-align: left; }
-.doc figure.diagram figcaption { margin-top: 8px; font-size: 12px; color: var(--text-3); }
-.doc .doc-img { display: block; padding: 0; margin: 4px 0 14px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: none; cursor: zoom-in; max-width: 560px; }
-.doc .doc-img img { display: block; width: 100%; height: auto; }
+.mynotes textarea:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+.mynotes textarea[readonly] { opacity: 0.7; }
+.mynotes .saved-state { font-size: 11.5px; color: var(--text-3); }
+
+/* Minutes: the page in a sandboxed frame under a bar */
+.pane.framed { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
+.pane.framed > * { max-width: none; }
+#minutes-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 32px; border-bottom: 1px solid var(--line); font-size: 12.5px; color: var(--text-2); }
+#minutes-bar:empty { display: none; }
+#minutes-bar .grow { flex: 1; min-width: 0; }
+#minutes-bar .warn { color: var(--warn); }
+.minutes-slot { flex: 1; min-height: 0; }
+.minutes-slot iframe { display: block; width: 100%; height: 100%; border: 0; background: var(--surface); }
+
+/* a message for a moment, and the close that couldn't save */
+.notice { margin: 10px 0; padding: 8px 12px; border-radius: 8px; background: var(--accent-soft); color: var(--text); font-size: 12.5px; display: flex; gap: 10px; align-items: center; }
+.notice.error { background: color-mix(in srgb, var(--danger) 14%, transparent); }
+.notice .grow { flex: 1; }
+.notices { padding: 4px 32px 0; flex: none; }
 
 /* transcript */
 .transcript { display: flex; flex-direction: column; gap: 14px; }
@@ -425,7 +415,7 @@ label.split-lang:focus-within { outline: 2px solid var(--accent); outline-offset
 .detail ul { margin: 0; padding-left: 16px; color: var(--text-2); font-size: 12.5px; }
 .detail .close { align-self: flex-end; margin: -6px -6px 0 0; }
 
-/* Write notes: buttons under the empty state, the run in progress */
+/* Write minutes: buttons under the empty state, the run in progress */
 .notes-actions { display: flex; gap: 8px; justify-content: center; margin-top: 14px; }
 .empty p.alt, p.alt { color: var(--text-3); font-size: 12.5px; }
 p.alt { text-align: center; margin-top: 4px; }

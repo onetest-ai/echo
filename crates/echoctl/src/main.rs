@@ -91,16 +91,17 @@ enum Cmd {
         #[command(subcommand)]
         cmd: Option<HomeCmd>,
     },
-    /// Calls transcribed but without notes yet (JSON) — what a Claude session picks up
+    /// Calls transcribed but without minutes yet (JSON); always empty for a session (--for): the
+    /// app writes minutes itself
     Pending {
-        /// The asking session's folder: empty list unless it may write notes (`config --notes-in`)
+        /// The asking session's folder (older panes)
         #[arg(long = "for")]
         session: Option<std::path::PathBuf>,
     },
-    /// Take a call for writing notes; fails if another session already took it
+    /// Take a call for writing minutes in a session; fails while Echo or another session writes them
     Claim {
         call: String,
-        /// The claiming session's folder: refused unless it may write notes (`config --notes-in`)
+        /// The claiming session's folder: refused outside the one set by `config --notes-in`
         #[arg(long = "for")]
         session: Option<std::path::PathBuf>,
     },
@@ -127,6 +128,9 @@ enum Cmd {
         /// Also write the minutes page (<title>-minutes.html) when notes are written
         #[arg(long)]
         minutes_page: Option<bool>,
+        /// Write a call's minutes by itself, 15 minutes after the call (or after your last note)
+        #[arg(long)]
+        auto_minutes: Option<bool>,
         /// Calendar meetings: "ask" (prompt ~1 min before) or "manual" (only when you record)
         #[arg(long, value_parser = ["ask", "manual"])]
         scheduled: Option<String>,
@@ -136,7 +140,8 @@ enum Cmd {
         /// Your email, used to tell colleagues from external attendees
         #[arg(long)]
         me_email: Option<String>,
-        /// Only Claude Code sessions in this folder write notes automatically; "any" clears
+        /// The folder Echo runs Claude Code in for minutes (with the built-in AI profile its
+        /// .claude/settings.json applies), and the only one `claim --for` accepts; "any" clears
         #[arg(long)]
         notes_in: Option<String>,
         /// Save snapshots of shared screens during calls (macOS; needs Screen Recording)
@@ -159,7 +164,7 @@ enum Cmd {
         #[arg(long)]
         live_model: Option<String>,
     },
-    /// Write notes and action items for a call with Claude Code (headless, the same
+    /// Write minutes and action items for a call with Claude Code (headless, the same
     /// process-call skill a session runs); the running app does it unless --wait
     Notes {
         /// Call folder or name, or "latest"
@@ -167,9 +172,8 @@ enum Cmd {
         /// Run here and wait for it, instead of handing it to the app
         #[arg(long)]
         wait: bool,
-        /// Automatic notes (the terminal pane): only if the call is due for them and the
-        /// session folder given with --for may write notes; a call whose notes were already tried
-        /// (it has a notes-run.json) is left alone
+        /// Automatic minutes from the terminal pane: always refused now — the app writes them
+        /// itself, 15 minutes after the call (`config --auto-minutes`); kept for older panes
         #[arg(long, requires = "session")]
         auto: bool,
         /// The asking session's folder (with --auto)
@@ -203,8 +207,22 @@ enum Cmd {
     },
     /// Set a call's title (one line, clamped) and rename its folder
     Title { call: String, title: String },
-    /// Add your own note to the call being recorded ("# Heading" lines shape the notes)
+    /// Add your own note to the call being recorded ("# Heading" lines shape the minutes)
     Note { text: Vec<String> },
+    /// Mark one of a call's action items done or to do (by its id, from `echoctl actions`)
+    Action {
+        call: String,
+        id: String,
+        #[arg(value_parser = ["done", "todo"])]
+        status: String,
+    },
+    /// A call's action items as JSON (each with its id); --apply replaces them with a new list,
+    /// keeping each known item's status (how the minutes skill writes them)
+    Actions {
+        call: String,
+        #[arg(long)]
+        apply: Option<std::path::PathBuf>,
+    },
     /// Open a pre-filled email (follow-up) in the default mail app; it is never sent from here
     Compose {
         #[arg(long, value_delimiter = ',')]
@@ -739,7 +757,7 @@ fn main() -> Result<()> {
             ModelCmd::Use { name } => models::use_model(&name),
             ModelCmd::Remove { name, force } => models::remove(&name, force),
         },
-        Cmd::Config { languages, vocabulary, unscheduled, keep_audio, minutes_page, scheduled, me_name, me_email, notes_in, capture_frames, capture_ui, graph_client_id, graph_tenant, notes_model, live_model } => {
+        Cmd::Config { languages, vocabulary, unscheduled, keep_audio, minutes_page, auto_minutes, scheduled, me_name, me_email, notes_in, capture_frames, capture_ui, graph_client_id, graph_tenant, notes_model, live_model } => {
             let mut cfg = config::Config::load()?;
             if let Some(m) = live_model {
                 cfg.live_model = Some(m.trim().to_string()).filter(|m| !m.is_empty() && m != config::DEFAULT_LIVE_MODEL && m != "default");
@@ -776,6 +794,9 @@ fn main() -> Result<()> {
             }
             if let Some(m) = minutes_page {
                 cfg.minutes_page = m;
+            }
+            if let Some(on) = auto_minutes {
+                cfg.set_auto_minutes(on);
             }
             if scheduled.is_some() {
                 cfg.scheduled = scheduled;
@@ -825,13 +846,23 @@ fn main() -> Result<()> {
             ServerCmd::Run { port } => remote::run_foreground(port),
         },
         #[cfg(feature = "transcribe")]
-        Cmd::Transcribe { call, model, keep_audio } => transcribe::transcribe(&call, model.as_deref(), keep_audio),
+        Cmd::Transcribe { call, model, keep_audio } => {
+            // A run Echo started can't keep audio the user's setting deletes (text only by default).
+            if let Some(why) = notes::refused_in_run(false, keep_audio, model.is_some()).filter(|_| notes::headless()) {
+                anyhow::bail!(why);
+            }
+            transcribe::transcribe(&call, model.as_deref(), keep_audio)
+        }
         #[cfg(feature = "transcribe")]
         Cmd::Speakers { call, names } => speakers::command(&call, &names),
         Cmd::Vocab { cmd } => {
             let mut cfg = config::Config::load()?;
             match cmd {
                 VocabCmd::Add { terms, call, always } => {
+                    // A run Echo started learns a call's terms, never the user's own always-on list.
+                    if let Some(why) = notes::refused_in_run(always, false, false).filter(|_| notes::headless()) {
+                        anyhow::bail!(why);
+                    }
                     let msg = vocab::add(&mut cfg, &terms, call.as_deref(), always)?;
                     cfg.save()?;
                     println!("{msg}");
@@ -848,6 +879,8 @@ fn main() -> Result<()> {
         Cmd::Context { call } => calls::context(&call),
         Cmd::Title { call, title } => calls::set_title(&call, &title),
         Cmd::Note { text } => calls::note(&text.join(" ")),
+        Cmd::Action { call, id, status } => calls::action_command(&call, &id, &status),
+        Cmd::Actions { call, apply } => calls::actions_command(&call, apply.as_deref()),
         Cmd::Previous { subject } => calls::previous(&subject),
         Cmd::Delete { call } => calls::delete(&call),
         Cmd::Frames { call, keep } => calls::prune_frames(&call, &keep),
@@ -1009,9 +1042,9 @@ fn main() -> Result<()> {
                 Ok(())
             }
         },
-        Cmd::Notes { call, wait, auto, session } => {
+        Cmd::Notes { call, wait, auto, session: _ } => {
             if auto {
-                notes::request_auto(&call, session.as_deref().unwrap_or(std::path::Path::new(".")))
+                notes::request_auto(&call)
             } else {
                 notes::request(&call, wait)
             }

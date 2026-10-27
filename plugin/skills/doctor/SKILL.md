@@ -1,6 +1,6 @@
 ---
 name: doctor
-description: Check Echo and fix what's missing — the app not installed or not running, no data folder or speech model, missing permissions (microphone, system audio), languages, calendar, where notes are written. Use when a recording comes out silent or empty, Echo isn't running, the user asks why capture or notes aren't working, or a command says "run the doctor skill".
+description: Check Echo and fix what's missing — the app not installed or not running, no data folder or speech model, missing permissions (microphone, system audio), languages, calendar, where and when minutes are written. Use when a recording comes out silent or empty, Echo isn't running, the user asks why capture or minutes aren't working, or a command says "run the doctor skill".
 ---
 
 # Echo doctor
@@ -13,8 +13,8 @@ permission for the user (open the page and explain), and never download a model 
 1. `echoctl up` (exit code 127 = the app isn't installed: macOS, open `Echo-<version>.dmg` and
    drag Echo to Applications; Windows, unzip to `%LOCALAPPDATA%\Programs\echo`; wait, retry).
    It starts the app if needed and reports `failing` and `next`. "nothing" in `next` → tell the
-   user Echo is fine in one line and stop. If the app won't start, show the last lines of
-   `<home>/.echo/app.log`.
+   user Echo is fine in one line and stop (asked about a call's minutes: step 6 first). If the app
+   won't start, show the last lines of `<home>/.echo/app.log`.
 2. **Data folder** (`echoctl app` → `home_source: default`): ask where calls should live
    (default `~/Echo`), then `echoctl home set <path>`.
 3. **Permissions** belong to the app, not the terminal: `echoctl doctor --json`.
@@ -30,9 +30,16 @@ permission for the user (open the page and explain), and never download a model 
    `echoctl model download <name>`.
 5. **Languages**, if the transcript came out in the wrong language: `echoctl config --languages
    en,uk` (detection is limited to this list).
-6. Only if the user asks:
+6. **Minutes** missing or failed for a call: `<call>/notes-run.json` (`state`, `message`) and the
+   end of `<call>/claude.log` say why; `echoctl notes <call> --auto --for .` prints when (or why
+   not) Echo writes them by itself. `echoctl notes <call>` writes them now.
+7. Only if the user asks:
    - calendar: `echoctl calendar login` (read-only Microsoft 365; another org needs its own app
      registration → `echoctl config --graph-client-id <id>`);
-   - notes only in one folder: `echoctl config --notes-in <folder>` (`any` to undo);
-   - notes model: `echoctl config --notes-model <name>` (`default` = Claude Code's own);
+   - automatic minutes (Echo writes them 15 min after a call, no session needed):
+     `echoctl config --auto-minutes true|false`;
+   - the folder Echo runs Claude Code in for minutes (with the built-in AI profile its
+     `.claude/settings.json` applies, e.g. a local model): `echoctl config --notes-in <folder>`
+     (`any` = the data folder again);
+   - minutes model: `echoctl config --notes-model <name>` (`default` = Claude Code's own);
    - the plugin in another project: `echoctl claude connect --scope project --project <repo>`.

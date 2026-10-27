@@ -86,7 +86,20 @@ Code markers: `git grep "TODO(windows)"`.
   Echo during it (no `claude`/`node` left: `claude.cmd` launchers are stopped with `taskkill /T`), and
   `echoctl ai login <id>` + Ctrl-C in a console.
 
-- **Write notes** (`notes.rs`): runs `claude` directly (no login shell, `cfg(unix)` only), so the
+- **Notes, Minutes tab and automatic minutes** (`window.rs`, `tray.rs`, `ui/app.js`, `notes::auto_due`):
+  in WebView2, the Minutes tab's sandboxed frame (`/minutes/<call>` at `http://echo.localhost`) shows the
+  page with its diagrams and lightbox, a click on a time opens the Transcript there, and `echoctl window
+  --selftest` reports `frame_blocked: true`; the Notes editor saves while typing and keeps a tray note
+  added meanwhile; closing the window, Quit and an update right after typing save first. **The MSI**:
+  run it directly while Echo is open with notes it can't save (a read-only `my-notes.md`), answer No
+  to Echo's "Quit Echo anyway?" (No is focused; Yes must go on) — the installation must stop with no
+  file replaced; a first install (no Echo yet) must not be affected. **Echo's own update** (tray → Update) passes
+  `ECHO_SELF_UPDATE=1`: the MSI goes on whatever that quit answers, and Echo starts again on the new version.
+  The popups come up in front (MB_SYSTEMMODAL); a meeting's "Record?" answered Yes records without joining.
+  Show in Explorer selects the minutes page of a call whose title has spaces. A call's minutes start by themselves
+  15 minutes after it ends.
+
+- **Write minutes** (`notes.rs`): runs `claude` directly (no login shell, `cfg(unix)` only), so the
   user's env is whatever the app inherited. Check: `claude` is found (`claude.exe` / `claude.cmd`
   from npm, `app::find_program`), `--plugin-dir` points at the plugin next to `echoctl.exe`,
   the `//C:/…` permission-rule paths match Claude Code's Windows path format, the run's
@@ -94,7 +107,7 @@ Code markers: `git grep "TODO(windows)"`.
   and bad-model messages appear (TC-CLA-009 … 013).
 - **Plugin script** `plugin/scripts/echoctl.cmd` and the mod (`plugin/hooks/register.tsx`):
   finding the CLI, starting the app, the live pane.
-- **Dialogs** (WScript popup, PowerShell InputBox for Notes model and other text prompts) and
+- **Dialogs** (WScript popup, PowerShell InputBox for Minutes model and other text prompts) and
   the Echo window on WebView2 (`http://echo.localhost`).
 - **Autostart** (HKCU Run key), **install-cli** (user PATH), single instance (`app.lock`).
 - **Microsoft 365** sign-in (loopback redirect), calendar, chat capture.

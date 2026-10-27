@@ -184,21 +184,41 @@ fn verify_digest(r: &Release, file: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-/// Download, verify and stage the update. A detached script swaps it in once the app process
-/// (`wait_pid`) has exited and starts the new version; the caller then stops the app.
-pub fn install(r: &Release, wait_pid: u32) -> Result<()> {
+/// An update downloaded, verified and staged, not yet swapped in (`commit`).
+#[derive(Debug)]
+pub struct Staged {
+    /// macOS: the verified Echo.app copied out of the image; Windows: the verified MSI.
+    file: PathBuf,
+    work: PathBuf,
+}
+
+/// Download, verify and stage the update — nothing is scheduled yet, so the app can still decide
+/// not to stop (`commit` does that part).
+pub fn prepare(r: &Release) -> Result<Staged> {
     if crate::watch::running_watcher().is_some_and(|w| w.recording.is_some()) {
         bail!("a call is being recorded — update after it ends");
     }
     let work = std::env::temp_dir().join(format!("echo-update-{}", r.version));
     let file = download(r, &work)?;
     verify_digest(r, &file)?;
-    platform_install(&file, &work, wait_pid)
+    Ok(Staged { file: platform_stage(&file, &work)?, work })
+}
+
+/// Swap the staged update in: a detached script does it once the app process (`wait_pid`) has
+/// exited and starts the new version (Windows: the MSI, which restarts Echo itself); the caller
+/// stops the app — before (`app update`: quitting saves a recording) or right after (the tray). Not
+/// while the app records a call: one may have started since `prepare` (the window's save, a
+/// question to the user).
+pub fn commit(s: &Staged, wait_pid: u32) -> Result<()> {
+    if crate::watch::running_watcher().is_some_and(|w| w.recording.is_some()) {
+        bail!("a call is being recorded — update after it ends");
+    }
+    platform_commit(&s.file, &s.work, wait_pid)
 }
 
 #[cfg(target_os = "macos")]
-fn platform_install(dmg: &Path, work: &Path, wait_pid: u32) -> Result<()> {
-    let target = crate::app::installed_app().ok_or_else(|| anyhow!("Echo.app is not installed (a development build updates with git)"))?;
+fn platform_stage(dmg: &Path, work: &Path) -> Result<PathBuf> {
+    crate::app::installed_app().ok_or_else(|| anyhow!("Echo.app is not installed (a development build updates with git)"))?;
     let mount = work.join("mnt");
     std::fs::create_dir_all(&mount)?;
     let ok = Command::new("hdiutil").args(["attach", "-nobrowse", "-readonly", "-mountpoint"]).arg(&mount).arg(dmg).stdout(Stdio::null()).status()?.success();
@@ -222,6 +242,12 @@ fn platform_install(dmg: &Path, work: &Path, wait_pid: u32) -> Result<()> {
     if !ok {
         bail!("the downloaded app is not signed by the Echo developer — not installed");
     }
+    Ok(staged)
+}
+
+#[cfg(target_os = "macos")]
+fn platform_commit(staged: &Path, _work: &Path, wait_pid: u32) -> Result<()> {
+    let target = crate::app::installed_app().ok_or_else(|| anyhow!("Echo.app is not installed (a development build updates with git)"))?;
     // Swap once this process is gone, then start the new version. Paths go in as positional
     // arguments ("$2", "$3"), never into the script text; a failed move restores the old app.
     let script = r#"while kill -0 "$1" 2>/dev/null; do sleep 0.3; done
@@ -234,11 +260,19 @@ open -g "$2"
     spawn_detached_sh(script, &[&wait_pid.to_string(), &target.display().to_string(), &staged.display().to_string()])
 }
 
+/// Windows: the verified MSI is what gets installed.
+#[cfg(windows)]
+fn platform_stage(msi: &Path, _work: &Path) -> Result<PathBuf> {
+    Ok(msi.to_path_buf())
+}
+
 /// Run the (checksum-verified) MSI silently. It is per-user, so no elevation; its own custom
 /// actions quit the running Echo (`app quit` waits for it) before replacing the files and start
-/// the new one afterwards, so `wait_pid` isn't needed. msiexec outlives this process.
+/// the new one afterwards, so `wait_pid` isn't needed. `ECHO_SELF_UPDATE`: Echo saved the window's
+/// notes and is stopping already, so that quit's answer doesn't stop the installation (a slow
+/// exit would roll the update back and leave Echo stopped). msiexec outlives this process.
 #[cfg(windows)]
-fn platform_install(msi: &Path, work: &Path, _wait_pid: u32) -> Result<()> {
+fn platform_commit(msi: &Path, work: &Path, _wait_pid: u32) -> Result<()> {
     use std::os::windows::process::CommandExt;
     const DETACHED_PROCESS: u32 = 0x0000_0008;
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
@@ -246,7 +280,7 @@ fn platform_install(msi: &Path, work: &Path, _wait_pid: u32) -> Result<()> {
     Command::new(msiexec)
         .arg("/i")
         .arg(msi)
-        .args(["/qn", "/norestart", "/l*v"])
+        .args(["/qn", "/norestart", "ECHO_SELF_UPDATE=1", "/l*v"])
         .arg(work.join("install.log"))
         .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP)
         .spawn()
@@ -255,7 +289,12 @@ fn platform_install(msi: &Path, work: &Path, _wait_pid: u32) -> Result<()> {
 }
 
 #[cfg(not(any(target_os = "macos", windows)))]
-fn platform_install(_: &Path, _: &Path, _: u32) -> Result<()> {
+fn platform_stage(_: &Path, _: &Path) -> Result<PathBuf> {
+    bail!("updates are not supported on this platform")
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
+fn platform_commit(_: &Path, _: &Path, _: u32) -> Result<()> {
     bail!("updates are not supported on this platform")
 }
 
@@ -280,12 +319,15 @@ pub fn cli(check_only: bool) -> Result<()> {
         None => println!("Echo {} is up to date", env!("CARGO_PKG_VERSION")),
         Some(r) if check_only => println!("update available: {} ({})", r.version, r.notes_url),
         Some(r) => {
-            // The swap waits for the running app (or, with none running, for this process).
+            let staged = prepare(&r)?;
+            // The running app quits first (it saves the notes typed in its window, or the user
+            // keeps it open: then nothing is scheduled); the swap then waits for it — or, with
+            // none running, for this process.
             let app = crate::watch::running_watcher().map(|w| w.pid);
-            install(&r, app.unwrap_or(std::process::id()))?;
             if app.is_some() {
                 crate::app::quit()?;
             }
+            commit(&staged, app.unwrap_or(std::process::id()))?;
             println!("updating to {} — Echo restarts by itself", r.version);
         }
     }

@@ -1,7 +1,8 @@
-//! Notes without an open Claude Code session: the app runs Claude Code headless on a call
+//! Minutes without an open Claude Code session: the app runs Claude Code headless on a call
 //! (`claude -p "/echo:process-call <dir>"`), the same skill a session runs. The app still
-//! never writes notes itself; it starts Claude Code when the user asks (`echoctl notes`, the
-//! window's Write notes button, the pane's buttons) or the pane asks after a call (`notes --auto`).
+//! never writes minutes itself; it starts Claude Code when the user asks (`echoctl notes`, the
+//! window's Write minutes button, the pane's buttons) and, on its own, 15 minutes after a call
+//! or after the user's last note (`auto_due`, `auto_tick`; `config.auto_minutes`).
 //!
 //! - The plugin comes with the app (`Echo.app/Contents/Resources/plugin`, the repo's `plugin/`
 //!   in a dev build) and is loaded with `--plugin-dir`, so the run doesn't depend on where, or
@@ -20,6 +21,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::Digest as _;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -55,15 +57,85 @@ pub struct Run {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub child_pid: Option<u32>,
     pub session_id: Option<String>,
+    /// Started by the app on its own (`auto_tick`), not asked for.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub auto: bool,
+    /// This run's id: given to its Claude Code (`calls::RUN_ID`) and recorded by `echoctl actions
+    /// --apply`, so the run knows it wrote the action items itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+    /// The minutes as the last `done` run left them; carried over by every later run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minutes: Option<Written>,
+    /// The call had minutes when this run was admitted (an update): the window keeps showing them.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub had_minutes: bool,
 }
+
+/// Who wrote the minutes shown (`model`: the profile and model, as the page names them) — valid
+/// only while `notes.md` still has `sha256`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Written {
+    pub model: String,
+    pub at: DateTime<Local>,
+    pub sha256: String,
+}
+
+/// Asked for (Write minutes, `echoctl notes`), or started by the app on its own.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Intent {
+    Explicit,
+    Auto,
+}
+
+/// How long after the call (or after the user's last note) the app writes the minutes.
+pub const AUTO_DELAY: Duration = Duration::from_secs(15 * 60);
 
 /// Inside a run Echo started (the mod and the CLI stay out of the way there).
 pub fn headless() -> bool {
     std::env::var_os(HEADLESS).is_some()
 }
 
+/// What a run Echo started may not ask of the CLI it is allowed: the user's own always-on
+/// vocabulary (a setting), or keeping a call's audio (`--keep-audio`, and `--model`, which keeps it
+/// to compare).
+pub fn refused_in_run(always: bool, keep_audio: bool, model: bool) -> Option<&'static str> {
+    if always {
+        Some("a minutes run can't change the always-on vocabulary")
+    } else if keep_audio || model {
+        Some("a minutes run can't keep a call's audio (--keep-audio, --model)")
+    } else {
+        None
+    }
+}
+
+/// `notes-run.json` as it is on disk.
+fn raw(dir: &Path) -> Option<Run> {
+    serde_json::from_slice(&fs::read(dir.join(RUN)).ok()?).ok()
+}
+
+/// An automatic run whose owner died before it wrote anything — still waiting, or its Claude Code
+/// stopped with it (Echo quit, crashed, the computer shut down): the call counts as never tried,
+/// so the app takes it up again.
+fn abandoned_auto(dir: &Path, r: &Run) -> bool {
+    r.auto
+        && pending(r)
+        && !r.pid.is_some_and(crate::app::process_alive)
+        && !r.child_pid.is_some_and(crate::app::process_alive)
+        && (r.state == "queued" || !dir.join("notes.md").exists())
+}
+
+/// The run's state as the user should see it; None when minutes were never tried (also after an
+/// automatic run that was withdrawn, or abandoned before it wrote them: `abandoned_auto`).
 pub fn status(dir: &Path) -> Option<Run> {
-    let mut r: Run = serde_json::from_slice(&fs::read(dir.join(RUN)).ok()?).ok()?;
+    let mut r = raw(dir)?;
+    if abandoned_auto(dir, &r) {
+        // Never tried, so nobody holds it: Echo's claim goes too (a session may take the call).
+        if let Ok(Some(_place)) = crate::app::FileLock::try_take(&dir.join(PLACE)) {
+            release_claim(dir);
+        }
+        return None;
+    }
     if !pending(&r) || r.pid.is_some_and(crate::app::process_alive) {
         return Some(r);
     }
@@ -74,7 +146,7 @@ pub fn status(dir: &Path) -> Option<Run> {
         return Some(r);
     }
     r.message = Some(if r.state == "queued" {
-        "Echo stopped before the notes were written — click Write notes again.".into()
+        "Echo stopped before the minutes were written — click Write minutes again.".into()
     } else {
         "The run stopped before it finished (Echo quit or Claude Code crashed).".into()
     });
@@ -96,20 +168,279 @@ pub(crate) fn pending(r: &Run) -> bool {
 /// to its final state (released by the OS if that process dies; it moves with a renamed folder).
 const PLACE: &str = "notes-run.lock";
 
-/// Admit a run to the call (never waits): its place first, then — under it — the claim, then
-/// `queued`. Refused while another run holds the place, while Claude Code from an earlier run whose
-/// owner died is still writing, or while a session has the call; a refusal changes nothing.
-fn admit(dir: &Path) -> Result<crate::app::FileLock> {
+/// Admit a run to the call (never waits): its place first, then — under it and the call's
+/// `.meta.lock` (which the user's note saves take too) — an automatic run checks the call is still
+/// due, the action items get their ids, the claim, then `queued`. Refused while another run holds
+/// the place, while Claude Code from an earlier run whose owner died is still writing, or while a
+/// session has the call; a refusal changes nothing (but the ids given to the action items, and an
+/// unreadable list set aside). None: an automatic run that isn't due any more.
+fn admit(dir: &Path, intent: Intent) -> Result<Option<(crate::app::FileLock, Run)>> {
     let place = crate::app::FileLock::try_take(&dir.join(PLACE)).with_context(|| format!("opening {}", dir.join(PLACE).display()))?;
-    let Some(place) = place else { bail!("Echo is already writing the notes for this call") };
+    let Some(place) = place else { bail!("Echo is already writing the minutes for this call") };
     if let Some(r) = status(dir).filter(pending) {
         if r.child_pid.is_some_and(crate::app::process_alive) {
-            bail!("Claude Code from an earlier run is still writing the notes for this call");
+            bail!("Claude Code from an earlier run is still writing the minutes for this call");
         }
     }
+    let _meta = calls::lock_meta(dir)?;
+    if intent == Intent::Auto && auto_due(dir, &Config::load()?, Local::now(), None) != Due::Now {
+        return Ok(None);
+    }
+    calls::actions_locked(dir)?;
     claim(dir)?;
-    save(dir, &Run { state: "queued".into(), pid: Some(std::process::id()), started_at: Some(Local::now()), message: Some("Starting…".into()), ..Default::default() });
-    Ok(place)
+    let r = Run {
+        state: "queued".into(),
+        pid: Some(std::process::id()),
+        started_at: Some(Local::now()),
+        message: Some("Starting…".into()),
+        auto: intent == Intent::Auto,
+        run_id: Some(run_id()),
+        had_minutes: dir.join("notes.md").exists(),
+        ..Run::carrying(dir)
+    };
+    save(dir, &r);
+    Ok(Some((place, r)))
+}
+
+impl Run {
+    /// A new record for the call: who wrote the minutes there (`minutes`) is carried over.
+    fn carrying(dir: &Path) -> Run {
+        Run { minutes: raw(dir).and_then(|r| r.minutes), ..Default::default() }
+    }
+}
+
+/// A new run id (the time and this process: unique on this computer).
+fn run_id() -> String {
+    format!("{}-{}", Local::now().format("%Y%m%dT%H%M%S%.6f"), std::process::id())
+}
+
+/// Withdraw an automatic run that wrote nothing (no longer due, or the app quit before or while its
+/// Claude Code ran): its record and claim go, so the call counts as never tried and the app takes
+/// it up again.
+fn withdraw(dir: &Path) {
+    let _ = fs::remove_file(dir.join(RUN));
+    release_claim(dir);
+}
+
+// ── automatic minutes ────────────────────────────────────────────────────────────────────────
+
+/// Why a call isn't due for automatic minutes.
+#[derive(Clone, Debug, PartialEq)]
+pub enum NotDue {
+    /// The switch is off, or not started yet.
+    Off,
+    /// The call ended before the switch was turned on.
+    Before,
+    /// Not closed, transcribed or still being recorded or transcribed.
+    NotReady,
+    /// Minutes exist or were tried, or a session is writing them.
+    Tried,
+    /// Too thin for minutes (`calls::minutes_gate`).
+    Gate(&'static str),
+}
+
+/// When a call gets its minutes automatically.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Due {
+    Now,
+    At(DateTime<Local>),
+    Not(NotDue),
+}
+
+/// Is the call in `dir` due for automatic minutes at `now`: the switch on and the call ended after
+/// it was turned on; closed and transcribed; never tried; past the gate; and 15 minutes past both
+/// its end and the last change of the user's notes (`my-notes.md`'s time: every real change moves
+/// it, so nothing else needs storing). `own`: the automatic run asking right before it starts
+/// Claude Code — its own record doesn't count as "tried" (an Echo claim never does; only a
+/// session's fresh one).
+pub fn auto_due(dir: &Path, cfg: &Config, now: DateTime<Local>, own: Option<&Run>) -> Due {
+    let (true, Some(since)) = (cfg.auto_minutes, cfg.auto_minutes_since) else { return Due::Not(NotDue::Off) };
+    let meta: Value = fs::read(dir.join("meta.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    let Some(ended) = meta["ended_at"].as_str().and_then(|t| DateTime::parse_from_rfc3339(t).ok()) else { return Due::Not(NotDue::NotReady) };
+    if ended < since {
+        return Due::Not(NotDue::Before);
+    }
+    if !dir.join("transcript.md").exists() || in_progress(dir) {
+        return Due::Not(NotDue::NotReady);
+    }
+    let mine = |r: &Run| own.is_some_and(|o| o.run_id.is_some() && o.run_id == r.run_id);
+    if dir.join("notes.md").exists() || raw(dir).is_some_and(|r| !mine(&r) && !abandoned_auto(dir, &r)) {
+        return Due::Not(NotDue::Tried);
+    }
+    if session_claim(dir) {
+        return Due::Not(NotDue::Tried); // a session is writing them right now
+    }
+    if let Some(why) = calls::minutes_gate(dir) {
+        return Due::Not(NotDue::Gate(why));
+    }
+    let noted = fs::metadata(dir.join(calls::USER_NOTES)).and_then(|m| m.modified()).ok().map(DateTime::<Local>::from);
+    if noted.is_some() && fs::read_to_string(dir.join(calls::USER_NOTES)).is_err() {
+        return Due::Not(NotDue::NotReady); // the user's notes can't be read (the Notes tab says why)
+    }
+    let last = noted.map_or(ended.with_timezone(&Local), |n| n.max(ended.with_timezone(&Local)));
+    let at = last + chrono::Duration::from_std(AUTO_DELAY).unwrap_or_default();
+    if now >= at { Due::Now } else { Due::At(at) }
+}
+
+/// The automatic-minutes state of a call for the window: `{due: "now"|"at"|"off"|"before"|
+/// "not_ready"|"tried"|"gate"|"missing"|"error", at, reason}` — "missing": due, but this computer
+/// can't write them (`auto_missing`); "error": the settings can't be read.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn auto_state(dir: &Path) -> Value {
+    let cfg = match Config::load() {
+        Ok(cfg) => cfg,
+        Err(e) => return json!({ "due": "error", "reason": format!("Echo's settings can't be read: {e:#}") }),
+    };
+    if let Some(why) = gave_up(&calls::stamp_of(dir)).or_else(|| BOUNDARY_ERROR.lock().unwrap_or_else(|e| e.into_inner()).clone()) {
+        return json!({ "due": "error", "reason": why });
+    }
+    match auto_due(dir, &cfg, Local::now(), None) {
+        Due::Now | Due::At(_) if auto_missing().is_some() => json!({ "due": "missing", "reason": auto_missing() }),
+        Due::Now => json!({ "due": "now" }),
+        Due::At(t) => json!({ "due": "at", "at": t.to_rfc3339() }),
+        Due::Not(NotDue::Gate(why)) => json!({ "due": "gate", "reason": why }),
+        Due::Not(NotDue::Off) => json!({ "due": "off" }),
+        Due::Not(NotDue::Before) => json!({ "due": "before" }),
+        Due::Not(NotDue::NotReady) => json!({ "due": "not_ready" }),
+        Due::Not(NotDue::Tried) => json!({ "due": "tried" }),
+    }
+}
+
+/// Why this computer can't write minutes automatically (Claude Code or the plugin missing), or None.
+pub fn auto_missing() -> Option<&'static str> {
+    if crate::app::claude_bin().is_none() {
+        Some("Claude Code isn't installed")
+    } else if plugin_dir().is_none() {
+        Some("the Echo plugin wasn't found")
+    } else {
+        None
+    }
+}
+
+/// Every 15 s in the app: start the minutes of each call that is due. Nothing when the settings
+/// can't be read (never on defaults) or the switch is off. The switch's boundary is set first,
+/// once (on from the first start: no backlog), and saved before anything is scheduled — tried
+/// again at the next tick if it can't be.
+pub fn auto_tick() {
+    let Ok(mut cfg) = Config::load() else { return };
+    if !cfg.auto_minutes {
+        return;
+    }
+    if cfg.auto_minutes_since.is_none() {
+        cfg.set_auto_minutes(true);
+        let saved = cfg.save();
+        let mut err = BOUNDARY_ERROR.lock().unwrap_or_else(|e| e.into_inner());
+        if let Err(e) = saved {
+            let why = format!("automatic minutes can't start: Echo's settings can't be saved ({e:#})");
+            log_once("boundary", &why);
+            *err = Some(why);
+            return;
+        }
+        *err = None;
+    }
+    let now = Local::now();
+    for dir in calls::all_calls() {
+        if !quitting() && gave_up(&calls::stamp_of(&dir)).is_none() && auto_due(&dir, &cfg, now, None) == Due::Now {
+            start_auto(dir);
+        }
+    }
+}
+
+/// Why the switch's boundary couldn't be saved (`auto_tick`; the window shows it).
+static BOUNDARY_ERROR: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// The app's scheduler for automatic minutes: `auto_tick` every 15 s until the app quits.
+pub fn start_scheduler() {
+    std::thread::spawn(|| {
+        while !quitting() {
+            auto_tick();
+            for _ in 0..15 {
+                if quitting() {
+                    return;
+                }
+                std::thread::sleep(Duration::from_secs(1));
+            }
+        }
+    });
+}
+
+/// Admit a due call on this thread (so the next tick sees `queued`), then run it on its own.
+/// Missing prerequisites (Claude Code, the plugin) are recorded at once, so the window says why;
+/// anything else that stops the admission is logged, and recorded the same way once it has
+/// failed `ADMIT_TRIES` ticks in a row (a lock held a moment is tried again).
+fn start_auto(dir: PathBuf) {
+    if let Err(e) = check(&dir) {
+        if auto_missing().is_some() {
+            refuse(&dir, &format!("{e:#}"));
+        }
+        return;
+    }
+    let stamp = calls::stamp_of(&dir);
+    match admit(&dir, Intent::Auto) {
+        Ok(admitted) => {
+            ADMIT_FAILED.lock().unwrap_or_else(|e| e.into_inner()).retain(|(s, _)| *s != stamp);
+            if let Some((place, r)) = admitted {
+                std::thread::spawn(move || {
+                    let _ = finish(&dir, place, r);
+                    if let Some(now) = calls::by_stamp(&stamp) {
+                        notify_outcome(&now);
+                    }
+                });
+            }
+        }
+        Err(e) => {
+            let why = format!("{e:#}");
+            let tries = {
+                let mut failed = ADMIT_FAILED.lock().unwrap_or_else(|e| e.into_inner());
+                let n = match failed.iter_mut().find(|(s, _)| *s == stamp) {
+                    Some((_, n)) => {
+                        *n += 1;
+                        *n
+                    }
+                    None => {
+                        failed.push((stamp.clone(), 1));
+                        1
+                    }
+                };
+                if n >= ADMIT_TRIES {
+                    failed.retain(|(s, _)| *s != stamp);
+                }
+                n
+            };
+            log_once(&stamp, &format!("{}: the automatic minutes couldn't start: {why}", dir.display()));
+            if tries >= ADMIT_TRIES {
+                // Recorded for the window; if even that can't be written, the call is left alone
+                // until Echo starts again (the window says why: `auto_state`).
+                if !refuse(&dir, &why) {
+                    GAVE_UP.lock().unwrap_or_else(|e| e.into_inner()).push((stamp.clone(), format!("the automatic minutes couldn't start: {why}")));
+                }
+                crate::app::notify("Couldn't write minutes", &format!("{}: {why}", call_title(&dir)));
+            }
+        }
+    }
+}
+
+/// Calls whose automatic admission failed, and how many ticks in a row (`start_auto`).
+static ADMIT_FAILED: std::sync::Mutex<Vec<(String, u32)>> = std::sync::Mutex::new(Vec::new());
+/// Calls given up on whose failure couldn't be recorded either, and why (until Echo starts again).
+static GAVE_UP: std::sync::Mutex<Vec<(String, String)>> = std::sync::Mutex::new(Vec::new());
+
+fn gave_up(stamp: &str) -> Option<String> {
+    GAVE_UP.lock().unwrap_or_else(|e| e.into_inner()).iter().find(|(s, _)| s == stamp).map(|(_, why)| why.clone())
+}
+const ADMIT_TRIES: u32 = 4;
+
+/// A line in the app's log, unless the last one said the same for `key` (the scheduler ticks
+/// every 15 s).
+fn log_once(key: &str, line: &str) {
+    static SAID: std::sync::Mutex<Vec<(String, String)>> = std::sync::Mutex::new(Vec::new());
+    let mut said = SAID.lock().unwrap_or_else(|e| e.into_inner());
+    match said.iter_mut().find(|(k, _)| k == key) {
+        Some((_, l)) if l == line => return,
+        Some((_, l)) => *l = line.to_string(),
+        None => said.push((key.to_string(), line.to_string())),
+    }
+    eprintln!("minutes: {line}");
 }
 
 /// Claude Code children of minutes runs in this process, and whether the app is quitting. A child
@@ -180,7 +511,7 @@ pub fn plugin_dir() -> Option<PathBuf> {
         .or_else(crate::app::plugin_root)
 }
 
-/// What the window shows next to the Write notes button.
+/// What the window shows next to the Write minutes button.
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn readiness() -> Value {
     let cfg = Config::load().unwrap_or_default();
@@ -198,7 +529,7 @@ pub fn request(call: &str, wait: bool) -> Result<()> {
     if !wait && crate::watch::running_watcher().is_some() {
         let name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         fs::write(paths::state_dir().join(format!("notes-{name}.request")), &name)?;
-        println!("Echo is writing the notes with Claude Code. Log: {}", dir.join(LOG).display());
+        println!("Echo is writing the minutes with Claude Code. Log: {}", dir.join(LOG).display());
         return Ok(());
     }
     // Run here, in this terminal: Ctrl-C stops Claude Code too (it runs in a session of its own),
@@ -207,56 +538,75 @@ pub fn request(call: &str, wait: bool) -> Result<()> {
     let dir = run(&dir)?;
     let r = status(&dir).unwrap_or_default();
     match r.state.as_str() {
-        "done" => println!("Notes written: {}", dir.join("notes.md").display()),
-        "skipped" => println!("No notes: {}", r.message.unwrap_or_default()),
+        "done" => println!("Minutes written: {}", dir.join("notes.md").display()),
+        "skipped" => println!("No minutes: {}", r.message.unwrap_or_default()),
         _ => bail!("{} (log: {})", r.message.unwrap_or_else(|| "failed".into()), dir.join(LOG).display()),
     }
     Ok(())
 }
 
-/// `echoctl notes <call> --auto --for <session>` (the terminal pane's automatic notes). The CLI
-/// checks the call is due (as `pending --for` lists them, and never tried before: a run that was
-/// skipped or failed is left to Write notes, not retried by every new session), takes the claim
-/// atomically (two sessions can't both start it) and hands the run to the app. Prints one JSON
-/// line: `{"requested": true|false, "reason": …}`.
-pub fn request_auto(call: &str, session: &Path) -> Result<()> {
+/// `echoctl notes <call> --auto --for <session>` (the terminal pane's automatic notes, older
+/// panes included): always refused now — the app writes the minutes itself (`auto_tick`), or,
+/// with `config.auto_minutes` off, nobody does automatically. One JSON line: `{"requested":
+/// false, "waiting": true|false, "reason": …}`.
+pub fn request_auto(call: &str) -> Result<()> {
     let dir = calls::resolve_call(call)?;
-    let say = |requested: bool, reason: &str| println!("{}", json!({ "requested": requested, "reason": reason }));
-    let why_not = if headless() {
-        Some("inside a run Echo started")
-    } else if !Config::load()?.notes_allowed(session) {
-        Some("this session's folder doesn't write notes (`echoctl config --notes-in`)")
-    } else if dir.join(RUN).exists() {
-        Some("notes were already tried for this call (Write notes runs them again)")
-    } else if !calls::pending_calls().iter().any(|d| d == &dir) {
-        Some("not due for automatic notes (too short, too old, claimed or done)")
-    } else {
-        None
-    };
-    if let Some(why) = why_not {
-        say(false, why);
-        return Ok(());
-    }
-    let marker = dir.join(calls::CLAIMED);
-    match fs::OpenOptions::new().write(true).create_new(true).open(&marker) {
-        Ok(mut f) => writeln!(f, "{} echo notes", Local::now().to_rfc3339())?,
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-            say(false, "another session has this call");
-            return Ok(());
-        }
-        Err(e) => return Err(e.into()),
-    }
-    let name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    if crate::watch::running_watcher().is_none() {
-        release_claim(&dir);
-        bail!("Echo isn't running — start it with `echoctl app start`");
-    }
-    if let Err(e) = paths::write_atomic(&paths::state_dir().join(format!("notes-{name}.request")), name.as_bytes()) {
-        release_claim(&dir);
-        return Err(e.into());
-    }
-    say(true, "Echo is writing the notes");
+    println!("{}", auto_answer(&dir, &Config::load()?));
     Ok(())
+}
+
+/// `request_auto`'s answer. `waiting`: no minutes yet and they are on their way — the call is due
+/// (now or later) for the app's automatic minutes, or a run or a session is writing them — so a
+/// pane keeps following the call. A prediction from the files: the app's own give-ups (`GAVE_UP`,
+/// in its memory) aren't seen here.
+fn auto_answer(dir: &Path, cfg: &Config) -> Value {
+    let running = crate::watch::running_watcher().is_some();
+    auto_answer_from(dir, auto_missing(), running, || auto_due(dir, cfg, Local::now(), None))
+}
+
+/// The scheduler may admit or withdraw a run while this looks, so the files are read after
+/// `auto_due`: minutes written → its answer stands; a run queued or running, or a session's fresh
+/// claim → on their way (the switch off or not); a run that ended → final. Tried with none of these
+/// (a run withdrawn or abandoned, or a session's claim gone, meanwhile) asks `auto_due` again, up
+/// to three times; the last answer is taken as it is. `missing`: `auto_missing()`; `running`: the
+/// app is.
+fn auto_answer_from(dir: &Path, missing: Option<&str>, running: bool, mut due_now: impl FnMut() -> Due) -> Value {
+    let mut due = due_now();
+    for _ in 0..3 {
+        if dir.join("notes.md").exists() {
+            break;
+        }
+        let run = status(dir);
+        if run.as_ref().is_some_and(pending) {
+            return json!({ "requested": false, "waiting": true, "reason": "Echo is writing the minutes now" });
+        }
+        if session_claim(dir) {
+            return json!({ "requested": false, "waiting": true, "reason": "a Claude Code session is writing the minutes now" });
+        }
+        if due != Due::Not(NotDue::Tried) || run.is_some() {
+            break; // not tried, or a run that ended
+        }
+        due = due_now();
+    }
+    // The app writes them later by itself: the pane keeps following the call until it has.
+    let later = matches!(due, Due::Now | Due::At(_) | Due::Not(NotDue::NotReady));
+    let waiting = later && missing.is_none();
+    // `NotReady` also when the user's notes can't be read: the minutes wait for them.
+    let notes = dir.join(calls::USER_NOTES);
+    let unreadable = (due == Due::Not(NotDue::NotReady) && notes.exists()).then(|| fs::read_to_string(&notes).err()).flatten();
+    let reason = match due {
+        _ if later && missing.is_some() => format!("no automatic minutes here: {}", missing.unwrap_or_default()),
+        _ if unreadable.is_some() => format!("your notes (my-notes.md) can't be read: {} — the minutes wait for them", unreadable.map(|e| e.to_string()).unwrap_or_default()),
+        _ if later && !running => "Echo isn't running: it writes the minutes once it starts again".to_string(),
+        Due::Not(NotDue::Off) => "automatic minutes are off (menu → Claude Code → Write minutes automatically)".to_string(),
+        Due::At(t) => format!("Echo writes the minutes itself at {}", t.format("%H:%M")),
+        Due::Now => "Echo is starting the minutes now".to_string(),
+        Due::Not(NotDue::Gate(why)) => format!("no automatic minutes: this call is {why} — use Write minutes"),
+        Due::Not(NotDue::Before) => "this call ended before automatic minutes were turned on — use Write minutes".to_string(),
+        Due::Not(NotDue::NotReady) => "Echo writes the minutes itself, 15 minutes after the call".to_string(),
+        Due::Not(NotDue::Tried) => "the minutes were already written or tried for this call".to_string(),
+    };
+    json!({ "requested": false, "waiting": waiting, "reason": reason })
 }
 
 /// Start runs the CLI or the page asked for (`notes-<call>.request`); called by the app.
@@ -275,30 +625,34 @@ pub fn handle_requests() {
     }
 }
 
-/// Say in `notes-run.json` why a run didn't start (the window shows it) and free an automatic
-/// claim — under the call's place, and only when no run holds it.
-pub fn refuse(dir: &Path, why: &str) {
-    let Ok(Some(_place)) = crate::app::FileLock::try_take(&dir.join(PLACE)) else { return };
-    if !status(dir).is_some_and(|r| pending(&r)) {
-        release_claim(dir);
-        save(dir, &Run { state: "failed".into(), message: Some(why.to_string()), finished_at: Some(Local::now()), ..Default::default() });
+/// Say in `notes-run.json` why a run didn't start (the window shows it) and free Echo's own
+/// claim (not a session's) — under the call's place, and only when no run holds it. Who wrote the
+/// minutes there is kept.
+/// Whether it is recorded (or another run of the call is on).
+pub fn refuse(dir: &Path, why: &str) -> bool {
+    let Ok(Some(_place)) = crate::app::FileLock::try_take(&dir.join(PLACE)) else { return false };
+    if status(dir).is_some_and(|r| pending(&r)) {
+        return true;
     }
+    release_claim(dir);
+    save(dir, &Run { state: "failed".into(), message: Some(why.to_string()), finished_at: Some(Local::now()), ..Run::carrying(dir) });
+    raw(dir).is_some_and(|r| r.state == "failed" && r.message.as_deref() == Some(why))
 }
 
 /// Run on a thread of the app; the outcome lands in `notes-run.json` and a notification. A run
-/// refused before it starts (no Claude Code, no plugin, …) releases an automatic claim and says
+/// refused before it starts (no Claude Code, no plugin, …) releases Echo's own claim and says
 /// why in `notes-run.json` too, unless another run of this call is on (its state stays).
 pub fn start_in_background(dir: PathBuf) {
     std::thread::spawn(move || {
         if let Err(e) = check(&dir) {
             refuse(&dir, &format!("{e:#}"));
-            crate::app::notify("Couldn't write notes", &format!("{e:#}"));
+            crate::app::notify("Couldn't write minutes", &format!("{e:#}"));
             return;
         }
         match run(&dir) {
             Ok(dir) => notify_outcome(&dir),
             // Refused before Claude Code started (a session has the call, …): only the reason.
-            Err(e) => crate::app::notify("Couldn't write notes", &format!("{e:#}")),
+            Err(e) => crate::app::notify("Couldn't write minutes", &format!("{e:#}")),
         }
     });
 }
@@ -307,10 +661,10 @@ fn notify_outcome(dir: &Path) {
     let Some(r) = status(dir) else { return };
     let title = call_title(dir);
     match r.state.as_str() {
-        // The watcher says "Notes ready" for calls it transcribed; the rest are said here.
-        "done" if !crate::watch::awaiting_notes(dir) => crate::app::notify("Notes ready", &title),
+        // Said once, here, once the run is `done` (the watcher's own check skips calls with a run).
+        "done" => crate::app::notify("Minutes ready", &title),
         "needs_login" => crate::app::notify("Claude Code needs you to sign in", &r.message.unwrap_or_default()),
-        "failed" => crate::app::notify("Couldn't write notes", &format!("{title}: {}", r.message.unwrap_or_default())),
+        "failed" => crate::app::notify("Couldn't write minutes", &format!("{title}: {}", r.message.unwrap_or_default())),
         _ => {}
     }
 }
@@ -320,16 +674,28 @@ fn call_title(dir: &Path) -> String {
     meta["title"].as_str().filter(|t| !t.is_empty()).map(str::to_owned).unwrap_or_else(|| "your call".into())
 }
 
+/// The call is still being recorded or transcribed.
+fn in_progress(dir: &Path) -> bool {
+    dir.join(crate::transcribe_marker()).exists() || crate::watch::running_watcher().and_then(|w| w.recording).is_some_and(|r| Path::new(&r) == dir)
+}
+
+/// A Claude Code session's fresh claim on the call (not one of Echo's runs: "echo notes").
+pub(crate) fn session_claim(dir: &Path) -> bool {
+    let marker = dir.join(calls::CLAIMED);
+    let fresh = fs::metadata(&marker).ok().and_then(|m| m.modified().ok()).and_then(|t| t.elapsed().ok()).is_some_and(|age| age < CLAIM_STALE);
+    fresh && !fs::read_to_string(&marker).is_ok_and(|t| t.contains("echo notes"))
+}
+
 /// Everything that must hold before Claude Code is started (said in words the user can act on).
 fn check(dir: &Path) -> Result<()> {
     if !dir.join("transcript.md").exists() {
         bail!("this call has no transcript yet");
     }
-    if dir.join(crate::transcribe_marker()).exists() || crate::watch::running_watcher().and_then(|w| w.recording).is_some_and(|r| Path::new(&r) == dir) {
+    if in_progress(dir) {
         bail!("this call is still being recorded or transcribed");
     }
     if status(dir).is_some_and(|r| pending(&r)) {
-        bail!("Echo is already writing the notes for this call");
+        bail!("Echo is already writing the minutes for this call");
     }
     if crate::app::claude_bin().is_none() {
         bail!("Claude Code is not installed — get it at https://claude.com/claude-code");
@@ -352,10 +718,8 @@ fn claim(dir: &Path) -> Result<()> {
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
         Err(e) => return Err(e.into()),
     }
-    let fresh = fs::metadata(&marker).ok().and_then(|m| m.modified().ok()).and_then(|t| t.elapsed().ok()).is_some_and(|age| age < CLAIM_STALE);
-    let ours = fs::read_to_string(&marker).is_ok_and(|t| t.contains("echo notes"));
-    if fresh && !ours && !dir.join("notes.md").exists() {
-        bail!("a Claude Code session is writing the notes for this call right now");
+    if session_claim(dir) && !dir.join("notes.md").exists() {
+        bail!("a Claude Code session is writing the minutes for this call right now");
     }
     fs::write(&marker, mine)?;
     Ok(())
@@ -366,11 +730,16 @@ fn claim(dir: &Path) -> Result<()> {
 /// `notes-run.json` and the log. Returns the call's folder afterwards (the run may have retitled it).
 pub fn run(dir: &Path) -> Result<PathBuf> {
     check(dir)?;
-    // Held until the run's final state and claim are settled (the run lets go of it only for the
-    // folder's final rename, after which nothing fails).
-    let mut place = Some(admit(dir)?);
+    let (place, r) = admit(dir, Intent::Explicit)?.ok_or_else(|| anyhow!("the minutes weren't started"))?;
+    finish(dir, place, r)
+}
+
+/// An admitted run, to its end. The place is held until the run's final state and claim are
+/// settled (the run lets go of it only for the folder's final rename, after which nothing fails).
+fn finish(dir: &Path, place: crate::app::FileLock, r: Run) -> Result<PathBuf> {
+    let mut place = Some(place);
     let stamp = calls::stamp_of(dir);
-    let out = run_in_place(dir, &mut place).map_err(|e| {
+    let out = run_in_place(dir, &mut place, r).map_err(|e| {
         // From `queued` on, every failure is recorded: the call never stays "already writing".
         let now = calls::by_stamp(&stamp).unwrap_or_else(|| dir.to_path_buf());
         let mut r = status(&now).unwrap_or_default();
@@ -417,7 +786,7 @@ fn local_model_turn() -> Result<std::result::Result<crate::app::FileLock, &'stat
 fn wait_for_local_model(stamp: &str, dir: &Path, r: &mut Run, name: &str) -> Result<crate::app::FileLock> {
     loop {
         if quitting() {
-            bail!("Echo quit before the notes were written — click Write notes again");
+            bail!("Echo quit before the minutes were written — click Write minutes again");
         }
         let why = match local_model_turn()? {
             Ok(lock) => return Ok(lock),
@@ -446,7 +815,7 @@ fn ready_for_notes(stamp: &str, dir: &Path, r: &mut Run) -> (PathBuf, Result<cra
         let now = calls::by_stamp(stamp).unwrap_or(before);
         match ready {
             Err(e) if e.downcast_ref::<crate::ai::SigningIn>().is_some() && t.elapsed() < Duration::from_secs(12 * 60) && !quitting() => {
-                let msg = format!("{e:#} — the notes wait for it");
+                let msg = format!("{e:#} — the minutes wait for it");
                 if r.message.as_deref() != Some(msg.as_str()) {
                     r.message = Some(msg);
                     save(&now, r);
@@ -474,17 +843,20 @@ fn not_ready(r: &mut Run, e: &anyhow::Error) {
     }
 }
 
-fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>) -> Result<PathBuf> {
+fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run) -> Result<PathBuf> {
     let call_stamp = calls::stamp_of(dir);
     let cfg = Config::load().unwrap_or_default();
     let home = paths::home();
-    let plugin =plugin_dir().ok_or_else(|| anyhow!("the Echo plugin wasn't found"))?;
+    let plugin = plugin_dir().ok_or_else(|| anyhow!("the Echo plugin wasn't found"))?;
     // The place is held by this process until the run ends (a dead holder = an interrupted run).
-    let mut r = Run { state: "queued".into(), pid: Some(std::process::id()), started_at: Some(Local::now()), ..Default::default() };
     // The call's profile: strict, never another one (`ai.rs`). Its lease is held for the whole
     // run: no sign-in changes the account under it.
     let (now, ready) = ready_for_notes(&call_stamp, dir, &mut r);
     let dir: &Path = &now; // retitled while it waited: carry on in the folder as it is named now
+    if r.auto && quitting() {
+        withdraw(dir); // started again at the next launch
+        return Ok(dir.to_path_buf());
+    }
     let ready = match ready {
         Ok(p) => p,
         Err(e) => {
@@ -500,10 +872,34 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>) -> Result<
     r.profile = Some(profile.id.clone());
     r.model = Some(label.clone());
     save(dir, &r);
-    let _local_turn = if profile.kind.gated() { Some(wait_for_local_model(&call_stamp, dir, &mut r, &profile.name)?) } else { None };
+    let _local_turn = if profile.kind.gated() {
+        match wait_for_local_model(&call_stamp, dir, &mut r, &profile.name) {
+            Ok(lock) => Some(lock),
+            Err(_) if r.auto && quitting() => {
+                withdraw(&calls::by_stamp(&call_stamp).unwrap_or_else(|| dir.to_path_buf()));
+                return Ok(dir.to_path_buf());
+            }
+            Err(e) => return Err(e),
+        }
+    } else {
+        None
+    };
     // Retitled while it waited: carry on in the folder as it is named now.
     let moved = calls::by_stamp(&call_stamp).filter(|d| d != dir);
     let dir: &Path = moved.as_deref().unwrap_or(dir);
+    // An automatic run may have waited long (a sign-in, the local model, a call): it starts only if
+    // the call is still due now — the switch, its boundary, the user's notes — else it is withdrawn
+    // and the app takes the call up again at its new time.
+    if r.auto {
+        let meta = calls::lock_meta(dir);
+        if let Err(e) = &meta {
+            eprintln!("minutes: {}: {e:#} — taken up again at the next tick", dir.display());
+        }
+        if meta.is_err() || quitting() || Config::load().map_or(true, |cfg| auto_due(dir, &cfg, Local::now(), Some(&r)) != Due::Now) {
+            withdraw(dir);
+            return Ok(dir.to_path_buf());
+        }
+    }
     let fail = |r: &mut Run, msg: String| -> Result<PathBuf> {
         r.state = "failed".into();
         r.message = Some(msg);
@@ -523,6 +919,7 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>) -> Result<
         cfg.notes_in.clone().filter(|d| d.is_dir()).unwrap_or_else(|| home.clone())
     };
 
+    let run_id = r.run_id.clone().unwrap_or_else(run_id);
     let mut log = match fs::File::create(dir.join(LOG)) {
         Ok(f) => f,
         Err(e) => return fail(&mut r, format!("couldn't create claude.log: {e}")),
@@ -531,13 +928,18 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>) -> Result<
     r.message = None;
     r.started_at = Some(Local::now());
     let started = Instant::now();
-    let _ = writeln!(log, "{}  Echo starts Claude Code to write notes", stamp());
+    let started_wall = std::time::SystemTime::now();
+    let _ = writeln!(log, "{}  Echo starts Claude Code to write the minutes{}", stamp(), if r.auto { " (automatically)" } else { "" });
     let _ = writeln!(log, "          call:   {}", dir.display());
     let _ = writeln!(log, "          model:  {label}");
     let _ = writeln!(log, "          folder: {}", cwd.display());
     let _ = writeln!(log, "          plugin: {}", plugin.display());
 
-    let mut child = match admit_child(|| crate::ai::claude_command(profile, &args(dir, &home, &plugin, model.as_deref()), &cwd, false)) {
+    let intent = if r.auto { Intent::Auto } else { Intent::Explicit };
+    let mut child = match admit_child(|| {
+        let mut c = crate::ai::prepare_claude(profile, &args(dir, &home, &plugin, model.as_deref(), intent, &run_id), &cwd, false)?;
+        Ok(c.env(calls::RUN_ID, &run_id).spawn()?)
+    }) {
         Ok(c) => c,
         Err(e) => {
             let msg = format!("couldn't start Claude Code: {e:#}");
@@ -623,8 +1025,19 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>) -> Result<
         .filter_map(|d| d["tool_name"].as_str().map(str::to_owned))
         .collect();
     r.finished_at = Some(Local::now());
+    let written_since = |f: &str| fs::metadata(dir.join(f)).and_then(|m| m.modified()).is_ok_and(|t| t >= started_wall);
+    let wrote_notes = written_since("notes.md");
+    if r.auto && quitting() && !wrote_notes {
+        // Echo stopped it on its way out: taken up again at the next start, as if never tried.
+        let _ = writeln!(log, "{}  Echo quit before the minutes were written: it starts them again next time.", stamp());
+        withdraw(dir);
+        return Ok(dir.to_path_buf());
+    }
+    let applied = if !is_error && wrote_notes { finish_actions(dir, &run_id, started_wall, &mut log) } else { Ok(false) };
+    let wrote_actions = matches!(applied, Ok(true));
     let ended = Ended {
-        wrote_notes: dir.join("notes.md").exists(),
+        wrote_notes,
+        wrote_actions,
         is_error,
         result_text: &result_text,
         err_text: &err_text,
@@ -632,10 +1045,15 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>) -> Result<
         timed_out: started.elapsed() >= TIMEOUT,
         refused: &refused,
         exit: status_code.and_then(|s| s.code()),
+        actions_error: applied.as_ref().err().map(String::as_str),
     };
     conclude(&mut r, profile, &ended, &label, &cfg.notes_model_label());
+    if r.state == "done" {
+        let sha256 = fs::read(dir.join("notes.md")).map(|b| hex(&sha2::Sha256::digest(&b))).unwrap_or_default();
+        r.minutes = Some(Written { model: label.clone(), at: Local::now(), sha256 });
+    }
     let _ = writeln!(log, "{}  {} ({}s)", stamp(), match r.state.as_str() {
-        "done" => "Notes written.".to_string(),
+        "done" => "Minutes written.".to_string(),
         s => format!("{s}: {}", r.message.as_deref().unwrap_or("")),
     }, started.elapsed().as_secs());
     if r.state != "done" {
@@ -670,9 +1088,51 @@ fn first_line(s: &str) -> Option<String> {
     s.lines().map(str::trim).find(|l| !l.is_empty()).map(|l| l.chars().take(300).collect())
 }
 
+/// Did this run write the call's action items? Yes when `echoctl actions --apply` recorded its
+/// id; else, when the run left its list unapplied — a weaker model stops one step short — the app
+/// applies it as this run's. Only the run's own file (`actions.new-<run>.json`, named in its
+/// prompt) counts: the skill's usual `actions.new.json` could be a session's, written meanwhile.
+/// Err(why): the run left its list, but it can't be applied.
+fn finish_actions(dir: &Path, run_id: &str, started: std::time::SystemTime, log: &mut impl Write) -> Result<bool, String> {
+    if calls::actions_written_by(dir).as_deref() == Some(run_id) {
+        return Ok(true);
+    }
+    let name = calls::actions_new_of(run_id);
+    if !fs::metadata(dir.join(&name)).and_then(|m| m.modified()).is_ok_and(|t| t >= started) {
+        return Ok(false);
+    }
+    match calls::apply_actions_as(dir, &dir.join(&name), run_id) {
+        Ok(n) => {
+            let _ = writeln!(log, "{}  Echo applied the {n} action items the run left in {name}", stamp());
+            Ok(true)
+        }
+        Err(e) => {
+            let _ = writeln!(log, "{}  The action items the run left in {name} can't be applied: {e:#}", stamp());
+            Err(format!("{e:#}"))
+        }
+    }
+}
+
+/// Lower-case hex.
+fn hex(b: &[u8]) -> String {
+    b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+/// Who wrote the minutes `notes.md` holds now (`notes-run.json`'s `minutes`, while the file still
+/// has the hash that run left): an update that replaced them and then failed, a session's rewrite
+/// or a hand edit leaves no model to name.
+pub fn minutes_model(dir: &Path) -> Option<String> {
+    let w = raw(dir)?.minutes?;
+    let now = fs::read(dir.join("notes.md")).ok()?;
+    (hex(&sha2::Sha256::digest(&now)) == w.sha256).then_some(w.model)
+}
+
 /// How Claude Code left a minutes run.
 struct Ended<'a> {
+    /// `notes.md` written during the run.
     wrote_notes: bool,
+    /// The action items applied by this run (`.actions-generation` names its id).
+    wrote_actions: bool,
     is_error: bool,
     result_text: &'a str,
     err_text: &'a str,
@@ -683,6 +1143,8 @@ struct Ended<'a> {
     refused: &'a [String],
     /// Its exit code (None: a signal).
     exit: Option<i32>,
+    /// Why the action list the run left couldn't be applied (`finish_actions`).
+    actions_error: Option<&'a str>,
 }
 
 /// The run's final state and message. A `claude` profile's sign-in is marked refused when a failed
@@ -690,9 +1152,14 @@ struct Ended<'a> {
 fn conclude(r: &mut Run, profile: &crate::ai::Profile, e: &Ended, label: &str, notes_model_label: &str) {
     use crate::ai::Kind;
     let all = format!("{}\n{}\n{}", e.seen, e.err_text, e.result_text);
-    let (state, message) = if e.wrote_notes && !e.is_error {
+    let (state, message) = if e.wrote_notes && e.wrote_actions && !e.is_error {
         crate::ai::job_worked(&profile.id);
         ("done", None)
+    } else if e.wrote_notes && !e.is_error {
+        ("failed", Some(match e.actions_error {
+            Some(why) => format!("The minutes were written, but the action items the run left can't be applied ({why}) — see the log, then Try again."),
+            None => "The minutes were written but not the action items — see the log, then Try again.".to_string(),
+        }))
     } else if e.is_error && needs_login(&all) && profile.kind == Kind::Local {
         // Its token is the profile's: /login in a terminal would only sign in the user's own Claude Code.
         ("failed", Some(format!(
@@ -710,7 +1177,7 @@ fn conclude(r: &mut Run, profile: &crate::ai::Profile, e: &Ended, label: &str, n
         }))
     } else if model_rejected(e.is_error, &all) {
         ("failed", Some(if profile.kind == Kind::System {
-            format!("Claude Code can't use the model \"{notes_model_label}\". Change it under menu → Claude Code → Notes model (\"default\" uses Claude Code's own setting).")
+            format!("Claude Code can't use the model \"{notes_model_label}\". Change it under menu → Claude Code → Minutes model (\"default\" uses Claude Code's own setting).")
         } else {
             format!("Claude Code can't use the model of {} ({label}) — `echoctl ai status`", profile.name)
         }))
@@ -719,8 +1186,8 @@ fn conclude(r: &mut Run, profile: &crate::ai::Profile, e: &Ended, label: &str, n
     } else if !e.refused.is_empty() {
         ("failed", Some(format!("Claude Code was refused a tool it needed ({}); see the log", e.refused.join(", "))))
     } else if !e.is_error {
-        // Claude finished but wrote no notes: the call was too short or thin (the skill's gate).
-        ("skipped", Some(first_line(e.result_text).unwrap_or_else(|| "Claude Code wrote no notes for this call".into())))
+        // Claude finished but wrote no minutes: the call was too short or thin (the skill's gate).
+        ("skipped", Some(first_line(e.result_text).unwrap_or_else(|| "Claude Code wrote no minutes for this call".into())))
     } else {
         ("failed", Some(
             first_line(e.result_text)
@@ -759,8 +1226,13 @@ fn rule_path(p: &Path) -> String {
     }
 }
 
+/// The Echo commands a run may use: what process-call needs, no more. A run follows a transcript
+/// (others' words) unattended, so it can't change Echo's settings, read the calendar or chats, or
+/// quit Echo.
+const RUN_COMMANDS: [&str; 7] = ["context", "actions", "speakers", "title", "vocab add", "frames", "transcribe"];
+
 /// The arguments for `claude`.
-fn args(dir: &Path, home: &Path, plugin: &Path, model: Option<&str>) -> Vec<String> {
+fn args(dir: &Path, home: &Path, plugin: &Path, model: Option<&str>, intent: Intent, run_id: &str) -> Vec<String> {
     let calls = paths::calls_dir();
     let abs = |p: &Path| format!("/{}", rule_path(p)); // permission rules spell absolute paths `//…`
     // Windows: Claude Code's Bash doesn't see the PATH this run gets, so the plugin's launcher
@@ -779,9 +1251,17 @@ fn args(dir: &Path, home: &Path, plugin: &Path, model: Option<&str>) -> Vec<Stri
          asking anything. Echo has already claimed this call for this run, so don't claim it again. \
          Run the Echo CLI as {cli}: one command per Bash call, with no \
          variables, `cd`, pipes, redirects or `&&`. Write and edit files with the Write and Edit \
-         tools, never through the shell. Skip the follow-up offers at the end; finish with a \
-         two-line report.",
-        fwd(dir)
+         tools, never through the shell. In step 5 write the new action list to `{}` (this run's own \
+         file) and apply that one. Skip the follow-up offers at the end; finish with a two-line \
+         report.{}",
+        fwd(dir),
+        fwd(&dir.join(calls::actions_new_of(run_id))),
+        if intent == Intent::Explicit {
+            "\n\nThe user asked for these minutes explicitly: write them even if `context` says \
+             `summarize: false`."
+        } else {
+            ""
+        }
     );
     let mut a: Vec<String> = vec!["-p".into(), prompt, "--output-format".into(), "stream-json".into(), "--verbose".into()];
     if let Some(m) = model {
@@ -799,11 +1279,17 @@ fn args(dir: &Path, home: &Path, plugin: &Path, model: Option<&str>) -> Vec<Stri
         format!("Grep({}/**)", abs(home)),
         format!("Edit({}/**)", abs(&calls)),
         format!("Write({}/**)", abs(&calls)),
-        format!("Bash({}/scripts/echoctl:*)", plugin.display()),
-        format!("Bash({launcher}:*)"),
-        "Bash(echoctl:*)".into(),
         "Skill(echo:process-call)".into(),
     ]);
+    // The CLI by any of the names the run may use for it, `RUN_COMMANDS` only.
+    let mut clis = vec![format!("{}/scripts/echoctl", plugin.display()), launcher.clone(), "echoctl".to_string()];
+    clis.dedup();
+    a.extend(clis.iter().flat_map(|cli| RUN_COMMANDS.iter().map(move |c| format!("Bash({cli} {c}:*)"))));
+    // The user's own notes are never changed, and the action items are written only through
+    // `echoctl actions --apply` (it keeps the ticks made meanwhile): deny rules win over the
+    // allowlist, and match every call folder (a retitle doesn't escape them).
+    a.push("--disallowedTools".into());
+    a.extend([format!("Edit({}/**/{})", abs(&calls), calls::USER_NOTES), format!("Edit({}/**/{})", abs(&calls), calls::ACTIONS)]);
     a
 }
 
@@ -886,18 +1372,19 @@ mod tests {
     }
 
     #[test]
-    fn automatic_notes_only_where_and_when_they_are_due() {
+    fn a_session_never_starts_minutes_automatically() {
         let (_env, root) = crate::paths::testenv::folders("notes-auto");
         let dir = root.join("home/calls/2026-10-23_120000-x");
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("meta.json"), "{}").unwrap();
         fs::create_dir_all(root.join("home/.echo")).unwrap();
-        Config { notes_in: Some(root.join("home")), ..Default::default() }.save().unwrap();
-        request_auto(&dir.display().to_string(), &root.join("elsewhere")).unwrap();
-        assert!(!dir.join(calls::CLAIMED).exists(), "a session outside notes_in claims nothing");
-        save(&dir, &Run { state: "skipped".into(), ..Default::default() });
-        request_auto(&dir.display().to_string(), &root.join("home")).unwrap();
-        assert!(!dir.join(calls::CLAIMED).exists(), "tried before: left to Write notes");
+        for on in [true, false] {
+            let mut cfg = Config { notes_in: Some(root.join("home")), ..Default::default() };
+            cfg.set_auto_minutes(on);
+            cfg.save().unwrap();
+            request_auto(&dir.display().to_string()).unwrap();
+            assert!(!dir.join(calls::CLAIMED).exists() && !dir.join(RUN).exists(), "the app writes them, or nobody automatically");
+        }
     }
 
     #[test]
@@ -905,9 +1392,9 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("echo-place-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
-        let place = admit(&dir).unwrap();
+        let place = admit(&dir, Intent::Explicit).unwrap().unwrap();
         assert_eq!(status(&dir).unwrap().state, "queued", "admission says so at once");
-        assert!(admit(&dir).is_err(), "one run at a time (even in this process)");
+        assert!(admit(&dir, Intent::Explicit).is_err(), "one run at a time (even in this process)");
         // While the place is held, an "interrupted" look at the state frees nothing.
         let gone = dead_pid();
         save(&dir, &Run { state: "queued".into(), pid: Some(gone), ..Default::default() });
@@ -932,7 +1419,7 @@ mod tests {
             let mut child = std::process::Command::new("sleep").arg("5").spawn().unwrap();
             save(&dir, &Run { state: "running".into(), pid: Some(gone), child_pid: Some(child.id()), ..Default::default() });
             assert_eq!(status(&dir).unwrap().state, "running");
-            assert!(admit(&dir).is_err());
+            assert!(admit(&dir, Intent::Explicit).is_err());
             let _ = child.kill();
             let _ = child.wait();
         }
@@ -947,7 +1434,7 @@ mod tests {
         let other = crate::app::FileLock::try_take(&dir.join(PLACE)).unwrap().unwrap(); // another run holds the place
         fs::write(dir.join(calls::CLAIMED), "2026-10-23T01:00:00+02:00 echo notes\n").unwrap();
         save(&dir, &Run { state: "running".into(), pid: Some(std::process::id()), ..Default::default() });
-        assert!(admit(&dir).is_err());
+        assert!(admit(&dir, Intent::Explicit).is_err());
         assert_eq!(fs::read_to_string(dir.join(calls::CLAIMED)).unwrap(), "2026-10-23T01:00:00+02:00 echo notes\n");
         assert_eq!(status(&dir).unwrap().state, "running");
         drop(other);
@@ -1024,7 +1511,7 @@ mod tests {
         // Once the notes say they wait for the sign-in, the call is retitled; then the sign-in ends.
         let signing_in = std::thread::spawn(move || {
             let t = Instant::now();
-            while !status(&d2).is_some_and(|r| r.message.is_some_and(|m| m.contains("the notes wait for it"))) {
+            while !status(&d2).is_some_and(|r| r.message.is_some_and(|m| m.contains("the minutes wait for it"))) {
                 assert!(t.elapsed() < Duration::from_secs(20), "the notes never said they wait");
                 std::thread::sleep(Duration::from_millis(20));
             }
@@ -1037,7 +1524,7 @@ mod tests {
         signing_in.join().unwrap();
         assert_eq!(ready.unwrap().profile().id, "w");
         assert_eq!(now, renamed, "carries on in the folder as it is named now");
-        assert!(r.message.unwrap().contains("the notes wait for it"));
+        assert!(r.message.unwrap().contains("the minutes wait for it"));
         assert!(status(&renamed).is_some(), "its state is where the call is");
         // Retitled during the check itself (it takes a second here), which then fails: the
         // failure goes where the call is.
@@ -1109,13 +1596,17 @@ mod tests {
         use crate::ai::Kind;
         let (_env, _root) = crate::paths::testenv::folders("notes-conclude");
         let profile = |kind| crate::ai::Profile { id: "judged".into(), name: "J".into(), kind, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false };
-        let ended = |wrote_notes, is_error, result_text| Ended { wrote_notes, is_error, result_text, err_text: "", seen: "", timed_out: false, refused: &[], exit: Some(1) };
+        let ended = |wrote_notes, is_error, result_text| Ended { wrote_notes, wrote_actions: wrote_notes, is_error, result_text, err_text: "", seen: "", timed_out: false, refused: &[], exit: Some(1), actions_error: None };
         let judge = |kind, e: &Ended| {
             let mut r = Run::default();
             conclude(&mut r, &profile(kind), e, "J · m", "sonnet");
             (r.state, r.message.unwrap_or_default())
         };
         assert_eq!(judge(Kind::System, &ended(true, false, "")).0, "done");
+        // Fresh minutes without this run's action items (an action ticked meanwhile doesn't count).
+        let (state, message) = judge(Kind::System, &Ended { wrote_actions: false, ..ended(true, false, "") });
+        assert_eq!(state, "failed");
+        assert!(message.contains("action items"), "{message}");
         // A call skipped as too short, whose report quotes what was said, needs no sign-in.
         let (state, message) = judge(Kind::Claude, &ended(false, false, "Too short for notes: they said they're not logged in."));
         assert_eq!((state.as_str(), message.as_str()), ("skipped", "Too short for notes: they said they're not logged in."));
@@ -1162,5 +1653,269 @@ mod tests {
         assert_eq!(c.notes_model_arg(), None);
         c.notes_model = Some("claude-opus-5-5".into());
         assert_eq!(c.notes_model_arg().as_deref(), Some("claude-opus-5-5"));
+    }
+
+    /// A closed, transcribed call worth minutes, ended `ago` before now.
+    fn closed_call(root: &Path, name: &str, ago: chrono::Duration) -> PathBuf {
+        let d = root.join("home/calls").join(name);
+        fs::create_dir_all(&d).unwrap();
+        let end = Local::now() - ago;
+        let meta = json!({ "started_at": (end - chrono::Duration::minutes(30)).to_rfc3339(), "ended_at": end.to_rfc3339() });
+        fs::write(d.join("meta.json"), meta.to_string()).unwrap();
+        fs::write(d.join("transcript.md"), "# t\n").unwrap();
+        fs::write(d.join("segments.json"), json!([{ "text": "x".repeat(2000) }]).to_string()).unwrap();
+        d
+    }
+
+    fn auto_on(since: chrono::Duration) -> Config {
+        let cfg = Config { auto_minutes_since: Some(chrono::Utc::now() - since), ..Default::default() };
+        cfg.save().unwrap();
+        cfg
+    }
+
+    #[test]
+    fn minutes_come_15_minutes_after_the_call_or_the_last_note() {
+        let (_env, root) = crate::paths::testenv::folders("notes-auto-due");
+        fs::create_dir_all(root.join("home/.echo")).unwrap();
+        let cfg = auto_on(chrono::Duration::days(1));
+        let now = Local::now();
+        let d = closed_call(&root, "2026-10-23_090000-a", chrono::Duration::minutes(20));
+        assert_eq!(auto_due(&d, &cfg, now, None), Due::Now);
+        // A note 10 minutes ago moves it to 5 minutes from now.
+        fs::write(d.join(calls::USER_NOTES), "mine").unwrap();
+        fs::File::options().write(true).open(d.join(calls::USER_NOTES)).unwrap().set_modified((now - chrono::Duration::minutes(10)).into()).unwrap();
+        let Due::At(t) = auto_due(&d, &cfg, now, None) else { panic!("not due yet") };
+        assert!((t - (now + chrono::Duration::minutes(5))).num_seconds().abs() <= 1);
+        // Just ended: 15 minutes after its end.
+        let fresh = closed_call(&root, "2026-10-23_100000-b", chrono::Duration::minutes(1));
+        assert!(matches!(auto_due(&fresh, &cfg, now, None), Due::At(_)));
+        // Off, or ended before it was turned on.
+        assert_eq!(auto_due(&d, &Config { auto_minutes: false, ..Config::default() }, now, None), Due::Not(NotDue::Off));
+        let old = closed_call(&root, "2026-10-21_090000-c", chrono::Duration::days(2));
+        assert_eq!(auto_due(&old, &cfg, now, None), Due::Not(NotDue::Before));
+        // Not closed, not transcribed, or being transcribed.
+        let open = closed_call(&root, "2026-10-23_110000-d", chrono::Duration::minutes(30));
+        fs::write(open.join("meta.json"), "{}").unwrap();
+        assert_eq!(auto_due(&open, &cfg, now, None), Due::Not(NotDue::NotReady));
+        let untranscribed = closed_call(&root, "2026-10-23_120000-e", chrono::Duration::minutes(30));
+        fs::remove_file(untranscribed.join("transcript.md")).unwrap();
+        assert_eq!(auto_due(&untranscribed, &cfg, now, None), Due::Not(NotDue::NotReady));
+        let busy = closed_call(&root, "2026-10-23_130000-f", chrono::Duration::minutes(30));
+        fs::write(busy.join(crate::transcribe_marker()), "1").unwrap();
+        assert_eq!(auto_due(&busy, &cfg, now, None), Due::Not(NotDue::NotReady));
+        // Too thin: why.
+        let short = closed_call(&root, "2026-10-23_140000-g", chrono::Duration::minutes(30));
+        fs::write(short.join("segments.json"), "[]").unwrap();
+        assert_eq!(auto_due(&short, &cfg, now, None), Due::Not(NotDue::Gate("less than 1,500 characters of transcript")));
+        // Tried: minutes exist, a run was recorded, or a session is writing them now.
+        let done = closed_call(&root, "2026-10-23_150000-h", chrono::Duration::minutes(30));
+        fs::write(done.join("notes.md"), "# m").unwrap();
+        assert_eq!(auto_due(&done, &cfg, now, None), Due::Not(NotDue::Tried));
+        let failed = closed_call(&root, "2026-10-23_160000-i", chrono::Duration::minutes(30));
+        save(&failed, &Run { state: "failed".into(), ..Default::default() });
+        assert_eq!(auto_due(&failed, &cfg, now, None), Due::Not(NotDue::Tried));
+        let session = closed_call(&root, "2026-10-23_170000-j", chrono::Duration::minutes(30));
+        fs::write(session.join(calls::CLAIMED), "2026-10-23T17:30:00+02:00\n").unwrap();
+        assert_eq!(auto_due(&session, &cfg, now, None), Due::Not(NotDue::Tried));
+        // What a pane is told: wait for the app (where it can write them), or not.
+        let ask = |d: &Path, cfg: &Config| auto_answer_from(d, None, true, || auto_due(d, cfg, Local::now(), None));
+        assert_eq!(ask(&fresh, &cfg)["waiting"], true);
+        assert_eq!(ask(&open, &cfg)["waiting"], true);
+        for not in [&done, &short, &old, &failed] {
+            assert_eq!(ask(not, &cfg)["waiting"], false);
+        }
+        // Without Claude Code nothing comes; with Echo quit they come once it runs again.
+        let none = auto_answer_from(&fresh, Some("Claude Code isn't installed"), true, || auto_due(&fresh, &cfg, Local::now(), None));
+        assert_eq!((none["waiting"].as_bool(), none["reason"].as_str()), (Some(false), Some("no automatic minutes here: Claude Code isn't installed")));
+        assert_eq!(auto_answer_from(&open, Some("x"), true, || Due::Not(NotDue::NotReady))["waiting"], false);
+        let quit = auto_answer_from(&fresh, None, false, || Due::Now);
+        assert_eq!((quit["waiting"].as_bool(), quit["reason"].as_str()), (Some(true), Some("Echo isn't running: it writes the minutes once it starts again")));
+        // Notes that can't be read: the minutes wait for them, and the pane says why.
+        let unreadable = closed_call(&root, "2026-10-23_210000-n", chrono::Duration::minutes(30));
+        fs::write(unreadable.join(calls::USER_NOTES), [0xff, 0xfe, 0x00]).unwrap();
+        assert_eq!(auto_due(&unreadable, &cfg, now, None), Due::Not(NotDue::NotReady));
+        let why = ask(&unreadable, &cfg);
+        assert!(why["waiting"] == true && why["reason"].as_str().unwrap().starts_with("your notes (my-notes.md) can't be read"), "{why}");
+        // Tried, but on their way: a run admitted (this process owns it) or a session writing them.
+        let admitted = closed_call(&root, "2026-10-23_200000-m", chrono::Duration::minutes(30));
+        save(&admitted, &Run { state: "queued".into(), pid: Some(std::process::id()), ..Default::default() });
+        assert_eq!(auto_due(&admitted, &cfg, now, None), Due::Not(NotDue::Tried));
+        assert_eq!(ask(&admitted, &cfg)["waiting"], true);
+        assert_eq!(ask(&session, &cfg)["waiting"], true);
+        // …whatever the computer: what is being written comes.
+        assert_eq!(auto_answer_from(&session, Some("x"), false, || Due::Not(NotDue::Tried))["waiting"], true);
+        // The scheduler moving meanwhile. Admitted between the pane's look and `auto_due`'s:
+        let racing = closed_call(&root, "2026-10-23_190000-l", chrono::Duration::minutes(30));
+        let admit_then_tried = || {
+            save(&racing, &Run { state: "queued".into(), pid: Some(std::process::id()), ..Default::default() });
+            Due::Not(NotDue::Tried)
+        };
+        assert_eq!(auto_answer_from(&racing, None, true, admit_then_tried)["waiting"], true);
+        // Withdrawn after `auto_due` saw it (a later note): looked at again, due later.
+        fs::remove_file(racing.join(RUN)).unwrap();
+        let mut seen = vec![Due::Not(NotDue::Tried), Due::At(Local::now() + chrono::Duration::minutes(15))].into_iter();
+        let answer = auto_answer_from(&racing, None, true, || seen.next().unwrap());
+        assert_eq!(answer["waiting"], true, "{answer}");
+        // Abandoned after `auto_due` saw it (Echo died while it waited): never tried, due again.
+        save(&racing, &Run { state: "queued".into(), auto: true, pid: Some(dead_pid()), ..Default::default() });
+        let mut seen = vec![Due::Not(NotDue::Tried), Due::At(Local::now() + chrono::Duration::minutes(15))].into_iter();
+        assert_eq!(auto_answer_from(&racing, None, true, || seen.next().unwrap())["waiting"], true);
+        // Ended after `auto_due` saw it running: final.
+        save(&racing, &Run { state: "failed".into(), ..Default::default() });
+        assert_eq!(auto_answer_from(&racing, None, true, || Due::Not(NotDue::Tried))["waiting"], false);
+        // The switch off (or the call before it): what is being written is still on its way.
+        let off = Config { auto_minutes: false, ..Config::default() };
+        assert_eq!(ask(&admitted, &off)["waiting"], true);
+        assert_eq!(ask(&session, &off)["waiting"], true);
+        assert_eq!(auto_answer_from(&admitted, None, true, || Due::Not(NotDue::Before))["waiting"], true);
+        assert_eq!(auto_answer(&fresh, &Config { auto_minutes: false, ..Config::default() })["waiting"], false);
+        // An automatic run that was still waiting when its owner died never started: due again.
+        let abandoned = closed_call(&root, "2026-10-23_180000-k", chrono::Duration::minutes(30));
+        save(&abandoned, &Run { state: "queued".into(), auto: true, pid: Some(dead_pid()), ..Default::default() });
+        assert_eq!(auto_due(&abandoned, &cfg, now, None), Due::Now);
+        assert!(status(&abandoned).is_none(), "shown as never tried");
+        // Nor one whose Claude Code stopped with it before writing anything (Echo quit, crashed).
+        save(&abandoned, &Run { state: "running".into(), auto: true, pid: Some(dead_pid()), child_pid: Some(dead_pid()), ..Default::default() });
+        assert_eq!(auto_due(&abandoned, &cfg, now, None), Due::Now);
+        assert!(status(&abandoned).is_none());
+        // …but not one whose Claude Code still writes, nor one that wrote the minutes.
+        save(&abandoned, &Run { state: "running".into(), auto: true, pid: Some(dead_pid()), child_pid: Some(std::process::id()), ..Default::default() });
+        assert_eq!(auto_due(&abandoned, &cfg, now, None), Due::Not(NotDue::Tried));
+        save(&abandoned, &Run { state: "running".into(), auto: true, pid: Some(dead_pid()), ..Default::default() });
+        fs::write(abandoned.join("notes.md"), "# Minutes\n").unwrap();
+        assert_eq!(auto_due(&abandoned, &cfg, now, None), Due::Not(NotDue::Tried));
+        assert_eq!(status(&abandoned).unwrap().state, "failed", "shown as a run that stopped");
+    }
+
+    #[test]
+    fn an_automatic_run_starts_only_while_the_call_is_still_due() {
+        let (_env, root) = crate::paths::testenv::folders("notes-auto-admit");
+        fs::create_dir_all(root.join("home/.echo")).unwrap();
+        auto_on(chrono::Duration::days(1));
+        let d = closed_call(&root, "2026-10-23_090000-a", chrono::Duration::minutes(20));
+        // A note saved between the scheduler's look and the admission: not admitted, nothing written.
+        fs::write(d.join(calls::USER_NOTES), "just now").unwrap();
+        assert!(admit(&d, Intent::Auto).unwrap().is_none());
+        assert!(!d.join(RUN).exists() && !d.join(calls::CLAIMED).exists());
+        fs::File::options().write(true).open(d.join(calls::USER_NOTES)).unwrap().set_modified((Local::now() - chrono::Duration::minutes(16)).into()).unwrap();
+        // Due: admitted once, the second look finds it tried.
+        let (place, r) = admit(&d, Intent::Auto).unwrap().unwrap();
+        assert!(r.auto && r.run_id.is_some() && !r.had_minutes && status(&d).unwrap().state == "queued");
+        drop(place);
+        assert!(admit(&d, Intent::Auto).unwrap().is_none(), "ticked twice: admitted once");
+        // Right before Claude Code would start: still due for this run (its own record is no "tried")…
+        let cfg = Config::load().unwrap();
+        assert_eq!(auto_due(&d, &cfg, Local::now(), Some(&r)), Due::Now);
+        // …not after a note, nor once the switch went off and on again past the call.
+        fs::write(d.join(calls::USER_NOTES), "one more").unwrap();
+        assert!(matches!(auto_due(&d, &cfg, Local::now(), Some(&r)), Due::At(_)));
+        let mut again = cfg;
+        again.set_auto_minutes(false);
+        again.set_auto_minutes(true);
+        assert_eq!(auto_due(&d, &again, Local::now(), Some(&r)), Due::Not(NotDue::Before));
+        // Withdrawn: never tried again, the app takes it up later.
+        withdraw(&d);
+        assert!(!d.join(RUN).exists() && !d.join(calls::CLAIMED).exists());
+        // Explicit runs ignore all of that; an update says the call had minutes (the window keeps them).
+        fs::write(d.join("notes.md"), "# m").unwrap();
+        let (_place, r) = admit(&d, Intent::Explicit).unwrap().unwrap();
+        assert!(r.had_minutes && !r.auto);
+    }
+
+    #[test]
+    fn the_model_is_named_only_for_the_minutes_it_wrote() {
+        let dir = std::env::temp_dir().join(format!("echo-minutes-model-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("notes.md"), "# Minutes\n").unwrap();
+        let sha256 = hex(&sha2::Sha256::digest(b"# Minutes\n"));
+        let written = Written { model: "Work · sonnet".into(), at: Local::now(), sha256 };
+        save(&dir, &Run { state: "done".into(), minutes: Some(written.clone()), ..Default::default() });
+        assert_eq!(minutes_model(&dir).as_deref(), Some("Work · sonnet"));
+        // An update queued, running, failed with another model: still the one that wrote them.
+        save(&dir, &Run { state: "failed".into(), model: Some("Home · opus".into()), minutes: Some(written), ..Default::default() });
+        assert_eq!(minutes_model(&dir).as_deref(), Some("Work · sonnet"));
+        let rev = crate::minutes::revision(&dir);
+        save(&dir, &Run { state: "queued".into(), model: None, minutes: raw(&dir).unwrap().minutes, ..Default::default() });
+        assert_eq!(crate::minutes::revision(&dir), rev, "the page doesn't reload for a run's state");
+        // An update refused before it started (no Claude Code, a profile that can't be pinned).
+        save(&dir, &Run { state: "failed".into(), minutes: raw(&dir).unwrap().minutes, ..Default::default() });
+        refuse(&dir, "Claude Code isn't installed");
+        assert_eq!(status(&dir).unwrap().message.as_deref(), Some("Claude Code isn't installed"));
+        assert_eq!(minutes_model(&dir).as_deref(), Some("Work · sonnet"), "a refused update keeps the model");
+        // Rewritten since (an update that failed after writing, a session, a hand edit): no model.
+        fs::write(dir.join("notes.md"), "# Minutes, rewritten\n").unwrap();
+        assert_eq!(minutes_model(&dir), None);
+        // A record from before: no hash, no model.
+        save(&dir, &Run { state: "done".into(), model: Some("old".into()), ..Default::default() });
+        assert_eq!(minutes_model(&dir), None);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_run_may_not_change_settings_or_keep_audio_through_its_commands() {
+        assert_eq!(refused_in_run(false, false, false), None);
+        assert!(refused_in_run(true, false, false).is_some_and(|w| w.contains("always-on")));
+        for (keep, model) in [(true, false), (false, true), (true, true)] {
+            assert!(refused_in_run(false, keep, model).is_some_and(|w| w.contains("audio")), "{keep} {model}");
+        }
+    }
+
+    #[test]
+    fn explicit_runs_may_override_the_gate_and_keep_the_users_files() {
+        let (_env, _root) = crate::paths::testenv::folders("notes-args");
+        let calls = paths::calls_dir();
+        let a = args(Path::new("/tmp/c"), Path::new("/tmp/h"), Path::new("/tmp/p"), None, Intent::Explicit, "r1").join("\n");
+        assert!(a.contains("asked for these minutes explicitly") && a.contains("/tmp/c/actions.new-r1.json"));
+        let auto = args(Path::new("/tmp/c"), Path::new("/tmp/h"), Path::new("/tmp/p"), None, Intent::Auto, "r1").join("\n");
+        assert!(!auto.contains("explicitly"));
+        let i = auto.lines().position(|l| l == "--disallowedTools").expect("deny rules");
+        let denied: Vec<&str> = auto.lines().skip(i + 1).collect();
+        let base = format!("/{}", rule_path(&calls));
+        assert_eq!(denied, [format!("Edit({base}/**/my-notes.md)"), format!("Edit({base}/**/actions.json)")]);
+        // The CLI only for what the skill does: not settings, the calendar, chats or quitting.
+        let cli: Vec<&str> = auto.lines().filter(|l| l.starts_with("Bash(")).collect();
+        for c in RUN_COMMANDS {
+            assert!(cli.contains(&format!("Bash(echoctl {c}:*)").as_str()) && cli.contains(&format!("Bash(/tmp/p/scripts/echoctl {c}:*)").as_str()), "{c}");
+        }
+        assert_eq!(cli.len(), RUN_COMMANDS.len() * 2, "{cli:?}"); // the plugin's script = the launcher here
+        // A Windows plugin folder: its script by the backslash path too, and the launcher with slashes.
+        let win = args(Path::new("/tmp/c"), Path::new("/tmp/h"), Path::new(r"C:\p"), None, Intent::Auto, "r1").join("\n");
+        let names = |c: &str| win.lines().filter(|l| l.starts_with("Bash(") && l.ends_with(&format!(" {c}:*)"))).count();
+        assert!(RUN_COMMANDS.iter().all(|c| names(c) == 3) && win.contains("Bash(C:/p/scripts/echoctl context:*)"), "{win}");
+        assert!(!auto.contains("echoctl:*") && !["server", "config", "calendar", "app", "ai ", "home"].iter().any(|w| cli.iter().any(|l| l.contains(&format!("echoctl {w}")))));
+    }
+
+    #[test]
+    fn a_list_the_run_wrote_but_didnt_apply_is_applied_for_it() {
+        let (_env, root) = crate::paths::testenv::folders("notes-finish-actions");
+        let d = root.join("home/calls/2026-10-23_090000-x");
+        fs::create_dir_all(&d).unwrap();
+        fs::write(d.join("meta.json"), "{}").unwrap();
+        let start = std::time::SystemTime::now() - Duration::from_secs(60);
+        let applied = |run: &str| serde_json::from_slice::<Value>(&fs::read(d.join(calls::ACTIONS_GENERATION)).unwrap()).unwrap()["run"] == run;
+        let mut log = Vec::new();
+        // Nothing left: no actions.
+        assert_eq!(finish_actions(&d, "run-1", start, &mut log), Ok(false));
+        // Its own file: applied as this run's.
+        fs::write(d.join(calls::actions_new_of("run-1")), r#"[{"task": "Send the report", "owner": "Me"}]"#).unwrap();
+        assert_eq!(finish_actions(&d, "run-1", start, &mut log), Ok(true));
+        assert!(applied("run-1") && !d.join(calls::actions_new_of("run-1")).exists());
+        assert!(String::from_utf8(log).unwrap().contains("applied the 1 action items"));
+        // Applied by the run itself: nothing to do.
+        assert_eq!(finish_actions(&d, "run-1", start, &mut Vec::new()), Ok(true));
+        // The skill's usual file is never taken: it could be a session's, written meanwhile.
+        fs::write(d.join("actions.new.json"), r#"[{"task": "From a session", "owner": null}]"#).unwrap();
+        assert_eq!(finish_actions(&d, "run-2", start, &mut Vec::new()), Ok(false));
+        assert!(d.join("actions.new.json").exists() && applied("run-1"));
+        // Its own file, but from before this run started (a clock gone back): not this run's.
+        fs::write(d.join(calls::actions_new_of("run-3")), "[]").unwrap();
+        fs::File::options().write(true).open(d.join(calls::actions_new_of("run-3"))).unwrap().set_modified(start - Duration::from_secs(60)).unwrap();
+        assert_eq!(finish_actions(&d, "run-3", start, &mut Vec::new()), Ok(false));
+        // A malformed one: not applied, said in the log and to the run (its message says why).
+        fs::write(d.join(calls::actions_new_of("run-4")), "{").unwrap();
+        let mut log = Vec::new();
+        assert!(matches!(finish_actions(&d, "run-4", start, &mut log), Err(why) if why.contains("isn't JSON")));
+        assert!(String::from_utf8(log).unwrap().contains("can't be applied"));
     }
 }

@@ -131,8 +131,8 @@ both speaking, at least 1 minute unless stated otherwise.
 1. During a recorded call, menu → **Add a note…**, type a note, confirm.
 
 **Expected**
-- The note is saved with the call (`my-notes.md` in the call folder) and shows up in the notes
-  Claude writes later (TC-CLA-003).
+- The note is saved with the call (`my-notes.md` in the call folder), shows in the call's Notes
+  tab, and shapes the minutes Claude writes later (TC-CLA-008).
 
 ---
 
@@ -183,4 +183,5 @@ both speaking, at least 1 minute unless stated otherwise.
 1. Arm, then make a 30-second call.
 
 **Expected**
-- A transcript is made. No notes are generated for it (too short), and nothing errors.
+- A transcript is made. No minutes are written for it automatically (too short), and nothing
+  errors.

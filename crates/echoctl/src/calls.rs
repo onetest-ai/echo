@@ -366,6 +366,49 @@ pub fn pick_template(title: Option<&str>) -> Option<Template> {
         .cloned()
 }
 
+/// Why a transcribed call is too thin for minutes (None: it isn't). Shared screens make a call
+/// worth them however short the talk: the slides are the content.
+fn gate(duration_min: f64, chars: usize, has_frames: bool) -> Option<&'static str> {
+    if has_frames {
+        None
+    } else if duration_min < MIN_SUMMARY_MINUTES {
+        Some("shorter than 3 minutes")
+    } else if chars < MIN_SUMMARY_CHARS {
+        Some("less than 1,500 characters of transcript")
+    } else {
+        None
+    }
+}
+
+/// `context`'s gate: no transcript yet, else `gate`. A call transcribed with nothing said (only
+/// shared screens) has a transcript — an empty one — so its frames still make it worth minutes,
+/// as `minutes_gate` says for the automatic ones.
+fn context_gate(dir: &Path, no_segments: bool, duration_min: f64, chars: usize, has_frames: bool) -> Option<&'static str> {
+    if no_segments && !dir.join("transcript.md").exists() {
+        Some("no transcript yet — run `echoctl transcribe` first")
+    } else {
+        gate(duration_min, chars, has_frames)
+    }
+}
+
+/// A call's length in minutes, from its `meta.json` (0 without a start and an end).
+fn duration_min(meta: &Value) -> f64 {
+    let ts = |k: &str| meta[k].as_str().and_then(|v| DateTime::parse_from_rfc3339(v).ok());
+    match (ts("started_at"), ts("ended_at")) {
+        (Some(a), Some(b)) => (b - a).num_seconds() as f64 / 60.0,
+        _ => 0.0,
+    }
+}
+
+/// The minutes gate for a call, as `context` applies it (the skill's), from its files: why it is
+/// too thin, or None.
+pub fn minutes_gate(dir: &Path) -> Option<&'static str> {
+    let duration_min = duration_min(&read_json(&dir.join("meta.json")));
+    let segs = read_json(&dir.join("segments.json"));
+    let chars = segs.as_array().into_iter().flatten().map(|s| s["text"].as_str().map_or(0, |t| t.chars().count())).sum();
+    gate(duration_min, chars, !frames_of(dir).is_empty())
+}
+
 /// `echoctl context <call>`: the input bundle for writing notes, as JSON.
 pub fn context(call: &str) -> Result<()> {
     let dir = resolve_call(call)?;
@@ -375,11 +418,7 @@ pub fn context(call: &str) -> Result<()> {
     let segs = read_json(&dir.join("segments.json"));
     let segs = segs.as_array().cloned().unwrap_or_default();
 
-    let ts = |k: &str| meta[k].as_str().and_then(|v| DateTime::parse_from_rfc3339(v).ok());
-    let duration_min = match (ts("started_at"), ts("ended_at")) {
-        (Some(a), Some(b)) => (b - a).num_seconds() as f64 / 60.0,
-        _ => 0.0,
-    };
+    let duration_min = duration_min(&meta);
     let mut chars = 0usize;
     let mut speech_s = 0f64;
     let mut by_lang: serde_json::Map<String, Value> = Default::default();
@@ -426,19 +465,13 @@ pub fn context(call: &str) -> Result<()> {
         .filter(|h| !h.is_empty())
         .collect();
 
-    // Shared screens make a call worth notes however short the talk: the slides are the content.
     let frames = frames_of(&dir);
-    let summarize = if segs.is_empty() {
-        Some("no transcript yet — run `echoctl transcribe` first")
-    } else if !frames.is_empty() {
-        None
-    } else if duration_min < MIN_SUMMARY_MINUTES {
-        Some("shorter than 3 minutes")
-    } else if chars < MIN_SUMMARY_CHARS {
-        Some("less than 1,500 characters of transcript")
-    } else {
-        None
-    };
+    let summarize = context_gate(&dir, segs.is_empty(), duration_min, chars, !frames.is_empty());
+    // The skill reads and rewrites the action items: by id from here on (`actions`). A list that
+    // can't be read doesn't stop the minutes: the new one replaces it (`apply_actions` keeps it aside).
+    if let Err(e) = actions(&dir) {
+        eprintln!("warning: {e:#} — the action items you apply replace it (the file is kept)");
+    }
     let subject = subject_of(&dir);
     let previous = subject.as_deref().and_then(|s| previous_with_notes(s, Some(&dir)));
 
@@ -473,14 +506,14 @@ pub fn context(call: &str) -> Result<()> {
     Ok(())
 }
 
-/// A Claude session took this call for notes (`claim`); no other session will.
+/// A Claude Code session (or Echo's own run: "echo notes") took this call for its minutes
+/// (`claim`); nobody else will.
 pub const CLAIMED: &str = ".claimed";
-/// Calls older than this are not offered for automatic notes (catch-up after a long gap would
-/// flood a session); the pane's Generate button still works for them.
+/// Calls older than this aren't listed by `echoctl pending`.
 const PENDING_MAX_AGE_H: i64 = 48;
 
-/// Calls transcribed but without notes, worth summarizing, unclaimed, from the last 48 h —
-/// what a Claude session picks up when it opens (the app writes no notes by itself).
+/// Calls transcribed but without minutes, worth them, unclaimed, from the last 48 h (`echoctl
+/// pending`). Sessions don't pick them up any more: the app writes minutes itself (`notes::auto_due`).
 pub fn pending_calls() -> Vec<PathBuf> {
     let now = chrono::Utc::now();
     all_calls()
@@ -488,29 +521,29 @@ pub fn pending_calls() -> Vec<PathBuf> {
         .filter(|d| {
             let meta = read_json(&d.join("meta.json"));
             let t = |k: &str| meta[k].as_str().and_then(|v| chrono::DateTime::parse_from_rfc3339(v).ok());
-            let (Some(a), Some(b)) = (t("started_at"), t("ended_at")) else { return false };
-            let long_enough = (b - a).num_seconds() as f64 / 60.0 >= MIN_SUMMARY_MINUTES;
+            let Some(b) = t("ended_at") else { return false };
             let recent = (now - b.with_timezone(&chrono::Utc)).num_hours() < PENDING_MAX_AGE_H;
-            let big_enough = fs::metadata(d.join("transcript.md")).is_ok_and(|m| m.len() as usize >= MIN_SUMMARY_CHARS);
-            long_enough && recent && big_enough
+            recent
+                && d.join("transcript.md").exists()
                 && !d.join("notes.md").exists()
                 && !d.join(CLAIMED).exists()
                 && !d.join(crate::transcribe_marker()).exists()
+                && minutes_gate(d).is_none()
         })
         .collect()
 }
 
-/// Refuse automatic notes for a session outside `config.notes_in`.
+/// Refuse a session's claim outside `config.notes_in`.
 fn session_allowed(session: Option<&Path>) -> Result<bool> {
     let cfg = crate::config::Config::load()?;
     Ok(session.is_none_or(|cwd| cfg.notes_allowed(cwd)))
 }
 
-/// `echoctl pending [--for <session cwd>]`: those calls as JSON (`[{dir, name}]`); empty for
-/// a session that isn't the one chosen for notes.
+/// `echoctl pending [--for <session cwd>]`: those calls as JSON (`[{dir, name}]`). Always empty
+/// for a session (`--for`): the app writes the minutes by itself, or nobody does automatically
+/// (`config.auto_minutes` off) — the terminal pane's catch-up starts nothing.
 pub fn pending(session: Option<&Path>) -> Result<()> {
-    // Inside a run Echo started for one call, the mod must not pick up others.
-    let calls = if session_allowed(session)? && !crate::notes::headless() { pending_calls() } else { vec![] };
+    let calls = if session.is_none() && !crate::notes::headless() { pending_calls() } else { vec![] };
     let out: Vec<Value> = calls
         .iter()
         .map(|d| json!({ "dir": d.display().to_string(), "name": d.file_name().map(|n| n.to_string_lossy().into_owned()) }))
@@ -519,27 +552,38 @@ pub fn pending(session: Option<&Path>) -> Result<()> {
     Ok(())
 }
 
-/// `echoctl claim <call>`: atomically take a call for notes. Fails if another session has it,
-/// so several open Claude sessions never process the same call twice.
+/// `echoctl claim <call>`: take a call for its minutes in a session. Fails while Echo's run of it
+/// is on or another session is writing them (a fresh claim on a call without minutes), so the same
+/// call is never processed twice at once; a claim left by a run that ended (Echo's keeps it once
+/// done), or an old one, is taken over — a session may write the minutes again.
 pub fn claim(call: &str, session: Option<&Path>) -> Result<()> {
     if crate::notes::headless() {
         bail!("this is a run Echo started for one call; it was claimed already");
     }
     if !session_allowed(session)? {
-        bail!("notes are written only in sessions opened in the folder set by `echoctl config --notes-in`");
+        bail!("this session isn't in the folder set by `echoctl config --notes-in`");
     }
     let dir = resolve_call(call)?;
     let marker = dir.join(CLAIMED);
+    let mine = format!("{}\n", chrono::Local::now().to_rfc3339());
     match fs::OpenOptions::new().write(true).create_new(true).open(&marker) {
         Ok(mut f) => {
             use std::io::Write;
-            let _ = writeln!(f, "{}", chrono::Local::now().to_rfc3339());
-            println!("{}", dir.display());
-            Ok(())
+            f.write_all(mine.as_bytes())?;
         }
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => bail!("already claimed by another session"),
-        Err(e) => Err(e.into()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            if crate::notes::status(&dir).is_some_and(|r| crate::notes::pending(&r)) {
+                bail!("Echo is writing the minutes for this call right now");
+            }
+            if crate::notes::session_claim(&dir) && !dir.join("notes.md").exists() {
+                bail!("another Claude Code session is writing the minutes for this call right now");
+            }
+            fs::write(&marker, mine)?;
+        }
+        Err(e) => return Err(e.into()),
     }
+    println!("{}", dir.display());
+    Ok(())
 }
 
 /// The user's own profile, read by every notes / follow-up step (`<home>/.echo/me.md`).
@@ -720,9 +764,282 @@ pub fn note(text: &str) -> Result<()> {
         })
         .unwrap_or_default();
     let line = if text.trim_start().starts_with('#') { format!("\n{}\n", text.trim()) } else { format!("- [{at}] {}\n", text.trim()) };
+    // Under the call's lock: the window's editor saves this file under it too (`save_my_notes`).
+    let _lock = lock_meta(&dir)?;
     let mut f = OpenOptions::new().create(true).append(true).open(dir.join(USER_NOTES))?;
     f.write_all(line.as_bytes())?;
     println!("noted in {}", dir.join(USER_NOTES).display());
+    Ok(())
+}
+
+/// What a save of the user's notes from the window did (`save_my_notes`).
+#[derive(Debug, PartialEq)]
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub struct NotesSaved {
+    /// What the file holds now.
+    pub stored: String,
+    /// The name of the copy kept of a version changed outside Echo meanwhile.
+    pub kept: Option<String>,
+}
+
+/// Save the user's notes as the window's editor has them. `base` is the text the editor last
+/// knew the file to hold: unchanged since → `text`; only appended to since (tray → Add a note…)
+/// → `text` + what was appended; changed otherwise (another editor) → that version is kept
+/// beside it as `my-notes.<HHMMSS>.md` and `text` is written. Nothing is written when the file
+/// already holds the result (the file's time is the minutes' clock), nor an empty file where
+/// there was none.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn save_my_notes(dir: &Path, text: &str, base: &str) -> Result<NotesSaved> {
+    let _lock = lock_meta(dir)?;
+    let path = dir.join(USER_NOTES);
+    let now = match fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
+    };
+    let mut kept = None;
+    let stored = if now == base {
+        text.to_string()
+    } else if let Some(tail) = now.strip_prefix(base) {
+        format!("{text}{tail}")
+    } else {
+        let name = (0..100)
+            .map(|n| format!("my-notes.{}{}.md", Local::now().format("%H%M%S"), if n == 0 { String::new() } else { format!("-{n}") }))
+            .find(|n| !dir.join(n).exists())
+            .context("no free name for a copy of the notes")?;
+        paths::write_atomic(&dir.join(&name), now.as_bytes()).with_context(|| format!("keeping {name}"))?;
+        kept = Some(name);
+        text.to_string()
+    };
+    if stored != now && (path.exists() || !stored.is_empty()) {
+        paths::write_atomic(&path, stored.as_bytes()).with_context(|| format!("writing {}", path.display()))?;
+    }
+    Ok(NotesSaved { stored, kept })
+}
+
+// ── action items ────────────────────────────────────────────────────────────────────────────
+
+pub const ACTIONS: &str = "actions.json";
+/// The file an app run writes its new action list to (its prompt names it) before `echoctl actions
+/// --apply`; only that run's (a session uses the skill's `actions.new.json`).
+pub fn actions_new_of(run_id: &str) -> String {
+    format!("actions.new-{run_id}.json")
+}
+/// Written by `apply_actions` only: which run last wrote the list (a status change never touches
+/// it), so a run is `done` only when it wrote its own (`notes::finish_actions`).
+pub const ACTIONS_GENERATION: &str = ".actions-generation";
+
+/// The run that last wrote the call's action items (`ACTIONS_GENERATION`; "session" for a
+/// Claude Code session's).
+pub fn actions_written_by(dir: &Path) -> Option<String> {
+    let v: Value = serde_json::from_slice(&fs::read(dir.join(ACTIONS_GENERATION)).ok()?).ok()?;
+    v["run"].as_str().map(str::to_owned)
+}
+/// Set on an app run's Claude Code: `apply_actions` records it as the list's writer.
+pub const RUN_ID: &str = "ECHOCTL_RUN_ID";
+
+/// A new id for an action item: 8 lowercase letters and digits (no l, o, 0, 1).
+fn action_id() -> String {
+    const ALPHABET: &[u8] = b"abcdefghijkmnpqrstuvwxyz23456789";
+    let mut b = [0u8; 8];
+    if getrandom::fill(&mut b).is_err() {
+        // No random source: the clock and a counter are unique enough within one list.
+        static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos() as u64;
+        b = (t ^ n.rotate_left(32) ^ std::process::id() as u64).to_le_bytes();
+    }
+    b.iter().map(|x| ALPHABET[*x as usize % ALPHABET.len()] as char).collect()
+}
+
+fn read_actions(dir: &Path) -> Result<Option<Vec<Value>>> {
+    let path = dir.join(ACTIONS);
+    match fs::read(&path) {
+        Ok(b) => match serde_json::from_slice::<Value>(&b).with_context(|| format!("reading {}", path.display()))? {
+            Value::Array(items) => Ok(Some(items)),
+            _ => bail!("{} isn't a list", path.display()),
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e).with_context(|| format!("reading {}", path.display())),
+    }
+}
+
+fn write_actions(dir: &Path, items: &[Value]) -> Result<()> {
+    let mut bytes = serde_json::to_vec_pretty(items)?;
+    bytes.push(b'\n');
+    Ok(paths::write_atomic(&dir.join(ACTIONS), &bytes)?)
+}
+
+/// Before the call's action items are written again (a run's admission, `apply_actions`): a list
+/// that isn't JSON, or isn't a list, is moved aside as `actions.unreadable-<HHMMSS>.json` — kept,
+/// never deleted — so one bad file can't stop the minutes for good. True if one was.
+fn set_aside_unreadable(dir: &Path) -> Result<bool> {
+    let path = dir.join(ACTIONS);
+    let bytes = match fs::read(&path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
+    };
+    if matches!(serde_json::from_slice::<Value>(&bytes), Ok(Value::Array(_))) {
+        return Ok(false);
+    }
+    let aside = (0..100)
+        .map(|n| dir.join(format!("actions.unreadable-{}{}.json", Local::now().format("%H%M%S"), if n == 0 { String::new() } else { format!("-{n}") })))
+        .find(|p| !p.exists())
+        .context("no free name for a copy of the action items")?;
+    fs::rename(&path, &aside).with_context(|| format!("moving {} aside", path.display()))?;
+    eprintln!("{} isn't a list of action items: kept as {}", path.display(), aside.display());
+    Ok(true)
+}
+
+/// Give every item without one an id (in place); true if any was given.
+fn give_ids(items: &mut [Value]) -> bool {
+    let mut given = false;
+    for it in items.iter_mut().filter(|it| it["id"].as_str().is_none_or(str::is_empty)) {
+        if it.is_object() {
+            it["id"] = json!(action_id());
+            given = true;
+        }
+    }
+    given
+}
+
+/// A call's action items (None: none written), every one with an id. A list written before ids
+/// existed gets them here, once, under the call's lock and written back — so neither the window,
+/// the pane, the CLI nor a minutes run ever sees an item it couldn't address.
+pub fn actions(dir: &Path) -> Result<Option<Vec<Value>>> {
+    let items = read_actions(dir)?;
+    if items.as_ref().is_none_or(|i| i.iter().all(|it| it["id"].as_str().is_some_and(|s| !s.is_empty()))) {
+        return Ok(items);
+    }
+    let _lock = lock_meta(dir)?;
+    actions_locked(dir)
+}
+
+/// `actions`, for a caller that holds the call's lock already (a run's admission: a list that
+/// can't be read is set aside first — the run writes a new one).
+pub(crate) fn actions_locked(dir: &Path) -> Result<Option<Vec<Value>>> {
+    set_aside_unreadable(dir)?;
+    let Some(mut items) = read_actions(dir)? else { return Ok(None) };
+    if give_ids(&mut items) {
+        write_actions(dir, &items)?;
+    }
+    Ok(Some(items))
+}
+
+/// Mark the action item `id` done or to do (the window, the pane, `echoctl action`). Under the
+/// call's lock, so it lands in the list a minutes run applies at the same moment, or after it.
+pub fn set_action_status(dir: &Path, id: &str, status: &str) -> Result<()> {
+    anyhow::ensure!(status == "done" || status == "todo", "a status is done or todo, not {status}");
+    let _lock = lock_meta(dir)?;
+    let mut items = read_actions(dir)?.ok_or_else(|| anyhow!("this call has no action items"))?;
+    let given = give_ids(&mut items);
+    let Some(it) = items.iter_mut().find(|it| it["id"].as_str() == Some(id)) else {
+        if given {
+            write_actions(dir, &items)?;
+        }
+        bail!("that action item isn't in the list any more — look again");
+    };
+    it["status"] = json!(status);
+    write_actions(dir, &items)
+}
+
+/// An action's task as compared across rewrites: lower case, single spaces.
+fn task_key(it: &Value) -> String {
+    it["task"].as_str().unwrap_or("").split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+}
+
+/// Replace the call's action items with the list in `file` (what process-call writes): each item
+/// whose `id` is in the current list keeps it and takes its current status (ticks made while the
+/// minutes were being written survive); an item without a known id (one not in the current list
+/// counts as none) takes the id and status of the one current item with the same owner and task,
+/// if exactly one; the rest get new ids. A current list that can't be read is set aside first.
+/// Records the writer in `.actions-generation` (`ECHOCTL_RUN_ID`, else a session's) and removes
+/// `file` — so only a new list in the call's own folder (`actions.new.json`, a run's
+/// `actions.new-<run>.json`) is taken: never `actions.json` itself, another call's or any other file.
+pub fn apply_actions(dir: &Path, file: &Path) -> Result<usize> {
+    let run = std::env::var(RUN_ID).ok().filter(|r| !r.is_empty()).unwrap_or_else(|| "session".into());
+    apply_actions_as(dir, file, &run)
+}
+
+/// `apply_actions` recorded as `run`'s (the app finishing a run that left its list unapplied).
+pub fn apply_actions_as(dir: &Path, file: &Path, run: &str) -> Result<usize> {
+    let name = file.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    let parent = file.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    // The same folder however it is spelled; as written where it can't be resolved (some Windows drives).
+    let in_call = match (dunce::canonicalize(parent), dunce::canonicalize(dir)) {
+        (Ok(a), Ok(b)) => a == b,
+        (Err(_), Err(_)) => parent == dir,
+        _ => false,
+    };
+    anyhow::ensure!(
+        name.starts_with("actions.new") && name.ends_with(".json") && in_call,
+        "{} isn't a new action list in the call's folder (actions.new.json there)",
+        file.display()
+    );
+    let text = fs::read_to_string(file).with_context(|| format!("reading {}", file.display()))?;
+    let Value::Array(mut new) = serde_json::from_str::<Value>(&text).with_context(|| format!("{} isn't JSON", file.display()))? else {
+        bail!("{} must be a JSON list of action items", file.display());
+    };
+    for (i, it) in new.iter().enumerate() {
+        anyhow::ensure!(it.is_object(), "item {} isn't an object", i + 1);
+        anyhow::ensure!(it["task"].as_str().is_some_and(|t| !t.trim().is_empty()), "item {} has no task", i + 1);
+        if let Some(st) = it.get("status").filter(|v| !v.is_null()) {
+            anyhow::ensure!(st == "todo" || st == "done", "item {}: status is todo or done", i + 1);
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    for id in new.iter().filter_map(|it| it["id"].as_str().filter(|s| !s.is_empty())) {
+        anyhow::ensure!(seen.insert(id.to_string()), "the id {id} is used twice");
+    }
+    let _lock = lock_meta(dir)?;
+    set_aside_unreadable(dir)?;
+    let mut current = read_actions(dir)?.unwrap_or_default();
+    give_ids(&mut current);
+    let by_id: std::collections::HashMap<String, &Value> = current.iter().filter_map(|it| Some((it["id"].as_str()?.to_string(), it))).collect();
+    let mut taken: std::collections::HashSet<String> = new.iter().filter_map(|it| it["id"].as_str().filter(|id| by_id.contains_key(*id)).map(str::to_owned)).collect();
+    for it in new.iter_mut() {
+        match it["id"].as_str().map(str::to_owned).filter(|id| by_id.contains_key(id)) {
+            Some(id) => it["status"] = by_id[&id]["status"].clone(),
+            None => {
+                let same: Vec<&&Value> = by_id
+                    .values()
+                    .filter(|c| task_key(c) == task_key(it) && c["owner"] == it["owner"] && !taken.contains(c["id"].as_str().unwrap_or("")))
+                    .collect();
+                if let [one] = same.as_slice() {
+                    let id = one["id"].as_str().unwrap_or("").to_string();
+                    it["status"] = one["status"].clone();
+                    it["id"] = json!(id);
+                    taken.insert(id);
+                } else {
+                    it["id"] = json!(action_id());
+                }
+            }
+        }
+        if !(it["status"] == "done" || it["status"] == "todo") {
+            it["status"] = json!("todo");
+        }
+    }
+    write_actions(dir, &new)?;
+    paths::write_atomic(&dir.join(ACTIONS_GENERATION), serde_json::to_string(&json!({ "run": run, "at": Local::now().to_rfc3339(), "items": new.len() }))?.as_bytes())?;
+    let _ = fs::remove_file(file);
+    Ok(new.len())
+}
+
+/// `echoctl action <call> <id> done|todo`.
+pub fn action_command(call: &str, id: &str, status: &str) -> Result<()> {
+    set_action_status(&resolve_call(call)?, id, status)?;
+    println!("{status}");
+    Ok(())
+}
+
+/// `echoctl actions <call> [--apply <file>]`: the list (with ids) as JSON, or apply a new one.
+pub fn actions_command(call: &str, apply: Option<&Path>) -> Result<()> {
+    let dir = resolve_call(call)?;
+    match apply {
+        Some(file) => println!("applied {} action items", apply_actions(&dir, file)?),
+        None => println!("{}", serde_json::to_string_pretty(&actions(&dir)?)?),
+    }
     Ok(())
 }
 
@@ -945,5 +1262,158 @@ mod tests {
         let long = "Discussion of the migration plan for the internal operations platform and the rollout schedule across regions";
         let t = clamp_title(long).unwrap();
         assert!(t.len() <= 100 && t.len() > 50 && !t.ends_with(' '), "{t}");
+    }
+
+    #[test]
+    fn the_users_notes_are_saved_without_losing_a_tray_note_or_another_editors_text() {
+        let (_env, root) = crate::paths::testenv::folders("calls-my-notes");
+        let d = root.join("home/calls/2026-10-23_090000-x");
+        fs::create_dir_all(&d).unwrap();
+        fs::write(d.join("meta.json"), "{}").unwrap();
+        let file = d.join(USER_NOTES);
+        // An empty editor over no file writes nothing.
+        assert_eq!(save_my_notes(&d, "", "").unwrap(), NotesSaved { stored: String::new(), kept: None });
+        assert!(!file.exists());
+        // Plain: the file is what the editor started from.
+        assert_eq!(save_my_notes(&d, "# Budget\n", "").unwrap().stored, "# Budget\n");
+        // The tray appended meanwhile: kept, after the editor's text.
+        fs::write(&file, "# Budget\n- [03:10] from the tray\n").unwrap();
+        let s = save_my_notes(&d, "# Budget\nmine\n", "# Budget\n").unwrap();
+        assert_eq!((s.stored.as_str(), s.kept), ("# Budget\nmine\n- [03:10] from the tray\n", None));
+        assert_eq!(fs::read_to_string(&file).unwrap(), s.stored);
+        // The same text again changes nothing, not even the file's time (the minutes' clock).
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+        fs::File::options().write(true).open(&file).unwrap().set_modified(old).unwrap();
+        save_my_notes(&d, &s.stored, &s.stored).unwrap();
+        assert_eq!(fs::metadata(&file).unwrap().modified().unwrap(), old);
+        // Changed by another editor: the editor's text is saved, the other version kept beside it.
+        fs::write(&file, "rewritten elsewhere\n").unwrap();
+        let s = save_my_notes(&d, "typed in Echo\n", "# Budget\nmine\n- [03:10] from the tray\n").unwrap();
+        assert_eq!(s.stored, "typed in Echo\n");
+        let kept = s.kept.expect("the other version is kept");
+        assert_eq!(fs::read_to_string(d.join(&kept)).unwrap(), "rewritten elsewhere\n");
+        // A file that can't be read is an error, nothing is written.
+        let bad = root.join("home/calls/2026-10-23_100000-y");
+        fs::create_dir_all(bad.join(USER_NOTES)).unwrap();
+        assert!(save_my_notes(&bad, "x", "").is_err());
+    }
+
+    #[test]
+    fn action_items_keep_their_ids_and_ticks_through_a_rewrite() {
+        let (_env, root) = crate::paths::testenv::folders("calls-actions");
+        let d = root.join("home/calls/2026-10-23_090000-x");
+        fs::create_dir_all(&d).unwrap();
+        fs::write(d.join("meta.json"), "{}").unwrap();
+        assert_eq!(actions(&d).unwrap(), None);
+        // A list from before ids: they are given once, and written back.
+        fs::write(d.join(ACTIONS), r#"[{"task": "Send the report", "owner": "Me", "status": "todo"}, {"task": "Book the room", "owner": "Ann", "status": "todo"}]"#).unwrap();
+        let first = actions(&d).unwrap().unwrap();
+        let ids: Vec<String> = first.iter().map(|a| a["id"].as_str().unwrap().to_string()).collect();
+        assert!(ids.iter().all(|i| i.len() == 8) && ids[0] != ids[1]);
+        assert_eq!(read_actions(&d).unwrap().unwrap(), first, "written back: everyone sees the same ids");
+        assert_eq!(actions(&d).unwrap().unwrap(), first, "given once");
+        // A tick names its item; one that isn't there is refused.
+        set_action_status(&d, &ids[0], "done").unwrap();
+        assert!(set_action_status(&d, "nosuchid", "done").unwrap_err().to_string().contains("isn't in the list"));
+        assert!(set_action_status(&d, &ids[0], "maybe").is_err());
+        // The run rewrites the list: reordered, the first reworded (same id), a new one; the user
+        // ticked the second meanwhile (after the run read the list).
+        set_action_status(&d, &ids[1], "done").unwrap();
+        let new = d.join("actions.new.json");
+        fs::write(&new, format!(r#"[{{"task": "Book a room", "owner": "Ann", "status": "todo", "id": "{}"}}, {{"task": "Send the quarterly report", "owner": "Me", "status": "todo", "id": "{}"}}, {{"task": "Call Bo", "owner": null}}]"#, ids[1], ids[0])).unwrap();
+        assert_eq!(apply_actions_as(&d, &new, "run-1").unwrap(), 3);
+        let after = read_actions(&d).unwrap().unwrap();
+        assert_eq!((after[0]["id"].as_str(), after[0]["status"].as_str()), (Some(ids[1].as_str()), Some("done")), "the tick made meanwhile survives");
+        assert_eq!((after[1]["id"].as_str(), after[1]["status"].as_str()), (Some(ids[0].as_str()), Some("done")));
+        assert!(after[2]["id"].as_str().is_some_and(|i| !ids.contains(&i.to_string())) && after[2]["status"] == "todo");
+        assert!(!new.exists(), "applied and removed");
+        let generation: Value = serde_json::from_slice(&fs::read(d.join(ACTIONS_GENERATION)).unwrap()).unwrap();
+        assert_eq!(generation["run"], "run-1");
+        // A tick doesn't touch the generation.
+        set_action_status(&d, &ids[0], "todo").unwrap();
+        assert_eq!(serde_json::from_slice::<Value>(&fs::read(d.join(ACTIONS_GENERATION)).unwrap()).unwrap()["run"], "run-1");
+        // Same wording, different owners, no ids: each takes its own item; an unknown id is replaced.
+        fs::write(d.join(ACTIONS), r#"[{"id": "aaaaaaaa", "task": "Review", "owner": "Ann", "status": "done"}, {"id": "bbbbbbbb", "task": "Review", "owner": "Bo", "status": "todo"}]"#).unwrap();
+        fs::write(&new, r#"[{"task": "review ", "owner": "Bo"}, {"task": "Review", "owner": "Ann"}, {"task": "Other", "owner": null, "id": "zzzzzzzz"}]"#).unwrap();
+        apply_actions(&d, &new).unwrap();
+        let after = read_actions(&d).unwrap().unwrap();
+        assert_eq!((after[0]["id"].as_str(), after[0]["status"].as_str()), (Some("bbbbbbbb"), Some("todo")));
+        assert_eq!((after[1]["id"].as_str(), after[1]["status"].as_str()), (Some("aaaaaaaa"), Some("done")));
+        assert_ne!(after[2]["id"], "zzzzzzzz");
+        assert_eq!(serde_json::from_slice::<Value>(&fs::read(d.join(ACTIONS_GENERATION)).unwrap()).unwrap()["run"], "session");
+        // Only a new list in the call's own folder: never the list itself, nor another call's.
+        let other = d.parent().unwrap().join("2026-10-22_090000-other");
+        fs::create_dir_all(&other).unwrap();
+        fs::write(other.join("actions.new.json"), r#"[{"task": "x"}]"#).unwrap();
+        for wrong in [d.join(ACTIONS), other.join("actions.new.json")] {
+            assert!(apply_actions(&d, &wrong).is_err() && wrong.exists(), "{}", wrong.display());
+        }
+        // …however its folder is spelled (macOS: the temp folder is under /var → /private/var).
+        let saved = read_actions(&d).unwrap();
+        for spelled in [dunce::canonicalize(&d).unwrap().join("actions.new.json"), d.join(".").join("actions.new.json")] {
+            fs::write(&spelled, r#"[{"task": "Same folder", "owner": null}]"#).unwrap();
+            assert_eq!(apply_actions(&d, &spelled).unwrap(), 1, "{}", spelled.display());
+        }
+        write_actions(&d, &saved.unwrap()).unwrap();
+        // Malformed lists change nothing.
+        for bad in [r#"{"task": "x"}"#, r#"[{"owner": "Me"}]"#, r#"[{"task": "x", "status": "maybe"}]"#, r#"[{"task": "a", "id": "q"}, {"task": "b", "id": "q"}]"#] {
+            fs::write(&new, bad).unwrap();
+            assert!(apply_actions(&d, &new).is_err(), "{bad}");
+        }
+        assert_eq!(read_actions(&d).unwrap().unwrap(), after);
+        // A current list that can't be read (a hand edit): the window says why; the next list
+        // replaces it, and it is kept aside.
+        fs::write(d.join(ACTIONS), "{ broken").unwrap();
+        assert!(actions(&d).is_err());
+        fs::write(&new, r#"[{"task": "Fresh", "owner": null}]"#).unwrap();
+        assert_eq!(apply_actions_as(&d, &new, "run-2").unwrap(), 1);
+        assert_eq!(read_actions(&d).unwrap().unwrap()[0]["task"], "Fresh");
+        let kept: Vec<_> = fs::read_dir(&d).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with("actions.unreadable-")).collect();
+        assert_eq!(kept.len(), 1);
+        assert_eq!(fs::read_to_string(kept[0].path()).unwrap(), "{ broken");
+    }
+
+    #[test]
+    fn a_session_takes_a_call_unless_someone_is_writing_its_minutes() {
+        let (_env, root) = crate::paths::testenv::folders("calls-claim");
+        let d = root.join("home/calls/2026-10-23_090000-x");
+        fs::create_dir_all(&d).unwrap();
+        fs::write(d.join("meta.json"), "{}").unwrap();
+        let call = d.display().to_string();
+        claim(&call, None).unwrap();
+        // A session's fresh claim on a call without minutes: another session waits.
+        assert!(claim(&call, None).unwrap_err().to_string().contains("another Claude Code session"));
+        // Minutes written since (that session's, or Echo's run that keeps its claim once done):
+        // a session may write them again.
+        fs::write(d.join(CLAIMED), "2026-10-23T10:00:00+02:00 echo notes\n").unwrap();
+        fs::write(d.join("notes.md"), "# Minutes\n").unwrap();
+        claim(&call, None).unwrap();
+        claim(&call, None).unwrap();
+        // Echo's run of the call is on: no.
+        fs::write(d.join(crate::notes::RUN), serde_json::to_vec(&json!({ "state": "running", "pid": std::process::id() })).unwrap()).unwrap();
+        assert!(claim(&call, None).unwrap_err().to_string().contains("Echo is writing"));
+    }
+
+    #[test]
+    fn the_minutes_gate_is_shared() {
+        let (_env, root) = crate::paths::testenv::folders("calls-gate");
+        let d = root.join("home/calls/2026-10-23_090000-x");
+        fs::create_dir_all(&d).unwrap();
+        let meta = |min: i64| json!({ "started_at": "2026-10-23T09:00:00+02:00", "ended_at": (DateTime::parse_from_rfc3339("2026-10-23T09:00:00+02:00").unwrap() + chrono::Duration::minutes(min)).to_rfc3339() }).to_string();
+        fs::write(d.join("meta.json"), meta(2)).unwrap();
+        fs::write(d.join("segments.json"), json!([{ "text": "x".repeat(2000) }]).to_string()).unwrap();
+        assert_eq!(minutes_gate(&d), Some("shorter than 3 minutes"));
+        fs::write(d.join("meta.json"), meta(10)).unwrap();
+        assert_eq!(minutes_gate(&d), None);
+        fs::write(d.join("segments.json"), json!([{ "text": "short" }]).to_string()).unwrap();
+        assert_eq!(minutes_gate(&d), Some("less than 1,500 characters of transcript"));
+        fs::write(d.join("frames.jsonl"), "{\"t\": 1, \"file\": \"frames/0001.jpg\"}\n").unwrap();
+        assert_eq!(minutes_gate(&d), None, "shared screens are content");
+        // Screens, nothing said: the skill's gate agrees once the call is transcribed.
+        fs::write(d.join("segments.json"), "[]").unwrap();
+        assert_eq!(minutes_gate(&d), None);
+        assert!(context_gate(&d, true, 10.0, 0, true).is_some(), "not transcribed yet");
+        fs::write(d.join("transcript.md"), "").unwrap();
+        assert_eq!(context_gate(&d, true, 10.0, 0, true), None);
     }
 }

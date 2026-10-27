@@ -1,7 +1,7 @@
 # Echo
 
 **Echo records the Teams calls you choose, turns them into text on your own Mac, and gives you
-notes and action items afterwards.** No bot joins the call, nothing is uploaded for
+minutes and action items afterwards.** No bot joins the call, nothing is uploaded for
 transcription, and the audio is deleted as soon as the transcript is ready.
 
 ![How Echo works](docs/images/how-it-works.svg)
@@ -10,8 +10,9 @@ Echo is two things that work together:
 
 - **The Echo app.** It lives in the menu bar, records the calls you opt in to and writes the
   transcript. It works on its own.
-- **Claude Code (optional).** After a call, Claude reads the transcript and writes the notes,
-  the action items and follow-up drafts. Without it you still get the full transcript.
+- **Claude Code (optional).** After a call, Claude reads the transcript and writes the minutes
+  and the action items (and follow-up drafts, in a session). Without it you still get the full
+  transcript.
 
 macOS 14.2 or later today. Windows is in progress.
 
@@ -51,26 +52,30 @@ for the call, **orange** means recording.
 
 Click **Open Echo…** in the menu. Every recorded call is in the list, newest first.
 
-**Notes**: the summary, decisions, open questions and next steps. The small purple times
+**Minutes**: the summary, decisions, open questions and next steps. The small purple times
 (`11:40`) jump to that moment in the transcript.
 
-![Notes for a call](docs/images/notes.jpg)
+![Minutes for a call](docs/images/notes.jpg)
+
+**Notes**: your own notes, during the call and after it. They are saved as you type (**Time**
+inserts the call's time while it records), and the minutes are written around them.
 
 **Transcript**: who said what and when. *Me* is you. In a call with one other person, they are
 named from the invite. In a bigger call, Echo names people from Teams itself: it watches who
 Teams shows as speaking (this needs the *Accessibility* permission). Download **Speech models →
 Speaker detection** (107 MB) too, and Echo also tells the voices apart, so a voice Teams didn't
-name still gets its own label (*Speaker 2*). Claude names those in the notes when someone
+name still gets its own label (*Speaker 2*). Claude names those in the minutes when someone
 introduces themselves or is addressed by name.
 
 ![Transcript](docs/images/transcript.jpg)
 
 **Actions**: the to-dos from the call, with owner and due date. Tick them off as you go.
 
-To share the notes, turn on menu → Claude Code → **Write a minutes page**: with every call's notes,
-Echo then also writes `<title>-minutes.html` in the call's folder, one file with the notes, the
-shared screens and diagrams, that opens in any browser and prints well. Mind what is on those
-screens before you send it on. `echoctl html <call> --open` writes it for any call.
+To share the minutes, click **Open in browser** or **Show in Finder** on the Minutes tab: Echo
+writes `<title>-minutes.html` in the call's folder, one file with the minutes, the shared screens
+and diagrams, that opens in any browser and prints well. Menu → Claude Code → **Write a minutes
+page (HTML file) too** writes it with every call's minutes. Mind what is on those screens before
+you send it on. `echoctl html <call> --open` writes it for any call.
 
 ![Action items](docs/images/actions.jpg)
 
@@ -87,35 +92,40 @@ keeps only the frames where the shared screen actually changed.
 Connect your Microsoft 365 calendar (menu → **Calendar → Connect Microsoft 365**, read-only)
 and the **Calendar** view shows yesterday, today and the next five days. Green means recorded,
 dashed purple means Echo will record it, and grey means you declined or it was cancelled.
-Click a meeting for details, notes from last time, and the Record button.
+Click a meeting for details, a recap of last time, and the Record button.
 
 ![Calendar week](docs/images/calendar.jpg)
 
 > Your organisation's IT may need to register an app for you. Put its ID under
 > menu → Calendar → Change app (client) ID.
 
-## 5. Get notes from Claude (optional)
+## 5. Get minutes from Claude (optional)
 
-Notes, action items and follow-ups are written by [Claude Code](https://claude.com/claude-code).
+Minutes, action items and follow-ups are written by [Claude Code](https://claude.com/claude-code).
 
-1. Menu → **Claude Code → Connect Claude Code**. This installs the Echo plugin.
-2. Start a new Claude Code session. Nothing else to set up: `/echo:doctor` checks Echo and fixes
-   what's missing if something doesn't work.
+1. Install Claude Code and sign in. That is all Echo needs to write minutes.
+2. Optional: menu → **Claude Code → Connect Claude Code** installs the Echo plugin in your own
+   Claude Code, for `/echo:process-call`, `/echo:live` and `/echo:doctor` (it checks Echo and fixes
+   what's missing if something doesn't work).
 
-From then on, notes come two ways:
+From then on, Echo writes the minutes by itself, **15 minutes after the call** (or after your
+last note, if you are still typing): it runs Claude Code in the background on your Mac with its
+own copy of the plugin, and no Claude Code session needs to be open. When the transcript is ready, a notification says when the
+minutes come ("minutes at 17:45"). Calls shorter than 3 minutes or with little said (unless a
+screen was shared) get none, nor do calls that ended before automatic minutes were on. **Write
+minutes** on the Minutes tab writes them at once, for any call. If it fails (for example, Claude
+Code is signed out), the call says why and **Show log** shows what happened. Menu → Claude Code →
+**Write minutes automatically** turns this off.
 
-- **With a Claude Code session open**, it writes the notes when the call ends and offers
-  follow-ups, such as a recap email or tasks for your action items. **Nothing is sent without
-  your explicit yes.**
-- **Without one**, Echo tells you the transcript is ready. Open the call and click **Write
-  notes**: Echo runs Claude Code in the background on your Mac, and the notes and action items
-  appear a minute or two later. If it fails (for example, Claude Code is signed out), the call
-  says why and **Show log** shows what happened.
+Claude Code sessions don't pick up calls by themselves. Ask one with `/echo:process-call <call>`
+and it writes the minutes and offers follow-ups, such as a recap email or tasks for your action
+items. **Nothing is sent without your explicit yes.**
 
-The model is `sonnet` by default. Change it under menu → Claude Code → **Notes model**: `opus`,
+The model is `sonnet` by default. Change it under menu → Claude Code → **Minutes model**: `opus`,
 `haiku`, a full model name, or `default` to use whatever your Claude Code is set up with (local
 models, a gateway, Bedrock or Vertex). During a
-call, `/echo:live` shows the transcript as it happens, and menu → **Add a note…** adds your own notes.
+call, `/echo:live` shows the transcript as it happens, and the Notes tab (or menu → **Add a
+note…**) takes your own notes.
 
 <details>
 <summary>Install the plugin by hand, or for one project</summary>
@@ -124,8 +134,6 @@ call, `/echo:live` shows the transcript as it happens, and menu → **Add a note
 claude plugin marketplace add onetest-ai/echo
 claude plugin install echo@onetest --scope user      # or: project (shared) / local (just you)
 ```
-To keep call notes out of your coding sessions, pick one folder under
-menu → Claude Code → Write call notes in.
 </details>
 
 ---
@@ -139,6 +147,28 @@ menu → Claude Code → Write call notes in.
   hears the audio, and nothing is kept there.
 - **Text only.** Audio is deleted once the transcript exists. Calls live in the folder you
   picked, as plain Markdown and JSON.
+- **Minutes.** With Claude Code installed, Echo runs it on each recorded call long enough for
+  minutes, 15 minutes after the call (or after your last note), with the call's AI profile. To
+  write the minutes it reads:
+  - the transcript and your own notes;
+  - the invite (subject, time, organizer, attendees with their email addresses, the Teams join
+    link) and the meeting chat;
+  - the shared screens Echo saved (menu → Settings → Save snapshots of shared screens, off by
+    default);
+  - your name and email from Echo's settings, your profile (`me.md`, if you filled it in), the
+    vocabulary and the notes template;
+  - the minutes of the last earlier call with the same subject, and on a re-run the current action
+    items.
+
+  Its permissions also let it read anything else in your data folder (your other calls) and in the
+  folder Echo runs Claude Code in (menu → Claude Code), and run the Echo commands the minutes need
+  (not your settings, calendar or chats). With the built-in profile (Claude Code as you set it up),
+  your own Claude Code settings apply too, with the tools they allow (MCP servers, web access). All
+  of it goes to the profile's model: for the built-in profile, wherever your Claude Code sends it
+  (Anthropic, or your gateway, Bedrock or Vertex); for a Claude account, Anthropic; for a local
+  model, the server the profile names (with Ollama on your computer, it stays there). With menu →
+  Claude Code → **Write minutes automatically** off, this happens only when you click **Write
+  minutes**.
 - **You are responsible for consent.** Tell the people on the call you are taking notes.
 
 ## FAQ
@@ -168,14 +198,14 @@ network you trust. Echo also accepts an `https://` URL, for a server behind a TL
 server can't be reached, the laptop transcribes the call itself. From a terminal, use
 `echoctl server use <url> --key <key>` or `echoctl server share on`.
 
-**Can a model on my Mac write the notes?** Yes, through [Ollama](https://ollama.com): then
-writing the notes sends nothing off your Mac.
+**Can a model on my Mac write the minutes?** Yes, through [Ollama](https://ollama.com): then
+writing the minutes sends nothing off your Mac.
 
 1. In Ollama, use a model that can call tools (Qwen 3.6, for example) with a context of at least
    64K tokens: Ollama → Settings → Context length, or a model of your own whose Modelfile says
    `PARAMETER num_ctx 131072`.
-2. In the folder Echo writes notes in (your data folder, or the one under menu → Claude Code →
-   Write call notes in), create `.claude/settings.json`:
+2. In the folder Echo runs Claude Code in for minutes (your data folder, or the one under
+   menu → Claude Code → Echo runs Claude Code for minutes in), create `.claude/settings.json`:
    ```json
    { "env": {
        "ANTHROPIC_BASE_URL": "http://localhost:11434",
@@ -185,12 +215,11 @@ writing the notes sends nothing off your Mac.
    ```
 3. `echoctl config --notes-model <the Ollama model>`.
 
-Notes then take a few minutes, and a local model follows Echo's instructions less closely than
-Claude: read them before you share them. Two things still use the model of an open Claude Code
-session: a session in another folder writes the notes itself, unless menu → Claude Code → Write
-call notes in names the folder from step 2 (then use **Write notes**); and during a call, a
-session with the Echo plugin sums up the live transcript for its pane. To keep a call entirely on
-your Mac, have no other Claude Code session with the Echo plugin open while it records.
+Writing them then takes a few minutes, and a local model follows Echo's instructions less
+closely than Claude: read them before you share them. Echo's own runs (automatic, or **Write
+minutes**) with the built-in AI profile use the folder from step 2; a Claude Code session you ask
+with `/echo:process-call` uses its own model. To keep a call entirely on your Mac, let Echo write
+its minutes.
 
 **Where are my files?** In the folder you picked, under `calls/`. Menu → **Open calls folder**.
 
@@ -209,7 +238,7 @@ your PATH; on macOS it lives at `/Applications/Echo.app/Contents/MacOS/echoctl`)
 `echoctl app [start|quit|autostart on|off|install-cli]`, `echoctl home [set <dir>|choose]`,
 `echoctl claude [connect --scope user|project|local]`, `echoctl doctor`,
 `echoctl arm|stop|status`, `echoctl model list|download|use|remove`,
-`echoctl pending|claim|context` (used by the plugin).
+`echoctl notes <call>` (write a call's minutes), `echoctl claim|context` (used by the plugin).
 
 ```sh
 scripts/build-plugin.sh          # dev build into plugin/bin (the plugin's launcher prefers it)

@@ -1,18 +1,25 @@
 ---
 name: process-call
-description: Turn a recorded Echo call into a transcript and useful notes — transcribe on-device, then write notes from a template (summary, decisions, action items, open questions), structured action items, and vocabulary fixes for misheard names and terms. Use after a recording stops, or when the user asks to process, transcribe, summarize or re-run a past call.
+description: Turn a recorded Echo call into a transcript and useful notes — transcribe on-device, then write notes from a template (summary, decisions, action items, open questions), structured action items, and vocabulary fixes for misheard names and terms. The Echo app runs it by itself after a call; use it when the user asks to process, transcribe, summarize or re-run a call.
 ---
 
 # echo: process a call
 
-Runs **unattended**: it is triggered automatically when a recording stops. Do every step
-without asking the user anything; the only thing that waits for them is the follow-up offers at
-the end, and nothing is ever sent without an explicit yes.
+Runs **unattended**: the Echo app starts it by itself 15 minutes after a call (or after the
+user's last note), or when the user asks (Write minutes). Do every step without asking the user
+anything; the only thing that waits for them is the follow-up offers at the end, and nothing is
+ever sent without an explicit yes.
 
-**Started by the Echo app** (Write notes; `ECHOCTL_HEADLESS` is set, nobody is watching): the
-app claimed the call already, `echoctl` is on PATH, and only the Echo CLI, reading the data folder
-and writing inside `calls/` are allowed. Run `echoctl …` as one plain command per Bash call (no
-variables, `cd`, pipes or redirects), write files with Write / Edit, and skip step 8's offers.
+**Started by the Echo app** (`ECHOCTL_HEADLESS` is set, nobody is watching): the app claimed the
+call already, `echoctl` is on PATH, and only the Echo CLI's `context`, `actions`, `speakers`, `title`,
+`vocab add`, `frames` and `transcribe`, reading the data folder and writing
+inside `calls/` are allowed (not the user's notes, not `actions.json` directly: step 5; the app's
+prompt names the file to write step 5's new list to — use that name instead of `actions.new.json`).
+Run `echoctl …` as one plain command per Bash call (no variables, `cd`, pipes or redirects), write
+files with Write / Edit, and skip step 8's offers.
+
+**The user's notes** (`user_notes`, `my-notes.md`) are theirs: read them, never edit, rewrite or
+delete them.
 
 CLI: `${CLAUDE_PLUGIN_ROOT}/scripts/echoctl` (below: `echoctl`) — the installed Echo
 app's CLI. Calls live in the app's data folder (`echoctl app` → `calls`), one folder per
@@ -21,8 +28,9 @@ call; `latest` works wherever a call is expected. All paths below are inside tha
 ## 1. Transcript
 The app transcribes every call itself when it stops. Only if `transcript.md` is missing and
 the WAVs are still there, run `echoctl transcribe <dir>` (Bash `run_in_background: true`).
-When the mod started this run it already claimed the call; if you run it by hand for a call
-nobody processed, `echoctl claim <dir>` first (it fails if another session has it — then stop).
+When the Echo app started this run it already claimed the call; run by hand, `echoctl claim <dir>`
+first — it fails only while Echo or another session is writing them (then stop); a call that has
+minutes already can be done again.
 
 ## 2. Read the context bundle
 `echoctl context <dir>` prints JSON — use its numbers, don't recompute them:
@@ -33,9 +41,12 @@ nobody processed, `echoctl claim <dir>` first (it fails if another session has i
 `me_profile` (if set) is the user's own description — role, team, the people and terms they
 deal with, how they like notes and follow-ups written. Follow it for tone, emphasis and naming.
 
-- If `summarize` is false: don't write notes, and leave any frames alone. A call with frames
-  is always summarized: the shared screens are content even when little was said. Tell the
-  user in one line (`skip_reason`) and stop after step 6 (title).
+- If `summarize` is false: don't write notes or the action items (step 5), and leave any frames
+  alone. A call with frames is always summarized: the shared screens are content even when little
+  was said. Tell the user in one line (`skip_reason`) and stop after step 6 (title).
+  **Unless the user asked for them explicitly** (the app's prompt says so, or the user asked you in
+  this session): then write the notes anyway — the gate only keeps short calls from getting notes
+  automatically. Not when `skip_reason` says there is no transcript yet: step 1 first.
 
 ## 3. Template
 `context` already picked it: `template.sections` is the list of `heading` + `instruction` to
@@ -107,12 +118,18 @@ addresses them by name and that speaker answers — and the name is one of the a
 Leave the others as "Speaker N"; never guess from who talked most or from the invite order. Do
 this before writing the notes, and use the names in them.
 
-## 5. Write `<dir>/actions.json`
-The action items from the notes, as a JSON array:
-`[{"task": "...", "owner": "Me" | "<name>" | null, "due": "<as stated>" | null,
-   "confidence": "high" | "low", "quote": "<short supporting quote>",
+## 5. Write the action items: `<dir>/actions.new.json`, then `echoctl actions <dir> --apply`
+The action items from the notes, as a JSON array, written to `<dir>/actions.new.json` (never to
+`actions.json` itself):
+`[{"id": "<kept from the current list, or none>", "task": "...", "owner": "Me" | "<name>" | null,
+   "due": "<as stated>" | null, "confidence": "high" | "low", "quote": "<short supporting quote>",
    "t": <seconds into the call where it was said>, "status": "todo"}]`
-(`status` is the user's to change — `todo` / `done` — in the pane; never reset it on a re-run.)
+then run `echoctl actions <dir> --apply <dir>/actions.new.json`. It replaces `actions.json`, keeps
+the status the user gave each item meanwhile (they tick items off in the window and the pane, also
+while you work), gives new items an id and removes `actions.new.json`; if it says the list is
+malformed, fix the file and run it again. On a re-run (`actions.json` exists: `echoctl actions
+<dir>` prints it), keep each item's `id` when your item is the same action — even reworded — and
+give new actions none.
 `owner` is whoever committed. A spoken "I will…" belongs to the speaker who said it: `"Me"` only
 when the user's own track ("Me") said it. A commitment written in the chat belongs to its sender:
 `"Me"` when that is the user (`me.name`). `null` when nobody took it.

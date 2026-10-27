@@ -169,7 +169,7 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
         let _ = fs::rename(file("events.jsonl"), file("events.1.jsonl"));
     }
     // Requests left by a previous run (a timed-out quit, say) must not act on this one.
-    for f in ["stop.request", "quit.request", "doctor.request", "open.request", "ai-profile.request"] {
+    for f in ["stop.request", "quit.request", "doctor.request", "open.request", "ai-profile.request", "quit.asking", "quit.cancelled"] {
         let _ = fs::remove_file(file(f));
     }
     let detects_calls = audio::app_in_call(app).is_some();
@@ -846,36 +846,26 @@ fn stop_mute_sync(alive: &mut Option<Arc<AtomicBool>>) {
     crate::audio::mic::MUTED.store(false, Ordering::SeqCst);
 }
 
-/// Transcribed calls whose notes (written by a Claude session) haven't appeared yet.
+/// Transcribed calls whose minutes haven't appeared yet.
 static AWAITING_NOTES: std::sync::Mutex<Vec<(PathBuf, Instant)>> = std::sync::Mutex::new(Vec::new());
 const NOTES_WAIT: Duration = Duration::from_secs(3 * 3600);
 
-/// "Notes ready" once a session has written them (checked every few seconds).
+/// "Minutes ready" once a Claude Code session has written them (minutes and action items; checked
+/// every few seconds). A call the app runs the minutes for is said by that run (`notes.rs`), once.
 fn notify_notes_ready() {
     let mut list = AWAITING_NOTES.lock().unwrap_or_else(|e| e.into_inner());
     list.retain(|(dir, since)| {
-        if dir.join("notes.md").exists() {
+        if dir.join(crate::notes::RUN).exists() {
+            return false;
+        }
+        if dir.join("notes.md").exists() && dir.join(crate::calls::ACTIONS).exists() {
             let meta: serde_json::Value = fs::read(dir.join("meta.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
             let title = meta["title"].as_str().map(str::to_owned).unwrap_or_else(|| "your call".into());
-            crate::app::notify("Notes ready", &title);
+            crate::app::notify("Minutes ready", &title);
             return false;
         }
         since.elapsed() < NOTES_WAIT
     });
-}
-
-/// Is the watcher waiting for this call's notes (it says "Notes ready" when they appear)?
-pub fn awaiting_notes(dir: &std::path::Path) -> bool {
-    AWAITING_NOTES.lock().unwrap_or_else(|e| e.into_inner()).iter().any(|(d, _)| d == dir)
-}
-
-/// A Claude Code session with the Echo plugin is open (the mod heartbeats every second).
-fn session_open() -> bool {
-    fs::metadata(paths::state_dir().join("mod.json"))
-        .and_then(|m| m.modified())
-        .ok()
-        .and_then(|t| t.elapsed().ok())
-        .is_some_and(|age| age < Duration::from_secs(10))
 }
 
 /// Set on the transcription child the watcher starts: the call it names is closed.
@@ -914,11 +904,19 @@ fn transcribed(dir: &std::path::Path, ok: bool, detail: &str) {
     if ok {
         let _ = fs::remove_file(dir.join(TRANSCRIBE_ERROR));
         AWAITING_NOTES.lock().unwrap_or_else(|e| e.into_inner()).push((dir.to_path_buf(), Instant::now()));
-        // No session will pick it up now: say where the notes come from.
-        if !session_open() && crate::app::claude_bin().is_some() && crate::calls::pending_calls().iter().any(|d| d == dir) {
-            let meta: serde_json::Value = fs::read(dir.join("meta.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-            let title = meta["title"].as_str().filter(|t| !t.is_empty()).unwrap_or("Your call");
-            crate::app::notify("Transcript ready", &format!("{title} — open Echo and click Write notes"));
+        // Say when the minutes come (or that they come only when asked for).
+        let meta: serde_json::Value = fs::read(dir.join("meta.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        let title = meta["title"].as_str().filter(|t| !t.is_empty()).unwrap_or("Your call");
+        use crate::notes::{Due, NotDue};
+        match crate::config::Config::load().map(|cfg| crate::notes::auto_due(dir, &cfg, chrono::Local::now(), None)) {
+            Ok(Due::At(t)) if crate::notes::auto_missing().is_none() => {
+                crate::app::notify("Transcript ready", &format!("{title} — minutes at {}. Add your notes in Echo before then.", t.format("%H:%M")))
+            }
+            Ok(Due::At(_)) => crate::app::notify("Transcript ready", title),
+            Ok(Due::Not(NotDue::Off)) if crate::app::claude_bin().is_some() && crate::calls::minutes_gate(dir).is_none() => {
+                crate::app::notify("Transcript ready", &format!("{title} — open Echo and click Write minutes"))
+            }
+            _ => {}
         }
     } else {
         let _ = fs::write(dir.join(TRANSCRIBE_ERROR), detail);
@@ -958,7 +956,8 @@ fn finish_transcript(_dir: PathBuf, live: crate::recorder::Live) {
 }
 
 /// Transcription needs no Claude turn, so the watcher runs it right away as a child process
-/// (`echoctl transcribe`), then emits `transcribed`; only the notes step waits for the session.
+/// (`echoctl transcribe`), then emits `transcribed`; the minutes follow from the app's scheduler
+/// (`notes::auto_due`) or when asked for.
 fn transcribe_in_background(dir: PathBuf) {
     std::thread::spawn(move || transcribe_now(&dir));
 }

@@ -23,9 +23,9 @@ use sha2::{Digest, Sha256};
 
 use crate::calls;
 
-/// Diagrams (```mermaid): mermaid 11.4.1, MIT. The window loads it on first use; a page embeds it
-/// only when its notes draw a diagram.
-pub const MERMAID_JS: &str = include_str!("../ui/vendor/mermaid.min.js");
+/// Diagrams (```mermaid): mermaid 11.4.1, MIT. A page embeds it only when its minutes draw a
+/// diagram (the window's Minutes tab shows the page itself).
+const MERMAID_JS: &str = include_str!("../ui/vendor/mermaid.min.js");
 
 /// Marks the pages Echo wrote, so a renamed call's old page is replaced, never someone's own file.
 const GENERATOR: &str = r#"<meta name="generator" content="Echo minutes">"#;
@@ -58,21 +58,58 @@ pub fn command(call: &str, open: bool, auto: bool) -> Result<()> {
     Ok(())
 }
 
-/// Write the minutes page of the call in `dir` (it needs `notes.md`); returns its path.
-pub fn write(dir: &Path) -> Result<PathBuf> {
-    let md = fs::read_to_string(dir.join("notes.md")).with_context(|| format!("{} has no notes yet", dir.display()))?;
-    // The call's title as Echo shows it (a retitled call's, `echoctl title`), else the meeting's.
+/// The call's title as Echo shows it (a retitled call's, `echoctl title`), else the meeting's.
+fn title_of(dir: &Path) -> String {
     let meta: Value = fs::read(dir.join("meta.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-    let title = meta["title"]
+    meta["title"]
         .as_str()
         .filter(|t| !t.trim().is_empty())
         .map(str::to_owned)
         .or_else(|| calls::subject_of(dir))
         .filter(|t| !t.trim().is_empty())
-        .unwrap_or_else(|| dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
-    let run: Value = fs::read(dir.join("notes-run.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        .unwrap_or_else(|| dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())
+}
+
+/// The page of the call in `dir` (it needs `notes.md`), and its CSP; `embed`: the copy the
+/// window's Minutes tab shows (one more script: timestamps and links talk to the window).
+fn page(dir: &Path, embed: bool) -> Result<(String, String)> {
+    let md = fs::read_to_string(dir.join("notes.md")).with_context(|| format!("{} has no minutes yet", dir.display()))?;
     let load = |name: &str| frame_bytes(dir, name);
-    let html = render(&md, &title, run["model"].as_str(), &load, &kept_frames(dir));
+    // The model is named only while the minutes are as the run that wrote them left them.
+    Ok(render_page(&md, &title_of(dir), crate::notes::minutes_model(dir).as_deref(), &load, &kept_frames(dir), embed))
+}
+
+/// The page for the window's Minutes tab, rendered now (no file written), and its CSP.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn render_for_window(dir: &Path) -> Result<(String, String)> {
+    page(dir, true)
+}
+
+/// Bumped when the page's rendering changes, so an open Minutes tab shows the new one.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+const RENDER_VERSION: u32 = 1;
+
+/// A short hash of exactly what the page is rendered from: the minutes and the kept frames (size
+/// and time), the title, the model it names, the renderer. The Minutes tab reloads its frame only
+/// when this changes — never for a note, an action ticked or a run's state.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn revision(dir: &Path) -> String {
+    let stamp = |p: PathBuf| fs::metadata(p).ok().map(|m| (m.len(), m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_nanos())));
+    let input = format!(
+        "{RENDER_VERSION}|{:?}|{:?}|{:?}|{}|{:?}",
+        stamp(dir.join("notes.md")),
+        stamp(dir.join("frames.jsonl")),
+        stamp(dir.join("frames")),
+        title_of(dir),
+        crate::notes::minutes_model(dir),
+    );
+    Sha256::digest(input.as_bytes()).iter().take(8).map(|b| format!("{b:02x}")).collect()
+}
+
+/// Write the minutes page of the call in `dir` (it needs `notes.md`); returns its path.
+pub fn write(dir: &Path) -> Result<PathBuf> {
+    let (html, _) = page(dir, false)?;
+    let title = title_of(dir);
 
     // Under the title, unless a file there isn't one of ours: then "<title> (2)-minutes.html", ….
     let stem = file_stem(&title);
@@ -173,7 +210,13 @@ fn frame_bytes(dir: &Path, name: &str) -> Option<(&'static str, Vec<u8>)> {
 type Loader<'a> = dyn Fn(&str) -> Option<(&'static str, Vec<u8>)> + 'a;
 
 /// The whole page.
+#[cfg(test)]
 fn render(md: &str, title: &str, model: Option<&str>, load: &Loader, frames: &[Frame]) -> String {
+    render_page(md, title, model, load, frames, false).0
+}
+
+/// The page and its CSP (also sent as a header when the window serves it).
+fn render_page(md: &str, title: &str, model: Option<&str>, load: &Loader, frames: &[Frame], embed: bool) -> (String, String) {
     let (front, rest) = calls::split_frontmatter(md);
     let (mut meta, rest) = header_block(rest);
     // Then the frontmatter's fields, unless a row already says the same thing (`time` beside the
@@ -224,6 +267,9 @@ fn render(md: &str, title: &str, model: Option<&str>, load: &Loader, frames: &[F
     // Only these exact scripts may run (by hash); images only from the page itself — so a diagram
     // can't fetch a URL (mermaid's `img:` shapes), nor anything else in the page.
     let mut sources = vec![PAGE_JS]; // first: it polices links before mermaid binds any
+    if embed {
+        sources.push(EMBED_JS);
+    }
     if body.mermaid {
         sources.extend([MERMAID_JS, MERMAID_INIT]);
     }
@@ -234,14 +280,15 @@ fn render(md: &str, title: &str, model: Option<&str>, load: &Loader, frames: &[F
         hashes.join(" ")
     );
     let tags: String = scripts.iter().map(|(s, _)| format!("<script>{s}</script>\n")).collect();
-    format!(
+    let html = format!(
         "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
          <meta http-equiv=\"Content-Security-Policy\" content=\"{csp}\">\n\
          <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n{GENERATOR}\n\
          <title>{} – minutes</title>\n<style>{CSS}</style>\n</head>\n<body>\n<main>\n{main}\n{screens}\n</main>\n\
          <div id=\"lightbox\"><img alt=\"\"></div>\n{tags}</body>\n</html>\n",
         esc(title)
-    )
+    );
+    (html, csp)
 }
 
 /// Each script as the page carries it, with its CSP source (`'sha256-…'`). LF only: a browser
@@ -645,6 +692,30 @@ const PAGE_JS: &str = "(function () {
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') lb.click(); });
 })();";
 
+/// Only in the window's copy (`render_for_window`), in a sandboxed frame: a click on a time posts
+/// `{echo: 'at', t}` to the window (it opens the transcript there), a click on an https link
+/// posts `{echo: 'open', url}` (the window opens it in the browser) instead of navigating the frame.
+const EMBED_JS: &str = "(function () {
+  document.documentElement.className += ' embedded';
+  var post = function (m) { try { window.parent.postMessage(m, '*'); } catch (e) {} };
+  var XLINK = 'http://www.w3.org/1999/xlink';
+  document.addEventListener('click', function (e) {
+    var el = e.target && e.target.closest ? e.target : null;
+    if (!el) return;
+    var ts = el.closest('.ts');
+    if (ts) {
+      var t = ts.textContent.trim().split(':').reduce(function (a, p) { return a * 60 + Number(p); }, 0);
+      if (isFinite(t) && t >= 0) post({ echo: 'at', t: t });
+      return;
+    }
+    var a = el.closest('a, area');
+    if (!a) return;
+    e.preventDefault();
+    var u = a.getAttribute('href') || a.getAttributeNS(XLINK, 'href') || '';
+    if (/^https:\\/\\//i.test(u)) post({ echo: 'open', url: u });
+  }, true);
+})();";
+
 const CSS: &str = "
 :root {
   --bg: #ffffff; --fg: #1d2733; --muted: #5b6875; --line: #dfe5ea;
@@ -675,6 +746,7 @@ th, td { border: 1px solid var(--line); padding: 7px 9px; text-align: left; vert
 th { background: var(--soft); font-weight: 600; }
 .tablewrap { overflow-x: auto; }
 .ts { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; margin-left: 4px; }
+.embedded .ts { cursor: pointer; text-decoration: underline dotted; }
 ul, ol { padding-left: 22px; }
 li { margin: 3px 0; }
 li:has(> input[type=checkbox]) { list-style: none; }
@@ -880,6 +952,36 @@ mod tests {
             assert_eq!(write(&dir).unwrap().file_name().unwrap(), "Weekly sync-minutes.html");
         }
         assert!(fs::read_dir(&dir).unwrap().flatten().all(|e| !e.file_name().to_string_lossy().ends_with(".tmp")));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_windows_copy_talks_to_the_window_under_its_own_policy() {
+        let dir = std::env::temp_dir().join(format!("echo-minutes-embed-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("notes.md"), "# T\n\n- Agreed [12:30]\n\n```mermaid\nflowchart TD\n  A --> B\n```\n").unwrap();
+        fs::write(dir.join("meta.json"), r#"{"title":"T"}"#).unwrap();
+        let (html, csp) = render_for_window(&dir).unwrap();
+        assert!(html.contains("<span class=\"ts\">12:30</span>") && html.contains("window.parent.postMessage"));
+        // The header the window sends is the page's own policy, and covers every script it carries.
+        assert_eq!(html.split("Content-Security-Policy\" content=\"").nth(1).unwrap().split('"').next().unwrap(), csp);
+        let scripts: Vec<&str> = html.split("<script>").skip(1).map(|s| s.split("</script>").next().unwrap()).collect();
+        assert_eq!(scripts.len(), 4, "the page's, the window's, mermaid and its settings");
+        for body in scripts {
+            assert!(csp.contains(&format!("'sha256-{}'", B64.encode(Sha256::digest(body.as_bytes())))));
+        }
+        // The file never carries it.
+        let page = write(&dir).unwrap();
+        assert!(!fs::read_to_string(page).unwrap().contains("window.parent.postMessage"));
+        // The frame reloads for the minutes, never for the user's notes, a tick or a run's state.
+        let rev = revision(&dir);
+        fs::write(dir.join(crate::calls::USER_NOTES), "mine").unwrap();
+        fs::write(dir.join(crate::calls::ACTIONS), "[]").unwrap();
+        fs::write(dir.join(crate::notes::RUN), r#"{"state":"running"}"#).unwrap();
+        assert_eq!(revision(&dir), rev);
+        fs::write(dir.join("notes.md"), "# T\n\nChanged\n").unwrap();
+        assert_ne!(revision(&dir), rev);
         let _ = fs::remove_dir_all(&dir);
     }
 }

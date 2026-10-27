@@ -57,7 +57,7 @@ or your organization's own app (client) ID (TC-CAL-003).
 **Expected**
 - The meeting shows as "Will record" (dashed purple).
 - A minute before the start the icon turns green (armed); when you join, it records.
-- After the call, the meeting shows as "Recorded" (green) and opens the notes or transcript.
+- After the call, the meeting shows as "Recorded" (green) and opens its minutes or transcript.
 - Leaving and rejoining after it was recorded does not start a second recording by itself.
 
 ---

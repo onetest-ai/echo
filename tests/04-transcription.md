@@ -88,4 +88,5 @@
 
 **Expected**
 - The transcript finishes (time it: roughly a few minutes per hour on Apple Silicon).
-- The Mac stays usable during transcription; a "Notes ready" or transcript-ready state follows.
+- The Mac stays usable during transcription; the transcript then appears, with a "Transcript
+  ready" notification when Claude Code is set up.

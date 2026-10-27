@@ -82,6 +82,8 @@ pub fn run(app: TargetApp, tray: bool, background: bool) -> Result<()> {
     std::thread::spawn(check_updates);
     // Live notes during calls (`livenotes.rs`): one worker for the AI jobs.
     crate::livenotes::start();
+    // Minutes written by themselves, 15 minutes after a call (`notes::auto_due`).
+    crate::notes::start_scheduler();
     // Who each Claude profile is signed in to, for the window (`signin.rs`; in the background).
     crate::signin::refresh_all();
     // Windows: try the GPU now (in a child process), not when the first recording loads a model.
@@ -337,6 +339,28 @@ pub fn reveal(dir: &Path) {
     let _ = Command::new("explorer").arg(dir).status();
 }
 
+/// Open a file or folder with its default app (the minutes page: the browser).
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn open_path(path: &Path) {
+    #[cfg(target_os = "macos")]
+    let _ = Command::new("open").arg(path).status();
+    #[cfg(windows)]
+    let _ = Command::new("explorer").arg(path).status();
+}
+
+/// Show a file selected in Finder / Explorer.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn reveal_file(path: &Path) {
+    #[cfg(target_os = "macos")]
+    let _ = Command::new("open").arg("-R").arg(path).status();
+    // Explorer parses its own command line: the path quoted after the comma (one with spaces).
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let _ = Command::new("explorer").raw_arg(format!("/select,\"{}\"", path.display())).status();
+    }
+}
+
 /// Is a process with this pid alive?
 pub fn process_alive(pid: u32) -> bool {
     #[cfg(unix)]
@@ -369,19 +393,32 @@ pub fn start() -> Result<()> {
     bail!("Echo did not start — see {}", state_file("app.log").display())
 }
 
-/// `echoctl app quit`: stop the app (a recording in progress is saved first).
+/// `echoctl app quit`: stop the app (a recording in progress is saved first). Exits 0 once Echo
+/// stopped (or wasn't running), 1 when it didn't — notes typed in its window couldn't be saved and
+/// the user kept Echo (or didn't answer its question in 2 min; `quit.cancelled` says why), or 30 s
+/// passed (while that Echo asks the user, `quit.asking`, it waits on). The Windows installer stops
+/// on a 1 for an Echo it installed, unless it is Echo's own update.
 pub fn quit() -> Result<()> {
     let Some(w) = watch::running_watcher() else {
         println!("Echo is not running");
         return Ok(());
     };
+    let _ = fs::remove_file(state_file("quit.cancelled"));
     fs::write(state_file("quit.request"), b"")?;
-    let t = Instant::now();
+    let mut t = Instant::now();
     while t.elapsed() < Duration::from_secs(30) {
         // Gone means the process has exited too (it holds the single-instance lock until then).
         if watch::running_watcher().is_none() && !process_alive(w.pid) {
             println!("Echo stopped (was pid {})", w.pid);
             return Ok(());
+        }
+        if let Ok(why) = fs::read_to_string(state_file("quit.cancelled")) {
+            let _ = fs::remove_file(state_file("quit.cancelled"));
+            bail!("Echo didn't quit: {}", if why.trim().is_empty() { "quitting was cancelled" } else { why.trim() });
+        }
+        // The user is deciding — in this Echo (a file an Echo that died left behind doesn't count).
+        if fs::read_to_string(state_file("quit.asking")).is_ok_and(|p| p.trim() == w.pid.to_string()) && process_alive(w.pid) {
+            t = Instant::now();
         }
         std::thread::sleep(Duration::from_millis(250));
     }
@@ -408,6 +445,34 @@ pub fn open_window(call: Option<String>) -> Result<()> {
     Ok(())
 }
 
+/// The tray's event loop runs (it owns the window, so it does the quitting).
+pub static UI_LOOP: AtomicBool = AtomicBool::new(false);
+/// `echoctl app quit` asked; taken by the tray's loop.
+static QUIT_ASKED: AtomicBool = AtomicBool::new(false);
+
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn take_quit_request() -> bool {
+    QUIT_ASKED.swap(false, Ordering::SeqCst)
+}
+
+/// `quit.asking` while Echo asks the user about the quit `echoctl app quit` waits for (it keeps
+/// waiting). It holds this process's id: one left by an Echo that died doesn't hold a later quit.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn asking_to_quit(on: bool) {
+    let f = state_file("quit.asking");
+    if on {
+        let _ = fs::write(f, std::process::id().to_string());
+    } else {
+        let _ = fs::remove_file(f);
+    }
+}
+
+/// The quit `echoctl app quit` waits for didn't happen: why, for it to say.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn quit_cancelled(why: &str) {
+    let _ = fs::write(state_file("quit.cancelled"), why);
+}
+
 /// Called every second by the watcher loop: control requests from the CLI / Claude.
 pub fn handle_requests(stop: &AtomicBool) {
     if let Ok(call) = fs::read_to_string(state_file("open.request")) {
@@ -416,7 +481,12 @@ pub fn handle_requests(stop: &AtomicBool) {
         *OPEN_WINDOW.lock().unwrap_or_else(|e| e.into_inner()) = Some((!call.is_empty()).then_some(call));
     }
     if fs::remove_file(state_file("quit.request")).is_ok() {
-        stop.store(true, Ordering::SeqCst);
+        // With the tray's loop, it quits once the window's notes are saved (`tray::Leaving`).
+        if UI_LOOP.load(Ordering::SeqCst) {
+            QUIT_ASKED.store(true, Ordering::SeqCst);
+        } else {
+            stop.store(true, Ordering::SeqCst);
+        }
     }
     if let Ok(bytes) = fs::read(state_file("doctor.request")) {
         let _ = fs::remove_file(state_file("doctor.request"));
@@ -872,8 +942,19 @@ fn applescript_str(s: &str) -> String {
     format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
-/// A dialog with buttons; the clicked label, or None (closed / timed out after 2 min).
+/// A dialog with buttons; the clicked label, or None (closed / timed out after 2 min). Windows: a
+/// Yes/No popup (`yes_no`): No returns None, like closing it. A dialog that can't be shown is
+/// logged and counts as None (`ask_checked` tells them apart).
 pub fn ask(message: &str, buttons: &[&str], default: &str) -> Option<String> {
+    ask_checked(message, buttons, default).unwrap_or_else(|e| {
+        eprintln!("dialog: {e:#}");
+        None
+    })
+}
+
+/// `ask`, with Err when the dialog couldn't be shown (or its answer read) — not answered is None.
+pub fn ask_checked(message: &str, buttons: &[&str], default: &str) -> Result<Option<String>> {
+    debug_assert!(buttons.contains(&default), "the default is one of the buttons");
     #[cfg(target_os = "macos")]
     {
         let list = buttons.iter().map(|b| applescript_str(b)).collect::<Vec<_>>().join(", ");
@@ -882,29 +963,57 @@ pub fn ask(message: &str, buttons: &[&str], default: &str) -> Option<String> {
             applescript_str(message),
             applescript_str(default)
         );
-        let out = Command::new("osascript").args(["-e", &script]).output().ok()?;
+        let out = Command::new("osascript").args(["-e", &script]).output().context("couldn't run osascript")?;
+        if !out.status.success() {
+            let err = String::from_utf8_lossy(&out.stderr);
+            if err.contains("(-128)") {
+                return Ok(None); // a button named Cancel (or Esc): "User canceled"
+            }
+            bail!("osascript: {}", err.trim());
+        }
         let text = String::from_utf8_lossy(&out.stdout);
         if text.contains("gave up:true") {
-            return None;
+            return Ok(None);
         }
-        return text.split("button returned:").nth(1).map(|r| r.split(',').next().unwrap_or("").trim().to_string());
+        return Ok(text.split("button returned:").nth(1).map(|r| r.split(',').next().unwrap_or("").trim().to_string()));
     }
     #[cfg(windows)]
     {
-        // Yes/No popup (yes = the default action), 2-minute timeout.
-        let _ = buttons;
-        let script = format!(
-            "(New-Object -ComObject WScript.Shell).Popup('{}', 120, 'echo', 4 + 32)",
-            message.replace('\'', "''").replace('\n', " ")
-        );
-        let out = Command::new("powershell").no_window().args(["-NoProfile", "-Command", &script]).output().ok()?;
-        let code = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        return (code == "6").then(|| default.to_string());
+        // Yes/No popup, 2-minute timeout: 6 = Yes, 7 = No, -1 = no answer.
+        // The text goes in through the environment, never quoted: PowerShell also ends a '…' string
+        // at a typographic quote (a meeting called "Alex’s sync").
+        let (yes, flags) = yes_no(buttons, default);
+        let script = format!("(New-Object -ComObject WScript.Shell).Popup($env:ECHO_ASK, 120, 'echo', {flags})");
+        let out = Command::new("powershell")
+            .no_window()
+            .env("ECHO_ASK", message)
+            .args(["-NoProfile", "-Command", &script])
+            .output()
+            .context("couldn't run PowerShell")?;
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        return match stdout.lines().map(str::trim).filter(|l| !l.is_empty()).last() {
+            Some("6") => Ok(Some(yes.to_string())),
+            Some("7") | Some("-1") => Ok(None),
+            _ => bail!("the popup gave no answer: {}", String::from_utf8_lossy(&out.stderr).trim()),
+        };
     }
     #[allow(unreachable_code)]
     {
         let _ = (message, buttons, default);
-        None
+        Ok(None)
+    }
+}
+
+/// `ask` on Windows: Yes stands for the default button, No for the others — unless the default
+/// is the first one (Cancel, Not now): then Yes is the last button (the action) and No is focused.
+/// The label Yes returns, and the popup's flags: MB_YESNO + MB_ICONQUESTION + MB_SYSTEMMODAL (on
+/// top: a popup behind other windows would time out unseen), + MB_DEFBUTTON2.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn yes_no<'a>(buttons: &[&'a str], default: &'a str) -> (&'a str, u32) {
+    const FLAGS: u32 = 4 + 32 + 4096;
+    match buttons {
+        [first, .., last] if *first == default => (*last, FLAGS + 256),
+        _ => (default, FLAGS),
     }
 }
 
@@ -1251,6 +1360,37 @@ pub mod notifications {
 #[cfg(test)]
 mod tests {
     use super::FileLock;
+
+    #[test]
+    fn app_quit_goes_through_the_tray_loop_when_there_is_one() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let (_env, _root) = crate::paths::testenv::folders("app-quit-route");
+        std::fs::create_dir_all(crate::paths::state_dir()).unwrap();
+        let ask = || std::fs::write(super::state_file("quit.request"), b"").unwrap();
+        // No tray loop (`app run --no-tray`): it stops at once.
+        let stop = AtomicBool::new(false);
+        ask();
+        super::handle_requests(&stop);
+        assert!(stop.load(Ordering::SeqCst) && !super::take_quit_request());
+        // With it: the loop takes it, once (it saves the window's notes first).
+        super::UI_LOOP.store(true, Ordering::SeqCst);
+        let stop = AtomicBool::new(false);
+        ask();
+        super::handle_requests(&stop);
+        let taken = (super::take_quit_request(), super::take_quit_request());
+        super::UI_LOOP.store(false, Ordering::SeqCst);
+        assert!(!stop.load(Ordering::SeqCst) && taken == (true, false));
+    }
+
+    #[test]
+    fn windows_yes_is_the_default_button_unless_that_is_cancel() {
+        const FLAGS: u32 = 4 + 32 + 4096;
+        // "Cancel" is the default of the leave dialog: Yes must still mean "Go on".
+        assert_eq!(super::yes_no(&["Cancel", "Go on"], "Cancel"), ("Go on", FLAGS + 256));
+        assert_eq!(super::yes_no(&["Later", "Update"], "Update"), ("Update", FLAGS));
+        // A meeting with a join link: Yes records, it doesn't join.
+        assert_eq!(super::yes_no(&["Not now", "Record", "Join & record"], "Record"), ("Record", FLAGS));
+    }
 
     #[test]
     fn shared_holders_exclude_an_exclusive_one_and_back() {

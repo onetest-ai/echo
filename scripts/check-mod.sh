@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Validate, test and type-check the Echo mod (plugin/hooks) the way the engine reads it, and test
-# the window's calendar dates.
+# the window's notes saving and calendar dates.
 # Type-checks against the engine's own declarations: the copy it lays beside a hot-reloaded mod
 # (plugin/.claude-plugin/types) if present, else the one the plugin-authoring skill wrote.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 claude plugin validate plugin
 claude plugin test plugin
+# The Echo window's notes saving (crates/echoctl/ui/app.js, NotesSync), as it ships.
+node crates/echoctl/ui/notes-sync.test.mjs
 # The calendar's days and hours across the days the clocks change.
 node crates/echoctl/ui/calendar-dates.test.mjs
 types="plugin/.claude-plugin/types/claude-code/index.d.ts"

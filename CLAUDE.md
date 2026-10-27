@@ -36,7 +36,11 @@ transcripts, never notes). One exception, by design: the app saves model-written
   `scripts/package-windows.ps1` (unsigned for now): a per-user MSI (`packaging/windows/echo.wxs`, WiX 5 —
   later WiX versions carry a maintenance-fee EULA; the NuGet tool package in `%LOCALAPPDATA%\wix5-tool` needs no
   admin) → `%LOCALAPPDATA%\Programs\echo`, Start menu shortcut (AUMID `onetest.Echo`), user PATH, Run key;
-  `app quit` before files are replaced, `app start` after; uninstall keeps data. Plus the same files as a zip.
+  `app quit` before files are replaced (its exit code checked when an installed `echoctl.exe` is found through
+  HKCU `Software\onetest\Echo\InstallFolder`: a quit the user cancelled — notes unsaved in the window — or one that
+  took over 30 s stops the installation; else ignored, as for a first install, and for Echo's own update, which passes
+  `ECHO_SELF_UPDATE=1`: it saved its notes and is stopping already), `app start` after; uninstall keeps data. Plus the
+  same files as a zip.
 - Marketplace `echoctl` (`.claude-plugin/marketplace.json`): `claude plugin marketplace add
   onetest-ai/echo` + `claude plugin install echo@onetest --scope user|project|local`
   (what `echoctl claude connect` runs; `ECHOCTL_MARKETPLACE` overrides the source).
@@ -50,14 +54,16 @@ transcripts, never notes). One exception, by design: the app saves model-written
   `process-call` (notes → actions → vocabulary → follow-ups), `live` (the mod opens the pane),
   `record` (arm / stop from chat), `doctor` (`echoctl up` + fix what's missing: data folder,
   permissions, model, languages; first run itself is the app's). The user's own notes during a
-  call come from the tray's "Add a note…" (`echoctl note` → `my-notes.md`).
+  call (`my-notes.md`) come from the window's Notes tab (during and after a call) or the tray's "Add a note…" while
+  recording (`echoctl note`).
   Note templates: `crates/echoctl/templates/*.md`, compiled in (user overrides in `<home>/.echo/templates/`).
   Post-call facts come from `echoctl context <call>` (gate: ≥ 3 min and ≥ 1,500 chars, or any saved frames; heading
   budget by length; colleagues vs external by email domain; previous notes of a recurring meeting).
 - `<home>/calls/<ts>-<slug>/` — `meta.json`, `transcript.md`, `segments.json`, `notes.md` (git-ignored). `mic.wav`/`remote.wav`
   exist only until transcription succeeds, then are deleted (`config.keep_audio`, default false) — text only.
 - `<home>/.echo/` — `config.json` (model, languages, vocabulary), control files
-  (`armed.json`, `stop.request`, `quit.request`, `doctor.request` → `health.json`), `events.jsonl`,
+  (`armed.json`, `stop.request`, `quit.request` → `quit.asking` / `quit.cancelled`, `doctor.request` →
+  `health.json`), `events.jsonl`,
   `watch.json` (heartbeat), `agenda.json`, `app.log` (background launches)
 - `<call>/meeting.json` — optional context (subject, attendees). Deterministic, no model:
   `agenda sync` reads today's events from Microsoft 365 through the app's own Graph client
@@ -129,7 +135,8 @@ holds the mic (2 s release debounce); records only when `.echo/armed.json` exist
 `arm`/`join`, single-use, expires 15 min); stops on `stop.request` or 10 s after the call ended.
 Events → `<home>/.echo/events.jsonl`; clients follow them (the mod, or `events --follow`).
 `config.scheduled` / `unscheduled` = `ask` → the app shows its own "Record?" dialog (osascript /
-WScript popup); clients don't ask.
+WScript popup: Yes/No on Windows, `app::yes_no` — Yes = the default button, or the last one when the
+default is the first, Cancel / Not now); clients don't ask.
 Windows detects calls from WASAPI: an active capture session owned by the Teams process tree
 (`echoctl procs` lists them); that session's endpoint is the mic track's device.
 Tray (`tray` feature, default; `app run --no-tray` to disable): the app's menu-bar/tray icon
@@ -146,7 +153,8 @@ through UserNotifications as Echo.app (its icon; a click opens the window — "U
 install instead, `app::Click`; asks permission at
 first start); dev builds fall back to osascript, which macOS shows as Script Editor. Menu: status, Record, Stop,
 recent calls, Settings (data folder, start at login, install CLI), Speech models (use / download
-with % / remove), Claude Code (connect = install plugin at user scope; where notes are written),
+with % / remove), Claude Code (connect = install plugin at user scope; where Echo runs it for minutes; write minutes
+automatically; minutes model; minutes page),
 Health (Ask for permissions),
 Check for updates… (or Update to <version>… once one is found), Quit — clicks call the same `arm`/`stop` as the CLI, so every client sees the same events.
 The menu is rebuilt when what it shows changes (checked every 5 s); on macOS never while a menu is open: AppKit
@@ -160,27 +168,45 @@ macOS SIGKILLs (exit 137) a binary rewritten in place.
 
 ## The Echo window (`window.rs`, `ui/`)
 Menu → Open Echo… (or `echoctl app open [--call <name>]`, or a recent call) opens one window:
-Calls (list + Notes / Transcript / Chat / Screens / Actions), Today (agenda + recap + Record /
+Calls (list + Live / Notes / Minutes / Transcript / Chat / Screens / Actions), Today (agenda + recap + Record /
 Join), Record/Stop status. wry (Tauri's webview crate: WKWebView / WebView2) on the tray's tao
 loop — not full Tauri (it would take over our loop, tray, packaging, updater). Content only via
 the `echo://` protocol (`http://echo.localhost` on Windows): compiled-in `ui/index.html`,
 `app.js`, `app.css` (vanilla, no npm/CDN; the octopus symbol is injected from
 `assets/octopus.svg`), `/api/{state,calls,agenda,call/<name>}` JSON, `/file/<call>/frames/<img>`
 after a path check; strict CSP; everything rendered is escaped (chat/transcripts are others'
-text). Notes Markdown (`markdown()` in app.js, our own parser: headings, nested and task lists,
-tables, quotes, rules, fences, inline code/bold/italic/strike, https links, `![](frames/x.jpg)` of
-that call only, `[mm:ss]` anchors; text escaped before markup). A ```` ```mermaid ```` fence is drawn by
-the vendored mermaid 11.4.1 (`ui/vendor/mermaid.min.js`, `/assets/mermaid.js`, ~2.5 MB, loaded on
-first use, `securityLevel: 'strict'`, no eval, so the CSP holds), themed from the CSS tokens and
-cached per source + theme so the 2 s refresh doesn't redraw it. A diagram that fails shows its
-source and the error. Parser helpers are `md*`: app.js is one global scope (a `list()` there
-is the calls list). Actions go back over IPC (`window::handle`: toggle action, delete, reveal, record, stop,
-arm/join meeting, copy) through the same functions as the CLI. The page polls the local API
-every 2 s and re-renders only when the data changed (keeps selection/scroll). Closing the
-window keeps the app in the menu bar; macOS shows a Dock icon only while it is open. Notes need
-Claude: a call without them shows the `/echo:process-call` command. Dev: `echoctl window
---selftest` (opens the real webview, page fetches via echo:// and reports over IPC),
-`echoctl window --export <dir>` (the same responses as files, to review the UI in a browser).
+text). **Notes** = the user's own notes: an editor over `my-notes.md` (`NotesSync` in app.js, no DOM: saves 1 s after
+typing, on blur, before Write minutes; one acknowledged save in flight per call — IPC `save_my_notes {text, base}` →
+`calls::save_my_notes` under `.meta.lock` (`note` takes it too): base unchanged → text; appended since (the tray) →
+text + tail; changed otherwise → the other version kept as `my-notes.<HHMMSS>.md`; an unchanged text is never written —
+its mtime is the minutes' clock; the answer is a script, `window.echo.saved`). **Minutes** = the page itself,
+`/minutes/<call>?v=<minutes revision>` (`minutes::render_for_window`, rendered fresh, under the page's own CSP) in an
+`<iframe sandbox="allow-scripts">`; its `EMBED_JS` posts `{echo: 'at'|'open'}` to the window (accepted only from that
+frame's `contentWindow`). The window's IPC takes messages only from its own page (`from_page`: wry gives the frame's URL
+on macOS — WebKit exposes the handler to frames; Windows listens to the top level only). `render()` replaces each
+region (sidebar, list, call header, pane — the Minutes pane's bar and frame apart) only when its HTML changed, so the
+frame never reloads for a refresh. Actions go back over IPC (`window::handle` → `{refresh, reply}`: toggle action by id +
+status, delete, reveal, record, stop, arm/join meeting, copy, open / reveal the minutes page) through the same functions
+as the CLI. The page polls `/api/call/<name>/rev` every 2 s (every file of the call, the live notes', the run's and the
+automatic minutes' state) and fetches the call when it changed; a focused notes editor is never re-rendered (a refresh
+updates its text in place, caret kept: `syncEditor`). Closing the window, Quit (macOS's own too: tao's delegate gets an
+`applicationShouldTerminate:` answering "later", `tray::terminate`), `echoctl app quit`, installing an update and
+changing the data folder first ask the page to save (`tray::Leaving`, one at a time: saving — `prepareClose(n, close)`
+→ `close_ready {ok, n}`, the editors read-only until Echo is gone or `thaw` — → asking the user — a failure or no
+answer in 5 s; a close's failure the page explains itself — → going; `act` does each step). A leave asked meanwhile
+replaces the pending one or is dropped (`takes_over`: anything replaces a close, a quit an update / folder change,
+`app quit` a quit); while the user is asked it waits for that answer instead (`queued`: a question is answered only
+for its own leave), then gets its own turn; once Echo is stopping, every one is dropped. So macOS's waiting quit is
+answered by the quit it rides on: yes on exit, no when that quit is cancelled. The question's thread answers once,
+also if it fails (a drop guard). `app quit` takes that path with or
+without a tray icon (`quit.asking` — this Echo's pid — while the user is asked about it; `quit.cancelled` says why →
+exit 1). `app::ask_checked` tells a dialog that couldn't be shown from one not answered (Echo stays, and says so).
+Closing the window keeps the app in the menu bar; macOS shows a Dock icon only while it is open. Minutes need
+Claude: a call without them shows when they come, or the `/echo:process-call` command. Dev: `echoctl window
+--selftest` (opens the real webview, page fetches via echo:// and reports over IPC; a sandboxed test frame proves
+its IPC posts are dropped; the close handshake answers with its number),
+`echoctl window --export <dir>` (the same responses as files, each minutes page as `minutes/<call>/index.html`, to review the UI
+in a browser through a static server).
 
 Calendar (window → Calendar): Day (today) and a rolling Week (yesterday, today, 5 days
 ahead) time grid from `/api/calendar?start=&days=` (Graph `calendar_view` for the range,
@@ -194,15 +220,14 @@ its recording starts (stopping never re-arms it), when that arm is cancelled, or
 ## Live view (mod) and automation
 `plugin/hooks/register.tsx` is a Claude Code mod (state contract `plugin/types/index.d.ts`, pure helpers
 `hooks/view.ts`). At session start it asks the CLI for the data folder (`echoctl app` → `home`),
-starts the app if it is set up but not running, and catches up: `echoctl pending --for <cwd>`
-(transcribed, no notes, ≥ 3 min, < 48 h; empty outside `config.notes_in`) → `echoctl notes <call>
---auto --for <cwd>` (the CLI checks the call is due and never tried, takes `.claimed` atomically — one
-session per call — and hands the run to the app, which writes the notes with the call's AI profile; it
-answers one JSON line `{requested, reason}`). Band above the prompt while the app runs: `[ Live ]` (hotkey l) +
+starts the app if it is set up but not running, and catches up: `echoctl pending --for <cwd>` → `echoctl notes <call>
+--auto --for <cwd>` — both refuse now (empty / `{requested: false, waiting, reason}`): the app writes the minutes itself
+(`notes::auto_due`), or nobody does automatically. Band above the prompt while the app runs: `[ Live ]` (hotkey l) +
 status. Pane: transcript left / summary-highlights-actions right (stacked under 100 cols). Every
 1 s it heartbeats `<home>/.echo/mod.json`, tails `events.jsonl` (from the end, never
-replays), and: on `recording_started` opens the `echo-live` pane; on `transcribed` asks the app
-for the notes (`notes --auto`, as above). The pane shows `<call>/live.jsonl` (written by `live.rs` during recording: the
+replays), and: on `recording_started` opens the `echo-live` pane; on `transcribed` asks for the minutes (`notes
+--auto`, refused as above; `waiting` → the pane follows the call until they are written, a run ends, or a later answer
+(at most once a minute; a CLI that didn't answer is asked again) stops saying `waiting`). Its action ticks go through `echoctl action <call> <id> done|todo`. The pane shows `<call>/live.jsonl` (written by `live.rs` during recording: the
 call's one transcription pass, an utterance decoded after 0.8 s of silence — see Transcription) plus the app's live notes
 (`live-notes.json` → summary/highlights/actions, `live-state.json`, answers in `live-asks.jsonl`); its quick buttons call
 `echoctl live ask`. It **never calls a model itself** (that would use the session's account, not the call's profile);
@@ -229,7 +254,7 @@ folder `<config dir>/claude/<id>`, signed in once; the first account seen (email
 recorded, and another one later stops jobs until it is accepted: window Use X / tray → AI for calls → Use X /
 `ai accept`).
 **Signing in** (`signin.rs`, the app): window Sign in… / tray → AI for calls → Sign in…, or choosing a signed-out
-Claude profile in one of the window's menus (Live header, Record, Write notes: `choose` + `ensure_request` / `applied` — only an explicit
+Claude profile in one of the window's menus (Live header, Record, Write minutes: `choose` + `ensure_request` / `applied` — only an explicit
 `loggedIn: false` opens the browser, and only if that choice is still the latest for its purpose when the check ends
 and right before the browser opens; a call's choice counts from when it reaches the app, its check runs once it is
 applied) → Echo runs `claude auth login --claudeai [--email] [--sso]` (`Profile.email`, else the recorded account's;
@@ -301,17 +326,49 @@ right there. Measured on a Mac with Qwen 3.6 35B-A3B (Q4_K_M) through Ollama: su
 Claude Code + haiku ~9 s. Unverified: jobs on two signed-in Claude folders side by side (the sign-ins themselves keep
 separate Keychain items: checked), live jobs during real transcription load, Windows.
 
-## Notes from the app (`notes.rs`)
-Write notes (window Notes/Actions tabs, the pane's buttons, `echoctl notes <call>`) runs the same
+## Minutes from the app (`notes.rs`)
+**Automatic** (`config.auto_minutes`, default on; tray → Claude Code → Write minutes automatically; `config
+--auto-minutes`): the app's scheduler (`notes::start_scheduler`, `auto_tick` every 15 s) starts a call's minutes when
+`notes::auto_due` says so — switch on and the call ended after `auto_minutes_since` (saved at the first start with the
+switch on and at each off → on, so no backlog is sent); closed, transcribed, not being transcribed; never tried (no
+`notes.md`, no `notes-run.json` but an automatic run whose owner died before it wrote anything — still `queued`, or
+`running` with its Claude Code gone too —, no session's fresh claim); past the gate
+(`calls::minutes_gate`, shared with `context`); and now ≥ max(end, `my-notes.md`'s mtime) + 15 min. Admission is
+synchronous (`admit(dir, Intent::Auto)`: under the place and `.meta.lock`, `auto_due` again), and right before Claude
+Code starts an automatic run checks `auto_due` again (its own record exempt); not due any more, or the app quitting
+while it waits, or Claude Code stopped by the app quitting before it wrote the minutes → **withdrawn** (record and claim
+removed: due again later). An admission that fails is logged (once per reason) and recorded as the call's failure after
+4 ticks in a row, with a notification (missing Claude Code / plugin: at once); one that can't even be recorded is left
+alone until Echo starts again, `auto` saying why (`notes::GAVE_UP`), as for a boundary that can't be saved. Automatic
+minutes also wait while `my-notes.md` can't be read. An abandoned automatic run frees Echo's claim. The switch governs every automatic path (the mod's included).
+The window: `auto` = `{due: now|at|off|before|not_ready|tried|gate|missing|error, at, reason}` (`missing`: due, but
+no Claude Code or plugin here, `notes::auto_missing` — no "minutes at" is promised then; `error`: no settings).
+**Write minutes** (window Minutes / Actions tabs, the pane's buttons, `echoctl notes <call>`) is explicit
+(`Intent::Explicit`: its prompt overrides the skill's short-call gate) and runs the same
 `/echo:process-call` skill headless: `claude -p … --output-format stream-json`, through the
 user's login shell (`$SHELL -l -i -c`, their env: gateways, `ANTHROPIC_*`, Bedrock/Vertex), cwd
 = `notes_in` or the data folder (for `system` strictly: `ai::system_folder`), `--plugin-dir` = the plugin shipped in the app
 (`Echo.app/Contents/Resources/plugin`; dev: repo `plugin/`; else the installed one), model =
-`config.notes_model` (default sonnet; `default` = Claude Code's own; menu → Claude Code → Notes
+`config.notes_model` (default sonnet; `default` = Claude Code's own; menu → Claude Code → Minutes
 model). `--permission-mode dontAsk` + an allowlist (Read/Glob/Grep in the data folder,
-Edit/Write in `calls/`, `Bash(echoctl:*)`, the skill): transcripts are others' words and the
-user's own default mode (auto / bypass) must not apply. `ECHOCTL_HEADLESS=1` inside: the mod
-does nothing, `pending`/`claim` refuse. The CLI hands the run to the running app
+Edit/Write in `calls/`, the CLI only for `notes::RUN_COMMANDS` — context, actions, speakers, title, vocab add,
+frames, transcribe: a run can't change settings, read the calendar or chats, or quit Echo; inside one `vocab add
+--always` and `transcribe --keep-audio` / `--model` refuse (`notes::refused_in_run`), and with the built-in profile the user's own allow rules apply too —,
+the skill) and deny rules (`Edit` of any call's `my-notes.md` or
+`actions.json`): transcripts are others' words and the user's own default mode (auto / bypass) must not apply. Action
+items carry stable ids (`calls::actions` gives ids once to an older list, before any reader or run sees it); the skill
+writes `actions.new.json` and runs `echoctl actions <call> --apply <file>` (`calls::apply_actions`: only a new list in the call's own folder, `actions.new*.json`; keeps ids and each known
+item's current status — ticks made meanwhile survive —, records the writer in `.actions-generation` from
+`ECHOCTL_RUN_ID`; an app run's prompt names its own file, `actions.new-<run>.json`: that list, left unapplied — a
+weaker model stops one step short — the app applies as that run's, `notes::finish_actions`; never the generic
+`actions.new.json`, which could be a session's; why it can't be applied goes into the run's message); a current list
+that isn't a JSON list is set aside as `actions.unreadable-<HHMMSS>.json` when a run is admitted or a list applied
+(`context` and the window say why meanwhile); ticks are `calls::set_action_status(id, status)`. A run is `done` only with `notes.md` written during
+it and this run's `.actions-generation`; then `notes-run.json` `minutes: {model, at, sha256}` (carried over by later
+runs) names the model on the page while `notes.md` still has that hash. `ECHOCTL_HEADLESS=1` inside: the mod
+does nothing, `pending`/`claim` refuse. A session's `claim` (by hand: `/echo:process-call`) fails only while Echo's run
+of the call is on or another session's fresh claim holds a call without minutes; a claim left by a finished run (Echo's
+keeps it once `done`) is taken over. The CLI hands the run to the running app
 (`notes-<call>.request`) unless `--wait` (Ctrl-C there stops its Claude Code too: `notes::shutdown`). The run uses the call's AI profile (launcher, model, strictness: above).
 One run per call (`notes::admit`): the call's place first, an OS lock on `notes-run.lock` held by the owner for the
 whole run (released by the OS if it dies; it moves with a renamed folder; dropped before the final rename for
@@ -325,21 +382,21 @@ writer); the claim is freed once nobody holds the place; every failure from `que
 before it starts says why there too; the run finishes in the folder as named after Claude Code (the skill may retitle
 it); quitting the app stops minutes runs' Claude Code and starts no more (`notes::shutdown`: a child is started and
 registered under the same lock). Readable log in
-`<call>/claude.log` (window → Show log). Failure releases `.claimed`. After transcription with
-no live session (`mod.json` heartbeat < 10 s) the app notifies "Transcript ready — click Write
-notes". `config.live_model` = the `system` profile's live model (default haiku).
+`<call>/claude.log` (window → Show log). Failure releases `.claimed`. After transcription the app notifies
+"Transcript ready — minutes at HH:MM. Add your notes in Echo before then." (switch off: "click Write minutes"); a run
+notifies its outcome once ("Minutes ready"); the watcher's own check only covers minutes a session wrote. `config.live_model` = the `system` profile's live model (default haiku).
 A local notes model (`system` profile; a `local` profile does this itself): the run's cwd (`notes_in`, else the data folder) gets a `.claude/settings.json`
 whose `env` points Claude Code at Ollama's Anthropic API (`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`,
 the default-model vars) and `notes_model` names the Ollama model (one with `num_ctx` ≥ 64K: Claude
 Code's prompt + an hour's transcript). Claude Code warns `unrecognized_model` for any model it
 doesn't know, so that counts as a failure only when the run failed (`model_rejected`).
-Notes in other shapes (a user template with tables or YAML frontmatter): `calls::recap_from_notes`
-skips frontmatter, reads a Decision table's cells and drops placeholders (`TBD`, `_None recorded._`);
-the window shows a frontmatter as a small key/value table (`mdFrontmatter`).
+Minutes in other shapes (a user template with tables or YAML frontmatter): `calls::recap_from_notes`
+skips frontmatter, reads a Decision table's cells and drops placeholders (`TBD`, `_None recorded._`).
 
 ## Minutes page (`minutes.rs`)
-Opt-in (`config.minutes_page`; menu → Claude Code → Write a minutes page; `echoctl config
---minutes-page true`): when notes are written, `notes.md` → `<call>/<title>-minutes.html`, one
+The window's Minutes tab shows it rendered fresh (above), whatever this setting says; Open in browser / Show in
+Finder write the file first. The file is opt-in (`config.minutes_page`; menu → Claude Code → Write a minutes page (HTML
+file) too; `echoctl config --minutes-page true`): when minutes are written, `notes.md` → `<call>/<title>-minutes.html`, one
 self-contained file — header block from the `> **Label:** value` lines under the title + a
 frontmatter's type / facilitator, tables, `[mm:ss]` as timestamps, `![…](frames/x.jpg)` embedded
 (base64) and the other kept frames under Screens, mermaid inlined only when a diagram is drawn
@@ -408,16 +465,19 @@ frames). A renamed call's old page (generator meta) is replaced, never another f
   and reach the swap script only as `"$1"…` arguments; Windows updates (unsigned) install only an MSI
   matching the release's SHA-256 digest; the transcription worker is never joined on the watcher's thread.
 - Updates (`update.rs`): GitHub release check at start + every 6 h (public API, else `gh`);
-  install mounts the dmg, requires our team id signature, swaps the bundle after exit. Windows:
+  `prepare` downloads, verifies and stages (mounts the dmg, requires our team id signature), `commit` schedules the
+  swap after exit — only once the window's notes are saved and Echo is stopping (`app update` too: after `app quit`,
+  which saves a recording), and from the tray not while a call is recorded (checked again in `commit`: one may have
+  started during the save or a question). Windows:
   the release's MSI (offered only to Echo in `%LOCALAPPDATA%\Programs\echo`), checked against
   the asset's `digest` from the API (required: the builds are unsigned), run by `msiexec /qn`
   (per-user, no elevation; the MSI quits Echo, replaces the files, starts it). Every platform
   checks the digest when the API gives one. Code signing would add a publisher check on top.
 - `me.md` profile → `context.me_profile`; `echoctl compose` opens a mailto draft (never sends);
   `calls::recap` (deterministic "last time" bullets) in the Record dialog and Upcoming menu;
-  tray "Add a note…" while recording; "Notes ready" notification.
-- Notes bullets carry `[mm:ss]`; the pane turns them into jumps; `actions.json` items have
-  `t` + `status` (todo/done, toggled in the pane). Live quick actions: What did I miss / Suggest
+  tray "Add a note…" while recording; "Minutes ready" notification.
+- Minutes bullets carry `[mm:ss]`; the window's page and the pane turn them into jumps; `actions.json` items have
+  `id` + `t` + `status` (todo/done, ticked in the window and the pane by id). Live quick actions: What did I miss / Suggest
   a question (the call's AI profile, its live model, over the last 5/10 min; `livenotes.rs`).
 
 ## Transcription
@@ -546,8 +606,9 @@ track, only when their loudness envelopes correlate (speakers, not headphones); 
 ## Checks
 - `cargo clippy`, `cargo test` (macOS) and `cargo check --target x86_64-pc-windows-msvc --no-default-features`
   must all be clean. (`--no-default-features` drops whisper.cpp, which can't cross-compile C++ to MSVC.)
-- Mod: `scripts/check-mod.sh` (plugin validate + `claude plugin test` + the window calendar's node test,
-  `crates/echoctl/ui/calendar-dates.test.mjs` + tsc against the engine's types).
+- Mod: `scripts/check-mod.sh` (plugin validate + `claude plugin test` + the window's node tests,
+  `crates/echoctl/ui/notes-sync.test.mjs` (`NotesSync`) and `calendar-dates.test.mjs` (the calendar's days, hours
+  and lanes) + tsc against the engine's types).
   Mod patterns used here: band button,
   `command.run` returning `{}` (no context), `ui.open({columns: 400})`, sizing from
   `e.props.bodyColumns` / `e.props.scroll.bodyRows`, `$.ui.mount` tests.

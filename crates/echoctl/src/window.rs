@@ -3,10 +3,12 @@
 //! tao event loop.
 //!
 //! Everything the page shows comes through the `echo://` custom protocol — no web server, no open
-//! port: `/` and `/assets/*` are compiled in, `/api/*` is JSON built from the call files, and
+//! port: `/` and `/assets/*` are compiled in, `/api/*` is JSON built from the call files,
 //! `/file/<call>/frames/<image>` serves frame images after a path check (a call folder under the
-//! data folder, `frames/` inside it, no `..`). Actions (mark done, delete, record, …) come back as
-//! IPC messages and run through the same functions the CLI and the tray use.
+//! data folder, `frames/` inside it, no `..`), and `/minutes/<call>` the call's minutes page,
+//! rendered fresh (the Minutes tab shows it in a sandboxed frame, under the page's own CSP).
+//! Actions (mark done, delete, record, …) come back as IPC messages — only from the window's own
+//! page, never from a frame inside it — and run through the same functions the CLI and the tray use.
 
 #[cfg(windows)]
 use crate::app::NoWindow;
@@ -26,8 +28,6 @@ use crate::{calls, paths, watch};
 const INDEX: &str = include_str!("../ui/index.html");
 const APP_JS: &str = include_str!("../ui/app.js");
 const APP_CSS: &str = include_str!("../ui/app.css");
-/// Diagrams in notes (```mermaid), loaded by the page on first use; shared with the minutes page.
-use crate::minutes::MERMAID_JS;
 const OCTOPUS_SVG: &str = include_str!("../assets/octopus.svg");
 /// The onetest logo (violet disc, the full octopus character), 192 px, for the window.
 const LOGO_PNG: &[u8] = include_bytes!("../assets/onetest-logo.png");
@@ -114,7 +114,12 @@ pub fn open<T: 'static>(
         .with_asynchronous_custom_protocol("echo".into(), |_id, req, responder| {
             std::thread::spawn(move || responder.respond(respond(&req)));
         })
-        .with_ipc_handler(move |req: Request<String>| ipc(req.into_body()))
+        // Only the window's own page: WebKit lets frames post to the handler too (the minutes page).
+        .with_ipc_handler(move |req: Request<String>| {
+            if from_page(&req.uri().to_string(), base_url()) {
+                ipc(req.into_body())
+            }
+        })
         // The page never navigates away from echo:// (links to the web open in the browser).
         .with_navigation_handler(|url| {
             let ours = url.starts_with(base_url()) || url.starts_with("about:");
@@ -127,6 +132,15 @@ pub fn open<T: 'static>(
         .with_devtools(cfg!(debug_assertions))
         .build(&window)?;
     Ok(EchoWindow { window, webview })
+}
+
+/// Is a message from the window's own page — `base` with the path `/` or `/index.html` — rather
+/// than from a frame inside it? wry gives the sending frame's URL on macOS
+/// (`WKScriptMessage.frameInfo`) and the sending document's on Windows (`WebMessageReceived`).
+fn from_page(uri: &str, base: &str) -> bool {
+    let Some(rest) = uri.strip_prefix(base.trim_end_matches('/')) else { return false };
+    let path = rest.split(['?', '#']).next().unwrap_or("");
+    path == "/" || path == "/index.html"
 }
 
 fn open_external(url: &str) {
@@ -175,6 +189,17 @@ fn reply(status: u16, mime: &str, body: Vec<u8>) -> Response<Cow<'static, [u8]>>
         .expect("valid response")
 }
 
+/// A page shown in a frame, under its own CSP (the window's would block its hashed inline scripts).
+fn page_reply(html: String, csp: &str) -> Response<Cow<'static, [u8]>> {
+    Response::builder()
+        .status(200)
+        .header(CONTENT_TYPE, "text/html; charset=utf-8")
+        .header("Content-Security-Policy", csp)
+        .header("Cache-Control", "no-store")
+        .body(Cow::Owned(html.into_bytes()))
+        .expect("valid response")
+}
+
 fn json_reply(v: Value) -> Response<Cow<'static, [u8]>> {
     reply(200, "application/json", serde_json::to_vec(&v).unwrap_or_default())
 }
@@ -185,16 +210,29 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
         "/" | "/index.html" => reply(200, "text/html; charset=utf-8", index_html().into_bytes()),
         "/assets/app.js" => reply(200, "text/javascript; charset=utf-8", APP_JS.as_bytes().to_vec()),
         "/assets/app.css" => reply(200, "text/css; charset=utf-8", APP_CSS.as_bytes().to_vec()),
-        "/assets/mermaid.js" => reply(200, "text/javascript; charset=utf-8", MERMAID_JS.as_bytes().to_vec()),
         "/assets/logo.png" => reply(200, "image/png", LOGO_PNG.to_vec()),
         "/api/state" => json_reply(state()),
         "/api/calls" => json_reply(Value::Array(calls::all_calls().iter().rev().map(|d| call_summary(d)).collect())),
         "/api/agenda" => json_reply(agenda()),
         "/api/calendar" => json_reply(calendar(req.uri().query().unwrap_or(""))),
-        p if p.starts_with("/api/call/") => match call_dir(&p["/api/call/".len()..]) {
-            Some(dir) => json_reply(call_detail(&dir)),
+        p if p.starts_with("/api/call/") => {
+            let rest = &p["/api/call/".len()..];
+            let (name, rev) = rest.strip_suffix("/rev").map_or((rest, false), |n| (n, true));
+            match call_dir(name) {
+                Some(dir) if rev => json_reply(json!({ "rev": call_rev(&dir) })),
+                Some(dir) => json_reply(call_detail(&dir)),
+                None => reply(404, "text/plain", b"no such call".to_vec()),
+            }
+        }
+        p if p.starts_with("/minutes/") => match call_dir(&p["/minutes/".len()..]).map(|d| crate::minutes::render_for_window(&d)) {
+            Some(Ok((html, csp))) => page_reply(html, &csp),
+            Some(Err(e)) => reply(500, "text/plain; charset=utf-8", format!("The minutes can't be shown: {e:#}").into_bytes()),
             None => reply(404, "text/plain", b"no such call".to_vec()),
         },
+        "/selftest/frame" if SELFTEST.load(std::sync::atomic::Ordering::SeqCst) => {
+            let (html, csp) = selftest_frame();
+            page_reply(html, &csp)
+        }
         p if p.starts_with("/file/") => match frame_file(&p["/file/".len()..]) {
             Some(file) => match fs::read(&file) {
                 Ok(bytes) => reply(200, mime_of(&file), bytes),
@@ -296,6 +334,9 @@ fn call_summary(dir: &Path) -> Value {
 }
 
 fn call_detail(dir: &Path) -> Value {
+    // The revision first: anything that changes while the rest is read gives a newer one at the
+    // next poll, so the page fetches again (taken last, it could stand for files read before).
+    let rev = call_rev(dir);
     let name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let mut v = call_summary(dir);
     let segments = match read_json(&dir.join("segments.json")) {
@@ -315,14 +356,37 @@ fn call_detail(dir: &Path) -> Value {
         .map(|f| json!({ "t": f["t"], "url": format!("{}file/{}/{}", base_url(), urlencode(&name), f["file"].as_str().unwrap_or("")) }))
         .collect();
     v["notes"] = json!(fs::read_to_string(dir.join("notes.md")).ok());
-    v["my_notes"] = json!(fs::read_to_string(dir.join(calls::USER_NOTES)).ok());
+    // The user's notes; one that can't be read is said, never shown as empty (the editor would start
+    // from nothing).
+    match fs::read_to_string(dir.join(calls::USER_NOTES)) {
+        Ok(t) => v["my_notes"] = json!(t),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => v["my_notes"] = Value::Null,
+        Err(e) => v["my_notes_error"] = json!(e.to_string()),
+    }
     v["segments"] = segments;
     v["chat"] = read_json(&dir.join("chat.json"));
     v["frames"] = json!(frames);
-    v["actions"] = read_json(&dir.join("actions.json"));
+    // With ids (a list from before ids gets them now, once: `calls::actions`).
+    match calls::actions(dir) {
+        Ok(a) => v["actions"] = json!(a),
+        Err(e) => v["actions_error"] = json!(format!("{e:#}")),
+    }
     v["meeting"] = read_json(&dir.join("meeting.json"));
     v["path"] = json!(dir.display().to_string());
-    v["notes_run"] = json!(crate::notes::status(dir));
+    let run = crate::notes::status(dir);
+    // The user's notes changed after the minutes were written — since the run that wrote them
+    // started, or, for minutes without one (a session's, an older run's), since `notes.md` was
+    // written: the Minutes tab offers an update.
+    let mtime = |f: &str| fs::metadata(dir.join(f)).and_then(|m| m.modified()).ok().map(chrono::DateTime::<chrono::Local>::from);
+    let written = match &run {
+        Some(r) if r.state == "done" => r.started_at,
+        _ => mtime("notes.md"),
+    };
+    v["notes_changed"] = json!(dir.join("notes.md").exists() && mtime(calls::USER_NOTES).zip(written).is_some_and(|(n, w)| n > w));
+    v["notes_run"] = json!(run);
+    v["auto"] = crate::notes::auto_state(dir);
+    v["minutes_rev"] = json!(crate::minutes::revision(dir));
+    v["rev"] = json!(rev);
     v["has_log"] = json!(dir.join(crate::notes::LOG).exists());
     let profile = crate::ai::call_profile_id(dir);
     v["live"] = json!({
@@ -334,6 +398,34 @@ fn call_detail(dir: &Path) -> Value {
         "prep": calls::prep(dir),
     });
     v
+}
+
+/// What everything `call_detail` returns depends on, as one short hash: every file of the call's
+/// folder (name, size, time) and the parts kept in memory or computed — the live notes' state, the
+/// minutes run's (a dead owner changes it without a file changing), the automatic minutes'. The
+/// page fetches the call again only when it changes.
+fn call_rev(dir: &Path) -> String {
+    use sha2::Digest as _;
+    let mut h = sha2::Sha256::new();
+    let mut files: Vec<(String, u64, u128)> = fs::read_dir(dir)
+        .map(|rd| {
+            rd.flatten()
+                .filter_map(|e| {
+                    let m = e.metadata().ok()?;
+                    let t = m.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_nanos();
+                    Some((e.file_name().to_string_lossy().into_owned(), m.len(), t))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    files.sort();
+    for (name, len, t) in files {
+        h.update(format!("{name}\0{len}\0{t}\n"));
+    }
+    h.update(crate::livenotes::status(dir).to_string());
+    h.update(json!(crate::notes::status(dir)).to_string());
+    h.update(crate::notes::auto_state(dir).to_string());
+    h.finalize().iter().take(8).map(|b| format!("{b:02x}")).collect()
 }
 
 fn agenda() -> Value {
@@ -490,24 +582,92 @@ fn profile(v: &Value) -> Option<String> {
     v["profile"].as_str().filter(|p| !p.is_empty()).map(str::to_owned)
 }
 
-/// Run an action the page posted; true if the page should refresh.
-pub fn handle(msg: &str) -> bool {
+/// What running a page's action did: refresh the page (and the menu), and a script to answer
+/// the page with.
+#[derive(Default)]
+pub struct Handled {
+    pub refresh: bool,
+    pub reply: Option<String>,
+}
+
+impl From<bool> for Handled {
+    fn from(refresh: bool) -> Self {
+        Handled { refresh, reply: None }
+    }
+}
+
+/// The close handshake (`tray.rs`): the page saved what it holds (`close_ready`), the user chose
+/// to close without saving (`close_now`), or to try closing again (`close_request`).
+pub enum Closing {
+    /// The page saved its notes (`ok`) for handshake `n`, or couldn't.
+    Ready { ok: bool, n: u64 },
+    Now,
+    Request,
+}
+
+pub fn closing(msg: &str) -> Option<Closing> {
+    let v: Value = serde_json::from_str(msg).ok()?;
+    match v["cmd"].as_str()? {
+        "close_ready" => Some(Closing::Ready { ok: v["ok"] == true, n: v["n"].as_u64().unwrap_or(0) }),
+        "close_now" => Some(Closing::Now),
+        "close_request" => Some(Closing::Request),
+        _ => None,
+    }
+}
+
+/// A call named by the page: by its folder name, else by its stamp (retitled since).
+fn call_named(v: &Value) -> Option<PathBuf> {
+    let name = v["call"].as_str()?;
+    call_dir(name).or_else(|| calls::by_stamp(&calls::stamp_of(Path::new(name))))
+}
+
+/// A notice for the page (an action that couldn't be done).
+fn notice(text: &str) -> Handled {
+    Handled { refresh: true, reply: Some(format!("window.echo && window.echo.notice({})", json!(text))) }
+}
+
+/// Run an action the page posted.
+pub fn handle(msg: &str) -> Handled {
     let v: Value = serde_json::from_str(msg).unwrap_or_default();
-    let call = v["call"].as_str().and_then(call_dir);
     match v["cmd"].as_str().unwrap_or("") {
         "toggle_action" => {
-            let (Some(dir), Some(i)) = (call, v["index"].as_u64()) else { return false };
-            let path = dir.join("actions.json");
-            let Value::Array(mut items) = read_json(&path) else { return false };
-            if let Some(it) = items.get_mut(i as usize) {
-                it["status"] = json!(if it["status"] == "done" { "todo" } else { "done" });
-                let tmp = path.with_extension("json.tmp");
-                if fs::write(&tmp, serde_json::to_vec_pretty(&items).unwrap_or_default()).is_ok() {
-                    let _ = fs::rename(tmp, path);
-                }
+            let (Some(dir), Some(id), Some(status)) = (call_named(&v), v["id"].as_str(), v["status"].as_str()) else { return false.into() };
+            match calls::set_action_status(&dir, id, status) {
+                Ok(()) => true.into(),
+                Err(e) => notice(&format!("{e:#}")),
             }
-            true
         }
+        // The user's notes from the Notes tab (`calls::save_my_notes`); the page learns what the
+        // file holds now.
+        "save_my_notes" => {
+            let id = v["id"].clone();
+            let name = v["call"].clone();
+            let answer = |r: Value| Handled { refresh: true, reply: Some(format!("window.echo && window.echo.saved({r})")) };
+            let Some(dir) = call_named(&v) else {
+                return answer(json!({ "call": name, "id": id, "error": "this call can't be found any more" }));
+            };
+            match calls::save_my_notes(&dir, v["text"].as_str().unwrap_or(""), v["base"].as_str().unwrap_or("")) {
+                Ok(s) => answer(json!({ "call": name, "id": id, "stored": s.stored, "kept": s.kept })),
+                Err(e) => answer(json!({ "call": name, "id": id, "error": format!("{e:#}") })),
+            }
+        }
+        "open_minutes" | "reveal_minutes" => {
+            let Some(dir) = call_named(&v) else { return false.into() };
+            match crate::minutes::write(&dir) {
+                Ok(page) if v["cmd"] == "open_minutes" => crate::app::open_path(&page),
+                Ok(page) => crate::app::reveal_file(&page),
+                Err(e) => return notice(&format!("{e:#}")),
+            }
+            false.into()
+        }
+        _ => act(&v).into(),
+    }
+}
+
+/// The page's other actions; true if the page should refresh.
+fn act(v: &Value) -> bool {
+    let call = v["call"].as_str().and_then(call_dir);
+    match v["cmd"].as_str().unwrap_or("") {
         "delete" => call.is_some_and(|d| calls::delete(&d.display().to_string()).is_ok()),
         "reveal" => {
             if let Some(d) = call {
@@ -519,7 +679,7 @@ pub fn handle(msg: &str) -> bool {
             let Some(d) = call else { return false };
             // Another profile for this run: it becomes the call's (`notes-run.json` records which
             // profile and model wrote the minutes). Not while a run of this call is on.
-            if let Some(id) = profile(&v) {
+            if let Some(id) = profile(v) {
                 if crate::notes::status(&d).is_some_and(|r| crate::notes::pending(&r)) {
                     return true; // the page shows that run
                 }
@@ -534,7 +694,7 @@ pub fn handle(msg: &str) -> bool {
             true
         }
         "set_profile" => {
-            let (Some(d), Some(id)) = (call, profile(&v)) else { return false };
+            let (Some(d), Some(id)) = (call, profile(v)) else { return false };
             // From now on an older choice's sign-in check opens nothing.
             let name = d.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             crate::signin::choose(&format!("call:{name}"), &id);
@@ -552,32 +712,32 @@ pub fn handle(msg: &str) -> bool {
         }
         // Signing a Claude profile in (`signin.rs`): the flows run on threads of their own.
         "sign_in" => {
-            if let Some(id) = profile(&v) {
+            if let Some(id) = profile(v) {
                 crate::signin::start(&id);
             }
             true
         }
         "sign_in_if_needed" => {
-            let (Some(id), Some(purpose)) = (profile(&v), v["purpose"].as_str().filter(|p| !p.is_empty()).map(str::to_owned)) else { return false };
+            let (Some(id), Some(purpose)) = (profile(v), v["purpose"].as_str().filter(|p| !p.is_empty()).map(str::to_owned)) else { return false };
             // Registered here, in the order the choices came; checked on a thread of its own.
             let request = crate::signin::choose(&purpose, &id);
             std::thread::spawn(move || crate::signin::ensure_request(&id, &purpose, request));
             true
         }
         "sign_in_cancel" => {
-            if let Some(id) = profile(&v) {
+            if let Some(id) = profile(v) {
                 crate::signin::cancel(&id);
             }
             true
         }
         "check_sign_in" => {
-            if let Some(p) = profile(&v).and_then(|id| crate::ai::Settings::load().ok()?.get(&id).ok()) {
+            if let Some(p) = profile(v).and_then(|id| crate::ai::Settings::load().ok()?.get(&id).ok()) {
                 crate::signin::refresh(&p, true);
             }
             true
         }
         "accept_account" => {
-            let (Some(id), Some(shown)) = (profile(&v), v["account"].as_str().filter(|a| !a.is_empty())) else { return false };
+            let (Some(id), Some(shown)) = (profile(v), v["account"].as_str().filter(|a| !a.is_empty())) else { return false };
             crate::signin::accept(&id, shown);
             true
         }
@@ -605,7 +765,7 @@ pub fn handle(msg: &str) -> bool {
             }
             false
         }
-        "record" => watch::arm(None, None, languages(&v), profile(&v)).is_ok(),
+        "record" => watch::arm(None, None, languages(v), profile(v)).is_ok(),
         "stop" => watch::stop().is_ok(),
         "schedule" | "unschedule" => {
             let Some(id) = v["id"].as_str() else { return false };
@@ -616,8 +776,8 @@ pub fn handle(msg: &str) -> bool {
             let meeting = raw.as_ref().and_then(crate::calendar::to_meeting)
                 .or_else(|| watch::agenda().into_iter().find(|m| m.id.as_deref() == Some(id)));
             meeting.is_some_and(|mut m| {
-                m.languages = languages(&v).unwrap_or_default();
-                m.ai_profile = profile(&v);
+                m.languages = languages(v).unwrap_or_default();
+                m.ai_profile = profile(v);
                 crate::schedule::add(m).is_ok()
             })
         }
@@ -630,8 +790,8 @@ pub fn handle(msg: &str) -> bool {
         "arm_meeting" | "join_meeting" => {
             let id = v["id"].as_str().unwrap_or("");
             let Some(mut m) = watch::agenda().into_iter().find(|m| m.id.as_deref() == Some(id)) else { return false };
-            m.languages = languages(&v).unwrap_or_default();
-            m.ai_profile = profile(&v);
+            m.languages = languages(v).unwrap_or_default();
+            m.ai_profile = profile(v);
             if v["cmd"] == "join_meeting" { watch::join(m).is_ok() } else { watch::arm(m.subject.clone(), Some(m), None, None).is_ok() }
         }
         "open_url" => {
@@ -671,13 +831,12 @@ pub(crate) fn copy_to_clipboard(text: &str) {
     }
 }
 
-/// (dev) Write what echo:// serves — the page, assets and every API response — into `dir`, so
-/// the UI can be reviewed in an ordinary browser (`python3 -m http.server`).
+/// (dev) Write what echo:// serves — the page, its assets, the API responses it loads first and
+/// each call's minutes page — into `dir`, so the UI can be reviewed in an ordinary browser
+/// (`python3 -m http.server`).
 pub fn export(dir: &Path) -> anyhow::Result<()> {
-    let get = |path: &str| -> Vec<u8> {
-        let req = Request::builder().uri(format!("echo://localhost{path}")).body(Vec::new()).expect("request");
-        respond(&req).into_body().into_owned()
-    };
+    let fetch = |path: &str| respond(&Request::builder().uri(format!("echo://localhost{path}")).body(Vec::new()).expect("request"));
+    let get = |path: &str| -> Vec<u8> { fetch(path).into_body().into_owned() };
     let write = |rel: &str, body: Vec<u8>| -> anyhow::Result<()> {
         let p = dir.join(rel.trim_start_matches('/'));
         fs::create_dir_all(p.parent().unwrap())?;
@@ -685,7 +844,7 @@ pub fn export(dir: &Path) -> anyhow::Result<()> {
         Ok(())
     };
     write("index.html", get("/"))?;
-    for p in ["/assets/app.js", "/assets/app.css", "/assets/mermaid.js", "/assets/logo.png", "/api/state", "/api/calls", "/api/agenda"] {
+    for p in ["/assets/app.js", "/assets/app.css", "/assets/logo.png", "/api/state", "/api/calls", "/api/agenda"] {
         write(p, get(p))?;
     }
     let week_start = chrono::Local::now().date_naive().pred_opt().unwrap_or_default().format("%Y-%m-%d");
@@ -693,6 +852,13 @@ pub fn export(dir: &Path) -> anyhow::Result<()> {
     for d in calls::all_calls() {
         let name = d.file_name().unwrap().to_string_lossy().into_owned();
         write(&format!("/api/call/{name}"), get(&format!("/api/call/{}", urlencode(&name))))?;
+        // The Minutes tab's frame (`minutes/<call>?v=…`): a folder's index.html, which a static
+        // server answers as a page (it redirects to the folder, query kept).
+        // One that can't be rendered is written as what the frame would show.
+        let page = fetch(&format!("/minutes/{}", urlencode(&name)));
+        if page.status() == 200 || d.join("notes.md").exists() {
+            write(&format!("/minutes/{name}/index.html"), page.into_body().into_owned())?;
+        }
     }
     println!("{}", dir.display());
     Ok(())
@@ -700,14 +866,34 @@ pub fn export(dir: &Path) -> anyhow::Result<()> {
 
 // ── self-test (`echoctl window --selftest`) ─────────────────────────────────────────────────
 
+/// Set while `echoctl window --selftest` runs: `/selftest/frame` is served only then.
+static SELFTEST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The selftest's frame, sandboxed like the minutes page: it tells the page it ran, then posts to
+/// the window's IPC directly — which `from_page` must drop.
+const SELFTEST_FRAME_JS: &str = "window.parent.postMessage({ echo: 'ready', ipc: !!((window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.ipc) || (window.chrome && window.chrome.webview)) }, '*');
+try { window.webkit.messageHandlers.ipc.postMessage('{\"probe\":\"frame\"}'); } catch (e) {}
+try { window.chrome.webview.postMessage('{\"probe\":\"frame\"}'); } catch (e) {}";
+
+fn selftest_frame() -> (String, String) {
+    use base64::Engine as _;
+    use sha2::Digest as _;
+    let hash = base64::engine::general_purpose::STANDARD.encode(sha2::Sha256::digest(SELFTEST_FRAME_JS.as_bytes()));
+    let csp = format!("default-src 'none'; script-src 'sha256-{hash}'");
+    (format!("<!doctype html><html><head><meta charset=\"utf-8\"></head><body><script>{SELFTEST_FRAME_JS}</script></body></html>"), csp)
+}
+
 /// Open the window on its own event loop, let the page fetch through echo:// and report back
 /// over IPC, print the report, exit. Proves the protocol, the API and IPC on this machine.
 pub fn selftest() -> anyhow::Result<()> {
     use tao::event::{Event, StartCause};
     use tao::event_loop::{ControlFlow, EventLoopBuilder};
+    SELFTEST.store(true, std::sync::atomic::Ordering::SeqCst);
     let event_loop = EventLoopBuilder::<String>::with_user_event().build();
     let proxy = event_loop.create_proxy();
-    let mut _win: Option<EchoWindow> = None; // kept alive for the loop's lifetime
+    let mut win: Option<EchoWindow> = None; // kept alive for the loop's lifetime
+    let mut probed = false; // a frame's message got through to IPC
+    let mut report: Option<Value> = None; // the page's, waiting for the close handshake
     let t0 = std::time::Instant::now();
     event_loop.run(move |event, target, flow| {
         *flow = ControlFlow::WaitUntil(std::time::Instant::now() + std::time::Duration::from_millis(200));
@@ -717,7 +903,7 @@ pub fn selftest() -> anyhow::Result<()> {
                 match open(target, None, move |msg| drop(p.send_event(msg))) {
                     Ok(w) => {
                         let _ = w.webview.evaluate_script("setTimeout(() => window.echo && window.echo.selftest(), 300)");
-                        _win = Some(w);
+                        win = Some(w);
                     }
                     Err(e) => {
                         println!("{{\"ok\":false,\"error\":{}}}", json!(e.to_string()));
@@ -725,8 +911,22 @@ pub fn selftest() -> anyhow::Result<()> {
                     }
                 }
             }
+            Event::UserEvent(msg) if msg.contains("\"probe\"") => probed = true,
             Event::UserEvent(msg) if msg.contains("\"selftest\"") => {
-                println!("{msg}");
+                let mut out: Value = serde_json::from_str(&msg).unwrap_or_default();
+                out["frame_blocked"] = json!(!probed);
+                report = Some(out);
+                // Then the close handshake, as the tray runs it: the page saves and answers with its number.
+                if let Some(w) = &win {
+                    let _ = w.webview.evaluate_script("window.echo.prepareClose(7, false)");
+                }
+            }
+            Event::UserEvent(msg) if report.is_some() && closing(&msg).is_some() => {
+                let mut out = report.take().unwrap_or_default();
+                out["close_handshake"] = json!(matches!(closing(&msg), Some(Closing::Ready { ok: true, n: 7 })));
+                let ok = out["ok"] == true && out["frame_ready"] == true && !probed && out["close_handshake"] == true;
+                out["ok"] = json!(ok);
+                println!("{out}");
                 *flow = ControlFlow::Exit;
             }
             _ if t0.elapsed() > std::time::Duration::from_secs(15) => {
@@ -750,6 +950,83 @@ mod tests {
         assert!(frame_file("x/frames/../../meta.json").is_none());
         assert!(frame_file("x/notes.md").is_none());
         assert!(call_dir("../x").is_none() && call_dir("/abs").is_none() && call_dir("a/b").is_none() && call_dir("").is_none());
+    }
+
+    #[test]
+    fn only_the_windows_own_page_reaches_its_actions() {
+        for base in ["echo://localhost/", "http://echo.localhost/"] {
+            let b = base.trim_end_matches('/');
+            for ok in ["/", "/index.html", "/#call/2026-10-23_090000-x/minutes", "/?x=1"] {
+                assert!(from_page(&format!("{b}{ok}"), base), "{b}{ok}");
+            }
+            for no in ["/minutes/2026-10-23_090000-x?v=1", "/selftest/frame", "/assets/app.js", "/index.html/x", ""] {
+                assert!(!from_page(&format!("{b}{no}"), base), "{b}{no}");
+            }
+        }
+        assert!(!from_page("https://localhost/", "echo://localhost/"));
+        assert!(!from_page("echo://localhostx/", "echo://localhost/"));
+        assert!(!from_page("about:blank", "echo://localhost/"));
+    }
+
+    #[test]
+    fn a_calls_revision_changes_with_what_it_shows() {
+        let (_env, root) = crate::paths::testenv::folders("window-rev");
+        let d = root.join("home/calls/2026-10-23_090000-x");
+        fs::create_dir_all(&d).unwrap();
+        fs::write(d.join("meta.json"), "{}").unwrap();
+        let r0 = call_rev(&d);
+        assert_eq!(call_rev(&d), r0);
+        // An answer appended (no other file changes), a run's owner gone: both show.
+        fs::write(d.join("live-asks.jsonl"), "{}\n").unwrap();
+        let r1 = call_rev(&d);
+        assert_ne!(r1, r0);
+        let gone = std::process::Command::new("true").spawn().unwrap();
+        let pid = gone.id();
+        drop(gone.wait_with_output());
+        fs::write(d.join(crate::notes::RUN), json!({ "state": "running", "pid": pid }).to_string()).unwrap();
+        let r2 = call_rev(&d);
+        assert_ne!(r2, r1);
+    }
+
+    #[test]
+    fn an_update_is_offered_when_the_users_notes_changed_after_the_minutes() {
+        let (_env, root) = crate::paths::testenv::folders("window-notes-changed");
+        let d = root.join("home/calls/2026-10-23_090000-x");
+        fs::create_dir_all(&d).unwrap();
+        fs::write(d.join("meta.json"), "{}").unwrap();
+        let at = |f: &str, ago: u64| fs::File::options().write(true).open(d.join(f)).unwrap().set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(ago)).unwrap();
+        // Minutes a session wrote (no run): compared with when they were written.
+        fs::write(d.join("notes.md"), "# m").unwrap();
+        fs::write(d.join(calls::USER_NOTES), "mine").unwrap();
+        at("notes.md", 600);
+        at(calls::USER_NOTES, 60);
+        assert_eq!(call_detail(&d)["notes_changed"], true);
+        at(calls::USER_NOTES, 900);
+        assert_eq!(call_detail(&d)["notes_changed"], false);
+        // Minutes a run wrote: compared with when that run started (it read the notes then).
+        let started = chrono::Local::now() - chrono::Duration::seconds(300);
+        fs::write(d.join(crate::notes::RUN), json!({ "state": "done", "started_at": started.to_rfc3339() }).to_string()).unwrap();
+        at(calls::USER_NOTES, 400);
+        assert_eq!(call_detail(&d)["notes_changed"], false);
+        at(calls::USER_NOTES, 100);
+        assert_eq!(call_detail(&d)["notes_changed"], true);
+    }
+
+    #[test]
+    fn the_export_has_each_calls_minutes_page_where_its_frame_looks() {
+        let (_env, root) = crate::paths::testenv::folders("window-export");
+        let with = root.join("home/calls/2026-10-23_090000-with minutes");
+        let without = root.join("home/calls/2026-10-23_100000-without");
+        for d in [&with, &without] {
+            fs::create_dir_all(d).unwrap();
+            fs::write(d.join("meta.json"), "{}").unwrap();
+        }
+        fs::write(with.join("notes.md"), "# Kickoff\n\n- Budget agreed [01:02]\n").unwrap();
+        let out = root.join("export");
+        export(&out).unwrap();
+        let page = fs::read_to_string(out.join("minutes/2026-10-23_090000-with minutes/index.html")).unwrap();
+        assert!(page.contains("Budget agreed"), "the page itself");
+        assert!(out.join("api/call/2026-10-23_100000-without").is_file() && !out.join("minutes/2026-10-23_100000-without").exists());
     }
 
     #[test]

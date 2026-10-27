@@ -61,9 +61,23 @@ text only.
 
 **Expected**
 - Echo only contacts: GitHub (update checks and the model download from Hugging Face),
-  Microsoft (sign-in and Graph, only when the calendar is connected).
-- Notes go through Claude Code only when you connected it; the app itself never sends a
-  transcript anywhere.
+  Microsoft (sign-in and Graph, only when the calendar is connected), and a transcription server
+  only when one is connected.
+- A call's content leaves the Mac only through Claude Code (or the local model an AI profile
+  names), with the call's AI profile: Echo runs it for the minutes 15 minutes after a recorded call
+  when Claude Code is installed (menu → Claude Code → Write minutes automatically, on by default —
+  off: nothing is sent until you click Write minutes), and for live notes during a call only if
+  they are turned on. The minutes run reads the transcript, the user's notes, the invite (subject,
+  time, organizer, attendees with their email addresses, the join link), the meeting chat, saved
+  shared screens, the user's name and email from the settings, `me.md`, the vocabulary, the notes
+  template, the minutes of the last earlier call with the same subject and, on a re-run, the
+  current action items. Its permissions also let it read the rest of the data folder and the
+  folder Echo runs Claude Code in, and run only the `echoctl` commands the minutes need (context,
+  actions, speakers, title, vocab add, frames, transcribe: not settings, the calendar or chats);
+  with the built-in profile, the user's
+  own Claude Code settings apply too, with the tools they allow. With a transcription server
+  connected, each utterance's audio also goes to that server (it keeps nothing). Apart from these,
+  Echo sends none of it anywhere.
 
 ---
 

@@ -23,10 +23,13 @@ export type LiveView = {
   title: string | null
   /** ms since epoch */
   startedAt: number | null
-  phase: 'idle' | 'recording' | 'transcribing' | 'writing-notes' | 'done'
-  /** what happened to the notes, in words (queued: why, failed: why, not requested: why) */
+  /** waiting-minutes: transcribed, no minutes yet, and `notes --auto` says they are on their way (the
+   *  app writes them later by itself, or a run or a session is writing them) */
+  phase: 'idle' | 'recording' | 'transcribing' | 'waiting-minutes' | 'writing-notes' | 'done'
+  /** what happened to the minutes, in words (waiting: when, or who writes them; queued: why; failed:
+   *  why; not requested: why) */
   notesNote?: string | null
-  /** set when the notes turn was asked for */
+  /** set when an (older) app took the pane's ask for the minutes; Echo now writes them itself */
   notesRequested: boolean
   lines: LiveLine[]
   /** the meeting chat so far */
@@ -65,6 +68,8 @@ export type CallItem = {
 export type DocTab = 'notes' | 'transcript' | 'actions' | 'chat'
 
 export type ActionItem = {
+  /** stable across rewrites of the list (`echoctl actions`); a tick names it */
+  id: string | null
   task: string
   owner: string | null
   due: string | null

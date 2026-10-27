@@ -60,10 +60,22 @@
       <ComponentRef Id="StartMenu" />
     </Feature>
 
-    <!-- Quit a running Echo (an older install here, or a zip copy unzipped to this folder) so
-         its files can be replaced or removed; `app quit` waits until it has exited. A missing
-         echoctl.exe (first install) just fails, ignored. -->
+    <!-- An Echo installed by this package: its echoctl.exe, found through the folder it recorded. -->
+    <Property Id="ECHO_INSTALLED_EXE">
+      <RegistrySearch Id="EchoInstallFolder" Root="HKCU" Key="Software\onetest\Echo" Name="InstallFolder" Type="directory">
+        <FileSearch Name="echoctl.exe" />
+      </RegistrySearch>
+    </Property>
+    <!-- Quit a running Echo so its files can be replaced or removed; `app quit` waits until it has
+         exited. Installed by this package: its answer counts — it exits 1 when Echo didn't quit
+         (the user kept it open because notes typed in its window couldn't be saved, or it didn't
+         stop within 30 s), and the installation stops before any file is touched. Otherwise (first
+         install: no echoctl.exe; a zip copy unzipped to this folder; Echo's own update,
+         ECHO_SELF_UPDATE: it saved its notes and is stopping already) a failure is ignored. -->
     <CustomAction Id="QuitEcho" Directory="INSTALLFOLDER"
+                  ExeCommand="&quot;[INSTALLFOLDER]echoctl.exe&quot; app quit"
+                  Execute="immediate" Return="check" />
+    <CustomAction Id="QuitEchoIfThere" Directory="INSTALLFOLDER"
                   ExeCommand="&quot;[INSTALLFOLDER]echoctl.exe&quot; app quit"
                   Execute="immediate" Return="ignore" />
     <!-- Start it again (or for the first time) unless this was an uninstall. -->
@@ -71,7 +83,8 @@
                   ExeCommand="&quot;[INSTALLFOLDER]echoctl.exe&quot; app start"
                   Execute="immediate" Return="asyncNoWait" />
     <InstallExecuteSequence>
-      <Custom Action="QuitEcho" Before="InstallValidate" />
+      <Custom Action="QuitEcho" Before="InstallValidate" Condition="ECHO_INSTALLED_EXE AND NOT ECHO_SELF_UPDATE" />
+      <Custom Action="QuitEchoIfThere" Before="InstallValidate" Condition="NOT ECHO_INSTALLED_EXE OR ECHO_SELF_UPDATE" />
       <Custom Action="StartEcho" After="InstallFinalize" Condition="NOT (REMOVE~=&quot;ALL&quot;)" />
     </InstallExecuteSequence>
   </Package>

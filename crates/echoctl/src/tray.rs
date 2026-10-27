@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -30,7 +30,278 @@ enum UiEvent {
     Menu(MenuId),
     /// A message from the Echo window's page.
     Ipc(String),
+    /// Close the window, quit, update or change the data folder — once the notes typed in the
+    /// window are saved (`Leaving`).
+    Leave(Then),
+    /// The window's page didn't answer that save handshake (its number) in time.
+    LeaveTimeout(u64),
+    /// After a handshake that failed, the user chose: go on anyway (true) or keep Echo (false) —
+    /// or couldn't be asked (why).
+    LeaveDecided(Result<bool, String>),
     Quit,
+}
+
+/// What a leave does once the window has saved the notes it holds.
+#[derive(Debug)]
+enum Then {
+    CloseWindow,
+    Quit,
+    /// `echoctl app quit` asked (it waits for the outcome).
+    QuitAsked,
+    Update(crate::update::Staged),
+    ChangeHome(PathBuf),
+}
+
+impl Then {
+    fn question(&self) -> &'static str {
+        match self {
+            Then::CloseWindow => "Close the window anyway?",
+            Then::Quit | Then::QuitAsked => "Quit Echo anyway?",
+            Then::Update(_) => "Install the update anyway?",
+            Then::ChangeHome(_) => "Change the data folder anyway?",
+        }
+    }
+}
+
+/// Where the leave stands: one at a time, from the window's save handshake to Echo stopping. A
+/// leave asked meanwhile takes the pending one's place (`takes_over`) or is dropped — while the
+/// user is asked, it waits for the answer instead (`queued`), so a question is never answered for
+/// another leave; once Echo is stopping, every one is dropped. The event loop does what each step
+/// says (`act`).
+#[derive(Default)]
+struct Leaving {
+    phase: Phase,
+    handshakes: u64,
+    /// Asked while the user is asked about another leave: started after that answer (it saves and
+    /// asks its own question).
+    queued: Option<Then>,
+    /// `quit.asking` is written (`asking_quit`).
+    asking_file: bool,
+}
+
+#[derive(Debug, Default)]
+enum Phase {
+    #[default]
+    Idle,
+    /// The window's page saves the notes it holds (`prepareClose`, handshake `n`; 5 s at most).
+    Saving(Then, u64),
+    /// The save failed or the page didn't answer: the user is asked whether to go on anyway.
+    Asking(Then),
+    /// A quit, an update or a folder change went ahead: Echo is stopping.
+    Going,
+}
+
+/// What the event loop does for the leave (`act`).
+#[derive(Debug)]
+enum Step {
+    Nothing,
+    /// The page saves its notes (`prepareClose(n, close)`; a close explains a failure itself).
+    Save { n: u64, close: bool },
+    /// Do it (`go`); then `went` says whether Echo stops.
+    Go(Then),
+    /// Ask the user whether to go on anyway (`ask_to_leave`).
+    Ask(String),
+    /// It didn't happen: the editors writable again, and whoever waits on a quit told why.
+    Stay(Then, String),
+    /// Close the window only: the leave still waits for the user's answer.
+    CloseWindow,
+}
+
+impl Leaving {
+    /// A leave is asked for; `window`: a page holds notes to save first.
+    fn start(&mut self, then: Then, window: bool) -> Step {
+        match &mut self.phase {
+            Phase::Going => Step::Nothing,
+            Phase::Saving(pending, _) => {
+                if takes_over(pending, &then) {
+                    *pending = then;
+                }
+                Step::Nothing
+            }
+            Phase::Asking(pending) => {
+                if takes_over(pending, &then) && self.queued.as_ref().is_none_or(|q| takes_over(q, &then)) {
+                    self.queued = Some(then);
+                }
+                Step::Nothing
+            }
+            Phase::Idle if !window => Step::Go(then),
+            Phase::Idle => {
+                self.handshakes += 1;
+                let close = matches!(then, Then::CloseWindow);
+                self.phase = Phase::Saving(then, self.handshakes);
+                Step::Save { n: self.handshakes, close }
+            }
+        }
+    }
+
+    /// The page answered handshake `n` (`ok`: its notes are saved), or didn't in time (None). An
+    /// answer or a timeout for another handshake changes nothing.
+    fn answered(&mut self, n: u64, ok: Option<bool>) -> Step {
+        if !matches!(self.phase, Phase::Saving(_, m) if m == n) {
+            return Step::Nothing;
+        }
+        let Phase::Saving(then, _) = std::mem::take(&mut self.phase) else { return Step::Nothing };
+        match after_handshake(then, ok) {
+            Next::Go(t) => Step::Go(t),
+            Next::Stay => Step::Nothing,
+            Next::Ask(t, why) => {
+                let question = format!("{why}\n\n{}", t.question());
+                self.phase = Phase::Asking(t);
+                Step::Ask(question)
+            }
+        }
+    }
+
+    /// The user's answer to `Ask` (Err: they couldn't be asked).
+    fn decided(&mut self, answer: Result<bool, String>) -> Step {
+        match (std::mem::take(&mut self.phase), answer) {
+            (Phase::Asking(then), Ok(true)) => Step::Go(then),
+            (Phase::Asking(then), Ok(false)) => Step::Stay(then, "notes typed in its window couldn't be saved, and Echo was kept open".into()),
+            (Phase::Asking(then), Err(why)) => {
+                Step::Stay(then, format!("notes typed in its window couldn't be saved, and Echo couldn't ask whether to go on ({why})"))
+            }
+            (other, _) => {
+                self.phase = other;
+                Step::Nothing
+            }
+        }
+    }
+
+    /// The page's Close without saving (after a close it couldn't save): a leave still saving goes
+    /// on without the notes; one waiting for the user's answer keeps waiting, the window closes.
+    fn close_now(&mut self) -> Step {
+        match std::mem::take(&mut self.phase) {
+            Phase::Idle => Step::Go(Then::CloseWindow),
+            Phase::Saving(then, _) => Step::Go(then),
+            asking @ Phase::Asking(_) => {
+                self.phase = asking;
+                Step::CloseWindow
+            }
+            Phase::Going => {
+                self.phase = Phase::Going;
+                Step::Nothing
+            }
+        }
+    }
+
+    /// What `go` did: Echo stops, or it stays (a window closed; an update or a folder change that
+    /// failed).
+    fn went(&mut self, stopping: bool) {
+        self.phase = if stopping { Phase::Going } else { Phase::Idle };
+    }
+
+    /// A leave that waited for the user's answer about another, once that one is done.
+    fn next(&mut self) -> Option<Then> {
+        if matches!(self.phase, Phase::Asking(_)) { None } else { self.queued.take() }
+    }
+
+    /// The quit `echoctl app quit` waits for is held up by a question to the user (`quit.asking`
+    /// while so: the CLI keeps waiting).
+    fn asking_quit(&self) -> bool {
+        matches!(self.phase, Phase::Asking(Then::QuitAsked)) || matches!(self.queued, Some(Then::QuitAsked))
+    }
+}
+
+/// A leave asked while another is pending (saving, or asking the user): does it take that one's
+/// place? Anything replaces a close; a quit replaces an update or a folder change (what was asked
+/// last wins); `echoctl app quit` replaces a quit (it waits for the outcome). Anything else is
+/// dropped: what is pending stops Echo too. So macOS's own quit, which waits for an answer, always
+/// rides on a quit that ends in `go` (answered yes on exit) or `Stay` (answered no).
+fn takes_over(pending: &Then, new: &Then) -> bool {
+    matches!(
+        (pending, new),
+        (Then::CloseWindow, _) | (Then::Update(_) | Then::ChangeHome(_), Then::Quit | Then::QuitAsked) | (Then::Quit, Then::QuitAsked)
+    )
+}
+
+/// What follows the window's answer to the save handshake (or its silence).
+#[derive(Debug)]
+enum Next {
+    Go(Then),
+    Ask(Then, &'static str),
+    /// A close the page explains itself (Try again / Close without saving).
+    Stay,
+}
+
+/// `close_ready`: saved → go on; not saved → the page says so for a close, the user is asked
+/// for anything else. No answer (`ok` None) → the user is asked, a close too.
+fn after_handshake(then: Then, ok: Option<bool>) -> Next {
+    match (ok, then) {
+        (Some(true), t) => Next::Go(t),
+        (Some(false), Then::CloseWindow) => Next::Stay,
+        (Some(false), t) => Next::Ask(t, "Notes typed in the Echo window couldn't be saved."),
+        (None, t) => Next::Ask(t, "The Echo window didn't confirm that the notes typed in it are saved."),
+    }
+}
+
+/// Ask whether to leave anyway, off the event loop (`LeaveDecided`: once, also if the dialog's
+/// thread fails — the leave would wait for ever).
+fn ask_to_leave(question: String, proxy: &tao::event_loop::EventLoopProxy<UiEvent>) {
+    struct Answer(Option<tao::event_loop::EventLoopProxy<UiEvent>>);
+    impl Answer {
+        fn send(&mut self, answer: Result<bool, String>) {
+            if let Some(p) = self.0.take() {
+                let _ = p.send_event(UiEvent::LeaveDecided(answer));
+            }
+        }
+    }
+    impl Drop for Answer {
+        fn drop(&mut self) {
+            self.send(Err("the question ended without an answer".into()));
+        }
+    }
+    let mut answer = Answer(Some(proxy.clone()));
+    std::thread::spawn(move || {
+        let a = app::ask_checked(&question, &["Cancel", "Go on"], "Cancel").map(|a| a.as_deref() == Some("Go on")).map_err(|e| format!("{e:#}"));
+        answer.send(a);
+    });
+}
+
+/// Do what the leave's step says.
+fn act(step: Step, l: &mut Leaving, win: &mut Option<crate::window::EchoWindow>, target: &tao::event_loop::EventLoopWindowTarget<UiEvent>, stop: &Arc<AtomicBool>, ui: &mut Option<Ui>, proxy: &tao::event_loop::EventLoopProxy<UiEvent>) {
+    match step {
+        Step::Nothing => {}
+        Step::Save { n, close } => {
+            if let Some(w) = win {
+                let _ = w.webview.evaluate_script(&format!(
+                    "window.echo && window.echo.prepareClose ? window.echo.prepareClose({n}, {close}) : window.ipc.postMessage(JSON.stringify({{ cmd: 'close_ready', ok: true, n: {n} }}))"
+                ));
+            }
+            let p = proxy.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_secs(5));
+                let _ = p.send_event(UiEvent::LeaveTimeout(n));
+            });
+        }
+        Step::Go(then) => l.went(go(then, win, target, stop, ui)),
+        Step::Ask(question) => ask_to_leave(question, proxy),
+        Step::Stay(then, why) => {
+            thaw(win);
+            match then {
+                Then::QuitAsked => app::quit_cancelled(&why),
+                Then::Update(_) => app::notify("Update not installed", "Notes typed in the Echo window couldn't be saved. Install it from the menu once they are."),
+                Then::ChangeHome(_) => app::notify("Data folder not changed", "Notes typed in the Echo window couldn't be saved."),
+                Then::CloseWindow | Then::Quit => {}
+            }
+            #[cfg(target_os = "macos")]
+            if matches!(then, Then::Quit | Then::QuitAsked) {
+                terminate::cancelled();
+            }
+        }
+        Step::CloseWindow => {
+            *win = None;
+            set_dock_icon(target, false);
+        }
+    }
+    if l.asking_quit() != l.asking_file {
+        l.asking_file = l.asking_quit();
+        app::asking_to_quit(l.asking_file);
+    }
+    // A leave that waited for that answer: its turn now.
+    if let Some(next) = l.next() {
+        let step = l.start(next, win.is_some());
+        act(step, l, win, target, stop, ui, proxy);
+    }
 }
 
 const SIZE: u32 = 36;
@@ -327,13 +598,6 @@ fn status_text(state: &UiState) -> String {
     }
 }
 
-fn open_path(p: &PathBuf) {
-    #[cfg(target_os = "macos")]
-    let _ = std::process::Command::new("open").arg(p).status();
-    #[cfg(windows)]
-    let _ = std::process::Command::new("explorer").arg(p).status();
-}
-
 /// Everything the menu shows besides the live status line. The menu is rebuilt only when this
 /// changes (checked every few seconds), so it stays cheap.
 #[derive(Clone, PartialEq)]
@@ -345,6 +609,7 @@ struct Model {
     scheduled_manual: bool,
     keep_audio: bool,
     minutes_page: bool,
+    auto_minutes: bool,
     capture_frames: bool,
     active_model: Option<String>,
     downloaded_models: Vec<&'static str>,
@@ -445,7 +710,7 @@ fn load_model(health: &[(String, String, Option<String>)]) -> Model {
             } else if d.join(crate::transcribe_marker()).exists() {
                 "transcribing…"
             } else if d.join("notes.md").exists() {
-                "✓ notes"
+                "✓ minutes"
             } else if d.join("transcript.md").exists() {
                 "✓ transcript"
             } else {
@@ -467,6 +732,7 @@ fn load_model(health: &[(String, String, Option<String>)]) -> Model {
         scheduled_manual: !cfg.ask_scheduled(),
         keep_audio: cfg.keep_audio,
         minutes_page: cfg.minutes_page,
+        auto_minutes: cfg.auto_minutes,
         capture_frames: cfg.capture_frames,
         active_model: cfg.model.clone(),
         downloaded_models,
@@ -560,6 +826,7 @@ enum Action {
     SetScheduled(&'static str),
     ToggleKeepAudio,
     ToggleMinutesPage,
+    ToggleAutoMinutes,
     ToggleFrames,
     UseModel(&'static str),
     RemoveModel(&'static str),
@@ -602,7 +869,7 @@ enum Action {
 }
 
 struct Ui {
-    stop_flag: Arc<AtomicBool>,
+    proxy: tao::event_loop::EventLoopProxy<UiEvent>,
     quit: MenuItem,
     tray: TrayIcon,
     status: MenuItem,
@@ -667,7 +934,7 @@ fn ellipsize(s: &str, n: usize) -> String {
 }
 
 impl Ui {
-    fn new(stop: Arc<AtomicBool>) -> tray_icon::Result<Self> {
+    fn new(proxy: tao::event_loop::EventLoopProxy<UiEvent>) -> tray_icon::Result<Self> {
         let (icon, _) = icon_for(&UiState::Idle { in_call: None });
         let builder = TrayIconBuilder::new().with_tooltip("Echo");
         #[cfg(target_os = "macos")]
@@ -676,7 +943,7 @@ impl Ui {
         let builder = builder.with_icon(icon);
         let tray = builder.build()?;
         let mut ui = Ui {
-            stop_flag: stop,
+            proxy,
             quit: MenuItem::new("", true, None),
             tray,
             status: MenuItem::new("", false, None),
@@ -785,7 +1052,7 @@ impl Ui {
         let _ = settings.append_items(&[&keep, &sep()]);
         let langs = if model.languages.is_empty() { "any".to_string() } else { model.languages.join(", ") };
         let _ = settings.append_items(&[&sep(), &MenuItem::new(format!("Languages: {langs}"), false, None)]);
-        let profile = self.item("Edit my profile (for notes)…", true, Some(Action::EditProfile));
+        let profile = self.item("Edit my profile (for minutes)…", true, Some(Action::EditProfile));
         let _ = settings.append(&profile);
         let cfg = self.item("Open settings file", true, Some(Action::Open(paths::state_dir().join("config.json"))));
         let _ = settings.append_items(&[&cfg, &sep()]);
@@ -870,7 +1137,7 @@ impl Ui {
             let _ = models_menu.append_items(&[&sep(), &MenuItem::new(format!("Downloading {name}: {pct}%"), false, None)]);
         }
 
-        // Claude Code: the plugin (notes, live pane) and where it writes notes.
+        // Claude Code: the plugin (live pane, sessions), where Echo runs it for minutes, and the minutes.
         let claude = Submenu::new(if model.plugin_installed { "Claude Code ✓" } else { "Claude Code" }, true);
         if !model.has_claude {
             let _ = claude.append(&MenuItem::new("Claude Code is not installed", false, None));
@@ -880,18 +1147,19 @@ impl Ui {
             let connect = self.item("Connect Claude Code (install the plugin)", true, Some(Action::ConnectClaude));
             let _ = claude.append(&connect);
         }
-        let _ = claude.append_items(&[&sep(), &MenuItem::new("Write call notes in", false, None)]);
-        let any = self.check("   Any Claude Code session", model.notes_in.is_none(), Action::NotesAnywhere);
+        let _ = claude.append_items(&[&sep(), &MenuItem::new("Echo runs Claude Code for minutes in", false, None)]);
+        let any = self.check("   The data folder", model.notes_in.is_none(), Action::NotesAnywhere);
         let _ = claude.append(&any);
         if let Some(dir) = &model.notes_in {
-            let only = self.check(&format!("   Only sessions in {}", ellipsize(&dir.display().to_string(), 40)), true, Action::NotesChoose);
+            let only = self.check(&format!("   {}", ellipsize(&dir.display().to_string(), 40)), true, Action::NotesChoose);
             let _ = claude.append(&only);
         }
         let choose = self.item("   Choose a folder…", true, Some(Action::NotesChoose));
         let _ = claude.append(&choose);
-        let notes_model = self.item(&format!("Notes model: {}…", model.notes_model), model.has_claude, Some(Action::NotesModel));
-        let page = self.check("Write a minutes page (HTML) with the notes", model.minutes_page, Action::ToggleMinutesPage);
-        let _ = claude.append_items(&[&sep(), &notes_model, &page]);
+        let auto = self.check("Write minutes automatically (15 min after a call)", model.auto_minutes, Action::ToggleAutoMinutes);
+        let notes_model = self.item(&format!("Minutes model: {}…", model.notes_model), model.has_claude, Some(Action::NotesModel));
+        let page = self.check("Write a minutes page (HTML file) too", model.minutes_page, Action::ToggleMinutesPage);
+        let _ = claude.append_items(&[&sep(), &auto, &notes_model, &page]);
 
         // AI for calls: which model (and account) writes live notes and minutes (`ai.rs`).
         let ai = Submenu::new("AI for calls", true);
@@ -1045,20 +1313,27 @@ impl Ui {
         self.state = Some(state);
     }
 
-    /// "Update to …" (menu, or a click on the "Update available" notification): ask, install.
+    /// "Update to …" (menu, or a click on the "Update available" notification): ask, download and
+    /// verify it, then — once the window's notes are saved (`Leaving`) — swap it in and stop.
     fn start_update(&self) {
         let Some(r) = crate::update::AVAILABLE.lock().unwrap().clone() else { return };
-        let stop = self.stop_flag.clone();
+        let proxy = self.proxy.clone();
         std::thread::spawn(move || {
             let msg = format!("Install Echo {}?\n\nEcho restarts; nothing is recorded meanwhile.", r.version);
             if app::ask(&msg, &["Later", "Update"], "Update").as_deref() != Some("Update") {
                 return;
             }
-            match crate::update::install(&r, std::process::id()) {
-                Ok(()) => stop.store(true, std::sync::atomic::Ordering::SeqCst), // the swap runs after exit
+            match crate::update::prepare(&r) {
+                Ok(staged) => drop(proxy.send_event(UiEvent::Leave(Then::Update(staged)))),
                 Err(e) => app::notify("Update failed", &format!("{e:#}")),
             }
         });
+    }
+
+    /// The Quit item while quitting.
+    fn quitting(&mut self) {
+        self.quit.set_text("Quitting…");
+        self.quit.set_enabled(false);
     }
 
     fn click(&mut self, id: &MenuId) {
@@ -1069,7 +1344,7 @@ impl Ui {
             Action::Stop => drop(watch::stop()),
             Action::ArmMeeting(m) => drop(watch::arm(m.subject.clone(), Some(*m), None, None)),
             Action::JoinMeeting(m) => drop(watch::join(*m)),
-            Action::Open(p) => open_path(&p),
+            Action::Open(p) => app::open_path(&p),
             Action::SetUnscheduled(v) => {
                 let Ok(mut cfg) = Config::load() else { return };
                 cfg.unscheduled = Some(v.to_string());
@@ -1104,6 +1379,16 @@ impl Ui {
                 cfg.minutes_page = !cfg.minutes_page;
                 let _ = cfg.save();
             }
+            Action::ToggleAutoMinutes => {
+                let saved = Config::load().and_then(|mut cfg| {
+                    let on = !cfg.auto_minutes;
+                    cfg.set_auto_minutes(on);
+                    cfg.save()
+                });
+                if let Err(e) = saved {
+                    app::notify("Couldn't change automatic minutes", &format!("{e:#}"));
+                }
+            }
             Action::UseModel(name) => drop(models::use_model(name)),
             Action::RemoveModel(name) => {
                 std::thread::spawn(move || {
@@ -1124,7 +1409,7 @@ impl Ui {
             }
             Action::NotesChoose => {
                 std::thread::spawn(|| {
-                    if let Some(dir) = app::choose_folder("Claude Code sessions opened in this folder write the call notes") {
+                    if let Some(dir) = app::choose_folder("Echo runs Claude Code for call minutes in this folder (its .claude/settings.json applies)") {
                         let Ok(mut cfg) = Config::load() else { return };
                         cfg.notes_in = Some(dunce::canonicalize(&dir).unwrap_or(dir));
                         let _ = cfg.save();
@@ -1133,7 +1418,7 @@ impl Ui {
             }
             Action::ConnectClaude => {
                 std::thread::spawn(|| match app::connect_claude("user", None) {
-                    Ok(()) => app::notify("Claude Code connected", "New Claude Code sessions now write your call notes."),
+                    Ok(()) => app::notify("Claude Code connected", "New Claude Code sessions get Echo's live pane and /echo:process-call."),
                     Err(e) => app::notify("Could not connect Claude Code", &format!("{e:#}")),
                 });
             }
@@ -1207,7 +1492,7 @@ impl Ui {
             Action::NotesModel => {
                 std::thread::spawn(|| {
                     let current = Config::load().unwrap_or_default().notes_model_label();
-                    let msg = "Model Claude Code uses when Echo writes call notes:\n\nsonnet, opus or haiku, a full model name, or \"default\" to use Claude Code's own setting (local models, a gateway, Bedrock or Vertex).";
+                    let msg = "Model Claude Code uses when Echo writes call minutes:\n\nsonnet, opus or haiku, a full model name, or \"default\" to use Claude Code's own setting (local models, a gateway, Bedrock or Vertex).";
                     if let Some(m) = app::ask_text(msg, &current, "Save") {
                         let Ok(mut cfg) = Config::load() else { return };
                         let m = m.trim().to_string();
@@ -1222,7 +1507,7 @@ impl Ui {
                 return;
             }
             Action::AddNote => {
-                // Your own note: it becomes the backbone of the call's notes ("# …" = heading).
+                // Your own note: it becomes the backbone of the call's minutes ("# …" = heading).
                 std::thread::spawn(|| {
                     if let Some(t) = app::ask_text("Note for this call (start with # for a heading):", "", "Add") {
                         if let Err(e) = crate::calls::note(&t) {
@@ -1234,7 +1519,7 @@ impl Ui {
             }
             Action::EditProfile => {
                 if let Ok(p) = crate::calls::ensure_me_profile() {
-                    open_path(&p);
+                    app::open_path(&p);
                 }
             }
             Action::InstallCli => {
@@ -1283,27 +1568,140 @@ impl Ui {
             Action::DownloadModel(name) => app::download_model_in_background(name),
             Action::ToggleAutostart => drop(app::set_autostart(!app::autostart_enabled())),
             Action::ChangeHome => {
-                // The picker blocks: run it off the event loop, then restart on the new folder.
-                let stop = self.stop_flag.clone();
+                // The picker blocks: run it off the event loop, then restart on the new folder once
+                // the window's notes are saved (`Leaving`).
+                let proxy = self.proxy.clone();
                 std::thread::spawn(move || {
-                    let Some(dir) = app::choose_folder("Folder for Echo calls and notes") else { return };
-                    if dir == paths::home() || paths::set_home(&dir).is_err() {
-                        return;
+                    let Some(dir) = app::choose_folder("Folder for Echo calls and minutes") else { return };
+                    if dir != paths::home() {
+                        let _ = proxy.send_event(UiEvent::Leave(Then::ChangeHome(dir)));
                     }
-                    app::RESTART.store(true, std::sync::atomic::Ordering::SeqCst);
-                    stop.store(true, std::sync::atomic::Ordering::SeqCst);
                 });
                 return;
             }
             Action::OpenUrl(u) => drop(permissions::open_settings(&u)),
             Action::Quit => {
-                self.quit.set_text("Quitting…");
-                self.quit.set_enabled(false);
-                self.stop_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+                let _ = self.proxy.send_event(UiEvent::Leave(Then::Quit));
                 return;
             }
         }
         self.refresh_model(true);
+    }
+}
+
+/// macOS's own Quit — the Dock icon's menu while the window is open, a logout — asks the app
+/// (`applicationShouldTerminate:`), which tao's delegate doesn't answer: the process would end at
+/// once, losing what is typed in the window and skipping the recording's close. Answered here
+/// "later" (`NSTerminateLater`), and the app quits its own way (`Leaving` → the watcher stops), then
+/// answers "yes" (macOS terminates it); a quit cancelled after a failed save is answered "no".
+#[cfg(target_os = "macos")]
+mod terminate {
+    use super::{Then, UiEvent};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Mutex, OnceLock};
+
+    static PROXY: OnceLock<Mutex<tao::event_loop::EventLoopProxy<UiEvent>>> = OnceLock::new();
+    /// macOS waits for our answer.
+    static PENDING: AtomicBool = AtomicBool::new(false);
+
+    const NS_TERMINATE_NOW: usize = 1;
+    const NS_TERMINATE_LATER: usize = 2;
+
+    unsafe extern "C-unwind" fn should_terminate(_this: &objc2::runtime::AnyObject, _cmd: objc2::runtime::Sel, _app: &objc2::runtime::AnyObject) -> usize {
+        let Some(p) = PROXY.get() else { return NS_TERMINATE_NOW };
+        if !PENDING.swap(true, Ordering::SeqCst) {
+            let _ = p.lock().unwrap_or_else(|e| e.into_inner()).send_event(UiEvent::Leave(Then::Quit));
+        }
+        NS_TERMINATE_LATER
+    }
+
+    /// Answer `applicationShouldTerminate:` for tao's app delegate (it has no answer of its own).
+    pub fn guard(proxy: tao::event_loop::EventLoopProxy<UiEvent>) {
+        let _ = PROXY.set(Mutex::new(proxy));
+        let Some(cls) = objc2::runtime::AnyClass::get(c"TaoAppDelegateParent") else {
+            eprintln!("macOS's Quit doesn't wait for the window's notes: tao's app delegate wasn't found");
+            return;
+        };
+        let sel = objc2::sel!(applicationShouldTerminate:);
+        if cls.instance_method(sel).is_some() {
+            eprintln!("macOS's Quit doesn't wait for the window's notes: tao answers applicationShouldTerminate: itself");
+            return;
+        }
+        // SAFETY: the function has the selector's signature (`- (NSApplicationTerminateReply)
+        // applicationShouldTerminate:(NSApplication *)sender`, type "Q@:@"), and the class exists.
+        unsafe {
+            let imp: objc2::runtime::Imp = std::mem::transmute(should_terminate as unsafe extern "C-unwind" fn(_, _, _) -> usize);
+            objc2::ffi::class_addMethod(cls as *const _ as *mut _, sel, imp, c"Q@:@".as_ptr());
+        }
+    }
+
+    /// A quit was cancelled (the user kept Echo, `Step::Stay`): so is the one macOS asked for, if it
+    /// waits — it asks nothing again until it gets an answer. A quit of `echoctl app quit` may carry
+    /// it (`takes_over`).
+    pub fn cancelled() {
+        reply(false);
+    }
+
+    /// Echo has stopped its own way (`Leaving`, the watcher's close): macOS may terminate it now — it
+    /// waits for this answer, and the event loop's stop alone doesn't release it.
+    pub fn finished() {
+        reply(true);
+    }
+
+    /// On the event loop's (main) thread only: elsewhere it would take the answer without giving it.
+    fn reply(go: bool) {
+        let Some(mtm) = objc2_foundation::MainThreadMarker::new() else { return };
+        if PENDING.swap(false, Ordering::SeqCst) {
+            objc2_app_kit::NSApplication::sharedApplication(mtm).replyToApplicationShouldTerminate(go);
+        }
+    }
+}
+
+/// Do what the leave was for; whether Echo stops now.
+fn go(then: Then, win: &mut Option<crate::window::EchoWindow>, target: &tao::event_loop::EventLoopWindowTarget<UiEvent>, stop: &Arc<AtomicBool>, ui: &mut Option<Ui>) -> bool {
+    match then {
+        Then::CloseWindow => {
+            *win = None; // closing the window leaves Echo running in the menu bar
+            set_dock_icon(target, false);
+            false
+        }
+        Then::Quit | Then::QuitAsked => {
+            if let Some(u) = ui.as_mut() {
+                u.quitting();
+            }
+            stop.store(true, Ordering::SeqCst);
+            true
+        }
+        Then::Update(staged) => match crate::update::commit(&staged, std::process::id()) {
+            Ok(()) => {
+                stop.store(true, Ordering::SeqCst); // the swap runs after exit
+                true
+            }
+            Err(e) => {
+                app::notify("Update not installed", &format!("{e:#}"));
+                thaw(win);
+                false
+            }
+        },
+        Then::ChangeHome(dir) => match paths::set_home(&dir) {
+            Ok(_) => {
+                app::RESTART.store(true, Ordering::SeqCst);
+                stop.store(true, Ordering::SeqCst);
+                true
+            }
+            Err(e) => {
+                app::notify("Couldn't change the data folder", &format!("{e:#}"));
+                thaw(win);
+                false
+            }
+        },
+    }
+}
+
+/// The window's editors were frozen for a leave that didn't happen: writable again.
+fn thaw(win: &Option<crate::window::EchoWindow>) {
+    if let Some(w) = win {
+        let _ = w.webview.evaluate_script("window.echo && window.echo.thaw && window.echo.thaw()");
     }
 }
 
@@ -1355,46 +1753,100 @@ pub fn run(app: TargetApp, stop: Arc<AtomicBool>) -> ! {
     }
 
     let proxy = event_loop.create_proxy();
+    // macOS's own Quit (the Dock's) goes through `Leaving` too.
+    #[cfg(target_os = "macos")]
+    terminate::guard(proxy.clone());
     let p = proxy.clone();
     MenuEvent::set_event_handler(Some(move |e: MenuEvent| {
         let _ = p.send_event(UiEvent::Menu(e.id));
     }));
     let p = proxy.clone();
     std::thread::spawn(move || {
+        // `Quit` ends the event loop once the watcher has finished — also if it panics: a quit
+        // macOS waits on is answered only then.
+        struct Finished(tao::event_loop::EventLoopProxy<UiEvent>);
+        impl Drop for Finished {
+            fn drop(&mut self) {
+                let _ = self.0.send_event(UiEvent::Quit);
+            }
+        }
+        let _finished = Finished(p.clone());
         if let Err(e) = watch::run_loop(app, stop, |s| {
             let _ = p.send_event(UiEvent::State(s));
         }) {
             eprintln!("watcher failed: {e:#}");
         }
-        let _ = p.send_event(UiEvent::Quit);
     });
 
     let mut ui: Option<Ui> = None;
     let mut win: Option<crate::window::EchoWindow> = None;
+    let mut leaving = Leaving::default();
+    app::UI_LOOP.store(true, Ordering::SeqCst);
     event_loop.run(move |event, target, control_flow| {
         *control_flow = ControlFlow::Wait;
         match event {
             Event::WindowEvent { window_id, event: WindowEvent::CloseRequested, .. }
                 if win.as_ref().is_some_and(|w| w.window.id() == window_id) =>
             {
-                win = None; // closing the window leaves Echo running in the menu bar
-                set_dock_icon(target, false);
+                let step = leaving.start(Then::CloseWindow, win.is_some());
+                act(step, &mut leaving, &mut win, target, &stop_for_ui, &mut ui, &proxy);
             }
-            Event::UserEvent(UiEvent::Ipc(msg)) if crate::window::handle(&msg) => {
-                // The action changed something: refresh the page and the menu.
-                if let Some(w) = &win {
-                    w.refresh();
-                }
-                if let Some(u) = ui.as_mut() {
-                    u.refresh_model(true);
-                }
+            Event::UserEvent(UiEvent::Leave(then)) => {
+                let step = leaving.start(then, win.is_some());
+                act(step, &mut leaving, &mut win, target, &stop_for_ui, &mut ui, &proxy);
             }
+            Event::UserEvent(UiEvent::LeaveTimeout(n)) => {
+                let step = leaving.answered(n, None);
+                act(step, &mut leaving, &mut win, target, &stop_for_ui, &mut ui, &proxy);
+            }
+            Event::UserEvent(UiEvent::LeaveDecided(answer)) => {
+                if let Err(why) = &answer {
+                    app::notify("Echo stays open", &format!("Notes typed in the Echo window couldn't be saved, and Echo couldn't ask what to do: {why}"));
+                }
+                let step = leaving.decided(answer);
+                act(step, &mut leaving, &mut win, target, &stop_for_ui, &mut ui, &proxy);
+            }
+            Event::UserEvent(UiEvent::Ipc(msg)) => match crate::window::closing(&msg) {
+                // The page saved what it holds (or couldn't): go on, or ask — a close the page
+                // itself explains (its Try again / Close without saving).
+                Some(crate::window::Closing::Ready { ok, n }) => {
+                    let step = leaving.answered(n, Some(ok));
+                    act(step, &mut leaving, &mut win, target, &stop_for_ui, &mut ui, &proxy);
+                }
+                Some(crate::window::Closing::Now) => {
+                    let step = leaving.close_now();
+                    act(step, &mut leaving, &mut win, target, &stop_for_ui, &mut ui, &proxy);
+                }
+                Some(crate::window::Closing::Request) => {
+                    let step = leaving.start(Then::CloseWindow, win.is_some());
+                    act(step, &mut leaving, &mut win, target, &stop_for_ui, &mut ui, &proxy);
+                }
+                None => {
+                    let done = crate::window::handle(&msg);
+                    if let (Some(js), Some(w)) = (&done.reply, &win) {
+                        let _ = w.webview.evaluate_script(js);
+                    }
+                    if done.refresh {
+                        // The action changed something: refresh the page and the menu.
+                        if let Some(w) = &win {
+                            w.refresh();
+                        }
+                        if let Some(u) = ui.as_mut() {
+                            u.refresh_model(true);
+                        }
+                    }
+                }
+            },
             // macOS: create the icon only once the event loop is running.
-            Event::NewEvents(StartCause::Init) => match Ui::new(stop_for_ui.clone()) {
+            Event::NewEvents(StartCause::Init) => match Ui::new(proxy.clone()) {
                 Ok(u) => ui = Some(u),
                 Err(e) => eprintln!("tray icon unavailable: {e}"),
             },
             Event::UserEvent(UiEvent::State(s)) => {
+                // `echoctl app quit` — also when the tray icon couldn't be made (no window then).
+                if app::take_quit_request() {
+                    let _ = proxy.send_event(UiEvent::Leave(Then::QuitAsked));
+                }
                 if let Some(u) = ui.as_mut() {
                     u.apply(s);
                     u.refresh_model(false);
@@ -1435,12 +1887,113 @@ pub fn run(app: TargetApp, stop: Arc<AtomicBool>) -> ! {
                 }
             }
             Event::UserEvent(UiEvent::Quit) => {
-                if app::RESTART.load(std::sync::atomic::Ordering::SeqCst) {
+                if app::RESTART.load(Ordering::SeqCst) {
                     let _ = app::spawn_app(true);
                 }
+                // A quit macOS asked for waits for its answer: the watcher has closed everything.
+                #[cfg(target_os = "macos")]
+                terminate::finished();
                 *control_flow = ControlFlow::Exit
             }
             _ => {}
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn leaving_waits_for_the_notes_in_the_window() {
+        assert!(matches!(after_handshake(Then::Quit, Some(true)), Next::Go(Then::Quit)));
+        assert!(matches!(after_handshake(Then::CloseWindow, Some(false)), Next::Stay), "the page says why, with its own buttons");
+        assert!(matches!(after_handshake(Then::QuitAsked, Some(false)), Next::Ask(Then::QuitAsked, _)));
+        assert!(matches!(after_handshake(Then::ChangeHome("/x".into()), Some(false)), Next::Ask(Then::ChangeHome(_), _)));
+        assert!(matches!(after_handshake(Then::CloseWindow, None), Next::Ask(Then::CloseWindow, _)), "no answer: asked, never closed quietly");
+        assert!(matches!(after_handshake(Then::Quit, None), Next::Ask(Then::Quit, _)));
+    }
+
+    #[test]
+    fn a_quit_is_never_dropped_for_another_leave() {
+        let home = || Then::ChangeHome("/x".into());
+        assert!(takes_over(&Then::CloseWindow, &Then::Quit) && takes_over(&Then::CloseWindow, &home()));
+        assert!(takes_over(&home(), &Then::Quit) && takes_over(&home(), &Then::QuitAsked), "macOS waits for its answer");
+        assert!(takes_over(&Then::Quit, &Then::QuitAsked), "`app quit` waits for the outcome");
+        for (pending, new) in [(Then::QuitAsked, Then::Quit), (Then::Quit, Then::CloseWindow), (Then::Quit, home()), (home(), Then::CloseWindow)] {
+            assert!(!takes_over(&pending, &new), "{pending:?} stays for {new:?}");
+        }
+    }
+
+    #[test]
+    fn one_leave_at_a_time_from_the_save_to_echo_stopping() {
+        let mut l = Leaving::default();
+        // A close with the window open: its page saves first.
+        assert!(matches!(l.start(Then::CloseWindow, true), Step::Save { n: 1, close: true }));
+        // A quit meanwhile takes its place; a close then doesn't.
+        assert!(matches!(l.start(Then::Quit, true), Step::Nothing));
+        assert!(matches!(l.start(Then::CloseWindow, true), Step::Nothing));
+        // An answer for another handshake changes nothing; this one's failure asks the user.
+        assert!(matches!(l.answered(7, Some(true)), Step::Nothing));
+        assert!(matches!(l.answered(1, Some(false)), Step::Ask(q) if q.contains("Quit Echo anyway?")));
+        assert!(matches!(l.answered(1, None), Step::Nothing), "the answered handshake's timeout");
+        // While the user is asked: no second handshake; `app quit` waits for the answer (and the
+        // CLI with it: quit.asking), it doesn't take this question over.
+        assert!(!l.asking_quit());
+        assert!(matches!(l.start(Then::QuitAsked, true), Step::Nothing));
+        assert!(l.asking_quit() && l.next().is_none());
+        // Kept open: then `app quit` gets its own turn — its own save and question.
+        assert!(matches!(l.decided(Ok(false)), Step::Stay(Then::Quit, why) if why.contains("kept open")));
+        let next = l.next();
+        assert!(matches!(next, Some(Then::QuitAsked)) && !l.asking_quit());
+        assert!(matches!(l.start(next.unwrap(), true), Step::Save { n: 2, close: false }));
+        assert!(matches!(l.answered(2, Some(false)), Step::Ask(_)));
+        assert!(l.asking_quit());
+        assert!(matches!(l.decided(Ok(false)), Step::Stay(Then::QuitAsked, _)));
+        // A folder change that goes ahead: Echo stops, and nothing else starts.
+        assert!(matches!(l.start(Then::ChangeHome("/x".into()), true), Step::Save { n: 3, close: false }));
+        assert!(matches!(l.answered(3, Some(true)), Step::Go(Then::ChangeHome(_))));
+        l.went(true);
+        assert!(matches!(l.start(Then::Quit, true), Step::Nothing));
+        assert!(matches!(l.close_now(), Step::Nothing));
+    }
+
+    #[test]
+    fn a_question_is_answered_only_for_its_own_leave() {
+        // "Close the window anyway?" open; a quit arrives: it waits, the answer is the close's.
+        let mut l = Leaving::default();
+        l.start(Then::CloseWindow, true);
+        assert!(matches!(l.answered(1, None), Step::Ask(q) if q.contains("Close the window anyway?")));
+        l.start(Then::Quit, true);
+        assert!(matches!(l.decided(Ok(true)), Step::Go(Then::CloseWindow)));
+        l.went(false);
+        assert!(matches!(l.next(), Some(Then::Quit)), "then the quit goes on (no window: at once)");
+        // Only one waits: what would take over the waiting one replaces it, else it's dropped.
+        let mut l = Leaving::default();
+        l.start(Then::ChangeHome("/x".into()), true);
+        l.answered(1, None);
+        l.start(Then::Quit, true);
+        l.start(Then::CloseWindow, true);
+        l.start(Then::QuitAsked, true);
+        l.decided(Ok(false));
+        assert!(matches!(l.next(), Some(Then::QuitAsked)));
+    }
+
+    #[test]
+    fn without_a_window_a_leave_goes_at_once_and_close_without_saving_goes_on() {
+        let mut l = Leaving::default();
+        assert!(matches!(l.start(Then::QuitAsked, false), Step::Go(Then::QuitAsked)), "no window (or no tray icon): nothing to save");
+        let mut l = Leaving::default();
+        assert!(matches!(l.close_now(), Step::Go(Then::CloseWindow)));
+        l.went(false);
+        // Still saving: the leave goes on without the notes.
+        assert!(matches!(l.start(Then::ChangeHome("/x".into()), true), Step::Save { .. }));
+        assert!(matches!(l.close_now(), Step::Go(Then::ChangeHome(_))));
+        l.went(false); // the folder couldn't be changed: Echo stays
+        // Asking the user: the window closes, the question stays.
+        assert!(matches!(l.start(Then::Quit, true), Step::Save { n: 2, .. }));
+        assert!(matches!(l.answered(2, None), Step::Ask(_)));
+        assert!(matches!(l.close_now(), Step::CloseWindow));
+        assert!(matches!(l.decided(Err("no dialog".into())), Step::Stay(Then::Quit, why) if why.contains("couldn't ask")));
+    }
 }

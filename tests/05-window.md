@@ -32,13 +32,18 @@
 **Priority:** P1 · **Platform:** macOS
 
 **Steps**
-1. Open a call that has notes, chat and actions. Visit Notes, Transcript, Chat, Actions.
-2. In Notes, click a time chip such as `11:40`.
-3. In Transcript, use "Find in transcript".
+1. Open a call that has minutes, chat and actions. Visit Notes, Minutes, Transcript, Chat,
+   Actions.
+2. In Minutes, click a time chip such as `11:40`.
+3. In Minutes, click **Open in browser**, then **Show in Finder**.
+4. In Transcript, use "Find in transcript".
 
 **Expected**
 - Each tab shows its content; the counts next to Chat and Actions match.
+- Notes is an editor with your own notes for the call (`my-notes.md`; empty if you took none).
+- Minutes shows the minutes page inside the window: header block, sections, tables.
 - The time chip jumps to that moment in the transcript.
+- Open in browser opens `<title>-minutes.html` from the call's folder; Show in Finder selects it.
 - Find highlights the matches.
 
 ---
@@ -54,14 +59,17 @@
 
 ---
 
-### TC-WIN-005 · Call without notes
+### TC-WIN-005 · Call without minutes
 **Priority:** P1 · **Platform:** macOS
 
 **Steps**
-1. Open a call that was transcribed but has no notes (no Claude Code connected).
+1. Open a call that was transcribed but has no minutes (Claude Code not installed).
+2. Install Claude Code; open a call of 4 minutes or more that ended less than 15 minutes ago.
 
 **Expected**
-- The Notes tab explains that notes come from Claude Code and shows the
+- Step 1: the Minutes tab explains that minutes come from Claude Code and links to install it.
+  The Notes tab is an editor you can type in.
+- Step 2: the Minutes tab says "Minutes at HH:MM", with **Write minutes now** and the
   `/echo:process-call` command to copy.
 
 ---
@@ -128,3 +136,20 @@
 
 **Expected**
 - The window follows the system appearance; all text stays readable in both.
+
+---
+
+### TC-WIN-011 · Your notes in the Notes tab
+**Priority:** P1 · **Platform:** macOS
+
+**Steps**
+1. While a call records, open it → Notes. Type a line, click **Time**, type another.
+2. Menu → **Add a note…** with a third point.
+3. Close and reopen the window; after the call, add a line to the same notes.
+
+**Expected**
+- The state under the editor goes from "Not saved yet" to "Saved" a second after you stop typing.
+- **Time** inserts the call's time (`[12:34]`) at the caret; it shows only while recording.
+- The tray's note appears below your text without losing what you typed.
+- After reopening, everything is there (`my-notes.md` in the call's folder); after the call the
+  editor still works, and a refresh never moves the caret.

@@ -1,5 +1,5 @@
 // Pure helpers for the Echo mod (no `$`): parsing the CLI's files and laying out text.
-import type { CallItem, LiveLine } from '../types'
+import type { CallItem, LiveLine, LiveView } from '../types'
 
 export function parseLines<T>(text: string): T[] {
   const out: T[] = []
@@ -72,7 +72,7 @@ export function callFromDir(name: string): { when: string; title: string } {
 export function statusBadge(status: CallItem['status']): { label: string; color: string } {
   switch (status) {
     case 'notes':
-      return { label: '✓ notes', color: 'success' }
+      return { label: '✓ minutes', color: 'success' }
     case 'transcript':
       return { label: '◐ transcript', color: 'suggestion' }
     case 'transcribing':
@@ -107,7 +107,7 @@ export function clock(seconds: number): string {
 
 export function callRow(c: CallItem): string {
   const mins = c.minutes === null ? '' : ` · ${c.minutes} min`
-  const status = c.status === 'notes' ? '✓ notes' : c.status === 'transcript' ? 'transcript' : c.status
+  const status = c.status === 'notes' ? '✓ minutes' : c.status === 'transcript' ? 'transcript' : c.status
   return `${c.when} · ${c.title}${mins} · ${status}`
 }
 
@@ -144,4 +144,30 @@ export function insightFromLive(notes: unknown): { summary: string[]; highlights
     actions: list('actions').filter(x => text(x, 'task')).map(x => `${text(x, 'owner') || '?'} — ${text(x, 'task')}${mmss(x.t)}`),
     updatedAt: Number.isNaN(updated) ? null : updated,
   }
+}
+
+/** The app's answer about a call's minutes (`echoctl notes <call> --auto`): an older app took the
+ *  ask (`requested`); they are on their way (`waiting`); or the CLI couldn't answer (`failed`). */
+export type MinutesAnswer = { requested: boolean; waiting: boolean; failed: boolean; reason: string }
+
+/** Where the pane goes on that answer. A CLI that couldn't answer is asked again later: the minutes
+ *  may still come, so the pane keeps following the call. */
+export function minutesPhase(r: MinutesAnswer): Pick<LiveView, 'phase' | 'notesNote'> & { notesRequested?: true } {
+  if (r.requested) return { phase: 'writing-notes', notesNote: null, notesRequested: true }
+  if (r.failed) return { phase: 'waiting-minutes', notesNote: `${r.reason || "Echo's CLI didn't answer"} — asking again in a minute` }
+  return { phase: r.waiting ? 'waiting-minutes' : 'done', notesNote: r.reason || null }
+}
+
+/** The pane after `transcribed` and that answer: only the call it follows changes (a late event for
+ *  an earlier call never touches the one recording now), and a final answer only says why — the
+ *  pane's own look at the files ends the phase and opens the call. */
+export function afterTranscribed(cur: LiveView, dir: string, r: MinutesAnswer): LiveView {
+  if (cur.dir !== dir || cur.phase === 'recording') return cur
+  const next = minutesPhase(r)
+  return next.phase === 'done' ? { ...cur, notesNote: next.notesNote } : { ...cur, ...next }
+}
+
+/** Whether the pane asks the app again: at once on the way in, then once a minute while waiting. */
+export function askAgain(phase: LiveView['phase'], now: number, lastAsk: number): boolean {
+  return phase !== 'waiting-minutes' || now - lastAsk > 60_000
 }

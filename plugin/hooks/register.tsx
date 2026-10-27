@@ -6,10 +6,10 @@
 //   action items, `<call>/live-notes.json`) on the right (stacked when narrow), and a browser of
 //   past calls. The app writes the live notes and answers the quick questions with the call's AI
 //   profile; this pane never calls a model itself (it would use this session's account instead).
-// - Notes: when a call is transcribed, the pane asks for them (`echoctl notes <call> --auto --for
-//   <cwd>`: the CLI checks the call is due and never tried, claims it so one of several open
-//   sessions starts it, and hands it to the app, which writes them with the call's profile);
-//   calls transcribed while no session was open are picked up when one opens (`echoctl pending`).
+// - Minutes: the app writes them itself, 15 minutes after a call (`notes::auto_due`), with the
+//   call's profile; the pane's buttons ask for them now (`echoctl notes <call>`). Its old automatic
+//   asks (`notes --auto`, `pending --for`) are kept for older apps and refused now — the pane shows
+//   the reason they give.
 // - It starts the app if it is set up but not running.
 //
 // It reads files the app writes in its data folder (`echoctl app` → home):
@@ -21,7 +21,8 @@ import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
 import type { ActionItem, Band, Browse, CallItem, CallMeta, ChatLine, DocTab, Insight, LiveLine, LiveView } from '../types'
-import { anchors, callFromDir, clock, hm, insightFromLive, isMe, minutesSince, newLines, parseLines, speakerLabel, statusBadge, tailThatFits } from './view'
+import { afterTranscribed, anchors, askAgain, callFromDir, clock, hm, insightFromLive, isMe, minutesPhase, minutesSince, newLines, parseLines, speakerLabel, statusBadge, tailThatFits } from './view'
+import type { MinutesAnswer } from './view'
 
 const PANE = 'echo-live'
 // The app's data folder, asked from the CLI at session start (absolute; independent of the
@@ -62,6 +63,19 @@ let LIVE_ON = false
 let LIVE_ERR: string | null = null
 let lastInfoAt = 0
 let lastCallsLoad = 0
+let lastWaitAsk = 0
+let recordings = 0 // recordings started this session: what the pane decided before one is dropped
+let generatingSince = 0 // `recordings` when the pane's Write minutes started
+/** The `notes --auto` in flight per call: ticks (they overlap while it runs) and the `transcribed` event share it. */
+const asking = new Map<string, Promise<MinutesAnswer>>()
+
+function askMinutes($: any, dir: string): Promise<MinutesAnswer> {
+  const pending = asking.get(dir)
+  if (pending) return pending
+  const answer = processCall($, dir).finally(() => asking.delete(dir))
+  asking.set(dir, answer)
+  return answer
+}
 
 type CliResult = { exitCode: number; stdout: string; stderr: string }
 
@@ -73,18 +87,21 @@ async function cli($: any, args: string[], timeoutMs = 30_000): Promise<CliResul
   return $.process.run(argv, { timeoutMs })
 }
 
-/** Ask the app for a call's notes: the CLI checks the call is due and this session may ask,
- *  claims it (one of several open sessions) and hands it to the app, which writes them with the
- *  call's AI profile. It answers one JSON line `{requested, reason}`. */
-async function processCall($: any, dir: string): Promise<{ requested: boolean; reason: string }> {
+/** Ask the CLI for a call's minutes automatically (`notes --auto`): it refuses now — the app writes
+ *  them itself, 15 minutes after the call, or nobody does automatically — and answers one JSON line
+ *  `{requested, waiting, reason}` (`waiting`: they are on their way, or being written). Older
+ *  versions hand the run to the app instead (`requested: true`, no `waiting`). `failed`: the CLI
+ *  couldn't answer. */
+async function processCall($: any, dir: string): Promise<MinutesAnswer> {
+  const failed = (reason: string): MinutesAnswer => ({ requested: false, waiting: false, failed: true, reason })
   const r = await cli($, ['notes', dir, '--auto', '--for', SESSION_CWD]).catch(() => null)
-  if (!r) return { requested: false, reason: "Echo's CLI didn't answer" }
-  if (r.exitCode !== 0) return { requested: false, reason: String(r.stderr).trim().split('\n').pop()?.replace(/^Error: /, '') ?? 'error' }
+  if (!r) return failed("Echo's CLI didn't answer")
+  if (r.exitCode !== 0) return failed(String(r.stderr).trim().split('\n').pop()?.replace(/^Error: /, '') || 'error')
   try {
-    const out = JSON.parse(String(r.stdout).trim().split('\n').pop() ?? '{}') as { requested?: boolean; reason?: string }
-    return { requested: Boolean(out.requested), reason: out.reason ?? '' }
+    const out = JSON.parse(String(r.stdout).trim().split('\n').pop() ?? '{}') as { requested?: boolean; waiting?: boolean; reason?: string }
+    return { requested: Boolean(out.requested), waiting: Boolean(out.waiting), failed: false, reason: out.reason ?? '' }
   } catch {
-    return { requested: false, reason: String(r.stdout).trim() }
+    return failed(String(r.stdout).trim())
   }
 }
 
@@ -221,10 +238,10 @@ export const register: Register = on => {
               <Box flexDirection="column" gap={1}>
                 <Text dimColor>No action items yet.</Text>
                 {br.generating === 'actions' ? (
-                  <Text color="warning">… Claude Code is writing the notes and action items (a minute or two)</Text>
+                  <Text color="warning">… Claude Code is writing the minutes and action items (a minute or two)</Text>
                 ) : br.transcript.length > 0 ? (
                   <Box>
-                    <Button key="gen-actions" label="Write notes and actions" hotkey="p" variant="primary"
+                    <Button key="gen-actions" label="Write minutes and actions" hotkey="p" variant="primary"
                       onPress={() => generate($, br.selected!, 'actions')} />
                   </Box>
                 ) : null}
@@ -235,7 +252,7 @@ export const register: Register = on => {
               <Box key={`a-${i}`} flexDirection="column" marginBottom={1}>
                 <Box gap={1}>
                   <Button key={`done-${i}`} label={x.status === 'done' ? 'Undo' : 'Done'}
-                    onPress={() => toggleAction($, br.selected!, i)} />
+                    onPress={() => toggleAction($, br.selected!, x)} />
                   {x.t !== null && (
                     <Button key={`at-${i}`} label={clock(x.t)} plain
                       onPress={() => update($, browse, (b): Browse => ({ ...b, tab: 'transcript', from: Math.max(0, x.t! - 15) }))} />
@@ -259,12 +276,12 @@ export const register: Register = on => {
           </Box>
         ) : !br.hasNotes || br.generating === 'notes' ? (
           <Box flexDirection="column" gap={1}>
-            <Text dimColor>No notes for this call yet.</Text>
+            <Text dimColor>No minutes for this call yet.</Text>
             {br.generating === 'notes' ? (
-              <Text color="warning">… Claude Code is writing the notes and action items (a minute or two)</Text>
+              <Text color="warning">… Claude Code is writing the minutes and action items (a minute or two)</Text>
             ) : br.transcript.length > 0 ? (
               <Box>
-                <Button key="gen-notes" label="Write notes and actions" hotkey="g" variant="primary"
+                <Button key="gen-notes" label="Write minutes and actions" hotkey="g" variant="primary"
                   onPress={() => generate($, br.selected!, 'notes')} />
               </Box>
             ) : (
@@ -299,7 +316,7 @@ export const register: Register = on => {
                 </Text>
               </Box>
               <Box gap={1} marginTop={1}>
-                {tab('notes', 'Notes', 'n')}
+                {tab('notes', 'Minutes', 'n')}
                 {tab('transcript', 'Transcript', 't')}
                 {tab('actions', `Actions${br.actions?.length ? ` (${br.actions.length})` : ''}`, 'a')}
                 {br.chat.length > 0 && tab('chat', `Chat (${br.chat.length})`, 'h')}
@@ -320,7 +337,7 @@ export const register: Register = on => {
             </>
           ) : (
             <Box borderStyle="round" borderColor="subtle" paddingX={1}>
-              <Text dimColor>Select a call to read its notes, transcript and action items.</Text>
+              <Text dimColor>Select a call to read its minutes, transcript and action items.</Text>
             </Box>
           )}
         </Box>
@@ -341,10 +358,12 @@ export const register: Register = on => {
         ? `● Recording${v.title ? ` · ${v.title}` : ''}${v.startedAt ? ` · since ${hm(v.startedAt)}` : ''}${bandNow.muted ? ' · 🔇 muted' : ''}`
         : v.phase === 'transcribing'
           ? `Transcribing ${v.title ?? 'the call'}… (on this Mac, ~¼ of the call's length)`
+          : v.phase === 'waiting-minutes'
+            ? `Transcript ready${v.title ? ` · ${v.title}` : ''} — ${v.notesNote ?? 'Echo writes the minutes 15 minutes after the call'}`
           : v.phase === 'writing-notes'
-            ? `Echo is writing the notes…${v.notesNote ? ` ${v.notesNote}` : ' (Calls → Notes when they are ready)'}`
+            ? `Echo is writing the minutes…${v.notesNote ? ` ${v.notesNote}` : ' (Calls → Minutes when they are ready)'}`
             : v.phase === 'done'
-              ? `Done${v.title ? ` · ${v.title}` : ''} — ${v.notesNote ?? 'open Calls to read the notes'}`
+              ? `Done${v.title ? ` · ${v.title}` : ''} — ${v.notesNote ?? 'open Calls to read the minutes'}`
               : 'Not recording — Record from the Echo menu-bar icon or /echo:record'
 
     const section = (title: string, items: string[]) =>
@@ -393,7 +412,7 @@ export const register: Register = on => {
         {ins.off ? (
           ins.error === null && <Text dimColor>Live notes are off — Echo menu → AI for calls → Live notes during calls.</Text>
         ) : ins.updatedAt === null ? (
-          <Text dimColor>{v.phase === 'recording' ? 'Notes appear after a couple of minutes of talk.' : ''}</Text>
+          <Text dimColor>{v.phase === 'recording' ? 'Live notes appear after a couple of minutes of talk.' : ''}</Text>
         ) : (
           <Text dimColor>updated {hm(ins.updatedAt)}{ins.state === 'updating' ? ' · updating…' : ''}</Text>
         )}
@@ -463,13 +482,14 @@ async function connect($: any): Promise<void> {
   }
   $.clock.every(1000, () => void tick($))
   if (!setUp) return
-  // Calls transcribed while no session was open: ask the app to write their notes (`notes --auto`).
+  // Calls transcribed while no session was open (`notes --auto`; an app that writes the minutes
+  // itself refuses, and lists none).
   try {
     const r = await cli($, ['pending', '--for', SESSION_CWD])
     const pending = r.exitCode === 0 ? (JSON.parse(r.stdout) as { dir: string }[]) : []
     let n = 0
     for (const p of pending.slice(-CATCH_UP_MAX)) if ((await processCall($, p.dir)).requested) n++
-    if (n > 0) $.ui.toast(`echo: writing notes for ${n} call${n > 1 ? 's' : ''} recorded earlier`)
+    if (n > 0) $.ui.toast(`echo: writing minutes for ${n} call${n > 1 ? 's' : ''} recorded earlier`)
   } catch {
     /* best effort */
   }
@@ -494,7 +514,9 @@ function fitText(s: string, width: number): string {
 const DOC_LIMIT = 90_000 // a tree draws up to 100k characters of text
 
 /** Load one call (header, notes, transcript lines, action items) into the browser. */
-async function selectCall($: any, dir: string, tab: DocTab): Promise<void> {
+/** Show a call in the browser. `since`: chosen by the pane itself when `recordings` was that — dropped
+ *  if a recording started after it. */
+async function selectCall($: any, dir: string, tab: DocTab, since?: number): Promise<void> {
   const read1 = (f: string) => $.fs.read(`${callsDir()}/${dir}/${f}`).catch(() => null) as Promise<string | null>
   const parse = <T,>(text: string | null, fallback: T): T => {
     try {
@@ -522,17 +544,23 @@ async function selectCall($: any, dir: string, tab: DocTab): Promise<void> {
   const notes = await read1('notes.md')
   const hasTranscript = (await $.fs.exists(`${callsDir()}/${dir}/transcript.md`)) as boolean
   let doc = notes ?? (hasTranscript
-    ? '_No notes for this call (too short, or still being written). See **Transcript**._'
+    ? '_No minutes for this call (too short, or still being written). See **Transcript**._'
     : '_Not transcribed yet._')
   if (doc.length > DOC_LIMIT) doc = `${doc.slice(0, DOC_LIMIT)}\n\n_…cut here; the full file is in calls/${dir}._`
 
   const segs = parse<LiveLine[]>(await read1('segments.json'), [])
   const transcript = (segs.length > 0 ? segs : parseLines<LiveLine>((await read1('live.jsonl')) ?? '')).slice(0, 2000)
   const chat = readChat((await read1('chat.json')) ?? '[]')
-  const rawActions = await read1('actions.json')
+  let rawActions = await read1('actions.json')
+  // A list from before ids gets them first (`echoctl actions` gives them, once): a tick names its item.
+  if (rawActions !== null && parse<Partial<ActionItem>[]>(rawActions, []).some(x => !x.id)) {
+    const r = await cli($, ['actions', dir]).catch(() => null)
+    if (r && r.exitCode === 0) rawActions = r.stdout
+  }
   const actions = rawActions === null
     ? null
     : parse<Partial<ActionItem>[]>(rawActions, []).map(x => ({
+        id: typeof x.id === 'string' && x.id ? x.id : null,
         task: String(x.task ?? ''),
         owner: x.owner ?? null,
         due: x.due ?? null,
@@ -541,20 +569,29 @@ async function selectCall($: any, dir: string, tab: DocTab): Promise<void> {
         status: x.status === 'done' ? 'done' as const : 'todo' as const,
       }))
 
-  await update($, browse, (cur): Browse => ({
-    ...cur, mode: 'calls', selected: dir, tab, meta, doc, transcript, actions, confirmDelete: false, hasNotes: notes !== null,
-    from: null, chat,
-  }))
+  // Chosen by the pane itself (`since`): it never switches to the call over a recording that started
+  // since, or whose view is up already (its handler counts it once that view is up, then shows its
+  // pane) — it only refreshes the call if it is the selected one, keeping where the user is.
+  const held = since !== undefined && (recordings !== since || (await read($, live)).phase === 'recording')
+  await update($, browse, (cur): Browse => {
+    const hold = held || (since !== undefined && recordings !== since)
+    if (hold && cur.selected !== dir) return cur
+    return {
+      ...cur, mode: hold ? cur.mode : 'calls', selected: dir, tab: hold ? cur.tab : tab, meta, doc, transcript, actions,
+      hasNotes: notes !== null, chat, ...(hold ? {} : { confirmDelete: false, from: null }),
+    }
+  })
 }
 
-/** Notes and action items for a call: the app runs the same process-call skill with Claude
- *  Code (`echoctl notes`, headless, the model set under menu → Claude Code → Notes model), so
- *  this session's own turn isn't used. The tick follows `notes-run.json` until it finishes. */
+/** Minutes and action items for a call: the app runs the same process-call skill with Claude
+ *  Code (`echoctl notes`, headless, with the call's AI profile), so this session's own turn isn't
+ *  used. The tick follows `notes-run.json` until it finishes. */
 async function generate($: any, dir: string, what: 'notes' | 'actions'): Promise<void> {
+  generatingSince = recordings
   await update($, browse, (b): Browse => ({ ...b, generating: what }))
   const r = await cli($, ['notes', dir], 25 * 60_000).catch((err: unknown) => ({ exitCode: 1, stdout: '', stderr: String(err) }))
   if (r.exitCode !== 0) {
-    $.ui.toast(`echo: couldn't write notes — ${String(r.stderr).trim().split('\n').pop()?.replace(/^Error: /, '') ?? 'error'}`)
+    $.ui.toast(`echo: couldn't write minutes — ${String(r.stderr).trim().split('\n').pop()?.replace(/^Error: /, '') ?? 'error'}`)
     await update($, browse, (b): Browse => ({ ...b, generating: null }))
   }
 }
@@ -572,9 +609,9 @@ async function followNotesRun($: any): Promise<void> {
   if (run.state === 'running' || run.state === 'queued') return
   const tab = b.generating
   await update($, browse, (x): Browse => ({ ...x, generating: null }))
-  if (run.state === 'done') $.ui.toast('Notes and action items written.')
-  else $.ui.toast(`echo: ${run.state === 'skipped' ? 'no notes' : "couldn't write notes"} — ${run.message ?? run.state}`, { timeoutMs: 10_000 })
-  await selectCall($, b.selected, tab)
+  if (run.state === 'done') $.ui.toast('Minutes and action items written.')
+  else $.ui.toast(`echo: ${run.state === 'skipped' ? 'no minutes' : "couldn't write minutes"} — ${run.message ?? run.state}`, { timeoutMs: 10_000 })
+  await selectCall($, b.selected, tab, generatingSince) // not over a recording started meanwhile
   lastCallsLoad = 0
 }
 
@@ -711,9 +748,11 @@ async function tick($: any): Promise<void> {
 
 /** After a call: the files say how far processing got (survives reloads and lost turns). */
 async function refreshPhase($: any, v: LiveView): Promise<void> {
+  const gen = recordings
   const has = (f: string) => $.fs.exists(`${v.dir}/${f}`)
   let phase: LiveView['phase'] = v.phase
   let note: string | null = v.notesNote ?? null
+  let requested = v.notesRequested
   if (await has('notes.md')) phase = 'done'
   else if (await has('transcript.md')) {
     // The app's run says where the notes are (queued: why; failed: why); calls under 3 minutes
@@ -726,15 +765,27 @@ async function refreshPhase($: any, v: LiveView): Promise<void> {
       note = run.state === 'queued' ? (run.message ?? null) : null
     } else if (run.state) {
       phase = 'done'
-      note = `${run.state === 'skipped' ? 'no notes' : "couldn't write notes"} — ${run.message ?? run.state}`
-    } else {
-      phase = minutes < 3 || !v.notesRequested ? 'done' : 'writing-notes'
+      note = `${run.state === 'skipped' ? 'no minutes' : "couldn't write minutes"} — ${run.message ?? run.state}`
+    } else if (v.notesRequested) {
+      phase = minutes < 3 ? 'done' : 'writing-notes' // an older app took the pane's ask
+    } else if (!asking.has(v.dir!) && askAgain(v.phase, Date.now(), lastWaitAsk)) {
+      // No run yet, or one withdrawn to wait for a later note: are they still on their way? Asked
+      // at once on the way in, then at most once a minute (switched off meanwhile, say).
+      lastWaitAsk = Date.now()
+      const to = minutesPhase(await askMinutes($, v.dir!))
+      phase = to.phase
+      note = to.notesNote ?? null
+      requested ||= Boolean(to.notesRequested)
     }
   } else if (await has('.transcribing')) phase = 'transcribing'
-  if (phase !== v.phase || note !== (v.notesNote ?? null)) {
-    await update($, live, (cur): LiveView => ({ ...cur, phase, notesNote: note }))
-    // Notes are ready: show them in the call browser.
-    if (phase === 'done' && v.dir) await selectCall($, v.dir.split('/').pop() ?? v.dir, 'notes')
+  if (phase !== v.phase || note !== (v.notesNote ?? null) || requested !== v.notesRequested) {
+    // Only the view it looked at, and nothing at all once a recording started since it began: that
+    // recording has a view of its own.
+    const same = (cur: LiveView) => recordings === gen && cur.dir === v.dir && cur.phase === v.phase
+    if (!same(await read($, live))) return
+    await update($, live, (cur): LiveView => same(cur) ? { ...cur, phase, notesNote: note, notesRequested: requested } : cur)
+    // Notes are ready: show them in the call browser (unless a recording starts meanwhile).
+    if (phase === 'done' && v.dir) await selectCall($, v.dir.split('/').pop() ?? v.dir, 'notes', gen)
   }
 }
 
@@ -757,26 +808,32 @@ async function onEvent($: any, ev: Event): Promise<void> {
         dir: String(ev.dir), title: (ev.title as string | null) ?? null, startedAt: Date.now(), phase: 'recording', lines: [],
         notesRequested: false, chat: [],
       }))
+      // Counted once its view is up and before its pane is shown: a selection the pane chose before
+      // is dropped even when its write is retried after this recording's (see selectCall).
+      recordings++
       await update($, insight, (): Insight => ({ summary: [], highlights: [], actions: [], answers: 0, updatedAt: null, answer: null, asking: null, off: !LIVE_ON, state: null, error: settingsError() }))
       await update($, browse, (b): Browse => ({ ...b, mode: 'live' }))
       void openPane($)
       return
     case 'recording_stopped':
-      // The watcher transcribes by itself; the pane follows the files (see refreshPhase).
-      await update($, live, (cur): LiveView => ({ ...cur, phase: 'transcribing' }))
+      // The watcher transcribes by itself; the pane follows the files (see refreshPhase) — also for
+      // a recording that started before this session did.
+      await update($, live, (cur): LiveView => cur.dir === null || cur.dir === String(ev.dir) ? { ...cur, dir: String(ev.dir), phase: 'transcribing' } : cur)
       return
     case 'transcribed':
       if (ev.ok !== true) {
         $.ui.toast(`echo: transcription failed — ${String(ev.error ?? '')}`)
         return
       }
-      // Ask the app for the notes (`notes --auto`): it runs them headless with the call's AI
-      // profile; only the session whose request claimed the call shows "writing notes".
+      // Ask the app for the minutes (`notes --auto`): one that writes them itself refuses and says
+      // when (when it answers `waiting`, the pane waits for them: refreshPhase); an older app runs
+      // them, and only the asking session shows "writing notes".
       {
-        const r = await processCall($, String(ev.dir))
-        await update($, live, (cur): LiveView => r.requested
-          ? { ...cur, phase: 'writing-notes', notesRequested: true, notesNote: null }
-          : { ...cur, notesNote: r.reason || null })
+        // Asked for every call (an older app starts its minutes on it); the pane changes only for its own.
+        const dir = String(ev.dir)
+        const r = await askMinutes($, dir)
+        if ((await read($, live)).dir === dir) lastWaitAsk = Date.now()
+        await update($, live, (cur): LiveView => afterTranscribed(cur, dir, r))
       }
       return
     // meeting_soon / call_started with `ask`: the app asks with its own dialog.
@@ -793,18 +850,15 @@ async function onEvent($: any, ev: Event): Promise<void> {
   }
 }
 
-/** Mark an action item done / to do (the user's state; process-call never resets it). */
-async function toggleAction($: any, dir: string, index: number): Promise<void> {
-  const path = `${callsDir()}/${dir}/actions.json`
-  try {
-    const items = JSON.parse(await $.fs.read(path)) as Record<string, unknown>[]
-    const it = items[index]
-    if (!it) return
-    it.status = it.status === 'done' ? 'todo' : 'done'
-    await $.fs.write(path, JSON.stringify(items, null, 2) + '\n')
-  } catch (err) {
-    $.ui.toast(`echo: couldn't update the action item — ${String(err)}`)
+/** Mark an action item done / to do (the user's state; a rewrite of the minutes keeps it): through
+ *  the CLI, by its id, so a tick made while the minutes are rewritten lands in the new list. */
+async function toggleAction($: any, dir: string, x: ActionItem): Promise<void> {
+  if (!x.id) {
+    $.ui.toast("echo: this action item has no id yet (Echo couldn't give the list its ids) — open the call again")
+    return
   }
+  const r = await cli($, ['action', dir, x.id, x.status === 'done' ? 'todo' : 'done']).catch((err) => ({ exitCode: 1, stdout: '', stderr: String(err) }))
+  if (r.exitCode !== 0) $.ui.toast(`echo: couldn't update the action item — ${String(r.stderr).trim().split('\n').pop()?.replace(/^Error: /, '') ?? 'error'}`)
   await selectCall($, dir, 'actions')
 }
 

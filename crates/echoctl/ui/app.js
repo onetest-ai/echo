@@ -20,7 +20,7 @@ const S = {
   state: null,
   selected: null,
   call: null,
-  tab: 'notes',
+  tab: 'minutes',
   query: '',
   find: '',
   jump: null, // seconds to scroll the transcript to
@@ -29,10 +29,94 @@ const S = {
   error: null,
   liveDraft: '', // the question being typed in the Live tab (kept across refreshes)
   recordProfile: null, // the AI profile picked for the next recording (null = the default)
-  notesProfile: null, // {call, id}: the AI profile picked for Write notes
+  notesProfile: null, // {call, id}: the AI profile picked for Write minutes
   prepOpen: {}, // call → the "Last time" card's open state, once the user toggled it
   autoTab: null, // the call whose tab was last chosen for the user (Live while it records)
+  notice: null, // a message for a moment (an action that couldn't be done)
+  closing: false, // the window is saving the user's notes before it closes (`prepareClose`)
+  closeError: null, // why they couldn't be saved (the window stays open)
+  renderOnBlur: false, // a render held back while the user types their notes
 }
+
+// ── the user's notes (Notes tab): saved over IPC, acknowledged, one save in flight per call ─
+// Per call (by its stamp, so a retitle doesn't lose a draft): `draft` = the editor's text,
+// `synced` = what the file was last known to hold. A save sends `{text, base: synced}`; the app
+// writes it, keeping what tray → Add a note… appended meanwhile, and answers with what the file
+// holds (`window.echo.saved`). An unchanged text is never sent: the file's time is the minutes'
+// clock. No DOM in here: `scripts/check-mod.sh` drives it from a node test.
+const NotesSync = (() => {
+  const calls = new Map()
+  let seq = 0
+  let post = (msg) => send(msg)
+  const stamp = (name) => String(name).slice(0, 17)
+  const of = (name) => {
+    let c = calls.get(stamp(name))
+    if (!c) calls.set(stamp(name), (c = { name, draft: null, synced: null, inflight: null, error: null, kept: null, waiters: [], epoch: 0 }))
+    c.name = name // the folder as it is named now
+    return c
+  }
+  const settle = (c, err) => {
+    const w = c.waiters.splice(0)
+    for (const x of w) err ? x.reject(err) : x.resolve()
+  }
+  const dirty = (c) => c.draft !== null && c.draft !== (c.synced ?? '')
+  function save(name) {
+    const c = of(name)
+    if (c.inflight) return
+    if (!dirty(c)) return settle(c)
+    c.inflight = { id: ++seq, text: c.draft }
+    c.error = null
+    post({ cmd: 'save_my_notes', call: c.name, id: c.inflight.id, text: c.draft, base: c.synced ?? '' })
+  }
+  return {
+    setPost(f) { post = f },
+    /** Which save answers a fetch saw (`seen` takes the epoch read when the fetch began). */
+    epoch(name) { return of(name).epoch },
+    /** What the file holds, from the call's details: the editor takes it unless it has unsaved text,
+     *  or the fetch began before a save was answered (it may show the file from before). */
+    seen(name, text, epoch) {
+      const c = of(name)
+      if (epoch !== undefined && epoch !== c.epoch) return
+      // With unsaved text, `synced` stays what it was based on: the next save keeps what was
+      // appended to the file since (the app merges by that base).
+      if (c.inflight || (c.draft !== null && dirty(c))) return
+      c.draft = text
+      c.synced = text
+    },
+    edit(name, text) { of(name).draft = text },
+    save,
+    /** The app's answer to a save. */
+    saved(r) {
+      const c = of(r.call)
+      if (!c.inflight || c.inflight.id !== r.id) return
+      const sent = c.inflight.text
+      c.inflight = null
+      c.epoch++
+      if (r.error) { c.error = r.error; return settle(c, new Error(r.error)) }
+      c.synced = r.stored
+      if (r.kept) c.kept = r.kept
+      // What the tray appended meanwhile lands at the end, as in the file; typing went on at the caret.
+      if (c.draft === sent) c.draft = r.stored
+      else if (r.stored.startsWith(sent)) c.draft += r.stored.slice(sent.length)
+      if (dirty(c)) save(c.name)
+      else settle(c)
+    },
+    /** Resolves once the file holds the draft (rejects when a save fails). */
+    flush(name) {
+      const c = of(name)
+      if (!c.inflight && !dirty(c)) return Promise.resolve()
+      const p = new Promise((resolve, reject) => c.waiters.push({ resolve, reject }))
+      save(name)
+      return p
+    },
+    flushAll() { return Promise.all([...calls.values()].filter((c) => c.inflight || dirty(c)).map((c) => this.flush(c.name))) },
+    view(name) {
+      const c = of(name)
+      return { draft: c.draft ?? '', saving: !!c.inflight, dirty: dirty(c), error: c.error, kept: c.kept }
+    },
+    clearKept(name) { of(name).kept = null },
+  }
+})()
 
 // ── formatting ─────────────────────────────────────────────────────────────────────────────
 const clock = (s) => {
@@ -52,247 +136,9 @@ const dayLabel = (d) => {
   return that.toLocaleDateString([], { day: 'numeric', month: 'long', year: today.getFullYear() === that.getFullYear() ? undefined : 'numeric' })
 }
 const STATUS = {
-  recording: 'Recording', transcribing: 'Transcribing', notes: 'Notes', transcript: 'Transcript', failed: 'Failed', audio: 'Audio',
+  recording: 'Recording', transcribing: 'Transcribing', notes: 'Minutes', transcript: 'Transcript', failed: 'Failed', audio: 'Audio',
 }
 const speaker = (seg) => (seg.speaker === 'me' || seg.speaker === 'mic') ? 'Me' : (seg.name || 'Remote')
-
-// ── safe Markdown: headings, paragraphs, nested + task lists, tables, quotes, rules, code
-//    fences (```mermaid → a diagram), inline code / bold / italic / strike, https links, the
-//    call's own frames as images, [mm:ss] anchors. Text is escaped before any markup is added.
-function inline(text, ctx = {}) {
-  // Code spans first: nothing inside them is markup.
-  return String(text).split(/(`[^`]+`)/).map((part, i) => i % 2 ? `<code>${esc(part.slice(1, -1))}</code>` : rich(part, ctx)).join('')
-}
-function rich(text, ctx) {
-  let s = esc(text)
-  s = s.replace(/!\[([^\]]*)\]\((frames\/[\w.-]+\.(?:jpe?g|png))\)/g, (_, alt, path) => ctx.call
-    ? `<button class="doc-img" data-frame="file/${encodeURIComponent(ctx.call)}/${path}"><img src="file/${encodeURIComponent(ctx.call)}/${path}" alt="${alt}" loading="lazy"></button>`
-    : alt)
-  s = s.replace(/\[([^\]]+)\]\((https:\/\/[^)\s]+)\)/g, (_, label, url) => `<a href="${url}" data-ext="1">${label}</a>`)
-  s = s.replace(/\*\*([^*]+)\*\*|__([^_]+)__/g, (_, a, b) => `<strong>${a || b}</strong>`)
-  s = s.replace(/(^|[^*\w])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>')
-  s = s.replace(/(^|[^\w])_([^_\s][^_]*)_(?!\w)/g, '$1<em>$2</em>')
-  s = s.replace(/~~([^~]+)~~/g, '<del>$1</del>')
-  s = s.replace(/\[((?:\d{1,2}:)?\d{1,2}:\d{2})\]/g, (_, t) => {
-    const p = t.split(':').map(Number)
-    const sec = p.length === 3 ? p[0] * 3600 + p[1] * 60 + p[2] : p[0] * 60 + p[1]
-    return `<a class="at" data-at="${sec}" title="Jump to ${t} in the transcript">${t}</a>`
-  })
-  return s
-}
-
-const ITEM = /^(\s*)([-*+]|\d{1,9}[.)])\s+(.*)$/
-const FENCE = /^\s*(`{3,}|~{3,})\s*([\w+-]*)/
-const RULE = /^\s{0,3}([-*_])(\s*\1){2,}\s*$/
-const TABLE_SEP = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/
-const cells = (line) => {
-  let s = line.trim()
-  if (s.startsWith('|')) s = s.slice(1)
-  if (s.endsWith('|')) s = s.slice(0, -1)
-  return s.split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, '|'))
-}
-
-// YAML frontmatter (the minutes format): `key: value` and `key:` + `  - item` lines, as a small
-// two-column table. Values are shown as written, without their quotes.
-const MD_KEY = /^([\w-]+):(?:\s+(.*))?$/
-function mdFrontmatter(lines) {
-  const rows = []
-  for (const l of lines) {
-    let m
-    if ((m = l.match(MD_KEY))) rows.push([m[1], m[2] ? [m[2]] : []])
-    else if ((m = l.match(/^\s+-\s+(.*)$/)) && rows.length) rows[rows.length - 1][1].push(m[1])
-  }
-  if (!rows.length) return ''
-  const unquote = (v) => v.trim().replace(/^(["'])(.*)\1$/, '$2')
-  return `<div class="table"><table class="frontmatter"><tbody>${
-    rows.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v.map(unquote).join(', '))}</td></tr>`).join('')}</tbody></table></div>`
-}
-
-function markdown(md, ctx = {}) {
-  const lines = String(md).replace(/\r\n?/g, '\n').split('\n')
-  const out = []
-  let para = []
-  const flush = () => { if (para.length) { out.push(`<p>${inline(para.join(' '), ctx)}</p>`); para = [] } }
-  let i = 0
-  if (lines[0].trim() === '---') {
-    // Only a block of `key: value` lines (and, after a key, `  - item` lines) is frontmatter; else
-    // the `---` is a rule and the block is content (as in calls::split_frontmatter).
-    const end = lines.findIndex((l, k) => k > 0 && l.trim() === '---')
-    const body = lines.slice(1, end)
-    let key = false
-    const yaml = body.every((l) => !l.trim() || (MD_KEY.test(l) ? (key = true) : key && /^\s+-\s/.test(l)))
-    if (end > 1 && key && yaml) {
-      out.push(mdFrontmatter(body))
-      i = end + 1
-    }
-  }
-  while (i < lines.length) {
-    const line = lines[i]
-    let m
-    if ((m = line.match(FENCE))) {
-      flush()
-      const close = new RegExp(`^\\s*${m[1][0] === '`' ? '`' : '~'}{${m[1].length},}\\s*$`)
-      const body = []
-      for (i++; i < lines.length && !close.test(lines[i]); i++) body.push(lines[i])
-      i++
-      out.push(codeBlock(body.join('\n'), m[2].toLowerCase()))
-      continue
-    }
-    if (!line.trim()) { flush(); i++; continue }
-    if ((m = line.match(/^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/))) {
-      flush()
-      const n = m[1].length
-      out.push(`<h${n}>${inline(m[2], ctx)}</h${n}>`)
-      i++
-      continue
-    }
-    if (RULE.test(line)) { flush(); out.push('<hr>'); i++; continue }
-    if (/^\s{0,3}>/.test(line)) {
-      flush()
-      const inner = []
-      for (; i < lines.length && /^\s{0,3}>/.test(lines[i]); i++) inner.push(lines[i].replace(/^\s{0,3}>\s?/, ''))
-      out.push(`<blockquote>${markdown(inner.join('\n'), ctx)}</blockquote>`)
-      continue
-    }
-    if (line.includes('|') && i + 1 < lines.length && TABLE_SEP.test(lines[i + 1])) {
-      flush()
-      const head = cells(line)
-      const align = cells(lines[i + 1]).map((c) => c.endsWith(':') ? (c.startsWith(':') ? 'center' : 'right') : '')
-      const td = (tag, c, k) => `<${tag}${align[k] ? ` style="text-align:${align[k]}"` : ''}>${inline(c, ctx)}</${tag}>`
-      const rows = []
-      for (i += 2; i < lines.length && lines[i].includes('|') && lines[i].trim(); i++) rows.push(cells(lines[i]))
-      out.push(`<div class="table"><table><thead><tr>${head.map((c, k) => td('th', c, k)).join('')}</tr></thead><tbody>${
-        rows.map((r) => `<tr>${head.map((_, k) => td('td', r[k] || '', k)).join('')}</tr>`).join('')}</tbody></table></div>`)
-      continue
-    }
-    if (ITEM.test(line)) { flush(); const [html, next] = mdList(lines, i, ctx); out.push(html); i = next; continue }
-    para.push(line.trim())
-    i++
-  }
-  flush()
-  return out.join('')
-}
-
-/** A list and everything nested in it (by indentation), up to the first line that isn't part
- *  of it. Returns the HTML and the next line's index. */
-function mdList(lines, i, ctx) {
-  const root = { indent: -1, children: [] }
-  const stack = [root]
-  while (i < lines.length) {
-    const line = lines[i]
-    const m = line.match(ITEM)
-    if (m && !RULE.test(line)) {
-      const indent = m[1].replace(/\t/g, '    ').length
-      while (stack.length > 1 && stack[stack.length - 1].indent >= indent) stack.pop()
-      const node = { indent, ordered: /\d/.test(m[2]), start: parseInt(m[2], 10) || 1, text: [m[3]], children: [] }
-      stack[stack.length - 1].children.push(node)
-      stack.push(node)
-      i++
-      continue
-    }
-    if (!line.trim()) {
-      // A blank line ends the list unless more of it follows.
-      let j = i + 1
-      while (j < lines.length && !lines[j].trim()) j++
-      if (j < lines.length && (ITEM.test(lines[j]) || /^\s{2,}\S/.test(lines[j]))) { i = j; continue }
-      break
-    }
-    if (/^\s+\S/.test(line) && stack.length > 1 && !FENCE.test(line)) { stack[stack.length - 1].text.push(line.trim()); i++; continue }
-    break
-  }
-  return [mdItems(root.children, ctx), i]
-}
-function mdItems(nodes, ctx) {
-  let html = ''
-  for (let k = 0; k < nodes.length;) {
-    const ordered = nodes[k].ordered
-    const group = []
-    while (k < nodes.length && nodes[k].ordered === ordered) group.push(nodes[k++])
-    const tag = ordered ? 'ol' : 'ul'
-    const start = ordered && group[0].start !== 1 ? ` start="${group[0].start}"` : ''
-    html += `<${tag}${start}>${group.map((n) => {
-      let text = n.text.join(' ')
-      const task = text.match(/^\[([ xX])\]\s+(.*)$/)
-      if (task) text = task[2]
-      const box = task ? `<span class="check${task[1] !== ' ' ? ' done' : ''}" aria-hidden="true"></span>` : ''
-      return `<li${task ? ' class="task-item"' : ''}>${box}${inline(text, ctx)}${n.children.length ? mdItems(n.children, ctx) : ''}</li>`
-    }).join('')}</${tag}>`
-  }
-  return html
-}
-
-// Mermaid diagrams: drawn after the page is rendered (the library loads on first use), kept by
-// source + theme so a background refresh shows the same SVG at once.
-const diagrams = new Map()
-// The system switching light/dark redraws them in the new colours.
-matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => render())
-const darkMode = () => {
-  const t = document.documentElement.dataset.theme
-  return t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches
-}
-function codeBlock(code, lang) {
-  if (lang === 'mermaid') {
-    const svg = diagrams.get(`${darkMode()}|${code}`)
-    return svg
-      ? `<figure class="diagram">${svg}</figure>`
-      : `<figure class="diagram pending" data-src="${esc(code)}"><pre class="code"><code>${esc(code)}</code></pre></figure>`
-  }
-  return `<pre class="code"${lang ? ` data-lang="${esc(lang)}"` : ''}><code>${esc(code)}</code></pre>`
-}
-let mermaidReady = null
-function loadMermaid() {
-  if (!mermaidReady) {
-    mermaidReady = new Promise((resolve, reject) => {
-      const s = document.createElement('script')
-      s.src = 'assets/mermaid.js'
-      s.onload = () => resolve(window.mermaid)
-      s.onerror = () => reject(new Error('could not load the diagram renderer'))
-      document.head.appendChild(s)
-    })
-  }
-  return mermaidReady
-}
-let diagramSeq = 0
-async function drawDiagrams() {
-  const pending = [...document.querySelectorAll('figure.diagram.pending:not([data-busy])')]
-  if (!pending.length) return
-  let mermaid
-  try { mermaid = await loadMermaid() } catch { return }
-  const dark = darkMode()
-  const css = getComputedStyle(document.documentElement)
-  const v = (name) => css.getPropertyValue(name).trim()
-  mermaid.initialize({
-    startOnLoad: false,
-    securityLevel: 'strict', // labels are text, no links or scripts in diagrams
-    theme: 'base',
-    fontFamily: getComputedStyle(document.body).fontFamily,
-    themeVariables: {
-      darkMode: dark,
-      background: v('--surface') || (dark ? '#1b1b21' : '#ffffff'),
-      primaryColor: dark ? '#2a2540' : '#efeaff',
-      primaryBorderColor: v('--accent') || '#8b62ff',
-      primaryTextColor: v('--text') || (dark ? '#ececf1' : '#18181d'),
-      lineColor: v('--text-3') || '#74747f',
-      secondaryColor: dark ? '#3a2f1a' : '#fff4e0',
-      tertiaryColor: dark ? '#22222a' : '#f6f6f8',
-      fontSize: '13px',
-    },
-    flowchart: { htmlLabels: false, curve: 'basis' },
-  })
-  for (const fig of pending) {
-    fig.dataset.busy = '1'
-    const src = fig.dataset.src
-    try {
-      const { svg } = await mermaid.render(`diagram-${++diagramSeq}`, src)
-      diagrams.set(`${dark}|${src}`, svg)
-      if (fig.isConnected) { fig.innerHTML = svg; fig.classList.remove('pending') }
-    } catch (e) {
-      fig.classList.remove('pending')
-      fig.classList.add('failed')
-      fig.insertAdjacentHTML('beforeend', `<figcaption>This diagram couldn't be drawn: ${esc(String((e && e.message) || e).split('\n')[0])}</figcaption>`)
-    }
-  }
-}
 
 // ── brand: the onetest logo (the full octopus character on its violet disc) ────────────────
 const mark = (cls = '') => `<img class="logo ${cls}" src="assets/logo.png" alt="" aria-hidden="true">`
@@ -307,8 +153,20 @@ async function loadCalls() {
 async function loadAgenda() {
   try { S.agenda = await get('api/agenda') } catch { S.agenda = [] }
 }
+let callSeq = 0
 async function loadCall(name) {
-  try { S.call = await get('api/call/' + encodeURIComponent(name)) } catch (e) {
+  const mine = ++callSeq, epoch = NotesSync.epoch(name)
+  try {
+    const c = await get('api/call/' + encodeURIComponent(name))
+    // Another call was chosen while this answer came (it is not shown, nor its notes edited as that
+    // one), or a newer fetch was started: only the newest answer counts.
+    if (S.selected !== name || mine !== callSeq) return
+    S.call = c
+    // A file that can't be read isn't "empty": the editor stays away from it (`notesTab` says why).
+    if (c.my_notes_error == null) NotesSync.seen(S.call.name, S.call.my_notes || '', epoch)
+    syncEditor()
+  } catch (e) {
+    if (S.selected !== name || mine !== callSeq) return
     // Retitled meanwhile (the notes run renames the folder): the same call keeps its stamp.
     const stamp = name.slice(0, 17)
     const moved = (S.calls || []).find((c) => c.name !== name && c.name.slice(0, 17) === stamp)
@@ -478,14 +336,17 @@ function emptyMain() {
   if (S.calls && !S.calls.length) {
     return `<div class="empty"><div>${mark()}<h3>No calls yet</h3><p>Use Record in the sidebar or the menu-bar octopus. Echo transcribes each call on this computer when it ends.</p></div></div>`
   }
-  return `<div class="empty"><div>${mark()}<h3>Pick a call</h3><p>Its notes, transcript, chat and shared screens open here.</p></div></div>`
+  return `<div class="empty"><div>${mark()}<h3>Pick a call</h3><p>Its minutes, your notes, the transcript, chat and shared screens open here.</p></div></div>`
 }
 
+/** The call view in regions: `plain` (nothing to show yet), else its header and its pane — on the
+ *  Minutes tab with minutes, the pane's bar and its frame apart, so a refresh that changes the bar
+ *  never reloads the page in the frame (`render`). */
 function doc() {
-  if (!S.selected) return emptyMain()
+  if (!S.selected) return { plain: emptyMain() }
   const c = S.call
-  if (!c) return `<div class="pane"><div class="skeleton">${'<i></i>'.repeat(10)}</div></div>`
-  if (c.error) return `<div class="empty"><div><h3>This call can't be opened</h3><p class="error">${esc(c.error)}</p></div></div>`
+  if (!c) return { plain: `<div class="pane"><div class="skeleton">${'<i></i>'.repeat(10)}</div></div>` }
+  if (c.error) return { plain: `<div class="empty"><div><h3>This call can't be opened</h3><p class="error">${esc(c.error)}</p></div></div>` }
   const d = c.started_at ? new Date(c.started_at) : null
   const segs = Array.isArray(c.segments) ? c.segments : []
   const chat = Array.isArray(c.chat) ? c.chat : []
@@ -495,19 +356,19 @@ function doc() {
   const tabs = [
     live ? ['live', 'Live', ''] : null,
     ['notes', 'Notes', ''],
+    ['minutes', 'Minutes', ''],
     ['transcript', 'Transcript', ''],
     chat.length ? ['chat', 'Chat', chat.length] : null,
     frames.length ? ['screens', 'Screens', frames.length] : null,
     ['actions', 'Actions', actions ? actions.length : ''],
   ].filter(Boolean)
   // While a call records (or is transcribed), open it on Live once; once its minutes are written,
-  // on Notes once. The user's own choice stays.
+  // on Minutes once. The user's own choice stays.
   if (live && S.autoTab !== c.name && (c.status === 'recording' || c.status === 'transcribing')) { S.autoTab = c.name; S.tab = 'live' }
-  if (S.autoTab === c.name && S.tab === 'live' && c.notes && c.notes_run && c.notes_run.state === 'done') { S.autoTab = 'done:' + c.name; S.tab = 'notes' }
-  if (!tabs.some((t) => t[0] === S.tab)) S.tab = 'notes'
+  if (S.autoTab === c.name && S.tab === 'live' && c.notes && c.notes_run && c.notes_run.state === 'done') { S.autoTab = 'done:' + c.name; S.tab = 'minutes' }
+  if (!tabs.some((t) => t[0] === S.tab)) S.tab = 'minutes'
   const people = c.people && c.people.length ? `<span class="people">${esc(c.people.slice(0, 6).join(', '))}${c.people.length > 6 ? ` and ${c.people.length - 6} more` : ''}</span>` : ''
-  return `<header class="doc-head">
-      <div class="head-row">
+  const head = `<div class="head-row">
         <div style="min-width:0">
           <h2 class="selectable">${esc(c.title)}</h2>
           <div class="facts">${d ? `<span>${esc(d.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' }))}, ${esc(hm(d))}</span>` : ''}${c.minutes ? `<span>${c.minutes} min</span>` : ''}${people}</div>
@@ -517,9 +378,23 @@ function doc() {
           <button class="btn ghost danger" data-cmd="ask-delete">Delete</button>
         </div>
       </div>
-      <div class="tabs" role="tablist">${tabs.map(([id, label, n]) => `<button class="tab" role="tab" data-tab="${id}" aria-selected="${S.tab === id}">${label}${n !== '' ? `<span class="n">${n}</span>` : ''}</button>`).join('')}</div>
-    </header>
-    <div class="pane" id="pane">${S.confirmDelete ? confirmBox(c) : ''}${tabBody(c, segs, chat, frames, actions)}</div>`
+      <div class="tabs" role="tablist">${tabs.map(([id, label, n]) => `<button class="tab" role="tab" data-tab="${id}" aria-selected="${S.tab === id}">${label}${n !== '' ? `<span class="n">${n}</span>` : ''}</button>`).join('')}</div>${notices()}`
+  const body = tabBody(c, segs, chat, frames, actions)
+  const confirm = S.confirmDelete ? confirmBox(c) : ''
+  return typeof body === 'string' ? { head, pane: confirm + body } : { head, bar: confirm + body.bar, frame: body.frame }
+}
+
+/** A message for a moment (an action that couldn't be done), and why the window didn't close: under
+ *  a call's tabs, or above whatever else the window shows (`noticesBar`). */
+function notices() {
+  const n = S.notice ? `<div class="notice"><span class="grow">${esc(S.notice)}</span><button class="btn ghost" data-cmd="notice-ok">OK</button></div>` : ''
+  const c = S.closeError ? `<div class="notice error"><span class="grow">Your notes couldn't be saved: ${esc(S.closeError)}</span><button class="btn" data-cmd="close-retry">Try again</button><button class="btn ghost danger" data-cmd="close-now">Close without saving</button></div>` : ''
+  return n + c
+}
+
+function noticesBar() {
+  const n = notices()
+  return n ? `<div class="notices">${n}</div>` : ''
 }
 
 function confirmBox(c) {
@@ -564,12 +439,14 @@ function tabBody(c, segs, chat, frames, actions) {
     return `<div class="frames">${frames.map((f) => `<button class="frame" data-frame="${esc(f.url)}"><img src="${esc(f.url)}" alt="Shared screen at ${clock(f.t || 0)}" loading="lazy"><span>${clock(f.t || 0)}</span></button>`).join('')}</div>`
   }
   if (S.tab === 'actions') {
-    if (!actions) return claudeHint(c, 'No action items yet', 'Action items are written together with the notes.')
+    if (!actions && c.actions_error) return minutesHint(c, "The action items can't be read", `${c.actions_error} — the next minutes replace them (the file is kept beside them).`)
+    if (!actions) return minutesHint(c, 'No action items yet', 'Action items come with the minutes.')
     if (!actions.length) return `<p style="color:var(--text-3)">No action items in this call.</p>`
-    return `<div class="todo">${actions.map((a, i) => {
+    return `<div class="todo">${actions.map((a) => {
       const done = a.status === 'done'
+      // By its id, with the status wanted: a list rewritten meanwhile can't make it another item.
       return `<div class="item${done ? ' done' : ''}">
-        <button class="check" role="checkbox" aria-checked="${done}" data-toggle="${i}" aria-label="Mark done"></button>
+        <button class="check" role="checkbox" aria-checked="${done}" data-toggle="${esc(a.id || '')}" data-status="${done ? 'todo' : 'done'}" aria-label="${done ? 'Mark to do' : 'Mark done'}"${a.id ? '' : ' disabled'}></button>
         <div><div class="task">${esc(a.task)}</div><div class="meta">
           <span class="owner${a.owner === 'Me' ? ' me' : ''}">${esc(a.owner || 'Unassigned')}</span>
           ${a.due ? `<span class="due">Due ${esc(a.due)}</span>` : ''}
@@ -579,28 +456,87 @@ function tabBody(c, segs, chat, frames, actions) {
       </div>`
     }).join('')}</div>`
   }
-  // notes
-  if (c.notes) return `<article class="doc">${markdown(c.notes, { call: c.name })}</article>`
-  if (c.status === 'recording') return `<p style="color:var(--text-3)">Notes are written after the call. Follow it live in the ${hasLive(c) ? 'Live' : 'Transcript'} tab.</p>`
-  return claudeHint(c, 'No notes yet', c.status === 'transcribing' ? 'Transcribing now. Notes come after that.' : 'The transcript is ready.')
+  if (S.tab === 'notes') return notesTab(c)
+  return minutesTab(c)
 }
 
-/** No notes (or no action items) yet: Write notes runs Claude Code from the app (the same
- *  process-call skill a session runs); the run's state and log come with the call. */
-function claudeHint(c, heading, lead) {
+// ── Notes: the user's own notes, an editor over my-notes.md (saved by NotesSync) ─────────────
+const notesState = (v) => v.saving ? 'Saving…' : v.error ? `Couldn't save: ${v.error}` : v.dirty ? 'Not saved yet' : 'Saved'
+function notesTab(c) {
+  if (c.my_notes_error) {
+    return `<div class="mynotes"><div class="notice error"><span class="grow">Your notes for this call (my-notes.md) can't be read: ${esc(c.my_notes_error)}. Fix or replace the file, and they show here again.</span><button class="btn ghost" data-cmd="reveal">Show folder</button></div></div>`
+  }
+  const v = NotesSync.view(c.name)
+  const time = c.status === 'recording' ? '<button class="btn ghost" data-cmd="stamp" title="Insert the time into the call">Time</button>' : ''
+  const kept = v.kept ? `<div class="notice"><span class="grow">The file was changed outside Echo while you typed: your text is saved, the other version is in ${esc(v.kept)}.</span><button class="btn ghost" data-cmd="kept-ok">OK</button></div>` : ''
+  const err = v.error ? `<div class="notice error"><span class="grow">Your notes couldn't be saved: ${esc(v.error)}</span><button class="btn" data-cmd="notes-retry">Retry</button></div>` : ''
+  // (The newline after <textarea> is dropped by the parser, so one that starts the text stays.)
+  return `<div class="mynotes">
+    <p class="hint"><span>Your notes shape the minutes: they're written around them. A line starting with # becomes a section.</span>${time}</p>
+    ${kept}${err}
+    <textarea id="my-notes" data-notes-call="${esc(c.name)}" aria-label="Your notes" placeholder="Type your notes for this call…"${S.closing ? ' readonly' : ''}>
+${esc(v.draft)}</textarea>
+    <div class="saved-state" id="notes-state">${esc(notesState(v))}</div>
+  </div>`
+}
+
+// ── Minutes: the page as it would be sent, in a sandboxed frame (`/minutes/<call>`) ───────────
+const SHOW_FILE = /Windows/.test(navigator.userAgent) ? 'Show in Explorer' : 'Show in Finder'
+function minutesTab(c) {
+  const run = c.notes_run
+  const busy = run && (run.state === 'queued' || run.state === 'running')
+  // The first minutes being written: their box until they are done (the file appears mid-run).
+  if (!c.notes || (busy && !run.had_minutes)) return minutesHint(c, 'No minutes yet', 'The transcript is ready.')
+  const frame = `<iframe id="minutes-frame" sandbox="allow-scripts" referrerpolicy="no-referrer" title="Minutes" src="minutes/${encodeURIComponent(c.name)}?v=${encodeURIComponent(c.minutes_rev || '')}"></iframe>`
+  return { bar: minutesBar(c), frame }
+}
+
+/** Above the page: an update going on or one that didn't finish, notes changed since, and the file. */
+function minutesBar(c) {
+  const run = c.notes_run
+  const log = c.has_log ? '<button class="btn ghost" data-cmd="show-log">Show log</button>' : ''
+  let status = '<span class="grow"></span>'
+  if (run && run.state === 'running') status = `<span class="grow">Updating the minutes…</span>${log}`
+  else if (run && run.state === 'queued') status = `<span class="grow">${esc(run.message || 'The update waits its turn.')}</span>`
+  else if (run && (run.state === 'failed' || run.state === 'needs_login')) {
+    const p = run.state === 'needs_login' && profileOf(run.profile)
+    const signin = p && p.kind === 'claude' ? `<button class="btn ghost" data-signin="${esc(p.id)}">Sign in…</button>` : ''
+    status = `<span class="grow warn">The last update didn't finish: ${esc(run.message || '')}</span>${signin}<button class="btn ghost" data-cmd="write-notes">Try again</button>${log}`
+  } else if (run && run.state === 'skipped') status = `<span class="grow">${esc(run.message || 'The last update wrote nothing.')}</span>`
+  else if (c.notes_changed) {
+    status = `<span class="grow">Your notes changed after these minutes were written.</span><button class="btn" data-cmd="write-notes" title="Writes the minutes and the action items again from your notes and the transcript; ticked items stay ticked">Update minutes</button>`
+  }
+  return `${status}<button class="btn ghost" data-cmd="open-minutes">Open in browser</button><button class="btn ghost" data-cmd="reveal-minutes">${SHOW_FILE}</button>`
+}
+
+/** No minutes (or no action items) yet: when Echo writes them by itself, or why not, and Write
+ *  minutes — Claude Code run from the app (the same process-call skill a session runs); the run's
+ *  state and log come with the call. */
+function minutesHint(c, heading, lead) {
   const n = (S.state && S.state.notes) || {}
   const run = c.notes_run
+  const auto = c.auto || {}
   const cmd = `/echo:process-call ${c.name}`
   const log = c.has_log ? '<button class="btn ghost" data-cmd="show-log">Show log</button>' : ''
   const box = (h, p, buttons, busy) => `<div class="empty" style="height:auto;padding:40px 0"><div>${mark(busy ? 'busy' : '')}<h3>${esc(h)}</h3>
     ${p}${buttons ? `<div class="notes-actions">${buttons}</div>` : ''}</div></div>`
   if (run && run.state === 'queued') {
-    return box('Notes are waiting their turn', `<p>${esc(run.message || 'They start as soon as the model is free.')}</p><p class="alt">With <b>${esc(run.model || '')}</b>. You can close this window.</p>`, '', true)
+    return box('Minutes are waiting their turn', `<p>${esc(run.message || 'They start as soon as the model is free.')}</p><p class="alt">With <b>${esc(run.model || '')}</b>. You can close this window.</p>`, '', true)
   }
   if (run && run.state === 'running') {
-    return box('Writing notes…', `<p>Claude Code is writing the notes and action items with <b>${esc(run.model || n.model || 'sonnet')}</b>. It takes a few minutes; you can close this window.</p>`, log, true)
+    return box('Writing minutes…', `<p>Claude Code is writing the minutes and action items with <b>${esc(run.model || n.model || 'sonnet')}</b>. It takes a few minutes; you can close this window.</p>`, log, true)
   }
-  if (c.status === 'recording' || c.status === 'transcribing') return box(heading, `<p>${esc(lead)}</p>`, '')
+  if (c.status === 'recording' || c.status === 'transcribing') {
+    // Promised only when they are due; whether Claude Code is there only once the state says so.
+    const known = !!(S.state && S.state.notes)
+    const when = known && !n.claude ? "Minutes are written by Claude Code, which isn't installed on this computer: install it from claude.com/claude-code to get them."
+      : known && !n.plugin ? "Echo's plugin for Claude Code wasn't found: menu → Claude Code → Connect Claude Code, then write them once the call is transcribed."
+      : auto.due === 'error' ? `Automatic minutes can't start${auto.reason ? `: ${auto.reason.replace(/^(the )?automatic minutes (can't|couldn't) start: /i, '')}` : ''}. Write them once the call is transcribed.`
+      : auto.due === 'not_ready' && !ai().error ? 'Echo writes them 15 minutes after the call. Add your own notes in the Notes tab meanwhile: the minutes are written around them.'
+      : 'Write them once the call is transcribed.'
+    return box('Minutes come after the call', `<p>${esc(when)}</p>`, '')
+  }
+  if (!run && auto.due === 'now') return box('Starting the minutes…', '<p>Echo is starting them now.</p>', '', true)
   // A run refused for a Claude profile's sign-in (the built-in profile signs in in Terminal), and
   // that profile's sign-in now: signed in since (or a model refused it although it looks signed in).
   const signinOf = run && run.state === 'needs_login' && [profileOf(run.profile)].find((x) => x && x.kind === 'claude')
@@ -608,27 +544,30 @@ function claudeHint(c, heading, lead) {
   const again = now && now.state === 'signed_in'
   const why = {
     needs_login: again ? ['Ready to try again', run.message ? `The last try said: ${run.message}` : '']
-      : [now && now.state === 'other_account' ? 'These notes need another account' : 'Claude Code needs you to sign in', run && run.message],
-    failed: ["Couldn't write notes", run && run.message],
-    skipped: ['No notes for this call', run && run.message],
+      : [now && now.state === 'other_account' ? 'These minutes need another account' : 'Claude Code needs you to sign in', run && run.message],
+    failed: ["Couldn't write the minutes", run && run.message],
+    skipped: ['No minutes for this call', run && run.message],
   }[run && run.state]
-  if (why) [heading, lead] = [why[0], why[1] || lead]
+  let label = 'Write minutes'
+  if (why) [heading, lead, label] = [why[0], why[1] || lead, run.state !== 'skipped' ? 'Try again' : label]
+  else if (auto.due === 'at' && auto.at) [heading, lead, label] = [`Minutes at ${hm(new Date(auto.at))}`, '15 minutes after the call, or after your last note — your notes in the Notes tab shape them.', 'Write minutes now']
+  else if (auto.due === 'gate') [heading, lead] = ['No minutes written automatically', `The call is too thin for them (${auto.reason || 'too short'}). Write them anyway if you want them.`]
+  else if (auto.due === 'error') [heading, lead] = ["Automatic minutes can't start", (auto.reason || "Echo's settings can't be read").replace(/^(the )?automatic minutes (can't|couldn't) start: /i, '')]
   const session = `<p class="alt">Or in a Claude Code session: <code>${esc(cmd)}</code> <button class="btn ghost" data-copy="${esc(cmd)}">Copy</button></p>`
   if (!n.claude) {
-    return box(heading, `<p>${esc(lead)}</p><p>Notes and action items are written by Claude Code. Install it from <a href="https://claude.com/claude-code" data-ext="1">claude.com/claude-code</a>, then come back here.</p>`, log)
+    return box(heading, `<p>${esc(lead)}</p><p>Minutes and action items are written by Claude Code. Install it from <a href="https://claude.com/claude-code" data-ext="1">claude.com/claude-code</a>, then come back here.</p>`, log)
   }
   if (!n.plugin) {
     return box(heading, `<p>${esc(lead)}</p><p>Connect Claude Code first: menu → Claude Code → Connect Claude Code.</p>`, log)
   }
-  const label = why && run.state !== 'skipped' ? 'Try again' : 'Write notes'
   // The call's own profile; none when it can't be read (the run would fail: say why, not the default).
   const live = c.live || {}, picked = S.notesProfile && S.notesProfile.call === c.name
   const pid = picked ? S.notesProfile.id : (live.profile || (live.profile_error ? '' : ai().default))
   const p = profileOf(pid)
   const model = p && p.notes_model ? p.notes_model : (n.model || 'sonnet')
-  // The profile these notes need signed in: the call's profile now (picked here or in the Live tab);
-  // the one the last run was refused for only while it still is (or none can be read). Signed in
-  // now: Try again (or sign in again, if a model keeps refusing it).
+  // The profile these minutes need signed in: the call's profile now (picked here or in the Live
+  // tab); the one the last run was refused for only while it still is (or none can be read).
+  // Signed in now: Try again (or sign in again, if a model keeps refusing it).
   const target = signinOf && (!p || p.id === signinOf.id) ? signinOf : p
   const sign = signinNote(target) || (again && target === signinOf
     ? `<div class="signin"><span class="signin-text">${esc(signinOf.name)} is signed in as ${esc(now.account)} now — click Try again.</span><span class="signin-acts"><button class="btn ghost" data-signin="${esc(signinOf.id)}">Sign in again…</button></span></div>` : '')
@@ -637,8 +576,8 @@ function claudeHint(c, heading, lead) {
     : !p ? (pid === '!unreadable' ? 'No model could be chosen when this call started — pick one.' : `The model this call was set to (${esc(pid || '?')}) no longer exists — pick another.`)
     : p.kind !== 'system'
       ? `Claude Code writes them with <b>${esc(p.name)}</b> (${esc(model)}), ${esc(profileWhere(p))}.`
-      : `Claude Code writes them with <b>${esc(n.model || 'sonnet')}</b>, as it is set up (menu → Claude Code → Notes model).`
-  const pick = ai().profiles.length > 1 || (ai().profiles.length && !p) ? `<label class="notes-pick">Model <select data-notesprofile aria-label="Model for these notes">${p ? '' : '<option value="" selected>Choose…</option>'}${profileOptions(pid)}</select></label>` : ''
+      : `Claude Code writes them with <b>${esc(n.model || 'sonnet')}</b>, as it is set up (menu → Claude Code → Minutes model).`
+  const pick = ai().profiles.length > 1 || (ai().profiles.length && !p) ? `<label class="notes-pick">Model <select data-notesprofile aria-label="Model for these minutes">${p ? '' : '<option value="" selected>Choose…</option>'}${profileOptions(pid)}</select></label>` : ''
   return box(heading, `<p>${esc(lead)}</p><p class="alt">${where}</p>${sign}`,
     `${pick}<button class="btn primary" data-cmd="write-notes">${label}</button>${log}`) + session
 }
@@ -698,12 +637,12 @@ function liveNotes(c) {
   if (!n) {
     if (c.status !== 'recording') return '<p class="muted">No live notes for this call.</p>'
     // Why there are none yet (the reason itself is in the header above).
-    const why = st.paused ? 'Paused — no notes until you resume.'
-      : st.needs_sign_in ? `No notes until ${profileName(st.needs_sign_in)} can be used (see above).`
-      : st.state === 'signing_in' ? 'No notes until the sign-in is done.'
-      : st.state === 'failed' ? 'No notes yet: the last update failed (see above).'
-      : st.state === 'busy' ? 'No notes yet: the model is finishing another job.'
-      : 'The first notes appear after about 90 seconds of conversation.'
+    const why = st.paused ? 'Paused — no live notes until you resume.'
+      : st.needs_sign_in ? `No live notes until ${profileName(st.needs_sign_in)} can be used (see above).`
+      : st.state === 'signing_in' ? 'No live notes until the sign-in is done.'
+      : st.state === 'failed' ? 'No live notes yet: the last update failed (see above).'
+      : st.state === 'busy' ? 'No live notes yet: the model is finishing another job.'
+      : 'The first live notes appear after about 90 seconds of conversation.'
     return `<p class="muted">${esc(why)}</p>`
   }
   const sec = (title, items, f) => items && items.length ? `<h3>${title}</h3><ul>${items.map(f).join('')}</ul>` : ''
@@ -925,13 +864,20 @@ function eventDetail(e, now) {
 // ── render + events ────────────────────────────────────────────────────────────────────────
 let lastKey = ''
 let lastPrint = ''
+/** Replace an element's content only when its HTML changed (keeps focus, selection, scroll and
+ *  a frame's page where nothing changed). */
+function patch(el, html) {
+  if (el && el._html !== html) { el.innerHTML = html; el._html = html }
+}
+
 function render() {
   // Animate entering a view / call / tab, never a background refresh.
   const key = `${S.view}|${S.selected}|${S.tab}`
   const entering = key !== lastKey
   lastKey = key
-  const focus = document.activeElement && document.activeElement.id
-  const caret = focus && document.activeElement.selectionStart
+  const focused = document.activeElement
+  const focus = focused && focused.id
+  const caret = focus && focused.selectionStart
   const scroll = $('#pane') ? $('#pane').scrollTop : 0
   // The live transcript follows the call while it is scrolled to the end.
   const lt = $('#live-transcript')
@@ -939,14 +885,51 @@ function render() {
   const app = $('#app')
   if (S.view === 'calendar') {
     const grid = $('#calgrid'), keep = grid ? grid.scrollTop : null
-    app.innerHTML = `<div class="shell no-list">${sidebar()}<main class="main">${calendarView()}</main></div>`
+    app.innerHTML = `<div class="shell no-list">${sidebar()}<main class="main">${noticesBar()}${calendarView()}</main></div>`
+    app.dataset.shell = 'calendar'
+    if (S.lightbox) app.insertAdjacentHTML('beforeend', `<div class="lightbox" data-close="1"><img src="${esc(S.lightbox)}" alt="Shared screen"></div>`)
     const g = $('#calgrid')
     // First open: around now, or 08:00 on a week without today.
     if (g) g.scrollTop = keep != null ? keep : Math.max(0, ($('.now') ? $('.now').offsetTop - 120 : 8 * Number(g.dataset.hour)))
   } else {
-    app.innerHTML = `<div class="shell">${sidebar()}${list()}<main class="main">${doc()}</main></div>`
+    // Regions, each replaced only when its HTML changed: the sidebar, the list, the call's header
+    // and its pane — on the Minutes tab, the pane's bar and the frame apart (the frame reloads only
+    // when the call or its minutes change; detaching it would reload it too).
+    if (app.dataset.shell !== 'calls') {
+      app.innerHTML = '<div class="shell"><div class="region" id="r-side"></div><div class="region" id="r-list"></div><main class="main" id="r-main"></main></div><div id="r-over"></div>'
+      app.dataset.shell = 'calls'
+    }
+    patch($('#r-side'), sidebar())
+    patch($('#r-list'), list())
+    const d = doc(), main = $('#r-main')
+    if (d.plain !== undefined) {
+      main.dataset.mode = 'plain'
+      patch(main, noticesBar() + d.plain)
+    } else {
+      if (main.dataset.mode !== 'doc') {
+        main.dataset.mode = 'doc'
+        patch(main, '<header class="doc-head" id="r-head"></header><div class="pane" id="pane"></div>')
+      }
+      patch($('#r-head'), d.head)
+      const pane = $('#pane')
+      if (d.frame !== undefined) {
+        if (pane.dataset.mode !== 'frame') {
+          pane.dataset.mode = 'frame'
+          pane.classList.add('framed')
+          patch(pane, '<div id="minutes-bar"></div><div class="minutes-slot" id="minutes-slot"></div>')
+        }
+        patch($('#minutes-bar'), d.bar)
+        patch($('#minutes-slot'), d.frame)
+      } else {
+        if (pane.dataset.mode === 'frame') { pane.dataset.mode = ''; pane.classList.remove('framed') }
+        patch(pane, d.pane)
+      }
+    }
+    patch($('#r-over'), S.lightbox ? `<div class="lightbox" data-close="1"><img src="${esc(S.lightbox)}" alt="Shared screen"></div>` : '')
   }
-  if (focus && $('#' + focus)) { const el = $('#' + focus); el.focus(); try { el.setSelectionRange(caret, caret) } catch {} }
+  // An element that was replaced gets its focus back (one left alone keeps its own selection).
+  const again = focus && $('#' + focus)
+  if (again && again !== focused) { again.focus(); try { again.setSelectionRange(caret, caret) } catch {} }
   const pane = $('#pane')
   if (pane) {
     const j = $('#jump')
@@ -955,13 +938,11 @@ function render() {
   }
   const lt2 = $('#live-transcript')
   if (lt2) lt2.scrollTop = ltStick ? lt2.scrollHeight : ltTop
-  if (S.lightbox) app.insertAdjacentHTML('beforeend', `<div class="lightbox" data-close="1"><img src="${esc(S.lightbox)}" alt="Shared screen"></div>`)
-  if (entering) { const p = $('.pane') || $('.grid-wrap'); if (p) p.classList.add('enter') }
+  if (entering) { const p = $('.pane') || $('.grid-wrap'); if (p) { p.classList.remove('enter'); void p.offsetWidth; p.classList.add('enter') } }
   placeDetail()
   const g = $('#calgrid')
   if (g) g.addEventListener('scroll', placeDetail, { passive: true })
   lastPrint = fingerprint()
-  drawDiagrams()
 }
 
 /** Put the event card next to the event it belongs to: right of it if there is room, else
@@ -1006,9 +987,9 @@ document.addEventListener('click', (e) => {
   if (t.dataset.close) { S.lightbox = null; return render() }
   if (t.dataset.copy) { send({ cmd: 'copy', text: t.dataset.copy }); t.textContent = 'Copied'; return }
   if (t.dataset.toggle) {
-    const a = S.call && S.call.actions && S.call.actions[Number(t.dataset.toggle)]
-    if (a) { a.status = a.status === 'done' ? 'todo' : 'done'; render() } // optimistic; the file follows
-    return send({ cmd: 'toggle_action', call: S.selected, index: Number(t.dataset.toggle) })
+    const a = S.call && S.call.actions && S.call.actions.find((x) => x.id === t.dataset.toggle)
+    if (a) { a.status = t.dataset.status; render() } // optimistic; the file follows (or a notice says why not)
+    return send({ cmd: 'toggle_action', call: S.selected, id: t.dataset.toggle, status: t.dataset.status })
   }
   if (t.dataset.arm !== undefined) return send({ cmd: 'arm_meeting', id: t.dataset.arm, languages: recordLang(), profile: pickedProfile() })
   if (t.dataset.join !== undefined) return send({ cmd: 'join_meeting', id: t.dataset.join, languages: recordLang(), profile: pickedProfile() })
@@ -1019,11 +1000,23 @@ document.addEventListener('click', (e) => {
     case 'reveal': return send({ cmd: 'reveal', call: S.selected })
     case 'show-log': return send({ cmd: 'show_log', call: S.selected })
     case 'write-notes': {
-      const pid = S.notesProfile && S.notesProfile.call === S.selected && S.notesProfile.id ? S.notesProfile.id : null
-      send({ cmd: 'write_notes', call: S.selected, profile: pid || undefined })
-      if (S.call) { S.call.notes_run = { state: 'queued', model: profileName(pid || (S.call.live && S.call.live.profile)), message: 'Starting…' }; render() }
+      // The run reads the user's notes: they are saved first, or it doesn't start.
+      const call = S.selected
+      const pid = S.notesProfile && S.notesProfile.call === call && S.notesProfile.id ? S.notesProfile.id : null
+      NotesSync.flush(call).then(() => {
+        send({ cmd: 'write_notes', call, profile: pid || undefined })
+        if (S.call && S.selected === call) { S.call.notes_run = { ...(S.call.notes_run || {}), state: 'queued', had_minutes: !!S.call.notes, model: profileName(pid || (S.call.live && S.call.live.profile)), message: 'Starting…' }; render() }
+      }, (err) => { S.notice = `Your notes couldn't be saved (${err.message}), so the minutes weren't started.`; render() })
       return
     }
+    case 'open-minutes': return send({ cmd: 'open_minutes', call: S.selected })
+    case 'reveal-minutes': return send({ cmd: 'reveal_minutes', call: S.selected })
+    case 'stamp': return stampNotes()
+    case 'notes-retry': NotesSync.save(S.selected); return render()
+    case 'kept-ok': NotesSync.clearKept(S.selected); return render()
+    case 'notice-ok': S.notice = null; return render()
+    case 'close-retry': S.closeError = null; render(); return send({ cmd: 'close_request' })
+    case 'close-now': return send({ cmd: 'close_now' })
     case 'live-pause': return send({ cmd: 'live_pause', call: S.selected })
     case 'live-resume': return send({ cmd: 'live_resume', call: S.selected })
     case 'ask-delete': S.confirmDelete = true; return render()
@@ -1038,7 +1031,64 @@ document.addEventListener('click', (e) => {
   }
 })
 
+// The user's notes: saved 1 s after the last keystroke, and when the editor loses focus (a tab
+// or a call chosen, the window closing). No render while typing (`tick`, `refresh`).
+let notesTimer = null
+const saveNotesSoon = (call) => { clearTimeout(notesTimer); notesTimer = setTimeout(() => { NotesSync.save(call); showNotesState() }, 1000) }
+/** The editor shows the draft NotesSync holds — a tray note taken in by a refresh, or appended by a
+ *  save — at once, even while it has focus (no render then): the next keystroke must not save
+ *  over what it didn't show. The caret and selection stay. */
+function syncEditor() {
+  const ta = $('#my-notes')
+  if (!ta || !S.call || String(S.call.name).slice(0, 17) !== String(ta.dataset.notesCall).slice(0, 17)) return
+  const draft = NotesSync.view(ta.dataset.notesCall).draft
+  if (ta.value === draft) return
+  const at = ta.selectionStart, end = ta.selectionEnd
+  ta.value = draft
+  try { ta.setSelectionRange(Math.min(at, draft.length), Math.min(end, draft.length)) } catch { /* not focused */ }
+}
+
+/** The editor's "Saved / Saving…" line, without re-rendering the editor. */
+function showNotesState() {
+  const el = $('#notes-state'), ta = $('#my-notes')
+  if (el && ta) el.textContent = notesState(NotesSync.view(ta.dataset.notesCall))
+}
+/** The Time button: `[m:ss] ` (time into the call; tray → Add a note… stamps `[mm:ss]`) at the caret. */
+function stampNotes() {
+  const ta = $('#my-notes')
+  if (!ta || !S.call || !S.call.started_at || ta.readOnly || ta.dataset.notesCall !== S.call.name) return
+  const call = ta.dataset.notesCall
+  const stamp = `[${clock((Date.now() - new Date(S.call.started_at)) / 1000)}] `
+  const at = ta.selectionStart ?? ta.value.length
+  ta.setRangeText(stamp, at, ta.selectionEnd ?? at, 'end')
+  ta.focus()
+  NotesSync.edit(call, ta.value)
+  saveNotesSoon(call)
+  showNotesState()
+}
+// The Time button keeps the editor focused (and its caret where it was).
+document.addEventListener('mousedown', (e) => { if (e.target.closest && e.target.closest('[data-cmd="stamp"]')) e.preventDefault() })
+document.addEventListener('focusout', (e) => {
+  if (e.target.id !== 'my-notes') return
+  clearTimeout(notesTimer)
+  NotesSync.save(e.target.dataset.notesCall)
+  if (S.renderOnBlur) { S.renderOnBlur = false; setTimeout(render) } else showNotesState()
+})
+
+// The minutes page in its frame: a time opens the transcript there, an https link the browser.
+// Only from that frame, and only these two shapes.
+window.addEventListener('message', (e) => {
+  const f = $('#minutes-frame')
+  if (!f || e.source !== f.contentWindow) return
+  const d = e.data
+  if (!d || typeof d !== 'object') return
+  if (d.echo === 'at' && typeof d.t === 'number' && Number.isFinite(d.t) && d.t >= 0) { S.jump = d.t; S.find = ''; go(`call/${S.selected}/transcript`) }
+  else if (d.echo === 'open' && typeof d.url === 'string' && /^https:\/\//i.test(d.url)) send({ cmd: 'open_url', url: d.url })
+})
+
 document.addEventListener('input', (e) => {
+  // The call the editor was drawn for, whatever is selected by now.
+  if (e.target.id === 'my-notes') { const call = e.target.dataset.notesCall; NotesSync.edit(call, e.target.value); saveNotesSoon(call); showNotesState(); return }
   if (e.target.id === 'q') { S.query = e.target.value; render() }
   if (e.target.id === 'find') { S.find = e.target.value; render() }
   if (e.target.id === 'ask') S.liveDraft = e.target.value // no render: typing must not be disturbed
@@ -1079,7 +1129,7 @@ function liveBusy() {
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && S.lightbox) { S.lightbox = null; return render() }
-  if (S.view !== 'calls' || !S.calls || !S.calls.length || /input/i.test(e.target.tagName)) return
+  if (S.view !== 'calls' || !S.calls || !S.calls.length || /input|textarea|select/i.test(e.target.tagName)) return
   if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
   e.preventDefault()
   const i = S.calls.findIndex((c) => c.name === S.selected)
@@ -1106,30 +1156,101 @@ async function tick() {
   if (changed || ticks % 3 === 0) await loadCalls()
   if (S.view === 'today' && ticks % 15 === 0) await loadAgenda()
   if (S.view === 'calendar' && ticks % 30 === 0) await loadCalendar()
-  const lv = S.call && S.call.live && S.call.live.status
-  const live = S.selected && S.call && (S.call.status === 'recording' || S.call.status === 'transcribing' ||
-    (S.call.notes_run && (S.call.notes_run.state === 'running' || S.call.notes_run.state === 'queued')) ||
-    (lv && (lv.running || lv.asking || lv.queued > 0)) || S.tab === 'live')
-  if (S.selected && (live || changed)) await loadCall(S.selected)
+  // The selected call is fetched again whenever anything it shows changed (`/rev`: its files,
+  // the live notes' and the minutes run's state, when the minutes come), whatever its status.
+  if (S.selected) {
+    let rev = null
+    try { rev = (await get('api/call/' + encodeURIComponent(S.selected) + '/rev')).rev } catch { /* retitled: loadCall finds it */ }
+    if (changed || !S.call || rev !== S.call.rev) await loadCall(S.selected)
+  }
   // Typing a question doesn't hold back the live notes (its text and caret survive a render); a
-  // text selection, an open menu or a focused search field does (until it ends).
+  // text selection, an open menu or a focused search field does (until it ends). The user's notes
+  // being typed hold back every render until the editor is left.
+  if (typingNotes()) { if (fingerprint() !== lastPrint) S.renderOnBlur = true; return }
   const sel = window.getSelection && window.getSelection()
   const busy = document.querySelector('input:focus:not(#ask), select:focus') || (sel && !sel.isCollapsed)
   if (fingerprint() !== lastPrint && (!busy || changed)) render()
 }
+const typingNotes = () => document.activeElement && document.activeElement.id === 'my-notes'
 
 window.echo = {
-  async refresh() { await loadCalls(); if (S.selected) await loadCall(S.selected); if (S.view === 'calendar') await loadCalendar(true); render() },
-  openCall(name) { go(`call/${name}/notes`) },
+  async refresh() {
+    await loadCalls(); if (S.selected) await loadCall(S.selected); if (S.view === 'calendar') await loadCalendar(true)
+    if (typingNotes()) S.renderOnBlur = true
+    else render()
+  },
+  openCall(name) { go(`call/${name}/minutes`) },
+  /** The app's answer to a save of the user's notes (`save_my_notes`). */
+  saved(r) {
+    NotesSync.saved(r)
+    // The editor gets a tail the tray appended meanwhile, without a render while it is typed in.
+    syncEditor()
+    if ((r.error || r.kept) && !typingNotes()) render()
+    else showNotesState()
+  },
+  /** A message for a moment (an action that couldn't be done). */
+  notice(text) { S.notice = text; render() },
+  /** The leave the editors were frozen for didn't happen (cancelled, or the update or folder
+   *  change failed): writable again. */
+  thaw() {
+    S.closing = false
+    S.closeError = null // Echo asked, and the user decided: no banner for it
+    const ta = $('#my-notes')
+    if (ta) ta.readOnly = false
+    if (!typingNotes()) render()
+  },
+  /** The window is closing (`close`), or Echo quitting, updating, moving its data folder: every
+   *  editor read-only, every unsaved note saved, then `close_ready` says for handshake `n` whether
+   *  it worked. */
+  prepareClose(n, close) {
+    S.closing = true
+    const ta = $('#my-notes')
+    if (ta) ta.readOnly = true
+    clearTimeout(notesTimer)
+    // Saved: the editors stay read-only until Echo is gone, or `thaw` says it stays.
+    NotesSync.flushAll().then(
+      () => send({ cmd: 'close_ready', ok: true, n }),
+      (err) => {
+        // A close explains itself here (Try again / Close without saving); for anything else Echo
+        // asks the user, and the editors stay read-only until it goes or `thaw`s them.
+        if (close) {
+          S.closing = false
+          S.closeError = err.message
+          const now = $('#my-notes')
+          if (now) now.readOnly = false
+        }
+        render()
+        send({ cmd: 'close_ready', ok: false, n })
+      },
+    )
+  },
   async selftest() {
     const out = { selftest: true, base: location.href }
     try {
       out.state = (await fetch('api/state')).status
       const calls = await get('api/calls'); out.calls = calls.length
-      if (calls.length) { const d = await get('api/call/' + encodeURIComponent(calls[0].name)); out.segments = (d.segments || []).length; out.notes = d.notes ? d.notes.length : 0 }
+      if (calls.length) {
+        const d = await get('api/call/' + encodeURIComponent(calls[0].name)); out.segments = (d.segments || []).length; out.notes = d.notes ? d.notes.length : 0
+        // A call with minutes: its page is served, and the Minutes tab (open on it) shows it in a frame.
+        if (d.notes) { out.minutes_page = (await fetch('minutes/' + encodeURIComponent(d.name))).status; out.minutes_frame = S.selected !== d.name || S.tab !== 'minutes' || !!document.querySelector('#minutes-frame') }
+      }
       out.forbidden = (await fetch('file/x/notes.md')).status
       out.rendered = !!document.querySelector('.shell')
-      out.ok = out.state === 200 && out.forbidden === 403 && out.rendered
+      // A sandboxed frame like the minutes page's: it says it ran, then posts to the window's IPC
+      // directly — the app must not get that (it checks, and reports `frame_blocked`).
+      out.frame_ready = await new Promise((resolve) => {
+        const f = document.createElement('iframe')
+        f.setAttribute('sandbox', 'allow-scripts')
+        f.style.display = 'none'
+        const done = (ok) => { window.removeEventListener('message', on); f.remove(); resolve(ok) }
+        // (`frame_sees_ipc`: whether the frame could reach the handler at all — then only `from_page` stops it.)
+        const on = (e) => { if (e.source === f.contentWindow && e.data && e.data.echo === 'ready') { out.frame_sees_ipc = e.data.ipc === true; setTimeout(() => done(true), 500) } }
+        window.addEventListener('message', on)
+        setTimeout(() => done(false), 4000)
+        f.src = 'selftest/frame'
+        document.body.appendChild(f)
+      })
+      out.ok = out.state === 200 && out.forbidden === 403 && out.rendered && out.frame_ready && out.minutes_page !== 404 && out.minutes_frame !== false
     } catch (e) { out.ok = false; out.error = String(e) }
     send(out)
   },
@@ -1139,7 +1260,7 @@ window.echo = {
   route()
   render()
   await Promise.all([loadState(), loadCalls(), loadAgenda()])
-  if (S.view === 'calls' && !S.selected && S.calls && S.calls.length) S.selected = S.calls[0].name, history.replaceState(null, '', `#call/${S.selected}/notes`)
+  if (S.view === 'calls' && !S.selected && S.calls && S.calls.length) S.selected = S.calls[0].name, history.replaceState(null, '', `#call/${S.selected}/minutes`)
   if (S.selected) await loadCall(S.selected)
   if (S.view === 'calendar') await loadCalendar()
   render()
