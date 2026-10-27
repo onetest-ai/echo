@@ -302,6 +302,18 @@ fn taskbar_dark() -> bool {
     false
 }
 
+/// Is a menu open right now? macOS tracks an open menu in the event-tracking run loop mode, and
+/// the event loop keeps running meanwhile: a menu replaced then closes under the pointer.
+fn menu_open() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_foundation::NSRunLoop;
+        NSRunLoop::mainRunLoop().currentMode().is_some_and(|m| m.to_string() == "NSEventTrackingRunLoopMode")
+    }
+    #[cfg(not(target_os = "macos"))]
+    false
+}
+
 fn status_text(state: &UiState) -> String {
     match state {
         UiState::Idle { in_call: Some(true) } => "Teams call in progress — not recording".into(),
@@ -557,6 +569,8 @@ struct Ui {
     model: Option<Model>,
     health: Vec<(String, String, Option<String>)>,
     last_refresh: Instant,
+    /// A refresh waits for the open menu to close (`menu_open`).
+    refresh_owed: bool,
     /// Set by a click: open (or focus) the window, at this call; the event loop does it.
     open_window: Option<Option<String>>,
 }
@@ -628,6 +642,7 @@ impl Ui {
             model: None,
             health: health(),
             last_refresh: Instant::now(),
+            refresh_owed: false,
             open_window: None,
         };
         ui.rebuild(load_model(&ui.health));
@@ -892,9 +907,16 @@ impl Ui {
     }
 
     fn refresh_model(&mut self, force: bool) {
+        let force = force || self.refresh_owed;
         if !force && self.last_refresh.elapsed() < Duration::from_secs(5) {
             return;
         }
+        // Rebuilding would close the menu being read: on the first tick after it closes.
+        if menu_open() {
+            self.refresh_owed = true;
+            return;
+        }
+        self.refresh_owed = false;
         self.last_refresh = Instant::now();
         let m = load_model(&self.health);
         if self.model.as_ref() != Some(&m) {

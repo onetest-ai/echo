@@ -147,6 +147,9 @@ recent calls, Settings (data folder, start at login, install CLI), Speech models
 with % / remove), Claude Code (connect = install plugin at user scope; where notes are written),
 Health (Ask for permissions),
 Check for updates… (or Update to <version>… once one is found), Quit — clicks call the same `arm`/`stop` as the CLI, so every client sees the same events.
+The menu is rebuilt when what it shows changes (checked every 5 s); on macOS never while a menu is open: AppKit
+tracks it in the event-tracking run loop mode, the event loop keeps running, and a menu replaced then closes under
+the pointer (`tray::menu_open`; the rebuild comes on the first tick after it closes).
 macOS needs the event loop on the main thread, so `run_loop` runs on a worker thread.
 Prompts follow `config.scheduled` (calendar meetings) and `config.unscheduled` (other calls), each
 `ask` | `manual`; this user uses `manual` for both — nothing prompts, the user arms explicitly.
