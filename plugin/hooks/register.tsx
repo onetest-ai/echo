@@ -2,11 +2,14 @@
 //
 // The app (tray icon + recorder, started at login) works without Claude Code. This mod adds:
 // - Band above the prompt while the app runs: [ Live ] plus a one-line status.
-// - Pane `echo-live`: live transcript on the left, rolling summary / highlights / action
-//   items on the right (stacked when narrow), and a browser of past calls.
-// - Notes: when a call is transcribed, the session claims it (`echoctl claim`, so one of
-//   several open sessions does it) and runs /echo:process-call by itself; calls
-//   transcribed while no session was open are picked up when one opens (`echoctl pending`).
+// - Pane `echo-live`: live transcript on the left, the app's live notes (summary / highlights /
+//   action items, `<call>/live-notes.json`) on the right (stacked when narrow), and a browser of
+//   past calls. The app writes the live notes and answers the quick questions with the call's AI
+//   profile; this pane never calls a model itself (it would use this session's account instead).
+// - Notes: when a call is transcribed, the pane asks for them (`echoctl notes <call> --auto --for
+//   <cwd>`: the CLI checks the call is due and never tried, claims it so one of several open
+//   sessions starts it, and hands it to the app, which writes them with the call's profile);
+//   calls transcribed while no session was open are picked up when one opens (`echoctl pending`).
 // - It starts the app if it is set up but not running.
 //
 // It reads files the app writes in its data folder (`echoctl app` → home):
@@ -18,7 +21,7 @@ import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
 import type { ActionItem, Band, Browse, CallItem, CallMeta, ChatLine, DocTab, Insight, LiveLine, LiveView } from '../types'
-import { anchors, callFromDir, clock, extractJson, hm, isMe, minutesSince, newLines, parseLines, speakerLabel, statusBadge, strings, tailThatFits, transcriptText } from './view'
+import { anchors, callFromDir, clock, hm, insightFromLive, isMe, minutesSince, newLines, parseLines, speakerLabel, statusBadge, tailThatFits } from './view'
 
 const PANE = 'echo-live'
 // The app's data folder, asked from the CLI at session start (absolute; independent of the
@@ -30,9 +33,6 @@ let IS_WINDOWS = false
 // This session's folder: the app may limit automatic notes to sessions in one folder.
 let SESSION_CWD = ''
 const CATCH_UP_MAX = 3
-const SUMMARY_EVERY_MS = 90_000
-const SUMMARY_MIN_NEW_CHARS = 400
-const SUMMARY_WINDOW_CHARS = 16_000
 const MAX_LINES = 400
 const TWO_COLUMNS_FROM = 100
 const ORANGE = '#D97757'
@@ -41,7 +41,7 @@ const live = atom({ plugin: 'echo', key: 'live' } as const, {
   dir: null, title: null, startedAt: null, phase: 'idle', lines: [], notesRequested: false, chat: [],
 } as LiveView)
 const insight = atom({ plugin: 'echo', key: 'insight' } as const, {
-  summary: [], highlights: [], actions: [], coveredChars: 0, updatedAt: null, answer: null, asking: null,
+  summary: [], highlights: [], actions: [], answers: 0, updatedAt: null, answer: null, asking: null, off: false, state: null, error: null,
 } as Insight)
 const browse = atom({ plugin: 'echo', key: 'browse' } as const, {
   mode: 'calls', calls: [], selected: null, tab: 'notes', meta: null, doc: '', transcript: [], actions: null,
@@ -55,11 +55,12 @@ type Event = { event: string; [k: string]: unknown }
 
 // Module variables reset on reload; that only costs one fresh read of the files.
 let eventsOffset: number | null = null
-let summarizing = false
-let lastSummaryAt = 0
 let didAutostart = false
-/** Model for the live summary and quick questions (`echoctl config --live-model`). */
-let LIVE_MODEL = 'haiku'
+/** Live notes are on in the app (`echoctl app` → live_notes; read at start, then every 60 s during a call). */
+let LIVE_ON = false
+/** Why the app can't tell (`ai_error`: its AI settings can't be read), read with LIVE_ON. */
+let LIVE_ERR: string | null = null
+let lastInfoAt = 0
 let lastCallsLoad = 0
 
 type CliResult = { exitCode: number; stdout: string; stderr: string }
@@ -72,12 +73,19 @@ async function cli($: any, args: string[], timeoutMs = 30_000): Promise<CliResul
   return $.process.run(argv, { timeoutMs })
 }
 
-/** Take a call for notes and run process-call on it, unless another session already has it. */
-async function processCall($: any, dir: string): Promise<boolean> {
-  const r = await cli($, ['claim', dir, '--for', SESSION_CWD]).catch(() => null)
-  if (!r || r.exitCode !== 0) return false
-  void $.prompt.submit({ text: `/echo:process-call ${dir}` })
-  return true
+/** Ask the app for a call's notes: the CLI checks the call is due and this session may ask,
+ *  claims it (one of several open sessions) and hands it to the app, which writes them with the
+ *  call's AI profile. It answers one JSON line `{requested, reason}`. */
+async function processCall($: any, dir: string): Promise<{ requested: boolean; reason: string }> {
+  const r = await cli($, ['notes', dir, '--auto', '--for', SESSION_CWD]).catch(() => null)
+  if (!r) return { requested: false, reason: "Echo's CLI didn't answer" }
+  if (r.exitCode !== 0) return { requested: false, reason: String(r.stderr).trim().split('\n').pop()?.replace(/^Error: /, '') ?? 'error' }
+  try {
+    const out = JSON.parse(String(r.stdout).trim().split('\n').pop() ?? '{}') as { requested?: boolean; reason?: string }
+    return { requested: Boolean(out.requested), reason: out.reason ?? '' }
+  } catch {
+    return { requested: false, reason: String(r.stdout).trim() }
+  }
 }
 
 async function openPane($: any): Promise<void> {
@@ -334,9 +342,9 @@ export const register: Register = on => {
         : v.phase === 'transcribing'
           ? `Transcribing ${v.title ?? 'the call'}… (on this Mac, ~¼ of the call's length)`
           : v.phase === 'writing-notes'
-            ? `Writing notes… they appear in the session${v.notesRequested ? '' : ' when it is free'}`
+            ? `Echo is writing the notes…${v.notesNote ? ` ${v.notesNote}` : ' (Calls → Notes when they are ready)'}`
             : v.phase === 'done'
-              ? `Done${v.title ? ` · ${v.title}` : ''} — open Calls to read the notes`
+              ? `Done${v.title ? ` · ${v.title}` : ''} — ${v.notesNote ?? 'open Calls to read the notes'}`
               : 'Not recording — Record from the Echo menu-bar icon or /echo:record'
 
     const section = (title: string, items: string[]) =>
@@ -349,7 +357,7 @@ export const register: Register = on => {
         </Box>
       )
 
-    const quick = v.phase === 'recording' && v.lines.length > 0 ? (
+    const quick = v.phase === 'recording' && v.lines.length > 0 && !ins.off ? (
       <Box flexDirection="column" marginBottom={1}>
         <Box gap={1}>
           <Button key="q-missed" label="What did I miss?" hotkey="w" onPress={() => quickAction($, 'missed')} />
@@ -382,11 +390,14 @@ export const register: Register = on => {
             ))}
           </Box>
         )}
-        {ins.updatedAt === null ? (
+        {ins.off ? (
+          ins.error === null && <Text dimColor>Live notes are off — Echo menu → AI for calls → Live notes during calls.</Text>
+        ) : ins.updatedAt === null ? (
           <Text dimColor>{v.phase === 'recording' ? 'Notes appear after a couple of minutes of talk.' : ''}</Text>
         ) : (
-          <Text dimColor>updated {hm(ins.updatedAt)}</Text>
+          <Text dimColor>updated {hm(ins.updatedAt)}{ins.state === 'updating' ? ' · updating…' : ''}</Text>
         )}
+        {ins.error !== null && <Text color="error" wrap="wrap">{ins.error}</Text>}
       </Box>
     )
 
@@ -433,7 +444,7 @@ export const register: Register = on => {
 
 /** Find the app's data folder, start the app if it is set up, pick up calls without notes. */
 async function connect($: any): Promise<void> {
-  let info: { home?: string; home_source?: string; running?: number | null; live_model?: string } = {}
+  let info: { home?: string; home_source?: string; running?: number | null; live_notes?: boolean; ai_error?: string | null } = {}
   try {
     const r = await cli($, ['app'])
     if (r.exitCode !== 0) return // app not installed: the plugin stays quiet until setup
@@ -442,7 +453,8 @@ async function connect($: any): Promise<void> {
     return
   }
   if (!info.home) return
-  if (info.live_model) LIVE_MODEL = info.live_model
+  LIVE_ON = Boolean(info.live_notes)
+  LIVE_ERR = info.ai_error ?? null
   HOME = info.home.replace(/\\/g, '/')
   const setUp = info.home_source !== 'default'
   if (setUp && !info.running && !didAutostart) {
@@ -451,12 +463,12 @@ async function connect($: any): Promise<void> {
   }
   $.clock.every(1000, () => void tick($))
   if (!setUp) return
-  // Calls transcribed while no session was open (the app writes no notes by itself).
+  // Calls transcribed while no session was open: ask the app to write their notes (`notes --auto`).
   try {
     const r = await cli($, ['pending', '--for', SESSION_CWD])
     const pending = r.exitCode === 0 ? (JSON.parse(r.stdout) as { dir: string }[]) : []
     let n = 0
-    for (const p of pending.slice(-CATCH_UP_MAX)) if (await processCall($, p.dir)) n++
+    for (const p of pending.slice(-CATCH_UP_MAX)) if ((await processCall($, p.dir)).requested) n++
     if (n > 0) $.ui.toast(`echo: writing notes for ${n} call${n > 1 ? 's' : ''} recorded earlier`)
   } catch {
     /* best effort */
@@ -557,7 +569,7 @@ async function followNotesRun($: any): Promise<void> {
   } catch {
     return // not started yet
   }
-  if (run.state === 'running') return
+  if (run.state === 'running' || run.state === 'queued') return
   const tab = b.generating
   await update($, browse, (x): Browse => ({ ...x, generating: null }))
   if (run.state === 'done') $.ui.toast('Notes and action items written.')
@@ -682,22 +694,45 @@ async function tick($: any): Promise<void> {
   if (lines.length !== v.lines.length) await update($, live, cur => ({ ...cur, lines }))
   const chat = readChat(await $.fs.read(`${v.dir}/chat.json`).catch(() => '[]'))
   if (chat.length !== v.chat.length) await update($, live, (cur): LiveView => ({ ...cur, chat }))
-  await maybeSummarize($, lines)
+  // Live notes may be switched on or off in the menu mid-call.
+  if (Date.now() - lastInfoAt > 60_000) {
+    lastInfoAt = Date.now()
+    const r = await cli($, ['app']).catch(() => null)
+    if (r && r.exitCode === 0) {
+      try {
+        const i = JSON.parse(r.stdout)
+        LIVE_ON = Boolean(i.live_notes)
+        LIVE_ERR = i.ai_error ?? null
+      } catch { /* keep */ }
+    }
+  }
+  await readLiveNotes($, v.dir)
 }
 
 /** After a call: the files say how far processing got (survives reloads and lost turns). */
 async function refreshPhase($: any, v: LiveView): Promise<void> {
   const has = (f: string) => $.fs.exists(`${v.dir}/${f}`)
   let phase: LiveView['phase'] = v.phase
+  let note: string | null = v.notesNote ?? null
   if (await has('notes.md')) phase = 'done'
   else if (await has('transcript.md')) {
-    // Calls under 3 minutes get a transcript only (the notes step skips them).
+    // The app's run says where the notes are (queued: why; failed: why); calls under 3 minutes
+    // get a transcript only.
+    const run = JSON.parse(await $.fs.read(`${v.dir}/notes-run.json`).catch(() => '{}')) as { state?: string; message?: string }
     const meta = JSON.parse(await $.fs.read(`${v.dir}/meta.json`).catch(() => '{}'))
     const minutes = (Date.parse(meta.ended_at) - Date.parse(meta.started_at)) / 60_000
-    phase = minutes < 3 ? 'done' : 'writing-notes'
+    if (run.state === 'queued' || run.state === 'running') {
+      phase = 'writing-notes'
+      note = run.state === 'queued' ? (run.message ?? null) : null
+    } else if (run.state) {
+      phase = 'done'
+      note = `${run.state === 'skipped' ? 'no notes' : "couldn't write notes"} — ${run.message ?? run.state}`
+    } else {
+      phase = minutes < 3 || !v.notesRequested ? 'done' : 'writing-notes'
+    }
   } else if (await has('.transcribing')) phase = 'transcribing'
-  if (phase !== v.phase) {
-    await update($, live, (cur): LiveView => ({ ...cur, phase }))
+  if (phase !== v.phase || note !== (v.notesNote ?? null)) {
+    await update($, live, (cur): LiveView => ({ ...cur, phase, notesNote: note }))
     // Notes are ready: show them in the call browser.
     if (phase === 'done' && v.dir) await selectCall($, v.dir.split('/').pop() ?? v.dir, 'notes')
   }
@@ -722,8 +757,7 @@ async function onEvent($: any, ev: Event): Promise<void> {
         dir: String(ev.dir), title: (ev.title as string | null) ?? null, startedAt: Date.now(), phase: 'recording', lines: [],
         notesRequested: false, chat: [],
       }))
-      await update($, insight, (): Insight => ({ summary: [], highlights: [], actions: [], coveredChars: 0, updatedAt: null, answer: null, asking: null }))
-      lastSummaryAt = Date.now()
+      await update($, insight, (): Insight => ({ summary: [], highlights: [], actions: [], answers: 0, updatedAt: null, answer: null, asking: null, off: !LIVE_ON, state: null, error: settingsError() }))
       await update($, browse, (b): Browse => ({ ...b, mode: 'live' }))
       void openPane($)
       return
@@ -736,10 +770,13 @@ async function onEvent($: any, ev: Event): Promise<void> {
         $.ui.toast(`echo: transcription failed — ${String(ev.error ?? '')}`)
         return
       }
-      // A turn of its own once the session is idle (the notes step needs Claude) — only in
-      // the session that claims the call.
-      if (await processCall($, String(ev.dir))) {
-        await update($, live, (cur): LiveView => ({ ...cur, phase: 'writing-notes', notesRequested: true }))
+      // Ask the app for the notes (`notes --auto`): it runs them headless with the call's AI
+      // profile; only the session whose request claimed the call shows "writing notes".
+      {
+        const r = await processCall($, String(ev.dir))
+        await update($, live, (cur): LiveView => r.requested
+          ? { ...cur, phase: 'writing-notes', notesRequested: true, notesNote: null }
+          : { ...cur, notesNote: r.reason || null })
       }
       return
     // meeting_soon / call_started with `ask`: the app asks with its own dialog.
@@ -771,78 +808,54 @@ async function toggleAction($: any, dir: string, index: number): Promise<void> {
   await selectCall($, dir, 'actions')
 }
 
-const QUICK = {
-  missed: {
-    title: 'What you missed',
-    window: 5 * 60,
-    system:
-      'The user stepped away from a call that is still going. From the machine transcript of the last few minutes ' +
-      '("Me" is the user, "Remote" the others; expect recognition errors), tell them in 3-5 short bullets what was said, ' +
-      'decided or asked — especially anything addressed to them. Plain text bullets, no preamble. Only what is in the transcript.',
-  },
-  question: {
-    title: 'You could ask',
-    window: 10 * 60,
-    system:
-      'The user is in a call that is still going. From the machine transcript ("Me" is the user, "Remote" the others), ' +
-      'suggest 2-3 short, specific questions the user could ask next to clarify, unblock or move things forward. ' +
-      'Plain text, one per line, no preamble. Base them only on the transcript. Use the language of the call.',
-  },
-} as const
+const QUICK_TITLE = { missed: 'What you missed', question: 'You could ask' } as const
+const ASK_TITLE: Record<string, string> = { missed: 'What you missed', question: 'You could ask', ask: 'You asked' }
 
-/** Live quick actions over the recent transcript (small model, answer shown in the pane). */
+/** Live quick actions: the app answers them with the call's AI profile (`echoctl live ask`). */
 async function quickAction($: any, kind: 'missed' | 'question'): Promise<void> {
   const cur = await read($, insight)
-  if (cur.asking !== null) return
-  await update($, insight, (i): Insight => ({ ...i, asking: kind }))
-  const q = QUICK[kind]
-  try {
-    const v = await read($, live)
-    const last = v.lines.at(-1)?.end ?? 0
-    const recent = transcriptText(v.lines.filter(l => l.end >= last - q.window)).slice(-12_000)
-    const r = await $.model.complete({ model: LIVE_MODEL, system: q.system, prompt: recent, maxTokens: 500, timeoutMs: 30_000, effort: 'low' })
-    const text = r.isAnswered ? String(r.text).trim() : `No answer (${r.reason ?? 'unknown'})`
-    await update($, insight, (i): Insight => ({ ...i, asking: null, answer: { title: q.title, text } }))
-  } catch (err) {
-    await update($, insight, (i): Insight => ({ ...i, asking: null, answer: { title: q.title, text: `Failed: ${String(err)}` } }))
+  if (cur.asking !== null || cur.off) return
+  const v = await read($, live)
+  if (!v.dir) return
+  await update($, insight, (i): Insight => ({ ...i, asking: kind, askedAt: Date.now() }))
+  const r = await cli($, ['live', 'ask', v.dir, '--kind', kind]).catch(() => null)
+  if (!r || r.exitCode !== 0) {
+    const why = r ? String(r.stderr).trim().split('\n').pop()?.replace(/^Error: /, '') : 'Echo didn\'t answer'
+    await update($, insight, (i): Insight => ({ ...i, asking: null, answer: { title: QUICK_TITLE[kind], text: `Failed: ${why ?? 'error'}` } }))
   }
 }
 
-/** Rolling notes over the live transcript with a small model, at most every 90 s. */
-async function maybeSummarize($: any, lines: LiveLine[]): Promise<void> {
-  if (summarizing || Date.now() - lastSummaryAt < SUMMARY_EVERY_MS) return
-  const all = transcriptText(lines)
-  const prev = await read($, insight)
-  if (all.length - prev.coveredChars < SUMMARY_MIN_NEW_CHARS) return
-  summarizing = true
-  lastSummaryAt = Date.now()
-  try {
-    const recent = all.slice(-SUMMARY_WINDOW_CHARS)
-    const system =
-      'You keep live notes for a call that is still in progress. The transcript is machine-made: ' +
-      '"Me" is the user, "Remote" is everyone else; expect recognition errors. Reply with JSON only: ' +
-      '{"summary": [up to 3 short bullets: what the call is about and where it stands], ' +
-      '"highlights": [up to 5 short bullets: decisions, numbers, dates, notable statements], ' +
-      '"actions": [up to 5: "owner — task" for commitments actually made]}. ' +
-      'Write in the language most of the transcript is in. Never add anything that is not in the transcript.'
-    const prompt =
-      (prev.updatedAt
-        ? `Previous notes (update them; keep what still holds):\n${JSON.stringify({ summary: prev.summary, highlights: prev.highlights, actions: prev.actions })}\n\n`
-        : '') + `Transcript so far${recent.length < all.length ? ' (latest part)' : ''}:\n${recent}`
-    const r = await $.model.complete({ model: LIVE_MODEL, system, prompt, maxTokens: 800, timeoutMs: 30_000, effort: 'low' })
-    if (!r.isAnswered) return
-    const parsed = extractJson(r.text) as Record<string, unknown>
-    await update($, insight, (cur): Insight => ({
-      ...cur,
-      summary: strings(parsed.summary, 3),
-      highlights: strings(parsed.highlights, 5),
-      actions: strings(parsed.actions, 5),
-      coveredChars: all.length,
-      updatedAt: Date.now(),
-    }))
-  } catch {
-    // keep the previous notes; try again next period
-  } finally {
-    summarizing = false
+/** Live notes can't run because the app can't read its AI settings (shown instead of "off"). */
+function settingsError(): string | null {
+  return LIVE_ERR === null ? null : `Echo can't read its AI settings: ${LIVE_ERR}`
+}
+
+/** The app's live notes, state and answers for the call being recorded → the pane. */
+async function readLiveNotes($: any, dir: string): Promise<void> {
+  const json = async (f: string): Promise<unknown> => {
+    try { return JSON.parse(String(await $.fs.read(`${dir}/${f}`))) } catch { return null }
   }
+  const notes = insightFromLive(await json('live-notes.json'))
+  const st = ((await json('live-state.json')) ?? {}) as { state?: string; error?: string | null }
+  const asks = parseLines<{ kind: string; question?: string; answer?: string; error?: string }>(
+    String(await $.fs.read(`${dir}/live-asks.jsonl`).catch(() => '')))
+  const last = asks.at(-1)
+  await update($, insight, (cur): Insight => {
+    const fresh: Insight = {
+      ...cur,
+      ...notes,
+      off: !LIVE_ON,
+      state: st.state ?? null,
+      error: settingsError() ?? (st.state === 'failed' ? (st.error ?? null) : null),
+      answers: asks.length,
+    }
+    if (asks.length > cur.answers && last) {
+      fresh.asking = null
+      fresh.answer = { title: ASK_TITLE[last.kind] ?? 'Answer', text: last.error ? `Failed: ${last.error}` : (last.answer ?? '') }
+    } else if (cur.asking !== null && cur.askedAt && Date.now() - cur.askedAt > 180_000) {
+      fresh.asking = null
+      fresh.answer = { title: QUICK_TITLE[cur.asking], text: 'No answer from Echo within 3 minutes.' }
+    }
+    return JSON.stringify(cur) === JSON.stringify(fresh) ? cur : fresh
+  })
 }

@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { LiveLine } from '../types'
-import { actionsMarkdown, anchors, callFromDir, clock, extractJson, newLines, statusBadge, parseLines, speakerLabel, strings, tailThatFits } from './view'
+import { actionsMarkdown, anchors, callFromDir, clock, insightFromLive, newLines, statusBadge, parseLines, speakerLabel, tailThatFits } from './view'
 
 const line = (text: string, speaker: 'me' | 'remote' = 'remote', start = 0): LiveLine =>
   ({ speaker, start, end: start + 1, lang: 'en', text })
@@ -23,11 +23,6 @@ test('tailThatFits keeps the newest lines that fit, oldest first', async () => {
   expect(got.map(l => l.text)).toEqual(['two', 'three'])
   const long = line('x'.repeat(200))
   expect(tailThatFits([long], 2, 80)).toEqual([]) // needs 3 rows, only 2 available
-})
-
-test('extractJson reads a fenced or chatty model reply', async () => {
-  expect(extractJson('Sure!\n```json\n{"summary":["a"]}\n```')).toEqual({ summary: ['a'] })
-  expect(strings(['a', '', 3, 'b'], 2)).toEqual(['a', '3'])
 })
 
 test('the mic track is "Me" under both its names', async () => {
@@ -58,4 +53,18 @@ test('notes anchors become transcript jumps', async () => {
     { label: '1:05:09', seconds: 3909 },
     { label: '7:03', seconds: 423 },
   ])
+})
+
+test('the app\'s live notes become the pane\'s sections', async () => {
+  const i = insightFromLive({
+    now: 'Budget for phase one', updated_at: '2026-10-23T01:20:00+02:00',
+    decisions: [{ text: 'Go-live on 15 Jan', t: 196 }, { text: '' }],
+    questions: [{ text: 'Who signs the SOW?' }],
+    actions: [{ owner: 'Me', task: 'Send the plan', t: 62 }, { owner: '', task: 'Book the room' }],
+  })
+  expect(i.summary).toEqual(['Budget for phase one'])
+  expect(i.highlights).toEqual(['Decided: Go-live on 15 Jan [03:16]', 'Open: Who signs the SOW?'])
+  expect(i.actions).toEqual(['Me — Send the plan [01:02]', '? — Book the room'])
+  expect(i.updatedAt).toBe(Date.parse('2026-10-23T01:20:00+02:00'))
+  expect(insightFromLive(null)).toEqual({ summary: [], highlights: [], actions: [], updatedAt: null })
 })

@@ -323,6 +323,15 @@ fn call_detail(dir: &Path) -> Value {
     v["path"] = json!(dir.display().to_string());
     v["notes_run"] = json!(crate::notes::status(dir));
     v["has_log"] = json!(dir.join(crate::notes::LOG).exists());
+    let profile = crate::ai::call_profile_id(dir);
+    v["live"] = json!({
+        "profile_error": profile.as_ref().err().map(|e| format!("{e:#}")),
+        "profile": profile.ok(),
+        "notes": crate::livenotes::read_notes(dir),
+        "answers": crate::livenotes::read_answers(dir),
+        "status": crate::livenotes::status(dir),
+        "prep": calls::prep(dir),
+    });
     v
 }
 
@@ -464,6 +473,7 @@ fn state() -> Value {
         "platform": std::env::consts::OS,
         "notes": crate::notes::readiness(),
         "languages": crate::config::Config::load().map(|c| c.languages).unwrap_or_default(),
+        "ai": crate::ai::summary(),
     })
 }
 
@@ -472,6 +482,11 @@ fn state() -> Value {
 /// The language the page picked for a recording (`languages: "en"`); none = the configured ones.
 fn languages(v: &Value) -> Option<Vec<String>> {
     v["languages"].as_str().filter(|l| !l.is_empty()).map(|l| vec![l.to_string()])
+}
+
+/// The AI profile the page picked for a recording or a run; none = the default / the call's own.
+fn profile(v: &Value) -> Option<String> {
+    v["profile"].as_str().filter(|p| !p.is_empty()).map(str::to_owned)
 }
 
 /// Run an action the page posted; true if the page should refresh.
@@ -501,7 +516,49 @@ pub fn handle(msg: &str) -> bool {
         }
         "write_notes" => {
             let Some(d) = call else { return false };
+            // Another profile for this run: it becomes the call's (`notes-run.json` records which
+            // profile and model wrote the minutes). Not while a run of this call is on.
+            if let Some(id) = profile(&v) {
+                if crate::notes::status(&d).is_some_and(|r| crate::notes::pending(&r)) {
+                    return true; // the page shows that run
+                }
+                if crate::ai::call_profile_id(&d).ok().as_deref() != Some(id.as_str()) {
+                    if let Err(e) = crate::ai::set_call_profile(&d, &id) {
+                        crate::notes::refuse(&d, &format!("{e:#}"));
+                        return true;
+                    }
+                }
+            }
             crate::notes::start_in_background(d);
+            true
+        }
+        "set_profile" => {
+            let (Some(d), Some(id)) = (call, profile(&v)) else { return false };
+            match crate::ai::set_call_profile(&d, &id) {
+                // While it records, the watcher applies it and tells the live notes itself (so
+                // no job starts on the old profile in between).
+                Ok(crate::ai::ProfileChange::Applied) => crate::livenotes::profile_changed(&d),
+                Ok(crate::ai::ProfileChange::Requested) => {}
+                Err(e) => crate::livenotes::report(&d, &format!("couldn't switch to {id}: {e:#}")),
+            }
+            true
+        }
+        "live_ask" => {
+            let Some(d) = call else { return false };
+            let text = v["text"].as_str().unwrap_or("");
+            match v["kind"].as_str().and_then(crate::livenotes::AskKind::parse) {
+                Some(kind) => {
+                    if let Err(e) = crate::livenotes::ask(&d, kind, text) {
+                        crate::livenotes::refused(&d, kind, text, &format!("{e:#}"));
+                    }
+                }
+                None => crate::livenotes::refused(&d, crate::livenotes::AskKind::Ask, text, "unknown kind of question"),
+            }
+            true
+        }
+        "live_pause" | "live_resume" => {
+            let Some(d) = call else { return false };
+            crate::livenotes::pause(&d, v["cmd"] == "live_pause");
             true
         }
         "show_log" => {
@@ -510,7 +567,7 @@ pub fn handle(msg: &str) -> bool {
             }
             false
         }
-        "record" => watch::arm(None, None, languages(&v)).is_ok(),
+        "record" => watch::arm(None, None, languages(&v), profile(&v)).is_ok(),
         "stop" => watch::stop().is_ok(),
         "schedule" | "unschedule" => {
             let Some(id) = v["id"].as_str() else { return false };
@@ -522,6 +579,7 @@ pub fn handle(msg: &str) -> bool {
                 .or_else(|| watch::agenda().into_iter().find(|m| m.id.as_deref() == Some(id)));
             meeting.is_some_and(|mut m| {
                 m.languages = languages(&v).unwrap_or_default();
+                m.ai_profile = profile(&v);
                 crate::schedule::add(m).is_ok()
             })
         }
@@ -535,7 +593,8 @@ pub fn handle(msg: &str) -> bool {
             let id = v["id"].as_str().unwrap_or("");
             let Some(mut m) = watch::agenda().into_iter().find(|m| m.id.as_deref() == Some(id)) else { return false };
             m.languages = languages(&v).unwrap_or_default();
-            if v["cmd"] == "join_meeting" { watch::join(m).is_ok() } else { watch::arm(m.subject.clone(), Some(m), None).is_ok() }
+            m.ai_profile = profile(&v);
+            if v["cmd"] == "join_meeting" { watch::join(m).is_ok() } else { watch::arm(m.subject.clone(), Some(m), None, None).is_ok() }
         }
         "open_url" => {
             if let Some(u) = v["url"].as_str().filter(|u| u.starts_with("https://")) {

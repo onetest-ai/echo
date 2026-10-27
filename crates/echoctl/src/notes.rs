@@ -1,28 +1,28 @@
 //! Notes without an open Claude Code session: the app runs Claude Code headless on a call
 //! (`claude -p "/echo:process-call <dir>"`), the same skill a session runs. The app still
-//! never writes notes itself; it only starts Claude Code when the user asks (`echoctl notes`,
-//! the window's Write notes button, the pane's buttons).
+//! never writes notes itself; it starts Claude Code when the user asks (`echoctl notes`, the
+//! window's Write notes button, the pane's buttons) or the pane asks after a call (`notes --auto`).
 //!
 //! - The plugin comes with the app (`Echo.app/Contents/Resources/plugin`, the repo's `plugin/`
 //!   in a dev build) and is loaded with `--plugin-dir`, so the run doesn't depend on where, or
 //!   whether, the user installed the plugin, and its skill matches the app's CLI.
-//! - Claude Code runs through the user's login shell, so the environment their own setup needs
-//!   (gateways, `ANTHROPIC_*`, Bedrock / Vertex credentials) is there; the model is
-//!   `config.notes_model` (`default` = Claude Code's own choice).
+//! - Claude Code starts through `ai::claude_command` with the call's AI profile: `system` = the
+//!   user's login shell and settings (gateways, `ANTHROPIC_*`, Bedrock / Vertex), model
+//!   `config.notes_model`; `local` / `claude` = their own config folder and model, the shell's
+//!   routing variables replaced.
 //! - Tools are limited to what the skill needs: reading the data folder, writing inside
 //!   `calls/`, and the Echo CLI. Transcripts and chat are other people's words, so the run gets
 //!   no web, no other shell commands and no files elsewhere.
-//! - `<call>/notes-run.json` holds the state (running / done / skipped / failed / needs_login);
-//!   `<call>/claude.log` a readable log of what Claude did.
-use crate::app::NoWindow;
+//! - One run per call (`notes-run.lock`); `<call>/notes-run.json` holds the state (queued /
+//!   running / done / skipped / failed / needs_login); `<call>/claude.log` a readable log of what
+//!   Claude did.
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use crate::{calls, config::Config, paths};
@@ -38,14 +38,22 @@ pub const HEADLESS: &str = "ECHOCTL_HEADLESS";
 
 #[derive(Serialize, Deserialize, Clone, Default, Debug)]
 pub struct Run {
-    /// running | done | skipped | failed | needs_login
+    /// queued | running | done | skipped | failed | needs_login
     pub state: String,
+    /// The AI profile the run uses (`ai.rs`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
     pub model: Option<String>,
     pub started_at: Option<DateTime<Local>>,
     pub finished_at: Option<DateTime<Local>>,
     /// Why it failed or was skipped, in words for the user.
     pub message: Option<String>,
+    /// The process that owns the run from its place to its final state (the app, or a `notes
+    /// --wait` CLI): it gone while `queued` / `running` = interrupted.
     pub pid: Option<u32>,
+    /// Claude Code, while it runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub child_pid: Option<u32>,
     pub session_id: Option<String>,
 }
 
@@ -56,12 +64,98 @@ pub fn headless() -> bool {
 
 pub fn status(dir: &Path) -> Option<Run> {
     let mut r: Run = serde_json::from_slice(&fs::read(dir.join(RUN)).ok()?).ok()?;
-    // A run whose process is gone (the app quit, a crash) didn't finish.
-    if r.state == "running" && !r.pid.is_some_and(crate::app::process_alive) {
-        r.state = "failed".into();
-        r.message = Some("The run stopped before it finished (Echo quit or Claude Code crashed).".into());
+    if !pending(&r) || r.pid.is_some_and(crate::app::process_alive) {
+        return Some(r);
+    }
+    // Its owner is gone (Echo quit or crashed, a CLI was stopped).
+    if r.child_pid.is_some_and(crate::app::process_alive) {
+        // Claude Code from that run is still going: it stays the call's only writer.
+        r.message = Some("Claude Code from a run Echo started before it stopped is still writing; wait for it to end.".into());
+        return Some(r);
+    }
+    r.message = Some(if r.state == "queued" {
+        "Echo stopped before the notes were written — click Write notes again.".into()
+    } else {
+        "The run stopped before it finished (Echo quit or Claude Code crashed).".into()
+    });
+    r.state = "failed".into();
+    // Its claim is freed once nobody holds the call's place, and under that place (a new run
+    // takes the place before it touches the claim).
+    if let Ok(Some(_place)) = crate::app::FileLock::try_take(&dir.join(PLACE)) {
+        release_claim(dir);
     }
     Some(r)
+}
+
+/// Waiting for its turn or running.
+pub(crate) fn pending(r: &Run) -> bool {
+    r.state == "queued" || r.state == "running"
+}
+
+/// The call's place: an OS lock on `<call>/notes-run.lock`, held by the run's owner from its start
+/// to its final state (released by the OS if that process dies; it moves with a renamed folder).
+const PLACE: &str = "notes-run.lock";
+
+/// Admit a run to the call (never waits): its place first, then — under it — the claim, then
+/// `queued`. Refused while another run holds the place, while Claude Code from an earlier run whose
+/// owner died is still writing, or while a session has the call; a refusal changes nothing.
+fn admit(dir: &Path) -> Result<crate::app::FileLock> {
+    let place = crate::app::FileLock::try_take(&dir.join(PLACE)).with_context(|| format!("opening {}", dir.join(PLACE).display()))?;
+    let Some(place) = place else { bail!("Echo is already writing the notes for this call") };
+    if let Some(r) = status(dir).filter(pending) {
+        if r.child_pid.is_some_and(crate::app::process_alive) {
+            bail!("Claude Code from an earlier run is still writing the notes for this call");
+        }
+    }
+    claim(dir)?;
+    save(dir, &Run { state: "queued".into(), pid: Some(std::process::id()), started_at: Some(Local::now()), message: Some("Starting…".into()), ..Default::default() });
+    Ok(place)
+}
+
+/// Claude Code children of minutes runs in this process, and whether the app is quitting. A child
+/// is started and registered under this lock, so once `shutdown` set `stopping` none is started,
+/// and every one started before is stopped.
+struct Children {
+    stopping: bool,
+    pids: Vec<u32>,
+}
+static CHILDREN: std::sync::Mutex<Children> = std::sync::Mutex::new(Children { stopping: false, pids: Vec::new() });
+
+/// Start a minutes run's Claude Code, unless the app is quitting.
+fn admit_child(start: impl FnOnce() -> Result<std::process::Child>) -> Result<std::process::Child> {
+    let mut c = CHILDREN.lock().unwrap_or_else(|e| e.into_inner());
+    if c.stopping {
+        bail!("Echo is quitting");
+    }
+    let child = start()?;
+    c.pids.push(child.id());
+    Ok(child)
+}
+
+fn quitting() -> bool {
+    CHILDREN.lock().unwrap_or_else(|e| e.into_inner()).stopping
+}
+
+/// The app is quitting: no new minutes run starts Claude Code, and those running are stopped (TERM
+/// to each group, KILL after 3 s), so none goes on writing on its own.
+pub fn shutdown() {
+    let pids: Vec<u32> = {
+        let mut c = CHILDREN.lock().unwrap_or_else(|e| e.into_inner());
+        c.stopping = true;
+        c.pids.clone()
+    };
+    let handles: Vec<_> = pids.into_iter().map(|p| std::thread::spawn(move || kill(p))).collect();
+    for h in handles {
+        let _ = h.join();
+    }
+}
+
+/// Our own claim (an Echo run's), released when the run doesn't finish.
+fn release_claim(dir: &Path) {
+    let marker = dir.join(calls::CLAIMED);
+    if fs::read_to_string(&marker).is_ok_and(|t| t.contains("echo notes")) {
+        let _ = fs::remove_file(marker);
+    }
 }
 
 fn save(dir: &Path, r: &Run) {
@@ -107,6 +201,9 @@ pub fn request(call: &str, wait: bool) -> Result<()> {
         println!("Echo is writing the notes with Claude Code. Log: {}", dir.join(LOG).display());
         return Ok(());
     }
+    // Run here, in this terminal: Ctrl-C stops Claude Code too (it runs in a session of its own),
+    // and the run ends as it does when Echo quits — its locks released once Claude Code is gone.
+    let _ = ctrlc::set_handler(shutdown);
     let dir = run(&dir)?;
     let r = status(&dir).unwrap_or_default();
     match r.state.as_str() {
@@ -117,6 +214,51 @@ pub fn request(call: &str, wait: bool) -> Result<()> {
     Ok(())
 }
 
+/// `echoctl notes <call> --auto --for <session>` (the terminal pane's automatic notes). The CLI
+/// checks the call is due (as `pending --for` lists them, and never tried before: a run that was
+/// skipped or failed is left to Write notes, not retried by every new session), takes the claim
+/// atomically (two sessions can't both start it) and hands the run to the app. Prints one JSON
+/// line: `{"requested": true|false, "reason": …}`.
+pub fn request_auto(call: &str, session: &Path) -> Result<()> {
+    let dir = calls::resolve_call(call)?;
+    let say = |requested: bool, reason: &str| println!("{}", json!({ "requested": requested, "reason": reason }));
+    let why_not = if headless() {
+        Some("inside a run Echo started")
+    } else if !Config::load()?.notes_allowed(session) {
+        Some("this session's folder doesn't write notes (`echoctl config --notes-in`)")
+    } else if dir.join(RUN).exists() {
+        Some("notes were already tried for this call (Write notes runs them again)")
+    } else if !calls::pending_calls().iter().any(|d| d == &dir) {
+        Some("not due for automatic notes (too short, too old, claimed or done)")
+    } else {
+        None
+    };
+    if let Some(why) = why_not {
+        say(false, why);
+        return Ok(());
+    }
+    let marker = dir.join(calls::CLAIMED);
+    match fs::OpenOptions::new().write(true).create_new(true).open(&marker) {
+        Ok(mut f) => writeln!(f, "{} echo notes", Local::now().to_rfc3339())?,
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            say(false, "another session has this call");
+            return Ok(());
+        }
+        Err(e) => return Err(e.into()),
+    }
+    let name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    if crate::watch::running_watcher().is_none() {
+        release_claim(&dir);
+        bail!("Echo isn't running — start it with `echoctl app start`");
+    }
+    if let Err(e) = paths::write_atomic(&paths::state_dir().join(format!("notes-{name}.request")), name.as_bytes()) {
+        release_claim(&dir);
+        return Err(e.into());
+    }
+    say(true, "Echo is writing the notes");
+    Ok(())
+}
+
 /// Start runs the CLI or the page asked for (`notes-<call>.request`); called by the app.
 pub fn handle_requests() {
     let Ok(rd) = fs::read_dir(paths::state_dir()) else { return };
@@ -124,17 +266,32 @@ pub fn handle_requests() {
         let name = e.file_name().to_string_lossy().into_owned();
         if let Some(call) = name.strip_prefix("notes-").and_then(|n| n.strip_suffix(".request")) {
             let _ = fs::remove_file(e.path());
-            if let Ok(dir) = calls::resolve_call(call) {
-                start_in_background(dir);
+            // By name, else by stamp (retitled since it was asked for).
+            match calls::resolve_call(call).ok().or_else(|| calls::by_stamp(&calls::stamp_of(Path::new(call)))) {
+                Some(dir) => start_in_background(dir),
+                None => eprintln!("notes: dropped the request for {call} — the call can't be found"),
             }
         }
     }
 }
 
-/// Run on a thread of the app; the outcome lands in `notes-run.json` and a notification.
+/// Say in `notes-run.json` why a run didn't start (the window shows it) and free an automatic
+/// claim — under the call's place, and only when no run holds it.
+pub fn refuse(dir: &Path, why: &str) {
+    let Ok(Some(_place)) = crate::app::FileLock::try_take(&dir.join(PLACE)) else { return };
+    if !status(dir).is_some_and(|r| pending(&r)) {
+        release_claim(dir);
+        save(dir, &Run { state: "failed".into(), message: Some(why.to_string()), finished_at: Some(Local::now()), ..Default::default() });
+    }
+}
+
+/// Run on a thread of the app; the outcome lands in `notes-run.json` and a notification. A run
+/// refused before it starts (no Claude Code, no plugin, …) releases an automatic claim and says
+/// why in `notes-run.json` too, unless another run of this call is on (its state stays).
 pub fn start_in_background(dir: PathBuf) {
     std::thread::spawn(move || {
         if let Err(e) = check(&dir) {
+            refuse(&dir, &format!("{e:#}"));
             crate::app::notify("Couldn't write notes", &format!("{e:#}"));
             return;
         }
@@ -171,8 +328,8 @@ fn check(dir: &Path) -> Result<()> {
     if dir.join(crate::transcribe_marker()).exists() || crate::watch::running_watcher().and_then(|w| w.recording).is_some_and(|r| Path::new(&r) == dir) {
         bail!("this call is still being recorded or transcribed");
     }
-    if status(dir).is_some_and(|r| r.state == "running") {
-        bail!("Claude Code is already writing the notes for this call");
+    if status(dir).is_some_and(|r| pending(&r)) {
+        bail!("Echo is already writing the notes for this call");
     }
     if crate::app::claude_bin().is_none() {
         bail!("Claude Code is not installed — get it at https://claude.com/claude-code");
@@ -183,55 +340,171 @@ fn check(dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Take the call for this run: a session working on it right now wins; an old claim, or one
-/// from an earlier run of ours, is taken over.
+/// Take the call for this run: a session working on it right now (its fresh claim, no notes yet)
+/// wins; an old claim, one from an earlier run of ours, or one for notes already written is taken
+/// over. A new claim is created exclusively, so a session claiming at the same moment isn't
+/// overwritten.
 fn claim(dir: &Path) -> Result<()> {
     let marker = dir.join(calls::CLAIMED);
-    if let Ok(m) = fs::metadata(&marker) {
-        let fresh = m.modified().ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age < CLAIM_STALE);
-        if fresh && !dir.join(RUN).exists() && !dir.join("notes.md").exists() {
-            bail!("a Claude Code session is writing the notes for this call right now");
-        }
+    let mine = format!("{} echo notes\n", Local::now().to_rfc3339());
+    match fs::OpenOptions::new().write(true).create_new(true).open(&marker) {
+        Ok(mut f) => return Ok(f.write_all(mine.as_bytes())?),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => return Err(e.into()),
     }
-    fs::write(&marker, format!("{} echo notes\n", Local::now().to_rfc3339()))?;
+    let fresh = fs::metadata(&marker).ok().and_then(|m| m.modified().ok()).and_then(|t| t.elapsed().ok()).is_some_and(|age| age < CLAIM_STALE);
+    let ours = fs::read_to_string(&marker).is_ok_and(|t| t.contains("echo notes"));
+    if fresh && !ours && !dir.join("notes.md").exists() {
+        bail!("a Claude Code session is writing the notes for this call right now");
+    }
+    fs::write(&marker, mine)?;
     Ok(())
 }
 
-/// The run itself (blocking). Errors before Claude Code starts are returned; everything after
-/// is recorded in `notes-run.json` and the log. Returns the call's folder afterwards (the run
-/// may have retitled it).
+/// The run itself (blocking). Refusals before it takes the call's place (another run, a
+/// session's claim, no plugin) are returned; from `queued` on, everything is recorded in
+/// `notes-run.json` and the log. Returns the call's folder afterwards (the run may have retitled it).
 pub fn run(dir: &Path) -> Result<PathBuf> {
     check(dir)?;
-    claim(dir)?;
-    let cfg = Config::load().unwrap_or_default();
-    let model = cfg.notes_model_arg();
-    let home = paths::home();
-    let cwd = cfg.notes_in.clone().filter(|d| d.is_dir()).unwrap_or_else(|| home.clone());
-    let claude = crate::app::claude_bin().ok_or_else(|| anyhow!("Claude Code is not installed"))?;
-    let plugin = plugin_dir().ok_or_else(|| anyhow!("the Echo plugin wasn't found"))?;
+    // Held until the run's final state and claim are settled (the run lets go of it only for the
+    // folder's final rename, after which nothing fails).
+    let mut place = Some(admit(dir)?);
+    let stamp = calls::stamp_of(dir);
+    let out = run_in_place(dir, &mut place).map_err(|e| {
+        // From `queued` on, every failure is recorded: the call never stays "already writing".
+        let now = calls::by_stamp(&stamp).unwrap_or_else(|| dir.to_path_buf());
+        let mut r = status(&now).unwrap_or_default();
+        if pending(&r) && r.pid == Some(std::process::id()) {
+            r.state = "failed".into();
+            r.message = Some(format!("{e:#}"));
+            r.finished_at = Some(Local::now());
+            save(&now, &r);
+            release_claim(&now);
+        }
+        e
+    });
+    drop(place);
+    out
+}
 
-    let mut log = fs::File::create(dir.join(LOG)).context("creating claude.log")?;
-    let mut r = Run { state: "running".into(), model: Some(cfg.notes_model_label()), started_at: Some(Local::now()), ..Default::default() };
+/// Something is being recorded or transcribed (any call): a local model waits for it.
+fn calls_busy() -> bool {
+    crate::watch::running_watcher().and_then(|w| w.recording).is_some()
+        || calls::all_calls().iter().any(|d| {
+            fs::read_to_string(d.join(crate::transcribe_marker()))
+                .ok()
+                .and_then(|t| t.split_whitespace().next().and_then(|p| p.parse::<u32>().ok()))
+                .is_some_and(crate::app::process_alive)
+        })
+}
+
+/// One look at the local model's turn: the lock, or why not yet.
+fn local_model_turn() -> Result<std::result::Result<crate::app::FileLock, &'static str>> {
+    if calls_busy() {
+        return Ok(Err("waits for the call to end"));
+    }
+    let path = crate::livenotes::local_lock_path();
+    let _ = fs::create_dir_all(paths::config_dir());
+    match crate::app::FileLock::try_take(&path).with_context(|| format!("opening {}", path.display()))? {
+        Some(lock) => Ok(Ok(lock)),
+        None => Ok(Err("waits for the model to finish another job")),
+    }
+}
+
+/// A gated profile (a local model, or Claude Code as configured, which may be one): wait until no
+/// call is recorded or transcribed, then for the local model's lock (held by this run until it
+/// ends). The reason is in `notes-run.json` and on stderr (`notes --wait`).
+fn wait_for_local_model(stamp: &str, dir: &Path, r: &mut Run, name: &str) -> Result<crate::app::FileLock> {
+    loop {
+        if quitting() {
+            bail!("Echo quit before the notes were written — click Write notes again");
+        }
+        let why = match local_model_turn()? {
+            Ok(lock) => return Ok(lock),
+            Err(why) => why,
+        };
+        let msg = format!("{name} {why}");
+        if r.message.as_deref() != Some(msg.as_str()) {
+            eprintln!("{msg}");
+            r.message = Some(msg);
+            // The folder may be retitled while it waits.
+            save(&calls::by_stamp(stamp).unwrap_or_else(|| dir.to_path_buf()), r);
+        }
+        std::thread::sleep(Duration::from_secs(5));
+    }
+}
+
+fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>) -> Result<PathBuf> {
+    let call_stamp = calls::stamp_of(dir);
+    let cfg = Config::load().unwrap_or_default();
+    let home = paths::home();
+    let plugin =plugin_dir().ok_or_else(|| anyhow!("the Echo plugin wasn't found"))?;
+    // The place is held by this process until the run ends (a dead holder = an interrupted run).
+    let mut r = Run { state: "queued".into(), pid: Some(std::process::id()), started_at: Some(Local::now()), ..Default::default() };
+    let fail = |r: &mut Run, msg: String| -> Result<PathBuf> {
+        r.state = "failed".into();
+        r.message = Some(msg);
+        r.finished_at = Some(Local::now());
+        save(dir, r);
+        release_claim(dir);
+        Ok(dir.to_path_buf())
+    };
+    // The call's profile: strict, never another one (`ai.rs`).
+    let profile = match crate::ai::for_call(dir) {
+        Ok(p) => p,
+        Err(e) => return fail(&mut r, format!("{e:#}")),
+    };
+    let model = profile.notes_model();
+    let label = format!("{} · {}", profile.name, model.as_deref().unwrap_or("Claude Code's default model"));
+    r.profile = Some(profile.id.clone());
+    r.model = Some(label.clone());
+    save(dir, &r);
+    let _lease = if profile.kind.gated() { Some(wait_for_local_model(&call_stamp, dir, &mut r, &profile.name)?) } else { None };
+    // Retitled while it waited: carry on in the folder as it is named now.
+    let moved = calls::by_stamp(&call_stamp).filter(|d| d != dir);
+    let dir: &Path = moved.as_deref().unwrap_or(dir);
+    let fail = |r: &mut Run, msg: String| -> Result<PathBuf> {
+        r.state = "failed".into();
+        r.message = Some(msg);
+        r.finished_at = Some(Local::now());
+        save(dir, r);
+        release_claim(dir);
+        Ok(dir.to_path_buf())
+    };
+    // `system` runs where it is set up (that folder's `.claude/settings.json` may route it), never
+    // elsewhere; the others load no project settings.
+    let cwd = if profile.kind == crate::ai::Kind::System {
+        match crate::ai::system_folder() {
+            Ok(d) => d,
+            Err(e) => return fail(&mut r, format!("{e:#}")),
+        }
+    } else {
+        cfg.notes_in.clone().filter(|d| d.is_dir()).unwrap_or_else(|| home.clone())
+    };
+
+    let mut log = match fs::File::create(dir.join(LOG)) {
+        Ok(f) => f,
+        Err(e) => return fail(&mut r, format!("couldn't create claude.log: {e}")),
+    };
+    r.state = "running".into();
+    r.message = None;
+    r.started_at = Some(Local::now());
     let started = Instant::now();
     let _ = writeln!(log, "{}  Echo starts Claude Code to write notes", stamp());
     let _ = writeln!(log, "          call:   {}", dir.display());
-    let _ = writeln!(log, "          model:  {}", cfg.notes_model_label());
+    let _ = writeln!(log, "          model:  {label}");
     let _ = writeln!(log, "          folder: {}", cwd.display());
     let _ = writeln!(log, "          plugin: {}", plugin.display());
 
-    let mut child = match command(&claude, &args(dir, &home, &plugin, model.as_deref()), &cwd) {
+    let mut child = match admit_child(|| crate::ai::claude_command(&profile, &args(dir, &home, &plugin, model.as_deref()), &cwd, false)) {
         Ok(c) => c,
         Err(e) => {
-            r.state = "failed".into();
-            r.message = Some(format!("couldn't start Claude Code: {e:#}"));
-            let _ = writeln!(log, "{}  {}", stamp(), r.message.as_deref().unwrap_or(""));
-            r.finished_at = Some(Local::now());
-            save(dir, &r);
-            let _ = fs::remove_file(dir.join(calls::CLAIMED));
-            return Ok(dir.to_path_buf());
+            let msg = format!("couldn't start Claude Code: {e:#}");
+            let _ = writeln!(log, "{}  {msg}", stamp());
+            return fail(&mut r, msg);
         }
     };
-    r.pid = Some(child.id());
+    r.child_pid = Some(child.id()); // `pid` stays this process: the owner of the run
     save(dir, &r);
 
     // stderr: kept whole in the log (sign-in errors and shell noise land here).
@@ -290,6 +563,11 @@ pub fn run(dir: &Path) -> Result<PathBuf> {
     }
     let status_code = child.wait().ok();
     done.store(true, std::sync::atomic::Ordering::SeqCst);
+    CHILDREN.lock().unwrap_or_else(|e| e.into_inner()).pids.retain(|p| *p != pid);
+    // The skill may have retitled the call (`echoctl title` renames its folder at once on macOS):
+    // finish in the folder as it is named now.
+    let renamed = calls::by_stamp(&call_stamp).filter(|d| d != dir);
+    let dir: &Path = renamed.as_deref().unwrap_or(dir);
     let err_text = stderr.and_then(|h| h.join().ok()).unwrap_or_default();
     for l in err_text.lines().filter(|l| !l.trim().is_empty()) {
         let _ = writeln!(log, "{}  stderr: {l}", stamp());
@@ -303,38 +581,18 @@ pub fn run(dir: &Path) -> Result<PathBuf> {
         .iter()
         .filter_map(|d| d["tool_name"].as_str().map(str::to_owned))
         .collect();
-    let all = format!("{seen}\n{err_text}\n{result_text}");
     r.finished_at = Some(Local::now());
-    if dir.join("notes.md").exists() && !is_error {
-        r.state = "done".into();
-    } else if needs_login(&all) {
-        r.state = "needs_login".into();
-        r.message = Some("Claude Code isn't signed in. Open Terminal, run claude, type /login, then click Try again.".into());
-    } else if model_rejected(is_error, &all) {
-        r.state = "failed".into();
-        r.message = Some(format!(
-            "Claude Code can't use the model \"{}\". Change it under menu → Claude Code → Notes model (\"default\" uses Claude Code's own setting).",
-            cfg.notes_model_label()
-        ));
-    } else if started.elapsed() >= TIMEOUT {
-        r.state = "failed".into();
-        r.message = Some(format!("stopped after {} minutes without finishing", TIMEOUT.as_secs() / 60));
-    } else if !refused.is_empty() {
-        r.state = "failed".into();
-        r.message = Some(format!("Claude Code was refused a tool it needed ({}); see the log", refused.join(", ")));
-    } else if !is_error {
-        // Claude finished but wrote no notes: the call was too short or thin (the skill's gate).
-        r.state = "skipped".into();
-        r.message = Some(first_line(&result_text).unwrap_or_else(|| "Claude Code wrote no notes for this call".into()));
-    } else {
-        r.state = "failed".into();
-        r.message = Some(
-            first_line(&result_text)
-                .or_else(|| first_line(&err_text))
-                .or_else(|| first_line(&seen))
-                .unwrap_or_else(|| format!("Claude Code exited with {}", status_code.and_then(|s| s.code()).map_or("a signal".into(), |c| c.to_string()))),
-        );
-    }
+    let ended = Ended {
+        wrote_notes: dir.join("notes.md").exists(),
+        is_error,
+        result_text: &result_text,
+        err_text: &err_text,
+        seen: &seen,
+        timed_out: started.elapsed() >= TIMEOUT,
+        refused: &refused,
+        exit: status_code.and_then(|s| s.code()),
+    };
+    conclude(&mut r, &profile, &ended, &label, &cfg.notes_model_label());
     let _ = writeln!(log, "{}  {} ({}s)", stamp(), match r.state.as_str() {
         "done" => "Notes written.".to_string(),
         s => format!("{s}: {}", r.message.as_deref().unwrap_or("")),
@@ -343,9 +601,12 @@ pub fn run(dir: &Path) -> Result<PathBuf> {
         // Leave the call to an open session or a retry.
         let _ = fs::remove_file(dir.join(calls::CLAIMED));
     }
+    drop(_lease); // the local model is free for the next job
     save(dir, &r);
-    // A title set during the run: Windows couldn't rename the folder while the log was open.
+    // A title set during the run: Windows couldn't rename the folder while the log (or the place)
+    // was open.
     drop(log);
+    drop(place.take());
     let dir = calls::rename_to_title(dir).unwrap_or_else(|_| dir.to_path_buf());
     // The minutes page (opt-in), under the call's final title.
     if r.state == "done" && cfg.minutes_page {
@@ -368,8 +629,70 @@ fn first_line(s: &str) -> Option<String> {
     s.lines().map(str::trim).find(|l| !l.is_empty()).map(|l| l.chars().take(300).collect())
 }
 
+/// How Claude Code left a minutes run.
+struct Ended<'a> {
+    wrote_notes: bool,
+    is_error: bool,
+    result_text: &'a str,
+    err_text: &'a str,
+    /// Its output that isn't stream JSON.
+    seen: &'a str,
+    timed_out: bool,
+    /// Tools it was refused.
+    refused: &'a [String],
+    /// Its exit code (None: a signal).
+    exit: Option<i32>,
+}
+
+/// The run's final state and message. A `claude` profile's cached sign-in check is dropped when a
+/// failed run says it isn't signed in.
+fn conclude(r: &mut Run, profile: &crate::ai::Profile, e: &Ended, label: &str, notes_model_label: &str) {
+    use crate::ai::Kind;
+    let all = format!("{}\n{}\n{}", e.seen, e.err_text, e.result_text);
+    let (state, message) = if e.wrote_notes && !e.is_error {
+        ("done", None)
+    } else if e.is_error && needs_login(&all) && profile.kind == Kind::Local {
+        // Its token is the profile's: /login in a terminal would only sign in the user's own Claude Code.
+        ("failed", Some(format!(
+            "{} refused the profile's token — set the right one: `echoctl ai remove {id}`, then `echoctl ai add-local {id} … --token …`",
+            profile.name,
+            id = profile.id
+        )))
+    } else if e.is_error && needs_login(&all) {
+        // Only a failed run: a skipped one's report may quote what was said ("not logged in").
+        ("needs_login", Some(if profile.kind == Kind::Claude {
+            crate::ai::forget_check(&profile.id);
+            format!("{} isn't signed in — menu → AI for calls → Sign in, then click Try again.", profile.name)
+        } else {
+            "Claude Code isn't signed in. Open Terminal, run claude, type /login, then click Try again.".into()
+        }))
+    } else if model_rejected(e.is_error, &all) {
+        ("failed", Some(if profile.kind == Kind::System {
+            format!("Claude Code can't use the model \"{notes_model_label}\". Change it under menu → Claude Code → Notes model (\"default\" uses Claude Code's own setting).")
+        } else {
+            format!("Claude Code can't use the model of {} ({label}) — `echoctl ai status`", profile.name)
+        }))
+    } else if e.timed_out {
+        ("failed", Some(format!("stopped after {} minutes without finishing", TIMEOUT.as_secs() / 60)))
+    } else if !e.refused.is_empty() {
+        ("failed", Some(format!("Claude Code was refused a tool it needed ({}); see the log", e.refused.join(", "))))
+    } else if !e.is_error {
+        // Claude finished but wrote no notes: the call was too short or thin (the skill's gate).
+        ("skipped", Some(first_line(e.result_text).unwrap_or_else(|| "Claude Code wrote no notes for this call".into())))
+    } else {
+        ("failed", Some(
+            first_line(e.result_text)
+                .or_else(|| first_line(e.err_text))
+                .or_else(|| first_line(e.seen))
+                .unwrap_or_else(|| format!("Claude Code exited with {}", e.exit.map_or("a signal".into(), |c| c.to_string()))),
+        ))
+    };
+    r.state = state.into();
+    r.message = message;
+}
+
 /// Claude Code's own words when it can't use the account.
-fn needs_login(text: &str) -> bool {
+pub(crate) fn needs_login(text: &str) -> bool {
     let t = text.to_lowercase();
     ["not logged in", "please run /login", "invalid api key", "oauth token has expired", "authentication_error", "credit balance is too low"]
         .iter()
@@ -442,44 +765,9 @@ fn args(dir: &Path, home: &Path, plugin: &Path, model: Option<&str>) -> Vec<Stri
     a
 }
 
-/// `claude` with those arguments: through the login shell on macOS / Linux, so the user's
-/// environment is there (a GUI app starts with almost none).
-fn command(claude: &Path, args: &[String], cwd: &Path) -> Result<std::process::Child> {
-    let mut c = if cfg!(unix) && std::env::var_os("ECHOCTL_NOTES_NO_SHELL").is_none() {
-        let shell = std::env::var("SHELL").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/bin/zsh".into());
-        let mut c = Command::new(shell);
-        // The Echo CLI first on PATH (the profile may reset PATH, so it's added after it ran).
-        c.args(["-l", "-i", "-c", "export PATH=\"$ECHOCTL_BIN_DIR:$PATH\"; exec \"$0\" \"$@\""]).arg(claude).args(args);
-        c
-    } else {
-        let mut c = Command::new(claude).no_window();
-        c.args(args);
-        c
-    };
-    c.current_dir(cwd)
-        .env(HEADLESS, "1")
-        .env("ECHOCTL_HOME", paths::home())
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(bin_dir) = exe.parent() {
-            let path = std::env::var_os("PATH").unwrap_or_default();
-            let joined = std::env::join_paths(std::iter::once(bin_dir.to_path_buf()).chain(std::env::split_paths(&path))).unwrap_or(path);
-            c.env("ECHOCTL_BIN_DIR", bin_dir).env("PATH", joined);
-        }
-        c.env("ECHOCTL_BIN", exe); // the plugin's CLI launcher uses this very binary
-    }
-    Ok(c.spawn()?)
-}
-
+/// Stop a run and what it started (its whole group; the run's thread reaps the leader).
 fn kill(pid: u32) {
-    #[cfg(unix)]
-    unsafe {
-        libc::kill(pid as i32, libc::SIGTERM);
-    }
-    #[cfg(windows)]
-    let _ = Command::new("taskkill").no_window().args(["/PID", &pid.to_string(), "/T", "/F"]).status();
+    crate::ai::stop_group(pid);
 }
 
 /// One stream-json event as log lines a person can follow.
@@ -543,6 +831,128 @@ fn describe(ev: &Value) -> Vec<String> {
 mod tests {
     use super::*;
 
+    /// The pid of a process that has just exited (any fixed number could be a live process).
+    fn dead_pid() -> u32 {
+        let mut c = std::process::Command::new(if cfg!(windows) { "cmd" } else { "true" });
+        if cfg!(windows) {
+            c.args(["/c", "exit"]);
+        }
+        let mut child = c.spawn().unwrap();
+        let pid = child.id();
+        child.wait().unwrap();
+        pid
+    }
+
+    #[test]
+    fn automatic_notes_only_where_and_when_they_are_due() {
+        let (_env, root) = crate::paths::testenv::folders("notes-auto");
+        let dir = root.join("home/calls/2026-10-23_120000-x");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("meta.json"), "{}").unwrap();
+        fs::create_dir_all(root.join("home/.echo")).unwrap();
+        Config { notes_in: Some(root.join("home")), ..Default::default() }.save().unwrap();
+        request_auto(&dir.display().to_string(), &root.join("elsewhere")).unwrap();
+        assert!(!dir.join(calls::CLAIMED).exists(), "a session outside notes_in claims nothing");
+        save(&dir, &Run { state: "skipped".into(), ..Default::default() });
+        request_auto(&dir.display().to_string(), &root.join("home")).unwrap();
+        assert!(!dir.join(calls::CLAIMED).exists(), "tried before: left to Write notes");
+    }
+
+    #[test]
+    fn one_run_per_call_and_interrupted_runs_free_it() {
+        let dir = std::env::temp_dir().join(format!("echo-place-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let place = admit(&dir).unwrap();
+        assert_eq!(status(&dir).unwrap().state, "queued", "admission says so at once");
+        assert!(admit(&dir).is_err(), "one run at a time (even in this process)");
+        // While the place is held, an "interrupted" look at the state frees nothing.
+        let gone = dead_pid();
+        save(&dir, &Run { state: "queued".into(), pid: Some(gone), ..Default::default() });
+        fs::write(dir.join(calls::CLAIMED), "2026-10-23T01:00:00+02:00 echo notes\n").unwrap();
+        assert_eq!(status(&dir).unwrap().state, "failed");
+        assert!(dir.join(calls::CLAIMED).exists(), "the place is held: a new run owns the claim");
+        drop(place); // its owner is gone: the OS releases the place
+        // A queued run whose owner died: interrupted, and its claim is released.
+        assert_eq!(status(&dir).unwrap().state, "failed");
+        assert!(!dir.join(calls::CLAIMED).exists());
+        // A session's claim is not ours to release.
+        save(&dir, &Run { state: "running".into(), pid: Some(gone), ..Default::default() });
+        fs::write(dir.join(calls::CLAIMED), "2026-10-23T01:00:00+02:00\n").unwrap();
+        assert_eq!(status(&dir).unwrap().state, "failed");
+        assert!(dir.join(calls::CLAIMED).exists());
+        // Claude Code from a run whose owner died still writes: still the only writer.
+        #[cfg(unix)]
+        {
+            let mut child = std::process::Command::new("sleep").arg("5").spawn().unwrap();
+            save(&dir, &Run { state: "running".into(), pid: Some(gone), child_pid: Some(child.id()), ..Default::default() });
+            assert_eq!(status(&dir).unwrap().state, "running");
+            assert!(admit(&dir).is_err());
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_refused_admission_touches_neither_claim_nor_state() {
+        let dir = std::env::temp_dir().join(format!("echo-admit-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let other = crate::app::FileLock::try_take(&dir.join(PLACE)).unwrap().unwrap(); // another run holds the place
+        fs::write(dir.join(calls::CLAIMED), "2026-10-23T01:00:00+02:00 echo notes\n").unwrap();
+        save(&dir, &Run { state: "running".into(), pid: Some(std::process::id()), ..Default::default() });
+        assert!(admit(&dir).is_err());
+        assert_eq!(fs::read_to_string(dir.join(calls::CLAIMED)).unwrap(), "2026-10-23T01:00:00+02:00 echo notes\n");
+        assert_eq!(status(&dir).unwrap().state, "running");
+        drop(other);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn quitting_stops_every_child_and_starts_none() {
+        let _q = QUITTING.lock().unwrap_or_else(|e| e.into_inner());
+        let child = admit_child(|| {
+            let mut c = std::process::Command::new("sleep");
+            c.arg("30");
+            crate::ai::detach(&mut c);
+            Ok(c.spawn()?)
+        })
+        .unwrap();
+        let pid = child.id();
+        let reaper = std::thread::spawn(move || {
+            let mut child = child;
+            child.wait().unwrap()
+        });
+        shutdown();
+        assert!(!reaper.join().unwrap().success(), "the running child was stopped");
+        let called = std::sync::atomic::AtomicBool::new(false);
+        assert!(admit_child(|| {
+            called.store(true, std::sync::atomic::Ordering::SeqCst);
+            bail!("started")
+        })
+        .is_err());
+        assert!(!called.load(std::sync::atomic::Ordering::SeqCst), "none starts after");
+        assert!(quitting());
+        CHILDREN.lock().unwrap().stopping = false; // other tests in this process
+        CHILDREN.lock().unwrap().pids.retain(|p| *p != pid);
+    }
+
+    #[test]
+    fn a_session_working_on_the_call_keeps_it() {
+        let dir = std::env::temp_dir().join(format!("echo-claim-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join(calls::CLAIMED), "2026-10-23T01:00:00+02:00\n").unwrap(); // a session's, fresh
+        save(&dir, &Run { state: "failed".into(), ..Default::default() }); // an earlier Echo run left its state
+        assert!(claim(&dir).is_err(), "Write notes doesn't overwrite a session's fresh claim");
+        fs::write(dir.join("notes.md"), "# done").unwrap();
+        claim(&dir).unwrap(); // its notes exist: a re-run may take over
+        assert!(fs::read_to_string(dir.join(calls::CLAIMED)).unwrap().contains("echo notes"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn permission_rule_paths_are_posix_with_a_lower_case_drive() {
         assert_eq!(rule_path(Path::new(r"C:\Users\User\Echo\calls")), "/c/Users/User/Echo/calls");
@@ -555,6 +965,57 @@ mod tests {
         assert!(needs_login("Not logged in · Please run /login"));
         assert!(needs_login("API Error: 401 {\"type\":\"error\",\"error\":{\"type\":\"authentication_error\"}}"));
         assert!(!needs_login("Notes written to notes.md"));
+    }
+
+    #[test]
+    fn minutes_on_a_local_model_wait_their_turn() {
+        let _q = QUITTING.lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = crate::paths::testenv::folders("notes-local-turn");
+        let d = root.join("home/calls/2026-10-23_220000-x");
+        fs::create_dir_all(&d).unwrap();
+        let busy = crate::app::FileLock::try_take(&crate::livenotes::local_lock_path()).unwrap().unwrap();
+        // Another job holds the model: the run says so, and goes on once it is free.
+        let d2 = d.clone();
+        let other = std::thread::spawn(move || {
+            let t = Instant::now();
+            while !status(&d2).is_some_and(|r| r.message.is_some_and(|m| m.contains("waits for the model"))) {
+                assert!(t.elapsed() < Duration::from_secs(20), "the run never said it waits");
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            drop(busy);
+        });
+        let mut r = Run::default();
+        let turn = wait_for_local_model(&calls::stamp_of(&d), &d, &mut r, "Qwen");
+        other.join().unwrap();
+        assert!(turn.is_ok());
+        assert_eq!(r.message.as_deref(), Some("Qwen waits for the model to finish another job"));
+    }
+
+    #[test]
+    fn a_run_is_judged_by_how_it_ended() {
+        use crate::ai::Kind;
+        let (_env, _root) = crate::paths::testenv::folders("notes-conclude");
+        let profile = |kind| crate::ai::Profile { id: "judged".into(), name: "J".into(), kind, base_url: None, token: None, live_model: None, notes_model: None, account: None };
+        let ended = |wrote_notes, is_error, result_text| Ended { wrote_notes, is_error, result_text, err_text: "", seen: "", timed_out: false, refused: &[], exit: Some(1) };
+        let judge = |kind, e: &Ended| {
+            let mut r = Run::default();
+            conclude(&mut r, &profile(kind), e, "J · m", "sonnet");
+            (r.state, r.message.unwrap_or_default())
+        };
+        assert_eq!(judge(Kind::System, &ended(true, false, "")).0, "done");
+        // A call skipped as too short, whose report quotes what was said, needs no sign-in.
+        let (state, message) = judge(Kind::Claude, &ended(false, false, "Too short for notes: they said they're not logged in."));
+        assert_eq!((state.as_str(), message.as_str()), ("skipped", "Too short for notes: they said they're not logged in."));
+        // A failed run that says so does.
+        assert_eq!(judge(Kind::System, &ended(false, true, "Not logged in · Please run /login")).0, "needs_login");
+        let (state, message) = judge(Kind::Claude, &ended(false, true, "Not logged in · Please run /login"));
+        assert_eq!(state, "needs_login");
+        assert!(message.contains("Sign in"), "{message}");
+        // A local server refusing the profile's token: the fix is the token, not /login.
+        let (state, message) = judge(Kind::Local, &ended(false, true, "Invalid API key · Please run /login"));
+        assert_eq!(state, "failed");
+        assert!(message.contains("token") && !message.contains("/login"), "{message}");
+        assert_eq!(judge(Kind::System, &ended(false, true, "")).1, "Claude Code exited with 1");
     }
 
     #[test]
@@ -589,4 +1050,7 @@ mod tests {
         c.notes_model = Some("claude-opus-5-5".into());
         assert_eq!(c.notes_model_arg().as_deref(), Some("claude-opus-5-5"));
     }
+
+    /// Tests that set or depend on `quitting()` (process-wide).
+    static QUITTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
 }

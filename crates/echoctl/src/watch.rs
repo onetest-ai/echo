@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 use anyhow::{bail, Result};
 use chrono::{DateTime, Local, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 
 use crate::apps::TargetApp;
 use crate::audio;
@@ -76,6 +76,9 @@ pub struct Armed {
     /// Languages pinned for this call; None = workspace list
     #[serde(default)]
     pub languages: Option<Vec<String>>,
+    /// The AI profile chosen for this call (`ai.rs`); None = the default at recording start
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_profile: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -166,7 +169,7 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
         let _ = fs::rename(file("events.jsonl"), file("events.1.jsonl"));
     }
     // Requests left by a previous run (a timed-out quit, say) must not act on this one.
-    for f in ["stop.request", "quit.request", "doctor.request", "open.request"] {
+    for f in ["stop.request", "quit.request", "doctor.request", "open.request", "ai-profile.request"] {
         let _ = fs::remove_file(file(f));
     }
     let detects_calls = audio::app_in_call(app).is_some();
@@ -232,7 +235,7 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
         if armed.is_none() && rec.is_none() {
             if let Some(m) = crate::schedule::due(now) {
                 let subject = m.subject.clone();
-                if arm(subject.clone(), Some(m), None).is_ok() {
+                if arm(subject.clone(), Some(m), None, None).is_ok() {
                     emit("scheduled_armed", json!({ "subject": subject }));
                     armed = read_json("armed.json");
                 }
@@ -307,7 +310,9 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
             if let Some(a) = &armed {
                 // No meeting given: attach the agenda meeting this call overlaps, if any.
                 let meeting = a.meeting.clone().or_else(|| crate::calendar::meeting_now(Utc::now()));
-                match Recording::start(app, a.title.as_deref(), meeting.as_ref(), a.languages.clone()) {
+                // The AI profile is pinned now: changing the default later never changes this call.
+                let ai_profile = Some(pinned_profile(a, meeting.as_ref()));
+                match Recording::start(app, a.title.as_deref(), meeting.as_ref(), a.languages.clone(), ai_profile) {
                     Ok(r) => {
                         // A scheduled meeting is done once its recording starts (stopping it
                         // must not re-arm it).
@@ -321,6 +326,7 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
                             find_call_people(&r.dir);
                         }
                         chat_alive = start_chat_capture(&r.dir, r.started_at, meeting.as_ref());
+                        crate::livenotes::recording_started(&r.dir);
                         emit("recording_started", json!({
                             "dir": r.dir.display().to_string(),
                             "title": a.title.clone().or_else(|| a.meeting.as_ref().and_then(|m| m.subject.clone())),
@@ -343,6 +349,12 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
                 let _ = fs::remove_file(file("armed.json"));
                 emit("arm_expired", json!({ "title": a.title }));
             }
+        }
+
+        // The window switched the AI profile of the call being recorded (this loop owns meta.json).
+        if let Some(req) = read_json::<Value>("ai-profile.request") {
+            let _ = fs::remove_file(file("ai-profile.request"));
+            apply_profile_request(rec.as_mut(), &req);
         }
 
         // 4. Stop: user request, or the call ended and no rejoin within the grace period.
@@ -384,13 +396,46 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
         stop_flag(&mut chat_alive);
         finish(r, "watch_stopped");
     }
+    crate::livenotes::shutdown();
+    crate::notes::shutdown();
     let _ = fs::remove_file(file("watch.json"));
     emit("watch_stopped", json!({}));
     Ok(())
 }
 
+/// The profile a recording pins (`ai::pin`): the arm's choice, its meeting's, the default.
+fn pinned_profile(a: &Armed, meeting: Option<&MeetingContext>) -> String {
+    crate::ai::pin(a.ai_profile.as_deref(), meeting)
+}
+
+/// Apply the window's mid-call profile switch to the recording (which owns `meta.json`). A call
+/// that stopped recording meanwhile gets it directly; a switch that can't be applied says why.
+fn apply_profile_request(rec: Option<&mut Recording>, req: &Value) {
+    let (Some(call), Some(id)) = (req["call"].as_str(), req["profile"].as_str()) else { return };
+    match rec {
+        Some(r) if r.dir.file_name().and_then(|n| n.to_str()) == Some(call) => match r.set_ai_profile(id) {
+            Ok(()) => crate::livenotes::profile_changed(&r.dir),
+            Err(e) => crate::livenotes::report(&r.dir, &format!("couldn't switch to {id}: {e:#}")),
+        },
+        _ => {
+            // By name, else by stamp (retitled since it was asked for).
+            let dir = crate::calls::resolve_call(call).ok().or_else(|| crate::calls::by_stamp(&crate::calls::stamp_of(std::path::Path::new(call))));
+            let Some(dir) = dir else {
+                eprintln!("ai: dropped the switch of {call} to {id} — the call can't be found");
+                return;
+            };
+            match crate::ai::set_call_profile(&dir, id) {
+                Ok(crate::ai::ProfileChange::Applied) => crate::livenotes::profile_changed(&dir),
+                Ok(crate::ai::ProfileChange::Requested) => {}
+                Err(e) => crate::livenotes::report(&dir, &format!("couldn't switch to {id}: {e:#}")),
+            }
+        }
+    }
+}
+
 fn finish(r: Recording, reason: &str) {
     let secs = r.t0.elapsed().as_secs();
+    crate::livenotes::recording_stopped(&r.dir);
     match r.finish(reason) {
         Ok((dir, _, live)) => {
             emit("recording_stopped", json!({
@@ -915,7 +960,7 @@ fn transcribe_in_background(dir: PathBuf) {
 /// write. True if it was unfinished.
 pub fn close_unfinished(dir: &std::path::Path) -> Result<bool> {
     let meta_path = dir.join("meta.json");
-    let mut meta: serde_json::Value = serde_json::from_slice(&fs::read(&meta_path)?)?;
+    let meta: serde_json::Value = serde_json::from_slice(&fs::read(&meta_path)?)?;
     if !meta["ended_at"].is_null() {
         return Ok(false);
     }
@@ -929,9 +974,14 @@ pub fn close_unfinished(dir: &std::path::Path) -> Result<bool> {
         .max()
         .map(DateTime::<Local>::from)
         .unwrap_or_else(Local::now);
-    meta["ended_at"] = json!(ended.to_rfc3339());
-    meta["stop_reason"] = json!("recovered");
-    fs::write(&meta_path, serde_json::to_vec_pretty(&meta)?)?;
+    // Under the call's meta lock, read again: the AI profile may have been changed meanwhile.
+    crate::calls::update_meta(dir, |m| {
+        if m["ended_at"].is_null() {
+            m["ended_at"] = json!(ended.to_rfc3339());
+            m["stop_reason"] = json!("recovered");
+        }
+        Ok(())
+    })?;
     Ok(true)
 }
 
@@ -988,12 +1038,15 @@ fn recover(app_started: DateTime<Utc>) {
 }
 
 /// `echoctl arm`: opt in to recording the current/next call.
-pub fn arm(title: Option<String>, meeting: Option<MeetingContext>, languages: Option<Vec<String>>) -> Result<()> {
+pub fn arm(title: Option<String>, meeting: Option<MeetingContext>, languages: Option<Vec<String>>, ai_profile: Option<String>) -> Result<()> {
     // A meeting scheduled or joined with a language (the window's Record ▾) carries it.
     let languages = languages.or_else(|| meeting.as_ref().map(|m| m.languages.clone()));
     let languages = languages.map(|l| l.into_iter().map(|x| x.trim().to_lowercase()).filter(|x| !x.is_empty()).collect::<Vec<_>>())
         .filter(|l| !l.is_empty());
-    write_json("armed.json", &Armed { armed_at: Utc::now(), title, meeting, languages })?;
+    // A scheduled or joined meeting carries its profile too. Never checked here: a profile that
+    // is gone (or unreadable settings) must not stop the recording — its AI jobs say why.
+    let ai_profile = ai_profile.or_else(|| meeting.as_ref().and_then(|m| m.ai_profile.clone())).filter(|p| !p.is_empty());
+    write_json("armed.json", &Armed { armed_at: Utc::now(), title, meeting, languages, ai_profile })?;
     match running_watcher() {
         Some(w) if w.in_call == Some(true) => println!("armed — call in progress, recording starts within a second"),
         Some(_) => println!("armed — recording starts when the call begins (expires in 15 min)"),
@@ -1045,7 +1098,7 @@ pub fn join(meeting: MeetingContext) -> Result<()> {
     // Not `cmd /C start`: cmd would split the URL at `&`.
     std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", &url]).status()?;
     let title = meeting.subject.clone();
-    arm(title, Some(meeting), None)
+    arm(title, Some(meeting), None, None)
 }
 
 pub fn write_agenda(meetings: &[MeetingContext]) -> Result<()> {
@@ -1109,6 +1162,50 @@ pub fn follow_events() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_profile_switch_for_a_call_not_recording_is_applied_or_says_why() {
+        let (_env, root) = crate::paths::testenv::folders("watch-switch");
+        crate::ai::Settings { default: None, live_notes: true, profiles: vec![] }.save().unwrap();
+        let d = root.join("home/calls/2026-10-23_230000-x");
+        fs::create_dir_all(&d).unwrap();
+        fs::write(d.join("meta.json"), r#"{"ai_profile":"!unreadable"}"#).unwrap();
+        let profile = |d: &std::path::Path| crate::ai::call_profile_id(d).unwrap();
+        apply_profile_request(None, &json!({"call": "2026-10-23_230000-x", "profile": "system"}));
+        assert_eq!(profile(&d), "system");
+        apply_profile_request(None, &json!({"call": "2026-10-23_230000-x", "profile": "gone"}));
+        assert_eq!(profile(&d), "system", "unchanged");
+        assert!(crate::livenotes::status(&d)["error"].as_str().unwrap().contains("couldn't switch to gone"));
+        // Retitled since it was asked for: found by its stamp.
+        let renamed = root.join("home/calls/2026-10-23_230000-retitled");
+        fs::rename(&d, &renamed).unwrap();
+        fs::write(renamed.join("meta.json"), r#"{"ai_profile":"!unreadable"}"#).unwrap();
+        apply_profile_request(None, &json!({"call": "2026-10-23_230000-x", "profile": "system"}));
+        assert_eq!(profile(&renamed), "system");
+    }
+
+    #[test]
+    fn a_profile_problem_never_stops_a_recording() {
+        let (_env, root) = crate::paths::testenv::folders("watch-arm");
+        fs::create_dir_all(root.join("home/.echo")).unwrap();
+        let meeting = MeetingContext { subject: Some("Sync".into()), ai_profile: Some("gone".into()), ..Default::default() };
+        arm(None, Some(meeting.clone()), None, None).unwrap();
+        let a: Armed = read_json("armed.json").unwrap();
+        assert_eq!(a.ai_profile.as_deref(), Some("gone"), "pinned as chosen; its AI jobs say it's gone");
+        // Unreadable AI settings: armed all the same.
+        fs::write(root.join("config/ai.json"), "{ nope").unwrap();
+        arm(None, None, None, None).unwrap();
+        let a: Armed = read_json("armed.json").unwrap();
+        assert_eq!(pinned_profile(&a, None), crate::ai::UNPINNED);
+        // Explicit beats the meeting, which beats the default.
+        fs::remove_file(root.join("config/ai.json")).unwrap();
+        let mut a = a;
+        assert_eq!(pinned_profile(&a, Some(&meeting)), "gone");
+        a.ai_profile = Some("chosen".into());
+        assert_eq!(pinned_profile(&a, Some(&meeting)), "chosen");
+        a.ai_profile = None;
+        assert_eq!(pinned_profile(&a, None), crate::ai::SYSTEM);
+    }
 
     #[test]
     fn last_call_left_skips_dropouts() {

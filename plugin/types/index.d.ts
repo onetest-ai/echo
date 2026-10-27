@@ -24,6 +24,8 @@ export type LiveView = {
   /** ms since epoch */
   startedAt: number | null
   phase: 'idle' | 'recording' | 'transcribing' | 'writing-notes' | 'done'
+  /** what happened to the notes, in words (queued: why, failed: why, not requested: why) */
+  notesNote?: string | null
   /** set when the notes turn was asked for */
   notesRequested: boolean
   lines: LiveLine[]
@@ -31,16 +33,24 @@ export type LiveView = {
   chat: ChatLine[]
 }
 
+/** The live notes the app writes during a call (`<call>/live-notes.json`), as the pane shows them. */
 export type Insight = {
   summary: string[]
   highlights: string[]
   actions: string[]
-  /** transcript chars covered by this insight */
-  coveredChars: number
+  /** answers in `live-asks.jsonl` so far (a new one ends "thinking") */
+  answers: number
   updatedAt: number | null
   /** answer to a live quick action ("What did I miss?", "Suggest a question") */
   answer: { title: string; text: string } | null
   asking: 'missed' | 'question' | null
+  /** when the quick question was sent (no answer within 3 min → given up) */
+  askedAt?: number | null
+  /** live notes are off in the app (menu → AI for calls) */
+  off: boolean
+  /** the app's live-notes state for the call: updating, failed, … (`live-state.json`) */
+  state: string | null
+  error: string | null
 }
 
 /** One recorded call in the pane's call browser. */

@@ -105,3 +105,66 @@ pub fn models_dir() -> PathBuf {
 pub fn legacy_models_dir() -> PathBuf {
     state_dir().join("models")
 }
+
+/// Replace a file in one step (a temporary file of its own beside it, then a rename), so a reader
+/// never sees it half written and two writers never share a temporary file.
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static N: AtomicU64 = AtomicU64::new(0);
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let tmp = path.with_file_name(format!(".{name}.{}.{}.tmp", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+    if let Err(e) = f.write_all(bytes) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    drop(f);
+    std::fs::rename(&tmp, path).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })
+}
+
+/// Tests that point the data folder and the config dir at temporary folders take this first, so
+/// they don't move each other's folders (the variables are process-wide).
+#[cfg(test)]
+pub mod testenv {
+    use std::path::PathBuf;
+    use std::sync::{Mutex, MutexGuard};
+
+    static LOCK: Mutex<()> = Mutex::new(());
+
+    /// Held by a test: on drop the variables are restored and the folder removed.
+    pub struct Env {
+        _lock: MutexGuard<'static, ()>,
+        root: PathBuf,
+        before: [(&'static str, Option<std::ffi::OsString>); 2],
+    }
+
+    impl Drop for Env {
+        fn drop(&mut self) {
+            for (k, v) in &self.before {
+                match v {
+                    Some(v) => std::env::set_var(k, v),
+                    None => std::env::remove_var(k),
+                }
+            }
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    /// A fresh `<tmp>/echo-test-<name>-<pid>` with `home/` (ECHOCTL_HOME) and `config/`
+    /// (ECHOCTL_CONFIG_DIR), until the returned guard drops.
+    pub fn folders(name: &str) -> (Env, PathBuf) {
+        let lock = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        crate::livenotes::forget_all();
+        let root = std::env::temp_dir().join(format!("echo-test-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("home/calls")).unwrap();
+        std::fs::create_dir_all(root.join("config")).unwrap();
+        let before = ["ECHOCTL_HOME", "ECHOCTL_CONFIG_DIR"].map(|k| (k, std::env::var_os(k)));
+        std::env::set_var("ECHOCTL_HOME", root.join("home"));
+        std::env::set_var("ECHOCTL_CONFIG_DIR", root.join("config"));
+        (Env { _lock: lock, root: root.clone(), before }, root)
+    }
+}

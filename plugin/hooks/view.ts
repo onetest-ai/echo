@@ -40,10 +40,6 @@ export function speakerLabel(l: LiveLine): string {
   return isMe(l) ? 'Me' : l.name || 'Remote'
 }
 
-export function transcriptText(lines: LiveLine[]): string {
-  return lines.map(l => `${speakerLabel(l)}: ${l.text}`).join('\n')
-}
-
 /** Rows a line takes when wrapped to `width` columns. */
 export function wrappedRows(text: string, width: number): number {
   return Math.max(1, Math.ceil(text.length / Math.max(10, width)))
@@ -62,18 +58,6 @@ export function tailThatFits(lines: LiveLine[], rows: number, width: number): Li
     out.unshift(l)
   }
   return out
-}
-
-/** Pull the JSON object out of a model reply (it may be fenced or chatty). */
-export function extractJson(text: string): unknown {
-  const start = text.indexOf('{')
-  const end = text.lastIndexOf('}')
-  if (start < 0 || end <= start) throw new Error('no JSON object in reply')
-  return JSON.parse(text.slice(start, end + 1))
-}
-
-export function strings(x: unknown, max: number): string[] {
-  return Array.isArray(x) ? x.map(String).filter(s => s.trim() !== '').slice(0, max) : []
 }
 
 /** "2026-10-09_183453-lumen-freight-kickoff" → its timestamp label and fallback title. */
@@ -141,4 +125,23 @@ export function actionsMarkdown(json: string): string {
   return items
     .map(a => `- [ ] **${a.owner ?? 'unassigned'}** — ${a.task ?? ''}${a.due ? ` _(due ${a.due})_` : ''}${a.confidence === 'low' ? ' _(uncertain)_' : ''}`)
     .join('\n')
+}
+
+const mmss = (t: unknown): string => (typeof t === 'number' ? ` [${clock(t)}]` : '')
+
+/** The app's live notes (`live-notes.json`) → the pane's Summary / Highlights / Action items. */
+export function insightFromLive(notes: unknown): { summary: string[]; highlights: string[]; actions: string[]; updatedAt: number | null } {
+  const n = (notes ?? {}) as Record<string, unknown>
+  const list = (k: string) => (Array.isArray(n[k]) ? (n[k] as Record<string, unknown>[]) : [])
+  const text = (x: Record<string, unknown>, k = 'text') => (typeof x[k] === 'string' ? (x[k] as string) : '')
+  const updated = typeof n.updated_at === 'string' ? Date.parse(n.updated_at) : NaN
+  return {
+    summary: typeof n.now === 'string' && n.now ? [n.now] : [],
+    highlights: [
+      ...list('decisions').filter(x => text(x)).map(x => `Decided: ${text(x)}${mmss(x.t)}`),
+      ...list('questions').filter(x => text(x)).map(x => `Open: ${text(x)}${mmss(x.t)}`),
+    ],
+    actions: list('actions').filter(x => text(x, 'task')).map(x => `${text(x, 'owner') || '?'} — ${text(x, 'task')}${mmss(x.t)}`),
+    updatedAt: Number.isNaN(updated) ? null : updated,
+  }
 }

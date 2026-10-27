@@ -27,6 +27,11 @@ const S = {
   confirmDelete: false,
   lightbox: null,
   error: null,
+  liveDraft: '', // the question being typed in the Live tab (kept across refreshes)
+  recordProfile: null, // the AI profile picked for the next recording (null = the default)
+  notesProfile: null, // {call, id}: the AI profile picked for Write notes
+  prepOpen: {}, // call → the "Last time" card's open state, once the user toggled it
+  autoTab: null, // the call whose tab was last chosen for the user (Live while it records)
 }
 
 // ── formatting ─────────────────────────────────────────────────────────────────────────────
@@ -303,7 +308,13 @@ async function loadAgenda() {
   try { S.agenda = await get('api/agenda') } catch { S.agenda = [] }
 }
 async function loadCall(name) {
-  try { S.call = await get('api/call/' + encodeURIComponent(name)) } catch (e) { S.call = { error: String(e) } }
+  try { S.call = await get('api/call/' + encodeURIComponent(name)) } catch (e) {
+    // Retitled meanwhile (the notes run renames the folder): the same call keeps its stamp.
+    const stamp = name.slice(0, 17)
+    const moved = (S.calls || []).find((c) => c.name !== name && c.name.slice(0, 17) === stamp)
+    if (moved && S.selected === name) { S.selected = moved.name; history.replaceState(null, '', `#call/${moved.name}/${S.tab}`); return loadCall(moved.name) }
+    S.call = { error: String(e) }
+  }
 }
 
 // ── routing: #calls, #call/<name>/<tab>, #today ────────────────────────────────────────────
@@ -338,7 +349,30 @@ function langChoices() {
   const cur = recordLang()
   return { configured, opts, cur: cur === '' || opts.includes(cur) ? cur : 'en' }
 }
-/** A record button with the language picker on its right (a native select over the caret). */
+// ── AI profiles: which model (and account) writes a call's live notes and minutes ──────────
+const ai = () => (S.state && S.state.ai && S.state.ai.profiles) ? S.state.ai : { profiles: [], default: null, live_notes: false, error: S.state && S.state.ai && S.state.ai.error }
+const profileOf = (id) => ai().profiles.find((p) => p.id === id)
+const profileName = (id) => { const p = profileOf(id); return p ? p.name : (id || '') }
+/** Where a profile's requests go, in words. */
+const profileWhere = (p) => !p ? '' : p.kind === 'local' ? (p.host ? `at ${p.host}` : 'on this computer') : p.kind === 'claude' ? `with your Claude account${p.account ? ` (${p.account})` : ''}` : 'as Claude Code is set up'
+/** The profile shown for the next recording: the one picked here, else the default. */
+function recordProfile() { const p = S.recordProfile; return p && profileOf(p) ? p : ai().default }
+/** What a recording is sent with: only a profile picked here (else the app pins its default when
+ *  the recording starts, and a broken AI setting never stops it). */
+function pickedProfile() { const p = S.recordProfile; S.recordProfile = null; return p && profileOf(p) ? p : undefined }
+function profileOptions(cur) {
+  return ai().profiles.map((p) => `<option value="${esc(p.id)}"${p.id === cur ? ' selected' : ''}>${esc(p.name)}</option>`).join('')
+}
+const CARET = '<svg viewBox="0 0 10 6" width="8" height="5" aria-hidden="true"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>'
+/** A compact native select over a label (as the language picker): `data-<attr>`. */
+function profilePick(attr, cur, cls = 'btn', title = 'Model for this call') {
+  if (ai().profiles.length < 2) return ''
+  const short = profileName(cur)
+  return `<label class="${cls} split-lang pick" title="${esc(title)}: ${esc(short)}"><span>${esc(short.length > 14 ? short.slice(0, 13) + '…' : short)}</span>${CARET}<select ${attr} aria-label="${esc(title)}">${profileOptions(cur)}</select></label>`
+}
+
+/** A record button with the language picker on its right (a native select over the caret), and
+ *  the AI profile picker when there is more than one. */
 function recordButton(attrs, label, primary = true) {
   const { configured, opts, cur } = langChoices()
   const cls = primary ? 'btn primary' : 'btn'
@@ -346,7 +380,7 @@ function recordButton(attrs, label, primary = true) {
   const options = opts.map((c) => `<option value="${esc(c)}"${c === cur ? ' selected' : ''}>${esc(langName(c))}</option>`).join('')
     + `<option value=""${cur === '' ? ' selected' : ''}>${esc(auto)}</option>`
   const title = cur ? `Transcribed as ${langName(cur)}` : 'Echo detects the language'
-  return `<span class="split"><button class="${cls} split-main" ${attrs}>${esc(label)}</button><label class="${cls} split-lang" title="${esc(title)}"><span>${cur ? esc(cur.toUpperCase()) : 'Auto'}</span><svg viewBox="0 0 10 6" width="8" height="5" aria-hidden="true"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg><select data-reclang aria-label="Language of the call">${options}</select></label></span>`
+  return `<span class="split"><button class="${cls} split-main" ${attrs}>${esc(label)}</button><label class="${cls} split-lang" title="${esc(title)}"><span>${cur ? esc(cur.toUpperCase()) : 'Auto'}</span>${CARET}<select data-reclang aria-label="Language of the call">${options}</select></label>${profilePick('data-recprofile', recordProfile(), cls, 'Model for live notes and minutes')}</span>`
 }
 
 // ── views ──────────────────────────────────────────────────────────────────────────────────
@@ -422,13 +456,19 @@ function doc() {
   const chat = Array.isArray(c.chat) ? c.chat : []
   const frames = Array.isArray(c.frames) ? c.frames : []
   const actions = Array.isArray(c.actions) ? c.actions : null
+  const live = hasLive(c)
   const tabs = [
+    live ? ['live', 'Live', ''] : null,
     ['notes', 'Notes', ''],
     ['transcript', 'Transcript', ''],
     chat.length ? ['chat', 'Chat', chat.length] : null,
     frames.length ? ['screens', 'Screens', frames.length] : null,
     ['actions', 'Actions', actions ? actions.length : ''],
   ].filter(Boolean)
+  // While a call records (or is transcribed), open it on Live once; once its minutes are written,
+  // on Notes once. The user's own choice stays.
+  if (live && S.autoTab !== c.name && (c.status === 'recording' || c.status === 'transcribing')) { S.autoTab = c.name; S.tab = 'live' }
+  if (S.autoTab === c.name && S.tab === 'live' && c.notes && c.notes_run && c.notes_run.state === 'done') { S.autoTab = 'done:' + c.name; S.tab = 'notes' }
   if (!tabs.some((t) => t[0] === S.tab)) S.tab = 'notes'
   const people = c.people && c.people.length ? `<span class="people">${esc(c.people.slice(0, 6).join(', '))}${c.people.length > 6 ? ` and ${c.people.length - 6} more` : ''}</span>` : ''
   return `<header class="doc-head">
@@ -452,29 +492,35 @@ function confirmBox(c) {
     <button class="btn" data-cmd="cancel-delete">Keep</button><button class="btn primary" style="background:var(--danger);border-color:var(--danger)" data-cmd="delete">Delete</button></div>`
 }
 
+/** Transcript turns: consecutive lines of one speaker joined; `q` highlights, `jump` (seconds)
+ *  marks the turn to scroll to. */
+function turnsHtml(segs, q, jump) {
+  const turns = []
+  for (const s of segs) {
+    const last = turns[turns.length - 1]
+    if (last && last.who === speaker(s) && s.start - last.end < 8) { last.text += ' ' + s.text; last.end = s.end }
+    else turns.push({ who: speaker(s), me: speaker(s) === 'Me', spk: s.speaker_id, start: s.start, end: s.end, lang: s.lang, text: s.text })
+  }
+  const jumpIdx = jump == null ? -1 : Math.max(0, turns.findIndex((t) => t.end >= jump - 2))
+  return `<div class="transcript">${turns.map((t, i) => {
+    const hit = (q && t.text.toLowerCase().includes(q)) || i === jumpIdx
+    // Detected remote speakers each get a color of their own (speakers.rs numbers them).
+    const spk = !t.me && t.spk ? ` spk${((t.spk - 1) % 6) + 1}` : ''
+    return `<div class="turn ${t.me ? 'me' : 'remote'}${spk}${hit ? ' hit' : ''}" ${i === jumpIdx ? 'id="jump"' : ''}>
+      <time>${clock(t.start)}</time>
+      <div><div class="who">${esc(t.who)}${t.lang ? `<span class="lang">${esc(t.lang)}</span>` : ''}</div><p>${esc(t.text)}</p></div></div>`
+  }).join('')}</div>`
+}
+
 function tabBody(c, segs, chat, frames, actions) {
   if (S.tab === 'transcript') {
     if (!segs.length) return c.status === 'recording'
       ? `<p style="color:var(--text-3)">Listening. The live transcript appears here as people speak.</p>`
       : `<p style="color:var(--text-3)">${c.status === 'transcribing' ? 'Transcribing on this computer. This takes about a quarter of the call length.' : 'No transcript for this call.'}</p>`
-    const q = S.find.trim().toLowerCase()
-    const turns = []
-    for (const s of segs) {
-      const last = turns[turns.length - 1]
-      if (last && last.who === speaker(s) && s.start - last.end < 8) { last.text += ' ' + s.text; last.end = s.end }
-      else turns.push({ who: speaker(s), me: speaker(s) === 'Me', spk: s.speaker_id, start: s.start, end: s.end, lang: s.lang, text: s.text })
-    }
-    const jumpIdx = S.jump == null ? -1 : Math.max(0, turns.findIndex((t) => t.end >= S.jump - 2))
     return `<div class="from-bar"><input class="search" id="find" placeholder="Find in transcript" value="${esc(S.find)}" style="max-width:280px" aria-label="Find in transcript"></div>
-      <div class="transcript">${turns.map((t, i) => {
-        const hit = (q && t.text.toLowerCase().includes(q)) || i === jumpIdx
-        // Detected remote speakers each get a color of their own (speakers.rs numbers them).
-        const spk = !t.me && t.spk ? ` spk${((t.spk - 1) % 6) + 1}` : ''
-        return `<div class="turn ${t.me ? 'me' : 'remote'}${spk}${hit ? ' hit' : ''}" ${i === jumpIdx ? 'id="jump"' : ''}>
-          <time>${clock(t.start)}</time>
-          <div><div class="who">${esc(t.who)}${t.lang ? `<span class="lang">${esc(t.lang)}</span>` : ''}</div><p>${esc(t.text)}</p></div></div>`
-      }).join('')}</div>`
+      ${turnsHtml(segs, S.find.trim().toLowerCase(), S.jump)}`
   }
+  if (S.tab === 'live') return liveTab(c, segs)
   if (S.tab === 'chat') {
     return `<div class="chat">${chat.map((m) => `<article class="msg"><header><b>${esc(m.from)}</b><time>${m.t == null ? '' : m.t < 0 ? 'before the call' : clock(m.t)}</time></header>
       <p>${esc(m.text)}</p>${m.files && m.files.length ? `<div class="files">${esc(m.files.join(', '))}</div>` : ''}</article>`).join('')}</div>`
@@ -500,7 +546,7 @@ function tabBody(c, segs, chat, frames, actions) {
   }
   // notes
   if (c.notes) return `<article class="doc">${markdown(c.notes, { call: c.name })}</article>`
-  if (c.status === 'recording') return `<p style="color:var(--text-3)">Notes are written after the call. Follow it live in the Transcript tab.</p>`
+  if (c.status === 'recording') return `<p style="color:var(--text-3)">Notes are written after the call. Follow it live in the ${hasLive(c) ? 'Live' : 'Transcript'} tab.</p>`
   return claudeHint(c, 'No notes yet', c.status === 'transcribing' ? 'Transcribing now. Notes come after that.' : 'The transcript is ready.')
 }
 
@@ -513,8 +559,11 @@ function claudeHint(c, heading, lead) {
   const log = c.has_log ? '<button class="btn ghost" data-cmd="show-log">Show log</button>' : ''
   const box = (h, p, buttons, busy) => `<div class="empty" style="height:auto;padding:40px 0"><div>${mark(busy ? 'busy' : '')}<h3>${esc(h)}</h3>
     ${p}${buttons ? `<div class="notes-actions">${buttons}</div>` : ''}</div></div>`
+  if (run && run.state === 'queued') {
+    return box('Notes are waiting their turn', `<p>${esc(run.message || 'They start as soon as the model is free.')}</p><p class="alt">With <b>${esc(run.model || '')}</b>. You can close this window.</p>`, '', true)
+  }
   if (run && run.state === 'running') {
-    return box('Writing notes…', `<p>Claude Code is writing the notes and action items with <b>${esc(run.model || n.model || 'sonnet')}</b>. It takes a minute or two; you can close this window.</p>`, log, true)
+    return box('Writing notes…', `<p>Claude Code is writing the notes and action items with <b>${esc(run.model || n.model || 'sonnet')}</b>. It takes a few minutes; you can close this window.</p>`, log, true)
   }
   if (c.status === 'recording' || c.status === 'transcribing') return box(heading, `<p>${esc(lead)}</p>`, '')
   const why = {
@@ -531,8 +580,136 @@ function claudeHint(c, heading, lead) {
     return box(heading, `<p>${esc(lead)}</p><p>Connect Claude Code first: menu → Claude Code → Connect Claude Code.</p>`, log)
   }
   const label = why && run.state !== 'skipped' ? 'Try again' : 'Write notes'
-  return box(heading, `<p>${esc(lead)}</p><p class="alt">Claude Code writes them on this computer with <b>${esc(n.model || 'sonnet')}</b> (menu → Claude Code → Notes model).</p>`,
-    `<button class="btn primary" data-cmd="write-notes">${label}</button>${log}`) + session
+  // The call's own profile; none when it can't be read (the run would fail: say why, not the default).
+  const live = c.live || {}, picked = S.notesProfile && S.notesProfile.call === c.name
+  const pid = picked ? S.notesProfile.id : (live.profile || (live.profile_error ? '' : ai().default))
+  const p = profileOf(pid)
+  const model = p && p.notes_model ? p.notes_model : (n.model || 'sonnet')
+  const where = ai().error ? `The AI settings can't be read: ${esc(ai().error)}`
+    : !p && !picked && live.profile_error ? `This call's model can't be read: ${esc(live.profile_error)}`
+    : !p ? (pid === '!unreadable' ? 'No model could be chosen when this call started — pick one.' : `The model this call was set to (${esc(pid || '?')}) no longer exists — pick another.`)
+    : p.kind !== 'system'
+      ? `Claude Code writes them with <b>${esc(p.name)}</b> (${esc(model)}), ${esc(profileWhere(p))}.`
+      : `Claude Code writes them with <b>${esc(n.model || 'sonnet')}</b>, as it is set up (menu → Claude Code → Notes model).`
+  const pick = ai().profiles.length > 1 || (ai().profiles.length && !p) ? `<label class="notes-pick">Model <select data-notesprofile aria-label="Model for these notes">${p ? '' : '<option value="" selected>Choose…</option>'}${profileOptions(pid)}</select></label>` : ''
+  return box(heading, `<p>${esc(lead)}</p><p class="alt">${where}</p>`,
+    `${pick}<button class="btn primary" data-cmd="write-notes">${label}</button>${log}`) + session
+}
+
+// ── Live tab: live notes, questions, last time (written by the app, `livenotes.rs`) ────────
+/** A call has a Live tab when it has live notes or answers, or while it records or is transcribed with live notes on
+ * (or the AI settings unreadable). */
+function hasLive(c) {
+  const l = c.live || {}, st = l.status || {}
+  if (l.notes || (l.answers && l.answers.length)) return true // what was written stays readable
+  return (!!st.enabled || !!st.settings_error) && (c.status === 'recording' || c.status === 'transcribing')
+}
+
+const LIVE_STATE = {
+  waiting: 'Waiting for enough to summarise',
+  updating: 'Updating…',
+  updated: 'Updated',
+  failed: 'The last update failed',
+  busy: 'Waiting for the model to finish another job',
+  paused: 'Paused',
+  ended: 'The call ended',
+}
+
+function ago(iso) {
+  if (!iso) return ''
+  const s = Math.max(0, Math.round((Date.now() - new Date(iso)) / 1000))
+  return s < 60 ? `${s} s ago` : `${Math.round(s / 60)} min ago`
+}
+
+const atLink = (t) => typeof t === 'number' ? ` <a class="at" data-at="${t}" title="Jump to ${clock(t)} in the transcript">${clock(t)}</a>` : ''
+
+function liveHead(c) {
+  const l = c.live || {}, st = l.status || {}, n = l.notes
+  const state = st.paused ? 'paused' : st.state || (c.status === 'recording' ? 'waiting' : 'ended')
+  let line = LIVE_STATE[state] || ''
+  if (state === 'updated' && n && n.updated_at) line = `Updated ${ago(n.updated_at)}`
+  const p = profileOf(l.profile)
+  const model = ai().profiles.length > 1
+    ? `<label class="btn split-lang pick live-model" title="Model for this call's live notes and minutes"><span>${esc(profileName(l.profile))}</span>${CARET}<select data-callprofile aria-label="Model for this call">${profileOptions(l.profile)}</select></label>`
+    : `<span class="live-model">${esc(profileName(l.profile))}</span>`
+  const where = p ? `<span class="hint">${esc(profileWhere(p))}</span>` : ''
+  const draftBy = n && n.profile && l.profile && n.profile !== l.profile ? `<span class="hint">Draft by ${esc(profileName(n.profile))}; the next update by ${esc(profileName(l.profile))}</span>` : ''
+  const pause = c.status === 'recording'
+    ? `<button class="btn ghost" data-cmd="${st.paused ? 'live-resume' : 'live-pause'}">${st.paused ? 'Resume' : 'Pause'}</button>` : ''
+  const problem = st.settings_error ? `The AI settings can't be read: ${st.settings_error}` : !st.enabled ? 'Live notes are off (menu → AI for calls → Live notes during calls).' : (st.state === 'failed' && st.error) || ''
+  return `<div class="live-head">${model}${where}<span class="live-state ${esc(state)}">${esc(line)}</span>${draftBy}<span class="grow"></span>${pause}</div>
+    ${problem ? `<p class="live-error">${esc(problem)}</p>` : ''}`
+}
+
+function liveNotes(c) {
+  const n = (c.live || {}).notes
+  if (!n) return `<p class="muted">${c.status === 'recording' ? 'The first notes appear after about 90 seconds of conversation.' : 'No live notes for this call.'}</p>`
+  const sec = (title, items, f) => items && items.length ? `<h3>${title}</h3><ul>${items.map(f).join('')}</ul>` : ''
+  const gaps = (n.gaps || []).map((g) => `${clock(g[0])}–${clock(g[1])}`).join(', ')
+  const empty = !n.now && !(n.decisions || []).length && !(n.actions || []).length && !(n.questions || []).length
+  return `${n.now ? `<p class="now"><b>Now</b> ${esc(n.now)}</p>` : ''}
+    ${sec('Decisions', n.decisions, (x) => `<li>${esc(x.text)}${atLink(x.t)}</li>`)}
+    ${sec('Action items', n.actions, (a) => `<li><span class="owner${a.owner === 'Me' ? ' me' : ''}">${esc(a.owner)}</span> ${esc(a.task)}${atLink(a.t)}</li>`)}
+    ${sec('Open questions', n.questions, (x) => `<li>${esc(x.text)}${atLink(x.t)}</li>`)}
+    ${empty ? '<p class="muted">Nothing decided, owed or open yet.</p>' : ''}
+    ${gaps ? `<p class="muted">Not covered: ${esc(gaps)}</p>` : ''}`
+}
+
+function prepCard(c) {
+  const p = (c.live || {}).prep
+  if (!p || (!(p.open_actions || []).length && !(p.highlights || []).length)) return ''
+  const a = p.open_actions || [], h = p.highlights || []
+  const mine = S.prepOpen[c.name]
+  const open = (mine !== undefined ? mine : c.status === 'recording' && !(c.live.notes && c.live.notes.updated_at)) ? ' open' : ''
+  return `<details class="prep" data-prep="${esc(c.name)}"${open}><summary>Last time${p.date ? ` (${esc(p.date)})` : ''}: ${a.length} open action${a.length === 1 ? '' : 's'}, ${h.length} highlight${h.length === 1 ? '' : 's'}</summary>
+    ${a.length ? `<h3>Open actions</h3><ul>${a.map((x) => `<li>${x.owner ? `<span class="owner">${esc(x.owner)}</span> ` : ''}${esc(x.task)}${x.due ? ` <span class="muted">due ${esc(x.due)}</span>` : ''}</li>`).join('')}</ul>` : ''}
+    ${h.length ? `<h3>Highlights</h3><ul>${h.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+  </details>`
+}
+
+/** An answer: escaped, line breaks kept, "* " / "- " bullets as •, [mm:ss] as jumps. */
+function answerText(t) {
+  return esc(String(t).replace(/^\s*[*-]\s+/gm, '• ')).replace(/\[((?:\d{1,2}:)?\d{1,2}:\d{2})\]/g, (_, x) => {
+    const p = x.split(':').map(Number)
+    const sec = p.length === 3 ? p[0] * 3600 + p[1] * 60 + p[2] : p[0] * 60 + p[1]
+    return `<a class="at" data-at="${sec}" title="Jump to ${x} in the transcript">${x}</a>`
+  }).replace(/\n/g, '<br>')
+}
+
+const ASK_TITLE = { missed: 'What did I miss?', question: 'Questions you could ask', ask: 'You asked' }
+/** What a question put back waits for (`asking.waiting`). */
+const ASK_WAIT = { model: 'Waiting for the model to finish another job…' }
+
+function liveAnswers(c) {
+  const l = c.live || {}, st = l.status || {}
+  const pending = st.asking
+    ? `<div class="answer pending"><b>${esc(ASK_TITLE[st.asking.kind] || '')}</b>${st.asking.text ? ` ${esc(st.asking.text)}` : ''}<p class="muted">${ASK_WAIT[st.asking.waiting] || 'Thinking…'}</p></div>`
+    : st.queued > 0 ? `<div class="answer pending"><p class="muted">Your question is next.</p></div>` : ''
+  const list = (l.answers || []).slice().reverse().slice(0, 30).map((a) => `<div class="answer">
+      <div class="answer-head"><b>${esc(ASK_TITLE[a.kind] || '')}</b>${a.question ? ` <span>${esc(a.question)}</span>` : ''}<span class="muted">${esc(hm(new Date(a.asked_at)))}</span></div>
+      ${a.error ? `<p class="error">${esc(a.error)}</p>` : `<p>${answerText(a.answer)}</p>`}</div>`).join('')
+  return pending + list
+}
+
+function liveTab(c, segs) {
+  const st = (c.live || {}).status || {}
+  const busy = !!st.asking || st.queued > 0
+  const dis = busy ? ' disabled' : ''
+  return `<div class="live">
+    ${liveHead(c)}
+    <div class="live-grid">
+      <section class="live-transcript" id="live-transcript" aria-label="Live transcript">${segs.length ? turnsHtml(segs, '', null) : `<p class="muted">Listening. The transcript appears here as people speak.</p>`}</section>
+      <section class="live-side" aria-label="Live notes">
+        ${prepCard(c)}
+        <div class="live-notes doc">${liveNotes(c)}</div>
+        <div class="live-ask">
+          <div class="live-buttons"><button class="btn" data-ask="missed"${dis}>What did I miss?</button><button class="btn" data-ask="question"${dis}>Suggest a question</button></div>
+          <form class="ask-row" data-askform="1"><input id="ask" class="search" placeholder="Ask about this call…" value="${esc(S.liveDraft)}" autocomplete="off" maxlength="500" aria-label="Ask about this call"><button class="btn primary" type="submit"${dis}>Ask</button></form>
+        </div>
+        <div class="live-answers">${liveAnswers(c)}</div>
+      </section>
+    </div>
+  </div>`
 }
 
 // ── calendar: today, or a rolling week (yesterday, today, 5 days ahead) ───────────────────
@@ -694,6 +871,9 @@ function render() {
   const focus = document.activeElement && document.activeElement.id
   const caret = focus && document.activeElement.selectionStart
   const scroll = $('#pane') ? $('#pane').scrollTop : 0
+  // The live transcript follows the call while it is scrolled to the end.
+  const lt = $('#live-transcript')
+  const ltStick = !lt || lt.scrollTop + lt.clientHeight >= lt.scrollHeight - 40, ltTop = lt ? lt.scrollTop : 0
   const app = $('#app')
   if (S.view === 'calendar') {
     const grid = $('#calgrid'), keep = grid ? grid.scrollTop : null
@@ -711,6 +891,8 @@ function render() {
     if (S.jump != null && j) { j.scrollIntoView({ block: 'center' }); S.jump = null }
     else pane.scrollTop = scroll
   }
+  const lt2 = $('#live-transcript')
+  if (lt2) lt2.scrollTop = ltStick ? lt2.scrollHeight : ltTop
   if (S.lightbox) app.insertAdjacentHTML('beforeend', `<div class="lightbox" data-close="1"><img src="${esc(S.lightbox)}" alt="Shared screen"></div>`)
   if (entering) { const p = $('.pane') || $('.grid-wrap'); if (p) p.classList.add('enter') }
   placeDetail()
@@ -738,7 +920,7 @@ function placeDetail() {
 const fingerprint = () => JSON.stringify([S.state, S.calls, S.call, S.agenda, S.cal.data, S.cal.selected])
 
 document.addEventListener('click', (e) => {
-  const t = e.target.closest('[data-go],[data-call],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-schedule],[data-unschedule],a[data-ext]')
+  const t = e.target.closest('[data-go],[data-call],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-schedule],[data-unschedule],[data-ask],a[data-ext]')
   if (!t) return
   if (t.dataset.ext) { e.preventDefault(); send({ cmd: 'open_url', url: t.getAttribute('href') }); return }
   if (t.dataset.go) return go(t.dataset.go === 'calls' ? (S.selected ? `call/${S.selected}/${S.tab}` : 'calls') : `calendar/${S.cal.mode}`)
@@ -746,7 +928,7 @@ document.addEventListener('click', (e) => {
   if (t.dataset.calclose) { S.cal.selected = null; return render() }
   if (t.dataset.calmode) { S.cal.mode = t.dataset.calmode; S.cal.offset = 0; S.cal.data = null; go(`calendar/${S.cal.mode}`); return loadCalendar().then(render) }
   if (t.dataset.calnav !== undefined) { const n = Number(t.dataset.calnav); S.cal.offset = n === 0 ? 0 : S.cal.offset + n; S.cal.data = null; render(); return loadCalendar().then(render) }
-  if (t.dataset.schedule) { send({ cmd: 'schedule', id: t.dataset.schedule, languages: recordLang() }); const e = (S.cal.data.events || []).find((x) => x.id === t.dataset.schedule); if (e) e.scheduled = true; return render() }
+  if (t.dataset.schedule) { send({ cmd: 'schedule', id: t.dataset.schedule, languages: recordLang(), profile: pickedProfile() }); const e = (S.cal.data.events || []).find((x) => x.id === t.dataset.schedule); if (e) e.scheduled = true; return render() }
   if (t.dataset.unschedule) { send({ cmd: 'unschedule', id: t.dataset.unschedule }); const e = (S.cal.data.events || []).find((x) => x.id === t.dataset.unschedule); if (e) e.scheduled = false; return render() }
   if (t.dataset.call) return go(`call/${t.dataset.call}/${S.tab}`)
   if (t.dataset.tab) return go(`call/${S.selected}/${t.dataset.tab}`)
@@ -759,17 +941,22 @@ document.addEventListener('click', (e) => {
     if (a) { a.status = a.status === 'done' ? 'todo' : 'done'; render() } // optimistic; the file follows
     return send({ cmd: 'toggle_action', call: S.selected, index: Number(t.dataset.toggle) })
   }
-  if (t.dataset.arm !== undefined) return send({ cmd: 'arm_meeting', id: t.dataset.arm, languages: recordLang() })
-  if (t.dataset.join !== undefined) return send({ cmd: 'join_meeting', id: t.dataset.join, languages: recordLang() })
+  if (t.dataset.arm !== undefined) return send({ cmd: 'arm_meeting', id: t.dataset.arm, languages: recordLang(), profile: pickedProfile() })
+  if (t.dataset.join !== undefined) return send({ cmd: 'join_meeting', id: t.dataset.join, languages: recordLang(), profile: pickedProfile() })
+  if (t.dataset.ask) { send({ cmd: 'live_ask', call: S.selected, kind: t.dataset.ask }); return liveBusy() }
   switch (t.dataset.cmd) {
-    case 'record': return send({ cmd: 'record', languages: recordLang() })
+    case 'record': return send({ cmd: 'record', languages: recordLang(), profile: pickedProfile() })
     case 'stop': return send({ cmd: 'stop' })
     case 'reveal': return send({ cmd: 'reveal', call: S.selected })
     case 'show-log': return send({ cmd: 'show_log', call: S.selected })
-    case 'write-notes':
-      send({ cmd: 'write_notes', call: S.selected })
-      if (S.call) { S.call.notes_run = { state: 'running', model: (S.state.notes || {}).model }; render() }
+    case 'write-notes': {
+      const pid = S.notesProfile && S.notesProfile.call === S.selected && S.notesProfile.id ? S.notesProfile.id : null
+      send({ cmd: 'write_notes', call: S.selected, profile: pid || undefined })
+      if (S.call) { S.call.notes_run = { state: 'queued', model: profileName(pid || (S.call.live && S.call.live.profile)), message: 'Starting…' }; render() }
       return
+    }
+    case 'live-pause': return send({ cmd: 'live_pause', call: S.selected })
+    case 'live-resume': return send({ cmd: 'live_resume', call: S.selected })
     case 'ask-delete': S.confirmDelete = true; return render()
     case 'cancel-delete': S.confirmDelete = false; return render()
     case 'delete': {
@@ -785,11 +972,39 @@ document.addEventListener('click', (e) => {
 document.addEventListener('input', (e) => {
   if (e.target.id === 'q') { S.query = e.target.value; render() }
   if (e.target.id === 'find') { S.find = e.target.value; render() }
+  if (e.target.id === 'ask') S.liveDraft = e.target.value // no render: typing must not be disturbed
 })
 
 document.addEventListener('change', (e) => {
   if (e.target.matches('[data-reclang]')) { setRecordLang(e.target.value); render() }
+  if (e.target.matches('[data-recprofile]')) { S.recordProfile = e.target.value; render() }
+  if (e.target.matches('[data-notesprofile]')) { S.notesProfile = { call: S.selected, id: e.target.value }; render() }
+  if (e.target.matches('[data-callprofile]')) {
+    send({ cmd: 'set_profile', call: S.selected, profile: e.target.value })
+    if (S.call && S.call.live) { S.call.live.profile = e.target.value; render() }
+  }
 })
+
+document.addEventListener('toggle', (e) => {
+  if (e.target.matches && e.target.matches('details[data-prep]')) S.prepOpen[e.target.dataset.prep] = e.target.open
+}, true)
+
+document.addEventListener('submit', (e) => {
+  if (!e.target.matches('[data-askform]')) return
+  e.preventDefault()
+  const text = S.liveDraft.trim()
+  if (!text) return
+  send({ cmd: 'live_ask', call: S.selected, kind: 'ask', text })
+  S.liveDraft = ''
+  liveBusy()
+})
+
+/** A question was sent: show it as pending until the next poll brings the app's state. */
+function liveBusy() {
+  const st = S.call && S.call.live && S.call.live.status
+  if (st) st.queued = (st.queued || 0) + 1
+  render()
+}
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && S.lightbox) { S.lightbox = null; return render() }
@@ -820,10 +1035,16 @@ async function tick() {
   if (changed || ticks % 3 === 0) await loadCalls()
   if (S.view === 'today' && ticks % 15 === 0) await loadAgenda()
   if (S.view === 'calendar' && ticks % 30 === 0) await loadCalendar()
+  const lv = S.call && S.call.live && S.call.live.status
   const live = S.selected && S.call && (S.call.status === 'recording' || S.call.status === 'transcribing' ||
-    (S.call.notes_run && S.call.notes_run.state === 'running'))
+    (S.call.notes_run && (S.call.notes_run.state === 'running' || S.call.notes_run.state === 'queued')) ||
+    (lv && (lv.running || lv.asking || lv.queued > 0)) || S.tab === 'live')
   if (S.selected && (live || changed)) await loadCall(S.selected)
-  if (fingerprint() !== lastPrint && (!document.querySelector('input:focus') || changed)) render()
+  // Typing a question doesn't hold back the live notes (its text and caret survive a render); a
+  // text selection, an open menu or a focused search field does (until it ends).
+  const sel = window.getSelection && window.getSelection()
+  const busy = document.querySelector('input:focus:not(#ask), select:focus') || (sel && !sel.isCollapsed)
+  if (fingerprint() !== lastPrint && (!busy || changed)) render()
 }
 
 window.echo = {

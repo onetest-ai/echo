@@ -1,5 +1,6 @@
 #[cfg(feature = "transcribe")]
 mod aec;
+mod ai;
 mod app;
 mod apps;
 mod audio;
@@ -13,6 +14,7 @@ mod frames;
 #[cfg(feature = "transcribe")]
 mod gpu;
 mod graph;
+mod livenotes;
 #[cfg(feature = "transcribe")]
 mod live;
 mod meeting;
@@ -164,6 +166,29 @@ enum Cmd {
         /// Run here and wait for it, instead of handing it to the app
         #[arg(long)]
         wait: bool,
+        /// Automatic notes (the terminal pane): only if the call is due for them and the
+        /// session folder given with --for may write notes; a call whose notes were already tried
+        /// (it has a notes-run.json) is left alone
+        #[arg(long, requires = "session")]
+        auto: bool,
+        /// The asking session's folder (with --auto)
+        #[arg(long = "for")]
+        session: Option<std::path::PathBuf>,
+    },
+    /// AI profiles: which model (and account) writes a call's live notes and minutes
+    Ai {
+        #[command(subcommand)]
+        cmd: Option<AiCmd>,
+    },
+    /// Live notes during a call: ask a question, pause or resume them, show them (JSON)
+    Live {
+        #[command(subcommand)]
+        cmd: LiveCmd,
+    },
+    /// "Last time" for a recurring call (JSON): the previous occurrence's open actions and highlights
+    Prep {
+        #[arg(default_value = "latest")]
+        call: String,
     },
     /// Vocabulary (names/terms Whisper should spell right), learned automatically
     Vocab {
@@ -283,6 +308,10 @@ enum Cmd {
         /// Meeting context JSON (as for `meeting attach`)
         #[arg(long)]
         meeting: Option<std::path::PathBuf>,
+        /// The AI profile for this call's live notes and minutes (`echoctl ai`); default: the one set
+        /// with `echoctl ai default`
+        #[arg(long = "ai")]
+        ai_profile: Option<String>,
     },
     /// Open a meeting's join link in the desktop app and arm recording for it
     Join {
@@ -438,6 +467,77 @@ enum AppCmd {
     Autostart {
         #[arg(value_parser = ["on", "off"])]
         state: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum AiCmd {
+    /// The profiles and the default (JSON); Claude profiles' sign-ins are checked now
+    Status {
+        id: Option<String>,
+    },
+    /// The profile new calls use
+    Default { id: String },
+    /// Live notes during calls (they send the call's text to the call's model)
+    Live {
+        #[arg(value_parser = ["on", "off"])]
+        state: String,
+    },
+    /// A model server on this computer with Anthropic's Messages API (Ollama)
+    AddLocal {
+        id: String,
+        /// The model for the minutes (and live notes, unless --live-model)
+        #[arg(long)]
+        model: String,
+        #[arg(long)]
+        live_model: Option<String>,
+        #[arg(long, default_value = "http://localhost:11434")]
+        url: String,
+        #[arg(long)]
+        token: Option<String>,
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// A claude.ai account in a Claude Code folder of its own (sign it in with `ai login`)
+    AddClaude {
+        id: String,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        live_model: Option<String>,
+        #[arg(long)]
+        notes_model: Option<String>,
+    },
+    Remove { id: String },
+    /// Sign a Claude profile in (opens a terminal running `claude auth login`)
+    Login { id: String },
+    /// Accept the account a Claude profile is signed in to now (after signing in to another)
+    Accept { id: String },
+}
+
+#[derive(Subcommand)]
+enum LiveCmd {
+    /// Ask about a call: --kind missed (the last 5 min) | question (suggest one) | ask (the text)
+    Ask {
+        call: String,
+        #[arg(long, default_value = "ask", value_parser = ["missed", "question", "ask"])]
+        kind: String,
+        text: Vec<String>,
+    },
+    Pause { call: String },
+    Resume { call: String },
+    /// The call's live notes, answers and state (JSON)
+    Show {
+        #[arg(default_value = "latest")]
+        call: String,
+    },
+    /// (dev) Run one summary (or, with --ask, one question) here and print the result
+    #[command(hide = true)]
+    Test {
+        call: String,
+        #[arg(long, value_parser = ["missed", "question", "ask"])]
+        ask: Option<String>,
+        text: Vec<String>,
     },
 }
 
@@ -888,7 +988,54 @@ fn main() -> Result<()> {
                 Ok(())
             }
         },
-        Cmd::Notes { call, wait } => notes::request(&call, wait),
+        Cmd::Notes { call, wait, auto, session } => {
+            if auto {
+                notes::request_auto(&call, session.as_deref().unwrap_or(std::path::Path::new(".")))
+            } else {
+                notes::request(&call, wait)
+            }
+        }
+        Cmd::Ai { cmd } => match cmd.unwrap_or(AiCmd::Status { id: None }) {
+            AiCmd::Status { id } => ai::status(id.as_deref()),
+            AiCmd::Default { id } => ai::set_default(&id),
+            AiCmd::Live { state } => ai::set_live(state == "on"),
+            AiCmd::AddLocal { id, model, live_model, url, token, name } => ai::add_local(&id, name, &model, live_model, &url, token),
+            AiCmd::AddClaude { id, name, live_model, notes_model } => ai::add_claude(&id, name, live_model, notes_model),
+            AiCmd::Remove { id } => ai::remove(&id),
+            AiCmd::Login { id } => {
+                ai::login(&ai::Settings::load()?.get(&id)?)?;
+                println!("a terminal opened to sign in; then: echoctl ai status {id}");
+                Ok(())
+            }
+            AiCmd::Accept { id } => {
+                println!("{id} now expects {}", ai::accept_account(&id)?);
+                Ok(())
+            }
+        },
+        Cmd::Live { cmd } => match cmd {
+            LiveCmd::Ask { call, kind, text } => livenotes::request(&call, "ask", livenotes::AskKind::parse(&kind), &text.join(" ")),
+            LiveCmd::Test { call, ask, text } => {
+                let dir = calls::resolve_call(&call)?;
+                livenotes::test_once(&dir, ask.as_deref().and_then(livenotes::AskKind::parse).map(|k| (k, text.join(" "))))
+            }
+            LiveCmd::Pause { call } => livenotes::request(&call, "pause", None, ""),
+            LiveCmd::Resume { call } => livenotes::request(&call, "resume", None, ""),
+            LiveCmd::Show { call } => {
+                let dir = calls::resolve_call(&call)?;
+                let state: serde_json::Value = std::fs::read(dir.join(livenotes::STATE)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+                println!("{}", serde_json::to_string_pretty(&serde_json::json!({
+                    "profile": ai::call_profile_id(&dir).ok(),
+                    "state": state,
+                    "notes": livenotes::read_notes(&dir),
+                    "answers": livenotes::read_answers(&dir),
+                }))?);
+                Ok(())
+            }
+        },
+        Cmd::Prep { call } => {
+            println!("{}", serde_json::to_string_pretty(&calls::prep(&calls::resolve_call(&call)?))?);
+            Ok(())
+        }
         Cmd::Pending { session } => calls::pending(session.as_deref()),
         Cmd::Claim { call, session } => calls::claim(&call, session.as_deref()),
         Cmd::Claude { cmd } => match cmd {
@@ -902,9 +1049,13 @@ fn main() -> Result<()> {
             anyhow::ensure!(follow, "only `events --follow` is supported");
             watch::follow_events()
         }
-        Cmd::Arm { title, languages, meeting } => {
+        Cmd::Arm { title, languages, meeting, ai_profile } => {
+            // Typed by hand: a misspelt profile is refused here (arming never checks it itself).
+            if let Some(id) = &ai_profile {
+                ai::Settings::load()?.get(id)?;
+            }
             let ctx = meeting.as_deref().map(meeting::MeetingContext::read_file).transpose()?;
-            watch::arm(title, ctx, languages)
+            watch::arm(title, ctx, languages, ai_profile)
         }
         Cmd::Join { meeting } => watch::join(meeting::MeetingContext::read_file(&meeting)?),
         Cmd::Stop => watch::stop(),

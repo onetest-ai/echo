@@ -43,6 +43,59 @@ pub fn resolve_call(arg: &str) -> Result<PathBuf> {
     bail!("{arg} is not a call folder (expected meta.json inside)")
 }
 
+/// Change a call's `meta.json` under its own lock (`<call>/.meta.lock`), read inside it: every
+/// read-modify-write of it goes through here (the recording's own writes too), so one never undoes
+/// another (a profile chosen right after a call vs. the transcription marking the audio gone).
+pub fn update_meta<R>(dir: &Path, f: impl FnOnce(&mut Value) -> Result<R>) -> Result<R> {
+    let _lock = lock_meta(dir)?;
+    let path = dir.join("meta.json");
+    let mut meta: Value = serde_json::from_slice(&fs::read(&path)?).with_context(|| format!("reading {}", path.display()))?;
+    let r = f(&mut meta)?;
+    paths::write_atomic(&path, &serde_json::to_vec_pretty(&meta)?)?;
+    Ok(r)
+}
+
+/// The call's `meta.json` lock (waits up to 10 s for another writer).
+pub fn lock_meta(dir: &Path) -> Result<crate::app::FileLock> {
+    let path = dir.join(".meta.lock");
+    let t = std::time::Instant::now();
+    loop {
+        if let Some(l) = crate::app::FileLock::try_take(&path).with_context(|| format!("opening {}", path.display()))? {
+            return Ok(l);
+        }
+        if t.elapsed() > std::time::Duration::from_secs(10) {
+            bail!("{} is being changed by another process", dir.join("meta.json").display());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+/// A call's stamp: the `YYYY-MM-DD_HHMMSS` its folder name starts with. Retitling changes only
+/// what follows it, so it names the call across renames. A folder whose name doesn't start with
+/// a stamp is its own key (its whole name).
+pub fn stamp_of(dir: &Path) -> String {
+    let name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let b = name.as_bytes();
+    let stamp = b.len() >= 17
+        && b[..17].iter().enumerate().all(|(i, c)| match i {
+            4 | 7 => *c == b'-',
+            10 => *c == b'_',
+            _ => c.is_ascii_digit(),
+        });
+    if stamp { name[..17].to_string() } else { name }
+}
+
+/// The call folder with this stamp now (it may have been renamed since it was last seen). None
+/// when no folder, or more than one, has it (two calls started in the same second: `-2`).
+pub fn by_stamp(stamp: &str) -> Option<PathBuf> {
+    if stamp.is_empty() {
+        return None;
+    }
+    let mut found = all_calls().into_iter().filter(|d| stamp_of(d) == stamp);
+    let first = found.next()?;
+    found.next().is_none().then_some(first)
+}
+
 fn read_json(p: &Path) -> Value {
     fs::read(p).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or(Value::Null)
 }
@@ -75,6 +128,35 @@ fn domain(email: &str) -> Option<String> {
 pub fn recap(subject: &str) -> Vec<String> {
     let Some(dir) = previous_with_notes(subject, None) else { return vec![] };
     recap_from_notes(&fs::read_to_string(dir.join("notes.md")).unwrap_or_default())
+}
+
+/// "Last time" for a call that recurs (the live view's prep card): the previous occurrence's date,
+/// its action items still to do and up to three highlights (`recap_from_notes`: decisions, else its
+/// summary or first bullets). Deterministic, no model; null when there is no earlier occurrence.
+pub fn prep(dir: &Path) -> Value {
+    let Some(subject) = subject_of(dir) else { return Value::Null };
+    let Some(prev) = previous_with_notes(&subject, Some(dir)) else { return Value::Null };
+    let date = read_json(&prev.join("meta.json"))["started_at"]
+        .as_str()
+        .and_then(|t| DateTime::parse_from_rfc3339(t).ok())
+        .map(|t| t.format("%-d %b").to_string())
+        .unwrap_or_default();
+    let open: Vec<Value> = read_json(&prev.join("actions.json"))
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|a| a["status"].as_str() != Some("done"))
+        .filter_map(|a| {
+            let task = a["task"].as_str().filter(|t| !t.trim().is_empty())?;
+            Some(json!({ "task": task, "owner": a["owner"], "due": a["due"] }))
+        })
+        .collect();
+    json!({
+        "call": prev.file_name().map(|n| n.to_string_lossy().into_owned()),
+        "date": date,
+        "open_actions": open,
+        "highlights": recap_from_notes(&fs::read_to_string(prev.join("notes.md")).unwrap_or_default()),
+    })
 }
 
 pub fn recap_from_notes(md: &str) -> Vec<String> {
@@ -588,9 +670,10 @@ pub fn set_title(call: &str, title: &str) -> Result<()> {
     if read_json(&dir.join("meta.json"))["ended_at"].is_null() {
         bail!("{} is still being recorded — set the title after it stops", dir.display());
     }
-    let mut meta = read_json(&dir.join("meta.json"));
-    meta["title"] = json!(title);
-    fs::write(dir.join("meta.json"), serde_json::to_vec_pretty(&meta)?)?;
+    update_meta(&dir, |meta| {
+        meta["title"] = json!(title);
+        Ok(())
+    })?;
     // The title is what counts; the folder name only follows it. Windows refuses to rename a
     // folder with a file open inside (a notes run's own claude.log): the run renames it when
     // it ends.
@@ -723,6 +806,48 @@ fn purge_trash_in(trash: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stamps_name_one_call_or_none() {
+        let (_env, root) = crate::paths::testenv::folders("calls-stamp");
+        let mk = |n: &str| {
+            let d = root.join("home/calls").join(n);
+            fs::create_dir_all(&d).unwrap();
+            fs::write(d.join("meta.json"), "{}").unwrap();
+            d
+        };
+        let one = mk("2026-10-23_090000-standup");
+        assert_eq!(stamp_of(&one), "2026-10-23_090000");
+        assert_eq!(by_stamp("2026-10-23_090000"), Some(one));
+        mk("2026-10-23_100000-x");
+        mk("2026-10-23_100000-x-2"); // two recordings in the same second
+        assert_eq!(by_stamp("2026-10-23_100000"), None, "ambiguous: never a guess");
+        let odd = mk("notes-for-later-folder");
+        assert_eq!(stamp_of(&odd), "notes-for-later-folder", "not a stamp: its whole name");
+    }
+
+    #[test]
+    fn last_time_comes_from_the_previous_occurrence() {
+        let (_env, root) = crate::paths::testenv::folders("calls-prep");
+        let mk = |n: &str, notes: Option<&str>, actions: &str| {
+            let d = root.join("home/calls").join(n);
+            fs::create_dir_all(&d).unwrap();
+            fs::write(d.join("meta.json"), r#"{"title":"Sync","started_at":"2026-10-16T12:00:00+02:00"}"#).unwrap();
+            if let Some(n) = notes {
+                fs::write(d.join("notes.md"), n).unwrap();
+                fs::write(d.join("actions.json"), actions).unwrap();
+            }
+            d
+        };
+        let now = mk("2026-10-23_120000-sync", None, "");
+        assert!(prep(&now).is_null(), "no earlier occurrence");
+        mk("2026-10-16_120000-sync", Some("## Decisions\n\n- Lisbon first\n"), r#"[{"task":"Send the plan","owner":"Me","status":"todo"},{"task":"Done one","status":"done"},{"task":"","status":"todo"}]"#);
+        mk("2026-10-30_120000-sync", Some("## Decisions\n\n- Later\n"), "[]"); // after this one: not "last time"
+        let p = prep(&now);
+        assert_eq!(p["call"], "2026-10-16_120000-sync");
+        assert_eq!(p["open_actions"].as_array().unwrap().len(), 1);
+        assert_eq!(p["highlights"][0], "Lisbon first");
+    }
 
     #[test]
     fn heading_budget_scales_with_length() {

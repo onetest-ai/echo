@@ -357,6 +357,8 @@ struct Model {
     downloading: Option<(&'static str, u8)>,
     notes_in: Option<PathBuf>,
     notes_model: String,
+    /// AI profiles (`ai.rs`); None = ai.json unreadable
+    ai: Option<AiMenu>,
     has_claude: bool,
     plugin_installed: bool,
     cli_installed: bool,
@@ -368,6 +370,9 @@ struct Model {
     calendar_account: Option<String>,
     graph_client: (String, bool),
 }
+
+/// The "AI for calls" menu: live notes on, the default id, [(id, name, kind, account)].
+type AiMenu = (bool, String, Vec<(String, String, crate::ai::Kind, Option<String>)>);
 
 const UPCOMING_MAX: usize = 6;
 const RECENT_MAX: usize = 5;
@@ -454,6 +459,10 @@ fn load_model(health: &[(String, String, Option<String>)]) -> Model {
         downloading: app::downloading(),
         notes_in: cfg.notes_in.clone(),
         notes_model: cfg.notes_model_label(),
+        ai: crate::ai::Settings::load().ok().map(|s| {
+            let all = s.all().into_iter().map(|p| (p.id.clone(), p.name.clone(), p.kind, p.account.clone())).collect();
+            (s.live_notes, s.default_id(), all)
+        }),
         has_claude: !claude["claude"].is_null(),
         plugin_installed: claude["plugin_installed"] == true,
         cli_installed: app::cli_installed(),
@@ -538,6 +547,10 @@ enum Action {
     CalendarSync,
     CalendarClientId,
     NotesModel,
+    ToggleLiveNotes,
+    DefaultProfile(String),
+    SignIn(String),
+    AcceptAccount(String),
     Recheck,
     AskPermissions,
     #[cfg_attr(not(feature = "transcribe"), allow(dead_code))]
@@ -849,6 +862,37 @@ impl Ui {
         let page = self.check("Write a minutes page (HTML) with the notes", model.minutes_page, Action::ToggleMinutesPage);
         let _ = claude.append_items(&[&sep(), &notes_model, &page]);
 
+        // AI for calls: which model (and account) writes live notes and minutes (`ai.rs`).
+        let ai = Submenu::new("AI for calls", true);
+        match &model.ai {
+            None => {
+                let _ = ai.append(&MenuItem::new("Can't read the AI settings (ai.json)", false, None));
+            }
+            Some((live, default, profiles)) => {
+                let live_item = self.check("Live notes during calls", *live, Action::ToggleLiveNotes);
+                let _ = ai.append_items(&[&live_item, &sep(), &MenuItem::new("New calls use", false, None)]);
+                for (id, name, _, _) in profiles {
+                    let it = self.check(&format!("   {name}"), id == default, Action::DefaultProfile(id.clone()));
+                    let _ = ai.append(&it);
+                }
+                let accounts: Vec<_> = profiles.iter().filter(|p| p.2 == crate::ai::Kind::Claude).collect();
+                if !accounts.is_empty() {
+                    let _ = ai.append(&sep());
+                }
+                for (id, name, _, account) in accounts {
+                    let label = match account {
+                        Some(a) => format!("{name}: {a}"),
+                        None => format!("{name}: no account recorded yet"),
+                    };
+                    let _ = ai.append(&MenuItem::new(ellipsize(&label, 60), false, None));
+                    let sign = self.item("   Sign in…", true, Some(Action::SignIn(id.clone())));
+                    let accept = self.item("   Use the account signed in now", account.is_some(), Some(Action::AcceptAccount(id.clone())));
+                    let _ = ai.append_items(&[&sign, &accept]);
+                }
+                let _ = ai.append_items(&[&sep(), &MenuItem::new("Add or remove profiles with `echoctl ai`", false, None)]);
+            }
+        }
+
         // Health
         let all_ok = model.health.iter().all(|(_, s, _)| s == "✓");
         let health = Submenu::new(if all_ok { "Health ✓" } else { "Health ⚠" }, true);
@@ -893,7 +937,7 @@ impl Ui {
         let _ = calendar.append_items(&[&sep(), &MenuItem::new(label, false, None)]);
         let change = self.item("Change app (client) ID…", true, Some(Action::CalendarClientId));
         let _ = calendar.append(&change);
-        let _ = menu.append_items(&[&settings, &models_menu, &calendar, &claude, &health, &sep()]);
+        let _ = menu.append_items(&[&settings, &models_menu, &calendar, &claude, &ai, &health, &sep()]);
         let up = match &model.update {
             Some(v) => self.item(&format!("Update to {v}…"), true, Some(Action::Update)),
             None => self.item("Check for updates…", true, Some(Action::CheckUpdates)),
@@ -990,10 +1034,10 @@ impl Ui {
     fn click(&mut self, id: &MenuId) {
         let Some(action) = self.actions.get(id).cloned() else { return };
         match action {
-            Action::Record => drop(watch::arm(None, None, None)),
-            Action::RecordIn(code) => drop(watch::arm(None, None, Some(vec![code]))),
+            Action::Record => drop(watch::arm(None, None, None, None)),
+            Action::RecordIn(code) => drop(watch::arm(None, None, Some(vec![code]), None)),
             Action::Stop => drop(watch::stop()),
-            Action::ArmMeeting(m) => drop(watch::arm(m.subject.clone(), Some(*m), None)),
+            Action::ArmMeeting(m) => drop(watch::arm(m.subject.clone(), Some(*m), None, None)),
             Action::JoinMeeting(m) => drop(watch::join(*m)),
             Action::Open(p) => open_path(&p),
             Action::SetUnscheduled(v) => {
@@ -1101,6 +1145,40 @@ impl Ui {
                         let _ = cfg.save();
                     }
                 });
+                return;
+            }
+            Action::ToggleLiveNotes => {
+                let r = crate::ai::Settings::update(|s| {
+                    s.live_notes = !s.live_notes;
+                    Ok(())
+                });
+                if let Err(e) = r {
+                    app::notify("Couldn't change the AI settings", &format!("{e:#}"));
+                }
+            }
+            Action::DefaultProfile(id) => {
+                // `update` refuses a default that was removed meanwhile (the menu was open).
+                let r = crate::ai::Settings::update(|s| {
+                    s.default = (id != crate::ai::SYSTEM).then_some(id);
+                    Ok(())
+                });
+                if let Err(e) = r {
+                    app::notify("Couldn't change the AI settings", &format!("{e:#}"));
+                }
+            }
+            Action::AcceptAccount(id) => {
+                // `claude auth status` takes a second or two: off the menu's thread.
+                std::thread::spawn(move || match crate::ai::accept_account(&id) {
+                    Ok(label) => app::notify("Account accepted", &label),
+                    Err(e) => app::notify("Couldn't accept the account", &format!("{e:#}")),
+                });
+                return;
+            }
+            Action::SignIn(id) => {
+                let r = crate::ai::Settings::load().and_then(|s| s.get(&id)).and_then(|p| crate::ai::login(&p));
+                if let Err(e) = r {
+                    app::notify("Couldn't sign in", &format!("{e:#}"));
+                }
                 return;
             }
             Action::NotesModel => {

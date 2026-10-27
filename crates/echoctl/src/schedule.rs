@@ -89,8 +89,7 @@ mod tests {
 
     #[test]
     fn due_only_from_a_minute_before_until_the_end() {
-        let home = std::env::temp_dir().join(format!("echo-sched-{}", std::process::id()));
-        std::env::set_var("ECHOCTL_HOME", &home);
+        let (_env, home) = crate::paths::testenv::folders("sched");
         let now = Utc::now();
         add(meeting("later", now + Duration::minutes(30), 30)).unwrap();
         add(meeting("soon", now + Duration::seconds(30), 30)).unwrap();

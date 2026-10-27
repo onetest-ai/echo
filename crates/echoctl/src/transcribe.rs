@@ -1186,9 +1186,11 @@ pub(crate) fn write_transcript(dir: &Path, cfg: &Config, model_name: &str, mut s
         for f in ["mic.wav", "remote.wav"] {
             let _ = fs::remove_file(dir.join(f));
         }
-        let mut meta = meta;
-        meta["audio"] = serde_json::json!("deleted after transcription");
-        fs::write(dir.join("meta.json"), serde_json::to_vec_pretty(&meta)?)?;
+        // Under the call's meta lock, read inside it: the AI profile may be changed meanwhile.
+        crate::calls::update_meta(dir, |m| {
+            m["audio"] = serde_json::json!("deleted after transcription");
+            Ok(())
+        })?;
         eprintln!("audio deleted (only text is kept; `--keep-audio` or `config --keep-audio true` to keep it)");
     }
     Ok(md_path)

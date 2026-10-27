@@ -5,7 +5,9 @@ to (their mic + the Teams app's audio, as two tracks) and transcribes them on-de
 Claude Code plugin that is its client (live pane, notes, follow-ups). **Separation of concerns:**
 the app never depends on Claude Code (it asks with native dialogs, starts at login, has its own
 permissions); the plugin drives it only through the CLI and the files in the data folder.
-Notes/actions are written only by a Claude session (the app writes transcripts, never notes).
+The final notes/actions (`notes.md`, `actions.json`) are written only by a Claude Code run (the app writes
+transcripts, never notes). One exception, by design: the app saves model-written **live drafts** during a call
+(`live-notes.json`, `live-asks.jsonl`, `livenotes.rs`), which never feed the minutes.
 
 ## Hard requirements
 - macOS **and** Windows. Platform code lives behind `#[cfg]` in `audio/{macos,windows}.rs` and
@@ -19,7 +21,7 @@ Notes/actions are written only by a Claude session (the app writes transcripts, 
 - `crates/echoctl` — one binary: the app (`app run`, or no arguments inside Echo.app /
   from Explorer) and the CLI: `app [start|quit|autostart|install-cli]`, `home [set|choose]`,
   `claude [connect --scope]`, `doctor`, `procs`, `capture`, `model list|download|use|remove`,
-  `config` (incl. `--notes-in`), `transcribe`, `pending --for`, `claim --for`, …
+  `config` (incl. `--notes-in`), `transcribe`, `pending --for`, `claim --for`, `ai`, `live`, `prep`, …
   `app.rs` = app lifecycle (single instance via the `watch.json` heartbeat, first run, control
   requests, native dialogs/notifications, autostart: LaunchAgent / HKCU Run key).
 - Data: `paths.rs`. Config dir (fixed): macOS `~/Library/Application Support/echo`, Windows
@@ -193,15 +195,18 @@ its recording starts (stopping never re-arms it), when that arm is cancelled, or
 `plugin/hooks/register.tsx` is a Claude Code mod (state contract `plugin/types/index.d.ts`, pure helpers
 `hooks/view.ts`). At session start it asks the CLI for the data folder (`echoctl app` → `home`),
 starts the app if it is set up but not running, and catches up: `echoctl pending --for <cwd>`
-(transcribed, no notes, ≥ 3 min, < 48 h; empty outside `config.notes_in`) → `echoctl claim
---for <cwd>` (atomic `.claimed`; one session per call) →
-`/echo:process-call`. Band above the prompt while the app runs: `[ Live ]` (hotkey l) +
+(transcribed, no notes, ≥ 3 min, < 48 h; empty outside `config.notes_in`) → `echoctl notes <call>
+--auto --for <cwd>` (the CLI checks the call is due and never tried, takes `.claimed` atomically — one
+session per call — and hands the run to the app, which writes the notes with the call's AI profile; it
+answers one JSON line `{requested, reason}`). Band above the prompt while the app runs: `[ Live ]` (hotkey l) +
 status. Pane: transcript left / summary-highlights-actions right (stacked under 100 cols). Every
 1 s it heartbeats `<home>/.echo/mod.json`, tails `events.jsonl` (from the end, never
-replays), and: on `recording_started` opens the `echo-live` pane; on `transcribed` claims
-the call and submits `/echo:process-call <dir>` (unattended processing). The pane shows `<call>/live.jsonl` (written by `live.rs` during recording: the
-call's one transcription pass, an utterance decoded after 0.8 s of silence — see Transcription) plus a rolling summary/highlights/actions from
-`$.model.complete` (haiku, ≤ every 90 s, ≥ 400 new chars). `echoctl live-replay <wav> <dir>` (hidden) plays a WAV in as a growing recording (10×)
+replays), and: on `recording_started` opens the `echo-live` pane; on `transcribed` asks the app
+for the notes (`notes --auto`, as above). The pane shows `<call>/live.jsonl` (written by `live.rs` during recording: the
+call's one transcription pass, an utterance decoded after 0.8 s of silence — see Transcription) plus the app's live notes
+(`live-notes.json` → summary/highlights/actions, `live-state.json`, answers in `live-asks.jsonl`); its quick buttons call
+`echoctl live ask`. It **never calls a model itself** (that would use the session's account, not the call's profile);
+live notes off → it says so. `echoctl live-replay <wav> <dir>` (hidden) plays a WAV in as a growing recording (10×)
 and writes the transcript, as after a call.
 Mute sync: while recording, the watcher polls Teams' microphone button via Accessibility / UI
 Automation (`ax::MuteWatch`, label "Unmute…" ⇒ muted) every 400 ms; muted ⇒ `audio::mic::MUTED` makes the mic
@@ -214,23 +219,92 @@ in the webview, "Detect" = the configured list; scheduled / joined meetings carr
 `MeetingContext.languages`) → `meta.json.languages` overrides the configured list in live and
 final transcription.
 
+## AI profiles and live notes (`ai.rs`, `livenotes.rs`; design + measurements: `docs/live-notes-design.md`)
+A profile = which model and account an AI job uses, per computer in `<config dir>/ai.json` (`default`,
+`live_notes` — off until turned on, `profiles`; loading refuses invalid or duplicate ids, saving is atomic and 0600 from the start).
+Kinds: `system` (built in, never stored: Claude Code as the user set it up — login shell, all settings,
+`config.notes_model` / `live_model`), `local` (a Messages-API server at `base_url`: Ollama on this computer; nothing
+checks it is local — the window names the host when it isn't), `claude` (a claude.ai account in its own Claude Code
+folder `<config dir>/claude/<id>`, signed in once with `echoctl ai login` / tray → AI for calls → Sign in…; the
+account seen first — email · organisation, not the plan — is recorded and another one later stops jobs until
+`ai accept` / tray → Use the account signed in now). No `ai.json` = only `system`: Claude Code launched as before, but
+its minutes are gated like a local model's (below) and live notes are off. A call pins its profile in `meta.json`
+`ai_profile` at recording start (explicit: `arm --ai`, the window's Record menu, a scheduled / joined meeting's
+`MeetingContext.ai_profile`; else the default; `!unreadable` when `ai.json` can't be read; one rule, `ai::pin`, for
+the watcher and `capture`). Every `ai.json` change goes through `Settings::update` (a lock + re-read, so one writer never
+undoes another; a new default must name a profile). **Recording never depends
+on any of this**: `arm` doesn't check the profile (only a typed `arm --ai` is checked by the CLI). Mid-call change →
+`ai-profile.request` → the watcher (it owns `meta.json` until `finish`, which keeps a switch written straight to the
+file before the heartbeat said the call records) → `livenotes::profile_changed`; afterwards `ai::set_call_profile`
+writes it. Request files name the call; one retitled since is found by its stamp. Every `meta.json` change takes the call's `.meta.lock` (`calls::update_meta` /
+`lock_meta`, the recording's writes too) and is atomic (`paths::write_atomic`: a temporary file of its own per write). **Routing is
+strict** (`ai::for_call`): a missing profile, an unreadable `ai.json` or `meta.json`, a signed-out or other account →
+the AI job fails with the reason; never another profile. `ai::claude_command` is how Echo runs Claude Code on call
+text or checks a sign-in (`login`'s terminal script and `claude connect` start it directly): `system` = the old
+command; `local` / `claude` = after the login shell, every `ANTHROPIC_*`, `CLAUDE_CODE_USE_*`,
+`CLAUDE_CODE_SKIP_*_AUTH`, `CLAUDE_CODE_OAUTH_*`, `CLAUDE_CODE_API_KEY_*`, `CLAUDE_CONFIG_DIR` unset (on Windows
+whatever their case) (`ai::routing_var`, and the same families as a `sed` filter, `UNSET_ROUTING`, for the shell — change both), the
+profile's values exported from `ECHOCTL_P_<name>` (never in the script's text), `NO_PROXY` for a loopback `local`,
+`--setting-sources user` (not for `claude auth …`: it rejects the option) — measured: a project
+`.claude/settings.json` `env` beats the process environment. Children get their own session (`ai::detach`:
+`setsid`; a process group alone stops an interactive login shell started from a terminal on SIGTTOU). Admin policy that
+could route (managed settings files + `.d/`, macOS managed preferences, any Windows policy key, the profile folder's
+cached `remote-settings.json`: a routing `env`, `apiKeyHelper`, `policyHelper(s)`, a source that can't be read) →
+Claude Code runs for `local` / `claude` are refused (`ai::policy_conflict`); `local` live jobs (curl) don't start
+Claude Code.
+Live notes (`livenotes.rs`): one worker in the app; calls keyed by their folder stamp (`calls::stamp_of` / `by_stamp`:
+retitling keeps it; two calls in the same second share one, and `by_stamp` then refuses to guess — the scheduler keeps
+the folder it last saw). A summary ≤ every 90 s with ≥ 400 new characters (not bytes), from a cursor of complete
+`live.jsonl` lines (advanced only when saved; backlog > 12K chars → newest part + a recorded gap), prompt = previous
+notes + new lines, always English, JSON `{now, decisions, actions, questions}` validated (none of the four fields →
+refused: it would wipe the draft) → `live-notes.json`. Asks (window, `echoctl live ask`, the pane): missed = last 5
+min, question = last 10, ask = the call (24K) + notes → `live-asks.jsonl`; asks go before summaries; every question
+ends as an answer or an error line (a refused one too), unless Echo quits first (questions wait in memory); one
+whose call folder can't be found says so in the call's state. `local` jobs: a direct `POST /v1/messages` with `thinking:
+disabled` through curl (`-q` first, no `-L`, `noproxy` for loopback; config on stdin) — Claude Code can't turn Qwen's
+thinking off (~50 s vs ~7 s an update); other kinds: lean `claude -p --tools "" --system-prompt …
+--strict-mcp-config --no-session-persistence`, text on stdin from a thread of its own (so the deadline and stopping cover it) (`system` from `notes_in`, else the data folder, so its `.claude/settings.json` applies — strictly, as its minutes:
+an unreadable `config.json` or a `notes_in` that isn't a folder fails the job, `ai::system_folder`). Stopping: pause stops summaries (a question goes on), a profile change stops either
+(a summary is dropped, a question asked again with the new profile), quit stops all — the worker sees the request
+before and while a child runs and stops it (`ai::stop_child` / `stop_group`: TERM to its group, then KILL to whatever
+of the group is left after 3 s — the leader exiting first doesn't end the watch; output a leftover process still
+holds after the leader exited gets 2 s, then that group is stopped too). Turning live notes off stops the running job
+and drops queued questions with that reason. `local` and `system` jobs share one
+lease, `<config dir>/local-model.lock` (`app::FileLock`: busy vs a real I/O error), across live jobs, the app's minutes
+and `notes --wait`; minutes on them wait while any call records or is transcribed. `live-state.json` mirrors the state
+for the pane only (rewritten `ended` at app start). `echoctl live test <call> [--ask kind text]` (hidden) runs one job
+right there. Measured on a Mac with Qwen 3.6 35B-A3B (Q4_K_M) through Ollama: summary 5–8 s (18 s cold), a question ~4 s;
+Claude Code + haiku ~9 s. Unverified: jobs on two signed-in Claude folders side by side (the sign-ins themselves keep
+separate Keychain items: checked), live jobs during real transcription load, Windows.
+
 ## Notes from the app (`notes.rs`)
 Write notes (window Notes/Actions tabs, the pane's buttons, `echoctl notes <call>`) runs the same
 `/echo:process-call` skill headless: `claude -p … --output-format stream-json`, through the
 user's login shell (`$SHELL -l -i -c`, their env: gateways, `ANTHROPIC_*`, Bedrock/Vertex), cwd
-= `notes_in` or the data folder, `--plugin-dir` = the plugin shipped in the app
+= `notes_in` or the data folder (for `system` strictly: `ai::system_folder`), `--plugin-dir` = the plugin shipped in the app
 (`Echo.app/Contents/Resources/plugin`; dev: repo `plugin/`; else the installed one), model =
 `config.notes_model` (default sonnet; `default` = Claude Code's own; menu → Claude Code → Notes
 model). `--permission-mode dontAsk` + an allowlist (Read/Glob/Grep in the data folder,
 Edit/Write in `calls/`, `Bash(echoctl:*)`, the skill): transcripts are others' words and the
 user's own default mode (auto / bypass) must not apply. `ECHOCTL_HEADLESS=1` inside: the mod
 does nothing, `pending`/`claim` refuse. The CLI hands the run to the running app
-(`notes-<call>.request`) unless `--wait`. State in `<call>/notes-run.json` (running / done /
-skipped / failed / needs_login — "Not logged in · Please run /login" etc.), readable log in
+(`notes-<call>.request`) unless `--wait` (Ctrl-C there stops its Claude Code too: `notes::shutdown`). The run uses the call's AI profile (launcher, model, strictness: above).
+One run per call (`notes::admit`): the call's place first, an OS lock on `notes-run.lock` held by the owner for the
+whole run (released by the OS if it dies; it moves with a renamed folder; dropped before the final rename for
+Windows), then under it the claim (a session's fresh claim on a call without notes wins), then `queued`; a refusal
+changes nothing. State in
+`<call>/notes-run.json` (queued — waiting for the call to end / the local model —, running, done, skipped, failed,
+needs_login — "Not logged in · Please run /login" etc., from a failed run only; a `local` profile's refused token is
+`failed`, saying how to set it — `notes::conclude`); `pid` = the owner (the app or a `notes --wait`) for the whole
+run, `child_pid` = Claude Code; a dead owner = interrupted, unless its Claude Code still runs (then it stays the only
+writer); the claim is freed once nobody holds the place; every failure from `queued` on is recorded; a run refused
+before it starts says why there too; the run finishes in the folder as named after Claude Code (the skill may retitle
+it); quitting the app stops minutes runs' Claude Code and starts no more (`notes::shutdown`: a child is started and
+registered under the same lock). Readable log in
 `<call>/claude.log` (window → Show log). Failure releases `.claimed`. After transcription with
 no live session (`mod.json` heartbeat < 10 s) the app notifies "Transcript ready — click Write
-notes". Live pane model: `config.live_model` (default haiku).
-A local notes model: the run's cwd (`notes_in`, else the data folder) gets a `.claude/settings.json`
+notes". `config.live_model` = the `system` profile's live model (default haiku).
+A local notes model (`system` profile; a `local` profile does this itself): the run's cwd (`notes_in`, else the data folder) gets a `.claude/settings.json`
 whose `env` points Claude Code at Ollama's Anthropic API (`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`,
 the default-model vars) and `notes_model` names the Ollama model (one with `num_ctx` ≥ 64K: Claude
 Code's prompt + an hour's transcript). Claude Code warns `unrecognized_model` for any model it
@@ -320,7 +394,7 @@ frames). A renamed call's old page (generator meta) is replaced, never another f
   tray "Add a note…" while recording; "Notes ready" notification.
 - Notes bullets carry `[mm:ss]`; the pane turns them into jumps; `actions.json` items have
   `t` + `status` (todo/done, toggled in the pane). Live quick actions: What did I miss / Suggest
-  a question (haiku over the last 5/10 min).
+  a question (the call's AI profile, its live model, over the last 5/10 min; `livenotes.rs`).
 
 ## Transcription
 **One pass, during the call** (`live.rs`): a worker reads `mic.wav` / `remote.wav` as the track

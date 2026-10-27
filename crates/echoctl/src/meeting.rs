@@ -43,6 +43,9 @@ pub struct MeetingContext {
     /// Languages chosen for this recording (the window's Record ▾ menu); empty = the configured ones.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub languages: Vec<String>,
+    /// The AI profile chosen for this recording (the window's Record menu); none = the default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_profile: Option<String>,
 }
 
 pub const FILE: &str = "meeting.json";

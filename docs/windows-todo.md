@@ -67,6 +67,16 @@ Code markers: `git grep "TODO(windows)"`.
 
 ## Built but never run on Windows
 
+- **AI profiles and live notes** (`ai.rs`, `livenotes.rs`): the Rust tests have only run on macOS (several
+  are Unix-only). Before calling them verified: `cargo test --no-default-features` on
+  Windows (`FileLock` share modes, the minutes' single run, settings); a live job on a `local`
+  profile through `curl.exe`; stopping a running `claude -p` job (pause, profile change, quit) with
+  nothing left behind — `taskkill /T` on a launcher that already exited may miss its `node.exe`;
+  a user environment with routing variables in any case (`Anthropic_Base_Url`) and `claude.cmd`:
+  the job still uses the profile's account; a `HKCU\SOFTWARE\Policies\ClaudeCode` key refuses
+  `local` / `claude` runs; retitling a call while its notes run (`notes-run.lock`, `.meta.lock` open).
+  `ai.json` is owner-only through the user profile's ACL (the 0600 mode is Unix only).
+
 - **Write notes** (`notes.rs`): runs `claude` directly (no login shell, `cfg(unix)` only), so the
   user's env is whatever the app inherited. Check: `claude` is found (`claude.exe` / `claude.cmd`
   from npm, `app::find_program`), `--plugin-dir` points at the plugin next to `echoctl.exe`,

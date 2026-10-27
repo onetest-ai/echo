@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use chrono::Utc;
 use serde_json::{json, Value};
 
@@ -80,6 +80,8 @@ pub fn run(app: TargetApp, tray: bool, background: bool) -> Result<()> {
     ctrlc::set_handler(move || s.store(true, Ordering::SeqCst))?; // SIGINT + SIGTERM
     std::thread::spawn(|| write_health(None, false, false));
     std::thread::spawn(check_updates);
+    // Live notes during calls (`livenotes.rs`): one worker for the AI jobs.
+    crate::livenotes::start();
     // Windows: try the GPU now (in a child process), not when the first recording loads a model.
     #[cfg(all(windows, feature = "transcribe"))]
     std::thread::spawn(crate::gpu::allowed);
@@ -126,7 +128,7 @@ fn check_updates() {
     }
 }
 
-static INSTANCE_LOCK: std::sync::OnceLock<fs::File> = std::sync::OnceLock::new();
+static INSTANCE_LOCK: std::sync::OnceLock<FileLock> = std::sync::OnceLock::new();
 
 /// Set on an app started by a restart: wait for the previous instance's lock.
 const WAIT_FOR_LOCK: &str = "ECHOCTL_WAIT_FOR_LOCK";
@@ -150,27 +152,45 @@ fn single_instance() -> Result<bool> {
 fn try_lock() -> Result<bool> {
     fs::create_dir_all(paths::config_dir())?;
     let path = paths::config_dir().join("app.lock");
-    #[cfg(unix)]
-    let file = {
-        use std::os::fd::AsRawFd;
-        let f = fs::OpenOptions::new().create(true).truncate(false).write(true).open(&path)?;
-        // SAFETY: flock on a valid, open fd; the lock lives as long as the File (process life).
-        if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
-            return Ok(false);
-        }
-        f
-    };
-    #[cfg(windows)]
-    let file = {
-        use std::os::windows::fs::OpenOptionsExt;
-        // share_mode(0): no other process can open the file while we hold it.
-        match fs::OpenOptions::new().create(true).truncate(false).write(true).share_mode(0).open(&path) {
-            Ok(f) => f,
-            Err(_) => return Ok(false),
-        }
-    };
-    let _ = INSTANCE_LOCK.set(file);
+    let Some(lock) = FileLock::try_take(&path).with_context(|| format!("opening {}", path.display()))? else { return Ok(false) };
+    let _ = INSTANCE_LOCK.set(lock);
     Ok(true)
+}
+
+/// An exclusive lock across processes, held until dropped and released when its process exits:
+/// `flock` on Unix (a second `flock` in the same process is refused too), a handle nobody else may
+/// open on Windows.
+pub struct FileLock {
+    _file: fs::File,
+}
+
+impl FileLock {
+    /// The lock; `Ok(None)` when another holder has it (never waits); an error when the file
+    /// can't be opened at all.
+    pub fn try_take(path: &Path) -> std::io::Result<Option<FileLock>> {
+        #[cfg(unix)]
+        let file = {
+            use std::os::fd::AsRawFd;
+            let f = fs::OpenOptions::new().create(true).truncate(false).write(true).open(path)?;
+            // SAFETY: flock on a valid, open fd; the lock lives as long as the File.
+            if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+                let e = std::io::Error::last_os_error();
+                return if e.kind() == std::io::ErrorKind::WouldBlock { Ok(None) } else { Err(e) };
+            }
+            f
+        };
+        #[cfg(windows)]
+        let file = {
+            use std::os::windows::fs::OpenOptionsExt;
+            // share_mode(0): no other process can open the file while we hold it.
+            match fs::OpenOptions::new().create(true).truncate(false).write(true).share_mode(0).open(path) {
+                Ok(f) => f,
+                Err(e) if e.raw_os_error() == Some(32) => return Ok(None), // ERROR_SHARING_VIOLATION
+                Err(e) => return Err(e),
+            }
+        };
+        Ok(Some(FileLock { _file: file }))
+    }
 }
 
 /// Background launches have no terminal: send output to `<home>/.echo/app.log` (Unix) or
@@ -355,6 +375,7 @@ pub fn handle_requests(stop: &AtomicBool) {
         std::thread::spawn(move || write_health(id, request, probe));
     }
     crate::notes::handle_requests();
+    crate::livenotes::handle_requests();
 }
 
 /// Trigger the permission prompts for the app (tray: Health → Ask for permissions).
@@ -488,7 +509,7 @@ pub fn offer_meeting(m: MeetingContext) {
         let answer = ask(&format!("{subject} is starting.{recap}\n\nRecord and transcribe it?"), buttons, "Record");
         match answer.as_deref() {
             Some("Join & record") => drop(watch::join(m)),
-            Some("Record") => drop(watch::arm(m.subject.clone(), Some(m), None)),
+            Some("Record") => drop(watch::arm(m.subject.clone(), Some(m), None, None)),
             _ => {}
         }
         ASKING.store(false, Ordering::SeqCst);
@@ -503,7 +524,7 @@ pub fn offer_call(app: TargetApp) {
     std::thread::spawn(move || {
         let answer = ask(&format!("A {app:?} call started.\n\nRecord and transcribe it?"), &["Not now", "Record"], "Record");
         if answer.as_deref() == Some("Record") {
-            let _ = watch::arm(None, crate::calendar::meeting_now(Utc::now()), None);
+            let _ = watch::arm(None, crate::calendar::meeting_now(Utc::now()), None, None);
         }
         ASKING.store(false, Ordering::SeqCst);
     });
@@ -599,6 +620,9 @@ pub fn info() -> Value {
         "notes_in": crate::config::Config::load().ok().and_then(|c| c.notes_in),
         "notes_model": crate::config::Config::load().unwrap_or_default().notes_model_label(),
         "live_model": crate::config::Config::load().ok().and_then(|c| c.live_model).unwrap_or_else(|| crate::config::DEFAULT_LIVE_MODEL.into()),
+        // Live notes during calls: the app writes them, the terminal pane only shows them.
+        "live_notes": crate::livenotes::enabled().unwrap_or(false),
+        "ai_error": crate::ai::Settings::load().err().map(|e| format!("{e:#}")),
         "version": env!("CARGO_PKG_VERSION"),
     })
 }

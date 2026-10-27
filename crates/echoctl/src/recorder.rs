@@ -28,6 +28,9 @@ struct Meta {
     /// Languages pinned for this call (overrides the workspace list); absent = workspace list
     #[serde(skip_serializing_if = "Option::is_none")]
     languages: Option<Vec<String>>,
+    /// The AI profile this call's live notes and minutes use (`ai.rs`), pinned at the start
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ai_profile: Option<String>,
     tracks: Vec<TrackInfo>,
 }
 
@@ -77,6 +80,7 @@ impl Recording {
         title: Option<&str>,
         meeting: Option<&MeetingContext>,
         languages: Option<Vec<String>>,
+        ai_profile: Option<String>,
     ) -> Result<Self> {
         let started_at = Local::now();
         // The meeting subject names the call when no explicit title is given.
@@ -91,9 +95,10 @@ impl Recording {
             ended_at: None,
             stop_reason: None,
             languages: languages.clone(),
+            ai_profile,
             tracks: vec![],
         };
-        fs::write(dir.join("meta.json"), serde_json::to_vec_pretty(&meta)?)?;
+        paths::write_atomic(&dir.join("meta.json"), &serde_json::to_vec_pretty(&meta)?)?;
         if let Some(m) = meeting {
             m.save(&dir)?;
         }
@@ -121,6 +126,18 @@ impl Recording {
         })
     }
 
+    /// Switch the call's AI profile mid-call. The recording owns `meta.json` until it finishes
+    /// (and rewrites it whole then), so the change goes through here.
+    pub fn set_ai_profile(&mut self, id: &str) -> Result<()> {
+        let _lock = crate::calls::lock_meta(&self.dir)?;
+        let before = self.meta.ai_profile.replace(id.to_string());
+        if let Err(e) = paths::write_atomic(&self.dir.join("meta.json"), &serde_json::to_vec_pretty(&self.meta)?) {
+            self.meta.ai_profile = before; // memory and disk say the same
+            return Err(e.into());
+        }
+        Ok(())
+    }
+
     /// Supervise both tracks; call every ~250 ms.
     pub fn poll(&mut self) {
         self.remote.poll();
@@ -143,7 +160,16 @@ impl Recording {
         }
         self.meta.ended_at = Some(Local::now());
         self.meta.stop_reason = Some(reason.to_string());
-        fs::write(self.dir.join("meta.json"), serde_json::to_vec_pretty(&self.meta)?)?;
+        {
+            let _lock = crate::calls::lock_meta(&self.dir)?;
+            // A profile switch written straight to the file is kept: it can reach a recording that
+            // has just started, before the heartbeat says it records (`ai::set_call_profile`).
+            let on_disk = fs::read(self.dir.join("meta.json")).ok().and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok());
+            if let Some(id) = on_disk.as_ref().and_then(|m| m["ai_profile"].as_str()).filter(|s| !s.is_empty()) {
+                self.meta.ai_profile = Some(id.to_string());
+            }
+            paths::write_atomic(&self.dir.join("meta.json"), &serde_json::to_vec_pretty(&self.meta)?)?;
+        }
         Ok((self.dir, self.meta.tracks, self.live.take()))
     }
 }
@@ -156,7 +182,8 @@ pub fn capture(
     meeting: Option<MeetingContext>,
     languages: Option<Vec<String>>,
 ) -> Result<()> {
-    let mut rec = Recording::start(app, title, meeting.as_ref(), languages)?;
+    let ai_profile = Some(crate::ai::pin(None, meeting.as_ref()));
+    let mut rec = Recording::start(app, title, meeting.as_ref(), languages, ai_profile)?;
     eprintln!("● recording {app:?} + microphone → {}", rec.dir.display());
     eprintln!("  press Ctrl-C to stop; device switches are followed automatically");
 

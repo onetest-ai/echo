@@ -135,6 +135,7 @@ pub fn to_meeting(ev: &Value) -> Option<MeetingContext> {
         vocabulary: vec![],
         source: Some("calendar".into()),
         languages: vec![],
+        ai_profile: None,
     })
 }
 
