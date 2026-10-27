@@ -13,7 +13,7 @@ use crate::app::NoWindow;
 use std::collections::HashSet;
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Seek, SeekFrom, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -397,6 +397,7 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
         finish(r, "watch_stopped");
     }
     crate::livenotes::shutdown();
+    crate::signin::shutdown();
     crate::notes::shutdown();
     let _ = fs::remove_file(file("watch.json"));
     emit("watch_stopped", json!({}));
@@ -412,20 +413,26 @@ fn pinned_profile(a: &Armed, meeting: Option<&MeetingContext>) -> String {
 /// that stopped recording meanwhile gets it directly; a switch that can't be applied says why.
 fn apply_profile_request(rec: Option<&mut Recording>, req: &Value) {
     let (Some(call), Some(id)) = (req["call"].as_str(), req["profile"].as_str()) else { return };
+    // Applied: the live notes follow, and a plainly signed-out Claude profile gets a sign-in
+    // (`signin::applied`).
+    let applied = |dir: &Path| {
+        crate::livenotes::profile_changed(dir);
+        crate::signin::applied(call, id);
+    };
     match rec {
         Some(r) if r.dir.file_name().and_then(|n| n.to_str()) == Some(call) => match r.set_ai_profile(id) {
-            Ok(()) => crate::livenotes::profile_changed(&r.dir),
+            Ok(()) => applied(&r.dir),
             Err(e) => crate::livenotes::report(&r.dir, &format!("couldn't switch to {id}: {e:#}")),
         },
         _ => {
             // By name, else by stamp (retitled since it was asked for).
-            let dir = crate::calls::resolve_call(call).ok().or_else(|| crate::calls::by_stamp(&crate::calls::stamp_of(std::path::Path::new(call))));
+            let dir = crate::calls::resolve_call(call).ok().or_else(|| crate::calls::by_stamp(&crate::calls::stamp_of(Path::new(call))));
             let Some(dir) = dir else {
                 eprintln!("ai: dropped the switch of {call} to {id} — the call can't be found");
                 return;
             };
             match crate::ai::set_call_profile(&dir, id) {
-                Ok(crate::ai::ProfileChange::Applied) => crate::livenotes::profile_changed(&dir),
+                Ok(crate::ai::ProfileChange::Applied) => applied(&dir),
                 Ok(crate::ai::ProfileChange::Requested) => {}
                 Err(e) => crate::livenotes::report(&dir, &format!("couldn't switch to {id}: {e:#}")),
             }

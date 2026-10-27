@@ -444,8 +444,11 @@ fn complete_claude(p: &Profile, system: &str, user: &str, whole: bool, cancelled
     if is_error {
         let all = format!("{out}\n{err}\n{text}");
         if crate::notes::needs_login(&all) {
-            ai::forget_check(&p.id);
-            bail!("{} isn't signed in — menu → AI for calls → Sign in…", p.name);
+            if !p.kind.signs_in() {
+                bail!("Claude Code isn't signed in — open Terminal, run claude and type /login");
+            }
+            ai::auth_failed(p);
+            return Err(anyhow::Error::new(ai::SignInNeeded::signed_out(p)));
         }
         let why = [text.trim().lines().next().unwrap_or("").to_string(), last_line(&err)].into_iter().find(|l| !l.is_empty());
         let why = why.or_else(|| wrote.err().map(|e| format!("couldn't send the prompt: {e}")));
@@ -467,8 +470,8 @@ struct Ask {
     kind: AskKind,
     text: String,
     asked_at: DateTime<Local>,
-    /// Waiting for the local model (busy): not asked before this — other jobs go first meanwhile
-    /// — and what it waits for (the window says).
+    /// Waiting for its model (busy, or being signed in): not asked before this — other jobs go
+    /// first meanwhile — and what it waits for (the window says).
     not_before: Option<(Instant, Wait)>,
 }
 
@@ -478,6 +481,8 @@ struct Ask {
 enum Wait {
     /// The local model, taken by another job.
     Model,
+    /// Its profile's sign-in.
+    SignIn,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -498,9 +503,13 @@ struct CallState {
     paused: bool,
     /// When the next summary is due (None: not before something sets it).
     next_summary: Option<Instant>,
-    /// waiting · updating · updated · failed · busy (the local model is taken) · paused · ended
+    /// waiting · updating · updated · failed · busy (the local model is taken) · signing_in (its
+    /// profile is being signed in) · paused · ended
     state: String,
     error: Option<String>,
+    /// The profile (id) a job failed for — not signed in, or to another account: the window offers
+    /// Sign in… / Use <account>, and `signed_in` resumes the call at once.
+    needs_sign_in: Option<String>,
     asks: VecDeque<Ask>,
     asking: Option<Ask>,
 }
@@ -518,6 +527,9 @@ struct Running {
 struct Shared {
     calls: HashMap<String, CallState>,
     running: Option<Running>,
+    /// Profiles an in-app sign-in holds back (id → its flow's generation): their jobs wait until
+    /// it is over, so they can't take the lease back before the sign-in gets it.
+    deferred: HashMap<String, u64>,
     started: bool,
     shutdown: bool,
 }
@@ -591,10 +603,19 @@ fn set_state(stamp: &str, state: &str, error: Option<String>) {
 /// Set the state only while the summary that sets it is still current (a pause or a profile
 /// change in between wins).
 fn set_state_if(stamp: &str, generation: u64, state: &str, error: Option<String>) {
+    set_state_where(stamp, |c| c.summary_gen == generation, state, error, None);
+}
+
+/// Set the state, its error and (`needs`: Some) the profile it waits a sign-in for, in one step —
+/// only while `current` says the job that sets them still counts. True when set.
+fn set_state_where(stamp: &str, current: impl Fn(&CallState) -> bool, state: &str, error: Option<String>, needs: Option<Option<String>>) -> bool {
     let ok = with(|s| match s.calls.get_mut(stamp) {
-        Some(c) if c.summary_gen == generation => {
+        Some(c) if current(c) => {
             c.state = state.into();
             c.error = error.clone();
+            if let Some(n) = needs {
+                c.needs_sign_in = n;
+            }
             true
         }
         _ => false,
@@ -602,6 +623,7 @@ fn set_state_if(stamp: &str, generation: u64, state: &str, error: Option<String>
     if ok {
         mirror(stamp, state, error);
     }
+    ok
 }
 
 /// Start the worker (the app, once). Nothing is live at start: mirrors left by a previous run
@@ -639,9 +661,16 @@ pub fn recording_started(dir: &Path) {
         Ok(true) => {
             set_state(&stamp, "waiting", None);
             let dir = dir.to_path_buf();
+            let generation = with(|s| s.calls.get(&stamp).map_or(0, |c| c.profile_gen));
             std::thread::spawn(move || {
+                // Said only while the call still has the profile that was checked.
+                let current = |c: &CallState| c.profile_gen == generation;
                 if let Err(e) = ai::for_call(&dir) {
-                    set_state(&stamp, "failed", Some(format!("{e:#}")));
+                    match classify(&e) {
+                        Hold::SigningIn => set_state_where(&stamp, current, "signing_in", None, None),
+                        Hold::SignIn { profile, why } => set_state_where(&stamp, current, "failed", Some(why), Some(Some(profile))),
+                        Hold::Busy | Hold::Fail(_) => set_state_where(&stamp, current, "failed", Some(format!("{e:#}")), None),
+                    };
                 }
             });
         }
@@ -695,12 +724,108 @@ pub fn profile_changed(dir: &Path) {
         c.summary_gen += 1;
         c.profile_gen += 1;
         c.error = None;
+        c.needs_sign_in = None;
         if c.recording && !c.paused {
             c.next_summary = Some(Instant::now());
         }
     });
     stop_running(&stamp, &[JobKind::Summary, JobKind::Ask]);
     WAKE.notify_all();
+}
+
+/// An in-app sign-in of profile `id` (flow `generation`) is about to start: jobs on it are held
+/// back until `release`, and what runs on it stops — a summary is dropped (its cursor never
+/// moved), a question asked again afterwards. Recording calls say they wait for the sign-in (and
+/// keep `needs_sign_in`: a sign-in that works resumes them).
+pub fn defer(id: &str, generation: u64) {
+    with(|s| s.deferred.insert(id.to_string(), generation));
+    let on = enabled().unwrap_or(false);
+    for dir in calls_on(id) {
+        let stamp = track(&dir);
+        let live = with(|s| {
+            let c = s.calls.entry(stamp.clone()).or_default();
+            c.summary_gen += 1;
+            c.profile_gen += 1;
+            c.recording && !c.paused
+        });
+        stop_running(&stamp, &[JobKind::Summary, JobKind::Ask]);
+        if live && on {
+            set_state(&stamp, "signing_in", None);
+        }
+    }
+    WAKE.notify_all();
+}
+
+/// That sign-in is over (whatever its outcome): the calls it held back go on now (a newer flow's
+/// hold is never released by an older one).
+pub fn release(id: &str, generation: u64) {
+    let mine = with(|s| s.deferred.get(id) == Some(&generation) && s.deferred.remove(id).is_some());
+    if mine {
+        wake(id, false);
+    }
+}
+
+fn deferred(id: &str) -> bool {
+    with(|s| s.deferred.contains_key(id))
+}
+
+/// Profile `id` was signed in, or its account accepted: calls that failed for it, or waited for
+/// its sign-in, go on now (a summary at once while recording, not paused, live notes on).
+pub fn signed_in(id: &str) {
+    wake(id, true);
+}
+
+/// Calls on `id` waiting for a sign-in (and, `failed`, those that failed for want of one) go on.
+fn wake(id: &str, failed: bool) {
+    let waiting: Vec<PathBuf> = with(|s| {
+        s.calls.values().filter(|c| (failed && c.needs_sign_in.as_deref() == Some(id)) || c.state == "signing_in").filter_map(|c| c.dir.clone()).collect()
+    });
+    let on = enabled().unwrap_or(false);
+    for dir in waiting.into_iter().filter(|d| ai::call_profile_id(d).ok().as_deref() == Some(id)) {
+        let stamp = track(&dir);
+        let state = with(|s| {
+            let c = s.calls.entry(stamp.clone()).or_default();
+            if failed {
+                c.needs_sign_in = None;
+            }
+            if c.recording && !c.paused && on {
+                c.next_summary = Some(Instant::now());
+            }
+            if !c.recording { "ended" } else if c.paused { "paused" } else { "waiting" }
+        });
+        if on {
+            set_state(&stamp, state, None);
+        }
+    }
+    WAKE.notify_all();
+}
+
+/// (tests) A recording call whose last summary failed for want of `id`'s sign-in.
+#[cfg(test)]
+pub fn test_call_needing(dir: &Path, id: &str) {
+    let stamp = track(dir);
+    with(|s| {
+        let c = s.calls.entry(stamp).or_default();
+        c.recording = true;
+        c.state = "failed".into();
+        c.needs_sign_in = Some(id.into());
+    });
+}
+
+/// The calls known here whose pinned profile is `id`.
+fn calls_on(id: &str) -> Vec<PathBuf> {
+    let dirs: Vec<PathBuf> = with(|s| s.calls.values().filter_map(|c| c.dir.clone()).collect());
+    dirs.into_iter().filter(|d| ai::call_profile_id(d).ok().as_deref() == Some(id)).collect()
+}
+
+/// A question's verdict on the call's profile (`id`: it needs a sign-in; None: it worked) —
+/// while the question's profile is still the call's.
+fn question_needs_sign_in(stamp: &str, profile_gen: u64, id: Option<String>) {
+    with(|s| {
+        if let Some(c) = s.calls.get_mut(stamp).filter(|c| c.profile_gen == profile_gen) {
+            c.needs_sign_in = id;
+        }
+    });
 }
 
 /// Queue a question about a call (the window, `echoctl live ask`, the terminal pane). A refusal
@@ -733,10 +858,11 @@ pub fn refused(dir: &Path, kind: AskKind, text: &str, why: &str) {
     }
 }
 
-/// Show a problem in the call's live state (a profile switch that didn't apply, …).
+/// Show a problem in the call's live state (a profile switch that didn't apply, …) — in place of
+/// an older one, a sign-in it waited for included.
 pub fn report(dir: &Path, why: &str) {
     let stamp = track(dir);
-    set_state(&stamp, "failed", Some(why.to_string()));
+    set_state_where(&stamp, |_| true, "failed", Some(why.to_string()), Some(None));
 }
 
 /// Stop everything (the app is quitting): the running job's child is stopped (waits up to 5 s).
@@ -770,6 +896,7 @@ pub fn status(dir: &Path) -> Value {
                 "settings_error": settings_error,
                 "state": c.state,
                 "error": c.error,
+                "needs_sign_in": c.needs_sign_in,
                 "paused": c.paused,
                 "recording": c.recording,
                 "running": running,
@@ -903,8 +1030,23 @@ pub fn local_lock_path() -> PathBuf {
 enum Hold {
     /// The local model is taken by another job: try again soon.
     Busy,
+    /// The profile is being signed in: try again soon.
+    SigningIn,
+    /// The profile isn't signed in, or to another account.
+    SignIn { profile: String, why: String },
     /// It can't run: the reason.
     Fail(String),
+}
+
+/// A profile error, by kind (before it becomes text).
+fn classify(e: &anyhow::Error) -> Hold {
+    if e.downcast_ref::<ai::SigningIn>().is_some() {
+        Hold::SigningIn
+    } else if let Some(s) = e.downcast_ref::<ai::SignInNeeded>() {
+        Hold::SignIn { profile: s.profile.clone(), why: format!("{e:#}") }
+    } else {
+        Hold::Fail(format!("{e:#}"))
+    }
 }
 
 /// (tests) Runs right after a job's profile is ready — where a slow sign-in check would end.
@@ -916,14 +1058,18 @@ fn still_on() -> bool {
     enabled().unwrap_or(false)
 }
 
-/// The call's profile, plus the local model's lock when it is gated.
-fn take_profile(dir: &Path) -> Result<(Profile, Option<crate::app::FileLock>), Hold> {
-    let p = ai::for_call(dir).map_err(|e| Hold::Fail(format!("{e:#}")))?;
+/// The call's profile ready (with its lease), plus the local model's lock when it is gated. Held
+/// back while an in-app sign-in of that profile runs.
+fn take_profile(dir: &Path) -> Result<(ai::Ready, Option<crate::app::FileLock>), Hold> {
+    if ai::call_profile_id(dir).is_ok_and(|id| deferred(&id)) {
+        return Err(Hold::SigningIn);
+    }
+    let p = ai::for_call(dir).map_err(|e| classify(&e))?;
     #[cfg(test)]
     if let Some(f) = *AFTER_PROFILE.lock().unwrap_or_else(|e| e.into_inner()) {
         f();
     }
-    if !p.kind.gated() {
+    if !p.profile().kind.gated() {
         return Ok((p, None));
     }
     let _ = fs::create_dir_all(paths::config_dir());
@@ -949,14 +1095,20 @@ fn run_summary(stamp: &str, generation: u64) {
     if new_chars < MIN_NEW_CHARS {
         return retry_summary_in(stamp, 10); // not enough said yet
     }
-    let (p, _lock) = match take_profile(&dir) {
+    let (ready, _lock) = match take_profile(&dir) {
         Ok(x) => x,
         Err(Hold::Busy) => {
             set_state_if(stamp, generation, "busy", None);
             return retry_summary_in(stamp, 10);
         }
+        Err(Hold::SigningIn) => {
+            set_state_if(stamp, generation, "signing_in", None);
+            return retry_summary_in(stamp, 10);
+        }
+        Err(Hold::SignIn { profile, why }) => return summary_needs_sign_in(stamp, generation, profile, why),
         Err(Hold::Fail(e)) => return set_state_if(stamp, generation, "failed", Some(e)),
     };
+    let p = ready.profile();
     if !summary_current(stamp, generation) || cancelled() || !still_on() {
         return; // paused, profile changed, turned off or quitting meanwhile: nothing was sent
     }
@@ -974,7 +1126,7 @@ fn run_summary(stamp: &str, generation: u64) {
         None => "New transcript lines:\n".to_string(),
     });
     user.push_str(&format_lines(&lines_in));
-    let reply = complete(&p, SUMMARY_SYSTEM, &user, 1200, true, &cancelled);
+    let reply = complete(p, SUMMARY_SYSTEM, &user, 1200, true, &cancelled);
     if !summary_current(stamp, generation) || !enabled().unwrap_or(false) {
         return; // stale, or live notes were turned off: its result is dropped
     }
@@ -997,12 +1149,24 @@ fn run_summary(stamp: &str, generation: u64) {
             };
             let bytes = serde_json::to_vec_pretty(&notes).unwrap_or_default();
             match save_in_call(stamp, |d| Ok(paths::write_atomic(&d.join(NOTES), &bytes)?)) {
-                Ok(()) => set_state_if(stamp, generation, if recording { "updated" } else { "ended" }, None),
+                Ok(()) => {
+                    let state = if recording { "updated" } else { "ended" };
+                    set_state_where(stamp, |c| c.summary_gen == generation, state, None, Some(None));
+                    ai::job_worked(&p.id);
+                }
                 Err(e) => set_state_if(stamp, generation, "failed", Some(format!("couldn't save the live notes: {e:#}"))),
             }
         }
-        Err(e) => set_state_if(stamp, generation, "failed", Some(format!("{e:#}"))),
+        Err(e) => match classify(&e) {
+            Hold::SignIn { profile, why } => summary_needs_sign_in(stamp, generation, profile, why),
+            _ => set_state_if(stamp, generation, "failed", Some(format!("{e:#}"))),
+        },
     }
+}
+
+/// A summary failed because its profile needs a sign-in (while it is still current).
+fn summary_needs_sign_in(stamp: &str, generation: u64, id: String, why: String) {
+    set_state_where(stamp, |c| c.summary_gen == generation, "failed", Some(why), Some(Some(id)));
 }
 
 fn run_ask(stamp: &str, generation: u64, ask: Ask) {
@@ -1014,7 +1178,7 @@ fn run_ask(stamp: &str, generation: u64, ask: Ask) {
         })
     };
     // Put it back first in line: at once (its profile changed: asked with the new one), or in 5 s
-    // while the local model is busy (other calls' jobs go first meanwhile).
+    // while its model is busy or being signed in (other calls' jobs go first meanwhile).
     let again = |wait: Option<Wait>| {
         with(|s| {
             if let Some(c) = s.calls.get_mut(stamp) {
@@ -1056,8 +1220,8 @@ fn run_ask(stamp: &str, generation: u64, ask: Ask) {
         Err(e) => return finish(None, String::new(), Some(format!("the AI settings can't be read: {e:#}"))),
     }
     let taken = take_profile(&dir);
-    // The check may have taken seconds: a profile change meanwhile (its generation moved) asks it
-    // again — whatever this check said.
+    // The check may have taken seconds: a profile change or a sign-in meanwhile (its generation
+    // moved) asks it again — whatever this check said.
     if with(|s| s.shutdown) {
         return done();
     }
@@ -1065,11 +1229,17 @@ fn run_ask(stamp: &str, generation: u64, ask: Ask) {
         drop(taken);
         return again(None);
     }
-    let (p, _lock) = match taken {
+    let (ready, _lock) = match taken {
         Ok(x) => x,
         Err(Hold::Busy) => return again(Some(Wait::Model)),
+        Err(Hold::SigningIn) => return again(Some(Wait::SignIn)),
+        Err(Hold::SignIn { profile, why }) => {
+            question_needs_sign_in(stamp, generation, Some(profile));
+            return finish(None, String::new(), Some(why));
+        }
         Err(Hold::Fail(e)) => return finish(None, String::new(), Some(e)),
     };
+    let p = ready.profile();
     // Read the call where it is now: it may have been retitled during the check.
     let Some(dir) = call_dir(stamp) else { return lost() };
     let all = lines(&dir);
@@ -1108,7 +1278,7 @@ fn run_ask(stamp: &str, generation: u64, ask: Ask) {
     if !still_on() {
         return finish(None, String::new(), Some("live notes were turned off before it was asked".into()));
     }
-    let reply = complete(&p, system, &user, 600, false, &cancelled);
+    let reply = complete(p, system, &user, 600, false, &cancelled);
     if with(|s| s.shutdown) {
         return done();
     }
@@ -1116,8 +1286,15 @@ fn run_ask(stamp: &str, generation: u64, ask: Ask) {
         return again(None);
     }
     match reply {
-        Ok(text) => finish(Some(&p), clip_lines(&text, 2000), None),
+        Ok(text) => {
+            question_needs_sign_in(stamp, generation, None); // it works
+            ai::job_worked(&p.id);
+            finish(Some(p), clip_lines(&text, 2000), None)
+        }
         Err(e) => {
+            if let Hold::SignIn { profile, .. } = classify(&e) {
+                question_needs_sign_in(stamp, generation, Some(profile));
+            }
             // Live notes turned off (or their settings unreadable) meanwhile stopped it: say so,
             // not just "stopped".
             let why = match enabled() {
@@ -1125,7 +1302,7 @@ fn run_ask(stamp: &str, generation: u64, ask: Ask) {
                 Ok(false) => "live notes were turned off while it was being answered".into(),
                 Err(s) => format!("the AI settings can't be read: {s:#}"),
             };
-            finish(Some(&p), String::new(), Some(why))
+            finish(Some(p), String::new(), Some(why))
         }
     }
 }
@@ -1235,7 +1412,7 @@ mod tests {
     }
 
     fn local(url: &str) -> Profile {
-        Profile { id: "t".into(), name: "Test".into(), kind: Kind::Local, base_url: Some(url.into()), token: None, live_model: Some("m".into()), notes_model: None, account: None }
+        Profile { id: "t".into(), name: "Test".into(), kind: Kind::Local, base_url: Some(url.into()), token: None, live_model: Some("m".into()), notes_model: None, account: None, email: None, sso: false }
     }
 
     /// A one-request HTTP server on 127.0.0.1 that answers `reply` (or holds the line). It reads
@@ -1465,7 +1642,108 @@ mod tests {
         assert_eq!(run().0, "failed");
         assert_eq!(read_notes(&d).unwrap().decisions.len(), 1);
         // The local model's lock is free again afterwards.
-        assert!(crate::app::FileLock::try_take(&local_lock_path()).unwrap().is_some());
+        crate::paths::testenv::eventually("the local lock is free", || crate::app::FileLock::try_take(&local_lock_path()).unwrap().is_some());
+    }
+
+    #[test]
+    fn a_sign_in_holds_its_profiles_jobs_back_until_it_is_over() {
+        let (_env, root) = crate::paths::testenv::folders("live-defer");
+        let p = ai::fake::profile("w", None, ai::fake::SIGNED_OUT);
+        let d = root.join("home/calls/2026-10-23_141500-x");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("meta.json"), r#"{"ai_profile":"w"}"#).unwrap();
+        defer("w", 7);
+        assert!(matches!(take_profile(&d), Err(Hold::SigningIn)), "held back without touching the lease");
+        crate::paths::testenv::eventually("so the sign-in gets the lock", || ai::sign_in_lease(&p).unwrap().is_some());
+        release("w", 6);
+        assert!(deferred("w"), "an older flow never releases a newer one's hold");
+        release("w", 7);
+        assert!(!deferred("w"));
+    }
+
+    #[test]
+    fn a_sign_in_holds_calls_back_and_wakes_each_as_it_should() {
+        let (_env, root) = crate::paths::testenv::folders("live-wake");
+        ai::Settings { default: None, live_notes: true, profiles: vec![] }.save().unwrap();
+        let call = |name: &str, profile: &str, recording: bool, paused: bool, needs: Option<&str>, state: &str| {
+            let d = root.join("home/calls").join(name);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join("meta.json"), format!(r#"{{"ai_profile":"{profile}"}}"#)).unwrap();
+            let stamp = track(&d);
+            with(|s| {
+                let c = s.calls.entry(stamp.clone()).or_default();
+                c.recording = recording;
+                c.paused = paused;
+                c.state = state.into();
+                c.error = Some("isn't signed in".into());
+                c.needs_sign_in = needs.map(str::to_owned);
+                c.next_summary = None;
+            });
+            stamp
+        };
+        let failed = call("2026-10-23_150000-a", "w", true, false, Some("w"), "failed");
+        let paused = call("2026-10-23_150100-b", "w", true, true, None, "paused");
+        let ended = call("2026-10-23_150200-c", "w", false, false, Some("w"), "failed");
+        let other = call("2026-10-23_150300-d", "v", true, false, None, "signing_in");
+        let of = |stamp: &str| with(|s| s.calls.get(stamp).map(|c| (c.state.clone(), c.needs_sign_in.clone(), c.next_summary.is_some(), c.summary_gen)).unwrap());
+        let gen_before = of(&failed).3;
+        // A sign-in starts: the recording call waits for it and keeps what it waits for.
+        defer("w", 3);
+        assert_eq!(of(&failed).0, "signing_in");
+        assert_eq!(of(&failed).1.as_deref(), Some("w"), "kept: a sign-in that works resumes it");
+        assert!(of(&failed).3 > gen_before, "a summary from before is dropped");
+        assert_eq!(of(&paused).0, "paused");
+        // It ends without a sign-in: those that waited try again (and say why then).
+        release("w", 3);
+        assert_eq!(of(&failed), ("waiting".into(), Some("w".into()), true, of(&failed).3));
+        assert_eq!(of(&other).0, "signing_in", "another profile's call isn't woken");
+        assert_eq!(of(&paused).0, "paused");
+        // Signed in: every call that failed for it goes on; a paused one stays paused.
+        signed_in("w");
+        assert_eq!(of(&failed).1, None);
+        assert_eq!((of(&ended).0.as_str(), of(&ended).1.clone()), ("ended", None));
+        assert_eq!(of(&paused).0, "paused");
+        assert_eq!(of(&other).1, None);
+        // Live notes off: nothing is said or scheduled.
+        ai::Settings { default: None, live_notes: false, profiles: vec![] }.save().unwrap();
+        with(|s| {
+            let c = s.calls.get_mut(&failed).unwrap();
+            c.state = "failed".into();
+            c.needs_sign_in = Some("w".into());
+            c.next_summary = None;
+        });
+        signed_in("w");
+        assert_eq!((of(&failed).0.as_str(), of(&failed).2), ("failed", false));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_question_checked_while_a_sign_in_starts_is_asked_again() {
+        let (_env, root) = crate::paths::testenv::folders("live-ask-defer");
+        let _fake = ai::fake::install(&root);
+        let p = ai::fake::profile("w", None, ai::fake::SIGNED_OUT);
+        std::fs::write(ai::fake::file(&p, "slow"), "").unwrap(); // its check takes a second
+        let d = root.join("home/calls/2026-10-23_191500-ask");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("meta.json"), r#"{"ai_profile":"w"}"#).unwrap();
+        std::fs::write(d.join(LIVE_FILE), "{\"speaker\":\"remote\",\"start\":0,\"end\":5,\"text\":\"Hello\"}\n").unwrap();
+        let stamp = track(&d);
+        let generation = with(|s| s.calls.entry(stamp.clone()).or_default().profile_gen);
+        let ask = Ask { kind: AskKind::Missed, text: String::new(), asked_at: Local::now(), not_before: None };
+        with(|s| s.running = Some(Running { stamp: stamp.clone(), kind: JobKind::Ask, cancelled: false }));
+        let (st, a) = (stamp.clone(), ask.clone());
+        let asking = std::thread::spawn(move || run_ask(&st, generation, a));
+        let started = std::time::Instant::now();
+        while ai::fake::status_runs(&p) == 0 {
+            assert!(started.elapsed() < Duration::from_secs(10), "its check never started");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        defer("w", 9); // a sign-in starts while it is checked (the check takes a second, finds it signed out)
+        asking.join().unwrap();
+        with(|s| s.running = None);
+        release("w", 9);
+        assert_eq!(with(|s| s.calls.get(&stamp).map(|c| c.asks.len()).unwrap()), 1, "asked again");
+        assert!(read_answers(&d).is_empty(), "not answered with the obsolete error");
     }
 
     #[test]
@@ -1489,9 +1767,9 @@ mod tests {
         let d = root.join("home/calls/2026-01-02_030405-ask-waits");
         fs::create_dir_all(&d).unwrap();
         let stamp = track(&d);
-        let ask = Ask { kind: AskKind::Missed, text: String::new(), asked_at: Local::now(), not_before: Some((Instant::now(), Wait::Model)) };
+        let ask = Ask { kind: AskKind::Missed, text: String::new(), asked_at: Local::now(), not_before: Some((Instant::now(), Wait::SignIn)) };
         with(|s| s.calls.get_mut(&stamp).unwrap().asks.push_back(ask.clone()));
-        assert_eq!(status(&d)["asking"]["waiting"], "model", "put back: it says what it waits for");
+        assert_eq!(status(&d)["asking"]["waiting"], "sign_in", "put back: it says what it waits for");
         with(|s| {
             let c = s.calls.get_mut(&stamp).unwrap();
             c.asks.pop_front();
@@ -1500,6 +1778,35 @@ mod tests {
         assert_eq!(status(&d)["asking"]["waiting"], Value::Null, "being asked: no longer waiting");
         with(|s| s.calls.get_mut(&stamp).unwrap().asking = None);
         assert_eq!(status(&d)["asking"], Value::Null);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_model_that_says_not_signed_in_marks_the_call_until_a_sign_in() {
+        let (_env, root) = crate::paths::testenv::folders("live-not-logged-in");
+        let _fake = ai::fake::install(&root);
+        let p = ai::fake::profile("w", None, &ai::fake::signed_in("pat@example.com"));
+        std::fs::write(ai::fake::file(&p, "p.reply"), r#"{"type":"result","is_error":true,"result":"Not logged in · Please run /login"}"#).unwrap();
+        let d = root.join("home/calls/2026-10-23_160000-sync");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("meta.json"), r#"{"title":"Sync","ai_profile":"w"}"#).unwrap();
+        let talk: String = (0..12).map(|i| format!("{{\"speaker\":\"remote\",\"start\":{},\"end\":{},\"text\":\"We agreed the pilot starts in Lisbon and the budget is fixed, item {i}.\"}}\n", i * 10, i * 10 + 5)).collect();
+        std::fs::write(d.join(LIVE_FILE), &talk).unwrap();
+        let stamp = track(&d);
+        let generation = with(|s| {
+            let c = s.calls.entry(stamp.clone()).or_default();
+            c.recording = true;
+            c.summary_gen
+        });
+        with(|s| s.running = Some(Running { stamp: stamp.clone(), kind: JobKind::Summary, cancelled: false }));
+        run_summary(&stamp, generation);
+        with(|s| s.running = None);
+        let (state, needs) = with(|s| s.calls.get(&stamp).map(|c| (c.state.clone(), c.needs_sign_in.clone())).unwrap());
+        assert_eq!((state.as_str(), needs.as_deref()), ("failed", Some("w")));
+        assert!(ai::observation("w").unwrap().stale, "the 'signed in' seen before no longer counts");
+        signed_in("w");
+        let (state, needs) = with(|s| s.calls.get(&stamp).map(|c| (c.state.clone(), c.needs_sign_in.clone())).unwrap());
+        assert_eq!((state.as_str(), needs), ("waiting", None));
     }
 
     #[test]

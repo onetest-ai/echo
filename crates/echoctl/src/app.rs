@@ -82,6 +82,8 @@ pub fn run(app: TargetApp, tray: bool, background: bool) -> Result<()> {
     std::thread::spawn(check_updates);
     // Live notes during calls (`livenotes.rs`): one worker for the AI jobs.
     crate::livenotes::start();
+    // Who each Claude profile is signed in to, for the window (`signin.rs`; in the background).
+    crate::signin::refresh_all();
     // Windows: try the GPU now (in a child process), not when the first recording loads a model.
     #[cfg(all(windows, feature = "transcribe"))]
     std::thread::spawn(crate::gpu::allowed);
@@ -157,23 +159,34 @@ fn try_lock() -> Result<bool> {
     Ok(true)
 }
 
-/// An exclusive lock across processes, held until dropped and released when its process exits:
-/// `flock` on Unix (a second `flock` in the same process is refused too), a handle nobody else may
-/// open on Windows.
+/// A lock across processes, held until dropped and released when its process exits: `flock` on
+/// Unix (a separate open's lock conflicts within this process too), share modes on Windows.
+/// Exclusive, or shared (any number of shared holders, never together with an exclusive one).
 pub struct FileLock {
-    _file: fs::File,
+    file: fs::File,
+    shared: bool,
 }
 
 impl FileLock {
-    /// The lock; `Ok(None)` when another holder has it (never waits); an error when the file
-    /// can't be opened at all.
+    /// The exclusive lock; `Ok(None)` when another holder has it (never waits); an error when the
+    /// file can't be opened at all.
     pub fn try_take(path: &Path) -> std::io::Result<Option<FileLock>> {
+        Self::take(path, false)
+    }
+
+    /// The shared lock (`Ok(None)` while an exclusive holder has it).
+    pub fn try_take_shared(path: &Path) -> std::io::Result<Option<FileLock>> {
+        Self::take(path, true)
+    }
+
+    fn take(path: &Path, shared: bool) -> std::io::Result<Option<FileLock>> {
         #[cfg(unix)]
         let file = {
             use std::os::fd::AsRawFd;
-            let f = fs::OpenOptions::new().create(true).truncate(false).write(true).open(path)?;
+            let f = fs::OpenOptions::new().create(true).truncate(false).read(true).write(true).open(path)?;
+            let mode = if shared { libc::LOCK_SH } else { libc::LOCK_EX };
             // SAFETY: flock on a valid, open fd; the lock lives as long as the File.
-            if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+            if unsafe { libc::flock(f.as_raw_fd(), mode | libc::LOCK_NB) } != 0 {
                 let e = std::io::Error::last_os_error();
                 return if e.kind() == std::io::ErrorKind::WouldBlock { Ok(None) } else { Err(e) };
             }
@@ -182,14 +195,52 @@ impl FileLock {
         #[cfg(windows)]
         let file = {
             use std::os::windows::fs::OpenOptionsExt;
-            // share_mode(0): no other process can open the file while we hold it.
-            match fs::OpenOptions::new().create(true).truncate(false).write(true).share_mode(0).open(path) {
+            const FILE_SHARE_READ: u32 = 1;
+            const FILE_SHARE_WRITE: u32 = 2;
+            // Exclusive: read + write access, no sharing — nobody else can open the file. Shared:
+            // read access, sharing read only — other shared holders can, an exclusive one can't.
+            let mut o = fs::OpenOptions::new();
+            if shared {
+                o.read(true).share_mode(FILE_SHARE_READ);
+            } else {
+                o.read(true).write(true).share_mode(0);
+            }
+            // A shared holder can't create it (no write access): make sure it exists first (an
+            // error here shows in the open below).
+            if shared && !path.exists() {
+                let _ = fs::OpenOptions::new().create(true).truncate(false).write(true).share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE).open(path);
+            }
+            match o.create(!shared).truncate(false).open(path) {
                 Ok(f) => f,
                 Err(e) if e.raw_os_error() == Some(32) => return Ok(None), // ERROR_SHARING_VIOLATION
                 Err(e) => return Err(e),
             }
         };
-        Ok(Some(FileLock { _file: file }))
+        Ok(Some(FileLock { file, shared }))
+    }
+
+    /// The lock file's text (a holder of either kind may read it).
+    pub fn text(&self) -> std::io::Result<String> {
+        use std::io::{Read, Seek};
+        let mut f = &self.file;
+        f.rewind()?;
+        let mut s = String::new();
+        f.read_to_string(&mut s)?;
+        Ok(s)
+    }
+
+    /// Replace the lock file's text — the exclusive holder only (a shared one can't on Windows, so
+    /// it can't anywhere).
+    pub fn set_text(&self, text: &str) -> std::io::Result<()> {
+        use std::io::{Seek, Write};
+        if self.shared {
+            return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "a shared lock's text can't be changed"));
+        }
+        let mut f = &self.file;
+        f.set_len(0)?;
+        f.rewind()?;
+        f.write_all(text.as_bytes())?;
+        f.flush()
     }
 }
 
@@ -983,6 +1034,9 @@ pub fn notify(title: &str, body: &str) {
 
 /// A notification whose click does `click`.
 pub fn notify_click(title: &str, body: &str, click: Click) {
+    if cfg!(test) {
+        return; // tests say nothing on the screen
+    }
     #[cfg(target_os = "macos")]
     if bundle_path().is_some() {
         notifications::post(title, body, click);
@@ -1191,5 +1245,44 @@ pub mod notifications {
         if !IN_APP.load(Ordering::SeqCst) {
             let _ = rx.recv_timeout(Duration::from_secs(5));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FileLock;
+
+    #[test]
+    fn shared_holders_exclude_an_exclusive_one_and_back() {
+        let dir = std::env::temp_dir().join(format!("echo-test-filelock-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("x.lock");
+        let _ = std::fs::remove_file(&p);
+        let a = FileLock::try_take_shared(&p).unwrap().expect("first shared");
+        let b = FileLock::try_take_shared(&p).unwrap().expect("a second shared one too");
+        assert!(FileLock::try_take(&p).unwrap().is_none(), "no exclusive while shared are held");
+        drop(a);
+        assert!(FileLock::try_take(&p).unwrap().is_none(), "one shared holder is enough to refuse it");
+        drop(b);
+        let x = std::cell::RefCell::new(None);
+        crate::paths::testenv::eventually("exclusive once all shared are gone", || {
+            *x.borrow_mut() = FileLock::try_take(&p).unwrap();
+            x.borrow().is_some()
+        });
+        let x = x.into_inner().unwrap();
+        assert!(FileLock::try_take_shared(&p).unwrap().is_none(), "no shared while exclusive is held");
+        x.set_text("token-1").unwrap();
+        x.set_text("t2").unwrap();
+        drop(x);
+        let s = std::cell::RefCell::new(None);
+        crate::paths::testenv::eventually("shared again", || {
+            *s.borrow_mut() = FileLock::try_take_shared(&p).unwrap();
+            s.borrow().is_some()
+        });
+        let s = s.into_inner().unwrap();
+        assert_eq!(s.text().unwrap(), "t2", "a shorter text replaces a longer one");
+        assert!(s.set_text("x").is_err(), "a shared holder can't change it (it can't on Windows)");
+        drop(s);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

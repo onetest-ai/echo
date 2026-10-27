@@ -143,6 +143,8 @@ pub mod testenv {
 
     impl Drop for Env {
         fn drop(&mut self) {
+            // The test's background threads end first, while its folders are still the current ones.
+            crate::signin::wait_idle();
             for (k, v) in &self.before {
                 match v {
                     Some(v) => std::env::set_var(k, v),
@@ -150,6 +152,16 @@ pub mod testenv {
                 }
             }
             let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    /// `f()` comes true within a second — for a lock just released: while another test thread starts
+    /// a process, its child holds a copy of the descriptor until it execs (macOS).
+    pub fn eventually(what: &str, f: impl Fn() -> bool) {
+        let t = std::time::Instant::now();
+        while !f() {
+            assert!(t.elapsed() < std::time::Duration::from_secs(1), "{what}");
+            std::thread::sleep(std::time::Duration::from_millis(20));
         }
     }
 

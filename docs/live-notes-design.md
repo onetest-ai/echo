@@ -385,9 +385,17 @@ Where the code differs from the text above, after the implementation and its rev
 (`/pr-review-toolkit:review-pr`: code, silent failures, tests, comments, types):
 
 - **Settings → AI for calls** is a tray menu ("AI for calls": live notes on/off, the default for new
-  calls, each Claude account with Sign in… and Use the account signed in now). Adding and removing
+  calls, each Claude account with its sign-in state, Sign in…, and Use <account> when it is signed in
+  to another one). Adding and removing
   profiles is the CLI (`echoctl ai add-local | add-claude | remove | default | live | status | login |
-  accept`). Sign-in opens `<id>.login.command` in Terminal (macOS) or a `.cmd` with `pause` (Windows).
+  accept | set`). Sign-in (2026-10-23, design reviewed with a second model over 3 rounds): no
+  terminal — Echo runs `claude auth login --claudeai [--email] [--sso]` itself (`signin.rs`), the
+  browser calls Claude Code back on localhost, Echo notices the child's exit, checks the account once
+  and resumes live notes at once; choosing a signed-out Claude profile in a menu starts it; the
+  window shows the state with Sign in… / Cancel / Use X. A per-profile reader/writer lock keeps jobs
+  and sign-ins apart across processes; `echoctl ai login` signs in in the terminal it was run from,
+  starting Claude Code with `build_command` directly (no login shell, not detached), not through
+  `claude_command`. See CLAUDE.md ("Signing in").
 - The tray's Record submenu carries no profile (it records with the default); the window's Record
   menu, scheduled meetings and Join do.
 - `ai::resolve` is `ai::for_call`; the old `notes.rs::command` is `ai::claude_command`.
@@ -398,7 +406,8 @@ Where the code differs from the text above, after the implementation and its rev
 - The profile's values reach the login shell as `ECHOCTL_P_<name>` and are exported after the routing
   variables are removed (never in the script's text). Children get their own session (`setsid`):
   a process group alone made an interactive login shell started from a terminal stop on SIGTTOU.
-- An account is compared by email · organisation (not the plan); `echoctl ai status` shows the plan.
+- An account is compared by email · organisation (not the plan); the plan shows in "Signed in as …"
+  right after a sign-in, and in `echoctl ai status`.
 - Stopping: pause stops summaries only; a profile change stops the running job (a summary is
   dropped, a question asked again with the new profile); the worker checks before and while a child
   runs and stops it (TERM, KILL after 3 s).
@@ -421,8 +430,8 @@ Where the code differs from the text above, after the implementation and its rev
   `ai-profile`) find a retitled call by its stamp, and say in `app.log` when they can't; `notes --wait`
   stops its Claude Code on Ctrl-C; `ai.json` is 0600 from creation and a new default must name a
   profile; on Windows the routing variables are removed whatever their case; the recording's
-  `finish` keeps a profile switch written straight to `meta.json`; a question put back while the local
-  model is busy waits in line (other calls' jobs go first) and says so.
+  `finish` keeps a profile switch written straight to `meta.json`; a question put back says what it
+  waits for (the model, or a sign-in).
 - The window doesn't re-render while text is selected or a menu is open; the "Last time" card keeps
   the open state the user chose; after the minutes are `done` the call opens on Notes once.
 - Tests that exist: routing (family matcher, the shell script in sh/zsh/bash, the no-shell command),

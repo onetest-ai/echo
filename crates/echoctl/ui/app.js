@@ -360,15 +360,50 @@ function recordProfile() { const p = S.recordProfile; return p && profileOf(p) ?
 /** What a recording is sent with: only a profile picked here (else the app pins its default when
  *  the recording starts, and a broken AI setting never stops it). */
 function pickedProfile() { const p = S.recordProfile; S.recordProfile = null; return p && profileOf(p) ? p : undefined }
+/** A profile in a menu: a Claude one with the account its folder is signed in to ("— not signed
+ *  in"; the recorded one until checked). */
+function profileLabel(p) {
+  if (!p || p.kind !== 'claude') return p ? p.name : ''
+  const s = p.signin || {}
+  if (s.state === 'signed_in' || s.state === 'other_account') return `${p.name} — ${s.account}`
+  if (s.state === 'signed_out') return `${p.name} — not signed in`
+  return p.account ? `${p.name} — ${p.account}` : p.name
+}
 function profileOptions(cur) {
-  return ai().profiles.map((p) => `<option value="${esc(p.id)}"${p.id === cur ? ' selected' : ''}>${esc(p.name)}</option>`).join('')
+  return ai().profiles.map((p) => `<option value="${esc(p.id)}"${p.id === cur ? ' selected' : ''}>${esc(profileLabel(p))}</option>`).join('')
+}
+
+/** A Claude profile's sign-in and what can be done about it (`signin.rs` → `p.signin`); '' when
+ *  there is nothing to say: signed in (not just now), or not known yet and no error. */
+function signinNote(p) {
+  const s = p && p.kind === 'claude' && p.signin
+  if (!s) return ''
+  const id = esc(p.id), name = esc(p.name)
+  const btn = (attrs, label, cls = 'btn') => `<button class="${cls}" ${attrs}>${esc(label)}</button>`
+  const signIn = (label = 'Sign in…') => btn(`data-signin="${id}"`, label, 'btn primary')
+  const note = (text, buttons, kind = '', more = '') => `<div class="signin ${kind}"><span class="signin-text">${text}</span>${buttons ? `<span class="signin-acts">${buttons}</span>` : ''}${more ? `<span class="hint">${more}</span>` : ''}</div>`
+  const cli = `echoctl ai login ${p.id}`
+  switch (s.state) {
+    case 'signed_out': return note(`${name} isn't signed in.`, signIn())
+    case 'starting': return note(`Starting the sign-in of ${name}…`, '', 'busy')
+    case 'checking': return note('Checking the sign-in…', '', 'busy')
+    case 'waiting': return note(`Sign in to ${name} in your browser${s.email ? ` (as ${esc(s.email)})` : ''}…`, btn(`data-signin-cancel="${id}"`, 'Cancel', 'btn ghost'), 'busy',
+      `Browser didn't open? Cancel, then run <code>${esc(cli)}</code> in Terminal <button class="btn ghost" data-copy="${esc(cli)}">Copy</button>`)
+    case 'stopping': return note('Stopping the sign-in…', '', 'busy')
+    case 'elsewhere': return note(`${name} is being signed in in a terminal…`, '', 'busy')
+    case 'failed': return note(`The sign-in of ${name} didn't finish: ${esc(s.error || '')}`, signIn('Try again'), 'error')
+    case 'other_account': return note(`${name} is signed in as <b>${esc(s.account)}</b>, not ${esc(s.expected || 'the account it was set up with')}.`,
+      btn(`data-signin-accept="${id}" data-account="${esc(s.account)}"`, `Use ${s.account}`) + signIn('Sign in again…'), 'error')
+    case 'signed_in': return s.just ? note(`Signed in as ${esc(s.account)}.`, '', 'ok') : ''
+    default: return s.error ? note(`${name}: ${esc(s.error)}`, btn(`data-signin-check="${id}"`, 'Check again', 'btn ghost') + signIn(), 'error') : ''
+  }
 }
 const CARET = '<svg viewBox="0 0 10 6" width="8" height="5" aria-hidden="true"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>'
 /** A compact native select over a label (as the language picker): `data-<attr>`. */
 function profilePick(attr, cur, cls = 'btn', title = 'Model for this call') {
   if (ai().profiles.length < 2) return ''
   const short = profileName(cur)
-  return `<label class="${cls} split-lang pick" title="${esc(title)}: ${esc(short)}"><span>${esc(short.length > 14 ? short.slice(0, 13) + '…' : short)}</span>${CARET}<select ${attr} aria-label="${esc(title)}">${profileOptions(cur)}</select></label>`
+  return `<label class="${cls} split-lang pick" title="${esc(title)}: ${esc(profileLabel(profileOf(cur)) || short)}"><span>${esc(short.length > 14 ? short.slice(0, 13) + '…' : short)}</span>${CARET}<select ${attr} aria-label="${esc(title)}">${profileOptions(cur)}</select></label>`
 }
 
 /** A record button with the language picker on its right (a native select over the caret), and
@@ -393,7 +428,7 @@ function sidebar() {
     ? `<div class="status-card recording"><div class="status-line"><b>Recording</b><span>${esc(titleOf(st.recording))}</span></div><button class="btn" data-cmd="stop">Stop recording</button></div>`
     : armed
       ? `<div class="status-card armed"><div class="status-line"><b>Armed</b><span>Recording starts with the next Teams call</span></div><button class="btn" data-cmd="stop">Cancel</button></div>`
-      : `<div class="status-card"><div class="status-line"><b>${st.in_call ? 'Teams call in progress' : 'Not recording'}</b><span>${st.in_call ? 'It is not being recorded' : 'Echo records only the calls you choose'}</span></div>${recordButton('data-cmd="record"', st.in_call ? 'Record this call' : 'Record next call')}</div>`
+      : `<div class="status-card"><div class="status-line"><b>${st.in_call ? 'Teams call in progress' : 'Not recording'}</b><span>${st.in_call ? 'It is not being recorded' : 'Echo records only the calls you choose'}</span></div>${recordButton('data-cmd="record"', st.in_call ? 'Record this call' : 'Record next call')}${signinNote(profileOf(recordProfile()))}</div>`
   return `<aside class="sidebar">
     <div class="brand">${mark()}<b>Echo</b></div>
     <nav class="nav">
@@ -566,8 +601,14 @@ function claudeHint(c, heading, lead) {
     return box('Writing notes…', `<p>Claude Code is writing the notes and action items with <b>${esc(run.model || n.model || 'sonnet')}</b>. It takes a few minutes; you can close this window.</p>`, log, true)
   }
   if (c.status === 'recording' || c.status === 'transcribing') return box(heading, `<p>${esc(lead)}</p>`, '')
+  // A run refused for a Claude profile's sign-in (the built-in profile signs in in Terminal), and
+  // that profile's sign-in now: signed in since (or a model refused it although it looks signed in).
+  const signinOf = run && run.state === 'needs_login' && [profileOf(run.profile)].find((x) => x && x.kind === 'claude')
+  const now = signinOf && signinOf.signin
+  const again = now && now.state === 'signed_in'
   const why = {
-    needs_login: ['Claude Code needs you to sign in', run && run.message],
+    needs_login: again ? ['Ready to try again', run.message ? `The last try said: ${run.message}` : '']
+      : [now && now.state === 'other_account' ? 'These notes need another account' : 'Claude Code needs you to sign in', run && run.message],
     failed: ["Couldn't write notes", run && run.message],
     skipped: ['No notes for this call', run && run.message],
   }[run && run.state]
@@ -585,6 +626,12 @@ function claudeHint(c, heading, lead) {
   const pid = picked ? S.notesProfile.id : (live.profile || (live.profile_error ? '' : ai().default))
   const p = profileOf(pid)
   const model = p && p.notes_model ? p.notes_model : (n.model || 'sonnet')
+  // The profile these notes need signed in: the call's profile now (picked here or in the Live tab);
+  // the one the last run was refused for only while it still is (or none can be read). Signed in
+  // now: Try again (or sign in again, if a model keeps refusing it).
+  const target = signinOf && (!p || p.id === signinOf.id) ? signinOf : p
+  const sign = signinNote(target) || (again && target === signinOf
+    ? `<div class="signin"><span class="signin-text">${esc(signinOf.name)} is signed in as ${esc(now.account)} now — click Try again.</span><span class="signin-acts"><button class="btn ghost" data-signin="${esc(signinOf.id)}">Sign in again…</button></span></div>` : '')
   const where = ai().error ? `The AI settings can't be read: ${esc(ai().error)}`
     : !p && !picked && live.profile_error ? `This call's model can't be read: ${esc(live.profile_error)}`
     : !p ? (pid === '!unreadable' ? 'No model could be chosen when this call started — pick one.' : `The model this call was set to (${esc(pid || '?')}) no longer exists — pick another.`)
@@ -592,7 +639,7 @@ function claudeHint(c, heading, lead) {
       ? `Claude Code writes them with <b>${esc(p.name)}</b> (${esc(model)}), ${esc(profileWhere(p))}.`
       : `Claude Code writes them with <b>${esc(n.model || 'sonnet')}</b>, as it is set up (menu → Claude Code → Notes model).`
   const pick = ai().profiles.length > 1 || (ai().profiles.length && !p) ? `<label class="notes-pick">Model <select data-notesprofile aria-label="Model for these notes">${p ? '' : '<option value="" selected>Choose…</option>'}${profileOptions(pid)}</select></label>` : ''
-  return box(heading, `<p>${esc(lead)}</p><p class="alt">${where}</p>`,
+  return box(heading, `<p>${esc(lead)}</p><p class="alt">${where}</p>${sign}`,
     `${pick}<button class="btn primary" data-cmd="write-notes">${label}</button>${log}`) + session
 }
 
@@ -611,6 +658,7 @@ const LIVE_STATE = {
   updated: 'Updated',
   failed: 'The last update failed',
   busy: 'Waiting for the model to finish another job',
+  signing_in: 'Waiting for the sign-in',
   paused: 'Paused',
   ended: 'The call ended',
 }
@@ -636,18 +684,32 @@ function liveHead(c) {
   const draftBy = n && n.profile && l.profile && n.profile !== l.profile ? `<span class="hint">Draft by ${esc(profileName(n.profile))}; the next update by ${esc(profileName(l.profile))}</span>` : ''
   const pause = c.status === 'recording'
     ? `<button class="btn ghost" data-cmd="${st.paused ? 'live-resume' : 'live-pause'}">${st.paused ? 'Resume' : 'Pause'}</button>` : ''
-  const problem = st.settings_error ? `The AI settings can't be read: ${st.settings_error}` : !st.enabled ? 'Live notes are off (menu → AI for calls → Live notes during calls).' : (st.state === 'failed' && st.error) || ''
+  // A sign-in problem (or one going on) for this call's profile: said with what to do about it.
+  const failedFor = st.needs_sign_in && profileOf(st.needs_sign_in)
+  const sign = failedFor ? (signinNote(failedFor) || `<div class="signin error"><span class="signin-text">${esc(st.error || '')}</span><span class="signin-acts"><button class="btn primary" data-signin="${esc(failedFor.id)}">Sign in…</button></span></div>`)
+    : signinNote(p)
+  const problem = st.settings_error ? `The AI settings can't be read: ${st.settings_error}` : !st.enabled ? 'Live notes are off (menu → AI for calls → Live notes during calls).' : (!failedFor && st.state === 'failed' && st.error) || ''
   return `<div class="live-head">${model}${where}<span class="live-state ${esc(state)}">${esc(line)}</span>${draftBy}<span class="grow"></span>${pause}</div>
-    ${problem ? `<p class="live-error">${esc(problem)}</p>` : ''}`
+    ${sign}${problem ? `<p class="live-error">${esc(problem)}</p>` : ''}`
 }
 
 function liveNotes(c) {
-  const n = (c.live || {}).notes
-  if (!n) return `<p class="muted">${c.status === 'recording' ? 'The first notes appear after about 90 seconds of conversation.' : 'No live notes for this call.'}</p>`
+  const l = c.live || {}, n = l.notes, st = l.status || {}
+  if (!n) {
+    if (c.status !== 'recording') return '<p class="muted">No live notes for this call.</p>'
+    // Why there are none yet (the reason itself is in the header above).
+    const why = st.paused ? 'Paused — no notes until you resume.'
+      : st.needs_sign_in ? `No notes until ${profileName(st.needs_sign_in)} can be used (see above).`
+      : st.state === 'signing_in' ? 'No notes until the sign-in is done.'
+      : st.state === 'failed' ? 'No notes yet: the last update failed (see above).'
+      : st.state === 'busy' ? 'No notes yet: the model is finishing another job.'
+      : 'The first notes appear after about 90 seconds of conversation.'
+    return `<p class="muted">${esc(why)}</p>`
+  }
   const sec = (title, items, f) => items && items.length ? `<h3>${title}</h3><ul>${items.map(f).join('')}</ul>` : ''
   const gaps = (n.gaps || []).map((g) => `${clock(g[0])}–${clock(g[1])}`).join(', ')
   const empty = !n.now && !(n.decisions || []).length && !(n.actions || []).length && !(n.questions || []).length
-  return `${n.now ? `<p class="now"><b>Now</b> ${esc(n.now)}</p>` : ''}
+  return `${n.now ? `<p class="live-now"><b>Now</b> ${esc(n.now)}</p>` : ''}
     ${sec('Decisions', n.decisions, (x) => `<li>${esc(x.text)}${atLink(x.t)}</li>`)}
     ${sec('Action items', n.actions, (a) => `<li><span class="owner${a.owner === 'Me' ? ' me' : ''}">${esc(a.owner)}</span> ${esc(a.task)}${atLink(a.t)}</li>`)}
     ${sec('Open questions', n.questions, (x) => `<li>${esc(x.text)}${atLink(x.t)}</li>`)}
@@ -678,7 +740,7 @@ function answerText(t) {
 
 const ASK_TITLE = { missed: 'What did I miss?', question: 'Questions you could ask', ask: 'You asked' }
 /** What a question put back waits for (`asking.waiting`). */
-const ASK_WAIT = { model: 'Waiting for the model to finish another job…' }
+const ASK_WAIT = { model: 'Waiting for the model to finish another job…', sign_in: 'Waiting for the sign-in to finish…' }
 
 function liveAnswers(c) {
   const l = c.live || {}, st = l.status || {}
@@ -920,8 +982,15 @@ function placeDetail() {
 const fingerprint = () => JSON.stringify([S.state, S.calls, S.call, S.agenda, S.cal.data, S.cal.selected])
 
 document.addEventListener('click', (e) => {
-  const t = e.target.closest('[data-go],[data-call],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-schedule],[data-unschedule],[data-ask],a[data-ext]')
+  const t = e.target.closest('[data-go],[data-call],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
   if (!t) return
+  // Sign-ins (`signin.rs`): shown at once (starting / stopping / checking) until the next poll
+  // brings the app's state.
+  const busySignin = (id, state) => { const p = profileOf(id); if (p) { p.signin = { state }; render() } }
+  if (t.dataset.signin) { send({ cmd: 'sign_in', profile: t.dataset.signin }); return busySignin(t.dataset.signin, 'starting') }
+  if (t.dataset.signinCancel) { send({ cmd: 'sign_in_cancel', profile: t.dataset.signinCancel }); return busySignin(t.dataset.signinCancel, 'stopping') }
+  if (t.dataset.signinAccept) { send({ cmd: 'accept_account', profile: t.dataset.signinAccept, account: t.dataset.account }); return busySignin(t.dataset.signinAccept, 'checking') }
+  if (t.dataset.signinCheck) { send({ cmd: 'check_sign_in', profile: t.dataset.signinCheck }); return busySignin(t.dataset.signinCheck, 'checking') }
   if (t.dataset.ext) { e.preventDefault(); send({ cmd: 'open_url', url: t.getAttribute('href') }); return }
   if (t.dataset.go) return go(t.dataset.go === 'calls' ? (S.selected ? `call/${S.selected}/${S.tab}` : 'calls') : `calendar/${S.cal.mode}`)
   if (t.dataset.ev !== undefined) { S.cal.selected = S.cal.selected === t.dataset.ev ? null : t.dataset.ev; return render() }
@@ -977,8 +1046,10 @@ document.addEventListener('input', (e) => {
 
 document.addEventListener('change', (e) => {
   if (e.target.matches('[data-reclang]')) { setRecordLang(e.target.value); render() }
-  if (e.target.matches('[data-recprofile]')) { S.recordProfile = e.target.value; render() }
-  if (e.target.matches('[data-notesprofile]')) { S.notesProfile = { call: S.selected, id: e.target.value }; render() }
+  // A profile chosen for the next recording or for these notes: a sign-in starts if it is plainly
+  // signed out (any choice, of any kind, supersedes an earlier one's check).
+  if (e.target.matches('[data-recprofile]')) { S.recordProfile = e.target.value; send({ cmd: 'sign_in_if_needed', profile: e.target.value, purpose: 'record' }); render() }
+  if (e.target.matches('[data-notesprofile]')) { S.notesProfile = { call: S.selected, id: e.target.value }; send({ cmd: 'sign_in_if_needed', profile: e.target.value, purpose: `notes:${S.selected}` }); render() }
   if (e.target.matches('[data-callprofile]')) {
     send({ cmd: 'set_profile', call: S.selected, profile: e.target.value })
     if (S.call && S.call.live) { S.call.live.profile = e.target.value; render() }

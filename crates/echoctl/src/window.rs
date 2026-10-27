@@ -90,6 +90,7 @@ pub fn open<T: 'static>(
     start_call: Option<&str>,
     ipc: impl Fn(String) + 'static,
 ) -> wry::Result<EchoWindow> {
+    crate::signin::refresh_all(); // who each Claude profile is signed in to, now (in the background)
     let builder = WindowBuilder::new()
         .with_title("Echo")
         .with_inner_size(LogicalSize::new(1180.0, 760.0))
@@ -534,13 +535,50 @@ pub fn handle(msg: &str) -> bool {
         }
         "set_profile" => {
             let (Some(d), Some(id)) = (call, profile(&v)) else { return false };
+            // From now on an older choice's sign-in check opens nothing.
+            let name = d.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            crate::signin::choose(&format!("call:{name}"), &id);
             match crate::ai::set_call_profile(&d, &id) {
                 // While it records, the watcher applies it and tells the live notes itself (so
-                // no job starts on the old profile in between).
-                Ok(crate::ai::ProfileChange::Applied) => crate::livenotes::profile_changed(&d),
+                // no job starts on the old profile in between) — and signs it in if needed.
+                Ok(crate::ai::ProfileChange::Applied) => {
+                    crate::livenotes::profile_changed(&d);
+                    std::thread::spawn(move || crate::signin::applied(&name, &id));
+                }
                 Ok(crate::ai::ProfileChange::Requested) => {}
                 Err(e) => crate::livenotes::report(&d, &format!("couldn't switch to {id}: {e:#}")),
             }
+            true
+        }
+        // Signing a Claude profile in (`signin.rs`): the flows run on threads of their own.
+        "sign_in" => {
+            if let Some(id) = profile(&v) {
+                crate::signin::start(&id);
+            }
+            true
+        }
+        "sign_in_if_needed" => {
+            let (Some(id), Some(purpose)) = (profile(&v), v["purpose"].as_str().filter(|p| !p.is_empty()).map(str::to_owned)) else { return false };
+            // Registered here, in the order the choices came; checked on a thread of its own.
+            let request = crate::signin::choose(&purpose, &id);
+            std::thread::spawn(move || crate::signin::ensure_request(&id, &purpose, request));
+            true
+        }
+        "sign_in_cancel" => {
+            if let Some(id) = profile(&v) {
+                crate::signin::cancel(&id);
+            }
+            true
+        }
+        "check_sign_in" => {
+            if let Some(p) = profile(&v).and_then(|id| crate::ai::Settings::load().ok()?.get(&id).ok()) {
+                crate::signin::refresh(&p, true);
+            }
+            true
+        }
+        "accept_account" => {
+            let (Some(id), Some(shown)) = (profile(&v), v["account"].as_str().filter(|a| !a.is_empty())) else { return false };
+            crate::signin::accept(&id, shown);
             true
         }
         "live_ask" => {

@@ -88,9 +88,16 @@ pub struct Profile {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes_model: Option<String>,
     /// claude: the account first seen signed in to this profile's folder (`Account::key`: email ·
-    /// organisation); another one later stops jobs until `echoctl ai accept` (a plan change doesn't)
+    /// organisation); another one later stops jobs until it is accepted (Use <account> in the window
+    /// or the tray, `echoctl ai accept`; a plan change doesn't count)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account: Option<String>,
+    /// claude: pre-filled on the sign-in page (else the recorded account's email)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    /// claude: the organisation signs in with single sign-on (`claude auth login --sso`)
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub sso: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -218,6 +225,8 @@ fn system_profile() -> Profile {
         live_model: Some(cfg.live_model.clone().unwrap_or_else(|| crate::config::DEFAULT_LIVE_MODEL.into())),
         notes_model: cfg.notes_model_arg(),
         account: None,
+        email: None,
+        sso: false,
     }
 }
 
@@ -253,6 +262,18 @@ impl Profile {
     /// Where this profile's Claude Code keeps its settings and sign-in (`local` / `claude`).
     pub fn config_folder(&self) -> PathBuf {
         paths::config_dir().join("claude").join(&self.id)
+    }
+
+    /// `claude`: may jobs use account `a`? The one recorded (compared by `Account::key`), or any
+    /// before one is recorded — the one rule for jobs (`judge`), the window and the tray.
+    pub fn expects(&self, a: &Account) -> bool {
+        self.account.as_deref().is_none_or(|want| want.to_lowercase() == a.key())
+    }
+
+    /// `claude`: the lock jobs and checks hold shared and a sign-in exclusively; its text is the
+    /// sign-in token (`Lease`).
+    pub fn lock_path(&self) -> PathBuf {
+        paths::config_dir().join("claude").join(format!("{}.lock", self.id))
     }
 }
 
@@ -331,12 +352,15 @@ pub fn set_call_profile(dir: &Path, id: &str) -> Result<ProfileChange> {
     Ok(ProfileChange::Applied)
 }
 
-/// The call's profile, ready to use (signed in, on the account it was set up with).
-pub fn for_call(dir: &Path) -> Result<Profile> {
+/// The call's profile, ready to use (signed in, on the account it was set up with), with the lease
+/// its job holds until it is done. Errors: `SigningIn` (a sign-in holds the lock — it never waits:
+/// the caller retries), `SignInNeeded`.
+pub fn for_call(dir: &Path) -> Result<Ready> {
     let id = call_profile_id(dir)?;
     let p = Settings::load()?.get(&id)?;
-    ready(&p)?;
-    Ok(p)
+    let lease = if p.kind.signs_in() { Some(lease(&p)?) } else { None };
+    check(&p, lease.as_ref())?;
+    Ok(Ready { profile: p, _lease: lease })
 }
 
 // ── Claude Code with a profile ──────────────────────────────────────────────────────────────
@@ -483,24 +507,48 @@ fn build_command(p: &Profile, claude: &Path, args: &[String], cwd: &Path, stdin:
         }
         c.env("ECHOCTL_BIN", exe); // the plugin's CLI launcher uses this very binary
     }
-    detach(&mut c);
     c
 }
 
-/// Start Claude Code for `p`: the one way Echo runs it on call text or checks a profile's sign-in
-/// (minutes, live jobs, `claude auth status`; `login`'s terminal script and `claude connect` start
-/// it directly). `system` keeps the user's own setup; `local` / `claude` apply the profile on top of
+/// Start Claude Code for `p`: the one way Echo runs it on call text, checks a sign-in or signs in
+/// from the app (minutes, live jobs, `claude auth status`, `claude auth login`); `echoctl ai login`
+/// (`login_here`) and `claude connect` start it otherwise. `system` keeps the user's own setup; `local` / `claude` apply the profile on top of
 /// the login shell and load only their own settings (`--setting-sources user` = their folder).
 pub fn claude_command(p: &Profile, args: &[String], cwd: &Path, stdin: bool) -> Result<Child> {
-    let claude = crate::app::claude_bin().ok_or_else(|| anyhow!("Claude Code is not installed — get it at https://claude.com/claude-code"))?;
+    Ok(prepare_claude(p, args, cwd, stdin)?.spawn()?)
+}
+
+/// `claude_command` up to the spawn (the checks it makes may take a moment: the policy check runs
+/// processes on Windows), so a caller can decide right before starting it.
+pub fn prepare_claude(p: &Profile, args: &[String], cwd: &Path, stdin: bool) -> Result<Command> {
+    let fake = fake_claude();
+    let claude = fake.clone().or_else(crate::app::claude_bin).ok_or_else(|| anyhow!("Claude Code is not installed — get it at https://claude.com/claude-code"))?;
     if p.kind.managed() {
         if let Some(why) = policy_conflict(p) {
             bail!("{why}");
         }
         fs::create_dir_all(p.config_folder())?;
     }
-    let use_shell = cfg!(unix) && std::env::var_os("ECHOCTL_NOTES_NO_SHELL").is_none();
-    Ok(build_command(p, &claude, args, cwd, stdin, use_shell).spawn()?)
+    let mut c = build_command(p, &claude, args, cwd, stdin, use_shell() && fake.is_none());
+    detach(&mut c);
+    Ok(c)
+}
+
+/// Claude Code through the user's login shell (Unix; `ECHOCTL_NOTES_NO_SHELL` starts it directly).
+fn use_shell() -> bool {
+    cfg!(unix) && std::env::var_os("ECHOCTL_NOTES_NO_SHELL").is_none()
+}
+
+/// (tests) A stand-in for Claude Code, started directly.
+#[cfg(test)]
+pub static FAKE_CLAUDE: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+fn fake_claude() -> Option<PathBuf> {
+    // Never the real one in a test: without the fake, starting Claude Code fails.
+    #[cfg(test)]
+    return Some(FAKE_CLAUDE.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_else(|| PathBuf::from("/nonexistent/claude-in-a-test")));
+    #[cfg(not(test))]
+    None
 }
 
 /// Admin-managed Claude Code policy always applies, and its `env` beats the environment Echo
@@ -703,25 +751,250 @@ impl Account {
     }
 }
 
-/// Who a `claude` profile's folder is signed in to (`claude auth status`); None = signed out.
-pub fn account(p: &Profile) -> Result<Option<Account>> {
+/// Why a `claude` profile can't be used now: signed out, or signed in to another account than the
+/// one it was set up with. Kept typed (through the readiness cache too), so the window can offer
+/// Sign in… / Use <account>, and live notes resume once it is fixed.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SignInNeeded {
+    /// The profile's id (`name` is for people).
+    pub profile: String,
+    pub name: String,
+    /// The account the folder is signed in to instead (None: signed out).
+    pub now: Option<String>,
+    /// The account it was set up with (None: none recorded yet).
+    pub expected: Option<String>,
+}
+
+impl SignInNeeded {
+    pub fn signed_out(p: &Profile) -> SignInNeeded {
+        SignInNeeded { profile: p.id.clone(), name: p.name.clone(), now: None, expected: p.account.clone() }
+    }
+
+    pub fn other_account(p: &Profile, now: String, expected: String) -> SignInNeeded {
+        SignInNeeded { profile: p.id.clone(), name: p.name.clone(), now: Some(now), expected: Some(expected) }
+    }
+}
+
+impl std::fmt::Display for SignInNeeded {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match (&self.now, &self.expected) {
+            (Some(now), Some(expected)) => write!(f, "{} is signed in as {now}, not {expected} — Use {now} in the Echo window, or sign in again", self.name),
+            _ => write!(f, "{} isn't signed in — Sign in… in the Echo window", self.name),
+        }
+    }
+}
+
+impl std::error::Error for SignInNeeded {}
+
+/// A sign-in of this profile holds its lock: `lease` / `for_call` refuse meanwhile (they never
+/// wait; live jobs and minutes runs try again).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SigningIn {
+    pub profile: String,
+    pub name: String,
+}
+
+impl std::fmt::Display for SigningIn {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{} is being signed in right now", self.name)
+    }
+}
+
+impl std::error::Error for SigningIn {}
+
+/// A hold on a `claude` profile's lock (`Profile::lock_path`). Shared: jobs and checks, any number
+/// at once, and no sign-in can change the account under them. Exclusive: a sign-in. `token` is the
+/// lock file's text, rewritten when a sign-in takes the lock: each process caches its own checks,
+/// so one cached under an older token (a sign-in since, here or in another process) doesn't count.
+pub struct Lease {
+    _lock: crate::app::FileLock,
+    token: String,
+}
+
+fn open_lock(p: &Profile, shared: bool) -> Result<Option<crate::app::FileLock>> {
+    let path = p.lock_path();
+    fs::create_dir_all(path.parent().unwrap_or(Path::new(".")))?;
+    let lock = if shared { crate::app::FileLock::try_take_shared(&path) } else { crate::app::FileLock::try_take(&path) };
+    lock.with_context(|| format!("opening {}", path.display()))
+}
+
+/// The shared lease (a job, a check); a `SigningIn` error while a sign-in holds the lock. Tried
+/// for 300 ms: a lock released a moment ago can still look held while another thread here starts a
+/// process (its child holds a copy of the descriptor until it execs — measured on macOS).
+pub fn lease(p: &Profile) -> Result<Lease> {
+    let t = Instant::now();
+    let lock = loop {
+        match open_lock(p, true)? {
+            Some(l) => break l,
+            None if t.elapsed() < Duration::from_millis(300) => std::thread::sleep(Duration::from_millis(30)),
+            None => return Err(anyhow::Error::new(SigningIn { profile: p.id.clone(), name: p.name.clone() })),
+        }
+    };
+    let token = lock.text().with_context(|| format!("reading {}", p.lock_path().display()))?;
+    Ok(Lease { _lock: lock, token })
+}
+
+/// A sign-in's exclusive lease, under a new token (None: a job, a check or another sign-in holds
+/// the lock).
+pub fn sign_in_lease(p: &Profile) -> Result<Option<Lease>> {
+    let Some(lock) = open_lock(p, false)? else { return Ok(None) };
+    let token = format!("{}-{}", std::process::id(), chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default());
+    lock.set_text(&token).with_context(|| format!("writing {}", p.lock_path().display()))?;
+    forget_check(&p.id);
+    Ok(Some(Lease { _lock: lock, token }))
+}
+
+/// The token now, without the lock (`""` before the first sign-in); None when the file can't be
+/// read — on Windows, while a sign-in holds it.
+pub fn token_now(p: &Profile) -> Option<String> {
+    match fs::read_to_string(p.lock_path()) {
+        Ok(t) => Some(t),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(String::new()),
+        Err(_) => None,
+    }
+}
+
+/// A sign-in holds the profile's lock (probed with a shared take, released at once; a sign-in
+/// starting at that very moment tries again).
+pub fn signing_in_now(p: &Profile) -> bool {
+    matches!(open_lock(p, true), Ok(None))
+}
+
+/// What this process last learned of a profile's sign-in (a `claude auth status` check, or
+/// `auth_failed`): `seq` taken when the check started (a check finishing late never replaces a
+/// newer one) and the token it ran under.
+#[derive(Clone, Debug)]
+pub struct Observation {
+    pub seq: u64,
+    pub token: String,
+    pub at: Instant,
+    pub result: Result<Option<Account>, String>,
+    /// Published by `auth_failed` (a model said the folder isn't signed in; `result` is then an
+    /// error), not by a check: it needs another look.
+    pub stale: bool,
+}
+
+static LAST: Mutex<Option<HashMap<String, Observation>>> = Mutex::new(None);
+static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn next_seq() -> u64 {
+    SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+}
+
+fn publish(id: &str, o: Observation) {
+    let mut g = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    let m = g.get_or_insert_with(HashMap::new);
+    if m.get(id).is_none_or(|old| old.seq < o.seq) {
+        m.insert(id.to_string(), o);
+    }
+}
+
+/// The last observation of a profile's sign-in (this process).
+pub fn observation(id: &str) -> Option<Observation> {
+    LAST.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(id).cloned())
+}
+
+/// Who `p`'s folder is signed in to (None: signed out), checked under a shared lease and
+/// published; a `SigningIn` error while a sign-in holds the lock (nothing published: it is a lock
+/// state, not an answer). A lock that can't be opened at all is published as the check's error.
+pub fn observe(p: &Profile, cancelled: &dyn Fn() -> bool) -> Result<Option<Account>> {
+    let seq = next_seq();
+    let lease = match lease(p) {
+        Ok(l) => l,
+        Err(e) if e.downcast_ref::<SigningIn>().is_some() => return Err(e),
+        Err(e) => {
+            let token = token_now(p).unwrap_or_default();
+            publish(&p.id, Observation { seq, token, at: Instant::now(), result: Err(format!("{e:#}")), stale: false });
+            return Err(e);
+        }
+    };
+    observe_under(p, &lease, cancelled)
+}
+
+/// The check, by a holder of the lock: a sign-in under its exclusive lease (`observe` would be
+/// refused — a shared take fails against it, in this process too), a job under its shared one
+/// (`check`), so the account can't change before it is used. Published under the lease's token; a
+/// stopped check publishes nothing.
+pub fn observe_under(p: &Profile, lease: &Lease, cancelled: &dyn Fn() -> bool) -> Result<Option<Account>> {
+    let seq = next_seq();
+    let r = account_with(p, cancelled);
+    if !cancelled() {
+        let result = r.as_ref().map(Clone::clone).map_err(|e| format!("{e:#}"));
+        publish(&p.id, Observation { seq, token: lease.token.clone(), at: Instant::now(), result, stale: false });
+    }
+    r
+}
+
+/// `claude auth status` for `p`'s folder (stopped when `cancelled()` says so).
+fn account_with(p: &Profile, cancelled: &dyn Fn() -> bool) -> Result<Option<Account>> {
     let mut child = claude_command(p, &["auth".into(), "status".into()], &paths::config_dir(), false)?;
-    let (out, err, _) = wait_output(&mut child, Duration::from_secs(20), &|| false)
+    let (out, err, _) = wait_output(&mut child, Duration::from_secs(20), cancelled)
         .with_context(|| format!("checking the sign-in of {}", p.name))?;
+    parse_status(&out, &err).with_context(|| format!("checking the sign-in of {}", p.name))
+}
+
+/// Profiles a model refused (id → the sign-in token then): `auth status` saying "signed in"
+/// doesn't undo that under the same token — a sign-in (a new token), an accepted account or a job
+/// that works does.
+static REFUSED: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
+
+/// A model run said `p` isn't signed in (or refused its token): neither the cached check nor the
+/// last observation counts any more, and the refusal holds until a sign-in, an accepted account,
+/// or a job that works. The job's own failure (`needs_sign_in`, a `needs_login` run) stays as long.
+pub fn auth_failed(p: &Profile) {
+    forget_check(&p.id);
+    let token = token_now(p).unwrap_or_default();
+    REFUSED.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashMap::new).insert(p.id.clone(), token.clone());
+    let result = Err("Claude Code said it isn't signed in".to_string());
+    publish(&p.id, Observation { seq: next_seq(), token, at: Instant::now(), result, stale: true });
+}
+
+/// A model refused `p` under the sign-in token it has now (`auth_failed`).
+pub fn refused_by_model(p: &Profile) -> bool {
+    let token = token_now(p);
+    REFUSED.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(&p.id)).is_some_and(|t| token.as_deref() == Some(t.as_str()))
+}
+
+/// A job on profile `id` worked (or its account was accepted): a model's refusal no longer holds.
+pub fn job_worked(id: &str) {
+    if let Some(m) = REFUSED.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+        m.remove(id);
+    }
+}
+
+/// `claude auth status`'s answer: signed in (with an email), or explicitly signed out
+/// (`loggedIn: false`); anything else is an error, never "signed out" (that would open a sign-in).
+fn parse_status(out: &str, err: &str) -> Result<Option<Account>> {
     // The JSON ends the output; the login shell's start-up may print a `{` of its own before it.
-    let v: Value = out.match_indices('{').find_map(|(i, _)| serde_json::from_str(out[i..].trim()).ok()).ok_or_else(|| {
-        let why = err.lines().chain(out.lines()).map(str::trim).rfind(|l| !l.is_empty()).unwrap_or("no output").to_string();
-        anyhow!("unexpected answer from `claude auth status` for {}: {why}", p.name)
-    })?;
-    if v["loggedIn"].as_bool() != Some(true) {
-        return Ok(None);
+    let v: Value = out
+        .match_indices('{')
+        .find_map(|(i, _)| serde_json::from_str(out[i..].trim()).ok())
+        .ok_or_else(|| anyhow!("unexpected answer from `claude auth status`: {}", last_words(out, err)))?;
+    match v["loggedIn"].as_bool() {
+        Some(false) => return Ok(None),
+        Some(true) => {}
+        None => bail!("unexpected answer from `claude auth status`: {}", clip_line(&v.to_string())),
     }
     let s = |k: &str| v[k].as_str().unwrap_or("").to_string();
     let a = Account { email: s("email"), org: s("orgName"), subscription: s("subscriptionType") };
     if a.email.is_empty() {
-        bail!("`claude auth status` for {} names no account", p.name);
+        bail!("`claude auth status` names no account");
     }
     Ok(Some(a))
+}
+
+/// A failed child's reason: the last line it wrote on stderr, else on stdout (not the sign-in's
+/// own chatter: its URLs and prompts).
+pub fn last_words(out: &str, err: &str) -> String {
+    let said = |s: &str| {
+        s.lines().map(str::trim).rfind(|l| !l.is_empty() && !l.contains("://") && !l.starts_with("Opening browser") && !l.starts_with("Paste code")).map(str::to_owned)
+    };
+    clip_line(&said(err).or_else(|| said(out)).unwrap_or_else(|| "no output".into()))
+}
+
+fn clip_line(s: &str) -> String {
+    let s = s.lines().next().unwrap_or("");
+    if s.chars().count() > 160 { format!("{}…", s.chars().take(160).collect::<String>()) } else { s.to_string() }
 }
 
 /// Run a child to the end: (stdout, stderr, exited successfully). Stopped (TERM, KILL after 3 s,
@@ -783,14 +1056,52 @@ pub fn wait_output_with(child: &mut Child, input: Option<Vec<u8>>, deadline: Dur
     Ok((out.join().unwrap_or_default(), err.join().unwrap_or_default(), status.success(), wrote))
 }
 
-/// Recent sign-in checks (`claude auth status` takes about a second), per profile id: when, and
-/// the account (or why it can't be used). A success is kept 30 s, a failure 10 s.
-type Checks = HashMap<String, (Instant, Result<String, String>)>;
+/// Why a readiness check failed, kept typed so a cache hit gives the same error as the check.
+#[derive(Clone, Debug)]
+enum Problem {
+    SignIn(SignInNeeded),
+    Other(String),
+}
+
+impl Problem {
+    fn of(e: &anyhow::Error) -> Problem {
+        match e.downcast_ref::<SignInNeeded>() {
+            Some(s) => Problem::SignIn(s.clone()),
+            None => Problem::Other(format!("{e:#}")),
+        }
+    }
+
+    fn error(&self) -> anyhow::Error {
+        match self {
+            Problem::SignIn(s) => anyhow::Error::new(s.clone()),
+            Problem::Other(s) => anyhow!("{s}"),
+        }
+    }
+}
+
+/// Recent sign-in checks (`claude auth status` takes about a second), per profile id: the token
+/// they ran under, when, and the account (or why it can't be used). A success is kept 30 s, a
+/// failure 10 s — and neither once a sign-in changed the token.
+type Checks = HashMap<String, (String, Instant, Result<String, Problem>)>;
 static CHECKED: Mutex<Option<Checks>> = Mutex::new(None);
 
-/// Can a job run on `p` now? `local`: an http(s) server and a model. `claude`: signed in, and to the
-/// account the profile was first used with (recorded then).
-pub fn ready(p: &Profile) -> Result<()> {
+/// A call's profile, ready for a job, and the lease the job holds while it runs (`claude`: no
+/// sign-in can change the account until it is dropped). The profile is borrowed from it, so the
+/// lease lives as long as it is used.
+pub struct Ready {
+    profile: Profile,
+    _lease: Option<Lease>,
+}
+
+impl Ready {
+    pub fn profile(&self) -> &Profile {
+        &self.profile
+    }
+}
+
+/// Can a job run on `p` now? `local`: an http(s) server and a model. `claude` (checked under the
+/// caller's `lease`): signed in, and to the account the profile was first used with (recorded then).
+fn check(p: &Profile, lease: Option<&Lease>) -> Result<()> {
     if p.kind == Kind::Local {
         let url = p.base_url.as_deref().unwrap_or("");
         if !(url.starts_with("http://") || url.starts_with("https://")) {
@@ -803,18 +1114,21 @@ pub fn ready(p: &Profile) -> Result<()> {
     if !p.kind.signs_in() {
         return Ok(());
     }
-    if let Some((at, r)) = CHECKED.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashMap::new).get(&p.id) {
+    let Some(lease) = lease else { bail!("{} is checked without its lock", p.name) };
+    let cached = CHECKED.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashMap::new).get(&p.id).cloned();
+    if let Some((token, at, r)) = cached {
         let ttl = Duration::from_secs(if r.is_ok() { 30 } else { 10 });
-        if at.elapsed() < ttl {
-            return r.clone().map(|_| ()).map_err(|e| anyhow!(e));
+        if token == lease.token && at.elapsed() < ttl {
+            return r.map(|_| ()).map_err(|e| e.error());
         }
     }
-    let r = check_account(p).map_err(|e| format!("{e:#}"));
-    CHECKED.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashMap::new).insert(p.id.clone(), (Instant::now(), r.clone()));
-    r.map(|_| ()).map_err(|e| anyhow!(e))
+    let r = observe_under(p, lease, &|| false).and_then(|a| settle(p, a.as_ref())).map_err(|e| Problem::of(&e));
+    CHECKED.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashMap::new).insert(p.id.clone(), (lease.token.clone(), Instant::now(), r.clone()));
+    r.map(|_| ()).map_err(|e| e.error())
 }
 
-/// Forget the last sign-in check (after signing in or accepting another account).
+/// Forget the last sign-in check (a sign-in started, an account accepted, a model said it isn't
+/// signed in).
 pub fn forget_check(id: &str) {
     if let Some(m) = CHECKED.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
         m.remove(id);
@@ -822,31 +1136,29 @@ pub fn forget_check(id: &str) {
 }
 
 /// What a sign-in check says (`None` = signed out): the account's key when it may be used, and
-/// whether it should be recorded as the profile's (its first use).
+/// whether it should be recorded as the profile's (its first use); else `SignInNeeded`.
 fn judge(p: &Profile, a: Option<&Account>) -> Result<(String, bool)> {
-    let Some(a) = a else {
-        bail!("{} isn't signed in — menu → AI for calls → Sign in…", p.name);
-    };
-    let key = a.key();
+    let Some(a) = a else { return Err(anyhow::Error::new(SignInNeeded::signed_out(p))) };
     match &p.account {
-        Some(want) if want.to_lowercase() != key => bail!(
-            "{} is signed in as {key}, not {want} — menu → AI for calls → Use the account signed in now, or sign in again",
-            p.name
-        ),
-        Some(_) => Ok((key, false)),
-        None => Ok((key, true)),
+        Some(want) if !p.expects(a) => Err(anyhow::Error::new(SignInNeeded::other_account(p, a.key(), want.clone()))),
+        Some(_) => Ok((a.key(), false)),
+        None => Ok((a.key(), true)),
     }
 }
 
-fn check_account(p: &Profile) -> Result<String> {
-    let a = account(p)?;
-    let (key, first) = judge(p, a.as_ref())?;
+/// Judge who `p`'s folder is signed in to against the profile as stored now (re-read: another
+/// process may have recorded or accepted an account meanwhile): the account's key, or
+/// `SignInNeeded`. The first use records it (unless another writer recorded a different one).
+pub fn settle(p: &Profile, a: Option<&Account>) -> Result<String> {
+    let now = Settings::load()?.get(&p.id)?;
+    let (key, first) = judge(&now, a)?;
     if first {
-        // First use: remember the account, so a later change is noticed (unless another check
-        // recorded one meanwhile).
         Settings::update(|s| {
-            if let Some(stored) = s.profiles.iter_mut().find(|x| x.id == p.id && x.account.is_none()) {
-                stored.account = Some(key.clone());
+            let stored = s.profiles.iter_mut().find(|x| x.id == p.id).ok_or_else(|| anyhow!("the AI profile \"{}\" was removed", p.id))?;
+            match stored.account.clone() {
+                None => stored.account = Some(key.clone()),
+                Some(want) if want.to_lowercase() == key => {}
+                Some(want) => return Err(anyhow::Error::new(SignInNeeded::other_account(stored, key.clone(), want))),
             }
             Ok(())
         })?;
@@ -854,67 +1166,160 @@ fn check_account(p: &Profile) -> Result<String> {
     Ok(key)
 }
 
-/// Accept the account a `claude` profile's folder is signed in to now (checked first, then
-/// recorded: the check takes seconds and must not hold or overwrite the settings).
-pub fn accept_account(id: &str) -> Result<String> {
+/// Accept the account a `claude` profile's folder is signed in to now — the one the user was shown
+/// (`shown`), when given: another one meanwhile is refused. Checked and recorded under the
+/// profile's lease (no sign-in in between); the check stops when `cancelled()` says so (its child
+/// reaped before the lease goes).
+pub fn accept_account(id: &str, shown: Option<&str>, cancelled: &dyn Fn() -> bool) -> Result<String> {
     let p = Settings::load()?.get(id)?;
-    let a = account(&p)?.ok_or_else(|| anyhow!("{} isn't signed in", p.name))?;
+    if !p.kind.signs_in() {
+        bail!("{} has no account of its own to accept", p.name);
+    }
+    let lease = lease(&p)?;
+    let a = observe_under(&p, &lease, cancelled)?.ok_or_else(|| anyhow::Error::new(SignInNeeded::signed_out(&p)))?;
+    if cancelled() {
+        bail!("stopped");
+    }
+    if let Some(shown) = shown.filter(|s| s.to_lowercase() != a.key()) {
+        bail!("{} is now signed in as {}, not {shown} — look again", p.name, a.key());
+    }
     Settings::update(|s| {
         let stored = s.profiles.iter_mut().find(|x| x.id == id).ok_or_else(|| anyhow!("no profile \"{id}\""))?;
         stored.account = Some(a.key());
         Ok(())
     })?;
     forget_check(id);
+    job_worked(id);
+    drop(lease);
     Ok(a.label())
 }
 
-/// One argument for `sh`: single-quoted.
-#[cfg(unix)]
-fn sh_quote(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "'\\''"))
+/// The email pre-filled on the sign-in page: the profile's, else the recorded account's.
+pub fn login_email(p: &Profile) -> Option<String> {
+    let recorded = p.account.as_deref().and_then(|k| k.split(" · ").next()).map(str::to_owned);
+    p.email.clone().or(recorded).filter(|e| e.contains('@'))
 }
 
-/// Open a terminal that signs a `claude` profile's folder in (`claude auth login`).
-pub fn login(p: &Profile) -> Result<()> {
+/// `claude auth login` for `p`: a claude.ai account always (a Console sign-in may be stored outside
+/// the profile's folder), the email pre-filled (`login_email`), single sign-on when the profile
+/// says so.
+pub fn login_args(p: &Profile) -> Vec<String> {
+    let mut a: Vec<String> = ["auth", "login", "--claudeai"].map(String::from).to_vec();
+    if let Some(email) = login_email(p) {
+        a.extend(["--email".into(), email]);
+    }
+    if p.sso {
+        a.push("--sso".into());
+    }
+    a
+}
+
+/// `echoctl ai login <id>`: sign in here, in the terminal it was run from (Claude Code's own
+/// prompts, its paste-code fallback included). Ctrl-C stops it.
+pub fn login_here(id: &str) -> Result<()> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let p = Settings::load()?.get(id)?;
+    let claude = fake_claude().or_else(crate::app::claude_bin).ok_or_else(|| anyhow!("Claude Code is not installed — get it at https://claude.com/claude-code"))?;
+    let stop = std::sync::Arc::new(AtomicBool::new(false));
+    let s = stop.clone();
+    let _ = ctrlc::set_handler(move || s.store(true, Ordering::SeqCst));
+    let label = login_with(&p, &claude, true, &|| stop.load(Ordering::SeqCst))?;
+    println!("{} is signed in as {label}", p.name);
+    Ok(())
+}
+
+/// The CLI's sign-in, under the profile's exclusive lease (taken within 10 s, as the app does),
+/// the child in this terminal's foreground (`terminal`: inherited stdio). One way out for every
+/// child: stopped and reaped before the lease is released. The account's label, or why not.
+fn login_with(p: &Profile, claude: &Path, terminal: bool, stopped: &dyn Fn() -> bool) -> Result<String> {
     if !p.kind.signs_in() {
         bail!("only a Claude account profile signs in");
     }
-    let claude = crate::app::claude_bin().ok_or_else(|| anyhow!("Claude Code is not installed"))?;
+    if let Some(why) = policy_conflict(p) {
+        bail!("{why}");
+    }
+    let t = Instant::now();
+    let lease = loop {
+        match sign_in_lease(p)? {
+            Some(l) => break l,
+            None if stopped() => bail!("stopped — {} isn't signed in", p.name),
+            None if t.elapsed() < Duration::from_secs(10) => std::thread::sleep(Duration::from_millis(200)),
+            None => bail!("{} is being signed in already, or Echo is using it (writing notes) — try again in a moment", p.name),
+        }
+    };
     fs::create_dir_all(p.config_folder())?;
-    forget_check(&p.id);
+    // In this terminal's foreground, not `detach`ed: it reads the paste code, and Ctrl-C reaches
+    // it. No login shell (its job control would take the terminal): the terminal's environment is
+    // already the user's; the profile's routing is applied on top.
+    let mut c = build_command(p, claude, &login_args(p), &paths::config_dir(), false, false);
+    if terminal {
+        c.stdin(Stdio::inherit()).stdout(Stdio::inherit()).stderr(Stdio::inherit());
+    } else {
+        c.stdout(Stdio::null()).stderr(Stdio::null());
+    }
+    let mut child = c.spawn()?;
+    let watched = (|| -> Result<std::process::ExitStatus> {
+        loop {
+            if let Some(s) = child.try_wait()? {
+                return Ok(s);
+            }
+            if stopped() {
+                bail!("stopped");
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    })();
+    let status = match watched {
+        Ok(s) => s,
+        Err(e) => {
+            stop_foreground(&mut child);
+            if !stopped() {
+                return Err(e);
+            }
+            child.wait()?
+        }
+    };
+    if stopped() {
+        bail!("stopped — {} isn't signed in", p.name);
+    }
+    if !status.success() {
+        bail!("the sign-in didn't finish");
+    }
+    let a = match observe_under(p, &lease, stopped) {
+        Err(_) if stopped() => bail!("stopped — the sign-in of {} wasn't checked", p.name),
+        r => r?,
+    };
+    let settled = settle(p, a.as_ref());
+    drop(lease);
+    match settled {
+        Ok(_) => Ok(a.map(|a| a.label()).unwrap_or_default()),
+        Err(e) if e.downcast_ref::<SignInNeeded>().is_some_and(|s| s.now.is_some()) => Err(anyhow!("{e:#} (or: echoctl ai accept {})", p.id)),
+        Err(e) => Err(e),
+    }
+}
+
+/// Stop a child in our own process group (a terminal's foreground: the group is the terminal's,
+/// so only its pid is signalled): TERM, then KILL after 3 s. On Windows its whole tree at once
+/// (`taskkill /T /F`: a `claude.cmd` launcher runs Claude Code as its child).
+fn stop_foreground(child: &mut Child) {
+    #[cfg(windows)]
+    stop_group(child.id());
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        let script = p.config_folder().with_extension("login.command");
-        let mut s = String::from("#!/bin/sh\n");
-        s.push_str(UNSET_ROUTING.trim_end());
-        s.push('\n');
-        s.push_str(&format!("echo {}\n", sh_quote(&format!("Echo: sign in for \"{}\"", p.name))));
-        s.push_str(&format!("CLAUDE_CONFIG_DIR={} {} auth login\n", sh_quote(&p.config_folder().display().to_string()), sh_quote(&claude.display().to_string())));
-        s.push_str("echo; echo 'Done — you can close this window.'\n");
-        fs::write(&script, s)?;
-        fs::set_permissions(&script, fs::Permissions::from_mode(0o700))?;
-        #[cfg(target_os = "macos")]
-        Command::new("open").args(["-a", "Terminal"]).arg(&script).spawn()?;
-        #[cfg(not(target_os = "macos"))]
-        Command::new("x-terminal-emulator").arg("-e").arg(&script).spawn()?;
-    }
-    #[cfg(windows)]
-    {
-        let script = p.config_folder().with_extension("login.cmd");
-        let mut s = String::from("@echo off\r\n");
-        for (k, _) in std::env::vars() {
-            if routing_var(&k) {
-                s.push_str(&format!("set {k}=\r\n"));
-            }
+        // SAFETY: signalling our own child by pid.
+        unsafe {
+            libc::kill(child.id() as i32, libc::SIGTERM);
         }
-        s.push_str(&format!("echo Echo: sign in for \"{}\"\r\n", p.name.replace(['"', '%', '^', '&', '|', '<', '>'], "")));
-        s.push_str(&format!("set \"CLAUDE_CONFIG_DIR={}\"\r\n", p.config_folder().display()));
-        s.push_str(&format!("\"{}\" auth login\r\npause\r\n", claude.display()));
-        fs::write(&script, s)?;
-        Command::new("cmd").args(["/c", "start", "", &script.display().to_string()]).spawn()?;
+        let t = Instant::now();
+        while t.elapsed() < Duration::from_secs(3) {
+            if matches!(child.try_wait(), Ok(Some(_))) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
     }
-    Ok(())
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 // ── `echoctl ai …` ──────────────────────────────────────────────────────────────────────────
@@ -971,11 +1376,13 @@ pub fn add_local(id: &str, name: Option<String>, model: &str, live_model: Option
         live_model: live_model.or_else(|| Some(model.to_string())),
         notes_model: Some(model.to_string()),
         account: None,
+        email: None,
+        sso: false,
     })
 }
 
-/// `echoctl ai add-claude <id> [--name …] [--live-model haiku] [--notes-model sonnet]`
-pub fn add_claude(id: &str, name: Option<String>, live_model: Option<String>, notes_model: Option<String>) -> Result<()> {
+/// `echoctl ai add-claude <id> [--name …] [--live-model haiku] [--notes-model sonnet] [--email …] [--sso]`
+pub fn add_claude(id: &str, name: Option<String>, live_model: Option<String>, notes_model: Option<String>, email: Option<String>, sso: bool) -> Result<()> {
     add(Profile {
         id: id.into(),
         name: name.unwrap_or_else(|| format!("Claude · {id}")),
@@ -985,8 +1392,40 @@ pub fn add_claude(id: &str, name: Option<String>, live_model: Option<String>, no
         live_model: Some(live_model.unwrap_or_else(|| crate::config::DEFAULT_LIVE_MODEL.into())),
         notes_model: Some(notes_model.unwrap_or_else(|| crate::config::DEFAULT_NOTES_MODEL.into())),
         account: None,
+        email: email_arg(email)?,
+        sso,
     })?;
-    println!("sign it in once: echoctl ai login {id}");
+    println!("sign it in once: Sign in… in the Echo window, or echoctl ai login {id}");
+    Ok(())
+}
+
+fn email_arg(email: Option<String>) -> Result<Option<String>> {
+    let email = email.map(|e| e.trim().to_string()).filter(|e| !e.is_empty());
+    if email.as_deref().is_some_and(|e| !e.contains('@') || e.chars().any(char::is_whitespace)) {
+        bail!("that isn't an email address");
+    }
+    Ok(email)
+}
+
+/// `echoctl ai set <id> [--email … | --no-email] [--sso on|off]`: how a Claude profile signs in.
+pub fn set_sign_in(id: &str, email: Option<String>, no_email: bool, sso: Option<bool>) -> Result<()> {
+    let email = email_arg(email)?;
+    let (name, email, sso) = Settings::update(|s| {
+        let p = s.profiles.iter_mut().find(|p| p.id == id).ok_or_else(|| anyhow!("no profile \"{id}\""))?;
+        if !p.kind.signs_in() {
+            bail!("{} doesn't sign in (only Claude account profiles do)", p.name);
+        }
+        if no_email {
+            p.email = None;
+        } else if email.is_some() {
+            p.email = email.clone();
+        }
+        if let Some(sso) = sso {
+            p.sso = sso;
+        }
+        Ok((p.name.clone(), p.email.clone(), p.sso))
+    })?;
+    println!("{name}: email {}, single sign-on {}", email.as_deref().unwrap_or("not set"), if sso { "on" } else { "off" });
     Ok(())
 }
 
@@ -1018,14 +1457,13 @@ pub fn status(id: Option<&str>) -> Result<()> {
     for p in s.all().into_iter().filter(|p| id.is_none_or(|i| i == p.id)) {
         let (signed_in, account, problem) = match p.kind {
             Kind::Claude => {
-                forget_check(&p.id);
-                match account(&p) {
-                    Ok(Some(a)) => (Some(true), Some(a.label()), ready(&p).err().map(|e| format!("{e:#}"))),
+                match observe(&p, &|| false) {
+                    Ok(Some(a)) => (Some(true), Some(a.label()), settle(&p, Some(&a)).err().map(|e| format!("{e:#}"))),
                     Ok(None) => (Some(false), None, None),
                     Err(e) => (None, None, Some(format!("{e:#}"))),
                 }
             }
-            _ => (None, None, ready(&p).err().map(|e| format!("{e:#}"))),
+            _ => (None, None, check(&p, None).err().map(|e| format!("{e:#}"))),
         };
         let conflict = (p.kind != Kind::System).then(|| policy_conflict(&p)).flatten();
         out.push(json!({
@@ -1048,18 +1486,288 @@ pub fn summary() -> Value {
             "live_notes": s.live_notes,
             "profiles": s.all().iter().map(|p| json!({
                 "id": p.id, "name": p.name, "kind": p.kind, "live_model": p.live_model(),
-                "notes_model": p.notes_model(), "account": p.account,
+                "notes_model": p.notes_model(), "account": p.account, "email": p.email, "sso": p.sso,
                 // `local`: where the requests go when it isn't this computer
                 "host": (p.kind == Kind::Local && !p.on_this_computer()).then(|| p.base_url.clone()).flatten(),
+                // `claude`: its sign-in now (`signin::state`; no process runs for it)
+                "signin": crate::signin::state(p),
             })).collect::<Vec<_>>(),
         }),
         Err(e) => json!({ "error": format!("{e:#}") }),
     }
 }
 
+/// (tests) A stand-in `claude`: `auth status` prints `<profile folder>/status.json` (each run
+/// counted in `status.count`; `slow` there makes it take a second, `stall` 30, `stubborn` ignore
+/// TERM — stopping it then takes the 3 s until KILL); `auth login` records its
+/// arguments in `login.args` and does what `login` says: `ok` (`after.json` becomes the status),
+/// `fail`, `hang` (its pid in `login.pid`, then it sleeps); `-p` reads its prompt and prints
+/// `p.reply`. Installing it forgets this process's observations and cached checks.
+#[cfg(test)]
+pub mod fake {
+    use super::*;
+
+    /// Installed until dropped.
+    pub struct Fake;
+
+    impl Drop for Fake {
+        fn drop(&mut self) {
+            *FAKE_CLAUDE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        }
+    }
+
+    pub fn install(root: &Path) -> Fake {
+        let f = root.join("fake-claude");
+        fs::write(
+            &f,
+            r#"#!/bin/sh
+d="$CLAUDE_CONFIG_DIR"
+[ -f "$d/stubborn" ] && trap '' TERM
+case "$1 $2" in
+"auth status") echo x >> "$d/status.count"; [ -f "$d/slow" ] && sleep 1; [ -f "$d/stall" ] && sleep 30; cat "$d/status.json" ;;
+"-p "*) cat > /dev/null; cat "$d/p.reply" ;;
+"auth login") echo "$@" > "$d/login.args"
+  case "$(cat "$d/login" 2>/dev/null)" in
+  ok) cp "$d/after.json" "$d/status.json"; echo "Login successful." ;;
+  fail) echo "Login failed: Request failed with status code 400" >&2; exit 1 ;;
+  hang) echo $$ > "$d/login.pid"; exec sleep 60 ;;
+  esac ;;
+esac
+"#,
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&f, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        *FAKE_CLAUDE.lock().unwrap_or_else(|e| e.into_inner()) = Some(f);
+        *LAST.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        *CHECKED.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        *REFUSED.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        Fake
+    }
+
+    pub fn signed_in(email: &str) -> String {
+        json!({ "loggedIn": true, "email": email, "orgName": "Example Corp", "subscriptionType": "max" }).to_string()
+    }
+
+    pub const SIGNED_OUT: &str = r#"{"loggedIn": false, "authMethod": "none"}"#;
+
+    /// A `claude` profile `id` saved in the settings, its folder answering `status`.
+    pub fn profile(id: &str, account: Option<&str>, status: &str) -> Profile {
+        let p = Profile {
+            id: id.into(),
+            name: format!("Claude · {id}"),
+            kind: Kind::Claude,
+            base_url: None,
+            token: None,
+            live_model: None,
+            notes_model: None,
+            account: account.map(str::to_owned),
+            email: None,
+            sso: false,
+        };
+        Settings::update(|s| {
+            s.live_notes = true;
+            s.profiles.retain(|x| x.id != id);
+            s.profiles.push(p.clone());
+            Ok(())
+        })
+        .unwrap();
+        fs::create_dir_all(p.config_folder()).unwrap();
+        fs::write(p.config_folder().join("status.json"), status).unwrap();
+        p
+    }
+
+    pub fn file(p: &Profile, name: &str) -> PathBuf {
+        p.config_folder().join(name)
+    }
+
+    pub fn status_runs(p: &Profile) -> usize {
+        fs::read_to_string(file(p, "status.count")).map(|s| s.lines().count()).unwrap_or(0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn auth_status_is_read_strictly() {
+        let a = parse_status(&fake::signed_in("Pat@Example.com"), "").unwrap().unwrap();
+        assert_eq!(a.key(), "pat@example.com · example corp");
+        assert_eq!(parse_status(fake::SIGNED_OUT, "").unwrap(), None, "only an explicit false is signed out");
+        assert!(parse_status(r#"{"error": "keychain locked"}"#, "").is_err(), "an answer without loggedIn isn't 'signed out'");
+        assert!(parse_status("", "Error: something broke").unwrap_err().to_string().contains("something broke"));
+        assert!(parse_status(r#"{"loggedIn": true}"#, "").is_err(), "signed in to nobody");
+    }
+
+    #[test]
+    fn the_sign_in_page_is_pre_filled() {
+        let mut p = Profile { id: "w".into(), name: "W".into(), kind: Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false };
+        assert_eq!(login_args(&p), ["auth", "login", "--claudeai"], "a claude.ai account always");
+        p.account = Some("pat@example.com · example corp".into());
+        assert_eq!(login_args(&p)[3..], ["--email", "pat@example.com"], "the recorded account's email");
+        p.email = Some("me@work.example".into());
+        p.sso = true;
+        assert_eq!(login_args(&p)[3..], ["--email", "me@work.example", "--sso"]);
+        assert!(email_arg(Some("not an email".into())).is_err());
+        assert_eq!(email_arg(Some("  ".into())).unwrap(), None);
+    }
+
+    #[test]
+    fn settling_judges_against_the_settings_as_they_are_now() {
+        let (_env, _root) = crate::paths::testenv::folders("ai-settle");
+        let a = Account { email: "pat@example.com".into(), org: "Example Corp".into(), subscription: "max".into() };
+        let snapshot = Profile { id: "w".into(), name: "Work".into(), kind: Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false };
+        Settings { default: None, live_notes: true, profiles: vec![snapshot.clone()] }.save().unwrap();
+        // First use: recorded.
+        assert_eq!(settle(&snapshot, Some(&a)).unwrap(), a.key());
+        assert_eq!(Settings::load().unwrap().get("w").unwrap().account, Some(a.key()));
+        // Another writer recorded another account meanwhile: the old snapshot doesn't let it through.
+        Settings::update(|s| {
+            s.profiles[0].account = Some("someone@else.example".into());
+            Ok(())
+        })
+        .unwrap();
+        let e = settle(&snapshot, Some(&a)).unwrap_err();
+        let typed = e.downcast_ref::<SignInNeeded>().expect("typed");
+        assert_eq!((typed.now.as_deref(), typed.expected.as_deref()), (Some(a.key().as_str()), Some("someone@else.example")));
+        assert!(settle(&snapshot, None).unwrap_err().downcast_ref::<SignInNeeded>().is_some_and(|s| s.now.is_none()));
+        // A removed profile: an error, never a pass.
+        Settings::update(|s| {
+            s.profiles.clear();
+            Ok(())
+        })
+        .unwrap();
+        assert!(settle(&snapshot, Some(&a)).is_err());
+    }
+
+    #[test]
+    fn a_sign_in_excludes_jobs_and_changes_the_token() {
+        let (_env, _root) = crate::paths::testenv::folders("ai-lease");
+        let p = fake::profile("w", None, fake::SIGNED_OUT);
+        let before = token_now(&p).unwrap();
+        let (a, b) = (lease(&p).unwrap(), lease(&p).unwrap());
+        assert!(sign_in_lease(&p).unwrap().is_none(), "not while jobs hold it");
+        assert!(!signing_in_now(&p));
+        drop((a, b));
+        crate::paths::testenv::eventually("free now", || sign_in_lease(&p).unwrap().is_some());
+        let s = sign_in_lease(&p).unwrap().expect("free now");
+        assert!(signing_in_now(&p));
+        let e = lease(&p).err().expect("jobs wait for the sign-in");
+        assert_eq!(e.downcast_ref::<SigningIn>().map(|s| s.profile.as_str()), Some("w"));
+        assert_ne!(s.token, before);
+        let token = s.token.clone();
+        drop(s);
+        assert_eq!(lease(&p).unwrap().token, token, "the new token is what jobs read");
+        assert_eq!(token_now(&p).unwrap(), token);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn readiness_is_cached_per_token_and_stays_typed() {
+        let (_env, root) = crate::paths::testenv::folders("ai-ready");
+        let _fake = fake::install(&root);
+        let p = fake::profile("w", None, &fake::signed_in("pat@example.com"));
+        let call = root.join("home/calls/2026-10-23_100000-x");
+        fs::create_dir_all(&call).unwrap();
+        fs::write(call.join("meta.json"), r#"{"ai_profile": "w"}"#).unwrap();
+        forget_check("w");
+        assert!(for_call(&call).is_ok());
+        assert!(for_call(&call).is_ok());
+        assert_eq!(fake::status_runs(&p), 1, "the second job used the cached check");
+        // A sign-in (here or in another process) …
+        crate::paths::testenv::eventually("the jobs' leases are gone", || sign_in_lease(&p).unwrap().is_some());
+        fs::write(fake::file(&p, "status.json"), fake::SIGNED_OUT).unwrap();
+        let e = for_call(&call).err().unwrap();
+        assert_eq!(fake::status_runs(&p), 2, "… voids the cached check");
+        assert!(e.downcast_ref::<SignInNeeded>().is_some(), "typed on a fresh check");
+        let e = for_call(&call).err().unwrap();
+        assert_eq!(fake::status_runs(&p), 2);
+        assert!(e.downcast_ref::<SignInNeeded>().is_some(), "and typed on a cache hit");
+        assert!(matches!(observation("w").unwrap().result, Ok(None)), "published");
+        // A model said it isn't signed in: neither the cache nor the observation counts.
+        auth_failed(&p);
+        assert!(observation("w").unwrap().stale);
+        let _ = for_call(&call);
+        assert_eq!(fake::status_runs(&p), 3);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_job_holds_its_lease_while_it_runs() {
+        let (_env, root) = crate::paths::testenv::folders("ai-job-lease");
+        let _fake = fake::install(&root);
+        let p = fake::profile("w", None, &fake::signed_in("pat@example.com"));
+        let call = root.join("home/calls/2026-10-23_100000-x");
+        fs::create_dir_all(&call).unwrap();
+        fs::write(call.join("meta.json"), r#"{"ai_profile": "w"}"#).unwrap();
+        let ready = for_call(&call).unwrap();
+        assert_eq!(ready.profile().id, "w");
+        assert!(sign_in_lease(&p).unwrap().is_none(), "no sign-in under a running job");
+        drop(ready);
+        crate::paths::testenv::eventually("free once the job is done", || sign_in_lease(&p).unwrap().is_some());
+    }
+
+    #[test]
+    fn observations_never_go_back() {
+        let (_env, _root) = crate::paths::testenv::folders("ai-order"); // `fake::install` clears them
+        let o = |seq| Observation { seq, token: String::new(), at: Instant::now(), result: Ok(None), stale: false };
+        publish("order-test", o(10));
+        publish("order-test", o(9)); // a check that started earlier and ended later
+        assert_eq!(observation("order-test").unwrap().seq, 10);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_cli_sign_in_records_reaps_and_releases() {
+        let (_env, root) = crate::paths::testenv::folders("ai-cli-login");
+        let fake = fake::install(&root);
+        let claude = FAKE_CLAUDE.lock().unwrap().clone().unwrap();
+        let p = fake::profile("w", None, fake::SIGNED_OUT);
+        let free = || crate::paths::testenv::eventually("the lease is released", || sign_in_lease(&p).unwrap().is_some());
+        // It fails: nothing recorded.
+        fs::write(fake::file(&p, "login"), "fail").unwrap();
+        assert!(login_with(&p, &claude, false, &|| false).unwrap_err().to_string().contains("didn't finish"));
+        assert_eq!(Settings::load().unwrap().get("w").unwrap().account, None);
+        free();
+        // It works: the account is recorded.
+        fs::write(fake::file(&p, "login"), "ok").unwrap();
+        fs::write(fake::file(&p, "after.json"), fake::signed_in("pat@example.com")).unwrap();
+        assert_eq!(login_with(&p, &claude, false, &|| false).unwrap(), "pat@example.com · example corp (max)");
+        assert_eq!(Settings::load().unwrap().get("w").unwrap().account.as_deref(), Some("pat@example.com · example corp"));
+        free();
+        // Another account: an error that says how to use it (a non-zero exit).
+        let p = fake::profile("w", Some("pat@example.com · example corp"), fake::SIGNED_OUT);
+        fs::write(fake::file(&p, "after.json"), fake::signed_in("other@example.com")).unwrap();
+        assert!(login_with(&p, &claude, false, &|| false).unwrap_err().to_string().contains("echoctl ai accept w"));
+        free();
+        // Stopped during the final check: that check's child is stopped too, then the lease goes.
+        fs::write(fake::file(&p, "status.json"), fake::SIGNED_OUT).unwrap();
+        fs::write(fake::file(&p, "slow"), "").unwrap();
+        let count = fake::file(&p, "status.count");
+        let _ = fs::remove_file(&count);
+        let e = login_with(&p, &claude, false, &|| count.exists()).unwrap_err();
+        assert!(e.to_string().contains("stopped"), "{e:#}");
+        free();
+        drop(fake);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn accepting_takes_the_account_that_was_shown_or_nothing() {
+        let (_env, root) = crate::paths::testenv::folders("ai-accept");
+        let _fake = fake::install(&root);
+        let p = fake::profile("w", Some("pat@example.com · example corp"), &fake::signed_in("other@example.com"));
+        let e = accept_account("w", Some("someone@third.example"), &|| false).unwrap_err();
+        assert!(e.to_string().contains("now signed in as other@example.com"), "{e:#}");
+        assert_eq!(Settings::load().unwrap().get("w").unwrap().account.as_deref(), Some("pat@example.com · example corp"), "nothing recorded");
+        accept_account("w", Some("other@example.com · example corp"), &|| false).unwrap();
+        assert_eq!(Settings::load().unwrap().get("w").unwrap().account.as_deref(), Some("other@example.com · example corp"));
+        let _ = p;
+    }
 
     #[test]
     fn the_script_removes_routing_and_passes_values_outside_its_text() {
@@ -1111,7 +1819,7 @@ mod tests {
         let _unset = Unset;
         USERS.iter().for_each(|k| std::env::set_var(k, "the user's own"));
         std::env::set_var("ANTHROPIC_BASE_URL", "https://gateway.example");
-        let local = Profile { id: "q".into(), name: "Q".into(), kind: Kind::Local, base_url: Some("http://localhost:11434".into()), token: None, live_model: Some("m".into()), notes_model: Some("m".into()), account: None };
+        let local = Profile { id: "q".into(), name: "Q".into(), kind: Kind::Local, base_url: Some("http://localhost:11434".into()), token: None, live_model: Some("m".into()), notes_model: Some("m".into()), account: None, email: None, sso: false };
         let c = build_command(&local, Path::new("/bin/claude"), &["-p".into()], &root, false, false);
         let envs: HashMap<String, Option<String>> = c.get_envs().map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned()))).collect();
         assert_eq!(envs.get("ANTHROPIC_BASE_URL"), Some(&Some("http://localhost:11434".into())), "the profile's, not the shell's");
@@ -1122,7 +1830,7 @@ mod tests {
         }
         let args: Vec<String> = c.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
         assert_eq!(args, ["-p", "--setting-sources", "user"]);
-        let claude = Profile { id: "c".into(), name: "C".into(), kind: Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: None };
+        let claude = Profile { id: "c".into(), name: "C".into(), kind: Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false };
         let c = build_command(&claude, Path::new("/bin/claude"), &["-p".into()], &root, false, false);
         let envs: HashMap<String, Option<String>> = c.get_envs().map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned()))).collect();
         for k in USERS {
@@ -1147,7 +1855,7 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(&stand_in, fs::Permissions::from_mode(0o755)).unwrap();
         }
-        let p = Profile { id: "c".into(), name: "C".into(), kind: Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: None };
+        let p = Profile { id: "c".into(), name: "C".into(), kind: Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false };
         let mut c = build_command(&p, &stand_in, &["-p".into()], &root, false, true);
         // The user's login shell (no start-up files of theirs here) and their own routing.
         c.env("HOME", &root).env_remove("ZDOTDIR").env("ANTHROPIC_API_KEY", "the user's own").env("CLAUDE_CODE_USE_BEDROCK", "1");
@@ -1171,7 +1879,7 @@ mod tests {
                 for i in 0..20 {
                     Settings::update(|s| {
                         s.profiles.retain(|p| p.id != id);
-                        s.profiles.push(Profile { id: id.into(), name: format!("{id} {i}"), kind: Kind::Local, base_url: Some("http://localhost:1".into()), token: None, live_model: Some("m".into()), notes_model: Some("m".into()), account: None });
+                        s.profiles.push(Profile { id: id.into(), name: format!("{id} {i}"), kind: Kind::Local, base_url: Some("http://localhost:1".into()), token: None, live_model: Some("m".into()), notes_model: Some("m".into()), account: None, email: None, sso: false });
                         Ok(())
                     })
                     .unwrap();
@@ -1194,7 +1902,7 @@ mod tests {
 
     #[test]
     fn the_account_is_who_not_which_plan() {
-        let p = |account: Option<&str>| Profile { id: "w".into(), name: "Work".into(), kind: Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: account.map(str::to_owned) };
+        let p = |account: Option<&str>| Profile { id: "w".into(), name: "Work".into(), kind: Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: account.map(str::to_owned), email: None, sso: false };
         let a = |sub: &str| Account { email: "Pat@Example.com".into(), org: "Example Corp".into(), subscription: sub.into() };
         assert!(format!("{:#}", judge(&p(None), None).unwrap_err()).contains("isn't signed in"));
         assert_eq!(judge(&p(None), Some(&a("pro"))).unwrap(), ("pat@example.com · example corp".into(), true), "first use: recorded");
@@ -1240,7 +1948,7 @@ mod tests {
             eprintln!("skipped: this machine has a real Claude Code policy, and the result would be about it");
             return;
         }
-        let p = Profile { id: "w".into(), name: "Work".into(), kind: Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: None };
+        let p = Profile { id: "w".into(), name: "Work".into(), kind: Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false };
         fs::create_dir_all(p.config_folder()).unwrap();
         let f = p.config_folder().join("remote-settings.json");
         fs::write(&f, r#"{"permissions":{"deny":["WebFetch"]}}"#).unwrap();
@@ -1337,9 +2045,9 @@ mod tests {
         fs::write(call.join("meta.json"), "{}").unwrap();
         // Unpinned (recorded before profiles): the default — which must exist.
         Settings { default: Some("gone".into()), live_notes: true, profiles: vec![] }.save().unwrap();
-        assert!(format!("{:#}", for_call(&call).unwrap_err()).contains("doesn't exist"));
+        assert!(format!("{:#}", for_call(&call).err().unwrap()).contains("doesn't exist"));
         set_call_profile(&call, SYSTEM).unwrap();
-        assert_eq!(for_call(&call).unwrap().kind, Kind::System);
+        assert_eq!(for_call(&call).unwrap().profile.kind, Kind::System);
         // A meta.json that can't be read: an error, not the default.
         fs::write(call.join("meta.json"), "{ half wri").unwrap();
         assert!(for_call(&call).is_err());

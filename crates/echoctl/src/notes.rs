@@ -434,6 +434,46 @@ fn wait_for_local_model(stamp: &str, dir: &Path, r: &mut Run, name: &str) -> Res
     }
 }
 
+/// The call's profile, waiting while it is being signed in (a sign-in takes 10 minutes at most):
+/// the minutes then go to the account it ends with, or say why they can't. With the call's folder
+/// as it is named now (it may be retitled meanwhile).
+fn ready_for_notes(stamp: &str, dir: &Path, r: &mut Run) -> (PathBuf, Result<crate::ai::Ready>) {
+    let t = Instant::now();
+    loop {
+        let before = calls::by_stamp(stamp).unwrap_or_else(|| dir.to_path_buf());
+        let ready = crate::ai::for_call(&before);
+        // The check may take seconds: where the call is after it.
+        let now = calls::by_stamp(stamp).unwrap_or(before);
+        match ready {
+            Err(e) if e.downcast_ref::<crate::ai::SigningIn>().is_some() && t.elapsed() < Duration::from_secs(12 * 60) && !quitting() => {
+                let msg = format!("{e:#} — the notes wait for it");
+                if r.message.as_deref() != Some(msg.as_str()) {
+                    r.message = Some(msg);
+                    save(&now, r);
+                }
+                std::thread::sleep(Duration::from_secs(2));
+            }
+            other => return (now, other),
+        }
+    }
+}
+
+/// The call's profile can't be used: a sign-in problem (signed out, another account, a sign-in
+/// that didn't end in time) becomes `needs_login` naming the profile — the window offers Sign in…
+/// or Use <account> — anything else `failed`.
+fn not_ready(r: &mut Run, e: &anyhow::Error) {
+    r.message = Some(format!("{e:#}"));
+    r.finished_at = Some(Local::now());
+    let profile = e.downcast_ref::<crate::ai::SignInNeeded>().map(|s| s.profile.clone()).or_else(|| e.downcast_ref::<crate::ai::SigningIn>().map(|s| s.profile.clone()));
+    match profile {
+        Some(id) => {
+            r.state = "needs_login".into();
+            r.profile = Some(id);
+        }
+        None => r.state = "failed".into(),
+    }
+}
+
 fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>) -> Result<PathBuf> {
     let call_stamp = calls::stamp_of(dir);
     let cfg = Config::load().unwrap_or_default();
@@ -441,25 +481,26 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>) -> Result<
     let plugin =plugin_dir().ok_or_else(|| anyhow!("the Echo plugin wasn't found"))?;
     // The place is held by this process until the run ends (a dead holder = an interrupted run).
     let mut r = Run { state: "queued".into(), pid: Some(std::process::id()), started_at: Some(Local::now()), ..Default::default() };
-    let fail = |r: &mut Run, msg: String| -> Result<PathBuf> {
-        r.state = "failed".into();
-        r.message = Some(msg);
-        r.finished_at = Some(Local::now());
-        save(dir, r);
-        release_claim(dir);
-        Ok(dir.to_path_buf())
-    };
-    // The call's profile: strict, never another one (`ai.rs`).
-    let profile = match crate::ai::for_call(dir) {
+    // The call's profile: strict, never another one (`ai.rs`). Its lease is held for the whole
+    // run: no sign-in changes the account under it.
+    let (now, ready) = ready_for_notes(&call_stamp, dir, &mut r);
+    let dir: &Path = &now; // retitled while it waited: carry on in the folder as it is named now
+    let ready = match ready {
         Ok(p) => p,
-        Err(e) => return fail(&mut r, format!("{e:#}")),
+        Err(e) => {
+            not_ready(&mut r, &e);
+            save(dir, &r);
+            release_claim(dir);
+            return Ok(dir.to_path_buf());
+        }
     };
+    let profile = ready.profile();
     let model = profile.notes_model();
     let label = format!("{} · {}", profile.name, model.as_deref().unwrap_or("Claude Code's default model"));
     r.profile = Some(profile.id.clone());
     r.model = Some(label.clone());
     save(dir, &r);
-    let _lease = if profile.kind.gated() { Some(wait_for_local_model(&call_stamp, dir, &mut r, &profile.name)?) } else { None };
+    let _local_turn = if profile.kind.gated() { Some(wait_for_local_model(&call_stamp, dir, &mut r, &profile.name)?) } else { None };
     // Retitled while it waited: carry on in the folder as it is named now.
     let moved = calls::by_stamp(&call_stamp).filter(|d| d != dir);
     let dir: &Path = moved.as_deref().unwrap_or(dir);
@@ -496,7 +537,7 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>) -> Result<
     let _ = writeln!(log, "          folder: {}", cwd.display());
     let _ = writeln!(log, "          plugin: {}", plugin.display());
 
-    let mut child = match admit_child(|| crate::ai::claude_command(&profile, &args(dir, &home, &plugin, model.as_deref()), &cwd, false)) {
+    let mut child = match admit_child(|| crate::ai::claude_command(profile, &args(dir, &home, &plugin, model.as_deref()), &cwd, false)) {
         Ok(c) => c,
         Err(e) => {
             let msg = format!("couldn't start Claude Code: {e:#}");
@@ -592,7 +633,7 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>) -> Result<
         refused: &refused,
         exit: status_code.and_then(|s| s.code()),
     };
-    conclude(&mut r, &profile, &ended, &label, &cfg.notes_model_label());
+    conclude(&mut r, profile, &ended, &label, &cfg.notes_model_label());
     let _ = writeln!(log, "{}  {} ({}s)", stamp(), match r.state.as_str() {
         "done" => "Notes written.".to_string(),
         s => format!("{s}: {}", r.message.as_deref().unwrap_or("")),
@@ -601,7 +642,7 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>) -> Result<
         // Leave the call to an open session or a retry.
         let _ = fs::remove_file(dir.join(calls::CLAIMED));
     }
-    drop(_lease); // the local model is free for the next job
+    drop(_local_turn); // the local model is free for the next job
     save(dir, &r);
     // A title set during the run: Windows couldn't rename the folder while the log (or the place)
     // was open.
@@ -644,12 +685,13 @@ struct Ended<'a> {
     exit: Option<i32>,
 }
 
-/// The run's final state and message. A `claude` profile's cached sign-in check is dropped when a
-/// failed run says it isn't signed in.
+/// The run's final state and message. A `claude` profile's sign-in is marked refused when a failed
+/// run says it isn't signed in (`ai::auth_failed`); notes written count as a job that worked.
 fn conclude(r: &mut Run, profile: &crate::ai::Profile, e: &Ended, label: &str, notes_model_label: &str) {
     use crate::ai::Kind;
     let all = format!("{}\n{}\n{}", e.seen, e.err_text, e.result_text);
     let (state, message) = if e.wrote_notes && !e.is_error {
+        crate::ai::job_worked(&profile.id);
         ("done", None)
     } else if e.is_error && needs_login(&all) && profile.kind == Kind::Local {
         // Its token is the profile's: /login in a terminal would only sign in the user's own Claude Code.
@@ -661,8 +703,8 @@ fn conclude(r: &mut Run, profile: &crate::ai::Profile, e: &Ended, label: &str, n
     } else if e.is_error && needs_login(&all) {
         // Only a failed run: a skipped one's report may quote what was said ("not logged in").
         ("needs_login", Some(if profile.kind == Kind::Claude {
-            crate::ai::forget_check(&profile.id);
-            format!("{} isn't signed in — menu → AI for calls → Sign in, then click Try again.", profile.name)
+            crate::ai::auth_failed(profile);
+            format!("{} isn't signed in — Sign in…, then click Try again.", profile.name)
         } else {
             "Claude Code isn't signed in. Open Terminal, run claude, type /login, then click Try again.".into()
         }))
@@ -874,8 +916,11 @@ mod tests {
         assert!(dir.join(calls::CLAIMED).exists(), "the place is held: a new run owns the claim");
         drop(place); // its owner is gone: the OS releases the place
         // A queued run whose owner died: interrupted, and its claim is released.
+        crate::paths::testenv::eventually("the place is free", || {
+            let _ = status(&dir);
+            !dir.join(calls::CLAIMED).exists()
+        });
         assert_eq!(status(&dir).unwrap().state, "failed");
-        assert!(!dir.join(calls::CLAIMED).exists());
         // A session's claim is not ours to release.
         save(&dir, &Run { state: "running".into(), pid: Some(gone), ..Default::default() });
         fs::write(dir.join(calls::CLAIMED), "2026-10-23T01:00:00+02:00\n").unwrap();
@@ -960,6 +1005,74 @@ mod tests {
         assert_eq!(rule_path(Path::new("/Users/me/Echo")), "/Users/me/Echo");
     }
 
+    /// Tests that set or depend on `quitting()` (process-wide).
+    static QUITTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[cfg(unix)]
+    #[test]
+    fn notes_wait_for_a_sign_in_going_on() {
+        let _q = QUITTING.lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = crate::paths::testenv::folders("notes-wait-sign-in");
+        let _fake = crate::ai::fake::install(&root);
+        let p = crate::ai::fake::profile("w", None, &crate::ai::fake::signed_in("pat@example.com"));
+        let d = root.join("home/calls/2026-10-23_170000-x");
+        fs::create_dir_all(&d).unwrap();
+        fs::write(d.join("meta.json"), r#"{"ai_profile": "w"}"#).unwrap();
+        let held = crate::ai::sign_in_lease(&p).unwrap().unwrap();
+        let renamed = root.join("home/calls/2026-10-23_170000-retitled");
+        let (d2, r2) = (d.clone(), renamed.clone());
+        // Once the notes say they wait for the sign-in, the call is retitled; then the sign-in ends.
+        let signing_in = std::thread::spawn(move || {
+            let t = Instant::now();
+            while !status(&d2).is_some_and(|r| r.message.is_some_and(|m| m.contains("the notes wait for it"))) {
+                assert!(t.elapsed() < Duration::from_secs(20), "the notes never said they wait");
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            fs::rename(&d2, &r2).unwrap();
+            std::thread::sleep(Duration::from_millis(300));
+            drop(held);
+        });
+        let mut r = Run::default();
+        let (now, ready) = ready_for_notes(&calls::stamp_of(&d), &d, &mut r);
+        signing_in.join().unwrap();
+        assert_eq!(ready.unwrap().profile().id, "w");
+        assert_eq!(now, renamed, "carries on in the folder as it is named now");
+        assert!(r.message.unwrap().contains("the notes wait for it"));
+        assert!(status(&renamed).is_some(), "its state is where the call is");
+        // Retitled during the check itself (it takes a second here), which then fails: the
+        // failure goes where the call is.
+        fs::write(crate::ai::fake::file(&p, "status.json"), crate::ai::fake::SIGNED_OUT).unwrap();
+        fs::write(crate::ai::fake::file(&p, "slow"), "").unwrap();
+        crate::ai::forget_check("w"); // (the first check is cached for 30 s)
+        let again = root.join("home/calls/2026-10-23_170000-again");
+        let (r1, r2) = (renamed.clone(), again.clone());
+        let retitle = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            fs::rename(&r1, &r2).unwrap();
+        });
+        let mut r = Run::default();
+        let (now, ready) = ready_for_notes(&calls::stamp_of(&renamed), &renamed, &mut r);
+        assert!(ready.is_err());
+        assert_eq!(now, again);
+        retitle.join().unwrap();
+        // One that never ends in time: the run says so and names the profile.
+        let mut r = Run::default();
+        not_ready(&mut r, &anyhow::Error::new(crate::ai::SigningIn { profile: "w".into(), name: "Work".into() }));
+        assert_eq!((r.state.as_str(), r.profile.as_deref()), ("needs_login", Some("w")));
+    }
+
+    #[test]
+    fn a_profile_that_needs_a_sign_in_is_named_in_the_run() {
+        let mut r = Run::default();
+        let e = anyhow::Error::new(crate::ai::SignInNeeded { profile: "w".into(), name: "Work".into(), now: None, expected: None });
+        not_ready(&mut r, &e.context("checking"));
+        assert_eq!((r.state.as_str(), r.profile.as_deref()), ("needs_login", Some("w")), "found through a context too");
+        assert!(r.message.unwrap().contains("isn't signed in"));
+        let mut r = Run::default();
+        not_ready(&mut r, &anyhow::anyhow!("the AI settings can't be read"));
+        assert_eq!((r.state.as_str(), r.profile), ("failed", None));
+    }
+
     #[test]
     fn sign_in_errors_are_recognised() {
         assert!(needs_login("Not logged in · Please run /login"));
@@ -995,7 +1108,7 @@ mod tests {
     fn a_run_is_judged_by_how_it_ended() {
         use crate::ai::Kind;
         let (_env, _root) = crate::paths::testenv::folders("notes-conclude");
-        let profile = |kind| crate::ai::Profile { id: "judged".into(), name: "J".into(), kind, base_url: None, token: None, live_model: None, notes_model: None, account: None };
+        let profile = |kind| crate::ai::Profile { id: "judged".into(), name: "J".into(), kind, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false };
         let ended = |wrote_notes, is_error, result_text| Ended { wrote_notes, is_error, result_text, err_text: "", seen: "", timed_out: false, refused: &[], exit: Some(1) };
         let judge = |kind, e: &Ended| {
             let mut r = Run::default();
@@ -1010,7 +1123,7 @@ mod tests {
         assert_eq!(judge(Kind::System, &ended(false, true, "Not logged in · Please run /login")).0, "needs_login");
         let (state, message) = judge(Kind::Claude, &ended(false, true, "Not logged in · Please run /login"));
         assert_eq!(state, "needs_login");
-        assert!(message.contains("Sign in"), "{message}");
+        assert!(message.contains("Sign in…"), "{message}");
         // A local server refusing the profile's token: the fix is the token, not /login.
         let (state, message) = judge(Kind::Local, &ended(false, true, "Invalid API key · Please run /login"));
         assert_eq!(state, "failed");
@@ -1050,7 +1163,4 @@ mod tests {
         c.notes_model = Some("claude-opus-5-5".into());
         assert_eq!(c.notes_model_arg().as_deref(), Some("claude-opus-5-5"));
     }
-
-    /// Tests that set or depend on `quitting()` (process-wide).
-    static QUITTING: std::sync::Mutex<()> = std::sync::Mutex::new(());
 }

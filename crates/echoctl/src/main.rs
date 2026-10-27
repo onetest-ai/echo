@@ -34,6 +34,7 @@ mod speakers;
 #[cfg(feature = "transcribe")]
 mod speaking;
 mod schedule;
+mod signin;
 mod watch;
 #[cfg(feature = "transcribe")]
 mod transcribe;
@@ -498,7 +499,8 @@ enum AiCmd {
         #[arg(long)]
         name: Option<String>,
     },
-    /// A claude.ai account in a Claude Code folder of its own (sign it in with `ai login`)
+    /// A claude.ai account in a Claude Code folder of its own (sign it in from the Echo window, or
+    /// with `ai login`)
     AddClaude {
         id: String,
         #[arg(long)]
@@ -507,9 +509,28 @@ enum AiCmd {
         live_model: Option<String>,
         #[arg(long)]
         notes_model: Option<String>,
+        /// Pre-filled on the sign-in page
+        #[arg(long)]
+        email: Option<String>,
+        /// The organisation signs in with single sign-on
+        #[arg(long)]
+        sso: bool,
+    },
+    /// How a Claude profile signs in: the email pre-filled, single sign-on
+    Set {
+        id: String,
+        /// The email pre-filled on the sign-in page
+        #[arg(long, conflicts_with = "no_email")]
+        email: Option<String>,
+        /// Pre-fill the recorded account's email instead (or none)
+        #[arg(long)]
+        no_email: bool,
+        /// Sign in with the organisation's single sign-on
+        #[arg(long, value_parser = ["on", "off"])]
+        sso: Option<String>,
     },
     Remove { id: String },
-    /// Sign a Claude profile in (opens a terminal running `claude auth login`)
+    /// Sign a Claude profile in, here in this terminal (`claude auth login`; Ctrl-C stops it)
     Login { id: String },
     /// Accept the account a Claude profile is signed in to now (after signing in to another)
     Accept { id: String },
@@ -1000,15 +1021,12 @@ fn main() -> Result<()> {
             AiCmd::Default { id } => ai::set_default(&id),
             AiCmd::Live { state } => ai::set_live(state == "on"),
             AiCmd::AddLocal { id, model, live_model, url, token, name } => ai::add_local(&id, name, &model, live_model, &url, token),
-            AiCmd::AddClaude { id, name, live_model, notes_model } => ai::add_claude(&id, name, live_model, notes_model),
+            AiCmd::AddClaude { id, name, live_model, notes_model, email, sso } => ai::add_claude(&id, name, live_model, notes_model, email, sso),
+            AiCmd::Set { id, email, no_email, sso } => ai::set_sign_in(&id, email, no_email, sso.map(|s| s == "on")),
             AiCmd::Remove { id } => ai::remove(&id),
-            AiCmd::Login { id } => {
-                ai::login(&ai::Settings::load()?.get(&id)?)?;
-                println!("a terminal opened to sign in; then: echoctl ai status {id}");
-                Ok(())
-            }
+            AiCmd::Login { id } => ai::login_here(&id),
             AiCmd::Accept { id } => {
-                println!("{id} now expects {}", ai::accept_account(&id)?);
+                println!("{id} now expects {}", ai::accept_account(&id, None, &|| false)?);
                 Ok(())
             }
         },

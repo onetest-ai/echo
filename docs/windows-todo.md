@@ -77,6 +77,15 @@ Code markers: `git grep "TODO(windows)"`.
   `local` / `claude` runs; retitling a call while its notes run (`notes-run.lock`, `.meta.lock` open).
   `ai.json` is owner-only through the user profile's ACL (the 0600 mode is Unix only).
 
+- **Signing a Claude profile in** (`signin.rs`, `ai::login_here`): `claude auth login` started directly
+  (no login shell) with no console window; whether it opens the browser from there, and the
+  per-profile lock (share modes: shared = read + `FILE_SHARE_READ`, exclusive = no sharing), are
+  untested. The first shared take of a lock file that doesn't exist yet creates it with write access
+  for a moment: a second shared take at that instant sees a sharing violation (a false "signing in",
+  retried). Smoke test before calling it verified: sign in from the window, Cancel during it, quit
+  Echo during it (no `claude`/`node` left: `claude.cmd` launchers are stopped with `taskkill /T`), and
+  `echoctl ai login <id>` + Ctrl-C in a console.
+
 - **Write notes** (`notes.rs`): runs `claude` directly (no login shell, `cfg(unix)` only), so the
   user's env is whatever the app inherited. Check: `claude` is found (`claude.exe` / `claude.cmd`
   from npm, `app::find_program`), `--plugin-dir` points at the plugin next to `echoctl.exe`,

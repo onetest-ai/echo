@@ -225,9 +225,32 @@ A profile = which model and account an AI job uses, per computer in `<config dir
 Kinds: `system` (built in, never stored: Claude Code as the user set it up — login shell, all settings,
 `config.notes_model` / `live_model`), `local` (a Messages-API server at `base_url`: Ollama on this computer; nothing
 checks it is local — the window names the host when it isn't), `claude` (a claude.ai account in its own Claude Code
-folder `<config dir>/claude/<id>`, signed in once with `echoctl ai login` / tray → AI for calls → Sign in…; the
-account seen first — email · organisation, not the plan — is recorded and another one later stops jobs until
-`ai accept` / tray → Use the account signed in now). No `ai.json` = only `system`: Claude Code launched as before, but
+folder `<config dir>/claude/<id>`, signed in once; the first account seen (email · organisation, not the plan) is
+recorded, and another one later stops jobs until it is accepted: window Use X / tray → AI for calls → Use X /
+`ai accept`).
+**Signing in** (`signin.rs`, the app): window Sign in… / tray → AI for calls → Sign in…, or choosing a signed-out
+Claude profile in one of the window's menus (Live header, Record, Write notes: `choose` + `ensure_request` / `applied` — only an explicit
+`loggedIn: false` opens the browser, and only if that choice is still the latest for its purpose when the check ends
+and right before the browser opens; a call's choice counts from when it reaches the app, its check runs once it is
+applied) → Echo runs `claude auth login --claudeai [--email] [--sso]` (`Profile.email`, else the recorded account's;
+`Profile.sso`; `ai add-claude --email --sso`, `ai set <id>`) through `ai::claude_command`, no terminal: the browser
+opens Claude's sign-in page, which calls Claude Code back on `http://localhost:<port>/callback`, and the child exits
+after that (measured); then one `auth status` judged against the settings as they are now (`ai::settle`) → "Signed in
+as …", and live notes waiting for it go on at once (`livenotes::signed_in`). 10 min at most; Cancel; quitting stops it.
+A reader/writer lock per profile, `<config dir>/claude/<id>.lock` (`app::FileLock` shared/exclusive): jobs and
+`auth status` checks hold it shared (`ai::lease`; `for_call` → `Ready` keeps it for the job), a sign-in exclusively
+(`ai::sign_in_lease`). Meanwhile `for_call` fails with `ai::SigningIn` (it never waits): live jobs retry — in the app
+`livenotes::defer` holds them back until the sign-in ends, so they can't take the lock first — and a minutes run waits
+(≤ 12 min). The lock's text is a token each sign-in rewrites; each process's readiness cache is keyed by it. A lock
+released a moment ago can still look held while another thread starts a process (macOS): `lease` tries for 300 ms,
+tests use `testenv::eventually`. Errors are typed (`ai::SignInNeeded`, through the cache too) →
+`CallState.needs_sign_in` / notes-run `needs_login` with its `profile` → the window's Sign in… / Use X. The window's
+and tray's state (`signin::SignInState`, in `ai::summary`) never runs a process; checks run in the background: app
+start, window open, and when nothing current is known (none yet, a changed token, a model said signed out), at most
+every 30 s; one that finds the profile usable again resumes what waited for it. `echoctl ai login <id>` signs in in
+the terminal it was run from (foreground, inherited stdio — Claude Code's paste-code fallback works — Ctrl-C stops it),
+under the same lock. Tests run a fake `claude` (`ai::fake`; a test never starts the real one).
+No `ai.json` = only `system`: Claude Code launched as before, but
 its minutes are gated like a local model's (below) and live notes are off. A call pins its profile in `meta.json`
 `ai_profile` at recording start (explicit: `arm --ai`, the window's Record menu, a scheduled / joined meeting's
 `MeetingContext.ai_profile`; else the default; `!unreadable` when `ai.json` can't be read; one rule, `ai::pin`, for
@@ -240,14 +263,15 @@ writes it. Request files name the call; one retitled since is found by its stamp
 `lock_meta`, the recording's writes too) and is atomic (`paths::write_atomic`: a temporary file of its own per write). **Routing is
 strict** (`ai::for_call`): a missing profile, an unreadable `ai.json` or `meta.json`, a signed-out or other account →
 the AI job fails with the reason; never another profile. `ai::claude_command` is how Echo runs Claude Code on call
-text or checks a sign-in (`login`'s terminal script and `claude connect` start it directly): `system` = the old
+text, checks a sign-in or signs in (`echoctl ai login` — `login_here` — and `claude connect` start it otherwise): `system` = the old
 command; `local` / `claude` = after the login shell, every `ANTHROPIC_*`, `CLAUDE_CODE_USE_*`,
 `CLAUDE_CODE_SKIP_*_AUTH`, `CLAUDE_CODE_OAUTH_*`, `CLAUDE_CODE_API_KEY_*`, `CLAUDE_CONFIG_DIR` unset (on Windows
 whatever their case) (`ai::routing_var`, and the same families as a `sed` filter, `UNSET_ROUTING`, for the shell — change both), the
 profile's values exported from `ECHOCTL_P_<name>` (never in the script's text), `NO_PROXY` for a loopback `local`,
 `--setting-sources user` (not for `claude auth …`: it rejects the option) — measured: a project
 `.claude/settings.json` `env` beats the process environment. Children get their own session (`ai::detach`:
-`setsid`; a process group alone stops an interactive login shell started from a terminal on SIGTTOU). Admin policy that
+`setsid`; a process group alone stops an interactive login shell started from a terminal on SIGTTOU) — not `ai login`'s
+child: it stays in the terminal's foreground (it reads the paste code; Ctrl-C reaches it). Admin policy that
 could route (managed settings files + `.d/`, macOS managed preferences, any Windows policy key, the profile folder's
 cached `remote-settings.json`: a routing `env`, `apiKeyHelper`, `policyHelper(s)`, a source that can't be read) →
 Claude Code runs for `local` / `claude` are refused (`ai::policy_conflict`); `local` live jobs (curl) don't start
@@ -270,7 +294,7 @@ before and while a child runs and stops it (`ai::stop_child` / `stop_group`: TER
 of the group is left after 3 s — the leader exiting first doesn't end the watch; output a leftover process still
 holds after the leader exited gets 2 s, then that group is stopped too). Turning live notes off stops the running job
 and drops queued questions with that reason. `local` and `system` jobs share one
-lease, `<config dir>/local-model.lock` (`app::FileLock`: busy vs a real I/O error), across live jobs, the app's minutes
+lock, `<config dir>/local-model.lock` (`app::FileLock`: busy vs a real I/O error), across live jobs, the app's minutes
 and `notes --wait`; minutes on them wait while any call records or is transcribed. `live-state.json` mirrors the state
 for the pane only (rewritten `ended` at app start). `echoctl live test <call> [--ask kind text]` (hidden) runs one job
 right there. Measured on a Mac with Qwen 3.6 35B-A3B (Q4_K_M) through Ollama: summary 5–8 s (18 s cold), a question ~4 s;

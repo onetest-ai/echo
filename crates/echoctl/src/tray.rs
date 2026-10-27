@@ -371,8 +371,27 @@ struct Model {
     graph_client: (String, bool),
 }
 
-/// The "AI for calls" menu: live notes on, the default id, [(id, name, kind, account)].
-type AiMenu = (bool, String, Vec<(String, String, crate::ai::Kind, Option<String>)>);
+/// The "AI for calls" menu: live notes on, the default id, [(id, name, kind, sign-in line, the
+/// account to offer — `claude` profiles signed in to another one than they were set up with)].
+type AiMenu = (bool, String, Vec<(String, String, crate::ai::Kind, String, Option<String>)>);
+
+/// A Claude profile's sign-in, in a menu line (`signin::state`).
+fn sign_in_line(p: &crate::ai::Profile, st: Option<&crate::signin::SignInState>) -> String {
+    use crate::signin::SignInState as S;
+    let what = match st {
+        Some(S::SignedIn { account, .. }) => account.clone(),
+        Some(S::OtherAccount { account, expected }) => format!("signed in as {account}, set up for {expected}"),
+        Some(S::SignedOut) => "not signed in".into(),
+        Some(S::Starting | S::Checking) => "checking…".into(),
+        Some(S::Waiting { .. }) => "waiting for you in the browser…".into(),
+        Some(S::Stopping) => "stopping the sign-in…".into(),
+        Some(S::Elsewhere) => "being signed in in a terminal…".into(),
+        Some(S::Failed { error }) => format!("the sign-in didn't finish: {error}"),
+        Some(S::Unknown { error: Some(e) }) => format!("couldn't check the sign-in: {e}"),
+        Some(S::Unknown { error: None }) | None => p.account.clone().map_or_else(|| "not checked yet".into(), |a| format!("{a} (not checked yet)")),
+    };
+    format!("{}: {what}", p.name)
+}
 
 const UPCOMING_MAX: usize = 6;
 const RECENT_MAX: usize = 5;
@@ -460,7 +479,18 @@ fn load_model(health: &[(String, String, Option<String>)]) -> Model {
         notes_in: cfg.notes_in.clone(),
         notes_model: cfg.notes_model_label(),
         ai: crate::ai::Settings::load().ok().map(|s| {
-            let all = s.all().into_iter().map(|p| (p.id.clone(), p.name.clone(), p.kind, p.account.clone())).collect();
+            let all = s
+                .all()
+                .into_iter()
+                .map(|p| {
+                    let st = crate::signin::state(&p);
+                    let other = match &st {
+                        Some(crate::signin::SignInState::OtherAccount { account, .. }) => Some(account.clone()),
+                        _ => None,
+                    };
+                    (p.id.clone(), p.name.clone(), p.kind, sign_in_line(&p, st.as_ref()), other)
+                })
+                .collect();
             (s.live_notes, s.default_id(), all)
         }),
         has_claude: !claude["claude"].is_null(),
@@ -550,7 +580,8 @@ enum Action {
     ToggleLiveNotes,
     DefaultProfile(String),
     SignIn(String),
-    AcceptAccount(String),
+    /// (profile, the account shown)
+    AcceptAccount(String, String),
     Recheck,
     AskPermissions,
     #[cfg_attr(not(feature = "transcribe"), allow(dead_code))]
@@ -871,7 +902,7 @@ impl Ui {
             Some((live, default, profiles)) => {
                 let live_item = self.check("Live notes during calls", *live, Action::ToggleLiveNotes);
                 let _ = ai.append_items(&[&live_item, &sep(), &MenuItem::new("New calls use", false, None)]);
-                for (id, name, _, _) in profiles {
+                for (id, name, _, _, _) in profiles {
                     let it = self.check(&format!("   {name}"), id == default, Action::DefaultProfile(id.clone()));
                     let _ = ai.append(&it);
                 }
@@ -879,15 +910,14 @@ impl Ui {
                 if !accounts.is_empty() {
                     let _ = ai.append(&sep());
                 }
-                for (id, name, _, account) in accounts {
-                    let label = match account {
-                        Some(a) => format!("{name}: {a}"),
-                        None => format!("{name}: no account recorded yet"),
-                    };
-                    let _ = ai.append(&MenuItem::new(ellipsize(&label, 60), false, None));
+                for (id, _, _, line, other) in accounts {
+                    let _ = ai.append(&MenuItem::new(ellipsize(line, 70), false, None));
                     let sign = self.item("   Sign in…", true, Some(Action::SignIn(id.clone())));
-                    let accept = self.item("   Use the account signed in now", account.is_some(), Some(Action::AcceptAccount(id.clone())));
-                    let _ = ai.append_items(&[&sign, &accept]);
+                    let _ = ai.append(&sign);
+                    if let Some(other) = other {
+                        let accept = self.item(&ellipsize(&format!("   Use {other}"), 60), true, Some(Action::AcceptAccount(id.clone(), other.clone())));
+                        let _ = ai.append(&accept);
+                    }
                 }
                 let _ = ai.append_items(&[&sep(), &MenuItem::new("Add or remove profiles with `echoctl ai`", false, None)]);
             }
@@ -1166,19 +1196,12 @@ impl Ui {
                     app::notify("Couldn't change the AI settings", &format!("{e:#}"));
                 }
             }
-            Action::AcceptAccount(id) => {
-                // `claude auth status` takes a second or two: off the menu's thread.
-                std::thread::spawn(move || match crate::ai::accept_account(&id) {
-                    Ok(label) => app::notify("Account accepted", &label),
-                    Err(e) => app::notify("Couldn't accept the account", &format!("{e:#}")),
-                });
+            Action::AcceptAccount(id, shown) => {
+                crate::signin::accept(&id, &shown); // checks off the menu's thread
                 return;
             }
             Action::SignIn(id) => {
-                let r = crate::ai::Settings::load().and_then(|s| s.get(&id)).and_then(|p| crate::ai::login(&p));
-                if let Err(e) = r {
-                    app::notify("Couldn't sign in", &format!("{e:#}"));
-                }
+                crate::signin::start(&id); // the browser opens; Echo notices when it's done
                 return;
             }
             Action::NotesModel => {
