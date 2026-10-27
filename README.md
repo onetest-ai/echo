@@ -121,9 +121,11 @@ Claude Code sessions don't pick up calls by themselves. Ask one with `/echo:proc
 and it writes the minutes and offers follow-ups, such as a recap email or tasks for your action
 items. **Nothing is sent without your explicit yes.**
 
-The model is `sonnet` by default. Change it under menu → Claude Code → **Minutes model**: `opus`,
-`haiku`, a full model name, or `default` to use whatever your Claude Code is set up with (local
-models, a gateway, Bedrock or Vertex). During a
+Each AI profile has its own minutes model (`sonnet` by default; a local profile, the model it was
+added with, or its live model when that is cleared). Change the one new calls use under menu → AI for calls → **Minutes model for …**, or any
+profile's with `echoctl ai set <profile> --notes-model <name>`: `opus`, `haiku`, a full model
+name, or, for the built-in profile, `default` to use whatever your Claude Code is set up with
+(local models, a gateway, Bedrock or Vertex). Minutes runs need Claude Code 2.1.295 or later. During a
 call, `/echo:live` shows the transcript as it happens, and the Notes tab (or menu → **Add a
 note…**) takes your own notes.
 
@@ -160,11 +162,17 @@ claude plugin install echo@onetest --scope user      # or: project (shared) / lo
   - the minutes of the last earlier call with the same subject, and on a re-run the current action
     items.
 
-  Its permissions also let it read anything else in your data folder (your other calls) and in the
-  folder Echo runs Claude Code in (menu → Claude Code), and run the Echo commands the minutes need
-  (not your settings, calendar or chats). With the built-in profile (Claude Code as you set it up),
-  your own Claude Code settings apply too, with the tools they allow (MCP servers, web access). All
-  of it goes to the profile's model: for the built-in profile, wherever your Claude Code sends it
+  Echo checks every step the run takes, whatever your own Claude Code settings allow: its own file
+  reads are limited to this call's folder and those previous minutes, it writes only the minutes
+  and its action list there, it runs only the Echo commands the minutes need and only on this call
+  (not your settings, calendar or chats), and it has no web access and no MCP servers. Outside the
+  call it may only add vocabulary it learned for this meeting and move screen snapshots it drops to
+  Echo's trash. (One limit: if your organisation newly turns on a Claude Code policy that switches
+  hooks off, the next run goes unchecked; Echo refuses runs from then on.) With the built-in
+  profile, Claude Code's own setup still applies around those steps: hooks from your settings and
+  plugins run and see what each step reads (Echo turns hooks on for the run so its check runs, so
+  hooks you switched off with `disableAllHooks` run too), and your CLAUDE.md files load. All of it
+  goes to the profile's model: for the built-in profile, wherever your Claude Code sends it
   (Anthropic, or your gateway, Bedrock or Vertex); for a Claude account, Anthropic; for a local
   model, the server the profile names (with Ollama on your computer, it stays there). With menu →
   Claude Code → **Write minutes automatically** off, this happens only when you click **Write

@@ -171,3 +171,12 @@ export function afterTranscribed(cur: LiveView, dir: string, r: MinutesAnswer): 
 export function askAgain(phase: LiveView['phase'], now: number, lastAsk: number): boolean {
   return phase !== 'waiting-minutes' || now - lastAsk > 60_000
 }
+
+/** Where a call went when its minutes run retitled it (the folder follows the title): the one other
+ *  folder in `names` with its 17-character stamp, or null — none, or several (no guess). */
+export function renamedTo(names: string[], selected: string): string | null {
+  const stamp = selected.slice(0, 17)
+  if (!/^\d{4}-\d{2}-\d{2}_\d{6}$/.test(stamp)) return null
+  const same = names.filter(n => n !== selected && (n === stamp || n.startsWith(`${stamp}-`)))
+  return same.length === 1 ? same[0]! : null
+}

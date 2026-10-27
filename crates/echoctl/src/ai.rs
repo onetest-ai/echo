@@ -248,10 +248,19 @@ impl Profile {
         self.live_model.clone().or_else(|| self.notes_model.clone()).unwrap_or_else(|| crate::config::DEFAULT_LIVE_MODEL.into())
     }
 
-    /// The model for the minutes (None = Claude Code's own choice: `system` without
-    /// `config.notes_model`, or a `local` profile naming only a live model).
+    /// The model that writes the minutes — what the run uses, the menu and the window show, and the
+    /// minutes record: `local` its minutes model, else its live model; `claude` its own, else
+    /// sonnet; `system` `config.notes_model_arg()` (None = Claude Code's own choice: "default").
     pub fn notes_model(&self) -> Option<String> {
-        self.notes_model.clone().or_else(|| self.kind.signs_in().then(|| crate::config::DEFAULT_NOTES_MODEL.into()))
+        match self.kind {
+            Kind::Local => self.notes_model.clone().or_else(|| self.live_model.clone()),
+            _ => self.notes_model.clone().or_else(|| self.kind.signs_in().then(|| crate::config::DEFAULT_NOTES_MODEL.into())),
+        }
+    }
+
+    /// `notes_model()` in words.
+    pub fn notes_model_label(&self) -> String {
+        self.notes_model().unwrap_or_else(|| "Claude Code's default model".into())
     }
 
     /// The server is this computer (`local`): `localhost`, `127.x.x.x`, `::1`.
@@ -606,6 +615,146 @@ pub fn policy_conflict(p: &Profile) -> Option<String> {
         }
     }
     None
+}
+
+/// The minutes run's guard is a settings-file hook (`guard.rs`): admin policy that switches those
+/// off (`disableAllHooks`, `allowManagedHooksOnly`), or that can't be read, refuses the run —
+/// whatever the profile. Sources: the managed settings files, macOS managed preferences, Windows
+/// policy keys (their `Settings` JSON; one that can't be read refuses), and the server-managed
+/// settings Claude Code cached
+/// in the profile's folder (`system`: every folder its Claude Code may use, `system_config_dirs`).
+/// Claude Code fetches those again when it starts: an organisation turning such a policy on is
+/// seen from the run after that (known residual).
+/// Ok: the Claude Code settings folders checked (for the run's log).
+pub fn hooks_conflict(p: &Profile, cwd: &Path) -> Result<Vec<PathBuf>, String> {
+    const WHY: &str = "the minutes run needs Echo's guard (a Claude Code hook), and a Claude Code policy switches hooks off or can't be read — ask for hooks to be allowed, or run /echo:process-call in a Claude Code session";
+    let present = |f: &Path| !matches!(f.try_exists(), Ok(false));
+    let mut files = match managed_files() {
+        Ok(f) => f,
+        Err(e) => return Err(format!("{WHY} ({e})")),
+    };
+    let folders = if p.kind == Kind::System {
+        match system_config_dirs(cwd) {
+            Ok(f) => f,
+            Err(e) => return Err(format!("Echo can't tell which Claude Code settings the minutes run would use ({e}), so it can't check they allow its guard")),
+        }
+    } else {
+        vec![p.config_folder()]
+    };
+    files.extend(folders.iter().map(|f| f.join("remote-settings.json")));
+    #[cfg_attr(not(any(target_os = "macos", windows)), allow(unused_mut))] // macOS and Windows add their own
+    let mut sources: Vec<(String, Result<Value, String>)> = files.iter().filter(|f| present(f)).map(|f| (f.display().to_string(), read_policy_json(f))).collect();
+    #[cfg(target_os = "macos")]
+    for f in managed_plists() {
+        if present(&f) {
+            let parsed = Command::new("plutil")
+                .args(["-convert", "json", "-o", "-"])
+                .arg(&f)
+                .output()
+                .map_err(|e| e.to_string())
+                .and_then(|o| serde_json::from_slice::<Value>(&o.stdout).map_err(|e| e.to_string()));
+            sources.push((f.display().to_string(), parsed));
+        }
+    }
+    #[cfg(windows)]
+    for (hklm, key) in [(true, r"HKLM\SOFTWARE\Policies\ClaudeCode"), (false, r"HKCU\SOFTWARE\Policies\ClaudeCode")] {
+        match windows_policy(hklm) {
+            Ok(None) => {}
+            Ok(Some(json)) => sources.push((key.to_string(), serde_json::from_str::<Value>(&json).map_err(|e| e.to_string()))),
+            Err(e) => return Err(format!("{WHY} ({key} can't be read: {e})")),
+        }
+    }
+    for (name, v) in sources {
+        match v {
+            Err(_) => return Err(format!("{WHY} ({name} can't be read)")),
+            Ok(v) if restricts_hooks(&v) => return Err(format!("{WHY} ({name})")),
+            Ok(_) => {}
+        }
+    }
+    Ok(folders)
+}
+
+/// The folders the built-in profile's Claude Code may keep its settings in: what its login shell
+/// sets `CLAUDE_CONFIG_DIR` to (the run starts through that shell), Echo's own value, and
+/// `~/.claude` — all are checked, since Echo can't tell which one the run will use. The shell is
+/// asked in the run's own folder (`cwd`), as the run starts there. Err when it can't say (it fails,
+/// hangs or prints no bounded answer): the check can't be made.
+fn system_config_dirs(cwd: &Path) -> Result<Vec<PathBuf>, String> {
+    let mut v = vec![];
+    if use_shell() && fake_claude().is_none() {
+        let shell = std::env::var("SHELL").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/bin/zsh".into());
+        let mut c = Command::new(shell);
+        // Its folder after its startup files (they may `cd`; Claude Code starts there) and its value.
+        c.args(["-l", "-i", "-c", "printf '<<echo:config-dir>>%s\\n%s<</echo:config-dir>>' \"$PWD\" \"$CLAUDE_CONFIG_DIR\""])
+            .current_dir(cwd)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        detach(&mut c);
+        let child = c.spawn().map_err(|e| format!("your login shell can't be started: {e}"))?;
+        let pid = child.id();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(child.wait_with_output());
+        });
+        let out = match rx.recv_timeout(Duration::from_secs(15)) {
+            Ok(Ok(o)) => o,
+            Ok(Err(e)) => return Err(format!("your login shell failed: {e}")),
+            Err(_) => {
+                stop_group(pid);
+                return Err("your login shell didn't answer within 15 s".into());
+            }
+        };
+        let text = String::from_utf8_lossy(&out.stdout);
+        let (pwd, d) = config_dir_answer(&text).ok_or("your login shell didn't say which settings folder it uses")?;
+        // A relative one as Claude Code sees it: from the folder the shell ends up in.
+        v.extend(Some(d).filter(|d| !d.is_empty()).map(|d| cwd.join(pwd).join(d)));
+    }
+    v.extend(std::env::var_os("CLAUDE_CONFIG_DIR").filter(|d| !d.is_empty()).map(|d| cwd.join(d)));
+    v.push(paths::user_home().join(".claude"));
+    v.dedup();
+    Ok(v)
+}
+
+/// The shell's folder and `CLAUDE_CONFIG_DIR`, between the probe's two markers (what the shell
+/// prints before or after — its rc files, a logout script — stays out); None without both.
+fn config_dir_answer(out: &str) -> Option<(&str, &str)> {
+    let (_, rest) = out.rsplit_once("<<echo:config-dir>>")?;
+    rest.split_once("<</echo:config-dir>>")?.0.split_once('\n')
+}
+
+/// Claude Code's Windows policy: the JSON in `<hive>\SOFTWARE\Policies\ClaudeCode`, value
+/// `Settings`. None when there is none; Err when it is there but can't be read (access denied, …).
+#[cfg(windows)]
+fn windows_policy(hklm: bool) -> Result<Option<String>, String> {
+    use windows::core::w;
+    use windows::Win32::Foundation::ERROR_FILE_NOT_FOUND;
+    use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, RRF_NOEXPAND, RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ};
+    let hive = if hklm { HKEY_LOCAL_MACHINE } else { HKEY_CURRENT_USER };
+    let (key, value) = (w!(r"SOFTWARE\Policies\ClaudeCode"), w!("Settings"));
+    let mut len = 0u32;
+    // SAFETY: plain registry reads into a buffer of the size the first call reports.
+    let r = unsafe { RegGetValueW(hive, key, value, RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ | RRF_NOEXPAND, None, None, Some(&mut len)) };
+    if r == ERROR_FILE_NOT_FOUND {
+        return Ok(None);
+    }
+    if r.is_err() {
+        return Err(format!("Windows error {}", r.0));
+    }
+    let mut buf = vec![0u16; (len as usize).div_ceil(2)];
+    let r = unsafe { RegGetValueW(hive, key, value, RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ | RRF_NOEXPAND, None, Some(buf.as_mut_ptr() as *mut _), Some(&mut len)) };
+    if r.is_err() {
+        return Err(format!("Windows error {}", r.0));
+    }
+    Ok(Some(String::from_utf16_lossy(&buf).trim_end_matches('\0').to_string()))
+}
+
+/// A policy document that switches settings-file hooks off, or a helper that may. Server-managed
+/// settings may wrap the settings in a `settings` object.
+fn restricts_hooks(v: &Value) -> bool {
+    // A policy helper decides the settings when Claude Code starts: Echo can't tell what it allows.
+    let doc = |v: &Value| v["disableAllHooks"] == true || v["allowManagedHooksOnly"] == true || v.get("policyHelper").is_some() || v.get("policyHelpers").is_some();
+    doc(v) || doc(&v["settings"])
 }
 
 fn read_policy_json(f: &Path) -> Result<Value, String> {
@@ -1429,6 +1578,26 @@ pub fn set_sign_in(id: &str, email: Option<String>, no_email: bool, sso: Option<
     Ok(())
 }
 
+/// `echoctl ai set <id> --notes-model <m>`, the menu's "Minutes model for …": the model that writes
+/// a profile's minutes. `system` → `config.notes_model` ("default" = Claude Code's own; empty or
+/// sonnet = unset); `claude` / `local` → its `notes_model` (empty = back to sonnet / its live
+/// model). Returns the profile's name and its minutes model now, in words.
+pub fn set_notes_model(id: &str, model: &str) -> Result<(String, String)> {
+    let m = model.trim().to_string();
+    if id == SYSTEM {
+        let mut cfg = Config::load()?;
+        cfg.notes_model = Some(m).filter(|m| !m.is_empty() && m != crate::config::DEFAULT_NOTES_MODEL);
+        cfg.save()?;
+        let p = system_profile();
+        return Ok((p.name.clone(), p.notes_model_label()));
+    }
+    Settings::update(|s| {
+        let p = s.profiles.iter_mut().find(|p| p.id == id).ok_or_else(|| anyhow!("no profile \"{id}\""))?;
+        p.notes_model = Some(m.clone()).filter(|m| !m.is_empty());
+        Ok((p.name.clone(), p.notes_model_label()))
+    })
+}
+
 /// `echoctl ai remove <id>` (its Claude Code folder, with the sign-in, is kept).
 pub fn remove(id: &str) -> Result<()> {
     let was_default = Settings::update(|s| {
@@ -1486,7 +1655,7 @@ pub fn summary() -> Value {
             "live_notes": s.live_notes,
             "profiles": s.all().iter().map(|p| json!({
                 "id": p.id, "name": p.name, "kind": p.kind, "live_model": p.live_model(),
-                "notes_model": p.notes_model(), "account": p.account, "email": p.email, "sso": p.sso,
+                "notes_model": p.notes_model(), "notes_model_label": p.notes_model_label(), "account": p.account, "email": p.email, "sso": p.sso,
                 // `local`: where the requests go when it isn't this computer
                 "host": (p.kind == Kind::Local && !p.on_this_computer()).then(|| p.base_url.clone()).flatten(),
                 // `claude`: its sign-in now (`signin::state`; no process runs for it)
@@ -2073,4 +2242,55 @@ mod tests {
         assert!(valid_id("claude-enterprise") && valid_id("local-qwen"));
         assert!(!valid_id("system") && !valid_id("../x") && !valid_id("A") && !valid_id(""));
     }
+
+    #[test]
+    fn the_minutes_model_is_one_answer_and_set_per_profile() {
+        let (_env, _root) = crate::paths::testenv::folders("ai-notes-model");
+        // A local profile with only a live model: that one writes the minutes (as the run routes it).
+        let mut q = Profile { id: "q".into(), name: "Q".into(), kind: Kind::Local, base_url: Some("http://localhost:11434".into()), token: None, live_model: Some("qwen".into()), notes_model: None, account: None, email: None, sso: false };
+        assert_eq!(q.notes_model().as_deref(), Some("qwen"));
+        q.notes_model = Some("big".into());
+        assert_eq!(q.notes_model_label(), "big");
+        add_claude("c", None, None, None, None, false).unwrap();
+        add_local("l", None, "m", Some("live".into()), "http://localhost:11434", None).unwrap();
+        assert_eq!(set_notes_model("c", " opus ").unwrap().1, "opus");
+        assert_eq!(Settings::load().unwrap().get("c").unwrap().notes_model().as_deref(), Some("opus"));
+        assert_eq!(set_notes_model("c", "").unwrap().1, crate::config::DEFAULT_NOTES_MODEL, "empty: back to sonnet");
+        assert_eq!(set_notes_model("l", "").unwrap().1, "live", "empty: its live model");
+        // The built-in profile: config.json, as `config --notes-model` writes it.
+        assert_eq!(set_notes_model(SYSTEM, "haiku").unwrap().1, "haiku");
+        assert_eq!(Config::load().unwrap().notes_model.as_deref(), Some("haiku"));
+        assert_eq!(set_notes_model(SYSTEM, "default").unwrap().1, "Claude Code's default model");
+        assert_eq!(set_notes_model(SYSTEM, "sonnet").unwrap().1, "sonnet");
+        assert_eq!(Config::load().unwrap().notes_model, None, "sonnet is the default: unset");
+        assert!(set_notes_model("nobody", "x").is_err());
+    }
+
+    #[test]
+    fn a_policy_that_switches_hooks_off_is_found() {
+        assert!(restricts_hooks(&json!({"allowManagedHooksOnly": true})) && restricts_hooks(&json!({"settings": {"disableAllHooks": true}})));
+        assert!(!restricts_hooks(&json!({"disableAllHooks": false, "env": {"ANTHROPIC_MODEL": "x"}})));
+        assert!(restricts_hooks(&json!({"policyHelper": {"command": "x"}})), "a helper may switch them off");
+        let (_env, _root) = crate::paths::testenv::folders("ai-hooks-policy");
+        add_claude("c", None, None, None, None, false).unwrap();
+        let p = Settings::load().unwrap().get("c").unwrap();
+        fs::create_dir_all(p.config_folder()).unwrap();
+        let cached = p.config_folder().join("remote-settings.json");
+        fs::write(&cached, r#"{"settings": {"allowManagedHooksOnly": true}}"#).unwrap();
+        assert!(hooks_conflict(&p, Path::new(".")).is_err_and(|w| w.contains("remote-settings.json")));
+        fs::write(&cached, "not json").unwrap();
+        assert!(hooks_conflict(&p, Path::new(".")).is_err_and(|w| w.contains("can't be read")));
+        fs::remove_file(&cached).unwrap();
+        assert_eq!(hooks_conflict(&p, Path::new(".")).unwrap(), [p.config_folder()], "checked: the profile's folder");
+    }
+
+    #[test]
+    fn the_shells_answer_is_only_what_lies_between_the_markers() {
+        let out = "motd\n<<echo:config-dir>>/Users/me\n.claude-work<</echo:config-dir>>bye\n";
+        assert_eq!(config_dir_answer(out), Some(("/Users/me", ".claude-work")), "relative: from the shell's folder");
+        assert_eq!(config_dir_answer("<<echo:config-dir>>/x\n<</echo:config-dir>>"), Some(("/x", "")), "not set");
+        assert_eq!(config_dir_answer("<<echo:config-dir>>/x\n/y/.claude-work"), None, "no end: can't tell");
+        assert_eq!(config_dir_answer("nothing"), None);
+    }
+
 }

@@ -12,9 +12,12 @@ ever sent without an explicit yes.
 
 **Started by the Echo app** (`ECHOCTL_HEADLESS` is set, nobody is watching): the app claimed the
 call already, `echoctl` is on PATH, and only the Echo CLI's `context`, `actions`, `speakers`, `title`,
-`vocab add`, `frames` and `transcribe`, reading the data folder and writing
-inside `calls/` are allowed (not the user's notes, not `actions.json` directly: step 5; the app's
-prompt names the file to write step 5's new list to — use that name instead of `actions.new.json`).
+`vocab add`, `frames` and `transcribe` on this call, reading this call's folder and the previous
+minutes `context` names, and writing only `notes.md` and step 5's new list in this call's folder
+are allowed (not the user's notes, not `actions.json` directly: step 5; the app's prompt names the
+file to write step 5's new list to — use that name instead of `actions.new.json`). Put words with
+spaces or punctuation in single quotes; `$` and backticks can't be used. `echoctl title` keeps the
+folder's path until the run ends: go on using it.
 Run `echoctl …` as one plain command per Bash call (no variables, `cd`, pipes or redirects), write
 files with Write / Edit, and skip step 8's offers.
 
@@ -138,7 +141,8 @@ when the user's own track ("Me") said it. A commitment written in the chat belon
 ## 6. Title (unscheduled calls only)
 If the call has no meeting subject (folder name is just a timestamp or a generic title), write a
 specific one-line title (≤ 60 chars, no trailing punctuation) and run
-`echoctl title <dir> "<title>"` — it renames the folder; use the new path afterwards.
+`echoctl title <dir> "<title>"` — it prints the call's folder afterwards (renamed to match at once
+in a session; in a run the Echo app started, when the run ends): use that path.
 
 ## 7. Vocabulary (automatic — never ask)
 Echo spells names and jargon better when they are in the call's vocabulary. A term you learn

@@ -71,13 +71,19 @@ text only.
   time, organizer, attendees with their email addresses, the join link), the meeting chat, saved
   shared screens, the user's name and email from the settings, `me.md`, the vocabulary, the notes
   template, the minutes of the last earlier call with the same subject and, on a re-run, the
-  current action items. Its permissions also let it read the rest of the data folder and the
-  folder Echo runs Claude Code in, and run only the `echoctl` commands the minutes need (context,
-  actions, speakers, title, vocab add, frames, transcribe: not settings, the calendar or chats);
-  with the built-in profile, the user's
-  own Claude Code settings apply too, with the tools they allow. With a transcription server
-  connected, each utterance's audio also goes to that server (it keeps nothing). Apart from these,
-  Echo sends none of it anywhere.
+  current action items. A guard Echo gives the run checks every tool call, whatever the user's own
+  Claude Code settings allow: the run's own file reads are limited to this call's folder and those
+  previous minutes, it writes only `notes.md` and its new action list there, it runs only the
+  `echoctl` commands the minutes need (context, actions, speakers, title, vocab add, frames,
+  transcribe: not settings, the calendar or chats) and only on this call, and it has no web access
+  and no MCP servers. Outside the call it may only add vocabulary learned for this meeting and move
+  pruned screen snapshots to Echo's trash. A Claude Code policy that switches hooks off refuses the
+  run (one the organisation newly turns on leaves the next run unchecked). With the built-in
+  profile, the user's own Claude Code hooks (settings, plugins) still run and see each step — also
+  ones the user switched off with `disableAllHooks`, since Echo turns hooks on for its guard — and
+  their CLAUDE.md files load. With a transcription server
+  connected, each utterance's audio also goes to that server (it keeps nothing). Apart from these
+  and the user's own Claude Code hooks, Echo sends none of it anywhere.
 
 ---
 

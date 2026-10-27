@@ -30,8 +30,17 @@ pub fn all_calls() -> Vec<PathBuf> {
     dirs
 }
 
-/// Resolve `latest`, a path, or a folder name under calls/ to a call directory.
+/// Resolve `latest`, a path, or a folder name under calls/ to a call directory. Inside a minutes
+/// run Echo started, only that run's own call (`guard::own_call`): whatever its model asks for.
 pub fn resolve_call(arg: &str) -> Result<PathBuf> {
+    let dir = find_call(arg)?;
+    if crate::notes::headless() {
+        return crate::guard::own_call(&dir, std::env::var_os(crate::guard::RUN_CALL).as_deref());
+    }
+    Ok(dir)
+}
+
+fn find_call(arg: &str) -> Result<PathBuf> {
     if arg == "latest" {
         return all_calls().pop().ok_or_else(|| anyhow!("no recorded calls in {}", paths::calls_dir().display()));
     }
@@ -108,6 +117,19 @@ pub(crate) fn subject_of(dir: &Path) -> Option<String> {
         .or_else(|| read_json(&dir.join("meta.json"))["title"].as_str().map(str::to_owned))
 }
 
+/// `meta.json`: the title was set by a minutes run (`retitle`), not by the user.
+const TITLE_FROM_RUN: &str = "title_from_run";
+
+/// The subject a call's previous minutes are matched by: its invite's, else its title — never a
+/// title a minutes run set, or a run could choose which other call's minutes a later run of it
+/// may read (`guard.rs`).
+pub(crate) fn previous_subject(dir: &Path) -> Option<String> {
+    MeetingContext::load(dir).ok().flatten().and_then(|m| m.subject).or_else(|| {
+        let meta = read_json(&dir.join("meta.json"));
+        (meta[TITLE_FROM_RUN] != true).then(|| meta["title"].as_str().map(str::to_owned)).flatten()
+    })
+}
+
 /// Heading budget for notes by transcript length (chars): short calls get fewer sections.
 pub fn heading_budget(chars: usize) -> usize {
     match chars {
@@ -134,7 +156,7 @@ pub fn recap(subject: &str) -> Vec<String> {
 /// its action items still to do and up to three highlights (`recap_from_notes`: decisions, else its
 /// summary or first bullets). Deterministic, no model; null when there is no earlier occurrence.
 pub fn prep(dir: &Path) -> Value {
-    let Some(subject) = subject_of(dir) else { return Value::Null };
+    let Some(subject) = previous_subject(dir) else { return Value::Null };
     let Some(prev) = previous_with_notes(&subject, Some(dir)) else { return Value::Null };
     let date = read_json(&prev.join("meta.json"))["started_at"]
         .as_str()
@@ -291,8 +313,10 @@ pub fn previous_with_notes(subject: &str, before: Option<&Path>) -> Option<PathB
     all_calls()
         .into_iter()
         .rev()
-        .filter(|d| before.is_none_or(|b| d.as_path() < b))
-        .find(|d| d.join("notes.md").exists() && subject_of(d).is_some_and(|s| s.trim().to_lowercase() == want))
+        // Earlier by folder name (it starts with the call's time): the same whatever spelling of
+        // the data folder each path came with.
+        .filter(|d| before.is_none_or(|b| d.file_name() < b.file_name()))
+        .find(|d| d.join("notes.md").exists() && previous_subject(d).is_some_and(|s| s.trim().to_lowercase() == want))
 }
 
 /// Where note templates live: the user's (`.echo/templates`, first) then the plugin's.
@@ -473,7 +497,7 @@ pub fn context(call: &str) -> Result<()> {
         eprintln!("warning: {e:#} — the action items you apply replace it (the file is kept)");
     }
     let subject = subject_of(&dir);
-    let previous = subject.as_deref().and_then(|s| previous_with_notes(s, Some(&dir)));
+    let previous = previous_subject(&dir).and_then(|s| previous_with_notes(&s, Some(&dir)));
 
     let out = json!({
         "dir": dir.display().to_string(),
@@ -666,7 +690,9 @@ pub fn prune_frames(call: &str, keep: &[String]) -> Result<()> {
     } else {
         fs::write(dir.join("frames.jsonl"), index.join("\n") + "\n")?;
     }
-    if let Some(trash) = bin.parent() {
+    // Expired trash goes too, but not from a minutes run (it only adds its own call's frames
+    // there): the app purges it when the run ends (`notes.rs`).
+    if let Some(trash) = bin.parent().filter(|_| !crate::notes::headless()) {
         purge_trash_in(trash);
     }
     if removed > 0 {
@@ -709,19 +735,37 @@ pub fn clamp_title(raw: &str) -> Result<String> {
 /// `echoctl title <call> <title>`: set a call's title and rename its folder to match.
 pub fn set_title(call: &str, title: &str) -> Result<()> {
     let dir = resolve_call(call)?;
+    retitle(&dir, title, crate::notes::headless())
+}
+
+/// The call's title; `in_run`: inside a minutes run Echo started (its folder keeps its name until
+/// the run ends).
+fn retitle(dir: &Path, title: &str, in_run: bool) -> Result<()> {
     let title = clamp_title(title)?;
     // While recording, meta.json is rewritten from memory at the stop: a title set now would be lost.
     if read_json(&dir.join("meta.json"))["ended_at"].is_null() {
         bail!("{} is still being recorded — set the title after it stops", dir.display());
     }
-    update_meta(&dir, |meta| {
+    update_meta(dir, |meta| {
         meta["title"] = json!(title);
+        match meta.as_object_mut() {
+            Some(m) if in_run => drop(m.insert(TITLE_FROM_RUN.into(), json!(true))),
+            Some(m) => drop(m.remove(TITLE_FROM_RUN)),
+            None => {}
+        }
         Ok(())
     })?;
-    // The title is what counts; the folder name only follows it. Windows refuses to rename a
-    // folder with a file open inside (a notes run's own claude.log): the run renames it when
-    // it ends.
-    match rename_to_title(&dir) {
+    // The title is what counts; the folder name only follows it. While a minutes run is on the
+    // call (this one, or one a terminal's `echoctl title` meets) it waits for the run's end — the
+    // run renames it then — so the call keeps the one path the run and its guard work in
+    // (`guard.rs`). Elsewhere at once; Windows refuses to rename a folder with a file open inside,
+    // and the run renames it when it ends then too.
+    if in_run || crate::notes::run_active(dir) {
+        eprintln!("title set; the folder is renamed to match when the minutes run on it ends");
+        println!("{}", dir.display());
+        return Ok(());
+    }
+    match rename_to_title(dir) {
         Ok(d) => println!("{}", d.display()),
         Err(e) => {
             eprintln!("title set; the folder is renamed to match when files in it are no longer open ({e:#})");
@@ -964,14 +1008,19 @@ pub fn apply_actions(dir: &Path, file: &Path) -> Result<usize> {
 
 /// `apply_actions` recorded as `run`'s (the app finishing a run that left its list unapplied).
 pub fn apply_actions_as(dir: &Path, file: &Path, run: &str) -> Result<usize> {
-    let name = file.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    let parent = file.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
-    // The same folder however it is spelled; as written where it can't be resolved (some Windows drives).
-    let in_call = match (dunce::canonicalize(parent), dunce::canonicalize(dir)) {
-        (Ok(a), Ok(b)) => a == b,
-        (Err(_), Err(_)) => parent == dir,
-        _ => false,
+    // The file itself as it is on disk (a link named actions.new.json resolves to what it points
+    // at), in the same folder however it is spelled; as written where neither can be resolved
+    // (some Windows drives).
+    let (real, in_call) = match (dunce::canonicalize(file), dunce::canonicalize(dir)) {
+        (Ok(f), Ok(d)) => {
+            let here = f.parent() == Some(d.as_path());
+            (f, here)
+        }
+        (Err(_), Err(_)) => (file.to_path_buf(), file.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")) == dir),
+        (Err(e), Ok(_)) => return Err(anyhow::Error::new(e).context(format!("reading {}", file.display()))),
+        (Ok(_), Err(_)) => (file.to_path_buf(), false),
     };
+    let name = real.file_name().and_then(|n| n.to_str()).unwrap_or("");
     anyhow::ensure!(
         name.starts_with("actions.new") && name.ends_with(".json") && in_call,
         "{} isn't a new action list in the call's folder (actions.new.json there)",
@@ -1102,7 +1151,8 @@ pub fn restore(name: &str) -> Result<()> {
     Ok(())
 }
 
-fn purge_trash() {
+/// The data folder's trash, without what was deleted more than 30 days ago.
+pub fn purge_trash() {
     purge_trash_in(&trash_dir());
 }
 
@@ -1415,5 +1465,111 @@ mod tests {
         assert!(context_gate(&d, true, 10.0, 0, true).is_some(), "not transcribed yet");
         fs::write(d.join("transcript.md"), "").unwrap();
         assert_eq!(context_gate(&d, true, 10.0, 0, true), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_action_list_linked_from_elsewhere_is_refused() {
+        let (_env, root) = crate::paths::testenv::folders("calls-apply-link");
+        let d = root.join("home/calls/2026-10-25_090000-x");
+        let other = root.join("home/calls/2026-10-24_090000-y");
+        for c in [&d, &other] {
+            fs::create_dir_all(c).unwrap();
+            fs::write(c.join("meta.json"), "{}").unwrap();
+        }
+        fs::write(other.join(ACTIONS), r#"[{"task": "Someone else's", "owner": null}]"#).unwrap();
+        std::os::unix::fs::symlink(other.join(ACTIONS), d.join("actions.new.json")).unwrap();
+        let e = apply_actions_as(&d, &d.join("actions.new.json"), "run-1").unwrap_err();
+        assert!(e.to_string().contains("isn't a new action list"), "{e}");
+        assert!(!d.join(ACTIONS).exists(), "nothing applied");
+        // A file that isn't there says so.
+        let e = apply_actions_as(&d, &d.join("actions.new-run-2.json"), "run-2").unwrap_err();
+        assert!(format!("{e:#}").contains("reading"), "{e:#}");
+    }
+
+    #[test]
+    fn a_minutes_run_titles_the_call_and_its_folder_waits() {
+        let (_env, root) = crate::paths::testenv::folders("calls-retitle-run");
+        let d = root.join("home/calls/2026-10-25_090000");
+        fs::create_dir_all(&d).unwrap();
+        fs::write(d.join("meta.json"), r#"{"ended_at": "2026-10-25T09:30:00+02:00"}"#).unwrap();
+        retitle(&d, "Atlas planning", true).unwrap();
+        assert_eq!(read_json(&d.join("meta.json"))["title"], "Atlas planning");
+        assert!(d.exists(), "the run keeps working in this folder");
+        // A title from a terminal while a run is on the call: it waits too (the run's guard works in
+        // this path).
+        fs::write(d.join(crate::notes::RUN), serde_json::to_vec(&json!({"state": "running", "pid": std::process::id()})).unwrap()).unwrap();
+        retitle(&d, "Atlas planning", false).unwrap();
+        assert!(d.exists());
+        fs::remove_file(d.join(crate::notes::RUN)).unwrap();
+        // When the run ends (or outside a run): the folder follows the title.
+        assert_eq!(rename_to_title(&d).unwrap(), root.join("home/calls/2026-10-25_090000-atlas-planning"));
+        let d = root.join("home/calls/2026-10-25_090000-atlas-planning");
+        retitle(&d, "Atlas review", false).unwrap();
+        assert!(root.join("home/calls/2026-10-25_090000-atlas-review").exists() && !d.exists());
+    }
+
+    /// Inside a run, every command's call goes through `resolve_call`: checked in a child process
+    /// of this test binary, with the run's environment set there only (tests share one process).
+    #[test]
+    fn inside_a_run_the_cli_takes_only_its_call() {
+        if std::env::var_os("ECHOCTL_TEST_IN_RUN").is_some() {
+            let own = std::env::var(crate::guard::RUN_CALL).unwrap();
+            let real = dunce::canonicalize(&own).unwrap();
+            assert_eq!(resolve_call(&own).unwrap(), real);
+            // A spelling through another call: the resolved path, never that spelling.
+            let other = paths::calls_dir().join("2026-10-25_090000-y");
+            assert_eq!(resolve_call(&other.join("../2026-10-24_090000-own").display().to_string()).unwrap(), real);
+            for arg in ["latest".to_string(), "2026-10-25_090000-y".into(), other.display().to_string(), format!("{own}/../2026-10-25_090000-y")] {
+                assert!(resolve_call(&arg).is_err(), "{arg}");
+            }
+            // `vocab add` without --call learns for the run's call, not the newest one.
+            let mut cfg = crate::config::Config::default();
+            assert!(crate::vocab::add(&mut cfg, &["Kubernetes".into()], None, false).unwrap().contains("2026-10-24_090000-own"));
+            // A title set here: marked as the run's, and the folder keeps its name until the run ends.
+            set_title(&own, "Weekly sync").unwrap();
+            let meta = read_json(&real.join("meta.json"));
+            assert!(meta["title_from_run"] == true && meta["title"] == "Weekly sync" && real.exists());
+            return;
+        }
+        let (_env, root) = crate::paths::testenv::folders("calls-in-run");
+        let own = root.join("home/calls/2026-10-24_090000-own"); // older: `latest` is the other one
+        for d in [&own, &root.join("home/calls/2026-10-25_090000-y")] {
+            fs::create_dir_all(d).unwrap();
+            fs::write(d.join("meta.json"), r#"{"title": "x", "ended_at": "2026-10-24T09:30:00+02:00"}"#).unwrap();
+        }
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "calls::tests::inside_a_run_the_cli_takes_only_its_call", "--nocapture"])
+            .env("ECHOCTL_TEST_IN_RUN", "1")
+            .env(crate::notes::HEADLESS, "1")
+            .env(crate::guard::RUN_CALL, &own)
+            .env("ECHOCTL_HOME", root.join("home"))
+            .env("ECHOCTL_CONFIG_DIR", root.join("config"))
+            .output()
+            .unwrap();
+        let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert!(out.status.success() && text.contains("1 passed"), "{text}"); // ran, not filtered out
+    }
+
+    #[test]
+    fn a_title_a_run_set_never_picks_the_previous_minutes() {
+        let (_env, root) = crate::paths::testenv::folders("calls-previous-subject");
+        let calls = root.join("home/calls");
+        let other = calls.join("2026-10-20_090000-leadership-sync");
+        let d = calls.join("2026-10-25_090000");
+        for (c, meta) in [(&other, r#"{"title": "Leadership sync"}"#), (&d, r#"{"ended_at": "2026-10-25T09:30:00+02:00"}"#)] {
+            fs::create_dir_all(c).unwrap();
+            fs::write(c.join("meta.json"), meta).unwrap();
+        }
+        fs::write(other.join("notes.md"), "# Leadership sync\n").unwrap();
+        // A run titles the call like another meeting: its previous minutes stay none.
+        retitle(&d, "Leadership sync", true).unwrap();
+        assert_eq!(subject_of(&d).as_deref(), Some("Leadership sync"), "the title is shown");
+        assert_eq!(previous_subject(&d), None);
+        // The user titles it so: then it is theirs to match.
+        retitle(&d, "Leadership sync", false).unwrap();
+        let d = calls.join("2026-10-25_090000-leadership-sync");
+        assert_eq!(previous_subject(&d).as_deref(), Some("Leadership sync"));
+        assert_eq!(previous_with_notes("Leadership sync", Some(&d)), Some(other));
     }
 }

@@ -21,7 +21,7 @@ import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
 import type { ActionItem, Band, Browse, CallItem, CallMeta, ChatLine, DocTab, Insight, LiveLine, LiveView } from '../types'
-import { afterTranscribed, anchors, askAgain, callFromDir, clock, hm, insightFromLive, isMe, minutesPhase, minutesSince, newLines, parseLines, speakerLabel, statusBadge, tailThatFits } from './view'
+import { afterTranscribed, anchors, askAgain, callFromDir, clock, hm, insightFromLive, isMe, minutesPhase, minutesSince, newLines, parseLines, renamedTo, speakerLabel, statusBadge, tailThatFits } from './view'
 import type { MinutesAnswer } from './view'
 
 const PANE = 'echo-live'
@@ -600,18 +600,33 @@ async function generate($: any, dir: string, what: 'notes' | 'actions'): Promise
 async function followNotesRun($: any): Promise<void> {
   const b = await read($, browse)
   if (!b.generating || !b.selected) return
-  let run: { state?: string; message?: string } = {}
+  let selected = b.selected
+  const runOf = async (dir: string) => JSON.parse(String(await $.fs.read(`${callsDir()}/${dir}/notes-run.json`))) as { state?: string; message?: string }
+  let run: { state?: string; message?: string }
   try {
-    run = JSON.parse(String(await $.fs.read(`${callsDir()}/${b.selected}/notes-run.json`)))
+    run = await runOf(selected)
   } catch {
-    return // not started yet
+    // Retitled by the run as it ended (the folder follows the title): found again by its stamp.
+    const names = ((await $.fs.list(callsDir()).catch(() => [])) as { name: string; kind: string }[]).filter(x => x.kind === 'dir').map(x => x.name)
+    const moved = names.includes(selected) ? null : renamedTo(names, selected)
+    if (!moved) return // not started yet
+    const was = selected
+    await update($, browse, (x): Browse => (x.selected === was ? { ...x, selected: moved } : x))
+    selected = moved
+    try {
+      run = await runOf(moved)
+    } catch {
+      return
+    }
   }
   if (run.state === 'running' || run.state === 'queued') return
   const tab = b.generating
   await update($, browse, (x): Browse => ({ ...x, generating: null }))
   if (run.state === 'done') $.ui.toast('Minutes and action items written.')
   else $.ui.toast(`echo: ${run.state === 'skipped' ? 'no minutes' : "couldn't write minutes"} — ${run.message ?? run.state}`, { timeoutMs: 10_000 })
-  await selectCall($, b.selected, tab, generatingSince) // not over a recording started meanwhile
+  // The call as it is named now — unless the user picked another one meanwhile (the toast says it),
+  // and not over a recording started meanwhile (`generatingSince`).
+  if ((await read($, browse)).selected === selected) await selectCall($, selected, tab, generatingSince)
   lastCallsLoad = 0
 }
 

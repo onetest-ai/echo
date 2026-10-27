@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { LiveLine, LiveView } from '../types'
-import { actionsMarkdown, afterTranscribed, anchors, askAgain, callFromDir, clock, insightFromLive, minutesPhase, newLines, statusBadge, parseLines, speakerLabel, tailThatFits } from './view'
+import { actionsMarkdown, afterTranscribed, anchors, askAgain, callFromDir, clock, insightFromLive, minutesPhase, newLines, renamedTo, statusBadge, parseLines, speakerLabel, tailThatFits } from './view'
 import type { MinutesAnswer } from './view'
 
 const line = (text: string, speaker: 'me' | 'remote' = 'remote', start = 0): LiveLine =>
@@ -100,4 +100,15 @@ test('the pane asks at once on the way in, then once a minute', async () => {
   expect(askAgain('writing-notes', 1_000, 900)).toBe(true) // a run withdrawn for a later note
   expect(askAgain('waiting-minutes', 60_000, 1_000)).toBe(false)
   expect(askAgain('waiting-minutes', 61_001, 1_000)).toBe(true)
+})
+
+test('a call its run retitled is found by its stamp, never guessed', async () => {
+  const old = '2026-10-23_170000'
+  expect(renamedTo([`${old}-weekly-sync`, '2026-10-23_090000-standup'], old)).toBe(`${old}-weekly-sync`)
+  expect(renamedTo([old, '2026-10-24_100000-x'], `${old}-untitled`)).toBe(old)
+  // Gone, two with that stamp (two calls in one second), or not a call folder: no guess.
+  expect(renamedTo(['2026-10-24_100000-x'], old)).toBeNull()
+  expect(renamedTo([`${old}-a`, `${old}-b`], old)).toBeNull()
+  expect(renamedTo([`${old}0-x`], old)).toBeNull()
+  expect(renamedTo(['notes-x'], 'notes')).toBeNull()
 })

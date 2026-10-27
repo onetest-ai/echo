@@ -564,7 +564,8 @@ function minutesHint(c, heading, lead) {
   const live = c.live || {}, picked = S.notesProfile && S.notesProfile.call === c.name
   const pid = picked ? S.notesProfile.id : (live.profile || (live.profile_error ? '' : ai().default))
   const p = profileOf(pid)
-  const model = p && p.notes_model ? p.notes_model : (n.model || 'sonnet')
+  // The model that writes them, as Echo decides it (`Profile::notes_model`), for every kind.
+  const model = (p && p.notes_model_label) || n.model || 'sonnet'
   // The profile these minutes need signed in: the call's profile now (picked here or in the Live
   // tab); the one the last run was refused for only while it still is (or none can be read).
   // Signed in now: Try again (or sign in again, if a model keeps refusing it).
@@ -576,7 +577,7 @@ function minutesHint(c, heading, lead) {
     : !p ? (pid === '!unreadable' ? 'No model could be chosen when this call started — pick one.' : `The model this call was set to (${esc(pid || '?')}) no longer exists — pick another.`)
     : p.kind !== 'system'
       ? `Claude Code writes them with <b>${esc(p.name)}</b> (${esc(model)}), ${esc(profileWhere(p))}.`
-      : `Claude Code writes them with <b>${esc(n.model || 'sonnet')}</b>, as it is set up (menu → Claude Code → Minutes model).`
+      : `Claude Code writes them with <b>${esc(model)}</b>, as it is set up (menu → AI for calls → Minutes model, while it is the profile new calls use).`
   const pick = ai().profiles.length > 1 || (ai().profiles.length && !p) ? `<label class="notes-pick">Model <select data-notesprofile aria-label="Model for these minutes">${p ? '' : '<option value="" selected>Choose…</option>'}${profileOptions(pid)}</select></label>` : ''
   return box(heading, `<p>${esc(lead)}</p><p class="alt">${where}</p>${sign}`,
     `${pick}<button class="btn primary" data-cmd="write-notes">${label}</button>${log}`) + session

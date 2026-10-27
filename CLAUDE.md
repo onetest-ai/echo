@@ -154,7 +154,8 @@ install instead, `app::Click`; asks permission at
 first start); dev builds fall back to osascript, which macOS shows as Script Editor. Menu: status, Record, Stop,
 recent calls, Settings (data folder, start at login, install CLI), Speech models (use / download
 with % / remove), Claude Code (connect = install plugin at user scope; where Echo runs it for minutes; write minutes
-automatically; minutes model; minutes page),
+automatically; minutes page), AI for calls (live notes, the profile new calls use with each one's minutes model, the
+default's Minutes model…, sign-ins),
 Health (Ask for permissions),
 Check for updates… (or Update to <version>… once one is found), Quit — clicks call the same `arm`/`stop` as the CLI, so every client sees the same events.
 The menu is rebuilt when what it shows changes (checked every 5 s); on macOS never while a menu is open: AppKit
@@ -349,13 +350,48 @@ no Claude Code or plugin here, `notes::auto_missing` — no "minutes at" is prom
 user's login shell (`$SHELL -l -i -c`, their env: gateways, `ANTHROPIC_*`, Bedrock/Vertex), cwd
 = `notes_in` or the data folder (for `system` strictly: `ai::system_folder`), `--plugin-dir` = the plugin shipped in the app
 (`Echo.app/Contents/Resources/plugin`; dev: repo `plugin/`; else the installed one), model =
-`config.notes_model` (default sonnet; `default` = Claude Code's own; menu → Claude Code → Minutes
-model). `--permission-mode dontAsk` + an allowlist (Read/Glob/Grep in the data folder,
-Edit/Write in `calls/`, the CLI only for `notes::RUN_COMMANDS` — context, actions, speakers, title, vocab add,
-frames, transcribe: a run can't change settings, read the calendar or chats, or quit Echo; inside one `vocab add
---always` and `transcribe --keep-audio` / `--model` refuse (`notes::refused_in_run`), and with the built-in profile the user's own allow rules apply too —,
-the skill) and deny rules (`Edit` of any call's `my-notes.md` or
-`actions.json`): transcripts are others' words and the user's own default mode (auto / bypass) must not apply. Action
+the call's profile's minutes model (`ai::Profile::notes_model`, one answer for the run, the menu, the window and the
+minutes record: `system` = `config.notes_model`, default sonnet, `default` = Claude Code's own; `claude` its own, default
+sonnet; `local` its own, else its live model; menu → AI for calls → Minutes model for <the default profile>, `echoctl ai
+set <id> --notes-model`). **The guard** (`guard.rs`, `echoctl run-guard`, hidden): a `PreToolUse` command hook,
+`onFailure: block`, in the run's own settings file (`--settings <config dir>/minutes-run/<run>.json`, removed after the
+run; with `disableAllHooks: false` and `claudeMdExcludes` for `calls/**`). It allows only `Bash` = `<cli> <one of
+notes::RUN_COMMANDS> …` as plain words (no `$`, backtick or newline; none of `;&|<>(){}*?[]~#!` outside quotes),
+Read inside the run's call folder (canonical: links and `..` followed) and of the previous minutes of the same meeting,
+Glob/Grep with a path in the call folder (patterns: not absolute, no `~`, `..` or braces), Edit/Write of only
+`notes.md` and `actions.new*.json` at the top of the call folder, never through a link (not Echo's own files —
+`meta.json` would pin the call to another profile for later runs —, the user's notes, or an instruction file whose
+`@imports` would load other files with no tool call), and Skill `echo:process-call`. Anything else, or anything it can't
+judge (a panic too), exits 2. Its scope comes only from the run's environment (`ECHOCTL_RUN_CALL`, a folder with
+`meta.json`; `ECHOCTL_RUN_PREVIOUS`; `ECHOCTL_RUN_CLIS`, required) — a settings `env` could set them too, but only the
+user's own. Claude Code runs it before every tool call, also one that needs no permission, and a refusal beats any
+allow — measured with 2.1.310 on fake data: a `cat` of another call with `Bash(cat:*)` allowed and a Read inside cwd
+were refused, and the guard still ran under a project `disableAllHooks: true`; without `onFailure` a guard that can't
+start lets the call through. With the built-in profile Claude Code's own setup still applies around it: the user's hooks
+(settings, plugins) run beside the guard and see each step — `disableAllHooks: false` turns them on for the run, also
+when the user had switched them off — and CLAUDE.md files load as in a session. A run whose `init` event lacks `claude_code_version` ≥ 2.1.295 is
+stopped before its model's first turn. Admin policy that switches settings hooks off (`disableAllHooks`,
+`allowManagedHooksOnly`, or a `policyHelper(s)` that may set them, in the managed settings files, macOS managed preferences, the Windows policy keys' `Settings`
+JSON read through the registry API — one that can't be read refuses —, or the profile's cached `remote-settings.json`;
+`system`: in every folder its Claude Code may use — the `CLAUDE_CONFIG_DIR` its login shell sets, asked in the run's
+folder with a 15 s limit and read between two markers with the shell's own folder after its startup files (no bounded
+answer refuses; a relative one is taken from that folder, where Claude Code starts), Echo's own, `~/.claude`) refuses the run (`ai::hooks_conflict`, which returns the folders it checked: the run's
+log names them); one
+Claude Code fetches fresh at startup is seen only from the next run (known residual). Second layer: `--tools
+Bash,Read,Glob,Grep,Edit,Write,Skill`, `--strict-mcp-config`, `--permission-mode dontAsk`, allow rules for the call
+folder only (Claude Code decides Write by the `Edit` rule — a path-scoped `Write(…)` rule never matched, measured), the
+previous minutes and `Bash(<cli> <cmd>:*)`, no `--add-dir` (the rules reach outside the working folder), and deny rules
+(`Edit` of any call's `my-notes.md` or `actions.json`). Inside a run (`ECHOCTL_HEADLESS`) the CLI works only on the run's
+call, resolved (`calls::resolve_call` → `guard::own_call`, which returns the canonical path: `other/../own` would put the
+frames' trash inside another call's folder; `vocab add` without `--call` = that call), `title` sets the title but leaves the
+folder's name to the run's end (`rename_to_title` then, on every platform; a terminal's `echoctl title` while a run is on
+the call waits for it too, `notes::run_active`, as the guard works in that path) and marks it `title_from_run` — previous
+minutes are matched by `calls::previous_subject`, which ignores such a title (a run could otherwise pick which other
+call's minutes a later run may read), `frames --keep` doesn't purge the trash (the
+app does when the run ends, `calls::purge_trash`), and `vocab add --always`, `transcribe --keep-audio` / `--model` refuse (`notes::refused_in_run`). By design a run
+still changes two things outside its call: vocabulary learned for this meeting (`config.learned`, scoped to its subject
+and people) and pruned frames moved to the trash. Transcripts are others' words and the user's own default mode (auto /
+bypass) and permissions must not apply. Action
 items carry stable ids (`calls::actions` gives ids once to an older list, before any reader or run sees it); the skill
 writes `actions.new.json` and runs `echoctl actions <call> --apply <file>` (`calls::apply_actions`: only a new list in the call's own folder, `actions.new*.json`; keeps ids and each known
 item's current status — ticks made meanwhile survive —, records the writer in `.actions-generation` from
@@ -379,8 +415,8 @@ needs_login — "Not logged in · Please run /login" etc., from a failed run onl
 `failed`, saying how to set it — `notes::conclude`); `pid` = the owner (the app or a `notes --wait`) for the whole
 run, `child_pid` = Claude Code; a dead owner = interrupted, unless its Claude Code still runs (then it stays the only
 writer); the claim is freed once nobody holds the place; every failure from `queued` on is recorded; a run refused
-before it starts says why there too; the run finishes in the folder as named after Claude Code (the skill may retitle
-it); quitting the app stops minutes runs' Claude Code and starts no more (`notes::shutdown`: a child is started and
+before it starts says why there too; the run finishes in the folder as named after Claude Code (a title the run set
+is applied to the folder only then; a rename made outside the run meanwhile is followed by stamp); quitting the app stops minutes runs' Claude Code and starts no more (`notes::shutdown`: a child is started and
 registered under the same lock). Readable log in
 `<call>/claude.log` (window → Show log). Failure releases `.claimed`. After transcription the app notifies
 "Transcript ready — minutes at HH:MM. Add your notes in Echo before then." (switch off: "click Write minutes"); a run

@@ -621,7 +621,6 @@ struct Model {
     /// The model being downloaded, with percent
     downloading: Option<(&'static str, u8)>,
     notes_in: Option<PathBuf>,
-    notes_model: String,
     /// AI profiles (`ai.rs`); None = ai.json unreadable
     ai: Option<AiMenu>,
     has_claude: bool,
@@ -637,8 +636,9 @@ struct Model {
 }
 
 /// The "AI for calls" menu: live notes on, the default id, [(id, name, kind, sign-in line, the
-/// account to offer — `claude` profiles signed in to another one than they were set up with)].
-type AiMenu = (bool, String, Vec<(String, String, crate::ai::Kind, String, Option<String>)>);
+/// account to offer — `claude` profiles signed in to another one than they were set up with —,
+/// the model that writes its minutes)].
+type AiMenu = (bool, String, Vec<(String, String, crate::ai::Kind, String, Option<String>, String)>);
 
 /// A Claude profile's sign-in, in a menu line (`signin::state`).
 fn sign_in_line(p: &crate::ai::Profile, st: Option<&crate::signin::SignInState>) -> String {
@@ -743,7 +743,6 @@ fn load_model(health: &[(String, String, Option<String>)]) -> Model {
         recommended: models::recommend(&models::hardware()).0,
         downloading: app::downloading(),
         notes_in: cfg.notes_in.clone(),
-        notes_model: cfg.notes_model_label(),
         ai: crate::ai::Settings::load().ok().map(|s| {
             let all = s
                 .all()
@@ -754,7 +753,7 @@ fn load_model(health: &[(String, String, Option<String>)]) -> Model {
                         Some(crate::signin::SignInState::OtherAccount { account, .. }) => Some(account.clone()),
                         _ => None,
                     };
-                    (p.id.clone(), p.name.clone(), p.kind, sign_in_line(&p, st.as_ref()), other)
+                    (p.id.clone(), p.name.clone(), p.kind, sign_in_line(&p, st.as_ref()), other, p.notes_model_label())
                 })
                 .collect();
             (s.live_notes, s.default_id(), all)
@@ -1157,9 +1156,8 @@ impl Ui {
         let choose = self.item("   Choose a folder…", true, Some(Action::NotesChoose));
         let _ = claude.append(&choose);
         let auto = self.check("Write minutes automatically (15 min after a call)", model.auto_minutes, Action::ToggleAutoMinutes);
-        let notes_model = self.item(&format!("Minutes model: {}…", model.notes_model), model.has_claude, Some(Action::NotesModel));
         let page = self.check("Write a minutes page (HTML file) too", model.minutes_page, Action::ToggleMinutesPage);
-        let _ = claude.append_items(&[&sep(), &auto, &notes_model, &page]);
+        let _ = claude.append_items(&[&sep(), &auto, &page]);
 
         // AI for calls: which model (and account) writes live notes and minutes (`ai.rs`).
         let ai = Submenu::new("AI for calls", true);
@@ -1170,15 +1168,20 @@ impl Ui {
             Some((live, default, profiles)) => {
                 let live_item = self.check("Live notes during calls", *live, Action::ToggleLiveNotes);
                 let _ = ai.append_items(&[&live_item, &sep(), &MenuItem::new("New calls use", false, None)]);
-                for (id, name, _, _, _) in profiles {
-                    let it = self.check(&format!("   {name}"), id == default, Action::DefaultProfile(id.clone()));
+                // Each with the model that writes its minutes; the default's can be changed here.
+                for (id, name, _, _, _, minutes) in profiles {
+                    let it = self.check(&ellipsize(&format!("   {name} — minutes: {minutes}"), 70), id == default, Action::DefaultProfile(id.clone()));
+                    let _ = ai.append(&it);
+                }
+                if let Some((_, name, _, _, _, minutes)) = profiles.iter().find(|p| &p.0 == default) {
+                    let it = self.item(&ellipsize(&format!("Minutes model for {name}: {minutes}…"), 70), model.has_claude, Some(Action::NotesModel));
                     let _ = ai.append(&it);
                 }
                 let accounts: Vec<_> = profiles.iter().filter(|p| p.2 == crate::ai::Kind::Claude).collect();
                 if !accounts.is_empty() {
                     let _ = ai.append(&sep());
                 }
-                for (id, _, _, line, other) in accounts {
+                for (id, _, _, line, other, _) in accounts {
                     let _ = ai.append(&MenuItem::new(ellipsize(line, 70), false, None));
                     let sign = self.item("   Sign in…", true, Some(Action::SignIn(id.clone())));
                     let _ = ai.append(&sign);
@@ -1490,14 +1493,26 @@ impl Ui {
                 return;
             }
             Action::NotesModel => {
+                // The model that writes the minutes of the profile new calls use (`ai::set_notes_model`).
                 std::thread::spawn(|| {
-                    let current = Config::load().unwrap_or_default().notes_model_label();
-                    let msg = "Model Claude Code uses when Echo writes call minutes:\n\nsonnet, opus or haiku, a full model name, or \"default\" to use Claude Code's own setting (local models, a gateway, Bedrock or Vertex).";
-                    if let Some(m) = app::ask_text(msg, &current, "Save") {
-                        let Ok(mut cfg) = Config::load() else { return };
-                        let m = m.trim().to_string();
-                        cfg.notes_model = (!m.is_empty() && m != crate::config::DEFAULT_NOTES_MODEL).then_some(m);
-                        let _ = cfg.save();
+                    let p = crate::ai::Settings::load().and_then(|s| s.get(&s.default_id()));
+                    let p = match p {
+                        Ok(p) => p,
+                        Err(e) => return app::notify("Echo", &format!("The minutes model can't be changed: {e:#}")),
+                    };
+                    let (current, how) = match p.kind {
+                        crate::ai::Kind::System => (
+                            Config::load().unwrap_or_default().notes_model_label(),
+                            "sonnet, opus or haiku, a full model name, or \"default\" to use Claude Code's own setting (local models, a gateway, Bedrock or Vertex).",
+                        ),
+                        crate::ai::Kind::Claude => (p.notes_model_label(), "sonnet, opus or haiku, or a full model name; empty for sonnet."),
+                        crate::ai::Kind::Local => (p.notes_model_label(), "the model's name on the server; empty for its live model."),
+                    };
+                    let msg = format!("Model that writes the minutes of {} (the profile new calls use):\n\n{how}", p.name);
+                    if let Some(m) = app::ask_text(&msg, &current, "Save") {
+                        if let Err(e) = crate::ai::set_notes_model(&p.id, &m) {
+                            app::notify("Echo", &format!("The minutes model wasn't changed: {e:#}"));
+                        }
                     }
                 });
                 return;

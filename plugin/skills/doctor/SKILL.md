@@ -41,5 +41,6 @@ permission for the user (open the page and explain), and never download a model 
    - the folder Echo runs Claude Code in for minutes (with the built-in AI profile its
      `.claude/settings.json` applies, e.g. a local model): `echoctl config --notes-in <folder>`
      (`any` = the data folder again);
-   - minutes model: `echoctl config --notes-model <name>` (`default` = Claude Code's own);
+   - minutes model: `echoctl ai set <profile> --notes-model <name>` (the built-in profile `system`:
+     `default` = Claude Code's own), or menu → AI for calls → Minutes model;
    - the plugin in another project: `echoctl claude connect --scope project --project <repo>`.

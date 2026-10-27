@@ -191,6 +191,8 @@ pub fn add(cfg: &mut Config, terms: &[String], call: Option<&str>, always: bool)
     }
     let dir = match call {
         Some(c) => crate::calls::resolve_call(c)?,
+        // A minutes run learns for its own call, never the newest one.
+        None if crate::notes::headless() => crate::calls::resolve_call(&std::env::var(crate::guard::RUN_CALL).unwrap_or_default())?,
         None => match latest_noted_call() {
             Some(d) => d,
             None => bail!("which call are these terms from? Pass --call <dir> (or --always for every call)"),

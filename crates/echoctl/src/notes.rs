@@ -11,9 +11,11 @@
 //!   user's login shell and settings (gateways, `ANTHROPIC_*`, Bedrock / Vertex), model
 //!   `config.notes_model`; `local` / `claude` = their own config folder and model, the shell's
 //!   routing variables replaced.
-//! - Tools are limited to what the skill needs: reading the data folder, writing inside
-//!   `calls/`, and the Echo CLI. Transcripts and chat are other people's words, so the run gets
-//!   no web, no other shell commands and no files elsewhere.
+//! - Tools are limited to what the skill needs: this call's folder, the previous minutes of the
+//!   same meeting, and the Echo commands the minutes need, on this call only. Transcripts and chat
+//!   are other people's words, so the run gets no web, no other shell commands and no files
+//!   elsewhere: a guard checks every tool call (`guard.rs`, passed in the run's own settings
+//!   file), and the permission rules are a second layer.
 //! - One run per call (`notes-run.lock`); `<call>/notes-run.json` holds the state (queued /
 //!   running / done / skipped / failed / needs_login); `<call>/claude.log` a readable log of what
 //!   Claude did.
@@ -162,6 +164,11 @@ pub fn status(dir: &Path) -> Option<Run> {
 /// Waiting for its turn or running.
 pub(crate) fn pending(r: &Run) -> bool {
     r.state == "queued" || r.state == "running"
+}
+
+/// A minutes run is on the call now: waiting or running, its owner or its Claude Code alive.
+pub(crate) fn run_active(dir: &Path) -> bool {
+    raw(dir).is_some_and(|r| pending(&r) && (r.pid.is_some_and(crate::app::process_alive) || r.child_pid.is_some_and(crate::app::process_alive)))
 }
 
 /// The call's place: an OS lock on `<call>/notes-run.lock`, held by the run's owner from its start
@@ -918,8 +925,22 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
     } else {
         cfg.notes_in.clone().filter(|d| d.is_dir()).unwrap_or_else(|| home.clone())
     };
-
+    // The guard must run (`guard.rs`): not under a policy that switches settings-file hooks off.
+    let checked = match crate::ai::hooks_conflict(profile, &cwd) {
+        Ok(f) => f,
+        Err(why) => return fail(&mut r, why),
+    };
+    // One spelling of the call for the prompt, the rules, the guard and the CLI (`resolve_call`
+    // inside the run gives the resolved path).
+    let resolved = dunce::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+    let dir: &Path = &resolved;
+    // The previous minutes of the same meeting: the one file of another call the run may read.
+    let previous = calls::previous_subject(dir).and_then(|s| calls::previous_with_notes(&s, Some(dir))).map(|d| d.join("notes.md")).filter(|f| f.is_file());
     let run_id = r.run_id.clone().unwrap_or_else(run_id);
+    let settings = match run_settings(&run_id) {
+        Ok(s) => s,
+        Err(e) => return fail(&mut r, format!("couldn't write the run's settings: {e:#}")),
+    };
     let mut log = match fs::File::create(dir.join(LOG)) {
         Ok(f) => f,
         Err(e) => return fail(&mut r, format!("couldn't create claude.log: {e}")),
@@ -934,11 +955,18 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
     let _ = writeln!(log, "          model:  {label}");
     let _ = writeln!(log, "          folder: {}", cwd.display());
     let _ = writeln!(log, "          plugin: {}", plugin.display());
+    let _ = writeln!(log, "          guard:  every tool call is checked: this call's folder{}, and Echo's minutes commands on this call only", if previous.is_some() { " and the previous minutes" } else { "" });
+    let _ = writeln!(log, "          hooks:  allowed by the Claude Code policy in {}", checked.iter().map(|f| f.display().to_string()).collect::<Vec<_>>().join(", "));
 
     let intent = if r.auto { Intent::Auto } else { Intent::Explicit };
     let mut child = match admit_child(|| {
-        let mut c = crate::ai::prepare_claude(profile, &args(dir, &home, &plugin, model.as_deref(), intent, &run_id), &cwd, false)?;
-        Ok(c.env(calls::RUN_ID, &run_id).spawn()?)
+        let a = args(dir, &plugin, model.as_deref(), intent, &run_id, previous.as_deref(), &settings.0);
+        let mut c = crate::ai::prepare_claude(profile, &a, &cwd, false)?;
+        c.env(calls::RUN_ID, &run_id).env(crate::guard::RUN_CALL, dir).env(crate::guard::RUN_CLIS, run_clis(&plugin).join("\n"));
+        if let Some(p) = &previous {
+            c.env(crate::guard::RUN_PREVIOUS, p);
+        }
+        Ok(c.spawn()?)
     }) {
         Ok(c) => c,
         Err(e) => {
@@ -980,6 +1008,7 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
 
     let mut result: Option<Value> = None;
     let mut seen = String::new(); // non-JSON output, for the sign-in check
+    let mut stopped: Option<String> = None; // stopped by Echo before it began: why
     if let Some(out) = child.stdout.take() {
         for line in BufReader::new(out).lines().map_while(Result::ok) {
             match serde_json::from_str::<Value>(&line) {
@@ -987,6 +1016,17 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
                     if ev["type"] == "system" && ev["subtype"] == "init" {
                         r.session_id = ev["session_id"].as_str().map(str::to_owned);
                         save(dir, &r);
+                        // The guard must block when it fails (`onFailure`): an older Claude Code is
+                        // stopped before its model's first turn.
+                        let v = ev["claude_code_version"].as_str().unwrap_or("");
+                        if stopped.is_none() && !crate::guard::new_enough(v) {
+                            let [a, b, c] = crate::guard::MIN_CLAUDE;
+                            stopped = Some(format!(
+                                "Claude Code {} is too old for minutes runs — update it (`claude update`) to {a}.{b}.{c} or later, then click Try again",
+                                if v.is_empty() { "(of unknown version)" } else { v }
+                            ));
+                            kill(pid);
+                        }
                     }
                     for l in describe(&ev) {
                         let _ = writeln!(log, "{}  {l}", stamp());
@@ -1007,8 +1047,8 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
     let status_code = child.wait().ok();
     done.store(true, std::sync::atomic::Ordering::SeqCst);
     CHILDREN.lock().unwrap_or_else(|e| e.into_inner()).pids.retain(|p| *p != pid);
-    // The skill may have retitled the call (`echoctl title` renames its folder at once on macOS):
-    // finish in the folder as it is named now.
+    // The call may have been retitled meanwhile (by the user, or an older app's run whose `title`
+    // renamed at once): finish in the folder as it is named now.
     let renamed = calls::by_stamp(&call_stamp).filter(|d| d != dir);
     let dir: &Path = renamed.as_deref().unwrap_or(dir);
     let err_text = stderr.and_then(|h| h.join().ok()).unwrap_or_default();
@@ -1033,7 +1073,7 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
         withdraw(dir);
         return Ok(dir.to_path_buf());
     }
-    let applied = if !is_error && wrote_notes { finish_actions(dir, &run_id, started_wall, &mut log) } else { Ok(false) };
+    let applied = if stopped.is_none() && !is_error && wrote_notes { finish_actions(dir, &run_id, started_wall, &mut log) } else { Ok(false) };
     let wrote_actions = matches!(applied, Ok(true));
     let ended = Ended {
         wrote_notes,
@@ -1046,6 +1086,7 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
         refused: &refused,
         exit: status_code.and_then(|s| s.code()),
         actions_error: applied.as_ref().err().map(String::as_str),
+        stopped: stopped.as_deref(),
     };
     conclude(&mut r, profile, &ended, &label, &cfg.notes_model_label());
     if r.state == "done" {
@@ -1062,11 +1103,21 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
     }
     drop(_local_turn); // the local model is free for the next job
     save(dir, &r);
-    // A title set during the run: Windows couldn't rename the folder while the log (or the place)
-    // was open.
+    // What the run's `frames --keep` moved to the trash expires here, outside the run.
+    calls::purge_trash();
+    // A title set during the run: its folder follows only now (a run's `title` leaves the rename to
+    // its end, and Windows couldn't rename the folder while the log or the place was open).
     drop(log);
     drop(place.take());
-    let dir = calls::rename_to_title(dir).unwrap_or_else(|_| dir.to_path_buf());
+    let dir = match calls::rename_to_title(dir) {
+        Ok(d) => d,
+        Err(e) => {
+            if let Ok(mut log) = fs::OpenOptions::new().append(true).open(dir.join(LOG)) {
+                let _ = writeln!(log, "{}  The folder wasn't renamed to the call's title: {e:#}", stamp());
+            }
+            dir.to_path_buf()
+        }
+    };
     // The minutes page (opt-in), under the call's final title.
     if r.state == "done" && cfg.minutes_page {
         let line = match crate::minutes::write(&dir) {
@@ -1078,6 +1129,31 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
         }
     }
     Ok(dir)
+}
+
+/// The run's own settings file (`guard::settings`) in `<config dir>/minutes-run/`, removed when
+/// the run ends (it drops); one a run left when Echo died goes after a day, with the next run.
+struct RunSettings(PathBuf);
+
+impl Drop for RunSettings {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
+fn run_settings(run_id: &str) -> Result<RunSettings> {
+    let folder = paths::config_dir().join("minutes-run");
+    fs::create_dir_all(&folder)?;
+    for e in fs::read_dir(&folder)?.flatten() {
+        let old = e.metadata().and_then(|m| m.modified()).is_ok_and(|t| t.elapsed().is_ok_and(|age| age > Duration::from_secs(24 * 3600)));
+        if old {
+            let _ = fs::remove_file(e.path());
+        }
+    }
+    let exe = std::env::current_exe().context("Echo's own program can't be found")?;
+    let f = folder.join(format!("{run_id}.json"));
+    fs::write(&f, serde_json::to_vec_pretty(&crate::guard::settings(&exe, &fwd(&paths::calls_dir())))?)?;
+    Ok(RunSettings(f))
 }
 
 fn stamp() -> String {
@@ -1145,6 +1221,8 @@ struct Ended<'a> {
     exit: Option<i32>,
     /// Why the action list the run left couldn't be applied (`finish_actions`).
     actions_error: Option<&'a str>,
+    /// Echo stopped it before it began, and why (an old Claude Code).
+    stopped: Option<&'a str>,
 }
 
 /// The run's final state and message. A `claude` profile's sign-in is marked refused when a failed
@@ -1152,7 +1230,9 @@ struct Ended<'a> {
 fn conclude(r: &mut Run, profile: &crate::ai::Profile, e: &Ended, label: &str, notes_model_label: &str) {
     use crate::ai::Kind;
     let all = format!("{}\n{}\n{}", e.seen, e.err_text, e.result_text);
-    let (state, message) = if e.wrote_notes && e.wrote_actions && !e.is_error {
+    let (state, message) = if let Some(why) = e.stopped {
+        ("failed", Some(why.to_string()))
+    } else if e.wrote_notes && e.wrote_actions && !e.is_error {
         crate::ai::job_worked(&profile.id);
         ("done", None)
     } else if e.wrote_notes && !e.is_error {
@@ -1177,9 +1257,15 @@ fn conclude(r: &mut Run, profile: &crate::ai::Profile, e: &Ended, label: &str, n
         }))
     } else if model_rejected(e.is_error, &all) {
         ("failed", Some(if profile.kind == Kind::System {
-            format!("Claude Code can't use the model \"{notes_model_label}\". Change it under menu → Claude Code → Minutes model (\"default\" uses Claude Code's own setting).")
+            format!(
+                "Claude Code can't use the model \"{notes_model_label}\". Change it under menu → AI for calls → Minutes model (while {} is the profile new calls use), or `echoctl ai set {} --notes-model <name>` (\"default\" uses Claude Code's own setting).",
+                profile.name, profile.id
+            )
         } else {
-            format!("Claude Code can't use the model of {} ({label}) — `echoctl ai status`", profile.name)
+            format!(
+                "Claude Code can't use the model of {} ({label}). Change it under menu → AI for calls → Minutes model (while it is the profile new calls use), or `echoctl ai set {} --notes-model <name>`.",
+                profile.name, profile.id
+            )
         }))
     } else if e.timed_out {
         ("failed", Some(format!("stopped after {} minutes without finishing", TIMEOUT.as_secs() / 60)))
@@ -1228,17 +1314,34 @@ fn rule_path(p: &Path) -> String {
 
 /// The Echo commands a run may use: what process-call needs, no more. A run follows a transcript
 /// (others' words) unattended, so it can't change Echo's settings, read the calendar or chats, or
-/// quit Echo.
-const RUN_COMMANDS: [&str; 7] = ["context", "actions", "speakers", "title", "vocab add", "frames", "transcribe"];
+/// quit Echo — nor work on another call (`calls::resolve_call` inside a run). The guard
+/// (`guard.rs`) holds every Bash call to these, as plain commands.
+pub const RUN_COMMANDS: [&str; 7] = ["context", "actions", "speakers", "title", "vocab add", "frames", "transcribe"];
 
-/// The arguments for `claude`.
-fn args(dir: &Path, home: &Path, plugin: &Path, model: Option<&str>, intent: Intent, run_id: &str) -> Vec<String> {
+/// The only tools a run has: no web, no agents, and with `--strict-mcp-config` no MCP server.
+const RUN_TOOLS: &str = "Bash,Read,Glob,Grep,Edit,Write,Skill";
+
+/// Forward slashes: Bash (Git Bash on Windows) drops the backslashes of a `C:\…` path.
+fn fwd(p: &Path) -> String {
+    p.display().to_string().replace('\\', "/")
+}
+
+/// The names a run may use for the CLI: the plugin's script, the same by forward slashes (the
+/// launcher the Windows prompt names), and `echoctl` on PATH.
+fn run_clis(plugin: &Path) -> Vec<String> {
+    let mut clis = vec![format!("{}/scripts/echoctl", plugin.display()), format!("{}/scripts/echoctl", fwd(plugin)), "echoctl".to_string()];
+    clis.dedup();
+    clis
+}
+
+/// The arguments for `claude`. `previous`: the previous minutes of the same meeting (`context`
+/// names them), the one file of another call the run may read; `settings`: the run's own
+/// settings file (`run_settings`: the guard).
+fn args(dir: &Path, plugin: &Path, model: Option<&str>, intent: Intent, run_id: &str, previous: Option<&Path>, settings: &Path) -> Vec<String> {
     let calls = paths::calls_dir();
     let abs = |p: &Path| format!("/{}", rule_path(p)); // permission rules spell absolute paths `//…`
     // Windows: Claude Code's Bash doesn't see the PATH this run gets, so the plugin's launcher
     // by its full path (forward slashes, as allowed below).
-    // Forward slashes: Bash (Git Bash on Windows) drops the backslashes of a `C:\…` path.
-    let fwd = |p: &Path| p.display().to_string().replace('\\', "/");
     let launcher = format!("{}/scripts/echoctl", fwd(plugin));
     let cli = if cfg!(windows) {
         format!("`{launcher} …` (the plugin's launcher, by this exact path)")
@@ -1250,10 +1353,13 @@ fn args(dir: &Path, home: &Path, plugin: &Path, model: Option<&str>, intent: Int
          This run was started from the Echo app and nobody is watching it: do every step without \
          asking anything. Echo has already claimed this call for this run, so don't claim it again. \
          Run the Echo CLI as {cli}: one command per Bash call, with no \
-         variables, `cd`, pipes, redirects or `&&`. Write and edit files with the Write and Edit \
-         tools, never through the shell. In step 5 write the new action list to `{}` (this run's own \
-         file) and apply that one. Skip the follow-up offers at the end; finish with a two-line \
-         report.{}",
+         variables, `cd`, pipes, redirects or `&&`; put words with spaces or punctuation in single \
+         quotes, and never use `$` or backticks. Write and edit files with the Write and Edit \
+         tools, never through the shell. Read and write only in this call's folder; the only other \
+         file you may read is the previous minutes `context` names. `echoctl title` keeps the \
+         folder's path until the run ends: go on using it. In step 5 write the new action list to \
+         `{}` (this run's own file) and apply that one. Skip the follow-up offers at the end; finish \
+         with a two-line report.{}",
         fwd(dir),
         fwd(&dir.join(calls::actions_new_of(run_id))),
         if intent == Intent::Explicit {
@@ -1268,23 +1374,24 @@ fn args(dir: &Path, home: &Path, plugin: &Path, model: Option<&str>, intent: Int
         a.extend(["--model".into(), m.into()]);
     }
     a.extend(["--plugin-dir".into(), plugin.display().to_string()]);
-    a.extend(["--add-dir".into(), home.display().to_string()]);
+    // The run's own settings: the guard before every tool call, whatever the user's own settings
+    // and permissions allow. It is the boundary; the rules below are a second layer.
+    a.extend(["--settings".into(), settings.display().to_string()]);
+    a.extend(["--tools".into(), RUN_TOOLS.into(), "--strict-mcp-config".into()]);
     // Only the tools below, whatever the user's own default mode is (auto / bypass would let a
     // transcript talk the run into anything): anything else is refused without asking.
     a.extend(["--permission-mode".into(), "dontAsk".into()]);
     a.push("--allowedTools".into());
-    a.extend([
-        format!("Read({}/**)", abs(home)),
-        format!("Glob({}/**)", abs(home)),
-        format!("Grep({}/**)", abs(home)),
-        format!("Edit({}/**)", abs(&calls)),
-        format!("Write({}/**)", abs(&calls)),
-        "Skill(echo:process-call)".into(),
-    ]);
+    // This call's folder; Write too, though Claude Code (2.1.310, measured) decides Write by the
+    // Edit rule. No `--add-dir`: the rules allow it outside the working folder.
+    let call = abs(dir);
+    a.extend(["Read", "Glob", "Grep", "Edit", "Write"].map(|t| format!("{t}({call}/**)")));
+    if let Some(p) = previous {
+        a.push(format!("Read({})", abs(p)));
+    }
+    a.push("Skill(echo:process-call)".into());
     // The CLI by any of the names the run may use for it, `RUN_COMMANDS` only.
-    let mut clis = vec![format!("{}/scripts/echoctl", plugin.display()), launcher.clone(), "echoctl".to_string()];
-    clis.dedup();
-    a.extend(clis.iter().flat_map(|cli| RUN_COMMANDS.iter().map(move |c| format!("Bash({cli} {c}:*)"))));
+    a.extend(run_clis(plugin).iter().flat_map(|cli| RUN_COMMANDS.iter().map(move |c| format!("Bash({cli} {c}:*)"))));
     // The user's own notes are never changed, and the action items are written only through
     // `echoctl actions --apply` (it keeps the ticks made meanwhile): deny rules win over the
     // allowlist, and match every call folder (a retitle doesn't escape them).
@@ -1596,7 +1703,7 @@ mod tests {
         use crate::ai::Kind;
         let (_env, _root) = crate::paths::testenv::folders("notes-conclude");
         let profile = |kind| crate::ai::Profile { id: "judged".into(), name: "J".into(), kind, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false };
-        let ended = |wrote_notes, is_error, result_text| Ended { wrote_notes, wrote_actions: wrote_notes, is_error, result_text, err_text: "", seen: "", timed_out: false, refused: &[], exit: Some(1), actions_error: None };
+        let ended = |wrote_notes, is_error, result_text| Ended { wrote_notes, wrote_actions: wrote_notes, is_error, result_text, err_text: "", seen: "", timed_out: false, refused: &[], exit: Some(1), actions_error: None, stopped: None };
         let judge = |kind, e: &Ended| {
             let mut r = Run::default();
             conclude(&mut r, &profile(kind), e, "J · m", "sonnet");
@@ -1865,9 +1972,10 @@ mod tests {
     fn explicit_runs_may_override_the_gate_and_keep_the_users_files() {
         let (_env, _root) = crate::paths::testenv::folders("notes-args");
         let calls = paths::calls_dir();
-        let a = args(Path::new("/tmp/c"), Path::new("/tmp/h"), Path::new("/tmp/p"), None, Intent::Explicit, "r1").join("\n");
+        let s = Path::new("/tmp/s.json");
+        let a = args(Path::new("/tmp/c"), Path::new("/tmp/p"), None, Intent::Explicit, "r1", None, s).join("\n");
         assert!(a.contains("asked for these minutes explicitly") && a.contains("/tmp/c/actions.new-r1.json"));
-        let auto = args(Path::new("/tmp/c"), Path::new("/tmp/h"), Path::new("/tmp/p"), None, Intent::Auto, "r1").join("\n");
+        let auto = args(Path::new("/tmp/c"), Path::new("/tmp/p"), None, Intent::Auto, "r1", None, s).join("\n");
         assert!(!auto.contains("explicitly"));
         let i = auto.lines().position(|l| l == "--disallowedTools").expect("deny rules");
         let denied: Vec<&str> = auto.lines().skip(i + 1).collect();
@@ -1880,10 +1988,76 @@ mod tests {
         }
         assert_eq!(cli.len(), RUN_COMMANDS.len() * 2, "{cli:?}"); // the plugin's script = the launcher here
         // A Windows plugin folder: its script by the backslash path too, and the launcher with slashes.
-        let win = args(Path::new("/tmp/c"), Path::new("/tmp/h"), Path::new(r"C:\p"), None, Intent::Auto, "r1").join("\n");
+        let win = args(Path::new("/tmp/c"), Path::new(r"C:\p"), None, Intent::Auto, "r1", None, s).join("\n");
         let names = |c: &str| win.lines().filter(|l| l.starts_with("Bash(") && l.ends_with(&format!(" {c}:*)"))).count();
         assert!(RUN_COMMANDS.iter().all(|c| names(c) == 3) && win.contains("Bash(C:/p/scripts/echoctl context:*)"), "{win}");
         assert!(!auto.contains("echoctl:*") && !["server", "config", "calendar", "app", "ai ", "home"].iter().any(|w| cli.iter().any(|l| l.contains(&format!("echoctl {w}")))));
+    }
+
+    #[test]
+    fn a_run_reads_and_writes_only_its_call_and_runs_with_its_guard() {
+        let (_env, _root) = crate::paths::testenv::folders("notes-args-scope");
+        let s = Path::new("/tmp/s.json");
+        let prev = Path::new("/tmp/calls/2026-10-18_100000-sync/notes.md");
+        let a = args(Path::new("/tmp/calls/2026-10-25_100000-sync"), Path::new("/tmp/p"), None, Intent::Auto, "r1", Some(prev), s);
+        let after = |flag: &str| a.iter().position(|x| x == flag).map(|i| a[i + 1].clone());
+        assert_eq!(after("--settings").as_deref(), Some("/tmp/s.json"));
+        assert_eq!(after("--tools").as_deref(), Some(RUN_TOOLS));
+        assert!(a.contains(&"--strict-mcp-config".to_string()) && !a.contains(&"--add-dir".to_string()));
+        // Files: this call only, and the previous minutes to read; the deny rules still cover every call.
+        let files: Vec<&String> = a.iter().filter(|x| ["Read(", "Glob(", "Grep(", "Edit(", "Write("].iter().any(|t| x.starts_with(t))).collect();
+        let call = "//tmp/calls/2026-10-25_100000-sync/**";
+        let mut want: Vec<String> = ["Read", "Glob", "Grep", "Edit", "Write"].iter().map(|t| format!("{t}({call})")).collect();
+        want.push("Read(//tmp/calls/2026-10-18_100000-sync/notes.md)".into());
+        let base = format!("/{}", rule_path(&paths::calls_dir()));
+        want.extend([format!("Edit({base}/**/my-notes.md)"), format!("Edit({base}/**/actions.json)")]);
+        assert_eq!(files, want.iter().collect::<Vec<_>>());
+        // No previous minutes: no other file at all.
+        let none = args(Path::new("/tmp/calls/2026-10-25_100000-sync"), Path::new("/tmp/p"), None, Intent::Auto, "r1", None, s);
+        assert!(!none.iter().any(|x| x.contains("2026-10-18")));
+        // The prompt keeps the run in the folder.
+        assert!(a[1].contains("only in this call's folder") && a[1].contains("keeps the folder's path until the run ends"));
+    }
+
+    #[test]
+    fn the_run_settings_carry_the_guard_and_go_with_the_run() {
+        let (_env, root) = crate::paths::testenv::folders("notes-run-settings");
+        let stale = root.join("config/minutes-run/old.json");
+        fs::create_dir_all(stale.parent().unwrap()).unwrap();
+        fs::write(&stale, "{}").unwrap();
+        let old = std::time::SystemTime::now() - Duration::from_secs(2 * 24 * 3600);
+        fs::File::options().write(true).open(&stale).unwrap().set_modified(old).unwrap();
+        let s = run_settings("r9").unwrap();
+        let v: Value = serde_json::from_slice(&fs::read(&s.0).unwrap()).unwrap();
+        assert!(v["hooks"]["PreToolUse"][0]["hooks"][0]["command"].as_str().unwrap().ends_with(" run-guard"));
+        assert_eq!(v["hooks"]["PreToolUse"][0]["hooks"][0]["onFailure"], "block");
+        assert_eq!(v["claudeMdExcludes"][0], format!("{}/**", fwd(&paths::calls_dir())));
+        assert!(!stale.exists(), "a file a run left a day ago goes");
+        let f = s.0.clone();
+        drop(s);
+        assert!(!f.exists(), "removed when the run ends");
+    }
+
+    #[test]
+    fn a_run_stopped_for_an_old_claude_code_says_why() {
+        let e = Ended {
+            wrote_notes: false,
+            wrote_actions: false,
+            is_error: true,
+            result_text: "",
+            err_text: "",
+            seen: "",
+            timed_out: false,
+            refused: &[],
+            exit: None,
+            actions_error: None,
+            stopped: Some("Claude Code 2.1.200 is too old for minutes runs"),
+        };
+        let mut r = Run::default();
+        let p = crate::ai::Profile { id: "c".into(), name: "C".into(), kind: crate::ai::Kind::Claude, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false };
+        conclude(&mut r, &p, &e, "C · sonnet", "sonnet");
+        assert_eq!(r.state, "failed");
+        assert!(r.message.unwrap().contains("too old"));
     }
 
     #[test]

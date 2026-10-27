@@ -14,6 +14,7 @@ mod frames;
 #[cfg(feature = "transcribe")]
 mod gpu;
 mod graph;
+mod guard;
 mod livenotes;
 #[cfg(feature = "transcribe")]
 mod live;
@@ -205,7 +206,7 @@ enum Cmd {
         #[arg(default_value = "latest")]
         call: String,
     },
-    /// Set a call's title (one line, clamped) and rename its folder
+    /// Set a call's title (one line, clamped) and rename its folder (inside a minutes run, when it ends)
     Title { call: String, title: String },
     /// Add your own note to the call being recorded ("# Heading" lines shape the minutes)
     Note { text: Vec<String> },
@@ -303,6 +304,10 @@ enum Cmd {
     #[cfg(feature = "transcribe")]
     #[command(hide = true)]
     GpuCheck,
+    /// (internal) The minutes run's guard: Claude Code asks it before every tool call of a run
+    /// Echo started (`guard.rs`); exit 2 refuses the call
+    #[command(hide = true)]
+    RunGuard,
     /// (old name of `app run`)
     #[command(hide = true)]
     Watch {
@@ -534,7 +539,7 @@ enum AiCmd {
         #[arg(long)]
         sso: bool,
     },
-    /// How a Claude profile signs in: the email pre-filled, single sign-on
+    /// A profile's minutes model; how a Claude profile signs in: the email pre-filled, single sign-on
     Set {
         id: String,
         /// The email pre-filled on the sign-in page
@@ -546,6 +551,10 @@ enum AiCmd {
         /// Sign in with the organisation's single sign-on
         #[arg(long, value_parser = ["on", "off"])]
         sso: Option<String>,
+        /// The model that writes this profile's minutes (empty: its default; for `system`,
+        /// "default" = Claude Code's own setting)
+        #[arg(long)]
+        notes_model: Option<String>,
     },
     Remove { id: String },
     /// Sign a Claude profile in, here in this terminal (`claude auth login`; Ctrl-C stops it)
@@ -818,6 +827,7 @@ fn main() -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&cfg)?);
             Ok(())
         }
+        Cmd::RunGuard => std::process::exit(guard::command()),
         #[cfg(feature = "transcribe")]
         Cmd::GpuCheck => gpu::check(),
         #[cfg(feature = "transcribe")]
@@ -1055,7 +1065,17 @@ fn main() -> Result<()> {
             AiCmd::Live { state } => ai::set_live(state == "on"),
             AiCmd::AddLocal { id, model, live_model, url, token, name } => ai::add_local(&id, name, &model, live_model, &url, token),
             AiCmd::AddClaude { id, name, live_model, notes_model, email, sso } => ai::add_claude(&id, name, live_model, notes_model, email, sso),
-            AiCmd::Set { id, email, no_email, sso } => ai::set_sign_in(&id, email, no_email, sso.map(|s| s == "on")),
+            AiCmd::Set { id, email, no_email, sso, notes_model } => {
+                anyhow::ensure!(notes_model.is_some() || email.is_some() || no_email || sso.is_some(), "nothing to set: --notes-model, --email, --no-email or --sso");
+                if let Some(m) = notes_model {
+                    let (name, now) = ai::set_notes_model(&id, &m)?;
+                    println!("{name}: minutes model {now}");
+                }
+                if email.is_some() || no_email || sso.is_some() {
+                    ai::set_sign_in(&id, email, no_email, sso.map(|s| s == "on"))?;
+                }
+                Ok(())
+            }
             AiCmd::Remove { id } => ai::remove(&id),
             AiCmd::Login { id } => ai::login_here(&id),
             AiCmd::Accept { id } => {
