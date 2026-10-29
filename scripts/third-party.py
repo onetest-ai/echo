@@ -18,6 +18,12 @@ EXTRA = [
     ("NeMo-Speech.cpp runtime (Nemotron models; its components' licenses ship in nemo-speech/licenses)", "0.2.0", "Apache-2.0", "https://github.com/NVIDIA/NeMo-Speech.cpp"),
     ("Nemotron speech models (downloaded when chosen)", "", "OpenMDW-1.1", "https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b"),
     ("mermaid (diagrams in the Echo window; license in ui/vendor/mermaid.min.js)", "11.4.1", "MIT", "https://github.com/mermaid-js/mermaid"),
+    ("xterm.js (terminals in the Echo window; license in ui/vendor/xterm.LICENSE)", "5.5.0", "MIT", "https://github.com/xtermjs/xterm.js"),
+    ("@xterm/addon-fit (terminals in the Echo window)", "0.10.0", "MIT", "https://github.com/xtermjs/xterm.js"),
+]
+# Vendored files whose license text isn't inside them: their texts go into the app's licenses file.
+VENDORED_TEXTS = [
+    ("xterm.js 5.5.0 and @xterm/addon-fit 0.10.0 (MIT)", "https://github.com/xtermjs/xterm.js", "crates/echoctl/ui/vendor/xterm.LICENSE"),
 ]
 
 
@@ -70,6 +76,9 @@ def main():
                     ids = [i for i in ids if i not in ("OR", "AND", "WITH")]
                     missing.update(ids)
                     f.write(f"Licensed under {p.get('license')}; the standard text is in the last section.\n\n")
+            for name, repo, path in VENDORED_TEXTS:
+                f.write(f"{'=' * 78}\n{name}\n{repo}\n{'=' * 78}\n\n")
+                f.write(open(os.path.join(ROOT, path), encoding="utf-8").read().rstrip() + "\n\n")
             # Crates that publish no license file: the standard SPDX texts of their licenses.
             f.write(f"{'=' * 78}\nStandard license texts\n{'=' * 78}\n\n")
             for i in sorted(missing):

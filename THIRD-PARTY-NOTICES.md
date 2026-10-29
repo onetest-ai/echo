@@ -11,6 +11,8 @@ Regenerate with `scripts/third-party.py`.
 | NeMo-Speech.cpp runtime (Nemotron models; its components' licenses ship in nemo-speech/licenses) | 0.2.0 | Apache-2.0 | https://github.com/NVIDIA/NeMo-Speech.cpp |
 | Nemotron speech models (downloaded when chosen) |  | OpenMDW-1.1 | https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b |
 | mermaid (diagrams in the Echo window; license in ui/vendor/mermaid.min.js) | 11.4.1 | MIT | https://github.com/mermaid-js/mermaid |
+| xterm.js (terminals in the Echo window; license in ui/vendor/xterm.LICENSE) | 5.5.0 | MIT | https://github.com/xtermjs/xterm.js |
+| @xterm/addon-fit (terminals in the Echo window) | 0.10.0 | MIT | https://github.com/xtermjs/xterm.js |
 | adler2 | 2.0.1 | 0BSD OR MIT OR Apache-2.0 | https://github.com/oyvindln/adler2 |
 | aec3 | 0.4.0 | MIT OR BSD-3-Clause | https://github.com/RubyBit/aec3-rs |
 | aho-corasick | 1.1.5 | Unlicense OR MIT | https://github.com/BurntSushi/aho-corasick |
@@ -24,6 +26,7 @@ Regenerate with `scripts/third-party.py`.
 | base64 | 0.22.1 | MIT OR Apache-2.0 | https://github.com/marshallpierce/rust-base64 |
 | base64 | 0.23.1 | MIT OR Apache-2.0 | https://github.com/marshallpierce/rust-base64 |
 | bindgen | 0.72.1 | BSD-3-Clause | https://github.com/rust-lang/rust-bindgen |
+| bitflags | 1.3.2 | MIT/Apache-2.0 | https://github.com/bitflags/bitflags |
 | bitflags | 2.13.2 | MIT OR Apache-2.0 | https://github.com/bitflags/bitflags |
 | block-buffer | 0.10.4 | MIT OR Apache-2.0 | https://github.com/RustCrypto/utils |
 | block2 | 0.6.2 | MIT | https://github.com/madsmtm/objc2 |
@@ -33,6 +36,7 @@ Regenerate with `scripts/third-party.py`.
 | cc | 1.6.0 | MIT OR Apache-2.0 | https://github.com/rust-lang/cc-rs |
 | cexpr | 0.6.0 | Apache-2.0/MIT | https://github.com/jethrogb/rust-cexpr |
 | cfg-if | 1.0.5 | MIT OR Apache-2.0 | https://github.com/rust-lang/cfg-if |
+| cfg_aliases | 0.1.1 | MIT | https://github.com/katharostech/cfg_aliases |
 | cfg_aliases | 0.2.2 | MIT | https://github.com/katharostech/cfg_aliases |
 | chrono | 0.4.45 | MIT OR Apache-2.0 | https://github.com/chronotope/chrono |
 | clang-sys | 1.9.1 | Apache-2.0 | https://github.com/KyleMayes/clang-sys |
@@ -62,12 +66,14 @@ Regenerate with `scripts/third-party.py`.
 | dirs-sys | 0.5.0 | MIT OR Apache-2.0 | https://github.com/dirs-dev/dirs-sys-rs |
 | dispatch2 | 0.3.1 | Zlib OR Apache-2.0 OR MIT | https://github.com/madsmtm/objc2 |
 | displaydoc | 0.2.7 | MIT OR Apache-2.0 | https://github.com/yaahc/displaydoc |
+| downcast-rs | 1.2.1 | MIT/Apache-2.0 | https://github.com/marcianx/downcast-rs |
 | dpi | 0.1.2 | Apache-2.0 AND MIT | https://github.com/rust-windowing/winit |
 | dunce | 1.0.5 | CC0-1.0 OR MIT-0 OR Apache-2.0 | https://gitlab.com/kornelski/dunce |
 | either | 1.19.0 | MIT OR Apache-2.0 | https://github.com/rayon-rs/either |
 | embed-resource | 3.0.12 | MIT | https://github.com/nabijaczleweli/rust-embed-resource |
 | equivalent | 1.0.2 | Apache-2.0 OR MIT | https://github.com/indexmap-rs/equivalent |
 | fdeflate | 0.3.7 | MIT OR Apache-2.0 | https://github.com/image-rs/fdeflate |
+| filedescriptor | 0.8.3 | MIT | https://github.com/wezterm/wezterm |
 | find-msvc-tools | 0.1.14 | MIT OR Apache-2.0 | https://github.com/rust-lang/cc-rs |
 | flate2 | 1.1.10 | MIT OR Apache-2.0 | https://github.com/rust-lang/flate2-rs |
 | foreign-types | 0.5.0 | MIT/Apache-2.0 | https://github.com/sfackler/foreign-types |
@@ -100,6 +106,7 @@ Regenerate with `scripts/third-party.py`.
 | itertools | 0.13.0 | MIT OR Apache-2.0 | https://github.com/rust-itertools/itertools |
 | itoa | 1.0.18 | MIT OR Apache-2.0 | https://github.com/dtolnay/itoa |
 | keyboard-types | 0.8.3 | MIT OR Apache-2.0 | https://github.com/rust-windowing/keyboard-types |
+| lazy_static | 1.5.1 | MIT OR Apache-2.0 | https://github.com/rust-lang-nursery/lazy-static.rs |
 | libc | 0.2.190 | MIT OR Apache-2.0 | https://github.com/rust-lang/libc |
 | libloading | 0.8.9 | ISC | https://github.com/nagisa/rust_libloading/ |
 | litemap | 0.8.3 | Unicode-3.0 | https://github.com/unicode-org/icu4x |
@@ -112,6 +119,7 @@ Regenerate with `scripts/third-party.py`.
 | miniz_oxide | 0.9.1 | MIT OR Zlib OR Apache-2.0 | https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide |
 | moxcms | 0.8.1 | BSD-3-Clause OR Apache-2.0 | https://github.com/awxkee/moxcms.git |
 | muda | 0.21.2 | Apache-2.0 OR MIT | https://github.com/tauri-apps/muda |
+| nix | 0.28.0 | MIT | https://github.com/nix-rust/nix |
 | nix | 0.31.3 | MIT | https://github.com/nix-rust/nix |
 | nom | 7.1.3 | MIT | https://github.com/Geal/nom |
 | num-complex | 0.4.6 | MIT OR Apache-2.0 | https://github.com/rust-num/num-complex |
@@ -146,6 +154,7 @@ Regenerate with `scripts/third-party.py`.
 | parking_lot_core | 0.9.12 | MIT OR Apache-2.0 | https://github.com/Amanieu/parking_lot |
 | percent-encoding | 2.3.2 | MIT OR Apache-2.0 | https://github.com/servo/rust-url/ |
 | png | 0.18.1 | MIT OR Apache-2.0 | https://github.com/image-rs/image-png |
+| portable-pty | 0.9.0 | MIT | https://github.com/wezterm/wezterm |
 | potential_utf | 0.1.6 | Unicode-3.0 | https://github.com/unicode-org/icu4x |
 | powerfmt | 0.2.1 | MIT OR Apache-2.0 | https://github.com/jhpratt/powerfmt |
 | prettyplease | 0.2.37 | MIT OR Apache-2.0 | https://github.com/dtolnay/prettyplease |
@@ -175,7 +184,10 @@ Regenerate with `scripts/third-party.py`.
 | serde_derive | 1.0.229 | MIT OR Apache-2.0 | https://github.com/serde-rs/serde |
 | serde_json | 1.0.151 | MIT OR Apache-2.0 | https://github.com/serde-rs/json |
 | serde_spanned | 1.1.2 | MIT OR Apache-2.0 | https://github.com/toml-rs/toml |
+| serial2 | 0.2.39 | BSD-2-Clause OR Apache-2.0 | https://github.com/de-vri-es/serial2-rs |
 | sha2 | 0.10.9 | MIT OR Apache-2.0 | https://github.com/RustCrypto/hashes |
+| shared_library | 0.1.9 | Apache-2.0/MIT | https://github.com/tomaka/shared_library/ |
+| shell-words | 1.1.1 | MIT/Apache-2.0 | https://github.com/tmiasko/shell-words |
 | shlex | 1.3.0 | MIT OR Apache-2.0 | https://github.com/comex/rust-shlex |
 | shlex | 2.0.1 | MIT OR Apache-2.0 | https://github.com/comex/rust-shlex |
 | simd-adler32 | 0.3.10 | MIT | https://github.com/mcountryman/simd-adler32 |
@@ -188,7 +200,9 @@ Regenerate with `scripts/third-party.py`.
 | syn | 3.0.6 | MIT OR Apache-2.0 | https://github.com/dtolnay/syn |
 | synstructure | 0.14.0 | MIT | https://github.com/mystor/synstructure |
 | tao | 0.37.1 | Apache-2.0 | https://github.com/tauri-apps/tao |
+| thiserror | 1.0.69 | MIT OR Apache-2.0 | https://github.com/dtolnay/thiserror |
 | thiserror | 2.0.21 | MIT OR Apache-2.0 | https://github.com/dtolnay/thiserror |
+| thiserror-impl | 1.0.69 | MIT OR Apache-2.0 | https://github.com/dtolnay/thiserror |
 | thiserror-impl | 2.0.21 | MIT OR Apache-2.0 | https://github.com/dtolnay/thiserror |
 | time | 0.3.55 | MIT OR Apache-2.0 | https://github.com/time-rs/time |
 | time-core | 0.1.9 | MIT OR Apache-2.0 | https://github.com/time-rs/time |
@@ -220,6 +234,7 @@ Regenerate with `scripts/third-party.py`.
 | webview2-com-sys | 0.39.1 | MIT | https://github.com/wravery/webview2-rs |
 | whisper-rs | 0.16.0 | Unlicense | https://codeberg.org/tazz4843/whisper-rs |
 | whisper-rs-sys | 0.15.0 | Unlicense | https://codeberg.org/tazz4843/whisper-rs |
+| winapi | 0.3.9 | MIT/Apache-2.0 | https://github.com/retep998/winapi-rs |
 | windows | 0.62.2 | MIT OR Apache-2.0 | https://github.com/microsoft/windows-rs |
 | windows-collections | 0.3.2 | MIT OR Apache-2.0 | https://github.com/microsoft/windows-rs |
 | windows-core | 0.62.2 | MIT OR Apache-2.0 | https://github.com/microsoft/windows-rs |
@@ -234,6 +249,7 @@ Regenerate with `scripts/third-party.py`.
 | windows-threading | 0.2.1 | MIT OR Apache-2.0 | https://github.com/microsoft/windows-rs |
 | windows-version | 0.1.7 | MIT OR Apache-2.0 | https://github.com/microsoft/windows-rs |
 | winnow | 1.0.4 | MIT | https://github.com/winnow-rs/winnow |
+| winreg | 0.10.1 | MIT | https://github.com/gentoo90/winreg-rs |
 | winreg | 0.56.0 | MIT | https://github.com/gentoo90/winreg-rs |
 | writeable | 0.6.4 | Unicode-3.0 | https://github.com/unicode-org/icu4x |
 | wry | 0.57.0 | Apache-2.0 OR MIT | https://github.com/tauri-apps/wry |
