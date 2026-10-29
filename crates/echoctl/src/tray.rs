@@ -1341,6 +1341,47 @@ impl Ui {
 
     fn click(&mut self, id: &MenuId) {
         let Some(action) = self.actions.get(id).cloned() else { return };
+        self.run(action)
+    }
+
+    /// The flows Settings in the window starts (`window::settings_action`), by name: the same
+    /// actions as the menu's, so a dialog, a sign-in or a download runs one way only.
+    fn page_action(name: &str, arg: &str) -> Option<Action> {
+        let model = || models::find(arg).ok().map(|m| m.name);
+        Some(match name {
+            "change_home" => Action::ChangeHome,
+            "install_cli" => Action::InstallCli,
+            "connect_claude" => Action::ConnectClaude,
+            "notes_choose" => Action::NotesChoose,
+            "notes_anywhere" => Action::NotesAnywhere,
+            "check_updates" => Action::CheckUpdates,
+            "update" => Action::Update,
+            "calendar_login" => Action::CalendarLogin,
+            "calendar_logout" => Action::CalendarLogout,
+            "calendar_sync" => Action::CalendarSync,
+            "calendar_client_id" => Action::CalendarClientId,
+            "use_model" => Action::UseModel(model()?),
+            "remove_model" => Action::RemoveModel(model()?),
+            "download_model" => Action::DownloadModel(model()?),
+            "edit_profile" => Action::EditProfile,
+            "notes_model" => Action::NotesModel,
+            "sign_in" => Action::SignIn(arg.to_string()),
+            "ask_permissions" => Action::AskPermissions,
+            "recheck" => Action::Recheck,
+            "open_settings_url" => Action::OpenUrl(arg.to_string()),
+            #[cfg(feature = "transcribe")]
+            "connect_server" => Action::ConnectServer,
+            #[cfg(feature = "transcribe")]
+            "disconnect_server" => Action::DisconnectServer,
+            #[cfg(feature = "transcribe")]
+            "toggle_serving" => Action::ToggleServing,
+            #[cfg(feature = "transcribe")]
+            "retest_gpu" => Action::RetestGpu,
+            _ => return None,
+        })
+    }
+
+    fn run(&mut self, action: Action) {
         match action {
             Action::Record => drop(watch::arm(None, None, None, None)),
             Action::RecordIn(code) => drop(watch::arm(None, None, Some(vec![code]), None)),
@@ -1836,6 +1877,30 @@ pub fn run(app: TargetApp, stop: Arc<AtomicBool>) -> ! {
                     let step = leaving.start(Then::CloseWindow, win.is_some());
                     act(step, &mut leaving, &mut win, target, &stop_for_ui, &mut ui, &proxy);
                 }
+                // Settings in the window started a flow the menu has too: run it the same way.
+                None if crate::window::settings_action(&msg).is_some() => {
+                    if let (Some((name, arg)), Some(u)) = (crate::window::settings_action(&msg), ui.as_mut()) {
+                        match Ui::page_action(&name, &arg) {
+                            Some(a) => {
+                                u.run(a);
+                                u.refresh_model(true);
+                            }
+                            None => eprintln!("settings: no action {name:?}"),
+                        }
+                    }
+                    if let Some(w) = &win {
+                        w.refresh();
+                    }
+                }
+                // The page's own title bar (macOS): drag or zoom the window.
+                None if crate::window::window_cmd(&msg).is_some() => {
+                    if let (Some(cmd), Some(w)) = (crate::window::window_cmd(&msg), &win) {
+                        match cmd {
+                            crate::window::WindowCmd::Drag => drop(w.window.drag_window()),
+                            crate::window::WindowCmd::Zoom => w.window.set_maximized(!w.window.is_maximized()),
+                        }
+                    }
+                }
                 None => {
                     let done = crate::window::handle(&msg);
                     if let (Some(js), Some(w)) = (&done.reply, &win) {
@@ -1902,6 +1967,8 @@ pub fn run(app: TargetApp, stop: Arc<AtomicBool>) -> ! {
                 }
             }
             Event::UserEvent(UiEvent::Quit) => {
+                // Terminals in the window (Claude sessions) end with Echo; they resume by id later.
+                crate::terminal::close_all();
                 if app::RESTART.load(Ordering::SeqCst) {
                     let _ = app::spawn_app(true);
                 }

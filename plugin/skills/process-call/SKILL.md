@@ -61,6 +61,11 @@ Name the speakers first (4a, if the transcript has "Speaker N" labels), then wri
 - **If the user took notes** (`user_notes`): their notes are the backbone. Keep every point
   they wrote, expand it from the transcript, and use their `user_headings` as section headings
   before the template's. Never drop or contradict something the user wrote.
+  Notes tied to a moment: `- [12:05] …` is about that time of the call — expand it from what was said
+  around then and put it in the section on that topic; a `  > "…"` line under a note quotes the words
+  it is about. `? …` is the user's question (an open question unless the call answered it), `! …` a
+  decision they noted, `- [ ] [12:22] …` their to-do (also written `- [12:22] [] …`; an action item for Me), `⚑` a moment they
+  flagged — make sure what was said then is covered.
 - Otherwise use the template's sections, at most `heading_budget` headings in total (merge or
   drop the least relevant). Follow each section's instruction.
 - Write in `dominant_language`. Keep names, products and figures exactly as said.

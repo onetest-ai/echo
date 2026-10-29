@@ -29,6 +29,11 @@ pub const RUN_CALL: &str = "ECHOCTL_RUN_CALL";
 pub const RUN_PREVIOUS: &str = "ECHOCTL_RUN_PREVIOUS";
 /// The names the run may use for the CLI, one per line.
 pub const RUN_CLIS: &str = "ECHOCTL_RUN_CLIS";
+/// `ask`: the Echo window's Claude session on a call — it reads, it changes nothing (no Edit,
+/// Write or skill; only `ASK_COMMANDS`). Unset: a minutes run.
+pub const RUN_MODE: &str = "ECHOCTL_RUN_MODE";
+/// The Echo commands a call's Claude session may run (read-only).
+pub const ASK_COMMANDS: [&str; 1] = ["context"];
 /// The oldest Claude Code whose hooks block when they fail (`onFailure`).
 pub const MIN_CLAUDE: [u32; 3] = [2, 1, 295];
 
@@ -38,6 +43,8 @@ pub struct Scope {
     call: PathBuf,
     previous: Option<PathBuf>,
     clis: Vec<String>,
+    /// The window's session on the call (`RUN_MODE=ask`): read-only.
+    ask: bool,
 }
 
 /// `echoctl run-guard`: judge the tool call on stdin; the exit code is Claude Code's answer.
@@ -54,7 +61,8 @@ pub fn command() -> i32 {
     match verdict {
         Ok(()) => 0,
         Err(why) => {
-            let _ = writeln!(std::io::stderr(), "Echo's minutes run: {why}");
+            let who = if std::env::var(RUN_MODE).as_deref() == Ok("ask") { "Echo (this call's Claude session reads only)" } else { "Echo's minutes run" };
+            let _ = writeln!(std::io::stderr(), "{who}: {why}");
             2
         }
     }
@@ -122,7 +130,8 @@ impl Scope {
         if clis.is_empty() {
             return Err("the run names no Echo CLI".into());
         }
-        Ok(Scope { call, previous, clis })
+        let ask = var(RUN_MODE).is_some_and(|m| m == "ask");
+        Ok(Scope { call, previous, clis, ask })
     }
 
     /// Allowed, or why not.
@@ -139,6 +148,7 @@ impl Scope {
                     Err(format!("only this call's folder can be read, not {}", p.display()))
                 }
             }
+            "Edit" | "Write" if self.ask => Err("this session reads the call; it changes no file".into()),
             "Edit" | "Write" => {
                 let raw = input["file_path"].as_str();
                 let p = resolve(raw)?;
@@ -162,6 +172,7 @@ impl Scope {
                     _ => Ok(()),
                 }
             }
+            "Skill" if self.ask => Err("no skill runs in this session".into()),
             "Skill" => {
                 let name = input["skill"].as_str().or_else(|| input["command"].as_str()).unwrap_or("");
                 if matches!(name.trim_start_matches('/'), "echo:process-call" | "process-call") {
@@ -186,14 +197,15 @@ impl Scope {
         if !self.clis.iter().any(|c| c == cli) {
             return Err(format!("only the Echo CLI runs here, not {cli}"));
         }
-        let allowed = crate::notes::RUN_COMMANDS.iter().any(|c| {
+        let commands: &[&str] = if self.ask { &ASK_COMMANDS } else { &crate::notes::RUN_COMMANDS };
+        let allowed = commands.iter().any(|c| {
             let c: Vec<&str> = c.split(' ').collect();
             rest.len() >= c.len() && rest.iter().zip(&c).all(|(w, c)| w.as_str() == *c)
         });
         if allowed {
             Ok(())
         } else {
-            Err(format!("echoctl {} isn't one of the commands a minutes run uses", rest.first().map(String::as_str).unwrap_or("")))
+            Err(format!("echoctl {} isn't one of the commands {} uses", rest.first().map(String::as_str).unwrap_or(""), if self.ask { "this session" } else { "a minutes run" }))
         }
     }
 }
@@ -324,6 +336,7 @@ mod tests {
             call: dunce::canonicalize(root.join("calls/2026-10-25_100000-call")).unwrap(),
             previous: dunce::canonicalize(root.join("calls/2026-10-18_100000-call/notes.md")).ok(),
             clis: vec!["echoctl".into(), "/Apps/Echo.app/plugin/scripts/echoctl".into()],
+            ask: false,
         }
     }
 
@@ -392,6 +405,42 @@ mod tests {
     }
 
     #[test]
+    fn the_windows_session_on_a_call_reads_and_changes_nothing() {
+        let root = fixture("ask");
+        let s = Scope { ask: true, ..scope(&root) };
+        let call = root.join("calls/2026-10-25_100000-call");
+        let path = |p: &Path| p.display().to_string();
+        let ok = |t: &str, input: Value| s.judge(&tool(t, input)).map_err(|e| format!("{t}: {e}"));
+        // Reading stays as in a run: the call, the previous minutes, Echo's context.
+        ok("Read", json!({"file_path": path(&call.join("transcript.md"))})).unwrap();
+        ok("Read", json!({"file_path": path(&root.join("calls/2026-10-18_100000-call/notes.md"))})).unwrap();
+        ok("Grep", json!({"pattern": "SSO", "path": path(&call)})).unwrap();
+        ok("Bash", json!({"command": format!("echoctl context {}", path(&call))})).unwrap();
+        // Nothing is written, no skill runs, and no other command — not even the minutes' own.
+        for (t, input) in [
+            ("Write", json!({"file_path": path(&call.join("notes.md")), "content": "x"})),
+            ("Edit", json!({"file_path": path(&call.join("notes.md"))})),
+            ("Skill", json!({"skill": "echo:process-call"})),
+            ("Bash", json!({"command": format!("echoctl title {} 'x'", path(&call))})),
+            ("Bash", json!({"command": format!("echoctl actions {} --apply x.json", path(&call))})),
+            ("Bash", json!({"command": "ls ~"})),
+            ("Read", json!({"file_path": path(&root.join("calls/2026-10-24_100000-other/transcript.md"))})),
+            ("WebFetch", json!({"url": "https://example.com"})),
+        ] {
+            assert!(s.judge(&tool(t, input.clone())).is_err(), "{t} {input}");
+        }
+        // The environment says which: `ECHOCTL_RUN_MODE=ask`.
+        let vars = |k: &str| match k {
+            RUN_CALL => Some(call.clone().into_os_string()),
+            RUN_CLIS => Some("echoctl".into()),
+            RUN_MODE => Some("ask".into()),
+            _ => None,
+        };
+        assert!(Scope::from_vars(vars).unwrap().ask);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn a_neighbour_named_like_the_call_is_another_call() {
         let root = fixture("neighbour");
         // A second call in the same second gets `-2`; an untitled call is its bare stamp: both
@@ -401,7 +450,7 @@ mod tests {
                 fs::create_dir_all(root.join("calls").join(d)).unwrap();
                 fs::write(root.join("calls").join(d).join("transcript.md"), "x").unwrap();
             }
-            let s = Scope { call: dunce::canonicalize(root.join("calls").join(own)).unwrap(), previous: None, clis: vec!["echoctl".into()] };
+            let s = Scope { call: dunce::canonicalize(root.join("calls").join(own)).unwrap(), previous: None, clis: vec!["echoctl".into()], ask: false };
             let p = |f: &str| root.join("calls").join(twin).join(f).display().to_string();
             for (t, input) in [
                 ("Read", json!({"file_path": p("transcript.md")})),

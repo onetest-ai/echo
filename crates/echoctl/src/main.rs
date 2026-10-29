@@ -44,6 +44,8 @@ mod mark;
 #[cfg(feature = "tray")]
 mod tray;
 #[cfg(feature = "tray")]
+mod terminal;
+#[cfg(feature = "tray")]
 mod window;
 mod update;
 

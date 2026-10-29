@@ -233,7 +233,7 @@ struct ListReport {
     models: Vec<ListEntry>,
 }
 
-pub fn list(json: bool) -> Result<()> {
+fn report() -> Result<ListReport> {
     let cfg = Config::load()?;
     let hw = hardware();
     let (rec, reason) = recommend(&hw);
@@ -247,7 +247,17 @@ pub fn list(json: bool) -> Result<()> {
             runnable: runnable(m),
         })
         .collect();
-    let r = ListReport { hardware: hw, recommended: rec, reason, models };
+    Ok(ListReport { hardware: hw, recommended: rec, reason, models })
+}
+
+/// The catalog as `echoctl model list --json` gives it (the window's Settings → Transcription).
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn list_value() -> Result<serde_json::Value> {
+    Ok(serde_json::to_value(report()?)?)
+}
+
+pub fn list(json: bool) -> Result<()> {
+    let r = report()?;
     if json {
         println!("{}", serde_json::to_string_pretty(&r)?);
         return Ok(());

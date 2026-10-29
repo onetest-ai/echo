@@ -105,7 +105,7 @@ pub fn by_stamp(stamp: &str) -> Option<PathBuf> {
     found.next().is_none().then_some(first)
 }
 
-fn read_json(p: &Path) -> Value {
+pub(crate) fn read_json(p: &Path) -> Value {
     fs::read(p).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or(Value::Null)
 }
 

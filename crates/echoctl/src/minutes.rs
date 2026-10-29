@@ -35,7 +35,7 @@ const MAX_FRAME: u64 = 20 << 20;
 /// All the images of one page together (each frame is embedded once).
 const MAX_IMAGES: usize = 64 << 20;
 
-/// A frame the call kept (`frames.jsonl`), for the screens at the end of the page.
+/// A frame the call kept (`frames.jsonl`): its time captions a screenshot the minutes cite.
 #[derive(Debug, Clone, PartialEq)]
 struct Frame {
     name: String,
@@ -87,7 +87,7 @@ pub fn render_for_window(dir: &Path) -> Result<(String, String)> {
 
 /// Bumped when the page's rendering changes, so an open Minutes tab shows the new one.
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
-const RENDER_VERSION: u32 = 1;
+const RENDER_VERSION: u32 = 8;
 
 /// A short hash of exactly what the page is rendered from: the minutes and the kept frames (size
 /// and time), the title, the model it names, the renderer. The Minutes tab reloads its frame only
@@ -233,6 +233,7 @@ fn render_page(md: &str, title: &str, model: Option<&str>, load: &Loader, frames
         }
     }
     let mut images = Images { load, frames, embedded: vec![], left: MAX_IMAGES };
+    let rest = attach_screens(&rest, frames);
     let body = body(&rest, &mut images);
 
     let mut top = String::new();
@@ -253,17 +254,8 @@ fn render_page(md: &str, title: &str, model: Option<&str>, load: &Loader, frames
         None => format!("<h1>{}</h1>{top}{}", esc(title), body.html),
     };
 
-    // The kept frames the notes don't show, at the end (`img` skips the ones already shown).
-    let mut screens = String::new();
-    for f in frames {
-        let when = clock(f.t);
-        let Some(img) = images.img(&f.name, &format!("Screen at {when}")) else { continue };
-        let who = f.shared_by.as_deref().map(|w| format!(" · shared by {}", esc(w))).unwrap_or_default();
-        screens.push_str(&format!("<figure>{img}<figcaption><span class=\"ts\">{when}</span>{who}</figcaption></figure>"));
-    }
-    if !screens.is_empty() {
-        screens.insert_str(0, "<h2>Screens</h2>");
-    }
+    // Screenshots only where the minutes cite them (their "On screen" section): one that proves no
+    // point isn't added at the end (the window's Screens tab still has every kept frame).
     // Only these exact scripts may run (by hash); images only from the page itself — so a diagram
     // can't fetch a URL (mermaid's `img:` shapes), nor anything else in the page.
     let mut sources = vec![PAGE_JS]; // first: it polices links before mermaid binds any
@@ -284,9 +276,10 @@ fn render_page(md: &str, title: &str, model: Option<&str>, load: &Loader, frames
         "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
          <meta http-equiv=\"Content-Security-Policy\" content=\"{csp}\">\n\
          <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n{GENERATOR}\n\
-         <title>{} – minutes</title>\n<style>{CSS}</style>\n</head>\n<body>\n<main>\n{main}\n{screens}\n</main>\n\
+         <title>{} – minutes</title>\n<style>{CSS}</style>\n{}</head>\n<body>\n<main>\n{main}\n</main>\n\
          <div id=\"lightbox\"><img alt=\"\"></div>\n{tags}</body>\n</html>\n",
-        esc(title)
+        esc(title),
+        if embed { format!("<style>{ECHO_CSS}</style>\n<style>{EMBED_CSS}</style>\n") } else { format!("<style>{ECHO_CSS}</style>\n") }
     );
     (html, csp)
 }
@@ -406,6 +399,17 @@ fn yaml_value(front: &str, key: &str) -> Option<String> {
 struct Body {
     html: String,
     mermaid: bool,
+}
+
+/// Markdown as safe HTML for the Echo window (Settings → About me): the minutes' own writer — raw
+/// HTML shown as text, https links only, no images.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn markdown_html(md: &str) -> String {
+    let load = |_: &str| None;
+    let mut images = Images { load: &load, frames: &[], embedded: vec![], left: 0 };
+    // A profile is written line by line ("Role: …"): each line stays one (a hard break).
+    let lines: Vec<String> = md.lines().map(|l| if l.trim().is_empty() { String::new() } else { format!("{}  ", l.trim_end()) }).collect();
+    body(&lines.join("\n"), &mut images).html
 }
 
 /// The notes' Markdown as HTML. Raw HTML in it is shown as text.
@@ -567,6 +571,12 @@ fn body(md: &str, images: &mut Images) -> Body {
 /// when Echo took it. Anything else (another path, a URL, a missing file, a frame already shown,
 /// no room left) stays a text reference.
 fn figure(dest: &str, alt: &str, images: &mut Images) -> String {
+    if alt == ATTACHED {
+        let name = dest.strip_prefix("frames/");
+        if let Some(img) = name.and_then(|n| images.img(n, "Screenshot")) {
+            return format!("<figure>{img}</figure>");
+        }
+    }
     let alt = alt.trim();
     let name = dest.strip_prefix("frames/");
     let mut caption = times(&esc(alt));
@@ -578,6 +588,68 @@ fn figure(dest: &str, alt: &str, images: &mut Images) -> String {
         Some(img) => format!("<figure>{img}<figcaption>{caption}</figcaption></figure>"),
         None => format!("<span class=\"figref\">[{}]</span>", if caption.is_empty() { "image".to_string() } else { caption }),
     }
+}
+
+/// The alt text `attach_screens` gives a screenshot it places: its line above says what and when, so
+/// the figure gets no caption (an invisible separator: never typed in minutes).
+const ATTACHED: &str = "\u{2063}";
+
+/// The minutes' "On screen" section names what was shown by its time ("- [08:41] Slide 4/6 …");
+/// the screenshot of that moment goes right under its line, so text and picture read together.
+/// The nearest kept frame within 30 s, each once; a bullet that cites a frame itself is left alone.
+fn attach_screens(md: &str, frames: &[Frame]) -> String {
+    let heading = |l: &str| {
+        let t = l.trim_start();
+        let level = t.chars().take_while(|c| *c == '#').count();
+        (level > 0 && t[level..].starts_with(' ')).then(|| (level, t[level..].trim().to_lowercase()))
+    };
+    let stamp = |l: &str| -> Option<f64> {
+        let rest = l.trim_start().strip_prefix(['-', '*'])?.trim_start().strip_prefix('[')?;
+        let (t, _) = rest.split_once(']')?;
+        let parts: Vec<f64> = t.split(':').map(|p| p.parse::<f64>().ok()).collect::<Option<_>>()?;
+        match parts.as_slice() {
+            [m, s] => Some(m * 60.0 + s),
+            [h, m, s] => Some(h * 3600.0 + m * 60.0 + s),
+            _ => None,
+        }
+    };
+    let lines: Vec<&str> = md.lines().collect();
+    let mut used: Vec<&str> = vec![];
+    let mut out: Vec<String> = vec![];
+    let mut section: Option<usize> = None; // the On screen heading's level while inside it
+    let mut i = 0;
+    while i < lines.len() {
+        let l = lines[i];
+        if let Some((level, text)) = heading(l) {
+            section = if text.starts_with("on screen") { Some(level) } else if section.is_some_and(|s| level <= s) { None } else { section };
+        }
+        out.push(l.to_string());
+        i += 1;
+        let Some(at) = section.and(stamp(l)) else { continue };
+        // The bullet's own continuation lines stay with it.
+        let mut item = l.to_string();
+        while i < lines.len() && lines[i].starts_with(char::is_whitespace) && !lines[i].trim().is_empty() {
+            item.push_str(lines[i]);
+            out.push(lines[i].to_string());
+            i += 1;
+        }
+        if item.contains("](frames/") {
+            continue;
+        }
+        let best = frames
+            .iter()
+            .filter(|f| !used.contains(&f.name.as_str()) && (f.t - at).abs() <= 30.0)
+            .min_by(|a, b| (a.t - at).abs().total_cmp(&(b.t - at).abs()));
+        if let Some(f) = best {
+            used.push(&f.name);
+            out.push(format!("  ![{ATTACHED}](frames/{})", f.name));
+        }
+    }
+    let mut s = out.join("\n");
+    if md.ends_with('\n') {
+        s.push('\n');
+    }
+    s
 }
 
 /// A diagram without its own configuration — `%%{init: …}%%` directives and a leading `---` YAML
@@ -714,6 +786,57 @@ const EMBED_JS: &str = "(function () {
     var u = a.getAttribute('href') || a.getAttributeNS(XLINK, 'href') || '';
     if (/^https:\\/\\//i.test(u)) post({ echo: 'open', url: u });
   }, true);
+  // Right-click a line: the window offers Add note, at the line's time, about the words selected
+  // in it (else the line), under its section.
+  var secs = function (ts) { var t = ts.textContent.trim().split(':').reduce(function (a, p) { return a * 60 + Number(p); }, 0); return isFinite(t) && t >= 0 ? t : null; };
+  document.addEventListener('contextmenu', function (e) {
+    var el = e.target && e.target.closest ? e.target : null;
+    var block = el && el.closest('li, p, td, figure, blockquote, h1, h2, h3, h4');
+    if (!block) return;
+    e.preventDefault();
+    var ts = block.querySelector('.ts');
+    var sel = String(window.getSelection ? window.getSelection() : '').replace(/\\s+/g, ' ').trim();
+    var top = block;
+    while (top.parentElement && top.parentElement.tagName !== 'MAIN') top = top.parentElement;
+    var h = top;
+    while (h && !/^H[1-3]$/.test(h.tagName)) h = h.previousElementSibling;
+    post({ echo: 'note', t: ts ? secs(ts) : null, quote: (sel || block.textContent.replace(/\\s+/g, ' ').trim()).slice(0, 300),
+      section: h ? h.textContent.trim().slice(0, 80) : '', x: e.clientX, y: e.clientY });
+  }, true);
+  // The user's own notes (from the window, never in the page itself): each under the line with its
+  // time — the same one, else the nearest within 3 min. Text only (textContent), and only from the
+  // window this page is shown in.
+  var LABEL = { note: 'Your note', question: 'Your question', decision: 'Your decision', todo: 'Your to-do', flag: 'You flagged' };
+  var MARK = { note: '•', question: '?', decision: '!', todo: '☐', flag: '⚑' };
+  var clock = function (t) { var m = Math.floor(t / 60), s = Math.floor(t % 60); var h = Math.floor(m / 60); m = m % 60;
+    return (h ? h + ':' + (m < 10 ? '0' : '') + m : (m < 10 ? '0' : '') + m) + ':' + (s < 10 ? '0' : '') + s; };
+  window.addEventListener('message', function (e) {
+    var d = e.data;
+    if (e.source !== window.parent || !d || d.echo !== 'notes' || !Array.isArray(d.notes)) return;
+    var old = document.querySelectorAll('.mynote');
+    for (var i = 0; i < old.length; i++) old[i].remove();
+    var stamps = Array.prototype.slice.call(document.querySelectorAll('main .ts')).filter(function (ts) { return !ts.closest('.mynote, .meta, figcaption'); })
+      .map(function (ts) { return { el: ts, t: secs(ts) }; }).filter(function (x) { return x.t != null; });
+    d.notes.slice(0, 200).forEach(function (n) {
+      if (typeof n.t !== 'number' || !isFinite(n.t)) return;
+      var best = null;
+      stamps.forEach(function (x) { var dt = Math.abs(x.t - n.t); if (dt <= 180 && (!best || dt < best.dt)) best = { el: x.el, dt: dt }; });
+      if (!best) return;
+      var block = best.el.closest('li, p, td, blockquote') || best.el.parentElement;
+      var box = document.createElement('div');
+      box.className = 'mynote k-' + (LABEL[n.kind] ? n.kind : 'note');
+      var head = document.createElement('b');
+      head.textContent = (MARK[n.kind] || '•') + ' ' + (LABEL[n.kind] || LABEL.note);
+      var ts = document.createElement('span');
+      ts.className = 'ts';
+      ts.textContent = clock(n.t);
+      box.appendChild(head); box.appendChild(document.createTextNode(' ')); box.appendChild(ts);
+      box.appendChild(document.createTextNode(' ' + String(n.text || '').slice(0, 1000)));
+      var sub = block.querySelector(':scope > ul, :scope > ol');
+      if (sub) block.insertBefore(box, sub); else block.appendChild(box);
+    });
+  });
+  post({ echo: 'ready' });
 })();";
 
 const CSS: &str = "
@@ -768,9 +891,70 @@ figure.diagram pre.mermaid { background: none; margin: 0; }
 @media (max-width: 600px) { main { padding: 24px 16px 60px; } .meta b { min-width: 0; display: block; } }
 ";
 
+/// Every minutes page — the file opened in a browser and the window's Minutes tab — in Echo's own
+/// design: its colour tokens (`ui/app.css`, light and dark) and type (`.doc`), times as the window's
+/// chips. Laid over `CSS`, which keeps the page's structure (tables, figures, print).
+const ECHO_CSS: &str = "
+:root {
+  --bg: #ffffff; --page: #f6f6f8; --fg: #18181d; --muted: #55555f; --line: rgb(17 17 34 / 0.08); --soft: #f6f6f8;
+  --accent: #5b34d6; --accent-soft: rgb(139 98 255 / 0.12); --warn: #b25b00; --warn-soft: rgb(178 91 0 / 0.08);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1b1b21; --page: #141418; --fg: #ececf1; --muted: #a9a9b4; --line: rgb(255 255 255 / 0.07); --soft: #141418;
+    --accent: #c4b0ff; --accent-soft: rgb(155 120 255 / 0.16); --warn: #f0a24a; --warn-soft: rgb(240 162 74 / 0.09);
+  }
+}
+body { background: var(--page); font: 14px/1.65 -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased; }
+main { max-width: 820px; margin: 32px auto 64px; padding: 36px 44px 48px; background: var(--bg);
+  border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 1px 2px rgb(30 20 70 / 0.06), 0 6px 24px rgb(30 20 70 / 0.06); }
+h1 { font-size: 22px; font-weight: 650; letter-spacing: -0.02em; line-height: 1.25; margin: 0 0 14px; }
+h2 { font-size: 15px; font-weight: 650; margin: 28px 0 8px; padding: 0; border: 0; }
+h3 { font-size: 14px; font-weight: 650; margin: 20px 0 6px; color: var(--fg); }
+h4, h5, h6 { font-size: 14px; font-weight: 600; margin: 16px 0 4px; }
+p { margin: 0 0 10px; }
+ul, ol { padding-left: 20px; margin: 0 0 12px; }
+li::marker { color: var(--muted); }
+.meta { background: none; border: 0; padding: 0; border-radius: 0; color: var(--fg); }
+.meta b { min-width: 120px; font-weight: 600; color: var(--muted); }
+.note { border-left: 0; border-radius: 8px; font-size: 12.5px; padding: 8px 12px; color: var(--fg); }
+blockquote { border-left: 2px solid var(--line); padding: 2px 14px; }
+body .ts, .embedded .ts { font: 11px ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
+  color: var(--accent); background: var(--accent-soft); padding: 0 5px; border-radius: 4px; margin-left: 2px; text-decoration: none; }
+table { font-size: 13px; }
+figure { border-radius: 10px; }
+li > figure { margin: 8px 0 16px; max-width: 640px; }
+code { font-size: 12px; }
+@media (max-width: 860px) { main { margin: 0; border: 0; border-radius: 0; box-shadow: none; padding: 24px 18px 48px; } }
+@media print { body { background: #fff; } main { margin: 0; border: 0; box-shadow: none; padding: 0; } }
+";
+
+/// In the window's Minutes tab the page is part of the window: no card around it, and no title of
+/// its own (the call's header shows it).
+const EMBED_CSS: &str = "
+body { background: var(--bg); }
+main { max-width: 760px; margin: 0; padding: 22px 32px 48px; border: 0; border-radius: 0; box-shadow: none; }
+main > h1:first-child { display: none; }
+.mynote { margin: 6px 0 10px; padding: 6px 10px; border-radius: 8px; font-size: 13px; line-height: 1.5;
+  background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); color: var(--fg); }
+.mynote b { font-weight: 600; margin-right: 2px; }
+.mynote.k-question b { color: #0b72a0; } .mynote.k-decision b { color: #0f8a5f; } .mynote.k-flag b { color: var(--warn); }
+@media (prefers-color-scheme: dark) { .mynote.k-question b { color: #6cc4f0; } .mynote.k-decision b { color: #3ccf91; } }
+";
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_profile_renders_line_by_line_and_safely() {
+        let html = markdown_html("# About me\n\nName: Ann\nRole: PM\n\n- a\n- b\n\n<script>x</script>\n\nSee [l](http://x) and [ok](https://example.com)");
+        assert!(html.contains("Name: Ann<br>"), "{html}");
+        assert!(html.contains("<li>a</li>") || html.contains("<li>a"), "{html}");
+        assert!(!html.contains("<script>") && html.contains("&lt;script&gt;"));
+        assert!(html.contains("href=\"https://example.com\"") && !html.contains("href=\"http://x\""));
+    }
 
     const NOTES: &str = "---\ndate: 2026-10-22\ntype: \"architecture-review\"\nfacilitator: \"Lena Varga\"\nattendees:\n  - \"Lena Varga\"\n---\n\n\
         # Meeting Minutes: Atlas\n\n> **Project:** Atlas\n> **Date:** 2026-10-22\n\n---\n\n## Decisions\n\n\
@@ -803,12 +987,12 @@ mod tests {
         // Other people's words never become markup; only https links do.
         assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;") && !html.contains("<script>alert"));
         assert!(!html.contains("evil.example\"") && html.contains("<a href=\"https://example.com/x\" rel=\"noopener noreferrer\">docs</a>"));
-        // Only this call's frames are embedded; the one not cited in the notes goes under Screens.
+        // Only this call's frames are embedded, and only where the notes cite them.
         assert!(html.contains("<figure><img src=\"data:image/jpeg;base64,AQID\" alt=\"Migration options [01:08]\"><figcaption>Migration options <span class=\"ts\">01:08</span></figcaption></figure>"));
         assert!(!html.contains("<p><figure"));
         assert!(html.contains("<span class=\"figref\">[x]</span>"));
-        assert!(html.contains("<h2>Screens</h2><figure><img src=\"data:image/jpeg;base64,AQID\" alt=\"Screen at 1:02:05\"><figcaption><span class=\"ts\">1:02:05</span> · shared by Tom &lt;b&gt;</figcaption>"));
-        assert_eq!(html.matches("<figure>").count(), 2);
+        assert!(!html.contains("<h2>Screens</h2>") && !html.contains("Screen at 1:02:05"), "an uncited frame isn't added");
+        assert_eq!(html.matches("<figure>").count(), 1);
         assert!(!html.contains("mermaid.initialize"));
     }
 
@@ -870,6 +1054,29 @@ mod tests {
         let (rows, rest) = header_block("# T\n\n> just a quote\n\nBody");
         assert!(rows.is_empty() && rest == "# T\n\n> just a quote\n\nBody");
         assert_eq!(times("at [5:07] and [1:02:03], not [12] or [1:2]"), "at <span class=\"ts\">5:07</span> and <span class=\"ts\">1:02:03</span>, not [12] or [1:2]");
+    }
+
+    #[test]
+    fn on_screen_lines_get_the_screenshot_of_their_moment() {
+        let frames = [
+            Frame { name: "01m02s.jpg".into(), t: 62.0, shared_by: None },
+            Frame { name: "08m41s.jpg".into(), t: 521.0, shared_by: None },
+            Frame { name: "30m00s.jpg".into(), t: 1800.0, shared_by: None },
+        ];
+        let md = "# T\n\n- [01:02] Not on screen: no picture here\n\n## On screen\n- [01:02] Slide 2/6, the plan\n- [08:45] Slide 4/6\n  that goes on\n- [20:00] Nothing kept near this\n- [08:41] Cites its own ![x](frames/08m41s.jpg)\n\n## Decisions\n- [30:00] Not on screen\n";
+        let got = attach_screens(md, &frames);
+        assert_eq!(got.matches("](frames/01m02s.jpg)").count(), 1, "{got}");
+        assert!(got.contains(&format!("- [08:45] Slide 4/6\n  that goes on\n  ![{ATTACHED}](frames/08m41s.jpg)\n")), "{got}");
+        assert!(got.contains("- [20:00] Nothing kept near this\n- [08:41]"), "{got}");
+        assert!(!got.contains("30m00s"), "only the On screen section: {got}");
+        assert!(got.starts_with("# T\n\n- [01:02] Not on screen: no picture here\n\n## On screen"));
+        let html = render(md, "T", None, &load_frames, &frames);
+        assert_eq!(html.matches("<figure>").count(), 2, "{html}");
+        assert!(!html.contains("<figcaption>"), "the line above is the caption: {html}");
+    }
+
+    fn load_frames(name: &str) -> Option<(&'static str, Vec<u8>)> {
+        ["01m02s.jpg", "08m41s.jpg", "30m00s.jpg"].contains(&name).then(|| ("image/jpeg", vec![1, 2, 3]))
     }
 
     #[test]

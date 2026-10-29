@@ -1304,7 +1304,7 @@ fn model_rejected(is_error: bool, text: &str) -> bool {
 /// A path as Claude Code's permission rules compare it. On Windows that is POSIX-style with a
 /// lower-case drive: `C:\Users\me` → `/c/Users/me` (measured: `/C:\…` and `/C:/…` never match,
 /// so a run in don't-ask mode was refused every Write). Elsewhere the path as it is.
-fn rule_path(p: &Path) -> String {
+pub(crate) fn rule_path(p: &Path) -> String {
     let s = p.display().to_string().replace('\\', "/");
     match s.as_bytes() {
         [d, b':', rest @ ..] if d.is_ascii_alphabetic() => format!("/{}{}", (*d as char).to_ascii_lowercase(), String::from_utf8_lossy(rest)),
@@ -1328,7 +1328,7 @@ fn fwd(p: &Path) -> String {
 
 /// The names a run may use for the CLI: the plugin's script, the same by forward slashes (the
 /// launcher the Windows prompt names), and `echoctl` on PATH.
-fn run_clis(plugin: &Path) -> Vec<String> {
+pub(crate) fn run_clis(plugin: &Path) -> Vec<String> {
     let mut clis = vec![format!("{}/scripts/echoctl", plugin.display()), format!("{}/scripts/echoctl", fwd(plugin)), "echoctl".to_string()];
     clis.dedup();
     clis

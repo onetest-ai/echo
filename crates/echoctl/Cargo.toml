@@ -7,7 +7,7 @@ license.workspace = true
 [features]
 default = ["transcribe", "tray"]
 # Menu-bar (macOS) / notification-area (Windows) icon shown by `echoctl watch`.
-tray = ["dep:tray-icon", "dep:tao", "dep:wry"]
+tray = ["dep:tray-icon", "dep:tao", "dep:wry", "dep:portable-pty"]
 # On-device transcription (whisper.cpp). Needs a C/C++ toolchain + cmake for the target, so
 # cross-checks from macOS to Windows run with --no-default-features.
 transcribe = ["dep:whisper-rs", "dep:ureq", "dep:libloading"]
@@ -41,6 +41,9 @@ tao = { version = "0.37", optional = true }
 # The Echo window (calls, notes, transcript, settings): the system webview (WKWebView / WebView2)
 # on the tray's own tao event loop.
 wry = { version = "0.57", default-features = false, optional = true }
+# Claude Code (and a shell) inside the Echo window: a pseudo-terminal per session (`terminal.rs`;
+# macOS PTY, Windows ConPTY), shown with xterm.js.
+portable-pty = { version = "0.9", optional = true }
 # The minutes page (`minutes.rs`): Markdown parsed (our own writer escapes), screenshots embedded.
 pulldown-cmark = { version = "0.13", default-features = false }
 base64 = "0.22"

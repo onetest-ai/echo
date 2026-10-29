@@ -169,14 +169,64 @@ macOS SIGKILLs (exit 137) a binary rewritten in place.
 
 ## The Echo window (`window.rs`, `ui/`)
 Menu → Open Echo… (or `echoctl app open [--call <name>]`, or a recent call) opens one window:
-Calls (list + Live / Notes / Minutes / Transcript / Chat / Screens / Actions), Today (agenda + recap + Record /
-Join), Record/Stop status. wry (Tauri's webview crate: WKWebView / WebView2) on the tray's tao
+Calls (list + Live / Minutes / Transcript / Chat / Screens / Actions, and **My notes** in the right panel), Calendar.
+**A workbench** (`docs/plugins-design.md`): fixed areas — a 40 px top strip with the **Record pill** at its centre
+(idle Record ▾ with language + profile, armed + Cancel, meeting soon + Record it, recording: clock, title, Stop that
+asks first; "Writing the transcript…" beside it), the activity bar (`ACTIVITIES`: Calls `list-detail`, Calendar
+`single`, and at its foot **Settings** — ⌘/Ctrl+, — `single`; ⌘/Ctrl+1…9), the primary view, right and bottom panels (`PANEL_VIEWS`, none yet: drawn only when a view is
+in them; the first is **My notes**, right by default, open unless closed — in a narrow window only when asked
+for, over the page), a status bar. The call header's actions are one ⋯ menu (folder, minutes page, delete) plus the
+My notes button; the Minutes tab's bar only says what is going on. Echo's own views are registry entries like a plugin's will be (`CALL_TABS`, `EVENT_ACTIONS`;
+the block between `// ── workbench` and `// end of the workbench block` has no DOM: `ui/workbench.test.mjs`).
+`Layout` keeps where panel views go and which panels are open in `<config dir>/window-layout.json` (per computer;
+`/api/layout`, IPC `save_layout`, ≤ 16 KB; nothing else reads it). Below 900 px the calls list folds behind
+"Calls ▾" and a right panel opens over the page; below 600 px of height the bottom panel folds. macOS: the title
+bar is transparent with the content under it (`with_fullsize_content_view`); the page posts `window_drag` /
+`window_zoom` from the strip (`window::window_cmd`, run by the tray on the window). Windows keeps its native title
+bar for now. wry (Tauri's webview crate: WKWebView / WebView2) on the tray's tao
 loop — not full Tauri (it would take over our loop, tray, packaging, updater). Content only via
 the `echo://` protocol (`http://echo.localhost` on Windows): compiled-in `ui/index.html`,
 `app.js`, `app.css` (vanilla, no npm/CDN; the octopus symbol is injected from
 `assets/octopus.svg`), `/api/{state,calls,agenda,call/<name>}` JSON, `/file/<call>/frames/<img>`
 after a path check; strict CSP; everything rendered is escaped (chat/transcripts are others'
-text). **Notes** = the user's own notes: an editor over `my-notes.md` (`NotesSync` in app.js, no DOM: saves 1 s after
+text). **Settings** (activity, `#settings/<section>`): General, Recording, Transcription, AI & minutes, Calendar & chat, Vocabulary,
+About me (name, email, and `me.md` — the profile the minutes read — shown rendered by `minutes::markdown_html`, the
+minutes' safe writer, line by line, and edited in place: `settings_set me_profile`), Layout, Health (a ⚠ badge counts
+required permissions missing). Vocabulary lists the learned terms with the meetings and people they are scoped to
+(`learned_always` / `learned_remove`). `/api/settings` = one snapshot
+(`window::settings_snapshot`: config values, models via `models::list_value`, downloads, the server, the calendar
+account, permissions). Plain values save at once with the value shown — never a toggle of a stale one — through IPC
+`settings_set {key, value}` (`window::settings_set`: config.json, or ai.json under its lock for `live_notes` /
+`default_profile`); flows with a dialog, a sign-in or a download are the tray's own `Action`s, run by name
+(`settings_action {action, arg}` → `tray::Ui::page_action` → `Ui::run`, the same code as the menu's).
+**Claude in the window** (`terminal.rs`; xterm.js 5.5 vendored in `ui/vendor/`, see its README): a pseudo-terminal per session
+(`portable-pty`: macOS PTY, Windows ConPTY) owned by the app — closing the window keeps it, quitting Echo ends it
+(`close_all` on `UiEvent::Quit`). Output: a 2 MB ring per terminal, numbered by byte; the page long-polls
+`/api/pty/<id>?from=<byte>` (≤ 25 s; a reopened window gets the scrollback), keys / size / close over IPC
+(`pty_input`, `pty_resize`, `pty_close`; `pty_open {kind, key, call|profile}` → `window.echo.ptyOpened`). Each xterm
+element is made once and moved into its panel slot after every render (a hidden holder otherwise), so renders and
+panel moves keep it; keys inside `.xterm` all go to it (⌘/Ctrl+Esc gives focus back). Two panel views (bottom by
+default): **Claude · this call** — guarded on the call's own profile (`ai::for_call`; a sign-in problem comes back
+with its profile → Sign in…): the minutes run's guard with `ECHOCTL_RUN_MODE=ask` (Read/Glob/Grep in the call and the
+previous minutes, Bash only `echoctl context` — `guard::ASK_COMMANDS` —, no Edit/Write/Skill), `--tools
+Bash,Read,Glob,Grep --strict-mcp-config --permission-mode default`, allow rules for reading the call, headless,
+Claude Code ≥ `guard::MIN_CLAUDE`; one call session at a time — and **Claude · Echo folder**, the user's own Claude
+Code (not headless) on the profile they pick (`ai::ready`, default = the default profile). Both run in the data
+folder (never a call's: Windows renames), hold their profile's lease while they run, start with `--session-id` and
+resume with `--resume` (ids per profile in `<home>/.echo/sessions.json`: `<profile>:folder`, `<profile>:<stamp>`; one
+refused within 4 s is forgotten). Entry points: status bar Claude, ⌘/Ctrl+`, the call's ⋯ → Ask Claude about this
+call. `ai::terminal_command` = `claude_command`'s command and environment for a PTY (`ECHOCTL_DEBUG` prints its
+arguments). `echoctl window --selftest` runs a shell in a terminal end to end (`terminal: true`).
+**My notes** (a panel view, `notesPanel`; it was a call tab) = the user's own notes as a **timeline of moments**
+(`NoteDoc`, no DOM: `ui/my-notes.test.mjs`): each note a line of `my-notes.md` — `- [12:05] …`, `? ` question, `! `
+decision, `⚑` flag, `- [ ] [12:22] …` to-do, `  > "…"` the words it is about — kept in time order; a box adds one,
+timed from its first key while the call records; select words in a transcript → Comment, or right-click a transcript turn or a line of the minutes → Add note (the
+frame's `EMBED_JS` posts `{echo: 'note', t, quote, section, x, y}`, taken only from that frame) adds one with that quote;
+the transcripts show a dot per note at its turn; the Minutes tab shows each timed note as a callout under the
+line with the same time (else the nearest within 3 min) — sent to the frame (`{echo: 'notes'}` after its `ready`),
+never written into the page or its file; a note is edited in place (click its text: text and kind; its time and
+quote stay); writing the minutes again is the ⋯ menu's Write minutes again (no nudge after each note); the process-call skill reads the times, kinds and quotes. Edit as
+text = the editor over `my-notes.md` (`NotesSync` in app.js, no DOM: saves 1 s after
 typing, on blur, before Write minutes; one acknowledged save in flight per call — IPC `save_my_notes {text, base}` →
 `calls::save_my_notes` under `.meta.lock` (`note` takes it too): base unchanged → text; appended since (the tray) →
 text + tail; changed otherwise → the other version kept as `my-notes.<HHMMSS>.md`; an unchanged text is never written —
@@ -435,7 +485,9 @@ Finder write the file first. The file is opt-in (`config.minutes_page`; menu →
 file) too; `echoctl config --minutes-page true`): when minutes are written, `notes.md` → `<call>/<title>-minutes.html`, one
 self-contained file — header block from the `> **Label:** value` lines under the title + a
 frontmatter's type / facilitator, tables, `[mm:ss]` as timestamps, `![…](frames/x.jpg)` embedded
-(base64) and the other kept frames under Screens, mermaid inlined only when a diagram is drawn
+(base64) only where the minutes cite them (no section of uncited frames) — and each "On screen" line
+"- [mm:ss] …" gets the kept frame of that moment under it (`attach_screens`: nearest within 30 s, each once, no caption), in Echo's design tokens and type
+(`minutes::ECHO_CSS`, light and dark; the window's frame adds `EMBED_CSS`: no card, no title of its own), mermaid inlined only when a diagram is drawn
 (`securityLevel: 'strict'`), click to enlarge, light/dark, print. A run from the app writes it
 after `done` (under the final title); a session's skill runs `echoctl html <call> --auto` (writes
 only when on); `echoctl html <call> [--open]` writes it any time. pulldown-cmark parses; our own

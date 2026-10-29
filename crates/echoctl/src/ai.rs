@@ -365,11 +365,22 @@ pub fn set_call_profile(dir: &Path, id: &str) -> Result<ProfileChange> {
 /// its job holds until it is done. Errors: `SigningIn` (a sign-in holds the lock — it never waits:
 /// the caller retries), `SignInNeeded`.
 pub fn for_call(dir: &Path) -> Result<Ready> {
-    let id = call_profile_id(dir)?;
-    let p = Settings::load()?.get(&id)?;
+    ready(&call_profile_id(dir)?)
+}
+
+/// A profile by id, ready to use, with its lease — the same checks as a call's (`for_call`): the
+/// Echo window's Claude sessions start on it, and hold the lease while they run.
+pub fn ready(id: &str) -> Result<Ready> {
+    let p = Settings::load()?.get(id)?;
     let lease = if p.kind.signs_in() { Some(lease(&p)?) } else { None };
     check(&p, lease.as_ref())?;
     Ok(Ready { profile: p, _lease: lease })
+}
+
+/// The default profile's id (`system` when none is set or the settings can't be read).
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn default_id() -> String {
+    Settings::load().map(|s| s.default_id()).unwrap_or_else(|_| SYSTEM.into())
 }
 
 // ── Claude Code with a profile ──────────────────────────────────────────────────────────────
@@ -541,6 +552,45 @@ pub fn prepare_claude(p: &Profile, args: &[String], cwd: &Path, stdin: bool) -> 
     let mut c = build_command(p, &claude, args, cwd, stdin, use_shell() && fake.is_none());
     detach(&mut c);
     Ok(c)
+}
+
+/// Claude Code for `p` in a terminal (the Echo window's Claude sessions): the command and
+/// environment `claude_command` would use — the login shell, the profile's routing, Echo's CLI on
+/// PATH — for a pseudo-terminal. `headless`: as in a minutes run (Echo's mod idle, the CLI only on
+/// `ECHOCTL_RUN_CALL`), for the guarded call session; else the user's own session.
+#[cfg(feature = "tray")]
+pub fn terminal_command(p: &Profile, args: &[String], cwd: &Path, env: &[(&str, String)], headless: bool) -> Result<portable_pty::CommandBuilder> {
+    let fake = fake_claude();
+    let claude = fake.clone().or_else(crate::app::claude_bin).ok_or_else(|| anyhow!("Claude Code is not installed — get it at https://claude.com/claude-code"))?;
+    if p.kind.managed() {
+        if let Some(why) = policy_conflict(p) {
+            bail!("{why}");
+        }
+        fs::create_dir_all(p.config_folder())?;
+    }
+    let c = build_command(p, &claude, args, cwd, false, use_shell() && fake.is_none());
+    let mut b = portable_pty::CommandBuilder::new(c.get_program());
+    b.args(c.get_args());
+    for (k, v) in c.get_envs() {
+        match v {
+            Some(v) => b.env(k, v),
+            None => b.env_remove(k),
+        }
+    }
+    if let Some(d) = c.get_current_dir() {
+        b.cwd(d);
+    }
+    if !headless {
+        b.env_remove(crate::notes::HEADLESS);
+    }
+    for (k, v) in env {
+        b.env(k, v);
+    }
+    if std::env::var_os("ECHOCTL_DEBUG").is_some() {
+        // What a session runs (never the environment's values: tokens).
+        eprintln!("  debug: claude session: {:?} {:?} in {:?}", c.get_program(), c.get_args().collect::<Vec<_>>(), c.get_current_dir());
+    }
+    Ok(b)
 }
 
 /// Claude Code through the user's login shell (Unix; `ECHOCTL_NOTES_NO_SHELL` starts it directly).

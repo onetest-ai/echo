@@ -31,6 +31,10 @@ const APP_CSS: &str = include_str!("../ui/app.css");
 const OCTOPUS_SVG: &str = include_str!("../assets/octopus.svg");
 /// The onetest logo (violet disc, the full octopus character), 192 px, for the window.
 const LOGO_PNG: &[u8] = include_bytes!("../assets/onetest-logo.png");
+/// xterm.js (MIT, `ui/vendor/README.md`): the terminals in the window.
+const XTERM_JS: &str = include_str!("../ui/vendor/xterm.js");
+const XTERM_FIT_JS: &str = include_str!("../ui/vendor/xterm-addon-fit.js");
+const XTERM_CSS: &str = include_str!("../ui/vendor/xterm.css");
 
 /// The page with the octopus mark defined once as an SVG symbol (`<use href="#octopus">`).
 fn index_html() -> String {
@@ -95,6 +99,16 @@ pub fn open<T: 'static>(
         .with_title("Echo")
         .with_inner_size(LogicalSize::new(1180.0, 760.0))
         .with_min_inner_size(LogicalSize::new(760.0, 480.0));
+    // macOS: the page draws the title bar (the Record pill sits in it, `app.js` → `window_drag`).
+    #[cfg(target_os = "macos")]
+    let builder = {
+        use tao::platform::macos::WindowBuilderExtMacOS;
+        builder
+            .with_titlebar_transparent(true)
+            .with_title_hidden(true)
+            .with_fullsize_content_view(true)
+            .with_traffic_light_inset(tao::dpi::LogicalPosition::new(16.0, 20.0))
+    };
     // Windows: Echo's icon (the one in echoctl.exe) on the title bar and the taskbar button
     // (macOS takes the bundle's).
     #[cfg(windows)]
@@ -211,9 +225,30 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
         "/assets/app.js" => reply(200, "text/javascript; charset=utf-8", APP_JS.as_bytes().to_vec()),
         "/assets/app.css" => reply(200, "text/css; charset=utf-8", APP_CSS.as_bytes().to_vec()),
         "/assets/logo.png" => reply(200, "image/png", LOGO_PNG.to_vec()),
+        "/assets/vendor/xterm.js" => reply(200, "text/javascript; charset=utf-8", XTERM_JS.as_bytes().to_vec()),
+        "/assets/vendor/xterm-addon-fit.js" => reply(200, "text/javascript; charset=utf-8", XTERM_FIT_JS.as_bytes().to_vec()),
+        "/assets/vendor/xterm.css" => reply(200, "text/css; charset=utf-8", XTERM_CSS.as_bytes().to_vec()),
         "/api/state" => json_reply(state()),
         "/api/calls" => json_reply(Value::Array(calls::all_calls().iter().rev().map(|d| call_summary(d)).collect())),
         "/api/agenda" => json_reply(agenda()),
+        "/api/layout" => json_reply(load_layout()),
+        "/api/settings" => json_reply(settings_snapshot()),
+        "/api/sessions" => json_reply(json!(crate::terminal::saved_sessions())),
+        "/api/ptys" => json_reply(Value::Array(crate::terminal::list().into_iter().map(|(id, key, exited)| json!({ "id": id, "key": key, "exited": exited })).collect())),
+        // A terminal's output after byte `from`: answered at once when there is some, else when
+        // some comes (or after 25 s) — the page asks again right away (a long poll).
+        p if p.starts_with("/api/pty/") => {
+            let id = p["/api/pty/".len()..].parse::<u64>().ok();
+            let from = query_param(req.uri().query().unwrap_or(""), "from").and_then(|f| f.parse::<u64>().ok()).unwrap_or(0);
+            match id.and_then(|id| crate::terminal::read(id, from, std::time::Duration::from_secs(25))) {
+                Some(c) => {
+                    use base64::Engine as _;
+                    json_reply(json!({ "from": c.from, "next": c.next, "reset": c.reset, "exited": c.exited,
+                                       "data": base64::engine::general_purpose::STANDARD.encode(&c.data) }))
+                }
+                None => reply(404, "text/plain", b"no such terminal".to_vec()),
+            }
+        }
         "/api/calendar" => json_reply(calendar(req.uri().query().unwrap_or(""))),
         p if p.starts_with("/api/call/") => {
             let rest = &p["/api/call/".len()..];
@@ -615,6 +650,211 @@ pub fn closing(msg: &str) -> Option<Closing> {
     }
 }
 
+/// What the page asks of the window itself (macOS: it draws the title bar).
+pub enum WindowCmd {
+    Drag,
+    Zoom,
+}
+
+pub fn window_cmd(msg: &str) -> Option<WindowCmd> {
+    let v: Value = serde_json::from_str(msg).ok()?;
+    match v["cmd"].as_str()? {
+        "window_drag" => Some(WindowCmd::Drag),
+        "window_zoom" => Some(WindowCmd::Zoom),
+        _ => None,
+    }
+}
+
+/// The user's own shell, in the data folder (a login shell: their PATH and setup).
+fn shell_command() -> portable_pty::CommandBuilder {
+    #[cfg(windows)]
+    let mut c = portable_pty::CommandBuilder::new(std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".into()));
+    #[cfg(not(windows))]
+    let mut c = {
+        let mut c = portable_pty::CommandBuilder::new(std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into()));
+        c.arg("-l");
+        c
+    };
+    c.cwd(paths::home());
+    c
+}
+
+// ── Settings (the window's Settings activity) ───────────────────────────────────────────────
+
+/// What Settings shows: each setting's value and what is installed, signed in or granted. Flows
+/// with a dialog run as the tray's own actions (`settings_action`); plain values save here
+/// (`settings_set`).
+fn settings_snapshot() -> Value {
+    let cfg = crate::config::Config::load();
+    let c = cfg.as_ref().ok();
+    let on = |v: Option<Option<bool>>| v.flatten().unwrap_or(true);
+    let health: Vec<Value> = crate::permissions::report()
+        .map(|r| r.checks.iter().map(|k| json!({ "id": k.id, "name": k.name, "status": format!("{:?}", k.status).to_lowercase(), "required": k.required, "why": k.why, "how": k.how, "url": k.settings_url })).collect())
+        .unwrap_or_default();
+    #[allow(unused_mut)]
+    let mut v = json!({
+        "config_error": cfg.as_ref().err().map(|e| format!("{e:#}")),
+        "home": paths::home(),
+        "home_source": paths::home_source(),
+        "autostart": crate::app::autostart_enabled(),
+        "cli": crate::app::cli_installed(),
+        "version": env!("CARGO_PKG_VERSION"),
+        "update": crate::update::AVAILABLE.lock().ok().and_then(|a| a.as_ref().map(|r| r.version.clone())),
+        "scheduled": c.map(|c| c.scheduled.clone().unwrap_or_else(|| "ask".into())),
+        "unscheduled": c.map(|c| c.unscheduled.clone().unwrap_or_else(|| "ask".into())),
+        "languages": c.map(|c| c.languages.clone()).unwrap_or_default(),
+        "keep_audio": c.is_some_and(|c| c.keep_audio),
+        "minutes_page": c.is_some_and(|c| c.minutes_page),
+        "auto_minutes": c.is_some_and(|c| c.auto_minutes),
+        "capture_frames": c.is_some_and(|c| c.capture_frames),
+        "follow_app_mute": on(c.map(|c| c.follow_app_mute)),
+        "capture_ui": on(c.map(|c| c.capture_ui)),
+        "capture_chat": on(c.map(|c| c.capture_chat)),
+        "echo_cancel": on(c.map(|c| c.echo_cancel)),
+        "notes_in": c.and_then(|c| c.notes_in.clone()),
+        "vocabulary": c.map(|c| c.vocabulary.clone()).unwrap_or_default(),
+        // Terms the minutes learned, with what they are used again for.
+        "learned": c.and_then(|c| c.learned.as_ref()).map(|l| l.iter().map(|x| json!({ "term": x.term, "subjects": x.subjects, "people": x.people, "calls": x.calls.len() })).collect::<Vec<_>>()).unwrap_or_default(),
+        "me": c.and_then(|c| c.me.clone()),
+        // The profile the minutes read (me.md), as text and rendered.
+        "me_profile": crate::calls::ensure_me_profile().ok().and_then(|p| fs::read_to_string(&p).ok()).map(|t| json!({ "text": t, "html": crate::minutes::markdown_html(&t) })),
+        "calendar": crate::graph::account(),
+        "graph_custom": c.is_some_and(|c| c.graph_client_id.is_some()),
+        "health": health,
+        "models": crate::models::list_value().ok(),
+        "downloading": crate::app::downloading().map(|(n, pct)| json!({ "name": n, "pct": pct })),
+    });
+    #[cfg(target_os = "macos")]
+    {
+        v["frames_permitted"] = json!(crate::frames::permitted());
+    }
+    #[cfg(feature = "transcribe")]
+    {
+        let serve = crate::remote::serve_settings();
+        v["engine"] = json!(crate::gpu::engine_status());
+        v["server"] = json!({ "client": crate::remote::client_label(), "serving": serve.on,
+                              "url": serve.on.then(|| crate::remote::serve_url(&serve)), "key": serve.on.then(|| serve.key.clone()) });
+    }
+    v
+}
+
+/// Save one plain setting with the value the page shows now (never a toggle of a stale value).
+fn settings_set(key: &str, value: &Value) -> anyhow::Result<()> {
+    use crate::config::Config;
+    match key {
+        // AI settings live in ai.json, changed under its lock.
+        "live_notes" => {
+            let on = value.as_bool().unwrap_or(false);
+            return crate::ai::Settings::update(|s| {
+                s.live_notes = on;
+                Ok(())
+            });
+        }
+        "default_profile" => {
+            let id = value.as_str().unwrap_or(crate::ai::SYSTEM).to_string();
+            return crate::ai::Settings::update(|s| {
+                s.default = (id != crate::ai::SYSTEM).then_some(id);
+                Ok(())
+            });
+        }
+        "autostart" => return crate::app::set_autostart(value.as_bool().unwrap_or(false)),
+        _ => {}
+    }
+    let mut cfg = Config::load()?;
+    let b = || value.as_bool().ok_or_else(|| anyhow::anyhow!("{key} takes true or false"));
+    match key {
+        "scheduled" | "unscheduled" => {
+            let v = value.as_str().filter(|v| matches!(*v, "ask" | "manual")).ok_or_else(|| anyhow::anyhow!("{key} is ask or manual"))?;
+            if key == "scheduled" { cfg.scheduled = Some(v.into()) } else { cfg.unscheduled = Some(v.into()) }
+        }
+        "keep_audio" => cfg.keep_audio = b()?,
+        "minutes_page" => cfg.minutes_page = b()?,
+        "auto_minutes" => cfg.set_auto_minutes(b()?),
+        "capture_frames" => {
+            cfg.capture_frames = b()?;
+            #[cfg(target_os = "macos")]
+            if cfg.capture_frames && !crate::frames::permitted() {
+                std::thread::spawn(|| {
+                    if !crate::frames::request() {
+                        crate::app::notify("Screen Recording needed", "Enable Echo in Privacy & Security → Screen & System Audio Recording, then restart Echo.");
+                    }
+                });
+            }
+        }
+        "follow_app_mute" => cfg.follow_app_mute = Some(b()?),
+        "capture_ui" => cfg.capture_ui = Some(b()?),
+        "capture_chat" => cfg.capture_chat = Some(b()?),
+        "echo_cancel" => cfg.echo_cancel = Some(b()?),
+        "languages" => {
+            let langs: Vec<String> = value.as_array().ok_or_else(|| anyhow::anyhow!("languages is a list"))?.iter()
+                .filter_map(|l| l.as_str()).map(|l| l.trim().to_lowercase()).filter(|l| l.len() == 2 && l.bytes().all(|b| b.is_ascii_lowercase())).collect();
+            cfg.languages = langs;
+        }
+        "vocabulary" => {
+            cfg.vocabulary = value.as_array().ok_or_else(|| anyhow::anyhow!("vocabulary is a list"))?.iter()
+                .filter_map(|t| t.as_str()).map(|t| t.trim().chars().take(50).collect::<String>()).filter(|t| !t.is_empty()).take(200).collect();
+        }
+        // A learned term: forgotten, or used in every call from now on.
+        "learned_remove" | "learned_always" => {
+            let term = value.as_str().ok_or_else(|| anyhow::anyhow!("{key} takes a term"))?.trim().to_string();
+            if let Some(l) = cfg.learned.as_mut() {
+                l.retain(|x| !x.term.eq_ignore_ascii_case(&term));
+            }
+            if key == "learned_always" && !cfg.vocabulary.iter().any(|v| v.eq_ignore_ascii_case(&term)) {
+                cfg.vocabulary.push(term);
+            }
+        }
+        // The profile the minutes read (me.md), written as the user edited it in Settings.
+        "me_profile" => {
+            let text = value.as_str().ok_or_else(|| anyhow::anyhow!("me_profile takes text"))?;
+            anyhow::ensure!(text.len() <= 64 * 1024, "the profile is too long (64 KB at most)");
+            let p = crate::calls::ensure_me_profile()?;
+            paths::write_atomic(&p, text.as_bytes())?;
+            return Ok(());
+        }
+        "me" => {
+            let name = value["name"].as_str().unwrap_or("").trim().to_string();
+            let email = value["email"].as_str().unwrap_or("").trim().to_string();
+            cfg.me = (!name.is_empty() || !email.is_empty()).then(|| crate::meeting::Person { name, email: (!email.is_empty()).then_some(email) });
+        }
+        other => anyhow::bail!("no setting {other:?}"),
+    }
+    cfg.save()
+}
+
+/// A flow the tray runs as it does from its menu (a dialog, a sign-in, a download): the page names
+/// it, `tray.rs` maps the name to its own action.
+pub fn settings_action(msg: &str) -> Option<(String, String)> {
+    let v: Value = serde_json::from_str(msg).ok()?;
+    (v["cmd"].as_str()? == "settings_action").then(|| (v["action"].as_str().unwrap_or("").to_string(), v["arg"].as_str().unwrap_or("").to_string()))
+}
+
+// ── the window's layout (`<config dir>/window-layout.json`, per computer) ────────────────────
+
+fn layout_file() -> PathBuf {
+    paths::config_dir().join("window-layout.json")
+}
+
+/// The saved layout, or `{}` (the page's defaults) when there is none or it can't be read.
+fn load_layout() -> Value {
+    fs::read(layout_file())
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .filter(Value::is_object)
+        .unwrap_or_else(|| json!({}))
+}
+
+/// Keep the page's layout: a JSON object of a sensible size (the page checks its fields when it
+/// reads it back).
+fn save_layout(layout: &Value) -> anyhow::Result<()> {
+    anyhow::ensure!(layout.is_object(), "not an object");
+    let bytes = serde_json::to_vec_pretty(layout)?;
+    anyhow::ensure!(bytes.len() <= 16 * 1024, "too large ({} bytes)", bytes.len());
+    fs::create_dir_all(paths::config_dir())?;
+    paths::write_atomic(&layout_file(), &bytes)?;
+    Ok(())
+}
+
 /// A call named by the page: by its folder name, else by its stamp (retitled since).
 fn call_named(v: &Value) -> Option<PathBuf> {
     let name = v["call"].as_str()?;
@@ -630,6 +870,63 @@ fn notice(text: &str) -> Handled {
 pub fn handle(msg: &str) -> Handled {
     let v: Value = serde_json::from_str(msg).unwrap_or_default();
     match v["cmd"].as_str().unwrap_or("") {
+        // Settings: one plain value, as the page shows it now.
+        "settings_set" => match settings_set(v["key"].as_str().unwrap_or(""), &v["value"]) {
+            Ok(()) => true.into(),
+            Err(e) => notice(&format!("{e:#}")),
+        },
+        // Terminals in the window (`terminal.rs`): open one, type into it, size it, end it.
+        "pty_open" => {
+            let (cols, rows) = (v["cols"].as_u64().unwrap_or(100) as u16, v["rows"].as_u64().unwrap_or(30) as u16);
+            let kind = v["kind"].as_str().unwrap_or("");
+            let key = v["key"].as_str().unwrap_or(kind).to_string();
+            let opened = match kind {
+                "shell" => crate::terminal::open(&key, shell_command(), cols, rows).map(|id| (id, key.clone())),
+                // Claude in the data folder, on the profile picked (the default when none).
+                "claude-folder" => crate::terminal::start_folder(&key, v["profile"].as_str().filter(|p| !p.is_empty()), cols, rows).map(|id| (id, key.clone())),
+                // Claude on one call, guarded, on the call's own profile.
+                "claude-call" => match call_named(&v) {
+                    Some(dir) => crate::terminal::start_call(&key, &dir, cols, rows).map(|id| (id, key.clone())),
+                    None => Err(anyhow::anyhow!("that call can't be found")),
+                },
+                other => Err(anyhow::anyhow!("no terminal of kind {other:?}")),
+            };
+            let answer = match opened {
+                Ok((id, key)) => json!({ "ok": true, "id": id, "key": key }),
+                Err(e) => {
+                    // A profile that needs a sign-in (or is being signed in): the page offers Sign in… for it.
+                    let signin = e.downcast_ref::<crate::ai::SignInNeeded>().map(|s| s.profile.clone())
+                        .or_else(|| e.downcast_ref::<crate::ai::SigningIn>().map(|s| s.profile.clone()));
+                    json!({ "ok": false, "kind": kind, "key": key, "error": format!("{e:#}"), "signin": signin })
+                }
+            };
+            Handled { refresh: false, reply: Some(format!("window.echo && window.echo.ptyOpened({answer})")) }
+        }
+        "pty_input" => {
+            if let (Some(id), Some(data)) = (v["id"].as_u64(), v["data"].as_str()) {
+                let _ = crate::terminal::write(id, data.as_bytes());
+            }
+            false.into()
+        }
+        "pty_resize" => {
+            if let (Some(id), Some(c), Some(r)) = (v["id"].as_u64(), v["cols"].as_u64(), v["rows"].as_u64()) {
+                let _ = crate::terminal::resize(id, c as u16, r as u16);
+            }
+            false.into()
+        }
+        "pty_close" => {
+            if let Some(id) = v["id"].as_u64() {
+                crate::terminal::close(id);
+            }
+            false.into()
+        }
+        // Where the window's panels and views go (`Layout` in app.js); nothing else reads it.
+        "save_layout" => {
+            if let Err(e) = save_layout(&v["layout"]) {
+                eprintln!("window layout not saved: {e:#}");
+            }
+            false.into()
+        }
         "toggle_action" => {
             let (Some(dir), Some(id), Some(status)) = (call_named(&v), v["id"].as_str(), v["status"].as_str()) else { return false.into() };
             match calls::set_action_status(&dir, id, status) {
@@ -844,7 +1141,7 @@ pub fn export(dir: &Path) -> anyhow::Result<()> {
         Ok(())
     };
     write("index.html", get("/"))?;
-    for p in ["/assets/app.js", "/assets/app.css", "/assets/logo.png", "/api/state", "/api/calls", "/api/agenda"] {
+    for p in ["/assets/app.js", "/assets/app.css", "/assets/logo.png", "/api/state", "/api/calls", "/api/agenda", "/api/layout", "/api/settings", "/api/sessions", "/api/ptys"] {
         write(p, get(p))?;
     }
     let week_start = chrono::Local::now().date_naive().pred_opt().unwrap_or_default().format("%Y-%m-%d");
@@ -912,6 +1209,12 @@ pub fn selftest() -> anyhow::Result<()> {
                 }
             }
             Event::UserEvent(msg) if msg.contains("\"probe\"") => probed = true,
+            // The page's terminal check: open a shell, type into it (as the tray runs these).
+            Event::UserEvent(msg) if msg.contains("\"cmd\":\"pty_") => {
+                if let (Some(js), Some(w)) = (handle(&msg).reply, &win) {
+                    let _ = w.webview.evaluate_script(&js);
+                }
+            }
             Event::UserEvent(msg) if msg.contains("\"selftest\"") => {
                 let mut out: Value = serde_json::from_str(&msg).unwrap_or_default();
                 out["frame_blocked"] = json!(!probed);
