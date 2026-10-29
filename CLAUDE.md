@@ -189,7 +189,14 @@ the `echo://` protocol (`http://echo.localhost` on Windows): compiled-in `ui/ind
 `app.js`, `app.css` (vanilla, no npm/CDN; the octopus symbol is injected from
 `assets/octopus.svg`), `/api/{state,calls,agenda,call/<name>}` JSON, `/file/<call>/frames/<img>`
 after a path check; strict CSP; everything rendered is escaped (chat/transcripts are others'
-text). **Settings** (activity, `#settings/<section>`): General, Recording, Transcription, AI & minutes, Calendar & chat, Vocabulary,
+text). **⌘K palette** (⌘K; Ctrl+K or Ctrl+Shift+P on Windows; status bar "Actions"; not while a terminal has the keys):
+actions on a target — the open call, the selected calendar event, or none (a chip; ⌫ on an empty box drops it) —
+Echo's own (Record / Stop… / Cancel, Claude, panels, updates, permissions) and Go to (activities, Settings sections,
+calls by title, people or day). Unavailable ones stay listed, greyed, with why. Each action runs as the click on the
+button that does it elsewhere (`press`), so it can't differ from it. Ranking (`Palette`, no DOM:
+`ui/palette.test.mjs`): every typed word in the label (anywhere) or a keyword (word start), word starts and earlier
+matches first, unavailable last, each group kept together. ⇧⌘R / Ctrl+Shift+R asks to stop a recording.
+**Settings** (activity, `#settings/<section>`): General, Recording, Transcription, AI & minutes, Calendar & chat, Vocabulary,
 About me (name, email, and `me.md` — the profile the minutes read — shown rendered by `minutes::markdown_html`, the
 minutes' safe writer, line by line, and edited in place: `settings_set me_profile`), Layout, Health (a ⚠ badge counts
 required permissions missing). Vocabulary lists the learned terms with the meetings and people they are scoped to

@@ -223,6 +223,47 @@ const NoteDoc = (() => {
 })()
 // end of the notes block
 
+// ── ⌘K palette: ranking what was typed (no DOM: `palette.test.mjs`) ────────────────────────
+// Each item: `{label, group, keywords?, disabled?}`. A query matches when its words all appear
+// in the label (or keywords), in any order; whole-word and earlier matches rank first, and
+// unavailable items after available ones. With no query, the items keep their own order.
+const Palette = (() => {
+  const norm = (s) => String(s ?? '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+  const atStart = (hay, i) => i === 0 || /[\s·:,/(-]/.test(hay[i - 1])
+  // A word anywhere in the label; in the keywords only at a word's start ("min" isn't "terminal").
+  function score(item, words) {
+    const label = norm(item.label), keys = norm(item.keywords)
+    let total = 0
+    for (const w of words) {
+      const i = label.indexOf(w)
+      if (i >= 0) { total += (atStart(label, i) ? 30 : 10) - Math.min(i, 20) * 0.5; continue }
+      const k = keys.split(/\s+/).some((x) => x.startsWith(w))
+      if (!k) return -1
+      total += 5
+    }
+    return total
+  }
+  return {
+    /** The items for `query`, best first (at most `limit`). */
+    rank(items, query, limit = 50) {
+      const words = norm(query).split(/\s+/).filter(Boolean)
+      if (!words.length) return items.slice(0, limit)
+      return items
+        .map((it, i) => ({ it, i, s: score(it, words) }))
+        .filter((x) => x.s >= 0)
+        .sort((a, b) => (!!a.it.disabled - !!b.it.disabled) || (b.s - a.s) || (a.i - b.i))
+        .slice(0, limit)
+        .map((x) => x.it)
+    },
+    /** The same items with each group kept together, groups in the order of their best item. */
+    grouped(items) {
+      const order = [...new Set(items.map((x) => x.group))]
+      return order.flatMap((g) => items.filter((x) => x.group === g))
+    },
+  }
+})()
+// end of the palette block
+
 // ── workbench: what the window is made of, and where each view goes ────────────────────────
 // The window is fixed areas (activity bar, primary view, right and bottom panels) filled from
 // these lists; Echo's own views are entries like a plugin's will be. No DOM in here:
@@ -547,6 +588,7 @@ function statusbar() {
   if (p) parts.push(`<span title="${esc(profileWhere(p))}">AI: ${esc(p.name)}</span>`)
   if (a.live_notes) parts.push('<span>Live notes on</span>')
   // The terminal panel: a toggle here, where VS Code keeps it.
+  parts.push(`<button class="sb-btn" data-pal-open title="Actions (${MAC ? '⌘K' : 'Ctrl+K'})">Actions ${MAC ? '⌘K' : 'Ctrl+K'}</button>`)
   const live = [...Terms.entries()].some(([k, e]) => k.startsWith('claude:') && e.id != null && !e.exited)
   parts.push(`<button class="sb-btn" data-cmd="claude-panel" title="Claude (${MOD}\`)">${live ? '● ' : ''}Claude</button>`)
   return `<span class="grow"></span>${parts.join('')}`
@@ -1635,6 +1677,134 @@ const SETTINGS_BODY = {
       setCard('', [setRow('Ask again', 'macOS asks for each permission Echo is missing.', actBtn('ask_permissions', 'Ask for permissions') + actBtn('recheck', 'Check again'))])
   },
 }
+
+// ── ⌘K palette: actions in context. Its actions are the window's own — each runs as the click on
+// the button that does it elsewhere (`press`), so a palette action never differs from the button.
+// The target is the open call, the selected calendar event, or nothing (Echo's own actions). ───
+const PAL = { open: false, query: '', sel: 0, target: null, items: [] }
+/** Run a window action the way its button does: a click on an element with these `data-` values. */
+function press(data) {
+  const b = document.createElement('button')
+  for (const [k, v] of Object.entries(data)) b.dataset[k] = v
+  b.hidden = true
+  document.body.appendChild(b)
+  b.click()
+  b.remove()
+}
+/** What the palette acts on now. */
+function paletteTarget() {
+  if (S.view === 'calendar' && S.cal.selected && S.cal.data) {
+    const e = (S.cal.data.events || []).find((x) => x.id === S.cal.selected)
+    if (e) return { kind: 'event', e, label: e.subject || 'Event' }
+  }
+  if (S.view === 'calls' && S.selected && S.call && !S.call.error) return { kind: 'call', c: S.call, label: S.call.title }
+  return null
+}
+/** Every action for the target, Echo's own, and where to go. `disabled`: why it can't run now. */
+function paletteItems(target) {
+  const items = []
+  const add = (group, label, run, extra = {}) => items.push({ group, label, run, ...extra })
+  const st = S.state || {}
+  if (target && target.kind === 'call') {
+    const c = target.c, busy = c.notes_run && (c.notes_run.state === 'queued' || c.notes_run.state === 'running')
+    const transcribed = !['recording', 'transcribing'].includes(c.status)
+    for (const [id, label] of callTabs({ live: hasLive(c), chat: (c.chat || []).length, frames: (c.frames || []).length, actions: Array.isArray(c.actions) ? c.actions.length : null })) {
+      add('This call', `Open ${label}`, () => press({ tab: id }), { keywords: 'tab show' })
+    }
+    add('This call', c.notes ? 'Write minutes again' : 'Write minutes', () => press({ cmd: 'write-notes' }), { keywords: 'notes update claude', disabled: !transcribed ? 'after the transcript is ready' : busy ? 'minutes are being written' : null })
+    add('This call', 'Ask Claude about this call', () => press({ cmd: 'ask-claude' }), { keywords: 'question terminal session' })
+    add('This call', 'Add a note', () => { Layout.show('notes', panelViews()); layoutChanged(); setTimeout(() => { const el = $('#note-input'); if (el) el.focus() }, 50) }, { keywords: 'my notes comment' })
+    add('This call', 'Show the call folder', () => press({ cmd: 'reveal' }), { keywords: 'finder files' })
+    add('This call', 'Open minutes in browser', () => press({ cmd: 'open-minutes' }), { disabled: c.notes ? null : 'no minutes yet' })
+    add('This call', 'Delete this call…', () => press({ cmd: 'ask-delete' }), { keywords: 'remove trash' })
+  }
+  if (target && target.kind === 'event') {
+    const e = target.e, es = eventState(e, new Date()), kind = eventAction(e, es)
+    if (kind === 'open-notes') add('This event', 'Open its notes', () => press({ call: e.recorded.name }))
+    if (kind === 'scheduled') add('This event', "Don't record it", () => press({ unschedule: e.id }))
+    if (kind === 'join') add('This event', 'Join and record', () => press({ join: e.id }))
+    if (kind === 'join' || kind === 'record') add('This event', es.live ? 'Record it' : 'Record when it starts', () => press({ schedule: e.id }))
+    if (!kind) add('This event', 'Record it', () => {}, { disabled: e.cancelled ? 'cancelled' : e.declined ? 'you declined it' : es.past ? 'it is over' : !e.online ? 'not a Teams meeting' : 'not possible' })
+  }
+  // Echo's own
+  if (st.recording) add('Echo', 'Stop recording…', () => press({ cmd: 'stop-ask' }), { keywords: 'end', hint: MAC ? '⇧⌘R' : 'Ctrl+Shift+R' })
+  else if (st.armed) add('Echo', 'Cancel recording the next call', () => press({ cmd: 'stop' }), { keywords: 'disarm' })
+  else add('Echo', st.in_call ? 'Record this call' : 'Record the next Teams call', () => press({ cmd: 'record' }), { keywords: 'start arm' })
+  add('Echo', 'Claude · Echo folder', () => claudePanel('claude-folder'), { keywords: 'terminal session ask' })
+  add('Echo', 'Show or hide My notes', () => press({ panelFlip: 'notes' }), { disabled: S.view === 'calls' && S.selected ? null : 'open a call first' })
+  add('Echo', 'Show or hide the bottom panel', () => { Layout.toggle('bottom'); layoutChanged() })
+  add('Echo', 'Check for updates', () => press({ act: 'check_updates' }))
+  add('Echo', 'Ask for permissions', () => press({ act: 'ask_permissions' }), { keywords: 'microphone screen accessibility health' })
+  // Go to
+  for (const a of ACTIVITIES) add('Go to', a.label, () => goActivity(a.id))
+  for (const [id, label] of SETTINGS_SECTIONS) add('Go to', `Settings: ${label}`, () => go(`settings/${id}`), { keywords: 'preferences' })
+  for (const c of S.calls || []) {
+    const d = c.started_at ? new Date(c.started_at) : null
+    add('Calls', c.title, () => go(`call/${c.name}/${S.tab}`), { keywords: `${(c.people || []).join(' ')} ${d ? dayLabel(d) : ''}`, hint: d ? dayLabel(d) : '' })
+  }
+  return items
+}
+function paletteOpen() {
+  PAL.open = true; PAL.query = ''; PAL.sel = 0; PAL.target = paletteTarget()
+  let el = $('#palette')
+  if (!el) { el = document.createElement('div'); el.id = 'palette'; document.body.appendChild(el) }
+  el.innerHTML = `<div class="pal-back" data-pal-close></div><div class="pal" role="dialog" aria-label="Actions">
+    <div class="pal-head">${ICON('<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>')}<input id="pal-q" autocomplete="off" spellcheck="false" placeholder="Type an action, a call, a person…" aria-label="Action"><span id="pal-target"></span></div>
+    <div class="pal-list" id="pal-list" role="listbox"></div>
+    <div class="pal-foot"><span><kbd>↵</kbd> run</span><span><kbd>↑</kbd><kbd>↓</kbd> choose</span><span><kbd>esc</kbd> close</span>${PAL.target ? '<span><kbd>⌫</kbd> on an empty box: drop the target</span>' : ''}</div></div>`
+  paletteDraw()
+  $('#pal-q').focus()
+}
+function paletteClose() { PAL.open = false; const el = $('#palette'); if (el) el.remove() }
+function paletteDraw() {
+  const t = PAL.target
+  $('#pal-target').innerHTML = t ? `<button class="pal-chip" data-pal-untarget title="Act on Echo itself instead">On: ${esc(t.label.length > 32 ? t.label.slice(0, 31) + '…' : t.label)} ×</button>` : ''
+  const all = paletteItems(t)
+  // Calls show only when something is typed (the list would be every call).
+  PAL.items = Palette.grouped(Palette.rank(PAL.query.trim() ? all : all.filter((x) => x.group !== 'Calls'), PAL.query))
+  if (PAL.sel >= PAL.items.length) PAL.sel = Math.max(0, PAL.items.length - 1)
+  let group = null
+  $('#pal-list').innerHTML = PAL.items.map((it, i) => {
+    const head = it.group !== group ? `<div class="pal-group">${esc(it.group)}</div>` : ''
+    group = it.group
+    return `${head}<button class="pal-item${i === PAL.sel ? ' on' : ''}${it.disabled ? ' off' : ''}" role="option" aria-selected="${i === PAL.sel}" aria-disabled="${!!it.disabled}" data-pal-i="${i}"><span class="pal-label">${esc(it.label)}</span><span class="pal-hint">${esc(it.disabled ? it.disabled : it.hint || '')}</span></button>`
+  }).join('') || '<div class="pal-empty">Nothing matches.</div>'
+  const on = $('#pal-list .pal-item.on'); if (on) on.scrollIntoView({ block: 'nearest' })
+}
+function paletteRun(i) {
+  const it = PAL.items[i]
+  if (!it || it.disabled) return
+  paletteClose()
+  it.run()
+}
+document.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('[data-pal-open]')) paletteOpen() })
+document.addEventListener('input', (e) => { if (e.target.id === 'pal-q') { PAL.query = e.target.value; PAL.sel = 0; paletteDraw() } })
+document.addEventListener('click', (e) => {
+  if (!PAL.open) return
+  const b = e.target.closest && e.target.closest('[data-pal-i],[data-pal-close],[data-pal-untarget]')
+  if (!b) return
+  e.stopPropagation()
+  if (b.dataset.palClose !== undefined) return paletteClose()
+  if (b.dataset.palUntarget !== undefined) { PAL.target = null; PAL.sel = 0; paletteDraw(); return $('#pal-q').focus() }
+  paletteRun(Number(b.dataset.palI))
+}, true)
+document.addEventListener('keydown', (e) => {
+  const mod = MAC ? e.metaKey : e.ctrlKey
+  // ⌘K (Ctrl+K, Ctrl+Shift+P on Windows) — not while a terminal has the keys (Claude Code's own Ctrl+K).
+  if (((mod && !e.shiftKey && e.key.toLowerCase() === 'k') || (!MAC && e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'p')) && !(e.target.closest && e.target.closest('.xterm'))) {
+    e.preventDefault(); e.stopPropagation()
+    return PAL.open ? paletteClose() : paletteOpen()
+  }
+  // ⇧⌘R / Ctrl+Shift+R: stop the recording (it asks first).
+  if (mod && e.shiftKey && e.key.toLowerCase() === 'r' && S.state && S.state.recording && !(e.target.closest && e.target.closest('.xterm'))) {
+    e.preventDefault(); e.stopPropagation(); return press({ cmd: 'stop-ask' })
+  }
+  if (!PAL.open || e.target.id !== 'pal-q') return
+  if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); return paletteClose() }
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); const n = PAL.items.length; if (n) PAL.sel = (PAL.sel + (e.key === 'ArrowDown' ? 1 : n - 1)) % n; return paletteDraw() }
+  if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); return paletteRun(PAL.sel) }
+  if (e.key === 'Backspace' && !PAL.query && PAL.target) { PAL.target = null; PAL.sel = 0; return paletteDraw() }
+}, true)
 
 // ── render + events ────────────────────────────────────────────────────────────────────────
 let lastKey = ''
