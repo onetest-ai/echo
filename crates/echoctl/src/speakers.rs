@@ -258,8 +258,9 @@ fn split_by_timeline(segs: &mut Vec<Segment>, tl: &crate::speaking::Timeline) {
 
 /// Names for detected speakers from Teams' timeline: a voice takes the name most of its words
 /// were lit for — at least 3 words, at least 60 % of its named words, and named words at least
-/// a quarter of all its words. Two voices on one name (people sharing a room's tile) become
-/// "Name (Speaker N)".
+/// a quarter of all its words. Several voices on one name keep that name: the speaker model splits
+/// one person into several voices far more often than two people share a room's tile (a 3-person
+/// call came out as 8 voices on 2026-10-29, "Pat (Speaker 1)" … "(Speaker 4)").
 fn vote(segs: &[Segment], tl: &crate::speaking::Timeline) -> BTreeMap<u32, String> {
     let mut words: BTreeMap<u32, (usize, BTreeMap<String, usize>)> = BTreeMap::new();
     for s in segs.iter().filter(|s| s.speaker == "remote") {
@@ -284,13 +285,6 @@ fn vote(segs: &[Segment], tl: &crate::speaking::Timeline) -> BTreeMap<u32, Strin
             if top >= 3 && top as f64 >= 0.6 * named as f64 && named as f64 >= 0.25 * all as f64 {
                 out.insert(id, name);
             }
-        }
-    }
-    let mut count: BTreeMap<String, usize> = BTreeMap::new();
-    out.values().for_each(|n| *count.entry(n.clone()).or_default() += 1);
-    for (id, name) in out.iter_mut() {
-        if count[name.as_str()] > 1 {
-            *name = format!("{name} (Speaker {id})");
         }
     }
     out
@@ -324,16 +318,38 @@ fn assign(segs: &mut Vec<Segment>, turns: &[crate::nemo::Turn]) -> usize {
     firsts.len()
 }
 
+/// Each voice's name again: a manual one (`speakers.json`), else the one Teams lit for it now
+/// (`speaking.rs`, re-learned: the calibration may have changed since the call), else "Speaker N".
+fn relabel(dir: &Path, segs: &mut [Segment]) -> BTreeMap<u32, String> {
+    let manual = names(dir);
+    let voted = crate::speaking::Timeline::learn(dir, segs, None).map(|tl| {
+        for (kind, token, lag, score) in &tl.learned {
+            eprintln!("  teams speaking marker ({kind}s): {token}, {lag:.1}s behind the voice (fit {score:.2})");
+        }
+        vote(segs, &tl)
+    }).unwrap_or_default();
+    let mut shown = BTreeMap::new();
+    for s in segs.iter_mut() {
+        if let Some(id) = s.speaker_id {
+            let name = manual.get(&id).or(voted.get(&id)).cloned().unwrap_or_else(|| format!("Speaker {id}"));
+            shown.insert(id, name.clone());
+            s.name = Some(name);
+        }
+    }
+    shown
+}
+
 /// `echoctl speakers <call>`: who spoke, how long, and their first lines (for naming them);
-/// with `N=Name` pairs, name them (`N=` clears a name) and re-render the transcript.
-pub fn command(call: &str, assignments: &[String]) -> Result<()> {
+/// with `N=Name` pairs, name them (`N=` clears a name) and re-render the transcript; with
+/// `--relabel`, name the voices from Teams again (after a fix to how its marker is learned).
+pub fn command(call: &str, assignments: &[String], relabel_only: bool) -> Result<()> {
     let dir = crate::calls::resolve_call(call)?;
     let path = dir.join("segments.json");
     let mut segs: Vec<Segment> = serde_json::from_slice(&fs::read(&path).with_context(|| format!("{} has no transcript yet", dir.display()))?)?;
     if !segs.iter().any(|s| s.speaker_id.is_some()) {
         bail!("this call has no detected speakers (the speaker model wasn't downloaded when it was transcribed, or one voice was heard)");
     }
-    if assignments.is_empty() {
+    if assignments.is_empty() && !relabel_only {
         let mut out: BTreeMap<u32, (f64, Vec<serde_json::Value>)> = BTreeMap::new();
         let mut shown: BTreeMap<u32, String> = BTreeMap::new();
         for s in segs.iter().filter(|s| s.speaker_id.is_some()) {
@@ -371,13 +387,11 @@ pub fn command(call: &str, assignments: &[String]) -> Result<()> {
             raw.insert(id.to_string(), name.to_string());
         }
     }
-    fs::write(dir.join(FILE), serde_json::to_vec_pretty(&raw)?)?;
-    let names = names(&dir);
-    for s in segs.iter_mut() {
-        if let Some(id) = s.speaker_id {
-            s.name = Some(display(id, &names));
-        }
+    if !assignments.is_empty() {
+        fs::write(dir.join(FILE), serde_json::to_vec_pretty(&raw)?)?;
     }
+    // Every voice, not only the ones named here: a manual name, else Teams', else "Speaker N".
+    let names = relabel(&dir, &mut segs);
     fs::write(&path, serde_json::to_vec_pretty(&segs)?)?;
     let md = dir.join("transcript.md");
     let model = fs::read_to_string(&md).ok().and_then(|t| t.lines().find_map(|l| l.strip_prefix("- **Model:** ").map(str::to_owned))).unwrap_or_default();

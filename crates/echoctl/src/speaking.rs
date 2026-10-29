@@ -27,11 +27,14 @@ const KNOWN_MARKERS: &[&str] = &["vdi-frame-occlusion"];
 const BOUNCE_S: f64 = 2.5;
 /// A ring lit this much of this window is stuck, not speech.
 const STUCK_WINDOW_S: f64 = 30.0;
-/// A known marker is kept unless another token fits this much better.
-const KNOWN_MARGIN: f64 = 0.15;
 
 /// A calibration is used only from this F1 (lit time vs speech time).
 const MIN_SCORE: f64 = 0.45;
+/// Teams' own ring (`KNOWN_MARKERS`) from this F1, when it lights one tile at a time.
+const MIN_KNOWN_SCORE: f64 = 0.3;
+/// Of a marker's lit time, at least this share with exactly one other person lit (measured on
+/// 2026-10-29: the ring 0.88–0.96, layout classes and "video is on" 0.00–0.36).
+const MIN_EXCLUSIVE: f64 = 0.6;
 /// Each side needs this much speech to calibrate on.
 const MIN_SPEECH_S: f64 = 15.0;
 /// UI delays tried (seconds).
@@ -289,8 +292,38 @@ fn floor(lit: &BTreeMap<String, Spans>, hands: &BTreeMap<String, Spans>, speech:
     out
 }
 
+/// Of the time `token` is lit on any of these tracks, the share when exactly one is lit: a
+/// speaking ring is on one tile at a time; a layout style or a state like "video is on" is on many.
+fn exclusivity(tracks: &[&&Track], token: &str, end: f64) -> f64 {
+    let mut edges: Vec<(f64, i32)> = vec![];
+    for t in tracks {
+        for (a, b) in union(t.present(token, end)) {
+            edges.push((a, 1));
+            edges.push((b, -1));
+        }
+    }
+    edges.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+    let (mut n, mut last, mut one, mut any) = (0i32, 0.0f64, 0.0f64, 0.0f64);
+    for (t, d) in edges {
+        if n >= 1 {
+            any += t - last;
+        }
+        if n == 1 {
+            one += t - last;
+        }
+        n += d;
+        last = t;
+    }
+    if any <= 0.0 { 0.0 } else { one / any }
+}
+
 /// The token and delay that best explain speech on one kind of element: the user's own
 /// element against the mic's speech, the others' (together) against the remote track's.
+///
+/// With two or more others, a token must light one of them at a time (`exclusivity` ≥
+/// `MIN_EXCLUSIVE`): against the remote track as a whole, a class that is on every tile (a layout
+/// style) or on whoever has video ("video is on") fits as well as the ring when the other side
+/// talks most of the call — it did, on two calls of 2026-10-29, and named everyone after one person.
 fn calibrate(group: &[&Track], mine: &Spans, theirs: &Spans, end: f64) -> Option<(String, f64, f64)> {
     let selfs: Vec<&&Track> = group.iter().filter(|t| t.me).collect();
     let others: Vec<&&Track> = group.iter().filter(|t| !t.me).collect();
@@ -299,17 +332,18 @@ fn calibrate(group: &[&Track], mine: &Spans, theirs: &Spans, end: f64) -> Option
     if !use_self && !use_others {
         return None;
     }
+    let debug = std::env::var_os("ECHOCTL_DEBUG").is_some();
     let candidates: BTreeSet<String> = group.iter().flat_map(|t| t.toggled()).collect();
-    let mut best: Option<(String, f64, f64)> = None;
-    let mut known: Option<(String, f64, f64)> = None;
+    // Per token: (its best delay, score, exclusivity).
+    let mut scored: Vec<(String, f64, f64, f64)> = vec![];
     for token in candidates {
-        let is_known = KNOWN_MARKERS.contains(&token.as_str());
         let me_raw = union(selfs.iter().flat_map(|t| t.present(&token, end)).collect());
         let them_raw = union(others.iter().flat_map(|t| t.present(&token, end)).collect());
-        // A style that is simply on (a layout class) is lit nearly all the time.
         if total(&me_raw) + total(&them_raw) <= 0.0 {
             continue;
         }
+        let excl = if others.len() >= 2 { exclusivity(&others, &token, end) } else { 1.0 };
+        let mut top: Option<(f64, f64)> = None;
         for step in 0..=(MAX_LAG * 10.0) as usize {
             let lag = step as f64 / 10.0;
             let mut scores = vec![];
@@ -320,17 +354,38 @@ fn calibrate(group: &[&Track], mine: &Spans, theirs: &Spans, end: f64) -> Option
                 scores.push(f1(&union(shift(&them_raw, lag)), theirs));
             }
             let score = scores.iter().sum::<f64>() / scores.len() as f64;
-            if best.as_ref().is_none_or(|b| score > b.2 + 1e-9) {
-                best = Some((token.clone(), lag, score));
-            }
-            if is_known && known.as_ref().is_none_or(|b| score > b.2 + 1e-9) {
-                known = Some((token.clone(), lag, score));
+            if top.is_none_or(|t| score > t.1 + 1e-9) {
+                top = Some((lag, score));
             }
         }
+        if let Some((lag, score)) = top {
+            scored.push((token, lag, score, excl));
+        }
     }
-    match (known, best) {
-        (Some(k), Some(b)) if k.2 >= MIN_SCORE && b.2 < k.2 + KNOWN_MARGIN => Some(k),
-        (_, b) => b.filter(|b| b.2 >= MIN_SCORE),
+    if debug {
+        // `ECHOCTL_DEBUG=1 echoctl speaking <call>`: what each candidate scored.
+        let mut list: Vec<&(String, f64, f64, f64)> = scored.iter().collect();
+        list.sort_by(|a, b| b.2.total_cmp(&a.2));
+        let shown = list.iter().take(8).chain(list.iter().filter(|x| KNOWN_MARKERS.contains(&x.0.as_str())));
+        for (t, lag, score, excl) in shown {
+            let known = if KNOWN_MARKERS.contains(&t.as_str()) { "  (known)" } else { "" };
+            eprintln!("  candidate {t:<24} lag {lag:.1}s  F1 {score:.3}  one tile at a time {excl:.2}{known}");
+        }
+    }
+    let pick = |want_known: bool| {
+        scored
+            .iter()
+            .filter(|x| x.3 >= MIN_EXCLUSIVE && (!want_known || KNOWN_MARKERS.contains(&x.0.as_str())))
+            .max_by(|a, b| a.2.total_cmp(&b.2))
+            .map(|x| (x.0.clone(), x.1, x.2))
+    };
+    // Teams' ring, when it lights one tile at a time: its fit can be low (a screen share hides the
+    // tiles for half the call) while it is still right, and a class that fits better can be its
+    // opposite (on exactly while the ring is off, on 2026-10-29). Another class only when the ring
+    // isn't there (renamed by a Teams update).
+    match pick(true) {
+        Some(k) if k.2 >= MIN_KNOWN_SCORE => Some(k),
+        _ => pick(false).filter(|b| b.2 >= MIN_SCORE),
     }
 }
 
@@ -435,6 +490,37 @@ mod tests {
         assert_eq!(tl.learned[0].1, "vdi-frame-occlusion");
         assert!((tl.learned[0].2 - 0.4).abs() < 1e-9);
         assert_eq!(tl.who(5.0, 6.0), Some("Dana Lin"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_class_on_every_tile_never_beats_the_ring_however_well_it_fits() {
+        // 2026-10-29: the other side talked almost the whole call. A layout class on every tile
+        // ("___layout", toggled when the tiles were redrawn) and "t:video is on" matched the
+        // remote track better than the ring, which a screen share hid half the time — and every
+        // voice was named after one person.
+        let dir = std::env::temp_dir().join(format!("echo-exclusive-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let mut lines = vec![];
+        let who = [("tile:Dana", "Dana Lin"), ("tile:Lee", "Lee Park"), ("tile:Kim", "Kim Ito")];
+        for (k, n) in who {
+            lines.push(serde_json::json!({ "t": 0.0, "k": k, "n": n, "add": ["tile", "___layout", "t:video is on"], "del": [] }).to_string());
+            // Redrawn once: the layout class and the video state come and go on every tile.
+            lines.push(serde_json::json!({ "t": 50.0, "k": k, "n": n, "add": [], "del": ["___layout", "t:video is on"] }).to_string());
+            lines.push(serde_json::json!({ "t": 51.0, "k": k, "n": n, "add": ["___layout", "t:video is on"], "del": [] }).to_string());
+        }
+        // The ring: Dana 0–30, Lee 30–60, Kim 60–90 — but hidden by a share from 70 to 90.
+        for (i, (k, n)) in who.iter().enumerate() {
+            let (a, b) = (i as f64 * 30.0, if i == 2 { 70.0 } else { i as f64 * 30.0 + 30.0 });
+            lines.push(serde_json::json!({ "t": a + 0.3, "k": k, "n": n, "add": ["vdi-frame-occlusion"], "del": [] }).to_string());
+            lines.push(serde_json::json!({ "t": b + 0.3, "k": k, "n": n, "add": [], "del": ["vdi-frame-occlusion"] }).to_string());
+        }
+        fs::write(dir.join(FILE), lines.join("\n")).unwrap();
+        let segs = [seg("remote", 0.0, 30.0), seg("remote", 30.0, 60.0), seg("remote", 60.0, 90.0)];
+        let tl = Timeline::learn(&dir, &segs, None).expect("calibrated");
+        assert_eq!(tl.learned[0].1, "vdi-frame-occlusion", "{:?}", tl.learned);
+        assert_eq!(tl.who(10.0, 11.0), Some("Dana Lin"));
+        assert_eq!(tl.who(40.0, 41.0), Some("Lee Park"));
         let _ = fs::remove_dir_all(&dir);
     }
 

@@ -592,7 +592,7 @@ most recently lit; suspect tiles (raised hand — an `id:` with "raisehand" or t
 of the last 30 s; lit as much in silence as in speech) take a free floor only when nobody else
 is lit. Element ids are recorded as `id:` tokens for the hand check and never become the marker. With the speaker model: a
 voice takes the name ≥ 60 % of its named words carry (≥ 3 words, named ≥ 25 % of its words;
-two voices on one name ⇒ "Name (Speaker N)"); without it, segments are split by the lit name
+several voices on one name keep it: the model over-splits one person far more often than a room shares a tile); without it, segments are split by the lit name
 (words < 0.7 s apart continue the previous one). Manual names (`speakers.json`) win; the
 process-call skill (step 4a) names only the leftover "Speaker N", or the user runs
 `echoctl speakers <call> 2="Name"` (segments + transcript.md re-rendered). Dev:
@@ -600,6 +600,10 @@ process-call skill (step 4a) names only the leftover "Speaker N", or the user ru
 `echoctl speaking <call>` (the marker learned and who it lights). **The marker** (Teams
 2026-10): the speaker's video tile (the `AXMenuItem` "<Name>, …") gets a direct child with the
 class `vdi-frame-occlusion` — the ring; language-independent, no participants pane needed.
+With two or more others, calibration only takes a class that lights one tile at a time (`exclusivity` ≥ 0.6:
+the ring measured 0.88–0.96; layout classes, "video is on" and the ring's opposite 0–0.36 — on 2026-10-29 they
+out-fitted the ring and named everyone after one person), and the ring wins whenever it passes that (F1 ≥ 0.3).
+`echoctl speakers <call> --relabel` names a call's voices again from its `speaking.jsonl` (manual names stay).
 Confirmed in recorded trees: at each snapshot exactly one tile had it, the person speaking
 then (and the participants list's avatar flipped class at the same moments). It is
 `KNOWN_MARKERS` in `speaking.rs`: chosen when it fits (calibration still learns the delay,

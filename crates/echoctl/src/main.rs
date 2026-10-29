@@ -292,6 +292,9 @@ enum Cmd {
         call: String,
         /// N=Name, e.g. 2="Daniel Osei"
         names: Vec<String>,
+        /// Name the voices from Teams' speaking ring again (names set by hand stay)
+        #[arg(long)]
+        relabel: bool,
     },
     /// Transcription on another computer (local network): use a server (URL + API key), or let
     /// other computers transcribe on this one
@@ -864,7 +867,7 @@ fn main() -> Result<()> {
             transcribe::transcribe(&call, model.as_deref(), keep_audio)
         }
         #[cfg(feature = "transcribe")]
-        Cmd::Speakers { call, names } => speakers::command(&call, &names),
+        Cmd::Speakers { call, names, relabel } => speakers::command(&call, &names, relabel),
         Cmd::Vocab { cmd } => {
             let mut cfg = config::Config::load()?;
             match cmd {
