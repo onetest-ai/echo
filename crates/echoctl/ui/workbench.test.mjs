@@ -19,9 +19,10 @@ test('Calls (list beside the call) comes first, Calendar (one column) second, Se
   assert.deepEqual(ACTIVITIES.map((a) => [a.id, a.layout, !!a.bottom]), [['calls', 'list-detail', false], ['calendar', 'single', false], ['projects', 'single', false], ['tasks', 'single', false], ['brain', 'single', false], ['settings', 'single', true]])
 })
 
-test('a call that records shows Live first; chat and screens only when there are any', () => {
-  assert.deepEqual(ids(callTabs({ live: true, chat: 0, frames: 0, actions: null })), ['live', 'minutes', 'transcript', 'actions'])
-  assert.deepEqual(callTabs({ live: false, chat: 3, frames: 2, actions: 4 }), [
+test('a call that records shows its Transcript first, with a dot; chat and screens only when there are any', () => {
+  assert.deepEqual(ids(callTabs({ recording: true, chat: 0, frames: 0, actions: null })), ['transcript', 'minutes', 'actions'])
+  assert.equal(callTabs({ recording: true, chat: 0, frames: 0, actions: null })[0][3], true)
+  assert.deepEqual(callTabs({ recording: false, chat: 3, frames: 2, actions: 4 }), [
     ['minutes', 'Minutes', ''], ['transcript', 'Transcript', ''],
     ['chat', 'Chat', 3], ['screens', 'Screens', 2], ['actions', 'Actions', 4],
   ])

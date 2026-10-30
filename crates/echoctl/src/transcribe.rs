@@ -1091,6 +1091,8 @@ pub(crate) fn render_markdown(
         md.push_str(&format!("**{who}** [{}] _{}_\n{text}\n\n", hms(s.start), s.lang));
         i = j;
     }
+    // The live notes kept during the call stay with its transcript (a draft, marked as such).
+    md.push_str(&crate::livenotes::markdown_section(dir));
     md
 }
 

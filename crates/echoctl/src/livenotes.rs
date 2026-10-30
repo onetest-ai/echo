@@ -37,6 +37,145 @@ use crate::ai::{self, Kind, Profile};
 use crate::{calls, paths};
 
 pub const NOTES: &str = "live-notes.json";
+/// What the call's live jobs used, added up (`Usage`).
+pub const USAGE: &str = "live-usage.json";
+
+/// Tokens and cost of a call's live jobs (summaries and questions), from Claude Code's result
+/// envelope; a `local` job (curl) adds its tokens, no cost.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct Usage {
+    pub jobs: u64,
+    pub input_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_write_tokens: u64,
+    pub output_tokens: u64,
+    pub cost_usd: f64,
+}
+
+impl Usage {
+    fn of(v: &Value) -> Usage {
+        let u = &v["usage"];
+        let n = |k: &str| u[k].as_u64().unwrap_or(0);
+        Usage {
+            jobs: 1,
+            input_tokens: n("input_tokens"),
+            cache_read_tokens: n("cache_read_input_tokens"),
+            cache_write_tokens: n("cache_creation_input_tokens"),
+            output_tokens: n("output_tokens"),
+            cost_usd: v["total_cost_usd"].as_f64().unwrap_or(0.0),
+        }
+    }
+
+    fn add(&mut self, o: &Usage) {
+        self.jobs += o.jobs;
+        self.input_tokens += o.input_tokens;
+        self.cache_read_tokens += o.cache_read_tokens;
+        self.cache_write_tokens += o.cache_write_tokens;
+        self.output_tokens += o.output_tokens;
+        self.cost_usd += o.cost_usd;
+    }
+}
+
+thread_local! {
+    /// The last job's usage on this thread (`take_usage` after `complete`).
+    static LAST_USAGE: std::cell::RefCell<Option<Usage>> = const { std::cell::RefCell::new(None) };
+}
+
+fn take_usage() -> Option<Usage> {
+    LAST_USAGE.with(|u| u.borrow_mut().take())
+}
+
+/// Add the job that just ran on this thread to the call's `live-usage.json`.
+fn count_usage(stamp: &str) {
+    if let Some(u) = take_usage() {
+        let _ = save_in_call(stamp, |d| {
+            let mut all: Usage = fs::read(d.join(USAGE)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+            all.add(&u);
+            Ok(paths::write_atomic(&d.join(USAGE), &serde_json::to_vec_pretty(&all)?)?)
+        });
+    }
+}
+
+/// The heading the live notes take at the end of `transcript.md` (everything from it on is theirs).
+const MD_HEADING: &str = "## Live notes";
+
+fn mmss(t: f64) -> String {
+    let s = t.max(0.0) as u64;
+    if s >= 3600 { format!("{}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60) } else { format!("{:02}:{:02}", s / 60, s % 60) }
+}
+
+/// The call's live notes as the end of its transcript: kept with it, marked as a draft. Empty when
+/// there are none.
+pub fn markdown_section(dir: &Path) -> String {
+    let Some(n) = read_notes(dir) else { return String::new() };
+    if n.decisions.is_empty() && n.actions.is_empty() && n.questions.is_empty() && n.now.trim().is_empty() {
+        return String::new();
+    }
+    let at = |t: Option<f64>| t.map(|t| format!(" [{}]", mmss(t))).unwrap_or_default();
+    let mut md = format!("{MD_HEADING}
+
+_Kept by {} while the call ran, up to {} — a draft: the transcript above is what was said._
+
+", n.model, mmss(n.covered_until));
+    if !n.now.trim().is_empty() {
+        md.push_str(&format!("**At the end:** {}
+
+", n.now.trim()));
+    }
+    let list = |md: &mut String, title: &str, items: Vec<String>| {
+        if !items.is_empty() {
+            md.push_str(&format!("### {title}
+
+"));
+            for i in items {
+                md.push_str(&format!("- {i}
+"));
+            }
+            md.push('\n');
+        }
+    };
+    list(&mut md, "Decisions", n.decisions.iter().map(|d| format!("{}{}", d.text, at(d.t))).collect());
+    list(&mut md, "Action items", n.actions.iter().map(|a| format!("**{}** {}{}", a.owner, a.task, at(a.t))).collect());
+    list(&mut md, "Open questions", n.questions.iter().map(|q| format!("{}{}", q.text, at(q.t))).collect());
+    if !n.gaps.is_empty() {
+        md.push_str(&format!("_Not read live: {}._\n\n", n.gaps.iter().map(|g| format!("{}–{}", mmss(g[0]), mmss(g[1]))).collect::<Vec<_>>().join(", ")));
+    }
+    md
+}
+
+/// Put the live notes as they are now at the end of an existing `transcript.md` (replacing the
+/// section an earlier version wrote): the last update can come after the transcript was written.
+pub fn refresh_transcript(dir: &Path) {
+    let path = dir.join("transcript.md");
+    let Ok(text) = fs::read_to_string(&path) else { return };
+    let body = match text.find(&format!("\n{MD_HEADING}\n")) {
+        Some(i) => text[..=i].to_string(),
+        None => text.clone(),
+    };
+    let section = markdown_section(dir);
+    let new = if section.is_empty() { body } else { format!("{}\n\n{section}", body.trim_end()) };
+    if new != text {
+        let _ = paths::write_atomic(&path, new.as_bytes());
+    }
+}
+
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn read_usage(dir: &Path) -> Option<Usage> {
+    fs::read(dir.join(USAGE)).ok().and_then(|b| serde_json::from_slice(&b).ok())
+}
+
+/// Settings for every short model job (live notes, questions, the Brain's readers): no CLAUDE.md and no
+/// auto memory — they are about one call or one document, and the data folder's CLAUDE.md (or the
+/// user's own) made each 90-second update ~46K tokens instead of ~2.5K (measured 2026-10-30).
+fn lean_settings() -> Result<PathBuf> {
+    let f = paths::config_dir().join("lean-job-settings.json");
+    let want = br#"{"claudeMdExcludes": ["**"]}"#;
+    if fs::read(&f).ok().as_deref() != Some(&want[..]) {
+        fs::create_dir_all(paths::config_dir())?;
+        paths::write_atomic(&f, want)?;
+    }
+    Ok(f)
+}
 pub const ASKS: &str = "live-asks.jsonl";
 pub const STATE: &str = "live-state.json";
 /// The live transcript (`live.rs` writes it; named here too, for builds without transcription).
@@ -485,6 +624,8 @@ fn complete_claude_with(p: &Profile, model: &str, system: &str, user: &str, bloc
         "--no-session-persistence".into(),
         "--model".into(),
         model.to_string(),
+        "--settings".into(),
+        lean_settings()?.display().to_string(),
     ]);
     let input = match blocks {
         Some(b) => format!("{}\n", json!({"type": "user", "message": {"role": "user", "content": b}})),
@@ -492,11 +633,16 @@ fn complete_claude_with(p: &Profile, model: &str, system: &str, user: &str, bloc
     };
     let cwd = if p.kind.managed() { paths::state_dir() } else { ai::system_folder()? };
     fs::create_dir_all(&cwd)?;
-    let mut child = ai::claude_command(p, &args, &cwd, true)?;
+    let mut cmd = ai::prepare_claude(p, &args, &cwd, true)?;
+    cmd.env("CLAUDE_CODE_DISABLE_AUTO_MEMORY", "1");
+    let mut child = cmd.spawn()?;
     let (out, err, _, wrote) = ai::wait_output_with(&mut child, Some(input.into_bytes()), deadline, cancelled)
         .map_err(|e| anyhow!("{}: {e:#}", p.name))?;
     let result = out.lines().rev().filter_map(|l| serde_json::from_str::<Value>(l.trim()).ok()).find(|v| v["type"] == "result");
     let text = result.as_ref().and_then(|v| v["result"].as_str()).unwrap_or("").to_string();
+    if let Some(v) = &result {
+        LAST_USAGE.with(|u| *u.borrow_mut() = Some(Usage::of(v)));
+    }
     let is_error = result.as_ref().is_none_or(|v| v["is_error"].as_bool().unwrap_or(false));
     if is_error {
         let all = format!("{out}\n{err}\n{text}");
@@ -1183,7 +1329,9 @@ fn run_summary(stamp: &str, generation: u64) {
         None => "New transcript lines:\n".to_string(),
     });
     user.push_str(&format_lines(&lines_in));
+    let _ = take_usage();
     let reply = complete(p, SUMMARY_SYSTEM, &user, 1200, true, &cancelled);
+    count_usage(stamp);
     if !summary_current(stamp, generation) || !enabled().unwrap_or(false) {
         return; // stale, or live notes were turned off: its result is dropped
     }
@@ -1207,6 +1355,12 @@ fn run_summary(stamp: &str, generation: u64) {
             let bytes = serde_json::to_vec_pretty(&notes).unwrap_or_default();
             match save_in_call(stamp, |d| Ok(paths::write_atomic(&d.join(NOTES), &bytes)?)) {
                 Ok(()) => {
+                    if !recording {
+                        // The call is over: its transcript keeps these notes (it may be written already).
+                        if let Some(d) = call_dir(stamp) {
+                            refresh_transcript(&d);
+                        }
+                    }
                     let state = if recording { "updated" } else { "ended" };
                     set_state_where(stamp, |c| c.summary_gen == generation, state, None, Some(None));
                     ai::job_worked(&p.id);
@@ -1335,7 +1489,9 @@ fn run_ask(stamp: &str, generation: u64, ask: Ask) {
     if !still_on() {
         return finish(None, String::new(), Some("live notes were turned off before it was asked".into()));
     }
+    let _ = take_usage();
     let reply = complete(p, system, &user, 600, false, &cancelled);
+    count_usage(stamp);
     if with(|s| s.shutdown) {
         return done();
     }
@@ -1463,6 +1619,26 @@ pub fn handle_requests() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_transcript_keeps_the_live_notes() {
+        let dir = std::env::temp_dir().join(format!("echo-livemd-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("transcript.md"), "# Call\n\n**Me** [00:00:01] _en_\nHello\n\n").unwrap();
+        refresh_transcript(&dir); // no notes: unchanged
+        assert!(!fs::read_to_string(dir.join("transcript.md")).unwrap().contains("Live notes"));
+        let notes = Notes { profile: "system".into(), model: "haiku".into(), updated_at: Local::now(), cursor: 3, covered_until: 95.0, gaps: vec![],
+            now: "Wrapping up".into(), decisions: vec![Point { text: "Ship Friday".into(), t: Some(62.0) }],
+            actions: vec![ActionItem { owner: "Ana".into(), task: "Send the deck".into(), t: None }], questions: vec![] };
+        fs::write(dir.join(NOTES), serde_json::to_vec(&notes).unwrap()).unwrap();
+        refresh_transcript(&dir);
+        refresh_transcript(&dir); // again: the same section, not a second one
+        let md = fs::read_to_string(dir.join("transcript.md")).unwrap();
+        assert_eq!(md.matches("## Live notes").count(), 1);
+        assert!(md.starts_with("# Call") && md.contains("Hello") && md.contains("- Ship Friday [01:02]") && md.contains("- **Ana** Send the deck\n"));
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     fn line(speaker: &str, start: f64, text: &str) -> Line {
         Line { speaker: speaker.into(), start, end: start + 2.0, text: text.into(), name: None }

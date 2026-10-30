@@ -7,7 +7,10 @@ the app never depends on Claude Code (it asks with native dialogs, starts at log
 permissions); the plugin drives it only through the CLI and the files in the data folder.
 The final notes/actions (`notes.md`, `actions.json`) are written only by a Claude Code run (the app writes
 transcripts, never notes). One exception, by design: the app saves model-written **live drafts** during a call
-(`live-notes.json`, `live-asks.jsonl`, `livenotes.rs`), which never feed the minutes.
+(`live-notes.json`, `live-asks.jsonl`, `livenotes.rs`); the minutes get the live notes as a checklist
+(`context.live_notes`: decisions, actions, questions with their times, the stretch covered and the gaps) — each
+checked against the transcript, which wins (the user's call, 2026-10-30: "these notes are very valuable for the
+minutes").
 
 ## Hard requirements
 - macOS **and** Windows. Platform code lives behind `#[cfg]` in `audio/{macos,windows}.rs` and
@@ -169,7 +172,8 @@ macOS SIGKILLs (exit 137) a binary rewritten in place.
 
 ## The Echo window (`window.rs`, `ui/`)
 Menu → Open Echo… (or `echoctl app open [--call <name>]`, or a recent call) opens one window:
-Calls (list + Live / Minutes / Transcript / Chat / Screens / Actions, and **My notes** in the right panel), Calendar.
+Calls (list + Minutes / Transcript / Chat / Screens / Actions — one Transcript tab: live while the call records, with a
+recording dot and first, the final one after, its live notes beside it either way; `#call/x/live` opens it —, and **My notes** in the right panel), Calendar.
 **A workbench** (`docs/plugins-design.md`): fixed areas — a 40 px top strip with the **Record pill** at its centre
 (idle Record ▾ with language + profile, armed + Cancel, meeting soon + Record it, recording: clock, title, Stop that
 asks first; "Writing the transcript…" beside it), the activity bar (`ACTIVITIES`: Calls `list-detail`, Calendar
@@ -353,6 +357,17 @@ project's own Status option in a state category (`Project.board`: columns with n
 card fields, hidden columns; the one in use remembered per project in the webview), cards dragged between columns set the item's state and `column` (a human field, pinned) —, or a tree by workstream, a node's fields, criteria, history with quotes and verdicts, Undo of
 your edits, To review — suggested moves/merges, weak "done" claims —, Sync now; `/api/project/<id>/work`, IPC
 `project {op: sync | ledger, body}`).
+**The meeting chat between calls** (`ledger::chat_sync`, a thread's `teams_chat` sources — Profile → Sources offers its
+calls' chats, `+ 💬 <meeting> chat`; `echoctl project source <id> --chat 19:… --name`; IPC `source_add`; read whether or
+not the Brain is on): in each sync (`projectsync::run`; `due` also when a chat wasn't checked for 30 min or a chat day
+isn't processed) the chat is read through Graph (`graph::chat_history`, ≤ 2000 newest; the first read 30 days back,
+later 7 — days are rebuilt, an item that changed is processed again, `reprocess`), messages within ±2 min of this
+thread's calls on that chat left out (the call's item has them), only the user's, colleagues' and senders trusted for
+the thread's client (the Brain's `senders` list; others wait there; an author not looked up yet holds the day), one
+evidence item a day `chat-<sha8 of chat>-<day>` (kind `chat`, turns at local HH:MM:SS, files shared named), written
+once the chat has been quiet for `SETTLE`. State per chat in `ledger/chats.json` (read_at, days, found, error), shown
+on the source's chip. `project ledger <id> sync --chats` reads them by hand. Measured on Borealis (2026-10-30):
+4 days of messages between its two calls, among them a blocker (an IP to whitelist) said nowhere in a call.
 **A client's page** (`#client/<id>/<tab>`, `/api/client/<id>` = `tasks::client`): Overview — its description (the
 user's Markdown, `projects/clients/<id>.md`, edited in place like a thread's Brief: IPC `project {op: client_brief}`) and
 a card per thread (stage, calls, stories done, open tasks by pile with the late ones, the last 3 decisions, open risks
@@ -698,6 +713,14 @@ could route (managed settings files + `.d/`, macOS managed preferences, any Wind
 cached `remote-settings.json`: a routing `env`, `apiKeyHelper`, `policyHelper(s)`, a source that can't be read) →
 Claude Code runs for `local` / `claude` are refused (`ai::policy_conflict`); `local` live jobs (curl) don't start
 Claude Code.
+Every short model job (live notes, questions, the Brain's readers: `complete_claude_with`) runs with
+`--settings <config dir>/lean-job-settings.json` (`claudeMdExcludes: ["**"]`) and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`:
+in the data folder (this repo's own) CLAUDE.md and memory made each 90-second update ~46K input tokens instead of
+~2.5K (measured 2026-10-30: a 26-min call ≈ 16 updates). What a call's live jobs used is added up from Claude Code's
+result envelope in `<call>/live-usage.json` (`livenotes::Usage`: jobs, input / cache read / cache write / output
+tokens, cost) and shown in the Transcript tab's header. When the call is over its live notes are kept at the end of
+`transcript.md` (`## Live notes`, marked a draft; `markdown_section` in `render_markdown`, and `refresh_transcript`
+after a later update).
 Live notes (`livenotes.rs`): one worker in the app; calls keyed by their folder stamp (`calls::stamp_of` / `by_stamp`:
 retitling keeps it; two calls in the same second share one, and `by_stamp` then refuses to guess — the scheduler keeps
 the folder it last saw). A summary ≤ every 90 s with ≥ 400 new characters (not bytes), from a cursor of complete
@@ -802,6 +825,11 @@ does nothing, `pending`/`claim` refuse. A session's `claim` (by hand: `/echo:pro
 of the call is on or another session's fresh claim holds a call without minutes; a claim left by a finished run (Echo's
 keeps it once `done`) is taken over. The CLI hands the run to the running app
 (`notes-<call>.request`) unless `--wait` (Ctrl-C there stops its Claude Code too: `notes::shutdown`). The run uses the call's AI profile (launcher, model, strictness: above).
+The user's Write minutes takes over a session's fresh claim (no minutes yet); automatic runs still yield to it — an
+older plugin's pane claimed every transcribed call itself and Write minutes was refused for 30 min with nobody writing
+(2026-10-30). Older Echo plugin installs in Claude Code (`app::stale_plugins`, from `installed_plugins.json`) show in
+Settings → Health and Needs you with Update it (IPC `update_plugins` → `app::update_plugins`: the marketplace, then
+each install in its scope, a project's from its folder).
 One run per call (`notes::admit`): the call's place first, an OS lock on `notes-run.lock` held by the owner for the
 whole run (released by the OS if it dies; it moves with a renamed folder; dropped before the final rename for
 Windows), then under it the claim (a session's fresh claim on a call without notes wins), then `queued`; a refusal

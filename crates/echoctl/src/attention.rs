@@ -253,6 +253,12 @@ pub fn collect() -> Collected {
             out.push(item(format!("permission:{}", k.id), "health", "echo", format!("{} isn't granted", k.name), k.why.to_string(), false, vec![act("Ask for it", true, json!({"cmd": "settings_action", "action": "ask_permissions", "arg": ""}))], Some("settings/health".into())));
         }
     }
+    // An older Echo plugin in Claude Code: its terminal pane still claims calls for minutes itself.
+    let stale = crate::app::stale_plugins();
+    if !stale.is_empty() {
+        let which = stale.iter().map(|s| format!("{} ({}{})", s["version"].as_str().unwrap_or("?"), s["scope"].as_str().unwrap_or("?"), s["project"].as_str().and_then(|p| std::path::Path::new(p).file_name()).map(|n| format!(", {}", n.to_string_lossy())).unwrap_or_default())).collect::<Vec<_>>().join(", ");
+        out.push(item("plugin:stale".into(), "health", "echo", "Claude Code has an older Echo plugin".into(), format!("{which} — it can hold calls back from Write minutes; update it, then restart Claude Code"), false, vec![act("Update it", true, json!({"cmd": "update_plugins"}))], Some("settings/health".into())));
+    }
     // Not checked yet looks the same as none: an update leaves quietly, never as "done".
     c.quiet_kinds.insert("update");
     if let Some(v) = crate::update::AVAILABLE.lock().ok().and_then(|a| a.as_ref().map(|r| r.version.clone())) {

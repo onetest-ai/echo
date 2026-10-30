@@ -527,9 +527,31 @@ pub fn context(call: &str) -> Result<()> {
         "vocabulary": crate::vocab::for_call(&cfg, meeting.as_ref()),
         // The projects this call belongs to: their brief, glossary, people and notes for Claude.
         "projects": crate::projects::context_for(&dir),
+        // The live notes a model kept during the call (on this call's own profile): a draft to check
+        // against the transcript, never a source on its own; times in seconds.
+        "live_notes": live_notes_for_minutes(&dir),
     });
     println!("{}", serde_json::to_string_pretty(&out)?);
     Ok(())
+}
+
+/// The call's live notes for the minutes: what the model on the call's profile kept during the call
+/// (decisions, action items, open questions, what was going on last), with the stretch it covered and
+/// any part it never read. `None` when the call had none.
+fn live_notes_for_minutes(dir: &Path) -> Option<Value> {
+    let n = crate::livenotes::read_notes(dir)?;
+    if n.decisions.is_empty() && n.actions.is_empty() && n.questions.is_empty() && n.now.trim().is_empty() {
+        return None;
+    }
+    Some(json!({
+        "model": n.model,
+        "covered_until": n.covered_until,
+        "gaps": n.gaps,
+        "last_now": n.now,
+        "decisions": n.decisions,
+        "actions": n.actions,
+        "questions": n.questions,
+    }))
 }
 
 /// A Claude Code session (or Echo's own run: "echo notes") took this call for its minutes

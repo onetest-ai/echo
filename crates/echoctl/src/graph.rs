@@ -629,6 +629,10 @@ fn created_at(m: &Value) -> Option<DateTime<Utc>> {
 /// All messages of a chat (user messages and system events) created in [since, until],
 /// oldest first, ≤ 400.
 fn chat_items(token: &str, chat_id: &str, since: DateTime<Utc>, until: DateTime<Utc>) -> Result<Vec<Value>> {
+    chat_items_upto(token, chat_id, since, until, 400)
+}
+
+fn chat_items_upto(token: &str, chat_id: &str, since: DateTime<Utc>, until: DateTime<Utc>, max: usize) -> Result<Vec<Value>> {
     // Newest *created* first, so paging can stop at the first message older than `since` (the
     // default order is by last modification: an old message edited today would end it early).
     let mut url = Some(format!("{GRAPH}/chats/{}/messages?$top=50&$orderby=createdDateTime%20desc", urlencode(chat_id)));
@@ -642,10 +646,20 @@ fn chat_items(token: &str, chat_id: &str, since: DateTime<Utc>, until: DateTime<
                 _ => out.push(m),
             }
         }
-        url = v["@odata.nextLink"].as_str().map(str::to_owned).filter(|_| out.len() < 400);
+        url = v["@odata.nextLink"].as_str().map(str::to_owned).filter(|_| out.len() < max);
     }
     out.reverse();
     Ok(out)
+}
+
+/// What people wrote in a chat during [since, until], oldest first (no system events), up to `max`
+/// (the newest kept): a thread reading its meeting chat between calls.
+pub fn chat_history(chat_id: &str, since: DateTime<Utc>, until: DateTime<Utc>, max: usize) -> Result<Vec<Value>> {
+    let token = access_token()?;
+    Ok(chat_items_upto(&token, chat_id, since, until, max)?
+        .into_iter()
+        .filter(|m| m["messageType"] == "message" && m["deletedDateTime"].is_null())
+        .collect())
 }
 
 /// What people wrote in a chat during [since, until], oldest first (no system events).

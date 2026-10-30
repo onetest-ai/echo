@@ -39,7 +39,7 @@ minutes already can be done again.
 `echoctl context <dir>` prints JSON — use its numbers, don't recompute them:
 `duration_min`, `transcript_chars`, `chars_by_speaker`, `dominant_language`, `colleagues` /
 `external`, `user_notes` + `user_headings`, `heading_budget`, `summarize` + `skip_reason`,
-`previous_notes`, `vocabulary`, `template`, `frames`, `chat`, `me_profile`, `projects`.
+`previous_notes`, `vocabulary`, `template`, `frames`, `chat`, `me_profile`, `projects`, `live_notes`.
 
 `me_profile` (if set) is the user's own description — role, team, the people and terms they
 deal with, how they like notes and follow-ups written. Follow it for tone, emphasis and naming.
@@ -66,6 +66,13 @@ Name the speakers first (4a, if the transcript has "Speaker N" labels), then wri
   it is about. `? …` is the user's question (an open question unless the call answered it), `! …` a
   decision they noted, `- [ ] [12:22] …` their to-do (also written `- [12:22] [] …`; an action item for Me), `⚑` a moment they
   flagged — make sure what was said then is covered.
+- **The live notes** (`live_notes`, if present): decisions, action items and open questions a model
+  kept while the call ran (`t` = seconds into the call), and `last_now`, what was going on near the end.
+  They are a valuable checklist, not a source of truth: make sure each one is covered — a decision,
+  an owner and a task, a question still open or answered later in the call — but take its wording,
+  owner and time from the transcript, and drop one the transcript doesn't bear out (a live note can
+  mishear, or be overtaken minutes later). `gaps` were never read live; past `covered_until` there
+  are none.
 - Otherwise use the template's sections, at most `heading_budget` headings in total (merge or
   drop the least relevant). Follow each section's instruction.
 - Write in `dominant_language`. Keep names, products and figures exactly as said.

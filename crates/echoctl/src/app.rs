@@ -811,6 +811,53 @@ fn plugin_installs() -> Vec<(String, Option<String>)> {
         .collect()
 }
 
+/// Echo plugin installs older than this Echo: [{scope, project, version}]. An old plugin's terminal
+/// pane did things the app does now (it claimed every transcribed call for its own minutes).
+pub fn stale_plugins() -> Vec<Value> {
+    let path = user_home().join(".claude/plugins/installed_plugins.json");
+    let v: Value = fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    let plugins = v.get("plugins").unwrap_or(&v);
+    plugins
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter(|(k, _)| k.starts_with("echo@"))
+        .flat_map(|(k, list)| list.as_array().cloned().unwrap_or_default().into_iter().map(move |i| (k.clone(), i)))
+        .filter(|(_, i)| i["version"].as_str().is_some_and(|ver| crate::update::newer(env!("CARGO_PKG_VERSION"), ver)))
+        .map(|(k, i)| serde_json::json!({"plugin": k, "scope": i["scope"], "project": i["projectPath"], "version": i["version"]}))
+        .collect()
+}
+
+/// Bring every Echo plugin install up to date: the marketplace first, then each install in its scope
+/// (a project's from its folder). What each step said, for the log; an error when one failed.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn update_plugins() -> Result<String> {
+    let claude = claude_bin().ok_or_else(|| anyhow::anyhow!("Claude Code is not installed"))?;
+    let stale = stale_plugins();
+    let mut said = String::new();
+    let run = |args: &[&str], cwd: Option<&str>, said: &mut String| -> Result<()> {
+        let mut c = std::process::Command::new(&claude);
+        c.args(args).stdin(std::process::Stdio::null());
+        if let Some(d) = cwd.filter(|d| Path::new(d).is_dir()) {
+            c.current_dir(d);
+        }
+        let o = c.output()?;
+        said.push_str(&String::from_utf8_lossy(&o.stdout));
+        said.push_str(&String::from_utf8_lossy(&o.stderr));
+        anyhow::ensure!(o.status.success(), "claude {} failed", args.join(" "));
+        Ok(())
+    };
+    let markets: std::collections::BTreeSet<String> = stale.iter().filter_map(|s| s["plugin"].as_str()?.split_once('@').map(|(_, m)| m.to_string())).collect();
+    for m in &markets {
+        run(&["plugin", "marketplace", "update", m], None, &mut said)?;
+    }
+    for s in &stale {
+        let (Some(p), Some(scope)) = (s["plugin"].as_str(), s["scope"].as_str()) else { continue };
+        run(&["plugin", "update", p, "--scope", scope], s["project"].as_str(), &mut said)?;
+    }
+    Ok(said)
+}
+
 /// Where Claude Code installed the Echo plugin (the newest user-scope install, else any).
 pub fn plugin_root() -> Option<PathBuf> {
     let path = user_home().join(".claude/plugins/installed_plugins.json");

@@ -759,9 +759,9 @@ enum ProjectCmd {
         #[arg(long)]
         remove: Option<usize>,
     },
-    /// A source the Brain reads for the project: --mail <domain or address>, --channel <team id>|<channel
-    /// id> (--name to show), --folder <path> (--exclude <glob>…: what in it not to read), or --remove
-    /// <kind:id> as `show` lists them
+    /// A source the project reads: --mail <domain or address>, --channel <team id>|<channel id> (--name
+    /// to show), --folder <path> (--exclude <glob>…: what in it not to read) into the Brain; --chat <chat
+    /// id> (19:…) a meeting chat its work reads between calls; or --remove <kind:id> as `show` lists them
     #[cfg(feature = "brain")]
     Source {
         id: String,
@@ -771,6 +771,8 @@ enum ProjectCmd {
         channel: Option<String>,
         #[arg(long)]
         folder: Option<std::path::PathBuf>,
+        #[arg(long)]
+        chat: Option<String>,
         #[arg(long)]
         exclude: Vec<String>,
         #[arg(long)]
@@ -848,10 +850,13 @@ enum ProjectCmd {
 
 #[derive(Subcommand)]
 enum LedgerCmd {
-    /// Bring the evidence up to date with the project's calls (--limit: only the newest N)
+    /// Bring the evidence up to date with the project's calls (--limit: only the newest N); --chats also
+    /// reads its meeting chats between calls (Microsoft 365)
     Sync {
         #[arg(long)]
         limit: Option<usize>,
+        #[arg(long)]
+        chats: bool,
     },
     /// Evidence not processed yet, oldest first
     Pending,
@@ -1573,8 +1578,13 @@ fn project_command(cmd: ProjectCmd) -> Result<()> {
             show(&p)?
         }
         #[cfg(feature = "brain")]
-        ProjectCmd::Source { id, mail, channel, folder, exclude, name, remove } => {
+        ProjectCmd::Source { id, mail, channel, folder, chat, exclude, name, remove } => {
             let add = match (mail, channel, folder) {
+                _ if chat.is_some() => {
+                    let c = chat.clone().unwrap_or_default().trim().to_string();
+                    anyhow::ensure!(c.starts_with("19:") && !c.contains(char::is_whitespace), "--chat takes a Teams chat id (19:…@thread.v2)");
+                    Some(("teams_chat".to_string(), c))
+                }
                 (Some(m), _, _) => Some(("mail".to_string(), brain::sources::mail_source(&m)?)),
                 (None, Some(c), _) if c.split_once('|').is_some_and(|(a, b)| !a.is_empty() && !b.is_empty()) => Some(("teams_channel".to_string(), c)),
                 (None, Some(_), _) => anyhow::bail!("--channel takes <team id>|<channel id>"),
@@ -2099,7 +2109,13 @@ fn ledger_command(id: &str, cmd: LedgerCmd) -> Result<()> {
         v.as_array().cloned().ok_or_else(|| anyhow::anyhow!("{}: expected a JSON array", p.display()))
     };
     match cmd {
-        LedgerCmd::Sync { limit } => print_json(&serde_json::json!({ "written": ledger::sync(id, limit)?, "pending": ledger::pending(id)? })),
+        LedgerCmd::Sync { limit, chats } => {
+            let mut written = ledger::sync(id, limit)?;
+            if chats {
+                written.extend(ledger::chat_sync(id)?);
+            }
+            print_json(&serde_json::json!({ "written": written, "pending": ledger::pending(id)?, "chats": ledger::chat_state(id) }))
+        }
         LedgerCmd::Pending => print_json(&serde_json::json!(ledger::pending(id)?)),
         LedgerCmd::Context => print_json(&ledger::context(id)?),
         LedgerCmd::Apply { evidence, proposals } => print_json(&ledger::apply(id, &evidence, &read(&proposals)?)?),

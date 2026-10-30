@@ -32,7 +32,7 @@ const MAX_ITEMS: usize = 10;
 /// A run that takes longer is stopped.
 const TIMEOUT: Duration = Duration::from_secs(40 * 60);
 /// A call is read once it ended this long ago (its minutes and the user's notes come first).
-const SETTLE: chrono::Duration = chrono::Duration::minutes(15);
+pub(crate) const SETTLE: chrono::Duration = chrono::Duration::minutes(15);
 const TOOLS: &str = "Bash,Read,Glob,Grep,Write,Edit,Skill";
 
 fn ledger_dir(id: &str) -> PathBuf {
@@ -60,7 +60,12 @@ pub fn run(id: &str) -> Result<Value> {
     let _one = crate::app::FileLock::try_take(&ledger_dir(id).join(".sync.lock"))?.ok_or_else(|| anyhow!("{} is being synced already", p.name))?;
     let started = Local::now();
     let first = ledger::Ledger::of(id)?.events()?.iter().all(|e| e["type"] != "processed");
-    let written = ledger::sync(id, first.then_some(BACKFILL))?;
+    let mut written = ledger::sync(id, first.then_some(BACKFILL))?;
+    // Its meeting chats between calls (a chat that can't be read keeps its error; the calls go on).
+    match ledger::chat_sync(id) {
+        Ok(w) => written.extend(w),
+        Err(e) => eprintln!("project sync {id}: the meeting chat: {e:#}"),
+    }
     let backlog = ledger::pending(id)?;
     let before = backlog.len();
     let pending: Vec<String> = backlog.into_iter().filter_map(|x| x["id"].as_str().map(str::to_owned)).take(MAX_ITEMS).collect();
@@ -279,6 +284,10 @@ fn due() -> Vec<String> {
             let failed_recently = state(&p.id)["state"] == "failed" && state(&p.id)["at"].as_str().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()).is_some_and(|t| now.signed_duration_since(t) < chrono::Duration::hours(1));
             if failed_recently {
                 return false;
+            }
+            // A meeting chat due a read, or a day of it not read yet.
+            if ledger::chat_due(p) || known.keys().any(|k| k.starts_with("chat-") && !processed.contains(k)) {
+                return true;
             }
             projects::calls_of(p).unwrap_or_default().iter().rev().take(BACKFILL).any(|(d, _)| {
                 let meta = crate::calls::read_json(&d.join("meta.json"));

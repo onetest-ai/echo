@@ -552,6 +552,15 @@ fn call_detail(dir: &Path) -> Value {
                     let mut c = crate::ledger::call_changes(&p.id, &stamp).ok()?;
                     all.extend(c["changes"].as_array().into_iter().flatten().map(|x| (p.id.clone(), x.clone())));
                     c["project"] = json!(p.id);
+                    // Not read yet: whether its sync is reading now, or when it will (the call settles
+                    // first, `projectsync::SETTLE` after it ended; the scheduler looks every 5 minutes).
+                    if c["read"] != true {
+                        c["syncing"] = json!(crate::projectsync::state(&p.id)["state"] == "running");
+                        let ended = calls::read_json(&dir.join("meta.json"))["ended_at"].as_str().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok());
+                        if let Some(t) = ended.filter(|_| dir.join("segments.json").is_file()) {
+                            c["reads_at"] = json!((t + crate::projectsync::SETTLE).to_rfc3339());
+                        }
+                    }
                     Some(c)
                 })
                 .collect();
@@ -567,6 +576,7 @@ fn call_detail(dir: &Path) -> Value {
         "profile": profile.ok(),
         "notes": crate::livenotes::read_notes(dir),
         "answers": crate::livenotes::read_answers(dir),
+        "usage": crate::livenotes::read_usage(dir),
         "status": crate::livenotes::status(dir),
         "prep": calls::prep(dir),
     });
@@ -878,6 +888,7 @@ fn settings_snapshot() -> Value {
         "calendar": crate::graph::account(),
         "graph_custom": c.is_some_and(|c| c.graph_client_id.is_some()),
         "health": health,
+        "stale_plugins": crate::app::stale_plugins(),
         "models": crate::models::list_value().ok(),
         "downloading": crate::app::downloading().map(|(n, pct)| json!({ "name": n, "pct": pct })),
     });
@@ -1199,6 +1210,8 @@ fn project_op(v: &Value) -> anyhow::Result<Option<String>> {
             let sid = s("source").unwrap_or_default().trim().to_string();
             let sid = match kind.as_str() {
                 "teams_channel" if sid.split_once('|').is_some_and(|(a, b)| !a.is_empty() && !b.is_empty()) => sid,
+                // A meeting chat its work reads between calls (`ledger::chat_sync`).
+                "teams_chat" if sid.starts_with("19:") && !sid.contains(char::is_whitespace) => sid,
                 #[cfg(feature = "brain")]
                 "mail" => crate::brain::sources::mail_source(&sid)?,
                 _ => anyhow::bail!("not a source: {kind}"),
@@ -1438,6 +1451,14 @@ pub fn handle(msg: &str) -> Handled {
         #[cfg(feature = "brain")]
         "brain_sync" => {
             brain_sync_now();
+            true.into()
+        }
+        // Bring Claude Code's Echo plugin installs up to this Echo (Needs you, Settings → Health).
+        "update_plugins" => {
+            std::thread::spawn(|| match crate::app::update_plugins() {
+                Ok(_) => crate::app::notify("Echo", "The Echo plugin in Claude Code is up to date — restart Claude Code to use it."),
+                Err(e) => crate::app::notify("Echo", &format!("Couldn't update the Echo plugin in Claude Code: {e:#}")),
+            });
             true.into()
         }
         // A sender of mail or posts trusted, ignored or forgotten for a client: read again at the next sync.

@@ -320,18 +320,24 @@ const ACTIVITIES = [
   { id: 'brain', label: 'Brain', layout: 'single', when: () => brainOn(), icon: ICON('<path d="M9 4.5a3 3 0 0 0-3 3 3 3 0 0 0-2 5.2A3.2 3.2 0 0 0 7.5 18 2.5 2.5 0 0 0 12 19V6a2 2 0 0 0-3-1.5z"/><path d="M15 4.5a3 3 0 0 1 3 3 3 3 0 0 1 2 5.2A3.2 3.2 0 0 1 16.5 18 2.5 2.5 0 0 1 12 19"/>') },
   { id: 'settings', label: 'Settings', layout: 'single', bottom: true, icon: ICON('<circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/>') },
 ]
-/** A call's tabs, in order. `x` = what the call has: `{live, chat, frames, actions}` (counts, or
- *  null for actions not written yet). */
+/** A call's tabs, in order. `x` = what the call has: `{recording, chat, frames, actions}` (counts, or
+ *  null for actions not written yet). One Transcript tab: live while the call records (with its live
+ *  notes beside it), the final transcript after — and the live notes stay beside it. */
 const CALL_TABS = [
-  { id: 'live', label: 'Live', when: (x) => x.live },
   { id: 'minutes', label: 'Minutes' },
   { id: 'transcript', label: 'Transcript' },
   { id: 'chat', label: 'Chat', when: (x) => x.chat > 0, count: (x) => x.chat },
   { id: 'screens', label: 'Screens', when: (x) => x.frames > 0, count: (x) => x.frames },
   { id: 'actions', label: 'Actions', count: (x) => x.actions ?? '' },
 ]
-/** The tabs a call shows: `[id, label, count ('' = none)]`. */
-const callTabs = (x) => CALL_TABS.filter((t) => !t.when || t.when(x)).map((t) => [t.id, t.label, t.count ? t.count(x) : ''])
+/** The tabs a call shows: `[id, label, count ('' = none)]`; while it records, Transcript comes first
+ *  with a fourth element, `true` (its recording dot). */
+const callTabs = (x) => {
+  const tabs = CALL_TABS.filter((t) => !t.when || t.when(x)).map((t) => [t.id, t.label, t.count ? t.count(x) : ''])
+  if (!x.recording) return tabs
+  const i = tabs.findIndex((t) => t[0] === 'transcript')
+  return [[...tabs[i], true], ...tabs.filter((_, j) => j !== i)]
+}
 /** What a calendar event's card offers, first match wins: `e` the event, `st` its timing
  *  (`{past, live, recordable}`). The card draws each kind (`eventDetail`). */
 const EVENT_ACTIONS = [
@@ -829,12 +835,12 @@ function doc() {
   const chat = Array.isArray(c.chat) ? c.chat : []
   const frames = Array.isArray(c.frames) ? c.frames : []
   const actions = Array.isArray(c.actions) ? c.actions : null
-  const live = hasLive(c)
-  const tabs = callTabs({ live, chat: chat.length, frames: frames.length, actions: actions ? actions.length : null })
-  // While a call records (or is transcribed), open it on Live once; once its minutes are written,
-  // on Minutes once. The user's own choice stays.
-  if (live && S.autoTab !== c.name && (c.status === 'recording' || c.status === 'transcribing')) { S.autoTab = c.name; S.tab = 'live' }
-  if (S.autoTab === c.name && S.tab === 'live' && c.notes && c.notes_run && c.notes_run.state === 'done') { S.autoTab = 'done:' + c.name; S.tab = 'minutes' }
+  const tabs = callTabs({ recording: c.status === 'recording', chat: chat.length, frames: frames.length, actions: actions ? actions.length : null })
+  // While a call records (or is transcribed), open it on its Transcript once; once its minutes are
+  // written, on Minutes once. The user's own choice stays. (`live` was the Transcript's live twin.)
+  if (S.tab === 'live') S.tab = 'transcript'
+  if (S.autoTab !== c.name && (c.status === 'recording' || c.status === 'transcribing')) { S.autoTab = c.name; S.tab = 'transcript' }
+  if (S.autoTab === c.name && S.tab === 'transcript' && c.notes && c.notes_run && c.notes_run.state === 'done') { S.autoTab = 'done:' + c.name; S.tab = 'minutes' }
   if (!tabs.some((t) => t[0] === S.tab)) S.tab = 'minutes'
   const people = c.people && c.people.length ? `<span class="people">${esc(c.people.slice(0, 6).join(', '))}${c.people.length > 6 ? ` and ${c.people.length - 6} more` : ''}</span>` : ''
   const head = `${listToggle()}<div class="head-row">
@@ -845,7 +851,7 @@ function doc() {
         </div>
         <div class="doc-actions">${callMenu(c)}</div>
       </div>
-      <div class="tabs" role="tablist">${tabs.map(([id, label, n]) => `<button class="tab" role="tab" data-tab="${id}" aria-selected="${S.tab === id}">${label}${n !== '' ? `<span class="n">${n}</span>` : ''}</button>`).join('')}</div>${notices()}`
+      <div class="tabs" role="tablist">${tabs.map(([id, label, n, rec]) => `<button class="tab" role="tab" data-tab="${id}" aria-selected="${S.tab === id}">${rec ? '<span class="tab-rec" aria-label="Recording"></span>' : ''}${label}${n !== '' ? `<span class="n">${n}</span>` : ''}</button>`).join('')}</div>${notices()}`
   const body = tabBody(c, segs, chat, frames, actions)
   const confirm = S.confirmDelete ? confirmBox(c) : ''
   return typeof body === 'string' ? { head, pane: confirm + body } : { head, bar: confirm + body.bar, frame: body.frame }
@@ -890,12 +896,17 @@ function confirmBox(c) {
 
 /** Transcript turns: consecutive lines of one speaker joined; `q` highlights, `jump` (seconds)
  *  marks the turn to scroll to. */
+/** A turn's longest stretch, in seconds, before the same speaker's next line starts a new one. */
+const TURN_MAX = 60
 function turnsHtml(segs, q, jump, marks = []) {
+  // One speaker's lines join a turn while they follow each other (< 8 s apart), each line its own
+  // paragraph; a turn runs at most TURN_MAX seconds, then the next starts with its own time — during a
+  // call every other voice is one "Remote" track, which would otherwise be one block of the whole call.
   const turns = []
   for (const s of segs) {
     const last = turns[turns.length - 1]
-    if (last && last.who === speaker(s) && s.start - last.end < 8) { last.text += ' ' + s.text; last.end = s.end }
-    else turns.push({ who: speaker(s), me: speaker(s) === 'Me', spk: s.speaker_id, start: s.start, end: s.end, lang: s.lang, text: s.text })
+    if (last && last.who === speaker(s) && s.start - last.end < 8 && s.start - last.start < TURN_MAX) { last.text += ' ' + s.text; last.parts.push(s.text); last.end = s.end }
+    else turns.push({ who: speaker(s), me: speaker(s) === 'Me', spk: s.speaker_id, start: s.start, end: s.end, lang: s.lang, text: s.text, parts: [s.text] })
   }
   const jumpIdx = jump == null ? -1 : Math.max(0, turns.findIndex((t) => t.end >= jump - 2))
   return `<div class="transcript">${turns.map((t, i) => {
@@ -908,19 +919,20 @@ function turnsHtml(segs, q, jump, marks = []) {
     const dots = mine.length ? `<span class="nt-marks">${mine.map((m) => `<span class="nt-dot k-${m.kind}" title="${esc((NOTE_LOOK[m.kind] || NOTE_LOOK.note)[1] + (m.text ? ': ' + m.text : ''))}"></span>`).join('')}</span>` : ''
     return `<div class="turn ${t.me ? 'me' : 'remote'}${spk}${hit ? ' hit' : ''}" data-t="${t.start}" ${i === jumpIdx ? 'id="jump"' : ''}>
       <time>${dots}${clock(t.start)}</time>
-      <div><div class="who">${esc(t.who)}${t.lang ? `<span class="lang">${esc(t.lang)}</span>` : ''}</div><p>${esc(t.text)}</p></div></div>`
+      <div><div class="who">${esc(t.who)}${t.lang ? `<span class="lang">${esc(t.lang)}</span>` : ''}</div>${t.parts.map((x) => `<p>${esc(x)}</p>`).join('')}</div></div>`
   }).join('')}</div>`
 }
 
 function tabBody(c, segs, chat, frames, actions) {
   if (S.tab === 'transcript') {
+    // Live notes kept (or being kept): the transcript with them beside it, as during the call.
+    if (hasLive(c)) return liveTab(c, segs)
     if (!segs.length) return c.status === 'recording'
       ? `<p style="color:var(--text-3)">Listening. The live transcript appears here as people speak.</p>`
       : `<p style="color:var(--text-3)">${c.status === 'transcribing' ? 'Transcribing on this computer. This takes about a quarter of the call length.' : 'No transcript for this call.'}</p>`
     return `<div class="from-bar"><input class="search" id="find" placeholder="Find in transcript" value="${esc(S.find)}" style="max-width:280px" aria-label="Find in transcript"></div>
       ${turnsHtml(segs, S.find.trim().toLowerCase(), S.jump, noteMarks(c))}`
   }
-  if (S.tab === 'live') return liveTab(c, segs)
   if (S.tab === 'chat') {
     return `<div class="chat">${chat.map((m) => `<article class="msg"><header><b>${esc(m.from)}</b><time>${m.t == null ? '' : m.t < 0 ? 'before the call' : clock(m.t)}</time></header>
       <p>${esc(m.text)}</p>${m.files && m.files.length ? `<div class="files">${esc(m.files.join(', '))}</div>` : ''}</article>`).join('')}</div>`
@@ -978,7 +990,15 @@ function callChanges(c) {
     const rows = g.changes.filter((x) => x.verdict !== 'wrong' && !(x.op === 'create' && linked.has(x.node.id)))
     const head = `<div class="cc-th">${projIcon(p, 14)}<b>${esc(p.name)}</b>`
     if (!g.read) {
-      return `${head}<span class="set-sub">${g.queued ? 'hasn\'t read this call yet' : 'doesn\'t read this call (too short, or no transcript)'}</span><span class="grow"></span>${g.queued ? `<button class="link-btn" data-cc-sync="${esc(g.project)}">Sync now</button>` : ''}</div>`
+      // Not read yet: being read now, due at a time (15 min after the call, then the next look), or
+      // nothing to read (no transcript).
+      const at = g.reads_at && new Date(g.reads_at)
+      const why = g.syncing ? 'is reading this call now…'
+        : g.queued ? 'hasn\'t read this call yet'
+        : at ? (at > new Date() ? `reads this call after ${esc(hm(at))} — 15 minutes after it ended` : 'reads this call within a few minutes')
+        : 'has nothing to read in this call (no transcript)'
+      const canSync = !g.syncing && (g.queued || at)
+      return `${head}<span class="set-sub">${why}</span><span class="grow"></span>${canSync ? `<button class="link-btn" data-cc-sync="${esc(g.project)}">Sync now</button>` : ''}</div>`
     }
     const hidden = linked.size ? ` · ${linked.size} on the action items below` : ''
     if (!rows.length) return `${head}<span class="set-sub">nothing changed${hidden}</span></div>`
@@ -1141,6 +1161,14 @@ function alsoPanel() {
   return `<div class="al">${chips ? `<div class="al-chips">${chips}</div>` : ''}${groups || '<p class="set-sub">Nothing close elsewhere yet — it fills as more calls (and, later, channels, mail and files) come into the Brain.</p>'}</div>`
 }
 PANEL_VIEWS.push({ id: 'also', label: 'Also discussed', icon: ICON('<circle cx="7" cy="12" r="3"/><circle cx="17" cy="6" r="3"/><circle cx="17" cy="18" r="3"/><path d="M9.6 10.7 14.4 7.4M9.6 13.3l4.8 3.3"/>'), area: 'right', when: () => brainOn() && S.view === 'calls' && !!S.selected, render: alsoPanel })
+// A button that sends one IPC command as it is (`data-cmd-ipc`), then reads the settings again.
+document.addEventListener('click', (e) => {
+  const b = e.target.closest && e.target.closest('[data-cmd-ipc]')
+  if (!b) return
+  b.disabled = true
+  send({ cmd: b.dataset.cmdIpc })
+  setTimeout(() => loadSettings().then(render), 8000)
+})
 /** Needs you (`attention.rs`): what waits for the user's decision, from everywhere, in one list — the
  *  activity bar's entry above Settings shows or hides it. Each item is decided here with the same
  *  message its own place sends, or opens that place; decided anywhere, it moves to Done this week. */
@@ -1525,7 +1553,7 @@ function ago(iso) {
 
 const atLink = (t) => typeof t === 'number' ? ` <a class="at" data-at="${t}" title="Jump to ${clock(t)} in the transcript">${clock(t)}</a>` : ''
 
-function liveHead(c) {
+function liveHead(c, find = '') {
   const l = c.live || {}, st = l.status || {}, n = l.notes
   const state = st.paused ? 'paused' : st.state || (c.status === 'recording' ? 'waiting' : 'ended')
   let line = LIVE_STATE[state] || ''
@@ -1543,7 +1571,11 @@ function liveHead(c) {
   const sign = failedFor ? (signinNote(failedFor) || `<div class="signin error"><span class="signin-text">${esc(st.error || '')}</span><span class="signin-acts"><button class="btn primary" data-signin="${esc(failedFor.id)}">Sign in…</button></span></div>`)
     : signinNote(p)
   const problem = st.settings_error ? `The AI settings can't be read: ${st.settings_error}` : !st.enabled ? 'Live notes are off (menu → AI for calls → Live notes during calls).' : (!failedFor && st.state === 'failed' && st.error) || ''
-  return `<div class="live-head">${model}${where}<span class="live-state ${esc(state)}">${esc(line)}</span>${draftBy}<span class="grow"></span>${pause}</div>
+  // What the call's live jobs used so far (Claude Code's own count).
+  const u = l.usage
+  const tok = (x) => x >= 1e6 ? `${(x / 1e6).toFixed(1)}M` : x >= 1e3 ? `${Math.round(x / 1e3)}K` : String(x)
+  const used = u && u.jobs ? `<span class="live-usage" title="${esc(`${u.jobs} jobs · input ${u.input_tokens} + cache read ${u.cache_read_tokens} + cache write ${u.cache_write_tokens} · output ${u.output_tokens}${u.cost_usd ? ` · $${u.cost_usd.toFixed(3)}` : ''}`)}">${u.jobs} update${u.jobs === 1 ? '' : 's'} · ${tok(u.input_tokens + u.cache_read_tokens + u.cache_write_tokens)} in · ${tok(u.output_tokens)} out${u.cost_usd ? ` · $${u.cost_usd.toFixed(2)}` : ''}</span>` : ''
+  return `<div class="live-head">${find}${model}${where}<span class="live-state ${esc(state)}">${esc(line)}</span>${draftBy}${used}<span class="grow"></span>${pause}</div>
     ${sign}${problem ? `<p class="live-error">${esc(problem)}</p>` : ''}`
 }
 
@@ -1563,12 +1595,17 @@ function liveNotes(c) {
   const sec = (title, items, f) => items && items.length ? `<h3>${title}</h3><ul>${items.map(f).join('')}</ul>` : ''
   const gaps = (n.gaps || []).map((g) => `${clock(g[0])}–${clock(g[1])}`).join(', ')
   const empty = !n.now && !(n.decisions || []).length && !(n.actions || []).length && !(n.questions || []).length
-  return `${n.now ? `<p class="live-now"><b>Now</b> ${esc(n.now)}</p>` : ''}
-    ${sec('Decisions', n.decisions, (x) => `<li>${esc(x.text)}${atLink(x.t)}</li>`)}
+  return `${sec('Decisions', n.decisions, (x) => `<li>${esc(x.text)}${atLink(x.t)}</li>`)}
     ${sec('Action items', n.actions, (a) => `<li><span class="owner${a.owner === 'Me' ? ' me' : ''}">${esc(a.owner)}</span> ${esc(a.task)}${atLink(a.t)}</li>`)}
     ${sec('Open questions', n.questions, (x) => `<li>${esc(x.text)}${atLink(x.t)}</li>`)}
     ${empty ? '<p class="muted">Nothing decided, owed or open yet.</p>' : ''}
     ${gaps ? `<p class="muted">Not covered: ${esc(gaps)}</p>` : ''}`
+}
+
+/** What is going on now, above the live notes (it never scrolls away under them). */
+function liveNow(c) {
+  const n = (c.live || {}).notes
+  return n && n.now ? `<p class="live-now"><b>Now</b> ${esc(n.now)}</p>` : ''
 }
 
 function prepCard(c) {
@@ -1608,20 +1645,22 @@ function liveAnswers(c) {
 }
 
 function liveTab(c, segs) {
-  const st = (c.live || {}).status || {}
-  const busy = !!st.asking || st.queued > 0
-  const dis = busy ? ' disabled' : ''
+  // After the call: the final transcript, searchable, its live notes still beside it.
+  const recording = c.status === 'recording'
+  const find = !recording && segs.length ? `<input class="search" id="find" placeholder="Find in transcript" value="${esc(S.find)}" style="max-width:280px" aria-label="Find in transcript">` : ''
+  const empty = recording ? 'Listening. The transcript appears here as people speak.' : c.status === 'transcribing' ? 'Transcribing on this computer.' : 'No transcript for this call.'
   return `<div class="live">
-    ${liveHead(c)}
+    ${liveHead(c, find)}
     <div class="live-grid">
-      <section class="live-transcript" id="live-transcript" aria-label="Live transcript">${segs.length ? turnsHtml(segs, '', null, noteMarks(c)) : `<p class="muted">Listening. The transcript appears here as people speak.</p>`}</section>
+      <section class="live-transcript" id="live-transcript" aria-label="Transcript">${segs.length ? turnsHtml(segs, recording ? '' : S.find.trim().toLowerCase(), recording ? null : S.jump, noteMarks(c)) : `<p class="muted">${empty}</p>`}</section>
       <section class="live-side" aria-label="Live notes">
-        ${prepCard(c)}
-        <div class="live-notes doc">${liveNotes(c)}</div>
-        <div class="live-ask">
-          <div class="live-buttons"><button class="btn" data-ask="missed"${dis}>What did I miss?</button><button class="btn" data-ask="question"${dis}>Suggest a question</button></div>
-          <form class="ask-row" data-askform="1"><input id="ask" class="search" placeholder="Ask about this call…" value="${esc(S.liveDraft)}" autocomplete="off" maxlength="500" aria-label="Ask about this call"><button class="btn primary" type="submit"${dis}>Ask</button></form>
+        ${liveNow(c)}
+        <div class="live-scroll">
+          <div class="live-notes doc">${liveNotes(c)}</div>
+          ${prepCard(c)}
         </div>
+        <!-- Questions about the call go to its Claude session (the call's own profile, guarded). -->
+        <div class="live-ask"><button class="btn" data-cmd="ask-claude">Ask Claude about this call</button></div>
         <div class="live-answers">${liveAnswers(c)}</div>
       </section>
     </div>
@@ -2076,7 +2115,9 @@ const SETTINGS_BODY = {
       const mark = ok ? '<span class="set-ok">✓</span>' : c.status === 'denied' ? '<span class="warn">✗</span>' : '<span class="set-sub">?</span>'
       return setRow(`${mark} ${esc(c.name)}`, ok ? esc(c.why) : `${esc(c.why)}<div class="set-sub">${esc(c.how)}</div>`, ok || !c.url ? '' : actBtn('open_settings_url', 'Open settings', c.url))
     })
-    return `<h2>Health</h2><p class="set-lead">What Echo needs from this computer.</p>` + setCard('Permissions', rows) +
+    const stale = st.stale_plugins || []
+    const plugin = stale.length ? setCard('Claude Code', [setRow('<span class="warn">✗</span> An older Echo plugin', `${stale.map((s) => `${esc(s.version)} (${esc(s.scope)}${s.project ? ', ' + esc(String(s.project).split(/[\\/]/).pop()) : ''})`).join(', ')} — its terminal pane can hold calls back from Write minutes. Restart Claude Code after updating.`, '<button class="btn" data-cmd-ipc="update_plugins">Update it</button>')]) : ''
+    return `<h2>Health</h2><p class="set-lead">What Echo needs from this computer.</p>` + plugin + setCard('Permissions', rows) +
       setCard('', [setRow('Ask again', 'macOS asks for each permission Echo is missing.', actBtn('ask_permissions', 'Ask for permissions') + actBtn('recheck', 'Check again'))])
   },
 }
@@ -2698,10 +2739,22 @@ function sourceLabel(x) {
   if (x.kind === 'mail') return x.id.startsWith('person:') ? `mail with ${x.id.slice(7)}` : `mail with ${x.id.replace(/^domain:/, '')}`
   return x.name || x.id
 }
+/** A thread's meeting chats, read into its work between calls (`ledger::chat_sync`), with the chats
+ *  of its calls it doesn't read yet offered — whether or not the Brain is on. */
+function chatSources(p) {
+  const cs = p.chat_state || {}
+  const chips = (p.sources || []).filter((x) => x.kind === 'teams_chat').map((x) => {
+    const s = cs[x.id] || {}
+    const info = s.error ? `Couldn't read it: ${s.error}` : s.read_at ? `Read ${relDay(s.read_at.slice(0, 10))} · ${s.days || 0} day${s.days === 1 ? '' : 's'} of messages between calls go into the work` : 'Read into the work between calls — at the next sync'
+    return tok(`💬 ${esc(x.name || 'Meeting chat')}${s.error ? ' <span class="src-err">⚠</span>' : ''}`, { op: 'source-remove', kind: 'teams_chat', source: x.id }, info)
+  }).join('')
+  const offer = (p.chat_suggestions || []).map((c) => `<button class="tok add" data-pj="source-add" data-kind="teams_chat" data-source="${esc(c.id)}" data-name="${esc(c.name)}" title="The chat of ${c.calls} of its call${c.calls === 1 ? '' : 's'}: what is said there between calls goes into the work">+ 💬 ${esc(c.name)} chat</button>`).join('')
+  return chips + offer
+}
 function threadSources(p, cl) {
   if (!brainOn()) {
-    const kept = (p.sources || []).map((x) => tok(`${{ teams_channel: '#', mail: '✉', teams_chat: '💬', folder: '▣' }[x.kind] || '·'} ${esc(x.kind === 'mail' ? sourceLabel(x) : x.name || x.id)}`, null)).join('')
-    return kept + `<div class="pf-sub">The Brain is off, so channels, mail and folders aren't read — turn it on in Settings → Brain.</div>`
+    const kept = (p.sources || []).filter((x) => x.kind !== 'teams_chat').map((x) => tok(`${{ teams_channel: '#', mail: '✉', folder: '▣' }[x.kind] || '·'} ${esc(x.kind === 'mail' ? sourceLabel(x) : x.name || x.id)}`, null)).join('')
+    return chatSources(p) + kept + `<div class="pf-sub">The Brain is off, so channels, mail and folders aren't read — turn it on in Settings → Brain. Meeting chats are read into the work either way.</div>`
   }
   loadSourceState()
   const st = (m365.state && m365.state.state) || {}
@@ -2714,13 +2767,14 @@ function threadSources(p, cl) {
         + (S.pj.adding === `exclude:${x.id}` ? `<span class="tok-in"><input id="pj-add-exclude" data-add="exclude" data-root="${esc(x.id)}" value="${esc((x.exclude || []).join(', '))}" placeholder="Don't read — e.g. Archive/, *draft*" aria-label="What not to read" autofocus></span>` : `<button class="tok add" data-pj="adding" data-what="exclude:${esc(x.id)}" title="Folders or names in it not to read">Don't read…</button>`)
     }
     const s = st[`${x.kind}:${x.id}`] || {}
-    const info = s.error ? `Couldn't read it: ${s.error}` : s.read_at ? `Read ${relDay(s.read_at.slice(0, 10))} · ${s.found || 0} new` : x.kind === 'teams_chat' ? 'Its calls join the thread' : 'Not read yet'
-    return tok(`${icon[x.kind] || '·'} ${esc(sourceLabel(x))}${s.error ? ' <span class="src-err">⚠</span>' : ''}`, x.kind === 'teams_chat' ? null : { op: 'source-remove', kind: x.kind, source: x.id }, info)
+    const info = s.error ? `Couldn't read it: ${s.error}` : s.read_at ? `Read ${relDay(s.read_at.slice(0, 10))} · ${s.found || 0} new` : 'Not read yet'
+    return tok(`${icon[x.kind] || '·'} ${esc(sourceLabel(x))}${s.error ? ' <span class="src-err">⚠</span>' : ''}`, { op: 'source-remove', kind: x.kind, source: x.id }, info)
   }
   const have = new Set((p.sources || []).map((x) => `${x.kind}:${x.id}`))
   const signedIn = !m365.state || m365.state.signed_in
   const folderBtn = `<button class="tok add" data-pj="source-folder" title="A folder of this thread's documents">▣ Folder</button>`
-  if (!signedIn) return (p.sources || []).map(chip).join('') + folderBtn + `<div class="pf-sub">Channels and mail need Microsoft 365 — sign in under Settings → Calendar & chat.</div>`
+  const others = (p.sources || []).filter((x) => x.kind !== 'teams_chat')
+  if (!signedIn) return chatSources(p) + others.map(chip).join('') + folderBtn + `<div class="pf-sub">Channels, mail and meeting chats need Microsoft 365 — sign in under Settings → Calendar & chat.</div>`
   const suggest = ((cl && cl.domains) || []).filter((d) => !have.has(`mail:domain:${d}`)).map((d) => `<button class="tok add" data-pj="source-add" data-kind="mail" data-source="${esc(d)}" title="Mail with anyone at ${esc(d)}">+ mail with ${esc(d)}</button>`).join('')
   let channel = `<button class="tok add" data-pj="adding" data-what="channel"># Channel</button>`
   if (S.pj.adding === 'channel') {
@@ -2732,8 +2786,8 @@ function threadSources(p, cl) {
     channel = `<span class="tok-in"><select data-src-team aria-label="Team" autofocus><option value="">${teams.length ? 'Team…' : m365.teams && m365.teams.error ? 'Teams unavailable' : 'Loading teams…'}</option>${teams.map((t) => `<option value="${esc(t.id)}"${t.id === team ? ' selected' : ''}>${esc(t.name)}</option>`).join('')}</select>${team ? `<select data-src-channel aria-label="Channel"><option value="">${chans && chans.length ? 'Channel…' : 'Loading…'}</option>${(chans || []).filter((c) => !have.has(`teams_channel:${team}|${c.id}`)).map((c) => `<option value="${esc(c.id)}" data-name="${esc(teams.find((t) => t.id === team).name + ' › ' + c.name)}">${esc(c.name)}${c.membership === 'private' ? ' (private)' : ''}</option>`).join('')}</select>` : ''}</span>`
   }
   const mail = S.pj.adding === 'mail' ? `<span class="tok-in"><input id="pj-add-mail" data-add="mail" placeholder="A domain or an address — globex.example, jane@globex.example" aria-label="Mail with" autofocus></span>` : `<button class="tok add" data-pj="adding" data-what="mail">✉ Mail</button>`
-  return (p.sources || []).map(chip).join('') + suggest + channel + mail + folderBtn
-    + `<div class="pf-sub">Read into the Brain, never copied: each section links to the post, the mail or the file's page. Mail is matched by its people's addresses; a folder's pages that their text misses (diagrams, timelines) are read from their images.</div>`
+  return chatSources(p) + others.map(chip).join('') + suggest + channel + mail + folderBtn
+    + `<div class="pf-sub">A meeting chat goes into the work between calls (what was done, moved or blocked). Channels, mail and folders are read into the Brain, never copied: each section links to the post, the mail or the file's page. Mail is matched by its people's addresses; a folder's pages that their text misses (diagrams, timelines) are read from their images.</div>`
 }
 document.addEventListener('change', (e) => {
   const t = e.target
@@ -3848,7 +3902,7 @@ document.addEventListener('click', (e) => {
     case 'logo-remove': return projectSend('remove_logo')
     case 'client-logo-remove': return send({ cmd: 'project', op: 'client_logo', id: d.id })
     case 'rule-remove': return projectSend('rule_remove', { index: Number(d.index) })
-    case 'source-add': projectSend('source_add', { kind: d.kind, source: d.source }); setTimeout(() => loadSourceState(true), 1500); return
+    case 'source-add': projectSend('source_add', { kind: d.kind, source: d.source, name: d.name || undefined }); setTimeout(() => loadSourceState(true), 1500); return
     case 'source-remove': projectSend('source_remove', { kind: d.kind, source: d.source }); setTimeout(() => loadSourceState(true), 1500); return
     case 'source-folder': send({ cmd: 'source_folder_pick', id: S.pj.sel }); setTimeout(() => loadSourceState(true), 4000); return
     case 'rule-add': {
@@ -4027,7 +4081,7 @@ function paletteItems(target) {
   if (target && target.kind === 'call') {
     const c = target.c, busy = c.notes_run && (c.notes_run.state === 'queued' || c.notes_run.state === 'running')
     const transcribed = !['recording', 'transcribing'].includes(c.status)
-    for (const [id, label] of callTabs({ live: hasLive(c), chat: (c.chat || []).length, frames: (c.frames || []).length, actions: Array.isArray(c.actions) ? c.actions.length : null })) {
+    for (const [id, label] of callTabs({ recording: c.status === 'recording', chat: (c.chat || []).length, frames: (c.frames || []).length, actions: Array.isArray(c.actions) ? c.actions.length : null })) {
       add('This call', `Open ${label}`, () => press({ tab: id }), { keywords: 'tab show' })
     }
     add('This call', c.notes ? 'Write minutes again' : 'Write minutes', () => press({ cmd: 'write-notes' }), { keywords: 'notes update claude', disabled: !transcribed ? 'after the transcript is ready' : busy ? 'minutes are being written' : null })
@@ -4207,6 +4261,8 @@ function render() {
   // The live transcript follows the call while it is scrolled to the end.
   const lt = $('#live-transcript')
   const ltStick = !lt || lt.scrollTop + lt.clientHeight >= lt.scrollHeight - 40, ltTop = lt ? lt.scrollTop : 0
+  // The live notes keep where they were scrolled to (an update re-renders them).
+  const ls = $('.live-scroll'), lsTop = ls ? ls.scrollTop : 0
   const termFocus = focusedTerm()
   const app = $('#app')
   // The workbench: fixed areas, each replaced only when its HTML changed (`patch`).
@@ -4289,13 +4345,16 @@ function render() {
   const again = focus && $('#' + focus)
   if (again && again !== focused) { again.focus(); try { again.setSelectionRange(caret, caret) } catch {} }
   const pane = $('#pane')
+  let jumped = false
   if (pane) {
     const j = $('#jump')
-    if (S.jump != null && j) { j.scrollIntoView({ block: 'center' }); S.jump = null }
+    if (S.jump != null && j) { j.scrollIntoView({ block: 'center' }); S.jump = null; jumped = true }
     else pane.scrollTop = scroll
   }
   const lt2 = $('#live-transcript')
-  if (lt2) lt2.scrollTop = ltStick ? lt2.scrollHeight : ltTop
+  if (lt2 && !jumped) lt2.scrollTop = ltStick ? lt2.scrollHeight : ltTop
+  const ls2 = $('.live-scroll')
+  if (ls2) ls2.scrollTop = lsTop
   if (entering) { const p = $('.pane') || $('.grid-wrap'); if (p) { p.classList.remove('enter'); void p.offsetWidth; p.classList.add('enter') } }
   placeDetail()
   pushNotes(false)

@@ -194,7 +194,7 @@ fn admit(dir: &Path, intent: Intent) -> Result<Option<(crate::app::FileLock, Run
         return Ok(None);
     }
     calls::actions_locked(dir)?;
-    claim(dir)?;
+    claim(dir, intent)?;
     let r = Run {
         state: "queued".into(),
         pid: Some(std::process::id()),
@@ -718,11 +718,13 @@ fn check(dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Take the call for this run: a session working on it right now (its fresh claim, no notes yet)
-/// wins; an old claim, one from an earlier run of ours, or one for notes already written is taken
-/// over. A new claim is created exclusively, so a session claiming at the same moment isn't
-/// overwritten.
-fn claim(dir: &Path) -> Result<()> {
+/// Take the call for this run: for an automatic run, a session working on it right now (its fresh
+/// claim, no notes yet) wins; an old claim, one from an earlier run of ours, or one for notes already
+/// written is taken over. The user's own Write minutes takes over a session's claim too: an older
+/// Echo plugin's terminal pane claimed every transcribed call by itself, and Write minutes was then
+/// refused for half an hour with nobody writing them (2026-10-30). A new claim is created exclusively,
+/// so a session claiming at the same moment isn't overwritten.
+fn claim(dir: &Path, intent: Intent) -> Result<()> {
     let marker = dir.join(calls::CLAIMED);
     let mine = format!("{} echo notes\n", Local::now().to_rfc3339());
     match fs::OpenOptions::new().write(true).create_new(true).open(&marker) {
@@ -731,7 +733,10 @@ fn claim(dir: &Path) -> Result<()> {
         Err(e) => return Err(e.into()),
     }
     if session_claim(dir) && !dir.join("notes.md").exists() {
-        bail!("a Claude Code session is writing the minutes for this call right now");
+        if intent != Intent::Explicit {
+            bail!("a Claude Code session is writing the minutes for this call right now");
+        }
+        eprintln!("minutes: {}: a Claude Code session's claim taken over by Write minutes", dir.display());
     }
     fs::write(&marker, mine)?;
     Ok(())
@@ -1590,9 +1595,12 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join(calls::CLAIMED), "2026-10-23T01:00:00+02:00\n").unwrap(); // a session's, fresh
         save(&dir, &Run { state: "failed".into(), ..Default::default() }); // an earlier Echo run left its state
-        assert!(claim(&dir).is_err(), "Write notes doesn't overwrite a session's fresh claim");
+        assert!(claim(&dir, Intent::Auto).is_err(), "automatic minutes don't overwrite a session's fresh claim");
+        claim(&dir, Intent::Explicit).unwrap(); // the user's Write minutes does
+        assert!(fs::read_to_string(dir.join(calls::CLAIMED)).unwrap().contains("echo notes"));
+        fs::write(dir.join(calls::CLAIMED), "2026-10-23T01:00:00+02:00\n").unwrap();
         fs::write(dir.join("notes.md"), "# done").unwrap();
-        claim(&dir).unwrap(); // its notes exist: a re-run may take over
+        claim(&dir, Intent::Auto).unwrap(); // its notes exist: a re-run may take over
         assert!(fs::read_to_string(dir.join(calls::CLAIMED)).unwrap().contains("echo notes"));
         let _ = fs::remove_dir_all(&dir);
     }
