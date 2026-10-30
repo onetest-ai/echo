@@ -1,5 +1,7 @@
 /target
 /calls
+/projects
+/brain
 /.echo
 .DS_Store
 /plugin/bin/echoctl*

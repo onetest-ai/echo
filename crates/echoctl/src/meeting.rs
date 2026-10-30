@@ -24,6 +24,9 @@ pub struct MeetingContext {
     pub id: Option<String>,
     #[serde(default)]
     pub subject: Option<String>,
+    /// The calendar series an occurrence belongs to (Graph `seriesMasterId`): a project's series rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub series_id: Option<String>,
     #[serde(default)]
     pub start: Option<String>,
     #[serde(default)]

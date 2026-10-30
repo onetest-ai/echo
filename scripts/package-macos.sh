@@ -98,6 +98,19 @@ if [[ "$ARCH" == arm64 ]]; then
 else
   echo "warning: $ARCH build: no NeMo-Speech runtime, so no Nemotron models" >&2
 fi
+# PDFium for the Brain's thread folders (PDF pages, page images; loaded at runtime,
+# `brain/files/pdf.rs`): Frameworks/pdfium, signed below; its license in Resources. Apple Silicon only
+# (the pinned build); without it PDFs in thread folders aren't read.
+if [[ "$ARCH" == arm64 ]]; then
+  rm -rf dist/pdfium
+  scripts/fetch-pdfium.sh dist/pdfium
+  mkdir -p "$APP/Contents/Frameworks/pdfium" "$APP/Contents/Resources/pdfium"
+  mv dist/pdfium/licenses "$APP/Contents/Resources/pdfium/licenses"
+  cp dist/pdfium/libpdfium.dylib "$APP/Contents/Frameworks/pdfium/"
+  rm -rf dist/pdfium
+else
+  echo "warning: $ARCH build: no PDFium, so PDFs in thread folders aren't read" >&2
+fi
 # CFBundleShortVersionString stays numeric (0.1.1); the pre-release tag lives in the DMG name.
 sed -e "s/__VERSION__/${VERSION%%-*}/" -e "s/__BUILD__/$BUILD/" packaging/macos/Info.plist > "$APP/Contents/Info.plist"
 # App icon: an Icon Composer document compiled by actool (Xcode 26) into Assets.car — macOS
@@ -119,7 +132,7 @@ rm -rf dist/echo.icon dist/icon-out dist/echo.iconset
 
 echo "signing with: $SIGN_ID"
 # Nested code first (the hardened runtime loads only libraries signed by this team).
-for lib in "$APP"/Contents/Frameworks/nemo-speech/*.dylib; do
+for lib in "$APP"/Contents/Frameworks/nemo-speech/*.dylib "$APP"/Contents/Frameworks/pdfium/*.dylib; do
   [[ -e "$lib" ]] && codesign --force "$TIMESTAMP" --options runtime --sign "$SIGN_ID" "$lib"
 done
 codesign --force "$TIMESTAMP" --options runtime \

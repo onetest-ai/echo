@@ -29,7 +29,7 @@ const SHORT_UTTERANCE_S: f64 = 1.5;
 /// decode: the hint is kept only if the text length stays within
 /// GUARD_MIN_RATIO × … GUARD_MAX_RATIO × + GUARD_SLACK chars of the plain text — otherwise
 /// the hint made Whisper add (listed names in silence) or drop words.
-const GUARD_MIN_S: f64 = 1.0;
+pub(crate) const GUARD_MIN_S: f64 = 1.0;
 const GUARD_MIN_RATIO: f64 = 0.6;
 const GUARD_MAX_RATIO: f64 = 1.8;
 const GUARD_SLACK: f64 = 80.0;
@@ -320,7 +320,7 @@ pub(crate) fn build_prompt(cfg: &Config, meeting: Option<&MeetingContext>) -> Op
         m.vocabulary.iter().for_each(|v| add(v));
     }
     // The always-on terms, then the learned ones that belong to this meeting (`vocab.rs`).
-    crate::vocab::for_meeting(cfg, meeting).iter().for_each(|v| add(v));
+    crate::vocab::for_call(cfg, meeting).iter().for_each(|v| add(v));
     let mut prompt = String::new();
     for t in terms {
         if prompt.len() + t.len() + 2 > MAX_CHARS {
@@ -437,10 +437,7 @@ impl Whisper {
             Some(hint) if dur >= GUARD_MIN_S => {
                 let hinted = self.decode(&mut st.state, chunk, &lang, Some(hint))?;
                 let plain = self.decode(&mut st.state, chunk, &lang, None)?;
-                let text = |d: &Decoded| d.iter().map(|p| p.text.as_str()).collect::<Vec<_>>().join(" ");
-                let (ht, pt) = (text(&hinted), text(&plain));
-                let terms: Vec<String> = hint.split(", ").map(str::to_owned).collect();
-                if hint_is_sane(&ht, &pt) && !hint_adds_terms(&ht, &pt, hint) && boost_is_heard(&ht, &pt, &terms) { hinted } else { plain }
+                choose_hinted(hinted, plain, hint)
             }
             _ => self.decode(&mut st.state, chunk, &lang, None)?,
         };
@@ -910,6 +907,19 @@ fn is_word_list(text: &str) -> bool {
     }
     let short = parts.iter().filter(|p| p.split_whitespace().count() <= 2).count();
     short * 4 >= parts.len() * 3 && text.split_whitespace().count() <= parts.len() * 2 + 2
+}
+
+/// The hinted decode, unless the hint distorted it (too long or short against the plain one, its
+/// terms in place of other speech, a term nobody said): then the plain one. Any engine or server.
+pub(crate) fn choose_hinted(hinted: Decoded, plain: Decoded, hint: &str) -> Decoded {
+    let text = |d: &Decoded| d.iter().map(|p| p.text.as_str()).collect::<Vec<_>>().join(" ");
+    let (ht, pt) = (text(&hinted), text(&plain));
+    let terms: Vec<String> = hint.split(", ").map(str::to_owned).collect();
+    if hint_is_sane(&ht, &pt) && !hint_adds_terms(&ht, &pt, hint) && boost_is_heard(&ht, &pt, &terms) {
+        hinted
+    } else {
+        plain
+    }
 }
 
 /// The hint made Whisper "hear" its own terms: most of the hinted text is hint words the plain

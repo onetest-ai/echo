@@ -331,12 +331,46 @@ fn parse_notes(text: &str, duration: f64) -> Result<Draft> {
 fn complete(p: &Profile, system: &str, user: &str, max_tokens: u32, whole: bool, cancelled: &dyn Fn() -> bool) -> Result<String> {
     match p.kind {
         Kind::Local => complete_local(p, system, user, max_tokens, whole, cancelled),
-        Kind::System | Kind::Claude => complete_claude(p, system, user, whole, cancelled),
+        Kind::System | Kind::Claude => complete_claude(p, &p.live_model(), system, user, whole, CLAUDE_DEADLINE, cancelled),
+    }
+}
+
+/// One prompt, one answer, no tools (the Brain's taxonomy jobs): on `model` (else the profile's
+/// minutes model) — a local profile answers through its own server.
+#[cfg_attr(not(feature = "brain"), allow(dead_code))]
+pub(crate) fn complete_text(p: &Profile, system: &str, user: &str, max_tokens: u32) -> Result<String> {
+    match p.kind {
+        Kind::Local => complete_local(p, system, user, max_tokens, true, &|| crate::notes::quitting()),
+        Kind::System | Kind::Claude => {
+            let model = p.notes_model().unwrap_or_else(|| "sonnet".into());
+            complete_claude(p, &model, system, user, true, Duration::from_secs(300), &|| crate::notes::quitting())
+        }
+    }
+}
+
+/// One request with images (PNG bytes) and a text, on a profile's minutes model: the Brain's page
+/// reader. Claude Code gets the images as content blocks (no tools); a `local` profile its Messages API.
+#[cfg_attr(not(feature = "brain"), allow(dead_code))]
+pub(crate) fn complete_vision(p: &Profile, system: &str, images: &[Vec<u8>], text: &str, max_tokens: u32) -> Result<String> {
+    use base64::Engine as _;
+    let mut blocks: Vec<Value> = images
+        .iter()
+        .map(|png| json!({"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": base64::engine::general_purpose::STANDARD.encode(png)}}))
+        .collect();
+    blocks.push(json!({"type": "text", "text": text}));
+    let blocks = Value::Array(blocks);
+    match p.kind {
+        Kind::Local => complete_local_blocks(p, system, &blocks, max_tokens, &|| crate::notes::quitting()),
+        Kind::System | Kind::Claude => {
+            let model = p.notes_model().unwrap_or_else(|| "sonnet".into());
+            complete_claude_with(p, &model, system, text, Some(&blocks), true, Duration::from_secs(300), &|| crate::notes::quitting())
+        }
     }
 }
 
 fn curl_quote(s: &str) -> String {
-    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+    // A newline would end the option and start another (curl reads its config line by line).
+    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\r', "\\r"))
 }
 
 /// The curl config for one request (read from stdin: the token never on a command line). The HTTP
@@ -369,12 +403,21 @@ fn last_line(s: &str) -> String {
 /// `POST <base_url>/v1/messages` with thinking off, through curl. `-q` first: the user's
 /// `.curlrc` isn't read (it could turn on following redirects); no `-L`: redirects aren't followed.
 fn complete_local(p: &Profile, system: &str, user: &str, max_tokens: u32, whole: bool, cancelled: &dyn Fn() -> bool) -> Result<String> {
+    complete_local_body(p, system, json!(user), max_tokens, whole, cancelled)
+}
+
+#[cfg_attr(not(feature = "brain"), allow(dead_code))]
+fn complete_local_blocks(p: &Profile, system: &str, blocks: &Value, max_tokens: u32, cancelled: &dyn Fn() -> bool) -> Result<String> {
+    complete_local_body(p, system, blocks.clone(), max_tokens, true, cancelled)
+}
+
+fn complete_local_body(p: &Profile, system: &str, content: Value, max_tokens: u32, whole: bool, cancelled: &dyn Fn() -> bool) -> Result<String> {
     let body = json!({
         "model": p.live_model(),
         "max_tokens": max_tokens,
         "thinking": {"type": "disabled"},
         "system": system,
-        "messages": [{"role": "user", "content": user}],
+        "messages": [{"role": "user", "content": content}],
     });
     let mut c = Command::new("curl");
     #[cfg(windows)]
@@ -419,11 +462,21 @@ fn complete_local(p: &Profile, system: &str, user: &str, max_tokens: u32, whole:
 /// is checked before the model's own text is used. `system` runs where the minutes run (the
 /// data folder or `notes_in`: its `.claude/settings.json` is part of "as configured"); the others
 /// in Echo's state folder (they load no project settings anyway).
-fn complete_claude(p: &Profile, system: &str, user: &str, whole: bool, cancelled: &dyn Fn() -> bool) -> Result<String> {
-    let args: Vec<String> = vec![
-        "-p".into(),
-        "--output-format".into(),
-        "json".into(),
+fn complete_claude(p: &Profile, model: &str, system: &str, user: &str, whole: bool, deadline: Duration, cancelled: &dyn Fn() -> bool) -> Result<String> {
+    complete_claude_with(p, model, system, user, None, whole, deadline, cancelled)
+}
+
+/// As `complete_claude`; with `blocks` (Messages API content: images, text) the prompt goes in as one
+/// stream-json user message instead of plain text.
+#[allow(clippy::too_many_arguments)]
+fn complete_claude_with(p: &Profile, model: &str, system: &str, user: &str, blocks: Option<&Value>, whole: bool, deadline: Duration, cancelled: &dyn Fn() -> bool) -> Result<String> {
+    let mut args: Vec<String> = vec!["-p".into()];
+    if blocks.is_some() {
+        args.extend(["--input-format", "stream-json", "--output-format", "stream-json", "--verbose"].map(String::from));
+    } else {
+        args.extend(["--output-format", "json"].map(String::from));
+    }
+    args.extend([
         "--system-prompt".into(),
         system.into(),
         "--tools".into(),
@@ -431,12 +484,16 @@ fn complete_claude(p: &Profile, system: &str, user: &str, whole: bool, cancelled
         "--strict-mcp-config".into(),
         "--no-session-persistence".into(),
         "--model".into(),
-        p.live_model(),
-    ];
+        model.to_string(),
+    ]);
+    let input = match blocks {
+        Some(b) => format!("{}\n", json!({"type": "user", "message": {"role": "user", "content": b}})),
+        None => user.to_string(),
+    };
     let cwd = if p.kind.managed() { paths::state_dir() } else { ai::system_folder()? };
     fs::create_dir_all(&cwd)?;
     let mut child = ai::claude_command(p, &args, &cwd, true)?;
-    let (out, err, _, wrote) = ai::wait_output_with(&mut child, Some(user.as_bytes().to_vec()), CLAUDE_DEADLINE, cancelled)
+    let (out, err, _, wrote) = ai::wait_output_with(&mut child, Some(input.into_bytes()), deadline, cancelled)
         .map_err(|e| anyhow!("{}: {e:#}", p.name))?;
     let result = out.lines().rev().filter_map(|l| serde_json::from_str::<Value>(l.trim()).ok()).find(|v| v["type"] == "result");
     let text = result.as_ref().and_then(|v| v["result"].as_str()).unwrap_or("").to_string();

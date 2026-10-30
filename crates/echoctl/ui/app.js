@@ -44,6 +44,9 @@ const S = {
   folderProfile: null, // the AI profile picked for Claude · Echo folder (null: the default)
   sessions: null, // Claude conversations that can be resumed (`<profile>:folder`, `<profile>:<stamp>`)
   settings: null, // Settings' snapshot (`api/settings`)
+  tk: { data: null, project: '', sort: 'due', more: {} }, // Tasks: across projects
+  br: { tab: 'topics', scope: '', data: null, graph: null, node: null, nodeData: null, edit: null }, // the Brain
+  pj: { client: null, adding: null, pfEdit: null, menu: false, work: null, node: null, openOnly: true, view: 'tree', kind: '', owner: '', editField: null, found: false, foundData: null, data: null, sel: null, tab: 'brief', detail: null, briefEdit: null, showClosed: false, confirmDelete: false, newClient: false, picker: false }, // Projects
   setSection: 'general', // Settings' open section
   noteDraft: '', // the note being typed in My notes' box
   noteAt: null, // the call's time when it was started (seconds), while the call records
@@ -223,6 +226,41 @@ const NoteDoc = (() => {
 })()
 // end of the notes block
 
+// ── projects: how a project is drawn, and its stages (no DOM: `projects.test.mjs`) ────────────
+// A project shows as a small tile: its logo if it has one, else a symbol the user picked, else an
+// identicon from its id (a 5×5 pattern mirrored left to right, as GitHub draws a user without an
+// avatar) — in its colour. The same id always gives the same pattern.
+const ProjectArt = (() => {
+  /** FNV-1a of a string, as an unsigned 32-bit number. */
+  function hash(str) {
+    let h = 0x811c9dc5
+    for (const ch of String(str)) { h ^= ch.codePointAt(0); h = Math.imul(h, 0x01000193) >>> 0 }
+    return h >>> 0
+  }
+  /** 25 cells, row by row: columns 0–2 from the hash, 3–4 mirror 1–0. Never (nearly) empty or full. */
+  function cells(id) {
+    const h = hash(id)
+    let bits = Array.from({ length: 15 }, (_, i) => (h >>> i) & 1)
+    const on = bits.reduce((a, b) => a + b, 0)
+    if (on < 4 || on > 12) bits = bits.map((b, i) => (i % 2 ? b : 1 - b))
+    const out = []
+    for (let r = 0; r < 5; r++) for (let c = 0; c < 5; c++) out.push(bits[r * 3 + (c < 3 ? c : 4 - c)] === 1)
+    return out
+  }
+  const STAGES = [
+    ['pursuit', 'Pursuit', [['lead', 'Lead'], ['proposal', 'Proposal'], ['negotiation', 'Negotiation']]],
+    ['delivery', 'Delivery', [['kickoff', 'Kickoff'], ['active', 'Active'], ['on_hold', 'On hold'], ['wrap_up', 'Wrap-up']]],
+    ['closed', 'Closed', [['done', 'Done'], ['lost', 'Lost'], ['cancelled', 'Cancelled']]],
+  ]
+  /** A stage's label and its group's ("on_hold" → {label: 'On hold', group: 'Delivery'}). */
+  function stage(id) {
+    for (const [gid, glabel, xs] of STAGES) for (const [sid, label] of xs) if (sid === id) return { id, label, group: glabel, gid }
+    return { id, label: id, group: '', gid: '' }
+  }
+  return { hash, cells, STAGES, stage }
+})()
+// end of the projects block
+
 // ── ⌘K palette: ranking what was typed (no DOM: `palette.test.mjs`) ────────────────────────
 // Each item: `{label, group, keywords?, disabled?}`. A query matches when its words all appear
 // in the label (or keywords), in any order; whole-word and earlier matches rank first, and
@@ -270,9 +308,16 @@ const Palette = (() => {
 // `workbench.test.mjs` drives it from node.
 const ICON = (d) => `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`
 /** Activities (the activity bar, in order). `layout`: `list-detail` (a list beside the item) or `single`. */
+/** The Brain is built in and switched on (Settings → Brain); off, it shows nowhere. */
+const brainOn = () => !(typeof S !== 'undefined' && S.state && S.state.brain === false)
+/** The activities shown: those whose `when` (if any) holds. */
+const shownActivities = () => ACTIVITIES.filter((a) => !a.when || a.when())
 const ACTIVITIES = [
   { id: 'calls', label: 'Calls', layout: 'list-detail', icon: ICON('<path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2"/>') },
   { id: 'calendar', label: 'Calendar', layout: 'single', icon: ICON('<rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/>') },
+  { id: 'projects', label: 'Threads', layout: 'single', icon: ICON('<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M8 13h8"/>') },
+  { id: 'tasks', label: 'Tasks', layout: 'single', icon: ICON('<rect x="4" y="4" width="16" height="16" rx="3.5"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/>') },
+  { id: 'brain', label: 'Brain', layout: 'single', when: () => brainOn(), icon: ICON('<path d="M9 4.5a3 3 0 0 0-3 3 3 3 0 0 0-2 5.2A3.2 3.2 0 0 0 7.5 18 2.5 2.5 0 0 0 12 19V6a2 2 0 0 0-3-1.5z"/><path d="M15 4.5a3 3 0 0 1 3 3 3 3 0 0 1 2 5.2A3.2 3.2 0 0 1 16.5 18 2.5 2.5 0 0 1 12 19"/>') },
   { id: 'settings', label: 'Settings', layout: 'single', bottom: true, icon: ICON('<circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/>') },
 ]
 /** A call's tabs, in order. `x` = what the call has: `{live, chat, frames, actions}` (counts, or
@@ -391,6 +436,51 @@ async function loadState() {
 async function loadCalls() {
   try { S.calls = await get('api/calls'); S.error = null } catch (e) { S.error = String(e) }
 }
+async function loadProjects() {
+  try { S.pj.data = await get('api/projects') } catch { /* app restarting */ }
+}
+async function loadTasks() {
+  try { S.tk.data = await get('api/tasks') } catch { /* app restarting */ }
+}
+/** The work of the project a Tasks card is in (its details panel reads it). */
+async function loadWork() {
+  const id = S.pj.sel
+  if (!id) return
+  try { const w = await get('api/project/' + encodeURIComponent(id) + '/work'); if (S.pj.sel === id) S.pj.work = w } catch { /* app restarting */ }
+}
+/** The People tab's data: the open thread's or client's (`people.rs`). */
+async function loadPeople() {
+  const url = S.pj.client ? `api/client/${encodeURIComponent(S.pj.client)}/people` : S.pj.sel ? `api/project/${encodeURIComponent(S.pj.sel)}/people` : null
+  if (!url) { S.pj.people = null; return }
+  try { const d = await get(url); d.url = url; S.pj.people = d } catch { /* app restarting */ }
+}
+/** The Brain as one thread sees it: its topics and terms (shared layer + its client's), for its
+ *  Profile and Brief. */
+async function loadThreadBrain() {
+  const id = S.pj.sel
+  if (!id) return
+  try { const d = await get(`api/brain?thread=${encodeURIComponent(id)}`); d.thread = id; if (S.pj.sel === id) S.pj.tbrain = d } catch { /* no Brain in this build */ }
+}
+async function loadFound() {
+  try { S.pj.foundData = await get('api/found') } catch { /* app restarting */ }
+}
+async function loadProject() {
+  if (S.pj.found) return loadFound()
+  if (S.pj.client) {
+    const id = S.pj.client
+    try { const d = await get('api/client/' + encodeURIComponent(id)); if (S.pj.client === id) S.pj.cdata = d } catch { /* app restarting */ }
+    if (S.pj.ctab === 'people') await loadPeople()
+    return
+  }
+  const id = S.pj.sel
+  if (!id) { S.pj.detail = null; return }
+  try { const d = await get('api/project/' + encodeURIComponent(id)); if (S.pj.sel === id) S.pj.detail = d } catch { /* app restarting */ }
+  if (S.pj.tab === 'people') await loadPeople()
+  if ((S.pj.tab === 'profile' || S.pj.tab === 'brief') && (!S.pj.tbrain || S.pj.tbrain.thread !== S.pj.sel)) await loadThreadBrain()
+  if (S.pj.tab === 'work') {
+    try { const w = await get('api/project/' + encodeURIComponent(id) + '/work'); if (S.pj.sel === id) S.pj.work = w } catch { /* app restarting */ }
+  }
+}
 async function loadAgenda() {
   try { S.agenda = await get('api/agenda') } catch { S.agenda = [] }
 }
@@ -426,6 +516,26 @@ function route() {
   if (cm) { S.view = 'calendar'; if (cm[1]) S.cal.mode = cm[1]; return }
   const sm = h.match(/^settings(?:\/([a-z]+))?$/)
   if (sm) { S.view = 'settings'; if (sm[1]) S.setSection = sm[1]; return }
+  if (h === 'tasks') { S.view = 'tasks'; return }
+  const bm = h.match(/^brain(?:\/(\w+))?$/)
+  if (bm && !brainOn()) { S.view = 'calls'; return }
+  if (bm) { S.view = 'brain'; if (bm[1]) S.br.tab = bm[1]; return }
+  if (h === 'found') { S.view = 'projects'; S.pj.found = true; S.pj.client = null; S.pj.sel = null; S.pj.detail = null; return }
+  const cm2 = h.match(/^client\/([a-z0-9-]+)(?:\/(\w+))?$/)
+  if (cm2) {
+    S.view = 'projects'; S.pj.found = false
+    if (S.pj.client !== cm2[1]) { S.pj.cdata = null; S.pj.briefEdit = null; S.pj.person = null }
+    S.pj.client = cm2[1]; S.pj.ctab = cm2[2] || S.pj.ctab || 'overview'; S.pj.sel = null; S.pj.detail = null; S.pj.adding = null; return
+  }
+  const pm = h.match(/^projects?(?:\/([a-z0-9-]+))?(?:\/(\w+))?$/)
+  if (pm) {
+    S.view = 'projects'
+    S.pj.found = false
+    S.pj.client = null
+    if (pm[1] && S.pj.sel !== pm[1]) { S.pj.adding = null; S.pj.pfEdit = null; S.pj.menu = false; S.pj.sel = pm[1]; S.pj.detail = null; S.pj.work = null; S.pj.person = null; S.pj.ppAdding = false; S.pj.node = S.pj.wantNode || null; S.pj.wantNode = null; S.pj.briefEdit = null; S.pj.confirmDelete = false }
+    if (pm[2]) S.pj.tab = pm[2]
+    return
+  }
   S.view = 'calls'
   const m = h.match(/^call\/([^/]+)(?:\/(\w+))?$/)
   if (m) {
@@ -435,7 +545,9 @@ function route() {
 }
 const go = (hash) => { if (location.hash.slice(1) !== hash) location.hash = hash; else render() }
 /** An activity, where the user left it (the open call and tab; the calendar's day or week). */
-const goActivity = (id) => go(id === 'calendar' ? `calendar/${S.cal.mode}` : id === 'settings' ? `settings/${S.setSection}` : (S.selected ? `call/${S.selected}/${S.tab}` : 'calls'))
+const goActivity = (id) => go(id === 'calendar' ? `calendar/${S.cal.mode}` : id === 'settings' ? `settings/${S.setSection}`
+  : id === 'tasks' ? 'tasks' : id === 'brain' ? `brain/${S.br.tab}`
+  : id === 'projects' ? (S.pj.found ? 'found' : S.pj.client ? `client/${S.pj.client}/${S.pj.ctab || 'overview'}` : S.pj.sel ? `project/${S.pj.sel}/${S.pj.tab}` : 'projects') : (S.selected ? `call/${S.selected}/${S.tab}` : 'calls'))
 
 // ── language of the next recording (Record ▾) ──────────────────────────────────────────────
 // Per viewer, remembered in this webview; English unless chosen otherwise. '' = auto: Echo
@@ -575,11 +687,19 @@ function pill() {
 
 function actbar() {
   const btn = (a, i) => {
-    const badge = a.id === 'settings' && settingsWarnings() ? `<span class="act-badge" aria-label="${settingsWarnings()} to fix">${settingsWarnings()}</span>` : ''
+    const found = a.id === 'projects' && S.pj.data ? S.pj.data.found_count || 0 : 0
+    const badge = a.id === 'settings' && settingsWarnings() ? `<span class="act-badge" aria-label="${settingsWarnings()} to fix">${settingsWarnings()}</span>`
+      : found ? `<span class="act-badge new" aria-label="${found} found for you">${found}</span>` : ''
     return `<button class="act" data-go="${a.id}"${S.view === a.id ? ' aria-current="page"' : ''} title="${esc(a.label)} (${a.id === 'settings' ? MOD + ',' : MOD + (i + 1)})">${a.icon}<span>${esc(a.label)}</span>${badge}</button>`
   }
-  const top = ACTIVITIES.filter((a) => !a.bottom), bottom = ACTIVITIES.filter((a) => a.bottom)
-  return `<nav class="acts" aria-label="Activities">${top.map(btn).join('')}<span class="acts-grow"></span>${bottom.map((a) => btn(a, ACTIVITIES.indexOf(a))).join('')}</nav>`
+  const acts = shownActivities()
+  const top = acts.filter((a) => !a.bottom), bottom = acts.filter((a) => a.bottom)
+  // Needs you: not an activity — it shows or hides its panel over whatever is open.
+  const n = nyOpen().length, urgent = nyOpen().some((i) => i.urgent)
+  const eff = Layout.effective(window.innerWidth, window.innerHeight, panelViews(), S.overlay)
+  const shown = Layout.AREAS.some((a) => eff[a].shown && eff[a].active === 'needs')
+  const needs = `<button class="act${shown ? ' pressed' : ''}" data-panel-flip="needs" aria-pressed="${shown}" title="Needs you (${NY_HINT})">${NY_ENTRY}<span>Needs you</span>${n ? `<span class="act-badge${urgent ? '' : ' new'}" aria-label="${n} open">${n}</span>` : ''}</button>`
+  return `<nav class="acts" aria-label="Activities">${top.map(btn).join('')}<span class="acts-grow"></span>${needs}${bottom.map((a) => btn(a, acts.indexOf(a))).join('')}</nav>`
 }
 
 function statusbar() {
@@ -667,10 +787,12 @@ function list() {
       const head = g !== group ? `<div class="group">${esc(g)}</div>` : ''
       group = g
       const meta = [d ? hm(d) : '', c.minutes ? `${c.minutes} min` : '', c.people.length ? c.people.slice(0, 2).join(', ') + (c.people.length > 2 ? ` +${c.people.length - 2}` : '') : ''].filter(Boolean).map((x) => `<span>${esc(x)}</span>`).join('')
+      const pjs = ((S.pj.data && S.pj.data.by_call) || {})[c.name] || []
+      const icons = pjs.length ? `<span class="pj-icons">${pjs.slice(0, 3).map((p) => projIcon(p, 14)).join('')}</span>` : ''
       return `${head}<button class="row" role="option" data-call="${esc(c.name)}" aria-selected="${c.name === S.selected}">
         ${statusIcon(c.status)}
         <span class="t">${esc(c.title)}</span>
-        <span class="m">${meta}</span>
+        <span class="m">${icons}${meta}</span>
       </button>`
     }).join('')
   }
@@ -719,6 +841,7 @@ function doc() {
         <div style="min-width:0">
           <h2 class="selectable">${esc(c.title)}</h2>
           <div class="facts">${d ? `<span>${esc(d.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' }))}, ${esc(hm(d))}</span>` : ''}${c.minutes ? `<span>${c.minutes} min</span>` : ''}${people}</div>
+          ${callProjects(c)}
         </div>
         <div class="doc-actions">${callMenu(c)}</div>
       </div>
@@ -749,16 +872,16 @@ function callMenu(c) {
 
 /** A message for a moment (an action that couldn't be done), and why the window didn't close: under
  *  a call's tabs, or above whatever else the window shows (`noticesBar`). */
-function notices() {
-  const n = S.notice ? `<div class="notice"><span class="grow">${esc(S.notice)}</span><button class="btn ghost" data-cmd="notice-ok">OK</button></div>` : ''
-  const c = S.closeError ? `<div class="notice error"><span class="grow">Your notes couldn't be saved: ${esc(S.closeError)}</span><button class="btn" data-cmd="close-retry">Try again</button><button class="btn ghost danger" data-cmd="close-now">Close without saving</button></div>` : ''
+/** Messages for a moment float over the window (`toasts`, drawn once in #r-over): nothing in the
+ *  page moves when one comes or goes. These stay as empty slots for the places that drew them. */
+function notices() { return '' }
+function toasts() {
+  const n = S.notice ? `<div class="toast"><span class="grow">${esc(S.notice)}</span><button class="btn ghost" data-cmd="notice-ok">OK</button></div>` : ''
+  const c = S.closeError ? `<div class="toast error"><span class="grow">Your notes couldn't be saved: ${esc(S.closeError)}</span><button class="btn" data-cmd="close-retry">Try again</button><button class="btn ghost danger" data-cmd="close-now">Close without saving</button></div>` : ''
   return n + c
 }
 
-function noticesBar() {
-  const n = notices()
-  return n ? `<div class="notices">${n}</div>` : ''
-}
+function noticesBar() { return '' }
 
 function confirmBox(c) {
   return `<div class="confirm"><span>Delete "${esc(c.title)}"? It goes to the trash in the data folder for 30 days.</span>
@@ -808,8 +931,11 @@ function tabBody(c, segs, chat, frames, actions) {
   if (S.tab === 'actions') {
     if (!actions && c.actions_error) return minutesHint(c, "The action items can't be read", `${c.actions_error} — the next minutes replace them (the file is kept beside them).`)
     if (!actions) return minutesHint(c, 'No action items yet', 'Action items come with the minutes.')
-    if (!actions.length) return `<p style="color:var(--text-3)">No action items in this call.</p>`
-    return `<div class="todo">${actions.map((a) => {
+    const changed = callChanges(c)
+    if (!actions.length) return `${changed}<p style="color:var(--text-3)">No action items in this call.</p>`
+    const links = c.action_tasks || {}
+    return `${changed}${changed ? '<div class="cc-h">Action items</div>' : ''}<div class="todo">${actions.map((a) => {
+      const k = links[a.id], kp = k && projById(k.project)
       const done = a.status === 'done'
       // By its id, with the status wanted: a list rewritten meanwhile can't make it another item.
       return `<div class="item${done ? ' done' : ''}">
@@ -818,6 +944,7 @@ function tabBody(c, segs, chat, frames, actions) {
           <span class="owner${a.owner === 'Me' ? ' me' : ''}">${esc(a.owner || 'Unassigned')}</span>
           ${a.due ? `<span class="due">Due ${esc(a.due)}</span>` : ''}
           ${a.confidence === 'low' ? '<span class="uncertain">Uncertain</span>' : ''}
+          ${k ? `<button class="cc-link" data-tk="open" data-project="${esc(k.project)}" data-node="${esc(k.id)}" title="Tracked as ${esc(k.title)}">${k.state === 'done' ? '✓ ' : ''}${kp ? projIcon(kp, 12) : ''}${esc(k.id)}</button>` : ''}
         </div></div>
         ${typeof a.t === 'number' ? `<button class="btn ghost" data-at="${a.t}">${clock(a.t)}</button>` : '<span></span>'}
       </div>`
@@ -825,6 +952,53 @@ function tabBody(c, segs, chat, frames, actions) {
   }
   return minutesTab(c)
 }
+
+/** What this call changed in its threads' work (`ledger::call_changes`): one line per change, in
+ *  the order said — what happened, to which item, the words, the verifier's mark. A task an action
+ *  item became shows on that item instead (`action_tasks`); changes the verifier called wrong, none. */
+const CC_KIND = { story: 'New story', task: 'New task', decision: 'Decision', risk: 'Risk', question: 'Question' }
+function ccWhat(x) {
+  const n = x.node
+  if (x.op === 'create') return [n.kind === 'task' && n.type === 'session' ? 'New session' : n.kind === 'task' && n.type === 'dependency' ? 'New dependency' : CC_KIND[n.kind] || 'New', n.kind]
+  if (x.effect) {
+    const e = x.effect
+    return [e === 'due' ? `Due ${x.due ? fmtDay(x.due) : x.due_text || ''}` : e === 'held' ? 'Held' : e === 'done' ? 'Done' : e === 'progress' ? 'Progress' : e === 'blocked' ? 'Blocked'
+      : e === 'cancelled' ? 'Cancelled' : e === 'reopen' ? 'Reopened' : e === 'delayed' ? 'Slipped' : e === 'reassign' ? 'New owner' : e, e === 'done' || e === 'held' ? 'done' : e === 'blocked' || e === 'delayed' ? 'warn' : 'move']
+  }
+  if (x.op === 'link') return ['Now waits', 'link']
+  if (x.op === 'waiting') return [x.what ? 'Waiting' : 'Not waiting', 'warn']
+  if (x.op === 'ac_met') return ['Criterion met', 'done']
+  if (x.op === 'revise') return ['Revised', 'move']
+  return [x.op, 'move']
+}
+function callChanges(c) {
+  const blocks = (c.changes || []).map((g) => {
+    const p = projById(g.project) || { id: g.project, name: g.project }
+    const linked = new Set(Object.values(c.action_tasks || {}).filter((k) => k.project === g.project).map((k) => k.id))
+    const rows = g.changes.filter((x) => x.verdict !== 'wrong' && !(x.op === 'create' && linked.has(x.node.id)))
+    const head = `<div class="cc-th">${projIcon(p, 14)}<b>${esc(p.name)}</b>`
+    if (!g.read) {
+      return `${head}<span class="set-sub">${g.queued ? 'hasn\'t read this call yet' : 'doesn\'t read this call (too short, or no transcript)'}</span><span class="grow"></span>${g.queued ? `<button class="link-btn" data-cc-sync="${esc(g.project)}">Sync now</button>` : ''}</div>`
+    }
+    const hidden = linked.size ? ` · ${linked.size} on the action items below` : ''
+    if (!rows.length) return `${head}<span class="set-sub">nothing changed${hidden}</span></div>`
+    return `${head}<span class="set-sub">${rows.length} change${rows.length === 1 ? '' : 's'}${hidden}</span></div><div class="cc-list">${rows.map((x) => {
+      const [what, cls] = ccWhat(x)
+      const mark = x.applied === false && x.verdict === 'supports' ? '<span class="wk-v weak" title="You set this yourself; the call\'s words are kept in its history">kept yours</span>'
+        : x.verdict === 'weak' ? '<span class="wk-v weak">weak · to review</span>'
+        : x.op !== 'create' && x.verdict == null && x.applied === false ? '<span class="wk-v">to check</span>' : ''
+      const ts = x.ts ? hms(x.ts) : null
+      return `<div class="cc-row"><span class="cc-what ${esc(cls)}">${esc(what)}</span>
+        <div class="cc-main"><button class="cc-node" data-tk="open" data-project="${esc(g.project)}" data-node="${esc(x.node.id)}"><span class="wk-id">${esc(x.node.id)}</span> ${esc(x.node.title)}</button>
+        ${x.op === 'link' ? `<div class="cc-dep">for <button class="cc-node inline" data-tk="open" data-project="${esc(g.project)}" data-node="${esc(x.depends_on)}"><span class="wk-id">${esc(x.depends_on)}</span> ${esc(x.depends_on_title || '')}</button></div>`
+          : x.op === 'waiting' && x.what ? `<div class="cc-dep">on ${esc(x.who || 'someone')} — ${esc(x.what)}</div>` : ''}
+        ${x.quote ? `<div class="cc-q">“${esc(x.quote)}”${x.speaker ? ` <span>— ${esc(x.speaker)}</span>` : ''}</div>` : ''}</div>
+        ${mark}${ts != null ? `<button class="btn ghost" data-at="${ts}">${clock(ts)}</button>` : '<span></span>'}</div>`
+    }).join('')}</div>`
+  })
+  return blocks.length ? `<section class="cc"><div class="cc-h">What this call changed</div>${blocks.join('')}</section>` : ''
+}
+const hms = (s) => String(s).split(':').reduce((a, x) => a * 60 + Number(x), 0)
 
 // ── Notes: the user's own notes, an editor over my-notes.md (saved by NotesSync) ─────────────
 const notesState = (v) => v.saving ? 'Saving…' : v.error ? `Couldn't save: ${v.error}` : v.dirty ? 'Not saved yet' : 'Saved'
@@ -943,6 +1117,124 @@ function addNote(kindOverride) {
   const el = $('#note-input'); if (el) el.focus()
 }
 PANEL_VIEWS.push({ id: 'notes', label: 'My notes', icon: ICON('<path d="M5 4h10l4 4v12H5z"/><path d="M15 4v4h4M8 12h8M8 16h6"/>'), area: 'right', when: () => S.view === 'calls', render: notesPanel })
+
+/** Also discussed (the Brain): for each moment of the open call, the nearest moments elsewhere — the
+ *  same client's first (another client's only when very close) — each opening at its second. */
+const also = { name: null, data: null, at: 0 }
+async function loadAlso(name) {
+  if (also.name === name && Date.now() - also.at < 60000) return
+  also.name = name; also.at = Date.now()
+  try { also.data = await get('api/brain/also/' + encodeURIComponent(name)) } catch { also.data = { error: 'The Brain isn\'t available' } }
+  render()
+}
+function alsoPanel() {
+  if (!S.selected) return '<p class="panel-empty">Open a call.</p>'
+  if (also.name !== S.selected) { loadAlso(S.selected); return '<div class="skeleton" style="padding:12px"><i></i><i></i></div>' }
+  const d = also.data
+  if (!d || d.error) return `<p class="panel-empty">${esc((d && d.error) || '')}</p>`
+  const chips = (d.topics || []).map((t) => `<span class="chipt">${esc(t)}</span>`).join('')
+  const groups = (d.groups || []).map((g) => `<div class="al-g"><div class="al-a">for ${esc(g.anchor)}</div>${g.related.map((r) => {
+    const call = r.link && r.link.startsWith('echo://call/') ? r.link.slice(12).split('?')[0] : ''
+    const t = r.link && r.link.includes('?t=') ? Number(r.link.split('?t=')[1]) : null
+    return `<div class="al-r"><button class="src" ${call ? `data-br-open="${esc(call)}"${t != null ? ` data-t="${t}"` : ''}` : extAttr(r.link)}>${kindMark(r)} ${esc(r.doc || r.source)}${r.date ? ` · ${esc(relDay(r.date))}` : ''}${t != null ? ` · ${clock(t)}` : ''}</button><div class="qt">${esc(r.text)}</div></div>`
+  }).join('')}</div>`).join('')
+  return `<div class="al">${chips ? `<div class="al-chips">${chips}</div>` : ''}${groups || '<p class="set-sub">Nothing close elsewhere yet — it fills as more calls (and, later, channels, mail and files) come into the Brain.</p>'}</div>`
+}
+PANEL_VIEWS.push({ id: 'also', label: 'Also discussed', icon: ICON('<circle cx="7" cy="12" r="3"/><circle cx="17" cy="6" r="3"/><circle cx="17" cy="18" r="3"/><path d="M9.6 10.7 14.4 7.4M9.6 13.3l4.8 3.3"/>'), area: 'right', when: () => brainOn() && S.view === 'calls' && !!S.selected, render: alsoPanel })
+/** Needs you (`attention.rs`): what waits for the user's decision, from everywhere, in one list — the
+ *  activity bar's entry above Settings shows or hides it. Each item is decided here with the same
+ *  message its own place sends, or opens that place; decided anywhere, it moves to Done this week. */
+const NY = { data: null, at: 0, filter: 'open', gone: new Set(), loading: null, failed: 0, seq: 0, more: new Set() }
+/** One request at a time; a fresh one (after a decision) wins over any older answer still on its way. */
+function loadAttention(fresh) {
+  if (NY.loading && !fresh) return NY.loading
+  const n = ++NY.seq
+  NY.loading = get('api/attention' + (fresh ? '?fresh=1' : '')).then((d) => {
+    if (n !== NY.seq) return
+    NY.data = d; NY.at = Date.now(); NY.failed = 0
+    if (fresh) NY.gone.clear()
+  }).catch(() => { NY.failed = Date.now() }).finally(() => { if (n === NY.seq) NY.loading = null })
+  return NY.loading
+}
+/** Show the list (from ⌘K): over the page in a narrow window, as My notes does. */
+function nyShow() {
+  const known = panelViews(), eff = Layout.effective(window.innerWidth, window.innerHeight, known, S.overlay)
+  if (eff.narrow && Layout.area('needs', known) === 'right') S.overlay = true
+  Layout.show('needs', known)
+  layoutChanged()
+}
+/** Its shortcut: ⇧⌘I on macOS; Ctrl+Shift+U elsewhere (Ctrl+Shift+I opens WebView2's DevTools). */
+const NY_KEY = MAC ? 'I' : 'U'
+const NY_HINT = MAC ? '⇧⌘I' : 'Ctrl+Shift+U'
+/** At most this many of one kind in a group; the rest are counted, opening their place. */
+const NY_CAP = 5
+const nyOpen = () => ((NY.data || {}).open || []).filter((i) => !NY.gone.has(i.key))
+const NY_ICON = {
+  signin: ICON('<circle cx="12" cy="8" r="3.5"/><path d="M5 20c1.2-3.6 4-5.5 7-5.5s5.8 1.9 7 5.5"/>'),
+  minutes: ICON('<path d="M6 3.5h9l4 4v13H6z"/><path d="M9 12h7M9 16h5"/>'),
+  sender: ICON('<rect x="3.5" y="5.5" width="17" height="13" rx="2"/><path d="M4 7l8 6 8-6"/>'),
+  people: ICON('<circle cx="9" cy="9" r="3"/><circle cx="16" cy="9" r="3"/><path d="M3.5 19c.9-2.8 3-4.3 5.5-4.3M20.5 19c-.9-2.8-3-4.3-5.5-4.3"/>'),
+  work: ICON('<rect x="4" y="4" width="16" height="16" rx="3.5"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/>'),
+  found: ICON('<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5h5"/>'),
+  brain: ICON('<path d="M9 4.5a3 3 0 0 0-3 3 3 3 0 0 0-2 5.2A3.2 3.2 0 0 0 7.5 18 2.5 2.5 0 0 0 12 19V6a2 2 0 0 0-3-1.5z"/><path d="M15 4.5a3 3 0 0 1 3 3 3 3 0 0 1 2 5.2A3.2 3.2 0 0 1 16.5 18 2.5 2.5 0 0 1 12 19"/>'),
+  health: ICON('<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17v.01"/>'),
+  update: ICON('<path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19.5h14"/>'),
+}
+const NY_ENTRY = ICON('<path d="M4 13l3-8h10l3 8v6H4z"/><path d="M4 13h5l1 2h4l1-2h5"/>')
+function needsPanel() {
+  const d = NY.data
+  if (!d) {
+    if (NY.failed) return '<p class="panel-empty">The list can\'t be read right now. Echo tries again shortly.</p>'
+    if (!NY.loading) loadAttention().then(render)
+    return '<div class="skeleton"><i></i><i></i></div>'
+  }
+  const open = nyOpen(), urgent = open.filter((i) => i.urgent), done = d.done || []
+  const chip = (f, label, n) => `<button class="fchip${NY.filter === f ? ' on' : ''}" data-ny-filter="${f}">${label}${n ? ` ${n}` : ''}</button>`
+  const head = `<div class="ny-head">${chip('open', 'Open', open.length)}${urgent.length ? chip('blocking', 'Blocking', urgent.length) : ''}${chip('done', 'Done', done.length)}<span class="grow"></span><span class="set-sub">this week</span></div>`
+  const row = (i) => {
+    const acts = (i.actions || []).map((a, k) => `<button class="btn${a.primary ? (i.urgent ? ' warn' : ' primary') : ''}" data-ny-act="${esc(i.key)}" data-k="${k}">${esc(a.label)}</button>`).join('')
+    const go = i.go ? `<button class="btn ghost" data-ny-go="${esc(i.go)}">${(i.actions || []).length ? 'Open' : 'Open →'}</button>` : ''
+    return `<div class="ny-item${i.urgent ? ' urgent' : ''}"><span class="ny-k">${NY_ICON[i.kind] || NY_ICON.work}</span><b>${esc(i.title)}</b>${i.why ? `<span class="ny-why">${esc(i.why)}</span>` : ''}${acts || go ? `<div class="ny-acts">${acts}${go}</div>` : ''}</div>`
+  }
+  const groupName = (g) => g === '-' || g === 'echo' ? 'Everything else' : (d.clients || {})[g] || g
+  const groups = (items) => {
+    const by = new Map()
+    for (const i of items) { const g = i.group === 'echo' ? '-' : i.group; if (!by.has(g)) by.set(g, []); by.get(g).push(i) }
+    const keys = [...by.keys()].sort((a, b) => (a === '-') - (b === '-') || groupName(a).localeCompare(groupName(b)))
+    const capped = (g, list) => {
+      const kinds = new Map()
+      for (const i of list) { if (!kinds.has(i.kind)) kinds.set(i.kind, []); kinds.get(i.kind).push(i) }
+      return [...kinds.entries()].map(([k, xs]) => {
+        const all = NY.more.has(g + ':' + k), shown = all ? xs : xs.slice(0, NY_CAP), rest = xs.length - shown.length
+        return shown.map(row).join('') + (rest ? `<button class="btn ghost ny-more" data-ny-more="${esc(g + ':' + k)}">${rest} more like these</button>` : '')
+      }).join('')
+    }
+    return keys.map((g) => `<div class="ny-grp"><span class="cap">${esc(groupName(g))}</span><span class="set-sub">${by.get(g).length}</span></div>${capped(g, by.get(g))}`).join('')
+  }
+  const doneRow = (x) => `<div class="ny-done"><span class="ok">✓</span><s>${esc(x.title || x.key)}</s><span class="grow"></span><span class="set-sub">${esc(relDay(String(x.at || '').slice(0, 10)))}</span></div>`
+  let body
+  if (NY.filter === 'done') body = done.length ? done.map(doneRow).join('') : '<p class="panel-empty">Nothing decided this week yet.</p>'
+  else if (NY.filter === 'blocking') body = urgent.map(row).join('') || '<p class="panel-empty">Nothing blocks work.</p>'
+  else if (!open.length) body = `<div class="ny-empty"><span class="ok">✓</span><div><b>Nothing needs you</b><div class="set-sub">Echo counts it here when something does.</div></div></div>${done.length ? `<div class="ny-grp"><span class="cap">Done this week</span><span class="set-sub">${done.length}</span></div>${done.slice(0, 3).map(doneRow).join('')}` : ''}`
+  else body = urgent.map(row).join('') + groups(open.filter((i) => !i.urgent)) + (done.length ? `<div class="ny-grp ny-sep"><span class="ok">✓</span><span class="cap">Done this week</span><span class="set-sub">${done.length}</span><span class="grow"></span><button class="btn ghost" data-ny-filter="done">All ▸</button></div>${done.slice(0, 2).map(doneRow).join('')}` : '')
+  return `<div class="ny">${head}${body}</div>`
+}
+PANEL_VIEWS.push({ id: 'needs', label: 'Needs you', icon: NY_ENTRY, area: 'right', render: needsPanel })
+document.addEventListener('click', (e) => {
+  const t = e.target.closest && e.target.closest('[data-ny-filter],[data-ny-act],[data-ny-go],[data-ny-more]')
+  if (!t) return
+  if (t.dataset.nyFilter) { NY.filter = t.dataset.nyFilter; return render() }
+  if (t.dataset.nyMore) { NY.more.add(t.dataset.nyMore); return render() }
+  if (t.dataset.nyGo) return go(t.dataset.nyGo)
+  const i = nyOpen().find((x) => x.key === t.dataset.nyAct)
+  const a = i && (i.actions || [])[Number(t.dataset.k)]
+  if (!a) return
+  send(a.ipc)
+  // A decision takes the item off at once; an action that opens a flow (a sign-in, a log) leaves it.
+  if (!['sign_in', 'show_log', 'settings_action', 'write_notes'].includes(a.ipc.cmd)) NY.gone.add(i.key)
+  render()
+  setTimeout(async () => { await loadAttention(true); await loadProjects(); render() }, 700)
+})
 /** The panel views of the current activity. */
 const panelViews = () => PANEL_VIEWS.filter((v) => !v.when || v.when())
 
@@ -1450,11 +1742,12 @@ function calendarView() {
       const w = 100 / x.lanes, left = x.lane * w
       const style = `top:${y}px;height:${h}px;left:calc(${left}% + 2px);width:calc(${w}% - 4px)`
       if (x.kind === 'call') {
-        return `<button class="ev call" style="${style}" data-call="${esc(x.c.name)}"><b>${esc(x.c.title)}</b><small><span class="tag rec">Recorded</span> ${esc(hm(new Date(x.s)))}</small></button>`
+        return `<button class="ev call" style="${style}" data-call="${esc(x.c.name)}"><b>${esc(x.c.title)}</b><small>${esc(hm(new Date(x.s)))}</small></button>`
       }
       const { ev: e, st } = x
       const cls = ['ev', e.online ? 'online' : '', e.recorded ? 'recorded' : '', e.scheduled ? 'scheduled' : '', st.past ? 'past' : '', e.declined ? 'declined' : '', e.cancelled ? 'cancelled' : ''].filter(Boolean).join(' ')
-      const tag = e.recorded ? '<span class="tag rec">Recorded</span>' : e.scheduled ? '<span class="tag will">Will record</span>' : e.no_notetakers ? '<span class="tag no">No notetakers</span>' : ''
+      // Green already says recorded: only what the colour doesn't.
+      const tag = e.recorded ? '' : e.scheduled ? '<span class="tag will">Will record</span>' : e.no_notetakers ? '<span class="tag no">No notetakers</span>' : ''
       return `<button class="${cls}" style="${style}" data-ev="${esc(e.id || '')}" aria-selected="${S.cal.selected === e.id}"><b>${esc(e.subject)}</b><small>${esc(hm(st.s))}${tag ? ' ' + tag : ''}</small></button>`
     }).join('')
     return `<div class="col${sameDay(day, now) ? ' today' : ''}" style="height:${(h1 - h0) * HOUR}px">${lines}${nowLine}${items}</div>`
@@ -1483,8 +1776,24 @@ function eventDetail(e, now) {
     <h2 class="selectable">${esc(e.subject)}</h2><div class="when">${esc(when)}</div>
     <dl>${e.organizer ? `<dt>Organizer</dt><dd>${esc(e.organizer)}</dd>` : ''}${e.people ? `<dt>People</dt><dd>${e.people}</dd>` : ''}${e.location ? `<dt>Where</dt><dd>${esc(e.location)}</dd>` : ''}${e.recorded ? `<dt>Recording</dt><dd>${STATUS[e.recorded.status] || esc(e.recorded.status)}${e.recorded.minutes ? `, ${e.recorded.minutes} min` : ''}</dd>` : ''}</dl>
     ${acts ? `<div class="acts">${acts}</div>` : ''}${why ? `<p class="why">${esc(why)}</p>` : ''}
+    ${eventProjects(e)}
     ${e.recap && e.recap.length ? `<div><b style="font-size:12px">Last time</b><ul>${e.recap.map((r) => `<li>${esc(r)}</li>`).join('')}</ul></div>` : ''}
   </aside>`
+}
+
+/** A calendar event's projects on its card: chips (× on one added by hand to this event), and
+ *  + Project — add it to a project (its call will belong), always its meeting series, or a new
+ *  project from it. A recorded meeting's projects are its call's. */
+function eventProjects(e) {
+  if (!e.id) return ''
+  const mine = e.projects || []
+  const ids = new Set(mine.map((p) => p.id))
+  const WHYS = { series: 'its meeting series', people: "the client's people", chat: 'its Teams chat', subject: 'its subject', pinned: 'added by hand' }
+  const chips = mine.map((p) => `<span class="pj-chip" title="${esc(WHYS[p.why] || p.why)}">${projIcon(p, 14)}<button class="link-btn" data-pj="goto" data-id="${esc(p.id)}">${esc(p.name)}</button>${p.why === 'pinned' && !e.recorded ? `<button class="pj-x" data-pj="event-member" data-id="${esc(p.id)}" data-event="${esc(e.id)}" data-how="remove" aria-label="Take it out of ${esc(p.name)}">×</button>` : ''}</span>`).join('')
+  const all = ((S.pj.data && S.pj.data.projects) || []).filter((p) => p.group !== 'closed' && !ids.has(p.id))
+  const picker = S.pj.evPicker === e.id ? `<div class="menu pj-menu" role="menu">${all.map((p) => `<button class="menu-item" role="menuitem" data-pj="event-member" data-id="${esc(p.id)}" data-event="${esc(e.id)}" data-how="include">${projIcon(p, 14)} ${esc(p.name)}</button>`).join('') || '<div class="menu-item set-sub">No other threads</div>'}<div class="menu-sep" role="separator"></div>${all.length ? `<label class="menu-item pj-series" title="Every occurrence of this meeting joins the thread">Every occurrence → <select data-ev-series="${esc(e.subject || '')}"><option value=""></option>${all.concat(mine.map((m) => ((S.pj.data && S.pj.data.projects) || []).find((x) => x.id === m.id)).filter(Boolean)).map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></label>` : ''}<button class="menu-item" role="menuitem" data-pj="event-new" data-event="${esc(e.id)}" data-subject="${esc(e.subject || '')}">New thread from this meeting…</button></div>` : ''
+  if (e.recorded && !mine.length) return ''
+  return `<div class="pj-chips ev-pj">${chips}${e.recorded ? '' : `<span class="pj-add-wrap"><button class="pj-chip add" data-pj="ev-picker" data-event="${esc(e.id)}" aria-haspopup="menu" aria-expanded="${S.pj.evPicker === e.id}">+ Thread</button>${picker}</span>`}</div>`
 }
 
 // ── Settings: every setting in one place (the tray keeps quick toggles). Plain values save at once
@@ -1492,7 +1801,7 @@ function eventDetail(e, now) {
 // a download run as the tray's own actions (`settings_action`). ────────────────────────────────
 const SETTINGS_SECTIONS = [
   ['general', 'General'], ['recording', 'Recording'], ['transcription', 'Transcription'], ['ai', 'AI & minutes'],
-  ['calendar', 'Calendar & chat'], ['vocabulary', 'Vocabulary'], ['me', 'About me'], ['layout', 'Layout'], ['health', 'Health'],
+  ['calendar', 'Calendar & chat'], ['brain', 'Brain'], ['vocabulary', 'Vocabulary'], ['me', 'About me'], ['layout', 'Layout'], ['health', 'Health'],
 ]
 /** Save the profile as edited; shown rendered again once the app has it. */
 function saveMeProfile() {
@@ -1533,7 +1842,7 @@ function settingsView() {
 
 /** The profile the minutes read (me.md): shown rendered (the minutes' own safe Markdown), edited in place. */
 function meProfileCard(mp) {
-  const head = (ctl) => `<div class="set-row"><div><b>Profile for the minutes</b><div class="set-sub">Your role, your projects, how you like notes written — the minutes read it.</div></div><div class="set-ctl">${ctl}</div></div>`
+  const head = (ctl) => `<div class="set-row"><div><b>Profile for the minutes</b><div class="set-sub">Your role, your threads, how you like notes written — the minutes read it.</div></div><div class="set-ctl">${ctl}</div></div>`
   if (S.meEdit != null) {
     return `<section class="set-sec"><div class="set-card">${head('<button class="btn ghost" data-me-cancel>Cancel</button><button class="btn primary" data-me-save>Save</button>')}
       <div class="me-edit"><textarea id="me-profile" spellcheck="true" aria-label="Your profile (Markdown)">${esc(S.meEdit)}</textarea><div class="set-sub">Markdown: # for headings, - for lists. ⌘S / Ctrl+S saves, Esc cancels.</div></div></div></section>`
@@ -1556,7 +1865,99 @@ function learnedCard(learned) {
   return `<section class="set-sec"><div class="set-card">${head}${rows.join('') || (learned.length ? '<div class="set-row"><div class="set-sub">Nothing matches.</div></div>' : '')}</div></section>`
 }
 
+/** Settings → Brain: the embedding server Echo asks (no model runs in Echo), what the Brain holds,
+ *  and whether the app keeps it current. */
+/** Settings → Brain → Documents: who reads the pages of thread folders that their text misses
+ *  (diagrams, timelines, title-only slides), and what lays documents out here. */
+function documentsSettings(b, s, field) {
+  const d = b.documents || {}
+  const pages = s.pages || 'claude'
+  const who = `<select class="set-in" data-brain-set="brain_pages" aria-label="Page reader"><option value="claude"${pages === 'claude' ? ' selected' : ''}>Claude (the default AI profile)</option><option value="endpoint"${pages === 'endpoint' ? ' selected' : ''}>A vision endpoint</option><option value="off"${pages === 'off' ? ' selected' : ''}>Off — their text only</option></select>`
+  const vapi = `<select class="set-in" data-brain-set="brain_vision_api" aria-label="Vision API"><option value="ollama"${s.vision_api !== 'openai' ? ' selected' : ''}>Ollama</option><option value="openai"${s.vision_api === 'openai' ? ' selected' : ''}>OpenAI-compatible</option></select>`
+  const tools = [d.pdfium ? 'PDF pages: ready' : 'PDF pages: <span class="error">PDFium missing</span>', d.libreoffice ? 'decks and Word layouts: LibreOffice' : 'decks and Word layouts: <span class="error">no LibreOffice</span> — slides are indexed from their text'].join(' · ')
+  const rows = [
+    setRow('Page reader', `Each page is read from its text unless its text misses the meaning — a diagram, a timeline, a title-only slide. Those pages are read from their image, once (cached), while Echo isn't recording.${d.pending ? ` ${d.pending} page${d.pending === 1 ? '' : 's'} waiting.` : ''}`, who),
+  ]
+  if (pages === 'endpoint') {
+    rows.push(setRow('Vision server', 'A vision model on Ollama or an OpenAI-compatible server.', `${vapi}${field('brain_vision_endpoint', s.vision_endpoint, 'http://localhost:11434', 'Vision server address')}`))
+    rows.push(setRow('Vision model', 'One that reads images (e.g. qwen2.5vl, llama3.2-vision).', field('brain_vision_model', s.vision_model, 'qwen2.5vl', 'Vision model')))
+    rows.push(setRow('Key', 'Only for a server that wants one.', field('brain_vision_key', '', s.vision_key ? '•••• set — type to replace' : 'none', 'Vision key', 'password')))
+  }
+  rows.push(setRow('Laying out', tools, ''))
+  return setCard('Documents (thread folders)', rows)
+}
+
+function brainSettings(st) {
+  const b = st.brain
+  if (!b) return '<p class="set-sub">This build of Echo has no Brain.</p>'
+  const onRow = setRow('Use the Brain', 'Cross-call memory: your calls, channels, mail and folders indexed for search, topics, insights and Claude. Off: nothing is read, indexed or offered to Claude, and it leaves the window — what it holds stays on disk for when you turn it back on.', sw('brain_enabled', b.enabled !== false, 'Use the Brain'))
+  if (b.enabled === false) return setCard('', [onRow]) + `<p class="set-foot">Kept in <code>${esc(b.path || 'brain/')}</code>.</p>`
+  const s = b.settings || {}
+  const field = (key, val, ph, label, type = 'text') => `<input class="set-in" type="${type}" data-brain-set="${key}" value="${esc(val || '')}" placeholder="${esc(ph)}" aria-label="${esc(label)}" spellcheck="false">`
+  const api = `<select class="set-in" data-brain-set="brain_api" aria-label="API"><option value="ollama"${s.api !== 'openai' ? ' selected' : ''}>Ollama</option><option value="openai"${s.api === 'openai' ? ' selected' : ''}>OpenAI-compatible</option></select>`
+  const kinds = Object.entries(b.by_kind || {}).map(([k, n]) => `${n} ${k}${n === 1 ? '' : 's'}`).join(', ')
+  const held = b.exists ? `${kinds || 'nothing yet'} · ${b.chunks} sections · ${b.embedded} with meaning${b.embed_model ? ` (${esc(b.embed_model)}${b.embed_dim ? `, ${b.embed_dim}-d` : ''})` : ''} · ${(b.bytes / 1048576).toFixed(1)} MB` : 'Not built yet'
+  const last = b.last ? (b.last.error ? `<span class="error">${esc(b.last.error)}</span>` : `Last sync: ${b.last.added || 0} added, ${b.last.changed || 0} changed, ${b.last.removed || 0} removed, ${b.last.embedded || 0} embedded${b.last.embed_error ? ` · <span class="error">${esc(b.last.embed_error)}</span>` : ''}`) : (b.built_at ? `Updated ${esc(relDay(String(b.built_at).slice(0, 10)))}` : '')
+  return setCard('', [
+    onRow,
+    setRow('What it holds', `${held}${last ? `<br>${last}` : ''}`, b.syncing ? '<span class="set-sub">Syncing…</span>' : '<button class="btn" data-brain-sync>Sync now</button>'),
+    setRow('Keep it current', 'Echo adds new and changed calls, channel posts, mail and folder files by itself (checked every 5 minutes).', sw('brain_auto', b.auto, 'Keep the Brain current')),
+  ]) + setCard('Meaning (embeddings)', [
+    setRow('Server', 'Echo runs no model: it asks yours. Ollama (e.g. http://localhost:11434) or any OpenAI-compatible server. Without one, the Brain searches by words only.', `${api}${field('brain_endpoint', s.endpoint, 'http://localhost:11434', 'Server address')}`),
+    setRow('Model', 'An embedding model that knows your languages (e.g. qwen3-embedding, bge-m3). Another model embeds everything again.', field('brain_model', s.model, 'qwen3-embedding', 'Model')),
+    setRow('Key', 'Only for a server that wants one (sent as a bearer token; kept on this computer).', field('brain_key', '', s.key ? '•••• set — type to replace' : 'none', 'Key', 'password')),
+  ]) + documentsSettings(b, s, field) + `<p class="set-foot">Sources come from your threads — their calls, Teams channels, mail and folders, set on each thread's Profile. Stored in <code>${esc(b.path || 'brain/')}</code>.</p>`
+}
+document.addEventListener('change', (e) => {
+  const t = e.target
+  if (!t.matches || !t.matches('[data-brain-set]')) return
+  send({ cmd: 'settings_set', key: t.dataset.brainSet, value: t.value })
+  if (t.type === 'password') t.value = ''
+  setTimeout(() => loadSettings().then(render), 300)
+})
+document.addEventListener('click', (e) => {
+  const b = e.target.closest && e.target.closest('[data-brain-sync]')
+  if (!b) return
+  send({ cmd: 'brain_sync' })
+  b.disabled = true
+  b.textContent = 'Syncing…'
+  setTimeout(() => loadSettings().then(render), 1000)
+})
+/** The transcription server row: an Echo, or an OpenAI-compatible server (Ollama with an audio
+ *  model, Speaches, vLLM, LocalAI, parakeet-api…) and what it was found to give. */
+function serverLine(srv) {
+  const i = srv.info
+  if (!srv.client || !i) return "Send each utterance to another Echo on your network, or to an OpenAI-compatible speech-to-text server (Ollama with an audio model, Speaches, vLLM, LocalAI…); this computer's model takes over when it's down."
+  if (i.api === 'openai') return `Transcribing on <code>${esc(i.url)}</code> with <b>${esc(i.model || '')}</b> (OpenAI-compatible)${i.words === false ? ' — it gives no word timings: speaker turns split by sentence only' : ''}. This computer's model takes over when it's down.`
+  return `Connected to ${esc(srv.client)}; this computer's model takes over when it's down.`
+}
+function sttForm(srv) {
+  const c = srv.connecting || {}
+  const f = S.sttForm
+  const msg = c.busy ? '<span class="set-sub">Checking the server — its models, then a test transcription…</span>' : c.error ? `<span class="error">${esc(c.error)}</span>` : ''
+  return setRow('OpenAI-compatible server', `Its address (it must answer <code>/v1/models</code> and <code>/v1/audio/transcriptions</code>), the model to ask for (empty: the first speech model it lists) and a key only if it wants one.` +
+    `<div class="stt-form"><input class="set-in" id="stt-url" value="${esc(f.url)}" placeholder="http://localhost:11434" aria-label="Server address" spellcheck="false">` +
+    `<input class="set-in" id="stt-model" value="${esc(f.model)}" placeholder="model — e.g. lfm3-audio, whisper-1" aria-label="Model" spellcheck="false">` +
+    `<input class="set-in" id="stt-key" type="password" placeholder="key (optional)" aria-label="Key">` +
+    `<button class="btn primary" data-stt-connect${c.busy ? ' disabled' : ''}>Connect</button></div>${msg ? `<div>${msg}</div>` : ''}`, '')
+}
+document.addEventListener('click', (e) => {
+  if (e.target.closest && e.target.closest('[data-stt-form]')) { S.sttForm = S.sttForm ? null : { url: 'http://localhost:11434', model: '' }; return render() }
+  if (!(e.target.closest && e.target.closest('[data-stt-connect]'))) return
+  const url = ($('#stt-url') || {}).value || '', model = ($('#stt-model') || {}).value || '', key = ($('#stt-key') || {}).value || ''
+  S.sttForm = { url, model }
+  send({ cmd: 'server_openai', url, model, key })
+  const poll = () => loadSettings().then(() => {
+    const c = (S.settings && S.settings.server && S.settings.server.connecting) || {}
+    if (c.busy) return setTimeout(poll, 1000)
+    if (c.ok) S.sttForm = null
+    render()
+  })
+  setTimeout(poll, 500)
+})
+
 const SETTINGS_BODY = {
+  brain: brainSettings,
   general(st) {
     const upd = st.update ? actBtn('update', `Update to ${st.update}…`, '', true) : actBtn('check_updates', 'Check for updates')
     const plugin = (S.state && S.state.notes) || {}
@@ -1607,7 +2008,8 @@ const SETTINGS_BODY = {
     return `<h2>Transcription</h2><p class="set-lead">On this computer — or on one you connect to yourself. Never a cloud service.${st.engine ? ` Speech engine: ${esc(st.engine)}.` : ''}</p>` +
       setCard('Speech models', rows) +
       (srv ? setCard('Transcription server', [
-        setRow('Use a server', srv.client ? `Connected to ${esc(srv.client)}; this computer's model takes over when it's down.` : "Send each utterance to another Echo on your network; this computer's model takes over when it's down.", srv.client ? actBtn('disconnect_server', 'Disconnect') : actBtn('connect_server', 'Connect…')),
+        setRow('Use a server', serverLine(srv), srv.client ? actBtn('disconnect_server', 'Disconnect') : actBtn('connect_server', 'Echo server…') + `<button class="btn" data-stt-form>OpenAI-compatible…</button>`),
+        ...(!srv.client && S.sttForm ? [sttForm(srv)] : []),
         setRow('Transcribe for other computers', srv.serving ? `Shared at <code>${esc(srv.url || '')}</code> — key <code>${esc(srv.key || '')}</code>` : "Share this computer's model on your network.", `<button class="sw${srv.serving ? ' on' : ''}" role="switch" aria-checked="${!!srv.serving}" aria-label="Transcribe for other computers" data-act="toggle_serving"></button>`),
       ]) : '') +
       setCard('Audio', [
@@ -1631,6 +2033,7 @@ const SETTINGS_BODY = {
       `<section class="set-sec"><h3>Profiles</h3><div class="set-card">${rows.join('')}${add}</div></section>` +
       setCard('Minutes', [
         setRow('Write minutes automatically', "15 min after a call ends (or after your last note), with the call's profile.", sw('auto_minutes', st.auto_minutes, 'Write minutes automatically')),
+        setRow("Keep threads' work current", "After a thread's calls, Claude reads them into its stories, tasks, decisions, risks and questions — with the thread's AI profile.", sw('project_sync', st.project_sync, "Keep threads' work current")),
         setRow('Live notes during calls', "A running summary and the Live tab's questions, with the call's profile.", sw('live_notes', a.live_notes, 'Live notes')),
         setRow('Minutes model', 'The model that writes minutes for the default profile.', actBtn('notes_model', 'Change…')),
         setRow('Where Claude Code runs for minutes', st.notes_in ? `<code>${esc(st.notes_in)}</code> — its .claude/settings.json applies.` : 'The data folder.', actBtn('notes_choose', 'Choose…') + (st.notes_in ? actBtn('notes_anywhere', 'Use the data folder') : '')),
@@ -1676,6 +2079,1922 @@ const SETTINGS_BODY = {
     return `<h2>Health</h2><p class="set-lead">What Echo needs from this computer.</p>` + setCard('Permissions', rows) +
       setCard('', [setRow('Ask again', 'macOS asks for each permission Echo is missing.', actBtn('ask_permissions', 'Ask for permissions') + actBtn('recheck', 'Check again'))])
   },
+}
+
+// ── Projects (`projects.rs`, docs/projects-design.md) ─────────────────────────────────────────
+/** Symbols a project can wear instead of its identicon (24-unit strokes, drawn in its colour). */
+const PJ_SYMBOLS = {
+  rocket: '<path d="M12 3c3 2 5 5.5 5 9.5l-2.5 3h-5L7 12.5C7 8.5 9 5 12 3z"/><circle cx="12" cy="10" r="1.6"/><path d="M9.5 15.5 7 19l3-.8M14.5 15.5 17 19l-3-.8"/>',
+  database: '<ellipse cx="12" cy="6" rx="7" ry="2.5"/><path d="M5 6v12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5V6M5 12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5"/>',
+  shield: '<path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/>',
+  people: '<circle cx="9" cy="9" r="3"/><path d="M3.5 19c.6-3 2.8-5 5.5-5s4.9 2 5.5 5"/><circle cx="17" cy="8" r="2.4"/><path d="M15.5 13.3c2.4.2 4.3 2 4.8 4.7"/>',
+  chart: '<path d="M4 20V4M4 20h16"/><path d="M8 16v-4M12 16V8M16 16v-6"/>',
+  cloud: '<path d="M7 18h10a4 4 0 0 0 .5-8 5.5 5.5 0 0 0-10.6 1.5A3.3 3.3 0 0 0 7 18z"/>',
+  code: '<path d="M9 8l-4 4 4 4M15 8l4 4-4 4M13 6l-2 12"/>',
+  briefcase: '<rect x="3.5" y="7.5" width="17" height="12" rx="2"/><path d="M9 7.5V6a1.5 1.5 0 0 1 1.5-1.5h3A1.5 1.5 0 0 1 15 6v1.5M3.5 12.5h17"/>',
+  flask: '<path d="M10 3.5h4M10.5 3.5v6L5 18.5a1.3 1.3 0 0 0 1.1 2h11.8a1.3 1.3 0 0 0 1.1-2l-5.5-9v-6"/><path d="M7.5 15h9"/>',
+  globe: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.4 3.6 5.2 3.6 8.5s-1.2 6.1-3.6 8.5c-2.4-2.4-3.6-5.2-3.6-8.5S9.6 5.9 12 3.5z"/>',
+  cart: '<path d="M3.5 4.5h2.5l2 11h10l2-8H7"/><circle cx="9.5" cy="19" r="1.3"/><circle cx="16.5" cy="19" r="1.3"/>',
+  book: '<path d="M5 4.5h10.5a2.5 2.5 0 0 1 2.5 2.5v13H7.5A2.5 2.5 0 0 1 5 17.5z"/><path d="M5 17.5A2.5 2.5 0 0 1 7.5 15H18"/>',
+}
+const PJ_COLORS = ['#9b78ff', '#5aa9ff', '#3ccf91', '#f0a24a', '#e8603c', '#d36bd1', '#4cc3c8', '#c9b458']
+/** A project's tile: its logo, else its symbol, else its identicon — `size` px square. */
+function projIcon(p, size = 18) {
+  const color = /^#[0-9a-f]{6}$/i.test(p.color || '') ? p.color : PJ_COLORS[0]
+  const t = `class="pj-ic" style="--pj:${color};width:${size}px;height:${size}px" title="${esc(p.name || '')}"`
+  if (p.has_logo) return `<img ${t} src="api/project/${encodeURIComponent(p.id)}/logo?v=${esc(p.logo_v || 0)}" alt="">`
+  if (p.icon === 'client' && p.client && p.client_logo_v) return `<img ${t} src="api/client/${encodeURIComponent(p.client)}/logo?v=${esc(p.client_logo_v)}" alt="">`
+  const sym = PJ_SYMBOLS[p.icon]
+  if (sym) return `<span ${t} aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${sym}</svg></span>`
+  const cells = ProjectArt.cells(p.id || p.name || '')
+  const rects = cells.map((on, i) => on ? `<rect x="${i % 5}" y="${Math.floor(i / 5)}" width="1" height="1"/>` : '').join('')
+  return `<span ${t} aria-hidden="true"><svg viewBox="-0.75 -0.75 6.5 6.5" fill="currentColor" shape-rendering="crispEdges">${rects}</svg></span>`
+}
+/** A client's logo (nothing when it has none). */
+const clientIcon = (c, size = 16) => c && c.logo_v ? `<img class="pj-ic" style="width:${size}px;height:${size}px" src="api/client/${encodeURIComponent(c.id)}/logo?v=${esc(c.logo_v)}" alt="" title="${esc(c.name)}">` : ''
+/** A logo file the user chose or dropped → the app (as base64), after a size check here. */
+function sendLogo(file, op, id) {
+  if (!file) return
+  if (!/^image\/(png|jpeg|webp)$/.test(file.type)) return window.echo.notice('A logo is a PNG, JPEG or WebP image.')
+  if (file.size > 512 * 1024) return window.echo.notice('A logo is at most 512 KB.')
+  const r = new FileReader()
+  r.onload = () => send({ cmd: 'project', op, id, data: String(r.result).replace(/^data:[^,]*,/, '') })
+  r.readAsDataURL(file)
+}
+const logoPicker = (op, id, label) => `<label class="btn pj-file">${esc(label)}<input type="file" accept="image/png,image/jpeg,image/webp" data-logo-op="${op}" data-id="${esc(id)}" aria-label="${esc(label)}"></label>`
+const stageTag = (id, long = false) => { const st = ProjectArt.stage(id); return `<span class="pj-stage ${esc(st.gid)}">${esc(long && st.group ? `${st.group} · ${st.label}` : st.label)}</span>` }
+const projClient = (id) => ((S.pj.data && S.pj.data.clients) || []).find((c) => c.id === id)
+
+function projectsView() {
+  const data = S.pj.data
+  if (!data) return `<div class="skeleton" style="padding:20px">${'<i></i>'.repeat(6)}</div>`
+  return `<div class="projects"><aside class="pj-side">${projectList(data)}</aside><div class="pj-main">${projectMain(data)}</div></div>`
+}
+
+function projectList(data) {
+  const ps = data.projects || []
+  const clients = data.clients || []
+  const row = (p) => {
+    const last = p.last_call ? dayLabel(new Date(p.last_call)) : ''
+    return `<button class="pj-row${p.id === S.pj.sel ? ' on' : ''}" data-pj="open" data-id="${esc(p.id)}">${projIcon(p, 20)}<span class="pj-row-t"><b>${esc(p.name)}</b><span class="pj-row-m">${p.call_count} call${p.call_count === 1 ? '' : 's'}${last ? ` · ${esc(last)}` : ''}</span></span>${p.group !== 'closed' ? stageTag(p.stage) : ''}</button>`
+  }
+  const open = ps.filter((p) => p.group !== 'closed'), closed = ps.filter((p) => p.group === 'closed')
+  const groups = []
+  for (const c of [...clients.filter((c) => !c.internal), ...clients.filter((c) => c.internal)]) {
+    const xs = open.filter((p) => p.client === c.id)
+    groups.push(`<button class="pj-group pj-client${S.pj.client === c.id ? ' on' : ''}" data-pj="client" data-id="${esc(c.id)}" title="${esc(c.name)}: its details">${clientIcon(c, 14)}${esc(c.internal ? `${c.name} · your company` : c.name)}</button>${xs.map(row).join('')}`)
+  }
+  const none = open.filter((p) => !p.client || !clients.some((c) => c.id === p.client))
+  if (none.length) groups.push(`<div class="pj-group">${clients.length ? 'No client' : 'Threads'}</div>${none.map(row).join('')}`)
+  const closedRows = closed.length ? `<button class="pj-group pj-fold" data-pj="toggle-closed" aria-expanded="${S.pj.showClosed}">${S.pj.showClosed ? '▾' : '▸'} Closed · ${closed.length}</button>${S.pj.showClosed ? closed.map(row).join('') : ''}` : ''
+  const err = data.error ? `<p class="error" style="padding:10px">${esc(data.error)}</p>` : ''
+  const fc = data.found_count || 0
+  const found = `<button class="pj-row pj-found${S.pj.found ? ' on' : ''}${fc ? '' : ' quiet'}" data-pj="found"><span class="pj-spark" aria-hidden="true">✦</span><b class="grow">Found for you</b>${fc ? `<span class="pj-badge">${fc}</span>` : ''}</button>`
+  return `<div class="pj-side-head"><h1>Threads</h1><button class="icon-btn" data-pj="new" title="New thread" aria-label="New thread">${ICON('<path d="M12 5v14M5 12h14"/>')}</button></div>${found}
+    ${err}<div class="pj-rows">${groups.join('')}${closedRows}</div>`
+}
+
+function projectMain(data) {
+  if (S.pj.found) return foundView(data)
+  if (S.pj.client) return clientView(data)
+  if (!S.pj.sel) {
+    const n = (data.projects || []).length
+    return `<div class="empty"><div>${mark()}<h3>${n ? 'Pick a thread' : 'No threads yet'}</h3><p>A thread gathers the calls of one piece of work — a client engagement, an initiative, hiring — by its meeting series, its people or its chat. Its glossary helps transcription, and the minutes see what was said in its other calls.</p><p>Name one in the box on the left to start.</p></div></div>`
+  }
+  const p = S.pj.detail
+  if (!p) return `<div class="skeleton" style="padding:20px">${'<i></i>'.repeat(8)}</div>`
+  if (p.error) return `<div class="empty"><div><h3>This thread can't be opened</h3><p class="error">${esc(p.error)}</p></div></div>`
+  const open = workOpenCount()
+  const tabs = [['brief', 'Brief'], ['work', `Work${open ? `<span class="n">${open}</span>` : ''}`], ['calls', `Calls<span class="n">${p.call_count}</span>`], ['people', `People${peopleCount() ? `<span class="n">${peopleCount()}</span>` : ''}`], ['profile', 'Profile']]
+  const tab = tabs.some(([t]) => t === S.pj.tab) ? S.pj.tab : 'brief'
+  const client = p.client_name ? `<span class="tag pj-client-tag">${clientIcon(projClient(p.client), 14)}${esc(p.client_name)}</span>` : ''
+  const facts = [`${p.call_count} call${p.call_count === 1 ? '' : 's'}`, p.since ? `since ${esc(p.since)}` : '', p.last_call ? `last call ${esc(dayLabel(new Date(p.last_call)).toLowerCase())}` : ''].filter(Boolean).join(' · ')
+  const menu = `<span class="pj-add-wrap pj-more"><button class="icon-btn" data-pj="menu" aria-haspopup="menu" aria-expanded="${S.pj.menu}" aria-label="Thread actions" title="Thread actions">${ICON('<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>')}</button>${S.pj.menu ? `<div class="menu" role="menu">${p.client ? `<button class="menu-item" role="menuitem" data-pj="client" data-id="${esc(p.client)}">Open ${esc(p.client_name || 'the client')}</button>` : ''}<button class="menu-item" role="menuitem" data-claude-about>Claude about this thread</button><button class="menu-item" role="menuitem" data-pj="sync">Sync now</button><div class="menu-sep" role="separator"></div><button class="menu-item danger" role="menuitem" data-pj="delete-ask">Delete…</button></div>` : ''}</span>`
+  const confirmDel = S.pj.confirmDelete ? `<div class="notice"><span class="grow">Delete <b>${esc(p.name)}</b>? Its brief, profile and work go to the trash; its calls stay.</span><button class="btn ghost" data-pj="delete-cancel">Cancel</button><button class="btn danger" data-pj="delete">Move to trash</button></div>` : ''
+  const head = `<header class="pj-head"><div class="pj-title">${projIcon(p, 34)}<div style="min-width:0"><div class="pj-name"><h2>${esc(p.name)}</h2>${client}${stageTag(p.stage, true)}</div><div class="facts"><span>${facts}</span></div></div><span class="grow"></span>${menu}</div>${confirmDel}
+    <div class="tabs" role="tablist">${tabs.map(([id, label]) => `<button class="tab" role="tab" data-pj="tab" data-tab-id="${id}" aria-selected="${tab === id}">${label}</button>`).join('')}</div>${notices()}</header>`
+  const body = tab === 'calls' ? projectCalls(p) : tab === 'profile' ? projectProfile(p, data) : tab === 'work' ? projectWork(p) : tab === 'people' ? peopleView() : projectBrief(p)
+  return `${head}<div class="pane pj-pane${tab === 'work' || tab === 'people' ? ' wide' : ''}">${body}</div>`
+}
+
+// ── the Work tab: the project's ledger (`ledger.rs`) ────────────────────────────────────────
+const CLOSED_STATES = ['done', 'cancelled', 'merged', 'deleted']
+const STATE_LABEL = { open: 'to do', in_progress: 'in progress', blocked: 'blocked', done: 'done', cancelled: 'cancelled', merged: 'merged', deleted: 'deleted' }
+const KIND_LABEL = { session: 'session', dependency: 'dependency', decision: 'decision', risk: 'risk', question: 'question' }
+function workOpenCount() {
+  const w = S.pj.work
+  if (!w || !w.nodes) return 0
+  return Object.values(w.nodes).filter((n) => (n.kind === 'story' || n.kind === 'task') && !CLOSED_STATES.includes(n.state)).length
+}
+/** What waits for the user: suggested moves and merges, and "done" claims the verifier only half-believed. */
+function workToReview(w) {
+  const out = []
+  for (const n of Object.values(w.nodes || {})) {
+    for (const s of n.suggestions || []) if (s.status === 'pending') out.push({ n, s })
+    const last = (n.history || []).filter((h) => h.type === 'agent' && h.effect).slice(-1)[0]
+    if (last && (last.effect === 'done' || last.effect === 'held') && last.verdict === 'weak' && !CLOSED_STATES.includes(n.state)) out.push({ n, weak: last })
+  }
+  return out
+}
+const fmtDay = (d) => d ? new Date(d + 'T12:00').toLocaleDateString([], { weekday: d && (new Date(d + 'T12:00') - Date.now()) / 864e5 < 7 && (new Date(d + 'T12:00') - Date.now()) > -864e5 ? 'short' : undefined, day: 'numeric', month: 'short' }) : ''
+const relDay = (d) => { if (!d) return ''; const t = new Date(); const iso = (x) => x.toISOString().slice(0, 10); if (d === iso(t)) return 'today'; t.setDate(t.getDate() - 1); if (d === iso(t)) return 'yesterday'; return fmtDay(d) }
+/** A work item's status as the tree and the board show it: its word and its colour. */
+function workStatus(n) {
+  if (n.kind === 'question') return n.state === 'done' ? ['answered', 'done'] : ['open', 'open']
+  if (n.state === 'done' && n.kind === 'task' && n.type === 'session') return ['held', 'done']
+  if (n.waiting_for && !CLOSED_STATES.includes(n.state)) return ['waiting', 'waiting']
+  return [STATE_LABEL[n.state] || n.state, n.state]
+}
+/** Where a record came from: its day and the call ("today · weekly 12:05"). */
+function workOrigin(w, n) {
+  const h = (n.history || []).find((x) => x.op === 'create')
+  const item = h && h.evidence && (w.evidence || {})[h.evidence]
+  const call = item ? String(item.title || '').split(/[—–-]/)[0].trim().split(/\s+/).slice(0, 2).join(' ').toLowerCase() : ''
+  return [n.kind === 'risk' ? `raised ${relDay(n.created)}` : relDay(n.created), call ? `${call}${h.ts ? ' ' + String(h.ts).replace(/^00:/, '').slice(0, 5) : ''}` : ''].filter(Boolean).join(' · ')
+}
+function workRow(w, n, level) {
+  const kind = n.kind === 'task' ? (n.type !== 'action' ? KIND_LABEL[n.type] : '') : KIND_LABEL[n.kind] || ''
+  const meta = n.kind === 'story' ? [n.ac.length ? `criteria ${n.ac.filter((a) => a.met).length} / ${n.ac.length}` : '', n.due ? `due ${fmtDay(n.due)}` : ''].filter(Boolean).join(' · ')
+    : n.kind === 'task' ? [n.state === 'done' && n.type === 'session' ? `held ${relDay((n.history || []).filter((h) => h.effect === 'held').map((h) => h.date).pop() || n.created)}` : (n.internal_owner || n.client_owner || 'nobody'), n.state !== 'done' && n.due ? fmtDay(n.due) : ''].filter(Boolean).join(' · ')
+    : workOrigin(w, n)
+  const [word, cls] = workStatus(n)
+  const st = n.kind === 'story' || n.kind === 'task' || n.kind === 'question' ? `<span class="wk-st ${esc(cls)}">● ${esc(word)}</span>` : ''
+  const tags = [n.pinned && n.pinned.length ? `<span class="tag">pinned: ${esc(n.pinned.join(', '))}</span>` : '', n.blocks && n.blocks.length && !CLOSED_STATES.includes(n.state) ? `<span class="tag">holds up ${n.blocks.length}</span>` : ''].join('')
+  return `<button class="wk-row${S.pj.node === n.id ? ' on' : ''}${CLOSED_STATES.includes(n.state) ? ' closed' : ''}" style="padding-left:${12 + level * 18}px" data-pj="node" data-node="${esc(n.id)}"><span class="wk-id">${esc(n.id)}</span>${kind ? `<span class="wk-k ${esc(n.kind === 'task' ? n.type : n.kind)}">${esc(kind)}</span>` : ''}<span class="wk-t${n.kind === 'story' ? ' story' : ''}">${esc(n.title)}</span>${tags}<span class="grow"></span><span class="wk-meta">${esc(meta)}</span>${st}</button>`
+}
+/** Initials for an avatar ("Pat Novak" → "PP"), with a colour of its own. */
+function avatar(name, owed) {
+  if (!name) return '<span class="bd-av none" title="Nobody named">?</span>'
+  const ini = name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('')
+  const hue = ProjectArt.hash(name) % 360
+  return `<span class="bd-av${owed ? ' owed' : ''}" style="--h:${hue}" title="${esc(name)}${owed ? ' (the client owes it)' : ''}">${esc(ini)}</span>`
+}
+/** The board, as GitHub Projects lays one out: columns of a fixed width (the board scrolls sideways,
+ *  cards are never squeezed), each a project's own Status option in a state category; cards with
+ *  where they belong on top, the title, then the fields the project shows; optional lanes. */
+const DEFAULT_COLUMNS = [
+  { id: 'todo', name: 'To do', color: '#8a8a95', state: 'open' },
+  { id: 'doing', name: 'In progress', color: '#9b78ff', state: 'in_progress' },
+  { id: 'waiting', name: 'Waiting', color: '#f0a24a', state: 'waiting' },
+  { id: 'blocked', name: 'Blocked', color: '#e8603c', state: 'blocked' },
+  { id: 'done', name: 'Done', color: '#3ccf91', state: 'done' },
+]
+const CARD_FIELDS = [['story', 'Story'], ['kind', 'Kind'], ['owner', 'Owner'], ['due', 'Due date'], ['waiting', 'Waiting on'], ['holds_up', 'Holds up'], ['source', 'Last call']]
+const DEFAULT_FIELDS = ['story', 'kind', 'owner', 'due', 'waiting', 'holds_up']
+const STATE_CATS = [['open', 'To do'], ['in_progress', 'In progress'], ['waiting', 'Waiting on someone'], ['blocked', 'Blocked'], ['done', 'Done']]
+const COL_COLORS = ['#8a8a95', '#9b78ff', '#5aa9ff', '#4cc3c8', '#3ccf91', '#c9b458', '#f0a24a', '#e8603c', '#d36bd1']
+function boardOf() {
+  const b = (S.pj.detail && S.pj.detail.board) || {}
+  return { columns: b.columns && b.columns.length ? b.columns : DEFAULT_COLUMNS, fields: b.fields && b.fields.length ? b.fields : DEFAULT_FIELDS, group: b.group || 'none', views: b.views && b.views.length ? b.views : DEFAULT_VIEWS }
+}
+/** Saved views of the Work tab, as GitHub Projects keeps them: each its layout, filters, grouping,
+ *  card fields and hidden columns; the columns themselves are the project's. */
+const DEFAULT_VIEWS = [{ id: 'board', name: 'Board', layout: 'board' }, { id: 'tree', name: 'Tree', layout: 'tree' }]
+const viewKey = () => `echo.pj.view.${S.pj.sel}`
+function activeViewId() {
+  const views = boardOf().views
+  let id = S.pj.viewIds && S.pj.viewIds[S.pj.sel]
+  if (!id) { try { id = localStorage.getItem(viewKey()) } catch { /* no storage */ } }
+  return views.some((v) => v.id === id) ? id : views[0].id
+}
+/** The active view, its settings filled in. */
+function wv() {
+  const b = boardOf()
+  const v = b.views.find((x) => x.id === activeViewId()) || b.views[0]
+  return { id: v.id, name: v.name || 'View', layout: v.layout === 'tree' ? 'tree' : 'board', kind: v.kind || '', owner: v.owner || '', open: v.open !== false, group: v.group || b.group || 'none', fields: v.fields && v.fields.length ? v.fields : b.fields, hidden: v.hidden || [] }
+}
+function setView(patch) {
+  const b = boardOf()
+  const id = activeViewId()
+  b.views = b.views.map((v) => v.id === id ? { ...v, ...patch } : v)
+  saveBoard(b)
+}
+function chooseView(id) {
+  S.pj.viewIds = { ...(S.pj.viewIds || {}), [S.pj.sel]: id }
+  try { localStorage.setItem(viewKey(), id) } catch { /* no storage */ }
+  S.pj.viewMenu = false
+  render()
+}
+function viewTabs() {
+  const b = boardOf(), cur = activeViewId()
+  const icon = (v) => v.layout === 'tree' ? ICON('<path d="M5 5h6M5 12h6M5 19h6M14 5h5M14 12h5M14 19h5"/>') : ICON('<rect x="4" y="5" width="4.5" height="14" rx="1"/><rect x="10" y="5" width="4.5" height="9" rx="1"/><rect x="16" y="5" width="4" height="11" rx="1"/>')
+  const tab = (v) => {
+    const on = v.id === cur
+    const menu = on && S.pj.viewMenu ? `<div class="menu bd-menu wv-menu" role="menu"><div class="bd-menu-row"><input data-view-name value="${esc(v.name || 'View')}" aria-label="View name" autofocus></div><button class="menu-item" data-pj="view-dup">Duplicate view</button>${b.views.length > 1 ? '<button class="menu-item danger" data-pj="view-del">Delete view</button>' : ''}</div>` : ''
+    return `<span class="wv-tab${on ? ' on' : ''}"><button class="wv-b" data-pj="${on ? 'view-menu' : 'view-pick'}" data-v="${esc(v.id)}"${on ? ' title="Rename, duplicate or delete this view" aria-haspopup="menu"' : ''}>${icon(v)}${esc(v.name || 'View')}</button>${on ? `<span class="pj-add-wrap"><button class="icon-btn wv-more" data-pj="view-menu" aria-label="View options" aria-haspopup="menu" aria-expanded="${!!S.pj.viewMenu}">${ICON('<path d="M7 10l5 5 5-5"/>')}</button>${menu}</span>` : ''}</span>`
+  }
+  return `<div class="wv-tabs">${b.views.map(tab).join('')}<button class="wv-add" data-pj="view-new">+ New view</button></div>`
+}
+
+function saveBoard(b) {
+  if (S.pj.detail) S.pj.detail.board = b
+  send({ cmd: 'project', op: 'board', id: S.pj.sel, board: b })
+  render()
+}
+/** A card's category, and the visible column it sits in (the one the user put it in, if it still fits). */
+function cardCategory(n) {
+  if (n.state === 'done') return 'done'
+  if (n.state === 'blocked') return 'blocked'
+  if (n.waiting_for) return 'waiting'
+  return n.state === 'in_progress' ? 'in_progress' : 'open'
+}
+function cardColumn(n, cols) {
+  const cat = cardCategory(n)
+  const own = cols.find((c) => c.id === n.column && c.state === cat)
+  return own || cols.find((c) => c.state === cat) || (cat === 'waiting' ? cols.find((c) => c.state === 'open') : null)
+}
+function workBoard(w, pass) {
+  const N = w.nodes || {}
+  const b = { ...boardOf(), ...(() => { const v = wv(); return { group: v.group, fields: v.fields, hide: v.hidden } })() }
+  const cols = b.columns.filter((c) => !c.hidden && !b.hide.includes(c.id))
+  const show = new Set(b.fields)
+  const today = new Date().toISOString().slice(0, 10)
+  const items = Object.values(N).filter((n) => (n.kind === 'task' || n.kind === 'question') && n.state !== 'merged' && n.state !== 'deleted' && n.state !== 'cancelled' && (pass(n) || n.state === 'done'))
+  const placed = items.map((n) => [n, cardColumn(n, cols)]).filter(([, c]) => c)
+  const card = (n) => {
+    const story = N[n.parent] && N[n.parent].kind === 'story' ? N[n.parent] : null
+    const kind = n.kind === 'question' ? 'question' : n.type !== 'action' ? n.type : ''
+    const owner = n.internal_owner || n.client_owner
+    const late = n.due && n.due < today && n.state !== 'done'
+    const last = (n.history || []).filter((h) => h.evidence).pop()
+    const item = last && (w.evidence || {})[last.evidence]
+    const chips = [
+      show.has('kind') && kind ? `<span class="wk-k ${esc(kind)}">${esc(kind)}</span>` : '',
+      show.has('due') && n.due ? `<span class="bd-chip${late ? ' late' : ''}" title="${late ? 'Overdue' : 'Due'}">${ICON('<rect x="4" y="5" width="16" height="15" rx="2.5"/><path d="M4 10h16M9 3v4M15 3v4"/>')}${esc(fmtDay(n.due))}</span>` : '',
+      show.has('waiting') && n.waiting_for ? `<span class="bd-chip warn" title="${esc(n.waiting_for.what || '')}">⏳ ${esc(n.waiting_for.who || 'someone')}</span>` : '',
+      show.has('holds_up') && (n.blocks || []).length && n.state !== 'done' ? `<span class="bd-chip" title="Holds up: ${esc(n.blocks.map((x) => (N[x] || {}).title || x).join('; '))}">holds up ${n.blocks.length}</span>` : '',
+      show.has('source') && item ? `<span class="bd-chip" title="${esc(item.title || '')}">▮ ${esc(relDay(item.date))}</span>` : '',
+    ].filter(Boolean).join('')
+    return `<div class="bd-card${S.pj.node === n.id ? ' on' : ''}${n.state === 'done' ? ' done' : ''}" draggable="true" data-pj="node" data-node="${esc(n.id)}" data-drag="${esc(n.id)}" tabindex="0">
+      <div class="bd-top"><span class="bd-ctx"><span class="wk-id">${esc(n.id)}</span>${show.has('story') && story && b.group !== 'story' ? ` · ${esc(story.title)}` : ''}</span>${show.has('owner') && n.kind === 'task' ? avatar(owner, !!n.client_owner && !n.internal_owner) : ''}</div>
+      <div class="bd-t">${esc(n.title)}</div>${chips ? `<div class="bd-f">${chips}</div>` : ''}
+    </div>`
+  }
+  // Lanes (Group by): none, each story, or each owner.
+  let lanes
+  if (b.group === 'story') {
+    const keyOf = (n) => (N[n.parent] && N[n.parent].kind === 'story' ? n.parent : '')
+    const keys = [...new Set(placed.map(([n]) => keyOf(n)))].sort((x, y) => (x === '') - (y === '') || x.localeCompare(y, undefined, { numeric: true }))
+    lanes = keys.map((k) => ({ title: k ? `<button class="bd-lane-t" data-pj="node" data-node="${esc(k)}"><span class="wk-id">${esc(k)}</span><b>${esc(N[k].title)}</b></button>${N[k].ac.length ? `<span class="bd-prog"><span style="width:${Math.round(100 * N[k].ac.filter((a) => a.met).length / N[k].ac.length)}%"></span></span><span class="bd-meta">${N[k].ac.filter((a) => a.met).length}/${N[k].ac.length}</span>` : ''}` : '<b class="bd-lane-loose">Not in a story</b>', rows: placed.filter(([n]) => keyOf(n) === k) }))
+  } else if (b.group === 'owner') {
+    const keyOf = (n) => n.internal_owner || n.client_owner || ''
+    const keys = [...new Set(placed.map(([n]) => keyOf(n)))].sort((x, y) => (x === '') - (y === '') || x.localeCompare(y))
+    lanes = keys.map((k) => ({ title: k ? `${avatar(k)}<b>${esc(k)}</b>` : '<b class="bd-lane-loose">Nobody named</b>', rows: placed.filter(([n]) => keyOf(n) === k) }))
+  } else lanes = [{ title: '', rows: placed }]
+  const count = (c) => placed.filter(([, x]) => x.id === c.id).length
+  const head = (c, i) => {
+    const n = count(c), over = c.limit && n > c.limit
+    const menu = S.pj.colMenu === c.id ? `<div class="menu bd-menu" role="menu">
+        <div class="bd-menu-row"><input id="bd-col-name" data-col-name="${esc(c.id)}" value="${esc(c.name)}" aria-label="Column name"></div>
+        <div class="bd-menu-row bd-colors">${COL_COLORS.map((x) => `<button class="pj-swatch${c.color === x ? ' on' : ''}" style="background:${x}" data-pj="col-set" data-col="${esc(c.id)}" data-k="color" data-v="${x}" aria-label="Colour ${x}"></button>`).join('')}</div>
+        <label class="bd-menu-row">Cards in it are <select data-col-state="${esc(c.id)}">${STATE_CATS.map(([k, l]) => `<option value="${k}"${c.state === k ? ' selected' : ''}>${esc(l.toLowerCase())}</option>`).join('')}</select></label>
+        <label class="bd-menu-row">Limit <input type="number" min="0" data-col-limit="${esc(c.id)}" value="${c.limit || ''}" placeholder="none" aria-label="Limit"></label>
+        <div class="menu-sep" role="separator"></div>
+        ${i > 0 ? `<button class="menu-item" data-pj="col-move" data-col="${esc(c.id)}" data-d="-1">Move left</button>` : ''}${i < cols.length - 1 ? `<button class="menu-item" data-pj="col-move" data-col="${esc(c.id)}" data-d="1">Move right</button>` : ''}
+        <button class="menu-item" data-pj="col-set" data-col="${esc(c.id)}" data-k="hidden" data-v="true">Hide</button>
+        <button class="menu-item danger" data-pj="col-delete" data-col="${esc(c.id)}">Delete column</button>
+      </div>` : ''
+    return `<div class="bd-col-h${n ? '' : ' empty'}" title="${esc(c.name)}"><span class="bd-dot" style="background:${esc(c.color)}"></span><b class="bd-hl">${esc(c.name)}</b><span class="bd-n${over ? ' over' : ''}">${n}${c.limit ? ` / ${c.limit}` : ''}</span><span class="grow"></span><span class="pj-add-wrap"><button class="icon-btn bd-more" data-pj="col-menu" data-col="${esc(c.id)}" aria-label="Column options" title="Column options">${ICON('<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>')}</button>${menu}</span></div>`
+  }
+  const hiddenCols = b.columns.filter((c) => c.hidden || b.hide.includes(c.id))
+  // Every column a card's width: the board scrolls sideways when there are many.
+  const grid = `grid-template-columns: repeat(${cols.length}, var(--bd-w)) var(--bd-add)`
+  const header = `<div class="bd-grid bd-heads" style="${grid}">${cols.map(head).join('')}<div class="bd-col-h add"><button class="tok add" data-pj="col-add">+ Column</button>${hiddenCols.length ? `<button class="link-btn" data-pj="col-unhide">${hiddenCols.length} hidden</button>` : ''}</div></div>`
+  const laneHtml = (l) => `${l.title ? `<div class="bd-lane-h">${l.title}<span class="bd-meta">${l.rows.length}</span></div>` : ''}<div class="bd-grid" style="${grid}">${cols.map((c) => `<div class="bd-col" data-drop="${c.state === 'waiting' ? '' : esc(c.id)}">${l.rows.filter(([, x]) => x.id === c.id).map(([n]) => card(n)).join('') || '<div class="bd-empty"></div>'}</div>`).join('')}<div></div></div>`
+  if (!placed.length) return `<div class="wk-empty"><b>Nothing here</b><p>No tasks match the filters.</p></div>`
+  return `<div class="bd${b.group !== 'none' ? ' grouped' : ''}">${header}${lanes.map(laneHtml).join('')}</div>`
+}
+// Drag a card to another column: its state, as the user set it (pinned, undoable).
+document.addEventListener('dragstart', (e) => {
+  const c = e.target.closest && e.target.closest('[data-drag]')
+  if (!c) return
+  e.dataTransfer.setData('text/x-echo-node', c.dataset.drag)
+  e.dataTransfer.effectAllowed = 'move'
+  c.classList.add('dragging')
+})
+document.addEventListener('dragend', (e) => { const c = e.target.closest && e.target.closest('[data-drag]'); if (c) c.classList.remove('dragging'); document.querySelectorAll('.bd-col.over').forEach((x) => x.classList.remove('over')) })
+document.addEventListener('dragover', (e) => {
+  const cell = e.target.closest && e.target.closest('.bd-col')
+  if (!cell || !cell.dataset.drop || !e.dataTransfer.types.includes('text/x-echo-node')) return
+  e.preventDefault()
+  document.querySelectorAll('.bd-col.over').forEach((x) => x !== cell && x.classList.remove('over'))
+  cell.classList.add('over')
+})
+document.addEventListener('drop', (e) => {
+  const cell = e.target.closest && e.target.closest('.bd-col')
+  const id = e.dataTransfer && e.dataTransfer.getData('text/x-echo-node')
+  if (!cell || !cell.dataset.drop || !id) return
+  e.preventDefault()
+  cell.classList.remove('over')
+  const n = S.pj.work && S.pj.work.nodes[id]
+  const col = boardOf().columns.find((c) => c.id === cell.dataset.drop)
+  if (!n || !col || n.column === col.id && cardCategory(n) === col.state) return
+  const set = { column: col.id }
+  if (cardCategory(n) !== col.state) set.state = col.state
+  Object.assign(n, set) // shown at once; the ledger answers on the next load
+  ledgerEdit({ op: 'edit', node: id, set })
+  render()
+})
+
+function boardChips() {
+  const b = wv()
+  const groups = [['none', 'No grouping'], ['story', 'Story'], ['owner', 'Owner']]
+  const group = `<label class="fchip${b.group !== 'none' ? ' on' : ''}">${b.group === 'none' ? 'Group' : `Group: ${esc((groups.find(([k]) => k === b.group) || [])[1])}`} ▾<select data-board-group aria-label="Group by">${groups.map(([k, l]) => `<option value="${k}"${b.group === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`
+  const fields = `<span class="pj-add-wrap"><button class="fchip" data-pj="fields-menu">Fields ▾</button>${S.pj.fieldsMenu ? `<div class="menu bd-menu" role="menu">${CARD_FIELDS.map(([k, l]) => `<label class="menu-item bd-check"><input type="checkbox" data-board-field="${k}" ${b.fields.includes(k) ? 'checked' : ''}> ${esc(l)}</label>`).join('')}</div>` : ''}</span>`
+  return group + fields
+}
+const KIND_FILTERS = [['', 'All kinds'], ['story', 'Stories'], ['task', 'Tasks'], ['decision', 'Decisions'], ['risk', 'Risks'], ['question', 'Questions']]
+function projectWork(p) {
+  const w = S.pj.work
+  if (!w) return `<div class="skeleton">${'<i></i>'.repeat(8)}</div>`
+  if (w.error) return `<p class="error">${esc(w.error)}</p>`
+  const N = w.nodes || {}
+  const all = Object.values(N).filter((n) => n.kind !== 'epic' && n.state !== 'merged' && n.state !== 'deleted')
+  const sync = w.sync || {}
+  const review = workToReview(w)
+  const syncText = sync.state === 'running' ? `${esc((sync.message || 'reading calls').replace(/^reading/, 'Reading'))}…`
+    : sync.state === 'failed' ? `<span class="error" title="${esc(sync.message || '')}">Sync failed</span>`
+    : [sync.at ? `Synced ${esc(hm(new Date(sync.finished_at || sync.at)))}` : 'Not synced yet', w.pending ? `${w.pending} call${w.pending === 1 ? '' : 's'} to read` : '', review.length ? `<span class="wk-warn">${review.length} to review</span>` : ''].filter(Boolean).join(' · ')
+  const owners = [...new Set(all.map((n) => n.internal_owner || n.client_owner).filter(Boolean))].sort()
+  const counts = Object.fromEntries(KIND_FILTERS.map(([k]) => [k, all.filter((n) => !k || n.kind === k).length]))
+  const V = wv()
+  const layoutChip = `<label class="fchip">${V.layout === 'tree' ? 'Tree' : 'Board'} ▾<select data-view-layout aria-label="Layout"><option value="board"${V.layout === 'board' ? ' selected' : ''}>Board</option><option value="tree"${V.layout === 'tree' ? ' selected' : ''}>Tree</option></select></label>`
+  const kindChip = `<label class="fchip${V.kind ? ' on' : ''}">${esc((KIND_FILTERS.find(([k]) => k === V.kind) || KIND_FILTERS[0])[1])} ▾<select data-pj-filter="kind" aria-label="Kind">${KIND_FILTERS.map(([k, l]) => `<option value="${k}"${V.kind === k ? ' selected' : ''}>${esc(l)} · ${counts[k]}</option>`).join('')}</select></label>`
+  const ownerChip = `<label class="fchip${V.owner ? ' on' : ''}">${esc(V.owner === '-' ? 'Nobody named' : V.owner || 'Owner')} ▾<select data-pj-filter="owner" aria-label="Owner"><option value="">Anyone</option><option value="-"${V.owner === '-' ? ' selected' : ''}>Nobody named</option>${owners.map((o) => `<option${V.owner === o ? ' selected' : ''}>${esc(o)}</option>`).join('')}</select></label>`
+  const head = `${viewTabs()}<div class="wk-bar">${layoutChip}${kindChip}${ownerChip}<button class="fchip${V.open ? ' on' : ''}" data-pj="open-only">Open only</button>${V.layout === 'board' ? boardChips() : ''}<span class="grow"></span><span class="wk-sync">${syncText}</span><button class="link-btn" data-pj="sync"${sync.state === 'running' ? ' disabled' : ''}>Sync now</button></div>`
+  const pass = (n) => (!V.open || !CLOSED_STATES.includes(n.state)) && (!V.kind || n.kind === V.kind)
+    && (!V.owner || (V.owner === '-' ? !(n.internal_owner || n.client_owner) && n.kind === 'task' : (n.internal_owner || n.client_owner) === V.owner))
+  if (!all.length) {
+    return `${head}<div class="wk-empty"><b>No work yet</b><p>${w.pending ? `Sync reads this thread's calls — ${w.pending} so far — into stories, tasks, decisions, risks and questions, each with the words it came from.` : 'Once this thread has calls, Sync reads them into stories, tasks, decisions, risks and questions.'} It uses the thread's AI profile.</p><button class="btn primary" data-pj="sync">Sync now</button></div>`
+  }
+  const reviewList = review.length ? `<div class="wk-review">${review.map((r) => r.s
+    ? `<div class="wk-rv"><span class="wk-warn">To review</span><span class="grow">${esc(r.s.op === 'suggest_merge' ? 'Same work as' : 'Belongs under')} <b>${esc((N[r.s.to] || {}).title || r.s.to)}</b>? <span class="set-sub">${esc(r.n.title)} — “${esc(r.s.quote || '')}”</span></span><button class="btn primary" data-pj="ledger" data-body='${esc(JSON.stringify({ op: 'accept', target: r.s.mid }))}'>Yes</button><button class="btn ghost" data-pj="ledger" data-body='${esc(JSON.stringify({ op: 'reject', target: r.s.mid }))}'>No</button></div>`
+    : `<div class="wk-rv"><span class="wk-warn">To review</span><span class="grow">Is <b>${esc(r.n.title)}</b> done? <span class="set-sub">“${esc(r.weak.quote || '')}”</span></span><button class="btn primary" data-pj="ledger" data-body='${esc(JSON.stringify({ op: 'edit', node: r.n.id, set: { state: 'done' } }))}'>Done</button><button class="btn ghost" data-pj="node" data-node="${esc(r.n.id)}">Look</button></div>`).join('')}</div>` : ''
+  if (V.layout === 'board') return `${head}${reviewList}${workBoard(w, pass)}`
+  const rows = []
+  const walk = (id, level) => {
+    const n = N[id]
+    if (!n || n.state === 'merged' || n.state === 'deleted') return
+    const order = ['story', 'task', 'question', 'decision', 'risk']
+    const kids = (n.children || []).filter((c) => N[c]).sort((a, b) => order.indexOf(N[a].kind) - order.indexOf(N[b].kind) || a.localeCompare(b))
+    if (n.kind === 'epic') {
+      const before = rows.length
+      rows.push('')
+      for (const c of kids) walk(c, 0)
+      if (rows.length > before + 1) rows[before] = `<div class="wk-ws">${esc(n.title)}<span> · ${n.plan === 'Off-plan' ? 'the sync found work outside the plan' : 'workstream'}</span></div>`
+      return
+    }
+    const below = rows.length
+    // As designed: a story's tasks and questions sit under it; its decisions and risks at its own level.
+    for (const c of kids) walk(c, N[c].kind === 'decision' || N[c].kind === 'risk' ? level : level + 1)
+    const kidsShown = rows.length > below
+    if (pass(n) || kidsShown) rows.splice(below, 0, workRow(w, n, level))
+  }
+  for (const r of w.roots || []) walk(r, 0)
+  return `${head}${reviewList}<div class="wk-tree">${rows.join('') || '<p class="set-sub">Nothing matches.</p>'}</div>`
+}
+
+/** The selected work item, in the right panel (`work-item`): as the design's detail — a facts card
+ *  read as text (click a value to change it), then its history with the words and the verifier's mark. */
+function workPanel() {
+  const w = S.pj.work, n = w && w.nodes && S.pj.node ? w.nodes[S.pj.node] : null
+  if (!n) return '<div class="wp-empty">Pick a story, task or record on the Work tab.</div>'
+  const N = w.nodes, ev = w.evidence || {}
+  const kind = n.kind === 'task' ? (n.type === 'action' || !n.type ? 'task' : n.type) : n.kind
+  const path = []
+  for (let p = n.parent; p && N[p]; p = N[p].parent) path.unshift(N[p].title)
+  const edit = S.pj.editField
+  const val = (field, text, empty, input) => edit === field ? input
+    : `<button class="wp-val${text ? '' : ' empty'}" data-pj="edit-field" data-field="${field}">${text ? esc(text) : `${esc(empty)} · <u>Set</u>`}</button>`
+  const titles = (ids) => ids.map((i) => `<button class="wp-link" data-pj="node" data-node="${esc(i)}">${esc(i)} ${esc((N[i] || {}).title || '')}</button>`).join('')
+  const trackable = n.kind === 'story' || n.kind === 'task' || n.kind === 'question'
+  const [word, cls] = workStatus(n)
+  const states = n.kind === 'question' ? [['open', 'open'], ['done', 'answered']] : [['open', 'to do'], ['in_progress', 'in progress'], ['blocked', 'blocked'], ['done', n.type === 'session' ? 'held' : 'done'], ['cancelled', 'cancelled']]
+  const actionItems = (n.history || []).filter((h) => h.op === 'create' && h.quote).slice(0, 1)
+  const rows = [
+    trackable ? ['Status', edit === 'state' ? `<select class="wp-in" data-ledger-set="state" aria-label="Status">${states.map(([v, l]) => `<option value="${v}"${n.state === v ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>` : `<button class="wp-val" data-pj="edit-field" data-field="state"><span class="wk-st ${esc(cls)}">● ${esc(word)}</span></button>${n.derived ? ` <span class="set-sub">${esc(n.derived)}</span>` : ''}`] : null,
+    n.kind === 'task' || n.kind === 'story' ? ['Owner', val('internal_owner', n.internal_owner, 'nobody named', `<input class="wp-in" data-ledger-set="internal_owner" value="${esc(n.internal_owner || '')}" aria-label="Owner" autofocus>`)] : null,
+    n.client_owner ? ['Client owes', esc(n.client_owner)] : null,
+    n.kind === 'task' || n.kind === 'story' ? ['Due', val('due', n.due ? new Date(n.due + 'T12:00').toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }) : '', 'no date', `<input class="wp-in" type="date" data-ledger-set="due" value="${esc(n.due || '')}" aria-label="Due" autofocus>`) + ((n.due_history || []).length > 1 ? ` <span class="set-sub">moved ${n.due_history.length - 1}×</span>` : '')] : null,
+    n.waiting_for ? ['Waiting on', `${esc(n.waiting_for.who || 'someone')} — ${esc(n.waiting_for.what || '')}`] : null,
+    (n.waiting_on || []).length ? ['Waits for', titles(n.waiting_on)] : null,
+    (n.blocks || []).length ? ['Holds up', titles(n.blocks)] : null,
+    n.kind !== 'story' && actionItems.length ? ['Said', `“${esc(actionItems[0].quote.length > 90 ? actionItems[0].quote.slice(0, 88) + '…' : actionItems[0].quote)}”`] : null,
+  ].filter(Boolean)
+  const met = n.ac.filter((a) => a.met).length
+  const criteria = n.kind === 'story' ? `<div class="wp-h">Done when · ${met} of ${n.ac.length}</div><div class="wp-ac-list">${n.ac.map((a, i) => `<label class="wp-ac${a.met ? ' met' : ''}"><input type="checkbox" data-ledger-ac="${i + 1}" ${a.met ? 'checked' : ''}><span>${esc(a.text)}</span></label>`).join('')}</div>` : ''
+  const hist = (n.history || []).slice().reverse().map((h) => {
+    const what = h.by === 'human' ? (h.op === 'edit' ? `you set ${Object.keys(h.set || {}).join(', ')}` : h.op === 'create' ? 'you created it' : `you: ${h.op}`)
+      : h.op === 'create' ? `created${h.due_text ? ' · due ' + h.due_text : ''}` : h.effect ? `${h.effect === 'due' ? 'due ' + (h.due_text || '') : h.effect}${h.effect === 'done' || h.effect === 'held' ? '?' : ''}`
+      : h.op === 'waiting' ? `waiting · ${h.who || '?'}` : h.op === 'link' ? `waits for ${h.depends_on}` : h.op === 'ac_met' ? `criterion ${h.ac} met` : h.op
+    const mark = h.by === 'human' ? (h.mid && h.op !== 'create' ? `<button class="link-btn" data-pj="ledger" data-body='${esc(JSON.stringify({ op: 'undo', target: h.mid }))}'>undo</button>` : '')
+      : h.applied === false && h.verdict === 'supports' ? '<span class="wk-v weak">kept yours</span>'
+      : h.verdict === 'supports' || (h.op === 'create') ? '<span class="wk-v supports">verified</span>'
+      : h.verdict === 'weak' ? '<span class="wk-v weak">weak · to review</span>' : h.verdict === 'wrong' ? '<span class="wk-v wrong">wrong</span>'
+      : (h.effect || ['ac_met', 'link', 'waiting'].includes(h.op)) && h.effect !== 'mention' ? '<span class="wk-v">to check</span>' : ''
+    const item = h.evidence && ev[h.evidence]
+    const srcs = item ? `<button class="wp-src" data-call="${esc(item.call || '')}" title="${esc(item.title || '')}">▮ ${esc(h.ts ? String(h.ts).replace(/^00:/, '').slice(0, 5) : relDay(item.date))}</button>` : ''
+    return `<div class="wp-ev"><div class="wp-ev-top"><span class="set-sub">${esc(relDay(h.date))}</span><b>${esc(what)}</b>${h.speaker ? `<span class="set-sub">${esc(h.speaker)}</span>` : ''}<span class="grow"></span>${mark}</div>${h.quote ? `<div class="wp-q">“${esc(h.quote)}” ${srcs}</div>` : ''}</div>`
+  }).join('')
+  return `<div class="wp">
+    <div class="wp-top"><span class="wk-id">${esc(n.id)}</span><span class="wk-k ${esc(n.kind === 'task' ? n.type : n.kind)}">${esc(kind)}</span><span class="grow"></span><button class="btn" data-pj="edit-title">Edit</button></div>
+    ${edit === 'title' ? `<textarea class="wp-title" data-ledger-set="title" rows="1" aria-label="Title" autofocus>${esc(n.title)}</textarea>` : `<h3 class="wp-name">${esc(n.title)}</h3>`}
+    ${path.length ? `<div class="set-sub">${esc(path.join(' › '))}</div>` : ''}
+    ${rows.length ? `<div class="wp-facts">${rows.map(([k, v]) => `<span>${esc(k)}</span><div>${v}</div>`).join('')}</div>` : ''}
+    ${criteria}
+    ${mentionsBlock(n)}
+    <div class="wp-h">History</div>${hist}
+  </div>`
+}
+PANEL_VIEWS.push({ id: 'work-item', label: 'Details', icon: ICON('<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/>'), area: 'right', when: () => ((S.view === 'projects' && S.pj.tab === 'work') || S.pj.inline === S.view) && !!S.pj.node, render: workPanel })
+function ledgerEdit(body) {
+  send({ cmd: 'project', op: 'ledger', id: S.pj.sel, body })
+  setTimeout(async () => {
+    if (S.view === 'projects') await loadProject()
+    else { await loadWork(); if (S.view === 'tasks') await loadTasks(); else if (S.selected) await loadCall(S.selected) }
+    render()
+  }, 300)
+}
+
+// ── Tasks: every open project's open tasks by who has to move, and what to ask whom ────────
+// Computed by the app (`tasks.rs`) from the ledgers; a card opens the task's details on the right.
+const TASK_PILES = [['mine', 'I owe'], ['owed', 'Owed to me'], ['waiting', 'Waiting for others'], ['nobody', 'Nobody named']]
+const TASK_SORTS = [['due', 'Due'], ['quiet', 'Quiet longest'], ['project', 'Thread']]
+const TASK_SHOWN = 6
+const projById = (id) => ((S.pj.data && S.pj.data.projects) || []).find((p) => p.id === id)
+const dueText = (c) => c.due ? `<span class="tk-due${c.late ? ' late' : ''}" title="${c.late ? 'Overdue' : 'Due'}">${esc(fmtDay(c.due))}</span>` : '<span class="tk-due none">no date</span>'
+/** Who a card is about, as the design says it: what you owe — its story; owed — who (· client);
+ *  waiting — on whom for what, or after which task; nobody — its story. */
+function taskWho(c, pile) {
+  const w = c.waiting_for
+  if (pile === 'waiting') return w ? `${esc(w.who || 'someone')}${w.what ? ` ← ${esc(w.what)}` : ''}` : c.after.length ? `after ${c.after.map((a) => `<span title="${esc(a.title)}">${esc(a.id)}</span>`).join(', ')}` : 'blocked'
+  if (pile === 'owed') return `${esc(c.owner)}${c.client ? ' · client' : ''}`
+  return c.story ? esc(c.story.title) : ''
+}
+function taskCard(c, pile) {
+  const p = projById(c.project) || { id: c.project, name: c.project }
+  const quiet = c.quiet >= 5 && !c.due ? `<span class="tk-quiet" title="No word about it in ${c.quiet} days">quiet ${c.quiet} d</span>` : ''
+  return `<button class="tk-card${S.pj.node === c.id && S.pj.sel === c.project ? ' on' : ''}" data-tk="open" data-project="${esc(c.project)}" data-node="${esc(c.id)}">
+    <span class="tk-t">${esc(c.title)}</span>${(() => { const w = taskWho(c, pile); return w ? `<span class="tk-who">${w}</span>` : '' })()}
+    <span class="tk-m"><span class="tk-pj">${projIcon(p, 12)}${esc(p.name)}</span><span class="grow"></span>${quiet}${dueText(c)}</span>
+  </button>`
+}
+function tasksView() {
+  const d = S.tk.data
+  if (!d) return `<div class="skeleton" style="padding:20px">${'<i></i>'.repeat(6)}</div>`
+  if (d.error) return `<div class="tk"><p class="error">${esc(d.error)}</p></div>`
+  const projects = d.projects || []
+  const pick = S.tk.project && projects.some((p) => p.id === S.tk.project) ? S.tk.project : ''
+  const name = (id) => (projById(id) || { name: id }).name
+  const sorts = {
+    due: () => 0,
+    quiet: (a, b) => (b.quiet || 0) - (a.quiet || 0),
+    project: (a, b) => name(a.project).localeCompare(name(b.project)),
+  }
+  const projChip = `<label class="fchip${pick ? ' on' : ''}">${esc(pick ? name(pick) : 'All threads')} ▾<select data-tk-project aria-label="Thread"><option value="">All threads</option>${projects.map((p) => `<option value="${esc(p.id)}"${pick === p.id ? ' selected' : ''}>${esc(p.name)} · ${p.tasks}</option>`).join('')}</select></label>`
+  const sortChip = `<label class="fchip">${esc((TASK_SORTS.find(([k]) => k === S.tk.sort) || TASK_SORTS[0])[1])} ▾<select data-tk-sort aria-label="Order">${TASK_SORTS.map(([k, l]) => `<option value="${k}"${S.tk.sort === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`
+  const head = `<header class="tk-head"><h2>Tasks</h2><span class="tk-sub">across ${projects.length} active project${projects.length === 1 ? '' : 's'}</span><span class="grow"></span>${projChip}${sortChip}</header>`
+  if (!projects.length) return `<div class="tk">${head}<div class="wk-empty"><b>No active threads</b><p>Tasks come from your threads' calls: each thread's Work tab reads them into stories and tasks.</p><button class="btn primary" data-go="projects">Open Threads</button></div></div>`
+  const total = TASK_PILES.reduce((n, [k]) => n + ((d.piles || {})[k] || []).length, 0)
+  if (!total) return `<div class="tk">${head}<div class="wk-empty"><b>No open tasks</b><p>Once a thread's calls are synced, what was promised, owed and waited on shows here — from every thread at once.</p></div></div>`
+  const cols = TASK_PILES.map(([k, label]) => {
+    const all = ((d.piles || {})[k] || []).filter((c) => !pick || c.project === pick).slice().sort(sorts[S.tk.sort] || sorts.due)
+    const open = S.tk.more[k], shown = open ? all : all.slice(0, TASK_SHOWN)
+    const more = all.length > TASK_SHOWN ? `<button class="tk-more" data-tk="more" data-pile="${k}">${open ? 'Show fewer' : `+ ${all.length - TASK_SHOWN}`}</button>` : ''
+    return `<section class="tk-col"><h3>${esc(label)} <span>${all.length}</span></h3>${shown.map((c) => taskCard(c, k)).join('') || '<p class="tk-none">Nothing here</p>'}${more}</section>`
+  }).join('')
+  const errs = (d.errors || []).length ? `<p class="set-sub tk-err">${d.errors.map((e) => `${esc(name(e.project))}: ${esc(e.error)}`).join(' · ')}</p>` : ''
+  return `<div class="tk">${head}${errs}<div class="tk-cols">${cols}</div></div>`
+}
+/** What to ask whom, next time you meet (right panel): late, due-soon and quiet things they owe,
+ *  and what we wait on them for. */
+function asksPanel() {
+  const d = S.tk.data
+  const asks = ((d && d.asks) || []).map((a) => ({ ...a, items: a.items.filter((c) => !S.tk.project || c.project === S.tk.project) })).filter((a) => a.items.length)
+  const when = (n) => {
+    if (!n || !n.start) return 'no meeting this week'
+    const s = new Date(n.start), t = new Date()
+    const day = s.toDateString() === t.toDateString() ? 'today' : s.toLocaleDateString([], { weekday: 'short' })
+    return `${day} · ${n.people <= 1 ? '1:1' : esc(n.subject || 'a meeting')}`
+  }
+  const why = (c) => c.why === 'late' ? `was due ${esc(fmtDay(c.due))}` : c.why === 'due' ? `due ${esc(fmtDay(c.due))}` : c.why === 'quiet' ? `quiet ${c.quiet} days` : `waiting${c.waiting_for && c.waiting_for.what ? ` · ${esc(c.waiting_for.what)}` : ''}`
+  const rows = asks.map((a) => `<div class="ask"><div class="ask-h"><b>${esc(a.who)}</b><span>${when(a.next)}</span></div>${a.items.map((c) => `<button class="ask-i" data-tk="open" data-project="${esc(c.project)}" data-node="${esc(c.id)}">${esc(c.title)} <span class="${c.why === 'late' ? 'late' : ''}">— ${why(c)}</span></button>`).join('')}</div>`).join('')
+  return `<div class="asks"><div class="asks-h"><b>Asks · by person</b><span>next time you meet</span></div>${rows || '<p class="set-sub">Nothing to chase: nobody owes you anything late, due soon or gone quiet.</p>'}<p class="asks-foot">Computed from what went quiet, what's due and what's owed — never a model's guess.</p></div>`
+}
+PANEL_VIEWS.push({ id: 'asks', label: 'Asks', icon: ICON('<path d="M5 18.5V7a2.5 2.5 0 0 1 2.5-2.5h9A2.5 2.5 0 0 1 19 7v6a2.5 2.5 0 0 1-2.5 2.5H9z"/><path d="M10 9.2a2 2 0 1 1 2.6 1.9c-.4.2-.6.5-.6.9v.3M12 14v.01"/>'), area: 'right', when: () => S.view === 'tasks', render: asksPanel })
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest && e.target.closest('[data-tk]')
+  if (!b) return
+  e.preventDefault()
+  const d = b.dataset
+  if (d.tk === 'more') { S.tk.more[d.pile] = !S.tk.more[d.pile]; return render() }
+  if (d.tk === 'open') {
+    if (S.pj.sel !== d.project) { S.pj.sel = d.project; S.pj.detail = null; S.pj.work = null; S.pj.tab = 'work' }
+    S.pj.node = d.node
+    S.pj.inline = S.view
+    S.pj.editField = null
+    const known = panelViews(), eff = Layout.effective(window.innerWidth, window.innerHeight, known, S.overlay)
+    if (eff.narrow) S.overlay = true
+    if (!S.pj.work) await loadWork()
+    Layout.show('work-item', known)
+    layoutChanged()
+  }
+})
+document.addEventListener('click', (e) => {
+  const b = e.target.closest && e.target.closest('[data-cc-sync]')
+  if (!b) return
+  send({ cmd: 'project', op: 'sync', id: b.dataset.ccSync })
+  b.disabled = true
+  b.textContent = 'Reading…'
+})
+document.addEventListener('change', (e) => {
+  const t = e.target
+  if (t.matches && t.matches('[data-tk-project]')) { S.tk.project = t.value; render() }
+  if (t.matches && t.matches('[data-tk-sort]')) { S.tk.sort = t.value; render() }
+})
+
+/** Projects Echo would make from calls in none (`projects::found`): accept, merge, reject. */
+function foundView(data) {
+  const fd = S.pj.foundData
+  const head = `<header class="pj-head"><div class="pj-title"><div style="min-width:0"><h2>Found for you</h2><div class="facts"><span>From your calls of the last 90 days that are in no thread — a recurring meeting, one organisation's calls, one Teams chat. Mail joins later.</span></div></div></div>${notices()}</header>`
+  if (!fd) return `${head}<div class="pane pj-pane"><div class="skeleton">${'<i></i>'.repeat(6)}</div></div>`
+  const clients = data.clients || [], projects = (data.projects || []).filter((p) => p.group !== 'closed')
+  const cards = (fd.found || []).map((c) => {
+    const calls = c.calls || []
+    const titles = calls.slice(0, 4).map((x) => `<button class="pj-call" data-call="${esc(x.name)}"><span class="pj-call-d">${x.started_at ? esc(dayLabel(new Date(x.started_at))) : ''}</span><span class="t">${esc(x.title || x.name)}</span></button>`).join('')
+    const more = calls.length > 4 ? `<div class="set-sub" style="padding:6px 14px">+ ${calls.length - 4} more</div>` : ''
+    const nc = c.new_client
+    const def = c.client || (nc ? 'new' : '')
+    const clientSel = `<select class="found-client" aria-label="Client"><option value=""${def === '' ? ' selected' : ''}>No client</option>${nc ? `<option value="new"${def === 'new' ? ' selected' : ''}>New client: ${esc(nc.name)} (${esc(nc.domain)})</option>` : ''}${clients.map((x) => `<option value="${esc(x.id)}"${def === x.id ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select>`
+    const merge = projects.length ? `<select class="found-merge" aria-label="Add to a thread"><option value="">Add to a thread…</option>${projects.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select>` : ''
+    return `<section class="set-card found-card" data-key="${esc(c.key)}">
+      <div class="set-row"><div class="found-top">${projIcon({ id: c.key, name: c.name, color: PJ_COLORS[ProjectArt.hash(c.key) % PJ_COLORS.length] }, 28)}<input class="found-name" value="${esc(c.name)}" aria-label="Thread name"></div>
+        <div class="set-ctl"><button class="btn primary" data-pj="found-accept">Accept</button><button class="btn ghost" data-pj="found-reject" title="Not a thread — never suggested again">Reject</button></div></div>
+      <div class="set-row"><div><div class="set-sub">${esc(c.why)}</div></div><div class="set-ctl">${clientSel}${merge}</div></div>
+      <div class="pj-calls">${titles}${more}</div></section>`
+  }).join('')
+  const empty = `<p class="set-sub" style="margin:4px 2px">Nothing found right now. Echo suggests a thread when two or more calls that are in none share a meeting series, one outside organisation, or a Teams chat.</p>`
+  const newRow = `<div class="pj-new"><span aria-hidden="true">+</span><input id="pj-new" placeholder="New thread — name it, Echo finds its calls" aria-label="New thread name" autocomplete="off"><span class="set-sub">Client</span><select id="pj-new-client" aria-label="Client"><option value="">None</option>${clients.map((x) => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('')}</select><button class="btn" data-pj="create">Create</button></div>`
+  return `${head}<div class="pane pj-pane">${newRow}${fd.error ? `<p class="error">${esc(fd.error)}</p>` : ''}${cards || empty}</div>`
+}
+
+function projectBrief(p) {
+  if (S.pj.briefEdit != null) {
+    return `<section class="set-sec"><div class="set-card"><div class="set-row"><div><b>What it is</b><div class="set-sub">Yours: goals, scope, who matters. Markdown. The minutes and Claude read it.</div></div><div class="set-ctl"><button class="btn ghost" data-pj="brief-cancel">Cancel</button><button class="btn primary" data-pj="brief-save">Save</button></div></div>
+      <div class="me-edit"><textarea id="pj-brief" spellcheck="true" aria-label="The thread's brief (Markdown)">${esc(S.pj.briefEdit)}</textarea><div class="set-sub">⌘S / Ctrl+S saves, Esc cancels.</div></div></div></section>`
+  }
+  const body = p.brief && p.brief.trim() ? `<div class="doc me-doc">${p.brief_html}</div>` : '<div class="me-doc set-sub">Nothing yet — say what this thread is for, so the minutes and Claude know.</div>'
+  const recent = (p.calls || []).slice(0, 5).map((c) => `<button class="pj-call" data-call="${esc(c.name)}"><span class="pj-call-d">${c.started_at ? esc(dayLabel(new Date(c.started_at))) : ''}</span><span class="t">${esc(c.title || c.name)}</span>${c.minutes ? '' : '<span class="set-sub">no minutes yet</span>'}</button>`).join('')
+  return `${insightsBlock('thread', p.id, p.name)}<section class="set-sec"><div class="set-card"><div class="set-row"><div><b>What it is</b></div><div class="set-ctl"><button class="btn" data-pj="brief-edit">Edit</button></div></div>${body}</div></section>
+    <section class="set-sec"><h3>Latest calls</h3><div class="set-card pj-calls">${recent || '<div class="set-row"><div class="set-sub">No calls yet: add a rule on Profile, or put a call in from its header.</div></div>'}</div></section>`
+}
+
+const WHY = { series: 'its meeting series', people: "the client's people", chat: 'its Teams chat', subject: 'its subject', pinned: 'added by hand' }
+function projectCalls(p) {
+  const rows = (p.calls || []).map((c) => {
+    const d = c.started_at ? new Date(c.started_at) : null
+    const ctl = c.why === 'pinned'
+      ? `<button class="btn ghost" data-pj="member" data-call-name="${esc(c.name)}" data-how="rules" title="Leave it to the rules">Unpin</button>`
+      : `<button class="btn ghost" data-pj="member" data-call-name="${esc(c.name)}" data-how="exclude" title="Take it out (the rules won't put it back)">Take out</button>`
+    return `<div class="set-row"><div><button class="link pj-call-t" data-call="${esc(c.name)}">${esc(c.title || c.name)}</button><div class="set-sub">${d ? `${esc(dayLabel(d))}, ${esc(hm(d))} · ` : ''}${esc(WHY[c.why] || c.why)}${c.minutes ? '' : ' · no minutes yet'}</div></div><div class="set-ctl">${ctl}</div></div>`
+  }).join('')
+  const out = p.exclusions && p.exclusions.length ? `<p class="set-foot">${p.exclusions.length} call${p.exclusions.length === 1 ? '' : 's'} taken out by hand.</p>` : ''
+  return `<section class="set-sec"><div class="set-card">${rows || '<div class="set-row"><div class="set-sub">No calls match yet. Add a rule on Profile — a meeting series, the client\'s people, a Teams chat — or open a call and add it from its header.</div></div>'}</div>${out}</section>`
+}
+
+const RULE_TEXT = (r, clientName) => r.kind === 'series' ? `Meeting series “${esc(r.subject)}”`
+  : r.kind === 'people' ? (r.domains && r.domains.length ? `People from ${esc(r.domains.join(', '))}` : `${esc(clientName || "The client")}'s people`)
+  : r.kind === 'chat' ? `Calls from the Teams chat ${esc(r.name || r.id)}` : `Subject contains “${esc(r.contains)}”`
+const RULE_SUB = { series: 'Every occurrence, by its calendar series or its subject.', people: "At least half of a call's outside people — your colleagues don't count.", chat: "A meeting's chat, or the chat a call was started from.", subject: 'Whole words, any case.' }
+
+/** A token (× removes it) and the dashed "+ Add" that opens an inline box in its place. */
+const tok = (html, remove, title = '') => `<span class="tok"${title ? ` title="${esc(title)}"` : ''}>${html}${remove ? `<button data-pj="${remove.op}" ${Object.entries(remove).filter(([k]) => k !== 'op').map(([k, v]) => `data-${k}="${esc(v)}"`).join(' ')} aria-label="Remove">×</button>` : ''}</span>`
+function addTok(what, placeholder, extra = '') {
+  if (S.pj.adding !== what) return `<button class="tok add" data-pj="adding" data-what="${what}">+ Add</button>`
+  return `<span class="tok-in">${extra}<input id="pj-add-${what}" data-add="${what}" placeholder="${esc(placeholder)}" aria-label="${esc(placeholder)}" autofocus></span>`
+}
+const RULE_TOKEN = (r, clientName) => r.kind === 'series' ? `series “${esc(r.subject)}”` : r.kind === 'people' ? (r.domains && r.domains.length ? `people from ${esc(r.domains.join(', '))} ≥ half` : `${esc(clientName || 'client')} people ≥ half`) : r.kind === 'chat' ? `from ${esc(r.name || 'a Teams chat')}` : `subject “${esc(r.contains)}”`
+const shortDay = (iso) => new Date(iso).toLocaleDateString([], { day: 'numeric', month: 'short' })
+
+/** A thread's sources for the Brain: Teams channels and mail (read, never copied: each section links
+ *  back to the message), how each was last read, and the pickers. Folders come next. */
+const m365 = { teams: null, channels: {}, state: null, stateAt: 0 }
+function loadSourceState(force) {
+  if (!force && Date.now() - m365.stateAt < 15000) return
+  m365.stateAt = Date.now()
+  get('api/brain/sources').then((d) => { m365.state = d; render() }).catch(() => {})
+  get('api/brain/files').then((d) => { m365.files = d && !d.error ? d : {}; render() }).catch(() => {})
+}
+/** A folder's files in a few words: read, waiting for the page reader, not read. */
+function folderSummary(root) {
+  const fs = ((m365.files || {})[root]) || []
+  if (!fs.length) return { line: 'Not read yet', n: 0 }
+  const by = (st) => fs.filter((f) => f.status === st).length
+  const read = by('indexed') + by('pending'), pending = fs.filter((f) => f.status === 'pending').reduce((n, f) => n + ((f.flagged || 0) - (f.read || 0)), 0)
+  const not = fs.length - read, err = by('error')
+  return { line: [`${read} file${read === 1 ? '' : 's'} read`, pending ? `${pending} page${pending === 1 ? '' : 's'} to read from their images` : '', not ? `${not} not read (${[by('twin') ? `${by('twin')} twin${by('twin') === 1 ? '' : 's'}` : '', by('skipped') ? `${by('skipped')} skipped` : '', by('unsupported') ? `${by('unsupported')} other formats` : '', err ? `${err} couldn't be read` : ''].filter(Boolean).join(', ')})` : ''].filter(Boolean).join(' · '), n: fs.length, err }
+}
+function sourceLabel(x) {
+  if (x.kind === 'mail') return x.id.startsWith('person:') ? `mail with ${x.id.slice(7)}` : `mail with ${x.id.replace(/^domain:/, '')}`
+  return x.name || x.id
+}
+function threadSources(p, cl) {
+  if (!brainOn()) {
+    const kept = (p.sources || []).map((x) => tok(`${{ teams_channel: '#', mail: '✉', teams_chat: '💬', folder: '▣' }[x.kind] || '·'} ${esc(x.kind === 'mail' ? sourceLabel(x) : x.name || x.id)}`, null)).join('')
+    return kept + `<div class="pf-sub">The Brain is off, so channels, mail and folders aren't read — turn it on in Settings → Brain.</div>`
+  }
+  loadSourceState()
+  const st = (m365.state && m365.state.state) || {}
+  const icon = { teams_channel: '#', mail: '✉', teams_chat: '💬', folder: '▣' }
+  const chip = (x) => {
+    if (x.kind === 'folder') {
+      const f = folderSummary(x.id)
+      const ex = (x.exclude || []).length ? ` · not reading ${x.exclude.join(', ')}` : ''
+      return tok(`▣ ${esc(x.name || x.id.split(/[\\/]/).pop())}${f.err ? ' <span class="src-err">⚠</span>' : ''}`, { op: 'source-remove', kind: 'folder', source: x.id }, `${x.id}\n${f.line}${ex}`)
+        + (S.pj.adding === `exclude:${x.id}` ? `<span class="tok-in"><input id="pj-add-exclude" data-add="exclude" data-root="${esc(x.id)}" value="${esc((x.exclude || []).join(', '))}" placeholder="Don't read — e.g. Archive/, *draft*" aria-label="What not to read" autofocus></span>` : `<button class="tok add" data-pj="adding" data-what="exclude:${esc(x.id)}" title="Folders or names in it not to read">Don't read…</button>`)
+    }
+    const s = st[`${x.kind}:${x.id}`] || {}
+    const info = s.error ? `Couldn't read it: ${s.error}` : s.read_at ? `Read ${relDay(s.read_at.slice(0, 10))} · ${s.found || 0} new` : x.kind === 'teams_chat' ? 'Its calls join the thread' : 'Not read yet'
+    return tok(`${icon[x.kind] || '·'} ${esc(sourceLabel(x))}${s.error ? ' <span class="src-err">⚠</span>' : ''}`, x.kind === 'teams_chat' ? null : { op: 'source-remove', kind: x.kind, source: x.id }, info)
+  }
+  const have = new Set((p.sources || []).map((x) => `${x.kind}:${x.id}`))
+  const signedIn = !m365.state || m365.state.signed_in
+  const folderBtn = `<button class="tok add" data-pj="source-folder" title="A folder of this thread's documents">▣ Folder</button>`
+  if (!signedIn) return (p.sources || []).map(chip).join('') + folderBtn + `<div class="pf-sub">Channels and mail need Microsoft 365 — sign in under Settings → Calendar & chat.</div>`
+  const suggest = ((cl && cl.domains) || []).filter((d) => !have.has(`mail:domain:${d}`)).map((d) => `<button class="tok add" data-pj="source-add" data-kind="mail" data-source="${esc(d)}" title="Mail with anyone at ${esc(d)}">+ mail with ${esc(d)}</button>`).join('')
+  let channel = `<button class="tok add" data-pj="adding" data-what="channel"># Channel</button>`
+  if (S.pj.adding === 'channel') {
+    if (!m365.teams) { m365.teams = []; get('api/m365/teams').then((d) => { m365.teams = Array.isArray(d) ? d : { error: d.error }; render() }).catch(() => {}) }
+    const team = S.pj.srcTeam
+    const chans = team ? m365.channels[team] : null
+    if (team && !chans) { m365.channels[team] = []; get('api/m365/channels?team=' + encodeURIComponent(team)).then((d) => { m365.channels[team] = Array.isArray(d) ? d : []; render() }).catch(() => {}) }
+    const teams = Array.isArray(m365.teams) ? m365.teams : []
+    channel = `<span class="tok-in"><select data-src-team aria-label="Team" autofocus><option value="">${teams.length ? 'Team…' : m365.teams && m365.teams.error ? 'Teams unavailable' : 'Loading teams…'}</option>${teams.map((t) => `<option value="${esc(t.id)}"${t.id === team ? ' selected' : ''}>${esc(t.name)}</option>`).join('')}</select>${team ? `<select data-src-channel aria-label="Channel"><option value="">${chans && chans.length ? 'Channel…' : 'Loading…'}</option>${(chans || []).filter((c) => !have.has(`teams_channel:${team}|${c.id}`)).map((c) => `<option value="${esc(c.id)}" data-name="${esc(teams.find((t) => t.id === team).name + ' › ' + c.name)}">${esc(c.name)}${c.membership === 'private' ? ' (private)' : ''}</option>`).join('')}</select>` : ''}</span>`
+  }
+  const mail = S.pj.adding === 'mail' ? `<span class="tok-in"><input id="pj-add-mail" data-add="mail" placeholder="A domain or an address — globex.example, jane@globex.example" aria-label="Mail with" autofocus></span>` : `<button class="tok add" data-pj="adding" data-what="mail">✉ Mail</button>`
+  return (p.sources || []).map(chip).join('') + suggest + channel + mail + folderBtn
+    + `<div class="pf-sub">Read into the Brain, never copied: each section links to the post, the mail or the file's page. Mail is matched by its people's addresses; a folder's pages that their text misses (diagrams, timelines) are read from their images.</div>`
+}
+document.addEventListener('change', (e) => {
+  const t = e.target
+  if (t.matches && t.matches('[data-src-team]')) { S.pj.srcTeam = t.value || null; return render() }
+  if (t.matches && t.matches('[data-src-channel]') && t.value && S.pj.srcTeam) {
+    const name = t.selectedOptions[0].dataset.name
+    projectSend('source_add', { kind: 'teams_channel', source: `${S.pj.srcTeam}|${t.value}`, name })
+    S.pj.adding = null; S.pj.srcTeam = null
+    setTimeout(() => loadSourceState(true), 1500)
+    return render()
+  }
+})
+
+function projectProfile(p, data) {
+  const id = esc(p.id)
+  const row = (label, html) => `<div class="pf-row"><span class="pf-l">${esc(label)}</span><div class="pf-v">${html}</div></div>`
+  // Stage: the three groups side by side; its history as one line.
+  const at = (st) => { for (let i = (p.stages || []).length - 1; i >= 0; i--) if (p.stages[i].stage === st) return i; return -1 }
+  const passed = new Set((p.stages || []).map((c) => c.stage))
+  const groups = ProjectArt.STAGES.map(([, glabel, xs]) => `<div class="pf-sg"><span>${esc(glabel)}</span><div class="seg">${xs.map(([sid, label]) => `<button data-pj="stage" data-stage="${sid}" aria-pressed="${p.stage === sid}" class="${p.stage !== sid && passed.has(sid) ? 'passed' : ''}">${esc(label)}</button>`).join('')}</div></div>`).join('')
+  const st = p.stages || []
+  const hist = st.length ? [`${ProjectArt.stage(p.stage).label} since ${shortDay(st[st.length - 1].at)}`, ...st.slice(0, -1).reverse().slice(0, 3).map((c, i, arr) => { const j = st.length - 2 - i; return `${ProjectArt.stage(c.stage).label} ${shortDay(c.at)} → ${shortDay(st[j + 1].at)}` })].join(' · ') : ''
+  const reason = st.length && st[st.length - 1].reason ? ` (${esc(st[st.length - 1].reason)})` : ''
+  // Client: its chip (opens it) and domains; changed through the chip's menu.
+  const clients = data.clients || []
+  const cl = projClient(p.client)
+  const clientPick = `<label class="fchip">${cl ? 'Change' : 'Choose'} ▾<select data-pj-field="client" data-id="${id}" aria-label="Client"><option value=""${!p.client ? ' selected' : ''}>No client</option>${clients.map((c) => `<option value="${esc(c.id)}"${p.client === c.id ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}<option value="__new">+ New client…</option></select></label>`
+  const newClient = S.pj.newClient ? `<div class="pj-inline"><input id="pj-client-name" placeholder="Client name" aria-label="Client name" autofocus><input id="pj-client-domains" placeholder="Mail domains, e.g. northwind.example" aria-label="Mail domains"><button class="btn primary" data-pj="client-add">Add</button><button class="btn ghost" data-pj="client-cancel">Cancel</button></div>` : ''
+  const clientRow = (cl ? `<button class="tok link" data-pj="client" data-id="${esc(cl.id)}" title="Open ${esc(cl.name)}">${clientIcon(cl, 14)}${esc(cl.name)}</button><span class="pf-sub pf-inl">${cl.domains.length ? `its domains: ${esc(cl.domains.join(', '))}` : 'no mail domains yet — the people rule needs them'}</span>` : '<span class="pf-sub pf-inl">No client — internal work, or not set</span>') + clientPick + newClient
+  // Since: text; click to change.
+  // Documents, posts and mail dated before this are history in the Brain: kept, not searched unless asked.
+  const history = S.pj.pfEdit === 'history' ? `<input type="date" class="pf-in" data-pj-field="history_before" data-id="${id}" value="${esc(p.history_before || '')}" aria-label="History before" autofocus>`
+    : `<button class="pf-text" data-pj="pf-edit" data-what="history">${p.history_before ? `Before ${esc(new Date(p.history_before + 'T12:00').toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' }))}` : 'None'}</button><span class="pf-sub pf-inl">· documents, posts and mail dated before it are history: kept, searched only when history is asked for</span>`
+  const since = S.pj.pfEdit === 'since' ? `<input type="date" class="pf-in" data-pj-field="since" data-id="${id}" value="${esc(p.since || '')}" aria-label="Since" autofocus>`
+    : `<button class="pf-text" data-pj="pf-edit" data-what="since">${p.since ? esc(new Date(p.since + 'T12:00').toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })) : 'From its first call'}</button><span class="pf-sub pf-inl">· nothing older is read</span>`
+  // Calls: the rules as tokens; how many match.
+  const pins = (p.pins || []).length, outs = (p.exclusions || []).length
+  const ruleKind = `<select id="pj-add-kind" aria-label="Kind of rule"><option value="series">Meeting series</option><option value="people">The client's people</option><option value="subject">Subject contains</option><option value="chat">Teams chat id</option></select>`
+  const calls = (p.rules || []).map((r, i) => tok(RULE_TOKEN(r, p.client_name), { op: 'rule-remove', index: i })).join('') + addTok('rule', "a meeting's subject (empty for the client's people)", ruleKind)
+    + `<div class="pf-sub">${p.call_count} call${p.call_count === 1 ? '' : 's'} match${pins || outs ? ` · ${[pins ? `${pins} pinned` : '', outs ? `${outs} taken out by hand` : ''].filter(Boolean).join(', ')}` : ''}</div>`
+  const sources = threadSources(p, cl)
+  const people = (p.people || []).map((m) => tok(`${esc(m.name)}${m.role ? ` · ${esc(m.role)}` : ''}`, { op: 'person-remove', name: m.name, email: m.email || '' }, m.email || '')).join('') + addTok('person', 'Name, email, role — e.g. Dana Kowal, dana@x.com, sponsor')
+  const terms = threadBrain(p) || ((p.terms || []).slice(0, 24).map((t) => tok(esc(t.term), { op: 'term-remove', term: t.term }, [t.kind, t.note].filter(Boolean).join(' · '))).join('') + addTok('term', 'A term — a system, an acronym, a name')
+    + `<div class="pf-sub">Hint transcription on its calls${(p.terms || []).length > 24 ? ` · ${p.terms.length - 24} more` : ''}</div>`)
+  const notes = S.pj.pfEdit === 'notes' ? `<textarea class="pf-in pj-notes" id="pj-f-notes" data-pj-field="notes" data-id="${id}" rows="3" aria-label="Notes for Claude" autofocus>${esc(p.notes || '')}</textarea>`
+    : `<button class="pf-text${p.notes ? '' : ' empty'}" data-pj="pf-edit" data-what="notes">${p.notes ? esc(p.notes) : 'What the minutes and Claude should know — what people call things, what to leave out'}</button>`
+  // Look and AI: not on the board; the same row style.
+  const symbols = `<button class="pj-pick${!p.icon ? ' on' : ''}" data-pj="icon" data-icon="" title="Its pattern" aria-label="Its pattern">${projIcon({ ...p, icon: null, has_logo: false }, 22)}</button>` +
+    (cl && cl.logo_v ? `<button class="pj-pick${p.icon === 'client' ? ' on' : ''}" data-pj="icon" data-icon="client" title="The client's logo" aria-label="The client's logo">${projIcon({ ...p, icon: 'client', has_logo: false, client_logo_v: cl.logo_v }, 22)}</button>` : '') +
+    Object.keys(PJ_SYMBOLS).map((k) => `<button class="pj-pick${p.icon === k ? ' on' : ''}" data-pj="icon" data-icon="${k}" title="${k}" aria-label="${k}">${projIcon({ ...p, icon: k, has_logo: false }, 22)}</button>`).join('')
+  const colors = PJ_COLORS.map((c) => `<button class="pj-swatch${p.color === c ? ' on' : ''}" style="background:${c}" data-pj="color" data-color="${c}" aria-label="Colour ${c}"></button>`).join('')
+  const look = `<div class="pf-look">${symbols}</div><div class="pf-look"><span class="pj-swatches">${colors}</span><span class="pj-logo-drop" data-drop-op="logo" data-id="${id}" title="Drop an image here">${p.has_logo ? projIcon(p, 22) : '<span class="pj-logo-empty">logo</span>'}</span>${logoPicker('logo', p.id, p.has_logo ? 'Change logo…' : 'Use a logo…')}${p.has_logo ? '<button class="link-btn" data-pj="logo-remove">Remove</button>' : ''}</div>`
+  const profiles = ai().profiles || []
+  const aiRow = `<label class="fchip">${esc(p.ai_profile ? profileName(p.ai_profile) : `The default · ${profileName(ai().default) || 'built in'}`)} ▾<select data-pj-field="ai_profile" data-id="${id}" aria-label="AI profile"><option value="">The default (${esc(profileName(ai().default) || 'built in')})</option>${profiles.map((x) => `<option value="${esc(x.id)}"${p.ai_profile === x.id ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>`
+    + (S.pj.pfEdit === 'model' ? `<input class="pf-in" data-pj-field="model" data-id="${id}" value="${esc(p.model || '')}" placeholder="sonnet" aria-label="Model" autofocus>` : `<button class="tok" data-pj="pf-edit" data-what="model">model: ${esc(p.model || "the profile's minutes model")}</button>`)
+    + `<div class="pf-sub">What Claude runs on for this thread's sync and questions, whichever profile a call was recorded on.</div>`
+  return `<div class="pf-card">
+    ${row('Stage', `<div class="pf-stages">${groups}</div><div class="pf-sub">${esc(hist)}${reason}</div>`)}
+    ${row('Client', clientRow)}
+    ${row('Since', since)}
+    ${brainOn() ? row('History', history) : ''}
+    ${row('Calls', calls)}
+    ${row('Sources', sources)}
+    ${row('People', people)}
+    ${row(S.pj.tbrain && S.pj.tbrain.taxonomy && S.pj.tbrain.taxonomy.exists ? 'Topics & terms' : 'Terms', terms)}
+    ${row('Notes for Claude', notes)}
+    ${row('Look', look)}
+    ${row('AI', aiRow)}
+  </div>
+  <p class="pf-foot">Saved as you change it · <code>projects/${id}/</code> · Delete in ⋯</p>`
+}
+
+/** A client's page (`#client/<id>`): its names, domains, whether it is the user's own company, its logo and projects. */
+function clientView(data) {
+  const c = (data.clients || []).find((x) => x.id === S.pj.client)
+  if (!c) return `<div class="empty"><div><h3>This client is gone</h3><p><a href="#projects">Back to the threads</a></p></div></div>`
+  const id = esc(c.id)
+  const row = (label, html) => `<div class="pf-row"><span class="pf-l">${esc(label)}</span><div class="pf-v">${html}</div></div>`
+  const ps = (data.projects || []).filter((p) => p.client === c.id)
+  const name = S.pj.pfEdit === 'cname' ? `<input class="pf-in" id="pj-cname" data-client-field="name" data-id="${id}" value="${esc(c.name)}" aria-label="Name" autofocus>` : `<button class="pf-text" data-pj="pf-edit" data-what="cname">${esc(c.name)}</button>`
+  const aliases = (c.aliases || []).map((a) => tok(esc(a), { op: 'client-list-remove', list: 'aliases', value: a })).join('') + addTok('alias', 'Another name — e.g. NW, Northwind Group')
+  const domains = (c.domains || []).map((d) => tok(esc(d), { op: 'client-list-remove', list: 'domains', value: d })).join('') + addTok('domain', 'A mail domain — e.g. northwind.example')
+    + `<div class="pf-sub">${c.internal ? 'Its people are your colleagues: they never count as a client\'s people.' : 'A call is this client\'s when half of its outside people come from these domains.'}</div>`
+  const internal = `<button class="sw${c.internal ? ' on' : ''}" role="switch" aria-checked="${!!c.internal}" aria-label="Your own company" data-pj="client-internal" data-on="${!c.internal}"></button><span class="pf-sub">${c.internal ? 'Your own company (internal work)' : 'A client, partner or vendor'}</span>`
+  const logo = `<div class="pf-look"><span class="pj-logo-drop" data-drop-op="client_logo" data-id="${id}" title="Drop an image here">${clientIcon(c, 28) || '<span class="pj-logo-empty">logo</span>'}</span>${logoPicker('client_logo', c.id, c.logo_v ? 'Change logo…' : 'Add a logo…')}${c.logo_v ? `<button class="link-btn" data-pj="client-logo-remove" data-id="${id}">Remove</button>` : ''}</div><div class="pf-sub">PNG, JPEG or WebP, up to 512 KB — shown beside its name and on its threads that wear it.</div>`
+  const projects = ps.map((p) => `<button class="pf-proj" data-pj="open" data-id="${esc(p.id)}">${projIcon(p, 18)}<span class="t">${esc(p.name)}</span>${stageTag(p.stage)}<span class="pf-sub">${p.call_count} call${p.call_count === 1 ? '' : 's'}</span></button>`).join('')
+    + (S.pj.adding === 'cproject' ? `<span class="tok-in"><input id="pj-add-cproject" data-add="cproject" placeholder="New thread for ${esc(c.name)}" aria-label="New thread name" autofocus></span>` : `<button class="tok add" data-pj="adding" data-what="cproject">+ New thread</button>`)
+  const del = S.pj.confirmDelete ? `<span class="pf-sub">Remove ${esc(c.name)}?</span><button class="btn ghost" data-pj="delete-cancel">Cancel</button><button class="btn danger" data-pj="client-remove" data-id="${id}">Remove</button>`
+    : ps.length ? `<span class="pf-sub">A client with threads stays: move or delete them first.</span>` : `<button class="btn ghost danger" data-pj="delete-ask">Remove this client…</button>`
+  const cd = S.pj.cdata && S.pj.cdata.client && S.pj.cdata.client.id === c.id ? S.pj.cdata : null
+  const openTasks = cd && cd.work ? TASK_PILES.reduce((n, [k]) => n + ((cd.work.piles || {})[k] || []).length, 0) : 0
+  const tabs = [['overview', 'Overview'], ['calls', `Calls${cd && cd.calls ? `<span class="n">${cd.calls.length}</span>` : ''}`], ['tasks', `Tasks${openTasks ? `<span class="n">${openTasks}</span>` : ''}`], ['people', `People${peopleCount() ? `<span class="n">${peopleCount()}</span>` : ''}`], ['profile', 'Profile']]
+  const tab = tabs.some(([t]) => t === S.pj.ctab) ? S.pj.ctab : 'overview'
+  const head = `<header class="pj-head"><div class="pj-title">${clientIcon(c, 34) || `<span class="pj-ic pf-cic" style="--pj:#8a8a95;width:34px;height:34px">${esc(c.name.slice(0, 1).toUpperCase())}</span>`}<div style="min-width:0"><div class="pj-name"><h2>${esc(c.name)}</h2><span class="tag">${c.internal ? 'your company' : 'client'}</span></div><div class="facts"><span>${ps.length} thread${ps.length === 1 ? '' : 's'}${c.domains.length ? ` · ${esc(c.domains.join(', '))}` : ''}</span></div></div><span class="grow"></span><button class="btn" data-claude-about title="Claude, with the Brain, about ${esc(c.name)}">Claude about ${esc(c.name)}</button></div>
+    <div class="tabs" role="tablist">${tabs.map(([t, label]) => `<button class="tab" role="tab" data-pj="ctab" data-tab-id="${t}" aria-selected="${tab === t}">${label}</button>`).join('')}</div>${notices()}</header>`
+  if (tab !== 'profile') {
+    if (!cd) return `${head}<div class="pane pj-pane"><div class="skeleton">${'<i></i>'.repeat(6)}</div></div>`
+    if (cd.error) return `${head}<div class="pane pj-pane"><p class="error">${esc(cd.error)}</p></div>`
+    return `${head}<div class="pane pj-pane${tab === 'tasks' || tab === 'people' ? ' wide' : ''}">${tab === 'calls' ? clientCalls(cd) : tab === 'tasks' ? clientTasks(cd) : tab === 'people' ? peopleView() : clientOverview(cd, c)}</div>`
+  }
+  return `${head}
+  <div class="pane pj-pane"><div class="pf-card">
+    ${row('Name', name)}
+    ${row('Other names', aliases)}
+    ${row('Mail domains', domains)}
+    ${row('Kind', internal)}
+    ${row('Logo', logo)}
+    ${row('Threads', projects)}
+    ${row('', del)}
+  </div><p class="pf-foot">Saved as you change it · <code>projects/clients.json</code></p></div>`
+}
+
+/** A client's Overview: its description (the user's, edited in place as a thread's brief) and a card
+ *  per thread — stage, calls, stories done, open tasks by who has to move, the latest decisions,
+ *  what's open (risks, questions). */
+function clientOverview(cd, c) {
+  const desc = S.pj.briefEdit != null
+    ? `<section class="set-sec"><div class="set-card"><div class="set-row"><div><b>About ${esc(c.name)}</b><div class="set-sub">Yours: who they are, what you do for them, who matters. Markdown.</div></div><div class="set-ctl"><button class="btn ghost" data-pj="brief-cancel">Cancel</button><button class="btn primary" data-pj="brief-save">Save</button></div></div>
+      <div class="me-edit"><textarea id="pj-brief" spellcheck="true" aria-label="About the client (Markdown)">${esc(S.pj.briefEdit)}</textarea><div class="set-sub">⌘S / Ctrl+S saves, Esc cancels.</div></div></div></section>`
+    : `<section class="set-sec"><div class="set-card"><div class="set-row"><div><b>About ${esc(c.name)}</b></div><div class="set-ctl"><button class="btn" data-pj="brief-edit">Edit</button></div></div>${cd.brief && cd.brief.trim() ? `<div class="doc me-doc">${cd.brief_html}</div>` : '<div class="me-doc set-sub">Nothing yet — who they are, what you do for them, who matters.</div>'}</div></section>`
+  const PILE_SHORT = { mine: 'I owe', owed: 'owed to me', waiting: 'waiting', nobody: 'nobody named' }
+  const card = (p) => {
+    const s = p.summary || {}, pl = s.piles || {}
+    const tasks = TASK_PILES.filter(([k]) => pl[k]).map(([k]) => `<span><b>${pl[k]}</b> ${PILE_SHORT[k]}</span>`).join('')
+    const recs = (label, xs, cls) => xs && xs.length ? `<div class="cl-recs"><span class="cl-rl ${cls}">${label}</span><div>${xs.slice(0, 3).map((x) => `<button class="cl-rec" data-pj="goto-node" data-id="${esc(p.id)}" data-node="${esc(x.id)}">${esc(x.title)}</button>`).join('')}${xs.length > 3 ? `<span class="set-sub">+ ${xs.length - 3} more</span>` : ''}</div></div>` : ''
+    const prog = s.stories ? `<div class="cl-prog"><span class="bd-prog"><span style="width:${Math.round(100 * s.stories_done / s.stories)}%"></span></span><span class="set-sub">${s.stories_done} of ${s.stories} stor${s.stories === 1 ? 'y' : 'ies'} done</span></div>` : ''
+    return `<div class="cl-card${p.group === 'closed' ? ' closed' : ''}">
+      <button class="cl-top" data-pj="open" data-id="${esc(p.id)}">${projIcon(p, 22)}<b>${esc(p.name)}</b>${stageTag(p.stage)}</button>
+      <div class="set-sub">${p.call_count} call${p.call_count === 1 ? '' : 's'}${p.last_call ? ` · last ${esc(dayLabel(new Date(p.last_call)).toLowerCase())}` : ''}</div>
+      ${prog}
+      ${tasks || s.late ? `<div class="cl-tasks">${tasks}${s.late ? `<span class="late">${s.late} late</span>` : ''}</div>` : '<div class="cl-tasks none">No open tasks</div>'}
+      ${recs('Decided', s.decisions, '')}${recs('Risks', s.risks, 'risk')}${recs('Open questions', s.questions, '')}
+    </div>`
+  }
+  const open = cd.threads.filter((p) => p.group !== 'closed'), closed = cd.threads.filter((p) => p.group === 'closed')
+  return `${insightsBlock('client', c.id, c.name)}${desc}<section class="set-sec"><h3>Threads</h3>${cd.threads.length ? `<div class="cl-grid">${open.map(card).join('')}${closed.map(card).join('')}</div>` : '<div class="set-card"><div class="set-row"><div class="set-sub">No threads for this client yet — add one on Profile.</div></div></div>'}</section>`
+}
+/** Every call of the client's threads, newest first, with the threads each is in. */
+function clientCalls(cd) {
+  const rows = cd.calls.map((c) => {
+    const d = c.started_at ? new Date(c.started_at) : null
+    const chips = (c.threads || []).map((id) => projById(id)).filter(Boolean).map((p) => `<span class="tk-pj">${projIcon(p, 12)}${esc(p.name)}</span>`).join('')
+    return `<div class="set-row"><div><button class="link pj-call-t" data-call="${esc(c.name)}">${esc(c.title || c.name)}</button><div class="set-sub">${d ? `${esc(dayLabel(d))}, ${esc(hm(d))}` : ''}${c.minutes ? '' : ' · no minutes yet'}</div></div><div class="set-ctl cl-chips">${chips}</div></div>`
+  }).join('')
+  return `<section class="set-sec"><div class="set-card">${rows || '<div class="set-row"><div class="set-sub">No calls in this client\'s threads yet.</div></div>'}</div></section>`
+}
+/** The Tasks activity's piles for this client's open threads. */
+function clientTasks(cd) {
+  const cols = TASK_PILES.map(([k, label]) => {
+    const all = (cd.work.piles || {})[k] || []
+    return `<section class="tk-col"><h3>${esc(label)} <span>${all.length}</span></h3>${all.map((c) => taskCard(c, k)).join('') || '<p class="tk-none">Nothing here</p>'}</section>`
+  }).join('')
+  return `<div class="tk-cols">${cols}</div>`
+}
+
+// ── People: stakeholders around a thread or a client (`people.rs`) ────────────────────────
+// Facts from the calls (computed by the app every time) beside what the user set: a Map
+// (influence × interest), the org chart, a List; the person in the right panel.
+const STANCES = ['champion', 'supporter', 'neutral', 'sceptic', 'blocker']
+const MATTERS = ['critical', 'high', 'normal', 'irrelevant']
+const peopleData = () => { const d = S.pj.people; const want = S.pj.client ? `api/client/${encodeURIComponent(S.pj.client)}/people` : `api/project/${encodeURIComponent(S.pj.sel)}/people`; return d && d.url === want ? d : null }
+const peopleCount = () => { const d = peopleData(); return d && d.people ? d.people.filter((x) => x.in_thread).length : 0 }
+const ppView = () => { try { return localStorage.getItem('echo.people.view') || 'map' } catch { return 'map' } }
+const initials = (n) => (n || '?').split(/[\s@._-]+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('')
+/** Where a person or organisation stands in this view: the thread's own place; on a client, the
+ *  thread where they weigh most. */
+function placeOf(x) {
+  const ps = (x.places || []).filter((p) => p.influence || p.interest || p.stance || p.role)
+  if (!ps.length) return x.places && x.places[0] ? x.places[0] : null
+  return ps.slice().sort((a, b) => (b.influence || 0) - (a.influence || 0))[0]
+}
+const ppAv = (name, stance, org) => `<span class="pp-av${org ? ' org' : ''} ${esc(stance || 'none')}" aria-hidden="true">${esc(initials(name))}</span>`
+const sideLabel = (x) => x.side === 'yours' ? 'your company' : x.org ? x.org.name : x.domain || 'outside'
+function peopleView() {
+  const d = peopleData()
+  if (!d) return `<div class="skeleton">${'<i></i>'.repeat(6)}</div>`
+  if (d.error) return `<p class="error">${esc(d.error)}</p>`
+  const v = ppView()
+  const legend = STANCES.map((s) => `<span class="pp-leg"><i class="pp-av ${s}"></i>${s}</span>`).join('')
+  const seg = `<div class="pp-seg" role="group" aria-label="View">${[['map', 'Map'], ['org', 'Org chart'], ['list', 'List']].map(([k, l]) => `<button data-pp="view" data-v="${k}" aria-pressed="${v === k}">${l}</button>`).join('')}</div>`
+  const add = S.pj.client ? '' : S.pj.ppAdding ? `<span class="tok-in"><input id="pp-new" placeholder="Name, or name &lt;email&gt;" aria-label="New person" autofocus></span>` : '<button class="btn" data-pp="add">+ Person</button>'
+  const bar = `<div class="pp-bar">${seg}<span class="grow"></span>${legend}${add}</div>`
+  const body = v === 'list' ? peopleList(d) : v === 'org' ? peopleOrg(d) : peopleMap(d)
+  return `<div class="pp">${bar}${peopleSuggestions(d)}${body}</div>`
+}
+/** What the sync's people pass proposed, with the words: Yes applies it as yours, No turns it down
+ *  (never proposed again). Three at a time. */
+function peopleSuggestions(d) {
+  const all = d.suggestions || []
+  if (!all.length) return ''
+  const LV = { 1: 'low', 2: 'mid', 3: 'high' }
+  const ask = (x) => {
+    const n = `<b>${esc(x.target.name || '')}</b>`, v = esc(x.value)
+    switch (x.field) {
+      case 'stance': return `Is ${n} a <b>${v}</b>?`
+      case 'role': return `${n}'s role here: <b>${v}</b>?`
+      case 'influence': case 'interest': return `${n}'s ${x.field}: <b>${LV[x.value] || v}</b>?`
+      case 'title': return `${n} is <b>${v}</b>?`
+      case 'group': return `${n} is in <b>${v}</b>?`
+      case 'reports_to': return `${n} reports to <b>${esc(x.value_name || x.value)}</b>?`
+      case 'left': return `Has ${n} left?`
+      case 'relation': return `${n} <b>${esc(x.value.replace('_', ' '))}</b> ${esc(x.target.to_name || '')}?`
+    }
+    return `${n}: ${esc(x.field)} = <b>${v}</b>?`
+  }
+  const row = (x) => {
+    const at = x.at || {}
+    const src = [at.title, at.date ? relDay(at.date) : '', at.ts ? String(at.ts).replace(/^00:/, '') : ''].filter(Boolean).join(' · ')
+    const st = x.field === 'stance' ? x.value : null
+    return `<div class="pp-sug">${ppAv(x.target.name || '?', st, x.field === 'relation')}<span class="grow">${ask(x)} <span class="pp-quote">“${esc(x.quote || '')}”</span> ${at.call ? `<button class="link-btn pp-src" data-call="${esc(at.call)}">${esc(src)}</button>` : `<span class="set-sub">${esc(src)}</span>`}</span><button class="btn primary" data-pp="decide" data-sid="${esc(x.sid)}" data-thread="${esc(x.thread)}" data-yes="1">Yes</button><button class="btn ghost" data-pp="decide" data-sid="${esc(x.sid)}" data-thread="${esc(x.thread)}" data-yes="">No</button></div>`
+  }
+  const shown = S.pj.ppAllSug ? all : all.slice(0, 3)
+  return `<div class="pp-sugs">${shown.map(row).join('')}${all.length > 3 ? `<button class="link-btn" data-pp="all-sug">${S.pj.ppAllSug ? 'Show fewer' : `${all.length - 3} more from the calls`}</button>` : ''}</div>`
+}
+function peopleMap(d) {
+  const thread = !S.pj.client
+  const people = d.people.filter((x) => x.in_thread)
+  const orgs = d.orgs.filter((o) => (o.places || []).length)
+  const items = [...people.map((x) => ({ x, org: false, pl: placeOf(x) })), ...orgs.map((o) => ({ x: o, org: true, pl: placeOf(o) }))]
+  const hi = (n) => (n || 0) >= 2
+  const placed = items.filter((i) => i.pl && i.pl.influence && i.pl.interest)
+  const loose = items.filter((i) => !(i.pl && i.pl.influence && i.pl.interest))
+  const chip = (i) => {
+    const key = i.org ? `org:${i.x.id}` : i.x.key
+    const sub = i.org ? (i.x.internal ? 'your company' : 'organisation') : (i.pl && i.pl.role) || i.x.title || sideLabel(i.x)
+    return `<button class="pp-chip${S.pj.person === key ? ' on' : ''}${i.x.new ? ' new' : ''}" data-pp="pick" data-key="${esc(key)}"${thread ? ` draggable="true" data-pp-drag="${esc(key)}"` : ''} title="${esc(i.x.name)}">${ppAv(i.x.name, i.pl && i.pl.stance, i.org)}<span class="pp-cn">${esc(i.x.name)}</span><small>${esc(sub)}</small>${i.x.new ? '<span class="pp-new">new</span>' : ''}${i.x.quiet ? '<span class="pp-quiet" title="Not seen for six weeks while the calls went on">quiet</span>' : ''}</button>`
+  }
+  const Q = [['3', '1', 'Keep satisfied', 'high influence · low interest'], ['3', '3', 'Manage closely', 'high influence · high interest'], ['1', '1', 'Monitor', 'low influence · low interest'], ['1', '3', 'Keep informed', 'low influence · high interest']]
+  const quad = ([inf, int, t, sub]) => {
+    const xs = placed.filter((i) => hi(i.pl.influence) === (inf === '3') && hi(i.pl.interest) === (int === '3'))
+    return `<section class="pp-q${inf === '3' && int === '3' ? ' key' : ''}" data-pp-drop="${inf}/${int}" aria-label="${esc(t)}"><div class="pp-qh"><b>${esc(t)}</b><span class="set-sub">${esc(sub)}</span></div><div class="pp-chips">${xs.map(chip).join('')}</div></section>`
+  }
+  const seenOnly = d.people.filter((x) => !x.in_thread).length
+  const tray = loose.length ? `<div class="pp-tray" data-pp-drop="tray"><span class="cap">Not placed yet</span>${loose.map(chip).join('')}</div>` : ''
+  const empty = !items.length ? `<div class="wk-empty"><b>Nobody in ${thread ? 'this thread' : "this client's threads"} yet</b><p>${seenOnly ? `${seenOnly} people were in its calls — add them from <button class="link-btn" data-pp="view" data-v="list">List</button>, then drag them where they stand.` : 'People join as its calls come in, or add someone with + Person.'}</p></div>` : ''
+  return `${empty}${items.length ? `<div class="pp-grid"><div class="pp-axis y"><span>Influence →</span></div>${Q.map(quad).join('')}<span></span><div class="pp-axis x"><span>Interest →</span></div></div>${tray}` : ''}
+    ${seenOnly ? `<p class="set-sub">${thread ? 'Drag a person to another quadrant. ' : ''}${seenOnly} more ${seenOnly === 1 ? 'was' : 'were'} in the calls and ${seenOnly === 1 ? "isn't" : "aren't"} in ${thread ? 'this thread' : 'a thread'} yet — <button class="link-btn" data-pp="view" data-v="list">List</button>.</p>` : ''}`
+}
+function peopleList(d) {
+  const thread = !S.pj.client
+  const row = (x) => {
+    const pl = placeOf(x)
+    const threads = !thread ? (x.places || []).map((p) => projById(p.thread)).filter(Boolean).map((p) => `<span class="tk-pj">${projIcon(p, 12)}${esc(p.name)}</span>`).join('') : ''
+    return `<tr class="${S.pj.person === x.key ? 'on' : ''}" data-pp="pick" data-key="${esc(x.key)}">
+      <td><span class="pp-who">${ppAv(x.name, pl && pl.stance)}<span><span class="pp-nm"><b>${esc(x.name)}</b>${x.new ? ' <span class="pp-new">new</span>' : ''}${x.quiet ? ' <span class="pp-quiet">quiet</span>' : ''}</span><span class="set-sub">${esc(x.title || x.email || '')}</span></span></span></td>
+      <td>${esc(sideLabel(x))}${x.group ? `<span class="set-sub"> · ${esc(x.group)}</span>` : ''}</td>
+      <td>${thread ? esc((pl && pl.role) || '') : threads}</td>
+      <td>${pl && pl.stance ? `<span class="pp-leg"><i class="pp-av ${esc(pl.stance)}"></i>${esc(pl.stance)}</span>` : ''}</td>
+      <td class="num">${x.calls}<span class="set-sub">/${x.of_calls}</span></td>
+      <td class="num">${x.share ? `${x.share}%` : ''}</td>
+      <td class="num">${x.owes ? `${x.owes}${x.late ? ` <span class="late">${x.late} late</span>` : ''}` : ''}</td>
+      <td>${x.last ? esc(relDay(x.last)) : ''}</td>
+      <td class="pp-act">${x.email ? `<a class="icon-btn" href="https://teams.microsoft.com/l/chat/0/0?users=${encodeURIComponent(x.email)}" data-ext title="Chat in Teams" aria-label="Chat with ${esc(x.name)} in Teams">${ICON('<path d="M5 18.5V7a2.5 2.5 0 0 1 2.5-2.5h9A2.5 2.5 0 0 1 19 7v6a2.5 2.5 0 0 1-2.5 2.5H9z"/>')}</a><button class="icon-btn" data-copy="${esc(x.email)}" title="Copy ${esc(x.email)}" aria-label="Copy ${esc(x.name)}'s email">${ICON('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>')}</button>` : ''}</td>
+    </tr>`
+  }
+  const inn = d.people.filter((x) => x.in_thread), seen = d.people.filter((x) => !x.in_thread)
+  const head = `<thead><tr><th>Person</th><th>Organisation</th><th>${thread ? 'Role' : 'Threads'}</th><th>Stance</th><th class="num">Calls</th><th class="num">Talk</th><th class="num">Owes</th><th>Last seen</th><th><span class="sr">Contact</span></th></tr></thead>`
+  const seenBox = seen.length ? `<div class="pp-seen"><div class="pp-seen-h"><span class="cap">Seen in calls</span><span class="set-sub">${seen.length} ${seen.length === 1 ? "isn't" : "aren't"} in ${thread ? 'this thread' : 'a thread'} yet</span><span class="grow"></span>${thread ? `<button class="btn" data-pp="add-all">Add all</button>` : ''}</div>
+    <table class="pp-tbl">${head}<tbody>${seen.map((x) => row(x).replace('<td class="pp-act">', `<td class="pp-act">${thread ? `<button class="btn ghost" data-pp="add-one" data-key="${esc(x.key)}">Add</button>` : ''}`)).join('')}</tbody></table></div>` : ''
+  return `${inn.length ? `<div class="pp-card"><table class="pp-tbl">${head}<tbody>${inn.map(row).join('')}</tbody></table></div>` : `<p class="set-sub">Nobody in ${thread ? 'this thread' : "this client's threads"} yet.</p>`}${seenBox}`
+}
+/** The org chart: organisations with their relationships; inside, groups and people. (Stage 3
+ *  draws the lines; this lays the organisations and groups out.) */
+function peopleOrg(d) {
+  const people = d.people.filter((x) => x.in_thread)
+  const byOrg = new Map()
+  for (const x of people) { const k = x.side === 'yours' ? '#yours' : x.org ? x.org.id : `#${x.domain || 'unknown'}`; if (!byOrg.has(k)) byOrg.set(k, []); byOrg.get(k).push(x) }
+  const orgName = (k) => k === '#yours' ? 'Your company' : k.startsWith('#') ? (k.slice(1) === 'unknown' ? 'Not known' : k.slice(1)) : ((d.orgs.find((o) => o.id === k) || {}).name || k)
+  const org = (k) => {
+    const o = d.orgs.find((x) => x.id === k)
+    const xs = byOrg.get(k) || []
+    const groups = new Map()
+    for (const x of xs) { const g = x.group || ''; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(x) }
+    const node = (x) => { const pl = placeOf(x); return `<button class="pp-node${S.pj.person === x.key ? ' on' : ''}" data-pp="pick" data-key="${esc(x.key)}">${ppAv(x.name, pl && pl.stance)}<span><b>${esc(x.name)}</b><small>${esc(x.title || (pl && pl.role) || '')}</small></span></button>` }
+    const top = (xs2) => { const keys = new Set(xs2.map((x) => x.key)); return xs2.filter((x) => !x.reports_to || !keys.has(x.reports_to)) }
+    const tree = (xs2) => top(xs2).map((x) => { const kids = xs2.filter((y) => y.reports_to === x.key); return `<div class="pp-tree">${node(x)}${kids.length ? `<div class="pp-kids">${kids.map(node).join('')}</div>` : ''}</div>` }).join('')
+    const rel = o ? [o.parent ? `part of ${esc((d.orgs.find((x) => x.id === o.parent) || { name: o.parent }).name)}` : '', ...(o.relations || []).map((r) => `${esc(r.kind.replace('_', ' '))} ${esc((d.orgs.find((x) => x.id === r.to) || { name: r.to }).name)}`)].filter(Boolean).join(' · ') : ''
+    return `<section class="pp-org${groups.size > 1 ? ' wide' : ''}" data-org="${esc(o ? o.id : k)}"><div class="pp-org-h">${o ? `<button class="pp-org-n" data-pp="pick" data-key="org:${esc(o.id)}">${ppAv(o.name, (placeOf(o) || {}).stance, true)}<b>${esc(o.name)}</b></button>` : `<b>${esc(orgName(k))}</b>`}<span class="set-sub">${xs.length} ${xs.length === 1 ? 'person' : 'people'}${rel ? ` · ${rel}` : ''}</span></div>
+      <div class="pp-groups">${[...groups.entries()].sort((a, b) => (a[0] === '') - (b[0] === '') || a[0].localeCompare(b[0])).map(([g, ys]) => `<div class="pp-group">${g ? `<span class="cap">${esc(g)}</span>` : groups.size > 1 ? '<span class="cap">No group</span>' : ''}${tree(ys)}</div>`).join('')}</div></section>`
+  }
+  // Organisations a shown one is related to (parent, partner, vendor…) are shown too, so the line has an end.
+  const shown = new Set(byOrg.keys())
+  for (const o of d.orgs || []) {
+    if (!shown.has(o.id)) continue
+    for (const t of [o.parent, ...(o.relations || []).map((r) => r.to)].filter(Boolean)) if (d.orgs.some((x) => x.id === t)) shown.add(t)
+  }
+  for (const o of d.orgs || []) if ((o.relations || []).some((r) => shown.has(r.to)) || (o.parent && shown.has(o.parent))) shown.add(o.id)
+  const keys = [...shown].sort((a, b) => (a === '#yours') - (b === '#yours') || orgName(a).localeCompare(orgName(b)))
+  return keys.length ? `<div class="pp-orgs">${keys.map(org).join('')}</div>` : '<p class="set-sub">Nobody placed yet: add people from List.</p>'
+}
+/** Lines between the org chart's organisations (drawn after the page is laid out, over it): each
+ *  relationship labelled with its kind and pointing at the other side; "part of" dashed. */
+function drawOrgLinks() {
+  const wrap = document.querySelector('.pp-orgs')
+  if (!wrap) return
+  const d = peopleData()
+  const edges = []
+  for (const o of (d && d.orgs) || []) {
+    if (o.parent) edges.push({ a: o.id, b: o.parent, kind: 'part of', dash: true })
+    for (const r of o.relations || []) edges.push({ a: o.id, b: r.to, kind: r.kind.replace(/_/g, ' ') })
+  }
+  const key = JSON.stringify(edges) + `|${wrap.clientWidth}x${wrap.scrollHeight}`
+  const old = wrap.querySelector(':scope > svg.pp-links')
+  if (old && old.dataset.key === key) return
+  if (old) old.remove()
+  // Room for the lines between cards, before anything is measured.
+  const linked = edges.some((e) => wrap.querySelector(`[data-org="${CSS.escape(e.a)}"]`) && wrap.querySelector(`[data-org="${CSS.escape(e.b)}"]`))
+  wrap.classList.toggle('linked', linked)
+  if (!linked) return
+  const box = wrap.getBoundingClientRect()
+  // Each card's side midpoints; a line joins the closest pair, so it runs card edge to card edge.
+  const sides = (id) => {
+    const s = wrap.querySelector(`[data-org="${CSS.escape(id)}"]`)
+    if (!s) return null
+    const r = s.getBoundingClientRect()
+    const l = r.left - box.left, t = r.top - box.top
+    return [{ x: l + r.width / 2, y: t }, { x: l + r.width / 2, y: t + r.height }, { x: l, y: t + Math.min(r.height / 2, 30) }, { x: l + r.width, y: t + Math.min(r.height / 2, 30) }]
+  }
+  const drawn = edges.map((e) => {
+    const a = sides(e.a), b = sides(e.b)
+    if (!a || !b) return null
+    let best = null
+    for (const p of a) for (const q of b) { const dd = Math.hypot(p.x - q.x, p.y - q.y); if (!best || dd < best.d) best = { p, q, d: dd } }
+    return { ...e, p: best.p, q: best.q }
+  }).filter(Boolean)
+  if (!drawn.length) return
+  const lines = drawn.map((e, i) => {
+    const { p, q } = e
+    // A curve that bows away from the cards' straight path; its label at the middle.
+    const mx = (p.x + q.x) / 2, my = (p.y + q.y) / 2, dx = q.x - p.x, dy = q.y - p.y, len = Math.hypot(dx, dy) || 1
+    const bow = Math.min(60, len / 4) * (i % 2 ? 1 : -1)
+    const cx = mx - (dy / len) * bow, cy = my + (dx / len) * bow
+    const lx = (p.x + 2 * cx + q.x) / 4, ly = (p.y + 2 * cy + q.y) / 4
+    return `<path d="M${p.x.toFixed(1)},${p.y.toFixed(1)} Q${cx.toFixed(1)},${cy.toFixed(1)} ${q.x.toFixed(1)},${q.y.toFixed(1)}" class="${e.dash ? 'dash' : ''}" marker-end="url(#pp-arrow)"/>` +
+      `<g class="lbl" transform="translate(${lx.toFixed(1)},${ly.toFixed(1)})"><rect x="${-(e.kind.length * 3.4 + 7)}" y="-9" width="${e.kind.length * 6.8 + 14}" height="18" rx="9"/><text y="4">${esc(e.kind)}</text></g>`
+  }).join('')
+  wrap.insertAdjacentHTML('beforeend', `<svg class="pp-links" data-key="${esc(key)}" width="${wrap.scrollWidth}" height="${wrap.scrollHeight}" aria-hidden="true"><defs><marker id="pp-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>${lines}</svg>`)
+}
+window.addEventListener('resize', () => { if (S.view === 'projects') drawOrgLinks() })
+
+/** The selected person or organisation, in the right panel. */
+function personPanel() {
+  const d = peopleData(), k = S.pj.person
+  if (!d || !k) return '<div class="wp-empty">Pick someone on the People tab.</div>'
+  if (k.startsWith('org:')) return orgPanel(d, k.slice(4))
+  const x = d.people.find((y) => y.key === k)
+  if (!x) return '<div class="wp-empty">Not in this view any more.</div>'
+  const thread = S.pj.client ? null : S.pj.sel
+  const pl = thread ? (x.places || []).find((p) => p.thread === thread) || {} : placeOf(x) || {}
+  const SRC = { you: 'you', m365: 'Microsoft 365' }
+  const src = (f) => x.sources && x.sources[f] ? `<span class="set-sub"> · ${esc(SRC[x.sources[f]] || x.sources[f])}</span>` : ''
+  const field = (f, label, input) => [label, S.pj.ppEdit === f ? input : `<button class="wp-val${x[f] ? '' : ' empty'}" data-pp="edit" data-f="${f}">${x[f] ? esc(x[f]) : '<u>Set</u>'}</button>${src(f)}`]
+  const others = d.people.filter((y) => y.key !== x.key && y.in_thread)
+  const orgs = (S.pj.data && S.pj.data.clients) || []
+  const rows = [
+    field('title', 'Title', `<input class="wp-in" data-pp-set="title" value="${esc(x.title || '')}" aria-label="Title" autofocus>`),
+    ['Organisation', `<select class="wp-in" data-pp-set="org" aria-label="Organisation"><option value="">${esc(x.org && !(x.sources || {}).org ? `${x.org.name} (by mail domain)` : x.side === 'yours' ? 'Your company' : 'Not known')}</option>${orgs.map((c) => `<option value="${esc(c.id)}"${(x.sources || {}).org && x.org && x.org.id === c.id ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select>`],
+    field('group', 'Group', `<input class="wp-in" data-pp-set="group" value="${esc(x.group || '')}" list="pp-groups" aria-label="Group" autofocus><datalist id="pp-groups">${[...new Set(d.people.map((y) => y.group).filter(Boolean).concat(...d.orgs.map((o) => o.groups || [])))].map((g) => `<option value="${esc(g)}">`).join('')}</datalist>`),
+    ['Reports to', `<select class="wp-in" data-pp-set="reports_to" aria-label="Reports to"><option value="">nobody set</option>${others.map((y) => `<option value="${esc(y.key)}"${x.reports_to === y.key ? ' selected' : ''}>${esc(y.name)}</option>`).join('')}</select>`],
+    ['Matters', `<select class="wp-in" data-pp-set="matters" aria-label="How much they matter to you"><option value="">not set</option>${MATTERS.map((m) => `<option${x.matters === m ? ' selected' : ''}>${m}</option>`).join('')}</select>`],
+    field('phone', 'Phone', `<input class="wp-in" data-pp-set="phone" value="${esc(x.phone || '')}" aria-label="Phone" autofocus>`),
+    ...(x.department || x.company || x.office ? [
+      field('department', 'Department', `<input class="wp-in" data-pp-set="department" value="${esc(x.department || '')}" aria-label="Department" autofocus>`),
+      field('company', 'Company', `<input class="wp-in" data-pp-set="company" value="${esc(x.company || '')}" aria-label="Company" autofocus>`),
+      field('office', 'Office', `<input class="wp-in" data-pp-set="office" value="${esc(x.office || '')}" aria-label="Office" autofocus>`),
+    ] : []),
+  ]
+  const asks = (x.questions || []).map((q) => `<div class="pp-ask"><span class="grow"><b>${esc(SRC[q.source] || q.source)}</b> says ${esc(q.field)} is “${esc(q.theirs)}” — you set “${esc(q.yours || '')}”.</span><button class="btn" data-pp="answer" data-f="${esc(q.field)}" data-use="1">Use theirs</button><button class="btn ghost" data-pp="answer" data-f="${esc(q.field)}" data-use="">Keep mine</button></div>`).join('')
+  const lvl = (f) => `<span class="pp-lvl" role="group" aria-label="${f}">${[1, 2, 3].map((n) => `<button data-pp="level" data-f="${f}" data-n="${n}" aria-pressed="${(pl[f] || 0) >= n}" title="${['low', 'mid', 'high'][n - 1]}"></button>`).join('')}<span class="set-sub">${pl[f] ? ['low', 'mid', 'high'][pl[f] - 1] : 'not set'}</span></span>`
+  const inThread = thread ? `<div class="wp-h">In ${esc((projById(thread) || {}).name || 'this thread')}</div><div class="wp-facts">
+      <span>Role</span><div>${S.pj.ppEdit === 'role' ? `<input class="wp-in" data-pp-place="role" value="${esc(pl.role || '')}" aria-label="Role" autofocus>` : `<button class="wp-val${pl.role ? '' : ' empty'}" data-pp="edit" data-f="role">${pl.role ? esc(pl.role) : '<u>Set</u>'}</button>`}</div>
+      <span>Stance</span><div><select class="wp-in" data-pp-place="stance" aria-label="Stance"><option value="">not set</option>${STANCES.map((s) => `<option${pl.stance === s ? ' selected' : ''}>${s}</option>`).join('')}</select></div>
+      <span>Influence</span><div>${lvl('influence')}</div><span>Interest</span><div>${lvl('interest')}</div>
+    </div>${x.in_thread ? '' : '<p class="set-sub">Not in this thread yet: setting any of these adds them.</p>'}` : `<div class="wp-h">In threads</div><div class="pp-in">${(x.places || []).map((p) => `<button class="link-btn" data-pj="goto" data-id="${esc(p.thread)}">${esc((projById(p.thread) || {}).name || p.thread)}</button>${p.role ? ` · ${esc(p.role)}` : ''}${p.stance ? ` · ${esc(p.stance)}` : ''}`).join('<br>') || '<span class="set-sub">none</span>'}</div>`
+  const stat = (n, l) => `<div><b>${n}</b><span class="set-sub">${l}</span></div>`
+  const hist = (x.history || []).slice().reverse().slice(0, 8).map((h) => `<div class="pp-h"><span class="set-sub">${esc(relDay(String(h.at || '').slice(0, 10)))}</span> ${esc(h.field)}: ${h.from ? `<s>${esc(h.from)}</s> → ` : ''}${esc(h.to || 'cleared')} <span class="set-sub">· ${esc(h.source === 'you' ? 'you' : h.source)}</span></div>`).join('')
+  return `<div class="wp pp-panel">
+    <div class="pp-p-top">${ppAv(x.name, pl.stance)}<div style="min-width:0">${S.pj.ppEdit === 'name' ? `<input class="wp-in" data-pp-set="name" value="${esc(x.name)}" aria-label="Name" autofocus>` : `<button class="wp-name pp-name" data-pp="edit" data-f="name">${esc(x.name)}</button>`}<div class="set-sub">${esc([x.title, sideLabel(x)].filter(Boolean).join(' · '))}</div></div></div>
+    ${(x.maybe_same || []).map((m) => `<div class="pp-ask"><span class="grow">Same person as <b>${esc(m.name)}</b>${m.email ? ` <span class="set-sub">${esc(m.email)}</span>` : ''}?</span><button class="btn" data-pp="merge" data-into="${esc(m.key)}">Merge</button></div>`).join('')}
+    ${(x.addresses || []).length ? `<div class="pp-addrs">${x.addresses.map((a, i) => `<div class="pp-addr"><a class="icon-btn" href="https://teams.microsoft.com/l/chat/0/0?users=${encodeURIComponent(a.email)}" data-ext title="Chat in Teams" aria-label="Chat in Teams with ${esc(a.email)}">${ICON('<path d="M5 18.5V7a2.5 2.5 0 0 1 2.5-2.5h9A2.5 2.5 0 0 1 19 7v6a2.5 2.5 0 0 1-2.5 2.5H9z"/>')}</a><button class="icon-btn" data-copy="${esc(a.email)}" title="Copy ${esc(a.email)}" aria-label="Copy ${esc(a.email)}">${ICON('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>')}</button><span class="pp-addr-t">${esc(a.email)}<span class="set-sub"> · ${esc(a.org || a.domain || '')}</span></span>${i ? `<button class="link-btn" data-pp="split" data-email="${esc(a.email)}" title="This address is someone else">Not the same</button>` : ''}</div>`).join('')}</div>` : ''}
+    <div class="pp-same">${S.pj.ppSame ? `<select class="wp-in" id="pp-same" aria-label="Same person as"><option value="">Same person as…</option>${d.people.filter((y) => y.key !== x.key).map((y) => `<option value="${esc(y.key)}">${esc(y.name)}${y.email ? ` · ${esc(y.email)}` : ''}</option>`).join('')}</select><button class="btn" data-pp="merge-pick">Merge</button><button class="btn ghost" data-pp="same-cancel">Cancel</button>` : '<button class="link-btn" data-pp="same">Same person as…</button>'}</div>
+    ${inThread}
+    <div class="wp-h">About them</div>${asks}<div class="wp-facts">${rows.map(([l, v]) => `<span>${esc(l)}</span><div>${v}</div>`).join('')}</div>
+    <div class="wp-h">What Echo saw</div>
+    <div class="pp-stats">${stat(`${x.calls}<small> of ${x.of_calls}</small>`, 'calls')}${stat(`${x.share || 0}%`, 'of the talking')}${stat(x.owes, `tasks owed${x.late ? ` · <span class="late">${x.late} late</span>` : ''}`)}${stat(x.waiting, 'waiting on them')}</div>
+    <div class="set-sub">${x.first ? `First seen ${esc(relDay(x.first))}, last ${esc(relDay(x.last))}` : 'Not in a call yet'}${x.chat ? ` · ${x.chat} chat message${x.chat === 1 ? '' : 's'}` : ''}</div>
+    ${hist ? `<div class="wp-h">Changes</div>${hist}` : ''}
+  </div>`
+}
+function orgPanel(d, id) {
+  const o = d.orgs.find((x) => x.id === id)
+  if (!o) return '<div class="wp-empty">Not in this view any more.</div>'
+  const thread = S.pj.client ? null : S.pj.sel
+  const pl = thread ? (o.places || []).find((p) => p.thread === thread) || {} : placeOf(o) || {}
+  const all = ((S.pj.data && S.pj.data.clients) || []).filter((c) => c.id !== o.id)
+  const KINDS = [['partner', 'partner of'], ['vendor', 'vendor to'], ['delivers_for', 'delivers for'], ['integrates_for', 'integrates for'], ['customer', 'customer of'], ['competitor', 'competitor of']]
+  const lvl = (f) => `<span class="pp-lvl" role="group" aria-label="${f}">${[1, 2, 3].map((n) => `<button data-pp="org-level" data-id="${esc(o.id)}" data-f="${f}" data-n="${n}" aria-pressed="${(pl[f] || 0) >= n}" title="${['low', 'mid', 'high'][n - 1]}"></button>`).join('')}<span class="set-sub">${pl[f] ? ['low', 'mid', 'high'][pl[f] - 1] : 'not set'}</span></span>`
+  return `<div class="wp pp-panel">
+    <div class="pp-p-top">${ppAv(o.name, pl.stance, true)}<div style="min-width:0"><button class="wp-name pp-name" data-pj="client" data-id="${esc(o.id)}">${esc(o.name)}</button><div class="set-sub">${o.internal ? 'your company' : 'organisation'} · ${o.people} ${o.people === 1 ? 'person' : 'people'}${o.domains && o.domains.length ? ` · ${esc(o.domains.join(', '))}` : ''}</div></div></div>
+    ${thread ? `<div class="wp-h">In ${esc((projById(thread) || {}).name || 'this thread')}</div><div class="wp-facts">
+      <span>Stance</span><div><select class="wp-in" data-pp-org="${esc(o.id)}" data-f="stance" aria-label="Stance"><option value="">not set</option>${STANCES.map((s) => `<option${pl.stance === s ? ' selected' : ''}>${s}</option>`).join('')}</select></div>
+      <span>Influence</span><div>${lvl('influence')}</div><span>Interest</span><div>${lvl('interest')}</div></div>` : ''}
+    <div class="wp-h">Relationships</div><div class="wp-facts">
+      <span>Part of</span><div><select class="wp-in" data-pp-rel="parent" data-id="${esc(o.id)}" aria-label="Part of"><option value="">nothing</option>${all.map((c) => `<option value="${esc(c.id)}"${o.parent === c.id ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select></div>
+      ${(o.relations || []).map((r) => `<span>${esc((KINDS.find(([k]) => k === r.kind) || [0, r.kind])[1])}</span><div>${esc((all.find((c) => c.id === r.to) || { name: r.to }).name)} <button class="link-btn" data-pp="rel-del" data-id="${esc(o.id)}" data-to="${esc(r.to)}">remove</button></div>`).join('')}
+      <span>Add</span><div class="pp-rel-add"><select class="wp-in" id="pp-rel-kind" aria-label="Relationship">${KINDS.map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join('')}</select><select class="wp-in" id="pp-rel-to" aria-label="Organisation"><option value="">organisation…</option>${all.map((c) => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')}</select><button class="btn" data-pp="rel-add" data-id="${esc(o.id)}">Add</button></div>
+    </div>
+    <div class="wp-h">Groups</div><div class="pp-in">${(o.groups || []).map((g) => `<span class="tok">${esc(g)}</span>`).join('') || '<span class="set-sub">none yet — set a person\'s group and it appears here</span>'}</div>
+  </div>`
+}
+PANEL_VIEWS.push({ id: 'person', label: 'Person', icon: ICON('<circle cx="12" cy="8.5" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/>'), area: 'right', when: () => S.view === 'projects' && !!S.pj.person && ((S.pj.client && S.pj.ctab === 'people') || (!S.pj.client && S.pj.sel && S.pj.tab === 'people')), render: personPanel })
+
+function peopleSend(op, extra) {
+  send({ cmd: 'project', op, id: S.pj.sel, ...extra })
+  setTimeout(() => loadPeople().then(render), 250)
+}
+function personOf(key) { const d = peopleData(); return d && d.people.find((y) => y.key === key) }
+function personSet(field, value) {
+  const x = personOf(S.pj.person)
+  if (!x) return
+  // The directory's group list follows a person's group (the organisation keeps the names).
+  if (field === 'group' && value && x.org) {
+    const o = ((S.pj.people || {}).orgs || []).find((y) => y.id === x.org.id)
+    if (o && !(o.groups || []).includes(value)) send({ cmd: 'project', op: 'client_set', id: o.id, groups: [...(o.groups || []), value] })
+  }
+  S.pj.ppEdit = null
+  peopleSend('person_set', { key: x.key, name: x.name, email: x.email, field, value })
+}
+function personPlace(key, set) {
+  const x = personOf(key)
+  if (x) return peopleSend('people_place', { name: x.name, email: x.email, set })
+  if (key.startsWith('org:')) peopleSend('org_place', { client: key.slice(4), set })
+}
+function showPerson(key) {
+  S.pj.person = key
+  S.pj.ppEdit = null
+  const known = panelViews(), eff = Layout.effective(window.innerWidth, window.innerHeight, known, S.overlay)
+  if (eff.narrow) S.overlay = true
+  Layout.show('person', known)
+  layoutChanged()
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest && e.target.closest('[data-pp]')
+  if (!b) return
+  e.preventDefault()
+  const d = b.dataset
+  switch (d.pp) {
+    case 'view': try { localStorage.setItem('echo.people.view', d.v) } catch { /* storage off */ } return render()
+    case 'pick': return showPerson(d.key)
+    case 'edit': S.pj.ppEdit = d.f; render(); { const i = document.querySelector('[data-pp-set][autofocus],[data-pp-place][autofocus]'); if (i) { i.focus(); i.select && i.select() } } return
+    case 'level': { const x = personOf(S.pj.person), pl = x && (x.places || []).find((p) => p.thread === S.pj.sel); const cur = pl && pl[d.f]; return personPlace(S.pj.person, { [d.f]: cur === Number(d.n) ? '' : Number(d.n) }) }
+    case 'org-level': { const o = ((S.pj.people || {}).orgs || []).find((y) => y.id === d.id), pl = o && (o.places || []).find((p) => p.thread === S.pj.sel); const cur = pl && pl[d.f]; return peopleSend('org_place', { client: d.id, set: { [d.f]: cur === Number(d.n) ? '' : Number(d.n) } }) }
+    case 'merge': case 'merge-pick': {
+      const x = personOf(S.pj.person), into = d.pp === 'merge' ? d.into : ($('#pp-same') || {}).value, y = into && personOf(into)
+      if (!x || !y) return
+      S.pj.ppSame = false
+      // The one in the thread (else the one seen more) stays; the other's addresses join it.
+      const keep = (y.in_thread && !x.in_thread) || (y.in_thread === x.in_thread && y.calls >= x.calls) ? y : x, other = keep === y ? x : y
+      S.pj.person = keep.key
+      return peopleSend('person_merge', { key: other.key, key_name: other.name, key_emails: [other.email, ...(other.also || [])].filter(Boolean), into: keep.key, into_name: keep.name, into_email: keep.email })
+    }
+    case 'same': S.pj.ppSame = true; return render()
+    case 'same-cancel': S.pj.ppSame = false; return render()
+    case 'split': { const x = personOf(S.pj.person); if (x) peopleSend('person_split', { key: x.key, name: x.name, email: d.email }); return }
+    case 'decide': send({ cmd: 'project', op: 'people_decide', id: d.thread, sid: d.sid, yes: !!d.yes }); return setTimeout(() => loadPeople().then(render), 250)
+    case 'all-sug': S.pj.ppAllSug = !S.pj.ppAllSug; return render()
+    case 'answer': { const x = personOf(S.pj.person); if (x) peopleSend('person_answer', { key: x.key, field: d.f, use: !!d.use }); return }
+    case 'add': S.pj.ppAdding = true; render(); { const i = $('#pp-new'); if (i) i.focus() } return
+    case 'add-all': { const dd = peopleData(); return peopleSend('people_add', { people: dd.people.filter((x) => !x.in_thread).map((x) => ({ name: x.name, email: x.email })) }) }
+    case 'add-one': { const x = personOf(d.key); if (x) peopleSend('people_add', { people: [{ name: x.name, email: x.email }] }); return }
+    case 'rel-add': { const kind = $('#pp-rel-kind').value, to = $('#pp-rel-to').value; if (!to) return; send({ cmd: 'project', op: 'client_set', id: d.id, relation: { to, kind } }); return setTimeout(() => loadProjects().then(loadPeople).then(render), 250) }
+    case 'rel-del': send({ cmd: 'project', op: 'client_set', id: d.id, relation: { to: d.to, kind: '' } }); return setTimeout(() => loadProjects().then(loadPeople).then(render), 250)
+  }
+})
+document.addEventListener('change', (e) => {
+  const t = e.target
+  if (!t.matches) return
+  if (t.matches('[data-pp-set]') && t.tagName === 'SELECT') return personSet(t.dataset.ppSet, t.value)
+  if (t.matches('[data-pp-place]') && t.tagName === 'SELECT') return personPlace(S.pj.person, { [t.dataset.ppPlace]: t.value })
+  if (t.matches('[data-pp-org]')) return peopleSend('org_place', { client: t.dataset.ppOrg, set: { [t.dataset.f]: t.value } })
+  if (t.matches('[data-pp-rel="parent"]')) { send({ cmd: 'project', op: 'client_set', id: t.dataset.id, parent: t.value }); return setTimeout(() => loadProjects().then(loadPeople).then(render), 250) }
+})
+document.addEventListener('focusout', (e) => {
+  const t = e.target
+  if (!t.matches || t.tagName !== 'INPUT') return
+  if (t.matches('[data-pp-set]')) return personSet(t.dataset.ppSet, t.value)
+  if (t.matches('[data-pp-place]')) { S.pj.ppEdit = null; return personPlace(S.pj.person, { [t.dataset.ppPlace]: t.value }) }
+  if (t.id === 'pp-new' && !t.value.trim()) { S.pj.ppAdding = false; render() }
+})
+document.addEventListener('keydown', (e) => {
+  const t = e.target
+  if (!t.matches) return
+  if ((t.matches('[data-pp-set]') || t.matches('[data-pp-place]')) && t.tagName === 'INPUT') {
+    if (e.key === 'Enter') { e.preventDefault(); t.blur() }
+    if (e.key === 'Escape') { e.preventDefault(); S.pj.ppEdit = null; render() }
+  }
+  if (t.id === 'pp-new' && e.key === 'Enter') {
+    e.preventDefault()
+    const m = t.value.trim().match(/^(.*?)\s*<([^>]+@[^>]+)>$/) || t.value.trim().match(/^()([^\s]+@[^\s]+)$/)
+    const name = m ? (m[1] || m[2].split('@')[0]) : t.value.trim(), email = m ? m[2] : undefined
+    S.pj.ppAdding = false
+    if (name) peopleSend('people_add', { people: [{ name, email }] })
+    else render()
+  }
+  if (t.id === 'pp-new' && e.key === 'Escape') { S.pj.ppAdding = false; render() }
+})
+// Drag a chip to a quadrant: high or low influence and interest.
+document.addEventListener('dragstart', (e) => { const c = e.target.closest && e.target.closest('[data-pp-drag]'); if (c) { e.dataTransfer.setData('text/x-echo-person', c.dataset.ppDrag); e.dataTransfer.effectAllowed = 'move' } })
+document.addEventListener('dragover', (e) => { const q = e.target.closest && e.target.closest('[data-pp-drop]'); if (q && [...e.dataTransfer.types].includes('text/x-echo-person')) { e.preventDefault(); q.classList.add('over') } })
+document.addEventListener('dragleave', (e) => { const q = e.target.closest && e.target.closest('[data-pp-drop]'); if (q && !q.contains(e.relatedTarget)) q.classList.remove('over') })
+document.addEventListener('drop', (e) => {
+  const q = e.target.closest && e.target.closest('[data-pp-drop]')
+  const key = e.dataTransfer.getData('text/x-echo-person')
+  if (!q || !key) return
+  e.preventDefault()
+  q.classList.remove('over')
+  const [inf, int] = q.dataset.ppDrop === 'tray' ? ['', ''] : q.dataset.ppDrop.split('/').map(Number)
+  personPlace(key, { influence: inf, interest: int })
+})
+
+// ── the Brain (`brain/`): what Echo knows across calls, by client and thread ──────────────
+// Its topics and terms to review (two layers: your practice, and each client's), the sources it
+// holds, its coverage, and a graph of documents around their topics. Asking is Claude's job (the
+// window's Claude sessions have the Brain); this shows and edits what it is made of.
+const BRAIN_TABS = [['topics', 'Topics'], ['terms', 'Terms'], ['sources', 'Sources'], ['numbers', 'Numbers'], ['coverage', 'Coverage'], ['graph', 'Graph']]
+const brainQuery = () => { const [k, v] = (S.br.scope || '').split(':'); return k && v ? `?${k}=${encodeURIComponent(v)}` : '' }
+async function loadBrain() {
+  const q = brainQuery()
+  try { const d = await get('api/brain' + q); d.q = q; S.br.data = d } catch { /* app restarting */ }
+  if (S.br.tab === 'graph') { try { const g = await get('api/brain/graph' + q); g.q = q; S.br.graph = g } catch { /* app restarting */ } }
+  if (S.br.tab === 'numbers') { try { S.br.numbers = await get('api/brain/numbers') } catch { /* app restarting */ } }
+  if (S.br.node) await loadBrainNode()
+}
+async function loadBrainNode() {
+  const id = S.br.node
+  try { const d = await get(`api/brain/node?id=${encodeURIComponent(id)}${brainQuery().replace('?', '&')}`); if (S.br.node === id) S.br.nodeData = d } catch { /* app restarting */ }
+}
+const clientName = (id) => id === '-' ? 'No client' : ((projClient(id) || {}).name || id)
+const threadChips = (ids) => (ids || []).filter((t) => t !== '-').map((t) => projById(t)).filter(Boolean).map((p) => `<span class="tk-pj">${projIcon(p, 12)}${esc(p.name)}</span>`).join('') + ((ids || []).includes('-') ? '<span class="tk-pj br-none">no thread</span>' : '')
+function brainView() {
+  const d = S.br.data
+  if (!d) return `<div class="skeleton" style="padding:20px">${'<i></i>'.repeat(6)}</div>`
+  if (d.error) return `<div class="br"><p class="error">${esc(d.error)}</p></div>`
+  const st = d.status || {}, tx = d.taxonomy || {}, sc = d.scopes || { clients: [], threads: [] }
+  const scopeSel = `<label class="fchip${S.br.scope ? ' on' : ''}">${esc(S.br.scope ? (S.br.scope.startsWith('client:') ? clientName(S.br.scope.slice(7)) : ((projById(S.br.scope.slice(7)) || {}).name || 'In no thread')) : 'Everything')} ▾<select data-br-scope aria-label="Scope"><option value="">Everything</option><optgroup label="Clients">${sc.clients.map((c) => `<option value="client:${esc(c.id)}"${S.br.scope === `client:${c.id}` ? ' selected' : ''}>${esc(c.name)} · ${c.documents}</option>`).join('')}</optgroup><optgroup label="Threads">${sc.threads.map((t) => `<option value="thread:${esc(t.id)}"${S.br.scope === `thread:${t.id}` ? ' selected' : ''}>${esc(t.name)} · ${t.documents}</option>`).join('')}</optgroup></select></label>`
+  const n = { topics: (tx.topics || []).length, terms: (tx.terms || []).length, sources: (d.documents || []).length }
+  const tabs = BRAIN_TABS.map(([id, l]) => `<button class="tab" role="tab" data-br-tab="${id}" aria-selected="${S.br.tab === id}">${l}${n[id] ? `<span class="n">${n[id]}</span>` : ''}</button>`).join('')
+  const sub = st.exists ? `${st.documents} sources · ${st.chunks} sections${st.embed_model ? ` · meaning by ${esc(st.embed_model)}` : ' · words only (no embedding server)'}` : 'Empty — it fills as your calls are synced'
+  const head = `<header class="pj-head br-head"><div class="br-title"><h2>Brain</h2><span class="tk-sub">${sub}</span><span class="grow"></span>${scopeSel}<button class="btn ghost" data-go="settings" title="Settings → Brain">Settings</button></div><div class="tabs" role="tablist">${tabs}</div></header>`
+  const body = S.br.tab === 'terms' ? brainTerms(tx) : S.br.tab === 'sources' ? brainSources(d) : S.br.tab === 'numbers' ? brainNumbers() : S.br.tab === 'coverage' ? brainCoverage(tx) : S.br.tab === 'graph' ? brainGraph() : brainTopics(tx)
+  return `<div class="br">${head}<div class="pane pj-pane wide br-pane">${body}</div></div>`
+}
+function brainTopics(tx) {
+  if (!tx.exists) return `<div class="wk-empty"><b>No topics yet</b><p>Claude builds them from your calls — your practice, and each client's own — and you review them here. <code>echoctl brain taxonomy build</code></p></div>`
+  const layers = tx.layers || []
+  const block = (l) => {
+    const ts = (tx.topics || []).filter((x) => x.layer === l.id)
+    if (!ts.length) return ''
+    const row = (x) => `<button class="br-row${x.level === 2 ? ' l2' : ''}${S.br.node === x.id ? ' on' : ''}" data-br-node="${esc(x.id)}"><span class="br-l">${x.level === 1 ? `<b>${esc(x.label)}</b>` : esc(x.label)}</span><span class="br-n">${x.sections || ''}</span><span class="br-th">${threadChips(x.threads)}</span></button>`
+    const rows = ts.filter((x) => x.level === 1).map((l1) => row(l1) + ts.filter((k) => k.level === 2 && k.parent === l1.label).map(row).join('')).join('')
+    const prov = l.provisional ? `<div class="br-prov"><span class="grow">Claude built ${l.id === 'shared' ? 'these' : `${esc(l.name)}'s topics`} from ${l.built_from || 'its'} calls. Rename, merge, move or remove — tags move with your changes — then accept them.</span><button class="btn primary" data-br-accept="${esc(l.id)}">Accept</button></div>` : ''
+    return `<section class="br-layer"><div class="br-lh"><span class="cap">${esc(l.id === 'shared' ? 'Your practice' : l.name)}</span><span class="set-sub">${l.id === 'shared' ? 'shared across clients' : 'client'}</span></div>${l.summary ? `<p class="br-sum">${esc(l.summary)}</p>` : ''}${prov}<div class="br-card">${rows}</div></section>`
+  }
+  const ordered = [...layers.filter((l) => l.id === 'shared'), ...layers.filter((l) => l.id !== 'shared')]
+  return ordered.map(block).join('') || '<p class="set-sub">Nothing in this scope.</p>'
+}
+function brainTerms(tx) {
+  if (!tx.exists) return '<p class="set-sub">No terms yet: they come with the topics.</p>'
+  const layers = [...(tx.layers || []).filter((l) => l.id === 'shared'), ...(tx.layers || []).filter((l) => l.id !== 'shared')]
+  return layers.map((l) => {
+    const ts = (tx.terms || []).filter((x) => x.layer === l.id).sort((a, b) => (b.sections || 0) - (a.sections || 0))
+    if (!ts.length) return ''
+    const kinds = [...new Set(ts.map((x) => x.kind))]
+    return `<section class="br-layer"><div class="br-lh"><span class="cap">${esc(l.id === 'shared' ? 'Your practice' : l.name)}</span><span class="set-sub">${ts.length} terms · ${esc(kinds.join(', '))}</span></div>
+      <div class="br-terms">${ts.map((x) => `<button class="br-term${S.br.node === x.id ? ' on' : ''}" data-br-node="${esc(x.id)}" title="${esc(x.description || '')}"><b>${esc(x.name)}</b><small>${esc(x.kind)}${x.variants.length ? ` · ${esc(x.variants.slice(0, 2).join(', '))}` : ''}</small>${x.sections ? `<span class="br-n">${x.sections}</span>` : ''}${x.pinned.length ? '<span class="br-pin" title="Pinned to a thread">📌</span>' : ''}${x.always ? '<span class="br-pin" title="Hints every call">∞</span>' : ''}</button>`).join('')}</div></section>`
+  }).join('')
+}
+/** A Brain section's source outside Echo (a Teams post, a mail): opened in its own app. */
+const extAttr = (link) => link && link.startsWith('echo://file/') ? `data-br-file="${esc(link.slice(12).split('?')[0])}" title="Open the document${link.includes('page=') ? ` (page ${esc(link.split('page=')[1])})` : ''}"`
+  : link && /^https:\/\//i.test(link) ? `data-br-ext="${esc(link)}" title="Open in ${/outlook|office\.com|owa/i.test(link) ? 'Outlook' : 'Teams'}"` : ''
+const KIND_MARK = { call: '▮', channel: '#', mail: '✉', file: '▣' }
+const kindMark = (x) => KIND_MARK[x.kind || (x.source || '').split('/')[0]] || '·'
+document.addEventListener('click', (e) => {
+  const f = e.target.closest && e.target.closest('[data-br-file]')
+  if (f) { e.preventDefault(); e.stopPropagation(); return send({ cmd: 'open_brain_file', id: f.dataset.brFile }) }
+  const b = e.target.closest && e.target.closest('[data-br-ext]')
+  if (!b) return
+  e.preventDefault(); e.stopPropagation()
+  send({ cmd: 'open_url', url: b.dataset.brExt })
+}, true)
+/** Who may speak into the Brain through mail and channels, per client: senders waiting for a decision
+ *  (their messages aren't read until trusted), then the trusted and ignored ones. Colleagues and the
+ *  user are trusted without asking; a trusted outside sender's mail is read only when authenticated. */
+function brainSenders() {
+  loadSourceState()
+  const s = (m365.state || {}).senders
+  if (!s) return ''
+  const scope = S.br.scope && S.br.scope.startsWith('client:') ? S.br.scope.slice(7) : null
+  const name = (c) => c === '-' ? 'No client' : ((((S.pj.data || {}).clients) || []).find((x) => x.id === c) || {}).name || c
+  const cards = Object.entries(s.clients || {}).filter(([c]) => !scope || c === scope).map(([c, l]) => {
+    const btn = (k, d, label, primary) => `<button class="btn${primary ? ' primary' : ''}" data-sender="${esc(d)}" data-client="${esc(c)}" data-key="${esc(k)}">${label}</button>`
+    const who = (x) => `<b>${esc(x.name || x.key)}</b>${x.key.startsWith('teams:') ? '' : ` <span class="set-sub">${esc(x.key)}</span>`}`
+    const wait = (l.waiting || []).sort((a, b) => (b.last_at || '').localeCompare(a.last_at || '')).map((w) => `<tr><td><span class="pp-who"><span class="br-kind">${w.kind === 'teams' ? '#' : '✉'}</span>${who(w)}<span class="set-sub br-why">${w.count} message${w.count === 1 ? '' : 's'} · last ${esc(relDay((w.last_at || '').slice(0, 10)))} · “${esc(w.last_about)}”${w.kind === 'mail' && !w.verified ? ' · not authenticated' : ''}${w.hint ? ' · ' + esc(w.hint) : ''}</span></span></td><td class="br-acts">${btn(w.key, 'trust', 'Trust', true)}${btn(w.key, 'ignore', 'Ignore')}</td></tr>`)
+    // A trusted sender's mail with no authentication verdict (a mailing list, a domain without DMARC).
+    const unver = (l.unverified || []).map((w) => `<tr><td><span class="pp-who"><span class="br-kind">✉</span>${who(w)}<span class="set-sub br-why">${w.count} message${w.count === 1 ? '' : 's'} not authenticated · last ${esc(relDay((w.last_at || '').slice(0, 10)))} · “${esc(w.last_about)}” · could be forged</span></span></td><td class="br-acts">${btn(w.key, 'read_unverified', 'Read anyway')}${btn(w.key, 'keep_unverified_out', 'Keep out')}</td></tr>`)
+    const unverWord = (x) => x.unverified === true ? ' · unauthenticated mail read too' : x.unverified === false ? ' · unauthenticated mail kept out' : ''
+    const decided = [...(l.trusted || []).map((x) => [x, 'trusted' + unverWord(x)]), ...(l.ignored || []).map((x) => [x, 'ignored'])].map(([x, st]) => `<tr class="br-sub"><td><span class="pp-who">${who(x)}<span class="set-sub br-why">${st}</span></span></td><td class="br-acts">${btn(x.key, 'forget', 'Forget')}</td></tr>`)
+    if (!wait.length && !unver.length && !decided.length) return ''
+    return `<div class="pp-card"><table class="pp-tbl"><thead><tr><th>${esc(name(c))} · senders${wait.length ? ` · <span class="error">${wait.length} waiting</span>` : ''}${unver.length ? ` · ${unver.length} not authenticated` : ''}</th><th></th></tr></thead><tbody>${wait.join('')}${unver.join('')}${decided.join('')}</tbody></table></div>`
+  }).filter(Boolean)
+  return cards.length ? `<p class="set-sub">Mail and posts are read only from you, colleagues and the senders you trust; the Brain keeps facts read from them, never their text.</p>${cards.join('')}` : ''
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest && e.target.closest('[data-sender]')
+  if (!b) return
+  b.disabled = true
+  send({ cmd: 'brain_sender', client: b.dataset.client, key: b.dataset.key, decision: b.dataset.sender })
+  setTimeout(() => loadSourceState(true), 400)
+})
+function brainSources(d) {
+  const senders = brainSenders()
+  const docs = d.documents || []
+  if (!docs.length) return senders + '<p class="set-sub">No sources in this scope yet.</p>'
+  const threads = (x) => threadChips((x.threads || []).map((t) => t.id).concat((x.threads || []).length ? [] : ['-']))
+  const row = (x, sub) => {
+    const call = x.link && x.link.startsWith('echo://call/') ? x.link.slice(12) : ''
+    const title = sub && x.channel && (x.title || '').startsWith(x.channel + ': ') ? x.title.slice(x.channel.length + 2) : (x.title || x.source)
+    const hist = x.history ? ' <span class="br-hist" title="Dated before its thread\'s history date: kept, searched only when history is asked for">history</span>' : ''
+    return `<tr${call ? ` data-call="${esc(call)}"` : ` ${extAttr(x.link)}`}${sub ? ' class="br-sub"' : ''}><td><span class="pp-who"><span class="br-kind">${kindMark(x)}</span>${sub ? esc(title) : `<b>${esc(title)}</b>`}${hist}</span></td><td>${x.date ? esc(relDay(x.date)) : ''}</td><td>${threads(x)}</td><td class="num">${x.sections}</td></tr>`
+  }
+  // A channel is one row (its posts, newest first, open under it); a folder too (every file in it,
+  // read or not, with why); calls and mail one row each.
+  loadSourceState()
+  const out = [], seen = new Set()
+  const STATUS = { indexed: 'read', pending: 'read · pages waiting for the page reader', twin: 'not read', skipped: 'not read', unsupported: 'not read', error: "couldn't be read", reading: 'reading…' }
+  for (const x of docs) {
+    if (x.folder) {
+      if (seen.has('f:' + x.folder)) continue
+      seen.add('f:' + x.folder)
+      const files = ((m365.files || {})[x.folder]) || []
+      const open = S.br.openCh === 'f:' + x.folder
+      const name = x.folder.split(/[\\/]/).pop()
+      const fdocs = docs.filter((y) => y.folder === x.folder)
+      out.push(`<tr data-br-ch="${esc('f:' + x.folder)}" class="br-ch" title="${esc(x.folder)}"><td><span class="pp-who"><span class="br-kind">▣</span><b>${esc(name)}</b><span class="set-sub">${esc(folderSummary(x.folder).line)} ${open ? '▾' : '▸'}</span></span></td><td>${fdocs[0] && fdocs[0].date ? esc(relDay(fdocs[0].date)) : ''}</td><td>${threads(x)}</td><td class="num">${fdocs.reduce((n, y) => n + y.sections, 0)}</td></tr>`)
+      if (open) {
+        for (const f of files) {
+          const d = fdocs.find((y) => y.source === 'file/' + f.id)
+          const histTag = d && d.history ? ' <span class="br-hist">history</span>' : ''
+          const why = [STATUS[f.status] || f.status, f.pages ? `${f.pages} page${f.pages === 1 ? '' : 's'}${f.flagged ? `, ${f.read || 0}/${f.flagged} read from images` : ''}` : '', f.fidelity && f.fidelity !== 'full' ? f.fidelity : '', f.reason || ''].filter(Boolean).join(' · ')
+          out.push(`<tr class="br-sub${d ? '' : ' br-off'}"${d ? ` data-br-file="${esc(f.id)}"` : ''}><td><span class="pp-who"><span class="br-kind">${d ? '▣' : '·'}</span>${esc(f.rel)}${histTag}<span class="set-sub br-why">${esc(why)}</span></span></td><td>${f.date ? esc(relDay(f.date)) : ''}</td><td></td><td class="num">${d ? d.sections : ''}</td></tr>`)
+        }
+      }
+      continue
+    }
+    if (!x.channel) { out.push(row(x)); continue }
+    if (seen.has(x.channel)) continue
+    seen.add(x.channel)
+    const posts = docs.filter((y) => y.channel === x.channel)
+    const open = S.br.openCh === x.channel
+    out.push(`<tr data-br-ch="${esc(x.channel)}" class="br-ch"><td><span class="pp-who"><span class="br-kind">#</span><b>${esc(x.channel)}</b><span class="set-sub">${posts.length} post${posts.length === 1 ? '' : 's'} ${open ? '▾' : '▸'}</span></span></td><td>${x.date ? esc(relDay(x.date)) : ''}</td><td>${threads(x)}</td><td class="num">${posts.reduce((n, y) => n + y.sections, 0)}</td></tr>`)
+    if (open) posts.forEach((y) => out.push(row(y, true)))
+  }
+  return `${senders}<div class="pp-card"><table class="pp-tbl"><thead><tr><th>Source</th><th>Date</th><th>Threads</th><th class="num">Sections</th></tr></thead><tbody>${out.join('')}</tbody></table></div>`
+}
+document.addEventListener('click', (e) => {
+  const r = e.target.closest && e.target.closest('[data-br-ch]')
+  if (!r) return
+  S.br.openCh = S.br.openCh === r.dataset.brCh ? null : r.dataset.brCh
+  render()
+})
+/** The numbers lane, per client: its reporting families (Claude proposes them from the workbooks;
+ *  nothing is built until accepted), what each loaded, the catalog of governed metrics, and what the
+ *  last build warns about (a file that yielded nothing, figures restated or in conflict, holes). */
+function brainNumbers() {
+  const d = S.br.numbers
+  if (!d) return '<div class="skeleton"><i></i><i></i></div>'
+  const busy = d.busy || {}
+  const scope = S.br.scope && S.br.scope.startsWith('client:') ? S.br.scope.slice(7) : null
+  const cs = (d.clients || []).filter((c) => !scope || c.client === scope)
+  if (!cs.length) return '<p class="set-sub">No reporting workbooks yet. Add a folder to a client\'s thread (Profile → Sources → Folder); its spreadsheets show up here.</p>'
+  return cs.map((c) => {
+    const cfg = c.config || {}, fams = cfg.families || [], st = c.status
+    const job = busy[c.client], err = busy[`${c.client}:error`]
+    const units = c.units || []
+    const famStat = (name) => { const u = units.filter((x) => x.family === name); const k = (s) => u.filter((x) => x.status === s).length; return u.length ? `${k('ok')} ok${k('partial') ? ` · ${k('partial')} partial` : ''}${k('zero') + k('error') ? ` · <span class="error">${k('zero') + k('error')} empty</span>` : ''}` : '' }
+    const rounds = ((cfg._echo || {}).rounds || []), lastRound = (cfg._echo || {}).kept || rounds[rounds.length - 1]
+    const state = job ? `<span class="set-sub">${job.op === 'propose' ? 'Claude is reading the workbooks and proposing families — a few minutes…' : job.op === 'accept' ? 'Accepting and building…' : 'Building…'}</span>`
+      : st === 'accepted' ? `<span class="tk-pj">accepted</span><span class="set-sub">${c.built_at ? `built ${esc(relDay(String(c.built_at).slice(0, 10)))} · ${c.audit ? c.audit.facts : 0} facts` : 'not built yet'}</span>`
+      : st === 'proposed' ? `<span class="tk-pj br-prop">proposed</span><span class="set-sub">${lastRound ? `loads ${lastRound.ok} of ${lastRound.units} sheets fully · ${lastRound.facts} facts — review, then accept` : 'review, then accept'}</span>` : `<span class="set-sub">${c.workbooks} workbook${c.workbooks === 1 ? '' : 's'} · no families yet</span>`
+    const acts = job ? '' : [
+      `<button class="btn${st ? '' : ' primary'}" data-num="propose" data-client="${esc(c.client)}">${st ? 'Propose again' : 'Propose families'}</button>`,
+      st === 'proposed' ? `<button class="btn primary" data-num="accept" data-client="${esc(c.client)}">Accept and build</button>` : '',
+      st === 'accepted' ? `<button class="btn" data-num="build" data-client="${esc(c.client)}">Build now</button>` : '',
+    ].join('')
+    const famRows = fams.map((f) => `<tr><td><b>${esc(f.name)}</b><div class="set-sub">${esc([].concat(f.glob).join(' · '))}</div></td><td>${esc(f.layout)}</td><td>${esc(Object.keys(f.grains || {}).concat(Object.keys(f.dim_candidates || {})).join(', ') || '—')}</td><td title="${esc(Object.keys(f.measures || {}).join(', '))}">${Object.keys(f.measures || {}).length}</td><td>${famStat(f.name)}</td></tr>`).join('')
+    const cat = Object.entries(c.catalog || {})
+    const catRows = cat.map(([n, m]) => `<tr><td><b>${esc(n)}</b></td><td>${esc(m.unit || '')}</td><td>${esc(m.desc || '')}${m.definition ? `<div class="set-sub">${esc(m.definition)}</div>` : ''}</td></tr>`).join('')
+    const warn = units.filter((x) => x.status === 'zero' || x.status === 'error' || x.status === 'partial').slice(0, 8)
+    const a = c.audit || {}
+    const notes = [a.restated ? `${a.restated} figures restated by a later report` : '', a.conflicts ? `${a.conflicts} where reports of one month disagree` : '', a.holes ? `${a.holes} grains with an entity missing some months` : '', a.collisions ? `${a.collisions} rows listed twice in one file (${a.collisions_merged} merged by policy)` : ''].filter(Boolean)
+    const skipped = ((cfg._echo || {}).skipped || [])
+    return `<section class="set-sec num-sec">
+      <div class="ins-h"><h3>${esc(clientName(c.client))}</h3>${state}<span class="grow"></span>${acts}</div>
+      ${err ? `<p class="error">${esc(err)}</p>` : ''}
+      ${fams.length ? `<div class="pp-card"><table class="pp-tbl"><thead><tr><th>Family</th><th>Layout</th><th>Grains</th><th class="num">Measures</th><th>Last build</th></tr></thead><tbody>${famRows}</tbody></table></div>` : ''}
+      ${notes.length || warn.length ? `<div class="num-warn">${notes.map((n) => `<div>⚠ ${esc(n)}</div>`).join('')}${warn.map((x) => `<div class="set-sub">${esc(x.status)} · ${esc(x.family)} / ${esc(x.unit)} · ${esc(String(x.file || '').split('/').pop())} — ${esc(x.reason || '')}</div>`).join('')}</div>` : ''}
+      ${cat.length ? `<details class="num-cat"><summary>${cat.length} governed metrics — what Claude's sessions can ask for (list_metrics, get_metric)</summary><div class="pp-card"><table class="pp-tbl"><tbody>${catRows}</tbody></table></div></details>` : ''}
+      ${skipped.length ? `<details class="num-cat"><summary>${skipped.length} workbooks left out</summary>${skipped.map((s) => `<div class="set-sub">${esc(String(s.series || '').split('/').pop())} — ${esc(s.why || '')}</div>`).join('')}</details>` : ''}
+    </section>`
+  }).join('') + '<p class="set-foot">Numbers are computed from the workbooks\' real cells and cited to their file — never read or estimated by a model. Claude proposes which tables to load; nothing is built until you accept. Rebuilt when the workbooks change.</p>'
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest && e.target.closest('[data-num]')
+  if (!b) return
+  send({ cmd: 'brain_numbers', op: b.dataset.num, client: b.dataset.client })
+  b.disabled = true
+  const poll = () => get('api/brain/numbers').then((d) => { S.br.numbers = d; render(); if (Object.keys(d.busy || {}).some((k) => !k.endsWith(':error'))) setTimeout(poll, 3000) }).catch(() => {})
+  setTimeout(poll, 600)
+})
+
+function brainCoverage(tx) {
+  const c = tx.coverage
+  if (!c || !c.total) return '<p class="set-sub">Nothing to cover yet.</p>'
+  const pct = (n) => Math.round(100 * n / c.total)
+  const bar = (label, n, cls) => `<div class="br-cov"><span>${label}</span><span class="br-bar"><i class="${cls}" style="width:${pct(n)}%"></i></span><span class="br-n">${n} · ${pct(n)}%</span></div>`
+  return `<section class="set-sec"><div class="set-card br-covs">${bar('Tagged with a topic', c.tagged, 'ok')}${bar('Small talk', c.no_topic, 'mute')}${bar('Nothing fits', c.nothing_fits, 'warn')}${bar('Not tagged yet', c.not_judged, 'mute')}</div>
+    <p class="set-foot">Of ${c.total} sections. New sections are tagged after each sync; "nothing fits" growing means the topics need another one — rebuild a layer with <code>echoctl brain taxonomy build --layer …</code>.</p></section>`
+}
+
+// The graph: documents (coloured by client) around their topics, related documents linked. A small
+// force layout, run once per data set and kept; drawn as SVG after each render.
+const CLIENT_COLORS = ['#9b78ff', '#5aa9ff', '#3ccf91', '#f0a24a', '#e8603c', '#d36bd1', '#4cc3c8', '#c9b458']
+function brainGraph() {
+  const g = S.br.graph
+  if (!g || g.q !== brainQuery()) return `<div class="skeleton" style="padding:20px">${'<i></i>'.repeat(6)}</div>`
+  if (!g.nodes || !g.nodes.length) return '<p class="set-sub">Nothing to draw in this scope yet.</p>'
+  const clients = [...new Set(g.nodes.filter((n) => n.type === 'doc').map((n) => n.client || '-'))]
+  const legend = clients.map((c, i) => `<span class="pp-leg"><i class="br-dot" style="background:${c === '-' ? '#8a8a95' : CLIENT_COLORS[i % CLIENT_COLORS.length]}"></i>${esc(clientName(c))}</span>`).join('')
+  return `<div class="br-graph-bar">${legend}<span class="grow"></span><span class="set-sub">Topics on the ring (grouped by client); sources inside, near their topics — calls round, posts, mail and documents square; dashed: related. Click one for its details.</span></div><div class="br-graph" id="br-graph"></div>`
+}
+function layoutGraph(g, w, h) {
+  // Topics on a ring, grouped by layer (a client's topics side by side); sources inside, each at the
+  // weighted middle of its topics, pulled in toward the centre, then nudged apart.
+  const cx = w / 2, cy = h / 2, R = Math.max(80, Math.min(w / 2 - 150, h / 2 - 34))
+  const topics = g.nodes.filter((n) => n.type === 'topic').sort((a, b) => (a.layer === 'shared') - (b.layer === 'shared') || String(a.layer).localeCompare(String(b.layer)) || b.sections - a.sections)
+  const pos = new Map()
+  topics.forEach((t, i) => { const a = -Math.PI / 2 + (2 * Math.PI * i) / Math.max(1, topics.length); pos.set(t.id, { ...t, x: cx + R * Math.cos(a), y: cy + R * Math.sin(a), a }) })
+  const about = new Map()
+  for (const e of g.edges.filter((e) => e.kind === 'about')) { if (!about.has(e.source)) about.set(e.source, []); about.get(e.source).push(e) }
+  const docs = g.nodes.filter((n) => n.type === 'doc').map((d) => {
+    const es = (about.get(d.id) || []).filter((e) => pos.has(e.target))
+    const sw = es.reduce((s, e) => s + e.weight, 0)
+    const seed = ProjectArt.hash(d.id)
+    let x = cx + ((seed % 41) - 20), y = cy + (((seed >> 6) % 41) - 20)
+    if (sw) { x = es.reduce((s, e) => s + pos.get(e.target).x * e.weight, 0) / sw; y = es.reduce((s, e) => s + pos.get(e.target).y * e.weight, 0) / sw; x = cx + (x - cx) * 0.66; y = cy + (y - cy) * 0.66 }
+    return { ...d, x, y }
+  })
+  for (let it = 0; it < 80; it++) for (let a = 0; a < docs.length; a++) for (let b = a + 1; b < docs.length; b++) {
+    const A = docs[a], B = docs[b], dx = A.x - B.x, dy = A.y - B.y, d = Math.sqrt(dx * dx + dy * dy) || 0.1
+    if (d < 22) { const f = (22 - d) / d / 2; A.x += dx * f; A.y += dy * f; B.x -= dx * f; B.y -= dy * f }
+  }
+  const all = new Map([...pos.values(), ...docs].map((n) => [n.id, n]))
+  const edges = g.edges.map((e) => ({ s: all.get(e.source), t: all.get(e.target), kind: e.kind, w: e.weight })).filter((e) => e.s && e.t)
+  return { nodes: [...pos.values(), ...docs], edges, cx, cy, R }
+}
+/** The graph's selection: the node in the details panel ringed, its edges brought up, the rest dimmed. */
+function markGraph(box) {
+  const sel = S.br.doc || (S.br.node ? `topic:${S.br.node}` : null)
+  const svg = box.querySelector('svg')
+  if (!svg) return
+  svg.classList.toggle('has-sel', !!sel)
+  const near = new Set(sel ? [sel] : [])
+  svg.querySelectorAll('line').forEach((l) => {
+    const on = !!sel && (l.dataset.a === sel || l.dataset.b === sel)
+    l.classList.toggle('hl', on)
+    if (on) { near.add(l.dataset.a); near.add(l.dataset.b) }
+  })
+  svg.querySelectorAll('[data-gid]').forEach((n) => { n.classList.toggle('sel', n.dataset.gid === sel); n.classList.toggle('near', near.has(n.dataset.gid)) })
+}
+
+function drawGraph() {
+  const box = $('#br-graph'), g = S.br.graph
+  if (!box || !g || !g.nodes) return
+  const w = Math.max(400, box.clientWidth), h = Math.max(360, box.clientHeight)
+  const key = `${g.q}|${w}|${h}|${g.nodes.length}|${g.edges.length}`
+  if (box.dataset.key === key) return markGraph(box)
+  box.dataset.key = key
+  const L = layoutGraph(g, w, h)
+  const clients = [...new Set(g.nodes.filter((n) => n.type === 'doc').map((n) => n.client || '-'))]
+  const color = (n) => n.client ? CLIENT_COLORS[clients.indexOf(n.client) % CLIENT_COLORS.length] : '#8a8a95'
+  const layerColor = (l) => { const i = clients.indexOf(l); return l && l !== 'shared' && i >= 0 ? CLIENT_COLORS[i % CLIENT_COLORS.length] : '#8a8a95' }
+  const short = (s) => s.length > 26 ? s.slice(0, 25) + '…' : s
+  const lines = L.edges.map((e) => `<line data-a="${esc(e.s.id)}" data-b="${esc(e.t.id)}" x1="${e.s.x.toFixed(1)}" y1="${e.s.y.toFixed(1)}" x2="${e.t.x.toFixed(1)}" y2="${e.t.y.toFixed(1)}" class="${e.kind === 'about' ? 'ab' : 'rl'}" stroke-width="${e.kind === 'about' ? Math.min(3, 0.5 + e.w / 6) : Math.min(2, 0.4 + e.w / 10)}"/>`).join('')
+  const dots = L.nodes.map((n) => n.type === 'topic'
+    ? (() => {
+      const r = 5 + Math.sqrt(n.sections || 1) * 1.6, c = Math.cos(n.a), lx = n.x + (r + 6) * (c >= 0 ? 1 : -1), ly = n.y + 4
+      return `<g class="tp" data-gid="${esc(n.id)}" data-br-node="${esc(n.id.replace(/^topic:/, ''))}"><circle cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${r.toFixed(1)}" style="stroke:${layerColor(n.layer)}"/><text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="${c >= 0 ? 'start' : 'end'}">${esc(short(n.label))}<title>${esc(n.label)} · ${n.sections} sections</title></text></g>`
+    })()
+    : `<g class="dc" data-gid="${esc(n.id)}" data-graph-doc="${esc(n.id)}">${(() => { const r = 4 + Math.sqrt(n.sections || 1) * 0.7; return n.kind && n.kind !== 'call' ? `<rect x="${(n.x - r * 0.85).toFixed(1)}" y="${(n.y - r * 0.85).toFixed(1)}" width="${(r * 1.7).toFixed(1)}" height="${(r * 1.7).toFixed(1)}" rx="1.5" fill="${color(n)}"/>` : `<circle cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${r.toFixed(1)}" fill="${color(n)}"/>` })()}<title>${esc(n.label || n.id)}${n.date ? ` · ${esc(n.date)}` : ''} · ${n.sections} sections</title></g>`).join('')
+  box.innerHTML = `<svg viewBox="0 0 ${w} ${h}" width="100%" height="100%" role="img" aria-label="The Brain as a graph: sources around their topics">${lines}${dots}</svg>`
+  markGraph(box)
+}
+
+/** A topic or term in the right panel: its description, where it comes up, the user's review
+ *  (rename, merge, move, remove; a term's kind, variants, pins) and its latest sections. */
+function brainNodePanel() {
+  const d = S.br.data, id = S.br.node, tx = (d && d.taxonomy) || {}
+  const x = (tx.topics || []).find((t) => t.id === id) || (tx.terms || []).find((t) => t.id === id)
+  if (!x) return '<div class="wp-empty">Pick a topic or a term.</div>'
+  const isTerm = !!x.name, name = x.name || x.label, layer = x.layer
+  const same = isTerm ? (tx.terms || []).filter((t) => t.layer === layer && t.id !== id) : (tx.topics || []).filter((t) => t.layer === layer && t.id !== id)
+  const l1s = (tx.topics || []).filter((t) => t.layer === layer && t.level === 1 && t.id !== id)
+  const ed = S.br.edit
+  const body = (o) => esc(JSON.stringify({ ...o, layer, [isTerm ? 'name' : 'label']: name, term: isTerm }))
+  const actions = ed === 'rename' ? `<span class="tok-in"><input id="br-rename" value="${esc(name)}" aria-label="New name" autofocus></span><button class="btn primary" data-br-do="rename">Rename</button>`
+    : ed === 'merge' ? `<select class="wp-in" id="br-into" aria-label="Merge into">${same.map((t) => `<option>${esc(t.name || t.label)}</option>`).join('')}</select><button class="btn primary" data-br-do="merge">Merge</button>`
+    : ed === 'move' ? `<select class="wp-in" id="br-parent" aria-label="Move under"><option value="">(top level)</option>${l1s.map((t) => `<option${x.parent === t.label ? ' selected' : ''}>${esc(t.label)}</option>`).join('')}</select><button class="btn primary" data-br-do="move">Move</button>`
+    : ed === 'remove' ? `<span class="set-sub">Remove it? Its tags go too.</span><button class="btn danger" data-br-op='${body({ op: 'remove' })}'>Remove</button>`
+    : `<button class="btn" data-br-edit="rename">Rename</button>${same.length ? '<button class="btn" data-br-edit="merge">Merge into…</button>' : ''}${isTerm ? '' : '<button class="btn" data-br-edit="move">Move…</button>'}<button class="btn ghost danger" data-br-edit="remove">Remove</button>`
+  const nd = S.br.nodeData && S.br.nodeData.id === id ? S.br.nodeData : null
+  const secs = !nd ? '<div class="skeleton"><i></i><i></i></div>' : nd.sections.length ? nd.sections.map((s) => {
+    const call = s.link && s.link.startsWith('echo://call/') ? s.link.slice(12).split('?')[0] : ''
+    const t = s.link && s.link.includes('?t=') ? Number(s.link.split('?t=')[1]) : null
+    return `<div class="br-sec"><button class="src" ${call ? `data-br-open="${esc(call)}"${t != null ? ` data-t="${t}"` : ''}` : extAttr(s.link)}>${kindMark(s)} ${esc(s.doc || s.source)}${s.date ? ` · ${esc(relDay(s.date))}` : ''}${t != null ? ` · ${clock(t)}` : ''}</button><div class="qt">${esc(s.text)}</div></div>`
+  }).join('') : '<p class="set-sub">No sections in this scope.</p>'
+  const layerName = layer === 'shared' ? 'Your practice' : ((tx.layers || []).find((l) => l.id === layer) || {}).name || layer
+  return `<div class="wp br-panel">
+    <div class="wp-top"><span class="wk-k">${isTerm ? esc(x.kind || 'term') : `topic · level ${x.level}`}</span><span class="set-sub">${esc(layerName)}</span></div>
+    <h3 class="wp-name">${esc(name)}</h3>
+    ${x.parent ? `<div class="set-sub">under ${esc(x.parent)}</div>` : ''}
+    ${x.description ? `<p class="br-desc">${esc(x.description)}</p>` : ''}
+    ${isTerm && x.variants.length ? `<div class="set-sub">Also written: ${esc(x.variants.join(', '))}</div>` : ''}
+    <div class="br-where">${x.sections || 0} sections ${threadChips(x.threads)}</div>
+    <div class="br-acts">${actions}</div>
+    <div class="wp-h">Latest sections</div>${secs}
+  </div>`
+}
+/** A source picked in the graph: its details in the right panel; opening it is the panel's Open. */
+function selectBrainDoc(source) {
+  S.br.doc = source; S.br.docData = null; S.br.node = null
+  const known = panelViews(), eff = Layout.effective(window.innerWidth, window.innerHeight, known, S.overlay)
+  if (eff.narrow) S.overlay = true
+  Layout.show('brain-doc', known)
+  layoutChanged()
+  get(`api/brain/doc?source=${encodeURIComponent(source)}${brainQuery().replace('?', '&')}`).then((x) => { if (S.br.doc === source) { S.br.docData = x; render() } }).catch(() => {})
+}
+/** A Brain link, opened where it lives: a call in Echo (at its moment), a post or mail in Teams / Outlook, a file in its app. */
+function openBrainLink(link) {
+  if (link.startsWith('echo://call/')) {
+    const [call, q] = link.slice(12).split('?')
+    const t = q && q.startsWith('t=') ? Number(q.slice(2)) : null
+    S.jump = t
+    return go(`call/${call}/${t != null ? 'transcript' : 'minutes'}`)
+  }
+  if (link.startsWith('echo://file/')) return send({ cmd: 'open_brain_file', id: link.slice(12).split('?')[0] })
+  if (/^https:\/\//i.test(link)) return send({ cmd: 'open_url', url: link })
+}
+const DOC_KIND = { call: 'call', channel: 'channel post', mail: 'mail', file: 'document' }
+function brainDocPanel() {
+  const x = S.br.docData
+  if (!x || x.source !== S.br.doc) return '<div class="wp br-panel"><div class="skeleton"><i></i><i></i><i></i></div></div>'
+  if (x.missing || x.error) return `<div class="wp-empty">${esc(x.error || 'This source is gone from the Brain.')}</div>`
+  const openLabel = x.kind === 'call' ? 'Open the call' : x.kind === 'file' ? 'Open the document' : x.kind === 'mail' ? 'Open in Outlook' : 'Open in Teams'
+  const open = x.link ? `<button class="btn primary" data-br-doc-open="${esc(x.link)}">${openLabel}</button>` : ''
+  const threads = (x.threads || []).map((t) => t.id)
+  const chip = (t) => `<button class="tok link" data-br-node="${esc(t.id)}" title="${t.sections} section${t.sections === 1 ? '' : 's'} here">${esc(t.label || t.id)}</button>`
+  const terms = (x.topics || []).filter((t) => t.term).map(chip).join('')
+  const topics = (x.topics || []).filter((t) => !t.term).map((t) => `<button class="tok link" data-br-node="${esc(t.id)}" title="${t.sections} section${t.sections === 1 ? '' : 's'} here">${esc(t.label || t.id)}</button>`).join('')
+  const secs = (x.sections || []).map((s) => {
+    const where = s.link && s.link.includes('?t=') ? clock(Number(s.link.split('?t=')[1])) : s.link && s.link.includes('page=') ? `page ${esc(s.link.split('page=')[1])}` : ''
+    return `<div class="br-sec"><button class="src" ${s.link ? `data-br-doc-open="${esc(s.link)}"` : ''}>${esc(s.section || '')}${where && !String(s.section || '').includes(where) ? ` · ${where}` : ''}</button><div class="qt">${esc(s.text)}</div></div>`
+  }).join('')
+  const rel = (x.related || []).map((r) => `<button class="br-rel" data-graph-doc="${esc(r.source)}"><span class="br-kind">${kindMark(r)}</span><span class="br-rel-t">${esc(r.title || r.source)}</span><span class="set-sub">${r.date ? esc(relDay(r.date)) : ''}</span></button>`).join('')
+  return `<div class="wp br-panel">
+    <div class="wp-top"><span class="wk-k">${kindMark(x)} ${esc(DOC_KIND[x.kind] || x.kind || 'source')}</span><span class="set-sub">${x.date ? esc(relDay(x.date)) : ''}</span></div>
+    <h3 class="wp-name">${esc(x.title || x.source)}</h3>
+    ${x.rel ? `<div class="set-sub">${esc(x.rel)}${x.fidelity && x.fidelity !== 'full' ? ` · ${esc(x.fidelity)}` : ''}</div>` : ''}
+    <div class="br-where">${x.sections_total} sections ${threadChips(threads.length ? threads : ['-'])}</div>
+    <div class="br-acts">${open}</div>
+    ${topics ? `<div class="wp-h">Topics</div><div class="br-topics">${topics}</div>` : ''}
+    ${terms ? `<div class="wp-h">Terms</div><div class="br-topics">${terms}</div>` : ''}
+    <div class="wp-h">Sections</div>${secs || '<p class="set-sub">No sections.</p>'}${x.sections_total > (x.sections || []).length ? `<p class="set-sub">${x.sections_total - x.sections.length} more — open it to read them all.</p>` : ''}
+    ${rel ? `<div class="wp-h">Related sources</div><div class="br-rels">${rel}</div>` : ''}
+  </div>`
+}
+PANEL_VIEWS.push({ id: 'brain-doc', label: 'Source', icon: ICON('<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/>'), area: 'right', when: () => S.view === 'brain' && !!S.br.doc, render: brainDocPanel })
+PANEL_VIEWS.push({ id: 'brain-node', label: 'Topic', icon: ICON('<circle cx="12" cy="12" r="3"/><circle cx="5" cy="6" r="2"/><circle cx="19" cy="7" r="2"/><circle cx="7" cy="19" r="2"/><path d="M9.5 10.5 6.6 7.4M14.6 10.6l2.8-2.4M10.2 14.2l-2 3.3"/>'), area: 'right', when: () => S.view === 'brain' && !!S.br.node, render: brainNodePanel })
+
+function brainEdit(body) {
+  send({ cmd: 'brain_taxonomy', body })
+  S.br.edit = null
+  setTimeout(() => loadBrain().then(render), 350)
+}
+document.addEventListener('click', (e) => {
+  const t = e.target.closest && e.target.closest('[data-br-tab],[data-br-node],[data-br-accept],[data-br-edit],[data-br-do],[data-br-op],[data-br-open],[data-graph-doc],[data-br-doc-open]')
+  if (!t) return
+  const d = t.dataset
+  if (d.brTab) { S.br.tab = d.brTab; go(`brain/${d.brTab}`); return loadBrain().then(render) }
+  if (d.brNode) {
+    S.br.node = d.brNode; S.br.edit = null; S.br.nodeData = null; S.br.doc = null
+    const known = panelViews(), eff = Layout.effective(window.innerWidth, window.innerHeight, known, S.overlay)
+    if (eff.narrow) S.overlay = true
+    Layout.show('brain-node', known)
+    layoutChanged()
+    return loadBrainNode().then(render)
+  }
+  if (d.brAccept) return brainEdit({ op: 'accept', layer: d.brAccept })
+  if (d.brEdit) { S.br.edit = d.brEdit; render(); { const i = $('#br-rename'); if (i) { i.focus(); i.select() } } return }
+  if (d.brOp) return brainEdit(JSON.parse(d.brOp))
+  if (d.brDo) {
+    const tx = (S.br.data || {}).taxonomy || {}
+    const x = (tx.topics || []).find((y) => y.id === S.br.node) || (tx.terms || []).find((y) => y.id === S.br.node)
+    if (!x) return
+    const base = { layer: x.layer, term: !!x.name, [x.name ? 'name' : 'label']: x.name || x.label }
+    if (d.brDo === 'rename') { const to = ($('#br-rename') || {}).value; if (to && to.trim()) { S.br.node = null; brainEdit({ ...base, op: 'rename', to: to.trim() }) } return }
+    if (d.brDo === 'merge') { S.br.node = null; return brainEdit({ ...base, op: 'merge', into: ($('#br-into') || {}).value }) }
+    if (d.brDo === 'move') return brainEdit({ ...base, op: 'move', parent: ($('#br-parent') || {}).value || null })
+  }
+  if (d.brOpen) { S.jump = d.t ? Number(d.t) : null; return go(`call/${d.brOpen}/${d.t ? 'transcript' : 'minutes'}`) }
+  if (d.graphDoc) return selectBrainDoc(d.graphDoc)
+  if (d.brDocOpen) return openBrainLink(d.brDocOpen)
+})
+document.addEventListener('change', (e) => {
+  const t = e.target
+  if (t.matches && t.matches('[data-br-scope]')) { S.br.scope = t.value; S.br.node = null; S.br.data = null; render(); loadBrain().then(render) }
+})
+document.addEventListener('keydown', (e) => {
+  if (e.target.id === 'br-rename' && e.key === 'Enter') { e.preventDefault(); const b = $('[data-br-do="rename"]'); if (b) b.click() }
+  if (e.target.id === 'br-rename' && e.key === 'Escape') { S.br.edit = null; render() }
+})
+window.addEventListener('resize', () => { if (S.view === 'brain') { const b = $('#br-graph'); if (b) b.dataset.key = ''; drawGraph() } })
+
+/** A thread's topics and terms from the Brain (null when there is no taxonomy yet: the old glossary
+ *  shows instead). Topics with their sections here; terms pinned here first, then by mentions. */
+function threadBrain(p) {
+  if (!brainOn()) return null
+  const d = S.pj.tbrain
+  if (!d || d.thread !== p.id || !d.taxonomy || !d.taxonomy.exists) return null
+  const tx = d.taxonomy
+  const topics = (tx.topics || []).filter((x) => x.sections).sort((a, b) => b.sections - a.sections).slice(0, 10)
+  const seen = new Set()
+  const terms = (tx.terms || []).filter((x) => x.sections || (x.pinned || []).includes(p.id))
+    .sort((a, b) => ((b.pinned || []).includes(p.id) - (a.pinned || []).includes(p.id)) || ((b.layer !== 'shared') - (a.layer !== 'shared')) || (b.sections - a.sections))
+    .filter((x) => { const k = x.name.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true }).slice(0, 30)
+  const more = (tx.terms || []).filter((x) => x.sections || (x.pinned || []).includes(p.id)).length - terms.length
+  return `<div class="tt-topics">${topics.map((x) => `<span class="chipt" title="${esc(x.description || '')}">${esc(x.label)} · ${x.sections}</span>`).join('') || '<span class="set-sub">No topics tagged here yet.</span>'}</div>
+    <div class="tt-terms">${terms.map((x) => `<span class="tok" title="${esc([x.kind, x.description].filter(Boolean).join(' — '))}">${esc(x.name)}<small>${esc(x.kind)}${(x.pinned || []).includes(p.id) ? ' · pinned' : ''}</small></span>`).join('')}${addTok('bterm', 'A term for this thread — a system, an acronym, a name')}</div>
+    <div class="pf-sub">From the Brain — ${esc(p.client_name || 'your practice')}'s layer and yours. Transcription spells these right on this thread's calls${more > 0 ? ` · ${more} more in <a href="#brain/terms">Brain → Terms</a>` : ''}.</div>`
+}
+
+/** Insights of a client or a thread (`brain/insights.rs`): what no single call shows, each citing two
+ *  sources or more; to re-check when a cited source changed; Refresh runs one now (otherwise the app
+ *  redoes a scope at most daily, after its calls changed). */
+const insights = { key: null, data: null, at: 0 }
+async function loadInsights(kind, id, force) {
+  const k = `${kind}:${id}`
+  if (!force && insights.key === k && Date.now() - insights.at < 20000) return
+  insights.key = k; insights.at = Date.now()
+  try { insights.data = await get(`api/brain/insights?${kind}=${encodeURIComponent(id)}`) } catch { insights.data = null }
+  render()
+}
+const INSIGHT_KIND = { moved: ['Position moved', 'warn'], slipping: ['Keeps slipping', 'danger'], recurs: ['Comes back', 'info'], contradiction: ['Contradiction', 'accent'], open: ['Still open', 'mute'] }
+function insightsBlock(kind, id, name) {
+  if (!brainOn()) return ''
+  const k = `${kind}:${id}`
+  if (insights.key !== k) { loadInsights(kind, id); return '' }
+  const d = insights.data
+  if (!d || d.error) return ''
+  const list = d.insights || []
+  const when = d.at ? `checked ${esc(relDay(String(d.at).slice(0, 10)))}` : 'not run yet'
+  const btn = d.running ? '<span class="set-sub">Reading…</span>' : `<button class="link-btn" data-insights-run="${esc(kind)}" data-id="${esc(id)}">${list.length ? 'Refresh' : 'Find insights'}</button>`
+  const card = (x) => {
+    const [label, cls] = INSIGHT_KIND[x.kind] || [x.kind, 'mute']
+    const cites = x.citations.map((c) => {
+      const call = c.link && c.link.startsWith('echo://call/') ? c.link.slice(12).split('?')[0] : ''
+      const t = c.link && c.link.includes('?t=') ? Number(c.link.split('?t=')[1]) : null
+      return `<button class="src" ${call ? `data-br-open="${esc(call)}"${t != null ? ` data-t="${t}"` : ''}` : extAttr(c.link)} title="“${esc(c.quote)}”">${kindMark(c)} ${esc(c.doc)}${c.date ? ` · ${esc(relDay(c.date))}` : ''}${t != null ? ` · ${clock(t)}` : ''}</button>`
+    }).join('')
+    return `<div class="ins${x.stale ? ' stale' : ''}"><span class="ins-k ${cls}">${esc(label)}${x.stale ? ' · to re-check' : ''}</span><div class="ins-t">${esc(x.text)}</div><div class="ins-c">${cites}</div></div>`
+  }
+  const empty = d.at ? '<p class="set-sub">Nothing across calls stands out yet.</p>' : `<p class="set-sub">Insights find what no single call shows — positions that moved, what keeps slipping or coming back, contradictions — each citing two sources. ${d.due ? 'Echo will look after its next quiet moment, or now:' : ''}</p>`
+  return `<section class="set-sec ins-sec"><div class="ins-h"><h3>Insights</h3><span class="set-sub">across ${esc(name)}'s calls · each cites two sources or more · ${when}</span><span class="grow"></span>${btn}</div>${list.length ? `<div class="ins-grid">${list.map(card).join('')}</div>` : empty}</section>`
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest && e.target.closest('[data-insights-run]')
+  if (!b) return
+  send({ cmd: 'brain_insights', kind: b.dataset.insightsRun, id: b.dataset.id })
+  b.textContent = 'Reading…'; b.disabled = true
+  const poll = (n) => setTimeout(() => loadInsights(b.dataset.insightsRun, b.dataset.id, true).then(() => { if (insights.data && insights.data.running && n < 60) poll(n + 1) }), 4000)
+  poll(0)
+})
+
+/** "Mentioned also in" (the Brain): where else in the thread a work item comes up — near the words it
+ *  came from, else about its title — leaving out the calls it already cites. */
+const mentions = { key: null, data: null }
+function mentionsBlock(n) {
+  if (!brainOn() || !S.pj.sel || n.kind === 'epic') return ''
+  const quotes = (n.history || []).filter((h) => h.quote && h.evidence).slice(0, 4).map((h) => [h.evidence, h.quote])
+  const key = `${S.pj.sel}|${n.id}|${quotes.length}`
+  if (mentions.key !== key) {
+    mentions.key = key; mentions.data = null
+    const q = `thread=${encodeURIComponent(S.pj.sel)}&title=${encodeURIComponent(n.title)}&quotes=${encodeURIComponent(JSON.stringify(quotes))}`
+    get('api/brain/mentions?' + q).then((d) => { if (mentions.key === key) { mentions.data = d; render() } }).catch(() => { if (mentions.key === key) { mentions.data = { items: [] }; render() } })
+    return ''
+  }
+  const items = (mentions.data && mentions.data.items) || []
+  if (!items.length) return ''
+  return `<div class="wp-h">Mentioned also in</div>${items.map((x) => {
+    const call = x.link && x.link.startsWith('echo://call/') ? x.link.slice(12).split('?')[0] : ''
+    const t = x.link && x.link.includes('?t=') ? Number(x.link.split('?t=')[1]) : null
+    return `<div class="br-sec"><button class="src" ${call ? `data-br-open="${esc(call)}"${t != null ? ` data-t="${t}"` : ''}` : extAttr(x.link)}>${kindMark(x)} ${esc(x.doc || x.source)}${x.date ? ` · ${esc(relDay(x.date))}` : ''}${t != null ? ` · ${clock(t)}` : ''}</button><div class="qt">${esc(x.text)}</div></div>`
+  }).join('')}`
+}
+
+// Claude about a thread or a client: the Echo-folder session (it has the Brain); the window tells it
+// which client or thread "this" is (`<echo_view>`), so its searches are scoped.
+document.addEventListener('click', (e) => {
+  if (!(e.target.closest && e.target.closest('[data-claude-about]'))) return
+  S.pj.menu = false
+  claudePanel('claude-folder')
+})
+
+/** A call's projects in its header: chips, the suggestion bar, and the picker. */
+function callProjects(c) {
+  const chips = (c.projects || []).map((p) => `<button class="pj-chip" data-pj="goto" data-id="${esc(p.id)}" title="${esc(WHY[p.why] || p.why)}">${projIcon(p, 14)}${esc(p.name)}</button>`).join('')
+  const sug = (c.suggested || [])[0]
+  const bar = sug ? `<div class="pj-sug">${projIcon(sug, 16)}<span class="grow">Part of <b>${esc(sug.name)}</b>? <span class="set-sub">${esc(sug.why)}</span></span><button class="btn primary" data-pj="member" data-id="${esc(sug.id)}" data-call-name="${esc(c.name)}" data-how="include">Add</button><button class="btn ghost" data-pj="member" data-id="${esc(sug.id)}" data-call-name="${esc(c.name)}" data-how="exclude">Not this</button></div>` : ''
+  const all = (S.pj.data && S.pj.data.projects) || []
+  const mine = new Set((c.projects || []).map((p) => p.id))
+  const picker = S.pj.picker ? `<div class="menu pj-menu" role="menu">${all.filter((p) => p.group !== 'closed').map((p) => `<button class="menu-item" role="menuitemcheckbox" aria-checked="${mine.has(p.id)}" data-pj="member" data-id="${esc(p.id)}" data-call-name="${esc(c.name)}" data-how="${mine.has(p.id) ? 'exclude' : 'include'}">${mine.has(p.id) ? '✓ ' : ''}${projIcon(p, 14)} ${esc(p.name)}</button>`).join('') || '<div class="menu-item set-sub">No threads yet</div>'}<div class="menu-sep" role="separator"></div><button class="menu-item" role="menuitem" data-pj="from-call" data-call-name="${esc(c.name)}">New thread from this call…</button></div>` : ''
+  if (c.projects_error) return `<div class="pj-chips"><span class="set-sub">Projects: ${esc(c.projects_error)}</span></div>`
+  return `<div class="pj-chips">${chips}<span class="pj-add-wrap"><button class="pj-chip add" data-pj="picker" aria-haspopup="menu" aria-expanded="${S.pj.picker}">+ Thread</button>${picker}</span></div>${bar}`
+}
+
+function projectSend(op, extra = {}) {
+  send({ cmd: 'project', op, id: S.pj.sel, ...extra })
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest && e.target.closest('[data-pj]')
+  if (!b) {
+    const inside = e.target.closest && (e.target.closest('.pj-add-wrap') || e.target.closest('.tok-in') || e.target.closest('.pf-v [autofocus]'))
+    if ((S.pj.picker || S.pj.menu || S.pj.adding || S.pj.evPicker || S.pj.colMenu || S.pj.fieldsMenu || S.pj.viewMenu) && !inside) { S.pj.picker = false; S.pj.menu = false; S.pj.adding = null; S.pj.evPicker = null; S.pj.colMenu = null; S.pj.fieldsMenu = false; S.pj.viewMenu = false; render() }
+    return
+  }
+  e.preventDefault()
+  e.stopPropagation()
+  const a = b.dataset.pj, d = b.dataset
+  switch (a) {
+    case 'open': return go(`project/${d.id}/${S.pj.tab}`)
+    case 'node': {
+      S.pj.node = d.node || null
+      S.pj.editField = null
+      if (S.pj.node) { const known = panelViews(); const eff = Layout.effective(window.innerWidth, window.innerHeight, known, S.overlay); if (eff.narrow) S.overlay = true; Layout.show('work-item', known); return layoutChanged() }
+      return render()
+    }
+    case 'open-only': return setView({ open: !wv().open })
+    case 'view-pick': return chooseView(d.v)
+    case 'view-menu': S.pj.viewMenu = !S.pj.viewMenu; render(); { const i = document.querySelector('[data-view-name]'); if (i) { i.focus(); i.select() } } return
+    case 'view-new': case 'view-dup': {
+      const bd = boardOf(), cur = wv()
+      const id = 'v' + Date.now().toString(36)
+      const base = a === 'view-dup' ? { ...bd.views.find((v) => v.id === cur.id), name: `${cur.name} copy` } : { name: `View ${bd.views.length + 1}`, layout: cur.layout }
+      bd.views = [...bd.views, { ...base, id }]
+      saveBoard(bd)
+      chooseView(id)
+      S.pj.viewMenu = true
+      render(); { const i = document.querySelector('[data-view-name]'); if (i) { i.focus(); i.select() } } return
+    }
+    case 'view-del': { const bd = boardOf(); const cur = activeViewId(); bd.views = bd.views.filter((v) => v.id !== cur); S.pj.viewMenu = false; saveBoard(bd); return chooseView(bd.views[0].id) }
+    case 'edit-field': S.pj.editField = d.field; render(); { const i = document.querySelector('.wp [autofocus]'); if (i) { i.focus(); if (i.showPicker && i.type === 'date') try { i.showPicker() } catch {} } } return
+    case 'edit-title': S.pj.editField = 'title'; render(); { const i = document.querySelector('.wp-title'); if (i) { i.focus(); i.select() } } return
+    case 'sync': send({ cmd: 'project', op: 'sync', id: S.pj.sel }); if (S.pj.work) S.pj.work.sync = { state: 'running', message: 'reading calls' }; return render()
+    case 'ledger': return ledgerEdit(JSON.parse(d.body))
+    case 'ledger-state': return S.pj.node && ledgerEdit({ op: 'edit', node: S.pj.node, set: { state: d.state } })
+    case 'found': return go('found')
+    case 'fields-menu': S.pj.fieldsMenu = !S.pj.fieldsMenu; return render()
+    case 'col-menu': S.pj.colMenu = S.pj.colMenu === d.col ? null : d.col; render(); { const i = $('#bd-col-name'); if (i) i.focus() } return
+    case 'col-set': {
+      if (d.k === 'hidden') { S.pj.colMenu = null; return setView({ hidden: [...new Set([...wv().hidden, d.col])] }) }
+      const bd = boardOf(); bd.columns = bd.columns.map((c) => c.id === d.col ? { ...c, [d.k]: d.v } : c); return saveBoard(bd)
+    }
+    case 'col-move': { const bd = boardOf(); const vis = bd.columns; const i = vis.findIndex((c) => c.id === d.col), j = i + Number(d.d); if (i < 0 || j < 0 || j >= vis.length) return; const cs = vis.slice(); [cs[i], cs[j]] = [cs[j], cs[i]]; bd.columns = cs; return saveBoard(bd) }
+    case 'col-delete': { const bd = boardOf(); const c = bd.columns.find((x) => x.id === d.col); if (!c) return; if (c.state !== 'waiting' && !bd.columns.some((x) => x.id !== c.id && x.state === c.state && !x.hidden)) return window.echo.notice(`Keep a column for “${(STATE_CATS.find(([k]) => k === c.state) || [])[1] || c.state}” — its cards need somewhere to go.`); bd.columns = bd.columns.filter((x) => x.id !== c.id); S.pj.colMenu = null; return saveBoard(bd) }
+    case 'col-add': { const bd = boardOf(); const id = 'c' + Date.now().toString(36); bd.columns = [...bd.columns, { id, name: 'New column', color: COL_COLORS[bd.columns.length % COL_COLORS.length], state: 'open' }]; S.pj.colMenu = id; saveBoard(bd); { const i = $('#bd-col-name'); if (i) { i.focus(); i.select() } } return }
+    case 'col-unhide': { const bd = boardOf(); bd.columns = bd.columns.map((c) => ({ ...c, hidden: false })); bd.views = bd.views.map((v) => v.id === activeViewId() ? { ...v, hidden: [] } : v); return saveBoard(bd) }
+    case 'ev-picker': S.pj.evPicker = S.pj.evPicker === d.event ? null : d.event; return render()
+    case 'event-member': S.pj.evPicker = null; send({ cmd: 'project', op: 'event_member', id: d.id, event: d.event, how: d.how }); setTimeout(() => loadCalendar(true).then(render), 300); return render()
+    case 'event-new': S.pj.evPicker = null; S.pj.fromEvent = { id: d.event, subject: d.subject }; send({ cmd: 'project', op: 'create', name: d.subject || 'New thread' }); return render()
+    case 'client': S.pj.menu = false; S.pj.confirmDelete = false; return go(`client/${d.id}/${d.ctab || 'overview'}`)
+    case 'ctab': return go(`client/${S.pj.client}/${d.tabId}`)
+    case 'menu': S.pj.menu = !S.pj.menu; return render()
+    case 'adding': S.pj.adding = d.what; render(); { const i = $(`#pj-add-${d.what}`); if (i) i.focus() } return
+    case 'pf-edit': S.pj.pfEdit = d.what; render(); { const i = document.querySelector('.pf-v [autofocus]'); if (i) { i.focus(); if (i.select) try { i.select() } catch {} } } return
+    case 'client-internal': return send({ cmd: 'project', op: 'client_set', id: S.pj.client, internal: d.on === 'true' })
+    case 'client-list-remove': { const c = ((S.pj.data && S.pj.data.clients) || []).find((x) => x.id === S.pj.client); if (!c) return; return send({ cmd: 'project', op: 'client_set', id: c.id, [d.list]: (c[d.list] || []).filter((x) => x !== d.value) }) }
+    case 'client-remove': S.pj.confirmDelete = false; send({ cmd: 'project', op: 'client_remove', id: d.id }); return go('projects')
+    case 'new': go('found'); setTimeout(() => { const i = $('#pj-new'); if (i) i.focus() }, 60); return
+    case 'create': { const i = $('#pj-new'); if (!i || !i.value.trim()) return i && i.focus(); send({ cmd: 'project', op: 'create', name: i.value.trim(), client: $('#pj-new-client').value }); i.value = ''; return }
+    case 'found-accept': {
+      const card = b.closest('.found-card')
+      send({ cmd: 'project', op: 'found_accept', key: card.dataset.key, name: card.querySelector('.found-name').value, client: card.querySelector('.found-client').value })
+      return
+    }
+    case 'found-reject': { const card = b.closest('.found-card'); send({ cmd: 'project', op: 'found_reject', key: card.dataset.key }); card.remove(); return }
+    case 'goto': return go(`project/${d.id}/brief`)
+    case 'goto-node': { S.pj.node = d.node; S.pj.wantNode = d.node; S.pj.inline = null; go(`project/${d.id}/work`); Layout.show('work-item', panelViews()); return layoutChanged() }
+    case 'tab': return go(`project/${S.pj.sel}/${d.tabId}`)
+    case 'toggle-closed': S.pj.showClosed = !S.pj.showClosed; return render()
+    case 'stage': return projectSend('stage', { stage: d.stage })
+    case 'icon': return projectSend('set', { field: 'icon', value: d.icon })
+    case 'color': return projectSend('set', { field: 'color', value: d.color })
+    case 'logo-remove': return projectSend('remove_logo')
+    case 'client-logo-remove': return send({ cmd: 'project', op: 'client_logo', id: d.id })
+    case 'rule-remove': return projectSend('rule_remove', { index: Number(d.index) })
+    case 'source-add': projectSend('source_add', { kind: d.kind, source: d.source }); setTimeout(() => loadSourceState(true), 1500); return
+    case 'source-remove': projectSend('source_remove', { kind: d.kind, source: d.source }); setTimeout(() => loadSourceState(true), 1500); return
+    case 'source-folder': send({ cmd: 'source_folder_pick', id: S.pj.sel }); setTimeout(() => loadSourceState(true), 4000); return
+    case 'rule-add': {
+      const kind = $('#pj-rule-kind').value, val = $('#pj-rule-val').value.trim()
+      const rule = kind === 'series' ? { kind, subject: val } : kind === 'people' ? { kind, domains: val ? val.split(/[ ,]+/).filter(Boolean) : [] } : kind === 'chat' ? { kind, id: val } : { kind, contains: val }
+      if (kind !== 'people' && !val) return $('#pj-rule-val').focus()
+      return projectSend('rule_add', { rule })
+    }
+    case 'term-add': { const t = $('#pj-term').value.trim(); if (t) projectSend('term_add', { term: t }); return }
+    case 'term-remove': return projectSend('term_remove', { term: d.term })
+    case 'person-add': { const name = $('#pj-person-name').value.trim(); if (!name) return $('#pj-person-name').focus(); return projectSend('person_add', { name, email: $('#pj-person-email').value.trim(), role: $('#pj-person-role').value.trim() }) }
+    case 'person-remove': return projectSend('person_remove', { name: d.name, email: d.email })
+    case 'brief-edit': S.pj.briefEdit = (S.pj.client ? S.pj.cdata && S.pj.cdata.brief : S.pj.detail && S.pj.detail.brief) || ''; render(); { const t = $('#pj-brief'); if (t) t.focus() } return
+    case 'brief-cancel': S.pj.briefEdit = null; return render()
+    case 'brief-save': return projectSaveBrief()
+    case 'client-add': { const name = $('#pj-client-name').value.trim(); if (!name) return $('#pj-client-name').focus(); S.pj.newClient = false; send({ cmd: 'project', op: 'client_add', name, domains: $('#pj-client-domains').value }); S.pj.pendingClient = name; return render() }
+    case 'client-cancel': S.pj.newClient = false; return render()
+    case 'delete-ask': S.pj.menu = false; S.pj.confirmDelete = true; return render()
+    case 'delete-cancel': S.pj.confirmDelete = false; return render()
+    case 'delete': { const id = S.pj.sel; S.pj.confirmDelete = false; S.pj.sel = null; S.pj.detail = null; send({ cmd: 'project', op: 'delete', id }); return go('projects') }
+    case 'picker': S.pj.picker = !S.pj.picker; return render()
+    case 'member': S.pj.picker = false; send({ cmd: 'project', op: 'member', id: d.id || S.pj.sel, call: d.callName, how: d.how }); return render()
+    case 'from-call': {
+      S.pj.picker = false
+      const c = S.call && S.call.name === d.callName ? S.call : null
+      send({ cmd: 'project', op: 'create', name: (c && c.title) || 'New thread' })
+      S.pj.fromCall = d.callName
+      return render()
+    }
+  }
+}, true)
+document.addEventListener('change', (e) => {
+  const el = e.target
+  if (el.dataset && el.dataset.logoOp && el.files) { sendLogo(el.files[0], el.dataset.logoOp, el.dataset.id); el.value = ''; return }
+  if (el.dataset && el.dataset.pjFilter) return setView({ [el.dataset.pjFilter]: el.value })
+  if (el.dataset && el.dataset.ledgerSet && S.pj.node) {
+    const k = el.dataset.ledgerSet, v = el.value.trim()
+    S.pj.editField = null
+    return ledgerEdit({ op: 'edit', node: S.pj.node, set: { [k]: v === '' && k !== 'title' ? null : v } })
+  }
+  if (el.dataset && el.dataset.ledgerAc && S.pj.node) return ledgerEdit({ op: 'ac_set', node: S.pj.node, ac: Number(el.dataset.ledgerAc), met: el.checked })
+  if (el.dataset && el.dataset.boardGroup !== undefined) return setView({ group: el.value })
+  if (el.dataset && el.dataset.boardField) { const f = wv().fields; return setView({ fields: el.checked ? [...new Set([...f, el.dataset.boardField])] : f.filter((x) => x !== el.dataset.boardField) }) }
+  if (el.dataset && el.dataset.viewLayout !== undefined) return setView({ layout: el.value })
+  if (el.dataset && el.dataset.viewName !== undefined) { const v = el.value.trim(); if (v) setView({ name: v }); return }
+  if (el.dataset && el.dataset.colState) { const bd = boardOf(); const next = bd.columns.map((c) => c.id === el.dataset.colState ? { ...c, state: el.value } : c); if (['open', 'in_progress', 'blocked', 'done'].some((k) => !next.some((c) => c.state === k && !c.hidden))) { render(); return window.echo.notice('Every state needs a visible column.') } bd.columns = next; return saveBoard(bd) }
+  if (el.dataset && el.dataset.colLimit) { const bd = boardOf(); const v = parseInt(el.value, 10); bd.columns = bd.columns.map((c) => c.id === el.dataset.colLimit ? { ...c, limit: v > 0 ? v : undefined } : c); return saveBoard(bd) }
+  if (el.dataset && el.dataset.colName) { const bd = boardOf(); const v = el.value.trim(); if (!v) return; bd.columns = bd.columns.map((c) => c.id === el.dataset.colName ? { ...c, name: v } : c); return saveBoard(bd) }
+  if (el.dataset && el.dataset.evSeries !== undefined && el.value) {
+    S.pj.evPicker = null
+    send({ cmd: 'project', op: 'rule_add', id: el.value, rule: { kind: 'series', subject: el.dataset.evSeries } })
+    setTimeout(() => loadCalendar(true).then(render), 300)
+    return render()
+  }
+  if (el.classList && el.classList.contains('found-merge') && el.value) {
+    send({ cmd: 'project', op: 'found_merge', key: el.closest('.found-card').dataset.key, into: el.value })
+    return
+  }
+  if (el.dataset && el.dataset.clientField) { S.pj.pfEdit = null; return send({ cmd: 'project', op: 'client_set', id: el.dataset.id, [el.dataset.clientField]: el.value.trim() }) }
+  if (!el.dataset || !el.dataset.pjField) return
+  S.pj.pfEdit = null
+  if (el.dataset.pjField === 'client' && el.value === '__new') { S.pj.newClient = true; return render() }
+  send({ cmd: 'project', op: 'set', id: el.dataset.id, field: el.dataset.pjField, value: el.value })
+})
+document.addEventListener('keydown', (e) => {
+  const el = e.target
+  if (el.id === 'pj-new' && e.key === 'Enter' && el.value.trim()) { e.preventDefault(); return $('[data-pj="create"]').click() }
+  if (el.dataset && el.dataset.add && (e.key === 'Enter' || e.key === 'Escape')) {
+    e.preventDefault()
+    const what = el.dataset.add, v = el.value.trim()
+    S.pj.adding = null
+    if (e.key === 'Escape') return render()
+    const c = ((S.pj.data && S.pj.data.clients) || []).find((x) => x.id === S.pj.client)
+    if (what === 'term' && v) projectSend('term_add', { term: v })
+    if (what === 'mail' && v) { projectSend('source_add', { kind: 'mail', source: v }); setTimeout(() => loadSourceState(true), 1500) }
+    if (what === 'exclude') { projectSend('source_exclude', { source: el.dataset.root, exclude: v.split(',').map((g) => g.trim()).filter(Boolean) }); setTimeout(() => loadSourceState(true), 1500) }
+    // A term for this thread in the Brain (its client's layer, pinned to it): the taxonomy supersedes the glossary.
+    if (what === 'bterm' && v && S.pj.sel) {
+      const p = S.pj.detail || {}
+      send({ cmd: 'brain_taxonomy', body: { op: 'add', term: true, name: v, layer: p.client || 'shared', threads: [S.pj.sel] } })
+      setTimeout(() => loadThreadBrain().then(render), 400)
+    }
+    if (what === 'rule') {
+      const kind = ($('#pj-add-kind') || {}).value || 'series'
+      if (!v && kind !== 'people') return render()
+      projectSend('rule_add', { rule: kind === 'series' ? { kind, subject: v } : kind === 'people' ? { kind, domains: v ? v.split(/[ ,]+/).filter(Boolean) : [] } : kind === 'chat' ? { kind, id: v } : { kind, contains: v } })
+    }
+    if (what === 'person' && v) { const [name, email, role] = v.split(',').map((x) => x.trim()); projectSend('person_add', { name, email: email || '', role: role || '' }) }
+    if (what === 'alias' && v && c) send({ cmd: 'project', op: 'client_set', id: c.id, aliases: [...(c.aliases || []), v] })
+    if (what === 'domain' && v && c) send({ cmd: 'project', op: 'client_set', id: c.id, domains: [...(c.domains || []), ...v.split(/[ ,]+/).filter(Boolean)] })
+    if (what === 'cproject' && v && c) send({ cmd: 'project', op: 'create', name: v, client: c.id })
+    return render()
+  }
+  if (el.dataset && el.dataset.clientField && e.key === 'Enter') { e.preventDefault(); return el.blur() }
+  if (el.dataset && (el.dataset.colName || el.dataset.colLimit) && (e.key === 'Enter' || e.key === 'Escape')) { e.preventDefault(); el.blur(); S.pj.colMenu = null; return render() }
+  if (el.dataset && el.dataset.viewName !== undefined && (e.key === 'Enter' || e.key === 'Escape')) { e.preventDefault(); el.blur(); S.pj.viewMenu = false; return render() }
+  if (el.id === 'pj-term' && e.key === 'Enter') { e.preventDefault(); return $('[data-pj="term-add"]').click() }
+  if (el.id === 'pj-rule-val' && e.key === 'Enter') { e.preventDefault(); return $('[data-pj="rule-add"]').click() }
+  if (el.id === 'pj-f-name' && e.key === 'Enter') { e.preventDefault(); return el.blur() }
+  if (el.classList && el.classList.contains('wp-title') && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); return el.blur() }
+  if (el.id === 'pj-brief') {
+    if (e.key === 'Escape') { e.preventDefault(); S.pj.briefEdit = null; return render() }
+    if ((MAC ? e.metaKey : e.ctrlKey) && e.key.toLowerCase() === 's') { e.preventDefault(); return projectSaveBrief() }
+  }
+})
+document.addEventListener('input', (e) => {
+  if (e.target.id === 'pj-brief') S.pj.briefEdit = e.target.value
+  if (e.target.id === 'pj-rule-val' || e.target.id === 'pj-rule-kind') return
+})
+document.addEventListener('change', (e) => {
+  if (e.target.id === 'pj-rule-kind') {
+    const ph = { series: "A meeting's subject", people: 'Domains (empty: the client\'s)', subject: 'Words of the subject', chat: '19:…@thread.v2' }
+    const v = $('#pj-rule-val'); if (v) v.placeholder = ph[e.target.value] || ''
+  }
+})
+// A work item's field opened for a change and left as it was (or Esc): back to reading it.
+document.addEventListener('focusout', (e) => {
+  if (!(e.target.closest && e.target.closest('.wp') && e.target.dataset.ledgerSet)) return
+  setTimeout(() => { if (S.pj.editField && !(document.activeElement && document.activeElement.closest && document.activeElement.closest('.wp') && document.activeElement.dataset.ledgerSet)) { S.pj.editField = null; render() } }, 150)
+})
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && S.pj.editField && e.target.closest && e.target.closest('.wp')) { e.preventDefault(); S.pj.editField = null; render() }
+})
+// An image dropped on a logo tile.
+document.addEventListener('dragover', (e) => { const t = e.target.closest && e.target.closest('.pj-logo-drop'); if (t) { e.preventDefault(); t.classList.add('over') } })
+document.addEventListener('dragleave', (e) => { const t = e.target.closest && e.target.closest('.pj-logo-drop'); if (t) t.classList.remove('over') })
+document.addEventListener('drop', (e) => {
+  const t = e.target.closest && e.target.closest('.pj-logo-drop')
+  if (!t) return
+  e.preventDefault()
+  t.classList.remove('over')
+  sendLogo(e.dataTransfer && e.dataTransfer.files[0], t.dataset.dropOp, t.dataset.id)
+})
+function projectSaveBrief() {
+  const text = S.pj.briefEdit
+  if (S.pj.client) {
+    send({ cmd: 'project', op: 'client_brief', id: S.pj.client, text })
+    if (S.pj.cdata) S.pj.cdata.brief = text
+    S.pj.briefEdit = null
+    render()
+    return setTimeout(() => loadProject().then(render), 300)
+  }
+  projectSend('brief', { text })
+  if (S.pj.detail) S.pj.detail.brief = text
+  S.pj.briefEdit = null
+  render()
 }
 
 // ── ⌘K palette: actions in context. Its actions are the window's own — each runs as the click on
@@ -1731,12 +4050,18 @@ function paletteItems(target) {
   else if (st.armed) add('Echo', 'Cancel recording the next call', () => press({ cmd: 'stop' }), { keywords: 'disarm' })
   else add('Echo', st.in_call ? 'Record this call' : 'Record the next Teams call', () => press({ cmd: 'record' }), { keywords: 'start arm' })
   add('Echo', 'Claude · Echo folder', () => claudePanel('claude-folder'), { keywords: 'terminal session ask' })
+  add('Echo', 'Show or hide Needs you', () => press({ panelFlip: 'needs' }), { keywords: 'notifications inbox attention decide review', hint: NY_HINT })
+  for (const i of nyOpen().slice(0, 8)) add('Needs you', i.title, nyShow, { keywords: i.why })
   add('Echo', 'Show or hide My notes', () => press({ panelFlip: 'notes' }), { disabled: S.view === 'calls' && S.selected ? null : 'open a call first' })
   add('Echo', 'Show or hide the bottom panel', () => { Layout.toggle('bottom'); layoutChanged() })
   add('Echo', 'Check for updates', () => press({ act: 'check_updates' }))
   add('Echo', 'Ask for permissions', () => press({ act: 'ask_permissions' }), { keywords: 'microphone screen accessibility health' })
   // Go to
-  for (const a of ACTIVITIES) add('Go to', a.label, () => goActivity(a.id))
+  for (const a of shownActivities()) add('Go to', a.label, () => goActivity(a.id))
+  for (const p of (S.pj.data && S.pj.data.projects) || []) {
+    const st = ProjectArt.stage(p.stage)
+    add('Threads', p.name, () => go(`project/${p.id}/brief`), { keywords: `thread project ${p.client_name || ''} ${st.label} ${st.group}`, hint: st.label })
+  }
   for (const [id, label] of SETTINGS_SECTIONS) add('Go to', `Settings: ${label}`, () => go(`settings/${id}`), { keywords: 'preferences' })
   for (const c of S.calls || []) {
     const d = c.started_at ? new Date(c.started_at) : null
@@ -1799,6 +4124,10 @@ document.addEventListener('keydown', (e) => {
   if (mod && e.shiftKey && e.key.toLowerCase() === 'r' && S.state && S.state.recording && !(e.target.closest && e.target.closest('.xterm'))) {
     e.preventDefault(); e.stopPropagation(); return press({ cmd: 'stop-ask' })
   }
+  // ⇧⌘I / Ctrl+Shift+U: show or hide Needs you (Ctrl+Shift+I is WebView2's DevTools on Windows).
+  if (mod && e.shiftKey && e.key.toLowerCase() === NY_KEY.toLowerCase() && !(e.target.closest && e.target.closest('.xterm'))) {
+    e.preventDefault(); e.stopPropagation(); return press({ panelFlip: 'needs' })
+  }
   if (!PAL.open || e.target.id !== 'pal-q') return
   if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); return paletteClose() }
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); const n = PAL.items.length; if (n) PAL.sel = (PAL.sel + (e.key === 'ArrowDown' ? 1 : n - 1)) % n; return paletteDraw() }
@@ -1815,7 +4144,58 @@ function patch(el, html) {
   if (el && el._html !== html) { el.innerHTML = html; el._html = html }
 }
 
+// ── what the user sees, for Echo's Claude terminals (`view.rs`: a UserPromptSubmit hook adds it to
+// each prompt, so "this" means what is open or selected here). Sent when it changes, and every minute.
+let viewSent = '', viewTimer = null, frameSel = ''
+function viewState() {
+  const act = ACTIVITIES.find((a) => a.id === S.view)
+  const v = { activity: act ? act.label : S.view }
+  const c = S.view === 'calls' && S.call && !S.call.error ? S.call : null
+  if (c) {
+    const d = c.started_at ? new Date(c.started_at) : null
+    v.call = { name: c.name, title: c.title, tab: (CALL_TABS.find((t) => t.id === S.tab) || {}).label || S.tab,
+      when: d ? d.toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '',
+      status: c.status === 'recording' ? 'recording now' : c.status === 'transcribing' ? 'being transcribed' : '',
+      threads: (c.projects || []).map((p) => p.name).join(', ') }
+  }
+  if (S.view === 'projects') {
+    if (S.pj.found) v.filter = 'Found for you (threads Echo suggests from calls in none)'
+    else if (S.pj.client) { const cl = projClient(S.pj.client); v.client = { id: S.pj.client, name: cl ? cl.name : S.pj.client, tab: S.pj.ctab } }
+    else if (S.pj.sel) { const p = projById(S.pj.sel); v.thread = { id: S.pj.sel, name: p ? p.name : S.pj.sel, tab: S.pj.tab } }
+  }
+  if (S.view === 'tasks') v.filter = `Tasks across threads${S.tk.project ? ` · only ${(projById(S.tk.project) || {}).name || S.tk.project}` : ''}`
+  if (S.view === 'settings') v.filter = `Settings · ${S.setSection}`
+  if (S.view === 'brain') v.filter = `Brain · ${S.br.tab}${S.br.scope ? ` · scoped to ${S.br.scope}` : ''}`
+  if (S.view === 'calendar') {
+    v.filter = `Calendar · ${S.cal.mode}`
+    const e = S.cal.selected && S.cal.data && (S.cal.data.events || []).find((x) => x.id === S.cal.selected)
+    if (e) v.event = { subject: e.subject, when: e.start ? new Date(e.start).toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '' }
+  }
+  const eff = Layout.effective(window.innerWidth, window.innerHeight, panelViews(), S.overlay)
+  const n = S.pj.node && S.pj.work && S.pj.work.nodes && S.pj.work.nodes[S.pj.node]
+  if (n && [eff.right, eff.bottom].some((p) => p.shown && p.active === 'work-item')) {
+    v.item = { id: n.id, title: n.title, kind: n.kind === 'task' && n.type && n.type !== 'action' ? n.type : n.kind, state: n.state, thread: (projById(S.pj.sel) || {}).name || S.pj.sel }
+  }
+  v.panel = ['right', 'bottom'].filter((a) => eff[a].shown && eff[a].active).map((a) => (PANEL_VIEWS.find((x) => x.id === eff[a].active) || {}).label).filter(Boolean).join(', ')
+  const s = window.getSelection && window.getSelection()
+  const inTerm = s && s.anchorNode && s.anchorNode.parentElement && s.anchorNode.parentElement.closest('.xterm')
+  const page = s && !inTerm ? String(s).replace(/\s+/g, ' ').trim() : ''
+  if (page) v.selection = { text: page.slice(0, 400), where: S.view === 'calls' && S.tab === 'transcript' ? 'transcript' : 'page' }
+  else if (frameSel && c && S.tab === 'minutes') v.selection = { text: frameSel.slice(0, 400), where: 'minutes' }
+  return v
+}
+function reportView(now) {
+  clearTimeout(viewTimer)
+  viewTimer = setTimeout(() => {
+    const v = JSON.stringify(viewState())
+    if (v !== viewSent || now) { viewSent = v; send({ cmd: 'view_state', view: JSON.parse(v) }) }
+  }, now ? 0 : 400)
+}
+document.addEventListener('selectionchange', () => reportView())
+setInterval(() => { if (document.visibilityState === 'visible') reportView(true) }, 60000)
+
 function render() {
+  reportView()
   // Animate entering a view / call / tab, never a background refresh.
   const key = `${S.view}|${S.selected}|${S.tab}`
   const entering = key !== lastKey
@@ -1848,7 +4228,7 @@ function render() {
   patch($('#r-status'), statusbar())
   patch($('#r-right'), panel('right', eff))
   patch($('#r-bottom'), panel('bottom', eff))
-  patch($('#r-over'), S.lightbox ? `<div class="lightbox" data-close="1"><img src="${esc(S.lightbox)}" alt="Shared screen"></div>` : '')
+  patch($('#r-over'), `<div class="toasts" role="status" aria-live="polite">${toasts()}</div>` + (S.lightbox ? `<div class="lightbox" data-close="1"><img src="${esc(S.lightbox)}" alt="Shared screen"></div>` : ''))
   // The primary area in the activity's layout; switching layouts starts it afresh.
   const primary = $('#r-primary')
   const layout = (ACTIVITIES.find((a) => a.id === S.view) || ACTIVITIES[0]).layout
@@ -1860,6 +4240,14 @@ function render() {
   }
   if (S.view === 'settings') {
     patch(primary, `<main class="main">${noticesBar()}${settingsView()}</main>`)
+  } else if (S.view === 'brain') {
+    patch(primary, `<main class="main">${noticesBar()}${brainView()}</main>`)
+    drawGraph()
+  } else if (S.view === 'tasks') {
+    patch(primary, `<main class="main">${noticesBar()}${tasksView()}</main>`)
+  } else if (S.view === 'projects') {
+    patch(primary, `<main class="main">${noticesBar()}${projectsView()}</main>`)
+    drawOrgLinks()
   } else if (S.view === 'calendar') {
     const grid = $('#calgrid'), keep = grid ? grid.scrollTop : null
     patch(primary, `<main class="main">${noticesBar()}${calendarView()}</main>`)
@@ -1933,7 +4321,7 @@ function placeDetail() {
 
 /** What the screen depends on: re-render only when it changes (keeps selection and scroll). */
 // (the minute too: the pill's "meeting soon" comes and goes with the clock)
-const fingerprint = () => JSON.stringify([S.state, S.calls, S.call, S.agenda, S.cal.data, S.cal.selected, S.settings, Math.floor(Date.now() / 60000)])
+const fingerprint = () => JSON.stringify([S.state, S.calls, S.call, S.agenda, S.cal.data, S.cal.selected, S.settings, S.pj.data, S.pj.detail, S.pj.foundData, S.pj.work, Math.floor(Date.now() / 60000)])
 
 document.addEventListener('click', (e) => {
   // Any click closes the call's ⋯ menu (its own button toggles it).
@@ -1962,6 +4350,11 @@ document.addEventListener('click', (e) => {
     } else if (S.settings) S.settings[t.dataset.set] = val // shown at once; the next snapshot confirms it
     if (t.dataset.set === 'live_notes' && S.state && S.state.ai) S.state.ai.live_notes = val
     if (t.dataset.set === 'default_profile' && S.state && S.state.ai) S.state.ai.default = val
+    if (t.dataset.set === 'brain_enabled') {
+      if (S.state) S.state.brain = !!val
+      if (S.settings && S.settings.brain) S.settings.brain.enabled = !!val
+      setTimeout(() => loadSettings().then(render), 400)
+    }
     send({ cmd: 'settings_set', key: t.dataset.set, value: val })
     return render()
   }
@@ -2271,6 +4664,8 @@ window.addEventListener('message', (e) => {
     showSelPop()
   }
   else if (d.echo === 'open' && typeof d.url === 'string' && /^https:\/\//i.test(d.url)) send({ cmd: 'open_url', url: d.url })
+  // Words selected in the minutes: what "this" means to Claude (`viewState`).
+  else if (d.echo === 'sel' && typeof d.text === 'string') { frameSel = d.text.slice(0, 400); reportView() }
 })
 
 document.addEventListener('input', (e) => {
@@ -2368,7 +4763,7 @@ document.addEventListener('keydown', (e) => {
   if ((MAC ? e.metaKey : e.ctrlKey) && e.key === '`') { e.preventDefault(); return claudePanel() }
   // ⌘1…9 / Ctrl+1…9: the activities, in the bar's order.
   if ((MAC ? e.metaKey : e.ctrlKey) && !e.altKey && !e.shiftKey && /^[1-9]$/.test(e.key)) {
-    const a = ACTIVITIES[Number(e.key) - 1]
+    const a = shownActivities()[Number(e.key) - 1]
     if (a) { e.preventDefault(); return goActivity(a.id) }
   }
   if (S.view !== 'calls' || !S.calls || !S.calls.length || /input|textarea|select/i.test(e.target.tagName)) return
@@ -2386,6 +4781,9 @@ window.addEventListener('hashchange', async () => {
   render()
   if (S.view === 'calendar' && !S.cal.data) { await loadCalendar(); render() }
   if (S.view === 'settings') { await loadSettings(); render() }
+  if (S.view === 'projects') { await loadProjects(); await loadProject(); render() }
+  if (S.view === 'tasks') { await loadTasks(); render() }
+  if (S.view === 'brain') { await loadBrain(); render() }
   if (S.view === 'calls' && S.selected && !S.call) { await loadCall(S.selected); render() }
 })
 
@@ -2400,6 +4798,9 @@ async function tick() {
   if (ticks % 30 === 0) await loadAgenda() // a meeting about to start (the pill)
   if (S.view === 'settings' ? ticks % 2 === 0 : ticks % 60 === 0) await loadSettings() // a download's progress; Settings' badge
   if (S.view === 'calendar' && ticks % 30 === 0) await loadCalendar()
+  if (ticks % 10 === 1) await loadAttention()
+  if (ticks % (S.view === 'projects' ? 5 : 15) === 0) { await loadProjects(); if (S.view === 'projects') await loadProject() }
+  if (S.view === 'tasks' && ticks % 15 === 0) { await loadTasks(); if (S.pj.node) await loadWork() }
   // The selected call is fetched again whenever anything it shows changed (`/rev`: its files,
   // the live notes' and the minutes run's state, when the minutes come), whatever its status.
   if (S.selected) {
@@ -2420,10 +4821,34 @@ const typingNotes = () => document.activeElement && (document.activeElement.id =
 window.echo = {
   async refresh() {
     await loadCalls(); if (S.selected) await loadCall(S.selected); if (S.view === 'calendar') await loadCalendar(true); if (S.view === 'settings') await loadSettings()
+    await loadProjects(); if (S.view === 'projects') await loadProject()
+    if (S.view === 'tasks') { await loadTasks(); if (S.pj.node) await loadWork() }
     if (typingNotes()) S.renderOnBlur = true
     else render()
   },
   openCall(name) { go(`call/${name}/minutes`) },
+  /** A project the page just created: open it on its Profile. */
+  async projectCreated(id) {
+    // From a calendar event: that event is in it, and its meeting series is its first rule.
+    const fe = S.pj.fromEvent
+    S.pj.fromEvent = null
+    if (fe) {
+      send({ cmd: 'project', op: 'event_member', id, event: fe.id, how: 'include' })
+      if (fe.subject) send({ cmd: 'project', op: 'rule_add', id, rule: { kind: 'series', subject: fe.subject } })
+    }
+    // From a call: that call is in it, and its meeting series is its first rule.
+    const from = S.pj.fromCall
+    S.pj.fromCall = null
+    if (from) {
+      send({ cmd: 'project', op: 'member', id, call: from, how: 'include' })
+      const title = S.call && S.call.name === from && S.call.meeting_subject
+      if (title) send({ cmd: 'project', op: 'rule_add', id, rule: { kind: 'series', subject: title } })
+    }
+    await loadProjects()
+    go(`project/${id}/profile`)
+  },
+  /** A client the page just added from a project's Profile: that project's client. */
+  clientCreated(id) { if (S.pj.sel) send({ cmd: 'project', op: 'set', id: S.pj.sel, field: 'client', value: id }) },
   /** The app's answer to a save of the user's notes (`save_my_notes`). */
   saved(r) {
     NotesSync.saved(r)
@@ -2433,7 +4858,12 @@ window.echo = {
     else showNotesState()
   },
   /** A message for a moment (an action that couldn't be done). */
-  notice(text) { S.notice = text; render() },
+  notice(text) {
+    S.notice = text
+    clearTimeout(window._noticeTimer)
+    window._noticeTimer = setTimeout(() => { S.notice = null; render() }, 7000)
+    render()
+  },
   /** The app started a terminal (`pty_open`): follow it. */
   ptyOpened(r) {
     const e = r.key && Terms.get(r.key)
@@ -2532,7 +4962,10 @@ window.echo = {
 ;(async () => {
   route()
   render()
-  await Promise.all([loadState(), loadCalls(), loadAgenda(), loadLayout(), loadTerms(), loadSettings()])
+  await Promise.all([loadState(), loadCalls(), loadAgenda(), loadLayout(), loadTerms(), loadSettings(), loadProjects()])
+  if (S.view === 'projects') await loadProject()
+  if (S.view === 'tasks') await loadTasks()
+  if (S.view === 'brain') await loadBrain()
   if (S.view === 'calls' && !S.selected && S.calls && S.calls.length) S.selected = S.calls[0].name, history.replaceState(null, '', `#call/${S.selected}/minutes`)
   if (S.selected) await loadCall(S.selected)
   if (S.view === 'calendar') await loadCalendar()

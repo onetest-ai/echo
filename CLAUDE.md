@@ -196,6 +196,19 @@ calls by title, people or day). Unavailable ones stay listed, greyed, with why. 
 button that does it elsewhere (`press`), so it can't differ from it. Ranking (`Palette`, no DOM:
 `ui/palette.test.mjs`): every typed word in the label (anywhere) or a keyword (word start), word starts and earlier
 matches first, unavailable last, each group kept together. ⇧⌘R / Ctrl+Shift+R asks to stop a recording.
+**Needs you** (`attention.rs`, `/api/attention`, `echoctl attention`): what waits for the user's decision, collected
+from where it lives (no model): a profile to sign in to (urgent: the default, or minutes waiting for it), minutes that
+failed (14 days), senders waiting, people suggestions, Found for you, the Work tab's To review, topics or numbers to
+accept, missing permissions, an update — each with the IPC message its own place sends (Trust, Yes, Create, Sign in…)
+or the hash where it is decided. Not an activity: its entry sits above Settings at the foot of the activity bar (a
+count; warn-coloured when one blocks work) and shows or hides the `needs` panel view (⇧⌘I; Ctrl+Shift+U on Windows,
+where Ctrl+Shift+I opens WebView2's DevTools; ⌘K); the
+places keep their own badges. An item gone (decided here or there) moves to Done for 7 days
+(`<home>/.echo/attention.json`, the open items kept whole) — only when its source was read: a source that couldn't be
+read now (or a sign-in not checked yet) keeps its items open as they were; one switched off (the Brain), an update
+not checked yet, failed minutes older than 14 days leave quietly. Nothing to mark read. Collected at most every 20 s,
+one collection at a time (`?fresh=1` after an action); `echoctl attention` only reads (a terminal sees neither the
+app's sign-in checks nor its update check). The page shows ≤ 5 of a kind per group ("N more like these").
 **Settings** (activity, `#settings/<section>`): General, Recording, Transcription, AI & minutes, Calendar & chat, Vocabulary,
 About me (name, email, and `me.md` — the profile the minutes read — shown rendered by `minutes::markdown_html`, the
 minutes' safe writer, line by line, and edited in place: `settings_set me_profile`), Layout, Health (a ⚠ badge counts
@@ -224,6 +237,16 @@ resume with `--resume` (ids per profile in `<home>/.echo/sessions.json`: `<profi
 refused within 4 s is forgotten). Entry points: status bar Claude, ⌘/Ctrl+`, the call's ⋯ → Ask Claude about this
 call. `ai::terminal_command` = `claude_command`'s command and environment for a PTY (`ECHOCTL_DEBUG` prints its
 arguments). `echoctl window --selftest` runs a shell in a terminal end to end (`terminal: true`).
+**What the window shows, in each prompt** (`view.rs`): the page reports its view (activity; the open call — title,
+time, tab, its threads; the thread and tab; the work item in the details panel; the calendar event; the panels; text
+selected in the page or the minutes frame, `{echo: 'sel'}`) over IPC `view_state` when it changes and every minute →
+`<config dir>/window-view.json`. Both terminal sessions' `--settings` (the call's guard file; `session-folder.json`
+for the folder's) carry a `UserPromptSubmit` hook, `echoctl view-hook`, that adds it as `additionalContext` in an
+`<echo_view>` block (what "this" / "here" mean; page text is data: no `<`/`>`, ≤ 400 chars each; a call's folder only
+when it is one; nothing when older than 15 min), **only when it changed** since the last block that session got (it stays in the
+session's history; per session id, a hash in `<config dir>/window-view-sent.json`, 50 sessions, 14 days) — a
+`SessionStart` hook (`compact|clear`) forgets the session, so the next prompt gets it again. **Echo only**: it answers only with `ECHOCTL_TERMINAL=1`, set on the
+Claude Code Echo's terminal starts — never the minutes or sync runs, the plugin, or the user's other sessions.
 **My notes** (a panel view, `notesPanel`; it was a call tab) = the user's own notes as a **timeline of moments**
 (`NoteDoc`, no DOM: `ui/my-notes.test.mjs`): each note a line of `my-notes.md` — `- [12:05] …`, `? ` question, `! `
 decision, `⚑` flag, `- [ ] [12:22] …` to-do, `  > "…"` the words it is about — kept in time order; a box adds one,
@@ -274,6 +297,322 @@ id, or by subject within the event's time) and `scheduled`; calls matching no ev
 as `calls`. "Record when it starts" → `schedule.rs` (`<home>/.echo/scheduled.json`): the watcher
 arms a scheduled meeting from 60 s before its start until its end; the entry is removed when
 its recording starts (stopping never re-arms it), when that arm is cancelled, or after the end.
+
+## Projects (`projects.rs`; plan and phases: `docs/projects-design.md`)
+**The window calls them Threads** (the activity, + Thread, New thread, the palette, Settings — the user's word, since
+2026-10-30); the code, the CLI (`echoctl project …`), the API and the data folder (`<home>/projects/`) keep "project".
+Clients (name, domains, internal) and projects as files: `<home>/projects/clients.json`, `<home>/projects/<id>/`
+(`profile.json`, `brief.md`, optional `logo.png|jpg|webp` ≤ 512 KB, checked by its first bytes; a client's logo:
+`<home>/projects/clients/<id>.<ext>`; set from Profile — Choose…, or dropped on the tile: IPC `project {op: logo |
+client_logo, data: base64}` — or `project set --logo` / `client set --logo`), written atomically
+under one lock (`<home>/projects/.lock`). Stages: pursuit (lead, proposal, negotiation), delivery (kickoff, active,
+on_hold, wrap_up), closed (done, lost, cancelled); each change is a dated event with its reason. **Membership is
+computed, never written into a call**: rules (`series` — calendar series id from Graph `seriesMasterId`, now in
+`MeetingContext.series_id`, else the normalised subject; `people` — at least half of the call's **outside** people
+(colleagues — the user's own domain, clients marked internal — don't count) from the domains given, else the client's; `chat` — `<call>/chat.id` or the join link's chat; `subject` — whole words), pins
+and exclusions (call stamps), `since`, and a closed project takes no call started after it closed. Suggestions are
+deterministic (half the call's people are the project's, or its subject names it or a glossary term), never an
+assignment; an exclusion ("Not this") stops them. **Found for you** (`projects::found`, `#found`, `echoctl project
+found [--accept KEY --name --client new|ID|""] [--merge KEY --into ID] [--reject KEY]`): calls of the last 90 days in
+no project, two or more sharing a meeting series, one outside organisation (the domain half their outside people
+come from; personal mail and colleagues aside) or one Teams chat → a candidate with its rules, calls and client (one
+you have, or a new one named from the domain); rejected keys in `<home>/projects/found.json`; its count badges the
+Projects activity. `echoctl project …` / `client …` (JSON; refused inside a run Echo
+started). The minutes: `context.projects` = each project's brief, notes for Claude, glossary, people and the
+highlights of its last 5 calls before this one (`calls::recap_from_notes`), so the guard stays as it is. Transcription:
+`vocab::for_call` = always-on + the glossaries of the projects the meeting belongs to + learned; `vocab add` from a
+project's call adds the terms to its glossary too. The window: **Projects** activity (`#project/<id>/<tab>`; list by
+client, Closed folded; tabs Brief (rendered `minutes::markdown_html`, edited in place), Calls (why each belongs,
+Unpin / Take out), Profile (stage bar, client — + New client —, since, look, rules, glossary, people, notes, AI
+profile + model)); a call's header shows its projects as chips, a suggestion bar (Add · Not this) and `+ Project`
+(several; New project from this call = that call pinned + its meeting series as the first rule); the calls list shows
+their icons; ⌘K goes to any project. A project is drawn as its logo, else its client's logo when picked (`icon: "client"`), else a symbol picked
+from `PJ_SYMBOLS`, else an identicon from its id (`ProjectArt`, no DOM: `ui/projects.test.mjs`), in its colour. API: `/api/projects`
+(overview + `by_call`), `/api/project/<id>[/logo]`; IPC `project {op, …}` (`window::project_op`).
+
+**The work ledger** (`ledger.rs`, taska's ported; `<home>/projects/<id>/ledger/`): `events.jsonl` (append-only, one write
+per batch) folded into Workstream (epic, `E01 General` first) › Story (criteria) › Task (action / session /
+dependency, owners, due, client-owed) + decision / risk / question records. Evidence = each project call as an item
+(`evidence/<stamp>.json` + `.md`: transcript turns `[hh:mm:ss] speaker: text`, chat and the user's notes as text; a
+changed call is queued again by a `reprocess` event). `apply`: each proposal's quote must be one contiguous span of
+its item (normalised), level rules, nothing before it existed, re-applying adds nothing; status changes, criteria
+met, links and waits count only after `verify_apply` says `supports`; the user's edits (`human_event`) pin fields
+(an agent's later evidence stays in the history, `applied: false`) and can be undone; spoken dates resolved against
+the item's day (`resolve_due`). **The sync** (`projectsync.rs`): `ledger::sync` (the first one: the last 20 calls,
+`BACKFILL`), then two Claude Code runs of the plugin's `project-sync` skill (EXTRACT / DEPS / VERIFY.md) — extract
+(+ dependencies), then verify in a fresh process — on the project's AI profile and model, guarded (`guard.rs`
+`RUN_MODE=project`: read the ledger and the skill's folder, write only `.json` in `runs/<run>/`, Bash only
+`echoctl project ledger <this id> <PROJECT_STEPS>`; the CLI checks `ECHOCTL_RUN_PROJECT` too and keeps `verify-prep
+--out` in the run's folder); ≤ 10 items a run; state in `ledger/sync.json`, the log in `runs/<run>/log.txt`. The app's
+scheduler (every 5 min, `config.project_sync`, default on; Settings → AI & minutes) syncs open projects with a call
+ended ≥ 15 min ago not read yet; a failed sync waits an hour. `echoctl project ledger <id> run|status|tree|edit …`;
+the window's **Work** tab (a **board** as GitHub Projects lays one out — fixed-width columns that scroll sideways, each a
+project's own Status option in a state category (`Project.board`: columns with name, colour, `state` open | in_progress
+| waiting | blocked | done, limit, hidden; card fields; group none | story | owner), configured in each column's ⋯ and
+`+ Column`; saved **views** as tabs (`board.views`: layout board | tree, kind / owner / open-only filters, grouping,
+card fields, hidden columns; the one in use remembered per project in the webview), cards dragged between columns set the item's state and `column` (a human field, pinned) —, or a tree by workstream, a node's fields, criteria, history with quotes and verdicts, Undo of
+your edits, To review — suggested moves/merges, weak "done" claims —, Sync now; `/api/project/<id>/work`, IPC
+`project {op: sync | ledger, body}`).
+**A client's page** (`#client/<id>/<tab>`, `/api/client/<id>` = `tasks::client`): Overview — its description (the
+user's Markdown, `projects/clients/<id>.md`, edited in place like a thread's Brief: IPC `project {op: client_brief}`) and
+a card per thread (stage, calls, stories done, open tasks by pile with the late ones, the last 3 decisions, open risks
+and questions; a record opens in its thread's Work tab) —, Calls (every call of its threads, with their chips), Tasks
+(the Tasks piles for its threads), Profile (name, other names, domains, kind, logo, threads).
+**People** (`people.rs`; plan and discovery: `docs/projects-design.md`, People): a People tab on every thread and client
+(`/api/project|client/<id>/people`, `echoctl project|client people <id>`). Facts are recomputed from the calls each time
+(invitees, organisers, named speakers and their share of the talking, chat posters; calls attended, first and last
+seen → **new** ≤ 14 days, **quiet** > 6 weeks while calls went on; open tasks owed, late, waiting on them by name); names are read as people read them (`people::display`: "(Partner)", "(external)", "[EXT]" dropped, a directory's
+"Last, First" turned round; compared with accents folded); one person can have addresses at several organisations —
+the same cleaned full name merges by itself (the other address kept in `also`), names or address local parts that
+share a first and a last name are suggested ("Same person as …?", `maybe_same`), and the panel merges any two
+(`person_merge`: the directory keeps every address of a person, `canon`) or splits an address off (`person_split` →
+`not_same`: never merged again); each address shows its organisation; the user is left out. What the user sets: the directory `projects/people.json` (title, organisation, group, reports to,
+matters, phone, notes, name — each with its source and a history; IPC `person_set`), placements in a thread
+(`Member`: role, stance champion…blocker, influence and interest 1–3; `people_place`, `people_add`) and organisations
+as stakeholders (`OrgPlace`, `org_place`); an organisation (a client) has a parent, typed relationships (`RELATIONS`)
+and groups (`client_set parent|relation|groups`). Views: **Map** (influence × interest quadrants, high = 2+, chips
+dragged between them set both; Not placed yet; organisations as square chips), **Org chart** (each organisation —
+yours by your mail domain — with its groups side by side, people as "reports to" trees; relationships drawn as
+lines between the cards after layout, `drawOrgLinks`: labelled with their kind, "part of" dashed, card edge to card
+edge, a related organisation with nobody in the thread shown as an empty card so the line has an end), **List**
+(contacts with Teams chat and copy email; Seen in calls → Add / Add all); the person or organisation in the right
+panel (`person`).
+**Microsoft 365** (`graph::person`, `people::refresh_m365`): the People API (`/me/people?$search="<email>"`,
+`People.Read`) gives colleagues' title, department, company, office and phone; people outside the tenant come back
+with a name or nothing. Measured with the CodeMie app at Contoso (2026-10-30): a token carries every scope the tenant
+consented for the app whatever a sign-in asks (People.Read, Group.Read.All, Mail.Read… — no new sign-in needed), but
+not `User.Read(Basic).All`: `/users/{x}` and their managers are refused, so reporting lines come from calls and the
+user. Asked when a People tab opens (in the background, one refresh at a time, each person at most weekly, ≤ 40 a
+run; `echoctl project people <id> --refresh`); a value goes in with source `m365` unless the user set that field —
+then it becomes a question in the person's panel (Use theirs / Keep mine: `person_answer`; a kept value isn't asked
+again).
+**The people pass** (the sync's third run, after extract and verify; `PEOPLE.md` in the project-sync skill): reads the
+calls it hasn't read yet (`ledger/people-read.json` — also calls synced before it existed; ≤ 10 a run, also when the
+work has nothing new) with the thread's people in view (`project ledger <id> people-context --items …`) and proposes
+role, stance, influence, interest, title, group, reports to, left, and relationships between organisations
+(`people-apply --evidence --file`, both in `guard::PROJECT_STEPS`). `people::apply_suggestions` checks each: the quote
+one span of that call (`ledger::quote_in`), the person or organisation known, the value valid and not already so, not
+proposed or turned down before → `<project>/people-suggestions.json`, pending. Nothing changes until the user answers
+in the People tab's bar (the question, the words, the call and time; Yes applies it as theirs, No stays no:
+`people_decide` → `people::decide`). No model verifier on top: the quote check and the user's yes are the gate.
+**Tasks** activity (`tasks.rs`, `#tasks`, `/api/tasks`, `echoctl project tasks`): every open project's open tasks in four
+piles — I owe (owner = the transcripts' "Me", or `config.me`'s name, first name or email), Owed to me (someone else
+owns it), Waiting for others (blocked, `waiting_for`, or an open dependency — before the owner), Nobody named —
+overdue first, then by date, then the longest quiet (days since the last word in the ledger); a project filter and an
+order. **Asks** (right panel): by person, what they owe that is late, due within 3 days or quiet ≥ 5 days, and what we
+wait on them for; ≤ 2 per story, ≤ 15 in all; each person's next meeting in the next 7 days (the calendar's cache,
+attendees by email or name; no sign-in: today's agenda). A card or an ask opens the task's details (the Work tab's
+`work-item` panel) right there.
+**What this call changed** (a call's Actions tab, above its action items; `ledger::call_changes`, call detail `changes`):
+per thread the call is in, every ledger history entry whose evidence is this call (new stories, tasks, decisions,
+risks, questions; status, dates, links, waits, criteria met; mentions left out, ones the verifier called wrong
+hidden), in the order said, with the words, the speaker, the time (a jump) and weak / to check / kept yours; a
+thread that hasn't read the call says so (Sync now). An action item that became a task (`ledger::match_actions`: a
+task created from this call within a minute of the item's moment sharing a third of its words, or half with no
+moment; ¾ when farther) shows its task as a chip instead of a second line (`action_tasks`).
+
+## The Brain (`brain/`; plan and phases: `docs/brain-design.md`)
+Cross-call intelligence as Echo's own: Brain (onetest-ai/applied_skills `bundles/brain`) ported into the app — **one per
+user**, **facts only** (calls now; Teams channels, mail and thread folders next — the stakeholder map and the work ledger
+are referenced by id, never ingested), **nothing copied** (every section links back: `echo://call/<name>?t=<s>`, later a
+message's / mail's / file's own link), **no model in Echo** (embeddings from the endpoint in Settings → Brain: Ollama
+`/api/embed` or OpenAI-compatible `/v1/embeddings`, `<config dir>/brain.json`, 0600; without one, words only). Sources are
+configured where they live (a thread's Profile), Brain settings in Settings → Brain, exploring it in its own activity
+(phase 3). The `brain` cargo feature (default) brings SQLite (`rusqlite`, bundled — C, so the Windows cross-check runs
+without it).
+- **Store** `<home>/brain/knowledge.sqlite`, Brain's schema (`chunks` + Echo's `link`, `refs`; `chunks_fts` FTS5
+  `unicode61` — any script, Brain's own query builder dropped Cyrillic; `chunks_vec` a plain table of unit vectors
+  searched in Rust, no sqlite-vec; `documents`, `related`, the taxonomy tables, `meta`). Brain's chunker and chunk ids
+  (`sha256(source\0ord)[:8]>>1`) as they are (`chunk.rs`, 1200 chars, no overlap).
+- **A call** (`calls.rs`, source `call/<stamp>`): its minutes' sections, then the transcript as packs of turns
+  (`### [mm:ss] A, B`, lines `[mm:ss] Name (Org): text`, ~1000 chars, real names via `people::display`, organisation
+  from the invite's domain), then the chat; refs = the call, its threads and client.
+- **Teams channels and mail** (`sources.rs`, phase 4; a thread's Profile → Sources: # Channel — a team, then a
+  channel — and ✉ Mail — a domain or an address, the client's domains offered —, `echoctl project source <id> --mail
+  | --channel <team>|<channel> --name | --remove kind:id`, IPC `project {op: source_add|source_remove}`, pickers
+  `/api/m365/teams|channels`): read with the Microsoft 365 sign-in (`ChannelMessage.Read.All`, `Mail.Read`, already
+  consented for the app) when the calls are synced and every half hour, first 90 days, ≤ 200 a read; one document per
+  channel post with its replies (`channel/<key>/<id>`, titled by its first line that isn't a bare link) and per mail
+  conversation (`mail/<conv>`, each message's new part, a section each), every section linking to the post / mail in
+  Teams / Outlook — nothing kept but the index. Mail: Graph's `from:X OR to:X` (its search is fuzzy, `participants:`
+  fails) then checked by address; calendar invites (`eventMessage…`, the call is the meeting), mail to > 30 people
+  and the user's own addresses at any domain (by the account's local part) don't count. Channels: system events
+  dropped. A document's threads = every open thread whose sources match it, recomputed at each sync (`rescope`: refs
+  and scopes rewritten, nothing fetched; matching none → removed). Read state per source in `<home>/brain/sources.json`
+  (`since`, `found`, the error shown on the chip); its `reader` version, when bumped, drops and re-reads everything.
+  The Brain's Sources tab folds a channel into one row; the graph draws posts and mail square.
+  **Who may speak, and only as facts** (`senders.rs`, `digest.rs`; reader 4): a message is read only from the user,
+  colleagues (mail sent inside the organisation — Exchange's `AuthAs: Internal` — from the tenant's verified domains,
+  the user's own address too; a Teams author whose People-API entry has the author's own directory id, never a name
+  match, and an address in them) or a sender the user trusted for every client of the document's threads
+  (`<home>/brain/senders.json`, per client, `-` = none; ignored anywhere wins); a trusted outside sender's mail only
+  when Exchange's own (topmost) `Authentication-Results` says DMARC or compauth passed for the From domain itself —
+  SPF + DKIM alone can pass for an attacker's domain (`graph::mail_auth`). An author not looked up yet (≤ 40 lookups a
+  sync, or it failed), or no organisation domains known, defers the document — never a stranger's verdict. Others wait (count, last subject; nothing of
+  theirs read) for Trust / Ignore / Forget (the Brain's Sources tab, IPC `brain_sender`, `echoctl brain senders
+  --client C --trust|--ignore|--forget KEY`). A trusted sender's mail with no verdict at all (a mailing list, a
+  domain without DMARC) is listed (`List.unverified`, Needs you, Sources) for Read anyway / Keep out
+  (`Entry.unverified`; `read_unverified` | `keep_unverified_out`); a failed check is never read. A decision asks for that client's sources to be read again
+  (`brain/reread.json`, taken by the next sync: their documents dropped, read from the start; the cache keeps it
+  cheap); a sync saves senders merged (`save_merged`: the user's lists on disk win).
+  Then the **quarantine reader**: each post (with its replies) or conversation once, by a no-tools model on its
+  threads' profile (`livenotes::complete_text`), into a neutral title and facts per message, each with at most a
+  25-word quote checked word for word against that message (else dropped); cached by content, profile and
+  `PROMPT_VERSION` in `<home>/brain/digests/`. The Brain indexes those facts with links — never the messages' text,
+  so a forged instruction in a mail never reaches a session with tools. ≤ 30 read a sync; what waits keeps its
+  sources from reading further; a document the reader fails on 3 times is given up; the reader waits while a call
+  records or is transcribed (`insights::quiet`). Measured: 36 posts + 1 conversation in ~5 min (two syncs) on haiku.
+- **Thread folders** (`brain/files/`, phase 5; Brain's `parse_corpus` + `visual-parse` + `source_registry` +
+  `scribe_marker` ported; plan and measurements: `docs/brain-design.md`). A thread's Profile → Sources → ▣ Folder (the
+  system's picker, IPC `source_folder_pick`; `echoctl project source <id> --folder <path> [--exclude glob…]`), "Don't
+  read…" globs per folder (`Source.exclude`, IPC `source_exclude`). **Registry** (`files` in the store; `folder.rs`):
+  root + relative path, sha256 (hashed only when size or time changed), status + reason — `indexed`, `pending` (pages
+  waiting for the page reader), `skipped` (hidden: dot components, `~$` lock files; excluded by a glob; too big;
+  Echo's own minutes page by its generator tag), `twin` (same stem in another format: pptx > docx > xlsx > … > pdf is
+  read), `unsupported`, `error` (the reader's words); the same bytes at a new path are a move (its document keeps its
+  id `file/<id>`); gone → removed with its sections; `READER_VERSION` bump re-reads all. **Readers** (deterministic):
+  pptx/docx from their XML (`office.rs`, `xml.rs`: text in order, headings by style name, table cells as Markdown
+  grids, speaker notes, SmartArt text; hidden slides out), PDF through PDFium (`pdf.rs`, BSD, loaded at runtime:
+  `ECHOCTL_PDFIUM_DIR` → `Echo.app/Contents/Frameworks/pdfium` → `<config dir>/pdfium`; `scripts/fetch-pdfium.sh`
+  pins chromium/7881 by SHA-256), spreadsheets (`sheet.rs`, calamine: the densest early row as header, a section per
+  row; a sheet over 200 rows makes it a reporting book — schema + 8 rows per sheet, its figures for the numbers lane
+  later), vtt/srt packed turns, md/txt as is, html as text (degraded; < 220 chars = JS-rendered, skipped). **Routing**
+  (`route`, Brain's `render_pages` rule on PDF pages): thin text (< 220) with no table, ≥ 60 vector paths, or ≥ 28 with
+  < 1000 chars → the page reader. Decks and Word files with figures are measured and rendered on LibreOffice's PDF of
+  them (`render.rs`, `soffice --convert-to pdf`, own profile, once per file version in the assets; slide N = page N,
+  checked) — the slides' own XML misjudged half of 328 real slides (free text boxes, divider lines); their text and
+  tables still come from the XML. No LibreOffice → slides indexed from their text (`degraded`). **Page reader**
+  (`vision.rs`): Claude on the default profile's minutes model (`livenotes::complete_vision`: images as content blocks
+  over stream-json input, no tools) or a vision endpoint (Settings → Brain → Documents: Ollama `/api/chat` /
+  OpenAI-compatible), 4 pages a request, Brain's deck rules (flow → ordered list, timeline → table, diagram →
+  relations, extracted cells trusted for numbers, no logos / page numbers / confidentiality marks), the answer checked
+  (one entry per image); cached in `page_render` by image sha + `PROMPT_VERSION`; ≤ 48 pages a run, only while quiet
+  (`insights::quiet`), the rest `pending` (indexed from their text meanwhile; the scheduler re-checks every 10 min).
+  **Two representations**: the reading (or text + tables) is the document (`## pNN · title` per page, links
+  `echo://file/<id>?page=N` — the window opens the registered file in its app, IPC `open_brain_file`); the page's text
+  layer, table grids and PNG (flagged pages) stay in `<home>/brain/assets/<id>/` and are what MCP `get_evidence`
+  returns (`verbatim_page_text`, `extracted_tables`, `page_asset`). **Dates**: Brain's `exact_date` (the first full date
+  in a document's first 2000 chars — not ≥ today: an auto-updated field; else a full date in the file name;
+  transcripts and spreadsheets by file name only). The Brain's Sources tab folds a folder into one row listing every
+  file with what happened to it; `echoctl brain files`; `echoctl brain read-file <path>…` (hidden) shows a reader's
+  pages and routing.
+- **Sync** (`store::sync`): a document re-chunked only when its text or refs changed (hash), a chunk re-embedded only
+  when its text did, chunks gone deleted with their FTS row, vector, related edges and tags; a snapshot (`VACUUM INTO`,
+  3 kept) before a change, one transaction; vectors outside it in batches of 32 (an embedding failure leaves the text
+  indexed; the next sync fills the gaps); another model re-embeds all; `related` = Brain's (k 6, ≥ 0.55, other
+  documents). The app syncs every 5 min when the calls' files, the threads or the model changed (`start_scheduler`,
+  switch in Settings → Brain); Sync now there (IPC `brain_sync`).
+- **Search**: BM25 + the query's vector fused by Brain's weighted RRF (0.4 / 0.6, k 60, 30 each).
+- **MCP** (`mcp.rs`, `echoctl brain mcp`, stdio JSON-RPC, read-only): Brain's tool names and shapes (health,
+  search_knowledge, list_sources, read_document, find_related_content, get_evidence; get_taxonomy / list_metrics /
+  get_metric answer `not_modeled` until those lanes exist) — kb recognises a Brain by them. Attached to both window
+  sessions (`--mcp-config`, `mcp__echo-brain` allowed); the call session's guard allows `mcp__echo-brain__*` in ask mode
+  only (`guard::BRAIN_TOOLS`), never in a minutes run.
+- **Client and thread are its dimensions** (`scopes(chunk_id, kind, id)`, from each section's refs; `-` = a call in
+  no thread / with no client; filled once for an older store): search, related, the taxonomy's counts and the MCP tools
+  take `client` / `thread` (`list_scopes` names them, the server's instructions say to scope); moving a call to another
+  thread moves its sections (refs are part of a document's hash). There is no Ask screen: asking is a Claude Code
+  session with the Brain attached.
+- **Two layers**: a shared layer (the user's practice: calls with no client) and one per client (its goal from the
+  client's name, description and threads; its own open term kinds); node ids of a client's layer carry its id
+  (`globex__budget`), so the same name in two clients is two topics; a section is tagged from the shared layer and its
+  own client's only; a client's terms are found only in its sections; a scope's view shows the shared layer and its
+  client's; an edit names its layer when a name is in two. A version from before layers loads as the shared layer.
+  `taxonomy build [--layer shared|<client>]` builds every layer or one (then classifies that layer's sections).
+- **Insights** (`insights.rs`, `<home>/brain/insights.json`): per client and thread — moved, slipping, recurs,
+  contradiction, open — each citing ≥ 2 sections from ≥ 2 sources, every quote checked word for word (else dropped). A
+  scope is redone only when its sections changed (a fingerprint of ids and texts): the run reads the previous
+  insights, the new sections (≤ 120, newest first) and their related older ones, and keeps / updates / retires / adds.
+  The app's scheduler runs scopes at most daily each, ≤ 5 a day, only while nothing records and (macOS) on AC power;
+  Refresh (IPC `brain_insights`) or `echoctl brain insights --client|--thread [--run]` runs one now. A cited section
+  changed or gone marks the insight "to re-check" (no model). Shown on a thread's Brief and a client's Overview.
+- **Numbers** (`brain/numbers/`; Brain's `tabular-semantic-layer` ported — the model picks a metric and filters, SQLite
+  gives the value from the real cells with its file; a number is never asserted by a model). Per client, from its
+  threads' folders' spreadsheets; config in Brain's own format, `<home>/brain/numbers/<client>/families.json` (families:
+  glob, month_from, layout `long` | `tolerant_long` | `matrix_month_cols` | `wide_month`, grains, measures with
+  alternatives, header / banner rows, collision policy, entity_map / entity_with, allow_zero; conform_titlecase,
+  dimension_map, rollups, derived, coverage) + `metrics.json` (catalog: unit, desc, definition — reported vs computed).
+  **Profile** (`profile.rs`, no model): each report series (same folder and name but dates) once in full — sheets,
+  header row, columns, samples, first-column labels — and its other files' sheet headers (template drift). **Propose**
+  (Claude, default profile's minutes model): the config + catalog + what it skipped and why; then **repair rounds**
+  (≤ 2): a dry build's failing units, with those files' real headers, go back for a revision; the best by fully loaded
+  units is kept (`_echo.kept`). Saved `proposed`: nothing is built or served until the user accepts (Brain → Numbers:
+  Accept and build; `echoctl brain numbers accept`). **Build** (`build.rs` + `load.rs`, Brain's `build_marts.py`
+  ported: cells from A1 as openpyxl gives them — dates, time cells as seconds —, vintage order by the month in the file
+  name, collisions merged by policy with `fact_merges`, `fact_versions` restated / conflict, every report in
+  `fact_reports`, rollups `<rollup>`, derived `<derived>`, `build_audit.json` (ok / partial / zero / error per file and
+  unit) and `coverage.json` (holes, expected roster)); facts in the store per client (`facts`, …). Rebuilt after a
+  Brain sync when its workbooks, config or catalog changed (`numbers::refresh`, `inputs` hash). MCP `list_metrics`,
+  `get_metric` (grain, entity / entity_like, month(s); `other_reported_values`, `restated` / `conflicting`,
+  `merged_from`, `caveats` — notes written beside the table, Brain's `scan_notes`: a lone sentence ≥ 40 chars right of
+  the header run past a blank column, in `fact_notes`; matched Northwind Brain's one note exactly), `get_metric_history` —
+  accepted clients only. `entity_regex` (tolerant_long) cleans an entity's encoding by its first group. Measured on Northwind: with the Northwind Brain's own config
+  Echo's build matched its facts value for value (17,802 of 17,817; the rest: files Brain had and this folder doesn't,
+  and 5 April repeat-caller figures Brain never rebuilt); Claude's own proposal with repair rounds recovered 90% of
+  them (FCR 99.6%, NPS 96%, adjustments and call volume ~100%) in ~4 minutes. `echoctl brain numbers
+  profile|propose|import|accept|build|show|list|get` (`--root` reads a folder instead of the client's threads').
+- **History** (Brain's `supersede_before`, per thread: `Project.history_before`, Profile → History, `project set
+  --history-before`): after each sync `store::supersede` marks the sections of documents, posts and mail dated before
+  every one of their threads' dates `SUPERSEDED` (`valid_to` = the date; recorded in `date_superseded`, so only these
+  marks are undone when a date moves or goes); calls aren't (a thread's Since decides its calls), undated documents
+  never are. Search (`store::search_at`, `History`): latest (default — superseded hidden), all (MCP `latest_only:
+  false`), or `as_of` a day (sections dated after it or superseded by then hidden). The Sources tab tags them "history".
+- **Meeting transcripts saved as Word** (`office::teams_turns`): Teams' (Brain's `read_teams_docx` — one paragraph a
+  turn: speaker run(s), an `M:SS` run, the words; "started / stopped transcription" dropped) and Otter's ("Name  00:03"
+  on its own line, the words after) → packed turns like a .vtt (`text::pack`), the title / date / duration preface kept
+  (it dates them); method `meeting-transcript`.
+- **Strict routing** (`brain/access.rs`; as for a call's own jobs: never another profile): a call's text belongs to
+  the profile pinned in its `meta.json` (`ai::call_profile_id`; unreadable → nowhere), mail, posts and folder documents
+  to their threads' profiles (a thread's own, else the default). The MCP server takes its reader (`echoctl brain mcp
+  --profile P [--client C | --thread T…] [--call call/<stamp>]`; none given: the default profile's) and every tool
+  answers from that profile's sources only — searches filtered before the cut, documents / evidence / related of
+  others "not found", scopes and numbers listed only where allowed. Echo-folder session: its profile; a call's
+  session: the call's profile and its client, else its threads, else the call itself (`terminal::brain_mcp_config`,
+  a config file per access). The `<echo_view>` hook drops the open call and the selection for a session of another
+  call or another profile (`ECHOCTL_SESSION_PROFILE`, `view::restrict`). Background jobs run on the default profile
+  and take only its sources: insights, taxonomy builds and tagging, the page reader (a folder whose threads run on
+  other profiles is indexed from text, never read — and not left pending), the numbers proposal (refused unless all
+  the client's threads run on it). A thread's sync makes evidence only of calls on the thread's profile.
+- **Off switch** (Settings → Brain → Use the Brain; `brain.json` `enabled`, default OFF — a fresh install and an update both start with it off until the user turns it on; `echoctl brain set --enabled
+  false`; IPC `settings_set brain_enabled`): off, nothing is read, indexed, tagged or summarised (`brain::sync` refuses,
+  the scheduler skips), the window shows no Brain (activity, ⌘ numbers and ⌘K, Also discussed, Insights, Mentioned also
+  in, Topics & terms → the glossary, no channel / mail / folder sources to add; `/api/state` `brain`), Claude's sessions
+  get no echo-brain server, transcription hints come from glossaries; the store stays on disk as it was.
+- **The window**: the **Brain** activity (`#brain/<tab>`: Topics — each layer with its summary, provisional banner and
+  Accept, the tree with counts and threads; Terms; Sources; Coverage; Graph — topics on a ring grouped and coloured by
+  client, sources inside at the weighted middle of their topics, related sources dashed; a click selects a node — a
+  topic opens its panel, a source the `brain-doc` panel (`/api/brain/doc`, `views::doc`: kind, threads, Open — the call,
+  Teams / Outlook, the file —, topics and terms, first sections, related sources), its edges brought up, the rest dimmed; a scope
+  picker: everything, a client, a thread), the topic or term in the right panel (`brain-node`: rename, merge, move,
+  remove — IPC `brain_taxonomy` —, its latest sections, `/api/brain/node`); a call's **Also discussed** (right panel
+  `also`, `/api/brain/also/<call>`: per moment, the nearest elsewhere — another client's only ≥ 0.75 —, topic chips); a
+  thread's Profile **Topics & terms** (its topics and terms from the Brain; + Term pins one in its client's layer).
+  A work item's details show **Mentioned also in** (`/api/brain/mentions`, `views::mentions`: for each of its quotes the
+  section saying it and its nearest sections elsewhere in the thread, else a search of its title in the thread; the
+  calls it cites left out). **Claude about this thread / client** (thread ⋯ menu, client header) opens the Echo-folder
+  session; `<echo_view>` names the client or thread with its id and tells Claude to scope Brain searches by it.
+- **Taxonomy** (`taxonomy.rs`; it supersedes thread glossaries and the learned vocabulary): one per user —
+  topics (L1/L2) and terms (name, kind, variants, description, pinned threads, always) — versions in
+  `<home>/brain/taxonomy/` (`vN.json`, `current.json`, `decisions.jsonl`). Built by `echoctl brain taxonomy build`: each
+  call's minutes mapped (4 calls a request), names clustered (Brain's ratio ≥ 0.86), one judge request, saved
+  provisional, then every section classified (40 a request, 0–3 labels, `__no_topic__`); requests are no-tool Claude
+  runs on the default profile's minutes model (`livenotes::complete_text`, 5 min each), every answer checked in Rust.
+  Term mentions are found without a model (whole words, name or variant) after each version and sync; the app tags new
+  sections after a sync. **Learned vocabulary** lives here (`Term.learned`: subjects, people, calls — the old
+  `config.learned` scope rules, `vocab::applies`): a minutes run's `vocab add` → `taxonomy::learn` (the call's
+  client's layer, else shared; pinned to its threads; merged into a term of that name or variant, else kind
+  `learned`; one version per call); the old list moved once (`vocab::migrate_learned`, at the scheduler's start and
+  in `echoctl vocab`, never inside a run; a copy in `.echo/learned-before-taxonomy.json`), `vocab::learned_all`
+  reading both meanwhile; Settings → Vocabulary forgets one (`forget_learned`: a learned-only term goes, a known one
+  loses its scope). Transcription's, so it works with the Brain switched off; thread glossaries no longer learn
+  them. Measured: 43 learned terms → 13 Northwind, 12 Globex, 8 Initech, 10 shared, most merged into terms the
+  taxonomy knew (Dial9, Flow Studio, Codemie).
+  sections after a sync. The user's edits (`taxonomy edit`: accept, add, rename, merge, move, remove, set) make a new
+  version; renames and merges keep tags through aliases, removals drop them. Transcription's hint reads the terms pinned
+  to or mentioned in the call's threads (`projects::terms_for_meeting`). Measured: 11 calls → 19 topics, 102 terms, 285 of
+  305 sections tagged (15 small talk, 5 nothing fits). Measured on this Mac (Ollama `qwen3-embedding`, 4096-d): 11 calls →
+  305 sections, first embedding 4 min; English and Russian queries find their moments; Claude Code with only this
+  server answered a question across two calls with times and said what wasn't modeled.
 
 ## Live view (mod) and automation
 `plugin/hooks/register.tsx` is a Claude Code mod (state contract `plugin/types/index.d.ts`, pure helpers
@@ -605,6 +944,18 @@ compared without case or dashes. Plain HTTP was the user's choice for the local 
 works through a proxy. `echoctl server [status|use <url> --key|off|share on|off [--new-key]|run]`.
 Tested on this Mac: a client with no model got the transcript 3 s after the end, using almost
 no CPU of its own; with the server down, it decoded locally.
+**Or an OpenAI-compatible server** (`ClientSettings.api: openai` + `model`; Settings → Transcription → Use a server →
+OpenAI-compatible…, IPC `server_openai`; `echoctl server use <url> --openai [--model m] [--key k]`): Ollama with an
+audio model (0.40.12+: `lfm3-audio`), Speaches, vLLM, LocalAI, parakeet-api. Connecting lists `/v1/models` (no model
+named: the first that looks like speech-to-text) and sends a test tone; `words` records whether word timestamps came
+back. Each utterance a WAV to `/v1/audio/transcriptions` (`verbose_json`, word + segment granularities); the language
+pinned when the call has one, else the server's detection checked against the call's list (outside it → asked again
+pinned to the track's last language, else the first); the hint as `prompt`, then a plain decode and
+`transcribe::choose_hinted` as locally; Whisper's no-speech rule where segments carry it; same fallback to this
+computer's model while it's down. Measured with Ollama 0.40.13 + lfm3-audio on a three-language test call: 0.23 s for a
+6 s utterance, but no `language` in its answer (the `language` parameter is ignored: uk/ru can't be restricted), one
+segment per request with no word times, and clearly weaker than Whisper turbo on Ukrainian (Russian letters in
+Ukrainian words) and on terms ("service now", "RACI"); Whisper turbo got all but one product name and one Ukrainian word.
 Speech engines: choosing a model chooses its engine (`models::Engine` on each catalog entry;
 `transcribe::Engine` is an enum with the same `utterance` contract — another engine is one more
 variant + catalog entries). Whisper (whisper.cpp, linked in) is described below. **Nemotron**

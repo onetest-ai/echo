@@ -786,6 +786,12 @@ const EMBED_JS: &str = "(function () {
     var u = a.getAttribute('href') || a.getAttributeNS(XLINK, 'href') || '';
     if (/^https:\\/\\//i.test(u)) post({ echo: 'open', url: u });
   }, true);
+  // Words selected here: the window tells Echo's Claude terminals what \"this\" is.
+  var selT = null;
+  document.addEventListener('selectionchange', function () {
+    clearTimeout(selT);
+    selT = setTimeout(function () { post({ echo: 'sel', text: String(window.getSelection ? window.getSelection() : '').replace(/\\s+/g, ' ').trim().slice(0, 400) }); }, 300);
+  });
   // Right-click a line: the window offers Add note, at the line's time, about the words selected
   // in it (else the line), under its section.
   var secs = function (ts) { var t = ts.textContent.trim().split(':').reduce(function (a, p) { return a * 60 + Number(p); }, 0); return isFinite(t) && t >= 0 ? t : null; };
@@ -934,7 +940,7 @@ code { font-size: 12px; }
 /// its own (the call's header shows it).
 const EMBED_CSS: &str = "
 body { background: var(--bg); }
-main { max-width: 760px; margin: 0; padding: 22px 32px 48px; border: 0; border-radius: 0; box-shadow: none; }
+main { max-width: 1280px; margin: 0; padding: 22px 32px 48px; border: 0; border-radius: 0; box-shadow: none; }
 main > h1:first-child { display: none; }
 .mynote { margin: 6px 0 10px; padding: 6px 10px; border-radius: 8px; font-size: 13px; line-height: 1.5;
   background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); color: var(--fg); }

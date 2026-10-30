@@ -460,7 +460,7 @@ struct Children {
 static CHILDREN: std::sync::Mutex<Children> = std::sync::Mutex::new(Children { stopping: false, pids: Vec::new() });
 
 /// Start a minutes run's Claude Code, unless the app is quitting.
-fn admit_child(start: impl FnOnce() -> Result<std::process::Child>) -> Result<std::process::Child> {
+pub(crate) fn admit_child(start: impl FnOnce() -> Result<std::process::Child>) -> Result<std::process::Child> {
     let mut c = CHILDREN.lock().unwrap_or_else(|e| e.into_inner());
     if c.stopping {
         bail!("Echo is quitting");
@@ -470,7 +470,12 @@ fn admit_child(start: impl FnOnce() -> Result<std::process::Child>) -> Result<st
     Ok(child)
 }
 
-fn quitting() -> bool {
+/// A child admitted by `admit_child` has ended.
+pub(crate) fn forget_child(pid: u32) {
+    CHILDREN.lock().unwrap_or_else(|e| e.into_inner()).pids.retain(|p| *p != pid);
+}
+
+pub(crate) fn quitting() -> bool {
     CHILDREN.lock().unwrap_or_else(|e| e.into_inner()).stopping
 }
 
@@ -1406,7 +1411,7 @@ fn kill(pid: u32) {
 }
 
 /// One stream-json event as log lines a person can follow.
-fn describe(ev: &Value) -> Vec<String> {
+pub(crate) fn describe(ev: &Value) -> Vec<String> {
     let clip = |s: &str, n: usize| -> String {
         let one = s.split_whitespace().collect::<Vec<_>>().join(" ");
         if one.chars().count() > n { format!("{}…", one.chars().take(n).collect::<String>()) } else { one }

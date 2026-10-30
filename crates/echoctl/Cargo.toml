@@ -5,12 +5,15 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-default = ["transcribe", "tray"]
+default = ["transcribe", "tray", "brain"]
 # Menu-bar (macOS) / notification-area (Windows) icon shown by `echoctl watch`.
 tray = ["dep:tray-icon", "dep:tao", "dep:wry", "dep:portable-pty"]
 # On-device transcription (whisper.cpp). Needs a C/C++ toolchain + cmake for the target, so
 # cross-checks from macOS to Windows run with --no-default-features.
 transcribe = ["dep:whisper-rs", "dep:ureq", "dep:libloading"]
+# The Brain: cross-call intelligence over a SQLite store (FTS5). SQLite is C, so cross-checks from macOS to
+# Windows run without it (--no-default-features), as without whisper.cpp.
+brain = ["dep:rusqlite", "dep:zip", "dep:quick-xml", "dep:calamine", "dep:pdfium-render", "dep:regex"]
 # Windows / Linux: whisper.cpp on the GPU through Vulkan (NVIDIA, AMD, Intel). Building needs the
 # Vulkan SDK (VULKAN_SDK); running needs vulkan-1.dll, which GPU drivers install.
 vulkan = ["transcribe", "whisper-rs/vulkan"]
@@ -31,6 +34,8 @@ serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
 ctrlc = { version = "3", features = ["termination"] }
 sha2 = "0.10"
+# The Brain's store (`brain/`): SQLite with FTS5, compiled in (no system library).
+rusqlite = { version = "0.37", features = ["bundled"], optional = true }
 # Transcription server client (`remote.rs`): http or https (rustls; the OS's certificate store, so
 # company TLS proxies work).
 ureq = { version = "3.4", default-features = false, features = ["rustls", "platform-verifier"], optional = true }
@@ -47,6 +52,14 @@ portable-pty = { version = "0.9", optional = true }
 # The minutes page (`minutes.rs`): Markdown parsed (our own writer escapes), screenshots embedded.
 pulldown-cmark = { version = "0.13", default-features = false }
 base64 = "0.22"
+# Thread folders in the Brain (`brain/files/`): Office files read from their XML, spreadsheets, and PDF
+# pages (text layer, page objects, images) through PDFium, loaded at runtime (BSD; no link-time dependency).
+zip = { version = "9.1.3", default-features = false, features = ["deflate"], optional = true }
+quick-xml = { version = "0.42.0", optional = true }
+calamine = { version = "0.37.0", optional = true }
+pdfium-render = { version = "0.9.4", optional = true }
+# The numbers lane's `entity_regex` (Brain's config: cleaning an entity's encoding, "SE1: Pat Ode" → "SE1").
+regex = { version = "1", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

@@ -34,6 +34,18 @@ pub const RUN_CLIS: &str = "ECHOCTL_RUN_CLIS";
 pub const RUN_MODE: &str = "ECHOCTL_RUN_MODE";
 /// The Echo commands a call's Claude session may run (read-only).
 pub const ASK_COMMANDS: [&str; 1] = ["context"];
+/// `RUN_MODE=project`: a project's sync run (`projectsync.rs`) — its ledger folder (reads), the run's
+/// own folder in it (its proposal and verdict files), the project's id (its ledger commands).
+pub const RUN_LEDGER: &str = "ECHOCTL_RUN_LEDGER";
+pub const RUN_DIR: &str = "ECHOCTL_RUN_DIR";
+pub const RUN_PROJECT: &str = "ECHOCTL_RUN_PROJECT";
+/// The project-sync skill's own folder: its instructions, readable by the run.
+pub const RUN_SKILL: &str = "ECHOCTL_RUN_SKILL";
+/// The Brain's MCP tools, as Claude Code names them (`mcp__<server>__<tool>`; all read-only).
+pub const BRAIN_TOOLS: &str = "mcp__echo-brain__";
+
+/// The ledger steps a sync run may take (`echoctl project ledger <id> <step>`).
+pub const PROJECT_STEPS: [&str; 8] = ["pending", "context", "apply", "done", "verify-prep", "verify-apply", "people-context", "people-apply"];
 /// The oldest Claude Code whose hooks block when they fail (`onFailure`).
 pub const MIN_CLAUDE: [u32; 3] = [2, 1, 295];
 
@@ -45,6 +57,17 @@ pub struct Scope {
     clis: Vec<String>,
     /// The window's session on the call (`RUN_MODE=ask`): read-only.
     ask: bool,
+    /// A project's sync run (`RUN_MODE=project`): `call` is then its ledger folder.
+    project: Option<ProjectScope>,
+}
+
+#[derive(Debug)]
+struct ProjectScope {
+    id: String,
+    /// The run's own folder: the only place it writes (its JSON files).
+    run_dir: PathBuf,
+    /// The skill's folder (its instructions): read only.
+    skill: Option<PathBuf>,
 }
 
 /// `echoctl run-guard`: judge the tool call on stdin; the exit code is Claude Code's answer.
@@ -61,7 +84,11 @@ pub fn command() -> i32 {
     match verdict {
         Ok(()) => 0,
         Err(why) => {
-            let who = if std::env::var(RUN_MODE).as_deref() == Ok("ask") { "Echo (this call's Claude session reads only)" } else { "Echo's minutes run" };
+            let who = match std::env::var(RUN_MODE).as_deref() {
+                Ok("ask") => "Echo (this call's Claude session reads only)",
+                Ok("project") => "Echo's project sync",
+                _ => "Echo's minutes run",
+            };
             let _ = writeln!(std::io::stderr(), "{who}: {why}");
             2
         }
@@ -120,24 +147,43 @@ impl Scope {
     }
 
     fn from_vars(var: impl Fn(&str) -> Option<std::ffi::OsString>) -> Result<Scope, String> {
+        let clis_of = |v: Option<std::ffi::OsString>| -> Vec<String> { v.and_then(|c| c.into_string().ok()).unwrap_or_default().lines().filter(|l| !l.is_empty()).map(str::to_owned).collect() };
+        if var(RUN_MODE).is_some_and(|m| m == "project") {
+            let ledger = var(RUN_LEDGER).filter(|c| !c.is_empty()).ok_or("this isn't a sync run Echo started")?;
+            let ledger = dunce::canonicalize(&ledger).map_err(|e| format!("the run's ledger can't be found: {e}"))?;
+            if !ledger.join("evidence").is_dir() {
+                return Err(format!("{} isn't a project's ledger", ledger.display()));
+            }
+            let run_dir = var(RUN_DIR).and_then(|d| dunce::canonicalize(d).ok()).filter(|d| d.parent() == Some(ledger.join("runs").as_path())).ok_or("the run's own folder isn't in its ledger")?;
+            let id = var(RUN_PROJECT).and_then(|i| i.into_string().ok()).filter(|i| !i.is_empty() && i.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')).ok_or("the run names no project")?;
+            let clis = clis_of(var(RUN_CLIS));
+            if clis.is_empty() {
+                return Err("the run names no Echo CLI".into());
+            }
+            let skill = var(RUN_SKILL).and_then(|d| dunce::canonicalize(d).ok()).filter(|d| d.ends_with("project-sync"));
+            return Ok(Scope { call: ledger, previous: None, clis, ask: false, project: Some(ProjectScope { id, run_dir, skill }) });
+        }
         let call = var(RUN_CALL).filter(|c| !c.is_empty()).ok_or("this isn't a minutes run Echo started")?;
         let call = dunce::canonicalize(&call).map_err(|e| format!("the run's call folder can't be found: {e}"))?;
         if !call.join("meta.json").is_file() {
             return Err(format!("{} isn't a call folder", call.display()));
         }
         let previous = var(RUN_PREVIOUS).filter(|p| !p.is_empty()).and_then(|p| dunce::canonicalize(p).ok());
-        let clis: Vec<String> = var(RUN_CLIS).and_then(|c| c.into_string().ok()).unwrap_or_default().lines().filter(|l| !l.is_empty()).map(str::to_owned).collect();
+        let clis = clis_of(var(RUN_CLIS));
         if clis.is_empty() {
             return Err("the run names no Echo CLI".into());
         }
         let ask = var(RUN_MODE).is_some_and(|m| m == "ask");
-        Ok(Scope { call, previous, clis, ask })
+        Ok(Scope { call, previous, clis, ask, project: None })
     }
 
     /// Allowed, or why not.
     pub fn judge(&self, call: &Value) -> Result<(), String> {
         let tool = call["tool_name"].as_str().unwrap_or("");
         let input = &call["tool_input"];
+        if let Some(ps) = &self.project {
+            return self.judge_project(ps, tool, input);
+        }
         match tool {
             "Bash" => self.bash(input["command"].as_str().unwrap_or("")),
             "Read" => {
@@ -173,6 +219,9 @@ impl Scope {
                 }
             }
             "Skill" if self.ask => Err("no skill runs in this session".into()),
+            // The Brain's read-only tools (`echoctl brain mcp`): the window's session may search the
+            // user's other calls; a minutes run may not (it writes from its own call only).
+            t if self.ask && t.starts_with(BRAIN_TOOLS) => Ok(()),
             "Skill" => {
                 let name = input["skill"].as_str().or_else(|| input["command"].as_str()).unwrap_or("");
                 if matches!(name.trim_start_matches('/'), "echo:process-call" | "process-call") {
@@ -183,6 +232,63 @@ impl Scope {
             }
             "" => Err("no tool named".into()),
             other => Err(format!("{other} isn't available in a minutes run")),
+        }
+    }
+
+    /// A project's sync run: read its ledger, write its own JSON files, run its ledger steps.
+    fn judge_project(&self, ps: &ProjectScope, tool: &str, input: &Value) -> Result<(), String> {
+        match tool {
+            "Bash" => {
+                let words = shell_words(input["command"].as_str().unwrap_or(""))?;
+                let (cli, rest) = words.split_first().ok_or("an empty command")?;
+                if !self.clis.iter().any(|c| c == cli) {
+                    return Err(format!("only the Echo CLI runs here, not {cli}"));
+                }
+                let ok = rest.len() >= 4 && rest[0] == "project" && rest[1] == "ledger" && rest[2] == ps.id && PROJECT_STEPS.contains(&rest[3].as_str());
+                if ok {
+                    Ok(())
+                } else {
+                    Err(format!("only `echoctl project ledger {} <{}>` runs here", ps.id, PROJECT_STEPS.join("|")))
+                }
+            }
+            "Read" | "Glob" | "Grep" => {
+                let key = if tool == "Read" { "file_path" } else { "path" };
+                let p = resolve(input[key].as_str())?;
+                // The skill's own instructions.
+                if tool == "Read" && ps.skill.as_ref().is_some_and(|s| p.starts_with(s)) {
+                    return Ok(());
+                }
+                if !self.inside(&p) {
+                    return Err(format!("only this project's ledger can be read, not {}", p.display()));
+                }
+                let pattern = if tool == "Glob" { input["pattern"].as_str() } else if tool == "Grep" { input["glob"].as_str() } else { None };
+                match pattern {
+                    Some(g) if escapes(g) => Err(format!("the pattern {g} reaches outside the ledger")),
+                    _ => Ok(()),
+                }
+            }
+            "Edit" | "Write" => {
+                let raw = input["file_path"].as_str();
+                let p = resolve(raw)?;
+                let json = p.extension().is_some_and(|e| e == "json");
+                if p.parent() != Some(ps.run_dir.as_path()) || !json {
+                    return Err(format!("a sync run writes only its own JSON files in {}, not {}", ps.run_dir.display(), p.display()));
+                }
+                if raw.map(native).is_some_and(|f| std::fs::symlink_metadata(f).is_ok_and(|m| m.file_type().is_symlink())) {
+                    return Err(format!("{} is a link: not written", p.display()));
+                }
+                Ok(())
+            }
+            "Skill" => {
+                let name = input["skill"].as_str().or_else(|| input["command"].as_str()).unwrap_or("");
+                if matches!(name.trim_start_matches('/'), "echo:project-sync" | "project-sync") {
+                    Ok(())
+                } else {
+                    Err(format!("only the project-sync skill runs here, not {name:?}"))
+                }
+            }
+            "" => Err("no tool named".into()),
+            other => Err(format!("{other} isn't available in a project sync")),
         }
     }
 
@@ -337,7 +443,56 @@ mod tests {
             previous: dunce::canonicalize(root.join("calls/2026-10-18_100000-call/notes.md")).ok(),
             clis: vec!["echoctl".into(), "/Apps/Echo.app/plugin/scripts/echoctl".into()],
             ask: false,
+            project: None,
         }
+    }
+
+    #[test]
+    fn a_project_sync_reads_its_ledger_writes_its_run_and_runs_its_steps() {
+        let root = std::env::temp_dir().join(format!("echo-guard-project-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let ledger = root.join("projects/aurora/ledger");
+        fs::create_dir_all(ledger.join("evidence")).unwrap();
+        fs::create_dir_all(ledger.join("runs/r1")).unwrap();
+        fs::create_dir_all(root.join("projects/helix/ledger/evidence")).unwrap();
+        fs::write(ledger.join("evidence/2026-10-28_110000.md"), "x").unwrap();
+        let vars = |k: &str| -> Option<std::ffi::OsString> {
+            match k {
+                RUN_MODE => Some("project".into()),
+                RUN_LEDGER => Some(ledger.clone().into()),
+                RUN_DIR => Some(ledger.join("runs/r1").into()),
+                RUN_PROJECT => Some("aurora".into()),
+                RUN_CLIS => Some("echoctl".into()),
+                _ => None,
+            }
+        };
+        let s = Scope::from_vars(vars).unwrap();
+        let ok = |name: &str, input: Value| s.judge(&tool(name, input));
+        let l = dunce::canonicalize(&ledger).unwrap();
+        assert!(ok("Bash", json!({"command": "echoctl project ledger aurora context"})).is_ok());
+        assert!(ok("Bash", json!({"command": "echoctl project ledger aurora apply --evidence 2026-10-28_110000 --proposals /x/p.json"})).is_ok());
+        assert!(ok("Bash", json!({"command": "echoctl project ledger aurora people-context --items '2026-10-28_110000'"})).is_ok(), "the people pass");
+        assert!(ok("Bash", json!({"command": "echoctl project ledger aurora people-apply --evidence 2026-10-28_110000 --file /x/p.json"})).is_ok());
+        assert!(ok("Bash", json!({"command": "echoctl project people aurora"})).is_err(), "not the people tab's own command");
+        assert!(ok("Bash", json!({"command": "echoctl project ledger helix context"})).is_err(), "another project");
+        assert!(ok("Bash", json!({"command": "echoctl project ledger aurora edit '{}'"})).is_err(), "the user's edits");
+        assert!(ok("Bash", json!({"command": "echoctl project ledger aurora context; rm -rf /"})).is_err());
+        assert!(ok("Bash", json!({"command": "echoctl notes latest"})).is_err());
+        assert!(ok("Read", json!({"file_path": l.join("evidence/2026-10-28_110000.md")})).is_ok());
+        assert!(ok("Read", json!({"file_path": root.join("projects/helix/ledger/evidence")})).is_err());
+        assert!(ok("Write", json!({"file_path": l.join("runs/r1/2026-10-28_110000.json")})).is_ok());
+        assert!(ok("Write", json!({"file_path": l.join("runs/r1/notes.md")})).is_err(), "JSON only");
+        assert!(ok("Write", json!({"file_path": l.join("events.jsonl")})).is_err(), "never the log itself");
+        assert!(ok("Edit", json!({"file_path": l.join("evidence/2026-10-28_110000.md")})).is_err());
+        assert!(ok("Glob", json!({"path": l, "pattern": "../../**"})).is_err());
+        assert!(ok("Skill", json!({"skill": "echo:project-sync"})).is_ok());
+        assert!(ok("Read", json!({"file_path": root.join("plugin/skills/project-sync/EXTRACT.md")})).is_err(), "no skill folder named: not readable");
+        assert!(ok("Skill", json!({"skill": "echo:process-call"})).is_err());
+        assert!(ok("WebFetch", json!({"url": "https://example.com"})).is_err());
+        // A run folder outside the ledger's runs is no run.
+        let bad = |k: &str| if k == RUN_DIR { Some(root.join("projects").into()) } else { vars(k) };
+        assert!(Scope::from_vars(bad).is_err());
+        let _ = fs::remove_dir_all(&root);
     }
 
     fn tool(name: &str, input: Value) -> Value {
@@ -408,6 +563,9 @@ mod tests {
     fn the_windows_session_on_a_call_reads_and_changes_nothing() {
         let root = fixture("ask");
         let s = Scope { ask: true, ..scope(&root) };
+        assert!(s.judge(&json!({"tool_name": "mcp__echo-brain__search_knowledge", "tool_input": {"query": "budget"}})).is_ok(), "the Brain reads");
+        assert!(s.judge(&json!({"tool_name": "mcp__other__send_mail", "tool_input": {}})).is_err(), "nothing else");
+        assert!(Scope { ask: false, ..scope(&root) }.judge(&json!({"tool_name": "mcp__echo-brain__search_knowledge", "tool_input": {}})).is_err(), "not in a minutes run");
         let call = root.join("calls/2026-10-25_100000-call");
         let path = |p: &Path| p.display().to_string();
         let ok = |t: &str, input: Value| s.judge(&tool(t, input)).map_err(|e| format!("{t}: {e}"));
@@ -450,7 +608,7 @@ mod tests {
                 fs::create_dir_all(root.join("calls").join(d)).unwrap();
                 fs::write(root.join("calls").join(d).join("transcript.md"), "x").unwrap();
             }
-            let s = Scope { call: dunce::canonicalize(root.join("calls").join(own)).unwrap(), previous: None, clis: vec!["echoctl".into()], ask: false };
+            let s = Scope { call: dunce::canonicalize(root.join("calls").join(own)).unwrap(), previous: None, clis: vec!["echoctl".into()], ask: false, project: None };
             let p = |f: &str| root.join("calls").join(twin).join(f).display().to_string();
             for (t, input) in [
                 ("Read", json!({"file_path": p("transcript.md")})),

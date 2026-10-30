@@ -127,6 +127,7 @@ pub fn to_meeting(ev: &Value) -> Option<MeetingContext> {
     Some(MeetingContext {
         id: ev.get("id").and_then(Value::as_str).map(str::to_owned),
         subject: Some(subject),
+        series_id: ev.get("seriesMasterId").and_then(Value::as_str).map(str::to_owned),
         start: Some(start.to_rfc3339()),
         end: end.map(|e| e.to_rfc3339()),
         organizer: ev.get("organizer").and_then(person),

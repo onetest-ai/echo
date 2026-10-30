@@ -39,7 +39,7 @@ minutes already can be done again.
 `echoctl context <dir>` prints JSON — use its numbers, don't recompute them:
 `duration_min`, `transcript_chars`, `chars_by_speaker`, `dominant_language`, `colleagues` /
 `external`, `user_notes` + `user_headings`, `heading_budget`, `summarize` + `skip_reason`,
-`previous_notes`, `vocabulary`, `template`, `frames`, `chat`, `me_profile`.
+`previous_notes`, `vocabulary`, `template`, `frames`, `chat`, `me_profile`, `projects`.
 
 `me_profile` (if set) is the user's own description — role, team, the people and terms they
 deal with, how they like notes and follow-ups written. Follow it for tone, emphasis and naming.
@@ -77,6 +77,11 @@ Name the speakers first (4a, if the transcript has "Speaker N" labels), then wri
   person everywhere. Otherwise say "someone on the call". "Me" is the user (`me.name` if set).
 - If `previous_notes` exists, read it and add a short "Since last time" line when there is real
   continuity (a decision revisited, an action item followed up). Skip it otherwise.
+- `projects` lists the projects this call belongs to: each one's `brief`, `notes` (what the user
+  wants you to know), `terms`, `people` and the `highlights` of its `recent_calls`. Use them to name
+  things the way the project does and to see continuity across calls with other titles (a decision
+  from an earlier call revisited here). They are context, not content: write only what this call
+  said.
 - Ground every line in the transcript. Leave a section out rather than pad it.
 - **Diagrams:** when a process, flow or architecture was walked through (or the user asks for
   one), draw it as a ```` ```mermaid ```` block (`flowchart TD`; one short line per node, `<br>` for

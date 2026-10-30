@@ -1,8 +1,11 @@
 #[cfg(feature = "transcribe")]
 mod aec;
+#[cfg(feature = "brain")]
+mod brain;
 mod ai;
 mod app;
 mod apps;
+mod attention;
 mod audio;
 #[cfg(any(target_os = "macos", windows))]
 mod ax;
@@ -15,6 +18,7 @@ mod frames;
 mod gpu;
 mod graph;
 mod guard;
+mod ledger;
 mod livenotes;
 #[cfg(feature = "transcribe")]
 mod live;
@@ -23,6 +27,11 @@ mod minutes;
 mod notes;
 mod models;
 mod paths;
+mod projects;
+mod people;
+mod projectsync;
+mod tasks;
+mod view;
 mod vocab;
 mod permissions;
 mod recorder;
@@ -61,6 +70,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// What waits for your decision (the window's Needs you), and what was done this week (JSON)
+    Attention,
     /// Check OS permissions needed for capture and explain how to grant them
     Doctor {
         /// Emit machine-readable JSON (used by the /echo:doctor skill)
@@ -198,6 +209,22 @@ enum Cmd {
         #[arg(default_value = "latest")]
         call: String,
     },
+    /// The Brain: cross-call intelligence over calls (later channels, mail, folders) (JSON)
+    #[cfg(feature = "brain")]
+    Brain {
+        #[command(subcommand)]
+        cmd: BrainCmd,
+    },
+    /// Projects: which calls belong (rules, pins), stage, glossary, people (JSON)
+    Project {
+        #[command(subcommand)]
+        cmd: ProjectCmd,
+    },
+    /// Clients: the organisations projects are for, with their mail domains (JSON)
+    Client {
+        #[command(subcommand)]
+        cmd: ClientCmd,
+    },
     /// Vocabulary (names/terms Whisper should spell right), learned automatically
     Vocab {
         #[command(subcommand)]
@@ -313,6 +340,9 @@ enum Cmd {
     /// Echo started (`guard.rs`); exit 2 refuses the call
     #[command(hide = true)]
     RunGuard,
+    /// (internal) Echo's Claude terminals ask it before each prompt: what the window shows (`view.rs`)
+    #[command(hide = true)]
+    ViewHook,
     /// (old name of `app run`)
     #[command(hide = true)]
     Watch {
@@ -656,6 +686,258 @@ enum VocabCmd {
 }
 
 #[derive(Subcommand)]
+enum ProjectCmd {
+    /// Every project with its client, stage and call count
+    List,
+    /// One project, with its calls and why each belongs
+    Show { id: String },
+    /// A new project (stage active unless --stage)
+    Create {
+        name: String,
+        #[arg(long)]
+        client: Option<String>,
+        #[arg(long)]
+        stage: Option<String>,
+    },
+    /// Change a project's fields
+    Set {
+        id: String,
+        #[arg(long)]
+        name: Option<String>,
+        /// A client id; "" for none
+        #[arg(long)]
+        client: Option<String>,
+        /// lead, proposal, negotiation, kickoff, active, on_hold, wrap_up, done, lost, cancelled
+        #[arg(long)]
+        stage: Option<String>,
+        /// Why it moved (kept with the stage change)
+        #[arg(long, requires = "stage")]
+        reason: Option<String>,
+        /// YYYY-MM-DD: older calls don't belong; "" for none
+        #[arg(long)]
+        since: Option<String>,
+        /// YYYY-MM-DD: its documents, posts and mail dated before it are history in the Brain; "" for none
+        #[arg(long)]
+        history_before: Option<String>,
+        #[arg(long)]
+        color: Option<String>,
+        /// What Claude should know about it
+        #[arg(long)]
+        notes: Option<String>,
+        /// The AI profile of its jobs; "" for the default
+        #[arg(long)]
+        profile: Option<String>,
+        /// The model of its jobs; "" for the profile's minutes model
+        #[arg(long)]
+        model: Option<String>,
+        /// The brief, from a file ("-" for stdin)
+        #[arg(long)]
+        brief: Option<std::path::PathBuf>,
+        /// A symbol from the window's set (rocket, database, shield…); "" for its identicon
+        #[arg(long)]
+        icon: Option<String>,
+        /// A logo image (PNG, JPEG or WebP, ≤ 512 KB); "" removes it
+        #[arg(long)]
+        logo: Option<std::path::PathBuf>,
+    },
+    /// Add a rule (one of --series, --people, --chat, --subject) or remove one by number (--remove)
+    Rule {
+        id: String,
+        /// Every occurrence of this recurring meeting (its subject)
+        #[arg(long)]
+        series: Option<String>,
+        /// Calls where half the other people are from these domains (none given: the client's)
+        #[arg(long, num_args = 0.., value_delimiter = ',')]
+        people: Option<Vec<String>>,
+        /// Calls whose Teams chat is this chat id
+        #[arg(long)]
+        chat: Option<String>,
+        /// Calls whose subject contains these words
+        #[arg(long)]
+        subject: Option<String>,
+        /// Remove the rule with this number (1 = the first, as `show` lists them)
+        #[arg(long)]
+        remove: Option<usize>,
+    },
+    /// A source the Brain reads for the project: --mail <domain or address>, --channel <team id>|<channel
+    /// id> (--name to show), --folder <path> (--exclude <glob>…: what in it not to read), or --remove
+    /// <kind:id> as `show` lists them
+    #[cfg(feature = "brain")]
+    Source {
+        id: String,
+        #[arg(long)]
+        mail: Option<String>,
+        #[arg(long)]
+        channel: Option<String>,
+        #[arg(long)]
+        folder: Option<std::path::PathBuf>,
+        #[arg(long)]
+        exclude: Vec<String>,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        remove: Option<String>,
+    },
+    /// Put a call in the project by hand
+    Include { id: String, call: String },
+    /// Take a call out of the project (the rules won't put it back)
+    Exclude { id: String, call: String },
+    /// Leave a call to the rules again
+    Reset { id: String, call: String },
+    /// Add or remove glossary terms (they hint transcription on its calls)
+    Term {
+        id: String,
+        terms: Vec<String>,
+        /// What they are: system, term, acronym, milestone, deliverable…
+        #[arg(long)]
+        kind: Option<String>,
+        #[arg(long)]
+        remove: bool,
+    },
+    /// Add or remove a person (email, or a name)
+    Person {
+        id: String,
+        name: String,
+        #[arg(long)]
+        email: Option<String>,
+        #[arg(long)]
+        role: Option<String>,
+        #[arg(long)]
+        remove: bool,
+    },
+    /// The projects a call belongs to, and the ones it may belong to
+    Of { call: String },
+    /// Its people and organisations: who the calls show (calls, talk share, tasks), what you set
+    People {
+        id: String,
+        /// Ask Microsoft 365 (the People API) about them first: title, department, company, office, phone
+        #[arg(long)]
+        refresh: bool,
+    },
+    /// Open tasks across open projects by who has to move (I owe, owed to me, waiting, nobody named), and asks by person
+    Tasks,
+    /// Projects Echo would make from calls in none (last 90 days); --accept, --merge or --reject one
+    Found {
+        /// Make this one (its key)
+        #[arg(long, conflicts_with_all = ["merge", "reject"])]
+        accept: Option<String>,
+        /// Its name (with --accept)
+        #[arg(long, requires = "accept")]
+        name: Option<String>,
+        /// Its client: an id, "new" for the one it proposes, "" for none (with --accept)
+        #[arg(long, requires = "accept")]
+        client: Option<String>,
+        /// Add this one's rules to a project (with --into)
+        #[arg(long, requires = "into", conflicts_with = "reject")]
+        merge: Option<String>,
+        #[arg(long)]
+        into: Option<String>,
+        /// Never suggest this one again
+        #[arg(long)]
+        reject: Option<String>,
+    },
+    /// Move a project to the trash (its calls are untouched)
+    Delete { id: String },
+    /// The project's work ledger: stories, tasks, decisions, risks, questions from its calls
+    Ledger {
+        id: String,
+        #[command(subcommand)]
+        cmd: LedgerCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum LedgerCmd {
+    /// Bring the evidence up to date with the project's calls (--limit: only the newest N)
+    Sync {
+        #[arg(long)]
+        limit: Option<usize>,
+    },
+    /// Evidence not processed yet, oldest first
+    Pending,
+    /// The live tree as the extractor reads it
+    Context,
+    /// Apply proposals (a JSON array file) for one evidence item
+    Apply {
+        #[arg(long)]
+        evidence: String,
+        #[arg(long)]
+        proposals: std::path::PathBuf,
+    },
+    /// Mark an evidence item processed (also when it changed nothing)
+    Done {
+        #[arg(long)]
+        evidence: String,
+        #[arg(long, default_value = "")]
+        note: String,
+    },
+    /// The claims a verifier must judge (--weak: those judged weak too)
+    VerifyPrep {
+        #[arg(long)]
+        weak: bool,
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+    },
+    /// Apply verdicts (a JSON array file of {mid, verdict, reason})
+    VerifyApply {
+        #[arg(long)]
+        file: std::path::PathBuf,
+    },
+    /// The people pass: the thread's people and organisations, these calls' files, what was proposed
+    PeopleContext {
+        /// Evidence ids (comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        items: Vec<String>,
+    },
+    /// Propose changes about people for one evidence item (a JSON array file of {who, field, value, quote, to?, note?})
+    PeopleApply {
+        #[arg(long)]
+        evidence: String,
+        #[arg(long)]
+        file: std::path::PathBuf,
+    },
+    /// The whole tree (JSON)
+    Tree,
+    /// Sync now: the calls into evidence, then Claude reads them in (extract, then verify, then people)
+    Run,
+    /// The last sync's state
+    Status,
+    /// An edit of yours (JSON: {op: edit|ac_add|ac_set|link|unlink|merge|delete|accept|reject|undo|create, …})
+    Edit { json: String },
+}
+
+#[derive(Subcommand)]
+enum ClientCmd {
+    List,
+    /// Its people and organisations across its threads: who the calls show, what you set
+    People { id: String },
+    Add {
+        name: String,
+        /// Mail domains (comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        domains: Vec<String>,
+        /// The user's own company
+        #[arg(long)]
+        internal: bool,
+    },
+    Set {
+        id: String,
+        #[arg(long)]
+        name: Option<String>,
+        /// Replaces the domains (comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        domains: Option<Vec<String>>,
+        #[arg(long)]
+        internal: Option<bool>,
+        /// A logo image (PNG, JPEG or WebP, ≤ 512 KB); "" removes it
+        #[arg(long)]
+        logo: Option<std::path::PathBuf>,
+    },
+    /// Remove a client without projects
+    Remove { id: String },
+}
+
+#[derive(Subcommand)]
 enum AgendaCmd {
     /// Refresh today's agenda from the calendar (msgraph skill if installed); quiet no-op without
     Sync {
@@ -685,11 +967,16 @@ enum MeetingCmd {
 enum ServerCmd {
     /// The server this computer uses, and whether it serves others
     Status,
-    /// Transcribe on this server: http(s)://host:port and its API key (checked before it is kept)
+    /// Transcribe on this server: http(s)://host:port and its API key (checked before it is kept);
+    /// --openai for an OpenAI-compatible server (Speaches, vLLM, LocalAI, parakeet-api…), --model to pick its model
     Use {
         url: String,
-        #[arg(long)]
+        #[arg(long, default_value = "")]
         key: String,
+        #[arg(long)]
+        openai: bool,
+        #[arg(long)]
+        model: Option<String>,
     },
     /// Stop using the server: transcribe on this computer again
     Off,
@@ -764,6 +1051,10 @@ fn main() -> Result<()> {
         return app::run(apps::TargetApp::Teams, true, true);
     }
     match Cli::parse().cmd {
+        Cmd::Attention => {
+            print_json(&attention::peek());
+            Ok(())
+        }
         Cmd::Doctor { json, request, probe, open } => permissions::doctor(json, request, probe, open.as_deref()),
         Cmd::Model { cmd } => match cmd {
             ModelCmd::List { json } => models::list(json),
@@ -833,12 +1124,23 @@ fn main() -> Result<()> {
             Ok(())
         }
         Cmd::RunGuard => std::process::exit(guard::command()),
+        Cmd::ViewHook => std::process::exit(view::hook()),
         #[cfg(feature = "transcribe")]
         Cmd::GpuCheck => gpu::check(),
         #[cfg(feature = "transcribe")]
         Cmd::Server { cmd } => match cmd.unwrap_or(ServerCmd::Status) {
             ServerCmd::Status => remote::print_status(),
-            ServerCmd::Use { url, key } => {
+            ServerCmd::Use { url, key, openai: true, model } => {
+                let c = remote::connect_openai(&url, &key, model.as_deref())?;
+                println!(
+                    "transcribing on {url} with {} (OpenAI-compatible; test answer in {:.1}s; word timestamps: {})",
+                    c.model,
+                    c.seconds,
+                    if c.words { "yes" } else { "no — speaker turns are split by sentence only" }
+                );
+                Ok(())
+            }
+            ServerCmd::Use { url, key, .. } => {
                 let h = remote::connect(&url, &key)?;
                 println!("transcribing on {} ({}, {}, Echo {})", h.name, h.model, h.engine, h.version);
                 Ok(())
@@ -872,6 +1174,15 @@ fn main() -> Result<()> {
         Cmd::Speakers { call, names, relabel } => speakers::command(&call, &names, relabel),
         Cmd::Vocab { cmd } => {
             let mut cfg = config::Config::load()?;
+            // The old learned list moves into the taxonomy once (never from inside a minutes run).
+            #[cfg(feature = "brain")]
+            if !notes::headless() {
+                match vocab::migrate_learned(&mut cfg) {
+                    Ok(0) => {}
+                    Ok(n) => eprintln!("moved {n} learned terms into the Brain's taxonomy (the old list is kept in .echo/learned-before-taxonomy.json)"),
+                    Err(e) => eprintln!("warning: moving the learned terms: {e:#}"),
+                }
+            }
             match cmd {
                 VocabCmd::Add { terms, call, always } => {
                     // A run Echo started learns a call's terms, never the user's own always-on list.
@@ -891,6 +1202,10 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
+        #[cfg(feature = "brain")]
+        Cmd::Brain { cmd } => brain_command(cmd),
+        Cmd::Project { cmd } => project_command(cmd),
+        Cmd::Client { cmd } => client_command(cmd),
         Cmd::Context { call } => calls::context(&call),
         Cmd::Title { call, title } => calls::set_title(&call, &title),
         Cmd::Note { text } => calls::note(&text.join(" ")),
@@ -1187,4 +1502,639 @@ fn main() -> Result<()> {
             AgendaCmd::Sync { quiet } => calendar::sync(quiet),
         },
     }
+}
+
+fn print_json(v: &serde_json::Value) {
+    println!("{}", serde_json::to_string_pretty(v).unwrap_or_default());
+}
+
+fn project_command(cmd: ProjectCmd) -> Result<()> {
+    use projects::{Member, Rule, Stage, Term};
+    if let ProjectCmd::Ledger { id, cmd } = cmd {
+        return ledger_command(&id, cmd);
+    }
+    // A run Echo started works on its own call (or project) only; projects are the user's.
+    if notes::headless() {
+        anyhow::bail!("projects can't be changed or listed from a run Echo started");
+    }
+    let empty = |s: String| if s.trim().is_empty() { None } else { Some(s) };
+    let show = |p: &projects::Project| -> Result<()> {
+        print_json(&projects::view(p, true)?);
+        Ok(())
+    };
+    match cmd {
+        ProjectCmd::List => print_json(&projects::overview()?),
+        ProjectCmd::Show { id } => show(&projects::load(&id)?)?,
+        ProjectCmd::Create { name, client, stage } => {
+            let stage = stage.as_deref().map(Stage::parse).transpose()?;
+            show(&projects::create(&name, client.as_deref(), stage)?)?
+        }
+        ProjectCmd::Set { id, name, client, stage, reason, since, history_before, color, notes, profile, model, brief, icon, logo } => {
+            if let Some(f) = logo {
+                projects::set_logo(&id, (!f.as_os_str().is_empty()).then_some(f.as_path()))?;
+            }
+            if let Some(f) = brief {
+                let text = if f.as_os_str() == "-" { std::io::read_to_string(std::io::stdin())? } else { std::fs::read_to_string(&f)? };
+                projects::set_brief(&id, &text)?;
+            }
+            if let Some(st) = stage {
+                projects::set_stage(&id, Stage::parse(&st)?, reason.as_deref())?;
+            }
+            let p = projects::update(&id, |p| {
+                if let Some(n) = name {
+                    p.name = n.trim().to_string();
+                }
+                if let Some(c) = client {
+                    p.client = empty(c);
+                }
+                if let Some(s) = since {
+                    p.since = empty(s);
+                }
+                if let Some(s) = history_before {
+                    p.history_before = empty(s);
+                }
+                if let Some(c) = color {
+                    p.color = c;
+                }
+                if let Some(n) = notes {
+                    p.notes = n;
+                }
+                if let Some(a) = profile {
+                    p.ai_profile = empty(a);
+                }
+                if let Some(m) = model {
+                    p.model = empty(m);
+                }
+                if let Some(i) = icon {
+                    p.icon = empty(i);
+                }
+                Ok(())
+            })?;
+            show(&p)?
+        }
+        #[cfg(feature = "brain")]
+        ProjectCmd::Source { id, mail, channel, folder, exclude, name, remove } => {
+            let add = match (mail, channel, folder) {
+                (Some(m), _, _) => Some(("mail".to_string(), brain::sources::mail_source(&m)?)),
+                (None, Some(c), _) if c.split_once('|').is_some_and(|(a, b)| !a.is_empty() && !b.is_empty()) => Some(("teams_channel".to_string(), c)),
+                (None, Some(_), _) => anyhow::bail!("--channel takes <team id>|<channel id>"),
+                (None, None, Some(f)) => {
+                    let f = dunce::canonicalize(&f).map_err(|e| anyhow::anyhow!("{}: {e}", f.display()))?;
+                    anyhow::ensure!(f.is_dir(), "{} isn't a folder", f.display());
+                    Some(("folder".to_string(), f.to_string_lossy().to_string()))
+                }
+                _ => None,
+            };
+            let p = projects::update(&id, |p| {
+                if let Some(r) = &remove {
+                    let before = p.sources.len();
+                    p.sources.retain(|s| format!("{}:{}", s.kind, s.id) != *r);
+                    if p.sources.len() == before {
+                        anyhow::bail!("no source {r}");
+                    }
+                }
+                if let Some((kind, sid)) = &add {
+                    match p.sources.iter_mut().find(|s| &s.kind == kind && &s.id == sid) {
+                        Some(s) if !exclude.is_empty() => s.exclude = exclude.clone(),
+                        Some(_) => {}
+                        None => p.sources.push(projects::Source { kind: kind.clone(), id: sid.clone(), name: name.clone(), exclude: exclude.clone() }),
+                    }
+                }
+                Ok(())
+            })?;
+            print_json(&serde_json::json!(p.sources));
+        }
+        ProjectCmd::Rule { id, series, people, chat, subject, remove } => {
+            let p = projects::update(&id, |p| {
+                if let Some(n) = remove {
+                    if n == 0 || n > p.rules.len() {
+                        anyhow::bail!("no rule {n} (it has {})", p.rules.len());
+                    }
+                    p.rules.remove(n - 1);
+                }
+                let mut add = vec![];
+                if let Some(s) = series {
+                    add.push(Rule::Series { subject: s, series_id: None });
+                }
+                if let Some(d) = people {
+                    add.push(Rule::People { domains: d });
+                }
+                if let Some(c) = chat {
+                    add.push(Rule::Chat { id: c.trim().to_string(), name: None });
+                }
+                if let Some(s) = subject {
+                    add.push(Rule::Subject { contains: s });
+                }
+                for r in add {
+                    if !p.rules.contains(&r) {
+                        p.rules.push(r);
+                    }
+                }
+                Ok(())
+            })?;
+            show(&p)?
+        }
+        ProjectCmd::Include { id, call } => show(&projects::set_membership(&id, &calls::resolve_call(&call)?, "include")?)?,
+        ProjectCmd::Exclude { id, call } => show(&projects::set_membership(&id, &calls::resolve_call(&call)?, "exclude")?)?,
+        ProjectCmd::Reset { id, call } => show(&projects::set_membership(&id, &calls::resolve_call(&call)?, "rules")?)?,
+        ProjectCmd::Term { id, terms, kind, remove } => {
+            let p = projects::update(&id, |p| {
+                for t in terms.iter().map(|t| t.trim()).filter(|t| !t.is_empty()) {
+                    p.terms.retain(|x| !x.term.eq_ignore_ascii_case(t));
+                    if !remove {
+                        if !config::valid_term(t) {
+                            anyhow::bail!("{t:?}: a term is 2–50 characters, at most 6 words");
+                        }
+                        p.terms.push(Term { term: t.to_string(), kind: kind.clone(), note: None });
+                    }
+                }
+                Ok(())
+            })?;
+            show(&p)?
+        }
+        ProjectCmd::Person { id, name, email, role, remove } => {
+            let p = projects::update(&id, |p| {
+                let key = email.clone().unwrap_or_else(|| name.clone()).to_lowercase();
+                p.people.retain(|m| m.email.clone().unwrap_or_else(|| m.name.clone()).to_lowercase() != key);
+                if !remove {
+                    p.people.push(Member { name: name.trim().to_string(), email: email.clone(), role: role.clone(), ..Default::default() });
+                }
+                Ok(())
+            })?;
+            show(&p)?
+        }
+        ProjectCmd::People { id, refresh } => {
+            let today = chrono::Local::now().date_naive();
+            if refresh {
+                let v = people::of_thread(&id, today)?;
+                let who: Vec<(String, String)> = v["people"].as_array().into_iter().flatten().filter_map(|p| Some((p["name"].as_str()?.to_string(), p["email"].as_str()?.to_string()))).collect();
+                eprintln!("asked Microsoft 365 about {} people", people::refresh_m365(&who)?);
+            }
+            print_json(&people::of_thread(&id, today)?)
+        }
+        ProjectCmd::Tasks => {
+            let now = chrono::Utc::now();
+            print_json(&tasks::across(&watch::agenda(), chrono::Local::now().date_naive(), &now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))?);
+        }
+        ProjectCmd::Of { call } => {
+            let dir = calls::resolve_call(&call)?;
+            let of: Vec<serde_json::Value> = projects::of_call(&dir)?.into_iter().map(|(p, w)| serde_json::json!({"id": p.id, "name": p.name, "why": w})).collect();
+            print_json(&serde_json::json!({"projects": of, "suggested": projects::suggest(&dir)?}));
+        }
+        ProjectCmd::Found { accept, name, client, merge, into, reject } => {
+            if let Some(k) = accept {
+                show(&projects::found_accept(&k, name.as_deref(), client.as_deref())?)?
+            } else if let (Some(k), Some(into)) = (merge, into) {
+                show(&projects::found_merge(&k, &into)?)?
+            } else if let Some(k) = reject {
+                projects::found_reject(&k)?;
+                println!("{k}: not suggested again");
+            } else {
+                print_json(&serde_json::json!(projects::found()?));
+            }
+        }
+        ProjectCmd::Ledger { .. } => unreachable!(),
+        ProjectCmd::Delete { id } => {
+            projects::delete(&id)?;
+            println!("{id} moved to the trash");
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "brain")]
+#[derive(Subcommand)]
+enum BrainCmd {
+    /// What the Brain holds, and its settings
+    Status,
+    /// Bring it up to date with the calls (only what changed; vectors for sections without one)
+    Sync,
+    /// Search it: keywords in any language and meaning (when an embedding server is set), fused
+    Search {
+        query: String,
+        #[arg(long, default_value_t = 8)]
+        limit: usize,
+        /// Only sources whose id contains this (e.g. call/2026-10)
+        #[arg(long)]
+        within: Option<String>,
+        /// Only one client's sections (its id; "-": calls with no client)
+        #[arg(long, conflicts_with = "thread")]
+        client: Option<String>,
+        /// Only one thread's sections (its id; "-": calls in no thread)
+        #[arg(long)]
+        thread: Option<String>,
+    },
+    /// The clients and threads it covers, with their documents and sections
+    Scopes,
+    /// Who may speak into the Brain through mail and channels, per client: trusted, ignored, waiting.
+    /// A decision drops what sources gave and reads them again at the next sync
+    Senders {
+        /// The client (a thread with none: "-")
+        #[arg(long)]
+        client: Option<String>,
+        /// Trust this sender (an address, or teams:<id> as listed)
+        #[arg(long, requires = "client", conflicts_with_all = ["ignore", "forget"])]
+        trust: Option<String>,
+        /// Never read this sender
+        #[arg(long, requires = "client", conflicts_with = "forget")]
+        ignore: Option<String>,
+        /// Forget a decision (the sender waits again)
+        #[arg(long, requires = "client")]
+        forget: Option<String>,
+    },
+    /// The thread folders' files: what was read, how, and why the others weren't
+    Files,
+    /// The numbers lane: governed metrics from a client's reporting workbooks
+    Numbers {
+        #[command(subcommand)]
+        cmd: NumbersCmd,
+    },
+    /// (dev) What the Brain's readers make of files: method, pages, routing (why a page goes to the page reader), date
+    #[command(hide = true)]
+    ReadFile {
+        paths: Vec<std::path::PathBuf>,
+        /// Print each page's text too
+        #[arg(long)]
+        text: bool,
+    },
+    /// (dev) Where a work item comes up elsewhere in its thread: the Work tab's "Mentioned also in"
+    #[command(hide = true)]
+    Mentions {
+        #[arg(long)]
+        thread: String,
+        #[arg(long)]
+        title: String,
+        /// JSON [[call stamp, quote], …]
+        #[arg(long, default_value = "[]")]
+        quotes: String,
+    },
+    /// A client's or a thread's insights (--run: refresh them now, Claude on the default profile)
+    Insights {
+        #[arg(long, conflicts_with = "thread")]
+        client: Option<String>,
+        #[arg(long)]
+        thread: Option<String>,
+        #[arg(long)]
+        run: bool,
+    },
+    /// The sections nearest to one, from other sources
+    Related {
+        chunk: i64,
+        #[arg(long, default_value_t = 6)]
+        limit: usize,
+    },
+    /// Serve it to Claude Code as an MCP server over stdio (read-only; Brain's tool names). Only one AI
+    /// profile's sources (--profile; default: the default profile's), narrowed for a call's session
+    /// to its client (--client), else its threads (--thread), else the call itself (--call)
+    Mcp {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        client: Option<String>,
+        #[arg(long)]
+        thread: Vec<String>,
+        #[arg(long)]
+        call: Option<String>,
+    },
+    /// The taxonomy: topics and terms (it supersedes thread glossaries)
+    Taxonomy {
+        #[command(subcommand)]
+        cmd: TaxonomyCmd,
+    },
+    /// The embedding server (Settings → Brain): Ollama or OpenAI-compatible
+    Set {
+        #[arg(long)]
+        endpoint: Option<String>,
+        /// ollama | openai
+        #[arg(long)]
+        api: Option<String>,
+        #[arg(long)]
+        model: Option<String>,
+        /// A bearer token for an OpenAI-compatible server ("" removes it)
+        #[arg(long)]
+        key: Option<String>,
+        /// The Brain at all: false turns it off (nothing read, indexed or offered to Claude; the store stays)
+        #[arg(long)]
+        enabled: Option<bool>,
+    },
+}
+
+#[cfg(feature = "brain")]
+#[derive(Subcommand)]
+enum NumbersCmd {
+    /// Profile the client's workbooks (its threads' folders, or --root): sheets, headers, samples
+    Profile {
+        client: String,
+        /// A folder to read instead of the client's threads' (testing)
+        #[arg(long)]
+        root: Option<std::path::PathBuf>,
+    },
+    /// Claude proposes the families and metrics from the profiles (saved as proposed)
+    Propose {
+        client: String,
+        #[arg(long)]
+        root: Option<std::path::PathBuf>,
+    },
+    /// Use a families config written by hand or by Brain (families.<corpus>.json), and its metrics.json
+    Import {
+        client: String,
+        families: std::path::PathBuf,
+        #[arg(long)]
+        metrics: Option<std::path::PathBuf>,
+        /// Accept it at once
+        #[arg(long)]
+        accept: bool,
+    },
+    /// Accept the proposed families (the build reads them from now on)
+    Accept { client: String },
+    /// Build the client's facts from its accepted families
+    Build {
+        client: String,
+        #[arg(long)]
+        root: Option<std::path::PathBuf>,
+        /// Build a config that isn't accepted yet (testing)
+        #[arg(long)]
+        force: bool,
+    },
+    /// Every client's families, catalog and last build
+    Show,
+    /// The governed metrics (MCP list_metrics)
+    List {
+        #[arg(long)]
+        client: Option<String>,
+    },
+    /// A metric's values (MCP get_metric)
+    Get {
+        name: String,
+        #[arg(long)]
+        client: Option<String>,
+        #[arg(long)]
+        grain: Option<String>,
+        #[arg(long)]
+        entity: Option<String>,
+        #[arg(long)]
+        month: Option<String>,
+    },
+}
+
+#[cfg(feature = "brain")]
+#[derive(Subcommand)]
+enum TaxonomyCmd {
+    /// Every topic and term, with its sections and threads, and the coverage
+    Show,
+    /// Build it from the calls (Claude, on the default AI profile): every layer, or one (--layer shared | a client's id);
+    /// a provisional version to review, then the layer's sections tagged
+    Build {
+        #[arg(long)]
+        layer: Option<String>,
+    },
+    /// Tag sections not tagged yet (--again: all of them; --layer: only one layer's sections)
+    Classify {
+        #[arg(long)]
+        again: bool,
+        #[arg(long)]
+        layer: Option<String>,
+    },
+    /// The user's change (JSON: {op: accept|add|rename|merge|move|remove|set, label|name, term?, to?, into?, parent?, …})
+    Edit { json: String },
+}
+
+#[cfg(feature = "brain")]
+fn brain_command(cmd: BrainCmd) -> Result<()> {
+    // Reading is allowed anywhere (a session Echo started reads it through MCP); changing it isn't.
+    if let BrainCmd::Mcp { profile, client, thread, call } = cmd {
+        let access = brain::access::Access { profile: profile.unwrap_or_else(ai::default_id), client, threads: thread, call };
+        return brain::mcp::serve(Some(access));
+    }
+    if notes::headless() {
+        anyhow::bail!("the Brain isn't changed from a run Echo started");
+    }
+    match cmd {
+        BrainCmd::Mcp { .. } => unreachable!(),
+        BrainCmd::Taxonomy { cmd } => {
+            let progress = |m: &str| eprintln!("{m}");
+            match cmd {
+                TaxonomyCmd::Show => print_json(&brain::taxonomy::view()?),
+                TaxonomyCmd::Build { layer } => print_json(&match layer {
+                    Some(l) => brain::taxonomy::induce(&l, &progress)?,
+                    None => brain::taxonomy::induce_all(&progress)?,
+                }),
+                TaxonomyCmd::Classify { again, layer } => print_json(&serde_json::json!({"classified": brain::taxonomy::classify(layer.as_deref(), again, &progress)?})),
+                TaxonomyCmd::Edit { json } => {
+                    let op: serde_json::Value = serde_json::from_str(&json).map_err(|e| anyhow::anyhow!("not JSON: {e}"))?;
+                    brain::taxonomy::edit(&op)?;
+                    print_json(&brain::taxonomy::view()?)
+                }
+            }
+        }
+        BrainCmd::Status => print_json(&brain::status()?),
+        BrainCmd::Sync => print_json(&serde_json::to_value(brain::sync()?)?),
+        BrainCmd::Search { query, limit, within, client, thread } => {
+            let scope = client.as_deref().map(|c| ("client", c)).or(thread.as_deref().map(|t| ("thread", t)));
+            print_json(&brain::search(&query, limit, within.as_deref(), scope)?)
+        }
+        BrainCmd::Scopes => print_json(&brain::store::scopes(&brain::store_path())?),
+        BrainCmd::Senders { client, trust, ignore, forget } => {
+            let pick = trust.map(|k| ("trust", k)).or(ignore.map(|k| ("ignore", k))).or(forget.map(|k| ("forget", k)));
+            if let (Some(c), Some((d, k))) = (&client, pick) {
+                brain::senders::decide(c, &k, d)?;
+            }
+            let mut v = brain::senders::view();
+            if let Some(c) = &client {
+                v["clients"] = serde_json::json!({c.clone(): v["clients"][c].clone()});
+            }
+            print_json(&v)
+        }
+        BrainCmd::Files => print_json(&brain::files::folder::status()?),
+        BrainCmd::Numbers { cmd } => {
+            use brain::numbers as n;
+            let root = |r: Option<std::path::PathBuf>| r.map(|r| vec![(r, vec![])]);
+            match cmd {
+                NumbersCmd::Profile { client, root: r } => print_json(&n::profile::run(&client, root(r))?["summary"]),
+                NumbersCmd::Propose { client, root: r } => print_json(&n::profile::propose(&client, root(r))?),
+                NumbersCmd::Import { client, families, metrics, accept } => {
+                    let c = n::import_config(&client, &families, accept)?;
+                    if let Some(m) = metrics {
+                        let v: serde_json::Value = serde_json::from_slice(&std::fs::read(&m)?)?;
+                        let cat: std::collections::BTreeMap<String, serde_json::Value> = serde_json::from_value(v.get("metrics").cloned().unwrap_or(v))?;
+                        n::save_catalog(&client, &cat)?;
+                    }
+                    print_json(&serde_json::json!({"families": c.families.len(), "accepted": c.accepted()}));
+                }
+                NumbersCmd::Accept { client } => {
+                    let mut c = n::load_config(&client).ok_or_else(|| anyhow::anyhow!("no families for {client}: propose or import them first"))?;
+                    c.check()?;
+                    c._echo = Some(serde_json::json!({"status": "accepted", "at": chrono::Utc::now().to_rfc3339(), "was": c._echo}));
+                    n::save_config(&client, &c)?;
+                    print_json(&serde_json::json!({"accepted": c.families.len()}));
+                }
+                NumbersCmd::Build { client, root: r, force } => {
+                    let c = n::load_config(&client).ok_or_else(|| anyhow::anyhow!("no families for {client}: propose or import them first"))?;
+                    anyhow::ensure!(force || c.accepted(), "the families for {client} are proposed, not accepted: accept them first (or --force)");
+                    print_json(&n::build::run(&client, &c, root(r))?);
+                }
+                NumbersCmd::Show => print_json(&n::overview()?),
+                NumbersCmd::List { client } => print_json(&n::list_metrics(client.as_deref())?),
+                NumbersCmd::Get { name, client, grain, entity, month } => print_json(&n::get_metric(&serde_json::json!({"name": name, "client": client, "grain": grain, "entity": entity, "month": month}))?),
+            }
+        }
+        BrainCmd::ReadFile { paths, text } => {
+            let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+            for p in paths {
+                match brain::files::read(&p) {
+                    Ok(r) => {
+                        let body = r.md.clone().unwrap_or_else(|| r.pages.iter().map(|x| x.text.clone()).collect::<Vec<_>>().join("\n"));
+                        let (date, from) = brain::files::exact_date(&body, &p, &today);
+                        let pages: Vec<serde_json::Value> = r
+                            .pages
+                            .iter()
+                            .map(|x| {
+                                let mut v = serde_json::json!({"n": x.n, "title": x.title, "chars": x.text.chars().count(), "tables": x.tables.len(), "drawings": x.drawings,
+                                    "pictures": x.pictures, "connectors": x.connectors, "charts": x.charts, "smartart": x.smartart, "route": brain::files::route(x)});
+                                if text {
+                                    v["text"] = serde_json::json!(x.text);
+                                }
+                                v
+                            })
+                            .collect();
+                        let flagged = r.pages.iter().filter(|x| brain::files::route(x).is_some()).count();
+                        print_json(&serde_json::json!({"file": p, "method": r.method, "fidelity": r.fidelity, "skip": r.skip, "date": date, "date_from": from,
+                            "chars": r.md.as_ref().map(|m| m.chars().count()), "figures": r.figures, "pages": r.pages.len(), "flagged": flagged,
+                            "page_list": pages, "md": if text { r.md } else { None }}));
+                    }
+                    Err(e) => print_json(&serde_json::json!({"file": p, "error": format!("{e:#}")})),
+                }
+            }
+        }
+        BrainCmd::Mentions { thread, title, quotes } => {
+            let q: Vec<(String, String)> = serde_json::from_str(&quotes).map_err(|e| anyhow::anyhow!("--quotes: {e}"))?;
+            print_json(&brain::views::mentions(&thread, &title, &q)?)
+        }
+        BrainCmd::Insights { client, thread, run } => {
+            let scope = client.as_deref().map(|c| ("client", c)).or(thread.as_deref().map(|t| ("thread", t))).ok_or_else(|| anyhow::anyhow!("--client or --thread"))?;
+            if run {
+                print_json(&brain::insights::run(scope, &|m: &str| eprintln!("{m}"))?);
+            }
+            print_json(&brain::insights::view(scope)?)
+        }
+        BrainCmd::Related { chunk, limit } => print_json(&brain::store::related(&brain::store_path(), chunk, limit)?),
+        BrainCmd::Set { endpoint, api, model, key, enabled } => {
+            let mut s = brain::settings();
+            if let Some(on) = enabled {
+                s.enabled = Some(on);
+            }
+            if let Some(e) = endpoint {
+                s.endpoint = e.trim().to_string();
+            }
+            if let Some(a) = api {
+                s.api = a.trim().to_string();
+            }
+            if let Some(m) = model {
+                s.model = m.trim().to_string();
+            }
+            if let Some(k) = key {
+                s.key = (!k.is_empty()).then_some(k);
+            }
+            brain::save_settings(&s)?;
+            print_json(&brain::status()?)
+        }
+    }
+    Ok(())
+}
+
+fn client_command(cmd: ClientCmd) -> Result<()> {
+    if notes::headless() {
+        anyhow::bail!("clients can't be changed or listed from a run Echo started");
+    }
+    match cmd {
+        ClientCmd::List => print_json(&serde_json::to_value(projects::clients()?)?),
+        ClientCmd::People { id } => print_json(&people::of_client(&id, chrono::Local::now().date_naive())?),
+        ClientCmd::Add { name, domains, internal } => print_json(&serde_json::to_value(projects::add_client(&name, &domains, internal)?)?),
+        ClientCmd::Set { id, name, domains, internal, logo } => {
+            if let Some(f) = logo {
+                let bytes = if f.as_os_str().is_empty() { None } else { Some(std::fs::read(&f)?) };
+                projects::set_client_logo(&id, bytes.as_deref())?;
+            }
+            let c = projects::update_client(&id, |c| {
+                if let Some(n) = name {
+                    c.name = n;
+                }
+                if let Some(d) = domains {
+                    c.domains = d;
+                }
+                if let Some(i) = internal {
+                    c.internal = i;
+                }
+                Ok(())
+            })?;
+            print_json(&serde_json::to_value(c)?)
+        }
+        ClientCmd::Remove { id } => {
+            projects::remove_client(&id)?;
+            println!("{id} removed");
+        }
+    }
+    Ok(())
+}
+
+fn ledger_command(id: &str, cmd: LedgerCmd) -> Result<()> {
+    // Inside a run Echo started: the agent's steps, on that run's project only.
+    if notes::headless() {
+        let own = std::env::var(guard::RUN_PROJECT).unwrap_or_default();
+        let agent_step = matches!(cmd, LedgerCmd::Pending | LedgerCmd::Context | LedgerCmd::Apply { .. } | LedgerCmd::Done { .. } | LedgerCmd::VerifyPrep { .. } | LedgerCmd::VerifyApply { .. } | LedgerCmd::PeopleContext { .. } | LedgerCmd::PeopleApply { .. });
+        if own.is_empty() || own != id || !agent_step {
+            anyhow::bail!("a run Echo started works only on its own project's ledger, with the agent's steps");
+        }
+    }
+    let read = |p: &std::path::Path| -> Result<Vec<serde_json::Value>> {
+        // A run reads its inputs only from its own folder (not another project's files).
+        if notes::headless() {
+            let run = std::env::var_os(guard::RUN_DIR).and_then(|d| dunce::canonicalize(d).ok());
+            let parent = dunce::canonicalize(p).ok().and_then(|f| f.parent().map(std::path::Path::to_path_buf));
+            if run.is_none() || parent != run {
+                anyhow::bail!("a run reads its files only from its own folder");
+            }
+        }
+        let v: serde_json::Value = serde_json::from_slice(&std::fs::read(p)?).map_err(|e| anyhow::anyhow!("{}: not JSON ({e})", p.display()))?;
+        v.as_array().cloned().ok_or_else(|| anyhow::anyhow!("{}: expected a JSON array", p.display()))
+    };
+    match cmd {
+        LedgerCmd::Sync { limit } => print_json(&serde_json::json!({ "written": ledger::sync(id, limit)?, "pending": ledger::pending(id)? })),
+        LedgerCmd::Pending => print_json(&serde_json::json!(ledger::pending(id)?)),
+        LedgerCmd::Context => print_json(&ledger::context(id)?),
+        LedgerCmd::Apply { evidence, proposals } => print_json(&ledger::apply(id, &evidence, &read(&proposals)?)?),
+        LedgerCmd::Done { evidence, note } => {
+            ledger::mark_processed(id, &evidence, &note)?;
+            print_json(&serde_json::json!({ "done": evidence }));
+        }
+        LedgerCmd::VerifyPrep { weak, out } => {
+            // A run writes only into its own folder.
+            if let (true, Some(f)) = (notes::headless(), &out) {
+                let run = std::env::var_os(guard::RUN_DIR).and_then(|d| dunce::canonicalize(d).ok());
+                let parent = f.parent().and_then(|d| dunce::canonicalize(d).ok());
+                if run.is_none() || parent != run {
+                    anyhow::bail!("a run writes its packets only into its own folder");
+                }
+            }
+            let packets = serde_json::json!(ledger::verify_prep(id, weak)?);
+            match out {
+                Some(f) => {
+                    std::fs::write(&f, serde_json::to_vec_pretty(&packets)?)?;
+                    print_json(&serde_json::json!({ "packets": packets.as_array().map(|a| a.len()), "file": f }));
+                }
+                None => print_json(&packets),
+            }
+        }
+        LedgerCmd::VerifyApply { file } => print_json(&ledger::verify_apply(id, &read(&file)?)?),
+        LedgerCmd::PeopleContext { items } => print_json(&people::context(id, &items)?),
+        LedgerCmd::PeopleApply { evidence, file } => print_json(&people::apply_suggestions(id, &evidence, &read(&file)?)?),
+        LedgerCmd::Tree => print_json(&ledger::tree(id)?),
+        LedgerCmd::Run => print_json(&projectsync::run(id)?),
+        LedgerCmd::Status => print_json(&projectsync::state(id)),
+        LedgerCmd::Edit { json } => {
+            let body: serde_json::Value = serde_json::from_str(&json).map_err(|e| anyhow::anyhow!("not JSON: {e}"))?;
+            print_json(&ledger::human_event(id, &body)?)
+        }
+    }
+    Ok(())
 }

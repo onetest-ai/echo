@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 use crate::config::Config;
@@ -31,7 +31,7 @@ use crate::paths;
 pub const DEFAULT_CLIENT_ID: &str = "3d7688c6-f449-4d04-8b0d-57d94818e922";
 pub const DEFAULT_TENANT: &str = "common";
 /// Read-only: the calendar, and the chats the user is in (the meeting chat during a call).
-const SCOPES: &str = "openid profile offline_access User.Read Calendars.Read Chat.Read";
+const SCOPES: &str = "openid profile offline_access User.Read Calendars.Read Chat.Read People.Read";
 const GRAPH: &str = "https://graph.microsoft.com/v1.0";
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
@@ -162,7 +162,8 @@ fn curl(config: &str) -> Result<Value> {
 }
 
 fn quote(s: &str) -> String {
-    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+    // A newline would end the option and start another (curl reads its config line by line).
+    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\r', "\\r"))
 }
 
 fn token_request(tenant: &str, body: &str) -> Result<Value> {
@@ -354,6 +355,214 @@ fn access_token() -> Result<String> {
 }
 
 /// Events between `from` and `to` (Graph shape, times in UTC), following pagination.
+/// What the user's directory says about a person (the People API, `People.Read`: works for
+/// colleagues; someone outside the organisation comes back with a name only, or not at all). Found
+/// by their address among the person's addresses; `None` when nobody matches.
+pub fn person(email: &str) -> Result<Option<Value>> {
+    let token = access_token()?;
+    let email = email.trim().to_lowercase();
+    let url = format!(
+        "{GRAPH}/me/people?$search={}&$top=5&$select=displayName,jobTitle,department,companyName,officeLocation,phones,scoredEmailAddresses,userPrincipalName",
+        urlencode(&format!("\"{email}\""))
+    );
+    let v = graph_get(&token, &url)?;
+    let hit = v["value"].as_array().into_iter().flatten().find(|p| {
+        p["userPrincipalName"].as_str().is_some_and(|u| u.eq_ignore_ascii_case(&email))
+            || p["scoredEmailAddresses"].as_array().into_iter().flatten().any(|a| a["address"].as_str().is_some_and(|x| x.eq_ignore_ascii_case(&email)))
+    });
+    Ok(hit.map(|p| {
+        let phones = p["phones"].as_array().cloned().unwrap_or_default();
+        let phone = ["business", "mobile"].iter().find_map(|t| phones.iter().find(|x| x["type"] == *t).and_then(|x| x["number"].as_str())).or_else(|| phones.first().and_then(|x| x["number"].as_str()));
+        json!({"name": p["displayName"], "title": p["jobTitle"], "department": p["department"], "company": p["companyName"],
+               "office": p["officeLocation"].as_str().map(|o| o.replace('\\', ", ")), "phone": phone})
+    }))
+}
+
+// ── Teams channels and mail: thread sources for the Brain (read only; nothing is kept but its index) ──
+
+/// GET with the body asked as text (mail) besides the usual headers.
+#[cfg_attr(not(feature = "brain"), allow(dead_code))]
+fn graph_get_text(token: &str, url: &str) -> Result<Value> {
+    let v = curl(&format!(
+        "url = {}\nheader = {}\nheader = \"Prefer: outlook.timezone=\\\"UTC\\\", outlook.body-content-type=\\\"text\\\"\"\n",
+        quote(url),
+        quote(&format!("Authorization: Bearer {token}"))
+    ))?;
+    if let Some(e) = v.get("error") {
+        bail!("Graph: {} {}", e["code"].as_str().unwrap_or(""), e["message"].as_str().unwrap_or(""));
+    }
+    Ok(v)
+}
+
+/// The teams the user is in: `[{id, name}]`.
+#[cfg_attr(not(feature = "brain"), allow(dead_code))]
+pub fn teams() -> Result<Vec<Value>> {
+    let token = access_token()?;
+    let v = graph_get(&token, &format!("{GRAPH}/me/joinedTeams?$select=id,displayName"))?;
+    Ok(v["value"].as_array().into_iter().flatten().map(|t| json!({"id": t["id"], "name": t["displayName"]})).collect())
+}
+
+/// A team's channels: `[{id, name}]`.
+#[cfg_attr(not(feature = "brain"), allow(dead_code))]
+pub fn channels(team: &str) -> Result<Vec<Value>> {
+    let token = access_token()?;
+    let v = graph_get(&token, &format!("{GRAPH}/teams/{}/channels?$select=id,displayName,membershipType", urlencode(team)))?;
+    Ok(v["value"].as_array().into_iter().flatten().map(|c| json!({"id": c["id"], "name": c["displayName"], "membership": c["membershipType"]})).collect())
+}
+
+/// A channel's messages (with their replies) created or changed since `since`, newest pages first,
+/// at most `cap` root messages: `[{id, at, from, text, url, replies: [{at, from, text}]}]`.
+#[cfg_attr(not(feature = "brain"), allow(dead_code))]
+pub fn channel_messages(team: &str, channel: &str, since: DateTime<Utc>, cap: usize) -> Result<Vec<Value>> {
+    let token = access_token()?;
+    let mut url = Some(format!("{GRAPH}/teams/{}/channels/{}/messages?$top=50&$expand=replies", urlencode(team), urlencode(channel)));
+    let mut out = vec![];
+    let msg = |m: &Value| -> Option<Value> {
+        if !m["deletedDateTime"].is_null() || m["messageType"].as_str().is_some_and(|t| t != "message") {
+            return None;
+        }
+        let text = html_to_text(m["body"]["content"].as_str().unwrap_or(""));
+        let text = text.trim().to_string();
+        (!text.is_empty()).then(|| json!({"id": m["id"], "at": m["createdDateTime"], "from": m["from"]["user"]["displayName"].as_str().or(m["from"]["application"]["displayName"].as_str()).unwrap_or("?"),
+                                          "from_id": m["from"]["user"]["id"].as_str().map(|i| format!("teams:{i}")).or_else(|| m["from"]["application"]["id"].as_str().map(|i| format!("app:{i}"))),
+                                          "text": text, "url": m["webUrl"]}))
+    };
+    while let Some(u) = url.take() {
+        let v = graph_get(&token, &u)?;
+        let mut older = 0;
+        for m in v["value"].as_array().into_iter().flatten() {
+            let changed = m["lastModifiedDateTime"].as_str().or(m["createdDateTime"].as_str()).and_then(|t| DateTime::parse_from_rfc3339(t).ok()).map(|t| t.with_timezone(&Utc));
+            let replies: Vec<Value> = m["replies"].as_array().into_iter().flatten().filter_map(msg).collect();
+            let newest_reply = replies.iter().filter_map(|r| r["at"].as_str().and_then(|t| DateTime::parse_from_rfc3339(t).ok())).map(|t| t.with_timezone(&Utc)).max();
+            if changed.max(newest_reply).is_none_or(|t| t < since) {
+                older += 1;
+                continue;
+            }
+            if let Some(mut root) = msg(m) {
+                root["replies"] = json!(replies);
+                out.push(root);
+            }
+        }
+        // Pages come newest first: a page all older than `since` ends it.
+        if out.len() < cap && older < v["value"].as_array().map(|a| a.len()).unwrap_or(0) {
+            url = v["@odata.nextLink"].as_str().map(str::to_owned);
+        }
+    }
+    out.truncate(cap);
+    Ok(out)
+}
+
+/// Mail matching a KQL query received since `since` (newest first, at most `cap`): `[{id,
+/// conversation, subject, from, to, at, text, url}]`.
+#[cfg_attr(not(feature = "brain"), allow(dead_code))]
+pub fn mail(kql: &str, since: DateTime<Utc>, cap: usize) -> Result<Vec<Value>> {
+    let token = access_token()?;
+    let q = format!("{kql} received>={}", since.format("%Y-%m-%d"));
+    let mut url = Some(format!(
+        "{GRAPH}/me/messages?$search={}&$top=50&$select=id,conversationId,subject,from,toRecipients,ccRecipients,receivedDateTime,body,webLink,internetMessageHeaders",
+        urlencode(&format!("\"{}\"", q.replace('"', "'")))
+    ));
+    let mut out = vec![];
+    while let Some(u) = url.take() {
+        let v = graph_get_text(&token, &u)?;
+        for m in v["value"].as_array().into_iter().flatten() {
+            out.push(mail_item(m));
+        }
+        if out.len() < cap {
+            url = v["@odata.nextLink"].as_str().map(str::to_owned);
+        }
+    }
+    out.truncate(cap);
+    Ok(out)
+}
+
+/// Every message of one conversation (oldest first).
+#[cfg_attr(not(feature = "brain"), allow(dead_code))]
+pub fn conversation(id: &str) -> Result<Vec<Value>> {
+    let token = access_token()?;
+    let v = graph_get_text(&token, &format!(
+        "{GRAPH}/me/messages?$filter={}&$top=50&$select=id,conversationId,subject,from,toRecipients,ccRecipients,receivedDateTime,body,webLink,internetMessageHeaders",
+        urlencode(&format!("conversationId eq '{}'", id.replace('\'', "''")))
+    ))?;
+    let mut out: Vec<Value> = v["value"].as_array().into_iter().flatten().map(mail_item).collect();
+    out.sort_by(|a, b| a["at"].as_str().cmp(&b["at"].as_str()));
+    Ok(out)
+}
+
+#[cfg_attr(not(feature = "brain"), allow(dead_code))]
+/// How a mail's sender was authenticated, from Exchange's headers: `internal` (sent inside the
+/// organisation: `X-MS-Exchange-Organization-AuthAs: Internal`), `pass` (Exchange's own verdict — the
+/// topmost `Authentication-Results`, which it prepends; any lower one could be the sender's — says
+/// DMARC or composite authentication passed for the From domain itself), `fail`, or `none`. SPF and
+/// DKIM alone don't count: they can pass for the attacker's own domain behind a forged From.
+pub fn mail_auth(m: &Value) -> &'static str {
+    let from = m["from"]["emailAddress"]["address"].as_str().and_then(|a| a.rsplit_once('@')).map(|(_, d)| d.trim().to_lowercase()).unwrap_or_default();
+    let mut authas = String::new();
+    let mut first: Option<String> = None;
+    for h in m["internetMessageHeaders"].as_array().into_iter().flatten() {
+        let (n, v) = (h["name"].as_str().unwrap_or("").to_lowercase(), h["value"].as_str().unwrap_or("").to_lowercase());
+        if n == "x-ms-exchange-organization-authas" {
+            authas = v;
+        } else if n == "authentication-results" && first.is_none() {
+            first = Some(v);
+        }
+    }
+    if authas.trim() == "internal" {
+        return "internal";
+    }
+    let Some(r) = first else { return "none" };
+    if r.contains("dmarc=fail") || r.contains("compauth=fail") {
+        return "fail";
+    }
+    let header_from = r.split("header.from=").nth(1).map(|x| x.split([';', ' ', ')']).next().unwrap_or("").trim().to_string()).unwrap_or_default();
+    let aligned = !from.is_empty() && header_from == from;
+    if aligned && (r.contains("dmarc=pass") || r.contains("compauth=pass")) {
+        "pass"
+    } else {
+        "none"
+    }
+}
+
+/// The organisation's own mail domains (colleagues), from the tenant's verified domains.
+#[cfg_attr(not(feature = "brain"), allow(dead_code))]
+pub fn org_domains() -> Result<Vec<String>> {
+    let token = access_token()?;
+    let v = graph_get(&token, &format!("{GRAPH}/organization?$select=verifiedDomains"))?;
+    Ok(v["value"][0]["verifiedDomains"].as_array().into_iter().flatten().filter_map(|d| d["name"].as_str().map(str::to_lowercase)).collect())
+}
+
+/// A Teams author's mail address: the People API searched by their name, kept only when the person
+/// found is that author (the same directory id) — a name alone can be anyone's.
+#[cfg_attr(not(feature = "brain"), allow(dead_code))]
+pub fn person_email(name: &str, id: &str) -> Result<Option<String>> {
+    let token = access_token()?;
+    let url = format!("{GRAPH}/me/people?$search={}&$top=5&$select=id,displayName,scoredEmailAddresses,userPrincipalName", urlencode(&format!("\"{}\"", name.replace('"', ""))));
+    let v = graph_get(&token, &url)?;
+    Ok(v["value"].as_array().into_iter().flatten().find(|p| p["id"].as_str().is_some_and(|x| x.eq_ignore_ascii_case(id))).and_then(|p| {
+        p["userPrincipalName"].as_str().or_else(|| p["scoredEmailAddresses"].as_array().and_then(|a| a.first()).and_then(|a| a["address"].as_str())).map(str::to_lowercase)
+    }))
+}
+
+fn mail_item(m: &Value) -> Value {
+    let who = |r: &Value| -> Value { json!({"name": r["emailAddress"]["name"], "email": r["emailAddress"]["address"]}) };
+    // The new part of a reply: up to the quoted mail ("From: …", "-----Original Message-----", "On … wrote:").
+    let body = m["body"]["content"].as_str().unwrap_or("");
+    let mut text = String::new();
+    for l in body.lines() {
+        let t = l.trim();
+        if t.starts_with("From:") || t.starts_with("-----Original") || (t.starts_with("On ") && t.ends_with("wrote:")) || t.starts_with("________________") {
+            break;
+        }
+        text.push_str(l);
+        text.push('\n');
+    }
+    // Calendar invites and their answers (`eventMessage…`): the meeting itself is the call.
+    let invite = m["@odata.type"].as_str().is_some_and(|t| t.contains("eventMessage"));
+    json!({"id": m["id"], "conversation": m["conversationId"], "subject": m["subject"], "from": who(&m["from"]), "invite": invite, "auth": mail_auth(m),
+           "to": m["toRecipients"].as_array().into_iter().flatten().chain(m["ccRecipients"].as_array().into_iter().flatten()).map(who).collect::<Vec<_>>(),
+           "at": m["receivedDateTime"], "text": text.trim(), "url": m["webLink"]})
+}
+
 pub fn calendar_view(from: DateTime<Utc>, to: DateTime<Utc>) -> Result<Vec<Value>> {
     let token = access_token()?;
     let fmt = |d: DateTime<Utc>| d.format("%Y-%m-%dT%H:%M:%SZ").to_string();

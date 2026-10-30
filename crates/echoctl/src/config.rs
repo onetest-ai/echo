@@ -58,6 +58,10 @@ pub struct Config {
     /// user's last note (`notes::auto_due`). Default: on. Off: minutes are written only when asked.
     #[serde(default = "yes")]
     pub auto_minutes: bool,
+    /// Projects' work ledgers kept current by themselves after their calls (`projectsync.rs`): the
+    /// project's AI profile reads each new call into its tree. Default: on.
+    #[serde(default = "yes")]
+    pub project_sync: bool,
     /// Calls that ended before this are never written automatically (set when the switch is first
     /// on, and again on each off → on), so turning it on doesn't send a backlog of calls to a model.
     #[serde(default, skip_serializing_if = "Option::is_none")]

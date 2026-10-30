@@ -111,3 +111,8 @@ Code markers: `git grep "TODO(windows)"`.
   the Echo window on WebView2 (`http://echo.localhost`).
 - **Autostart** (HKCU Run key), **install-cli** (user PATH), single instance (`app.lock`).
 - **Microsoft 365** sign-in (loopback redirect), calendar, chat capture.
+
+## Thread folders in the Brain (untested on Windows)
+`package-windows.ps1` ships PDFium (`pdfium\pdfium.dll`, chromium/7881, checked by SHA-256). Never run on a
+Windows machine: PDF pages through it, LibreOffice found at `C:\Program Files\LibreOffice\program\soffice.exe`
+and its `-env:UserInstallation=file:///C:/…` profile, documents opened with `explorer <file>`, the folder picker.

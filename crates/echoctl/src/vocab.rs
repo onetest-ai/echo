@@ -6,6 +6,11 @@
 //!   in a call that shares one of those subjects, has mostly those people, or names it in its
 //!   invite.
 //!
+//! With the Brain built in, learned terms live in its taxonomy (`brain::taxonomy::learn`: in the call's
+//! client's layer, pinned to its threads, with the same scope); the old `learned` list is moved there
+//! once (`migrate_learned`, a copy kept in `.echo/learned-before-taxonomy.json`) and read meanwhile.
+//! It is transcription's, so it works whether or not the Brain is switched on.
+//!
 //! One list for every call is what went wrong first: terms learned in one project were boosted
 //! into all the others, and Nemotron wrote "Flow Studio" and "ServiceNow" dozens of times into a
 //! call that never mentioned them (2026-10-13).
@@ -40,7 +45,7 @@ pub struct Learned {
 }
 
 /// "Weekly sync #12" ~ "weekly sync": case, digits and punctuation don't make another series.
-fn norm_subject(s: &str) -> String {
+pub(crate) fn norm_subject(s: &str) -> String {
     s.to_lowercase()
         .chars()
         .map(|c| if c.is_alphabetic() { c } else { ' ' })
@@ -62,7 +67,7 @@ fn is_me(p: &Person, me: Option<&Person>) -> bool {
 }
 
 /// The other people of a meeting, as keys.
-fn others(m: &MeetingContext, me: Option<&Person>) -> BTreeSet<String> {
+pub(crate) fn others(m: &MeetingContext, me: Option<&Person>) -> BTreeSet<String> {
     m.organizer.iter().chain(m.attendees.iter()).filter(|p| !is_me(p, me)).map(person_key).filter(|k| !k.is_empty()).collect()
 }
 
@@ -80,15 +85,45 @@ fn applies(l: &Learned, m: &MeetingContext, me: Option<&Person>) -> bool {
     shared > 0 && shared * 2 >= people.len()
 }
 
+/// Every learned term: the old list's, then the taxonomy's.
+pub fn learned_all(cfg: &Config) -> Vec<Learned> {
+    let out: Vec<Learned> = cfg.learned.clone().unwrap_or_default();
+    #[cfg(feature = "brain")]
+    let out = {
+        let mut out = out;
+        for t in crate::brain::taxonomy::learned() {
+            if out.iter().any(|l| l.term.eq_ignore_ascii_case(&t.name)) {
+                continue;
+            }
+            let s = t.learned.unwrap_or_default();
+            out.push(Learned { term: t.name, subjects: s.subjects, people: s.people, calls: s.calls });
+        }
+        out
+    };
+    out
+}
+
 /// Terms for a call: the always-on list, then the learned terms that belong to this meeting.
 /// Without a meeting (an ad-hoc call before its people are known) only the always-on list.
 pub fn for_meeting(cfg: &Config, meeting: Option<&MeetingContext>) -> Vec<String> {
     let mut out: Vec<String> = cfg.vocabulary.clone();
     if let Some(m) = meeting {
-        for l in cfg.learned.iter().flatten().filter(|l| applies(l, m, cfg.me.as_ref())) {
+        for l in learned_all(cfg).iter().filter(|l| applies(l, m, cfg.me.as_ref())) {
             if !out.iter().any(|t| t.eq_ignore_ascii_case(&l.term)) {
                 out.push(l.term.clone());
             }
+        }
+    }
+    out
+}
+
+/// Terms for a call: the always-on list, the glossaries of the projects the meeting belongs to, then
+/// the learned terms that belong to it.
+pub fn for_call(cfg: &Config, meeting: Option<&MeetingContext>) -> Vec<String> {
+    let mut out: Vec<String> = cfg.vocabulary.clone();
+    for t in meeting.map(crate::projects::terms_for_meeting).unwrap_or_default().into_iter().chain(for_meeting(cfg, meeting)) {
+        if !out.iter().any(|x| x.eq_ignore_ascii_case(&t)) {
+            out.push(t);
         }
     }
     out
@@ -106,6 +141,25 @@ pub fn learn(cfg: &mut Config, dir: &Path, terms: &[String]) -> Vec<String> {
         .filter(|s| !s.is_empty());
     let people = meeting.as_ref().map(|m| others(m, cfg.me.as_ref())).unwrap_or_default();
     let call = dir.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+    #[cfg(feature = "brain")]
+    {
+        let (layer, threads) = place_of(dir);
+        let items: Vec<crate::brain::taxonomy::Learn> = terms
+            .iter()
+            .map(|t| t.trim())
+            .filter(|t| valid_term(t))
+            .map(|t| crate::brain::taxonomy::Learn {
+                term: t.to_string(),
+                layer: layer.clone(),
+                threads: threads.clone(),
+                scope: crate::brain::taxonomy::LearnedScope { subjects: subject.iter().cloned().collect(), people: people.iter().cloned().collect(), calls: if call.is_empty() { vec![] } else { vec![call.clone()] } },
+            })
+            .collect();
+        match crate::brain::taxonomy::learn(&items, "minutes") {
+            Ok(added) => return added,
+            Err(e) => eprintln!("warning: the taxonomy couldn't learn them ({e:#}); kept in the old list"),
+        }
+    }
     let list = cfg.learned.get_or_insert_with(Vec::new);
     let mut added = vec![];
     for t in terms.iter().map(|t| t.trim()) {
@@ -139,6 +193,50 @@ pub fn learn(cfg: &mut Config, dir: &Path, terms: &[String]) -> Vec<String> {
     added
 }
 
+/// Where a call's learned terms go: its client's layer (the first of its threads with a client),
+/// else the shared one; pinned to its threads.
+#[cfg(feature = "brain")]
+fn place_of(dir: &Path) -> (String, Vec<String>) {
+    let ps = crate::projects::of_call(dir).unwrap_or_default();
+    let layer = ps.iter().find_map(|(p, _)| p.client.clone()).unwrap_or_else(|| crate::brain::taxonomy::SHARED.to_string());
+    (layer, ps.into_iter().map(|(p, _)| p.id).collect())
+}
+
+/// Move the old `learned` list into the taxonomy, once: each term in the layer of the calls it came
+/// from (their client), pinned to their threads, its scope kept; the list saved beside the config,
+/// then emptied. Returns how many terms moved.
+#[cfg(feature = "brain")]
+pub fn migrate_learned(cfg: &mut Config) -> Result<usize> {
+    let Some(list) = cfg.learned.clone().filter(|l| !l.is_empty()) else { return Ok(0) };
+    let items: Vec<crate::brain::taxonomy::Learn> = list
+        .iter()
+        .map(|l| {
+            let dirs: Vec<std::path::PathBuf> = l.calls.iter().filter_map(|c| crate::calls::resolve_call(c).ok()).collect();
+            let places: Vec<(String, Vec<String>)> = dirs.iter().map(|d| place_of(d)).collect();
+            let layer = places.iter().map(|p| p.0.clone()).find(|l| l != crate::brain::taxonomy::SHARED).unwrap_or_else(|| crate::brain::taxonomy::SHARED.to_string());
+            let mut threads: Vec<String> = places.into_iter().flat_map(|p| p.1).collect();
+            threads.sort();
+            threads.dedup();
+            crate::brain::taxonomy::Learn {
+                term: l.term.clone(),
+                layer,
+                threads,
+                scope: crate::brain::taxonomy::LearnedScope { subjects: l.subjects.clone(), people: l.people.clone(), calls: l.calls.clone() },
+            }
+        })
+        .collect();
+    paths::write_atomic(&paths::state_dir().join("learned-before-taxonomy.json"), serde_json::to_string_pretty(&list)?.as_bytes())?;
+    crate::brain::taxonomy::learn(&items, "migration")?;
+    // `Some(empty)`, never None: an empty `learned` beside a non-empty always-on list is what the older
+    // migration (`migrate`) takes for a config from before learned terms, and would scope the list away.
+    // The config is read again right before saving, so a change made meanwhile isn't overwritten.
+    let mut fresh = Config::load()?;
+    fresh.learned = Some(vec![]);
+    fresh.save()?;
+    cfg.learned = Some(vec![]);
+    Ok(items.len())
+}
+
 /// The call a notes run just wrote (`vocab add` without `--call`): the newest notes.md, if it
 /// was written in the last three hours.
 fn latest_noted_call() -> Option<std::path::PathBuf> {
@@ -158,6 +256,13 @@ fn latest_noted_call() -> Option<std::path::PathBuf> {
 /// a transcript can hold the very insertions this undoes); the always-on list starts empty.
 pub fn migrate(cfg: &mut Config) -> bool {
     if cfg.learned.is_some() || cfg.vocabulary.is_empty() {
+        return false;
+    }
+    // Learned terms already moved to the taxonomy (a config saved with `learned: None` by an earlier
+    // build): this config is not from before learned terms, and its always-on list stays as it is.
+    #[cfg(feature = "brain")]
+    if !crate::brain::taxonomy::learned().is_empty() {
+        cfg.learned = Some(vec![]);
         return false;
     }
     let old = std::mem::take(&mut cfg.vocabulary);
@@ -199,11 +304,47 @@ pub fn add(cfg: &mut Config, terms: &[String], call: Option<&str>, always: bool)
         },
     };
     let added = learn(cfg, &dir, terms);
+    // A project's call: its glossary learns them too — unless the taxonomy did (it pins them to the
+    // call's threads, and it superseded the glossaries).
+    #[cfg(feature = "brain")]
+    let glossary = false;
+    #[cfg(not(feature = "brain"))]
+    let glossary = true;
+    match crate::projects::of_call(&dir).map(|p| if glossary { p } else { vec![] }) {
+        Ok(projects) => {
+            for (p, _) in projects {
+                let r = crate::projects::update(&p.id, |p| {
+                    for t in terms.iter().map(|t| t.trim()).filter(|t| valid_term(t)) {
+                        if !p.terms.iter().any(|x| x.term.eq_ignore_ascii_case(t)) {
+                            p.terms.push(crate::projects::Term { term: t.to_string(), kind: None, note: Some("learned from a call".into()) });
+                        }
+                    }
+                    Ok(())
+                });
+                if let Err(e) = r {
+                    eprintln!("warning: project {}: {e:#}", p.id);
+                }
+            }
+        }
+        Err(e) => eprintln!("warning: projects: {e:#}"),
+    }
     Ok(format!(
         "learned from {}: {}",
         dir.file_name().unwrap_or_default().to_string_lossy(),
         if added.is_empty() { "nothing new".into() } else { added.join(", ") }
     ))
+}
+
+/// Forget a learned term only (the always-on list keeps it if it is there).
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn forget_learned(cfg: &mut Config, term: &str) {
+    if let Some(l) = cfg.learned.as_mut() {
+        l.retain(|x| !x.term.eq_ignore_ascii_case(term));
+    }
+    #[cfg(feature = "brain")]
+    if let Err(e) = crate::brain::taxonomy::forget_learned(term) {
+        eprintln!("warning: the taxonomy: {e:#}");
+    }
 }
 
 pub fn remove(cfg: &mut Config, terms: &[String]) {
@@ -212,13 +353,19 @@ pub fn remove(cfg: &mut Config, terms: &[String]) {
     if let Some(l) = cfg.learned.as_mut() {
         l.retain(|x| !gone(&x.term));
     }
+    #[cfg(feature = "brain")]
+    for t in terms {
+        if let Err(e) = crate::brain::taxonomy::forget_learned(t.trim()) {
+            eprintln!("warning: the taxonomy: {e:#}");
+        }
+    }
 }
 
 pub fn list(cfg: &Config) -> String {
     let mut out = format!("always ({}): {}\n", cfg.vocabulary.len(), cfg.vocabulary.join(", "));
-    let learned = cfg.learned.as_deref().unwrap_or_default();
+    let learned = learned_all(cfg);
     out.push_str(&format!("learned ({}):\n", learned.len()));
-    for l in learned {
+    for l in &learned {
         let scope = if l.subjects.is_empty() && l.people.is_empty() { "only when an invite names it".to_string() } else { format!("{} · {}", l.subjects.join(" | "), l.people.join(", ")) };
         out.push_str(&format!("  {:<22} {scope}\n", l.term));
     }
@@ -235,6 +382,8 @@ mod tests {
 
     #[test]
     fn learned_terms_come_back_only_with_their_meeting() {
+        // Learning writes the data folder's taxonomy: a folder of the test's own.
+        let (_env, _root) = crate::paths::testenv::folders("vocab-learned");
         let me = p("Jane Doe", "jane@x.com");
         let dial9 = MeetingContext { subject: Some("Analyse dial9".into()), attendees: vec![me.clone(), p("Karen Ortiz", "karen@y.com")], ..Default::default() };
         let other = MeetingContext { subject: None, attendees: vec![me.clone(), p("Kate Lin", "kate@x.com")], ..Default::default() };
@@ -255,6 +404,35 @@ mod tests {
         let named = MeetingContext { subject: Some("Flow Studio review".into()), ..Default::default() };
         assert_eq!(for_meeting(&cfg, Some(&named)), ["Contoso", "Flow Studio"]);
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(feature = "brain")]
+    #[test]
+    fn the_old_learned_list_moves_into_the_taxonomy() {
+        let (_env, _root) = crate::paths::testenv::folders("vocab-migrate");
+        let me = p("Jane Doe", "jane@x.com");
+        let mut cfg = Config { me: Some(me.clone()), ..Default::default() };
+        cfg.learned = Some(vec![Learned { term: "Flow Studio".into(), subjects: vec!["analyse dial".into()], people: vec!["karen@y.com".into()], calls: vec![] }]);
+        cfg.save().unwrap();
+        cfg.vocabulary = vec!["Contoso".into()];
+        cfg.save().unwrap();
+        assert_eq!(migrate_learned(&mut cfg).unwrap(), 1);
+        assert_eq!(cfg.learned, Some(vec![]));
+        // The always-on list stays always-on across loads (the old migration mustn't scope it away).
+        let again = Config::load().unwrap();
+        assert_eq!((again.vocabulary.clone(), again.learned.clone()), (vec!["Contoso".to_string()], Some(vec![])));
+        assert!(crate::paths::state_dir().join("learned-before-taxonomy.json").exists());
+        let t = crate::brain::taxonomy::learned();
+        assert_eq!((t[0].name.as_str(), t[0].layer.as_str(), t[0].kind.as_str()), ("Flow Studio", "shared", "learned"));
+        // Its scope still decides: Karen's call gets it, someone else's doesn't.
+        let karen = MeetingContext { attendees: vec![me.clone(), p("Karen Ortiz", "karen@y.com")], ..Default::default() };
+        let other = MeetingContext { attendees: vec![me, p("Kate Lin", "kate@x.com")], ..Default::default() };
+        assert_eq!(for_meeting(&cfg, Some(&karen)), ["Contoso", "Flow Studio"]);
+        assert_eq!(for_meeting(&cfg, Some(&other)), ["Contoso"]);
+        // Nothing left to move; forgetting it removes the learned-only term.
+        assert_eq!(migrate_learned(&mut cfg).unwrap(), 0);
+        forget_learned(&mut cfg, "flow studio");
+        assert!(crate::brain::taxonomy::learned().is_empty());
     }
 
     #[test]

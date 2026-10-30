@@ -233,6 +233,7 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
         "/api/agenda" => json_reply(agenda()),
         "/api/layout" => json_reply(load_layout()),
         "/api/settings" => json_reply(settings_snapshot()),
+        "/api/attention" => json_reply(crate::attention::view(req.uri().query().is_some_and(|q| q.contains("fresh")))),
         "/api/sessions" => json_reply(json!(crate::terminal::saved_sessions())),
         "/api/ptys" => json_reply(Value::Array(crate::terminal::list().into_iter().map(|(id, key, exited)| json!({ "id": id, "key": key, "exited": exited })).collect())),
         // A terminal's output after byte `from`: answered at once when there is some, else when
@@ -250,6 +251,119 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
             }
         }
         "/api/calendar" => json_reply(calendar(req.uri().query().unwrap_or(""))),
+        // Pickers for a thread's sources: the user's teams, a team's channels (Microsoft 365).
+        // The numbers lane: per client its families (proposed / accepted), catalog, last build.
+        #[cfg(feature = "brain")]
+        "/api/brain/numbers" => json_reply({
+            let mut v = crate::brain::numbers::overview().unwrap_or_else(|e| json!({ "error": format!("{e:#}") }));
+            v["busy"] = NUMBERS_BUSY.lock().map(|b| json!(*b)).unwrap_or(Value::Null);
+            v
+        }),
+        // The thread folders' files: what was read, how, and why the others weren't.
+        #[cfg(feature = "brain")]
+        "/api/brain/files" => json_reply(crate::brain::files::folder::status().unwrap_or_else(|e| json!({ "error": format!("{e:#}") }))),
+        "/api/m365/teams" => json_reply(crate::graph::teams().map(Value::from).unwrap_or_else(|e| json!({ "error": format!("{e:#}") }))),
+        "/api/m365/channels" => {
+            let team = query_param(req.uri().query().unwrap_or(""), "team").unwrap_or_default();
+            json_reply(crate::graph::channels(&team).map(Value::from).unwrap_or_else(|e| json!({ "error": format!("{e:#}") })))
+        }
+        // How each thread source was last read (`brain/sources.json`).
+        #[cfg(feature = "brain")]
+        "/api/brain/sources" => json_reply(json!({ "state": crate::brain::sources::state(), "senders": crate::brain::senders::view(), "signed_in": crate::graph::account().is_some(), "syncing": BRAIN_SYNC.load(std::sync::atomic::Ordering::SeqCst) })),
+        // Projects: the list (clients, stages, each call's projects), one project, its logo.
+        "/api/projects" => json_reply(projects_overview()),
+        "/api/tasks" => json_reply(tasks_view()),
+        // The Brain: its overview, graph and a call's "Also discussed" (?client= / ?thread= scope them).
+        #[cfg(feature = "brain")]
+        p if p == "/api/brain" || p == "/api/brain/graph" => {
+            let q = req.uri().query().unwrap_or("");
+            let (client, thread) = (query_param(q, "client"), query_param(q, "thread"));
+            let scope = client.as_deref().map(|c| ("client", c)).or(thread.as_deref().map(|t| ("thread", t)));
+            let r = if p == "/api/brain" { crate::brain::views::overview(scope) } else { crate::brain::views::graph(scope) };
+            json_reply(r.unwrap_or_else(|e| json!({ "error": format!("{e:#}") })))
+        }
+        #[cfg(feature = "brain")]
+        "/api/brain/insights" => {
+            let q = req.uri().query().unwrap_or("");
+            let (client, thread) = (query_param(q, "client"), query_param(q, "thread"));
+            let scope = client.as_deref().map(|c| ("client", c)).or(thread.as_deref().map(|t| ("thread", t)));
+            json_reply(match scope {
+                Some(s) => crate::brain::insights::view(s).map(|mut v| {
+                    v["running"] = json!(BRAIN_INSIGHTS.lock().map(|r| r.contains(&format!("{}:{}", s.0, s.1))).unwrap_or(false));
+                    v
+                }).unwrap_or_else(|e| json!({ "error": format!("{e:#}") })),
+                None => json!({ "error": "a client or a thread" }),
+            })
+        }
+        // A work item's mentions elsewhere in its thread: POST-less, the item rides in the query.
+        #[cfg(feature = "brain")]
+        "/api/brain/mentions" => {
+            let q = req.uri().query().unwrap_or("");
+            let thread = query_param(q, "thread").unwrap_or_default();
+            let title = query_param(q, "title").unwrap_or_default();
+            let quotes: Vec<(String, String)> = query_param(q, "quotes")
+                .and_then(|s| serde_json::from_str::<Vec<(String, String)>>(&s).ok())
+                .unwrap_or_default();
+            json_reply(crate::brain::views::mentions(&thread, &title, &quotes).unwrap_or_else(|e| json!({ "error": format!("{e:#}") })))
+        }
+        #[cfg(feature = "brain")]
+        "/api/brain/node" => {
+            let q = req.uri().query().unwrap_or("");
+            let (client, thread) = (query_param(q, "client"), query_param(q, "thread"));
+            let scope = client.as_deref().map(|c| ("client", c)).or(thread.as_deref().map(|t| ("thread", t)));
+            json_reply(crate::brain::views::node(&query_param(q, "id").unwrap_or_default(), scope).unwrap_or_else(|e| json!({ "error": format!("{e:#}") })))
+        }
+        // One source for the graph's details panel.
+        #[cfg(feature = "brain")]
+        "/api/brain/doc" => {
+            let q = req.uri().query().unwrap_or("");
+            let (client, thread) = (query_param(q, "client"), query_param(q, "thread"));
+            let scope = client.as_deref().map(|c| ("client", c)).or(thread.as_deref().map(|t| ("thread", t)));
+            json_reply(crate::brain::views::doc(&query_param(q, "source").unwrap_or_default(), scope).unwrap_or_else(|e| json!({ "error": format!("{e:#}") })))
+        }
+        #[cfg(feature = "brain")]
+        p if p.starts_with("/api/brain/also/") => json_reply(crate::brain::views::also(&urldecode(&p["/api/brain/also/".len()..])).unwrap_or_else(|e| json!({ "error": format!("{e:#}") }))),
+        p if p.starts_with("/api/client/") && p.ends_with("/people") => {
+            json_reply(people_view(crate::people::of_client(&p["/api/client/".len()..p.len() - "/people".len()], chrono::Local::now().date_naive())))
+        }
+        p if p.starts_with("/api/client/") && !p.ends_with("/logo") => json_reply(client_view(&p["/api/client/".len()..])),
+        "/api/found" => json_reply(match crate::projects::found() {
+            Ok(f) => json!({ "found": f }),
+            Err(e) => json!({ "found": [], "error": format!("{e:#}") }),
+        }),
+        p if p.starts_with("/api/client/") && p.ends_with("/logo") => {
+            match crate::projects::client_logo(&p["/api/client/".len()..p.len() - "/logo".len()]).and_then(|(f, mime)| Some((fs::read(f).ok()?, mime))) {
+                Some((bytes, mime)) => reply(200, mime, bytes),
+                None => reply(404, "text/plain", b"no logo".to_vec()),
+            }
+        }
+        p if p.starts_with("/api/project/") => {
+            let rest = &p["/api/project/".len()..];
+            // Its people and organisations (the People tab).
+            if let Some(id) = rest.strip_suffix("/people") {
+                return json_reply(people_view(crate::people::of_thread(id, chrono::Local::now().date_naive())));
+            }
+            // Its work ledger: the tree, and the last sync.
+            if let Some(id) = rest.strip_suffix("/work") {
+                return json_reply(match crate::ledger::tree(id) {
+                    Ok(mut t) => {
+                        t["sync"] = crate::projectsync::state(id);
+                        t
+                    }
+                    Err(e) => json!({ "error": format!("{e:#}") }),
+                });
+            }
+            match rest.strip_suffix("/logo") {
+                Some(id) => match crate::projects::logo(id).and_then(|(f, mime)| Some((fs::read(f).ok()?, mime))) {
+                    Some((bytes, mime)) => reply(200, mime, bytes),
+                    None => reply(404, "text/plain", b"no logo".to_vec()),
+                },
+                None => match crate::projects::load(rest).and_then(|p| crate::projects::view(&p, true)) {
+                    Ok(v) => json_reply(v),
+                    Err(e) => json_reply(json!({ "error": format!("{e:#}") })),
+                },
+            }
+        }
         p if p.starts_with("/api/call/") => {
             let rest = &p["/api/call/".len()..];
             let (name, rev) = rest.strip_suffix("/rev").map_or((rest, false), |n| (n, true));
@@ -423,6 +537,30 @@ fn call_detail(dir: &Path) -> Value {
     v["minutes_rev"] = json!(crate::minutes::revision(dir));
     v["rev"] = json!(rev);
     v["has_log"] = json!(dir.join(crate::notes::LOG).exists());
+    v["meeting_subject"] = json!(crate::meeting::MeetingContext::load(dir).ok().flatten().and_then(|m| m.subject).filter(|s| !s.trim().is_empty()));
+    // Its projects (and the ones it may belong to): the header's chips and suggestion bar.
+    match crate::projects::of_call(dir) {
+        Ok(ps) => {
+            v["projects"] = ps.iter().map(|(p, w)| crate::projects::chip(p, w)).collect();
+            v["suggested"] = json!(crate::projects::suggest(dir).unwrap_or_default());
+            // What this call changed in each project's work, and the tasks its action items became.
+            let stamp = calls::stamp_of(dir);
+            let mut all = vec![];
+            let changes: Vec<Value> = ps
+                .iter()
+                .filter_map(|(p, _)| {
+                    let mut c = crate::ledger::call_changes(&p.id, &stamp).ok()?;
+                    all.extend(c["changes"].as_array().into_iter().flatten().map(|x| (p.id.clone(), x.clone())));
+                    c["project"] = json!(p.id);
+                    Some(c)
+                })
+                .collect();
+            let actions: Vec<Value> = calls::read_json(&dir.join("actions.json")).as_array().cloned().unwrap_or_default();
+            v["action_tasks"] = json!(crate::ledger::match_actions(&actions, &all));
+            v["changes"] = json!(changes);
+        }
+        Err(e) => v["projects_error"] = json!(format!("{e:#}")),
+    }
     let profile = crate::ai::call_profile_id(dir);
     v["live"] = json!({
         "profile_error": profile.as_ref().err().map(|e| format!("{e:#}")),
@@ -506,6 +644,8 @@ fn calendar(q: &str) -> Value {
     let (Some(from), Some(to)) = (crate::calendar::local_midnight(start), to) else { return json!({ "error": "bad date" }) };
     let signed_in = crate::graph::account().is_some();
 
+    // Each event's meeting (people, series): which projects it belongs to.
+    let mut meetings: std::collections::HashMap<String, crate::meeting::MeetingContext> = std::collections::HashMap::new();
     let (events, source, error): (Vec<Value>, &str, Option<String>) = if signed_in {
         let key = format!("{start}/{days}");
         let cached = CALENDAR_CACHE.lock().unwrap_or_else(|e| e.into_inner()).as_ref()
@@ -515,12 +655,23 @@ fn calendar(q: &str) -> Value {
             Ok(raw) => {
                 *CALENDAR_CACHE.lock().unwrap_or_else(|e| e.into_inner()) = Some((key, std::time::Instant::now(), raw.clone()));
                 *RAW_EVENTS.lock().unwrap_or_else(|e| e.into_inner()) = raw.clone();
+                for m in raw.iter().filter_map(crate::calendar::to_meeting) {
+                    if let Some(id) = m.id.clone() {
+                        meetings.insert(id, m);
+                    }
+                }
                 (raw.iter().filter_map(crate::calendar::view_event).collect(), "microsoft365", None)
             }
             Err(e) => (vec![], "microsoft365", Some(format!("{e:#}"))),
         }
     } else {
-        let ev: Vec<Value> = watch::agenda().into_iter().map(|m| json!({
+        let agenda = watch::agenda();
+        for m in &agenda {
+            if let Some(id) = m.id.clone() {
+                meetings.insert(id, m.clone());
+            }
+        }
+        let ev: Vec<Value> = agenda.into_iter().map(|m| json!({
             "id": m.id, "subject": m.subject, "start": m.start, "end": m.end, "all_day": false, "online": true,
             "join_url": m.join_url, "declined": false, "cancelled": false, "no_notetakers": false,
             "organizer": m.organizer.map(|o| o.name), "people": m.attendees.len(),
@@ -561,6 +712,9 @@ fn calendar(q: &str) -> Value {
             used[i] = true;
             let dir = paths::calls_dir().join(name);
             e["recorded"] = json!({ "name": name, "status": status(&dir, recording.as_deref()), "minutes": minutes(meta) });
+            e["projects"] = json!(crate::projects::of_call(&dir).map(|ps| ps.iter().map(|(p, w)| crate::projects::chip(p, w)).collect::<Vec<_>>()).unwrap_or_default());
+        } else if let Some(m) = e["id"].as_str().and_then(|id| meetings.get(id)) {
+            e["projects"] = json!(crate::projects::for_event(m));
         }
         let sched = e["id"].as_str().and_then(|id| scheduled.iter().find(|s| s.0 == id));
         e["scheduled"] = json!(sched.is_some());
@@ -602,6 +756,8 @@ fn state() -> Value {
         "notes": crate::notes::readiness(),
         "languages": crate::config::Config::load().map(|c| c.languages).unwrap_or_default(),
         "ai": crate::ai::summary(),
+        // The Brain: built in and switched on (off hides it everywhere in the window).
+        "brain": cfg!(feature = "brain") && { #[cfg(feature = "brain")] { crate::brain::enabled() } #[cfg(not(feature = "brain"))] { false } },
     })
 }
 
@@ -706,6 +862,7 @@ fn settings_snapshot() -> Value {
         "keep_audio": c.is_some_and(|c| c.keep_audio),
         "minutes_page": c.is_some_and(|c| c.minutes_page),
         "auto_minutes": c.is_some_and(|c| c.auto_minutes),
+        "project_sync": c.is_some_and(|c| c.project_sync),
         "capture_frames": c.is_some_and(|c| c.capture_frames),
         "follow_app_mute": on(c.map(|c| c.follow_app_mute)),
         "capture_ui": on(c.map(|c| c.capture_ui)),
@@ -714,7 +871,7 @@ fn settings_snapshot() -> Value {
         "notes_in": c.and_then(|c| c.notes_in.clone()),
         "vocabulary": c.map(|c| c.vocabulary.clone()).unwrap_or_default(),
         // Terms the minutes learned, with what they are used again for.
-        "learned": c.and_then(|c| c.learned.as_ref()).map(|l| l.iter().map(|x| json!({ "term": x.term, "subjects": x.subjects, "people": x.people, "calls": x.calls.len() })).collect::<Vec<_>>()).unwrap_or_default(),
+        "learned": c.map(|c| crate::vocab::learned_all(c).iter().map(|x| json!({ "term": x.term, "subjects": x.subjects, "people": x.people, "calls": x.calls.len() })).collect::<Vec<_>>()).unwrap_or_default(),
         "me": c.and_then(|c| c.me.clone()),
         // The profile the minutes read (me.md), as text and rendered.
         "me_profile": crate::calls::ensure_me_profile().ok().and_then(|p| fs::read_to_string(&p).ok()).map(|t| json!({ "text": t, "html": crate::minutes::markdown_html(&t) })),
@@ -732,11 +889,41 @@ fn settings_snapshot() -> Value {
     {
         let serve = crate::remote::serve_settings();
         v["engine"] = json!(crate::gpu::engine_status());
-        v["server"] = json!({ "client": crate::remote::client_label(), "serving": serve.on,
+        v["server"] = json!({ "client": crate::remote::client_label(), "info": crate::remote::client_info(),
+                              "connecting": SERVER_CONNECT.lock().map(|s| s.clone()).unwrap_or(Value::Null), "serving": serve.on,
                               "url": serve.on.then(|| crate::remote::serve_url(&serve)), "key": serve.on.then(|| serve.key.clone()) });
+    }
+    #[cfg(feature = "brain")]
+    {
+        let mut b = crate::brain::status().unwrap_or_else(|e| json!({ "error": format!("{e:#}") }));
+        b["auto"] = json!(crate::brain::settings().auto());
+        b["enabled"] = json!(crate::brain::enabled());
+        b["syncing"] = json!(BRAIN_SYNC.load(std::sync::atomic::Ordering::SeqCst));
+        b["last"] = BRAIN_LAST.lock().map(|l| l.clone()).unwrap_or(Value::Null);
+        // Documents: what lays them out and reads their pages here.
+        b["documents"] = json!({ "pdfium": crate::brain::files::pdf::library().is_some(), "libreoffice": crate::brain::files::render::soffice().is_some(),
+                                 "pending": crate::brain::files::folder::pending() });
+        v["brain"] = b;
     }
     v
 }
+
+/// The last OpenAI-compatible transcription server connection: `{busy}`, `{ok, …}` or `{error}`.
+#[cfg(feature = "transcribe")]
+static SERVER_CONNECT: std::sync::Mutex<Value> = std::sync::Mutex::new(Value::Null);
+
+/// The numbers lane's jobs running now (client → op), and the last error per client (`<client>:error`).
+#[cfg(feature = "brain")]
+static NUMBERS_BUSY: std::sync::LazyLock<std::sync::Mutex<std::collections::BTreeMap<String, Value>>> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::BTreeMap::new()));
+
+/// Settings → Brain's Sync now: one at a time, in the background; its report for the page.
+#[cfg(feature = "brain")]
+static BRAIN_SYNC: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+#[cfg(feature = "brain")]
+static BRAIN_LAST: std::sync::Mutex<Value> = std::sync::Mutex::new(Value::Null);
+/// Scopes whose insights are being refreshed from the window.
+#[cfg(feature = "brain")]
+static BRAIN_INSIGHTS: std::sync::Mutex<std::collections::BTreeSet<String>> = std::sync::Mutex::new(std::collections::BTreeSet::new());
 
 /// Save one plain setting with the value the page shows now (never a toggle of a stale value).
 fn settings_set(key: &str, value: &Value) -> anyhow::Result<()> {
@@ -758,6 +945,30 @@ fn settings_set(key: &str, value: &Value) -> anyhow::Result<()> {
             });
         }
         "autostart" => return crate::app::set_autostart(value.as_bool().unwrap_or(false)),
+        // Settings → Brain: the embedding server, in <config dir>/brain.json.
+        #[cfg(feature = "brain")]
+        k if k.starts_with("brain_") => {
+            let mut s = crate::brain::settings();
+            let text = value.as_str().unwrap_or("").trim().to_string();
+            match k {
+                "brain_endpoint" => s.endpoint = text,
+                "brain_api" => s.api = text,
+                "brain_model" => s.model = text,
+                "brain_key" => s.key = (!text.is_empty()).then_some(text),
+                "brain_auto" => s.auto = Some(value.as_bool().unwrap_or(true)),
+                "brain_enabled" => s.enabled = Some(value.as_bool().unwrap_or(true)),
+                "brain_pages" => {
+                    anyhow::ensure!(["claude", "endpoint", "off"].contains(&text.as_str()), "the page reader is claude, endpoint or off");
+                    s.pages = Some(text);
+                }
+                "brain_vision_endpoint" => s.vision_endpoint = text,
+                "brain_vision_api" => s.vision_api = text,
+                "brain_vision_model" => s.vision_model = text,
+                "brain_vision_key" => s.vision_key = (!text.is_empty()).then_some(text),
+                _ => anyhow::bail!("no setting {k}"),
+            }
+            return crate::brain::save_settings(&s);
+        }
         _ => {}
     }
     let mut cfg = Config::load()?;
@@ -770,6 +981,7 @@ fn settings_set(key: &str, value: &Value) -> anyhow::Result<()> {
         "keep_audio" => cfg.keep_audio = b()?,
         "minutes_page" => cfg.minutes_page = b()?,
         "auto_minutes" => cfg.set_auto_minutes(b()?),
+        "project_sync" => cfg.project_sync = b()?,
         "capture_frames" => {
             cfg.capture_frames = b()?;
             #[cfg(target_os = "macos")]
@@ -797,9 +1009,7 @@ fn settings_set(key: &str, value: &Value) -> anyhow::Result<()> {
         // A learned term: forgotten, or used in every call from now on.
         "learned_remove" | "learned_always" => {
             let term = value.as_str().ok_or_else(|| anyhow::anyhow!("{key} takes a term"))?.trim().to_string();
-            if let Some(l) = cfg.learned.as_mut() {
-                l.retain(|x| !x.term.eq_ignore_ascii_case(&term));
-            }
+            crate::vocab::forget_learned(&mut cfg, &term);
             if key == "learned_always" && !cfg.vocabulary.iter().any(|v| v.eq_ignore_ascii_case(&term)) {
                 cfg.vocabulary.push(term);
             }
@@ -855,6 +1065,337 @@ fn save_layout(layout: &Value) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The Tasks activity: the piles and asks, with the next 7 days of the calendar for "next time you
+/// meet" (the calendar's own 2-minute cache; without a sign-in, today's agenda).
+/// A People tab's data; and in the background, Microsoft 365 is asked about its people not asked
+/// this week (one refresh at a time; the page's next poll shows what came back).
+fn people_view(v: anyhow::Result<Value>) -> Value {
+    static RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let v = match v {
+        Ok(v) => v,
+        Err(e) => return json!({ "error": format!("{e:#}") }),
+    };
+    let who: Vec<(String, String)> = v["people"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|p| Some((p["name"].as_str()?.to_string(), p["email"].as_str()?.to_string())))
+        .collect();
+    if !who.is_empty() && !RUNNING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        std::thread::spawn(move || {
+            if let Err(e) = crate::people::refresh_m365(&who) {
+                eprintln!("echoctl: people from Microsoft 365: {e:#}");
+            }
+            RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
+        });
+    }
+    v
+}
+
+fn client_view(id: &str) -> Value {
+    let today = chrono::Local::now().date_naive();
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    crate::tasks::client(id, &upcoming(today), today, &now).unwrap_or_else(|e| json!({ "error": format!("{e:#}") }))
+}
+
+/// The next 7 days of the calendar (its own 2-minute cache; without a sign-in, today's agenda).
+fn upcoming(today: chrono::NaiveDate) -> Vec<crate::meeting::MeetingContext> {
+    let mut meetings = watch::agenda();
+    if crate::graph::account().is_some() {
+        let _ = calendar(&format!("start={today}&days=7"));
+        let key = format!("{today}/7");
+        if let Some((_, _, raw)) = CALENDAR_CACHE.lock().unwrap_or_else(|e| e.into_inner()).as_ref().filter(|(k, _, _)| *k == key) {
+            meetings = raw.iter().filter_map(crate::calendar::to_meeting).collect();
+        }
+    }
+    meetings
+}
+
+fn tasks_view() -> Value {
+    let today = chrono::Local::now().date_naive();
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    crate::tasks::across(&upcoming(today), today, &now).unwrap_or_else(|e| json!({ "error": format!("{e:#}"), "piles": {}, "asks": [], "projects": [] }))
+}
+
+/// Clients, projects (each with its call count), the stages, and each call's projects (the
+/// calls list's chips) — or why the projects can't be read.
+fn projects_overview() -> Value {
+    match crate::projects::overview() {
+        Ok(mut v) => {
+            v["by_call"] = json!(crate::projects::by_call());
+            v["found_count"] = json!(crate::projects::found().map(|f| f.len()).unwrap_or(0));
+            v
+        }
+        Err(e) => json!({ "error": format!("{e:#}"), "projects": [], "clients": [], "by_call": {} }),
+    }
+}
+
+/// A change to a project or a client from the page (`{cmd: "project", op, …}`).
+/// Start a Brain sync in the background unless one runs (its outcome: `BRAIN_LAST`).
+#[cfg(feature = "brain")]
+fn brain_sync_now() {
+    if !BRAIN_SYNC.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        std::thread::spawn(|| {
+            let r = match crate::brain::sync() {
+                Ok(r) => json!(r),
+                Err(e) => json!({ "error": format!("{e:#}") }),
+            };
+            if let Ok(mut l) = BRAIN_LAST.lock() {
+                *l = r;
+            }
+            BRAIN_SYNC.store(false, std::sync::atomic::Ordering::SeqCst);
+        });
+    }
+}
+
+fn project_op(v: &Value) -> anyhow::Result<Option<String>> {
+    use crate::projects::{self as pj, Member, Rule, Stage, Term};
+    let s = |k: &str| v[k].as_str().map(str::to_owned);
+    let id = s("id").unwrap_or_default();
+    let opt = |k: &str| s(k).map(|x| x.trim().to_string()).filter(|x| !x.is_empty());
+    match v["op"].as_str().unwrap_or("") {
+        "create" => {
+            let p = pj::create(&s("name").unwrap_or_default(), opt("client").as_deref(), None)?;
+            return Ok(Some(p.id));
+        }
+        "set" => {
+            let value = v["value"].as_str().unwrap_or("").to_string();
+            pj::update(&id, |p| {
+                let some = || Some(value.trim().to_string()).filter(|x| !x.is_empty());
+                match v["field"].as_str().unwrap_or("") {
+                    "name" => p.name = value.trim().to_string(),
+                    "client" => p.client = some(),
+                    "since" => p.since = some(),
+                    "history_before" => p.history_before = some(),
+                    "color" => p.color = value.clone(),
+                    "icon" => p.icon = some(),
+                    "notes" => p.notes = value.clone(),
+                    "ai_profile" => p.ai_profile = some(),
+                    "model" => p.model = some(),
+                    f => anyhow::bail!("no field {f:?}"),
+                }
+                Ok(())
+            })?;
+            // A history date changes what the Brain searches: apply it now.
+            #[cfg(feature = "brain")]
+            if v["field"] == "history_before" {
+                brain_sync_now();
+            }
+        }
+        "stage" => {
+            pj::set_stage(&id, Stage::parse(v["stage"].as_str().unwrap_or(""))?, v["reason"].as_str())?;
+        }
+        // The Work board's columns, card fields and grouping (null: back to the defaults).
+        "board" => {
+            let b: Option<pj::Board> = if v["board"].is_null() { None } else { Some(serde_json::from_value(v["board"].clone()).map_err(|e| anyhow::anyhow!("not a board: {e}"))?) };
+            pj::update(&id, |p| {
+                p.board = b;
+                Ok(())
+            })?;
+        }
+        // A Teams channel or a mail rule the thread reads into the Brain (`brain::sources`).
+        "source_add" => {
+            let kind = s("kind").unwrap_or_default();
+            let sid = s("source").unwrap_or_default().trim().to_string();
+            let sid = match kind.as_str() {
+                "teams_channel" if sid.split_once('|').is_some_and(|(a, b)| !a.is_empty() && !b.is_empty()) => sid,
+                #[cfg(feature = "brain")]
+                "mail" => crate::brain::sources::mail_source(&sid)?,
+                _ => anyhow::bail!("not a source: {kind}"),
+            };
+            let name = opt("name");
+            pj::update(&id, |p| {
+                if !p.sources.iter().any(|x| x.kind == kind && x.id == sid) {
+                    p.sources.push(pj::Source { kind: kind.clone(), id: sid.clone(), name: name.clone(), ..Default::default() });
+                }
+                Ok(())
+            })?;
+            #[cfg(feature = "brain")]
+            brain_sync_now();
+        }
+        // A folder's globs of what not to read.
+        "source_exclude" => {
+            let sid = s("source").unwrap_or_default();
+            let globs: Vec<String> = v["exclude"].as_array().into_iter().flatten().filter_map(|g| g.as_str()).map(|g| g.trim().to_string()).filter(|g| !g.is_empty()).collect();
+            pj::update(&id, |p| {
+                if let Some(src) = p.sources.iter_mut().find(|x| x.kind == "folder" && x.id == sid) {
+                    src.exclude = globs.clone();
+                }
+                Ok(())
+            })?;
+            #[cfg(feature = "brain")]
+            brain_sync_now();
+        }
+        "source_remove" => {
+            let kind = s("kind").unwrap_or_default();
+            let sid = s("source").unwrap_or_default();
+            pj::update(&id, |p| {
+                p.sources.retain(|x| !(x.kind == kind && x.id == sid));
+                Ok(())
+            })?;
+            #[cfg(feature = "brain")]
+            brain_sync_now();
+        }
+        "rule_add" => {
+            let r: Rule = serde_json::from_value(v["rule"].clone()).map_err(|e| anyhow::anyhow!("not a rule: {e}"))?;
+            pj::update(&id, |p| {
+                if !p.rules.contains(&r) {
+                    p.rules.push(r);
+                }
+                Ok(())
+            })?;
+        }
+        "rule_remove" => {
+            let i = v["index"].as_u64().unwrap_or(u64::MAX) as usize;
+            pj::update(&id, |p| {
+                if i >= p.rules.len() {
+                    anyhow::bail!("that rule is gone already");
+                }
+                p.rules.remove(i);
+                Ok(())
+            })?;
+        }
+        // A calendar event put in a project by hand (or taken out): its call will belong.
+        "event_member" => {
+            pj::set_event(&id, v["event"].as_str().unwrap_or(""), v["how"].as_str().unwrap_or(""))?;
+        }
+        "member" => {
+            let dir = call_named(v).ok_or_else(|| anyhow::anyhow!("that call can't be found"))?;
+            pj::set_membership(&id, &dir, v["how"].as_str().unwrap_or(""))?;
+        }
+        "term_add" | "term_remove" => {
+            let term = s("term").unwrap_or_default().trim().to_string();
+            let add = v["op"] == "term_add";
+            if add && !crate::config::valid_term(&term) {
+                anyhow::bail!("a term is 2–50 characters, at most 6 words");
+            }
+            pj::update(&id, |p| {
+                p.terms.retain(|t| !t.term.eq_ignore_ascii_case(&term));
+                if add {
+                    p.terms.push(Term { term: term.clone(), kind: opt("kind"), note: None });
+                }
+                Ok(())
+            })?;
+        }
+        "person_add" | "person_remove" => {
+            let name = s("name").unwrap_or_default().trim().to_string();
+            let email = opt("email");
+            let key = email.clone().unwrap_or_else(|| name.clone()).to_lowercase();
+            let add = v["op"] == "person_add";
+            if add && name.is_empty() {
+                anyhow::bail!("a person needs a name");
+            }
+            pj::update(&id, |p| {
+                p.people.retain(|m| m.email.clone().unwrap_or_else(|| m.name.clone()).to_lowercase() != key);
+                if add {
+                    p.people.push(Member { name: name.clone(), email: email.clone(), role: opt("role"), ..Default::default() });
+                }
+                Ok(())
+            })?;
+        }
+        "brief" => pj::set_brief(&id, v["text"].as_str().unwrap_or(""))?,
+        "client_brief" => pj::set_client_brief(&id, v["text"].as_str().unwrap_or(""))?,
+        // Found for you: make the project (as the user named it, with the client chosen), add its
+        // rules to one the user has, or never suggest it again.
+        "found_accept" => {
+            let p = pj::found_accept(&s("key").unwrap_or_default(), s("name").as_deref(), v["client"].as_str())?;
+            return Ok(Some(p.id));
+        }
+        "found_merge" => {
+            pj::found_merge(&s("key").unwrap_or_default(), &s("into").unwrap_or_default())?;
+        }
+        "found_reject" => pj::found_reject(&s("key").unwrap_or_default())?,
+        // A logo from the page (a file the user chose or dropped, base64): a project's or a client's.
+        "logo" | "client_logo" => {
+            use base64::Engine as _;
+            let bytes = match v["data"].as_str() {
+                Some(d) => Some(base64::engine::general_purpose::STANDARD.decode(d.trim()).map_err(|_| anyhow::anyhow!("that image couldn't be read"))?),
+                None => None,
+            };
+            if v["op"] == "logo" {
+                pj::set_logo_bytes(&id, bytes.as_deref())?
+            } else {
+                pj::set_client_logo(&id, bytes.as_deref())?
+            }
+        }
+        "remove_logo" => pj::set_logo(&id, None)?,
+        // The work ledger: sync now (in the background), or an edit of the user's (pinned, undoable).
+        // Already syncing: the Work tab shows it running; nothing to say.
+        "sync" => {
+            crate::projectsync::start(&id);
+        }
+        "ledger" => {
+            crate::ledger::human_event(&id, &v["body"])?;
+        }
+        "delete" => pj::delete(&id)?,
+        "client_add" => {
+            let domains: Vec<String> = v["domains"].as_str().unwrap_or("").split([',', ' ']).map(str::to_owned).collect();
+            let c = pj::add_client(&s("name").unwrap_or_default(), &domains, v["internal"] == true)?;
+            return Ok(Some(c.id));
+        }
+        "client_set" => {
+            pj::update_client(&id, |c| {
+                if let Some(n) = s("name") {
+                    c.name = n;
+                }
+                if let Some(d) = v["domains"].as_array() {
+                    c.domains = d.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect();
+                } else if let Some(d) = v["domains"].as_str() {
+                    c.domains = d.split([',', ' ']).map(str::to_owned).collect();
+                }
+                if let Some(a) = v["aliases"].as_array() {
+                    c.aliases = a.iter().filter_map(|x| x.as_str().map(|s| s.trim().to_string())).filter(|s| !s.is_empty()).collect();
+                }
+                if let Some(i) = v["internal"].as_bool() {
+                    c.internal = i;
+                }
+                // The organisation it belongs to, its groups, a relationship added or removed.
+                if let Some(p) = v.get("parent") {
+                    c.parent = p.as_str().map(str::trim).filter(|p| !p.is_empty()).map(str::to_owned);
+                    anyhow::ensure!(c.parent.as_deref() != Some(c.id.as_str()), "an organisation can't belong to itself");
+                }
+                if let Some(g) = v["groups"].as_array() {
+                    c.groups = g.iter().filter_map(|x| x.as_str().map(|s| s.trim().to_string())).filter(|s| !s.is_empty()).collect();
+                    c.groups.dedup();
+                }
+                if let (Some(to), Some(kind)) = (v["relation"]["to"].as_str(), v["relation"]["kind"].as_str()) {
+                    c.relations.retain(|r| r.to != to);
+                    if !kind.is_empty() {
+                        anyhow::ensure!(pj::RELATIONS.contains(&kind), "a relationship is one of {:?}", pj::RELATIONS);
+                        anyhow::ensure!(to != c.id, "an organisation can't relate to itself");
+                        c.relations.push(pj::Relation { to: to.into(), kind: kind.into(), note: None });
+                    }
+                }
+                Ok(())
+            })?;
+        }
+        // People: placed in a thread (role, stance, influence, interest), the directory's fields,
+        // organisations placed in a thread.
+        "people_place" => crate::people::place(&id, &s("name").unwrap_or_default(), opt("email").as_deref(), &v["set"])?,
+        "people_add" => {
+            for x in v["people"].as_array().into_iter().flatten() {
+                crate::people::place(&id, x["name"].as_str().unwrap_or(""), x["email"].as_str(), &json!({}))?;
+            }
+        }
+        "person_merge" => {
+            let key_emails: Vec<String> = v["key_emails"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(str::to_owned)).collect();
+            crate::people::merge(&s("key").unwrap_or_default(), &s("key_name").unwrap_or_default(), &key_emails, &s("into").unwrap_or_default(), &s("into_name").unwrap_or_default(), opt("into_email").as_deref())?
+        }
+        "person_split" => crate::people::split(&s("key").unwrap_or_default(), &s("name").unwrap_or_default(), &s("email").unwrap_or_default())?,
+        "people_decide" => crate::people::decide(&id, &s("sid").unwrap_or_default(), v["yes"] == true)?,
+        "person_answer" => crate::people::answer(&s("key").unwrap_or_default(), &s("field").unwrap_or_default(), v["use"] == true)?,
+        "org_place" => crate::people::place_org(&id, &s("client").unwrap_or_default(), &v["set"])?,
+        "person_set" => {
+            let name = s("name").unwrap_or_default();
+            let key = s("key").unwrap_or_else(|| crate::people::key_of(&name, opt("email").as_deref()));
+            crate::people::set(&key, &name, opt("email").as_deref(), &s("field").unwrap_or_default(), &s("value").unwrap_or_default(), "you")?;
+        }
+        "client_remove" => pj::remove_client(&id)?,
+        op => anyhow::bail!("no project change {op:?}"),
+    }
+    Ok(None)
+}
+
 /// A call named by the page: by its folder name, else by its stamp (retitled since).
 fn call_named(v: &Value) -> Option<PathBuf> {
     let name = v["call"].as_str()?;
@@ -871,6 +1412,102 @@ pub fn handle(msg: &str) -> Handled {
     let v: Value = serde_json::from_str(msg).unwrap_or_default();
     match v["cmd"].as_str().unwrap_or("") {
         // Settings: one plain value, as the page shows it now.
+        // The taxonomy: the user's review (accept, rename, merge, move, remove, add, set).
+        #[cfg(feature = "brain")]
+        "brain_taxonomy" => match crate::brain::taxonomy::edit(&v["body"]) {
+            Ok(_) => true.into(),
+            Err(e) => notice(&format!("{e:#}")),
+        },
+        // Refresh a scope's insights now (in the background; one run per scope at a time).
+        #[cfg(feature = "brain")]
+        "brain_insights" => {
+            let (kind, id) = (v["kind"].as_str().unwrap_or("").to_string(), v["id"].as_str().unwrap_or("").to_string());
+            let k = format!("{kind}:{id}");
+            if (kind == "client" || kind == "thread") && !id.is_empty() && BRAIN_INSIGHTS.lock().map(|mut r| r.insert(k.clone())).unwrap_or(false) {
+                std::thread::spawn(move || {
+                    if let Err(e) = crate::brain::insights::run((&kind, &id), &|_| {}) {
+                        eprintln!("brain: insights {k}: {e:#}");
+                    }
+                    if let Ok(mut r) = BRAIN_INSIGHTS.lock() {
+                        r.remove(&k);
+                    }
+                });
+            }
+            true.into()
+        }
+        #[cfg(feature = "brain")]
+        "brain_sync" => {
+            brain_sync_now();
+            true.into()
+        }
+        // A sender of mail or posts trusted, ignored or forgotten for a client: read again at the next sync.
+        #[cfg(feature = "brain")]
+        "brain_sender" => {
+            let (client, key, decision) = (v["client"].as_str().unwrap_or(""), v["key"].as_str().unwrap_or(""), v["decision"].as_str().unwrap_or(""));
+            match crate::brain::senders::decide(client, key, decision) {
+                Ok(()) => {
+                    brain_sync_now();
+                    true.into()
+                }
+                Err(e) => {
+                    eprintln!("brain_sender: {e:#}");
+                    false.into()
+                }
+            }
+        }
+        // Settings → Transcription → OpenAI-compatible server: checked (its models, a test
+        // transcription) before it is kept; the outcome in the settings snapshot.
+        #[cfg(feature = "transcribe")]
+        "server_openai" => {
+            let (url, key, model) = (v["url"].as_str().unwrap_or("").to_string(), v["key"].as_str().unwrap_or("").to_string(), v["model"].as_str().unwrap_or("").to_string());
+            if let Ok(mut s) = SERVER_CONNECT.lock() {
+                *s = json!({ "busy": true });
+            }
+            std::thread::spawn(move || {
+                let r = crate::remote::connect_openai(&url, &key, (!model.trim().is_empty()).then_some(model.as_str()));
+                if let Ok(mut s) = SERVER_CONNECT.lock() {
+                    *s = match r {
+                        Ok(c) => json!({ "ok": true, "model": c.model, "words": c.words, "seconds": c.seconds }),
+                        Err(e) => json!({ "error": format!("{e:#}") }),
+                    };
+                }
+            });
+            true.into()
+        }
+        // The numbers lane: Claude proposes a client's families (minutes), the user accepts them, a build.
+        #[cfg(feature = "brain")]
+        "brain_numbers" => {
+            let (op, client) = (v["op"].as_str().unwrap_or("").to_string(), v["client"].as_str().unwrap_or("").to_string());
+            if client.is_empty() || NUMBERS_BUSY.lock().map(|b| b.contains_key(&client)).unwrap_or(true) {
+                return false.into();
+            }
+            if let Ok(mut b) = NUMBERS_BUSY.lock() {
+                b.insert(client.clone(), json!({ "op": op, "since": chrono::Utc::now().to_rfc3339() }));
+            }
+            std::thread::spawn(move || {
+                use crate::brain::numbers as n;
+                let r: anyhow::Result<Value> = match op.as_str() {
+                    "propose" => n::profile::propose(&client, None),
+                    "accept" => n::load_config(&client).ok_or_else(|| anyhow::anyhow!("nothing proposed")).and_then(|mut c| {
+                        c.check()?;
+                        c._echo = Some(json!({ "status": "accepted", "at": chrono::Utc::now().to_rfc3339(), "was": c._echo }));
+                        n::save_config(&client, &c)?;
+                        n::build::run(&client, &c, None)
+                    }),
+                    "build" => n::load_config(&client).filter(|c| c.accepted()).ok_or_else(|| anyhow::anyhow!("nothing accepted")).and_then(|c| n::build::run(&client, &c, None)),
+                    _ => Err(anyhow::anyhow!("no op {op}")),
+                };
+                if let Ok(mut b) = NUMBERS_BUSY.lock() {
+                    b.remove(&client);
+                    if let Err(e) = r {
+                        b.insert(format!("{client}:error"), json!(format!("{e:#}")));
+                    } else {
+                        b.remove(&format!("{client}:error"));
+                    }
+                }
+            });
+            true.into()
+        }
         "settings_set" => match settings_set(v["key"].as_str().unwrap_or(""), &v["value"]) {
             Ok(()) => true.into(),
             Err(e) => notice(&format!("{e:#}")),
@@ -920,7 +1557,20 @@ pub fn handle(msg: &str) -> Handled {
             }
             false.into()
         }
+        // Projects and clients: every change the page makes (`project_op`); a new one is opened.
+        "project" => match project_op(&v) {
+            Ok(Some(id)) if v["op"] == "create" || v["op"] == "found_accept" => Handled { refresh: true, reply: Some(format!("window.echo && window.echo.projectCreated({})", json!(id))) },
+            Ok(Some(id)) if v["op"] == "client_add" => Handled { refresh: true, reply: Some(format!("window.echo && window.echo.clientCreated({})", json!(id))) },
+            Ok(_) => true.into(),
+            Err(e) => notice(&format!("{e:#}")),
+        },
         // Where the window's panels and views go (`Layout` in app.js); nothing else reads it.
+        "view_state" => {
+            if let Err(e) = crate::view::save(&v["view"]) {
+                eprintln!("window view not saved: {e:#}");
+            }
+            false.into()
+        }
         "save_layout" => {
             if let Err(e) = save_layout(&v["layout"]) {
                 eprintln!("window layout not saved: {e:#}");
@@ -963,7 +1613,8 @@ pub fn handle(msg: &str) -> Handled {
 
 /// The page's other actions; true if the page should refresh.
 fn act(v: &Value) -> bool {
-    let call = v["call"].as_str().and_then(call_dir);
+    // By name, else by its stamp: a call retitled since the page (or Needs you) last saw it.
+    let call = call_named(v);
     match v["cmd"].as_str().unwrap_or("") {
         "delete" => call.is_some_and(|d| calls::delete(&d.display().to_string()).is_ok()),
         "reveal" => {
@@ -1091,6 +1742,34 @@ fn act(v: &Value) -> bool {
             m.ai_profile = profile(v);
             if v["cmd"] == "join_meeting" { watch::join(m).is_ok() } else { watch::arm(m.subject.clone(), Some(m), None, None).is_ok() }
         }
+        // A Brain section's file (a thread folder's), opened in its own app: only a file the registry
+        // holds, never a path the page names.
+        #[cfg(feature = "brain")]
+        "open_brain_file" => {
+            if let Some(p) = v["id"].as_str().and_then(crate::brain::files::folder::path_of) {
+                open_in_app(&p);
+            }
+            false
+        }
+        // A folder for a thread's sources, chosen in the system's own dialog (never typed by the page).
+        #[cfg(feature = "brain")]
+        "source_folder_pick" => {
+            let id = v["id"].as_str().unwrap_or("").to_string();
+            std::thread::spawn(move || {
+                if let Some(dir) = crate::app::choose_folder("A folder for this thread — Echo reads its files into the Brain") {
+                    let dir = dunce::canonicalize(&dir).unwrap_or(dir);
+                    let sid = dir.to_string_lossy().to_string();
+                    let _ = crate::projects::update(&id, |p| {
+                        if !p.sources.iter().any(|s| s.kind == "folder" && s.id == sid) {
+                            p.sources.push(crate::projects::Source { kind: "folder".into(), id: sid.clone(), name: dir.file_name().map(|n| n.to_string_lossy().to_string()), ..Default::default() });
+                        }
+                        Ok(())
+                    });
+                    brain_sync_now();
+                }
+            });
+            false
+        }
         "open_url" => {
             if let Some(u) = v["url"].as_str().filter(|u| u.starts_with("https://")) {
                 open_external(u);
@@ -1110,6 +1789,18 @@ fn open_file(path: &Path) {
     let _ = std::process::Command::new("open").arg("-t").arg(path).spawn();
     #[cfg(windows)]
     let _ = std::process::Command::new("notepad").arg(path).spawn();
+}
+
+/// A document in the app the system opens it with (a deck in PowerPoint or Keynote, a PDF in Preview).
+#[cfg(feature = "brain")]
+fn open_in_app(path: &Path) {
+    if !path.is_file() {
+        return;
+    }
+    #[cfg(target_os = "macos")]
+    let _ = std::process::Command::new("open").arg(path).spawn();
+    #[cfg(windows)]
+    let _ = std::process::Command::new("explorer").arg(path).no_window().spawn();
 }
 
 pub(crate) fn copy_to_clipboard(text: &str) {
@@ -1146,9 +1837,52 @@ pub fn export(dir: &Path) -> anyhow::Result<()> {
     }
     let week_start = chrono::Local::now().date_naive().pred_opt().unwrap_or_default().format("%Y-%m-%d");
     write("/api/calendar", get(&format!("/api/calendar?start={week_start}&days=7")))?;
+    write("/api/projects", get("/api/projects"))?;
+    write("/api/found", get("/api/found"))?;
+    write("/api/attention", get("/api/attention"))?;
+    write("/api/tasks", get("/api/tasks"))?;
+    #[cfg(feature = "brain")]
+    {
+        write("/api/brain/index.html", get("/api/brain"))?;
+        write("/api/brain/graph", get("/api/brain/graph"))?;
+        for c in crate::projects::clients().unwrap_or_default() {
+            write(&format!("/api/brain/insights-client-{}", c.id), get(&format!("/api/brain/insights?client={}", c.id)))?;
+        }
+        for p in crate::projects::list() {
+            write(&format!("/api/brain/thread-{}", p.id), get(&format!("/api/brain?thread={}", p.id)))?;
+        }
+        write("/api/brain/sources", get("/api/brain/sources"))?;
+        write("/api/brain/files", get("/api/brain/files"))?;
+        write("/api/brain/numbers", get("/api/brain/numbers"))?;
+        // The graph's details panel, for each source (the export's static server can't take a query).
+        if let Ok(g) = crate::brain::views::graph(None) {
+            for n in g["nodes"].as_array().into_iter().flatten().filter(|n| n["type"] == "doc") {
+                let src = n["id"].as_str().unwrap_or("");
+                write(&format!("/api/brain/doc-{}", src.replace('/', "_")), get(&format!("/api/brain/doc?source={}", src)))?;
+            }
+        }
+    }
+    for p in crate::projects::list() {
+        // A folder (its work and logo live under it): the project itself as its index.
+        write(&format!("/api/project/{}/index.html", p.id), get(&format!("/api/project/{}", p.id)))?;
+        write(&format!("/api/project/{}/work", p.id), get(&format!("/api/project/{}/work", p.id)))?;
+        write(&format!("/api/project/{}/people", p.id), get(&format!("/api/project/{}/people", p.id)))?;
+        if crate::projects::logo(&p.id).is_some() {
+            write(&format!("/api/project/{}/logo", p.id), get(&format!("/api/project/{}/logo", p.id)))?;
+        }
+    }
+    for c in crate::projects::clients().unwrap_or_default() {
+        write(&format!("/api/client/{}/index.html", c.id), get(&format!("/api/client/{}", c.id)))?;
+        write(&format!("/api/client/{}/people", c.id), get(&format!("/api/client/{}/people", c.id)))?;
+        if crate::projects::client_logo(&c.id).is_some() {
+            write(&format!("/api/client/{}/logo", c.id), get(&format!("/api/client/{}/logo", c.id)))?;
+        }
+    }
     for d in calls::all_calls() {
         let name = d.file_name().unwrap().to_string_lossy().into_owned();
         write(&format!("/api/call/{name}"), get(&format!("/api/call/{}", urlencode(&name))))?;
+        #[cfg(feature = "brain")]
+        write(&format!("/api/brain/also/{name}"), get(&format!("/api/brain/also/{}", urlencode(&name))))?;
         // The Minutes tab's frame (`minutes/<call>?v=…`): a folder's index.html, which a static
         // server answers as a page (it redirects to the folder, query kept).
         // One that can't be rendered is written as what the frame would show.

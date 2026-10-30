@@ -72,6 +72,26 @@ $nemoDlls = @("nemo_speech_asr_c.dll", "nemo_speech_asr.dll", "ggml.dll", "ggml-
 foreach ($dll in $nemoDlls) { Copy-Item "$nemoDir\bin\$dll" "$stage\nemo-speech\" }
 Copy-Item "$nemoDir\share\licenses\nemo-speech\*" "$stage\nemo-speech\licenses\" -Recurse
 
+# PDFium for the Brain's thread folders (crates/echoctl/src/brain/files/pdf.rs loads it from pdfium\
+# next to echoctl.exe): bblanchon/pdfium-binaries' build of chromium/7881 (the version pdfium-render
+# expects), BSD-3, checked by SHA-256. Same build as scripts/fetch-pdfium.sh.
+$pdfiumBuild = "7881"
+$pdfiumSha256 = "73cc0de638ac2095e7445bf56a38200a5b7c7ca0e9f4ba144598f2457377ac08"
+$pdfiumTgz = Join-Path $env:TEMP "pdfium-win-x64-$pdfiumBuild.tgz"
+$pdfiumDir = Join-Path $env:TEMP "pdfium-win-x64-$pdfiumBuild"
+if (-not (Test-Path $pdfiumTgz) -or (Get-FileHash $pdfiumTgz -Algorithm SHA256).Hash -ne $pdfiumSha256) {
+    Invoke-WebRequest "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F$pdfiumBuild/pdfium-win-x64.tgz" -OutFile $pdfiumTgz
+}
+if ((Get-FileHash $pdfiumTgz -Algorithm SHA256).Hash -ne $pdfiumSha256) { throw "checksum mismatch for pdfium-win-x64.tgz" }
+Remove-Item -Recurse -Force $pdfiumDir -ErrorAction SilentlyContinue
+New-Item -ItemType Directory $pdfiumDir -Force | Out-Null
+& "$env:SystemRoot\System32\tar.exe" -x -z -f $pdfiumTgz -C $pdfiumDir
+if ($LASTEXITCODE -ne 0) { throw "extracting pdfium-win-x64.tgz failed" }
+New-Item -ItemType Directory "$stage\pdfium\licenses" -Force | Out-Null
+Copy-Item (Get-ChildItem $pdfiumDir -Recurse -Filter pdfium.dll | Select-Object -First 1).FullName "$stage\pdfium\"
+Copy-Item "$pdfiumDir\LICENSE" "$stage\pdfium\licenses\LICENSE"
+Copy-Item "$pdfiumDir\licenses\*" "$stage\pdfium\licenses\" -Recurse
+
 # The plugin travels with the app (`echoctl notes` runs Claude Code with --plugin-dir on it).
 robocopy plugin "$stage\plugin" /E /XD bin node_modules "plugin\.claude-plugin\types" /XF *.test.ts | Out-Null
 python scripts/third-party.py --texts "$stage\THIRD-PARTY-LICENSES.txt"

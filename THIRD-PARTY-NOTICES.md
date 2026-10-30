@@ -22,6 +22,7 @@ Regenerate with `scripts/third-party.py`.
 | anstyle-query | 1.1.5 | MIT OR Apache-2.0 | https://github.com/rust-cli/anstyle.git |
 | anstyle-wincon | 3.0.11 | MIT OR Apache-2.0 | https://github.com/rust-cli/anstyle.git |
 | anyhow | 1.0.104 | MIT OR Apache-2.0 | https://github.com/dtolnay/anyhow |
+| atoi_simd | 0.18.1 | MIT OR Apache-2.0 | https://github.com/RoDmitry/atoi_simd |
 | autocfg | 1.5.1 | Apache-2.0 OR MIT | https://github.com/cuviper/autocfg |
 | base64 | 0.22.1 | MIT OR Apache-2.0 | https://github.com/marshallpierce/rust-base64 |
 | base64 | 0.23.1 | MIT OR Apache-2.0 | https://github.com/marshallpierce/rust-base64 |
@@ -30,9 +31,12 @@ Regenerate with `scripts/third-party.py`.
 | bitflags | 2.13.2 | MIT OR Apache-2.0 | https://github.com/bitflags/bitflags |
 | block-buffer | 0.10.4 | MIT OR Apache-2.0 | https://github.com/RustCrypto/utils |
 | block2 | 0.6.2 | MIT | https://github.com/madsmtm/objc2 |
+| bumpalo | 3.20.3 | MIT OR Apache-2.0 | https://github.com/fitzgen/bumpalo |
 | bytemuck | 1.25.2 | Zlib OR Apache-2.0 OR MIT | https://github.com/Lokathor/bytemuck |
+| byteorder | 1.5.0 | Unlicense OR MIT | https://github.com/BurntSushi/byteorder |
 | byteorder-lite | 0.1.0 | Unlicense OR MIT | https://github.com/image-rs/byteorder-lite |
 | bytes | 1.12.1 | MIT | https://github.com/tokio-rs/bytes |
+| calamine | 0.37.0 | MIT | https://github.com/tafia/calamine |
 | cc | 1.6.0 | MIT OR Apache-2.0 | https://github.com/rust-lang/cc-rs |
 | cexpr | 0.6.0 | Apache-2.0/MIT | https://github.com/jethrogb/rust-cexpr |
 | cfg-if | 1.0.5 | MIT OR Apache-2.0 | https://github.com/rust-lang/cfg-if |
@@ -45,12 +49,14 @@ Regenerate with `scripts/third-party.py`.
 | clap_derive | 4.6.7 | MIT OR Apache-2.0 | https://github.com/clap-rs/clap |
 | clap_lex | 1.1.1 | MIT OR Apache-2.0 | https://github.com/clap-rs/clap |
 | cmake | 0.1.58 | MIT OR Apache-2.0 | https://github.com/rust-lang/cmake-rs |
+| codepage | 0.1.3 | Apache-2.0 OR MIT | https://github.com/hsivonen/codepage |
 | colorchoice | 1.0.5 | MIT OR Apache-2.0 | https://github.com/rust-cli/anstyle.git |
 | cookie | 0.18.2 | MIT OR Apache-2.0 | https://github.com/SergioBenitez/cookie-rs |
 | core-foundation | 0.10.1 | MIT OR Apache-2.0 | https://github.com/servo/core-foundation-rs |
 | core-foundation-sys | 0.8.7 | MIT OR Apache-2.0 | https://github.com/servo/core-foundation-rs |
 | core-graphics | 0.25.0 | MIT OR Apache-2.0 | https://github.com/servo/core-foundation-rs |
 | core-graphics-types | 0.2.0 | MIT OR Apache-2.0 | https://github.com/servo/core-foundation-rs |
+| core_detect | 1.0.0 | MIT/Apache-2.0 | https://github.com/thomcc/core_detect |
 | coreaudio-rs | 0.14.2 | MIT/Apache-2.0 | https://github.com/RustAudio/coreaudio-rs.git |
 | cpal | 0.18.2 | Apache-2.0 | https://github.com/RustAudio/cpal |
 | cpufeatures | 0.2.17 | MIT OR Apache-2.0 | https://github.com/RustCrypto/utils |
@@ -60,6 +66,7 @@ Regenerate with `scripts/third-party.py`.
 | crypto-common | 0.1.7 | MIT OR Apache-2.0 | https://github.com/RustCrypto/traits |
 | ctrlc | 3.5.2 | MIT/Apache-2.0 | https://github.com/Detegr/rust-ctrlc.git |
 | dasp_sample | 0.11.0 | MIT OR Apache-2.0 | https://github.com/rustaudio/sample.git |
+| debug_unsafe | 0.1.4 | MIT OR Apache-2.0 | https://github.com/RoDmitry/debug_unsafe |
 | deranged | 0.5.8 | MIT OR Apache-2.0 | https://github.com/jhpratt/deranged |
 | digest | 0.10.7 | MIT OR Apache-2.0 | https://github.com/RustCrypto/traits |
 | dirs | 7.0.0 | MIT OR Apache-2.0 | https://codeberg.org/dirs/dirs-rs |
@@ -71,11 +78,16 @@ Regenerate with `scripts/third-party.py`.
 | dunce | 1.0.5 | CC0-1.0 OR MIT-0 OR Apache-2.0 | https://gitlab.com/kornelski/dunce |
 | either | 1.19.0 | MIT OR Apache-2.0 | https://github.com/rayon-rs/either |
 | embed-resource | 3.0.12 | MIT | https://github.com/nabijaczleweli/rust-embed-resource |
+| encoding_rs | 0.8.42 | (Apache-2.0 OR MIT) AND BSD-3-Clause | https://github.com/hsivonen/encoding_rs |
 | equivalent | 1.0.2 | Apache-2.0 OR MIT | https://github.com/indexmap-rs/equivalent |
+| fallible-iterator | 0.3.0 | MIT/Apache-2.0 | https://github.com/sfackler/rust-fallible-iterator |
+| fallible-streaming-iterator | 0.1.9 | MIT/Apache-2.0 | https://github.com/sfackler/fallible-streaming-iterator |
+| fast-float2 | 0.2.4 | MIT OR Apache-2.0 | https://github.com/Alexhuszagh/fast-float-rust |
 | fdeflate | 0.3.7 | MIT OR Apache-2.0 | https://github.com/image-rs/fdeflate |
 | filedescriptor | 0.8.3 | MIT | https://github.com/wezterm/wezterm |
 | find-msvc-tools | 0.1.14 | MIT OR Apache-2.0 | https://github.com/rust-lang/cc-rs |
 | flate2 | 1.1.10 | MIT OR Apache-2.0 | https://github.com/rust-lang/flate2-rs |
+| foldhash | 0.1.5 | Zlib | https://github.com/orlp/foldhash |
 | foreign-types | 0.5.0 | MIT/Apache-2.0 | https://github.com/sfackler/foreign-types |
 | foreign-types-macros | 0.2.4 | MIT/Apache-2.0 | https://github.com/sfackler/foreign-types |
 | foreign-types-shared | 0.3.1 | MIT/Apache-2.0 | https://github.com/sfackler/foreign-types |
@@ -84,8 +96,11 @@ Regenerate with `scripts/third-party.py`.
 | generic-array | 0.14.7 | MIT | https://github.com/fizyk20/generic-array.git |
 | getrandom | 0.2.17 | MIT OR Apache-2.0 | https://github.com/rust-random/getrandom |
 | getrandom | 0.3.4 | MIT OR Apache-2.0 | https://github.com/rust-random/getrandom |
+| getrandom | 0.4.3 | MIT OR Apache-2.0 | https://github.com/rust-random/getrandom |
 | glob | 0.3.4 | MIT OR Apache-2.0 | https://github.com/rust-lang/glob |
+| hashbrown | 0.15.5 | MIT OR Apache-2.0 | https://github.com/rust-lang/hashbrown |
 | hashbrown | 0.17.1 | MIT OR Apache-2.0 | https://github.com/rust-lang/hashbrown |
+| hashlink | 0.10.0 | MIT OR Apache-2.0 | https://github.com/kyren/hashlink |
 | heck | 0.5.0 | MIT OR Apache-2.0 | https://github.com/withoutboats/heck |
 | hound | 3.5.1 | Apache-2.0 | https://github.com/ruuda/hound |
 | http | 1.5.0 | MIT OR Apache-2.0 | https://github.com/hyperium/http |
@@ -109,16 +124,19 @@ Regenerate with `scripts/third-party.py`.
 | lazy_static | 1.5.1 | MIT OR Apache-2.0 | https://github.com/rust-lang-nursery/lazy-static.rs |
 | libc | 0.2.190 | MIT OR Apache-2.0 | https://github.com/rust-lang/libc |
 | libloading | 0.8.9 | ISC | https://github.com/nagisa/rust_libloading/ |
+| libsqlite3-sys | 0.35.0 | MIT | https://github.com/rusqlite/rusqlite |
 | litemap | 0.8.3 | Unicode-3.0 | https://github.com/unicode-org/icu4x |
 | lock_api | 0.4.14 | MIT OR Apache-2.0 | https://github.com/Amanieu/parking_lot |
 | log | 0.4.34 | MIT OR Apache-2.0 | https://github.com/rust-lang/log |
 | mach2 | 0.6.0 | BSD-2-Clause OR MIT OR Apache-2.0 | https://github.com/JohnTitor/mach2 |
+| maybe-owned | 0.3.4 | MIT OR Apache-2.0 | https://github.com/rustonaut/maybe-owned |
 | memchr | 2.8.3 | Unlicense OR MIT | https://github.com/BurntSushi/memchr |
 | minimal-lexical | 0.2.1 | MIT/Apache-2.0 | https://github.com/Alexhuszagh/minimal-lexical |
 | miniz_oxide | 0.8.9 | MIT OR Zlib OR Apache-2.0 | https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide |
 | miniz_oxide | 0.9.1 | MIT OR Zlib OR Apache-2.0 | https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide |
 | moxcms | 0.8.1 | BSD-3-Clause OR Apache-2.0 | https://github.com/awxkee/moxcms.git |
 | muda | 0.21.2 | Apache-2.0 OR MIT | https://github.com/tauri-apps/muda |
+| multiversion_no_op | 1.0.0 | Apache-2.0 OR MIT | https://github.com/hsivonen/multiversion_no_op |
 | nix | 0.28.0 | MIT | https://github.com/nix-rust/nix |
 | nix | 0.31.3 | MIT | https://github.com/nix-rust/nix |
 | nom | 7.1.3 | MIT | https://github.com/Geal/nom |
@@ -152,7 +170,10 @@ Regenerate with `scripts/third-party.py`.
 | option-ext | 0.2.0 | MPL-2.0 | https://github.com/soc/option-ext.git |
 | parking_lot | 0.12.5 | MIT OR Apache-2.0 | https://github.com/Amanieu/parking_lot |
 | parking_lot_core | 0.9.12 | MIT OR Apache-2.0 | https://github.com/Amanieu/parking_lot |
+| pdfium-render | 0.9.4 | MIT OR Apache-2.0 | https://github.com/ajrcarey/pdfium-render |
 | percent-encoding | 2.3.2 | MIT OR Apache-2.0 | https://github.com/servo/rust-url/ |
+| piston-float | 1.0.1 | MIT | https://github.com/pistondevelopers/float.git |
+| pkg-config | 0.3.34 | MIT OR Apache-2.0 | https://github.com/rust-lang/pkg-config-rs |
 | png | 0.18.1 | MIT OR Apache-2.0 | https://github.com/image-rs/image-png |
 | portable-pty | 0.9.0 | MIT | https://github.com/wezterm/wezterm |
 | potential_utf | 0.1.6 | Unicode-3.0 | https://github.com/unicode-org/icu4x |
@@ -162,12 +183,14 @@ Regenerate with `scripts/third-party.py`.
 | proc-macro2 | 1.0.107 | MIT OR Apache-2.0 | https://github.com/dtolnay/proc-macro2 |
 | pulldown-cmark | 0.13.5 | MIT | https://github.com/raphlinus/pulldown-cmark |
 | pxfm | 0.1.30 | BSD-3-Clause OR Apache-2.0 | https://github.com/awxkee/pxfm |
+| quick-xml | 0.42.0 | MIT | https://github.com/tafia/quick-xml |
 | quote | 1.0.47 | MIT OR Apache-2.0 | https://github.com/dtolnay/quote |
 | raw-window-handle | 0.6.2 | MIT OR Apache-2.0 OR Zlib | https://github.com/rust-windowing/raw-window-handle |
 | regex | 1.13.1 | MIT OR Apache-2.0 | https://github.com/rust-lang/regex |
 | regex-automata | 0.4.18 | MIT OR Apache-2.0 | https://github.com/rust-lang/regex |
 | regex-syntax | 0.8.11 | MIT OR Apache-2.0 | https://github.com/rust-lang/regex |
 | ring | 0.17.14 | Apache-2.0 AND ISC | https://github.com/briansmith/ring |
+| rusqlite | 0.37.0 | MIT | https://github.com/rusqlite/rusqlite |
 | rustc-hash | 2.1.3 | Apache-2.0 OR MIT | https://github.com/rust-lang/rustc-hash |
 | rustc_version | 0.4.1 | MIT OR Apache-2.0 | https://github.com/djc/rustc-version-rs |
 | rustfft | 6.4.1 | MIT OR Apache-2.0 | https://github.com/ejmahler/RustFFT |
@@ -175,6 +198,7 @@ Regenerate with `scripts/third-party.py`.
 | rustls-pki-types | 1.15.1 | MIT OR Apache-2.0 | https://github.com/rustls/pki-types |
 | rustls-platform-verifier | 0.7.1 | MIT OR Apache-2.0 | https://github.com/rustls/rustls-platform-verifier |
 | rustls-webpki | 0.103.15 | ISC | https://github.com/rustls/webpki |
+| rustversion | 1.0.23 | MIT OR Apache-2.0 | https://github.com/dtolnay/rustversion |
 | scopeguard | 1.2.0 | MIT OR Apache-2.0 | https://github.com/bluss/scopeguard |
 | security-framework | 3.7.0 | MIT OR Apache-2.0 | https://github.com/kornelski/rust-security-framework |
 | security-framework-sys | 2.17.0 | MIT OR Apache-2.0 | https://github.com/kornelski/rust-security-framework |
@@ -191,6 +215,7 @@ Regenerate with `scripts/third-party.py`.
 | shlex | 1.3.0 | MIT OR Apache-2.0 | https://github.com/comex/rust-shlex |
 | shlex | 2.0.1 | MIT OR Apache-2.0 | https://github.com/comex/rust-shlex |
 | simd-adler32 | 0.3.10 | MIT | https://github.com/mcountryman/simd-adler32 |
+| simdutf8 | 0.1.5 | MIT OR Apache-2.0 | https://github.com/rusticstuff/simdutf8 |
 | smallvec | 1.16.2 | MIT OR Apache-2.0 | https://github.com/servo/rust-smallvec |
 | stable_deref_trait | 1.2.1 | MIT OR Apache-2.0 | https://github.com/storyyeller/stable_deref_trait |
 | strength_reduce | 0.2.4 | MIT OR Apache-2.0 | http://github.com/ejmahler/strength_reduce |
@@ -214,6 +239,7 @@ Regenerate with `scripts/third-party.py`.
 | toml_writer | 1.1.3+spec-1.1.0 | MIT OR Apache-2.0 | https://github.com/toml-rs/toml |
 | transpose | 0.2.3 | MIT OR Apache-2.0 | https://github.com/ejmahler/transpose |
 | tray-icon | 0.26.1 | MIT OR Apache-2.0 | https://github.com/tauri-apps/tray-icon |
+| typed-path | 0.13.0 | MIT OR Apache-2.0 | https://github.com/chipsenkbeil/typed-path |
 | typenum | 1.20.1 | MIT OR Apache-2.0 | https://github.com/paholg/typenum |
 | unicase | 2.10.0 | MIT OR Apache-2.0 | https://github.com/seanmonstar/unicase |
 | unicode-ident | 1.0.26 | (MIT OR Apache-2.0) AND Unicode-3.0 | https://github.com/dtolnay/unicode-ident |
@@ -222,9 +248,12 @@ Regenerate with `scripts/third-party.py`.
 | ureq | 3.4.2 | MIT OR Apache-2.0 | https://github.com/algesten/ureq |
 | ureq-proto | 0.6.4 | MIT OR Apache-2.0 | https://github.com/algesten/ureq-proto |
 | url | 2.5.8 | MIT OR Apache-2.0 | https://github.com/servo/rust-url |
+| utf16string | 0.2.0 | MIT OR Apache-2.0 | https://github.com/getsentry/utf16string |
 | utf8-zero | 0.8.1 | MIT OR Apache-2.0 | https://github.com/algesten/utf8-zero |
 | utf8_iter | 1.0.4 | Apache-2.0 OR MIT | https://github.com/hsivonen/utf8_iter |
 | utf8parse | 0.2.2 | Apache-2.0 OR MIT | https://github.com/alacritty/vte |
+| vcpkg | 0.2.15 | MIT/Apache-2.0 | https://github.com/mcgoo/vcpkg-rs |
+| vecmath | 1.0.0 | MIT | https://github.com/pistondevelopers/vecmath.git |
 | version_check | 0.9.5 | MIT/Apache-2.0 | https://github.com/SergioBenitez/version_check |
 | vswhom | 0.1.0 | MIT | https://github.com/nabijaczleweli/vswhom.rs |
 | vswhom-sys | 0.1.3 | MIT | https://github.com/nabijaczleweli/vswhom-sys.rs |
@@ -261,7 +290,9 @@ Regenerate with `scripts/third-party.py`.
 | zerotrie | 0.2.5 | Unicode-3.0 | https://github.com/unicode-org/icu4x |
 | zerovec | 0.11.8 | Unicode-3.0 | https://github.com/unicode-org/icu4x |
 | zerovec-derive | 0.11.6 | Unicode-3.0 | https://github.com/unicode-org/icu4x |
+| zip | 9.1.3 | MIT | https://github.com/zip-rs/zip2 |
 | zlib-rs | 0.6.8 | Zlib | https://github.com/trifectatechfoundation/zlib-rs |
 | zmij | 1.0.23 | MIT | https://github.com/dtolnay/zmij |
+| zopfli | 0.8.4 | Apache-2.0 | https://github.com/zopfli-rs/zopfli |
 | zune-core | 0.5.3 | MIT OR Apache-2.0 OR Zlib | https://github.com/etemesi254/zune-image |
 | zune-jpeg | 0.5.15 | MIT OR Apache-2.0 OR Zlib | https://github.com/etemesi254/zune-image/tree/dev/crates/zune-jpeg |

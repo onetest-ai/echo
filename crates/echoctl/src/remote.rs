@@ -18,6 +18,14 @@
 //!   `{lang_id, lang, segs: [[start, end, text]]}`.
 //!
 //! Both need `Authorization: Bearer <key>`; a wrong key gets 401 after a 1 s pause.
+//!
+//! Or any OpenAI-compatible server (`api: openai`: Speaches, vLLM, LocalAI, parakeet-api, …;
+//! `echoctl server use <url> --key --openai --model <m>`, Settings → Transcription): each utterance a WAV
+//! to `POST /v1/audio/transcriptions` (`verbose_json`, word and segment timestamps), the language
+//! pinned when the call has one, else detected by the server and checked against the call's list
+//! (a language outside it is asked again pinned); the vocabulary hint as `prompt`, checked against a
+//! plain decode as on this computer; Whisper's no-speech rule applied to segments that carry it.
+//! What a server gives back (word times, honouring the language) is found when it is connected.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream, UdpSocket};
@@ -59,13 +67,22 @@ impl std::fmt::Display for Refused {
 
 impl std::error::Error for Refused {}
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Default)]
 struct ClientSettings {
     url: String,
     key: String,
     /// The server's name when it was connected (for menus).
     #[serde(default)]
     name: Option<String>,
+    /// `openai` for an OpenAI-compatible server; none: an Echo.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    api: Option<String>,
+    /// The model an OpenAI-compatible server is asked for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
+    /// What the server was found to give: word timestamps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    words: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -80,6 +97,8 @@ pub struct Client {
     url: String,
     key: String,
     agent: ureq::Agent,
+    /// An OpenAI-compatible server and the model it is asked for; none: an Echo.
+    openai: Option<String>,
 }
 
 impl Client {
@@ -95,13 +114,26 @@ impl Client {
             .tls_config(ureq::tls::TlsConfig::builder().root_certs(ureq::tls::RootCerts::PlatformVerifier).build())
             .build()
             .into();
-        Ok(Client { url, key: key.trim().to_string(), agent })
+        Ok(Client { url, key: key.trim().to_string(), agent, openai: None })
     }
 
     /// The server this computer uses, if one is set.
     pub fn configured() -> Option<Client> {
         let s = load_client()?;
-        Client::new(&s.url, &s.key).ok()
+        let mut c = Client::new(&s.url, &s.key).ok()?;
+        if s.api.as_deref() == Some("openai") {
+            c.openai = Some(s.model.unwrap_or_default());
+        }
+        Some(c)
+    }
+
+    /// `<url>/v1/<path>`, whether the URL was given with `/v1` or without.
+    fn v1(&self, path: &str) -> String {
+        if self.url.ends_with("/v1") {
+            format!("{}/{path}", self.url)
+        } else {
+            format!("{}/v1/{path}", self.url)
+        }
     }
 
     pub fn url(&self) -> &str {
@@ -118,6 +150,9 @@ impl Client {
     }
 
     pub fn hello(&self) -> Result<Hello> {
+        if let Some(model) = &self.openai {
+            return self.openai_hello(model);
+        }
         let mut r = self
             .agent
             .get(format!("{}/v1/hello", self.url))
@@ -132,8 +167,97 @@ impl Client {
         serde_json::from_str(&body).context("not an Echo transcription server")
     }
 
+    /// An OpenAI-compatible server: its models answer (any server lists them), named by its host.
+    fn openai_hello(&self, model: &str) -> Result<Hello> {
+        let mut r = self
+            .agent
+            .get(self.v1("models"))
+            .header("Authorization", format!("Bearer {}", self.key))
+            .config()
+            .timeout_global(Some(Duration::from_secs(10)))
+            .build()
+            .call()
+            .with_context(|| format!("could not reach {}", self.url))?;
+        let body = r.body_mut().read_to_string()?;
+        Self::check(r.status().as_u16(), &body)?;
+        let host = self.url.split("://").nth(1).unwrap_or(&self.url).split('/').next().unwrap_or("").to_string();
+        Ok(Hello { name: host, model: model.to_string(), engine: "OpenAI-compatible".into(), version: String::new() })
+    }
+
+    /// The models an OpenAI-compatible server lists.
+    pub fn openai_models(&self) -> Result<Vec<String>> {
+        let mut r = self.agent.get(self.v1("models")).header("Authorization", format!("Bearer {}", self.key)).call().with_context(|| format!("could not reach {}", self.url))?;
+        let body = r.body_mut().read_to_string()?;
+        Self::check(r.status().as_u16(), &body)?;
+        let v: serde_json::Value = serde_json::from_str(&body).context("not an OpenAI-compatible server (its /v1/models isn't JSON)")?;
+        Ok(v["data"].as_array().into_iter().flatten().filter_map(|m| m["id"].as_str().map(str::to_owned)).collect())
+    }
+
+    /// One request to `/v1/audio/transcriptions`: the verbose answer.
+    fn openai_request(&self, model: &str, chunk: &[f32], language: Option<&str>, prompt: Option<&str>) -> Result<serde_json::Value> {
+        let boundary = format!("echo{:x}", Instant::now().elapsed().as_nanos() ^ (chunk.len() as u128 * 2654435761));
+        let mut body: Vec<u8> = vec![];
+        let mut field = |name: &str, value: &str| {
+            body.extend(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n").as_bytes());
+        };
+        field("model", model);
+        field("response_format", "verbose_json");
+        field("timestamp_granularities[]", "word");
+        field("timestamp_granularities[]", "segment");
+        field("temperature", "0");
+        if let Some(l) = language {
+            field("language", l);
+        }
+        if let Some(p) = prompt {
+            field("prompt", p);
+        }
+        body.extend(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"utterance.wav\"\r\nContent-Type: audio/wav\r\n\r\n").as_bytes());
+        body.extend(wav16k(chunk));
+        body.extend(format!("\r\n--{boundary}--\r\n").as_bytes());
+        let mut r = self
+            .agent
+            .post(self.v1("audio/transcriptions"))
+            .header("Authorization", format!("Bearer {}", self.key))
+            .header("Content-Type", format!("multipart/form-data; boundary={boundary}"))
+            .send(&body[..])
+            .with_context(|| format!("could not reach {}", self.url))?;
+        let text = r.body_mut().read_to_string()?;
+        Self::check(r.status().as_u16(), &text)?;
+        serde_json::from_str(&text).with_context(|| format!("unexpected answer from the server: {}", text.chars().take(200).collect::<String>()))
+    }
+
+    /// Decode one utterance on an OpenAI-compatible server: the language pinned when the call has one;
+    /// else the server's detection, asked again pinned (the track's last language, else the call's
+    /// first) when it falls outside the call's list. The hint is checked against a plain decode.
+    fn openai_utterance(&self, model: &str, chunk: &[f32], prev: Option<i32>, allowed: &[i32], prompt: Option<&str>) -> Result<(Option<i32>, String, Decoded)> {
+        let code = |id: i32| whisper_rs::get_lang_str(id).map(str::to_owned);
+        let pinned: Option<String> = if allowed.len() == 1 { code(allowed[0]) } else { None };
+        let decode = |lang: Option<&str>, hint: Option<&str>| -> Result<(Option<i32>, Decoded)> {
+            let v = self.openai_request(model, chunk, lang, hint)?;
+            Ok((lang_of(&v["language"]), pieces(&v)))
+        };
+        let (mut lang_id, mut segs) = decode(pinned.as_deref(), prompt)?;
+        if pinned.is_none() && !allowed.is_empty() && lang_id.is_some_and(|l| !allowed.contains(&l)) {
+            let fix = prev.filter(|p| allowed.contains(p)).unwrap_or(allowed[0]);
+            if let Some(c) = code(fix) {
+                (_, segs) = decode(Some(&c), prompt)?;
+                lang_id = Some(fix);
+            }
+        }
+        let lang = lang_id.and_then(whisper_rs::get_lang_str).unwrap_or("auto").to_string();
+        if let Some(hint) = prompt.filter(|_| chunk.len() as f64 / 16000.0 >= crate::transcribe::GUARD_MIN_S) {
+            let lang_arg = lang_id.and_then(whisper_rs::get_lang_str).map(str::to_owned);
+            let (_, plain) = decode(lang_arg.as_deref(), None)?;
+            segs = crate::transcribe::choose_hinted(segs, plain, hint);
+        }
+        Ok((lang_id, lang, segs))
+    }
+
     /// Decode one utterance on the server (see `Engine::utterance`).
     pub fn utterance(&self, chunk: &[f32], prev: Option<i32>, allowed: &[i32], prompt: Option<&str>) -> Result<(Option<i32>, String, Decoded)> {
+        if let Some(model) = &self.openai {
+            return self.openai_utterance(model, chunk, prev, allowed, prompt);
+        }
         let languages: Vec<&str> = allowed.iter().filter_map(|l| whisper_rs::get_lang_str(*l)).collect();
         let head = serde_json::to_vec(&json!({
             "languages": languages,
@@ -173,6 +297,66 @@ struct Answer {
     words: Vec<Vec<[f64; 2]>>,
 }
 
+/// 16 kHz mono 16-bit PCM as a WAV file.
+fn wav16k(chunk: &[f32]) -> Vec<u8> {
+    let data = (chunk.len() * 2) as u32;
+    let mut w = Vec::with_capacity(44 + data as usize);
+    w.extend(b"RIFF");
+    w.extend((36 + data).to_le_bytes());
+    w.extend(b"WAVEfmt ");
+    w.extend(16u32.to_le_bytes());
+    w.extend(1u16.to_le_bytes());
+    w.extend(1u16.to_le_bytes());
+    w.extend(16000u32.to_le_bytes());
+    w.extend(32000u32.to_le_bytes());
+    w.extend(2u16.to_le_bytes());
+    w.extend(16u16.to_le_bytes());
+    w.extend(b"data");
+    w.extend(data.to_le_bytes());
+    for s in chunk {
+        w.extend(((s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16).to_le_bytes());
+    }
+    w
+}
+
+/// A language as servers name it ("en", "english", "English") → whisper's id.
+fn lang_of(v: &serde_json::Value) -> Option<i32> {
+    let s = v.as_str()?.trim().to_lowercase();
+    whisper_rs::get_lang_id(&s).or_else(|| (0..=whisper_rs::get_lang_max_id()).find(|&i| whisper_rs::get_lang_str_full(i).is_some_and(|f| f.eq_ignore_ascii_case(&s))))
+}
+
+/// A verbose answer's segments as sentences: Whisper's no-speech rule applied where the segment
+/// carries it (no-speech > 0.6, or > 0.2 with a mean log-prob under −1); each segment's words are
+/// the answer's words starting within it. No segments: the whole text as one.
+fn pieces(v: &serde_json::Value) -> Decoded {
+    let words: Vec<(f64, f64)> = v["words"].as_array().into_iter().flatten().filter_map(|w| Some((w["start"].as_f64()?, w["end"].as_f64()?))).collect();
+    let segs = v["segments"].as_array().cloned().unwrap_or_default();
+    if segs.is_empty() {
+        let text = v["text"].as_str().unwrap_or("").trim().to_string();
+        if text.is_empty() {
+            return vec![];
+        }
+        let end = words.last().map(|w| w.1).unwrap_or(0.0);
+        return vec![Piece::new(0.0, end, text, words.iter().map(|w| [w.0, w.1]).collect())];
+    }
+    let mut out = vec![];
+    for s in segs {
+        let (Some(a), Some(b)) = (s["start"].as_f64(), s["end"].as_f64()) else { continue };
+        let text = s["text"].as_str().unwrap_or("").trim().to_string();
+        let ns = s["no_speech_prob"].as_f64().unwrap_or(0.0);
+        let lp = s["avg_logprob"].as_f64().unwrap_or(0.0);
+        if text.is_empty() || ns > 0.6 || (ns > 0.2 && lp < -1.0) {
+            continue;
+        }
+        let ws: Vec<[f64; 2]> = s["words"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|w| Some([w["start"].as_f64()?, w["end"].as_f64()?])).collect())
+            .unwrap_or_else(|| words.iter().filter(|w| w.0 >= a - 0.01 && w.0 < b + 0.01).map(|w| [w.0, w.1]).collect());
+        out.push(Piece::new(a, b, text, ws));
+    }
+    out
+}
+
 fn load_client() -> Option<ClientSettings> {
     serde_json::from_slice(&std::fs::read(paths::config_dir().join(CLIENT_FILE)).ok()?).ok()
 }
@@ -196,9 +380,50 @@ fn write_private(name: &str, bytes: &[u8]) -> Result<()> {
 pub fn connect(url: &str, key: &str) -> Result<Hello> {
     let c = Client::new(url, key)?;
     let hello = c.hello()?;
-    let s = ClientSettings { url: c.url.clone(), key: c.key.clone(), name: Some(hello.name.clone()) };
+    let s = ClientSettings { url: c.url.clone(), key: c.key.clone(), name: Some(hello.name.clone()), ..Default::default() };
     write_private(CLIENT_FILE, &serde_json::to_vec_pretty(&s)?)?;
     Ok(hello)
+}
+
+/// What connecting to an OpenAI-compatible server found.
+#[derive(Debug, Serialize)]
+pub struct OpenAiCheck {
+    pub model: String,
+    pub models: Vec<String>,
+    /// Word timestamps came back (speaker splitting and the hint check use them).
+    pub words: bool,
+    pub seconds: f64,
+}
+
+/// Connect to an OpenAI-compatible server: its models listed (the one asked for, else the first
+/// that looks like speech-to-text), a test transcription of a short tone, then kept.
+pub fn connect_openai(url: &str, key: &str, model: Option<&str>) -> Result<OpenAiCheck> {
+    let mut c = Client::new(url, key)?;
+    let models = c.openai_models()?;
+    let model = match model.map(str::trim).filter(|m| !m.is_empty()) {
+        Some(m) => m.to_string(),
+        None => models
+            .iter()
+            .find(|m| ["whisper", "parakeet", "canary", "stt", "asr", "transcri"].iter().any(|k| m.to_lowercase().contains(k)))
+            .cloned()
+            .ok_or_else(|| anyhow!("the server lists no speech-to-text model ({}); name one with --model", models.join(", ")))?,
+    };
+    c.openai = Some(model.clone());
+    // A second of a quiet tone: enough to show the answer's shape (segments, words).
+    let tone: Vec<f32> = (0..16000).map(|i| (i as f32 * 440.0 * std::f32::consts::TAU / 16000.0).sin() * 0.05).collect();
+    let t = Instant::now();
+    let v = c.openai_request(&model, &tone, Some("en"), None).with_context(|| format!("the test transcription with {model} failed"))?;
+    let words = v.get("words").is_some() || v["segments"].as_array().is_some_and(|s| s.iter().any(|x| x.get("words").is_some()));
+    let host = c.url.split("://").nth(1).unwrap_or(&c.url).split('/').next().unwrap_or("").to_string();
+    let s = ClientSettings { url: c.url.clone(), key: c.key.clone(), name: Some(host), api: Some("openai".into()), model: Some(model.clone()), words: Some(words) };
+    write_private(CLIENT_FILE, &serde_json::to_vec_pretty(&s)?)?;
+    Ok(OpenAiCheck { model, models, words, seconds: t.elapsed().as_secs_f64() })
+}
+
+/// The server in use, for the window: its address, kind, model, what it gives.
+pub fn client_info() -> Option<serde_json::Value> {
+    let s = load_client()?;
+    Some(json!({"url": s.url, "name": s.name, "api": s.api.unwrap_or_else(|| "echo".into()), "model": s.model, "words": s.words}))
 }
 
 /// Stop using the server (transcribe on this computer again).
@@ -212,9 +437,13 @@ pub fn disconnect() -> Result<()> {
 /// The server in use, for menus: "<name> (<url>)". Never touches the network.
 pub fn client_label() -> Option<String> {
     let s = load_client()?;
+    let what = match (&s.api, &s.model) {
+        (Some(a), Some(m)) if a == "openai" => format!(" · {m}"),
+        _ => String::new(),
+    };
     Some(match s.name {
-        Some(n) => format!("{n} ({})", s.url),
-        None => s.url,
+        Some(n) => format!("{n} ({}){what}", s.url),
+        None => format!("{}{what}", s.url),
     })
 }
 
@@ -542,6 +771,23 @@ fn decode_request(body: &[u8]) -> Result<Answer> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn openai_answers_become_sentences() {
+        let v = serde_json::json!({"language": "english", "text": "Hello there. Budget's fine.",
+            "segments": [{"start": 0.0, "end": 1.2, "text": " Hello there.", "no_speech_prob": 0.01, "avg_logprob": -0.2},
+                         {"start": 1.3, "end": 2.5, "text": " Budget's fine.", "no_speech_prob": 0.05, "avg_logprob": -0.3},
+                         {"start": 2.6, "end": 4.0, "text": " Thank you.", "no_speech_prob": 0.9, "avg_logprob": -0.4}],
+            "words": [{"word": "Hello", "start": 0.0, "end": 0.4}, {"word": "there.", "start": 0.5, "end": 1.1}, {"word": "Budget's", "start": 1.3, "end": 1.8}, {"word": "fine.", "start": 1.9, "end": 2.4}]});
+        let p = pieces(&v);
+        assert_eq!(p.len(), 2, "the no-speech segment is dropped");
+        assert_eq!(p[1].text, "Budget's fine.");
+        assert_eq!(p[1].words, vec![[1.3, 1.8], [1.9, 2.4]]);
+        assert_eq!(lang_of(&v["language"]), whisper_rs::get_lang_id("en"));
+        assert_eq!(lang_of(&serde_json::json!("uk")), whisper_rs::get_lang_id("uk"));
+        let w = wav16k(&[0.0, 0.5]);
+        assert_eq!((&w[..4], w.len()), (&b"RIFF"[..], 48));
+    }
 
     #[test]
     fn keys_match_however_they_are_typed() {
