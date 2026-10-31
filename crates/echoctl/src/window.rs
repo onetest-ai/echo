@@ -1395,7 +1395,7 @@ fn project_op(v: &Value) -> anyhow::Result<Option<String>> {
             crate::people::merge(&s("key").unwrap_or_default(), &s("key_name").unwrap_or_default(), &key_emails, &s("into").unwrap_or_default(), &s("into_name").unwrap_or_default(), opt("into_email").as_deref())?
         }
         "person_split" => crate::people::split(&s("key").unwrap_or_default(), &s("name").unwrap_or_default(), &s("email").unwrap_or_default())?,
-        "people_decide" => crate::people::decide(&id, &s("sid").unwrap_or_default(), v["yes"] == true)?,
+        "people_decide" => crate::people::decide(&id, &s("sid").unwrap_or_default(), v["yes"] == true, opt("value").as_deref())?,
         "person_answer" => crate::people::answer(&s("key").unwrap_or_default(), &s("field").unwrap_or_default(), v["use"] == true)?,
         "org_place" => crate::people::place_org(&id, &s("client").unwrap_or_default(), &v["set"])?,
         "person_set" => {

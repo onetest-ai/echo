@@ -886,16 +886,23 @@ pub fn apply_suggestions(project: &str, evid: &str, proposals: &[Value]) -> Resu
 
 /// The user's answer to a suggestion: yes applies it as theirs (a placement, a directory field, a
 /// relationship, or taking someone out of the thread); no keeps it turned down (not proposed again).
-pub fn decide(project: &str, sid: &str, yes: bool) -> Result<()> {
+/// `value` = the user's own version instead of the proposed one ("Change…"): checked as a proposal
+/// is, applied as theirs, and the proposed value stays turned down.
+pub fn decide(project: &str, sid: &str, yes: bool, value: Option<&str>) -> Result<()> {
     let mut all = suggestions(project);
     let x = all.iter_mut().find(|x| x["sid"] == sid).ok_or_else(|| anyhow::anyhow!("no such suggestion"))?;
     if x["state"] != "pending" {
         bail!("already decided");
     }
+    let field = x["field"].as_str().unwrap_or("").to_string();
+    let own = match value.map(str::trim) {
+        Some(v) if yes => Some(corrected(project, &field, v)?),
+        _ => None,
+    };
     if yes {
         let t = &x["target"];
-        let field = x["field"].as_str().unwrap_or("");
-        let value = x["value"].as_str().unwrap_or("");
+        let field = field.as_str();
+        let value = own.as_deref().unwrap_or(x["value"].as_str().unwrap_or(""));
         let (name, email) = (t["name"].as_str().unwrap_or(""), t["email"].as_str());
         match field {
             "role" | "stance" => place(project, name, email, &json!({field: value}))?,
@@ -920,9 +927,33 @@ pub fn decide(project: &str, sid: &str, yes: bool) -> Result<()> {
             }
         }
     }
-    x["state"] = json!(if yes { "accepted" } else { "rejected" });
+    x["state"] = json!(if own.is_some() { "corrected" } else if yes { "accepted" } else { "rejected" });
+    if let Some(v) = &own {
+        x["chosen"] = json!(v);
+    }
     x["decided"] = json!(chrono::Utc::now().to_rfc3339());
     projects::with_lock(|| projects::write_json(&suggestions_file(project), &all))
+}
+
+/// The user's own value for a suggestion's field, checked as a proposal's is (`reports_to`: a
+/// person of the thread, by key, name or address → their key). Whether someone left is yes or no.
+fn corrected(project: &str, field: &str, v: &str) -> Result<String> {
+    let ok = match field {
+        "stance" => projects::STANCES.contains(&v),
+        "relation" => projects::RELATIONS.contains(&v),
+        "influence" | "interest" => matches!(v, "1" | "2" | "3"),
+        "left" => bail!("whether someone left is a yes or a no"),
+        "reports_to" => {
+            let people = of_thread(project, chrono::Local::now().date_naive())?["people"].as_array().cloned().unwrap_or_default();
+            let x = people.iter().find(|x| x["key"] == v).or_else(|| find_person(&people, v));
+            return x.and_then(|x| x["key"].as_str()).map(str::to_owned).ok_or_else(|| anyhow::anyhow!("{v:?} isn't among the thread's people"));
+        }
+        _ => !v.is_empty() && v.chars().count() <= 80,
+    };
+    if !ok {
+        bail!("bad value {v:?} for {field}");
+    }
+    Ok(v.to_string())
 }
 
 #[cfg(test)]
@@ -998,13 +1029,29 @@ mod tests {
         let ravi = |v: &Value| v["people"].as_array().unwrap().iter().find(|x| x["name"] == "Ravi Mehta").unwrap().clone();
         assert!(ravi(&of_thread(&p.id, today).unwrap())["places"][0]["stance"].is_null());
         assert_eq!(of_thread(&p.id, today).unwrap()["suggestions"].as_array().unwrap().len(), 2);
-        decide(&p.id, all[0]["sid"].as_str().unwrap(), true).unwrap();
-        decide(&p.id, all[1]["sid"].as_str().unwrap(), false).unwrap();
+        decide(&p.id, all[0]["sid"].as_str().unwrap(), true, None).unwrap();
+        decide(&p.id, all[1]["sid"].as_str().unwrap(), false, None).unwrap();
         let v = of_thread(&p.id, today).unwrap();
         assert_eq!(ravi(&v)["places"][0]["stance"], "sceptic");
         assert!(ravi(&v)["reports_to"].is_null(), "turned down");
         assert_eq!(v["suggestions"].as_array().unwrap().len(), 0);
         assert_eq!(apply_suggestions(&p.id, ev, &[json!({"who": "Ravi", "field": "reports_to", "value": "Dana Kowal", "quote": "Ravi reports to me now"})]).unwrap()["added"], 0, "a no stays no");
+        // Not quite: the user's own version is applied, the proposed one stays turned down.
+        apply_suggestions(&p.id, ev, &[json!({"who": "Ravi Mehta", "field": "role", "value": "approver", "quote": "I can't sign this off"})]).unwrap();
+        let sid = suggestions(&p.id).iter().find(|x| x["field"] == "role" && x["state"] == "pending").unwrap()["sid"].as_str().unwrap().to_string();
+        assert!(decide(&p.id, &sid, true, Some("grumpy")).is_ok(), "a role is free text");
+        assert!(decide(&p.id, &sid, true, Some("x")).unwrap_err().to_string().contains("already decided"));
+        apply_suggestions(&p.id, ev, &[json!({"who": "Ravi Mehta", "field": "stance", "value": "blocker", "quote": "I can't sign this off"})]).unwrap();
+        let sid = suggestions(&p.id).iter().find(|x| x["field"] == "stance" && x["state"] == "pending").unwrap()["sid"].as_str().unwrap().to_string();
+        assert!(decide(&p.id, &sid, true, Some("grumpy")).unwrap_err().to_string().contains("bad value"), "checked as a proposal is");
+        decide(&p.id, &sid, true, Some("neutral")).unwrap();
+        let v = of_thread(&p.id, today).unwrap();
+        assert_eq!(ravi(&v)["places"][0]["stance"], "neutral");
+        assert_eq!(ravi(&v)["places"][0]["role"], "grumpy");
+        let s = suggestions(&p.id);
+        let x = s.iter().find(|x| x["sid"] == sid.as_str()).unwrap();
+        assert_eq!((x["state"].as_str(), x["value"].as_str(), x["chosen"].as_str()), (Some("corrected"), Some("blocker"), Some("neutral")));
+        assert_eq!(apply_suggestions(&p.id, ev, &[json!({"who": "Ravi Mehta", "field": "stance", "value": "blocker", "quote": "I can't sign this off"})]).unwrap()["added"], 0, "the proposed value stays turned down");
     }
 
     #[test]

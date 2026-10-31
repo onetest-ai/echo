@@ -408,8 +408,9 @@ role, stance, influence, interest, title, group, reports to, left, and relations
 (`people-apply --evidence --file`, both in `guard::PROJECT_STEPS`). `people::apply_suggestions` checks each: the quote
 one span of that call (`ledger::quote_in`), the person or organisation known, the value valid and not already so, not
 proposed or turned down before → `<project>/people-suggestions.json`, pending. Nothing changes until the user answers
-in the People tab's bar (the question, the words, the call and time; Yes applies it as theirs, No stays no:
-`people_decide` → `people::decide`). No model verifier on top: the quote check and the user's yes are the gate.
+in the People tab's bar (the question, the words, the call and time; Yes applies it as theirs, No stays no, Change…
+applies the user's own version — checked as a proposal is, state `corrected`, the proposed value stays turned down; Needs
+you's Change… opens that editor in the People tab: `people_decide {value}` → `people::decide`). No model verifier on top: the quote check and the user's yes are the gate.
 **Tasks** activity (`tasks.rs`, `#tasks`, `/api/tasks`, `echoctl project tasks`): every open project's open tasks in four
 piles — I owe (owner = the transcripts' "Me", or `config.me`'s name, first name or email), Owed to me (someone else
 owns it), Waiting for others (blocked, `waiting_for`, or an open dependency — before the owner), Nobody named —

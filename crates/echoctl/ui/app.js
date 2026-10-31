@@ -1257,6 +1257,8 @@ document.addEventListener('click', (e) => {
   const i = nyOpen().find((x) => x.key === t.dataset.nyAct)
   const a = i && (i.actions || [])[Number(t.dataset.k)]
   if (!a) return
+  // Change…: decided where it can be edited (a suggestion's own version in the People tab).
+  if (a.go) { if (a.edit) S.pj.ppSugEdit = a.edit; return go(a.go) }
   send(a.ipc)
   // A decision takes the item off at once; an action that opens a flow (a sign-in, a log) leaves it.
   if (!['sign_in', 'show_log', 'settings_action', 'write_notes'].includes(a.ipc.cmd)) NY.gone.add(i.key)
@@ -2947,6 +2949,8 @@ function clientTasks(cd) {
 // Facts from the calls (computed by the app every time) beside what the user set: a Map
 // (influence × interest), the org chart, a List; the person in the right panel.
 const STANCES = ['champion', 'supporter', 'neutral', 'sceptic', 'blocker']
+/** Relationships between organisations (`projects::RELATIONS`), as a sentence reads them. */
+const REL_KINDS = [['partner', 'partner of'], ['vendor', 'vendor to'], ['delivers_for', 'delivers for'], ['integrates_for', 'integrates for'], ['customer', 'customer of'], ['competitor', 'competitor of']]
 const MATTERS = ['critical', 'high', 'normal', 'irrelevant']
 const peopleData = () => { const d = S.pj.people; const want = S.pj.client ? `api/client/${encodeURIComponent(S.pj.client)}/people` : `api/project/${encodeURIComponent(S.pj.sel)}/people`; return d && d.url === want ? d : null }
 const peopleCount = () => { const d = peopleData(); return d && d.people ? d.people.filter((x) => x.in_thread).length : 0 }
@@ -2974,7 +2978,8 @@ function peopleView() {
   return `<div class="pp">${bar}${peopleSuggestions(d)}${body}</div>`
 }
 /** What the sync's people pass proposed, with the words: Yes applies it as yours, No turns it down
- *  (never proposed again). Three at a time. */
+ *  (never proposed again), Change… applies your own version instead (the proposed one stays turned
+ *  down). Three at a time; the one being changed is always shown. */
 function peopleSuggestions(d) {
   const all = d.suggestions || []
   if (!all.length) return ''
@@ -2993,13 +2998,27 @@ function peopleSuggestions(d) {
     }
     return `${n}: ${esc(x.field)} = <b>${v}</b>?`
   }
+  /** The control for your own version: the field's choices, else the proposed text to correct. */
+  const editor = (x) => {
+    const sel = (opts) => `<select id="pp-sug-v" aria-label="Your version">${opts.map(([v, l]) => `<option value="${esc(v)}"${String(v) === String(x.value) ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>`
+    switch (x.field) {
+      case 'stance': return sel(STANCES.map((v) => [v, v]))
+      case 'influence': case 'interest': return sel([1, 2, 3].map((n) => [n, LV[n]]))
+      case 'relation': return sel(REL_KINDS)
+      case 'reports_to': return sel(d.people.filter((p) => p.key !== x.target.key).map((p) => [p.key, p.name]))
+    }
+    return `<input id="pp-sug-v" value="${esc(x.value)}" maxlength="80" aria-label="Your version" autofocus>`
+  }
   const row = (x) => {
     const at = x.at || {}
     const src = [at.title, at.date ? relDay(at.date) : '', at.ts ? String(at.ts).replace(/^00:/, '') : ''].filter(Boolean).join(' · ')
     const st = x.field === 'stance' ? x.value : null
-    return `<div class="pp-sug">${ppAv(x.target.name || '?', st, x.field === 'relation')}<span class="grow">${ask(x)} <span class="pp-quote">“${esc(x.quote || '')}”</span> ${at.call ? `<button class="link-btn pp-src" data-call="${esc(at.call)}">${esc(src)}</button>` : `<span class="set-sub">${esc(src)}</span>`}</span><button class="btn primary" data-pp="decide" data-sid="${esc(x.sid)}" data-thread="${esc(x.thread)}" data-yes="1">Yes</button><button class="btn ghost" data-pp="decide" data-sid="${esc(x.sid)}" data-thread="${esc(x.thread)}" data-yes="">No</button></div>`
+    if (S.pj.ppSugEdit === x.sid) {
+      return `<div class="pp-sug">${ppAv(x.target.name || '?', st, x.field === 'relation')}<span class="grow">${ask(x).replace(/\?$/, '')} → ${editor(x)} <span class="pp-quote">“${esc(x.quote || '')}”</span></span><button class="btn primary" data-pp="sug-save" data-sid="${esc(x.sid)}" data-thread="${esc(x.thread)}">Save</button><button class="btn ghost" data-pp="sug-cancel">Cancel</button></div>`
+    }
+    return `<div class="pp-sug">${ppAv(x.target.name || '?', st, x.field === 'relation')}<span class="grow">${ask(x)} <span class="pp-quote">“${esc(x.quote || '')}”</span> ${at.call ? `<button class="link-btn pp-src" data-call="${esc(at.call)}">${esc(src)}</button>` : `<span class="set-sub">${esc(src)}</span>`}</span><button class="btn primary" data-pp="decide" data-sid="${esc(x.sid)}" data-thread="${esc(x.thread)}" data-yes="1">Yes</button><button class="btn ghost" data-pp="decide" data-sid="${esc(x.sid)}" data-thread="${esc(x.thread)}" data-yes="">No</button>${x.field === 'left' ? '' : `<button class="btn ghost" data-pp="sug-edit" data-sid="${esc(x.sid)}" title="Not quite: put it right">Change…</button>`}</div>`
   }
-  const shown = S.pj.ppAllSug ? all : all.slice(0, 3)
+  const shown = S.pj.ppAllSug || all.slice(3).some((x) => x.sid === S.pj.ppSugEdit) ? all : all.slice(0, 3)
   return `<div class="pp-sugs">${shown.map(row).join('')}${all.length > 3 ? `<button class="link-btn" data-pp="all-sug">${S.pj.ppAllSug ? 'Show fewer' : `${all.length - 3} more from the calls`}</button>` : ''}</div>`
 }
 function peopleMap(d) {
@@ -3183,7 +3202,7 @@ function orgPanel(d, id) {
   const thread = S.pj.client ? null : S.pj.sel
   const pl = thread ? (o.places || []).find((p) => p.thread === thread) || {} : placeOf(o) || {}
   const all = ((S.pj.data && S.pj.data.clients) || []).filter((c) => c.id !== o.id)
-  const KINDS = [['partner', 'partner of'], ['vendor', 'vendor to'], ['delivers_for', 'delivers for'], ['integrates_for', 'integrates for'], ['customer', 'customer of'], ['competitor', 'competitor of']]
+  const KINDS = REL_KINDS
   const lvl = (f) => `<span class="pp-lvl" role="group" aria-label="${f}">${[1, 2, 3].map((n) => `<button data-pp="org-level" data-id="${esc(o.id)}" data-f="${f}" data-n="${n}" aria-pressed="${(pl[f] || 0) >= n}" title="${['low', 'mid', 'high'][n - 1]}"></button>`).join('')}<span class="set-sub">${pl[f] ? ['low', 'mid', 'high'][pl[f] - 1] : 'not set'}</span></span>`
   return `<div class="wp pp-panel">
     <div class="pp-p-top">${ppAv(o.name, pl.stance, true)}<div style="min-width:0"><button class="wp-name pp-name" data-pj="client" data-id="${esc(o.id)}">${esc(o.name)}</button><div class="set-sub">${o.internal ? 'your company' : 'organisation'} · ${o.people} ${o.people === 1 ? 'person' : 'people'}${o.domains && o.domains.length ? ` · ${esc(o.domains.join(', '))}` : ''}</div></div></div>
@@ -3203,6 +3222,20 @@ PANEL_VIEWS.push({ id: 'person', label: 'Person', icon: ICON('<circle cx="12" cy
 function peopleSend(op, extra) {
   send({ cmd: 'project', op, id: S.pj.sel, ...extra })
   setTimeout(() => loadPeople().then(render), 250)
+}
+/** Change… on a suggestion: its row becomes your version, focused. */
+function sugEdit(sid) {
+  S.pj.ppSugEdit = sid
+  render()
+  const i = $('#pp-sug-v')
+  if (i) { i.focus(); i.select && i.select() }
+}
+function sugSave(thread, sid) {
+  const i = $('#pp-sug-v'), value = i ? i.value.trim() : ''
+  if (!value) return window.echo.notice('Say what it should be, or press No.')
+  S.pj.ppSugEdit = null
+  send({ cmd: 'project', op: 'people_decide', id: thread, sid, yes: true, value })
+  setTimeout(() => { loadPeople().then(render); loadAttention(true).then(render) }, 250)
 }
 function personOf(key) { const d = peopleData(); return d && d.people.find((y) => y.key === key) }
 function personSet(field, value) {
@@ -3253,6 +3286,9 @@ document.addEventListener('click', (e) => {
     case 'same-cancel': S.pj.ppSame = false; return render()
     case 'split': { const x = personOf(S.pj.person); if (x) peopleSend('person_split', { key: x.key, name: x.name, email: d.email }); return }
     case 'decide': send({ cmd: 'project', op: 'people_decide', id: d.thread, sid: d.sid, yes: !!d.yes }); return setTimeout(() => loadPeople().then(render), 250)
+    case 'sug-edit': return sugEdit(d.sid)
+    case 'sug-cancel': S.pj.ppSugEdit = null; return render()
+    case 'sug-save': return sugSave(d.thread, d.sid)
     case 'all-sug': S.pj.ppAllSug = !S.pj.ppAllSug; return render()
     case 'answer': { const x = personOf(S.pj.person); if (x) peopleSend('person_answer', { key: x.key, field: d.f, use: !!d.use }); return }
     case 'add': S.pj.ppAdding = true; render(); { const i = $('#pp-new'); if (i) i.focus() } return
@@ -3293,6 +3329,8 @@ document.addEventListener('keydown', (e) => {
     else render()
   }
   if (t.id === 'pp-new' && e.key === 'Escape') { S.pj.ppAdding = false; render() }
+  if (t.id === 'pp-sug-v' && e.key === 'Enter') { e.preventDefault(); const b = document.querySelector('[data-pp="sug-save"]'); if (b) b.click() }
+  if (t.id === 'pp-sug-v' && e.key === 'Escape') { e.preventDefault(); S.pj.ppSugEdit = null; render() }
 })
 // Drag a chip to a quadrant: high or low influence and interest.
 document.addEventListener('dragstart', (e) => { const c = e.target.closest && e.target.closest('[data-pp-drag]'); if (c) { e.dataTransfer.setData('text/x-echo-person', c.dataset.ppDrag); e.dataTransfer.effectAllowed = 'move' } })

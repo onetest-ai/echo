@@ -145,7 +145,14 @@ pub fn collect() -> Collected {
                 q,
                 format!("{} · {quote}", p.name),
                 false,
-                vec![act("Yes", true, json!({"cmd": "project", "op": "people_decide", "id": p.id, "sid": sid, "yes": true})), act("No", false, json!({"cmd": "project", "op": "people_decide", "id": p.id, "sid": sid, "yes": false}))],
+                {
+                    let mut acts = vec![act("Yes", true, json!({"cmd": "project", "op": "people_decide", "id": p.id, "sid": sid, "yes": true})), act("No", false, json!({"cmd": "project", "op": "people_decide", "id": p.id, "sid": sid, "yes": false}))];
+                    // Not quite right: the People tab, with this suggestion open for the user's own version.
+                    if x["field"] != "left" {
+                        acts.push(json!({"label": "Change…", "primary": false, "go": format!("project/{}/people", p.id), "edit": sid}));
+                    }
+                    acts
+                },
                 Some(format!("project/{}/people", p.id)),
             ));
         }
