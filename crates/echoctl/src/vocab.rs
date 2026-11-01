@@ -132,15 +132,7 @@ pub fn for_call(cfg: &Config, meeting: Option<&MeetingContext>) -> Vec<String> {
 /// Learn terms from a call: each remembers the call's subject and people (re-learning adds
 /// them and makes the term the newest). Returns the terms new to the list.
 pub fn learn(cfg: &mut Config, dir: &Path, terms: &[String]) -> Vec<String> {
-    let meeting = MeetingContext::load(dir).ok().flatten();
-    let subject = meeting
-        .as_ref()
-        .and_then(|m| m.subject.clone())
-        .or_else(|| fs::read(dir.join("meta.json")).ok().and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok()).and_then(|v| v["title"].as_str().map(str::to_owned)))
-        .map(|s| norm_subject(&s))
-        .filter(|s| !s.is_empty());
-    let people = meeting.as_ref().map(|m| others(m, cfg.me.as_ref())).unwrap_or_default();
-    let call = dir.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+    let (subject, people, call) = scope_of(cfg, dir);
     #[cfg(feature = "brain")]
     {
         let (layer, threads) = place_of(dir);
@@ -152,7 +144,7 @@ pub fn learn(cfg: &mut Config, dir: &Path, terms: &[String]) -> Vec<String> {
                 term: t.to_string(),
                 layer: layer.clone(),
                 threads: threads.clone(),
-                scope: crate::brain::taxonomy::LearnedScope { subjects: subject.iter().cloned().collect(), people: people.iter().cloned().collect(), calls: if call.is_empty() { vec![] } else { vec![call.clone()] } },
+                scope: crate::brain::taxonomy::LearnedScope { subjects: subject.iter().cloned().collect(), people: people.to_vec(), calls: if call.is_empty() { vec![] } else { vec![call.clone()] } },
             })
             .collect();
         match crate::brain::taxonomy::learn(&items, "minutes") {
@@ -160,6 +152,26 @@ pub fn learn(cfg: &mut Config, dir: &Path, terms: &[String]) -> Vec<String> {
             Err(e) => eprintln!("warning: the taxonomy couldn't learn them ({e:#}); kept in the old list"),
         }
     }
+    learn_into_list(cfg, terms, subject, &people, &call)
+}
+
+/// A call's subject (normalised), its other people and its folder name.
+fn scope_of(cfg: &Config, dir: &Path) -> (Option<String>, Vec<String>, String) {
+    let meeting = MeetingContext::load(dir).ok().flatten();
+    let subject = meeting
+        .as_ref()
+        .and_then(|m| m.subject.clone())
+        .or_else(|| fs::read(dir.join("meta.json")).ok().and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok()).and_then(|v| v["title"].as_str().map(str::to_owned)))
+        .map(|s| norm_subject(&s))
+        .filter(|s| !s.is_empty());
+    let people = meeting.as_ref().map(|m| others(m, cfg.me.as_ref())).unwrap_or_default();
+    let call = dir.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+    (subject, people.into_iter().collect(), call)
+}
+
+/// The old `learned` list in the config. Reads nothing else: `migrate` runs inside `Config::load`, and
+/// the taxonomy's way (`place_of` → the projects → `Config::load`) recursed there until the stack ran out.
+fn learn_into_list(cfg: &mut Config, terms: &[String], subject: Option<String>, people: &[String], call: &str) -> Vec<String> {
     let list = cfg.learned.get_or_insert_with(Vec::new);
     let mut added = vec![];
     for t in terms.iter().map(|t| t.trim()) {
@@ -178,13 +190,13 @@ pub fn learn(cfg: &mut Config, dir: &Path, terms: &[String]) -> Vec<String> {
                 entry.subjects.push(s.clone());
             }
         }
-        for p in &people {
+        for p in people {
             if !entry.people.contains(p) {
                 entry.people.push(p.clone());
             }
         }
-        if !call.is_empty() && !entry.calls.contains(&call) {
-            entry.calls.push(call.clone());
+        if !call.is_empty() && !entry.calls.iter().any(|c| c == call) {
+            entry.calls.push(call.to_string());
         }
         list.push(entry);
     }
@@ -275,8 +287,10 @@ pub fn migrate(cfg: &mut Config) -> bool {
         if found.is_empty() {
             cfg.learned.get_or_insert_with(Vec::new).push(Learned { term: term.clone(), ..Default::default() });
         }
+        // Into the old list only (`migrate_learned` moves it into the taxonomy later, outside a load).
         for d in found {
-            learn(cfg, d, std::slice::from_ref(&term));
+            let (subject, people, call) = scope_of(cfg, d);
+            learn_into_list(cfg, std::slice::from_ref(&term), subject, &people, &call);
         }
     }
     true
