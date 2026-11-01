@@ -1821,7 +1821,7 @@ fn open_in_app(path: &Path) {
     #[cfg(target_os = "macos")]
     let _ = std::process::Command::new("open").arg(path).spawn();
     #[cfg(windows)]
-    let _ = std::process::Command::new("explorer").arg(path).no_window().spawn();
+    let _ = std::process::Command::new("explorer").no_window().arg(path).spawn();
 }
 
 pub(crate) fn copy_to_clipboard(text: &str) {

@@ -1085,6 +1085,10 @@ track, only when their loudness envelopes correlate (speakers, not headphones); 
 ## Checks
 - `cargo clippy`, `cargo test` (macOS) and `cargo check --target x86_64-pc-windows-msvc --no-default-features`
   must all be clean. (`--no-default-features` drops whisper.cpp, which can't cross-compile C++ to MSVC.)
+- That cross-check also drops the `brain` feature (bundled SQLite is C), so Windows-only code behind it is never
+  compiled there: v0.4.1-beta's Windows build broke on one such line. On Windows, before a release:
+  `cargo check -p echoctl --no-default-features --features tray,brain` (native MSVC, no cmake needed) must be clean;
+  `scripts/package-windows.ps1` then builds everything (`transcribe` + `vulkan`).
 - Mod: `scripts/check-mod.sh` (plugin validate + `claude plugin test` + the window's node tests,
   `crates/echoctl/ui/notes-sync.test.mjs` (`NotesSync`) and `calendar-dates.test.mjs` (the calendar's days, hours
   and lanes) + tsc against the engine's types).
