@@ -6,9 +6,9 @@
 #   GitHub runs this file as it is in the tagged commit, so only tags made after it landed.
 # - Run by hand (Actions -> Windows release -> Run workflow): the same for a tag given; upload off
 #   to only get the files as a workflow artifact; no tag = build the branch it runs on, upload nothing.
-# - Every push to main (not docs): builds, uploads nothing. It keeps main's cache warm — the only
-#   cache a release run can read (a cache is scoped to its ref; one unused for 7 days is dropped) —
-#   and shows at once when a merge breaks the Windows build. Pull requests don't build.
+# Nothing else builds: changes pile up on main and a release ships them. No cache either — a
+# release run (a new tag each time) could read none but main's — so every release builds from
+# scratch, ~25 minutes on GitHub's runner.
 #
 # Signing is on when the repository variable SIGNPATH_ORGANIZATION_ID is set, with the secret
 # SIGNPATH_API_TOKEN and the variables SIGNPATH_PROJECT_SLUG and SIGNPATH_POLICY_SLUG
@@ -30,12 +30,7 @@ on:
         description: Upload the MSI and zip to that release
         type: boolean
         default: true
-  push:
-    branches: [main]
-    paths-ignore:
-      - "**.md"
-      - docs/**
-      - tests/**
+
 
 permissions:
   contents: write   # gh release upload
@@ -76,15 +71,7 @@ jobs:
           rustup default stable
           rustc --version
 
-      - name: Vulkan SDK (cached)
-        id: vulkan-cache
-        uses: actions/cache@v4
-        with:
-          path: C:\VulkanSDK\${{ env.VULKAN_VERSION }}
-          key: vulkan-sdk-${{ env.VULKAN_VERSION }}
-
       - name: Install the Vulkan SDK
-        if: steps.vulkan-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           $v = $env:VULKAN_VERSION
@@ -106,15 +93,6 @@ jobs:
           "ECHO_STAGE_DIR=$env:RUNNER_TEMP\stage" >> $env:GITHUB_ENV
           dotnet tool install --global wix --version $env:WIX_VERSION
 
-      - name: Cargo cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            C:\eb
-          key: cargo-windows-${{ hashFiles('Cargo.lock', 'packaging/windows/whisper.cmake', '.cargo/config.toml') }}
-          restore-keys: cargo-windows-
 
       - name: Build and stage
         shell: pwsh
@@ -204,7 +182,7 @@ jobs:
             dist\*.msi
             dist\*.zip
           if-no-files-found: error
-          # A release's files live on the release; a main build's are only for a look.
+          # A release's files live on the release; a build by hand without one is only for a look.
           retention-days: ${{ steps.tag.outputs.upload == 'true' && 90 || 7 }}
 
       - name: Upload to the release

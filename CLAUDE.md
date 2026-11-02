@@ -44,8 +44,8 @@ minutes").
   took over 30 s stops the installation; else ignored, as for a first install, and for Echo's own update, which passes
   `ECHO_SELF_UPDATE=1`: it saved its notes and is stopping already), `app start` after; uninstall keeps data. Plus the
   same files as a zip. CI: `.github/workflows/windows-release.yml` builds it on GitHub's runner when a release is
-  published (or by hand for a tag) and uploads both; every push to `main` (not docs) builds only — it keeps
-  `main`'s cache warm, the only one a release run can read (7 days unused → dropped); PRs don't build; `-Phase stage` /
+  published (or by hand for a tag) and uploads both; nothing else builds (changes pile up on `main`, a
+  release ships them) and nothing is cached — every release builds from scratch, ~25 min; `-Phase stage` /
   `package` split the script so SignPath signs `echoctl.exe` in between, then the MSI — on once the repository has
   `SIGNPATH_*` settings, else unsigned as before.
 - Marketplace `echoctl` (`.claude-plugin/marketplace.json`): `claude plugin marketplace add
