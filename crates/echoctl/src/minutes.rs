@@ -23,7 +23,7 @@ use sha2::{Digest, Sha256};
 
 use crate::calls;
 
-/// Diagrams (```mermaid): mermaid 11.4.1, MIT. A page embeds it only when its minutes draw a
+/// Diagrams (```mermaid): mermaid 11.17.2, MIT. A page embeds it only when its minutes draw a
 /// diagram (the window's Minutes tab shows the page itself).
 const MERMAID_JS: &str = include_str!("../ui/vendor/mermaid.min.js");
 

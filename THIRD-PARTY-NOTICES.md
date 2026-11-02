@@ -10,7 +10,7 @@ Regenerate with `scripts/third-party.py`.
 | Vulkan loader (vulkan-1.dll, Windows zip) |  | Apache-2.0 | https://github.com/KhronosGroup/Vulkan-Loader |
 | NeMo-Speech.cpp runtime (Nemotron models; its components' licenses ship in nemo-speech/licenses) | 0.2.0 | Apache-2.0 | https://github.com/NVIDIA/NeMo-Speech.cpp |
 | Nemotron speech models (downloaded when chosen) |  | OpenMDW-1.1 | https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b |
-| mermaid (diagrams in the Echo window; license in ui/vendor/mermaid.min.js) | 11.4.1 | MIT | https://github.com/mermaid-js/mermaid |
+| mermaid (diagrams in the Echo window; license in ui/vendor/mermaid.min.js) | 11.17.2 | MIT | https://github.com/mermaid-js/mermaid |
 | xterm.js (terminals in the Echo window; license in ui/vendor/xterm.LICENSE) | 5.5.0 | MIT | https://github.com/xtermjs/xterm.js |
 | @xterm/addon-fit (terminals in the Echo window) | 0.10.0 | MIT | https://github.com/xtermjs/xterm.js |
 | adler2 | 2.0.1 | 0BSD OR MIT OR Apache-2.0 | https://github.com/oyvindln/adler2 |
@@ -181,7 +181,7 @@ Regenerate with `scripts/third-party.py`.
 | prettyplease | 0.2.37 | MIT OR Apache-2.0 | https://github.com/dtolnay/prettyplease |
 | primal-check | 0.3.4 | MIT OR Apache-2.0 | https://github.com/huonw/primal |
 | proc-macro2 | 1.0.107 | MIT OR Apache-2.0 | https://github.com/dtolnay/proc-macro2 |
-| pulldown-cmark | 0.13.5 | MIT | https://github.com/raphlinus/pulldown-cmark |
+| pulldown-cmark | 0.13.6 | MIT | https://github.com/raphlinus/pulldown-cmark |
 | pxfm | 0.1.30 | BSD-3-Clause OR Apache-2.0 | https://github.com/awxkee/pxfm |
 | quick-xml | 0.42.0 | MIT | https://github.com/tafia/quick-xml |
 | quote | 1.0.47 | MIT OR Apache-2.0 | https://github.com/dtolnay/quote |
@@ -194,10 +194,10 @@ Regenerate with `scripts/third-party.py`.
 | rustc-hash | 2.1.3 | Apache-2.0 OR MIT | https://github.com/rust-lang/rustc-hash |
 | rustc_version | 0.4.1 | MIT OR Apache-2.0 | https://github.com/djc/rustc-version-rs |
 | rustfft | 6.4.1 | MIT OR Apache-2.0 | https://github.com/ejmahler/RustFFT |
-| rustls | 0.23.45 | Apache-2.0 OR ISC OR MIT | https://github.com/rustls/rustls |
+| rustls | 0.23.46 | Apache-2.0 OR ISC OR MIT | https://github.com/rustls/rustls |
 | rustls-pki-types | 1.15.1 | MIT OR Apache-2.0 | https://github.com/rustls/pki-types |
 | rustls-platform-verifier | 0.7.1 | MIT OR Apache-2.0 | https://github.com/rustls/rustls-platform-verifier |
-| rustls-webpki | 0.103.15 | ISC | https://github.com/rustls/webpki |
+| rustls-webpki | 0.103.16 | ISC | https://github.com/rustls/webpki |
 | rustversion | 1.0.23 | MIT OR Apache-2.0 | https://github.com/dtolnay/rustversion |
 | scopeguard | 1.2.0 | MIT OR Apache-2.0 | https://github.com/bluss/scopeguard |
 | security-framework | 3.7.0 | MIT OR Apache-2.0 | https://github.com/kornelski/rust-security-framework |
@@ -257,7 +257,7 @@ Regenerate with `scripts/third-party.py`.
 | version_check | 0.9.5 | MIT/Apache-2.0 | https://github.com/SergioBenitez/version_check |
 | vswhom | 0.1.0 | MIT | https://github.com/nabijaczleweli/vswhom.rs |
 | vswhom-sys | 0.1.3 | MIT | https://github.com/nabijaczleweli/vswhom-sys.rs |
-| webpki-roots | 1.0.9 | CDLA-Permissive-2.0 | https://github.com/rustls/webpki-roots |
+| webpki-roots | 1.0.11 | CDLA-Permissive-2.0 | https://github.com/rustls/webpki-roots |
 | webview2-com | 0.39.1 | MIT | https://github.com/wravery/webview2-rs |
 | webview2-com-macros | 0.8.1 | MIT | https://github.com/wravery/webview2-rs |
 | webview2-com-sys | 0.39.1 | MIT | https://github.com/wravery/webview2-rs |
