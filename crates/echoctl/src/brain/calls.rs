@@ -164,8 +164,8 @@ mod tests {
         std::fs::write(d.join("meta.json"), json!({"title": "Aurora weekly", "started_at": "2026-10-28T11:00:00+02:00"}).to_string()).unwrap();
         std::fs::write(d.join("notes.md"), "# Aurora weekly\n\n## Summary\nSSO lands first.\n\n## Decisions\n- Pilot moves to 24 Nov [12:05].\n").unwrap();
         std::fs::write(d.join("segments.json"), json!([
-            {"speaker": "remote", "name": "Ortiz, Karen (Partner)", "start": 725.0, "text": "Then SSO has to land first."},
-            {"speaker": "remote", "name": "Ortiz, Karen (Partner)", "start": 728.0, "text": "Let's say the 24th."},
+            {"speaker": "remote", "name": "Varga, Lena (Partner)", "start": 725.0, "text": "Then SSO has to land first."},
+            {"speaker": "remote", "name": "Varga, Lena (Partner)", "start": 728.0, "text": "Let's say the 24th."},
             {"speaker": "me", "start": 741.0, "text": "I can have the SAML config by Friday."},
         ]).to_string()).unwrap();
         std::fs::write(d.join("chat.json"), json!([{"t": 730.0, "from": "Ravi", "text": "link to the diagram"}]).to_string()).unwrap();
@@ -173,9 +173,9 @@ mod tests {
         assert_eq!(doc.source, format!("call/{}", calls::stamp_of(&d)));
         let c = super::super::chunk::chunk(&doc.md, 1200);
         let titles: Vec<&str> = c.iter().map(|x| x.title.as_str()).collect();
-        assert_eq!(titles, ["Summary", "Decisions", "[12:05] Karen Ortiz, Me", "Chat"], "{}", doc.md);
-        assert_eq!(c[2].breadcrumb, "Aurora weekly > Transcript > [12:05] Karen Ortiz, Me");
-        assert!(c[2].body.contains("[12:05] Karen Ortiz: Then SSO has to land first. Let's say the 24th."), "one turn: {}", c[2].body);
+        assert_eq!(titles, ["Summary", "Decisions", "[12:05] Lena Varga, Me", "Chat"], "{}", doc.md);
+        assert_eq!(c[2].breadcrumb, "Aurora weekly > Transcript > [12:05] Lena Varga, Me");
+        assert!(c[2].body.contains("[12:05] Lena Varga: Then SSO has to land first. Let's say the 24th."), "one turn: {}", c[2].body);
         assert_eq!(title_time(&c[2].title), Some(725.0));
         assert!(doc.md.contains("<!-- event_date: 2026-10-28 -->"));
         assert!(document(&crate::paths::calls_dir().join("nothing")).is_none());

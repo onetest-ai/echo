@@ -793,13 +793,19 @@ fn chat_line(m: &serde_json::Value, started: DateTime<Local>) -> serde_json::Val
     let body = m["body"]["content"].as_str().unwrap_or("");
     let text = if m["body"]["contentType"] == "html" { crate::graph::html_to_text(body) } else { body.trim().to_string() };
     let files: Vec<&str> = m["attachments"].as_array().into_iter().flatten().filter_map(|a| a["name"].as_str()).collect();
-    json!({
+    // No user: an app or a bot (Teams' Facilitator) — kept, by its name, never a person.
+    let user = m["from"]["user"]["displayName"].as_str();
+    let mut line = json!({
         "t": at.map(|a| (a.with_timezone(&Local) - started).num_seconds()),
         "at": m["createdDateTime"],
-        "from": m["from"]["user"]["displayName"].as_str().unwrap_or("someone"),
+        "from": user.or(m["from"]["application"]["displayName"].as_str()).unwrap_or("someone"),
         "text": text,
         "files": files,
-    })
+    });
+    if user.is_none() {
+        line["bot"] = json!(true);
+    }
+    line
 }
 
 /// Save key frames of the meeting window during the call (shared screens; macOS needs Screen

@@ -342,19 +342,19 @@ mod tests {
         // A pass the sender wrote lower down doesn't count; nor one for another From domain.
         assert_eq!(g(&mail("ana@acme.com", &[("Authentication-Results", "dmarc=none header.from=acme.com"), ("Authentication-Results", "dmarc=pass header.from=acme.com")])), "none");
         assert_eq!(g(&mail("ana@acme.com", &[("Authentication-Results", "dmarc=pass header.from=evil.com")])), "none");
-        assert_eq!(g(&mail("bo@contoso.com", &[("X-MS-Exchange-Organization-AuthAs", "Internal")])), "internal");
+        assert_eq!(g(&mail("bo@ours.example", &[("X-MS-Exchange-Organization-AuthAs", "Internal")])), "internal");
     }
 
     #[test]
     fn verdicts() {
-        let mut s = Senders { org_domains: vec!["contoso.com".into()], ..Default::default() };
+        let mut s = Senders { org_domains: vec!["ours.example".into()], ..Default::default() };
         s.clients.insert("acme".into(), List { trusted: vec![Entry { key: "ana@acme.com".into(), ..Default::default() }], ignored: vec![Entry { key: "spam@acme.com".into(), ..Default::default() }], ..Default::default() });
         // A colleague's mail inside the organisation; the same address from outside isn't a colleague.
-        assert_eq!(s.mail("acme", "Bo@contoso.com", "internal"), Verdict::Trusted);
+        assert_eq!(s.mail("acme", "Bo@ours.example", "internal"), Verdict::Trusted);
         assert_eq!(combine(&[Verdict::Trusted, Verdict::Waiting]), Verdict::Waiting);
         assert_eq!(combine(&[Verdict::Trusted, Verdict::Ignored]), Verdict::Ignored);
         assert_eq!(combine(&[Verdict::Trusted, Verdict::Trusted]), Verdict::Trusted);
-        assert_eq!(s.mail("acme", "bo@contoso.com", "none"), Verdict::Waiting);
+        assert_eq!(s.mail("acme", "bo@ours.example", "none"), Verdict::Waiting);
         // Not even the user's own address from outside.
         assert_ne!(s.mail("acme", "me@nowhere.example", "fail"), Verdict::Trusted);
         // A trusted outside sender: read only authenticated.
@@ -372,7 +372,7 @@ mod tests {
         assert_eq!(s.mail("acme", "spam@acme.com", "pass"), Verdict::Ignored);
         // Trust is per client.
         assert_eq!(s.mail("other", "ana@acme.com", "pass"), Verdict::Waiting);
-        s.teams_known.insert("teams:1".into(), "karen@contoso.com".into());
+        s.teams_known.insert("teams:1".into(), "karen@ours.example".into());
         s.teams_known.insert("teams:2".into(), String::new());
         assert_eq!(s.teams("acme", "teams:1"), Verdict::Trusted);
         assert_eq!(s.teams("acme", "teams:2"), Verdict::Waiting);

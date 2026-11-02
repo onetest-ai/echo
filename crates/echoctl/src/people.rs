@@ -168,6 +168,64 @@ pub fn directory() -> Result<Vec<Person>> {
     }
 }
 
+/// Who is a colleague on any of their addresses (#40: a colleague invited on a client address
+/// counted as the client): the user's own mail domain and internal organisations' domains, and every
+/// address of a directory person known as a colleague — one of their addresses is in those domains,
+/// or Microsoft 365's People API knows them in the tenant (their title, department or office come
+/// from it: outside people come back with a name or nothing).
+#[derive(Debug, Default)]
+pub struct Colleagues {
+    pub domains: BTreeSet<String>,
+    pub addresses: BTreeSet<String>,
+}
+
+impl Colleagues {
+    pub fn domain(&self, d: &str) -> bool {
+        let d = d.to_lowercase();
+        self.domains.iter().any(|x| d == *x || d.ends_with(&format!(".{x}")))
+    }
+
+    pub fn address(&self, e: &str) -> bool {
+        let e = e.trim().to_lowercase();
+        self.addresses.contains(&e) || domain(Some(&e)).is_some_and(|d| self.domain(&d))
+    }
+
+    /// The addresses (lowercase) among these people that are colleagues': a colleague's address, or any
+    /// address of a name that also comes with one here (the same person invited twice).
+    pub fn among<'a>(&self, people: impl IntoIterator<Item = (&'a str, Option<&'a str>)>) -> BTreeSet<String> {
+        let people: Vec<(String, String)> = people.into_iter().filter_map(|(n, e)| Some((norm(n), e?.trim().to_lowercase()))).collect();
+        let names: BTreeSet<&String> = people.iter().filter(|(n, e)| n.split(' ').count() >= 2 && self.address(e)).map(|(n, _)| n).collect();
+        people.iter().filter(|(n, e)| self.address(e) || names.contains(n)).map(|(_, e)| e.clone()).collect()
+    }
+}
+
+/// The colleagues' book, read again only when `clients.json`, the directory or the settings change.
+pub fn colleagues() -> std::sync::Arc<Colleagues> {
+    type Cached = Option<(Vec<Option<std::time::SystemTime>>, std::sync::Arc<Colleagues>)>;
+    static CACHE: std::sync::Mutex<Cached> = std::sync::Mutex::new(None);
+    let stamps: Vec<Option<std::time::SystemTime>> = [projects::dir().join("clients.json"), file(), crate::paths::state_dir().join("config.json")]
+        .iter()
+        .map(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())
+        .collect();
+    let mut g = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    // Tests write these files within the same second: never cached there.
+    if let Some((_, c)) = g.as_ref().filter(|(s, _)| *s == stamps && !cfg!(test)) {
+        return c.clone();
+    }
+    let mut c = Colleagues::default();
+    c.domains.extend(crate::config::Config::load().ok().and_then(|c| c.me).and_then(|m| domain(m.email.as_deref())));
+    c.domains.extend(projects::orgs().unwrap_or_default().into_iter().filter(|o| o.internal).flat_map(|o| o.domains).map(|d| d.trim().trim_start_matches('@').to_lowercase()).filter(|d| !d.is_empty()));
+    for p in directory().unwrap_or_default() {
+        let tenant = ["title", "department", "office"].iter().any(|f| p.sources.get(*f).is_some_and(|s| s == "m365"));
+        if tenant || p.emails.iter().any(|e| domain(Some(e)).is_some_and(|d| c.domain(&d))) {
+            c.addresses.extend(p.emails.iter().map(|e| e.trim().to_lowercase()));
+        }
+    }
+    let c = std::sync::Arc::new(c);
+    *g = Some((stamps, c.clone()));
+    c
+}
+
 /// A person's key: their email, else their name.
 pub fn key_of(name: &str, email: Option<&str>) -> String {
     match email.map(|e| e.trim().to_lowercase()).filter(|e| e.contains('@')) {
@@ -177,7 +235,7 @@ pub fn key_of(name: &str, email: Option<&str>) -> String {
 }
 
 /// A display name as people read it: "(Partner)", "(external)", "[EXT]" and the like dropped, and
-/// a directory's "Last, First" turned round. "Ortiz, Karen (Partner)" → "Karen Ortiz".
+/// a directory's "Last, First" turned round. "Varga, Lena (Partner)" → "Lena Varga".
 pub fn display(name: &str) -> String {
     let mut out = String::new();
     let mut depth = 0;
@@ -223,7 +281,7 @@ fn norm(name: &str) -> String {
     fold(&display(name).to_lowercase())
 }
 
-/// Words that tag an address or a name, not a person ("partner.karen.ortiz@…").
+/// Words that tag an address or a name, not a person ("partner.lena.varga@…").
 const TAGS: [&str; 8] = ["partner", "ext", "external", "guest", "contractor", "contr", "admin", "adm"];
 
 /// The name words of a person: from their name, else their address's local part.
@@ -452,7 +510,11 @@ impl MeIs {
 /// A generated name ("Speaker 2", "Remote") is nobody in particular.
 fn anonymous(name: &str) -> bool {
     let n = name.trim().to_lowercase();
-    n.is_empty() || n == "remote" || n == "me" || n == "unknown" || (n.starts_with("speaker ") && n[8..].chars().all(|c| c.is_ascii_digit()))
+    // "Speaker 2" (detected voices), "@1" (a Teams transcript's unnamed speaker), "someone" (a chat
+    // message with no user: a bot or an app) are nobody.
+    n.is_empty() || n == "remote" || n == "me" || n == "unknown" || n == "someone"
+        || (n.starts_with("speaker ") && n[8..].chars().all(|c| c.is_ascii_digit()))
+        || (n.len() > 1 && n.starts_with('@') && n[1..].chars().all(|c| c.is_ascii_digit()))
 }
 
 /// Everyone the calls show: invitees and organisers, named speakers (and how long each spoke),
@@ -530,7 +592,7 @@ fn gather(dirs: &[PathBuf], me: &MeIs, dir_people: &[Person]) -> (BTreeMap<Strin
             }
         }
         if let Some(chat) = calls::read_json(&d.join("chat.json")).as_array() {
-            for c in chat {
+            for c in chat.iter().filter(|c| c["bot"] != true) {
                 if let Some(n) = c["from"].as_str() {
                     touch(n, None, &mut |x| x.chat += 1);
                 }
@@ -629,15 +691,23 @@ pub fn view(threads: &[&Project], today: chrono::NaiveDate) -> Result<Value> {
     let work = work_of(threads, today);
     let last_call = dirs.iter().filter_map(|d| calls::read_json(&d.join("meta.json"))["started_at"].as_str().map(|s| s.get(..10).unwrap_or("").to_string())).max().unwrap_or_default();
     let days = |d: &str| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok().map(|x| (today - x).num_days());
+    let book = colleagues();
     let mut people: Vec<Value> = seen
         .into_iter()
-        .map(|(key, s)| {
+        .map(|(key, mut s)| {
             let entry = dir_people.iter().find(|p| p.id == key || s.email.as_ref().is_some_and(|e| p.emails.contains(e)));
             let f = |k: &str| entry.and_then(|p| p.fields.get(k).cloned());
+            // A colleague shown on their own address; a client address they were invited on stays in `also`.
+            if let Some(i) = s.also.iter().position(|e| book.address(e)).filter(|_| !s.email.as_deref().is_some_and(|e| book.address(e))) {
+                let own = s.also.remove(i);
+                s.also.extend(s.email.replace(own));
+            }
+            let colleague = s.email.as_deref().is_some_and(|e| book.address(e)) || entry.is_some_and(|p| p.emails.iter().any(|e| book.address(e)));
             let dom = domain(s.email.as_deref());
-            let org = f("org").and_then(|o| clients.iter().find(|c| c.id == o)).or_else(|| org_of(&clients, dom.as_deref()));
+            let org = f("org").and_then(|o| clients.iter().find(|c| c.id == o)).or_else(|| org_of(&clients, dom.as_deref())).filter(|c| !colleague || c.internal || f("org").is_some());
             let side = match (org, &dom) {
                 (Some(c), _) if c.internal => "yours",
+                (None, _) if colleague => "yours",
                 (Some(_), _) => "org",
                 (None, Some(d)) if Some(d) == my_domain.as_ref() => "yours",
                 (None, Some(_)) => "other",
@@ -899,7 +969,7 @@ pub fn link_org(thread: &str, client: &str, on: bool) -> Result<()> {
 pub fn name_org(name: &str, domain: &str, thread: Option<&str>) -> Result<projects::Client> {
     let d = domain.trim().trim_start_matches('@').to_lowercase();
     if d.is_empty() || !d.contains('.') {
-        bail!("a mail domain, like orbit.com");
+        bail!("a mail domain, like acme.example");
     }
     let o = projects::add_org(name, &[d], false, false)?;
     if let Some(t) = thread {
@@ -1403,37 +1473,37 @@ mod tests {
 
     #[test]
     fn names_as_directories_write_them() {
-        assert_eq!(display("Ortiz, Karen (Partner)"), "Karen Ortiz");
+        assert_eq!(display("Varga, Lena (Partner)"), "Lena Varga");
         assert_eq!(display("Pat Novak (external)"), "Pat Novak");
         assert_eq!(display("[EXT] Dana Kowal"), "Dana Kowal");
         assert_eq!(display("Smith, Jr."), "Jr. Smith");
         assert_eq!(norm("Inés Peña Gómez"), "ines pena gomez");
-        assert_eq!(tokens("partner.karen.ortiz"), ["ortiz", "karen"].map(String::from).into_iter().collect());
+        assert_eq!(tokens("partner.lena.varga"), ["lena", "varga"].map(String::from).into_iter().collect());
     }
 
     #[test]
     fn one_person_with_addresses_at_two_organisations() {
         let (_env, root) = crate::paths::testenv::folders("people-addresses");
         let a = call(&root, "2026-10-01_100000-a", "2026-10-01T10:00:00+00:00",
-            json!({"attendees": [{"name": "Ortiz, Karen (Partner)", "email": "partner.karen.ortiz@initrode.example"}]}), json!([]));
+            json!({"attendees": [{"name": "Varga, Lena (Partner)", "email": "partner.lena.varga@initech.example"}]}), json!([]));
         let b = call(&root, "2026-10-02_100000-b", "2026-10-02T10:00:00+00:00",
-            json!({"attendees": [{"name": "Karen F.", "email": "karen.ortiz@northwind.example"}]}), json!([]));
-        let p = projects::create("Northwind", None, None).unwrap();
+            json!({"attendees": [{"name": "Lena V.", "email": "lena.varga@globex.example"}]}), json!([]));
+        let p = projects::create("Globex", None, None).unwrap();
         projects::update(&p.id, |x| { x.pins = vec![calls::stamp_of(&a), calls::stamp_of(&b)]; Ok(()) }).unwrap();
         let today = chrono::NaiveDate::from_ymd_opt(2026, 10, 30).unwrap();
         let v = of_thread(&p.id, today).unwrap();
-        let karen = v["people"].as_array().unwrap().iter().find(|x| x["email"] == "partner.karen.ortiz@initrode.example").unwrap().clone();
-        assert_eq!(karen["name"], "Karen Ortiz", "the directory's \"Last, First (Partner)\" read as a name");
-        assert_eq!(karen["maybe_same"][0]["email"], "karen.ortiz@northwind.example", "the same first and last name in the other address");
+        let lena = v["people"].as_array().unwrap().iter().find(|x| x["email"] == "partner.lena.varga@initech.example").unwrap().clone();
+        assert_eq!(lena["name"], "Lena Varga", "the directory's \"Last, First (Partner)\" read as a name");
+        assert_eq!(lena["maybe_same"][0]["email"], "lena.varga@globex.example", "the same first and last name in the other address");
         // Merged by the user: one person, both addresses, every call.
-        merge("karen.ortiz@northwind.example", "Karen F.", &[], "partner.karen.ortiz@initrode.example", "Karen Ortiz", Some("partner.karen.ortiz@initrode.example")).unwrap();
+        merge("lena.varga@globex.example", "Lena V.", &[], "partner.lena.varga@initech.example", "Lena Varga", Some("partner.lena.varga@initech.example")).unwrap();
         let v = of_thread(&p.id, today).unwrap();
-        let ks: Vec<&Value> = v["people"].as_array().unwrap().iter().filter(|x| x["name"] == "Karen Ortiz").collect();
+        let ks: Vec<&Value> = v["people"].as_array().unwrap().iter().filter(|x| x["name"] == "Lena Varga").collect();
         assert_eq!(ks.len(), 1);
         assert_eq!((ks[0]["calls"].as_u64(), ks[0]["addresses"].as_array().unwrap().len()), (Some(2), 2));
         assert_eq!(ks[0]["maybe_same"].as_array().unwrap().len(), 0);
         // Split again: two people, never suggested as one.
-        split("partner.karen.ortiz@initrode.example", "Karen Ortiz", "karen.ortiz@northwind.example").unwrap();
+        split("partner.lena.varga@initech.example", "Lena Varga", "lena.varga@globex.example").unwrap();
         let v = of_thread(&p.id, today).unwrap();
         assert_eq!(v["people"].as_array().unwrap().len(), 2);
         assert!(v["people"].as_array().unwrap().iter().all(|x| x["maybe_same"].as_array().unwrap().is_empty()));

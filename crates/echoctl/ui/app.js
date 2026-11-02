@@ -2309,7 +2309,7 @@ function workRow(w, n, level) {
   const tags = [n.pinned && n.pinned.length ? `<span class="tag">pinned: ${esc(n.pinned.join(', '))}</span>` : '', n.blocks && n.blocks.length && !CLOSED_STATES.includes(n.state) ? `<span class="tag">holds up ${n.blocks.length}</span>` : ''].join('')
   return `<button class="wk-row${S.pj.node === n.id ? ' on' : ''}${CLOSED_STATES.includes(n.state) ? ' closed' : ''}" style="padding-left:${12 + level * 18}px" data-pj="node" data-node="${esc(n.id)}"><span class="wk-id">${esc(n.id)}</span>${kind ? `<span class="wk-k ${esc(n.kind === 'task' ? n.type : n.kind)}">${esc(kind)}</span>` : ''}<span class="wk-t${n.kind === 'story' ? ' story' : ''}">${esc(n.title)}</span>${tags}<span class="grow"></span><span class="wk-meta">${esc(meta)}</span>${st}</button>`
 }
-/** Initials for an avatar ("Pat Novak" → "PP"), with a colour of its own. */
+/** Initials for an avatar ("Pat Novak" → "PN"), with a colour of its own. */
 function avatar(name, owed) {
   if (!name) return '<span class="bd-av none" title="Nobody named">?</span>'
   const ini = name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('')
@@ -2863,7 +2863,7 @@ function threadSources(p, cl) {
     const teams = Array.isArray(m365.teams) ? m365.teams : []
     channel = `<span class="tok-in"><select data-src-team aria-label="Team" autofocus><option value="">${teams.length ? 'Team…' : m365.teams && m365.teams.error ? 'Teams unavailable' : 'Loading teams…'}</option>${teams.map((t) => `<option value="${esc(t.id)}"${t.id === team ? ' selected' : ''}>${esc(t.name)}</option>`).join('')}</select>${team ? `<select data-src-channel aria-label="Channel"><option value="">${chans && chans.length ? 'Channel…' : 'Loading…'}</option>${(chans || []).filter((c) => !have.has(`teams_channel:${team}|${c.id}`)).map((c) => `<option value="${esc(c.id)}" data-name="${esc(teams.find((t) => t.id === team).name + ' › ' + c.name)}">${esc(c.name)}${c.membership === 'private' ? ' (private)' : ''}</option>`).join('')}</select>` : ''}</span>`
   }
-  const mail = S.pj.adding === 'mail' ? `<span class="tok-in"><input id="pj-add-mail" data-add="mail" placeholder="A domain or an address — globex.example, jane@globex.example" aria-label="Mail with" autofocus></span>` : `<button class="tok add" data-pj="adding" data-what="mail">✉ Mail</button>`
+  const mail = S.pj.adding === 'mail' ? `<span class="tok-in"><input id="pj-add-mail" data-add="mail" placeholder="A domain or an address — acme.example, jane@acme.example" aria-label="Mail with" autofocus></span>` : `<button class="tok add" data-pj="adding" data-what="mail">✉ Mail</button>`
   return chatSources(p) + others.map(chip).join('') + suggest + channel + mail + folderBtn
     + `<div class="pf-sub">A meeting chat goes into the work between calls (what was done, moved or blocked). Channels, mail and folders are read into the Brain, never copied: each section links to the post, the mail or the file's page. Mail is matched by its people's addresses; a folder's pages that their text misses (diagrams, timelines) are read from their images.</div>`
 }
@@ -2899,7 +2899,7 @@ function projectProfile(p, data) {
   const mine = (p.orgs || []).map((o) => allOrgs.find((c) => c.id === o.client) || { id: o.client, name: o.client, domains: [] })
   const orgPick = S.pj.adding === 'org' ? `<span class="tok-in"><select id="pj-org-pick" aria-label="Organisation"><option value="">Organisation…</option>${allOrgs.filter((c) => c.id !== p.client && !c.internal && !mine.some((m) => m.id === c.id)).map((c) => `<option value="${esc(c.id)}">${esc(c.name)}${c.domains.length ? ` · ${esc(c.domains[0])}` : ''}</option>`).join('')}<option value="__new">+ New organisation…</option></select></span>`
     : '<button class="tok add" data-pj="adding" data-what="org">+ Organisation</button>'
-  const newOrg = S.pj.newOrg ? `<div class="pj-inline"><input id="pj-org-name" placeholder="Organisation, e.g. Orbit USA" aria-label="Organisation name" autofocus><input id="pj-org-domains" placeholder="Mail domains, e.g. orbit.com" aria-label="Mail domains"><button class="btn primary" data-pj="org-new">Add</button><button class="btn ghost" data-pj="org-new-cancel">Cancel</button></div>` : ''
+  const newOrg = S.pj.newOrg ? `<div class="pj-inline"><input id="pj-org-name" placeholder="Organisation, e.g. Globex" aria-label="Organisation name" autofocus><input id="pj-org-domains" placeholder="Mail domains, e.g. globex.example" aria-label="Mail domains"><button class="btn primary" data-pj="org-new">Add</button><button class="btn ghost" data-pj="org-new-cancel">Cancel</button></div>` : ''
   const orgsRow = mine.map((c) => tok(esc(c.name), { op: 'org-unlink', org: c.id }, (c.domains || []).join(', '))).join('') + orgPick + newOrg
     + '<div class="pf-sub">Who this thread is with besides its client: their people are theirs in People, and the people rule counts their domains</div>'
   const clientRow = (cl ? `<button class="tok link" data-pj="client" data-id="${esc(cl.id)}" title="Open ${esc(cl.name)}">${clientIcon(cl, 14)}${esc(cl.name)}</button><span class="pf-sub pf-inl">${cl.domains.length ? `its domains: ${esc(cl.domains.join(', '))}` : 'no mail domains yet — the people rule needs them'}</span>` : '<span class="pf-sub pf-inl">No client — internal work, or not set</span>') + clientPick + newClient

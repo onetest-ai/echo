@@ -1118,7 +1118,7 @@ mod tests {
         assert_eq!(nid("Москва Сити"), "москва_сити");
         assert_eq!(topic_id(SHARED, "Budget"), "budget");
         assert_eq!(topic_id("globex", "Budget"), "globex__budget", "the same name in a client is another node");
-        assert_eq!(term_id("northwind", "Dial9"), "term__northwind__dial9");
+        assert_eq!(term_id("acme", "Dial9"), "term__acme__dial9");
         assert!(ratio("Agent Hub", "agent-hub") > 0.99);
         assert!(ratio("Data Studio", "Data Stuido") >= SAME);
         assert!(ratio("Budget", "Security") < SAME);

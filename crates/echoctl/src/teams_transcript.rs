@@ -89,7 +89,11 @@ fn segments(transcripts: &[Value], t0: DateTime<Utc>, me: &crate::tasks::Me) -> 
     let mut segs = vec![];
     for t in transcripts {
         let off = t["created"].as_str().and_then(|c| DateTime::parse_from_rfc3339(c).ok()).map(|c| (c.with_timezone(&Utc) - t0).num_milliseconds() as f64 / 1000.0).unwrap_or(0.0).max(0.0);
-        for c in parse_vtt(t["vtt"].as_str().unwrap_or("")) {
+        for mut c in parse_vtt(t["vtt"].as_str().unwrap_or("")) {
+            // Teams' unnamed speakers ("@1") are Echo's "Speaker 1": named later, as for a recording.
+            if let Some(n) = c.name.as_deref().and_then(|n| n.strip_prefix('@')).filter(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit())) {
+                c.name = Some(format!("Speaker {n}"));
+            }
             let mine = c.name.as_deref().is_some_and(|n| me.is(n));
             segs.push(json!({"speaker": if mine { "me" } else { "remote" }, "start": off + c.start, "end": off + c.end, "lang": "",
                              "text": c.text, "name": if mine { None } else { c.name }}));
@@ -209,7 +213,7 @@ pub fn import(ev: &Value) -> Result<PathBuf> {
     let first = transcripts.iter().filter_map(|t| t["created"].as_str()).filter_map(|c| DateTime::parse_from_rfc3339(c).ok()).map(|c| c.with_timezone(&Utc)).min();
     let t0 = first.map_or(start, |f| f.min(start));
     let cfg = crate::config::Config::load().ok();
-    // About me's name, else the Microsoft 365 account's ("artem_rozumenko@…" → "artem rozumenko").
+    // About me's name, else the Microsoft 365 account's ("alex_morgan@…" → "alex morgan").
     let account = graph::account().map(|a| crate::meeting::Person { name: a.split('@').next().unwrap_or("").replace(['_', '.'], " "), email: Some(a) });
     let me = crate::tasks::Me::of(cfg.as_ref().and_then(|c| c.me.as_ref()).or(account.as_ref()));
     let segs = segments(&transcripts, t0, &me);
@@ -255,11 +259,21 @@ fn save_offers(m: &serde_json::Map<String, Value>) -> Result<()> {
     Ok(())
 }
 
-/// Not this one: never offered again.
+/// Not this one: never offered again, and the threads it was offered for keep the meeting out (a call
+/// made of it later doesn't join them by their rules).
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn dismiss(id: &str) -> Result<()> {
     let mut m = offers();
-    m.entry(id.to_string()).or_insert_with(|| json!({}))["dismissed"] = json!(true);
+    let e = m.entry(id.to_string()).or_insert_with(|| json!({}));
+    e["dismissed"] = json!(true);
+    for t in e["threads"].as_array().cloned().unwrap_or_default().iter().filter_map(|t| t["id"].as_str()) {
+        crate::projects::update(t, |p| {
+            if !p.not_events.iter().any(|x| x == id) {
+                p.not_events.push(id.to_string());
+            }
+            Ok(())
+        })?;
+    }
     save_offers(&m)
 }
 
@@ -362,14 +376,14 @@ mod tests {
     use super::*;
 
     const VTT: &str = "WEBVTT\n\n0a1b/12-0\n00:00:03.120 --> 00:00:05.400\n<v Dana Kowal>Can we start with the pilot?</v>\n\n\
-                       0a1b/13-0\n00:00:05.900 --> 00:00:09.000\n<v Artem Rozumenko>Yes &amp; the SSO date\nfirst.</v>\n\n00:00:10.000 --> 00:00:11.000\nNo voice here.\n";
+                       0a1b/13-0\n00:00:05.900 --> 00:00:09.000\n<v Alex Morgan>Yes &amp; the SSO date\nfirst.</v>\n\n00:00:10.000 --> 00:00:11.000\nNo voice here.\n";
 
     #[test]
     fn a_teams_vtt_reads_as_named_turns() {
         let c = parse_vtt(VTT);
         assert_eq!(c.len(), 3);
         assert_eq!(c[0], Cue { start: 3.12, end: 5.4, name: Some("Dana Kowal".into()), text: "Can we start with the pilot?".into() });
-        assert_eq!((c[1].name.as_deref(), c[1].text.as_str()), (Some("Artem Rozumenko"), "Yes & the SSO date first."));
+        assert_eq!((c[1].name.as_deref(), c[1].text.as_str()), (Some("Alex Morgan"), "Yes & the SSO date first."));
         assert_eq!((c[2].name.as_deref(), c[2].text.as_str()), (None, "No voice here."));
     }
 
@@ -384,7 +398,7 @@ mod tests {
     #[test]
     fn transcripts_join_in_time_order_with_me_as_me() {
         let t0 = DateTime::parse_from_rfc3339("2026-11-02T16:00:00Z").unwrap().with_timezone(&Utc);
-        let me = crate::tasks::Me::of(Some(&crate::meeting::Person { name: "Artem Rozumenko".into(), email: None }));
+        let me = crate::tasks::Me::of(Some(&crate::meeting::Person { name: "Alex Morgan".into(), email: None }));
         // Restarted: the second transcript began 10 minutes in; listed first, still placed second.
         let ts = vec![
             json!({"created": "2026-11-02T16:10:00Z", "vtt": "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<v Dana Kowal>Back again.</v>\n"}),

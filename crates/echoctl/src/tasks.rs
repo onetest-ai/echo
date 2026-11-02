@@ -326,8 +326,8 @@ mod tests {
 
     #[test]
     fn me_is_the_speaker_label_my_name_and_email() {
-        let me = Me::of(Some(&Person { name: "Artem Rozumenko".into(), email: Some("artem@example.com".into()) }));
-        assert!(me.is("Me") && me.is("artem") && me.is("Artem Rozumenko") && me.is("artem@example.com"));
+        let me = Me::of(Some(&Person { name: "Alex Morgan".into(), email: Some("alex@example.com".into()) }));
+        assert!(me.is("Me") && me.is("alex") && me.is("Alex Morgan") && me.is("alex@example.com"));
         assert!(!me.is("Dana Kowal") && !me.is(""));
         assert!(Me::of(None).is("me"));
     }

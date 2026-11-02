@@ -739,7 +739,7 @@ fn mail_item(m: &Value) -> Option<Value> {
     let at = m["at"].as_str().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())?.with_timezone(&Local);
     let text = m["text"].as_str().map(str::trim).filter(|t| !t.is_empty())?;
     let me = mail_me();
-    // The user is "Me", as in a call; names as people read them ("Rozumenko, Artem" → "Artem Rozumenko").
+    // The user is "Me", as in a call; names as people read them ("Morgan, Alex" → "Alex Morgan").
     let name = |p: &Value| {
         let email = p["email"].as_str().unwrap_or("").to_lowercase();
         if !email.is_empty() && me(&email) {
@@ -2573,9 +2573,9 @@ mod tests {
     #[test]
     fn a_mail_is_evidence_its_history_cites() {
         let (_env, l, id) = setup("ledger-mail");
-        let m = json!({"id": "AAMk1", "internet_id": "<abc@mail.example>", "conversation": "c1", "subject": "FW: MFLens demo", "auth": "internal",
+        let m = json!({"id": "AAMk1", "internet_id": "<abc@mail.example>", "conversation": "c1", "subject": "FW: Pathfinder demo", "auth": "internal",
             "from": {"name": "Dana Kowal", "email": "dana@northwind.example"}, "to": [{"name": "Me Myself", "email": "me@us.example"}],
-            "at": "2026-10-30T09:15:00Z", "text": "Could you prepare the agents demo for HKJC by next Thursday? They want to see MFLens live.",
+            "at": "2026-10-30T09:15:00Z", "text": "Could you prepare the agents demo for Northwind by next Thursday? They want to see Pathfinder live.",
             "url": "https://outlook.office365.com/owa/?ItemID=AAMk1"});
         let item = mail_item(&m).unwrap();
         let ev = item["id"].as_str().unwrap().to_string();
@@ -2585,10 +2585,10 @@ mod tests {
         assert_eq!(dir_name["turns"][0]["speaker"], "Dana Kowal", "names as people read them");
         assert_eq!(mail_item(&json!({"id": "y", "text": "x", "at": "2026-10-30T09:15:00Z", "url": "javascript:x"})).unwrap()["url"], Value::Null);
         fs::write(l.dir.join(format!("evidence/{ev}.json")), serde_json::to_vec(&item).unwrap()).unwrap();
-        let r = apply(&id, &ev, &[json!({"op": "create", "kind": "story", "parent": "E01", "ref": "s", "title": "MFLens demo", "ac": ["Demo shown to HKJC"],
-                "description": "HKJC asked to **see MFLens live**.", "quote": "They want to see MFLens live"}),
+        let r = apply(&id, &ev, &[json!({"op": "create", "kind": "story", "parent": "E01", "ref": "s", "title": "Pathfinder demo", "ac": ["Demo shown to Northwind"],
+                "description": "Northwind asked to **see Pathfinder live**.", "quote": "They want to see Pathfinder live"}),
             json!({"op": "create", "kind": "task", "type": "action", "parent": "s", "title": "Prepare the agents demo", "internal_owner": "Me",
-                "due_text": "next Thursday", "quote": "Could you prepare the agents demo for HKJC by next Thursday?"})]).unwrap();
+                "due_text": "next Thursday", "quote": "Could you prepare the agents demo for Northwind by next Thursday?"})]).unwrap();
         assert_eq!(r["events"], 2, "{r}");
         mark_processed(&id, &ev, "").unwrap();
         let t = tree(&id).unwrap();
@@ -2598,7 +2598,7 @@ mod tests {
         assert_eq!(task["history"][0]["speaker"], "Dana Kowal");
         assert_eq!(task["due"], "2026-11-05", "a spoken date read against the mail's day");
         assert_eq!(t["evidence"][&ev]["url"], "https://outlook.office365.com/owa/?ItemID=AAMk1");
-        assert!(t["nodes"]["S001"]["description_html"].as_str().unwrap().contains("<strong>see MFLens live</strong>"));
+        assert!(t["nodes"]["S001"]["description_html"].as_str().unwrap().contains("<strong>see Pathfinder live</strong>"));
         assert_eq!(quote_in(&id, &ev, "prepare the agents demo").unwrap().unwrap()["url"], "https://outlook.office365.com/owa/?ItemID=AAMk1");
     }
 
@@ -2697,7 +2697,7 @@ mod tests {
     #[test]
     fn links_to_where_it_came_from() {
         let (_env, l, id) = setup("ledger-links");
-        let mail = json!({"title": "FW: MFLens", "url": "https://outlook.office365.com/owa/?ItemID=x"});
+        let mail = json!({"title": "FW: Pathfinder", "url": "https://outlook.office365.com/owa/?ItemID=x"});
         human_event(&id, &json!({"op": "create", "kind": "story", "parent": "E01", "title": "Demo"})).unwrap();
         human_event(&id, &json!({"op": "create", "kind": "task", "parent": "S001", "title": "Agents", "links": [mail]})).unwrap();
         assert_eq!(fold(&l).unwrap().nodes["T001"].links, vec![mail.clone()]);

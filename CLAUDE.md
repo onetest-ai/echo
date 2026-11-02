@@ -326,8 +326,7 @@ from `imported_at` (`notes::auto_due`), so an old meeting gets them. **Needs you
 min) `teams_transcript::scan` checks the last 3 days' ended Teams meetings of open threads with no call
 (`<home>/.echo/teams-transcripts.json`, the calendar's answers too: rechecked hourly until a day after the end, kept 30
 days) and offers each
-one with a transcript once (Import · Not this → `dismissed`). Measured 2026-11-02: the Orbit follow-up (7 min,
-organised by a colleague; 85 cues, 3 chat messages) and a 32-min call (149 cues, ~31K chars, 8 chat messages).
+one with a transcript once (Import · Not this → `dismissed`). Measured 2026-11-02: a 7-minute follow-up organised by a colleague (85 cues, 3 chat messages) and a 32-min call (149 cues, ~31K chars, 8 chat messages).
 
 ## Projects (`projects.rs`; plan and phases: `docs/projects-design.md`)
 **The window calls them Threads** (the activity, + Thread, New thread, the palette, Settings — the user's word, since
@@ -343,6 +342,15 @@ org_link | org_new}`), a person's unknown domain → Name this organisation (`or
 thread's counterpart), Found for you (an unknown domain proposes a new organisation, a counterpart, not a client —
 unless New client is picked) and `echoctl org list|add|set|remove` (`--thread` links, `--unlink`, `--account`). A domain
 is one organisation's; one with threads under it stays an account; removing one unlinks it everywhere.
+**A colleague on any address** (#40, `people::Colleagues`, cached until `clients.json`, the directory or the settings
+change): the user's own domain and internal organisations' domains, every address of a directory person with one
+of them or known in the tenant (title / department / office from Microsoft 365), and on one invite any address of a
+name that also comes with a colleague's address (a colleague invited on a client address). Rule matching
+(`CallFacts.colleagues`, `outside`), Found for you, the transcript offers and Needs you, the minutes' colleagues vs
+external and People's side all use it; People shows such a person on their own address, the client one in `also`.
+Chat messages with no user (a bot or an app) are kept with `bot: true` and are nobody in People; Teams transcripts'
+unnamed "@1" speakers are imported as "Speaker 1". Needs you's "Not this" on a transcript offer keeps that meeting out
+of the threads it was offered for (`Project.not_events`).
 Clients (name, domains, internal) and projects as files: `<home>/projects/clients.json`, `<home>/projects/<id>/`
 (`profile.json`, `brief.md`, optional `logo.png|jpg|webp` ≤ 512 KB, checked by its first bytes; a client's logo:
 `<home>/projects/clients/<id>.<ext>`; set from Profile — Choose…, or dropped on the tile: IPC `project {op: logo |
@@ -424,7 +432,7 @@ thread's calls on that chat left out (the call's item has them), only the user's
 the thread's client (the Brain's `senders` list; others wait there; an author not looked up yet holds the day), one
 evidence item a day `chat-<sha8 of chat>-<day>` (kind `chat`, turns at local HH:MM:SS, files shared named), written
 once the chat has been quiet for `SETTLE`. State per chat in `ledger/chats.json` (read_at, days, found, error), shown
-on the source's chip. `project ledger <id> sync --chats` reads them by hand. Measured on Borealis (2026-10-30):
+on the source's chip. `project ledger <id> sync --chats` reads them by hand. Measured on one thread (2026-10-30):
 4 days of messages between its two calls, among them a blocker (an IP to whitelist) said nowhere in a call.
 **A client's page** (`#client/<id>/<tab>`, `/api/client/<id>` = `tasks::client`): Overview — its description (the
 user's Markdown, `projects/clients/<id>.md`, edited in place like a thread's Brief: IPC `project {op: client_brief}`) and
@@ -605,7 +613,7 @@ without it).
   session with the Brain attached.
 - **Two layers**: a shared layer (the user's practice: calls with no client) and one per client (its goal from the
   client's name, description and threads; its own open term kinds); node ids of a client's layer carry its id
-  (`globex__budget`), so the same name in two clients is two topics; a section is tagged from the shared layer and its
+  (`acme__budget`), so the same name in two clients is two topics; a section is tagged from the shared layer and its
   own client's only; a client's terms are found only in its sections; a scope's view shows the shared layer and its
   client's; an edit names its layer when a name is in two. A version from before layers loads as the shared layer.
   `taxonomy build [--layer shared|<client>]` builds every layer or one (then classifies that layer's sections).
@@ -635,8 +643,8 @@ without it).
   Brain sync when its workbooks, config or catalog changed (`numbers::refresh`, `inputs` hash). MCP `list_metrics`,
   `get_metric` (grain, entity / entity_like, month(s); `other_reported_values`, `restated` / `conflicting`,
   `merged_from`, `caveats` — notes written beside the table, Brain's `scan_notes`: a lone sentence ≥ 40 chars right of
-  the header run past a blank column, in `fact_notes`; matched Northwind Brain's one note exactly), `get_metric_history` —
-  accepted clients only. `entity_regex` (tolerant_long) cleans an entity's encoding by its first group. Measured on Northwind: with the Northwind Brain's own config
+  the header run past a blank column, in `fact_notes`; matched the client's Brain's one note exactly), `get_metric_history` —
+  accepted clients only. `entity_regex` (tolerant_long) cleans an entity's encoding by its first group. Measured on one client: with its Brain's own config
   Echo's build matched its facts value for value (17,802 of 17,817; the rest: files Brain had and this folder doesn't,
   and 5 April repeat-caller figures Brain never rebuilt); Claude's own proposal with repair rounds recovered 90% of
   them (FCR 99.6%, NPS 96%, adjustments and call volume ~100%) in ~4 minutes. `echoctl brain numbers
@@ -695,7 +703,7 @@ without it).
   in `echoctl vocab`, never inside a run; a copy in `.echo/learned-before-taxonomy.json`), `vocab::learned_all`
   reading both meanwhile; Settings → Vocabulary forgets one (`forget_learned`: a learned-only term goes, a known one
   loses its scope). Transcription's, so it works with the Brain switched off; thread glossaries no longer learn
-  them. Measured: 43 learned terms → 13 Northwind, 12 Globex, 8 Initech, 10 shared, most merged into terms the
+  them. Measured: 43 learned terms → 13, 12 and 8 in three clients' layers, 10 shared, most merged into terms the
   taxonomy knew (Dial9, Flow Studio, Codemie).
   sections after a sync. The user's edits (`taxonomy edit`: accept, add, rename, merge, move, remove, set) make a new
   version; renames and merges keep tags through aliases, removals drop them. Transcription's hint reads the terms pinned

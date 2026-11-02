@@ -562,7 +562,7 @@ const WHISPER_WORD_LAG: f64 = 0.3;
 const NEMO_WORD_LAG: f64 = -0.4;
 
 /// Weight of the vocabulary's words in Nemotron's decoder. Measured with a 24-term vocabulary
-/// (2026-10-13): 0.5 fixes terms that were said ("service now" → ServiceNow, Karen Ortiz)
+/// (2026-10-13): 0.5 fixes terms that were said ("service now" → ServiceNow, a client's surname)
 /// and inserts nothing; 1 already garbles a sentence; 2 puts terms into speech that has none;
 /// 3 (NVIDIA's example value, used at first) writes "Flow Studio" over every few words.
 const NEMO_BOOST: f32 = 0.5;

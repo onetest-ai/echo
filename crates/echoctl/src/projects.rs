@@ -371,6 +371,10 @@ pub struct Project {
     /// Calendar events put in by hand (their ids): the call recorded from one belongs.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub events: Vec<String>,
+    /// Calendar events kept out by hand (their ids): a call made of one never belongs, whatever the
+    /// rules say (Needs you's "Not this" on a Teams transcript offered for it).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub not_events: Vec<String>,
     #[serde(default)]
     pub sources: Vec<Source>,
     #[serde(default)]
@@ -418,6 +422,9 @@ pub struct CallFacts {
     pub chat_id: Option<String>,
     /// The calendar event it was recorded from (or is: an upcoming one).
     pub event_id: Option<String>,
+    /// Its people's addresses that are colleagues' whatever their domain (`people::Colleagues`): a
+    /// colleague invited on a client address is no client person.
+    pub colleagues: BTreeSet<String>,
 }
 
 impl CallFacts {
@@ -445,6 +452,7 @@ impl CallFacts {
             own_domain: me.and_then(|p| p.email.as_deref()).and_then(domain_of).map(str::to_lowercase),
             chat_id: m.join_url.as_deref().and_then(crate::graph::chat_id_from_join_url),
             event_id: m.id.clone().filter(|i| !i.is_empty()),
+            colleagues: crate::people::colleagues().among(m.organizer.iter().chain(&m.attendees).map(|p| (p.name.as_str(), p.email.as_deref()))),
         }
     }
 }
@@ -459,6 +467,7 @@ fn outside<'a>(f: &'a CallFacts, clients: &[Client]) -> Vec<&'a str> {
     let internal: Vec<String> = clients.iter().filter(|c| c.internal).flat_map(|c| norm_domains(&c.domains)).collect();
     f.others
         .iter()
+        .filter(|k| !f.colleagues.contains(*k))
         .filter_map(|k| domain_of(k))
         .filter(|d| f.own_domain.as_deref() != Some(*d) && !internal.iter().any(|x| x == d))
         .collect()
@@ -488,6 +497,9 @@ pub fn matches(p: &Project, clients: &[Client], f: &CallFacts) -> Option<&'stati
     }
     if f.event_id.as_ref().is_some_and(|e| p.events.contains(e)) {
         return Some("pinned");
+    }
+    if f.event_id.as_ref().is_some_and(|e| p.not_events.contains(e)) {
+        return None;
     }
     if let (Some(since), Some(started)) = (p.since.as_deref().and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok()), f.started) {
         if started.date_naive() < since {
@@ -709,6 +721,7 @@ pub fn create(name: &str, client: Option<&str>, stage: Option<Stage>) -> Result<
         pins: vec![],
         exclusions: vec![],
         events: vec![],
+        not_events: vec![],
         board: None,
         sources: vec![],
         people: vec![],
@@ -1052,7 +1065,7 @@ fn found_state() -> FoundState {
     fs::read(dir().join(FOUND)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
 }
 
-/// "globex.example" → "Globex", "northwind-group.example" → "Northwind Group": a first guess at a client's name.
+/// "acme.example" → "Acme", "northwind-group.example" → "Northwind Group": a first guess at a client's name.
 fn name_from_domain(d: &str) -> String {
     let label = d.split('.').next().unwrap_or(d);
     label.split(['-', '_']).filter(|w| !w.is_empty()).map(|w| {
@@ -1066,7 +1079,7 @@ fn name_from_domain(d: &str) -> String {
 fn main_domain(f: &CallFacts, skip: &BTreeSet<String>) -> Option<String> {
     let mut n: BTreeMap<&str, usize> = BTreeMap::new();
     let mut total = 0;
-    for d in f.others.iter().filter_map(|k| domain_of(k)).filter(|d| !skip.contains(*d) && f.own_domain.as_deref() != Some(*d)) {
+    for d in f.others.iter().filter(|k| !f.colleagues.contains(*k)).filter_map(|k| domain_of(k)).filter(|d| !skip.contains(*d) && f.own_domain.as_deref() != Some(*d)) {
         *n.entry(d).or_default() += 1;
         total += 1;
     }
@@ -1504,6 +1517,7 @@ mod tests {
             pins: vec![],
             exclusions: vec![],
             events: vec![],
+        not_events: vec![],
             board: None,
             sources: vec![],
             people: vec![],
@@ -1518,13 +1532,13 @@ mod tests {
         assert_eq!(matches(&p, &clients, &f(&["a@northwind.example", "b@ours.example"])), Some("people"));
         assert_eq!(matches(&p, &clients, &f(&["a@northwind.example", "b@ours.example", "c@ours.example"])), None);
         // Colleagues don't count: the user's own domain, or a client marked as their company.
-        let mut g = f(&["a@northwind.example", "b@ours.example", "c@ours.example", "d@contoso.example", "e@contoso.example"]);
+        let mut g = f(&["a@northwind.example", "b@ours.example", "c@ours.example", "d@inhouse.example", "e@inhouse.example"]);
         g.own_domain = Some("ours.example".into());
-        assert_eq!(matches(&p, &clients, &g), None, "contoso is outside here");
-        let mut with_contoso = clients.clone();
-        with_contoso.push(Client { id: "contoso".into(), name: "Contoso".into(), domains: vec!["contoso.example".into()], internal: true, ..Default::default() });
-        assert_eq!(matches(&p, &with_contoso, &g), Some("people"));
-        assert_eq!(matches(&p, &with_contoso, &f(&["d@contoso.example"])), None, "only colleagues: nobody outside");
+        assert_eq!(matches(&p, &clients, &g), None, "inhouse is outside here");
+        let mut with_inhouse = clients.clone();
+        with_inhouse.push(Client { id: "inhouse".into(), name: "Inhouse".into(), domains: vec!["inhouse.example".into()], internal: true, ..Default::default() });
+        assert_eq!(matches(&p, &with_inhouse, &g), Some("people"));
+        assert_eq!(matches(&p, &with_inhouse, &f(&["d@inhouse.example"])), None, "only colleagues: nobody outside");
         assert_eq!(matches(&p, &clients, &f(&[])), None);
         p.client = None; // no client, no domains: the rule matches nothing
         assert_eq!(matches(&p, &clients, &f(&["a@northwind.example"])), None);
@@ -1662,34 +1676,71 @@ mod tests {
     }
 
     #[test]
+    fn a_colleague_on_a_client_address_is_still_a_colleague() {
+        let (_env, _root) = paths::testenv::folders("projects-colleague-addresses");
+        add_client("Inhouse", &["inhouse.example".into()], true).unwrap();
+        add_client("Acme", &["acme.example".into()], false).unwrap();
+        let sr = create("Acme", Some("acme"), None).unwrap();
+        update(&sr.id, |p| {
+            p.rules = vec![Rule::People { domains: vec![] }];
+            Ok(())
+        })
+        .unwrap();
+        // Seven colleagues, and one of them invited on his client address too.
+        let mut people: Vec<Person> = (1..=6).map(|i| person(&format!("Colleague {i} Name"), &format!("c{i}@inhouse.example"))).collect();
+        people.push(person("Carter, Sam", "Sam_Carter@inhouse.example"));
+        people.push(person("Sam Carter", "sam_carter@acme.example"));
+        let c = call("2026-10-28_110000-sensor-sync", Some(meeting("Sensor prototype weekly sync", &people)), None);
+        assert!(of_call(&c).unwrap().is_empty(), "not an Acme call: its only acme.example address is a colleague's");
+        // Known from the directory alone (only his client address on the invite).
+        let only = call("2026-10-29_110000-sensor-sync", Some(meeting("Sensor prototype weekly sync", &[person("Sam Carter", "sam_carter@acme.example")])), None);
+        assert_eq!(of_call(&only).unwrap().len(), 1, "alone on his client address, nothing says he is a colleague yet");
+        crate::people::merge("sam_carter@acme.example", "Sam Carter", &[], "sam_carter@inhouse.example", "Sam Carter", Some("sam_carter@inhouse.example")).unwrap();
+        assert!(crate::people::colleagues().address("sam_carter@acme.example"));
+        assert!(of_call(&only).unwrap().is_empty(), "the directory knows both his addresses");
+        // A real client person still makes it Acme's; a meeting kept out by hand never does.
+        let ravi = call("2026-10-30_110000-acme-sync", Some(meeting("Weekly", &[person("Ravi Mehta", "ravi@acme.example")])), None);
+        assert_eq!(of_call(&ravi).unwrap().len(), 1);
+        let mut m = meeting("Weekly", &[person("Ravi Mehta", "ravi@acme.example")]);
+        m.id = Some("ev-1".into());
+        assert_eq!(for_event(&m).len(), 1);
+        update(&sr.id, |p| {
+            p.not_events.push("ev-1".into());
+            Ok(())
+        })
+        .unwrap();
+        assert!(for_event(&m).is_empty());
+    }
+
+    #[test]
     fn organisations_are_counterparts_not_accounts() {
         let (_env, _root) = paths::testenv::folders("projects-orgs");
-        let contoso = add_client("Contoso Systems", &["contoso.example".into()], true).unwrap();
-        let p = create("Orbit pursuit", Some(&contoso.id), None).unwrap();
+        let ours = add_client("Inhouse", &["inhouse.example".into()], true).unwrap();
+        let p = create("Globex pursuit", Some(&ours.id), None).unwrap();
         update(&p.id, |p| {
             p.rules = vec![Rule::People { domains: vec![] }];
             Ok(())
         })
         .unwrap();
-        let zach = person("Zach Lee", "zach@orbit.example");
-        let c = call("2026-10-29_160000-orbit", Some(meeting("Orals prep", &[zach])), None);
+        let kim = person("Kim Park", "kim@globex.example");
+        let c = call("2026-10-29_160000-globex", Some(meeting("Orals prep", &[kim])), None);
         assert!(calls_of(&load(&p.id).unwrap()).unwrap().is_empty(), "the client's domains are colleagues': nothing matches yet");
-        // Orbit as an organisation: not a client, never a thread's account; its domains join the people rule.
-        let orbit = add_org("Orbit USA", &["orbit.example".into()], false, false).unwrap();
-        assert!(add_org("Orbit again", &["orbit.example".into()], false, false).is_err(), "a domain is one organisation's");
-        assert!(!clients().unwrap().iter().any(|x| x.id == orbit.id) && orgs().unwrap().iter().any(|x| x.id == orbit.id));
-        assert!(update(&p.id, |p| { p.client = Some(orbit.id.clone()); Ok(()) }).is_err(), "a thread sits under an account only");
+        // Globex as an organisation: not a client, never a thread's account; its domains join the people rule.
+        let globex = add_org("Globex", &["globex.example".into()], false, false).unwrap();
+        assert!(add_org("Globex again", &["globex.example".into()], false, false).is_err(), "a domain is one organisation's");
+        assert!(!clients().unwrap().iter().any(|x| x.id == globex.id) && orgs().unwrap().iter().any(|x| x.id == globex.id));
+        assert!(update(&p.id, |p| { p.client = Some(globex.id.clone()); Ok(()) }).is_err(), "a thread sits under an account only");
         update(&p.id, |p| {
-            p.orgs.push(OrgPlace { client: orbit.id.clone(), ..Default::default() });
+            p.orgs.push(OrgPlace { client: globex.id.clone(), ..Default::default() });
             Ok(())
         })
         .unwrap();
-        assert_eq!(of_call(&c).unwrap().iter().map(|(p, w)| (p.name.as_str(), *w)).collect::<Vec<_>>(), [("Orbit pursuit", "people")]);
+        assert_eq!(of_call(&c).unwrap().iter().map(|(p, w)| (p.name.as_str(), *w)).collect::<Vec<_>>(), [("Globex pursuit", "people")]);
         // Written as before organisations: an account. Not written when it is one.
         let raw = fs::read_to_string(dir().join(CLIENTS)).unwrap();
         assert!(raw.contains("\"account\": false") && raw.matches("\"account\"").count() == 1, "{raw}");
         // Gone: no thread lists it any more.
-        remove_client(&orbit.id).unwrap();
+        remove_client(&globex.id).unwrap();
         assert!(load(&p.id).unwrap().orgs.is_empty());
     }
 

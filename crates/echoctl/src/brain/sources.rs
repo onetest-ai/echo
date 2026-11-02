@@ -95,7 +95,7 @@ impl MailRule {
     }
 }
 
-/// A mail source as typed — "globex.example", "@globex.example", "jane@globex.example" or a rule itself — as
+/// A mail source as typed — "acme.example", "@acme.example", "jane@acme.example" or a rule itself — as
 /// the rule a thread stores.
 pub fn mail_source(typed: &str) -> Result<String> {
     let t = typed.trim();
@@ -103,7 +103,7 @@ pub fn mail_source(typed: &str) -> Result<String> {
     match MailRule::parse(&rule) {
         Some(MailRule::Domain(d)) => Ok(format!("domain:{d}")),
         Some(MailRule::Person(p)) => Ok(format!("person:{p}")),
-        None => anyhow::bail!("Type a domain (globex.example) or an address (jane@globex.example)."),
+        None => anyhow::bail!("Type a domain (acme.example) or an address (jane@acme.example)."),
     }
 }
 
@@ -580,19 +580,19 @@ mod tests {
 
     #[test]
     fn mail_rules_match_exactly() {
-        let d = MailRule::parse("domain:@Globex.com").unwrap();
-        assert_eq!(d, MailRule::Domain("globex.example".into()));
-        assert!(d.matches(&["a.b@globex.example".into()]));
-        assert!(d.matches(&["a.b@eu.globex.example".into()]));
-        // Graph's search is fuzzy: what it returns for "globex.example" can be someone else's mail.
-        assert!(!d.matches(&["x@initech.example".into(), "y@notglobex.example".into()]));
+        let d = MailRule::parse("domain:@Acme.example").unwrap();
+        assert_eq!(d, MailRule::Domain("acme.example".into()));
+        assert!(d.matches(&["a.b@acme.example".into()]));
+        assert!(d.matches(&["a.b@eu.acme.example".into()]));
+        // Graph's search is fuzzy: what it returns for "acme.example" can be someone else's mail.
+        assert!(!d.matches(&["x@other-org.example".into(), "y@notacme.example".into()]));
         let p = MailRule::parse("person:Jane@x.org").unwrap();
         assert!(p.matches(&["jane@x.org".into()]) && !p.matches(&["jane@y.org".into()]));
         assert!(MailRule::parse("domain:a b.com").is_none());
         assert!(MailRule::parse("domain:x\"y.com").is_none());
         assert!(MailRule::parse("other:x.com").is_none());
-        assert_eq!(d.kql(), "from:globex.example OR to:globex.example");
-        assert_eq!(mail_source(" @Globex.com ").unwrap(), "domain:globex.example");
+        assert_eq!(d.kql(), "from:acme.example OR to:acme.example");
+        assert_eq!(mail_source(" @Acme.example ").unwrap(), "domain:acme.example");
         assert_eq!(mail_source("Jane@X.org").unwrap(), "person:jane@x.org");
         assert!(mail_source("not a domain").is_err());
     }

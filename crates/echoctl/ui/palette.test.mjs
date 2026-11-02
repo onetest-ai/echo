@@ -18,7 +18,7 @@ const ITEMS = [
   { label: 'Open Transcript' },
   { label: 'Record the next Teams call', keywords: 'start arm' },
   { label: 'Settings: Transcription' },
-  { label: 'Bruno - Contoso follow-up', keywords: 'Pat Novak Ivo Brandt Today' },
+  { label: 'Bruno - Acme follow-up', keywords: 'Pat Novak Ivo Brandt Today' },
   { label: 'Delete this call…', disabled: null },
   { label: 'Open minutes in browser', disabled: 'no minutes yet' },
 ]
@@ -30,7 +30,7 @@ test('no query: the items in their own order', () => {
 
 test('every word must appear, in any order, in the label or the keywords', () => {
   assert.deepEqual(labels(Palette.rank(ITEMS, 'call claude')), ['Ask Claude about this call'])
-  assert.deepEqual(labels(Palette.rank(ITEMS, 'novak')), ['Bruno - Contoso follow-up'])
+  assert.deepEqual(labels(Palette.rank(ITEMS, 'novak')), ['Bruno - Acme follow-up'])
   assert.deepEqual(labels(Palette.rank(ITEMS, 'zzz')), [])
 })
 

@@ -459,10 +459,13 @@ pub fn context(call: &str) -> Result<()> {
     }
     let dominant_language = by_lang.iter().max_by_key(|(_, v)| v.as_u64().unwrap_or(0)).map(|(k, _)| k.clone());
 
-    // Colleagues vs external attendees, by the user's email domain.
+    // Colleagues vs external attendees: by the user's email domain and internal organisations', and a
+    // colleague invited on a client address is still a colleague (`people::Colleagues`).
     let my_domain = cfg.me.as_ref().and_then(|p| p.email.as_deref()).and_then(domain);
     let (mut colleagues, mut external) = (vec![], vec![]);
     if let Some(m) = &meeting {
+        let book = crate::people::colleagues();
+        let theirs = book.among(m.organizer.iter().chain(m.attendees.iter()).map(|p| (p.name.as_str(), p.email.as_deref())));
         for p in m.organizer.iter().chain(m.attendees.iter()) {
             let is_me = cfg.me.as_ref().is_some_and(|me| me.email.is_some() && me.email == p.email);
             if is_me {
@@ -472,8 +475,9 @@ pub fn context(call: &str) -> Result<()> {
                 Some(e) => format!("{} <{e}>", p.name),
                 None => p.name.clone(),
             };
+            let colleague = p.email.as_deref().is_some_and(|e| theirs.contains(&e.trim().to_lowercase()));
             match (p.email.as_deref().and_then(domain), &my_domain) {
-                (Some(d), Some(mine)) if &d != mine => external.push(label),
+                (Some(d), Some(mine)) if &d != mine && !colleague => external.push(label),
                 _ => colleagues.push(label),
             }
         }
@@ -1261,13 +1265,13 @@ mod tests {
     #[test]
     fn about_me_is_read_in_parts() {
         let text = "# About me\n\nName: Alex (\"Me\")\nRole: Head of Delivery\n\n## People I work with often\n- Jordan — my manager\n\n\
-                    ## Terms and names used in my calls\nBRLS, Pathfinder\n\n## How I work — expected patterns\n- I delegate and track.\n\n\
+                    ## Terms and names used in my calls\nPathfinder, Northstar\n\n## How I work — expected patterns\n- I delegate and track.\n\n\
                     ## How I like notes written\n- Short.\n";
         let short = me_parts(text, &["identity", "people", "terms"], 1500).unwrap();
-        assert!(short.contains("Role: Head of Delivery") && short.contains("Jordan — my manager") && short.contains("BRLS"));
+        assert!(short.contains("Role: Head of Delivery") && short.contains("Jordan — my manager") && short.contains("Pathfinder"));
         assert!(!short.contains("delegate") && !short.contains("Short.") && !short.contains("# About me"), "{short}");
         let brain = me_parts(text, &["people", "terms"], 1500).unwrap();
-        assert!(!brain.contains("Artem") && brain.contains("Pathfinder"));
+        assert!(!brain.contains("Alex") && brain.contains("Northstar"));
         assert!(me_parts(text, &["patterns"], 1500).unwrap().contains("I delegate and track."));
         // The template's form: "Label:" lines.
         let t = "Name: Dana\nPeople I work with often (name — role): Ravi — sponsor\nTerms and names used in my calls: SSO\nHow I like notes and follow-ups written (tone, length, language): short\n";
