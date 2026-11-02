@@ -229,7 +229,10 @@ account, permissions). Plain values save at once with the value shown — never 
 `/api/pty/<id>?from=<byte>` (≤ 25 s; a reopened window gets the scrollback), keys / size / close over IPC
 (`pty_input`, `pty_resize`, `pty_close`; `pty_open {kind, key, call|profile}` → `window.echo.ptyOpened`). Each xterm
 element is made once and moved into its panel slot after every render (a hidden holder otherwise), so renders and
-panel moves keep it; keys inside `.xterm` all go to it (⌘/Ctrl+Esc gives focus back). Two panel views (bottom by
+panel moves keep it; keys inside `.xterm` all go to it (⌘/Ctrl+Esc gives focus back) except `termKey`'s: on macOS
+⌘C copies the selection, ⌘A selects all and ⌘V pastes through the app (IPC `pty_paste` → `pbpaste`, bracketed when the
+program asked; no text → Ctrl+V for Claude Code's image paste) — the window has no Edit menu, so WebKit's own never
+runs —, and Ctrl/Shift+Enter send ESC CR (a new line in Claude Code's prompt). Two panel views (bottom by
 default): **Claude · this call** — guarded on the call's own profile (`ai::for_call`; a sign-in problem comes back
 with its profile → Sign in…): the minutes run's guard with `ECHOCTL_RUN_MODE=ask` (Read/Glob/Grep in the call and the
 previous minutes, Bash only `echoctl context` — `guard::ASK_COMMANDS` —, no Edit/Write/Skill), `--tools
@@ -336,7 +339,20 @@ from `PJ_SYMBOLS`, else an identicon from its id (`ProjectArt`, no DOM: `ui/proj
 
 **The work ledger** (`ledger.rs`, taska's ported; `<home>/projects/<id>/ledger/`): `events.jsonl` (append-only, one write
 per batch) folded into Workstream (epic, `E01 General` first) › Story (criteria) › Task (action / session /
-dependency, owners, due, client-owed) + decision / risk / question records. Evidence = each project call as an item
+dependency, owners, due, client-owed) + decision / risk / question records. Stories and tasks carry a `description`
+(Markdown; an agent's from `create` / `revise`, ≤ 1200 chars; the user's in Details — click it — ≤ 4000, pinned) and
+`links` (`{title, url}`, https, ≤ 10: tickets, docs). **Mails as evidence** (`echoctl project ledger <id> mail
+<graph message id>… [--conversation]`, `ledger::add_mail`): one item a mail, `mail-<sha8 of its Internet message
+id>` (kind `mail`: one turn — the sender ("Me" for the user's own: About me's address or the account's local part; names
+through `people::display`), the local time, the new part of its text — and its Outlook `webLink`),
+read by the next sync like a call; the user's pick is the trust. A thread's ✉ Mail sources (the Brain's `domain:` /
+`person:` rules) are read into its work in each sync too (`ledger::mail_sync`, `sync --mail`; first 30 days, later 7,
+≤ 200 a read; state in `ledger/mails.json`, on the source's chip; trusting a sender — or reading one's unauthenticated mail anyway — makes
+that client's threads read their mail and meeting chats from the start again, `ledger::reread_sources`): only the user's, colleagues' and senders trusted for
+the thread's client — a trusted outside sender's only with DMARC/compauth passing, the Brain's `senders` rules; others
+wait there (Needs you — asked there also with the Brain off when a thread reads mail or chats); no organisation domains
+known → nothing read. Read whether or not the Brain is on (not
+without the `brain` feature). History entries from a mail show ✉ and open it in Outlook. Evidence = each project call as an item
 (`evidence/<stamp>.json` + `.md`: transcript turns `[hh:mm:ss] speaker: text`, chat and the user's notes as text; a
 changed call is queued again by a `reprocess` event). `apply`: each proposal's quote must be one contiguous span of
 its item (normalised), level rules, nothing before it existed, re-applying adds nothing; status changes, criteria
@@ -402,7 +418,7 @@ run; `echoctl project people <id> --refresh`); a value goes in with source `m365
 then it becomes a question in the person's panel (Use theirs / Keep mine: `person_answer`; a kept value isn't asked
 again).
 **The people pass** (the sync's third run, after extract and verify; `PEOPLE.md` in the project-sync skill): reads the
-calls it hasn't read yet (`ledger/people-read.json` — also calls synced before it existed; ≤ 10 a run, also when the
+calls it hasn't read yet (`ledger/people-read-2.json` — version 2 re-reads everything once for facts; ≤ 10 a run, also when the
 work has nothing new) with the thread's people in view (`project ledger <id> people-context --items …`) and proposes
 role, stance, influence, interest, title, group, reports to, left, and relationships between organisations
 (`people-apply --evidence --file`, both in `guard::PROJECT_STEPS`). `people::apply_suggestions` checks each: the quote
@@ -410,13 +426,29 @@ one span of that call (`ledger::quote_in`), the person or organisation known, th
 proposed or turned down before → `<project>/people-suggestions.json`, pending. Nothing changes until the user answers
 in the People tab's bar (the question, the words, the call and time; Yes applies it as theirs, No stays no, Change…
 applies the user's own version — checked as a proposal is, state `corrected`, the proposed value stays turned down; Needs
-you's Change… opens that editor in the People tab: `people_decide {value}` → `people::decide`). No model verifier on top: the quote check and the user's yes are the gate.
-**Tasks** activity (`tasks.rs`, `#tasks`, `/api/tasks`, `echoctl project tasks`): every open project's open tasks in four
-piles — I owe (owner = the transcripts' "Me", or `config.me`'s name, first name or email), Owed to me (someone else
-owns it), Waiting for others (blocked, `waiting_for`, or an open dependency — before the owner), Nobody named —
-overdue first, then by date, then the longest quiet (days since the last word in the ledger); a project filter and an
-order. **Asks** (right panel): by person, what they owe that is late, due within 3 days or quiet ≥ 5 days, and what we
-wait on them for; ≤ 2 per story, ≤ 15 in all; each person's next meeting in the next 7 days (the calendar's cache,
+you's Change… opens that editor in the People tab: `people_decide {value}` → `people::decide`). No model verifier on top: the quote check and the user's yes are the gate. The same pass keeps each person's file (as a vault's people
+notes): **facts** (`fact`: one line ≤ 240 chars, its quote one span of the item → `Person.facts` in the directory at once,
+`{text, quote, date, thread, evidence, kind, call, url, ts}`, deduped by person + item + quote, ≤ 300; a mail's or chat's
+sender may be named by address) and **who they are** (`about`, ≤ 800 chars, no quote, source `echo` +
+`about_thread`; the user's own — Details, ≤ 2000 — is pinned and never rewritten). The view adds `about`, the facts of
+its threads, `threads` (by calls, places, facts), `touches` (distinct sources) and `with` (≤ 3 people sharing ≥ 2
+calls; built again only when its inputs' file times change, or every 10 min — `view_cached`). **The Brain's People**
+(`#brain/people`, `/api/brain/people` = `people::everyone`): threads on a ring (a
+client's side by side), people near theirs — only those with ≥ 2 sources, a place or the user's description (a one-off
+name stays out); role lines solid, calls faint, reports-to dashed, calls-together on selection; a click opens the
+person panel (Who they are, What was said about them with links to the call / mail, Often in calls with). MCP
+`find_people` / `get_person` (echo-brain): only the threads on the reader's profile, narrowed like its documents
+(`Access::people_threads`); Echo's `about` only when written by one of them.
+**Tasks** activity (`tasks.rs`, `#tasks`, `/api/tasks`, `echoctl project tasks`): every open project's open tasks in piles
+by the user's rules (2026-11-02) — **I owe** (owner = the transcripts' "Me", or `config.me`'s name, first name or email;
+a blocked one stays here, marked "blocked by …"), **Owed to me** (someone else does it and the user handed it over: the
+task's `delegated_by` is me — a human and agent ledger field, Details → Handed over by, EXTRACT's `delegated_by` on
+create / reassign — else the speaker whose words created it; tasks filed by hand count only with the field), **Waiting
+for others** (what stops what I owe: each open task my tasks wait on that isn't mine — "stops T011" —, and a card per
+person a task of mine waits for, `waiting_for {who, what}`), Nobody named, and **Others** (other people's work I neither
+handed over nor wait on; folded under the columns) — overdue first, then by date, then the longest quiet (days since
+the last word in the ledger); a project filter and an order. **Asks** (right panel): by person, what they owe me (Owed to me) that is late, due within 3 days or quiet ≥ 5 days, and
+what my work waits on them for (an owed task that also stops me asked once); ≤ 2 per story, ≤ 15 in all; each person's next meeting in the next 7 days (the calendar's cache,
 attendees by email or name; no sign-in: today's agenda). A card or an ask opens the task's details (the Work tab's
 `work-item` panel) right there.
 **What this call changed** (a call's Actions tab, above its action items; `ledger::call_changes`, call detail `changes`):

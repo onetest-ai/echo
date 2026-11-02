@@ -294,6 +294,7 @@ pub fn decide(client: &str, key: &str, decision: &str) -> Result<()> {
         save(&s)?;
         if read {
             super::sources::request_reread(client)?;
+            crate::ledger::reread_sources(client)?;
         }
         return Ok(());
     }
@@ -313,6 +314,10 @@ pub fn decide(client: &str, key: &str, decision: &str) -> Result<()> {
     // That client's sources are read again from the start at the next sync (the reader's cache keeps
     // it cheap): a trusted sender's messages come in, an ignored one's go.
     super::sources::request_reread(client)?;
+    // A thread's work reads mail and meeting chats by the same list: a trusted one's held-back messages come in.
+    if decision == "trust" {
+        crate::ledger::reread_sources(client)?;
+    }
     Ok(())
 }
 

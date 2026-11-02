@@ -1,5 +1,7 @@
-//! The Tasks activity: every open project's open tasks in four piles by who has to move — I owe ·
-//! Owed to me · Waiting for others · Nobody named — and what to ask each person the next time you
+//! The Tasks activity: every open project's open tasks in piles by the user's rules (2026-11-02) —
+//! I owe (what I do), Owed to me (what I handed over and check), Waiting for others (what stops me
+//! doing what I owe: the work and the people my tasks wait on), Nobody named, and Others (other
+//! people's work I neither delegated nor wait on) — and what to ask each person the next time you
 //! meet. Computed from the ledgers (and the calendar for "next time you meet"), never a model's guess.
 
 use anyhow::Result;
@@ -13,7 +15,7 @@ use crate::meeting::{MeetingContext, Person};
 use crate::projects::{self, Project};
 
 /// The piles, in the order the window shows them.
-pub const PILES: [&str; 4] = ["mine", "owed", "waiting", "nobody"];
+pub const PILES: [&str; 5] = ["mine", "owed", "waiting", "nobody", "others"];
 /// Asks: at most this many, and this many per story (taska's rule).
 const ASKS_MAX: usize = 15;
 const ASKS_PER_STORY: usize = 2;
@@ -65,16 +67,19 @@ fn card(p: &Project, n: &Node, nodes: &BTreeMap<String, Node>, ev: &BTreeMap<Str
     let last = n.history.iter().rev().find(|h| h["date"].is_string());
     let quiet = last.and_then(|h| days(h["date"].as_str()?, today));
     let last_call = n.history.iter().rev().filter_map(|h| ev.get(h["evidence"].as_str()?)).next();
-    let after: Vec<Value> = n.waiting_on.iter().filter_map(|d| nodes.get(d)).map(|d| json!({"id": d.id, "title": d.title})).collect();
-    let waiting = n.state == "blocked" || n.waiting_for.is_some() || !after.is_empty();
-    let pile = if waiting {
-        "waiting"
-    } else if owner.as_deref().is_some_and(|o| me.is(o)) {
+    let after: Vec<Value> = n.waiting_on.iter().filter_map(|d| nodes.get(d)).filter(|d| open(&d.state)).map(|d| json!({"id": d.id, "title": d.title})).collect();
+    let blocked = n.state == "blocked" || n.waiting_for.as_ref().is_some_and(|w| w["what"].is_string() || w["who"].is_string()) || !after.is_empty();
+    // Who handed it over: as recorded, else whoever's words created it. Not "made by hand": a session
+    // filing the user's mail makes tasks by hand that nobody handed over (2026-11-02).
+    let delegated = n.delegated_by.clone().or(n.creator.clone());
+    let pile = if owner.as_deref().is_some_and(|o| me.is(o)) {
         "mine"
-    } else if owner.is_some() {
+    } else if owner.is_none() {
+        "nobody"
+    } else if delegated.as_deref().is_some_and(|d| me.is(d)) {
         "owed"
     } else {
-        "nobody"
+        "others"
     };
     let late = n.due.as_deref().and_then(|d| days(d, today)).is_some_and(|d| d > 0);
     (
@@ -82,8 +87,8 @@ fn card(p: &Project, n: &Node, nodes: &BTreeMap<String, Node>, ev: &BTreeMap<Str
         json!({
             "project": p.id, "id": n.id, "title": n.title, "type": n.task_type, "state": n.state,
             "story": story.map(|s| json!({"id": s.id, "title": s.title})),
-            "owner": owner, "mine": owner.as_deref().is_some_and(|o| me.is(o)), "client": client,
-            "due": n.due, "late": late, "waiting_for": n.waiting_for, "after": after,
+            "owner": owner, "mine": owner.as_deref().is_some_and(|o| me.is(o)), "client": client, "delegated_by": delegated,
+            "due": n.due, "late": late, "waiting_for": n.waiting_for, "after": after, "blocked": blocked,
             "quiet": quiet, "last": last_call.map(|e| json!({"date": e["date"], "call": e["call"], "title": e["title"]})),
         }),
     )
@@ -147,11 +152,49 @@ fn across_with(list: &[Project], me: &Me, meetings: &[MeetingContext], today: Na
                 continue;
             }
         };
-        let mut count = 0;
-        for n in t.nodes.values().filter(|n| n.kind == "task" && open(&n.state) && n.merged_into.is_none()) {
-            let (pile, c) = card(p, n, &t.nodes, &t.evidence, today, me);
-            count += 1;
-            // Something to ask: what they owe that is late, due soon or quiet; what we wait on them for.
+        let tasks: Vec<&Node> = t.nodes.values().filter(|n| n.kind == "task" && open(&n.state) && n.merged_into.is_none()).collect();
+        let mut cards: BTreeMap<String, (String, Value)> = tasks.iter().map(|n| (n.id.clone(), card(p, n, &t.nodes, &t.evidence, today, me))).collect();
+        // Waiting for others = what stops me doing what I owe: the open work my tasks wait on (not
+        // mine; it leaves Others / Nobody named for here) and the people they wait on (a card each).
+        let mut waits: Vec<Value> = vec![];
+        for n in &tasks {
+            if cards[&n.id].0 != "mine" {
+                continue;
+            }
+            let mine = json!({"id": n.id, "title": n.title});
+            for d in &n.waiting_on {
+                if let Some((pile, c)) = cards.get_mut(d) {
+                    if pile == "mine" {
+                        continue;
+                    }
+                    if pile != "owed" {
+                        *pile = "waiting".into();
+                    }
+                    if let Some(b) = c["blocks"].as_array_mut() {
+                        b.push(mine.clone());
+                    } else {
+                        c["blocks"] = json!([mine]);
+                    }
+                }
+            }
+            if let Some(w) = n.waiting_for.as_ref().filter(|w| w["what"].is_string() || w["who"].is_string()) {
+                if w["who"].as_str().is_some_and(|x| me.is(x)) {
+                    continue;
+                }
+                let c = &cards[&n.id].1;
+                waits.push(json!({"project": p.id, "id": n.id, "wait": true, "title": w["what"].as_str().unwrap_or("an answer"), "who": w["who"], "owner": w["who"],
+                                  "waiting_for": w, "after": [], "blocks": [mine], "due": null, "late": false, "quiet": c["quiet"], "story": c["story"], "last": c["last"]}));
+            }
+        }
+        // An owed task my work waits on is in both: I check it, and it stops me.
+        let owed_blockers: Vec<Value> = cards.values().filter(|(pile, c)| pile == "owed" && c["blocks"].is_array()).map(|(_, c)| {
+            let mut c = c.clone();
+            c["also"] = json!("owed");
+            c
+        }).collect();
+        let count = tasks.len();
+        for (pile, c) in cards.into_values().chain(owed_blockers.into_iter().map(|c| ("waiting".to_string(), c))).chain(waits.into_iter().map(|c| ("waiting".to_string(), c))) {
+            // Something to ask: what they owe me that is late, due soon or quiet; what my work waits on them for.
             let due_in = c["due"].as_str().and_then(|d| days(d, today)).map(|d| -d);
             let ask = match pile.as_str() {
                 "owed" => {
@@ -166,7 +209,9 @@ fn across_with(list: &[Project], me: &Me, meetings: &[MeetingContext], today: Na
                     };
                     why.map(|w| (c["owner"].as_str().unwrap_or_default().to_owned(), w))
                 }
-                "waiting" => n.waiting_for.as_ref().and_then(|w| w["who"].as_str()).filter(|w| !me.is(w)).map(|w| (w.to_owned(), "waiting")),
+                "waiting" if c["owner"].as_str().is_some_and(|o| !me.is(o)) => {
+                    Some((c["owner"].as_str().unwrap_or_default().to_owned(), "waiting"))
+                }
                 _ => None,
             };
             if let Some((who, why)) = ask {
@@ -186,6 +231,9 @@ fn across_with(list: &[Project], me: &Me, meetings: &[MeetingContext], today: Na
     }
     // Most urgent first; at most two per story, fifteen in all; then grouped by person.
     asks.sort_by(|a, b| rank(&a.2, &b.2));
+    // An owed task that also stops me is asked about once.
+    let mut asked = std::collections::BTreeSet::new();
+    asks.retain(|a| a.2["wait"] == true || asked.insert(format!("{}/{}", a.2["project"], a.2["id"])));
     let mut per_story: BTreeMap<String, usize> = BTreeMap::new();
     let mut people: Vec<(String, Option<String>, Vec<Value>)> = vec![];
     for (who, email, a) in asks {
@@ -236,7 +284,8 @@ pub fn client(id: &str, meetings: &[MeetingContext], today: NaiveDate, now: &str
         let mut piles = serde_json::Map::new();
         let mut late = 0;
         for k in PILES {
-            let n: Vec<&Value> = work["piles"][k].as_array().into_iter().flatten().filter(|c| c["project"] == p.id.as_str()).collect();
+            // Tasks, each once: not a person waited on, not an owed task shown again as a blocker.
+            let n: Vec<&Value> = work["piles"][k].as_array().into_iter().flatten().filter(|c| c["project"] == p.id.as_str() && c["wait"] != true && c["also"].is_null()).collect();
             late += n.iter().filter(|c| c["late"] == true).count();
             piles.insert(k.into(), json!(n.len()));
         }
@@ -278,7 +327,8 @@ mod tests {
     #[test]
     fn tasks_fall_into_piles_and_asks() {
         let (_env, _root) = crate::paths::testenv::folders("tasks-across");
-        let p = projects::create("Aurora", None, None).unwrap();
+        projects::add_client("Northwind", &["northwind.example".into()], false).unwrap();
+        let p = projects::create("Aurora", Some("northwind"), None).unwrap();
         projects::update(&p.id, |p| {
             p.people = vec![projects::Member { name: "Dana Kowal".into(), email: Some("dana@northwind.example".into()), role: None, ..Default::default() }];
             Ok(())
@@ -291,18 +341,26 @@ mod tests {
                 {"ts": "00:01:00", "speaker": "Me", "text": "I can have the SAML config ready by Friday."},
                 {"ts": "00:02:00", "speaker": "Dana Kowal", "text": "I will send the pilot user list on Monday."},
                 {"ts": "00:03:00", "speaker": "Ravi Mehta", "text": "Somebody has to run the load test for ingest at some point."},
-                {"ts": "00:04:00", "speaker": "Ravi Mehta", "text": "The security review needs the data-flow diagram first."},
+                {"ts": "00:04:00", "speaker": "Ravi Mehta", "text": "I will run the security review of the vendor contract next week."},
+                {"ts": "00:05:00", "speaker": "Me", "text": "Dana, please draft the rollout email for the pilot users by Thursday."},
+                {"ts": "00:06:00", "speaker": "Me", "text": "The SAML config can't start until Sam sends us the signing certificate."},
             ], "text": ""});
         std::fs::write(l.dir.join("evidence/2026-10-20_110000.json"), serde_json::to_vec(&item).unwrap()).unwrap();
         ledger::ensure_first_epic(&l).unwrap();
         let ev = "2026-10-20_110000";
         let r = ledger::apply(&p.id, ev, &[
             json!({"op": "create", "ref": "s1", "kind": "story", "parent": "E01", "title": "Pilot", "ac": ["Users can sign in", "Load holds"], "quote": "I can have the SAML config ready by Friday"}),
-            json!({"op": "create", "kind": "task", "parent": "s1", "title": "SAML config", "type": "action", "internal_owner": "Me", "due_text": "Friday", "quote": "I can have the SAML config ready by Friday"}),
-            json!({"op": "create", "kind": "task", "parent": "s1", "title": "Pilot user list", "type": "dependency", "client_owed": true, "client_owner": "Dana Kowal", "due_text": "Monday", "quote": "I will send the pilot user list on Monday"}),
+            json!({"op": "create", "ref": "t1", "kind": "task", "parent": "s1", "title": "SAML config", "type": "action", "internal_owner": "Me", "due_text": "Friday", "quote": "I can have the SAML config ready by Friday"}),
+            json!({"op": "create", "ref": "t2", "kind": "task", "parent": "s1", "title": "Pilot user list", "type": "dependency", "client_owed": true, "client_owner": "Dana Kowal", "due_text": "Monday", "quote": "I will send the pilot user list on Monday"}),
             json!({"op": "create", "kind": "task", "parent": "s1", "title": "Load test for ingest", "type": "session", "quote": "Somebody has to run the load test for ingest"}),
+            json!({"op": "create", "kind": "task", "parent": "s1", "title": "Security review of the vendor contract", "type": "action", "internal_owner": "Ravi Mehta", "due_text": "next week", "quote": "I will run the security review of the vendor contract next week"}),
+            json!({"op": "create", "kind": "task", "parent": "s1", "title": "Rollout email", "type": "action", "internal_owner": "Dana Kowal", "due_text": "Thursday", "quote": "Dana, please draft the rollout email for the pilot users by Thursday"}),
+            json!({"op": "link", "node": "t1", "depends_on": "t2", "quote": "I can have the SAML config ready by Friday"}),
+            json!({"op": "waiting", "node": "t1", "who": "Sam", "what": "the signing certificate", "quote": "can't start until Sam sends us the signing certificate"}),
         ]).unwrap();
-        assert_eq!(r["events"], 4, "{r}");
+        assert_eq!(r["rejected"].as_array().map(|a| a.len()), Some(0), "{r}");
+        let claims: Vec<Value> = ledger::verify_prep(&p.id, false).unwrap().iter().map(|c| json!({"mid": c["mid"], "verdict": "supports"})).collect();
+        ledger::verify_apply(&p.id, &claims).unwrap();
         ledger::mark_processed(&p.id, ev, "").ok();
         let meetings = vec![MeetingContext {
             subject: Some("Aurora weekly".into()),
@@ -314,17 +372,36 @@ mod tests {
         let me = Me::of(None);
         let v = across_with(&projects::list(), &me, &meetings, NaiveDate::from_ymd_opt(2026, 10, 28).unwrap(), "2026-10-28T12:00:00Z").unwrap();
         let titles = |k: &str| v["piles"][k].as_array().unwrap().iter().map(|c| c["title"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
+        // Mine stays mine while it waits; what it waits on — work and a person — is in Waiting.
         assert_eq!(titles("mine"), ["SAML config"]);
-        assert_eq!(titles("owed"), ["Pilot user list"]);
+        assert_eq!(v["piles"]["mine"][0]["blocked"], true);
+        assert_eq!(titles("owed"), ["Rollout email"], "my words handed it to Dana");
+        let mut w = titles("waiting");
+        w.sort();
+        assert_eq!(w, ["Pilot user list", "the signing certificate"]);
+        let cert = v["piles"]["waiting"].as_array().unwrap().iter().find(|c| c["wait"] == true).unwrap();
+        assert_eq!((cert["who"].as_str(), cert["blocks"][0]["title"].as_str()), (Some("Sam"), Some("SAML config")));
+        assert_eq!(titles("others"), ["Security review of the vendor contract"], "Ravi's own work, not mine to chase");
         assert_eq!(titles("nobody"), ["Load test for ingest"]);
-        let pl = &v["piles"]["owed"][0];
-        assert_eq!(pl["client"], true);
-        assert_eq!(pl["late"], true, "Monday the 26th is before the 28th");
-        assert_eq!(pl["quiet"], 8);
-        assert_eq!(v["asks"][0]["who"], "Dana Kowal");
-        assert_eq!(v["asks"][0]["items"][0]["why"], "late");
-        assert_eq!(v["asks"][0]["next"]["subject"], "Aurora weekly", "matched by email, any case");
-        assert_eq!(v["projects"][0]["tasks"], 3);
+        let pl = v["piles"]["waiting"].as_array().unwrap().iter().find(|c| c["title"] == "Pilot user list").unwrap();
+        assert_eq!((pl["client"].as_bool(), pl["late"].as_bool(), pl["quiet"].as_i64()), (Some(true), Some(true), Some(8)), "Monday the 26th is before the 28th");
+        let dana = v["asks"].as_array().unwrap().iter().find(|a| a["who"] == "Dana Kowal").unwrap();
+        assert_eq!(dana["next"]["subject"], "Aurora weekly", "matched by email, any case");
+        let whys: Vec<&str> = dana["items"].as_array().unwrap().iter().map(|i| i["why"].as_str().unwrap()).collect();
+        assert_eq!(whys, ["late", "waiting"], "the rollout email (Thursday the 22nd), then the list my work waits on");
+        // Sam's certificate would be next, but a story gets two asks at most.
+        assert!(!v["asks"].as_array().unwrap().iter().any(|a| a["who"] == "Ravi Mehta"), "others' work isn't chased");
+        assert_eq!(v["projects"][0]["tasks"], 5);
+        // Handed over by hand: the user says who delegated it.
+        ledger::human_event(&p.id, &json!({"op": "edit", "node": "T004", "set": {"delegated_by": "Me"}})).unwrap();
+        let v = across_with(&projects::list(), &me, &meetings, NaiveDate::from_ymd_opt(2026, 10, 28).unwrap(), "2026-10-28T12:00:00Z").unwrap();
+        assert!(v["piles"]["owed"].as_array().unwrap().iter().any(|c| c["title"] == "Security review of the vendor contract"));
+        // The client's summary counts tasks, each once: Sam's certificate is a person waited on, not a task.
+        let c = client("northwind", &meetings, NaiveDate::from_ymd_opt(2026, 10, 28).unwrap(), "2026-10-28T12:00:00Z").unwrap();
+        let sum = &c["threads"][0]["summary"];
+        assert_eq!(sum["piles"], json!({"mine": 1, "owed": 2, "waiting": 1, "nobody": 1, "others": 0}));
+        let late = ["mine", "owed", "waiting", "nobody", "others"].iter().flat_map(|k| c["work"]["piles"][*k].as_array().unwrap().iter()).filter(|x| x["wait"] != true && x["also"].is_null() && x["late"] == true).count();
+        assert_eq!(sum["late"], late);
     }
 
     #[test]

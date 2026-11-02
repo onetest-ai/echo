@@ -34,7 +34,12 @@ const VERIFIED_OPS: [&str; 3] = ["ac_met", "link", "waiting"];
 const KINDS: [&str; 6] = ["epic", "story", "task", "risk", "decision", "question"];
 const TASK_TYPES: [&str; 3] = ["action", "session", "dependency"];
 const CLOSED: [&str; 4] = ["done", "cancelled", "merged", "deleted"];
-const HUMAN_FIELDS: [&str; 10] = ["title", "internal_owner", "client_owner", "due", "state", "parent", "type", "client_owed", "waiting_for", "column"];
+const HUMAN_FIELDS: [&str; 13] = ["title", "internal_owner", "client_owner", "due", "state", "parent", "type", "client_owed", "waiting_for", "column", "links", "description", "delegated_by"];
+/// Where a node came from outside the calls (a mail, a ticket): at most this many `{title, url}`, https only.
+const MAX_LINKS: usize = 10;
+/// A description (Markdown): the user's at most this many characters; an agent's, from what was said, shorter.
+const MAX_DESC: usize = 4000;
+const MAX_AGENT_DESC: usize = 1200;
 const AGENT_OPS: [&str; 9] = ["create", "status", "revise", "ac_met", "link", "waiting", "suggest_move", "suggest_merge", "note"];
 const HUMAN_OPS: [&str; 11] = ["edit", "ac_add", "ac_set", "link", "unlink", "merge", "delete", "accept", "reject", "undo", "create"];
 const HUMAN_STATES: [&str; 5] = ["open", "in_progress", "blocked", "done", "cancelled"];
@@ -380,7 +385,7 @@ pub fn quote_in(project: &str, evid: &str, quote: &str) -> Result<Option<Value>>
     }
     let head: String = q.chars().take(40).collect();
     let turn = item["turns"].as_array().into_iter().flatten().find(|t| norm(t["text"].as_str().unwrap_or("")).contains(&head));
-    Ok(Some(json!({"evidence": evid, "date": item["date"], "call": item["call"], "title": item["title"],
+    Ok(Some(json!({"evidence": evid, "date": item["date"], "call": item["call"], "title": item["title"], "kind": item["kind"], "url": item["url"],
                    "ts": turn.map(|t| t["ts"].clone()), "speaker": turn.map(|t| t["speaker"].clone())})))
 }
 
@@ -716,6 +721,243 @@ pub fn chat_suggestions(p: &crate::projects::Project) -> Vec<Value> {
     v
 }
 
+// ── mail ────────────────────────────────────────────────────────────────────────────────────────
+
+/// A mail as one evidence item (`mail-<sha8 of its Internet message id>`: Graph's own id changes when
+/// the mail moves to another folder): the new part of its text as one turn at the local time it
+/// came, the sender as the speaker, and its link in Outlook (`url`).
+fn mail_item(m: &Value) -> Option<Value> {
+    if m["invite"] == true {
+        return None; // a meeting's invite: the meeting is the call
+    }
+    let key = m["internet_id"].as_str().or(m["id"].as_str())?;
+    let at = m["at"].as_str().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())?.with_timezone(&Local);
+    let text = m["text"].as_str().map(str::trim).filter(|t| !t.is_empty())?;
+    let me = mail_me();
+    // The user is "Me", as in a call; names as people read them ("Rozumenko, Artem" → "Artem Rozumenko").
+    let name = |p: &Value| {
+        let email = p["email"].as_str().unwrap_or("").to_lowercase();
+        if !email.is_empty() && me(&email) {
+            return "Me".to_string();
+        }
+        let n = p["name"].as_str().map(crate::people::display).filter(|n| !n.trim().is_empty());
+        n.unwrap_or_else(|| p["email"].as_str().unwrap_or("?").trim().to_string())
+    };
+    let from = name(&m["from"]);
+    let mut people = vec![from.clone()];
+    for p in m["to"].as_array().into_iter().flatten().map(name) {
+        if !people.contains(&p) {
+            people.push(p);
+        }
+    }
+    let subject = m["subject"].as_str().map(str::trim).filter(|t| !t.is_empty()).unwrap_or("(no subject)");
+    Some(json!({
+        "id": format!("mail-{}", short(key)), "kind": "mail", "source": "mail", "message": m["id"], "conversation": m["conversation"],
+        "at": at.to_rfc3339(), "date": at.date_naive().to_string(), "title": subject, "from": m["from"], "to": m["to"], "auth": m["auth"],
+        "url": m["url"].as_str().filter(|u| u.starts_with("https://")),
+        "people": people, "turns": [{"ts": at.format("%H:%M:%S").to_string(), "speaker": from, "text": text}], "text": "",
+    }))
+}
+
+/// Whether an address is the user's: the one in Settings → About me, or (with the Brain) the signed-in
+/// account's local part at any of their domains.
+fn mail_me() -> impl Fn(&str) -> bool {
+    let mine = crate::config::Config::load().ok().and_then(|c| c.me).and_then(|m| m.email).map(|e| e.to_lowercase());
+    #[cfg(feature = "brain")]
+    let local = crate::brain::sources::me_local();
+    #[cfg(not(feature = "brain"))]
+    let local: Option<String> = None;
+    move |e: &str| Some(e) == mine.as_deref() || local.as_deref().is_some_and(|l| e.split('@').next() == Some(l))
+}
+
+/// How far back a mail source's first read goes, and how far each later read looks again.
+#[cfg(feature = "brain")]
+const MAIL_FIRST_DAYS: i64 = 30;
+#[cfg(feature = "brain")]
+const MAIL_AGAIN_DAYS: i64 = 7;
+/// Mails taken at most a read (the newest).
+#[cfg(feature = "brain")]
+const MAIL_MAX: usize = 200;
+
+fn mails_file(project: &str) -> PathBuf {
+    crate::projects::dir().join(project).join("ledger").join("mails.json")
+}
+
+/// Each ✉ Mail source's read into the work: `{<rule>: {read_at, checked_at, found, error}}`.
+pub fn mail_state(project: &str) -> Value {
+    calls::read_json(&mails_file(project)).as_object().map(|o| Value::Object(o.clone())).unwrap_or_else(|| json!({}))
+}
+
+/// A mail source not checked for `CHAT_EVERY_MIN` (or never).
+pub fn mail_due(p: &crate::projects::Project) -> bool {
+    // Without the Brain built in mail isn't read: never due (it would be every tick).
+    if !cfg!(feature = "brain") {
+        return false;
+    }
+    let st = mail_state(&p.id);
+    p.sources.iter().filter(|s| s.kind == "mail").any(|s| {
+        st[&s.id]["checked_at"].as_str().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()).is_none_or(|t| Local::now().signed_duration_since(t) >= chrono::Duration::minutes(CHAT_EVERY_MIN))
+    })
+}
+
+/// Read the project's ✉ Mail sources (`domain:` / `person:` rules, as the Brain reads them) into its
+/// evidence: one item a mail, only from the user, colleagues and senders trusted for the thread's
+/// client — a trusted outside sender's only when Exchange says it is really theirs (DMARC); the
+/// others wait in the Brain's senders list (Needs you), never read meanwhile. The sync runs Claude
+/// Code with tools on what it reads, hence the same rules as the Brain's quarantine. Returns the ids
+/// written; a source that can't be read keeps its error in `mails.json`.
+#[cfg(feature = "brain")]
+pub fn mail_sync(project: &str) -> Result<Vec<String>> {
+    use crate::brain::senders::{self, Verdict};
+    use crate::brain::sources::{me_local, not_me, MailRule, MAX_PEOPLE};
+    let p = crate::projects::load(project)?;
+    let rules: Vec<crate::projects::Source> = p.sources.iter().filter(|s| s.kind == "mail").cloned().collect();
+    if rules.is_empty() {
+        return Ok(vec![]);
+    }
+    let l = Ledger::of(project)?;
+    let mut state = mail_state(project);
+    let now = chrono::Utc::now();
+    let mut snd = senders::load();
+    snd.refresh_org();
+    let mut items: Vec<Value> = vec![];
+    if snd.org_domains.is_empty() {
+        // Nobody can be told a colleague: nothing is judged, every source reads this window next time.
+        for s in &rules {
+            state[&s.id]["checked_at"] = json!(Local::now().to_rfc3339());
+            state[&s.id]["error"] = json!("couldn't read your organisation's domains: mail waits");
+        }
+    } else {
+        let me = me_local();
+        let client = p.client.clone().unwrap_or_else(|| "-".into());
+        for s in &rules {
+            state[&s.id]["checked_at"] = json!(Local::now().to_rfc3339());
+            let Some(rule) = MailRule::parse(&s.id) else {
+                state[&s.id]["error"] = json!(format!("not a mail rule: {}", s.id));
+                continue;
+            };
+            let first = state[&s.id]["read_at"].is_null();
+            let mut since = now - chrono::Duration::days(if first { MAIL_FIRST_DAYS } else { MAIL_AGAIN_DAYS });
+            if let Some(t) = p.since.as_deref().and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()).and_then(|d| d.and_hms_opt(0, 0, 0)).and_then(|d| d.and_local_timezone(Local).single()) {
+                since = since.max(t.with_timezone(&chrono::Utc));
+            }
+            let found = match crate::graph::mail(&rule.kql(), since, MAIL_MAX) {
+                Ok(f) => f,
+                Err(e) => {
+                    state[&s.id]["error"] = json!(format!("{e:#}"));
+                    continue;
+                }
+            };
+            let mut n = 0;
+            for m in &found {
+                let people = not_me(std::iter::once(&m["from"]).chain(m["to"].as_array().into_iter().flatten()), me.as_deref());
+                // Graph's search is fuzzy: only mail that really has these people; a broadcast isn't a thread's.
+                if m["invite"] == true || people.len() > MAX_PEOPLE || !rule.matches(&people) {
+                    continue;
+                }
+                let from = m["from"]["email"].as_str().unwrap_or("").to_lowercase();
+                let who = m["from"]["name"].as_str().unwrap_or(&from).to_string();
+                let (auth, id, at, subject) = (m["auth"].as_str().unwrap_or("none"), m["id"].as_str().unwrap_or(""), m["at"].as_str().unwrap_or(""), m["subject"].as_str().unwrap_or("(no subject)"));
+                match snd.mail(&client, &from, auth) {
+                    Verdict::Trusted => {
+                        if let Some(item) = mail_item(m) {
+                            n += 1;
+                            items.push(item);
+                        }
+                    }
+                    Verdict::Ignored => {}
+                    Verdict::Unverified => snd.note_unverified(&client, &from, &who, id, at, subject, auth),
+                    Verdict::Waiting => snd.wait(&client, &from, &who, "mail", id, at, subject, auth == "pass", None),
+                }
+            }
+            state[&s.id]["read_at"] = json!(Local::now().to_rfc3339());
+            state[&s.id]["found"] = json!(n);
+            if let Some(o) = state[&s.id].as_object_mut() {
+                o.remove("error");
+            }
+        }
+        let _ = senders::save_merged(&mut snd);
+    }
+    // Sources no longer watched forget their state (one added back reads its 30 days again).
+    if let Some(o) = state.as_object_mut() {
+        o.retain(|k, _| rules.iter().any(|s| &s.id == k));
+    }
+    let _lock = l.lock()?;
+    ensure_first_epic(&l)?;
+    let mut written = vec![];
+    for item in &items {
+        let id = item["id"].as_str().unwrap_or("").to_string();
+        let path = l.dir.join("evidence").join(format!("{id}.json"));
+        if path.exists() || written.contains(&id) {
+            continue; // a mail doesn't change; one the user added by hand is already there
+        }
+        fs::write(l.evidence_md(&id), render_md(item))?;
+        crate::paths::write_atomic(&path, &serde_json::to_vec_pretty(item)?)?;
+        written.push(id);
+    }
+    crate::paths::write_atomic(&mails_file(project), serde_json::to_string_pretty(&state)?.as_bytes())?;
+    Ok(written)
+}
+
+/// A sender the user trusted for `client` (or whose mail they read anyway): that client's open threads
+/// read their mail and meeting chats from the start again at the next sync (due at once) — what was
+/// held back comes in; items already there stay as they are.
+#[cfg(feature = "brain")]
+pub fn reread_sources(client: &str) -> Result<()> {
+    for p in crate::projects::list().into_iter().filter(|p| !p.stage.closed() && p.client.as_deref().unwrap_or("-") == client) {
+        for f in [mails_file(&p.id), chats_file(&p.id)] {
+            let mut st = calls::read_json(&f);
+            let Some(o) = st.as_object_mut() else { continue };
+            for v in o.values_mut().filter_map(Value::as_object_mut) {
+                v.remove("read_at");
+                v.remove("checked_at");
+            }
+            crate::paths::write_atomic(&f, serde_json::to_string_pretty(&st)?.as_bytes())?;
+        }
+    }
+    Ok(())
+}
+
+/// Without the Brain built in there is no senders list to trust anyone by: mail isn't read.
+#[cfg(not(feature = "brain"))]
+pub fn mail_sync(_project: &str) -> Result<Vec<String>> {
+    Ok(vec![])
+}
+
+/// Mails the user picked (Graph message ids; `conversation`: every message of their conversations
+/// too) as evidence of the project: one item a mail, written once — the next sync reads it as it
+/// reads a call. The user's own choice is the trust here (a thread's ✉ Mail sources, read by
+/// themselves, will take only trusted senders). Returns the items, new or already there.
+pub fn add_mail(project: &str, ids: &[String], conversation: bool) -> Result<Vec<Value>> {
+    let l = Ledger::of(project)?;
+    let mut mails: Vec<Value> = vec![];
+    for id in ids {
+        let m = crate::graph::message(id).with_context(|| format!("mail {id}"))?;
+        match m["conversation"].as_str().filter(|_| conversation) {
+            Some(c) => mails.extend(crate::graph::conversation(c)?),
+            None => mails.push(m),
+        }
+    }
+    let _lock = l.lock()?;
+    ensure_first_epic(&l)?;
+    let mut out = vec![];
+    for m in &mails {
+        let Some(item) = mail_item(m) else { continue };
+        let id = item["id"].as_str().unwrap_or("").to_string();
+        if out.iter().any(|x: &Value| x["id"] == id.as_str()) {
+            continue;
+        }
+        let path = l.dir.join("evidence").join(format!("{id}.json"));
+        let new = !path.exists();
+        if new {
+            fs::write(l.evidence_md(&id), render_md(&item))?;
+            crate::paths::write_atomic(&path, &serde_json::to_vec_pretty(&item)?)?;
+        }
+        out.push(json!({"id": id, "title": item["title"], "date": item["date"], "from": item["turns"][0]["speaker"], "new": new}));
+    }
+    Ok(out)
+}
+
 /// Bring the project's evidence up to date with its calls: new ones written, changed ones written
 /// again (and queued again when they were processed). `limit`: only the newest calls (the backfill).
 /// Returns the ids written.
@@ -810,6 +1052,9 @@ pub struct Node {
     pub task_type: Option<String>,
     pub internal_owner: Option<String>,
     pub client_owner: Option<String>,
+    /// Who handed the task over and checks it ("Me": the user delegated it). Unset: whoever's words
+    /// created it (`creator`) is taken for it in the Tasks piles.
+    pub delegated_by: Option<String>,
     pub client_owed: bool,
     pub ac: Vec<Ac>,
     pub depends_on: Vec<String>,
@@ -823,6 +1068,10 @@ pub struct Node {
     pub waiting_for: Option<Value>,
     /// The board column the user put it in (a project's own column id).
     pub column: Option<String>,
+    /// The user's links to where it came from (`{title, url}`): a mail, a ticket.
+    pub links: Vec<Value>,
+    /// What the work is, in Markdown: an agent's from the words that created it, else the user's (pinned).
+    pub description: Option<String>,
     #[serde(skip)]
     unlinked: Vec<String>,
     pub created: Option<String>,
@@ -833,6 +1082,30 @@ pub struct Node {
     pub derived: Option<String>,
     pub waiting_on: Vec<String>,
     pub blocks: Vec<String>,
+}
+
+/// The valid links of a value (an older or hand-written event may hold anything).
+fn links_of(v: &Value) -> Vec<Value> {
+    v.as_array()
+        .map(|a| a.iter().filter(|l| link_ok(l)).take(MAX_LINKS).map(|l| json!({"title": l["title"], "url": l["url"]})).collect())
+        .unwrap_or_default()
+}
+
+fn link_ok(l: &Value) -> bool {
+    l["title"].as_str().is_some_and(|t| !t.trim().is_empty() && t.chars().count() <= 200)
+        && l["url"].as_str().is_some_and(|u| u.starts_with("https://") && u.len() <= 2000 && !u.chars().any(char::is_whitespace))
+}
+
+/// A description as kept: trimmed, empty = none, cut at `MAX_DESC` characters.
+fn desc_of(v: &Value) -> Option<String> {
+    v.as_str().map(str::trim).filter(|t| !t.is_empty()).map(|t| t.chars().take(MAX_DESC).collect())
+}
+
+fn check_links(v: &Value) -> Result<()> {
+    if !(v.is_null() || v.as_array().is_some_and(|a| a.len() <= MAX_LINKS && a.iter().all(link_ok))) {
+        bail!("links is a list of at most {MAX_LINKS} {{title, url}}, url https://");
+    }
+    Ok(())
 }
 
 fn s(v: &Value) -> Option<String> {
@@ -849,6 +1122,7 @@ fn node_of(e: &Value) -> Node {
         task_type: s(&f["type"]),
         internal_owner: s(&f["internal_owner"]),
         client_owner: s(&f["client_owner"]),
+        delegated_by: s(&f["delegated_by"]),
         client_owed: f["client_owed"] == true,
         ac: f["ac"].as_array().map(|a| a.iter().filter_map(|x| x.as_str()).map(|t| Ac { text: t.into(), met: false, met_by: None, source: s(&e["by"]), human: false, dropped: false }).collect()).unwrap_or_default(),
         depends_on: f["depends_on"].as_array().map(|a| a.iter().filter_map(s).collect()).unwrap_or_default(),
@@ -861,6 +1135,8 @@ fn node_of(e: &Value) -> Node {
         merged_into: None,
         waiting_for: None,
         column: None,
+        links: links_of(&f["links"]),
+        description: desc_of(&f["description"]),
         unlinked: vec![],
         created: s(&e["date"]),
         created_in: s(&e["evidence"]),
@@ -909,12 +1185,15 @@ fn set_field(n: &mut Node, field: &str, v: &Value, human: bool) -> bool {
         "title" => n.title = s(v).unwrap_or_default(),
         "internal_owner" => n.internal_owner = s(v),
         "client_owner" => n.client_owner = s(v),
+        "delegated_by" => n.delegated_by = s(v),
         "state" => n.state = s(v).unwrap_or_else(|| "open".into()),
         "type" => n.task_type = s(v),
         "client_owed" => n.client_owed = v == true,
         "waiting_for" => n.waiting_for = (!v.is_null()).then(|| v.clone()),
         "due" => n.due = s(v),
         "column" => n.column = s(v),
+        "links" => n.links = links_of(v),
+        "description" => n.description = desc_of(v),
         _ => return false,
     }
     true
@@ -1003,10 +1282,12 @@ fn fold_events(evs: &[Value], ev: BTreeMap<String, Value>) -> Result<Tree> {
                     "revise" => {
                         let x = n.get_mut(&id).unwrap();
                         let t_ok = if e["title"].is_string() { set_field(x, "title", &e["title"], false) } else { true };
+                        let d_ok = if e["description"].is_string() { set_field(x, "description", &e["description"], false) } else { true };
                         let added: Vec<Ac> = e["ac_add"].as_array().map(|a| a.iter().filter_map(|t| t.as_str()).map(|t| Ac { text: t.into(), met: false, met_by: None, source: Some("agent".into()), human: false, dropped: false }).collect()).unwrap_or_default();
                         let any = !added.is_empty();
                         x.ac.extend(added);
-                        hist(x, e, t_ok || any, json!({}));
+                        // Applied when any part of it was (a pinned description doesn't undo a new title).
+                        hist(x, e, (e["title"].is_string() && t_ok) || (e["description"].is_string() && d_ok) || any, json!({}));
                     }
                     "ac_met" => {
                         let x = n.get_mut(&id).unwrap();
@@ -1182,7 +1463,7 @@ fn apply_status(x: &mut Node, e: &Value) -> bool {
             x.due_history.push(json!({"due": null, "date": e["date"], "ts": e["ts"], "evidence": e["evidence"], "text": e["due_text"].as_str().unwrap_or("delayed, no new date")}));
         }
         "reassign" => {
-            for k in ["internal_owner", "client_owner"] {
+            for k in ["internal_owner", "client_owner", "delegated_by"] {
                 if e[k].is_string() {
                     set_field(x, k, &e[k], false);
                 }
@@ -1334,7 +1615,10 @@ pub fn context(project: &str) -> Result<Value> {
         if x.kind == "task" {
             d["type"] = json!(x.task_type);
         }
-        for (k, v) in [("internal_owner", &x.internal_owner), ("client_owner", &x.client_owner), ("due", &x.due)] {
+        if let Some(t) = &x.description {
+            d["description"] = json!(if t.chars().count() > 400 { format!("{}…", t.chars().take(400).collect::<String>()) } else { t.clone() });
+        }
+        for (k, v) in [("internal_owner", &x.internal_owner), ("client_owner", &x.client_owner), ("delegated_by", &x.delegated_by), ("due", &x.due)] {
             if let Some(v) = v {
                 d[k] = json!(v);
             }
@@ -1490,6 +1774,8 @@ pub fn apply(project: &str, evid: &str, proposals: &[Value]) -> Result<Value> {
                 Some("a story needs acceptance criteria (ac: [...]): what must be true for it to be done".into())
             } else if k == "story" && ac.len() > MAX_AC {
                 Some(format!("more than {MAX_AC} acceptance criteria: split it into two stories and link them"))
+            } else if pr["description"].as_str().is_some_and(|t| t.chars().count() > MAX_AGENT_DESC) {
+                Some(format!("description: at most {MAX_AGENT_DESC} characters"))
             } else if k == "task" && !TASK_TYPES.contains(&ty) {
                 Some(format!("task type must be one of {TASK_TYPES:?}"))
             } else if k == "task" && !(pr["internal_owner"].is_string() || pr["client_owner"].is_string() || pr["due_text"].is_string() || ty == "session" || ty == "dependency") {
@@ -1520,8 +1806,10 @@ pub fn apply(project: &str, evid: &str, proposals: &[Value]) -> Result<Value> {
                 "title": title, "parent": if k == "epic" { None } else { par.clone() }, "type": pr["type"],
                 "plan": if k == "epic" { Some("Off-plan") } else { None },
                 "internal_owner": canonical(&p, pr["internal_owner"].as_str()), "client_owner": canonical(&p, pr["client_owner"].as_str()),
+                "delegated_by": canonical(&p, pr["delegated_by"].as_str()),
                 "client_owed": pr["client_owed"] == true, "ac": ac,
                 "due": resolve_due(pr["due_text"].as_str(), &date), "due_text": pr["due_text"],
+                "description": pr["description"].as_str().map(str::trim).filter(|t| !t.is_empty()),
             });
             n.insert(nid.clone(), node_of(&e));
             made.insert(cmid, nid.clone());
@@ -1573,6 +1861,7 @@ pub fn apply(project: &str, evid: &str, proposals: &[Value]) -> Result<Value> {
         if op == "revise" {
             key.push(key_str(&pr["title"]));
             key.push(key_str(&pr["ac_add"]));
+            key.push(key_str(&pr["description"]));
         }
         let mut k2 = vec![op.to_string(), node.clone()];
         k2.extend(key);
@@ -1601,11 +1890,17 @@ pub fn apply(project: &str, evid: &str, proposals: &[Value]) -> Result<Value> {
                 e["due"] = if eff == "delayed" { Value::Null } else { json!(resolve_due(pr["due_text"].as_str(), &date)) };
                 e["internal_owner"] = json!(canonical(&p, pr["internal_owner"].as_str()));
                 e["client_owner"] = json!(canonical(&p, pr["client_owner"].as_str()));
+                e["delegated_by"] = json!(canonical(&p, pr["delegated_by"].as_str()));
             }
             "revise" => {
                 let add = pr["ac_add"].as_array().map(|a| a.len()).unwrap_or(0);
-                if !pr["title"].is_string() && add == 0 {
-                    bad("revise needs a new title and/or ac_add".into(), &mut rej);
+                let desc = pr["description"].as_str().map(str::trim).filter(|t| !t.is_empty());
+                if !pr["title"].is_string() && add == 0 && desc.is_none() {
+                    bad("revise needs a new title, ac_add and/or description".into(), &mut rej);
+                    continue;
+                }
+                if desc.is_some_and(|t| t.chars().count() > MAX_AGENT_DESC) {
+                    bad(format!("description: at most {MAX_AGENT_DESC} characters"), &mut rej);
                     continue;
                 }
                 if x.ac.len() + add > MAX_AC {
@@ -1614,6 +1909,7 @@ pub fn apply(project: &str, evid: &str, proposals: &[Value]) -> Result<Value> {
                 }
                 e["title"] = pr["title"].clone();
                 e["ac_add"] = pr["ac_add"].clone();
+                e["description"] = json!(desc);
             }
             "ac_met" => {
                 let a = pr["ac"].as_u64().unwrap_or(0) as usize;
@@ -1760,7 +2056,9 @@ fn check_edit(sets: &Value, n: &BTreeMap<String, Node>) -> Result<()> {
             "client_owed" if !v.is_boolean() => bail!("client_owed is true or false"),
             "column" if !(v.is_null() || v.as_str().is_some_and(|c| !c.is_empty() && c.len() <= 40)) => bail!("column is a column id"),
             "title" if v.as_str().is_none_or(|t| t.trim().is_empty()) => bail!("title cannot be empty"),
-            "internal_owner" | "client_owner" | "type" if !(v.is_null() || v.is_string()) => bail!("{k} must be text"),
+            "internal_owner" | "client_owner" | "delegated_by" | "type" if !(v.is_null() || v.is_string()) => bail!("{k} must be text"),
+            "links" => check_links(v)?,
+            "description" if !(v.is_null() || v.as_str().is_some_and(|t| t.chars().count() <= MAX_DESC)) => bail!("description is text of at most {MAX_DESC} characters"),
             k if !HUMAN_FIELDS.contains(&k) => bail!("editable fields: {HUMAN_FIELDS:?}"),
             _ => {}
         }
@@ -1790,12 +2088,16 @@ pub fn human_event(project: &str, body: &Value) -> Result<Value> {
         if !KINDS.contains(&k) || (k != "epic" && !parent_ok(k, par.and_then(|p| n.get(p)).map(|x| x.kind.as_str()))) {
             bail!("cannot create a {k} under {par:?}");
         }
+        check_links(&body["links"])?;
+        if !(body["description"].is_null() || body["description"].as_str().is_some_and(|t| t.chars().count() <= MAX_DESC)) {
+            bail!("description is text of at most {MAX_DESC} characters");
+        }
         let c = evs.iter().filter(|x| x["type"] == "create" && x["kind"] == k).count() + 1;
         e = json!({"type": "create", "id": new_id(k, c), "kind": k, "by": "human", "evidence": last, "date": date, "at": now,
                    "fields": {"title": body["title"].as_str().filter(|t| !t.trim().is_empty()).unwrap_or("Untitled"),
                               "parent": if k == "epic" { None } else { par }, "type": body["type"].as_str().or(if k == "task" { Some("action") } else { None }),
                               "ac": body["ac"].as_array().cloned().unwrap_or_default(), "plan": if k == "epic" { Some("Off-plan") } else { None },
-                              "internal_owner": body["internal_owner"], "due": body["due"]}});
+                              "internal_owner": body["internal_owner"], "delegated_by": body["delegated_by"], "due": body["due"], "links": body["links"], "description": body["description"]}});
     } else if ["undo", "accept", "reject"].contains(&op) {
         let target = body["target"].as_str().ok_or_else(|| anyhow!("target mid required"))?;
         e["target"] = json!(target);
@@ -1902,11 +2204,17 @@ pub fn tree(project: &str) -> Result<Value> {
     let l = Ledger::of(project)?;
     let t = fold(&l)?;
     let pend = pending(project)?.len();
+    let mut nodes = serde_json::to_value(&t.nodes)?;
+    for (_, x) in nodes.as_object_mut().into_iter().flatten() {
+        if let Some(d) = x["description"].as_str().map(crate::minutes::markdown_html) {
+            x["description_html"] = json!(d);
+        }
+    }
     Ok(json!({
-        "nodes": t.nodes, "notes": t.notes,
+        "nodes": nodes, "notes": t.notes,
         "processed": t.order.len(), "pending": pend,
         // Each evidence item's call: history entries name the call they came from.
-        "evidence": t.evidence.iter().map(|(k, v)| (k.clone(), json!({"title": v["title"], "call": v["call"], "date": v["date"]}))).collect::<serde_json::Map<String, Value>>(),
+        "evidence": t.evidence.iter().map(|(k, v)| (k.clone(), json!({"title": v["title"], "call": v["call"], "date": v["date"], "kind": v["kind"], "url": v["url"], "from": v["turns"][0]["speaker"].as_str().filter(|_| v["kind"] == "mail")}))).collect::<serde_json::Map<String, Value>>(),
         "roots": t.nodes.values().filter(|x| x.kind == "epic" && x.state != "merged" && x.state != "deleted").map(|x| &x.id).collect::<Vec<_>>(),
     }))
 }
@@ -2087,5 +2395,132 @@ mod tests {
         assert!(human_event(&id, &json!({"op": "create", "kind": "task", "parent": "E01", "title": "No story"})).is_err());
         let ctx = context(&id).unwrap();
         assert_eq!(ctx["epics"][0]["stories"][0]["tasks"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_revise_is_applied_when_any_part_of_it_is() {
+        let (_env, _l, id) = setup("ledger-revise-part");
+        let ev = "2026-10-28_110000";
+        apply(&id, ev, &[json!({"op": "create", "kind": "story", "parent": "E01", "title": "Pilot", "ac": ["SSO works"], "quote": "Then SSO has to land first"})]).unwrap();
+        human_event(&id, &json!({"op": "edit", "node": "S001", "set": {"description": "Mine."}})).unwrap();
+        apply(&id, ev, &[json!({"op": "revise", "node": "S001", "title": "Pilot after SSO", "description": "Theirs.", "quote": "Then SSO has to land first"})]).unwrap();
+        let claims: Vec<Value> = verify_prep(&id, false).unwrap().iter().map(|c| json!({"mid": c["mid"], "verdict": "supports"})).collect();
+        verify_apply(&id, &claims).unwrap();
+        let t = fold(&Ledger::of(&id).unwrap()).unwrap();
+        let s = &t.nodes["S001"];
+        assert_eq!((s.title.as_str(), s.description.as_deref()), ("Pilot after SSO", Some("Mine.")), "the title moved, the pinned description stayed");
+        let h = s.history.iter().rev().find(|h| h["op"] == "revise").unwrap();
+        assert_eq!(h["applied"], true, "{h}");
+    }
+
+    #[cfg(feature = "brain")]
+    #[test]
+    fn trusting_a_sender_reads_the_clients_sources_again() {
+        let (_env, _root) = crate::paths::testenv::folders("ledger-reread");
+        crate::projects::add_client("Northwind", &["northwind.example".into()], false).unwrap();
+        let a = crate::projects::create("Aurora", Some("northwind"), None).unwrap();
+        let b = crate::projects::create("Elsewhere", None, None).unwrap();
+        for p in [&a.id, &b.id] {
+            fs::create_dir_all(crate::projects::dir().join(p).join("ledger")).unwrap();
+            let st = json!({"domain:northwind.example": {"read_at": "2026-10-01T00:00:00Z", "checked_at": "2026-10-01T00:00:00Z", "found": 3}});
+            fs::write(mails_file(p), st.to_string()).unwrap();
+            fs::write(chats_file(p), json!({"19:x": {"read_at": "2026-10-01T00:00:00Z", "checked_at": "2026-10-01T00:00:00Z"}}).to_string()).unwrap();
+        }
+        reread_sources("northwind").unwrap();
+        let m = mail_state(&a.id);
+        assert!(m["domain:northwind.example"]["read_at"].is_null() && m["domain:northwind.example"]["checked_at"].is_null(), "{m}");
+        assert_eq!(m["domain:northwind.example"]["found"], 3, "what it found stays");
+        assert!(calls::read_json(&chats_file(&a.id))["19:x"]["read_at"].is_null());
+        assert!(!mail_state(&b.id)["domain:northwind.example"]["read_at"].is_null(), "another client's thread reads on as it was");
+    }
+
+    #[test]
+    fn a_mail_is_evidence_its_history_cites() {
+        let (_env, l, id) = setup("ledger-mail");
+        let m = json!({"id": "AAMk1", "internet_id": "<abc@mail.example>", "conversation": "c1", "subject": "FW: MFLens demo", "auth": "internal",
+            "from": {"name": "Dana Kowal", "email": "dana@northwind.example"}, "to": [{"name": "Me Myself", "email": "me@us.example"}],
+            "at": "2026-10-30T09:15:00Z", "text": "Could you prepare the agents demo for HKJC by next Thursday? They want to see MFLens live.",
+            "url": "https://outlook.office365.com/owa/?ItemID=AAMk1"});
+        let item = mail_item(&m).unwrap();
+        let ev = item["id"].as_str().unwrap().to_string();
+        assert!(ev.starts_with("mail-") && item["kind"] == "mail" && item["turns"][0]["speaker"] == "Dana Kowal");
+        assert_eq!(mail_item(&json!({"internet_id": "<x>", "id": "y", "text": "x", "at": "2026-10-30T09:15:00Z", "invite": true})), None, "an invite is the call's");
+        let dir_name = mail_item(&json!({"id": "z", "text": "x", "at": "2026-10-30T09:15:00Z", "from": {"name": "Kowal, Dana (Partner)", "email": "dana@northwind.example"}})).unwrap();
+        assert_eq!(dir_name["turns"][0]["speaker"], "Dana Kowal", "names as people read them");
+        assert_eq!(mail_item(&json!({"id": "y", "text": "x", "at": "2026-10-30T09:15:00Z", "url": "javascript:x"})).unwrap()["url"], Value::Null);
+        fs::write(l.dir.join(format!("evidence/{ev}.json")), serde_json::to_vec(&item).unwrap()).unwrap();
+        let r = apply(&id, &ev, &[json!({"op": "create", "kind": "story", "parent": "E01", "ref": "s", "title": "MFLens demo", "ac": ["Demo shown to HKJC"],
+                "description": "HKJC asked to **see MFLens live**.", "quote": "They want to see MFLens live"}),
+            json!({"op": "create", "kind": "task", "type": "action", "parent": "s", "title": "Prepare the agents demo", "internal_owner": "Me",
+                "due_text": "next Thursday", "quote": "Could you prepare the agents demo for HKJC by next Thursday?"})]).unwrap();
+        assert_eq!(r["events"], 2, "{r}");
+        mark_processed(&id, &ev, "").unwrap();
+        let t = tree(&id).unwrap();
+        let task = &t["nodes"]["T001"];
+        assert_eq!(task["history"][0]["evidence"], ev.as_str());
+        assert_eq!(task["history"][0]["source"], "mail");
+        assert_eq!(task["history"][0]["speaker"], "Dana Kowal");
+        assert_eq!(task["due"], "2026-11-05", "a spoken date read against the mail's day");
+        assert_eq!(t["evidence"][&ev]["url"], "https://outlook.office365.com/owa/?ItemID=AAMk1");
+        assert!(t["nodes"]["S001"]["description_html"].as_str().unwrap().contains("<strong>see MFLens live</strong>"));
+        assert_eq!(quote_in(&id, &ev, "prepare the agents demo").unwrap().unwrap()["url"], "https://outlook.office365.com/owa/?ItemID=AAMk1");
+    }
+
+    #[cfg(feature = "brain")]
+    #[test]
+    fn mail_waits_while_nobody_can_be_told_a_colleague() {
+        let (_env, l, id) = setup("ledger-mail-sync");
+        crate::projects::update(&id, |p| {
+            p.sources.push(crate::projects::Source { kind: "mail".into(), id: "domain:northwind.example".into(), ..Default::default() });
+            Ok(())
+        })
+        .unwrap();
+        let p = crate::projects::load(&id).unwrap();
+        assert!(mail_due(&p), "never checked");
+        // Not signed in: the organisation's domains are unknown, so nothing is judged or read.
+        assert!(mail_sync(&id).unwrap().is_empty());
+        let st = mail_state(&id);
+        assert!(st["domain:northwind.example"]["error"].as_str().unwrap().contains("mail waits"));
+        assert!(st["domain:northwind.example"]["read_at"].is_null(), "the window is read again next time");
+        assert!(!mail_due(&p), "checked just now");
+        assert!(!l.evidence().keys().any(|k| k.starts_with("mail-")));
+    }
+
+    #[test]
+    fn a_description_the_user_wrote_stays_theirs() {
+        let (_env, l, id) = setup("ledger-description");
+        let ev = "2026-10-28_110000";
+        apply(&id, ev, &[json!({"op": "create", "kind": "story", "parent": "E01", "title": "Security review", "ac": ["Diagram sent"], "description": "Ravi's review.",
+            "quote": "Our security review needs the data-flow diagram"})]).unwrap();
+        mark_processed(&id, ev, "").unwrap();
+        assert_eq!(fold(&l).unwrap().nodes["S001"].description.as_deref(), Some("Ravi's review."));
+        let long = "x".repeat(MAX_AGENT_DESC + 1);
+        let r = apply(&id, ev, &[json!({"op": "revise", "node": "S001", "description": long, "quote": "Our security review needs the data-flow diagram"})]).unwrap();
+        assert_eq!(r["events"], 0, "an agent's description is short");
+        human_event(&id, &json!({"op": "edit", "node": "S001", "set": {"description": "Mine: the **diagram** first."}})).unwrap();
+        apply(&id, ev, &[json!({"op": "revise", "node": "S001", "description": "The agent's.", "quote": "can you send it this week?"})]).unwrap();
+        let n = fold(&l).unwrap().nodes["S001"].clone();
+        assert_eq!(n.description.as_deref(), Some("Mine: the **diagram** first."), "pinned");
+        assert!(n.history.iter().any(|h| h["op"] == "revise" && h["applied"] == false));
+        assert!(human_event(&id, &json!({"op": "edit", "node": "S001", "set": {"description": "y".repeat(MAX_DESC + 1)}})).is_err());
+        human_event(&id, &json!({"op": "create", "kind": "task", "parent": "S001", "title": "Send it", "description": "By hand."})).unwrap();
+        assert_eq!(fold(&l).unwrap().nodes["T001"].description.as_deref(), Some("By hand."));
+    }
+
+    #[test]
+    fn links_to_where_it_came_from() {
+        let (_env, l, id) = setup("ledger-links");
+        let mail = json!({"title": "FW: MFLens", "url": "https://outlook.office365.com/owa/?ItemID=x"});
+        human_event(&id, &json!({"op": "create", "kind": "story", "parent": "E01", "title": "Demo"})).unwrap();
+        human_event(&id, &json!({"op": "create", "kind": "task", "parent": "S001", "title": "Agents", "links": [mail]})).unwrap();
+        assert_eq!(fold(&l).unwrap().nodes["T001"].links, vec![mail.clone()]);
+        let two = json!([mail, {"title": "Ticket", "url": "https://jira.example.com/T-1"}]);
+        human_event(&id, &json!({"op": "edit", "node": "T001", "set": {"links": two}})).unwrap();
+        assert_eq!(fold(&l).unwrap().nodes["T001"].links.len(), 2);
+        // Only https, with a title: refused when written.
+        for bad in [json!([{"title": "x", "url": "javascript:alert(1)"}]), json!([{"title": "", "url": "https://a.b"}]), json!("https://a.b")] {
+            assert!(human_event(&id, &json!({"op": "edit", "node": "T001", "set": {"links": bad}})).is_err());
+            assert!(human_event(&id, &json!({"op": "create", "kind": "task", "parent": "S001", "title": "y", "links": bad})).is_err());
+        }
     }
 }

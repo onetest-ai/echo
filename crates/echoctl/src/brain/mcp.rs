@@ -28,6 +28,8 @@ fn tools() -> Value {
         {"name": "get_taxonomy", "description": "[identity] The topics and terms (names, systems, acronyms) of the user's calls, each with its sections, clients and threads; `client` / `thread` show what comes up there; `label` gives one node and its latest sections.", "inputSchema": s(json!({"label": {"type": "string"}, "client": {"type": "string"}, "thread": {"type": "string"}, "relation": {"type": "string"}, "kind": {"type": "string"}, "limit": {"type": "integer"}}), &[])},
         {"name": "list_metrics", "description": "[identity] Governed metrics from the client's reporting workbooks (the numbers lane): name, unit, description, definition (reported or computed), and per grain the entities and months the facts cover. Use it before any numeric answer.", "inputSchema": s(json!({"client": {"type": "string"}}), &[])},
         {"name": "get_metric", "description": "[identity] A governed metric's values, computed from the real cells, each with its source file: filter by grain (branch, region, division, overall…), entity (exact) or entity_like, month (YYYY-MM) or months. Says when a figure was restated by a later report or reports conflict (other_reported_values), and what a merged row merged. No rows = not modeled for that filter: say so, never estimate.", "inputSchema": s(json!({"name": {"type": "string"}, "client": {"type": "string"}, "grain": {"type": "string"}, "entity": {"type": "string"}, "entity_like": {"type": "string"}, "month": {"type": "string"}, "months": {"type": "array", "items": {"type": "string"}}}), &["name"])},
+        {"name": "find_people", "description": "[identity] Who is who: the people of the user's threads — name, organisation, title, the threads they are in and their role there, when last seen. `query` matches names, addresses, organisations, titles and roles; `client` / `thread` narrow it. Then get_person for one.", "inputSchema": s(json!({"query": {"type": "string"}, "client": {"type": "string"}, "thread": {"type": "string"}, "limit": {"type": "integer", "default": 20}}), &[])},
+        {"name": "get_person", "description": "[identity] One person (by key from find_people, an address or a name): who they are, their threads with role and stance, reporting line, open tasks they owe, who they are in calls with, and the facts said about them — each with its words, date and a link to the moment, mail or chat.", "inputSchema": s(json!({"person": {"type": "string"}, "facts": {"type": "integer", "default": 40}}), &["person"])},
         {"name": "get_metric_history", "description": "[identity] Every report of a metric-month: each file that reported it, what it said and which value is current — to cite \"the July workbook reported July as X\".", "inputSchema": s(json!({"name": {"type": "string"}, "client": {"type": "string"}, "grain": {"type": "string"}, "entity": {"type": "string"}, "month": {"type": "string"}}), &["name"])},
     ])
 }
@@ -52,6 +54,22 @@ fn access() -> &'static super::access::Access {
 fn call(name: &str, a: &Value) -> Result<Value> {
     let path = super::store_path();
     let acc = access();
+    // People come from the threads' files, not the store: only the threads this reader may see.
+    if name == "find_people" || name == "get_person" {
+        let mut threads = acc.people_threads();
+        if let Some(t) = a["thread"].as_str().filter(|t| !t.is_empty()) {
+            threads.retain(|x| x == t);
+        }
+        if let Some(c) = a["client"].as_str().filter(|c| !c.is_empty()) {
+            let of: Vec<String> = crate::projects::list().into_iter().filter(|p| p.client.as_deref() == Some(c)).map(|p| p.id).collect();
+            threads.retain(|x| of.contains(x));
+        }
+        return if name == "find_people" {
+            crate::people::find(&threads, a["query"].as_str().unwrap_or(""), a["limit"].as_u64().unwrap_or(20).clamp(1, 100) as usize)
+        } else {
+            crate::people::card(&threads, a["person"].as_str().unwrap_or(""), a["facts"].as_u64().unwrap_or(40).clamp(1, 300) as usize)
+        };
+    }
     // A narrowed reader searches its own client or thread whatever it asks.
     let scope = acc.scope().or_else(|| scope_of(a));
     let (allowed_src, allowed_ids) = {

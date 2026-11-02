@@ -1210,6 +1210,7 @@ pub fn view(p: &Project, with_calls: bool) -> Result<Value> {
         v["calls"] = calls.iter().rev().map(|(d, w)| call_row(d, w)).collect();
         // Its meeting chats: how each was read, and its calls' chats it doesn't read yet.
         v["chat_state"] = crate::ledger::chat_state(&p.id);
+        v["mail_state"] = crate::ledger::mail_state(&p.id);
         v["chat_suggestions"] = json!(crate::ledger::chat_suggestions(p));
     }
     Ok(v)

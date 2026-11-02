@@ -103,6 +103,24 @@ impl Access {
         }
     }
 
+    /// The threads whose people it may see: those on its profile, narrowed as its documents are (a
+    /// call's session with no client or thread sees nobody).
+    pub fn people_threads(&self) -> Vec<String> {
+        let default = crate::ai::default_id();
+        let profiles = thread_profiles(&default);
+        crate::projects::list()
+            .into_iter()
+            .filter(|p| profiles.get(&p.id) == Some(&self.profile))
+            .filter(|p| match (&self.client, self.threads.is_empty(), &self.call) {
+                (Some(c), _, _) => p.client.as_deref() == Some(c.as_str()),
+                (None, false, _) => self.threads.contains(&p.id),
+                (None, true, Some(_)) => false,
+                (None, true, None) => true,
+            })
+            .map(|p| p.id)
+            .collect()
+    }
+
     /// The clients whose numbers it may read: its own client, or (not narrowed) every client whose
     /// threads all run on its profile.
     pub fn numbers_clients(&self) -> Vec<String> {

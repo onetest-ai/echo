@@ -459,7 +459,7 @@ pub fn mail(kql: &str, since: DateTime<Utc>, cap: usize) -> Result<Vec<Value>> {
     let token = access_token()?;
     let q = format!("{kql} received>={}", since.format("%Y-%m-%d"));
     let mut url = Some(format!(
-        "{GRAPH}/me/messages?$search={}&$top=50&$select=id,conversationId,subject,from,toRecipients,ccRecipients,receivedDateTime,body,webLink,internetMessageHeaders",
+        "{GRAPH}/me/messages?$search={}&$top=50&$select=id,conversationId,internetMessageId,subject,from,toRecipients,ccRecipients,receivedDateTime,body,webLink,internetMessageHeaders",
         urlencode(&format!("\"{}\"", q.replace('"', "'")))
     ));
     let mut out = vec![];
@@ -476,12 +476,21 @@ pub fn mail(kql: &str, since: DateTime<Utc>, cap: usize) -> Result<Vec<Value>> {
     Ok(out)
 }
 
+/// One message by its Graph id, as `mail` gives each.
+pub fn message(id: &str) -> Result<Value> {
+    let token = access_token()?;
+    let m = graph_get_text(&token, &format!(
+        "{GRAPH}/me/messages/{}?$select=id,conversationId,internetMessageId,subject,from,toRecipients,ccRecipients,receivedDateTime,body,webLink,internetMessageHeaders",
+        urlencode(id)
+    ))?;
+    Ok(mail_item(&m))
+}
+
 /// Every message of one conversation (oldest first).
-#[cfg_attr(not(feature = "brain"), allow(dead_code))]
 pub fn conversation(id: &str) -> Result<Vec<Value>> {
     let token = access_token()?;
     let v = graph_get_text(&token, &format!(
-        "{GRAPH}/me/messages?$filter={}&$top=50&$select=id,conversationId,subject,from,toRecipients,ccRecipients,receivedDateTime,body,webLink,internetMessageHeaders",
+        "{GRAPH}/me/messages?$filter={}&$top=50&$select=id,conversationId,internetMessageId,subject,from,toRecipients,ccRecipients,receivedDateTime,body,webLink,internetMessageHeaders",
         urlencode(&format!("conversationId eq '{}'", id.replace('\'', "''")))
     ))?;
     let mut out: Vec<Value> = v["value"].as_array().into_iter().flatten().map(mail_item).collect();
@@ -558,7 +567,7 @@ fn mail_item(m: &Value) -> Value {
     }
     // Calendar invites and their answers (`eventMessage…`): the meeting itself is the call.
     let invite = m["@odata.type"].as_str().is_some_and(|t| t.contains("eventMessage"));
-    json!({"id": m["id"], "conversation": m["conversationId"], "subject": m["subject"], "from": who(&m["from"]), "invite": invite, "auth": mail_auth(m),
+    json!({"id": m["id"], "internet_id": m["internetMessageId"], "conversation": m["conversationId"], "subject": m["subject"], "from": who(&m["from"]), "invite": invite, "auth": mail_auth(m),
            "to": m["toRecipients"].as_array().into_iter().flatten().chain(m["ccRecipients"].as_array().into_iter().flatten()).map(who).collect::<Vec<_>>(),
            "at": m["receivedDateTime"], "text": text.trim(), "url": m["webLink"]})
 }

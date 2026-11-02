@@ -273,6 +273,8 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
         // Projects: the list (clients, stages, each call's projects), one project, its logo.
         "/api/projects" => json_reply(projects_overview()),
         "/api/tasks" => json_reply(tasks_view()),
+        // Everyone across the threads (the Brain's People): who, where, what was said about them.
+        "/api/brain/people" => json_reply(crate::people::everyone(chrono::Local::now().date_naive()).unwrap_or_else(|e| json!({ "error": format!("{e:#}") }))),
         // The Brain: its overview, graph and a call's "Also discussed" (?client= / ?thread= scope them).
         #[cfg(feature = "brain")]
         p if p == "/api/brain" || p == "/api/brain/graph" => {
@@ -1566,6 +1568,12 @@ pub fn handle(msg: &str) -> Handled {
             }
             false.into()
         }
+        "pty_paste" => {
+            if let Some(id) = v["id"].as_u64() {
+                let _ = crate::terminal::write(id, paste_bytes(clipboard_text(), v["bracketed"] == true).as_slice());
+            }
+            false.into()
+        }
         "pty_resize" => {
             if let (Some(id), Some(c), Some(r)) = (v["id"].as_u64(), v["cols"].as_u64(), v["rows"].as_u64()) {
                 let _ = crate::terminal::resize(id, c as u16, r as u16);
@@ -1840,6 +1848,33 @@ pub(crate) fn copy_to_clipboard(text: &str) {
     }
 }
 
+/// The clipboard's text (empty when it holds none: an image, say). macOS only: there ⌘V never
+/// reaches the page (no Edit menu); on Windows Ctrl+V goes to the program, which reads it itself.
+fn clipboard_text() -> String {
+    #[cfg(target_os = "macos")]
+    let out = std::process::Command::new("pbpaste").output();
+    #[cfg(not(target_os = "macos"))]
+    let out: std::io::Result<std::process::Output> = Err(std::io::Error::other("no clipboard"));
+    out.ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default()
+}
+
+/// What a paste types into a terminal, as xterm.js's own paste does: line ends as Enter, inside
+/// bracketed-paste marks when the program asked for them (so Claude Code takes several lines as
+/// one message). No text — an image on the clipboard — sends Ctrl+V: Claude Code reads the
+/// clipboard itself then.
+fn paste_bytes(text: String, bracketed: bool) -> Vec<u8> {
+    if text.is_empty() {
+        return vec![0x16];
+    }
+    let text = text.replace("\r\n", "\r").replace('\n', "\r");
+    if bracketed {
+        // A pasted end mark would end the paste early and run the rest as typed keys.
+        format!("\x1b[200~{}\x1b[201~", text.replace("\x1b[201~", "")).into_bytes()
+    } else {
+        text.into_bytes()
+    }
+}
+
 /// (dev) Write what echo:// serves — the page, its assets, the API responses it loads first and
 /// each call's minutes page — into `dir`, so the UI can be reviewed in an ordinary browser
 /// (`python3 -m http.server`).
@@ -1866,6 +1901,7 @@ pub fn export(dir: &Path) -> anyhow::Result<()> {
     {
         write("/api/brain/index.html", get("/api/brain"))?;
         write("/api/brain/graph", get("/api/brain/graph"))?;
+        write("/api/brain/people", get("/api/brain/people"))?;
         for c in crate::projects::clients().unwrap_or_default() {
             write(&format!("/api/brain/insights-client-{}", c.id), get(&format!("/api/brain/insights?client={}", c.id)))?;
         }
@@ -1999,6 +2035,15 @@ pub fn selftest() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_paste_types_as_xterm_would() {
+        assert_eq!(paste_bytes("a\r\nb\nc".into(), false), b"a\rb\rc");
+        assert_eq!(paste_bytes("a\nb".into(), true), b"\x1b[200~a\rb\x1b[201~");
+        // A forged end mark can't let the rest run as keys.
+        assert_eq!(paste_bytes("x\x1b[201~rm -rf\n".into(), true), b"\x1b[200~xrm -rf\r\x1b[201~");
+        assert_eq!(paste_bytes(String::new(), true), [0x16]);
+    }
 
     #[test]
     fn only_frames_inside_a_call_are_served() {

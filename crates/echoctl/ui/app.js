@@ -1298,9 +1298,32 @@ function termEntry(key) {
   term.open(el)
   e = { id: null, term, fit, el, from: 0, exited: false, polling: false, cols: 0, rows: 0 }
   term.onData((d) => { if (e.id != null && !e.exited) send({ cmd: 'pty_input', id: e.id, data: d }) })
+  term.attachCustomKeyEventHandler((k) => termKey(e, k))
   Terms.set(key, e)
   termHolder().appendChild(el)
   return e
+}
+/** Keys xterm.js would get wrong here (false = handled). macOS: the window has no Edit menu, so
+ *  ⌘C / ⌘V / ⌘A never reach the webview's own copy and paste — copy the selection, paste through
+ *  the app (it reads the clipboard; an image there goes on as Ctrl+V, which Claude Code reads).
+ *  Ctrl+Enter and Shift+Enter: a new line in Claude Code's prompt (Option+Enter's ESC CR), not Enter. */
+function termKey(e, k) {
+  const live = e.id != null && !e.exited
+  const cmd = MAC && k.metaKey && !k.ctrlKey && !k.altKey && !k.shiftKey ? k.key.toLowerCase() : ''
+  if (cmd === 'c' || cmd === 'v' || cmd === 'a') {
+    k.preventDefault()
+    if (k.type !== 'keydown') return false
+    if (cmd === 'c' && e.term.hasSelection()) send({ cmd: 'copy', text: e.term.getSelection() })
+    if (cmd === 'v' && live) send({ cmd: 'pty_paste', id: e.id, bracketed: !!e.term.modes.bracketedPasteMode })
+    if (cmd === 'a') e.term.selectAll()
+    return false
+  }
+  if (k.key === 'Enter' && (k.ctrlKey || k.shiftKey) && !k.metaKey && !k.altKey) {
+    k.preventDefault()
+    if (k.type === 'keydown' && live) send({ cmd: 'pty_input', id: e.id, data: '\x1b\r' })
+    return false
+  }
+  return true
 }
 /** Follow a terminal's output until its program ends. */
 async function termPoll(e) {
@@ -2517,13 +2540,22 @@ function workPanel() {
   const rows = [
     trackable ? ['Status', edit === 'state' ? `<select class="wp-in" data-ledger-set="state" aria-label="Status">${states.map(([v, l]) => `<option value="${v}"${n.state === v ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>` : `<button class="wp-val" data-pj="edit-field" data-field="state"><span class="wk-st ${esc(cls)}">● ${esc(word)}</span></button>${n.derived ? ` <span class="set-sub">${esc(n.derived)}</span>` : ''}`] : null,
     n.kind === 'task' || n.kind === 'story' ? ['Owner', val('internal_owner', n.internal_owner, 'nobody named', `<input class="wp-in" data-ledger-set="internal_owner" value="${esc(n.internal_owner || '')}" aria-label="Owner" autofocus>`)] : null,
+    n.kind === 'task' ? ['Handed over by', val('delegated_by', n.delegated_by, n.creator ? `${n.creator} (said it)` : 'not known', `<input class="wp-in" data-ledger-set="delegated_by" value="${esc(n.delegated_by || '')}" placeholder="Me, or a name" aria-label="Handed over by" autofocus>`)] : null,
     n.client_owner ? ['Client owes', esc(n.client_owner)] : null,
     n.kind === 'task' || n.kind === 'story' ? ['Due', val('due', n.due ? new Date(n.due + 'T12:00').toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }) : '', 'no date', `<input class="wp-in" type="date" data-ledger-set="due" value="${esc(n.due || '')}" aria-label="Due" autofocus>`) + ((n.due_history || []).length > 1 ? ` <span class="set-sub">moved ${n.due_history.length - 1}×</span>` : '')] : null,
     n.waiting_for ? ['Waiting on', `${esc(n.waiting_for.who || 'someone')} — ${esc(n.waiting_for.what || '')}`] : null,
     (n.waiting_on || []).length ? ['Waits for', titles(n.waiting_on)] : null,
     (n.blocks || []).length ? ['Holds up', titles(n.blocks)] : null,
+    (n.links || []).length ? ['From', n.links.filter((l) => /^https:\/\//i.test(l.url || '')).map((l) => `<a class="wp-link" href="${esc(l.url)}" data-ext title="${esc(l.url)}">↗ ${esc(l.title)}</a>`).join('')] : null,
     n.kind !== 'story' && actionItems.length ? ['Said', `“${esc(actionItems[0].quote.length > 90 ? actionItems[0].quote.slice(0, 88) + '…' : actionItems[0].quote)}”`] : null,
   ].filter(Boolean)
+  // What the work is: an agent's from the words that created it, or yours (then it stays yours).
+  const describable = n.kind === 'story' || n.kind === 'task'
+  const de = S.pj.descEdit && S.pj.descEdit.node === n.id ? S.pj.descEdit : null
+  const description = !describable ? ''
+    : de ? `<div class="wp-desc-edit"><textarea id="wp-desc" rows="6" spellcheck="true" aria-label="Description (Markdown)" placeholder="What it is, why, what done looks like — Markdown">${esc(de.text)}</textarea><div class="wp-desc-bar"><span class="set-sub">${MAC ? '⌘S' : 'Ctrl+S'} saves, Esc cancels</span><span class="grow"></span><button class="btn ghost" data-pj="desc-cancel">Cancel</button><button class="btn primary" data-pj="desc-save">Save</button></div></div>`
+    : n.description ? `<div class="wp-desc doc" data-pj="desc-edit" title="Click to change">${n.description_html || esc(n.description)}</div>`
+    : '<button class="wp-val empty wp-desc-add" data-pj="desc-edit">No description · <u>Add</u></button>'
   const met = n.ac.filter((a) => a.met).length
   const criteria = n.kind === 'story' ? `<div class="wp-h">Done when · ${met} of ${n.ac.length}</div><div class="wp-ac-list">${n.ac.map((a, i) => `<label class="wp-ac${a.met ? ' met' : ''}"><input type="checkbox" data-ledger-ac="${i + 1}" ${a.met ? 'checked' : ''}><span>${esc(a.text)}</span></label>`).join('')}</div>` : ''
   const hist = (n.history || []).slice().reverse().map((h) => {
@@ -2536,13 +2568,17 @@ function workPanel() {
       : h.verdict === 'weak' ? '<span class="wk-v weak">weak · to review</span>' : h.verdict === 'wrong' ? '<span class="wk-v wrong">wrong</span>'
       : (h.effect || ['ac_met', 'link', 'waiting'].includes(h.op)) && h.effect !== 'mention' ? '<span class="wk-v">to check</span>' : ''
     const item = h.evidence && ev[h.evidence]
-    const srcs = item ? `<button class="wp-src" data-call="${esc(item.call || '')}" title="${esc(item.title || '')}">▮ ${esc(h.ts ? String(h.ts).replace(/^00:/, '').slice(0, 5) : relDay(item.date))}</button>` : ''
+    // A call's words jump to the call; a mail's open it in Outlook.
+    const srcs = !item ? '' : item.kind === 'mail'
+      ? (/^https:\/\//i.test(item.url || '') ? `<a class="wp-src" href="${esc(item.url)}" data-ext title="${esc(item.title || 'The mail')} — open in Outlook">✉ ${esc(relDay(item.date))}</a>` : `<span class="wp-src" title="${esc(item.title || '')}">✉ ${esc(relDay(item.date))}</span>`)
+      : `<button class="wp-src" data-call="${esc(item.call || '')}" title="${esc(item.title || '')}">▮ ${esc(h.ts ? String(h.ts).replace(/^00:/, '').slice(0, 5) : relDay(item.date))}</button>`
     return `<div class="wp-ev"><div class="wp-ev-top"><span class="set-sub">${esc(relDay(h.date))}</span><b>${esc(what)}</b>${h.speaker ? `<span class="set-sub">${esc(h.speaker)}</span>` : ''}<span class="grow"></span>${mark}</div>${h.quote ? `<div class="wp-q">“${esc(h.quote)}” ${srcs}</div>` : ''}</div>`
   }).join('')
   return `<div class="wp">
     <div class="wp-top"><span class="wk-id">${esc(n.id)}</span><span class="wk-k ${esc(n.kind === 'task' ? n.type : n.kind)}">${esc(kind)}</span><span class="grow"></span><button class="btn" data-pj="edit-title">Edit</button></div>
     ${edit === 'title' ? `<textarea class="wp-title" data-ledger-set="title" rows="1" aria-label="Title" autofocus>${esc(n.title)}</textarea>` : `<h3 class="wp-name">${esc(n.title)}</h3>`}
     ${path.length ? `<div class="set-sub">${esc(path.join(' › '))}</div>` : ''}
+    ${description}
     ${rows.length ? `<div class="wp-facts">${rows.map(([k, v]) => `<span>${esc(k)}</span><div>${v}</div>`).join('')}</div>` : ''}
     ${criteria}
     ${mentionsBlock(n)}
@@ -2566,18 +2602,25 @@ const TASK_SORTS = [['due', 'Due'], ['quiet', 'Quiet longest'], ['project', 'Thr
 const TASK_SHOWN = 6
 const projById = (id) => ((S.pj.data && S.pj.data.projects) || []).find((p) => p.id === id)
 const dueText = (c) => c.due ? `<span class="tk-due${c.late ? ' late' : ''}" title="${c.late ? 'Overdue' : 'Due'}">${esc(fmtDay(c.due))}</span>` : '<span class="tk-due none">no date</span>'
-/** Who a card is about, as the design says it: what you owe — its story; owed — who (· client);
- *  waiting — on whom for what, or after which task; nobody — its story. */
+/** Who a card is about (the user's rules, 2026-11-02): what you owe — its story, and what blocks
+ *  it; owed — who does it (· client); waiting — who, and which of yours it stops; others — who. */
 function taskWho(c, pile) {
-  const w = c.waiting_for
-  if (pile === 'waiting') return w ? `${esc(w.who || 'someone')}${w.what ? ` ← ${esc(w.what)}` : ''}` : c.after.length ? `after ${c.after.map((a) => `<span title="${esc(a.title)}">${esc(a.id)}</span>`).join(', ')}` : 'blocked'
-  if (pile === 'owed') return `${esc(c.owner)}${c.client ? ' · client' : ''}`
+  const stops = (c.blocks || []).length ? ` · stops ${c.blocks.map((b) => `<span title="${esc(b.title)}">${esc(b.id)}</span>`).join(', ')}` : ''
+  if (pile === 'waiting') return c.wait ? `${esc(c.who || 'someone')}${stops}` : `${esc(c.owner || 'nobody named')}${c.client ? ' · client' : ''}${stops}`
+  if (pile === 'owed' || pile === 'others') return `${esc(c.owner)}${c.client ? ' · client' : ''}${c.blocked ? ' · <span class="late">blocked</span>' : ''}`
+  if (pile === 'mine' && c.blocked) return `${c.story ? esc(c.story.title) + ' · ' : ''}<span class="late">blocked</span>${c.waiting_for && c.waiting_for.who ? ` by ${esc(c.waiting_for.who)}` : c.after.length ? ` by ${c.after.map((a) => `<span title="${esc(a.title)}">${esc(a.id)}</span>`).join(', ')}` : ''}`
   return c.story ? esc(c.story.title) : ''
+}
+/** Others: other people's work in your threads that you neither handed over nor wait on — folded. */
+function othersPile(all, key) {
+  if (!all.length) return ''
+  const open = S.tk.more[key]
+  return `<section class="tk-others"><button class="tk-more" data-tk="more" data-pile="${key}">${open ? '▾' : '▸'} Others · ${all.length} <span class="set-sub">— other people's work in your threads: not handed over by you, not stopping you</span></button>${open ? `<div class="tk-others-cards">${all.map((c) => taskCard(c, 'others')).join('')}</div>` : ''}</section>`
 }
 function taskCard(c, pile) {
   const p = projById(c.project) || { id: c.project, name: c.project }
   const quiet = c.quiet >= 5 && !c.due ? `<span class="tk-quiet" title="No word about it in ${c.quiet} days">quiet ${c.quiet} d</span>` : ''
-  return `<button class="tk-card${S.pj.node === c.id && S.pj.sel === c.project ? ' on' : ''}" data-tk="open" data-project="${esc(c.project)}" data-node="${esc(c.id)}">
+  return `<button class="tk-card${c.wait ? ' tk-wait' : ''}${S.pj.node === c.id && S.pj.sel === c.project ? ' on' : ''}" data-tk="open" data-project="${esc(c.project)}" data-node="${esc(c.id)}">
     <span class="tk-t">${esc(c.title)}</span>${(() => { const w = taskWho(c, pile); return w ? `<span class="tk-who">${w}</span>` : '' })()}
     <span class="tk-m"><span class="tk-pj">${projIcon(p, 12)}${esc(p.name)}</span><span class="grow"></span>${quiet}${dueText(c)}</span>
   </button>`
@@ -2598,7 +2641,7 @@ function tasksView() {
   const sortChip = `<label class="fchip">${esc((TASK_SORTS.find(([k]) => k === S.tk.sort) || TASK_SORTS[0])[1])} ▾<select data-tk-sort aria-label="Order">${TASK_SORTS.map(([k, l]) => `<option value="${k}"${S.tk.sort === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`
   const head = `<header class="tk-head"><h2>Tasks</h2><span class="tk-sub">across ${projects.length} active project${projects.length === 1 ? '' : 's'}</span><span class="grow"></span>${projChip}${sortChip}</header>`
   if (!projects.length) return `<div class="tk">${head}<div class="wk-empty"><b>No active threads</b><p>Tasks come from your threads' calls: each thread's Work tab reads them into stories and tasks.</p><button class="btn primary" data-go="projects">Open Threads</button></div></div>`
-  const total = TASK_PILES.reduce((n, [k]) => n + ((d.piles || {})[k] || []).length, 0)
+  const total = TASK_PILES.reduce((n, [k]) => n + ((d.piles || {})[k] || []).length, 0) + ((d.piles || {}).others || []).length
   if (!total) return `<div class="tk">${head}<div class="wk-empty"><b>No open tasks</b><p>Once a thread's calls are synced, what was promised, owed and waited on shows here — from every thread at once.</p></div></div>`
   const cols = TASK_PILES.map(([k, label]) => {
     const all = ((d.piles || {})[k] || []).filter((c) => !pick || c.project === pick).slice().sort(sorts[S.tk.sort] || sorts.due)
@@ -2607,7 +2650,8 @@ function tasksView() {
     return `<section class="tk-col"><h3>${esc(label)} <span>${all.length}</span></h3>${shown.map((c) => taskCard(c, k)).join('') || '<p class="tk-none">Nothing here</p>'}${more}</section>`
   }).join('')
   const errs = (d.errors || []).length ? `<p class="set-sub tk-err">${d.errors.map((e) => `${esc(name(e.project))}: ${esc(e.error)}`).join(' · ')}</p>` : ''
-  return `<div class="tk">${head}${errs}<div class="tk-cols">${cols}</div></div>`
+  const others = ((d.piles || {}).others || []).filter((c) => !pick || c.project === pick).slice().sort(sorts[S.tk.sort] || sorts.due)
+  return `<div class="tk">${head}${errs}<div class="tk-cols">${cols}</div>${othersPile(others, 'others')}</div>`
 }
 /** What to ask whom, next time you meet (right panel): late, due-soon and quiet things they owe,
  *  and what we wait on them for. */
@@ -2756,7 +2800,7 @@ function chatSources(p) {
 function threadSources(p, cl) {
   if (!brainOn()) {
     const kept = (p.sources || []).filter((x) => x.kind !== 'teams_chat').map((x) => tok(`${{ teams_channel: '#', mail: '✉', folder: '▣' }[x.kind] || '·'} ${esc(x.kind === 'mail' ? sourceLabel(x) : x.name || x.id)}`, null)).join('')
-    return chatSources(p) + kept + `<div class="pf-sub">The Brain is off, so channels, mail and folders aren't read — turn it on in Settings → Brain. Meeting chats are read into the work either way.</div>`
+    return chatSources(p) + kept + `<div class="pf-sub">The Brain is off, so channels, mail and folders aren't read into it — turn it on in Settings → Brain. Meeting chats, and mail already added here, are read into the work either way.</div>`
   }
   loadSourceState()
   const st = (m365.state && m365.state.state) || {}
@@ -2769,8 +2813,11 @@ function threadSources(p, cl) {
         + (S.pj.adding === `exclude:${x.id}` ? `<span class="tok-in"><input id="pj-add-exclude" data-add="exclude" data-root="${esc(x.id)}" value="${esc((x.exclude || []).join(', '))}" placeholder="Don't read — e.g. Archive/, *draft*" aria-label="What not to read" autofocus></span>` : `<button class="tok add" data-pj="adding" data-what="exclude:${esc(x.id)}" title="Folders or names in it not to read">Don't read…</button>`)
     }
     const s = st[`${x.kind}:${x.id}`] || {}
-    const info = s.error ? `Couldn't read it: ${s.error}` : s.read_at ? `Read ${relDay(s.read_at.slice(0, 10))} · ${s.found || 0} new` : 'Not read yet'
-    return tok(`${icon[x.kind] || '·'} ${esc(sourceLabel(x))}${s.error ? ' <span class="src-err">⚠</span>' : ''}`, { op: 'source-remove', kind: x.kind, source: x.id }, info)
+    let info = s.error ? `Couldn't read it: ${s.error}` : s.read_at ? `Read ${relDay(s.read_at.slice(0, 10))} · ${s.found || 0} new` : 'Not read yet'
+    // Mail also goes into the work (`ledger::mail_sync`): trusted senders' mails, one item each.
+    const w = x.kind === 'mail' ? (p.mail_state || {})[x.id] : null
+    if (w) info += w.error ? `\nInto the work: couldn't read it — ${w.error}` : w.read_at ? `\nInto the work: read ${relDay(w.read_at.slice(0, 10))} · ${w.found || 0} from trusted senders` : ''
+    return tok(`${icon[x.kind] || '·'} ${esc(sourceLabel(x))}${s.error || (w && w.error) ? ' <span class="src-err">⚠</span>' : ''}`, { op: 'source-remove', kind: x.kind, source: x.id }, info)
   }
   const have = new Set((p.sources || []).map((x) => `${x.kind}:${x.id}`))
   const signedIn = !m365.state || m365.state.signed_in
@@ -2910,7 +2957,7 @@ function clientOverview(cd, c) {
     ? `<section class="set-sec"><div class="set-card"><div class="set-row"><div><b>About ${esc(c.name)}</b><div class="set-sub">Yours: who they are, what you do for them, who matters. Markdown.</div></div><div class="set-ctl"><button class="btn ghost" data-pj="brief-cancel">Cancel</button><button class="btn primary" data-pj="brief-save">Save</button></div></div>
       <div class="me-edit"><textarea id="pj-brief" spellcheck="true" aria-label="About the client (Markdown)">${esc(S.pj.briefEdit)}</textarea><div class="set-sub">⌘S / Ctrl+S saves, Esc cancels.</div></div></div></section>`
     : `<section class="set-sec"><div class="set-card"><div class="set-row"><div><b>About ${esc(c.name)}</b></div><div class="set-ctl"><button class="btn" data-pj="brief-edit">Edit</button></div></div>${cd.brief && cd.brief.trim() ? `<div class="doc me-doc">${cd.brief_html}</div>` : '<div class="me-doc set-sub">Nothing yet — who they are, what you do for them, who matters.</div>'}</div></section>`
-  const PILE_SHORT = { mine: 'I owe', owed: 'owed to me', waiting: 'waiting', nobody: 'nobody named' }
+  const PILE_SHORT = { mine: 'I owe', owed: 'owed to me', waiting: 'waiting', nobody: 'nobody named', others: 'others' }
   const card = (p) => {
     const s = p.summary || {}, pl = s.piles || {}
     const tasks = TASK_PILES.filter(([k]) => pl[k]).map(([k]) => `<span><b>${pl[k]}</b> ${PILE_SHORT[k]}</span>`).join('')
@@ -2942,7 +2989,7 @@ function clientTasks(cd) {
     const all = (cd.work.piles || {})[k] || []
     return `<section class="tk-col"><h3>${esc(label)} <span>${all.length}</span></h3>${all.map((c) => taskCard(c, k)).join('') || '<p class="tk-none">Nothing here</p>'}</section>`
   }).join('')
-  return `<div class="tk-cols">${cols}</div>`
+  return `<div class="tk-cols">${cols}</div>${othersPile((cd.work.piles || {}).others || [], 'client-others')}`
 }
 
 // ── People: stakeholders around a thread or a client (`people.rs`) ────────────────────────
@@ -2952,7 +2999,7 @@ const STANCES = ['champion', 'supporter', 'neutral', 'sceptic', 'blocker']
 /** Relationships between organisations (`projects::RELATIONS`), as a sentence reads them. */
 const REL_KINDS = [['partner', 'partner of'], ['vendor', 'vendor to'], ['delivers_for', 'delivers for'], ['integrates_for', 'integrates for'], ['customer', 'customer of'], ['competitor', 'competitor of']]
 const MATTERS = ['critical', 'high', 'normal', 'irrelevant']
-const peopleData = () => { const d = S.pj.people; const want = S.pj.client ? `api/client/${encodeURIComponent(S.pj.client)}/people` : `api/project/${encodeURIComponent(S.pj.sel)}/people`; return d && d.url === want ? d : null }
+const peopleData = () => { if (S.view === 'brain') return S.br.people && S.br.people.people ? S.br.people : null; const d = S.pj.people; const want = S.pj.client ? `api/client/${encodeURIComponent(S.pj.client)}/people` : `api/project/${encodeURIComponent(S.pj.sel)}/people`; return d && d.url === want ? d : null }
 const peopleCount = () => { const d = peopleData(); return d && d.people ? d.people.filter((x) => x.in_thread).length : 0 }
 const ppView = () => { try { return localStorage.getItem('echo.people.view') || 'map' } catch { return 'map' } }
 const initials = (n) => (n || '?').split(/[\s@._-]+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('')
@@ -3016,7 +3063,7 @@ function peopleSuggestions(d) {
     if (S.pj.ppSugEdit === x.sid) {
       return `<div class="pp-sug">${ppAv(x.target.name || '?', st, x.field === 'relation')}<span class="grow">${ask(x).replace(/\?$/, '')} → ${editor(x)} <span class="pp-quote">“${esc(x.quote || '')}”</span></span><button class="btn primary" data-pp="sug-save" data-sid="${esc(x.sid)}" data-thread="${esc(x.thread)}">Save</button><button class="btn ghost" data-pp="sug-cancel">Cancel</button></div>`
     }
-    return `<div class="pp-sug">${ppAv(x.target.name || '?', st, x.field === 'relation')}<span class="grow">${ask(x)} <span class="pp-quote">“${esc(x.quote || '')}”</span> ${at.call ? `<button class="link-btn pp-src" data-call="${esc(at.call)}">${esc(src)}</button>` : `<span class="set-sub">${esc(src)}</span>`}</span><button class="btn primary" data-pp="decide" data-sid="${esc(x.sid)}" data-thread="${esc(x.thread)}" data-yes="1">Yes</button><button class="btn ghost" data-pp="decide" data-sid="${esc(x.sid)}" data-thread="${esc(x.thread)}" data-yes="">No</button>${x.field === 'left' ? '' : `<button class="btn ghost" data-pp="sug-edit" data-sid="${esc(x.sid)}" title="Not quite: put it right">Change…</button>`}</div>`
+    return `<div class="pp-sug">${ppAv(x.target.name || '?', st, x.field === 'relation')}<span class="grow">${ask(x)} <span class="pp-quote">“${esc(x.quote || '')}”</span> ${at.call ? `<button class="link-btn pp-src" data-call="${esc(at.call)}">${esc(src)}</button>` : /^https:\/\//i.test(at.url || '') ? `<a class="link-btn pp-src" href="${esc(at.url)}" data-ext title="Open the mail in Outlook">✉ ${esc(src)}</a>` : `<span class="set-sub">${esc(src)}</span>`}</span><button class="btn primary" data-pp="decide" data-sid="${esc(x.sid)}" data-thread="${esc(x.thread)}" data-yes="1">Yes</button><button class="btn ghost" data-pp="decide" data-sid="${esc(x.sid)}" data-thread="${esc(x.thread)}" data-yes="">No</button>${x.field === 'left' ? '' : `<button class="btn ghost" data-pp="sug-edit" data-sid="${esc(x.sid)}" title="Not quite: put it right">Change…</button>`}</div>`
   }
   const shown = S.pj.ppAllSug || all.slice(3).some((x) => x.sid === S.pj.ppSugEdit) ? all : all.slice(0, 3)
   return `<div class="pp-sugs">${shown.map(row).join('')}${all.length > 3 ? `<button class="link-btn" data-pp="all-sug">${S.pj.ppAllSug ? 'Show fewer' : `${all.length - 3} more from the calls`}</button>` : ''}</div>`
@@ -3154,9 +3201,9 @@ function personPanel() {
   if (k.startsWith('org:')) return orgPanel(d, k.slice(4))
   const x = d.people.find((y) => y.key === k)
   if (!x) return '<div class="wp-empty">Not in this view any more.</div>'
-  const thread = S.pj.client ? null : S.pj.sel
+  const thread = S.pj.client || S.view === 'brain' ? null : S.pj.sel
   const pl = thread ? (x.places || []).find((p) => p.thread === thread) || {} : placeOf(x) || {}
-  const SRC = { you: 'you', m365: 'Microsoft 365' }
+  const SRC = { you: 'you', m365: 'Microsoft 365', echo: 'Echo' }
   const src = (f) => x.sources && x.sources[f] ? `<span class="set-sub"> · ${esc(SRC[x.sources[f]] || x.sources[f])}</span>` : ''
   const field = (f, label, input) => [label, S.pj.ppEdit === f ? input : `<button class="wp-val${x[f] ? '' : ' empty'}" data-pp="edit" data-f="${f}">${x[f] ? esc(x[f]) : '<u>Set</u>'}</button>${src(f)}`]
   const others = d.people.filter((y) => y.key !== x.key && y.in_thread)
@@ -3182,13 +3229,27 @@ function personPanel() {
       <span>Influence</span><div>${lvl('influence')}</div><span>Interest</span><div>${lvl('interest')}</div>
     </div>${x.in_thread ? '' : '<p class="set-sub">Not in this thread yet: setting any of these adds them.</p>'}` : `<div class="wp-h">In threads</div><div class="pp-in">${(x.places || []).map((p) => `<button class="link-btn" data-pj="goto" data-id="${esc(p.thread)}">${esc((projById(p.thread) || {}).name || p.thread)}</button>${p.role ? ` · ${esc(p.role)}` : ''}${p.stance ? ` · ${esc(p.stance)}` : ''}`).join('<br>') || '<span class="set-sub">none</span>'}</div>`
   const stat = (n, l) => `<div><b>${n}</b><span class="set-sub">${l}</span></div>`
-  const hist = (x.history || []).slice().reverse().slice(0, 8).map((h) => `<div class="pp-h"><span class="set-sub">${esc(relDay(String(h.at || '').slice(0, 10)))}</span> ${esc(h.field)}: ${h.from ? `<s>${esc(h.from)}</s> → ` : ''}${esc(h.to || 'cleared')} <span class="set-sub">· ${esc(h.source === 'you' ? 'you' : h.source)}</span></div>`).join('')
+  const hist = (x.history || []).slice().reverse().slice(0, 8).map((h) => `<div class="pp-h"><span class="set-sub">${esc(relDay(String(h.at || '').slice(0, 10)))}</span> ${h.field === 'about' ? `who they are: ${h.to || h.source === 'echo' ? 'rewritten' : 'cleared'}` : `${esc(h.field)}: ${h.from ? `<s>${esc(h.from)}</s> → ` : ''}${esc(h.to || 'cleared')}`} <span class="set-sub">· ${esc(SRC[h.source] || h.source)}</span></div>`).join('')
+  // Who they are (Echo's summary from what was said, or the user's own words) and what was said.
+  const about = S.pj.aboutEdit != null
+    ? `<textarea class="wp-in pp-about-in" id="pp-about" rows="5" maxlength="2000" aria-label="Who they are">${esc(S.pj.aboutEdit)}</textarea><div class="wp-desc-bar"><button class="btn" data-pp="about-save">Save</button><button class="btn ghost" data-pp="about-cancel">Cancel</button><span class="set-sub">⌘S saves · Esc cancels${x.about_by === 'echo' ? ' · yours from then on: Echo won\'t rewrite it' : ''}</span></div>`
+    : x.about ? `<button class="pp-about" data-pp="about-edit" title="Edit">${esc(x.about)}</button><div class="set-sub">${x.about_by === 'you' ? 'In your words' : 'Echo\'s summary of what was said — click to write your own'}</div>`
+    : '<button class="link-btn" data-pp="about-edit">Describe them…</button><span class="set-sub"> Echo writes this from their calls, chats and mail once it knows enough.</span>'
+  const factSrc = (f) => f.kind === 'mail'
+    ? (/^https:\/\//i.test(f.url || '') ? `<a class="wp-src" href="${esc(f.url)}" data-ext title="${esc(f.title || 'The mail')} — open in Outlook">✉</a>` : '<span class="wp-src">✉</span>')
+    : f.call ? `<button class="wp-src" data-call="${esc(f.call)}" title="${esc(f.title || '')}">▮ ${esc(f.ts ? String(f.ts).replace(/^00:/, '').slice(0, 5) : '')}</button>` : `<span class="wp-src" title="${esc(f.title || '')}">💬</span>`
+  const allFacts = x.facts || []
+  const facts = allFacts.slice(0, S.pj.ppAllFacts ? 300 : 8).map((f) => `<div class="pp-fact"><div><span class="set-sub">${esc(relDay(f.date))}</span> ${esc(f.text)}${!thread && f.thread ? ` <span class="set-sub">· ${esc((projById(f.thread) || {}).name || f.thread)}</span>` : ''}</div><div class="wp-q" title="${esc(f.title || '')}">“${esc(f.quote)}” ${factSrc(f)}</div></div>`).join('')
+  const withThem = (x.with || []).map((y) => { const o = personOf(y.key); return o ? `<button class="link-btn" data-pp="pick" data-key="${esc(y.key)}">${esc(o.name)}</button><span class="set-sub"> · ${y.calls} calls</span>` : '' }).filter(Boolean).join('<br>')
   return `<div class="wp pp-panel">
     <div class="pp-p-top">${ppAv(x.name, pl.stance)}<div style="min-width:0">${S.pj.ppEdit === 'name' ? `<input class="wp-in" data-pp-set="name" value="${esc(x.name)}" aria-label="Name" autofocus>` : `<button class="wp-name pp-name" data-pp="edit" data-f="name">${esc(x.name)}</button>`}<div class="set-sub">${esc([x.title, sideLabel(x)].filter(Boolean).join(' · '))}</div></div></div>
     ${(x.maybe_same || []).map((m) => `<div class="pp-ask"><span class="grow">Same person as <b>${esc(m.name)}</b>${m.email ? ` <span class="set-sub">${esc(m.email)}</span>` : ''}?</span><button class="btn" data-pp="merge" data-into="${esc(m.key)}">Merge</button></div>`).join('')}
     ${(x.addresses || []).length ? `<div class="pp-addrs">${x.addresses.map((a, i) => `<div class="pp-addr"><a class="icon-btn" href="https://teams.microsoft.com/l/chat/0/0?users=${encodeURIComponent(a.email)}" data-ext title="Chat in Teams" aria-label="Chat in Teams with ${esc(a.email)}">${ICON('<path d="M5 18.5V7a2.5 2.5 0 0 1 2.5-2.5h9A2.5 2.5 0 0 1 19 7v6a2.5 2.5 0 0 1-2.5 2.5H9z"/>')}</a><button class="icon-btn" data-copy="${esc(a.email)}" title="Copy ${esc(a.email)}" aria-label="Copy ${esc(a.email)}">${ICON('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>')}</button><span class="pp-addr-t">${esc(a.email)}<span class="set-sub"> · ${esc(a.org || a.domain || '')}</span></span>${i ? `<button class="link-btn" data-pp="split" data-email="${esc(a.email)}" title="This address is someone else">Not the same</button>` : ''}</div>`).join('')}</div>` : ''}
     <div class="pp-same">${S.pj.ppSame ? `<select class="wp-in" id="pp-same" aria-label="Same person as"><option value="">Same person as…</option>${d.people.filter((y) => y.key !== x.key).map((y) => `<option value="${esc(y.key)}">${esc(y.name)}${y.email ? ` · ${esc(y.email)}` : ''}</option>`).join('')}</select><button class="btn" data-pp="merge-pick">Merge</button><button class="btn ghost" data-pp="same-cancel">Cancel</button>` : '<button class="link-btn" data-pp="same">Same person as…</button>'}</div>
+    <div class="wp-h">Who they are</div><div class="pp-about-box">${about}</div>
     ${inThread}
+    ${facts ? `<div class="wp-h">What was said about them</div>${facts}${allFacts.length > 8 ? `<button class="link-btn" data-pp="all-facts">${S.pj.ppAllFacts ? 'Fewer' : `All ${allFacts.length}`}</button>` : ''}` : ''}
+    ${withThem ? `<div class="wp-h">Often in calls with</div><div class="pp-in">${withThem}</div>` : ''}
     <div class="wp-h">About them</div>${asks}<div class="wp-facts">${rows.map(([l, v]) => `<span>${esc(l)}</span><div>${v}</div>`).join('')}</div>
     <div class="wp-h">What Echo saw</div>
     <div class="pp-stats">${stat(`${x.calls}<small> of ${x.of_calls}</small>`, 'calls')}${stat(`${x.share || 0}%`, 'of the talking')}${stat(x.owes, `tasks owed${x.late ? ` · <span class="late">${x.late} late</span>` : ''}`)}${stat(x.waiting, 'waiting on them')}</div>
@@ -3199,7 +3260,7 @@ function personPanel() {
 function orgPanel(d, id) {
   const o = d.orgs.find((x) => x.id === id)
   if (!o) return '<div class="wp-empty">Not in this view any more.</div>'
-  const thread = S.pj.client ? null : S.pj.sel
+  const thread = S.pj.client || S.view === 'brain' ? null : S.pj.sel
   const pl = thread ? (o.places || []).find((p) => p.thread === thread) || {} : placeOf(o) || {}
   const all = ((S.pj.data && S.pj.data.clients) || []).filter((c) => c.id !== o.id)
   const KINDS = REL_KINDS
@@ -3217,11 +3278,18 @@ function orgPanel(d, id) {
     <div class="wp-h">Groups</div><div class="pp-in">${(o.groups || []).map((g) => `<span class="tok">${esc(g)}</span>`).join('') || '<span class="set-sub">none yet — set a person\'s group and it appears here</span>'}</div>
   </div>`
 }
-PANEL_VIEWS.push({ id: 'person', label: 'Person', icon: ICON('<circle cx="12" cy="8.5" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/>'), area: 'right', when: () => S.view === 'projects' && !!S.pj.person && ((S.pj.client && S.pj.ctab === 'people') || (!S.pj.client && S.pj.sel && S.pj.tab === 'people')), render: personPanel })
+PANEL_VIEWS.push({ id: 'person', label: 'Person', icon: ICON('<circle cx="12" cy="8.5" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/>'), area: 'right', when: () => !!S.pj.person && ((S.view === 'brain' && S.br.tab === 'people') || (S.view === 'projects' && ((S.pj.client && S.pj.ctab === 'people') || (!S.pj.client && S.pj.sel && S.pj.tab === 'people')))), render: personPanel })
 
 function peopleSend(op, extra) {
   send({ cmd: 'project', op, id: S.pj.sel, ...extra })
-  setTimeout(() => loadPeople().then(render), 250)
+  setTimeout(() => (S.view === 'brain' ? loadBrainPeople() : loadPeople()).then(render), 250)
+}
+function aboutSave() {
+  const i = $('#pp-about')
+  if (!i) return
+  const v = i.value.trim()
+  S.pj.aboutEdit = null
+  personSet('about', v)
 }
 /** Change… on a suggestion: its row becomes your version, focused. */
 function sugEdit(sid) {
@@ -3269,7 +3337,11 @@ document.addEventListener('click', (e) => {
   const d = b.dataset
   switch (d.pp) {
     case 'view': try { localStorage.setItem('echo.people.view', d.v) } catch { /* storage off */ } return render()
-    case 'pick': return showPerson(d.key)
+    case 'pick': S.pj.aboutEdit = null; return showPerson(d.key)
+    case 'about-edit': { const x = personOf(S.pj.person); S.pj.aboutEdit = (x && x.about) || ''; render(); const i = $('#pp-about'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length) } return }
+    case 'about-cancel': S.pj.aboutEdit = null; return render()
+    case 'about-save': return aboutSave()
+    case 'all-facts': S.pj.ppAllFacts = !S.pj.ppAllFacts; return render()
     case 'edit': S.pj.ppEdit = d.f; render(); { const i = document.querySelector('[data-pp-set][autofocus],[data-pp-place][autofocus]'); if (i) { i.focus(); i.select && i.select() } } return
     case 'level': { const x = personOf(S.pj.person), pl = x && (x.places || []).find((p) => p.thread === S.pj.sel); const cur = pl && pl[d.f]; return personPlace(S.pj.person, { [d.f]: cur === Number(d.n) ? '' : Number(d.n) }) }
     case 'org-level': { const o = ((S.pj.people || {}).orgs || []).find((y) => y.id === d.id), pl = o && (o.places || []).find((p) => p.thread === S.pj.sel); const cur = pl && pl[d.f]; return peopleSend('org_place', { client: d.id, set: { [d.f]: cur === Number(d.n) ? '' : Number(d.n) } }) }
@@ -3329,6 +3401,10 @@ document.addEventListener('keydown', (e) => {
     else render()
   }
   if (t.id === 'pp-new' && e.key === 'Escape') { S.pj.ppAdding = false; render() }
+  if (t.id === 'pp-about') {
+    if (e.key === 'Escape') { e.preventDefault(); S.pj.aboutEdit = null; return render() }
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') { e.preventDefault(); return aboutSave() }
+  }
   if (t.id === 'pp-sug-v' && e.key === 'Enter') { e.preventDefault(); const b = document.querySelector('[data-pp="sug-save"]'); if (b) b.click() }
   if (t.id === 'pp-sug-v' && e.key === 'Escape') { e.preventDefault(); S.pj.ppSugEdit = null; render() }
 })
@@ -3350,13 +3426,14 @@ document.addEventListener('drop', (e) => {
 // Its topics and terms to review (two layers: your practice, and each client's), the sources it
 // holds, its coverage, and a graph of documents around their topics. Asking is Claude's job (the
 // window's Claude sessions have the Brain); this shows and edits what it is made of.
-const BRAIN_TABS = [['topics', 'Topics'], ['terms', 'Terms'], ['sources', 'Sources'], ['numbers', 'Numbers'], ['coverage', 'Coverage'], ['graph', 'Graph']]
+const BRAIN_TABS = [['topics', 'Topics'], ['terms', 'Terms'], ['people', 'People'], ['sources', 'Sources'], ['numbers', 'Numbers'], ['coverage', 'Coverage'], ['graph', 'Graph']]
 const brainQuery = () => { const [k, v] = (S.br.scope || '').split(':'); return k && v ? `?${k}=${encodeURIComponent(v)}` : '' }
 async function loadBrain() {
   const q = brainQuery()
   try { const d = await get('api/brain' + q); d.q = q; S.br.data = d } catch { /* app restarting */ }
   if (S.br.tab === 'graph') { try { const g = await get('api/brain/graph' + q); g.q = q; S.br.graph = g } catch { /* app restarting */ } }
   if (S.br.tab === 'numbers') { try { S.br.numbers = await get('api/brain/numbers') } catch { /* app restarting */ } }
+  if (S.br.tab === 'people') await loadBrainPeople()
   if (S.br.node) await loadBrainNode()
 }
 async function loadBrainNode() {
@@ -3375,7 +3452,7 @@ function brainView() {
   const tabs = BRAIN_TABS.map(([id, l]) => `<button class="tab" role="tab" data-br-tab="${id}" aria-selected="${S.br.tab === id}">${l}${n[id] ? `<span class="n">${n[id]}</span>` : ''}</button>`).join('')
   const sub = st.exists ? `${st.documents} sources · ${st.chunks} sections${st.embed_model ? ` · meaning by ${esc(st.embed_model)}` : ' · words only (no embedding server)'}` : 'Empty — it fills as your calls are synced'
   const head = `<header class="pj-head br-head"><div class="br-title"><h2>Brain</h2><span class="tk-sub">${sub}</span><span class="grow"></span>${scopeSel}<button class="btn ghost" data-go="settings" title="Settings → Brain">Settings</button></div><div class="tabs" role="tablist">${tabs}</div></header>`
-  const body = S.br.tab === 'terms' ? brainTerms(tx) : S.br.tab === 'sources' ? brainSources(d) : S.br.tab === 'numbers' ? brainNumbers() : S.br.tab === 'coverage' ? brainCoverage(tx) : S.br.tab === 'graph' ? brainGraph() : brainTopics(tx)
+  const body = S.br.tab === 'terms' ? brainTerms(tx) : S.br.tab === 'sources' ? brainSources(d) : S.br.tab === 'numbers' ? brainNumbers() : S.br.tab === 'coverage' ? brainCoverage(tx) : S.br.tab === 'graph' ? brainGraph() : S.br.tab === 'people' ? brainPeople() : brainTopics(tx)
   return `<div class="br">${head}<div class="pane pj-pane wide br-pane">${body}</div></div>`
 }
 function brainTopics(tx) {
@@ -3629,6 +3706,118 @@ function drawGraph() {
   markGraph(box)
 }
 
+// ── the Brain's People: who is who across the threads (`people::everyone`) ─────────────────────
+// Threads on a ring (a client's side by side, in its colour); people inside, each near the threads
+// they are in. Shown: people with two sources or more (calls, mails, chats that say something about
+// them), placed in a thread, or described by the user — a one-off name stays out, as in a vault.
+async function loadBrainPeople() {
+  try { const d = await get('api/brain/people'); d.at = Date.now(); S.br.people = d } catch { /* app restarting */ }
+}
+const brShown = (x) => x.touches >= 2 || (x.places || []).length > 0 || x.about_by === 'you'
+/** The people and threads in the Brain's scope, filtered by the box. */
+function brPeopleIn() {
+  const d = S.br.people
+  if (!d || !d.people) return null
+  const [k, v] = (S.br.scope || '').split(':')
+  const inScope = (t) => !k ? true : k === 'thread' ? t === v : ((projById(t) || {}).client || '-') === v
+  const q = (S.br.pq || '').trim().toLowerCase()
+  const people = d.people.filter((x) => brShown(x) && (x.threads || []).some(inScope) && (!q || [x.name, x.email, x.title, x.org && x.org.name, x.about, ...(x.places || []).map((p) => p.role)].join(' ').toLowerCase().includes(q)))
+  const threads = (d.threads || []).filter((t) => inScope(t.id) && people.some((x) => (x.threads || []).includes(t.id)))
+  return { people, threads }
+}
+function brainPeople() {
+  const d = S.br.people
+  if (!d) return `<div class="skeleton" style="padding:20px">${'<i></i>'.repeat(6)}</div>`
+  if (d.error) return `<p class="error">${esc(d.error)}</p>`
+  const v = brPeopleIn()
+  const hidden = d.people.filter((x) => !brShown(x)).length
+  const box = `<input class="wp-in br-pq" id="br-pq" type="search" placeholder="Find someone — name, organisation, role" value="${esc(S.br.pq || '')}" aria-label="Find someone">`
+  const sub = `${v.people.length} ${v.people.length === 1 ? 'person' : 'people'} · ${v.threads.length} thread${v.threads.length === 1 ? '' : 's'}${hidden ? ` · ${hidden} seen once, not shown` : ''}`
+  if (!v.people.length) return `<div class="br-graph-bar">${box}<span class="set-sub">${sub}</span></div><p class="set-sub">${S.br.pq ? 'Nobody matches.' : 'Nobody yet: people appear as their threads are synced.'}</p>`
+  return `<div class="br-graph-bar">${box}<span class="set-sub">${sub}</span><span class="grow"></span><span class="set-sub">Threads on the ring, people near theirs — a line is a role (solid) or calls (faint); dashed: reports to. Click someone for who they are.</span></div><div class="br-graph" id="br-people"></div>`
+}
+function layoutPeople(v, w, h) {
+  const cx = w / 2, cy = h / 2, R = Math.max(80, Math.min(w / 2 - 150, h / 2 - 34))
+  const threads = v.threads.slice().sort((a, b) => String((projById(a.id) || {}).client || '~').localeCompare(String((projById(b.id) || {}).client || '~')) || a.name.localeCompare(b.name))
+  const pos = new Map()
+  threads.forEach((t, i) => { const a = -Math.PI / 2 + (2 * Math.PI * i) / Math.max(1, threads.length); pos.set('t:' + t.id, { id: 't:' + t.id, thread: t, x: cx + R * Math.cos(a), y: cy + R * Math.sin(a), a }) })
+  const people = v.people.map((x) => {
+    const ts = (x.threads || []).map((t) => pos.get('t:' + t)).filter(Boolean)
+    const seed = ProjectArt.hash(x.key)
+    let px = cx + ((seed % 61) - 30), py = cy + (((seed >> 6) % 61) - 30)
+    if (ts.length === 1) {
+      // One thread: a fan inside the ring around it, spread by a hash.
+      const a = ts[0].a + (((seed >> 3) % 100) / 100 - 0.5) * 0.8, rr = R * (0.45 + ((seed >> 10) % 40) / 100)
+      px = cx + rr * Math.cos(a); py = cy + rr * Math.sin(a)
+    } else if (ts.length) {
+      // Several: their middle, pulled in.
+      px = cx + (ts.reduce((s, t) => s + t.x, 0) / ts.length - cx) * 0.55 + ((seed >> 9) % 31) - 15
+      py = cy + (ts.reduce((s, t) => s + t.y, 0) / ts.length - cy) * 0.55 + ((seed >> 14) % 31) - 15
+    }
+    return { id: 'p:' + x.key, person: x, x: px, y: py, r: 4 + Math.min(7, Math.sqrt(x.touches || 1) * 1.3) }
+  })
+  for (let it = 0; it < 90; it++) for (let a = 0; a < people.length; a++) for (let b = a + 1; b < people.length; b++) {
+    const A = people[a], B = people[b], dx = A.x - B.x, dy = A.y - B.y, d = Math.sqrt(dx * dx + dy * dy) || 0.1, min = A.r + B.r + 14
+    if (d < min) { const f = (min - d) / d / 2; A.x += dx * f; A.y += dy * f; B.x -= dx * f; B.y -= dy * f }
+  }
+  const byKey = new Map(people.map((n) => [n.person.key, n]))
+  const edges = []
+  for (const n of people) {
+    for (const t of n.person.threads || []) {
+      const T = pos.get('t:' + t)
+      if (!T) continue
+      const pl = (n.person.places || []).find((p) => p.thread === t)
+      edges.push({ s: n, t: T, kind: pl ? 'role' : 'seen', label: pl && pl.role })
+    }
+    const boss = n.person.reports_to && byKey.get(n.person.reports_to)
+    if (boss) edges.push({ s: n, t: boss, kind: 'boss' })
+    for (const y of n.person.with || []) { const o = byKey.get(y.key); if (o && n.person.key < y.key) edges.push({ s: n, t: o, kind: 'with', label: `${y.calls} calls together` }) }
+  }
+  return { threads: [...pos.values()], people, edges }
+}
+function drawPeople() {
+  const box = $('#br-people')
+  const v = box && brPeopleIn()
+  if (!box || !v) return
+  const w = Math.max(400, box.clientWidth), h = Math.max(360, box.clientHeight)
+  const key = `${w}|${h}|${v.people.map((x) => x.key).join(',')}|${(S.br.people || {}).at || ''}`
+  const sel = S.view === 'brain' && S.pj.person ? 'p:' + S.pj.person : null
+  if (box.dataset.key !== key) {
+    box.dataset.key = key
+    const L = layoutPeople(v, w, h)
+    const clients = [...new Set(L.threads.map((t) => (projById(t.thread.id) || {}).client || '-'))]
+    const tColor = (id) => { const c = (projById(id) || {}).client; return c ? CLIENT_COLORS[clients.indexOf(c) % CLIENT_COLORS.length] : '#8a8a95' }
+    const orgs = [...new Set(L.people.map((n) => (n.person.org || {}).id || n.person.side))]
+    const pColor = (x) => x.side === 'yours' ? 'var(--text-3)' : CLIENT_COLORS[(orgs.indexOf((x.org || {}).id || x.side) + 3) % CLIENT_COLORS.length]
+    const short = (s) => s.length > 24 ? s.slice(0, 23) + '…' : s
+    const lines = L.edges.map((e) => `<line data-a="${esc(e.s.id)}" data-b="${esc(e.t.id)}" x1="${e.s.x.toFixed(1)}" y1="${e.s.y.toFixed(1)}" x2="${e.t.x.toFixed(1)}" y2="${e.t.y.toFixed(1)}" class="pe-${e.kind}">${e.label ? `<title>${esc(e.label)}</title>` : ''}</line>`).join('')
+    const ts = L.threads.map((t) => { const c = Math.cos(t.a), lx = t.x + 13 * (c >= 0 ? 1 : -1); return `<g class="tp" data-gid="${esc(t.id)}" data-pj="goto" data-id="${esc(t.thread.id)}"><circle cx="${t.x.toFixed(1)}" cy="${t.y.toFixed(1)}" r="7" style="stroke:${tColor(t.thread.id)}"/><text x="${lx.toFixed(1)}" y="${(t.y + 4).toFixed(1)}" text-anchor="${c >= 0 ? 'start' : 'end'}">${esc(short(t.thread.name))}<title>${esc(t.thread.name)} — open the thread</title></text></g>` }).join('')
+    // Names where they fit: the most seen first, each only if its label overlaps no label (or thread) drawn.
+    const boxes = L.threads.map((t) => ({ x0: t.x - 8, x1: t.x + 8 + (Math.cos(t.a) >= 0 ? 1 : -1) * t.thread.name.length * 6.2, y0: t.y - 8, y1: t.y + 8 })).map((b) => ({ ...b, x0: Math.min(b.x0, b.x1), x1: Math.max(b.x0, b.x1) }))
+    const named = new Set()
+    for (const n of L.people.slice().sort((a, b) => (b.person.touches || 0) - (a.person.touches || 0))) {
+      const b = { x0: n.x + n.r + 2, x1: n.x + n.r + 4 + short(n.person.name).length * 5.6, y0: n.y - 6, y1: n.y + 6 }
+      if (boxes.some((o) => b.x0 < o.x1 && o.x0 < b.x1 && b.y0 < o.y1 && o.y0 < b.y1)) continue
+      boxes.push(b); named.add(n.id)
+    }
+    const ps = L.people.map((n) => { const x = n.person, role = (x.places || []).map((p) => p.role).filter(Boolean)[0]; return `<g class="dc pe" data-gid="${esc(n.id)}" data-pp="pick" data-key="${esc(x.key)}"><circle cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${n.r.toFixed(1)}" fill="${pColor(x)}"/>${`<text class="${named.has(n.id) ? '' : 'pe-quiet'}" x="${(n.x + n.r + 3).toFixed(1)}" y="${(n.y + 3.5).toFixed(1)}">${esc(short(x.name))}</text>`}<title>${esc([x.name, x.title, x.org && x.org.name, role].filter(Boolean).join(' · '))}</title></g>` }).join('')
+    box.innerHTML = `<svg viewBox="0 0 ${w} ${h}" width="100%" height="100%" role="img" aria-label="People and their threads">${lines}${ts}${ps}</svg>`
+  }
+  const svg = box.querySelector('svg')
+  if (!svg) return
+  svg.classList.toggle('has-sel', !!sel)
+  const near = new Set(sel ? [sel] : [])
+  svg.querySelectorAll('line').forEach((l) => { const on = !!sel && (l.dataset.a === sel || l.dataset.b === sel); l.classList.toggle('hl', on); if (on) { near.add(l.dataset.a); near.add(l.dataset.b) } })
+  svg.querySelectorAll('[data-gid]').forEach((n) => { n.classList.toggle('sel', n.dataset.gid === sel); n.classList.toggle('near', near.has(n.dataset.gid)) })
+}
+document.addEventListener('input', (e) => {
+  if (e.target.id === 'pp-about') { S.pj.aboutEdit = e.target.value; return }
+  if (e.target.id !== 'br-pq') return
+  S.br.pq = e.target.value
+  clearTimeout(S.br.pqT)
+  S.br.pqT = setTimeout(() => { const at = e.target.selectionStart; render(); const i = $('#br-pq'); if (i) { i.focus(); i.setSelectionRange(at, at) } }, 200)
+})
+
 /** A topic or term in the right panel: its description, where it comes up, the user's review
  *  (rename, merge, move, remove; a term's kind, variants, pins) and its latest sections. */
 function brainNodePanel() {
@@ -3756,7 +3945,7 @@ document.addEventListener('keydown', (e) => {
   if (e.target.id === 'br-rename' && e.key === 'Enter') { e.preventDefault(); const b = $('[data-br-do="rename"]'); if (b) b.click() }
   if (e.target.id === 'br-rename' && e.key === 'Escape') { S.br.edit = null; render() }
 })
-window.addEventListener('resize', () => { if (S.view === 'brain') { const b = $('#br-graph'); if (b) b.dataset.key = ''; drawGraph() } })
+window.addEventListener('resize', () => { if (S.view === 'brain') { for (const id of ['#br-graph', '#br-people']) { const b = $(id); if (b) b.dataset.key = '' } drawGraph(); drawPeople() } })
 
 /** A thread's topics and terms from the Brain (null when there is no taxonomy yet: the old glossary
  *  shows instead). Topics with their sections here; terms pinned here first, then by mentions. */
@@ -3955,6 +4144,18 @@ document.addEventListener('click', (e) => {
     case 'person-remove': return projectSend('person_remove', { name: d.name, email: d.email })
     case 'brief-edit': S.pj.briefEdit = (S.pj.client ? S.pj.cdata && S.pj.cdata.brief : S.pj.detail && S.pj.detail.brief) || ''; render(); { const t = $('#pj-brief'); if (t) t.focus() } return
     case 'brief-cancel': S.pj.briefEdit = null; return render()
+    case 'desc-edit': {
+      const a = e.target.closest && e.target.closest('a[href]') // a link in it opens (https only), it doesn't edit
+      if (a) { if (/^https:\/\//i.test(a.getAttribute('href'))) send({ cmd: 'open_url', url: a.getAttribute('href') }); return }
+      const x = S.pj.work && S.pj.work.nodes && S.pj.work.nodes[S.pj.node]
+      if (!x) return
+      S.pj.descEdit = { node: x.id, text: x.description || '' }
+      render()
+      const t = $('#wp-desc'); if (t) { t.focus(); t.setSelectionRange(t.value.length, t.value.length) }
+      return
+    }
+    case 'desc-cancel': S.pj.descEdit = null; return render()
+    case 'desc-save': return saveDescription()
     case 'brief-save': return projectSaveBrief()
     case 'client-add': { const name = $('#pj-client-name').value.trim(); if (!name) return $('#pj-client-name').focus(); S.pj.newClient = false; send({ cmd: 'project', op: 'client_add', name, domains: $('#pj-client-domains').value }); S.pj.pendingClient = name; return render() }
     case 'client-cancel': S.pj.newClient = false; return render()
@@ -4041,6 +4242,10 @@ document.addEventListener('keydown', (e) => {
   if (el.id === 'pj-rule-val' && e.key === 'Enter') { e.preventDefault(); return $('[data-pj="rule-add"]').click() }
   if (el.id === 'pj-f-name' && e.key === 'Enter') { e.preventDefault(); return el.blur() }
   if (el.classList && el.classList.contains('wp-title') && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); return el.blur() }
+  if (el.id === 'wp-desc') {
+    if (e.key === 'Escape') { e.preventDefault(); S.pj.descEdit = null; return render() }
+    if ((MAC ? e.metaKey : e.ctrlKey) && e.key.toLowerCase() === 's') { e.preventDefault(); return saveDescription() }
+  }
   if (el.id === 'pj-brief') {
     if (e.key === 'Escape') { e.preventDefault(); S.pj.briefEdit = null; return render() }
     if ((MAC ? e.metaKey : e.ctrlKey) && e.key.toLowerCase() === 's') { e.preventDefault(); return projectSaveBrief() }
@@ -4048,6 +4253,7 @@ document.addEventListener('keydown', (e) => {
 })
 document.addEventListener('input', (e) => {
   if (e.target.id === 'pj-brief') S.pj.briefEdit = e.target.value
+  if (e.target.id === 'wp-desc' && S.pj.descEdit) S.pj.descEdit.text = e.target.value
   if (e.target.id === 'pj-rule-val' || e.target.id === 'pj-rule-kind') return
 })
 document.addEventListener('change', (e) => {
@@ -4074,6 +4280,18 @@ document.addEventListener('drop', (e) => {
   t.classList.remove('over')
   sendLogo(e.dataTransfer && e.dataTransfer.files[0], t.dataset.dropOp, t.dataset.id)
 })
+/** A work item's description, as typed (empty: none). Shown at once; the ledger pins it as yours. */
+function saveDescription() {
+  const de = S.pj.descEdit
+  if (!de) return
+  const text = de.text.trim(), x = S.pj.work && S.pj.work.nodes && S.pj.work.nodes[de.node]
+  S.pj.descEdit = null
+  if (x && (x.description || '') !== text) {
+    x.description = text || null; x.description_html = null
+    ledgerEdit({ op: 'edit', node: de.node, set: { description: text || null } })
+  }
+  render()
+}
 function projectSaveBrief() {
   const text = S.pj.briefEdit
   if (S.pj.client) {
@@ -4337,6 +4555,7 @@ function render() {
   } else if (S.view === 'brain') {
     patch(primary, `<main class="main">${noticesBar()}${brainView()}</main>`)
     drawGraph()
+    drawPeople()
   } else if (S.view === 'tasks') {
     patch(primary, `<main class="main">${noticesBar()}${tasksView()}</main>`)
   } else if (S.view === 'projects') {
@@ -4433,7 +4652,7 @@ document.addEventListener('click', (e) => {
   if (t.dataset.signinCancel) { send({ cmd: 'sign_in_cancel', profile: t.dataset.signinCancel }); return busySignin(t.dataset.signinCancel, 'stopping') }
   if (t.dataset.signinAccept) { send({ cmd: 'accept_account', profile: t.dataset.signinAccept, account: t.dataset.account }); return busySignin(t.dataset.signinAccept, 'checking') }
   if (t.dataset.signinCheck) { send({ cmd: 'check_sign_in', profile: t.dataset.signinCheck }); return busySignin(t.dataset.signinCheck, 'checking') }
-  if (t.dataset.ext) { e.preventDefault(); send({ cmd: 'open_url', url: t.getAttribute('href') }); return }
+  if (t.dataset.ext !== undefined) { e.preventDefault(); send({ cmd: 'open_url', url: t.getAttribute('href') }); return }
   // Settings
   if (t.dataset.meEdit !== undefined) { S.meEdit = (S.settings && S.settings.me_profile && S.settings.me_profile.text) || ''; render(); const ta = $('#me-profile'); if (ta) ta.focus(); return }
   if (t.dataset.meCancel !== undefined) { S.meEdit = null; return render() }

@@ -28,15 +28,15 @@ const DIGEST_MAX: usize = 30;
 /// Teams authors looked up by name at most a sync.
 const LOOKUPS_MAX: usize = 40;
 /// Mail to more people than this is a broadcast (a newsletter, a training invitation), not a thread's.
-const MAX_PEOPLE: usize = 30;
+pub(crate) const MAX_PEOPLE: usize = 30;
 
 /// The user's own addresses never make a mail a client's (people at a client often have an address
 /// in its domain too): by the local part of the signed-in account, at any domain.
-fn me_local() -> Option<String> {
+pub(crate) fn me_local() -> Option<String> {
     graph::account().and_then(|a| a.split_once('@').map(|(l, _)| l.to_lowercase()))
 }
 
-fn not_me<'a>(people: impl Iterator<Item = &'a Value>, me: Option<&str>) -> Vec<String> {
+pub(crate) fn not_me<'a>(people: impl Iterator<Item = &'a Value>, me: Option<&str>) -> Vec<String> {
     people
         .filter_map(|p| p["email"].as_str().map(str::to_lowercase))
         .filter(|e| me.is_none_or(|m| e.split_once('@').is_none_or(|(l, _)| l != m)))
@@ -79,7 +79,7 @@ impl MailRule {
     }
 
     /// Graph's search (fuzzy: what it returns is checked with `matches`).
-    fn kql(&self) -> String {
+    pub fn kql(&self) -> String {
         let v = match self {
             MailRule::Domain(d) | MailRule::Person(d) => d,
         };

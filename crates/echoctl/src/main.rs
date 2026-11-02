@@ -851,12 +851,22 @@ enum ProjectCmd {
 #[derive(Subcommand)]
 enum LedgerCmd {
     /// Bring the evidence up to date with the project's calls (--limit: only the newest N); --chats also
-    /// reads its meeting chats between calls (Microsoft 365)
+    /// reads its meeting chats between calls, --mail its ✉ Mail sources (Microsoft 365)
     Sync {
         #[arg(long)]
         limit: Option<usize>,
         #[arg(long)]
         chats: bool,
+        #[arg(long)]
+        mail: bool,
+    },
+    /// Mails as evidence (Graph message ids): one item a mail, read by the next sync like a call;
+    /// --conversation adds the rest of each one's conversation
+    Mail {
+        #[arg(required = true)]
+        ids: Vec<String>,
+        #[arg(long)]
+        conversation: bool,
     },
     /// Evidence not processed yet, oldest first
     Pending,
@@ -2109,13 +2119,17 @@ fn ledger_command(id: &str, cmd: LedgerCmd) -> Result<()> {
         v.as_array().cloned().ok_or_else(|| anyhow::anyhow!("{}: expected a JSON array", p.display()))
     };
     match cmd {
-        LedgerCmd::Sync { limit, chats } => {
+        LedgerCmd::Sync { limit, chats, mail } => {
             let mut written = ledger::sync(id, limit)?;
             if chats {
                 written.extend(ledger::chat_sync(id)?);
             }
-            print_json(&serde_json::json!({ "written": written, "pending": ledger::pending(id)?, "chats": ledger::chat_state(id) }))
+            if mail {
+                written.extend(ledger::mail_sync(id)?);
+            }
+            print_json(&serde_json::json!({ "written": written, "pending": ledger::pending(id)?, "chats": ledger::chat_state(id), "mail": ledger::mail_state(id) }))
         }
+        LedgerCmd::Mail { ids, conversation } => print_json(&serde_json::json!({ "mail": ledger::add_mail(id, &ids, conversation)?, "pending": ledger::pending(id)? })),
         LedgerCmd::Pending => print_json(&serde_json::json!(ledger::pending(id)?)),
         LedgerCmd::Context => print_json(&ledger::context(id)?),
         LedgerCmd::Apply { evidence, proposals } => print_json(&ledger::apply(id, &evidence, &read(&proposals)?)?),

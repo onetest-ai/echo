@@ -5,6 +5,10 @@ only the words tell: what someone's role is here, where they stand, how much the
 report to, which group they are in, how organisations relate, and who has left. Every proposal waits
 for the user's yes — propose only what the words say, and quote them.
 
+You also keep each person's file, as a good assistant keeps notes on the people around them: **facts**
+(one dated line each, with the words it rests on — they go in at once, no yes needed, because the words
+are checked) and **who they are** (`about`, a short description you rewrite from the facts).
+
 1. `$L people-context --items '<the evidence ids, comma-separated>'` — the thread's people (as they
    stand now, with their addresses and organisations), its organisations, the readable file of each
    call, and what was already proposed or turned down. Never propose those again.
@@ -23,6 +27,16 @@ for the user's yes — propose only what the words say, and quote them.
 - `title`, `group` — a job title or a department/team said in the call ("I lead the platform team").
 - `reports_to` — `value` is the manager's name as people-context spells it ("Ravi reports to me now").
 - `left` — `value` `true`: they left the company or the project ("Tom moved to another account").
+- `fact` — one line about the person worth remembering when you meet them next, in your words (≤ 240
+  characters): what they own or decided, asked for, promised, worry about, know, prefer; a change in
+  their job; who they work with. "Owns the SSO rollout; wants it before the March freeze." Not small
+  talk, not what the work ledger already holds as a task unless it says something about *them*, not a
+  repeat of a fact people-context already lists. From a mail or a chat, the sender (and anyone named
+  there) counts too: `who` may be an address not yet among the people, with `name` as the item gives it.
+- `about` — who they are, 1–4 sentences (≤ 800 characters), no quote: their job and part here, what
+  they care about, how to work with them — only from their facts (people-context lists the latest)
+  and this item's. Write it for someone whose `about` is empty, or rewrite it when this item changes
+  the picture. Never when `about_is_users` is true: the user wrote it.
 - `relation` — between two organisations: `who` and `to` are organisation names from
   `known_organisations`, `value` one of `relations` ("Contoso does the integration for us" → `who`
   Contoso, `value` integrates_for, `to` the client).
@@ -35,6 +49,9 @@ user ("Me") — they are left out of the map.
 {"who": "Ravi Mehta", "field": "stance", "value": "sceptic",
  "quote": "exact contiguous words from ONE turn (8–40 words)", "note": "≤ 15 words: why"}
 {"who": "Contoso", "field": "relation", "value": "integrates_for", "to": "Northwind", "quote": "…"}
+{"who": "Ravi Mehta", "field": "fact", "value": "Signs off every release; wants the audit trail before go-live.", "quote": "…"}
+{"who": "dana@northwind.example", "name": "Dana Kowal", "field": "fact", "value": "…", "quote": "…"}
+{"who": "Ravi Mehta", "field": "about", "value": "Northwind's head of platform and the release approver here. …"}
 ```
 `who` = a name or an address exactly as people-context gives it. The quote must be words said in this
 item, copied exactly (case and punctuation may differ), from one turn.

@@ -21,7 +21,15 @@ const FILE: &str = "people.json";
 const NEW_DAYS: i64 = 14;
 const QUIET_DAYS: i64 = 42;
 /// Fields a person's directory entry takes from the user (`set`).
-pub const FIELDS: [&str; 11] = ["name", "title", "org", "group", "reports_to", "matters", "notes", "phone", "department", "company", "office"];
+pub const FIELDS: [&str; 12] = ["name", "title", "org", "group", "reports_to", "matters", "notes", "phone", "department", "company", "office", "about"];
+/// Who someone is, in a few sentences: the people pass writes it (source `echo`) until the user
+/// writes theirs (source `you`: kept, never rewritten).
+const MAX_ABOUT: usize = 2000;
+const MAX_AGENT_ABOUT: usize = 800;
+/// A fact about someone: one line, its words quoted from one evidence item.
+const MAX_FACT: usize = 240;
+/// Facts kept per person (the oldest go first).
+const MAX_FACTS: usize = 300;
 /// The fields Microsoft 365 fills (the People API).
 const M365_FIELDS: [&str; 5] = ["title", "department", "company", "office", "phone"];
 /// A person is looked up again after this many days.
@@ -58,6 +66,10 @@ pub struct Person {
     /// Addresses (or `n:` names) the user said are someone else: never merged with this person.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub not_same: Vec<String>,
+    /// What the calls, chats and mails of the threads say about them, each with its words and where
+    /// they were said: `{id, text, quote, date, thread, evidence, kind, call, title, url, ts, added}`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub facts: Vec<Value>,
 }
 
 /// Every address the directory knows for a person → their key.
@@ -233,6 +245,9 @@ pub fn set(key: &str, name: &str, email: Option<&str>, field: &str, value: &str,
     if field == "matters" && !value.is_empty() && !MATTERS.contains(&value) {
         bail!("how much someone matters is one of {MATTERS:?}");
     }
+    if field == "about" && value.chars().count() > MAX_ABOUT {
+        bail!("who someone is takes at most {MAX_ABOUT} characters");
+    }
     projects::with_lock(|| {
         let mut all = directory()?;
         let i = match all.iter().position(|p| p.id == key) {
@@ -258,6 +273,9 @@ pub fn set(key: &str, name: &str, email: Option<&str>, field: &str, value: &str,
             p.fields.insert(field.into(), value.into());
         }
         p.sources.insert(field.into(), source.into());
+        if field == "about" {
+            p.fields.remove("about_thread");
+        }
         p.history.push(json!({"field": field, "from": before, "to": (!value.is_empty()).then_some(value), "source": source, "at": chrono::Utc::now().to_rfc3339()}));
         let p = p.clone();
         projects::write_json(&file(), &all)?;
@@ -563,14 +581,42 @@ pub fn view(threads: &[&Project], today: chrono::NaiveDate) -> Result<Value> {
     let me = MeIs::now();
     let my_domain = crate::config::Config::load().ok().and_then(|c| c.me).and_then(|m| domain(m.email.as_deref()));
     let mut dirs: Vec<PathBuf> = vec![];
+    // Each call's threads (by stamp), for the threads someone was seen in.
+    let mut call_threads: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for p in threads {
         for (d, _) in projects::calls_of(p)? {
+            call_threads.entry(calls::stamp_of(&d)).or_default().push(p.id.clone());
             if !dirs.contains(&d) {
                 dirs.push(d);
             }
         }
     }
     let (mut seen, total) = gather(&dirs, &me, &dir_people);
+    let ids: BTreeSet<&str> = threads.iter().map(|p| p.id.as_str()).collect();
+    // Facts said in these threads put someone in them too (a mail's sender who was in no call).
+    for p in &dir_people {
+        if !seen.contains_key(&p.id) && p.facts.iter().any(|f| f["thread"].as_str().is_some_and(|t| ids.contains(t))) {
+            seen.insert(p.id.clone(), Seen { name: p.name.clone(), email: p.emails.first().cloned(), ..Default::default() });
+        }
+    }
+    // Who is in calls with whom: for each person, the three they shared most calls with (two or more).
+    let mut with: BTreeMap<String, Vec<(usize, String)>> = BTreeMap::new();
+    {
+        let keys: Vec<&String> = seen.keys().collect();
+        for (i, a) in keys.iter().enumerate() {
+            for b in keys.iter().skip(i + 1) {
+                let n = seen[*a].calls.intersection(&seen[*b].calls).count();
+                if n >= 2 {
+                    with.entry((*a).clone()).or_default().push((n, (*b).clone()));
+                    with.entry((*b).clone()).or_default().push((n, (*a).clone()));
+                }
+            }
+        }
+        for v in with.values_mut() {
+            v.sort_by(|x, y| y.0.cmp(&x.0).then(x.1.cmp(&y.1)));
+            v.truncate(3);
+        }
+    }
     let canon = canon(&dir_people);
     let member_key = |m: &projects::Member| m.email.as_ref().map(|e| e.to_lowercase()).and_then(|e| canon.get(&e).cloned()).unwrap_or_else(|| key_of(&m.name, m.email.as_deref()));
     // People placed by hand who no call shows (yet).
@@ -609,6 +655,14 @@ pub fn view(threads: &[&Project], today: chrono::NaiveDate) -> Result<Value> {
             let in_thread = !places.is_empty();
             let new = in_thread && !s.first.is_empty() && days(&s.first).is_some_and(|d| d <= NEW_DAYS);
             let quiet = in_thread && !s.last.is_empty() && days(&s.last).is_some_and(|d| d > QUIET_DAYS) && last_call > s.last;
+            // What the threads' words say about them, newest first; and where they were seen.
+            let mut facts: Vec<Value> = entry.map(|p| p.facts.iter().filter(|f| f["thread"].as_str().is_some_and(|t| ids.contains(t))).cloned().collect()).unwrap_or_default();
+            facts.reverse();
+            let mut seen_in: BTreeSet<String> = s.calls.iter().flat_map(|c| call_threads.get(c).cloned().unwrap_or_default()).collect();
+            seen_in.extend(places.iter().filter_map(|p| p["thread"].as_str().map(str::to_owned)));
+            seen_in.extend(facts.iter().filter_map(|f| f["thread"].as_str().map(str::to_owned)));
+            let touches = s.calls.iter().cloned().chain(facts.iter().filter_map(|f| f["evidence"].as_str().map(str::to_owned))).collect::<BTreeSet<_>>().len();
+            let with_them: Vec<Value> = with.get(&key).into_iter().flatten().map(|(n, k)| json!({"key": k, "calls": n})).collect();
             let addresses: Vec<Value> = s.email.iter().chain(&s.also).map(|e| {
                 let d = domain(Some(e));
                 json!({"email": e, "org": org_of(&clients, d.as_deref()).map(|c| c.name.clone()), "domain": d})
@@ -623,6 +677,8 @@ pub fn view(threads: &[&Project], today: chrono::NaiveDate) -> Result<Value> {
                 "first": s.first, "last": s.last, "new": new, "quiet": quiet,
                 "owes": owes, "late": late, "waiting": waiting,
                 "places": places, "in_thread": in_thread,
+                "about": f("about"), "about_by": entry.and_then(|p| p.sources.get("about").cloned()), "about_thread": f("about_thread"),
+                "facts": facts, "threads": seen_in, "touches": touches, "with": with_them,
             })
         })
         .collect();
@@ -686,6 +742,122 @@ pub fn of_thread(id: &str, today: chrono::NaiveDate) -> Result<Value> {
 pub fn of_client(id: &str, today: chrono::NaiveDate) -> Result<Value> {
     let ps: Vec<Project> = projects::list().into_iter().filter(|p| p.client.as_deref() == Some(id)).collect();
     view(&ps.iter().collect::<Vec<_>>(), today)
+}
+
+/// What the people view is built from, as file times: the directory, clients, each thread's profile,
+/// suggestions and ledger events, the calls folder (a call added or removed), the user's settings. Any
+/// change — an edit here, a sync, a new call — makes a new one.
+fn inputs(ps: &[Project]) -> String {
+    let t = |p: PathBuf| std::fs::metadata(&p).and_then(|m| m.modified()).ok().and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_nanos()).unwrap_or(0);
+    let mut out = vec![t(file()), t(projects::dir().join("clients.json")), t(crate::paths::calls_dir()), t(crate::paths::state_dir().join("config.json"))];
+    for p in ps {
+        let d = projects::dir().join(&p.id);
+        out.extend([t(d.join("profile.json")), t(suggestions_file(&p.id)), t(d.join("ledger").join("events.jsonl"))]);
+    }
+    format!("{}|{}|{out:?}", projects::dir().display(), ps.iter().map(|p| p.id.as_str()).collect::<Vec<_>>().join(","))
+}
+
+/// The last view built, by its inputs (and the day: new and quiet are counted from it).
+static VIEW: std::sync::Mutex<Option<(String, Value)>> = std::sync::Mutex::new(None);
+
+/// `view`, built again only when its inputs changed.
+fn view_cached(ps: &[Project], today: chrono::NaiveDate) -> Result<Value> {
+    // And every 10 minutes regardless: a call's speakers named later change none of these times.
+    let tick = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() / 600).unwrap_or(0);
+    let key = format!("{today}|{tick}|{}", inputs(ps));
+    if let Some((k, v)) = VIEW.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        if *k == key {
+            return Ok(v.clone());
+        }
+    }
+    let v = view(&ps.iter().collect::<Vec<_>>(), today)?;
+    *VIEW.lock().unwrap_or_else(|e| e.into_inner()) = Some((key, v.clone()));
+    Ok(v)
+}
+
+/// Everyone across every thread: the Brain's People.
+pub fn everyone(today: chrono::NaiveDate) -> Result<Value> {
+    view_cached(&projects::list(), today)
+}
+
+/// The people of some threads (what a Brain reader may see), with their threads named.
+fn of_threads(ids: &[String]) -> Result<(Vec<Value>, BTreeMap<String, String>)> {
+    let ps: Vec<Project> = projects::list().into_iter().filter(|p| ids.contains(&p.id)).collect();
+    let names = ps.iter().map(|p| (p.id.clone(), p.name.clone())).collect();
+    if ps.is_empty() {
+        return Ok((vec![], names));
+    }
+    let v = view_cached(&ps, chrono::Local::now().date_naive())?;
+    Ok((v["people"].as_array().cloned().unwrap_or_default(), names))
+}
+
+/// A person as a reader sees them in a list: who, where from, which threads and their role there.
+fn brief(x: &Value, names: &BTreeMap<String, String>) -> Value {
+    let role = |t: &str| x["places"].as_array().into_iter().flatten().find(|p| p["thread"] == t).and_then(|p| p["role"].as_str().map(str::to_owned));
+    let threads: Vec<Value> = x["threads"].as_array().into_iter().flatten().filter_map(Value::as_str).map(|t| json!({"id": t, "name": names.get(t), "role": role(t)})).collect();
+    json!({"key": x["key"], "name": x["name"], "email": x["email"], "organisation": x["org"]["name"].as_str().or(match x["side"].as_str() { Some("yours") => Some("the user's company"), _ => None }),
+           "title": x["title"], "group": x["group"], "threads": threads, "calls": x["calls"], "last_seen": x["last"], "about": about_for(x, names)})
+}
+
+/// Who someone is, for a reader of these threads: the user's own words, or Echo's when a pass on one
+/// of them wrote it (another thread's may rest on what this reader may not see).
+fn about_for(x: &Value, threads: &BTreeMap<String, String>) -> Value {
+    let ok = x["about_by"] == "you" || x["about_thread"].as_str().is_some_and(|t| threads.contains_key(t));
+    if ok { x["about"].clone() } else { Value::Null }
+}
+
+/// `find_people`: the people of these threads whose name, address, organisation, title, group or role
+/// has every word of the query; the most seen first.
+pub fn find(threads: &[String], query: &str, limit: usize) -> Result<Value> {
+    let (people, names) = of_threads(threads)?;
+    let words: Vec<String> = fold(&query.to_lowercase()).split_whitespace().map(str::to_owned).collect();
+    let mut seen: Vec<&Value> = people.iter().filter(|x| x["touches"].as_u64().unwrap_or(0) > 0 || x["in_thread"] == true).collect();
+    seen.sort_by_key(|x| std::cmp::Reverse(x["touches"].as_u64().unwrap_or(0)));
+    let mut hits: Vec<Value> = seen
+        .into_iter()
+        .map(|x| brief(x, &names))
+        .filter(|b| {
+            // The values only (a field's name isn't a match).
+            let mut hay: Vec<&str> = ["name", "email", "organisation", "title", "group", "about"].iter().filter_map(|k| b[*k].as_str()).collect();
+            hay.extend(b["threads"].as_array().into_iter().flatten().flat_map(|t| [t["name"].as_str(), t["role"].as_str()]).flatten());
+            let hay = fold(&hay.join(" ").to_lowercase());
+            words.iter().all(|w| hay.contains(w.as_str()))
+        })
+        .collect();
+    let total = hits.len();
+    hits.truncate(limit);
+    Ok(json!({"people": hits, "total": total, "guidance": "get_person gives one person's facts with their sources. Cite them; say 'not modeled' for what they don't say."}))
+}
+
+/// `get_person`: one person of these threads (by key, address or name) with the facts said about them
+/// there, each with its words and a link (a call's moment, the mail).
+pub fn card(threads: &[String], who: &str, max_facts: usize) -> Result<Value> {
+    let (people, names) = of_threads(threads)?;
+    let w = who.trim().to_lowercase();
+    let x = people.iter().find(|x| x["key"] == w.as_str()).or_else(|| find_person(&people, who));
+    let Some(x) = x else { return Ok(json!({"status": "not_found", "reason": format!("nobody called {who:?} in the threads this session may read")})) };
+    let name_of = |k: &str| people.iter().find(|y| y["key"] == k).map(|y| y["name"].clone()).unwrap_or(json!(k));
+    let facts: Vec<Value> = x["facts"].as_array().into_iter().flatten().take(max_facts).map(|f| {
+        let link = match (f["kind"].as_str(), f["call"].as_str()) {
+            (Some("mail"), _) => f["url"].as_str().map(str::to_owned),
+            (_, Some(call)) => Some(match f["ts"].as_str().map(|t| t.split(':').fold(0u64, |a, x| a * 60 + x.parse::<u64>().unwrap_or(0))) {
+                Some(t) => format!("echo://call/{call}?t={t}"),
+                None => format!("echo://call/{call}"),
+            }),
+            _ => None,
+        };
+        json!({"fact": f["text"], "quote": f["quote"], "date": f["date"], "thread": names.get(f["thread"].as_str().unwrap_or("")), "source": f["title"], "kind": f["kind"], "link": link})
+    }).collect();
+    let mut v = brief(x, &names);
+    v["places"] = json!(x["places"].as_array().into_iter().flatten().map(|p| json!({"thread": names.get(p["thread"].as_str().unwrap_or("")), "role": p["role"], "stance": p["stance"], "influence": p["influence"], "interest": p["interest"]})).collect::<Vec<_>>());
+    v["reports_to"] = x["reports_to"].as_str().map(name_of).unwrap_or(Value::Null);
+    v["first_seen"] = x["first"].clone();
+    v["share_of_talking"] = x["share"].clone();
+    v["tasks"] = json!({"owes": x["owes"], "late": x["late"], "waiting_on_them": x["waiting"]});
+    v["often_with"] = json!(x["with"].as_array().into_iter().flatten().map(|y| json!({"name": name_of(y["key"].as_str().unwrap_or("")), "calls_together": y["calls"]})).collect::<Vec<_>>());
+    v["facts"] = json!(facts);
+    v["guidance"] = json!("Each fact has the words it rests on and a link: cite them. `about` is Echo's summary (or the user's own words).");
+    Ok(v)
 }
 
 /// Place a person in a thread (adding them if they aren't in it): role, stance, influence, interest
@@ -768,12 +940,14 @@ pub fn context(project: &str, items: &[String]) -> Result<Value> {
         .as_array()
         .into_iter()
         .flatten()
-        .filter(|x| x["calls"].as_u64().unwrap_or(0) > 0 || x["in_thread"] == true)
+        .filter(|x| x["touches"].as_u64().unwrap_or(0) > 0 || x["in_thread"] == true)
         .map(|x| {
             let pl = x["places"].get(0).cloned().unwrap_or(json!({}));
             json!({"name": x["name"], "email": x["email"], "organisation": x["org"]["name"].as_str().unwrap_or(match x["side"].as_str() { Some("yours") => "the user's company", _ => "" }),
                    "in_thread": x["in_thread"], "title": x["title"], "group": x["group"], "reports_to": x["reports_to"].as_str().and_then(name_of),
-                   "role": pl["role"], "stance": pl["stance"], "influence": pl["influence"], "interest": pl["interest"], "calls": x["calls"]})
+                   "role": pl["role"], "stance": pl["stance"], "influence": pl["influence"], "interest": pl["interest"], "calls": x["calls"],
+                   "about": if x["about_by"] == "you" || x["about_thread"] == project { x["about"].clone() } else { Value::Null }, "about_is_users": x["about_by"] == "you",
+                   "facts": x["facts"].as_array().into_iter().flatten().take(12).map(|f| json!({"date": f["date"], "fact": f["text"]})).collect::<Vec<_>>()})
         })
         .collect();
     let orgs: Vec<Value> = v["orgs"].as_array().into_iter().flatten().map(|o| json!({"name": o["name"], "relations": o["relations"], "parent": o["parent"]})).collect();
@@ -783,7 +957,7 @@ pub fn context(project: &str, items: &[String]) -> Result<Value> {
         "project": project, "people": people, "organisations": orgs, "known_organisations": known,
         "items": items.iter().map(|i| json!({"id": i, "file": l.evidence_md(i).display().to_string().replace('\\', "/")})).collect::<Vec<_>>(),
         "already_proposed": said,
-        "fields": SUGGEST_FIELDS, "stances": projects::STANCES, "relations": projects::RELATIONS,
+        "fields": SUGGEST_FIELDS.iter().chain(&["fact", "about"]).collect::<Vec<_>>(), "stances": projects::STANCES, "relations": projects::RELATIONS,
     }))
 }
 
@@ -809,6 +983,11 @@ pub fn apply_suggestions(project: &str, evid: &str, proposals: &[Value]) -> Resu
     let v = of_thread(project, chrono::Local::now().date_naive())?;
     let people = v["people"].as_array().cloned().unwrap_or_default();
     let clients = projects::clients()?;
+    let dir_people = directory()?;
+    let me = MeIs::now();
+    // Facts and who someone is go in at once (their words are checked; nothing to decide).
+    let mut facts: Vec<(String, String, Option<String>, Value)> = vec![];
+    let mut abouts: Vec<(String, String, Option<String>, String)> = vec![];
     let org_named = |n: &str| clients.iter().find(|c| norm(&c.name) == norm(n) || c.aliases.iter().any(|a| norm(a) == norm(n)) || c.id == n);
     let mut all = suggestions(project);
     let (mut added, mut rejected) = (0, vec![]);
@@ -822,8 +1001,52 @@ pub fn apply_suggestions(project: &str, evid: &str, proposals: &[Value]) -> Resu
         };
         let who = pr["who"].as_str().unwrap_or("");
         let why: Option<String> = (|| {
+            if field == "fact" || field == "about" {
+                let (key, name, email) = match find_person(&people, who) {
+                    Some(x) => (x["key"].as_str().unwrap_or("").to_string(), x["name"].as_str().unwrap_or("").to_string(), x["email"].as_str().map(str::to_owned)),
+                    // A mail's sender or recipient by address, not in a call yet — only one of this mail's.
+                    None if field == "fact" && who.contains('@') && !who.contains(char::is_whitespace) => {
+                        let e = who.trim().to_lowercase();
+                        let item = crate::ledger::Ledger::of(project).ok().and_then(|l| l.evidence().get(evid).cloned()).unwrap_or_default();
+                        let addrs: Vec<String> = std::iter::once(&item["from"]).chain(item["to"].as_array().into_iter().flatten()).filter_map(|p| p["email"].as_str().map(str::to_lowercase)).collect();
+                        if !addrs.contains(&e) {
+                            return Some(format!("{who:?} isn't among the thread's people nor this mail's sender or recipients"));
+                        }
+                        let name = pr["name"].as_str().map(display).filter(|n| !n.is_empty()).unwrap_or_else(|| e.clone());
+                        (canon(&dir_people).get(&e).cloned().unwrap_or_else(|| e.clone()), name, Some(e))
+                    }
+                    None => return Some(format!("{who:?} isn't among the thread's people (use a name or an address from people-context)")),
+                };
+                if me.is(&name, email.as_deref()) {
+                    return Some("nothing about the user".into());
+                }
+                let n = value.chars().count();
+                if field == "about" {
+                    if n == 0 || n > MAX_AGENT_ABOUT {
+                        return Some(format!("who someone is: 1 to {MAX_AGENT_ABOUT} characters"));
+                    }
+                    if dir_people.iter().any(|p| p.id == key && p.sources.get("about").map(String::as_str) == Some("you")) {
+                        return Some("the user wrote who they are: leave it".into());
+                    }
+                    abouts.push((key, name, email, value.clone()));
+                    return None;
+                }
+                if n == 0 || n > MAX_FACT {
+                    return Some(format!("a fact is one line of 1 to {MAX_FACT} characters"));
+                }
+                let quote = pr["quote"].as_str().unwrap_or("");
+                let at = match crate::ledger::quote_in(project, evid, quote) {
+                    Ok(Some(at)) => at,
+                    Ok(None) => return Some("quote not verbatim in this evidence item (one contiguous span, 3 words or more)".into()),
+                    Err(e) => return Some(format!("{e:#}")),
+                };
+                let id = format!("{:x}", { use sha2::Digest as _; let d = sha2::Sha256::digest(format!("{key}\0{evid}\0{}", norm(quote)).as_bytes()); u64::from_be_bytes(d[..8].try_into().unwrap()) });
+                facts.push((key, name, email, json!({"id": id, "text": value, "quote": quote, "date": at["date"], "thread": project, "evidence": evid,
+                    "kind": at["kind"], "call": at["call"], "title": at["title"], "url": at["url"], "ts": at["ts"], "added": chrono::Utc::now().to_rfc3339()})));
+                return None;
+            }
             if !SUGGEST_FIELDS.contains(&field) {
-                return Some(format!("field is one of {SUGGEST_FIELDS:?}"));
+                return Some(format!("field is one of {SUGGEST_FIELDS:?}, fact or about"));
             }
             let at = match crate::ledger::quote_in(project, evid, pr["quote"].as_str().unwrap_or("")) {
                 Ok(Some(at)) => at,
@@ -881,7 +1104,45 @@ pub fn apply_suggestions(project: &str, evid: &str, proposals: &[Value]) -> Resu
         }
     }
     projects::with_lock(|| projects::write_json(&suggestions_file(project), &all))?;
-    Ok(json!({"added": added, "rejected": rejected}))
+    let (n_facts, n_about) = (facts.len(), abouts.len());
+    if n_facts + n_about > 0 {
+        projects::with_lock(|| {
+            let mut dir = directory()?;
+            let now = chrono::Utc::now().to_rfc3339();
+            for (key, name, email, f) in facts {
+                let p = entry(&mut dir, &key, &name, email.as_deref());
+                if !p.facts.iter().any(|x| x["id"] == f["id"]) {
+                    p.facts.push(f);
+                    p.facts.sort_by(|a, b| a["date"].as_str().cmp(&b["date"].as_str()));
+                    let over = p.facts.len().saturating_sub(MAX_FACTS);
+                    p.facts.drain(..over);
+                }
+            }
+            for (key, name, email, text) in abouts {
+                let p = entry(&mut dir, &key, &name, email.as_deref());
+                if p.sources.get("about").map(String::as_str) != Some("you") && p.fields.get("about") != Some(&text) {
+                    p.history.push(json!({"field": "about", "from": null, "to": null, "source": "echo", "at": now}));
+                    p.fields.insert("about".into(), text);
+                    p.fields.insert("about_thread".into(), project.into());
+                    p.sources.insert("about".into(), "echo".into());
+                }
+            }
+            projects::write_json(&file(), &dir)
+        })?;
+    }
+    Ok(json!({"added": added, "facts": n_facts, "about": n_about, "rejected": rejected}))
+}
+
+/// A person's directory entry (by key or one of their addresses), made when there is none.
+fn entry<'a>(all: &'a mut Vec<Person>, key: &str, name: &str, email: Option<&str>) -> &'a mut Person {
+    let i = match all.iter().position(|p| p.id == key || email.is_some_and(|e| p.emails.iter().any(|x| x == e))) {
+        Some(i) => i,
+        None => {
+            all.push(Person { id: key.into(), name: name.trim().into(), emails: email.map(|e| vec![e.trim().to_lowercase()]).unwrap_or_default(), ..Default::default() });
+            all.len() - 1
+        }
+    };
+    &mut all[i]
 }
 
 /// The user's answer to a suggestion: yes applies it as theirs (a placement, a directory field, a
@@ -1052,6 +1313,61 @@ mod tests {
         let x = s.iter().find(|x| x["sid"] == sid.as_str()).unwrap();
         assert_eq!((x["state"].as_str(), x["value"].as_str(), x["chosen"].as_str()), (Some("corrected"), Some("blocker"), Some("neutral")));
         assert_eq!(apply_suggestions(&p.id, ev, &[json!({"who": "Ravi Mehta", "field": "stance", "value": "blocker", "quote": "I can't sign this off"})]).unwrap()["added"], 0, "the proposed value stays turned down");
+    }
+
+    #[test]
+    fn what_is_said_about_someone_is_kept_with_its_words() {
+        let (_env, _root) = crate::paths::testenv::folders("people-facts");
+        let p = projects::create("Aurora", None, None).unwrap();
+        let q = projects::create("Borealis", None, None).unwrap();
+        place(&p.id, "Ravi Mehta", Some("ravi@northwind.example"), &json!({"role": "security"})).unwrap();
+        let l = crate::ledger::Ledger::of(&p.id).unwrap();
+        std::fs::create_dir_all(l.dir.join("evidence")).unwrap();
+        let ev = "2026-10-28_110000";
+        std::fs::write(l.dir.join(format!("evidence/{ev}.json")), json!({"id": ev, "date": "2026-10-28", "title": "Aurora weekly", "call": "2026-10-28_110000-aurora", "turns": [
+            {"ts": "00:12:21", "speaker": "Ravi Mehta", "text": "I own the SSO rollout and I want it done before the March freeze."},
+            {"ts": "00:14:00", "speaker": "Lena Fischer", "text": "I'll send the vendor list on Friday, I run procurement now."}]}).to_string()).unwrap();
+        let r = apply_suggestions(&p.id, ev, &[
+            json!({"who": "Ravi Mehta", "field": "fact", "value": "Owns the SSO rollout; wants it before the March freeze.", "quote": "I own the SSO rollout and I want it done"}),
+            json!({"who": "lena@northwind.example", "name": "Lena Fischer", "field": "fact", "value": "Runs procurement.", "quote": "I run procurement now"}),
+            json!({"who": "Ravi Mehta", "field": "fact", "value": "Hates Mondays.", "quote": "words nobody said"}),
+            json!({"who": "Ravi Mehta", "field": "about", "value": "Northwind's security lead; owns SSO."}),
+        ]).unwrap();
+        assert_eq!((r["facts"].as_u64(), r["about"].as_u64(), r["rejected"].as_array().unwrap().len()), (Some(1), Some(1), 2), "{r}");
+        assert!(r["rejected"][0]["why"].as_str().unwrap().contains("sender or recipients"), "an address must be this item's: {r}");
+        // A mail from her: her address is its sender's.
+        let mail = "mail-0000aaaa";
+        std::fs::write(l.dir.join(format!("evidence/{mail}.json")), json!({"id": mail, "kind": "mail", "date": "2026-10-29", "title": "Vendors",
+            "from": {"name": "Lena Fischer", "email": "lena@northwind.example"}, "to": [{"name": "Me", "email": "me@us.example"}],
+            "turns": [{"ts": "09:00:00", "speaker": "Lena Fischer", "text": "I run procurement now, so send the vendor list to me."}]}).to_string()).unwrap();
+        let r = apply_suggestions(&p.id, mail, &[json!({"who": "lena@northwind.example", "name": "Lena Fischer", "field": "fact", "value": "Runs procurement.", "quote": "I run procurement now"})]).unwrap();
+        assert_eq!(r["facts"], 1, "{r}");
+        // Read again: nothing twice.
+        apply_suggestions(&p.id, ev, &[json!({"who": "Ravi Mehta", "field": "fact", "value": "Owns SSO.", "quote": "i own the SSO rollout and I want it done"})]).unwrap();
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 10, 30).unwrap();
+        let v = of_thread(&p.id, today).unwrap();
+        let who = |n: &str| v["people"].as_array().unwrap().iter().find(|x| x["name"] == n).unwrap().clone();
+        let ravi = who("Ravi Mehta");
+        assert_eq!(ravi["facts"].as_array().unwrap().len(), 1);
+        assert_eq!((ravi["facts"][0]["ts"].as_str(), ravi["facts"][0]["thread"].as_str()), (Some("00:12:21"), Some(p.id.as_str())));
+        assert_eq!((ravi["about"].as_str(), ravi["about_by"].as_str()), (Some("Northwind's security lead; owns SSO."), Some("echo")));
+        assert_eq!(who("Lena Fischer")["threads"], json!([p.id]), "a mail's sender is in the thread by what was said");
+        // The user's words stay theirs.
+        set(ravi["key"].as_str().unwrap(), "Ravi Mehta", Some("ravi@northwind.example"), "about", "Ravi: careful, wants everything in writing.", "you").unwrap();
+        let r = apply_suggestions(&p.id, ev, &[json!({"who": "Ravi Mehta", "field": "about", "value": "Something else."})]).unwrap();
+        assert!(r["rejected"][0]["why"].as_str().unwrap().contains("the user wrote"), "{r}");
+        // A reader sees the people of its threads only, with links to the moment.
+        let c = card(std::slice::from_ref(&p.id), "ravi@northwind.example", 10).unwrap();
+        assert_eq!(c["facts"][0]["link"], "echo://call/2026-10-28_110000-aurora?t=741");
+        assert_eq!(c["about"], "Ravi: careful, wants everything in writing.");
+        assert_eq!(find(std::slice::from_ref(&p.id), "procurement", 10).unwrap()["total"], 0, "facts aren't searched, only who they are");
+        assert_eq!(find(std::slice::from_ref(&p.id), "ravi security", 10).unwrap()["total"], 1);
+        assert_eq!(card(std::slice::from_ref(&q.id), "Ravi Mehta", 10).unwrap()["status"], "not_found");
+        // Echo's summary from one thread isn't shown to a reader of another.
+        let mut x = json!({"about": "secret", "about_by": "echo", "about_thread": p.id});
+        assert!(about_for(&x, &[(q.id.clone(), "B".into())].into_iter().collect()).is_null());
+        x["about_by"] = json!("you");
+        assert_eq!(about_for(&x, &BTreeMap::new()), "secret");
     }
 
     #[test]

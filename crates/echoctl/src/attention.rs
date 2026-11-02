@@ -204,12 +204,22 @@ pub fn collect() -> Collected {
     let brain_on = crate::brain::enabled();
     #[cfg(not(feature = "brain"))]
     let brain_on = false;
+    // A thread's mail and meeting chats are read into its work whether or not the Brain is on, by the
+    // same senders list: whom they wait for is asked here either way.
+    #[cfg(feature = "brain")]
+    let senders_asked = brain_on || crate::projects::list().iter().any(|p| !p.stage.closed() && p.sources.iter().any(|s| s.kind == "mail" || s.kind == "teams_chat"));
+    #[cfg(not(feature = "brain"))]
+    let senders_asked = false;
     if !brain_on {
-        c.quiet_kinds.extend(["sender", "brain"]);
+        c.quiet_kinds.insert("brain");
+    }
+    if !senders_asked {
+        c.quiet_kinds.insert("sender");
     }
     #[cfg(feature = "brain")]
-    if brain_on {
-        // Senders whose mail or posts wait to be read.
+    if senders_asked {
+        // Senders whose mail or posts wait to be read (with the Brain off: decided right here).
+        let go = brain_on.then(|| "brain/sources".to_string());
         for (client, l) in crate::brain::senders::load().clients {
             for w in &l.unverified {
                 out.push(item(
@@ -220,7 +230,7 @@ pub fn collect() -> Collected {
                     format!("{} · {} message{} with no DMARC verdict (a mailing list, or a domain without it) — could be forged · “{}”", w.key, w.count, if w.count == 1 { "" } else { "s" }, w.last_about),
                     false,
                     vec![act("Read anyway", false, json!({"cmd": "brain_sender", "client": client, "key": w.key, "decision": "read_unverified"})), act("Keep out", false, json!({"cmd": "brain_sender", "client": client, "key": w.key, "decision": "keep_unverified_out"}))],
-                    Some("brain/sources".into()),
+                    go.clone(),
                 ));
             }
             for w in &l.waiting {
@@ -234,10 +244,13 @@ pub fn collect() -> Collected {
                     format!("{addr} · {} message{}{auth} · “{}”", w.count, if w.count == 1 { "" } else { "s" }, w.last_about),
                     false,
                     vec![act("Trust", w.kind != "mail" || w.verified, json!({"cmd": "brain_sender", "client": client, "key": w.key, "decision": "trust"})), act("Ignore", false, json!({"cmd": "brain_sender", "client": client, "key": w.key, "decision": "ignore"}))],
-                    Some("brain/sources".into()),
+                    go.clone(),
                 ));
             }
         }
+    }
+    #[cfg(feature = "brain")]
+    if brain_on {
         if crate::brain::taxonomy::current().is_some_and(|t| t.provisional()) {
             out.push(item("taxonomy".into(), "brain", "echo", "Topics are provisional".into(), "Review the Brain's topics and terms, then accept them".into(), false, vec![], Some("brain/topics".into())));
         }

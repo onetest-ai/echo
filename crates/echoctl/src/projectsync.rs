@@ -66,6 +66,11 @@ pub fn run(id: &str) -> Result<Value> {
         Ok(w) => written.extend(w),
         Err(e) => eprintln!("project sync {id}: the meeting chat: {e:#}"),
     }
+    // Its ✉ Mail sources, trusted senders only (a source that can't be read keeps its error).
+    match ledger::mail_sync(id) {
+        Ok(w) => written.extend(w),
+        Err(e) => eprintln!("project sync {id}: mail: {e:#}"),
+    }
     let backlog = ledger::pending(id)?;
     let before = backlog.len();
     let pending: Vec<String> = backlog.into_iter().filter_map(|x| x["id"].as_str().map(str::to_owned)).take(MAX_ITEMS).collect();
@@ -150,15 +155,18 @@ pub fn run(id: &str) -> Result<Value> {
     Ok(v)
 }
 
-/// Evidence the people pass has read (`ledger/people-read.json`).
+/// Evidence the people pass has read (`ledger/people-read-2.json`). Version 2 = since it keeps facts
+/// and who someone is: everything is read once more for them (what was proposed before isn't again).
+const PEOPLE_READ: &str = "people-read-2.json";
+
 fn read_people(id: &str) -> Vec<String> {
-    fs::read(ledger_dir(id).join("people-read.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+    fs::read(ledger_dir(id).join(PEOPLE_READ)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
 }
 
 fn mark_people_read(id: &str, ids: &[String]) {
     let mut all = read_people(id);
     all.extend(ids.iter().filter(|i| !all.contains(i)).cloned().collect::<Vec<_>>());
-    let _ = paths::write_atomic(&ledger_dir(id).join("people-read.json"), &serde_json::to_vec(&all).unwrap_or_default());
+    let _ = paths::write_atomic(&ledger_dir(id).join(PEOPLE_READ), &serde_json::to_vec(&all).unwrap_or_default());
 }
 
 fn settings_file(run_id: &str) -> Result<PathBuf> {
@@ -285,8 +293,8 @@ fn due() -> Vec<String> {
             if failed_recently {
                 return false;
             }
-            // A meeting chat due a read, or a day of it not read yet.
-            if ledger::chat_due(p) || known.keys().any(|k| k.starts_with("chat-") && !processed.contains(k)) {
+            // A meeting chat or a mail source due a read, or an item of theirs not read yet.
+            if ledger::chat_due(p) || ledger::mail_due(p) || known.keys().any(|k| (k.starts_with("chat-") || k.starts_with("mail-")) && !processed.contains(k)) {
                 return true;
             }
             projects::calls_of(p).unwrap_or_default().iter().rev().take(BACKFILL).any(|(d, _)| {
