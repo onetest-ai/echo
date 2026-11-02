@@ -1460,6 +1460,19 @@ fn project_op(v: &Value) -> anyhow::Result<Option<String>> {
         "people_decide" => crate::people::decide(&id, &s("sid").unwrap_or_default(), v["yes"] == true, opt("value").as_deref())?,
         "person_answer" => crate::people::answer(&s("key").unwrap_or_default(), &s("field").unwrap_or_default(), v["use"] == true)?,
         "org_place" => crate::people::place_org(&id, &s("client").unwrap_or_default(), &v["set"])?,
+        // A thread's counterpart organisations: link one, unlink it, or make one (Profile's
+        // + Organisation; People's "Name this organisation" for a domain no organisation has).
+        "org_link" => crate::people::link_org(&id, &s("org").unwrap_or_default(), v["on"] != false)?,
+        "org_new" => {
+            let domains: Vec<String> = v["domains"].as_str().unwrap_or("").split([',', ' ']).map(str::to_owned).collect();
+            let o = pj::add_org(&s("name").unwrap_or_default(), &domains, false, false)?;
+            if !id.is_empty() {
+                crate::people::link_org(&id, &o.id, true)?;
+            }
+        }
+        "org_name" => {
+            crate::people::name_org(&s("name").unwrap_or_default(), &s("domain").unwrap_or_default(), Some(id.as_str()).filter(|t| !t.is_empty()))?;
+        }
         "person_set" => {
             let name = s("name").unwrap_or_default();
             let key = s("key").unwrap_or_else(|| crate::people::key_of(&name, opt("email").as_deref()));

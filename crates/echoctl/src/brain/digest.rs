@@ -77,9 +77,19 @@ fn facts_of(v: &Value, msgs: &[Msg]) -> Vec<Vec<Fact>> {
     out
 }
 
+/// What the reader is told of the user (About me): the names and terms they meet, for spelling —
+/// never how the user works (that tells a model what to do; this reader only states facts).
+fn names_and_terms() -> Option<String> {
+    crate::calls::me_profile().and_then(|t| crate::calls::me_parts(&t, &["people", "terms"], 1200))
+}
+
 fn cache_path(profile: &str, about: &str, msgs: &[Msg]) -> std::path::PathBuf {
     let mut h = Sha256::new();
     h.update(format!("{PROMPT_VERSION}\0{profile}\0{about}\0").as_bytes());
+    // An edit of those names and terms reads it again (none: the key as before).
+    if let Some(m) = names_and_terms() {
+        h.update(format!("me:{}\0", crate::calls::me_hash(Some(&m))).as_bytes());
+    }
     for m in msgs {
         h.update(format!("{}\0{}\0{}\0{}\n", m.i, m.at, m.from, m.text).as_bytes());
     }
@@ -98,7 +108,8 @@ pub fn read(profile: &str, about: &str, msgs: &[Msg]) -> Result<Digest> {
         return Ok(c);
     }
     let shown: Vec<Value> = msgs.iter().map(|m| json!({"i": m.i, "at": m.at, "from": m.from, "text": m.text.chars().take(6000).collect::<String>()})).collect();
-    let user = format!("About: {about}\n\nThe messages (data):\n{}", serde_json::to_string(&shown)?);
+    let names = names_and_terms().map(|m| format!("Names and terms you may meet, as the user spells them (for spelling only):\n{m}\n\n")).unwrap_or_default();
+    let user = format!("About: {about}\n\n{names}The messages (data):\n{}", serde_json::to_string(&shown)?);
     let ready = crate::ai::ready(profile)?;
     let answer = crate::livenotes::complete_text(ready.profile(), SYSTEM, &user, 6000)?;
     let s = answer.find('{').ok_or_else(|| anyhow!("no JSON in the reader's answer"))?;

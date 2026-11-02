@@ -104,10 +104,16 @@ impl Stage {
     }
 }
 
-/// An organisation the user works for or with. Its domains say whose mail and calls are its.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+/// An organisation the user works for or with. Its domains say whose mail and calls are its, and whose
+/// people are its. An **account** (a client) is one threads sit under — Threads, its page, the Brain's
+/// layers; any other is People-side only (a thread's counterpart: `Project.orgs`). One file for both,
+/// `clients.json`: an entry written before organisations is an account.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Client {
     pub id: String,
+    /// A client (threads sit under it), or an organisation only.
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub account: bool,
     pub name: String,
     #[serde(default)]
     pub aliases: Vec<String>,
@@ -125,6 +131,20 @@ pub struct Client {
     /// Its groups (departments, teams), as people are placed in them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub groups: Vec<String>,
+}
+
+fn yes() -> bool {
+    true
+}
+
+fn is_yes(b: &bool) -> bool {
+    *b
+}
+
+impl Default for Client {
+    fn default() -> Self {
+        Client { id: String::new(), account: true, name: String::new(), aliases: vec![], domains: vec![], internal: false, parent: None, relations: vec![], groups: vec![] }
+    }
 }
 
 /// Which calls belong to a project.
@@ -480,7 +500,8 @@ pub fn matches(p: &Project, clients: &[Client], f: &CallFacts) -> Option<&'stati
             return None;
         }
     }
-    let client_domains = p.client.as_deref().and_then(|c| clients.iter().find(|x| x.id == c)).map(|c| norm_domains(&c.domains)).unwrap_or_default();
+    // No domains of its own: the client's and its counterpart organisations'.
+    let client_domains: Vec<String> = p.client.iter().chain(p.orgs.iter().map(|o| &o.client)).filter_map(|c| clients.iter().find(|x| &x.id == c)).flat_map(|c| norm_domains(&c.domains)).collect();
     for r in &p.rules {
         let hit = match r {
             Rule::Series { subject, series_id } => {
@@ -545,7 +566,13 @@ pub(crate) fn write_json<T: Serialize>(path: &Path, v: &T) -> Result<()> {
     paths::write_atomic(path, &serde_json::to_vec_pretty(v)?).with_context(|| format!("writing {}", path.display()))
 }
 
+/// The accounts: organisations threads sit under.
 pub fn clients() -> Result<Vec<Client>> {
+    Ok(orgs()?.into_iter().filter(|c| c.account).collect())
+}
+
+/// Every organisation, accounts and the others (whose people they are, a thread's counterparts).
+pub fn orgs() -> Result<Vec<Client>> {
     let p = dir().join(CLIENTS);
     match fs::read(&p) {
         Ok(b) => serde_json::from_slice(&b).with_context(|| format!("reading {}", p.display())),
@@ -793,7 +820,7 @@ pub fn set_logo(id: &str, file: Option<&Path>) -> Result<()> {
 /// Give a client a logo (image bytes), or take it away (None).
 pub fn set_client_logo(id: &str, bytes: Option<&[u8]>) -> Result<()> {
     let _l = lock()?;
-    if !clients()?.iter().any(|c| c.id == id) {
+    if !orgs()?.iter().any(|c| c.id == id) {
         bail!("no client {id:?}");
     }
     write_logo(&client_logo_stem(id)?, bytes)
@@ -823,15 +850,24 @@ pub fn delete(id: &str) -> Result<()> {
 }
 
 pub fn add_client(name: &str, domains: &[String], internal: bool) -> Result<Client> {
+    add_org(name, domains, internal, true)
+}
+
+/// A new organisation: an account (`account`) or People-side only.
+pub fn add_org(name: &str, domains: &[String], internal: bool, account: bool) -> Result<Client> {
     let _l = lock()?;
-    let mut all = clients()?;
+    let mut all = orgs()?;
     if name.trim().is_empty() {
-        bail!("a client needs a name");
+        bail!("an organisation needs a name");
+    }
+    let ds = norm_domains(domains);
+    if let Some((d, o)) = ds.iter().find_map(|d| all.iter().find(|c| norm_domains(&c.domains).contains(d)).map(|o| (d, o))) {
+        bail!("{d} is already {}'s", o.name);
     }
     let base = crate::recorder::slugify(name);
     let base = if base.is_empty() { "client".to_string() } else { base };
     let id = std::iter::once(base.clone()).chain((2..).map(|n| format!("{base}-{n}"))).find(|id| !all.iter().any(|c| &c.id == id)).unwrap_or(base);
-    let c = Client { id, name: name.trim().to_string(), domains: norm_domains(domains), internal, ..Default::default() };
+    let c = Client { id, name: name.trim().to_string(), domains: ds, internal, account, ..Default::default() };
     all.push(c.clone());
     write_json(&dir().join(CLIENTS), &all)?;
     Ok(c)
@@ -839,23 +875,26 @@ pub fn add_client(name: &str, domains: &[String], internal: bool) -> Result<Clie
 
 pub fn update_client(id: &str, f: impl FnOnce(&mut Client) -> Result<()>) -> Result<Client> {
     let _l = lock()?;
-    let mut all = clients()?;
-    let c = all.iter_mut().find(|c| c.id == id).ok_or_else(|| anyhow!("no client {id:?}"))?;
+    let mut all = orgs()?;
+    let c = all.iter_mut().find(|c| c.id == id).ok_or_else(|| anyhow!("no organisation {id:?}"))?;
     f(c)?;
     c.id = id.to_string();
     c.domains = norm_domains(&c.domains);
     if c.name.trim().is_empty() {
-        bail!("a client needs a name");
+        bail!("an organisation needs a name");
     }
     let c = c.clone();
+    if !c.account && list().iter().any(|p| p.client.as_deref() == Some(id)) {
+        bail!("{} has threads under it: it stays an account", c.name);
+    }
     write_json(&dir().join(CLIENTS), &all)?;
     Ok(c)
 }
 
-/// A client without projects can go.
+/// A client without projects can go (an organisation too: its threads stop listing it).
 pub fn remove_client(id: &str) -> Result<()> {
     let _l = lock()?;
-    let mut all = clients()?;
+    let mut all = orgs()?;
     if list().iter().any(|p| p.client.as_deref() == Some(id)) {
         bail!("{id} still has projects: move or delete them first");
     }
@@ -865,6 +904,20 @@ pub fn remove_client(id: &str) -> Result<()> {
         bail!("no client {id:?}");
     }
     write_logo(&client_logo_stem(id)?, None)?;
+    write_json(&dir().join(CLIENTS), &all)?;
+    // Nothing points at it any more: threads' counterparts, other organisations' parent and relations.
+    for p in list().into_iter().filter(|p| p.orgs.iter().any(|o| o.client == id)) {
+        let mut p = p;
+        p.orgs.retain(|o| o.client != id);
+        write_json(&profile_path(&p.id)?, &p)?;
+    }
+    let mut all = orgs()?;
+    for c in all.iter_mut() {
+        if c.parent.as_deref() == Some(id) {
+            c.parent = None;
+        }
+        c.relations.retain(|r| r.to != id);
+    }
     write_json(&dir().join(CLIENTS), &all)
 }
 
@@ -876,14 +929,14 @@ fn me() -> Option<Person> {
 
 /// The project's calls, oldest first, each with why it belongs.
 pub fn calls_of(p: &Project) -> Result<Vec<(PathBuf, &'static str)>> {
-    let clients = clients()?;
+    let clients = orgs()?;
     let me = me();
     Ok(calls::all_calls().into_iter().filter_map(|d| matches(p, &clients, &CallFacts::of(&d, me.as_ref())).map(|w| (d, w))).collect())
 }
 
 /// The projects a call belongs to, with why.
 pub fn of_call(dir: &Path) -> Result<Vec<(Project, &'static str)>> {
-    let clients = clients()?;
+    let clients = orgs()?;
     let f = CallFacts::of(dir, me().as_ref());
     Ok(list().into_iter().filter_map(|p| matches(&p, &clients, &f).map(|w| (p, w))).collect())
 }
@@ -891,7 +944,7 @@ pub fn of_call(dir: &Path) -> Result<Vec<(Project, &'static str)>> {
 /// The projects a meeting that is starting belongs to by their rules (no pins: the call has no
 /// stamp yet) — for its vocabulary and live notes.
 pub fn of_meeting(m: &MeetingContext) -> Vec<Project> {
-    let Ok(clients) = clients() else { return vec![] };
+    let Ok(clients) = orgs() else { return vec![] };
     let f = CallFacts::of_meeting(m, me().as_ref());
     list().into_iter().filter(|p| matches(p, &clients, &f).is_some()).collect()
 }
@@ -900,7 +953,7 @@ pub fn of_meeting(m: &MeetingContext) -> Vec<Project> {
 /// added by hand to this very event.
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn for_event(m: &MeetingContext) -> Vec<Value> {
-    let Ok(clients) = clients() else { return vec![] };
+    let Ok(clients) = orgs() else { return vec![] };
     let f = CallFacts::of_meeting(m, me().as_ref());
     list().iter().filter(|p| !p.stage.closed()).filter_map(|p| matches(p, &clients, &f).map(|w| chip(p, w))).collect()
 }
@@ -951,7 +1004,7 @@ fn people_of(p: &Project, calls: &[(PathBuf, &'static str)], me: Option<&Person>
 /// other people are people the project meets, or its subject names the project or one of its
 /// terms. `why` says which, in words.
 pub fn suggest(call: &Path) -> Result<Vec<Value>> {
-    let clients = clients()?;
+    let clients = orgs()?;
     let me = me();
     let f = CallFacts::of(call, me.as_ref());
     let mut out = vec![];
@@ -1026,7 +1079,7 @@ fn main_domain(f: &CallFacts, skip: &BTreeSet<String>) -> Option<String> {
 /// calls and its client (one you have, or a new one for an unknown domain). Deterministic; rejected
 /// ones never come back. Newest first.
 pub fn found() -> Result<Vec<Value>> {
-    let clients = clients()?;
+    let clients = orgs()?;
     let projects = list();
     let me = me();
     let rejected = found_state().rejected;
@@ -1059,12 +1112,15 @@ pub fn found() -> Result<Vec<Value>> {
             }
         }
         let dom = doms.into_iter().max_by_key(|(_, n)| *n).map(|(d, _)| d);
-        let (client, new_client) = match dom.as_deref() {
+        // Its client when the domain is an account's; else the organisation it is with — one you have,
+        // or a new one named from the domain (a counterpart, never an account unless you pick it as one).
+        let (client, org, new_client) = match dom.as_deref() {
             Some(d) => match client_of(d) {
-                Some(c) => (Some(c.id.clone()), Value::Null),
-                None => (None, json!({"name": name_from_domain(d), "domain": d})),
+                Some(c) if c.account => (Some(c.id.clone()), None, Value::Null),
+                Some(c) => (None, Some(json!({"id": c.id, "name": c.name, "domain": d})), Value::Null),
+                None => (None, None, json!({"name": name_from_domain(d), "domain": d})),
             },
-            None => (None, Value::Null),
+            None => (None, None, Value::Null),
         };
         let latest = members.iter().filter_map(|(_, f)| f.started).max();
         for (d, _) in &members {
@@ -1072,7 +1128,8 @@ pub fn found() -> Result<Vec<Value>> {
         }
         out.push(json!({
             "key": key, "kind": kind, "name": name, "why": why, "rules": rules,
-            "client": client, "new_client": new_client, "latest": latest.map(|t| t.to_rfc3339()),
+            "client": client, "org": org.unwrap_or_else(|| if new_client.is_null() { Value::Null } else { json!({"new": true, "name": new_client["name"], "domain": new_client["domain"]}) }),
+            "new_client": new_client, "latest": latest.map(|t| t.to_rfc3339()),
             "calls": members.iter().rev().map(|(d, _)| call_row(d, kind)).collect::<Vec<_>>(),
         }));
     };
@@ -1122,9 +1179,11 @@ fn found_one(key: &str) -> Result<Value> {
 }
 
 /// Make the project a candidate proposes: `name` and `client` as the user left them (a client id,
-/// "new" for the candidate's new client, "" for none).
+/// "new" for the candidate's new client, "" for none). Its organisation (one you have, or a new one
+/// from its domain) becomes the thread's counterpart — unless it was just made its client.
 pub fn found_accept(key: &str, name: Option<&str>, client: Option<&str>) -> Result<Project> {
     let c = found_one(key)?;
+    let made_client = client == Some("new");
     let client = match client {
         Some("new") => {
             let nc = &c["new_client"];
@@ -1146,8 +1205,16 @@ pub fn found_accept(key: &str, name: Option<&str>, client: Option<&str>) -> Resu
             r => r,
         })
         .collect();
+    let org = match (&c["org"], made_client) {
+        (o, false) if o["new"] == true => Some(add_org(o["name"].as_str().unwrap_or("Organisation"), &[o["domain"].as_str().unwrap_or("").to_string()], false, false)?.id),
+        (o, false) => o["id"].as_str().map(str::to_owned),
+        _ => None,
+    };
     update(&p.id, |p| {
         p.rules = rules;
+        if let Some(o) = org {
+            p.orgs.push(OrgPlace { client: o, ..Default::default() });
+        }
         Ok(())
     })
 }
@@ -1228,8 +1295,11 @@ pub fn overview() -> Result<Value> {
             x
         })
         .collect();
+    // Every organisation (accounts too): what a thread's counterparts are picked from.
+    let orgs: Vec<Value> = orgs()?.into_iter().map(|c| json!({"id": c.id, "name": c.name, "domains": c.domains, "account": c.account, "internal": c.internal})).collect();
     Ok(json!({
         "clients": clients,
+        "orgs": orgs,
         "projects": projects,
         "stages": Stage::ALL.map(|s| json!({"id": s.id(), "group": s.group()})),
     }))
@@ -1589,6 +1659,38 @@ mod tests {
         found_reject("domain:contoso.example").unwrap();
         assert!(found().unwrap().is_empty());
         assert!(found_accept("domain:contoso.example", None, None).is_err());
+    }
+
+    #[test]
+    fn organisations_are_counterparts_not_accounts() {
+        let (_env, _root) = paths::testenv::folders("projects-orgs");
+        let contoso = add_client("Contoso Systems", &["contoso.example".into()], true).unwrap();
+        let p = create("Orbit pursuit", Some(&contoso.id), None).unwrap();
+        update(&p.id, |p| {
+            p.rules = vec![Rule::People { domains: vec![] }];
+            Ok(())
+        })
+        .unwrap();
+        let zach = person("Zach Lee", "zach@orbit.example");
+        let c = call("2026-10-29_160000-orbit", Some(meeting("Orals prep", &[zach])), None);
+        assert!(calls_of(&load(&p.id).unwrap()).unwrap().is_empty(), "the client's domains are colleagues': nothing matches yet");
+        // Orbit as an organisation: not a client, never a thread's account; its domains join the people rule.
+        let orbit = add_org("Orbit USA", &["orbit.example".into()], false, false).unwrap();
+        assert!(add_org("Orbit again", &["orbit.example".into()], false, false).is_err(), "a domain is one organisation's");
+        assert!(!clients().unwrap().iter().any(|x| x.id == orbit.id) && orgs().unwrap().iter().any(|x| x.id == orbit.id));
+        assert!(update(&p.id, |p| { p.client = Some(orbit.id.clone()); Ok(()) }).is_err(), "a thread sits under an account only");
+        update(&p.id, |p| {
+            p.orgs.push(OrgPlace { client: orbit.id.clone(), ..Default::default() });
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(of_call(&c).unwrap().iter().map(|(p, w)| (p.name.as_str(), *w)).collect::<Vec<_>>(), [("Orbit pursuit", "people")]);
+        // Written as before organisations: an account. Not written when it is one.
+        let raw = fs::read_to_string(dir().join(CLIENTS)).unwrap();
+        assert!(raw.contains("\"account\": false") && raw.matches("\"account\"").count() == 1, "{raw}");
+        // Gone: no thread lists it any more.
+        remove_client(&orbit.id).unwrap();
+        assert!(load(&p.id).unwrap().orgs.is_empty());
     }
 
     #[test]

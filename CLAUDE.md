@@ -332,6 +332,17 @@ organised by a colleague; 85 cues, 3 chat messages) and a 32-min call (149 cues,
 ## Projects (`projects.rs`; plan and phases: `docs/projects-design.md`)
 **The window calls them Threads** (the activity, + Thread, New thread, the palette, Settings — the user's word, since
 2026-10-30); the code, the CLI (`echoctl project …`), the API and the data folder (`<home>/projects/`) keep "project".
+**Organisations and clients** (2026-11-02, #36): `clients.json` holds organisations (name, other names, domains,
+internal, logo, parent, relations, groups); a **client** is one marked `account` (the default: an entry written before
+organisations is one, so nothing moved). `projects::clients()` = accounts — Threads, a thread's client, the client page,
+the Brain's layers and scopes, senders —; `projects::orgs()` = all — whose people are whose (`people::org_of`, the org
+chart, the map), rule matching, Found for you. A thread's **counterparts** are its `orgs` (`OrgPlace`, placed on the map
+as before): its `people` rule with no domains of its own takes its client's and theirs; People shows their people
+under them. Made from Profile → Organisations (+ Organisation: one you have, or New organisation…; IPC `project {op:
+org_link | org_new}`), a person's unknown domain → Name this organisation (`org_name`: new organisation, this
+thread's counterpart), Found for you (an unknown domain proposes a new organisation, a counterpart, not a client —
+unless New client is picked) and `echoctl org list|add|set|remove` (`--thread` links, `--unlink`, `--account`). A domain
+is one organisation's; one with threads under it stays an account; removing one unlinks it everywhere.
 Clients (name, domains, internal) and projects as files: `<home>/projects/clients.json`, `<home>/projects/<id>/`
 (`profile.json`, `brief.md`, optional `logo.png|jpg|webp` ≤ 512 KB, checked by its first bytes; a client's logo:
 `<home>/projects/clients/<id>.<ext>`; set from Profile — Choose…, or dropped on the tile: IPC `project {op: logo |
@@ -999,7 +1010,14 @@ frames). A renamed call's old page (generator meta) is replaced, never another f
   the asset's `digest` from the API (required: the builds are unsigned), run by `msiexec /qn`
   (per-user, no elevation; the MSI quits Echo, replaces the files, starts it). Every platform
   checks the digest when the API gives one. Code signing would add a publisher check on top.
-- `me.md` profile → `context.me_profile`; `echoctl compose` opens a mailto draft (never sends);
+- `me.md` profile (About me, `calls::me_profile`) → `context.me_profile`; read in parts by kind (`calls::me_parts`:
+  blocks by heading or "Label:" line — identity, people, terms, patterns ("How I work"), style): the threads' sync
+  gets all of it (`project ledger <id> context` and `people-context` `me_profile`, `verify-prep`'s answer
+  `me_patterns`; EXTRACT / VERIFY / PEOPLE apply the patterns as defaults, the words win), Claude in the window too (a
+  `SessionStart` hook — startup, compact, clear; a resume only when it changed — adds `<about_me>`), live notes and
+  questions who I am / people / terms (`livenotes::call_header`, ≤ 1500 chars), the Brain's quarantine reader people and
+  terms only, for spelling (its cache key carries their hash: an edit reads mail and posts again); Settings → About me
+  says so; `echoctl compose` opens a mailto draft (never sends);
   `calls::recap` (deterministic "last time" bullets) in the Record dialog and Upcoming menu;
   tray "Add a note…" while recording; "Minutes ready" notification.
 - Minutes bullets carry `[mm:ss]`; the window's page and the pane turn them into jumps; `actions.json` items have

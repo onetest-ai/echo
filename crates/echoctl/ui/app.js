@@ -1910,13 +1910,15 @@ function settingsView() {
 
 /** The profile the minutes read (me.md): shown rendered (the minutes' own safe Markdown), edited in place. */
 function meProfileCard(mp) {
-  const head = (ctl) => `<div class="set-row"><div><b>Profile for the minutes</b><div class="set-sub">Your role, your threads, how you like notes written — the minutes read it.</div></div><div class="set-ctl">${ctl}</div></div>`
+  const head = (ctl) => `<div class="set-row"><div><b>Your profile</b><div class="set-sub">Who you are, the people and terms around you, how you work and like notes written. Sections by heading: “People…”, “Terms…”, “How I work…”, “How I like notes…”.</div></div><div class="set-ctl">${ctl}</div></div>`
+  // Who reads which part (`calls::me_parts`): the readers of other people's words get the least.
+  const readers = `<div class="set-sub me-readers"><b>Who reads it</b> · minutes, the threads' sync (work and people) and Claude in the window: all of it — your patterns are their defaults, what was said wins · live notes and questions: who you are, people and terms · the Brain's mail and channel reader: people and terms only, for spelling</div>`
   if (S.meEdit != null) {
-    return `<section class="set-sec"><div class="set-card">${head('<button class="btn ghost" data-me-cancel>Cancel</button><button class="btn primary" data-me-save>Save</button>')}
+    return `<section class="set-sec"><div class="set-card">${head('<button class="btn ghost" data-me-cancel>Cancel</button><button class="btn primary" data-me-save>Save</button>')}${readers}
       <div class="me-edit"><textarea id="me-profile" spellcheck="true" aria-label="Your profile (Markdown)">${esc(S.meEdit)}</textarea><div class="set-sub">Markdown: # for headings, - for lists. ⌘S / Ctrl+S saves, Esc cancels.</div></div></div></section>`
   }
   const body = mp && mp.text.trim() ? `<div class="doc me-doc">${mp.html}</div>` : '<div class="me-doc set-sub">Nothing yet — tell the minutes who you are.</div>'
-  return `<section class="set-sec"><div class="set-card">${head('<button class="btn" data-me-edit>Edit</button>')}${body}</div></section>`
+  return `<section class="set-sec"><div class="set-card">${head('<button class="btn" data-me-edit>Edit</button>')}${readers}${body}</div></section>`
 }
 
 /** The terms the minutes learned: each with the meetings and people it is used again for. */
@@ -2127,7 +2129,7 @@ const SETTINGS_BODY = {
   },
   me(st) {
     const me = st.me || {}
-    return `<h2>About me</h2><p class="set-lead">So the minutes know which voice is you, and write to you.</p>` + setCard('', [
+    return `<h2>About me</h2><p class="set-lead">So Echo knows which voice is you, whose work is whose, and how to write to you.</p>` + setCard('', [
       setRow('Name', '', `<input class="search set-input" id="me-name" value="${esc(me.name || '')}" placeholder="Your name" aria-label="Your name">`),
       setRow('Email', 'Tells your colleagues from external people.', `<input class="search set-input" id="me-email" value="${esc(me.email || '')}" placeholder="you@company.com" aria-label="Your email">`),
     ]) + meProfileCard(st.me_profile)
@@ -2735,13 +2737,16 @@ function foundView(data) {
     const titles = calls.slice(0, 4).map((x) => `<button class="pj-call" data-call="${esc(x.name)}"><span class="pj-call-d">${x.started_at ? esc(dayLabel(new Date(x.started_at))) : ''}</span><span class="t">${esc(x.title || x.name)}</span></button>`).join('')
     const more = calls.length > 4 ? `<div class="set-sub" style="padding:6px 14px">+ ${calls.length - 4} more</div>` : ''
     const nc = c.new_client
-    const def = c.client || (nc ? 'new' : '')
+    const def = c.client || ''
+    // The organisation it is with joins it as a counterpart (made from its domain when new) —
+    // unless you make it the thread's client.
+    const org = c.org ? `<div class="set-sub">With ${esc(c.org.name)}${c.org.new ? ` (${esc(c.org.domain)}) — a new organisation, not a client` : ''}: its counterpart</div>` : ''
     const clientSel = `<select class="found-client" aria-label="Client"><option value=""${def === '' ? ' selected' : ''}>No client</option>${nc ? `<option value="new"${def === 'new' ? ' selected' : ''}>New client: ${esc(nc.name)} (${esc(nc.domain)})</option>` : ''}${clients.map((x) => `<option value="${esc(x.id)}"${def === x.id ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select>`
     const merge = projects.length ? `<select class="found-merge" aria-label="Add to a thread"><option value="">Add to a thread…</option>${projects.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select>` : ''
     return `<section class="set-card found-card" data-key="${esc(c.key)}">
       <div class="set-row"><div class="found-top">${projIcon({ id: c.key, name: c.name, color: PJ_COLORS[ProjectArt.hash(c.key) % PJ_COLORS.length] }, 28)}<input class="found-name" value="${esc(c.name)}" aria-label="Thread name"></div>
         <div class="set-ctl"><button class="btn primary" data-pj="found-accept">Accept</button><button class="btn ghost" data-pj="found-reject" title="Not a thread — never suggested again">Reject</button></div></div>
-      <div class="set-row"><div><div class="set-sub">${esc(c.why)}</div></div><div class="set-ctl">${clientSel}${merge}</div></div>
+      <div class="set-row"><div><div class="set-sub">${esc(c.why)}</div>${org}</div><div class="set-ctl">${clientSel}${merge}</div></div>
       <div class="pj-calls">${titles}${more}</div></section>`
   }).join('')
   const empty = `<p class="set-sub" style="margin:4px 2px">Nothing found right now. Echo suggests a thread when two or more calls that are in none share a meeting series, one outside organisation, or a Teams chat.</p>`
@@ -2889,6 +2894,14 @@ function projectProfile(p, data) {
   const cl = projClient(p.client)
   const clientPick = `<label class="fchip">${cl ? 'Change' : 'Choose'} ▾<select data-pj-field="client" data-id="${id}" aria-label="Client"><option value=""${!p.client ? ' selected' : ''}>No client</option>${clients.map((c) => `<option value="${esc(c.id)}"${p.client === c.id ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}<option value="__new">+ New client…</option></select></label>`
   const newClient = S.pj.newClient ? `<div class="pj-inline"><input id="pj-client-name" placeholder="Client name" aria-label="Client name" autofocus><input id="pj-client-domains" placeholder="Mail domains, e.g. northwind.example" aria-label="Mail domains"><button class="btn primary" data-pj="client-add">Add</button><button class="btn ghost" data-pj="client-cancel">Cancel</button></div>` : ''
+  // Counterparts: organisations the thread is with besides its client (their people, the people rule).
+  const allOrgs = data.orgs || clients
+  const mine = (p.orgs || []).map((o) => allOrgs.find((c) => c.id === o.client) || { id: o.client, name: o.client, domains: [] })
+  const orgPick = S.pj.adding === 'org' ? `<span class="tok-in"><select id="pj-org-pick" aria-label="Organisation"><option value="">Organisation…</option>${allOrgs.filter((c) => c.id !== p.client && !c.internal && !mine.some((m) => m.id === c.id)).map((c) => `<option value="${esc(c.id)}">${esc(c.name)}${c.domains.length ? ` · ${esc(c.domains[0])}` : ''}</option>`).join('')}<option value="__new">+ New organisation…</option></select></span>`
+    : '<button class="tok add" data-pj="adding" data-what="org">+ Organisation</button>'
+  const newOrg = S.pj.newOrg ? `<div class="pj-inline"><input id="pj-org-name" placeholder="Organisation, e.g. Orbit USA" aria-label="Organisation name" autofocus><input id="pj-org-domains" placeholder="Mail domains, e.g. orbit.com" aria-label="Mail domains"><button class="btn primary" data-pj="org-new">Add</button><button class="btn ghost" data-pj="org-new-cancel">Cancel</button></div>` : ''
+  const orgsRow = mine.map((c) => tok(esc(c.name), { op: 'org-unlink', org: c.id }, (c.domains || []).join(', '))).join('') + orgPick + newOrg
+    + '<div class="pf-sub">Who this thread is with besides its client: their people are theirs in People, and the people rule counts their domains</div>'
   const clientRow = (cl ? `<button class="tok link" data-pj="client" data-id="${esc(cl.id)}" title="Open ${esc(cl.name)}">${clientIcon(cl, 14)}${esc(cl.name)}</button><span class="pf-sub pf-inl">${cl.domains.length ? `its domains: ${esc(cl.domains.join(', '))}` : 'no mail domains yet — the people rule needs them'}</span>` : '<span class="pf-sub pf-inl">No client — internal work, or not set</span>') + clientPick + newClient
   // Since: text; click to change.
   // Documents, posts and mail dated before this are history in the Brain: kept, not searched unless asked.
@@ -2920,6 +2933,7 @@ function projectProfile(p, data) {
   return `<div class="pf-card">
     ${row('Stage', `<div class="pf-stages">${groups}</div><div class="pf-sub">${esc(hist)}${reason}</div>`)}
     ${row('Client', clientRow)}
+    ${row('Organisations', orgsRow)}
     ${row('Since', since)}
     ${brainOn() ? row('History', history) : ''}
     ${row('Calls', calls)}
@@ -3237,10 +3251,14 @@ function personPanel() {
   const src = (f) => x.sources && x.sources[f] ? `<span class="set-sub"> · ${esc(SRC[x.sources[f]] || x.sources[f])}</span>` : ''
   const field = (f, label, input) => [label, S.pj.ppEdit === f ? input : `<button class="wp-val${x[f] ? '' : ' empty'}" data-pp="edit" data-f="${f}">${x[f] ? esc(x[f]) : '<u>Set</u>'}</button>${src(f)}`]
   const others = d.people.filter((y) => y.key !== x.key && y.in_thread)
-  const orgs = (S.pj.data && S.pj.data.clients) || []
+  const orgs = (S.pj.data && (S.pj.data.orgs || S.pj.data.clients)) || []
+  // A domain no organisation has: name it (a new organisation, this thread's counterpart).
+  const nameOrg = x.side === 'other' && x.domain && !x.org
+    ? (S.pj.nameOrg === x.domain ? `<span class="pp-rel-add"><input class="wp-in" id="pp-org-name" placeholder="Who is ${esc(x.domain)}?" aria-label="Organisation name" autofocus><button class="btn primary" data-pp="org-name" data-domain="${esc(x.domain)}">Add</button></span>`
+      : `<button class="link-btn" data-pp="org-name-ask" data-domain="${esc(x.domain)}">Name this organisation (${esc(x.domain)})</button>`) : ''
   const rows = [
     field('title', 'Title', `<input class="wp-in" data-pp-set="title" value="${esc(x.title || '')}" aria-label="Title" autofocus>`),
-    ['Organisation', `<select class="wp-in" data-pp-set="org" aria-label="Organisation"><option value="">${esc(x.org && !(x.sources || {}).org ? `${x.org.name} (by mail domain)` : x.side === 'yours' ? 'Your company' : 'Not known')}</option>${orgs.map((c) => `<option value="${esc(c.id)}"${(x.sources || {}).org && x.org && x.org.id === c.id ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select>`],
+    ['Organisation', `<select class="wp-in" data-pp-set="org" aria-label="Organisation"><option value="">${esc(x.org && !(x.sources || {}).org ? `${x.org.name} (by mail domain)` : x.side === 'yours' ? 'Your company' : 'Not known')}</option>${orgs.map((c) => `<option value="${esc(c.id)}"${(x.sources || {}).org && x.org && x.org.id === c.id ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select>${nameOrg}`],
     field('group', 'Group', `<input class="wp-in" data-pp-set="group" value="${esc(x.group || '')}" list="pp-groups" aria-label="Group" autofocus><datalist id="pp-groups">${[...new Set(d.people.map((y) => y.group).filter(Boolean).concat(...d.orgs.map((o) => o.groups || [])))].map((g) => `<option value="${esc(g)}">`).join('')}</datalist>`),
     ['Reports to', `<select class="wp-in" data-pp-set="reports_to" aria-label="Reports to"><option value="">nobody set</option>${others.map((y) => `<option value="${esc(y.key)}"${x.reports_to === y.key ? ' selected' : ''}>${esc(y.name)}</option>`).join('')}</select>`],
     ['Matters', `<select class="wp-in" data-pp-set="matters" aria-label="How much they matter to you"><option value="">not set</option>${MATTERS.map((m) => `<option${x.matters === m ? ' selected' : ''}>${m}</option>`).join('')}</select>`],
@@ -3292,11 +3310,13 @@ function orgPanel(d, id) {
   if (!o) return '<div class="wp-empty">Not in this view any more.</div>'
   const thread = S.pj.client || S.view === 'brain' ? null : S.pj.sel
   const pl = thread ? (o.places || []).find((p) => p.thread === thread) || {} : placeOf(o) || {}
-  const all = ((S.pj.data && S.pj.data.clients) || []).filter((c) => c.id !== o.id)
+  const all = ((S.pj.data && (S.pj.data.orgs || S.pj.data.clients)) || []).filter((c) => c.id !== o.id)
+  const linked = thread && ((projById(thread) || {}).orgs || []).some((x) => x.client === o.id)
   const KINDS = REL_KINDS
   const lvl = (f) => `<span class="pp-lvl" role="group" aria-label="${f}">${[1, 2, 3].map((n) => `<button data-pp="org-level" data-id="${esc(o.id)}" data-f="${f}" data-n="${n}" aria-pressed="${(pl[f] || 0) >= n}" title="${['low', 'mid', 'high'][n - 1]}"></button>`).join('')}<span class="set-sub">${pl[f] ? ['low', 'mid', 'high'][pl[f] - 1] : 'not set'}</span></span>`
   return `<div class="wp pp-panel">
-    <div class="pp-p-top">${ppAv(o.name, pl.stance, true)}<div style="min-width:0"><button class="wp-name pp-name" data-pj="client" data-id="${esc(o.id)}">${esc(o.name)}</button><div class="set-sub">${o.internal ? 'your company' : 'organisation'} · ${o.people} ${o.people === 1 ? 'person' : 'people'}${o.domains && o.domains.length ? ` · ${esc(o.domains.join(', '))}` : ''}</div></div></div>
+    <div class="pp-p-top">${ppAv(o.name, pl.stance, true)}<div style="min-width:0">${o.account === false ? `<span class="wp-name pp-name">${esc(o.name)}</span>` : `<button class="wp-name pp-name" data-pj="client" data-id="${esc(o.id)}">${esc(o.name)}</button>`}<div class="set-sub">${o.internal ? 'your company' : o.account === false ? 'organisation' : 'client'} · ${o.people} ${o.people === 1 ? 'person' : 'people'}${o.domains && o.domains.length ? ` · ${esc(o.domains.join(', '))}` : ''}</div></div></div>
+    ${thread && !o.internal && (projById(thread) || {}).client !== o.id ? `<div class="set-sub">${linked ? `A counterpart of this thread · <button class="link-btn" data-pj="org-unlink" data-org="${esc(o.id)}">Unlink</button>` : `<button class="link-btn" data-pj="org-link" data-org="${esc(o.id)}">Make it this thread's counterpart</button>`}</div>` : ''}
     ${thread ? `<div class="wp-h">In ${esc((projById(thread) || {}).name || 'this thread')}</div><div class="wp-facts">
       <span>Stance</span><div><select class="wp-in" data-pp-org="${esc(o.id)}" data-f="stance" aria-label="Stance"><option value="">not set</option>${STANCES.map((s) => `<option${pl.stance === s ? ' selected' : ''}>${s}</option>`).join('')}</select></div>
       <span>Influence</span><div>${lvl('influence')}</div><span>Interest</span><div>${lvl('interest')}</div></div>` : ''}
@@ -3372,6 +3392,8 @@ document.addEventListener('click', (e) => {
     case 'about-cancel': S.pj.aboutEdit = null; return render()
     case 'about-save': return aboutSave()
     case 'all-facts': S.pj.ppAllFacts = !S.pj.ppAllFacts; return render()
+    case 'org-name-ask': S.pj.nameOrg = d.domain; render(); { const i = $('#pp-org-name'); if (i) i.focus() } return
+    case 'org-name': { const name = ($('#pp-org-name') || {}).value || ''; if (!name.trim()) return; S.pj.nameOrg = null; send({ cmd: 'project', op: 'org_name', id: S.pj.client || S.view === 'brain' ? '' : S.pj.sel || '', name: name.trim(), domain: d.domain }); return setTimeout(async () => { await loadProjects(); await loadPeople(); render() }, 300) }
     case 'edit': S.pj.ppEdit = d.f; render(); { const i = document.querySelector('[data-pp-set][autofocus],[data-pp-place][autofocus]'); if (i) { i.focus(); i.select && i.select() } } return
     case 'level': { const x = personOf(S.pj.person), pl = x && (x.places || []).find((p) => p.thread === S.pj.sel); const cur = pl && pl[d.f]; return personPlace(S.pj.person, { [d.f]: cur === Number(d.n) ? '' : Number(d.n) }) }
     case 'org-level': { const o = ((S.pj.people || {}).orgs || []).find((y) => y.id === d.id), pl = o && (o.places || []).find((p) => p.thread === S.pj.sel); const cur = pl && pl[d.f]; return peopleSend('org_place', { client: d.id, set: { [d.f]: cur === Number(d.n) ? '' : Number(d.n) } }) }
@@ -4189,6 +4211,10 @@ document.addEventListener('click', (e) => {
     case 'brief-save': return projectSaveBrief()
     case 'client-add': { const name = $('#pj-client-name').value.trim(); if (!name) return $('#pj-client-name').focus(); S.pj.newClient = false; send({ cmd: 'project', op: 'client_add', name, domains: $('#pj-client-domains').value }); S.pj.pendingClient = name; return render() }
     case 'client-cancel': S.pj.newClient = false; return render()
+    case 'org-new': { const name = $('#pj-org-name').value.trim(); if (!name) return $('#pj-org-name').focus(); S.pj.newOrg = false; return projectSend('org_new', { name, domains: $('#pj-org-domains').value }) }
+    case 'org-new-cancel': S.pj.newOrg = false; return render()
+    case 'org-unlink': return projectSend('org_link', { org: d.org, on: false })
+    case 'org-link': return projectSend('org_link', { org: d.org, on: true })
     case 'delete-ask': S.pj.menu = false; S.pj.confirmDelete = true; return render()
     case 'delete-cancel': S.pj.confirmDelete = false; return render()
     case 'delete': { const id = S.pj.sel; S.pj.confirmDelete = false; S.pj.sel = null; S.pj.detail = null; send({ cmd: 'project', op: 'delete', id }); return go('projects') }
@@ -4231,6 +4257,12 @@ document.addEventListener('change', (e) => {
     return
   }
   if (el.dataset && el.dataset.clientField) { S.pj.pfEdit = null; return send({ cmd: 'project', op: 'client_set', id: el.dataset.id, [el.dataset.clientField]: el.value.trim() }) }
+  if (el.id === 'pj-org-pick') {
+    S.pj.adding = null
+    if (el.value === '__new') { S.pj.newOrg = true; return render() }
+    if (el.value) projectSend('org_link', { org: el.value, on: true })
+    return render()
+  }
   if (!el.dataset || !el.dataset.pjField) return
   S.pj.pfEdit = null
   if (el.dataset.pjField === 'client' && el.value === '__new') { S.pj.newClient = true; return render() }

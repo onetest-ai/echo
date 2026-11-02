@@ -1531,3 +1531,4 @@ select.set-in { width: auto; margin-right: 6px; }
 .tk-others > .tk-more { text-align: left; }
 .tk-others-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; margin-top: 8px; }
 .tk-card.tk-wait { border-style: dashed; }
+.me-readers { padding: 0 14px 8px; line-height: 1.5; }

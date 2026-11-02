@@ -189,7 +189,16 @@ pub fn hook() -> i32 {
     }
     let lines = view.as_ref().and_then(|v| view_lines(v, now, &paths::calls_dir()));
     let event = input["hook_event_name"].as_str().unwrap_or("");
-    let (changed, add) = decide(&mut sent, &session, event, lines.as_ref().map(|(l, _)| l.as_slice()), now);
+    let (mut changed, add) = decide(&mut sent, &session, event, lines.as_ref().map(|(l, _)| l.as_slice()), now);
+    // A session starting (or compacted, cleared, resumed with an About me changed since) is told who the user is.
+    if event == "SessionStart" {
+        let me = crate::calls::me_profile();
+        let (c, tell) = about_me_due(&mut sent, &session, input["source"].as_str().unwrap_or(""), me.as_deref(), now);
+        changed |= c;
+        if let (true, Some(t)) = (tell, me) {
+            println!("{}", json!({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": about_me_block(&t)}}));
+        }
+    }
     if changed {
         let _ = paths::write_atomic(&sent_file, &serde_json::to_vec(&sent).unwrap_or_default());
     }
@@ -197,6 +206,30 @@ pub fn hook() -> i32 {
         println!("{}", json!({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": block(&l, at)}}));
     }
     0
+}
+
+/// About me for a session: the user's own words, marked as theirs.
+fn about_me_block(text: &str) -> String {
+    format!("<about_me>\n{}\n</about_me>\nThe user's own description of themselves and how they work (`<home>/.echo/me.md`, Settings → About me): \
+             \"Me\" in transcripts is them. Its patterns are their defaults for filing and judging work; what was said wins.", text.trim())
+}
+
+/// Whether a starting session gets About me: always at its start and after a compaction or /clear
+/// (its context is gone); on a resume only when About me changed since this session got it.
+/// Returns (the record changed, tell it).
+fn about_me_due(sent: &mut Value, session: &str, source: &str, me: Option<&str>, now: chrono::DateTime<chrono::Utc>) -> (bool, bool) {
+    let Some(me) = me else { return (false, false) };
+    let hash = crate::calls::me_hash(Some(me));
+    let key = format!("me:{session}");
+    if source == "resume" && sent[&key]["hash"] == hash.as_str() {
+        return (false, false);
+    }
+    if !session.is_empty() {
+        if let Some(m) = sent.as_object_mut() {
+            m.insert(key, json!({"hash": hash, "at": now.to_rfc3339()}));
+        }
+    }
+    (!session.is_empty(), true)
 }
 
 /// Strict routing for the view block: the open call (and any text selected meanwhile) is described only
@@ -261,7 +294,8 @@ pub fn hook_settings(exe: &Path) -> Value {
     let command = if cfg!(windows) { format!("\"{}\" view-hook", p.replace('\\', "/")) } else { format!("'{}' view-hook", p.replace('\'', r"'\''")) };
     let h = json!([{"type": "command", "command": command, "timeout": 5}]);
     // After a compaction or a /clear the session's blocks are gone: the hook forgets it, so the next prompt gets one.
-    json!({"UserPromptSubmit": [{"hooks": h}], "SessionStart": [{"matcher": "compact|clear", "hooks": h}]})
+    // At every start it gives the session About me (`about_me_due`).
+    json!({"UserPromptSubmit": [{"hooks": h}], "SessionStart": [{"matcher": "startup|resume|compact|clear", "hooks": h}]})
 }
 
 #[cfg(test)]
@@ -330,6 +364,12 @@ mod tests {
         assert!(decide(&mut sent, "s2", "UserPromptSubmit", Some(&a), now).1, "another session gets its own");
         assert!(decide(&mut sent, "s1", "UserPromptSubmit", Some(&b), now).1, "changed");
         assert_eq!(decide(&mut sent, "s1", "SessionStart", None, now), (true, false), "compacted: forgotten");
+        // About me: at a start, again after a compaction, on a resume only when it changed.
+        assert_eq!(about_me_due(&mut sent, "s1", "startup", Some("I'm Alex"), now), (true, true));
+        assert_eq!(about_me_due(&mut sent, "s1", "resume", Some("I'm Alex"), now), (false, false));
+        assert!(about_me_due(&mut sent, "s1", "resume", Some("I'm Alex, Delivery"), now).1);
+        assert!(about_me_due(&mut sent, "s1", "compact", Some("I'm Alex, Delivery"), now).1);
+        assert_eq!(about_me_due(&mut sent, "s1", "startup", None, now), (false, false), "none written: nothing");
         assert!(decide(&mut sent, "s1", "UserPromptSubmit", Some(&b), now).1, "so it comes again");
         assert!(!decide(&mut sent, "s1", "UserPromptSubmit", None, now).1, "no view, nothing");
         // Sessions not seen for two weeks are forgotten.

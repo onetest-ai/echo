@@ -226,6 +226,12 @@ enum Cmd {
         #[command(subcommand)]
         cmd: ClientCmd,
     },
+    /// Organisations: whose people are whose (accounts — clients — and the others, a thread's
+    /// counterparts), with their mail domains (JSON)
+    Org {
+        #[command(subcommand)]
+        cmd: OrgCmd,
+    },
     /// Vocabulary (names/terms Whisper should spell right), learned automatically
     Vocab {
         #[command(subcommand)]
@@ -968,6 +974,52 @@ enum ClientCmd {
 }
 
 #[derive(Subcommand)]
+enum OrgCmd {
+    /// Every organisation (`account: false` = not a client)
+    List,
+    /// A new organisation (not an account unless --account); --thread makes it that thread's counterpart
+    Add {
+        name: String,
+        /// Mail domains (comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        domains: Vec<String>,
+        #[arg(long)]
+        thread: Option<String>,
+        /// A client: threads may sit under it
+        #[arg(long)]
+        account: bool,
+    },
+    Set {
+        id: String,
+        #[arg(long)]
+        name: Option<String>,
+        /// Replaces the domains (comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        domains: Option<Vec<String>>,
+        /// Replaces the other names (comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        aliases: Option<Vec<String>>,
+        /// The organisation it is part of (its id; "" for none)
+        #[arg(long)]
+        parent: Option<String>,
+        /// A client or not (one with threads under it stays one)
+        #[arg(long)]
+        account: Option<bool>,
+        /// A logo image (PNG, JPEG or WebP, ≤ 512 KB); "" removes it
+        #[arg(long)]
+        logo: Option<std::path::PathBuf>,
+        /// Make it this thread's counterpart
+        #[arg(long)]
+        thread: Option<String>,
+        /// No longer this thread's counterpart
+        #[arg(long)]
+        unlink: Option<String>,
+    },
+    /// Remove an organisation (an account only without threads); threads stop listing it
+    Remove { id: String },
+}
+
+#[derive(Subcommand)]
 enum AgendaCmd {
     /// Refresh today's agenda from the calendar (msgraph skill if installed); quiet no-op without
     Sync {
@@ -1236,6 +1288,7 @@ fn main() -> Result<()> {
         Cmd::Brain { cmd } => brain_command(cmd),
         Cmd::Project { cmd } => project_command(cmd),
         Cmd::Client { cmd } => client_command(cmd),
+        Cmd::Org { cmd } => org_command(cmd),
         Cmd::Context { call } => calls::context(&call),
         Cmd::Title { call, title } => calls::set_title(&call, &title),
         Cmd::Note { text } => calls::note(&text.join(" ")),
@@ -2088,6 +2141,64 @@ fn brain_command(cmd: BrainCmd) -> Result<()> {
     Ok(())
 }
 
+fn org_command(cmd: OrgCmd) -> Result<()> {
+    if notes::headless() {
+        anyhow::bail!("organisations can't be changed or listed from a run Echo started");
+    }
+    match cmd {
+        OrgCmd::List => print_json(&serde_json::to_value(projects::orgs()?)?),
+        OrgCmd::Add { name, domains, thread, account } => {
+            let o = projects::add_org(&name, &domains, false, account)?;
+            if let Some(t) = thread {
+                people::link_org(&t, &o.id, true)?;
+            }
+            print_json(&serde_json::to_value(o)?)
+        }
+        OrgCmd::Set { id, name, domains, aliases, parent, account, logo, thread, unlink } => {
+            if let Some(f) = logo {
+                let bytes = if f.as_os_str().is_empty() { None } else { Some(std::fs::read(&f)?) };
+                projects::set_client_logo(&id, bytes.as_deref())?;
+            }
+            let known = projects::orgs()?;
+            if let Some(p) = parent.as_deref().filter(|p| !p.is_empty()) {
+                if p == id || !known.iter().any(|c| c.id == p) {
+                    anyhow::bail!("no other organisation {p:?}");
+                }
+            }
+            let o = projects::update_client(&id, |c| {
+                if let Some(n) = name {
+                    c.name = n;
+                }
+                if let Some(d) = domains {
+                    c.domains = d;
+                }
+                if let Some(a) = aliases {
+                    c.aliases = a.into_iter().map(|a| a.trim().to_string()).filter(|a| !a.is_empty()).collect();
+                }
+                if let Some(p) = parent {
+                    c.parent = Some(p).filter(|p| !p.is_empty());
+                }
+                if let Some(a) = account {
+                    c.account = a;
+                }
+                Ok(())
+            })?;
+            if let Some(t) = thread {
+                people::link_org(&t, &id, true)?;
+            }
+            if let Some(t) = unlink {
+                people::link_org(&t, &id, false)?;
+            }
+            print_json(&serde_json::to_value(o)?)
+        }
+        OrgCmd::Remove { id } => {
+            projects::remove_client(&id)?;
+            println!("{id} removed");
+        }
+    }
+    Ok(())
+}
+
 fn client_command(cmd: ClientCmd) -> Result<()> {
     if notes::headless() {
         anyhow::bail!("clients can't be changed or listed from a run Echo started");
@@ -2176,7 +2287,9 @@ fn ledger_command(id: &str, cmd: LedgerCmd) -> Result<()> {
             match out {
                 Some(f) => {
                     std::fs::write(&f, serde_json::to_vec_pretty(&packets)?)?;
-                    print_json(&serde_json::json!({ "packets": packets.as_array().map(|a| a.len()), "file": f }));
+                    // How the user works (About me), for judging what counts as done or handed over.
+                    let me = calls::me_profile().and_then(|t| calls::me_parts(&t, &["identity", "patterns"], 2500));
+                    print_json(&serde_json::json!({ "packets": packets.as_array().map(|a| a.len()), "file": f, "me_patterns": me }));
                 }
                 None => print_json(&packets),
             }

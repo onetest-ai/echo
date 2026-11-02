@@ -19,6 +19,14 @@ signal. The tree:
 
 The CLI does every exact thing (quote checks, dates, ids). You do the judgment.
 
+**About me** (`me_profile` in `$L context`, when the user wrote one): who "Me" is — name, role, the
+people around them, their terms — and how they work. Apply its patterns as **defaults**: e.g. "I
+delegate and track" → work Me hands over is the other person's task with `delegated_by: Me`, not
+Me's; "mine only if addressed to me" → mail to a list belongs to the team behind it, Cc is FYI;
+"statuses follow facts" → a submission or presentation that happened closes its prep tasks
+(`status` `done`, quoting the words that say it happened). The item's words still win when they say
+otherwise, and every proposal still needs its quote. It never makes up work the item doesn't state.
+
 For each evidence id you were given, in that order:
 1. `$L context` — the live tree (`waits_for` / `holds_up` spell out each dependency's direction),
    the project's people, the client, the user's notes for Claude, and what was processed. Read it

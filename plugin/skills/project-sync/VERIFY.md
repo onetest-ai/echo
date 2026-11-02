@@ -4,7 +4,9 @@ You did not extract these. For each packet decide whether the quote, read with i
 the **claimed change on this specific node** (its `path` shows workstream › story › task). Only
 `supports` changes the tree.
 
-1. `$L verify-prep --out <run folder>/packets.json`
+1. `$L verify-prep --out <run folder>/packets.json` — its answer may carry `me_patterns`: how the
+   user ("Me") works, from their About me. Use it to read the context (e.g. "submitted" means the
+   prep is done; work Me "passed to" someone is that person's), never instead of the words.
 2. Read that file. For each packet write `{"mid": "…", "verdict": "supports|weak|wrong", "reason":
    "≤ 15 words"}` into `<run folder>/verdicts.json` (a JSON array covering every packet).
 3. `$L verify-apply --file <run folder>/verdicts.json`

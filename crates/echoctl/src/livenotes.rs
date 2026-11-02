@@ -396,13 +396,19 @@ fn call_header(dir: &Path) -> String {
         .filter_map(|p| p["name"].as_str().filter(|n| !n.is_empty()))
         .take(12)
         .collect();
-    match (title.is_empty(), people.is_empty()) {
+    // Who "Me" is, the people around them and their terms (About me's short form; never how they want
+    // work filed — that is the sync's), so names and jargon read right.
+    let me = crate::calls::me_profile().and_then(|t| crate::calls::me_parts(&t, &["identity", "people", "terms"], ME_CHARS)).map(|m| format!("About the user (\"Me\"):\n{m}\n\n")).unwrap_or_default();
+    me + &match (title.is_empty(), people.is_empty()) {
         (true, true) => String::new(),
         (false, true) => format!("Call: {title}\n\n"),
         (true, false) => format!("People invited: {}\n\n", people.join(", ")),
         (false, false) => format!("Call: {title}\nPeople invited: {}\n\n", people.join(", ")),
     }
 }
+
+/// About me's short form in a live job's prompt: at most this many characters.
+const ME_CHARS: usize = 1500;
 
 /// The notes as the model sees them again (times as mm:ss).
 fn notes_for_prompt(n: &Notes) -> String {

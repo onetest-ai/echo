@@ -522,7 +522,7 @@ pub fn context(call: &str) -> Result<()> {
         "template": pick_template(subject_of(&dir).as_deref()),
         "frames": frames,
         "chat": fs::read(dir.join("chat.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).unwrap_or(json!([])),
-        "me_profile": fs::read_to_string(me_profile_path()).ok().filter(|t| !t.trim().is_empty() && t.trim() != ME_TEMPLATE.trim()),
+        "me_profile": me_profile(),
         // This call's terms (always-on + learned for this meeting); learning: `vocab add --call`.
         "vocabulary": crate::vocab::for_call(&cfg, meeting.as_ref()),
         // The projects this call belongs to: their brief, glossary, people and notes for Claude.
@@ -642,6 +642,66 @@ pub fn me_profile_path() -> PathBuf {
 pub const ME_TEMPLATE: &str = "# About me\n\n\
 Name:\nRole:\nCompany / team:\nWhat I work on now:\nPeople I work with often (name — role):\n\
 Terms and names used in my calls:\nHow I like notes and follow-ups written (tone, length, language):\n";
+
+/// About me as the user wrote it (none: missing, empty, or still the template).
+pub fn me_profile() -> Option<String> {
+    fs::read_to_string(me_profile_path()).ok().filter(|t| !t.trim().is_empty() && t.trim() != ME_TEMPLATE.trim())
+}
+
+/// What a block of About me is, by its heading or label: `identity` (name, role, company, what I
+/// work on), `people`, `terms`, `patterns` (how I work: what the sync files as mine), `style` (how I
+/// like notes written).
+fn me_kind(label: &str) -> &'static str {
+    let l = label.to_lowercase();
+    if l.contains("how i like") || l.contains("tone") || l.contains("written") {
+        "style"
+    } else if l.contains("how i work") || l.contains("pattern") {
+        "patterns"
+    } else if l.contains("people") {
+        "people"
+    } else if l.contains("term") {
+        "terms"
+    } else {
+        "identity"
+    }
+}
+
+/// About me's blocks of these kinds, in its order, at most `max` characters — what each reader is
+/// given: the sync all of it, live notes who I am / people / terms, the Brain's readers people and
+/// terms only (never the patterns: they tell a model what to do). A block starts at a heading or at
+/// a "Label:" line (the template's form).
+pub fn me_parts(text: &str, kinds: &[&str], max: usize) -> Option<String> {
+    let mut blocks: Vec<(&'static str, String)> = vec![];
+    for line in text.lines() {
+        let t = line.trim_start();
+        if t.trim().eq_ignore_ascii_case("# about me") {
+            continue;
+        }
+        let label = t.strip_prefix('#').map(|h| h.trim_start_matches('#').trim()).or_else(|| {
+            let (l, _) = t.split_once(':')?;
+            (!t.starts_with(['-', '*']) && !l.is_empty() && l.chars().count() <= 100 && l.chars().next().is_some_and(char::is_uppercase)).then_some(l)
+        });
+        match label {
+            Some(l) => blocks.push((me_kind(l), line.to_string())),
+            None => match blocks.last_mut() {
+                Some(b) => {
+                    b.1.push('\n');
+                    b.1.push_str(line);
+                }
+                None => blocks.push(("identity", line.to_string())),
+            },
+        }
+    }
+    let out: String = blocks.into_iter().filter(|(k, _)| kinds.contains(k)).map(|(_, b)| b.trim().to_string()).filter(|b| !b.is_empty()).collect::<Vec<_>>().join("\n");
+    let out = if out.chars().count() > max { format!("{}…", out.chars().take(max).collect::<String>()) } else { out };
+    (!out.trim().is_empty()).then_some(out)
+}
+
+/// A short hash of what a reader is given of About me: in its caches' keys, so an edit is read again.
+pub fn me_hash(part: Option<&str>) -> String {
+    use sha2::Digest;
+    part.map(|p| sha2::Sha256::digest(p.as_bytes())[..4].iter().map(|b| format!("{b:02x}")).collect()).unwrap_or_default()
+}
 
 /// Create `me.md` from the template if missing; returns its path.
 pub fn ensure_me_profile() -> Result<PathBuf> {
@@ -1197,6 +1257,24 @@ fn purge_trash_in(trash: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn about_me_is_read_in_parts() {
+        let text = "# About me\n\nName: Alex (\"Me\")\nRole: Head of Delivery\n\n## People I work with often\n- Jordan — my manager\n\n\
+                    ## Terms and names used in my calls\nBRLS, Pathfinder\n\n## How I work — expected patterns\n- I delegate and track.\n\n\
+                    ## How I like notes written\n- Short.\n";
+        let short = me_parts(text, &["identity", "people", "terms"], 1500).unwrap();
+        assert!(short.contains("Role: Head of Delivery") && short.contains("Jordan — my manager") && short.contains("BRLS"));
+        assert!(!short.contains("delegate") && !short.contains("Short.") && !short.contains("# About me"), "{short}");
+        let brain = me_parts(text, &["people", "terms"], 1500).unwrap();
+        assert!(!brain.contains("Artem") && brain.contains("Pathfinder"));
+        assert!(me_parts(text, &["patterns"], 1500).unwrap().contains("I delegate and track."));
+        // The template's form: "Label:" lines.
+        let t = "Name: Dana\nPeople I work with often (name — role): Ravi — sponsor\nTerms and names used in my calls: SSO\nHow I like notes and follow-ups written (tone, length, language): short\n";
+        assert_eq!(me_parts(t, &["people", "terms"], 1500).as_deref(), Some("People I work with often (name — role): Ravi — sponsor\nTerms and names used in my calls: SSO"));
+        assert_eq!(me_parts(t, &["patterns"], 1500), None);
+        assert_ne!(me_hash(Some("a")), me_hash(Some("b")));
+    }
 
     #[test]
     fn stamps_name_one_call_or_none() {

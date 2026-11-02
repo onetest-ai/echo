@@ -576,7 +576,8 @@ fn work_of(projects: &[&Project], today: chrono::NaiveDate) -> Vec<(String, usiz
 /// show or the user placed, with what Echo saw, the directory's fields and each project's placement;
 /// and the organisations involved, with their relationships and placements.
 pub fn view(threads: &[&Project], today: chrono::NaiveDate) -> Result<Value> {
-    let clients = projects::clients()?;
+    // Every organisation, accounts or not: whose people they are.
+    let clients = projects::orgs()?;
     let dir_people = directory()?;
     let me = MeIs::now();
     let my_domain = crate::config::Config::load().ok().and_then(|c| c.me).and_then(|m| domain(m.email.as_deref()));
@@ -723,7 +724,7 @@ pub fn view(threads: &[&Project], today: chrono::NaiveDate) -> Result<Value> {
                 .iter()
                 .filter_map(|p| p.orgs.iter().find(|o| o.client == c.id).map(|o| json!({"thread": p.id, "role": o.role, "stance": o.place.stance, "influence": o.place.influence, "interest": o.place.interest})))
                 .collect();
-            json!({"id": c.id, "name": c.name, "internal": c.internal, "parent": c.parent, "relations": c.relations, "groups": c.groups,
+            json!({"id": c.id, "name": c.name, "internal": c.internal, "account": c.account, "parent": c.parent, "relations": c.relations, "groups": c.groups,
                    "domains": c.domains, "logo_v": projects::client_logo_v(&c.id), "places": places,
                    "people": people.iter().filter(|p| p["org"]["id"] == c.id.as_str()).count()})
         })
@@ -878,9 +879,38 @@ pub fn place(thread: &str, name: &str, email: Option<&str>, v: &Value) -> Result
     Ok(())
 }
 
+/// A thread's counterpart organisation: link one (`client`, an organisation's id) or unlink it.
+pub fn link_org(thread: &str, client: &str, on: bool) -> Result<()> {
+    if on && !projects::orgs()?.iter().any(|c| c.id == client) {
+        bail!("no organisation {client:?}");
+    }
+    projects::update(thread, |p| {
+        p.orgs.retain(|o| o.client != client || on);
+        if on && !p.orgs.iter().any(|o| o.client == client) {
+            p.orgs.push(projects::OrgPlace { client: client.into(), ..Default::default() });
+        }
+        Ok(())
+    })?;
+    Ok(())
+}
+
+/// "Name this organisation": a new organisation (not an account) for the people of a mail domain no
+/// organisation has, made the thread's counterpart when one is given.
+pub fn name_org(name: &str, domain: &str, thread: Option<&str>) -> Result<projects::Client> {
+    let d = domain.trim().trim_start_matches('@').to_lowercase();
+    if d.is_empty() || !d.contains('.') {
+        bail!("a mail domain, like orbit.com");
+    }
+    let o = projects::add_org(name, &[d], false, false)?;
+    if let Some(t) = thread {
+        link_org(t, &o.id, true)?;
+    }
+    Ok(o)
+}
+
 /// Place an organisation in a thread, as `place` does a person.
 pub fn place_org(thread: &str, client: &str, v: &Value) -> Result<()> {
-    if !projects::clients()?.iter().any(|c| c.id == client) {
+    if !projects::orgs()?.iter().any(|c| c.id == client) {
         bail!("no organisation {client:?}");
     }
     projects::update(thread, |p| {
@@ -951,10 +981,11 @@ pub fn context(project: &str, items: &[String]) -> Result<Value> {
         })
         .collect();
     let orgs: Vec<Value> = v["orgs"].as_array().into_iter().flatten().map(|o| json!({"name": o["name"], "relations": o["relations"], "parent": o["parent"]})).collect();
-    let known = projects::clients()?.into_iter().map(|c| c.name).collect::<Vec<_>>();
+    let known = projects::orgs()?.into_iter().map(|c| c.name).collect::<Vec<_>>();
     let said: Vec<Value> = suggestions(project).into_iter().map(|x| json!({"who": x["who"], "field": x["field"], "value": x["value"], "state": x["state"]})).collect();
     Ok(json!({
         "project": project, "people": people, "organisations": orgs, "known_organisations": known,
+        "me_profile": crate::calls::me_profile(),
         "items": items.iter().map(|i| json!({"id": i, "file": l.evidence_md(i).display().to_string().replace('\\', "/")})).collect::<Vec<_>>(),
         "already_proposed": said,
         "fields": SUGGEST_FIELDS.iter().chain(&["fact", "about"]).collect::<Vec<_>>(), "stances": projects::STANCES, "relations": projects::RELATIONS,
@@ -982,7 +1013,7 @@ fn find_person<'a>(people: &'a [Value], who: &str) -> Option<&'a Value> {
 pub fn apply_suggestions(project: &str, evid: &str, proposals: &[Value]) -> Result<Value> {
     let v = of_thread(project, chrono::Local::now().date_naive())?;
     let people = v["people"].as_array().cloned().unwrap_or_default();
-    let clients = projects::clients()?;
+    let clients = projects::orgs()?;
     let dir_people = directory()?;
     let me = MeIs::now();
     // Facts and who someone is go in at once (their words are checked; nothing to decide).

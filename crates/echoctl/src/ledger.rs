@@ -1719,6 +1719,8 @@ pub fn context(project: &str) -> Result<Value> {
     Ok(json!({
         "project": p.name, "stage": p.stage.id(), "client": client.map(|c| &c.name),
         "client_domains": client.map(|c| &c.domains), "notes": p.notes,
+        // About me (the user's `me.md`): who "Me" is and how they work — defaults the words can override.
+        "me_profile": crate::calls::me_profile(),
         "people": p.people,
         "evidence_processed": {"count": t.order.len(), "latest": t.order.iter().rev().take(5).rev().map(|c| format!("{} {}", t.evidence[c]["date"].as_str().unwrap_or(""), t.evidence[c]["title"].as_str().unwrap_or(""))).collect::<Vec<_>>()},
         "epics": epics.iter().filter(|e| !e.children.is_empty()).map(|e| view(n, e)).collect::<Vec<_>>(),

@@ -41,6 +41,11 @@ are checked) and **who they are** (`about`, a short description you rewrite from
   `known_organisations`, `value` one of `relations` ("Contoso does the integration for us" → `who`
   Contoso, `value` integrates_for, `to` the client).
 
+`me_profile` (in people-context, when the user wrote one) is the user's About me: who "Me" is, the
+people they work with and their roles as the user sees them. Use it to recognise people and to read
+their part — a role the user names there is a fact you may still propose only with a quote from the
+item.
+
 Not a proposal: guesses from tone, titles from an email signature you can't quote, anything about the
 user ("Me") — they are left out of the map.
 
