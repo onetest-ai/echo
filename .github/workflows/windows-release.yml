@@ -5,8 +5,10 @@
 # - A release published (from the Mac, with the dmg): builds the tag, uploads the Windows assets.
 #   GitHub runs this file as it is in the tagged commit, so only tags made after it landed.
 # - Run by hand (Actions -> Windows release -> Run workflow): the same for a tag given; upload off
-#   to only get the files as a workflow artifact.
-# - A pull request touching the Windows packaging: builds, uploads nothing.
+#   to only get the files as a workflow artifact; no tag = build the branch it runs on, upload nothing.
+# - Every push to main (not docs): builds, uploads nothing. It keeps main's cache warm — the only
+#   cache a release run can read (a cache is scoped to its ref; one unused for 7 days is dropped) —
+#   and shows at once when a merge breaks the Windows build. Pull requests don't build.
 #
 # Signing is on when the repository variable SIGNPATH_ORGANIZATION_ID is set, with the secret
 # SIGNPATH_API_TOKEN and the variables SIGNPATH_PROJECT_SLUG and SIGNPATH_POLICY_SLUG
@@ -21,17 +23,19 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag to build (e.g. v0.5.6-beta)
-        required: true
+        description: Release tag to build (e.g. v0.5.6-beta); empty = this branch, nothing uploaded
+        required: false
+        default: ""
       upload:
         description: Upload the MSI and zip to that release
         type: boolean
         default: true
-  pull_request:
-    paths:
-      - .github/workflows/windows-release.yml
-      - scripts/package-windows.ps1
-      - packaging/windows/**
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - docs/**
+      - tests/**
 
 permissions:
   contents: write   # gh release upload
@@ -57,7 +61,7 @@ jobs:
         shell: pwsh
         run: |
           $tag = "${{ github.event.release.tag_name || inputs.tag }}"
-          $upload = "${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.upload) }}"
+          $upload = "${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.upload && inputs.tag != '') }}"
           "tag=$tag" >> $env:GITHUB_OUTPUT
           "upload=$upload" >> $env:GITHUB_OUTPUT
 
@@ -200,6 +204,8 @@ jobs:
             dist\*.msi
             dist\*.zip
           if-no-files-found: error
+          # A release's files live on the release; a main build's are only for a look.
+          retention-days: ${{ steps.tag.outputs.upload == 'true' && 90 || 7 }}
 
       - name: Upload to the release
         if: steps.tag.outputs.upload == 'true'
