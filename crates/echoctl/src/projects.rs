@@ -215,6 +215,16 @@ pub struct Member {
     /// Their role in this project ("sponsor", "approver").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
+    /// Their workstream in this project (the org chart's column).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    /// In its governance (sponsor, client partner, programme lead, PM): the chart's top band. None:
+    /// high influence and high interest say so.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub governance: Option<bool>,
+    /// Whom they work for in this project (a person's key): their lead here, not their line manager.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub works_for: Option<String>,
     #[serde(flatten)]
     pub place: Place,
 }

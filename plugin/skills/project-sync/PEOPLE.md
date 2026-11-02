@@ -24,7 +24,11 @@ are checked) and **who they are** (`about`, a short description you rewrite from
 - `influence` / `interest` — `1` low, `2` mid, `3` high. Influence = can decide, approve, fund or stop
   it; interest = how much they care and take part. Propose only on clear signals ("nothing goes live
   without Ravi's sign-off" → influence 3).
-- `title`, `group` — a job title or a department/team said in the call ("I lead the platform team").
+- `title` — a job title said in the call.
+- `group` — their **workstream in this thread** (the org chart's column): what part of the work they
+  are in ("data migration", "testing", "governance" is not one — that's `role`). From their role here,
+  the stories they own and the meetings they are in, with the words that say it ("Ravi's team does the
+  integration"). Use the thread's existing workstream names when one fits.
 - `reports_to` — `value` is the manager's name as people-context spells it ("Ravi reports to me now").
 - `left` — `value` `true`: they left the company or the project ("Tom moved to another account").
 - `fact` — one line about the person worth remembering when you meet them next, in your words (≤ 240

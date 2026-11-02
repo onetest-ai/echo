@@ -3159,24 +3159,79 @@ function peopleList(d) {
     <table class="pp-tbl">${head}<tbody>${seen.map((x) => row(x).replace('<td class="pp-act">', `<td class="pp-act">${thread ? `<button class="btn ghost" data-pp="add-one" data-key="${esc(x.key)}">Add</button>` : ''}`)).join('')}</tbody></table></div>` : ''
   return `${inn.length ? `<div class="pp-card"><table class="pp-tbl">${head}<tbody>${inn.map(row).join('')}</tbody></table></div>` : `<p class="set-sub">Nobody in ${thread ? 'this thread' : "this client's threads"} yet.</p>`}${seenBox}`
 }
-/** The org chart: organisations with their relationships; inside, groups and people. (Stage 3
- *  draws the lines; this lays the organisations and groups out.) */
+/** The org chart (#43): who does what in this engagement, not who reports to whom (those lines are
+ *  rarely known). Each organisation — yours first, then the others — has a governance band on top
+ *  (sponsor, partner, programme lead, PM: marked, else high influence and high interest), then a
+ *  column per workstream (the person's `group` in the thread), its lead on top — the one the others
+ *  work for here — and the rest by title seniority; people inactive in the thread folded ("+N").
+ *  Reporting lines are metadata: the card's tooltip, the panel, faint lines when asked for. In a
+ *  thread, drag a card to a column (its workstream), to the band (governance), or onto a person
+ *  (works for them here). */
+const ocPlace = (x) => placeOf(x) || {}
+const ocGov = (x) => { const p = ocPlace(x); return p.governance != null ? !!p.governance : (p.influence || 0) >= 3 && (p.interest || 0) >= 3 }
+/** Workstreams the thread's roles name, until any is set: "<X> stream lead", a "<X>:" prefix two
+ *  people share; then anyone whose role names one ("Design (CX)" → CX). For showing only, never saved. */
+let ocRoles = new Map()
+function ocRoleStreams(people) {
+  const roles = people.map((x) => [x.key, String(ocPlace(x).role || '')])
+  const names = new Set()
+  for (const [, r] of roles) { const m = r.match(/^\s*([A-Za-z][\w &/+-]{0,40}?)\s+(?:work)?stream\b/i); if (m) names.add(m[1].trim()) }
+  const prefix = new Map()
+  for (const [, r] of roles) { const m = r.match(/^\s*([A-Z][\w &/+-]{1,40}):/); if (m) prefix.set(m[1].trim(), (prefix.get(m[1].trim()) || 0) + 1) }
+  for (const [n, c] of prefix) if (c >= 2) names.add(n)
+  const out = new Map()
+  for (const [k, r] of roles) {
+    const hit = [...names].find((n) => new RegExp(`(^|[^\\w])${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^\\w]|$)`, 'i').test(r))
+    if (hit) out.set(k, hit)
+  }
+  return out
+}
+const ocStream = (x) => ocPlace(x).group || x.group || ocRoles.get(x.key) || ''
+const ocBoss = (x) => ocPlace(x).works_for || x.works_for_hint || null
+const ocIdle = (x) => !!x.quiet || (!x.calls && !x.owes && !(x.facts || []).length)
+function ocCard(x, d) {
+  const p = ocPlace(x), thread = !S.pj.client
+  const boss = ocPlace(x).works_for ? d.people.find((y) => y.key === ocPlace(x).works_for) : null
+  const rep = x.reports_to ? d.people.find((y) => y.key === x.reports_to) : null
+  const tip = [x.title, rep ? `reports to ${rep.name}` : '', boss ? `works for ${boss.name} here` : x.works_for_hint ? `works for ${(d.people.find((y) => y.key === x.works_for_hint) || {}).name || '?'} here (from the work)` : ''].filter(Boolean).join(' · ')
+  const meta = [x.owes ? `${x.owes} open` : '', x.late ? `<span class="late">${x.late} late</span>` : '', x.last ? `seen ${esc(relDay(x.last))}` : 'not in a call yet'].filter(Boolean).join(' · ')
+  return `<button class="oc-card${S.pj.person === x.key ? ' on' : ''}" data-pp="pick" data-key="${esc(x.key)}" data-pk="${esc(x.key)}"${thread ? ` draggable="true" data-pp-drag="${esc(x.key)}" data-oc-person="${esc(x.key)}"` : ''} title="${esc(tip)}">${ppAv(x.name, p.stance)}<span class="oc-t"><b>${esc(x.name)}</b><small>${esc(p.role || x.title || '')}</small><span class="oc-m">${meta}</span></span></button>`
+}
+/** A workstream's people: its lead (whom most of the others work for here; else the most senior),
+ *  then by seniority, then by calls; the inactive folded. */
+function ocColumn(ys, key, label, d) {
+  const lead_ = (x) => /\blead\b/i.test(ocPlace(x).role || '') ? 1 : 0
+  const n = (x) => ys.filter((y) => ocBoss(y) === x.key).length + lead_(x)
+  const order = ys.slice().sort((a, b) => n(b) - n(a) || (b.seniority || 0) - (a.seniority || 0) || (b.calls || 0) - (a.calls || 0) || a.name.localeCompare(b.name))
+  const lead = order.length > 1 && n(order[0]) > 0 ? order[0] : null
+  const rest = order.filter((x) => x !== lead)
+  const on = rest.filter((x) => !ocIdle(x)), idle = rest.filter(ocIdle)
+  const open = S.pj.ocOpen && S.pj.ocOpen[key]
+  const fold = idle.length ? (open ? idle.map((x) => ocCard(x, d)).join('') + `<button class="link-btn oc-more" data-pp="oc-fold" data-col="${esc(key)}">Fold</button>` : `<button class="link-btn oc-more" data-pp="oc-fold" data-col="${esc(key)}" title="${esc(idle.map((x) => x.name).join(', '))}">+${idle.length} not active</button>`) : ''
+  return `<div class="oc-col" data-oc-drop="${esc(key)}"><span class="cap">${esc(label)}</span>${lead ? `<div class="oc-lead">${ocCard(lead, d)}</div>` : ''}${on.map((x) => ocCard(x, d)).join('')}${fold}${!ys.length ? '<span class="set-sub">Drop people here</span>' : ''}</div>`
+}
 function peopleOrg(d) {
   const people = d.people.filter((x) => x.in_thread)
+  // Read from the roles only while nobody has a workstream set.
+  ocRoles = people.some((x) => ocPlace(x).group || x.group) ? new Map() : ocRoleStreams(people)
   const byOrg = new Map()
   for (const x of people) { const k = x.side === 'yours' ? '#yours' : x.org ? x.org.id : `#${x.domain || 'unknown'}`; if (!byOrg.has(k)) byOrg.set(k, []); byOrg.get(k).push(x) }
   const orgName = (k) => k === '#yours' ? 'Your company' : k.startsWith('#') ? (k.slice(1) === 'unknown' ? 'Not known' : k.slice(1)) : ((d.orgs.find((o) => o.id === k) || {}).name || k)
   const org = (k) => {
     const o = d.orgs.find((x) => x.id === k)
     const xs = byOrg.get(k) || []
-    const groups = new Map()
-    for (const x of xs) { const g = x.group || ''; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(x) }
-    const node = (x) => { const pl = placeOf(x); return `<button class="pp-node${S.pj.person === x.key ? ' on' : ''}" data-pp="pick" data-key="${esc(x.key)}">${ppAv(x.name, pl && pl.stance)}<span><b>${esc(x.name)}</b><small>${esc(x.title || (pl && pl.role) || '')}</small></span></button>` }
-    const top = (xs2) => { const keys = new Set(xs2.map((x) => x.key)); return xs2.filter((x) => !x.reports_to || !keys.has(x.reports_to)) }
-    const tree = (xs2) => top(xs2).map((x) => { const kids = xs2.filter((y) => y.reports_to === x.key); return `<div class="pp-tree">${node(x)}${kids.length ? `<div class="pp-kids">${kids.map(node).join('')}</div>` : ''}</div>` }).join('')
+    const gov = xs.filter(ocGov), work = xs.filter((x) => !ocGov(x))
+    const streams = new Map()
+    for (const x of work) { const g = ocStream(x); if (!streams.has(g)) streams.set(g, []); streams.get(g).push(x) }
+    const cols = [...streams.entries()].sort((a, b) => (a[0] === '') - (b[0] === '') || a[0].localeCompare(b[0]))
     const rel = o ? [o.parent ? `part of ${esc((d.orgs.find((x) => x.id === o.parent) || { name: o.parent }).name)}` : '', ...(o.relations || []).map((r) => `${esc(r.kind.replace('_', ' '))} ${esc((d.orgs.find((x) => x.id === r.to) || { name: r.to }).name)}`)].filter(Boolean).join(' · ') : ''
-    return `<section class="pp-org${groups.size > 1 ? ' wide' : ''}" data-org="${esc(o ? o.id : k)}"><div class="pp-org-h">${o ? `<button class="pp-org-n" data-pp="pick" data-key="org:${esc(o.id)}">${ppAv(o.name, (placeOf(o) || {}).stance, true)}<b>${esc(o.name)}</b></button>` : `<b>${esc(orgName(k))}</b>`}<span class="set-sub">${xs.length} ${xs.length === 1 ? 'person' : 'people'}${rel ? ` · ${rel}` : ''}</span></div>
-      <div class="pp-groups">${[...groups.entries()].sort((a, b) => (a[0] === '') - (b[0] === '') || a[0].localeCompare(b[0])).map(([g, ys]) => `<div class="pp-group">${g ? `<span class="cap">${esc(g)}</span>` : groups.size > 1 ? '<span class="cap">No group</span>' : ''}${tree(ys)}</div>`).join('')}</div></section>`
+    const band = gov.length || xs.length > 3 ? `<div class="oc-gov" data-oc-drop="${esc(k)}|gov"><span class="cap">Governance</span><div class="oc-row">${gov.slice().sort((a, b) => (b.seniority || 0) - (a.seniority || 0)).map((x) => ocCard(x, d)).join('') || '<span class="set-sub">Sponsor, partner, programme lead, PM — drop them here</span>'}</div></div>` : ''
+    const fromRoles = (g) => g && ocRoles.size && [...ocRoles.values()].includes(g)
+    const body = cols.map(([g, ys]) => ocColumn(ys, `${k}|${g}`, g ? `${g}${fromRoles(g) ? ' · from roles' : ''}` : (cols.length > 1 ? 'No workstream' : 'Team'), d)).join('')
+    const newCol = !S.pj.client && xs.length ? (S.pj.ocNewCol === k ? `<div class="oc-col oc-new"><input class="wp-in" id="oc-new-col" data-org="${esc(k)}" placeholder="Workstream name" aria-label="New workstream" autofocus><span class="set-sub">then drop people on it</span></div>` : `<button class="oc-add" data-pp="oc-new-col" data-org="${esc(k)}" title="A new workstream column">+ Workstream</button>`) : ''
+    const extra = (S.pj.ocCols || []).filter((c) => c.org === k && !streams.has(c.name)).map((c) => ocColumn([], `${k}|${c.name}`, c.name, d)).join('')
+    return `<section class="pp-org oc-org${k === '#yours' ? ' yours' : ''}" data-org="${esc(o ? o.id : k)}"><div class="pp-org-h">${o ? `<button class="pp-org-n" data-pp="pick" data-key="org:${esc(o.id)}">${ppAv(o.name, (placeOf(o) || {}).stance, true)}<b>${esc(o.name)}</b></button>` : `<b>${esc(orgName(k))}</b>`}<span class="set-sub">${xs.length} ${xs.length === 1 ? 'person' : 'people'}${rel ? ` · ${rel}` : ''}</span></div>
+      ${band}<div class="oc-cols">${body}${extra}${newCol}</div></section>`
   }
   // Organisations a shown one is related to (parent, partner, vendor…) are shown too, so the line has an end.
   const shown = new Set(byOrg.keys())
@@ -3185,8 +3240,37 @@ function peopleOrg(d) {
     for (const t of [o.parent, ...(o.relations || []).map((r) => r.to)].filter(Boolean)) if (d.orgs.some((x) => x.id === t)) shown.add(t)
   }
   for (const o of d.orgs || []) if ((o.relations || []).some((r) => shown.has(r.to)) || (o.parent && shown.has(o.parent))) shown.add(o.id)
-  const keys = [...shown].sort((a, b) => (a === '#yours') - (b === '#yours') || orgName(a).localeCompare(orgName(b)))
-  return keys.length ? `<div class="pp-orgs">${keys.map(org).join('')}</div>` : '<p class="set-sub">Nobody placed yet: add people from List.</p>'
+  // Yours on the left, the others mirrored on the right.
+  const keys = [...shown].sort((a, b) => (b === '#yours') - (a === '#yours') || (a === '#unknown') - (b === '#unknown') || orgName(a).localeCompare(orgName(b)))
+  const bar = `<div class="oc-bar"><span class="set-sub">Who does what here. Lines: works for (solid; dashed when the work suggests it) · works with across organisations (faint)</span><span class="grow"></span><label class="oc-tog"><input type="checkbox" data-pp-reports${S.pj.ocReports ? ' checked' : ''}> Reporting lines</label></div>`
+  return keys.length ? `${bar}<div class="pp-orgs oc">${keys.map(org).join('')}</div>` : '<p class="set-sub">Nobody placed yet: add people from List.</p>'
+}
+/** The chart's people lines, over it: works for (solid; from the work, dashed), works with across
+ *  organisations (shared calls, faint), reports to (dotted, when asked for). */
+function drawPeopleLinks(wrap, d) {
+  const old = wrap.querySelector(':scope > svg.oc-links')
+  const box = wrap.getBoundingClientRect()
+  const at = (k) => { const e = wrap.querySelector(`[data-pk="${CSS.escape(k)}"]`); if (!e || !e.offsetParent) return null; const r = e.getBoundingClientRect(); return { x: r.left - box.left + r.width / 2, y: r.top - box.top + r.height / 2, t: r.top - box.top, b: r.bottom - box.top, org: e.closest('[data-org]') } }
+  const lines = []
+  for (const x of d.people.filter((y) => y.in_thread)) {
+    const set = ocPlace(x).works_for
+    const boss = set || x.works_for_hint
+    if (boss) lines.push({ a: x.key, b: boss, cls: set ? 'wf' : 'wf hint' })
+    if (S.pj.ocReports && x.reports_to) lines.push({ a: x.key, b: x.reports_to, cls: 'rep' })
+    for (const w of x.with || []) if (x.key < w.key) lines.push({ a: x.key, b: w.key, cls: 'ww', cross: true })
+  }
+  const paths = lines.map((l) => {
+    const a = at(l.a), b = at(l.b)
+    if (!a || !b || (l.cross && a.org === b.org)) return ''
+    // From the bottom of the upper card to the top of the lower; side by side, centre to centre.
+    const [p, q] = a.y <= b.y ? [{ x: a.x, y: a.b }, { x: b.x, y: b.t }] : [{ x: a.x, y: a.t }, { x: b.x, y: b.b }]
+    const my = (p.y + q.y) / 2
+    return `<path class="${l.cls}" d="M${p.x.toFixed(1)},${p.y.toFixed(1)} C${p.x.toFixed(1)},${my.toFixed(1)} ${q.x.toFixed(1)},${my.toFixed(1)} ${q.x.toFixed(1)},${q.y.toFixed(1)}"/>`
+  }).join('')
+  const key = `${paths.length}|${wrap.scrollWidth}x${wrap.scrollHeight}|${paths.slice(0, 200)}`
+  if (old && old.dataset.key === key) return
+  if (old) old.remove()
+  if (paths) wrap.insertAdjacentHTML('afterbegin', `<svg class="oc-links" data-key="${esc(key)}" width="${wrap.scrollWidth}" height="${wrap.scrollHeight}" aria-hidden="true">${paths}</svg>`)
 }
 /** Lines between the org chart's organisations (drawn after the page is laid out, over it): each
  *  relationship labelled with its kind and pointing at the other side; "part of" dashed. */
@@ -3194,6 +3278,7 @@ function drawOrgLinks() {
   const wrap = document.querySelector('.pp-orgs')
   if (!wrap) return
   const d = peopleData()
+  if (d && wrap.classList.contains('oc')) drawPeopleLinks(wrap, d)
   const edges = []
   for (const o of (d && d.orgs) || []) {
     if (o.parent) edges.push({ a: o.id, b: o.parent, kind: 'part of', dash: true })
@@ -3275,6 +3360,9 @@ function personPanel() {
       <span>Role</span><div>${S.pj.ppEdit === 'role' ? `<input class="wp-in" data-pp-place="role" value="${esc(pl.role || '')}" aria-label="Role" autofocus>` : `<button class="wp-val${pl.role ? '' : ' empty'}" data-pp="edit" data-f="role">${pl.role ? esc(pl.role) : '<u>Set</u>'}</button>`}</div>
       <span>Stance</span><div><select class="wp-in" data-pp-place="stance" aria-label="Stance"><option value="">not set</option>${STANCES.map((s) => `<option${pl.stance === s ? ' selected' : ''}>${s}</option>`).join('')}</select></div>
       <span>Influence</span><div>${lvl('influence')}</div><span>Interest</span><div>${lvl('interest')}</div>
+      <span>Workstream</span><div>${S.pj.ppEdit === 'group' ? `<input class="wp-in" data-pp-place="group" value="${esc(pl.group || '')}" list="pp-streams" aria-label="Workstream" autofocus><datalist id="pp-streams">${[...new Set(d.people.map((y) => ocStream(y)).filter(Boolean))].map((g) => `<option value="${esc(g)}">`).join('')}</datalist>` : `<button class="wp-val${pl.group ? '' : ' empty'}" data-pp="edit" data-f="group">${pl.group ? esc(pl.group) : x.group ? `${esc(x.group)} <span class="set-sub">(their group)</span>` : '<u>Set</u>'}</button>`}</div>
+      <span>Governance</span><div><select class="wp-in" data-pp-place="governance" aria-label="Governance"><option value=""${pl.governance == null ? ' selected' : ''}>${ocGov(x) ? 'yes — high influence and interest' : 'no — by influence and interest'}</option><option value="yes"${pl.governance === true ? ' selected' : ''}>yes</option><option value="no"${pl.governance === false ? ' selected' : ''}>no</option></select></div>
+      <span>Works for here</span><div><select class="wp-in" data-pp-place="works_for" aria-label="Works for in this thread"><option value="">${x.works_for_hint && !pl.works_for ? `${esc((d.people.find((y) => y.key === x.works_for_hint) || {}).name || '?')}? (from the work)` : 'nobody set'}</option>${d.people.filter((y) => y.key !== x.key && y.in_thread).map((y) => `<option value="${esc(y.key)}"${pl.works_for === y.key ? ' selected' : ''}>${esc(y.name)}</option>`).join('')}</select></div>
     </div>${x.in_thread ? '' : '<p class="set-sub">Not in this thread yet: setting any of these adds them.</p>'}` : `<div class="wp-h">In threads</div><div class="pp-in">${(x.places || []).map((p) => `<button class="link-btn" data-pj="goto" data-id="${esc(p.thread)}">${esc((projById(p.thread) || {}).name || p.thread)}</button>${p.role ? ` · ${esc(p.role)}` : ''}${p.stance ? ` · ${esc(p.stance)}` : ''}`).join('<br>') || '<span class="set-sub">none</span>'}</div>`
   const stat = (n, l) => `<div><b>${n}</b><span class="set-sub">${l}</span></div>`
   const hist = (x.history || []).slice().reverse().slice(0, 8).map((h) => `<div class="pp-h"><span class="set-sub">${esc(relDay(String(h.at || '').slice(0, 10)))}</span> ${h.field === 'about' ? `who they are: ${h.to || h.source === 'echo' ? 'rewritten' : 'cleared'}` : `${esc(h.field)}: ${h.from ? `<s>${esc(h.from)}</s> → ` : ''}${esc(h.to || 'cleared')}`} <span class="set-sub">· ${esc(SRC[h.source] || h.source)}</span></div>`).join('')
@@ -3392,6 +3480,8 @@ document.addEventListener('click', (e) => {
     case 'about-cancel': S.pj.aboutEdit = null; return render()
     case 'about-save': return aboutSave()
     case 'all-facts': S.pj.ppAllFacts = !S.pj.ppAllFacts; return render()
+    case 'oc-fold': S.pj.ocOpen = { ...(S.pj.ocOpen || {}), [d.col]: !(S.pj.ocOpen || {})[d.col] }; return render()
+    case 'oc-new-col': S.pj.ocNewCol = d.org; render(); { const i = $('#oc-new-col'); if (i) i.focus() } return
     case 'org-name-ask': S.pj.nameOrg = d.domain; render(); { const i = $('#pp-org-name'); if (i) i.focus() } return
     case 'org-name': { const name = ($('#pp-org-name') || {}).value || ''; if (!name.trim()) return; S.pj.nameOrg = null; send({ cmd: 'project', op: 'org_name', id: S.pj.client || S.view === 'brain' ? '' : S.pj.sel || '', name: name.trim(), domain: d.domain }); return setTimeout(async () => { await loadProjects(); await loadPeople(); render() }, 300) }
     case 'edit': S.pj.ppEdit = d.f; render(); { const i = document.querySelector('[data-pp-set][autofocus],[data-pp-place][autofocus]'); if (i) { i.focus(); i.select && i.select() } } return
@@ -3426,6 +3516,7 @@ document.addEventListener('change', (e) => {
   const t = e.target
   if (!t.matches) return
   if (t.matches('[data-pp-set]') && t.tagName === 'SELECT') return personSet(t.dataset.ppSet, t.value)
+  if (t.matches('[data-pp-place="governance"]')) return personPlace(S.pj.person, { governance: t.value === 'yes' ? true : t.value === 'no' ? false : null })
   if (t.matches('[data-pp-place]') && t.tagName === 'SELECT') return personPlace(S.pj.person, { [t.dataset.ppPlace]: t.value })
   if (t.matches('[data-pp-org]')) return peopleSend('org_place', { client: t.dataset.ppOrg, set: { [t.dataset.f]: t.value } })
   if (t.matches('[data-pp-rel="parent"]')) { send({ cmd: 'project', op: 'client_set', id: t.dataset.id, parent: t.value }); return setTimeout(() => loadProjects().then(loadPeople).then(render), 250) }
@@ -3459,6 +3550,32 @@ document.addEventListener('keydown', (e) => {
   }
   if (t.id === 'pp-sug-v' && e.key === 'Enter') { e.preventDefault(); const b = document.querySelector('[data-pp="sug-save"]'); if (b) b.click() }
   if (t.id === 'pp-sug-v' && e.key === 'Escape') { e.preventDefault(); S.pj.ppSugEdit = null; render() }
+})
+// The org chart: a new workstream column (kept in the page until someone is dropped on it), reporting lines.
+document.addEventListener('keydown', (e) => {
+  const t = e.target
+  if (t.id !== 'oc-new-col') return
+  if (e.key === 'Escape') { S.pj.ocNewCol = null; return render() }
+  if (e.key === 'Enter' && t.value.trim()) { S.pj.ocCols = [...(S.pj.ocCols || []), { org: t.dataset.org, name: t.value.trim() }]; S.pj.ocNewCol = null; render() }
+})
+document.addEventListener('change', (e) => { if (e.target.matches && e.target.matches('[data-pp-reports]')) { S.pj.ocReports = e.target.checked; render() } })
+// Drag a card on the org chart: onto a person (works for them here), a column (that workstream), the
+// governance band.
+document.addEventListener('dragover', (e) => {
+  const q = e.target.closest && (e.target.closest('[data-oc-person]') || e.target.closest('[data-oc-drop]'))
+  if (q && [...e.dataTransfer.types].includes('text/x-echo-person')) { e.preventDefault(); document.querySelectorAll('.oc .over').forEach((x) => x !== q && x.classList.remove('over')); q.classList.add('over') }
+})
+document.addEventListener('drop', (e) => {
+  const card = e.target.closest && e.target.closest('[data-oc-person]')
+  const col = e.target.closest && e.target.closest('[data-oc-drop]')
+  const key = e.dataTransfer.getData('text/x-echo-person')
+  if (!key || !(card || col)) return
+  e.preventDefault()
+  document.querySelectorAll('.oc .over').forEach((x) => x.classList.remove('over'))
+  if (card && card.dataset.ocPerson !== key) return personPlace(key, { works_for: card.dataset.ocPerson })
+  if (!col || card) return
+  const [, g] = col.dataset.ocDrop.split('|')
+  personPlace(key, g === 'gov' ? { governance: true } : { governance: false, group: g || '' })
 })
 // Drag a chip to a quadrant: high or low influence and interest.
 document.addEventListener('dragstart', (e) => { const c = e.target.closest && e.target.closest('[data-pp-drag]'); if (c) { e.dataTransfer.setData('text/x-echo-person', c.dataset.ppDrag); e.dataTransfer.effectAllowed = 'move' } })

@@ -452,8 +452,16 @@ matters, phone, notes, name — each with its source and a history; IPC `person_
 (`Member`: role, stance champion…blocker, influence and interest 1–3; `people_place`, `people_add`) and organisations
 as stakeholders (`OrgPlace`, `org_place`); an organisation (a client) has a parent, typed relationships (`RELATIONS`)
 and groups (`client_set parent|relation|groups`). Views: **Map** (influence × interest quadrants, high = 2+, chips
-dragged between them set both; Not placed yet; organisations as square chips), **Org chart** (each organisation —
-yours by your mail domain — with its groups side by side, people as "reports to" trees; relationships drawn as
+dragged between them set both; Not placed yet; organisations as square chips), **Org chart** (#43: who does what in this engagement, not reporting lines — rarely known. Each organisation, yours on
+the left and the others mirrored right, has a governance band — `Member.governance`, else high influence and interest —
+then a column per workstream — `Member.group` in the thread (the people pass's `group`), else the directory's group,
+else read from the roles while none is set ("<X> stream lead", a shared "<X>:" prefix; shown "from roles", never
+saved) —, its lead on top (whom the others work for here, or a "lead" role), the rest by title seniority
+(`people::seniority`, ordering only), inactive people folded "+N"; one card: role, stance, open / late tasks, last seen.
+Lines: works for here (`Member.works_for`, solid; the work's suggestion `works_for_hint` — who handed their tasks over,
+else their stories' owner — dashed), works with across organisations (shared calls, faint), reports to only when asked
+(dotted) and in the card's tooltip and the panel. In a thread a card dragged onto a person sets works for, onto a
+column its workstream, onto the band governance; + Workstream adds a column; organisations' relationships drawn as
 lines between the cards after layout, `drawOrgLinks`: labelled with their kind, "part of" dashed, card edge to card
 edge, a related organisation with nobody in the thread shown as an empty card so the line has an end), **List**
 (contacts with Teams chat and copy email; Seen in calls → Add / Add all); the person or organisation in the right

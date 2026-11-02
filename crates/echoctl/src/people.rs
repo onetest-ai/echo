@@ -717,7 +717,8 @@ pub fn view(threads: &[&Project], today: chrono::NaiveDate) -> Result<Value> {
                 .iter()
                 .filter_map(|p| {
                     let m = p.people.iter().find(|m| member_key(m) == key || m.email.as_ref().is_some_and(|e| s.also.contains(&e.to_lowercase())) || (m.email.is_none() && s.email.is_some() && norm(&m.name) == norm(&s.name)))?;
-                    Some(json!({"thread": p.id, "role": m.role, "stance": m.place.stance, "influence": m.place.influence, "interest": m.place.interest}))
+                    Some(json!({"thread": p.id, "role": m.role, "stance": m.place.stance, "influence": m.place.influence, "interest": m.place.interest,
+                                "group": m.group, "governance": m.governance, "works_for": m.works_for}))
                 })
                 .collect();
             let n = norm(entry.map(|p| p.name.as_str()).unwrap_or(&s.name));
@@ -778,6 +779,24 @@ pub fn view(threads: &[&Project], today: chrono::NaiveDate) -> Result<Value> {
     }
     for p in people.iter_mut() {
         p["maybe_same"] = json!(maybe.remove(p["key"].as_str().unwrap_or("")).unwrap_or_default());
+    }
+    // The chart's order and its suggestions: seniority by title, whom they work for here as the work
+    // says (a name in the ledger → a person here: the full name, else a first name only one has).
+    let hints = works_for_hints(threads);
+    let by_name: Vec<(String, String)> = people.iter().map(|p| (norm(p["name"].as_str().unwrap_or("")), p["key"].as_str().unwrap_or("").to_string())).collect();
+    let key_of_name = |n: &str| {
+        by_name.iter().find(|(x, _)| x == n).map(|(_, k)| k.clone()).or_else(|| {
+            let first: Vec<&(String, String)> = by_name.iter().filter(|(x, _)| x.split(' ').next() == Some(n)).collect();
+            (first.len() == 1).then(|| first[0].1.clone())
+        })
+    };
+    for p in people.iter_mut() {
+        p["seniority"] = json!(seniority(p["title"].as_str().unwrap_or("")));
+        let n = norm(p["name"].as_str().unwrap_or(""));
+        let first = n.split(' ').next().unwrap_or("").to_string();
+        if let Some(k) = hints.get(&n).or_else(|| hints.get(&first)).and_then(|l| key_of_name(l)).filter(|k| p["key"] != k.as_str()) {
+            p["works_for_hint"] = json!(k);
+        }
     }
     people.sort_by(|a, b| b["in_thread"].as_bool().cmp(&a["in_thread"].as_bool()).then(b["calls"].as_u64().cmp(&a["calls"].as_u64())).then(a["name"].as_str().cmp(&b["name"].as_str())));
     // Organisations: the threads' clients, the ones their people come from, and those related to them.
@@ -944,9 +963,70 @@ pub fn place(thread: &str, name: &str, email: Option<&str>, v: &Value) -> Result
             }
         };
         let m = &mut p.people[i];
+        // Their part in this thread's work: workstream, governance, whom they work for here ("" clears).
+        let text = |k: &str| v.get(k).map(|x| x.as_str().map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned));
+        if let Some(g) = text("group") {
+            m.group = g;
+        }
+        if let Some(g) = v.get("governance") {
+            m.governance = g.as_bool();
+        }
+        if let Some(w) = text("works_for") {
+            anyhow::ensure!(w.as_deref() != Some(key.as_str()), "nobody works for themselves");
+            m.works_for = w;
+        }
         set_place(&mut m.role, &mut m.place, v)
     })?;
     Ok(())
+}
+
+/// A title's level, for ordering people within a workstream only (never shown as a rank): chief 6,
+/// vice president / head 5, director 4, principal / lead / manager / architect 3, senior 2, else 1,
+/// junior / intern 0.
+pub fn seniority(title: &str) -> u8 {
+    let t = format!(" {} ", title.to_lowercase().replace([',', '/', '-', '(', ')'], " "));
+    let has = |w: &[&str]| w.iter().any(|w| t.contains(&format!(" {w} ")));
+    if has(&["chief", "ceo", "cto", "cio", "coo", "cfo", "president", "founder", "partner"]) && !has(&["vice"]) {
+        6
+    } else if has(&["vp", "svp", "evp", "vice", "head"]) {
+        5
+    } else if has(&["director"]) {
+        4
+    } else if has(&["principal", "lead", "manager", "architect", "owner"]) {
+        3
+    } else if has(&["senior", "sr", "sr."]) {
+        2
+    } else if has(&["junior", "jr", "intern", "trainee"]) {
+        0
+    } else {
+        1
+    }
+}
+
+/// Whom each person works for in these threads, as the work says (a suggestion, never set): the one
+/// who handed their tasks over (`delegated_by`, not the user), else the owner of the story their
+/// tasks sit under. By name as the ledger has it; the most frequent wins.
+fn works_for_hints(threads: &[&Project]) -> BTreeMap<String, String> {
+    let mut n: BTreeMap<(String, String), usize> = BTreeMap::new();
+    for p in threads {
+        let Ok(t) = crate::ledger::Ledger::of(&p.id).and_then(|l| crate::ledger::fold(&l)) else { continue };
+        for x in t.nodes.values().filter(|x| x.kind == "task" && !matches!(x.state.as_str(), "merged" | "deleted")) {
+            let Some(owner) = x.internal_owner.as_ref().or(x.client_owner.as_ref()) else { continue };
+            let story_owner = x.parent.as_ref().and_then(|s| t.nodes.get(s)).and_then(|s| s.internal_owner.clone());
+            let lead = x.delegated_by.clone().filter(|d| !d.eq_ignore_ascii_case("me")).or(story_owner);
+            if let Some(l) = lead.filter(|l| norm(l) != norm(owner) && !l.eq_ignore_ascii_case("me")) {
+                *n.entry((norm(owner), norm(&l))).or_default() += 1;
+            }
+        }
+    }
+    let mut best: BTreeMap<String, (usize, String)> = BTreeMap::new();
+    for ((who, lead), c) in n {
+        let e = best.entry(who).or_insert((0, String::new()));
+        if c > e.0 {
+            *e = (c, lead);
+        }
+    }
+    best.into_iter().map(|(k, (_, l))| (k, l)).collect()
 }
 
 /// A thread's counterpart organisation: link one (`client`, an organisation's id) or unlink it.
@@ -1267,7 +1347,8 @@ pub fn decide(project: &str, sid: &str, yes: bool, value: Option<&str>) -> Resul
         let value = own.as_deref().unwrap_or(x["value"].as_str().unwrap_or(""));
         let (name, email) = (t["name"].as_str().unwrap_or(""), t["email"].as_str());
         match field {
-            "role" | "stance" => place(project, name, email, &json!({field: value}))?,
+            // `group`: their workstream in this thread (the chart's column), not the directory's.
+            "role" | "stance" | "group" => place(project, name, email, &json!({field: value}))?,
             "influence" | "interest" => place(project, name, email, &json!({field: value.parse::<u8>().unwrap_or(0)}))?,
             "left" => {
                 let key = t["key"].as_str().unwrap_or("").to_string();
@@ -1479,6 +1560,34 @@ mod tests {
         assert_eq!(display("Smith, Jr."), "Jr. Smith");
         assert_eq!(norm("Inés Peña Gómez"), "ines pena gomez");
         assert_eq!(tokens("partner.lena.varga"), ["lena", "varga"].map(String::from).into_iter().collect());
+    }
+
+    #[test]
+    fn the_chart_is_who_does_what_here() {
+        assert!(seniority("Chief Data Officer") > seniority("VP, Lending") && seniority("VP, Lending") > seniority("Director of IT"));
+        assert!(seniority("Director of IT") > seniority("Lead Engineer") && seniority("Lead Engineer") > seniority("Senior Analyst"));
+        assert!(seniority("Senior Analyst") > seniority("Analyst") && seniority("Analyst") > seniority("Junior Developer"));
+        assert_eq!(seniority("Vice President"), 5, "a vice president is no president");
+        let (_env, root) = crate::paths::testenv::folders("people-chart");
+        let a = call(&root, "2026-10-01_100000-a", "2026-10-01T10:00:00+00:00",
+            json!({"attendees": [{"name": "Dana Doe", "email": "dana@acme.example"}, {"name": "Lee Park", "email": "lee@acme.example"}]}), json!([]));
+        let p = projects::create("Acme Lending", None, None).unwrap();
+        projects::update(&p.id, |x| { x.pins = vec![calls::stamp_of(&a)]; Ok(()) }).unwrap();
+        // Lee's task was handed over by Dana: Lee works for Dana here (a suggestion).
+        crate::ledger::human_event(&p.id, &json!({"op": "create", "kind": "story", "parent": "E01", "title": "Migration", "ac": ["Moved"]})).unwrap();
+        crate::ledger::human_event(&p.id, &json!({"op": "create", "kind": "task", "parent": "S001", "title": "Map the fields", "internal_owner": "Lee Park", "delegated_by": "Dana Doe"})).unwrap();
+        place(&p.id, "Lee Park", Some("lee@acme.example"), &json!({"group": "Data migration"})).unwrap();
+        place(&p.id, "Dana Doe", Some("dana@acme.example"), &json!({"governance": true})).unwrap();
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 10, 30).unwrap();
+        let v = of_thread(&p.id, today).unwrap();
+        let who = |k: &str| v["people"].as_array().unwrap().iter().find(|x| x["key"] == k).unwrap().clone();
+        assert_eq!(who("lee@acme.example")["places"][0]["group"], "Data migration");
+        assert_eq!(who("dana@acme.example")["places"][0]["governance"], true);
+        assert_eq!(who("lee@acme.example")["works_for_hint"], "dana@acme.example");
+        // The user's choice: works for, cleared; nobody works for themselves.
+        place(&p.id, "Lee Park", Some("lee@acme.example"), &json!({"works_for": "dana@acme.example", "governance": null})).unwrap();
+        assert_eq!(of_thread(&p.id, today).unwrap()["people"].as_array().unwrap().iter().find(|x| x["key"] == "lee@acme.example").unwrap()["places"][0]["works_for"], "dana@acme.example");
+        assert!(place(&p.id, "Lee Park", Some("lee@acme.example"), &json!({"works_for": "lee@acme.example"})).is_err());
     }
 
     #[test]
