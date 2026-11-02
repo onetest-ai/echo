@@ -200,7 +200,7 @@ calls by title, people or day). Unavailable ones stay listed, greyed, with why. 
 button that does it elsewhere (`press`), so it can't differ from it. Ranking (`Palette`, no DOM:
 `ui/palette.test.mjs`): every typed word in the label (anywhere) or a keyword (word start), word starts and earlier
 matches first, unavailable last, each group kept together. ⇧⌘R / Ctrl+Shift+R asks to stop a recording.
-**Needs you** (`attention.rs`, `/api/attention`, `echoctl attention`): what waits for the user's decision, collected
+**Needs you** — shown as **Inbox** in the window since 2026-11-02 (the code and these notes keep "Needs you"; the panel id is `needs`) — (`attention.rs`, `/api/attention`, `echoctl attention`): what waits for the user's decision, collected
 from where it lives (no model): a profile to sign in to (urgent: the default, or minutes waiting for it), minutes that
 failed (14 days), senders waiting, people suggestions, Found for you, the Work tab's To review, topics or numbers to
 accept, missing permissions, an update — each with the IPC message its own place sends (Trust, Yes, Create, Sign in…)
@@ -452,7 +452,14 @@ matters, phone, notes, name — each with its source and a history; IPC `person_
 (`Member`: role, stance champion…blocker, influence and interest 1–3; `people_place`, `people_add`) and organisations
 as stakeholders (`OrgPlace`, `org_place`); an organisation (a client) has a parent, typed relationships (`RELATIONS`)
 and groups (`client_set parent|relation|groups`). Views: **Map** (influence × interest quadrants, high = 2+, chips
-dragged between them set both; Not placed yet; organisations as square chips), **Org chart** (#43: who does what in this engagement, not reporting lines — rarely known. Each organisation, yours on
+dragged between them set both; Not placed yet; organisations as square chips), **Org chart** (#43: who does what in this engagement, not reporting lines — rarely known. #46: the layout is `OrgLayout` in app.js, no DOM,
+`ui/org-chart.test.mjs` — a "<X> stream lead" leads column X and stays out of the band, the band's high influence and
+interest fallback is for people with no stream; Keep these columns saves the columns read from roles as each person's
+`group`; the "works for" hint only within one stream and never from governance, PMs or partners (`people::coordinates`,
+`role_stream`); "new" = first seen more than a day after the thread's first call; a role keeps `role_by` (you: pinned —
+never proposed over — / echo), `role_at`, `role_from`, and the people pass may propose a replacement ("was …"); the
+pass proposes `person` — someone named but never invited, one proposal per name with its mentions counted —, on Yes a
+name-only person in the thread under the organisation the words gave. Each organisation, yours on
 the left and the others mirrored right, has a governance band — `Member.governance`, else high influence and interest —
 then a column per workstream — `Member.group` in the thread (the people pass's `group`), else the directory's group,
 else read from the roles while none is set ("<X> stream lead", a shared "<X>:" prefix; shown "from roles", never
@@ -624,7 +631,26 @@ without it).
   (`acme__budget`), so the same name in two clients is two topics; a section is tagged from the shared layer and its
   own client's only; a client's terms are found only in its sections; a scope's view shows the shared layer and its
   client's; an edit names its layer when a name is in two. A version from before layers loads as the shared layer.
+  **One tree** (2026-11-02): layers are how topics are *built and owned*, not separate trees. A client's topic may
+  sit under one of the practice's level-1 topics (`Topic.parent` names it; `taxonomy::parent_of`: its own layer's
+  first, else the practice's); building a client's layer gives the model the practice's level-1 topics to place its
+  own under, and this layer's existing topics to keep (`keep_identity`: a new wording of an old topic — its label,
+  a synonym, or ratio ≥ 0.86 — keeps the old label, id and tags, the wording becomes a synonym). Topics have
+  **synonyms** (`Topic.synonyms`: old labels from renames, merges and rebuilds, the user's; tagging resolves them);
+  a description is the definition tagging reads (Define… in the panel). Tagging reads one tree (`vocab_text`: the
+  practice's topics with the clients' under them, "(Client)", then "[Client only]"). A client's topic never tags
+  another client's section (`build_graph` drops such tags). **Moves** (`taxonomy::moves`, no model; Inbox, the
+  Topics tab, `echoctl brain taxonomy moves [--apply|--dismiss KEY]`): up — clients' topics naming one thing (a
+  label or synonym in common, or nearly the same label) → the practice (`scope` op, the others merged in as
+  synonyms; `merge` takes `into_layer: shared`); down — a practice topic whose ≥ 10 tagged sections are all one
+  client's → that client. Turned down ones stay quiet (`brain/taxonomy/moves.json`).
   `taxonomy build [--layer shared|<client>]` builds every layer or one (then classifies that layer's sections).
+  **Drift** (#47, `taxonomy::drift`, no model): per layer, over the sections judged since its last build (its `build` in
+  the history) — ≥ 30 of them —, stale when > 10% fit no topic (`untagged`) or one level-1 topic took > 40% of the tagged
+  ones; or when its calls are ≥ 3× `built_from` (and ≥ 6). A stale layer is an Inbox item and a banner on its Topics
+  block: Rebuild topics (IPC `brain_rebuild_topics` → `induce` in the background, provisional as any build; a
+  notification when done) · Not now (`brain_topics_snooze` → `brain/taxonomy/drift.json`: held until its sections or
+  calls grow by half; a rebuild clears it). Never rebuilt automatically. `echoctl brain taxonomy drift` (JSON).
 - **Insights** (`insights.rs`, `<home>/brain/insights.json`): per client and thread — moved, slipping, recurs,
   contradiction, open — each citing ≥ 2 sections from ≥ 2 sources, every quote checked word for word (else dropped). A
   scope is redone only when its sections changed (a fingerprint of ids and texts): the run reads the previous
@@ -684,7 +710,22 @@ without it).
   the scheduler skips), the window shows no Brain (activity, ⌘ numbers and ⌘K, Also discussed, Insights, Mentioned also
   in, Topics & terms → the glossary, no channel / mail / folder sources to add; `/api/state` `brain`), Claude's sessions
   get no echo-brain server, transcription hints come from glossaries; the store stays on disk as it was.
-- **The window**: the **Brain** activity (`#brain/<tab>`: Topics — each layer with its summary, provisional banner and
+- **Topics** is one tree: the practice's topics by size (a bar, the share), each with its subtopics and the clients'
+  topics under it (a chip names the client), then "Only <client>" for a client's own; definitions and synonyms under the
+  name; drift's catch-all flagged in place. Above it, **Builds**: one line per layer — provisional (Accept), out of date
+  and what fits no topic, **Tag again** (IPC `brain_retag_topics` → `classify(layer, again)`, background) and
+  **Rebuild** (`brain_rebuild_topics` → `induce`, provisional) — and the suggested **moves** (Move up / down · Keep it);
+  **Sync now** reads new sources and tags their sections (a manual sync tags too, as the scheduler's); what runs is
+  `/api/brain` `topic_jobs`, a notification says when it ends. (A sunburst was tried and dropped: too hard to read.)
+  Open: term groups and terms' synonyms (the user's to decide, 2026-11-02).
+**Graphs** (2026-11-02): the Brain's Graph and People are drawn by Sigma.js 4 (WebGL) over graphology, vendored in
+`ui/vendor/` (`GraphView` in app.js): laid out once per data set — ForceAtlas2 run in the page (never its worker:
+the CSP), then noverlap —, kept across renders (the camera too), labels where they fit (the biggest first), hover lights
+a node's neighbours. Search: the Graph's box lights topics and sources by name as you type and, on Enter, asks the Brain
+(`/api/brain/search` = `store::search_in`, words and meaning, the scope) and lights the sources of its hits; People's
+box lights people by name, address, title, organisation, workstream and role. Matches and their neighbours stay lit,
+the rest dims (plain hex colours: WebGL reads no CSS), the camera flies to them; Esc clears.
+**The window**: the **Brain** activity (`#brain/<tab>`: Topics — each layer with its summary, provisional banner and
   Accept, the tree with counts and threads; Terms; Sources; Coverage; Graph — topics on a ring grouped and coloured by
   client, sources inside at the weighted middle of their topics, related sources dashed; a click selects a node — a
   topic opens its panel, a source the `brain-doc` panel (`/api/brain/doc`, `views::doc`: kind, threads, Open — the call,

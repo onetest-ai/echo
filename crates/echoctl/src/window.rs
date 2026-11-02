@@ -35,6 +35,10 @@ const LOGO_PNG: &[u8] = include_bytes!("../assets/onetest-logo.png");
 const XTERM_JS: &str = include_str!("../ui/vendor/xterm.js");
 const XTERM_FIT_JS: &str = include_str!("../ui/vendor/xterm-addon-fit.js");
 const XTERM_CSS: &str = include_str!("../ui/vendor/xterm.css");
+/// Sigma.js + graphology (MIT, `ui/vendor/README.md`): the Brain's graphs, drawn with WebGL.
+const SIGMA_JS: &str = include_str!("../ui/vendor/sigma.min.js");
+const GRAPHOLOGY_JS: &str = include_str!("../ui/vendor/graphology.umd.min.js");
+const GRAPHOLOGY_LIB_JS: &str = include_str!("../ui/vendor/graphology-library.min.js");
 
 /// The page with the octopus mark defined once as an SVG symbol (`<use href="#octopus">`).
 fn index_html() -> String {
@@ -228,6 +232,9 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
         "/assets/vendor/xterm.js" => reply(200, "text/javascript; charset=utf-8", XTERM_JS.as_bytes().to_vec()),
         "/assets/vendor/xterm-addon-fit.js" => reply(200, "text/javascript; charset=utf-8", XTERM_FIT_JS.as_bytes().to_vec()),
         "/assets/vendor/xterm.css" => reply(200, "text/css; charset=utf-8", XTERM_CSS.as_bytes().to_vec()),
+        "/assets/vendor/sigma.min.js" => reply(200, "text/javascript; charset=utf-8", SIGMA_JS.as_bytes().to_vec()),
+        "/assets/vendor/graphology.umd.min.js" => reply(200, "text/javascript; charset=utf-8", GRAPHOLOGY_JS.as_bytes().to_vec()),
+        "/assets/vendor/graphology-library.min.js" => reply(200, "text/javascript; charset=utf-8", GRAPHOLOGY_LIB_JS.as_bytes().to_vec()),
         "/api/state" => json_reply(state()),
         "/api/calls" => json_reply(Value::Array(calls::all_calls().iter().rev().map(|d| call_summary(d)).collect())),
         "/api/agenda" => json_reply(agenda()),
@@ -282,7 +289,27 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
             let (client, thread) = (query_param(q, "client"), query_param(q, "thread"));
             let scope = client.as_deref().map(|c| ("client", c)).or(thread.as_deref().map(|t| ("thread", t)));
             let r = if p == "/api/brain" { crate::brain::views::overview(scope) } else { crate::brain::views::graph(scope) };
-            json_reply(r.unwrap_or_else(|e| json!({ "error": format!("{e:#}") })))
+            let mut v = r.unwrap_or_else(|e| json!({ "error": format!("{e:#}") }));
+            // Topic rebuilds and re-tagging running now (`brain_rebuild_topics`, `brain_retag_topics`), by layer.
+            if p == "/api/brain" {
+                v["topic_jobs"] = json!(BRAIN_INSIGHTS.lock().map(|r| r.iter().filter(|k| k.starts_with("taxonomy:") || k.starts_with("retag:")).cloned().collect::<Vec<_>>()).unwrap_or_default());
+            }
+            json_reply(v)
+        }
+        // The Brain searched from its graphs (words and meaning, as Claude's search_knowledge): the hits'
+        // sources light up. Off the main thread, as every echo:// request: the embedder may take a moment.
+        #[cfg(feature = "brain")]
+        "/api/brain/search" => {
+            let q = req.uri().query().unwrap_or("");
+            let (text, client, thread) = (query_param(q, "q").unwrap_or_default(), query_param(q, "client"), query_param(q, "thread"));
+            let scope = client.as_deref().map(|c| ("client", c)).or(thread.as_deref().map(|t| ("thread", t)));
+            let emb = crate::brain::embedder();
+            json_reply(if !crate::brain::enabled() || text.trim().is_empty() {
+                json!({ "hits": [] })
+            } else {
+                crate::brain::store::search_in(&crate::brain::store_path(), text.trim(), 40, None, scope, emb.as_ref().map(|e| e as &dyn crate::brain::embed::Embedder))
+                    .unwrap_or_else(|e| json!({ "error": format!("{e:#}") }))
+            })
         }
         #[cfg(feature = "brain")]
         "/api/brain/insights" => {
@@ -1210,7 +1237,15 @@ fn brain_sync_now() {
     if !BRAIN_SYNC.swap(true, std::sync::atomic::Ordering::SeqCst) {
         std::thread::spawn(|| {
             let r = match crate::brain::sync() {
-                Ok(r) => json!(r),
+                Ok(r) => {
+                    // New sections get their topics, as after the scheduler's sync.
+                    if r.chunks > 0 && crate::brain::taxonomy::current().is_some() {
+                        if let Err(e) = crate::brain::taxonomy::classify(None, false, &|_| {}) {
+                            eprintln!("brain: tagging: {e:#}");
+                        }
+                    }
+                    json!(r)
+                }
                 Err(e) => json!({ "error": format!("{e:#}") }),
             };
             if let Ok(mut l) = BRAIN_LAST.lock() {
@@ -1523,6 +1558,54 @@ pub fn handle(msg: &str) -> Handled {
             }
             true.into()
         }
+        // A layer's topics rebuilt from its calls (Claude, in the background; provisional as any build).
+        #[cfg(feature = "brain")]
+        "brain_rebuild_topics" => {
+            let layer = v["layer"].as_str().unwrap_or("").to_string();
+            let k = format!("taxonomy:{layer}");
+            if !layer.is_empty() && BRAIN_INSIGHTS.lock().map(|mut r| r.insert(k.clone())).unwrap_or(false) {
+                std::thread::spawn(move || {
+                    match crate::brain::taxonomy::induce(&layer, &|_| {}) {
+                        Ok(_) => crate::app::notify("Topics rebuilt", "Review them on the Brain's Topics tab, then accept"),
+                        Err(e) => crate::app::notify("Topics not rebuilt", &format!("{e:#}")),
+                    }
+                    if let Ok(mut r) = BRAIN_INSIGHTS.lock() {
+                        r.remove(&k);
+                    }
+                });
+            }
+            true.into()
+        }
+        // A layer's sections tagged again with its topics as they are now (Claude, in the background).
+        #[cfg(feature = "brain")]
+        "brain_retag_topics" => {
+            let layer = v["layer"].as_str().unwrap_or("").to_string();
+            let k = format!("retag:{layer}");
+            if !layer.is_empty() && BRAIN_INSIGHTS.lock().map(|mut r| r.insert(k.clone())).unwrap_or(false) {
+                std::thread::spawn(move || {
+                    match crate::brain::taxonomy::classify(Some(&layer), true, &|_| {}) {
+                        Ok(n) => crate::app::notify("Sections tagged again", &format!("{n} sections, with the topics as they are now")),
+                        Err(e) => crate::app::notify("Sections not tagged", &format!("{e:#}")),
+                    }
+                    if let Ok(mut r) = BRAIN_INSIGHTS.lock() {
+                        r.remove(&k);
+                    }
+                });
+            }
+            true.into()
+        }
+        // A suggested topic move (up to the practice, down to a client), done or turned down.
+        #[cfg(feature = "brain")]
+        "brain_topic_move" => match (v["key"].as_str(), v["do"].as_str()) {
+            (Some(k), Some("apply")) => match crate::brain::taxonomy::apply_move(k) {
+                Ok(()) => true.into(),
+                Err(e) => notice(&format!("{e:#}")),
+            },
+            (Some(k), Some("dismiss")) => crate::brain::taxonomy::dismiss_move(k).is_ok().into(),
+            _ => false.into(),
+        },
+        #[cfg(feature = "brain")]
+        "brain_topics_snooze" => v["layer"].as_str().is_some_and(|l| crate::brain::taxonomy::snooze(l).is_ok()).into(),
         #[cfg(feature = "brain")]
         "brain_sync" => {
             brain_sync_now();
@@ -1963,7 +2046,7 @@ pub fn export(dir: &Path) -> anyhow::Result<()> {
         Ok(())
     };
     write("index.html", get("/"))?;
-    for p in ["/assets/app.js", "/assets/app.css", "/assets/logo.png", "/api/state", "/api/calls", "/api/agenda", "/api/layout", "/api/settings", "/api/sessions", "/api/ptys"] {
+    for p in ["/assets/app.js", "/assets/app.css", "/assets/logo.png", "/assets/vendor/sigma.min.js", "/assets/vendor/graphology.umd.min.js", "/assets/vendor/graphology-library.min.js", "/api/state", "/api/calls", "/api/agenda", "/api/layout", "/api/settings", "/api/sessions", "/api/ptys"] {
         write(p, get(p))?;
     }
     let week_start = chrono::Local::now().date_naive().pred_opt().unwrap_or_default().format("%Y-%m-%d");

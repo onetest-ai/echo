@@ -127,7 +127,9 @@ pub fn collect() -> Collected {
             let v = x["value_name"].as_str().or(x["value"].as_str()).unwrap_or("");
             let q = match x["field"].as_str().unwrap_or("") {
                 "stance" => format!("Is {who} a {v}?"),
-                "role" => format!("{who}'s role here: {v}?"),
+                "role" => format!("{who}'s role here: {v}?{}", x["was"].as_str().map(|w| format!(" (was “{w}”)")).unwrap_or_default()),
+                "person" => format!("Add {who}{}? Mentioned{}, {} time{}", x["target"]["org_name"].as_str().map(|o| format!(" ({o})")).unwrap_or_default(),
+                    x["at"]["title"].as_str().map(|t| format!(" in {t}")).unwrap_or_default(), x["mentions"].as_u64().unwrap_or(1), if x["mentions"].as_u64().unwrap_or(1) == 1 { "" } else { "s" }),
                 "left" => format!("Has {who} left?"),
                 "reports_to" => format!("{who} reports to {v}?"),
                 "title" => format!("{who} is {v}?"),
@@ -253,6 +255,27 @@ pub fn collect() -> Collected {
     if brain_on {
         if crate::brain::taxonomy::current().is_some_and(|t| t.provisional()) {
             out.push(item("taxonomy".into(), "brain", "echo", "Topics are provisional".into(), "Review the Brain's topics and terms, then accept them".into(), false, vec![], Some("brain/topics".into())));
+        }
+        // A topic in the wrong place (`taxonomy::moves`, no model): up to the practice, or down to a client.
+        for m in crate::brain::taxonomy::moves().unwrap_or_default() {
+            let key = m["key"].as_str().unwrap_or("").to_string();
+            let (title, label) = if m["dir"] == "up" {
+                (format!("“{}” belongs to your practice?", m["label"].as_str().unwrap_or("")), "Move it up")
+            } else {
+                (format!("“{}” is only {}'s?", m["label"].as_str().unwrap_or(""), m["to_name"].as_str().unwrap_or("")), "Move it down")
+            };
+            out.push(item(format!("move:{key}"), "brain", "echo", title, m["why"].as_str().unwrap_or("").to_string(), false,
+                vec![act(label, true, json!({"cmd": "brain_topic_move", "key": key, "do": "apply"})), act("Keep it", false, json!({"cmd": "brain_topic_move", "key": key, "do": "dismiss"}))],
+                Some("brain/topics".into())));
+        }
+        // A layer whose topics no longer fit its calls (`taxonomy::drift`, no model): rebuild it, or not now.
+        for d in crate::brain::taxonomy::drift().unwrap_or_default().into_iter().filter(|d| d["stale"] == true) {
+            let layer = d["layer"].as_str().unwrap_or("").to_string();
+            let why = d["reasons"].as_array().into_iter().flatten().filter_map(|r| r["text"].as_str()).collect::<Vec<_>>().join(" · ");
+            out.push(item(format!("drift:{layer}"), "brain", if layer == crate::brain::taxonomy::SHARED { "echo" } else { layer.as_str() },
+                format!("Topics for {} look out of date", d["name"].as_str().unwrap_or(&layer)), why, false,
+                vec![act("Rebuild topics", true, json!({"cmd": "brain_rebuild_topics", "layer": layer})), act("Not now", false, json!({"cmd": "brain_topics_snooze", "layer": layer}))],
+                Some("brain/topics".into())));
         }
         if let Ok(v) = crate::brain::numbers::overview() {
             for c in v["clients"].as_array().into_iter().flatten().filter(|c| c["status"] == "proposed") {

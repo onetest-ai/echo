@@ -1987,6 +1987,18 @@ enum TaxonomyCmd {
         #[arg(long)]
         layer: Option<String>,
     },
+    /// Whether each layer's topics still fit its calls (no model): new sections fitting no topic, one
+    /// topic taking most, calls outgrowing its build (JSON)
+    Drift,
+    /// Topics that look in the wrong place (no model): clients' topics naming one thing → up to the
+    /// practice; a practice topic only one client uses → down to it. --apply KEY does one, --dismiss KEY
+    /// keeps it where it is
+    Moves {
+        #[arg(long)]
+        apply: Option<String>,
+        #[arg(long)]
+        dismiss: Option<String>,
+    },
     /// Tag sections not tagged yet (--again: all of them; --layer: only one layer's sections)
     Classify {
         #[arg(long)]
@@ -2014,6 +2026,16 @@ fn brain_command(cmd: BrainCmd) -> Result<()> {
             let progress = |m: &str| eprintln!("{m}");
             match cmd {
                 TaxonomyCmd::Show => print_json(&brain::taxonomy::view()?),
+                TaxonomyCmd::Drift => print_json(&serde_json::json!(brain::taxonomy::drift()?)),
+                TaxonomyCmd::Moves { apply, dismiss } => {
+                    if let Some(k) = apply {
+                        brain::taxonomy::apply_move(&k)?;
+                    }
+                    if let Some(k) = dismiss {
+                        brain::taxonomy::dismiss_move(&k)?;
+                    }
+                    print_json(&serde_json::json!(brain::taxonomy::moves()?))
+                }
                 TaxonomyCmd::Build { layer } => print_json(&match layer {
                     Some(l) => brain::taxonomy::induce(&l, &progress)?,
                     None => brain::taxonomy::induce_all(&progress)?,

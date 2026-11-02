@@ -1399,14 +1399,8 @@ select.set-in { width: auto; margin-right: 6px; }
 .br-bar i.ok { background: var(--accent); } .br-bar i.warn { background: var(--warn); } .br-bar i.mute { background: var(--text-3); }
 .br-graph-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
 .br-dot { width: 9px; height: 9px; border-radius: 5px; display: inline-block; }
-.br-graph { height: calc(100vh - 230px); min-height: 380px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); overflow: hidden; }
-.br-graph svg line.ab { stroke: color-mix(in srgb, var(--text) 16%, transparent); }
-.br-graph svg line.rl { stroke: color-mix(in srgb, var(--accent) 35%, transparent); stroke-dasharray: 3 3; }
-.br-graph svg .tp circle { fill: var(--bg); stroke-width: 2; }
-.br-graph svg .tp text { fill: var(--text-2); font-size: 10.5px; font-weight: 600; paint-order: stroke; stroke: var(--bg); stroke-width: 3px; }
-.br-graph svg .dc { cursor: pointer; }
-.br-graph svg .dc circle { stroke: var(--bg); stroke-width: 1.5; }
-.br-graph svg .dc:hover circle { stroke: var(--text); }
+.br-graph { position: relative; height: calc(100vh - 250px); min-height: 380px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); overflow: hidden; }
+.br-gq-res, .br-pq-res { white-space: nowrap; }
 .br-panel { gap: 8px; }
 .br-desc { margin: 0; font-size: 12.5px; color: var(--text-2); line-height: 1.5; }
 .br-where { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--text-3); }
@@ -1447,14 +1441,6 @@ select.set-in { width: auto; margin-right: 6px; }
 .pp-tbl tr.br-off td { color: var(--text-3, var(--text-2)); }
 .pp-tbl .br-why { display: block; margin-left: 0; font-size: 11.5px; }
 .pp-tbl tr[data-br-file] { cursor: pointer; }
-.br-graph svg .tp { cursor: pointer; }
-.br-graph svg .dc rect { stroke: var(--bg); stroke-width: 1.5; }
-.br-graph svg .dc:hover rect, .br-graph svg .tp:hover circle { stroke: var(--text); }
-.br-graph svg.has-sel line { opacity: .25; }
-.br-graph svg.has-sel line.hl { opacity: 1; stroke: var(--accent); }
-.br-graph svg.has-sel g:not(.near) { opacity: .35; }
-.br-graph svg g.sel circle, .br-graph svg g.sel rect { stroke: var(--text); stroke-width: 3; }
-.br-graph svg g.sel text { fill: var(--text); }
 .br-topics { display: flex; flex-wrap: wrap; gap: 6px; }
 .br-rels { display: flex; flex-direction: column; gap: 2px; }
 .br-rel { display: flex; gap: 8px; align-items: baseline; text-align: left; background: none; border: 0; color: var(--text); font: inherit; padding: 5px 6px; border-radius: 6px; cursor: pointer; }
@@ -1510,15 +1496,6 @@ select.set-in { width: auto; margin-right: 6px; }
 
 /* The Brain's People: threads on the ring, people near theirs. */
 .br-pq { max-width: 320px; }
-.br-graph svg line.pe-role { stroke: color-mix(in srgb, var(--text) 30%, transparent); }
-.br-graph svg line.pe-seen { stroke: color-mix(in srgb, var(--text) 10%, transparent); }
-.br-graph svg line.pe-boss { stroke: color-mix(in srgb, var(--accent) 60%, transparent); stroke-dasharray: 4 3; }
-.br-graph svg line.pe-with { stroke: color-mix(in srgb, var(--accent) 45%, transparent); opacity: 0; }
-.br-graph svg.has-sel line.pe-with.hl { opacity: 1; }
-.br-graph svg .pe text { fill: var(--text-2); font-size: 10.5px; paint-order: stroke; stroke: var(--bg); stroke-width: 3px; pointer-events: none; }
-.br-graph svg .pe text.pe-quiet { display: none; }
-.br-graph svg .pe:hover text.pe-quiet, .br-graph svg .pe.near text.pe-quiet { display: inline; }
-.br-graph svg .pe:hover circle { stroke: var(--text); }
 /* A person's file: who they are, what was said about them. */
 .pp-about-box { display: flex; flex-direction: column; gap: 4px; }
 .pp-about { text-align: left; background: none; border: 0; padding: 4px 6px; margin: 0 -6px; border-radius: 6px; color: var(--text); font: inherit; font-size: 12.5px; line-height: 1.5; white-space: pre-wrap; cursor: text; }
@@ -1561,3 +1538,36 @@ select.set-in { width: auto; margin-right: 6px; }
 .oc-links path.wf.hint { stroke-dasharray: 4 3; }
 .oc-links path.ww { stroke: color-mix(in srgb, var(--text-3) 35%, transparent); }
 .oc-links path.rep { stroke: color-mix(in srgb, var(--text-2) 45%, transparent); stroke-dasharray: 1 3; }
+/* The taxonomy as a tree (Topics): fold, name and definition, a size bar, share of the layer, threads. */
+.br-lh .br-fold { margin-right: 2px; }
+.br-tr { display: grid; grid-template-columns: 18px minmax(0, 1fr) 120px 64px minmax(0, 0.55fr); align-items: center; gap: 10px; padding: 6px 12px 6px 6px; border-top: 1px solid var(--line); font-size: 12.5px; }
+.br-tr:first-child { border-top: 0; }
+.br-tr.on { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.br-tr.l2 { padding-left: 28px; }
+.br-tr.l2 .br-bar i { background: color-mix(in srgb, var(--accent) 35%, transparent); }
+.br-tr.none { color: var(--text-3); }
+.br-tr.none .br-bar i { background: var(--line-strong); }
+.br-fold { width: 18px; height: 18px; border: 0; background: none; color: var(--text-2); font: inherit; font-size: 13px; padding: 0; cursor: default; }
+.br-tbar { display: flex; align-items: center; gap: 10px; margin: 0 2px 12px; }
+.br-lh .link-btn { font-size: 12px; margin-left: 10px; }
+.br-fold:hover { color: var(--text); }
+.br-tm { display: flex; flex-direction: column; min-width: 0; border: 0; background: none; padding: 0; font: inherit; color: var(--text); text-align: left; cursor: default; }
+.br-tm:hover .br-tn b, .br-tm:hover .br-tn { color: var(--accent-ink); }
+.br-tn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.br-td { font-size: 11.5px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.br-bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.br-bar i { display: block; height: 100%; background: color-mix(in srgb, var(--accent) 70%, transparent); border-radius: 3px; }
+.br-tr .br-n { text-align: right; font-variant-numeric: tabular-nums; }
+.br-tr .br-n small { color: var(--text-3); }
+.br-flag { margin-left: 6px; font-size: 10.5px; font-weight: 650; color: var(--warn); }
+/* One tree: the client a topic belongs to, the builds per layer, suggested moves. */
+.br-cl { display: inline-block; font-size: 10.5px; font-weight: 600; padding: 0 6px; border-radius: 8px; color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); vertical-align: 1px; }
+.br-blds { margin: 0 0 12px; border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; background: var(--bg); }
+.br-blds > summary { font-size: 12px; color: var(--text-2); cursor: default; padding: 2px 0; }
+.br-bld { display: flex; align-items: center; gap: 10px; padding: 5px 0; border-top: 1px solid var(--line); font-size: 12.5px; }
+.br-bld:first-of-type { border-top: 0; }
+.br-bld.warn .set-sub { color: var(--warn); }
+.br-bld .link-btn { font-size: 12px; }
+.br-bld .link-btn.strong { font-weight: 650; }
+.br-mvs { display: flex; flex-direction: column; gap: 6px; margin: 0 0 12px; }
+.br-mv { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); border-radius: 8px; background: var(--accent-soft); font-size: 12.5px; }

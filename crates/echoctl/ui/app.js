@@ -701,11 +701,11 @@ function actbar() {
   }
   const acts = shownActivities()
   const top = acts.filter((a) => !a.bottom), bottom = acts.filter((a) => a.bottom)
-  // Needs you: not an activity — it shows or hides its panel over whatever is open.
+  // Inbox: not an activity — it shows or hides its panel over whatever is open.
   const n = nyOpen().length, urgent = nyOpen().some((i) => i.urgent)
   const eff = Layout.effective(window.innerWidth, window.innerHeight, panelViews(), S.overlay)
   const shown = Layout.AREAS.some((a) => eff[a].shown && eff[a].active === 'needs')
-  const needs = `<button class="act${shown ? ' pressed' : ''}" data-panel-flip="needs" aria-pressed="${shown}" title="Needs you (${NY_HINT})">${NY_ENTRY}<span>Needs you</span>${n ? `<span class="act-badge${urgent ? '' : ' new'}" aria-label="${n} open">${n}</span>` : ''}</button>`
+  const needs = `<button class="act${shown ? ' pressed' : ''}" data-panel-flip="needs" aria-pressed="${shown}" title="Inbox (${NY_HINT})">${NY_ENTRY}<span>Inbox</span>${n ? `<span class="act-badge${urgent ? '' : ' new'}" aria-label="${n} open">${n}</span>` : ''}</button>`
   return `<nav class="acts" aria-label="Activities">${top.map(btn).join('')}<span class="acts-grow"></span>${needs}${bottom.map((a) => btn(a, acts.indexOf(a))).join('')}</nav>`
 }
 
@@ -1171,7 +1171,7 @@ document.addEventListener('click', (e) => {
   send({ cmd: b.dataset.cmdIpc })
   setTimeout(() => loadSettings().then(render), 8000)
 })
-/** Needs you (`attention.rs`): what waits for the user's decision, from everywhere, in one list — the
+/** Inbox (`attention.rs`): what waits for the user's decision, from everywhere, in one list — the
  *  activity bar's entry above Settings shows or hides it. Each item is decided here with the same
  *  message its own place sends, or opens that place; decided anywhere, it moves to Done this week. */
 const NY = { data: null, at: 0, filter: 'open', gone: new Set(), loading: null, failed: 0, seq: 0, more: new Set() }
@@ -1249,7 +1249,7 @@ function needsPanel() {
   else body = urgent.map(row).join('') + groups(open.filter((i) => !i.urgent)) + (done.length ? `<div class="ny-grp ny-sep"><span class="ok">✓</span><span class="cap">Done this week</span><span class="set-sub">${done.length}</span><span class="grow"></span><button class="btn ghost" data-ny-filter="done">All ▸</button></div>${done.slice(0, 2).map(doneRow).join('')}` : '')
   return `<div class="ny">${head}${body}</div>`
 }
-PANEL_VIEWS.push({ id: 'needs', label: 'Needs you', icon: NY_ENTRY, area: 'right', render: needsPanel })
+PANEL_VIEWS.push({ id: 'needs', label: 'Inbox', icon: NY_ENTRY, area: 'right', render: needsPanel })
 document.addEventListener('click', (e) => {
   const t = e.target.closest && e.target.closest('[data-ny-filter],[data-ny-act],[data-ny-go],[data-ny-more]')
   if (!t) return
@@ -3079,7 +3079,8 @@ function peopleSuggestions(d) {
     const n = `<b>${esc(x.target.name || '')}</b>`, v = esc(x.value)
     switch (x.field) {
       case 'stance': return `Is ${n} a <b>${v}</b>?`
-      case 'role': return `${n}'s role here: <b>${v}</b>?`
+      case 'role': return `${n}'s role here: <b>${v}</b>?${x.was ? ` <span class="set-sub">(was “${esc(x.was)}”)</span>` : ''}`
+      case 'person': return `${n}${x.target.org_name ? ` (${esc(x.target.org_name)})` : ''} — mentioned${x.at && x.at.title ? ` in ${esc(x.at.title)}` : ''}${(x.mentions || 1) > 1 ? `, ${x.mentions} times` : ''}${x.role ? `, ${esc(x.role)}` : ''}: add?`
       case 'influence': case 'interest': return `${n}'s ${x.field}: <b>${LV[x.value] || v}</b>?`
       case 'title': return `${n} is <b>${v}</b>?`
       case 'group': return `${n} is in <b>${v}</b>?`
@@ -3167,43 +3168,79 @@ function peopleList(d) {
  *  Reporting lines are metadata: the card's tooltip, the panel, faint lines when asked for. In a
  *  thread, drag a card to a column (its workstream), to the band (governance), or onto a person
  *  (works for them here). */
-const ocPlace = (x) => placeOf(x) || {}
-const ocGov = (x) => { const p = ocPlace(x); return p.governance != null ? !!p.governance : (p.influence || 0) >= 3 && (p.interest || 0) >= 3 }
-/** Workstreams the thread's roles name, until any is set: "<X> stream lead", a "<X>:" prefix two
- *  people share; then anyone whose role names one ("Design (CX)" → CX). For showing only, never saved. */
-let ocRoles = new Map()
-function ocRoleStreams(people) {
-  const roles = people.map((x) => [x.key, String(ocPlace(x).role || '')])
-  const names = new Set()
-  for (const [, r] of roles) { const m = r.match(/^\s*([A-Za-z][\w &/+-]{0,40}?)\s+(?:work)?stream\b/i); if (m) names.add(m[1].trim()) }
-  const prefix = new Map()
-  for (const [, r] of roles) { const m = r.match(/^\s*([A-Z][\w &/+-]{1,40}):/); if (m) prefix.set(m[1].trim(), (prefix.get(m[1].trim()) || 0) + 1) }
-  for (const [n, c] of prefix) if (c >= 2) names.add(n)
-  const out = new Map()
-  for (const [k, r] of roles) {
-    const hit = [...names].find((n) => new RegExp(`(^|[^\\w])${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^\\w]|$)`, 'i').test(r))
-    if (hit) out.set(k, hit)
+// ── org chart layout (no DOM; org-chart.test.mjs runs app.js from here to the end mark) ──────────
+/** Who goes where on the org chart (#46): each person's workstream — their saved one (the thread's
+ *  `group`, else the directory's), else the one their role names ("<X> stream lead", a "<X>:" prefix
+ *  two people share, a stream name in the role: "Design (CX)") —, whether they lead it (a "<X> stream
+ *  lead" role, or a "lead" role in their saved stream), and whether they sit in the governance band:
+ *  set explicitly, else high influence and interest for people with no workstream only — a stream's
+ *  lead leads its column, not the band. `place(x)` = their place in this view. */
+const OrgLayout = (() => {
+  const reEsc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const streamOfRole = (role) => { const m = String(role || '').match(/(?:^|[:;(,]\s*)([A-Za-z][\w &/+-]{0,40}?)\s+(?:work)?stream\b/i); return m ? m[1].trim() : null }
+  const isLead = (role) => /\blead\b/i.test(String(role || ''))
+  const saved = (x, place) => place(x).group || x.group || ''
+  /** Workstream names the thread gives (saved groups, "<X> stream" roles, a shared "<X>:" prefix) and
+   *  whom a role puts in one. */
+  function roleStreams(people, place) {
+    const names = new Set(people.map((x) => saved(x, place)).filter(Boolean))
+    const prefix = new Map()
+    for (const x of people) {
+      const r = String(place(x).role || '')
+      const s = streamOfRole(r)
+      if (s) names.add(s)
+      const m = r.match(/^\s*([A-Z][\w &/+-]{1,40}):/)
+      if (m) prefix.set(m[1].trim(), (prefix.get(m[1].trim()) || 0) + 1)
+    }
+    for (const [n, c] of prefix) if (c >= 2) names.add(n)
+    const out = new Map()
+    for (const x of people) {
+      const r = String(place(x).role || '')
+      const own = streamOfRole(r)
+      const hit = own ? [...names].find((n) => n.toLowerCase() === own.toLowerCase()) || own : [...names].find((n) => new RegExp(`(^|[^\\w])${reEsc(n)}([^\\w]|$)`, 'i').test(r))
+      if (hit) out.set(x.key, hit)
+    }
+    return out
   }
-  return out
-}
-const ocStream = (x) => ocPlace(x).group || x.group || ocRoles.get(x.key) || ''
+  function assign(people, place) {
+    const roles = roleStreams(people, place)
+    const out = new Map()
+    for (const x of people) {
+      const p = place(x), own = saved(x, place), role = p.role || ''
+      const stream = own || roles.get(x.key) || ''
+      const leads = isLead(role) && stream && (own ? true : !!streamOfRole(role))
+      const band = p.governance != null ? !!p.governance : !stream && (p.influence || 0) >= 3 && (p.interest || 0) >= 3
+      out.set(x.key, { stream, fromRoles: !own && !!stream, band, lead: leads && !band })
+    }
+    return out
+  }
+  return { assign, roleStreams, streamOfRole }
+})()
+// end of the org chart layout block
+const ocPlace = (x) => placeOf(x) || {}
+/** The chart's layout of the people shown now (`OrgLayout.assign`, set by `peopleOrg`). */
+let ocLay = new Map()
+const ocGov = (x) => { const l = ocLay.get(x.key); if (l) return l.band; const p = ocPlace(x); return p.governance != null ? !!p.governance : (p.influence || 0) >= 3 && (p.interest || 0) >= 3 }
+const ocStream = (x) => (ocLay.get(x.key) || {}).stream || ocPlace(x).group || x.group || ''
 const ocBoss = (x) => ocPlace(x).works_for || x.works_for_hint || null
 const ocIdle = (x) => !!x.quiet || (!x.calls && !x.owes && !(x.facts || []).length)
 function ocCard(x, d) {
   const p = ocPlace(x), thread = !S.pj.client
   const boss = ocPlace(x).works_for ? d.people.find((y) => y.key === ocPlace(x).works_for) : null
   const rep = x.reports_to ? d.people.find((y) => y.key === x.reports_to) : null
-  const tip = [x.title, rep ? `reports to ${rep.name}` : '', boss ? `works for ${boss.name} here` : x.works_for_hint ? `works for ${(d.people.find((y) => y.key === x.works_for_hint) || {}).name || '?'} here (from the work)` : ''].filter(Boolean).join(' · ')
+  const roleWhen = p.role && p.role_at ? `role since ${fmtDay(p.role_at)}${p.role_by === 'you' ? ' (yours)' : p.role_from ? ` (from ${p.role_from})` : ''}` : ''
+  const tip = [x.title, roleWhen, rep ? `reports to ${rep.name}` : '', boss ? `works for ${boss.name} here` : x.works_for_hint ? `works for ${(d.people.find((y) => y.key === x.works_for_hint) || {}).name || '?'} here (from the work)` : ''].filter(Boolean).join(' · ')
   const meta = [x.owes ? `${x.owes} open` : '', x.late ? `<span class="late">${x.late} late</span>` : '', x.last ? `seen ${esc(relDay(x.last))}` : 'not in a call yet'].filter(Boolean).join(' · ')
   return `<button class="oc-card${S.pj.person === x.key ? ' on' : ''}" data-pp="pick" data-key="${esc(x.key)}" data-pk="${esc(x.key)}"${thread ? ` draggable="true" data-pp-drag="${esc(x.key)}" data-oc-person="${esc(x.key)}"` : ''} title="${esc(tip)}">${ppAv(x.name, p.stance)}<span class="oc-t"><b>${esc(x.name)}</b><small>${esc(p.role || x.title || '')}</small><span class="oc-m">${meta}</span></span></button>`
 }
 /** A workstream's people: its lead (whom most of the others work for here; else the most senior),
  *  then by seniority, then by calls; the inactive folded. */
 function ocColumn(ys, key, label, d) {
-  const lead_ = (x) => /\blead\b/i.test(ocPlace(x).role || '') ? 1 : 0
-  const n = (x) => ys.filter((y) => ocBoss(y) === x.key).length + lead_(x)
+  // Its lead: the one whose role leads this stream, else whom the others work for here.
+  const named = (x) => (ocLay.get(x.key) || {}).lead ? 100 : 0
+  const n = (x) => ys.filter((y) => ocBoss(y) === x.key).length + named(x)
   const order = ys.slice().sort((a, b) => n(b) - n(a) || (b.seniority || 0) - (a.seniority || 0) || (b.calls || 0) - (a.calls || 0) || a.name.localeCompare(b.name))
-  const lead = order.length > 1 && n(order[0]) > 0 ? order[0] : null
+  const lead = order.length && n(order[0]) > 0 && (order.length > 1 || named(order[0])) ? order[0] : null
   const rest = order.filter((x) => x !== lead)
   const on = rest.filter((x) => !ocIdle(x)), idle = rest.filter(ocIdle)
   const open = S.pj.ocOpen && S.pj.ocOpen[key]
@@ -3212,8 +3249,8 @@ function ocColumn(ys, key, label, d) {
 }
 function peopleOrg(d) {
   const people = d.people.filter((x) => x.in_thread)
-  // Read from the roles only while nobody has a workstream set.
-  ocRoles = people.some((x) => ocPlace(x).group || x.group) ? new Map() : ocRoleStreams(people)
+  ocLay = OrgLayout.assign(people, ocPlace)
+  const derived = people.filter((x) => (ocLay.get(x.key) || {}).fromRoles)
   const byOrg = new Map()
   for (const x of people) { const k = x.side === 'yours' ? '#yours' : x.org ? x.org.id : `#${x.domain || 'unknown'}`; if (!byOrg.has(k)) byOrg.set(k, []); byOrg.get(k).push(x) }
   const orgName = (k) => k === '#yours' ? 'Your company' : k.startsWith('#') ? (k.slice(1) === 'unknown' ? 'Not known' : k.slice(1)) : ((d.orgs.find((o) => o.id === k) || {}).name || k)
@@ -3226,7 +3263,7 @@ function peopleOrg(d) {
     const cols = [...streams.entries()].sort((a, b) => (a[0] === '') - (b[0] === '') || a[0].localeCompare(b[0]))
     const rel = o ? [o.parent ? `part of ${esc((d.orgs.find((x) => x.id === o.parent) || { name: o.parent }).name)}` : '', ...(o.relations || []).map((r) => `${esc(r.kind.replace('_', ' '))} ${esc((d.orgs.find((x) => x.id === r.to) || { name: r.to }).name)}`)].filter(Boolean).join(' · ') : ''
     const band = gov.length || xs.length > 3 ? `<div class="oc-gov" data-oc-drop="${esc(k)}|gov"><span class="cap">Governance</span><div class="oc-row">${gov.slice().sort((a, b) => (b.seniority || 0) - (a.seniority || 0)).map((x) => ocCard(x, d)).join('') || '<span class="set-sub">Sponsor, partner, programme lead, PM — drop them here</span>'}</div></div>` : ''
-    const fromRoles = (g) => g && ocRoles.size && [...ocRoles.values()].includes(g)
+    const fromRoles = (g) => g && xs.some((x) => ocStream(x) === g && (ocLay.get(x.key) || {}).fromRoles)
     const body = cols.map(([g, ys]) => ocColumn(ys, `${k}|${g}`, g ? `${g}${fromRoles(g) ? ' · from roles' : ''}` : (cols.length > 1 ? 'No workstream' : 'Team'), d)).join('')
     const newCol = !S.pj.client && xs.length ? (S.pj.ocNewCol === k ? `<div class="oc-col oc-new"><input class="wp-in" id="oc-new-col" data-org="${esc(k)}" placeholder="Workstream name" aria-label="New workstream" autofocus><span class="set-sub">then drop people on it</span></div>` : `<button class="oc-add" data-pp="oc-new-col" data-org="${esc(k)}" title="A new workstream column">+ Workstream</button>`) : ''
     const extra = (S.pj.ocCols || []).filter((c) => c.org === k && !streams.has(c.name)).map((c) => ocColumn([], `${k}|${c.name}`, c.name, d)).join('')
@@ -3242,7 +3279,9 @@ function peopleOrg(d) {
   for (const o of d.orgs || []) if ((o.relations || []).some((r) => shown.has(r.to)) || (o.parent && shown.has(o.parent))) shown.add(o.id)
   // Yours on the left, the others mirrored on the right.
   const keys = [...shown].sort((a, b) => (b === '#yours') - (a === '#yours') || (a === '#unknown') - (b === '#unknown') || orgName(a).localeCompare(orgName(b)))
-  const bar = `<div class="oc-bar"><span class="set-sub">Who does what here. Lines: works for (solid; dashed when the work suggests it) · works with across organisations (faint)</span><span class="grow"></span><label class="oc-tog"><input type="checkbox" data-pp-reports${S.pj.ocReports ? ' checked' : ''}> Reporting lines</label></div>`
+  // Columns read from the roles: kept as each person's workstream in one go (as dragging them would).
+  const keep = derived.length && !S.pj.client ? `<button class="btn" data-pp="oc-keep" title="Save ${derived.length} people's workstream as their roles give it">Keep these columns</button>` : ''
+  const bar = `<div class="oc-bar"><span class="set-sub">Who does what here. Lines: works for (solid; dashed when the work suggests it) · works with across organisations (faint)</span><span class="grow"></span>${keep}<label class="oc-tog"><input type="checkbox" data-pp-reports${S.pj.ocReports ? ' checked' : ''}> Reporting lines</label></div>`
   return keys.length ? `${bar}<div class="pp-orgs oc">${keys.map(org).join('')}</div>` : '<p class="set-sub">Nobody placed yet: add people from List.</p>'
 }
 /** The chart's people lines, over it: works for (solid; from the work, dashed), works with across
@@ -3357,7 +3396,7 @@ function personPanel() {
   const asks = (x.questions || []).map((q) => `<div class="pp-ask"><span class="grow"><b>${esc(SRC[q.source] || q.source)}</b> says ${esc(q.field)} is “${esc(q.theirs)}” — you set “${esc(q.yours || '')}”.</span><button class="btn" data-pp="answer" data-f="${esc(q.field)}" data-use="1">Use theirs</button><button class="btn ghost" data-pp="answer" data-f="${esc(q.field)}" data-use="">Keep mine</button></div>`).join('')
   const lvl = (f) => `<span class="pp-lvl" role="group" aria-label="${f}">${[1, 2, 3].map((n) => `<button data-pp="level" data-f="${f}" data-n="${n}" aria-pressed="${(pl[f] || 0) >= n}" title="${['low', 'mid', 'high'][n - 1]}"></button>`).join('')}<span class="set-sub">${pl[f] ? ['low', 'mid', 'high'][pl[f] - 1] : 'not set'}</span></span>`
   const inThread = thread ? `<div class="wp-h">In ${esc((projById(thread) || {}).name || 'this thread')}</div><div class="wp-facts">
-      <span>Role</span><div>${S.pj.ppEdit === 'role' ? `<input class="wp-in" data-pp-place="role" value="${esc(pl.role || '')}" aria-label="Role" autofocus>` : `<button class="wp-val${pl.role ? '' : ' empty'}" data-pp="edit" data-f="role">${pl.role ? esc(pl.role) : '<u>Set</u>'}</button>`}</div>
+      <span>Role</span><div>${S.pj.ppEdit === 'role' ? `<input class="wp-in" data-pp-place="role" value="${esc(pl.role || '')}" aria-label="Role" autofocus>` : `<button class="wp-val${pl.role ? '' : ' empty'}" data-pp="edit" data-f="role">${pl.role ? esc(pl.role) : '<u>Set</u>'}</button>${pl.role && pl.role_at ? `<div class="set-sub">${esc(fmtDay(pl.role_at))} · ${pl.role_by === 'you' ? 'yours (Echo leaves it)' : `from ${esc(pl.role_from || 'a call')}`}</div>` : ''}`}</div>
       <span>Stance</span><div><select class="wp-in" data-pp-place="stance" aria-label="Stance"><option value="">not set</option>${STANCES.map((s) => `<option${pl.stance === s ? ' selected' : ''}>${s}</option>`).join('')}</select></div>
       <span>Influence</span><div>${lvl('influence')}</div><span>Interest</span><div>${lvl('interest')}</div>
       <span>Workstream</span><div>${S.pj.ppEdit === 'group' ? `<input class="wp-in" data-pp-place="group" value="${esc(pl.group || '')}" list="pp-streams" aria-label="Workstream" autofocus><datalist id="pp-streams">${[...new Set(d.people.map((y) => ocStream(y)).filter(Boolean))].map((g) => `<option value="${esc(g)}">`).join('')}</datalist>` : `<button class="wp-val${pl.group ? '' : ' empty'}" data-pp="edit" data-f="group">${pl.group ? esc(pl.group) : x.group ? `${esc(x.group)} <span class="set-sub">(their group)</span>` : '<u>Set</u>'}</button>`}</div>
@@ -3480,6 +3519,7 @@ document.addEventListener('click', (e) => {
     case 'about-cancel': S.pj.aboutEdit = null; return render()
     case 'about-save': return aboutSave()
     case 'all-facts': S.pj.ppAllFacts = !S.pj.ppAllFacts; return render()
+    case 'oc-keep': { const d2 = peopleData(); if (!d2) return; for (const x of d2.people.filter((y) => y.in_thread && (ocLay.get(y.key) || {}).fromRoles)) personPlace(x.key, { group: ocLay.get(x.key).stream }); return }
     case 'oc-fold': S.pj.ocOpen = { ...(S.pj.ocOpen || {}), [d.col]: !(S.pj.ocOpen || {})[d.col] }; return render()
     case 'oc-new-col': S.pj.ocNewCol = d.org; render(); { const i = $('#oc-new-col'); if (i) i.focus() } return
     case 'org-name-ask': S.pj.nameOrg = d.domain; render(); { const i = $('#pp-org-name'); if (i) i.focus() } return
@@ -3626,17 +3666,51 @@ function brainView() {
 }
 function brainTopics(tx) {
   if (!tx.exists) return `<div class="wk-empty"><b>No topics yet</b><p>Claude builds them from your calls — your practice, and each client's own — and you review them here. <code>echoctl brain taxonomy build</code></p></div>`
+  // One tree for the whole Brain: the practice's topics, each with its subtopics and the clients' topics
+  // placed under it (a chip names the client); then what only one client has. Builds stay per layer
+  // (the practice, each client): their state and actions above the tree; suggested moves (up to the
+  // practice, down to a client) next to it.
   const layers = tx.layers || []
-  const block = (l) => {
-    const ts = (tx.topics || []).filter((x) => x.layer === l.id)
-    if (!ts.length) return ''
-    const row = (x) => `<button class="br-row${x.level === 2 ? ' l2' : ''}${S.br.node === x.id ? ' on' : ''}" data-br-node="${esc(x.id)}"><span class="br-l">${x.level === 1 ? `<b>${esc(x.label)}</b>` : esc(x.label)}</span><span class="br-n">${x.sections || ''}</span><span class="br-th">${threadChips(x.threads)}</span></button>`
-    const rows = ts.filter((x) => x.level === 1).map((l1) => row(l1) + ts.filter((k) => k.level === 2 && k.parent === l1.label).map(row).join('')).join('')
-    const prov = l.provisional ? `<div class="br-prov"><span class="grow">Claude built ${l.id === 'shared' ? 'these' : `${esc(l.name)}'s topics`} from ${l.built_from || 'its'} calls. Rename, merge, move or remove — tags move with your changes — then accept them.</span><button class="btn primary" data-br-accept="${esc(l.id)}">Accept</button></div>` : ''
-    return `<section class="br-layer"><div class="br-lh"><span class="cap">${esc(l.id === 'shared' ? 'Your practice' : l.name)}</span><span class="set-sub">${l.id === 'shared' ? 'shared across clients' : 'client'}</span></div>${l.summary ? `<p class="br-sum">${esc(l.summary)}</p>` : ''}${prov}<div class="br-card">${rows}</div></section>`
+  const topics = tx.topics || []
+  const lname = (id) => id === 'shared' ? 'Your practice' : ((layers.find((l) => l.id === id) || {}).name || id)
+  const lcolor = (id) => { const i = layers.filter((l) => l.id !== 'shared').findIndex((l) => l.id === id); return i < 0 ? '#8a8a95' : CLIENT_COLORS[i % CLIENT_COLORS.length] }
+  const open = (id, dflt) => (S.br.fold || {})[id] == null ? dflt : !(S.br.fold || {})[id]
+  const jobs = new Set([...((S.br.data || {}).topic_jobs || []), ...Object.keys(S.br.rebuilding || {})])
+  const catchAll = new Map(layers.filter((l) => l.drift && (l.drift.reasons || []).some((r) => r.rule === 'catch_all') && l.drift.top).map((l) => [`${l.id}|${l.drift.top.label}`, Math.round(l.drift.top.pct)]))
+  const kidsOf = (x) => topics.filter((k) => k.level === 2 && k.parent_id === x.id).sort((a, b) => (a.layer !== 'shared') - (b.layer !== 'shared') || (b.sections || 0) - (a.sections || 0))
+  const roots = topics.filter((x) => x.level === 1 || !x.parent_id)
+  const max = Math.max(1, ...roots.map((t) => t.sections || 0))
+  const total = roots.reduce((n, t) => n + (t.sections || 0), 0)
+  const row = (x, top) => {
+    const sub = kidsOf(x)
+    const isOpen = open(x.id, false)
+    const pct = total ? Math.round(100 * (x.sections || 0) / total) : 0
+    const ca = catchAll.get(`${x.layer}|${x.label}`)
+    const flag = ca ? `<span class="br-flag" title="Took ${ca}% of ${esc(lname(x.layer))}'s new sections: a catch-all — split it, or rebuild">took ${ca}% of new</span>` : ''
+    const chip = x.layer !== 'shared' ? `<span class="br-cl" style="--c:${lcolor(x.layer)}">${esc(lname(x.layer))}</span>` : ''
+    const syn = (x.synonyms || []).length ? ` · also ${esc(x.synonyms.slice(0, 3).join(', '))}` : ''
+    const fold = sub.length ? `<button class="br-fold" data-br-fold="${esc(x.id)}" aria-expanded="${isOpen}" title="${isOpen ? 'Fold' : 'Show'} ${sub.length} subtopic${sub.length === 1 ? '' : 's'}">${isOpen ? '▾' : '▸'}</button>` : '<span class="br-fold"></span>'
+    const subs = sub.length && !isOpen ? ` <span class="set-sub">· ${sub.length} sub${sub.some((k) => k.layer !== 'shared') ? `, ${[...new Set(sub.filter((k) => k.layer !== 'shared').map((k) => lname(k.layer)))].map(esc).join(', ')}` : ''}</span>` : ''
+    return `<div class="br-tr${top ? '' : ' l2'}${S.br.node === x.id ? ' on' : ''}">${fold}<button class="br-tm" data-br-node="${esc(x.id)}"><span class="br-tn">${top ? `<b>${esc(x.label)}</b>` : esc(x.label)} ${chip}${subs}${flag}</span>${x.description || syn ? `<span class="br-td">${esc(x.description || '')}${syn}</span>` : ''}</button>
+      <span class="br-bar" title="${x.sections || 0} sections · ${pct}%"><i style="width:${Math.round(100 * (x.sections || 0) / max)}%"></i></span><span class="br-n">${x.sections || 0}<small> · ${pct}%</small></span><span class="br-th">${threadChips(x.threads)}</span></div>${isOpen ? sub.map((k) => row(k, false)).join('') : ''}`
+  }
+  const practice = roots.filter((x) => x.layer === 'shared').sort((a, b) => (b.sections || 0) - (a.sections || 0))
+  const own = layers.filter((l) => l.id !== 'shared').map((l) => [l, roots.filter((x) => x.layer === l.id).sort((a, b) => (b.sections || 0) - (a.sections || 0))]).filter(([, xs]) => xs.length)
+  // Builds: one line per layer — its state, what fits no topic, and its actions.
+  const build = (l) => {
+    const running = jobs.has(`taxonomy:${l.id}`) ? 'rebuilding from its calls…' : jobs.has(`retag:${l.id}`) ? 'tagging its sections again…' : ''
+    const d = l.drift || {}
+    const state = running || [l.provisional ? 'provisional' : '', d.stale ? `out of date — ${(d.reasons || []).map((r) => r.text).join(' · ')}` : '', d.untagged ? `${d.untagged} new sections fit no topic` : ''].filter(Boolean).join(' · ') || 'up to date'
+    const acts = running ? '' : `${l.provisional ? `<button class="link-btn" data-br-accept="${esc(l.id)}">Accept</button>` : ''}${d.stale ? `<button class="link-btn" data-br-snooze="${esc(l.id)}">Not now</button>` : ''}<button class="link-btn" data-br-retag="${esc(l.id)}" title="Tag its sections again with the topics as they are now">Tag again</button><button class="link-btn${d.stale ? ' strong' : ''}" data-br-rebuild="${esc(l.id)}" title="Build its topics again from its calls (Claude): existing topics keep their place, a provisional version to review">Rebuild</button>`
+    return `<div class="br-bld${d.stale ? ' warn' : ''}"><span class="br-cl" style="--c:${l.id === 'shared' ? '#8a8a95' : lcolor(l.id)}">${esc(lname(l.id))}</span><span class="set-sub grow">${esc(state)}${l.built_from ? ` · built from ${l.built_from} calls` : ''}</span>${acts}</div>`
   }
   const ordered = [...layers.filter((l) => l.id === 'shared'), ...layers.filter((l) => l.id !== 'shared')]
-  return ordered.map(block).join('') || '<p class="set-sub">Nothing in this scope.</p>'
+  const builds = `<details class="br-blds"${ordered.some((l) => l.provisional || (l.drift && l.drift.stale)) || jobs.size ? ' open' : ''}><summary>Builds · ${ordered.length} layer${ordered.length === 1 ? '' : 's'}${ordered.filter((l) => l.drift && l.drift.stale).length ? ` · ${ordered.filter((l) => l.drift && l.drift.stale).length} out of date` : ''}</summary>${ordered.map(build).join('')}</details>`
+  const mv = (tx.moves || []).map((m) => `<div class="br-mv"><span class="grow">${m.dir === 'up' ? `↑ <b>${esc(m.label)}</b> belongs to your practice? <span class="set-sub">${esc(m.why)}</span>` : `↓ <b>${esc(m.label)}</b> is only ${esc(m.to_name)}'s? <span class="set-sub">${esc(m.why)}</span>`}</span><button class="btn ghost" data-br-move="${esc(m.key)}" data-do="dismiss">Keep it</button><button class="btn primary" data-br-move="${esc(m.key)}" data-do="apply">${m.dir === 'up' ? 'Move up' : 'Move down'}</button></div>`).join('')
+  const top = `<div class="br-tbar"><span class="set-sub">${topics.length} topics · version ${tx.version}</span><span class="grow"></span><button class="btn" data-brain-sync title="Read new calls, mail and files into the Brain now; their new sections are tagged after it">Sync now</button></div>`
+  const tree = practice.length ? `<div class="br-card">${practice.map((x) => row(x, true)).join('')}</div>` : ''
+  const only = own.map(([l, xs]) => `<section class="br-layer"><div class="br-lh"><span class="cap">Only ${esc(lname(l.id))}</span><span class="set-sub">topics no other client shares — move one up when it does</span></div><div class="br-card">${xs.map((x) => row(x, true)).join('')}</div></section>`).join('')
+  return `${top}${builds}${mv ? `<div class="br-mvs">${mv}</div>` : ''}${practice.length ? `<section class="br-layer"><div class="br-lh"><span class="cap">Your practice</span><span class="set-sub">one tree for every client: their topics sit under the practice's where they fit</span></div>${tree}</section>` : ''}${only}` || '<p class="set-sub">Nothing in this scope.</p>'
 }
 function brainTerms(tx) {
   if (!tx.exists) return '<p class="set-sub">No terms yet: they come with the topics.</p>'
@@ -3801,78 +3875,166 @@ function brainCoverage(tx) {
     <p class="set-foot">Of ${c.total} sections. New sections are tagged after each sync; "nothing fits" growing means the topics need another one — rebuild a layer with <code>echoctl brain taxonomy build --layer …</code>.</p></section>`
 }
 
-// The graph: documents (coloured by client) around their topics, related documents linked. A small
-// force layout, run once per data set and kept; drawn as SVG after each render.
+// ── graphs: Sigma.js (WebGL) over graphology, vendored (`ui/vendor/README.md`) ─────────────────────
+// One instance per graph box: built once per data set (ForceAtlas2 run in the page, then spaced
+// apart), kept across renders — a render that replaces the box remounts the same graph, positions
+// and all. Search focuses: the matches and their neighbours stay lit, the rest is dimmed, the camera
+// flies to them; hovering does the same for one node.
 const CLIENT_COLORS = ['#9b78ff', '#5aa9ff', '#3ccf91', '#f0a24a', '#e8603c', '#d36bd1', '#4cc3c8', '#c9b458']
+const GraphView = (() => {
+  const live = new Map() // box id → { sigma, graph, key, box, match, focus, hover, sel, opts }
+  const cache = new Map() // data key → graph (laid out once)
+  const css = (v, f) => (getComputedStyle(document.documentElement).getPropertyValue(v) || '').trim() || f
+  function layout(graph) {
+    const n = graph.order
+    if (!n || typeof graphologyLibrary === 'undefined') return
+    const L = graphologyLibrary
+    const fa2 = L.layoutForceAtlas2
+    const settings = { ...fa2.inferSettings(graph), barnesHutOptimize: n > 400, gravity: 1, scalingRatio: n > 400 ? 6 : 12, slowDown: 2 }
+    fa2.assign(graph, { iterations: n > 3000 ? 60 : n > 800 ? 120 : 250, settings, getEdgeWeight: 'weight' })
+    if (L.layoutNoverlap) L.layoutNoverlap.assign(graph, { maxIterations: n > 2000 ? 20 : 80, settings: { margin: 4, ratio: 1.3 } })
+  }
+  /** Draw `box` (an element with an id) from `build()` → a graphology graph whose nodes carry x, y,
+   *  size, color, label, `group` (seeds the layout) and `pinLabel` (always labelled); edges weight,
+   *  size, color. `key` names the data: the same key keeps the same graph. */
+  function draw(box, key, build, opts) {
+    if (!box || typeof Sigma === 'undefined' || typeof graphology === 'undefined') return null
+    const id = box.id
+    let v = live.get(id)
+    if (v && v.key === key && v.box === box) return v
+    // The same data in a new box (a render replaced it): the camera stays where it was.
+    const cam = v && v.key === key ? v.sigma.getCamera().getState() : null
+    if (v) { try { v.sigma.kill() } catch { /* gone with its box */ } }
+    let graph = cache.get(key)
+    if (!graph) { graph = build(); layout(graph); cache.set(key, graph); if (cache.size > 8) cache.delete(cache.keys().next().value) }
+    box.innerHTML = ''
+    const st = { key, box, graph, match: v && v.key === key ? v.match : null, focus: v && v.key === key ? v.focus : null, hover: null, sel: null, opts }
+    // WebGL reads plain colours only: the theme's hex values, a dimmed node by the background's lightness.
+    const bg = css('--bg', '#f6f6f8'), dark = /^#/.test(bg) && parseInt(bg.slice(1, 3), 16) < 128
+    const dim = dark ? '#33333d' : '#e1e1e8', text = css('--text', dark ? '#eee' : '#222'), muted = css('--text-3', '#8a8a95')
+    const near = (k) => new Set([k, ...graph.neighbors(k)])
+    const sigma = new Sigma(graph, box, {
+      settings: { labelDensity: 0.08, labelGridCellSize: 120, labelRenderedSizeThreshold: 7, hideEdgesOnMove: graph.size > 3000, zIndex: true, minCameraRatio: 0.02, maxCameraRatio: 4, stagePadding: 24, labelFont: getComputedStyle(document.body).fontFamily, labelSize: 11 },
+      nodeReducer: (k, d, a) => {
+        const hov = st.hover && near(st.hover)
+        const out = { ...d, labelColor: a.pinLabel ? text : muted }
+        const lit = (st.focus && st.focus.has(k)) || (hov && hov.has(k)) || k === st.sel
+        const off = (st.focus && !st.focus.has(k)) || (hov && !hov.has(k))
+        if (off) return { ...out, color: dim, label: null, zIndex: 0 }
+        if ((st.match && st.match.has(k)) || k === st.sel || k === st.hover) return { ...out, highlighted: true, labelVisibility: 'visible', labelColor: text, zIndex: 3 }
+        // Labels where they fit (sigma's grid, the biggest first: topics and threads); lit ones always.
+        if (lit) return { ...out, labelVisibility: 'visible', zIndex: 2 }
+        if (a.pinLabel) return { ...out, zIndex: 1 }
+        return out
+      },
+      edgeReducer: (k, d) => {
+        const [s, t] = graph.extremities(k)
+        const hov = st.hover && near(st.hover)
+        const on = (x) => (!st.focus || st.focus.has(x)) && (!hov || hov.has(x))
+        if (!on(s) || !on(t)) return { ...d, visibility: 'hidden' }
+        return (st.hover && (s === st.hover || t === st.hover)) || (st.sel && (s === st.sel || t === st.sel)) ? { ...d, color: css('--accent', '#8b62ff'), size: Math.max(d.size, 1.5), zIndex: 2 } : d
+      },
+    })
+    st.sigma = sigma
+    sigma.on('enterNode', ({ node }) => { st.hover = node; box.style.cursor = 'pointer'; sigma.refresh({ skipIndexation: true }) })
+    sigma.on('leaveNode', () => { st.hover = null; box.style.cursor = ''; sigma.refresh({ skipIndexation: true }) })
+    sigma.on('clickNode', ({ node }) => opts.click && opts.click(node, graph.getNodeAttributes(node)))
+    live.set(id, st)
+    if (cam) sigma.getCamera().setState(cam)
+    return st
+  }
+  /** Fly the camera to these nodes (their bounding box), or back to the whole graph. */
+  function fly(st, keys) {
+    const cam = st.sigma.getCamera()
+    const pts = [...(keys || [])].map((k) => st.sigma.getNodeDisplayData(k)).filter(Boolean)
+    if (!pts.length) return cam.animate({ x: 0.5, y: 0.5, ratio: 1, angle: 0 }, { duration: 400 })
+    const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y)
+    const span = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys))
+    cam.animate({ x: (Math.max(...xs) + Math.min(...xs)) / 2, y: (Math.max(...ys) + Math.min(...ys)) / 2, ratio: Math.min(1, Math.max(0.08, span * 1.4)) }, { duration: 500 })
+  }
+  /** Light these nodes (null: none) and their neighbours, dim the rest, fly to them. */
+  function focus(id, keys) {
+    const st = live.get(id)
+    if (!st) return 0
+    const g = st.graph
+    const m = keys ? new Set([...keys].filter((k) => g.hasNode(k))) : null
+    st.match = m && m.size ? m : null
+    st.focus = st.match ? new Set([...st.match].flatMap((k) => [k, ...g.neighbors(k)])) : null
+    st.sigma.refresh({ skipIndexation: true })
+    fly(st, st.match)
+    return st.match ? st.match.size : 0
+  }
+  function select(id, key) {
+    const st = live.get(id)
+    if (!st || st.sel === key) return
+    st.sel = key && st.graph.hasNode(key) ? key : null
+    st.sigma.refresh({ skipIndexation: true })
+  }
+  /** Nodes whose label (or `search` text) has every word typed. */
+  function find(id, q) {
+    const st = live.get(id)
+    const words = String(q || '').toLowerCase().split(/\s+/).filter(Boolean)
+    if (!st || !words.length) return null
+    const hits = new Set()
+    st.graph.forEachNode((k, a) => { const t = `${a.label || ''} ${a.search || ''}`.toLowerCase(); if (words.every((w) => t.includes(w))) hits.add(k) })
+    return hits
+  }
+  const resize = () => { for (const st of live.values()) if (st.box.isConnected) st.sigma.resize() }
+  return { draw, focus, select, find, resize, live }
+})()
+
+// The Brain's graph: documents (coloured by client) and their topics (labelled, coloured by layer);
+// a document joins the topics its sections are tagged with, related documents join each other.
 function brainGraph() {
   const g = S.br.graph
   if (!g || g.q !== brainQuery()) return `<div class="skeleton" style="padding:20px">${'<i></i>'.repeat(6)}</div>`
   if (!g.nodes || !g.nodes.length) return '<p class="set-sub">Nothing to draw in this scope yet.</p>'
   const clients = [...new Set(g.nodes.filter((n) => n.type === 'doc').map((n) => n.client || '-'))]
   const legend = clients.map((c, i) => `<span class="pp-leg"><i class="br-dot" style="background:${c === '-' ? '#8a8a95' : CLIENT_COLORS[i % CLIENT_COLORS.length]}"></i>${esc(clientName(c))}</span>`).join('')
-  return `<div class="br-graph-bar">${legend}<span class="grow"></span><span class="set-sub">Topics on the ring (grouped by client); sources inside, near their topics — calls round, posts, mail and documents square; dashed: related. Click one for its details.</span></div><div class="br-graph" id="br-graph"></div>`
+  const box = `<input class="wp-in br-pq" id="br-gq" type="search" placeholder="Find a topic or source — Enter searches the Brain" value="${esc(S.br.gq || '')}" aria-label="Find in the graph">`
+  const res = S.br.gqRes ? `<span class="set-sub br-gq-res">${esc(S.br.gqRes)}</span>` : ''
+  return `<div class="br-graph-bar">${box}${res}<span class="grow"></span>${legend}</div><div class="br-graph" id="br-graph"></div><p class="set-foot">${g.nodes.length} nodes · ${g.edges.length} links. Scroll to zoom, drag to move; hover to see a node's links, click for its details. Topics are labelled; sources by size once you zoom in.</p>`
 }
-function layoutGraph(g, w, h) {
-  // Topics on a ring, grouped by layer (a client's topics side by side); sources inside, each at the
-  // weighted middle of its topics, pulled in toward the centre, then nudged apart.
-  const cx = w / 2, cy = h / 2, R = Math.max(80, Math.min(w / 2 - 150, h / 2 - 34))
-  const topics = g.nodes.filter((n) => n.type === 'topic').sort((a, b) => (a.layer === 'shared') - (b.layer === 'shared') || String(a.layer).localeCompare(String(b.layer)) || b.sections - a.sections)
-  const pos = new Map()
-  topics.forEach((t, i) => { const a = -Math.PI / 2 + (2 * Math.PI * i) / Math.max(1, topics.length); pos.set(t.id, { ...t, x: cx + R * Math.cos(a), y: cy + R * Math.sin(a), a }) })
-  const about = new Map()
-  for (const e of g.edges.filter((e) => e.kind === 'about')) { if (!about.has(e.source)) about.set(e.source, []); about.get(e.source).push(e) }
-  const docs = g.nodes.filter((n) => n.type === 'doc').map((d) => {
-    const es = (about.get(d.id) || []).filter((e) => pos.has(e.target))
-    const sw = es.reduce((s, e) => s + e.weight, 0)
-    const seed = ProjectArt.hash(d.id)
-    let x = cx + ((seed % 41) - 20), y = cy + (((seed >> 6) % 41) - 20)
-    if (sw) { x = es.reduce((s, e) => s + pos.get(e.target).x * e.weight, 0) / sw; y = es.reduce((s, e) => s + pos.get(e.target).y * e.weight, 0) / sw; x = cx + (x - cx) * 0.66; y = cy + (y - cy) * 0.66 }
-    return { ...d, x, y }
-  })
-  for (let it = 0; it < 80; it++) for (let a = 0; a < docs.length; a++) for (let b = a + 1; b < docs.length; b++) {
-    const A = docs[a], B = docs[b], dx = A.x - B.x, dy = A.y - B.y, d = Math.sqrt(dx * dx + dy * dy) || 0.1
-    if (d < 22) { const f = (22 - d) / d / 2; A.x += dx * f; A.y += dy * f; B.x -= dx * f; B.y -= dy * f }
-  }
-  const all = new Map([...pos.values(), ...docs].map((n) => [n.id, n]))
-  const edges = g.edges.map((e) => ({ s: all.get(e.source), t: all.get(e.target), kind: e.kind, w: e.weight })).filter((e) => e.s && e.t)
-  return { nodes: [...pos.values(), ...docs], edges, cx, cy, R }
-}
-/** The graph's selection: the node in the details panel ringed, its edges brought up, the rest dimmed. */
-function markGraph(box) {
-  const sel = S.br.doc || (S.br.node ? `topic:${S.br.node}` : null)
-  const svg = box.querySelector('svg')
-  if (!svg) return
-  svg.classList.toggle('has-sel', !!sel)
-  const near = new Set(sel ? [sel] : [])
-  svg.querySelectorAll('line').forEach((l) => {
-    const on = !!sel && (l.dataset.a === sel || l.dataset.b === sel)
-    l.classList.toggle('hl', on)
-    if (on) { near.add(l.dataset.a); near.add(l.dataset.b) }
-  })
-  svg.querySelectorAll('[data-gid]').forEach((n) => { n.classList.toggle('sel', n.dataset.gid === sel); n.classList.toggle('near', near.has(n.dataset.gid)) })
-}
-
+function graphKey(g) { return `brain|${g.q}|${g.nodes.length}|${g.edges.length}|${g.nodes.slice(0, 3).map((n) => n.id).join(',')}` }
 function drawGraph() {
   const box = $('#br-graph'), g = S.br.graph
   if (!box || !g || !g.nodes) return
-  const w = Math.max(400, box.clientWidth), h = Math.max(360, box.clientHeight)
-  const key = `${g.q}|${w}|${h}|${g.nodes.length}|${g.edges.length}`
-  if (box.dataset.key === key) return markGraph(box)
-  box.dataset.key = key
-  const L = layoutGraph(g, w, h)
   const clients = [...new Set(g.nodes.filter((n) => n.type === 'doc').map((n) => n.client || '-'))]
-  const color = (n) => n.client ? CLIENT_COLORS[clients.indexOf(n.client) % CLIENT_COLORS.length] : '#8a8a95'
-  const layerColor = (l) => { const i = clients.indexOf(l); return l && l !== 'shared' && i >= 0 ? CLIENT_COLORS[i % CLIENT_COLORS.length] : '#8a8a95' }
-  const short = (s) => s.length > 26 ? s.slice(0, 25) + '…' : s
-  const lines = L.edges.map((e) => `<line data-a="${esc(e.s.id)}" data-b="${esc(e.t.id)}" x1="${e.s.x.toFixed(1)}" y1="${e.s.y.toFixed(1)}" x2="${e.t.x.toFixed(1)}" y2="${e.t.y.toFixed(1)}" class="${e.kind === 'about' ? 'ab' : 'rl'}" stroke-width="${e.kind === 'about' ? Math.min(3, 0.5 + e.w / 6) : Math.min(2, 0.4 + e.w / 10)}"/>`).join('')
-  const dots = L.nodes.map((n) => n.type === 'topic'
-    ? (() => {
-      const r = 5 + Math.sqrt(n.sections || 1) * 1.6, c = Math.cos(n.a), lx = n.x + (r + 6) * (c >= 0 ? 1 : -1), ly = n.y + 4
-      return `<g class="tp" data-gid="${esc(n.id)}" data-br-node="${esc(n.id.replace(/^topic:/, ''))}"><circle cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${r.toFixed(1)}" style="stroke:${layerColor(n.layer)}"/><text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="${c >= 0 ? 'start' : 'end'}">${esc(short(n.label))}<title>${esc(n.label)} · ${n.sections} sections</title></text></g>`
-    })()
-    : `<g class="dc" data-gid="${esc(n.id)}" data-graph-doc="${esc(n.id)}">${(() => { const r = 4 + Math.sqrt(n.sections || 1) * 0.7; return n.kind && n.kind !== 'call' ? `<rect x="${(n.x - r * 0.85).toFixed(1)}" y="${(n.y - r * 0.85).toFixed(1)}" width="${(r * 1.7).toFixed(1)}" height="${(r * 1.7).toFixed(1)}" rx="1.5" fill="${color(n)}"/>` : `<circle cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${r.toFixed(1)}" fill="${color(n)}"/>` })()}<title>${esc(n.label || n.id)}${n.date ? ` · ${esc(n.date)}` : ''} · ${n.sections} sections</title></g>`).join('')
-  box.innerHTML = `<svg viewBox="0 0 ${w} ${h}" width="100%" height="100%" role="img" aria-label="The Brain as a graph: sources around their topics">${lines}${dots}</svg>`
-  markGraph(box)
+  const color = (c) => c && c !== '-' && c !== 'shared' && clients.indexOf(c) >= 0 ? CLIENT_COLORS[clients.indexOf(c) % CLIENT_COLORS.length] : '#8a8a95'
+  const st = GraphView.draw(box, graphKey(g), () => {
+    const G = new graphology.Graph({ multi: false, type: 'undirected' })
+    const topics = g.nodes.filter((n) => n.type === 'topic')
+    // Seeds: topics on a ring by layer, documents near the middle (ForceAtlas2 does the rest).
+    topics.forEach((t, i) => { const a = (2 * Math.PI * i) / Math.max(1, topics.length); G.addNode(t.id, { x: 100 * Math.cos(a), y: 100 * Math.sin(a), size: 5 + Math.sqrt(t.sections || 1) * 1.2, color: color(t.layer), label: t.label, pinLabel: true, kind: 'topic' }) })
+    for (const n of g.nodes.filter((x) => x.type === 'doc')) {
+      const h = ProjectArt.hash(n.id)
+      G.addNode(n.id, { x: (h % 101) - 50, y: ((h >> 7) % 101) - 50, size: 2.5 + Math.sqrt(n.sections || 1) * 0.6, color: color(n.client || '-'), label: n.label || n.id, search: [n.kind, n.date, n.client && clientName(n.client)].filter(Boolean).join(' '), kind: 'doc' })
+    }
+    for (const e of g.edges) {
+      if (!G.hasNode(e.source) || !G.hasNode(e.target) || G.hasEdge(e.source, e.target)) continue
+      G.addEdge(e.source, e.target, { weight: e.weight || 1, size: e.kind === 'about' ? Math.min(2.5, 0.4 + (e.weight || 1) / 8) : 0.6, color: e.kind === 'about' ? 'rgba(130,130,145,0.22)' : 'rgba(139,98,255,0.28)' })
+    }
+    return G
+  }, { click: (node, a) => a.kind === 'topic' ? press({ brNode: node.replace(/^topic:/, '') }) : press({ graphDoc: node }) })
+  if (st) GraphView.select('br-graph', S.br.doc || (S.br.node ? `topic:${S.br.node}` : null))
+}
+/** The graph's search: typing lights matching topics and sources (by name); Enter asks the Brain (words
+ *  and meaning) and lights the sources of the sections it finds. */
+async function graphSearch(q, ask) {
+  S.br.gq = q
+  if (!q.trim()) { S.br.gqRes = ''; GraphView.focus('br-graph', null); return }
+  if (!ask) { const hits = GraphView.find('br-graph', q); const n = GraphView.focus('br-graph', hits); S.br.gqRes = n ? `${n} by name · Enter searches the Brain` : 'no name matches · Enter searches the Brain'; return }
+  S.br.gqRes = 'searching the Brain…'; render()
+  try {
+    const sc = brainQuery().replace('?', '&')
+    const r = await get(`api/brain/search?q=${encodeURIComponent(q)}${sc}`)
+    if (S.br.gq !== q) return
+    const hits = r.hits || []
+    const srcs = new Set(hits.map((h) => h.source).filter(Boolean))
+    const n = GraphView.focus('br-graph', srcs)
+    S.br.gqRes = r.error ? r.error : `${hits.length} section${hits.length === 1 ? '' : 's'} in ${n} source${n === 1 ? '' : 's'} shown`
+  } catch (e) { S.br.gqRes = String(e) }
+  render()
 }
 
 // ── the Brain's People: who is who across the threads (`people::everyone`) ─────────────────────
@@ -3883,14 +4045,13 @@ async function loadBrainPeople() {
   try { const d = await get('api/brain/people'); d.at = Date.now(); S.br.people = d } catch { /* app restarting */ }
 }
 const brShown = (x) => x.touches >= 2 || (x.places || []).length > 0 || x.about_by === 'you'
-/** The people and threads in the Brain's scope, filtered by the box. */
+/** The people and threads in the Brain's scope (the box lights matches; it doesn't remove anyone). */
 function brPeopleIn() {
   const d = S.br.people
   if (!d || !d.people) return null
   const [k, v] = (S.br.scope || '').split(':')
   const inScope = (t) => !k ? true : k === 'thread' ? t === v : ((projById(t) || {}).client || '-') === v
-  const q = (S.br.pq || '').trim().toLowerCase()
-  const people = d.people.filter((x) => brShown(x) && (x.threads || []).some(inScope) && (!q || [x.name, x.email, x.title, x.org && x.org.name, x.about, ...(x.places || []).map((p) => p.role)].join(' ').toLowerCase().includes(q)))
+  const people = d.people.filter((x) => brShown(x) && (x.threads || []).some(inScope))
   const threads = (d.threads || []).filter((t) => inScope(t.id) && people.some((x) => (x.threads || []).includes(t.id)))
   return { people, threads }
 }
@@ -3902,89 +4063,56 @@ function brainPeople() {
   const hidden = d.people.filter((x) => !brShown(x)).length
   const box = `<input class="wp-in br-pq" id="br-pq" type="search" placeholder="Find someone — name, organisation, role" value="${esc(S.br.pq || '')}" aria-label="Find someone">`
   const sub = `${v.people.length} ${v.people.length === 1 ? 'person' : 'people'} · ${v.threads.length} thread${v.threads.length === 1 ? '' : 's'}${hidden ? ` · ${hidden} seen once, not shown` : ''}`
-  if (!v.people.length) return `<div class="br-graph-bar">${box}<span class="set-sub">${sub}</span></div><p class="set-sub">${S.br.pq ? 'Nobody matches.' : 'Nobody yet: people appear as their threads are synced.'}</p>`
-  return `<div class="br-graph-bar">${box}<span class="set-sub">${sub}</span><span class="grow"></span><span class="set-sub">Threads on the ring, people near theirs — a line is a role (solid) or calls (faint); dashed: reports to. Click someone for who they are.</span></div><div class="br-graph" id="br-people"></div>`
-}
-function layoutPeople(v, w, h) {
-  const cx = w / 2, cy = h / 2, R = Math.max(80, Math.min(w / 2 - 150, h / 2 - 34))
-  const threads = v.threads.slice().sort((a, b) => String((projById(a.id) || {}).client || '~').localeCompare(String((projById(b.id) || {}).client || '~')) || a.name.localeCompare(b.name))
-  const pos = new Map()
-  threads.forEach((t, i) => { const a = -Math.PI / 2 + (2 * Math.PI * i) / Math.max(1, threads.length); pos.set('t:' + t.id, { id: 't:' + t.id, thread: t, x: cx + R * Math.cos(a), y: cy + R * Math.sin(a), a }) })
-  const people = v.people.map((x) => {
-    const ts = (x.threads || []).map((t) => pos.get('t:' + t)).filter(Boolean)
-    const seed = ProjectArt.hash(x.key)
-    let px = cx + ((seed % 61) - 30), py = cy + (((seed >> 6) % 61) - 30)
-    if (ts.length === 1) {
-      // One thread: a fan inside the ring around it, spread by a hash.
-      const a = ts[0].a + (((seed >> 3) % 100) / 100 - 0.5) * 0.8, rr = R * (0.45 + ((seed >> 10) % 40) / 100)
-      px = cx + rr * Math.cos(a); py = cy + rr * Math.sin(a)
-    } else if (ts.length) {
-      // Several: their middle, pulled in.
-      px = cx + (ts.reduce((s, t) => s + t.x, 0) / ts.length - cx) * 0.55 + ((seed >> 9) % 31) - 15
-      py = cy + (ts.reduce((s, t) => s + t.y, 0) / ts.length - cy) * 0.55 + ((seed >> 14) % 31) - 15
-    }
-    return { id: 'p:' + x.key, person: x, x: px, y: py, r: 4 + Math.min(7, Math.sqrt(x.touches || 1) * 1.3) }
-  })
-  for (let it = 0; it < 90; it++) for (let a = 0; a < people.length; a++) for (let b = a + 1; b < people.length; b++) {
-    const A = people[a], B = people[b], dx = A.x - B.x, dy = A.y - B.y, d = Math.sqrt(dx * dx + dy * dy) || 0.1, min = A.r + B.r + 14
-    if (d < min) { const f = (min - d) / d / 2; A.x += dx * f; A.y += dy * f; B.x -= dx * f; B.y -= dy * f }
-  }
-  const byKey = new Map(people.map((n) => [n.person.key, n]))
-  const edges = []
-  for (const n of people) {
-    for (const t of n.person.threads || []) {
-      const T = pos.get('t:' + t)
-      if (!T) continue
-      const pl = (n.person.places || []).find((p) => p.thread === t)
-      edges.push({ s: n, t: T, kind: pl ? 'role' : 'seen', label: pl && pl.role })
-    }
-    const boss = n.person.reports_to && byKey.get(n.person.reports_to)
-    if (boss) edges.push({ s: n, t: boss, kind: 'boss' })
-    for (const y of n.person.with || []) { const o = byKey.get(y.key); if (o && n.person.key < y.key) edges.push({ s: n, t: o, kind: 'with', label: `${y.calls} calls together` }) }
-  }
-  return { threads: [...pos.values()], people, edges }
+  const res = S.br.pqRes ? `<span class="set-sub br-pq-res">${esc(S.br.pqRes)}</span>` : ''
+  if (!v.people.length) return `<div class="br-graph-bar">${box}<span class="set-sub">${sub}</span></div><p class="set-sub">Nobody yet: people appear as their threads are synced.</p>`
+  return `<div class="br-graph-bar">${box}${res}<span class="set-sub">${sub}</span></div><div class="br-graph" id="br-people"></div><p class="set-foot">Threads labelled, people near theirs: a line is a role, calls (faint), reports to (dark) or calls together. Scroll to zoom, hover for someone's links, click for who they are.</p>`
 }
 function drawPeople() {
   const box = $('#br-people')
   const v = box && brPeopleIn()
   if (!box || !v) return
-  const w = Math.max(400, box.clientWidth), h = Math.max(360, box.clientHeight)
-  const key = `${w}|${h}|${v.people.map((x) => x.key).join(',')}|${(S.br.people || {}).at || ''}`
-  const sel = S.view === 'brain' && S.pj.person ? 'p:' + S.pj.person : null
-  if (box.dataset.key !== key) {
-    box.dataset.key = key
-    const L = layoutPeople(v, w, h)
-    const clients = [...new Set(L.threads.map((t) => (projById(t.thread.id) || {}).client || '-'))]
+  const key = `people|${S.br.scope || ''}|${v.people.length}|${v.threads.length}|${(S.br.people || {}).at || ''}`
+  const st = GraphView.draw(box, key, () => {
+    const G = new graphology.Graph({ type: 'undirected' })
+    const clients = [...new Set(v.threads.map((t) => (projById(t.id) || {}).client || '-'))]
     const tColor = (id) => { const c = (projById(id) || {}).client; return c ? CLIENT_COLORS[clients.indexOf(c) % CLIENT_COLORS.length] : '#8a8a95' }
-    const orgs = [...new Set(L.people.map((n) => (n.person.org || {}).id || n.person.side))]
-    const pColor = (x) => x.side === 'yours' ? 'var(--text-3)' : CLIENT_COLORS[(orgs.indexOf((x.org || {}).id || x.side) + 3) % CLIENT_COLORS.length]
-    const short = (s) => s.length > 24 ? s.slice(0, 23) + '…' : s
-    const lines = L.edges.map((e) => `<line data-a="${esc(e.s.id)}" data-b="${esc(e.t.id)}" x1="${e.s.x.toFixed(1)}" y1="${e.s.y.toFixed(1)}" x2="${e.t.x.toFixed(1)}" y2="${e.t.y.toFixed(1)}" class="pe-${e.kind}">${e.label ? `<title>${esc(e.label)}</title>` : ''}</line>`).join('')
-    const ts = L.threads.map((t) => { const c = Math.cos(t.a), lx = t.x + 13 * (c >= 0 ? 1 : -1); return `<g class="tp" data-gid="${esc(t.id)}" data-pj="goto" data-id="${esc(t.thread.id)}"><circle cx="${t.x.toFixed(1)}" cy="${t.y.toFixed(1)}" r="7" style="stroke:${tColor(t.thread.id)}"/><text x="${lx.toFixed(1)}" y="${(t.y + 4).toFixed(1)}" text-anchor="${c >= 0 ? 'start' : 'end'}">${esc(short(t.thread.name))}<title>${esc(t.thread.name)} — open the thread</title></text></g>` }).join('')
-    // Names where they fit: the most seen first, each only if its label overlaps no label (or thread) drawn.
-    const boxes = L.threads.map((t) => ({ x0: t.x - 8, x1: t.x + 8 + (Math.cos(t.a) >= 0 ? 1 : -1) * t.thread.name.length * 6.2, y0: t.y - 8, y1: t.y + 8 })).map((b) => ({ ...b, x0: Math.min(b.x0, b.x1), x1: Math.max(b.x0, b.x1) }))
-    const named = new Set()
-    for (const n of L.people.slice().sort((a, b) => (b.person.touches || 0) - (a.person.touches || 0))) {
-      const b = { x0: n.x + n.r + 2, x1: n.x + n.r + 4 + short(n.person.name).length * 5.6, y0: n.y - 6, y1: n.y + 6 }
-      if (boxes.some((o) => b.x0 < o.x1 && o.x0 < b.x1 && b.y0 < o.y1 && o.y0 < b.y1)) continue
-      boxes.push(b); named.add(n.id)
+    const orgs = [...new Set(v.people.map((x) => (x.org || {}).id || x.side))]
+    const pColor = (x) => x.side === 'yours' ? '#8a8a95' : CLIENT_COLORS[(orgs.indexOf((x.org || {}).id || x.side) + 3) % CLIENT_COLORS.length]
+    v.threads.forEach((t, i) => { const a = (2 * Math.PI * i) / Math.max(1, v.threads.length); G.addNode('t:' + t.id, { x: 100 * Math.cos(a), y: 100 * Math.sin(a), size: 9, color: tColor(t.id), label: t.name, pinLabel: true, kind: 'thread', thread: t.id }) })
+    for (const x of v.people) {
+      const h = ProjectArt.hash(x.key)
+      const roles = (x.places || []).map((p) => p.role).filter(Boolean)
+      G.addNode('p:' + x.key, { x: (h % 101) - 50, y: ((h >> 7) % 101) - 50, size: 3 + Math.min(7, Math.sqrt(x.touches || 1) * 1.3), color: pColor(x), label: x.name, kind: 'person', key: x.key,
+        search: [x.email, x.title, x.org && x.org.name, x.group, ...roles].filter(Boolean).join(' ') })
     }
-    const ps = L.people.map((n) => { const x = n.person, role = (x.places || []).map((p) => p.role).filter(Boolean)[0]; return `<g class="dc pe" data-gid="${esc(n.id)}" data-pp="pick" data-key="${esc(x.key)}"><circle cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${n.r.toFixed(1)}" fill="${pColor(x)}"/>${`<text class="${named.has(n.id) ? '' : 'pe-quiet'}" x="${(n.x + n.r + 3).toFixed(1)}" y="${(n.y + 3.5).toFixed(1)}">${esc(short(x.name))}</text>`}<title>${esc([x.name, x.title, x.org && x.org.name, role].filter(Boolean).join(' · '))}</title></g>` }).join('')
-    box.innerHTML = `<svg viewBox="0 0 ${w} ${h}" width="100%" height="100%" role="img" aria-label="People and their threads">${lines}${ts}${ps}</svg>`
-  }
-  const svg = box.querySelector('svg')
-  if (!svg) return
-  svg.classList.toggle('has-sel', !!sel)
-  const near = new Set(sel ? [sel] : [])
-  svg.querySelectorAll('line').forEach((l) => { const on = !!sel && (l.dataset.a === sel || l.dataset.b === sel); l.classList.toggle('hl', on); if (on) { near.add(l.dataset.a); near.add(l.dataset.b) } })
-  svg.querySelectorAll('[data-gid]').forEach((n) => { n.classList.toggle('sel', n.dataset.gid === sel); n.classList.toggle('near', near.has(n.dataset.gid)) })
+    const add = (a, b, attrs) => { if (G.hasNode(a) && G.hasNode(b) && a !== b && !G.hasEdge(a, b)) G.addEdge(a, b, attrs) }
+    for (const x of v.people) {
+      for (const t of x.threads || []) { const pl = (x.places || []).find((p) => p.thread === t); add('p:' + x.key, 't:' + t, { weight: pl ? 3 : 1, size: pl ? 1 : 0.5, color: pl ? 'rgba(130,130,145,0.45)' : 'rgba(130,130,145,0.15)' }) }
+      if (x.reports_to) add('p:' + x.key, 'p:' + x.reports_to, { weight: 2, size: 1.2, color: 'rgba(91,52,214,0.55)' })
+      for (const y of x.with || []) add('p:' + x.key, 'p:' + y.key, { weight: Math.min(4, y.calls || 1), size: 0.6, color: 'rgba(139,98,255,0.18)' })
+    }
+    return G
+  }, { click: (node, a) => a.kind === 'thread' ? press({ pj: 'goto', id: a.thread }) : press({ pp: 'pick', key: a.key }) })
+  if (!st) return
+  GraphView.select('br-people', S.view === 'brain' && S.pj.person ? 'p:' + S.pj.person : null)
+  if ((S.br.pq || '') !== (st.q || '')) { st.q = S.br.pq || ''; const hits = GraphView.find('br-people', S.br.pq); const n = GraphView.focus('br-people', hits); S.br.pqRes = S.br.pq ? (n ? `${n} found` : 'nobody matches') : '' }
 }
 document.addEventListener('input', (e) => {
   if (e.target.id === 'pp-about') { S.pj.aboutEdit = e.target.value; return }
+  if (e.target.id === 'br-gq') {
+    const q = e.target.value
+    clearTimeout(S.br.gqT)
+    S.br.gqT = setTimeout(() => { graphSearch(q, false); const r = $('.br-gq-res'); if (r) r.textContent = S.br.gqRes; else if (S.br.gqRes) { const at = e.target.selectionStart; render(); const i = $('#br-gq'); if (i) { i.focus(); i.setSelectionRange(at, at) } } }, 150)
+    return
+  }
   if (e.target.id !== 'br-pq') return
   S.br.pq = e.target.value
   clearTimeout(S.br.pqT)
-  S.br.pqT = setTimeout(() => { const at = e.target.selectionStart; render(); const i = $('#br-pq'); if (i) { i.focus(); i.setSelectionRange(at, at) } }, 200)
+  S.br.pqT = setTimeout(() => { drawPeople(); const r = $('.br-pq-res'); if (r) r.textContent = S.br.pqRes; else { const at = e.target.selectionStart; render(); const i = $('#br-pq'); if (i) { i.focus(); i.setSelectionRange(at, at) } } }, 150)
+})
+document.addEventListener('keydown', (e) => {
+  if (e.target.id === 'br-gq' && e.key === 'Enter') { e.preventDefault(); graphSearch(e.target.value, true) }
+  if ((e.target.id === 'br-gq' || e.target.id === 'br-pq') && e.key === 'Escape') { e.target.value = ''; e.target.dispatchEvent(new Event('input', { bubbles: true })) }
 })
 
 /** A topic or term in the right panel: its description, where it comes up, the user's review
@@ -3994,15 +4122,19 @@ function brainNodePanel() {
   const x = (tx.topics || []).find((t) => t.id === id) || (tx.terms || []).find((t) => t.id === id)
   if (!x) return '<div class="wp-empty">Pick a topic or a term.</div>'
   const isTerm = !!x.name, name = x.name || x.label, layer = x.layer
-  const same = isTerm ? (tx.terms || []).filter((t) => t.layer === layer && t.id !== id) : (tx.topics || []).filter((t) => t.layer === layer && t.id !== id)
-  const l1s = (tx.topics || []).filter((t) => t.layer === layer && t.level === 1 && t.id !== id)
+  // A client's topic may merge into, or sit under, one of the practice's too (one tree).
+  const same = isTerm ? (tx.terms || []).filter((t) => t.layer === layer && t.id !== id) : (tx.topics || []).filter((t) => (t.layer === layer || (layer !== 'shared' && t.layer === 'shared')) && t.id !== id)
+  const l1s = (tx.topics || []).filter((t) => (t.layer === layer || (layer !== 'shared' && t.layer === 'shared')) && t.level === 1 && t.id !== id)
+  const lnm = (l) => l === 'shared' ? 'practice' : (((tx.layers || []).find((y) => y.id === l) || {}).name || l)
   const ed = S.br.edit
   const body = (o) => esc(JSON.stringify({ ...o, layer, [isTerm ? 'name' : 'label']: name, term: isTerm }))
   const actions = ed === 'rename' ? `<span class="tok-in"><input id="br-rename" value="${esc(name)}" aria-label="New name" autofocus></span><button class="btn primary" data-br-do="rename">Rename</button>`
-    : ed === 'merge' ? `<select class="wp-in" id="br-into" aria-label="Merge into">${same.map((t) => `<option>${esc(t.name || t.label)}</option>`).join('')}</select><button class="btn primary" data-br-do="merge">Merge</button>`
+    : ed === 'merge' ? `<select class="wp-in" id="br-into" aria-label="Merge into">${same.map((t) => `<option value="${esc(JSON.stringify([t.name || t.label, t.layer]))}">${esc(t.name || t.label)}${t.layer !== layer ? ` (${esc(lnm(t.layer))})` : ''}</option>`).join('')}</select><button class="btn primary" data-br-do="merge">Merge</button>`
+    : ed === 'scope' ? `<select class="wp-in" id="br-scope-to" aria-label="Whose topic">${layer === 'shared' ? (tx.layers || []).filter((l) => l.id !== 'shared').map((l) => `<option value="${esc(l.id)}">Only ${esc(l.name || l.id)}</option>`).join('') : '<option value="shared">Your practice (every client)</option>'}</select><button class="btn primary" data-br-do="scope">Move</button>`
+    : ed === 'define' ? `<div class="br-def"><textarea class="wp-in" id="br-desc" rows="3" aria-label="What belongs in it" placeholder="What belongs in it — and what doesn't">${esc(x.description || '')}</textarea><input class="wp-in" id="br-syn" value="${esc((x.synonyms || []).join(', '))}" placeholder="Other names, comma-separated" aria-label="Synonyms"><button class="btn primary" data-br-do="define">Save</button></div>`
     : ed === 'move' ? `<select class="wp-in" id="br-parent" aria-label="Move under"><option value="">(top level)</option>${l1s.map((t) => `<option${x.parent === t.label ? ' selected' : ''}>${esc(t.label)}</option>`).join('')}</select><button class="btn primary" data-br-do="move">Move</button>`
     : ed === 'remove' ? `<span class="set-sub">Remove it? Its tags go too.</span><button class="btn danger" data-br-op='${body({ op: 'remove' })}'>Remove</button>`
-    : `<button class="btn" data-br-edit="rename">Rename</button>${same.length ? '<button class="btn" data-br-edit="merge">Merge into…</button>' : ''}${isTerm ? '' : '<button class="btn" data-br-edit="move">Move…</button>'}<button class="btn ghost danger" data-br-edit="remove">Remove</button>`
+    : `<button class="btn" data-br-edit="rename">Rename</button>${same.length ? '<button class="btn" data-br-edit="merge">Merge into…</button>' : ''}${isTerm ? '' : `<button class="btn" data-br-edit="define">Define…</button><button class="btn" data-br-edit="move">Move under…</button><button class="btn" data-br-edit="scope">${layer === 'shared' ? 'Only one client…' : 'Up to the practice…'}</button>`}<button class="btn ghost danger" data-br-edit="remove">Remove</button>`
   const nd = S.br.nodeData && S.br.nodeData.id === id ? S.br.nodeData : null
   const secs = !nd ? '<div class="skeleton"><i></i><i></i></div>' : nd.sections.length ? nd.sections.map((s) => {
     const call = s.link && s.link.startsWith('echo://call/') ? s.link.slice(12).split('?')[0] : ''
@@ -4015,6 +4147,7 @@ function brainNodePanel() {
     <h3 class="wp-name">${esc(name)}</h3>
     ${x.parent ? `<div class="set-sub">under ${esc(x.parent)}</div>` : ''}
     ${x.description ? `<p class="br-desc">${esc(x.description)}</p>` : ''}
+    ${!isTerm && (x.synonyms || []).length ? `<div class="set-sub">Also called: ${esc(x.synonyms.join(', '))}</div>` : ''}
     ${isTerm && x.variants.length ? `<div class="set-sub">Also written: ${esc(x.variants.join(', '))}</div>` : ''}
     <div class="br-where">${x.sections || 0} sections ${threadChips(x.threads)}</div>
     <div class="br-acts">${actions}</div>
@@ -4078,7 +4211,7 @@ function brainEdit(body) {
   setTimeout(() => loadBrain().then(render), 350)
 }
 document.addEventListener('click', (e) => {
-  const t = e.target.closest && e.target.closest('[data-br-tab],[data-br-node],[data-br-accept],[data-br-edit],[data-br-do],[data-br-op],[data-br-open],[data-graph-doc],[data-br-doc-open]')
+  const t = e.target.closest && e.target.closest('[data-br-tab],[data-br-node],[data-br-accept],[data-br-fold],[data-br-rebuild],[data-br-retag],[data-br-move],[data-br-snooze],[data-br-edit],[data-br-do],[data-br-op],[data-br-open],[data-graph-doc],[data-br-doc-open]')
   if (!t) return
   const d = t.dataset
   if (d.brTab) { S.br.tab = d.brTab; go(`brain/${d.brTab}`); return loadBrain().then(render) }
@@ -4091,6 +4224,11 @@ document.addEventListener('click', (e) => {
     return loadBrainNode().then(render)
   }
   if (d.brAccept) return brainEdit({ op: 'accept', layer: d.brAccept })
+  if (d.brFold) { const f = S.br.fold || {}; S.br.fold = { ...f, [d.brFold]: !f[d.brFold] }; return render() }
+  if (d.brRebuild) { send({ cmd: 'brain_rebuild_topics', layer: d.brRebuild }); S.br.rebuilding = { ...(S.br.rebuilding || {}), [`taxonomy:${d.brRebuild}`]: true }; setTimeout(() => { S.br.rebuilding = {}; loadBrain().then(render) }, 1500); return render() }
+  if (d.brMove) { send({ cmd: 'brain_topic_move', key: d.brMove, do: d.do }); return setTimeout(() => loadBrain().then(render), 400) }
+  if (d.brRetag) { send({ cmd: 'brain_retag_topics', layer: d.brRetag }); S.br.rebuilding = { ...(S.br.rebuilding || {}), [`retag:${d.brRetag}`]: true }; setTimeout(() => { S.br.rebuilding = {}; loadBrain().then(render) }, 1500); return render() }
+  if (d.brSnooze) { send({ cmd: 'brain_topics_snooze', layer: d.brSnooze }); return setTimeout(() => loadBrain().then(render), 300) }
   if (d.brEdit) { S.br.edit = d.brEdit; render(); { const i = $('#br-rename'); if (i) { i.focus(); i.select() } } return }
   if (d.brOp) return brainEdit(JSON.parse(d.brOp))
   if (d.brDo) {
@@ -4099,7 +4237,9 @@ document.addEventListener('click', (e) => {
     if (!x) return
     const base = { layer: x.layer, term: !!x.name, [x.name ? 'name' : 'label']: x.name || x.label }
     if (d.brDo === 'rename') { const to = ($('#br-rename') || {}).value; if (to && to.trim()) { S.br.node = null; brainEdit({ ...base, op: 'rename', to: to.trim() }) } return }
-    if (d.brDo === 'merge') { S.br.node = null; return brainEdit({ ...base, op: 'merge', into: ($('#br-into') || {}).value }) }
+    if (d.brDo === 'merge') { const [into, into_layer] = JSON.parse(($('#br-into') || {}).value || '[]'); S.br.node = null; return brainEdit({ ...base, op: 'merge', into, into_layer }) }
+    if (d.brDo === 'scope') { S.br.node = null; return brainEdit({ ...base, op: 'scope', to: ($('#br-scope-to') || {}).value }) }
+    if (d.brDo === 'define') return brainEdit({ ...base, op: 'set', description: ($('#br-desc') || {}).value || '', synonyms: (($('#br-syn') || {}).value || '').split(',').map((x) => x.trim()).filter(Boolean) })
     if (d.brDo === 'move') return brainEdit({ ...base, op: 'move', parent: ($('#br-parent') || {}).value || null })
   }
   if (d.brOpen) { S.jump = d.t ? Number(d.t) : null; return go(`call/${d.brOpen}/${d.t ? 'transcript' : 'minutes'}`) }
@@ -4114,7 +4254,7 @@ document.addEventListener('keydown', (e) => {
   if (e.target.id === 'br-rename' && e.key === 'Enter') { e.preventDefault(); const b = $('[data-br-do="rename"]'); if (b) b.click() }
   if (e.target.id === 'br-rename' && e.key === 'Escape') { S.br.edit = null; render() }
 })
-window.addEventListener('resize', () => { if (S.view === 'brain') { for (const id of ['#br-graph', '#br-people']) { const b = $(id); if (b) b.dataset.key = '' } drawGraph(); drawPeople() } })
+window.addEventListener('resize', () => { if (S.view === 'brain') GraphView.resize() })
 
 /** A thread's topics and terms from the Brain (null when there is no taxonomy yet: the old glossary
  *  shows instead). Topics with their sections here; terms pinned here first, then by mentions. */
@@ -4540,8 +4680,8 @@ function paletteItems(target) {
   else if (st.armed) add('Echo', 'Cancel recording the next call', () => press({ cmd: 'stop' }), { keywords: 'disarm' })
   else add('Echo', st.in_call ? 'Record this call' : 'Record the next Teams call', () => press({ cmd: 'record' }), { keywords: 'start arm' })
   add('Echo', 'Claude · Echo folder', () => claudePanel('claude-folder'), { keywords: 'terminal session ask' })
-  add('Echo', 'Show or hide Needs you', () => press({ panelFlip: 'needs' }), { keywords: 'notifications inbox attention decide review', hint: NY_HINT })
-  for (const i of nyOpen().slice(0, 8)) add('Needs you', i.title, nyShow, { keywords: i.why })
+  add('Echo', 'Show or hide Inbox', () => press({ panelFlip: 'needs' }), { keywords: 'needs you notifications attention decide review', hint: NY_HINT })
+  for (const i of nyOpen().slice(0, 8)) add('Inbox', i.title, nyShow, { keywords: i.why })
   add('Echo', 'Show or hide My notes', () => press({ panelFlip: 'notes' }), { disabled: S.view === 'calls' && S.selected ? null : 'open a call first' })
   add('Echo', 'Show or hide the bottom panel', () => { Layout.toggle('bottom'); layoutChanged() })
   add('Echo', 'Check for updates', () => press({ act: 'check_updates' }))
@@ -4614,7 +4754,7 @@ document.addEventListener('keydown', (e) => {
   if (mod && e.shiftKey && e.key.toLowerCase() === 'r' && S.state && S.state.recording && !(e.target.closest && e.target.closest('.xterm'))) {
     e.preventDefault(); e.stopPropagation(); return press({ cmd: 'stop-ask' })
   }
-  // ⇧⌘I / Ctrl+Shift+U: show or hide Needs you (Ctrl+Shift+I is WebView2's DevTools on Windows).
+  // ⇧⌘I / Ctrl+Shift+U: show or hide Inbox (Ctrl+Shift+I is WebView2's DevTools on Windows).
   if (mod && e.shiftKey && e.key.toLowerCase() === NY_KEY.toLowerCase() && !(e.target.closest && e.target.closest('.xterm'))) {
     e.preventDefault(); e.stopPropagation(); return press({ panelFlip: 'needs' })
   }

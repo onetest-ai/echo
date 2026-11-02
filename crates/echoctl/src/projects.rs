@@ -215,6 +215,14 @@ pub struct Member {
     /// Their role in this project ("sponsor", "approver").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
+    /// Who set the role — "you" (typed by the user: pinned, never proposed over) or "echo" (a proposal the
+    /// user accepted) —, when (the words' day) and from which call or mail.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role_from: Option<String>,
     /// Their workstream in this project (the org chart's column).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,

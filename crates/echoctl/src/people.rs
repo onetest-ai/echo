@@ -689,7 +689,14 @@ pub fn view(threads: &[&Project], today: chrono::NaiveDate) -> Result<Value> {
         }
     }
     let work = work_of(threads, today);
-    let last_call = dirs.iter().filter_map(|d| calls::read_json(&d.join("meta.json"))["started_at"].as_str().map(|s| s.get(..10).unwrap_or("").to_string())).max().unwrap_or_default();
+    let call_days: Vec<String> = dirs.iter().filter_map(|d| calls::read_json(&d.join("meta.json"))["started_at"].as_str().map(|s| s.get(..10).unwrap_or("").to_string())).collect();
+    let last_call = call_days.iter().max().cloned().unwrap_or_default();
+    // "New" = joined an engagement already running: first seen more than a day after its first call.
+    let first_call = call_days.iter().min().and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok());
+    let joined_later = |first: &str| match (first_call, chrono::NaiveDate::parse_from_str(first, "%Y-%m-%d").ok()) {
+        (Some(f), Some(x)) => x > f + chrono::Duration::days(1),
+        _ => false,
+    };
     let days = |d: &str| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok().map(|x| (today - x).num_days());
     let book = colleagues();
     let mut people: Vec<Value> = seen
@@ -718,14 +725,15 @@ pub fn view(threads: &[&Project], today: chrono::NaiveDate) -> Result<Value> {
                 .filter_map(|p| {
                     let m = p.people.iter().find(|m| member_key(m) == key || m.email.as_ref().is_some_and(|e| s.also.contains(&e.to_lowercase())) || (m.email.is_none() && s.email.is_some() && norm(&m.name) == norm(&s.name)))?;
                     Some(json!({"thread": p.id, "role": m.role, "stance": m.place.stance, "influence": m.place.influence, "interest": m.place.interest,
-                                "group": m.group, "governance": m.governance, "works_for": m.works_for}))
+                                "group": m.group, "governance": m.governance, "works_for": m.works_for,
+                                "role_by": m.role_by, "role_at": m.role_at, "role_from": m.role_from}))
                 })
                 .collect();
             let n = norm(entry.map(|p| p.name.as_str()).unwrap_or(&s.name));
             let first_name = n.split(' ').next().unwrap_or("").to_string();
             let (owes, late, waiting) = work.iter().filter(|(w, ..)| *w == n || *w == first_name).fold((0, 0, 0), |a, (_, x, y, z)| (a.0 + x, a.1 + y, a.2 + z));
             let in_thread = !places.is_empty();
-            let new = in_thread && !s.first.is_empty() && days(&s.first).is_some_and(|d| d <= NEW_DAYS);
+            let new = in_thread && !s.first.is_empty() && days(&s.first).is_some_and(|d| d <= NEW_DAYS) && joined_later(&s.first);
             let quiet = in_thread && !s.last.is_empty() && days(&s.last).is_some_and(|d| d > QUIET_DAYS) && last_call > s.last;
             // What the threads' words say about them, newest first; and where they were seen.
             let mut facts: Vec<Value> = entry.map(|p| p.facts.iter().filter(|f| f["thread"].as_str().is_some_and(|t| ids.contains(t))).cloned().collect()).unwrap_or_default();
@@ -790,11 +798,26 @@ pub fn view(threads: &[&Project], today: chrono::NaiveDate) -> Result<Value> {
             (first.len() == 1).then(|| first[0].1.clone())
         })
     };
+    // Handing a task over isn't leading someone: governance, PMs and partners coordinate everyone. A
+    // hint only within one workstream — the same one, or its lead's.
+    let part: BTreeMap<String, (Option<String>, bool, Option<String>)> = people.iter().map(|p| {
+        let pl = &p["places"][0];
+        let role = pl["role"].as_str().unwrap_or("");
+        let stream = pl["group"].as_str().or(p["group"].as_str()).map(str::to_owned).or_else(|| role_stream(role));
+        let lead = role_stream(role).filter(|_| role.to_lowercase().contains("lead")).or_else(|| stream.clone().filter(|_| role.to_lowercase().contains("lead")));
+        let coord = pl["governance"] == true || coordinates(role) || (pl["governance"].is_null() && pl["influence"] == 3 && pl["interest"] == 3 && stream.is_none());
+        (p["key"].as_str().unwrap_or("").to_string(), (stream, coord, lead))
+    }).collect();
     for p in people.iter_mut() {
         p["seniority"] = json!(seniority(p["title"].as_str().unwrap_or("")));
         let n = norm(p["name"].as_str().unwrap_or(""));
         let first = n.split(' ').next().unwrap_or("").to_string();
-        if let Some(k) = hints.get(&n).or_else(|| hints.get(&first)).and_then(|l| key_of_name(l)).filter(|k| p["key"] != k.as_str()) {
+        let mine = part.get(p["key"].as_str().unwrap_or("")).and_then(|x| x.0.clone());
+        let fits = |k: &String| part.get(k).is_some_and(|(stream, coord, lead)| {
+            let same = |a: &Option<String>| a.as_deref().zip(mine.as_deref()).is_some_and(|(a, b)| a.eq_ignore_ascii_case(b));
+            !coord && (same(stream) || same(lead))
+        });
+        if let Some(k) = hints.get(&n).or_else(|| hints.get(&first)).and_then(|l| key_of_name(l)).filter(|k| p["key"] != k.as_str()).filter(fits) {
             p["works_for_hint"] = json!(k);
         }
     }
@@ -965,6 +988,12 @@ pub fn place(thread: &str, name: &str, email: Option<&str>, v: &Value) -> Result
         let m = &mut p.people[i];
         // Their part in this thread's work: workstream, governance, whom they work for here ("" clears).
         let text = |k: &str| v.get(k).map(|x| x.as_str().map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned));
+        // A role keeps who set it and when: the user (pinned) unless an accepted proposal says otherwise.
+        if text("role").is_some() {
+            m.role_by = Some(v["role_by"].as_str().unwrap_or("you").to_string());
+            m.role_at = Some(v["role_at"].as_str().map(str::to_owned).unwrap_or_else(|| chrono::Local::now().date_naive().to_string()));
+            m.role_from = v["role_from"].as_str().map(str::to_owned);
+        }
         if let Some(g) = text("group") {
             m.group = g;
         }
@@ -1001,6 +1030,23 @@ pub fn seniority(title: &str) -> u8 {
     } else {
         1
     }
+}
+
+/// The workstream a role names: "Technology stream lead: …" → Technology ("workstream" too).
+pub fn role_stream(role: &str) -> Option<String> {
+    let l = role.to_lowercase();
+    let i = l.find(" workstream").or_else(|| l.find(" stream"))?;
+    let head = role[..i].rsplit([':', '(', ';', ',']).next().unwrap_or("").trim();
+    (!head.is_empty() && head.chars().count() <= 40).then(|| head.to_string())
+}
+
+/// A role that coordinates everyone rather than leading a workstream: project / programme / delivery
+/// manager, PM, partner.
+fn coordinates(role: &str) -> bool {
+    let l = format!(" {} ", role.to_lowercase().replace([':', ',', ';', '(', ')', '/'], " "));
+    [" pm ", "project manager", "program manager", "programme manager", "program management", "programme management", "delivery manager", "partner", "project management"]
+        .iter()
+        .any(|w| l.contains(w))
 }
 
 /// Whom each person works for in these threads, as the work says (a suggestion, never set): the one
@@ -1124,8 +1170,8 @@ pub fn context(project: &str, items: &[String]) -> Result<Value> {
         .map(|x| {
             let pl = x["places"].get(0).cloned().unwrap_or(json!({}));
             json!({"name": x["name"], "email": x["email"], "organisation": x["org"]["name"].as_str().unwrap_or(match x["side"].as_str() { Some("yours") => "the user's company", _ => "" }),
-                   "in_thread": x["in_thread"], "title": x["title"], "group": x["group"], "reports_to": x["reports_to"].as_str().and_then(name_of),
-                   "role": pl["role"], "stance": pl["stance"], "influence": pl["influence"], "interest": pl["interest"], "calls": x["calls"],
+                   "in_thread": x["in_thread"], "title": x["title"], "group": pl["group"].as_str().or(x["group"].as_str()), "reports_to": x["reports_to"].as_str().and_then(name_of),
+                   "role": pl["role"], "role_by": pl["role_by"], "role_at": pl["role_at"], "stance": pl["stance"], "influence": pl["influence"], "interest": pl["interest"], "calls": x["calls"],
                    "about": if x["about_by"] == "you" || x["about_thread"] == project { x["about"].clone() } else { Value::Null }, "about_is_users": x["about_by"] == "you",
                    "facts": x["facts"].as_array().into_iter().flatten().take(12).map(|f| json!({"date": f["date"], "fact": f["text"]})).collect::<Vec<_>>()})
         })
@@ -1138,7 +1184,7 @@ pub fn context(project: &str, items: &[String]) -> Result<Value> {
         "me_profile": crate::calls::me_profile(),
         "items": items.iter().map(|i| json!({"id": i, "file": l.evidence_md(i).display().to_string().replace('\\', "/")})).collect::<Vec<_>>(),
         "already_proposed": said,
-        "fields": SUGGEST_FIELDS.iter().chain(&["fact", "about"]).collect::<Vec<_>>(), "stances": projects::STANCES, "relations": projects::RELATIONS,
+        "fields": SUGGEST_FIELDS.iter().chain(&["person", "fact", "about"]).collect::<Vec<_>>(), "stances": projects::STANCES, "relations": projects::RELATIONS,
     }))
 }
 
@@ -1226,8 +1272,51 @@ pub fn apply_suggestions(project: &str, evid: &str, proposals: &[Value]) -> Resu
                     "kind": at["kind"], "call": at["call"], "title": at["title"], "url": at["url"], "ts": at["ts"], "added": chrono::Utc::now().to_rfc3339()})));
                 return None;
             }
+            // Someone the words name who was in no call (a client contact named in internal syncs): one
+            // proposal per name, its mentions counted; on Yes a name-only person in the thread.
+            if field == "person" {
+                let name = display(who);
+                if name.split_whitespace().next().is_none_or(|w| w.chars().count() < 2) || name.contains('@') || name.chars().count() > 80 {
+                    return Some("a person is a name as the words give it (\"Dana Doe\", or \"Dana\" when that is all)".into());
+                }
+                if me.is(&name, None) || find_person(&people, &name).is_some() {
+                    return Some(format!("{name:?} is already among the thread's people"));
+                }
+                let at = match crate::ledger::quote_in(project, evid, pr["quote"].as_str().unwrap_or("")) {
+                    Ok(Some(at)) => at,
+                    Ok(None) => return Some("quote not verbatim in this evidence item (one contiguous span, 3 words or more)".into()),
+                    Err(e) => return Some(format!("{e:#}")),
+                };
+                let org = pr["org"].as_str().filter(|o| !o.trim().is_empty()).and_then(&org_named);
+                let role = pr["role"].as_str().map(str::trim).filter(|r| !r.is_empty()).map(|r| r.chars().take(80).collect::<String>());
+                let key = key_of(&name, None);
+                if let Some(x) = all.iter_mut().find(|x| x["field"] == "person" && x["target_key"] == key.as_str()) {
+                    if x["state"] != "pending" {
+                        return Some("already proposed (or turned down)".into());
+                    }
+                    if x["at"]["evidence"] != at["evidence"] {
+                        x["mentions"] = json!(x["mentions"].as_u64().unwrap_or(1) + 1);
+                    }
+                    if x["target"]["org"].is_null() {
+                        if let Some(o) = org {
+                            x["target"]["org"] = json!(o.id);
+                            x["target"]["org_name"] = json!(o.name);
+                        }
+                    }
+                    if x["role"].is_null() && role.is_some() {
+                        x["role"] = json!(role);
+                    }
+                    return None;
+                }
+                let sid = format!("{:x}", { use sha2::Digest as _; let d = sha2::Sha256::digest(format!("{key}\0person\0{evid}").as_bytes()); u64::from_be_bytes(d[..8].try_into().unwrap()) });
+                all.push(json!({"sid": sid, "who": who, "target": {"key": key, "name": name, "email": null, "org": org.map(|o| &o.id), "org_name": org.map(|o| &o.name)},
+                                "target_key": key, "field": "person", "value": name, "role": role, "mentions": 1,
+                                "quote": pr["quote"], "note": pr["note"], "at": at, "state": "pending", "proposed": chrono::Utc::now().to_rfc3339()}));
+                added += 1;
+                return None;
+            }
             if !SUGGEST_FIELDS.contains(&field) {
-                return Some(format!("field is one of {SUGGEST_FIELDS:?}, fact or about"));
+                return Some(format!("field is one of {SUGGEST_FIELDS:?}, person, fact or about"));
             }
             let at = match crate::ledger::quote_in(project, evid, pr["quote"].as_str().unwrap_or("")) {
                 Ok(Some(at)) => at,
@@ -1246,6 +1335,9 @@ pub fn apply_suggestions(project: &str, evid: &str, proposals: &[Value]) -> Resu
             } else {
                 let Some(x) = find_person(&people, who) else { return Some(format!("{who:?} isn't among the thread's people (use a name or an address from people-context)")) };
                 let pl = x["places"].get(0).cloned().unwrap_or(json!({}));
+                if field == "role" && pl["role_by"] == "you" {
+                    return Some("the user set this role: leave it".into());
+                }
                 let cur = match field {
                     "role" | "stance" => pl[field].as_str().map(str::to_owned),
                     "influence" | "interest" => pl[field].as_u64().map(|n| n.to_string()),
@@ -1276,6 +1368,7 @@ pub fn apply_suggestions(project: &str, evid: &str, proposals: &[Value]) -> Resu
             let sid = format!("{:x}", { use sha2::Digest as _; let d = sha2::Sha256::digest(format!("{tkey}\0{field}\0{value}\0{evid}").as_bytes()); u64::from_be_bytes(d[..8].try_into().unwrap()) });
             all.push(json!({"sid": sid, "who": who, "target": target, "target_key": tkey, "field": field, "value": value,
                             "value_name": if field == "reports_to" { find_person(&people, pr["value"].as_str().unwrap_or("")).map(|x| x["name"].clone()) } else { None },
+                            "was": current,
                             "quote": pr["quote"], "note": pr["note"], "at": at, "state": "pending", "proposed": chrono::Utc::now().to_rfc3339()}));
             added += 1;
             None
@@ -1346,9 +1439,24 @@ pub fn decide(project: &str, sid: &str, yes: bool, value: Option<&str>) -> Resul
         let field = field.as_str();
         let value = own.as_deref().unwrap_or(x["value"].as_str().unwrap_or(""));
         let (name, email) = (t["name"].as_str().unwrap_or(""), t["email"].as_str());
+        let at = x["at"].clone();
         match field {
+            // A role keeps where it came from: the proposal's words (yours when you changed it).
+            "role" => place(project, name, email, &json!({"role": value, "role_by": if own.is_some() { "you" } else { "echo" }, "role_at": at["date"], "role_from": at["title"]}))?,
             // `group`: their workstream in this thread (the chart's column), not the directory's.
-            "role" | "stance" | "group" => place(project, name, email, &json!({field: value}))?,
+            "stance" | "group" => place(project, name, email, &json!({field: value}))?,
+            // Named in the words, in no call: a name-only person, under the organisation the words gave.
+            "person" => {
+                let key = key_of(value, None);
+                if let Some(o) = t["org"].as_str() {
+                    set(&key, value, None, "org", o, "echo")?;
+                }
+                let mut v = json!({"role_by": "echo", "role_at": at["date"], "role_from": at["title"]});
+                if let Some(r) = x["role"].as_str() {
+                    v["role"] = json!(r);
+                }
+                place(project, value, None, &v)?;
+            }
             "influence" | "interest" => place(project, name, email, &json!({field: value.parse::<u8>().unwrap_or(0)}))?,
             "left" => {
                 let key = t["key"].as_str().unwrap_or("").to_string();
@@ -1445,7 +1553,7 @@ mod tests {
     fn the_people_pass_proposes_and_the_user_decides() {
         let (_env, _root) = crate::paths::testenv::folders("people-suggest");
         let p = projects::create("Aurora", None, None).unwrap();
-        place(&p.id, "Ravi Mehta", Some("ravi@northwind.example"), &json!({"role": "security"})).unwrap();
+        place(&p.id, "Ravi Mehta", Some("ravi@northwind.example"), &json!({"role": "security", "role_by": "echo"})).unwrap();
         place(&p.id, "Dana Kowal", Some("dana@northwind.example"), &json!({})).unwrap();
         let l = crate::ledger::Ledger::of(&p.id).unwrap();
         std::fs::create_dir_all(l.dir.join("evidence")).unwrap();
@@ -1583,11 +1691,67 @@ mod tests {
         let who = |k: &str| v["people"].as_array().unwrap().iter().find(|x| x["key"] == k).unwrap().clone();
         assert_eq!(who("lee@acme.example")["places"][0]["group"], "Data migration");
         assert_eq!(who("dana@acme.example")["places"][0]["governance"], true);
-        assert_eq!(who("lee@acme.example")["works_for_hint"], "dana@acme.example");
+        assert!(who("lee@acme.example")["works_for_hint"].is_null(), "Dana is governance: handing work over isn't leading it");
         // The user's choice: works for, cleared; nobody works for themselves.
         place(&p.id, "Lee Park", Some("lee@acme.example"), &json!({"works_for": "dana@acme.example", "governance": null})).unwrap();
         assert_eq!(of_thread(&p.id, today).unwrap()["people"].as_array().unwrap().iter().find(|x| x["key"] == "lee@acme.example").unwrap()["places"][0]["works_for"], "dana@acme.example");
         assert!(place(&p.id, "Lee Park", Some("lee@acme.example"), &json!({"works_for": "lee@acme.example"})).is_err());
+    }
+
+    #[test]
+    fn the_chart_reads_the_work_not_the_room() {
+        let (_env, root) = crate::paths::testenv::folders("people-chart-current");
+        let att = |n: &str, e: &str| json!({"name": n, "email": e});
+        let first = call(&root, "2026-10-01_100000-a", "2026-10-01T10:00:00+00:00",
+            json!({"attendees": [att("Pam Lane", "pam@acme.example"), att("Ann Hart", "ann@acme.example"), att("Cy Moss", "cy@acme.example")]}), json!([]));
+        let later = call(&root, "2026-10-08_100000-b", "2026-10-08T10:00:00+00:00",
+            json!({"attendees": [att("Pam Lane", "pam@acme.example"), att("Joe Ruiz", "joe@acme.example")]}), json!([]));
+        let p = projects::create("Globex delivery", None, None).unwrap();
+        projects::update(&p.id, |x| { x.pins = vec![calls::stamp_of(&first), calls::stamp_of(&later)]; Ok(()) }).unwrap();
+        place(&p.id, "Pam Lane", Some("pam@acme.example"), &json!({"role": "Project manager: runs the daily sync"})).unwrap();
+        place(&p.id, "Ann Hart", Some("ann@acme.example"), &json!({"role": "CX stream lead: charter"})).unwrap();
+        place(&p.id, "Cy Moss", Some("cy@acme.example"), &json!({"role": "CX research", "group": "CX"})).unwrap();
+        place(&p.id, "Joe Ruiz", Some("joe@acme.example"), &json!({"role": "Engineering", "group": "Technology"})).unwrap();
+        // The PM hands Ann a task (no hint: coordination); Ann hands Cy one (same stream: a hint); Ann hands
+        // Joe one (another stream: none).
+        crate::ledger::human_event(&p.id, &json!({"op": "create", "kind": "story", "parent": "E01", "title": "Charter", "ac": ["Signed"]})).unwrap();
+        for (owner, by) in [("Ann Hart", "Pam Lane"), ("Cy Moss", "Ann Hart"), ("Joe Ruiz", "Ann Hart")] {
+            crate::ledger::human_event(&p.id, &json!({"op": "create", "kind": "task", "parent": "S001", "title": format!("{owner}'s part"), "internal_owner": owner, "delegated_by": by})).unwrap();
+        }
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 10, 9).unwrap();
+        let v = of_thread(&p.id, today).unwrap();
+        let who = |k: &str| v["people"].as_array().unwrap().iter().find(|x| x["key"] == k).unwrap().clone();
+        assert!(who("ann@acme.example")["works_for_hint"].is_null(), "a PM's task isn't a lead's");
+        assert_eq!(who("cy@acme.example")["works_for_hint"], "ann@acme.example");
+        assert!(who("joe@acme.example")["works_for_hint"].is_null(), "another stream");
+        // New = joined after the thread's first call.
+        assert_eq!((who("cy@acme.example")["new"].as_bool(), who("joe@acme.example")["new"].as_bool()), (Some(false), Some(true)));
+        // The roles typed here are the user's: kept, with their day.
+        assert_eq!(who("ann@acme.example")["places"][0]["role_by"], "you");
+
+        // Someone named, never invited: one proposal per name, mentions counted; on Yes a name-only person.
+        projects::add_client("Globex", &["globex.example".into()], false).unwrap();
+        let l = crate::ledger::Ledger::of(&p.id).unwrap();
+        std::fs::create_dir_all(l.dir.join("evidence")).unwrap();
+        for (ev, text) in [("2026-10-08_100000", "Send Dana the agenda before Thursday, she books the rooms."), ("2026-10-09_100000", "Dana is going to help me schedule the workshops.")] {
+            std::fs::write(l.dir.join(format!("evidence/{ev}.json")), json!({"id": ev, "date": &ev[..10], "title": "Daily sync", "turns": [{"ts": "00:01:00", "speaker": "Pam Lane", "text": text}]}).to_string()).unwrap();
+        }
+        let r = apply_suggestions(&p.id, "2026-10-08_100000", &[
+            json!({"who": "Dana", "field": "person", "org": "Globex", "role": "books the workshops", "quote": "Send Dana the agenda before Thursday"}),
+            json!({"who": "Cy Moss", "field": "person", "quote": "Send Dana the agenda before Thursday"}),
+            json!({"who": "Dana", "field": "person", "quote": "words nobody said here"}),
+            json!({"who": "Ann Hart", "field": "role", "value": "Sponsor", "quote": "Send Dana the agenda before Thursday"}),
+        ]).unwrap();
+        assert_eq!(r["added"], 1, "{r}");
+        assert_eq!(r["rejected"].as_array().unwrap().len(), 3, "already a person; a quote not said; a role the user set: {r}");
+        apply_suggestions(&p.id, "2026-10-09_100000", &[json!({"who": "Dana", "field": "person", "quote": "Dana is going to help me schedule"})]).unwrap();
+        let sug = suggestions(&p.id).into_iter().find(|x| x["field"] == "person").unwrap();
+        assert_eq!((sug["mentions"].as_u64(), sug["target"]["org_name"].as_str()), (Some(2), Some("Globex")));
+        decide(&p.id, sug["sid"].as_str().unwrap(), true, None).unwrap();
+        let v = of_thread(&p.id, today).unwrap();
+        let dana = v["people"].as_array().unwrap().iter().find(|x| x["name"] == "Dana").unwrap().clone();
+        assert_eq!((dana["in_thread"].as_bool(), dana["org"]["name"].as_str(), dana["places"][0]["role"].as_str()), (Some(true), Some("Globex"), Some("books the workshops")));
+        assert_eq!(dana["places"][0]["role_by"], "echo");
     }
 
     #[test]

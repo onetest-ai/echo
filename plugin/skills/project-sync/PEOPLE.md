@@ -17,8 +17,12 @@ are checked) and **who they are** (`about`, a short description you rewrite from
    `<id>_people_fix.json` (apply only the fixed entries). An item with nothing to say needs no file.
 
 ## What to propose (`field`)
-- `role` — what they are in this project, in a few words ("sponsor", "approver", "security review",
-  "day-to-day contact"). Only when the words say it ("Dana owns the budget", "I'll sign it off").
+- `role` — what they do in this engagement, in a few words ("sponsor", "approver", "security review",
+  "day-to-day contact", "CX stream lead"). Only when the words say it ("Dana owns the budget", "I'll
+  sign it off"). A role is never an event: "asked for access on 30.10" is a `fact`; when someone's
+  current role in people-context reads as an event, or a later item clearly says they now do
+  something else, propose the role that fits — it replaces the old one (shown as "was …"). A role
+  people-context marks `role_by: "you"` is the user's: never propose over it.
 - `stance` — `champion` (pushes for it), `supporter`, `neutral`, `sceptic` (doubts, conditions, pushes
   back), `blocker` (stops it). A single complaint is not a stance; a pattern or a clear statement is.
 - `influence` / `interest` — `1` low, `2` mid, `3` high. Influence = can decide, approve, fund or stop
@@ -26,9 +30,11 @@ are checked) and **who they are** (`about`, a short description you rewrite from
   without Ravi's sign-off" → influence 3).
 - `title` — a job title said in the call.
 - `group` — their **workstream in this thread** (the org chart's column): what part of the work they
-  are in ("data migration", "testing", "governance" is not one — that's `role`). From their role here,
-  the stories they own and the meetings they are in, with the words that say it ("Ravi's team does the
-  integration"). Use the thread's existing workstream names when one fits.
+  are in ("data migration", "testing"; "governance" is not one — that's `role`). Propose it whenever
+  the words or their role tie them to a stream: "<X> stream lead", work they own or report on in that
+  stream ("Ravi's team does the integration", an OMS architect in the Technology stream). Use the
+  stream names the thread already has — saved groups and "<X> stream" roles in people-context — and
+  never invent one when an existing name fits.
 - `reports_to` — `value` is the manager's name as people-context spells it ("Ravi reports to me now").
 - `left` — `value` `true`: they left the company or the project ("Tom moved to another account").
 - `fact` — one line about the person worth remembering when you meet them next, in your words (≤ 240
@@ -41,6 +47,12 @@ are checked) and **who they are** (`about`, a short description you rewrite from
   they care about, how to work with them — only from their facts (people-context lists the latest)
   and this item's. Write it for someone whose `about` is empty, or rewrite it when this item changes
   the picture. Never when `about_is_users` is true: the user wrote it.
+- `person` — someone the words name who is not among the thread's people (never in a call: a client
+  contact the team keeps talking about — "Dana is going to help me schedule", "send Dana the
+  agenda"). `who` = the name as said (full when given), `org` = the organisation the words tie them to
+  (the client or a counterpart from `known_organisations`; leave it out when unknown), `role` when
+  said, and the quote. Once per item; Echo counts the mentions. Not for passing names (a CEO named
+  once) or the user.
 - `relation` — between two organisations: `who` and `to` are organisation names from
   `known_organisations`, `value` one of `relations` ("Contoso does the integration for us" → `who`
   Contoso, `value` integrates_for, `to` the client).
@@ -61,6 +73,7 @@ user ("Me") — they are left out of the map.
 {"who": "Ravi Mehta", "field": "fact", "value": "Signs off every release; wants the audit trail before go-live.", "quote": "…"}
 {"who": "dana@northwind.example", "name": "Dana Kowal", "field": "fact", "value": "…", "quote": "…"}
 {"who": "Ravi Mehta", "field": "about", "value": "Northwind's head of platform and the release approver here. …"}
+{"who": "Dana Doe", "field": "person", "org": "Globex", "role": "books the workshops", "quote": "…"}
 ```
 `who` = a name or an address exactly as people-context gives it. The quote must be words said in this
 item, copied exactly (case and punctuation may differ), from one turn.
