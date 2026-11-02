@@ -43,7 +43,10 @@ minutes").
   HKCU `Software\onetest\Echo\InstallFolder`: a quit the user cancelled — notes unsaved in the window — or one that
   took over 30 s stops the installation; else ignored, as for a first install, and for Echo's own update, which passes
   `ECHO_SELF_UPDATE=1`: it saved its notes and is stopping already), `app start` after; uninstall keeps data. Plus the
-  same files as a zip.
+  same files as a zip. CI: `.github/workflows/windows-release.yml` builds it on GitHub's runner when a release is
+  published (or by hand for a tag; build only for a PR touching the packaging) and uploads both; `-Phase stage` /
+  `package` split the script so SignPath signs `echoctl.exe` in between, then the MSI — on once the repository has
+  `SIGNPATH_*` settings, else unsigned as before.
 - Marketplace `echoctl` (`.claude-plugin/marketplace.json`): `claude plugin marketplace add
   onetest-ai/echo` + `claude plugin install echo@onetest --scope user|project|local`
   (what `echoctl claude connect` runs; `ECHOCTL_MARKETPLACE` overrides the source).

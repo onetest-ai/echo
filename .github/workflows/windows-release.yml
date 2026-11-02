@@ -1,0 +1,212 @@
+# Echo for Windows on GitHub's runner: scripts/package-windows.ps1 in two phases, signed in between
+# through SignPath (https://signpath.io) once the repository has its settings, then the MSI and the
+# zip uploaded to the release.
+#
+# - A release published (from the Mac, with the dmg): builds the tag, uploads the Windows assets.
+#   GitHub runs this file as it is in the tagged commit, so only tags made after it landed.
+# - Run by hand (Actions -> Windows release -> Run workflow): the same for a tag given; upload off
+#   to only get the files as a workflow artifact.
+# - A pull request touching the Windows packaging: builds, uploads nothing.
+#
+# Signing is on when the repository variable SIGNPATH_ORGANIZATION_ID is set, with the secret
+# SIGNPATH_API_TOKEN and the variables SIGNPATH_PROJECT_SLUG and SIGNPATH_POLICY_SLUG
+# (release-signing; test-signing for pull requests is not used). SignPath's artifact
+# configuration signs every .exe / .msi at the top of the artifact. Without them the files are
+# unsigned, as built by hand.
+name: Windows release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build (e.g. v0.5.6-beta)
+        required: true
+      upload:
+        description: Upload the MSI and zip to that release
+        type: boolean
+        default: true
+  pull_request:
+    paths:
+      - .github/workflows/windows-release.yml
+      - scripts/package-windows.ps1
+      - packaging/windows/**
+
+permissions:
+  contents: write   # gh release upload
+  actions: read     # SignPath reads the uploaded artifact
+
+concurrency:
+  group: windows-release-${{ github.event.release.tag_name || inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+env:
+  VULKAN_VERSION: 1.4.363.0
+  WIX_VERSION: 5.0.2          # WiX 5: later versions carry a maintenance-fee EULA
+  ECHO_BUILD_DIR: C:\eb       # short: the Vulkan shader generator's nested CMake hits MAX_PATH
+  SIGN: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
+
+jobs:
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 120
+    steps:
+      - name: Which tag
+        id: tag
+        shell: pwsh
+        run: |
+          $tag = "${{ github.event.release.tag_name || inputs.tag }}"
+          $upload = "${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.upload) }}"
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "upload=$upload" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.tag || github.sha }}
+
+      - name: Rust
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc --version
+
+      - name: Vulkan SDK (cached)
+        id: vulkan-cache
+        uses: actions/cache@v4
+        with:
+          path: C:\VulkanSDK\${{ env.VULKAN_VERSION }}
+          key: vulkan-sdk-${{ env.VULKAN_VERSION }}
+
+      - name: Install the Vulkan SDK
+        if: steps.vulkan-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $v = $env:VULKAN_VERSION
+          $exe = Join-Path $env:RUNNER_TEMP "vulkansdk-$v.exe"
+          Invoke-WebRequest "https://sdk.lunarg.com/sdk/download/$v/windows/vulkansdk-windows-X64-$v.exe" -OutFile $exe
+          $sig = Get-AuthenticodeSignature $exe
+          if ($sig.Status -ne "Valid" -or $sig.SignerCertificate.Subject -notmatch 'LunarG') { throw "the Vulkan SDK installer is not signed by LunarG ($($sig.Status))" }
+          & $exe --root "C:\VulkanSDK\$v" --accept-licenses --default-answer --confirm-command install
+          if ($LASTEXITCODE -ne 0) { throw "Vulkan SDK install failed ($LASTEXITCODE)" }
+
+      - name: Tool paths
+        shell: pwsh
+        run: |
+          "VULKAN_SDK=C:\VulkanSDK\$env:VULKAN_VERSION" >> $env:GITHUB_ENV
+          "C:\VulkanSDK\$env:VULKAN_VERSION\Bin" >> $env:GITHUB_PATH
+          # LLVM for bindgen (libclang only); the runner image has it, else install it.
+          if (-not (Test-Path "C:\Program Files\LLVM\bin\libclang.dll")) { choco install llvm -y --no-progress }
+          "LIBCLANG_PATH=C:\Program Files\LLVM\bin" >> $env:GITHUB_ENV
+          "ECHO_STAGE_DIR=$env:RUNNER_TEMP\stage" >> $env:GITHUB_ENV
+          dotnet tool install --global wix --version $env:WIX_VERSION
+
+      - name: Cargo cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            C:\eb
+          key: cargo-windows-${{ hashFiles('Cargo.lock', 'packaging/windows/whisper.cmake', '.cargo/config.toml') }}
+          restore-keys: cargo-windows-
+
+      - name: Build and stage
+        shell: pwsh
+        run: ./scripts/package-windows.ps1 -Phase stage
+
+      - name: Check the exe
+        shell: pwsh
+        run: |
+          # An 8 MB main-thread stack (crates/echoctl/build.rs): 1 MB overflowed at start in 0.4.1-beta.
+          $b = [IO.File]::ReadAllBytes("$env:ECHO_STAGE_DIR\echoctl.exe")
+          $pe = [BitConverter]::ToInt32($b, 0x3C)
+          $stack = [BitConverter]::ToUInt64($b, $pe + 24 + 72)
+          if ($stack -ne 8388608) { throw "stack reserve is $stack, not 8 MB" }
+          & "$env:ECHO_STAGE_DIR\echoctl.exe" --version
+          if ($LASTEXITCODE -ne 0) { throw "echoctl --version failed" }
+
+      # ── signing echoctl.exe (before it goes into the zip and the MSI) ──
+      - name: Upload echoctl.exe for signing
+        if: env.SIGN == 'true'
+        id: exe-unsigned
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-exe
+          path: ${{ env.ECHO_STAGE_DIR }}\echoctl.exe
+          if-no-files-found: error
+
+      - name: Sign echoctl.exe
+        if: env.SIGN == 'true'
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG }}
+          github-artifact-id: ${{ steps.exe-unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: ${{ runner.temp }}\signed-exe
+
+      - name: Put the signed exe in the stage
+        if: env.SIGN == 'true'
+        shell: pwsh
+        run: |
+          $signed = "$env:RUNNER_TEMP\signed-exe\echoctl.exe"
+          if ((Get-AuthenticodeSignature $signed).Status -ne "Valid") { throw "the signed echoctl.exe has no valid signature" }
+          Copy-Item $signed "$env:ECHO_STAGE_DIR\echoctl.exe" -Force
+
+      - name: Zip and MSI
+        shell: pwsh
+        run: ./scripts/package-windows.ps1 -Phase package
+
+      # ── signing the MSI ──
+      - name: Upload the MSI for signing
+        if: env.SIGN == 'true'
+        id: msi-unsigned
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-msi
+          path: dist\*.msi
+          if-no-files-found: error
+
+      - name: Sign the MSI
+        if: env.SIGN == 'true'
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG }}
+          github-artifact-id: ${{ steps.msi-unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: ${{ runner.temp }}\signed-msi
+
+      - name: Put the signed MSI in dist
+        if: env.SIGN == 'true'
+        shell: pwsh
+        run: |
+          Get-ChildItem "$env:RUNNER_TEMP\signed-msi\*.msi" | ForEach-Object {
+            if ((Get-AuthenticodeSignature $_.FullName).Status -ne "Valid") { throw "$($_.Name) has no valid signature" }
+            Copy-Item $_.FullName dist\ -Force
+          }
+
+      - name: Keep the files
+        uses: actions/upload-artifact@v4
+        with:
+          name: echo-windows-x64
+          path: |
+            dist\*.msi
+            dist\*.zip
+          if-no-files-found: error
+
+      - name: Upload to the release
+        if: steps.tag.outputs.upload == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ steps.tag.outputs.tag }}"
+          gh release upload $tag (Get-ChildItem dist\*.msi, dist\*.zip).FullName --clobber
+          if ($LASTEXITCODE -ne 0) { throw "upload failed" }
