@@ -269,6 +269,10 @@ pub fn start_folder(key: &str, profile: Option<&str>, cols: u16, rows: u16) -> R
     if let Some(m) = (p.kind == ai::Kind::Local).then(|| p.notes_model()).flatten() {
         args.extend(["--model".into(), m]);
     }
+    // The user's choice (Settings → AI & minutes): no permission prompts in this session only.
+    if crate::config::Config::load().is_ok_and(|c| c.folder_skip_permissions) {
+        args.push("--dangerously-skip-permissions".into());
+    }
     // What the window shows, before each prompt: a settings file of its own with only that hook (the
     // user's own settings apply as ever).
     let folder = paths::config_dir().join("minutes-run");

@@ -62,6 +62,12 @@ pub struct Config {
     /// project's AI profile reads each new call into its tree. Default: on.
     #[serde(default = "yes")]
     pub project_sync: bool,
+    /// The window's Echo folder session (the user's own Claude Code) starts with
+    /// `--dangerously-skip-permissions`: no prompts, so in auto mode it can reach other sessions and
+    /// other systems (closing the user's tasks there). Never the call's session, which reads others'
+    /// words under the guard, nor any run Echo starts. Default: off.
+    #[serde(default)]
+    pub folder_skip_permissions: bool,
     /// Calls that ended before this are never written automatically (set when the switch is first
     /// on, and again on each off → on), so turning it on doesn't send a backlog of calls to a model.
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -238,7 +238,9 @@ with its profile → Sign in…): the minutes run's guard with `ECHOCTL_RUN_MODE
 previous minutes, Bash only `echoctl context` — `guard::ASK_COMMANDS` —, no Edit/Write/Skill), `--tools
 Bash,Read,Glob,Grep --strict-mcp-config --permission-mode default`, allow rules for reading the call, headless,
 Claude Code ≥ `guard::MIN_CLAUDE`; one call session at a time — and **Claude · Echo folder**, the user's own Claude
-Code (not headless) on the profile they pick (`ai::ready`, default = the default profile). Both run in the data
+Code (not headless) on the profile they pick (`ai::ready`, default = the default profile) — with `config.folder_skip_permissions` (Settings → AI & minutes → Claude in the window,
+off by default) started with `--dangerously-skip-permissions`: in auto mode it can reach other sessions and systems;
+never the call's session or a run. Both run in the data
 folder (never a call's: Windows renames), hold their profile's lease while they run, start with `--session-id` and
 resume with `--resume` (ids per profile in `<home>/.echo/sessions.json`: `<profile>:folder`, `<profile>:<stamp>`; one
 refused within 4 s is forgotten). Entry points: status bar Claude, ⌘/Ctrl+`, the call's ⋯ → Ask Claude about this

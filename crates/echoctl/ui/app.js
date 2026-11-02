@@ -2102,6 +2102,9 @@ const SETTINGS_BODY = {
         setRow('Minutes model', 'The model that writes minutes for the default profile.', actBtn('notes_model', 'Change…')),
         setRow('Where Claude Code runs for minutes', st.notes_in ? `<code>${esc(st.notes_in)}</code> — its .claude/settings.json applies.` : 'The data folder.', actBtn('notes_choose', 'Choose…') + (st.notes_in ? actBtn('notes_anywhere', 'Use the data folder') : '')),
         setRow('Also write a minutes page file', "An HTML file in the call's folder, for sharing.", sw('minutes_page', st.minutes_page, 'Minutes page file')),
+      ]) +
+      setCard('Claude in the window', [
+        setRow('Echo folder session: no permission prompts', `Starts it with <code>--dangerously-skip-permissions</code>: Claude runs any command and tool without asking — it can talk to your other sessions and close your tasks in other systems. ${st.folder_skip_permissions ? '<span class="warn">On.</span> ' : ''}Takes effect the next time the session starts. A call's session stays guarded.`, sw('folder_skip_permissions', st.folder_skip_permissions, 'Echo folder session: no permission prompts')),
       ])
   },
   calendar(st) {
