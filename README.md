@@ -96,8 +96,9 @@ Click a meeting for details, a recap of last time, and the Record button.
 
 ![Calendar week](docs/images/calendar.jpg)
 
-> Your organisation's IT may need to register an app for you. Put its ID under
-> menu → Calendar → Change app (client) ID.
+> Echo signs in with CodeMie's public app registration by default. Your organisation's IT may need
+> to approve it, or register its own app for you: put its ID under menu → Calendar → Change app
+> (client) ID.
 
 ## 5. Get minutes from Claude (optional)
 

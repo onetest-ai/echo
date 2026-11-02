@@ -99,7 +99,7 @@ pub struct Config {
     #[serde(default)]
     pub capture_chat: Option<bool>,
     /// Microsoft 365 app registration (public client) the calendar sign-in uses; default
-    /// CodeMie's (Contoso). Other orgs: register a public client with redirect http://localhost
+    /// CodeMie's. An organisation may register its own public client with redirect http://localhost
     /// and delegated Calendars.Read, and put its id here.
     #[serde(default)]
     pub graph_client_id: Option<String>,

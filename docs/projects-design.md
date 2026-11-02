@@ -234,7 +234,7 @@ Decided 2026-10-30:
   Folders bring Brain's document lanes along: PDF / Word / PowerPoint text, page images read by a model, spreadsheets
   into the numbers lane.
 - Measured 2026-10-30: the CodeMie app's token already carries `ChannelMessage.Read.All`, `Team.ReadBasic.All`,
-  `Mail.Read`, `Group.Read.All` at Contoso — no new sign-in.
+  `Mail.Read`, `Group.Read.All` where the tenant consented them — no new sign-in.
 
 ## People and organisations (stakeholder maps)
 
@@ -263,7 +263,7 @@ document behind them and wait for the user's yes, verified by a separate pass as
 | Calls | invitees and organiser with emails; speakers (named from Teams' tiles) and their share of the talking; chat senders; calls attended, last seen; tasks owned, what waits on them | role, stance, influence, reports to, group, relationships between organisations — each with its quote | now |
 | Calendar | who meets whom and how often (unrecorded meetings too), who organises | interest (from cadence) | now |
 | Teams chats | members, posters, @mentions | as for calls, quoting the message | now (meeting chats) |
-| Entra / Microsoft 365 directory | title, department, company, office, phones (the People API: colleagues only) | — | built; managers need `User.Read.All`, which the CodeMie app isn't granted at Contoso |
+| Entra / Microsoft 365 directory | title, department, company, office, phones (the People API: colleagues only) | — | built; managers need `User.Read.All`, which tenants rarely grant the CodeMie app |
 | Mail | who is on which threads (To/CC → groups, DLs); signatures (title, phone, company) | roles, relationships, who decides | phase 4 (`Mail.Read`, its own opt-in) |
 | Documents (local folders, SharePoint/OneDrive) | parties of an SOW or contract, RACI tables | structure, owners, relationships — citing the document and page | with the brain |
 

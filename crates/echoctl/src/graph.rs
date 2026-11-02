@@ -6,7 +6,7 @@
 //! that Conditional Access requires, which an embedded login window would not.
 //!
 //! The app registration is a setting (`config.graph_client_id`, default CodeMie's public
-//! client, consented at Contoso; another org registers its own public client with redirect
+//! client, which a tenant's admin may have to approve; an organisation can register its own public client with redirect
 //! `http://localhost` and delegated `Calendars.Read`). Only read-only scopes are requested.
 //! Tokens live in `<config dir>/graph.json` (mode 0600) — like `gh` and the msgraph skill; the
 //! Keychain would re-prompt after every re-signed build.
@@ -27,7 +27,7 @@ use sha2::{Digest, Sha256};
 use crate::config::Config;
 use crate::paths;
 
-/// CodeMie (Contoso) public client — the default for the Contoso beta.
+/// CodeMie's public client (an open project's app registration) — the default.
 pub const DEFAULT_CLIENT_ID: &str = "3d7688c6-f449-4d04-8b0d-57d94818e922";
 pub const DEFAULT_TENANT: &str = "common";
 /// Read-only: the calendar, and the chats the user is in (the meeting chat during a call).

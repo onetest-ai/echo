@@ -72,7 +72,7 @@ minutes").
   `agenda sync` reads today's events from Microsoft 365 through the app's own Graph client
   (`graph.rs`: auth code + PKCE in the system browser, `http://localhost` loopback — keeps
   Conditional Access device claims; read-only `Calendars.Read`; app registration =
-  `config.graph_client_id`, default CodeMie's public client for the Contoso beta; tokens in
+  `config.graph_client_id`, default CodeMie's public client (an open project's registration); tokens in
   `<config dir>/graph.json` 0600; `echoctl calendar login|logout|events`). Not signed in →
   the msgraph skill CLI if installed, else a quiet no-op. Teams' own IndexedDB calendar cache
   was rejected (undocumented, "data from other apps" prompt). Events are filtered into `.echo/agenda.json`;
@@ -475,7 +475,7 @@ edge, a related organisation with nobody in the thread shown as an empty card so
 panel (`person`).
 **Microsoft 365** (`graph::person`, `people::refresh_m365`): the People API (`/me/people?$search="<email>"`,
 `People.Read`) gives colleagues' title, department, company, office and phone; people outside the tenant come back
-with a name or nothing. Measured with the CodeMie app at Contoso (2026-10-30): a token carries every scope the tenant
+with a name or nothing. Measured with the CodeMie app (2026-10-30): a token carries every scope the tenant
 consented for the app whatever a sign-in asks (People.Read, Group.Read.All, Mail.Read… — no new sign-in needed), but
 not `User.Read(Basic).All`: `/users/{x}` and their managers are refused, so reporting lines come from calls and the
 user. Asked when a People tab opens (in the background, one refresh at a time, each person at most weekly, ≤ 40 a

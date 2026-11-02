@@ -1,7 +1,7 @@
 # Microsoft 365: calendar and meeting chat
 
-The default sign-in uses the CodeMie app registration, so these cases need an Contoso account,
-or your organization's own app (client) ID (TC-CAL-003).
+The default sign-in uses the CodeMie app registration, so these cases need an account whose
+organisation allows that app, or your organisation's own app (client) ID (TC-CAL-003).
 
 ### TC-CAL-001 · Connect Microsoft 365
 **Priority:** P1 · **Platform:** macOS
