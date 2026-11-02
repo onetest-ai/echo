@@ -11,7 +11,7 @@ Thanks for helping. Bug reports and ideas are welcome as GitHub issues; pull req
 - Never attach real call data (transcripts, chat, screenshots of real meetings) to an issue or
   a test. Use made-up people and companies.
 
-**License of contributions.** Echo is under the [Functional Source License](LICENSE.md). By
+**License of contributions.** Echo is under the [GNU AGPL v3.0](LICENSE). By
 submitting a contribution you agree that it is licensed under the same terms, and you grant the
 project's licensor (Artyom Rozumenko) a perpetual, irrevocable, worldwide, royalty-free license
 to use, modify and relicense your contribution, including under other license terms. You confirm

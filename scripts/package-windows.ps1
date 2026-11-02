@@ -37,7 +37,7 @@ if ($Phase -ne "package") {
     New-Item -ItemType Directory $stage | Out-Null
     Copy-Item "$target\release\echoctl.exe" $stage
     Copy-Item README.md $stage
-    Copy-Item LICENSE.md $stage
+    Copy-Item LICENSE "$stage\LICENSE.txt"
 
     # The Vulkan loader next to the exe: echoctl.exe imports vulkan-1.dll, which GPU drivers install
     # but a machine without one (VM, bare office PC) lacks - Windows would refuse to start Echo.

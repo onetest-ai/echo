@@ -16,7 +16,7 @@ Vulkan SDK (`VULKAN_SDK`), Python.
 **Expected**
 - The build finishes with whisper.cpp compiled in (Vulkan + AVX2 CPU).
 - The zip contains `echoctl.exe`, `vulkan-1.dll`, `VULKAN-RUNTIME-LICENSE.txt`, `README.md`,
-  `LICENSE.md`, `THIRD-PARTY-LICENSES.txt` and `plugin\`.
+  `LICENSE.txt`, `THIRD-PARTY-LICENSES.txt` and `plugin\`.
 - `dumpbin /dependents echoctl.exe` lists no `MSVCP140` / `VCRUNTIME140` (static C runtime).
 - On a PC without a GPU driver (or a VM) Echo starts and transcribes on the CPU.
 

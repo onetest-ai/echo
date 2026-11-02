@@ -6,6 +6,6 @@
     "name": "Artyom Rozumenko"
   },
   "types": "./types/index.d.ts",
-  "license": "FSL-1.1-ALv2",
+  "license": "AGPL-3.0-only",
   "homepage": "https://github.com/onetest-ai/echo"
 }

@@ -271,17 +271,20 @@ way macOS does.
 
 ## License
 
-Echo is **source-available** under the [Functional Source License 1.1](LICENSE.md)
-(FSL-1.1-ALv2), with the Apache 2.0 license as its future license. In plain words:
+Copyright © 2026 Artyom Rozumenko. Echo is **open source** under the
+[GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-only). In plain words:
 
-- **You can** use Echo for free: for yourself, for your work calls, inside your company. You can
-  read, change and share the code.
-- **You can't** sell Echo or offer a competing product or service built on it.
-- **Two years after each release**, that release becomes Apache 2.0 open source with no limits.
+- **You can** use Echo for free, for any purpose: for yourself, your work calls, inside your
+  company. You can read, change and share the code.
+- **If you share Echo or a changed version** — as a download, or as a service people use over a
+  network — you must offer its complete source code under the same license.
+- **Want to ship it in a closed product?** A commercial license is available: open an issue.
 
-This is a summary; [LICENSE.md](LICENSE.md) is what counts. For other terms, open an issue.
+This is a summary; [LICENSE](LICENSE) is what counts. Releases up to 0.5.6-beta were published under
+the Functional Source License 1.1 (FSL-1.1-ALv2) and keep those terms.
 Third-party components keep their own licenses: see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
-The onetest name and octopus logo are trademarks and aren't covered by the license.
+The onetest name and octopus logo are trademarks of onetest and aren't covered by the license:
+a fork must use its own name and logo.
 
 ## Credits
 
