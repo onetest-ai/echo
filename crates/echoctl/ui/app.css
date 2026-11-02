@@ -1571,3 +1571,19 @@ select.set-in { width: auto; margin-right: 6px; }
 .br-bld .link-btn.strong { font-weight: 650; }
 .br-mvs { display: flex; flex-direction: column; gap: 6px; margin: 0 0 12px; }
 .br-mv { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); border-radius: 8px; background: var(--accent-soft); font-size: 12.5px; }
+/* The dictionary (Terms). */
+.dict-groups { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
+.dict-groups .fchip { cursor: default; }
+.dict-groups .fchip.on { background: var(--accent-soft); color: var(--text); }
+.dict-list { border: 1px solid var(--line); border-radius: 10px; background: var(--bg); overflow: hidden; }
+.dict-e { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 8px 12px; border: 0; border-top: 1px solid var(--line); background: none; color: var(--text); font: inherit; font-size: 12.5px; text-align: left; cursor: default; }
+.dict-e:first-child { border-top: 0; }
+.dict-e:hover { background: color-mix(in srgb, var(--text) 3%, transparent); }
+.dict-e.on { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.dict-h { display: flex; align-items: baseline; gap: 6px; }
+.dict-aka { font-size: 11.5px; color: var(--text-2); }
+.dict-d { font-size: 11.5px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dict-tps { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.dict-tp { font-size: 10.5px; padding: 0 6px; border-radius: 8px; background: var(--line); color: var(--text-2); }
+.dict-flag { font-size: 10px; color: var(--text-3); border: 1px solid var(--line-strong); border-radius: 6px; padding: 0 4px; }
+.br-def { display: flex; flex-direction: column; gap: 6px; width: 100%; }

@@ -3712,16 +3712,32 @@ function brainTopics(tx) {
   const only = own.map(([l, xs]) => `<section class="br-layer"><div class="br-lh"><span class="cap">Only ${esc(lname(l.id))}</span><span class="set-sub">topics no other client shares — move one up when it does</span></div><div class="br-card">${xs.map((x) => row(x, true)).join('')}</div></section>`).join('')
   return `${top}${builds}${mv ? `<div class="br-mvs">${mv}</div>` : ''}${practice.length ? `<section class="br-layer"><div class="br-lh"><span class="cap">Your practice</span><span class="set-sub">one tree for every client: their topics sit under the practice's where they fit</span></div>${tree}</section>` : ''}${only}` || '<p class="set-sub">Nothing in this scope.</p>'
 }
+/** The dictionary (the Terms tab): every term — named things: organisations, products, initiatives… — by
+ *  group, A–Z within it; a search over its name, other names and spellings; each with what it is, whose it
+ *  is (the practice, or a client), the topics it comes up in and how often. A click opens it to edit. */
 function brainTerms(tx) {
   if (!tx.exists) return '<p class="set-sub">No terms yet: they come with the topics.</p>'
-  const layers = [...(tx.layers || []).filter((l) => l.id === 'shared'), ...(tx.layers || []).filter((l) => l.id !== 'shared')]
-  return layers.map((l) => {
-    const ts = (tx.terms || []).filter((x) => x.layer === l.id).sort((a, b) => (b.sections || 0) - (a.sections || 0))
-    if (!ts.length) return ''
-    const kinds = [...new Set(ts.map((x) => x.kind))]
-    return `<section class="br-layer"><div class="br-lh"><span class="cap">${esc(l.id === 'shared' ? 'Your practice' : l.name)}</span><span class="set-sub">${ts.length} terms · ${esc(kinds.join(', '))}</span></div>
-      <div class="br-terms">${ts.map((x) => `<button class="br-term${S.br.node === x.id ? ' on' : ''}" data-br-node="${esc(x.id)}" title="${esc(x.description || '')}"><b>${esc(x.name)}</b><small>${esc(x.kind)}${x.variants.length ? ` · ${esc(x.variants.slice(0, 2).join(', '))}` : ''}</small>${x.sections ? `<span class="br-n">${x.sections}</span>` : ''}${x.pinned.length ? '<span class="br-pin" title="Pinned to a thread">📌</span>' : ''}${x.always ? '<span class="br-pin" title="Hints every call">∞</span>' : ''}</button>`).join('')}</div></section>`
-  }).join('')
+  const layers = tx.layers || []
+  const lname = (id) => id === 'shared' ? 'Practice' : ((layers.find((l) => l.id === id) || {}).name || id)
+  const lcolor = (id) => { const i = layers.filter((l) => l.id !== 'shared').findIndex((l) => l.id === id); return i < 0 ? '#8a8a95' : CLIENT_COLORS[i % CLIENT_COLORS.length] }
+  const q = (S.br.tq || '').trim().toLowerCase()
+  const hit = (x) => !q || [x.name, ...(x.synonyms || []), ...(x.variants || []), x.description, x.kind].join(' ').toLowerCase().includes(q)
+  const all = (tx.terms || []).filter(hit)
+  const g = S.br.tg || ''
+  const groups = (tx.groups || []).map((x) => ({ ...x, n: all.filter((t) => t.group === x.id).length })).filter((x) => x.n)
+  const shown = all.filter((t) => !g || t.group === g).sort((a, b) => a.name.localeCompare(b.name))
+  const chips = `<div class="dict-groups"><button class="fchip${!g ? ' on' : ''}" data-dict-group="">All · ${all.length}</button>${groups.map((x) => `<button class="fchip${g === x.id ? ' on' : ''}" data-dict-group="${esc(x.id)}">${esc(x.label)} · ${x.n}</button>`).join('')}</div>`
+  const box = `<input class="wp-in br-pq" id="dict-q" type="search" placeholder="Find a term — its name, another name, a spelling" value="${esc(S.br.tq || '')}" aria-label="Find a term">`
+  const entry = (x) => {
+    const names = (x.synonyms || []).length ? `<span class="dict-aka">also ${esc(x.synonyms.join(', '))}</span>` : ''
+    const flags = [x.always ? '<span class="br-pin" title="Hints every call’s transcription">∞</span>' : '', (x.pinned || []).length ? '<span class="br-pin" title="Pinned to a thread: hints its calls’ transcription">📌</span>' : '', x.learned ? '<span class="dict-flag" title="Learned from the minutes">learned</span>' : ''].join('')
+    const tps = (x.topics || []).map((t) => `<span class="dict-tp">${esc(t.label)}</span>`).join('')
+    return `<button class="dict-e${S.br.node === x.id ? ' on' : ''}" data-br-node="${esc(x.id)}"><span class="dict-h"><b>${esc(x.name)}</b> <span class="br-cl" style="--c:${lcolor(x.layer)}">${esc(lname(x.layer))}</span> <span class="set-sub">${esc(x.kind || '')}</span>${flags}<span class="grow"></span><span class="br-n" title="Sections that mention it">${x.sections || 0}</span></span>${names}${x.description ? `<span class="dict-d">${esc(x.description)}</span>` : ''}${tps ? `<span class="dict-tps">${tps}</span>` : ''}</button>`
+  }
+  const body = !shown.length ? `<p class="set-sub">${q ? 'Nothing matches.' : 'No terms here.'}</p>`
+    : g ? `<div class="dict-list">${shown.map(entry).join('')}</div>`
+    : groups.map((x) => `<section class="br-layer"><div class="br-lh"><span class="cap">${esc(x.label)}</span><span class="set-sub">${x.n}</span></div><div class="dict-list">${shown.filter((t) => t.group === x.id).map(entry).join('')}</div></section>`).join('')
+  return `<div class="br-graph-bar">${box}<span class="grow"></span></div>${chips}${body}<p class="set-foot">A term is a named thing: its name, its other names (what search and Claude take for it) and its spellings (how it is written or misheard — they hint transcription). Merge two that are one thing; split off a name that is a thing of its own.</p>`
 }
 /** A Brain section's source outside Echo (a Teams post, a mail): opened in its own app. */
 const extAttr = (link) => link && link.startsWith('echo://file/') ? `data-br-file="${esc(link.slice(12).split('?')[0])}" title="Open the document${link.includes('page=') ? ` (page ${esc(link.split('page=')[1])})` : ''}"`
@@ -4099,6 +4115,12 @@ function drawPeople() {
 }
 document.addEventListener('input', (e) => {
   if (e.target.id === 'pp-about') { S.pj.aboutEdit = e.target.value; return }
+  if (e.target.id === 'dict-q') {
+    S.br.tq = e.target.value
+    clearTimeout(S.br.tqT)
+    S.br.tqT = setTimeout(() => { const at = e.target.selectionStart; render(); const i = $('#dict-q'); if (i) { i.focus(); i.setSelectionRange(at, at) } }, 150)
+    return
+  }
   if (e.target.id === 'br-gq') {
     const q = e.target.value
     clearTimeout(S.br.gqT)
@@ -4123,7 +4145,7 @@ function brainNodePanel() {
   if (!x) return '<div class="wp-empty">Pick a topic or a term.</div>'
   const isTerm = !!x.name, name = x.name || x.label, layer = x.layer
   // A client's topic may merge into, or sit under, one of the practice's too (one tree).
-  const same = isTerm ? (tx.terms || []).filter((t) => t.layer === layer && t.id !== id) : (tx.topics || []).filter((t) => (t.layer === layer || (layer !== 'shared' && t.layer === 'shared')) && t.id !== id)
+  const same = (isTerm ? (tx.terms || []) : (tx.topics || [])).filter((t) => (t.layer === layer || (layer !== 'shared' && t.layer === 'shared')) && t.id !== id)
   const l1s = (tx.topics || []).filter((t) => (t.layer === layer || (layer !== 'shared' && t.layer === 'shared')) && t.level === 1 && t.id !== id)
   const lnm = (l) => l === 'shared' ? 'practice' : (((tx.layers || []).find((y) => y.id === l) || {}).name || l)
   const ed = S.br.edit
@@ -4131,10 +4153,11 @@ function brainNodePanel() {
   const actions = ed === 'rename' ? `<span class="tok-in"><input id="br-rename" value="${esc(name)}" aria-label="New name" autofocus></span><button class="btn primary" data-br-do="rename">Rename</button>`
     : ed === 'merge' ? `<select class="wp-in" id="br-into" aria-label="Merge into">${same.map((t) => `<option value="${esc(JSON.stringify([t.name || t.label, t.layer]))}">${esc(t.name || t.label)}${t.layer !== layer ? ` (${esc(lnm(t.layer))})` : ''}</option>`).join('')}</select><button class="btn primary" data-br-do="merge">Merge</button>`
     : ed === 'scope' ? `<select class="wp-in" id="br-scope-to" aria-label="Whose topic">${layer === 'shared' ? (tx.layers || []).filter((l) => l.id !== 'shared').map((l) => `<option value="${esc(l.id)}">Only ${esc(l.name || l.id)}</option>`).join('') : '<option value="shared">Your practice (every client)</option>'}</select><button class="btn primary" data-br-do="scope">Move</button>`
-    : ed === 'define' ? `<div class="br-def"><textarea class="wp-in" id="br-desc" rows="3" aria-label="What belongs in it" placeholder="What belongs in it — and what doesn't">${esc(x.description || '')}</textarea><input class="wp-in" id="br-syn" value="${esc((x.synonyms || []).join(', '))}" placeholder="Other names, comma-separated" aria-label="Synonyms"><button class="btn primary" data-br-do="define">Save</button></div>`
+    : ed === 'define' ? `<div class="br-def"><textarea class="wp-in" id="br-desc" rows="3" aria-label="What it is" placeholder="${isTerm ? 'What it is' : "What belongs in it — and what doesn't"}">${esc(x.description || '')}</textarea><input class="wp-in" id="br-syn" value="${esc((x.synonyms || []).join(', '))}" placeholder="Other names, comma-separated" aria-label="Synonyms">${isTerm ? `<input class="wp-in" id="br-spell" value="${esc((x.variants || []).join(', '))}" placeholder="Spellings — how it is written or misheard" aria-label="Spellings"><select class="wp-in" id="br-group" aria-label="Group">${(tx.groups || []).map((g) => `<option value="${esc(g.id)}"${x.group === g.id ? ' selected' : ''}>${esc(g.label)}</option>`).join('')}</select>` : ''}<button class="btn primary" data-br-do="define">Save</button></div>`
+    : ed === 'split' ? `<select class="wp-in" id="br-split" aria-label="Which name">${[...(x.synonyms || []), ...(x.variants || [])].map((n) => `<option>${esc(n)}</option>`).join('')}</select><button class="btn primary" data-br-do="split">Make it a term</button>`
     : ed === 'move' ? `<select class="wp-in" id="br-parent" aria-label="Move under"><option value="">(top level)</option>${l1s.map((t) => `<option${x.parent === t.label ? ' selected' : ''}>${esc(t.label)}</option>`).join('')}</select><button class="btn primary" data-br-do="move">Move</button>`
     : ed === 'remove' ? `<span class="set-sub">Remove it? Its tags go too.</span><button class="btn danger" data-br-op='${body({ op: 'remove' })}'>Remove</button>`
-    : `<button class="btn" data-br-edit="rename">Rename</button>${same.length ? '<button class="btn" data-br-edit="merge">Merge into…</button>' : ''}${isTerm ? '' : `<button class="btn" data-br-edit="define">Define…</button><button class="btn" data-br-edit="move">Move under…</button><button class="btn" data-br-edit="scope">${layer === 'shared' ? 'Only one client…' : 'Up to the practice…'}</button>`}<button class="btn ghost danger" data-br-edit="remove">Remove</button>`
+    : `<button class="btn" data-br-edit="rename">Rename</button>${same.length ? '<button class="btn" data-br-edit="merge">Merge into…</button>' : ''}<button class="btn" data-br-edit="define">Define…</button>${isTerm ? ([...(x.synonyms || []), ...(x.variants || [])].length ? '<button class="btn" data-br-edit="split">Split off…</button>' : '') : '<button class="btn" data-br-edit="move">Move under…</button>'}<button class="btn" data-br-edit="scope">${layer === 'shared' ? 'Only one client…' : 'Up to the practice…'}</button><button class="btn ghost danger" data-br-edit="remove">Remove</button>`
   const nd = S.br.nodeData && S.br.nodeData.id === id ? S.br.nodeData : null
   const secs = !nd ? '<div class="skeleton"><i></i><i></i></div>' : nd.sections.length ? nd.sections.map((s) => {
     const call = s.link && s.link.startsWith('echo://call/') ? s.link.slice(12).split('?')[0] : ''
@@ -4148,7 +4171,11 @@ function brainNodePanel() {
     ${x.parent ? `<div class="set-sub">under ${esc(x.parent)}</div>` : ''}
     ${x.description ? `<p class="br-desc">${esc(x.description)}</p>` : ''}
     ${!isTerm && (x.synonyms || []).length ? `<div class="set-sub">Also called: ${esc(x.synonyms.join(', '))}</div>` : ''}
-    ${isTerm && x.variants.length ? `<div class="set-sub">Also written: ${esc(x.variants.join(', '))}</div>` : ''}
+    ${isTerm && (x.synonyms || []).length ? `<div class="set-sub">Also called: ${esc(x.synonyms.join(', '))}</div>` : ''}
+    ${isTerm && (x.variants || []).length ? `<div class="set-sub">Written or heard as: ${esc(x.variants.join(', '))}</div>` : ''}
+    ${isTerm ? `<div class="set-sub">${esc(((tx.groups || []).find((g) => g.id === x.group) || {}).label || x.group)}${x.kind ? ` · ${esc(x.kind)}` : ''}${x.learned ? ' · learned from the minutes' : ''}</div>` : ''}
+    ${(x.topics || []).length ? `<div class="br-where">Comes up in ${x.topics.map((t) => `<button class="link-btn" data-br-node="${esc(t.id)}">${esc(t.label)}</button>`).join(', ')}</div>` : ''}
+    ${(x.terms || []).length ? `<div class="br-where">Its terms: ${x.terms.map((t) => `<button class="link-btn" data-br-node="${esc(t.id)}">${esc(t.label)}</button>`).join(', ')}</div>` : ''}
     <div class="br-where">${x.sections || 0} sections ${threadChips(x.threads)}</div>
     <div class="br-acts">${actions}</div>
     <div class="wp-h">Latest sections</div>${secs}
@@ -4211,7 +4238,7 @@ function brainEdit(body) {
   setTimeout(() => loadBrain().then(render), 350)
 }
 document.addEventListener('click', (e) => {
-  const t = e.target.closest && e.target.closest('[data-br-tab],[data-br-node],[data-br-accept],[data-br-fold],[data-br-rebuild],[data-br-retag],[data-br-move],[data-br-snooze],[data-br-edit],[data-br-do],[data-br-op],[data-br-open],[data-graph-doc],[data-br-doc-open]')
+  const t = e.target.closest && e.target.closest('[data-br-tab],[data-br-node],[data-br-accept],[data-br-fold],[data-br-rebuild],[data-br-retag],[data-br-move],[data-dict-group],[data-br-snooze],[data-br-edit],[data-br-do],[data-br-op],[data-br-open],[data-graph-doc],[data-br-doc-open]')
   if (!t) return
   const d = t.dataset
   if (d.brTab) { S.br.tab = d.brTab; go(`brain/${d.brTab}`); return loadBrain().then(render) }
@@ -4226,6 +4253,7 @@ document.addEventListener('click', (e) => {
   if (d.brAccept) return brainEdit({ op: 'accept', layer: d.brAccept })
   if (d.brFold) { const f = S.br.fold || {}; S.br.fold = { ...f, [d.brFold]: !f[d.brFold] }; return render() }
   if (d.brRebuild) { send({ cmd: 'brain_rebuild_topics', layer: d.brRebuild }); S.br.rebuilding = { ...(S.br.rebuilding || {}), [`taxonomy:${d.brRebuild}`]: true }; setTimeout(() => { S.br.rebuilding = {}; loadBrain().then(render) }, 1500); return render() }
+  if (d.dictGroup !== undefined) { S.br.tg = d.dictGroup; return render() }
   if (d.brMove) { send({ cmd: 'brain_topic_move', key: d.brMove, do: d.do }); return setTimeout(() => loadBrain().then(render), 400) }
   if (d.brRetag) { send({ cmd: 'brain_retag_topics', layer: d.brRetag }); S.br.rebuilding = { ...(S.br.rebuilding || {}), [`retag:${d.brRetag}`]: true }; setTimeout(() => { S.br.rebuilding = {}; loadBrain().then(render) }, 1500); return render() }
   if (d.brSnooze) { send({ cmd: 'brain_topics_snooze', layer: d.brSnooze }); return setTimeout(() => loadBrain().then(render), 300) }
@@ -4239,7 +4267,12 @@ document.addEventListener('click', (e) => {
     if (d.brDo === 'rename') { const to = ($('#br-rename') || {}).value; if (to && to.trim()) { S.br.node = null; brainEdit({ ...base, op: 'rename', to: to.trim() }) } return }
     if (d.brDo === 'merge') { const [into, into_layer] = JSON.parse(($('#br-into') || {}).value || '[]'); S.br.node = null; return brainEdit({ ...base, op: 'merge', into, into_layer }) }
     if (d.brDo === 'scope') { S.br.node = null; return brainEdit({ ...base, op: 'scope', to: ($('#br-scope-to') || {}).value }) }
-    if (d.brDo === 'define') return brainEdit({ ...base, op: 'set', description: ($('#br-desc') || {}).value || '', synonyms: (($('#br-syn') || {}).value || '').split(',').map((x) => x.trim()).filter(Boolean) })
+    if (d.brDo === 'define') {
+      const list = (sel) => (($(sel) || {}).value || '').split(',').map((v) => v.trim()).filter(Boolean)
+      const extra = base.term ? { variants: list('#br-spell'), group: ($('#br-group') || {}).value } : {}
+      return brainEdit({ ...base, op: 'set', description: ($('#br-desc') || {}).value || '', synonyms: list('#br-syn'), ...extra })
+    }
+    if (d.brDo === 'split') return brainEdit({ ...base, op: 'split', alias: ($('#br-split') || {}).value })
     if (d.brDo === 'move') return brainEdit({ ...base, op: 'move', parent: ($('#br-parent') || {}).value || null })
   }
   if (d.brOpen) { S.jump = d.t ? Number(d.t) : null; return go(`call/${d.brOpen}/${d.t ? 'transcript' : 'minutes'}`) }

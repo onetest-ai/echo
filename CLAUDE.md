@@ -717,7 +717,19 @@ without it).
   **Rebuild** (`brain_rebuild_topics` → `induce`, provisional) — and the suggested **moves** (Move up / down · Keep it);
   **Sync now** reads new sources and tags their sections (a manual sync tags too, as the scheduler's); what runs is
   `/api/brain` `topic_jobs`, a notification says when it ends. (A sunburst was tried and dropped: too hard to read.)
-  Open: term groups and terms' synonyms (the user's to decide, 2026-11-02).
+  **Terms → the dictionary** (2026-11-02): a term is a named thing with a name, **synonyms** (`Term.synonyms`: other
+  names, abbreviations, older names — search, mentions, Claude; renames and merges keep the old name here) and
+  **spellings** (`variants`: how it is written or misheard — the transcription hint and mentions), a **group** from a
+  fixed list (`GROUPS`: organisation, product, initiative, document, metric, method, concept, other; `Term.group`, else
+  `group_of(kind)`; the kind stays its subtype; "learned" is a source, not a group) and a scope like topics' (the
+  practice or a client; one name in several clients → a Move up, done as the practice's term with the others merged
+  in). Old terms load split (`split_variants`, every load until saved: an abbreviation or a name under 0.75 alike →
+  a synonym; a near spelling, or another script than the name's — "Эко" — → a spelling). Edit ops: `set` (synonyms,
+  variants, group), `split` (a name becomes a term of its own), `rename`, `merge` (`into_layer: shared`), `scope`. The
+  view gives each term its topics and each topic its terms (sections they share, no model). The Terms tab is the
+  dictionary: search over every name, groups with counts, A–Z within; the panel defines, regroups, splits, merges,
+  moves. Measured on the real store (a copy): 172 terms, 34 free kinds → 8 groups, 68 with synonyms, 51 with
+  spellings, 11 names shared by clients offered up; merging one (in 3 layers) dropped only its duplicate mentions.
 **Graphs** (2026-11-02): the Brain's Graph and People are drawn by Sigma.js 4 (WebGL) over graphology, vendored in
 `ui/vendor/` (`GraphView` in app.js): laid out once per data set — ForceAtlas2 run in the page (never its worker:
 the CSP), then noverlap —, kept across renders (the camera too), labels where they fit (the biggest first), hover lights

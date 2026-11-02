@@ -75,17 +75,74 @@ fn add_synonym(x: &mut Topic, name: &str) {
     }
 }
 
+/// The dictionary's groups (a term's `kind` is its subtype within one): a short fixed list, so the
+/// same sort of thing isn't "product" in one layer and "platform" in another.
+pub const GROUPS: [(&str, &str); 8] = [
+    ("organisation", "Organisations"), ("product", "Products & systems"), ("initiative", "Initiatives & projects"), ("document", "Documents"),
+    ("metric", "Metrics"), ("method", "Methods & processes"), ("concept", "Concepts & acronyms"), ("other", "Other"),
+];
+
+/// The group a kind falls in (the model's open words, mapped; unknown ones are "other").
+pub fn group_of(kind: &str) -> &'static str {
+    match kind.trim().to_lowercase().as_str() {
+        "organisation" | "organization" | "company" | "client" | "vendor" | "partner" | "team" | "department" | "region" | "branch" => "organisation",
+        "product" | "system" | "tool" | "platform" | "server" | "model" | "framework" | "driver" | "protocol" | "application" | "app" | "service" | "database" | "library" => "product",
+        "initiative" | "project" | "programme" | "program" | "offering" | "milestone" | "workstream" | "pilot" | "engagement" => "initiative",
+        "document" | "report" | "template" | "contract" | "policy" | "deck" => "document",
+        "metric" | "kpi" | "measure" => "metric",
+        "method" | "process" | "governance" | "discipline" | "practice" | "methodology" | "ceremony" => "method",
+        "acronym" | "concept" | "feature" | "requirement" | "term" | "capability" => "concept",
+        _ => "other",
+    }
+}
+
+impl Term {
+    /// Its dictionary group: set, else from its kind.
+    pub fn group(&self) -> &str {
+        if self.group.is_empty() { group_of(&self.kind) } else { &self.group }
+    }
+    /// Every name it goes by: its name, synonyms and spellings.
+    pub fn names(&self) -> impl Iterator<Item = &String> {
+        std::iter::once(&self.name).chain(&self.synonyms).chain(&self.variants)
+    }
+    fn is(&self, name: &str) -> bool {
+        self.names().any(|n| nid(n) == nid(name))
+    }
+}
+
+/// A term written before synonyms: its `variants` held both. An abbreviation, or a name nothing like
+/// its own, is another name (a synonym); a near spelling stays a spelling. Same answer every load.
+fn split_variants(x: &mut Term) {
+    if !x.synonyms.is_empty() {
+        return;
+    }
+    let abbrev = |v: &str| { let c: Vec<char> = v.chars().filter(|c| !c.is_whitespace()).collect(); (2..=6).contains(&c.len()) && c.iter().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || *c == '&') };
+    // Another script than its name's is how a transcription heard it ("Эко" for Echo): a spelling.
+    let cyr = |v: &str| v.chars().any(|c| ('\u{0400}'..='\u{04FF}').contains(&c));
+    let (syn, spell): (Vec<String>, Vec<String>) = std::mem::take(&mut x.variants).into_iter().partition(|v| cyr(v) == cyr(&x.name) && (abbrev(v) || ratio(v, &x.name) < 0.75));
+    x.synonyms = syn;
+    x.variants = spell;
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Term {
     #[serde(default = "shared", skip_serializing_if = "is_shared")]
     pub layer: String,
     pub name: String,
-    /// The layer's own word for what it is (system, initiative, branch, acronym…): open.
+    /// The layer's own word for what it is (system, initiative, branch, acronym…): open — its subtype
+    /// within its `group`.
     #[serde(default)]
     pub kind: String,
-    /// Other spellings, abbreviations, how it is misheard.
+    /// How it is written or misheard (the transcription hint and finding its mentions).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub variants: Vec<String>,
+    /// Its other names: abbreviations, older or informal names, translations ("SG" for Signal Grid)
+    /// — what search, the Brain and Claude take for it. Renames and merges keep old names here.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub synonyms: Vec<String>,
+    /// Its group in the dictionary (one of `GROUPS`); empty: read from its kind (`group_of`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub group: String,
     #[serde(default)]
     pub description: String,
     /// Threads it is pinned to (else it belongs where it is mentioned).
@@ -134,7 +191,7 @@ fn push_new<T: PartialEq + Clone>(v: &mut Vec<T>, xs: &[T]) {
 /// and a term the model didn't name again is kept when it carries any of that (learned vocabulary, a
 /// pin, always). A rebuild never loses them.
 fn carry_over(old_terms: &[Term], lterms: &mut Vec<Term>) {
-    let same_term = |a: &Term, b: &Term| nid(&a.name) == nid(&b.name) || a.variants.iter().any(|v| nid(v) == nid(&b.name)) || b.variants.iter().any(|v| nid(v) == nid(&a.name));
+    let same_term = |a: &Term, b: &Term| a.is(&b.name) || b.is(&a.name);
     for x in lterms.iter_mut() {
         let matches: Vec<&Term> = old_terms.iter().filter(|o| same_term(o, x)).collect();
         for old in matches {
@@ -144,6 +201,10 @@ fn carry_over(old_terms: &[Term], lterms: &mut Vec<Term>) {
                 x.learned = old.learned.clone();
             }
             push_new(&mut x.variants, &old.variants);
+            push_new(&mut x.synonyms, &old.synonyms);
+            if x.group.is_empty() {
+                x.group = old.group.clone();
+            }
             if x.description.is_empty() {
                 x.description = old.description.clone();
             }
@@ -336,6 +397,7 @@ pub fn current() -> Option<Taxonomy> {
     if t.layers.is_empty() && !t.topics.is_empty() {
         t.layers.insert(SHARED.into(), Layer { name: "Your practice".into(), goal: t.goal.clone(), summary: t.summary.clone(), provisional: t.provisional, ..Default::default() });
     }
+    t.terms.iter_mut().for_each(split_variants);
     Some(t)
 }
 
@@ -497,7 +559,7 @@ pub fn mentions(c: &Connection, t: &Taxonomy) -> Result<()> {
             if tm.layer != SHARED && !clients.get(cid).is_some_and(|s| s.contains(&tm.layer)) {
                 continue;
             }
-            if std::iter::once(&tm.name).chain(&tm.variants).any(|n| word_in(text, n)) {
+            if tm.names().any(|n| word_in(text, n)) {
                 tx.execute("INSERT INTO chunk_topics(chunk_id, category_id, category_label, kind) VALUES (?1, ?2, ?3, 'term')", params![cid, id, tm.name])?;
                 tx.execute("INSERT INTO graph_edges(source, target, rel) VALUES (?1, ?2, 'mentions')", params![format!("chunk:{cid}"), id])?;
             }
@@ -680,14 +742,15 @@ pub fn induce(layer: &str, progress: &dyn Fn(&str)) -> Result<Value> {
          This layer's topics now (keep each label that still fits — put a new wording in its synonyms instead of renaming it):\n{}\n\n\
          {}\
          Build this layer:\n- topics: 3–12 level-1 topics, each with 0–6 level-2 children; general enough to recur, each with a one-line description of what belongs in it (and what doesn't) and its synonyms (other names people use for it). Merge near-duplicates; drop one-offs that fit nowhere.\n\
-         - terms: the candidates worth keeping (named things, not ordinary words), merged where they are one thing (its best spelling as name, the others as variants); give each a kind — a short lowercase word, reused across terms (e.g. system, initiative, region, acronym).\n\n\
-         Answer {{\"summary\": one paragraph on what these calls are about, \"topics\": [{{\"label\": …, \"level\": 1|2, \"parent\": level-1 label for level 2, \"description\": …, \"synonyms\": [...]}}], \"terms\": [{{\"name\": …, \"kind\": …, \"variants\": [...], \"description\": …}}]}}.",
+         - terms: the candidates worth keeping (named things, not ordinary words), merged where they are one thing (its best name as name); its other names — abbreviations, older or informal names — as synonyms, and how it is written or misheard as variants; give each a group (one of {}) and a kind — a short lowercase word for what it is within the group (e.g. system, platform, initiative, acronym).\n\n\
+         Answer {{\"summary\": one paragraph on what these calls are about, \"topics\": [{{\"label\": …, \"level\": 1|2, \"parent\": level-1 label for level 2, \"description\": …, \"synonyms\": [...]}}], \"terms\": [{{\"name\": …, \"group\": …, \"kind\": …, \"synonyms\": [...], \"variants\": [...], \"description\": …}}]}}.",
         docs.len(),
         serde_json::to_string(&cand_topics)?,
         serde_json::to_string(&cand_terms)?,
         serde_json::to_string(&seeds)?,
         serde_json::to_string(&existing)?,
         if practice.is_empty() { String::new() } else { format!("The practice's level-1 topics (shared by every client). A topic of this client that belongs under one of them is a level-2 topic with that label as its parent; only what fits none is a level-1 topic of this client's own:\n{}\n\n", serde_json::to_string(&practice)?) },
+        GROUPS.map(|(k, _)| k).join(", "),
     );
     let v = ask(JUDGE_SYSTEM, &user)?;
     let practice_ids: BTreeSet<String> = before.topics.iter().filter(|x| x.layer == SHARED && x.level == 1).map(|x| nid(&x.label)).collect();
@@ -851,6 +914,29 @@ fn moves_in(c: &Connection, t: &Taxonomy, dismissed: &BTreeSet<String>) -> Resul
                         "topics": all.iter().map(|x| json!({"label": x.label, "layer": x.layer, "layer_name": name(&x.layer)})).collect::<Vec<_>>(),
                         "why": format!("{} clients have it: {}", all.len(), all.iter().map(|x| format!("{} ({})", x.label, name(&x.layer))).collect::<Vec<_>>().join(", "))}));
     }
+    // Terms: one name in several clients (or a client's and the practice's) is one thing of the practice.
+    let mut tseen: BTreeSet<String> = BTreeSet::new();
+    let lname = |l: &str| t.layers.get(l).map(|x| x.name.clone()).filter(|n| !n.is_empty()).unwrap_or_else(|| if l == SHARED { "your practice".into() } else { l.to_string() });
+    for a in t.terms.iter().filter(|x| x.layer != SHARED) {
+        if tseen.contains(&term_id(&a.layer, &a.name)) {
+            continue;
+        }
+        let same: Vec<&Term> = t.terms.iter().filter(|b| b.layer != a.layer && (b.is(&a.name) || a.is(&b.name))).collect();
+        if same.is_empty() {
+            continue;
+        }
+        let all: Vec<&Term> = std::iter::once(a).chain(same).collect();
+        for x in &all {
+            tseen.insert(term_id(&x.layer, &x.name));
+        }
+        let key = format!("up:{}", term_id(&a.layer, &a.name));
+        if dismissed.contains(&key) {
+            continue;
+        }
+        out.push(json!({"key": key, "dir": "up", "what": "term", "label": a.name, "layer": a.layer,
+                        "topics": all.iter().map(|x| json!({"label": x.name, "layer": x.layer, "layer_name": lname(&x.layer)})).collect::<Vec<_>>(),
+                        "why": format!("{} has it: {}", all.iter().map(|x| lname(&x.layer)).collect::<Vec<_>>().join(", "), all.iter().map(|x| x.name.clone()).collect::<Vec<_>>().join(" · "))}));
+    }
     for x in t.topics.iter().filter(|x| x.layer == SHARED) {
         let id = topic_id(&x.layer, &x.label);
         let key = format!("down:{id}");
@@ -899,10 +985,13 @@ pub fn apply_move(key: &str) -> Result<()> {
         return Ok(());
     }
     let all = m["topics"].as_array().cloned().unwrap_or_default();
-    let first = &all[0];
-    edit(&json!({"op": "scope", "label": first["label"], "layer": first["layer"], "to": SHARED}))?;
-    for x in &all[1..] {
-        edit(&json!({"op": "merge", "label": x["label"], "layer": x["layer"], "into": first["label"], "into_layer": SHARED}))?;
+    let term = m["what"] == "term";
+    let (k, first) = (if term { "name" } else { "label" }, all.iter().find(|x| x["layer"] == SHARED).unwrap_or(&all[0]));
+    if first["layer"] != SHARED {
+        edit(&json!({"op": "scope", k: first["label"], "layer": first["layer"], "to": SHARED, "term": term}))?;
+    }
+    for x in all.iter().filter(|x| *x != first) {
+        edit(&json!({"op": "merge", k: x["label"], "layer": x["layer"], "into": first["label"], "into_layer": SHARED, "term": term}))?;
     }
     Ok(())
 }
@@ -987,7 +1076,9 @@ fn parse_layer_under(v: &Value, layer: &str, practice: &BTreeSet<String>) -> Res
         }
         let kind = tm["kind"].as_str().map(|k| k.trim().to_lowercase()).filter(|k| !k.is_empty() && k.len() <= 24).unwrap_or_else(|| "other".into());
         let variants = tm["variants"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(|s| s.trim().to_string())).filter(|s| !s.is_empty() && nid(s) != nid(&name)).collect();
-        terms.push(Term { layer: layer.into(), name, kind, variants, description: tm["description"].as_str().unwrap_or("").to_string(), ..Default::default() });
+        let synonyms = tm["synonyms"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(|s| s.trim().to_string())).filter(|s| !s.is_empty() && nid(s) != nid(&name)).collect();
+        let group = tm["group"].as_str().map(|g| g.trim().to_lowercase()).filter(|g| GROUPS.iter().any(|(k, _)| k == g)).unwrap_or_default();
+        terms.push(Term { layer: layer.into(), name, kind, variants, synonyms, group, description: tm["description"].as_str().unwrap_or("").to_string(), ..Default::default() });
     }
     if topics.is_empty() {
         bail!("the model proposed no topics");
@@ -1177,6 +1268,21 @@ pub fn view_in(scope: store::Scope) -> Result<Value> {
     }
     let layers = scope_layers(&t, scope);
     let visible = |l: &String| layers.as_ref().is_none_or(|s| s.contains(l));
+    // Which topics a term comes up in, and a topic's terms: sections they share (no model).
+    let mut together: Vec<(String, String, i64)> = vec![];
+    {
+        let mut st = c.prepare("SELECT a.category_id, b.category_id, count(DISTINCT a.chunk_id) FROM chunk_topics a JOIN chunk_topics b ON b.chunk_id = a.chunk_id AND b.kind = 'intent_l1' WHERE a.kind = 'term' GROUP BY 1, 2")?;
+        for row in st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?)))? {
+            together.push(row?);
+        }
+    }
+    let label_of: BTreeMap<String, String> = t.topics.iter().map(|x| (topic_id(&x.layer, &x.label), x.label.clone())).collect();
+    let name_of: BTreeMap<String, String> = t.terms.iter().map(|x| (term_id(&x.layer, &x.name), x.name.clone())).collect();
+    let top = |rows: Vec<(String, i64)>, names: &BTreeMap<String, String>, k: usize| -> Vec<Value> {
+        let mut rows: Vec<(String, i64)> = rows.into_iter().filter(|(id, _)| names.contains_key(id)).collect();
+        rows.sort_by_key(|r| std::cmp::Reverse(r.1));
+        rows.into_iter().take(k).map(|(id, n)| json!({"id": id, "label": names[&id], "sections": n})).collect()
+    };
     let topics: Vec<Value> = t
         .topics
         .iter()
@@ -1185,8 +1291,9 @@ pub fn view_in(scope: store::Scope) -> Result<Value> {
             let id = topic_id(&x.layer, &x.label);
             let (n, th, cl) = counts.get(&id).cloned().unwrap_or_default();
             let parent = parent_of(&t, x);
+            let terms = top(together.iter().filter(|(_, tp, _)| *tp == id).map(|(tm, _, n)| (tm.clone(), *n)).collect(), &name_of, 6);
             json!({"id": id, "layer": x.layer, "label": x.label, "level": x.level, "parent": x.parent, "parent_id": parent.map(|p| topic_id(&p.layer, &p.label)), "parent_layer": parent.map(|p| &p.layer),
-                   "description": x.description, "synonyms": x.synonyms, "sections": n, "threads": th, "clients": cl})
+                   "description": x.description, "synonyms": x.synonyms, "sections": n, "threads": th, "clients": cl, "terms": terms})
         })
         .collect();
     let terms: Vec<Value> = t
@@ -1197,7 +1304,9 @@ pub fn view_in(scope: store::Scope) -> Result<Value> {
             let id = term_id(&x.layer, &x.name);
             let (n, mut th, cl) = counts.get(&id).cloned().unwrap_or_default();
             th.extend(x.threads.iter().cloned());
-            json!({"id": id, "layer": x.layer, "name": x.name, "kind": x.kind, "variants": x.variants, "description": x.description, "pinned": x.threads, "always": x.always, "sections": n, "threads": th, "clients": cl})
+            let topics = top(together.iter().filter(|(tm, _, _)| *tm == id).map(|(_, tp, n)| (tp.clone(), *n)).collect(), &label_of, 3);
+            json!({"id": id, "layer": x.layer, "name": x.name, "kind": x.kind, "group": x.group(), "group_set": !x.group.is_empty(), "synonyms": x.synonyms, "variants": x.variants,
+                   "description": x.description, "pinned": x.threads, "always": x.always, "learned": x.learned.is_some() || x.kind == "learned", "sections": n, "threads": th, "clients": cl, "topics": topics})
         })
         .collect();
     let lv: Vec<Value> = t
@@ -1216,6 +1325,7 @@ pub fn view_in(scope: store::Scope) -> Result<Value> {
     }
     let moves = moves_in(&c, &t, &dismissed_moves()).unwrap_or_default();
     Ok(json!({"exists": true, "version": t.version, "provisional": t.provisional(), "layers": lv, "scope": scope.map(|s| json!({"kind": s.0, "id": s.1})), "moves": moves,
+              "groups": GROUPS.iter().map(|(k, l)| json!({"id": k, "label": l})).collect::<Vec<_>>(),
               "topics": topics, "terms": terms, "coverage": coverage(&c)?, "review_flags": t.review_flags, "history": t.history}))
 }
 
@@ -1294,7 +1404,9 @@ pub fn edit(op: &Value) -> Result<Taxonomy> {
             }
             t.terms.push(Term { layer: layer.clone(), name: target.clone(), kind: s("kind").unwrap_or_else(|| "other".into()), description: s("description").unwrap_or_default(),
                                 variants: op["variants"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(str::to_owned)).collect(),
-                                threads: op["threads"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(str::to_owned)).collect(), always: op["always"] == true, learned: None });
+                                threads: op["threads"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(str::to_owned)).collect(), always: op["always"] == true, learned: None,
+                                synonyms: op["synonyms"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(str::to_owned)).collect(),
+                                group: s("group").filter(|g| GROUPS.iter().any(|(k, _)| k == g)).unwrap_or_default() });
         }
         "add" => {
             if t.topics.iter().any(|x| x.layer == layer && same(&x.label, &target)) {
@@ -1307,10 +1419,12 @@ pub fn edit(op: &Value) -> Result<Taxonomy> {
             let to = s("to").ok_or_else(|| anyhow!("rename to what?"))?;
             if is_term {
                 let x = t.terms.iter_mut().find(|x| x.layer == layer && same(&x.name, &target)).ok_or_else(|| anyhow!("no term {target:?}"))?;
-                if !x.variants.contains(&x.name) {
-                    x.variants.push(x.name.clone());
+                let old = std::mem::replace(&mut x.name, to.clone());
+                x.synonyms.retain(|s| nid(s) != nid(&to));
+                x.variants.retain(|s| nid(s) != nid(&to));
+                if !x.synonyms.iter().any(|s| nid(s) == nid(&old)) {
+                    x.synonyms.push(old);
                 }
-                x.name = to.clone();
             } else {
                 let x = t.topics.iter_mut().find(|x| x.layer == layer && same(&x.label, &target)).ok_or_else(|| anyhow!("no topic {target:?}"))?;
                 let old = std::mem::replace(&mut x.label, to.clone());
@@ -1325,12 +1439,34 @@ pub fn edit(op: &Value) -> Result<Taxonomy> {
         "merge" => {
             let into = s("into").ok_or_else(|| anyhow!("merge into what?"))?;
             if is_term {
+                let into_layer = s("into_layer").unwrap_or_else(|| layer.clone());
+                if into_layer != layer && into_layer != SHARED {
+                    bail!("a term merges into its own layer's or the practice's");
+                }
                 let from = t.terms.iter().position(|x| x.layer == layer && same(&x.name, &target)).ok_or_else(|| anyhow!("no term {target:?}"))?;
                 let from = t.terms.remove(from);
-                let x = t.terms.iter_mut().find(|x| x.layer == layer && same(&x.name, &into)).ok_or_else(|| anyhow!("no term {into:?}"))?;
-                x.variants.extend(std::iter::once(from.name).chain(from.variants).filter(|v| nid(v) != nid(&into)));
+                let x = t.terms.iter_mut().find(|x| x.layer == into_layer && same(&x.name, &into)).ok_or_else(|| anyhow!("no term {into:?}"))?;
+                // Its name and other names become this one's; its spellings stay spellings.
+                for n in std::iter::once(from.name.clone()).chain(from.synonyms.clone()) {
+                    if !x.is(&n) {
+                        x.synonyms.push(n);
+                    }
+                }
+                for v in from.variants.clone() {
+                    if !x.is(&v) {
+                        x.variants.push(v);
+                    }
+                }
                 x.threads.extend(from.threads);
                 x.threads.dedup();
+                x.always |= from.always;
+                if x.description.is_empty() {
+                    x.description = from.description;
+                }
+                if into_layer != layer {
+                    t.aliases.insert(key(&target), term_id(&into_layer, &into));
+                    return save(t, json!({"op": "merge", "by": "you", "layer": into_layer, "target": target, "change": op}));
+                }
             } else {
                 // Into a topic of this layer, or (a client's topic) into one of the practice's.
                 let into_layer = s("into_layer").unwrap_or_else(|| layer.clone());
@@ -1391,6 +1527,42 @@ pub fn edit(op: &Value) -> Result<Taxonomy> {
             if let Some(a) = op["always"].as_bool() {
                 x.always = a;
             }
+            if let Some(v) = op["synonyms"].as_array() {
+                x.synonyms = v.iter().filter_map(|x| x.as_str().map(|s| s.trim().to_string())).filter(|s| !s.is_empty() && nid(s) != nid(&target)).collect();
+            }
+            if let Some(g) = s("group") {
+                anyhow::ensure!(GROUPS.iter().any(|(k, _)| *k == g), "a group is one of {:?}", GROUPS.map(|(k, _)| k));
+                x.group = g;
+            }
+        }
+        // One of a term's names is a thing of its own: a new term by that name (same layer and kind).
+        "split" if is_term => {
+            let alias = s("alias").ok_or_else(|| anyhow!("split off which name?"))?;
+            let x = t.terms.iter_mut().find(|x| x.layer == layer && same(&x.name, &target)).ok_or_else(|| anyhow!("no term {target:?}"))?;
+            let before = x.synonyms.len() + x.variants.len();
+            x.synonyms.retain(|s| !same(s, &alias));
+            x.variants.retain(|s| !same(s, &alias));
+            if x.synonyms.len() + x.variants.len() == before {
+                bail!("{alias:?} isn't one of {target:?}'s names");
+            }
+            let n = Term { layer: layer.clone(), name: alias.clone(), kind: x.kind.clone(), group: x.group.clone(), ..Default::default() };
+            t.terms.push(n);
+        }
+        "scope" if is_term => {
+            let to = s("to").ok_or_else(|| anyhow!("to the practice (shared) or which client?"))?;
+            if to == layer || (to != SHARED && layer != SHARED) {
+                bail!("a term moves between the practice and one client");
+            }
+            if t.terms.iter().any(|x| x.layer == to && same(&x.name, &target)) {
+                bail!("{target:?} is a term there already: merge them instead");
+            }
+            let x = t.terms.iter_mut().find(|x| x.layer == layer && same(&x.name, &target)).ok_or_else(|| anyhow!("no term {target:?}"))?;
+            x.layer = to.clone();
+            t.aliases.insert(term_id(&layer, &target), term_id(&to, &target));
+            t.layers.entry(to.clone()).or_insert_with(|| {
+                let (name, goal, audience) = layer_facts(&to);
+                Layer { name, goal, audience, ..Default::default() }
+            });
         }
         "set" => {
             let x = t.topics.iter_mut().find(|x| x.layer == layer && same(&x.label, &target)).ok_or_else(|| anyhow!("no topic {target:?}"))?;
@@ -1545,6 +1717,60 @@ mod tests {
         edit(&json!({"op": "add", "term": true, "name": "Foundry", "layer": "northwind", "threads": ["northwind-thread"]})).unwrap();
         let mut _p = crate::projects::create("NW thread", None, None).unwrap();
         assert!(terms_for_threads(&["northwind-thread".into()]).contains(&"Foundry".to_string()), "pinned");
+    }
+
+    fn t_echo_spellings(t: &Taxonomy) -> Vec<String> {
+        t.terms.iter().find(|x| x.name == "Echo").map(|x| x.variants.clone()).unwrap_or_default()
+    }
+
+    #[test]
+    fn an_old_taxonomy_reads_as_the_new_one() {
+        let (_env, _root) = crate::paths::testenv::folders("brain-old-taxonomy");
+        // As written before synonyms, groups and one tree: two clients' layers, spellings and other
+        // names mixed in `variants`, free kinds, a learned term, the same product in both clients.
+        let old = json!({"version": 7, "layers": {"shared": {"name": "Your practice", "built_from": 4}, "globex": {"name": "Globex", "built_from": 2}, "acme": {"name": "Acme", "built_from": 3}},
+            "topics": [{"label": "Delivery", "level": 1, "description": "How work is delivered."}, {"layer": "globex", "label": "Data platform", "level": 1}, {"layer": "globex", "label": "Ingestion", "level": 2, "parent": "Data platform"}],
+            "terms": [{"layer": "globex", "name": "Signal Grid", "kind": "platform", "variants": ["SG", "Signal Gird", "the grid layer"]},
+                      {"name": "Echo", "kind": "product", "variants": ["Эко"]},
+                      {"layer": "globex", "name": "Databricks", "kind": "product", "variants": ["Data bricks"]},
+                      {"layer": "acme", "name": "Databricks", "kind": "tool"},
+                      {"layer": "acme", "name": "Pathfinder", "kind": "learned", "learned": {"subjects": ["weekly"], "people": [], "calls": []}},
+                      {"layer": "acme", "name": "SLA", "kind": "metric"}],
+            "history": [{"op": "build", "layer": "globex", "version": 5}]});
+        std::fs::create_dir_all(dir()).unwrap();
+        std::fs::write(dir().join("current.json"), old.to_string()).unwrap();
+        let t = current().unwrap();
+        let sg = t.terms.iter().find(|x| x.name == "Signal Grid").unwrap();
+        assert_eq!((sg.synonyms.clone(), sg.variants.clone()), (vec!["SG".to_string(), "the grid layer".to_string()], vec!["Signal Gird".to_string()]), "an abbreviation or a name nothing like it is another name; a near spelling stays a spelling");
+        assert_eq!(sg.group(), "product");
+        assert_eq!(t.terms.iter().find(|x| x.name == "SLA").unwrap().group(), "metric");
+        assert_eq!(t.terms.iter().find(|x| x.name == "Pathfinder").unwrap().group(), "other", "learned is a source, not a group");
+        assert!(t.topics.iter().all(|x| x.synonyms.is_empty()) && parent_of(&t, &t.topics[2]).is_some_and(|p| p.label == "Data platform"));
+        // The view reads it: groups, other names, nothing lost.
+        let v = view().unwrap();
+        assert_eq!(v["terms"].as_array().unwrap().len(), 6);
+        assert_eq!(t_echo_spellings(&current().unwrap()), vec!["Эко".to_string()], "a transcription's other script is a spelling");
+        assert!(v["terms"].as_array().unwrap().iter().any(|x| x["name"] == "Signal Grid" && x["synonyms"][0] == "SG" && x["group"] == "product"));
+        // The same product in two clients: one thing of the practice; done, it is one term.
+        let m = moves().unwrap();
+        let up = m.iter().find(|x| x["what"] == "term").unwrap();
+        assert_eq!(up["label"], "Databricks");
+        apply_move(up["key"].as_str().unwrap()).unwrap();
+        let t = current().unwrap();
+        let dbx: Vec<&Term> = t.terms.iter().filter(|x| x.name == "Databricks").collect();
+        assert_eq!((dbx.len(), dbx[0].layer.as_str()), (1, SHARED));
+        assert!(dbx[0].variants.contains(&"Data bricks".to_string()));
+        // Its first save keeps the split: written as synonyms now, not again on the next load.
+        let raw: Value = serde_json::from_slice(&std::fs::read(dir().join("current.json")).unwrap()).unwrap();
+        assert!(raw["terms"].as_array().unwrap().iter().any(|x| x["name"] == "Signal Grid" && x["synonyms"][0] == "SG"));
+        // Split a name off, rename (the old name kept), regroup.
+        edit(&json!({"op": "split", "term": true, "name": "Signal Grid", "layer": "globex", "alias": "the grid layer"})).unwrap();
+        edit(&json!({"op": "rename", "term": true, "name": "Signal Grid", "layer": "globex", "to": "SGrid"})).unwrap();
+        let t = edit(&json!({"op": "set", "term": true, "name": "SGrid", "layer": "globex", "group": "initiative"})).unwrap();
+        let k = t.terms.iter().find(|x| x.name == "SGrid").unwrap();
+        assert!(k.synonyms.contains(&"Signal Grid".to_string()) && k.group() == "initiative");
+        assert!(t.terms.iter().any(|x| x.name == "the grid layer" && x.layer == "globex"));
+        assert!(edit(&json!({"op": "set", "term": true, "name": "SGrid", "layer": "globex", "group": "nonsense"})).is_err());
     }
 
     #[test]
