@@ -271,8 +271,8 @@ document behind them and wait for the user's yes, verified by a separate pass as
   parent / subsidiary from shared domain roots, Entra's company name, later signatures and contracts; "partner",
   "integrates for" from who shows up together and what was said.
 - **Identity:** one person may have addresses at several organisations (a partner or guest account beside their
-  own): the directory keeps all of a person's addresses. Display names are cleaned ("Ortiz, Karen (Partner)" →
-  Karen Ortiz); the same cleaned name merges; a shared first and last name (in names or address local parts) is
+  own): the directory keeps all of a person's addresses. Display names are cleaned ("Varga, Lena (Partner)" →
+  Lena Varga); the same cleaned name merges; a shared first and last name (in names or address local parts) is
   suggested; the user merges or splits, and a split is never merged again. Name variants, Teams names and Entra ids attach to it; a "Speaker N" gets a name
   from the tiles or the user. Unsure merges go to To review, never silently.
 - **Precedence:** the user > Microsoft 365 > a document or signature > a suggestion from a call. Every value keeps its

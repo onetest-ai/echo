@@ -31,7 +31,7 @@ skills and anything else that speaks Brain's MCP tools work on Echo's Brain unch
 | marts from Excel (pandas) | later, from folder spreadsheets (calamine) | needed once folders come in |
 | VLM page / frame transcription | later, a Claude job over page images of folder documents (and Echo's kept frames) | folders' slides and scans |
 
-## Checked against a real Brain (Northwind v6, built by the Python bundle; a reference, not migrated)
+## Checked against a real Brain (one client's v6, built by the Python bundle; a reference, not migrated)
 
 | Brain (v6) | Echo | Status |
 |---|---|---|
@@ -151,10 +151,10 @@ Each phase ends with the usual checks and a run on the user's real data.
 
 ## Phase 4 as built (2026-10-30)
 Teams channels and mail are thread sources (`brain/sources.rs`), read into the index and linked back, never copied.
-Measured on this account: Globex's domain rule found 12 conversations — all calendar invites, mass training mail or
-the user's own globex.example address — so those three are filtered and the rule keeps 1 real thread; the Globex team's
-General had only system events; Contoso Northwind Retail › General gave 36 posts (98 sections, embedded in ~20 s, tagged
-by the Northwind layer in 30 s, 23 left as small talk). Searching Northwind now finds channel posts beside its calls.
+Measured on this account: one client's domain rule found 12 conversations — all calendar invites, mass training mail or
+the user's own address at that domain — so those three are filtered and the rule keeps 1 real thread; that client team's
+General had only system events; another client team's General gave 36 posts (98 sections, embedded in ~20 s, tagged
+by that client's layer in 30 s, 23 left as small talk). Searching that client now finds channel posts beside its calls.
 Graph notes: `participants:` KQL → 500 (`OrFilter`); `cc:` matches loosely; channel messages need `$expand=replies`.
 
 ## Phase 5: thread folders — Brain's document lane, ported (plan, 2026-10-30)
@@ -193,7 +193,7 @@ threads is in both.
   calls).
 
 ### Phase 5 as built and measured (2026-10-30)
-On the Northwind OneDrive folder (117 files): every reader read every file without an error. Routing, measured
+On one client's OneDrive folder (117 files): every reader read every file without an error. Routing, measured
 against Brain's own rule on LibreOffice's PDFs of the 15 decks that convert (328 slides): the rule flags 41%; a rule
 from the slides' XML disagreed on half of them (consulting decks put text in free boxes and draw divider lines), so
 slides are routed on the PDF — the XML still gives their exact text and tables. PDFs: 36% of 647 pages flagged.
@@ -206,7 +206,7 @@ page cache (re-adding costs no model).
 
 ## The numbers lane (2026-10-30)
 Brain's `tabular-semantic-layer` ported (`brain/numbers/`), its config format kept so a Brain `families.<corpus>.json`
-imports as is. Checked against the Northwind Brain: with its own config, Echo's build reproduced its 17,802 comparable facts
+imports as is. Checked against that client's Brain: with its own config, Echo's build reproduced its 17,802 comparable facts
 exactly (adjustments, call volume, FCR, NPS, scorecards; wide_month, tolerant_long, collisions with weighted means,
 rollups); the only differences were files outside this folder and 5 April repeat-caller values Brain had from an
 earlier version of the workbook (not in the file any more). Claude's proposal from Echo's profiles: first pass 25% of
