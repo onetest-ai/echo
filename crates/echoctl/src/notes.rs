@@ -263,7 +263,10 @@ pub enum Due {
 pub fn auto_due(dir: &Path, cfg: &Config, now: DateTime<Local>, own: Option<&Run>) -> Due {
     let (true, Some(since)) = (cfg.auto_minutes, cfg.auto_minutes_since) else { return Due::Not(NotDue::Off) };
     let meta: Value = fs::read(dir.join("meta.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-    let Some(ended) = meta["ended_at"].as_str().and_then(|t| DateTime::parse_from_rfc3339(t).ok()) else { return Due::Not(NotDue::NotReady) };
+    let time = |k: &str| meta[k].as_str().and_then(|t| DateTime::parse_from_rfc3339(t).ok());
+    let Some(ended) = time("ended_at") else { return Due::Not(NotDue::NotReady) };
+    // A call made from a Teams transcript reached Echo when it was imported: that is its end here.
+    let ended = time("imported_at").map_or(ended, |i| i.max(ended));
     if ended < since {
         return Due::Not(NotDue::Before);
     }
@@ -1813,6 +1816,12 @@ mod tests {
         assert_eq!(auto_due(&d, &Config { auto_minutes: false, ..Config::default() }, now, None), Due::Not(NotDue::Off));
         let old = closed_call(&root, "2026-10-21_090000-c", chrono::Duration::days(2));
         assert_eq!(auto_due(&old, &cfg, now, None), Due::Not(NotDue::Before));
+        // Made from a Teams transcript just now: it counts from its import, so an old meeting gets minutes.
+        let imported = closed_call(&root, "2026-10-21_100000-k", chrono::Duration::days(2));
+        let mut meta: serde_json::Value = serde_json::from_slice(&fs::read(imported.join("meta.json")).unwrap()).unwrap();
+        meta["imported_at"] = json!((now - chrono::Duration::minutes(1)).to_rfc3339());
+        fs::write(imported.join("meta.json"), meta.to_string()).unwrap();
+        assert!(matches!(auto_due(&imported, &cfg, now, None), Due::At(_)));
         // Not closed, not transcribed, or being transcribed.
         let open = closed_call(&root, "2026-10-23_110000-d", chrono::Duration::minutes(30));
         fs::write(open.join("meta.json"), "{}").unwrap();

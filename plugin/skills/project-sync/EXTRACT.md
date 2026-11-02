@@ -12,8 +12,10 @@ signal. The tree:
 - **Task**: short and achievable under a story, one owner, days not weeks. `type`: `session` (a
   meeting, workshop or visit that must happen), `action` (someone does something), `dependency`
   (something the project waits for; `client_owed: true` + `client_owner` when the client owes it).
-- **Records** under a workstream or story: `decision`, `risk`, `question` (asked and not answered
-  yet; when it gets answered, `status` `done` on it with the answering words).
+- **Records** under a workstream or story, each with its substance: a `decision` (what was decided,
+  the options weighed, why — in `description` — and `decided_by`), a `risk` (its response: what is
+  done about it, with `owner`, `likelihood` and `impact`), a `question` (asked and not answered yet;
+  its answer comes with op `answer`).
 
 The CLI does every exact thing (quote checks, dates, ids). You do the judgment.
 
@@ -43,6 +45,12 @@ something bigger. For every story or task this item touches:
 - `ac_met` — one criterion of a story is now true (`ac`: its number in `context`; `ac_text`: its
   text exactly as `context` shows it).
 - `link` — `node` is the **waiting** work, `depends_on` what it waits for. Both stories or tasks.
+- `answer` — a question got its answer, or a risk got a response (a mitigation, a fallback, someone
+  watching it): `text` is the answer in one plain line (who said it, what it is), or what is done
+  about the risk. On a risk it may also set `internal_owner` (who handles it), `likelihood` and
+  `impact` (`low` | `med` | `high`). A question answered this way is closed. The verifier checks it
+  like a status change. `context` shows each record with its answer or response: never answer one
+  again unless the words change it.
 - `waiting` — `node` is held up by a **person**, not by work ("Dana is checking calendars",
   "waiting on Sam's reply"): `who` and `what`. When the wait is over, clear it: `"what": null`.
 - `suggest_merge` (`into`) — two nodes are the same work; `suggest_move` (`parent`) — a node sits in
@@ -64,16 +72,22 @@ words differ).
   the invite") are a `note`.
 - Something the client owes: a task `type: dependency`, `client_owed: true`, `client_owner`, then
   a `link` from the work it unblocks (`node` = the waiting work, `depends_on` = the new dependency).
-- Risks heard → `risk`; decisions taken → `decision`; questions asked and left open → `question`.
+- Risks heard → `risk` (`likelihood` / `impact` only when the words weigh it: "very likely", "it
+  would stop the launch"; a response said with it → an `answer` on its `ref` in the same file);
+  decisions taken → `decision` with `description` (what was decided; the alternatives and why, when
+  said) and `decided_by` (who decided: "we agreed" = nobody named); questions asked and left open →
+  `question` (no description: answered in the same item = not an open question).
 - A typical call creates at most ~2 stories and ~6 tasks. Quality over count.
 - Owners: "I" = the speaker, "we" = nobody. Use names as the project's people list spells them.
 - `delegated_by` — who handed the task over and will check it: the one asking ("Dana, can you…"
   said by Me → `internal_owner` Dana, `delegated_by` Me; "I asked Sam to…"; a mail Me sent
   asking for it). Leave it out when someone takes work on themselves ("I'll send it") or nobody
   asked. A `reassign` that hands work to someone else carries it too.
-- `description` (stories and tasks, optional, ≤ 1200 characters, Markdown): what the work is and
-  why, in a few plain sentences, only from what the item says — no invented scope. Leave it out when
-  the title says it all. A description in `pinned_by_human` is the user's: never revise it.
+- `description` (stories, tasks and decisions, optional, ≤ 1200 characters, Markdown): what the work
+  is and why, or what was decided and why, in a few plain sentences, only from what the item says —
+  no invented scope. Leave it out when the title says it all. A description in `pinned_by_human` is
+  the user's: never revise it. A question's answer and a risk's response are never a description:
+  op `answer`.
 
 ## Schema (one object per proposal)
 ```json
@@ -81,10 +95,13 @@ words differ).
  "title": "short noun phrase", "ac": ["…", "…"], "type": "session|action|dependency",
  "internal_owner": "name|null", "client_owner": "name|null", "delegated_by": "Me|name|null", "client_owed": false,
  "depends_on": ["T012"], "due_text": "next Thursday", "plan": "Off-plan (epics only)", "description": "…",
+ "decided_by": "name (decisions)", "likelihood": "low|med|high (risks)", "impact": "low|med|high (risks)",
  "quote": "exact contiguous words from ONE turn or passage (8–40 words)", "note": "≤ 20 words"}
 {"op": "status", "node": "T012", "effect": "held|done|progress|blocked|cancelled|reopen|due|delayed|reassign|mention",
  "due_text": "…", "internal_owner": "…", "client_owner": "…", "delegated_by": "…", "quote": "…", "note": "…"}
 {"op": "revise", "node": "S004", "title": "…", "ac_add": ["…"], "description": "…", "quote": "…", "note": "what changed"}
+{"op": "answer", "node": "Q002|R001|q1", "text": "Dana presents; Ravi joins for the demo.", "internal_owner": "risks only",
+ "likelihood": "risks only", "impact": "risks only", "quote": "…"}
 {"op": "ac_met", "node": "S004", "ac": 2, "ac_text": "criterion 2 as shown in context", "quote": "…"}
 {"op": "link", "node": "T020", "depends_on": "T019", "quote": "…"}
 {"op": "waiting", "node": "T020", "who": "Dana Example", "what": "dates for the regroup session", "quote": "…"}

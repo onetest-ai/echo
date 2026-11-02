@@ -452,12 +452,14 @@ label.split-lang:focus-within { outline: 2px solid var(--accent); outline-offset
 
 .ev {
   position: absolute; z-index: 1;
-  border-radius: 6px; padding: 3px 7px; overflow: hidden;
+  border-radius: 6px; padding: 3px 7px; overflow: hidden; gap: 0;
   border: 1px solid var(--line-strong); border-left-width: 3px;
   background: var(--surface); color: var(--text);
   font-size: 11.5px; line-height: 1.3; text-align: left; cursor: default;
 }
-.ev b { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ev b { display: block; flex-shrink: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A tag stays as tall as the time beside it: a short meeting keeps its title. */
+.ev .tag { padding: 0 5px; line-height: inherit; }
 .ev small { color: var(--text-3); font-size: 10.5px; }
 .ev:hover { border-color: var(--accent); }
 .ev[aria-selected="true"] { outline: 2px solid var(--accent); outline-offset: 0; }
@@ -465,7 +467,10 @@ label.split-lang:focus-within { outline: 2px solid var(--accent); outline-offset
 .ev.recorded { background: color-mix(in srgb, var(--me) 12%, var(--surface)); border-color: color-mix(in srgb, var(--me) 40%, transparent); border-left-color: var(--me); }
 /* Will be recorded: orange, as recorded is green (Echo's recording colour). */
 .ev.scheduled { background: color-mix(in srgb, var(--recording) 12%, var(--surface)); border-color: color-mix(in srgb, var(--recording) 40%, transparent); border-left-color: var(--recording); }
-.ev.past:not(.recorded) { opacity: 0.55; }
+.ev.past:not(.recorded):not(.transcript) { opacity: 0.55; }
+/* Not recorded, but Teams has its transcript: one to import (blue — green is recorded, orange will be). */
+.ev.transcript { background: color-mix(in srgb, var(--spk3) 12%, var(--surface)); border-color: color-mix(in srgb, var(--spk3) 45%, transparent); border-style: dashed; border-left: 3px solid var(--spk3); }
+.ev .tag.tr { color: var(--spk3); }
 .ev.declined, .ev.cancelled { opacity: 0.45; }
 .ev.declined b, .ev.cancelled b { text-decoration: line-through; }
 .ev.call { background: color-mix(in srgb, var(--me) 12%, var(--surface)); border-left-color: var(--me); border-style: solid; }
@@ -952,6 +957,8 @@ a.wp-link { display: block; text-decoration: none; cursor: pointer; }
 .wp-desc:hover { background: var(--line); }
 .wp-desc > :last-child { margin-bottom: 0; }
 .wp-desc-add { align-self: flex-start; margin: 2px 0 4px; }
+.wp-desc-add.warn { color: var(--warn); }
+.wp-rec-h { margin-top: 6px; }
 .wp-desc-edit { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 4px; }
 .wp-desc-edit textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 110px; padding: 8px 10px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); background: var(--surface); color: var(--text); font: 12.5px/1.55 var(--mono); }
 .wp-desc-bar { display: flex; align-items: center; gap: 6px; }
@@ -1245,6 +1252,8 @@ a.wp-src { text-decoration: none; cursor: pointer; }
 .cl-rl.risk { color: var(--danger); }
 .cl-rec { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 1px 0; font: inherit; font-size: 12.5px; color: var(--text); cursor: default; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cl-rec:hover { color: var(--accent-ink); }
+.cl-rec-sub { display: block; overflow: hidden; text-overflow: ellipsis; color: var(--text-3); font-size: 11.5px; }
+.cl-rec.bare .cl-rec-sub { color: var(--warn); }
 .cl-chips { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
 .wp-val.empty { white-space: nowrap; }
 .wp-val.empty u { margin-left: 2px; }

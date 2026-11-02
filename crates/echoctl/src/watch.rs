@@ -228,6 +228,10 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
             last_sync = Some(Instant::now());
             std::thread::spawn(|| {
                 let _ = crate::calendar::sync(true);
+                // Meetings of the user's threads nobody recorded that Teams transcribed (Needs you).
+                if let Err(e) = crate::teams_transcript::scan() {
+                    eprintln!("teams transcripts: {e:#}");
+                }
             });
         }
         let mut armed: Option<Armed> = read_json("armed.json");

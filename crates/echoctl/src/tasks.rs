@@ -291,12 +291,20 @@ pub fn client(id: &str, meetings: &[MeetingContext], today: NaiveDate, now: &str
         }
         let (mut decisions, mut risks, mut questions, mut stories) = (vec![], vec![], vec![], (0, 0));
         if let Ok(t) = ledger::Ledger::of(&p.id).and_then(|l| ledger::fold(&l)) {
-            let rec = |n: &Node| json!({"id": n.id, "title": n.title, "date": n.created});
+            // A record with what it holds: a decision's content and who took it, a risk's response.
+            let rec = |n: &Node| {
+                let what = n.description.as_deref().and_then(|d| d.lines().map(str::trim).find(|l| !l.is_empty())).map(|l| l.chars().take(160).collect::<String>());
+                json!({"id": n.id, "title": n.title, "date": n.created, "what": what, "by": n.decided_by.as_ref().or(n.internal_owner.as_ref()),
+                       "likelihood": n.likelihood, "impact": n.impact})
+            };
             let mut ds: Vec<&Node> = t.nodes.values().filter(|n| n.kind == "decision" && n.state != "merged" && n.state != "deleted").collect();
             ds.sort_by(|a, b| b.created.cmp(&a.created).then(b.id.cmp(&a.id)));
             decisions = ds.into_iter().take(3).map(rec).collect();
-            risks = t.nodes.values().filter(|n| n.kind == "risk" && open(&n.state)).map(rec).collect();
-            questions = t.nodes.values().filter(|n| n.kind == "question" && open(&n.state)).map(rec).collect();
+            // Open risks with no response first: they are the ones nobody handles.
+            let mut rs: Vec<&Node> = t.nodes.values().filter(|n| n.kind == "risk" && ledger::record_open(n)).collect();
+            rs.sort_by_key(|n| n.description.is_some());
+            risks = rs.into_iter().map(rec).collect();
+            questions = t.nodes.values().filter(|n| n.kind == "question" && ledger::record_open(n)).map(rec).collect();
             let st: Vec<&Node> = t.nodes.values().filter(|n| n.kind == "story" && n.state != "merged" && n.state != "deleted" && n.state != "cancelled").collect();
             stories = (st.iter().filter(|s| s.state == "done").count(), st.len());
         }

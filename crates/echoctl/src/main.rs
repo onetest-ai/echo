@@ -31,6 +31,7 @@ mod projects;
 mod people;
 mod projectsync;
 mod tasks;
+mod teams_transcript;
 mod view;
 mod vocab;
 mod permissions;
@@ -632,6 +633,20 @@ enum CalendarCmd {
     Logout,
     /// Fetch the meeting chat of a recorded call into <call>/chat.json (also done live)
     Chat { call: String },
+    /// Make a call of a meeting nobody recorded, from its Teams transcript (and its chat): the event's
+    /// Graph id, or words of its subject (the latest such meeting on --date, else in the last 14 days)
+    Import {
+        event: String,
+        /// The meeting's day (YYYY-MM-DD)
+        #[arg(long)]
+        date: Option<chrono::NaiveDate>,
+    },
+    /// (diagnostics) Which ended Teams meetings of the last N days with no call have a transcript
+    #[command(hide = true)]
+    Transcripts {
+        #[arg(long, default_value_t = 3)]
+        days: i64,
+    },
     /// (diagnostics) Call start/end events in your recent chats, last N hours
     #[command(hide = true)]
     CallEvents {
@@ -1354,6 +1369,17 @@ fn main() -> Result<()> {
                 calendar::sync(false)
             }
             Some(CalendarCmd::Chat { call }) => watch::fetch_call_chat(&call),
+            Some(CalendarCmd::Transcripts { days }) => {
+                let now = chrono::Utc::now();
+                teams_transcript::check(&graph::calendar_view(now - chrono::Duration::days(days), now)?, false)?;
+                print_json(&serde_json::Value::Object(teams_transcript::offers()));
+                Ok(())
+            }
+            Some(CalendarCmd::Import { event, date }) => {
+                let dir = teams_transcript::import(&teams_transcript::find_event(&event, date)?)?;
+                println!("{}", dir.display());
+                Ok(())
+            }
             Some(CalendarCmd::CallEvents { hours }) => {
                 for (chat, ev, t) in graph::recent_call_events(chrono::Utc::now() - chrono::Duration::hours(hours))? {
                     println!("{}  {ev:<8} {chat}", t.with_timezone(&chrono::Local).format("%H:%M:%S"));

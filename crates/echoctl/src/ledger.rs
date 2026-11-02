@@ -30,17 +30,22 @@ use serde_json::{json, Value};
 use crate::calls;
 
 const STATUS: [&str; 9] = ["held", "done", "progress", "blocked", "cancelled", "reopen", "due", "delayed", "reassign"];
-const VERIFIED_OPS: [&str; 3] = ["ac_met", "link", "waiting"];
+const VERIFIED_OPS: [&str; 4] = ["ac_met", "link", "waiting", "answer"];
 const KINDS: [&str; 6] = ["epic", "story", "task", "risk", "decision", "question"];
 const TASK_TYPES: [&str; 3] = ["action", "session", "dependency"];
 const CLOSED: [&str; 4] = ["done", "cancelled", "merged", "deleted"];
-const HUMAN_FIELDS: [&str; 13] = ["title", "internal_owner", "client_owner", "due", "state", "parent", "type", "client_owed", "waiting_for", "column", "links", "description", "delegated_by"];
+const HUMAN_FIELDS: [&str; 16] = [
+    "title", "internal_owner", "client_owner", "due", "state", "parent", "type", "client_owed", "waiting_for", "column", "links", "description", "delegated_by",
+    "decided_by", "likelihood", "impact",
+];
+/// A risk's likelihood and impact.
+const LEVELS: [&str; 3] = ["low", "med", "high"];
 /// Where a node came from outside the calls (a mail, a ticket): at most this many `{title, url}`, https only.
 const MAX_LINKS: usize = 10;
 /// A description (Markdown): the user's at most this many characters; an agent's, from what was said, shorter.
 const MAX_DESC: usize = 4000;
 const MAX_AGENT_DESC: usize = 1200;
-const AGENT_OPS: [&str; 9] = ["create", "status", "revise", "ac_met", "link", "waiting", "suggest_move", "suggest_merge", "note"];
+const AGENT_OPS: [&str; 10] = ["create", "status", "revise", "ac_met", "link", "waiting", "answer", "suggest_move", "suggest_merge", "note"];
 const HUMAN_OPS: [&str; 11] = ["edit", "ac_add", "ac_set", "link", "unlink", "merge", "delete", "accept", "reject", "undo", "create"];
 const HUMAN_STATES: [&str; 5] = ["open", "in_progress", "blocked", "done", "cancelled"];
 const MAX_AC: usize = 6;
@@ -1071,7 +1076,14 @@ pub struct Node {
     /// The user's links to where it came from (`{title, url}`): a mail, a ticket.
     pub links: Vec<Value>,
     /// What the work is, in Markdown: an agent's from the words that created it, else the user's (pinned).
+    /// A record's substance: a question's answer, a decision's content (what, the options, why), a
+    /// risk's response — an agent's answer or response only once the verifier says `supports`.
     pub description: Option<String>,
+    /// Who took a decision.
+    pub decided_by: Option<String>,
+    /// A risk's likelihood and impact: low | med | high.
+    pub likelihood: Option<String>,
+    pub impact: Option<String>,
     #[serde(skip)]
     unlinked: Vec<String>,
     pub created: Option<String>,
@@ -1099,6 +1111,21 @@ fn link_ok(l: &Value) -> bool {
 /// A description as kept: trimmed, empty = none, cut at `MAX_DESC` characters.
 fn desc_of(v: &Value) -> Option<String> {
     v.as_str().map(str::trim).filter(|t| !t.is_empty()).map(|t| t.chars().take(MAX_DESC).collect())
+}
+
+fn level_of(v: &Value) -> Option<String> {
+    v.as_str().filter(|l| LEVELS.contains(l)).map(str::to_owned)
+}
+
+/// A question with an answer, or closed as answered.
+pub fn answered(n: &Node) -> bool {
+    n.kind == "question" && (n.description.is_some() || n.state == "done")
+}
+
+/// A record still to act on: a question without an answer, a risk not closed (with a response it is
+/// handled, still open), any other kind not closed.
+pub fn record_open(n: &Node) -> bool {
+    !closed(&n.state) && !answered(n)
 }
 
 fn check_links(v: &Value) -> Result<()> {
@@ -1137,6 +1164,9 @@ fn node_of(e: &Value) -> Node {
         column: None,
         links: links_of(&f["links"]),
         description: desc_of(&f["description"]),
+        decided_by: s(&f["decided_by"]),
+        likelihood: level_of(&f["likelihood"]),
+        impact: level_of(&f["impact"]),
         unlinked: vec![],
         created: s(&e["date"]),
         created_in: s(&e["evidence"]),
@@ -1194,6 +1224,9 @@ fn set_field(n: &mut Node, field: &str, v: &Value, human: bool) -> bool {
         "column" => n.column = s(v),
         "links" => n.links = links_of(v),
         "description" => n.description = desc_of(v),
+        "decided_by" => n.decided_by = s(v),
+        "likelihood" => n.likelihood = level_of(v),
+        "impact" => n.impact = level_of(v),
         _ => return false,
     }
     true
@@ -1318,6 +1351,23 @@ fn fold_events(evs: &[Value], ev: BTreeMap<String, Value>) -> Result<Tree> {
                         if ok {
                             let v = if e["what"].as_str().is_some_and(|w| !w.is_empty()) { json!({"who": e["who"], "what": e["what"], "since": e["date"], "evidence": e["evidence"]}) } else { Value::Null };
                             ok = set_field(x, "waiting_for", &v, false);
+                        }
+                        hist(x, e, ok, json!({}));
+                    }
+                    "answer" => {
+                        let x = n.get_mut(&id).unwrap();
+                        if ok && !["merged", "deleted"].contains(&x.state.as_str()) {
+                            ok = set_field(x, "description", &e["text"], false);
+                            if ok && x.kind == "question" && !x.pinned.iter().any(|p| p == "state") {
+                                x.state = "done".into();
+                            }
+                            if ok && x.kind == "risk" {
+                                for k in ["internal_owner", "likelihood", "impact"] {
+                                    if e[k].is_string() {
+                                        set_field(x, k, &e[k], false);
+                                    }
+                                }
+                            }
                         }
                         hist(x, e, ok, json!({}));
                     }
@@ -1656,7 +1706,7 @@ pub fn context(project: &str) -> Result<Value> {
             }
         }
         for (k, name) in [("risk", "risks"), ("decision", "decisions"), ("question", "questions")] {
-            let xs: Vec<String> = x.children.iter().filter(|c| n[*c].kind == k).map(|c| format!("{c} {}{}", n[c].title.chars().take(90).collect::<String>(), if closed(&n[c].state) { " (closed)" } else { "" })).collect();
+            let xs: Vec<String> = x.children.iter().filter(|c| n[*c].kind == k).map(|c| record_line(&n[c])).collect();
             if !xs.is_empty() {
                 d[name] = json!(xs);
             }
@@ -1674,6 +1724,43 @@ pub fn context(project: &str) -> Result<Value> {
         "epics": epics.iter().filter(|e| !e.children.is_empty()).map(|e| view(n, e)).collect::<Vec<_>>(),
         "epics_without_work": epics.iter().filter(|e| e.children.is_empty()).map(|e| format!("{} {}", e.id, e.title)).collect::<Vec<_>>(),
     }))
+}
+
+/// A record as the extractor reads it: its id and title, then what it holds — a question's answer, a
+/// decision's content and who took it, a risk's response, owner, likelihood and impact.
+fn record_line(r: &Node) -> String {
+    let cut = |t: &str, k: usize| if t.chars().count() > k { format!("{}…", t.chars().take(k).collect::<String>()) } else { t.to_string() };
+    let mut s = format!("{} {}", r.id, cut(&r.title, 90));
+    let what = r.description.as_deref().map(|d| cut(&d.split_whitespace().collect::<Vec<_>>().join(" "), 160));
+    let mut more = vec![];
+    match r.kind.as_str() {
+        "question" => more.push(match &what {
+            Some(a) => format!("answered: {a}"),
+            None if r.state == "done" => "answered".into(),
+            None => "no answer yet".into(),
+        }),
+        "decision" => {
+            more.extend(what.map(|d| format!("decided: {d}")));
+            more.extend(r.decided_by.as_ref().map(|b| format!("by {b}")));
+        }
+        "risk" => {
+            more.push(what.map(|d| format!("response: {d}")).unwrap_or_else(|| "no response yet".into()));
+            more.extend(r.internal_owner.as_ref().map(|o| format!("owner {o}")));
+            more.extend(r.likelihood.as_ref().map(|l| format!("likelihood {l}")));
+            more.extend(r.impact.as_ref().map(|i| format!("impact {i}")));
+        }
+        _ => {}
+    }
+    if closed(&r.state) && !(r.kind == "question" && r.state == "done") {
+        more.push("closed".into());
+    }
+    if !r.pinned.is_empty() {
+        more.push(format!("pinned_by_human: {}", r.pinned.join(", ")));
+    }
+    if !more.is_empty() {
+        s.push_str(&format!(" ({})", more.join("; ")));
+    }
+    s
 }
 
 // ── apply: agent proposals ───────────────────────────────────────────────────────────────────────
@@ -1776,6 +1863,10 @@ pub fn apply(project: &str, evid: &str, proposals: &[Value]) -> Result<Value> {
                 Some(format!("more than {MAX_AC} acceptance criteria: split it into two stories and link them"))
             } else if pr["description"].as_str().is_some_and(|t| t.chars().count() > MAX_AGENT_DESC) {
                 Some(format!("description: at most {MAX_AGENT_DESC} characters"))
+            } else if (k == "question" || k == "risk") && pr["description"].as_str().is_some_and(|t| !t.trim().is_empty()) {
+                Some(format!("a {k}'s {} is checked by the verifier: create it without one, then op 'answer' on its ref", if k == "question" { "answer" } else { "response" }))
+            } else if let Some(f) = ["likelihood", "impact"].into_iter().find(|f| !pr[*f].is_null() && (k != "risk" || level_of(&pr[*f]).is_none())) {
+                Some(format!("{f} is for a risk: one of {LEVELS:?}"))
             } else if k == "task" && !TASK_TYPES.contains(&ty) {
                 Some(format!("task type must be one of {TASK_TYPES:?}"))
             } else if k == "task" && !(pr["internal_owner"].is_string() || pr["client_owner"].is_string() || pr["due_text"].is_string() || ty == "session" || ty == "dependency") {
@@ -1810,6 +1901,8 @@ pub fn apply(project: &str, evid: &str, proposals: &[Value]) -> Result<Value> {
                 "client_owed": pr["client_owed"] == true, "ac": ac,
                 "due": resolve_due(pr["due_text"].as_str(), &date), "due_text": pr["due_text"],
                 "description": pr["description"].as_str().map(str::trim).filter(|t| !t.is_empty()),
+                "decided_by": if k == "decision" { canonical(&p, pr["decided_by"].as_str()) } else { None },
+                "likelihood": pr["likelihood"], "impact": pr["impact"],
             });
             n.insert(nid.clone(), node_of(&e));
             made.insert(cmid, nid.clone());
@@ -1858,6 +1951,9 @@ pub fn apply(project: &str, evid: &str, proposals: &[Value]) -> Result<Value> {
             continue;
         }
         let mut key: Vec<String> = ["effect", "depends_on", "into", "parent", "ac", "what"].iter().map(|k| key_str(&pr[*k])).collect();
+        if op == "answer" {
+            key.push(key_str(&pr["text"]));
+        }
         if op == "revise" {
             key.push(key_str(&pr["title"]));
             key.push(key_str(&pr["ac_add"]));
@@ -1903,6 +1999,10 @@ pub fn apply(project: &str, evid: &str, proposals: &[Value]) -> Result<Value> {
                     bad(format!("description: at most {MAX_AGENT_DESC} characters"), &mut rej);
                     continue;
                 }
+                if desc.is_some() && (x.kind == "question" || x.kind == "risk") {
+                    bad(format!("a {}'s answer or response is op 'answer' (the verifier checks it)", x.kind), &mut rej);
+                    continue;
+                }
                 if x.ac.len() + add > MAX_AC {
                     bad(format!("{node} would have more than {MAX_AC} criteria: create a second story"), &mut rej);
                     continue;
@@ -1935,6 +2035,31 @@ pub fn apply(project: &str, evid: &str, proposals: &[Value]) -> Result<Value> {
                     continue;
                 }
                 e["depends_on"] = json!(d);
+            }
+            "answer" => {
+                let text = pr["text"].as_str().map(str::trim).filter(|t| !t.is_empty());
+                if x.kind != "question" && x.kind != "risk" {
+                    bad(format!("answer is for a question (its answer) or a risk (its response); {node} is a {}", x.kind), &mut rej);
+                    continue;
+                }
+                let Some(text) = text else {
+                    bad("answer needs its text: the answer, or what is done about the risk".into(), &mut rej);
+                    continue;
+                };
+                if text.chars().count() > MAX_AGENT_DESC {
+                    bad(format!("text: at most {MAX_AGENT_DESC} characters"), &mut rej);
+                    continue;
+                }
+                if let Some(f) = ["likelihood", "impact"].into_iter().find(|f| !pr[*f].is_null() && (x.kind != "risk" || level_of(&pr[*f]).is_none())) {
+                    bad(format!("{f} is for a risk: one of {LEVELS:?}"), &mut rej);
+                    continue;
+                }
+                e["text"] = json!(text);
+                if x.kind == "risk" {
+                    e["internal_owner"] = json!(canonical(&p, pr["internal_owner"].as_str()));
+                    e["likelihood"] = pr["likelihood"].clone();
+                    e["impact"] = pr["impact"].clone();
+                }
             }
             "waiting" => {
                 if x.kind != "story" && x.kind != "task" {
@@ -2011,6 +2136,8 @@ pub fn verify_prep(project: &str, weak: bool) -> Result<Vec<Value>> {
                 Some(w) if !w.is_empty() => format!("is waiting on {}: {w}", e["who"].as_str().unwrap_or("someone")),
                 _ => "is no longer waiting on anyone (what it waited for arrived or was dropped)".into(),
             },
+            "answer" if x.is_some_and(|y| y.kind == "risk") => format!("what is done about this risk: {}", e["text"].as_str().unwrap_or("")),
+            "answer" => format!("this question is answered: {}", e["text"].as_str().unwrap_or("")),
             _ => e["effect"].as_str().unwrap_or("").to_string(),
         };
         out.push(json!({"mid": mid, "node": node, "kind": x.map(|y| &y.kind), "path": path(&n, node), "claimed": claim, "due": e["due"],
@@ -2056,7 +2183,8 @@ fn check_edit(sets: &Value, n: &BTreeMap<String, Node>) -> Result<()> {
             "client_owed" if !v.is_boolean() => bail!("client_owed is true or false"),
             "column" if !(v.is_null() || v.as_str().is_some_and(|c| !c.is_empty() && c.len() <= 40)) => bail!("column is a column id"),
             "title" if v.as_str().is_none_or(|t| t.trim().is_empty()) => bail!("title cannot be empty"),
-            "internal_owner" | "client_owner" | "delegated_by" | "type" if !(v.is_null() || v.is_string()) => bail!("{k} must be text"),
+            "internal_owner" | "client_owner" | "delegated_by" | "decided_by" | "type" if !(v.is_null() || v.is_string()) => bail!("{k} must be text"),
+            "likelihood" | "impact" if !(v.is_null() || level_of(v).is_some()) => bail!("{k} is null or one of {LEVELS:?}"),
             "links" => check_links(v)?,
             "description" if !(v.is_null() || v.as_str().is_some_and(|t| t.chars().count() <= MAX_DESC)) => bail!("description is text of at most {MAX_DESC} characters"),
             k if !HUMAN_FIELDS.contains(&k) => bail!("editable fields: {HUMAN_FIELDS:?}"),
@@ -2089,6 +2217,11 @@ pub fn human_event(project: &str, body: &Value) -> Result<Value> {
             bail!("cannot create a {k} under {par:?}");
         }
         check_links(&body["links"])?;
+        for f in ["likelihood", "impact"] {
+            if !(body[f].is_null() || (k == "risk" && level_of(&body[f]).is_some())) {
+                bail!("{f} is for a risk: one of {LEVELS:?}");
+            }
+        }
         if !(body["description"].is_null() || body["description"].as_str().is_some_and(|t| t.chars().count() <= MAX_DESC)) {
             bail!("description is text of at most {MAX_DESC} characters");
         }
@@ -2097,7 +2230,8 @@ pub fn human_event(project: &str, body: &Value) -> Result<Value> {
                    "fields": {"title": body["title"].as_str().filter(|t| !t.trim().is_empty()).unwrap_or("Untitled"),
                               "parent": if k == "epic" { None } else { par }, "type": body["type"].as_str().or(if k == "task" { Some("action") } else { None }),
                               "ac": body["ac"].as_array().cloned().unwrap_or_default(), "plan": if k == "epic" { Some("Off-plan") } else { None },
-                              "internal_owner": body["internal_owner"], "delegated_by": body["delegated_by"], "due": body["due"], "links": body["links"], "description": body["description"]}});
+                              "internal_owner": body["internal_owner"], "delegated_by": body["delegated_by"], "due": body["due"], "links": body["links"], "description": body["description"],
+                              "decided_by": body["decided_by"], "likelihood": body["likelihood"], "impact": body["impact"]}});
     } else if ["undo", "accept", "reject"].contains(&op) {
         let target = body["target"].as_str().ok_or_else(|| anyhow!("target mid required"))?;
         e["target"] = json!(target);
@@ -2505,6 +2639,57 @@ mod tests {
         assert!(human_event(&id, &json!({"op": "edit", "node": "S001", "set": {"description": "y".repeat(MAX_DESC + 1)}})).is_err());
         human_event(&id, &json!({"op": "create", "kind": "task", "parent": "S001", "title": "Send it", "description": "By hand."})).unwrap();
         assert_eq!(fold(&l).unwrap().nodes["T001"].description.as_deref(), Some("By hand."));
+    }
+
+    #[test]
+    fn records_keep_their_substance() {
+        let (_env, l, id) = setup("ledger-records");
+        let ev = "2026-10-28_110000";
+        let r = apply(&id, ev, &[
+            json!({"op": "create", "ref": "q", "kind": "question", "parent": "E01", "title": "When does the pilot start?", "quote": "Then SSO has to land first"}),
+            json!({"op": "create", "kind": "decision", "parent": "E01", "title": "Pilot after SSO", "description": "SSO first; the pilot moves to **24 Nov**.",
+                   "decided_by": "Dana Kowal", "quote": "let's say the pilot moves to the 24th of November"}),
+            json!({"op": "create", "ref": "r", "kind": "risk", "parent": "E01", "title": "Security review holds the pilot", "impact": "high", "quote": "Our security review needs the data-flow diagram"}),
+            json!({"op": "answer", "node": "q", "text": "On 24 November, once SSO lands (Dana).", "quote": "the pilot moves to the 24th of November"}),
+            json!({"op": "answer", "node": "r", "text": "Send the data-flow diagram this week.", "internal_owner": "Me", "likelihood": "med", "quote": "can you send it this week?"}),
+            // Refused: an answer on a task, a level that isn't one, a risk's response as a description.
+            json!({"op": "answer", "node": "E01", "text": "x", "quote": "I can have the SAML config ready by Friday"}),
+            json!({"op": "create", "kind": "risk", "parent": "E01", "title": "SAML late", "likelihood": "very", "quote": "I can have the SAML config ready by Friday"}),
+            json!({"op": "create", "kind": "risk", "parent": "E01", "title": "SAML late", "description": "Watch it.", "quote": "I can have the SAML config ready by Friday"}),
+        ]).unwrap();
+        assert_eq!(r["rejected"].as_array().unwrap().len(), 3, "{r}");
+        mark_processed(&id, ev, "").unwrap();
+        let t = fold(&l).unwrap();
+        let (q, d, k) = (&t.nodes["Q001"], &t.nodes["D001"], &t.nodes["R001"]);
+        assert_eq!((d.description.as_deref(), d.decided_by.as_deref()), (Some("SSO first; the pilot moves to **24 Nov**."), Some("Dana Kowal")), "a decision's content goes in at once");
+        assert!(q.description.is_none() && q.state == "open" && record_open(q), "an answer waits for the verifier");
+        assert!(k.description.is_none() && k.impact.as_deref() == Some("high") && k.likelihood.is_none());
+        let packets = verify_prep(&id, false).unwrap();
+        assert_eq!(packets.len(), 2);
+        assert!(packets.iter().any(|p| p["claimed"].as_str().unwrap().starts_with("this question is answered: On 24 November")));
+        assert!(packets.iter().any(|p| p["claimed"].as_str().unwrap().starts_with("what is done about this risk: Send the data-flow")));
+        verify_apply(&id, &packets.iter().map(|p| json!({"mid": p["mid"], "verdict": "supports"})).collect::<Vec<_>>()).unwrap();
+        let t = fold(&l).unwrap();
+        let (q, k) = (&t.nodes["Q001"], &t.nodes["R001"]);
+        assert!(q.state == "done" && answered(q) && !record_open(q), "answered and closed");
+        assert_eq!(q.description.as_deref(), Some("On 24 November, once SSO lands (Dana)."));
+        assert_eq!((k.description.as_deref(), k.internal_owner.as_deref(), k.likelihood.as_deref()), (Some("Send the data-flow diagram this week."), Some("Me"), Some("med")));
+        assert!(record_open(k), "a handled risk is still open");
+        let ctx = context(&id).unwrap().to_string();
+        assert!(ctx.contains("Q001 When does the pilot start? (answered: On 24 November"), "{ctx}");
+        assert!(ctx.contains("R001 Security review holds the pilot (response: Send the data-flow diagram this week.; owner Me; likelihood med; impact high)"), "{ctx}");
+        assert!(ctx.contains("D001 Pilot after SSO (decided: SSO first; the pilot moves to **24 Nov**.; by Dana Kowal)"), "{ctx}");
+        // The user's: an answer on an open question answers it; levels are checked; a record's text is theirs.
+        human_event(&id, &json!({"op": "create", "kind": "question", "parent": "E01", "title": "Who presents?"})).unwrap();
+        human_event(&id, &json!({"op": "edit", "node": "Q002", "set": {"description": "Dana."}})).unwrap();
+        assert!(answered(&fold(&l).unwrap().nodes["Q002"]));
+        assert!(human_event(&id, &json!({"op": "edit", "node": "R001", "set": {"impact": "huge"}})).is_err());
+        human_event(&id, &json!({"op": "edit", "node": "R001", "set": {"impact": "low", "description": "Mine."}})).unwrap();
+        apply(&id, ev, &[json!({"op": "answer", "node": "R001", "text": "Theirs.", "quote": "Our security review needs the data-flow diagram"})]).unwrap();
+        let p = verify_prep(&id, false).unwrap();
+        verify_apply(&id, &[json!({"mid": p[0]["mid"], "verdict": "supports"})]).unwrap();
+        let k = fold(&l).unwrap().nodes["R001"].clone();
+        assert_eq!((k.description.as_deref(), k.impact.as_deref()), (Some("Mine."), Some("low")), "pinned by the user");
     }
 
     #[test]

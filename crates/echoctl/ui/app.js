@@ -342,6 +342,7 @@ const callTabs = (x) => {
  *  (`{past, live, recordable}`). The card draws each kind (`eventDetail`). */
 const EVENT_ACTIONS = [
   { kind: 'open-notes', when: (e) => !!e.recorded },
+  { kind: 'import', when: (e, st) => st.past && !!e.join_url && !e.cancelled && !e.declined },
   { kind: 'scheduled', when: (e, st) => st.recordable && !!e.scheduled },
   { kind: 'join', when: (e, st) => st.recordable && st.live && !!e.join_url },
   { kind: 'record', when: (e, st) => st.recordable },
@@ -792,7 +793,7 @@ function list() {
       const g = d ? dayLabel(d) : 'Undated'
       const head = g !== group ? `<div class="group">${esc(g)}</div>` : ''
       group = g
-      const meta = [d ? hm(d) : '', c.minutes ? `${c.minutes} min` : '', c.people.length ? c.people.slice(0, 2).join(', ') + (c.people.length > 2 ? ` +${c.people.length - 2}` : '') : ''].filter(Boolean).map((x) => `<span>${esc(x)}</span>`).join('')
+      const meta = [d ? hm(d) : '', c.imported ? 'Teams transcript' : '', c.minutes ? `${c.minutes} min` : '', c.people.length ? c.people.slice(0, 2).join(', ') + (c.people.length > 2 ? ` +${c.people.length - 2}` : '') : ''].filter(Boolean).map((x) => `<span>${esc(x)}</span>`).join('')
       const pjs = ((S.pj.data && S.pj.data.by_call) || {})[c.name] || []
       const icons = pjs.length ? `<span class="pj-icons">${pjs.slice(0, 3).map((p) => projIcon(p, 14)).join('')}</span>` : ''
       return `${head}<button class="row" role="option" data-call="${esc(c.name)}" aria-selected="${c.name === S.selected}">
@@ -846,7 +847,7 @@ function doc() {
   const head = `${listToggle()}<div class="head-row">
         <div style="min-width:0">
           <h2 class="selectable">${esc(c.title)}</h2>
-          <div class="facts">${d ? `<span>${esc(d.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' }))}, ${esc(hm(d))}</span>` : ''}${c.minutes ? `<span>${c.minutes} min</span>` : ''}${people}</div>
+          <div class="facts">${d ? `<span>${esc(d.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' }))}, ${esc(hm(d))}</span>` : ''}${c.minutes ? `<span>${c.minutes} min</span>` : ''}${c.imported ? '<span title="Made from the meeting\'s Teams transcript: no audio, no live notes">from Teams transcript</span>' : ''}${people}</div>
           ${callProjects(c)}
         </div>
         <div class="doc-actions">${callMenu(c)}</div>
@@ -981,6 +982,7 @@ function ccWhat(x) {
   if (x.op === 'waiting') return [x.what ? 'Waiting' : 'Not waiting', 'warn']
   if (x.op === 'ac_met') return ['Criterion met', 'done']
   if (x.op === 'revise') return ['Revised', 'move']
+  if (x.op === 'answer') return [n.kind === 'risk' ? 'Response' : 'Answered', 'done']
   return [x.op, 'move']
 }
 function callChanges(c) {
@@ -1809,9 +1811,9 @@ function calendarView() {
         return `<button class="ev call" style="${style}" data-call="${esc(x.c.name)}"><b>${esc(x.c.title)}</b><small>${esc(hm(new Date(x.s)))}</small></button>`
       }
       const { ev: e, st } = x
-      const cls = ['ev', e.online ? 'online' : '', e.recorded ? 'recorded' : '', e.scheduled ? 'scheduled' : '', st.past ? 'past' : '', e.declined ? 'declined' : '', e.cancelled ? 'cancelled' : ''].filter(Boolean).join(' ')
+      const cls = ['ev', e.online ? 'online' : '', e.recorded ? 'recorded' : '', e.scheduled ? 'scheduled' : '', st.past ? 'past' : '', !e.recorded && e.transcript ? 'transcript' : '', e.declined ? 'declined' : '', e.cancelled ? 'cancelled' : ''].filter(Boolean).join(' ')
       // Green already says recorded: only what the colour doesn't.
-      const tag = e.recorded ? '' : e.scheduled ? '<span class="tag will">Will record</span>' : e.no_notetakers ? '<span class="tag no">No notetakers</span>' : ''
+      const tag = e.recorded ? '' : e.transcript ? '<span class="tag tr" title="Teams has its transcript: click, then Import">Transcript</span>' : e.scheduled ? '<span class="tag will">Will record</span>' : e.no_notetakers ? '<span class="tag no">No notetakers</span>' : ''
       return `<button class="${cls}" style="${style}" data-ev="${esc(e.id || '')}" aria-selected="${S.cal.selected === e.id}"><b>${esc(e.subject)}</b><small>${esc(hm(st.s))}${tag ? ' ' + tag : ''}</small></button>`
     }).join('')
     return `<div class="col${sameDay(day, now) ? ' today' : ''}" style="height:${(h1 - h0) * HOUR}px">${lines}${nowLine}${items}</div>`
@@ -1831,14 +1833,16 @@ function eventDetail(e, now) {
     scheduled: () => `<button class="btn" data-unschedule="${esc(e.id)}">Don't record</button><p class="why">Echo arms itself a minute before it starts${e.scheduled_languages ? `, transcribed as ${esc(e.scheduled_languages.map(langName).join(', '))}` : ''}.</p>`,
     join: () => `${recordButton(`data-join="${esc(e.id)}"`, 'Join and record')}<button class="btn" data-schedule="${esc(e.id)}">Record it</button>`,
     record: () => recordButton(`data-schedule="${esc(e.id)}"`, st.live ? 'Record it' : 'Record when it starts'),
+    import: () => e.import && e.import.busy ? '<button class="btn" disabled>Importing the Teams transcript…</button>'
+      : `<button class="btn primary" data-cal-import="${esc(e.id)}">Import Teams transcript</button>`,
   }
   const kind = eventAction(e, st)
   const acts = kind ? ACTS[kind]() : ''
-  const why = e.recorded ? '' : e.no_notetakers ? 'The organizer asked for no notetakers.' : e.declined ? 'You declined this meeting.' : e.cancelled ? 'This meeting was cancelled.' : !e.online ? 'Not a Teams meeting.' : st.past ? 'This meeting is over and was not recorded.' : ''
+  const why = e.recorded ? '' : e.import && e.import.error ? e.import.error : kind === 'import' ? (e.transcript ? 'Not recorded, but Teams transcribed it' : e.transcript === false ? 'Not recorded, and Teams has no transcript of it (yet)' : 'Not recorded. If Teams transcribed it') + ' — Echo makes a call of its transcript and chat; minutes, threads and the Brain follow.' : e.no_notetakers ? 'The organizer asked for no notetakers.' : e.declined ? 'You declined this meeting.' : e.cancelled ? 'This meeting was cancelled.' : !e.online ? 'Not a Teams meeting.' : st.past ? 'This meeting is over and was not recorded.' : ''
   return `<aside class="detail">
     <button class="btn ghost close" data-calclose="1" aria-label="Close">Close</button>
     <h2 class="selectable">${esc(e.subject)}</h2><div class="when">${esc(when)}</div>
-    <dl>${e.organizer ? `<dt>Organizer</dt><dd>${esc(e.organizer)}</dd>` : ''}${e.people ? `<dt>People</dt><dd>${e.people}</dd>` : ''}${e.location ? `<dt>Where</dt><dd>${esc(e.location)}</dd>` : ''}${e.recorded ? `<dt>Recording</dt><dd>${STATUS[e.recorded.status] || esc(e.recorded.status)}${e.recorded.minutes ? `, ${e.recorded.minutes} min` : ''}</dd>` : ''}</dl>
+    <dl>${e.organizer ? `<dt>Organizer</dt><dd>${esc(e.organizer)}</dd>` : ''}${e.people ? `<dt>People</dt><dd>${e.people}</dd>` : ''}${e.location ? `<dt>Where</dt><dd>${esc(e.location)}</dd>` : ''}${e.recorded ? `<dt>${e.recorded.imported ? 'Call' : 'Recording'}</dt><dd>${e.recorded.imported ? 'from the Teams transcript' : STATUS[e.recorded.status] || esc(e.recorded.status)}${e.recorded.minutes ? `, ${e.recorded.minutes} min` : ''}</dd>` : ''}</dl>
     ${acts ? `<div class="acts">${acts}</div>` : ''}${why ? `<p class="why">${esc(why)}</p>` : ''}
     ${eventProjects(e)}
     ${e.recap && e.recap.length ? `<div><b style="font-size:12px">Last time</b><ul>${e.recap.map((r) => `<li>${esc(r)}</li>`).join('')}</ul></div>` : ''}
@@ -2250,6 +2254,17 @@ function projectMain(data) {
 const CLOSED_STATES = ['done', 'cancelled', 'merged', 'deleted']
 const STATE_LABEL = { open: 'to do', in_progress: 'in progress', blocked: 'blocked', done: 'done', cancelled: 'cancelled', merged: 'merged', deleted: 'deleted' }
 const KIND_LABEL = { session: 'session', dependency: 'dependency', decision: 'decision', risk: 'risk', question: 'question' }
+/** What each kind holds in its Markdown (`description`): the work's description, a question's answer,
+ *  the decision itself, what is done about a risk. */
+const DESC_PLACEHOLDER = 'What it is, why, what done looks like — Markdown'
+const RECORD_TEXT = {
+  story: { word: 'description', label: '', empty: 'No description', placeholder: DESC_PLACEHOLDER },
+  task: { word: 'description', label: '', empty: 'No description', placeholder: DESC_PLACEHOLDER },
+  question: { word: 'answer', label: 'Answer', empty: 'No answer yet', placeholder: 'The answer, and who gave it — Markdown' },
+  decision: { word: 'decision', label: 'Decision', empty: 'Not written down', placeholder: 'What was decided, the options weighed, why this one — Markdown' },
+  risk: { word: 'response', label: 'Response', empty: 'No response yet', placeholder: 'What we do about it: mitigation, fallback, who watches it — Markdown' },
+}
+const LEVEL_LABEL = { low: 'low', med: 'medium', high: 'high' }
 function workOpenCount() {
   const w = S.pj.work
   if (!w || !w.nodes) return 0
@@ -2269,7 +2284,8 @@ const fmtDay = (d) => d ? new Date(d + 'T12:00').toLocaleDateString([], { weekda
 const relDay = (d) => { if (!d) return ''; const t = new Date(); const iso = (x) => x.toISOString().slice(0, 10); if (d === iso(t)) return 'today'; t.setDate(t.getDate() - 1); if (d === iso(t)) return 'yesterday'; return fmtDay(d) }
 /** A work item's status as the tree and the board show it: its word and its colour. */
 function workStatus(n) {
-  if (n.kind === 'question') return n.state === 'done' ? ['answered', 'done'] : ['open', 'open']
+  if (n.kind === 'question') return n.description || n.state === 'done' ? ['answered', 'done'] : CLOSED_STATES.includes(n.state) ? [STATE_LABEL[n.state] || n.state, n.state] : ['open', 'open']
+  if (n.kind === 'risk') return CLOSED_STATES.includes(n.state) ? [STATE_LABEL[n.state] || n.state, n.state] : n.description ? ['handled', 'done'] : ['no response', 'waiting']
   if (n.state === 'done' && n.kind === 'task' && n.type === 'session') return ['held', 'done']
   if (n.waiting_for && !CLOSED_STATES.includes(n.state)) return ['waiting', 'waiting']
   return [STATE_LABEL[n.state] || n.state, n.state]
@@ -2287,7 +2303,7 @@ function workRow(w, n, level) {
     : n.kind === 'task' ? [n.state === 'done' && n.type === 'session' ? `held ${relDay((n.history || []).filter((h) => h.effect === 'held').map((h) => h.date).pop() || n.created)}` : (n.internal_owner || n.client_owner || 'nobody'), n.state !== 'done' && n.due ? fmtDay(n.due) : ''].filter(Boolean).join(' · ')
     : workOrigin(w, n)
   const [word, cls] = workStatus(n)
-  const st = n.kind === 'story' || n.kind === 'task' || n.kind === 'question' ? `<span class="wk-st ${esc(cls)}">● ${esc(word)}</span>` : ''
+  const st = n.kind === 'story' || n.kind === 'task' || n.kind === 'question' || n.kind === 'risk' ? `<span class="wk-st ${esc(cls)}">● ${esc(word)}</span>` : ''
   const tags = [n.pinned && n.pinned.length ? `<span class="tag">pinned: ${esc(n.pinned.join(', '))}</span>` : '', n.blocks && n.blocks.length && !CLOSED_STATES.includes(n.state) ? `<span class="tag">holds up ${n.blocks.length}</span>` : ''].join('')
   return `<button class="wk-row${S.pj.node === n.id ? ' on' : ''}${CLOSED_STATES.includes(n.state) ? ' closed' : ''}" style="padding-left:${12 + level * 18}px" data-pj="node" data-node="${esc(n.id)}"><span class="wk-id">${esc(n.id)}</span>${kind ? `<span class="wk-k ${esc(n.kind === 'task' ? n.type : n.kind)}">${esc(kind)}</span>` : ''}<span class="wk-t${n.kind === 'story' ? ' story' : ''}">${esc(n.title)}</span>${tags}<span class="grow"></span><span class="wk-meta">${esc(meta)}</span>${st}</button>`
 }
@@ -2542,7 +2558,9 @@ function workPanel() {
   const actionItems = (n.history || []).filter((h) => h.op === 'create' && h.quote).slice(0, 1)
   const rows = [
     trackable ? ['Status', edit === 'state' ? `<select class="wp-in" data-ledger-set="state" aria-label="Status">${states.map(([v, l]) => `<option value="${v}"${n.state === v ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>` : `<button class="wp-val" data-pj="edit-field" data-field="state"><span class="wk-st ${esc(cls)}">● ${esc(word)}</span></button>${n.derived ? ` <span class="set-sub">${esc(n.derived)}</span>` : ''}`] : null,
-    n.kind === 'task' || n.kind === 'story' ? ['Owner', val('internal_owner', n.internal_owner, 'nobody named', `<input class="wp-in" data-ledger-set="internal_owner" value="${esc(n.internal_owner || '')}" aria-label="Owner" autofocus>`)] : null,
+    n.kind === 'decision' ? ['Decided by', val('decided_by', n.decided_by, 'not known', `<input class="wp-in" data-ledger-set="decided_by" value="${esc(n.decided_by || '')}" placeholder="Me, or a name" aria-label="Decided by" autofocus>`)] : null,
+    ...(n.kind === 'risk' ? [['likelihood', 'Likelihood'], ['impact', 'Impact']].map(([f, l]) => [l, val(f, LEVEL_LABEL[n[f]] || '', 'not rated', `<select class="wp-in" data-ledger-set="${f}" aria-label="${l}" autofocus><option value="">not rated</option>${Object.entries(LEVEL_LABEL).map(([v, t]) => `<option value="${v}"${n[f] === v ? ' selected' : ''}>${t}</option>`).join('')}</select>`)]) : []),
+    n.kind === 'task' || n.kind === 'story' || n.kind === 'risk' ? ['Owner', val('internal_owner', n.internal_owner, 'nobody named', `<input class="wp-in" data-ledger-set="internal_owner" value="${esc(n.internal_owner || '')}" aria-label="Owner" autofocus>`)] : null,
     n.kind === 'task' ? ['Handed over by', val('delegated_by', n.delegated_by, n.creator ? `${n.creator} (said it)` : 'not known', `<input class="wp-in" data-ledger-set="delegated_by" value="${esc(n.delegated_by || '')}" placeholder="Me, or a name" aria-label="Handed over by" autofocus>`)] : null,
     n.client_owner ? ['Client owes', esc(n.client_owner)] : null,
     n.kind === 'task' || n.kind === 'story' ? ['Due', val('due', n.due ? new Date(n.due + 'T12:00').toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }) : '', 'no date', `<input class="wp-in" type="date" data-ledger-set="due" value="${esc(n.due || '')}" aria-label="Due" autofocus>`) + ((n.due_history || []).length > 1 ? ` <span class="set-sub">moved ${n.due_history.length - 1}×</span>` : '')] : null,
@@ -2553,23 +2571,26 @@ function workPanel() {
     n.kind !== 'story' && actionItems.length ? ['Said', `“${esc(actionItems[0].quote.length > 90 ? actionItems[0].quote.slice(0, 88) + '…' : actionItems[0].quote)}”`] : null,
   ].filter(Boolean)
   // What the work is: an agent's from the words that created it, or yours (then it stays yours).
-  const describable = n.kind === 'story' || n.kind === 'task'
+  // A record's: its answer, the decision, its response — under the title, edited the same way.
+  const rt = RECORD_TEXT[n.kind]
   const de = S.pj.descEdit && S.pj.descEdit.node === n.id ? S.pj.descEdit : null
-  const description = !describable ? ''
-    : de ? `<div class="wp-desc-edit"><textarea id="wp-desc" rows="6" spellcheck="true" aria-label="Description (Markdown)" placeholder="What it is, why, what done looks like — Markdown">${esc(de.text)}</textarea><div class="wp-desc-bar"><span class="set-sub">${MAC ? '⌘S' : 'Ctrl+S'} saves, Esc cancels</span><span class="grow"></span><button class="btn ghost" data-pj="desc-cancel">Cancel</button><button class="btn primary" data-pj="desc-save">Save</button></div></div>`
-    : n.description ? `<div class="wp-desc doc" data-pj="desc-edit" title="Click to change">${n.description_html || esc(n.description)}</div>`
-    : '<button class="wp-val empty wp-desc-add" data-pj="desc-edit">No description · <u>Add</u></button>'
+  const head = rt && rt.label ? `<div class="wp-h wp-rec-h">${esc(rt.label)}</div>` : ''
+  const description = !rt ? ''
+    : de ? `${head}<div class="wp-desc-edit"><textarea id="wp-desc" rows="6" spellcheck="true" aria-label="${esc(rt.label || 'Description')} (Markdown)" placeholder="${esc(rt.placeholder)}">${esc(de.text)}</textarea><div class="wp-desc-bar"><span class="set-sub">${MAC ? '⌘S' : 'Ctrl+S'} saves, Esc cancels</span><span class="grow"></span><button class="btn ghost" data-pj="desc-cancel">Cancel</button><button class="btn primary" data-pj="desc-save">Save</button></div></div>`
+    : n.description ? `${head}<div class="wp-desc doc" data-pj="desc-edit" title="Click to change">${n.description_html || esc(n.description)}</div>`
+    : `${head}<button class="wp-val empty wp-desc-add${n.kind === 'risk' && !CLOSED_STATES.includes(n.state) ? ' warn' : ''}" data-pj="desc-edit">${esc(rt.empty)} · <u>Add</u></button>`
   const met = n.ac.filter((a) => a.met).length
   const criteria = n.kind === 'story' ? `<div class="wp-h">Done when · ${met} of ${n.ac.length}</div><div class="wp-ac-list">${n.ac.map((a, i) => `<label class="wp-ac${a.met ? ' met' : ''}"><input type="checkbox" data-ledger-ac="${i + 1}" ${a.met ? 'checked' : ''}><span>${esc(a.text)}</span></label>`).join('')}</div>` : ''
   const hist = (n.history || []).slice().reverse().map((h) => {
-    const what = h.by === 'human' ? (h.op === 'edit' ? `you set ${Object.keys(h.set || {}).join(', ')}` : h.op === 'create' ? 'you created it' : `you: ${h.op}`)
+    const what = h.by === 'human' ? (h.op === 'edit' ? `you set ${Object.keys(h.set || {}).map((k) => k === 'description' && rt ? rt.word : k.replace('_', ' ')).join(', ')}` : h.op === 'create' ? 'you created it' : `you: ${h.op}`)
+      : h.op === 'answer' ? `${n.kind === 'risk' ? 'response' : 'answered'}: ${h.text || ''}`
       : h.op === 'create' ? `created${h.due_text ? ' · due ' + h.due_text : ''}` : h.effect ? `${h.effect === 'due' ? 'due ' + (h.due_text || '') : h.effect}${h.effect === 'done' || h.effect === 'held' ? '?' : ''}`
       : h.op === 'waiting' ? `waiting · ${h.who || '?'}` : h.op === 'link' ? `waits for ${h.depends_on}` : h.op === 'ac_met' ? `criterion ${h.ac} met` : h.op
     const mark = h.by === 'human' ? (h.mid && h.op !== 'create' ? `<button class="link-btn" data-pj="ledger" data-body='${esc(JSON.stringify({ op: 'undo', target: h.mid }))}'>undo</button>` : '')
       : h.applied === false && h.verdict === 'supports' ? '<span class="wk-v weak">kept yours</span>'
       : h.verdict === 'supports' || (h.op === 'create') ? '<span class="wk-v supports">verified</span>'
       : h.verdict === 'weak' ? '<span class="wk-v weak">weak · to review</span>' : h.verdict === 'wrong' ? '<span class="wk-v wrong">wrong</span>'
-      : (h.effect || ['ac_met', 'link', 'waiting'].includes(h.op)) && h.effect !== 'mention' ? '<span class="wk-v">to check</span>' : ''
+      : (h.effect || ['ac_met', 'link', 'waiting', 'answer'].includes(h.op)) && h.effect !== 'mention' ? '<span class="wk-v">to check</span>' : ''
     const item = h.evidence && ev[h.evidence]
     // A call's words jump to the call; a mail's open it in Outlook.
     const srcs = !item ? '' : item.kind === 'mail'
@@ -2964,7 +2985,13 @@ function clientOverview(cd, c) {
   const card = (p) => {
     const s = p.summary || {}, pl = s.piles || {}
     const tasks = TASK_PILES.filter(([k]) => pl[k]).map(([k]) => `<span><b>${pl[k]}</b> ${PILE_SHORT[k]}</span>`).join('')
-    const recs = (label, xs, cls) => xs && xs.length ? `<div class="cl-recs"><span class="cl-rl ${cls}">${label}</span><div>${xs.slice(0, 3).map((x) => `<button class="cl-rec" data-pj="goto-node" data-id="${esc(p.id)}" data-node="${esc(x.id)}">${esc(x.title)}</button>`).join('')}${xs.length > 3 ? `<span class="set-sub">+ ${xs.length - 3} more</span>` : ''}</div></div>` : ''
+    // Each with what it holds: the decision and who took it; a risk's response — none stands out.
+    const recLine = (x, cls) => {
+      const sub = cls === 'risk' ? (x.what ? `↳ ${x.what}` : 'no response yet') : x.what ? `${x.what}${x.by ? ` — ${x.by}` : ''}` : ''
+      const lvl = cls === 'risk' && (x.likelihood || x.impact) ? ` <span class="set-sub">${[x.likelihood && `likelihood ${LEVEL_LABEL[x.likelihood]}`, x.impact && `impact ${LEVEL_LABEL[x.impact]}`].filter(Boolean).join(' · ')}</span>` : ''
+      return `<button class="cl-rec${cls === 'risk' && !x.what ? ' bare' : ''}" data-pj="goto-node" data-id="${esc(p.id)}" data-node="${esc(x.id)}">${esc(x.title)}${lvl}${sub ? `<span class="cl-rec-sub">${esc(sub)}</span>` : ''}</button>`
+    }
+    const recs = (label, xs, cls) => xs && xs.length ? `<div class="cl-recs"><span class="cl-rl ${cls}">${label}</span><div>${xs.slice(0, 3).map((x) => recLine(x, cls)).join('')}${xs.length > 3 ? `<span class="set-sub">+ ${xs.length - 3} more</span>` : ''}</div></div>` : ''
     const prog = s.stories ? `<div class="cl-prog"><span class="bd-prog"><span style="width:${Math.round(100 * s.stories_done / s.stories)}%"></span></span><span class="set-sub">${s.stories_done} of ${s.stories} stor${s.stories === 1 ? 'y' : 'ies'} done</span></div>` : ''
     return `<div class="cl-card${p.group === 'closed' ? ' closed' : ''}">
       <button class="cl-top" data-pj="open" data-id="${esc(p.id)}">${projIcon(p, 22)}<b>${esc(p.name)}</b>${stageTag(p.stage)}</button>
@@ -4356,6 +4383,7 @@ function paletteItems(target) {
     if (kind === 'scheduled') add('This event', "Don't record it", () => press({ unschedule: e.id }))
     if (kind === 'join') add('This event', 'Join and record', () => press({ join: e.id }))
     if (kind === 'join' || kind === 'record') add('This event', es.live ? 'Record it' : 'Record when it starts', () => press({ schedule: e.id }))
+    if (kind === 'import') add('This event', 'Import Teams transcript', () => press({ calImport: e.id }), { keywords: 'missed unrecorded transcript teams', disabled: e.import && e.import.busy ? 'importing now' : null })
     if (!kind) add('This event', 'Record it', () => {}, { disabled: e.cancelled ? 'cancelled' : e.declined ? 'you declined it' : es.past ? 'it is over' : !e.online ? 'not a Teams meeting' : 'not possible' })
   }
   // Echo's own
@@ -4488,6 +4516,10 @@ function viewState() {
   const n = S.pj.node && S.pj.work && S.pj.work.nodes && S.pj.work.nodes[S.pj.node]
   if (n && [eff.right, eff.bottom].some((p) => p.shown && p.active === 'work-item')) {
     v.item = { id: n.id, title: n.title, kind: n.kind === 'task' && n.type && n.type !== 'action' ? n.type : n.kind, state: n.state, thread: (projById(S.pj.sel) || {}).name || S.pj.sel }
+    // What a record holds (an answer, the decision, a response) or the work's description.
+    if (n.description) Object.assign(v.item, { what: (RECORD_TEXT[n.kind] || RECORD_TEXT.story).word, text: n.description })
+    if (n.kind === 'decision' && n.decided_by) v.item.decided_by = n.decided_by
+    if (n.kind === 'risk') Object.assign(v.item, { owner: n.internal_owner || undefined, likelihood: n.likelihood || undefined, impact: n.impact || undefined })
   }
   v.panel = ['right', 'bottom'].filter((a) => eff[a].shown && eff[a].active).map((a) => (PANEL_VIEWS.find((x) => x.id === eff[a].active) || {}).label).filter(Boolean).join(', ')
   const s = window.getSelection && window.getSelection()
@@ -4646,7 +4678,7 @@ document.addEventListener('click', (e) => {
   // Any click closes the call's ⋯ menu (its own button toggles it).
   const menuWas = S.menuOpen
   if (menuWas && !(e.target.closest && e.target.closest('[data-cmd="call-menu"]'))) S.menuOpen = false
-  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
+  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
   if (!t) { if (menuWas) render(); return }
   // Sign-ins (`signin.rs`): shown at once (starting / stopping / checking) until the next poll
   // brings the app's state.
@@ -4724,6 +4756,7 @@ document.addEventListener('click', (e) => {
   if (t.dataset.calclose) { S.cal.selected = null; return render() }
   if (t.dataset.calmode) { S.cal.mode = t.dataset.calmode; S.cal.offset = 0; S.cal.data = null; go(`calendar/${S.cal.mode}`); return loadCalendar().then(render) }
   if (t.dataset.calnav !== undefined) { const n = Number(t.dataset.calnav); S.cal.offset = n === 0 ? 0 : S.cal.offset + n; S.cal.data = null; render(); return loadCalendar().then(render) }
+  if (t.dataset.calImport) { send({ cmd: 'calendar_import', id: t.dataset.calImport }); const e = (S.cal.data.events || []).find((x) => x.id === t.dataset.calImport); if (e) e.import = { busy: true }; return render() }
   if (t.dataset.schedule) { send({ cmd: 'schedule', id: t.dataset.schedule, languages: recordLang(), profile: pickedProfile() }); const e = (S.cal.data.events || []).find((x) => x.id === t.dataset.schedule); if (e) e.scheduled = true; return render() }
   if (t.dataset.unschedule) { send({ cmd: 'unschedule', id: t.dataset.unschedule }); const e = (S.cal.data.events || []).find((x) => x.id === t.dataset.unschedule); if (e) e.scheduled = false; return render() }
   if (t.dataset.call) { S.listOpen = false; return go(`call/${t.dataset.call}/${S.tab}`) }
@@ -5116,7 +5149,8 @@ async function tick() {
   if (changed || ticks % 3 === 0) await loadCalls()
   if (ticks % 30 === 0) await loadAgenda() // a meeting about to start (the pill)
   if (S.view === 'settings' ? ticks % 2 === 0 : ticks % 60 === 0) await loadSettings() // a download's progress; Settings' badge
-  if (S.view === 'calendar' && ticks % 30 === 0) await loadCalendar()
+  // While a transcript is imported, every few seconds: the call shows once it is there.
+  if (S.view === 'calendar' && (ticks % 30 === 0 || (ticks % 3 === 0 && ((S.cal.data && S.cal.data.events) || []).some((e) => e.import && e.import.busy)) || (ticks % 5 === 0 && S.cal.data && S.cal.data.checking_transcripts))) await loadCalendar()
   if (ticks % 10 === 1) await loadAttention()
   if (ticks % (S.view === 'projects' ? 5 : 15) === 0) { await loadProjects(); if (S.view === 'projects') await loadProject() }
   if (S.view === 'tasks' && ticks % 15 === 0) { await loadTasks(); if (S.pj.node) await loadWork() }

@@ -306,6 +306,28 @@ id, or by subject within the event's time) and `scheduled`; calls matching no ev
 as `calls`. "Record when it starts" → `schedule.rs` (`<home>/.echo/scheduled.json`): the watcher
 arms a scheduled meeting from 60 s before its start until its end; the entry is removed when
 its recording starts (stopping never re-arms it), when that arm is cancelled, or after the end.
+**A meeting nobody recorded, from its Teams transcript** (`teams_transcript.rs`): Calendar → an ended Teams event with
+no call → Import Teams transcript (IPC `calendar_import`, in the background — its state on the event, `import`; the
+outcome as a notification), ⌘K, `echoctl calendar import <event id | subject words> [--date]`. Graph: the event's
+join link → `/me/onlineMeetings?$filter=JoinWebUrl eq '…'` → its transcripts → each as `text/vtt` (`text/plain` is
+refused; `OnlineMeetingTranscript.Read.All`, in the CodeMie token). A series shares one online meeting, so only
+transcripts started within the occurrence (±30 min) count; several are joined in time order. The call: `meta.json`
+`source: teams-transcript` (the event's times — an earlier transcript moves the start, a longer one the end —,
+`imported_at`, the AI profile pinned), `meeting.json` from the event (series id, attendees: threads match as for a
+recording), `segments.json` + `transcript.md` from the VTT's `<v Name>` cues ("Me" = About me's name, else the
+Microsoft 365 account's), the chat (`fetch_call_chat`). **The calendar marks them**: an ended Teams event with no
+call whose transcript is known is blue, dashed, tagged "Transcript" (`transcript` on the event, from
+`teams_transcript::known`); unknown ones are asked about in the background (`check`, one at a time, ≤ 25 meetings,
+the page re-reading while `checking_transcripts`) — about 45 s for 25. `echoctl calendar transcripts [--days]`
+(hidden) runs the same check. No audio, no live notes; the list and header say "from Teams
+transcript". An existing call of the event (its meeting id, or its subject within its time) refuses the import; no
+transcript, or a meeting Teams doesn't give this account (an outside organiser's), says so. Automatic minutes count
+from `imported_at` (`notes::auto_due`), so an old meeting gets them. **Needs you**: with the agenda's sync (every 15
+min) `teams_transcript::scan` checks the last 3 days' ended Teams meetings of open threads with no call
+(`<home>/.echo/teams-transcripts.json`, the calendar's answers too: rechecked hourly until a day after the end, kept 30
+days) and offers each
+one with a transcript once (Import · Not this → `dismissed`). Measured 2026-11-02: the Orbit follow-up (7 min,
+organised by a colleague; 85 cues, 3 chat messages) and a 32-min call (149 cues, ~31K chars, 8 chat messages).
 
 ## Projects (`projects.rs`; plan and phases: `docs/projects-design.md`)
 **The window calls them Threads** (the activity, + Thread, New thread, the palette, Settings — the user's word, since
@@ -343,7 +365,14 @@ from `PJ_SYMBOLS`, else an identicon from its id (`ProjectArt`, no DOM: `ui/proj
 per batch) folded into Workstream (epic, `E01 General` first) › Story (criteria) › Task (action / session /
 dependency, owners, due, client-owed) + decision / risk / question records. Stories and tasks carry a `description`
 (Markdown; an agent's from `create` / `revise`, ≤ 1200 chars; the user's in Details — click it — ≤ 4000, pinned) and
-`links` (`{title, url}`, https, ≤ 10: tickets, docs). **Mails as evidence** (`echoctl project ledger <id> mail
+`links` (`{title, url}`, https, ≤ 10: tickets, docs). A record's substance lives in the same `description`, named by
+its kind (`RECORD_TEXT`): a question's **Answer** (answered = an answer, or `done`; `ledger::answered` / `record_open`), a
+decision's **Decision** (what, the options, why — an agent's at `create`) + `decided_by`, a risk's **Response** + owner
+(`internal_owner`), `likelihood` / `impact` (low | med | high; with a response it reads "handled", without "no response").
+An agent's answer or response is op `answer` (`text`; a risk's owner and levels with it), verified like a status change
+(`supports` → set; a question closes) — never a `description` on a question or risk; the user's edit pins it. `context`
+shows each record with what it holds; the client Overview lists open risks without a response first, marked; the
+`<echo_view>` item carries it. **Mails as evidence** (`echoctl project ledger <id> mail
 <graph message id>… [--conversation]`, `ledger::add_mail`): one item a mail, `mail-<sha8 of its Internet message
 id>` (kind `mail`: one turn — the sender ("Me" for the user's own: About me's address or the account's local part; names
 through `people::display`), the local time, the new part of its text — and its Outlook `webLink`),

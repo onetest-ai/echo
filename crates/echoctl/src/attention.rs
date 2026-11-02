@@ -262,6 +262,22 @@ pub fn collect() -> Collected {
         }
     }
 
+    // Meetings of your threads nobody recorded that Teams transcribed (`teams_transcript::scan`): offered once.
+    for (id, v) in crate::teams_transcript::to_offer() {
+        let t = &v["threads"][0];
+        let when = v["start"].as_str().and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok()).map(|s| s.with_timezone(&chrono::Local).format("%a %-d %b, %H:%M").to_string()).unwrap_or_default();
+        out.push(item(
+            format!("transcript:{id}"),
+            "transcript",
+            t["client"].as_str().unwrap_or("-"),
+            format!("Teams transcript: {}", v["subject"].as_str().unwrap_or("a meeting")),
+            format!("{when} · {} — not recorded; import it as a call for its minutes and work", t["name"].as_str().unwrap_or("your thread")),
+            false,
+            vec![act("Import", true, json!({"cmd": "calendar_import", "id": id})), act("Not this", false, json!({"cmd": "teams_transcript_dismiss", "id": id}))],
+            Some("calendar/day".into()),
+        ));
+    }
+
     // Echo itself: permissions a recording needs, an update.
     // Only what is known to be refused: macOS answers "not determined" for audio capture even when granted.
     let report = crate::permissions::report();

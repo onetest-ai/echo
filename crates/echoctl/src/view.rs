@@ -134,6 +134,17 @@ fn view_lines(v: &Value, now: chrono::DateTime<chrono::Utc>, calls: &Path) -> Op
         if let Some(p) = q(&i["thread"]) {
             s.push_str(&format!(" · in thread {p}"));
         }
+        // A record's substance: a question's answer, a decision and who took it, a risk's response.
+        for (k, label) in [("decided_by", "decided by"), ("owner", "owner"), ("likelihood", "likelihood"), ("impact", "impact")] {
+            if let Some(x) = clean(&i[k]) {
+                s.push_str(&format!(" · {label} {x}"));
+            }
+        }
+        if let (Some(what), Some(text)) = (clean(&i["what"]).filter(|w| ["answer", "decision", "response", "description"].contains(&w.as_str())), q(&i["text"])) {
+            s.push_str(&format!(" · {what}: {text}"));
+        } else if ["question", "risk"].contains(&i["kind"].as_str().unwrap_or("")) {
+            s.push_str(if i["kind"] == "question" { " · no answer yet" } else { " · no response yet" });
+        }
         l.push(s);
     }
     let e = &v["event"];
@@ -291,6 +302,12 @@ mod tests {
         assert!(b.starts_with("<echo_view>\n") && b.ends_with("\n</echo_view>"));
         assert!(b.contains("Call: \"Bruno - Contoso follow-up\" · Thu 29 Oct, 17:02 · tab Actions · folder "), "{b}");
         assert!(b.contains("Selected work item: T003 \"Send a monthly cost forecast\" · task · open · in thread \"Globex\""));
+        let mut r = v.clone();
+        r["item"] = json!({"id": "R002", "title": "SSO slips", "kind": "risk", "state": "open", "thread": "Globex", "owner": "Dana", "impact": "high"});
+        assert!(context(&r, now, &tmp).unwrap().contains("· owner Dana · impact high · no response yet"));
+        r["item"]["what"] = json!("response");
+        r["item"]["text"] = json!("Pilot on local accounts\nuntil SSO lands");
+        assert!(context(&r, now, &tmp).unwrap().contains("· response: \"Pilot on local accounts until SSO lands\""));
         assert_eq!(b.matches("</echo_view>").count(), 1, "page text can't close the block: {b}");
         assert!(b.contains("(in the transcript)"));
         // A folder that isn't a call, or a stale view: no folder, nothing.

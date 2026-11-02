@@ -481,6 +481,7 @@ fn call_summary(dir: &Path) -> Value {
         "people": people(dir),
         "frames": dir.join("frames.jsonl").exists(),
         "chat": dir.join("chat.json").exists(),
+        "imported": crate::teams_transcript::imported(&meta),
     })
 }
 
@@ -635,6 +636,39 @@ fn agenda() -> Value {
 type CalendarCache = (String, std::time::Instant, Vec<Value>);
 static CALENDAR_CACHE: std::sync::Mutex<Option<CalendarCache>> = std::sync::Mutex::new(None);
 static RAW_EVENTS: std::sync::Mutex<Vec<Value>> = std::sync::Mutex::new(Vec::new());
+/// A background check of which shown meetings have a Teams transcript (`teams_transcript::check`).
+static TRANSCRIPT_CHECK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Teams transcripts being imported or that failed, by event id: `{busy: true}` | `{error}`.
+static IMPORTS: std::sync::Mutex<Option<std::collections::HashMap<String, Value>>> = std::sync::Mutex::new(None);
+
+/// Make a call of a meeting from its Teams transcript, in the background (`teams_transcript::import`);
+/// its state shows on the event (`import`) until the call is there.
+fn import_transcript(id: &str) -> bool {
+    let mut g = IMPORTS.lock().unwrap_or_else(|e| e.into_inner());
+    let m = g.get_or_insert_with(Default::default);
+    if m.get(id).is_some_and(|s| s["busy"] == true) {
+        return false;
+    }
+    m.insert(id.to_string(), json!({"busy": true}));
+    let (id, raw) = (id.to_string(), RAW_EVENTS.lock().unwrap_or_else(|e| e.into_inner()).iter().find(|e| e["id"].as_str() == Some(id)).cloned());
+    std::thread::spawn(move || {
+        let r = raw.map(Ok).unwrap_or_else(|| crate::graph::event(&id)).and_then(|ev| crate::teams_transcript::import(&ev));
+        let mut g = IMPORTS.lock().unwrap_or_else(|e| e.into_inner());
+        let m = g.get_or_insert_with(Default::default);
+        // Said where it was asked (the event's card) and wherever the user is now (Needs you, ⌘K).
+        match r {
+            Ok(d) => {
+                crate::app::notify("Teams transcript imported", &format!("{} — its minutes and threads follow", read_json(&d.join("meta.json"))["title"].as_str().unwrap_or("The meeting")));
+                m.remove(&id)
+            }
+            Err(e) => {
+                crate::app::notify("Teams transcript not imported", &format!("{e:#}"));
+                m.insert(id, json!({"error": format!("{e:#}")}))
+            }
+        };
+    });
+    true
+}
 const CALENDAR_TTL: std::time::Duration = std::time::Duration::from_secs(120);
 
 fn query_param(q: &str, key: &str) -> Option<String> {
@@ -704,6 +738,9 @@ fn calendar(q: &str) -> Value {
     let recording = watch::running_watcher().and_then(|w| w.recording);
     let mut used = vec![false; calls.len()];
     let scheduled: Vec<(String, Vec<String>)> = crate::schedule::load().into_iter().filter_map(|m| Some((m.id?, m.languages))).collect();
+    let raw_events = RAW_EVENTS.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let offers = crate::teams_transcript::offers();
+    let mut to_check = vec![];
     let mut out = vec![];
     for mut e in events {
         let (es, ee) = (rfc(&e["start"]), rfc(&e["end"]));
@@ -723,15 +760,28 @@ fn calendar(q: &str) -> Value {
         if let Some((i, (name, meta, _))) = hit {
             used[i] = true;
             let dir = paths::calls_dir().join(name);
-            e["recorded"] = json!({ "name": name, "status": status(&dir, recording.as_deref()), "minutes": minutes(meta) });
+            e["recorded"] = json!({ "name": name, "status": status(&dir, recording.as_deref()), "minutes": minutes(meta), "imported": crate::teams_transcript::imported(meta) });
             e["projects"] = json!(crate::projects::of_call(&dir).map(|ps| ps.iter().map(|(p, w)| crate::projects::chip(p, w)).collect::<Vec<_>>()).unwrap_or_default());
         } else if let Some(m) = e["id"].as_str().and_then(|id| meetings.get(id)) {
             e["projects"] = json!(crate::projects::for_event(m));
+        }
+        if let Some(st) = e["id"].as_str().and_then(|id| IMPORTS.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(id).cloned())) {
+            e["import"] = st;
         }
         let sched = e["id"].as_str().and_then(|id| scheduled.iter().find(|s| s.0 == id));
         e["scheduled"] = json!(sched.is_some());
         if let Some((_, l)) = sched.filter(|s| !s.1.is_empty()) {
             e["scheduled_languages"] = json!(l);
+        }
+        // Ended, not recorded: does Teams have its transcript? Known → `transcript`; else asked in the background.
+        if let Some(raw) = e["recorded"].is_null().then(|| raw_events.iter().find(|r| r["id"] == e["id"])).flatten() {
+            let (has, ask) = crate::teams_transcript::known(raw, &offers);
+            if let Some(h) = has {
+                e["transcript"] = json!(h);
+            }
+            if ask {
+                to_check.push(raw.clone());
+            }
         }
         if e["recorded"].is_null() {
             let recap = e["subject"].as_str().map(calls::recap).unwrap_or_default();
@@ -751,8 +801,16 @@ fn calendar(q: &str) -> Value {
                     "start": meta["started_at"], "end": meta["ended_at"], "status": status(&dir, recording.as_deref()) })
         })
         .collect();
+    if !to_check.is_empty() && !TRANSCRIPT_CHECK.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        std::thread::spawn(move || {
+            if let Err(e) = crate::teams_transcript::check(&to_check, false) {
+                eprintln!("teams transcripts: {e:#}");
+            }
+            TRANSCRIPT_CHECK.store(false, std::sync::atomic::Ordering::SeqCst);
+        });
+    }
     json!({ "source": source, "signed_in": signed_in, "error": error, "start": start.to_string(), "days": days,
-            "events": out, "calls": extra })
+            "events": out, "calls": extra, "checking_transcripts": TRANSCRIPT_CHECK.load(std::sync::atomic::Ordering::SeqCst) })
 }
 
 fn state() -> Value {
@@ -1766,6 +1824,8 @@ fn act(v: &Value) -> bool {
             }
             false
         }
+        "calendar_import" => v["id"].as_str().is_some_and(import_transcript),
+        "teams_transcript_dismiss" => v["id"].as_str().is_some_and(|id| crate::teams_transcript::dismiss(id).is_ok()),
         "arm_meeting" | "join_meeting" => {
             let id = v["id"].as_str().unwrap_or("");
             let Some(mut m) = watch::agenda().into_iter().find(|m| m.id.as_deref() == Some(id)) else { return false };

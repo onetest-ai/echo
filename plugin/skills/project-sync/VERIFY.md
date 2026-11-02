@@ -14,8 +14,11 @@ Verdicts
   `done` = completed, received, working; `due` = this node's date was set or moved to roughly that
   date; `delayed` = it slipped without a new date; `blocked` = stuck; `progress` = partial progress
   already made; `cancelled` = someone decided not to do it; `reassign` = a new owner stated;
-  criterion met = the context says it is now true; a dependency = the waiting work can't finish or
-  start until the named thing happens; waiting on a person = held up by that person's action.
+  criterion met = the context says it is now true; an answer = the words answer this question (as
+  `claimed` puts it, near enough); a risk's response = the words say this is being done about this
+  risk (a plan agreed, a fallback, someone owning it — a wish is not a response); a dependency = the
+  waiting work can't finish or start until the named thing happens; waiting on a person = held up
+  by that person's action.
 - **Presupposition counts.** When the context treats an event as having happened ("how was the
   billing session?", findings reported from it), that supports `held` / `done`.
 - **A recording is proof.** When the item is itself the session (its transcript is that meeting),

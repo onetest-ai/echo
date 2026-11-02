@@ -43,7 +43,7 @@ pub fn slugify(s: &str) -> String {
     slug.chars().take(60).collect()
 }
 
-fn call_dir(started: &DateTime<Local>, title: Option<&str>) -> PathBuf {
+pub(crate) fn call_dir(started: &DateTime<Local>, title: Option<&str>) -> PathBuf {
     let mut name = started.format("%Y-%m-%d_%H%M%S").to_string();
     if let Some(t) = title.map(slugify).filter(|s| !s.is_empty()) {
         name.push('-');

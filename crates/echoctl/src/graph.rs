@@ -575,10 +575,8 @@ fn mail_item(m: &Value) -> Value {
 pub fn calendar_view(from: DateTime<Utc>, to: DateTime<Utc>) -> Result<Vec<Value>> {
     let token = access_token()?;
     let fmt = |d: DateTime<Utc>| d.format("%Y-%m-%dT%H:%M:%SZ").to_string();
-    let select = "id,subject,start,end,organizer,attendees,isOnlineMeeting,onlineMeeting,onlineMeetingProvider,\
-                  isAllDay,isCancelled,responseStatus,bodyPreview,location,seriesMasterId,type,webLink";
     let mut url = Some(format!(
-        "{GRAPH}/me/calendarView?startDateTime={}&endDateTime={}&$top=50&$orderby=start/dateTime&$select={select}",
+        "{GRAPH}/me/calendarView?startDateTime={}&endDateTime={}&$top=50&$orderby=start/dateTime&$select={EVENT_FIELDS}",
         fmt(from),
         fmt(to)
     ));
@@ -589,6 +587,86 @@ pub fn calendar_view(from: DateTime<Utc>, to: DateTime<Utc>) -> Result<Vec<Value
         url = v["@odata.nextLink"].as_str().map(str::to_owned).filter(|_| events.len() < 500);
     }
     Ok(events)
+}
+
+/// The calendar event fields Echo reads (the calendar view's, by id or in a range).
+const EVENT_FIELDS: &str = "id,subject,start,end,organizer,attendees,isOnlineMeeting,onlineMeeting,onlineMeetingProvider,\
+                            isAllDay,isCancelled,responseStatus,bodyPreview,location,seriesMasterId,type,webLink";
+
+/// One calendar event (an occurrence's id works too).
+pub fn event(id: &str) -> Result<Value> {
+    let token = access_token()?;
+    graph_get(&token, &format!("{GRAPH}/me/events/{}?$select={EVENT_FIELDS}", urlencode(id)))
+}
+
+/// What Teams kept of a meeting's transcription (`OnlineMeetingTranscript.Read.All`).
+pub enum Transcripts {
+    /// Each transcript `{id, created, ended, vtt}`, oldest first (a restarted transcription is several).
+    Found(Vec<Value>),
+    /// Teams has the meeting but nobody transcribed it.
+    None,
+    /// The meeting isn't given to this account (an outside organiser's, or not a Teams meeting).
+    NotGiven(String),
+}
+
+/// The transcripts of the Teams meeting behind a join link: `/me/onlineMeetings?$filter=JoinWebUrl eq
+/// '…'` → its transcripts → (`content`) each one's text as WebVTT (`text/plain` is refused).
+pub fn meeting_transcripts(join_url: &str, content: bool) -> Result<Transcripts> {
+    let token = access_token()?;
+    let filter = format!("JoinWebUrl eq '{}'", join_url.replace('\'', "''"));
+    let (code, body) = graph_raw(&token, &format!("{GRAPH}/me/onlineMeetings?$filter={}", urlencode(&filter)))?;
+    let v: Value = serde_json::from_str(&body).unwrap_or_default();
+    if code != 200 {
+        return Ok(Transcripts::NotGiven(graph_error(code, &v)));
+    }
+    let Some(id) = v["value"][0]["id"].as_str().map(str::to_owned) else {
+        return Ok(Transcripts::NotGiven("Teams doesn't give this meeting to your account".into()));
+    };
+    let list = graph_get(&token, &format!("{GRAPH}/me/onlineMeetings/{}/transcripts", urlencode(&id)))?;
+    let mut out = vec![];
+    for t in list["value"].as_array().into_iter().flatten() {
+        let Some(tid) = t["id"].as_str() else { continue };
+        if !content {
+            out.push(json!({"id": tid, "created": t["createdDateTime"], "ended": t["endDateTime"]}));
+            continue;
+        }
+        let (code, vtt) = graph_raw(&token, &format!("{GRAPH}/me/onlineMeetings/{}/transcripts/{}/content?$format=text/vtt", urlencode(&id), urlencode(tid)))?;
+        if code != 200 {
+            bail!("the transcript can't be read: {}", graph_error(code, &serde_json::from_str(&vtt).unwrap_or_default()));
+        }
+        out.push(json!({"id": tid, "created": t["createdDateTime"], "ended": t["endDateTime"], "vtt": vtt}));
+    }
+    out.sort_by(|a, b| a["created"].as_str().cmp(&b["created"].as_str()));
+    Ok(if out.is_empty() { Transcripts::None } else { Transcripts::Found(out) })
+}
+
+fn graph_error(code: u16, v: &Value) -> String {
+    let m = v["error"]["message"].as_str().unwrap_or("").trim();
+    match code {
+        401 | 403 => format!("Teams refused it (HTTP {code}{}) — an outside organiser's meeting, or the sign-in lacks OnlineMeetingTranscript.Read.All", if m.is_empty() { String::new() } else { format!(": {m}") }),
+        404 => "Teams doesn't give this meeting to your account".into(),
+        _ => format!("HTTP {code}{}", if m.is_empty() { String::new() } else { format!(": {m}") }),
+    }
+}
+
+/// GET whose answer isn't JSON (a transcript): its status and body.
+fn graph_raw(token: &str, url: &str) -> Result<(u16, String)> {
+    let mut child = Command::new("curl").no_window()
+        .args(["-sS", "-K", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("running curl")?;
+    let config = format!("url = {}\nheader = {}\nwrite-out = \"\\n%{{http_code}}\"\n", quote(url), quote(&format!("Authorization: Bearer {token}")));
+    child.stdin.take().unwrap().write_all(config.as_bytes())?;
+    let out = child.wait_with_output()?;
+    if !out.status.success() {
+        bail!("network error: {}", String::from_utf8_lossy(&out.stderr).trim());
+    }
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    let (body, code) = text.rsplit_once('\n').unwrap_or(("", &text));
+    Ok((code.trim().parse().unwrap_or(0), body.to_string()))
 }
 
 /// The meeting chat's id from a Teams join link: `/l/meetup-join/19%3ameeting_…%40thread.v2/…`.
