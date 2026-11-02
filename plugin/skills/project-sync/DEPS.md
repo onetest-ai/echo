@@ -1,7 +1,7 @@
 # Dependency pass — the whole tree in view
 
 Extraction looks at one item and the nodes in front of it, so it misses dependencies **across
-stories** (measured on a real engagement, the largest gap). Read the same items again with the
+stories** (the largest gap in testing). Read the same items again with the
 whole tree in view and propose only two ops (schema and the quote rule as in EXTRACT.md):
 
 - `link` — `node` can't finish (or start) until `depends_on` does. Both existing stories or tasks,

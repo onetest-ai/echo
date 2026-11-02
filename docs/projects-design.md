@@ -32,7 +32,7 @@ A project is the scope all of these hang on, and the place where work said in ca
 | Mail | Needed once tasks and the brain integrate (threads continue what calls start). Built later, opted in separately. |
 | Local folders | A project's folders become sources and part of the brain. Built later. |
 | Task tracking | **Port taska** into Echo now (Rust, no Python), as the engine behind projects. |
-| Ideas from an assistant prototype | Concepts only, in our own words: the repository has no license. Never its code or prompts. |
+| Ideas from an unlicensed assistant prototype | Concepts only, in our own words: it has no license. Never its code or prompts. |
 | Verified changes | **Apply by themselves**, each on the Timeline with Undo (an undone change isn't made again; pinned fields are never touched). |
 | To review | **Inside Projects**: a row with a count on top of the project list, a badge on the activity; each project's own items also in its tabs. |
 | Backfill | **Automatic, the last 20 calls** of a new project, oldest first, stoppable; older ones on request. A call is evidence by its transcript (plus its minutes, chat and notes when there are any), so calls without minutes are processed too. |

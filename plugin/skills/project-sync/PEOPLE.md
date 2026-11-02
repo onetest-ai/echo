@@ -18,7 +18,7 @@ are checked) and **who they are** (`about`, a short description you rewrite from
 
 ## What to propose (`field`)
 - `role` — what they do in this engagement, in a few words ("sponsor", "approver", "security review",
-  "day-to-day contact", "CX stream lead"). Only when the words say it ("Dana owns the budget", "I'll
+  "day-to-day contact", "operations stream lead"). Only when the words say it ("Dana owns the budget", "I'll
   sign it off"). A role is never an event: "asked for access on 30.10" is a `fact`; when someone's
   current role in people-context reads as an event, or a later item clearly says they now do
   something else, propose the role that fits — it replaces the old one (shown as "was …"). A role
@@ -32,7 +32,7 @@ are checked) and **who they are** (`about`, a short description you rewrite from
 - `group` — their **workstream in this thread** (the org chart's column): what part of the work they
   are in ("data migration", "testing"; "governance" is not one — that's `role`). Propose it whenever
   the words or their role tie them to a stream: "<X> stream lead", work they own or report on in that
-  stream ("Ravi's team does the integration", an OMS architect in the Technology stream). Use the
+  stream ("Ravi's team does the integration", an architect in the Technology stream). Use the
   stream names the thread already has — saved groups and "<X> stream" roles in people-context — and
   never invent one when an existing name fits.
 - `reports_to` — `value` is the manager's name as people-context spells it ("Ravi reports to me now").

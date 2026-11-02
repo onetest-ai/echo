@@ -170,7 +170,7 @@ tracks it in the event-tracking run loop mode, the event loop keeps running, and
 the pointer (`tray::menu_open`; the rebuild comes on the first tick after it closes).
 macOS needs the event loop on the main thread, so `run_loop` runs on a worker thread.
 Prompts follow `config.scheduled` (calendar meetings) and `config.unscheduled` (other calls), each
-`ask` | `manual`; this user uses `manual` for both — nothing prompts, the user arms explicitly.
+`ask` | `manual`; with `manual` for both nothing prompts and the user arms explicitly.
 `scripts/build-plugin.sh` must replace `plugin/bin/echoctl` by rename, never overwrite in place:
 macOS SIGKILLs (exit 137) a binary rewritten in place.
 
@@ -330,7 +330,7 @@ from `imported_at` (`notes::auto_due`), so an old meeting gets them. **Needs you
 min) `teams_transcript::scan` checks the last 3 days' ended Teams meetings of open threads with no call
 (`<home>/.echo/teams-transcripts.json`, the calendar's answers too: rechecked hourly until a day after the end, kept 30
 days) and offers each
-one with a transcript once (Import · Not this → `dismissed`). Measured 2026-11-02: a 7-minute follow-up organised by a colleague (85 cues, 3 chat messages) and a 32-min call (149 cues, ~31K chars, 8 chat messages).
+one with a transcript once (Import · Not this → `dismissed`). Measured: a short and a half-hour meeting, each with its cues and chat messages.
 
 ## Projects (`projects.rs`; plan and phases: `docs/projects-design.md`)
 **The window calls them Threads** (the activity, + Thread, New thread, the palette, Settings — the user's word, since
@@ -436,8 +436,8 @@ thread's calls on that chat left out (the call's item has them), only the user's
 the thread's client (the Brain's `senders` list; others wait there; an author not looked up yet holds the day), one
 evidence item a day `chat-<sha8 of chat>-<day>` (kind `chat`, turns at local HH:MM:SS, files shared named), written
 once the chat has been quiet for `SETTLE`. State per chat in `ledger/chats.json` (read_at, days, found, error), shown
-on the source's chip. `project ledger <id> sync --chats` reads them by hand. Measured on one thread (2026-10-30):
-4 days of messages between its two calls, among them a blocker (an IP to whitelist) said nowhere in a call.
+on the source's chip. `project ledger <id> sync --chats` reads them by hand. Measured on one thread:
+days of messages between its calls held a blocker said nowhere in a call.
 **A client's page** (`#client/<id>/<tab>`, `/api/client/<id>` = `tasks::client`): Overview — its description (the
 user's Markdown, `projects/clients/<id>.md`, edited in place like a thread's Brief: IPC `project {op: client_brief}`) and
 a card per thread (stage, calls, stories done, open tasks by pile with the late ones, the last 3 decisions, open risks
@@ -597,7 +597,7 @@ without it).
   (`route`, Brain's `render_pages` rule on PDF pages): thin text (< 220) with no table, ≥ 60 vector paths, or ≥ 28 with
   < 1000 chars → the page reader. Decks and Word files with figures are measured and rendered on LibreOffice's PDF of
   them (`render.rs`, `soffice --convert-to pdf`, own profile, once per file version in the assets; slide N = page N,
-  checked) — the slides' own XML misjudged half of 328 real slides (free text boxes, divider lines); their text and
+  checked) — the slides' own XML misjudged half of the slides in a sample of real-world decks (free text boxes, divider lines); their text and
   tables still come from the XML. No LibreOffice → slides indexed from their text (`degraded`). **Page reader**
   (`vision.rs`): Claude on the default profile's minutes model (`livenotes::complete_vision`: images as content blocks
   over stream-json input, no tools) or a vision endpoint (Settings → Brain → Documents: Ollama `/api/chat` /
@@ -681,11 +681,10 @@ without it).
   Brain sync when its workbooks, config or catalog changed (`numbers::refresh`, `inputs` hash). MCP `list_metrics`,
   `get_metric` (grain, entity / entity_like, month(s); `other_reported_values`, `restated` / `conflicting`,
   `merged_from`, `caveats` — notes written beside the table, Brain's `scan_notes`: a lone sentence ≥ 40 chars right of
-  the header run past a blank column, in `fact_notes`; matched the client's Brain's one note exactly), `get_metric_history` —
-  accepted clients only. `entity_regex` (tolerant_long) cleans an entity's encoding by its first group. Measured on one client: with its Brain's own config
-  Echo's build matched its facts value for value (17,802 of 17,817; the rest: files Brain had and this folder doesn't,
-  and 5 April repeat-caller figures Brain never rebuilt); Claude's own proposal with repair rounds recovered 90% of
-  them (FCR 99.6%, NPS 96%, adjustments and call volume ~100%) in ~4 minutes. `echoctl brain numbers
+  the header run past a blank column, in `fact_notes`), `get_metric_history` —
+  accepted clients only. `entity_regex` (tolerant_long) cleans an entity's encoding by its first group. Measured on a sample set of reporting
+  workbooks: with a Brain's own config Echo's build matched its facts value for value (the few left: files outside the
+  folder); Claude's own proposal with repair rounds recovered about 90% of them in ~4 minutes. `echoctl brain numbers
   profile|propose|import|accept|build|show|list|get` (`--root` reads a folder instead of the client's threads').
 - **History** (Brain's `supersede_before`, per thread: `Project.history_before`, Profile → History, `project set
   --history-before`): after each sync `store::supersede` marks the sections of documents, posts and mail dated before
@@ -732,8 +731,8 @@ without it).
   variants, group), `split` (a name becomes a term of its own), `rename`, `merge` (`into_layer: shared`), `scope`. The
   view gives each term its topics and each topic its terms (sections they share, no model). The Terms tab is the
   dictionary: search over every name, groups with counts, A–Z within; the panel defines, regroups, splits, merges,
-  moves. Measured on the real store (a copy): 172 terms, 34 free kinds → 8 groups, 68 with synonyms, 51 with
-  spellings, 11 names shared by clients offered up; merging one (in 3 layers) dropped only its duplicate mentions.
+  moves. Measured on a working store (a copy): free kinds folded into 8 groups, names shared by clients offered up;
+  merging one (in 3 layers) dropped only its duplicate mentions.
 **Graphs** (2026-11-02): the Brain's Graph and People are drawn by Sigma.js 4 (WebGL) over graphology, vendored in
 `ui/vendor/` (`GraphView` in app.js): laid out once per data set — ForceAtlas2 run in the page (never its worker:
 the CSP), then noverlap —, kept across renders (the camera too), labels where they fit (the biggest first), hover lights
@@ -768,8 +767,8 @@ the rest dims (plain hex colours: WebGL reads no CSS), the camera flies to them;
   in `echoctl vocab`, never inside a run; a copy in `.echo/learned-before-taxonomy.json`), `vocab::learned_all`
   reading both meanwhile; Settings → Vocabulary forgets one (`forget_learned`: a learned-only term goes, a known one
   loses its scope). Transcription's, so it works with the Brain switched off; thread glossaries no longer learn
-  them. Measured: 43 learned terms → 13, 12 and 8 in three clients' layers, 10 shared, most merged into terms the
-  taxonomy knew (Dial9, Flow Studio, Codemie).
+  them. Measured: the learned terms spread over the clients' layers and the shared one, most merged into terms the
+  taxonomy already knew.
   sections after a sync. The user's edits (`taxonomy edit`: accept, add, rename, merge, move, remove, set) make a new
   version; renames and merges keep tags through aliases, removals drop them. Transcription's hint reads the terms pinned
   to or mentioned in the call's threads (`projects::terms_for_meeting`). Measured: 11 calls → 19 topics, 102 terms, 285 of

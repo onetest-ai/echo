@@ -1296,13 +1296,13 @@ mod tests {
 
     #[test]
     fn replies_follow_the_question_they_answer() {
-        // From a real call: the answer was stamped 0.27 s before the question.
+        // The answer stamped 0.27 s before the question, as Whisper does.
         let seg = |speaker: &str, start: f64, end: f64, text: &str| Segment {
             speaker: speaker.into(), start, end, lang: "en".into(), text: text.into(), name: None, speaker_id: None, words: vec![],
         };
         let mut s = vec![
-            seg("me", 171.12, 176.28, "No, no, like, she's on leave, so..."),
-            seg("remote", 171.39, 174.43, "Yeah, is Priya joining or not?"),
+            seg("me", 171.12, 176.28, "No, no, she's out this week, so..."),
+            seg("remote", 171.39, 174.43, "Yeah, is Kim joining or not?"),
             seg("me", 182.0, 183.0, "Later."),
         ];
         order_turns(&mut s);
@@ -1348,10 +1348,10 @@ mod tests {
         assert!(!is_word_list("We need the export, the report, the cluster and the budget done by Friday, okay?"));
         assert!(!is_word_list("Да, да, конечно."));
         assert!(!is_word_list("Ну, смотри, я думаю, что это надо сделать завтра утром, до встречи с ними."));
-        let hint = "ServiceNow, Miro, IPAM, Ravi Mehta";
-        assert!(hint_adds_terms("Miro, IPAM, Ravi Mehta", "", hint));
+        let hint = "ServiceNow, Miro, IPAM, Marta Kowal";
+        assert!(hint_adds_terms("Miro, IPAM, Marta Kowal", "", hint));
         assert!(!hint_adds_terms("We moved it to ServiceNow", "We moved it to service now", hint));
-        assert!(hint_adds_terms("Ravi Mehta, Miro.", "Okay.", hint));
+        assert!(hint_adds_terms("Marta Kowal, Miro.", "Okay.", hint));
         assert!(!hint_adds_terms("Open Miro and draw it", "Open Miro and draw it", hint));
         assert!(!hint_adds_terms("Давай посмотрим", "Давай посмотрим", hint));
         assert!(is_silence(0.7, -0.2) && is_silence(0.3, -1.3) && !is_silence(0.3, -0.4) && !is_silence(0.1, -1.5));
@@ -1416,7 +1416,7 @@ mod tests {
         assert!(boost_is_heard("open it in ServiceNow", "open it in service now", &vocab));
         // The boost put a term over unrelated words: dropped.
         assert!(!boost_is_heard("и дальше Ха Flow Studio сами уточняют", "и дальше они сами уточняют", &vocab));
-        assert!(!boost_is_heard("this is Flow Studio in Springfield", "this is Lena in Springfield", &vocab));
+        assert!(!boost_is_heard("this is Flow Studio in Springfield", "this is Pat in Springfield", &vocab));
         // Nothing added: nothing to check.
         assert!(boost_is_heard("same words", "same words", &vocab));
         assert_eq!(latin("Сервіс Нау"), "servisnau");

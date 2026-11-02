@@ -1469,8 +1469,8 @@ mod tests {
 
         let nw = add_client("Northwind", &["@Northwind.example".into()], false).unwrap();
         assert_eq!(nw.domains, vec!["northwind.example"]);
-        let p = create("Aurora · agent hub", Some(&nw.id), None).unwrap();
-        assert_eq!((p.id.as_str(), p.stage), ("aurora-agent-hub", Stage::Active));
+        let p = create("Aurora · data hub", Some(&nw.id), None).unwrap();
+        assert_eq!((p.id.as_str(), p.stage), ("aurora-data-hub", Stage::Active));
         let p = update(&p.id, |p| {
             p.rules = vec![
                 Rule::Series { subject: "aurora weekly".into(), series_id: None },

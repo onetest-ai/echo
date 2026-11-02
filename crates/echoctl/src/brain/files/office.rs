@@ -416,15 +416,15 @@ mod tests {
     fn teams_transcripts_in_word() {
         let x = |s: &str| xml::parse(s).unwrap();
         let body = x(r#"<w:body>
-            <w:p><w:r><w:t>Customer Service Strategy</w:t></w:r></w:p>
-            <w:p><w:r><w:t>October 2, 2026</w:t></w:r></w:p>
-            <w:p><w:r><w:t>42m 10s</w:t></w:r></w:p>
+            <w:p><w:r><w:t>Weekly planning</w:t></w:r></w:p>
+            <w:p><w:r><w:t>March 3, 2026</w:t></w:r></w:p>
+            <w:p><w:r><w:t>31m 05s</w:t></w:r></w:p>
             <w:p><w:r><w:t>Ana Lopez started transcription</w:t></w:r></w:p>
             <w:p><w:r><w:drawing><wp:posOffset>12345</wp:posOffset></w:drawing></w:r><w:r><w:t>Ana Lopez</w:t></w:r><w:r><w:t>0:05</w:t></w:r><w:r><w:t>We start with the IVR.</w:t></w:r></w:p>
             <w:p><w:r><w:t>Bo Chen  1:02:07 The budget is approved.</w:t></w:r></w:p>
         </w:body>"#);
         let (pre, t) = teams_turns(&body).unwrap();
-        assert_eq!(pre, vec!["Customer Service Strategy", "October 2, 2026", "42m 10s"]);
+        assert_eq!(pre, vec!["Weekly planning", "March 3, 2026", "31m 05s"]);
         assert_eq!(t, vec![(5.0, Some("Ana Lopez".into()), "We start with the IVR.".into()), (3727.0, Some("Bo Chen".into()), "The budget is approved.".into())]);
         // Otter: the name and clock on a line of their own, the words after.
         let otter = x(r#"<w:body><w:p><w:r><w:t>SPEAKERS</w:t></w:r></w:p><w:p><w:r><w:t>Speaker 1  00:03</w:t></w:r></w:p><w:p><w:r><w:t>You're on.</w:t></w:r></w:p><w:p><w:r><w:t>Can you see it?</w:t></w:r></w:p><w:p><w:r><w:t>Speaker 2  00:09</w:t></w:r></w:p><w:p><w:r><w:t>Yes.</w:t></w:r></w:p></w:body>"#);

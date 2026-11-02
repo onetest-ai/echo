@@ -31,25 +31,25 @@ skills and anything else that speaks Brain's MCP tools work on Echo's Brain unch
 | marts from Excel (pandas) | later, from folder spreadsheets (calamine) | needed once folders come in |
 | VLM page / frame transcription | later, a Claude job over page images of folder documents (and Echo's kept frames) | folders' slides and scans |
 
-## Checked against a real Brain (one client's v6, built by the Python bundle; a reference, not migrated)
+## Checked against a Brain built by the Python bundle (a reference, not migrated)
 
-| Brain (v6) | Echo | Status |
+| Brain (Python) | Echo | Status |
 |---|---|---|
 | `chunks` (all columns), `chunks_fts`, `related`, `chunk_topics`, `chunk_verdicts`, `graph_nodes` / `graph_edges` / `graph_aliases`, `brain_schema`, `documents` | same; Echo adds a section's `link` and `refs`, a document's kind, title, date, refs, and `scopes` (client / thread) | kept |
 | `chunks_vec` (vec0) | a plain table of unit vectors searched in Rust | equivalent |
 | `meta` name, goal, audience, taxonomy_sha256 | written with each taxonomy version | kept |
 | `entity_kind` nodes; entities in `current.json` by kind | entity-kind nodes, and each term a node (`term__…`) under its kind, with `mentions` edges | kept, richer |
 | `current.json` goal, summary, intent tree, descriptions, aliases, history, demoted, review_flags | topics (with descriptions), terms (with variants), summary, demoted, review_flags (near-duplicate topics / terms), aliases, history | kept |
-| entity kinds of its own (system, segment, initiative, branch, region, rsr…) | open kinds (the model's or the user's) | to do with the per-client layer |
+| entity kinds of its own (system, segment, initiative, region…) | open kinds (the model's or the user's) | to do with the per-client layer |
 | `sources` + `synced_files` (registry of original files: path, sha, size, type, removed) | with folders (phase 5) | later |
-| `page_render` (1,668 pages read by a model) | with folders (phase 5) | later |
-| `facts`, `fact_versions`, `fact_reports`, `fact_merges`, `fact_notes`; `metrics` (382 in v6) | the numbers lane with folders (phase 5) | later |
+| `page_render` (pages read by a model) | with folders (phase 5) | later |
+| `facts`, `fact_versions`, `fact_reports`, `fact_merges`, `fact_notes`; `metrics` | the numbers lane with folders (phase 5) | later |
 | `date_superseded`, status SUPERSEDED | newer revisions of a file (phase 5) | later |
-| `memory_*` (assertions, questions) | empty in v6; covered by the work ledger and Insights | not carried |
+| `memory_*` (assertions, questions) | unused there; covered by the work ledger and Insights | not carried |
 
-Lessons from v6's `brain.toml`: sources are read in place (`import` from the OneDrive folder); curated with reasons —
+Lessons from its `brain.toml`: sources are read in place (`import` from a synced folder); curated with reasons —
 format twins dropped (PDF kept over PPTX), internal stand-ups and status calls excluded because evals scored better
-without them (3.32 vs 3.11). In Echo, a client's scope keeps internal calls out of its answers; a thread's folders get
+without them. In Echo, a client's scope keeps internal calls out of its answers; a thread's folders get
 include / exclude patterns with reasons, and twins are dropped; a question set per client can score a rebuild.
 
 ## Sources and identity
@@ -151,10 +151,9 @@ Each phase ends with the usual checks and a run on the user's real data.
 
 ## Phase 4 as built (2026-10-30)
 Teams channels and mail are thread sources (`brain/sources.rs`), read into the index and linked back, never copied.
-Measured on this account: one client's domain rule found 12 conversations — all calendar invites, mass training mail or
-the user's own address at that domain — so those three are filtered and the rule keeps 1 real thread; that client team's
-General had only system events; another client team's General gave 36 posts (98 sections, embedded in ~20 s, tagged
-by that client's layer in 30 s, 23 left as small talk). Searching that client now finds channel posts beside its calls.
+Measured on a test account: a domain rule first matched mostly calendar invites, mass mailings and the user's own address
+at that domain — so those three are filtered; a team's General channel gave a few dozen posts (embedded in ~20 s, tagged
+in ~30 s, some left as small talk). Searching that client now finds channel posts beside its calls.
 Graph notes: `participants:` KQL → 500 (`OrFilter`); `cc:` matches loosely; channel messages need `$expand=replies`.
 
 ## Phase 5: thread folders — Brain's document lane, ported (plan, 2026-10-30)
@@ -193,12 +192,12 @@ threads is in both.
   calls).
 
 ### Phase 5 as built and measured (2026-10-30)
-On one client's OneDrive folder (117 files): every reader read every file without an error. Routing, measured
-against Brain's own rule on LibreOffice's PDFs of the 15 decks that convert (328 slides): the rule flags 41%; a rule
+On a sample folder of consulting documents (a hundred-odd files): every reader read every file without an error. Routing,
+measured against Brain's own rule on LibreOffice's PDFs of the decks: the rule flags about 40% of slides; a rule
 from the slides' XML disagreed on half of them (consulting decks put text in free boxes and draw divider lines), so
-slides are routed on the PDF — the XML still gives their exact text and tables. PDFs: 36% of 647 pages flagged.
-Spreadsheets: one section per row turned 42 books into 14.4M characters; reporting books (a sheet over 200 rows) now
-keep their schema and first rows (39K characters for the 1.2M one). On a test folder of 10 files (a twin, a hidden
+slides are routed on the PDF — the XML still gives their exact text and tables. PDFs: about a third of pages flagged.
+Spreadsheets: one section per row turned a few dozen books into millions of characters; reporting books (a sheet over
+200 rows) now keep their schema and first rows (tens of thousands of characters for the largest). On a test folder of 10 files (a twin, a hidden
 file, a lock file, an excluded file): the first sync read 48 of 60 flagged pages with Claude (4 a request, ~4 a minute)
 and indexed 6 documents (552 sections) in 13.5 minutes; the second read the other 12 in under 3 minutes; the third
 changed nothing (1.3 s). Readings keep tables as exact grids. Removing the folder removed its documents and kept the
@@ -206,10 +205,8 @@ page cache (re-adding costs no model).
 
 ## The numbers lane (2026-10-30)
 Brain's `tabular-semantic-layer` ported (`brain/numbers/`), its config format kept so a Brain `families.<corpus>.json`
-imports as is. Checked against that client's Brain: with its own config, Echo's build reproduced its 17,802 comparable facts
-exactly (adjustments, call volume, FCR, NPS, scorecards; wide_month, tolerant_long, collisions with weighted means,
-rollups); the only differences were files outside this folder and 5 April repeat-caller values Brain had from an
-earlier version of the workbook (not in the file any more). Claude's proposal from Echo's profiles: first pass 25% of
-FCR and 65% of NPS (the profile showed one file per series: template drift unseen); with the series' other files'
-headers and two audit-driven repair rounds, 90% overall (FCR 99.6%, NPS 96%); the scorecards differ by design (it read
-the Region Scorecard sheet, Brain's config the NPS sheets). Nothing is served until the user accepts the families.
+imports as is. Checked against a Brain built on a sample set of reporting workbooks: with its own config, Echo's build reproduced its
+comparable facts exactly (wide_month, tolerant_long, collisions with weighted means, rollups); the only differences were
+files outside the folder and values Brain had from an earlier version of a workbook. Claude's proposal from Echo's
+profiles: a first pass recovered a quarter to two thirds of a series (the profile showed one file per series: template
+drift unseen); with the series' other files' headers and two audit-driven repair rounds, about 90% overall. Nothing is served until the user accepts the families.

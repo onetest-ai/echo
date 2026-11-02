@@ -260,7 +260,7 @@ fn split_by_timeline(segs: &mut Vec<Segment>, tl: &crate::speaking::Timeline) {
 /// were lit for — at least 3 words, at least 60 % of its named words, and named words at least
 /// a quarter of all its words. Several voices on one name keep that name: the speaker model splits
 /// one person into several voices far more often than two people share a room's tile (a 3-person
-/// call came out as 8 voices on 2026-10-29, "Pat (Speaker 1)" … "(Speaker 4)").
+/// call came out as 8 voices once, "Pat (Speaker 1)" … "(Speaker 4)").
 fn vote(segs: &[Segment], tl: &crate::speaking::Timeline) -> BTreeMap<u32, String> {
     let mut words: BTreeMap<u32, (usize, BTreeMap<String, usize>)> = BTreeMap::new();
     for s in segs.iter().filter(|s| s.speaker == "remote") {

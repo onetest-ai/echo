@@ -2363,7 +2363,7 @@ mod tests {
     fn a_chat_day_is_one_item_of_turns_at_local_time() {
         let m = |id: &str, at: &str, who: &str, html: &str, files: &[&str]| json!({"id": id, "createdDateTime": at, "from": {"user": {"id": "u1", "displayName": who}},
             "body": {"content": html}, "attachments": files.iter().map(|f| json!({"name": f})).collect::<Vec<_>>()});
-        let a = m("1", "2026-10-30T07:02:04Z", "Dana", "<p>IP needs to be <b>whitelisted</b></p>", &[]);
+        let a = m("1", "2026-10-30T07:02:04Z", "Dana", "<p>The test server needs a <b>firewall rule</b></p>", &[]);
         let b = m("2", "2026-10-30T08:00:00Z", "Sam", "", &["plan.pptx"]);
         let c = m("3", "2026-10-30T08:01:00Z", "Sam", "", &[]);
         let day = chrono::NaiveDate::from_ymd_opt(2026, 10, 30).unwrap();
@@ -2372,7 +2372,7 @@ mod tests {
         assert_eq!(item["kind"], "chat");
         let turns = item["turns"].as_array().unwrap();
         assert_eq!(turns.len(), 2, "an empty message without files is left out");
-        assert_eq!(turns[0]["text"], "IP needs to be whitelisted");
+        assert_eq!(turns[0]["text"], "The test server needs a firewall rule");
         assert_eq!(turns[1]["text"], "(shared plan.pptx)");
         assert_eq!(turns[0]["ts"].as_str().unwrap().len(), 8);
         assert!(item["text"].as_str().unwrap().contains("Sam shared plan.pptx"));

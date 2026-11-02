@@ -85,8 +85,8 @@ pub fn read(path: &Path) -> Result<Parsed> {
 /// Brain's `render_pages` rule: should this page go to the page reader, and why — thin text with no
 /// table (`thin-text`: a title, a picture, a pure diagram), ≥ 60 vector paths (`dense-draw`: a timeline
 /// or diagram, whatever its labels), or ≥ 28 with modest text (< 1000: `diagram`). Measured on PDF
-/// pages: slides and Word pages with figures are measured on LibreOffice's PDF of them (on 15 real
-/// consulting decks the slides' own XML misjudged half of them: free text boxes and divider lines
+/// pages: slides and Word pages with figures are measured on LibreOffice's PDF of them (on a sample of
+/// real-world decks the slides' own XML misjudged half of them: free text boxes and divider lines
 /// everywhere). A page that is a table we have the cells of is never sent for being thin.
 pub fn route(p: &Page) -> Option<&'static str> {
     let tl = p.text.trim().chars().count();

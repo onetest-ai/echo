@@ -13,7 +13,7 @@ const tests = []
 const test = (name, f) => tests.push([name, f])
 
 test('an identicon is 5×5, mirrored left to right, and the same for the same id', () => {
-  for (const id of ['aurora', 'helix-data-platform', 'orbit-hiring', 'x', 'globex-ai-agent-hub']) {
+  for (const id of ['aurora', 'helix-data-platform', 'orbit-hiring', 'x', 'globex-agent-hub']) {
     const c = ProjectArt.cells(id)
     assert.equal(c.length, 25)
     for (let r = 0; r < 5; r++) {
