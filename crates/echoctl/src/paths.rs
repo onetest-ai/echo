@@ -106,6 +106,14 @@ pub fn legacy_models_dir() -> PathBuf {
     state_dir().join("models")
 }
 
+/// The folder of the running program, links followed: `/usr/local/bin/echoctl` (`app install-cli`)
+/// is a link to `Echo.app/Contents/MacOS/echoctl`, and what ships beside it is found from there.
+#[cfg(any(feature = "transcribe", feature = "brain"))]
+pub fn exe_dir() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    dunce::canonicalize(&exe).unwrap_or(exe).parent().map(Path::to_path_buf)
+}
+
 /// Replace a file in one step (a temporary file of its own beside it, then a rename), so a reader
 /// never sees it half written and two writers never share a temporary file.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {

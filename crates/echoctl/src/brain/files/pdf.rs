@@ -15,7 +15,7 @@ fn candidates() -> Vec<PathBuf> {
     if let Some(d) = std::env::var_os("ECHOCTL_PDFIUM_DIR") {
         dirs.push(PathBuf::from(d));
     }
-    if let Some(exe_dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) {
+    if let Some(exe_dir) = paths::exe_dir() {
         if cfg!(target_os = "macos") {
             dirs.push(exe_dir.join("../Frameworks/pdfium"));
         }
