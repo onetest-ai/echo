@@ -320,7 +320,7 @@ pub fn auto_state(dir: &Path) -> Value {
         Due::Not(NotDue::Off) => json!({ "due": "off" }),
         Due::Not(NotDue::Before) => json!({ "due": "before" }),
         Due::Not(NotDue::NotReady) => json!({ "due": "not_ready" }),
-        Due::Not(NotDue::Tried) => json!({ "due": "tried" }),
+        Due::Not(NotDue::Tried) => json!({ "due": "tried", "held_by": claim_holder(dir) }),
     }
 }
 
@@ -702,11 +702,34 @@ fn in_progress(dir: &Path) -> bool {
     dir.join(crate::transcribe_marker()).exists() || crate::watch::running_watcher().and_then(|w| w.recording).is_some_and(|r| Path::new(&r) == dir)
 }
 
-/// A Claude Code session's fresh claim on the call (not one of Echo's runs: "echo notes").
+/// A live claim may sit this long without a sign of work on the call before it stops holding it.
+const CLAIM_QUIET: Duration = Duration::from_secs(5 * 60);
+
+/// A Claude Code session's claim that holds the call (not one of Echo's runs: "echo notes"; #43): it names its
+/// session and its process, that process is alive, and it is working — the claim is under 5 minutes old, or the
+/// call's minutes, action items or log changed since. A claim of an older plugin (a bare time) or of a session
+/// that went away holds nothing.
 pub(crate) fn session_claim(dir: &Path) -> bool {
+    claim_holder(dir).is_some()
+}
+
+/// Who holds the call by a live claim: `{pid, session, at}`.
+pub(crate) fn claim_holder(dir: &Path) -> Option<Value> {
     let marker = dir.join(calls::CLAIMED);
-    let fresh = fs::metadata(&marker).ok().and_then(|m| m.modified().ok()).and_then(|t| t.elapsed().ok()).is_some_and(|age| age < CLAIM_STALE);
-    fresh && !fs::read_to_string(&marker).is_ok_and(|t| t.contains("echo notes"))
+    let age = fs::metadata(&marker).ok()?.modified().ok()?.elapsed().ok()?;
+    if age >= CLAIM_STALE {
+        return None;
+    }
+    let v: Value = serde_json::from_str(fs::read_to_string(&marker).ok()?.trim()).ok()?;
+    let pid = v["pid"].as_u64()? as u32;
+    if !crate::app::process_alive(pid) {
+        return None;
+    }
+    let at = v["at"].as_str().and_then(|a| DateTime::parse_from_rfc3339(a).ok())?;
+    let since = |f: PathBuf| fs::metadata(f).and_then(|m| m.modified()).ok().map(DateTime::<Local>::from).is_some_and(|t| t > at);
+    let touched = since(dir.join("notes.md")) || since(dir.join(calls::ACTIONS)) || since(dir.join("claude.log"))
+        || fs::read_dir(dir).into_iter().flatten().flatten().any(|e| e.file_name().to_string_lossy().starts_with("actions.new") && since(e.path()));
+    (age < CLAIM_QUIET || touched).then(|| json!({"pid": pid, "session": v["session"], "at": v["at"]}))
 }
 
 /// Everything that must hold before Claude Code is started (said in words the user can act on).
@@ -1552,6 +1575,30 @@ pub(crate) fn describe(ev: &Value) -> Vec<String> {
 mod tests {
     use super::*;
 
+    /// A live session's claim: this test's own process holds it, now.
+    fn live_claim() -> String {
+        format!("{}\n", json!({"at": Local::now().to_rfc3339(), "pid": std::process::id(), "session": "s1", "by": "session"}))
+    }
+
+    #[test]
+    fn only_a_live_session_working_on_the_call_holds_it() {
+        let (_env, root) = crate::paths::testenv::folders("notes-ghost-claim");
+        let dir = root.join("home/calls/2026-10-23_100000-call");
+        fs::create_dir_all(&dir).unwrap();
+        // An older plugin's claim (a bare time, #43): it holds nothing.
+        fs::write(dir.join(calls::CLAIMED), format!("{}\n", Local::now().to_rfc3339())).unwrap();
+        assert!(!session_claim(&dir));
+        // A session that went away: nothing.
+        fs::write(dir.join(calls::CLAIMED), json!({"at": Local::now().to_rfc3339(), "pid": 999_999_u32, "session": "s1"}).to_string()).unwrap();
+        assert!(!session_claim(&dir));
+        // A live one: it holds the call, and the window can say who.
+        fs::write(dir.join(calls::CLAIMED), live_claim()).unwrap();
+        assert!(session_claim(&dir));
+        assert_eq!(claim_holder(&dir).unwrap()["pid"], std::process::id());
+        // And a claim without a session id is an older plugin's: refused.
+        assert!(calls::claim(&dir.display().to_string(), None, None).unwrap_err().to_string().contains("too old"));
+    }
+
     /// The pid of a process that has just exited (any fixed number could be a live process).
     fn dead_pid() -> u32 {
         let mut c = std::process::Command::new(if cfg!(windows) { "cmd" } else { "true" });
@@ -1603,7 +1650,7 @@ mod tests {
         assert_eq!(status(&dir).unwrap().state, "failed");
         // A session's claim is not ours to release.
         save(&dir, &Run { state: "running".into(), pid: Some(gone), ..Default::default() });
-        fs::write(dir.join(calls::CLAIMED), "2026-10-23T01:00:00+02:00\n").unwrap();
+        fs::write(dir.join(calls::CLAIMED), live_claim()).unwrap();
         assert_eq!(status(&dir).unwrap().state, "failed");
         assert!(dir.join(calls::CLAIMED).exists());
         // Claude Code from a run whose owner died still writes: still the only writer.
@@ -1669,12 +1716,12 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("echo-claim-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join(calls::CLAIMED), "2026-10-23T01:00:00+02:00\n").unwrap(); // a session's, fresh
+        fs::write(dir.join(calls::CLAIMED), live_claim()).unwrap(); // a session's, fresh
         save(&dir, &Run { state: "failed".into(), ..Default::default() }); // an earlier Echo run left its state
         assert!(claim(&dir, Intent::Auto).is_err(), "automatic minutes don't overwrite a session's fresh claim");
         claim(&dir, Intent::Explicit).unwrap(); // the user's Write minutes does
         assert!(fs::read_to_string(dir.join(calls::CLAIMED)).unwrap().contains("echo notes"));
-        fs::write(dir.join(calls::CLAIMED), "2026-10-23T01:00:00+02:00\n").unwrap();
+        fs::write(dir.join(calls::CLAIMED), live_claim()).unwrap();
         fs::write(dir.join("notes.md"), "# done").unwrap();
         claim(&dir, Intent::Auto).unwrap(); // its notes exist: a re-run may take over
         assert!(fs::read_to_string(dir.join(calls::CLAIMED)).unwrap().contains("echo notes"));
@@ -1956,7 +2003,7 @@ mod tests {
         save(&failed, &Run { state: "failed".into(), ..Default::default() });
         assert_eq!(auto_due(&failed, &cfg, now, None), Due::Not(NotDue::Tried));
         let session = closed_call(&root, "2026-10-23_170000-j", chrono::Duration::minutes(30));
-        fs::write(session.join(calls::CLAIMED), "2026-10-23T17:30:00+02:00\n").unwrap();
+        fs::write(session.join(calls::CLAIMED), live_claim()).unwrap();
         assert_eq!(auto_due(&session, &cfg, now, None), Due::Not(NotDue::Tried));
         // What a pane is told: wait for the app (where it can write them), or not.
         let ask = |d: &Path, cfg: &Config| auto_answer_from(d, None, true, || auto_due(d, cfg, Local::now(), None));

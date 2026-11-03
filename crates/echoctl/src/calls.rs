@@ -608,16 +608,21 @@ pub fn pending(session: Option<&Path>) -> Result<()> {
 /// is on or another session is writing them (a fresh claim on a call without minutes), so the same
 /// call is never processed twice at once; a claim left by a run that ended (Echo's keeps it once
 /// done), or an old one, is taken over — a session may write the minutes again.
-pub fn claim(call: &str, session: Option<&Path>) -> Result<()> {
+pub fn claim(call: &str, session: Option<&Path>, session_id: Option<&str>) -> Result<()> {
     if crate::notes::headless() {
         bail!("this is a run Echo started for one call; it was claimed already");
     }
+    // An Echo plugin from before live claims (#43): its claim would hold automatic minutes with nobody writing.
+    let Some(session_id) = session_id.filter(|s| !s.trim().is_empty()) else {
+        bail!("this Echo plugin is too old to claim a call: update it (Echo → Settings → Health) and restart Claude Code");
+    };
     if !session_allowed(session)? {
         bail!("this session isn't in the folder set by `echoctl config --notes-in`");
     }
     let dir = resolve_call(call)?;
     let marker = dir.join(CLAIMED);
-    let mine = format!("{}\n", chrono::Local::now().to_rfc3339());
+    // Who holds it: the Claude Code session (its process, for as long as it lives) and its id.
+    let mine = format!("{}\n", json!({"at": chrono::Local::now().to_rfc3339(), "pid": claude_ancestor(), "session": session_id.trim(), "by": "session"}));
     match fs::OpenOptions::new().write(true).create_new(true).open(&marker) {
         Ok(mut f) => {
             use std::io::Write;
@@ -636,6 +641,33 @@ pub fn claim(call: &str, session: Option<&Path>) -> Result<()> {
     }
     println!("{}", dir.display());
     Ok(())
+}
+
+/// The Claude Code process this command runs under (its Bash tool → a shell → echoctl): the first ancestor
+/// that isn't a shell or Echo itself. None when it can't be told.
+fn claude_ancestor() -> Option<u32> {
+    #[cfg(unix)]
+    {
+        let mut pid = std::os::unix::process::parent_id();
+        for _ in 0..8 {
+            let out = std::process::Command::new("ps").args(["-o", "ppid=,comm=", "-p", &pid.to_string()]).output().ok()?;
+            let line = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            let (ppid, comm) = line.split_once(char::is_whitespace)?;
+            let name = comm.trim().rsplit('/').next().unwrap_or("").trim_start_matches('-').to_lowercase();
+            if !["sh", "bash", "zsh", "dash", "fish", "echoctl", "env", "timeout"].contains(&name.as_str()) {
+                return Some(pid);
+            }
+            pid = ppid.trim().parse().ok()?;
+            if pid <= 1 {
+                return None;
+            }
+        }
+        None
+    }
+    #[cfg(not(unix))]
+    {
+        None
+    }
 }
 
 /// The user's own profile, read by every notes / follow-up step (`<home>/.echo/me.md`).
@@ -1536,18 +1568,18 @@ mod tests {
         fs::create_dir_all(&d).unwrap();
         fs::write(d.join("meta.json"), "{}").unwrap();
         let call = d.display().to_string();
-        claim(&call, None).unwrap();
+        claim(&call, None, Some("s1")).unwrap();
         // A session's fresh claim on a call without minutes: another session waits.
-        assert!(claim(&call, None).unwrap_err().to_string().contains("another Claude Code session"));
+        assert!(claim(&call, None, Some("s1")).unwrap_err().to_string().contains("another Claude Code session"));
         // Minutes written since (that session's, or Echo's run that keeps its claim once done):
         // a session may write them again.
         fs::write(d.join(CLAIMED), "2026-10-23T10:00:00+02:00 echo notes\n").unwrap();
         fs::write(d.join("notes.md"), "# Minutes\n").unwrap();
-        claim(&call, None).unwrap();
-        claim(&call, None).unwrap();
+        claim(&call, None, Some("s1")).unwrap();
+        claim(&call, None, Some("s1")).unwrap();
         // Echo's run of the call is on: no.
         fs::write(d.join(crate::notes::RUN), serde_json::to_vec(&json!({ "state": "running", "pid": std::process::id() })).unwrap()).unwrap();
-        assert!(claim(&call, None).unwrap_err().to_string().contains("Echo is writing"));
+        assert!(claim(&call, None, Some("s1")).unwrap_err().to_string().contains("Echo is writing"));
     }
 
     #[test]
