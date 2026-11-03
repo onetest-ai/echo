@@ -1114,7 +1114,11 @@ that isn't a JSON list is set aside as `actions.unreadable-<HHMMSS>.json` when a
 (`context` and the window say why meanwhile); ticks are `calls::set_action_status(id, status)`. A run is `done` only with `notes.md` written during
 it and this run's `.actions-generation`; then `notes-run.json` `minutes: {model, at, sha256}` (carried over by later
 runs) names the model on the page while `notes.md` still has that hash. `ECHOCTL_HEADLESS=1` inside: the mod
-does nothing, `pending`/`claim` refuse. A session's `claim` (by hand: `/echo:process-call`) fails only while Echo's run
+does nothing, `pending`/`claim` refuse. A session's claim is **live** (#43): `echoctl claim <call> --session <id>` records the session id and the Claude Code
+process it runs under; it holds a call only while that process lives and works on it (the claim under 15 min old, or the
+minutes, actions or log changed since) — a bare-time claim of an older plugin, or one whose session went away, holds
+nothing, and `claim` without `--session` is refused ("too old: update and restart Claude Code"); the Minutes tab says
+who holds it (`auto.held_by`) with Write minutes. A session's `claim` (by hand: `/echo:process-call`) fails only while Echo's run
 of the call is on or another session's fresh claim holds a call without minutes; a claim left by a finished run (Echo's
 keeps it once `done`) is taken over. The CLI hands the run to the running app
 (`notes-<call>.request`) unless `--wait` (Ctrl-C there stops its Claude Code too: `notes::shutdown`). The run uses the call's AI profile (launcher, model, strictness: above).

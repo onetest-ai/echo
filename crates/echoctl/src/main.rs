@@ -126,6 +126,9 @@ enum Cmd {
         /// The claiming session's folder: refused outside the one set by `config --notes-in`
         #[arg(long = "for")]
         session: Option<std::path::PathBuf>,
+        /// The claiming Claude Code session's id (required: an older plugin without it can't claim)
+        #[arg(long = "session")]
+        session_id: Option<String>,
     },
     /// Claude Code integration: status, or install the Echo plugin
     Claude {
@@ -1625,7 +1628,7 @@ fn main() -> Result<()> {
             Ok(())
         }
         Cmd::Pending { session } => calls::pending(session.as_deref()),
-        Cmd::Claim { call, session } => calls::claim(&call, session.as_deref()),
+        Cmd::Claim { call, session, session_id } => calls::claim(&call, session.as_deref(), session_id.as_deref()),
         Cmd::Claude { cmd } => match cmd {
             None => {
                 println!("{}", serde_json::to_string_pretty(&app::claude_status())?);
