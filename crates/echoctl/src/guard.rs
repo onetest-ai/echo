@@ -305,6 +305,11 @@ impl Scope {
                 if tool == "Read" && ps.skill.as_ref().is_some_and(|s| p.starts_with(s)) {
                     return Ok(());
                 }
+                // A pattern that climbs out is refused wherever it starts.
+                let pattern = if tool == "Glob" { input["pattern"].as_str() } else if tool == "Grep" { input["glob"].as_str() } else { None };
+                if let Some(g) = pattern.filter(|g| escapes(g)) {
+                    return Err(format!("the pattern {g} reaches outside the ledger"));
+                }
                 // The session's own saved output: a large thread's context Claude Code put aside (#39).
                 if own_results(call).is_some_and(|r| p.starts_with(&r)) {
                     return Ok(());
@@ -312,11 +317,7 @@ impl Scope {
                 if !self.inside(&p) {
                     return Err(format!("only this project's ledger can be read, not {}", p.display()));
                 }
-                let pattern = if tool == "Glob" { input["pattern"].as_str() } else if tool == "Grep" { input["glob"].as_str() } else { None };
-                match pattern {
-                    Some(g) if escapes(g) => Err(format!("the pattern {g} reaches outside the ledger")),
-                    _ => Ok(()),
-                }
+                Ok(())
             }
             "Edit" | "Write" => {
                 let raw = input["file_path"].as_str();
@@ -593,6 +594,8 @@ mod tests {
                                           "session_id": session, "transcript_path": claude.join("s9.jsonl").display().to_string()});
         assert!(s.judge(&read("s9")).is_ok(), "its own saved output");
         assert!(s.judge(&read("other")).is_err(), "not another session's");
+        let climb = json!({"tool_name": "Glob", "tool_input": {"path": results.display().to_string(), "pattern": "../../*.jsonl"}, "session_id": "s9", "transcript_path": claude.join("s9.jsonl").display().to_string()});
+        assert!(s.judge(&climb).is_err(), "a pattern climbing out of it");
         let _ = fs::remove_dir_all(&claude);
         assert!(ok("Bash", json!({"command": "echoctl notes latest"})).is_err());
         assert!(ok("Read", json!({"file_path": l.join("evidence/2026-10-28_110000.md")})).is_ok());
