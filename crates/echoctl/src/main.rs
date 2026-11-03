@@ -384,7 +384,7 @@ enum Cmd {
         /// Meeting context JSON with join_url
         meeting: std::path::PathBuf,
     },
-    /// Stop the current recording (or cancel an arm)
+    /// Stop the current recording (or, when nothing records, cancel the pending arm)
     Stop,
     /// Watcher / arm / agenda state as JSON
     Status,

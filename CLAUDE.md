@@ -140,6 +140,10 @@ The app (`app run`; `watch` is a hidden old alias) runs from login or `app start
 1 s: agenda (`.echo/agenda.json`) → `meeting_soon` at T−58 s…T+4 min; call presence = app
 holds the mic (2 s release debounce); records only when `.echo/armed.json` exists (written by
 `arm`/`join`, single-use, expires 15 min); stops on `stop.request` or 10 s after the call ended.
+An arm has an `id`; writing, cancelling, expiring and taking one hold `.echo/armed.lock`. A recording takes (removes)
+its arm as it starts, so an arm made during a recording — the next meeting's — survives its end and its Stop: Stop
+ends the recording only, and an arm pending then waits for the next call when this one goes on (`held_arm`).
+`echoctl stop` with nothing recording still cancels the pending arm.
 Events → `<home>/.echo/events.jsonl`; clients follow them (the mod, or `events --follow`).
 `config.scheduled` / `unscheduled` = `ask` → the app shows its own "Record?" dialog (osascript /
 WScript popup: Yes/No on Windows, `app::yes_no` — Yes = the default button, or the last one when the
