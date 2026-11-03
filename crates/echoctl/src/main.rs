@@ -488,6 +488,10 @@ enum Cmd {
         /// Write the page and API responses to a folder (review the UI in a browser)
         #[arg(long)]
         export: Option<std::path::PathBuf>,
+        /// (dev) Answer the page's requests live on 127.0.0.1:<port>, as the window does — review the UI in a
+        /// browser against real data (no IPC: clicks that send to the app do nothing)
+        #[arg(long, hide = true)]
+        serve: Option<u16>,
     },
     /// (build) Write the app icon: an .iconset folder for `iconutil`, or a Windows <file>.ico
     #[cfg(feature = "tray")]
@@ -1455,7 +1459,8 @@ fn main() -> Result<()> {
         #[cfg(feature = "tray")]
         Cmd::DevIcon { dir, from } => tray::write_iconset(&dir, from.as_deref()),
         #[cfg(feature = "tray")]
-        Cmd::Window { selftest, export } => match export {
+        Cmd::Window { selftest, export, serve } => match export {
+            _ if serve.is_some() => window::serve(serve.unwrap_or(0)),
             Some(dir) => window::export(&dir),
             None => {
                 anyhow::ensure!(selftest, "the window opens from the menu-bar icon (use --selftest to check it)");

@@ -456,26 +456,32 @@ const mark = (cls = '') => `<img class="logo ${cls}" src="assets/logo.png" alt="
 async function loadState() {
   try { S.state = await get('api/state') } catch { /* app restarting */ }
 }
-/** The calls list, a page at a time from the app (`/api/calls`, newest first): a refresh reads again as many as are
- *  loaded (at least a page), scrolling to the end loads the next page, a search asks the app. */
+/** The calls list, a page at a time from the app (`/api/calls`, newest first): a refresh reads only the first page
+ *  again and puts it on top of what is loaded (new calls, changed statuses) — never every loaded call; scrolling to the
+ *  end loads the next page; a search asks the app. `S.callsGen` drops an answer a newer search or reset made stale. */
 const CALLS_PAGE = 60
 const callsQuery = () => S.query.trim() ? `&q=${encodeURIComponent(S.query.trim())}` : ''
-async function loadCalls() {
-  const want = Math.max(CALLS_PAGE, (S.calls || []).length)
-  const q = S.query
+async function loadCalls(reset) {
+  const gen = S.callsGen = (S.callsGen || 0) + (reset ? 1 : 0)
   try {
-    const r = await get(`api/calls?limit=${want}${callsQuery()}`)
-    if (q !== S.query) return // a newer search is on its way
-    S.calls = r.calls; S.callsNext = r.next; S.callsTotal = r.total; S.error = null
+    const r = await get(`api/calls?limit=${CALLS_PAGE}${callsQuery()}`)
+    if (gen !== S.callsGen) return
+    const have = reset ? [] : (S.calls || [])
+    const last = r.calls.length ? r.calls[r.calls.length - 1].name : null
+    // What is loaded beyond the first page stays (older calls; a call gone from the top is dropped with it).
+    const rest = last && r.next ? have.filter((c) => c.name < last) : []
+    S.calls = [...r.calls, ...rest]
+    S.callsNext = rest.length ? S.callsNext : r.next
+    S.callsTotal = r.total; S.error = null
   } catch (e) { S.error = String(e) }
 }
 async function loadMoreCalls() {
   if (!S.callsNext || S.callsMore) return
   S.callsMore = true
-  const q = S.query, after = S.callsNext
+  const gen = S.callsGen, after = S.callsNext
   try {
     const r = await get(`api/calls?limit=${CALLS_PAGE}&before=${encodeURIComponent(after)}${callsQuery()}`)
-    if (q === S.query && after === S.callsNext) { S.calls = [...(S.calls || []), ...r.calls]; S.callsNext = r.next; S.callsTotal = r.total }
+    if (gen === S.callsGen && after === S.callsNext) { const seen = new Set((S.calls || []).map((c) => c.name)); S.calls = [...(S.calls || []), ...r.calls.filter((c) => !seen.has(c.name))]; S.callsNext = r.next; S.callsTotal = r.total }
   } catch { /* the next scroll asks again */ }
   S.callsMore = false
   render()
@@ -5549,7 +5555,11 @@ let lastPrint = ''
 /** Replace an element's content only when its HTML changed (keeps focus, selection, scroll and
  *  a frame's page where nothing changed). */
 function patch(el, html) {
-  if (el && el._html !== html) { el.innerHTML = html; el._html = html }
+  if (!el || el._html === html) return
+  // A region drawn again keeps where its scrolled lists were (the calls list loading its next page).
+  const kept = [...el.querySelectorAll('.rows, [data-keep-scroll]')].map((x) => x.scrollTop)
+  el.innerHTML = html; el._html = html
+  if (kept.some((t) => t > 0)) [...el.querySelectorAll('.rows, [data-keep-scroll]')].forEach((x, i) => { if (kept[i]) x.scrollTop = kept[i] })
 }
 
 // ── what the user sees, for Echo's Claude terminals (`view.rs`: a UserPromptSubmit hook adds it to
@@ -6128,7 +6138,8 @@ document.addEventListener('input', (e) => {
   if (e.target.id === 'q') {
     S.query = e.target.value
     clearTimeout(S.qT)
-    S.qT = setTimeout(async () => { S.calls = S.calls || []; S.callsNext = null; await loadCalls(); const at = e.target.selectionStart; render(); const i = $('#q'); if (i) { i.focus(); i.setSelectionRange(at, at) } }, 200)
+    // A new search starts at the top of its results.
+    S.qT = setTimeout(async () => { await loadCalls(true); const at = e.target.selectionStart; render(); const rows = $('.rows'); if (rows) rows.scrollTop = 0; const i = $('#q'); if (i) { i.focus(); i.setSelectionRange(at, at) } }, 200)
   }
   if (e.target.id === 'set-q') { S.setQuery = e.target.value; render() }
   if (e.target.id === 'learned-q') { S.learnedQuery = e.target.value; render() }

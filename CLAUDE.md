@@ -199,7 +199,7 @@ bar for now. wry (Tauri's webview crate: WKWebView / WebView2) on the tray's tao
 loop — not full Tauri (it would take over our loop, tray, packaging, updater). Content only via
 the `echo://` protocol (`http://echo.localhost` on Windows): compiled-in `ui/index.html`,
 `app.js`, `app.css` (vanilla, no npm/CDN; the octopus symbol is injected from
-`assets/octopus.svg`), `/api/{state,calls,agenda,call/<name>}` JSON (`/api/calls?limit=&before=<name>&q=` = a page, newest first, `{calls, next, total}` — `calls_page`, 60 a page, ≤ 500; the list loads the next page near its end and searches title, people and subject in the app; a refresh reads again as many as are loaded), `/file/<call>/frames/<img>`
+`assets/octopus.svg`), `/api/{state,calls,agenda,call/<name>}` JSON (`/api/calls?limit=&before=<name>&q=` = a page, newest first, `{calls, next, total}` — `calls_page`, 60 a page, ≤ 500; the list loads the next page near its end and searches title, people and subject in the app; a refresh reads the first page again and puts it on top of what is loaded; `patch` keeps a redrawn region's scrolled lists where they were; a new search starts at the top), `/file/<call>/frames/<img>`
 after a path check; strict CSP; everything rendered is escaped (chat/transcripts are others'
 text). **⌘K palette** (⌘K; Ctrl+K or Ctrl+Shift+P on Windows; status bar "Actions"; not while a terminal has the keys):
 actions on a target — the open call, the selected calendar event, or none (a chip; ⌫ on an empty box drops it) —
@@ -315,7 +315,7 @@ Closing the window keeps the app in the menu bar; macOS shows a Dock icon only w
 Claude: a call without them shows when they come, or the `/echo:process-call` command. Dev: `echoctl window
 --selftest` (opens the real webview, page fetches via echo:// and reports over IPC; a sandboxed test frame proves
 its IPC posts are dropped; the close handshake answers with its number),
-`echoctl window --export <dir>` (the same responses as files, each minutes page as `minutes/<call>/index.html`, to review the UI
+`echoctl window --serve <port>` (hidden: the page and its API answered live on 127.0.0.1 by `respond` — a browser against real or generated data, paging and search included; no IPC), `echoctl window --export <dir>` (the same responses as files, each minutes page as `minutes/<call>/index.html`, to review the UI
 in a browser through a static server).
 
 Calendar (window → Calendar): Day (today) and a rolling Week (yesterday, today, 5 days
