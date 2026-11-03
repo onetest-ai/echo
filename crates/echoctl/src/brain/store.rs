@@ -265,7 +265,7 @@ pub fn meta(c: &Connection, key: &str) -> Option<String> {
     c.query_row("SELECT value FROM meta WHERE key = ?1", [key], |r| r.get(0)).optional().ok().flatten()
 }
 
-fn set_meta(c: &Connection, key: &str, value: &str) -> Result<()> {
+pub(crate) fn set_meta(c: &Connection, key: &str, value: &str) -> Result<()> {
     c.execute("INSERT INTO meta(key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value", params![key, value])?;
     Ok(())
 }

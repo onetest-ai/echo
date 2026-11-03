@@ -553,10 +553,7 @@ pub fn build_graph(c: &Connection, t: &Taxonomy, before: Option<&Taxonomy>) -> R
         tx.execute("DELETE FROM chunk_topics WHERE category_id = ?1", [&g])?;
         tx.execute("DELETE FROM graph_edges WHERE target = ?1 AND rel IN ('about', 'mentions')", [&g])?;
     }
-    let sha: String = {
-        use sha2::Digest;
-        sha2::Sha256::digest(serde_json::to_vec(t).unwrap_or_default()).iter().map(|b| format!("{b:02x}")).collect()
-    };
+    let sha = taxonomy_sha(t);
     let shared = t.layers.get(SHARED).cloned().unwrap_or_default();
     let goal = if shared.goal.is_empty() { goal() } else { shared.goal };
     for (k, v) in [("taxonomy_version", t.version.to_string()), ("taxonomy_sha256", sha), ("goal", goal), ("audience", "the user (their own calls)".to_string()), ("name", "Echo — the user's calls".to_string())] {
@@ -570,6 +567,8 @@ pub fn build_graph(c: &Connection, t: &Taxonomy, before: Option<&Taxonomy>) -> R
         Some(b) => mentions_of(c, t, &changed_terms(b, t))?,
         None => mentions(c, t)?,
     }
+    // Done: the store's mentions are this version's (else the next sync redoes them, `mentions_after_sync`).
+    store::set_meta(c, "mentions_for", &taxonomy_sha(t))?;
     Ok(())
 }
 
@@ -602,27 +601,63 @@ fn word_in_lower(h: &str, n: &str) -> bool {
 /// each). `term_scan` remembers the text each section was read in, so a sync reads only what changed
 /// (`mentions_changed`) and an edit only the terms it changed (`mentions_of`).
 pub fn mentions(c: &Connection, t: &Taxonomy) -> Result<()> {
-    let idx = NameIndex::new(t);
     let tx = c.unchecked_transaction()?;
     tx.execute_batch(TERM_SCAN)?;
     tx.execute("DELETE FROM chunk_topics WHERE kind = 'term'", [])?;
     tx.execute("DELETE FROM graph_edges WHERE rel = 'mentions'", [])?;
     tx.execute("DELETE FROM term_scan", [])?;
-    scan_chunks(&tx, t, &idx, "")?;
     tx.commit()?;
+    scan_unread(c, t)?;
     Ok(())
 }
 
-/// After a sync: the sections new or changed since they were last read for terms (their old mentions dropped).
+/// After a sync (`brain::sync`): the sections written since they were last read for terms (every write of a
+/// section clears its `term_scan` row). Under the taxonomy's lock, with its current version; when the store's
+/// mentions aren't that version's (an edit that stopped half way, a store from before `mentions_for`), all of them
+/// again (`build_graph`).
+pub fn mentions_after_sync(c: &Connection) -> Result<usize> {
+    let _lock = write_lock()?;
+    let Some(t) = current() else { return Ok(0) };
+    if store::meta(c, "taxonomy_sha256").is_none() || store::meta(c, "mentions_for").as_deref() != Some(taxonomy_sha(&t).as_str()) {
+        build_graph(c, &t, None)?;
+        return Ok(0);
+    }
+    mentions_changed(c, &t)
+}
+
+/// The sections not read for terms since they were last written (their old mentions dropped).
 pub fn mentions_changed(c: &Connection, t: &Taxonomy) -> Result<usize> {
-    let idx = NameIndex::new(t);
-    let tx = c.unchecked_transaction()?;
-    tx.execute_batch(TERM_SCAN)?;
+    c.execute_batch(TERM_SCAN)?;
+    // Every section read (as many rows as sections, and none of a section gone): nothing to do — a count, not a scan.
+    let (chunks, read): (i64, i64) = c.query_row("SELECT (SELECT count(*) FROM chunks), (SELECT count(*) FROM term_scan)", [], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    if chunks == read && c.query_row("SELECT NOT EXISTS (SELECT 1 FROM term_scan WHERE chunk_id NOT IN (SELECT id FROM chunks) LIMIT 1)", [], |r| r.get::<_, bool>(0))? {
+        return Ok(0);
+    }
     // Sections gone: their scan state goes too (their tags went with them).
-    tx.execute("DELETE FROM term_scan WHERE chunk_id NOT IN (SELECT id FROM chunks)", [])?;
-    let n = scan_chunks(&tx, t, &idx, "WHERE NOT EXISTS (SELECT 1 FROM term_scan s WHERE s.chunk_id = c.id AND s.sha = coalesce(c.sha, ''))")?;
-    tx.commit()?;
-    Ok(n)
+    c.execute("DELETE FROM term_scan WHERE chunk_id NOT IN (SELECT id FROM chunks)", [])?;
+    scan_unread(c, t)
+}
+
+/// Read every section without a `term_scan` row (or read in another text), 20,000 a transaction: a first read of
+/// millions never holds the store for minutes.
+fn scan_unread(c: &Connection, t: &Taxonomy) -> Result<usize> {
+    let idx = NameIndex::new(t);
+    let mut n = 0;
+    loop {
+        let tx = c.unchecked_transaction()?;
+        let k = scan_chunks(&tx, t, &idx, "WHERE NOT EXISTS (SELECT 1 FROM term_scan s WHERE s.chunk_id = c.id AND s.sha = coalesce(c.sha, '')) LIMIT 20000")?;
+        tx.commit()?;
+        n += k;
+        if k < 20000 {
+            return Ok(n);
+        }
+    }
+}
+
+/// A taxonomy's identity (its whole content): the graph's `taxonomy_sha256`, the mentions' `mentions_for`.
+fn taxonomy_sha(t: &Taxonomy) -> String {
+    use sha2::Digest;
+    sha2::Sha256::digest(serde_json::to_vec(t).unwrap_or_default()).iter().map(|b| format!("{b:02x}")).collect()
 }
 
 const TERM_SCAN: &str = "CREATE TABLE IF NOT EXISTS term_scan(chunk_id INTEGER PRIMARY KEY, sha TEXT NOT NULL);";
@@ -683,15 +718,12 @@ fn scan_chunks(tx: &Connection, t: &Taxonomy, idx: &NameIndex, filter: &str) -> 
     let mut tag = tx.prepare("INSERT INTO chunk_topics(chunk_id, category_id, category_label, kind) VALUES (?1, ?2, ?3, 'term')")?;
     let mut edge = tx.prepare("INSERT INTO graph_edges(source, target, rel) VALUES (?1, ?2, 'mentions')")?;
     let mut done = tx.prepare("INSERT OR REPLACE INTO term_scan(chunk_id, sha) VALUES (?1, ?2)")?;
-    let incremental = !filter.is_empty();
     let mut n = 0;
     let mut rows = st.query([])?;
     while let Some(r) = rows.next()? {
         let (cid, text, sha, cl): (i64, String, String, Option<String>) = (r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?);
-        if incremental {
-            del.execute([cid])?;
-            del_e.execute([format!("chunk:{cid}")])?;
-        }
+        del.execute([cid])?;
+        del_e.execute([format!("chunk:{cid}")])?;
         let clients: BTreeSet<&str> = cl.as_deref().unwrap_or("").split('\u{1f}').filter(|x| !x.is_empty()).collect();
         for i in idx.found(&text) {
             let tm = &t.terms[i];
@@ -2442,6 +2474,13 @@ mod tests {
         mentions_changed(&c, &current().unwrap()).unwrap();
         edit(&json!({"op": "remove", "term": true, "name": "Pilot desk", "layer": "globex"})).unwrap();
         assert!(!full().iter().any(|x| x.1 == "term__globex__pilot_desk"));
+        // An edit that stopped half way (its version saved, its mentions not): the next sync's step redoes them.
+        let good = full();
+        assert_eq!(mentions_after_sync(&c).unwrap(), 0, "in step: nothing to read");
+        c.execute("DELETE FROM chunk_topics WHERE category_id = 'term__merchant_portal'", []).unwrap();
+        store::set_meta(&c, "mentions_for", "an older version").unwrap();
+        mentions_after_sync(&c).unwrap();
+        assert_eq!(full(), good);
     }
 
     #[test]

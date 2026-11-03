@@ -511,7 +511,7 @@ async function loadPeople() {
 async function loadThreadBrain() {
   const id = S.pj.sel
   if (!id) return
-  try { const d = await get(`api/brain?thread=${encodeURIComponent(id)}`); d.thread = id; if (S.pj.sel === id) S.pj.tbrain = d } catch { /* no Brain in this build */ }
+  try { const d = await get(`api/brain?thread=${encodeURIComponent(id)}`); d.thread = id; if (S.pj.sel === id) S.pj.tbrain = d; noteEditErrors(d) } catch { /* no Brain in this build */ }
 }
 async function loadFound() {
   try { S.pj.foundData = await get('api/found') } catch { /* app restarting */ }
@@ -4311,15 +4311,18 @@ const BRAIN_TABS = [['topics', 'Topics'], ['terms', 'Terms'], ['people', 'People
 const brainQuery = () => { const [k, v] = (S.br.scope || '').split(':'); return k && v ? `?${k}=${encodeURIComponent(v)}` : '' }
 async function loadBrain() {
   const q = brainQuery()
-  try { const d = await get('api/brain' + q); d.q = q; S.br.data = d } catch { /* app restarting */ }
+  const before = S.br.data ? `${S.br.data.q}|${(S.br.data.taxonomy || {}).version}|${(S.br.data.status || {}).chunks}` : ''
+  try { const d = await get('api/brain' + q); d.q = q; S.br.data = d; noteEditErrors(d) } catch { /* app restarting */ }
+  const now = S.br.data ? `${S.br.data.q}|${(S.br.data.taxonomy || {}).version}|${(S.br.data.status || {}).chunks}` : ''
   // The topics graph again when the scope, the taxonomy or the store changed (a sync, a rename); the sets opened stay.
   const gv = `${((S.br.data || {}).taxonomy || {}).version}|${((S.br.data || {}).status || {}).chunks}`
   if (S.br.tab === 'graph' && (!S.br.graph || S.br.graph.q !== q || S.br.graph.v !== gv)) {
     try { const g = await get('api/brain/browse/graph' + q); g.q = q; g.v = gv; if (!S.br.graph || S.br.graph.q !== q) S.br.gsets = []; S.br.graph = g } catch { /* app restarting */ }
   }
-  // Sources and the dictionary read their pages again (a sync or an edit changed them).
-  if (S.br.tab === 'sources' && S.br.src && S.br.src.key === q) { S.br.src.groups = null; S.br.src.lists = {} }
-  if (S.br.tab === 'terms' && S.br.dict) { S.br.dict.head = null; S.br.dict.lists = {} }
+  // Sources and the dictionary read their pages again only when a sync or an edit changed them (else they keep
+  // the pages shown and the letter picked).
+  if (before !== now && S.br.src && S.br.src.key === q) { S.br.src.groups = null; S.br.src.lists = {} }
+  if (before !== now && S.br.dict) { S.br.dict.head = null; S.br.dict.lists = {} }
   if (S.br.tab === 'numbers') { try { S.br.numbers = await get('api/brain/numbers') } catch { /* app restarting */ } }
   if (S.br.tab === 'people') await loadBrainPeople()
   if (S.br.node) await loadBrainNode()
@@ -4420,7 +4423,7 @@ function brainTopics(tx) {
  *  terms: the app sends a page at a time (`browse::terms`). */
 function termsState() {
   const key = brainQuery() + '|' + ((S.br.data || {}).taxonomy || {}).version
-  if (!S.br.dict || S.br.dict.key !== key) { termById.clear(); S.br.dict = { key, head: null, open: S.br.dict ? S.br.dict.open : new Set(), lists: {}, q: S.br.dict ? S.br.dict.q : '' } }
+  if (!S.br.dict || S.br.dict.key !== key) { termById.clear(); S.br.dict = { key, head: null, open: S.br.dict ? S.br.dict.open : new Set(), lists: {}, letters: S.br.dict ? S.br.dict.letters : {}, q: S.br.dict ? S.br.dict.q : '' } }
   return S.br.dict
 }
 const termById = new Map()
@@ -4439,7 +4442,9 @@ async function loadDictTerms(k, more, letter) {
   const p = new URLSearchParams({ limit: '50' })
   if (k === 'q') p.set('q', s.q)
   else p.set('group', k.slice(2))
-  const from = letter !== undefined ? letter : cur ? cur.letter : ''
+  // The letter picked stays when the group is read again (after an edit or a sync).
+  const from = letter !== undefined ? letter : cur ? cur.letter : (s.letters || {})[k] || ''
+  s.letters = { ...(s.letters || {}), [k]: from }
   if (from) p.set('letter', from)
   const offset = more && cur ? cur.items.length : 0
   if (offset) p.set('offset', String(offset))
@@ -4924,7 +4929,7 @@ function brainGraph() {
     ${sets.length ? `<div class="br-graph-bar">${sets.map(chip).join('')}</div>` : ''}<div class="br-graph-bar">${legend}</div><div class="br-graph" id="br-graph"></div>
     <p class="set-foot">Topics first. Click a topic: its sources fan out (the 50 most tagged with it). Click a client, or zoom in on its topics: its sources fill in. At most ${GRAPH_MAX} sources on screen. Scroll to zoom, drag to move; hover for a node's links.</p>`
 }
-function graphKey(g) { return `brain|${g.q}|${g.nodes.length}|${g.edges.length}|${g.nodes.slice(0, 3).map((n) => n.id).join(',')}` }
+function graphKey(g) { return `brain|${g.q}|${g.v || ''}|${g.nodes.length}|${g.edges.length}|${g.nodes.slice(0, 3).map((n) => n.id).join(',')}` }
 function graphColors(g) {
   const layers = [...new Set(g.nodes.map((n) => n.layer).filter((l) => l && l !== 'shared'))]
   return (c) => c && c !== '-' && c !== 'shared' && layers.indexOf(c) >= 0 ? CLIENT_COLORS[layers.indexOf(c) % CLIENT_COLORS.length] : '#8a8a95'
@@ -5285,19 +5290,21 @@ function brainDocPanel() {
 PANEL_VIEWS.push({ id: 'brain-doc', label: 'Source', icon: ICON('<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/>'), area: 'right', when: () => S.view === 'brain' && !!S.br.doc, render: brainDocPanel })
 PANEL_VIEWS.push({ id: 'brain-node', label: 'Topic', icon: ICON('<circle cx="12" cy="12" r="3"/><circle cx="5" cy="6" r="2"/><circle cx="19" cy="7" r="2"/><circle cx="7" cy="19" r="2"/><path d="M9.5 10.5 6.6 7.4M14.6 10.6l2.8-2.4M10.2 14.2l-2 3.3"/>'), area: 'right', when: () => S.view === 'brain' && !!S.br.node, render: brainNodePanel })
 
+/** The edit errors this page has seen (numbered by the app): an edit shows only one newer than these. */
+function noteEditErrors(d) { const n = ((d || {}).edit_error || {}).n || 0; if (n > (S.br.errSeen || 0)) S.br.errSeen = n }
 /** The user's edit: the app makes the new version in the background (a large Brain takes seconds); the page
  *  reads the Brain again until it is done, and says why when it couldn't be done. */
-function brainEdit(body) {
-  const seen = (((S.br.data || {}).edit_error) || {}).n || 0
+function brainEdit(body, reload = loadBrain, data = () => S.br.data) {
+  const seen = S.br.errSeen || 0
   send({ cmd: 'brain_taxonomy', body })
   S.br.edit = null
   // Until it is saved, the panel offers no edit of what it shows (a form would start from the values before it).
   S.br.saving = true
   render()
   let tries = 0
-  const again = () => loadBrain().then(() => {
-    const d = S.br.data || {}
-    if (d.edit_error && d.edit_error.n > seen) { S.br.saving = false; window.echo.notice(d.edit_error.text); return render() }
+  const again = () => reload().then(() => {
+    const d = data() || {}
+    if (d.edit_error && d.edit_error.n > seen) { S.br.saving = false; noteEditErrors(d); window.echo.notice(d.edit_error.text); return render() }
     const running = (d.topic_jobs || []).includes('edit:taxonomy') && ++tries < 150
     if (!running) S.br.saving = false
     render()
@@ -5660,8 +5667,7 @@ document.addEventListener('keydown', (e) => {
     // A term for this thread in the Brain (its client's layer, pinned to it): the taxonomy supersedes the glossary.
     if (what === 'bterm' && v && S.pj.sel) {
       const p = S.pj.detail || {}
-      send({ cmd: 'brain_taxonomy', body: { op: 'add', term: true, name: v, layer: p.client || 'shared', threads: [S.pj.sel] } })
-      setTimeout(() => loadThreadBrain().then(render), 400)
+      brainEdit({ op: 'add', term: true, name: v, layer: p.client || 'shared', threads: [S.pj.sel] }, loadThreadBrain, () => S.pj.tbrain)
     }
     if (what === 'rule') {
       const kind = ($('#pj-add-kind') || {}).value || 'series'
