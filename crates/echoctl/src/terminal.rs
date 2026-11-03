@@ -12,7 +12,7 @@ use std::io::{Read as _, Write as _};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 
 /// Scrollback the app keeps per terminal.
@@ -73,6 +73,10 @@ struct Term {
     changed: Condvar,
     /// The AI profile whose lease it holds (a Claude session).
     profile: Option<String>,
+    /// What a Claude session loaded at start that Claude Code reads only then (#44): `(what, fingerprint)`.
+    loaded: Vec<(String, String)>,
+    /// Stopped by Echo (closed, restarted): its exit isn't Claude Code refusing a conversation.
+    stopped: std::sync::atomic::AtomicBool,
     /// What must live as long as the program: a Claude session's profile lease.
     _hold: Mutex<Option<Box<dyn Send>>>,
 }
@@ -150,6 +154,8 @@ pub fn open_with(key: &str, mut cmd: CommandBuilder, cols: u16, rows: u16, hold:
         child: Mutex::new(child),
         out: Mutex::new(Ring::default()),
         changed: Condvar::new(),
+        loaded: if key.starts_with("claude:") { loaded_now(profile.as_deref(), key.starts_with("claude:folder")).into_iter().map(|(w, f, _)| (w, f)).collect() } else { vec![] },
+        stopped: std::sync::atomic::AtomicBool::new(false),
         profile,
         _hold: Mutex::new(hold),
     });
@@ -170,7 +176,7 @@ pub fn open_with(key: &str, mut cmd: CommandBuilder, cols: u16, rows: u16, hold:
         term.out.lock().unwrap_or_else(|e| e.into_inner()).exited = true;
         term._hold.lock().unwrap_or_else(|e| e.into_inner()).take(); // the lease goes with the program
         term.changed.notify_all();
-        if let Some(f) = on_exit {
+        if let Some(f) = on_exit.filter(|_| !term.stopped.load(std::sync::atomic::Ordering::SeqCst)) {
             f(started.elapsed());
         }
     })?;
@@ -211,16 +217,43 @@ pub fn resize(id: u64, cols: u16, rows: u16) -> Result<()> {
 }
 
 /// End a terminal (its program is stopped) and forget it.
+/// Keys whose closed program is still being stopped: a new one for the same key waits (the same conversation
+/// must never run twice).
+static STOPPING: Mutex<BTreeMap<String, usize>> = Mutex::new(BTreeMap::new());
+
+/// Is a program of `key` still being stopped.
+pub fn stopping(key: &str) -> bool {
+    STOPPING.lock().unwrap_or_else(|e| e.into_inner()).get(key).is_some_and(|n| *n > 0)
+}
+
 pub fn close(id: u64) {
     let term = TERMS.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
     if let Some(t) = term {
+        t.stopped.store(true, std::sync::atomic::Ordering::SeqCst);
         let mut child = t.child.lock().unwrap_or_else(|e| e.into_inner());
         // Its whole process group: the login shell, Claude Code and what it started (MCP servers)
         // — one of them left holding the terminal would keep its profile's lease.
-        if let Some(pid) = child.process_id() {
-            std::thread::spawn(move || crate::ai::stop_group(pid));
+        let tree = child.process_id();
+        if let Some(pid) = tree {
+            let key = t.key.clone();
+            *STOPPING.lock().unwrap_or_else(|e| e.into_inner()).entry(key.clone()).or_default() += 1;
+            let term = t.clone();
+            std::thread::spawn(move || {
+                crate::ai::stop_group(pid);
+                // Windows: the root goes only after its tree (`taskkill /T` needs it to find the rest).
+                let _ = term.child.lock().unwrap_or_else(|e| e.into_inner()).kill();
+                let mut s = STOPPING.lock().unwrap_or_else(|e| e.into_inner());
+                if let Some(n) = s.get_mut(&key) {
+                    *n = n.saturating_sub(1);
+                    if *n == 0 {
+                        s.remove(&key);
+                    }
+                }
+            });
         }
-        let _ = child.kill();
+        if cfg!(unix) || tree.is_none() {
+            let _ = child.kill();
+        }
         drop(child);
         t.out.lock().unwrap_or_else(|e| e.into_inner()).exited = true;
         t.changed.notify_all();
@@ -231,6 +264,84 @@ pub fn close(id: u64) {
 pub fn close_all() {
     let ids: Vec<u64> = TERMS.lock().unwrap_or_else(|e| e.into_inner()).keys().copied().collect();
     ids.into_iter().for_each(close);
+}
+
+/// The open terminals with what a Claude session among them hasn't loaded: `{id, key, exited, stale}` —
+/// `stale` = `{at, what}`, the first of what Claude Code reads only at start that is different now (#44) — and the
+/// keys still being stopped (`{key, stopping: true}`).
+pub fn list_value() -> serde_json::Value {
+    type Row = (u64, String, bool, Option<String>, Vec<(String, String)>);
+    let terms: Vec<Row> = TERMS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .map(|(id, t)| (*id, t.key.clone(), t.out.lock().unwrap_or_else(|e| e.into_inner()).exited, t.profile.clone(), t.loaded.clone()))
+        .collect();
+    let mut out: Vec<serde_json::Value> = terms.into_iter().map(|(id, key, exited, profile, loaded)| {
+        let stale = (!exited && key.starts_with("claude:")).then(|| {
+            let now = loaded_now(profile.as_deref(), key.starts_with("claude:folder"));
+            now.into_iter().find(|(what, f, _)| loaded.iter().find(|(w, _)| w == what).is_none_or(|(_, g)| g != f))
+        }).flatten();
+        serde_json::json!({"id": id, "key": key, "exited": exited, "stale": stale.map(|(what, _, at)| serde_json::json!({"at": at.map(|t| chrono::DateTime::<chrono::Local>::from(t).to_rfc3339()), "what": what}))})
+    }).collect();
+    for key in STOPPING.lock().unwrap_or_else(|e| e.into_inner()).keys() {
+        out.push(serde_json::json!({"key": key, "stopping": true}));
+    }
+    serde_json::Value::Array(out)
+}
+
+/// What a session on `profile` loads only at start, by content: Echo's plugin as installed in that profile's Claude
+/// Code (its `echo@…` entries — not the file, which any plugin install rewrites), and for the folder session the
+/// skills Echo's plugins give it. `(what changed, fingerprint, when)`.
+fn loaded_now(profile: Option<&str>, folder: bool) -> Vec<(String, String, Option<std::time::SystemTime>)> {
+    use sha2::Digest as _;
+    let hash = |b: &[u8]| sha2::Sha256::digest(b).iter().take(8).map(|x| format!("{x:02x}")).collect::<String>();
+    let mtime = |f: &Path| std::fs::metadata(f).and_then(|m| m.modified()).ok();
+    let mut out = vec![];
+    let installed = profile.and_then(claude_folder).unwrap_or_else(own_claude_folder).join("plugins/installed_plugins.json");
+    let v: serde_json::Value = std::fs::read(&installed).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    let echo: Vec<(&String, &serde_json::Value)> = v["plugins"].as_object().into_iter().flatten().filter(|(k, _)| k.starts_with("echo@")).collect();
+    out.push(("Echo's plugin for Claude Code was updated".to_string(), hash(serde_json::json!(echo).to_string().as_bytes()), mtime(&installed)));
+    if folder {
+        for d in crate::grants::session_plugins() {
+            let mut files = vec![];
+            collect_files(&d, 3, &mut files);
+            files.sort();
+            let mut h = sha2::Sha256::new();
+            for f in &files {
+                h.update(f.strip_prefix(&d).unwrap_or(f).to_string_lossy().as_bytes());
+                h.update(std::fs::read(f).unwrap_or_default());
+            }
+            let name = d.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let at = files.iter().filter_map(|f| mtime(f)).max();
+            out.push((format!("Skills from the {name} plugin changed"), h.finalize().iter().take(8).map(|x| format!("{x:02x}")).collect(), at));
+        }
+    }
+    out
+}
+
+/// The files under `dir`, `depth` levels down.
+fn collect_files(dir: &Path, depth: u32, out: &mut Vec<PathBuf>) {
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        if e.file_type().is_ok_and(|t| t.is_dir()) {
+            if depth > 0 {
+                collect_files(&e.path(), depth - 1, out);
+            }
+        } else {
+            out.push(e.path());
+        }
+    }
+}
+
+/// The user's own Claude Code folder: `CLAUDE_CONFIG_DIR` when Echo has it, else `~/.claude`.
+fn own_claude_folder() -> PathBuf {
+    std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from).filter(|p| p.is_absolute()).unwrap_or_else(|| paths::user_home().join(".claude"))
+}
+
+/// A Claude account profile's own Claude Code folder (None: the user's own, `~/.claude`).
+fn claude_folder(profile: &str) -> Option<PathBuf> {
+    let p = ai::Settings::load().ok()?.get(profile).ok()?;
+    (p.kind == ai::Kind::Claude).then(|| p.config_folder())
 }
 
 /// The open terminals: `(id, key, exited)`.
@@ -265,7 +376,120 @@ fn session_ids() -> BTreeMap<String, String> {
     std::fs::read(sessions_file()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
 }
 
+fn history_file() -> PathBuf {
+    paths::state_dir().join("session-history.json")
+}
+
+/// Every conversation started for a key (newest last): `{key: [{id, at}]}` — what Conversations ▾ lists (#44).
+fn history() -> BTreeMap<String, Vec<serde_json::Value>> {
+    std::fs::read(history_file()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+}
+
+/// One writer of the session files at a time (exit handlers run on their own threads).
+static SESSIONS_LOCK: Mutex<()> = Mutex::new(());
+
+fn remember(key: &str, id: &str) {
+    let _one = SESSIONS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut all = history();
+    let list = all.entry(key.to_string()).or_default();
+    if list.iter().any(|e| e["id"] == id) {
+        return;
+    }
+    list.push(serde_json::json!({"id": id, "at": chrono::Local::now().to_rfc3339()}));
+    let n = list.len();
+    if n > 30 {
+        list.drain(..n - 30);
+    }
+    if let Ok(bytes) = serde_json::to_vec_pretty(&all) {
+        let _ = std::fs::create_dir_all(paths::state_dir());
+        let _ = paths::write_atomic(&history_file(), &bytes);
+    }
+}
+
+/// Which conversation the next start of `store_key` takes (#44): `new` — a fresh one (the current stays in the
+/// list); an id from its list — that one again; anything else — as it is (resume the current).
+fn choose_session(store_key: &str, pick: Option<&str>) -> Result<()> {
+    match pick {
+        None | Some("") => Ok(()),
+        Some("new") => {
+            set_session(store_key, None);
+            Ok(())
+        }
+        Some(id) if history().get(store_key).is_some_and(|l| l.iter().any(|e| e["id"] == id)) => {
+            set_session(store_key, Some(id));
+            Ok(())
+        }
+        Some(_) => Err(anyhow!("that conversation isn't one of this panel's")),
+    }
+}
+
+/// The store key of the folder session on `profile` (the default when none).
+pub fn folder_store_key(profile: Option<&str>) -> String {
+    format!("{}:folder", profile.map(str::to_owned).unwrap_or_else(ai::default_id))
+}
+
+/// The store key of the session on the call in `dir` (its own profile).
+pub fn call_store_key(dir: &Path) -> Result<String> {
+    Ok(format!("{}:{}", ai::call_profile_id(dir)?, calls::stamp_of(dir)))
+}
+
+/// The conversations of a panel, newest first: `{id, at, title, current}` — title = its first prompt of the user's
+/// (from Claude Code's own transcript on that profile).
+pub fn conversations(store_key: &str) -> serde_json::Value {
+    let current = session_ids().get(store_key).cloned();
+    let profile = store_key.split(':').next().unwrap_or("");
+    let cfg = claude_folder(profile).unwrap_or_else(own_claude_folder);
+    let mut list = history().remove(store_key).unwrap_or_default();
+    // Only conversations Claude Code kept (one refused or never used has no transcript), and the current one.
+    list.retain(|e| e["id"].as_str().is_some_and(|id| current.as_deref() == Some(id) || transcript(&cfg, id).is_some()));
+    if let Some(c) = &current {
+        if !list.iter().any(|e| e["id"] == c.as_str()) {
+            list.push(serde_json::json!({"id": c, "at": null}));
+        }
+    }
+    list.reverse();
+    serde_json::Value::Array(list.into_iter().map(|e| {
+        let id = e["id"].as_str().unwrap_or("").to_string();
+        let title = first_prompt(&cfg, &id);
+        serde_json::json!({"id": id, "at": e["at"], "title": title, "current": current.as_deref() == Some(id.as_str())})
+    }).collect())
+}
+
+/// A conversation's transcript in a Claude Code folder (any project of it).
+fn transcript(cfg: &Path, id: &str) -> Option<PathBuf> {
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
+        return None;
+    }
+    std::fs::read_dir(cfg.join("projects")).ok()?.flatten().map(|d| d.path().join(format!("{id}.jsonl"))).find(|f| f.is_file())
+}
+
+/// The first thing the user asked in a conversation (not Echo's own opening, hooks' or commands' text), ≤ 90 chars.
+fn first_prompt(cfg: &Path, id: &str) -> Option<String> {
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
+        return None;
+    }
+    let file = transcript(cfg, id)?;
+    use std::io::BufRead as _;
+    let reader = std::io::BufReader::new(std::fs::File::open(file).ok()?);
+    for line in reader.lines().take(400).map_while(Result::ok) {
+        let v: serde_json::Value = serde_json::from_str(&line).unwrap_or_default();
+        if v["type"] != "user" || v["isMeta"] == true {
+            continue;
+        }
+        let content = &v["message"]["content"];
+        let text = content.as_str().map(str::to_owned).or_else(|| content.as_array().and_then(|a| a.iter().find_map(|b| (b["type"] == "text").then(|| b["text"].as_str().map(str::to_owned)).flatten())));
+        let Some(t) = text.map(|t| t.trim().to_string()).filter(|t| !t.is_empty() && !t.starts_with('<') && !t.starts_with("You are in Echo")) else { continue };
+        let one: String = t.split_whitespace().collect::<Vec<_>>().join(" ");
+        return Some(if one.chars().count() > 90 { format!("{}…", one.chars().take(89).collect::<String>()) } else { one });
+    }
+    None
+}
+
 fn set_session(key: &str, id: Option<&str>) {
+    if let Some(id) = id {
+        remember(key, id);
+    }
+    let _one = SESSIONS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut all = session_ids();
     match id {
         Some(id) => all.insert(key.to_string(), id.to_string()),
@@ -303,19 +527,35 @@ fn session_args(store_key: &str) -> (Vec<String>, bool, OnExit) {
             (vec!["--session-id".to_string(), id], false)
         }
     };
+    // Only the conversation this run started with, and only while it is still the panel's (Echo stopping it
+    // never counts: `Term::stopped`).
+    let started = args[1].clone();
     let forget: OnExit = Box::new(move |ran| {
-        if ran < Duration::from_secs(4) {
+        if ran < Duration::from_secs(4) && session_ids().get(&key) == Some(&started) {
             set_session(&key, None);
         }
     });
     (args, resumed, forget)
 }
 
+/// A live session already on `key`: a second one would run the same conversation twice.
+fn running_already(key: &str) -> Result<()> {
+    if list().iter().any(|(_, k, exited)| k == key && !exited) {
+        bail!("Claude is already running in this panel");
+    }
+    Ok(())
+}
+
 /// The Echo folder session, on `profile` (the default when none).
-pub fn start_folder(key: &str, profile: Option<&str>, cols: u16, rows: u16) -> Result<u64> {
+pub fn start_folder(key: &str, profile: Option<&str>, pick: Option<&str>, cols: u16, rows: u16) -> Result<u64> {
+    running_already(key)?;
+    if stopping(key) {
+        bail!("the previous session is still stopping — try again in a moment");
+    }
     let id = profile.map(str::to_owned).unwrap_or_else(ai::default_id);
     let ready = ai::ready(&id)?;
     let p = ready.profile().clone();
+    choose_session(&format!("{}:folder", p.id), pick)?;
     let (mut args, _, forget) = session_args(&format!("{}:folder", p.id));
     if let Some(m) = (p.kind == ai::Kind::Local).then(|| p.notes_model()).flatten() {
         args.extend(["--model".into(), m]);
@@ -361,7 +601,11 @@ pub fn start_folder(key: &str, profile: Option<&str>, cols: u16, rows: u16) -> R
 
 /// The guarded session on the call in `dir`, on the call's own profile. Only one at a time: another
 /// call's session ends (it resumes by id when opened again).
-pub fn start_call(key: &str, dir: &Path, cols: u16, rows: u16) -> Result<u64> {
+pub fn start_call(key: &str, dir: &Path, pick: Option<&str>, cols: u16, rows: u16) -> Result<u64> {
+    running_already(key)?;
+    if stopping(key) {
+        bail!("the previous session is still stopping — try again in a moment");
+    }
     let dir = dunce::canonicalize(dir)?;
     let ready = ai::for_call(&dir)?;
     let p = ready.profile().clone();
@@ -416,6 +660,7 @@ pub fn start_call(key: &str, dir: &Path, cols: u16, rows: u16) -> Result<u64> {
             args.extend(["--model".into(), m]);
         }
     }
+    choose_session(&format!("{}:{}", p.id, calls::stamp_of(&dir)), pick)?;
     let (session, resumed, forget) = session_args(&format!("{}:{}", p.id, calls::stamp_of(&dir)));
     args.extend(session);
     if !resumed {
@@ -491,6 +736,45 @@ fn claude_new_enough() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_panel_starts_a_new_conversation_and_goes_back_to_an_old_one() {
+        let (_env, root) = crate::paths::testenv::folders("terminal-conversations");
+        let key = "system:folder";
+        let (first, ..) = session_args(key);
+        let one = first[1].clone();
+        assert_eq!(first[0], "--session-id");
+        // New conversation: the next start is a fresh id; the first stays in the list.
+        choose_session(key, Some("new")).unwrap();
+        let (second, ..) = session_args(key);
+        assert_eq!(second[0], "--session-id");
+        assert_ne!(second[1], one);
+        let ids: Vec<String> = conversations(key).as_array().unwrap().iter().map(|c| c["id"].as_str().unwrap().to_string()).collect();
+        // Listed only when Claude Code kept them (a transcript), or the current one.
+        assert_eq!(ids, vec![second[1].clone()], "the first has no transcript yet");
+        // Back to the first: resumed by id; one that isn't this panel's is refused.
+        choose_session(key, Some(&one)).unwrap();
+        assert_eq!(session_args(key).0, vec!["--resume".to_string(), one.clone()]);
+        assert!(choose_session(key, Some("00000000-0000-4000-8000-000000000000")).is_err());
+        // A run refused at once forgets only the conversation it started with, while it is still the panel's: one
+        // switched to meanwhile stays.
+        let (_, _, forget) = session_args(key);
+        choose_session(key, Some(&second[1])).unwrap();
+        forget(Duration::from_secs(1));
+        assert_eq!(session_ids().get(key), Some(&second[1]));
+        choose_session(key, Some(&one)).unwrap();
+        // Its title: the user's first prompt, not Echo's opening or a hook's text.
+        let cfg = root.join("claude-cfg");
+        std::fs::create_dir_all(cfg.join("projects/-x")).unwrap();
+        let lines = [
+            serde_json::json!({"type": "user", "message": {"content": "You are in Echo, on the call"}}),
+            serde_json::json!({"type": "user", "message": {"content": "<command-name>/clear</command-name>"}}),
+            serde_json::json!({"type": "user", "message": {"content": [{"type": "text", "text": "What did we agree   with Acme?"}]}}),
+        ].iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
+        std::fs::write(cfg.join(format!("projects/-x/{one}.jsonl")), lines).unwrap();
+        assert_eq!(first_prompt(&cfg, &one).as_deref(), Some("What did we agree with Acme?"));
+        assert_eq!(first_prompt(&cfg, "../../etc"), None);
+    }
 
     #[test]
     fn the_ring_numbers_bytes_and_keeps_the_last_ones() {

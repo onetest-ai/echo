@@ -653,6 +653,21 @@ p.alt { text-align: center; margin-top: 4px; }
 .term-slot .term, .term-slot .xterm { height: 100%; }
 .term-bar { display: flex; align-items: center; gap: 8px; padding: 6px 12px; font-size: 12px; color: var(--text-2); border-bottom: 1px solid var(--line); flex: none; }
 .term-bar .grow { flex: 1; }
+/* a Claude panel's conversations (#44) */
+.term-head { padding: 4px 10px; }
+.term-tools { display: flex; gap: 6px; align-items: center; }
+.btn.sm { height: 24px; padding: 0 9px; font-size: 12px; }
+.conv-wrap { position: relative; }
+.conv-menu { right: 0; left: auto; top: 28px; width: 340px; max-height: min(240px, 30vh); overflow: auto; }
+.conv-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+.conv-item.on { background: var(--accent-soft); }
+.conv-t { overflow: hidden; text-overflow: ellipsis; }
+.conv-w { color: var(--text-3); font-size: 11.5px; }
+.conv-empty { padding: 8px 10px; color: var(--text-3); font-size: 12px; }
+.term-stale { display: flex; align-items: center; gap: 10px; padding: 6px 12px; font-size: 12.5px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--warn, #f0a24a) 10%, transparent); flex: none; }
+.term-stale .grow { flex: 1; }
+.term-ask { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.term-stale .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn, #f0a24a); }
 .term-empty { padding: 18px 16px; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; color: var(--text-2); font-size: 12.5px; }
 .term-empty p { margin: 0; }
 .panel-body:has(.term-wrap) { overflow: hidden; }
@@ -660,8 +675,9 @@ p.alt { text-align: center; margin-top: 4px; }
 .sb-btn:hover { background: var(--line); color: var(--text); }
 .term-banner { flex: none; padding: 6px 12px; font-size: 11.5px; color: var(--text-2); background: color-mix(in srgb, var(--warn) 8%, transparent); border-bottom: 1px solid color-mix(in srgb, var(--warn) 25%, transparent); }
 .term-banner b { color: var(--warn); font-weight: 600; }
-.panel-body:has(.term-banner) { display: flex; flex-direction: column; }
-.panel-body:has(.term-banner) > .term-wrap { flex: 1; min-height: 0; }
+.panel-body:has(.term-banner), .panel-body:has(.term-head) { display: flex; flex-direction: column; }
+.panel-body:has(.term-banner) > .term-wrap, .panel-body:has(.term-head) > .term-wrap { flex: 1; min-height: 0; height: auto; }
+.term-head { position: relative; z-index: 5; }
 .term-empty .hint { color: var(--text-3); font-size: 12px; }
 .term-profile { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
 .term-profile select { height: 26px; border-radius: 6px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--text); font: inherit; }

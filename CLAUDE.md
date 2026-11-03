@@ -253,7 +253,16 @@ never the call's session or a run. Both run in the data
 folder (never a call's: Windows renames), hold their profile's lease while they run, start with `--session-id` and
 resume with `--resume` (ids per profile in `<home>/.echo/sessions.json`: `<profile>:folder`, `<profile>:<stamp>`; one
 refused within 4 s is forgotten). Entry points: status bar Claude, ⌘/Ctrl+`, the call's ⋯ → Ask Claude about this
-call. `ai::terminal_command` = `claude_command`'s command and environment for a PTY (`ECHOCTL_DEBUG` prints its
+call. **Conversations** (#44): each Claude panel has ↻ Restart (stop, resume the same id: plugins and settings read
+afresh), ＋ New conversation and Conversations ▾ (`/api/conversations?call=|profile=` = `terminal::conversations`: every id
+started for that store key, `<home>/.echo/session-history.json`, ≤ 30, titled by the user's first prompt from Claude Code's
+own transcript on that profile); `pty_open {session: '' | 'new' | <id>}` → `choose_session` (an id must be the panel's).
+`/api/ptys` `stale` = `{at, what}`: the profile's `plugins/installed_plugins.json`, or (folder) a plugin's session skills,
+changed in content (Echo's `echo@…` entries; the skills' files hashed) since the session started → **Restart to update** on
+the panel. Restart / New / Switch ask first while it runs (what it is doing is lost; the conversation is kept); the page
+waits until the old session's processes are gone (`terminal::stopping`, `/api/ptys` `{key, stopping}`; a start of a key
+still stopping is refused), and a session Echo stopped never forgets its conversation (`Term::stopped`; the refused-at-once
+rule forgets only the id it started with, while still the panel's). `ai::terminal_command` = `claude_command`'s command and environment for a PTY (`ECHOCTL_DEBUG` prints its
 arguments). `echoctl window --selftest` runs a shell in a terminal end to end (`terminal: true`).
 **What the window shows, in each prompt** (`view.rs`): the page reports its view (activity; the open call — title,
 time, tab, its threads; the thread and tab; the work item in the details panel; the calendar event; the panels; text
