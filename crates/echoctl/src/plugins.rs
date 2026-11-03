@@ -877,15 +877,23 @@ pub fn refresh(name: &str) -> Result<Catalog> {
     Ok(c)
 }
 
-/// Refresh every marketplace not fetched within `STALE_SECS` (or `all`); errors stay in each catalog.
+/// A catalog read by this Echo within `STALE_SECS`.
+fn fresh(c: &Catalog) -> bool {
+    c.echo_version == env!("CARGO_PKG_VERSION")
+        && chrono::DateTime::parse_from_rfc3339(&c.fetched_at).is_ok_and(|t| (chrono::Local::now().fixed_offset() - t).num_seconds() < STALE_SECS)
+}
+
+/// Is any marketplace due to be read again.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn any_stale() -> bool {
+    Registry::load().is_ok_and(|r| r.all_markets().into_iter().any(|(m, _)| !catalog(&m.name).as_ref().is_some_and(fresh)))
+}
+
+/// Refresh every marketplace not fetched within `STALE_SECS` by this Echo (or `all`); errors stay in each catalog.
 pub fn refresh_stale(all: bool) {
     let Ok(r) = Registry::load() else { return };
     for (m, _) in r.all_markets() {
-        let fresh = catalog(&m.name).is_some_and(|c| {
-            c.echo_version == env!("CARGO_PKG_VERSION")
-                && chrono::DateTime::parse_from_rfc3339(&c.fetched_at).is_ok_and(|t| (chrono::Local::now().fixed_offset() - t).num_seconds() < STALE_SECS)
-        });
-        if all || !fresh {
+        if all || !catalog(&m.name).as_ref().is_some_and(fresh) {
             if let Err(e) = refresh(&m.name) {
                 eprintln!("plugins: {}: {e:#}", m.name);
             }
@@ -1471,13 +1479,14 @@ mod tests {
         // (an Echo updated since may install what it couldn't), however recent.
         let d = plugin(&mk, "demo", "0.2.0", json!({"deliver": {"to": ["mail"]}}));
         assert!(d.is_dir());
-        refresh_stale(false);
-        assert_eq!(catalog(&name).unwrap().plugins[0].manifest.as_ref().unwrap().version, "0.1.0", "read a moment ago");
         let mut c = catalog(&name).unwrap();
+        assert!(fresh(&c), "read a moment ago");
         c.echo_version = "0.0.1".into();
-        paths::write_atomic(&market_dir(&name).join("catalog.json"), serde_json::to_string(&c).unwrap().as_bytes()).unwrap();
-        refresh_stale(false);
-        assert_eq!(catalog(&name).unwrap().plugins[0].manifest.as_ref().unwrap().version, "0.2.0");
+        assert!(!fresh(&c));
+        c.echo_version = env!("CARGO_PKG_VERSION").into();
+        c.fetched_at = (chrono::Local::now() - chrono::Duration::hours(1)).to_rfc3339();
+        assert!(!fresh(&c));
+        refresh(&name).unwrap();
         let p = Registry::load().unwrap().installed["demo"].clone();
         let rv = update_for(&p).unwrap();
         assert_eq!(rv.new_uses.len(), 1);
