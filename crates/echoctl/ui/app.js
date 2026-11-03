@@ -1954,7 +1954,7 @@ function eventProjects(e) {
 // a download run as the tray's own actions (`settings_action`). ────────────────────────────────
 const SETTINGS_SECTIONS = [
   ['general', 'General'], ['recording', 'Recording'], ['transcription', 'Transcription'], ['ai', 'AI & minutes'],
-  ['calendar', 'Calendar & chat'], ['brain', 'Brain'], ['me', 'About me'], ['plugins', 'Plugins'], ['layout', 'Layout'], ['health', 'Health'],
+  ['calendar', 'Calendar & chat'], ['brain', 'Brain'], ['me', 'About me'], ['deliver', 'Sends to you'], ['plugins', 'Plugins'], ['layout', 'Layout'], ['health', 'Health'],
 ]
 /** Save the profile as edited; shown rendered again once the app has it. */
 function saveMeProfile() {
@@ -2002,7 +2002,7 @@ function settingsView() {
   if (own) return `<div class="settings"><aside class="set-side"><h1>Settings</h1><input class="search" id="set-q" placeholder="Search settings" value="${esc(S.setQuery || '')}" aria-label="Search settings">${nav}${pnav}</aside>
     <div class="set-main plug-main">${body}</div></div>`
   return `<div class="settings"><aside class="set-side"><h1>Settings</h1><input class="search" id="set-q" placeholder="Search settings" value="${esc(S.setQuery || '')}" aria-label="Search settings">${nav}${pnav}</aside>
-    <div class="set-main">${body}<p class="set-foot">Saved as you change it.</p></div></div>`
+    <div class="set-main${sec === 'plugins' ? ' pl-main' : ''}">${body}<p class="set-foot">Saved as you change it.</p></div></div>`
 }
 
 /** The profile the minutes read (me.md): shown rendered (the minutes' own safe Markdown), edited in place. */
@@ -2153,58 +2153,136 @@ document.addEventListener('click', (e) => {
   if ('forget' in b.dataset) pluginOp('set', { id: b.dataset.plSet, key: b.dataset.key, value: '' })
   else pluginOp('set', { id: b.dataset.plSet, key: b.dataset.key, value: b.dataset.val === 'true' })
 })
+/** Settings → Plugins (designed on the Workbench canvas): Installed — a row each, the chosen one on the right;
+ *  Discover — categories, featured, cards, the install sheet over the page; Marketplaces — where plugins come from. */
+const PL_COLORS = ['#9b78ff', '#4fb3d9', '#3a9cf0', '#e0a96d', '#3ccf91', '#e07fa3', '#d9a84f', '#7fd0c0']
+const plColor = (id) => PL_COLORS[[...String(id)].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7) % PL_COLORS.length]
+/** A plugin's tile: the icon of its own Settings section when it has one, else its initial, in its colour. */
+function plTile(x, big = false) {
+  const sec = Plugins.sections.find((s) => s.plugin === x.id)
+  const inner = sec && sec.icon ? sec.icon : esc((x.name || x.id || '?').trim().charAt(0).toUpperCase())
+  return `<span class="pl-tile${big ? ' big' : ''}" style="--c:${plColor(x.id)}">${inner}</span>`
+}
+const plMatch = (x) => { const q = (S.plQuery || '').trim().toLowerCase(); return !q || `${x.name} ${x.summary || ''} ${x.id} ${(x.categories || []).join(' ')}`.toLowerCase().includes(q) }
+function pluginsSettings() {
+  const p = S.plugins
+  if (!p) { if (!S.pluginsLoading) { S.pluginsLoading = true; loadPluginsView().then(() => { S.pluginsLoading = false; render() }) } return '<h2>Plugins</h2><div class="skeleton" style="padding:20px"><i></i><i></i><i></i></div>' }
+  if (p.error) return `<h2>Plugins</h2><p class="error">${esc(p.error)}</p>`
+  const tab = S.plTab || ((p.installed || []).length ? 'installed' : 'discover')
+  const tabs = [['installed', 'Installed', p.installed.length || ''], ['discover', 'Discover', ''], ['markets', 'Marketplaces', p.markets.length]]
+  const head = `<div class="pl-head"><h2>Plugins</h2>${tab === 'markets' ? '' : `<input class="search pl-q" id="pl-q" placeholder="Search plugins" value="${esc(S.plQuery || '')}" aria-label="Search plugins">`}</div>`
+  const bar = `<div class="tabs pl-tabs" role="tablist">${tabs.map(([id, l, n]) => `<button class="tab" role="tab" data-pl-tab="${id}" aria-selected="${tab === id}">${esc(l)}${n !== '' ? `<span class="n">${esc(String(n))}</span>` : ''}</button>`).join('')}</div>`
+  const body = tab === 'installed' ? plInstalled(p) : tab === 'discover' ? plDiscover(p) : plMarkets(p)
+  const sheet = S.plSheet ? `<div class="pl-scrim" data-pl-sheet-cancel>${plSheet(S.plSheet)}</div>` : ''
+  return `<div class="pl-page">${head}${bar}${body}${sheet}</div>`
+}
+function plInstalled(p) {
+  if (!p.installed.length) return '<p class="set-sub">No plugins yet — Discover lists what your marketplaces offer.</p>'
+  const list = p.installed.filter(plMatch).sort((a, b) => a.name.localeCompare(b.name))
+  const sel = p.installed.find((x) => x.id === S.plSel) || list[0] || p.installed[0]
+  const row = (x) => {
+    const pill = x.update && !x.update.blocked ? `<span class="pl-pill up">Update to ${esc(x.update.version)}</span>`
+      : Plugins.errors[x.id] || p.errors && p.errors[`plugin:${x.id}`] ? '<span class="pl-pill bad">Has a problem</span>' : '<span></span>'
+    return `<div class="pl-row${x.id === sel.id ? ' on' : ''}${x.enabled ? '' : ' off'}" data-pl-sel="${esc(x.id)}">${plTile(x)}<div class="pl-txt"><div class="pl-n">${esc(x.name)} <span class="pl-v">${esc(x.version)}</span></div><div class="pl-s">${esc(x.summary || '')}</div></div>${pill}<button class="sw${x.enabled ? ' on' : ''}" role="switch" aria-checked="${!!x.enabled}" aria-label="${esc(x.name)} on" data-pl-enable="${esc(x.id)}" data-on="${!x.enabled}"></button></div>`
+  }
+  const rows = list.length ? list.map(row).join('') : '<p class="set-sub" style="padding:12px 14px">Nothing matches.</p>'
+  const note = '<p class="set-sub">Where Echo sends you things — Teams, mail and the ways plugins add — is in <a href="#settings/deliver">Sends to you</a>.</p>'
+  return `<div class="pl-split"><div><section class="pl-list">${rows}</section>${note}</div>${plDetail(p, sel)}</div>`
+}
+/** The chosen installed plugin: where it comes from, what it may do, its settings, update and remove. */
+function plDetail(p, x) {
+  const busy = plBusy(p, `plugin:${x.id}`)
+  const sec = Plugins.sections.find((s) => s.plugin === x.id)
+  const upd = x.update ? (x.update.blocked ? `<div class="set-sub">${esc(x.update.version)}: ${esc(x.update.blocked)}</div>` : `<button class="btn" data-pl-update="${esc(x.id)}"${busy ? ' disabled' : ''}>${busy ? esc(busy) : `Update to ${esc(x.update.version)}`}</button>`) : ''
+  const open = sec && x.enabled ? `<button class="btn primary" data-pl-open="${esc(sec.id)}">Open its settings</button>` : ''
+  const rm = S.plRemove === x.id ? `<div class="confirm"><span>Remove ${esc(x.name)}? Its settings and data can stay for when you install it again.</span>
+    <button class="btn" data-pl-remove-cancel>Cancel</button><button class="btn" data-pl-remove="${esc(x.id)}" data-keep="1">Remove, keep data</button><button class="btn primary" style="background:var(--danger);border-color:var(--danger)" data-pl-remove="${esc(x.id)}" data-keep="0">Remove with data</button></div>` : ''
+  const fields = (x.settings || []).map((d) => setRow(esc(d.label), d.help ? esc(d.help) : '', plField(x.id, d)))
+  let own = ''
+  const card = Plugins.settings[x.id]
+  if (card && x.enabled && !sec) { try { own = card.render() } catch (e) { own = `<p class="error">${esc(String(e))}</p>` } }
+  const broke = Plugins.errors[x.id] ? `<p class="error">Its window part didn't load: ${esc(Plugins.errors[x.id])}</p>` : ''
+  return `<section class="pl-detail">
+    <div class="pl-dhead">${plTile(x, true)}<div style="flex:1;min-width:0"><div class="pl-dn">${esc(x.name)}</div><div class="set-sub">${esc(x.version)} · from <b>${esc(x.market)}</b>${x.market_gone ? ' (removed — no updates)' : ''} · commit <code>${esc((x.commit || '').slice(0, 10))}</code></div></div>
+      <button class="sw${x.enabled ? ' on' : ''}" role="switch" aria-checked="${!!x.enabled}" aria-label="${esc(x.name)} on" data-pl-enable="${esc(x.id)}" data-on="${!x.enabled}"></button></div>
+    ${x.summary ? `<p class="pl-sum">${esc(x.summary)}</p>` : ''}
+    <div class="pl-acts">${open}${upd}<span class="grow"></span><button class="btn ghost danger" data-pl-ask-remove="${esc(x.id)}">Remove…</button></div>
+    ${rm}${plErr(p, `plugin:${x.id}`)}${broke}
+    ${fields.length ? setCard('Its settings', fields) : ''}${own}
+    <div class="pl-h4">What it can do</div>${plUses(x.uses)}
+    <p class="set-sub">You agreed to these when you installed it. An update that asks for more asks you again.</p>
+  </section>`
+}
 function plDiscover(p) {
-  const q = (S.plQuery || '').trim().toLowerCase()
-  const list = (p.discover || []).filter((x) => !q || `${x.name} ${x.summary} ${x.id} ${(x.categories || []).join(' ')}`.toLowerCase().includes(q))
+  const all = (p.discover || []).filter(plMatch)
+  const cats = [...new Set((p.discover || []).flatMap((x) => x.categories || []))].sort()
+  const cat = cats.includes(S.plCat) ? S.plCat : ''
+  const list = all.filter((x) => !cat || (x.categories || []).includes(cat))
     .sort((a, b) => (b.featured - a.featured) || (b.built_in - a.built_in) || a.name.localeCompare(b.name))
-  const search = `<input class="search" id="pl-q" placeholder="Search plugins" value="${esc(S.plQuery || '')}" aria-label="Search plugins">`
+  const chips = cats.length ? `<div class="pl-cats">${['', ...cats].map((k) => `<button class="pl-cat${k === cat ? ' on' : ''}" data-pl-cat="${esc(k)}">${esc(k ? k[0].toUpperCase() + k.slice(1) : 'All')}</button>`).join('')}</div>` : ''
   const reading = plBusy(p, 'markets') ? '<p class="set-sub">Reading marketplaces…</p>' : ''
-  if (!list.length) return search + reading + `<p class="set-sub">${q ? 'Nothing matches.' : 'Your marketplaces offer nothing yet' + ((p.markets || []).some((m) => m.error) ? ' — one can\'t be read (Marketplaces).' : '.')}</p>`
-  return search + reading + list.map((x) => {
+  if (!list.length) return chips + reading + `<p class="set-sub">${S.plQuery || cat ? 'Nothing matches.' : 'Your marketplaces offer nothing yet' + ((p.markets || []).some((m) => m.error) ? ' — one can\'t be read (Marketplaces).' : '.')}</p>`
+  const card = (x) => {
     const busy = plBusy(p, `plugin:${x.id}`)
-    const ctl = x.installed === true ? '<span class="set-ok">Installed ✓</span>'
+    const act = x.installed === true ? '<span class="set-ok">Installed ✓</span>'
       : x.installed === false ? '<span class="set-sub">Installed from another marketplace</span>'
       : x.why_not ? `<span class="tag" title="${esc(x.why_not)}">${!x.version ? "Can't be read" : 'Needs a newer Echo'}</span>`
-      : `<button class="btn primary" data-pl-review="${esc(x.id)}" data-market="${esc(x.market)}"${busy ? ' disabled' : ''}>${busy ? esc(busy) : 'Install…'}</button>`
-    const sheet = S.plSheet && S.plSheet.install === x.id && S.plSheet.market === x.market ? plSheet(S.plSheet) : ''
-    return setCard('', [setRow(`${esc(x.name)} ${x.version ? `<span class="tag">${esc(x.version)}</span>` : ''} <span class="tag${x.built_in ? ' rec' : ''}">${esc(x.market)}</span>`,
-      `${esc(x.summary || '')}${(x.uses || []).length ? plUses(x.uses) : ''}${x.why_not && x.installed == null ? `<div class="pl-why">${esc(x.why_not)}</div>` : ''}`, ctl)]) + plErr(p, `plugin:${x.id}`) + sheet
-  }).join('')
+      : `<button class="btn primary" data-pl-review="${esc(x.id)}" data-market="${esc(x.market)}"${busy ? ' disabled' : ''}>${busy ? esc(busy) : 'Install'}</button>`
+    const cats2 = (x.categories || []).map((k) => k[0].toUpperCase() + k.slice(1)).join(' · ')
+    return `<div class="pl-card">${''}<div class="pl-ctop">${plTile(x)}<div style="flex:1;min-width:0"><div class="pl-n">${esc(x.name)}</div><div class="pl-cat2">${esc(cats2)}</div></div><span class="tag${x.built_in ? ' rec' : ''}">${esc(x.market)}</span></div>
+      <div class="pl-cs">${esc(x.summary || '')}</div><div class="pl-cact">${act}${x.version ? `<span class="pl-v">${esc(x.version)}</span>` : ''}</div>${plErr(p, `plugin:${x.id}`)}</div>`
+  }
+  const featured = !S.plQuery && !cat ? list.filter((x) => x.featured) : []
+  const rest = list.filter((x) => !featured.includes(x))
+  return chips + reading + (featured.length ? `<div class="pl-h4">Featured</div><div class="pl-grid two">${featured.map(card).join('')}</div>` : '') +
+    (rest.length ? `${featured.length ? '<div class="pl-h4">All plugins</div>' : ''}<div class="pl-grid">${rest.map(card).join('')}</div>` : '')
 }
-/** The permission sheet: what the plugin will use, in Echo's words, before anything is installed. */
+/** The permission sheet, over the page: what the plugin will be able to do, in Echo's words, before anything
+ *  is installed — and who listed it when Echo didn't. */
 function plSheet(sh) {
   const r = sh.review
-  if (!r) return '<div class="confirm"><span>Reading what it uses…</span></div>'
-  if (r.error) return `<div class="confirm"><span class="error">${esc(r.error)}</span><button class="btn" data-pl-sheet-cancel>Close</button></div>`
+  const box = (inner) => `<div class="pl-sheet" role="dialog" aria-modal="true">${inner}</div>`
+  if (!r) return box('<span class="set-sub">Reading what it uses…</span>')
+  if (r.error) return box(`<span class="error">${esc(r.error)}</span><div class="pl-sheet-btns"><button class="btn" data-pl-sheet-cancel>Close</button></div>`)
   const lines = sh.update ? r.new_uses : r.uses
   const outside = S.plugins && !(S.plugins.markets || []).some((m) => m.name === r.market && m.built_in)
-  const who = outside ? `<div class="set-sub">Listed by ${esc(r.market)} — Echo hasn't reviewed it.</div>` : ''
+  const who = outside ? `<div class="pl-warn"><b>!</b><span>Listed by ${esc(r.market)} — Echo hasn’t reviewed it. Install it only if you trust who made it.</span></div>` : ''
   const go = sh.update ? `Update to ${esc(r.version)}` : 'Install'
-  return `<div class="pl-sheet"><b>${sh.update ? `${esc(r.name)} ${esc(r.version)} asks for more` : `Install ${esc(r.name)} ${esc(r.version)}?`}</b>
-    ${plUses(lines)}<div class="set-sub">From ${esc(r.market)} · commit <code>${esc((r.commit || '').slice(0, 10))}</code></div>${who}
+  return box(`<div class="pl-dhead">${plTile({ id: r.id, name: r.name })}<div style="flex:1"><div class="pl-dn">${sh.update ? `${esc(r.name)} ${esc(r.version)} asks for more` : `Install ${esc(r.name)} ${esc(r.version)}?`}</div>
+      <div class="set-sub">from <b>${esc(r.market)}</b> · commit <code>${esc((r.commit || '').slice(0, 10))}</code></div></div></div>
+    ${who}<div class="pl-h4">It will be able to</div>${plUses(lines)}
     ${r.blocked ? `<div class="error">${esc(r.blocked)}</div>` : ''}
-    <div class="pl-sheet-btns"><button class="btn${outside ? ' primary' : ''}" data-pl-sheet-cancel${outside ? ' autofocus' : ''}>Cancel</button>${r.blocked ? '' : `<button class="btn${outside ? '' : ' primary'}" data-pl-sheet-go>${go}</button>`}</div></div>`
+    <div class="pl-sheet-btns"><button class="btn${outside ? ' primary' : ''}" data-pl-sheet-cancel${outside ? ' autofocus' : ''}>Cancel</button>${r.blocked ? '' : `<button class="btn${outside ? '' : ' primary'}" data-pl-sheet-go>${go}</button>`}</div>`)
 }
 function plMarkets(p) {
   const rows = p.markets.map((m) => {
     const busy = plBusy(p, `market:${m.name}`)
-    const state = busy ? esc(busy) : m.error ? `<span class="error">${esc(m.error)}</span>` : m.fetched_at ? `${m.count} plugin${m.count === 1 ? '' : 's'} · read ${esc(relDay(String(m.fetched_at).slice(0, 10)))}` : 'Not read yet'
-    const ctl = `<button class="btn ghost" data-pl-mrefresh="${esc(m.name)}"${busy ? ' disabled' : ''}>Read again</button>` +
-      `<button class="btn ghost" data-pl-mhide="${esc(m.name)}" data-hidden="${!m.hidden}">${m.hidden ? 'Show' : 'Hide'}</button>` +
-      (m.built_in ? '' : `<button class="btn ghost" data-pl-mremove="${esc(m.name)}">Remove</button>`)
-    return setRow(`${esc(m.name)}${m.title && m.title !== m.name ? ` <span class="set-sub">(calls itself ${esc(m.title)})</span>` : ''}${m.built_in ? ' <span class="tag rec">built in</span>' : ''}${m.hidden ? ' <span class="tag">hidden</span>' : ''}`, `<code>${esc(m.source)}</code><br>${state}`, ctl)
+    const state = busy ? esc(busy) : m.error ? `<span class="error">Can’t be read: ${esc(m.error)}</span>` : m.fetched_at ? `${m.count} plugin${m.count === 1 ? '' : 's'} · read ${esc(relDay(String(m.fetched_at).slice(0, 10)))}` : 'Not read yet'
+    const tags = `${m.built_in ? ' <span class="tag rec">built in</span>' : ''}${m.hidden ? ' <span class="tag">hidden</span>' : ''}`
+    const menu = S.plMenu === m.name ? `<div class="pl-pop"><button data-pl-mhide="${esc(m.name)}" data-hidden="${!m.hidden}">${m.hidden ? 'Show its plugins in Discover' : 'Hide its plugins from Discover'}</button>${m.built_in ? '' : `<button class="danger" data-pl-mremove="${esc(m.name)}">Remove — installed plugins stay, without updates</button>`}</div>` : ''
+    return `<div class="pl-mrow">${plTile({ id: m.name, name: m.name })}<div class="pl-txt"><div class="pl-n">${esc(m.name)}${m.title && m.title !== m.name ? ` <span class="set-sub">(${esc(m.title)})</span>` : ''}${tags}</div><div class="pl-s"><code>${esc(m.source)}</code></div><div class="pl-s">${state}</div></div>
+      <button class="btn" data-pl-mrefresh="${esc(m.name)}"${busy ? ' disabled' : ''}>Read again</button><span class="pl-menu"><button class="btn pl-ib" data-pl-mmenu="${esc(m.name)}" aria-label="More">⋯</button>${menu}</span></div>`
   })
-  const add = setRow('Add a marketplace', 'Your team\'s or company\'s catalog: <code>owner/repo</code> on GitHub, any git address (<code>https://…</code>, private ones through your own git sign-in), or a folder. It needs <code>echo-marketplace.json</code> at its root.',
-    `<input class="set-in" id="pl-msrc" placeholder="owner/repo" aria-label="Marketplace" spellcheck="false"><input class="set-in" id="pl-mname" placeholder="name (optional)" aria-label="Name" spellcheck="false" style="width:120px"><button class="btn primary" data-pl-madd>Add</button>`)
-  return setCard('', rows) + Object.keys(p.errors || {}).filter((k) => k.startsWith('market:')).map((k) => plErr(p, k)).join('') + setCard('', [add])
+  const add = `<section class="pl-add"><b>Add a marketplace</b>
+    <div class="pl-addrow"><input class="set-in" id="pl-msrc" placeholder="owner/repo, a git address, or a folder" aria-label="Marketplace" spellcheck="false"><input class="set-in" id="pl-mname" placeholder="Name (optional)" aria-label="Name" spellcheck="false"><button class="btn primary" data-pl-madd>Add</button></div>
+    <div class="set-sub">It needs <code>echo-marketplace.json</code> at its root. Private repositories use your own git sign-in. Plugins from it say who listed them when you install.</div></section>`
+  return `<p class="set-sub">Where plugins come from. Echo’s own is built in; add your team’s or company’s catalog — a GitHub repository, any git address, or a folder.</p>
+    <section class="pl-list pl-mlist">${rows.join('')}</section>${Object.keys(p.errors || {}).filter((k) => k.startsWith('market:')).map((k) => plErr(p, k)).join('')}${add}`
 }
 // The page's own controls: tabs, install / update (through the sheet), switch, remove, marketplaces, search.
 document.addEventListener('click', (e) => {
-  const t = e.target.closest && e.target.closest('[data-pl-tab],[data-pl-enable],[data-pl-update],[data-pl-review],[data-pl-sheet-go],[data-pl-sheet-cancel],[data-pl-ask-remove],[data-pl-remove],[data-pl-remove-cancel],[data-pl-mrefresh],[data-pl-mhide],[data-pl-mremove],[data-pl-madd]')
-  if (!t) return
+  const t = e.target.closest && e.target.closest('[data-pl-tab],[data-pl-enable],[data-pl-update],[data-pl-review],[data-pl-sheet-go],[data-pl-sheet-cancel],[data-pl-ask-remove],[data-pl-remove],[data-pl-remove-cancel],[data-pl-mrefresh],[data-pl-mhide],[data-pl-mremove],[data-pl-madd],[data-pl-sel],[data-pl-cat],[data-pl-mmenu],[data-pl-open]')
+  if (!t) { if (S.plMenu) { S.plMenu = null; render() } return }
   const d = t.dataset
-  if (d.plTab) { S.plTab = d.plTab; S.plSheet = null; return render() }
-  if (d.plEnable) return pluginOp('enable', { id: d.plEnable, on: d.on === 'true' })
+  // The sheet's backdrop closes it; a click inside the sheet doesn't.
+  if ('plSheetCancel' in d && t.classList.contains('pl-scrim') && e.target.closest('.pl-sheet')) return
+  if (d.plTab) { S.plTab = d.plTab; S.plSheet = null; S.plMenu = null; return render() }
+  if (d.plEnable) { e.stopPropagation(); return pluginOp('enable', { id: d.plEnable, on: d.on === 'true' }) }
+  if (d.plSel) { S.plSel = d.plSel; S.plRemove = null; return render() }
+  if (d.plCat != null && t.classList.contains('pl-cat')) { S.plCat = d.plCat; return render() }
+  if (d.plOpen) return go(`settings/${d.plOpen}`)
+  if (d.plMmenu) { S.plMenu = S.plMenu === d.plMmenu ? null : d.plMmenu; return render() }
+  if (d.plMhide || d.plMremove) S.plMenu = null
   if (d.plReview || d.plUpdate) {
     const id = d.plReview || d.plUpdate, market = d.market || ''
     S.plSheet = d.plUpdate ? { update: id, review: (S.plugins.installed.find((x) => x.id === id) || {}).update } : { install: id, market, review: null }
@@ -2241,53 +2319,6 @@ document.addEventListener('input', (e) => {
 const plUses = (uses) => (uses || []).length ? `<ul class="pl-uses">${uses.map((u) => `<li>${esc(u)}</li>`).join('')}</ul>` : '<div class="set-sub">Uses nothing of Echo\'s.</div>'
 const plBusy = (p, key) => p.busy && p.busy[key]
 const plErr = (p, key) => p.errors && p.errors[key] ? `<div class="error">${esc(p.errors[key])}</div>` : ''
-function pluginsSettings() {
-  const p = S.plugins
-  if (!p) { if (!S.pluginsLoading) { S.pluginsLoading = true; loadPluginsView().then(() => { S.pluginsLoading = false; render() }) } return '<h2>Plugins</h2><div class="skeleton" style="padding:20px"><i></i><i></i><i></i></div>' }
-  if (p.error) return `<h2>Plugins</h2><p class="error">${esc(p.error)}</p>`
-  const tab = S.plTab || ((p.installed || []).length ? 'installed' : 'discover')
-  const ups = (p.installed || []).filter((x) => x.update).length
-  const tabs = [['installed', 'Installed', p.installed.length ? `${p.installed.length}${ups ? ` · ${ups} update${ups > 1 ? 's' : ''}` : ''}` : ''], ['discover', 'Discover', ''], ['markets', 'Marketplaces', p.markets.length]]
-  const bar = `<div class="tabs pl-tabs" role="tablist">${tabs.map(([id, l, n]) => `<button class="tab" role="tab" data-pl-tab="${id}" aria-selected="${tab === id}">${esc(l)}${n !== '' ? `<span class="n">${esc(String(n))}</span>` : ''}</button>`).join('')}</div>`
-  const body = tab === 'installed' ? plInstalled(p) : tab === 'discover' ? plDiscover(p) : plMarkets(p)
-  return `<h2>Plugins</h2>${bar}${body}`
-}
-function plInstalled(p) {
-  plShown.clear()
-  if (!p.installed.length) return '<p class="set-sub">No plugins yet — Discover lists what your marketplaces offer.</p>'
-  return p.installed.map((x) => {
-    const busy = plBusy(p, `plugin:${x.id}`)
-    const upd = x.update ? (x.update.blocked ? `<span class="set-sub">${esc(x.update.version)}: ${esc(x.update.blocked)}</span>`
-      : `<button class="btn" data-pl-update="${esc(x.id)}"${busy ? ' disabled' : ''}>${busy ? esc(busy) : `Update to ${esc(x.update.version)}`}</button>`) : ''
-    const sheet = S.plSheet && S.plSheet.update === x.id ? plSheet(S.plSheet) : ''
-    const rm = S.plRemove === x.id ? `<div class="confirm"><span>Remove ${esc(x.name)}? Its settings and data can stay for when you install it again.</span>
-      <button class="btn" data-pl-remove-cancel>Cancel</button><button class="btn" data-pl-remove="${esc(x.id)}" data-keep="1">Remove, keep data</button><button class="btn primary" style="background:var(--danger);border-color:var(--danger)" data-pl-remove="${esc(x.id)}" data-keep="0">Remove with data</button></div>` : ''
-    const settings = (x.settings || []).map((d) => setRow(esc(d.label), d.help ? esc(d.help) : '', plField(x.id, d)))
-    return setCard('', [
-      setRow(`${esc(x.name)} <span class="tag">${esc(x.version)}</span>`, `${esc(x.summary || '')}<br>From ${esc(x.market)}${x.market_gone ? ' (removed — no updates)' : ''} · commit <code>${esc((x.commit || '').slice(0, 10))}</code>`,
-        `${upd}<button class="btn ghost" data-pl-ask-remove="${esc(x.id)}">Remove</button><button class="sw${x.enabled ? ' on' : ''}" role="switch" aria-checked="${!!x.enabled}" aria-label="${esc(x.name)} on" data-pl-enable="${esc(x.id)}" data-on="${!x.enabled}"></button>`),
-      setRow('What it uses', plUses(x.uses), ''),
-      ...settings,
-    ]) + plErr(p, `plugin:${x.id}`) + sheet + rm + (x.enabled ? plExtras(x) : '')
-  }).join('')
-}
-/** What an installed plugin adds to its card: its own settings (its client half's `ctx.settings.add`),
- *  and — once, for every plugin that sends — where Echo sends things to you. */
-const plShown = new Set()
-function plExtras(x) {
-  let out = ''
-  const own = Plugins.settings[x.id]
-  if (own) {
-    let html = ''
-    try { html = own.render() } catch (e) { html = `<p class="error">${esc(String(e))}</p>` }
-    out += `<div class="plug-own" data-plug-own="${esc(x.id)}">${html}</div>`
-  } else if (Plugins.errors[x.id]) out += `<p class="error">${esc(x.name)}'s window part didn't load: ${esc(Plugins.errors[x.id])}</p>`
-  if ((x.caps || []).includes('deliver') && !plShown.has('deliver')) {
-    plShown.add('deliver')
-    if (!S.deliver) { if (!S.deliverLoading) { S.deliverLoading = true; loadDeliver().then(() => { S.deliverLoading = false; render() }) } } else out += deliverCard(S.deliver)
-  }
-  return out
-}
 async function loadDeliver() {
   try { S.deliver = await get('api/deliver') } catch { /* app restarting */ }
 }
@@ -2305,7 +2336,7 @@ function deliverCard(d) {
     return setRow(esc(x.label), x.ready ? `Ready — from the ${esc(x.plugin)} plugin.` : `${esc(x.why || 'Not set up yet')} — in its plugin’s section.`,
       (x.ready ? test(x.kind) : '') + (sec ? `<button class="btn${x.ready ? ' ghost' : ' primary'}" data-dl-go="${esc(sec.id)}">${x.ready ? 'Settings' : 'Set up…'}</button>` : ''))
   })
-  return setCard('Echo sends to you', [
+  return setCard('', [
     setRow('Teams', `Your chat with yourself. ${ms}`, d.teams ? test('teams') : ''),
     setRow('Mail', `Your own mailbox — or the addresses a plugin was given. ${ms}`, d.mail ? test('mail') : ''),
     ...own,
@@ -2558,6 +2589,10 @@ const SETTINGS_BODY = {
       setRow('Meeting chat', "Each recorded meeting's Teams chat, kept with the call.", sw('capture_chat', st.capture_chat, 'Meeting chat')),
       setRow('App registration', st.graph_custom ? "Your organisation's own app." : 'The default (CodeMie). Your IT can register another.', actBtn('calendar_client_id', 'Change…')),
     ])
+  },
+  deliver() {
+    if (!S.deliver) { if (!S.deliverLoading) { S.deliverLoading = true; loadDeliver().then(() => { S.deliverLoading = false; render() }) } return '<h2>Sends to you</h2><div class="skeleton" style="padding:20px"><i></i><i></i></div>' }
+    return `<h2>Sends to you</h2><p class="set-lead">Where Echo sends you things — routines’ answers, tests. Only to you: your own Teams chat, your mailbox, and the ways plugins add.</p>${deliverCard(S.deliver)}`
   },
   me(st) {
     const me = st.me || {}
