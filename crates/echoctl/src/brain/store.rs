@@ -50,10 +50,42 @@ pub fn open(path: &Path) -> Result<Connection> {
          CREATE TABLE IF NOT EXISTS chunk_verdicts(chunk_id INTEGER PRIMARY KEY, verdict TEXT, taxonomy_version TEXT);
          CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
          CREATE TABLE IF NOT EXISTS scopes(chunk_id INTEGER NOT NULL, kind TEXT NOT NULL, id TEXT NOT NULL, PRIMARY KEY(chunk_id, kind, id));
+         CREATE TABLE IF NOT EXISTS term_scan(chunk_id INTEGER PRIMARY KEY, sha TEXT NOT NULL);
          CREATE INDEX IF NOT EXISTS scopes_by ON scopes(kind, id);
+         CREATE INDEX IF NOT EXISTS chunk_topics_cat ON chunk_topics(category_id, chunk_id);
+         CREATE INDEX IF NOT EXISTS chunk_topics_chunk ON chunk_topics(chunk_id);
          CREATE TABLE IF NOT EXISTS brain_schema(component TEXT PRIMARY KEY, version TEXT, migrated_at TEXT);
          INSERT OR IGNORE INTO brain_schema VALUES ('echo', '1', datetime('now'));",
     )?;
+    // What a list of sources reads without touching its sections (the window pages tens of thousands): how many
+    // sections, its client (`-`: none) and its folder — kept by `doc_facts` at every write, filled once for an older store.
+    // One writer at a time, each column on its own: two processes opening an older store, or one stopped half way,
+    // leave it whole.
+    let missing = |c: &Connection| -> Result<Vec<&'static str>> {
+        let mut out = vec![];
+        for col in ["sections", "client", "root"] {
+            if c.query_row("SELECT count(*) FROM pragma_table_info('documents') WHERE name = ?1", [col], |r| r.get::<_, i64>(0))? == 0 {
+                out.push(col);
+            }
+        }
+        Ok(out)
+    };
+    if !missing(&c)?.is_empty() {
+        c.execute_batch("BEGIN IMMEDIATE")?;
+        let done = (|| -> Result<()> {
+            let cols = missing(&c)?;
+            for col in &cols {
+                c.execute_batch(&format!("ALTER TABLE documents ADD COLUMN {col} {}", if *col == "sections" { "INTEGER" } else { "TEXT" }))?;
+            }
+            if !cols.is_empty() {
+                c.execute(&format!("UPDATE documents SET {DOC_FACTS}"), [])?;
+            }
+            Ok(())
+        })();
+        c.execute_batch(if done.is_ok() { "COMMIT" } else { "ROLLBACK" })?;
+        done?;
+    }
+    c.execute_batch("CREATE INDEX IF NOT EXISTS documents_list ON documents(client, kind, event_date); CREATE INDEX IF NOT EXISTS documents_root ON documents(root, event_date);")?;
     // A store from before scopes: fill them from each section's references, once.
     let empty: bool = c.query_row("SELECT NOT EXISTS (SELECT 1 FROM scopes) AND EXISTS (SELECT 1 FROM chunks)", [], |r| r.get(0))?;
     if empty {
@@ -66,6 +98,109 @@ pub fn open(path: &Path) -> Result<Connection> {
         tx.commit()?;
     }
     Ok(c)
+}
+
+/// An answer counted from the store, kept while `fp` (the store's `changed_stamp`, plus whatever else it reads) is
+/// unchanged. Changed since: the last answer is given while it is counted again in the background — the fresh one when
+/// it comes within 250 ms (a small store: always). Aggregates over millions of sections take seconds; a window waiting
+/// for each of them after every sync would not do.
+pub fn kept<T: Send + Sync + 'static>(key: String, fp: String, make: impl FnOnce() -> Result<T> + Send + 'static) -> Result<std::sync::Arc<T>> {
+    let r = kept_inner(key, fp, make);
+    if let Ok((_, stale)) = &r {
+        if *stale {
+            STALE.with(|s| s.set(true));
+        }
+    }
+    r.map(|x| x.0)
+}
+
+thread_local! {
+    /// Set when this thread was given a stale `kept` answer: what is built from it mustn't be kept as fresh.
+    static STALE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Run `f`; whether it was given any stale `kept` answer on the way.
+pub fn noting_stale<R>(f: impl FnOnce() -> R) -> (R, bool) {
+    let before = STALE.with(|s| s.replace(false));
+    let r = f();
+    let stale = STALE.with(|s| s.replace(before));
+    if stale {
+        STALE.with(|s| s.set(true));
+    }
+    (r, stale)
+}
+
+fn kept_inner<T: Send + Sync + 'static>(key: String, fp: String, make: impl FnOnce() -> Result<T> + Send + 'static) -> Result<(std::sync::Arc<T>, bool)> {
+    use std::any::Any;
+    use std::sync::{Arc, Condvar, Mutex};
+    type Val = Arc<dyn Any + Send + Sync>;
+    struct Entry {
+        fp: String,
+        val: Val,
+        running: bool,
+    }
+    static CACHE: Mutex<Option<std::collections::HashMap<String, Entry>>> = Mutex::new(None);
+    static DONE: Condvar = Condvar::new();
+    let lock = || CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    let typed = |v: &Val| v.clone().downcast::<T>().map_err(|_| anyhow::anyhow!("kept: another type under {key}"));
+    let mut g = lock();
+    let Some(e) = g.get_or_insert_with(Default::default).get_mut(&key) else {
+        drop(g);
+        let v: Arc<T> = Arc::new(make()?);
+        lock().get_or_insert_with(Default::default).insert(key, Entry { fp, val: v.clone(), running: false });
+        return Ok((v, false));
+    };
+    if e.fp == fp {
+        return Ok((typed(&e.val)?, false));
+    }
+    if !e.running {
+        e.running = true;
+        let (k, f) = (key.clone(), fp.clone());
+        std::thread::spawn(move || {
+            // A panic counting still frees the key (else it is never counted again).
+            let v = std::panic::catch_unwind(std::panic::AssertUnwindSafe(make)).unwrap_or_else(|_| Err(anyhow::anyhow!("panicked")));
+            let mut g = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(e) = g.get_or_insert_with(Default::default).get_mut(&k) {
+                e.running = false;
+                match v {
+                    Ok(v) => {
+                        e.val = Arc::new(v);
+                        e.fp = f;
+                    }
+                    Err(err) => eprintln!("brain: counting {k} again failed: {err:#}"),
+                }
+            }
+            DONE.notify_all();
+        });
+    }
+    let until = std::time::Instant::now() + std::time::Duration::from_millis(250);
+    loop {
+        let e = g.as_ref().and_then(|m| m.get(&key)).ok_or_else(|| anyhow::anyhow!("kept: {key} went"))?;
+        let left = until.saturating_duration_since(std::time::Instant::now());
+        if e.fp == fp || !e.running || left.is_zero() {
+            return Ok((typed(&e.val)?, e.fp != fp));
+        }
+        g = DONE.wait_timeout(g, left).unwrap_or_else(|e| e.into_inner()).0;
+    }
+}
+
+/// What changes when the store is written: the file, and its write-ahead log while it holds writes not yet
+/// checkpointed (an open connection makes an empty one: not a change).
+pub fn changed_stamp(path: &Path) -> String {
+    let stamp = |p: &Path| std::fs::metadata(p).ok().filter(|m| m.len() > 0).map(|m| format!("{}:{:?};", m.len(), m.modified().ok())).unwrap_or_default();
+    stamp(path) + &stamp(&path.with_extension("sqlite-wal"))
+}
+
+/// A document's list facts from its sections and references (the client: its threads' first, else its own).
+const DOC_FACTS: &str = "sections = (SELECT count(*) FROM chunks c WHERE c.source = documents.source),
+    client = coalesce((SELECT json_extract(t.value, '$.client') FROM json_each(documents.refs, '$.threads') t WHERE json_extract(t.value, '$.client') IS NOT NULL LIMIT 1),
+                      json_extract(documents.refs, '$.client'), '-'),
+    root = json_extract(documents.refs, '$.root')";
+
+/// Keep one document's list facts current after its sections or references changed.
+fn doc_facts(tx: &Connection, source: &str) -> Result<()> {
+    tx.execute(&format!("UPDATE documents SET {DOC_FACTS} WHERE source = ?1"), [source])?;
+    Ok(())
 }
 
 /// A scope: `client` or `thread` and its id (`-`: in none).
@@ -94,6 +229,9 @@ fn scopes_of(refs: &Value) -> Vec<(&'static str, String)> {
 
 fn write_scopes(tx: &Connection, id: i64, refs: &Value) -> Result<()> {
     tx.execute("DELETE FROM scopes WHERE chunk_id = ?1", [id])?;
+    // Its clients decide whose terms it may mention, and a write may have dropped its tags: read for terms again
+    // (`taxonomy::mentions_changed`).
+    tx.execute("DELETE FROM term_scan WHERE chunk_id = ?1", [id])?;
     for (k, v) in scopes_of(refs) {
         tx.execute("INSERT OR IGNORE INTO scopes(chunk_id, kind, id) VALUES (?1, ?2, ?3)", params![id, k, v])?;
     }
@@ -127,7 +265,7 @@ pub fn meta(c: &Connection, key: &str) -> Option<String> {
     c.query_row("SELECT value FROM meta WHERE key = ?1", [key], |r| r.get(0)).optional().ok().flatten()
 }
 
-fn set_meta(c: &Connection, key: &str, value: &str) -> Result<()> {
+pub(crate) fn set_meta(c: &Connection, key: &str, value: &str) -> Result<()> {
     c.execute("INSERT INTO meta(key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value", params![key, value])?;
     Ok(())
 }
@@ -198,6 +336,7 @@ fn delete_chunks(tx: &Connection, ids: &[i64]) -> Result<()> {
         tx.execute("DELETE FROM chunk_verdicts WHERE chunk_id = ?1", [id])?;
         tx.execute("DELETE FROM graph_edges WHERE source = ?1", [format!("chunk:{id}")])?;
         tx.execute("DELETE FROM scopes WHERE chunk_id = ?1", [id])?;
+        tx.execute("DELETE FROM term_scan WHERE chunk_id = ?1", [id])?;
     }
     Ok(())
 }
@@ -277,6 +416,7 @@ pub fn sync_kinds(path: &Path, inputs: Vec<Input>, emb: Option<&dyn Embedder>, k
                 // old text's — gone, so the classifier tags it again.
                 if prev.is_some() {
                     tx.execute("DELETE FROM chunk_topics WHERE chunk_id = ?1", [id])?;
+                    tx.execute("DELETE FROM term_scan WHERE chunk_id = ?1", [id])?;
                     tx.execute("DELETE FROM chunk_verdicts WHERE chunk_id = ?1", [id])?;
                     tx.execute("DELETE FROM graph_edges WHERE source = ?1", [format!("chunk:{id}")])?;
                 }
@@ -301,6 +441,7 @@ pub fn sync_kinds(path: &Path, inputs: Vec<Input>, emb: Option<&dyn Embedder>, k
                kind=excluded.kind, event_date=excluded.event_date, refs=excluded.refs",
             params![i.source, h, now, i.title, i.kind, i.event_date, i.refs.to_string()],
         )?;
+        doc_facts(&tx, &i.source)?;
     }
     set_meta(&tx, "built_at", &now)?;
     set_meta(&tx, "chunker_version", CHUNKER_VERSION)?;
@@ -369,6 +510,7 @@ pub fn rescope(path: &Path, source: &str, refs: &Value) -> Result<()> {
     for id in ids {
         write_scopes(&tx, id, refs)?;
     }
+    doc_facts(&tx, source)?;
     tx.commit()?;
     Ok(())
 }
@@ -624,11 +766,14 @@ pub fn related_in(path: &Path, id: i64, limit: usize, scope: Scope) -> Result<Va
 /// The clients and threads in the Brain: each with its documents and sections (names from Echo's own
 /// files, so a renamed thread shows its new name).
 pub fn scopes(path: &Path) -> Result<Value> {
-    let c = open(path)?;
-    let rows: Vec<(String, String, i64, i64)> = c
-        .prepare("SELECT s.kind, s.id, count(DISTINCT ch.source), count(*) FROM scopes s JOIN chunks ch ON ch.id = s.chunk_id GROUP BY s.kind, s.id")?
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
-        .collect::<Result<_, _>>()?;
+    // Counted over every section (`kept`: seconds on millions); the names are read fresh.
+    let p = path.to_path_buf();
+    let rows = kept(format!("scopes|{}", path.display()), changed_stamp(path), move || -> Result<Vec<(String, String, i64, i64)>> {
+        Ok(open(&p)?
+            .prepare("SELECT s.kind, s.id, count(DISTINCT ch.source), count(*) FROM scopes s JOIN chunks ch ON ch.id = s.chunk_id GROUP BY s.kind, s.id")?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+            .collect::<Result<_, _>>()?)
+    })?;
     let clients = crate::projects::clients().unwrap_or_default();
     let threads = crate::projects::list();
     let name = |k: &str, id: &str| -> String {
@@ -691,6 +836,27 @@ mod tests {
             link: Box::new(move |c| format!("echo://call/{s}?ord={}", c.ord)),
             speaker: Box::new(|_| None),
         }
+    }
+
+    #[test]
+    fn kept_answers_at_once_and_counts_again_behind() {
+        let key = format!("test-kept-{}", std::process::id());
+        assert_eq!(*kept(key.clone(), "v1".into(), || Ok(1)).unwrap(), 1);
+        assert_eq!(*kept(key.clone(), "v1".into(), || -> Result<i32> { panic!("unchanged: never counted again") }).unwrap(), 1);
+        // Changed, and slow to count: the last answer comes back within the short wait, the new one later.
+        let t = std::time::Instant::now();
+        let (v, stale) = noting_stale(|| {
+            kept(key.clone(), "v2".into(), || {
+                std::thread::sleep(std::time::Duration::from_millis(700));
+                Ok(2)
+            })
+            .unwrap()
+        });
+        assert_eq!((*v, stale, t.elapsed() < std::time::Duration::from_millis(600)), (1, true, true), "the last answer, marked stale");
+        std::thread::sleep(std::time::Duration::from_millis(900));
+        assert_eq!(*kept(key.clone(), "v2".into(), || Ok(3)).unwrap(), 2);
+        // Changed and quick: the fresh answer.
+        assert_eq!(*kept(key, "v3".into(), || Ok(4)).unwrap(), 4);
     }
 
     #[test]

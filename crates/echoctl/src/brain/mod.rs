@@ -5,6 +5,7 @@
 //! come from the endpoint the user sets (Ollama or OpenAI-compatible).
 
 pub mod access;
+pub mod browse;
 pub mod advert;
 pub mod calls;
 pub mod chunk;
@@ -168,16 +169,10 @@ pub fn sync() -> Result<store::Report> {
         Ok(_) => {}
         Err(e) => eprintln!("brain: history: {e:#}"),
     }
-    // Which sections mention which terms: no model, redone when anything changed. A store from before
-    // Brain's meta keys and entity-kind nodes gets its graph rebuilt once.
-    if let Some(t) = taxonomy::current() {
-        let c = store::open(&store_path())?;
-        if store::meta(&c, "taxonomy_sha256").is_none() {
-            taxonomy::build_graph(&c, &t)?;
-        } else if r.added + r.changed + r.removed > 0 {
-            taxonomy::mentions(&c, &t)?;
-        }
-    }
+    // Which sections mention which terms: no model; the sections written or moved to other threads since they
+    // were last read (`term_scan`, cleared by every write of a section). A store from before Brain's meta keys
+    // and entity-kind nodes gets its graph rebuilt once.
+    taxonomy::mentions_after_sync(&store::open(&store_path())?)?;
     Ok(r)
 }
 
@@ -249,6 +244,15 @@ pub fn start_scheduler() {
                 Ok(n) => eprintln!("vocabulary: {n} learned terms moved into the taxonomy"),
                 Err(e) => eprintln!("vocabulary: moving the learned terms: {e:#}"),
             }
+        }
+    });
+    // What the Brain's screens count over every section (seconds on millions), counted once now so the first look
+    // doesn't wait; later changes are counted again in the background (`store::kept`).
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_secs(20));
+        if enabled() {
+            let _ = views::overview(None);
+            let _ = browse::graph_topics(None);
         }
     });
     std::thread::spawn(|| {

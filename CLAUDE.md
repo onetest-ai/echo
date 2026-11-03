@@ -315,7 +315,7 @@ Closing the window keeps the app in the menu bar; macOS shows a Dock icon only w
 Claude: a call without them shows when they come, or the `/echo:process-call` command. Dev: `echoctl window
 --selftest` (opens the real webview, page fetches via echo:// and reports over IPC; a sandboxed test frame proves
 its IPC posts are dropped; the close handshake answers with its number),
-`echoctl window --serve <port>` (hidden: the page and its API answered live on 127.0.0.1 by `respond` — a browser against real or generated data, paging and search included; no IPC), `echoctl window --export <dir>` (the same responses as files, each minutes page as `minutes/<call>/index.html`, to review the UI
+`echoctl window --serve <port>` (hidden: the page and its API answered live on 127.0.0.1 by `respond` — a browser against real or generated data, paging and search included; with `ECHOCTL_SERVE_IPC=1` the page's messages too, `POST /ipc` → `handle`, only with that run's SameSite=Strict cookie and its own Origin — for a dev data folder), `echoctl window --export <dir>` (the same responses as files, each minutes page as `minutes/<call>/index.html`, to review the UI
 in a browser through a static server).
 
 Calendar (window → Calendar): Day (today) and a rolling Week (yesterday, today, 5 days
@@ -650,6 +650,26 @@ without it).
   documents). The app syncs every 5 min when the calls' files, the threads or the model changed (`start_scheduler`,
   switch in Settings → Brain); Sync now there (IPC `brain_sync`).
 - **Search**: BM25 + the query's vector fused by Brain's weighted RRF (0.4 / 0.6, k 60, 30 each).
+- **At scale** (`browse.rs`; measured on a copy grown to 50,000 sources, 2 million sections, 20,000 terms): the window
+  never loads all of it. `documents` keeps its list facts (`sections`, `client`, `root`; `store::DOC_FACTS`, filled once
+  for an older store) and `chunk_topics` is indexed. `/api/brain` carries no documents and no terms (`terms_n`; a
+  thread's 30 for its Profile, `terms_more`); `/api/brain/browse/…`: `groups` (per client its kinds, channels, folders),
+  `sources` (50 a page, newest first, cursor `date\tsource`; `of`, `kind`, `channel`, `q`), `folder` (its registry's
+  files, 50 a page), `terms` (group counts, a group A–Z from a `letter`, 50 a page, or `q` across groups), `graph`
+  (level-1 topics + their related pairs, ≤ 6 each), `graph-topic` (its 50 most tagged sources), `graph-client` (≤ 400
+  sources, each joined to its 3 main topics), `graph-search`. Aggregates over every section (the taxonomy view's
+  counts, drift, coverage, scopes, the groups, the topic graph) are `store::kept`: kept while the store is unchanged
+  (`changed_stamp`: the file, and the write-ahead log only while it holds writes), recounted in the background when it
+  changed — the last answer meanwhile, the fresh one if it comes within 250 ms; the app counts them once at start. The
+  window: Sources and Terms as closed accordions opened a page at a time ("Show 50 more · N left", the pane keeps its
+  scroll); the Graph starts with topics only and grows in place (`GraphView.batch`: changed with the renderer off —
+  sigma answering each dropped node and edge one by one froze the page), a topic's click, a client's chip or zooming
+  in on its topics, a search's Enter each bringing a set, ≤ 400 sources on screen (the oldest set goes first). Term
+  mentions are found once per section (`term_scan`: the text it was read in; a sync reads only changed sections,
+  `mentions_changed`), each name indexed by its rarest word; an edit re-reads only the terms it changed through the
+  full-text index (`mentions_of`) — measured: 21 s the first time on 2 million sections, then ~2.5 s an edit, which
+  runs off the window's thread (`topic_jobs` `edit:taxonomy`, its error once as `edit_error`). Near-duplicate terms
+  (`review_flags`) are compared with their A–Z neighbours, never each with each.
 - **MCP** (`mcp.rs`, `echoctl brain mcp`, stdio JSON-RPC, read-only): Brain's tool names and shapes (health,
   search_knowledge, list_sources, read_document, find_related_content, get_evidence; get_taxonomy / list_metrics /
   get_metric answer `not_modeled` until those lanes exist) — kb recognises a Brain by them. Attached to both window

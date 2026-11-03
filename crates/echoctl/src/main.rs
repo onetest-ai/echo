@@ -2187,7 +2187,7 @@ fn brain_command(cmd: BrainCmd) -> Result<()> {
             }
             print_json(&v)
         }
-        BrainCmd::Files => print_json(&brain::files::folder::status()?),
+        BrainCmd::Files => print_json(&brain::files::folder::list_all()?),
         BrainCmd::Numbers { cmd } => {
             use brain::numbers as n;
             let root = |r: Option<std::path::PathBuf>| r.map(|r| vec![(r, vec![])]);

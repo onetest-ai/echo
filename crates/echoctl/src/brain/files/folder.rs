@@ -612,6 +612,27 @@ pub fn page_of(title: &str) -> Option<usize> {
 pub fn status() -> Result<Value> {
     let c = store::open(&crate::brain::store_path())?;
     ensure_schema(&c)?;
+    // Counts only: a folder may hold thousands of files (its files a page at a time: `browse::folder_files`).
+    let mut out = serde_json::Map::new();
+    for root in watched().keys() {
+        let mut by = serde_json::Map::new();
+        let (mut n, mut pages) = (0i64, 0i64);
+        let mut st = c.prepare("SELECT coalesce(status, '?'), count(*), coalesce(sum(CASE WHEN status = 'pending' THEN max(coalesce(flagged, 0) - coalesce(read, 0), 0) END), 0) FROM files WHERE root = ?1 AND state = 'active' GROUP BY 1")?;
+        for row in st.query_map([root], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?)))? {
+            let (s, k, p) = row?;
+            n += k;
+            pages += p;
+            by.insert(s, json!(k));
+        }
+        out.insert(root.clone(), json!({"n": n, "by_status": by, "pending_pages": pages}));
+    }
+    Ok(Value::Object(out))
+}
+
+/// Every folder's files with what happened to each (`echoctl brain files`).
+pub fn list_all() -> Result<Value> {
+    let c = store::open(&crate::brain::store_path())?;
+    ensure_schema(&c)?;
     let mut out = serde_json::Map::new();
     for root in watched().keys() {
         let rows: Vec<Value> = c
