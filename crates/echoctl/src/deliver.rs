@@ -1,94 +1,43 @@
-//! Sending text to the user (`docs/plugins-design.md`, the `deliver` capability): their own Telegram
-//! bot's chat with them, their Teams chat with themselves, their own mailbox — or, for mail only, the
-//! addresses the user set on a routine (`Msg::mail_to`; 2026-11-03). Plugins send through it
+//! Sending text to the user (`docs/plugins-design.md`, the `deliver` capability). Echo's own ways —
+//! their Teams chat with themselves, their own mailbox (or, for mail only, the addresses the user set on
+//! a routine: `Msg::mail_to`) — and the ways plugins add (`ctx.deliver.provide`: Telegram, from its
+//! plugin), which Echo hands the message to (`jshost::provider_send`). Plugins send through it
 //! (`ctx.deliver.send`); never asked by a model, never to an address a model chose.
 //!
-//! - **Telegram**: the user's own bot (from @BotFather). Echo keeps its token and, once the user has
-//!   pressed Start in the bot's chat, the user's chat id (`<config dir>/deliver.json`, 0600). Pairing
-//!   reads the bot's updates once (`getUpdates`) and then leaves them alone: later the Telegram plugin's
-//!   channel reads them, and two readers would take each other's messages.
 //! - **Teams**: Graph `POST /chats/48:notes/messages` — the chat with yourself — through the Microsoft
 //!   365 sign-in (its token carries `Chat.ReadWrite`).
 //! - **Mail**: Graph `POST /me/sendMail` (`Mail.Send`) to the account's own address, not kept in Sent —
 //!   or to the routine's `mail_to`, kept in Sent like any mail of the user's.
 
-use std::io::Write as _;
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
-
-use anyhow::{anyhow, bail, Context, Result};
-use serde::{Deserialize, Serialize};
+use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 
-use crate::app::NoWindow;
-use crate::paths;
+/// Echo's own ways to send; a plugin adds others (`ctx.deliver.provide`).
+pub const BUILTIN: [&str; 2] = ["teams", "mail"];
 
-/// Ways to send, as manifests and routines name them.
-pub const KINDS: [&str; 3] = ["telegram", "teams", "mail"];
-/// Telegram's limit for one message's text.
-const TELEGRAM_MAX: usize = 4000;
-
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct Telegram {
-    pub token: String,
-    /// The bot's @name (from `getMe`).
-    #[serde(default)]
-    pub bot: String,
-    /// The user's chat with the bot, once paired.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub chat_id: Option<i64>,
-    /// Who paired (their Telegram name), shown in Settings.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub user: Option<String>,
+/// A way to send's name, as manifests and routines write it.
+pub fn valid_kind(k: &str) -> bool {
+    (1..=24).contains(&k.len()) && k.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct Settings {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub telegram: Option<Telegram>,
-}
-
-fn file() -> PathBuf {
-    paths::config_dir().join("deliver.json")
-}
-
-pub fn load() -> Settings {
-    std::fs::read(file()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
-}
-
-fn save(s: &Settings) -> Result<()> {
-    std::fs::create_dir_all(paths::config_dir())?;
-    let tmp = file().with_extension(format!("{}.tmp", std::process::id()));
-    let mut o = std::fs::OpenOptions::new();
-    o.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        o.mode(0o600);
-    }
-    o.open(&tmp)?.write_all(&serde_json::to_vec_pretty(s)?)?;
-    std::fs::rename(&tmp, file())?;
-    Ok(())
-}
-
-/// What can be sent now, for Settings and the routines' editor (no secrets).
+/// What can be sent now, for Settings and the plugins (no secrets): Echo's ways and the plugins'.
 pub fn status() -> Value {
-    let s = load();
-    let tg = s.telegram.as_ref().map(|t| json!({"bot": t.bot, "paired": t.chat_id.is_some(), "user": t.user, "chat_id": t.chat_id}));
     let ms = crate::graph::account();
-    json!({"telegram": tg, "teams": ms.is_some(), "mail": ms.is_some(), "account": ms})
+    #[cfg(feature = "js")]
+    let provided = crate::jshost::providers();
+    #[cfg(not(feature = "js"))]
+    let provided: Vec<Value> = vec![];
+    json!({"teams": ms.is_some(), "mail": ms.is_some(), "account": ms, "provided": provided})
 }
 
 /// Can `kind` be sent to now? (Why not, otherwise.)
 pub fn ready(kind: &str) -> Result<()> {
     match kind {
-        "telegram" => match load().telegram {
-            Some(t) if t.chat_id.is_some() => Ok(()),
-            Some(_) => bail!("Telegram isn't paired yet: press Start in your bot's chat"),
-            None => bail!("Telegram isn't set up: add your bot in Settings → Plugins"),
-        },
         "teams" | "mail" if crate::graph::account().is_some() => Ok(()),
         "teams" | "mail" => bail!("not signed in to Microsoft 365 (Settings → Calendar & chat)"),
+        #[cfg(feature = "js")]
+        k => crate::jshost::provider_ready(k),
+        #[cfg(not(feature = "js"))]
         k => bail!("“{k}” isn't a way Echo sends"),
     }
 }
@@ -131,16 +80,6 @@ pub fn send(kind: &str, m: &Msg) -> Result<()> {
     let notice = m.ai.map(ai_notice);
     let foot_lines: Vec<String> = [m.about.map(str::to_owned), notice.clone()].into_iter().flatten().collect();
     match kind {
-        "telegram" => {
-            let t = load().telegram.ok_or_else(|| anyhow!("Telegram isn't set up"))?;
-            let chat = t.chat_id.ok_or_else(|| anyhow!("Telegram isn't paired yet"))?;
-            let foot: String = foot_lines.iter().map(|a| format!("\n\n<i>{}</i>", esc(a))).collect();
-            let text = format!("<b>{}</b>\n\n{}{foot}", esc(m.title), telegram_html(m.markdown));
-            for part in split(&text, TELEGRAM_MAX) {
-                bot(&t.token, "sendMessage", &json!({"chat_id": chat, "text": part, "parse_mode": "HTML", "disable_web_page_preview": true}))?;
-            }
-            Ok(())
-        }
         "teams" => {
             let foot: String = foot_lines.iter().map(|a| format!("<p><em>{}</em></p>", esc(a))).collect();
             let html = format!("<h3>{}</h3>{}{foot}", esc(m.title), crate::minutes::markdown_html(m.markdown));
@@ -164,6 +103,10 @@ pub fn send(kind: &str, m: &Msg) -> Result<()> {
             crate::graph::post("/me/sendMail", &body).context("mail")?;
             Ok(())
         }
+        // A plugin's way (Telegram…): the plugin sends it.
+        #[cfg(feature = "js")]
+        k => crate::jshost::provider_send(k, m),
+        #[cfg(not(feature = "js"))]
         k => bail!("“{k}” isn't a way Echo sends"),
     }
 }
@@ -274,262 +217,13 @@ fn mail_html(title: &str, body: &str, about: Option<&str>, notice: Option<&str>,
     )
 }
 
-// ── Telegram ──
-
-fn quote(s: &str) -> String {
-    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\r', "\\r"))
-}
-
-/// A Bot API call (the token only in curl's config on stdin, never on a command line).
-fn bot(token: &str, method: &str, body: &Value) -> Result<Value> {
-    if token.is_empty() || !token.bytes().all(|b| b.is_ascii_alphanumeric() || b == b':' || b == b'_' || b == b'-') {
-        bail!("that isn't a bot token (it looks like 123456:ABC-…)");
-    }
-    let mut child = Command::new("curl")
-        .no_window()
-        .args(["-sS", "-K", "-"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .context("running curl")?;
-    let config = format!(
-        "url = {}\nrequest = \"POST\"\nheader = \"Content-Type: application/json\"\ndata-binary = {}\nmax-time = 40\n",
-        quote(&format!("https://api.telegram.org/bot{token}/{method}")),
-        quote(&body.to_string())
-    );
-    child.stdin.take().unwrap().write_all(config.as_bytes())?;
-    let out = child.wait_with_output()?;
-    if !out.status.success() {
-        bail!("Telegram can't be reached: {}", String::from_utf8_lossy(&out.stderr).trim());
-    }
-    let v: Value = serde_json::from_slice(&out.stdout).context("Telegram's answer isn't JSON")?;
-    if v["ok"] != true {
-        bail!("Telegram: {}", v["description"].as_str().unwrap_or("refused"));
-    }
-    Ok(v["result"].clone())
-}
-
-/// Set the bot (its token checked with `getMe`); pairing starts over.
-pub fn telegram_connect(token: &str) -> Result<String> {
-    let token = token.trim();
-    let me = bot(token, "getMe", &json!({}))?;
-    let name = me["username"].as_str().ok_or_else(|| anyhow!("Telegram gave no bot name"))?.to_string();
-    let mut s = load();
-    s.telegram = Some(Telegram { token: token.into(), bot: name.clone(), chat_id: None, user: None });
-    save(&s)?;
-    Ok(name)
-}
-
-pub fn telegram_forget() -> Result<()> {
-    let mut s = load();
-    s.telegram = None;
-    save(&s)
-}
-
-/// Wait (≤ `secs`) for the user's Start in the bot's private chat; the first one pairs. The updates
-/// read are acknowledged so they aren't given to the next reader again.
-pub fn telegram_pair(secs: u64) -> Result<String> {
-    let t = load().telegram.ok_or_else(|| anyhow!("add your bot first"))?;
-    if let (Some(_), Some(u)) = (t.chat_id, &t.user) {
-        return Ok(u.clone());
-    }
-    let until = std::time::Instant::now() + std::time::Duration::from_secs(secs);
-    let mut offset: i64 = 0;
-    while std::time::Instant::now() < until {
-        let wait = until.saturating_duration_since(std::time::Instant::now()).as_secs().clamp(1, 25);
-        let ups = bot(&t.token, "getUpdates", &json!({"offset": offset, "timeout": wait, "allowed_updates": ["message"]}))?;
-        for u in ups.as_array().cloned().unwrap_or_default() {
-            offset = offset.max(u["update_id"].as_i64().unwrap_or(0) + 1);
-            let m = &u["message"];
-            if m["chat"]["type"] != "private" || !m["text"].as_str().is_some_and(|x| x.trim_start().starts_with("/start")) {
-                continue;
-            }
-            let Some(chat) = m["chat"]["id"].as_i64() else { continue };
-            let who = m["from"]["username"].as_str().map(|u| format!("@{u}")).or_else(|| m["from"]["first_name"].as_str().map(str::to_owned)).unwrap_or_else(|| "you".into());
-            // Acknowledge what was read, then remember the chat.
-            let _ = bot(&t.token, "getUpdates", &json!({"offset": offset, "timeout": 0}));
-            let mut s = load();
-            if let Some(tg) = s.telegram.as_mut().filter(|x| x.token == t.token) {
-                tg.chat_id = Some(chat);
-                tg.user = Some(who.clone());
-            }
-            save(&s)?;
-            let _ = bot(&t.token, "sendMessage", &json!({"chat_id": chat, "text": "Echo will send you what you ask it to here. ✓"}));
-            return Ok(who);
-        }
-    }
-    bail!("no Start came from Telegram — open @{} and press Start, then try again", t.bot)
-}
-
 fn esc(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
-}
-
-/// Markdown → the HTML Telegram takes (b, i, s, code, pre, a, blockquote): headings bold, list items
-/// bulleted, a table's rows as bulleted lines — Telegram has no tables — ("• **10:00** Weekly sync · Open
-/// asks", its first cell bold, empty or "—" cells left out), links only https, everything else as text.
-pub fn telegram_html(md: &str) -> String {
-    use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
-    let mut out = String::new();
-    let mut lists: Vec<Option<u64>> = vec![];
-    let mut link_open = vec![];
-    let (mut in_head, mut cell_at, mut row) = (false, 0usize, Vec::<String>::new());
-    for ev in Parser::new_ext(md, Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH) {
-        match ev {
-            Event::Start(Tag::Table(_)) => row.clear(),
-            Event::Start(Tag::TableHead) => in_head = true,
-            Event::End(TagEnd::TableHead) => {
-                in_head = false;
-                row.clear();
-            }
-            Event::Start(Tag::TableRow) => row.clear(),
-            Event::Start(Tag::TableCell) => cell_at = out.len(),
-            Event::End(TagEnd::TableCell) => {
-                let cell = out.split_off(cell_at.min(out.len()));
-                row.push(cell.trim().to_string());
-            }
-            Event::End(TagEnd::TableRow) if !in_head => {
-                let cells: Vec<&String> = row.iter().filter(|c| !c.is_empty() && !matches!(c.as_str(), "—" | "–" | "-")).collect();
-                if let Some((first, rest)) = cells.split_first() {
-                    out.push_str(&format!("• <b>{first}</b>"));
-                    if !rest.is_empty() {
-                        out.push(' ');
-                        out.push_str(&rest.iter().map(|c| c.as_str()).collect::<Vec<_>>().join(" · "));
-                    }
-                    out.push('\n');
-                }
-                row.clear();
-            }
-            Event::End(TagEnd::Table) => out.push('\n'),
-            Event::Start(Tag::BlockQuote(_)) => out.push_str("<blockquote>"),
-            Event::End(TagEnd::BlockQuote(_)) => {
-                while out.ends_with('\n') {
-                    out.pop();
-                }
-                out.push_str("</blockquote>\n\n");
-            }
-            Event::Start(Tag::Strikethrough) => out.push_str("<s>"),
-            Event::End(TagEnd::Strikethrough) => out.push_str("</s>"),
-            Event::Start(Tag::Heading { .. }) | Event::Start(Tag::Strong) => out.push_str("<b>"),
-            Event::End(TagEnd::Heading(_)) => out.push_str("</b>\n\n"),
-            Event::End(TagEnd::Strong) => out.push_str("</b>"),
-            Event::Start(Tag::Emphasis) => out.push_str("<i>"),
-            Event::End(TagEnd::Emphasis) => out.push_str("</i>"),
-            Event::Start(Tag::CodeBlock(_)) => out.push_str("<pre>"),
-            Event::End(TagEnd::CodeBlock) => out.push_str("</pre>\n"),
-            Event::Start(Tag::List(n)) => lists.push(n),
-            Event::End(TagEnd::List(_)) => {
-                lists.pop();
-                if lists.is_empty() {
-                    out.push('\n');
-                }
-            }
-            Event::Start(Tag::Item) => {
-                let depth = lists.len().saturating_sub(1);
-                out.push_str(&"  ".repeat(depth));
-                match lists.last_mut() {
-                    Some(Some(n)) => {
-                        out.push_str(&format!("{n}. "));
-                        *n += 1;
-                    }
-                    _ => out.push_str("• "),
-                }
-            }
-            Event::End(TagEnd::Item) if !out.ends_with('\n') => out.push('\n'),
-            Event::End(TagEnd::Paragraph) => out.push_str(if lists.is_empty() { "\n\n" } else { "\n" }),
-            Event::Start(Tag::Link { dest_url, .. }) => {
-                let ok = dest_url.starts_with("https://");
-                if ok {
-                    out.push_str(&format!("<a href=\"{}\">", esc(&dest_url)));
-                }
-                link_open.push(ok);
-            }
-            Event::End(TagEnd::Link) if link_open.pop().unwrap_or(false) => out.push_str("</a>"),
-            Event::Text(t) => out.push_str(&esc(&t)),
-            Event::Code(t) => out.push_str(&format!("<code>{}</code>", esc(&t))),
-            Event::SoftBreak | Event::HardBreak => out.push('\n'),
-            Event::Rule => out.push_str("—\n"),
-            Event::Html(t) | Event::InlineHtml(t) => out.push_str(&esc(&t)),
-            _ => {}
-        }
-    }
-    out.trim_end().to_string()
-}
-
-/// Cut text into pieces of at most `max` characters at line ends (a longer line is cut where it
-/// must; a cut inside a tag is avoided by cutting before its `<`).
-fn split(text: &str, max: usize) -> Vec<String> {
-    let mut parts = vec![];
-    let mut cur = String::new();
-    for line in text.split_inclusive('\n') {
-        if cur.chars().count() + line.chars().count() > max && !cur.is_empty() {
-            parts.push(std::mem::take(&mut cur));
-        }
-        let mut line = line.to_string();
-        while line.chars().count() > max {
-            let mut cut: usize = line.char_indices().nth(max).map(|(i, _)| i).unwrap_or(line.len());
-            if let Some(lt) = line[..cut].rfind('<').filter(|&lt| !line[lt..cut].contains('>')) {
-                cut = lt.max(1);
-            }
-            parts.push(line[..cut].to_string());
-            line = line[cut..].to_string();
-        }
-        cur.push_str(&line);
-    }
-    if !cur.trim().is_empty() {
-        parts.push(cur);
-    }
-    // Tags left open across a cut would be refused: close and reopen bold / italic / code.
-    parts.into_iter().map(|p| balance(&p)).collect()
-}
-
-fn balance(p: &str) -> String {
-    let mut out = p.to_string();
-    for tag in ["b", "i", "s", "code", "pre", "blockquote"] {
-        let opens = p.matches(&format!("<{tag}>")).count();
-        let closes = p.matches(&format!("</{tag}>")).count();
-        if opens > closes {
-            out.push_str(&format!("</{tag}>").repeat(opens - closes));
-        } else if closes > opens {
-            out = format!("{}{out}", format!("<{tag}>").repeat(closes - opens));
-        }
-    }
-    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_table_becomes_lines_and_a_quote_a_blockquote() {
-        let h = telegram_html("## Meetings\n\n| Time | Meeting | Prepare |\n|---|---|---|\n| 10:00 | Weekly sync | Open asks |\n| 15:00 | Acme review | — |\n\n> Not real: a test.");
-        assert!(h.contains("• <b>10:00</b> Weekly sync · Open asks\n• <b>15:00</b> Acme review\n"), "{h}");
-        assert!(!h.contains('|') && !h.contains("Time"), "{h}");
-        assert!(h.contains("<blockquote>Not real: a test.</blockquote>"), "{h}");
-    }
-
-    #[test]
-    fn markdown_becomes_telegrams_html() {
-        let h = telegram_html("# Monday\n\nYou owe **2** things:\n\n- Send the <deck> to [Acme](https://acme.example)\n- `T011`\n\n[x](javascript:alert(1))");
-        assert!(h.starts_with("<b>Monday</b>"), "{h}");
-        assert!(h.contains("You owe <b>2</b> things"));
-        assert!(h.contains("• Send the &lt;deck&gt; to <a href=\"https://acme.example\">Acme</a>"), "{h}");
-        assert!(h.contains("• <code>T011</code>"));
-        assert!(!h.contains("javascript"), "only https links: {h}");
-    }
-
-    #[test]
-    fn long_text_is_cut_at_line_ends_with_tags_closed() {
-        let text = format!("<b>{}</b>\n{}", "a".repeat(30), "line\n".repeat(20));
-        let parts = split(&text, 50);
-        assert!(parts.len() > 1);
-        assert!(parts.iter().all(|p| p.chars().count() <= 60));
-        assert_eq!(parts.concat().matches("line").count(), 20);
-        let long = split(&format!("<b>{}</b>", "x".repeat(120)), 50);
-        assert!(long.iter().all(|p| p.matches("<b>").count() == p.matches("</b>").count()), "{long:?}");
-    }
 
     #[test]
     fn a_mail_is_echos_card_with_the_text_escaped() {
@@ -548,10 +242,9 @@ mod tests {
     }
 
     #[test]
-    fn only_known_ways_and_a_token_shaped_token() {
+    fn only_known_ways() {
         let (_env, _) = crate::paths::testenv::folders("deliver");
         assert!(ready("slack").is_err());
-        assert!(ready("telegram").unwrap_err().to_string().contains("set up"));
-        assert!(bot("bad token; rm", "getMe", &json!({})).unwrap_err().to_string().contains("bot token"));
+        assert!(valid_kind("telegram") && !valid_kind("Tele gram") && !valid_kind(""));
     }
 }

@@ -787,8 +787,8 @@ ES module's `apply(ctx)` gets Echo's services over two Rust functions (`__host` 
 from a worker thread) wrapped by `PRELUDE`: `ctx.command(name, fn)` (async allowed; called by `jshost::call` — the window's
 `GET /api/plugin/<id>/call/<cmd>?args=`, IPC `plugin_call` from Inbox buttons, `echoctl plugin call <id> <cmd> [json]`, which
 never runs timers: `no_timers`), `ctx.every(sec, fn)` (ticks each second in the app), `ctx.on(event)`, `ctx.store` (its
-folder `<home>/.echo/plugins/<id>/`, relative paths only), `ctx.package` (its installed files, read-only), `ctx.settings`,
-`ctx.markdown` (Echo's safe writer), `ctx.notify`, `ctx.inbox.set/clear` (`inbox.json` → Needs you items whose buttons
+folder `<home>/.echo/plugins/<id>/`, relative paths only), `ctx.package` (its installed files, read-only), `ctx.settings` (get / set; secrets 0600),
+`ctx.http.fetch` (HTTPS to its manifest's hosts), `ctx.markdown` (Echo's safe writer), `ctx.notify`, `ctx.inbox.set/clear` (`inbox.json` → Needs you items whose buttons
 call its commands), `ctx.profiles`, `ctx.deliver.status/send`, `ctx.claude.run({prompt, title, profile, model, tools,
 dir})` → `{answer, model, usage}` (`claudejob.rs`: headless on one of the user's AI profiles, the Brain narrowed to it;
 `tools` read = the guard's `RUN_MODE=routine` — the data folder, the run's own tool-results, read-only
@@ -811,11 +811,10 @@ a git URL (`#ref`) → `git clone --depth 1`; a folder read where it is; every t
 `<home>/.echo/plugins/<id>/settings.json`, secrets `<config dir>/plugins/secrets/<id>.json` (0600). Install = the sheet's
 lines agreed; an update asking for more waits for a new agreement. Settings → Plugins (Installed · Discover ·
 Marketplaces; IPC `plugin_op`); `echoctl plugin list|install|update|remove|enable|disable|set|call|marketplace …`.
-**Channels** (`ctx.sessions.channel({plugin, env, token})`, only the channel the manifest's `uses.channel` names;
+**Channels** (`ctx.sessions.channel({plugin, env})`, only the channel the manifest's `uses.channel` names;
 `jshost::channels`): the Echo-folder session starts with `--channels plugin:<spec>` and the env given — no `CLAUDE*` /
-`ANTHROPIC*` keys; `token: 'telegram'` adds `TELEGRAM_BOT_TOKEN` from Echo's own delivery settings, so the plugin never
-holds it. `ctx.claude.hasPlugin` / `installPlugin` (`claude plugin list --json` / `install --scope user` through the
-profile: on, at user scope or this data folder's project), `ctx.system.which`. **Telegram** (its package): writes the
+`ANTHROPIC*` keys. `ctx.claude.hasPlugin` / `installPlugin` (`claude plugin list --json` / `install --scope user` through the
+profile: on, at user scope or this data folder's project), `ctx.system.which`. **Telegram** (its package, with its bot): writes the
 channel's `access.json` in its store — `allowlist`, only the paired chat id, `TELEGRAM_ACCESS_MODE=static` (no pairing
 codes) — and registers the channel; its Settings section checks the bot, Bun and Claude Code's
 `telegram@claude-plugins-official`. Measured 2026-11-03 (personal Max account): a message reaches the open session, the
@@ -825,22 +824,21 @@ transcript, so it can't be resumed.
 **Scheduler** (its package in `onetest-ai/echo-plugins/plugins/scheduler`): routines = the user's prompts on a schedule
 (`routines/<id>.md` in its store, templates in its package), runs with tokens and cost, its own Settings section; the
 Telegram and Obsidian plugins wait for `channel`, `brain_source`, `export`, `sessions`.
-**Delivery** (`deliver.rs`; to the user — mail also to the addresses set on a routine, `mail_to`, the user's call
-2026-11-03; never an address a model picked): Telegram = the user's own bot (token + their chat id in
-`<config dir>/deliver.json`, 0600; pairing reads the bot's updates once — `getUpdates` until the user's `/start` — then
-never again, so the Telegram channel can own them later; Bot API through curl's config on stdin), Teams = Graph `POST
-/chats/48:notes/messages` (the chat with yourself), mail = `POST /me/sendMail` to `/me`'s own address, not saved in Sent
-(`graph::post`, `graph::my_address`; mail to others is kept in Sent and its foot says who sent it); Markdown → Telegram's HTML subset (`telegram_html`, https links only, split at
-4000 with tags closed) or `minutes::markdown_html`; a mail is Echo's (`mail_html`, `MAIL_CSS`: the minutes page — the octopus, an inline `cid:`
-attachment, "Echo" and the day above one plain card, Echo's type, violet only for links, code and the AI mark; no
-grey page around the card (Outlook's dark mode turned it grey on grey) and no decoration — a top bar, section
-markers — the user called AI-slop; Outlook recolours after the CSS, so every text is Echo's ink (rank by size and weight,
-never a lighter grey) and only saturated fills are used — tables are reports: a violet head row with white text, faint
-zebra rows marked in the HTML (`zebra`: mail apps drop `:nth-child`), horizontal rules; checked in Outlook on the web,
-light and dark; Apple Mail gets Echo's dark colours) and anything
-a model wrote carries `ai_notice` ("Written by AI (Claude, <model>)… it can contain mistakes") — in every channel. Settings → Plugins → Echo sends to you (IPC `deliver_op
-{telegram_connect|telegram_pair|telegram_forget|test}`); `echoctl deliver status|telegram <token>|telegram-forget|test
-<kind>`.
+**Delivery** (`deliver.rs`; to the user — mail also to the addresses set on a routine, `mail_to`; never an address a
+model picked): Echo's own ways are Teams = Graph `POST /chats/48:notes/messages` (the chat with yourself) and mail =
+`POST /me/sendMail` to `/me`'s own address, not saved in Sent (`graph::post`, `graph::my_address`; mail to others is kept
+in Sent and its foot says who sent it), from `minutes::markdown_html`. A mail is Echo's (`mail_html`, `MAIL_CSS`: the
+minutes page — the octopus, an inline `cid:` attachment, "Echo" and the day above one plain card, Echo's type, violet only
+for links, code and the AI mark; no grey page around the card and no decoration — a top bar, section markers — the user
+called AI-slop; Outlook recolours after the CSS, so every text is Echo's ink, rank by size and weight, never a lighter
+grey, and only saturated fills — tables are reports: a violet head row with white text, faint zebra rows marked in the
+HTML (`zebra`), horizontal rules; checked in Outlook on the web, light and dark). Anything a model wrote carries
+`ai_notice` in every channel. **Other ways are plugins'**: `ctx.deliver.provide(kind, {label, send})` in a host half
+whose manifest names the kind (`uses.deliver_provider.kinds`), its readiness told with `ctx.deliver.ready`
+(`jshost::providers`); `deliver::send` hands such a message to that plugin (`jshost::provider_send` → its `__deliver`
+command). Telegram is one (its package: bot token as its secret setting, pairing, sending through `ctx.http.fetch` to
+`api.telegram.org` only — `uses.network.hosts` —, Markdown → Telegram HTML with tables as lines). Settings → Plugins →
+Echo sends to you (`/api/deliver`) lists Teams, Mail and the plugins' ways; `echoctl deliver status|test <kind>|send`.
 
 ## Live view (mod) and automation
 `plugin/hooks/register.tsx` is a Claude Code mod (state contract `plugin/types/index.d.ts`, pure helpers

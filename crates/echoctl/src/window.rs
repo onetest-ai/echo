@@ -272,11 +272,7 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
             json_reply(crate::plugins::snapshot())
         }
         // Where Echo can send to the user (the plugins that deliver).
-        "/api/deliver" => json_reply({
-            let mut v = crate::deliver::status();
-            v["busy"] = DELIVER_BUSY.lock().map(|b| json!(*b)).unwrap_or(Value::Null);
-            v
-        }),
+        "/api/deliver" => json_reply(crate::deliver::status()),
         // A plugin's command (`ctx.command` in its host half), for its client half: JSON in, JSON out.
         #[cfg(feature = "js")]
         p if p.starts_with("/api/plugin/") => {
@@ -1645,53 +1641,8 @@ fn plugin_file(rest: &str) -> Response<Cow<'static, [u8]>> {
     }
 }
 
-/// A delivery set up from Settings, in the background: what it is doing, or why it failed.
-static DELIVER_BUSY: std::sync::Mutex<Option<Value>> = std::sync::Mutex::new(None);
-
 fn deliver_op(v: &Value) -> Handled {
-    let busy = |x: Option<Value>| {
-        if let Ok(mut b) = DELIVER_BUSY.lock() {
-            *b = x;
-        }
-    };
     match v["op"].as_str().unwrap_or("") {
-        // The bot's token checked, then the user's Start waited for (≤ 5 min).
-        "telegram_connect" => {
-            let token = v["token"].as_str().unwrap_or("").to_string();
-            busy(Some(json!({"what": "telegram", "doing": "Checking the bot…"})));
-            std::thread::spawn(move || {
-                let r = crate::deliver::telegram_connect(&token).and_then(|bot| {
-                    if let Ok(mut b) = DELIVER_BUSY.lock() {
-                        *b = Some(json!({"what": "telegram", "doing": format!("Open @{bot} in Telegram and press Start"), "bot": bot}));
-                    }
-                    crate::deliver::telegram_pair(300)
-                });
-                if let Ok(mut b) = DELIVER_BUSY.lock() {
-                    *b = match r {
-                        Ok(_) => None,
-                        Err(e) => Some(json!({"what": "telegram", "error": format!("{e:#}")})),
-                    };
-                }
-            });
-            true.into()
-        }
-        "telegram_pair" => {
-            busy(Some(json!({"what": "telegram", "doing": "Waiting for your Start in Telegram…"})));
-            std::thread::spawn(|| {
-                let r = crate::deliver::telegram_pair(300);
-                if let Ok(mut b) = DELIVER_BUSY.lock() {
-                    *b = r.err().map(|e| json!({"what": "telegram", "error": format!("{e:#}")}));
-                }
-            });
-            true.into()
-        }
-        "telegram_forget" => match crate::deliver::telegram_forget() {
-            Ok(()) => {
-                busy(None);
-                true.into()
-            }
-            Err(e) => notice(&format!("{e:#}")),
-        },
         "test" => {
             let kind = v["kind"].as_str().unwrap_or("").to_string();
             std::thread::spawn(move || {

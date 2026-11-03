@@ -2086,47 +2086,32 @@ function plExtras(x) {
 }
 async function loadDeliver() {
   try { S.deliver = await get('api/deliver') } catch { /* app restarting */ }
-  if (S.deliver && S.deliver.busy && S.deliver.busy.doing) setTimeout(() => { if (S.view === 'settings' && S.setSection === 'plugins') loadDeliver().then(render) }, 1500)
 }
 function deliverOp(op, body = {}) {
   send({ cmd: 'deliver_op', op, ...body })
   setTimeout(() => loadDeliver().then(render), 500)
 }
-const DELIVER_LABEL = { telegram: 'Telegram', teams: 'Teams', mail: 'Mail' }
-/** Where Echo sends things to you: your own bot, your Teams chat with yourself, your mailbox. */
+/** Where Echo sends things to you: your Teams chat with yourself, your mailbox — and the ways plugins add
+ *  (Telegram…), each set up in its own plugin's section. */
 function deliverCard(d) {
-  const tg = d.telegram, b = d.busy && d.busy.what === 'telegram' ? d.busy : null
-  const test = (k) => `<button class="btn ghost" data-dl-test="${k}">Send a test</button>`
-  let tgSub, tgCtl
-  if (b && b.doing) {
-    tgSub = b.bot ? `Open <a data-ext href="https://t.me/${esc(b.bot)}">@${esc(b.bot)}</a> in Telegram and press <b>Start</b> — Echo is waiting for it.` : esc(b.doing)
-    tgCtl = '<span class="set-sub">Waiting…</span>'
-  } else if (tg && tg.paired) {
-    tgSub = `Your bot <b>@${esc(tg.bot)}</b> sends to ${esc(tg.user || 'you')}. Only you: Echo never reads what others write to it.`
-    tgCtl = test('telegram') + '<button class="btn ghost" data-dl-forget>Forget</button>'
-  } else if (tg) {
-    tgSub = `Open <a data-ext href="https://t.me/${esc(tg.bot)}">@${esc(tg.bot)}</a> in Telegram and press <b>Start</b>, then let Echo look for it.`
-    tgCtl = '<button class="btn primary" data-dl-pair>I pressed Start</button><button class="btn ghost" data-dl-forget>Forget</button>'
-  } else {
-    tgSub = 'Your own bot: in Telegram, message <b>@BotFather</b>, send <code>/newbot</code>, and paste the token it gives you.'
-    tgCtl = '<input class="set-in" type="password" id="dl-token" placeholder="123456:ABC-…" aria-label="Bot token" spellcheck="false"><button class="btn primary" data-dl-connect>Connect</button>'
-  }
-  if (b && b.error) tgSub += `<div class="error">${esc(b.error)}</div>`
+  const test = (k) => `<button class="btn ghost" data-dl-test="${esc(k)}">Send a test</button>`
   const ms = d.account ? `As ${esc(d.account)}.` : 'Sign in to Microsoft 365 first (Settings → Calendar &amp; chat).'
+  const own = (d.provided || []).map((x) => {
+    const sec = Plugins.sections.find((s) => s.plugin === x.plugin)
+    return setRow(esc(x.label), x.ready ? `Ready — from the ${esc(x.plugin)} plugin.` : `${esc(x.why || 'Not set up yet')} — in its plugin’s section.`,
+      (x.ready ? test(x.kind) : '') + (sec ? `<button class="btn${x.ready ? ' ghost' : ' primary'}" data-dl-go="${esc(sec.id)}">${x.ready ? 'Settings' : 'Set up…'}</button>` : ''))
+  })
   return setCard('Echo sends to you', [
-    setRow('Telegram', tgSub, tgCtl),
     setRow('Teams', `Your chat with yourself. ${ms}`, d.teams ? test('teams') : ''),
     setRow('Mail', `Your own mailbox — or the addresses a plugin was given. ${ms}`, d.mail ? test('mail') : ''),
+    ...own,
   ])
 }
 document.addEventListener('click', (e) => {
-  const t = e.target.closest && e.target.closest('[data-dl-connect],[data-dl-pair],[data-dl-forget],[data-dl-test]')
+  const t = e.target.closest && e.target.closest('[data-dl-test],[data-dl-go]')
   if (!t) return
-  const d = t.dataset
-  if ('dlConnect' in d) { const token = ($('#dl-token') || {}).value || ''; if (token.trim()) deliverOp('telegram_connect', { token: token.trim() }); return }
-  if ('dlPair' in d) return deliverOp('telegram_pair')
-  if ('dlForget' in d) return deliverOp('telegram_forget')
-  if (d.dlTest) return deliverOp('test', { kind: d.dlTest })
+  if (t.dataset.dlGo) return go(`settings/${t.dataset.dlGo}`)
+  if (t.dataset.dlTest) return deliverOp('test', { kind: t.dataset.dlTest })
 })
 
 // ── Plugins' client halves (docs/plugins-design.md, v4) ──

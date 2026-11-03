@@ -243,7 +243,7 @@ enum Cmd {
         #[command(subcommand)]
         cmd: PluginCmd,
     },
-    /// Where Echo sends things to you: Telegram (your bot), Teams (your chat with yourself), mail
+    /// Where Echo sends things to you: Teams (your chat with yourself), mail, and the ways plugins add
     Deliver {
         #[command(subcommand)]
         cmd: DeliverCmd,
@@ -1036,13 +1036,9 @@ enum PluginCmd {
 enum DeliverCmd {
     /// What can be sent now (JSON)
     Status,
-    /// Set your Telegram bot (token from @BotFather), then wait for your Start in its chat
-    Telegram { token: String },
-    /// Forget the Telegram bot
-    TelegramForget,
-    /// Send a test message: telegram | teams | mail
+    /// Send a test message: teams | mail | a way a plugin adds (telegram…)
     Test { kind: String },
-    /// Send a Markdown file to yourself: telegram | teams | mail
+    /// Send a Markdown file to yourself: teams | mail | a way a plugin adds
     Send {
         kind: String,
         #[arg(long)]
@@ -2281,14 +2277,15 @@ fn routine_reads() -> bool {
 const TEST_MESSAGE: &str = "This is how Echo's messages reach you.\n\n## Today\n\n1. **Send the deck** to Acme — due today\n2. Review `T012` before the 15:00 call\n\n## Meetings\n\n| Time | Meeting | Prepare |\n|---|---|---|\n| 10:00 | Weekly sync | Open asks |\n| 15:00 | Acme review | The deck |\n\n> Nothing here is real: it's a test.";
 
 fn deliver_command(cmd: DeliverCmd) -> Result<()> {
+    // The ways plugins add live in their host halves: load them (commands only, no timers).
+    #[cfg(feature = "js")]
+    {
+        jshost::no_timers();
+        jshost::sync();
+        std::thread::sleep(std::time::Duration::from_millis(600));
+    }
     match cmd {
         DeliverCmd::Status => print_json(&deliver::status()),
-        DeliverCmd::Telegram { token } => {
-            let bot = deliver::telegram_connect(&token)?;
-            println!("Open https://t.me/{bot} and press Start (waiting up to 5 minutes)…");
-            println!("Paired with {}", deliver::telegram_pair(300)?);
-        }
-        DeliverCmd::TelegramForget => deliver::telegram_forget()?,
         DeliverCmd::Send { kind, title, file, about, ai, to } => {
             deliver::ready(&kind)?;
             let to: Vec<String> = to.split(',').map(str::trim).filter(|a| !a.is_empty()).map(str::to_owned).collect();

@@ -64,6 +64,8 @@ const CAPABILITIES: &[Capability] = &[
     Capability { id: "claude", ready: true, describe: describe_claude },
     Capability { id: "schedule", ready: true, describe: describe_schedule },
     Capability { id: "deliver", ready: true, describe: describe_deliver },
+    Capability { id: "deliver_provider", ready: true, describe: describe_deliver_provider },
+    Capability { id: "network", ready: true, describe: describe_network },
     Capability { id: "channel", ready: true, describe: describe_channel },
     Capability { id: "brain_source", ready: false, describe: describe_brain_source },
     Capability { id: "export", ready: false, describe: describe_export },
@@ -103,19 +105,42 @@ fn describe_schedule(_: &Value) -> Result<String> {
 
 fn describe_deliver(v: &Value) -> Result<String> {
     let to = strings(v, "to")?;
-    only("A delivery", &to, &crate::deliver::KINDS)?;
-    if to.is_empty() {
-        bail!("“deliver” names no way to send (telegram, teams, mail)");
+    if let Some(k) = to.iter().find(|k| !crate::deliver::valid_kind(k)) {
+        bail!("a delivery “{k}” isn't a plain name");
     }
-    let words: Vec<&str> = to
+    if to.is_empty() {
+        bail!("“deliver” names no way to send (teams, mail, or one a plugin adds)");
+    }
+    let words: Vec<String> = to
         .iter()
         .map(|t| match t.as_str() {
-            "telegram" => "Telegram (your own bot)",
-            "teams" => "Teams (your chat with yourself)",
-            _ => "mail (to you, or to the addresses you set on a routine)",
+            "teams" => "Teams (your chat with yourself)".to_string(),
+            "mail" => "mail (to you, or to the addresses you set on a routine)".to_string(),
+            k => format!("{} (through the plugin that adds it)", title_case(k)),
         })
         .collect();
-    Ok(format!("Sends messages: {}", join_words(&words)))
+    Ok(format!("Sends messages: {}", join_words(&words.iter().map(String::as_str).collect::<Vec<_>>())))
+}
+
+fn title_case(k: &str) -> String {
+    let mut c = k.chars();
+    c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
+}
+
+fn describe_deliver_provider(v: &Value) -> Result<String> {
+    let kinds = strings(v, "kinds")?;
+    if kinds.is_empty() || kinds.iter().any(|k| !crate::deliver::valid_kind(k) || crate::deliver::BUILTIN.contains(&k.as_str())) {
+        bail!("“deliver_provider” names its ways by plain new names");
+    }
+    Ok(format!("Adds a way Echo sends things to you: {}", join_words(&kinds.iter().map(|k| title_case(k)).collect::<Vec<_>>().iter().map(String::as_str).collect::<Vec<_>>())))
+}
+
+fn describe_network(v: &Value) -> Result<String> {
+    let hosts = strings(v, "hosts")?;
+    if hosts.is_empty() || hosts.iter().any(|h| h.is_empty() || !h.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-') || !h.contains('.')) {
+        bail!("“network” names hosts (e.g. api.example.com)");
+    }
+    Ok(format!("Talks to {} over HTTPS", join_words(&hosts.iter().map(String::as_str).collect::<Vec<_>>())))
 }
 
 fn describe_channel(v: &Value) -> Result<String> {
@@ -1350,14 +1375,17 @@ mod tests {
     fn capabilities_are_described_in_echos_words() {
         let uses = |v: Value| v.as_object().unwrap().clone();
         let w = describe(&uses(json!({"deliver": {"to": ["telegram", "mail"]}}))).unwrap();
-        assert_eq!(w, vec!["Sends messages: Telegram (your own bot) and mail (to you, or to the addresses you set on a routine)"]);
-        assert!(describe(&uses(json!({"deliver": {"to": ["slack"]}}))).is_err());
+        assert_eq!(w, vec!["Sends messages: Telegram (through the plugin that adds it) and mail (to you, or to the addresses you set on a routine)"]);
+        assert!(describe(&uses(json!({"deliver": {"to": ["Slack!"]}}))).is_err());
+        assert_eq!(describe(&uses(json!({"network": {"hosts": ["api.telegram.org"]}}))).unwrap(), vec!["Talks to api.telegram.org over HTTPS"]);
+        assert!(describe(&uses(json!({"network": {"hosts": ["https://x"]}}))).is_err());
+        assert!(describe(&uses(json!({"deliver_provider": {"kinds": ["mail"]}}))).is_err());
         assert!(describe(&uses(json!({"teleport": {}}))).unwrap_err().to_string().contains("newer Echo"));
         assert!(describe(&uses(json!({"channel": {"plugin": "evil@somewhere"}}))).is_err());
         assert!(describe(&uses(json!({"channel": {"plugin": "telegram@claude-plugins-official"}}))).is_ok());
         // Known but not implemented yet: listed, not installable.
-        let m = Manifest { id: "x".into(), name: "X".into(), version: "0.1.0".into(), echo: None, summary: String::new(), uses: uses(json!({"channel": {"plugin": "telegram@claude-plugins-official"}})), settings: vec![], main: None, client: None };
-        assert!(why_not(&m).unwrap().contains("channel"));
+        let m = Manifest { id: "x".into(), name: "X".into(), version: "0.1.0".into(), echo: None, summary: String::new(), uses: uses(json!({"brain_source": {"kind": "vault"}})), settings: vec![], main: None, client: None };
+        assert!(why_not(&m).unwrap().contains("brain_source"));
         let m = Manifest { echo: Some(">=99.0.0".into()), uses: Default::default(), ..m };
         assert_eq!(why_not(&m).unwrap(), "Needs Echo 99.0.0 or later");
     }

@@ -31,7 +31,13 @@ const SLICE: Duration = Duration::from_secs(5);
 const PRELUDE: &str = r#"
 (() => {
   const host = globalThis.__host, hostAsync = globalThis.__hostAsync
-  const commands = {}, timers = [], pending = {}, handlers = {}
+  const commands = {}, timers = [], pending = {}, handlers = {}, providers = {}
+  // A way to send this plugin adds (`ctx.deliver.provide`): Echo hands it the message.
+  commands.__deliver = ({ kind, msg }) => {
+    const p = providers[kind]
+    if (!p) throw new Error(`this plugin doesn't send “${kind}”`)
+    return p.send(msg)
+  }
   const call = (op, arg) => {
     const out = JSON.parse(host(op, JSON.stringify(arg === undefined ? null : arg)))
     if (out && out.error) throw new Error(out.error)
@@ -71,7 +77,9 @@ const PRELUDE: &str = r#"
       remove: (path) => call('store.remove', path),
       path: (path) => call('store.path', path || ''),
     },
-    settings: { get: (key) => call('settings.get', key) },
+    settings: { get: (key) => call('settings.get', key), set: (key, value) => call('settings.set', [key, value]) },
+    /** HTTPS to the hosts its manifest names (`uses.network.hosts`): {status, body}. */
+    http: { fetch: (url, opts) => later('http.fetch', [String(url), opts || {}]) },
     package: { read: (path) => call('package.read', path), list: (dir) => call('package.list', dir || '') },
     markdown: (md) => call('markdown', String(md)),
     notify: (title, body) => call('notify', [String(title), String(body || '')]),
@@ -85,10 +93,17 @@ const PRELUDE: &str = r#"
       installPlugin: (spec, profile) => later('claude.install_plugin', [spec, profile || '']),
     },
     /** The Claude · Echo folder session listens to a Claude Code channel (the one the manifest names) while
-     *  it is open; `env` is passed to it, `token: 'telegram'` adds the bot token Echo keeps. */
+     *  it is open, with `env` (the channel's own keys; Claude and Anthropic ones are refused). */
     sessions: { channel: (opts) => call('sessions.channel', opts), clearChannel: () => call('sessions.clear_channel') },
     system: { which: (name) => call('system.which', name) },
-    deliver: { status: () => call('deliver.status'), send: (kind, msg) => later('deliver.send', [kind, msg]) },
+    deliver: {
+      status: () => call('deliver.status'),
+      send: (kind, msg) => later('deliver.send', [kind, msg]),
+      /** Add a way Echo sends to the user: `send(msg)` gets {title, markdown, about, ai}; tell Echo
+       *  whether it can send now with `ready(kind, yes, why)`. */
+      provide: (kind, opts) => { providers[kind] = opts; call('deliver.provide', { kind, label: opts.label || kind }) },
+      ready: (kind, yes, why) => call('deliver.ready', { kind, ready: !!yes, why: why || '' }),
+    },
   }
 })()
 "#;
@@ -122,6 +137,88 @@ pub struct Channel {
 pub fn channels() -> Vec<Channel> {
     let on: Vec<String> = plugins::enabled().into_iter().map(|p| p.id).collect();
     CHANNELS.lock().map(|c| c.iter().filter(|(id, _)| on.contains(id)).map(|(_, ch)| ch.clone()).collect()).unwrap_or_default()
+}
+
+/// Ways to send plugins added (`ctx.deliver.provide`): kind → who, and whether it can send now.
+static PROVIDERS: Mutex<BTreeMap<String, Provider>> = Mutex::new(BTreeMap::new());
+
+#[derive(Debug, Clone)]
+struct Provider {
+    plugin: String,
+    label: String,
+    ready: bool,
+    why: String,
+}
+
+fn provider(kind: &str) -> Result<Provider> {
+    let on: Vec<String> = plugins::enabled().into_iter().map(|p| p.id).collect();
+    PROVIDERS
+        .lock()
+        .ok()
+        .and_then(|p| p.get(kind).cloned())
+        .filter(|x| on.contains(&x.plugin))
+        .ok_or_else(|| anyhow!("“{kind}” isn't a way Echo sends (its plugin isn't installed and on)"))
+}
+
+/// The ways plugins add, for `deliver::status`: [{kind, label, plugin, ready, why}].
+pub fn providers() -> Vec<Value> {
+    let on: Vec<String> = plugins::enabled().into_iter().map(|p| p.id).collect();
+    PROVIDERS
+        .lock()
+        .map(|p| p.iter().filter(|(_, x)| on.contains(&x.plugin)).map(|(k, x)| json!({"kind": k, "label": x.label, "plugin": x.plugin, "ready": x.ready, "why": x.why})).collect())
+        .unwrap_or_default()
+}
+
+pub fn provider_ready(kind: &str) -> Result<()> {
+    let p = provider(kind)?;
+    if p.ready {
+        Ok(())
+    } else {
+        bail!("{} isn't ready: {}", p.label, if p.why.is_empty() { "set it up in Settings" } else { &p.why })
+    }
+}
+
+/// Hand a message to the plugin that adds `kind` (its `send`), and wait for it.
+pub fn provider_send(kind: &str, m: &crate::deliver::Msg) -> Result<()> {
+    let p = provider(kind)?;
+    let msg = json!({"title": m.title, "markdown": m.markdown, "about": m.about, "ai": m.ai.map(crate::deliver::ai_notice)});
+    call_within(&p.plugin, "__deliver", &json!({"kind": kind, "msg": msg}), Duration::from_secs(90)).map(|_| ())
+}
+
+/// `ctx.http.fetch`: HTTPS to a host the plugin's manifest names, through curl (its config on stdin, so
+/// headers and body never show on a command line). {status, body}; at most 10 MB, 60 s.
+fn fetch(id: &str, url: &str, opts: &Value) -> Result<Value> {
+    use std::io::Write as _;
+    use crate::app::NoWindow;
+    let m = plugins::read_manifest(&package_dir(id)?)?;
+    let hosts: Vec<String> = m.uses.get("network").and_then(|v| v["hosts"].as_array().cloned()).unwrap_or_default().iter().filter_map(|h| h.as_str().map(str::to_owned)).collect();
+    let rest = url.strip_prefix("https://").ok_or_else(|| anyhow!("only https:// addresses"))?;
+    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if host.contains('@') || host.contains(':') || !hosts.iter().any(|h| h == host) {
+        bail!("{id} may reach only the hosts its manifest names ({})", hosts.join(", "));
+    }
+    let q = |s: &str| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\r', "\\r"));
+    let method = opts["method"].as_str().unwrap_or("GET").to_ascii_uppercase();
+    if !["GET", "POST", "PUT", "PATCH", "DELETE"].contains(&method.as_str()) {
+        bail!("method {method}");
+    }
+    let mut cfg = format!("url = {}\nrequest = \"{method}\"\nmax-time = 60\nmax-filesize = 10485760\nwrite-out = \"\\n%{{http_code}}\"\n", q(url));
+    for (k, v) in opts["headers"].as_object().cloned().unwrap_or_default() {
+        cfg.push_str(&format!("header = {}\n", q(&format!("{k}: {}", v.as_str().unwrap_or("")))));
+    }
+    if let Some(b) = opts.get("body").filter(|b| !b.is_null()) {
+        let body = b.as_str().map(str::to_owned).unwrap_or_else(|| b.to_string());
+        cfg.push_str(&format!("data-binary = {}\n", q(&body)));
+    }
+    let mut child = std::process::Command::new("curl").no_window().args(["-sS", "-K", "-"]).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn()?;
+    child.stdin.take().unwrap().write_all(cfg.as_bytes())?;
+    let out = child.wait_with_output()?;
+    if !out.status.success() {
+        bail!("{host} can't be reached: {}", String::from_utf8_lossy(&out.stderr).trim());
+    }
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    let (body, code) = text.rsplit_once('\n').unwrap_or(("", &text));
+    Ok(json!({"status": code.trim().parse::<u16>().unwrap_or(0), "body": body}))
 }
 
 /// Async operations and command calls in flight, numbered.
@@ -492,6 +589,31 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             json!({"default": set.default_id(), "profiles": set.all().into_iter().map(|p| json!({"id": p.id, "name": p.name})).collect::<Vec<_>>()})
         }
         "deliver.status" => crate::deliver::status(),
+        "deliver.provide" => {
+            let kind = s(&arg["kind"]);
+            let m = plugins::read_manifest(&package_dir(id)?)?;
+            let named = m.uses.get("deliver_provider").map(|v| v["kinds"].as_array().cloned().unwrap_or_default()).unwrap_or_default();
+            if crate::deliver::BUILTIN.contains(&kind.as_str()) || !named.iter().any(|k| k == &json!(kind)) {
+                bail!("{id} may add only the ways its manifest names (uses.deliver_provider.kinds)");
+            }
+            let label = s(&arg["label"]);
+            let mut p = PROVIDERS.lock().map_err(|_| anyhow!("busy"))?;
+            let ready = p.get(&kind).map(|x| (x.ready, x.why.clone())).unwrap_or((false, String::new()));
+            p.insert(kind, Provider { plugin: id.into(), label, ready: ready.0, why: ready.1 });
+            Value::Null
+        }
+        "deliver.ready" => {
+            let kind = s(&arg["kind"]);
+            let mut p = PROVIDERS.lock().map_err(|_| anyhow!("busy"))?;
+            let x = p.get_mut(&kind).filter(|x| x.plugin == id).ok_or_else(|| anyhow!("{id} doesn't add “{kind}”"))?;
+            x.ready = arg["ready"].as_bool().unwrap_or(false);
+            x.why = s(&arg["why"]);
+            Value::Null
+        }
+        "settings.set" => {
+            plugins::set_setting(id, &s(&arg[0]), &arg[1])?;
+            Value::Null
+        }
         "sessions.channel" => {
             // Only the channel the manifest names (the install sheet said which).
             let m = plugins::read_manifest(&package_dir(id)?)?;
@@ -506,10 +628,6 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
                     bail!("“{k}” can't be set for a channel");
                 }
                 env.push((k, v.as_str().unwrap_or("").to_string()));
-            }
-            if arg["token"] == "telegram" {
-                let t = crate::deliver::load().telegram.ok_or_else(|| anyhow!("no Telegram bot yet: add yours in Settings → Plugins"))?;
-                env.push(("TELEGRAM_BOT_TOKEN".into(), t.token));
             }
             CHANNELS.lock().map_err(|_| anyhow!("busy"))?.insert(id.into(), Channel { spec: spec.into(), env });
             Value::Null
@@ -538,6 +656,7 @@ fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
             let (answer, model, usage) = crate::claudejob::run(&spec)?;
             Ok(json!({"answer": answer, "model": model, "usage": usage}))
         }
+        "http.fetch" => fetch(id, arg[0].as_str().unwrap_or(""), &arg[1]),
         "claude.has_plugin" | "claude.install_plugin" => {
             let spec = arg[0].as_str().unwrap_or("");
             if !spec.contains('@') || !spec.bytes().all(|b| b.is_ascii_alphanumeric() || b"@._-".contains(&b)) {
