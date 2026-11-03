@@ -456,8 +456,29 @@ const mark = (cls = '') => `<img class="logo ${cls}" src="assets/logo.png" alt="
 async function loadState() {
   try { S.state = await get('api/state') } catch { /* app restarting */ }
 }
+/** The calls list, a page at a time from the app (`/api/calls`, newest first): a refresh reads again as many as are
+ *  loaded (at least a page), scrolling to the end loads the next page, a search asks the app. */
+const CALLS_PAGE = 60
+const callsQuery = () => S.query.trim() ? `&q=${encodeURIComponent(S.query.trim())}` : ''
 async function loadCalls() {
-  try { S.calls = await get('api/calls'); S.error = null } catch (e) { S.error = String(e) }
+  const want = Math.max(CALLS_PAGE, (S.calls || []).length)
+  const q = S.query
+  try {
+    const r = await get(`api/calls?limit=${want}${callsQuery()}`)
+    if (q !== S.query) return // a newer search is on its way
+    S.calls = r.calls; S.callsNext = r.next; S.callsTotal = r.total; S.error = null
+  } catch (e) { S.error = String(e) }
+}
+async function loadMoreCalls() {
+  if (!S.callsNext || S.callsMore) return
+  S.callsMore = true
+  const q = S.query, after = S.callsNext
+  try {
+    const r = await get(`api/calls?limit=${CALLS_PAGE}&before=${encodeURIComponent(after)}${callsQuery()}`)
+    if (q === S.query && after === S.callsNext) { S.calls = [...(S.calls || []), ...r.calls]; S.callsNext = r.next; S.callsTotal = r.total }
+  } catch { /* the next scroll asks again */ }
+  S.callsMore = false
+  render()
 }
 async function loadProjects() {
   try { S.pj.data = await get('api/projects') } catch { /* app restarting */ }
@@ -805,8 +826,9 @@ function statusIcon(status) {
 }
 
 function list() {
-  const q = S.query.trim().toLowerCase()
-  const calls = (S.calls || []).filter((c) => !q || c.title.toLowerCase().includes(q) || c.people.some((p) => p.toLowerCase().includes(q)))
+  // The app searched and paged them already (`loadCalls`).
+  const q = S.query.trim()
+  const calls = S.calls || []
   let body
   if (S.calls === null) body = `<div class="skeleton" style="padding:12px">${'<i></i>'.repeat(8)}</div>`
   else if (S.error) body = `<p class="error" style="padding:12px">Can't read the calls: ${esc(S.error)}</p>`
@@ -828,7 +850,7 @@ function list() {
         <span class="t">${esc(c.title)}</span>
         <span class="m">${clockChip}${icons}${meta}</span>
       </button>`
-    }).join('')
+    }).join('') + (S.callsNext ? `<div class="rows-more" data-calls-more>${S.callsMore ? 'Loading…' : `${calls.length} of ${S.callsTotal}`}</div>` : '')
   }
   return `<section class="list">
     <div class="list-head"><div class="list-title"><h1>Calls</h1><button class="icon-btn" data-panel-show="vocabulary" title="Vocabulary — names and terms transcription should hear right" aria-label="Vocabulary">${BOOK}</button></div><input class="search" id="q" placeholder="Search titles and people" value="${esc(S.query)}" aria-label="Search calls"></div>
@@ -4810,6 +4832,11 @@ function drawPeople() {
   GraphView.select('br-people', S.view === 'brain' && S.pj.person ? 'p:' + S.pj.person : null)
   if ((S.br.pq || '') !== (st.q || '')) { st.q = S.br.pq || ''; const hits = GraphView.find('br-people', S.br.pq); const n = GraphView.focus('br-people', hits); S.br.pqRes = S.br.pq ? (n ? `${n} found` : 'nobody matches') : '' }
 }
+// The calls list: near its end, the next page.
+document.addEventListener('scroll', (e) => {
+  const el = e.target
+  if (el && el.classList && el.classList.contains('rows') && S.callsNext && el.scrollTop + el.clientHeight > el.scrollHeight - 400) loadMoreCalls()
+}, true)
 document.addEventListener('toggle', (e) => {
   const d = e.target
   if (d.classList && d.classList.contains('br-arch')) S.br.archOpen = d.open ? d.dataset.arch : (S.br.archOpen === d.dataset.arch ? null : S.br.archOpen)
@@ -6098,7 +6125,11 @@ window.addEventListener('message', (e) => {
 document.addEventListener('input', (e) => {
   // The call the editor was drawn for, whatever is selected by now.
   if (e.target.id === 'my-notes') { const call = e.target.dataset.notesCall; NotesSync.edit(call, e.target.value); saveNotesSoon(call); showNotesState(); return }
-  if (e.target.id === 'q') { S.query = e.target.value; render() }
+  if (e.target.id === 'q') {
+    S.query = e.target.value
+    clearTimeout(S.qT)
+    S.qT = setTimeout(async () => { S.calls = S.calls || []; S.callsNext = null; await loadCalls(); const at = e.target.selectionStart; render(); const i = $('#q'); if (i) { i.focus(); i.setSelectionRange(at, at) } }, 200)
+  }
   if (e.target.id === 'set-q') { S.setQuery = e.target.value; render() }
   if (e.target.id === 'learned-q') { S.learnedQuery = e.target.value; render() }
   if (e.target.id === 'me-profile') S.meEdit = e.target.value // no render while typing
@@ -6353,7 +6384,7 @@ window.echo = {
     const out = { selftest: true, base: location.href }
     try {
       out.state = (await fetch('api/state')).status
-      const calls = await get('api/calls'); out.calls = calls.length
+      const calls = await get('api/calls'); out.calls = calls.calls.length
       if (calls.length) {
         const d = await get('api/call/' + encodeURIComponent(calls[0].name)); out.segments = (d.segments || []).length; out.notes = d.notes ? d.notes.length : 0
         // A call with minutes: its page is served, and the Minutes tab (open on it) shows it in a frame.

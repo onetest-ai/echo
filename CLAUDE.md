@@ -199,7 +199,7 @@ bar for now. wry (Tauri's webview crate: WKWebView / WebView2) on the tray's tao
 loop — not full Tauri (it would take over our loop, tray, packaging, updater). Content only via
 the `echo://` protocol (`http://echo.localhost` on Windows): compiled-in `ui/index.html`,
 `app.js`, `app.css` (vanilla, no npm/CDN; the octopus symbol is injected from
-`assets/octopus.svg`), `/api/{state,calls,agenda,call/<name>}` JSON, `/file/<call>/frames/<img>`
+`assets/octopus.svg`), `/api/{state,calls,agenda,call/<name>}` JSON (`/api/calls?limit=&before=<name>&q=` = a page, newest first, `{calls, next, total}` — `calls_page`, 60 a page, ≤ 500; the list loads the next page near its end and searches title, people and subject in the app; a refresh reads again as many as are loaded), `/file/<call>/frames/<img>`
 after a path check; strict CSP; everything rendered is escaped (chat/transcripts are others'
 text). **⌘K palette** (⌘K; Ctrl+K or Ctrl+Shift+P on Windows; status bar "Actions"; not while a terminal has the keys):
 actions on a target — the open call, the selected calendar event, or none (a chip; ⌫ on an empty box drops it) —
