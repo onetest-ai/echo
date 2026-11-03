@@ -221,11 +221,12 @@ read now (or a sign-in not checked yet) keeps its items open as they were; one s
 not checked yet, failed minutes older than 14 days leave quietly. Nothing to mark read. Collected at most every 20 s,
 one collection at a time (`?fresh=1` after an action); `echoctl attention` only reads (a terminal sees neither the
 app's sign-in checks nor its update check). The page shows ≤ 5 of a kind per group ("N more like these").
-**Settings** (activity, `#settings/<section>`): General, Recording, Transcription, AI & minutes, Calendar & chat, Vocabulary,
+**Settings** (activity, `#settings/<section>`): General, Recording, Transcription, AI & minutes, Calendar & chat,
 About me (name, email, and `me.md` — the profile the minutes read — shown rendered by `minutes::markdown_html`, the
 minutes' safe writer, line by line, and edited in place: `settings_set me_profile`), Layout, Health (a ⚠ badge counts
-required permissions missing). Vocabulary lists the learned terms with the meetings and people they are scoped to
-(`learned_always` / `learned_remove`). `/api/settings` = one snapshot
+required permissions missing). **Vocabulary** is a panel view (the book beside Calls' heading, ⌘K; the old
+`#settings/vocabulary` opens it): the always-on terms and the learned ones with the meetings and people they are scoped
+to (`learned_always` / `learned_remove`), saved as Settings' values are. `/api/settings` = one snapshot
 (`window::settings_snapshot`: config values, models via `models::list_value`, downloads, the server, the calendar
 account, permissions). Plain values save at once with the value shown — never a toggle of a stale one — through IPC
 `settings_set {key, value}` (`window::settings_set`: config.json, or ai.json under its lock for `live_notes` /
@@ -773,7 +774,7 @@ the rest dims (plain hex colours: WebGL reads no CSS), the camera flies to them;
   client's layer, else shared; pinned to its threads; merged into a term of that name or variant, else kind
   `learned`; one version per call); the old list moved once (`vocab::migrate_learned`, at the scheduler's start and
   in `echoctl vocab`, never inside a run; a copy in `.echo/learned-before-taxonomy.json`), `vocab::learned_all`
-  reading both meanwhile; Settings → Vocabulary forgets one (`forget_learned`: a learned-only term goes, a known one
+  reading both meanwhile; the Vocabulary panel forgets one (`forget_learned`: a learned-only term goes, a known one
   loses its scope). Transcription's, so it works with the Brain switched off; thread glossaries no longer learn
   them. Measured: the learned terms spread over the clients' layers and the shared one, most merged into terms the
   taxonomy already knew.

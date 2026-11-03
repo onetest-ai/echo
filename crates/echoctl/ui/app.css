@@ -207,6 +207,17 @@ label.split-lang:focus-within { outline: 2px solid var(--accent); outline-offset
 .list { border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; background: var(--surface); }
 .list-head { padding: 14px 14px 10px; display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid var(--line); }
 .list-head h1 { margin: 0; font-size: 18px; font-weight: 650; letter-spacing: -0.015em; }
+.list-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.voc { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; }
+.voc .search { width: 100%; box-sizing: border-box; }
+.voc .grow { flex: 1; }
+.voc .set-sub { margin: 0; }
+.voc-h { margin: 10px 0 0; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-2); display: flex; gap: 6px; align-items: baseline; }
+.voc .vocab-add { display: flex; gap: 6px; }
+.voc .vocab-add .search { flex: 1; min-width: 0; }
+.voc-row { padding: 7px 0; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 2px; }
+.voc-t { display: flex; align-items: center; gap: 8px; }
+.voc-t b { font-weight: 600; overflow-wrap: anywhere; }
 .search {
   height: 30px; width: 100%;
   border: 1px solid var(--line-strong); border-radius: var(--r-control);
