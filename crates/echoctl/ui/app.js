@@ -4743,8 +4743,9 @@ function brPeopleIn() {
   if (!d || !d.people) return null
   const [k, v] = (S.br.scope || '').split(':')
   const inScope = (t) => !k ? true : k === 'thread' ? t === v : ((projById(t) || {}).client || '-') === v
-  // Someone seen only in closed threads is the archive (#55): folded apart, not on the map — unless the scope is that thread.
-  const own = (x) => k === 'thread' && (x.archived || []).some((t) => t.id === v)
+  // Someone seen only in closed threads is the archive (#55): off the map unless asked for (the toggle above it) or the
+  // scope is that thread.
+  const own = (x) => S.br.pClosed || (k === 'thread' && (x.archived || []).some((t) => t.id === v))
   const all = d.people.filter((x) => brShown(x) && (x.threads || []).some(inScope))
   const people = all.filter((x) => !x.archived || own(x))
   const archived = all.filter((x) => x.archived && !own(x))
@@ -4772,22 +4773,24 @@ function brainPeople() {
   const box = `<input class="wp-in br-pq" id="br-pq" type="search" placeholder="Find someone — name, organisation, role" value="${esc(S.br.pq || '')}" aria-label="Find someone">`
   const sub = `${v.people.length} ${v.people.length === 1 ? 'person' : 'people'} · ${v.threads.length} thread${v.threads.length === 1 ? '' : 's'}${hidden ? ` · ${hidden} seen once, not shown` : ''}`
   const res = S.br.pqRes ? `<span class="set-sub br-pq-res">${esc(S.br.pqRes)}</span>` : ''
-  const arch = archiveGroup('Only in closed threads', v.archived.map((x) => `<button class="br-arch-row" data-pp="pick" data-key="${esc(x.key)}"><b>${esc(x.name)}</b><span class="set-sub">${esc([x.title, x.org && x.org.name].filter(Boolean).join(' · '))}</span><span class="grow"></span>${x.archived.map((t) => `<span class="chip closed">${esc(closedLabel(t))}</span>`).join('')}</button>`),
-    'not on the map · still found by search and Claude')
-  if (!v.people.length) return `<div class="br-graph-bar">${box}<span class="set-sub">${sub}</span></div><p class="set-sub">${v.archived.length ? 'Nobody current here.' : 'Nobody yet: people appear as their threads are synced.'}</p>${arch}`
-  return `<div class="br-graph-bar">${box}${res}<span class="set-sub">${sub}</span></div><div class="br-graph" id="br-people"></div>${arch}<p class="set-foot">Threads labelled, people near theirs: a line is a role, calls (faint), reports to (dark) or calls together. Scroll to zoom, hover for someone's links, click for who they are.</p>`
+  // People seen only in closed threads: on the map when asked for, greyed, with their closed threads.
+  const nOld = d.people.filter((x) => x.archived && brShown(x)).length
+  const tog = nOld ? `<span class="br-tog"><button class="sw${S.br.pClosed ? ' on' : ''}" role="switch" aria-checked="${!!S.br.pClosed}" aria-label="Show people from closed threads" data-br-pclosed></button>Show people from closed threads <span class="set-sub">${nOld}</span></span>` : ''
+  if (!v.people.length) return `<div class="br-graph-bar">${box}${tog}<span class="set-sub">${sub}</span></div><p class="set-sub">${nOld ? 'Nobody current here — switch on the people from closed threads to see them.' : 'Nobody yet: people appear as their threads are synced.'}</p>`
+  return `<div class="br-graph-bar">${box}${res}${tog}<span class="set-sub">${sub}</span></div><div class="br-graph" id="br-people"></div><p class="set-foot">Threads labelled, people near theirs: a line is a role, calls (faint), reports to (dark) or calls together. Scroll to zoom, hover for someone's links, click for who they are.</p>`
 }
 function drawPeople() {
   const box = $('#br-people')
   const v = box && brPeopleIn()
   if (!box || !v) return
-  const key = `people|${S.br.scope || ''}|${v.people.length}|${v.threads.length}|${(S.br.people || {}).at || ''}`
+  const key = `people|${S.br.scope || ''}|${S.br.pClosed ? 'closed' : ''}|${v.people.length}|${v.threads.length}|${(S.br.people || {}).at || ''}`
   const st = GraphView.draw(box, key, () => {
     const G = new graphology.Graph({ type: 'undirected' })
     const clients = [...new Set(v.threads.map((t) => (projById(t.id) || {}).client || '-'))]
-    const tColor = (id) => { const c = (projById(id) || {}).client; return c ? CLIENT_COLORS[clients.indexOf(c) % CLIENT_COLORS.length] : '#8a8a95' }
+    const shut = (id) => ProjectArt.stage((projById(id) || {}).stage).gid === 'closed'
+    const tColor = (id) => { const c = (projById(id) || {}).client; return shut(id) ? '#8a8a9588' : c ? CLIENT_COLORS[clients.indexOf(c) % CLIENT_COLORS.length] : '#8a8a95' }
     const orgs = [...new Set(v.people.map((x) => (x.org || {}).id || x.side))]
-    const pColor = (x) => x.side === 'yours' ? '#8a8a95' : CLIENT_COLORS[(orgs.indexOf((x.org || {}).id || x.side) + 3) % CLIENT_COLORS.length]
+    const pColor = (x) => x.archived ? '#8a8a9588' : x.side === 'yours' ? '#8a8a95' : CLIENT_COLORS[(orgs.indexOf((x.org || {}).id || x.side) + 3) % CLIENT_COLORS.length]
     v.threads.forEach((t, i) => { const a = (2 * Math.PI * i) / Math.max(1, v.threads.length); G.addNode('t:' + t.id, { x: 100 * Math.cos(a), y: 100 * Math.sin(a), size: 9, color: tColor(t.id), label: t.name, pinLabel: true, kind: 'thread', thread: t.id }) })
     for (const x of v.people) {
       const h = ProjectArt.hash(x.key)
@@ -5723,7 +5726,7 @@ document.addEventListener('click', (e) => {
   const menuWas = S.menuOpen
   if (menuWas && !(e.target.closest && e.target.closest('[data-cmd="call-menu"]'))) S.menuOpen = false
   if (S.laterOpen && !(e.target.closest && e.target.closest('[data-cmd^="later-"]'))) { S.laterOpen = false; render() }
-  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-go],[data-conv-keep],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
+  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-go],[data-conv-keep],[data-br-pclosed],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
   if (!t) { if (menuWas) render(); return }
   // Sign-ins (`signin.rs`): shown at once (starting / stopping / checking) until the next poll
   // brings the app's state.
@@ -5762,6 +5765,7 @@ document.addEventListener('click', (e) => {
   if (t.dataset.layoutReset !== undefined) { Layout.load({}); return layoutChanged() }
   if (t.dataset.termOutput) { S.termOutput = S.termOutput || {}; S.termOutput[t.dataset.termOutput] = !S.termOutput[t.dataset.termOutput]; return render() }
   // A Claude panel's restart / new conversation (#44): asked first while it runs.
+  if (t.dataset.brPclosed !== undefined) { S.br.pClosed = !S.br.pClosed; return render() }
   if (t.dataset.convKeep !== undefined) { S.convAsk = null; return render() }
   if (t.dataset.conv || t.dataset.convGo !== undefined) {
     const extra = t.dataset.termCall ? { call: t.dataset.termCall } : { profile: S.folderProfile || ai().default || undefined }

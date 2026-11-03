@@ -765,8 +765,9 @@ without it).
   more is still removed, and a closed thread's read state is kept, so reopening reads on from there); its calls stay
   as they are. A section whose threads are all closed (`store::archived_of`, `projects::closed_threads` = `{id, name,
   stage, closed_at}`) is found by search with `closed` and weighs half (`ARCHIVE_WEIGHT`) — not within that thread's own
-  scope; the doc panel says "closed thread · …". Brain People folds someone seen only in closed threads into "Only in
-  closed threads" (`people::everyone` → `archived`, off the map unless scoped to that thread); a term or topic mentioned
+  scope; the doc panel says "closed thread · …". Brain People leaves someone seen only in closed threads off the map
+  (`people::everyone` → `archived`) until the switch above it, Show people from closed threads (`S.br.pClosed`), puts
+  them on it greyed, with their closed threads — or the scope is that thread; a term or topic mentioned
   only there is `archived` in the taxonomy view → the Terms tab's folded "Closed threads" group, and out of a new call's
   hint (`terms_for_threads`); the `<echo_brain>` advert lists open threads and one "Archive: N closed threads — …" line.
   Everything is computed from the stages, so reopening a thread makes it current again with nothing read again.
