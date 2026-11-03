@@ -200,10 +200,10 @@ pub fn save_catalog(client: &str, m: &BTreeMap<String, Value>) -> Result<()> {
     Ok(())
 }
 
-/// The folders a client's threads read (root, excludes).
+/// The folders a client's threads have (root, excludes) — closed threads' too: their figures stay (#55).
 pub fn roots(client: &str) -> Vec<(PathBuf, Vec<String>)> {
     let mut out: Vec<(PathBuf, Vec<String>)> = vec![];
-    for p in crate::projects::list().into_iter().filter(|p| p.client.as_deref() == Some(client) && !p.stage.closed()) {
+    for p in crate::projects::list().into_iter().filter(|p| p.client.as_deref() == Some(client)) {
         for s in p.sources.iter().filter(|s| s.kind == "folder") {
             if !out.iter().any(|(r, _)| r == Path::new(&s.id)) {
                 out.push((PathBuf::from(&s.id), s.exclude.clone()));

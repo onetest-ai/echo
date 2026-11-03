@@ -4310,8 +4310,10 @@ function brainTopics(tx) {
   const open = (id, dflt) => (S.br.fold || {})[id] == null ? dflt : !(S.br.fold || {})[id]
   const jobs = new Set([...((S.br.data || {}).topic_jobs || []), ...Object.keys(S.br.rebuilding || {})])
   const catchAll = new Map(layers.filter((l) => l.drift && (l.drift.reasons || []).some((r) => r.rule === 'catch_all') && l.drift.top).map((l) => [`${l.id}|${l.drift.top.label}`, Math.round(l.drift.top.pct)]))
-  const kidsOf = (x) => topics.filter((k) => k.level === 2 && k.parent_id === x.id).sort((a, b) => (a.layer !== 'shared') - (b.layer !== 'shared') || (b.sections || 0) - (a.sections || 0))
-  const roots = topics.filter((x) => x.level === 1 || !x.parent_id)
+  // A topic only closed threads' sections have is the archive (#55): its own folded group at the end.
+  const kidsOf = (x) => topics.filter((k) => k.level === 2 && k.parent_id === x.id && !k.archived).sort((a, b) => (a.layer !== 'shared') - (b.layer !== 'shared') || (b.sections || 0) - (a.sections || 0))
+  const roots = topics.filter((x) => (x.level === 1 || !x.parent_id) && !x.archived)
+  const oldTopics = topics.filter((x) => x.archived)
   const max = Math.max(1, ...roots.map((t) => t.sections || 0))
   const total = roots.reduce((n, t) => n + (t.sections || 0), 0)
   const row = (x, top) => {
@@ -4361,7 +4363,8 @@ function brainTopics(tx) {
   const top = `<div class="br-tbar"><span class="set-sub">${topics.length} topics · version ${tx.version}</span><span class="grow"></span><button class="btn" data-brain-sync title="Read new calls, mail and files into the Brain now; their new sections are tagged after it">Sync now</button></div>`
   const tree = practice.length ? `<div class="br-card">${practice.map((x) => row(x, true)).join('')}</div>` : ''
   const only = own.map(([l, xs]) => `<section class="br-layer"><div class="br-lh"><span class="cap">Only ${esc(lname(l.id))}</span><span class="set-sub">topics no other client shares — move one up when it does</span></div><div class="br-card">${xs.map((x) => row(x, true)).join('')}</div></section>`).join('')
-  return `${top}${builds}${mv ? `<div class="br-mvs">${mv}</div>` : ''}${practice.length ? `<section class="br-layer"><div class="br-lh"><span class="cap">Your practice</span><span class="set-sub">one tree for every client: their topics sit under the practice's where they fit</span></div>${tree}</section>` : ''}${only}` || '<p class="set-sub">Nothing in this scope.</p>'
+  const arch = archiveGroup('Closed threads', oldTopics.map((x) => `<div class="br-card">${row(x, true)}</div>`), 'topics only closed threads talked about · still searchable')
+  return `${top}${builds}${mv ? `<div class="br-mvs">${mv}</div>` : ''}${practice.length ? `<section class="br-layer"><div class="br-lh"><span class="cap">Your practice</span><span class="set-sub">one tree for every client: their topics sit under the practice's where they fit</span></div>${tree}</section>` : ''}${only}${arch}` || '<p class="set-sub">Nothing in this scope.</p>'
 }
 /** The dictionary (the Terms tab): every term — named things: organisations, products, initiatives… — by
  *  group, A–Z within it; a search over its name, other names and spellings; each with what it is, whose it
@@ -4373,7 +4376,10 @@ function brainTerms(tx) {
   const lcolor = (id) => { const i = layers.filter((l) => l.id !== 'shared').findIndex((l) => l.id === id); return i < 0 ? '#8a8a95' : CLIENT_COLORS[i % CLIENT_COLORS.length] }
   const q = (S.br.tq || '').trim().toLowerCase()
   const hit = (x) => !q || [x.name, ...(x.synonyms || []), ...(x.variants || []), x.description, x.kind].join(' ').toLowerCase().includes(q)
-  const all = (tx.terms || []).filter(hit)
+  // A term mentioned only in closed threads is the archive (#55): its own folded group, still found by the box.
+  const found = (tx.terms || []).filter(hit)
+  const all = found.filter((t) => !t.archived)
+  const old = found.filter((t) => t.archived).sort((a, b) => a.name.localeCompare(b.name))
   const g = S.br.tg || ''
   const groups = (tx.groups || []).map((x) => ({ ...x, n: all.filter((t) => t.group === x.id).length })).filter((x) => x.n)
   const shown = all.filter((t) => !g || t.group === g).sort((a, b) => a.name.localeCompare(b.name))
@@ -4383,12 +4389,14 @@ function brainTerms(tx) {
     const names = (x.synonyms || []).length ? `<span class="dict-aka">also ${esc(x.synonyms.join(', '))}</span>` : ''
     const flags = [x.always ? '<span class="br-pin" title="Hints every call’s transcription">∞</span>' : '', (x.pinned || []).length ? '<span class="br-pin" title="Pinned to a thread: hints its calls’ transcription">📌</span>' : '', x.learned ? '<span class="dict-flag" title="Learned from the minutes">learned</span>' : ''].join('')
     const tps = (x.topics || []).map((t) => `<span class="dict-tp">${esc(t.label)}</span>`).join('')
-    return `<button class="dict-e${S.br.node === x.id ? ' on' : ''}" data-br-node="${esc(x.id)}"><span class="dict-h"><b>${esc(x.name)}</b> <span class="br-cl" style="--c:${lcolor(x.layer)}">${esc(lname(x.layer))}</span> <span class="set-sub">${esc(x.kind || '')}</span>${flags}<span class="grow"></span><span class="br-n" title="Sections that mention it">${x.sections || 0}</span></span>${names}${x.description ? `<span class="dict-d">${esc(x.description)}</span>` : ''}${tps ? `<span class="dict-tps">${tps}</span>` : ''}</button>`
+    const was = (x.archived || []).map((t) => `<span class="chip closed">${esc(closedLabel(t))}</span>`).join('')
+    return `<button class="dict-e${S.br.node === x.id ? ' on' : ''}${x.archived ? ' closed' : ''}" data-br-node="${esc(x.id)}"><span class="dict-h"><b>${esc(x.name)}</b> <span class="br-cl" style="--c:${lcolor(x.layer)}">${esc(lname(x.layer))}</span> <span class="set-sub">${esc(x.kind || '')}</span>${flags}${was}<span class="grow"></span><span class="br-n" title="Sections that mention it">${x.sections || 0}</span></span>${names}${x.description ? `<span class="dict-d">${esc(x.description)}</span>` : ''}${tps ? `<span class="dict-tps">${tps}</span>` : ''}</button>`
   }
-  const body = !shown.length ? `<p class="set-sub">${q ? 'Nothing matches.' : 'No terms here.'}</p>`
+  const arch = archiveGroup('Closed threads', old.map(entry), "out of transcription hints and Claude's current list · search and spellings still resolve them")
+  const body = !shown.length ? (old.length ? '' : `<p class="set-sub">${q ? 'Nothing matches.' : 'No terms here.'}</p>`)
     : g ? `<div class="dict-list">${shown.map(entry).join('')}</div>`
     : groups.map((x) => `<section class="br-layer"><div class="br-lh"><span class="cap">${esc(x.label)}</span><span class="set-sub">${x.n}</span></div><div class="dict-list">${shown.filter((t) => t.group === x.id).map(entry).join('')}</div></section>`).join('')
-  return `<div class="br-graph-bar">${box}<span class="grow"></span></div>${chips}${body}<p class="set-foot">A term is a named thing: its name, its other names (what search and Claude take for it) and its spellings (how it is written or misheard — they hint transcription). Merge two that are one thing; split off a name that is a thing of its own.</p>`
+  return `<div class="br-graph-bar">${box}<span class="grow"></span></div>${chips}${body}${arch}<p class="set-foot">A term is a named thing: its name, its other names (what search and Claude take for it) and its spellings (how it is written or misheard — they hint transcription). Merge two that are one thing; split off a name that is a thing of its own.</p>`
 }
 /** A Brain section's source outside Echo (a Teams post, a mail): opened in its own app. */
 const extAttr = (link) => link && link.startsWith('echo://file/') ? `data-br-file="${esc(link.slice(12).split('?')[0])}" title="Open the document${link.includes('page=') ? ` (page ${esc(link.split('page=')[1])})` : ''}"`
@@ -4726,9 +4734,25 @@ function brPeopleIn() {
   if (!d || !d.people) return null
   const [k, v] = (S.br.scope || '').split(':')
   const inScope = (t) => !k ? true : k === 'thread' ? t === v : ((projById(t) || {}).client || '-') === v
-  const people = d.people.filter((x) => brShown(x) && (x.threads || []).some(inScope))
+  // Someone seen only in closed threads is the archive (#55): folded apart, not on the map — unless the scope is that thread.
+  const own = (x) => k === 'thread' && (x.archived || []).some((t) => t.id === v)
+  const all = d.people.filter((x) => brShown(x) && (x.threads || []).some(inScope))
+  const people = all.filter((x) => !x.archived || own(x))
+  const archived = all.filter((x) => x.archived && !own(x))
   const threads = (d.threads || []).filter((t) => inScope(t.id) && people.some((x) => (x.threads || []).includes(t.id)))
-  return { people, threads }
+  return { people, threads, archived }
+}
+/** "Hooli workshop · closed 28 Oct" — a closed thread as the archive names it. */
+function closedLabel(t) {
+  const how = t.stage === 'lost' ? 'lost' : t.stage === 'cancelled' ? 'cancelled' : 'closed'
+  const d = t.closed_at ? new Date(t.closed_at) : null
+  const opts = d && d.getFullYear() !== new Date().getFullYear() ? { day: 'numeric', month: 'short', year: 'numeric' } : { day: 'numeric', month: 'short' }
+  return `${t.name} · ${how}${d ? ' ' + d.toLocaleDateString([], opts) : ''}`
+}
+/** The folded "Only in closed threads" group under a list or map. */
+function archiveGroup(title, rows, note) {
+  if (!rows.length) return ''
+  return `<details class="br-arch"${S.br.archOpen === title ? ' open' : ''} data-arch="${esc(title)}"><summary><span class="br-arch-h">${esc(title)}</span><span class="n">${rows.length}</span><span class="set-sub">${esc(note)}</span></summary>${rows.join('')}</details>`
 }
 function brainPeople() {
   const d = S.br.people
@@ -4739,8 +4763,10 @@ function brainPeople() {
   const box = `<input class="wp-in br-pq" id="br-pq" type="search" placeholder="Find someone — name, organisation, role" value="${esc(S.br.pq || '')}" aria-label="Find someone">`
   const sub = `${v.people.length} ${v.people.length === 1 ? 'person' : 'people'} · ${v.threads.length} thread${v.threads.length === 1 ? '' : 's'}${hidden ? ` · ${hidden} seen once, not shown` : ''}`
   const res = S.br.pqRes ? `<span class="set-sub br-pq-res">${esc(S.br.pqRes)}</span>` : ''
-  if (!v.people.length) return `<div class="br-graph-bar">${box}<span class="set-sub">${sub}</span></div><p class="set-sub">Nobody yet: people appear as their threads are synced.</p>`
-  return `<div class="br-graph-bar">${box}${res}<span class="set-sub">${sub}</span></div><div class="br-graph" id="br-people"></div><p class="set-foot">Threads labelled, people near theirs: a line is a role, calls (faint), reports to (dark) or calls together. Scroll to zoom, hover for someone's links, click for who they are.</p>`
+  const arch = archiveGroup('Only in closed threads', v.archived.map((x) => `<button class="br-arch-row" data-pp="pick" data-key="${esc(x.key)}"><b>${esc(x.name)}</b><span class="set-sub">${esc([x.title, x.org && x.org.name].filter(Boolean).join(' · '))}</span><span class="grow"></span>${x.archived.map((t) => `<span class="chip closed">${esc(closedLabel(t))}</span>`).join('')}</button>`),
+    'not on the map · still found by search and Claude')
+  if (!v.people.length) return `<div class="br-graph-bar">${box}<span class="set-sub">${sub}</span></div><p class="set-sub">${v.archived.length ? 'Nobody current here.' : 'Nobody yet: people appear as their threads are synced.'}</p>${arch}`
+  return `<div class="br-graph-bar">${box}${res}<span class="set-sub">${sub}</span></div><div class="br-graph" id="br-people"></div>${arch}<p class="set-foot">Threads labelled, people near theirs: a line is a role, calls (faint), reports to (dark) or calls together. Scroll to zoom, hover for someone's links, click for who they are.</p>`
 }
 function drawPeople() {
   const box = $('#br-people')
@@ -4772,6 +4798,10 @@ function drawPeople() {
   GraphView.select('br-people', S.view === 'brain' && S.pj.person ? 'p:' + S.pj.person : null)
   if ((S.br.pq || '') !== (st.q || '')) { st.q = S.br.pq || ''; const hits = GraphView.find('br-people', S.br.pq); const n = GraphView.focus('br-people', hits); S.br.pqRes = S.br.pq ? (n ? `${n} found` : 'nobody matches') : '' }
 }
+document.addEventListener('toggle', (e) => {
+  const d = e.target
+  if (d.classList && d.classList.contains('br-arch')) S.br.archOpen = d.open ? d.dataset.arch : (S.br.archOpen === d.dataset.arch ? null : S.br.archOpen)
+}, true)
 document.addEventListener('input', (e) => {
   if (e.target.id === 'pp-about') { S.pj.aboutEdit = e.target.value; return }
   if (e.target.id === 'dict-q') {
@@ -4881,6 +4911,7 @@ function brainDocPanel() {
     <h3 class="wp-name">${esc(x.title || x.source)}</h3>
     ${x.rel ? `<div class="set-sub">${esc(x.rel)}${x.fidelity && x.fidelity !== 'full' ? ` · ${esc(x.fidelity)}` : ''}</div>` : ''}
     <div class="br-where">${x.sections_total} sections ${threadChips(threads.length ? threads : ['-'])}</div>
+    ${x.closed ? `<div class="br-closed">${x.closed.map((t) => `<span class="chip closed">🗄 closed thread · ${esc(closedLabel(t))}</span>`).join('')}<span class="set-sub">its archive: still found, ranked under current material</span></div>` : ''}
     <div class="br-acts">${open}</div>
     ${topics ? `<div class="wp-h">Topics</div><div class="br-topics">${topics}</div>` : ''}
     ${terms ? `<div class="wp-h">Terms</div><div class="br-topics">${terms}</div>` : ''}

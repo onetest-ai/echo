@@ -759,6 +759,20 @@ without it).
   and take only its sources: insights, taxonomy builds and tagging, the page reader (a folder whose threads run on
   other profiles is indexed from text, never read — and not left pending), the numbers proposal (refused unless all
   the client's threads run on it). A thread's sync makes evidence only of calls on the thread's profile.
+- **Closed threads are the archive** (#55; never dropped silently): a closed thread's mail, posts and folder documents
+  stay under it (`sources::with_sources`, `files::with_folders`: only open threads read on; a source no thread has any
+  more is still removed, and a closed thread's read state is kept, so reopening reads on from there); its calls stay
+  as they are. A section whose threads are all closed (`store::archived_of`, `projects::closed_threads` = `{id, name,
+  stage, closed_at}`) is found by search with `closed` and weighs half (`ARCHIVE_WEIGHT`) — not within that thread's own
+  scope; the doc panel says "closed thread · …". Brain People folds someone seen only in closed threads into "Only in
+  closed threads" (`people::everyone` → `archived`, off the map unless scoped to that thread); a term or topic mentioned
+  only there is `archived` in the taxonomy view → the Terms tab's folded "Closed threads" group, and out of a new call's
+  hint (`terms_for_threads`); the `<echo_brain>` advert lists open threads and one "Archive: N closed threads — …" line.
+  Everything is computed from the stages, so reopening a thread makes it current again with nothing read again.
+  A closed thread keeps what it had and takes nothing read after it closed (mail / posts: `had`; a folder shared with an
+  open thread is read under the open threads only); a sender decision (`reread`) leaves an all-closed document alone; a
+  client's numbers keep its closed threads' workbooks. Known gap: a `READER` bump drops every mail / channel document and
+  read state, a closed thread's archive included (reopened, it reads its window again). Not done yet: Forget on close.
 - **Off switch** (Settings → Brain → Use the Brain; `brain.json` `enabled`, default OFF — a fresh install and an update both start with it off until the user turns it on; `echoctl brain set --enabled
   false`; IPC `settings_set brain_enabled`): off, nothing is read, indexed, tagged or summarised (`brain::sync` refuses,
   the scheduler skips), the window shows no Brain (activity, ⌘ numbers and ⌘K, Also discussed, Insights, Mentioned also

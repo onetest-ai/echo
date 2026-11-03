@@ -301,7 +301,11 @@ pub fn doc(source: &str, scope: Scope) -> Result<Value> {
                       "date": r.get::<_, Option<String>>(3)?, "links": r.get::<_, i64>(4)?, "score": (r.get::<_, f64>(5)? * 100.0).round() / 100.0}))
         })?
         .collect::<Result<_, _>>()?;
-    Ok(json!({"source": source, "title": title, "kind": kind, "date": date, "link": doc_link(source, &refs),
+    // Only in closed threads: the archive (#55), said with when each closed.
+    let closed = crate::projects::closed_threads();
+    let ids: Vec<&str> = refs["threads"].as_array().into_iter().flatten().filter_map(|t| t["id"].as_str()).collect();
+    let archived = (!ids.is_empty() && ids.iter().all(|t| closed.contains_key(*t))).then(|| ids.iter().filter_map(|t| closed.get(*t).cloned()).collect::<Vec<_>>());
+    Ok(json!({"source": source, "title": title, "kind": kind, "date": date, "link": doc_link(source, &refs), "closed": archived,
               "threads": refs["threads"], "client": refs["client"], "rel": refs["rel"], "fidelity": refs["fidelity"],
               "sections_total": total, "topics": topics, "sections": sections, "related": related}))
 }

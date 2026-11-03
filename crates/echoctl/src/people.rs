@@ -888,9 +888,21 @@ fn view_cached(ps: &[Project], today: chrono::NaiveDate) -> Result<Value> {
     Ok(v)
 }
 
-/// Everyone across every thread: the Brain's People.
+/// Everyone across every thread: the Brain's People. Someone seen only in closed threads is marked `archived` (those
+/// threads, with when each closed): the page folds them apart from the map (#55); reopened, they are current again.
 pub fn everyone(today: chrono::NaiveDate) -> Result<Value> {
-    view_cached(&projects::list(), today)
+    let mut v = view_cached(&projects::list(), today)?;
+    mark_archived(&mut v, &projects::closed_threads());
+    Ok(v)
+}
+
+pub(crate) fn mark_archived(v: &mut Value, closed: &BTreeMap<String, Value>) {
+    for x in v["people"].as_array_mut().into_iter().flatten() {
+        let threads: Vec<&str> = x["threads"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+        if !threads.is_empty() && threads.iter().all(|t| closed.contains_key(*t)) {
+            x["archived"] = Value::Array(threads.iter().filter_map(|t| closed.get(*t).cloned()).collect());
+        }
+    }
 }
 
 /// The people of some threads (what a Brain reader may see), with their threads named.
@@ -1509,6 +1521,21 @@ fn corrected(project: &str, field: &str, v: &str) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn someone_seen_only_in_closed_threads_is_archived() {
+        let closed: BTreeMap<String, Value> = [("old".to_string(), json!({"id": "old", "name": "Hooli workshop", "stage": "done", "closed_at": "2026-10-28T10:00:00+00:00"}))].into();
+        let mut v = json!({"people": [
+            {"key": "a", "threads": ["old"]},
+            {"key": "b", "threads": ["old", "open"]},
+            {"key": "c", "threads": []},
+        ]});
+        mark_archived(&mut v, &closed);
+        assert_eq!(v["people"][0]["archived"][0]["name"], "Hooli workshop");
+        assert!(v["people"][1]["archived"].is_null(), "also in an open thread: current");
+        assert!(v["people"][2]["archived"].is_null(), "in no thread: current");
+    }
+
     use super::*;
 
     fn call(root: &std::path::Path, name: &str, started: &str, meeting: Value, segs: Value) -> PathBuf {

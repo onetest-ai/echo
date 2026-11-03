@@ -1766,3 +1766,18 @@ select.set-in { width: auto; margin-right: 6px; }
 .empty > div:has(> .mn-ring) { display: flex; flex-direction: column; align-items: center; }
 .empty > div:has(> .mn-ring) > .logo { display: none; }
 .empty > div > .mn-ring { order: -1; }
+
+/* a closed thread's archive (#55): folded apart, quieter */
+.br-arch { margin: 12px 0 4px; border: 1px dashed var(--line-strong); border-radius: var(--r-panel); padding: 6px 10px; }
+.br-arch > summary { display: flex; align-items: baseline; gap: 8px; cursor: default; list-style: none; padding: 4px 0; }
+.br-arch > summary::-webkit-details-marker { display: none; }
+.br-arch > summary::before { content: '▸'; color: var(--text-3); width: 10px; }
+.br-arch[open] > summary::before { content: '▾'; }
+.br-arch-h { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-2); font-weight: 600; }
+.br-arch .n { font-weight: 600; color: var(--text); }
+.br-arch-row { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; background: none; padding: 5px 6px; border-radius: var(--r-control); color: var(--text-2); text-align: left; cursor: default; }
+.br-arch-row:hover { background: var(--accent-soft); }
+.br-arch-row .grow { flex: 1; }
+.br-arch .dict-e { opacity: .78; }
+.chip.closed { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 10px; background: var(--line); color: var(--text-2); font-size: 11.5px; white-space: nowrap; }
+.br-closed { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0; }

@@ -93,8 +93,26 @@ pub fn summary(c: &Connection, access: &Access) -> Result<String> {
     if !clients.is_empty() {
         out.push(format!("Clients (id in brackets, for `client`): {}.", names(&clients, &all_clients)));
     }
-    if !threads.is_empty() {
-        out.push(format!("Threads (for `thread`): {}.", names(&threads, &all_threads)));
+    // Closed threads are the archive (#55): named once, apart, so Claude searches them when asked about the past.
+    let closed = crate::projects::closed_threads();
+    let (old, current): (BTreeSet<String>, BTreeSet<String>) = threads.iter().cloned().partition(|t| closed.contains_key(t));
+    if !current.is_empty() {
+        out.push(format!("Threads (for `thread`): {}.", names(&current, &all_threads)));
+    }
+    if !old.is_empty() {
+        // "closed 28 Oct 2026", "lost …", "cancelled …".
+        let when = |id: &str| -> String {
+            let c = &closed[id];
+            let how = match c["stage"].as_str() { Some("lost") => "lost", Some("cancelled") => "cancelled", _ => "closed" };
+            match c["closed_at"].as_str().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()) {
+                Some(t) => format!("{how} {}", t.format("%-d %b %Y")),
+                None => how.to_string(),
+            }
+        };
+        let shown: Vec<String> = old.iter().take(8).filter_map(|id| all_threads.iter().find(|(i, _)| i == id).map(|(_, n)| format!("{} ({}, {})", label(n), label(id), when(id)))).collect();
+        let more = old.len().saturating_sub(8);
+        out.push(format!("Archive: {} closed thread{} — {}{}. Their sections are still searchable (marked `closed`, ranked under current ones); search them when asked about the past.",
+            old.len(), if old.len() == 1 { "" } else { "s" }, shown.join(", "), if more > 0 { format!(" and {more} more") } else { String::new() }));
     }
     let mut also = vec![];
     if !access.people_threads().is_empty() {
@@ -200,6 +218,15 @@ mod tests {
         let s = summary(&c, &Access::default_profile()).unwrap();
         assert!(s.contains("Acme pilot") && s.contains("Acme (acme)"), "{s}");
         assert!(!s.contains("Globex"), "another profile's thread and client aren't named: {s}");
+        // A closed thread is the archive: named apart, not among the current threads.
+        let old = crate::projects::create("Acme workshop", Some("acme"), None).unwrap().id;
+        crate::projects::set_stage(&old, crate::projects::Stage::Lost, None).unwrap();
+        let refs = json!({"threads": [{"id": old, "client": "acme"}]}).to_string();
+        c.execute("INSERT INTO documents(source, kind, title, event_date, refs) VALUES ('mail/d', 'mail', 'Old', '2026-09-01', ?1)", [refs]).unwrap();
+        let s = summary(&c, &Access::default_profile()).unwrap();
+        let threads_line = s.lines().find(|l| l.starts_with("Threads")).unwrap_or("");
+        assert!(threads_line.contains("Acme pilot") && !threads_line.contains("Acme workshop"), "{s}");
+        assert!(s.contains("Archive: 1 closed thread — Acme workshop (acme-workshop, lost "), "{s}");
         count("folder", "search_knowledge");
         count("folder", "search_knowledge");
         count("window", "also");

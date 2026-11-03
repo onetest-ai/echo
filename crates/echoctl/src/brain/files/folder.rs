@@ -165,10 +165,21 @@ pub struct Report {
     pub store: Option<store::Report>,
 }
 
-/// The folders open threads watch: root → (its excludes, the threads).
+/// The folders open threads watch: root → (its excludes, those threads). A folder an open thread shares with a closed
+/// one is current: read under the open threads only, so nothing read after a close joins the closed thread.
 fn watched() -> BTreeMap<String, (Vec<String>, Vec<Value>)> {
+    folders_of(projects::list().into_iter().filter(|p| !p.stage.closed()))
+}
+
+/// Every thread's folders, closed threads' too: a folder only closed threads have isn't read, and what was read stays
+/// (their archive, #55).
+fn with_folders() -> BTreeMap<String, (Vec<String>, Vec<Value>)> {
+    folders_of(projects::list().into_iter())
+}
+
+fn folders_of(ps: impl Iterator<Item = projects::Project>) -> BTreeMap<String, (Vec<String>, Vec<Value>)> {
     let mut out: BTreeMap<String, (Vec<String>, Vec<Value>)> = BTreeMap::new();
-    for p in projects::list().into_iter().filter(|p| !p.stage.closed()) {
+    for p in ps {
         for s in p.sources.iter().filter(|s| s.kind == "folder") {
             let e = out.entry(s.id.clone()).or_default();
             for x in &s.exclude {
@@ -195,9 +206,11 @@ pub fn sync(emb: Option<&dyn crate::brain::embed::Embedder>, read_pages: bool) -
         let r = sync_root(&c, &path, Path::new(root), excludes, threads, emb, &mut budget, &mut reader);
         out.push(r.unwrap_or_else(|e| Report { root: root.clone(), errors: vec![format!("{e:#}")], ..Default::default() }));
     }
-    // Folders no open thread watches any more: their files leave the Brain (the registry keeps them removed).
+    // Folders no thread has any more: their files leave the Brain (the registry keeps them removed). A closed thread's
+    // folder isn't read, and what was read stays: its archive (#55).
+    let kept = with_folders();
     let roots: Vec<String> = c.prepare("SELECT DISTINCT root FROM files WHERE state = 'active'")?.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?;
-    for root in roots.into_iter().filter(|r| !w.contains_key(r)) {
+    for root in roots.into_iter().filter(|r| !kept.contains_key(r)) {
         let ids: Vec<String> = c.prepare("SELECT id FROM files WHERE root = ?1 AND state = 'active'")?.query_map([&root], |r| r.get(0))?.collect::<Result<_, _>>()?;
         for id in &ids {
             store::remove(&path, &format!("file/{id}"))?;

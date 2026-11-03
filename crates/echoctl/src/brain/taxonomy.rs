@@ -1552,6 +1552,14 @@ pub fn view_in(scope: store::Scope) -> Result<Value> {
     }
     let layers = scope_layers(&t, scope);
     let visible = |l: &String| layers.as_ref().is_none_or(|s| s.contains(l));
+    // Only in closed threads' sections (#55): the archive — listed apart, out of transcription hints; still resolved.
+    let closed = crate::projects::closed_threads();
+    let archived = |th: &BTreeSet<String>| -> Value {
+        if th.is_empty() || !th.iter().all(|t| closed.contains_key(t)) {
+            return Value::Null;
+        }
+        Value::Array(th.iter().filter_map(|t| closed.get(t).cloned()).collect())
+    };
     // Which topics a term comes up in, and a topic's terms: sections they share (no model).
     let mut together: Vec<(String, String, i64)> = vec![];
     {
@@ -1577,7 +1585,7 @@ pub fn view_in(scope: store::Scope) -> Result<Value> {
             let parent = parent_of(&t, x);
             let terms = top(together.iter().filter(|(_, tp, _)| *tp == id).map(|(tm, _, n)| (tm.clone(), *n)).collect(), &name_of, 6);
             json!({"id": id, "layer": x.layer, "label": x.label, "level": x.level, "parent": x.parent, "parent_id": parent.map(|p| topic_id(&p.layer, &p.label)), "parent_layer": parent.map(|p| &p.layer),
-                   "description": x.description, "synonyms": x.synonyms, "sections": n, "threads": th, "clients": cl, "terms": terms})
+                   "description": x.description, "synonyms": x.synonyms, "sections": n, "archived": archived(&th), "threads": th, "clients": cl, "terms": terms})
         })
         .collect();
     let terms: Vec<Value> = t
@@ -1590,7 +1598,8 @@ pub fn view_in(scope: store::Scope) -> Result<Value> {
             th.extend(x.threads.iter().cloned());
             let topics = top(together.iter().filter(|(tm, _, _)| *tm == id).map(|(_, tp, n)| (tp.clone(), *n)).collect(), &label_of, 3);
             json!({"id": id, "layer": x.layer, "name": x.name, "kind": x.kind, "group": x.group(), "group_set": !x.group.is_empty(), "synonyms": x.synonyms, "variants": x.variants,
-                   "description": x.description, "pinned": x.threads, "always": x.always, "learned": x.learned.is_some() || x.kind == "learned", "sections": n, "threads": th, "clients": cl, "topics": topics})
+                   "description": x.description, "pinned": x.threads, "always": x.always, "learned": x.learned.is_some() || x.kind == "learned", "sections": n,
+                   "archived": if x.always { Value::Null } else { archived(&th) }, "threads": th, "clients": cl, "topics": topics})
         })
         .collect();
     let lv: Vec<Value> = t
@@ -1632,7 +1641,8 @@ pub fn terms_for_threads(threads: &[String]) -> Vec<String> {
             add(x["name"].as_str().unwrap_or(""));
         }
     }
-    let mut mine: Vec<&&Value> = all.iter().filter(|x| x["layer"].as_str().is_some_and(|l| clients.contains(l))).collect();
+    // A closed thread's own terms stay out of a new call's hint.
+    let mut mine: Vec<&&Value> = all.iter().filter(|x| x["layer"].as_str().is_some_and(|l| clients.contains(l)) && x["archived"].is_null()).collect();
     mine.sort_by_key(|x| std::cmp::Reverse((in_threads(x), x["sections"].as_i64().unwrap_or(0))));
     for x in mine {
         add(x["name"].as_str().unwrap_or(""));
