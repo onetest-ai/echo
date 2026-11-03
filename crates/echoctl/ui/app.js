@@ -2203,7 +2203,8 @@ function plDetail(p, x) {
   const open = sec && x.enabled ? `<button class="btn primary" data-pl-open="${esc(sec.id)}">Open its settings</button>` : ''
   const rm = S.plRemove === x.id ? `<div class="confirm"><span>Remove ${esc(x.name)}? Its settings and data can stay for when you install it again.</span>
     <button class="btn" data-pl-remove-cancel>Cancel</button><button class="btn" data-pl-remove="${esc(x.id)}" data-keep="1">Remove, keep data</button><button class="btn primary" style="background:var(--danger);border-color:var(--danger)" data-pl-remove="${esc(x.id)}" data-keep="0">Remove with data</button></div>` : ''
-  const fields = (x.settings || []).map((d) => setRow(esc(d.label), d.help ? esc(d.help) : '', plField(x.id, d)))
+  // Its own settings, stacked (the column is narrow): the name and its help above, the field the full width below.
+  const fields = (x.settings || []).map((d) => `<div class="pl-field"><b>${esc(d.label)}</b>${d.help ? `<span class="set-sub">${esc(d.help)}</span>` : ''}<div class="pl-field-ctl">${plField(x.id, d)}</div></div>`)
   let own = ''
   const card = Plugins.settings[x.id]
   if (card && x.enabled && !sec) { try { own = card.render() } catch (e) { own = `<p class="error">${esc(String(e))}</p>` } }
@@ -2214,7 +2215,7 @@ function plDetail(p, x) {
     ${x.summary ? `<p class="pl-sum">${esc(x.summary)}</p>` : ''}
     <div class="pl-acts">${open}${upd}<span class="grow"></span><button class="btn ghost danger" data-pl-ask-remove="${esc(x.id)}">Remove…</button></div>
     ${rm}${plErr(p, `plugin:${x.id}`)}${broke}
-    ${fields.length ? setCard('Its settings', fields) : ''}${own}
+    ${fields.length ? `<div class="pl-h4">Its settings</div><div class="pl-fields">${fields.join('')}</div>` : ''}${own}
     <div class="pl-h4">What it can do</div>${plUses(x.uses)}
     <p class="set-sub">You agreed to these when you installed it. An update that asks for more asks you again.</p>
   </section>`
