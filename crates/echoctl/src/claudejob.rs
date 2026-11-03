@@ -146,7 +146,17 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
     // The launcher by its full path, told which Echo to run (`ECHOCTL_BIN`, below): this one — `echoctl` on
     // PATH may be another version.
     let launcher = clis.iter().find(|c| c.contains('/') && c.contains("scripts")).cloned().unwrap_or_else(|| "echoctl".into());
-    let prompt = format!("{}\n\n{}", preamble(spec.tools, &format!("`{launcher}` (its full path, exactly so)")), spec.prompt);
+    // What the Brain holds and when to go there (#34): only when it is on and the run has tools to ask it.
+    #[cfg(feature = "brain")]
+    let brain_text = (spec.tools != Tools::None).then(|| crate::brain::advert::block(&crate::brain::access::Access { profile: profile.id.clone(), ..Default::default() })).flatten();
+    #[cfg(not(feature = "brain"))]
+    let brain_text: Option<String> = None;
+    let prompt = format!(
+        "{}{}\n\n{}",
+        preamble(spec.tools, &format!("`{launcher}` (its full path, exactly so)")),
+        brain_text.map(|b| format!("\n\n<echo_brain>\n{b}\n</echo_brain>")).unwrap_or_default(),
+        spec.prompt
+    );
     let _ = fs::write(spec.run_dir.join("prompt.md"), &prompt);
     let _ = writeln!(log, "{}  Echo runs “{}” on {}{} ({} permissions)", Local::now().format("%H:%M:%S"), spec.title, profile.name, model.as_deref().map(|m| format!(", model {m}")).unwrap_or_default(), spec.tools.word());
     let mut a: Vec<String> = vec!["-p".into(), prompt, "--output-format".into(), "stream-json".into(), "--verbose".into()];
@@ -156,7 +166,7 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
     let exe = std::env::current_exe().context("Echo's own program can't be found")?;
     // The Brain, narrowed to this profile's sources (strict routing).
     #[cfg(all(feature = "tray", feature = "brain"))]
-    let brain = crate::terminal::brain_mcp_config(&exe, &["--profile".into(), profile.id.clone()]);
+    let brain = crate::terminal::brain_mcp_config(&exe, &["--profile".into(), profile.id.clone(), "--who".into(), "routine".into()]);
     #[cfg(not(all(feature = "tray", feature = "brain")))]
     let brain: Option<String> = None;
     let mut settings_file = None;

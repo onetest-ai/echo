@@ -1999,6 +1999,9 @@ enum BrainCmd {
         thread: Vec<String>,
         #[arg(long)]
         call: Option<String>,
+        /// Who runs it (folder | call | routine), for the usage counts in Settings → Brain
+        #[arg(long)]
+        who: Option<String>,
     },
     /// The taxonomy: topics and terms (it supersedes thread glossaries)
     Taxonomy {
@@ -2118,9 +2121,9 @@ enum TaxonomyCmd {
 #[cfg(feature = "brain")]
 fn brain_command(cmd: BrainCmd) -> Result<()> {
     // Reading is allowed anywhere (a session Echo started reads it through MCP); changing it isn't.
-    if let BrainCmd::Mcp { profile, client, thread, call } = cmd {
+    if let BrainCmd::Mcp { profile, client, thread, call, who } = cmd {
         let access = brain::access::Access { profile: profile.unwrap_or_else(ai::default_id), client, threads: thread, call };
-        return brain::mcp::serve(Some(access));
+        return brain::mcp::serve(Some(access), who);
     }
     if notes::headless() {
         anyhow::bail!("the Brain isn't changed from a run Echo started");

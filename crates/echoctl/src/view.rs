@@ -158,6 +158,29 @@ fn view_lines(v: &Value, now: chrono::DateTime<chrono::Utc>, calls: &Path) -> Op
     if let Some(s) = q(&e["subject"]) {
         l.push(format!("Calendar event: {s}{}", clean(&e["when"]).map(|w| format!(" · {w}")).unwrap_or_default()));
     }
+    // Where the Brain helps with what is open (#34), when it is on: one line, the tool and its scope.
+    #[cfg(feature = "brain")]
+    if crate::brain::enabled() {
+        let scope = match (&client_id, &thread_id) {
+            (Some(c), _) => format!(" with client={c}"),
+            (None, Some(t)) => format!(" with thread={t}"),
+            _ => String::new(),
+        };
+        let hint = if v["item"]["title"].is_string() {
+            Some(format!("where this work item was raised and what was said about it since — search_knowledge on its title{scope}"))
+        } else if v["event"]["subject"].is_string() {
+            Some("a prep for this meeting — what was said with these people before: search_knowledge on its subject and their names, find_people for who they are".to_string())
+        } else if v["call"]["title"].is_string() {
+            Some(format!("what else was said about this call's subjects in other calls, mail and chats — search_knowledge{scope}"))
+        } else if !scope.is_empty() {
+            Some(format!("what was said, decided and promised here across calls, mail and documents — search_knowledge{scope}"))
+        } else {
+            None
+        };
+        if let Some(h) = hint {
+            l.push(format!("Brain: {h}"));
+        }
+    }
     if let Some(x) = clean(&v["filter"]) {
         l.push(format!("Showing: {x}"));
     }
@@ -202,8 +225,21 @@ pub fn hook() -> i32 {
         let me = crate::calls::me_profile();
         let (c, tell) = about_me_due(&mut sent, &session, input["source"].as_str().unwrap_or(""), me.as_deref(), now);
         changed |= c;
+        let mut blocks: Vec<String> = vec![];
         if let (true, Some(t)) = (tell, me) {
-            println!("{}", json!({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": about_me_block(&t)}}));
+            blocks.push(about_me_block(&t));
+        }
+        // What the Brain holds for this session and when to go there (#34): only when it is on.
+        #[cfg(feature = "brain")]
+        if let Some(b) = session_access().and_then(|a| crate::brain::advert::session_block(&a)) {
+            let (c, tell) = block_due(&mut sent, "brain", &session, input["source"].as_str().unwrap_or(""), &b, now);
+            changed |= c;
+            if tell {
+                blocks.push(b);
+            }
+        }
+        if !blocks.is_empty() {
+            println!("{}", json!({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": blocks.join("\n\n")}}));
         }
     }
     if changed {
@@ -213,6 +249,41 @@ pub fn hook() -> i32 {
         println!("{}", json!({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": block(&l, at)}}));
     }
     0
+}
+
+/// What this session may see of the Brain: its AI profile, and for a call's session that call's client, else its
+/// threads, else the call itself — as its echo-brain server is narrowed (`terminal::start_call`).
+#[cfg(feature = "brain")]
+fn session_access() -> Option<crate::brain::access::Access> {
+    let profile = std::env::var(PROFILE_VAR).ok().filter(|p| !p.is_empty())?;
+    let mut a = crate::brain::access::Access { profile, ..Default::default() };
+    if let Some(dir) = std::env::var_os(crate::guard::RUN_CALL).map(std::path::PathBuf::from) {
+        a.call = Some(format!("call/{}", crate::calls::stamp_of(&dir)));
+        let threads = crate::projects::of_call(&dir).unwrap_or_default();
+        match threads.iter().find_map(|(t, _)| t.client.clone()) {
+            Some(c) => a.client = Some(c),
+            None => a.threads = threads.iter().map(|(t, _)| t.id.clone()).collect(),
+        }
+    }
+    Some(a)
+}
+
+/// Whether a starting session gets a block of `kind`: at its start and after a compaction or /clear always,
+/// on a resume only when the block changed since this session got it. (the record changed, tell it)
+#[cfg_attr(not(feature = "brain"), allow(dead_code))]
+fn block_due(sent: &mut Value, kind: &str, session: &str, source: &str, text: &str, now: chrono::DateTime<chrono::Utc>) -> (bool, bool) {
+    use sha2::{Digest, Sha256};
+    let hash: String = Sha256::digest(text.as_bytes()).iter().take(8).map(|b| format!("{b:02x}")).collect();
+    let key = format!("{kind}:{session}");
+    if source == "resume" && sent[&key]["hash"] == hash.as_str() {
+        return (false, false);
+    }
+    if !session.is_empty() {
+        if let Some(m) = sent.as_object_mut() {
+            m.insert(key, json!({"hash": hash, "at": now.to_rfc3339()}));
+        }
+    }
+    (!session.is_empty(), true)
 }
 
 /// About me for a session: the user's own words, marked as theirs.

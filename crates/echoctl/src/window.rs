@@ -366,6 +366,7 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
         // A work item's mentions elsewhere in its thread: POST-less, the item rides in the query.
         #[cfg(feature = "brain")]
         "/api/brain/mentions" => {
+            crate::brain::advert::count("window", "mentioned_also_in");
             let q = req.uri().query().unwrap_or("");
             let thread = query_param(q, "thread").unwrap_or_default();
             let title = query_param(q, "title").unwrap_or_default();
@@ -390,7 +391,10 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
             json_reply(crate::brain::views::doc(&query_param(q, "source").unwrap_or_default(), scope).unwrap_or_else(|e| json!({ "error": format!("{e:#}") })))
         }
         #[cfg(feature = "brain")]
-        p if p.starts_with("/api/brain/also/") => json_reply(crate::brain::views::also(&urldecode(&p["/api/brain/also/".len()..])).unwrap_or_else(|e| json!({ "error": format!("{e:#}") }))),
+        p if p.starts_with("/api/brain/also/") => json_reply({
+            crate::brain::advert::count("window", "also_discussed");
+            crate::brain::views::also(&urldecode(&p["/api/brain/also/".len()..])).unwrap_or_else(|e| json!({ "error": format!("{e:#}") }))
+        }),
         p if p.starts_with("/api/client/") && p.ends_with("/people") => {
             json_reply(people_view(crate::people::of_client(&p["/api/client/".len()..p.len() - "/people".len()], chrono::Local::now().date_naive())))
         }
@@ -1093,6 +1097,8 @@ fn settings_snapshot() -> Value {
         b["auto"] = json!(crate::brain::settings().auto());
         b["enabled"] = json!(crate::brain::enabled());
         b["syncing"] = json!(BRAIN_SYNC.load(std::sync::atomic::Ordering::SeqCst));
+        // How often Claude asks it, and the window's views of it (#34): counts only.
+        b["usage"] = crate::brain::advert::usage(7);
         b["last"] = BRAIN_LAST.lock().map(|l| l.clone()).unwrap_or(Value::Null);
         // Documents: what lays them out and reads their pages here.
         b["documents"] = json!({ "pdfium": crate::brain::files::pdf::library().is_some(), "libreoffice": crate::brain::files::render::soffice().is_some(),

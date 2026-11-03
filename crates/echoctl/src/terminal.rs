@@ -350,7 +350,7 @@ pub fn start_folder(key: &str, profile: Option<&str>, cols: u16, rows: u16) -> R
     args.splice(0..0, ["--settings".to_string(), settings.display().to_string()]);
     // The Brain beside the user's own MCP servers (read-only; its tools allowed without asking).
     #[cfg(feature = "brain")]
-    if let Some(f) = brain_mcp_config(&std::env::current_exe()?, &["--profile".into(), p.id.clone()]) {
+    if let Some(f) = brain_mcp_config(&std::env::current_exe()?, &["--profile".into(), p.id.clone(), "--who".into(), "folder".into()]) {
         args.splice(0..0, ["--mcp-config".to_string(), f, "--allowedTools".into(), "mcp__echo-brain".into()]);
     }
     let mut env = vec![(crate::view::SESSION_VAR, "1".into()), (crate::view::PROFILE_VAR, p.id.clone())];
@@ -396,7 +396,7 @@ pub fn start_call(key: &str, dir: &Path, cols: u16, rows: u16) -> Result<u64> {
     args.extend(clis.iter().map(|cli| format!("Bash({cli} context:*)")));
     // The Brain, read-only: what was said in the user's other calls — on this call's AI profile, and
     // its client, else its threads, else the call itself.
-    let mut access: Vec<String> = vec!["--profile".into(), p.id.clone(), "--call".into(), format!("call/{}", calls::stamp_of(&dir))];
+    let mut access: Vec<String> = vec!["--profile".into(), p.id.clone(), "--who".into(), "call".into(), "--call".into(), format!("call/{}", calls::stamp_of(&dir))];
     let threads = crate::projects::of_call(&dir).unwrap_or_default();
     match threads.iter().find_map(|(t, _)| t.client.clone()) {
         Some(c) => access.extend(["--client".into(), c]),
@@ -427,7 +427,7 @@ pub fn start_call(key: &str, dir: &Path, cols: u16, rows: u16) -> Result<u64> {
              transcript, give me a three-line overview, then wait for my questions.",
             dir.display(),
             dir.display(),
-            if with_brain { ", and search the user's other calls with the echo-brain tools (cite the call and time)" } else { "" }
+            if with_brain { ", and search the user's Brain with the echo-brain tools — their other calls, mail, chats and documents about this call's client or threads (cite the source and time)" } else { "" }
         ));
     }
     let mut env: Vec<(&str, String)> = vec![

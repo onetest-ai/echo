@@ -2084,8 +2084,14 @@ function brainSettings(st) {
   const kinds = Object.entries(b.by_kind || {}).map(([k, n]) => `${n} ${k}${n === 1 ? '' : 's'}`).join(', ')
   const held = b.exists ? `${kinds || 'nothing yet'} · ${b.chunks} sections · ${b.embedded} with meaning${b.embed_model ? ` (${esc(b.embed_model)}${b.embed_dim ? `, ${b.embed_dim}-d` : ''})` : ''} · ${(b.bytes / 1048576).toFixed(1)} MB` : 'Not built yet'
   const last = b.last ? (b.last.error ? `<span class="error">${esc(b.last.error)}</span>` : `Last sync: ${b.last.added || 0} added, ${b.last.changed || 0} changed, ${b.last.removed || 0} removed, ${b.last.embedded || 0} embedded${b.last.embed_error ? ` · <span class="error">${esc(b.last.embed_error)}</span>` : ''}`) : (b.built_at ? `Updated ${esc(relDay(String(b.built_at).slice(0, 10)))}` : '')
+  const u = b.usage || {}, by = u.by || {}
+  const sum = (o) => Object.values(o || {}).reduce((n, k) => n + k, 0)
+  const asked = `${u.claude || 0} time${u.claude === 1 ? '' : 's'} in the last ${u.days || 7} days` + (u.claude ? ` — ${[['folder', 'the Echo folder session'], ['call', 'call sessions'], ['routine', 'routines']].filter(([k]) => sum(by[k])).map(([k, l]) => `${l} ${sum(by[k])}`).join(' · ')}` : '')
+  const seen = by.window ? ` · in the window: Also discussed ${by.window.also_discussed || 0}, Mentioned also in ${by.window.mentioned_also_in || 0}` : ''
+  const usageRow = setRow('How much it is used', `Claude asked it ${asked}${seen}. Claude sees what it holds and when to ask it at the start of every Echo session.`, '')
   return setCard('', [
     onRow,
+    usageRow,
     setRow('What it holds', `${held}${last ? `<br>${last}` : ''}`, b.syncing ? '<span class="set-sub">Syncing…</span>' : '<button class="btn" data-brain-sync>Sync now</button>'),
     setRow('Keep it current', 'Echo adds new and changed calls, channel posts, mail and folder files by itself (checked every 5 minutes).', sw('brain_auto', b.auto, 'Keep the Brain current')),
   ]) + setCard('Meaning (embeddings)', [
