@@ -885,7 +885,14 @@ templates folders) → one Claude run with no tools → a description in parts (
 —, what it is, where things are, how notes are written, what Claude can do, leave alone) + which clients / threads it is
 for → the user corrects it and confirms (Inbox until then; one analysis per vault at a time). Then **one skill**, `obsidian-vaults` (its description names
 the vaults), a catalog `vaults.md` and each description — rebuilt on every add, remove, re-read and edit; a re-read waits
-beside the user's description (`proposed.md`); a vault whose folder is gone (a drive not mounted) is left out. Measured on a fake vault: the analysis in ~12 s; Claude Code with
+beside the user's description (`proposed.md`); a vault whose folder is gone (a drive not mounted) is left out.
+**The Obsidian activity** (phase B; `ctx.activities.add` — a plugin's activity in the bar under Echo's, its route
+`#<plugin>:<id>/…` in `ctx.where().route`, `render()` + `after()` to draw; `ctx.ui.graph` = Echo's GraphView,
+`ctx.ui.newGraph()`): a vault browsed as Obsidian shows it — Files | Tags tree (left-alone folders greyed), notes as
+tabs with their properties (a property's `[[link]]` opens its note) and body through Echo's safe Markdown writer
+(wikilinks become in-place links, a missing one dotted), Open in Obsidian, the local graph, backlinks with their line,
+tags, In Echo (a client or thread of the same name); a Graph tab by Links | Tags | Both, coloured by folder or tag, orphans
+hidden. The host half keeps an index per vault (frontmatter, tags, links), re-read only for files whose time changed. Measured on a fake vault: the analysis in ~12 s; Claude Code with
 the skill and `--add-dir` answered from the vault and named the notes.
 **Scheduler** (its package in `onetest-ai/echo-plugins/plugins/scheduler`): routines = the user's prompts on a schedule
 (`routines/<id>.md` in its store, templates in its package), runs with tokens and cost, its own Settings section; the

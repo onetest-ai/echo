@@ -535,6 +535,9 @@ async function loadCall(name) {
 // ── routing: #calls, #call/<name>/<tab>, #today ────────────────────────────────────────────
 function route() {
   const h = decodeURIComponent(location.hash.slice(1))
+  // A plugin's activity (`ctx.activities.add`): `#<plugin>:<id>` and anything after a slash is its own.
+  const pa = ACTIVITIES.find((a) => a.plugin && (h === a.id || h.startsWith(a.id + '/')))
+  if (pa) { S.view = pa.id; S.plRoute = h.slice(pa.id.length + 1); S.plRoutes = { ...(S.plRoutes || {}), [pa.id]: S.plRoute }; return }
   const cm = h.match(/^calendar(?:\/(day|week))?$/)
   if (cm) { S.view = 'calendar'; if (cm[1]) S.cal.mode = cm[1]; return }
   const sm = h.match(/^settings(?:\/([a-z0-9:-]+))?$/)
@@ -571,7 +574,7 @@ function route() {
 }
 const go = (hash) => { if (location.hash.slice(1) !== hash) location.hash = hash; else render() }
 /** An activity, where the user left it (the open call and tab; the calendar's day or week). */
-const goActivity = (id) => go(id === 'calendar' ? `calendar/${S.cal.mode}` : id === 'settings' ? `settings/${S.setSection}`
+const goActivity = (id) => go(ACTIVITIES.some((a) => a.id === id && a.plugin) ? (S.view === id ? id : (S.plRoutes || {})[id] ? `${id}/${S.plRoutes[id]}` : id) : id === 'calendar' ? `calendar/${S.cal.mode}` : id === 'settings' ? `settings/${S.setSection}`
   : id === 'tasks' ? 'tasks' : id === 'brain' ? `brain/${S.br.tab}`
   : id === 'projects' ? (S.pj.found ? 'found' : S.pj.client ? `client/${S.pj.client}/${S.pj.ctab || 'overview'}` : S.pj.sel ? `project/${S.pj.sel}/${S.pj.tab}` : 'projects') : (S.selected ? `call/${S.selected}/${S.tab}` : 'calls'))
 
@@ -2401,12 +2404,22 @@ function pluginCtx(id) {
       /** A section of its own in Settings ("From plugins"); its id is `<plugin>:<id>` in the hash. */
       section: (v) => { Plugins.sections.push({ ...v, id: `${id}:${v.id || 'main'}`, plugin: id }); render() },
     },
+    /** An activity of its own in the activity bar, under Echo's (`#<plugin>:<id>/<its route>`): {id, label, icon,
+     *  render() → HTML of the page, after(box) — after each render (draw a graph)}. */
+    activities: {
+      add: (a) => {
+        const at = ACTIVITIES.findIndex((x) => x.bottom)
+        ACTIVITIES.splice(at < 0 ? ACTIVITIES.length : at, 0, { layout: 'single', ...a, id: `${id}:${a.id}`, plugin: id })
+        route()
+        render()
+      },
+    },
     /** Open one of its panel views (`ctx.panels.add`). */
     showPanel: (view) => { Layout.show(`${id}:${view}`, panelViews()); layoutChanged() },
     /** Open one of Echo's own panel views, e.g. `claude-folder` (the Claude · Echo folder session). */
     openEchoPanel: (view) => { if (view.includes(':')) return; go('calls'); setTimeout(() => { Layout.show(view, panelViews()); layoutChanged() }, 50) },
     /** Where the window is: the activity and the Settings section (`#settings/<plugin>:<id>`). */
-    where: () => ({ view: S.view, section: S.setSection }),
+    where: () => ({ view: S.view, section: S.setSection, route: S.plRoute || '' }),
     go: (hash) => go(hash),
     palette: { add: (item) => add(Plugins.palette, item) },
     /** Echo's own pieces, so a plugin looks like Echo. */
@@ -2414,6 +2427,9 @@ function pluginCtx(id) {
       esc, setRow, setCard, sw, ICON, relDay, ago, notice: (text) => { S.notice = text; render() },
       /** Its CSS in the page, taken out when it unloads. */
       style: (css) => { const el = document.createElement('style'); el.dataset.plugin = id; el.textContent = String(css); document.head.appendChild(el); owned.styles.push(el) },
+      /** Echo's graph (Sigma over graphology, as the Brain's): draw(box, key, build, {click}), focus, select, find. */
+      graph: GraphView,
+      newGraph: () => new graphology.Graph(),
     },
     render: () => render(),
   }
@@ -2437,6 +2453,8 @@ async function loadPluginClients(snapshot) {
   render()
 }
 function unloadPlugin(id) {
+  for (let i = ACTIVITIES.length - 1; i >= 0; i--) if (ACTIVITIES[i].plugin === id) ACTIVITIES.splice(i, 1)
+  if (S.view && S.view.startsWith(id + ':')) { S.view = 'calls'; go('calls') }
   const owned = Plugins.owned[id]
   if (owned) {
     for (const [type, fn, opts] of owned.listeners) document.removeEventListener(type, fn, opts)
@@ -5478,7 +5496,13 @@ function render() {
     primary.dataset.layout = layout
     primary.dataset.view = S.view
   }
-  if (S.view === 'settings') {
+  const pact = ACTIVITIES.find((a) => a.id === S.view && a.plugin)
+  if (pact) {
+    let html = ''
+    try { html = pact.render() } catch (e) { html = `<p class="error">${esc(pact.label)}: ${esc(String((e && e.message) || e))}</p>` }
+    patch(primary, `<main class="main plug-act">${noticesBar()}${html}</main>`)
+    try { if (pact.after) pact.after(primary) } catch (e) { console.error(e) }
+  } else if (S.view === 'settings') {
     patch(primary, `<main class="main">${noticesBar()}${settingsView()}</main>`)
   } else if (S.view === 'brain') {
     patch(primary, `<main class="main">${noticesBar()}${brainView()}</main>`)
