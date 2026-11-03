@@ -13,6 +13,8 @@ Screens: the Echo Workbench canvas, row "Plugins — Obsidian".
 - **Connecting is short**: connect → Echo analyses the vault → it writes a **description for Claude** (what the vault is
   and what Claude can do with it) → the user corrects the description → done. No mapping review, no write previews.
 - A vault holds knowledge, not operational notes.
+- **The vault and the Brain stay apart** ("волт отдельно — брейн отдельно", 2026-11-03): a vault is never indexed into the Brain;
+  Claude reads it directly (the skill, the folder). The Brain keeps calls, mail, channels and thread folders.
 
 ## 1. Connect and analyse
 
@@ -61,8 +63,6 @@ doesn't need. The way Claude Code handles skills instead: a short line always, t
   Echo's sessions get it with `--plugin-dir`, as minutes runs get Echo's own plugin.
 - **Pointed to from the view**: when a thread or client is open, the `<echo_view>` hook names its vaults directly: "this thread has the vault
   Team wiki: ~/Vaults/delivery-wiki — read its description at …". No catalog step; the main path for everyday questions.
-- **Through the Brain** (when on): search returns vault sections with their note path. Claude reaches a vault that way
-  too.
 - **Who sees what**:
 
   | Session | Vaults |
@@ -72,11 +72,6 @@ doesn't need. The way Claude Code handles skills instead: a short line always, t
   | Scheduler routines | all, read-only (`RUN_MODE=routine` reads the vault folders too) |
   | Minutes, thread sync, live notes | none (their guards stay as they are) |
 
-- **The Brain** (when on): every note is a source, `vault/<id>/<path>`.
-  - Headings become sections; wikilinks become explicit related edges; each section opens the note.
-  - Clients and threads come from the description's "Belongs to" lines.
-  - A vault belongs to the default profile, or to its thread's profile when it is bound to one.
-  - Re-read on change every 5 minutes.
 
 ## 3. The Obsidian activity (people browse it)
 
@@ -102,7 +97,6 @@ The plugin adds an activity, ◆ Obsidian, under Brain. Layout as Obsidian's:
 | `ctx.fs` scoped to the vault folders the user picked (read; write none — Claude writes, under its own permissions) | survey, browsing, reading |
 | `ctx.echo.read(kind)` — clients, threads, people | the survey's matching, "In Echo" |
 | `ctx.sessions.plugin(dir)` (one generated Claude Code plugin with the `obsidian-vaults` skill, given to Echo's sessions with `--plugin-dir`), `ctx.sessions.read(paths, {write})`, `ctx.view.hint(scope, text)` | the skill and its catalog, vault access, the pointer from the open thread / client |
-| `ctx.brain.provide(kind, {list, read})` → `store::Input` + explicit `links` | the vault in the Brain |
 | `ctx.claude.run` (exists) | the analysis |
 
 ## Phases
@@ -111,4 +105,3 @@ The plugin adds an activity, ◆ Obsidian, under Brain. Layout as Obsidian's:
 |---|---|
 | A | Connect, analyse, the line + description (Settings card), the `obsidian-vaults` skill + catalog in Claude's sessions, read access, the view's pointer |
 | B | The Obsidian activity: file browser, note, local graph, backlinks, graph tab |
-| C | The vault in the Brain |
