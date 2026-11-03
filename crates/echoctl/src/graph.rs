@@ -688,6 +688,47 @@ fn graph_raw(token: &str, url: &str) -> Result<(u16, String)> {
     Ok((code.trim().parse().unwrap_or(0), body.to_string()))
 }
 
+/// POST a JSON body to Graph (`path` after `/v1.0`): the answer's JSON (`{}` for an empty one), or the
+/// error in words. Only what Echo sends the user themselves (`deliver.rs`): their own chat, their mailbox.
+pub fn post(path: &str, body: &Value) -> Result<Value> {
+    let token = access_token()?;
+    let url = format!("https://graph.microsoft.com/v1.0{path}");
+    let mut child = Command::new("curl").no_window()
+        .args(["-sS", "-K", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("running curl")?;
+    let config = format!(
+        "url = {}\nrequest = \"POST\"\nheader = {}\nheader = \"Content-Type: application/json\"\ndata-binary = {}\nwrite-out = \"\\n%{{http_code}}\"\n",
+        quote(&url),
+        quote(&format!("Authorization: Bearer {token}")),
+        quote(&body.to_string())
+    );
+    child.stdin.take().unwrap().write_all(config.as_bytes())?;
+    let out = child.wait_with_output()?;
+    if !out.status.success() {
+        bail!("network error: {}", String::from_utf8_lossy(&out.stderr).trim());
+    }
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    let (body, code) = text.rsplit_once('\n').unwrap_or(("", &text));
+    let code: u16 = code.trim().parse().unwrap_or(0);
+    let v: Value = if body.trim().is_empty() { json!({}) } else { serde_json::from_str(body).unwrap_or_else(|_| json!({"raw": body.chars().take(300).collect::<String>()})) };
+    if !(200..300).contains(&code) {
+        let m = v["error"]["message"].as_str().unwrap_or("").trim();
+        bail!("Microsoft 365 refused it (HTTP {code}{})", if m.is_empty() { String::new() } else { format!(": {m}") });
+    }
+    Ok(v)
+}
+
+/// The signed-in user's own mail address (`/me`: `mail`, else the sign-in name).
+pub fn my_address() -> Result<String> {
+    let token = access_token()?;
+    let v = graph_get(&token, "https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName")?;
+    v["mail"].as_str().or_else(|| v["userPrincipalName"].as_str()).filter(|m| m.contains('@')).map(str::to_owned).ok_or_else(|| anyhow!("Microsoft 365 gives no address for this account"))
+}
+
 /// The meeting chat's id from a Teams join link: `/l/meetup-join/19%3ameeting_…%40thread.v2/…`.
 pub fn chat_id_from_join_url(url: &str) -> Option<String> {
     let rest = url.split("/meetup-join/").nth(1)?;

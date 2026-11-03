@@ -324,6 +324,15 @@ pub fn start_folder(key: &str, profile: Option<&str>, cols: u16, rows: u16) -> R
     if crate::config::Config::load().is_ok_and(|c| c.folder_skip_permissions) {
         args.push("--dangerously-skip-permissions".into());
     }
+    // Channels plugins asked for (Telegram…): the session listens to them while it is open.
+    let mut extra_env: Vec<(&str, String)> = vec![];
+    #[cfg(feature = "js")]
+    let channels = crate::jshost::channels();
+    #[cfg(feature = "js")]
+    for ch in &channels {
+        args.extend(["--channels".into(), format!("plugin:{}", ch.spec)]);
+        extra_env.extend(ch.env.iter().map(|(k, v)| (k.as_str(), v.clone())));
+    }
     // What the window shows, before each prompt: a settings file of its own with only that hook (the
     // user's own settings apply as ever).
     let folder = paths::config_dir().join("minutes-run");
@@ -336,7 +345,9 @@ pub fn start_folder(key: &str, profile: Option<&str>, cols: u16, rows: u16) -> R
     if let Some(f) = brain_mcp_config(&std::env::current_exe()?, &["--profile".into(), p.id.clone()]) {
         args.splice(0..0, ["--mcp-config".to_string(), f, "--allowedTools".into(), "mcp__echo-brain".into()]);
     }
-    let cmd = ai::terminal_command(&p, &args, &paths::home(), &[(crate::view::SESSION_VAR, "1".into()), (crate::view::PROFILE_VAR, p.id.clone())], false)?;
+    let mut env = vec![(crate::view::SESSION_VAR, "1".into()), (crate::view::PROFILE_VAR, p.id.clone())];
+    env.extend(extra_env);
+    let cmd = ai::terminal_command(&p, &args, &paths::home(), &env, false)?;
     open_with(key, cmd, cols, rows, Some((p.id.clone(), Box::new(ready))), Some(forget))
 }
 
@@ -434,12 +445,12 @@ pub fn start_call(key: &str, dir: &Path, cols: u16, rows: u16) -> Result<u64> {
 /// the session may read — its AI profile's sources only (strict routing), and for a call's session
 /// that call's client, else its threads, else the call itself.
 #[cfg(not(feature = "brain"))]
-fn brain_mcp_config(_exe: &Path, _access: &[String]) -> Option<String> {
+pub(crate) fn brain_mcp_config(_exe: &Path, _access: &[String]) -> Option<String> {
     None
 }
 
 #[cfg(feature = "brain")]
-fn brain_mcp_config(exe: &Path, access: &[String]) -> Option<String> {
+pub(crate) fn brain_mcp_config(exe: &Path, access: &[String]) -> Option<String> {
     // The Brain switched off: its server isn't offered to Claude.
     #[cfg(feature = "brain")]
     if !crate::brain::enabled() {

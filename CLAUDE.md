@@ -784,6 +784,71 @@ the rest dims (plain hex colours: WebGL reads no CSS), the camera flies to them;
   305 sections, first embedding 4 min; English and Russian queries find their moments; Claude Code with only this
   server answered a question across two calls with times and said what wasn't modeled.
 
+## Echo plugins (`plugins.rs`, `jshost.rs`, `claudejob.rs`; plan: `docs/plugins-design.md`, v4)
+Not Claude Code plugins: packages that extend Echo itself **with their own code** (v4, the user's call 2026-11-03, after
+dsh-desktop's cordis plugins): `echo-plugin.json` (id, name, version, `echo`, summary, `uses` — what it touches, for the
+install sheet —, `main`, `client`, `settings` of type string | bool | folder | secret) + `main.js` (the **host half**) +
+`client.js` (the **client half**) + skills, templates… Installing is trusting its code (`plugins::sheet` puts "Runs its
+own code in Echo / the window, with your rights" first). Echo keeps only primitives; a plugin's features live in its
+package. **Host half** (`jshost.rs`, `js` feature: QuickJS via `rquickjs`, C — off in the Windows cross-check): one host
+thread, one context per enabled plugin, loaded at app start and after install / switch / remove (`jshost::sync`); its
+ES module's `apply(ctx)` gets Echo's services over two Rust functions (`__host` at once, `__hostAsync` → a Promise settled
+from a worker thread) wrapped by `PRELUDE`: `ctx.command(name, fn)` (async allowed; called by `jshost::call` — the window's
+`GET /api/plugin/<id>/call/<cmd>?args=`, IPC `plugin_call` from Inbox buttons, `echoctl plugin call <id> <cmd> [json]`, which
+never runs timers: `no_timers`), `ctx.every(sec, fn)` (ticks each second in the app), `ctx.on(event)`, `ctx.store` (its
+folder `<home>/.echo/plugins/<id>/`, relative paths only), `ctx.package` (its installed files, read-only), `ctx.settings` (get / set; secrets 0600),
+`ctx.http.fetch` (HTTPS to its manifest's hosts), `ctx.markdown` (Echo's safe writer), `ctx.notify`, `ctx.inbox.set/clear` (`inbox.json` → Needs you items whose buttons
+call its commands), `ctx.profiles`, `ctx.deliver.status/send`, `ctx.claude.run({prompt, title, profile, model, tools,
+dir})` → `{answer, model, usage}` (`claudejob.rs`: headless on one of the user's AI profiles, the Brain narrowed to it;
+`tools` read = the guard's `RUN_MODE=routine` — the data folder, the run's own tool-results, read-only
+`guard::ROUTINE_COMMANDS` — the CLI lets such a run read projects, clients, orgs and a ledger's tree, `routine_reads` —, the Brain —, folder = the user's settings with dontAsk, skip; Echo adds the time and how to
+reach its data; the CLI is the plugin launcher with `ECHOCTL_BIN` = this Echo; `usage` = tokens by kind, cost,
+duration, turns from the result event, `projectsync::finish_run_result`). 64 MB, 5 s of JavaScript per slice.
+**Client half** (app.js `Plugins`, `loadPluginClients`): each enabled plugin's `client` imported as a module from
+`/plugin/<id>/<file>` (`window::plugin_file`, its own files only) into the window's own page (trusted, as dsh-desktop);
+`apply(ctx)`: `ctx.call`, `ctx.settings.section({id, label, icon, badge, render})` (its own Settings section under "From
+plugins", hash `#settings/<plugin>:<id>`), `ctx.settings.add` (its card in Settings → Plugins), `ctx.panels.add` (+
+`ctx.showPanel`), `ctx.slots.add(slot, {label, icon, when, run})` (`SLOTS`: `call.menu`, `calendar.event`,
+`task.actions`), `ctx.palette.add`, `ctx.ui` (Echo's helpers), `ctx.where`, `ctx.go`, `ctx.render`; switched off or removed →
+`unloadPlugin` takes all of it out. **Marketplaces**: git repositories with `echo-marketplace.json` (name, `featured`,
+plugins: `{id, source: "./path" | {github, ref, path}, categories}`); ours, `onetest-ai/echo-plugins` (public;
+`ECHOCTL_PLUGIN_MARKET` points it elsewhere), built in (hidden, never removed); the user adds any number. Fetching
+(`refresh`, never the page): GitHub `owner/repo[@ref]` → the commit (`curl`, else `gh`) → its tarball unpacked by `tar`;
+a git URL (`#ref`) → `git clone --depth 1`; a folder read where it is; every tree checked (`check_tree`: no links,
+≤ 5000 files / 64 MB a marketplace, ≤ 400 / 20 MB a plugin). Files: `<config dir>/plugins.json`,
+`<config dir>/plugins/markets/<key>/`, `<config dir>/plugins/installed/<id>/<version>/`; settings per data folder
+`<home>/.echo/plugins/<id>/settings.json`, secrets `<config dir>/plugins/secrets/<id>.json` (0600). Install = the sheet's
+lines agreed; an update asking for more waits for a new agreement. Settings → Plugins (Installed · Discover ·
+Marketplaces; IPC `plugin_op`); `echoctl plugin list|install|update|remove|enable|disable|set|call|marketplace …`.
+**Channels** (`ctx.sessions.channel({plugin, env})`, only the channel the manifest's `uses.channel` names;
+`jshost::channels`): the Echo-folder session starts with `--channels plugin:<spec>` and the env given — no `CLAUDE*` /
+`ANTHROPIC*` keys. `ctx.claude.hasPlugin` / `installPlugin` (`claude plugin list --json` / `install --scope user` through the
+profile: on, at user scope or this data folder's project), `ctx.system.which`. **Telegram** (its package, with its bot): writes the
+channel's `access.json` in its store — `allowlist`, only the paired chat id, `TELEGRAM_ACCESS_MODE=static` (no pairing
+codes) — and registers the channel; its Settings section checks the bot, Bun and Claude Code's
+`telegram@claude-plugins-official`. Measured 2026-11-03 (personal Max account): a message reaches the open session, the
+bot reacts 👀 and Claude answers through the channel; it still works after `--resume`; messages sent while the session
+was closed aren't read. A Claude Code started from inside another (`CLAUDE_CODE_CHILD_SESSION` inherited) keeps no
+transcript, so it can't be resumed.
+**Scheduler** (its package in `onetest-ai/echo-plugins/plugins/scheduler`): routines = the user's prompts on a schedule
+(`routines/<id>.md` in its store, templates in its package), runs with tokens and cost, its own Settings section; the
+Telegram and Obsidian plugins wait for `channel`, `brain_source`, `export`, `sessions`.
+**Delivery** (`deliver.rs`; to the user — mail also to the addresses set on a routine, `mail_to`; never an address a
+model picked): Echo's own ways are Teams = Graph `POST /chats/48:notes/messages` (the chat with yourself) and mail =
+`POST /me/sendMail` to `/me`'s own address, not saved in Sent (`graph::post`, `graph::my_address`; mail to others is kept
+in Sent and its foot says who sent it), from `minutes::markdown_html`. A mail is Echo's (`mail_html`, `MAIL_CSS`: the
+minutes page — the octopus, an inline `cid:` attachment, "Echo" and the day above one plain card, Echo's type, violet only
+for links, code and the AI mark; no grey page around the card and no decoration — a top bar, section markers — the user
+called AI-slop; Outlook recolours after the CSS, so every text is Echo's ink, rank by size and weight, never a lighter
+grey, and only saturated fills — tables are reports: a violet head row with white text, faint zebra rows marked in the
+HTML (`zebra`), horizontal rules; checked in Outlook on the web, light and dark). Anything a model wrote carries
+`ai_notice` in every channel. **Other ways are plugins'**: `ctx.deliver.provide(kind, {label, send})` in a host half
+whose manifest names the kind (`uses.deliver_provider.kinds`), its readiness told with `ctx.deliver.ready`
+(`jshost::providers`); `deliver::send` hands such a message to that plugin (`jshost::provider_send` → its `__deliver`
+command). Telegram is one (its package: bot token as its secret setting, pairing, sending through `ctx.http.fetch` to
+`api.telegram.org` only — `uses.network.hosts` —, Markdown → Telegram HTML with tables as lines). Settings → Plugins →
+Echo sends to you (`/api/deliver`) lists Teams, Mail and the plugins' ways; `echoctl deliver status|test <kind>|send`.
+
 ## Live view (mod) and automation
 `plugin/hooks/register.tsx` is a Claude Code mod (state contract `plugin/types/index.d.ts`, pure helpers
 `hooks/view.ts`). At session start it asks the CLI for the data folder (`echoctl app` → `home`),

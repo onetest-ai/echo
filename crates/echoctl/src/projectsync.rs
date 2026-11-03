@@ -213,12 +213,24 @@ fn claude(profile: &crate::ai::Profile, model: Option<&str>, plugin: &Path, cwd:
     a.push("Skill(echo:project-sync)".into());
     a.push(format!("Read({}/**)", abs(&dunce::canonicalize(plugin.join("skills").join("project-sync")).unwrap_or_else(|_| plugin.join("skills").join("project-sync")))));
     a.extend(clis.iter().flat_map(|cli| guard::PROJECT_STEPS.iter().map(move |s| format!("Bash({cli} project ledger {id} {s}:*)"))));
-    let mut child = notes::admit_child(|| {
+    let child = notes::admit_child(|| {
         let mut c = crate::ai::prepare_claude(profile, &a, cwd, false)?;
         c.env(guard::RUN_MODE, "project").env(guard::RUN_LEDGER, &ledger).env(guard::RUN_DIR, run_dir).env(guard::RUN_PROJECT, id).env(guard::RUN_CLIS, clis.join("\n"));
         c.env(guard::RUN_SKILL, plugin.join("skills").join("project-sync"));
         Ok(c.spawn()?)
     })?;
+    finish_run(child, log, TIMEOUT, "sync a thread", "Echo quit during the sync: it goes on next time")
+}
+
+/// Follow a headless Claude Code run started with `--output-format stream-json`: its steps into `log`,
+/// stopped after `timeout` or when it is too old for the guard (`what` it was for), and its final
+/// answer — or why there is none. Shared by the project sync and routines.
+pub fn finish_run(child: std::process::Child, log: &mut fs::File, timeout: Duration, what: &str, quit: &str) -> Result<String> {
+    finish_run_result(child, log, timeout, what, quit).map(|(text, _)| text)
+}
+
+/// The same, with Claude Code's result event (its usage, cost, duration, turns).
+pub fn finish_run_result(mut child: std::process::Child, log: &mut fs::File, timeout: Duration, what: &str, quit: &str) -> Result<(String, Value)> {
     let pid = child.id();
     let err = child.stderr.take().map(|e| std::thread::spawn(move || BufReader::new(e).lines().map_while(Result::ok).collect::<Vec<_>>().join("\n")));
     let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -226,7 +238,7 @@ fn claude(profile: &crate::ai::Profile, model: Option<&str>, plugin: &Path, cwd:
         let done = done.clone();
         std::thread::spawn(move || {
             let t = Instant::now();
-            while t.elapsed() < TIMEOUT {
+            while t.elapsed() < timeout {
                 if done.load(std::sync::atomic::Ordering::SeqCst) {
                     return;
                 }
@@ -246,7 +258,7 @@ fn claude(profile: &crate::ai::Profile, model: Option<&str>, plugin: &Path, cwd:
             };
             if ev["type"] == "system" && ev["subtype"] == "init" && !guard::new_enough(ev["claude_code_version"].as_str().unwrap_or("")) {
                 let [x, y, z] = guard::MIN_CLAUDE;
-                stopped = Some(format!("Claude Code is too old to sync a thread — update it to {x}.{y}.{z} or later"));
+                stopped = Some(format!("Claude Code is too old to {what} — update it to {x}.{y}.{z} or later"));
                 crate::ai::stop_group(pid);
             }
             for l in notes::describe(&ev) {
@@ -268,14 +280,14 @@ fn claude(profile: &crate::ai::Profile, model: Option<&str>, plugin: &Path, cwd:
         bail!(why);
     }
     if notes::quitting() {
-        bail!("Echo quit during the sync: it goes on next time");
+        bail!("{quit}");
     }
     let r = result.ok_or_else(|| anyhow!("Claude Code ended without a result{}", err.lines().find(|l| !l.trim().is_empty()).map(|l| format!(": {l}")).unwrap_or_default()))?;
     let text = r["result"].as_str().unwrap_or("").trim().to_string();
     if r["is_error"] == true {
         bail!("Claude Code failed: {}", text.lines().next().unwrap_or("no reason given"));
     }
-    Ok(text)
+    Ok((text, r))
 }
 
 /// Projects whose new calls are due a sync: not closed; a call of theirs ended ≥ 15 min ago and

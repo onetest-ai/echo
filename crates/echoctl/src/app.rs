@@ -85,6 +85,9 @@ pub fn run(app: TargetApp, tray: bool, background: bool) -> Result<()> {
     // Minutes written by themselves, 15 minutes after a call (`notes::auto_due`).
     crate::notes::start_scheduler();
     crate::projectsync::start_scheduler();
+    // Plugins' host halves (`jshost.rs`): their code, inside Echo.
+    #[cfg(feature = "js")]
+    crate::jshost::sync();
     #[cfg(feature = "brain")]
     crate::brain::start_scheduler();
     // Who each Claude profile is signed in to, for the window (`signin.rs`; in the background).
