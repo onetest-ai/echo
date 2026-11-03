@@ -1461,6 +1461,7 @@ const focusedTerm = () => { for (const [k, e] of Terms) if (e.el.contains(docume
 /** Start a terminal of `kind` for `key` (the app answers with `ptyOpened`). */
 function termStart(kind, key, extra = {}) {
   const e = termEntry(key)
+  if (S.convAsk && S.convAsk.key === key) S.convAsk = null
   if (!e) { S.notice = "The terminal can't be shown (xterm.js didn't load)."; return render() }
   e.exited = false; e.starting = true; e.signin = null; e.error = null; e.from = 0; e.term.reset()
   if (S.termOutput) delete S.termOutput[key]
@@ -1496,11 +1497,11 @@ function claudeTools(key, kind, extra, running) {
   const convs = S.convOpen === key ? (S.convs && S.convs[key]) : null
   const menu = S.convOpen !== key ? '' : `<div class="menu conv-menu" role="menu">${convs == null ? '<div class="conv-empty">Loading…</div>'
     : !convs.length ? '<div class="conv-empty">No conversations yet.</div>'
-    : convs.map((x) => `<button class="menu-item conv-item${x.current ? ' on' : ''}" role="menuitem" data-conv="${esc(x.id)}" ${data}><span class="conv-t">${esc(x.title || (x.current ? 'This conversation' : 'A conversation'))}</span><span class="conv-w">${x.current ? 'now' : x.at ? esc(dayLabel(new Date(x.at)) + ' ' + hm(new Date(x.at))) : ''}</span></button>`).join('')}
+    : convs.map((x) => `<button class="menu-item conv-item${x.current ? ' on' : ''}" role="menuitem" data-conv="${esc(x.id)}"${x.current && Terms.get(key) && Terms.get(key).id != null && !Terms.get(key).exited ? ' data-conv-current' : ''} ${data}><span class="conv-t">${esc(x.title || (x.current ? 'This conversation' : 'A conversation'))}</span><span class="conv-w">${x.current ? 'now' : x.at ? esc(dayLabel(new Date(x.at)) + ' ' + hm(new Date(x.at))) : ''}</span></button>`).join('')}
     <div class="menu-sep" role="separator"></div><button class="menu-item" role="menuitem" data-conv="new" ${data}>＋ New conversation</button></div>`
   const tools = `<span class="term-tools">${running ? `<button class="btn ghost sm" data-conv="restart" ${data} title="Stop it and start it again: the same conversation, with plugins and settings read afresh">↻ Restart</button>` : ''}<button class="btn ghost sm" data-conv="new" ${data} title="Start a fresh conversation; this one stays in the list">＋ New conversation</button><span class="conv-wrap"><button class="btn ghost sm" data-conv-menu ${data} aria-haspopup="menu" aria-expanded="${S.convOpen === key}">Conversations ▾</button>${menu}</span></span>`
   const stale = running && S.ptyStale && S.ptyStale[key]
-  const hint = stale ? `<div class="term-stale"><span class="dot" aria-hidden="true"></span><span class="grow">${esc(stale.what)} at ${esc(hm(new Date(stale.at)))} — this session still runs what it started with.</span><button class="btn primary sm" data-conv="restart" ${data}>Restart to update</button></div>` : ''
+  const hint = stale ? `<div class="term-stale"><span class="dot" aria-hidden="true"></span><span class="grow">${esc(stale.what)}${stale.at ? ` at ${esc(hm(new Date(stale.at)))}` : ''} — this session still runs what it started with.</span><button class="btn primary sm" data-conv="restart" ${data}>Restart to update</button></div>` : ''
   // Asked first while it runs: what it is doing stops (the conversation itself is kept).
   const ask = S.convAsk && S.convAsk.key === key && running ? S.convAsk : null
   const askText = !ask ? '' : ask.session === '' ? 'Restart Claude? Whatever it is doing now stops, and an answer being written is lost. The conversation is kept and goes on after the restart.'
@@ -5732,6 +5733,8 @@ document.addEventListener('click', (e) => {
     const extra = t.dataset.termCall ? { call: t.dataset.termCall } : { profile: S.folderProfile || ai().default || undefined }
     const key = t.dataset.termKey
     const v = t.dataset.convGo !== undefined ? t.dataset.convGo : t.dataset.conv === 'restart' ? '' : t.dataset.conv
+    // The conversation already open: nothing to switch to.
+    if (t.dataset.convCurrent !== undefined) { S.convOpen = null; return render() }
     const e = Terms.get(key)
     // A running session: asked first (the confirmation's own button goes on).
     if (t.dataset.convGo === undefined && e && e.id != null && !e.exited) { S.convAsk = { key, session: v }; S.convOpen = null; return render() }

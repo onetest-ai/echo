@@ -233,11 +233,15 @@ pub fn close(id: u64) {
         let mut child = t.child.lock().unwrap_or_else(|e| e.into_inner());
         // Its whole process group: the login shell, Claude Code and what it started (MCP servers)
         // — one of them left holding the terminal would keep its profile's lease.
-        if let Some(pid) = child.process_id() {
+        let tree = child.process_id();
+        if let Some(pid) = tree {
             let key = t.key.clone();
             *STOPPING.lock().unwrap_or_else(|e| e.into_inner()).entry(key.clone()).or_default() += 1;
+            let term = t.clone();
             std::thread::spawn(move || {
                 crate::ai::stop_group(pid);
+                // Windows: the root goes only after its tree (`taskkill /T` needs it to find the rest).
+                let _ = term.child.lock().unwrap_or_else(|e| e.into_inner()).kill();
                 let mut s = STOPPING.lock().unwrap_or_else(|e| e.into_inner());
                 if let Some(n) = s.get_mut(&key) {
                     *n = n.saturating_sub(1);
@@ -247,7 +251,9 @@ pub fn close(id: u64) {
                 }
             });
         }
-        let _ = child.kill();
+        if cfg!(unix) || tree.is_none() {
+            let _ = child.kill();
+        }
         drop(child);
         t.out.lock().unwrap_or_else(|e| e.into_inner()).exited = true;
         t.changed.notify_all();
@@ -532,8 +538,17 @@ fn session_args(store_key: &str) -> (Vec<String>, bool, OnExit) {
     (args, resumed, forget)
 }
 
+/// A live session already on `key`: a second one would run the same conversation twice.
+fn running_already(key: &str) -> Result<()> {
+    if list().iter().any(|(_, k, exited)| k == key && !exited) {
+        bail!("Claude is already running in this panel");
+    }
+    Ok(())
+}
+
 /// The Echo folder session, on `profile` (the default when none).
 pub fn start_folder(key: &str, profile: Option<&str>, pick: Option<&str>, cols: u16, rows: u16) -> Result<u64> {
+    running_already(key)?;
     if stopping(key) {
         bail!("the previous session is still stopping — try again in a moment");
     }
@@ -587,6 +602,7 @@ pub fn start_folder(key: &str, profile: Option<&str>, pick: Option<&str>, cols: 
 /// The guarded session on the call in `dir`, on the call's own profile. Only one at a time: another
 /// call's session ends (it resumes by id when opened again).
 pub fn start_call(key: &str, dir: &Path, pick: Option<&str>, cols: u16, rows: u16) -> Result<u64> {
+    running_already(key)?;
     if stopping(key) {
         bail!("the previous session is still stopping — try again in a moment");
     }
