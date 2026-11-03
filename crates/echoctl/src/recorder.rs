@@ -161,8 +161,10 @@ impl Recording {
             let (info, err) = track.finish();
             if let Some(e) = err {
                 // A writer that died never wrote the WAV's sizes: fix them, the samples are there.
+                // Its failure was told when it happened (`Track::poll`) and is in the track's
+                // events: the recording itself closes normally, and what was saved is used.
                 let _ = audio::repair_wav(&dir.join(&info.file));
-                errors.push(e);
+                eprintln!("{}: {e:#}", info.file);
             }
             meta.tracks.push(info);
         }

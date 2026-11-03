@@ -226,6 +226,9 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
     // was made for another meeting, so it waits for the next call instead of recording the
     // rest of this one.
     let mut held_arm: Option<String> = None;
+    // Stopped by the user while the call went on: no scheduled meeting is armed until that call
+    // ends (it would record the rest of this call as that meeting).
+    let mut stopped_in_call = false;
     // Keep today's agenda fresh from the calendar (if one is configured), off the main loop.
     let mut last_sync: Option<Instant> = None;
     // Sleep shows up as wall-clock time passing faster than the monotonic clock.
@@ -253,6 +256,7 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
             call_ended_at = None;
             mic_released_at = None;
             held_arm = None;
+            stopped_in_call = false;
             emit("woke", json!({}));
         }
         if let Some(r) = rec.as_mut() {
@@ -280,7 +284,7 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
         }
         let mut armed: Option<Armed> = read_json("armed.json");
         // A meeting chosen ahead of time ("Record when it starts"): arm it ~1 min before.
-        if armed.is_none() && rec.is_none() {
+        if armed.is_none() && rec.is_none() && !stopped_in_call {
             if let Some(m) = crate::schedule::due(now) {
                 let subject = m.subject.clone();
                 if arm(subject.clone(), Some(m), None, None).is_ok() {
@@ -346,6 +350,7 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
                     in_call = false;
                     call_ended_at = Some(Instant::now());
                     held_arm = None;
+                    stopped_in_call = false;
                     emit("call_ended", json!({ "app": app, "recording": rec.is_some() }));
                 }
             }
@@ -416,6 +421,7 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
             // call when this one goes on.
             if user_stop && call_active {
                 held_arm = read_json::<Armed>("armed.json").map(|a| a.id);
+                stopped_in_call = true;
             }
             stop_mute_sync(&mut mute_alive);
             stop_flag(&mut ui_alive);
@@ -537,6 +543,8 @@ fn finish(r: Recording, reason: &str) {
             }
         }
         Err(e) => {
+            // Closed all the same (`Recording::finish` closes both tracks and dates the end).
+            emit("recording_stopped", json!({ "dir": dir.display().to_string(), "duration_s": secs, "reason": reason }));
             emit("error", json!({ "message": format!("finishing recording failed: {e:#}") }));
             crate::app::notify("Recording not closed properly", &format!("{e:#}"));
             // What was saved is transcribed all the same: `Recording::finish` closes both tracks

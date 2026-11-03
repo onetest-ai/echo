@@ -115,7 +115,14 @@ pub struct Track {
     watch_silence: bool,
     /// The writer's failure has been reported (`write_failure`).
     write_failed: bool,
+    /// When the last planned reopens happened: more than `REOPENS_PER_WINDOW` within
+    /// `REOPEN_WINDOW` (a device or a process set flipping back and forth) back off like failures.
+    reopens: Vec<Instant>,
 }
+
+/// Planned reopens are free up to this many within `REOPEN_WINDOW`; beyond, they back off.
+const REOPENS_PER_WINDOW: usize = 3;
+const REOPEN_WINDOW: Duration = Duration::from_secs(30);
 
 impl Track {
     /// Start a track. If the source can't open yet (e.g. Teams isn't playing audio), the track
@@ -133,6 +140,7 @@ impl Track {
             file: path.file_name().unwrap().to_string_lossy().into_owned(),
             t0,
             next_retry: Instant::now(),
+            reopens: Vec::new(),
             last_error: None,
             events: vec![],
             restarts: 0,
@@ -195,6 +203,13 @@ impl Track {
         }
         let health = match self.live.as_mut().map(|l| l.health()) {
             Some(Health::Ok) => self.silence_check(),
+            // A planned change that keeps coming back is treated as a failure (backed off).
+            Some(Health::Reopen(reason)) => {
+                let now = Instant::now();
+                self.reopens.retain(|t| now.duration_since(*t) < REOPEN_WINDOW);
+                self.reopens.push(now);
+                Some(if self.reopens.len() > REOPENS_PER_WINDOW { Health::Restart(format!("{reason} (again and again)")) } else { Health::Reopen(reason) })
+            }
             other => other,
         };
         match health {
@@ -584,8 +599,9 @@ mod tests {
         let mut track = Track::start("mic", &dir.join("mic.wav"), Box::new(source), Instant::now()).unwrap();
         assert_eq!(opens.load(Ordering::SeqCst), 1);
 
-        // Planned: every one reopens on the same poll, and none counts as a failure.
-        for i in 0..5 {
+        // Planned: every one reopens on the same poll, and none counts as a failure (up to three
+        // within 30 s; more, flipping back and forth, back off like failures).
+        for i in 0..REOPENS_PER_WINDOW as u64 {
             script.lock().unwrap().push_back(Health::Reopen(format!("device {i}")));
             track.poll();
             assert_eq!(opens.load(Ordering::SeqCst), 2 + i);
@@ -593,13 +609,15 @@ mod tests {
         }
         assert_eq!(track.restarts, 0);
 
-        // Failures: the first reopens at once, the second waits for the backoff.
+        // A fourth within 30 s is flipping back and forth: it counts as a failure — the first
+        // failure reopens at once, the next waits for the backoff.
+        script.lock().unwrap().push_back(Health::Reopen("device again".into()));
+        track.poll();
+        assert_eq!(opens.load(Ordering::SeqCst), 5);
+        assert_eq!(track.restarts, 1);
         script.lock().unwrap().push_back(Health::Restart("stalled".into()));
         track.poll();
-        assert_eq!(opens.load(Ordering::SeqCst), 7);
-        script.lock().unwrap().push_back(Health::Restart("stalled".into()));
-        track.poll();
-        assert_eq!(opens.load(Ordering::SeqCst), 7);
+        assert_eq!(opens.load(Ordering::SeqCst), 5);
         assert!(track.live.is_none());
         assert!(track.next_retry > Instant::now() + Duration::from_secs(1));
         assert_eq!(track.restarts, 2);

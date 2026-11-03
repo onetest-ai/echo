@@ -853,6 +853,23 @@ fn drift_in(c: &Connection, t: &Taxonomy, snoozed: &Value) -> Result<Vec<Value>>
             None => vec![],
         };
         let sub_top: Option<(String, i64)> = if subs.is_empty() { None } else { Some(counts("intent_l2")?.into_iter().find(|(k, _)| subs.contains(k)).unwrap_or_default()) };
+        // Sections tagged with that level-1 topic but none of its subtopics (the classifier may stop at
+        // level 1): a bucket of their own, as big a catch-all as any subtopic.
+        let direct: i64 = if subs.is_empty() {
+            0
+        } else {
+            let marks = (0..subs.len()).map(|i| format!("?{}", i + 4)).collect::<Vec<_>>().join(",");
+            let sql = format!(
+                "SELECT count(DISTINCT k.chunk_id) FROM chunk_topics k
+                 JOIN chunk_verdicts v ON v.chunk_id = k.chunk_id AND v.verdict = 'tagged' AND {NEW}
+                 JOIN scopes s ON s.chunk_id = k.chunk_id AND s.kind = 'client' AND s.id = ?1
+                 WHERE k.kind = 'intent_l2' AND k.category_id IN ({marks})"
+            );
+            let mut values: Vec<&dyn rusqlite::ToSql> = vec![&client, &since, &at];
+            values.extend(subs.iter().map(|x| x as &dyn rusqlite::ToSql));
+            let with_sub: i64 = c.query_row(&sql, values.as_slice(), |r| r.get(0))?;
+            top.as_ref().map(|(_, n)| (n - with_sub).max(0)).unwrap_or(0)
+        };
         let calls: i64 = c.query_row(
             "SELECT count(DISTINCT ch.source) FROM chunks ch JOIN scopes s ON s.chunk_id = ch.id AND s.kind = 'client' AND s.id = ?1
              WHERE ch.source LIKE 'call/%' AND ch.status = 'ACTIVE'",
@@ -865,6 +882,7 @@ fn drift_in(c: &Connection, t: &Taxonomy, snoozed: &Value) -> Result<Vec<Value>>
         let top_pct = top.as_ref().map(|(_, n)| pct(*n, tagged)).unwrap_or(0.0);
         // The topic the catch-all rule judges: the biggest level-1 topic, or its biggest subtopic.
         let (broad, broad_pct) = match &sub_top {
+            Some((_, n)) if direct > *n => (top_label.clone().map(|l| format!("{l} (in none of its subtopics)")), pct(direct, tagged)),
             Some((tid, n)) => (Some(label(tid)), pct(*n, tagged)),
             None => (top_label.clone(), top_pct),
         };
@@ -1969,6 +1987,18 @@ mod tests {
         let s = shared(&t6);
         assert_eq!(s["stale"], true, "{s}");
         assert!(s["reasons"][0]["text"].as_str().unwrap().contains("“A1”"), "{s}");
+        // Sections tagged with a level-1 topic alone, none of its subtopics, are a catch-all too.
+        t.layers.insert("beta".into(), Layer { name: "Beta".into(), built_from: 6, ..Default::default() });
+        t.topics.extend([topic("beta", "P", None), topic("beta", "P1", Some("P")), topic("beta", "P2", Some("P")), topic("beta", "Q", None)]);
+        t.history.push(json!({"op": "build", "layer": "beta", "version": 5, "at": "2026-11-01T10:00:00+00:00"}));
+        let (pp, q) = (topic_id("beta", "P"), topic_id("beta", "Q"));
+        for i in 0..40 {
+            let (l1, l2) = if i < 28 { (&pp, None) } else if i < 32 { (&pp, Some(topic_id("beta", "P1"))) } else { (&q, None) };
+            add("beta", &format!("call/b{}", i % 6), after, Some(l1), l2.as_deref());
+        }
+        let d = drift_in(&c, &t, &json!({})).unwrap().into_iter().find(|x| x["layer"] == "beta").unwrap();
+        assert_eq!(d["stale"], true, "{d}");
+        assert!(d["reasons"][0]["text"].as_str().unwrap().contains("P (in none of its subtopics)"), "{d}");
         // A client built from 10 calls: half its new sections under one topic with no subtopics.
         t.layers.insert("acme".into(), Layer { name: "Acme".into(), built_from: 10, ..Default::default() });
         t.topics.extend([topic("acme", "X", None), topic("acme", "Y", None), topic("acme", "Z", None)]);

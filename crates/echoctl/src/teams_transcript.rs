@@ -139,15 +139,6 @@ pub fn occurrence_window(start: DateTime<Utc>, end: Option<DateTime<Utc>>) -> (D
     (start - Duration::minutes(30), end.unwrap_or(start + Duration::hours(3)) + Duration::minutes(30))
 }
 
-/// The transcripts of this occurrence: a recurring meeting keeps one online meeting, so Teams lists
-/// every occurrence's — only those started from 30 minutes before it to 30 minutes after its end count.
-fn of_occurrence(ts: Vec<Value>, start: DateTime<Utc>, end: Option<DateTime<Utc>>) -> Vec<Value> {
-    let (from, to) = occurrence_window(start, end);
-    ts.into_iter()
-        .filter(|t| t["created"].as_str().and_then(|c| DateTime::parse_from_rfc3339(c).ok()).is_some_and(|c| c.with_timezone(&Utc) >= from && c.with_timezone(&Utc) <= to))
-        .collect()
-}
-
 fn end_of(m: &MeetingContext) -> Option<DateTime<Utc>> {
     m.end.as_deref().and_then(|e| DateTime::parse_from_rfc3339(e).ok()).map(|e| e.with_timezone(&Utc))
 }
@@ -207,7 +198,8 @@ pub fn import(ev: &Value) -> Result<PathBuf> {
     }
     let none = || anyhow::anyhow!("“{title}” has no Teams transcript: nobody turned transcription on");
     let transcripts = match graph::meeting_transcripts(&join, occurrence_window(start, end_of(&meeting)), true)? {
-        Transcripts::Found(t) => of_occurrence(t, start, end_of(&meeting)),
+        // Already only this occurrence's (`graph::meeting_transcripts` filters by the window).
+        Transcripts::Found(t) => t,
         Transcripts::None => return Err(none()),
         Transcripts::NotGiven(why) => bail!("“{title}”'s transcript can't be read: {why}"),
     };
@@ -392,14 +384,6 @@ mod tests {
         assert_eq!(c[0], Cue { start: 3.12, end: 5.4, name: Some("Dana Kowal".into()), text: "Can we start with the pilot?".into() });
         assert_eq!((c[1].name.as_deref(), c[1].text.as_str()), (Some("Alex Morgan"), "Yes & the SSO date first."));
         assert_eq!((c[2].name.as_deref(), c[2].text.as_str()), (None, "No voice here."));
-    }
-
-    #[test]
-    fn a_series_keeps_only_this_occurrences_transcripts() {
-        let at = |s: &str| DateTime::parse_from_rfc3339(s).unwrap().with_timezone(&Utc);
-        let ts = vec![json!({"created": "2026-10-28T13:32:00Z"}), json!({"created": "2026-11-02T13:31:00Z"}), json!({"created": "2026-11-02T14:10:00Z"})];
-        let got = of_occurrence(ts, at("2026-11-02T13:30:00Z"), Some(at("2026-11-02T14:00:00Z")));
-        assert_eq!(got.iter().map(|t| t["created"].as_str().unwrap()).collect::<Vec<_>>(), ["2026-11-02T13:31:00Z", "2026-11-02T14:10:00Z"]);
     }
 
     #[test]

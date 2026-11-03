@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use serde_json::json;
 
 use crate::config::Config;
@@ -42,10 +42,12 @@ const THREADS: usize = 4;
 /// The worker's thread: every segment of the call and the model's name.
 type Worker = JoinHandle<Result<(Vec<Segment>, String)>>;
 
-/// The worker of one recording. Dropped without `join` (a recording that failed to close), it
-/// is still told to stop, so it never keeps polling with its model loaded.
+/// The worker of one recording. Dropped without `join` (nobody will use its transcript: the
+/// call is transcribed from its WAVs instead), it is told to give up at once — not to decode
+/// what is left — so it never keeps polling, or decoding beside that pass, with its model loaded.
 pub struct Live {
     done: Arc<AtomicBool>,
+    quit: Arc<AtomicBool>,
     handle: Option<Worker>,
 }
 
@@ -65,18 +67,22 @@ impl Live {
 
 impl Drop for Live {
     fn drop(&mut self) {
+        // Joined: done already. Not joined: abandoned.
+        if self.handle.is_some() {
+            self.quit.store(true, Ordering::SeqCst);
+        }
         self.close();
     }
 }
 
-/// Start the worker for a call. None when no model is downloaded and no server is set (the call is then transcribed
-/// after it ends, as before).
 /// Whether live transcription can run here: a model here, or a transcription server to send
 /// the audio to.
 fn can_transcribe() -> bool {
     crate::remote::Client::configured().is_some() || models::active_model_path().ok().is_some_and(|p| p.exists())
 }
 
+/// Start the worker for a call. None when no model is downloaded and no server is set (the call is then transcribed
+/// after it ends, as before).
 pub fn start(dir: &Path, meeting: Option<&MeetingContext>, languages: Option<Vec<String>>) -> Option<Live> {
     let mut cfg = Config::load().ok()?;
     if let Some(l) = languages.filter(|l| !l.is_empty()) {
@@ -87,16 +93,16 @@ pub fn start(dir: &Path, meeting: Option<&MeetingContext>, languages: Option<Vec
     }
     let prompt = build_prompt(&cfg, meeting);
     let remote_name = meeting.and_then(|m| m.sole_other(cfg.me.as_ref()));
-    let done = Arc::new(AtomicBool::new(false));
-    let (d, dir) = (done.clone(), dir.to_path_buf());
+    let (done, quit) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
+    let (d, q, dir) = (done.clone(), quit.clone(), dir.to_path_buf());
     let handle = std::thread::spawn(move || {
-        let r = run(&dir, &cfg, prompt, remote_name, &d);
+        let r = run(&dir, &cfg, prompt, remote_name, &d, &q);
         if let Err(e) = &r {
             eprintln!("transcription during the call stopped: {e:#}");
         }
         r
     });
-    Some(Live { done, handle: Some(handle) })
+    Some(Live { done, quit, handle: Some(handle) })
 }
 
 /// One track's WAV, read as it grows.
@@ -168,7 +174,7 @@ impl TrackReader {
     }
 }
 
-fn run(dir: &Path, cfg: &Config, prompt: Option<String>, remote_name: Option<String>, done: &AtomicBool) -> Result<(Vec<Segment>, String)> {
+fn run(dir: &Path, cfg: &Config, prompt: Option<String>, remote_name: Option<String>, done: &AtomicBool, quit: &AtomicBool) -> Result<(Vec<Segment>, String)> {
     let (tr, model) = final_transcriber(cfg, None, prompt, THREADS)?;
     let out = dir.join(FILE);
     let mut tracks = [
@@ -183,6 +189,9 @@ fn run(dir: &Path, cfg: &Config, prompt: Option<String>, remote_name: Option<Str
         for t in tracks.iter_mut() {
             let name = if t.speaker == "remote" { remote_name.as_deref() } else { None };
             loop {
+                if quit.load(Ordering::SeqCst) {
+                    bail!("given up: nobody waits for this transcript");
+                }
                 t.fill()?;
                 drain(&tr, t, name, last && t.caught_up, &out, &mut segs)?;
                 if !last || t.caught_up {
@@ -251,9 +260,6 @@ fn drain(tr: &Transcriber, t: &mut TrackReader, name: Option<&str>, flush: bool,
     Ok(())
 }
 
-/// Dev aid (`echoctl live-replay`): play a WAV into `<out>/remote.wav` as a recording would
-/// (growing on disk, 10× real time) while the worker transcribes it, then close it and write the
-/// transcript as the watcher does after a call (the audio is kept).
 /// The mark `live-replay` leaves in its output folder: only a folder holding it (or a new or
 /// empty one) is written over — never a call's.
 const REPLAY_MARK: &str = ".replay";
@@ -286,6 +292,9 @@ fn replay_folder_ok(out_dir: &Path) -> Result<()> {
     }
 }
 
+/// Dev aid (`echoctl live-replay`): play a WAV into `<out>/remote.wav` as a recording would
+/// (growing on disk, 10× real time) while the worker transcribes it, then close it and write the
+/// transcript as the watcher does after a call (the audio is kept).
 pub fn replay(wav: &Path, out_dir: &Path) -> Result<()> {
     let audio = load_16k(wav)?;
     // Nothing is touched before the folder is known to be a replay's and transcription can run.
@@ -342,18 +351,21 @@ mod tests {
             }
             Ok((vec![], String::new()))
         });
-        drop(Live { done: done.clone(), handle: Some(handle) });
-        assert!(done.load(Ordering::SeqCst), "a worker nobody joins doesn't keep polling");
+        let quit = Arc::new(AtomicBool::new(false));
+        drop(Live { done: done.clone(), quit: quit.clone(), handle: Some(handle) });
+        assert!(done.load(Ordering::SeqCst) && quit.load(Ordering::SeqCst), "a worker nobody joins gives up");
         // And `join` still works (it takes the handle; its drop then only sets the flag again).
         let d = Arc::new(AtomicBool::new(false));
         let d2 = d.clone();
-        let live = Live { done: d, handle: Some(std::thread::spawn(move || {
+        let q = Arc::new(AtomicBool::new(false));
+        let live = Live { done: d, quit: q.clone(), handle: Some(std::thread::spawn(move || {
             while !d2.load(Ordering::SeqCst) {
                 std::thread::sleep(Duration::from_millis(5));
             }
             Ok((vec![], "m".into()))
         })) };
         assert_eq!(live.join().unwrap().1, "m");
+        assert!(!q.load(Ordering::SeqCst), "a joined worker isn't told to give up");
     }
 
     #[test]

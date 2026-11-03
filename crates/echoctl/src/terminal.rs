@@ -214,7 +214,14 @@ pub fn resize(id: u64, cols: u16, rows: u16) -> Result<()> {
 pub fn close(id: u64) {
     let term = TERMS.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
     if let Some(t) = term {
-        let _ = t.child.lock().unwrap_or_else(|e| e.into_inner()).kill();
+        let mut child = t.child.lock().unwrap_or_else(|e| e.into_inner());
+        // Its whole process group: the login shell, Claude Code and what it started (MCP servers)
+        // — one of them left holding the terminal would keep its profile's lease.
+        if let Some(pid) = child.process_id() {
+            std::thread::spawn(move || crate::ai::stop_group(pid));
+        }
+        let _ = child.kill();
+        drop(child);
         t.out.lock().unwrap_or_else(|e| e.into_inner()).exited = true;
         t.changed.notify_all();
     }

@@ -492,8 +492,8 @@ fn login(p: &Profile, generation: u64) -> Option<Outcome> {
     let cancelled = || !current(&p.id, generation);
     let t = Instant::now();
     // Live jobs were told to stop (`defer`): seconds each (TERM, KILL after 3 s). Claude sessions in
-    // the window on this profile are closed (they resume by id). A minutes run keeps its lease to the
-    // end: give up then.
+    // the window on this profile are closed (they resume by id) — only when one of them is what holds
+    // it, never for nothing. A minutes run keeps its lease to the end: give up then.
     let mut closed = false;
     let lease = loop {
         match ai::sign_in_lease(p) {
@@ -503,7 +503,7 @@ fn login(p: &Profile, generation: u64) -> Option<Outcome> {
             }
             Err(e) => return Some(Outcome::Failed(format!("{e:#}"))),
             Ok(None) if cancelled() => return None,
-            Ok(None) if !closed => {
+            Ok(None) if !closed && session_holds(&p.id) => {
                 closed = true;
                 close_sessions(&p.id);
             }
