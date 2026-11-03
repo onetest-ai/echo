@@ -37,7 +37,7 @@ const CATALOG: &str = "echo-marketplace.json";
 /// A plugin's manifest at the root of its folder.
 const MANIFEST: &str = "echo-plugin.json";
 /// A marketplace refreshed by itself once its fetch is this old (window open, `refresh_stale`).
-const STALE_SECS: i64 = 6 * 3600;
+const STALE_SECS: i64 = 30 * 60;
 
 /// Caps on what a fetch may unpack: a whole marketplace, one plugin.
 const MARKET_LIMIT: Limit = Limit { files: 5000, bytes: 64 << 20 };
@@ -758,6 +758,9 @@ pub struct Catalog {
     pub name: String,
     pub commit: String,
     pub fetched_at: String,
+    /// The Echo that read it: an Echo updated since reads it again (what it may install changed).
+    #[serde(default)]
+    pub echo_version: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[serde(default)]
@@ -858,13 +861,14 @@ pub fn refresh(name: &str) -> Result<Catalog> {
             };
             plugins.push(offer);
         }
-        Ok(Catalog { name: if file.name.trim().is_empty() { m.name.clone() } else { file.name }, commit: snap.commit, fetched_at: now.clone(), error: None, plugins })
+        Ok(Catalog { name: if file.name.trim().is_empty() { m.name.clone() } else { file.name }, commit: snap.commit, fetched_at: now.clone(), echo_version: env!("CARGO_PKG_VERSION").into(), error: None, plugins })
     })();
     let c = match got {
         Ok(c) => c,
         Err(e) => {
             let mut c = catalog(name).unwrap_or_default();
             c.fetched_at = now;
+            c.echo_version = env!("CARGO_PKG_VERSION").into();
             c.error = Some(format!("{e:#}"));
             c
         }
@@ -877,7 +881,10 @@ pub fn refresh(name: &str) -> Result<Catalog> {
 pub fn refresh_stale(all: bool) {
     let Ok(r) = Registry::load() else { return };
     for (m, _) in r.all_markets() {
-        let fresh = catalog(&m.name).and_then(|c| chrono::DateTime::parse_from_rfc3339(&c.fetched_at).ok()).is_some_and(|t| (chrono::Local::now().fixed_offset() - t).num_seconds() < STALE_SECS);
+        let fresh = catalog(&m.name).is_some_and(|c| {
+            c.echo_version == env!("CARGO_PKG_VERSION")
+                && chrono::DateTime::parse_from_rfc3339(&c.fetched_at).is_ok_and(|t| (chrono::Local::now().fixed_offset() - t).num_seconds() < STALE_SECS)
+        });
         if all || !fresh {
             if let Err(e) = refresh(&m.name) {
                 eprintln!("plugins: {}: {e:#}", m.name);
@@ -1460,10 +1467,17 @@ mod tests {
         assert!(!view[1].to_string().contains("s3cret"));
         assert_eq!(view[2]["value"], false);
         assert_eq!(setting("demo", "token").unwrap(), "s3cret");
-        // A new version that asks for more waits for the user.
+        // A new version that asks for more waits for the user. A catalog read by another Echo is read again at once
+        // (an Echo updated since may install what it couldn't), however recent.
         let d = plugin(&mk, "demo", "0.2.0", json!({"deliver": {"to": ["mail"]}}));
         assert!(d.is_dir());
-        refresh(&name).unwrap();
+        refresh_stale(false);
+        assert_eq!(catalog(&name).unwrap().plugins[0].manifest.as_ref().unwrap().version, "0.1.0", "read a moment ago");
+        let mut c = catalog(&name).unwrap();
+        c.echo_version = "0.0.1".into();
+        paths::write_atomic(&market_dir(&name).join("catalog.json"), serde_json::to_string(&c).unwrap().as_bytes()).unwrap();
+        refresh_stale(false);
+        assert_eq!(catalog(&name).unwrap().plugins[0].manifest.as_ref().unwrap().version, "0.2.0");
         let p = Registry::load().unwrap().installed["demo"].clone();
         let rv = update_for(&p).unwrap();
         assert_eq!(rv.new_uses.len(), 1);

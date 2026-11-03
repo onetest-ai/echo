@@ -275,7 +275,7 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
             }
         }
         "/api/calendar" => json_reply(calendar(req.uri().query().unwrap_or(""))),
-        // Settings → Plugins; marketplaces not read for 6 h are fetched again in the background.
+        // Settings → Plugins; marketplaces not read for 30 min, or by another Echo version, are fetched again in the background.
         "/api/plugins" => {
             refresh_plugin_markets();
             json_reply(crate::plugins::snapshot())

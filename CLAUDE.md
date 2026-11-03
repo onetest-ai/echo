@@ -856,7 +856,7 @@ plugins", hash `#settings/<plugin>:<id>`), `ctx.settings.add` (its card in Setti
 `unloadPlugin` takes all of it out. **Marketplaces**: git repositories with `echo-marketplace.json` (name, `featured`,
 plugins: `{id, source: "./path" | {github, ref, path}, categories}`); ours, `onetest-ai/echo-plugins` (public;
 `ECHOCTL_PLUGIN_MARKET` points it elsewhere), built in (hidden, never removed); the user adds any number. Fetching
-(`refresh`, never the page): GitHub `owner/repo[@ref]` → the commit (`curl`, else `gh`) → its tarball unpacked by `tar`;
+(`refresh`, never the page; again when the Plugins page asks and the last read is 30 min old or by another Echo version — `Catalog.echo_version`): GitHub `owner/repo[@ref]` → the commit (`curl`, else `gh`) → its tarball unpacked by `tar`;
 a git URL (`#ref`) → `git clone --depth 1`; a folder read where it is; every tree checked (`check_tree`: no links,
 ≤ 5000 files / 64 MB a marketplace, ≤ 400 / 20 MB a plugin). Files: `<config dir>/plugins.json`,
 `<config dir>/plugins/markets/<key>/`, `<config dir>/plugins/installed/<id>/<version>/`; settings per data folder
