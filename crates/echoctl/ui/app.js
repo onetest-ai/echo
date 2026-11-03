@@ -538,6 +538,8 @@ function route() {
   const cm = h.match(/^calendar(?:\/(day|week))?$/)
   if (cm) { S.view = 'calendar'; if (cm[1]) S.cal.mode = cm[1]; return }
   const sm = h.match(/^settings(?:\/([a-z0-9:-]+))?$/)
+  // The vocabulary was a Settings section: its old link opens its panel, over the calls.
+  if (sm && sm[1] === 'vocabulary') { S.view = 'calls'; setTimeout(() => { Layout.show('vocabulary', panelViews()); layoutChanged() }); return }
   if (sm) { S.view = 'settings'; if (sm[1]) S.setSection = sm[1]; return }
   if (h === 'tasks') { S.view = 'tasks'; return }
   const bm = h.match(/^brain(?:\/(\w+))?$/)
@@ -821,7 +823,7 @@ function list() {
     }).join('')
   }
   return `<section class="list">
-    <div class="list-head"><h1>Calls</h1><input class="search" id="q" placeholder="Search titles and people" value="${esc(S.query)}" aria-label="Search calls"></div>
+    <div class="list-head"><div class="list-title"><h1>Calls</h1><button class="icon-btn" data-panel-show="vocabulary" title="Vocabulary — names and terms transcription should hear right" aria-label="Vocabulary">${BOOK}</button></div><input class="search" id="q" placeholder="Search titles and people" value="${esc(S.query)}" aria-label="Search calls"></div>
     <div class="rows" role="listbox" aria-label="Calls">${body}</div>
   </section>`
 }
@@ -1952,7 +1954,7 @@ function eventProjects(e) {
 // a download run as the tray's own actions (`settings_action`). ────────────────────────────────
 const SETTINGS_SECTIONS = [
   ['general', 'General'], ['recording', 'Recording'], ['transcription', 'Transcription'], ['ai', 'AI & minutes'],
-  ['calendar', 'Calendar & chat'], ['brain', 'Brain'], ['vocabulary', 'Vocabulary'], ['me', 'About me'], ['plugins', 'Plugins'], ['layout', 'Layout'], ['health', 'Health'],
+  ['calendar', 'Calendar & chat'], ['brain', 'Brain'], ['me', 'About me'], ['plugins', 'Plugins'], ['layout', 'Layout'], ['health', 'Health'],
 ]
 /** Save the profile as edited; shown rendered again once the app has it. */
 function saveMeProfile() {
@@ -2017,18 +2019,37 @@ function meProfileCard(mp) {
 }
 
 /** The terms the minutes learned: each with the meetings and people it is used again for. */
-function learnedCard(learned) {
+/** The vocabulary (a panel view, opened from the book beside Calls): terms the transcription should hear
+ *  right — the user's own, used in every call, and those the minutes learned, each scoped to its meetings
+ *  and people. Saved through `settings_set` as Settings' values are. */
+function vocabularyPanel() {
+  const st = S.settings
+  if (!st) { loadSettings().then(render); return '<div class="skeleton"><i></i><i></i></div>' }
+  const v = st.vocabulary || []
+  const chips = v.map((t) => `<span class="chip">${esc(t)}<button data-vocab-del="${esc(t)}" aria-label="Remove ${esc(t)}">×</button></span>`).join('')
+  const learned = st.learned || []
   const q = (S.learnedQuery || '').trim().toLowerCase()
   const shown = learned.filter((x) => !q || x.term.toLowerCase().includes(q) || x.subjects.some((s) => s.includes(q)) || x.people.some((p) => p.includes(q)))
     .sort((a, b) => a.term.localeCompare(b.term))
-  const list = (xs, n = 3) => xs.length > n ? `${xs.slice(0, n).map(esc).join(', ')} +${xs.length - n}` : xs.map(esc).join(', ')
-  const rows = shown.map((x) => setRow(esc(x.term),
-    !x.subjects.length && !x.people.length ? 'Used only when a meeting\'s invite names it (from the older, shared list).'
-      : [x.subjects.length ? `Meetings: ${list(x.subjects)}` : '', x.people.length ? `People: ${list(x.people)}` : '', x.calls ? `from ${x.calls} call${x.calls === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · '),
-    `<button class="btn" data-set="learned_always" data-val='${esc(JSON.stringify(x.term))}' title="Use it in every call">Always</button><button class="btn ghost" data-set="learned_remove" data-val='${esc(JSON.stringify(x.term))}' title="Forget it">Remove</button>`))
-  const head = `<div class="set-row"><div><b>Learned from calls</b><div class="set-sub">${learned.length} term${learned.length === 1 ? '' : 's'} the minutes learned — each used again only in calls of the same meeting, or with mostly the same people.</div></div><div class="set-ctl"><input class="search set-input" id="learned-q" placeholder="Filter terms, meetings, people" value="${esc(S.learnedQuery || '')}" aria-label="Filter learned terms"></div></div>`
-  return `<section class="set-sec"><div class="set-card">${head}${rows.join('') || (learned.length ? '<div class="set-row"><div class="set-sub">Nothing matches.</div></div>' : '')}</div></section>`
+  const list = (xs, n = 2) => xs.length > n ? `${xs.slice(0, n).map(esc).join(', ')} +${xs.length - n}` : xs.map(esc).join(', ')
+  const rows = shown.map((x) => `<div class="voc-row"><div class="voc-t"><b>${esc(x.term)}</b><span class="grow"></span>
+      <button class="link-btn" data-set="learned_always" data-val='${esc(JSON.stringify(x.term))}' title="Use it in every call">Always</button>
+      <button class="link-btn" data-set="learned_remove" data-val='${esc(JSON.stringify(x.term))}' title="Forget it">Remove</button></div>
+    <div class="set-sub">${!x.subjects.length && !x.people.length ? 'Only when a meeting\'s invite names it'
+      : [x.subjects.length ? `Meetings: ${list(x.subjects)}` : '', x.people.length ? `People: ${list(x.people)}` : '', x.calls ? `${x.calls} call${x.calls === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')}</div></div>`).join('')
+  return `<div class="voc">
+    <p class="set-sub">Names and terms the transcription should hear right.</p>
+    <h4 class="voc-h">Every call</h4>
+    <div class="chips">${chips || '<span class="set-sub">None yet.</span>'}</div>
+    <form data-vocab-form class="vocab-add"><input class="search" id="vocab-new" placeholder="Add a term" maxlength="50" aria-label="Add a term"><button class="btn" type="submit">Add</button></form>
+    <h4 class="voc-h">Learned from calls <span class="set-sub">${learned.length}</span></h4>
+    <p class="set-sub">Each used again only in calls of the same meeting, or with mostly the same people.</p>
+    ${learned.length > 6 ? `<input class="search" id="learned-q" placeholder="Filter terms, meetings, people" value="${esc(S.learnedQuery || '')}" aria-label="Filter learned terms">` : ''}
+    ${rows || (learned.length ? '<p class="set-sub">Nothing matches.</p>' : '<p class="set-sub">None yet — the minutes add the names they had to fix.</p>')}
+  </div>`
 }
+const BOOK = ICON('<path d="M5 4.5h9.5A2.5 2.5 0 0 1 17 7v13H7.5A2.5 2.5 0 0 1 5 17.5z"/><path d="M5 17.5A2.5 2.5 0 0 1 7.5 15H17M19 7v13"/>')
+PANEL_VIEWS.push({ id: 'vocabulary', label: 'Vocabulary', icon: BOOK, area: 'right', render: vocabularyPanel })
 
 /** Settings → Brain: the embedding server Echo asks (no model runs in Echo), what the Brain holds,
  *  and whether the app keeps it current. */
@@ -2452,13 +2473,6 @@ const SETTINGS_BODY = {
       setRow('Meeting chat', "Each recorded meeting's Teams chat, kept with the call.", sw('capture_chat', st.capture_chat, 'Meeting chat')),
       setRow('App registration', st.graph_custom ? "Your organisation's own app." : 'The default (CodeMie). Your IT can register another.', actBtn('calendar_client_id', 'Change…')),
     ])
-  },
-  vocabulary(st) {
-    const v = st.vocabulary || []
-    const chips = v.map((t) => `<span class="chip">${esc(t)}<button data-vocab-del="${esc(t)}" aria-label="Remove ${esc(t)}">×</button></span>`).join('')
-    return `<h2>Vocabulary</h2><p class="set-lead">Names and terms the transcription should hear right.</p>` + setCard('', [
-      setRow('Always', `Used in every call.<div class="chips">${chips || '<span class="set-sub">None yet.</span>'}</div><form data-vocab-form class="vocab-add"><input class="search" id="vocab-new" placeholder="Add a term" maxlength="50" aria-label="Add a term"><button class="btn" type="submit">Add</button></form>`, ''),
-    ]) + learnedCard(st.learned || [])
   },
   me(st) {
     const me = st.me || {}
@@ -5094,6 +5108,7 @@ function paletteItems(target) {
   else if (st.armed) add('Echo', 'Cancel recording the next call', () => press({ cmd: 'stop' }), { keywords: 'disarm' })
   else add('Echo', st.in_call ? 'Record this call' : 'Record the next Teams call', () => press({ cmd: 'record' }), { keywords: 'start arm' })
   add('Echo', 'Claude · Echo folder', () => claudePanel('claude-folder'), { keywords: 'terminal session ask' })
+  add('Echo', 'Vocabulary', () => press({ panelShow: 'vocabulary' }), { keywords: 'terms names words dictionary transcription learned glossary' })
   add('Echo', 'Show or hide Inbox', () => press({ panelFlip: 'needs' }), { keywords: 'needs you notifications attention decide review', hint: NY_HINT })
   for (const i of nyOpen().slice(0, 8)) add('Inbox', i.title, nyShow, { keywords: i.why })
   add('Echo', 'Show or hide My notes', () => press({ panelFlip: 'notes' }), { disabled: S.view === 'calls' && S.selected ? null : 'open a call first' })
