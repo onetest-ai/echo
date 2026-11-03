@@ -241,8 +241,12 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
         "/api/layout" => json_reply(load_layout()),
         "/api/settings" => json_reply(settings_snapshot()),
         "/api/attention" => {
+            // What runs, read first: a job ending meanwhile then shows as running over a list that may
+            // still hold its item, never as an item with its buttons back.
+            let (busy, failed) = attention_busy();
             let mut v = crate::attention::view(req.uri().query().is_some_and(|q| q.contains("fresh")));
-            v["busy"] = attention_busy();
+            v["busy"] = busy;
+            v["failed"] = failed;
             json_reply(v)
         }
         "/api/sessions" => json_reply(json!(crate::terminal::saved_sessions())),
@@ -672,23 +676,44 @@ static TRANSCRIPT_CHECK: std::sync::atomic::AtomicBool = std::sync::atomic::Atom
 /// Teams transcripts being imported or that failed, by event id: `{busy: true}` | `{error}`.
 static IMPORTS: std::sync::Mutex<Option<std::collections::HashMap<String, Value>>> = std::sync::Mutex::new(None);
 
-/// Inbox items whose decision runs in the background right now, by item key → what it is doing:
-/// the page shows them working, not with their buttons, until the job ends and they go.
-fn attention_busy() -> Value {
-    let mut m = serde_json::Map::new();
+/// Inbox items whose decision runs in the background right now, by item key → what it is doing
+/// (the page shows them working, not with their buttons, until the job ends and they go), and the
+/// ones whose job failed → why.
+fn attention_busy() -> (Value, Value) {
+    let (mut busy, mut failed) = (serde_json::Map::new(), serde_json::Map::new());
     if let Some(i) = IMPORTS.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
-        for id in i.iter().filter(|(_, s)| s["busy"] == true).map(|(id, _)| id) {
-            m.insert(format!("transcript:{id}"), "Importing…".into());
+        for (id, s) in i {
+            if s["busy"] == true {
+                busy.insert(format!("transcript:{id}"), "Importing…".into());
+            } else if let Some(e) = s["error"].as_str() {
+                failed.insert(format!("transcript:{id}"), format!("Not imported: {e}").into());
+            }
         }
     }
     #[cfg(feature = "brain")]
     if let Ok(r) = BRAIN_INSIGHTS.lock() {
         for layer in r.iter().filter_map(|k| k.strip_prefix("taxonomy:")) {
-            m.insert(format!("drift:{layer}"), "Rebuilding topics…".into());
+            busy.insert(format!("drift:{layer}"), "Rebuilding topics…".into());
         }
     }
-    Value::Object(m)
+    if PLUGINS_UPDATING.load(std::sync::atomic::Ordering::SeqCst) {
+        busy.insert("plugin:stale".into(), "Updating…".into());
+    }
+    (Value::Object(busy), Value::Object(failed))
 }
+
+/// Runs its closure when dropped: a background job's end, a panic too (no marker left behind).
+struct OnEnd<F: FnOnce()>(Option<F>);
+impl<F: FnOnce()> Drop for OnEnd<F> {
+    fn drop(&mut self) {
+        if let Some(f) = self.0.take() {
+            f()
+        }
+    }
+}
+
+/// Claude Code's Echo plugin installs being updated (`update_plugins`): one update at a time.
+static PLUGINS_UPDATING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Make a call of a meeting from its Teams transcript, in the background (`teams_transcript::import`);
 /// its state shows on the event (`import`) until the call is there.
@@ -701,7 +726,19 @@ fn import_transcript(id: &str) -> bool {
     m.insert(id.to_string(), json!({"busy": true}));
     let (id, raw) = (id.to_string(), RAW_EVENTS.lock().unwrap_or_else(|e| e.into_inner()).iter().find(|e| e["id"].as_str() == Some(id)).cloned());
     std::thread::spawn(move || {
+        // A panic leaves no import running forever: said as a failure.
+        let end_id = id.clone();
+        let _end = OnEnd(Some(move || {
+            let mut g = IMPORTS.lock().unwrap_or_else(|e| e.into_inner());
+            let m = g.get_or_insert_with(Default::default);
+            if m.get(&end_id).is_some_and(|s| s["busy"] == true) {
+                crate::attention::stale();
+                m.insert(end_id, json!({"error": "the import stopped unexpectedly"}));
+            }
+        }));
         let r = raw.map(Ok).unwrap_or_else(|| crate::graph::event(&id)).and_then(|ev| crate::teams_transcript::import(&ev));
+        // The Inbox collects again before the import stops showing as running.
+        crate::attention::stale();
         let mut g = IMPORTS.lock().unwrap_or_else(|e| e.into_inner());
         let m = g.get_or_insert_with(Default::default);
         // Said where it was asked (the event's card) and wherever the user is now (Needs you, ⌘K).
@@ -715,7 +752,6 @@ fn import_transcript(id: &str) -> bool {
                 m.insert(id, json!({"error": format!("{e:#}")}))
             }
         };
-        crate::attention::stale();
     });
     true
 }
@@ -1588,14 +1624,17 @@ pub fn handle(msg: &str) -> Handled {
             let k = format!("taxonomy:{layer}");
             if !layer.is_empty() && BRAIN_INSIGHTS.lock().map(|mut r| r.insert(k.clone())).unwrap_or(false) {
                 std::thread::spawn(move || {
+                    // However it ends (a panic too): the Inbox collects again, then it stops showing as running.
+                    let _end = OnEnd(Some(move || {
+                        crate::attention::stale();
+                        if let Ok(mut r) = BRAIN_INSIGHTS.lock() {
+                            r.remove(&k);
+                        }
+                    }));
                     match crate::brain::taxonomy::induce(&layer, &|_| {}) {
                         Ok(_) => crate::app::notify("Topics rebuilt", "Review them on the Brain's Topics tab, then accept"),
                         Err(e) => crate::app::notify("Topics not rebuilt", &format!("{e:#}")),
                     }
-                    if let Ok(mut r) = BRAIN_INSIGHTS.lock() {
-                        r.remove(&k);
-                    }
-                    crate::attention::stale();
                 });
             }
             true.into()
@@ -1637,10 +1676,19 @@ pub fn handle(msg: &str) -> Handled {
         }
         // Bring Claude Code's Echo plugin installs up to this Echo (Needs you, Settings → Health).
         "update_plugins" => {
-            std::thread::spawn(|| match crate::app::update_plugins() {
-                Ok(_) => crate::app::notify("Echo", "The Echo plugin in Claude Code is up to date — restart Claude Code to use it."),
-                Err(e) => crate::app::notify("Echo", &format!("Couldn't update the Echo plugin in Claude Code: {e:#}")),
-            });
+            use std::sync::atomic::Ordering;
+            if !PLUGINS_UPDATING.swap(true, Ordering::SeqCst) {
+                std::thread::spawn(|| {
+                    let _end = OnEnd(Some(|| {
+                        crate::attention::stale();
+                        PLUGINS_UPDATING.store(false, Ordering::SeqCst);
+                    }));
+                    match crate::app::update_plugins() {
+                        Ok(_) => crate::app::notify("Echo", "The Echo plugin in Claude Code is up to date — restart Claude Code to use it."),
+                        Err(e) => crate::app::notify("Echo", &format!("Couldn't update the Echo plugin in Claude Code: {e:#}")),
+                    }
+                });
+            }
             true.into()
         }
         // A sender of mail or posts trusted, ignored or forgotten for a client: read again at the next sync.

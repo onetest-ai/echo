@@ -1174,7 +1174,7 @@ document.addEventListener('click', (e) => {
 /** Inbox (`attention.rs`): what waits for the user's decision, from everywhere, in one list — the
  *  activity bar's entry above Settings shows or hides it. Each item is decided here with the same
  *  message its own place sends, or opens that place; decided anywhere, it moves to Done this week. */
-const NY = { data: null, at: 0, filter: 'open', busy: new Map(), loading: null, failed: 0, seq: 0, more: new Set() }
+const NY = { data: null, at: 0, filter: 'open', busy: new Map(), last: null, loading: null, failed: 0, seq: 0, more: new Set() }
 /** How long a decision shows as working with no word from the app: a quick one is gone by then. */
 const NY_BUSY_MS = 15000
 /** One request at a time; a fresh one (after a decision) wins over any older answer still on its way. */
@@ -1186,7 +1186,8 @@ function loadAttention(fresh) {
     NY.data = d; NY.at = Date.now(); NY.failed = 0
     // A decision still working stays so until its item is gone; the app names the long ones (`busy`).
     const open = new Set((d.open || []).map((i) => i.key))
-    for (const [k, at] of NY.busy) if (!open.has(k) || (!(d.busy || {})[k] && Date.now() - at > NY_BUSY_MS)) NY.busy.delete(k)
+    // A job that failed gives the buttons back at once, with why (`failed`).
+    for (const [k, at] of NY.busy) if (!open.has(k) || (d.failed || {})[k] || (!(d.busy || {})[k] && Date.now() - at > NY_BUSY_MS)) NY.busy.delete(k)
   }).catch(() => { NY.failed = Date.now() }).finally(() => { if (n === NY.seq) NY.loading = null })
   return NY.loading
 }
@@ -1231,7 +1232,8 @@ function needsPanel() {
     const busy = nyBusy(i.key)
     const acts = busy ? `<span class="ny-busy" role="status"><i></i>${esc(busy)}</span>` : (i.actions || []).map((a, k) => `<button class="btn${a.primary ? (i.urgent ? ' warn' : ' primary') : ''}" data-ny-act="${esc(i.key)}" data-k="${k}">${esc(a.label)}</button>`).join('')
     const go = i.go ? `<button class="btn ghost" data-ny-go="${esc(i.go)}">${(i.actions || []).length ? 'Open' : 'Open →'}</button>` : ''
-    return `<div class="ny-item${i.urgent ? ' urgent' : ''}${busy ? ' busy' : ''}"><span class="ny-k">${NY_ICON[i.kind] || NY_ICON.work}</span><b>${esc(i.title)}</b>${i.why ? `<span class="ny-why">${esc(i.why)}</span>` : ''}${acts || go ? `<div class="ny-acts">${acts}${go}</div>` : ''}</div>`
+    const failed = !busy && ((NY.data || {}).failed || {})[i.key]
+    return `<div class="ny-item${i.urgent ? ' urgent' : ''}${busy ? ' busy' : ''}"><span class="ny-k">${NY_ICON[i.kind] || NY_ICON.work}</span><b>${esc(i.title)}</b>${i.why ? `<span class="ny-why">${esc(i.why)}</span>` : ''}${failed ? `<span class="ny-why ny-err">${esc(failed)}</span>` : ''}${acts || go ? `<div class="ny-acts">${acts}${go}</div>` : ''}</div>`
   }
   const groupName = (g) => g === '-' || g === 'echo' ? 'Everything else' : (d.clients || {})[g] || g
   const groups = (items) => {
@@ -1271,7 +1273,7 @@ document.addEventListener('click', (e) => {
   send(a.ipc)
   // A decision shows as working until its item goes (a background job: until it ends); an action
   // that opens a flow (a sign-in, a log) leaves it as it was.
-  if (!['sign_in', 'show_log', 'settings_action', 'write_notes'].includes(a.ipc.cmd)) NY.busy.set(i.key, Date.now())
+  if (!['sign_in', 'show_log', 'settings_action', 'write_notes'].includes(a.ipc.cmd)) { NY.busy.set(i.key, Date.now()); NY.last = { key: i.key, at: Date.now() } }
   render()
   setTimeout(async () => { await loadAttention(true); await loadProjects(); render() }, 700)
 })
@@ -5543,8 +5545,8 @@ window.echo = {
   /** A message for a moment (an action that couldn't be done). */
   notice(text) {
     S.notice = text
-    // An action that couldn't be done: a decision clicked a moment ago gets its buttons back.
-    for (const [k, at] of NY.busy) if (Date.now() - at < 10000) NY.busy.delete(k)
+    // An action that couldn't be done: the decision clicked a moment ago (the last one) gets its buttons back.
+    if (NY.last && Date.now() - NY.last.at < 10000) { NY.busy.delete(NY.last.key); NY.last = null }
     clearTimeout(window._noticeTimer)
     window._noticeTimer = setTimeout(() => { S.notice = null; render() }, 7000)
     render()
