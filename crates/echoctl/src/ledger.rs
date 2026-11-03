@@ -52,9 +52,10 @@ const HUMAN_OPS: [&str; 13] = ["edit", "ac_add", "ac_set", "link", "unlink", "me
 const XREF_KINDS: [&str; 3] = ["same", "depends_on", "blocks"];
 const HUMAN_STATES: [&str; 5] = ["open", "in_progress", "blocked", "done", "cancelled"];
 const MAX_AC: usize = 6;
-const HIST_KEYS: [&str; 29] = [
+const HIST_KEYS: [&str; 33] = [
     "mid", "type", "op", "effect", "evidence", "date", "ts", "speaker", "quote", "note", "due_text", "due", "by", "kind", "set", "text", "met", "ac",
-    "ac_text", "depends_on", "into", "title", "ac_add", "who", "what", "source", "thread", "target", "master",
+    "ac_text", "depends_on", "into", "title", "ac_add", "who", "what", "source", "thread", "target", "master", "internal_owner", "client_owner",
+    "delegated_by", "at",
 ];
 /// The workstream every project starts with.
 const FIRST_EPIC: &str = "General";
@@ -2244,15 +2245,47 @@ pub fn human_event(project: &str, body: &Value) -> Result<Value> {
         }
         "unxref" => return unlink_threads(project, body["node"].as_str().unwrap_or(""), body["thread"].as_str().unwrap_or(""), body["target"].as_str().unwrap_or("")),
         "undo" => {
-            let l = Ledger::of(project)?;
-            if let Some(x) = l.events()?.into_iter().find(|e| e["mid"] == body["target"] && e["type"] == "human" && e["op"] == "xref") {
-                return unlink_threads(project, x["node"].as_str().unwrap_or(""), x["thread"].as_str().unwrap_or(""), x["target"].as_str().unwrap_or(""));
+            let evs = Ledger::of(project)?.events()?;
+            if let Some(x) = evs.iter().find(|e| e["mid"] == body["target"] && e["type"] == "human" && (e["op"] == "xref" || e["op"] == "unxref")) {
+                let (node, thread, target) = (x["node"].as_str().unwrap_or(""), x["thread"].as_str().unwrap_or(""), x["target"].as_str().unwrap_or(""));
+                // The pair's latest link event: undoing an older one would undo something else.
+                let latest = evs.iter().rev().find(|e| e["type"] == "human" && (e["op"] == "xref" || e["op"] == "unxref") && e["node"] == node && e["thread"] == thread && e["target"] == target);
+                if latest.is_some_and(|l| l["mid"] != x["mid"]) {
+                    bail!("this link was changed since: undo the newer change, or link / unlink it again");
+                }
+                if x["op"] == "xref" {
+                    return unlink_threads(project, node, thread, target);
+                }
+                // Undo an unlink: link them again as they were.
+                let before = evs.iter().rev().find(|e| e["type"] == "human" && e["op"] == "xref" && e["node"] == node && e["thread"] == thread && e["target"] == target).ok_or_else(|| anyhow!("nothing to link again"))?;
+                return link_threads(project, node, thread, target, before["kind"].as_str().unwrap_or("same"), before["master"] == "here");
+            }
+        }
+        "edit" => {
+            // A mirror's state, owners and due are its master's (#20): changed there, or they would never show.
+            let node = body["node"].as_str().unwrap_or("");
+            let raw = fold(&Ledger::of(project)?)?;
+            let master = raw.nodes.get(node).and_then(|x| x.xrefs.iter().find(|r| r["kind"] == "same" && r["master"] == "there").cloned());
+            if let (Some(m), Some(set)) = (master, body["set"].as_object()) {
+                let (theirs, mine): (serde_json::Map<String, Value>, serde_json::Map<String, Value>) =
+                    set.clone().into_iter().partition(|(k, _)| MIRRORED.contains(&k.as_str()));
+                let mut out = Value::Null;
+                if !theirs.is_empty() {
+                    out = human_event_here(m["thread"].as_str().unwrap_or(""), &json!({"op": "edit", "node": m["node"], "set": theirs}))?;
+                }
+                if !mine.is_empty() {
+                    out = human_event_here(project, &json!({"op": "edit", "node": node, "set": mine}))?;
+                }
+                return Ok(out);
             }
         }
         _ => {}
     }
     human_event_here(project, body)
 }
+
+/// A mirror's fields that are its master's (#20).
+const MIRRORED: [&str; 6] = ["state", "internal_owner", "client_owner", "due", "waiting_for", "delegated_by"];
 
 /// Link `node` here to `target` in `thread` (#20), in both ledgers. `same`: one piece of work, its master
 /// here or there; `depends_on`: this one waits on that one (the other records `blocks`).
@@ -2276,7 +2309,11 @@ pub fn link_threads(project: &str, node: &str, thread: &str, target: &str, kind:
     };
     let back = if kind == "depends_on" { "blocks" } else { "same" };
     let e = human_event_here(project, &json!({"op": "xref", "node": node, "thread": thread, "target": target, "kind": kind, "master": here}))?;
-    human_event_here(thread, &json!({"op": "xref", "node": target, "thread": project, "target": node, "kind": back, "master": there}))?;
+    if let Err(err) = human_event_here(thread, &json!({"op": "xref", "node": target, "thread": project, "target": node, "kind": back, "master": there})) {
+        // Never a link on one side only.
+        let _ = human_event_here(project, &json!({"op": "unxref", "node": node, "thread": thread, "target": target}));
+        return Err(err.context(format!("{thread} couldn't take the link")));
+    }
     Ok(e)
 }
 
@@ -2367,27 +2404,48 @@ fn status_moves(x: &Node) -> Vec<Value> {
     x.history.iter().filter(|h| h["type"] == "agent" && h["op"] == "status" && h["applied"] == true && h["verdict"] != "unsupported").cloned().collect()
 }
 
+/// When a history entry happened, comparable across entries: a call's day and time for an agent's, the
+/// moment the user acted for theirs.
+fn when(h: &Value) -> String {
+    match h["at"].as_str().filter(|_| h["by"] == "human") {
+        Some(at) => at.chars().take(19).collect(),
+        None => format!("{}T{}", h["date"].as_str().unwrap_or(""), h["ts"].as_str().unwrap_or("00:00:00")),
+    }
+}
+
 /// A ledger folded with its master items taking the status changes their mirrors' threads heard (one
-/// level: the mirrors' own ledgers as they are).
+/// level: the mirrors' own ledgers as they are) — newer than the master's own last word on its state.
 fn fold_forwarded(project: &str) -> Result<Tree> {
     let mut t = fold(&Ledger::of(project)?)?;
+    let mut mirrors: BTreeMap<String, Option<Tree>> = BTreeMap::new();
     let ids: Vec<String> = t.nodes.keys().cloned().collect();
+    let mut moved = false;
     for id in ids {
         let refs: Vec<Value> = t.nodes[&id].xrefs.iter().filter(|r| r["kind"] == "same" && r["master"] == "here").cloned().collect();
         for r in refs {
-            let (th, node) = (r["thread"].as_str().unwrap_or(""), r["node"].as_str().unwrap_or(""));
-            let Some(m) = Ledger::of(th).and_then(|l| fold(&l)).ok().and_then(|o| o.nodes.get(node).cloned()) else { continue };
+            let (th, node) = (r["thread"].as_str().unwrap_or("").to_string(), r["node"].as_str().unwrap_or("").to_string());
+            let other = mirrors.entry(th.clone()).or_insert_with(|| Ledger::of(&th).and_then(|l| fold(&l)).ok());
+            let Some(m) = other.as_ref().and_then(|o| o.nodes.get(&node)).cloned() else { continue };
             let x = t.nodes.get_mut(&id).unwrap();
             x.also_in.push(json!({"thread": th, "node": node, "title": m.title}));
-            let last_here = x.history.iter().filter(|h| h["op"] == "status" || h["op"] == "edit").filter_map(|h| h["date"].as_str()).max().unwrap_or("").to_string();
-            for h in status_moves(&m).into_iter().filter(|h| h["date"].as_str().unwrap_or("") > last_here.as_str()) {
+            // A merged or deleted master takes nothing.
+            if x.state == "merged" || x.state == "deleted" {
+                continue;
+            }
+            let last_here = x.history.iter().filter(|h| h["op"] == "status" || (h["op"] == "edit" && h["set"]["state"].is_string())).map(when).max().unwrap_or_default();
+            for h in status_moves(&m).into_iter().filter(|h| when(h) > last_here) {
                 if apply_status(x, &h) {
                     let mut h = h.clone();
                     h["from"] = json!({"thread": th, "node": node});
                     x.history.push(h);
+                    moved = true;
                 }
             }
+            x.due = x.due_history.last().and_then(|h| s(&h["due"]));
         }
+    }
+    if moved {
+        derive(&mut t.nodes);
     }
     Ok(t)
 }
@@ -2398,29 +2456,54 @@ fn fold_forwarded(project: &str) -> Result<Tree> {
 pub fn fold_linked(project: &str) -> Result<Tree> {
     let mut t = fold_forwarded(project)?;
     let mut others: BTreeMap<String, Option<Tree>> = BTreeMap::new();
+    let mut get = |th: &str, node: &str| -> Option<Node> { others.entry(th.to_string()).or_insert_with(|| fold_forwarded(th).ok()).as_ref().and_then(|t| t.nodes.get(node).cloned()) };
     let ids: Vec<String> = t.nodes.keys().cloned().collect();
-    for id in ids {
-        let refs = t.nodes[&id].xrefs.clone();
+    for id in &ids {
+        let refs = t.nodes[id].xrefs.clone();
         for r in refs {
             let (th, node, kind) = (r["thread"].as_str().unwrap_or("").to_string(), r["node"].as_str().unwrap_or("").to_string(), r["kind"].as_str().unwrap_or(""));
-            let other = others.entry(th.clone()).or_insert_with(|| if kind == "same" && r["master"] == "there" { fold_forwarded(&th).ok() } else { Ledger::of(&th).and_then(|l| fold(&l)).ok() });
-            let Some(o) = other.as_ref().and_then(|o| o.nodes.get(&node)).cloned() else { continue };
-            let x = t.nodes.get_mut(&id).unwrap();
+            let Some(mut o) = get(&th, &node) else { continue };
+            // An item that is itself a mirror stands for its master (one more step).
+            if let Some(m) = o.xrefs.iter().find(|x| x["kind"] == "same" && x["master"] == "there").cloned() {
+                if let Some(mm) = get(m["thread"].as_str().unwrap_or(""), m["node"].as_str().unwrap_or("")) {
+                    o.state = mm.state;
+                    o.internal_owner = mm.internal_owner;
+                    o.client_owner = mm.client_owner;
+                    o.due = mm.due;
+                }
+            }
+            let x = t.nodes.get_mut(id).unwrap();
             match kind {
                 "same" if r["master"] == "there" => {
                     x.state = o.state.clone();
                     x.internal_owner = o.internal_owner.clone();
                     x.client_owner = o.client_owner.clone();
+                    x.delegated_by = o.delegated_by.clone();
                     x.due = o.due.clone();
                     x.waiting_for = o.waiting_for.clone();
                     let last: Vec<Value> = o.history.iter().rev().take(3).rev().cloned().collect();
-                    x.mirror_of = Some(json!({"thread": th, "node": node, "title": o.title, "history": last}));
+                    // A master in a closed thread isn't on Tasks: the mirror is shown there instead.
+                    let closed_thread = crate::projects::load(&th).map(|p| p.stage.closed()).unwrap_or(true);
+                    x.mirror_of = Some(json!({"thread": th, "node": node, "title": o.title, "history": last, "closed_thread": closed_thread}));
                 }
                 "depends_on" if !closed(&o.state) => {
                     let owner = o.internal_owner.clone().or(o.client_owner.clone());
                     x.xwaits.push(json!({"thread": th, "node": node, "title": o.title, "owner": owner, "state": o.state}));
                 }
                 _ => {}
+            }
+        }
+    }
+    // A local wait on a mirror is a wait on its master's work (Tasks shows the master, not the mirror).
+    for id in &ids {
+        let waits: Vec<String> = t.nodes[id].waiting_on.clone();
+        for w in waits {
+            let Some(m) = t.nodes.get(&w).and_then(|y| y.mirror_of.clone()).filter(|m| m["closed_thread"] != true) else { continue };
+            let (state, owner) = (t.nodes[&w].state.clone(), t.nodes[&w].internal_owner.clone());
+            let x = t.nodes.get_mut(id).unwrap();
+            x.waiting_on.retain(|v| v != &w);
+            if !closed(&state) {
+                x.xwaits.push(json!({"thread": m["thread"], "node": m["node"], "title": m["title"], "owner": owner, "state": state}));
             }
         }
     }
@@ -2733,6 +2816,9 @@ mod tests {
         ensure_first_epic(&Ledger::of(&other).unwrap()).unwrap();
         human_event(&other, &json!({"op": "create", "kind": "story", "parent": "E01", "title": "Single sign-on"})).unwrap();
         let master = human_event(&other, &json!({"op": "create", "kind": "task", "parent": "S001", "title": "SAML configuration"})).unwrap()["id"].as_str().unwrap().to_string();
+        // An earlier link to the same thread (a wait, read first) doesn't change how the mirror is read.
+        let other_task = human_event(&other, &json!({"op": "create", "kind": "task", "parent": "S001", "title": "IdP contract"})).unwrap()["id"].as_str().unwrap().to_string();
+        human_event(&id, &json!({"op": "xref", "node": "S001", "thread": other, "target": other_task, "kind": "depends_on"})).unwrap();
         // Here is the mirror; the identity programme does the work.
         human_event(&id, &json!({"op": "xref", "node": "T001", "thread": other, "target": master, "kind": "same", "master": "there"})).unwrap();
         // This thread's call says it is done; verified, it reaches the master and shows here as the master's.

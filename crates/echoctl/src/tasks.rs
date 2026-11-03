@@ -157,7 +157,7 @@ fn across_with(list: &[Project], me: &Me, meetings: &[MeetingContext], today: Na
             }
         };
         // A mirror (#20) is shown once, as its master's card in the master's thread.
-        let tasks: Vec<&Node> = t.nodes.values().filter(|n| n.kind == "task" && open(&n.state) && n.merged_into.is_none() && n.mirror_of.is_none()).collect();
+        let tasks: Vec<&Node> = t.nodes.values().filter(|n| n.kind == "task" && open(&n.state) && n.merged_into.is_none() && n.mirror_of.as_ref().is_none_or(|m| m["closed_thread"] == true)).collect();
         let mut cards: BTreeMap<String, (String, Value)> = tasks.iter().map(|n| (n.id.clone(), card(p, n, &t.nodes, &t.evidence, today, me))).collect();
         // Waiting for others = what stops me doing what I owe: the open work my tasks wait on (not
         // mine; it leaves Others / Nobody named for here) and the people they wait on (a card each).
@@ -186,6 +186,13 @@ fn across_with(list: &[Project], me: &Me, meetings: &[MeetingContext], today: Na
             for w in &n.xwaits {
                 let owner = w["owner"].as_str();
                 if owner.is_some_and(|o| me.is(o)) {
+                    continue;
+                }
+                // Several of my tasks waiting on it: one card, every one of them in what it stops.
+                if let Some(c) = waits.iter_mut().find(|c| c["project"] == w["thread"] && c["id"] == w["node"]) {
+                    if let Some(b) = c["blocks"].as_array_mut() {
+                        b.push(mine.clone());
+                    }
                     continue;
                 }
                 let c = &cards[&n.id].1;
@@ -376,6 +383,10 @@ mod tests {
         assert!(ledger::search_open("pitch", Some(&practice)).is_empty(), "this thread's own items aren't offered");
         // 1. The same work, its master in the pursuit thread.
         let link = ledger::human_event(&practice, &json!({"op": "xref", "node": pitch, "thread": pursuit, "target": demo, "kind": "same", "master": "there"})).unwrap();
+        // An edit of the mirror's owner, due or state is the master's: made there.
+        ledger::human_event(&practice, &json!({"op": "edit", "node": pitch, "set": {"internal_owner": "Lee Park", "title": "Pitch to the CIO"}})).unwrap();
+        assert_eq!(ledger::fold_linked(&pursuit).unwrap().nodes[&demo].internal_owner.as_deref(), Some("Lee Park"));
+        assert_eq!(ledger::fold_linked(&practice).unwrap().nodes[&pitch].title, "Pitch to the CIO", "its title stays its own");
         // 2. The master changes; the mirror shows it, and Tasks shows the work once, with both threads.
         ledger::human_event(&pursuit, &json!({"op": "edit", "node": demo, "set": {"internal_owner": "Dana Doe", "due": "2026-11-06"}})).unwrap();
         let t = ledger::fold_linked(&practice).unwrap();
@@ -396,12 +407,20 @@ mod tests {
         let t = ledger::fold_linked(&practice).unwrap();
         assert!(t.nodes[&pitch].mirror_of.is_none() && t.nodes[&pitch].state == "open" && t.nodes[&pitch].internal_owner.as_deref() == Some("Me"));
         assert!(ledger::fold_linked(&pursuit).unwrap().nodes[&demo].xrefs.is_empty(), "taken away on both sides");
+        // Undoing the unlink links them again, as they were.
+        let unlink = ledger::Ledger::of(&practice).unwrap().events().unwrap().into_iter().rev().find(|e| e["op"] == "unxref").unwrap();
+        ledger::human_event(&practice, &json!({"op": "undo", "target": unlink["mid"]})).unwrap_err(); // the pitch's master is done: can't link a closed item
         // 4. Across threads, a wait: my task waits on someone's open task in the other thread.
         ledger::human_event(&practice, &json!({"op": "xref", "node": waits, "thread": pursuit, "target": prep, "kind": "depends_on"})).unwrap();
         let w = &ledger::fold_linked(&practice).unwrap().nodes[&waits];
         assert_eq!(w.xwaits[0]["node"], prep.as_str());
         let work = across_with(&projects::list(), &me, &[], today, "2026-11-03T09:00:00Z").unwrap();
         assert!(work["piles"]["waiting"].as_array().unwrap().iter().any(|c| c["id"] == prep.as_str() && c["project"] == pursuit.as_str()), "{}", work["piles"]["waiting"]);
+        // Unlinked, then the unlink undone: the wait is back, as it was.
+        let u = ledger::human_event(&practice, &json!({"op": "unxref", "node": waits, "thread": pursuit, "target": prep})).unwrap();
+        assert!(ledger::fold_linked(&practice).unwrap().nodes[&waits].xwaits.is_empty());
+        ledger::human_event(&practice, &json!({"op": "undo", "target": u["mid"]})).unwrap();
+        assert_eq!(ledger::fold_linked(&practice).unwrap().nodes[&waits].xwaits.len(), 1);
         // Same thread, unknown item, closed item: refused, nothing written.
         assert!(ledger::human_event(&practice, &json!({"op": "xref", "node": waits, "thread": practice, "target": pitch, "kind": "same"})).is_err());
         assert!(ledger::human_event(&practice, &json!({"op": "xref", "node": waits, "thread": pursuit, "target": "T999", "kind": "same"})).is_err());

@@ -3056,7 +3056,7 @@ function workPanel() {
     n.mirror_of ? ['Same as', `${xItem(n.mirror_of.thread, n.mirror_of.node, n.mirror_of.title)} <span class="set-sub">— done there: its status, owner and due show here</span> ${xUnlink(n, n.mirror_of.thread, n.mirror_of.node)}`] : null,
     (n.also_in || []).length ? ['Also in', n.also_in.map((a) => `${xItem(a.thread, a.node, a.title)} ${xUnlink(n, a.thread, a.node)}`).join('<br>')] : null,
     (n.xwaits || []).length ? ['Waits for', n.xwaits.map((a) => `${xItem(a.thread, a.node, a.title)}${a.owner ? ` <span class="set-sub">· ${esc(a.owner)}</span>` : ''} ${xUnlink(n, a.thread, a.node)}`).join('<br>')] : null,
-    ...(n.xrefs || []).filter((r) => r.kind === 'blocks').map((r) => ['Holds up', `${xItem(r.thread, r.node, '')} <span class="set-sub">in another thread</span>`]),
+    ...(n.xrefs || []).filter((r) => r.kind === 'blocks').map((r) => ['Holds up', `${xItem(r.thread, r.node, '')} <span class="set-sub">in another thread</span> ${xUnlink(n, r.thread, r.node)}`]),
     (n.links || []).length ? ['From', n.links.filter((l) => /^https:\/\//i.test(l.url || '')).map((l) => `<a class="wp-link" href="${esc(l.url)}" data-ext title="${esc(l.url)}">↗ ${esc(l.title)}</a>`).join('')] : null,
     n.kind !== 'story' && actionItems.length ? ['Said', `“${esc(actionItems[0].quote.length > 90 ? actionItems[0].quote.slice(0, 88) + '…' : actionItems[0].quote)}”`] : null,
   ].filter(Boolean)
