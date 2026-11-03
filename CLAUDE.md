@@ -416,14 +416,17 @@ wait there (Needs you — asked there also with the Brain off when a thread read
 known → nothing read. Read whether or not the Brain is on (not
 without the `brain` feature). History entries from a mail show ✉ and open it in Outlook. Evidence = each project call as an item
 (`evidence/<stamp>.json` + `.md`: transcript turns `[hh:mm:ss] speaker: text`, chat and the user's notes as text; a
-changed call is queued again by a `reprocess` event). `apply`: each proposal's quote must be one contiguous span of
+changed call is queued again by a `reprocess` event). `apply` answers with what it `created` (ids, titles, parents) and `touched`, so the next item and the dependency pass refer to
+them; a new story or task whose title shares most words with an open one of the thread is offered "Same as …?" (To review, a
+`suggest_merge`, never merged by itself; #39). Each proposal's quote must be one contiguous span of
 its item (normalised), level rules, nothing before it existed, re-applying adds nothing; status changes, criteria
 met, links and waits count only after `verify_apply` says `supports`; the user's edits (`human_event`) pin fields
 (an agent's later evidence stays in the history, `applied: false`) and can be undone; spoken dates resolved against
 the item's day (`resolve_due`). **The sync** (`projectsync.rs`): `ledger::sync` (the first one: the last 20 calls,
 `BACKFILL`), then two Claude Code runs of the plugin's `project-sync` skill (EXTRACT / DEPS / VERIFY.md) — extract
 (+ dependencies), then verify in a fresh process — on the project's AI profile and model, guarded (`guard.rs`
-`RUN_MODE=project`: read the ledger and the skill's folder, write only `.json` in `runs/<run>/`, Bash only
+`RUN_MODE=project`: read the ledger, the skill's folder and the session's own tool-results — a large thread's `context`
+or `people-context` Claude Code saved to a file (#39) —, write only `.json` in `runs/<run>/`, Bash only
 `echoctl project ledger <this id> <PROJECT_STEPS>`; the CLI checks `ECHOCTL_RUN_PROJECT` too and keeps `verify-prep
 --out` in the run's folder); ≤ 10 items a run; state in `ledger/sync.json`, the log in `runs/<run>/log.txt`. The app's
 scheduler (every 5 min, `config.project_sync`, default on; Settings → AI & minutes) syncs open projects with a call

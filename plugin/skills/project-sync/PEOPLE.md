@@ -12,6 +12,8 @@ are checked) and **who they are** (`about`, a short description you rewrite from
 1. `$L people-context --items '<the evidence ids, comma-separated>'` — the thread's people (as they
    stand now, with their addresses and organisations), its organisations, the readable file of each
    call, and what was already proposed or turned down. Never propose those again.
+   When Claude Code saves that answer to a file, Read the file (your session's own: allowed). If you
+   can't read it, stop and say so — never propose without the people in view.
 2. For each evidence id: read its file in full, write `<run folder>/<id>_people.json` (a JSON array,
    schema below), run `$L people-apply --evidence '<id>' --file '<that file>'`, and fix rejections in
    `<id>_people_fix.json` (apply only the fixed entries). An item with nothing to say needs no file.
