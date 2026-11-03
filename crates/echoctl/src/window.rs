@@ -331,7 +331,7 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
             let mut v = r.unwrap_or_else(|e| json!({ "error": format!("{e:#}") }));
             // Topic rebuilds and re-tagging running now (`brain_rebuild_topics`, `brain_retag_topics`), by layer.
             if p == "/api/brain" {
-                v["topic_jobs"] = json!(BRAIN_INSIGHTS.lock().map(|r| r.iter().filter(|k| k.starts_with("taxonomy:") || k.starts_with("retag:")).cloned().collect::<Vec<_>>()).unwrap_or_default());
+                v["topic_jobs"] = json!(BRAIN_INSIGHTS.lock().map(|r| r.iter().filter(|k| k.starts_with("taxonomy:") || k.starts_with("retag:") || k.starts_with("split:")).cloned().collect::<Vec<_>>()).unwrap_or_default());
             }
             json_reply(v)
         }
@@ -725,6 +725,9 @@ fn attention_busy() -> (Value, Value) {
     if let Ok(r) = BRAIN_INSIGHTS.lock() {
         for layer in r.iter().filter_map(|k| k.strip_prefix("taxonomy:")) {
             busy.insert(format!("drift:{layer}"), "Rebuilding topics…".into());
+        }
+        for layer in r.iter().filter_map(|k| k.strip_prefix("split:")) {
+            busy.insert(format!("drift:{layer}"), "Splitting a topic…".into());
         }
     }
     if PLUGINS_UPDATING.load(std::sync::atomic::Ordering::SeqCst) {
@@ -1731,6 +1734,27 @@ pub fn handle(msg: &str) -> Handled {
             }
             true.into()
         }
+        // A topic too broad, split into subtopics (Claude, in the background; #31).
+        #[cfg(feature = "brain")]
+        "brain_split_topic" => {
+            let (layer, label) = (v["layer"].as_str().unwrap_or("").to_string(), v["label"].as_str().unwrap_or("").to_string());
+            let k = format!("split:{layer}");
+            if !layer.is_empty() && !label.is_empty() && BRAIN_INSIGHTS.lock().map(|mut r| r.insert(k.clone())).unwrap_or(false) {
+                std::thread::spawn(move || {
+                    let _end = OnEnd(Some(move || {
+                        crate::attention::stale();
+                        if let Ok(mut r) = BRAIN_INSIGHTS.lock() {
+                            r.remove(&k);
+                        }
+                    }));
+                    match crate::brain::taxonomy::split(&layer, &label, &|_| {}) {
+                        Ok(v) => crate::app::notify(&format!("“{label}” split"), &format!("Into {} — its sections are tagged again; review them on the Brain's Topics tab", v["into"].as_array().map(|a| a.iter().filter_map(|x| x.as_str()).collect::<Vec<_>>().join(", ")).unwrap_or_default())),
+                        Err(e) => crate::app::notify(&format!("“{label}” not split"), &format!("{e:#}")),
+                    }
+                });
+            }
+            true.into()
+        }
         // A layer's sections tagged again with its topics as they are now (Claude, in the background).
         #[cfg(feature = "brain")]
         "brain_retag_topics" => {
@@ -1753,7 +1777,7 @@ pub fn handle(msg: &str) -> Handled {
         #[cfg(feature = "brain")]
         "brain_topic_move" => match (v["key"].as_str(), v["do"].as_str()) {
             (Some(k), Some("apply")) => match crate::brain::taxonomy::apply_move(k) {
-                Ok(()) => true.into(),
+                Ok(said) => notice(&said),
                 Err(e) => notice(&format!("{e:#}")),
             },
             (Some(k), Some("dismiss")) => crate::brain::taxonomy::dismiss_move(k).is_ok().into(),

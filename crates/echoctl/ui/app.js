@@ -4185,15 +4185,18 @@ function brainTopics(tx) {
   const why = (d) => (d.reasons || []).map((r) => r.text.charAt(0).toUpperCase() + r.text.slice(1) + '.').join(' ')
   const build = (l) => {
     const d = l.drift || {}
-    const running = jobs.has(`taxonomy:${l.id}`) ? 'Rebuilding its topics from its calls…' : jobs.has(`retag:${l.id}`) ? 'Tagging its sections again…' : ''
+    const running = jobs.has(`taxonomy:${l.id}`) ? 'Rebuilding its topics from its calls…' : jobs.has(`split:${l.id}`) ? 'Splitting a topic into subtopics…' : jobs.has(`retag:${l.id}`) ? 'Tagging its sections again…' : ''
+    // One topic took most of the new sections (#31): splitting that topic fixes it; a rebuild alone doesn't.
+    const broad = ((d.reasons || []).find((r) => r.rule === 'catch_all' && r.topic) || {}).topic
+    const splitBtn = broad ? `<button class="btn primary" data-br-split="${esc(JSON.stringify([broad.layer, broad.label]))}" title="Make 2–6 subtopics of it from its own sections (Claude), then tag only those again">Split “${esc(broad.label)}”</button>` : ''
     const retag = `<button class="link-btn" data-br-retag="${esc(l.id)}" title="Tag its sections again with the topics as they are now (no new topics)">Tag again</button>`
     const rebuild = `<button class="link-btn" data-br-rebuild="${esc(l.id)}" title="Build its topics again from its calls (Claude): existing topics keep their place, a provisional version to review">Rebuild</button>`
     const accept = `<button class="btn${d.stale ? '' : ' primary'}" data-br-accept="${esc(l.id)}">Accept</button>`
     const calls = `Built from ${l.built_from || 0} call${l.built_from === 1 ? '' : 's'}.`
     let head, text, acts
     if (running) [head, text, acts] = [running, 'You can keep working; a notification says when it is done.', '']
-    else if (d.stale) [head, text, acts] = ['Needs a rebuild', `${why(d)} Rebuild makes a new version from its calls for you to review; its topics keep their place.${l.provisional ? ' Or accept this version as it is.' : ''}`,
-      `<button class="btn primary" data-br-rebuild="${esc(l.id)}">Rebuild</button>${l.provisional ? accept : ''}<button class="link-btn" data-br-snooze="${esc(l.id)}" title="Ask again once it has half as many new sections or calls again">Not now</button>${retag}`]
+    else if (d.stale) [head, text, acts] = ['Needs a rebuild', `${why(d)} ${broad ? `Split makes subtopics of “${broad.label}” from its own sections and tags only those again; Rebuild makes a new version of every topic.` : 'Rebuild makes a new version from its calls for you to review; its topics keep their place.'}${l.provisional ? ' Or accept this version as it is.' : ''}`,
+      `${splitBtn}<button class="btn${broad ? '' : ' primary'}" data-br-rebuild="${esc(l.id)}">Rebuild</button>${l.provisional ? accept : ''}<button class="link-btn" data-br-snooze="${esc(l.id)}" title="Ask again once it has half as many new sections or calls again">Not now</button>${retag}`]
     else if (l.provisional) [head, text, acts] = ['Waiting for your review', 'Claude built these topics and nobody accepted them yet. Look through its topics below; rename, merge or remove what is wrong, then Accept.', `${accept}${retag}${rebuild}`]
     else if (d.snoozed) [head, text, acts] = ['Rebuild put off', `${why(d)} You chose Not now; Echo asks again once it has half as many new sections or calls again.`, `${retag}${rebuild}`]
     else if (!l.built_from) [head, text, acts] = ['Not built from calls yet', 'Rebuild makes its topics from its calls.', `${retag}${rebuild}`]
@@ -4664,7 +4667,7 @@ function brainNodePanel() {
     : ed === 'split' ? `<select class="wp-in" id="br-split" aria-label="Which name">${[...(x.synonyms || []), ...(x.variants || [])].map((n) => `<option>${esc(n)}</option>`).join('')}</select><button class="btn primary" data-br-do="split">Make it a term</button>`
     : ed === 'move' ? `<select class="wp-in" id="br-parent" aria-label="Move under"><option value="">(top level)</option>${l1s.map((t) => `<option${x.parent === t.label ? ' selected' : ''}>${esc(t.label)}</option>`).join('')}</select><button class="btn primary" data-br-do="move">Move</button>`
     : ed === 'remove' ? `<span class="set-sub">Remove it? Its tags go too.</span><button class="btn danger" data-br-op='${body({ op: 'remove' })}'>Remove</button>`
-    : `<button class="btn" data-br-edit="rename">Rename</button>${same.length ? '<button class="btn" data-br-edit="merge">Merge into…</button>' : ''}<button class="btn" data-br-edit="define">Define…</button>${isTerm ? ([...(x.synonyms || []), ...(x.variants || [])].length ? '<button class="btn" data-br-edit="split">Split off…</button>' : '') : '<button class="btn" data-br-edit="move">Move under…</button>'}<button class="btn" data-br-edit="scope">${layer === 'shared' ? 'Only one client…' : 'Up to the practice…'}</button><button class="btn ghost danger" data-br-edit="remove">Remove</button>`
+    : `<button class="btn" data-br-edit="rename">Rename</button>${same.length ? '<button class="btn" data-br-edit="merge">Merge into…</button>' : ''}<button class="btn" data-br-edit="define">Define…</button>${isTerm ? ([...(x.synonyms || []), ...(x.variants || [])].length ? '<button class="btn" data-br-edit="split">Split off…</button>' : '') : `<button class="btn" data-br-edit="move">Move under…</button><button class="btn" data-br-split="${esc(JSON.stringify([layer, name]))}" title="Make 2–6 subtopics of it from its own sections (Claude), then tag only those again">Split into subtopics</button>`}<button class="btn" data-br-edit="scope">${layer === 'shared' ? 'Only one client…' : 'Up to the practice…'}</button><button class="btn ghost danger" data-br-edit="remove">Remove</button>`
   const nd = S.br.nodeData && S.br.nodeData.id === id ? S.br.nodeData : null
   const secs = !nd ? '<div class="skeleton"><i></i><i></i></div>' : nd.sections.length ? nd.sections.map((s) => {
     const call = s.link && s.link.startsWith('echo://call/') ? s.link.slice(12).split('?')[0] : ''
@@ -4745,7 +4748,7 @@ function brainEdit(body) {
   setTimeout(() => loadBrain().then(render), 350)
 }
 document.addEventListener('click', (e) => {
-  const t = e.target.closest && e.target.closest('[data-br-tab],[data-br-node],[data-br-accept],[data-br-fold],[data-br-rebuild],[data-br-retag],[data-br-move],[data-dict-group],[data-br-snooze],[data-br-edit],[data-br-do],[data-br-op],[data-br-open],[data-graph-doc],[data-br-doc-open]')
+  const t = e.target.closest && e.target.closest('[data-br-tab],[data-br-node],[data-br-accept],[data-br-fold],[data-br-rebuild],[data-br-split],[data-br-retag],[data-br-move],[data-dict-group],[data-br-snooze],[data-br-edit],[data-br-do],[data-br-op],[data-br-open],[data-graph-doc],[data-br-doc-open]')
   if (!t) return
   const d = t.dataset
   if (d.brTab) { S.br.tab = d.brTab; go(`brain/${d.brTab}`); return loadBrain().then(render) }
@@ -4760,6 +4763,7 @@ document.addEventListener('click', (e) => {
   if (d.brAccept) return brainEdit({ op: 'accept', layer: d.brAccept })
   if (d.brFold) { const f = S.br.fold || {}; S.br.fold = { ...f, [d.brFold]: !f[d.brFold] }; return render() }
   if (d.brRebuild) { send({ cmd: 'brain_rebuild_topics', layer: d.brRebuild }); S.br.rebuilding = { ...(S.br.rebuilding || {}), [`taxonomy:${d.brRebuild}`]: true }; setTimeout(() => { S.br.rebuilding = {}; loadBrain().then(render) }, 1500); return render() }
+  if (d.brSplit) { const [layer, label] = JSON.parse(d.brSplit); send({ cmd: 'brain_split_topic', layer, label }); S.br.rebuilding = { ...(S.br.rebuilding || {}), [`split:${layer}`]: true }; setTimeout(() => { S.br.rebuilding = {}; loadBrain().then(render) }, 1500); return render() }
   if (d.dictGroup !== undefined) { S.br.tg = d.dictGroup; return render() }
   if (d.brMove) { send({ cmd: 'brain_topic_move', key: d.brMove, do: d.do }); return setTimeout(() => loadBrain().then(render), 400) }
   if (d.brRetag) { send({ cmd: 'brain_retag_topics', layer: d.brRetag }); S.br.rebuilding = { ...(S.br.rebuilding || {}), [`retag:${d.brRetag}`]: true }; setTimeout(() => { S.br.rebuilding = {}; loadBrain().then(render) }, 1500); return render() }
