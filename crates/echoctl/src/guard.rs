@@ -44,6 +44,11 @@ pub const RUN_SKILL: &str = "ECHOCTL_RUN_SKILL";
 /// `RUN_MODE=routine`: a routine the user wrote, run on a schedule with "read" permissions
 /// (`routines.rs`) — the data folder it may read.
 pub const RUN_HOME: &str = "ECHOCTL_RUN_HOME";
+/// The skills a read-only routine may load (one per line): those of the plugins Echo gave the run.
+pub const RUN_SKILLS: &str = "ECHOCTL_RUN_SKILLS";
+/// More folders a read-only routine may read (one per line): the ones plugins gave Echo's sessions (an
+/// Obsidian vault the user picked).
+pub const RUN_READ: &str = "ECHOCTL_RUN_READ";
 /// The Echo commands a read-only routine may run (`*` = any one word: an id).
 pub const ROUTINE_COMMANDS: [&str; 13] = [
     "context", "attention", "prep", "previous", "status", "calendar events", "project list", "project show", "project of",
@@ -69,6 +74,10 @@ pub struct Scope {
     project: Option<ProjectScope>,
     /// A read-only routine (`RUN_MODE=routine`): `call` is then the data folder; `ask` holds too.
     routine: bool,
+    /// A routine may read these too: folders the user gave plugins for Echo's sessions (`RUN_READ`).
+    extra: Vec<PathBuf>,
+    /// …and load these skills (`RUN_SKILLS`).
+    skills: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -172,7 +181,7 @@ impl Scope {
                 return Err("the run names no Echo CLI".into());
             }
             let skill = var(RUN_SKILL).and_then(|d| dunce::canonicalize(d).ok()).filter(|d| d.ends_with("project-sync"));
-            return Ok(Scope { call: ledger, previous: None, clis, ask: false, project: Some(ProjectScope { id, run_dir, skill }), routine: false });
+            return Ok(Scope { call: ledger, previous: None, clis, ask: false, project: Some(ProjectScope { id, run_dir, skill }), routine: false, extra: vec![], skills: vec![] });
         }
         if var(RUN_MODE).is_some_and(|m| m == "routine") {
             let home = var(RUN_HOME).filter(|c| !c.is_empty()).ok_or("this isn't a routine Echo started")?;
@@ -184,7 +193,9 @@ impl Scope {
             if clis.is_empty() {
                 return Err("the run names no Echo CLI".into());
             }
-            return Ok(Scope { call: home, previous: None, clis, ask: true, project: None, routine: true });
+            let extra = var(RUN_READ).map(|v| v.to_string_lossy().lines().filter(|l| !l.is_empty()).filter_map(|l| dunce::canonicalize(l).ok()).filter(|p| p.is_dir()).collect()).unwrap_or_default();
+            let skills = var(RUN_SKILLS).map(|v| v.to_string_lossy().lines().filter(|l| !l.is_empty()).map(str::to_owned).collect()).unwrap_or_default();
+            return Ok(Scope { call: home, previous: None, clis, ask: true, project: None, routine: true, extra, skills });
         }
         let call = var(RUN_CALL).filter(|c| !c.is_empty()).ok_or("this isn't a minutes run Echo started")?;
         let call = dunce::canonicalize(&call).map_err(|e| format!("the run's call folder can't be found: {e}"))?;
@@ -197,7 +208,7 @@ impl Scope {
             return Err("the run names no Echo CLI".into());
         }
         let ask = var(RUN_MODE).is_some_and(|m| m == "ask");
-        Ok(Scope { call, previous, clis, ask, project: None, routine: false })
+        Ok(Scope { call, previous, clis, ask, project: None, routine: false, extra: vec![], skills: vec![] })
     }
 
     /// Allowed, or why not.
@@ -328,7 +339,7 @@ impl Scope {
             (!session.is_empty() && t.file_stem().is_some_and(|s| s == session)).then(|| t.with_extension("").join("tool-results"))
         });
         let results = results.map(|r| dunce::canonicalize(&r).unwrap_or(r));
-        let readable = |p: &Path| self.inside(p) || results.as_ref().is_some_and(|r| p.starts_with(r));
+        let readable = |p: &Path| self.inside(p) || self.extra.iter().any(|d| p.starts_with(d)) || results.as_ref().is_some_and(|r| p.starts_with(r));
         match tool {
             "Bash" => self.bash(input["command"].as_str().unwrap_or("")),
             "Read" => {
@@ -355,6 +366,16 @@ impl Scope {
                 }
             }
             t if t.starts_with(BRAIN_TOOLS) => Ok(()),
+            // Only the skills of the plugins Echo gave the run (`--plugin-dir`), by their full name (`plugin:skill`):
+            // a skill of the same name from anywhere else isn't one of them.
+            "Skill" => {
+                let name = input["skill"].as_str().unwrap_or("");
+                if self.skills.iter().any(|k| name == k) {
+                    Ok(())
+                } else {
+                    Err(format!("the skill {name} isn't one Echo gave this routine"))
+                }
+            }
             "Edit" | "Write" | "NotebookEdit" => Err("a read-only routine changes no file".into()),
             "" => Err("no tool named".into()),
             other => Err(format!("{other} isn't available in a read-only routine")),
@@ -519,6 +540,8 @@ mod tests {
             ask: false,
             project: None,
             routine: false,
+            extra: vec![],
+            skills: vec![],
         }
     }
 
@@ -683,8 +706,23 @@ mod tests {
             RUN_MODE => Some("routine".into()),
             _ => None,
         };
+        let vault = root.join("vault");
+        fs::create_dir_all(&vault).unwrap();
+        fs::write(vault.join("Dana.md"), "x").unwrap();
+        let vault = dunce::canonicalize(&vault).unwrap();
+        let (v2, h2) = (vault.clone(), home.clone());
+        let vars = move |k: &str| match k {
+            RUN_READ => Some(v2.clone().into_os_string()),
+            RUN_SKILLS => Some("echo-obsidian:obsidian-vaults".into()),
+            o => vars(o).or_else(|| (o == RUN_HOME).then(|| h2.clone().into_os_string())),
+        };
         let s = Scope::from_vars(vars).unwrap();
         assert!(s.routine && s.ask);
+        assert!(s.judge(&tool("Read", json!({"file_path": vault.join("Dana.md").display().to_string()}))).is_ok(), "a folder given to Echo's sessions");
+        assert!(s.judge(&tool("Skill", json!({"skill": "echo-obsidian:obsidian-vaults"}))).is_ok(), "a skill Echo gave the run");
+        for other in ["obsidian-vaults", "evil:obsidian-vaults", "echo:process-call"] {
+            assert!(s.judge(&tool("Skill", json!({"skill": other}))).is_err(), "{other}");
+        }
         let path = |p: &Path| p.display().to_string();
         let ok = |t: &str, input: Value| s.judge(&tool(t, input)).map_err(|e| format!("{t}: {e}"));
         ok("Read", json!({"file_path": path(&home.join("calls/2026-10-24_100000-other/transcript.md"))})).unwrap();
@@ -732,7 +770,7 @@ mod tests {
                 fs::create_dir_all(root.join("calls").join(d)).unwrap();
                 fs::write(root.join("calls").join(d).join("transcript.md"), "x").unwrap();
             }
-            let s = Scope { call: dunce::canonicalize(root.join("calls").join(own)).unwrap(), previous: None, clis: vec!["echoctl".into()], ask: false, project: None, routine: false };
+            let s = Scope { call: dunce::canonicalize(root.join("calls").join(own)).unwrap(), previous: None, clis: vec!["echoctl".into()], ask: false, project: None, routine: false, extra: vec![], skills: vec![] };
             let p = |f: &str| root.join("calls").join(twin).join(f).display().to_string();
             for (t, input) in [
                 ("Read", json!({"file_path": p("transcript.md")})),

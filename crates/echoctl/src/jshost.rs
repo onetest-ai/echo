@@ -94,8 +94,32 @@ const PRELUDE: &str = r#"
     },
     /** The Claude · Echo folder session listens to a Claude Code channel (the one the manifest names) while
      *  it is open, with `env` (the channel's own keys; Claude and Anthropic ones are refused). */
-    sessions: { channel: (opts) => call('sessions.channel', opts), clearChannel: () => call('sessions.clear_channel') },
-    system: { which: (name) => call('system.which', name) },
+    sessions: {
+      channel: (opts) => call('sessions.channel', opts), clearChannel: () => call('sessions.clear_channel'),
+      /** Skills for Echo's own Claude sessions (never the user's Claude Code): [{name, description, body}], text
+       *  only — Echo writes the Claude Code plugin around them. [] takes them away. */
+      skills: (list) => call('sessions.skills', list || []),
+      /** Echo's sessions may read these of the folders the user gave it. */
+      read: (folders) => call('sessions.read', folders || []),
+    },
+    /** A line for Claude when a client or thread is open in the window: [{client | thread, text}] (replaces all). */
+    view: { hints: (list) => call('view.hints', list || []) },
+    /** Echo's own data, read-only: 'clients' | 'threads'. */
+    echo: { read: (kind) => call('echo.read', kind) },
+    /** The folders the user gave this plugin (Echo's picker), read-only: paths relative to one of them. */
+    fs: {
+      folders: () => call('fs.folders'),
+      forget: (root) => call('fs.forget', String(root)),
+      list: (root, path) => call('fs.list', [String(root), path || '']),
+      read: (root, path, max) => call('fs.read', [String(root), String(path), max || 0]),
+      /** Every file under `path` (dot folders left out unless `hidden`): [{path, size, mtime}] up to `max`. */
+      walk: (root, opts) => later('fs.walk', [String(root), opts || {}]),
+    },
+    system: {
+      which: (name) => call('system.which', name),
+      /** The system's folder picker; the folder picked is given to this plugin. Its path, or null. */
+      pickFolder: (prompt) => later('system.pick_folder', String(prompt || 'Choose a folder')),
+    },
     deliver: {
       status: () => call('deliver.status'),
       send: (kind, msg) => later('deliver.send', [kind, msg]),
@@ -346,6 +370,8 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
         match msg {
             Ok(Msg::Load(id, dir)) => {
                 plugins.remove(&id);
+                // A new version registers what it adds again; an old version's additions don't linger.
+                crate::grants::drop_plugin(&id);
                 let outcome = load(&rt, &id, &dir, &current, &tx, &mut slice);
                 if let Ok(mut l) = host().loaded.lock() {
                     l.insert(id.clone(), outcome.as_ref().map(|_| ()).map_err(|e| e.to_string()));
@@ -359,6 +385,7 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
             }
             Ok(Msg::Unload(id)) => {
                 plugins.remove(&id);
+                crate::grants::drop_plugin(&id);
                 if let Ok(mut l) = host().loaded.lock() {
                     l.remove(&id);
                 }
@@ -509,6 +536,20 @@ fn package_file(id: &str, rel: &str) -> Result<PathBuf> {
     plugins::inside_plugin(&package_dir(id)?, rel)
 }
 
+/// The plugin's manifest names capability `cap` in its `uses` (the install sheet said so).
+fn uses(id: &str, cap: &str) -> Result<Value> {
+    let m = plugins::read_manifest(&package_dir(id)?)?;
+    m.uses.get(cap).cloned().ok_or_else(|| anyhow!("{id} didn't ask for “{cap}” when it was installed"))
+}
+
+/// …and, within it, `flag` set (the install sheet named that part).
+fn uses_flag(id: &str, cap: &str, flag: &str) -> Result<()> {
+    if uses(id, cap)?[flag].as_bool() != Some(true) {
+        bail!("{id} didn't ask for “{cap}.{flag}” when it was installed");
+    }
+    Ok(())
+}
+
 /// A path in the plugin's own folder of the data folder: relative, no `..`, no links followed out.
 fn store_path(id: &str, rel: &str) -> Result<PathBuf> {
     let base = plugins::data_dir(id);
@@ -636,6 +677,63 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             CHANNELS.lock().map_err(|_| anyhow!("busy"))?.remove(id);
             Value::Null
         }
+        "sessions.skills" => {
+            uses_flag(id, "sessions", "skills")?;
+            crate::grants::set_session_skills(id, arg)?;
+            Value::Null
+        }
+        "sessions.read" => {
+            uses_flag(id, "sessions", "read")?;
+            let dirs: Vec<String> = arg.as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect()).unwrap_or_default();
+            crate::grants::set_session_read(id, &dirs)?;
+            Value::Null
+        }
+        "view.hints" => {
+            uses_flag(id, "sessions", "hints")?;
+            crate::grants::set_hints(id, arg)?;
+            Value::Null
+        }
+        "echo.read" => {
+            let kind = s(arg);
+            if !uses(id, "echo")?["read"].as_array().is_some_and(|a| a.iter().any(|k| k.as_str() == Some(kind.as_str()))) {
+                bail!("{id} didn't ask to read your {kind} when it was installed");
+            }
+            match kind.as_str() {
+                "clients" => json!(crate::projects::clients().unwrap_or_default().into_iter().map(|c| json!({"id": c.id, "name": c.name, "aliases": c.aliases, "domains": c.domains})).collect::<Vec<_>>()),
+                "threads" => json!(crate::projects::list().into_iter().filter(|p| !p.stage.closed()).map(|p| json!({"id": p.id, "name": p.name, "client": p.client})).collect::<Vec<_>>()),
+                o => bail!("Echo doesn't share “{o}” (clients, threads)"),
+            }
+        }
+        "fs.folders" => {
+            uses(id, "folders")?;
+            json!(crate::grants::folders(id).iter().map(|p| p.display().to_string()).collect::<Vec<_>>())
+        }
+        "fs.forget" => {
+            crate::grants::forget(id, Path::new(&s(arg)))?;
+            Value::Null
+        }
+        "fs.list" => {
+            uses(id, "folders")?;
+            let dir = crate::grants::resolve(id, arg[0].as_str().unwrap_or(""), arg[1].as_str().unwrap_or(""))?;
+            let mut out = vec![];
+            for e in std::fs::read_dir(&dir)?.flatten() {
+                let Ok(t) = e.file_type() else { continue };
+                if t.is_symlink() {
+                    continue;
+                }
+                out.push(json!({"name": e.file_name().to_string_lossy(), "dir": t.is_dir()}));
+            }
+            json!(out)
+        }
+        "fs.read" => {
+            uses(id, "folders")?;
+            let f = crate::grants::resolve(id, arg[0].as_str().unwrap_or(""), arg[1].as_str().unwrap_or(""))?;
+            let max = arg[2].as_u64().filter(|m| *m > 0).unwrap_or(1 << 20).min(4 << 20) as usize;
+            let mut buf = vec![];
+            use std::io::Read;
+            std::fs::File::open(&f)?.take(max as u64).read_to_end(&mut buf)?;
+            json!(String::from_utf8_lossy(&buf))
+        }
         "system.which" => {
             let name = s(arg);
             if name.is_empty() || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
@@ -656,7 +754,58 @@ fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
             let (answer, model, usage) = crate::claudejob::run(&spec)?;
             Ok(json!({"answer": answer, "model": model, "usage": usage}))
         }
-        "http.fetch" => fetch(id, arg[0].as_str().unwrap_or(""), &arg[1]),
+"http.fetch" => fetch(id, arg[0].as_str().unwrap_or(""), &arg[1]),
+        "system.pick_folder" => {
+            uses(id, "folders")?;
+            let name = plugins::enabled().into_iter().find(|p| p.id == id).map(|p| p.name).unwrap_or_else(|| id.to_string());
+            let prompt: String = format!("{} — {}", name, arg.as_str().unwrap_or("Choose a folder")).chars().take(200).collect();
+            Ok(match crate::app::choose_folder(&prompt) {
+                Some(dir) => json!(crate::grants::grant(id, &dir)?.display().to_string()),
+                None => Value::Null,
+            })
+        }
+        "fs.walk" => {
+            uses(id, "folders")?;
+            let root = crate::grants::resolve(id, arg[0].as_str().unwrap_or(""), "")?;
+            let o = &arg[1];
+            let base = match o["path"].as_str().filter(|p| !p.is_empty()) {
+                Some(rel) => crate::grants::resolve(id, &root.display().to_string(), rel)?,
+                None => root.clone(),
+            };
+            let hidden = o["hidden"].as_bool().unwrap_or(false);
+            let max = o["max"].as_u64().filter(|m| *m > 0).unwrap_or(20_000).min(100_000) as usize;
+            let exts: Vec<String> = o["ext"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(|e| e.trim_start_matches('.').to_lowercase())).collect()).unwrap_or_default();
+            let mut out = vec![];
+            let mut stack = vec![base];
+            while let Some(dir) = stack.pop() {
+                // A folder swapped for a link since it was listed: not read.
+                if !dunce::canonicalize(&dir).is_ok_and(|real| real.starts_with(&root)) {
+                    continue;
+                }
+                let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+                for e in rd.flatten() {
+                    let name = e.file_name().to_string_lossy().to_string();
+                    let Ok(t) = e.file_type() else { continue };
+                    // Links aren't followed: one could lead out of the folder.
+                    if t.is_symlink() || (!hidden && name.starts_with('.')) {
+                        continue;
+                    }
+                    let p = e.path();
+                    if t.is_dir() {
+                        stack.push(p);
+                    } else if exts.is_empty() || p.extension().is_some_and(|x| exts.contains(&x.to_string_lossy().to_lowercase())) {
+                        let m = e.metadata().ok();
+                        let rel = p.strip_prefix(&root).unwrap_or(&p).to_string_lossy().replace('\\', "/");
+                        let mtime = m.as_ref().and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0);
+                        out.push(json!({"path": rel, "size": m.map(|m| m.len()).unwrap_or(0), "mtime": mtime}));
+                        if out.len() >= max {
+                            return Ok(json!(out));
+                        }
+                    }
+                }
+            }
+            Ok(json!(out))
+        }
         "claude.has_plugin" | "claude.install_plugin" => {
             let spec = arg[0].as_str().unwrap_or("");
             if !spec.contains('@') || !spec.bytes().all(|b| b.is_ascii_alphanumeric() || b"@._-".contains(&b)) {
@@ -781,6 +930,84 @@ mod tests {
         assert_eq!(call("hello", "md", &json!({})).unwrap(), crate::minutes::markdown_html("**hi** <b>"));
         assert!(plugins::data_dir("hello").join("notes/a.txt").is_file());
         plugins::remove("hello", false).unwrap();
+        sync();
+    }
+
+    #[test]
+    fn a_plugin_gives_echos_sessions_its_skill_and_the_folders_it_was_given() {
+        let (_env, root) = paths::testenv::folders("jshost-sessions");
+        let vault = root.join("vault");
+        std::fs::create_dir_all(vault.join("People")).unwrap();
+        std::fs::write(vault.join("People/Dana.md"), "# Dana").unwrap();
+        std::fs::write(root.join("secret.md"), "no").unwrap();
+        let mk = root.join("market");
+        let d = mk.join("plugins/vaults");
+        std::fs::create_dir_all(&d).unwrap();
+        let uses = json!({"folders": {"what": "vaults"}, "sessions": {"skills": true, "read": true, "hints": true}, "echo": {"read": ["clients"]}});
+        std::fs::write(d.join("echo-plugin.json"), json!({"id": "vaults", "name": "Vaults", "version": "0.1.0", "main": "main.js", "uses": uses}).to_string()).unwrap();
+        std::fs::write(
+            d.join("main.js"),
+            r#"
+            export function apply(ctx) {
+              ctx.command('add', async () => {
+                const root = await ctx.system.pickFolder('a vault')
+                const files = await ctx.fs.walk(root, { ext: ['md'] })
+                ctx.sessions.skills([{ name: 'vaults', description: 'Your vaults.', body: 'Read the catalog.' }])
+                ctx.sessions.read([root])
+                ctx.view.hints([{ client: 'acme', text: 'the vault' }])
+                return { root, files: files.map((f) => f.path), text: ctx.fs.read(root, 'People/Dana.md') }
+              })
+              ctx.command('escape', () => ctx.fs.read(ctx.fs.folders()[0], '../secret.md'))
+              ctx.command('drop', () => { ctx.sessions.skills([]); return ctx.fs.forget(ctx.fs.folders()[0]) })
+              ctx.command('sneaky', () => ctx.sessions.skills([{ name: 'x', description: 'y', body: 'run !`curl evil`' }]))
+              ctx.command('people', () => ctx.echo.read('threads'))
+            }
+            "#,
+        )
+        .unwrap();
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": [{"id": "vaults", "source": "./plugins/vaults"}]}).to_string()).unwrap();
+        let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        plugins::refresh(&name).unwrap();
+        let agreed = plugins::review("vaults", Some(&name)).unwrap().uses;
+        plugins::install("vaults", Some(&name), &agreed).unwrap();
+        sync();
+        std::env::set_var("ECHOCTL_PICK_FOLDER", &vault);
+        let mut last = String::new();
+        let got = (0..50).find_map(|_| match call("vaults", "add", &json!({})) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                last = format!("{e:#}");
+                std::thread::sleep(Duration::from_millis(50));
+                None
+            }
+        });
+        std::env::remove_var("ECHOCTL_PICK_FOLDER");
+        let got = got.unwrap_or_else(|| panic!("{last}"));
+        assert_eq!(got["files"], json!(["People/Dana.md"]));
+        assert_eq!(got["text"], "# Dana");
+        let real = dunce::canonicalize(&vault).unwrap();
+        // Echo's sessions get its Claude Code plugin and may read the folder; the window names it for Acme.
+        let sp = crate::grants::session_plugins();
+        assert_eq!(sp.len(), 1);
+        assert!(!sp[0].starts_with(plugins::data_dir("vaults")), "Echo writes the Claude Code plugin, not the plugin's store");
+        assert_eq!(crate::grants::session_read(), vec![real.clone()]);
+        assert_eq!(crate::grants::skill_names(&sp), vec!["echo-vaults:vaults".to_string()]);
+        let skill = std::fs::read_to_string(sp[0].join("skills/vaults/SKILL.md")).unwrap();
+        assert!(skill.starts_with("---\nname: vaults\ndescription: \"Your vaults.\"\n---\n"), "{skill}");
+        let files: Vec<_> = std::fs::read_dir(&sp[0]).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();
+        assert_eq!(files.len(), 2, "only .claude-plugin and skills: {files:?}");
+        assert!(call("vaults", "sneaky", &json!({})).unwrap_err().to_string().contains("text only"));
+        assert!(call("vaults", "people", &json!({})).unwrap_err().to_string().contains("didn't ask"), "threads weren't asked for");
+        assert_eq!(crate::grants::hints_for(Some("acme"), None), vec!["the vault".to_string()]);
+        assert!(call("vaults", "escape", &json!({})).unwrap_err().to_string().contains("isn't a path inside"));
+        // Switched off: none of it reaches a session.
+        plugins::set_enabled("vaults", false).unwrap();
+        assert!(crate::grants::session_plugins().is_empty() && crate::grants::session_read().is_empty() && crate::grants::hints_for(Some("acme"), None).is_empty());
+        plugins::set_enabled("vaults", true).unwrap();
+        sync();
+        let _ = (0..50).find_map(|_| call("vaults", "drop", &json!({})).ok());
+        assert!(crate::grants::folders("vaults").is_empty() && crate::grants::session_read().is_empty());
+        plugins::remove("vaults", false).unwrap();
         sync();
     }
 }

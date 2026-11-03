@@ -22,6 +22,8 @@ use crate::{guard, notes, paths};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Tools {
+    /// No tools at all: the prompt holds everything (a plugin's analysis of what it read).
+    None,
     Read,
     Folder,
     Skip,
@@ -33,12 +35,14 @@ impl Tools {
             "" | "read" => Ok(Tools::Read),
             "folder" => Ok(Tools::Folder),
             "skip" => Ok(Tools::Skip),
-            o => bail!("tools “{o}”: read, folder or skip"),
+            "none" => Ok(Tools::None),
+            o => bail!("tools “{o}”: none, read, folder or skip"),
         }
     }
 
     pub fn word(self) -> &'static str {
         match self {
+            Tools::None => "no tools",
             Tools::Read => "read",
             Tools::Folder => "folder",
             Tools::Skip => "skip",
@@ -104,6 +108,7 @@ fn preamble(tools: Tools, cli: &str) -> String {
              only: {}. You change nothing.",
             guard::ROUTINE_COMMANDS.iter().map(|c| format!("`echoctl {}`", c.replace('*', "<id>"))).collect::<Vec<_>>().join(", ")
         ),
+        Tools::None => "You have no tools: everything you need is below.".to_string(),
         _ => format!("Echo's CLI is {cli}; the Brain (echo-brain tools) is there when it is on."),
     };
     format!(
@@ -155,20 +160,39 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
     #[cfg(not(all(feature = "tray", feature = "brain")))]
     let brain: Option<String> = None;
     let mut settings_file = None;
+    // What plugins add to Echo's sessions: their skills, and folders to read (also for a read-only run).
+    let (session_plugins, session_read) = (crate::grants::session_plugins(), crate::grants::session_read());
+    if spec.tools != Tools::None {
+        for d in &session_plugins {
+            a.extend(["--plugin-dir".into(), d.display().to_string()]);
+        }
+    }
     match spec.tools {
+        Tools::None => {
+            a.extend(["--tools".into(), String::new(), "--strict-mcp-config".into(), "--no-session-persistence".into()]);
+        }
         Tools::Read => {
             crate::ai::hooks_conflict(profile, &cwd).map_err(|w| anyhow!(w))?;
             let folder = paths::config_dir().join("minutes-run");
             fs::create_dir_all(&folder)?;
             let f = folder.join(format!("job-{}-{}.json", std::process::id(), Local::now().timestamp_millis()));
             fs::write(&f, serde_json::to_vec_pretty(&guard::settings(&exe, &fwd(&paths::calls_dir())))?)?;
-            a.extend(["--settings".into(), f.display().to_string(), "--tools".into(), "Bash,Read,Glob,Grep".into(), "--strict-mcp-config".into()]);
+            let tools = if session_plugins.is_empty() { "Bash,Read,Glob,Grep" } else { "Bash,Read,Glob,Grep,Skill" };
+            a.extend(["--settings".into(), f.display().to_string(), "--tools".into(), tools.into(), "--strict-mcp-config".into()]);
             if let Some(b) = &brain {
                 a.extend(["--mcp-config".into(), b.clone()]);
             }
             a.extend(["--permission-mode".into(), "dontAsk".into(), "--allowedTools".into()]);
             let abs = format!("/{}", notes::rule_path(&home));
             a.extend(["Read", "Glob", "Grep"].map(|t| format!("{t}({abs}/**)")));
+            for d in &session_read {
+                let abs = format!("/{}", notes::rule_path(d));
+                a.extend(["Read", "Glob", "Grep"].map(|t| format!("{t}({abs}/**)")));
+                a.extend(["--add-dir".into(), d.display().to_string()]);
+            }
+            if !session_plugins.is_empty() {
+                a.push("Skill".into());
+            }
             a.extend(clis.iter().flat_map(|cli| guard::ROUTINE_COMMANDS.iter().map(move |c| format!("Bash({cli} {}:*)", c.split(" *").next().unwrap_or(c)))));
             a.push("mcp__echo-brain".into());
             settings_file = Some(f);
@@ -189,6 +213,8 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
         c.env("ECHOCTL_BIN", &exe);
         if spec.tools == Tools::Read {
             c.env(guard::RUN_MODE, "routine").env(guard::RUN_HOME, &home).env(guard::RUN_CLIS, clis.join("\n"));
+            c.env(guard::RUN_READ, session_read.iter().map(|d| d.display().to_string()).collect::<Vec<_>>().join("\n"));
+            c.env(guard::RUN_SKILLS, crate::grants::skill_names(&session_plugins).join("\n"));
         }
         Ok(c.spawn()?)
     });

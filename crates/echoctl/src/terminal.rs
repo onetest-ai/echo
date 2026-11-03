@@ -333,6 +333,14 @@ pub fn start_folder(key: &str, profile: Option<&str>, cols: u16, rows: u16) -> R
         args.extend(["--channels".into(), format!("plugin:{}", ch.spec)]);
         extra_env.extend(ch.env.iter().map(|(k, v)| (k.as_str(), v.clone())));
     }
+    // What plugins add to Echo's sessions (never the user's own Claude Code): their Claude Code plugin
+    // (skills) and the folders the user gave them to read (an Obsidian vault…).
+    for d in crate::grants::session_plugins() {
+        args.extend(["--plugin-dir".into(), d.display().to_string()]);
+    }
+    for d in crate::grants::session_read() {
+        args.extend(["--add-dir".into(), d.display().to_string()]);
+    }
     // What the window shows, before each prompt: a settings file of its own with only that hook (the
     // user's own settings apply as ever).
     let folder = paths::config_dir().join("minutes-run");

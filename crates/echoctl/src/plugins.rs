@@ -69,7 +69,9 @@ const CAPABILITIES: &[Capability] = &[
     Capability { id: "channel", ready: true, describe: describe_channel },
     Capability { id: "brain_source", ready: false, describe: describe_brain_source },
     Capability { id: "export", ready: false, describe: describe_export },
-    Capability { id: "sessions", ready: false, describe: describe_sessions },
+    Capability { id: "sessions", ready: true, describe: describe_sessions },
+    Capability { id: "folders", ready: true, describe: describe_folders },
+    Capability { id: "echo", ready: true, describe: describe_echo },
 ];
 
 fn strings(v: &Value, key: &str) -> Result<Vec<String>> {
@@ -174,20 +176,42 @@ fn describe_export(v: &Value) -> Result<String> {
 }
 
 fn describe_sessions(v: &Value) -> Result<String> {
-    let read = strings(v, "read")?;
-    only("A folder to read", &read, &["vault"])?;
-    let skills = strings(v, "skills")?;
     let mut parts = vec![];
-    if !read.is_empty() {
-        parts.push("read the vault you pick".to_string());
+    if v["skills"].as_bool() == Some(true) {
+        parts.push("gives Claude in Echo skills of its own — text only, in Echo's sessions, not your Claude Code".to_string());
     }
-    if !skills.is_empty() {
-        parts.push(format!("use this plugin's skills ({})", skills.join(", ")));
+    if v["read"].as_bool() == Some(true) {
+        parts.push("lets Claude in Echo read the folders you give it (your Echo folder session may also change them, with your permissions)".to_string());
+    }
+    if v["hints"].as_bool() == Some(true) {
+        parts.push("tells Claude what it knows about the client or thread open in the window".to_string());
     }
     if parts.is_empty() {
-        bail!("“sessions” adds nothing (read, skills)");
+        bail!("“sessions” adds nothing (skills, read, hints)");
     }
-    Ok(format!("Lets Claude in the Echo window {}", parts.join(" and ")))
+    let mut text = parts.join("; ");
+    text[..1].make_ascii_uppercase();
+    Ok(text)
+}
+
+fn describe_folders(v: &Value) -> Result<String> {
+    if v["write"].as_bool() == Some(true) {
+        bail!("“folders” is read-only (Echo doesn't let plugins write to your folders)");
+    }
+    let what = v["what"].as_str().unwrap_or("folders").trim();
+    if what.is_empty() || what.chars().count() > 60 {
+        bail!("“folders” what: a few words, e.g. “Obsidian vaults”");
+    }
+    Ok(format!("Reads the {what} you pick, on this computer — only those"))
+}
+
+fn describe_echo(v: &Value) -> Result<String> {
+    let read = strings(v, "read")?;
+    only("Echo data", &read, &["clients", "threads"])?;
+    if read.is_empty() {
+        bail!("“echo” reads nothing (clients, threads)");
+    }
+    Ok(format!("Reads the names of your {} in Echo", read.join(" and ")))
 }
 
 /// The permission sheet's lines for a manifest's `uses`, in order; an unknown capability or a bad
@@ -1067,6 +1091,7 @@ pub fn set_enabled(id: &str, on: bool) -> Result<()> {
 pub fn remove(id: &str, keep_data: bool) -> Result<()> {
     Registry::update(|r| r.installed.remove(id).map(|_| ()).ok_or_else(|| anyhow!("“{id}” isn't installed")))?;
     let _ = fs::remove_dir_all(installed_dir(id));
+    crate::grants::remove_plugin(id);
     if !keep_data {
         let _ = fs::remove_dir_all(data_dir(id));
         let _ = fs::remove_file(secrets_file(id));

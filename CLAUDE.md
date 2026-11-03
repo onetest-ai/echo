@@ -831,6 +831,30 @@ codes) — and registers the channel; its Settings section checks the bot, Bun a
 bot reacts 👀 and Claude answers through the channel; it still works after `--resume`; messages sent while the session
 was closed aren't read. A Claude Code started from inside another (`CLAUDE_CODE_CHILD_SESSION` inherited) keeps no
 transcript, so it can't be resumed.
+**What plugins may reach beyond their store** (`grants.rs`, granted by the user or kept by Echo, never written by the plugin):
+**folders** the user picked in Echo's own picker (`ctx.system.pickFolder` → `<config dir>/plugins/grants/<id>.json`;
+`ECHOCTL_PICK_FOLDER` answers it in tests) — `ctx.fs.walk / list / read` only inside them (plain relative paths, links
+not followed, a link resolving out refused, the resolved path is what is opened, Windows device names refused;
+`uses.folders`, read-only; `ECHOCTL_PICK_FOLDER` only in debug builds); **Echo's sessions** (`uses.sessions`, each part
+asked for: `skills`, `read`, `hints`): skills as text (`ctx.sessions.skills([{name, description, body}])` — Echo writes
+the Claude Code plugin itself in `<config dir>/plugins/session/<id>/`: `plugin.json` `echo-<id>` + `SKILL.md`s with only
+name and description, `!`…`` refused, so no hooks / MCP / agents ride along) given to the Echo-folder session and to
+`claudejob` runs with `--plugin-dir` — never the user's Claude Code — and granted folders they may read
+(`ctx.sessions.read`: `--add-dir` in the folder session; a read-only routine's guard reads `RUN_READ` and loads only those
+skills, by full name `echo-<id>:<skill>`, `RUN_SKILLS`);
+**hints** (`ctx.view.hints`, `<config dir>/plugins/hints/<id>.json`): a line in `<echo_view>` when that client or thread
+(or a thread of that client) is open — one plain line, no tags or breaks; `ctx.echo.read('clients' | 'threads')` (only
+the kinds `uses.echo.read` names). All of it only for enabled plugins; a reload drops what the old version added; removing
+a plugin deletes its grants, hints and session plugin. The client half: `ctx.listen` / `ctx.ui.style`, taken out when it
+unloads (else an update doubles every click). `ctx.claude.run({tools: 'none'})` = no tools at all.
+**Obsidian** (its package; plan `docs/obsidian-design.md`, screens on the Workbench canvas): the user's own vaults, never
+an Echo-made one. + Vault → the picker → a survey (no model: folders, frontmatter keys, tags, links, `.obsidian` daily /
+templates folders) → one Claude run with no tools → a description in parts (**When Claude looks here** — one line ≤ 250
+—, what it is, where things are, how notes are written, what Claude can do, leave alone) + which clients / threads it is
+for → the user corrects it and confirms (Inbox until then; one analysis per vault at a time). Then **one skill**, `obsidian-vaults` (its description names
+the vaults), a catalog `vaults.md` and each description — rebuilt on every add, remove, re-read and edit; a re-read waits
+beside the user's description (`proposed.md`); a vault whose folder is gone (a drive not mounted) is left out. Measured on a fake vault: the analysis in ~12 s; Claude Code with
+the skill and `--add-dir` answered from the vault and named the notes.
 **Scheduler** (its package in `onetest-ai/echo-plugins/plugins/scheduler`): routines = the user's prompts on a schedule
 (`routines/<id>.md` in its store, templates in its package), runs with tokens and cost, its own Settings section; the
 Telegram and Obsidian plugins wait for `channel`, `brain_source`, `export`, `sessions`.

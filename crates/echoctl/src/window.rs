@@ -2153,7 +2153,8 @@ fn act(v: &Value) -> bool {
             false
         }
         "open_url" => {
-            if let Some(u) = v["url"].as_str().filter(|u| u.starts_with("https://")) {
+            // The web, and a note in Obsidian (`obsidian://open?vault=…&file=…`: it only opens the note).
+            if let Some(u) = v["url"].as_str().filter(|u| u.starts_with("https://") || u.starts_with("obsidian://open?")) {
                 open_external(u);
             }
             false

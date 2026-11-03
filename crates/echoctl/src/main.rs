@@ -18,6 +18,7 @@ mod frames;
 #[cfg(feature = "transcribe")]
 mod gpu;
 mod graph;
+mod grants;
 mod guard;
 mod ledger;
 mod livenotes;
