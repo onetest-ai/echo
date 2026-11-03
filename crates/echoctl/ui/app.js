@@ -3937,19 +3937,23 @@ const GraphView = (() => {
     const st = { key, box, graph, match: v && v.key === key ? v.match : null, focus: v && v.key === key ? v.focus : null, hover: null, sel: null, opts }
     // WebGL reads plain colours only: the theme's hex values, a dimmed node by the background's lightness.
     const bg = css('--bg', '#f6f6f8'), dark = /^#/.test(bg) && parseInt(bg.slice(1, 3), 16) < 128
-    const dim = dark ? '#33333d' : '#e1e1e8', text = css('--text', dark ? '#eee' : '#222'), muted = css('--text-3', '#8a8a95')
+    const dim = dark ? '#33333d' : '#e1e1e8', text = css('--text', dark ? '#eee' : '#222'), muted = css('--text-3', '#8a8a95'), soft = css('--text-2', '#55555f')
+    // The hovered node's label sits on a card (sigma's backdrop, white by default): the theme's.
+    const card = dark
+      ? { backdropColor: '#26262e', backdropBorderColor: '#3a3a45', backdropBorderWidth: 1, backdropShadowColor: 'rgba(0, 0, 0, 0.55)', backdropCornerRadius: 6 }
+      : { backdropColor: '#ffffff', backdropBorderColor: '#e1e1e8', backdropBorderWidth: 1, backdropShadowColor: 'rgba(17, 17, 34, 0.18)', backdropCornerRadius: 6 }
     const near = (k) => new Set([k, ...graph.neighbors(k)])
     const sigma = new Sigma(graph, box, {
       settings: { labelDensity: 0.08, labelGridCellSize: 120, labelRenderedSizeThreshold: 7, hideEdgesOnMove: graph.size > 3000, zIndex: true, minCameraRatio: 0.02, maxCameraRatio: 4, stagePadding: 24, labelFont: getComputedStyle(document.body).fontFamily, labelSize: 11 },
       nodeReducer: (k, d, a) => {
         const hov = st.hover && near(st.hover)
-        const out = { ...d, labelColor: a.pinLabel ? text : muted }
+        const out = { ...d, ...card, labelColor: a.pinLabel ? text : muted }
         const lit = (st.focus && st.focus.has(k)) || (hov && hov.has(k)) || k === st.sel
         const off = (st.focus && !st.focus.has(k)) || (hov && !hov.has(k))
-        if (off) return { ...out, color: dim, label: null, zIndex: 0 }
+        if (off) return { ...out, color: dim, label: null, backdropVisibility: 'hidden', zIndex: 0 }
         if ((st.match && st.match.has(k)) || k === st.sel || k === st.hover) return { ...out, highlighted: true, labelVisibility: 'visible', labelColor: text, zIndex: 3 }
         // Labels where they fit (sigma's grid, the biggest first: topics and threads); lit ones always.
-        if (lit) return { ...out, labelVisibility: 'visible', zIndex: 2 }
+        if (lit) return { ...out, labelVisibility: 'visible', labelColor: a.pinLabel ? text : soft, zIndex: 2 }
         if (a.pinLabel) return { ...out, zIndex: 1 }
         return out
       },
@@ -4006,7 +4010,11 @@ const GraphView = (() => {
     return hits
   }
   const resize = () => { for (const st of live.values()) if (st.box.isConnected) st.sigma.resize() }
-  return { draw, focus, select, find, resize, live }
+  /** The theme changed (the system's appearance): drawn again in its colours, laid out as they were. */
+  function retheme() {
+    for (const [id, st] of live) { try { st.sigma.kill() } catch { /* gone with its box */ } live.delete(id) }
+  }
+  return { draw, focus, select, find, resize, retheme, live }
 })()
 
 // The Brain's graph: documents (coloured by client) and their topics (labelled, coloured by layer);
@@ -4298,6 +4306,7 @@ document.addEventListener('keydown', (e) => {
   if (e.target.id === 'br-rename' && e.key === 'Escape') { S.br.edit = null; render() }
 })
 window.addEventListener('resize', () => { if (S.view === 'brain') GraphView.resize() })
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { GraphView.retheme(); if (S.view === 'brain') render() })
 
 /** A thread's topics and terms from the Brain (null when there is no taxonomy yet: the old glossary
  *  shows instead). Topics with their sections here; terms pinned here first, then by mentions. */
