@@ -112,6 +112,8 @@ const PRELUDE: &str = r#"
       forget: (root) => call('fs.forget', String(root)),
       list: (root, path) => call('fs.list', [String(root), path || '']),
       read: (root, path, max) => call('fs.read', [String(root), String(path), max || 0]),
+      /** Many files at once, off the plugin's own time slice (a vault's notes): [text | null] in order. */
+      readMany: (root, paths, max) => later('fs.read_many', [String(root), (paths || []).map(String), max || 0]),
       /** Every file under `path` (dot folders left out unless `hidden`): [{path, size, mtime}] up to `max`. */
       walk: (root, opts) => later('fs.walk', [String(root), opts || {}]),
     },
@@ -763,6 +765,22 @@ fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
                 Some(dir) => json!(crate::grants::grant(id, &dir)?.display().to_string()),
                 None => Value::Null,
             })
+        }
+        "fs.read_many" => {
+            uses(id, "folders")?;
+            let root = arg[0].as_str().unwrap_or("").to_string();
+            let max = arg[2].as_u64().filter(|m| *m > 0).unwrap_or(1 << 20).min(4 << 20);
+            let mut out = vec![];
+            for rel in arg[1].as_array().into_iter().flatten().take(5000) {
+                let text = crate::grants::resolve(id, &root, rel.as_str().unwrap_or("")).ok().and_then(|f| {
+                    use std::io::Read;
+                    let mut buf = vec![];
+                    std::fs::File::open(f).ok()?.take(max).read_to_end(&mut buf).ok()?;
+                    Some(String::from_utf8_lossy(&buf).into_owned())
+                });
+                out.push(json!(text));
+            }
+            Ok(json!(out))
         }
         "fs.walk" => {
             uses(id, "folders")?;

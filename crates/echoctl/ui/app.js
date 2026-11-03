@@ -574,7 +574,7 @@ function route() {
 }
 const go = (hash) => { if (location.hash.slice(1) !== hash) location.hash = hash; else render() }
 /** An activity, where the user left it (the open call and tab; the calendar's day or week). */
-const goActivity = (id) => go(ACTIVITIES.some((a) => a.id === id && a.plugin) ? (S.view === id ? id : (S.plRoutes || {})[id] ? `${id}/${S.plRoutes[id]}` : id) : id === 'calendar' ? `calendar/${S.cal.mode}` : id === 'settings' ? `settings/${S.setSection}`
+const goActivity = (id) => go(ACTIVITIES.some((a) => a.id === id && a.plugin) ? ((S.plRoutes || {})[id] ? `${id}/${S.plRoutes[id]}` : id) : id === 'calendar' ? `calendar/${S.cal.mode}` : id === 'settings' ? `settings/${S.setSection}`
   : id === 'tasks' ? 'tasks' : id === 'brain' ? `brain/${S.br.tab}`
   : id === 'projects' ? (S.pj.found ? 'found' : S.pj.client ? `client/${S.pj.client}/${S.pj.ctab || 'overview'}` : S.pj.sel ? `project/${S.pj.sel}/${S.pj.tab}` : 'projects') : (S.selected ? `call/${S.selected}/${S.tab}` : 'calls'))
 
@@ -719,7 +719,7 @@ function actbar() {
     const found = a.id === 'projects' && S.pj.data ? S.pj.data.found_count || 0 : 0
     const badge = a.id === 'settings' && settingsWarnings() ? `<span class="act-badge" aria-label="${settingsWarnings()} to fix">${settingsWarnings()}</span>`
       : found ? `<span class="act-badge new" aria-label="${found} found for you">${found}</span>` : ''
-    return `<button class="act" data-go="${a.id}"${S.view === a.id ? ' aria-current="page"' : ''} title="${esc(a.label)} (${a.id === 'settings' ? MOD + ',' : MOD + (i + 1)})">${a.icon}<span>${esc(a.label)}</span>${badge}</button>`
+    return `<button class="act" data-go="${esc(a.id)}"${S.view === a.id ? ' aria-current="page"' : ''} title="${esc(a.label)} (${a.id === 'settings' ? MOD + ',' : MOD + (i + 1)})">${a.icon}<span>${esc(a.label)}</span>${badge}</button>`
   }
   const acts = shownActivities()
   const top = acts.filter((a) => !a.bottom), bottom = acts.filter((a) => a.bottom)
@@ -2410,7 +2410,9 @@ function pluginCtx(id) {
       add: (a) => {
         const at = ACTIVITIES.findIndex((x) => x.bottom)
         ACTIVITIES.splice(at < 0 ? ACTIVITIES.length : at, 0, { layout: 'single', ...a, id: `${id}:${a.id}`, plugin: id })
-        route()
+        // Only a hash of this activity is routed again (no other route's side effects re-run).
+        const h = decodeURIComponent(location.hash.slice(1)), aid = `${id}:${a.id}`
+        if (h === aid || h.startsWith(aid + '/')) route()
         render()
       },
     },
@@ -2454,7 +2456,8 @@ async function loadPluginClients(snapshot) {
 }
 function unloadPlugin(id) {
   for (let i = ACTIVITIES.length - 1; i >= 0; i--) if (ACTIVITIES[i].plugin === id) ACTIVITIES.splice(i, 1)
-  if (S.view && S.view.startsWith(id + ':')) { S.view = 'calls'; go('calls') }
+  // Switched off or removed (not an update, which loads it again right away): its page goes.
+  setTimeout(() => { if (S.view && S.view.startsWith(id + ':') && !ACTIVITIES.some((a) => a.id === S.view)) { S.view = 'calls'; go('calls') } }, 1500)
   const owned = Plugins.owned[id]
   if (owned) {
     for (const [type, fn, opts] of owned.listeners) document.removeEventListener(type, fn, opts)

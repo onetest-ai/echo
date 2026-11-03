@@ -892,7 +892,10 @@ beside the user's description (`proposed.md`); a vault whose folder is gone (a d
 tabs with their properties (a property's `[[link]]` opens its note) and body through Echo's safe Markdown writer
 (wikilinks become in-place links, a missing one dotted), Open in Obsidian, the local graph, backlinks with their line,
 tags, In Echo (a client or thread of the same name); a Graph tab by Links | Tags | Both, coloured by folder or tag, orphans
-hidden. The host half keeps an index per vault (frontmatter, tags, links), re-read only for files whose time changed. Measured on a fake vault: the analysis in ~12 s; Claude Code with
+hidden. The host half keeps an index per vault (frontmatter, tags, links and the line each sits on), re-read only for files whose
+time or size changed, in batches through `ctx.fs.readMany` (async: off the plugin's 5 s slice), one build per vault at a
+time. Wikilinks pass Echo's writer as markers of that call only and become links in text nodes (never code or attributes).
+A vault is never indexed into the Brain: vault and Brain stay apart (the user, 2026-11-03). Measured on a fake vault: the analysis in ~12 s; Claude Code with
 the skill and `--add-dir` answered from the vault and named the notes.
 **Scheduler** (its package in `onetest-ai/echo-plugins/plugins/scheduler`): routines = the user's prompts on a schedule
 (`routines/<id>.md` in its store, templates in its package), runs with tokens and cost, its own Settings section; the
