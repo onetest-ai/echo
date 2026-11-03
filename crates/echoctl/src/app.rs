@@ -1100,6 +1100,11 @@ pub fn message(text: &str, buttons: &[&str]) -> Option<String> {
 
 /// A native folder picker.
 pub fn choose_folder(prompt: &str) -> Option<PathBuf> {
+    // Development and tests: the folder given, with no dialog.
+    if let Some(d) = std::env::var_os("ECHOCTL_PICK_FOLDER") {
+        let _ = prompt;
+        return Some(PathBuf::from(d)).filter(|p| p.is_dir());
+    }
     #[cfg(target_os = "macos")]
     {
         let script = format!("POSIX path of (choose folder with prompt {} default location (path to home folder))", applescript_str(prompt));

@@ -123,6 +123,13 @@ fn view_lines(v: &Value, now: chrono::DateTime<chrono::Utc>, calls: &Path) -> Op
         }
         l.push(s);
     }
+    // What plugins know about the open client or thread (an Obsidian vault of theirs…): their own lines,
+    // not page text. A thread's client counts too.
+    let thread_id = clean(&t["id"]);
+    let client_id = clean(&cl["id"]).or_else(|| thread_id.as_deref().and_then(|id| crate::projects::list().into_iter().find(|p| p.id == id)).and_then(|p| p.client));
+    for h in crate::grants::hints_for(client_id.as_deref(), thread_id.as_deref()) {
+        l.push(format!("Also for this: {h}"));
+    }
     let i = &v["item"];
     if let (Some(id), Some(title)) = (clean(&i["id"]), q(&i["title"])) {
         let mut s = format!("Selected work item: {id} {title}");
