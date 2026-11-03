@@ -67,7 +67,9 @@ fn card(p: &Project, n: &Node, nodes: &BTreeMap<String, Node>, ev: &BTreeMap<Str
     let last = n.history.iter().rev().find(|h| h["date"].is_string());
     let quiet = last.and_then(|h| days(h["date"].as_str()?, today));
     let last_call = n.history.iter().rev().filter_map(|h| ev.get(h["evidence"].as_str()?)).next();
-    let after: Vec<Value> = n.waiting_on.iter().filter_map(|d| nodes.get(d)).filter(|d| open(&d.state)).map(|d| json!({"id": d.id, "title": d.title})).collect();
+    let mut after: Vec<Value> = n.waiting_on.iter().filter_map(|d| nodes.get(d)).filter(|d| open(&d.state)).map(|d| json!({"id": d.id, "title": d.title})).collect();
+    // Open work in other threads it waits on (#20).
+    after.extend(n.xwaits.iter().map(|w| json!({"id": w["node"], "title": w["title"], "thread": w["thread"]})));
     let blocked = n.state == "blocked" || n.waiting_for.as_ref().is_some_and(|w| w["what"].is_string() || w["who"].is_string()) || !after.is_empty();
     // Who handed it over: as recorded, else whoever's words created it. Not "made by hand": a session
     // filing the user's mail makes tasks by hand that nobody handed over (2026-11-02).
@@ -90,6 +92,8 @@ fn card(p: &Project, n: &Node, nodes: &BTreeMap<String, Node>, ev: &BTreeMap<Str
             "owner": owner, "mine": owner.as_deref().is_some_and(|o| me.is(o)), "client": client, "delegated_by": delegated,
             "due": n.due, "late": late, "waiting_for": n.waiting_for, "after": after, "blocked": blocked,
             "quiet": quiet, "last": last_call.map(|e| json!({"date": e["date"], "call": e["call"], "title": e["title"]})),
+            // One piece of work raised in several threads (#20): this card stands for all of them.
+            "also_in": n.also_in,
         }),
     )
 }
@@ -145,14 +149,15 @@ fn across_with(list: &[Project], me: &Me, meetings: &[MeetingContext], today: Na
     // Asks: per person, the items to raise, with the project they're in.
     let mut asks: Vec<(String, Option<String>, Value)> = vec![];
     for p in list.iter().filter(|p| !p.stage.closed()) {
-        let t = match ledger::Ledger::of(&p.id).and_then(|l| ledger::fold(&l)) {
+        let t = match ledger::fold_linked(&p.id) {
             Ok(t) => t,
             Err(e) => {
                 errors.push(json!({"project": p.id, "error": format!("{e:#}")}));
                 continue;
             }
         };
-        let tasks: Vec<&Node> = t.nodes.values().filter(|n| n.kind == "task" && open(&n.state) && n.merged_into.is_none()).collect();
+        // A mirror (#20) is shown once, as its master's card in the master's thread.
+        let tasks: Vec<&Node> = t.nodes.values().filter(|n| n.kind == "task" && open(&n.state) && n.merged_into.is_none() && n.mirror_of.as_ref().is_none_or(|m| m["closed_thread"] == true)).collect();
         let mut cards: BTreeMap<String, (String, Value)> = tasks.iter().map(|n| (n.id.clone(), card(p, n, &t.nodes, &t.evidence, today, me))).collect();
         // Waiting for others = what stops me doing what I owe: the open work my tasks wait on (not
         // mine; it leaves Others / Nobody named for here) and the people they wait on (a card each).
@@ -176,6 +181,23 @@ fn across_with(list: &[Project], me: &Me, meetings: &[MeetingContext], today: Na
                         c["blocks"] = json!([mine]);
                     }
                 }
+            }
+            // What it waits on in another thread (#20): that work, a card here.
+            for w in &n.xwaits {
+                let owner = w["owner"].as_str();
+                if owner.is_some_and(|o| me.is(o)) {
+                    continue;
+                }
+                // Several of my tasks waiting on it: one card, every one of them in what it stops.
+                if let Some(c) = waits.iter_mut().find(|c| c["project"] == w["thread"] && c["id"] == w["node"]) {
+                    if let Some(b) = c["blocks"].as_array_mut() {
+                        b.push(mine.clone());
+                    }
+                    continue;
+                }
+                let c = &cards[&n.id].1;
+                waits.push(json!({"project": w["thread"], "id": w["node"], "title": w["title"], "owner": w["owner"], "state": w["state"], "other_thread": true,
+                                  "after": [], "blocks": [mine], "due": null, "late": false, "quiet": c["quiet"], "story": null, "last": null}));
             }
             if let Some(w) = n.waiting_for.as_ref().filter(|w| w["what"].is_string() || w["who"].is_string()) {
                 if w["who"].as_str().is_some_and(|x| me.is(x)) {
@@ -225,6 +247,13 @@ fn across_with(list: &[Project], me: &Me, meetings: &[MeetingContext], today: Na
             }
         }
         shown.push(json!({"id": p.id, "name": p.name, "tasks": count}));
+    }
+    // Work of another thread my tasks wait on (#20) is Waiting for others, not Others / Nobody named there.
+    let waited: Vec<(Value, Value)> = piles["waiting"].iter().filter(|c| c["other_thread"] == true).map(|c| (c["project"].clone(), c["id"].clone())).collect();
+    for k in ["others", "nobody"] {
+        if let Some(v) = piles.get_mut(k) {
+            v.retain(|c| !waited.iter().any(|(p, i)| c["project"] == *p && c["id"] == *i));
+        }
     }
     for v in piles.values_mut() {
         v.sort_by(rank);
@@ -330,6 +359,72 @@ mod tests {
         assert!(me.is("Me") && me.is("alex") && me.is("Alex Morgan") && me.is("alex@example.com"));
         assert!(!me.is("Dana Kowal") && !me.is(""));
         assert!(Me::of(None).is("me"));
+    }
+
+    #[test]
+    fn one_piece_of_work_in_two_threads() {
+        // #20's case, with fictional threads: a practice thread hears the pitch its pursuit thread already has.
+        let (_env, _root) = crate::paths::testenv::folders("tasks-xref");
+        let practice = projects::create("Acme practice", None, None).unwrap().id;
+        let pursuit = projects::create("Acme pursuit", None, None).unwrap().id;
+        for id in [&practice, &pursuit] {
+            ledger::ensure_first_epic(&ledger::Ledger::of(id).unwrap()).unwrap();
+            ledger::human_event(id, &json!({"op": "create", "kind": "story", "parent": "E01", "title": "Proposal"})).unwrap();
+        }
+        let mk = |id: &str, title: &str| ledger::human_event(id, &json!({"op": "create", "kind": "task", "parent": "S001", "title": title, "internal_owner": "Me"})).unwrap()["id"].as_str().unwrap().to_string();
+        let pitch = mk(&practice, "Pitch the reworked Acme proposal to the CIO");
+        let demo = mk(&pursuit, "Acme demo, Fri");
+        let waits = mk(&practice, "Send the deck to the CIO's office");
+        let prep = mk(&pursuit, "Prepare the demo data");
+        ledger::human_event(&pursuit, &json!({"op": "edit", "node": prep, "set": {"internal_owner": "Sam Ortiz"}})).unwrap();
+        // Found by words of its title in the other threads, not this one.
+        let found = ledger::search_open("acme demo", Some(&practice));
+        assert_eq!(found.iter().map(|x| (x["thread"].as_str().unwrap(), x["id"].as_str().unwrap())).collect::<Vec<_>>(), vec![(pursuit.as_str(), demo.as_str())]);
+        assert!(ledger::search_open("pitch", Some(&practice)).is_empty(), "this thread's own items aren't offered");
+        // 1. The same work, its master in the pursuit thread.
+        let link = ledger::human_event(&practice, &json!({"op": "xref", "node": pitch, "thread": pursuit, "target": demo, "kind": "same", "master": "there"})).unwrap();
+        // An edit of the mirror's owner, due or state is the master's: made there.
+        ledger::human_event(&practice, &json!({"op": "edit", "node": pitch, "set": {"internal_owner": "Lee Park", "title": "Pitch to the CIO"}})).unwrap();
+        assert_eq!(ledger::fold_linked(&pursuit).unwrap().nodes[&demo].internal_owner.as_deref(), Some("Lee Park"));
+        assert_eq!(ledger::fold_linked(&practice).unwrap().nodes[&pitch].title, "Pitch to the CIO", "its title stays its own");
+        // 2. The master changes; the mirror shows it, and Tasks shows the work once, with both threads.
+        ledger::human_event(&pursuit, &json!({"op": "edit", "node": demo, "set": {"internal_owner": "Dana Doe", "due": "2026-11-06"}})).unwrap();
+        let t = ledger::fold_linked(&practice).unwrap();
+        let m = &t.nodes[&pitch];
+        assert_eq!((m.internal_owner.as_deref(), m.due.as_deref()), (Some("Dana Doe"), Some("2026-11-06")));
+        assert_eq!(m.mirror_of.as_ref().unwrap()["node"], demo.as_str());
+        let me = Me::of(None);
+        let list = projects::list();
+        let today = NaiveDate::from_ymd_opt(2026, 11, 3).unwrap();
+        let work = across_with(&list, &me, &[], today, "2026-11-03T09:00:00Z").unwrap();
+        let cards: Vec<Value> = PILES.iter().flat_map(|k| work["piles"][*k].as_array().cloned().unwrap_or_default()).filter(|c| c["title"].as_str().is_some_and(|t| t.contains("Acme demo") || t.contains("Pitch"))).collect();
+        assert_eq!(cards.len(), 1, "one card: {cards:?}");
+        assert_eq!(cards[0]["also_in"][0]["thread"], practice.as_str());
+        ledger::human_event(&pursuit, &json!({"op": "edit", "node": demo, "set": {"state": "done"}})).unwrap();
+        assert_eq!(ledger::fold_linked(&practice).unwrap().nodes[&pitch].state, "done");
+        // 3. Undo the link (from either side): both are on their own again, with their own last values.
+        ledger::human_event(&practice, &json!({"op": "undo", "target": link["mid"]})).unwrap();
+        let t = ledger::fold_linked(&practice).unwrap();
+        assert!(t.nodes[&pitch].mirror_of.is_none() && t.nodes[&pitch].state == "open" && t.nodes[&pitch].internal_owner.as_deref() == Some("Me"));
+        assert!(ledger::fold_linked(&pursuit).unwrap().nodes[&demo].xrefs.is_empty(), "taken away on both sides");
+        // Undoing the unlink links them again, as they were.
+        let unlink = ledger::Ledger::of(&practice).unwrap().events().unwrap().into_iter().rev().find(|e| e["op"] == "unxref").unwrap();
+        ledger::human_event(&practice, &json!({"op": "undo", "target": unlink["mid"]})).unwrap_err(); // the pitch's master is done: can't link a closed item
+        // 4. Across threads, a wait: my task waits on someone's open task in the other thread.
+        ledger::human_event(&practice, &json!({"op": "xref", "node": waits, "thread": pursuit, "target": prep, "kind": "depends_on"})).unwrap();
+        let w = &ledger::fold_linked(&practice).unwrap().nodes[&waits];
+        assert_eq!(w.xwaits[0]["node"], prep.as_str());
+        let work = across_with(&projects::list(), &me, &[], today, "2026-11-03T09:00:00Z").unwrap();
+        assert!(work["piles"]["waiting"].as_array().unwrap().iter().any(|c| c["id"] == prep.as_str() && c["project"] == pursuit.as_str()), "{}", work["piles"]["waiting"]);
+        // Unlinked, then the unlink undone: the wait is back, as it was.
+        let u = ledger::human_event(&practice, &json!({"op": "unxref", "node": waits, "thread": pursuit, "target": prep})).unwrap();
+        assert!(ledger::fold_linked(&practice).unwrap().nodes[&waits].xwaits.is_empty());
+        ledger::human_event(&practice, &json!({"op": "undo", "target": u["mid"]})).unwrap();
+        assert_eq!(ledger::fold_linked(&practice).unwrap().nodes[&waits].xwaits.len(), 1);
+        // Same thread, unknown item, closed item: refused, nothing written.
+        assert!(ledger::human_event(&practice, &json!({"op": "xref", "node": waits, "thread": practice, "target": pitch, "kind": "same"})).is_err());
+        assert!(ledger::human_event(&practice, &json!({"op": "xref", "node": waits, "thread": pursuit, "target": "T999", "kind": "same"})).is_err());
+        assert!(ledger::human_event(&practice, &json!({"op": "xref", "node": waits, "thread": pursuit, "target": demo, "kind": "same"})).is_err(), "the demo is done");
     }
 
     #[test]

@@ -528,6 +528,16 @@ the last word in the ledger); a project filter and an order. **Asks** (right pan
 what my work waits on them for (an owed task that also stops me asked once); ≤ 2 per story, ≤ 15 in all; each person's next meeting in the next 7 days (the calendar's cache,
 attendees by email or name; no sign-in: today's agenda). A card or an ask opens the task's details (the Work tab's
 `work-item` panel) right there.
+**One piece of work in two threads** (#20): a work item linked to one of another thread — `same` (one piece of work, its
+master where it is done, `master: here | there`) or `depends_on` (the other side records `blocks`) — as the user's edit in
+**both** ledgers (`xref` / `unxref`, `ledger::link_threads` / `unlink_threads`; an undo of either side unlinks both; both
+items must be open). Read through `ledger::fold_linked` (the window's tree, Tasks, the extractor's context): a master takes
+the verified status changes its mirrors' threads heard (newer than its own; history marked `from`), a mirror shows its
+master's state, owners, due and last history (`mirror_of`) while its own history keeps its evidence, `also_in` names the
+mirrors, `xwaits` the open items it waits on elsewhere. Tasks shows a pair once (the master's card with every thread's
+chip) and a cross-thread wait in Waiting for others. Details: Same as / Also in / Waits for with Unlink, and **Link to an
+item in another thread…** — `/api/work/search` (`ledger::search_open`: open items by title words, no model) → Same work ·
+done there / Done here / Waits on it. EXTRACT sees mirrors as known (`also_tracked_in`), so it doesn't create them again.
 **What this call changed** (a call's Actions tab, above its action items; `ledger::call_changes`, call detail `changes`):
 per thread the call is in, every ledger history entry whose evidence is this call (new stories, tasks, decisions,
 risks, questions; status, dates, links, waits, criteria met; mentions left out, ones the verifier called wrong
