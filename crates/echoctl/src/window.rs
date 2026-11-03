@@ -336,7 +336,7 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
             let mut v = r.unwrap_or_else(|e| json!({ "error": format!("{e:#}") }));
             // Topic rebuilds and re-tagging running now (`brain_rebuild_topics`, `brain_retag_topics`), by layer.
             if p == "/api/brain" {
-                v["topic_jobs"] = json!(BRAIN_INSIGHTS.lock().map(|r| r.iter().filter(|k| k.starts_with("taxonomy:") || k.starts_with("retag:")).cloned().collect::<Vec<_>>()).unwrap_or_default());
+                v["topic_jobs"] = json!(BRAIN_INSIGHTS.lock().map(|r| r.iter().filter(|k| k.starts_with("taxonomy:") || k.starts_with("retag:") || k.starts_with("split:")).cloned().collect::<Vec<_>>()).unwrap_or_default());
             }
             json_reply(v)
         }
@@ -371,6 +371,7 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
         // A work item's mentions elsewhere in its thread: POST-less, the item rides in the query.
         #[cfg(feature = "brain")]
         "/api/brain/mentions" => {
+            crate::brain::advert::count("window", "mentioned_also_in");
             let q = req.uri().query().unwrap_or("");
             let thread = query_param(q, "thread").unwrap_or_default();
             let title = query_param(q, "title").unwrap_or_default();
@@ -395,7 +396,10 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
             json_reply(crate::brain::views::doc(&query_param(q, "source").unwrap_or_default(), scope).unwrap_or_else(|e| json!({ "error": format!("{e:#}") })))
         }
         #[cfg(feature = "brain")]
-        p if p.starts_with("/api/brain/also/") => json_reply(crate::brain::views::also(&urldecode(&p["/api/brain/also/".len()..])).unwrap_or_else(|e| json!({ "error": format!("{e:#}") }))),
+        p if p.starts_with("/api/brain/also/") => json_reply({
+            crate::brain::advert::count("window", "also_discussed");
+            crate::brain::views::also(&urldecode(&p["/api/brain/also/".len()..])).unwrap_or_else(|e| json!({ "error": format!("{e:#}") }))
+        }),
         p if p.starts_with("/api/client/") && p.ends_with("/people") => {
             json_reply(people_view(crate::people::of_client(&p["/api/client/".len()..p.len() - "/people".len()], chrono::Local::now().date_naive())))
         }
@@ -730,6 +734,9 @@ fn attention_busy() -> (Value, Value) {
     if let Ok(r) = BRAIN_INSIGHTS.lock() {
         for layer in r.iter().filter_map(|k| k.strip_prefix("taxonomy:")) {
             busy.insert(format!("drift:{layer}"), "Rebuilding topics…".into());
+        }
+        for layer in r.iter().filter_map(|k| k.strip_prefix("split:")) {
+            busy.insert(format!("drift:{layer}"), "Splitting a topic…".into());
         }
     }
     if PLUGINS_UPDATING.load(std::sync::atomic::Ordering::SeqCst) {
@@ -1098,6 +1105,8 @@ fn settings_snapshot() -> Value {
         b["auto"] = json!(crate::brain::settings().auto());
         b["enabled"] = json!(crate::brain::enabled());
         b["syncing"] = json!(BRAIN_SYNC.load(std::sync::atomic::Ordering::SeqCst));
+        // How often Claude asks it, and the window's views of it (#34): counts only.
+        b["usage"] = crate::brain::advert::usage(7);
         b["last"] = BRAIN_LAST.lock().map(|l| l.clone()).unwrap_or(Value::Null);
         // Documents: what lays them out and reads their pages here.
         b["documents"] = json!({ "pdfium": crate::brain::files::pdf::library().is_some(), "libreoffice": crate::brain::files::render::soffice().is_some(),
@@ -1736,6 +1745,32 @@ pub fn handle(msg: &str) -> Handled {
             }
             true.into()
         }
+        // A topic too broad, split into subtopics (Claude, in the background; #31).
+        #[cfg(feature = "brain")]
+        "brain_split_topic" => {
+            let (layer, label) = (v["layer"].as_str().unwrap_or("").to_string(), v["label"].as_str().unwrap_or("").to_string());
+            // Tracked under the layer whose drift asked for it (a client's catch-all is often a practice topic).
+            let asker = v["for"].as_str().filter(|f| !f.is_empty()).unwrap_or(&layer).to_string();
+            let k = format!("split:{asker}");
+            if BRAIN_INSIGHTS.lock().map(|r| r.contains(&format!("taxonomy:{asker}")) || r.contains(&format!("taxonomy:{layer}"))).unwrap_or(false) {
+                return notice("Its topics are being rebuilt: split it when that is done");
+            }
+            if !layer.is_empty() && !label.is_empty() && BRAIN_INSIGHTS.lock().map(|mut r| r.insert(k.clone())).unwrap_or(false) {
+                std::thread::spawn(move || {
+                    let _end = OnEnd(Some(move || {
+                        crate::attention::stale();
+                        if let Ok(mut r) = BRAIN_INSIGHTS.lock() {
+                            r.remove(&k);
+                        }
+                    }));
+                    match crate::brain::taxonomy::split(&layer, &label, &|_| {}) {
+                        Ok(v) => crate::app::notify(&format!("“{label}” split"), &format!("Into {} — its sections are tagged again; review them on the Brain's Topics tab", v["into"].as_array().map(|a| a.iter().filter_map(|x| x.as_str()).collect::<Vec<_>>().join(", ")).unwrap_or_default())),
+                        Err(e) => crate::app::notify(&format!("“{label}” not split"), &format!("{e:#}")),
+                    }
+                });
+            }
+            true.into()
+        }
         // A layer's sections tagged again with its topics as they are now (Claude, in the background).
         #[cfg(feature = "brain")]
         "brain_retag_topics" => {
@@ -1758,7 +1793,7 @@ pub fn handle(msg: &str) -> Handled {
         #[cfg(feature = "brain")]
         "brain_topic_move" => match (v["key"].as_str(), v["do"].as_str()) {
             (Some(k), Some("apply")) => match crate::brain::taxonomy::apply_move(k) {
-                Ok(()) => true.into(),
+                Ok(said) => notice(&said),
                 Err(e) => notice(&format!("{e:#}")),
             },
             (Some(k), Some("dismiss")) => crate::brain::taxonomy::dismiss_move(k).is_ok().into(),

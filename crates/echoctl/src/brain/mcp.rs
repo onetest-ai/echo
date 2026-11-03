@@ -19,13 +19,13 @@ fn tools() -> Value {
         {"name": "list_scopes", "description": "[identity] The user's clients and threads (engagements) the Brain covers, with their ids, names and how much each holds. Scope every search to a client or a thread when the question is about one.", "inputSchema": s(json!({}), &[])},
         {"name": "search_knowledge", "description": "[identity] Search the user's calls (minutes, transcripts with speakers and times, chats), their threads' Teams channels, mail and documents: keywords in any language fused with meaning. Scope it with `client` or `thread` (ids from list_scopes) when the question is about one. Documents a thread marks as history are left out unless `latest_only` is false, or `as_of` (YYYY-MM-DD) asks what was current on a day. Each hit has its source, section, text, date, speaker, its client and threads, its status, and a link to the moment or page.",
          "inputSchema": s(json!({"query": {"type": "string"}, "limit": {"type": "integer", "default": 5}, "client": {"type": "string"}, "thread": {"type": "string"}, "source_contains": {"type": "string"}, "latest_only": {"type": "boolean"}, "as_of": {"type": "string"}, "tag": {"type": "string"}}), &["query"])},
-        {"name": "list_sources", "description": "[identity] The documents in the Brain (calls now), newest first; `client` / `thread` narrow them.", "inputSchema": s(json!({"contains": {"type": "string"}, "client": {"type": "string"}, "thread": {"type": "string"}, "offset": {"type": "integer"}}), &[])},
-        {"name": "read_document", "description": "[identity] One document's sections in order (a call: its minutes, transcript, chat).",
+        {"name": "list_sources", "description": "[identity] The documents in the Brain — calls, mail conversations, Teams channel posts, folder documents — newest first; `client` / `thread` narrow them.", "inputSchema": s(json!({"contains": {"type": "string"}, "client": {"type": "string"}, "thread": {"type": "string"}, "offset": {"type": "integer"}}), &[])},
+        {"name": "read_document", "description": "[identity] One document's sections in order (a call: its minutes, transcript, chat; a mail conversation or channel post: its messages' facts; a document: its pages).",
          "inputSchema": s(json!({"source": {"type": "string"}, "from_ord": {"type": "integer"}, "to_ord": {"type": "integer"}, "titles_only": {"type": "boolean"}, "max_chars": {"type": "integer"}}), &["source"])},
         {"name": "find_related_content", "description": "[identity] Sections from other sources nearest to a section (by chunk_id) or to a query.",
          "inputSchema": s(json!({"chunk_id": {"type": "string"}, "query": {"type": "string"}, "client": {"type": "string"}, "thread": {"type": "string"}, "limit": {"type": "integer", "default": 6}}), &[])},
         {"name": "get_evidence", "description": "[identity] One section verbatim, with its source and link.", "inputSchema": s(json!({"chunk_id": {"type": "string"}, "include_page_text": {"type": "boolean"}}), &["chunk_id"])},
-        {"name": "get_taxonomy", "description": "[identity] The topics and terms (names, systems, acronyms) of the user's calls, each with its sections, clients and threads; `client` / `thread` show what comes up there; `label` gives one node and its latest sections.", "inputSchema": s(json!({"label": {"type": "string"}, "client": {"type": "string"}, "thread": {"type": "string"}, "relation": {"type": "string"}, "kind": {"type": "string"}, "limit": {"type": "integer"}}), &[])},
+        {"name": "get_taxonomy", "description": "[identity] The topics and terms (names, systems, acronyms) of the user's work — calls, mail, channels, documents — each with its sections, clients and threads; `client` / `thread` show what comes up there; `label` gives one node and its latest sections.", "inputSchema": s(json!({"label": {"type": "string"}, "client": {"type": "string"}, "thread": {"type": "string"}, "relation": {"type": "string"}, "kind": {"type": "string"}, "limit": {"type": "integer"}}), &[])},
         {"name": "list_metrics", "description": "[identity] Governed metrics from the client's reporting workbooks (the numbers lane): name, unit, description, definition (reported or computed), and per grain the entities and months the facts cover. Use it before any numeric answer.", "inputSchema": s(json!({"client": {"type": "string"}}), &[])},
         {"name": "get_metric", "description": "[identity] A governed metric's values, computed from the real cells, each with its source file: filter by grain (branch, region, division, overall…), entity (exact) or entity_like, month (YYYY-MM) or months. Says when a figure was restated by a later report or reports conflict (other_reported_values), and what a merged row merged. No rows = not modeled for that filter: say so, never estimate.", "inputSchema": s(json!({"name": {"type": "string"}, "client": {"type": "string"}, "grain": {"type": "string"}, "entity": {"type": "string"}, "entity_like": {"type": "string"}, "month": {"type": "string"}, "months": {"type": "array", "items": {"type": "string"}}}), &["name"])},
         {"name": "find_people", "description": "[identity] Who is who: the people of the user's threads — name, organisation, title, the threads they are in and their role there, when last seen. `query` matches names, addresses, organisations, titles and roles; `client` / `thread` narrow it. Then get_person for one.", "inputSchema": s(json!({"query": {"type": "string"}, "client": {"type": "string"}, "thread": {"type": "string"}, "limit": {"type": "integer", "default": 20}}), &[])},
@@ -86,7 +86,7 @@ fn call(name: &str, a: &Value) -> Result<Value> {
             Ok(json!({"status": if chunks > 0 { "healthy" } else { "degraded" }, "database_check": "ok", "vector_extension": "echo (in-process)",
                       "counts": {"chunks": chunks, "chunks_fts": chunks, "chunks_vec": st["embedded"], "graph_nodes": st["graph_nodes"], "graph_edges": 0, "chunk_topics": st["chunk_topics"], "facts": 0},
                       "empty_lanes": if st["graph_nodes"].as_i64().unwrap_or(0) > 0 { json!(["facts"]) } else { json!(["facts", "taxonomy"]) }, "knowledge_version": st["built_at"],
-                      "about": {"name": "Echo — the user's calls", "goal": "What was said in the user's calls: decisions, commitments, positions, people, over time", "audience": "the user"}}))
+                      "about": {"name": "Echo — the user's work", "goal": "What was said in the user's calls, mail, Teams channels and documents: decisions, commitments, positions, people, over time", "audience": "the user"}}))
         }
         "search_knowledge" => {
             let q = a["query"].as_str().unwrap_or("");
@@ -102,21 +102,12 @@ fn call(name: &str, a: &Value) -> Result<Value> {
         "list_scopes" => {
             // Only the clients and threads it may read.
             let mut v = store::scopes(&path)?;
-            let threads_ok: Vec<String> = {
-                let default = crate::ai::default_id();
-                super::access::thread_profiles(&default).into_iter().filter(|(_, p)| *p == acc.profile).map(|(t, _)| t).collect()
-            };
+            let threads_ok = acc.threads_on_profile();
             if let Some(a) = v["threads"].as_array_mut() {
-                a.retain(|t| {
-                    let id = t["id"].as_str().unwrap_or("");
-                    (id == "-" || threads_ok.iter().any(|x| x == id)) && (acc.threads.is_empty() || acc.threads.iter().any(|x| x == id)) && acc.client.as_deref().is_none_or(|c| t["client"].as_str() == Some(c))
-                });
+                a.retain(|t| acc.thread_ok(t["id"].as_str().unwrap_or(""), t["client"].as_str(), &threads_ok));
             }
             if let Some(a) = v["clients"].as_array_mut() {
-                a.retain(|c| {
-                    let id = c["id"].as_str().unwrap_or("");
-                    (id == "-" || super::access::client_profile_ok(id, &acc.profile)) && acc.client.as_deref().is_none_or(|x| x == id)
-                });
+                a.retain(|c| acc.client_ok(c["id"].as_str().unwrap_or("")));
             }
             Ok(v)
         }
@@ -285,18 +276,36 @@ fn call(name: &str, a: &Value) -> Result<Value> {
     }
 }
 
+/// What this reader's Brain holds and when to go there (#34), generated when the server starts; the fixed
+/// rules on scoping and citing either way.
+fn instructions() -> String {
+    let rules = "When a question is about a client or a thread, pass its id (list_scopes) to every search — a fact from another client is not about this one. Cite every claim with its source (title, date, time) — never print raw ids; say 'not modeled' when nothing supports it. Read-only.";
+    match super::advert::block(access()) {
+        Some(b) => format!("{b}\n\n{rules}"),
+        None => format!("The user's Brain in Echo: their calls, mail, Teams channels and documents as cited facts, organised by client and by thread. {rules}"),
+    }
+}
+
+/// Who runs this server (folder | call | routine), for the usage counts.
+static WHO: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
 fn answer(req: &Value) -> Option<Value> {
     let id = req.get("id").cloned()?; // a notification gets no answer
     let r = match req["method"].as_str().unwrap_or("") {
         "initialize" => Ok(json!({"protocolVersion": req["params"]["protocolVersion"].as_str().unwrap_or(PROTOCOL), "capabilities": {"tools": {}},
                                   "serverInfo": {"name": "echo-brain", "version": env!("CARGO_PKG_VERSION")},
-                                  "instructions": "The user's Brain in Echo: their calls (minutes, transcripts with speakers, chats) as cited facts, organised by client and by thread (engagement). When a question is about a client or a thread, find its id with list_scopes and pass it to every search — a fact from another client is not about this one. Cite every claim with its source (call title, date, time) — never print raw ids; say 'not modeled' when nothing supports it. Read-only."})),
+                                  "instructions": instructions()})),
         "ping" => Ok(json!({})),
         "tools/list" => Ok(json!({"tools": tools()})),
         "tools/call" => {
             let name = req["params"]["name"].as_str().unwrap_or("");
             let args = req["params"]["arguments"].clone();
-            Ok(match call(name, &args) {
+            let r = call(name, &args);
+            // Counted: a call of one of its tools that answered (no content kept).
+            if r.is_ok() && tools().as_array().is_some_and(|t| t.iter().any(|x| x["name"] == name)) {
+                super::advert::count(WHO.get().map(String::as_str).unwrap_or("other"), name);
+            }
+            Ok(match r {
                 Ok(v) => json!({"content": [{"type": "text", "text": v.to_string()}], "structuredContent": v, "isError": false}),
                 Err(e) => json!({"content": [{"type": "text", "text": json!({"error": format!("{e:#}"), "how_to_fix": "Run `echoctl brain status`; set the embedding server in Settings → Brain; `echoctl brain sync`."}).to_string()}], "isError": true}),
             })
@@ -310,10 +319,11 @@ fn answer(req: &Value) -> Option<Value> {
 }
 
 /// Serve until stdin closes.
-pub fn serve(access: Option<super::access::Access>) -> Result<()> {
+pub fn serve(access: Option<super::access::Access>, who: Option<String>) -> Result<()> {
     if let Some(a) = access {
         let _ = ACCESS.set(a);
     }
+    let _ = WHO.set(who.filter(|w| ["folder", "call", "routine"].contains(&w.as_str())).unwrap_or_else(|| "other".into()));
     let stdin = std::io::stdin();
     let mut out = std::io::stdout();
     for line in stdin.lock().lines() {

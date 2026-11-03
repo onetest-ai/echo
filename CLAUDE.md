@@ -643,6 +643,16 @@ without it).
   get_metric answer `not_modeled` until those lanes exist) — kb recognises a Brain by them. Attached to both window
   sessions (`--mcp-config`, `mcp__echo-brain` allowed); the call session's guard allows `mcp__echo-brain__*` in ask mode
   only (`guard::BRAIN_TOOLS`), never in a minutes run.
+- **It tells Claude it is there** (#34, `brain/advert.rs`, no model, nothing when it is off): what this reader's Brain
+  holds now — kinds with counts and dates, clients and threads with their ids, people / figures / insights, last update —
+  from the store and the reader's access, plus fixed rules on when to go there first (what was said / decided, people,
+  figures, before a brief or prep; scope by client / thread; "not in the Brain"). In the MCP server's `instructions`, an
+  `<echo_brain>` block at `SessionStart` of Echo's sessions (narrowed like the session's server; again after compact /
+  clear, on resume only when changed), routines' prompts (`claudejob`, when they have tools) and a `Brain:` line in
+  `<echo_view>` for an open call, work item, calendar event, client or thread. Usage counted (`brain/usage.json`: tool
+  calls by day and session kind — `brain mcp --who folder|call|routine` —, Also discussed / Mentioned also in views),
+  shown in Settings → Brain. Measured on a working store: asked about a client, a fresh session loaded the tool and
+  searched scoped to that client first.
 - **Client and thread are its dimensions** (`scopes(chunk_id, kind, id)`, from each section's refs; `-` = a call in
   no thread / with no client; filled once for an older store): search, related, the taxonomy's counts and the MCP tools
   take `client` / `thread` (`list_scopes` names them, the server's instructions say to scope); moving a call to another
@@ -667,6 +677,16 @@ without it).
   synonyms; `merge` takes `into_layer: shared`); down — a practice topic whose ≥ 10 tagged sections are all one
   client's → that client. Turned down ones stay quiet (`brain/taxonomy/moves.json`).
   `taxonomy build [--layer shared|<client>]` builds every layer or one (then classifies that layer's sections).
+  **A client never repeats the practice** (#32, #33, `fold_into_practice`, after every client build): a client topic that
+  names a practice topic (label, synonym, ratio ≥ 0.86) isn't made — its subtopics go under the practice's level-1, its
+  tags follow by alias — and a client term that is a practice term by any name isn't either (its thread pins move to the
+  practice's). Duplicates from older builds are offered as Move up ("your practice has it already"). Move up says where it
+  went (a term: the dictionary, its group). **Split** (#31, `taxonomy::split`, `echoctl brain taxonomy split <layer>
+  <topic>`, IPC `brain_split_topic`, the drift banner's and the Inbox's first button when one topic took the most, the
+  topic panel): that topic's sections only (≤ 80 sampled) → 2–6 subtopics (a level-2 topic is replaced by siblings) →
+  provisional → only those sections tagged again (`classify_in`). A rebuild gets the drift reasons and each topic's
+  sections and share, and is told a topic over a quarter of the sections gets subtopics; the catch-all reason names its
+  topic.
   **Drift** (#47, `taxonomy::drift`, no model): per layer, over the sections that came in since its last build (its `build`
   in the history: indexed after its `at` — `chunks.created_at` — and judged since; never the build's own sections tagged
   again, #18) — ≥ 30 of them —, stale when > 10% fit no topic (`untagged`) or one level-1 topic took > 40% of the tagged

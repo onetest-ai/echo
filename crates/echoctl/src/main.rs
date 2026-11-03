@@ -1999,6 +1999,9 @@ enum BrainCmd {
         thread: Vec<String>,
         #[arg(long)]
         call: Option<String>,
+        /// Who runs it (folder | call | routine), for the usage counts in Settings → Brain
+        #[arg(long)]
+        who: Option<String>,
     },
     /// The taxonomy: topics and terms (it supersedes thread glossaries)
     Taxonomy {
@@ -2104,6 +2107,9 @@ enum TaxonomyCmd {
         #[arg(long)]
         dismiss: Option<String>,
     },
+    /// Split a topic that is too broad into 2–6 subtopics (Claude, on the default AI profile), then tag only
+    /// its sections again (layer: shared | a client's id)
+    Split { layer: String, topic: String },
     /// Tag sections not tagged yet (--again: all of them; --layer: only one layer's sections)
     Classify {
         #[arg(long)]
@@ -2118,9 +2124,9 @@ enum TaxonomyCmd {
 #[cfg(feature = "brain")]
 fn brain_command(cmd: BrainCmd) -> Result<()> {
     // Reading is allowed anywhere (a session Echo started reads it through MCP); changing it isn't.
-    if let BrainCmd::Mcp { profile, client, thread, call } = cmd {
+    if let BrainCmd::Mcp { profile, client, thread, call, who } = cmd {
         let access = brain::access::Access { profile: profile.unwrap_or_else(ai::default_id), client, threads: thread, call };
-        return brain::mcp::serve(Some(access));
+        return brain::mcp::serve(Some(access), who);
     }
     if notes::headless() {
         anyhow::bail!("the Brain isn't changed from a run Echo started");
@@ -2132,9 +2138,10 @@ fn brain_command(cmd: BrainCmd) -> Result<()> {
             match cmd {
                 TaxonomyCmd::Show => print_json(&brain::taxonomy::view()?),
                 TaxonomyCmd::Drift => print_json(&serde_json::json!(brain::taxonomy::drift()?)),
+                TaxonomyCmd::Split { layer, topic } => print_json(&brain::taxonomy::split(&layer, &topic, &progress)?),
                 TaxonomyCmd::Moves { apply, dismiss } => {
                     if let Some(k) = apply {
-                        brain::taxonomy::apply_move(&k)?;
+                        println!("{}", brain::taxonomy::apply_move(&k)?);
                     }
                     if let Some(k) = dismiss {
                         brain::taxonomy::dismiss_move(&k)?;
