@@ -418,12 +418,24 @@ pub struct Project {
 
 impl Project {
     /// When it closed (the last change into a closed stage), if it is closed.
-    fn closed_at(&self) -> Option<DateTime<FixedOffset>> {
+    pub(crate) fn closed_at(&self) -> Option<DateTime<FixedOffset>> {
         if !self.stage.closed() {
             return None;
         }
         self.stages.iter().rev().find(|c| c.stage.closed()).and_then(|c| DateTime::parse_from_rfc3339(&c.at).ok())
     }
+}
+
+/// The closed threads, by id: `{id, name, stage, closed_at}` — what the Brain keeps as an archive (#55).
+pub fn closed_threads() -> BTreeMap<String, serde_json::Value> {
+    list()
+        .into_iter()
+        .filter(|p| p.stage.closed())
+        .map(|p| {
+            let at = p.closed_at().map(|t| t.to_rfc3339());
+            (p.id.clone(), serde_json::json!({"id": p.id, "name": p.name, "stage": p.stage.id(), "closed_at": at}))
+        })
+        .collect()
 }
 
 /// What membership looks at in a call.

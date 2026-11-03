@@ -109,9 +109,14 @@ pub fn mail_source(typed: &str) -> Result<String> {
 
 /// The open threads' sources: (thread, source).
 fn watched() -> Vec<(projects::Project, projects::Source)> {
+    with_sources().into_iter().filter(|(p, _)| !p.stage.closed()).collect()
+}
+
+/// Every thread's channel and mail sources, closed threads' too: what was read stays under the threads it belongs to
+/// (a closed thread's is its archive, #55); only open threads read on.
+fn with_sources() -> Vec<(projects::Project, projects::Source)> {
     projects::list()
         .into_iter()
-        .filter(|p| !p.stage.closed())
         .flat_map(|p| p.sources.clone().into_iter().map(move |s| (p.clone(), s)))
         .filter(|(_, s)| s.kind == "teams_channel" || s.kind == "mail")
         .collect()
@@ -297,9 +302,10 @@ pub fn sync(emb: Option<&dyn super::embed::Embedder>) -> Result<(Read, store::Re
             }
         }
     }
-    // A source no open thread watches any more forgets how far it was read: its documents leave the
-    // Brain, so watched again (a thread reopened, a source added back) it reads its whole window again.
-    let live: BTreeSet<String> = w.iter().map(|(_, s)| format!("{}:{}", s.kind, s.id)).collect();
+    // A source no thread has any more forgets how far it was read: its documents leave the Brain, so added back it reads
+    // its whole window again. A closed thread's keeps it: reopened, it reads on from there.
+    let all = with_sources();
+    let live: BTreeSet<String> = all.iter().map(|(_, s)| format!("{}:{}", s.kind, s.id)).collect();
     if let Some(o) = st.as_object_mut() {
         o.retain(|k, _| k == "reader" || k == "reader_fails" || live.contains(k));
     }
@@ -553,7 +559,7 @@ pub fn sync(emb: Option<&dyn super::embed::Embedder>) -> Result<(Read, store::Re
     }
     out.docs = kept.len();
     let report = store::sync_kinds(&path, kept, emb, &[])?;
-    // Documents read before: under the threads that match them now; none → removed.
+    // Documents read before: under the threads that match them now, closed ones too; none → removed.
     let c = store::open(&path)?;
     let rows: Vec<(String, String)> = c
         .prepare("SELECT source, refs FROM documents WHERE kind IN ('channel', 'mail')")?
@@ -562,7 +568,7 @@ pub fn sync(emb: Option<&dyn super::embed::Embedder>) -> Result<(Read, store::Re
     drop(c);
     for (src, refs) in rows {
         let refs: Value = serde_json::from_str(&refs).unwrap_or(Value::Null);
-        let t = threads_for(&refs, &w);
+        let t = threads_for(&refs, &all);
         if t.is_empty() {
             out.removed += store::remove(&path, &src)?;
         } else if refs["threads"] != json!(t) {
@@ -577,6 +583,22 @@ pub fn sync(emb: Option<&dyn super::embed::Embedder>) -> Result<(Read, store::Re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_closed_threads_mail_stays_under_it_and_isnt_read_on() {
+        let (_env, _root) = crate::paths::testenv::folders("brain-sources-closed");
+        let id = projects::create("Hooli workshop", None, None).unwrap().id;
+        projects::update(&id, |p| {
+            p.sources.push(projects::Source { kind: "mail".into(), id: "domain:hooli.example".into(), name: Some("Hooli".into()), ..Default::default() });
+            Ok(())
+        })
+        .unwrap();
+        projects::set_stage(&id, projects::Stage::Done, None).unwrap();
+        assert!(watched().is_empty(), "nothing read on");
+        let refs = json!({"kind": "mail", "people": ["rina@hooli.example"]});
+        let t = threads_for(&refs, &with_sources());
+        assert_eq!(t.len(), 1, "what was read stays under the closed thread (the sync removes only what no thread has)");
+    }
 
     #[test]
     fn mail_rules_match_exactly() {

@@ -551,15 +551,56 @@ pub fn search_at(path: &Path, q: &str, limit: usize, source_contains: Option<&st
     } else {
         note = Some("keywords only: no embedding server is set (Settings → Brain)".into());
     }
+    // A closed thread's sections are its archive (#55): found, marked, ranked under what is current — unless the search
+    // is within that thread.
+    let closed = crate::projects::closed_threads();
+    let ids: Vec<i64> = score.keys().copied().collect();
+    let archived = archived_of(&c, &ids, &closed)?;
+    let within_closed = scope.is_some_and(|s| s.0 == "thread" && closed.contains_key(s.1));
+    for (id, s) in score.iter_mut() {
+        if archived.contains_key(id) && !within_closed {
+            *s *= ARCHIVE_WEIGHT;
+        }
+    }
     let mut ranked: Vec<(i64, f32)> = score.into_iter().collect();
     ranked.sort_by(|a, b| b.1.total_cmp(&a.1));
-    let hits: Vec<Value> = ranked.into_iter().take(limit).map(|(id, s)| hit(&c, id, s)).collect::<Result<_>>()?;
+    let hits: Vec<Value> = ranked
+        .into_iter()
+        .take(limit)
+        .map(|(id, s)| {
+            let mut h = hit(&c, id, s)?;
+            if let Some(t) = archived.get(&id) {
+                h["closed"] = json!(t);
+            }
+            Ok(h)
+        })
+        .collect::<Result<_>>()?;
     let history = match history {
         History::Latest => json!("latest"),
         History::All => json!("all"),
         History::AsOf(d) => json!({"as_of": d}),
     };
     Ok(json!({"query": q, "scope": scope.map(|s| json!({"kind": s.0, "id": s.1})), "history": history, "hits": hits, "count": hits.len(), "note": note}))
+}
+
+/// How much a closed thread's section weighs in a search against a current one.
+const ARCHIVE_WEIGHT: f32 = 0.5;
+
+/// The sections that belong only to closed threads (in a thread, and every thread of theirs closed): id → those
+/// threads (`closed_threads`' entries).
+pub fn archived_of(c: &Connection, ids: &[i64], closed: &BTreeMap<String, Value>) -> Result<BTreeMap<i64, Vec<Value>>> {
+    let mut out = BTreeMap::new();
+    if closed.is_empty() || ids.is_empty() {
+        return Ok(out);
+    }
+    let mut st = c.prepare("SELECT id FROM scopes WHERE chunk_id = ?1 AND kind = 'thread' AND id != '-'")?;
+    for id in ids {
+        let threads: Vec<String> = st.query_map([id], |r| r.get(0))?.collect::<Result<_, _>>()?;
+        if !threads.is_empty() && threads.iter().all(|t| closed.contains_key(t)) {
+            out.insert(*id, threads.iter().filter_map(|t| closed.get(t).cloned()).collect());
+        }
+    }
+    Ok(out)
 }
 
 /// The sections nearest to a chunk, from other documents.
@@ -692,6 +733,38 @@ mod tests {
         let r = sync(&db, vec![input("call/a", &a2), input("call/c", "# C\n## X\nСпринт закрыт.\n")], Some(&Words)).unwrap();
         assert_eq!(r.embedded, 1, "the missing vector is made now");
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_closed_threads_sections_are_its_archive() {
+        let (_env, root) = crate::paths::testenv::folders("brain-archive");
+        let db = root.join("knowledge.sqlite");
+        let open_t = crate::projects::create("Agents pilot", None, None).unwrap().id;
+        let closed_t = crate::projects::create("Hooli workshop", None, None).unwrap().id;
+        crate::projects::set_stage(&closed_t, crate::projects::Stage::Done, Some("wrapped up")).unwrap();
+        let mut a = input("call/a", "# A\n## Gateway\nThe gateway goes in before the pilot.\n");
+        a.refs = json!({"threads": [{"id": open_t}]});
+        let mut b = input("call/b", "# B\n## Gateway\nThe gateway pattern for the procurement bots, the gateway again.\n");
+        b.refs = json!({"threads": [{"id": closed_t}]});
+        let mut both = input("call/c", "# C\n## Gateway\nA gateway shared by both.\n");
+        both.refs = json!({"threads": [{"id": open_t}, {"id": closed_t}]});
+        sync(&db, vec![a, b, both], Some(&Words)).unwrap();
+        let h = search_in(&db, "gateway", 10, None, None, None).unwrap();
+        let hits = h["hits"].as_array().unwrap().clone();
+        assert_eq!(hits.len(), 3, "found, all of it");
+        let closed_hit = hits.iter().find(|x| x["source"] == "call/b").unwrap();
+        assert_eq!(closed_hit["closed"][0]["name"], "Hooli workshop", "marked");
+        assert!(closed_hit["closed"][0]["closed_at"].is_string());
+        assert!(hits.iter().filter(|x| x["source"] != "call/b").all(|x| x["closed"].is_null()), "one open thread keeps it current");
+        assert_eq!(hits.last().unwrap()["source"], "call/b", "ranked under current ones");
+        // Within that thread it isn't pushed down; reopened, it is current again (nothing read again).
+        let within = search_in(&db, "gateway", 10, None, Some(("thread", closed_t.as_str())), None).unwrap();
+        let own = within["hits"].as_array().unwrap().iter().find(|x| x["source"] == "call/b").unwrap();
+        let outside = h["hits"].as_array().unwrap().iter().find(|x| x["source"] == "call/b").unwrap();
+        assert!(own["closed"].is_array() && own["score"].as_f64() > outside["score"].as_f64(), "marked, not weighed down: {within}");
+        crate::projects::set_stage(&closed_t, crate::projects::Stage::Active, Some("back")).unwrap();
+        let h2 = search_in(&db, "gateway", 10, None, None, None).unwrap();
+        assert!(h2["hits"].as_array().unwrap().iter().all(|x| x["closed"].is_null()));
     }
 
     #[test]
