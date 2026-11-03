@@ -667,6 +667,16 @@ without it).
   synonyms; `merge` takes `into_layer: shared`); down — a practice topic whose ≥ 10 tagged sections are all one
   client's → that client. Turned down ones stay quiet (`brain/taxonomy/moves.json`).
   `taxonomy build [--layer shared|<client>]` builds every layer or one (then classifies that layer's sections).
+  **A client never repeats the practice** (#32, #33, `fold_into_practice`, after every client build): a client topic that
+  names a practice topic (label, synonym, ratio ≥ 0.86) isn't made — its subtopics go under the practice's level-1, its
+  tags follow by alias — and a client term that is a practice term by any name isn't either (its thread pins move to the
+  practice's). Duplicates from older builds are offered as Move up ("your practice has it already"). Move up says where it
+  went (a term: the dictionary, its group). **Split** (#31, `taxonomy::split`, `echoctl brain taxonomy split <layer>
+  <topic>`, IPC `brain_split_topic`, the drift banner's and the Inbox's first button when one topic took the most, the
+  topic panel): that topic's sections only (≤ 80 sampled) → 2–6 subtopics (a level-2 topic is replaced by siblings) →
+  provisional → only those sections tagged again (`classify_in`). A rebuild gets the drift reasons and each topic's
+  sections and share, and is told a topic over a quarter of the sections gets subtopics; the catch-all reason names its
+  topic.
   **Drift** (#47, `taxonomy::drift`, no model): per layer, over the sections that came in since its last build (its `build`
   in the history: indexed after its `at` — `chunks.created_at` — and judged since; never the build's own sections tagged
   again, #18) — ≥ 30 of them —, stale when > 10% fit no topic (`untagged`) or one level-1 topic took > 40% of the tagged

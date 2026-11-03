@@ -2107,6 +2107,9 @@ enum TaxonomyCmd {
         #[arg(long)]
         dismiss: Option<String>,
     },
+    /// Split a topic that is too broad into 2–6 subtopics (Claude, on the default AI profile), then tag only
+    /// its sections again (layer: shared | a client's id)
+    Split { layer: String, topic: String },
     /// Tag sections not tagged yet (--again: all of them; --layer: only one layer's sections)
     Classify {
         #[arg(long)]
@@ -2135,9 +2138,10 @@ fn brain_command(cmd: BrainCmd) -> Result<()> {
             match cmd {
                 TaxonomyCmd::Show => print_json(&brain::taxonomy::view()?),
                 TaxonomyCmd::Drift => print_json(&serde_json::json!(brain::taxonomy::drift()?)),
+                TaxonomyCmd::Split { layer, topic } => print_json(&brain::taxonomy::split(&layer, &topic, &progress)?),
                 TaxonomyCmd::Moves { apply, dismiss } => {
                     if let Some(k) = apply {
-                        brain::taxonomy::apply_move(&k)?;
+                        println!("{}", brain::taxonomy::apply_move(&k)?);
                     }
                     if let Some(k) = dismiss {
                         brain::taxonomy::dismiss_move(&k)?;
