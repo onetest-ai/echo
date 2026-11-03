@@ -977,6 +977,11 @@ pub fn window_cmd(msg: &str) -> Option<WindowCmd> {
     }
 }
 
+/// Whether the page may open a plain shell: only `echoctl window --selftest` needs one.
+fn shell_allowed(selftest: bool) -> bool {
+    selftest
+}
+
 /// The user's own shell, in the data folder (a login shell: their PATH and setup).
 fn shell_command() -> portable_pty::CommandBuilder {
     #[cfg(windows)]
@@ -1769,7 +1774,10 @@ pub fn handle(msg: &str) -> Handled {
             let kind = v["kind"].as_str().unwrap_or("");
             let key = v["key"].as_str().unwrap_or(kind).to_string();
             let opened = match kind {
-                "shell" => crate::terminal::open(&key, shell_command(), cols, rows).map(|id| (id, key.clone())),
+                // The self-test's shell only (`window --selftest`): never in a normal window.
+                "shell" if shell_allowed(SELFTEST.load(std::sync::atomic::Ordering::SeqCst)) => {
+                    crate::terminal::open(&key, shell_command(), cols, rows).map(|id| (id, key.clone()))
+                }
                 // Claude in the data folder, on the profile picked (the default when none).
                 "claude-folder" => crate::terminal::start_folder(&key, v["profile"].as_str().filter(|p| !p.is_empty()), cols, rows).map(|id| (id, key.clone())),
                 // Claude on one call, guarded, on the call's own profile.
@@ -2283,6 +2291,15 @@ mod tests {
         // A forged end mark can't let the rest run as keys.
         assert_eq!(paste_bytes("x\x1b[201~rm -rf\n".into(), true), b"\x1b[200~xrm -rf\r\x1b[201~");
         assert_eq!(paste_bytes(String::new(), true), [0x16]);
+    }
+
+    #[test]
+    fn a_normal_window_opens_no_shell() {
+        assert!(!shell_allowed(false) && shell_allowed(true));
+        // The page's own request outside the self-test: refused before anything starts.
+        assert!(!SELFTEST.load(std::sync::atomic::Ordering::SeqCst));
+        let reply = handle(r#"{"cmd":"pty_open","kind":"shell","key":"t","cols":80,"rows":24}"#).reply.unwrap();
+        assert!(reply.contains(r#""ok":false"#) && reply.contains("no terminal of kind"), "{reply}");
     }
 
     #[test]

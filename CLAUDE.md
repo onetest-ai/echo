@@ -267,7 +267,9 @@ Claude Code Echo's terminal starts — never the minutes or sync runs, the plugi
 **My notes** (a panel view, `notesPanel`; it was a call tab) = the user's own notes as a **timeline of moments**
 (`NoteDoc`, no DOM: `ui/my-notes.test.mjs`): each note a line of `my-notes.md` — `- [12:05] …`, `? ` question, `! `
 decision, `⚑` flag, `- [ ] [12:22] …` to-do, `  > "…"` the words it is about — kept in time order; a box adds one,
-timed from its first key while the call records; select words in a transcript → Comment, or right-click a transcript turn or a line of the minutes → Add note (the
+timed from its first key while the call records (a note typed there, or edited in place, without Enter belongs to
+its call and is added as Enter would before a close or quit — `prepareClose` —, Write minutes or another call opened;
+"Not saved yet" meanwhile; Esc / Cancel drop it); select words in a transcript → Comment, or right-click a transcript turn or a line of the minutes → Add note (the
 frame's `EMBED_JS` posts `{echo: 'note', t, quote, section, x, y}`, taken only from that frame) adds one with that quote;
 the transcripts show a dot per note at its turn; the Minutes tab shows each timed note as a callout under the
 line with the same time (else the nearest within 3 min) — sent to the frame (`{echo: 'notes'}` after its `ready`),
@@ -795,7 +797,8 @@ call's one transcription pass, an utterance decoded after 0.8 s of silence — s
 (`live-notes.json` → summary/highlights/actions, `live-state.json`, answers in `live-asks.jsonl`); its quick buttons call
 `echoctl live ask`. It **never calls a model itself** (that would use the session's account, not the call's profile);
 live notes off → it says so. `echoctl live-replay <wav> <dir>` (hidden) plays a WAV in as a growing recording (10×)
-and writes the transcript, as after a call.
+and writes the transcript, as after a call — only into a new or empty folder, or one it marked (`.replay`), and
+only once transcription can run (never a call's folder).
 Mute sync: while recording, the watcher polls Teams' microphone button via Accessibility / UI
 Automation (`ax::MuteWatch`, label "Unmute…" ⇒ muted) every 400 ms; muted ⇒ `audio::mic::MUTED` makes the mic
 track record silence; events `mic_muted`/`mic_unmuted` drive the band. `config.follow_app_mute`
