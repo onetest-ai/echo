@@ -376,7 +376,7 @@ started). The minutes: `context.projects` = each project's brief, notes for Clau
 highlights of its last 5 calls before this one (`calls::recap_from_notes`), so the guard stays as it is. Transcription:
 `vocab::for_call` = always-on + the glossaries of the projects the meeting belongs to + learned; `vocab add` from a
 project's call adds the terms to its glossary too. The window: **Projects** activity (`#project/<id>/<tab>`; list by
-client, Closed folded; tabs Brief (rendered `minutes::markdown_html`, edited in place), Calls (why each belongs,
+client, Closed folded; each client an accordion — its chevron folds it, the open thread stays in view, a count shows; remembered in the webview, `echo.threads.folded`; tabs Brief (rendered `minutes::markdown_html`, edited in place), Calls (why each belongs,
 Unpin / Take out), Profile (stage bar, client — + New client —, since, look, rules, glossary, people, notes, AI
 profile + model)); a call's header shows its projects as chips, a suggestion bar (Add · Not this) and `+ Project`
 (several; New project from this call = that call pinned + its meeting series as the first rule); the calls list shows
