@@ -1473,11 +1473,10 @@ function minutesTab(c) {
 }
 
 /** Above the page: an update going on or one that didn't finish, notes changed since, and the file. */
-/** Write now: a run of Claude Code as configured waiting for another call's recording or transcript
- *  (a local model never: it would take the computer from the recording). */
+/** Write now: a run waiting for another call's recording or transcript that may start anyway
+ *  (`may_start`: Claude Code as configured, not on a model on this computer). */
 const notesNowBtn = (run) => {
-  const p = run && run.state === 'queued' && run.wait === 'call' && profileOf(run.profile)
-  return p && p.kind === 'system' && !run.now ? '<button class="btn ghost" data-cmd="notes-now" title="Start them now; the other call keeps recording, and both share this computer">Write now</button>' : ''
+  return run && run.state === 'queued' && run.wait === 'call' && run.may_start && !run.now ? '<button class="btn ghost" data-cmd="notes-now" title="Start them now; the other call keeps recording, and both share this computer">Write now</button>' : ''
 }
 function minutesBar(c) {
   const run = c.notes_run

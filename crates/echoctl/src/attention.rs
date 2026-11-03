@@ -66,40 +66,45 @@ pub fn collect() -> Collected {
 
     // Minutes: failed ones, ones still waiting their turn, and the profiles whose sign-in they wait for.
     let mut login_wait: BTreeMap<String, usize> = BTreeMap::new();
-    let profiles = crate::ai::Settings::load().ok();
     let fresh = (chrono::Local::now() - chrono::Duration::days(MINUTES_DAYS)).format("%Y-%m-%d").to_string();
     for d in recent_calls(MINUTES_DAYS * 2) {
-        let r = read(&d.join(crate::notes::RUN));
         let name = d.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         if name.get(..10).is_some_and(|x| x < fresh.as_str()) {
             c.quiet.insert(format!("minutes:{}", crate::calls::stamp_of(&d)));
+            c.quiet.insert(format!("minutes-wait:{}", crate::calls::stamp_of(&d)));
             continue;
         }
-        match r["state"].as_str() {
-            Some("needs_login") => *login_wait.entry(r["profile"].as_str().map(str::to_owned).unwrap_or_else(crate::ai::default_id)).or_default() += 1,
-            // Not written yet, waiting (another call's recording, the model): what for, and Write now
-            // where the run may start anyway (Claude Code as configured). Its owner gone: failed, above.
-            Some("queued") => {
-                let Some(run) = crate::notes::status(&d).filter(|r| r.state == "queued") else { continue };
-                let system = run.profile.as_deref().and_then(|id| profiles.as_ref()?.get(id).ok()).is_some_and(|p| p.kind == crate::ai::Kind::System);
-                let acts = if run.wait.as_deref() == Some("call") && system { vec![act("Write now", true, json!({"cmd": "notes_now", "call": name}))] } else { vec![] };
-                out.push(item(
-                    format!("minutes:{}", crate::calls::stamp_of(&d)),
-                    "minutes",
-                    "echo",
-                    format!("Minutes not written yet: {}", call_title(&d)),
-                    run.message.unwrap_or_else(|| "They start as soon as the model is free".into()).chars().take(200).collect(),
-                    false,
-                    acts,
-                    Some(format!("call/{name}/minutes")),
-                ));
-            }
-            Some("failed") if !d.join("notes.md").exists() => out.push(item(
-                format!("minutes:{}", crate::calls::stamp_of(&d)),
+        let stamp = crate::calls::stamp_of(&d);
+        // The state as the user sees it (`notes::status`): a run whose owner died is failed there.
+        let Some(run) = crate::notes::status(&d) else {
+            c.quiet.insert(format!("minutes-wait:{stamp}"));
+            continue;
+        };
+        // Waiting for something it names (not the moment every run spends starting): what for, and
+        // Write now where the run may start anyway. Once it starts it leaves quietly (not "Done").
+        if run.state == "queued" && run.wait.is_some() {
+            let acts = if run.may_start { vec![act("Write now", true, json!({"cmd": "notes_now", "call": name}))] } else { vec![] };
+            out.push(item(
+                format!("minutes-wait:{stamp}"),
+                "minutes",
+                "echo",
+                format!("Minutes not written yet: {}", call_title(&d)),
+                run.message.clone().unwrap_or_else(|| "They start as soon as the model is free".into()).chars().take(200).collect(),
+                false,
+                acts,
+                Some(format!("call/{name}/minutes")),
+            ));
+        } else {
+            c.quiet.insert(format!("minutes-wait:{stamp}"));
+        }
+        match run.state.as_str() {
+            "needs_login" => *login_wait.entry(run.profile.clone().unwrap_or_else(crate::ai::default_id)).or_default() += 1,
+            "failed" if !d.join("notes.md").exists() => out.push(item(
+                format!("minutes:{stamp}"),
                 "minutes",
                 "echo",
                 format!("Minutes failed: {}", call_title(&d)),
-                r["message"].as_str().unwrap_or("Claude Code didn't finish them").chars().take(160).collect(),
+                run.message.as_deref().unwrap_or("Claude Code didn't finish them").chars().take(160).collect(),
                 false,
                 vec![act("Write again", true, json!({"cmd": "write_notes", "call": name})), act("Show log", false, json!({"cmd": "show_log", "call": name}))],
                 Some(format!("call/{name}/minutes")),
@@ -489,9 +494,14 @@ mod tests {
             std::fs::write(d.join(crate::notes::RUN), run.to_string()).unwrap();
         };
         let me = std::process::id();
-        call("planning", "Planning", json!({"state": "queued", "profile": "system", "pid": me, "wait": "call", "message": "Claude Code (as configured) waits for the recording of “Weekly sync” to end"}));
+        call("planning", "Planning", json!({"state": "queued", "profile": "system", "pid": me, "wait": "call", "may_start": true, "message": "Claude Code (as configured) waits for the recording of “Weekly sync” to end"}));
         call("review", "Review", json!({"state": "queued", "profile": "system", "pid": me, "wait": "model", "message": "Claude Code (as configured) waits for the model to finish another job"}));
+        // Starting (every run passes through it): nothing to say yet. Its owner gone: failed.
+        call("starting", "Starting", json!({"state": "queued", "profile": "system", "pid": me, "message": "Starting…"}));
+        call("lost", "Lost", json!({"state": "queued", "profile": "system", "pid": 999_999_999u32, "wait": "call"}));
         let got = collect().items;
+        assert!(!got.iter().any(|i| i["title"].as_str().is_some_and(|t| t.ends_with("Starting"))), "{got:?}");
+        assert!(got.iter().any(|i| i["title"] == "Minutes failed: Lost"), "{got:?}");
         let find = |t: &str| got.iter().find(|i| i["title"] == format!("Minutes not written yet: {t}")).cloned().unwrap_or_else(|| panic!("no item for {t}: {got:?}"));
         let p = find("Planning");
         assert!(p["why"].as_str().unwrap().contains("“Weekly sync”"));
