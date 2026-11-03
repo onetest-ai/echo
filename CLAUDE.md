@@ -1054,7 +1054,11 @@ removed: due again later). An admission that fails is logged (once per reason) a
 4 ticks in a row, with a notification (missing Claude Code / plugin: at once); one that can't even be recorded is left
 alone until Echo starts again, `auto` saying why (`notes::GAVE_UP`), as for a boundary that can't be saved. Automatic
 minutes also wait while `my-notes.md` can't be read. An abandoned automatic run frees Echo's claim. The switch governs every automatic path (the mod's included).
-The window: `auto` = `{due: now|at|off|before|not_ready|tried|gate|missing|error, at, reason}` (`missing`: due, but
+**The countdown** (#42): the Minutes tab shows a ring with the minutes left, the time, what moved it (`auto.moved`: your notes'
+edit, or Not yet), Write now and **Not yet ▾** — 15 minutes more or until I say (IPC `minutes_later {minutes: 15 | null | 0}` →
+`<call>/minutes-later.json` `{until}` / `{manual: true}`, `notes::set_later`; `held` = until the user writes them); the calls
+list shows ⏱ N min on a call ended in the last 2 hours (`minutes_at` in `/api/calls`), the status bar the next one.
+The window: `auto` = `{due: now|at|off|before|not_ready|tried|held|gate|missing|error, at, moved, reason}` (`missing`: due, but
 no Claude Code or plugin here, `notes::auto_missing` — no "minutes at" is promised then; `error`: no settings).
 **Write minutes** (window Minutes / Actions tabs, the pane's buttons, `echoctl notes <call>`) is explicit
 (`Intent::Explicit`: its prompt overrides the skill's short-call gate) and runs the same

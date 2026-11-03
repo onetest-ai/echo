@@ -734,13 +734,16 @@ function actbar() {
 function statusbar() {
   const a = ai(), p = profileOf(a.default)
   const parts = []
+  // The next automatic minutes, a click away (#42).
+  const next = (S.calls || []).map((c) => [c, minutesAhead(c)]).filter((x) => x[1]).sort((x, y) => x[1] - y[1])[0]
+  const soon = next ? `<button class="sb-btn sb-minutes" data-minutes-of="${esc(next[0].name)}" title="Minutes at ${esc(hm(next[1]))}">⏱ Minutes for “${esc(next[0].title)}” in ${minutesLeft(next[1])} min</button>` : ''
   if (p) parts.push(`<span title="${esc(profileWhere(p))}">AI: ${esc(p.name)}</span>`)
   if (a.live_notes) parts.push('<span>Live notes on</span>')
   // The terminal panel: a toggle here, where VS Code keeps it.
   parts.push(`<button class="sb-btn" data-pal-open title="Actions (${MAC ? '⌘K' : 'Ctrl+K'})">Actions ${MAC ? '⌘K' : 'Ctrl+K'}</button>`)
   const live = [...Terms.entries()].some(([k, e]) => k.startsWith('claude:') && e.id != null && !e.exited)
   parts.push(`<button class="sb-btn" data-cmd="claude-panel" title="Claude (${MOD}\`)">${live ? '● ' : ''}Claude</button>`)
-  return `<span class="grow"></span>${parts.join('')}`
+  return `${soon}<span class="grow"></span>${parts.join('')}`
 }
 
 /** A panel (right or bottom) with its views as tabs; nothing when it has none (`Layout.effective`). */
@@ -818,10 +821,12 @@ function list() {
       const meta = [d ? hm(d) : '', c.imported ? 'Teams transcript' : '', c.minutes ? `${c.minutes} min` : '', c.people.length ? c.people.slice(0, 2).join(', ') + (c.people.length > 2 ? ` +${c.people.length - 2}` : '') : ''].filter(Boolean).map((x) => `<span>${esc(x)}</span>`).join('')
       const pjs = ((S.pj.data && S.pj.data.by_call) || {})[c.name] || []
       const icons = pjs.length ? `<span class="pj-icons">${pjs.slice(0, 3).map((p) => projIcon(p, 14)).join('')}</span>` : ''
+      const due = minutesAhead(c)
+      const clockChip = due ? `<span class="mn-clock" title="Minutes at ${esc(hm(due))}">⏱ ${minutesLeft(due)} min</span>` : ''
       return `${head}<button class="row" role="option" data-call="${esc(c.name)}" aria-selected="${c.name === S.selected}">
         ${statusIcon(c.status)}
         <span class="t">${esc(c.title)}</span>
-        <span class="m">${icons}${meta}</span>
+        <span class="m">${clockChip}${icons}${meta}</span>
       </button>`
     }).join('')
   }
@@ -1569,6 +1574,11 @@ function minutesBar(c) {
 /** No minutes (or no action items) yet: when Echo writes them by itself, or why not, and Write
  *  minutes — Claude Code run from the app (the same process-call skill a session runs); the run's
  *  state and log come with the call. */
+/** Whole minutes until `at` (at least 1 while it is ahead). */
+const minutesLeft = (at) => Math.max(1, Math.ceil((at - Date.now()) / 60000))
+/** A call's automatic minutes still ahead (the list's and the status bar's clock). */
+const minutesAhead = (c) => c.minutes_at && new Date(c.minutes_at) > Date.now() ? new Date(c.minutes_at) : null
+
 function minutesHint(c, heading, lead) {
   const n = (S.state && S.state.notes) || {}
   const run = c.notes_run
@@ -1611,8 +1621,25 @@ function minutesHint(c, heading, lead) {
     skipped: ['No minutes for this call', run && run.message],
   }[run && run.state]
   let label = 'Write minutes'
+  // The countdown (#42): a ring of the time left, why it moved, and Not yet.
+  let ring = '', moved = '', later = ''
   if (why) [heading, lead, label] = [why[0], why[1] || lead, run.state !== 'skipped' ? 'Try again' : label]
-  else if (auto.due === 'at' && auto.at) [heading, lead, label] = [`Minutes at ${hm(new Date(auto.at))}`, '15 minutes after the call, or after your last note — your notes in the Notes tab shape them.', 'Write minutes now']
+  else if (auto.due === 'at' && auto.at) {
+    const at = new Date(auto.at), left = minutesLeft(at)
+    ;[heading, lead, label] = [`Minutes in ${left} min (${hm(at)})`, 'Echo writes them 15 minutes after the call or your last note, so what you add in My notes goes in.', 'Write now']
+    // Against the longest wait seen for this time (15 minutes, or more after Not yet): it empties as it comes.
+    const span = S.ringSpan && S.ringSpan.at === auto.at ? S.ringSpan.ms : Math.max(15 * 60000, at - Date.now())
+    S.ringSpan = { at: auto.at, ms: span }
+    const share = Math.max(0, Math.min(1, (at - Date.now()) / span))
+    ring = `<div class="mn-ring" style="--left:${Math.round(share * 100)}%" aria-hidden="true"><span><b>${left}</b><small>min</small></span></div>`
+    const m = auto.moved || {}
+    moved = m.by === 'later' ? '<p class="mn-moved">Moved: you said not yet.</p>'
+      : m.by === 'notes' && m.at ? `<p class="mn-moved">Moved: you edited your notes at ${esc(hm(new Date(m.at)))}.</p>` : ''
+    later = `<span class="mn-later"><button class="btn ghost" data-cmd="later-menu" aria-haspopup="menu" aria-expanded="${!!S.laterOpen}">Not yet ▾</button>${S.laterOpen ? `<div class="menu" role="menu"><button class="menu-item" role="menuitem" data-cmd="later-15">15 minutes more</button><button class="menu-item" role="menuitem" data-cmd="later-manual">Until I say — I'll click Write minutes</button></div>` : ''}</span>`
+  } else if (auto.due === 'held') {
+    ;[heading, lead] = ['Minutes when you say', "You asked for these later: Echo won't write them by itself."]
+    later = '<button class="btn ghost" data-cmd="later-clear">Write them automatically again</button>'
+  }
   else if (auto.due === 'gate') [heading, lead] = ['No minutes written automatically', `The call is too thin for them (${auto.reason || 'too short'}). Write them anyway if you want them.`]
   else if (auto.due === 'error') [heading, lead] = ["Automatic minutes can't start", (auto.reason || "Echo's settings can't be read").replace(/^(the )?automatic minutes (can't|couldn't) start: /i, '')]
   const session = `<p class="alt">Or in a Claude Code session: <code>${esc(cmd)}</code> <button class="btn ghost" data-copy="${esc(cmd)}">Copy</button></p>`
@@ -1641,8 +1668,8 @@ function minutesHint(c, heading, lead) {
       ? `Claude Code writes them with <b>${esc(p.name)}</b> (${esc(model)}), ${esc(profileWhere(p))}.`
       : `Claude Code writes them with <b>${esc(model)}</b>, as it is set up (menu → AI for calls → Minutes model, while it is the profile new calls use).`
   const pick = ai().profiles.length > 1 || (ai().profiles.length && !p) ? `<label class="notes-pick">Model <select data-notesprofile aria-label="Model for these minutes">${p ? '' : '<option value="" selected>Choose…</option>'}${profileOptions(pid)}</select></label>` : ''
-  return box(heading, `<p>${esc(lead)}</p><p class="alt">${where}</p>${sign}`,
-    `${pick}<button class="btn primary" data-cmd="write-notes">${label}</button>${log}`) + session
+  return box(heading, `${ring}<p>${esc(lead)}</p>${moved}<p class="alt">${where}</p>${sign}`,
+    `${pick}<button class="btn primary" data-cmd="write-notes">${label}</button>${later}${log}`) + session
 }
 
 // ── Live tab: live notes, questions, last time (written by the app, `livenotes.rs`) ────────
@@ -5603,7 +5630,8 @@ document.addEventListener('click', (e) => {
   // Any click closes the call's ⋯ menu (its own button toggles it).
   const menuWas = S.menuOpen
   if (menuWas && !(e.target.closest && e.target.closest('[data-cmd="call-menu"]'))) S.menuOpen = false
-  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
+  if (S.laterOpen && !(e.target.closest && e.target.closest('[data-cmd^="later-"]'))) { S.laterOpen = false; render() }
+  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
   if (!t) { if (menuWas) render(); return }
   // Sign-ins (`signin.rs`): shown at once (starting / stopping / checking) until the next poll
   // brings the app's state.
@@ -5687,6 +5715,7 @@ document.addEventListener('click', (e) => {
   if (t.dataset.schedule) { send({ cmd: 'schedule', id: t.dataset.schedule, languages: recordLang(), profile: pickedProfile() }); const e = (S.cal.data.events || []).find((x) => x.id === t.dataset.schedule); if (e) e.scheduled = true; return render() }
   if (t.dataset.unschedule) { send({ cmd: 'unschedule', id: t.dataset.unschedule }); const e = (S.cal.data.events || []).find((x) => x.id === t.dataset.unschedule); if (e) e.scheduled = false; return render() }
   if (t.dataset.call) { S.listOpen = false; return go(`call/${t.dataset.call}/${S.tab}`) }
+  if (t.dataset.minutesOf) return go(`call/${t.dataset.minutesOf}/notes`)
   if (t.dataset.tab) return go(`call/${S.selected}/${t.dataset.tab}`)
   if (t.dataset.at) { S.jump = Number(t.dataset.at); S.find = ''; return go(`call/${S.selected}/transcript`) }
   if (t.dataset.frame) { S.lightbox = t.dataset.frame; return render() }
@@ -5707,6 +5736,10 @@ document.addEventListener('click', (e) => {
     case 'stop-keep': S.stopAsk = false; return render()
     case 'list-toggle': S.listOpen = !S.listOpen; return render()
     case 'call-menu': S.menuOpen = !S.menuOpen; return render()
+    case 'later-menu': S.laterOpen = !S.laterOpen; return render()
+    case 'later-15': S.laterOpen = false; render(); return send({ cmd: 'minutes_later', call: S.selected, minutes: 15 })
+    case 'later-manual': S.laterOpen = false; render(); return send({ cmd: 'minutes_later', call: S.selected, minutes: null })
+    case 'later-clear': return send({ cmd: 'minutes_later', call: S.selected, minutes: 0 })
     case 'claude-panel': return claudePanel()
     case 'ask-claude': return claudePanel('claude-call')
     case 'notes-raw': S.notesRaw = true; return render()
@@ -6047,7 +6080,7 @@ document.addEventListener('keydown', (e) => {
   if (e.target.id === 'sel-note' && e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); return commentSelection() }
   if (e.key === 'Escape' && S.selNote) return hideSelPop()
   if (e.key === 'Escape' && S.lightbox) { S.lightbox = null; return render() }
-  if (e.key === 'Escape' && (S.stopAsk || S.listOpen || S.menuOpen || S.overlay)) { S.stopAsk = false; S.listOpen = false; S.menuOpen = false; S.overlay = false; return render() }
+  if (e.key === 'Escape' && (S.stopAsk || S.listOpen || S.menuOpen || S.laterOpen || S.overlay)) { S.stopAsk = false; S.listOpen = false; S.menuOpen = false; S.laterOpen = false; S.overlay = false; return render() }
   if ((MAC ? e.metaKey : e.ctrlKey) && e.key === ',') { e.preventDefault(); return goActivity('settings') }
   if ((MAC ? e.metaKey : e.ctrlKey) && e.key === '`') { e.preventDefault(); return claudePanel() }
   // ⌘1…9 / Ctrl+1…9: the activities, in the bar's order.
