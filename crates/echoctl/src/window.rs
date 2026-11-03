@@ -275,7 +275,7 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
             }
         }
         "/api/calendar" => json_reply(calendar(req.uri().query().unwrap_or(""))),
-        // Settings → Plugins; marketplaces not read for 6 h are fetched again in the background.
+        // Settings → Plugins; marketplaces not read for 30 min, or by another Echo version, are fetched again in the background.
         "/api/plugins" => {
             refresh_plugin_markets();
             json_reply(crate::plugins::snapshot())
@@ -1702,11 +1702,16 @@ fn refresh_plugin_markets() {
     use std::sync::atomic::{AtomicBool, Ordering};
     static RUNNING: AtomicBool = AtomicBool::new(false);
     if !RUNNING.swap(true, Ordering::SeqCst) {
+        // Said busy before the answer is made, so the page asks again until the read ends.
+        if !crate::plugins::any_stale() {
+            RUNNING.store(false, Ordering::SeqCst);
+            return;
+        }
+        if let Ok(mut b) = crate::plugins::BUSY.lock() {
+            b.insert("markets".into(), "Reading marketplaces…".into());
+        }
         std::thread::spawn(|| {
             let _end = OnEnd(Some(|| RUNNING.store(false, Ordering::SeqCst)));
-            if let Ok(mut b) = crate::plugins::BUSY.lock() {
-                b.insert("markets".into(), "Reading marketplaces…".into());
-            }
             crate::plugins::refresh_stale(false);
             if let Ok(mut b) = crate::plugins::BUSY.lock() {
                 b.remove("markets");

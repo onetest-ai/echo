@@ -37,7 +37,7 @@ const CATALOG: &str = "echo-marketplace.json";
 /// A plugin's manifest at the root of its folder.
 const MANIFEST: &str = "echo-plugin.json";
 /// A marketplace refreshed by itself once its fetch is this old (window open, `refresh_stale`).
-const STALE_SECS: i64 = 6 * 3600;
+const STALE_SECS: i64 = 30 * 60;
 
 /// Caps on what a fetch may unpack: a whole marketplace, one plugin.
 const MARKET_LIMIT: Limit = Limit { files: 5000, bytes: 64 << 20 };
@@ -758,6 +758,9 @@ pub struct Catalog {
     pub name: String,
     pub commit: String,
     pub fetched_at: String,
+    /// The Echo that read it: an Echo updated since reads it again (what it may install changed).
+    #[serde(default)]
+    pub echo_version: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[serde(default)]
@@ -858,13 +861,14 @@ pub fn refresh(name: &str) -> Result<Catalog> {
             };
             plugins.push(offer);
         }
-        Ok(Catalog { name: if file.name.trim().is_empty() { m.name.clone() } else { file.name }, commit: snap.commit, fetched_at: now.clone(), error: None, plugins })
+        Ok(Catalog { name: if file.name.trim().is_empty() { m.name.clone() } else { file.name }, commit: snap.commit, fetched_at: now.clone(), echo_version: env!("CARGO_PKG_VERSION").into(), error: None, plugins })
     })();
     let c = match got {
         Ok(c) => c,
         Err(e) => {
             let mut c = catalog(name).unwrap_or_default();
             c.fetched_at = now;
+            c.echo_version = env!("CARGO_PKG_VERSION").into();
             c.error = Some(format!("{e:#}"));
             c
         }
@@ -873,12 +877,23 @@ pub fn refresh(name: &str) -> Result<Catalog> {
     Ok(c)
 }
 
-/// Refresh every marketplace not fetched within `STALE_SECS` (or `all`); errors stay in each catalog.
+/// A catalog read by this Echo within `STALE_SECS`.
+fn fresh(c: &Catalog) -> bool {
+    c.echo_version == env!("CARGO_PKG_VERSION")
+        && chrono::DateTime::parse_from_rfc3339(&c.fetched_at).is_ok_and(|t| (chrono::Local::now().fixed_offset() - t).num_seconds() < STALE_SECS)
+}
+
+/// Is any marketplace due to be read again.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn any_stale() -> bool {
+    Registry::load().is_ok_and(|r| r.all_markets().into_iter().any(|(m, _)| !catalog(&m.name).as_ref().is_some_and(fresh)))
+}
+
+/// Refresh every marketplace not fetched within `STALE_SECS` by this Echo (or `all`); errors stay in each catalog.
 pub fn refresh_stale(all: bool) {
     let Ok(r) = Registry::load() else { return };
     for (m, _) in r.all_markets() {
-        let fresh = catalog(&m.name).and_then(|c| chrono::DateTime::parse_from_rfc3339(&c.fetched_at).ok()).is_some_and(|t| (chrono::Local::now().fixed_offset() - t).num_seconds() < STALE_SECS);
-        if all || !fresh {
+        if all || !catalog(&m.name).as_ref().is_some_and(fresh) {
             if let Err(e) = refresh(&m.name) {
                 eprintln!("plugins: {}: {e:#}", m.name);
             }
@@ -1460,9 +1475,17 @@ mod tests {
         assert!(!view[1].to_string().contains("s3cret"));
         assert_eq!(view[2]["value"], false);
         assert_eq!(setting("demo", "token").unwrap(), "s3cret");
-        // A new version that asks for more waits for the user.
+        // A new version that asks for more waits for the user. A catalog read by another Echo is read again at once
+        // (an Echo updated since may install what it couldn't), however recent.
         let d = plugin(&mk, "demo", "0.2.0", json!({"deliver": {"to": ["mail"]}}));
         assert!(d.is_dir());
+        let mut c = catalog(&name).unwrap();
+        assert!(fresh(&c), "read a moment ago");
+        c.echo_version = "0.0.1".into();
+        assert!(!fresh(&c));
+        c.echo_version = env!("CARGO_PKG_VERSION").into();
+        c.fetched_at = (chrono::Local::now() - chrono::Duration::hours(1)).to_rfc3339();
+        assert!(!fresh(&c));
         refresh(&name).unwrap();
         let p = Registry::load().unwrap().installed["demo"].clone();
         let rv = update_for(&p).unwrap();

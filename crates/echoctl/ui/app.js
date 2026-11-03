@@ -2202,7 +2202,7 @@ document.addEventListener('click', (e) => {
 // ── Settings → Plugins: installed, offered by the marketplaces, the marketplaces themselves. Every change
 // runs in the app (IPC `plugin_op`); installs and fetches in the background, shown from `busy`.
 async function loadPluginsView() {
-  try { S.plugins = await get('api/plugins') } catch { /* app restarting */ }
+  try { S.plugins = await get('api/plugins'); S.pluginsAt = Date.now() } catch { /* app restarting */ }
   const p = S.plugins
   // What is installed and on may have changed: the window's plugin parts follow.
   if (p && !p.error) loadPluginClients(p)
@@ -2257,6 +2257,8 @@ const plMatch = (x) => { const q = (S.plQuery || '').trim().toLowerCase(); retur
 function pluginsSettings() {
   const p = S.plugins
   if (!p) { if (!S.pluginsLoading) { S.pluginsLoading = true; loadPluginsView().then(() => { S.pluginsLoading = false; render() }) } return '<h2>Plugins</h2><div class="skeleton" style="padding:20px"><i></i><i></i><i></i></div>' }
+  // Shown again after a while: asked again (the app reads stale marketplaces then), the page keeps what it has meanwhile.
+  if (!S.pluginsLoading && Date.now() - (S.pluginsAt || 0) > 60000) { S.pluginsLoading = true; loadPluginsView().then(() => { S.pluginsLoading = false; render() }) }
   if (p.error) return `<h2>Plugins</h2><p class="error">${esc(p.error)}</p>`
   const tab = S.plTab || ((p.installed || []).length ? 'installed' : 'discover')
   const tabs = [['installed', 'Installed', p.installed.length || ''], ['discover', 'Discover', ''], ['markets', 'Marketplaces', p.markets.length]]
