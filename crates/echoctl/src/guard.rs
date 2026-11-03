@@ -160,6 +160,15 @@ pub fn new_enough(version: &str) -> bool {
     parts.len() == 3 && parts.as_slice() >= MIN_CLAUDE.as_slice()
 }
 
+/// The session's own saved tool output (`<transcript without .jsonl>/tool-results`), named by Claude Code's hook
+/// input: a long command answer Claude Code put aside for the model to Read. Never another session's.
+fn own_results(call: &Value) -> Option<PathBuf> {
+    let t = call["transcript_path"].as_str().map(native).filter(|t| t.is_absolute() && t.extension().is_some_and(|e| e == "jsonl"))?;
+    let session = call["session_id"].as_str().unwrap_or("");
+    let r = (!session.is_empty() && t.file_stem().is_some_and(|s| s == session)).then(|| t.with_extension("").join("tool-results"))?;
+    Some(dunce::canonicalize(&r).unwrap_or(r))
+}
+
 impl Scope {
     /// From the run's environment; none outside a run Echo started (refused).
     pub fn from_env() -> Result<Scope, String> {
@@ -216,7 +225,7 @@ impl Scope {
         let tool = call["tool_name"].as_str().unwrap_or("");
         let input = &call["tool_input"];
         if let Some(ps) = &self.project {
-            return self.judge_project(ps, tool, input);
+            return self.judge_project(ps, call, tool, input);
         }
         if self.routine {
             return self.judge_routine(call, tool, input);
@@ -274,7 +283,7 @@ impl Scope {
     }
 
     /// A project's sync run: read its ledger, write its own JSON files, run its ledger steps.
-    fn judge_project(&self, ps: &ProjectScope, tool: &str, input: &Value) -> Result<(), String> {
+    fn judge_project(&self, ps: &ProjectScope, call: &Value, tool: &str, input: &Value) -> Result<(), String> {
         match tool {
             "Bash" => {
                 let words = shell_words(input["command"].as_str().unwrap_or(""))?;
@@ -296,14 +305,19 @@ impl Scope {
                 if tool == "Read" && ps.skill.as_ref().is_some_and(|s| p.starts_with(s)) {
                     return Ok(());
                 }
+                // A pattern that climbs out is refused wherever it starts.
+                let pattern = if tool == "Glob" { input["pattern"].as_str() } else if tool == "Grep" { input["glob"].as_str() } else { None };
+                if let Some(g) = pattern.filter(|g| escapes(g)) {
+                    return Err(format!("the pattern {g} reaches outside the ledger"));
+                }
+                // The session's own saved output: a large thread's context Claude Code put aside (#39).
+                if own_results(call).is_some_and(|r| p.starts_with(&r)) {
+                    return Ok(());
+                }
                 if !self.inside(&p) {
                     return Err(format!("only this project's ledger can be read, not {}", p.display()));
                 }
-                let pattern = if tool == "Glob" { input["pattern"].as_str() } else if tool == "Grep" { input["glob"].as_str() } else { None };
-                match pattern {
-                    Some(g) if escapes(g) => Err(format!("the pattern {g} reaches outside the ledger")),
-                    _ => Ok(()),
-                }
+                Ok(())
             }
             "Edit" | "Write" => {
                 let raw = input["file_path"].as_str();
@@ -334,11 +348,7 @@ impl Scope {
     /// Code puts a command's answer too long to show (`<transcript>/tool-results/`, from the hook's own
     /// input, not the model's) —, run `ROUTINE_COMMANDS`, ask the Brain; change nothing.
     fn judge_routine(&self, call: &Value, tool: &str, input: &Value) -> Result<(), String> {
-        let results = call["transcript_path"].as_str().map(native).filter(|t| t.is_absolute() && t.extension().is_some_and(|e| e == "jsonl")).and_then(|t| {
-            let session = call["session_id"].as_str().unwrap_or("");
-            (!session.is_empty() && t.file_stem().is_some_and(|s| s == session)).then(|| t.with_extension("").join("tool-results"))
-        });
-        let results = results.map(|r| dunce::canonicalize(&r).unwrap_or(r));
+        let results = own_results(call);
         let readable = |p: &Path| self.inside(p) || self.extra.iter().any(|d| p.starts_with(d)) || results.as_ref().is_some_and(|r| p.starts_with(r));
         match tool {
             "Bash" => self.bash(input["command"].as_str().unwrap_or("")),
@@ -575,6 +585,18 @@ mod tests {
         assert!(ok("Bash", json!({"command": "echoctl project ledger helix context"})).is_err(), "another project");
         assert!(ok("Bash", json!({"command": "echoctl project ledger aurora edit '{}'"})).is_err(), "the user's edits");
         assert!(ok("Bash", json!({"command": "echoctl project ledger aurora context; rm -rf /"})).is_err());
+        // A large thread's context saved by Claude Code (#39): this session's own copy may be read, nobody else's.
+        let claude = std::env::temp_dir().join(format!("echo-guard-sync-claude-{}", std::process::id()));
+        let results = claude.join("s9/tool-results");
+        fs::create_dir_all(&results).unwrap();
+        fs::write(results.join("ctx.txt"), "x").unwrap();
+        let read = |session: &str| json!({"tool_name": "Read", "tool_input": {"file_path": results.join("ctx.txt").display().to_string()},
+                                          "session_id": session, "transcript_path": claude.join("s9.jsonl").display().to_string()});
+        assert!(s.judge(&read("s9")).is_ok(), "its own saved output");
+        assert!(s.judge(&read("other")).is_err(), "not another session's");
+        let climb = json!({"tool_name": "Glob", "tool_input": {"path": results.display().to_string(), "pattern": "../../*.jsonl"}, "session_id": "s9", "transcript_path": claude.join("s9.jsonl").display().to_string()});
+        assert!(s.judge(&climb).is_err(), "a pattern climbing out of it");
+        let _ = fs::remove_dir_all(&claude);
         assert!(ok("Bash", json!({"command": "echoctl notes latest"})).is_err());
         assert!(ok("Read", json!({"file_path": l.join("evidence/2026-10-28_110000.md")})).is_ok());
         assert!(ok("Read", json!({"file_path": root.join("projects/helix/ledger/evidence")})).is_err());

@@ -18,4 +18,6 @@ sequence. Don't link a story to its own tasks. Skip anything already in `waits_f
 1. `$L context` once.
 2. For each evidence id: read its `.md`, write `<run folder>/<id>_deps.json`, run
    `$L apply --evidence <id> --proposals <that file>`, fix rejections in `<id>_deps_fix.json`.
+   `apply` answers with the ids it created and touched; the tree (`$L context`, its saved file when it is
+   large) has every id.
    A node created after the item's date can't be linked from it: skip it.

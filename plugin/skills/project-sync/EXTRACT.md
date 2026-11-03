@@ -32,10 +32,15 @@ For each evidence id you were given, in that order:
    the project's people, the client, the user's notes for Claude, and what was processed. Read it
    every time; it changes after each item. `unverified_claims` wait for the verifier: don't repeat
    them. `pinned_by_human` fields were set by the user: never try to change them.
+   In a large thread Claude Code saves its answer to a file and tells you to Read it: Read that file
+   (it is your session's own and is allowed). **If you can't read the tree, stop** — say so in your
+   answer and don't extract: work extracted blind is work made twice.
 2. Read the item's `.md` file (its path is in `$L pending`) in full. "Me" is the user.
 3. Write `<run folder>/<evidence id>.json` (a JSON array, schema below): **pass 1, then pass 2**.
 4. `$L apply --evidence <id> --proposals <that file>`. Fix every rejection in
-   `<run folder>/<id>_fix.json` and apply only the fixed entries.
+   `<run folder>/<id>_fix.json` and apply only the fixed entries. Its answer lists what it `created`
+   (ids, titles, parents) and `touched`: the next item refers to those ids — work an earlier item of
+   this run made (a mail asking, then the call the next day) is updated, never made again.
 5. `$L done --evidence <id> --note '<why, when nothing changed>'` — also when it changed nothing.
 
 ## Pass 1 — the tree moves (most important)

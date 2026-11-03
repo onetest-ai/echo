@@ -2130,13 +2130,50 @@ pub fn apply(project: &str, evid: &str, proposals: &[Value]) -> Result<Value> {
         seen.insert(mid);
         out.push(e);
     }
+    // The same work twice (#39: a mail and the call after it asked for one thing): a new story or task whose
+    // title shares most of its words with an open one of this thread is offered as "same as …?" — To review,
+    // never merged by itself.
+    let mut same: Vec<Value> = vec![];
+    // Words that say what the work is (not "the", "with", "for"…), and pairs offered once.
+    const STOP: [&str; 16] = ["the", "and", "for", "with", "from", "into", "onto", "this", "that", "their", "them", "our", "your", "about", "over", "via"];
+    let key_words = |t: &str| -> BTreeSet<String> { words(t).into_iter().filter(|w| !STOP.contains(&w.as_str())).collect() };
+    let mut pairs: BTreeSet<(String, String)> = BTreeSet::new();
+    for e in out.iter().filter(|e| e["type"] == "create" && (e["kind"] == "story" || e["kind"] == "task")) {
+        let (id, kind) = (e["id"].as_str().unwrap_or(""), e["kind"].as_str().unwrap_or(""));
+        let mine = key_words(e["fields"]["title"].as_str().unwrap_or(""));
+        if mine.len() < 2 {
+            continue;
+        }
+        // Most of both titles in common (shared over all their words), at least two words of it.
+        let best = n.values().filter(|x| x.kind == kind && x.id != id && !closed(&x.state)).filter_map(|x| {
+            let theirs = key_words(&x.title);
+            let shared = mine.intersection(&theirs).count();
+            let ratio = shared as f64 / mine.union(&theirs).count().max(1) as f64;
+            (shared >= 2 && ratio >= 0.6).then_some((ratio, x))
+        }).max_by(|a, b| a.0.total_cmp(&b.0));
+        if let Some((_, x)) = best {
+            let pair = if id < x.id.as_str() { (id.to_string(), x.id.clone()) } else { (x.id.clone(), id.to_string()) };
+            if !pairs.insert(pair) {
+                continue;
+            }
+            let mid = mid_of(&["same", evid, id, &x.id]);
+            if seen.insert(mid.clone()) {
+                same.push(json!({"type": "agent", "op": "suggest_merge", "node": id, "into": x.id, "by": "agent", "evidence": evid, "date": date, "mid": mid,
+                                 "note": format!("Same as {} “{}”? Their titles share most words (Echo's check, no model).", x.id, x.title)}));
+            }
+        }
+    }
+    out.extend(same);
     l.append(&out)?;
     let mut by: BTreeMap<String, usize> = BTreeMap::new();
     for e in &out {
         let k = if e["type"] == "create" { format!("create_{}", e["kind"].as_str().unwrap_or("")) } else { e["op"].as_str().or(e["type"].as_str()).unwrap_or("").to_string() };
         *by.entry(k).or_default() += 1;
     }
-    Ok(json!({"events": out.len(), "by_op": by, "rejected": rej}))
+    // What it made and touched, by id: the next item and the dependency pass refer to them (#39).
+    let created: Vec<Value> = out.iter().filter(|e| e["type"] == "create").map(|e| json!({"id": e["id"], "kind": e["kind"], "title": e["fields"]["title"], "parent": e["fields"]["parent"]})).collect();
+    let touched: BTreeSet<&str> = out.iter().filter(|e| e["type"] != "create").filter_map(|e| e["node"].as_str()).collect();
+    Ok(json!({"events": out.len(), "by_op": by, "rejected": rej, "created": created, "touched": touched}))
 }
 
 // ── verify ──────────────────────────────────────────────────────────────────────────────────────
@@ -2548,7 +2585,7 @@ pub fn call_changes(project: &str, stamp: &str) -> Result<Value> {
     let queued = !read && pending(project)?.iter().any(|e| e["id"] == stamp);
     let mut out: Vec<Value> = vec![];
     for n in t.nodes.values().filter(|n| n.state != "merged" && n.state != "deleted" && n.kind != "epic") {
-        for h in n.history.iter().filter(|h| h["evidence"] == stamp && h["by"] != "human" && h["effect"] != "mention") {
+        for h in n.history.iter().filter(|h| h["evidence"] == stamp && h["by"] != "human" && h["effect"] != "mention" && !h["op"].as_str().is_some_and(|o| o.starts_with("suggest_"))) {
             let mut c = h.clone();
             c["node"] = json!({"id": n.id, "kind": n.kind, "type": n.task_type, "title": n.title, "state": n.state, "due": n.due,
                                "owner": n.internal_owner.as_ref().or(n.client_owner.as_ref())});
@@ -2831,6 +2868,33 @@ mod tests {
         assert_eq!(fold_linked(&id).unwrap().nodes["T001"].state, "done");
         // The mirror's own history keeps its evidence ("What this call changed" still lists it).
         assert!(fold(&l).unwrap().nodes["T001"].history.iter().any(|h| h["op"] == "status" && h["evidence"] == ev));
+    }
+
+    #[test]
+    fn apply_names_what_it_made_and_offers_the_same_work_once() {
+        let (_env, l, id) = setup("ledger-same-work");
+        let ev = "2026-10-28_110000";
+        let r = apply(&id, ev, &[
+            json!({"op": "create", "ref": "s1", "kind": "story", "parent": "E01", "title": "Security review", "ac": ["Diagram sent"], "quote": "Our security review needs the data-flow diagram"}),
+            json!({"op": "create", "kind": "task", "parent": "s1", "title": "Send the data-flow diagram", "type": "action", "internal_owner": "Me", "quote": "can you send it this week"}),
+        ]).unwrap();
+        assert_eq!(r["created"].as_array().unwrap().iter().map(|c| c["id"].as_str().unwrap()).collect::<Vec<_>>(), ["S001", "T001"]);
+        // The same ask again (as from a second source): offered as the same work, never merged by itself.
+        let r = apply(&id, ev, &[json!({"op": "create", "kind": "task", "parent": "S001", "title": "Send them the data-flow diagram", "type": "action", "internal_owner": "Me", "quote": "Our security review needs the data-flow diagram"})]).unwrap();
+        let new = r["created"][0]["id"].as_str().unwrap_or_else(|| panic!("{r}")).to_string();
+        let t = fold(&l).unwrap().nodes;
+        let sug = &t[&new].suggestions;
+        assert_eq!((sug.len(), sug[0]["op"].as_str(), sug[0]["to"].as_str(), sug[0]["status"].as_str()), (1, Some("suggest_merge"), Some("T001"), Some("pending")), "{sug:?}");
+        assert!(t[&new].state == "open" && t["T001"].state == "open", "nothing merged");
+        // Not every shared word makes the same work: a different object, or a short title inside a long one.
+        let r = apply(&id, ev, &[
+            json!({"op": "create", "kind": "task", "parent": "S001", "title": "Send the vendor contract", "type": "action", "internal_owner": "Me", "quote": "I can have the SAML config ready by Friday"}),
+            json!({"op": "create", "ref": "s2", "kind": "story", "parent": "E01", "title": "Security review of the vendor contract", "ac": ["Signed"], "quote": "Then SSO has to land first"}),
+        ]).unwrap();
+        let t = fold(&l).unwrap().nodes;
+        for c in r["created"].as_array().unwrap() {
+            assert!(t[c["id"].as_str().unwrap()].suggestions.is_empty(), "{c}");
+        }
     }
 
     #[test]
