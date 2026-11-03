@@ -148,7 +148,8 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
     let launcher = clis.iter().find(|c| c.contains('/') && c.contains("scripts")).cloned().unwrap_or_else(|| "echoctl".into());
     // What the Brain holds and when to go there (#34): only when it is on and the run has tools to ask it.
     #[cfg(feature = "brain")]
-    let brain_text = (spec.tools != Tools::None).then(|| crate::brain::advert::block(&crate::brain::access::Access { profile: profile.id.clone(), ..Default::default() })).flatten();
+    // Only where the run gets the echo-brain server (the window's builds; any tool mode but none).
+    let brain_text = (cfg!(feature = "tray") && spec.tools != Tools::None).then(|| crate::brain::advert::block(&crate::brain::access::Access { profile: profile.id.clone(), ..Default::default() })).flatten();
     #[cfg(not(feature = "brain"))]
     let brain_text: Option<String> = None;
     let prompt = format!(

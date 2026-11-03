@@ -232,7 +232,9 @@ pub fn hook() -> i32 {
         // What the Brain holds for this session and when to go there (#34): only when it is on.
         #[cfg(feature = "brain")]
         if let Some(b) = session_access().and_then(|a| crate::brain::advert::session_block(&a)) {
-            let (c, tell) = block_due(&mut sent, "brain", &session, input["source"].as_str().unwrap_or(""), &b, now);
+            // Its "Last updated" line changes with every sync: a resumed session isn't sent the block for that alone.
+            let stable: String = b.lines().filter(|l| !l.starts_with("Last updated")).collect::<Vec<_>>().join("\n");
+            let (c, tell) = block_due(&mut sent, "brain", &session, input["source"].as_str().unwrap_or(""), &stable, now);
             changed |= c;
             if tell {
                 blocks.push(b);
@@ -326,7 +328,8 @@ fn restrict(v: &mut Value, own_call: Option<&str>, profile: Option<&str>, calls:
 }
 
 /// Sessions remembered at most (the oldest go first), and for this long.
-const SENT_MAX: usize = 50;
+// About 50 sessions: each keeps up to three keys (its view, About me, the Brain).
+const SENT_MAX: usize = 150;
 const SENT_DAYS: i64 = 14;
 
 /// Whether to add the block to this prompt: only when the view differs from the last one this

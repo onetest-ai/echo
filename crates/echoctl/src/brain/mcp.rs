@@ -102,21 +102,12 @@ fn call(name: &str, a: &Value) -> Result<Value> {
         "list_scopes" => {
             // Only the clients and threads it may read.
             let mut v = store::scopes(&path)?;
-            let threads_ok: Vec<String> = {
-                let default = crate::ai::default_id();
-                super::access::thread_profiles(&default).into_iter().filter(|(_, p)| *p == acc.profile).map(|(t, _)| t).collect()
-            };
+            let threads_ok = acc.threads_on_profile();
             if let Some(a) = v["threads"].as_array_mut() {
-                a.retain(|t| {
-                    let id = t["id"].as_str().unwrap_or("");
-                    (id == "-" || threads_ok.iter().any(|x| x == id)) && (acc.threads.is_empty() || acc.threads.iter().any(|x| x == id)) && acc.client.as_deref().is_none_or(|c| t["client"].as_str() == Some(c))
-                });
+                a.retain(|t| acc.thread_ok(t["id"].as_str().unwrap_or(""), t["client"].as_str(), &threads_ok));
             }
             if let Some(a) = v["clients"].as_array_mut() {
-                a.retain(|c| {
-                    let id = c["id"].as_str().unwrap_or("");
-                    (id == "-" || super::access::client_profile_ok(id, &acc.profile)) && acc.client.as_deref().is_none_or(|x| x == id)
-                });
+                a.retain(|c| acc.client_ok(c["id"].as_str().unwrap_or("")));
             }
             Ok(v)
         }
@@ -308,9 +299,13 @@ fn answer(req: &Value) -> Option<Value> {
         "tools/list" => Ok(json!({"tools": tools()})),
         "tools/call" => {
             let name = req["params"]["name"].as_str().unwrap_or("");
-            super::advert::count(WHO.get().map(String::as_str).unwrap_or("other"), name);
             let args = req["params"]["arguments"].clone();
-            Ok(match call(name, &args) {
+            let r = call(name, &args);
+            // Counted: a call of one of its tools that answered (no content kept).
+            if r.is_ok() && tools().as_array().is_some_and(|t| t.iter().any(|x| x["name"] == name)) {
+                super::advert::count(WHO.get().map(String::as_str).unwrap_or("other"), name);
+            }
+            Ok(match r {
                 Ok(v) => json!({"content": [{"type": "text", "text": v.to_string()}], "structuredContent": v, "isError": false}),
                 Err(e) => json!({"content": [{"type": "text", "text": json!({"error": format!("{e:#}"), "how_to_fix": "Run `echoctl brain status`; set the embedding server in Settings → Brain; `echoctl brain sync`."}).to_string()}], "isError": true}),
             })
