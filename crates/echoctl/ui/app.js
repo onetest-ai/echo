@@ -1475,6 +1475,7 @@ async function loadTerms() {
   try { S.sessions = new Set(await get('api/sessions')) } catch { /* none known */ }
   let list = []
   try { list = await get('api/ptys') } catch { return }
+  S.ptyStale = Object.fromEntries(list.filter((t) => t.stale).map((t) => [t.key, t.stale]))
   for (const t of list) {
     const e = termEntry(t.key)
     if (!e || e.id === t.id) continue
@@ -1484,11 +1485,44 @@ async function loadTerms() {
 }
 new ResizeObserver(() => { for (const e of Terms.values()) termFit(e) }).observe(document.documentElement)
 
+/** What the app knows of its terminals beyond their output: what a Claude session hasn't loaded (#44). */
+async function loadPtyInfo() {
+  try { S.ptyStale = Object.fromEntries((await get('api/ptys')).filter((t) => t.stale).map((t) => [t.key, t.stale])) } catch { /* as it was */ }
+}
+/** A Claude panel's conversation controls (#44): Restart, New conversation, Conversations ▾ — and, when it runs
+ *  older plugins or skills than installed, Restart to update. */
+function claudeTools(key, kind, extra, running) {
+  const data = `data-term-kind="${esc(kind)}" data-term-key="${esc(key)}"${extra.call ? ` data-term-call="${esc(extra.call)}"` : ''}`
+  const convs = S.convOpen === key ? (S.convs && S.convs[key]) : null
+  const menu = S.convOpen !== key ? '' : `<div class="menu conv-menu" role="menu">${convs == null ? '<div class="conv-empty">Loading…</div>'
+    : !convs.length ? '<div class="conv-empty">No conversations yet.</div>'
+    : convs.map((x) => `<button class="menu-item conv-item${x.current ? ' on' : ''}" role="menuitem" data-conv="${esc(x.id)}" ${data}><span class="conv-t">${esc(x.title || (x.current ? 'This conversation' : 'A conversation'))}</span><span class="conv-w">${x.current ? 'now' : x.at ? esc(dayLabel(new Date(x.at)) + ' ' + hm(new Date(x.at))) : ''}</span></button>`).join('')}
+    <div class="menu-sep" role="separator"></div><button class="menu-item" role="menuitem" data-conv="new" ${data}>＋ New conversation</button></div>`
+  const tools = `<span class="term-tools">${running ? `<button class="btn ghost sm" data-conv="restart" ${data} title="Stop it and start it again: the same conversation, with plugins and settings read afresh">↻ Restart</button>` : ''}<button class="btn ghost sm" data-conv="new" ${data} title="Start a fresh conversation; this one stays in the list">＋ New conversation</button><span class="conv-wrap"><button class="btn ghost sm" data-conv-menu ${data} aria-haspopup="menu" aria-expanded="${S.convOpen === key}">Conversations ▾</button>${menu}</span></span>`
+  const stale = running && S.ptyStale && S.ptyStale[key]
+  const hint = stale ? `<div class="term-stale"><span class="dot" aria-hidden="true"></span><span class="grow">${esc(stale.what)} at ${esc(hm(new Date(stale.at)))} — this session still runs what it started with.</span><button class="btn primary sm" data-conv="restart" ${data}>Restart to update</button></div>` : ''
+  return `<div class="term-bar term-head"><span class="grow"></span>${tools}</div>${hint}`
+}
+/** Restart a Claude panel's session, start a new conversation, or go back to one (`session`: '' | 'new' | an id). */
+function termRestart(kind, key, extra, session) {
+  const e = Terms.get(key)
+  if (e && e.id != null && !e.exited) { send({ cmd: 'pty_close', id: e.id }); e.id = null; e.exited = true }
+  S.convOpen = null
+  if (S.ptyStale) delete S.ptyStale[key]
+  render()
+  // Its process group stops first (the same conversation can't run twice).
+  setTimeout(() => termStart(kind, key, { ...extra, session: session || undefined }), 800)
+}
+
 /** A terminal panel view: the slot, or what starts it. */
 function termView(key, kind, startLabel, intro = '', extra = {}) {
   const e = Terms.get(key)
   const running = e && e.id != null && !e.exited
   const attrs = `data-term-start="${esc(kind)}" data-term-key="${esc(key)}"${extra.call ? ` data-term-call="${esc(extra.call)}"` : ''}`
+  const head = key.startsWith('claude:') ? claudeTools(key, kind, extra, running) : ''
+  return head + termBody(e, key, kind, startLabel, intro, extra, running, attrs)
+}
+function termBody(e, key, kind, startLabel, intro, extra, running, attrs) {
   // Ended (or couldn't start): a card like the one before starting — what happened, and Resume —
   // not an empty terminal. What it printed stays one click away (an error is worth reading).
   if (e && e.exited && !(S.termOutput || {})[key]) {
@@ -1532,7 +1566,7 @@ function claudeFolderView() {
   const pick = a.profiles.length > 1 ? `<label class="term-profile">Profile <select data-term-profile>${profileOptions(S.folderProfile || a.default)}</select></label>` : ''
   const intro = `<p>Your own Claude Code in the Echo data folder — your settings and permissions, every call's files at hand.</p>${pick}`
   const saved = S.sessions && S.sessions.has(`${S.folderProfile || a.default || 'system'}:folder`)
-  return termView('claude:folder', 'claude-folder', saved ? 'Resume Claude' : 'Start Claude', intro, {})
+  return termView('claude:folder', 'claude-folder', saved ? 'Resume Claude' : 'Start Claude', intro, { profile: S.folderProfile || a.default || '' })
 }
 // Claude's sparkle, in a speech bubble (this call) or on a folder (the Echo folder).
 const SPARK = (x, y, r) => `<path d="M${x} ${y - r}l${r * 0.3} ${r * 0.7} ${r * 0.7} ${r * 0.3}-${r * 0.7} ${r * 0.3}-${r * 0.3} ${r * 0.7}-${r * 0.3}-${r * 0.7}-${r * 0.7}-${r * 0.3} ${r * 0.7}-${r * 0.3}z" fill="currentColor" stroke="none"/>`
@@ -5628,10 +5662,11 @@ const fingerprint = () => JSON.stringify([S.state, S.calls, S.call, S.agenda, S.
 
 document.addEventListener('click', (e) => {
   // Any click closes the call's ⋯ menu (its own button toggles it).
+  if (S.convOpen && !(e.target.closest && e.target.closest('.conv-wrap'))) { S.convOpen = null; render() }
   const menuWas = S.menuOpen
   if (menuWas && !(e.target.closest && e.target.closest('[data-cmd="call-menu"]'))) S.menuOpen = false
   if (S.laterOpen && !(e.target.closest && e.target.closest('[data-cmd^="later-"]'))) { S.laterOpen = false; render() }
-  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
+  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-menu],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
   if (!t) { if (menuWas) render(); return }
   // Sign-ins (`signin.rs`): shown at once (starting / stopping / checking) until the next poll
   // brings the app's state.
@@ -5669,6 +5704,20 @@ document.addEventListener('click', (e) => {
   if (t.dataset.layoutMove) { Layout.move(t.dataset.layoutMove, t.dataset.to, PANEL_VIEWS); return layoutChanged() }
   if (t.dataset.layoutReset !== undefined) { Layout.load({}); return layoutChanged() }
   if (t.dataset.termOutput) { S.termOutput = S.termOutput || {}; S.termOutput[t.dataset.termOutput] = !S.termOutput[t.dataset.termOutput]; return render() }
+  // A Claude panel's conversations (#44).
+  if (t.dataset.convMenu !== undefined) {
+    const key = t.dataset.termKey
+    if (S.convOpen === key) { S.convOpen = null; return render() }
+    S.convOpen = key; S.convs = { ...(S.convs || {}), [key]: null }; render()
+    const q = t.dataset.termCall ? `call=${encodeURIComponent(t.dataset.termCall)}` : `profile=${encodeURIComponent(S.folderProfile || ai().default || '')}`
+    get(`api/conversations?${q}`).then((l) => { S.convs[key] = l; render() }, () => { S.convs[key] = []; render() })
+    return
+  }
+  if (t.dataset.conv) {
+    const extra = t.dataset.termCall ? { call: t.dataset.termCall } : { profile: S.folderProfile || ai().default || undefined }
+    const v = t.dataset.conv
+    return termRestart(t.dataset.termKind, t.dataset.termKey, extra, v === 'restart' ? '' : v)
+  }
   if (t.dataset.termStart) {
     const sel = t.closest('.panel-body') && t.closest('.panel-body').querySelector('[data-term-profile]')
     if (sel) S.folderProfile = sel.value
@@ -6118,6 +6167,7 @@ async function tick() {
   const changed = JSON.stringify(S.state) !== before
   if (changed || ticks % 3 === 0) await loadCalls()
   if (ticks % 30 === 0) await loadAgenda() // a meeting about to start (the pill)
+  if (ticks % 15 === 0 && [...Terms.values()].some((e) => e.id != null && !e.exited)) await loadPtyInfo() // Restart to update
   if (S.view === 'settings' ? ticks % 2 === 0 : ticks % 60 === 0) await loadSettings() // a download's progress; Settings' badge
   // While a transcript is imported, every few seconds: the call shows once it is there.
   if (S.view === 'calendar' && (ticks % 30 === 0 || (ticks % 3 === 0 && ((S.cal.data && S.cal.data.events) || []).some((e) => e.import && e.import.busy)) || (ticks % 5 === 0 && S.cal.data && S.cal.data.checking_transcripts))) await loadCalendar()

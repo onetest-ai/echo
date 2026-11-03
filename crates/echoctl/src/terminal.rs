@@ -73,6 +73,8 @@ struct Term {
     changed: Condvar,
     /// The AI profile whose lease it holds (a Claude session).
     profile: Option<String>,
+    /// When its program started: what changed after it (a plugin updated) it hasn't loaded (#44).
+    started_at: std::time::SystemTime,
     /// What must live as long as the program: a Claude session's profile lease.
     _hold: Mutex<Option<Box<dyn Send>>>,
 }
@@ -151,6 +153,7 @@ pub fn open_with(key: &str, mut cmd: CommandBuilder, cols: u16, rows: u16, hold:
         out: Mutex::new(Ring::default()),
         changed: Condvar::new(),
         profile,
+        started_at: std::time::SystemTime::now(),
         _hold: Mutex::new(hold),
     });
     let started = Instant::now();
@@ -233,6 +236,58 @@ pub fn close_all() {
     ids.into_iter().for_each(close);
 }
 
+/// The open terminals with what a Claude session among them hasn't loaded: `{id, key, exited, stale}` —
+/// `stale` = `{at, what}`, the newest change since it started of what Claude Code reads only at start (#44).
+pub fn list_value() -> serde_json::Value {
+    let terms: Vec<(u64, String, bool, Option<String>, std::time::SystemTime)> = TERMS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .map(|(id, t)| (*id, t.key.clone(), t.out.lock().unwrap_or_else(|e| e.into_inner()).exited, t.profile.clone(), t.started_at))
+        .collect();
+    serde_json::Value::Array(terms.into_iter().map(|(id, key, exited, profile, started)| {
+        let stale = (!exited && key.starts_with("claude:")).then(|| changed_since(profile.as_deref(), started, key.starts_with("claude:folder"))).flatten();
+        serde_json::json!({"id": id, "key": key, "exited": exited, "stale": stale.map(|(at, what)| serde_json::json!({"at": chrono::DateTime::<chrono::Local>::from(at).to_rfc3339(), "what": what}))})
+    }).collect())
+}
+
+/// What a session on `profile` loaded at start that changed after `started`: the Claude Code plugins installed
+/// on that profile (Echo's plugin updated), and for the folder session the skills Echo's plugins give it.
+fn changed_since(profile: Option<&str>, started: std::time::SystemTime, folder: bool) -> Option<(std::time::SystemTime, String)> {
+    let mtime = |f: &Path| std::fs::metadata(f).and_then(|m| m.modified()).ok();
+    let mut found: Vec<(std::time::SystemTime, String)> = vec![];
+    let cfg = profile.and_then(claude_folder).unwrap_or_else(|| paths::user_home().join(".claude"));
+    if let Some(t) = mtime(&cfg.join("plugins/installed_plugins.json")) {
+        found.push((t, "Echo's plugin for Claude Code was updated".into()));
+    }
+    if folder {
+        for d in crate::grants::session_plugins() {
+            let newest = walk_newest(&d, 3);
+            let name = d.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            if let Some(t) = newest {
+                found.push((t, format!("Skills from the {name} plugin changed")));
+            }
+        }
+    }
+    found.into_iter().filter(|(t, _)| *t > started + Duration::from_secs(2)).max_by_key(|(t, _)| *t)
+}
+
+/// The newest file time under `dir`, `depth` levels down.
+fn walk_newest(dir: &Path, depth: u32) -> Option<std::time::SystemTime> {
+    let mut newest = std::fs::metadata(dir).and_then(|m| m.modified()).ok();
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let t = if e.file_type().is_ok_and(|t| t.is_dir()) && depth > 0 { walk_newest(&e.path(), depth - 1) } else { e.metadata().and_then(|m| m.modified()).ok() };
+        newest = newest.max(t);
+    }
+    newest
+}
+
+/// A Claude account profile's own Claude Code folder (None: the user's own, `~/.claude`).
+fn claude_folder(profile: &str) -> Option<PathBuf> {
+    let p = ai::Settings::load().ok()?.get(profile).ok()?;
+    (p.kind == ai::Kind::Claude).then(|| p.config_folder())
+}
+
 /// The open terminals: `(id, key, exited)`.
 pub fn list() -> Vec<(u64, String, bool)> {
     TERMS
@@ -265,7 +320,105 @@ fn session_ids() -> BTreeMap<String, String> {
     std::fs::read(sessions_file()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
 }
 
+fn history_file() -> PathBuf {
+    paths::state_dir().join("session-history.json")
+}
+
+/// Every conversation started for a key (newest last): `{key: [{id, at}]}` — what Conversations ▾ lists (#44).
+fn history() -> BTreeMap<String, Vec<serde_json::Value>> {
+    std::fs::read(history_file()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+}
+
+fn remember(key: &str, id: &str) {
+    let mut all = history();
+    let list = all.entry(key.to_string()).or_default();
+    if list.iter().any(|e| e["id"] == id) {
+        return;
+    }
+    list.push(serde_json::json!({"id": id, "at": chrono::Local::now().to_rfc3339()}));
+    let n = list.len();
+    if n > 30 {
+        list.drain(..n - 30);
+    }
+    if let Ok(bytes) = serde_json::to_vec_pretty(&all) {
+        let _ = std::fs::create_dir_all(paths::state_dir());
+        let _ = paths::write_atomic(&history_file(), &bytes);
+    }
+}
+
+/// Which conversation the next start of `store_key` takes (#44): `new` — a fresh one (the current stays in the
+/// list); an id from its list — that one again; anything else — as it is (resume the current).
+fn choose_session(store_key: &str, pick: Option<&str>) -> Result<()> {
+    match pick {
+        None | Some("") => Ok(()),
+        Some("new") => {
+            set_session(store_key, None);
+            Ok(())
+        }
+        Some(id) if history().get(store_key).is_some_and(|l| l.iter().any(|e| e["id"] == id)) => {
+            set_session(store_key, Some(id));
+            Ok(())
+        }
+        Some(_) => Err(anyhow!("that conversation isn't one of this panel's")),
+    }
+}
+
+/// The store key of the folder session on `profile` (the default when none).
+pub fn folder_store_key(profile: Option<&str>) -> String {
+    format!("{}:folder", profile.map(str::to_owned).unwrap_or_else(ai::default_id))
+}
+
+/// The store key of the session on the call in `dir` (its own profile).
+pub fn call_store_key(dir: &Path) -> Result<String> {
+    Ok(format!("{}:{}", ai::call_profile_id(dir)?, calls::stamp_of(dir)))
+}
+
+/// The conversations of a panel, newest first: `{id, at, title, current}` — title = its first prompt of the user's
+/// (from Claude Code's own transcript on that profile).
+pub fn conversations(store_key: &str) -> serde_json::Value {
+    let current = session_ids().get(store_key).cloned();
+    let profile = store_key.split(':').next().unwrap_or("");
+    let cfg = claude_folder(profile).unwrap_or_else(|| paths::user_home().join(".claude"));
+    let mut list = history().remove(store_key).unwrap_or_default();
+    if let Some(c) = &current {
+        if !list.iter().any(|e| e["id"] == c.as_str()) {
+            list.push(serde_json::json!({"id": c, "at": null}));
+        }
+    }
+    list.reverse();
+    serde_json::Value::Array(list.into_iter().map(|e| {
+        let id = e["id"].as_str().unwrap_or("").to_string();
+        let title = first_prompt(&cfg, &id);
+        serde_json::json!({"id": id, "at": e["at"], "title": title, "current": current.as_deref() == Some(id.as_str())})
+    }).collect())
+}
+
+/// The first thing the user asked in a conversation (not Echo's own opening, hooks' or commands' text), ≤ 90 chars.
+fn first_prompt(cfg: &Path, id: &str) -> Option<String> {
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
+        return None;
+    }
+    let file = std::fs::read_dir(cfg.join("projects")).ok()?.flatten().map(|d| d.path().join(format!("{id}.jsonl"))).find(|f| f.is_file())?;
+    use std::io::BufRead as _;
+    let reader = std::io::BufReader::new(std::fs::File::open(file).ok()?);
+    for line in reader.lines().take(400).map_while(Result::ok) {
+        let v: serde_json::Value = serde_json::from_str(&line).unwrap_or_default();
+        if v["type"] != "user" || v["isMeta"] == true {
+            continue;
+        }
+        let content = &v["message"]["content"];
+        let text = content.as_str().map(str::to_owned).or_else(|| content.as_array().and_then(|a| a.iter().find_map(|b| (b["type"] == "text").then(|| b["text"].as_str().map(str::to_owned)).flatten())));
+        let Some(t) = text.map(|t| t.trim().to_string()).filter(|t| !t.is_empty() && !t.starts_with('<') && !t.starts_with("You are in Echo")) else { continue };
+        let one: String = t.split_whitespace().collect::<Vec<_>>().join(" ");
+        return Some(if one.chars().count() > 90 { format!("{}…", one.chars().take(89).collect::<String>()) } else { one });
+    }
+    None
+}
+
 fn set_session(key: &str, id: Option<&str>) {
+    if let Some(id) = id {
+        remember(key, id);
+    }
     let mut all = session_ids();
     match id {
         Some(id) => all.insert(key.to_string(), id.to_string()),
@@ -312,10 +465,11 @@ fn session_args(store_key: &str) -> (Vec<String>, bool, OnExit) {
 }
 
 /// The Echo folder session, on `profile` (the default when none).
-pub fn start_folder(key: &str, profile: Option<&str>, cols: u16, rows: u16) -> Result<u64> {
+pub fn start_folder(key: &str, profile: Option<&str>, pick: Option<&str>, cols: u16, rows: u16) -> Result<u64> {
     let id = profile.map(str::to_owned).unwrap_or_else(ai::default_id);
     let ready = ai::ready(&id)?;
     let p = ready.profile().clone();
+    choose_session(&format!("{}:folder", p.id), pick)?;
     let (mut args, _, forget) = session_args(&format!("{}:folder", p.id));
     if let Some(m) = (p.kind == ai::Kind::Local).then(|| p.notes_model()).flatten() {
         args.extend(["--model".into(), m]);
@@ -361,7 +515,7 @@ pub fn start_folder(key: &str, profile: Option<&str>, cols: u16, rows: u16) -> R
 
 /// The guarded session on the call in `dir`, on the call's own profile. Only one at a time: another
 /// call's session ends (it resumes by id when opened again).
-pub fn start_call(key: &str, dir: &Path, cols: u16, rows: u16) -> Result<u64> {
+pub fn start_call(key: &str, dir: &Path, pick: Option<&str>, cols: u16, rows: u16) -> Result<u64> {
     let dir = dunce::canonicalize(dir)?;
     let ready = ai::for_call(&dir)?;
     let p = ready.profile().clone();
@@ -416,6 +570,7 @@ pub fn start_call(key: &str, dir: &Path, cols: u16, rows: u16) -> Result<u64> {
             args.extend(["--model".into(), m]);
         }
     }
+    choose_session(&format!("{}:{}", p.id, calls::stamp_of(&dir)), pick)?;
     let (session, resumed, forget) = session_args(&format!("{}:{}", p.id, calls::stamp_of(&dir)));
     args.extend(session);
     if !resumed {
@@ -491,6 +646,37 @@ fn claude_new_enough() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_panel_starts_a_new_conversation_and_goes_back_to_an_old_one() {
+        let (_env, root) = crate::paths::testenv::folders("terminal-conversations");
+        let key = "system:folder";
+        let (first, ..) = session_args(key);
+        let one = first[1].clone();
+        assert_eq!(first[0], "--session-id");
+        // New conversation: the next start is a fresh id; the first stays in the list.
+        choose_session(key, Some("new")).unwrap();
+        let (second, ..) = session_args(key);
+        assert_eq!(second[0], "--session-id");
+        assert_ne!(second[1], one);
+        let ids: Vec<String> = conversations(key).as_array().unwrap().iter().map(|c| c["id"].as_str().unwrap().to_string()).collect();
+        assert_eq!(ids, vec![second[1].clone(), one.clone()], "newest first");
+        // Back to the first: resumed by id; one that isn't this panel's is refused.
+        choose_session(key, Some(&one)).unwrap();
+        assert_eq!(session_args(key).0, vec!["--resume".to_string(), one.clone()]);
+        assert!(choose_session(key, Some("00000000-0000-4000-8000-000000000000")).is_err());
+        // Its title: the user's first prompt, not Echo's opening or a hook's text.
+        let cfg = root.join("claude-cfg");
+        std::fs::create_dir_all(cfg.join("projects/-x")).unwrap();
+        let lines = [
+            serde_json::json!({"type": "user", "message": {"content": "You are in Echo, on the call"}}),
+            serde_json::json!({"type": "user", "message": {"content": "<command-name>/clear</command-name>"}}),
+            serde_json::json!({"type": "user", "message": {"content": [{"type": "text", "text": "What did we agree   with Acme?"}]}}),
+        ].iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
+        std::fs::write(cfg.join(format!("projects/-x/{one}.jsonl")), lines).unwrap();
+        assert_eq!(first_prompt(&cfg, &one).as_deref(), Some("What did we agree with Acme?"));
+        assert_eq!(first_prompt(&cfg, "../../etc"), None);
+    }
 
     #[test]
     fn the_ring_numbers_bytes_and_keeps_the_last_ones() {

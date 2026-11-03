@@ -250,7 +250,16 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
             json_reply(v)
         }
         "/api/sessions" => json_reply(json!(crate::terminal::saved_sessions())),
-        "/api/ptys" => json_reply(Value::Array(crate::terminal::list().into_iter().map(|(id, key, exited)| json!({ "id": id, "key": key, "exited": exited })).collect())),
+        "/api/ptys" => json_reply(crate::terminal::list_value()),
+        // A Claude panel's conversations (#44): `?call=<name>` (this call's) or `?profile=<id>` (the Echo folder's).
+        "/api/conversations" => {
+            let q = req.uri().query().unwrap_or("");
+            let key = match query_param(q, "call") {
+                Some(name) => crate::calls::resolve_call(&name).and_then(|d| crate::terminal::call_store_key(&d)).ok(),
+                None => Some(crate::terminal::folder_store_key(query_param(q, "profile").filter(|p| !p.is_empty()).as_deref())),
+            };
+            json_reply(key.map(|k| crate::terminal::conversations(&k)).unwrap_or_else(|| json!([])))
+        }
         // A terminal's output after byte `from`: answered at once when there is some, else when
         // some comes (or after 25 s) — the page asks again right away (a long poll).
         p if p.starts_with("/api/pty/") => {
@@ -1935,10 +1944,10 @@ pub fn handle(msg: &str) -> Handled {
                     crate::terminal::open(&key, shell_command(), cols, rows).map(|id| (id, key.clone()))
                 }
                 // Claude in the data folder, on the profile picked (the default when none).
-                "claude-folder" => crate::terminal::start_folder(&key, v["profile"].as_str().filter(|p| !p.is_empty()), cols, rows).map(|id| (id, key.clone())),
+                "claude-folder" => crate::terminal::start_folder(&key, v["profile"].as_str().filter(|p| !p.is_empty()), v["session"].as_str(), cols, rows).map(|id| (id, key.clone())),
                 // Claude on one call, guarded, on the call's own profile.
                 "claude-call" => match call_named(&v) {
-                    Some(dir) => crate::terminal::start_call(&key, &dir, cols, rows).map(|id| (id, key.clone())),
+                    Some(dir) => crate::terminal::start_call(&key, &dir, v["session"].as_str(), cols, rows).map(|id| (id, key.clone())),
                     None => Err(anyhow::anyhow!("that call can't be found")),
                 },
                 other => Err(anyhow::anyhow!("no terminal of kind {other:?}")),
