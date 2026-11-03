@@ -252,6 +252,41 @@ pub enum NotDue {
     Tried,
     /// Too thin for minutes (`calls::minutes_gate`).
     Gate(&'static str),
+    /// The user said Not yet — until they say (`LATER`).
+    Held,
+}
+
+/// The user's Not yet on a call's automatic minutes (#42): `{"until": <time>}` (later) or `{"manual": true}`
+/// (until they write them).
+pub const LATER: &str = "minutes-later.json";
+
+/// What the user said about this call's automatic minutes: Some(None) = until they say, Some(Some(t)) = not before t.
+fn later(dir: &Path) -> Option<Option<DateTime<Local>>> {
+    let v: Value = serde_json::from_slice(&fs::read(dir.join(LATER)).ok()?).ok()?;
+    if v["manual"] == true {
+        return Some(None);
+    }
+    v["until"].as_str().and_then(|t| DateTime::parse_from_rfc3339(t).ok()).map(|t| Some(t.with_timezone(&Local)))
+}
+
+/// Not yet: `minutes` more after when they are due now (None: until the user writes them; Some(0): as before).
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn set_later(dir: &Path, minutes: Option<i64>) -> Result<()> {
+    let file = dir.join(LATER);
+    match minutes {
+        Some(0) => match fs::remove_file(&file) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
+            _ => Ok(()),
+        },
+        Some(m) => {
+            let base = match Config::load().map(|c| auto_due(dir, &c, Local::now(), None)) {
+                Ok(Due::At(t)) => t,
+                _ => Local::now(),
+            };
+            Ok(paths::write_atomic(&file, json!({"until": (base + chrono::Duration::minutes(m)).to_rfc3339()}).to_string().as_bytes())?)
+        }
+        None => Ok(paths::write_atomic(&file, br#"{"manual": true}"#)?),
+    }
 }
 
 /// When a call gets its minutes automatically.
@@ -296,7 +331,12 @@ pub fn auto_due(dir: &Path, cfg: &Config, now: DateTime<Local>, own: Option<&Run
         return Due::Not(NotDue::NotReady); // the user's notes can't be read (the Notes tab says why)
     }
     let last = noted.map_or(ended.with_timezone(&Local), |n| n.max(ended.with_timezone(&Local)));
-    let at = last + chrono::Duration::from_std(AUTO_DELAY).unwrap_or_default();
+    let mut at = last + chrono::Duration::from_std(AUTO_DELAY).unwrap_or_default();
+    match later(dir) {
+        Some(None) => return Due::Not(NotDue::Held),
+        Some(Some(t)) => at = at.max(t),
+        None => {}
+    }
     if now >= at { Due::Now } else { Due::At(at) }
 }
 
@@ -315,7 +355,21 @@ pub fn auto_state(dir: &Path) -> Value {
     match auto_due(dir, &cfg, Local::now(), None) {
         Due::Now | Due::At(_) if auto_missing().is_some() => json!({ "due": "missing", "reason": auto_missing() }),
         Due::Now => json!({ "due": "now" }),
-        Due::At(t) => json!({ "due": "at", "at": t.to_rfc3339() }),
+        Due::At(t) => {
+            // What moved it past 15 minutes after the call: the user's Not yet, or their notes.
+            let noted = fs::metadata(dir.join(calls::USER_NOTES)).and_then(|m| m.modified()).ok().map(DateTime::<Local>::from);
+            let ended = fs::read(dir.join("meta.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+                .and_then(|m| m["ended_at"].as_str().and_then(|t| DateTime::parse_from_rfc3339(t).ok()));
+            let moved = if matches!(later(dir), Some(Some(u)) if u >= t) {
+                json!({"by": "later"})
+            } else if let (Some(n), Some(e)) = (noted, ended) {
+                if n > e { json!({"by": "notes", "at": n.to_rfc3339()}) } else { Value::Null }
+            } else {
+                Value::Null
+            };
+            json!({ "due": "at", "at": t.to_rfc3339(), "moved": moved })
+        }
+        Due::Not(NotDue::Held) => json!({ "due": "held" }),
         Due::Not(NotDue::Gate(why)) => json!({ "due": "gate", "reason": why }),
         Due::Not(NotDue::Off) => json!({ "due": "off" }),
         Due::Not(NotDue::Before) => json!({ "due": "before" }),
@@ -628,6 +682,7 @@ fn auto_answer_from(dir: &Path, missing: Option<&str>, running: bool, mut due_no
         Due::Not(NotDue::Before) => "this call ended before automatic minutes were turned on — use Write minutes".to_string(),
         Due::Not(NotDue::NotReady) => "Echo writes the minutes itself, 15 minutes after the call".to_string(),
         Due::Not(NotDue::Tried) => "the minutes were already written or tried for this call".to_string(),
+        Due::Not(NotDue::Held) => "you asked for these minutes later: Write minutes when you want them".to_string(),
     };
     json!({ "requested": false, "waiting": waiting, "reason": reason })
 }
@@ -1985,6 +2040,14 @@ mod tests {
         assert!((t - (now + chrono::Duration::minutes(5))).num_seconds().abs() <= 1);
         // Just ended: 15 minutes after its end.
         let fresh = closed_call(&root, "2026-10-23_100000-b", chrono::Duration::minutes(1));
+        assert!(matches!(auto_due(&fresh, &cfg, now, None), Due::At(_)));
+        // Not yet (#42): later than that, or not until the user says; cleared, as before.
+        let until = now + chrono::Duration::minutes(40);
+        fs::write(fresh.join(LATER), json!({"until": until.to_rfc3339()}).to_string()).unwrap();
+        assert_eq!(auto_due(&fresh, &cfg, now, None), Due::At(until));
+        fs::write(fresh.join(LATER), r#"{"manual": true}"#).unwrap();
+        assert_eq!(auto_due(&fresh, &cfg, now, None), Due::Not(NotDue::Held));
+        set_later(&fresh, Some(0)).unwrap();
         assert!(matches!(auto_due(&fresh, &cfg, now, None), Due::At(_)));
         // Off, or ended before it was turned on.
         assert_eq!(auto_due(&d, &Config { auto_minutes: false, ..Config::default() }, now, None), Due::Not(NotDue::Off));

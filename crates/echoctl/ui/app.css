@@ -508,6 +508,17 @@ label.split-lang:focus-within { outline: 2px solid var(--accent); outline-offset
 
 /* Write minutes: buttons under the empty state, the run in progress */
 .notes-actions { display: flex; gap: 8px; justify-content: center; margin-top: 14px; }
+/* the countdown to automatic minutes (#42) */
+.mn-ring { width: 84px; height: 84px; margin: 0 auto 12px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  background: conic-gradient(var(--accent) 0 var(--left), var(--line) var(--left) 100%); }
+.mn-ring span { width: 70px; height: 70px; border-radius: 50%; background: var(--surface); display: flex; align-items: baseline; justify-content: center; gap: 2px; padding-top: 22px; box-sizing: border-box; }
+.mn-ring b { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.mn-ring small { font-size: 10px; color: var(--text-3); font-weight: 600; }
+.mn-moved { color: var(--text); }
+.mn-later { position: relative; }
+.mn-later .menu { top: 32px; left: 0; right: auto; }
+.mn-clock { display: inline-flex; align-items: center; margin-left: 8px; height: 18px; padding: 0 7px; border-radius: 9px; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 600; vertical-align: 1px; }
+.sb-minutes { color: var(--accent); }
 .empty p.alt, p.alt { color: var(--text-3); font-size: 12.5px; }
 p.alt { text-align: center; margin-top: 4px; }
 .empty .logo.busy { animation: echo-pulse 1.6s ease-in-out infinite; }
@@ -1735,3 +1746,7 @@ select.set-in { width: auto; margin-right: 6px; }
 .pl-field-ctl { display: flex; gap: 6px; align-items: center; margin-top: 2px; }
 .pl-field-ctl .set-in { flex: 1; width: auto; min-width: 0; }
 .main.plug-act { overflow: hidden; }
+/* the ring stands where the octopus would (#42) */
+.empty > div:has(> .mn-ring) { display: flex; flex-direction: column; align-items: center; }
+.empty > div:has(> .mn-ring) > .logo { display: none; }
+.empty > div > .mn-ring { order: -1; }

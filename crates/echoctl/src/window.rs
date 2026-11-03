@@ -557,7 +557,19 @@ fn call_summary(dir: &Path) -> Value {
         "frames": dir.join("frames.jsonl").exists(),
         "chat": dir.join("chat.json").exists(),
         "imported": crate::teams_transcript::imported(&meta),
+        "minutes_at": minutes_at(dir, &meta),
     })
+}
+
+/// When automatic minutes come for a call that ended in the last 2 hours and has none yet (#42: the list's clock).
+fn minutes_at(dir: &Path, meta: &Value) -> Value {
+    let recent = meta["ended_at"].as_str().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+        .is_some_and(|e| chrono::Local::now().signed_duration_since(e) < chrono::Duration::hours(2));
+    if !recent || dir.join("notes.md").exists() {
+        return Value::Null;
+    }
+    let a = crate::notes::auto_state(dir);
+    if a["due"] == "at" { a["at"].clone() } else { Value::Null }
 }
 
 fn call_detail(dir: &Path) -> Value {
@@ -2041,6 +2053,18 @@ fn act(v: &Value) -> bool {
                 return true;
             }
             let _ = std::fs::write(d.join(crate::notes::NOW_REQUEST), b"");
+            true
+        }
+        // Not yet (#42): 15 minutes more, until the user says, or as before.
+        "minutes_later" => {
+            let Some(d) = call else { return false };
+            let minutes = match &v["minutes"] {
+                Value::Number(m) => m.as_i64(),
+                _ => None,
+            };
+            if let Err(e) = crate::notes::set_later(&d, minutes) {
+                eprintln!("minutes later: {e:#}");
+            }
             true
         }
         "write_notes" => {
