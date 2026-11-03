@@ -1501,17 +1501,31 @@ function claudeTools(key, kind, extra, running) {
   const tools = `<span class="term-tools">${running ? `<button class="btn ghost sm" data-conv="restart" ${data} title="Stop it and start it again: the same conversation, with plugins and settings read afresh">↻ Restart</button>` : ''}<button class="btn ghost sm" data-conv="new" ${data} title="Start a fresh conversation; this one stays in the list">＋ New conversation</button><span class="conv-wrap"><button class="btn ghost sm" data-conv-menu ${data} aria-haspopup="menu" aria-expanded="${S.convOpen === key}">Conversations ▾</button>${menu}</span></span>`
   const stale = running && S.ptyStale && S.ptyStale[key]
   const hint = stale ? `<div class="term-stale"><span class="dot" aria-hidden="true"></span><span class="grow">${esc(stale.what)} at ${esc(hm(new Date(stale.at)))} — this session still runs what it started with.</span><button class="btn primary sm" data-conv="restart" ${data}>Restart to update</button></div>` : ''
-  return `<div class="term-bar term-head"><span class="grow"></span>${tools}</div>${hint}`
+  // Asked first while it runs: what it is doing stops (the conversation itself is kept).
+  const ask = S.convAsk && S.convAsk.key === key && running ? S.convAsk : null
+  const askText = !ask ? '' : ask.session === '' ? 'Restart Claude? Whatever it is doing now stops, and an answer being written is lost. The conversation is kept and goes on after the restart.'
+    : ask.session === 'new' ? 'Start a new conversation? This session stops, and whatever it is doing now is lost. This conversation stays in Conversations ▾ to come back to.'
+    : 'Switch to that conversation? This session stops, and whatever it is doing now is lost. This one stays in Conversations ▾.'
+  const confirm = ask ? `<div class="term-stale term-ask" role="alert"><span class="grow">${esc(askText)}</span><button class="btn ghost sm" data-conv-keep>Keep it running</button><button class="btn primary sm" data-conv-go="${esc(ask.session)}" ${data}>${ask.session === '' ? 'Restart' : ask.session === 'new' ? 'Start new' : 'Switch'}</button></div>` : ''
+  return `<div class="term-bar term-head"><span class="grow"></span>${tools}</div>${confirm || hint}`
 }
 /** Restart a Claude panel's session, start a new conversation, or go back to one (`session`: '' | 'new' | an id). */
-function termRestart(kind, key, extra, session) {
+async function termRestart(kind, key, extra, session) {
   const e = Terms.get(key)
-  if (e && e.id != null && !e.exited) { send({ cmd: 'pty_close', id: e.id }); e.id = null; e.exited = true }
+  if (e && e.starting) return // one at a time
+  if (e && e.id != null && !e.exited) send({ cmd: 'pty_close', id: e.id })
+  if (e) { e.id = null; e.exited = false; e.starting = true }
   S.convOpen = null
   if (S.ptyStale) delete S.ptyStale[key]
   render()
-  // Its process group stops first (the same conversation can't run twice).
-  setTimeout(() => termStart(kind, key, { ...extra, session: session || undefined }), 800)
+  // The old session's processes stop first (the same conversation must never run twice): up to 8 s.
+  for (let i = 0; i < 40; i++) {
+    await new Promise((ok) => setTimeout(ok, 200))
+    let list = []
+    try { list = await get('api/ptys') } catch { continue }
+    if (!list.some((t) => t.key === key && t.stopping)) break
+  }
+  termStart(kind, key, { ...extra, session: session || undefined })
 }
 
 /** A terminal panel view: the slot, or what starts it. */
@@ -5666,7 +5680,7 @@ document.addEventListener('click', (e) => {
   const menuWas = S.menuOpen
   if (menuWas && !(e.target.closest && e.target.closest('[data-cmd="call-menu"]'))) S.menuOpen = false
   if (S.laterOpen && !(e.target.closest && e.target.closest('[data-cmd^="later-"]'))) { S.laterOpen = false; render() }
-  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-menu],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
+  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-menu],[data-conv-go],[data-conv-keep],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
   if (!t) { if (menuWas) render(); return }
   // Sign-ins (`signin.rs`): shown at once (starting / stopping / checking) until the next poll
   // brings the app's state.
@@ -5713,10 +5727,16 @@ document.addEventListener('click', (e) => {
     get(`api/conversations?${q}`).then((l) => { S.convs[key] = l; render() }, () => { S.convs[key] = []; render() })
     return
   }
-  if (t.dataset.conv) {
+  if (t.dataset.convKeep !== undefined) { S.convAsk = null; return render() }
+  if (t.dataset.conv || t.dataset.convGo !== undefined) {
     const extra = t.dataset.termCall ? { call: t.dataset.termCall } : { profile: S.folderProfile || ai().default || undefined }
-    const v = t.dataset.conv
-    return termRestart(t.dataset.termKind, t.dataset.termKey, extra, v === 'restart' ? '' : v)
+    const key = t.dataset.termKey
+    const v = t.dataset.convGo !== undefined ? t.dataset.convGo : t.dataset.conv === 'restart' ? '' : t.dataset.conv
+    const e = Terms.get(key)
+    // A running session: asked first (the confirmation's own button goes on).
+    if (t.dataset.convGo === undefined && e && e.id != null && !e.exited) { S.convAsk = { key, session: v }; S.convOpen = null; return render() }
+    S.convAsk = null
+    return termRestart(t.dataset.termKind, key, extra, v)
   }
   if (t.dataset.termStart) {
     const sel = t.closest('.panel-body') && t.closest('.panel-body').querySelector('[data-term-profile]')
@@ -6129,7 +6149,7 @@ document.addEventListener('keydown', (e) => {
   if (e.target.id === 'sel-note' && e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); return commentSelection() }
   if (e.key === 'Escape' && S.selNote) return hideSelPop()
   if (e.key === 'Escape' && S.lightbox) { S.lightbox = null; return render() }
-  if (e.key === 'Escape' && (S.stopAsk || S.listOpen || S.menuOpen || S.laterOpen || S.overlay)) { S.stopAsk = false; S.listOpen = false; S.menuOpen = false; S.laterOpen = false; S.overlay = false; return render() }
+  if (e.key === 'Escape' && (S.stopAsk || S.listOpen || S.menuOpen || S.laterOpen || S.convAsk || S.convOpen || S.overlay)) { S.convAsk = null; S.convOpen = null; S.stopAsk = false; S.listOpen = false; S.menuOpen = false; S.laterOpen = false; S.overlay = false; return render() }
   if ((MAC ? e.metaKey : e.ctrlKey) && e.key === ',') { e.preventDefault(); return goActivity('settings') }
   if ((MAC ? e.metaKey : e.ctrlKey) && e.key === '`') { e.preventDefault(); return claudePanel() }
   // ⌘1…9 / Ctrl+1…9: the activities, in the bar's order.

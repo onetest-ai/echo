@@ -258,7 +258,11 @@ afresh), ＋ New conversation and Conversations ▾ (`/api/conversations?call=|p
 started for that store key, `<home>/.echo/session-history.json`, ≤ 30, titled by the user's first prompt from Claude Code's
 own transcript on that profile); `pty_open {session: '' | 'new' | <id>}` → `choose_session` (an id must be the panel's).
 `/api/ptys` `stale` = `{at, what}`: the profile's `plugins/installed_plugins.json`, or (folder) a plugin's session skills,
-changed after the session started → **Restart to update** on the panel. `ai::terminal_command` = `claude_command`'s command and environment for a PTY (`ECHOCTL_DEBUG` prints its
+changed in content (Echo's `echo@…` entries; the skills' files hashed) since the session started → **Restart to update** on
+the panel. Restart / New / Switch ask first while it runs (what it is doing is lost; the conversation is kept); the page
+waits until the old session's processes are gone (`terminal::stopping`, `/api/ptys` `{key, stopping}`; a start of a key
+still stopping is refused), and a session Echo stopped never forgets its conversation (`Term::stopped`; the refused-at-once
+rule forgets only the id it started with, while still the panel's). `ai::terminal_command` = `claude_command`'s command and environment for a PTY (`ECHOCTL_DEBUG` prints its
 arguments). `echoctl window --selftest` runs a shell in a terminal end to end (`terminal: true`).
 **What the window shows, in each prompt** (`view.rs`): the page reports its view (activity; the open call — title,
 time, tab, its threads; the thread and tab; the work item in the details panel; the calendar event; the panels; text
