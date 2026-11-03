@@ -656,9 +656,11 @@ without it).
   synonyms; `merge` takes `into_layer: shared`); down — a practice topic whose ≥ 10 tagged sections are all one
   client's → that client. Turned down ones stay quiet (`brain/taxonomy/moves.json`).
   `taxonomy build [--layer shared|<client>]` builds every layer or one (then classifies that layer's sections).
-  **Drift** (#47, `taxonomy::drift`, no model): per layer, over the sections judged since its last build (its `build` in
-  the history) — ≥ 30 of them —, stale when > 10% fit no topic (`untagged`) or one level-1 topic took > 40% of the tagged
-  ones; or when its calls are ≥ 3× `built_from` (and ≥ 6). A stale layer is an Inbox item ("Topics for X need a rebuild", the reasons in plain words — `reasons[].text`, one source for the Inbox and Builds) and a banner on its Topics
+  **Drift** (#47, `taxonomy::drift`, no model): per layer, over the sections that came in since its last build (its `build`
+  in the history: indexed after its `at` — `chunks.created_at` — and judged since; never the build's own sections tagged
+  again, #18) — ≥ 30 of them —, stale when > 10% fit no topic (`untagged`) or one level-1 topic took > 40% of the tagged
+  ones (one with subtopics: only when one subtopic did) — these two only for a layer built from ≥ 6 calls (`built_from`
+  0, unknown, is judged); or when its calls are ≥ 3× `built_from` (and ≥ 6). A stale layer is an Inbox item ("Topics for X need a rebuild", the reasons in plain words — `reasons[].text`, one source for the Inbox and Builds) and a banner on its Topics
   block: Rebuild topics (IPC `brain_rebuild_topics` → `induce` in the background, provisional as any build; a
   notification when done) · Not now (`brain_topics_snooze` → `brain/taxonomy/drift.json`: held until its sections or
   calls grow by half; a rebuild clears it). Never rebuilt automatically. `echoctl brain taxonomy drift` (JSON).
@@ -828,6 +830,9 @@ applied) → Echo runs `claude auth login --claudeai [--email] [--sso]` (`Profil
 opens Claude's sign-in page, which calls Claude Code back on `http://localhost:<port>/callback`, and the child exits
 after that (measured); then one `auth status` judged against the settings as they are now (`ai::settle`) → "Signed in
 as …", and live notes waiting for it go on at once (`livenotes::signed_in`). 10 min at most; Cancel; quitting stops it.
+The window's Claude sessions on the profile hold its lease while they run: a sign-in closes them first
+(`terminal::close_profile`; they resume by id), and if the lease is still held after 10 s the error names a session that
+didn't stop (`terminal::holds_profile`) apart from minutes or another sign-in (#16).
 A reader/writer lock per profile, `<config dir>/claude/<id>.lock` (`app::FileLock` shared/exclusive): jobs and
 `auth status` checks hold it shared (`ai::lease`; `for_call` → `Ready` keeps it for the job), a sign-in exclusively
 (`ai::sign_in_lease`). Meanwhile `for_call` fails with `ai::SigningIn` (it never waits): live jobs retry — in the app

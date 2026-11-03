@@ -466,13 +466,35 @@ fn run(p: &Profile, generation: u64) {
     finish(p, generation, outcome);
 }
 
+/// The window's Claude sessions on a profile hold its lease while they run: closed for a sign-in.
+#[cfg(feature = "tray")]
+fn close_sessions(profile: &str) {
+    crate::terminal::close_profile(profile);
+}
+
+#[cfg(not(feature = "tray"))]
+fn close_sessions(_profile: &str) {}
+
+/// Is a Claude session in the window (still) what holds the profile.
+#[cfg(feature = "tray")]
+fn session_holds(profile: &str) -> bool {
+    crate::terminal::holds_profile(profile)
+}
+
+#[cfg(not(feature = "tray"))]
+fn session_holds(_profile: &str) -> bool {
+    false
+}
+
 /// The sign-in itself, under the profile's exclusive lease (dropped when this returns — after its
 /// child was stopped and reaped). None: cancelled.
 fn login(p: &Profile, generation: u64) -> Option<Outcome> {
     let cancelled = || !current(&p.id, generation);
     let t = Instant::now();
-    // Live jobs were told to stop (`defer`): seconds each (TERM, KILL after 3 s). A minutes run
-    // keeps its lease to the end: give up then.
+    // Live jobs were told to stop (`defer`): seconds each (TERM, KILL after 3 s). Claude sessions in
+    // the window on this profile are closed (they resume by id). A minutes run keeps its lease to the
+    // end: give up then.
+    let mut closed = false;
     let lease = loop {
         match ai::sign_in_lease(p) {
             Ok(Some(l)) => {
@@ -481,9 +503,16 @@ fn login(p: &Profile, generation: u64) -> Option<Outcome> {
             }
             Err(e) => return Some(Outcome::Failed(format!("{e:#}"))),
             Ok(None) if cancelled() => return None,
+            Ok(None) if !closed => {
+                closed = true;
+                close_sessions(&p.id);
+            }
             Ok(None) if t.elapsed() < Duration::from_secs(10) => std::thread::sleep(Duration::from_millis(200)),
+            Ok(None) if session_holds(&p.id) => {
+                return Some(Outcome::Failed(format!("{} is held by a Claude session in Echo's window that didn't stop — quit Echo and start it again, then sign in", p.name)));
+            }
             Ok(None) => {
-                return Some(Outcome::Failed(format!("{} is in use (notes being written) or being signed in elsewhere (`echoctl ai login`) — try again in a moment", p.name)));
+                return Some(Outcome::Failed(format!("{} is in use — minutes being written, or a sign-in elsewhere (`echoctl ai login`) — try again when it ends", p.name)));
             }
         }
     };
