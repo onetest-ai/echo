@@ -850,7 +850,7 @@ fn drift_in(c: &Connection, t: &Taxonomy, snoozed: &Value) -> Result<Vec<Value>>
             reasons.push(json!({"rule": "catch_all", "text": format!("one topic, “{}”, took {}% of its new sections: too broad to tell them apart", top_label.clone().unwrap_or_default(), top_pct.round())}));
         }
         if l.built_from > 0 && calls >= 6 && calls >= 3 * l.built_from as i64 {
-            reasons.push(json!({"rule": "outgrown", "text": format!("its topics were built from {} call{}, it has {calls} now", l.built_from, if l.built_from == 1 { "" } else { "s" })}));
+            reasons.push(json!({"rule": "outgrown", "text": format!("its topics were built from {} call{}, but it has {calls} now", l.built_from, if l.built_from == 1 { "" } else { "s" })}));
         }
         let z = &snoozed[id];
         let held = z.is_object() && (judged as f64) < 1.5 * z["sections"].as_f64().unwrap_or(0.0) && (calls as f64) < 1.5 * z["calls"].as_f64().unwrap_or(0.0).max(1.0);

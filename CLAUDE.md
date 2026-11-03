@@ -715,7 +715,7 @@ without it).
   get no echo-brain server, transcription hints come from glossaries; the store stays on disk as it was.
 - **Topics** is one tree: the practice's topics by size (a bar, the share), each with its subtopics and the clients'
   topics under it (a chip names the client), then "Only <client>" for a client's own; definitions and synonyms under the
-  name; drift's catch-all flagged in place. Above it, **Topic builds**: one line per layer saying in plain words what is wrong and the one thing to do — Needs a rebuild (why; Rebuild · Not now), Waiting for your review (Accept), Nothing to do —, **Tag again** (IPC `brain_retag_topics` → `classify(layer, again)`, background) and
+  name; drift's catch-all flagged in place. Above it, **Topic builds**: one line per layer saying in plain words what is wrong and the one thing to do — Needs a rebuild (why; Rebuild · Accept when provisional · Not now), Waiting for your review (Accept), Rebuild put off (snoozed), Not built from calls yet, Nothing to do — with Tag again and Rebuild always there as quiet links, **Tag again** (IPC `brain_retag_topics` → `classify(layer, again)`, background) and
   **Rebuild** (`brain_rebuild_topics` → `induce`, provisional) — and the suggested **moves** (Move up / down · Keep it);
   **Sync now** reads new sources and tags their sections (a manual sync tags too, as the scheduler's); what runs is
   `/api/brain` `topic_jobs`, a notification says when it ends. (A sunburst was tried and dropped: too hard to read.)
