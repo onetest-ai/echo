@@ -1773,3 +1773,5 @@ select.set-in { width: auto; margin-right: 6px; }
 .br-closed { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0; }
 
 .br-tog { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-2); white-space: nowrap; }
+
+.rows-more { padding: 12px 14px; color: var(--text-3); font-size: 12px; text-align: center; }

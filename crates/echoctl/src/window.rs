@@ -236,7 +236,8 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
         "/assets/vendor/graphology.umd.min.js" => reply(200, "text/javascript; charset=utf-8", GRAPHOLOGY_JS.as_bytes().to_vec()),
         "/assets/vendor/graphology-library.min.js" => reply(200, "text/javascript; charset=utf-8", GRAPHOLOGY_LIB_JS.as_bytes().to_vec()),
         "/api/state" => json_reply(state()),
-        "/api/calls" => json_reply(Value::Array(calls::all_calls().iter().rev().map(|d| call_summary(d)).collect())),
+        // The calls list, a page at a time, newest first: `?limit=&before=<name>&q=` → {calls, next, total}.
+        "/api/calls" => json_reply(calls_page(req.uri().query().unwrap_or(""))),
         "/api/agenda" => json_reply(agenda()),
         "/api/layout" => json_reply(load_layout()),
         "/api/settings" => json_reply(settings_snapshot()),
@@ -547,6 +548,38 @@ fn people(dir: &Path) -> Vec<String> {
         .collect();
     out.dedup();
     out
+}
+
+/// How many calls a page holds when the page doesn't say.
+const CALLS_PAGE: usize = 60;
+
+/// A page of the calls list (`/api/calls`), newest first: `limit` calls (≤ 500) older than `before` (a call's folder
+/// name — names start with their time), those whose title, people or meeting subject hold every word of `q`. `next` is
+/// the cursor of the following page (none: the end); `total` how many match.
+fn calls_page(q: &str) -> Value {
+    let limit = query_param(q, "limit").and_then(|l| l.parse::<usize>().ok()).filter(|l| *l > 0).unwrap_or(CALLS_PAGE).min(500);
+    let before = query_param(q, "before").filter(|b| !b.is_empty());
+    let words: Vec<String> = query_param(q, "q").unwrap_or_default().to_lowercase().split_whitespace().map(str::to_owned).collect();
+    let mut dirs: Vec<PathBuf> = calls::all_calls();
+    dirs.reverse();
+    // A search reads each call's own words (title, people, subject) — never a whole summary for a call it drops.
+    if !words.is_empty() {
+        dirs.retain(|d| {
+            let meta = read_json(&d.join("meta.json"));
+            let meeting = read_json(&d.join("meeting.json"));
+            let hay = format!("{} {} {} {}", meta["title"].as_str().unwrap_or(""), d.file_name().map(|n| n.to_string_lossy().replace('-', " ")).unwrap_or_default(),
+                meeting["subject"].as_str().unwrap_or(""), people(d).join(" ")).to_lowercase();
+            words.iter().all(|w| hay.contains(w.as_str()))
+        });
+    }
+    let total = dirs.len();
+    let start = match &before {
+        Some(b) => dirs.iter().position(|d| d.file_name().is_some_and(|n| n.to_string_lossy().as_ref() < b.as_str())).unwrap_or(dirs.len()),
+        None => 0,
+    };
+    let page: Vec<&PathBuf> = dirs.iter().skip(start).take(limit).collect();
+    let next = (start + page.len() < dirs.len()).then(|| page.last().and_then(|d| d.file_name()).map(|n| n.to_string_lossy().into_owned())).flatten();
+    json!({ "calls": page.into_iter().map(|d| call_summary(d)).collect::<Vec<_>>(), "next": next, "total": total })
 }
 
 fn call_summary(dir: &Path) -> Value {
@@ -2471,6 +2504,28 @@ pub fn selftest() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_calls_list_comes_a_page_at_a_time_and_searches_in_the_app() {
+        let (_env, _root) = crate::paths::testenv::folders("window-calls-page");
+        for (stamp, title, who) in [("2026-10-20_100000-a", "Harbor weekly", "Maya Lindqvist"), ("2026-10-21_100000-b", "Verdant discovery", "Hannah Brooks"), ("2026-10-22_100000-c", "Harbor depot data", "Tom Okafor")] {
+            let d = crate::paths::calls_dir().join(stamp);
+            fs::create_dir_all(&d).unwrap();
+            fs::write(d.join("meta.json"), json!({"title": title, "started_at": "2026-10-20T10:00:00+02:00"}).to_string()).unwrap();
+            fs::write(d.join("meeting.json"), json!({"attendees": [{"name": who}]}).to_string()).unwrap();
+        }
+        let names = |v: &Value| v["calls"].as_array().unwrap().iter().map(|c| c["name"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        let first = calls_page("limit=2");
+        assert_eq!(names(&first), ["2026-10-22_100000-c", "2026-10-21_100000-b"], "newest first");
+        assert_eq!((first["next"].as_str(), first["total"].as_u64()), (Some("2026-10-21_100000-b"), Some(3)));
+        let rest = calls_page("limit=2&before=2026-10-21_100000-b");
+        assert_eq!(names(&rest), ["2026-10-20_100000-a"]);
+        assert!(rest["next"].is_null(), "the end");
+        let found = calls_page("q=harbor");
+        assert_eq!((names(&found).len(), found["total"].as_u64()), (2, Some(2)));
+        assert_eq!(names(&calls_page("q=hannah")), ["2026-10-21_100000-b"], "by the people in it");
+        assert_eq!(names(&calls_page("q=harbor%20tom")), ["2026-10-22_100000-c"], "every word");
+    }
 
     #[test]
     fn a_paste_types_as_xterm_would() {
