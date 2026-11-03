@@ -121,6 +121,23 @@ impl Access {
             .collect()
     }
 
+    /// The threads it may name (`list_scopes`, the Brain's own summary): on its profile and within its
+    /// narrowing. `on_profile`: `threads_on_profile()`.
+    pub fn thread_ok(&self, id: &str, client: Option<&str>, on_profile: &[String]) -> bool {
+        (id == "-" || on_profile.iter().any(|x| x == id)) && (self.threads.is_empty() || self.threads.iter().any(|x| x == id)) && self.client.as_deref().is_none_or(|c| client == Some(c))
+    }
+
+    /// The threads that run on its profile.
+    pub fn threads_on_profile(&self) -> Vec<String> {
+        let default = crate::ai::default_id();
+        thread_profiles(&default).into_iter().filter(|(_, p)| *p == self.profile).map(|(t, _)| t).collect()
+    }
+
+    /// The clients it may name: every one of their threads on its profile, and its own client when narrowed.
+    pub fn client_ok(&self, id: &str) -> bool {
+        (id == "-" || client_profile_ok(id, &self.profile)) && self.client.as_deref().is_none_or(|x| x == id)
+    }
+
     /// The clients whose numbers it may read: its own client, or (not narrowed) every client whose
     /// threads all run on its profile.
     pub fn numbers_clients(&self) -> Vec<String> {

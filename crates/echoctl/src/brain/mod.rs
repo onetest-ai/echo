@@ -5,6 +5,7 @@
 //! come from the endpoint the user sets (Ollama or OpenAI-compatible).
 
 pub mod access;
+pub mod advert;
 pub mod calls;
 pub mod chunk;
 pub mod digest;

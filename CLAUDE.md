@@ -633,6 +633,16 @@ without it).
   get_metric answer `not_modeled` until those lanes exist) — kb recognises a Brain by them. Attached to both window
   sessions (`--mcp-config`, `mcp__echo-brain` allowed); the call session's guard allows `mcp__echo-brain__*` in ask mode
   only (`guard::BRAIN_TOOLS`), never in a minutes run.
+- **It tells Claude it is there** (#34, `brain/advert.rs`, no model, nothing when it is off): what this reader's Brain
+  holds now — kinds with counts and dates, clients and threads with their ids, people / figures / insights, last update —
+  from the store and the reader's access, plus fixed rules on when to go there first (what was said / decided, people,
+  figures, before a brief or prep; scope by client / thread; "not in the Brain"). In the MCP server's `instructions`, an
+  `<echo_brain>` block at `SessionStart` of Echo's sessions (narrowed like the session's server; again after compact /
+  clear, on resume only when changed), routines' prompts (`claudejob`, when they have tools) and a `Brain:` line in
+  `<echo_view>` for an open call, work item, calendar event, client or thread. Usage counted (`brain/usage.json`: tool
+  calls by day and session kind — `brain mcp --who folder|call|routine` —, Also discussed / Mentioned also in views),
+  shown in Settings → Brain. Measured on a working store: asked about a client, a fresh session loaded the tool and
+  searched scoped to that client first.
 - **Client and thread are its dimensions** (`scopes(chunk_id, kind, id)`, from each section's refs; `-` = a call in
   no thread / with no client; filled once for an older store): search, related, the taxonomy's counts and the MCP tools
   take `client` / `thread` (`list_scopes` names them, the server's instructions say to scope); moving a call to another

@@ -37,6 +37,16 @@ fn save(v: &Value) -> Result<()> {
     Ok(())
 }
 
+/// Insights kept for these clients and threads (what a reader may see).
+pub fn count_for(clients: &BTreeSet<String>, threads: &BTreeSet<String>) -> usize {
+    let all = load();
+    all["scopes"].as_object().into_iter().flatten().filter(|(k, _)| match k.split_once(':') {
+        Some(("client", id)) => clients.contains(id),
+        Some(("thread", id)) => threads.contains(id),
+        _ => false,
+    }).map(|(_, s)| s["insights"].as_array().map(|x| x.len()).unwrap_or(0)).sum()
+}
+
 fn key(scope: (&str, &str)) -> String {
     format!("{}:{}", scope.0, scope.1)
 }
