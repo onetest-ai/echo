@@ -877,12 +877,18 @@ pub fn plugin_root() -> Option<PathBuf> {
     installs.iter().filter_map(|i| i["installPath"].as_str()).map(PathBuf::from).find(|p| p.is_dir())
 }
 
+/// The same folder, after links (`/private/var` vs `/var` on macOS).
+fn same_folder(a: &Path, b: &Path) -> bool {
+    dunce::canonicalize(a).ok().zip(dunce::canonicalize(b).ok()).is_some_and(|(a, b)| a == b) || a == b
+}
+
 /// `echoctl claude`: is Claude Code installed, and is the plugin?
 pub fn claude_status() -> Value {
     let installs = plugin_installs();
     json!({
         "claude": claude_bin(),
-        "plugin_installed": !installs.is_empty(),
+        // Where Echo's sessions see it: every session (user scope), or the data folder (project / local scope there).
+        "plugin_installed": installs.iter().any(|(s, p)| s == "user" || p.as_deref().is_some_and(|p| same_folder(Path::new(p), &paths::home()))),
         "installs": installs.iter().map(|(s, p)| json!({ "scope": s, "project": p })).collect::<Vec<_>>(),
         "marketplace": marketplace_source(),
     })

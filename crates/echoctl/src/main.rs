@@ -185,7 +185,7 @@ enum Cmd {
         /// default (Claude Code's own setting)
         #[arg(long)]
         notes_model: Option<String>,
-        /// Model for the live pane's summary and quick questions: haiku | <model id>
+        /// Model for live notes and quick questions during a call: haiku | <model id>
         #[arg(long)]
         live_model: Option<String>,
     },

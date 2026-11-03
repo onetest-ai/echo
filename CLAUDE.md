@@ -932,15 +932,16 @@ command). Telegram is one (its package: bot token as its secret setting, pairing
 browser went — Echo's window shows calls, live transcripts, live notes and minutes). At session start it asks the CLI
 for the data folder (`echoctl app` → `home`) and starts the app if it is set up but not running. While the app runs:
 **Echo** (hotkey e: `echoctl app open [--call <the recording>]`) + "● Recording · title · N min" (· 🔇 muted), "◌ Armed",
-or "Echo · next: 18:30 …". Every 1 s it heartbeats `<home>/.echo/mod.json` and tails `events.jsonl` (from the end, never
-replays): muted / unmuted for the line, toasts for a failed transcription, an error, an expired arm. It asks for no
+or "Echo · next: 18:30 …". Every 1 s it tails `events.jsonl` (from the end, never
+replays; no `mod.json` heartbeat any more — nothing read it): muted / unmuted for the line, toasts for a failed transcription, an error, an expired arm. It asks for no
 minutes (`pending --for` / `notes --auto` stay for older mods, and refuse) and never calls a model. `echoctl live-replay
 <wav> <dir>` (hidden) plays a WAV in as a growing recording (10×) and writes the transcript, as after a call — only into
 a new or empty folder, or one it marked (`.replay`), and only once transcription can run (never a call's folder).
 **Where the plugin goes**: `echoctl claude connect` / tray → Claude Code → Connect installs it in the **project scope of
 the data folder** by default (where Echo's own Claude sessions run; `--scope user` for every session); a folder session on
 a `claude` / `local` profile reads only its own settings, so Echo passes the plugin shipped with the app
-(`--plugin-dir`, `notes::plugin_dir`).
+(`--plugin-dir`, `notes::plugin_dir`). "Claude Code ✓" counts a user-scope install or one whose folder is the data folder
+(after `home set` Connect is offered again).
 Mute sync: while recording, the watcher polls Teams' microphone button via Accessibility / UI
 Automation (`ax::MuteWatch`, label "Unmute…" ⇒ muted) every 400 ms; muted ⇒ `audio::mic::MUTED` makes the mic
 track record silence; events `mic_muted`/`mic_unmuted` drive the status line. `config.follow_app_mute`

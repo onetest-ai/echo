@@ -145,7 +145,7 @@ The action items from the notes, as a JSON array, written to `<dir>/actions.new.
    "due": "<as stated>" | null, "confidence": "high" | "low", "quote": "<short supporting quote>",
    "t": <seconds into the call where it was said>, "status": "todo"}]`
 then run `echoctl actions <dir> --apply <dir>/actions.new.json`. It replaces `actions.json`, keeps
-the status the user gave each item meanwhile (they tick items off in the window and the pane, also
+the status the user gave each item meanwhile (they tick items off in Echo's window, also
 while you work), gives new items an id and removes `actions.new.json`; if it says the list is
 malformed, fix the file and run it again. On a re-run (`actions.json` exists: `echoctl actions
 <dir>` prints it), keep each item's `id` when your item is the same action — even reworded — and

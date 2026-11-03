@@ -1136,7 +1136,7 @@ impl Ui {
             let _ = models_menu.append_items(&[&sep(), &MenuItem::new(format!("Downloading {name}: {pct}%"), false, None)]);
         }
 
-        // Claude Code: the plugin (live pane, sessions), where Echo runs it for minutes, and the minutes.
+        // Claude Code: the plugin (status line, skills), where Echo runs it for minutes, and the minutes.
         let claude = Submenu::new(if model.plugin_installed { "Claude Code ✓" } else { "Claude Code" }, true);
         if !model.has_claude {
             let _ = claude.append(&MenuItem::new("Claude Code is not installed", false, None));

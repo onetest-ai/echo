@@ -4,7 +4,8 @@
 // shows calls, live transcripts, live notes and minutes. In a Claude Code session this mod only:
 // - shows a one-line status above the prompt while the app runs (recording · title · minutes,
 //   muted, armed, or the next meeting), with a button that opens the call in Echo's window;
-// - starts the app if it is set up but not running;
+// - starts the app if it is set up but not running (on a profile of its own, a folder session gets this plugin from the
+//   app with --plugin-dir; one also installed in that profile's own Claude Code would show the line twice);
 // - says in a toast when a transcription fails or an arm expires.
 //
 // It reads files the app writes in its data folder (`echoctl app` → home):
@@ -139,13 +140,13 @@ async function recordingMeta($: any, dir: string): Promise<{ title: string | nul
 
 async function tick($: any): Promise<void> {
   if (!HOME) return
-  await $.fs.write(`${stateDir()}/mod.json`, JSON.stringify({ heartbeat: new Date().toISOString() }))
   await relayEvents($)
   const w = await watcherState($)
   const nextUp = w ? await nextMeeting($) : null
   const cur = await read($, band)
   const dir = w?.recording ?? null
-  const meta = dir && dir !== cur.dir ? await recordingMeta($, dir) : { title: cur.title, startedAt: cur.startedAt }
+  // Read when the recording changes, and again while its meta.json doesn't say yet.
+  const meta = dir && (dir !== cur.dir || cur.title === null || cur.startedAt === null) ? await recordingMeta($, dir) : { title: cur.title, startedAt: cur.startedAt }
   await update($, band, prev => {
     const fresh: Band = {
       watching: w !== null, recording: dir !== null, armed: Boolean(w?.armed), next: nextUp,
