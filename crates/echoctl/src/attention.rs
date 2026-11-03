@@ -64,8 +64,9 @@ pub fn collect() -> Collected {
     let threads = crate::projects::list();
     let client_of = |thread: &str| threads.iter().find(|p| p.id == thread).and_then(|p| p.client.clone()).unwrap_or_else(|| "-".into());
 
-    // Minutes: failed ones, and the profiles whose sign-in they wait for.
+    // Minutes: failed ones, ones still waiting their turn, and the profiles whose sign-in they wait for.
     let mut login_wait: BTreeMap<String, usize> = BTreeMap::new();
+    let profiles = crate::ai::Settings::load().ok();
     let fresh = (chrono::Local::now() - chrono::Duration::days(MINUTES_DAYS)).format("%Y-%m-%d").to_string();
     for d in recent_calls(MINUTES_DAYS * 2) {
         let r = read(&d.join(crate::notes::RUN));
@@ -76,6 +77,23 @@ pub fn collect() -> Collected {
         }
         match r["state"].as_str() {
             Some("needs_login") => *login_wait.entry(r["profile"].as_str().map(str::to_owned).unwrap_or_else(crate::ai::default_id)).or_default() += 1,
+            // Not written yet, waiting (another call's recording, the model): what for, and Write now
+            // where the run may start anyway (Claude Code as configured). Its owner gone: failed, above.
+            Some("queued") => {
+                let Some(run) = crate::notes::status(&d).filter(|r| r.state == "queued") else { continue };
+                let system = run.profile.as_deref().and_then(|id| profiles.as_ref()?.get(id).ok()).is_some_and(|p| p.kind == crate::ai::Kind::System);
+                let acts = if run.wait.as_deref() == Some("call") && system { vec![act("Write now", true, json!({"cmd": "notes_now", "call": name}))] } else { vec![] };
+                out.push(item(
+                    format!("minutes:{}", crate::calls::stamp_of(&d)),
+                    "minutes",
+                    "echo",
+                    format!("Minutes not written yet: {}", call_title(&d)),
+                    run.message.unwrap_or_else(|| "They start as soon as the model is free".into()).chars().take(200).collect(),
+                    false,
+                    acts,
+                    Some(format!("call/{name}/minutes")),
+                ));
+            }
             Some("failed") if !d.join("notes.md").exists() => out.push(item(
                 format!("minutes:{}", crate::calls::stamp_of(&d)),
                 "minutes",
@@ -458,6 +476,29 @@ mod tests {
 
     fn got(items: &[&Value]) -> Collected {
         Collected { items: items.iter().map(|v| (*v).clone()).collect(), ..Default::default() }
+    }
+
+    #[test]
+    fn minutes_still_waiting_are_listed_with_write_now_where_it_helps() {
+        let (_env, root) = crate::paths::testenv::folders("attention-minutes-wait");
+        let day = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let call = |slug: &str, title: &str, run: Value| {
+            let d = root.join(format!("home/calls/{day}_090000-{slug}"));
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join("meta.json"), json!({"title": title}).to_string()).unwrap();
+            std::fs::write(d.join(crate::notes::RUN), run.to_string()).unwrap();
+        };
+        let me = std::process::id();
+        call("planning", "Planning", json!({"state": "queued", "profile": "system", "pid": me, "wait": "call", "message": "Claude Code (as configured) waits for the recording of “Weekly sync” to end"}));
+        call("review", "Review", json!({"state": "queued", "profile": "system", "pid": me, "wait": "model", "message": "Claude Code (as configured) waits for the model to finish another job"}));
+        let got = collect().items;
+        let find = |t: &str| got.iter().find(|i| i["title"] == format!("Minutes not written yet: {t}")).cloned().unwrap_or_else(|| panic!("no item for {t}: {got:?}"));
+        let p = find("Planning");
+        assert!(p["why"].as_str().unwrap().contains("“Weekly sync”"));
+        assert_eq!(p["actions"][0]["label"], "Write now");
+        assert_eq!(p["actions"][0]["ipc"]["cmd"], "notes_now");
+        // Waiting for the model: nothing to start early.
+        assert!(find("Review")["actions"].as_array().unwrap().is_empty());
     }
 
     #[test]
