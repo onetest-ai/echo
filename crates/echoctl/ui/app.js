@@ -1473,12 +1473,17 @@ function minutesTab(c) {
 }
 
 /** Above the page: an update going on or one that didn't finish, notes changed since, and the file. */
+/** Write now: a run waiting for another call's recording or transcript that may start anyway
+ *  (`may_start`: Claude Code as configured, not on a model on this computer). */
+const notesNowBtn = (run) => {
+  return run && run.state === 'queued' && run.wait === 'call' && run.may_start && !run.now ? '<button class="btn ghost" data-cmd="notes-now" title="Start them now; the other call keeps recording, and both share this computer">Write now</button>' : ''
+}
 function minutesBar(c) {
   const run = c.notes_run
   const log = c.has_log ? '<button class="btn ghost" data-cmd="show-log">Show log</button>' : ''
   let status = ''
   if (run && run.state === 'running') status = `<span class="grow">Updating the minutes…</span>${log}`
-  else if (run && run.state === 'queued') status = `<span class="grow">${esc(run.message || 'The update waits its turn.')}</span>`
+  else if (run && run.state === 'queued') status = `<span class="grow">${esc(run.message || 'The update waits its turn.')}</span>${notesNowBtn(run)}`
   else if (run && (run.state === 'failed' || run.state === 'needs_login')) {
     const p = run.state === 'needs_login' && profileOf(run.profile)
     const signin = p && p.kind === 'claude' ? `<button class="btn ghost" data-signin="${esc(p.id)}">Sign in…</button>` : ''
@@ -1500,7 +1505,7 @@ function minutesHint(c, heading, lead) {
   const box = (h, p, buttons, busy) => `<div class="empty" style="height:auto;padding:40px 0"><div>${mark(busy ? 'busy' : '')}<h3>${esc(h)}</h3>
     ${p}${buttons ? `<div class="notes-actions">${buttons}</div>` : ''}</div></div>`
   if (run && run.state === 'queued') {
-    return box('Minutes are waiting their turn', `<p>${esc(run.message || 'They start as soon as the model is free.')}</p><p class="alt">With <b>${esc(run.model || '')}</b>. You can close this window.</p>`, '', true)
+    return box('Minutes are waiting their turn', `<p>${esc(run.message || 'They start as soon as the model is free.')}</p><p class="alt">With <b>${esc(run.model || '')}</b>. You can close this window.</p>`, notesNowBtn(run), true)
   }
   if (run && run.state === 'running') {
     return box('Writing minutes…', `<p>Claude Code is writing the minutes and action items with <b>${esc(run.model || n.model || 'sonnet')}</b>. It takes a few minutes; you can close this window.</p>`, log, true)
@@ -5168,6 +5173,7 @@ document.addEventListener('click', (e) => {
     case 'note-edit-cancel': S.noteEdit = null; return render()
     case 'reveal': render(); return send({ cmd: 'reveal', call: S.selected })
     case 'show-log': return send({ cmd: 'show_log', call: S.selected })
+    case 'notes-now': { send({ cmd: 'notes_now', call: S.selected }); if (S.call && S.call.notes_run) { S.call.notes_run.now = true; S.call.notes_run.message = 'Starting now…' } return render() }
     case 'write-notes': {
       // The run reads the user's notes: they are saved first, or it doesn't start.
       const call = S.selected

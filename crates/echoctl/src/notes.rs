@@ -72,6 +72,14 @@ pub struct Run {
     /// The call had minutes when this run was admitted (an update): the window keeps showing them.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub had_minutes: bool,
+    /// While `queued`, what it waits for: `own` (its own call still recorded or transcribed), `call`
+    /// (another call's) or `model` (the local model's other job).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait: Option<String>,
+    /// Waiting for another call, it may start anyway on the user's Write now (Claude Code as
+    /// configured, not pointed at a model on this computer).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub may_start: bool,
 }
 
 /// Who wrote the minutes shown (`model`: the profile and model, as the page names them) — valid
@@ -776,46 +784,111 @@ fn finish(dir: &Path, place: crate::app::FileLock, r: Run) -> Result<PathBuf> {
     out
 }
 
-/// Something is being recorded or transcribed (any call): a local model waits for it.
-fn calls_busy() -> bool {
-    crate::watch::running_watcher().and_then(|w| w.recording).is_some()
-        || calls::all_calls().iter().any(|d| {
+/// The user's "Write now" on a run waiting for another call (`<call>/notes-now.request`, the window's
+/// IPC `notes_now`): Claude Code as configured starts without waiting for that call.
+pub const NOW_REQUEST: &str = "notes-now.request";
+
+/// A call named for the user: its title in quotes, and when its recording started.
+fn call_words(d: &Path) -> String {
+    let meta: Value = fs::read(d.join("meta.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    let title = meta["title"].as_str().filter(|t| !t.trim().is_empty()).map(str::to_string).unwrap_or_else(|| calls::stamp_of(d));
+    let at = meta["started_at"].as_str().and_then(|s| DateTime::parse_from_rfc3339(s).ok()).map(|t| format!(" (started {})", t.with_timezone(&Local).format("%H:%M"))).unwrap_or_default();
+    format!("“{title}”{at}")
+}
+
+/// When the call's meeting ends by its invite, if that is still ahead: ", about 11:00".
+fn ends_about(d: &Path) -> String {
+    let m: Value = fs::read(d.join("meeting.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    m["end"].as_str().and_then(|s| DateTime::parse_from_rfc3339(s).ok()).map(|t| t.with_timezone(&Local)).filter(|t| *t > Local::now()).map(|t| format!(", about {}", t.format("%H:%M"))).unwrap_or_default()
+}
+
+/// What a call being recorded or transcribed makes a gated run of `own` wait for, in words, and
+/// whether that call is its own (checked first: never skipped); None: nothing is.
+fn busy_call(own: &Path) -> Option<(String, bool)> {
+    let same = |d: &Path| calls::stamp_of(d) == calls::stamp_of(own);
+    let recording = crate::watch::running_watcher().and_then(|w| w.recording).map(PathBuf::from);
+    let transcribing: Vec<PathBuf> = calls::all_calls()
+        .into_iter()
+        .filter(|d| {
             fs::read_to_string(d.join(crate::transcribe_marker()))
                 .ok()
                 .and_then(|t| t.split_whitespace().next().and_then(|p| p.parse::<u32>().ok()))
                 .is_some_and(crate::app::process_alive)
         })
+        .collect();
+    if recording.as_deref().is_some_and(same) {
+        return Some(("waits for the call to end".into(), true));
+    }
+    if transcribing.iter().any(|d| same(d)) {
+        return Some(("waits for its transcript".into(), true));
+    }
+    if let Some(d) = recording {
+        return Some((format!("waits for the recording of {} to end{}", call_words(&d), ends_about(&d)), false));
+    }
+    let d = transcribing.first()?;
+    Some((format!("waits for the transcript of {} to be written", call_words(d)), false))
 }
 
-/// One look at the local model's turn: the lock, or why not yet.
-fn local_model_turn() -> Result<std::result::Result<crate::app::FileLock, &'static str>> {
-    if calls_busy() {
-        return Ok(Err("waits for the call to end"));
+/// Claude Code as configured pointed at a model on this computer (its folder's settings route it to
+/// a loopback `ANTHROPIC_BASE_URL`): it would take the computer from a recording, as a local profile.
+fn system_runs_locally() -> bool {
+    let Ok(dir) = crate::ai::system_folder() else { return true };
+    ["settings.json", "settings.local.json"].iter().any(|f| {
+        let v: Value = fs::read(dir.join(".claude").join(f)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        v["env"]["ANTHROPIC_BASE_URL"].as_str().is_some_and(|u| ["localhost", "127.0.0.1", "[::1]", "0.0.0.0"].iter().any(|h| u.contains(h)))
+    })
+}
+
+/// One look at the local model's turn for `own`: the lock, or why not yet and what it waits for
+/// (`own` | `call` | `model`). `skip_calls`: the user said Write now, so another call doesn't hold it back.
+fn local_model_turn(own: &Path, skip_calls: bool) -> Result<std::result::Result<crate::app::FileLock, (String, &'static str)>> {
+    if let Some((why, is_own)) = busy_call(own) {
+        if is_own {
+            return Ok(Err((why, "own")));
+        }
+        if !skip_calls {
+            return Ok(Err((why, "call")));
+        }
     }
     let path = crate::livenotes::local_lock_path();
     let _ = fs::create_dir_all(paths::config_dir());
     match crate::app::FileLock::try_take(&path).with_context(|| format!("opening {}", path.display()))? {
         Some(lock) => Ok(Ok(lock)),
-        None => Ok(Err("waits for the model to finish another job")),
+        None => Ok(Err(("waits for the model to finish another job".into(), "model"))),
     }
 }
 
 /// A gated profile (a local model, or Claude Code as configured, which may be one): wait until no
 /// call is recorded or transcribed, then for the local model's lock (held by this run until it
 /// ends). The reason is in `notes-run.json` and on stderr (`notes --wait`).
-fn wait_for_local_model(stamp: &str, dir: &Path, r: &mut Run, name: &str) -> Result<crate::app::FileLock> {
+/// `may_skip`: Claude Code as configured, which the user may start anyway (Write now); a local model
+/// never — it would take the computer from the recording.
+fn wait_for_local_model(stamp: &str, dir: &Path, r: &mut Run, name: &str, may_skip: bool) -> Result<crate::app::FileLock> {
+    let now_dir = || calls::by_stamp(stamp).unwrap_or_else(|| dir.to_path_buf());
+    // A Write now left by an earlier run doesn't count for this one.
+    let _ = fs::remove_file(now_dir().join(NOW_REQUEST));
     loop {
         if quitting() {
             bail!("Echo quit before the minutes were written — click Write minutes again");
         }
-        let why = match local_model_turn()? {
-            Ok(lock) => return Ok(lock),
-            Err(why) => why,
+        let d = now_dir();
+        let skip = may_skip && d.join(NOW_REQUEST).exists();
+        let (why, wait) = match local_model_turn(&d, skip)? {
+            Ok(lock) => {
+                let _ = fs::remove_file(d.join(NOW_REQUEST));
+                r.wait = None;
+                r.may_start = false;
+                return Ok(lock);
+            }
+            Err(w) => w,
         };
         let msg = format!("{name} {why}");
-        if r.message.as_deref() != Some(msg.as_str()) {
+        let may_start = may_skip && wait == "call" && !skip;
+        if r.message.as_deref() != Some(msg.as_str()) || r.wait.as_deref() != Some(wait) || r.may_start != may_start {
             eprintln!("{msg}");
             r.message = Some(msg);
+            r.wait = Some(wait.into());
+            r.may_start = may_start;
             // The folder may be retitled while it waits.
             save(&calls::by_stamp(stamp).unwrap_or_else(|| dir.to_path_buf()), r);
         }
@@ -893,7 +966,7 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
     r.model = Some(label.clone());
     save(dir, &r);
     let _local_turn = if profile.kind.gated() {
-        match wait_for_local_model(&call_stamp, dir, &mut r, &profile.name) {
+        match wait_for_local_model(&call_stamp, dir, &mut r, &profile.name, profile.kind == crate::ai::Kind::System && !system_runs_locally()) {
             Ok(lock) => Some(lock),
             Err(_) if r.auto && quitting() => {
                 withdraw(&calls::by_stamp(&call_stamp).unwrap_or_else(|| dir.to_path_buf()));
@@ -1708,10 +1781,49 @@ mod tests {
             drop(busy);
         });
         let mut r = Run::default();
-        let turn = wait_for_local_model(&calls::stamp_of(&d), &d, &mut r, "Qwen");
+        let turn = wait_for_local_model(&calls::stamp_of(&d), &d, &mut r, "Qwen", false);
         other.join().unwrap();
         assert!(turn.is_ok());
         assert_eq!(r.message.as_deref(), Some("Qwen waits for the model to finish another job"));
+    }
+
+    #[test]
+    fn minutes_waiting_for_another_call_name_it_and_may_start_anyway() {
+        let _q = QUITTING.lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = crate::paths::testenv::folders("notes-other-call");
+        let own = root.join("home/calls/2026-11-02_180000-planning");
+        let other = root.join("home/calls/2026-11-03_100100-weekly-sync");
+        for d in [&own, &other] {
+            fs::create_dir_all(d).unwrap();
+        }
+        fs::write(other.join("meta.json"), r#"{"title": "Weekly sync", "started_at": "2026-11-03T10:01:00+00:00"}"#).unwrap();
+        // The other call is being transcribed (this process holds its marker).
+        fs::write(other.join(crate::transcribe_marker()), std::process::id().to_string()).unwrap();
+        let (why, is_own) = busy_call(&own).unwrap();
+        assert!(!is_own);
+        let at = DateTime::parse_from_rfc3339("2026-11-03T10:01:00+00:00").unwrap().with_timezone(&Local).format("%H:%M").to_string();
+        assert_eq!(why, format!("waits for the transcript of “Weekly sync” (started {at}) to be written"));
+        // Its own transcript is never skipped; another call's is, on the user's say-so.
+        assert_eq!(busy_call(&other), Some(("waits for its transcript".into(), true)));
+        assert!(matches!(local_model_turn(&own, false), Ok(Err((_, "call")))));
+        assert!(matches!(local_model_turn(&other, true), Ok(Err((_, "own")))));
+        assert!(matches!(local_model_turn(&own, true), Ok(Ok(_))));
+        // Write now reaches a waiting run of Claude Code as configured, and is used up when it starts.
+        let (o, stamp) = (own.clone(), calls::stamp_of(&own));
+        let now = std::thread::spawn(move || {
+            let t = Instant::now();
+            while status(&o).is_none_or(|r| !(r.wait.as_deref() == Some("call") && r.may_start)) {
+                assert!(t.elapsed() < Duration::from_secs(20), "the run never said it waits for a call");
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            fs::write(o.join(NOW_REQUEST), b"").unwrap();
+        });
+        let mut r = Run::default();
+        let turn = wait_for_local_model(&stamp, &own, &mut r, "Claude Code", true);
+        now.join().unwrap();
+        assert!(turn.is_ok());
+        assert!(!own.join(NOW_REQUEST).exists());
+        assert_eq!(r.wait, None);
     }
 
     #[test]
