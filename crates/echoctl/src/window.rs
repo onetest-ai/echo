@@ -563,8 +563,7 @@ fn call_summary(dir: &Path) -> Value {
 
 /// When automatic minutes come for a call that ended in the last 2 hours and has none yet (#42: the list's clock).
 fn minutes_at(dir: &Path, meta: &Value) -> Value {
-    let recent = meta["ended_at"].as_str().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
-        .is_some_and(|e| chrono::Local::now().signed_duration_since(e) < chrono::Duration::hours(2));
+    let recent = meta["ended_at"].is_string() && crate::notes::ended_at(dir).is_some_and(|e| chrono::Local::now().signed_duration_since(e) < chrono::Duration::hours(2));
     if !recent || dir.join("notes.md").exists() {
         return Value::Null;
     }
@@ -2058,9 +2057,14 @@ fn act(v: &Value) -> bool {
         // Not yet (#42): 15 minutes more, until the user says, or as before.
         "minutes_later" => {
             let Some(d) = call else { return false };
+            // A number of minutes (0: as before); only an explicit null is "until I say".
             let minutes = match &v["minutes"] {
-                Value::Number(m) => m.as_i64(),
-                _ => None,
+                Value::Number(m) => match m.as_f64() {
+                    Some(f) if f.is_finite() => Some(f.round() as i64),
+                    _ => return false,
+                },
+                Value::Null if v.get("minutes").is_some() => None,
+                _ => return false,
             };
             if let Err(e) = crate::notes::set_later(&d, minutes) {
                 eprintln!("minutes later: {e:#}");

@@ -736,7 +736,7 @@ function statusbar() {
   const parts = []
   // The next automatic minutes, a click away (#42).
   const next = (S.calls || []).map((c) => [c, minutesAhead(c)]).filter((x) => x[1]).sort((x, y) => x[1] - y[1])[0]
-  const soon = next ? `<button class="sb-btn sb-minutes" data-call="${esc(next[0].name)}" title="Minutes at ${esc(hm(next[1]))}">⏱ Minutes for “${esc(next[0].title)}” in ${minutesLeft(next[1])} min</button>` : ''
+  const soon = next ? `<button class="sb-btn sb-minutes" data-minutes-of="${esc(next[0].name)}" title="Minutes at ${esc(hm(next[1]))}">⏱ Minutes for “${esc(next[0].title)}” in ${minutesLeft(next[1])} min</button>` : ''
   if (p) parts.push(`<span title="${esc(profileWhere(p))}">AI: ${esc(p.name)}</span>`)
   if (a.live_notes) parts.push('<span>Live notes on</span>')
   // The terminal panel: a toggle here, where VS Code keeps it.
@@ -825,8 +825,8 @@ function list() {
       const clockChip = due ? `<span class="mn-clock" title="Minutes at ${esc(hm(due))}">⏱ ${minutesLeft(due)} min</span>` : ''
       return `${head}<button class="row" role="option" data-call="${esc(c.name)}" aria-selected="${c.name === S.selected}">
         ${statusIcon(c.status)}
-        <span class="t">${esc(c.title)}${clockChip}</span>
-        <span class="m">${icons}${meta}</span>
+        <span class="t">${esc(c.title)}</span>
+        <span class="m">${clockChip}${icons}${meta}</span>
       </button>`
     }).join('')
   }
@@ -1627,7 +1627,10 @@ function minutesHint(c, heading, lead) {
   else if (auto.due === 'at' && auto.at) {
     const at = new Date(auto.at), left = minutesLeft(at)
     ;[heading, lead, label] = [`Minutes in ${left} min (${hm(at)})`, 'Echo writes them 15 minutes after the call or your last note, so what you add in My notes goes in.', 'Write now']
-    const share = Math.max(0, Math.min(1, (at - Date.now()) / (15 * 60000)))
+    // Against the longest wait seen for this time (15 minutes, or more after Not yet): it empties as it comes.
+    const span = S.ringSpan && S.ringSpan.at === auto.at ? S.ringSpan.ms : Math.max(15 * 60000, at - Date.now())
+    S.ringSpan = { at: auto.at, ms: span }
+    const share = Math.max(0, Math.min(1, (at - Date.now()) / span))
     ring = `<div class="mn-ring" style="--left:${Math.round(share * 100)}%" aria-hidden="true"><span><b>${left}</b><small>min</small></span></div>`
     const m = auto.moved || {}
     moved = m.by === 'later' ? '<p class="mn-moved">Moved: you said not yet.</p>'
@@ -5628,7 +5631,7 @@ document.addEventListener('click', (e) => {
   const menuWas = S.menuOpen
   if (menuWas && !(e.target.closest && e.target.closest('[data-cmd="call-menu"]'))) S.menuOpen = false
   if (S.laterOpen && !(e.target.closest && e.target.closest('[data-cmd^="later-"]'))) { S.laterOpen = false; render() }
-  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
+  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
   if (!t) { if (menuWas) render(); return }
   // Sign-ins (`signin.rs`): shown at once (starting / stopping / checking) until the next poll
   // brings the app's state.
@@ -5712,6 +5715,7 @@ document.addEventListener('click', (e) => {
   if (t.dataset.schedule) { send({ cmd: 'schedule', id: t.dataset.schedule, languages: recordLang(), profile: pickedProfile() }); const e = (S.cal.data.events || []).find((x) => x.id === t.dataset.schedule); if (e) e.scheduled = true; return render() }
   if (t.dataset.unschedule) { send({ cmd: 'unschedule', id: t.dataset.unschedule }); const e = (S.cal.data.events || []).find((x) => x.id === t.dataset.unschedule); if (e) e.scheduled = false; return render() }
   if (t.dataset.call) { S.listOpen = false; return go(`call/${t.dataset.call}/${S.tab}`) }
+  if (t.dataset.minutesOf) return go(`call/${t.dataset.minutesOf}/notes`)
   if (t.dataset.tab) return go(`call/${S.selected}/${t.dataset.tab}`)
   if (t.dataset.at) { S.jump = Number(t.dataset.at); S.find = ''; return go(`call/${S.selected}/transcript`) }
   if (t.dataset.frame) { S.lightbox = t.dataset.frame; return render() }
@@ -6076,7 +6080,7 @@ document.addEventListener('keydown', (e) => {
   if (e.target.id === 'sel-note' && e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); return commentSelection() }
   if (e.key === 'Escape' && S.selNote) return hideSelPop()
   if (e.key === 'Escape' && S.lightbox) { S.lightbox = null; return render() }
-  if (e.key === 'Escape' && (S.stopAsk || S.listOpen || S.menuOpen || S.overlay)) { S.stopAsk = false; S.listOpen = false; S.menuOpen = false; S.overlay = false; return render() }
+  if (e.key === 'Escape' && (S.stopAsk || S.listOpen || S.menuOpen || S.laterOpen || S.overlay)) { S.stopAsk = false; S.listOpen = false; S.menuOpen = false; S.laterOpen = false; S.overlay = false; return render() }
   if ((MAC ? e.metaKey : e.ctrlKey) && e.key === ',') { e.preventDefault(); return goActivity('settings') }
   if ((MAC ? e.metaKey : e.ctrlKey) && e.key === '`') { e.preventDefault(); return claudePanel() }
   // ⌘1…9 / Ctrl+1…9: the activities, in the bar's order.

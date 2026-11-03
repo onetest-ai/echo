@@ -260,7 +260,15 @@ pub enum NotDue {
 /// (until they write them).
 pub const LATER: &str = "minutes-later.json";
 
-/// What the user said about this call's automatic minutes: Some(None) = until they say, Some(Some(t)) = not before t.
+/// When the call ended for automatic minutes: its end, or its import (a Teams transcript) when later.
+pub(crate) fn ended_at(dir: &Path) -> Option<DateTime<Local>> {
+    let meta: Value = fs::read(dir.join("meta.json")).ok().and_then(|b| serde_json::from_slice(&b).ok())?;
+    let time = |k: &str| meta[k].as_str().and_then(|t| DateTime::parse_from_rfc3339(t).ok()).map(|t| t.with_timezone(&Local));
+    let ended = time("ended_at")?;
+    Some(time("imported_at").map_or(ended, |i| i.max(ended)))
+}
+
+/// What the user said about this call's automatic minutes (an unreadable file holds nothing): Some(None) = until they say, Some(Some(t)) = not before t.
 fn later(dir: &Path) -> Option<Option<DateTime<Local>>> {
     let v: Value = serde_json::from_slice(&fs::read(dir.join(LATER)).ok()?).ok()?;
     if v["manual"] == true {
@@ -279,6 +287,7 @@ pub fn set_later(dir: &Path, minutes: Option<i64>) -> Result<()> {
             _ => Ok(()),
         },
         Some(m) => {
+            let m = m.clamp(1, 24 * 60);
             let base = match Config::load().map(|c| auto_due(dir, &c, Local::now(), None)) {
                 Ok(Due::At(t)) => t,
                 _ => Local::now(),
@@ -357,13 +366,13 @@ pub fn auto_state(dir: &Path) -> Value {
         Due::Now => json!({ "due": "now" }),
         Due::At(t) => {
             // What moved it past 15 minutes after the call: the user's Not yet, or their notes.
+            // Said only when that is what set the time: the Not yet, or the notes' last edit (+ 15 minutes) past the end.
             let noted = fs::metadata(dir.join(calls::USER_NOTES)).and_then(|m| m.modified()).ok().map(DateTime::<Local>::from);
-            let ended = fs::read(dir.join("meta.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok())
-                .and_then(|m| m["ended_at"].as_str().and_then(|t| DateTime::parse_from_rfc3339(t).ok()));
-            let moved = if matches!(later(dir), Some(Some(u)) if u >= t) {
+            let delay = chrono::Duration::from_std(AUTO_DELAY).unwrap_or_default();
+            let moved = if matches!(later(dir), Some(Some(u)) if u == t) {
                 json!({"by": "later"})
-            } else if let (Some(n), Some(e)) = (noted, ended) {
-                if n > e { json!({"by": "notes", "at": n.to_rfc3339()}) } else { Value::Null }
+            } else if let Some(n) = noted.filter(|n| *n + delay == t && ended_at(dir).is_some_and(|e| *n > e + chrono::Duration::seconds(30))) {
+                json!({"by": "notes", "at": n.to_rfc3339()})
             } else {
                 Value::Null
             };

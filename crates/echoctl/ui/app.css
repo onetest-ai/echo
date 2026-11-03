@@ -517,7 +517,7 @@ label.split-lang:focus-within { outline: 2px solid var(--accent); outline-offset
 .mn-moved { color: var(--text); }
 .mn-later { position: relative; }
 .mn-later .menu { top: 32px; left: 0; right: auto; }
-.mn-clock { display: inline-flex; align-items: center; margin-left: 8px; height: 18px; padding: 0 7px; border-radius: 9px; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 600; vertical-align: 1px; }
+.mn-clock { display: inline-flex; align-items: center; margin-right: 6px; height: 18px; padding: 0 7px; border-radius: 9px; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 600; vertical-align: 1px; }
 .sb-minutes { color: var(--accent); }
 .empty p.alt, p.alt { color: var(--text-3); font-size: 12.5px; }
 p.alt { text-align: center; margin-top: 4px; }
