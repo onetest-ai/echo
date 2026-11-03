@@ -1020,6 +1020,14 @@ a.wp-src { text-decoration: none; cursor: pointer; }
 .pj-client { display: flex; align-items: center; width: 100%; border: 0; background: none; text-align: left; cursor: default; border-radius: 6px; }
 .pj-client:hover { color: var(--text-2); background: color-mix(in srgb, var(--text) 4%, transparent); }
 .pj-client.on { color: var(--accent-ink); }
+.pj-ghead { display: flex; align-items: center; gap: 0; margin-top: 4px; }
+.pj-ghead .pj-group { flex: 1; min-width: 0; padding-left: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pj-ghead .pj-cn { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.pj-ghead .pj-ic { flex: none; }
+.pj-chev { flex: none; width: 20px; height: 22px; margin: 7px 0 0 2px; display: grid; place-items: center; border: 0; background: none; color: var(--text-3); border-radius: 5px; cursor: default; padding: 0; }
+.pj-chev svg { width: 12px; height: 12px; }
+.pj-chev:hover { color: var(--text); background: color-mix(in srgb, var(--text) 6%, transparent); }
+.pj-gn { flex: none; margin: 7px 8px 0 4px; font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .pj-more { position: relative; }
 .pj-more .menu { right: 0; left: auto; top: 30px; min-width: 200px; }
 .pf-row { grid-template-columns: minmax(84px, 150px) minmax(0, 1fr); }

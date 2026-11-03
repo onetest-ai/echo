@@ -2216,6 +2216,13 @@ function projectsView() {
   return `<div class="projects"><aside class="pj-side">${projectList(data)}</aside><div class="pj-main">${projectMain(data)}</div></div>`
 }
 
+/** The Threads list's clients folded by the user (an accordion each; remembered in the webview). */
+const PJ_FOLD_KEY = 'echo.threads.folded'
+const pjFolded = (() => { try { return new Set(JSON.parse(localStorage.getItem(PJ_FOLD_KEY) || '[]')) } catch { return new Set() } })()
+function pjFold(id) {
+  if (pjFolded.has(id)) pjFolded.delete(id); else pjFolded.add(id)
+  try { localStorage.setItem(PJ_FOLD_KEY, JSON.stringify([...pjFolded])) } catch { /* storage off */ }
+}
 function projectList(data) {
   const ps = data.projects || []
   const clients = data.clients || []
@@ -2225,12 +2232,21 @@ function projectList(data) {
   }
   const open = ps.filter((p) => p.group !== 'closed'), closed = ps.filter((p) => p.group === 'closed')
   const groups = []
+  // Each client an accordion: the chevron folds it (the open thread stays in view), the name opens its page.
+  const fold = (id, xs, name) => {
+    const folded = pjFolded.has(id), shown = folded ? xs.filter((p) => p.id === S.pj.sel) : xs
+    // Nothing to fold: a spacer keeps the names in line.
+    const chev = !xs.length ? '<span class="pj-chev" aria-hidden="true"></span>' : `<button class="pj-chev" data-pj="fold" data-id="${esc(id)}" aria-expanded="${!folded}" title="${folded ? 'Show' : 'Hide'} its threads" aria-label="${folded ? 'Show' : 'Hide'} its threads">${ICON(folded ? '<path d="M9 6l6 6-6 6"/>' : '<path d="M6 9l6 6 6-6"/>')}</button>`
+    return `<div class="pj-ghead${folded ? ' folded' : ''}">${chev}${name}${folded && xs.length ? `<span class="pj-gn">${xs.length}</span>` : ''}</div>${shown.map(row).join('')}`
+  }
   for (const c of [...clients.filter((c) => !c.internal), ...clients.filter((c) => c.internal)]) {
     const xs = open.filter((p) => p.client === c.id)
-    groups.push(`<button class="pj-group pj-client${S.pj.client === c.id ? ' on' : ''}" data-pj="client" data-id="${esc(c.id)}" title="${esc(c.name)}: its details">${clientIcon(c, 14)}${esc(c.internal ? `${c.name} · your company` : c.name)}</button>${xs.map(row).join('')}`)
+    groups.push(fold(c.id, xs, `<button class="pj-group pj-client${S.pj.client === c.id ? ' on' : ''}" data-pj="client" data-id="${esc(c.id)}" title="${esc(c.name)}: its details">${clientIcon(c, 14)}<span class="pj-cn">${esc(c.internal ? `${c.name} · your company` : c.name)}</span></button>`))
   }
+  // Folds of clients that are gone are forgotten.
+  if (clients.length && !data.error) for (const k of [...pjFolded]) if (k !== '-' && !clients.some((c) => c.id === k)) pjFold(k)
   const none = open.filter((p) => !p.client || !clients.some((c) => c.id === p.client))
-  if (none.length) groups.push(`<div class="pj-group">${clients.length ? 'No client' : 'Threads'}</div>${none.map(row).join('')}`)
+  if (none.length) groups.push(clients.length ? fold('-', none, '<div class="pj-group">No client</div>') : `<div class="pj-group">Threads</div>${none.map(row).join('')}`)
   const closedRows = closed.length ? `<button class="pj-group pj-fold" data-pj="toggle-closed" aria-expanded="${S.pj.showClosed}">${S.pj.showClosed ? '▾' : '▸'} Closed · ${closed.length}</button>${S.pj.showClosed ? closed.map(row).join('') : ''}` : ''
   const err = data.error ? `<p class="error" style="padding:10px">${esc(data.error)}</p>` : ''
   const fc = data.found_count || 0
@@ -4499,6 +4515,13 @@ document.addEventListener('click', (e) => {
     case 'goto-node': { S.pj.node = d.node; S.pj.wantNode = d.node; S.pj.inline = null; go(`project/${d.id}/work`); Layout.show('work-item', panelViews()); return layoutChanged() }
     case 'tab': return go(`project/${S.pj.sel}/${d.tabId}`)
     case 'toggle-closed': S.pj.showClosed = !S.pj.showClosed; return render()
+    case 'fold': {
+      pjFold(d.id); render()
+      // The sidebar was drawn again: the keyboard stays on this chevron.
+      const again = [...document.querySelectorAll('.pj-chev[data-pj="fold"]')].find((x) => x.dataset.id === d.id)
+      if (again) again.focus()
+      return
+    }
     case 'stage': return projectSend('stage', { stage: d.stage })
     case 'icon': return projectSend('set', { field: 'icon', value: d.icon })
     case 'color': return projectSend('set', { field: 'color', value: d.color })
