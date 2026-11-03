@@ -822,6 +822,9 @@ applied) → Echo runs `claude auth login --claudeai [--email] [--sso]` (`Profil
 opens Claude's sign-in page, which calls Claude Code back on `http://localhost:<port>/callback`, and the child exits
 after that (measured); then one `auth status` judged against the settings as they are now (`ai::settle`) → "Signed in
 as …", and live notes waiting for it go on at once (`livenotes::signed_in`). 10 min at most; Cancel; quitting stops it.
+The window's Claude sessions on the profile hold its lease while they run: a sign-in closes them first
+(`terminal::close_profile`; they resume by id), and if the lease is still held after 10 s the error names a session that
+didn't stop (`terminal::holds_profile`) apart from minutes or another sign-in (#16).
 A reader/writer lock per profile, `<config dir>/claude/<id>.lock` (`app::FileLock` shared/exclusive): jobs and
 `auth status` checks hold it shared (`ai::lease`; `for_call` → `Ready` keeps it for the job), a sign-in exclusively
 (`ai::sign_in_lease`). Meanwhile `for_call` fails with `ai::SigningIn` (it never waits): live jobs retry — in the app
