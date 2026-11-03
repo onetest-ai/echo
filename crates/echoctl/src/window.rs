@@ -344,9 +344,13 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
             let scope = client.as_deref().map(|c| ("client", c)).or(thread.as_deref().map(|t| ("thread", t)));
             let mut v = crate::brain::views::overview(scope).unwrap_or_else(|e| json!({ "error": format!("{e:#}") }));
             // Topic rebuilds and re-tagging running now (`brain_rebuild_topics`, `brain_retag_topics`), by layer.
-            v["topic_jobs"] = json!(BRAIN_INSIGHTS.lock().map(|r| r.iter().filter(|k| k.starts_with("taxonomy:") || k.starts_with("retag:") || k.starts_with("split:") || k.starts_with("edit:")).cloned().collect::<Vec<_>>()).unwrap_or_default());
-            if let Some(e) = BRAIN_EDIT_ERROR.lock().ok().and_then(|mut x| x.take()) {
-                v["edit_error"] = json!(e);
+            let mut jobs: Vec<String> = BRAIN_INSIGHTS.lock().map(|r| r.iter().filter(|k| k.starts_with("taxonomy:") || k.starts_with("retag:") || k.starts_with("split:")).cloned().collect()).unwrap_or_default();
+            if BRAIN_EDITS.load(std::sync::atomic::Ordering::SeqCst) > 0 {
+                jobs.push("edit:taxonomy".into());
+            }
+            v["topic_jobs"] = json!(jobs);
+            if let Ok(e) = BRAIN_EDIT_ERROR.lock() {
+                v["edit_error"] = json!({"n": e.0, "text": e.1});
             }
             json_reply(v)
         }
@@ -1213,9 +1217,12 @@ static BRAIN_LAST: std::sync::Mutex<Value> = std::sync::Mutex::new(Value::Null);
 /// Scopes whose insights are being refreshed from the window.
 #[cfg(feature = "brain")]
 static BRAIN_INSIGHTS: std::sync::Mutex<std::collections::BTreeSet<String>> = std::sync::Mutex::new(std::collections::BTreeSet::new());
-/// The last taxonomy edit's error, for the page that made it (taken once by `/api/brain`).
+/// Taxonomy edits running now, and the last one's error with its number (the page that made an edit shows an error
+/// numbered after the one it saw when it asked).
 #[cfg(feature = "brain")]
-static BRAIN_EDIT_ERROR: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+static BRAIN_EDITS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+#[cfg(feature = "brain")]
+static BRAIN_EDIT_ERROR: std::sync::Mutex<(u64, String)> = std::sync::Mutex::new((0, String::new()));
 
 /// Save one plain setting with the value the page shows now (never a toggle of a stale value).
 fn settings_set(key: &str, value: &Value) -> anyhow::Result<()> {
@@ -1795,19 +1802,15 @@ pub fn handle(msg: &str) -> Handled {
         // mentions it changed (seconds). `topic_jobs` shows it running; its error comes back once (`edit_error`).
         "brain_taxonomy" => {
             let body = v["body"].clone();
-            if let Ok(mut r) = BRAIN_INSIGHTS.lock() {
-                r.insert("edit:taxonomy".into());
-            }
+            BRAIN_EDITS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             std::thread::spawn(move || {
-                let res = crate::brain::taxonomy::edit(&body);
+                let res = std::panic::catch_unwind(|| crate::brain::taxonomy::edit(&body)).unwrap_or_else(|_| Err(anyhow::anyhow!("the edit failed")));
                 if let Err(e) = &res {
                     if let Ok(mut x) = BRAIN_EDIT_ERROR.lock() {
-                        *x = Some(format!("{e:#}"));
+                        *x = (x.0 + 1, format!("{e:#}"));
                     }
                 }
-                if let Ok(mut r) = BRAIN_INSIGHTS.lock() {
-                    r.remove("edit:taxonomy");
-                }
+                BRAIN_EDITS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
             });
             true.into()
         }

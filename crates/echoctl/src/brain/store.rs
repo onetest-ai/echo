@@ -50,6 +50,7 @@ pub fn open(path: &Path) -> Result<Connection> {
          CREATE TABLE IF NOT EXISTS chunk_verdicts(chunk_id INTEGER PRIMARY KEY, verdict TEXT, taxonomy_version TEXT);
          CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
          CREATE TABLE IF NOT EXISTS scopes(chunk_id INTEGER NOT NULL, kind TEXT NOT NULL, id TEXT NOT NULL, PRIMARY KEY(chunk_id, kind, id));
+         CREATE TABLE IF NOT EXISTS term_scan(chunk_id INTEGER PRIMARY KEY, sha TEXT NOT NULL);
          CREATE INDEX IF NOT EXISTS scopes_by ON scopes(kind, id);
          CREATE INDEX IF NOT EXISTS chunk_topics_cat ON chunk_topics(category_id, chunk_id);
          CREATE INDEX IF NOT EXISTS chunk_topics_chunk ON chunk_topics(chunk_id);
@@ -58,10 +59,31 @@ pub fn open(path: &Path) -> Result<Connection> {
     )?;
     // What a list of sources reads without touching its sections (the window pages tens of thousands): how many
     // sections, its client (`-`: none) and its folder — kept by `doc_facts` at every write, filled once for an older store.
-    let has: bool = c.query_row("SELECT count(*) FROM pragma_table_info('documents') WHERE name = 'sections'", [], |r| r.get::<_, i64>(0))? > 0;
-    if !has {
-        c.execute_batch("ALTER TABLE documents ADD COLUMN sections INTEGER; ALTER TABLE documents ADD COLUMN client TEXT; ALTER TABLE documents ADD COLUMN root TEXT;")?;
-        c.execute(&format!("UPDATE documents SET {DOC_FACTS}"), [])?;
+    // One writer at a time, each column on its own: two processes opening an older store, or one stopped half way,
+    // leave it whole.
+    let missing = |c: &Connection| -> Result<Vec<&'static str>> {
+        let mut out = vec![];
+        for col in ["sections", "client", "root"] {
+            if c.query_row("SELECT count(*) FROM pragma_table_info('documents') WHERE name = ?1", [col], |r| r.get::<_, i64>(0))? == 0 {
+                out.push(col);
+            }
+        }
+        Ok(out)
+    };
+    if !missing(&c)?.is_empty() {
+        c.execute_batch("BEGIN IMMEDIATE")?;
+        let done = (|| -> Result<()> {
+            let cols = missing(&c)?;
+            for col in &cols {
+                c.execute_batch(&format!("ALTER TABLE documents ADD COLUMN {col} {}", if *col == "sections" { "INTEGER" } else { "TEXT" }))?;
+            }
+            if !cols.is_empty() {
+                c.execute(&format!("UPDATE documents SET {DOC_FACTS}"), [])?;
+            }
+            Ok(())
+        })();
+        c.execute_batch(if done.is_ok() { "COMMIT" } else { "ROLLBACK" })?;
+        done?;
     }
     c.execute_batch("CREATE INDEX IF NOT EXISTS documents_list ON documents(client, kind, event_date); CREATE INDEX IF NOT EXISTS documents_root ON documents(root, event_date);")?;
     // A store from before scopes: fill them from each section's references, once.
@@ -83,6 +105,32 @@ pub fn open(path: &Path) -> Result<Connection> {
 /// it comes within 250 ms (a small store: always). Aggregates over millions of sections take seconds; a window waiting
 /// for each of them after every sync would not do.
 pub fn kept<T: Send + Sync + 'static>(key: String, fp: String, make: impl FnOnce() -> Result<T> + Send + 'static) -> Result<std::sync::Arc<T>> {
+    let r = kept_inner(key, fp, make);
+    if let Ok((_, stale)) = &r {
+        if *stale {
+            STALE.with(|s| s.set(true));
+        }
+    }
+    r.map(|x| x.0)
+}
+
+thread_local! {
+    /// Set when this thread was given a stale `kept` answer: what is built from it mustn't be kept as fresh.
+    static STALE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Run `f`; whether it was given any stale `kept` answer on the way.
+pub fn noting_stale<R>(f: impl FnOnce() -> R) -> (R, bool) {
+    let before = STALE.with(|s| s.replace(false));
+    let r = f();
+    let stale = STALE.with(|s| s.replace(before));
+    if stale {
+        STALE.with(|s| s.set(true));
+    }
+    (r, stale)
+}
+
+fn kept_inner<T: Send + Sync + 'static>(key: String, fp: String, make: impl FnOnce() -> Result<T> + Send + 'static) -> Result<(std::sync::Arc<T>, bool)> {
     use std::any::Any;
     use std::sync::{Arc, Condvar, Mutex};
     type Val = Arc<dyn Any + Send + Sync>;
@@ -100,16 +148,17 @@ pub fn kept<T: Send + Sync + 'static>(key: String, fp: String, make: impl FnOnce
         drop(g);
         let v: Arc<T> = Arc::new(make()?);
         lock().get_or_insert_with(Default::default).insert(key, Entry { fp, val: v.clone(), running: false });
-        return Ok(v);
+        return Ok((v, false));
     };
     if e.fp == fp {
-        return typed(&e.val);
+        return Ok((typed(&e.val)?, false));
     }
     if !e.running {
         e.running = true;
         let (k, f) = (key.clone(), fp.clone());
         std::thread::spawn(move || {
-            let v = make();
+            // A panic counting still frees the key (else it is never counted again).
+            let v = std::panic::catch_unwind(std::panic::AssertUnwindSafe(make)).unwrap_or_else(|_| Err(anyhow::anyhow!("panicked")));
             let mut g = CACHE.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(e) = g.get_or_insert_with(Default::default).get_mut(&k) {
                 e.running = false;
@@ -129,7 +178,7 @@ pub fn kept<T: Send + Sync + 'static>(key: String, fp: String, make: impl FnOnce
         let e = g.as_ref().and_then(|m| m.get(&key)).ok_or_else(|| anyhow::anyhow!("kept: {key} went"))?;
         let left = until.saturating_duration_since(std::time::Instant::now());
         if e.fp == fp || !e.running || left.is_zero() {
-            return typed(&e.val);
+            return Ok((typed(&e.val)?, e.fp != fp));
         }
         g = DONE.wait_timeout(g, left).unwrap_or_else(|e| e.into_inner()).0;
     }
@@ -180,6 +229,9 @@ fn scopes_of(refs: &Value) -> Vec<(&'static str, String)> {
 
 fn write_scopes(tx: &Connection, id: i64, refs: &Value) -> Result<()> {
     tx.execute("DELETE FROM scopes WHERE chunk_id = ?1", [id])?;
+    // Its clients decide whose terms it may mention, and a write may have dropped its tags: read for terms again
+    // (`taxonomy::mentions_changed`).
+    tx.execute("DELETE FROM term_scan WHERE chunk_id = ?1", [id])?;
     for (k, v) in scopes_of(refs) {
         tx.execute("INSERT OR IGNORE INTO scopes(chunk_id, kind, id) VALUES (?1, ?2, ?3)", params![id, k, v])?;
     }
@@ -284,6 +336,7 @@ fn delete_chunks(tx: &Connection, ids: &[i64]) -> Result<()> {
         tx.execute("DELETE FROM chunk_verdicts WHERE chunk_id = ?1", [id])?;
         tx.execute("DELETE FROM graph_edges WHERE source = ?1", [format!("chunk:{id}")])?;
         tx.execute("DELETE FROM scopes WHERE chunk_id = ?1", [id])?;
+        tx.execute("DELETE FROM term_scan WHERE chunk_id = ?1", [id])?;
     }
     Ok(())
 }
@@ -363,6 +416,7 @@ pub fn sync_kinds(path: &Path, inputs: Vec<Input>, emb: Option<&dyn Embedder>, k
                 // old text's — gone, so the classifier tags it again.
                 if prev.is_some() {
                     tx.execute("DELETE FROM chunk_topics WHERE chunk_id = ?1", [id])?;
+                    tx.execute("DELETE FROM term_scan WHERE chunk_id = ?1", [id])?;
                     tx.execute("DELETE FROM chunk_verdicts WHERE chunk_id = ?1", [id])?;
                     tx.execute("DELETE FROM graph_edges WHERE source = ?1", [format!("chunk:{id}")])?;
                 }
@@ -791,12 +845,14 @@ mod tests {
         assert_eq!(*kept(key.clone(), "v1".into(), || -> Result<i32> { panic!("unchanged: never counted again") }).unwrap(), 1);
         // Changed, and slow to count: the last answer comes back within the short wait, the new one later.
         let t = std::time::Instant::now();
-        let v = kept(key.clone(), "v2".into(), || {
-            std::thread::sleep(std::time::Duration::from_millis(700));
-            Ok(2)
-        })
-        .unwrap();
-        assert_eq!((*v, t.elapsed() < std::time::Duration::from_millis(600)), (1, true));
+        let (v, stale) = noting_stale(|| {
+            kept(key.clone(), "v2".into(), || {
+                std::thread::sleep(std::time::Duration::from_millis(700));
+                Ok(2)
+            })
+            .unwrap()
+        });
+        assert_eq!((*v, stale, t.elapsed() < std::time::Duration::from_millis(600)), (1, true, true), "the last answer, marked stale");
         std::thread::sleep(std::time::Duration::from_millis(900));
         assert_eq!(*kept(key.clone(), "v2".into(), || Ok(3)).unwrap(), 2);
         // Changed and quick: the fresh answer.

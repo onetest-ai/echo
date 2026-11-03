@@ -456,14 +456,19 @@ fn review_flags(t: &Taxonomy) -> Value {
         }
     };
     for (_, mut ids) in by_layer {
-        ids.sort_by_key(|i| nid(&t.terms[*i].name));
         let by_name: HashMap<String, usize> = ids.iter().map(|i| (nid(&t.terms[*i].name), *i)).collect();
-        for (k, a) in ids.iter().enumerate() {
-            for b in ids.iter().skip(k + 1).take(12) {
-                if ratio(&t.terms[*a].name, &t.terms[*b].name) >= 0.8 {
-                    pair(*a, *b, &mut terms);
+        // Neighbours by beginning, then by ending (names that differ in their first letters).
+        for key in [|n: &str| nid(n), |n: &str| nid(n).chars().rev().collect::<String>()] {
+            ids.sort_by_key(|i| key(&t.terms[*i].name));
+            for (k, a) in ids.iter().enumerate() {
+                for b in ids.iter().skip(k + 1).take(12) {
+                    if ratio(&t.terms[*a].name, &t.terms[*b].name) >= 0.8 {
+                        pair(*a, *b, &mut terms);
+                    }
                 }
             }
+        }
+        for a in &ids {
             for v in &t.terms[*a].variants {
                 if let Some(b) = by_name.get(&nid(v)) {
                     pair(*a, *b, &mut terms);
@@ -560,7 +565,7 @@ pub fn build_graph(c: &Connection, t: &Taxonomy, before: Option<&Taxonomy>) -> R
     tx.commit()?;
     // Mentions: only the terms this version changed (a term gone took its tags with it above); everything when
     // there is no version before, or the store never had its mentions read.
-    let scanned: bool = c.query_row("SELECT count(*) FROM sqlite_master WHERE name = 'term_scan'", [], |r| r.get::<_, i64>(0)).unwrap_or(0) > 0;
+    let scanned: bool = c.query_row("SELECT EXISTS (SELECT 1 FROM term_scan) OR NOT EXISTS (SELECT 1 FROM chunks)", [], |r| r.get(0)).unwrap_or(false);
     match before.filter(|_| scanned) {
         Some(b) => mentions_of(c, t, &changed_terms(b, t))?,
         None => mentions(c, t)?,
@@ -2415,7 +2420,26 @@ mod tests {
         store::sync(&path, docs("## D\nThe merchant portal again.\n"), None).unwrap();
         assert_eq!(mentions_changed(&c, &current().unwrap()).unwrap(), 1, "only the changed section");
         assert!(full().contains(&s("call/4", "term__merchant_portal")));
+        // A document written again (no embedder: every section's tags were dropped) whose first section didn't
+        // change: it keeps its mentions.
+        let two = |second: &str| doc("call/5", "acme", &format!("## E\nThe merchant portal pilot desk.\n## F\n{second}\n"));
+        let mut all = docs("## D\nThe merchant portal again.\n");
+        all.push(two("First text."));
+        store::sync(&path, all, None).unwrap();
+        mentions_changed(&c, &current().unwrap()).unwrap();
+        let mut all = docs("## D\nThe merchant portal again.\n");
+        all.push(two("Second text."));
+        store::sync(&path, all, None).unwrap();
+        mentions_changed(&c, &current().unwrap()).unwrap();
+        assert!(full().contains(&s("call/5", "term__merchant_portal")), "the unchanged section kept its mention");
+        // Moved to another client's thread, text unchanged: its client's terms follow.
+        store::rescope(&path, "call/2", &json!({"threads": [{"id": "acme-t", "client": "acme"}]})).unwrap();
+        mentions_changed(&c, &current().unwrap()).unwrap();
+        let moved = full();
+        assert!(moved.contains(&s("call/2", "term__acme__pilot_desk")) && !moved.contains(&s("call/2", "term__globex__pilot_desk")));
         // A term removed takes its mentions with it.
+        store::rescope(&path, "call/2", &json!({"threads": [{"id": "globex-t", "client": "globex"}]})).unwrap();
+        mentions_changed(&c, &current().unwrap()).unwrap();
         edit(&json!({"op": "remove", "term": true, "name": "Pilot desk", "layer": "globex"})).unwrap();
         assert!(!full().iter().any(|x| x.1 == "term__globex__pilot_desk"));
     }

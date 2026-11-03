@@ -40,7 +40,12 @@ pub fn cached(key: &str, make: impl FnOnce() -> Result<Value>) -> Result<Value> 
             return Ok(v.clone());
         }
     }
-    let v = make()?;
+    // Built from a stale count (`store::kept`): given, never kept — the next call builds it again from the fresh one.
+    let (v, stale) = store::noting_stale(make);
+    let v = v?;
+    if stale {
+        return Ok(v);
+    }
     let mut g = CACHE.lock().unwrap_or_else(|e| e.into_inner());
     let m = g.get_or_insert_with(HashMap::new);
     if m.len() > 24 {
@@ -61,11 +66,14 @@ pub fn view(scope: store::Scope) -> Result<Value> {
     cached(&format!("view|{scope:?}"), || super::taxonomy::view_in(scope))
 }
 
-/// The SQL that keeps a document within a scope (a client's, or one thread's), and its parameters.
+/// The SQL that keeps a document within a scope (a client's, or one thread's — `-`: in none), and its parameters: as
+/// the rest of the Brain scopes it, by its sections' scopes (a document's sections share them: its first one says).
 fn doc_scope(scope: store::Scope) -> (String, Vec<String>) {
     match scope {
-        Some(("client", id)) => ("client = ?".into(), vec![id.into()]),
-        Some((_, id)) => ("EXISTS (SELECT 1 FROM json_each(documents.refs, '$.threads') t WHERE json_extract(t.value, '$.id') = ?)".into(), vec![id.into()]),
+        Some((k, id)) => (
+            "EXISTS (SELECT 1 FROM scopes s WHERE s.chunk_id = (SELECT ch.id FROM chunks ch WHERE ch.source = documents.source LIMIT 1) AND s.kind = ? AND s.id = ?)".into(),
+            vec![k.into(), id.into()],
+        ),
         None => ("1".into(), vec![]),
     }
 }
@@ -160,8 +168,8 @@ pub fn source_list(scope: store::Scope, q: &ListQuery) -> Result<Value> {
         p.push(x.clone());
     }
     for word in q.q.as_deref().unwrap_or("").split_whitespace().take(8) {
-        wh.push("lower(coalesce(title, '') || ' ' || source) LIKE ?".into());
-        p.push(format!("%{}%", word.to_lowercase()));
+        wh.push("lower(coalesce(title, '') || ' ' || source) LIKE ? ESCAPE '\\'".into());
+        p.push(format!("%{}%", word.to_lowercase().replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")));
     }
     let base = wh.join(" AND ");
     let total: i64 = c.query_row(&format!("SELECT count(*) FROM documents WHERE {base}"), params_from_iter(p.iter()), |r| r.get(0))?;
@@ -204,7 +212,7 @@ pub fn terms(scope: store::Scope, group: Option<&str>, letter: Option<&str>, q: 
     let closed = terms.len() - current.len();
     let words: Vec<String> = q.unwrap_or("").to_lowercase().split_whitespace().map(str::to_owned).collect();
     let hit = |t: &Value| {
-        let hay = std::iter::once(&t["name"]).chain(t["synonyms"].as_array().into_iter().flatten()).chain(t["variants"].as_array().into_iter().flatten())
+        let hay = [&t["name"], &t["description"], &t["kind"]].into_iter().chain(t["synonyms"].as_array().into_iter().flatten()).chain(t["variants"].as_array().into_iter().flatten())
             .filter_map(Value::as_str).collect::<Vec<_>>().join(" ").to_lowercase();
         words.iter().all(|w| hay.contains(w.as_str()))
     };
@@ -310,7 +318,8 @@ pub fn graph_topic(id: &str, scope: store::Scope, limit: usize) -> Result<Value>
         .prepare(&format!("SELECT ch.source, count(*) n FROM chunk_topics k JOIN chunks ch ON ch.id = k.chunk_id WHERE k.category_id = ? {sc} GROUP BY ch.source ORDER BY n DESC LIMIT ?"))?
         .query_map(params_from_iter(p.iter()), |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<Result<_, _>>()?;
-    let total: i64 = c.query_row("SELECT count(DISTINCT ch.source) FROM chunk_topics k JOIN chunks ch ON ch.id = k.chunk_id WHERE k.category_id = ?1", [id], |r| r.get(0))?;
+    p.pop();
+    let total: i64 = c.query_row(&format!("SELECT count(DISTINCT ch.source) FROM chunk_topics k JOIN chunks ch ON ch.id = k.chunk_id WHERE k.category_id = ? {sc}"), params_from_iter(p.iter()), |r| r.get(0))?;
     let nodes = doc_nodes(&c, &top.iter().map(|t| t.0.clone()).collect::<Vec<_>>())?;
     let edges: Vec<Value> = top.iter().map(|(s, n)| json!({"source": s, "target": format!("topic:{id}"), "kind": "about", "weight": n})).collect();
     Ok(json!({"topic": format!("topic:{id}"), "nodes": nodes, "edges": edges, "shown": top.len(), "total": total}))
@@ -365,10 +374,10 @@ pub fn graph_search(q: &str, scope: store::Scope, emb: Option<&dyn super::embed:
 pub fn folder_files(root: &str, q: Option<&str>, offset: usize, limit: usize) -> Result<Value> {
     let c = store::open(&super::store_path())?;
     super::files::folder::ensure_schema(&c)?;
-    let like = format!("%{}%", q.unwrap_or("").to_lowercase());
-    let total: i64 = c.query_row("SELECT count(*) FROM files WHERE root = ?1 AND state = 'active' AND lower(rel) LIKE ?2", params![root, like], |r| r.get(0))?;
+    let like = format!("%{}%", q.unwrap_or("").to_lowercase().replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"));
+    let total: i64 = c.query_row("SELECT count(*) FROM files WHERE root = ?1 AND state = 'active' AND lower(rel) LIKE ?2 ESCAPE '\\'", params![root, like], |r| r.get(0))?;
     let rows: Vec<Value> = c
-        .prepare("SELECT id, rel, status, reason, method, fidelity, event_date, pages, flagged, read, size FROM files WHERE root = ?1 AND state = 'active' AND lower(rel) LIKE ?2 ORDER BY rel LIMIT ?3 OFFSET ?4")?
+        .prepare("SELECT id, rel, status, reason, method, fidelity, event_date, pages, flagged, read, size FROM files WHERE root = ?1 AND state = 'active' AND lower(rel) LIKE ?2 ESCAPE '\\' ORDER BY rel LIMIT ?3 OFFSET ?4")?
         .query_map(params![root, like, limit.clamp(1, 200) as i64, offset as i64], |r| {
             Ok(json!({"id": r.get::<_, String>(0)?, "rel": r.get::<_, String>(1)?, "status": r.get::<_, Option<String>>(2)?, "reason": r.get::<_, Option<String>>(3)?,
                       "method": r.get::<_, Option<String>>(4)?, "fidelity": r.get::<_, Option<String>>(5)?, "date": r.get::<_, Option<String>>(6)?,

@@ -4312,7 +4312,11 @@ const brainQuery = () => { const [k, v] = (S.br.scope || '').split(':'); return 
 async function loadBrain() {
   const q = brainQuery()
   try { const d = await get('api/brain' + q); d.q = q; S.br.data = d } catch { /* app restarting */ }
-  if (S.br.tab === 'graph' && (!S.br.graph || S.br.graph.q !== q)) { try { const g = await get('api/brain/browse/graph' + q); g.q = q; S.br.graph = g; S.br.gsets = [] } catch { /* app restarting */ } }
+  // The topics graph again when the scope, the taxonomy or the store changed (a sync, a rename); the sets opened stay.
+  const gv = `${((S.br.data || {}).taxonomy || {}).version}|${((S.br.data || {}).status || {}).chunks}`
+  if (S.br.tab === 'graph' && (!S.br.graph || S.br.graph.q !== q || S.br.graph.v !== gv)) {
+    try { const g = await get('api/brain/browse/graph' + q); g.q = q; g.v = gv; if (!S.br.graph || S.br.graph.q !== q) S.br.gsets = []; S.br.graph = g } catch { /* app restarting */ }
+  }
   // Sources and the dictionary read their pages again (a sync or an edit changed them).
   if (S.br.tab === 'sources' && S.br.src && S.br.src.key === q) { S.br.src.groups = null; S.br.src.lists = {} }
   if (S.br.tab === 'terms' && S.br.dict) { S.br.dict.head = null; S.br.dict.lists = {} }
@@ -4332,7 +4336,9 @@ function brainView() {
   if (d.error) return `<div class="br"><p class="error">${esc(d.error)}</p></div>`
   const st = d.status || {}, tx = d.taxonomy || {}, sc = d.scopes || { clients: [], threads: [] }
   const scopeSel = `<label class="fchip${S.br.scope ? ' on' : ''}">${esc(S.br.scope ? (S.br.scope.startsWith('client:') ? clientName(S.br.scope.slice(7)) : ((projById(S.br.scope.slice(7)) || {}).name || 'In no thread')) : 'Everything')} ▾<select data-br-scope aria-label="Scope"><option value="">Everything</option><optgroup label="Clients">${sc.clients.map((c) => `<option value="client:${esc(c.id)}"${S.br.scope === `client:${c.id}` ? ' selected' : ''}>${esc(c.name)} · ${c.documents}</option>`).join('')}</optgroup><optgroup label="Threads">${sc.threads.map((t) => `<option value="thread:${esc(t.id)}"${S.br.scope === `thread:${t.id}` ? ' selected' : ''}>${esc(t.name)} · ${t.documents}</option>`).join('')}</optgroup></select></label>`
-  const n = { topics: (tx.topics || []).length, terms: tx.terms_n || 0, sources: st.documents || 0 }
+  const [sk, sv] = (S.br.scope || '').split(':')
+  const inScope = sk ? ((sc[sk === 'client' ? 'clients' : 'threads'] || []).find((x) => x.id === sv) || {}).documents : null
+  const n = { topics: (tx.topics || []).length, terms: tx.terms_n || 0, sources: inScope != null ? inScope : st.documents || 0 }
   const tabs = BRAIN_TABS.map(([id, l]) => `<button class="tab" role="tab" data-br-tab="${id}" aria-selected="${S.br.tab === id}">${l}${n[id] ? `<span class="n">${nf(n[id])}</span>` : ''}</button>`).join('')
   const sub = st.exists ? `${nf(st.documents)} sources · ${nf(st.chunks)} sections${st.embed_model ? ` · meaning by ${esc(st.embed_model)}` : ' · words only (no embedding server)'}` : 'Empty — it fills as your calls are synced'
   const head = `<header class="pj-head br-head"><div class="br-title"><h2>Brain</h2><span class="tk-sub">${sub}</span><span class="grow"></span>${scopeSel}<button class="btn ghost" data-go="settings" title="Settings → Brain">Settings</button></div><div class="tabs" role="tablist">${tabs}</div></header>`
@@ -4414,7 +4420,7 @@ function brainTopics(tx) {
  *  terms: the app sends a page at a time (`browse::terms`). */
 function termsState() {
   const key = brainQuery() + '|' + ((S.br.data || {}).taxonomy || {}).version
-  if (!S.br.dict || S.br.dict.key !== key) S.br.dict = { key, head: null, open: new Set(), lists: {}, q: S.br.dict ? S.br.dict.q : '' }
+  if (!S.br.dict || S.br.dict.key !== key) { termById.clear(); S.br.dict = { key, head: null, open: S.br.dict ? S.br.dict.open : new Set(), lists: {}, q: S.br.dict ? S.br.dict.q : '' } }
   return S.br.dict
 }
 const termById = new Map()
@@ -4465,6 +4471,7 @@ function brainTerms(tx) {
   }
   const list = (k) => {
     const l = s.lists[k]
+    if (!l) setTimeout(() => loadDictTerms(k), 0)
     if (!l || (l.loading && !l.items.length)) return '<div class="bs-wait">Loading…</div>'
     if (l.error) return `<div class="bs-wait error">${esc(l.error)}</div>`
     const az = k === 'q' ? '' : `<div class="dict-az">${Object.entries(l.letters || {}).map(([ch, n]) => `<button class="${l.letter === ch ? 'on' : ''}" data-dict-letter="${esc(ch)}" data-dict-in="${esc(k)}" title="${n} term${n === 1 ? '' : 's'}">${esc(ch)}</button>`).join('')}${l.letter ? `<button data-dict-letter="" data-dict-in="${esc(k)}">All</button>` : ''}</div>`
@@ -4511,8 +4518,11 @@ document.addEventListener('input', (e) => {
   clearTimeout(dictTimer)
   dictTimer = setTimeout(render, 300)
 })
-/** A topic or a term by id: topics come with the overview, terms as their pages were read. */
+/** A topic or a term by id: as the panel last read it (`/api/brain/node`, current after every edit), else the
+ *  overview's topics or the dictionary's pages until that comes. */
 function brItem(id) {
+  const nd = S.br.nodeData
+  if (nd && nd.id === id && nd.item) return nd.item
   const tx = (S.br.data || {}).taxonomy || {}
   return (tx.topics || []).find((t) => t.id === id) || termById.get(id) || (tx.terms || []).find((t) => t.id === id) || null
 }
@@ -4625,6 +4635,8 @@ function fileRow(f) {
 /** A list's rows, its "Show 50 more · N left", or what it is waiting for. */
 function srcListBody(k, opts) {
   const l = srcState().lists[k]
+  // Open but not read (the Brain was read again meanwhile): read it.
+  if (!l) setTimeout(() => loadSrcList(k), 0)
   if (!l || (l.loading && !l.items.length)) return '<div class="bs-wait">Loading…</div>'
   if (l.error) return `<div class="bs-wait error">${esc(l.error)}</div>`
   if (!l.items.length) return '<div class="bs-wait">Nothing here.</div>'
@@ -5016,12 +5028,13 @@ function drawGraph() {
     let t = null
     now.sigma.getCamera().on('updated', (c) => {
       clearTimeout(t)
-      if (c.ratio > 0.35) return
+      // Zoomed out again: a client closed by hand may come in by zooming once more.
+      if (c.ratio > 0.35) { if (S.br.gnoauto) S.br.gnoauto.clear(); return }
       t = setTimeout(() => {
         const mid = now.sigma.viewportToGraph({ x: box.clientWidth / 2, y: box.clientHeight / 2 })
         let best = null, bd = Infinity
         now.graph.forEachNode((k, a) => { if (a.kind !== 'topic' || !a.layer || a.layer === 'shared') return; const d = (a.x - mid.x) ** 2 + (a.y - mid.y) ** 2; if (d < bd) { bd = d; best = a.layer } })
-        if (best && !(S.br.gsets || []).some((s) => s.key === `client:${best}`)) openClientSources(best)
+        if (best && !(S.br.gsets || []).some((s) => s.key === `client:${best}`) && !(S.br.gnoauto || new Set()).has(`client:${best}`)) openClientSources(best)
       }, 600)
     })
   }
@@ -5029,7 +5042,9 @@ function drawGraph() {
 document.addEventListener('click', (e) => {
   const t = e.target.closest && e.target.closest('[data-gset-close],[data-gset-client]')
   if (!t) return
-  if (t.dataset.gsetClient) return openClientSources(t.dataset.gsetClient)
+  if (t.dataset.gsetClient) { if (S.br.gnoauto) S.br.gnoauto.delete(`client:${t.dataset.gsetClient}`); return openClientSources(t.dataset.gsetClient) }
+  // Closed by hand: zooming in where it is doesn't bring it back (until zoomed out).
+  if (t.dataset.gsetClose.startsWith('client:')) (S.br.gnoauto || (S.br.gnoauto = new Set())).add(t.dataset.gsetClose)
   S.br.gsets = (S.br.gsets || []).filter((s) => s.key !== t.dataset.gsetClose)
   render()
 })
@@ -5178,7 +5193,7 @@ document.addEventListener('keydown', (e) => {
 function brainNodePanel() {
   const d = S.br.data, id = S.br.node, tx = (d && d.taxonomy) || {}
   const x = brItem(id)
-  if (!x) return '<div class="wp-empty">Pick a topic or a term.</div>'
+  if (!x) return id && !(S.br.nodeData && S.br.nodeData.id === id) ? '<div class="skeleton"><i></i><i></i><i></i></div>' : '<div class="wp-empty">Pick a topic or a term.</div>'
   const isTerm = !!x.name, name = x.name || x.label, layer = x.layer
   // A client's topic may merge into, or sit under, one of the practice's too (one tree).
   const same = (isTerm ? [] : (tx.topics || [])).filter((t) => (t.layer === layer || (layer !== 'shared' && t.layer === 'shared')) && t.id !== id)
@@ -5186,7 +5201,7 @@ function brainNodePanel() {
   const lnm = (l) => l === 'shared' ? 'practice' : (((tx.layers || []).find((y) => y.id === l) || {}).name || l)
   const ed = S.br.edit
   const body = (o) => esc(JSON.stringify({ ...o, layer, [isTerm ? 'name' : 'label']: name, term: isTerm }))
-  const actions = ed === 'rename' ? `<span class="tok-in"><input id="br-rename" value="${esc(name)}" aria-label="New name" autofocus></span><button class="btn primary" data-br-do="rename">Rename</button>`
+  const actions = S.br.saving ? '<span class="set-sub">Saving your change…</span>' : ed === 'rename' ? `<span class="tok-in"><input id="br-rename" value="${esc(name)}" aria-label="New name" autofocus></span><button class="btn primary" data-br-do="rename">Rename</button>`
     : ed === 'merge' && isTerm ? `<div class="br-def"><input class="wp-in" id="br-into-q" value="${esc(S.br.mergeQ || '')}" placeholder="Find the term it is the same thing as" aria-label="Merge into" autofocus>${(S.br.mergeHits || []).filter((t) => t.id !== id).map((t) => `<button class="tok link" data-br-merge-into="${esc(JSON.stringify([t.name, t.layer]))}">${esc(t.name)}${t.layer !== layer ? ` <small>${esc(lnm(t.layer))}</small>` : ''}</button>`).join('') || (S.br.mergeQ ? '<span class="set-sub">No term by that name.</span>' : '')}</div>`
     : ed === 'merge' ? `<select class="wp-in" id="br-into" aria-label="Merge into">${same.map((t) => `<option value="${esc(JSON.stringify([t.name || t.label, t.layer]))}">${esc(t.name || t.label)}${t.layer !== layer ? ` (${esc(lnm(t.layer))})` : ''}</option>`).join('')}</select><button class="btn primary" data-br-do="merge">Merge</button>`
     : ed === 'scope' ? `<select class="wp-in" id="br-scope-to" aria-label="Whose topic">${layer === 'shared' ? (tx.layers || []).filter((l) => l.id !== 'shared').map((l) => `<option value="${esc(l.id)}">Only ${esc(l.name || l.id)}</option>`).join('') : '<option value="shared">Your practice (every client)</option>'}</select><button class="btn primary" data-br-do="scope">Move</button>`
@@ -5273,14 +5288,20 @@ PANEL_VIEWS.push({ id: 'brain-node', label: 'Topic', icon: ICON('<circle cx="12"
 /** The user's edit: the app makes the new version in the background (a large Brain takes seconds); the page
  *  reads the Brain again until it is done, and says why when it couldn't be done. */
 function brainEdit(body) {
+  const seen = (((S.br.data || {}).edit_error) || {}).n || 0
   send({ cmd: 'brain_taxonomy', body })
   S.br.edit = null
+  // Until it is saved, the panel offers no edit of what it shows (a form would start from the values before it).
+  S.br.saving = true
+  render()
   let tries = 0
   const again = () => loadBrain().then(() => {
     const d = S.br.data || {}
-    if (d.edit_error) { window.echo.notice(d.edit_error); return render() }
+    if (d.edit_error && d.edit_error.n > seen) { S.br.saving = false; window.echo.notice(d.edit_error.text); return render() }
+    const running = (d.topic_jobs || []).includes('edit:taxonomy') && ++tries < 150
+    if (!running) S.br.saving = false
     render()
-    if ((d.topic_jobs || []).includes('edit:taxonomy') && ++tries < 150) setTimeout(again, 400)
+    if (running) setTimeout(again, 400)
   })
   setTimeout(again, 250)
 }

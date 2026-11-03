@@ -169,13 +169,14 @@ pub fn sync() -> Result<store::Report> {
         Ok(_) => {}
         Err(e) => eprintln!("brain: history: {e:#}"),
     }
-    // Which sections mention which terms: no model, redone when anything changed. A store from before
-    // Brain's meta keys and entity-kind nodes gets its graph rebuilt once.
+    // Which sections mention which terms: no model; the sections written or moved to other threads since they
+    // were last read (`term_scan`, cleared by every write of a section). A store from before Brain's meta keys
+    // and entity-kind nodes gets its graph rebuilt once.
     if let Some(t) = taxonomy::current() {
         let c = store::open(&store_path())?;
         if store::meta(&c, "taxonomy_sha256").is_none() {
             taxonomy::build_graph(&c, &t, None)?;
-        } else if r.added + r.changed + r.removed > 0 {
+        } else {
             taxonomy::mentions_changed(&c, &t)?;
         }
     }
