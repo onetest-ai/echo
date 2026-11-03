@@ -651,7 +651,7 @@ without it).
   `taxonomy build [--layer shared|<client>]` builds every layer or one (then classifies that layer's sections).
   **Drift** (#47, `taxonomy::drift`, no model): per layer, over the sections judged since its last build (its `build` in
   the history) — ≥ 30 of them —, stale when > 10% fit no topic (`untagged`) or one level-1 topic took > 40% of the tagged
-  ones; or when its calls are ≥ 3× `built_from` (and ≥ 6). A stale layer is an Inbox item and a banner on its Topics
+  ones; or when its calls are ≥ 3× `built_from` (and ≥ 6). A stale layer is an Inbox item ("Topics for X need a rebuild", the reasons in plain words — `reasons[].text`, one source for the Inbox and Builds) and a banner on its Topics
   block: Rebuild topics (IPC `brain_rebuild_topics` → `induce` in the background, provisional as any build; a
   notification when done) · Not now (`brain_topics_snooze` → `brain/taxonomy/drift.json`: held until its sections or
   calls grow by half; a rebuild clears it). Never rebuilt automatically. `echoctl brain taxonomy drift` (JSON).
@@ -715,8 +715,7 @@ without it).
   get no echo-brain server, transcription hints come from glossaries; the store stays on disk as it was.
 - **Topics** is one tree: the practice's topics by size (a bar, the share), each with its subtopics and the clients'
   topics under it (a chip names the client), then "Only <client>" for a client's own; definitions and synonyms under the
-  name; drift's catch-all flagged in place. Above it, **Builds**: one line per layer — provisional (Accept), out of date
-  and what fits no topic, **Tag again** (IPC `brain_retag_topics` → `classify(layer, again)`, background) and
+  name; drift's catch-all flagged in place. Above it, **Topic builds**: one line per layer saying in plain words what is wrong and the one thing to do — Needs a rebuild (why; Rebuild · Not now), Waiting for your review (Accept), Nothing to do —, **Tag again** (IPC `brain_retag_topics` → `classify(layer, again)`, background) and
   **Rebuild** (`brain_rebuild_topics` → `induce`, provisional) — and the suggested **moves** (Move up / down · Keep it);
   **Sync now** reads new sources and tags their sections (a manual sync tags too, as the scheduler's); what runs is
   `/api/brain` `topic_jobs`, a notification says when it ends. (A sunburst was tried and dropped: too hard to read.)

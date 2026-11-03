@@ -3706,16 +3706,27 @@ function brainTopics(tx) {
   }
   const practice = roots.filter((x) => x.layer === 'shared').sort((a, b) => (b.sections || 0) - (a.sections || 0))
   const own = layers.filter((l) => l.id !== 'shared').map((l) => [l, roots.filter((x) => x.layer === l.id).sort((a, b) => (b.sections || 0) - (a.sections || 0))]).filter(([, xs]) => xs.length)
-  // Builds: one line per layer — its state, what fits no topic, and its actions.
+  // Builds: one line per layer — in plain words what is wrong, if anything, and the one thing to do
+  // about it (the button that does it); Tag again stays as a quiet extra.
+  const why = (d) => (d.reasons || []).map((r) => r.text.charAt(0).toUpperCase() + r.text.slice(1) + '.').join(' ')
   const build = (l) => {
-    const running = jobs.has(`taxonomy:${l.id}`) ? 'rebuilding from its calls…' : jobs.has(`retag:${l.id}`) ? 'tagging its sections again…' : ''
     const d = l.drift || {}
-    const state = running || [l.provisional ? 'provisional' : '', d.stale ? `out of date — ${(d.reasons || []).map((r) => r.text).join(' · ')}` : '', d.untagged ? `${d.untagged} new sections fit no topic` : ''].filter(Boolean).join(' · ') || 'up to date'
-    const acts = running ? '' : `${l.provisional ? `<button class="link-btn" data-br-accept="${esc(l.id)}">Accept</button>` : ''}${d.stale ? `<button class="link-btn" data-br-snooze="${esc(l.id)}">Not now</button>` : ''}<button class="link-btn" data-br-retag="${esc(l.id)}" title="Tag its sections again with the topics as they are now">Tag again</button><button class="link-btn${d.stale ? ' strong' : ''}" data-br-rebuild="${esc(l.id)}" title="Build its topics again from its calls (Claude): existing topics keep their place, a provisional version to review">Rebuild</button>`
-    return `<div class="br-bld${d.stale ? ' warn' : ''}"><span class="br-cl" style="--c:${l.id === 'shared' ? '#8a8a95' : lcolor(l.id)}">${esc(lname(l.id))}</span><span class="set-sub grow">${esc(state)}${l.built_from ? ` · built from ${l.built_from} calls` : ''}</span>${acts}</div>`
+    const running = jobs.has(`taxonomy:${l.id}`) ? 'Rebuilding its topics from its calls…' : jobs.has(`retag:${l.id}`) ? 'Tagging its sections again…' : ''
+    const retag = `<button class="link-btn" data-br-retag="${esc(l.id)}" title="Tag its sections again with the topics as they are now (no new topics)">Tag again</button>`
+    let head, text, acts
+    if (running) [head, text, acts] = [running, 'You can keep working; a notification says when it is done.', '']
+    else if (d.stale) [head, text, acts] = ['Needs a rebuild', `${why(d)} Rebuild makes a new version from its calls for you to review; its topics keep their place.`,
+      `<button class="btn primary" data-br-rebuild="${esc(l.id)}">Rebuild</button><button class="link-btn" data-br-snooze="${esc(l.id)}" title="Ask again once it has half as many new sections or calls again">Not now</button>${retag}`]
+    else if (l.provisional) [head, text, acts] = ['Waiting for your review', 'Claude built these topics and nobody accepted them yet. Look through its topics below; rename, merge or remove what is wrong, then Accept.',
+      `<button class="btn primary" data-br-accept="${esc(l.id)}">Accept</button>${retag}`]
+    else [head, text, acts] = ['Nothing to do', `${d.untagged ? `${d.untagged} new section${d.untagged === 1 ? '' : 's'} fit no topic, too few to matter yet. ` : ''}Built from ${l.built_from || 0} call${l.built_from === 1 ? '' : 's'}.`, retag]
+    const kind = running ? 'run' : d.stale ? 'warn' : l.provisional ? 'todo' : 'ok'
+    return `<div class="br-bld ${kind}"><span class="br-cl" style="--c:${l.id === 'shared' ? '#8a8a95' : lcolor(l.id)}">${esc(lname(l.id))}</span><div class="br-bld-t"><b>${running ? '<i class="spin"></i>' : ''}${esc(head)}</b><span class="set-sub">${esc(text)}</span></div><div class="br-bld-a">${acts}</div></div>`
   }
   const ordered = [...layers.filter((l) => l.id === 'shared'), ...layers.filter((l) => l.id !== 'shared')]
-  const builds = `<details class="br-blds"${ordered.some((l) => l.provisional || (l.drift && l.drift.stale)) || jobs.size ? ' open' : ''}><summary>Builds · ${ordered.length} layer${ordered.length === 1 ? '' : 's'}${ordered.filter((l) => l.drift && l.drift.stale).length ? ` · ${ordered.filter((l) => l.drift && l.drift.stale).length} out of date` : ''}</summary>${ordered.map(build).join('')}</details>`
+  const nStale = ordered.filter((l) => l.drift && l.drift.stale).length, nReview = ordered.filter((l) => l.provisional && !(l.drift && l.drift.stale)).length
+  const todo = [nStale ? `${nStale} need${nStale === 1 ? 's' : ''} a rebuild` : '', nReview ? `${nReview} waiting for your review` : ''].filter(Boolean).join(' · ') || 'nothing to do'
+  const builds = `<details class="br-blds"${nStale || nReview || jobs.size ? ' open' : ''}><summary>Topic builds · ${ordered.length} layer${ordered.length === 1 ? '' : 's'} · ${todo}</summary>${ordered.map(build).join('')}</details>`
   const mv = (tx.moves || []).map((m) => `<div class="br-mv"><span class="grow">${m.dir === 'up' ? `↑ <b>${esc(m.label)}</b> belongs to your practice? <span class="set-sub">${esc(m.why)}</span>` : `↓ <b>${esc(m.label)}</b> is only ${esc(m.to_name)}'s? <span class="set-sub">${esc(m.why)}</span>`}</span><button class="btn ghost" data-br-move="${esc(m.key)}" data-do="dismiss">Keep it</button><button class="btn primary" data-br-move="${esc(m.key)}" data-do="apply">${m.dir === 'up' ? 'Move up' : 'Move down'}</button></div>`).join('')
   const top = `<div class="br-tbar"><span class="set-sub">${topics.length} topics · version ${tx.version}</span><span class="grow"></span><button class="btn" data-brain-sync title="Read new calls, mail and files into the Brain now; their new sections are tagged after it">Sync now</button></div>`
   const tree = practice.length ? `<div class="br-card">${practice.map((x) => row(x, true)).join('')}</div>` : ''
