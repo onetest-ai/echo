@@ -74,7 +74,7 @@ fn save(s: &Settings) -> Result<()> {
 /// What can be sent now, for Settings and the routines' editor (no secrets).
 pub fn status() -> Value {
     let s = load();
-    let tg = s.telegram.as_ref().map(|t| json!({"bot": t.bot, "paired": t.chat_id.is_some(), "user": t.user}));
+    let tg = s.telegram.as_ref().map(|t| json!({"bot": t.bot, "paired": t.chat_id.is_some(), "user": t.user, "chat_id": t.chat_id}));
     let ms = crate::graph::account();
     json!({"telegram": tg, "teams": ms.is_some(), "mail": ms.is_some(), "account": ms})
 }
@@ -366,15 +366,51 @@ fn esc(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
-/// Markdown → the HTML Telegram takes (b, i, code, pre, a): headings bold, list items bulleted,
-/// links only https, everything else as text.
+/// Markdown → the HTML Telegram takes (b, i, s, code, pre, a, blockquote): headings bold, list items
+/// bulleted, a table's rows as bulleted lines — Telegram has no tables — ("• **10:00** Weekly sync · Open
+/// asks", its first cell bold, empty or "—" cells left out), links only https, everything else as text.
 pub fn telegram_html(md: &str) -> String {
-    use pulldown_cmark::{Event, Parser, Tag, TagEnd};
+    use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
     let mut out = String::new();
     let mut lists: Vec<Option<u64>> = vec![];
     let mut link_open = vec![];
-    for ev in Parser::new(md) {
+    let (mut in_head, mut cell_at, mut row) = (false, 0usize, Vec::<String>::new());
+    for ev in Parser::new_ext(md, Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH) {
         match ev {
+            Event::Start(Tag::Table(_)) => row.clear(),
+            Event::Start(Tag::TableHead) => in_head = true,
+            Event::End(TagEnd::TableHead) => {
+                in_head = false;
+                row.clear();
+            }
+            Event::Start(Tag::TableRow) => row.clear(),
+            Event::Start(Tag::TableCell) => cell_at = out.len(),
+            Event::End(TagEnd::TableCell) => {
+                let cell = out.split_off(cell_at.min(out.len()));
+                row.push(cell.trim().to_string());
+            }
+            Event::End(TagEnd::TableRow) if !in_head => {
+                let cells: Vec<&String> = row.iter().filter(|c| !c.is_empty() && !matches!(c.as_str(), "—" | "–" | "-")).collect();
+                if let Some((first, rest)) = cells.split_first() {
+                    out.push_str(&format!("• <b>{first}</b>"));
+                    if !rest.is_empty() {
+                        out.push(' ');
+                        out.push_str(&rest.iter().map(|c| c.as_str()).collect::<Vec<_>>().join(" · "));
+                    }
+                    out.push('\n');
+                }
+                row.clear();
+            }
+            Event::End(TagEnd::Table) => out.push('\n'),
+            Event::Start(Tag::BlockQuote(_)) => out.push_str("<blockquote>"),
+            Event::End(TagEnd::BlockQuote(_)) => {
+                while out.ends_with('\n') {
+                    out.pop();
+                }
+                out.push_str("</blockquote>\n\n");
+            }
+            Event::Start(Tag::Strikethrough) => out.push_str("<s>"),
+            Event::End(TagEnd::Strikethrough) => out.push_str("</s>"),
             Event::Start(Tag::Heading { .. }) | Event::Start(Tag::Strong) => out.push_str("<b>"),
             Event::End(TagEnd::Heading(_)) => out.push_str("</b>\n\n"),
             Event::End(TagEnd::Strong) => out.push_str("</b>"),
@@ -450,7 +486,7 @@ fn split(text: &str, max: usize) -> Vec<String> {
 
 fn balance(p: &str) -> String {
     let mut out = p.to_string();
-    for tag in ["b", "i", "code", "pre"] {
+    for tag in ["b", "i", "s", "code", "pre", "blockquote"] {
         let opens = p.matches(&format!("<{tag}>")).count();
         let closes = p.matches(&format!("</{tag}>")).count();
         if opens > closes {
@@ -465,6 +501,14 @@ fn balance(p: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_table_becomes_lines_and_a_quote_a_blockquote() {
+        let h = telegram_html("## Meetings\n\n| Time | Meeting | Prepare |\n|---|---|---|\n| 10:00 | Weekly sync | Open asks |\n| 15:00 | Acme review | — |\n\n> Not real: a test.");
+        assert!(h.contains("• <b>10:00</b> Weekly sync · Open asks\n• <b>15:00</b> Acme review\n"), "{h}");
+        assert!(!h.contains('|') && !h.contains("Time"), "{h}");
+        assert!(h.contains("<blockquote>Not real: a test.</blockquote>"), "{h}");
+    }
 
     #[test]
     fn markdown_becomes_telegrams_html() {

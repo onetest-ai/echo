@@ -77,7 +77,17 @@ const PRELUDE: &str = r#"
     notify: (title, body) => call('notify', [String(title), String(body || '')]),
     inbox: { set: (key, item) => call('inbox.set', [key, item]), clear: (key) => call('inbox.clear', key) },
     profiles: () => call('profiles'),
-    claude: { run: (opts) => later('claude.run', opts) },
+    claude: {
+      run: (opts) => later('claude.run', opts),
+      /** Is a Claude Code plugin ("name@marketplace") installed for an AI profile ('' = the default)? */
+      hasPlugin: (spec, profile) => later('claude.has_plugin', [spec, profile || '']),
+      /** Install it there (user scope of that profile's Claude Code). */
+      installPlugin: (spec, profile) => later('claude.install_plugin', [spec, profile || '']),
+    },
+    /** The Claude · Echo folder session listens to a Claude Code channel (the one the manifest names) while
+     *  it is open; `env` is passed to it, `token: 'telegram'` adds the bot token Echo keeps. */
+    sessions: { channel: (opts) => call('sessions.channel', opts), clearChannel: () => call('sessions.clear_channel') },
+    system: { which: (name) => call('system.which', name) },
     deliver: { status: () => call('deliver.status'), send: (kind, msg) => later('deliver.send', [kind, msg]) },
   }
 })()
@@ -97,6 +107,23 @@ struct Host {
 }
 
 static HOST: OnceLock<Host> = OnceLock::new();
+/// The channels plugins asked the Echo-folder session to listen to: plugin → (channel plugin, env).
+static CHANNELS: Mutex<BTreeMap<String, Channel>> = Mutex::new(BTreeMap::new());
+
+#[derive(Debug, Clone)]
+pub struct Channel {
+    /// Claude Code's channel plugin, `name@marketplace`.
+    pub spec: String,
+    pub env: Vec<(String, String)>,
+}
+
+/// What the Echo-folder session adds for the enabled plugins' channels (`--channels` and their env).
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn channels() -> Vec<Channel> {
+    let on: Vec<String> = plugins::enabled().into_iter().map(|p| p.id).collect();
+    CHANNELS.lock().map(|c| c.iter().filter(|(id, _)| on.contains(id)).map(|(_, ch)| ch.clone()).collect()).unwrap_or_default()
+}
+
 /// Async operations and command calls in flight, numbered.
 static NEXT: AtomicU64 = AtomicU64::new(1);
 /// Off in a terminal (`echoctl plugin call`): the plugins' timers are the app's alone.
@@ -465,6 +492,40 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             json!({"default": set.default_id(), "profiles": set.all().into_iter().map(|p| json!({"id": p.id, "name": p.name})).collect::<Vec<_>>()})
         }
         "deliver.status" => crate::deliver::status(),
+        "sessions.channel" => {
+            // Only the channel the manifest names (the install sheet said which).
+            let m = plugins::read_manifest(&package_dir(id)?)?;
+            let allowed = m.uses.get("channel").and_then(|c| c["plugin"].as_str()).map(str::to_owned);
+            let spec = arg["plugin"].as_str().unwrap_or("");
+            if allowed.as_deref() != Some(spec) {
+                bail!("{id} may listen only to the channel its manifest names ({})", allowed.unwrap_or_else(|| "none".into()));
+            }
+            let mut env: Vec<(String, String)> = vec![];
+            for (k, v) in arg["env"].as_object().cloned().unwrap_or_default() {
+                if !k.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_') || k.starts_with("ANTHROPIC") || k.starts_with("CLAUDE") {
+                    bail!("“{k}” can't be set for a channel");
+                }
+                env.push((k, v.as_str().unwrap_or("").to_string()));
+            }
+            if arg["token"] == "telegram" {
+                let t = crate::deliver::load().telegram.ok_or_else(|| anyhow!("no Telegram bot yet: add yours in Settings → Plugins"))?;
+                env.push(("TELEGRAM_BOT_TOKEN".into(), t.token));
+            }
+            CHANNELS.lock().map_err(|_| anyhow!("busy"))?.insert(id.into(), Channel { spec: spec.into(), env });
+            Value::Null
+        }
+        "sessions.clear_channel" => {
+            CHANNELS.lock().map_err(|_| anyhow!("busy"))?.remove(id);
+            Value::Null
+        }
+        "system.which" => {
+            let name = s(arg);
+            if name.is_empty() || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
+                bail!("“{name}” isn't a program name");
+            }
+            let p = crate::app::find_program(&name);
+            if Path::new(&p).is_file() { json!(p) } else { Value::Null }
+        }
         o => bail!("Echo has no service “{o}”"),
     })
 }
@@ -476,6 +537,32 @@ fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
             let spec = crate::claudejob::Spec::from_value(arg, &plugins::data_dir(id))?;
             let (answer, model, usage) = crate::claudejob::run(&spec)?;
             Ok(json!({"answer": answer, "model": model, "usage": usage}))
+        }
+        "claude.has_plugin" | "claude.install_plugin" => {
+            let spec = arg[0].as_str().unwrap_or("");
+            if !spec.contains('@') || !spec.bytes().all(|b| b.is_ascii_alphanumeric() || b"@._-".contains(&b)) {
+                bail!("“{spec}” isn't a Claude Code plugin (name@marketplace)");
+            }
+            let profile = Some(arg[1].as_str().unwrap_or("")).filter(|p| !p.is_empty()).map(str::to_owned).unwrap_or_else(crate::ai::default_id);
+            let ready = crate::ai::ready(&profile)?;
+            let args: Vec<String> = if op == "claude.has_plugin" { vec!["plugin".into(), "list".into(), "--json".into()] } else { vec!["plugin".into(), "install".into(), spec.into(), "--scope".into(), "user".into()] };
+            let out = crate::ai::claude_command(ready.profile(), &args, &paths::home(), false)?.wait_with_output()?;
+            let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+            if op == "claude.has_plugin" {
+                // On and seen from the data folder (where Echo's sessions run): user scope, or this folder's project.
+                let list: Vec<Value> = serde_json::from_slice(&out.stdout).map_err(|_| anyhow!("Claude Code's plugin list can't be read"))?;
+                let home = dunce::canonicalize(paths::home()).unwrap_or_else(|_| paths::home());
+                let usable = list.iter().any(|x| {
+                    x["id"] == spec
+                        && x["enabled"] == true
+                        && (x["scope"] == "user" || x["projectPath"].as_str().and_then(|p| dunce::canonicalize(p).ok()).is_some_and(|p| p == home))
+                });
+                return Ok(json!(usable));
+            }
+            if !out.status.success() {
+                bail!("Claude Code couldn't install {spec}: {}", text.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("no reason given").trim());
+            }
+            Ok(Value::Null)
         }
         "deliver.send" => {
             let kind = arg[0].as_str().unwrap_or("");

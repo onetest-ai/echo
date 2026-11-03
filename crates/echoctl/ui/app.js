@@ -2171,6 +2171,8 @@ function pluginCtx(id) {
     },
     /** Open one of its panel views (`ctx.panels.add`). */
     showPanel: (view) => { Layout.show(`${id}:${view}`, panelViews()); layoutChanged() },
+    /** Open one of Echo's own panel views, e.g. `claude-folder` (the Claude · Echo folder session). */
+    openEchoPanel: (view) => { if (view.includes(':')) return; go('calls'); setTimeout(() => { Layout.show(view, panelViews()); layoutChanged() }, 50) },
     /** Where the window is: the activity and the Settings section (`#settings/<plugin>:<id>`). */
     where: () => ({ view: S.view, section: S.setSection }),
     go: (hash) => go(hash),

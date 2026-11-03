@@ -811,6 +811,17 @@ a git URL (`#ref`) → `git clone --depth 1`; a folder read where it is; every t
 `<home>/.echo/plugins/<id>/settings.json`, secrets `<config dir>/plugins/secrets/<id>.json` (0600). Install = the sheet's
 lines agreed; an update asking for more waits for a new agreement. Settings → Plugins (Installed · Discover ·
 Marketplaces; IPC `plugin_op`); `echoctl plugin list|install|update|remove|enable|disable|set|call|marketplace …`.
+**Channels** (`ctx.sessions.channel({plugin, env, token})`, only the channel the manifest's `uses.channel` names;
+`jshost::channels`): the Echo-folder session starts with `--channels plugin:<spec>` and the env given — no `CLAUDE*` /
+`ANTHROPIC*` keys; `token: 'telegram'` adds `TELEGRAM_BOT_TOKEN` from Echo's own delivery settings, so the plugin never
+holds it. `ctx.claude.hasPlugin` / `installPlugin` (`claude plugin list --json` / `install --scope user` through the
+profile: on, at user scope or this data folder's project), `ctx.system.which`. **Telegram** (its package): writes the
+channel's `access.json` in its store — `allowlist`, only the paired chat id, `TELEGRAM_ACCESS_MODE=static` (no pairing
+codes) — and registers the channel; its Settings section checks the bot, Bun and Claude Code's
+`telegram@claude-plugins-official`. Measured 2026-11-03 (personal Max account): a message reaches the open session, the
+bot reacts 👀 and Claude answers through the channel; it still works after `--resume`; messages sent while the session
+was closed aren't read. A Claude Code started from inside another (`CLAUDE_CODE_CHILD_SESSION` inherited) keeps no
+transcript, so it can't be resumed.
 **Scheduler** (its package in `onetest-ai/echo-plugins/plugins/scheduler`): routines = the user's prompts on a schedule
 (`routines/<id>.md` in its store, templates in its package), runs with tokens and cost, its own Settings section; the
 Telegram and Obsidian plugins wait for `channel`, `brain_source`, `export`, `sessions`.

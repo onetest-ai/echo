@@ -64,7 +64,7 @@ const CAPABILITIES: &[Capability] = &[
     Capability { id: "claude", ready: true, describe: describe_claude },
     Capability { id: "schedule", ready: true, describe: describe_schedule },
     Capability { id: "deliver", ready: true, describe: describe_deliver },
-    Capability { id: "channel", ready: false, describe: describe_channel },
+    Capability { id: "channel", ready: true, describe: describe_channel },
     Capability { id: "brain_source", ready: false, describe: describe_brain_source },
     Capability { id: "export", ready: false, describe: describe_export },
     Capability { id: "sessions", ready: false, describe: describe_sessions },
