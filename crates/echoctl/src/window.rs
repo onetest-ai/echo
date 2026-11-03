@@ -1880,6 +1880,16 @@ fn act(v: &Value) -> bool {
             }
             false
         }
+        // Write now: a run of this call waiting for another call's recording or transcript starts anyway
+        // (Claude Code as configured only: the run decides, `notes::wait_for_local_model`).
+        "notes_now" => {
+            let Some(d) = call else { return false };
+            if crate::notes::status(&d).is_none_or(|r| r.state != "queued") {
+                return true;
+            }
+            let _ = std::fs::write(d.join(crate::notes::NOW_REQUEST), b"");
+            true
+        }
         "write_notes" => {
             let Some(d) = call else { return false };
             // Another profile for this run: it becomes the call's (`notes-run.json` records which

@@ -886,7 +886,7 @@ of the group is left after 3 s — the leader exiting first doesn't end the watc
 holds after the leader exited gets 2 s, then that group is stopped too). Turning live notes off stops the running job
 and drops queued questions with that reason. `local` and `system` jobs share one
 lock, `<config dir>/local-model.lock` (`app::FileLock`: busy vs a real I/O error), across live jobs, the app's minutes
-and `notes --wait`; minutes on them wait while any call records or is transcribed. `live-state.json` mirrors the state
+and `notes --wait`; minutes on them wait while any call records or is transcribed — the run's message names it ("waits for the recording of “X” (started 10:01) to end, about 11:00" from its invite's end, "…for the transcript of “X”…", "…for the model to finish another job"; `notes-run.json` `wait: call | model`); on Claude Code as configured the window offers **Write now** while it waits for another call (IPC `notes_now` → `<call>/notes-now.request`, read by the waiting run, used up when it starts; never a local model, never its own call). `live-state.json` mirrors the state
 for the pane only (rewritten `ended` at app start). `echoctl live test <call> [--ask kind text]` (hidden) runs one job
 right there. Measured on a Mac with Qwen 3.6 35B-A3B (Q4_K_M) through Ollama: summary 5–8 s (18 s cold), a question ~4 s;
 Claude Code + haiku ~9 s. Unverified: jobs on two signed-in Claude folders side by side (the sign-ins themselves keep
