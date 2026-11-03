@@ -124,7 +124,7 @@ pub struct Config {
     /// (local models, gateways, Bedrock / Vertex). None = sonnet.
     #[serde(default)]
     pub notes_model: Option<String>,
-    /// Model for the live pane's rolling summary and quick questions during a call (a fast
+    /// Model for the live notes' rolling summary and quick questions during a call (a fast
     /// one). None = haiku.
     #[serde(default)]
     pub live_model: Option<String>,

@@ -99,7 +99,7 @@ Name the speakers first (4a, if the transcript has "Speaker N" labels), then wri
   `transcript.md`; drop the hour when it is 0). One anchor per bullet, never a range: the turn
   that supports exactly that point — for a decision, where it was agreed; for an action, where
   it was committed — and of equally good turns, the first.
-  The live pane turns these into jumps into the transcript.
+  Echo's window turns these into jumps into the transcript.
 
 ### Shared screens (`frames`)
 If `frames` is non-empty, these are snapshots of what was on screen (slides, documents, demos),
@@ -145,7 +145,7 @@ The action items from the notes, as a JSON array, written to `<dir>/actions.new.
    "due": "<as stated>" | null, "confidence": "high" | "low", "quote": "<short supporting quote>",
    "t": <seconds into the call where it was said>, "status": "todo"}]`
 then run `echoctl actions <dir> --apply <dir>/actions.new.json`. It replaces `actions.json`, keeps
-the status the user gave each item meanwhile (they tick items off in the window and the pane, also
+the status the user gave each item meanwhile (they tick items off in Echo's window, also
 while you work), gives new items an id and removes `actions.new.json`; if it says the list is
 malformed, fix the file and run it again. On a re-run (`actions.json` exists: `echoctl actions
 <dir>` prints it), keep each item's `id` when your item is the same action — even reworded — and

@@ -105,9 +105,10 @@ Click a meeting for details, a recap of last time, and the Record button.
 Minutes, action items and follow-ups are written by [Claude Code](https://claude.com/claude-code).
 
 1. Install Claude Code and sign in. That is all Echo needs to write minutes.
-2. Optional: menu → **Claude Code → Connect Claude Code** installs the Echo plugin in your own
-   Claude Code, for `/echo:process-call`, `/echo:live` and `/echo:doctor` (it checks Echo and fixes
-   what's missing if something doesn't work).
+2. Optional: menu → **Claude Code → Connect Claude Code** installs the Echo plugin for Claude Code
+   sessions in Echo's data folder (`echoctl claude connect --scope user` for every session): a status
+   line above the prompt, `/echo:process-call`, `/echo:record` and `/echo:doctor` (it checks Echo and
+   fixes what's missing if something doesn't work).
 
 From then on, Echo writes the minutes by itself, **15 minutes after the call** (or after your
 last note, if you are still typing): it runs Claude Code in the background on your Mac with its
@@ -127,7 +128,7 @@ added with, or its live model when that is cleared). Change the one new calls us
 profile's with `echoctl ai set <profile> --notes-model <name>`: `opus`, `haiku`, a full model
 name, or, for the built-in profile, `default` to use whatever your Claude Code is set up with
 (local models, a gateway, Bedrock or Vertex). Minutes runs need Claude Code 2.1.295 or later. During a
-call, `/echo:live` shows the transcript as it happens, and the Notes tab (or menu → **Add a
+call, Echo's window shows the transcript as it happens, and the Notes tab (or menu → **Add a
 note…**) takes your own notes.
 
 <details>

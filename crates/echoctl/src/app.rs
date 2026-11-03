@@ -877,25 +877,37 @@ pub fn plugin_root() -> Option<PathBuf> {
     installs.iter().filter_map(|i| i["installPath"].as_str()).map(PathBuf::from).find(|p| p.is_dir())
 }
 
+/// The same folder, after links (`/private/var` vs `/var` on macOS).
+fn same_folder(a: &Path, b: &Path) -> bool {
+    dunce::canonicalize(a).ok().zip(dunce::canonicalize(b).ok()).is_some_and(|(a, b)| a == b) || a == b
+}
+
 /// `echoctl claude`: is Claude Code installed, and is the plugin?
 pub fn claude_status() -> Value {
     let installs = plugin_installs();
     json!({
         "claude": claude_bin(),
-        "plugin_installed": !installs.is_empty(),
+        // Where Echo's sessions see it: every session (user scope), or the data folder (project / local scope there).
+        "plugin_installed": installs.iter().any(|(s, p)| s == "user" || p.as_deref().is_some_and(|p| same_folder(Path::new(p), &paths::home()))),
         "installs": installs.iter().map(|(s, p)| json!({ "scope": s, "project": p })).collect::<Vec<_>>(),
         "marketplace": marketplace_source(),
     })
 }
 
-/// `echoctl claude connect`: add the marketplace and install the plugin at `scope`.
+/// `echoctl claude connect`: add the marketplace and install the plugin at `scope` — by default the project scope
+/// of Echo's data folder, where Echo's own Claude sessions run: Claude Code elsewhere doesn't need Echo.
 pub fn connect_claude(scope: &str, project: Option<&Path>) -> Result<()> {
     let Some(claude) = claude_bin() else {
         bail!("Claude Code is not installed (no `claude` command found) — see https://claude.com/claude-code");
     };
     let cwd = match project {
         Some(p) => p.to_path_buf(),
-        None => std::env::current_dir().unwrap_or_else(|_| user_home()),
+        None if scope == "user" => std::env::current_dir().unwrap_or_else(|_| user_home()),
+        None => {
+            let home = paths::home();
+            std::fs::create_dir_all(&home)?;
+            home
+        }
     };
     let run = |args: &[&str]| -> Result<String> {
         let out = Command::new(&claude).no_window().args(args).current_dir(&cwd).output()?;

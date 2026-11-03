@@ -2,7 +2,7 @@
 
 A standalone app (Rust: tray icon + call watcher + CLI) that records Teams calls the user opts in
 to (their mic + the Teams app's audio, as two tracks) and transcribes them on-device, plus a
-Claude Code plugin that is its client (live pane, notes, follow-ups). **Separation of concerns:**
+Claude Code plugin that is its client (a status line, minutes, follow-ups). **Separation of concerns:**
 the app never depends on Claude Code (it asks with native dialogs, starts at login, has its own
 permissions); the plugin drives it only through the CLI and the files in the data folder.
 The final notes/actions (`notes.md`, `actions.json`) are written only by a Claude Code run (the app writes
@@ -49,7 +49,7 @@ minutes").
   `package` split the script so SignPath signs `echoctl.exe` in between, then the MSI — on once the repository has
   `SIGNPATH_*` settings, else unsigned as before.
 - Marketplace `echoctl` (`.claude-plugin/marketplace.json`): `claude plugin marketplace add
-  onetest-ai/echo` + `claude plugin install echo@onetest --scope user|project|local`
+  onetest-ai/echo` + `claude plugin install echo@onetest --scope project|user|local` (project = the data folder, the default)
   (what `echoctl claude connect` runs; `ECHOCTL_MARKETPLACE` overrides the source).
 - CLI on PATH (`app install-cli`): macOS `/usr/local/bin/echoctl` → the app's binary (admin
   prompt via osascript); Windows: app folder appended to the user PATH.
@@ -58,8 +58,7 @@ minutes").
   path in `<config dir>/app-path` (written at each app start: any install folder) → PATH →
   Echo.app / `%LOCALAPPDATA%\Programs\echo`). On Windows Claude Code's Bash is Git Bash, so
   the skills run the **sh** launcher there too (it handles MINGW paths via `cygpath`). Skills:
-  `process-call` (notes → actions → vocabulary → follow-ups), `live` (the mod opens the pane),
-  `record` (arm / stop from chat), `doctor` (`echoctl up` + fix what's missing: data folder,
+  `process-call` (notes → actions → vocabulary → follow-ups), `record` (arm / stop from chat), `doctor` (`echoctl up` + fix what's missing: data folder,
   permissions, model, languages; first run itself is the app's). The user's own notes during a
   call (`my-notes.md`) come from the window's Notes tab (during and after a call) or the tray's "Add a note…" while
   recording (`echoctl note`).
@@ -927,28 +926,26 @@ whose manifest names the kind (`uses.deliver_provider.kinds`), its readiness tol
 command). Telegram is one (its package: bot token as its secret setting, pairing, sending through `ctx.http.fetch` to
 `api.telegram.org` only — `uses.network.hosts` —, Markdown → Telegram HTML with tables as lines). Settings → **Sends to you** (its own section, `#settings/deliver`, `/api/deliver`) lists Teams, Mail and the plugins' ways; `echoctl deliver status|test <kind>|send`.
 
-## Live view (mod) and automation
+## The mod: a status line (and automation)
 `plugin/hooks/register.tsx` is a Claude Code mod (state contract `plugin/types/index.d.ts`, pure helpers
-`hooks/view.ts`). At session start it asks the CLI for the data folder (`echoctl app` → `home`),
-starts the app if it is set up but not running, and catches up: `echoctl pending --for <cwd>` → `echoctl notes <call>
---auto --for <cwd>` — both refuse now (empty / `{requested: false, waiting, reason}`): the app writes the minutes itself
-(`notes::auto_due`), or nobody does automatically. Band above the prompt while the app runs: `[ Live ]` (hotkey l) +
-status. Pane: transcript left / summary-highlights-actions right (stacked under 100 cols). Every
-1 s it heartbeats `<home>/.echo/mod.json`, tails `events.jsonl` (from the end, never
-replays), and: on `recording_started` opens the `echo-live` pane; on `transcribed` asks for the minutes (`notes
---auto`, refused as above; `waiting` → the pane follows the call until they are written, a run ends, or a later answer
-(at most once a minute; a CLI that didn't answer is asked again) stops saying `waiting`). Its action ticks go through `echoctl action <call> <id> done|todo`. The pane shows `<call>/live.jsonl` (written by `live.rs` during recording: the
-call's one transcription pass, an utterance decoded after 0.8 s of silence — see Transcription) plus the app's live notes
-(`live-notes.json` → summary/highlights/actions, `live-state.json`, answers in `live-asks.jsonl`); its quick buttons call
-`echoctl live ask`. It **never calls a model itself** (that would use the session's account, not the call's profile);
-live notes off → it says so. `echoctl live-replay <wav> <dir>` (hidden) plays a WAV in as a growing recording (10×)
-and writes the transcript, as after a call — only into a new or empty folder, or one it marked (`.replay`), and
-only once transcription can run (never a call's folder).
+`hooks/view.ts`) and only a **status line** above the prompt (2026-11-03, the user's call: the live pane and its call
+browser went — Echo's window shows calls, live transcripts, live notes and minutes). At session start it asks the CLI
+for the data folder (`echoctl app` → `home`) and starts the app if it is set up but not running. While the app runs:
+**Echo** (hotkey e: `echoctl app open [--call <the recording>]`) + "● Recording · title · N min" (· 🔇 muted), "◌ Armed",
+or "Echo · next: 18:30 …". Every 1 s it tails `events.jsonl` (from the end, never
+replays; no `mod.json` heartbeat any more — nothing read it): muted / unmuted for the line, toasts for a failed transcription, an error, an expired arm. It asks for no
+minutes (`pending --for` / `notes --auto` stay for older mods, and refuse) and never calls a model. `echoctl live-replay
+<wav> <dir>` (hidden) plays a WAV in as a growing recording (10×) and writes the transcript, as after a call — only into
+a new or empty folder, or one it marked (`.replay`), and only once transcription can run (never a call's folder).
+**Where the plugin goes**: `echoctl claude connect` / tray → Claude Code → Connect installs it in the **project scope of
+the data folder** by default (where Echo's own Claude sessions run; `--scope user` for every session); a folder session on
+a `claude` / `local` profile reads only its own settings, so Echo passes the plugin shipped with the app
+(`--plugin-dir`, `notes::plugin_dir`). "Claude Code ✓" counts a user-scope install or one whose folder is the data folder
+(after `home set` Connect is offered again).
 Mute sync: while recording, the watcher polls Teams' microphone button via Accessibility / UI
 Automation (`ax::MuteWatch`, label "Unmute…" ⇒ muted) every 400 ms; muted ⇒ `audio::mic::MUTED` makes the mic
-track record silence; events `mic_muted`/`mic_unmuted` drive the band. `config.follow_app_mute`
-(default on). `echoctl ax-mic` (hidden) shows what the detector sees. `/echo:live` is a skill
-the mod intercepts in `command.run` (mods can't register names with a colon).
+track record silence; events `mic_muted`/`mic_unmuted` drive the status line. `config.follow_app_mute`
+(default on). `echoctl ax-mic` (hidden) shows what the detector sees.
 A call can pin languages (`arm --languages uk`, tray Record ▸ Only …, the window's Record
 button's language menu — a native `<select>` over its right part; default English, remembered
 in the webview, "Detect" = the configured list; scheduled / joined meetings carry it as
