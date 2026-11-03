@@ -256,7 +256,9 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
             emit("woke", json!({}));
         }
         if let Some(r) = rec.as_mut() {
-            r.poll();
+            for (track, e) in r.poll() {
+                track_failed(&r.dir, track, &e);
+            }
         }
         if last_check.elapsed() < Duration::from_secs(1) {
             continue;
@@ -509,8 +511,20 @@ fn apply_profile_request(rec: Option<&mut Recording>, req: &Value) {
     }
 }
 
+/// A track's audio can no longer be written (a full disk, a volume gone): the rest of it is lost
+/// while the recording goes on, so the user hears of it now, once per track.
+fn track_failed(dir: &Path, track: &str, e: &str) {
+    emit("track_failed", json!({ "dir": dir.display().to_string(), "track": track, "message": e }));
+    let what = if track == "mic" { "your microphone" } else { "the others' audio" };
+    crate::app::notify(
+        "Recording problem",
+        &format!("Echo can't save {what} any more: {e}. The rest of this call on that track is lost — take notes in Echo."),
+    );
+}
+
 fn finish(r: Recording, reason: &str) {
     let secs = r.t0.elapsed().as_secs();
+    let dir = r.dir.clone();
     crate::livenotes::recording_stopped(&r.dir);
     match r.finish(reason) {
         Ok((dir, _, live)) => {
@@ -522,7 +536,13 @@ fn finish(r: Recording, reason: &str) {
                 None => transcribe_in_background(dir),
             }
         }
-        Err(e) => emit("error", json!({ "message": format!("finishing recording failed: {e:#}") })),
+        Err(e) => {
+            emit("error", json!({ "message": format!("finishing recording failed: {e:#}") }));
+            crate::app::notify("Recording not closed properly", &format!("{e:#}"));
+            // What was saved is transcribed all the same: `Recording::finish` closes both tracks
+            // and dates the end even when one failed.
+            transcribe_in_background(dir);
+        }
     }
 }
 

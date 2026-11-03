@@ -1028,6 +1028,9 @@ frames). A renamed call's old page (generator meta) is replaced, never another f
 - Sleep = wall clock outrunning the monotonic clock (> 30 s) → the recording is closed.
 - Track restarts back off 1 s → 30 s (slow after 20, reset after 5 min stable); the remote
   track reopens after 5 min of exact digital zeros (≤ 10×; also what revoked TCC looks like).
+- A track whose writer fails (a full disk, a volume gone) says so at once: a `write_failed` track event, a
+  `track_failed` event and one notification. `Recording::finish` closes both tracks whatever fails, tells the live
+  worker to stop (`Live`'s `Drop` does too), dates the end, then returns the error; what was saved is transcribed.
 - `<call>/ui.jsonl` (`ax::UiRecorder`, `config.capture_ui`, default on): Teams' call window
   (`ax::CallWindow`, both platforms: the window holding `microphone-button` — AXDOMIdentifier on
   macOS, Teams' web UI is the same in WebView2; never the main window with chats) text diffs

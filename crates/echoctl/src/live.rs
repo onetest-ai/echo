@@ -39,10 +39,14 @@ const TICK: Duration = Duration::from_millis(1000);
 /// macOS), and the call itself needs the machine too.
 const THREADS: usize = 4;
 
-/// The worker of one recording.
+/// The worker's thread: every segment of the call and the model's name.
+type Worker = JoinHandle<Result<(Vec<Segment>, String)>>;
+
+/// The worker of one recording. Dropped without `join` (a recording that failed to close), it
+/// is still told to stop, so it never keeps polling with its model loaded.
 pub struct Live {
     done: Arc<AtomicBool>,
-    handle: JoinHandle<Result<(Vec<Segment>, String)>>,
+    handle: Option<Worker>,
 }
 
 impl Live {
@@ -52,9 +56,16 @@ impl Live {
     }
 
     /// Wait for the worker: every segment of the call and the model's name.
-    pub fn join(self) -> Result<(Vec<Segment>, String)> {
+    pub fn join(mut self) -> Result<(Vec<Segment>, String)> {
         self.close();
-        self.handle.join().map_err(|_| anyhow!("the transcription worker panicked"))?
+        let handle = self.handle.take().expect("joined once");
+        handle.join().map_err(|_| anyhow!("the transcription worker panicked"))?
+    }
+}
+
+impl Drop for Live {
+    fn drop(&mut self) {
+        self.close();
     }
 }
 
@@ -80,7 +91,7 @@ pub fn start(dir: &Path, meeting: Option<&MeetingContext>, languages: Option<Vec
         }
         r
     });
-    Some(Live { done, handle })
+    Some(Live { done, handle: Some(handle) })
 }
 
 /// One track's WAV, read as it grows.
@@ -272,6 +283,30 @@ pub fn replay(wav: &Path, out_dir: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_dropped_worker_is_told_to_stop() {
+        let done = Arc::new(AtomicBool::new(false));
+        let d = done.clone();
+        let handle = std::thread::spawn(move || {
+            while !d.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Ok((vec![], String::new()))
+        });
+        drop(Live { done: done.clone(), handle: Some(handle) });
+        assert!(done.load(Ordering::SeqCst), "a worker nobody joins doesn't keep polling");
+        // And `join` still works (it takes the handle; its drop then only sets the flag again).
+        let d = Arc::new(AtomicBool::new(false));
+        let d2 = d.clone();
+        let live = Live { done: d, handle: Some(std::thread::spawn(move || {
+            while !d2.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Ok((vec![], "m".into()))
+        })) };
+        assert_eq!(live.join().unwrap().1, "m");
+    }
 
     #[test]
     fn reads_samples_of_a_wav_still_being_written() {

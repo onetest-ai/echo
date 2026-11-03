@@ -138,40 +138,63 @@ impl Recording {
         Ok(())
     }
 
-    /// Supervise both tracks; call every ~250 ms.
-    pub fn poll(&mut self) {
-        self.remote.poll();
-        self.mic.poll();
+    /// Supervise both tracks; call every ~250 ms. Returns each track whose audio can no longer
+    /// be written (its name, why), once.
+    pub fn poll(&mut self) -> Vec<(&'static str, String)> {
+        let remote = self.remote.poll().map(|e| ("remote", e));
+        let mic = self.mic.poll().map(|e| ("mic", e));
+        remote.into_iter().chain(mic).collect()
     }
 
     /// Close the tracks. Returns the call's folder, its tracks and the transcription worker
     /// (now finishing the last utterances; `Live::join` waits for it), if one ran.
-    pub fn finish(mut self, reason: &str) -> Result<(PathBuf, Vec<TrackInfo>, Option<Live>)> {
+    ///
+    /// A failure doesn't cut it short: both tracks are closed, the worker is told to stop and
+    /// `meta.json` gets its end, then the first error comes back (the worker, dropped, stops).
+    pub fn finish(self, reason: &str) -> Result<(PathBuf, Vec<TrackInfo>, Option<Live>)> {
+        let Recording { live, dir, mut meta, mut remote, mut mic, .. } = self;
         // Stop both captures at the same instant so the tracks end together.
-        self.remote.halt();
-        self.mic.halt();
-        self.meta.tracks.push(self.remote.finish()?);
-        self.meta.tracks.push(self.mic.finish()?);
+        remote.halt();
+        mic.halt();
+        let mut errors = vec![];
+        for track in [remote, mic] {
+            let (info, err) = track.finish();
+            if let Some(e) = err {
+                // A writer that died never wrote the WAV's sizes: fix them, the samples are there.
+                let _ = audio::repair_wav(&dir.join(&info.file));
+                errors.push(e);
+            }
+            meta.tracks.push(info);
+        }
         // The WAVs are complete: the worker decodes what is left. Not joined here: a slow
         // decoder must not hold up the watcher, the tray or the heartbeat.
         #[cfg(feature = "transcribe")]
-        if let Some(l) = &self.live {
+        if let Some(l) = &live {
             l.close();
         }
-        self.meta.ended_at = Some(Local::now());
-        self.meta.stop_reason = Some(reason.to_string());
-        {
-            let _lock = crate::calls::lock_meta(&self.dir)?;
-            // A profile switch written straight to the file is kept: it can reach a recording that
-            // has just started, before the heartbeat says it records (`ai::set_call_profile`).
-            let on_disk = fs::read(self.dir.join("meta.json")).ok().and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok());
-            if let Some(id) = on_disk.as_ref().and_then(|m| m["ai_profile"].as_str()).filter(|s| !s.is_empty()) {
-                self.meta.ai_profile = Some(id.to_string());
-            }
-            paths::write_atomic(&self.dir.join("meta.json"), &serde_json::to_vec_pretty(&self.meta)?)?;
+        meta.ended_at = Some(Local::now());
+        meta.stop_reason = Some(reason.to_string());
+        if let Err(e) = write_final_meta(&dir, &mut meta) {
+            errors.push(e);
         }
-        Ok((self.dir, self.meta.tracks, self.live.take()))
+        match errors.into_iter().next() {
+            Some(e) => Err(e),
+            None => Ok((dir, meta.tracks, live)),
+        }
     }
+}
+
+/// The recording's last `meta.json`, under the call's lock.
+fn write_final_meta(dir: &std::path::Path, meta: &mut Meta) -> Result<()> {
+    let _lock = crate::calls::lock_meta(dir)?;
+    // A profile switch written straight to the file is kept: it can reach a recording that
+    // has just started, before the heartbeat says it records (`ai::set_call_profile`).
+    let on_disk = fs::read(dir.join("meta.json")).ok().and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok());
+    if let Some(id) = on_disk.as_ref().and_then(|m| m["ai_profile"].as_str()).filter(|s| !s.is_empty()) {
+        meta.ai_profile = Some(id.to_string());
+    }
+    paths::write_atomic(&dir.join("meta.json"), &serde_json::to_vec_pretty(meta)?)?;
+    Ok(())
 }
 
 /// `echoctl capture`: record until Ctrl-C or `--seconds`.
@@ -192,7 +215,8 @@ pub fn capture(
     ctrlc::set_handler(move || s.store(true, Ordering::SeqCst))?;
     while !stop.load(Ordering::SeqCst) && seconds.is_none_or(|n| rec.t0.elapsed() < Duration::from_secs(n)) {
         std::thread::sleep(Duration::from_millis(250));
-        rec.poll();
+        // A track that can't be written any more is said by its event, on stderr.
+        let _ = rec.poll();
     }
 
     // `capture` leaves transcription to `echoctl transcribe` (the worker ends with the process).
