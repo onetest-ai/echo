@@ -646,6 +646,10 @@ pub fn claim(call: &str, session: Option<&Path>, session_id: Option<&str>) -> Re
 /// The Claude Code process this command runs under (its Bash tool → a shell → echoctl): the first ancestor
 /// that isn't a shell or Echo itself. None when it can't be told.
 fn claude_ancestor() -> Option<u32> {
+    // Claude Code tells its Bash tool its own pid, on every platform.
+    if let Some(p) = std::env::var("CLAUDE_PID").ok().and_then(|p| p.trim().parse::<u32>().ok()).filter(|p| *p > 1) {
+        return Some(p);
+    }
     #[cfg(unix)]
     {
         let mut pid = std::os::unix::process::parent_id();

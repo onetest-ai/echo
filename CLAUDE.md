@@ -1112,7 +1112,7 @@ that isn't a JSON list is set aside as `actions.unreadable-<HHMMSS>.json` when a
 it and this run's `.actions-generation`; then `notes-run.json` `minutes: {model, at, sha256}` (carried over by later
 runs) names the model on the page while `notes.md` still has that hash. `ECHOCTL_HEADLESS=1` inside: the mod
 does nothing, `pending`/`claim` refuse. A session's claim is **live** (#43): `echoctl claim <call> --session <id>` records the session id and the Claude Code
-process it runs under; it holds a call only while that process lives and works on it (the claim under 5 min old, or the
+process it runs under; it holds a call only while that process lives and works on it (the claim under 15 min old, or the
 minutes, actions or log changed since) — a bare-time claim of an older plugin, or one whose session went away, holds
 nothing, and `claim` without `--session` is refused ("too old: update and restart Claude Code"); the Minutes tab says
 who holds it (`auto.held_by`) with Write minutes. A session's `claim` (by hand: `/echo:process-call`) fails only while Echo's run

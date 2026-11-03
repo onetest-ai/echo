@@ -702,8 +702,9 @@ fn in_progress(dir: &Path) -> bool {
     dir.join(crate::transcribe_marker()).exists() || crate::watch::running_watcher().and_then(|w| w.recording).is_some_and(|r| Path::new(&r) == dir)
 }
 
-/// A live claim may sit this long without a sign of work on the call before it stops holding it.
-const CLAIM_QUIET: Duration = Duration::from_secs(5 * 60);
+/// A live claim may sit this long without a sign of work on the call before it stops holding it (a session reads
+/// the transcript and the context before it writes anything).
+const CLAIM_QUIET: Duration = Duration::from_secs(15 * 60);
 
 /// A Claude Code session's claim that holds the call (not one of Echo's runs: "echo notes"; #43): it names its
 /// session and its process, that process is alive, and it is working — the claim is under 5 minutes old, or the
@@ -721,8 +722,9 @@ pub(crate) fn claim_holder(dir: &Path) -> Option<Value> {
         return None;
     }
     let v: Value = serde_json::from_str(fs::read_to_string(&marker).ok()?.trim()).ok()?;
-    let pid = v["pid"].as_u64()? as u32;
-    if !crate::app::process_alive(pid) {
+    // Its process must be alive when it is known (none known: by time and work only).
+    let pid = v["pid"].as_u64().map(|p| p as u32);
+    if pid.is_some_and(|p| !crate::app::process_alive(p)) {
         return None;
     }
     let at = v["at"].as_str().and_then(|a| DateTime::parse_from_rfc3339(a).ok())?;
@@ -1595,6 +1597,19 @@ mod tests {
         fs::write(dir.join(calls::CLAIMED), live_claim()).unwrap();
         assert!(session_claim(&dir));
         assert_eq!(claim_holder(&dir).unwrap()["pid"], std::process::id());
+        // Quiet for longer than a session takes to start writing, with nothing changed: it holds nothing; a newer
+        // minutes file since: it holds.
+        let old = (Local::now() - chrono::Duration::minutes(20)).to_rfc3339();
+        fs::write(dir.join(calls::CLAIMED), json!({"at": old, "pid": std::process::id(), "session": "s1"}).to_string()).unwrap();
+        let set_age = |f: &std::path::Path, mins: u64| fs::File::options().write(true).open(f).unwrap().set_modified(std::time::SystemTime::now() - Duration::from_secs(mins * 60)).unwrap();
+        set_age(&dir.join(calls::CLAIMED), 20);
+        assert!(!session_claim(&dir), "quiet for 20 minutes");
+        fs::write(dir.join("notes.md"), "# Minutes").unwrap();
+        assert!(session_claim(&dir), "it wrote the minutes since");
+        fs::remove_file(dir.join("notes.md")).unwrap();
+        // No process known (where it can't be told): by time and work only.
+        fs::write(dir.join(calls::CLAIMED), json!({"at": Local::now().to_rfc3339(), "pid": null, "session": "s1"}).to_string()).unwrap();
+        assert!(session_claim(&dir));
         // And a claim without a session id is an older plugin's: refused.
         assert!(calls::claim(&dir.display().to_string(), None, None).unwrap_err().to_string().contains("too old"));
     }

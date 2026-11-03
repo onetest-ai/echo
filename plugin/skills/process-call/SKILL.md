@@ -31,7 +31,7 @@ call; `latest` works wherever a call is expected. All paths below are inside tha
 ## 1. Transcript
 The app transcribes every call itself when it stops. Only if `transcript.md` is missing and
 the WAVs are still there, run `echoctl transcribe <dir>` (Bash `run_in_background: true`).
-When the Echo app started this run it already claimed the call; run by hand, `echoctl claim <dir> --session "${CLAUDE_SESSION_ID:-process-call}"`
+When the Echo app started this run it already claimed the call; run by hand, `echoctl claim <dir> --session "${CLAUDE_CODE_SESSION_ID:-process-call}"`
 first — it fails only while Echo or another session is writing them (then stop); a call that has
 minutes already can be done again.
 

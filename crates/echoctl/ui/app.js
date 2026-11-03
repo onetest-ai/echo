@@ -1595,9 +1595,9 @@ function minutesHint(c, heading, lead) {
   }
   if (!run && auto.due === 'now') return box('Starting the minutes…', '<p>Echo is starting them now.</p>', '', true)
   // A Claude Code session holds the call (#43): who, since when — and Write minutes takes it over.
-  if (!run && auto.due === 'tried' && auto.held_by) {
+  if (!(run && ['queued', 'running'].includes(run.state)) && auto.due === 'tried' && auto.held_by) {
     const since = auto.held_by.at ? new Date(auto.held_by.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''
-    return box('A Claude Code session is writing the minutes', `<p>Held by a Claude Code session (process ${esc(String(auto.held_by.pid))}${since ? `, since ${esc(since)}` : ''}). If nothing comes, write them here instead.</p>`, '<button class="btn primary" data-cmd="write-notes">Write minutes</button>', true)
+    return box('A Claude Code session is writing the minutes', `<p>Held by a Claude Code session (${auto.held_by.pid ? `process ${esc(String(auto.held_by.pid))}` : 'on this computer'}${since ? `, since ${esc(since)}` : ''}). If nothing comes, write them here instead.</p>`, '<button class="btn primary" data-cmd="write-notes">Write minutes</button>', true)
   }
   // A run refused for a Claude profile's sign-in (the built-in profile signs in in Terminal), and
   // that profile's sign-in now: signed in since (or a model refused it although it looks signed in).
