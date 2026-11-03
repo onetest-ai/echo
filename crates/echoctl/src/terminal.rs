@@ -383,12 +383,12 @@ pub fn start_call(key: &str, dir: &Path, cols: u16, rows: u16) -> Result<u64> {
 /// the session may read — its AI profile's sources only (strict routing), and for a call's session
 /// that call's client, else its threads, else the call itself.
 #[cfg(not(feature = "brain"))]
-fn brain_mcp_config(_exe: &Path, _access: &[String]) -> Option<String> {
+pub(crate) fn brain_mcp_config(_exe: &Path, _access: &[String]) -> Option<String> {
     None
 }
 
 #[cfg(feature = "brain")]
-fn brain_mcp_config(exe: &Path, access: &[String]) -> Option<String> {
+pub(crate) fn brain_mcp_config(exe: &Path, access: &[String]) -> Option<String> {
     // The Brain switched off: its server isn't offered to Claude.
     #[cfg(feature = "brain")]
     if !crate::brain::enabled() {

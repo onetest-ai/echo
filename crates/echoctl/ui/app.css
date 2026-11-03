@@ -1616,3 +1616,25 @@ select.set-in { width: auto; margin-right: 6px; }
 .dict-tp { font-size: 10.5px; padding: 0 6px; border-radius: 8px; background: var(--line); color: var(--text-2); }
 .dict-flag { font-size: 10px; color: var(--text-3); border: 1px solid var(--line-strong); border-radius: 6px; padding: 0 4px; }
 .br-def { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+
+/* Settings → Plugins */
+.pl-tabs { border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+.pl-why { margin-top: 6px; font-size: 12px; color: var(--warn); }
+.pl-uses { margin: 6px 0 0; padding-left: 18px; font-size: 12px; color: var(--text-2); }
+.pl-uses li { margin: 2px 0; }
+.pl-sheet { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: var(--r-panel); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); background: var(--accent-soft); }
+.pl-sheet-btns { display: flex; gap: 8px; justify-content: flex-end; }
+
+/* Routines (Scheduler plugin) */
+.rt-edit { gap: 10px; }
+.rt-f { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 4px 10px; align-items: start; font-size: 12.5px; }
+.rt-f > span:first-child { color: var(--text-2); padding-top: 5px; }
+.rt-f > .set-sub, .rt-f > .set-in + .set-in { grid-column: 2; }
+.rt-f .set-in { width: 100%; }
+.rt-prompt { height: 110px; padding: 7px 9px; resize: vertical; font: inherit; font-size: 12.5px; line-height: 1.45; }
+.rt-checks { display: flex; flex-direction: column; gap: 4px; padding-top: 5px; }
+.rt-checks label { display: block; }
+.rt-checks input { margin: 0 6px 0 0; vertical-align: -1px; }
+.pl-sheet-btns .grow { flex: 1; }
+.rt-mailto { display: flex !important; align-items: center; gap: 8px; }
+.rt-mailto .set-in { flex: 1; }

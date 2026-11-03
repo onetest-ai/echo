@@ -266,6 +266,23 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
             }
         }
         "/api/calendar" => json_reply(calendar(req.uri().query().unwrap_or(""))),
+        // Settings → Plugins; marketplaces not read for 6 h are fetched again in the background.
+        "/api/plugins" => {
+            refresh_plugin_markets();
+            json_reply(crate::plugins::snapshot())
+        }
+        // The Scheduler plugin's routines, and where Echo can send to the user.
+        "/api/routines" => json_reply({
+            let mut v = crate::routines::view();
+            v["deliver_busy"] = DELIVER_BUSY.lock().map(|b| json!(*b)).unwrap_or(Value::Null);
+            v
+        }),
+        // The permission sheet for installing a plugin (from what its marketplace last gave).
+        "/api/plugins/review" => {
+            let q = req.uri().query().unwrap_or("");
+            let (id, market) = (query_param(q, "id").unwrap_or_default(), query_param(q, "market"));
+            json_reply(crate::plugins::review_value(&id, market.as_deref().filter(|m| !m.is_empty())))
+        }
         // Pickers for a thread's sources: the user's teams, a team's channels (Microsoft 365).
         // The numbers lane: per client its families (proposed / accepted), catalog, last build.
         #[cfg(feature = "brain")]
@@ -1589,6 +1606,86 @@ fn notice(text: &str) -> Handled {
     Handled { refresh: true, reply: Some(format!("window.echo && window.echo.notice({})", json!(text))) }
 }
 
+/// A delivery set up from Settings, in the background: what it is doing, or why it failed.
+static DELIVER_BUSY: std::sync::Mutex<Option<Value>> = std::sync::Mutex::new(None);
+
+fn deliver_op(v: &Value) -> Handled {
+    let busy = |x: Option<Value>| {
+        if let Ok(mut b) = DELIVER_BUSY.lock() {
+            *b = x;
+        }
+    };
+    match v["op"].as_str().unwrap_or("") {
+        // The bot's token checked, then the user's Start waited for (≤ 5 min).
+        "telegram_connect" => {
+            let token = v["token"].as_str().unwrap_or("").to_string();
+            busy(Some(json!({"what": "telegram", "doing": "Checking the bot…"})));
+            std::thread::spawn(move || {
+                let r = crate::deliver::telegram_connect(&token).and_then(|bot| {
+                    if let Ok(mut b) = DELIVER_BUSY.lock() {
+                        *b = Some(json!({"what": "telegram", "doing": format!("Open @{bot} in Telegram and press Start"), "bot": bot}));
+                    }
+                    crate::deliver::telegram_pair(300)
+                });
+                if let Ok(mut b) = DELIVER_BUSY.lock() {
+                    *b = match r {
+                        Ok(_) => None,
+                        Err(e) => Some(json!({"what": "telegram", "error": format!("{e:#}")})),
+                    };
+                }
+            });
+            true.into()
+        }
+        "telegram_pair" => {
+            busy(Some(json!({"what": "telegram", "doing": "Waiting for your Start in Telegram…"})));
+            std::thread::spawn(|| {
+                let r = crate::deliver::telegram_pair(300);
+                if let Ok(mut b) = DELIVER_BUSY.lock() {
+                    *b = r.err().map(|e| json!({"what": "telegram", "error": format!("{e:#}")}));
+                }
+            });
+            true.into()
+        }
+        "telegram_forget" => match crate::deliver::telegram_forget() {
+            Ok(()) => {
+                busy(None);
+                true.into()
+            }
+            Err(e) => notice(&format!("{e:#}")),
+        },
+        "test" => {
+            let kind = v["kind"].as_str().unwrap_or("").to_string();
+            std::thread::spawn(move || {
+                let r = crate::deliver::ready(&kind).and_then(|_| crate::deliver::send(&kind, &crate::deliver::Msg { title: "Echo test", markdown: "This is how Echo's messages will reach you.", about: Some("A test from Settings"), ..Default::default() }));
+                match r {
+                    Ok(()) => crate::app::notify("Echo", &format!("Test sent to your {kind}")),
+                    Err(e) => crate::app::notify("Not sent", &format!("{e:#}")),
+                }
+            });
+            true.into()
+        }
+        o => notice(&format!("unknown delivery operation “{o}”")),
+    }
+}
+
+/// Marketplaces not fetched for a while, fetched again (one pass at a time, in the background).
+fn refresh_plugin_markets() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static RUNNING: AtomicBool = AtomicBool::new(false);
+    if !RUNNING.swap(true, Ordering::SeqCst) {
+        std::thread::spawn(|| {
+            let _end = OnEnd(Some(|| RUNNING.store(false, Ordering::SeqCst)));
+            if let Ok(mut b) = crate::plugins::BUSY.lock() {
+                b.insert("markets".into(), "Reading marketplaces…".into());
+            }
+            crate::plugins::refresh_stale(false);
+            if let Ok(mut b) = crate::plugins::BUSY.lock() {
+                b.remove("markets");
+            }
+        });
+    }
+}
+
 /// Run an action the page posted.
 pub fn handle(msg: &str) -> Handled {
     let v: Value = serde_json::from_str(msg).unwrap_or_default();
@@ -1669,6 +1766,17 @@ pub fn handle(msg: &str) -> Handled {
         },
         #[cfg(feature = "brain")]
         "brain_topics_snooze" => v["layer"].as_str().is_some_and(|l| crate::brain::taxonomy::snooze(l).is_ok()).into(),
+        // Routines (Scheduler plugin): save, remove, switch, run now.
+        "routine_op" => match crate::routines::page_op(&v) {
+            Ok(()) => true.into(),
+            Err(e) => notice(&format!("{e:#}")),
+        },
+        "deliver_op" => deliver_op(&v),
+        // Settings → Plugins: install / update in the background, the rest at once.
+        "plugin_op" => match crate::plugins::page_op(&v) {
+            Ok(()) => true.into(),
+            Err(e) => notice(&format!("{e:#}")),
+        },
         #[cfg(feature = "brain")]
         "brain_sync" => {
             brain_sync_now();
@@ -2128,7 +2236,7 @@ pub fn export(dir: &Path) -> anyhow::Result<()> {
         Ok(())
     };
     write("index.html", get("/"))?;
-    for p in ["/assets/app.js", "/assets/app.css", "/assets/logo.png", "/assets/vendor/sigma.min.js", "/assets/vendor/graphology.umd.min.js", "/assets/vendor/graphology-library.min.js", "/api/state", "/api/calls", "/api/agenda", "/api/layout", "/api/settings", "/api/sessions", "/api/ptys"] {
+    for p in ["/assets/app.js", "/assets/app.css", "/assets/logo.png", "/assets/vendor/sigma.min.js", "/assets/vendor/graphology.umd.min.js", "/assets/vendor/graphology-library.min.js", "/api/state", "/api/calls", "/api/agenda", "/api/layout", "/api/settings", "/api/plugins", "/api/routines", "/api/sessions", "/api/ptys"] {
         write(p, get(p))?;
     }
     let week_start = chrono::Local::now().date_naive().pred_opt().unwrap_or_default().format("%Y-%m-%d");

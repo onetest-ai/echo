@@ -12,6 +12,7 @@ mod ax;
 mod calendar;
 mod calls;
 mod config;
+mod deliver;
 #[cfg(any(target_os = "macos", windows))]
 mod frames;
 #[cfg(feature = "transcribe")]
@@ -27,6 +28,7 @@ mod minutes;
 mod notes;
 mod models;
 mod paths;
+mod plugins;
 mod projects;
 mod people;
 mod projectsync;
@@ -40,6 +42,7 @@ mod recorder;
 mod nemo;
 #[cfg(feature = "transcribe")]
 mod remote;
+mod routines;
 #[cfg(feature = "transcribe")]
 mod speakers;
 #[cfg(feature = "transcribe")]
@@ -231,6 +234,21 @@ enum Cmd {
     Org {
         #[command(subcommand)]
         cmd: OrgCmd,
+    },
+    /// Echo plugins from marketplaces: list, install, update, remove, settings
+    Plugin {
+        #[command(subcommand)]
+        cmd: PluginCmd,
+    },
+    /// Routines (Scheduler plugin): your prompts run by Claude Code on a schedule, answers sent to you
+    Routine {
+        #[command(subcommand)]
+        cmd: RoutineCmd,
+    },
+    /// Where Echo sends things to you: Telegram (your bot), Teams (your chat with yourself), mail
+    Deliver {
+        #[command(subcommand)]
+        cmd: DeliverCmd,
     },
     /// Vocabulary (names/terms Whisper should spell right), learned automatically
     Vocab {
@@ -974,6 +992,133 @@ enum ClientCmd {
 }
 
 #[derive(Subcommand)]
+enum PluginCmd {
+    /// Installed plugins, what the marketplaces offer, and the marketplaces (JSON)
+    List,
+    /// Install a plugin (shows what it uses; --yes agrees)
+    Install {
+        id: String,
+        /// The marketplace, when more than one offers it
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Update a plugin (or all) to its marketplace's newer version; more permissions need --yes
+    Update {
+        id: Option<String>,
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Remove a plugin (its settings and data stay unless --delete-data)
+    Remove {
+        id: String,
+        #[arg(long)]
+        delete_data: bool,
+    },
+    Enable { id: String },
+    Disable { id: String },
+    /// Show (no value) or set a plugin's setting
+    Set { id: String, key: String, value: Option<String> },
+    /// Marketplaces: list | add <owner/repo | git URL | folder> [--name] | remove <name> | update [<name>]
+    Marketplace {
+        #[command(subcommand)]
+        cmd: MarketCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum RoutineCmd {
+    /// Every routine with its schedule, next and last run (JSON)
+    List,
+    /// One routine's file
+    Show { id: String },
+    /// A new routine
+    Add {
+        #[arg(long)]
+        name: String,
+        /// daily 09:00 · weekdays 09:00 · mon,thu 09:00 · every 2h · every 30m
+        #[arg(long)]
+        schedule: String,
+        /// The prompt (or --prompt-file)
+        #[arg(long)]
+        prompt: Option<String>,
+        #[arg(long)]
+        prompt_file: Option<std::path::PathBuf>,
+        /// telegram, teams, mail (comma-separated)
+        #[arg(long, default_value = "")]
+        deliver: String,
+        /// Mail to these addresses instead of you (comma-separated)
+        #[arg(long, default_value = "")]
+        mail_to: String,
+        /// read (default) · folder · skip
+        #[arg(long, default_value = "read")]
+        tools: String,
+        #[arg(long, default_value = "")]
+        profile: String,
+        #[arg(long, default_value = "")]
+        model: String,
+        /// Send even when there's nothing worth sending
+        #[arg(long)]
+        always_send: bool,
+    },
+    Remove { id: String },
+    Enable { id: String },
+    Disable { id: String },
+    /// Run it now (in this terminal); --no-deliver prints the answer instead of sending it
+    Run {
+        id: String,
+        #[arg(long)]
+        no_deliver: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum DeliverCmd {
+    /// What can be sent now (JSON)
+    Status,
+    /// Set your Telegram bot (token from @BotFather), then wait for your Start in its chat
+    Telegram { token: String },
+    /// Forget the Telegram bot
+    TelegramForget,
+    /// Send a test message: telegram | teams | mail
+    Test { kind: String },
+    /// Send a Markdown file to yourself: telegram | teams | mail
+    Send {
+        kind: String,
+        #[arg(long)]
+        title: String,
+        #[arg(long)]
+        file: std::path::PathBuf,
+        /// One line on where it comes from, under the title
+        #[arg(long)]
+        about: Option<String>,
+        /// A model wrote it (its name): the message says so
+        #[arg(long)]
+        ai: Option<String>,
+        /// Mail to these addresses instead of you (comma-separated)
+        #[arg(long, default_value = "")]
+        to: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum MarketCmd {
+    List,
+    Add {
+        source: String,
+        #[arg(long)]
+        name: Option<String>,
+    },
+    Remove { name: String },
+    /// Leave a marketplace out of Discover (the built-in one can't be removed, only hidden)
+    Hide { name: String },
+    Show { name: String },
+    /// Fetch again (all, or one)
+    Update { name: Option<String> },
+}
+
+#[derive(Subcommand)]
 enum OrgCmd {
     /// Every organisation (`account: false` = not a client)
     List,
@@ -1289,6 +1434,9 @@ fn main() -> Result<()> {
         Cmd::Project { cmd } => project_command(cmd),
         Cmd::Client { cmd } => client_command(cmd),
         Cmd::Org { cmd } => org_command(cmd),
+        Cmd::Plugin { cmd } => plugin_command(cmd),
+        Cmd::Routine { cmd } => routine_command(cmd),
+        Cmd::Deliver { cmd } => deliver_command(cmd),
         Cmd::Context { call } => calls::context(&call),
         Cmd::Title { call, title } => calls::set_title(&call, &title),
         Cmd::Note { text } => calls::note(&text.join(" ")),
@@ -1607,8 +1755,10 @@ fn project_command(cmd: ProjectCmd) -> Result<()> {
     if let ProjectCmd::Ledger { id, cmd } = cmd {
         return ledger_command(&id, cmd);
     }
-    // A run Echo started works on its own call (or project) only; projects are the user's.
-    if notes::headless() {
+    // A run Echo started works on its own call (or project) only; projects are the user's. A read-only
+    // routine (the user's own prompt) may read them.
+    let reads = matches!(cmd, ProjectCmd::List | ProjectCmd::Show { .. } | ProjectCmd::Of { .. } | ProjectCmd::Tasks);
+    if notes::headless() && !(reads && routine_reads()) {
         anyhow::bail!("projects can't be changed or listed from a run Echo started");
     }
     let empty = |s: String| if s.trim().is_empty() { None } else { Some(s) };
@@ -2163,8 +2313,152 @@ fn brain_command(cmd: BrainCmd) -> Result<()> {
     Ok(())
 }
 
+/// Inside a read-only routine Echo started (`guard::RUN_MODE=routine`, set by the app, never by the
+/// run): the user's own prompt may read projects, clients and organisations.
+fn routine_reads() -> bool {
+    std::env::var(guard::RUN_MODE).is_ok_and(|m| m == "routine")
+}
+
+fn routine_command(cmd: RoutineCmd) -> Result<()> {
+    use routines::*;
+    let toggle = |id: &str, on: bool| -> Result<()> {
+        let mut r = get(id)?;
+        r.enabled = on;
+        save(r).map(|_| ())
+    };
+    match cmd {
+        RoutineCmd::List => print_json(&view()),
+        RoutineCmd::Show { id } => print!("{}", render(&get(&id)?)),
+        RoutineCmd::Add { name, schedule, prompt, prompt_file, deliver, mail_to, tools, profile, model, always_send } => {
+            let prompt = match (prompt, prompt_file) {
+                (Some(p), _) => p,
+                (None, Some(f)) => std::fs::read_to_string(f)?,
+                (None, None) => anyhow::bail!("give --prompt or --prompt-file"),
+            };
+            let v = serde_json::json!({"name": name, "schedule": schedule, "prompt": prompt, "tools": tools, "profile": profile, "model": model,
+                "deliver": deliver.split(',').map(str::trim).filter(|d| !d.is_empty()).collect::<Vec<_>>(), "skip_empty": !always_send, "mail_to": mail_to});
+            let r = save(from_value(&v)?)?;
+            println!("Added {} ({})", r.id, Schedule::parse(&r.schedule)?.words());
+        }
+        RoutineCmd::Remove { id } => remove(&id)?,
+        RoutineCmd::Enable { id } => toggle(&id, true)?,
+        RoutineCmd::Disable { id } => toggle(&id, false)?,
+        RoutineCmd::Run { id, no_deliver } => {
+            let rec = run(&id, !no_deliver)?;
+            if no_deliver {
+                let answer = routines::dir().join("runs").join(&id).join(rec["run"].as_str().unwrap_or("")).join("answer.md");
+                print!("{}", std::fs::read_to_string(answer).unwrap_or_default());
+            }
+            print_json(&rec);
+            if rec["state"] == "failed" {
+                std::process::exit(1);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// What a delivery test sends: the shapes a routine's answer has (headings, a list, a table).
+const TEST_MESSAGE: &str = "This is how Echo's messages reach you.\n\n## Today\n\n1. **Send the deck** to Acme — due today\n2. Review `T012` before the 15:00 call\n\n## Meetings\n\n| Time | Meeting | Prepare |\n|---|---|---|\n| 10:00 | Weekly sync | Open asks |\n| 15:00 | Acme review | The deck |\n\n> Nothing here is real: it's a test.";
+
+fn deliver_command(cmd: DeliverCmd) -> Result<()> {
+    match cmd {
+        DeliverCmd::Status => print_json(&deliver::status()),
+        DeliverCmd::Telegram { token } => {
+            let bot = deliver::telegram_connect(&token)?;
+            println!("Open https://t.me/{bot} and press Start (waiting up to 5 minutes)…");
+            println!("Paired with {}", deliver::telegram_pair(300)?);
+        }
+        DeliverCmd::TelegramForget => deliver::telegram_forget()?,
+        DeliverCmd::Send { kind, title, file, about, ai, to } => {
+            deliver::ready(&kind)?;
+            let to: Vec<String> = to.split(',').map(str::trim).filter(|a| !a.is_empty()).map(str::to_owned).collect();
+            let markdown = std::fs::read_to_string(file)?;
+            deliver::send(&kind, &deliver::Msg { title: &title, markdown: &markdown, about: about.as_deref(), ai: ai.as_deref(), mail_to: &to })?;
+            println!("Sent");
+        }
+        DeliverCmd::Test { kind } => {
+            deliver::ready(&kind)?;
+            deliver::send(&kind, &deliver::Msg { title: "Echo test", markdown: TEST_MESSAGE, about: Some("A test from Settings"), ..Default::default() })?;
+            println!("Sent");
+        }
+    }
+    Ok(())
+}
+
+fn plugin_command(cmd: PluginCmd) -> Result<()> {
+    use plugins::*;
+    // Install / update ask in the terminal's own words; --yes is the answer.
+    let agree = |r: &Review, yes: bool| -> Result<Vec<String>> {
+        print_review(r);
+        if let Some(b) = &r.blocked {
+            anyhow::bail!("{} can't be installed: {b}", r.name);
+        }
+        if !yes && !(r.new_uses.is_empty()) {
+            anyhow::bail!("run again with --yes to agree");
+        }
+        Ok(r.uses.clone())
+    };
+    match cmd {
+        PluginCmd::List => print_json(&snapshot()),
+        PluginCmd::Install { id, from, yes } => {
+            let r = review(&id, from.as_deref())?;
+            let agreed = agree(&r, yes)?;
+            let p = install(&id, from.as_deref(), &agreed)?;
+            println!("Installed {} {}", p.name, p.version);
+        }
+        PluginCmd::Update { id, yes } => {
+            let ids: Vec<String> = match id {
+                Some(i) => vec![i],
+                None => Registry::load()?.installed.into_keys().collect(),
+            };
+            for id in ids {
+                let p = Registry::load()?.installed.get(&id).cloned().ok_or_else(|| anyhow::anyhow!("“{id}” isn't installed"))?;
+                refresh(&p.market)?;
+                let Some(r) = update_for(&p) else {
+                    println!("{} {} is up to date", p.name, p.version);
+                    continue;
+                };
+                let agreed = agree(&r, yes)?;
+                if let Some(n) = update(&id, &agreed)? {
+                    println!("Updated {} to {}", n.name, n.version);
+                }
+            }
+        }
+        PluginCmd::Remove { id, delete_data } => remove(&id, !delete_data)?,
+        PluginCmd::Enable { id } => set_enabled(&id, true)?,
+        PluginCmd::Disable { id } => set_enabled(&id, false)?,
+        PluginCmd::Set { id, key, value: None } => print_json(&serde_json::json!(settings_view(&id)?.into_iter().find(|s| s["key"] == key.as_str()))),
+        PluginCmd::Set { id, key, value: Some(v) } => set_setting(&id, &key, &serde_json::Value::String(v))?,
+        PluginCmd::Marketplace { cmd } => match cmd {
+            MarketCmd::List => print_json(&snapshot()["markets"]),
+            MarketCmd::Add { source, name } => {
+                let n = market_add(&source, name.as_deref())?;
+                let c = refresh(&n)?;
+                match c.error {
+                    Some(e) => println!("Added {n}, but it can't be read yet: {e}"),
+                    None => println!("Added {n}: {} plugins", c.plugins.len()),
+                }
+            }
+            MarketCmd::Remove { name } => market_remove(&name)?,
+            MarketCmd::Hide { name } => market_hide(&name, true)?,
+            MarketCmd::Show { name } => market_hide(&name, false)?,
+            MarketCmd::Update { name } => match name {
+                Some(n) => {
+                    let c = refresh(&n)?;
+                    if let Some(e) = c.error {
+                        anyhow::bail!("{e}");
+                    }
+                }
+                None => refresh_stale(true),
+            },
+        },
+    }
+    Ok(())
+}
+
 fn org_command(cmd: OrgCmd) -> Result<()> {
-    if notes::headless() {
+    if notes::headless() && !(matches!(cmd, OrgCmd::List) && routine_reads()) {
         anyhow::bail!("organisations can't be changed or listed from a run Echo started");
     }
     match cmd {
@@ -2222,7 +2516,7 @@ fn org_command(cmd: OrgCmd) -> Result<()> {
 }
 
 fn client_command(cmd: ClientCmd) -> Result<()> {
-    if notes::headless() {
+    if notes::headless() && !(matches!(cmd, ClientCmd::List) && routine_reads()) {
         anyhow::bail!("clients can't be changed or listed from a run Echo started");
     }
     match cmd {
@@ -2257,8 +2551,9 @@ fn client_command(cmd: ClientCmd) -> Result<()> {
 }
 
 fn ledger_command(id: &str, cmd: LedgerCmd) -> Result<()> {
-    // Inside a run Echo started: the agent's steps, on that run's project only.
-    if notes::headless() {
+    // Inside a run Echo started: the agent's steps, on that run's project only (a read-only routine:
+    // the tree).
+    if notes::headless() && !(matches!(cmd, LedgerCmd::Tree) && routine_reads()) {
         let own = std::env::var(guard::RUN_PROJECT).unwrap_or_default();
         let agent_step = matches!(cmd, LedgerCmd::Pending | LedgerCmd::Context | LedgerCmd::Apply { .. } | LedgerCmd::Done { .. } | LedgerCmd::VerifyPrep { .. } | LedgerCmd::VerifyApply { .. } | LedgerCmd::PeopleContext { .. } | LedgerCmd::PeopleApply { .. });
         if own.is_empty() || own != id || !agent_step {

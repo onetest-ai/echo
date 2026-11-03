@@ -775,6 +775,61 @@ the rest dims (plain hex colours: WebGL reads no CSS), the camera flies to them;
   305 sections, first embedding 4 min; English and Russian queries find their moments; Claude Code with only this
   server answered a question across two calls with times and said what wasn't modeled.
 
+## Echo plugins (`plugins.rs`; plan and phases: `docs/plugins-design.md`, v3)
+Not Claude Code plugins: packages that extend Echo itself. **Declarative, no code of their own** — a manifest
+(`echo-plugin.json`: id, name, version, `echo` (>=x.y.z), summary, `uses`, `settings` of type string | bool | folder |
+secret) naming the **capabilities** it uses (`CAPABILITIES`: routines, deliver, channel, brain_source, export,
+sessions — each with its own checked value and the permission sheet's words, written by Echo, never the plugin's; one
+that isn't `ready` in this Echo → listed, not installable: "Needs a newer Echo"). **Marketplaces**: git repositories
+with `echo-marketplace.json` (name, `featured`, plugins: `{id, source: "./path" | {github, ref, path}, categories}`);
+ours, `onetest-ai/echo-plugins` (public; `ECHOCTL_PLUGIN_MARKET` points it elsewhere), is built in (hidden, never
+removed), the user adds any number (an enterprise's catalog is one more; promotion is its maintainers'). Fetching
+(`refresh`, in the app or the CLI, never the page): GitHub `owner/repo[@ref]` → the commit (`curl` the API, else `gh`)
+→ its tarball unpacked by `tar`; a git URL (`#ref`) → `git clone --depth 1` (the user's own credentials); a folder read
+where it is; every tree checked (`check_tree`: no links or special files, ≤ 5000 files / 64 MB a marketplace, ≤ 400 /
+20 MB a plugin). Files: `<config dir>/plugins.json` (markets added, installed: version, market, commit, hash of its
+files, enabled, the sheet agreed to; lock + re-read), `<config dir>/plugins/markets/<key>/` (catalog.json + the commit's
+files; refreshed when 6 h old as the window asks `/api/plugins`), `<config dir>/plugins/installed/<id>/<version>/`;
+settings per data folder `<home>/.echo/plugins/<id>/settings.json`, secrets `<config dir>/plugins/secrets/<id>.json`
+(0600, shown only as set). Install = the sheet's lines agreed (`install(id, market, agreed)` refuses anything else);
+an update asking for more waits for a new agreement. Window: Settings → Plugins (Installed · Discover · Marketplaces;
+`/api/plugins`, `/api/plugins/review`, IPC `plugin_op {op: install|update|enable|remove|set|market_add|market_refresh|
+market_hide|market_remove}`, long ones in the background under `plugins::BUSY`). CLI: `echoctl plugin list | install
+<id> [--from] [--yes] | update [<id>] | remove [--delete-data] | enable | disable | set <id> <key> [value] | marketplace
+list|add|remove|hide|show|update`. The first three — Scheduler, Telegram, Obsidian vault — are manifests in our
+marketplace; `routines` and `deliver` are ready (Scheduler installs), `channel`, `brain_source`, `export`, `sessions`
+come in phases 3–4. `plugins::enabled_with(cap)` = a plugin using it is installed and on (what switches a capability on).
+**Delivery** (`deliver.rs`; to the user — mail also to the addresses set on a routine, `mail_to`, the user's call
+2026-11-03; never an address a model picked): Telegram = the user's own bot (token + their chat id in
+`<config dir>/deliver.json`, 0600; pairing reads the bot's updates once — `getUpdates` until the user's `/start` — then
+never again, so the Telegram channel can own them later; Bot API through curl's config on stdin), Teams = Graph `POST
+/chats/48:notes/messages` (the chat with yourself), mail = `POST /me/sendMail` to `/me`'s own address, not saved in Sent
+(`graph::post`, `graph::my_address`; mail to others is kept in Sent and its foot says who sent it); Markdown → Telegram's HTML subset (`telegram_html`, https links only, split at
+4000 with tags closed) or `minutes::markdown_html`; a mail is Echo's (`mail_html`, `MAIL_CSS`: the minutes page — the octopus, an inline `cid:`
+attachment, "Echo" and the day above one plain card, Echo's type, violet only for links, code and the AI mark; no
+grey page around the card (Outlook's dark mode turned it grey on grey) and no decoration — a top bar, section
+markers — the user called AI-slop; Outlook recolours after the CSS, so every text is Echo's ink (rank by size and weight,
+never a lighter grey) and only saturated fills are used — tables are reports: a violet head row with white text, faint
+zebra rows marked in the HTML (`zebra`: mail apps drop `:nth-child`), horizontal rules; checked in Outlook on the web,
+light and dark; Apple Mail gets Echo's dark colours) and anything
+a model wrote carries `ai_notice` ("Written by AI (Claude, <model>)… it can contain mistakes") — in every channel. Settings → Plugins → Echo sends to you (IPC `deliver_op
+{telegram_connect|telegram_pair|telegram_forget|test}`); `echoctl deliver status|telegram <token>|telegram-forget|test
+<kind>`. **Routines** (`routines.rs`): `<home>/.echo/routines/<id>.md` — frontmatter (name, schedule: `daily|weekdays|
+mon,thu HH:MM` · `every 2h|30m` (≥ 15 min), profile, model, tools `read|folder|skip`, deliver, mail_to, skip_empty,
+enabled) +
+the user's prompt. The app's scheduler (every 30 s, only with a `routines` plugin on) runs a routine when its next
+slot after the last one handled (`state.json`) has come — once, also after Echo was off through several; a new or
+rescheduled one counts from then. A run: `claude -p … stream-json` through `ai::claude_command` on its profile (lease;
+`system` in `ai::system_folder`), the Brain MCP narrowed to that profile; `read` = guard `RUN_MODE=routine`
+(`RUN_HOME`: Read/Glob/Grep in the data folder, Bash only `guard::ROUTINE_COMMANDS` — read-only `echoctl`, `*` = an id —,
+the Brain, no Edit/Write/Skill; the CLI lets such a run read projects, clients, orgs and a ledger's tree:
+`routine_reads`), `folder` = the user's settings with `dontAsk`, `skip` = `--dangerously-skip-permissions` — the
+user's choice, the prompt being theirs. The answer (`NOTHING` with skip_empty → nothing sent) goes to each `deliver`;
+`routines/runs/<id>/<stamp>/` (prompt, log, answer, result; 20 kept); a failed run → notification + Inbox
+(`routine:<id>`: Run again / Sign in…). `projectsync::finish_run` follows any such stream-json run (the sync's too).
+Window: the Scheduler's card → Routines (list, Run now, switch, editor; `/api/routines`, IPC `routine_op
+{save|remove|enable|run}`). `echoctl routine list|show|add|remove|enable|disable|run [--no-deliver]`.
+
 ## Live view (mod) and automation
 `plugin/hooks/register.tsx` is a Claude Code mod (state contract `plugin/types/index.d.ts`, pure helpers
 `hooks/view.ts`). At session start it asks the CLI for the data folder (`echoctl app` → `home`),

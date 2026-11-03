@@ -1,10 +1,233 @@
-# Echo plugins — exploration
+# Echo plugins
 
-Status: v2, 2026-10-29. Built so far: **PR 1, the workbench shell** (Record pill, activity bar, panels,
-status bar, the view registry with Echo's own views on it, `window-layout.json`); no plugin code yet. After three rounds of a proposer-vs-critic
-design fight. **Decisions from the design fight** (near the end) supersedes the sections before it. Scope: **Echo plugins** — packages that
-extend the app itself (window, tray, background jobs). Claude Code plugins are a separate thing and
-not covered here. Open questions at the end.
+Status: **v3, 2026-11-03** — the plan we build from. v2 (2026-10-29, below under *v2: exploration*) is kept for
+its UI decisions; where they disagree, v3 wins. Since v2 the terminal, the task tracker (Threads' work ledger),
+Review (→ Needs you / Inbox) and the ⌘K palette became core, so its two motivating examples are gone.
+
+## What changed in v3
+
+- **A plugin is a declarative package, no code of its own.** Everything that runs is Echo's (Rust): plugins combine
+  Echo's **capabilities** (below) and bring content — skills, MCP servers, settings, UI entries. No WASM,
+  no plugin pages, no second origin in this round. A capability Echo lacks is added to Echo, then any plugin uses it.
+- **Marketplaces in Settings.** A marketplace is a catalog of plugins. Echo ships ours (public, built in); the user
+  adds others in Settings → Plugins → Marketplaces — an enterprise's own catalog is one more marketplace. Which plugins
+  a marketplace offers and promotes is its maintainers' business, not Echo's.
+- **The first three plugins**: Scheduler (routines), Telegram, Obsidian vault — in our public marketplace, each
+  one a manifest over capabilities Echo gains for them.
+- Integration with other systems keeps the 2026-10-30 rule: **an MCP connection + Echo's ingestion / egress points
+  + a skill for judgment**.
+
+## Invariants (unchanged)
+
+| Invariant | For plugins |
+|---|---|
+| Recording is opt-in per meeting | No plugin arms, starts or stops a recording. |
+| Nothing leaves by default | A plugin that sends anything names where, in words, at install; routines deliver to the user (their Telegram, their Teams chat with themselves, their own mailbox) — and mail to the addresses the user sets on a routine (2026-11-03), never ones a model picked. |
+| Strict profile routing | Every Claude run a plugin causes goes through the user's AI profiles (`ai::claude_command`, `ai::lease`) — never a plugin's own key or account. |
+| Others' words stay data | Transcripts, chat, mail reach a run with tools only under a guard; mail and posts reach the Brain only as checked facts (the quarantine reader). |
+| `notes.md` / `actions.json` are the minutes run's | Plugins read them; an export copies them, never edits them. |
+| macOS **and** Windows | A package has no per-OS parts. |
+
+## Plugin package
+
+```
+echo-plugin.json      manifest
+skills/               Claude Code skills (loaded with --plugin-dir into the sessions / runs the manifest names)
+templates/            optional: note templates, export templates
+README.md             shown in the marketplace (Echo's escaping Markdown writer)
+```
+
+```json
+{
+  "id": "obsidian",
+  "name": "Obsidian vault",
+  "version": "0.1.0",
+  "echo": ">=0.7.0",
+  "summary": "Use your Obsidian vault as Echo's second brain, and keep minutes and people in it",
+  "uses": {
+    "brain_source": { "kind": "vault" },
+    "export": { "kind": "vault", "what": ["minutes", "people"] },
+    "sessions": { "read": ["vault"], "skills": ["obsidian"] }
+  },
+  "settings": [
+    { "key": "vault", "label": "Vault", "type": "folder" },
+    { "key": "map", "label": "Folders → clients / threads", "type": "scope_map" },
+    { "key": "export_folder", "label": "Echo writes into", "type": "string", "default": "Echo" }
+  ]
+}
+```
+
+`uses` names capabilities, each with its own small schema checked by Echo; an unknown capability or a newer
+`echo` refuses the install with the reason in words. The permission sheet is written from `uses`, never from the
+plugin's own text.
+
+## Capabilities (what Echo implements)
+
+| Capability | What it is | Built on |
+|---|---|---|
+| `routines` | Scheduled headless Claude runs (below) | `ai::claude_command`, the notes run's machinery, `guard.rs` |
+| `deliver` | Send text to the user: `telegram`, `teams` (chat with yourself, `48:notes`), `mail` (to yourself) | Bot API `sendMessage`; Graph `POST /chats/{id}/messages`, `/me/sendMail` (the sign-in already carries `ChatMessage`/`Chat.ReadWrite`, `Mail.Send`) |
+| `channel` | A Claude Code channel plugin attached to the **Echo-folder session** | `terminal.rs` folder session + `--channels` |
+| `brain_source` | A new kind of Brain source | `brain/files` (registry, readers, sync) |
+| `export` | Echo writes copies of its own records into a folder the user picked | `paths::write_atomic`, generator marks |
+| `sessions` | Skills / MCP servers / read folders added to Claude in the window | `terminal::brain_mcp_config`, session settings |
+| `ui` | ⌘K actions, Inbox items, a Settings section, a call's ⋯ entry | the workbench registries |
+
+Not offered: recording control, writes to call files, network beyond `deliver` and named MCP servers, arbitrary
+processes.
+
+## Marketplaces
+
+A marketplace is a git repository (GitHub `owner/repo`, or any https git URL — an enterprise's GitLab / Azure
+DevOps) with `echo-marketplace.json` at its root:
+
+```json
+{
+  "name": "onetest",
+  "owner": "onetest-ai",
+  "plugins": [
+    { "id": "scheduler", "source": "./plugins/scheduler", "categories": ["automation"] },
+    { "id": "telegram",  "source": "./plugins/telegram",  "categories": ["chat"] },
+    { "id": "obsidian",  "source": "./plugins/obsidian",  "categories": ["knowledge"] }
+  ]
+}
+```
+
+- **Built in**: `onetest-ai/echo-plugins` (public; all of ours live there, each in `plugins/<id>/`; a plugin may also point to its own repo at a ref). Can be hidden, not removed.
+- **Added by the user**: Settings → Plugins → Marketplaces → Add (`owner/repo`, a git URL, or a local folder for
+  authors); `echoctl plugin marketplace add|remove|list|update`.
+- Any number of marketplaces; the same plugin id in two is shown with each one's name, and the user picks which
+  to install from. A marketplace's `featured` list orders Discover (promotion is the maintainers' job). No
+  managed / locked configuration in this round.
+- Fetching is the app's (never the page's): a shallow fetch of the repo at its default branch, or a pinned ref;
+  every plugin's files are recorded with the **commit SHA** and a hash of the extracted files; an update is a new
+  SHA. Private repos: the user's `git` / `gh` credentials (enterprises already have them), never stored by Echo.
+- Installed plugins: `<config dir>/plugins/<id>/<sha>/`, list in `<config dir>/plugins.json` (lock + re-read, as
+  `ai.json`); their settings and state per data folder in `<home>/.echo/plugins/<id>/`.
+- Install = the permission sheet (from `uses`), Install / Cancel (Cancel the default outside the built-in
+  marketplace). An update asking for more capabilities waits for the user; within the built-in marketplace and with
+  nothing new asked, updates install themselves with Echo's own update check.
+
+### Settings → Plugins
+
+```
+Plugins                                          [ Search ]
+Installed (3)   Discover   Marketplaces (2)
+
+Scheduler      onetest · v0.1.0   On ●   3 routines · last ran 09:00 ✓        ⋯
+Telegram       onetest · v0.1.0   On ●   @my_echo_bot · paired with you       ⋯
+Obsidian vault onetest · v0.1.0   Off    Needs: a vault folder                ⋯
+
+Marketplaces:  onetest (built in) · acme-corp · + Add marketplace
+```
+
+A plugin's row opens its section: what it uses (in words), its settings, its state, Remove (keep or delete its data).
+
+## The first three plugins
+
+### Scheduler — routines
+
+A routine = a prompt Claude Code runs headless on a schedule, its answer delivered to the user.
+
+```yaml
+# <home>/.echo/routines/<id>.md   — written by the user (or by Claude for them); plugins ship no routines
+---
+name: Monday asks
+schedule: "mon 09:00"            # daily HH:MM · weekdays HH:MM · <day> HH:MM · every 2h · cron
+profile: default                 # an AI profile id; model: its minutes model unless set
+tools: read                      # the user picks: read (default) · folder (the Echo-folder session's permissions) · skip (no prompts)
+deliver: [telegram, teams]       # telegram · teams · mail — always to the user
+skip_empty: true                 # nothing to say → nothing sent
+---
+What do I owe this week and what is waiting for others? Use the Brain and `echoctl project tasks`.
+```
+
+- Runs in the data folder (as the window's sessions), `claude -p … --output-format stream-json` through
+  `ai::claude_command` on the routine's profile under its lease; Echo's Brain MCP attached when the Brain is on and
+  narrowed to that profile (`brain/access.rs`).
+- `tools: read` = a guard (`RUN_MODE=routine`): Read / Glob / Grep in the data folder, Bash only read-only `echoctl`
+  commands, `mcp__echo-brain__*`; no Edit / Write. `tools: folder` = the Echo-folder session's settings (incl.
+  `folder_skip_permissions` when on); `tools: skip` = `--dangerously-skip-permissions`. The routine's editor says
+  what each one can do ("can change files", "asks nothing"); a headless run can't ask, so in `folder` a tool that
+  would need a prompt is refused and the run says which.
+- Missed runs (asleep, Echo off) run once when Echo is back; never two of one routine at a time; local-model
+  profiles share the `local-model.lock` and wait while a call records, as minutes do.
+- Each run: `<home>/.echo/routines/runs/<id>/<stamp>/` (prompt, log, answer, deliveries). A failed run or delivery →
+  Inbox ("Routine ‘Monday asks’ failed: …", Run again). Delivery formats: Telegram HTML subset (split at 4096),
+  Teams HTML, mail HTML — all from Echo's safe Markdown writer.
+- UI: Settings → Plugins → Scheduler (list, New routine, Run now, last runs) + ⌘K "Run routine…"; making one in
+  words is a skill (`scheduler:new`) in the Echo-folder session that runs `echoctl routine add`.
+- CLI: `echoctl routine list|add|edit|remove|run <id>|runs <id>`. The code is `routines.rs` (`schedule.rs` is
+  "Record when it starts").
+
+### Telegram — the Echo-folder session from the phone
+
+One user, one session: Telegram talks to **the same Claude · Echo folder session** the window shows — no second
+Claude, no Echo-side bridge.
+
+- The session starts with `--channels plugin:telegram@claude-plugins-official`, its profile = the folder session's
+  (Settings: which profile). Echo installs the channel plugin into that profile's Claude Code folder
+  (`claude plugin install telegram@claude-plugins-official` through `ai::claude_command`).
+- The bot token: Settings → Plugins → Telegram, stored by Echo (0600) and given as `TELEGRAM_BOT_TOKEN`; the
+  channel's state in `TELEGRAM_STATE_DIR=<config dir>/telegram/` (not the profile's folder). Pairing: Echo shows
+  "send /start to @bot" and the code the bot answers; Echo runs the pairing and sets the allowlist policy — only
+  the user's Telegram id.
+- Each person configures **their own bot**; it answers only while their Claude · Echo folder session is open in
+  Echo (the channel lives in that process). Closed session → the bot is silent; Telegram keeps the messages ~24 h
+  and the session reads them when it opens again (to check in the spike). Nothing marks a message "from Telegram"
+  in the window: it is the same conversation.
+- Delivery for routines uses the same bot (`sendMessage` to the paired id, any time — sending needs no open
+  session) — no Claude involved.
+- Limits we inherit, said in the sheet: a research preview; needs Bun; a claude.ai login or Console key (not
+  Bedrock / Vertex / a gateway); on Team / Enterprise an admin must switch channels on. Echo checks what it can
+  (Bun present, profile kind, the `channelsEnabled` managed setting) and says which one blocks it.
+- To spike first: `--channels` with `--resume`; whether the channel plugin declares permission relay (prompts on the
+  phone); `access.json` written by Echo vs the `/telegram:access` command.
+
+### Obsidian vault — the user's second brain, kept
+
+Read (needs the Brain on):
+- A Brain source of kind `vault` (personal, not a thread's): Markdown with frontmatter, `[[wikilinks]]` (and
+  `#heading`, `|alias`), `#tags` / nested tags, embeds as links; `.obsidian/`, `.trash/`, templates, attachments and
+  Echo's own export folder skipped (globs in Settings). A note → a document, its headings → sections; wikilinks →
+  `related` edges; frontmatter `tags` / `date` / `aliases` kept (dates as `exact_date`, aliases as names).
+- Each section links back with `obsidian://open?vault=<name>&file=<path>` (the window opens it in Obsidian).
+- Scope: the vault belongs to the default profile; a folder or tag map (`Clients/Acme/**` → Acme, `#proj/alpha` →
+  thread Alpha) gives sections a client / thread, so they appear in those scopes. Unmapped = the practice.
+- Claude in the window: the session may Read / Grep the vault (an allow rule for its path) and loads the plugin's
+  `obsidian` skill (navigating wikilinks, tags, MOCs).
+
+Write (export, opt-in per kind):
+- Into `<vault>/<export_folder>/` (default `Echo/`): `Calls/<date> <title>.md` — the minutes as written by the
+  minutes run + frontmatter (date, attendees as `[[people]]`, threads, client, `echo://call/<name>` link);
+  `People/<Name>.md` — role, organisation, threads, facts with their sources.
+- Echo owns only files it wrote (a generator field in their frontmatter, `echo: <id>`): it rewrites those, never a
+  file the user made or edited since (its hash differs) — that one is kept and the new version written beside it.
+- Written after minutes are written / a person changes; `echoctl vault export [--all]`.
+
+## Phases
+
+| Phase | Scope |
+|---|---|
+| 1 (built 2026-11-03) | Plugin registry: manifest + `uses` validation, `plugins.json`, marketplaces (built in + any number added), install / update / remove from a local folder and git, Settings → Plugins (Installed, Discover, Marketplaces), `echoctl plugin …`. The three plugins' manifests in `onetest-ai/echo-plugins`. |
+| 2 | `deliver` (Telegram Bot API, Teams self-chat, mail) + `routines` → **Scheduler** — built 2026-11-03 (the bot's token is Echo's own delivery setting, shared with phase 3) |
+| 3 | `channel` on the folder session (while it is open) → **Telegram** (spike items first) |
+| 4 | `brain_source: vault` + `sessions` read access → **Obsidian** read; then `export: vault` |
+| later | Plugin pages / code (v2's WASM and second origin), plugin call tabs and panels, signatures |
+
+## Decided after review (2026-11-03)
+
+1. Telegram: one bot per person, their own; it answers only while their Echo-folder session is open. No marking.
+2. Routines are the user's own (no templates from plugins), so the user picks their permissions — the prompt isn't
+   someone else's text, the injection risk is what the routine reads (as in any session).
+3. Enterprise managed configuration is out of scope: several marketplaces, promotion inside a marketplace is its
+   maintainers' job.
+
+---
+
+# v2: exploration (2026-10-29)
+
+Kept for its window / UI decisions. Its WASM host, plugin pages and second origin are deferred (v3 → *later*).
 
 ## Goal
 

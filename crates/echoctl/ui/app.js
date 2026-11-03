@@ -1884,7 +1884,7 @@ function eventProjects(e) {
 // a download run as the tray's own actions (`settings_action`). ────────────────────────────────
 const SETTINGS_SECTIONS = [
   ['general', 'General'], ['recording', 'Recording'], ['transcription', 'Transcription'], ['ai', 'AI & minutes'],
-  ['calendar', 'Calendar & chat'], ['brain', 'Brain'], ['vocabulary', 'Vocabulary'], ['me', 'About me'], ['layout', 'Layout'], ['health', 'Health'],
+  ['calendar', 'Calendar & chat'], ['brain', 'Brain'], ['vocabulary', 'Vocabulary'], ['me', 'About me'], ['plugins', 'Plugins'], ['layout', 'Layout'], ['health', 'Health'],
 ]
 /** Save the profile as edited; shown rendered again once the app has it. */
 function saveMeProfile() {
@@ -2008,6 +2008,269 @@ document.addEventListener('click', (e) => {
   b.textContent = 'Syncing…'
   setTimeout(() => loadSettings().then(render), 1000)
 })
+// ── Settings → Plugins: installed, offered by the marketplaces, the marketplaces themselves. Every change
+// runs in the app (IPC `plugin_op`); installs and fetches in the background, shown from `busy`.
+async function loadPlugins() {
+  try { S.plugins = await get('api/plugins') } catch { /* app restarting */ }
+  const p = S.plugins
+  // While something runs (a fetch, an install), read again until it ends.
+  if (p && p.busy && Object.keys(p.busy).length) setTimeout(() => { if (S.view === 'settings' && S.setSection === 'plugins') loadPlugins().then(render) }, 1000)
+}
+function pluginOp(op, body = {}) {
+  send({ cmd: 'plugin_op', op, ...body })
+  setTimeout(() => loadPlugins().then(render), 300)
+}
+const plUses = (uses) => (uses || []).length ? `<ul class="pl-uses">${uses.map((u) => `<li>${esc(u)}</li>`).join('')}</ul>` : '<div class="set-sub">Uses nothing of Echo\'s.</div>'
+const plBusy = (p, key) => p.busy && p.busy[key]
+const plErr = (p, key) => p.errors && p.errors[key] ? `<div class="error">${esc(p.errors[key])}</div>` : ''
+function pluginsSettings() {
+  const p = S.plugins
+  if (!p) { if (!S.pluginsLoading) { S.pluginsLoading = true; loadPlugins().then(() => { S.pluginsLoading = false; render() }) } return '<h2>Plugins</h2><div class="skeleton" style="padding:20px"><i></i><i></i><i></i></div>' }
+  if (p.error) return `<h2>Plugins</h2><p class="error">${esc(p.error)}</p>`
+  const tab = S.plTab || ((p.installed || []).length ? 'installed' : 'discover')
+  const ups = (p.installed || []).filter((x) => x.update).length
+  const tabs = [['installed', 'Installed', p.installed.length ? `${p.installed.length}${ups ? ` · ${ups} update${ups > 1 ? 's' : ''}` : ''}` : ''], ['discover', 'Discover', ''], ['markets', 'Marketplaces', p.markets.length]]
+  const bar = `<div class="tabs pl-tabs" role="tablist">${tabs.map(([id, l, n]) => `<button class="tab" role="tab" data-pl-tab="${id}" aria-selected="${tab === id}">${esc(l)}${n !== '' ? `<span class="n">${esc(String(n))}</span>` : ''}</button>`).join('')}</div>`
+  const body = tab === 'installed' ? plInstalled(p) : tab === 'discover' ? plDiscover(p) : plMarkets(p)
+  return `<h2>Plugins</h2>${bar}${body}`
+}
+function plInstalled(p) {
+  plShown.clear()
+  if (!p.installed.length) return '<p class="set-sub">No plugins yet — Discover lists what your marketplaces offer.</p>'
+  return p.installed.map((x) => {
+    const busy = plBusy(p, `plugin:${x.id}`)
+    const upd = x.update ? (x.update.blocked ? `<span class="set-sub">${esc(x.update.version)}: ${esc(x.update.blocked)}</span>`
+      : `<button class="btn" data-pl-update="${esc(x.id)}"${busy ? ' disabled' : ''}>${busy ? esc(busy) : `Update to ${esc(x.update.version)}`}</button>`) : ''
+    const sheet = S.plSheet && S.plSheet.update === x.id ? plSheet(S.plSheet) : ''
+    const rm = S.plRemove === x.id ? `<div class="confirm"><span>Remove ${esc(x.name)}? Its settings and data can stay for when you install it again.</span>
+      <button class="btn" data-pl-remove-cancel>Cancel</button><button class="btn" data-pl-remove="${esc(x.id)}" data-keep="1">Remove, keep data</button><button class="btn primary" style="background:var(--danger);border-color:var(--danger)" data-pl-remove="${esc(x.id)}" data-keep="0">Remove with data</button></div>` : ''
+    const settings = (x.settings || []).map((d) => setRow(esc(d.label), d.help ? esc(d.help) : '', plField(x.id, d)))
+    return setCard('', [
+      setRow(`${esc(x.name)} <span class="tag">${esc(x.version)}</span>`, `${esc(x.summary || '')}<br>From ${esc(x.market)}${x.market_gone ? ' (removed — no updates)' : ''} · commit <code>${esc((x.commit || '').slice(0, 10))}</code>`,
+        `${upd}<button class="btn ghost" data-pl-ask-remove="${esc(x.id)}">Remove</button><button class="sw${x.enabled ? ' on' : ''}" role="switch" aria-checked="${!!x.enabled}" aria-label="${esc(x.name)} on" data-pl-enable="${esc(x.id)}" data-on="${!x.enabled}"></button>`),
+      setRow('What it uses', plUses(x.uses), ''),
+      ...settings,
+    ]) + plErr(p, `plugin:${x.id}`) + sheet + rm + (x.enabled ? plExtras(x) : '')
+  }).join('')
+}
+/** What an installed plugin's capabilities add to its card: where Echo sends things (deliver, once), its routines. */
+const plShown = new Set()
+function plExtras(x) {
+  const caps = x.caps || []
+  if (!caps.includes('deliver') && !caps.includes('routines')) return ''
+  const R = S.routines
+  if (!R) { if (!S.routinesLoading) { S.routinesLoading = true; loadRoutines().then(() => { S.routinesLoading = false; render() }) } return '' }
+  let out = ''
+  if (caps.includes('routines')) out += routinesCard(R)
+  if (caps.includes('deliver') && !plShown.has('deliver')) { plShown.add('deliver'); out += deliverCard(R) }
+  return out
+}
+async function loadRoutines() {
+  try { S.routines = await get('api/routines') } catch { /* app restarting */ }
+  const R = S.routines
+  const busy = R && ((R.routines || []).some((x) => x.running) || (R.deliver_busy && R.deliver_busy.doing))
+  if (busy) setTimeout(() => { if (S.view === 'settings' && S.setSection === 'plugins') loadRoutines().then(render) }, 1500)
+}
+function routineOp(op, body = {}) {
+  send({ cmd: 'routine_op', op, ...body })
+  setTimeout(() => loadRoutines().then(render), 400)
+}
+function deliverOp(op, body = {}) {
+  send({ cmd: 'deliver_op', op, ...body })
+  setTimeout(() => loadRoutines().then(render), 500)
+}
+const DELIVER_LABEL = { telegram: 'Telegram', teams: 'Teams', mail: 'Mail' }
+/** Where Echo sends things to you: your own bot, your Teams chat with yourself, your mailbox. */
+function deliverCard(R) {
+  const d = R.deliver || {}, tg = d.telegram, b = R.deliver_busy && R.deliver_busy.what === 'telegram' ? R.deliver_busy : null
+  const test = (k) => `<button class="btn ghost" data-dl-test="${k}">Send a test</button>`
+  let tgSub, tgCtl
+  if (b && b.doing) {
+    tgSub = b.bot ? `Open <a data-ext href="https://t.me/${esc(b.bot)}">@${esc(b.bot)}</a> in Telegram and press <b>Start</b> — Echo is waiting for it.` : esc(b.doing)
+    tgCtl = '<span class="set-sub">Waiting…</span>'
+  } else if (tg && tg.paired) {
+    tgSub = `Your bot <b>@${esc(tg.bot)}</b> sends to ${esc(tg.user || 'you')}. Only you: Echo never reads what others write to it.`
+    tgCtl = test('telegram') + '<button class="btn ghost" data-dl-forget>Forget</button>'
+  } else if (tg) {
+    tgSub = `Open <a data-ext href="https://t.me/${esc(tg.bot)}">@${esc(tg.bot)}</a> in Telegram and press <b>Start</b>, then let Echo look for it.`
+    tgCtl = '<button class="btn primary" data-dl-pair>I pressed Start</button><button class="btn ghost" data-dl-forget>Forget</button>'
+  } else {
+    tgSub = 'Your own bot: in Telegram, message <b>@BotFather</b>, send <code>/newbot</code>, and paste the token it gives you.'
+    tgCtl = '<input class="set-in" type="password" id="dl-token" placeholder="123456:ABC-…" aria-label="Bot token" spellcheck="false"><button class="btn primary" data-dl-connect>Connect</button>'
+  }
+  if (b && b.error) tgSub += `<div class="error">${esc(b.error)}</div>`
+  const ms = d.account ? `As ${esc(d.account)}.` : 'Sign in to Microsoft 365 first (Settings → Calendar &amp; chat).'
+  return setCard('Echo sends to you', [
+    setRow('Telegram', tgSub, tgCtl),
+    setRow('Teams', `Your chat with yourself. ${ms}`, d.teams ? test('teams') : ''),
+    setRow('Mail', `Your own mailbox (not kept in Sent). ${ms}`, d.mail ? test('mail') : ''),
+  ])
+}
+function routinesCard(R) {
+  const list = R.routines || []
+  const rows = list.map((x) => {
+    if (x.error) return setRow(`${esc(x.id)} <span class="tag">can't be read</span>`, `<span class="error">${esc(x.error)}</span>`, `<button class="btn ghost" data-rt-del="${esc(x.id)}">Delete</button>`)
+    if (S.rtEdit && S.rtEdit.id === x.id) return ''
+    const last = x.last ? `Last: ${esc(relDay(String(x.last.at).slice(0, 10)))} ${esc(String(x.last.at).slice(11, 16))} — ${x.last.state === 'failed' ? `<span class="error">${esc(x.last.message || 'failed')}</span>` : x.last.state === 'empty' ? 'nothing to send' : ((x.last.sent || []).length ? `sent to ${x.last.sent.map((k) => DELIVER_LABEL[k] || k).join(', ')}` : 'answered (kept in its runs)')}` : 'Not run yet'
+    const next = x.enabled && x.next ? ` · next ${esc(relDay(String(x.next).slice(0, 10)))} ${esc(String(x.next).slice(11, 16))}` : x.enabled ? '' : ' · off'
+    const to = (x.deliver || []).map((k) => k === 'mail' && (x.mail_to || []).length ? `Mail (${x.mail_to.join(', ')})` : DELIVER_LABEL[k] || k).join(', ') || 'nowhere — answer kept in its runs'
+    const ctl = `${x.running ? '<span class="set-sub">Running…</span>' : `<button class="btn ghost" data-rt-run="${esc(x.id)}">Run now</button>`}<button class="btn ghost" data-rt-edit="${esc(x.id)}">Edit</button>` +
+      `<button class="sw${x.enabled ? ' on' : ''}" role="switch" aria-checked="${!!x.enabled}" aria-label="${esc(x.name)} on" data-rt-on="${esc(x.id)}" data-on="${!x.enabled}"></button>`
+    return setRow(esc(x.name), `${esc(x.when)} · to ${esc(to)} · ${x.tools === 'read' ? 'reads only' : x.tools === 'folder' ? 'your folder session\'s permissions' : 'asks nothing'}${next}<br>${last}`, ctl)
+  })
+  const add = S.rtEdit ? '' : setRow('', '', '<button class="btn" data-rt-new>+ New routine</button>')
+  return setCard('Routines', [...rows, ...(list.length ? [] : [setRow('No routines yet', 'A prompt Claude runs on a schedule — "every Monday at 9, what do I owe this week?" — the answer sent to you.', '')]), add]) + (S.rtEdit ? routineEditor(R, S.rtEdit) : '')
+}
+function routineEditor(R, e) {
+  const d = R.deliver || {}
+  const profiles = (R.profiles || []).map((p) => `<option value="${esc(p.id)}"${e.profile === p.id ? ' selected' : ''}>${esc(p.name)}${p.id === R.default_profile ? ' (default)' : ''}</option>`).join('')
+  const tools = [['read', 'Reads only', 'Echo\'s data folder, the Brain and read-only Echo commands; changes nothing'], ['folder', 'Your folder session\'s permissions', 'What your Claude Code settings allow; anything needing a prompt is refused'], ['skip', 'Asks nothing', 'Every tool, no prompts (--dangerously-skip-permissions)']]
+  const can = { telegram: d.telegram && d.telegram.paired, teams: d.teams, mail: d.mail }
+  return `<div class="pl-sheet rt-edit">
+    <b>${e.id ? 'Edit routine' : 'New routine'}</b>
+    <label class="rt-f"><span>Name</span><input class="set-in" id="rt-name" value="${esc(e.name || '')}" placeholder="Monday asks"></label>
+    <label class="rt-f"><span>When</span><input class="set-in" id="rt-schedule" value="${esc(e.schedule || '')}" placeholder="mon 09:00" spellcheck="false"><span class="set-sub">daily 09:00 · weekdays 18:30 · mon,thu 09:00 · every 2h · every 30m</span></label>
+    <label class="rt-f"><span>Prompt</span><textarea class="set-in rt-prompt" id="rt-prompt" placeholder="What do I owe this week, and what is waiting for others? Group by client.">${esc(e.prompt || '')}</textarea></label>
+    <div class="rt-f"><span>Send to</span><div class="rt-checks">${['telegram', 'teams', 'mail'].map((k) => `<label><input type="checkbox" data-rt-to="${k}"${(e.deliver || []).includes(k) ? ' checked' : ''}${can[k] ? '' : ' disabled'}> ${DELIVER_LABEL[k]}${can[k] ? '' : ' <span class="set-sub">(not set up)</span>'}</label>`).join('')}
+      <label class="rt-mailto">Mail to <input class="set-in" id="rt-mailto" value="${esc((e.mail_to || []).join(', '))}" placeholder="you — or addresses, comma-separated" spellcheck="false"></label>
+      <span class="set-sub">Mail to others goes from your account, as written — nobody reviews it first.</span>
+      <label><input type="checkbox" id="rt-skip"${e.skip_empty !== false ? ' checked' : ''}> Send nothing when there's nothing worth sending</label></div></div>
+    <div class="rt-f"><span>Permissions</span><div class="rt-checks">${tools.map(([v, l, h]) => `<label><input type="radio" name="rt-tools" value="${v}"${(e.tools || 'read') === v ? ' checked' : ''}> ${l} <span class="set-sub">— ${h}</span></label>`).join('')}</div></div>
+    <label class="rt-f"><span>AI profile</span><select class="set-in" id="rt-profile"><option value=""${!e.profile ? ' selected' : ''}>The default</option>${profiles}</select><input class="set-in" id="rt-model" value="${esc(e.model || '')}" placeholder="model (empty: the profile's minutes model)" spellcheck="false"></label>
+    <div class="pl-sheet-btns">${e.id ? `<button class="btn ghost danger" data-rt-del="${esc(e.id)}">Delete</button><span class="grow"></span>` : ''}<button class="btn" data-rt-cancel>Cancel</button><button class="btn primary" data-rt-save>Save</button></div>
+  </div>`
+}
+function routineFromForm() {
+  const v = (id) => ($(id) || {}).value || ''
+  return {
+    id: S.rtEdit.id || '', name: v('#rt-name'), schedule: v('#rt-schedule'), prompt: v('#rt-prompt'), profile: v('#rt-profile'), model: v('#rt-model'),
+    tools: (document.querySelector('input[name="rt-tools"]:checked') || {}).value || 'read',
+    deliver: [...document.querySelectorAll('[data-rt-to]')].filter((c) => c.checked).map((c) => c.dataset.rtTo),
+    mail_to: v('#rt-mailto').split(/[,;\s]+/).map((a) => a.trim()).filter(Boolean),
+    skip_empty: !!($('#rt-skip') || {}).checked, enabled: S.rtEdit.enabled !== false,
+  }
+}
+document.addEventListener('click', (e) => {
+  const t = e.target.closest && e.target.closest('[data-rt-new],[data-rt-edit],[data-rt-cancel],[data-rt-save],[data-rt-del],[data-rt-run],[data-rt-on],[data-dl-connect],[data-dl-pair],[data-dl-forget],[data-dl-test]')
+  if (!t) return
+  const d = t.dataset
+  if ('rtNew' in d) { S.rtEdit = { tools: 'read', skip_empty: true, deliver: [] }; return render() }
+  if (d.rtEdit) { S.rtEdit = { ...(S.routines.routines.find((x) => x.id === d.rtEdit) || {}) }; return render() }
+  if ('rtCancel' in d) { S.rtEdit = null; return render() }
+  if ('rtSave' in d) {
+    const r = routineFromForm()
+    S.rtEdit = { ...S.rtEdit, ...r }
+    send({ cmd: 'routine_op', op: 'save', routine: r })
+    // Closed once the list holds it (an error comes back as a notice and the form stays).
+    setTimeout(() => loadRoutines().then(() => { if (S.routines && S.routines.routines.some((x) => x.name === r.name && x.schedule === r.schedule)) S.rtEdit = null; render() }), 400)
+    return
+  }
+  if (d.rtDel) { if (S.rtEdit && S.rtEdit.id === d.rtDel) S.rtEdit = null; return routineOp('remove', { id: d.rtDel }) }
+  if (d.rtRun) return routineOp('run', { id: d.rtRun })
+  if (d.rtOn) return routineOp('enable', { id: d.rtOn, on: d.on === 'true' })
+  if ('dlConnect' in d) { const token = ($('#dl-token') || {}).value || ''; if (token.trim()) deliverOp('telegram_connect', { token: token.trim() }); return }
+  if ('dlPair' in d) return deliverOp('telegram_pair')
+  if ('dlForget' in d) return deliverOp('telegram_forget')
+  if (d.dlTest) return deliverOp('test', { kind: d.dlTest })
+})
+function plField(id, d) {
+  const attrs = `data-pl-set="${esc(id)}" data-key="${esc(d.key)}" aria-label="${esc(d.label)}"`
+  if (d.type === 'bool') return `<button class="sw${d.value ? ' on' : ''}" role="switch" aria-checked="${!!d.value}" ${attrs} data-val="${!d.value}"></button>`
+  if (d.type === 'secret') return `<input class="set-in" type="password" ${attrs} placeholder="${d.set ? '•••• set — type to replace' : 'not set'}">`
+  return `<input class="set-in" ${attrs} value="${esc(d.value == null ? '' : String(d.value))}" placeholder="${d.type === 'folder' ? 'a folder on this computer' : ''}" spellcheck="false">`
+}
+function plDiscover(p) {
+  const q = (S.plQuery || '').trim().toLowerCase()
+  const list = (p.discover || []).filter((x) => !q || `${x.name} ${x.summary} ${x.id} ${(x.categories || []).join(' ')}`.toLowerCase().includes(q))
+    .sort((a, b) => (b.featured - a.featured) || (b.built_in - a.built_in) || a.name.localeCompare(b.name))
+  const search = `<input class="search" id="pl-q" placeholder="Search plugins" value="${esc(S.plQuery || '')}" aria-label="Search plugins">`
+  const reading = plBusy(p, 'markets') ? '<p class="set-sub">Reading marketplaces…</p>' : ''
+  if (!list.length) return search + reading + `<p class="set-sub">${q ? 'Nothing matches.' : 'Your marketplaces offer nothing yet' + ((p.markets || []).some((m) => m.error) ? ' — one can\'t be read (Marketplaces).' : '.')}</p>`
+  return search + reading + list.map((x) => {
+    const busy = plBusy(p, `plugin:${x.id}`)
+    const ctl = x.installed === true ? '<span class="set-ok">Installed ✓</span>'
+      : x.installed === false ? '<span class="set-sub">Installed from another marketplace</span>'
+      : x.why_not ? `<span class="tag" title="${esc(x.why_not)}">${!x.version ? "Can't be read" : 'Needs a newer Echo'}</span>`
+      : `<button class="btn primary" data-pl-review="${esc(x.id)}" data-market="${esc(x.market)}"${busy ? ' disabled' : ''}>${busy ? esc(busy) : 'Install…'}</button>`
+    const sheet = S.plSheet && S.plSheet.install === x.id && S.plSheet.market === x.market ? plSheet(S.plSheet) : ''
+    return setCard('', [setRow(`${esc(x.name)} ${x.version ? `<span class="tag">${esc(x.version)}</span>` : ''} <span class="tag${x.built_in ? ' rec' : ''}">${esc(x.market)}</span>`,
+      `${esc(x.summary || '')}${(x.uses || []).length ? plUses(x.uses) : ''}${x.why_not && x.installed == null ? `<div class="pl-why">${esc(x.why_not)}</div>` : ''}`, ctl)]) + plErr(p, `plugin:${x.id}`) + sheet
+  }).join('')
+}
+/** The permission sheet: what the plugin will use, in Echo's words, before anything is installed. */
+function plSheet(sh) {
+  const r = sh.review
+  if (!r) return '<div class="confirm"><span>Reading what it uses…</span></div>'
+  if (r.error) return `<div class="confirm"><span class="error">${esc(r.error)}</span><button class="btn" data-pl-sheet-cancel>Close</button></div>`
+  const lines = sh.update ? r.new_uses : r.uses
+  const outside = S.plugins && !(S.plugins.markets || []).some((m) => m.name === r.market && m.built_in)
+  const who = outside ? `<div class="set-sub">Listed by ${esc(r.market)} — Echo hasn't reviewed it.</div>` : ''
+  const go = sh.update ? `Update to ${esc(r.version)}` : 'Install'
+  return `<div class="pl-sheet"><b>${sh.update ? `${esc(r.name)} ${esc(r.version)} asks for more` : `Install ${esc(r.name)} ${esc(r.version)}?`}</b>
+    ${plUses(lines)}<div class="set-sub">From ${esc(r.market)} · commit <code>${esc((r.commit || '').slice(0, 10))}</code></div>${who}
+    ${r.blocked ? `<div class="error">${esc(r.blocked)}</div>` : ''}
+    <div class="pl-sheet-btns"><button class="btn${outside ? ' primary' : ''}" data-pl-sheet-cancel${outside ? ' autofocus' : ''}>Cancel</button>${r.blocked ? '' : `<button class="btn${outside ? '' : ' primary'}" data-pl-sheet-go>${go}</button>`}</div></div>`
+}
+function plMarkets(p) {
+  const rows = p.markets.map((m) => {
+    const busy = plBusy(p, `market:${m.name}`)
+    const state = busy ? esc(busy) : m.error ? `<span class="error">${esc(m.error)}</span>` : m.fetched_at ? `${m.count} plugin${m.count === 1 ? '' : 's'} · read ${esc(relDay(String(m.fetched_at).slice(0, 10)))}` : 'Not read yet'
+    const ctl = `<button class="btn ghost" data-pl-mrefresh="${esc(m.name)}"${busy ? ' disabled' : ''}>Read again</button>` +
+      `<button class="btn ghost" data-pl-mhide="${esc(m.name)}" data-hidden="${!m.hidden}">${m.hidden ? 'Show' : 'Hide'}</button>` +
+      (m.built_in ? '' : `<button class="btn ghost" data-pl-mremove="${esc(m.name)}">Remove</button>`)
+    return setRow(`${esc(m.name)}${m.title && m.title !== m.name ? ` <span class="set-sub">(calls itself ${esc(m.title)})</span>` : ''}${m.built_in ? ' <span class="tag rec">built in</span>' : ''}${m.hidden ? ' <span class="tag">hidden</span>' : ''}`, `<code>${esc(m.source)}</code><br>${state}`, ctl)
+  })
+  const add = setRow('Add a marketplace', 'Your team\'s or company\'s catalog: <code>owner/repo</code> on GitHub, any git address (<code>https://…</code>, private ones through your own git sign-in), or a folder. It needs <code>echo-marketplace.json</code> at its root.',
+    `<input class="set-in" id="pl-msrc" placeholder="owner/repo" aria-label="Marketplace" spellcheck="false"><input class="set-in" id="pl-mname" placeholder="name (optional)" aria-label="Name" spellcheck="false" style="width:120px"><button class="btn primary" data-pl-madd>Add</button>`)
+  return setCard('', rows) + Object.keys(p.errors || {}).filter((k) => k.startsWith('market:')).map((k) => plErr(p, k)).join('') + setCard('', [add])
+}
+document.addEventListener('click', (e) => {
+  const t = e.target.closest && e.target.closest('[data-pl-tab],[data-pl-enable],[data-pl-set],[data-pl-update],[data-pl-review],[data-pl-sheet-go],[data-pl-sheet-cancel],[data-pl-ask-remove],[data-pl-remove],[data-pl-remove-cancel],[data-pl-mrefresh],[data-pl-mhide],[data-pl-mremove],[data-pl-madd]')
+  if (!t) return
+  const d = t.dataset
+  if (d.plTab) { S.plTab = d.plTab; S.plSheet = null; return render() }
+  if (d.plEnable) return pluginOp('enable', { id: d.plEnable, on: d.on === 'true' })
+  if (d.plSet && t.classList.contains('sw')) return pluginOp('set', { id: d.plSet, key: d.key, value: d.val === 'true' })
+  if (d.plReview || d.plUpdate) {
+    const id = d.plReview || d.plUpdate, market = d.market || ''
+    S.plSheet = d.plUpdate ? { update: id, review: (S.plugins.installed.find((x) => x.id === id) || {}).update } : { install: id, market, review: null }
+    render()
+    if (d.plReview) get(`api/plugins/review?id=${encodeURIComponent(id)}&market=${encodeURIComponent(market)}`).then((r) => { if (S.plSheet && S.plSheet.install === id) { S.plSheet.review = r; render() } })
+    return
+  }
+  if ('plSheetCancel' in d) { S.plSheet = null; return render() }
+  if ('plSheetGo' in d) {
+    const sh = S.plSheet
+    S.plSheet = null
+    if (sh && sh.review) pluginOp(sh.update ? 'update' : 'install', { id: sh.review.id, market: sh.review.market, agreed: sh.update ? sh.review.new_uses : sh.review.uses })
+    return render()
+  }
+  if (d.plAskRemove) { S.plRemove = d.plAskRemove; return render() }
+  if ('plRemoveCancel' in d) { S.plRemove = null; return render() }
+  if (d.plRemove) { S.plRemove = null; return pluginOp('remove', { id: d.plRemove, keep_data: d.keep === '1' }) }
+  if (d.plMrefresh) return pluginOp('market_refresh', { name: d.plMrefresh })
+  if (d.plMhide) return pluginOp('market_hide', { name: d.plMhide, hidden: d.hidden === 'true' })
+  if (d.plMremove) return pluginOp('market_remove', { name: d.plMremove })
+  if ('plMadd' in d) {
+    const source = ($('#pl-msrc') || {}).value || '', name = ($('#pl-mname') || {}).value || ''
+    if (source.trim()) pluginOp('market_add', { source: source.trim(), name: name.trim() })
+  }
+})
+document.addEventListener('change', (e) => {
+  const t = e.target
+  if (!t.matches || !t.matches('input[data-pl-set]')) return
+  pluginOp('set', { id: t.dataset.plSet, key: t.dataset.key, value: t.value })
+  if (t.type === 'password') t.value = ''
+})
+document.addEventListener('input', (e) => {
+  if (e.target.id !== 'pl-q') return
+  S.plQuery = e.target.value
+  const pos = e.target.selectionStart
+  render()
+  const q = $('#pl-q')
+  if (q) { q.focus(); q.setSelectionRange(pos, pos) }
+})
+
 /** The transcription server row: an Echo, or an OpenAI-compatible server (Ollama with an audio
  *  model, Speaches, vLLM, LocalAI, parakeet-api…) and what it was found to give. */
 function serverLine(srv) {
@@ -2043,6 +2306,7 @@ document.addEventListener('click', (e) => {
 
 const SETTINGS_BODY = {
   brain: brainSettings,
+  plugins: pluginsSettings,
   general(st) {
     const upd = st.update ? actBtn('update', `Update to ${st.update}…`, '', true) : actBtn('check_updates', 'Check for updates')
     const plugin = (S.state && S.state.notes) || {}
