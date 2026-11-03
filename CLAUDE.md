@@ -649,9 +649,11 @@ without it).
   synonyms; `merge` takes `into_layer: shared`); down — a practice topic whose ≥ 10 tagged sections are all one
   client's → that client. Turned down ones stay quiet (`brain/taxonomy/moves.json`).
   `taxonomy build [--layer shared|<client>]` builds every layer or one (then classifies that layer's sections).
-  **Drift** (#47, `taxonomy::drift`, no model): per layer, over the sections judged since its last build (its `build` in
-  the history) — ≥ 30 of them —, stale when > 10% fit no topic (`untagged`) or one level-1 topic took > 40% of the tagged
-  ones; or when its calls are ≥ 3× `built_from` (and ≥ 6). A stale layer is an Inbox item ("Topics for X need a rebuild", the reasons in plain words — `reasons[].text`, one source for the Inbox and Builds) and a banner on its Topics
+  **Drift** (#47, `taxonomy::drift`, no model): per layer, over the sections that came in since its last build (its `build`
+  in the history: indexed after its `at` — `chunks.created_at` — and judged since; never the build's own sections tagged
+  again, #18) — ≥ 30 of them —, stale when > 10% fit no topic (`untagged`) or one level-1 topic took > 40% of the tagged
+  ones (one with subtopics: only when one subtopic did) — these two only for a layer built from ≥ 6 calls (`built_from`
+  0, unknown, is judged); or when its calls are ≥ 3× `built_from` (and ≥ 6). A stale layer is an Inbox item ("Topics for X need a rebuild", the reasons in plain words — `reasons[].text`, one source for the Inbox and Builds) and a banner on its Topics
   block: Rebuild topics (IPC `brain_rebuild_topics` → `induce` in the background, provisional as any build; a
   notification when done) · Not now (`brain_topics_snooze` → `brain/taxonomy/drift.json`: held until its sections or
   calls grow by half; a rebuild clears it). Never rebuilt automatically. `echoctl brain taxonomy drift` (JSON).
