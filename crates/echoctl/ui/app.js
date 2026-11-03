@@ -1174,7 +1174,9 @@ document.addEventListener('click', (e) => {
 /** Inbox (`attention.rs`): what waits for the user's decision, from everywhere, in one list — the
  *  activity bar's entry above Settings shows or hides it. Each item is decided here with the same
  *  message its own place sends, or opens that place; decided anywhere, it moves to Done this week. */
-const NY = { data: null, at: 0, filter: 'open', gone: new Set(), loading: null, failed: 0, seq: 0, more: new Set() }
+const NY = { data: null, at: 0, filter: 'open', busy: new Map(), last: null, loading: null, failed: 0, seq: 0, more: new Set() }
+/** How long a decision shows as working with no word from the app: a quick one is gone by then. */
+const NY_BUSY_MS = 15000
 /** One request at a time; a fresh one (after a decision) wins over any older answer still on its way. */
 function loadAttention(fresh) {
   if (NY.loading && !fresh) return NY.loading
@@ -1182,7 +1184,10 @@ function loadAttention(fresh) {
   NY.loading = get('api/attention' + (fresh ? '?fresh=1' : '')).then((d) => {
     if (n !== NY.seq) return
     NY.data = d; NY.at = Date.now(); NY.failed = 0
-    if (fresh) NY.gone.clear()
+    // A decision still working stays so until its item is gone; the app names the long ones (`busy`).
+    const open = new Set((d.open || []).map((i) => i.key))
+    // A job that failed gives the buttons back at once, with why (`failed`).
+    for (const [k, at] of NY.busy) if (!open.has(k) || (d.failed || {})[k] || (!(d.busy || {})[k] && Date.now() - at > NY_BUSY_MS)) NY.busy.delete(k)
   }).catch(() => { NY.failed = Date.now() }).finally(() => { if (n === NY.seq) NY.loading = null })
   return NY.loading
 }
@@ -1198,7 +1203,9 @@ const NY_KEY = MAC ? 'I' : 'U'
 const NY_HINT = MAC ? '⇧⌘I' : 'Ctrl+Shift+U'
 /** At most this many of one kind in a group; the rest are counted, opening their place. */
 const NY_CAP = 5
-const nyOpen = () => ((NY.data || {}).open || []).filter((i) => !NY.gone.has(i.key))
+const nyOpen = () => (NY.data || {}).open || []
+/** What an item is doing now, or '' : the app's word for a background job, else the user's click a moment ago. */
+const nyBusy = (key) => ((NY.data || {}).busy || {})[key] || (NY.busy.has(key) ? 'Working…' : '')
 const NY_ICON = {
   signin: ICON('<circle cx="12" cy="8" r="3.5"/><path d="M5 20c1.2-3.6 4-5.5 7-5.5s5.8 1.9 7 5.5"/>'),
   minutes: ICON('<path d="M6 3.5h9l4 4v13H6z"/><path d="M9 12h7M9 16h5"/>'),
@@ -1222,9 +1229,11 @@ function needsPanel() {
   const chip = (f, label, n) => `<button class="fchip${NY.filter === f ? ' on' : ''}" data-ny-filter="${f}">${label}${n ? ` ${n}` : ''}</button>`
   const head = `<div class="ny-head">${chip('open', 'Open', open.length)}${urgent.length ? chip('blocking', 'Blocking', urgent.length) : ''}${chip('done', 'Done', done.length)}<span class="grow"></span><span class="set-sub">this week</span></div>`
   const row = (i) => {
-    const acts = (i.actions || []).map((a, k) => `<button class="btn${a.primary ? (i.urgent ? ' warn' : ' primary') : ''}" data-ny-act="${esc(i.key)}" data-k="${k}">${esc(a.label)}</button>`).join('')
+    const busy = nyBusy(i.key)
+    const acts = busy ? `<span class="ny-busy" role="status"><i></i>${esc(busy)}</span>` : (i.actions || []).map((a, k) => `<button class="btn${a.primary ? (i.urgent ? ' warn' : ' primary') : ''}" data-ny-act="${esc(i.key)}" data-k="${k}">${esc(a.label)}</button>`).join('')
     const go = i.go ? `<button class="btn ghost" data-ny-go="${esc(i.go)}">${(i.actions || []).length ? 'Open' : 'Open →'}</button>` : ''
-    return `<div class="ny-item${i.urgent ? ' urgent' : ''}"><span class="ny-k">${NY_ICON[i.kind] || NY_ICON.work}</span><b>${esc(i.title)}</b>${i.why ? `<span class="ny-why">${esc(i.why)}</span>` : ''}${acts || go ? `<div class="ny-acts">${acts}${go}</div>` : ''}</div>`
+    const failed = !busy && ((NY.data || {}).failed || {})[i.key]
+    return `<div class="ny-item${i.urgent ? ' urgent' : ''}${busy ? ' busy' : ''}"><span class="ny-k">${NY_ICON[i.kind] || NY_ICON.work}</span><b>${esc(i.title)}</b>${i.why ? `<span class="ny-why">${esc(i.why)}</span>` : ''}${failed ? `<span class="ny-why ny-err">${esc(failed)}</span>` : ''}${acts || go ? `<div class="ny-acts">${acts}${go}</div>` : ''}</div>`
   }
   const groupName = (g) => g === '-' || g === 'echo' ? 'Everything else' : (d.clients || {})[g] || g
   const groups = (items) => {
@@ -1262,8 +1271,9 @@ document.addEventListener('click', (e) => {
   // Change…: decided where it can be edited (a suggestion's own version in the People tab).
   if (a.go) { if (a.edit) S.pj.ppSugEdit = a.edit; return go(a.go) }
   send(a.ipc)
-  // A decision takes the item off at once; an action that opens a flow (a sign-in, a log) leaves it.
-  if (!['sign_in', 'show_log', 'settings_action', 'write_notes'].includes(a.ipc.cmd)) NY.gone.add(i.key)
+  // A decision shows as working until its item goes (a background job: until it ends); an action
+  // that opens a flow (a sign-in, a log) leaves it as it was.
+  if (!['sign_in', 'show_log', 'settings_action', 'write_notes'].includes(a.ipc.cmd)) { NY.busy.set(i.key, Date.now()); NY.last = { key: i.key, at: Date.now() } }
   render()
   setTimeout(async () => { await loadAttention(true); await loadProjects(); render() }, 700)
 })
@@ -5473,7 +5483,7 @@ async function tick() {
   if (S.view === 'settings' ? ticks % 2 === 0 : ticks % 60 === 0) await loadSettings() // a download's progress; Settings' badge
   // While a transcript is imported, every few seconds: the call shows once it is there.
   if (S.view === 'calendar' && (ticks % 30 === 0 || (ticks % 3 === 0 && ((S.cal.data && S.cal.data.events) || []).some((e) => e.import && e.import.busy)) || (ticks % 5 === 0 && S.cal.data && S.cal.data.checking_transcripts))) await loadCalendar()
-  if (ticks % 10 === 1) await loadAttention()
+  if (ticks % 10 === 1 || (ticks % 3 === 0 && (NY.busy.size || Object.keys((NY.data || {}).busy || {}).length))) await loadAttention()
   if (ticks % (S.view === 'projects' ? 5 : 15) === 0) { await loadProjects(); if (S.view === 'projects') await loadProject() }
   if (S.view === 'tasks' && ticks % 15 === 0) { await loadTasks(); if (S.pj.node) await loadWork() }
   // The selected call is fetched again whenever anything it shows changed (`/rev`: its files,
@@ -5535,6 +5545,8 @@ window.echo = {
   /** A message for a moment (an action that couldn't be done). */
   notice(text) {
     S.notice = text
+    // An action that couldn't be done: the decision clicked a moment ago (the last one) gets its buttons back.
+    if (NY.last && Date.now() - NY.last.at < 10000) { NY.busy.delete(NY.last.key); NY.last = null }
     clearTimeout(window._noticeTimer)
     window._noticeTimer = setTimeout(() => { S.notice = null; render() }, 7000)
     render()

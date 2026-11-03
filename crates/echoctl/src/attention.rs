@@ -374,6 +374,9 @@ fn fold(rec: &mut Value, got: &Collected, now: chrono::DateTime<chrono::Utc>) ->
 static CACHE: Mutex<Option<(Instant, Value)>> = Mutex::new(None);
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 static COLLECTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Moved by `stale`: a collection that saw it move while it ran is answered but not cached.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 fn shape(open: Vec<Value>, rec: &Value) -> Value {
     let mut done = rec["done"].as_array().cloned().unwrap_or_default();
@@ -381,6 +384,16 @@ fn shape(open: Vec<Value>, rec: &Value) -> Value {
     let clients: BTreeMap<String, String> = crate::projects::clients().unwrap_or_default().into_iter().map(|c| (c.id, c.name)).collect();
     let urgent = open.iter().filter(|i| i["urgent"] == true).count();
     json!({"open": open, "done": done, "clients": clients, "urgent": urgent})
+}
+
+/// Collect again at the next request: a job an item started has ended (the item may be gone now).
+/// A collection running meanwhile may have read the old state: it isn't kept (`GENERATION`).
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn stale() {
+    GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    if let Ok(mut c) = CACHE.lock() {
+        *c = None;
+    }
 }
 
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
@@ -412,13 +425,16 @@ pub fn view(fresh: bool) -> Value {
         }
     }
     let _done = Done;
+    let generation = GENERATION.load(Ordering::SeqCst);
     let got = collect();
     let mut rec = read(&file());
     let open = fold(&mut rec, &got, chrono::Utc::now());
     let _ = paths::write_atomic(&file(), serde_json::to_string_pretty(&rec).unwrap_or_default().as_bytes());
     let v = shape(open, &rec);
     if let Ok(mut c) = CACHE.lock() {
-        *c = Some((Instant::now(), v.clone()));
+        if GENERATION.load(Ordering::SeqCst) == generation {
+            *c = Some((Instant::now(), v.clone()));
+        }
     }
     v
 }
