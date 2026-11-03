@@ -873,8 +873,7 @@ HTML (`zebra`), horizontal rules; checked in Outlook on the web, light and dark)
 whose manifest names the kind (`uses.deliver_provider.kinds`), its readiness told with `ctx.deliver.ready`
 (`jshost::providers`); `deliver::send` hands such a message to that plugin (`jshost::provider_send` → its `__deliver`
 command). Telegram is one (its package: bot token as its secret setting, pairing, sending through `ctx.http.fetch` to
-`api.telegram.org` only — `uses.network.hosts` —, Markdown → Telegram HTML with tables as lines). Settings → Plugins →
-Echo sends to you (`/api/deliver`) lists Teams, Mail and the plugins' ways; `echoctl deliver status|test <kind>|send`.
+`api.telegram.org` only — `uses.network.hosts` —, Markdown → Telegram HTML with tables as lines). Settings → **Sends to you** (its own section, `#settings/deliver`, `/api/deliver`) lists Teams, Mail and the plugins' ways; `echoctl deliver status|test <kind>|send`.
 
 ## Live view (mod) and automation
 `plugin/hooks/register.tsx` is a Claude Code mod (state contract `plugin/types/index.d.ts`, pure helpers
