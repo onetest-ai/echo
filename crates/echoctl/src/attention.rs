@@ -350,24 +350,15 @@ pub fn collect() -> Collected {
     if let Some(v) = crate::update::AVAILABLE.lock().ok().and_then(|a| a.as_ref().map(|r| r.version.clone())) {
         out.push(item("update".into(), "update", "echo", format!("Echo {v} is available"), "Installs after Echo saves and quits".into(), false, vec![act("Update…", true, json!({"cmd": "settings_action", "action": "update", "arg": ""}))], None));
     }
-    // Routines whose last run failed (Scheduler plugin): open until a run goes through, or it's gone.
-    if crate::routines::active() {
-        let states = crate::routines::states();
-        for r in crate::routines::list().into_iter().flatten() {
-            let Some(last) = states.get(&r.id).and_then(|s| s.last.as_ref()) else { continue };
-            if last["state"] != "failed" {
-                continue;
-            }
-            let why: String = last["message"].as_str().unwrap_or("It didn't finish").chars().take(200).collect();
-            let mut acts = vec![act("Run again", true, json!({"cmd": "routine_op", "op": "run", "id": r.id}))];
-            if let Some(p) = last["needs_sign_in"].as_str() {
-                acts.insert(0, act("Sign in…", true, json!({"cmd": "sign_in", "profile": p})));
-                acts[1]["primary"] = false.into();
-            }
-            out.push(item(format!("routine:{}", r.id), "routine", "echo", format!("Routine failed: {}", r.name), why, false, acts, Some("settings/plugins".into())));
-        }
-    } else {
-        c.quiet_kinds.insert("routine");
+    // What plugins put here (`ctx.inbox.set`): their buttons call their own commands.
+    #[cfg(feature = "js")]
+    for (plugin, key, it) in crate::jshost::inbox_items() {
+        let acts = it["actions"].as_array().cloned().unwrap_or_default().iter().filter_map(|a| {
+            let (label, command) = (a["label"].as_str()?, a["command"].as_str()?);
+            Some(act(label, a["primary"].as_bool().unwrap_or(false), json!({"cmd": "plugin_call", "id": plugin, "command": command, "args": a["args"]})))
+        }).collect();
+        out.push(item(format!("plugin:{plugin}:{key}"), "plugin", "echo", it["title"].as_str().unwrap_or(&key).chars().take(120).collect(),
+            it["why"].as_str().unwrap_or("").chars().take(200).collect(), it["urgent"].as_bool().unwrap_or(false), acts, it["go"].as_str().map(str::to_owned)));
     }
     c.items = out;
     c

@@ -42,7 +42,10 @@ mod recorder;
 mod nemo;
 #[cfg(feature = "transcribe")]
 mod remote;
-mod routines;
+#[cfg(feature = "js")]
+mod claudejob;
+#[cfg(feature = "js")]
+mod jshost;
 #[cfg(feature = "transcribe")]
 mod speakers;
 #[cfg(feature = "transcribe")]
@@ -239,11 +242,6 @@ enum Cmd {
     Plugin {
         #[command(subcommand)]
         cmd: PluginCmd,
-    },
-    /// Routines (Scheduler plugin): your prompts run by Claude Code on a schedule, answers sent to you
-    Routine {
-        #[command(subcommand)]
-        cmd: RoutineCmd,
     },
     /// Where Echo sends things to you: Telegram (your bot), Teams (your chat with yourself), mail
     Deliver {
@@ -1020,56 +1018,17 @@ enum PluginCmd {
     Disable { id: String },
     /// Show (no value) or set a plugin's setting
     Set { id: String, key: String, value: Option<String> },
+    /// Run a plugin's command (its host half's `ctx.command`) with JSON arguments; prints its JSON answer
+    Call {
+        id: String,
+        command: String,
+        /// JSON arguments (default {})
+        args: Option<String>,
+    },
     /// Marketplaces: list | add <owner/repo | git URL | folder> [--name] | remove <name> | update [<name>]
     Marketplace {
         #[command(subcommand)]
         cmd: MarketCmd,
-    },
-}
-
-#[derive(Subcommand)]
-enum RoutineCmd {
-    /// Every routine with its schedule, next and last run (JSON)
-    List,
-    /// One routine's file
-    Show { id: String },
-    /// A new routine
-    Add {
-        #[arg(long)]
-        name: String,
-        /// daily 09:00 · weekdays 09:00 · mon,thu 09:00 · every 2h · every 30m
-        #[arg(long)]
-        schedule: String,
-        /// The prompt (or --prompt-file)
-        #[arg(long)]
-        prompt: Option<String>,
-        #[arg(long)]
-        prompt_file: Option<std::path::PathBuf>,
-        /// telegram, teams, mail (comma-separated)
-        #[arg(long, default_value = "")]
-        deliver: String,
-        /// Mail to these addresses instead of you (comma-separated)
-        #[arg(long, default_value = "")]
-        mail_to: String,
-        /// read (default) · folder · skip
-        #[arg(long, default_value = "read")]
-        tools: String,
-        #[arg(long, default_value = "")]
-        profile: String,
-        #[arg(long, default_value = "")]
-        model: String,
-        /// Send even when there's nothing worth sending
-        #[arg(long)]
-        always_send: bool,
-    },
-    Remove { id: String },
-    Enable { id: String },
-    Disable { id: String },
-    /// Run it now (in this terminal); --no-deliver prints the answer instead of sending it
-    Run {
-        id: String,
-        #[arg(long)]
-        no_deliver: bool,
     },
 }
 
@@ -1435,7 +1394,6 @@ fn main() -> Result<()> {
         Cmd::Client { cmd } => client_command(cmd),
         Cmd::Org { cmd } => org_command(cmd),
         Cmd::Plugin { cmd } => plugin_command(cmd),
-        Cmd::Routine { cmd } => routine_command(cmd),
         Cmd::Deliver { cmd } => deliver_command(cmd),
         Cmd::Context { call } => calls::context(&call),
         Cmd::Title { call, title } => calls::set_title(&call, &title),
@@ -2319,45 +2277,6 @@ fn routine_reads() -> bool {
     std::env::var(guard::RUN_MODE).is_ok_and(|m| m == "routine")
 }
 
-fn routine_command(cmd: RoutineCmd) -> Result<()> {
-    use routines::*;
-    let toggle = |id: &str, on: bool| -> Result<()> {
-        let mut r = get(id)?;
-        r.enabled = on;
-        save(r).map(|_| ())
-    };
-    match cmd {
-        RoutineCmd::List => print_json(&view()),
-        RoutineCmd::Show { id } => print!("{}", render(&get(&id)?)),
-        RoutineCmd::Add { name, schedule, prompt, prompt_file, deliver, mail_to, tools, profile, model, always_send } => {
-            let prompt = match (prompt, prompt_file) {
-                (Some(p), _) => p,
-                (None, Some(f)) => std::fs::read_to_string(f)?,
-                (None, None) => anyhow::bail!("give --prompt or --prompt-file"),
-            };
-            let v = serde_json::json!({"name": name, "schedule": schedule, "prompt": prompt, "tools": tools, "profile": profile, "model": model,
-                "deliver": deliver.split(',').map(str::trim).filter(|d| !d.is_empty()).collect::<Vec<_>>(), "skip_empty": !always_send, "mail_to": mail_to});
-            let r = save(from_value(&v)?)?;
-            println!("Added {} ({})", r.id, Schedule::parse(&r.schedule)?.words());
-        }
-        RoutineCmd::Remove { id } => remove(&id)?,
-        RoutineCmd::Enable { id } => toggle(&id, true)?,
-        RoutineCmd::Disable { id } => toggle(&id, false)?,
-        RoutineCmd::Run { id, no_deliver } => {
-            let rec = run(&id, !no_deliver)?;
-            if no_deliver {
-                let answer = routines::dir().join("runs").join(&id).join(rec["run"].as_str().unwrap_or("")).join("answer.md");
-                print!("{}", std::fs::read_to_string(answer).unwrap_or_default());
-            }
-            print_json(&rec);
-            if rec["state"] == "failed" {
-                std::process::exit(1);
-            }
-        }
-    }
-    Ok(())
-}
-
 /// What a delivery test sends: the shapes a routine's answer has (headings, a list, a table).
 const TEST_MESSAGE: &str = "This is how Echo's messages reach you.\n\n## Today\n\n1. **Send the deck** to Acme — due today\n2. Review `T012` before the 15:00 call\n\n## Meetings\n\n| Time | Meeting | Prepare |\n|---|---|---|\n| 10:00 | Weekly sync | Open asks |\n| 15:00 | Acme review | The deck |\n\n> Nothing here is real: it's a test.";
 
@@ -2430,6 +2349,16 @@ fn plugin_command(cmd: PluginCmd) -> Result<()> {
         PluginCmd::Disable { id } => set_enabled(&id, false)?,
         PluginCmd::Set { id, key, value: None } => print_json(&serde_json::json!(settings_view(&id)?.into_iter().find(|s| s["key"] == key.as_str()))),
         PluginCmd::Set { id, key, value: Some(v) } => set_setting(&id, &key, &serde_json::Value::String(v))?,
+        #[cfg(feature = "js")]
+        PluginCmd::Call { id, command, args } => {
+            let args: serde_json::Value = serde_json::from_str(args.as_deref().unwrap_or("{}")).map_err(|e| anyhow::anyhow!("the arguments aren't JSON: {e}"))?;
+            // A terminal's host runs commands, never the plugins' timers: those are the app's.
+            jshost::no_timers();
+            jshost::sync();
+            print_json(&jshost::call_within(&id, &command, &args, std::time::Duration::from_secs(3600))?);
+        }
+        #[cfg(not(feature = "js"))]
+        PluginCmd::Call { .. } => anyhow::bail!("this build of Echo runs no plugin code"),
         PluginCmd::Marketplace { cmd } => match cmd {
             MarketCmd::List => print_json(&snapshot()["markets"]),
             MarketCmd::Add { source, name } => {

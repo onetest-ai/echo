@@ -1,5 +1,6 @@
-//! Echo plugins (`docs/plugins-design.md`, v3): declarative packages — a manifest naming the
-//! **capabilities** of Echo it uses, skills and settings — never code of their own. They come from
+//! Echo plugins (`docs/plugins-design.md`, v4): packages that bring their own code — a host half
+//! (`main`, run by `jshost.rs` inside Echo) and a client half (`client`, loaded into the window) — with a
+//! manifest saying what of Echo they touch (`uses`), skills and settings. They come from
 //! **marketplaces**: git repositories with `echo-marketplace.json`; ours (`onetest-ai/echo-plugins`) is
 //! built in, the user adds any number of others (an enterprise's own catalog is one more).
 //!
@@ -60,7 +61,8 @@ struct Capability {
 }
 
 const CAPABILITIES: &[Capability] = &[
-    Capability { id: "routines", ready: true, describe: describe_routines },
+    Capability { id: "claude", ready: true, describe: describe_claude },
+    Capability { id: "schedule", ready: true, describe: describe_schedule },
     Capability { id: "deliver", ready: true, describe: describe_deliver },
     Capability { id: "channel", ready: false, describe: describe_channel },
     Capability { id: "brain_source", ready: false, describe: describe_brain_source },
@@ -91,13 +93,17 @@ fn join_words(w: &[&str]) -> String {
     }
 }
 
-fn describe_routines(_: &Value) -> Result<String> {
-    Ok("Runs Claude Code prompts you write, on a schedule, with the AI profile and permissions you pick for each".into())
+fn describe_claude(_: &Value) -> Result<String> {
+    Ok("Runs Claude Code on your AI profiles, with the permissions you pick".into())
+}
+
+fn describe_schedule(_: &Value) -> Result<String> {
+    Ok("Works on its own on a schedule while Echo runs".into())
 }
 
 fn describe_deliver(v: &Value) -> Result<String> {
     let to = strings(v, "to")?;
-    only("A delivery", &to, &["telegram", "teams", "mail"])?;
+    only("A delivery", &to, &crate::deliver::KINDS)?;
     if to.is_empty() {
         bail!("“deliver” names no way to send (telegram, teams, mail)");
     }
@@ -191,6 +197,12 @@ pub struct Manifest {
     pub uses: serde_json::Map<String, Value>,
     #[serde(default)]
     pub settings: Vec<SettingDef>,
+    /// The host half: a JavaScript module run inside Echo (`jshost.rs`), `export function apply(ctx)`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub main: Option<String>,
+    /// The client half: a JavaScript module loaded into the Echo window, `export function apply(ctx)`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -255,7 +267,54 @@ pub fn read_manifest(dir: &Path) -> Result<Manifest> {
         }
     }
     describe(&m.uses)?;
+    for f in [&m.main, &m.client].into_iter().flatten() {
+        let p = inside_plugin(dir, f)?;
+        if p.extension().is_none_or(|e| e != "js" && e != "mjs") {
+            bail!("{f} isn't a JavaScript module (.js)");
+        }
+    }
     Ok(m)
+}
+
+/// A file of the plugin's own: a relative path inside its folder that exists.
+pub fn inside_plugin(dir: &Path, rel: &str) -> Result<PathBuf> {
+    let rel = rel.trim_start_matches("./");
+    let p = Path::new(rel);
+    if rel.is_empty() || p.is_absolute() || p.components().any(|c| !matches!(c, std::path::Component::Normal(_))) {
+        bail!("“{rel}” isn't a file inside the plugin");
+    }
+    let f = dir.join(p);
+    if !f.is_file() {
+        bail!("{rel} isn't in the plugin");
+    }
+    Ok(f)
+}
+
+/// A folder of the plugin's own: a relative path inside its folder that exists.
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
+pub fn inside_plugin_dir(dir: &Path, rel: &str) -> Result<PathBuf> {
+    let rel = rel.trim_start_matches("./").trim_end_matches('/');
+    let p = Path::new(rel);
+    if rel.is_empty() || p.is_absolute() || p.components().any(|c| !matches!(c, std::path::Component::Normal(_))) {
+        bail!("“{rel}” isn't a folder inside the plugin");
+    }
+    let d = dir.join(p);
+    if !d.is_dir() {
+        bail!("{rel} isn't in the plugin");
+    }
+    Ok(d)
+}
+
+/// The permission sheet: what the plugin touches (`uses`), and that it runs code of its own.
+pub fn sheet(m: &Manifest) -> Result<Vec<String>> {
+    let mut lines = describe(&m.uses)?;
+    match (&m.main, &m.client) {
+        (Some(_), Some(_)) => lines.insert(0, "Runs its own code in Echo and in the Echo window, with your rights".into()),
+        (Some(_), None) => lines.insert(0, "Runs its own code in Echo, with your rights".into()),
+        (None, Some(_)) => lines.insert(0, "Runs its own code in the Echo window, with your rights".into()),
+        (None, None) => {}
+    }
+    Ok(lines)
 }
 
 /// Why this Echo can't install it (`None` = it can).
@@ -885,7 +944,7 @@ pub struct Review {
 
 fn review_of(market: &str, o: &Offer, before: Option<&Installed>) -> Result<Review> {
     let m = o.manifest.as_ref().ok_or_else(|| anyhow!("“{}” can't be installed: {}", o.id, o.error.as_deref().unwrap_or("its manifest can't be read")))?;
-    let uses = describe(&m.uses)?;
+    let uses = sheet(m)?;
     let new_uses = uses.iter().filter(|u| before.is_none_or(|b| !b.uses.contains(u))).cloned().collect();
     Ok(Review { id: m.id.clone(), name: m.name.clone(), version: m.version.clone(), market: market.into(), commit: o.commit.clone(), uses, new_uses, blocked: why_not(m) })
 }
@@ -990,15 +1049,13 @@ pub fn remove(id: &str, keep_data: bool) -> Result<()> {
     Ok(())
 }
 
-/// Installed and switched on (what the capabilities will read).
+/// Installed and switched on (what the host halves and the window load).
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
 pub fn enabled() -> Vec<Installed> {
     Registry::load().map(|r| r.installed.into_values().filter(|p| p.enabled).collect()).unwrap_or_default()
 }
 
-/// Is a plugin that uses `capability` installed and on? (Its manifest as installed decides.)
-pub fn enabled_with(capability: &str) -> bool {
-    enabled().iter().any(|p| read_manifest(&plugin_dir(p)).is_ok_and(|m| m.uses.contains_key(capability)))
-}
+
 
 // ── settings ──
 
@@ -1125,7 +1182,7 @@ pub fn snapshot() -> Value {
         }
         for o in c.map(|c| c.plugins).unwrap_or_default() {
             let (name, version, summary, uses, why) = match &o.manifest {
-                Some(mf) => (mf.name.clone(), mf.version.clone(), mf.summary.clone(), describe(&mf.uses).unwrap_or_default(), why_not(mf)),
+                Some(mf) => (mf.name.clone(), mf.version.clone(), mf.summary.clone(), sheet(mf).unwrap_or_default(), why_not(mf)),
                 None => (o.id.clone(), String::new(), String::new(), vec![], o.error.clone()),
             };
             discover.push(json!({
@@ -1141,9 +1198,10 @@ pub fn snapshot() -> Value {
         .map(|p| {
             let m = read_manifest(&plugin_dir(p)).ok();
             let summary = m.as_ref().map(|m| m.summary.clone()).unwrap_or_default();
+            let client = m.as_ref().and_then(|m| m.client.clone());
             let caps: Vec<String> = m.map(|m| m.uses.keys().cloned().collect()).unwrap_or_default();
             json!({
-                "id": p.id, "name": p.name, "version": p.version, "market": p.market, "enabled": p.enabled, "summary": summary, "caps": caps,
+                "id": p.id, "name": p.name, "version": p.version, "market": p.market, "enabled": p.enabled, "summary": summary, "caps": caps, "client": client,
                 "commit": p.commit, "installed_at": p.installed_at, "uses": p.uses,
                 "market_gone": r.market(&p.market).is_none(),
                 "update": update_for(p).map(|u| review_json(&u)),
@@ -1174,8 +1232,8 @@ pub fn page_op(v: &Value) -> Result<()> {
     let s = |k: &str| v[k].as_str().unwrap_or("").to_string();
     let list = |k: &str| v[k].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect::<Vec<_>>()).unwrap_or_default();
     match s("op").as_str() {
-        "enable" => set_enabled(&s("id"), v["on"].as_bool().unwrap_or(true)),
-        "remove" => remove(&s("id"), v["keep_data"].as_bool().unwrap_or(true)),
+        "enable" => set_enabled(&s("id"), v["on"].as_bool().unwrap_or(true)).inspect(|_| reload()),
+        "remove" => remove(&s("id"), v["keep_data"].as_bool().unwrap_or(true)).inspect(|_| reload()),
         "set" => set_setting(&s("id"), &s("key"), &v["value"]),
         "market_hide" => market_hide(&s("name"), v["hidden"].as_bool().unwrap_or(true)),
         "market_remove" => market_remove(&s("name")),
@@ -1195,16 +1253,22 @@ pub fn page_op(v: &Value) -> Result<()> {
         }
         "install" => {
             let (id, market, agreed) = (s("id"), s("market"), list("agreed"));
-            background(format!("plugin:{id}"), "Installing…", move || install(&id, Some(&market).filter(|m| !m.is_empty()).map(String::as_str), &agreed).map(|_| ()));
+            background(format!("plugin:{id}"), "Installing…", move || install(&id, Some(&market).filter(|m| !m.is_empty()).map(String::as_str), &agreed).map(|_| reload()));
             Ok(())
         }
         "update" => {
             let (id, agreed) = (s("id"), list("agreed"));
-            background(format!("plugin:{id}"), "Updating…", move || update(&id, &agreed).map(|_| ()));
+            background(format!("plugin:{id}"), "Updating…", move || update(&id, &agreed).map(|_| reload()));
             Ok(())
         }
         o => bail!("unknown plugin operation “{o}”"),
     }
+}
+
+/// The host halves follow what is installed and on (`jshost::sync`).
+fn reload() {
+    #[cfg(feature = "js")]
+    crate::jshost::sync();
 }
 
 /// One background job per key; its error kept for the page until the next try.
@@ -1292,7 +1356,7 @@ mod tests {
         assert!(describe(&uses(json!({"channel": {"plugin": "evil@somewhere"}}))).is_err());
         assert!(describe(&uses(json!({"channel": {"plugin": "telegram@claude-plugins-official"}}))).is_ok());
         // Known but not implemented yet: listed, not installable.
-        let m = Manifest { id: "x".into(), name: "X".into(), version: "0.1.0".into(), echo: None, summary: String::new(), uses: uses(json!({"channel": {"plugin": "telegram@claude-plugins-official"}})), settings: vec![] };
+        let m = Manifest { id: "x".into(), name: "X".into(), version: "0.1.0".into(), echo: None, summary: String::new(), uses: uses(json!({"channel": {"plugin": "telegram@claude-plugins-official"}})), settings: vec![], main: None, client: None };
         assert!(why_not(&m).unwrap().contains("channel"));
         let m = Manifest { echo: Some(">=99.0.0".into()), uses: Default::default(), ..m };
         assert_eq!(why_not(&m).unwrap(), "Needs Echo 99.0.0 or later");
@@ -1352,7 +1416,6 @@ mod tests {
         assert_eq!(rv.new_uses.len(), 1);
         assert!(update("demo", &[]).unwrap_err().to_string().contains("asks for more"));
         assert_eq!(update("demo", &rv.new_uses).unwrap().unwrap().version, "0.2.0");
-        assert!(enabled_with("deliver") && !enabled_with("routines"));
         assert_eq!(fs::read_dir(installed_dir("demo")).unwrap().count(), 1, "the old version's files are gone");
         set_enabled("demo", false).unwrap();
         assert!(enabled().is_empty());

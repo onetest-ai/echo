@@ -775,30 +775,45 @@ the rest dims (plain hex colours: WebGL reads no CSS), the camera flies to them;
   305 sections, first embedding 4 min; English and Russian queries find their moments; Claude Code with only this
   server answered a question across two calls with times and said what wasn't modeled.
 
-## Echo plugins (`plugins.rs`; plan and phases: `docs/plugins-design.md`, v3)
-Not Claude Code plugins: packages that extend Echo itself. **Declarative, no code of their own** — a manifest
-(`echo-plugin.json`: id, name, version, `echo` (>=x.y.z), summary, `uses`, `settings` of type string | bool | folder |
-secret) naming the **capabilities** it uses (`CAPABILITIES`: routines, deliver, channel, brain_source, export,
-sessions — each with its own checked value and the permission sheet's words, written by Echo, never the plugin's; one
-that isn't `ready` in this Echo → listed, not installable: "Needs a newer Echo"). **Marketplaces**: git repositories
-with `echo-marketplace.json` (name, `featured`, plugins: `{id, source: "./path" | {github, ref, path}, categories}`);
-ours, `onetest-ai/echo-plugins` (public; `ECHOCTL_PLUGIN_MARKET` points it elsewhere), is built in (hidden, never
-removed), the user adds any number (an enterprise's catalog is one more; promotion is its maintainers'). Fetching
-(`refresh`, in the app or the CLI, never the page): GitHub `owner/repo[@ref]` → the commit (`curl` the API, else `gh`)
-→ its tarball unpacked by `tar`; a git URL (`#ref`) → `git clone --depth 1` (the user's own credentials); a folder read
-where it is; every tree checked (`check_tree`: no links or special files, ≤ 5000 files / 64 MB a marketplace, ≤ 400 /
-20 MB a plugin). Files: `<config dir>/plugins.json` (markets added, installed: version, market, commit, hash of its
-files, enabled, the sheet agreed to; lock + re-read), `<config dir>/plugins/markets/<key>/` (catalog.json + the commit's
-files; refreshed when 6 h old as the window asks `/api/plugins`), `<config dir>/plugins/installed/<id>/<version>/`;
-settings per data folder `<home>/.echo/plugins/<id>/settings.json`, secrets `<config dir>/plugins/secrets/<id>.json`
-(0600, shown only as set). Install = the sheet's lines agreed (`install(id, market, agreed)` refuses anything else);
-an update asking for more waits for a new agreement. Window: Settings → Plugins (Installed · Discover · Marketplaces;
-`/api/plugins`, `/api/plugins/review`, IPC `plugin_op {op: install|update|enable|remove|set|market_add|market_refresh|
-market_hide|market_remove}`, long ones in the background under `plugins::BUSY`). CLI: `echoctl plugin list | install
-<id> [--from] [--yes] | update [<id>] | remove [--delete-data] | enable | disable | set <id> <key> [value] | marketplace
-list|add|remove|hide|show|update`. The first three — Scheduler, Telegram, Obsidian vault — are manifests in our
-marketplace; `routines` and `deliver` are ready (Scheduler installs), `channel`, `brain_source`, `export`, `sessions`
-come in phases 3–4. `plugins::enabled_with(cap)` = a plugin using it is installed and on (what switches a capability on).
+## Echo plugins (`plugins.rs`, `jshost.rs`, `claudejob.rs`; plan: `docs/plugins-design.md`, v4)
+Not Claude Code plugins: packages that extend Echo itself **with their own code** (v4, the user's call 2026-11-03, after
+dsh-desktop's cordis plugins): `echo-plugin.json` (id, name, version, `echo`, summary, `uses` — what it touches, for the
+install sheet —, `main`, `client`, `settings` of type string | bool | folder | secret) + `main.js` (the **host half**) +
+`client.js` (the **client half**) + skills, templates… Installing is trusting its code (`plugins::sheet` puts "Runs its
+own code in Echo / the window, with your rights" first). Echo keeps only primitives; a plugin's features live in its
+package. **Host half** (`jshost.rs`, `js` feature: QuickJS via `rquickjs`, C — off in the Windows cross-check): one host
+thread, one context per enabled plugin, loaded at app start and after install / switch / remove (`jshost::sync`); its
+ES module's `apply(ctx)` gets Echo's services over two Rust functions (`__host` at once, `__hostAsync` → a Promise settled
+from a worker thread) wrapped by `PRELUDE`: `ctx.command(name, fn)` (async allowed; called by `jshost::call` — the window's
+`GET /api/plugin/<id>/call/<cmd>?args=`, IPC `plugin_call` from Inbox buttons, `echoctl plugin call <id> <cmd> [json]`, which
+never runs timers: `no_timers`), `ctx.every(sec, fn)` (ticks each second in the app), `ctx.on(event)`, `ctx.store` (its
+folder `<home>/.echo/plugins/<id>/`, relative paths only), `ctx.package` (its installed files, read-only), `ctx.settings`,
+`ctx.markdown` (Echo's safe writer), `ctx.notify`, `ctx.inbox.set/clear` (`inbox.json` → Needs you items whose buttons
+call its commands), `ctx.profiles`, `ctx.deliver.status/send`, `ctx.claude.run({prompt, title, profile, model, tools,
+dir})` → `{answer, model, usage}` (`claudejob.rs`: headless on one of the user's AI profiles, the Brain narrowed to it;
+`tools` read = the guard's `RUN_MODE=routine` — the data folder, the run's own tool-results, read-only
+`guard::ROUTINE_COMMANDS` — the CLI lets such a run read projects, clients, orgs and a ledger's tree, `routine_reads` —, the Brain —, folder = the user's settings with dontAsk, skip; Echo adds the time and how to
+reach its data; the CLI is the plugin launcher with `ECHOCTL_BIN` = this Echo; `usage` = tokens by kind, cost,
+duration, turns from the result event, `projectsync::finish_run_result`). 64 MB, 5 s of JavaScript per slice.
+**Client half** (app.js `Plugins`, `loadPluginClients`): each enabled plugin's `client` imported as a module from
+`/plugin/<id>/<file>` (`window::plugin_file`, its own files only) into the window's own page (trusted, as dsh-desktop);
+`apply(ctx)`: `ctx.call`, `ctx.settings.section({id, label, icon, badge, render})` (its own Settings section under "From
+plugins", hash `#settings/<plugin>:<id>`), `ctx.settings.add` (its card in Settings → Plugins), `ctx.panels.add` (+
+`ctx.showPanel`), `ctx.slots.add(slot, {label, icon, when, run})` (`SLOTS`: `call.menu`, `calendar.event`,
+`task.actions`), `ctx.palette.add`, `ctx.ui` (Echo's helpers), `ctx.where`, `ctx.go`, `ctx.render`; switched off or removed →
+`unloadPlugin` takes all of it out. **Marketplaces**: git repositories with `echo-marketplace.json` (name, `featured`,
+plugins: `{id, source: "./path" | {github, ref, path}, categories}`); ours, `onetest-ai/echo-plugins` (public;
+`ECHOCTL_PLUGIN_MARKET` points it elsewhere), built in (hidden, never removed); the user adds any number. Fetching
+(`refresh`, never the page): GitHub `owner/repo[@ref]` → the commit (`curl`, else `gh`) → its tarball unpacked by `tar`;
+a git URL (`#ref`) → `git clone --depth 1`; a folder read where it is; every tree checked (`check_tree`: no links,
+≤ 5000 files / 64 MB a marketplace, ≤ 400 / 20 MB a plugin). Files: `<config dir>/plugins.json`,
+`<config dir>/plugins/markets/<key>/`, `<config dir>/plugins/installed/<id>/<version>/`; settings per data folder
+`<home>/.echo/plugins/<id>/settings.json`, secrets `<config dir>/plugins/secrets/<id>.json` (0600). Install = the sheet's
+lines agreed; an update asking for more waits for a new agreement. Settings → Plugins (Installed · Discover ·
+Marketplaces; IPC `plugin_op`); `echoctl plugin list|install|update|remove|enable|disable|set|call|marketplace …`.
+**Scheduler** (its package in `onetest-ai/echo-plugins/plugins/scheduler`): routines = the user's prompts on a schedule
+(`routines/<id>.md` in its store, templates in its package), runs with tokens and cost, its own Settings section; the
+Telegram and Obsidian plugins wait for `channel`, `brain_source`, `export`, `sessions`.
 **Delivery** (`deliver.rs`; to the user — mail also to the addresses set on a routine, `mail_to`, the user's call
 2026-11-03; never an address a model picked): Telegram = the user's own bot (token + their chat id in
 `<config dir>/deliver.json`, 0600; pairing reads the bot's updates once — `getUpdates` until the user's `/start` — then
@@ -814,21 +829,7 @@ zebra rows marked in the HTML (`zebra`: mail apps drop `:nth-child`), horizontal
 light and dark; Apple Mail gets Echo's dark colours) and anything
 a model wrote carries `ai_notice` ("Written by AI (Claude, <model>)… it can contain mistakes") — in every channel. Settings → Plugins → Echo sends to you (IPC `deliver_op
 {telegram_connect|telegram_pair|telegram_forget|test}`); `echoctl deliver status|telegram <token>|telegram-forget|test
-<kind>`. **Routines** (`routines.rs`): `<home>/.echo/routines/<id>.md` — frontmatter (name, schedule: `daily|weekdays|
-mon,thu HH:MM` · `every 2h|30m` (≥ 15 min), profile, model, tools `read|folder|skip`, deliver, mail_to, skip_empty,
-enabled) +
-the user's prompt. The app's scheduler (every 30 s, only with a `routines` plugin on) runs a routine when its next
-slot after the last one handled (`state.json`) has come — once, also after Echo was off through several; a new or
-rescheduled one counts from then. A run: `claude -p … stream-json` through `ai::claude_command` on its profile (lease;
-`system` in `ai::system_folder`), the Brain MCP narrowed to that profile; `read` = guard `RUN_MODE=routine`
-(`RUN_HOME`: Read/Glob/Grep in the data folder, Bash only `guard::ROUTINE_COMMANDS` — read-only `echoctl`, `*` = an id —,
-the Brain, no Edit/Write/Skill; the CLI lets such a run read projects, clients, orgs and a ledger's tree:
-`routine_reads`), `folder` = the user's settings with `dontAsk`, `skip` = `--dangerously-skip-permissions` — the
-user's choice, the prompt being theirs. The answer (`NOTHING` with skip_empty → nothing sent) goes to each `deliver`;
-`routines/runs/<id>/<stamp>/` (prompt, log, answer, result; 20 kept); a failed run → notification + Inbox
-(`routine:<id>`: Run again / Sign in…). `projectsync::finish_run` follows any such stream-json run (the sync's too).
-Window: the Scheduler's card → Routines (list, Run now, switch, editor; `/api/routines`, IPC `routine_op
-{save|remove|enable|run}`). `echoctl routine list|show|add|remove|enable|disable|run [--no-deliver]`.
+<kind>`.
 
 ## Live view (mod) and automation
 `plugin/hooks/register.tsx` is a Claude Code mod (state contract `plugin/types/index.d.ts`, pure helpers

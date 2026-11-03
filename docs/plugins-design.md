@@ -1,6 +1,38 @@
 # Echo plugins
 
-Status: **v3, 2026-11-03** — the plan we build from. v2 (2026-10-29, below under *v2: exploration*) is kept for
+## v4 (2026-11-03, later the same day) — plugins carry their own code
+
+The user: "код плагина должен доставляться плагином — Echo расширяется плагинами, которые добавляют в Echo новый
+функционал; код не внутри Echo". This replaces v3's "declarative package, no code": Echo is a **core + services +
+slots**, a plugin brings its features. Modelled on **dsh-desktop** (cordis plugins: a package with two halves, each
+`export function apply(ctx)`, services injected, everything a plugin registers torn down with it).
+
+```
+echo-plugin.json      id, name, version, echo, summary, uses (what it touches, shown before install),
+                      main (host half), client (client half), settings
+main.js               host half — runs inside Echo (QuickJS), also with the window closed
+client.js             client half — runs in the Echo window's own page (trusted, like dsh-desktop)
+skills/, assets…      Claude Code skills, templates, icons
+```
+
+- **Host half** (`plugins/host.rs`, QuickJS via `rquickjs`, one context per plugin on one host thread): `apply(ctx)`
+  with Echo's services — `ctx.command(name, fn)` (callable from its client half, ⌘K, `echoctl plugin call`),
+  `ctx.every(sec, fn)`, `ctx.store` (its folder in the data folder), `ctx.settings`, `ctx.claude.run({prompt,
+  profile, model, tools})` (Echo's guarded run, a Promise), `ctx.deliver.send(kind, msg)` (Telegram / Teams / mail),
+  `ctx.markdown(md)` (Echo's safe writer), `ctx.notify`, `ctx.inbox`, `ctx.log`.
+- **Client half** (the window loads `/plugin/<id>/client.js` as a module): `apply(ctx)` with `ctx.call(cmd, args)`,
+  `ctx.slots.add(slot, item)` (buttons in Echo's cards: `call.menu`, `task.actions`, `thread.profile`,
+  `calendar.event`…), `ctx.panels.add(view)` (right / bottom panel views), `ctx.activities.add`, `ctx.settings.add`
+  (its card in Settings → Plugins), `ctx.palette.add`, `ctx.ui` (Echo's own helpers, so plugins look like Echo).
+- **Trust**: the user's choice — install = trust (same page, as dsh-desktop); the sheet before install says what the
+  plugin touches (`uses`), in Echo's words.
+- **Echo keeps only primitives**: the guarded Claude run, Graph / Telegram sending, the safe Markdown writer, the
+  store, timers, the slots. The Scheduler's routines (files, schedule, editor, the mail's shape) live in its package.
+- Marketplaces, install, update, the permission sheet: as in v3 below.
+
+---
+
+Status of what follows: **v3, 2026-11-03** — superseded where v4 differs. v2 (2026-10-29, below under *v2: exploration*) is kept for
 its UI decisions; where they disagree, v3 wins. Since v2 the terminal, the task tracker (Threads' work ledger),
 Review (→ Needs you / Inbox) and the ⌘K palette became core, so its two motivating examples are gone.
 

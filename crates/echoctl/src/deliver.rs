@@ -1,7 +1,7 @@
 //! Sending text to the user (`docs/plugins-design.md`, the `deliver` capability): their own Telegram
 //! bot's chat with them, their Teams chat with themselves, their own mailbox — or, for mail only, the
-//! addresses the user set on a routine (`Msg::mail_to`; 2026-11-03). Used by routines (`routines.rs`);
-//! never asked by a model, never to an address a model chose.
+//! addresses the user set on a routine (`Msg::mail_to`; 2026-11-03). Plugins send through it
+//! (`ctx.deliver.send`); never asked by a model, never to an address a model chose.
 //!
 //! - **Telegram**: the user's own bot (from @BotFather). Echo keeps its token and, once the user has
 //!   pressed Start in the bot's chat, the user's chat id (`<config dir>/deliver.json`, 0600). Pairing

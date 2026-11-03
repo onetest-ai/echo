@@ -225,7 +225,12 @@ fn claude(profile: &crate::ai::Profile, model: Option<&str>, plugin: &Path, cwd:
 /// Follow a headless Claude Code run started with `--output-format stream-json`: its steps into `log`,
 /// stopped after `timeout` or when it is too old for the guard (`what` it was for), and its final
 /// answer — or why there is none. Shared by the project sync and routines.
-pub fn finish_run(mut child: std::process::Child, log: &mut fs::File, timeout: Duration, what: &str, quit: &str) -> Result<String> {
+pub fn finish_run(child: std::process::Child, log: &mut fs::File, timeout: Duration, what: &str, quit: &str) -> Result<String> {
+    finish_run_result(child, log, timeout, what, quit).map(|(text, _)| text)
+}
+
+/// The same, with Claude Code's result event (its usage, cost, duration, turns).
+pub fn finish_run_result(mut child: std::process::Child, log: &mut fs::File, timeout: Duration, what: &str, quit: &str) -> Result<(String, Value)> {
     let pid = child.id();
     let err = child.stderr.take().map(|e| std::thread::spawn(move || BufReader::new(e).lines().map_while(Result::ok).collect::<Vec<_>>().join("\n")));
     let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -282,7 +287,7 @@ pub fn finish_run(mut child: std::process::Child, log: &mut fs::File, timeout: D
     if r["is_error"] == true {
         bail!("Claude Code failed: {}", text.lines().next().unwrap_or("no reason given"));
     }
-    Ok(text)
+    Ok((text, r))
 }
 
 /// Projects whose new calls are due a sync: not closed; a call of theirs ended ≥ 15 min ago and

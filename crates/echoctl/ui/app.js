@@ -521,7 +521,7 @@ function route() {
   const h = decodeURIComponent(location.hash.slice(1))
   const cm = h.match(/^calendar(?:\/(day|week))?$/)
   if (cm) { S.view = 'calendar'; if (cm[1]) S.cal.mode = cm[1]; return }
-  const sm = h.match(/^settings(?:\/([a-z]+))?$/)
+  const sm = h.match(/^settings(?:\/([a-z0-9:-]+))?$/)
   if (sm) { S.view = 'settings'; if (sm[1]) S.setSection = sm[1]; return }
   if (h === 'tasks') { S.view = 'tasks'; return }
   const bm = h.match(/^brain(?:\/(\w+))?$/)
@@ -867,6 +867,7 @@ function callMenu(c) {
     c.notes ? item('reveal-minutes', `${SHOW_FILE.replace('Show in', 'Show minutes in')}`) : '',
     c.notes ? item('write-notes', 'Write minutes again') : '',
     item('ask-claude', 'Ask Claude about this call'),
+    slotItems('call.menu', { kind: 'call', call: c }, 'menu'),
     '<div class="menu-sep" role="separator"></div>',
     item('ask-delete', 'Delete…', ' danger'),
   ].join('')
@@ -1858,7 +1859,7 @@ function eventDetail(e, now) {
     <button class="btn ghost close" data-calclose="1" aria-label="Close">Close</button>
     <h2 class="selectable">${esc(e.subject)}</h2><div class="when">${esc(when)}</div>
     <dl>${e.organizer ? `<dt>Organizer</dt><dd>${esc(e.organizer)}</dd>` : ''}${e.people ? `<dt>People</dt><dd>${e.people}</dd>` : ''}${e.location ? `<dt>Where</dt><dd>${esc(e.location)}</dd>` : ''}${e.recorded ? `<dt>${e.recorded.imported ? 'Call' : 'Recording'}</dt><dd>${e.recorded.imported ? 'from the Teams transcript' : STATUS[e.recorded.status] || esc(e.recorded.status)}${e.recorded.minutes ? `, ${e.recorded.minutes} min` : ''}</dd>` : ''}</dl>
-    ${acts ? `<div class="acts">${acts}</div>` : ''}${why ? `<p class="why">${esc(why)}</p>` : ''}
+    ${acts || slotItems('calendar.event', { kind: 'event', event: e }) ? `<div class="acts">${acts}${slotItems('calendar.event', { kind: 'event', event: e })}</div>` : ''}${why ? `<p class="why">${esc(why)}</p>` : ''}
     ${eventProjects(e)}
     ${e.recap && e.recap.length ? `<div><b style="font-size:12px">Last time</b><ul>${e.recap.map((r) => `<li>${esc(r)}</li>`).join('')}</ul></div>` : ''}
   </aside>`
@@ -1910,16 +1911,27 @@ const LANG_LIST = ['en', 'uk', 'ru', 'es', 'de', 'fr', 'it', 'pl', 'pt', 'nl', '
 
 function settingsView() {
   const st = S.settings
-  const sec = SETTINGS_SECTIONS.some(([id]) => id === S.setSection) ? S.setSection : 'general'
+  const own = Plugins.sections.find((x) => x.id === S.setSection)
+  const sec = own ? own.id : SETTINGS_SECTIONS.some(([id]) => id === S.setSection) ? S.setSection : 'general'
   const q = (S.setQuery || '').trim().toLowerCase()
   const nav = SETTINGS_SECTIONS.filter(([, l]) => !q || l.toLowerCase().includes(q)).map(([id, label]) => {
     const warn = id === 'health' && settingsWarnings() ? `<span class="set-warn">⚠ ${settingsWarnings()}</span>` : ''
     return `<button class="set-nav${id === sec ? ' on' : ''}" data-setsec="${id}">${esc(label)}${warn}</button>`
   }).join('')
-  const body = !st ? `<div class="skeleton" style="padding:20px">${'<i></i>'.repeat(6)}</div>`
+  // Plugins' own sections (`ctx.settings.section`), under their own heading.
+  const mine = Plugins.sections.filter((x) => !q || x.label.toLowerCase().includes(q))
+  const pnav = mine.length ? `<div class="set-grp">From plugins</div>` + mine.map((x) => {
+    let badge = ''
+    try { badge = x.badge ? x.badge() : '' } catch { /* none */ }
+    return `<button class="set-nav${x.id === sec ? ' on' : ''}" data-setsec="${esc(x.id)}">${x.icon || ''}${esc(x.label)}${badge !== '' && badge != null ? `<span class="set-n">${esc(String(badge))}</span>` : ''}</button>`
+  }).join('') : ''
+  const body = own ? (() => { try { return own.render() } catch (e) { return `<p class="error">${esc(own.label)}: ${esc(String((e && e.message) || e))}</p>` } })()
+    : !st ? `<div class="skeleton" style="padding:20px">${'<i></i>'.repeat(6)}</div>`
     : st.config_error ? `<p class="error">Echo's settings (config.json) can't be read: ${esc(st.config_error)}</p>`
     : (SETTINGS_BODY[sec] || SETTINGS_BODY.general)(st)
-  return `<div class="settings"><aside class="set-side"><h1>Settings</h1><input class="search" id="set-q" placeholder="Search settings" value="${esc(S.setQuery || '')}" aria-label="Search settings">${nav}</aside>
+  if (own) return `<div class="settings"><aside class="set-side"><h1>Settings</h1><input class="search" id="set-q" placeholder="Search settings" value="${esc(S.setQuery || '')}" aria-label="Search settings">${nav}${pnav}</aside>
+    <div class="set-main plug-main">${body}</div></div>`
+  return `<div class="settings"><aside class="set-side"><h1>Settings</h1><input class="search" id="set-q" placeholder="Search settings" value="${esc(S.setQuery || '')}" aria-label="Search settings">${nav}${pnav}</aside>
     <div class="set-main">${body}<p class="set-foot">Saved as you change it.</p></div></div>`
 }
 
@@ -2010,22 +2022,24 @@ document.addEventListener('click', (e) => {
 })
 // ── Settings → Plugins: installed, offered by the marketplaces, the marketplaces themselves. Every change
 // runs in the app (IPC `plugin_op`); installs and fetches in the background, shown from `busy`.
-async function loadPlugins() {
+async function loadPluginsView() {
   try { S.plugins = await get('api/plugins') } catch { /* app restarting */ }
   const p = S.plugins
+  // What is installed and on may have changed: the window's plugin parts follow.
+  if (p && !p.error) loadPluginClients(p)
   // While something runs (a fetch, an install), read again until it ends.
-  if (p && p.busy && Object.keys(p.busy).length) setTimeout(() => { if (S.view === 'settings' && S.setSection === 'plugins') loadPlugins().then(render) }, 1000)
+  if (p && p.busy && Object.keys(p.busy).length) setTimeout(() => { if (S.view === 'settings' && S.setSection === 'plugins') loadPluginsView().then(render) }, 1000)
 }
 function pluginOp(op, body = {}) {
   send({ cmd: 'plugin_op', op, ...body })
-  setTimeout(() => loadPlugins().then(render), 300)
+  setTimeout(() => loadPluginsView().then(render), 300)
 }
 const plUses = (uses) => (uses || []).length ? `<ul class="pl-uses">${uses.map((u) => `<li>${esc(u)}</li>`).join('')}</ul>` : '<div class="set-sub">Uses nothing of Echo\'s.</div>'
 const plBusy = (p, key) => p.busy && p.busy[key]
 const plErr = (p, key) => p.errors && p.errors[key] ? `<div class="error">${esc(p.errors[key])}</div>` : ''
 function pluginsSettings() {
   const p = S.plugins
-  if (!p) { if (!S.pluginsLoading) { S.pluginsLoading = true; loadPlugins().then(() => { S.pluginsLoading = false; render() }) } return '<h2>Plugins</h2><div class="skeleton" style="padding:20px"><i></i><i></i><i></i></div>' }
+  if (!p) { if (!S.pluginsLoading) { S.pluginsLoading = true; loadPluginsView().then(() => { S.pluginsLoading = false; render() }) } return '<h2>Plugins</h2><div class="skeleton" style="padding:20px"><i></i><i></i><i></i></div>' }
   if (p.error) return `<h2>Plugins</h2><p class="error">${esc(p.error)}</p>`
   const tab = S.plTab || ((p.installed || []).length ? 'installed' : 'discover')
   const ups = (p.installed || []).filter((x) => x.update).length
@@ -2053,36 +2067,35 @@ function plInstalled(p) {
     ]) + plErr(p, `plugin:${x.id}`) + sheet + rm + (x.enabled ? plExtras(x) : '')
   }).join('')
 }
-/** What an installed plugin's capabilities add to its card: where Echo sends things (deliver, once), its routines. */
+/** What an installed plugin adds to its card: its own settings (its client half's `ctx.settings.add`),
+ *  and — once, for every plugin that sends — where Echo sends things to you. */
 const plShown = new Set()
 function plExtras(x) {
-  const caps = x.caps || []
-  if (!caps.includes('deliver') && !caps.includes('routines')) return ''
-  const R = S.routines
-  if (!R) { if (!S.routinesLoading) { S.routinesLoading = true; loadRoutines().then(() => { S.routinesLoading = false; render() }) } return '' }
   let out = ''
-  if (caps.includes('routines')) out += routinesCard(R)
-  if (caps.includes('deliver') && !plShown.has('deliver')) { plShown.add('deliver'); out += deliverCard(R) }
+  const own = Plugins.settings[x.id]
+  if (own) {
+    let html = ''
+    try { html = own.render() } catch (e) { html = `<p class="error">${esc(String(e))}</p>` }
+    out += `<div class="plug-own" data-plug-own="${esc(x.id)}">${html}</div>`
+  } else if (Plugins.errors[x.id]) out += `<p class="error">${esc(x.name)}'s window part didn't load: ${esc(Plugins.errors[x.id])}</p>`
+  if ((x.caps || []).includes('deliver') && !plShown.has('deliver')) {
+    plShown.add('deliver')
+    if (!S.deliver) { if (!S.deliverLoading) { S.deliverLoading = true; loadDeliver().then(() => { S.deliverLoading = false; render() }) } } else out += deliverCard(S.deliver)
+  }
   return out
 }
-async function loadRoutines() {
-  try { S.routines = await get('api/routines') } catch { /* app restarting */ }
-  const R = S.routines
-  const busy = R && ((R.routines || []).some((x) => x.running) || (R.deliver_busy && R.deliver_busy.doing))
-  if (busy) setTimeout(() => { if (S.view === 'settings' && S.setSection === 'plugins') loadRoutines().then(render) }, 1500)
-}
-function routineOp(op, body = {}) {
-  send({ cmd: 'routine_op', op, ...body })
-  setTimeout(() => loadRoutines().then(render), 400)
+async function loadDeliver() {
+  try { S.deliver = await get('api/deliver') } catch { /* app restarting */ }
+  if (S.deliver && S.deliver.busy && S.deliver.busy.doing) setTimeout(() => { if (S.view === 'settings' && S.setSection === 'plugins') loadDeliver().then(render) }, 1500)
 }
 function deliverOp(op, body = {}) {
   send({ cmd: 'deliver_op', op, ...body })
-  setTimeout(() => loadRoutines().then(render), 500)
+  setTimeout(() => loadDeliver().then(render), 500)
 }
 const DELIVER_LABEL = { telegram: 'Telegram', teams: 'Teams', mail: 'Mail' }
 /** Where Echo sends things to you: your own bot, your Teams chat with yourself, your mailbox. */
-function deliverCard(R) {
-  const d = R.deliver || {}, tg = d.telegram, b = R.deliver_busy && R.deliver_busy.what === 'telegram' ? R.deliver_busy : null
+function deliverCard(d) {
+  const tg = d.telegram, b = d.busy && d.busy.what === 'telegram' ? d.busy : null
   const test = (k) => `<button class="btn ghost" data-dl-test="${k}">Send a test</button>`
   let tgSub, tgCtl
   if (b && b.doing) {
@@ -2103,172 +2116,113 @@ function deliverCard(R) {
   return setCard('Echo sends to you', [
     setRow('Telegram', tgSub, tgCtl),
     setRow('Teams', `Your chat with yourself. ${ms}`, d.teams ? test('teams') : ''),
-    setRow('Mail', `Your own mailbox (not kept in Sent). ${ms}`, d.mail ? test('mail') : ''),
+    setRow('Mail', `Your own mailbox — or the addresses a plugin was given. ${ms}`, d.mail ? test('mail') : ''),
   ])
 }
-function routinesCard(R) {
-  const list = R.routines || []
-  const rows = list.map((x) => {
-    if (x.error) return setRow(`${esc(x.id)} <span class="tag">can't be read</span>`, `<span class="error">${esc(x.error)}</span>`, `<button class="btn ghost" data-rt-del="${esc(x.id)}">Delete</button>`)
-    if (S.rtEdit && S.rtEdit.id === x.id) return ''
-    const last = x.last ? `Last: ${esc(relDay(String(x.last.at).slice(0, 10)))} ${esc(String(x.last.at).slice(11, 16))} — ${x.last.state === 'failed' ? `<span class="error">${esc(x.last.message || 'failed')}</span>` : x.last.state === 'empty' ? 'nothing to send' : ((x.last.sent || []).length ? `sent to ${x.last.sent.map((k) => DELIVER_LABEL[k] || k).join(', ')}` : 'answered (kept in its runs)')}` : 'Not run yet'
-    const next = x.enabled && x.next ? ` · next ${esc(relDay(String(x.next).slice(0, 10)))} ${esc(String(x.next).slice(11, 16))}` : x.enabled ? '' : ' · off'
-    const to = (x.deliver || []).map((k) => k === 'mail' && (x.mail_to || []).length ? `Mail (${x.mail_to.join(', ')})` : DELIVER_LABEL[k] || k).join(', ') || 'nowhere — answer kept in its runs'
-    const ctl = `${x.running ? '<span class="set-sub">Running…</span>' : `<button class="btn ghost" data-rt-run="${esc(x.id)}">Run now</button>`}<button class="btn ghost" data-rt-edit="${esc(x.id)}">Edit</button>` +
-      `<button class="sw${x.enabled ? ' on' : ''}" role="switch" aria-checked="${!!x.enabled}" aria-label="${esc(x.name)} on" data-rt-on="${esc(x.id)}" data-on="${!x.enabled}"></button>`
-    return setRow(esc(x.name), `${esc(x.when)} · to ${esc(to)} · ${x.tools === 'read' ? 'reads only' : x.tools === 'folder' ? 'your folder session\'s permissions' : 'asks nothing'}${next}<br>${last}`, ctl)
-  })
-  const add = S.rtEdit ? '' : setRow('', '', '<button class="btn" data-rt-new>+ New routine</button>')
-  return setCard('Routines', [...rows, ...(list.length ? [] : [setRow('No routines yet', 'A prompt Claude runs on a schedule — "every Monday at 9, what do I owe this week?" — the answer sent to you.', '')]), add]) + (S.rtEdit ? routineEditor(R, S.rtEdit) : '')
-}
-function routineEditor(R, e) {
-  const d = R.deliver || {}
-  const profiles = (R.profiles || []).map((p) => `<option value="${esc(p.id)}"${e.profile === p.id ? ' selected' : ''}>${esc(p.name)}${p.id === R.default_profile ? ' (default)' : ''}</option>`).join('')
-  const tools = [['read', 'Reads only', 'Echo\'s data folder, the Brain and read-only Echo commands; changes nothing'], ['folder', 'Your folder session\'s permissions', 'What your Claude Code settings allow; anything needing a prompt is refused'], ['skip', 'Asks nothing', 'Every tool, no prompts (--dangerously-skip-permissions)']]
-  const can = { telegram: d.telegram && d.telegram.paired, teams: d.teams, mail: d.mail }
-  return `<div class="pl-sheet rt-edit">
-    <b>${e.id ? 'Edit routine' : 'New routine'}</b>
-    <label class="rt-f"><span>Name</span><input class="set-in" id="rt-name" value="${esc(e.name || '')}" placeholder="Monday asks"></label>
-    <label class="rt-f"><span>When</span><input class="set-in" id="rt-schedule" value="${esc(e.schedule || '')}" placeholder="mon 09:00" spellcheck="false"><span class="set-sub">daily 09:00 · weekdays 18:30 · mon,thu 09:00 · every 2h · every 30m</span></label>
-    <label class="rt-f"><span>Prompt</span><textarea class="set-in rt-prompt" id="rt-prompt" placeholder="What do I owe this week, and what is waiting for others? Group by client.">${esc(e.prompt || '')}</textarea></label>
-    <div class="rt-f"><span>Send to</span><div class="rt-checks">${['telegram', 'teams', 'mail'].map((k) => `<label><input type="checkbox" data-rt-to="${k}"${(e.deliver || []).includes(k) ? ' checked' : ''}${can[k] ? '' : ' disabled'}> ${DELIVER_LABEL[k]}${can[k] ? '' : ' <span class="set-sub">(not set up)</span>'}</label>`).join('')}
-      <label class="rt-mailto">Mail to <input class="set-in" id="rt-mailto" value="${esc((e.mail_to || []).join(', '))}" placeholder="you — or addresses, comma-separated" spellcheck="false"></label>
-      <span class="set-sub">Mail to others goes from your account, as written — nobody reviews it first.</span>
-      <label><input type="checkbox" id="rt-skip"${e.skip_empty !== false ? ' checked' : ''}> Send nothing when there's nothing worth sending</label></div></div>
-    <div class="rt-f"><span>Permissions</span><div class="rt-checks">${tools.map(([v, l, h]) => `<label><input type="radio" name="rt-tools" value="${v}"${(e.tools || 'read') === v ? ' checked' : ''}> ${l} <span class="set-sub">— ${h}</span></label>`).join('')}</div></div>
-    <label class="rt-f"><span>AI profile</span><select class="set-in" id="rt-profile"><option value=""${!e.profile ? ' selected' : ''}>The default</option>${profiles}</select><input class="set-in" id="rt-model" value="${esc(e.model || '')}" placeholder="model (empty: the profile's minutes model)" spellcheck="false"></label>
-    <div class="pl-sheet-btns">${e.id ? `<button class="btn ghost danger" data-rt-del="${esc(e.id)}">Delete</button><span class="grow"></span>` : ''}<button class="btn" data-rt-cancel>Cancel</button><button class="btn primary" data-rt-save>Save</button></div>
-  </div>`
-}
-function routineFromForm() {
-  const v = (id) => ($(id) || {}).value || ''
-  return {
-    id: S.rtEdit.id || '', name: v('#rt-name'), schedule: v('#rt-schedule'), prompt: v('#rt-prompt'), profile: v('#rt-profile'), model: v('#rt-model'),
-    tools: (document.querySelector('input[name="rt-tools"]:checked') || {}).value || 'read',
-    deliver: [...document.querySelectorAll('[data-rt-to]')].filter((c) => c.checked).map((c) => c.dataset.rtTo),
-    mail_to: v('#rt-mailto').split(/[,;\s]+/).map((a) => a.trim()).filter(Boolean),
-    skip_empty: !!($('#rt-skip') || {}).checked, enabled: S.rtEdit.enabled !== false,
-  }
-}
 document.addEventListener('click', (e) => {
-  const t = e.target.closest && e.target.closest('[data-rt-new],[data-rt-edit],[data-rt-cancel],[data-rt-save],[data-rt-del],[data-rt-run],[data-rt-on],[data-dl-connect],[data-dl-pair],[data-dl-forget],[data-dl-test]')
+  const t = e.target.closest && e.target.closest('[data-dl-connect],[data-dl-pair],[data-dl-forget],[data-dl-test]')
   if (!t) return
   const d = t.dataset
-  if ('rtNew' in d) { S.rtEdit = { tools: 'read', skip_empty: true, deliver: [] }; return render() }
-  if (d.rtEdit) { S.rtEdit = { ...(S.routines.routines.find((x) => x.id === d.rtEdit) || {}) }; return render() }
-  if ('rtCancel' in d) { S.rtEdit = null; return render() }
-  if ('rtSave' in d) {
-    const r = routineFromForm()
-    S.rtEdit = { ...S.rtEdit, ...r }
-    send({ cmd: 'routine_op', op: 'save', routine: r })
-    // Closed once the list holds it (an error comes back as a notice and the form stays).
-    setTimeout(() => loadRoutines().then(() => { if (S.routines && S.routines.routines.some((x) => x.name === r.name && x.schedule === r.schedule)) S.rtEdit = null; render() }), 400)
-    return
-  }
-  if (d.rtDel) { if (S.rtEdit && S.rtEdit.id === d.rtDel) S.rtEdit = null; return routineOp('remove', { id: d.rtDel }) }
-  if (d.rtRun) return routineOp('run', { id: d.rtRun })
-  if (d.rtOn) return routineOp('enable', { id: d.rtOn, on: d.on === 'true' })
   if ('dlConnect' in d) { const token = ($('#dl-token') || {}).value || ''; if (token.trim()) deliverOp('telegram_connect', { token: token.trim() }); return }
   if ('dlPair' in d) return deliverOp('telegram_pair')
   if ('dlForget' in d) return deliverOp('telegram_forget')
   if (d.dlTest) return deliverOp('test', { kind: d.dlTest })
 })
-function plField(id, d) {
-  const attrs = `data-pl-set="${esc(id)}" data-key="${esc(d.key)}" aria-label="${esc(d.label)}"`
-  if (d.type === 'bool') return `<button class="sw${d.value ? ' on' : ''}" role="switch" aria-checked="${!!d.value}" ${attrs} data-val="${!d.value}"></button>`
-  if (d.type === 'secret') return `<input class="set-in" type="password" ${attrs} placeholder="${d.set ? '•••• set — type to replace' : 'not set'}">`
-  return `<input class="set-in" ${attrs} value="${esc(d.value == null ? '' : String(d.value))}" placeholder="${d.type === 'folder' ? 'a folder on this computer' : ''}" spellcheck="false">`
+
+// ── Plugins' client halves (docs/plugins-design.md, v4) ──
+// Each enabled plugin's `client` module is loaded into this page (trusted, as in dsh-desktop) and its
+// `apply(ctx)` adds to Echo: buttons in Echo's own places (slots), panel views, its card in Settings →
+// Plugins, ⌘K actions. `ctx.call` runs a command of its host half (`/api/plugin/<id>/call/<command>`).
+// Everything a plugin added goes when it is switched off or removed (`unloadPlugin`).
+const Plugins = {
+  /** slot name → [{plugin, id, label, icon, when(target), run(target)}] */
+  slots: {},
+  /** plugin id → {render() → html} */
+  settings: {},
+  /** Plugins' own Settings sections: [{plugin, id, label, icon, badge(), render()}] */
+  sections: [],
+  /** [{plugin, label, run, group, keywords}] */
+  palette: [],
+  loaded: {},
+  errors: {},
+  /** What each slot was last drawn for: its buttons run on that. */
+  targets: {},
 }
-function plDiscover(p) {
-  const q = (S.plQuery || '').trim().toLowerCase()
-  const list = (p.discover || []).filter((x) => !q || `${x.name} ${x.summary} ${x.id} ${(x.categories || []).join(' ')}`.toLowerCase().includes(q))
-    .sort((a, b) => (b.featured - a.featured) || (b.built_in - a.built_in) || a.name.localeCompare(b.name))
-  const search = `<input class="search" id="pl-q" placeholder="Search plugins" value="${esc(S.plQuery || '')}" aria-label="Search plugins">`
-  const reading = plBusy(p, 'markets') ? '<p class="set-sub">Reading marketplaces…</p>' : ''
-  if (!list.length) return search + reading + `<p class="set-sub">${q ? 'Nothing matches.' : 'Your marketplaces offer nothing yet' + ((p.markets || []).some((m) => m.error) ? ' — one can\'t be read (Marketplaces).' : '.')}</p>`
-  return search + reading + list.map((x) => {
-    const busy = plBusy(p, `plugin:${x.id}`)
-    const ctl = x.installed === true ? '<span class="set-ok">Installed ✓</span>'
-      : x.installed === false ? '<span class="set-sub">Installed from another marketplace</span>'
-      : x.why_not ? `<span class="tag" title="${esc(x.why_not)}">${!x.version ? "Can't be read" : 'Needs a newer Echo'}</span>`
-      : `<button class="btn primary" data-pl-review="${esc(x.id)}" data-market="${esc(x.market)}"${busy ? ' disabled' : ''}>${busy ? esc(busy) : 'Install…'}</button>`
-    const sheet = S.plSheet && S.plSheet.install === x.id && S.plSheet.market === x.market ? plSheet(S.plSheet) : ''
-    return setCard('', [setRow(`${esc(x.name)} ${x.version ? `<span class="tag">${esc(x.version)}</span>` : ''} <span class="tag${x.built_in ? ' rec' : ''}">${esc(x.market)}</span>`,
-      `${esc(x.summary || '')}${(x.uses || []).length ? plUses(x.uses) : ''}${x.why_not && x.installed == null ? `<div class="pl-why">${esc(x.why_not)}</div>` : ''}`, ctl)]) + plErr(p, `plugin:${x.id}`) + sheet
-  }).join('')
+const SLOTS = ['call.menu', 'calendar.event', 'task.actions']
+function pluginCtx(id) {
+  const add = (list, item) => { list.push({ ...item, plugin: id }); render() }
+  return {
+    id,
+    call: async (command, args = {}) => {
+      const r = await get(`api/plugin/${encodeURIComponent(id)}/call/${encodeURIComponent(command)}?args=${encodeURIComponent(JSON.stringify(args))}`)
+      if (r && r.error) throw new Error(r.error)
+      return r ? r.value : null
+    },
+    slots: {
+      list: () => SLOTS.slice(),
+      add: (slot, item) => { if (!SLOTS.includes(slot)) throw new Error(`Echo has no slot “${slot}” (${SLOTS.join(', ')})`); add(Plugins.slots[slot] = Plugins.slots[slot] || [], item) },
+    },
+    panels: { add: (v) => { PANEL_VIEWS.push({ area: 'right', ...v, id: `${id}:${v.id}`, plugin: id }); render() } },
+    settings: {
+      /** Its card in Settings → Plugins. */
+      add: (v) => { Plugins.settings[id] = v; render() },
+      /** A section of its own in Settings ("From plugins"); its id is `<plugin>:<id>` in the hash. */
+      section: (v) => { Plugins.sections.push({ ...v, id: `${id}:${v.id || 'main'}`, plugin: id }); render() },
+    },
+    /** Open one of its panel views (`ctx.panels.add`). */
+    showPanel: (view) => { Layout.show(`${id}:${view}`, panelViews()); layoutChanged() },
+    /** Where the window is: the activity and the Settings section (`#settings/<plugin>:<id>`). */
+    where: () => ({ view: S.view, section: S.setSection }),
+    go: (hash) => go(hash),
+    palette: { add: (item) => add(Plugins.palette, item) },
+    /** Echo's own pieces, so a plugin looks like Echo. */
+    ui: { esc, setRow, setCard, sw, ICON, relDay, ago, notice: (text) => { S.notice = text; render() } },
+    render: () => render(),
+  }
 }
-/** The permission sheet: what the plugin will use, in Echo's words, before anything is installed. */
-function plSheet(sh) {
-  const r = sh.review
-  if (!r) return '<div class="confirm"><span>Reading what it uses…</span></div>'
-  if (r.error) return `<div class="confirm"><span class="error">${esc(r.error)}</span><button class="btn" data-pl-sheet-cancel>Close</button></div>`
-  const lines = sh.update ? r.new_uses : r.uses
-  const outside = S.plugins && !(S.plugins.markets || []).some((m) => m.name === r.market && m.built_in)
-  const who = outside ? `<div class="set-sub">Listed by ${esc(r.market)} — Echo hasn't reviewed it.</div>` : ''
-  const go = sh.update ? `Update to ${esc(r.version)}` : 'Install'
-  return `<div class="pl-sheet"><b>${sh.update ? `${esc(r.name)} ${esc(r.version)} asks for more` : `Install ${esc(r.name)} ${esc(r.version)}?`}</b>
-    ${plUses(lines)}<div class="set-sub">From ${esc(r.market)} · commit <code>${esc((r.commit || '').slice(0, 10))}</code></div>${who}
-    ${r.blocked ? `<div class="error">${esc(r.blocked)}</div>` : ''}
-    <div class="pl-sheet-btns"><button class="btn${outside ? ' primary' : ''}" data-pl-sheet-cancel${outside ? ' autofocus' : ''}>Cancel</button>${r.blocked ? '' : `<button class="btn${outside ? '' : ' primary'}" data-pl-sheet-go>${go}</button>`}</div></div>`
+/** Load the client halves of the enabled plugins not loaded yet (or at another version). */
+async function loadPluginClients(snapshot) {
+  let p = snapshot
+  if (!p) try { p = await get('api/plugins') } catch { return }
+  const want = (p.installed || []).filter((x) => x.enabled && x.client)
+  for (const id of Object.keys(Plugins.loaded)) if (!want.some((x) => x.id === id && x.version === Plugins.loaded[id])) unloadPlugin(id)
+  for (const x of want) {
+    if (Plugins.loaded[x.id]) continue
+    Plugins.loaded[x.id] = x.version
+    try {
+      const m = await import(new URL(`plugin/${encodeURIComponent(x.id)}/${x.client}?v=${encodeURIComponent(x.version)}`, location.href).href)
+      if (typeof m.apply !== 'function') throw new Error(`${x.client} exports no apply(ctx)`)
+      await m.apply(pluginCtx(x.id))
+      delete Plugins.errors[x.id]
+    } catch (e) { Plugins.errors[x.id] = String((e && e.message) || e) }
+  }
+  render()
 }
-function plMarkets(p) {
-  const rows = p.markets.map((m) => {
-    const busy = plBusy(p, `market:${m.name}`)
-    const state = busy ? esc(busy) : m.error ? `<span class="error">${esc(m.error)}</span>` : m.fetched_at ? `${m.count} plugin${m.count === 1 ? '' : 's'} · read ${esc(relDay(String(m.fetched_at).slice(0, 10)))}` : 'Not read yet'
-    const ctl = `<button class="btn ghost" data-pl-mrefresh="${esc(m.name)}"${busy ? ' disabled' : ''}>Read again</button>` +
-      `<button class="btn ghost" data-pl-mhide="${esc(m.name)}" data-hidden="${!m.hidden}">${m.hidden ? 'Show' : 'Hide'}</button>` +
-      (m.built_in ? '' : `<button class="btn ghost" data-pl-mremove="${esc(m.name)}">Remove</button>`)
-    return setRow(`${esc(m.name)}${m.title && m.title !== m.name ? ` <span class="set-sub">(calls itself ${esc(m.title)})</span>` : ''}${m.built_in ? ' <span class="tag rec">built in</span>' : ''}${m.hidden ? ' <span class="tag">hidden</span>' : ''}`, `<code>${esc(m.source)}</code><br>${state}`, ctl)
-  })
-  const add = setRow('Add a marketplace', 'Your team\'s or company\'s catalog: <code>owner/repo</code> on GitHub, any git address (<code>https://…</code>, private ones through your own git sign-in), or a folder. It needs <code>echo-marketplace.json</code> at its root.',
-    `<input class="set-in" id="pl-msrc" placeholder="owner/repo" aria-label="Marketplace" spellcheck="false"><input class="set-in" id="pl-mname" placeholder="name (optional)" aria-label="Name" spellcheck="false" style="width:120px"><button class="btn primary" data-pl-madd>Add</button>`)
-  return setCard('', rows) + Object.keys(p.errors || {}).filter((k) => k.startsWith('market:')).map((k) => plErr(p, k)).join('') + setCard('', [add])
+function unloadPlugin(id) {
+  for (const k of Object.keys(Plugins.slots)) Plugins.slots[k] = Plugins.slots[k].filter((x) => x.plugin !== id)
+  Plugins.palette = Plugins.palette.filter((x) => x.plugin !== id)
+  Plugins.sections = Plugins.sections.filter((x) => x.plugin !== id)
+  delete Plugins.settings[id]
+  for (let i = PANEL_VIEWS.length - 1; i >= 0; i--) if (PANEL_VIEWS[i].plugin === id) PANEL_VIEWS.splice(i, 1)
+  delete Plugins.loaded[id]
+}
+/** A slot's buttons for `target`: `menu` (menu items) or `buttons`. */
+function slotItems(slot, target, style = 'buttons') {
+  const items = (Plugins.slots[slot] || []).filter((x) => { try { return !x.when || x.when(target) } catch { return false } })
+  if (!items.length) return ''
+  Plugins.targets[slot] = target
+  return items.map((x, i) => style === 'menu'
+    ? `<button class="menu-item" role="menuitem" data-plug-slot="${slot}" data-plug-i="${i}">${x.icon || ''}${esc(x.label)}</button>`
+    : `<button class="btn" data-plug-slot="${slot}" data-plug-i="${i}" title="${esc(x.title || x.label)}">${x.icon || ''}${esc(x.label)}</button>`).join('')
 }
 document.addEventListener('click', (e) => {
-  const t = e.target.closest && e.target.closest('[data-pl-tab],[data-pl-enable],[data-pl-set],[data-pl-update],[data-pl-review],[data-pl-sheet-go],[data-pl-sheet-cancel],[data-pl-ask-remove],[data-pl-remove],[data-pl-remove-cancel],[data-pl-mrefresh],[data-pl-mhide],[data-pl-mremove],[data-pl-madd]')
+  const t = e.target.closest && e.target.closest('[data-plug-slot]')
   if (!t) return
-  const d = t.dataset
-  if (d.plTab) { S.plTab = d.plTab; S.plSheet = null; return render() }
-  if (d.plEnable) return pluginOp('enable', { id: d.plEnable, on: d.on === 'true' })
-  if (d.plSet && t.classList.contains('sw')) return pluginOp('set', { id: d.plSet, key: d.key, value: d.val === 'true' })
-  if (d.plReview || d.plUpdate) {
-    const id = d.plReview || d.plUpdate, market = d.market || ''
-    S.plSheet = d.plUpdate ? { update: id, review: (S.plugins.installed.find((x) => x.id === id) || {}).update } : { install: id, market, review: null }
-    render()
-    if (d.plReview) get(`api/plugins/review?id=${encodeURIComponent(id)}&market=${encodeURIComponent(market)}`).then((r) => { if (S.plSheet && S.plSheet.install === id) { S.plSheet.review = r; render() } })
-    return
-  }
-  if ('plSheetCancel' in d) { S.plSheet = null; return render() }
-  if ('plSheetGo' in d) {
-    const sh = S.plSheet
-    S.plSheet = null
-    if (sh && sh.review) pluginOp(sh.update ? 'update' : 'install', { id: sh.review.id, market: sh.review.market, agreed: sh.update ? sh.review.new_uses : sh.review.uses })
-    return render()
-  }
-  if (d.plAskRemove) { S.plRemove = d.plAskRemove; return render() }
-  if ('plRemoveCancel' in d) { S.plRemove = null; return render() }
-  if (d.plRemove) { S.plRemove = null; return pluginOp('remove', { id: d.plRemove, keep_data: d.keep === '1' }) }
-  if (d.plMrefresh) return pluginOp('market_refresh', { name: d.plMrefresh })
-  if (d.plMhide) return pluginOp('market_hide', { name: d.plMhide, hidden: d.hidden === 'true' })
-  if (d.plMremove) return pluginOp('market_remove', { name: d.plMremove })
-  if ('plMadd' in d) {
-    const source = ($('#pl-msrc') || {}).value || '', name = ($('#pl-mname') || {}).value || ''
-    if (source.trim()) pluginOp('market_add', { source: source.trim(), name: name.trim() })
-  }
-})
-document.addEventListener('change', (e) => {
-  const t = e.target
-  if (!t.matches || !t.matches('input[data-pl-set]')) return
-  pluginOp('set', { id: t.dataset.plSet, key: t.dataset.key, value: t.value })
-  if (t.type === 'password') t.value = ''
-})
-document.addEventListener('input', (e) => {
-  if (e.target.id !== 'pl-q') return
-  S.plQuery = e.target.value
-  const pos = e.target.selectionStart
-  render()
-  const q = $('#pl-q')
-  if (q) { q.focus(); q.setSelectionRange(pos, pos) }
+  const slot = t.dataset.plugSlot, target = Plugins.targets[slot]
+  const items = (Plugins.slots[slot] || []).filter((x) => { try { return !x.when || x.when(target) } catch { return false } })
+  const item = items[+t.dataset.plugI]
+  S.menuOpen = false
+  if (item) Promise.resolve().then(() => item.run(target)).catch((err) => { S.notice = `${item.label}: ${(err && err.message) || err}`; render() })
 })
 
 /** The transcription server row: an Echo, or an OpenAI-compatible server (Ollama with an audio
@@ -2902,6 +2856,7 @@ function workPanel() {
     ${description}
     ${rows.length ? `<div class="wp-facts">${rows.map(([k, v]) => `<span>${esc(k)}</span><div>${v}</div>`).join('')}</div>` : ''}
     ${criteria}
+    ${(() => { const b = slotItems('task.actions', { kind: n.kind, node: n, project: S.pj.sel }); return b ? `<div class="acts plug-acts">${b}</div>` : '' })()}
     ${mentionsBlock(n)}
     <div class="wp-h">History</div>${hist}
   </div>`
@@ -5051,6 +5006,7 @@ function paletteItems(target) {
     const st = ProjectArt.stage(p.stage)
     add('Threads', p.name, () => go(`project/${p.id}/brief`), { keywords: `thread project ${p.client_name || ''} ${st.label} ${st.group}`, hint: st.label })
   }
+  for (const x of Plugins.palette) add(x.group || 'Plugins', x.label, () => Promise.resolve().then(() => x.run(target)).catch((err) => { S.notice = `${x.label}: ${(err && err.message) || err}`; render() }), { keywords: x.keywords || '' })
   for (const [id, label] of SETTINGS_SECTIONS) add('Go to', `Settings: ${label}`, () => go(`settings/${id}`), { keywords: 'preferences' })
   for (const c of S.calls || []) {
     const d = c.started_at ? new Date(c.started_at) : null
@@ -5967,6 +5923,7 @@ window.echo = {
   route()
   render()
   await Promise.all([loadState(), loadCalls(), loadAgenda(), loadLayout(), loadTerms(), loadSettings(), loadProjects()])
+  await loadPluginClients()
   if (S.view === 'projects') await loadProject()
   if (S.view === 'tasks') await loadTasks()
   if (S.view === 'brain') await loadBrain()
