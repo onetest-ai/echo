@@ -2153,6 +2153,91 @@ document.addEventListener('click', (e) => {
   if ('forget' in b.dataset) pluginOp('set', { id: b.dataset.plSet, key: b.dataset.key, value: '' })
   else pluginOp('set', { id: b.dataset.plSet, key: b.dataset.key, value: b.dataset.val === 'true' })
 })
+function plDiscover(p) {
+  const q = (S.plQuery || '').trim().toLowerCase()
+  const list = (p.discover || []).filter((x) => !q || `${x.name} ${x.summary} ${x.id} ${(x.categories || []).join(' ')}`.toLowerCase().includes(q))
+    .sort((a, b) => (b.featured - a.featured) || (b.built_in - a.built_in) || a.name.localeCompare(b.name))
+  const search = `<input class="search" id="pl-q" placeholder="Search plugins" value="${esc(S.plQuery || '')}" aria-label="Search plugins">`
+  const reading = plBusy(p, 'markets') ? '<p class="set-sub">Reading marketplaces…</p>' : ''
+  if (!list.length) return search + reading + `<p class="set-sub">${q ? 'Nothing matches.' : 'Your marketplaces offer nothing yet' + ((p.markets || []).some((m) => m.error) ? ' — one can\'t be read (Marketplaces).' : '.')}</p>`
+  return search + reading + list.map((x) => {
+    const busy = plBusy(p, `plugin:${x.id}`)
+    const ctl = x.installed === true ? '<span class="set-ok">Installed ✓</span>'
+      : x.installed === false ? '<span class="set-sub">Installed from another marketplace</span>'
+      : x.why_not ? `<span class="tag" title="${esc(x.why_not)}">${!x.version ? "Can't be read" : 'Needs a newer Echo'}</span>`
+      : `<button class="btn primary" data-pl-review="${esc(x.id)}" data-market="${esc(x.market)}"${busy ? ' disabled' : ''}>${busy ? esc(busy) : 'Install…'}</button>`
+    const sheet = S.plSheet && S.plSheet.install === x.id && S.plSheet.market === x.market ? plSheet(S.plSheet) : ''
+    return setCard('', [setRow(`${esc(x.name)} ${x.version ? `<span class="tag">${esc(x.version)}</span>` : ''} <span class="tag${x.built_in ? ' rec' : ''}">${esc(x.market)}</span>`,
+      `${esc(x.summary || '')}${(x.uses || []).length ? plUses(x.uses) : ''}${x.why_not && x.installed == null ? `<div class="pl-why">${esc(x.why_not)}</div>` : ''}`, ctl)]) + plErr(p, `plugin:${x.id}`) + sheet
+  }).join('')
+}
+/** The permission sheet: what the plugin will use, in Echo's words, before anything is installed. */
+function plSheet(sh) {
+  const r = sh.review
+  if (!r) return '<div class="confirm"><span>Reading what it uses…</span></div>'
+  if (r.error) return `<div class="confirm"><span class="error">${esc(r.error)}</span><button class="btn" data-pl-sheet-cancel>Close</button></div>`
+  const lines = sh.update ? r.new_uses : r.uses
+  const outside = S.plugins && !(S.plugins.markets || []).some((m) => m.name === r.market && m.built_in)
+  const who = outside ? `<div class="set-sub">Listed by ${esc(r.market)} — Echo hasn't reviewed it.</div>` : ''
+  const go = sh.update ? `Update to ${esc(r.version)}` : 'Install'
+  return `<div class="pl-sheet"><b>${sh.update ? `${esc(r.name)} ${esc(r.version)} asks for more` : `Install ${esc(r.name)} ${esc(r.version)}?`}</b>
+    ${plUses(lines)}<div class="set-sub">From ${esc(r.market)} · commit <code>${esc((r.commit || '').slice(0, 10))}</code></div>${who}
+    ${r.blocked ? `<div class="error">${esc(r.blocked)}</div>` : ''}
+    <div class="pl-sheet-btns"><button class="btn${outside ? ' primary' : ''}" data-pl-sheet-cancel${outside ? ' autofocus' : ''}>Cancel</button>${r.blocked ? '' : `<button class="btn${outside ? '' : ' primary'}" data-pl-sheet-go>${go}</button>`}</div></div>`
+}
+function plMarkets(p) {
+  const rows = p.markets.map((m) => {
+    const busy = plBusy(p, `market:${m.name}`)
+    const state = busy ? esc(busy) : m.error ? `<span class="error">${esc(m.error)}</span>` : m.fetched_at ? `${m.count} plugin${m.count === 1 ? '' : 's'} · read ${esc(relDay(String(m.fetched_at).slice(0, 10)))}` : 'Not read yet'
+    const ctl = `<button class="btn ghost" data-pl-mrefresh="${esc(m.name)}"${busy ? ' disabled' : ''}>Read again</button>` +
+      `<button class="btn ghost" data-pl-mhide="${esc(m.name)}" data-hidden="${!m.hidden}">${m.hidden ? 'Show' : 'Hide'}</button>` +
+      (m.built_in ? '' : `<button class="btn ghost" data-pl-mremove="${esc(m.name)}">Remove</button>`)
+    return setRow(`${esc(m.name)}${m.title && m.title !== m.name ? ` <span class="set-sub">(calls itself ${esc(m.title)})</span>` : ''}${m.built_in ? ' <span class="tag rec">built in</span>' : ''}${m.hidden ? ' <span class="tag">hidden</span>' : ''}`, `<code>${esc(m.source)}</code><br>${state}`, ctl)
+  })
+  const add = setRow('Add a marketplace', 'Your team\'s or company\'s catalog: <code>owner/repo</code> on GitHub, any git address (<code>https://…</code>, private ones through your own git sign-in), or a folder. It needs <code>echo-marketplace.json</code> at its root.',
+    `<input class="set-in" id="pl-msrc" placeholder="owner/repo" aria-label="Marketplace" spellcheck="false"><input class="set-in" id="pl-mname" placeholder="name (optional)" aria-label="Name" spellcheck="false" style="width:120px"><button class="btn primary" data-pl-madd>Add</button>`)
+  return setCard('', rows) + Object.keys(p.errors || {}).filter((k) => k.startsWith('market:')).map((k) => plErr(p, k)).join('') + setCard('', [add])
+}
+// The page's own controls: tabs, install / update (through the sheet), switch, remove, marketplaces, search.
+document.addEventListener('click', (e) => {
+  const t = e.target.closest && e.target.closest('[data-pl-tab],[data-pl-enable],[data-pl-update],[data-pl-review],[data-pl-sheet-go],[data-pl-sheet-cancel],[data-pl-ask-remove],[data-pl-remove],[data-pl-remove-cancel],[data-pl-mrefresh],[data-pl-mhide],[data-pl-mremove],[data-pl-madd]')
+  if (!t) return
+  const d = t.dataset
+  if (d.plTab) { S.plTab = d.plTab; S.plSheet = null; return render() }
+  if (d.plEnable) return pluginOp('enable', { id: d.plEnable, on: d.on === 'true' })
+  if (d.plReview || d.plUpdate) {
+    const id = d.plReview || d.plUpdate, market = d.market || ''
+    S.plSheet = d.plUpdate ? { update: id, review: (S.plugins.installed.find((x) => x.id === id) || {}).update } : { install: id, market, review: null }
+    render()
+    if (d.plReview) get(`api/plugins/review?id=${encodeURIComponent(id)}&market=${encodeURIComponent(market)}`).then((r) => { if (S.plSheet && S.plSheet.install === id) { S.plSheet.review = r; render() } })
+    return
+  }
+  if ('plSheetCancel' in d) { S.plSheet = null; return render() }
+  if ('plSheetGo' in d) {
+    const sh = S.plSheet
+    S.plSheet = null
+    if (sh && sh.review) pluginOp(sh.update ? 'update' : 'install', { id: sh.review.id, market: sh.review.market, agreed: sh.update ? sh.review.new_uses : sh.review.uses })
+    return render()
+  }
+  if (d.plAskRemove) { S.plRemove = d.plAskRemove; return render() }
+  if ('plRemoveCancel' in d) { S.plRemove = null; return render() }
+  if (d.plRemove) { S.plRemove = null; return pluginOp('remove', { id: d.plRemove, keep_data: d.keep === '1' }) }
+  if (d.plMrefresh) return pluginOp('market_refresh', { name: d.plMrefresh })
+  if (d.plMhide) return pluginOp('market_hide', { name: d.plMhide, hidden: d.hidden === 'true' })
+  if (d.plMremove) return pluginOp('market_remove', { name: d.plMremove })
+  if ('plMadd' in d) {
+    const source = ($('#pl-msrc') || {}).value || '', name = ($('#pl-mname') || {}).value || ''
+    if (source.trim()) pluginOp('market_add', { source: source.trim(), name: name.trim() })
+  }
+})
+document.addEventListener('input', (e) => {
+  if (e.target.id !== 'pl-q') return
+  S.plQuery = e.target.value
+  const pos = e.target.selectionStart
+  render()
+  const q = $('#pl-q')
+  if (q) { q.focus(); q.setSelectionRange(pos, pos) }
+})
 const plUses = (uses) => (uses || []).length ? `<ul class="pl-uses">${uses.map((u) => `<li>${esc(u)}</li>`).join('')}</ul>` : '<div class="set-sub">Uses nothing of Echo\'s.</div>'
 const plBusy = (p, key) => p.busy && p.busy[key]
 const plErr = (p, key) => p.errors && p.errors[key] ? `<div class="error">${esc(p.errors[key])}</div>` : ''
