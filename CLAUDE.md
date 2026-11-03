@@ -211,7 +211,7 @@ accept, missing permissions, an update — each with the IPC message its own pla
 or the hash where it is decided. Not an activity: its entry sits above Settings at the foot of the activity bar (a
 count; warn-coloured when one blocks work) and shows or hides the `needs` panel view (⇧⌘I; Ctrl+Shift+U on Windows,
 where Ctrl+Shift+I opens WebView2's DevTools; ⌘K); the
-places keep their own badges. An item gone (decided here or there) moves to Done for 7 days
+places keep their own badges. A decision clicked here keeps its item, working (a spinner and what it does), until the item is gone: a background job's (Rebuild topics, Import — `/api/attention` `busy`, by item key; its end makes the next request collect again, `attention::stale`) for as long as it runs, any other up to 15 s; a notice (the action couldn't be done) gives the buttons back. An item gone (decided here or there) moves to Done for 7 days
 (`<home>/.echo/attention.json`, the open items kept whole) — only when its source was read: a source that couldn't be
 read now (or a sign-in not checked yet) keeps its items open as they were; one switched off (the Brain), an update
 not checked yet, failed minutes older than 14 days leave quietly. Nothing to mark read. Collected at most every 20 s,

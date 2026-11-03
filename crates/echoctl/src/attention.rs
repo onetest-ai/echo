@@ -383,6 +383,14 @@ fn shape(open: Vec<Value>, rec: &Value) -> Value {
     json!({"open": open, "done": done, "clients": clients, "urgent": urgent})
 }
 
+/// Collect again at the next request: a job an item started has ended (the item may be gone now).
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn stale() {
+    if let Ok(mut c) = CACHE.lock() {
+        *c = None;
+    }
+}
+
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 /// The list for the window: open items (blocking first), Done this week (newest first), and the
 /// groups' names. Collected at most every 20 s unless `fresh`, one collection at a time (a request

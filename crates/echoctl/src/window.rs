@@ -240,7 +240,11 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
         "/api/agenda" => json_reply(agenda()),
         "/api/layout" => json_reply(load_layout()),
         "/api/settings" => json_reply(settings_snapshot()),
-        "/api/attention" => json_reply(crate::attention::view(req.uri().query().is_some_and(|q| q.contains("fresh")))),
+        "/api/attention" => {
+            let mut v = crate::attention::view(req.uri().query().is_some_and(|q| q.contains("fresh")));
+            v["busy"] = attention_busy();
+            json_reply(v)
+        }
         "/api/sessions" => json_reply(json!(crate::terminal::saved_sessions())),
         "/api/ptys" => json_reply(Value::Array(crate::terminal::list().into_iter().map(|(id, key, exited)| json!({ "id": id, "key": key, "exited": exited })).collect())),
         // A terminal's output after byte `from`: answered at once when there is some, else when
@@ -668,6 +672,24 @@ static TRANSCRIPT_CHECK: std::sync::atomic::AtomicBool = std::sync::atomic::Atom
 /// Teams transcripts being imported or that failed, by event id: `{busy: true}` | `{error}`.
 static IMPORTS: std::sync::Mutex<Option<std::collections::HashMap<String, Value>>> = std::sync::Mutex::new(None);
 
+/// Inbox items whose decision runs in the background right now, by item key → what it is doing:
+/// the page shows them working, not with their buttons, until the job ends and they go.
+fn attention_busy() -> Value {
+    let mut m = serde_json::Map::new();
+    if let Some(i) = IMPORTS.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        for id in i.iter().filter(|(_, s)| s["busy"] == true).map(|(id, _)| id) {
+            m.insert(format!("transcript:{id}"), "Importing…".into());
+        }
+    }
+    #[cfg(feature = "brain")]
+    if let Ok(r) = BRAIN_INSIGHTS.lock() {
+        for layer in r.iter().filter_map(|k| k.strip_prefix("taxonomy:")) {
+            m.insert(format!("drift:{layer}"), "Rebuilding topics…".into());
+        }
+    }
+    Value::Object(m)
+}
+
 /// Make a call of a meeting from its Teams transcript, in the background (`teams_transcript::import`);
 /// its state shows on the event (`import`) until the call is there.
 fn import_transcript(id: &str) -> bool {
@@ -693,6 +715,7 @@ fn import_transcript(id: &str) -> bool {
                 m.insert(id, json!({"error": format!("{e:#}")}))
             }
         };
+        crate::attention::stale();
     });
     true
 }
@@ -1572,6 +1595,7 @@ pub fn handle(msg: &str) -> Handled {
                     if let Ok(mut r) = BRAIN_INSIGHTS.lock() {
                         r.remove(&k);
                     }
+                    crate::attention::stale();
                 });
             }
             true.into()
