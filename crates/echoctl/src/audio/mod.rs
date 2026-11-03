@@ -15,8 +15,8 @@ pub(crate) mod windows;
 
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{self, Sender};
-use std::sync::Arc;
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -39,8 +39,11 @@ pub struct Chunk {
 
 pub enum Health {
     Ok,
-    /// Tear down and reopen, for the given reason.
+    /// Something failed (an error, a stall): tear down and reopen, backing off when it repeats.
     Restart(String),
+    /// A planned change (another device, a new rate, the app's processes): reopen at once, without
+    /// counting toward the failure backoff.
+    Reopen(String),
 }
 
 /// One running capture. Dropping it stops the capture.
@@ -73,7 +76,7 @@ pub struct TrackInfo {
 }
 
 const RETRY_EVERY: Duration = Duration::from_secs(1);
-/// Restart policy: back off 1 s → 30 s between restarts;
+/// Restart policy for failures (`Health::Restart`; a planned `Reopen` reopens at once): back off 1 s → 30 s between restarts;
 /// beyond 20 restarts only retry every 30 s; a stream stable for 5 min resets the count.
 const BACKOFF_MAX: Duration = Duration::from_secs(30);
 const RESTARTS_BEFORE_SLOW: u32 = 20;
@@ -83,11 +86,13 @@ const STABLE_RESETS: Duration = Duration::from_secs(5 * 60);
 const SILENT_RESTART_AFTER: Duration = Duration::from_secs(5 * 60);
 const SILENT_RESTARTS_MAX: u32 = 10;
 
-/// What the writer saw: ms since t0 of the last chunk, and of the last non-zero chunk.
+/// What the writer saw: ms since t0 of the last chunk, and of the last non-zero chunk; and why
+/// it stopped writing, when it failed (a full disk, a volume gone).
 #[derive(Default)]
 struct Signal {
     last_chunk_ms: AtomicU64,
     last_sound_ms: AtomicU64,
+    failed: Mutex<Option<String>>,
 }
 
 pub struct Track {
@@ -108,7 +113,16 @@ pub struct Track {
     signal: Arc<Signal>,
     /// Reopen when the stream delivers only zeros for too long (the call app's track).
     watch_silence: bool,
+    /// The writer's failure has been reported (`write_failure`).
+    write_failed: bool,
+    /// When the last planned reopens happened: more than `REOPENS_PER_WINDOW` within
+    /// `REOPEN_WINDOW` (a device or a process set flipping back and forth) back off like failures.
+    reopens: Vec<Instant>,
 }
+
+/// Planned reopens are free up to this many within `REOPEN_WINDOW`; beyond, they back off.
+const REOPENS_PER_WINDOW: usize = 3;
+const REOPEN_WINDOW: Duration = Duration::from_secs(30);
 
 impl Track {
     /// Start a track. If the source can't open yet (e.g. Teams isn't playing audio), the track
@@ -126,6 +140,7 @@ impl Track {
             file: path.file_name().unwrap().to_string_lossy().into_owned(),
             t0,
             next_retry: Instant::now(),
+            reopens: Vec::new(),
             last_error: None,
             events: vec![],
             restarts: 0,
@@ -133,6 +148,7 @@ impl Track {
             opened_at: Instant::now(),
             signal,
             watch_silence: name == "remote",
+            write_failed: false,
         };
         t.try_open();
         Ok(t)
@@ -166,13 +182,34 @@ impl Track {
         }
     }
 
-    /// Supervise: restart unhealthy streams, retry missing ones.
-    pub fn poll(&mut self) {
+    /// The writer's error, the first time it is seen (also a `write_failed` event): the rest of
+    /// this track is lost, and the user should know now, not when the recording stops.
+    fn write_failure(&mut self) -> Option<String> {
+        if self.write_failed {
+            return None;
+        }
+        let e = self.signal.failed.lock().unwrap_or_else(|p| p.into_inner()).clone()?;
+        self.write_failed = true;
+        self.event("write_failed", e.clone());
+        Some(e)
+    }
+
+    /// Supervise: restart unhealthy streams, retry missing ones. Returns the writer's error the
+    /// first time it is seen.
+    pub fn poll(&mut self) -> Option<String> {
+        let failed = self.write_failure();
         if self.live.is_some() && self.opened_at.elapsed() >= STABLE_RESETS {
             self.restarts = 0;
         }
         let health = match self.live.as_mut().map(|l| l.health()) {
             Some(Health::Ok) => self.silence_check(),
+            // A planned change that keeps coming back is treated as a failure (backed off).
+            Some(Health::Reopen(reason)) => {
+                let now = Instant::now();
+                self.reopens.retain(|t| now.duration_since(*t) < REOPEN_WINDOW);
+                self.reopens.push(now);
+                Some(if self.reopens.len() > REOPENS_PER_WINDOW { Health::Restart(format!("{reason} (again and again)")) } else { Health::Reopen(reason) })
+            }
             other => other,
         };
         match health {
@@ -193,9 +230,15 @@ impl Track {
                     self.next_retry = Instant::now() + delay;
                 }
             }
+            Some(Health::Reopen(reason)) => {
+                self.live = None;
+                self.event("restarting", reason);
+                self.try_open();
+            }
             None if Instant::now() >= self.next_retry => self.try_open(),
             None => {}
         }
+        failed
     }
 
     /// Audio keeps arriving but has been exact zeros for minutes: reopen (bounded).
@@ -220,22 +263,31 @@ impl Track {
         self.live = None;
     }
 
-    pub fn finish(mut self) -> Result<TrackInfo> {
+    /// Close the track. Its info (events included) comes back even when the writer failed, with
+    /// the error beside it.
+    pub fn finish(mut self) -> (TrackInfo, Option<anyhow::Error>) {
         self.live = None;
         drop(self.tx.take());
-        let (frames, padded) = self
+        let written = self
             .writer
             .take()
             .expect("writer")
             .join()
-            .map_err(|_| anyhow::anyhow!("{} writer thread panicked", self.name))??;
-        Ok(TrackInfo {
+            .map_err(|_| anyhow::anyhow!("{} writer thread panicked", self.name))
+            .and_then(|r| r);
+        let _ = self.write_failure();
+        let ((frames, padded), err) = match written {
+            Ok(n) => (n, None),
+            Err(e) => ((0, 0), Some(e.context(format!("writing {}", self.file)))),
+        };
+        let info = TrackInfo {
             file: self.file.clone(),
             sample_rate: TRACK_RATE,
             frames,
             padded_frames: padded,
             events: std::mem::take(&mut self.events),
-        })
+        };
+        (info, err)
     }
 }
 
@@ -254,53 +306,68 @@ fn spawn_writer(
         bits_per_sample: 16,
         sample_format: hound::SampleFormat::Int,
     };
-    let mut wav = hound::WavWriter::create(path, spec).with_context(|| format!("creating {}", path.display()))?;
+    let wav = hound::WavWriter::create(path, spec).with_context(|| format!("creating {}", path.display()))?;
     let (tx, rx) = mpsc::channel::<Chunk>();
-    let handle = std::thread::spawn(move || -> Result<(u64, u64)> {
-        let (mut written, mut padded) = (0u64, 0u64);
-        let mut epoch = 0u32;
-        let mut rs = Resampler::new(TRACK_RATE, TRACK_RATE);
-        let tolerance = (GAP_TOLERANCE.as_secs_f64() * TRACK_RATE as f64) as u64;
-        for chunk in rx {
-            if chunk.epoch != epoch || chunk.rate != rs.from {
-                epoch = chunk.epoch;
-                rs = Resampler::new(chunk.rate, TRACK_RATE);
-            }
-            let now_ms = t0.elapsed().as_millis() as u64;
-            signal.last_chunk_ms.store(now_ms, Ordering::Relaxed);
-            if chunk.samples.iter().any(|s| *s != 0.0) {
-                signal.last_sound_ms.store(now_ms, Ordering::Relaxed);
-            }
-            let out = rs.process(&chunk.samples);
-            // The chunk ends "now"; where should it start on the call timeline?
-            let start = t0.elapsed().as_secs_f64() - chunk.samples.len() as f64 / chunk.rate as f64;
-            let expected = (start.max(0.0) * TRACK_RATE as f64) as u64;
-            if expected > written + tolerance {
-                for _ in written..expected {
-                    wav.write_sample(0i16)?;
-                }
-                padded += expected - written;
-                written = expected;
-            }
-            for s in &out {
-                wav.write_sample((s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16)?;
-            }
-            written += out.len() as u64;
+    let handle = std::thread::spawn(move || {
+        let r = write_track(rx, wav, t0, &signal);
+        if let Err(e) = &r {
+            // Said at once (`Track::poll`), not only when the recording stops.
+            *signal.failed.lock().unwrap_or_else(|p| p.into_inner()) = Some(format!("{e:#}"));
         }
-        // Channel closed = capture stopped. Pad to "now" so every track spans the whole call
-        // even if its source went quiet (an idle app's tap delivers nothing at all).
-        let end = (t0.elapsed().as_secs_f64() * TRACK_RATE as f64) as u64;
-        if end > written + tolerance {
-            for _ in written..end {
-                wav.write_sample(0i16)?;
-            }
-            padded += end - written;
-            written = end;
-        }
-        wav.finalize()?;
-        Ok((written, padded))
+        r
     });
     Ok((tx, handle))
+}
+
+/// The writer's loop: chunks until the capture stops, then pad to "now" and finalize.
+fn write_track(
+    rx: Receiver<Chunk>,
+    mut wav: hound::WavWriter<std::io::BufWriter<std::fs::File>>,
+    t0: Instant,
+    signal: &Signal,
+) -> Result<(u64, u64)> {
+    let (mut written, mut padded) = (0u64, 0u64);
+    let mut epoch = 0u32;
+    let mut rs = Resampler::new(TRACK_RATE, TRACK_RATE);
+    let tolerance = (GAP_TOLERANCE.as_secs_f64() * TRACK_RATE as f64) as u64;
+    for chunk in rx {
+        if chunk.epoch != epoch || chunk.rate != rs.from {
+            epoch = chunk.epoch;
+            rs = Resampler::new(chunk.rate, TRACK_RATE);
+        }
+        let now_ms = t0.elapsed().as_millis() as u64;
+        signal.last_chunk_ms.store(now_ms, Ordering::Relaxed);
+        if chunk.samples.iter().any(|s| *s != 0.0) {
+            signal.last_sound_ms.store(now_ms, Ordering::Relaxed);
+        }
+        let out = rs.process(&chunk.samples);
+        // The chunk ends "now"; where should it start on the call timeline?
+        let start = t0.elapsed().as_secs_f64() - chunk.samples.len() as f64 / chunk.rate as f64;
+        let expected = (start.max(0.0) * TRACK_RATE as f64) as u64;
+        if expected > written + tolerance {
+            for _ in written..expected {
+                wav.write_sample(0i16)?;
+            }
+            padded += expected - written;
+            written = expected;
+        }
+        for s in &out {
+            wav.write_sample((s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16)?;
+        }
+        written += out.len() as u64;
+    }
+    // Channel closed = capture stopped. Pad to "now" so every track spans the whole call
+    // even if its source went quiet (an idle app's tap delivers nothing at all).
+    let end = (t0.elapsed().as_secs_f64() * TRACK_RATE as f64) as u64;
+    if end > written + tolerance {
+        for _ in written..end {
+            wav.write_sample(0i16)?;
+        }
+        padded += end - written;
+        written = end;
+    }
+    wav.finalize()?;
+    Ok((written, padded))
 }
 
 /// Fix the RIFF/data sizes of a WAV whose writer never finalized it (the app was killed
@@ -467,11 +534,97 @@ mod tests {
         }
     }
 
+    /// A source that never opens (the track keeps waiting), for tests of the track itself.
+    struct Never;
+    impl Source for Never {
+        fn open(&mut self, _epoch: u32, _tx: Sender<Chunk>) -> Result<Box<dyn LiveStream>> {
+            anyhow::bail!("not playing")
+        }
+    }
+
+    #[test]
+    fn a_write_failure_is_reported_once_and_kept_in_the_tracks_events() {
+        let (_env, root) = crate::paths::testenv::folders("track-write-failed");
+        let mut t = Track::start("remote", &root.join("remote.wav"), Box::new(Never), Instant::now()).unwrap();
+        assert_eq!(t.poll(), None);
+        // What the writer thread sets when a write fails.
+        *t.signal.failed.lock().unwrap() = Some("No space left on device".into());
+        assert_eq!(t.poll().as_deref(), Some("No space left on device"));
+        assert_eq!(t.poll(), None, "once");
+        let (info, err) = t.finish();
+        assert!(err.is_none(), "this writer itself was fine");
+        assert_eq!(info.events.iter().filter(|e| e.kind == "write_failed").count(), 1);
+    }
+
     #[test]
     fn resampler_preserves_dc_level() {
         let mut rs = Resampler::new(48_000, TRACK_RATE);
         let out = rs.process(&vec![0.25; 4800]);
         assert!(out[10..].iter().all(|s| (s - 0.25).abs() < 1e-4));
+    }
+
+    /// A source whose streams report the health a test scripts, counting how often it opens.
+    struct FakeSource {
+        opens: Arc<AtomicU64>,
+        script: Arc<std::sync::Mutex<std::collections::VecDeque<Health>>>,
+    }
+
+    struct FakeStream {
+        script: Arc<std::sync::Mutex<std::collections::VecDeque<Health>>>,
+    }
+
+    impl Source for FakeSource {
+        fn open(&mut self, _epoch: u32, _tx: Sender<Chunk>) -> Result<Box<dyn LiveStream>> {
+            self.opens.fetch_add(1, Ordering::SeqCst);
+            Ok(Box::new(FakeStream { script: self.script.clone() }))
+        }
+    }
+
+    impl LiveStream for FakeStream {
+        fn label(&self) -> String {
+            "fake".into()
+        }
+        fn health(&mut self) -> Health {
+            self.script.lock().unwrap().pop_front().unwrap_or(Health::Ok)
+        }
+    }
+
+    #[test]
+    fn planned_reopens_skip_the_backoff_failures_dont() {
+        let dir = std::env::temp_dir().join(format!("echo-track-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let opens = Arc::new(AtomicU64::new(0));
+        let script = Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new()));
+        let source = FakeSource { opens: opens.clone(), script: script.clone() };
+        let mut track = Track::start("mic", &dir.join("mic.wav"), Box::new(source), Instant::now()).unwrap();
+        assert_eq!(opens.load(Ordering::SeqCst), 1);
+
+        // Planned: every one reopens on the same poll, and none counts as a failure (up to three
+        // within 30 s; more, flipping back and forth, back off like failures).
+        for i in 0..REOPENS_PER_WINDOW as u64 {
+            script.lock().unwrap().push_back(Health::Reopen(format!("device {i}")));
+            track.poll();
+            assert_eq!(opens.load(Ordering::SeqCst), 2 + i);
+            assert!(track.live.is_some());
+        }
+        assert_eq!(track.restarts, 0);
+
+        // A fourth within 30 s is flipping back and forth: it counts as a failure — the first
+        // failure reopens at once, the next waits for the backoff.
+        script.lock().unwrap().push_back(Health::Reopen("device again".into()));
+        track.poll();
+        assert_eq!(opens.load(Ordering::SeqCst), 5);
+        assert_eq!(track.restarts, 1);
+        script.lock().unwrap().push_back(Health::Restart("stalled".into()));
+        track.poll();
+        assert_eq!(opens.load(Ordering::SeqCst), 5);
+        assert!(track.live.is_none());
+        assert!(track.next_retry > Instant::now() + Duration::from_secs(1));
+        assert_eq!(track.restarts, 2);
+
+        let (_, err) = track.finish();
+        assert!(err.is_none(), "{err:?}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

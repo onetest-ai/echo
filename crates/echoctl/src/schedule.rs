@@ -1,8 +1,8 @@
 //! Recordings chosen ahead of time ("Record when it starts" in the calendar): a list of
 //! meetings in `<home>/.echo/scheduled.json`. The watcher arms a meeting ~1 min before it
 //! starts and keeps it armed until it ends; the entry goes away once a recording starts for it,
-//! when the user cancels that arm, or after the meeting ends. Still a per-meeting opt-in — just
-//! made earlier.
+//! when the user cancels that arm, when its recording fails to start, or after the meeting ends.
+//! Still a per-meeting opt-in — just made earlier.
 
 use std::fs;
 use std::path::PathBuf;

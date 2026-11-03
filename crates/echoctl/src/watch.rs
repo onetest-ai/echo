@@ -70,6 +70,10 @@ fn file(name: &str) -> PathBuf {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Armed {
+    /// Names this arm: a recording takes only the arm that started it (`take_arm`), so one
+    /// written meanwhile (the next meeting's) stays. Empty in an arm written before ids.
+    #[serde(default)]
+    pub id: String,
     pub armed_at: DateTime<Utc>,
     pub title: Option<String>,
     pub meeting: Option<MeetingContext>,
@@ -102,6 +106,39 @@ fn write_json<T: Serialize>(name: &str, v: &T) -> Result<()> {
     fs::write(&tmp, serde_json::to_vec_pretty(v)?)?;
     fs::rename(tmp, file(name))?;
     Ok(())
+}
+
+/// Writing, cancelling, expiring and taking an arm hold this lock, so none of them acts on an
+/// arm another has just replaced.
+fn arm_lock() -> Result<crate::app::FileLock> {
+    fs::create_dir_all(paths::state_dir())?;
+    let path = file("armed.lock");
+    let t = Instant::now();
+    loop {
+        if let Some(l) = crate::app::FileLock::try_take(&path)? {
+            return Ok(l);
+        }
+        if t.elapsed() > Duration::from_secs(5) {
+            bail!("{} is held by another process", path.display());
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// Remove the pending arm if it is still the one named `id` (not replaced or cancelled
+/// meanwhile). Whether it was.
+fn take_arm(id: &str) -> bool {
+    let Ok(_lock) = arm_lock() else { return false };
+    if read_json::<Armed>("armed.json").is_none_or(|a| a.id != id) {
+        return false;
+    }
+    fs::remove_file(file("armed.json")).is_ok()
+}
+
+fn new_arm_id() -> String {
+    let mut b = [0u8; 8];
+    let _ = getrandom::fill(&mut b);
+    format!("{}-{}", Utc::now().timestamp_millis(), b.iter().map(|x| format!("{x:02x}")).collect::<String>())
 }
 
 /// Live watcher state, or None if no watcher is running.
@@ -185,6 +222,13 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
     let mut ui_alive: Option<Arc<AtomicBool>> = None;
     let mut frames_alive: Option<Arc<AtomicBool>> = None;
     let mut chat_alive: Option<Arc<AtomicBool>> = None;
+    // The arm that was pending when the user stopped a recording while the call went on: it
+    // was made for another meeting, so it waits for the next call instead of recording the
+    // rest of this one.
+    let mut held_arm: Option<String> = None;
+    // Stopped by the user while the call went on: no scheduled meeting is armed until that call
+    // ends (it would record the rest of this call as that meeting).
+    let mut stopped_in_call = false;
     // Keep today's agenda fresh from the calendar (if one is configured), off the main loop.
     let mut last_sync: Option<Instant> = None;
     // Sleep shows up as wall-clock time passing faster than the monotonic clock.
@@ -211,10 +255,14 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
             in_call = false;
             call_ended_at = None;
             mic_released_at = None;
+            held_arm = None;
+            stopped_in_call = false;
             emit("woke", json!({}));
         }
         if let Some(r) = rec.as_mut() {
-            r.poll();
+            for (track, e) in r.poll() {
+                track_failed(&r.dir, track, &e);
+            }
         }
         if last_check.elapsed() < Duration::from_secs(1) {
             continue;
@@ -236,7 +284,7 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
         }
         let mut armed: Option<Armed> = read_json("armed.json");
         // A meeting chosen ahead of time ("Record when it starts"): arm it ~1 min before.
-        if armed.is_none() && rec.is_none() {
+        if armed.is_none() && rec.is_none() && !stopped_in_call {
             if let Some(m) = crate::schedule::due(now) {
                 let subject = m.subject.clone();
                 if arm(subject.clone(), Some(m), None, None).is_ok() {
@@ -301,6 +349,8 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
                 if since.elapsed() >= MIC_RELEASE_DEBOUNCE {
                     in_call = false;
                     call_ended_at = Some(Instant::now());
+                    held_arm = None;
+                    stopped_in_call = false;
                     emit("call_ended", json!({ "app": app, "recording": rec.is_some() }));
                 }
             }
@@ -310,47 +360,49 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
         let call_active = detected.map(|_| in_call).unwrap_or(true);
 
         // 3. Start: armed + call active.
-        if rec.is_none() && call_active {
-            if let Some(a) = &armed {
-                // No meeting given: attach the agenda meeting this call overlaps, if any.
-                let meeting = a.meeting.clone().or_else(|| crate::calendar::meeting_now(Utc::now()));
-                // The AI profile is pinned now: changing the default later never changes this call.
-                let ai_profile = Some(pinned_profile(a, meeting.as_ref()));
-                match Recording::start(app, a.title.as_deref(), meeting.as_ref(), a.languages.clone(), ai_profile) {
-                    Ok(r) => {
-                        // A scheduled meeting is done once its recording starts (stopping it
-                        // must not re-arm it).
-                        if let Some(id) = meeting.as_ref().and_then(|m| m.id.as_deref()) {
-                            let _ = crate::schedule::remove_id(id);
-                        }
-                        mute_alive = start_mute_sync();
-                        ui_alive = start_ui_capture(&r.dir, r.t0);
-                        frames_alive = start_frame_capture(&r.dir, r.t0);
-                        if meeting.is_none() {
-                            find_call_people(&r.dir);
-                        }
-                        chat_alive = start_chat_capture(&r.dir, r.started_at, meeting.as_ref());
-                        crate::livenotes::recording_started(&r.dir);
-                        emit("recording_started", json!({
-                            "dir": r.dir.display().to_string(),
-                            "title": a.title.clone().or_else(|| a.meeting.as_ref().and_then(|m| m.subject.clone())),
-                        }));
-                        rec = Some(r);
+        // The arm is taken (removed) before the recording starts, under its lock: one cancelled
+        // or replaced since this tick read it doesn't start, and one written during the
+        // recording (the next meeting's) is never the one removed.
+        let startable = armed.as_ref().filter(|a| {
+            held_arm.as_deref() != Some(a.id.as_str()) && (now - a.armed_at).to_std().unwrap_or_default() <= ARM_EXPIRES
+        });
+        if let Some(a) = startable.filter(|a| rec.is_none() && call_active && take_arm(&a.id)) {
+            // No meeting given: attach the agenda meeting this call overlaps, if any.
+            let meeting = a.meeting.clone().or_else(|| crate::calendar::meeting_now(Utc::now()));
+            // The AI profile is pinned now: changing the default later never changes this call.
+            let ai_profile = Some(pinned_profile(a, meeting.as_ref()));
+            match Recording::start(app, a.title.as_deref(), meeting.as_ref(), a.languages.clone(), ai_profile) {
+                Ok(r) => {
+                    // A scheduled meeting is done once its recording starts (stopping it
+                    // must not re-arm it).
+                    if let Some(id) = meeting.as_ref().and_then(|m| m.id.as_deref()) {
+                        let _ = crate::schedule::remove_id(id);
                     }
-                    Err(e) => {
-                        // Disarm: retrying every second would only repeat the error (and the
-                        // notification) until the arm expires.
-                        let _ = fs::remove_file(file("armed.json"));
-                        emit("error", json!({ "message": format!("could not start recording: {e:#}") }));
-                        crate::app::notify("Could not start recording", &format!("{e:#} — click Record to try again"));
+                    mute_alive = start_mute_sync();
+                    ui_alive = start_ui_capture(&r.dir, r.t0);
+                    frames_alive = start_frame_capture(&r.dir, r.t0);
+                    if meeting.is_none() {
+                        find_call_people(&r.dir);
                     }
+                    chat_alive = start_chat_capture(&r.dir, r.started_at, meeting.as_ref());
+                    crate::livenotes::recording_started(&r.dir);
+                    emit("recording_started", json!({
+                        "dir": r.dir.display().to_string(),
+                        "title": a.title.clone().or_else(|| a.meeting.as_ref().and_then(|m| m.subject.clone())),
+                    }));
+                    rec = Some(r);
+                }
+                Err(e) => {
+                    // The arm is used up (taken above): retrying every second would only
+                    // repeat the error (and the notification).
+                    emit("error", json!({ "message": format!("could not start recording: {e:#}") }));
+                    crate::app::notify("Could not start recording", &start_failed(meeting.as_ref(), &e));
                 }
             }
         }
         if let (None, Some(a)) = (&rec, &armed) {
             let age = (now - a.armed_at).to_std().unwrap_or_default();
-            if age > ARM_EXPIRES {
-                let _ = fs::remove_file(file("armed.json"));
+            if age > ARM_EXPIRES && take_arm(&a.id) {
                 emit("arm_expired", json!({ "title": a.title }));
             }
         }
@@ -365,6 +417,12 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
         let user_stop = file("stop.request").exists();
         let ended = call_ended_at.is_some_and(|t| t.elapsed() >= REJOIN_GRACE) && !in_call;
         if rec.is_some() && (user_stop || ended) {
+            // Stop ends this recording only: an arm made meanwhile stays, and waits for the next
+            // call when this one goes on.
+            if user_stop && call_active {
+                held_arm = read_json::<Armed>("armed.json").map(|a| a.id);
+                stopped_in_call = true;
+            }
             stop_mute_sync(&mut mute_alive);
             stop_flag(&mut ui_alive);
             stop_flag(&mut frames_alive);
@@ -374,7 +432,6 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
         }
         if user_stop {
             let _ = fs::remove_file(file("stop.request"));
-            let _ = fs::remove_file(file("armed.json"));
         }
 
         let armed_now = file("armed.json").exists();
@@ -406,6 +463,22 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
     let _ = fs::remove_file(file("watch.json"));
     emit("watch_stopped", json!({}));
     Ok(())
+}
+
+/// A recording that couldn't start: a meeting set to "Record when it starts" leaves the schedule
+/// too, or the watcher would arm it again the next second and fail (and notify) again until it
+/// ends. Returns the notification's text.
+fn start_failed(meeting: Option<&MeetingContext>, e: &anyhow::Error) -> String {
+    let scheduled = meeting
+        .and_then(|m| m.id.as_deref())
+        .filter(|id| crate::schedule::load().iter().any(|s| s.id.as_deref() == Some(*id)))
+        .is_some_and(|id| crate::schedule::remove_id(id).is_ok());
+    if scheduled {
+        let name = meeting.and_then(|m| m.subject.as_deref()).unwrap_or("this meeting");
+        format!("{e:#} — “{name}” is no longer set to record when it starts; click Record to try again")
+    } else {
+        format!("{e:#} — click Record to try again")
+    }
 }
 
 /// The profile a recording pins (`ai::pin`): the arm's choice, its meeting's, the default.
@@ -444,8 +517,20 @@ fn apply_profile_request(rec: Option<&mut Recording>, req: &Value) {
     }
 }
 
+/// A track's audio can no longer be written (a full disk, a volume gone): the rest of it is lost
+/// while the recording goes on, so the user hears of it now, once per track.
+fn track_failed(dir: &Path, track: &str, e: &str) {
+    emit("track_failed", json!({ "dir": dir.display().to_string(), "track": track, "message": e }));
+    let what = if track == "mic" { "your microphone" } else { "the others' audio" };
+    crate::app::notify(
+        "Recording problem",
+        &format!("Echo can't save {what} any more: {e}. The rest of this call on that track is lost — take notes in Echo."),
+    );
+}
+
 fn finish(r: Recording, reason: &str) {
     let secs = r.t0.elapsed().as_secs();
+    let dir = r.dir.clone();
     crate::livenotes::recording_stopped(&r.dir);
     match r.finish(reason) {
         Ok((dir, _, live)) => {
@@ -457,10 +542,16 @@ fn finish(r: Recording, reason: &str) {
                 None => transcribe_in_background(dir),
             }
         }
-        Err(e) => emit("error", json!({ "message": format!("finishing recording failed: {e:#}") })),
+        Err(e) => {
+            // Closed all the same (`Recording::finish` closes both tracks and dates the end).
+            emit("recording_stopped", json!({ "dir": dir.display().to_string(), "duration_s": secs, "reason": reason }));
+            emit("error", json!({ "message": format!("finishing recording failed: {e:#}") }));
+            crate::app::notify("Recording not closed properly", &format!("{e:#}"));
+            // What was saved is transcribed all the same: `Recording::finish` closes both tracks
+            // and dates the end even when one failed.
+            transcribe_in_background(dir);
+        }
     }
-    // An arm is single-use: the next meeting needs a new opt-in.
-    let _ = fs::remove_file(file("armed.json"));
 }
 
 /// Follow the call app's mute button while recording (macOS Accessibility, Windows UI
@@ -1062,7 +1153,10 @@ pub fn arm(title: Option<String>, meeting: Option<MeetingContext>, languages: Op
     // A scheduled or joined meeting carries its profile too. Never checked here: a profile that
     // is gone (or unreadable settings) must not stop the recording — its AI jobs say why.
     let ai_profile = ai_profile.or_else(|| meeting.as_ref().and_then(|m| m.ai_profile.clone())).filter(|p| !p.is_empty());
-    write_json("armed.json", &Armed { armed_at: Utc::now(), title, meeting, languages, ai_profile })?;
+    {
+        let _lock = arm_lock()?;
+        write_json("armed.json", &Armed { id: new_arm_id(), armed_at: Utc::now(), title, meeting, languages, ai_profile })?;
+    }
     match running_watcher() {
         Some(w) if w.in_call == Some(true) => println!("armed — call in progress, recording starts within a second"),
         Some(_) => println!("armed — recording starts when the call begins (expires in 15 min)"),
@@ -1071,7 +1165,8 @@ pub fn arm(title: Option<String>, meeting: Option<MeetingContext>, languages: Op
     Ok(())
 }
 
-/// `echoctl stop`: end the current recording (and cancel an arm).
+/// `echoctl stop`: end the current recording, or cancel the pending arm when nothing records.
+/// A recording's Stop leaves an arm made during it (the next meeting's) as it is.
 pub fn stop() -> Result<()> {
     match running_watcher() {
         Some(w) if w.recording.is_some() => {
@@ -1079,6 +1174,7 @@ pub fn stop() -> Result<()> {
             println!("stopping {}", w.recording.unwrap());
         }
         _ => {
+            let _lock = arm_lock()?;
             // Cancelling a scheduled meeting's arm cancels the schedule too.
             if let Some(id) = read_json::<Armed>("armed.json").and_then(|a| a.meeting).and_then(|m| m.id) {
                 let _ = crate::schedule::remove_id(&id);
@@ -1221,6 +1317,56 @@ mod tests {
         assert_eq!(pinned_profile(&a, Some(&meeting)), "chosen");
         a.ai_profile = None;
         assert_eq!(pinned_profile(&a, None), crate::ai::SYSTEM);
+    }
+
+    #[test]
+    fn a_recording_takes_only_its_own_arm() {
+        let (_env, root) = crate::paths::testenv::folders("watch-arm-own");
+        fs::create_dir_all(root.join("home/.echo")).unwrap();
+        arm(Some("A".into()), None, None, None).unwrap();
+        let a: Armed = read_json("armed.json").unwrap();
+        // The next meeting armed while A's arm is still on disk (or A records): A's id no
+        // longer takes anything.
+        arm(Some("B".into()), None, None, None).unwrap();
+        let b: Armed = read_json("armed.json").unwrap();
+        assert_ne!(a.id, b.id);
+        assert!(!take_arm(&a.id), "A's recording leaves B's arm alone");
+        assert_eq!(read_json::<Armed>("armed.json").unwrap().title.as_deref(), Some("B"));
+        assert!(take_arm(&b.id));
+        assert!(read_json::<Armed>("armed.json").is_none());
+        assert!(!take_arm(&b.id), "taken once");
+        // An arm written before ids is taken by its empty id.
+        fs::write(root.join("home/.echo/armed.json"), r#"{"armed_at":"2026-10-23T10:00:00Z","title":"old","meeting":null}"#).unwrap();
+        assert!(take_arm(""));
+        // Nothing recording: `stop` cancels a pending arm, and a scheduled meeting's schedule.
+        let m = MeetingContext { id: Some("ev1".into()), subject: Some("C".into()), ..Default::default() };
+        crate::schedule::add(m.clone()).unwrap();
+        arm(m.subject.clone(), Some(m), None, None).unwrap();
+        stop().unwrap();
+        assert!(read_json::<Armed>("armed.json").is_none());
+        assert!(!crate::schedule::is_scheduled("ev1"));
+    }
+
+    #[test]
+    fn a_failed_start_unschedules_its_meeting_and_says_so() {
+        let (_env, _root) = crate::paths::testenv::folders("watch-start-failed");
+        let start = Utc::now() - chrono::Duration::seconds(30);
+        let m = MeetingContext {
+            id: Some("ev1".into()),
+            subject: Some("Weekly".into()),
+            start: Some(start.to_rfc3339()),
+            end: Some((start + chrono::Duration::minutes(30)).to_rfc3339()),
+            ..Default::default()
+        };
+        crate::schedule::add(m.clone()).unwrap();
+        assert!(crate::schedule::due(Utc::now()).is_some());
+        let e = anyhow::anyhow!("creating calls: read-only");
+        let text = start_failed(Some(&m), &e);
+        assert!(text.contains("“Weekly” is no longer set to record"), "{text}");
+        assert!(crate::schedule::due(Utc::now()).is_none(), "not armed again the next second");
+        // A meeting that wasn't scheduled (or none) just says to try again.
+        assert_eq!(start_failed(Some(&m), &e), "creating calls: read-only — click Record to try again");
+        assert_eq!(start_failed(None, &e), "creating calls: read-only — click Record to try again");
     }
 
     #[test]

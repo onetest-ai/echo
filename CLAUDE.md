@@ -140,6 +140,10 @@ The app (`app run`; `watch` is a hidden old alias) runs from login or `app start
 1 s: agenda (`.echo/agenda.json`) → `meeting_soon` at T−58 s…T+4 min; call presence = app
 holds the mic (2 s release debounce); records only when `.echo/armed.json` exists (written by
 `arm`/`join`, single-use, expires 15 min); stops on `stop.request` or 10 s after the call ended.
+An arm has an `id`; writing, cancelling, expiring and taking one hold `.echo/armed.lock`. A recording takes (removes)
+its arm as it starts, so an arm made during a recording — the next meeting's — survives its end and its Stop: Stop
+ends the recording only, and an arm pending then waits for the next call when this one goes on (`held_arm`).
+`echoctl stop` with nothing recording still cancels the pending arm.
 Events → `<home>/.echo/events.jsonl`; clients follow them (the mod, or `events --follow`).
 `config.scheduled` / `unscheduled` = `ask` → the app shows its own "Record?" dialog (osascript /
 WScript popup: Yes/No on Windows, `app::yes_no` — Yes = the default button, or the last one when the
@@ -263,7 +267,9 @@ Claude Code Echo's terminal starts — never the minutes or sync runs, the plugi
 **My notes** (a panel view, `notesPanel`; it was a call tab) = the user's own notes as a **timeline of moments**
 (`NoteDoc`, no DOM: `ui/my-notes.test.mjs`): each note a line of `my-notes.md` — `- [12:05] …`, `? ` question, `! `
 decision, `⚑` flag, `- [ ] [12:22] …` to-do, `  > "…"` the words it is about — kept in time order; a box adds one,
-timed from its first key while the call records; select words in a transcript → Comment, or right-click a transcript turn or a line of the minutes → Add note (the
+timed from its first key while the call records (a note typed there, or edited in place, without Enter belongs to
+its call and is added as Enter would before a close or quit — `prepareClose` —, Write minutes or another call opened;
+"Not saved yet" meanwhile; Esc / Cancel drop it); select words in a transcript → Comment, or right-click a transcript turn or a line of the minutes → Add note (the
 frame's `EMBED_JS` posts `{echo: 'note', t, quote, section, x, y}`, taken only from that frame) adds one with that quote;
 the transcripts show a dot per note at its turn; the Minutes tab shows each timed note as a callout under the
 line with the same time (else the nearest within 3 min) — sent to the frame (`{echo: 'notes'}` after its `ready`),
@@ -309,7 +315,8 @@ without a sign-in: today's agenda). Each event carries `recorded` (a call matche
 id, or by subject within the event's time) and `scheduled`; calls matching no event come back
 as `calls`. "Record when it starts" → `schedule.rs` (`<home>/.echo/scheduled.json`): the watcher
 arms a scheduled meeting from 60 s before its start until its end; the entry is removed when
-its recording starts (stopping never re-arms it), when that arm is cancelled, or after the end.
+its recording starts (stopping never re-arms it), when that arm is cancelled, when its recording fails to start
+(one notification says so; no re-arm every second), or after the end.
 **A meeting nobody recorded, from its Teams transcript** (`teams_transcript.rs`): Calendar → an ended Teams event with
 no call → Import Teams transcript (IPC `calendar_import`, in the background — its state on the event, `import`; the
 outcome as a notification), ⌘K, `echoctl calendar import <event id | subject words> [--date]`. Graph: the event's
@@ -649,9 +656,11 @@ without it).
   synonyms; `merge` takes `into_layer: shared`); down — a practice topic whose ≥ 10 tagged sections are all one
   client's → that client. Turned down ones stay quiet (`brain/taxonomy/moves.json`).
   `taxonomy build [--layer shared|<client>]` builds every layer or one (then classifies that layer's sections).
-  **Drift** (#47, `taxonomy::drift`, no model): per layer, over the sections judged since its last build (its `build` in
-  the history) — ≥ 30 of them —, stale when > 10% fit no topic (`untagged`) or one level-1 topic took > 40% of the tagged
-  ones; or when its calls are ≥ 3× `built_from` (and ≥ 6). A stale layer is an Inbox item ("Topics for X need a rebuild", the reasons in plain words — `reasons[].text`, one source for the Inbox and Builds) and a banner on its Topics
+  **Drift** (#47, `taxonomy::drift`, no model): per layer, over the sections that came in since its last build (its `build`
+  in the history: indexed after its `at` — `chunks.created_at` — and judged since; never the build's own sections tagged
+  again, #18) — ≥ 30 of them —, stale when > 10% fit no topic (`untagged`) or one level-1 topic took > 40% of the tagged
+  ones (one with subtopics: only when one subtopic did) — these two only for a layer built from ≥ 6 calls (`built_from`
+  0, unknown, is judged); or when its calls are ≥ 3× `built_from` (and ≥ 6). A stale layer is an Inbox item ("Topics for X need a rebuild", the reasons in plain words — `reasons[].text`, one source for the Inbox and Builds) and a banner on its Topics
   block: Rebuild topics (IPC `brain_rebuild_topics` → `induce` in the background, provisional as any build; a
   notification when done) · Not now (`brain_topics_snooze` → `brain/taxonomy/drift.json`: held until its sections or
   calls grow by half; a rebuild clears it). Never rebuilt automatically. `echoctl brain taxonomy drift` (JSON).
@@ -790,7 +799,8 @@ call's one transcription pass, an utterance decoded after 0.8 s of silence — s
 (`live-notes.json` → summary/highlights/actions, `live-state.json`, answers in `live-asks.jsonl`); its quick buttons call
 `echoctl live ask`. It **never calls a model itself** (that would use the session's account, not the call's profile);
 live notes off → it says so. `echoctl live-replay <wav> <dir>` (hidden) plays a WAV in as a growing recording (10×)
-and writes the transcript, as after a call.
+and writes the transcript, as after a call — only into a new or empty folder, or one it marked (`.replay`), and
+only once transcription can run (never a call's folder).
 Mute sync: while recording, the watcher polls Teams' microphone button via Accessibility / UI
 Automation (`ax::MuteWatch`, label "Unmute…" ⇒ muted) every 400 ms; muted ⇒ `audio::mic::MUTED` makes the mic
 track record silence; events `mic_muted`/`mic_unmuted` drive the band. `config.follow_app_mute`
@@ -820,6 +830,9 @@ applied) → Echo runs `claude auth login --claudeai [--email] [--sso]` (`Profil
 opens Claude's sign-in page, which calls Claude Code back on `http://localhost:<port>/callback`, and the child exits
 after that (measured); then one `auth status` judged against the settings as they are now (`ai::settle`) → "Signed in
 as …", and live notes waiting for it go on at once (`livenotes::signed_in`). 10 min at most; Cancel; quitting stops it.
+The window's Claude sessions on the profile hold its lease while they run: a sign-in closes them first
+(`terminal::close_profile`; they resume by id), and if the lease is still held after 10 s the error names a session that
+didn't stop (`terminal::holds_profile`) apart from minutes or another sign-in (#16).
 A reader/writer lock per profile, `<config dir>/claude/<id>.lock` (`app::FileLock` shared/exclusive): jobs and
 `auth status` checks hold it shared (`ai::lease`; `for_call` → `Ready` keeps it for the job), a sign-in exclusively
 (`ai::sign_in_lease`). Meanwhile `for_call` fails with `ai::SigningIn` (it never waits): live jobs retry — in the app
@@ -1023,6 +1036,9 @@ frames). A renamed call's old page (generator meta) is replaced, never another f
 - Sleep = wall clock outrunning the monotonic clock (> 30 s) → the recording is closed.
 - Track restarts back off 1 s → 30 s (slow after 20, reset after 5 min stable); the remote
   track reopens after 5 min of exact digital zeros (≤ 10×; also what revoked TCC looks like).
+- A track whose writer fails (a full disk, a volume gone) says so at once: a `write_failed` track event, a
+  `track_failed` event and one notification. `Recording::finish` closes both tracks whatever fails, tells the live
+  worker to stop (`Live`'s `Drop` does too), dates the end, then returns the error; what was saved is transcribed.
 - `<call>/ui.jsonl` (`ax::UiRecorder`, `config.capture_ui`, default on): Teams' call window
   (`ax::CallWindow`, both platforms: the window holding `microphone-button` — AXDOMIdentifier on
   macOS, Teams' web UI is the same in WebView2; never the main window with chats) text diffs

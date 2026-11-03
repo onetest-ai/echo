@@ -1443,7 +1443,7 @@ fn login_with(p: &Profile, claude: &Path, terminal: bool, stopped: &dyn Fn() -> 
             Some(l) => break l,
             None if stopped() => bail!("stopped — {} isn't signed in", p.name),
             None if t.elapsed() < Duration::from_secs(10) => std::thread::sleep(Duration::from_millis(200)),
-            None => bail!("{} is being signed in already, or Echo is using it (writing minutes) — try again in a moment", p.name),
+            None => bail!("{} is being signed in already, or Echo is using it (writing minutes, or a Claude session open in Echo's window on it — close that session) — try again in a moment", p.name),
         }
     };
     fs::create_dir_all(p.config_folder())?;
