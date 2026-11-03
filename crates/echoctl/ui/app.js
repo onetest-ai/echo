@@ -2103,22 +2103,34 @@ function pluginOp(op, body = {}) {
   setTimeout(() => loadPluginsView().then(render), 300)
 }
 /** One of a plugin's own settings (its manifest's `settings`): a switch, or a box saved when it changes; a
- *  secret is never shown back, only whether it is set (an empty one forgets it). */
+ *  secret is never shown back, only whether it is set (Forget empties it). */
 function plField(id, d) {
   const at = `data-pl-set="${esc(id)}" data-key="${esc(d.key)}"`
-  if (d.type === 'bool') return `<button class="sw${d.value ? ' on' : ''}" role="switch" aria-checked="${!!d.value}" aria-label="${esc(d.label)}" ${at} data-val="${!d.value}"></button>`
-  if (d.type === 'secret') return `<input class="set-in" type="password" ${at} placeholder="${d.set ? '•••• set — type to replace' : 'not set'}" aria-label="${esc(d.label)}" spellcheck="false" autocomplete="off">`
-  return `<input class="set-in" ${at} value="${esc(d.value == null ? '' : String(d.value))}" placeholder="${d.type === 'folder' ? '/path/to/folder' : ''}" aria-label="${esc(d.label)}" spellcheck="false">`
+  const box = `id="pl-${esc(id)}-${esc(d.key)}" ${at} aria-label="${esc(d.label)}" spellcheck="false"`
+  if (d.type === 'bool') {
+    const on = d.value === true || d.value === 'true'
+    return `<button class="sw${on ? ' on' : ''}" role="switch" aria-checked="${on}" aria-label="${esc(d.label)}" ${at} data-val="${!on}"></button>`
+  }
+  if (d.type === 'secret') return `<input class="set-in" type="password" ${box} placeholder="${d.set ? '•••• set — type to replace' : 'not set'}" autocomplete="off">${d.set ? `<button class="btn ghost" ${at} data-forget>Forget</button>` : ''}`
+  return `<input class="set-in" ${box} value="${esc(d.value == null ? '' : String(d.value))}" placeholder="${d.type === 'folder' ? '/path/to/folder' : ''}">`
 }
+/** A plugin's setting being typed (not saved yet): renders wait until the box is left, so the text isn't lost. */
+const plTyping = () => { const a = document.activeElement; return !!(a && a.matches && a.matches('input[data-pl-set]') && a.value !== a.defaultValue) }
 document.addEventListener('change', (e) => {
   const t = e.target
   if (!t.matches || !t.matches('input[data-pl-set]')) return
   pluginOp('set', { id: t.dataset.plSet, key: t.dataset.key, value: t.value })
   if (t.type === 'password') t.value = ''
+  t.defaultValue = t.value
+})
+document.addEventListener('focusout', (e) => {
+  if (e.target.matches && e.target.matches('input[data-pl-set]') && S.renderOnBlur) { S.renderOnBlur = false; setTimeout(render) }
 })
 document.addEventListener('click', (e) => {
   const b = e.target.closest && e.target.closest('button[data-pl-set]')
-  if (b) pluginOp('set', { id: b.dataset.plSet, key: b.dataset.key, value: b.dataset.val === 'true' })
+  if (!b) return
+  if ('forget' in b.dataset) pluginOp('set', { id: b.dataset.plSet, key: b.dataset.key, value: '' })
+  else pluginOp('set', { id: b.dataset.plSet, key: b.dataset.key, value: b.dataset.val === 'true' })
 })
 const plUses = (uses) => (uses || []).length ? `<ul class="pl-uses">${uses.map((u) => `<li>${esc(u)}</li>`).join('')}</ul>` : '<div class="set-sub">Uses nothing of Echo\'s.</div>'
 const plBusy = (p, key) => p.busy && p.busy[key]
@@ -5217,6 +5229,7 @@ document.addEventListener('selectionchange', () => reportView())
 setInterval(() => { if (document.visibilityState === 'visible') reportView(true) }, 60000)
 
 function render() {
+  if (plTyping()) { S.renderOnBlur = true; return }
   reportView()
   // Animate entering a view / call / tab, never a background refresh.
   const key = `${S.view}|${S.selected}|${S.tab}`
