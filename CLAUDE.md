@@ -769,7 +769,10 @@ without it).
   only there is `archived` in the taxonomy view → the Terms tab's folded "Closed threads" group, and out of a new call's
   hint (`terms_for_threads`); the `<echo_brain>` advert lists open threads and one "Archive: N closed threads — …" line.
   Everything is computed from the stages, so reopening a thread makes it current again with nothing read again.
-  Not done yet: Forget on close (drop a thread's sections, and people / terms left with no source).
+  A closed thread keeps what it had and takes nothing read after it closed (mail / posts: `had`; a folder shared with an
+  open thread is read under the open threads only); a sender decision (`reread`) leaves an all-closed document alone; a
+  client's numbers keep its closed threads' workbooks. Known gap: a `READER` bump drops every mail / channel document and
+  read state, a closed thread's archive included (reopened, it reads its window again). Not done yet: Forget on close.
 - **Off switch** (Settings → Brain → Use the Brain; `brain.json` `enabled`, default OFF — a fresh install and an update both start with it off until the user turns it on; `echoctl brain set --enabled
   false`; IPC `settings_set brain_enabled`): off, nothing is read, indexed, tagged or summarised (`brain::sync` refuses,
   the scheduler skips), the window shows no Brain (activity, ⌘ numbers and ⌘K, Also discussed, Insights, Mentioned also

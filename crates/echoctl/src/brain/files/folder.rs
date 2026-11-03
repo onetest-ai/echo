@@ -165,18 +165,21 @@ pub struct Report {
     pub store: Option<store::Report>,
 }
 
-/// The folders open threads watch: root → (its excludes, its threads — closed ones too, whose archive it also is).
+/// The folders open threads watch: root → (its excludes, those threads). A folder an open thread shares with a closed
+/// one is current: read under the open threads only, so nothing read after a close joins the closed thread.
 fn watched() -> BTreeMap<String, (Vec<String>, Vec<Value>)> {
-    let mut all = with_folders();
-    let open: BTreeSet<String> = projects::list().into_iter().filter(|p| !p.stage.closed()).flat_map(|p| p.sources.into_iter().filter(|s| s.kind == "folder").map(|s| s.id)).collect();
-    all.retain(|root, _| open.contains(root));
-    all
+    folders_of(projects::list().into_iter().filter(|p| !p.stage.closed()))
 }
 
-/// Every thread's folders, closed threads' too: root → (its excludes, the threads).
+/// Every thread's folders, closed threads' too: a folder only closed threads have isn't read, and what was read stays
+/// (their archive, #55).
 fn with_folders() -> BTreeMap<String, (Vec<String>, Vec<Value>)> {
+    folders_of(projects::list().into_iter())
+}
+
+fn folders_of(ps: impl Iterator<Item = projects::Project>) -> BTreeMap<String, (Vec<String>, Vec<Value>)> {
     let mut out: BTreeMap<String, (Vec<String>, Vec<Value>)> = BTreeMap::new();
-    for p in projects::list() {
+    for p in ps {
         for s in p.sources.iter().filter(|s| s.kind == "folder") {
             let e = out.entry(s.id.clone()).or_default();
             for x in &s.exclude {

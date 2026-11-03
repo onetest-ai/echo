@@ -4310,8 +4310,10 @@ function brainTopics(tx) {
   const open = (id, dflt) => (S.br.fold || {})[id] == null ? dflt : !(S.br.fold || {})[id]
   const jobs = new Set([...((S.br.data || {}).topic_jobs || []), ...Object.keys(S.br.rebuilding || {})])
   const catchAll = new Map(layers.filter((l) => l.drift && (l.drift.reasons || []).some((r) => r.rule === 'catch_all') && l.drift.top).map((l) => [`${l.id}|${l.drift.top.label}`, Math.round(l.drift.top.pct)]))
-  const kidsOf = (x) => topics.filter((k) => k.level === 2 && k.parent_id === x.id).sort((a, b) => (a.layer !== 'shared') - (b.layer !== 'shared') || (b.sections || 0) - (a.sections || 0))
-  const roots = topics.filter((x) => x.level === 1 || !x.parent_id)
+  // A topic only closed threads' sections have is the archive (#55): its own folded group at the end.
+  const kidsOf = (x) => topics.filter((k) => k.level === 2 && k.parent_id === x.id && !k.archived).sort((a, b) => (a.layer !== 'shared') - (b.layer !== 'shared') || (b.sections || 0) - (a.sections || 0))
+  const roots = topics.filter((x) => (x.level === 1 || !x.parent_id) && !x.archived)
+  const oldTopics = topics.filter((x) => x.archived)
   const max = Math.max(1, ...roots.map((t) => t.sections || 0))
   const total = roots.reduce((n, t) => n + (t.sections || 0), 0)
   const row = (x, top) => {
@@ -4361,7 +4363,8 @@ function brainTopics(tx) {
   const top = `<div class="br-tbar"><span class="set-sub">${topics.length} topics · version ${tx.version}</span><span class="grow"></span><button class="btn" data-brain-sync title="Read new calls, mail and files into the Brain now; their new sections are tagged after it">Sync now</button></div>`
   const tree = practice.length ? `<div class="br-card">${practice.map((x) => row(x, true)).join('')}</div>` : ''
   const only = own.map(([l, xs]) => `<section class="br-layer"><div class="br-lh"><span class="cap">Only ${esc(lname(l.id))}</span><span class="set-sub">topics no other client shares — move one up when it does</span></div><div class="br-card">${xs.map((x) => row(x, true)).join('')}</div></section>`).join('')
-  return `${top}${builds}${mv ? `<div class="br-mvs">${mv}</div>` : ''}${practice.length ? `<section class="br-layer"><div class="br-lh"><span class="cap">Your practice</span><span class="set-sub">one tree for every client: their topics sit under the practice's where they fit</span></div>${tree}</section>` : ''}${only}` || '<p class="set-sub">Nothing in this scope.</p>'
+  const arch = archiveGroup('Closed threads', oldTopics.map((x) => `<div class="br-card">${row(x, true)}</div>`), 'topics only closed threads talked about · still searchable')
+  return `${top}${builds}${mv ? `<div class="br-mvs">${mv}</div>` : ''}${practice.length ? `<section class="br-layer"><div class="br-lh"><span class="cap">Your practice</span><span class="set-sub">one tree for every client: their topics sit under the practice's where they fit</span></div>${tree}</section>` : ''}${only}${arch}` || '<p class="set-sub">Nothing in this scope.</p>'
 }
 /** The dictionary (the Terms tab): every term — named things: organisations, products, initiatives… — by
  *  group, A–Z within it; a search over its name, other names and spellings; each with what it is, whose it
@@ -4743,7 +4746,8 @@ function brPeopleIn() {
 function closedLabel(t) {
   const how = t.stage === 'lost' ? 'lost' : t.stage === 'cancelled' ? 'cancelled' : 'closed'
   const d = t.closed_at ? new Date(t.closed_at) : null
-  return `${t.name} · ${how}${d ? ' ' + d.toLocaleDateString([], { day: 'numeric', month: 'short' }) : ''}`
+  const opts = d && d.getFullYear() !== new Date().getFullYear() ? { day: 'numeric', month: 'short', year: 'numeric' } : { day: 'numeric', month: 'short' }
+  return `${t.name} · ${how}${d ? ' ' + d.toLocaleDateString([], opts) : ''}`
 }
 /** The folded "Only in closed threads" group under a list or map. */
 function archiveGroup(title, rows, note) {
@@ -4759,9 +4763,9 @@ function brainPeople() {
   const box = `<input class="wp-in br-pq" id="br-pq" type="search" placeholder="Find someone — name, organisation, role" value="${esc(S.br.pq || '')}" aria-label="Find someone">`
   const sub = `${v.people.length} ${v.people.length === 1 ? 'person' : 'people'} · ${v.threads.length} thread${v.threads.length === 1 ? '' : 's'}${hidden ? ` · ${hidden} seen once, not shown` : ''}`
   const res = S.br.pqRes ? `<span class="set-sub br-pq-res">${esc(S.br.pqRes)}</span>` : ''
-  if (!v.people.length) return `<div class="br-graph-bar">${box}<span class="set-sub">${sub}</span></div><p class="set-sub">Nobody yet: people appear as their threads are synced.</p>`
   const arch = archiveGroup('Only in closed threads', v.archived.map((x) => `<button class="br-arch-row" data-pp="pick" data-key="${esc(x.key)}"><b>${esc(x.name)}</b><span class="set-sub">${esc([x.title, x.org && x.org.name].filter(Boolean).join(' · '))}</span><span class="grow"></span>${x.archived.map((t) => `<span class="chip closed">${esc(closedLabel(t))}</span>`).join('')}</button>`),
     'not on the map · still found by search and Claude')
+  if (!v.people.length) return `<div class="br-graph-bar">${box}<span class="set-sub">${sub}</span></div><p class="set-sub">${v.archived.length ? 'Nobody current here.' : 'Nobody yet: people appear as their threads are synced.'}</p>${arch}`
   return `<div class="br-graph-bar">${box}${res}<span class="set-sub">${sub}</span></div><div class="br-graph" id="br-people"></div>${arch}<p class="set-foot">Threads labelled, people near theirs: a line is a role, calls (faint), reports to (dark) or calls together. Scroll to zoom, hover for someone's links, click for who they are.</p>`
 }
 function drawPeople() {
