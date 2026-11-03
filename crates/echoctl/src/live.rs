@@ -60,14 +60,19 @@ impl Live {
 
 /// Start the worker for a call. None when no model is downloaded and no server is set (the call is then transcribed
 /// after it ends, as before).
+/// Whether live transcription can run here: a model here, or a transcription server to send
+/// the audio to.
+fn can_transcribe() -> bool {
+    crate::remote::Client::configured().is_some() || models::active_model_path().ok().is_some_and(|p| p.exists())
+}
+
 pub fn start(dir: &Path, meeting: Option<&MeetingContext>, languages: Option<Vec<String>>) -> Option<Live> {
     let mut cfg = Config::load().ok()?;
     if let Some(l) = languages.filter(|l| !l.is_empty()) {
         cfg.languages = l; // pinned for this call
     }
-    // A model here, or a transcription server to send the audio to.
-    if crate::remote::Client::configured().is_none() {
-        models::active_model_path().ok().filter(|p| p.exists())?;
+    if !can_transcribe() {
+        return None;
     }
     let prompt = build_prompt(&cfg, meeting);
     let remote_name = meeting.and_then(|m| m.sole_other(cfg.me.as_ref()));
@@ -238,11 +243,54 @@ fn drain(tr: &Transcriber, t: &mut TrackReader, name: Option<&str>, flush: bool,
 /// Dev aid (`echoctl live-replay`): play a WAV into `<out>/remote.wav` as a recording would
 /// (growing on disk, 10× real time) while the worker transcribes it, then close it and write the
 /// transcript as the watcher does after a call (the audio is kept).
+/// The mark `live-replay` leaves in its output folder: only a folder holding it (or a new or
+/// empty one) is written over — never a call's.
+const REPLAY_MARK: &str = ".replay";
+const REPLAY_MARK_TEXT: &str = "echoctl live-replay\n";
+
+/// Refuse an output folder that isn't a replay's: anything there but nothing, or a folder this
+/// command marked. Anything that can't be read refuses (fail closed).
+fn replay_folder_ok(out_dir: &Path) -> Result<()> {
+    let refuse = |why: &str| anyhow!("{} {why}; live-replay writes only into a new or empty folder, or one it made", out_dir.display());
+    match std::fs::symlink_metadata(out_dir) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(refuse(&format!("can't be read ({e})"))),
+        Ok(m) if !m.is_dir() => return Err(refuse("isn't a folder")),
+        Ok(_) => {}
+    }
+    let mut entries = std::fs::read_dir(out_dir).map_err(|e| refuse(&format!("can't be read ({e})")))?;
+    if entries.next().is_none() {
+        return Ok(());
+    }
+    match std::fs::symlink_metadata(out_dir.join(REPLAY_MARK)) {
+        Ok(m) if m.is_file() => {}
+        Ok(_) => return Err(refuse("has a .replay that isn't a file")),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(refuse("isn't empty and isn't a replay's")),
+        Err(e) => return Err(refuse(&format!("can't be read ({e})"))),
+    }
+    match std::fs::read_to_string(out_dir.join(REPLAY_MARK)) {
+        Ok(t) if t == REPLAY_MARK_TEXT => Ok(()),
+        Ok(_) => Err(refuse("has a .replay this command didn't write")),
+        Err(e) => Err(refuse(&format!("has a .replay that can't be read ({e})"))),
+    }
+}
+
 pub fn replay(wav: &Path, out_dir: &Path) -> Result<()> {
     let audio = load_16k(wav)?;
+    // Nothing is touched before the folder is known to be a replay's and transcription can run.
+    replay_folder_ok(out_dir)?;
+    if Config::load().is_err() || !can_transcribe() {
+        return Err(anyhow!("no transcription model downloaded (or server connected)"));
+    }
     std::fs::create_dir_all(out_dir)?;
+    std::fs::write(out_dir.join(REPLAY_MARK), REPLAY_MARK_TEXT)?;
     for f in [FILE, "transcript.md", "segments.json"] {
-        let _ = std::fs::remove_file(out_dir.join(f));
+        match std::fs::remove_file(out_dir.join(f)) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                return Err(anyhow!("can't remove {}: {e}", out_dir.join(f).display()));
+            }
+            _ => {}
+        }
     }
     if !out_dir.join("meta.json").exists() {
         std::fs::write(out_dir.join("meta.json"), json!({ "title": "replay", "started_at": chrono::Local::now().to_rfc3339() }).to_string())?;
@@ -293,5 +341,44 @@ mod tests {
         assert_eq!(i16::from_le_bytes([bytes[2 * 999], bytes[2 * 999 + 1]]), 999);
         drop(w);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn replay_writes_only_into_its_own_folders() {
+        let root = std::env::temp_dir().join(format!("echo-replay-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        // New or empty: fine.
+        assert!(replay_folder_ok(&root.join("new")).is_ok());
+        let empty = root.join("empty");
+        std::fs::create_dir_all(&empty).unwrap();
+        assert!(replay_folder_ok(&empty).is_ok());
+        // A call's folder: refused, and nothing in it touched — also by `replay` itself.
+        let call = root.join("2026-10-23_090000-x");
+        std::fs::create_dir_all(&call).unwrap();
+        std::fs::write(call.join("meta.json"), r#"{"title":"replay"}"#).unwrap();
+        std::fs::write(call.join("transcript.md"), "# words").unwrap();
+        assert!(replay_folder_ok(&call).is_err());
+        let wav = root.join("in.wav");
+        let spec = hound::WavSpec { channels: 1, sample_rate: 16_000, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
+        let mut w = hound::WavWriter::create(&wav, spec).unwrap();
+        for _ in 0..1600 {
+            w.write_sample(0i16).unwrap();
+        }
+        w.finalize().unwrap();
+        let e = replay(&wav, &call).unwrap_err().to_string();
+        assert!(e.contains("isn't empty"), "{e}");
+        assert_eq!(std::fs::read_to_string(call.join("transcript.md")).unwrap(), "# words");
+        // A mark of another text, or not a file: refused; the command's own mark: fine.
+        std::fs::write(call.join(REPLAY_MARK), "x").unwrap();
+        assert!(replay_folder_ok(&call).is_err());
+        std::fs::write(call.join(REPLAY_MARK), REPLAY_MARK_TEXT).unwrap();
+        assert!(replay_folder_ok(&call).is_ok());
+        let odd = root.join("odd");
+        std::fs::create_dir_all(odd.join(REPLAY_MARK)).unwrap();
+        assert!(replay_folder_ok(&odd).is_err());
+        // A file given as the folder: refused.
+        assert!(replay_folder_ok(&wav).is_err());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

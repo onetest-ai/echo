@@ -790,7 +790,8 @@ call's one transcription pass, an utterance decoded after 0.8 s of silence — s
 (`live-notes.json` → summary/highlights/actions, `live-state.json`, answers in `live-asks.jsonl`); its quick buttons call
 `echoctl live ask`. It **never calls a model itself** (that would use the session's account, not the call's profile);
 live notes off → it says so. `echoctl live-replay <wav> <dir>` (hidden) plays a WAV in as a growing recording (10×)
-and writes the transcript, as after a call.
+and writes the transcript, as after a call — only into a new or empty folder, or one it marked (`.replay`), and
+only once transcription can run (never a call's folder).
 Mute sync: while recording, the watcher polls Teams' microphone button via Accessibility / UI
 Automation (`ax::MuteWatch`, label "Unmute…" ⇒ muted) every 400 ms; muted ⇒ `audio::mic::MUTED` makes the mic
 track record silence; events `mic_muted`/`mic_unmuted` drive the band. `config.follow_app_mute`
