@@ -1494,21 +1494,31 @@ async function loadPtyInfo() {
  *  older plugins or skills than installed, Restart to update. */
 function claudeTools(key, kind, extra, running) {
   const data = `data-term-kind="${esc(kind)}" data-term-key="${esc(key)}"${extra.call ? ` data-term-call="${esc(extra.call)}"` : ''}`
-  const convs = S.convOpen === key ? (S.convs && S.convs[key]) : null
-  const menu = S.convOpen !== key ? '' : `<div class="menu conv-menu" role="menu">${convs == null ? '<div class="conv-empty">Loading…</div>'
-    : !convs.length ? '<div class="conv-empty">No conversations yet.</div>'
-    : convs.map((x) => `<button class="menu-item conv-item${x.current ? ' on' : ''}" role="menuitem" data-conv="${esc(x.id)}"${x.current && Terms.get(key) && Terms.get(key).id != null && !Terms.get(key).exited ? ' data-conv-current' : ''} ${data}><span class="conv-t">${esc(x.title || (x.current ? 'This conversation' : 'A conversation'))}</span><span class="conv-w">${x.current ? 'now' : x.at ? esc(dayLabel(new Date(x.at)) + ' ' + hm(new Date(x.at))) : ''}</span></button>`).join('')}
-    <div class="menu-sep" role="separator"></div><button class="menu-item" role="menuitem" data-conv="new" ${data}>＋ New conversation</button></div>`
-  const tools = `<span class="term-tools">${running ? `<button class="btn ghost sm" data-conv="restart" ${data} title="Stop it and start it again: the same conversation, with plugins and settings read afresh">↻ Restart</button>` : ''}<button class="btn ghost sm" data-conv="new" ${data} title="Start a fresh conversation; this one stays in the list">＋ New conversation</button><span class="conv-wrap"><button class="btn ghost sm" data-conv-menu ${data} aria-haspopup="menu" aria-expanded="${S.convOpen === key}">Conversations ▾</button>${menu}</span></span>`
+  // Only when it matters: the session runs older plugins or skills than installed. Restart and a new conversation
+  // are ⌘K actions (claudeSessionActions).
   const stale = running && S.ptyStale && S.ptyStale[key]
   const hint = stale ? `<div class="term-stale"><span class="dot" aria-hidden="true"></span><span class="grow">${esc(stale.what)}${stale.at ? ` at ${esc(hm(new Date(stale.at)))}` : ''} — this session still runs what it started with.</span><button class="btn primary sm" data-conv="restart" ${data}>Restart to update</button></div>` : ''
   // Asked first while it runs: what it is doing stops (the conversation itself is kept).
   const ask = S.convAsk && S.convAsk.key === key && running ? S.convAsk : null
   const askText = !ask ? '' : ask.session === '' ? 'Restart Claude? Whatever it is doing now stops, and an answer being written is lost. The conversation is kept and goes on after the restart.'
-    : ask.session === 'new' ? 'Start a new conversation? This session stops, and whatever it is doing now is lost. This conversation stays in Conversations ▾ to come back to.'
-    : 'Switch to that conversation? This session stops, and whatever it is doing now is lost. This one stays in Conversations ▾.'
-  const confirm = ask ? `<div class="term-stale term-ask" role="alert"><span class="grow">${esc(askText)}</span><button class="btn ghost sm" data-conv-keep>Keep it running</button><button class="btn primary sm" data-conv-go="${esc(ask.session)}" ${data}>${ask.session === '' ? 'Restart' : ask.session === 'new' ? 'Start new' : 'Switch'}</button></div>` : ''
-  return `<div class="term-bar term-head"><span class="grow"></span>${tools}</div>${confirm || hint}`
+    : 'Start a new conversation? This session stops, and whatever it is doing now is lost.'
+  const confirm = ask ? `<div class="term-stale term-ask" role="alert"><span class="grow">${esc(askText)}</span><button class="btn ghost sm" data-conv-keep>Keep it running</button><button class="btn primary sm" data-conv-go="${esc(ask.session)}" ${data}>${ask.session === '' ? 'Restart' : 'Start new'}</button></div>` : ''
+  return confirm || hint
+}
+/** ⌘K: restart a Claude panel's session (plugins and settings read afresh) or start a new conversation there. */
+function claudeSessionActions(add) {
+  const panels = [['claude-folder', 'claude:folder', 'Claude · Echo folder', { profile: S.folderProfile || ai().default || undefined }]]
+  if (S.view === 'calls' && S.selected && S.call && !S.call.error) panels.push(['claude-call', callKey(S.call.name), 'Claude · this call', { call: S.call.name }])
+  for (const [kind, key, label, extra] of panels) {
+    const e = Terms.get(key), running = !!(e && e.id != null && !e.exited)
+    const act = (session) => () => {
+      claudePanel(kind)
+      // While it runs the panel asks first; else it starts at once.
+      if (running) { S.convAsk = { key, session }; render() } else termRestart(kind, key, extra, session)
+    }
+    add('Claude', `Restart ${label}`, act(''), { keywords: 'claude session reload plugins update', disabled: running ? null : 'not running' })
+    add('Claude', `New conversation in ${label}`, act('new'), { keywords: 'claude session fresh clear' })
+  }
 }
 /** Restart a Claude panel's session, start a new conversation, or go back to one (`session`: '' | 'new' | an id). */
 async function termRestart(kind, key, extra, session) {
@@ -1516,7 +1526,6 @@ async function termRestart(kind, key, extra, session) {
   if (e && e.starting) return // one at a time
   if (e && e.id != null && !e.exited) send({ cmd: 'pty_close', id: e.id })
   if (e) { e.id = null; e.exited = false; e.starting = true }
-  S.convOpen = null
   if (S.ptyStale) delete S.ptyStale[key]
   render()
   // The old session's processes stop first (the same conversation must never run twice): up to 8 s.
@@ -5416,6 +5425,7 @@ function paletteItems(target) {
   else if (st.armed) add('Echo', 'Cancel recording the next call', () => press({ cmd: 'stop' }), { keywords: 'disarm' })
   else add('Echo', st.in_call ? 'Record this call' : 'Record the next Teams call', () => press({ cmd: 'record' }), { keywords: 'start arm' })
   add('Echo', 'Claude · Echo folder', () => claudePanel('claude-folder'), { keywords: 'terminal session ask' })
+  claudeSessionActions(add)
   add('Echo', 'Vocabulary', () => press({ panelShow: 'vocabulary' }), { keywords: 'terms names words dictionary transcription learned glossary' })
   add('Echo', 'Show or hide Inbox', () => press({ panelFlip: 'needs' }), { keywords: 'needs you notifications attention decide review', hint: NY_HINT })
   for (const i of nyOpen().slice(0, 8)) add('Inbox', i.title, nyShow, { keywords: i.why })
@@ -5710,11 +5720,10 @@ const fingerprint = () => JSON.stringify([S.state, S.calls, S.call, S.agenda, S.
 
 document.addEventListener('click', (e) => {
   // Any click closes the call's ⋯ menu (its own button toggles it).
-  if (S.convOpen && !(e.target.closest && e.target.closest('.conv-wrap'))) { S.convOpen = null; render() }
   const menuWas = S.menuOpen
   if (menuWas && !(e.target.closest && e.target.closest('[data-cmd="call-menu"]'))) S.menuOpen = false
   if (S.laterOpen && !(e.target.closest && e.target.closest('[data-cmd^="later-"]'))) { S.laterOpen = false; render() }
-  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-menu],[data-conv-go],[data-conv-keep],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
+  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-go],[data-conv-keep],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
   if (!t) { if (menuWas) render(); return }
   // Sign-ins (`signin.rs`): shown at once (starting / stopping / checking) until the next poll
   // brings the app's state.
@@ -5752,25 +5761,15 @@ document.addEventListener('click', (e) => {
   if (t.dataset.layoutMove) { Layout.move(t.dataset.layoutMove, t.dataset.to, PANEL_VIEWS); return layoutChanged() }
   if (t.dataset.layoutReset !== undefined) { Layout.load({}); return layoutChanged() }
   if (t.dataset.termOutput) { S.termOutput = S.termOutput || {}; S.termOutput[t.dataset.termOutput] = !S.termOutput[t.dataset.termOutput]; return render() }
-  // A Claude panel's conversations (#44).
-  if (t.dataset.convMenu !== undefined) {
-    const key = t.dataset.termKey
-    if (S.convOpen === key) { S.convOpen = null; return render() }
-    S.convOpen = key; S.convs = { ...(S.convs || {}), [key]: null }; render()
-    const q = t.dataset.termCall ? `call=${encodeURIComponent(t.dataset.termCall)}` : `profile=${encodeURIComponent(S.folderProfile || ai().default || '')}`
-    get(`api/conversations?${q}`).then((l) => { S.convs[key] = l; render() }, () => { S.convs[key] = []; render() })
-    return
-  }
+  // A Claude panel's restart / new conversation (#44): asked first while it runs.
   if (t.dataset.convKeep !== undefined) { S.convAsk = null; return render() }
   if (t.dataset.conv || t.dataset.convGo !== undefined) {
     const extra = t.dataset.termCall ? { call: t.dataset.termCall } : { profile: S.folderProfile || ai().default || undefined }
     const key = t.dataset.termKey
     const v = t.dataset.convGo !== undefined ? t.dataset.convGo : t.dataset.conv === 'restart' ? '' : t.dataset.conv
-    // The conversation already open: nothing to switch to.
-    if (t.dataset.convCurrent !== undefined) { S.convOpen = null; return render() }
     const e = Terms.get(key)
     // A running session: asked first (the confirmation's own button goes on).
-    if (t.dataset.convGo === undefined && e && e.id != null && !e.exited) { S.convAsk = { key, session: v }; S.convOpen = null; return render() }
+    if (t.dataset.convGo === undefined && e && e.id != null && !e.exited) { S.convAsk = { key, session: v }; return render() }
     S.convAsk = null
     return termRestart(t.dataset.termKind, key, extra, v)
   }
@@ -6185,7 +6184,7 @@ document.addEventListener('keydown', (e) => {
   if (e.target.id === 'sel-note' && e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); return commentSelection() }
   if (e.key === 'Escape' && S.selNote) return hideSelPop()
   if (e.key === 'Escape' && S.lightbox) { S.lightbox = null; return render() }
-  if (e.key === 'Escape' && (S.stopAsk || S.listOpen || S.menuOpen || S.laterOpen || S.convAsk || S.convOpen || S.overlay)) { S.convAsk = null; S.convOpen = null; S.stopAsk = false; S.listOpen = false; S.menuOpen = false; S.laterOpen = false; S.overlay = false; return render() }
+  if (e.key === 'Escape' && (S.stopAsk || S.listOpen || S.menuOpen || S.laterOpen || S.convAsk || S.overlay)) { S.convAsk = null; S.stopAsk = false; S.listOpen = false; S.menuOpen = false; S.laterOpen = false; S.overlay = false; return render() }
   if ((MAC ? e.metaKey : e.ctrlKey) && e.key === ',') { e.preventDefault(); return goActivity('settings') }
   if ((MAC ? e.metaKey : e.ctrlKey) && e.key === '`') { e.preventDefault(); return claudePanel() }
   // ⌘1…9 / Ctrl+1…9: the activities, in the bar's order.
