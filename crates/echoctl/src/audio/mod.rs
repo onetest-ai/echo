@@ -39,8 +39,11 @@ pub struct Chunk {
 
 pub enum Health {
     Ok,
-    /// Tear down and reopen, for the given reason.
+    /// Something failed (an error, a stall): tear down and reopen, backing off when it repeats.
     Restart(String),
+    /// A planned change (another device, a new rate, the app's processes): reopen at once, without
+    /// counting toward the failure backoff.
+    Reopen(String),
 }
 
 /// One running capture. Dropping it stops the capture.
@@ -73,7 +76,7 @@ pub struct TrackInfo {
 }
 
 const RETRY_EVERY: Duration = Duration::from_secs(1);
-/// Restart policy: back off 1 s → 30 s between restarts;
+/// Restart policy for failures (`Health::Restart`; a planned `Reopen` reopens at once): back off 1 s → 30 s between restarts;
 /// beyond 20 restarts only retry every 30 s; a stream stable for 5 min resets the count.
 const BACKOFF_MAX: Duration = Duration::from_secs(30);
 const RESTARTS_BEFORE_SLOW: u32 = 20;
@@ -211,6 +214,11 @@ impl Track {
                 } else {
                     self.next_retry = Instant::now() + delay;
                 }
+            }
+            Some(Health::Reopen(reason)) => {
+                self.live = None;
+                self.event("restarting", reason);
+                self.try_open();
             }
             None if Instant::now() >= self.next_retry => self.try_open(),
             None => {}
@@ -538,6 +546,66 @@ mod tests {
         let mut rs = Resampler::new(48_000, TRACK_RATE);
         let out = rs.process(&vec![0.25; 4800]);
         assert!(out[10..].iter().all(|s| (s - 0.25).abs() < 1e-4));
+    }
+
+    /// A source whose streams report the health a test scripts, counting how often it opens.
+    struct FakeSource {
+        opens: Arc<AtomicU64>,
+        script: Arc<std::sync::Mutex<std::collections::VecDeque<Health>>>,
+    }
+
+    struct FakeStream {
+        script: Arc<std::sync::Mutex<std::collections::VecDeque<Health>>>,
+    }
+
+    impl Source for FakeSource {
+        fn open(&mut self, _epoch: u32, _tx: Sender<Chunk>) -> Result<Box<dyn LiveStream>> {
+            self.opens.fetch_add(1, Ordering::SeqCst);
+            Ok(Box::new(FakeStream { script: self.script.clone() }))
+        }
+    }
+
+    impl LiveStream for FakeStream {
+        fn label(&self) -> String {
+            "fake".into()
+        }
+        fn health(&mut self) -> Health {
+            self.script.lock().unwrap().pop_front().unwrap_or(Health::Ok)
+        }
+    }
+
+    #[test]
+    fn planned_reopens_skip_the_backoff_failures_dont() {
+        let dir = std::env::temp_dir().join(format!("echo-track-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let opens = Arc::new(AtomicU64::new(0));
+        let script = Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new()));
+        let source = FakeSource { opens: opens.clone(), script: script.clone() };
+        let mut track = Track::start("mic", &dir.join("mic.wav"), Box::new(source), Instant::now()).unwrap();
+        assert_eq!(opens.load(Ordering::SeqCst), 1);
+
+        // Planned: every one reopens on the same poll, and none counts as a failure.
+        for i in 0..5 {
+            script.lock().unwrap().push_back(Health::Reopen(format!("device {i}")));
+            track.poll();
+            assert_eq!(opens.load(Ordering::SeqCst), 2 + i);
+            assert!(track.live.is_some());
+        }
+        assert_eq!(track.restarts, 0);
+
+        // Failures: the first reopens at once, the second waits for the backoff.
+        script.lock().unwrap().push_back(Health::Restart("stalled".into()));
+        track.poll();
+        assert_eq!(opens.load(Ordering::SeqCst), 7);
+        script.lock().unwrap().push_back(Health::Restart("stalled".into()));
+        track.poll();
+        assert_eq!(opens.load(Ordering::SeqCst), 7);
+        assert!(track.live.is_none());
+        assert!(track.next_retry > Instant::now() + Duration::from_secs(1));
+        assert_eq!(track.restarts, 2);
+
+        track.finish().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

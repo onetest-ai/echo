@@ -492,7 +492,7 @@ impl LiveStream for LoopbackStream {
                     return Health::Restart(format!("{:?} quit", self.app));
                 }
                 if let Some(e) = app_render_endpoint(self.app, Some(current), false).filter(|e| e != current) {
-                    return Health::Restart(format!("{:?} switched output to \"{}\"", self.app, output_name(&e)));
+                    return Health::Reopen(format!("{:?} switched output to \"{}\"", self.app, output_name(&e)));
                 }
             }
         }

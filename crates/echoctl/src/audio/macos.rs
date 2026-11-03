@@ -436,7 +436,7 @@ impl LiveStream for TapStream {
         }
         if let Ok(r) = unsafe { get::<f64>(self.agg_id, kAudioDevicePropertyNominalSampleRate) } {
             if r as u32 != self.rate {
-                return Health::Restart(format!("rate changed {} → {} Hz", self.rate, r as u32));
+                return Health::Reopen(format!("rate changed {} → {} Hz", self.rate, r as u32));
             }
         }
         if let Some(app) = self.app {
@@ -448,7 +448,7 @@ impl LiveStream for TapStream {
                     now.sort_unstable();
                     was.sort_unstable();
                     if !now.is_empty() && now != was {
-                        return Health::Restart(format!(
+                        return Health::Reopen(format!(
                             "{app:?} audio processes changed ({} → {})",
                             was.len(),
                             now.len()
