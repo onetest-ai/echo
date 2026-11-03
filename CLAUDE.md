@@ -253,10 +253,10 @@ never the call's session or a run. Both run in the data
 folder (never a call's: Windows renames), hold their profile's lease while they run, start with `--session-id` and
 resume with `--resume` (ids per profile in `<home>/.echo/sessions.json`: `<profile>:folder`, `<profile>:<stamp>`; one
 refused within 4 s is forgotten). Entry points: status bar Claude, ⌘/Ctrl+`, the call's ⋯ → Ask Claude about this
-call. **Conversations** (#44): each Claude panel has ↻ Restart (stop, resume the same id: plugins and settings read
-afresh), ＋ New conversation and Conversations ▾ (`/api/conversations?call=|profile=` = `terminal::conversations`: every id
-started for that store key, `<home>/.echo/session-history.json`, ≤ 30, titled by the user's first prompt from Claude Code's
-own transcript on that profile); `pty_open {session: '' | 'new' | <id>}` → `choose_session` (an id must be the panel's).
+call. **Restart and a new conversation** (#44): ⌘K actions per Claude panel (`claudeSessionActions`: Restart — the same id
+resumed, plugins and settings read afresh; New conversation — a fresh `--session-id`, the old one kept in
+`<home>/.echo/session-history.json`; `/api/conversations` still lists them, no UI reads it since the panel's own row was
+dropped, 2026-11-03: "such a notification is enough"); `pty_open {session: '' | 'new' | <id>}` → `choose_session`.
 `/api/ptys` `stale` = `{at, what}`: the profile's `plugins/installed_plugins.json`, or (folder) a plugin's session skills,
 changed in content (Echo's `echo@…` entries; the skills' files hashed) since the session started → **Restart to update** on
 the panel. Restart / New / Switch ask first while it runs (what it is doing is lost; the conversation is kept); the page
