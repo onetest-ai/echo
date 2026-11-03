@@ -39,18 +39,38 @@ fn device_id(d: &Device) -> Option<String> {
     d.id().ok().map(|id| id.id().to_string())
 }
 
+/// The input cpal lists with this id, if any.
+fn listed_input(uid: &str) -> Option<Device> {
+    cpal::default_host().input_devices().ok()?.find(|d| device_id(d).as_deref() == Some(uid))
+}
+
 /// The device we should be recording from right now, and whether it came from the app.
 fn desired_device(app: Option<TargetApp>) -> Result<(Device, bool)> {
     let host = cpal::default_host();
     if let Some((uid, _)) = app.and_then(app_input_device) {
-        if let Ok(mut inputs) = host.input_devices() {
-            if let Some(d) = inputs.find(|d| device_id(d).as_deref() == Some(uid.as_str())) {
-                return Ok((d, true));
-            }
+        if let Some(d) = listed_input(&uid) {
+            return Ok((d, true));
         }
     }
     let d = host.default_input_device().ok_or_else(|| anyhow!("no microphone available"))?;
     Ok((d, false))
+}
+
+/// Should a stream on the default input reopen on the app's mic `uid`? Only when cpal lists that
+/// device: otherwise the reopen lands on the default again and the next check asks again — a
+/// reopen every second. Such an id is remembered in `unmatched` (`listed` is asked again at each
+/// check, so a device that appears later is still followed).
+fn follow_app_mic(uid: &str, open_id: Option<&str>, listed: impl FnOnce() -> bool, unmatched: &mut Option<String>) -> bool {
+    if open_id == Some(uid) {
+        *unmatched = None;
+        return false;
+    }
+    if listed() {
+        *unmatched = None;
+        return true;
+    }
+    *unmatched = Some(uid.to_string());
+    false
 }
 
 struct MicStream {
@@ -65,6 +85,8 @@ struct MicStream {
     seen: (u64, Instant),
     last_device_check: Instant,
     app_device_missing_since: Option<Instant>,
+    /// The app's mic when cpal doesn't list it (we stay on the default meanwhile).
+    unmatched_app_mic: Option<String>,
 }
 
 impl Source for MicSource {
@@ -128,6 +150,7 @@ impl Source for MicSource {
             seen: (0, Instant::now()),
             last_device_check: Instant::now(),
             app_device_missing_since: None,
+            unmatched_app_mic: None,
         }))
     }
 }
@@ -141,9 +164,16 @@ impl MicStream {
             (Some((uid, name)), true) if Some(uid) != self.device_id.as_ref() => {
                 Some(format!("{:?} switched mic to \"{name}\"", self.app.unwrap()))
             }
-            // Using the default, but the app now has a mic of its own.
+            // Using the default, but the app now has a mic of its own — one we can open.
             (Some((uid, name)), false) if Some(uid) != self.device_id.as_ref() => {
-                Some(format!("following {:?}'s mic \"{name}\"", self.app.unwrap()))
+                let was = self.unmatched_app_mic.clone();
+                if follow_app_mic(uid, self.device_id.as_deref(), || listed_input(uid).is_some(), &mut self.unmatched_app_mic) {
+                    return Some(format!("following {:?}'s mic \"{name}\"", self.app.unwrap()));
+                }
+                if self.unmatched_app_mic != was {
+                    eprintln!("  {:?}'s mic \"{name}\" isn't in the input list; staying on \"{}\"", self.app.unwrap(), self.device);
+                }
+                self.default_change()
             }
             (Some(_), _) => {
                 self.app_device_missing_since = None;
@@ -155,12 +185,14 @@ impl MicStream {
                 (since.elapsed() >= APP_DEVICE_GRACE)
                     .then(|| format!("{:?} released its mic; using the default input", self.app.unwrap()))
             }
-            // Using the default: follow changes to it.
-            (None, false) => {
-                let d = cpal::default_host().default_input_device()?;
-                (device_id(&d) != self.device_id).then(|| format!("default mic changed to \"{}\"", device_name(&d)))
-            }
+            (None, false) => self.default_change(),
         }
+    }
+
+    /// Using the default: follow changes to it.
+    fn default_change(&self) -> Option<String> {
+        let d = cpal::default_host().default_input_device()?;
+        (device_id(&d) != self.device_id).then(|| format!("default mic changed to \"{}\"", device_name(&d)))
     }
 }
 
@@ -183,7 +215,7 @@ impl LiveStream for MicStream {
         if self.last_device_check.elapsed() >= DEVICE_CHECK_EVERY {
             self.last_device_check = Instant::now();
             if let Some(reason) = self.device_change() {
-                return Health::Restart(reason);
+                return Health::Reopen(reason);
             }
             let host = cpal::default_host();
             let current = host
@@ -192,7 +224,7 @@ impl LiveStream for MicStream {
                 .and_then(|mut it| it.find(|d| device_id(d) == self.device_id));
             if let Some(cfg) = current.and_then(|d| d.default_input_config().ok()) {
                 if cfg.sample_rate() != self.rate {
-                    return Health::Restart(format!(
+                    return Health::Reopen(format!(
                         "\"{}\" changed rate {} → {} Hz",
                         self.device,
                         self.rate,
@@ -202,5 +234,25 @@ impl LiveStream for MicStream {
             }
         }
         Health::Ok
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_unlisted_app_mic_is_not_followed_until_it_appears() {
+        let mut unmatched = None;
+        // Teams reports a mic cpal doesn't list: stay on the default, check after check.
+        for _ in 0..5 {
+            assert!(!follow_app_mic("missing-input", Some("default-mic"), || false, &mut unmatched));
+        }
+        assert_eq!(unmatched.as_deref(), Some("missing-input"));
+        // It shows up in the list: follow it.
+        assert!(follow_app_mic("missing-input", Some("default-mic"), || true, &mut unmatched));
+        assert_eq!(unmatched, None);
+        // Already on it: nothing to do, and the list isn't asked.
+        assert!(!follow_app_mic("headset", Some("headset"), || panic!("not asked"), &mut unmatched));
     }
 }

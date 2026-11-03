@@ -50,9 +50,10 @@ const S = {
   setSection: 'general', // Settings' open section
   noteDraft: '', // the note being typed in My notes' box
   noteAt: null, // the call's time when it was started (seconds), while the call records
+  noteDraftCall: null, // the call the note in the box is for (the one open at its first key)
   noteKind: 'note', // note | question | decision | todo
   selNote: null, // a comment on words selected in the transcript: {t, quote, x, y, open}
-  noteEdit: null, // the note being edited in place: {i (its block), text, kind}
+  noteEdit: null, // the note being edited in place: {i (its block), text, kind, call}
 }
 
 // ── the user's notes (Notes tab): saved over IPC, acknowledged, one save in flight per call ─
@@ -222,7 +223,22 @@ const NoteDoc = (() => {
     time()
     return t === undefined ? { kind, text: v.trim() } : { kind, text: v.trim(), t }
   }
-  return { parse, line, add, change, typed, stamp }
+  /** The note box's text added as Enter adds it — `{text, kind, at}`, `at` the call's time taken at its
+   *  first key (null: none) unless the text names one — or null when there is nothing to add. */
+  function addTyped(text, p) {
+    const n = typed(p.text, p.kind)
+    if (!n.text) return null
+    const t = n.t !== undefined ? n.t : p.at
+    return add(text, { kind: n.kind, t: t == null ? null : Math.floor(t), text: n.text })
+  }
+  /** A note edited in place (`{i, text, kind}`) saved as Save saves it: its text and kind change, its
+   *  time and quote stay; null when emptied (delete is the × beside it). */
+  function saveEdit(text, ed) {
+    const t = flat(ed.text)
+    if (!t && ed.kind !== 'flag') return null
+    return change(text, ed.i, { text: t, kind: ed.kind })
+  }
+  return { parse, line, add, change, typed, stamp, addTyped, saveEdit }
 })()
 // end of the notes block
 
@@ -546,7 +562,8 @@ function route() {
   S.view = 'calls'
   const m = h.match(/^call\/([^/]+)(?:\/(\w+))?$/)
   if (m) {
-    if (S.selected !== m[1]) { S.selected = m[1]; S.call = null; S.confirmDelete = false; S.find = '' }
+    // Another call: a note typed or edited on this one goes into its notes first.
+    if (S.selected !== m[1]) { commitPendingNotes(); S.selected = m[1]; S.call = null; S.confirmDelete = false; S.find = '' }
     if (m[2]) S.tab = m[2]
   }
 }
@@ -1024,7 +1041,8 @@ function callChanges(c) {
 const hms = (s) => String(s).split(':').reduce((a, x) => a * 60 + Number(x), 0)
 
 // ── Notes: the user's own notes, an editor over my-notes.md (saved by NotesSync) ─────────────
-const notesState = (v) => v.saving ? 'Saving…' : v.error ? `Couldn't save: ${v.error}` : v.dirty ? 'Not saved yet' : 'Saved'
+/** `pending`: a note typed in the box, or edited in place, not added to the notes yet. */
+const notesState = (v, pending) => pending ? 'Not saved yet' : v.saving ? 'Saving…' : v.error ? `Couldn't save: ${v.error}` : v.dirty ? 'Not saved yet' : 'Saved'
 function notesTab(c) {
   if (c.my_notes_error) {
     return `<div class="mynotes"><div class="notice error"><span class="grow">Your notes for this call (my-notes.md) can't be read: ${esc(c.my_notes_error)}. Fix or replace the file, and they show here again.</span><button class="btn ghost" data-cmd="reveal">Show folder</button></div></div>`
@@ -1097,7 +1115,7 @@ function notesTimeline(c) {
   const kept = v.kept ? `<div class="notice"><span class="grow">The file was changed outside Echo while you typed: your text is saved, the other version is in ${esc(v.kept)}.</span><button class="btn ghost" data-cmd="kept-ok">OK</button></div>` : ''
   const err = v.error ? `<div class="notice error"><span class="grow">Your notes couldn't be saved: ${esc(v.error)}</span><button class="btn" data-cmd="notes-retry">Retry</button></div>` : ''
   return `<div class="notes-tl" data-notes-call="${esc(c.name)}">
-    <div class="nt-bar"><span class="saved-state" id="notes-state">${esc(notesState(v))}</span><button class="icon-btn" data-cmd="notes-raw" title="Edit as text (my-notes.md)" aria-label="Edit as text">${ICON('<path d="M8 7l-5 5 5 5M16 7l5 5-5 5"/>')}</button></div>
+    <div class="nt-bar"><span class="saved-state" id="notes-state">${esc(notesState(v, pendingNote(c.name)))}</span><button class="icon-btn" data-cmd="notes-raw" title="Edit as text (my-notes.md)" aria-label="Edit as text">${ICON('<path d="M8 7l-5 5 5 5M16 7l5 5-5 5"/>')}</button></div>
     ${kept}${err}
     <div class="nt-list" id="nt-list">${items}${empty}</div>
     <div class="nt-compose">
@@ -1119,25 +1137,74 @@ function editNotes(f) {
 
 /** Save the note edited in place: its text and kind change, its time and quote stay. */
 function saveNoteEdit() {
-  const ed = S.noteEdit
-  if (!ed) return
-  S.noteEdit = null
-  const text = ed.text.replace(/\s+/g, ' ').trim()
-  if (!text && ed.kind !== 'flag') return render() // emptied: delete is the × beside it
-  editNotes((all) => NoteDoc.change(all, ed.i, { text, kind: ed.kind }))
+  if (!S.noteEdit || S.closing) return
+  commitPendingEdit() // emptied: dropped (delete is the × beside it)
+  render()
 }
 
 /** Add what is typed in the note box (or a flag) at its moment. */
 function addNote(kindOverride) {
   const c = S.call
   if (!c) return
-  const typed = kindOverride ? { kind: kindOverride, text: '' } : NoteDoc.typed(S.noteDraft, S.noteKind)
-  if (!kindOverride && !typed.text) return
-  const t = kindOverride ? callNow(c) : typed.t !== undefined ? typed.t : (S.noteAt != null ? S.noteAt : callNow(c))
-  editNotes((text) => NoteDoc.add(text, { kind: typed.kind, t: t == null ? null : Math.floor(t), text: typed.text }))
-  if (!kindOverride) { S.noteDraft = ''; S.noteAt = null }
-  render()
+  if (S.closing) return
+  if (kindOverride) {
+    const t = callNow(c)
+    editNotes((text) => NoteDoc.add(text, { kind: kindOverride, t: t == null ? null : Math.floor(t), text: '' }))
+  } else {
+    commitNoteDraft()
+    render()
+  }
   const el = $('#note-input'); if (el) el.focus()
+}
+
+// A note typed in the box (`S.noteDraft`, its time `S.noteAt`) and one edited in place (`S.noteEdit`)
+// belong to the call they were started on (`S.noteDraftCall`, `S.noteEdit.call`). Enter / Save add them;
+// so do closing the window, quitting Echo (anything `prepareClose` saves for), Write minutes and opening
+// another call — nothing typed is lost. Escape / Cancel drop them.
+const sameCall = (a, b) => !!a && !!b && String(a).slice(0, 17) === String(b).slice(0, 17)
+/** The call's folder as it is named now (a retitle keeps the stamp). */
+const ownCall = (name) => (S.call && sameCall(S.call.name, name) ? S.call.name : name)
+/** Whether the call has a note typed or edited that isn't in its notes yet. */
+function pendingNote(call) {
+  if (S.noteDraft.trim() && sameCall(S.noteDraftCall, call)) return true
+  const ed = S.noteEdit
+  if (!ed || !sameCall(ed.call, call)) return false
+  const draft = NotesSync.view(call).draft, next = NoteDoc.saveEdit(draft, ed)
+  return next != null && next !== draft
+}
+/** Add the note box's text to its own call's notes, as Enter does; the box is emptied once they hold it.
+ *  The call whose notes changed, else null. */
+function commitNoteDraft() {
+  const own = S.noteDraftCall || (S.call && S.call.name)
+  if (!own || !S.noteDraft.trim()) return null
+  const call = ownCall(own)
+  const at = S.noteAt != null ? S.noteAt : S.call && sameCall(S.call.name, call) ? callNow(S.call) : null
+  const next = NoteDoc.addTyped(NotesSync.view(call).draft, { text: S.noteDraft, kind: S.noteKind, at })
+  if (next == null) return null
+  NotesSync.edit(call, next)
+  S.noteDraft = ''; S.noteAt = null; S.noteDraftCall = null
+  if (!S.closing) saveNotesSoon(call)
+  return call
+}
+/** Everything typed and not added yet, added to its own call's notes and saved now (no waiting for the
+ *  1 s timer): before the window closes or Echo quits, before Write minutes, when another call opens. */
+function commitPendingNotes() {
+  const changed = new Set([commitPendingEdit(), commitNoteDraft()].filter(Boolean))
+  for (const call of changed) NotesSync.save(call)
+  return changed.size > 0
+}
+/** The note edited in place, saved into its own call's notes as Save does (an emptied one is dropped,
+ *  as Save drops it). The call whose notes changed, else null. */
+function commitPendingEdit() {
+  const ed = S.noteEdit
+  const call = ed && ownCall(ed.call || (S.call && S.call.name))
+  if (!call) return null
+  const draft = NotesSync.view(call).draft, next = NoteDoc.saveEdit(draft, ed)
+  S.noteEdit = null
+  if (next == null || next === draft) return null
+  NotesSync.edit(call, next)
+  if (!S.closing) saveNotesSoon(call)
+  return call
 }
 PANEL_VIEWS.push({ id: 'notes', label: 'My notes', icon: ICON('<path d="M5 4h10l4 4v12H5z"/><path d="M15 4v4h4M8 12h8M8 16h6"/>'), area: 'right', when: () => S.view === 'calls', render: notesPanel })
 
@@ -5318,7 +5385,9 @@ document.addEventListener('click', (e) => {
     // Clicking a note's text to select it for copying isn't an edit.
     const sel = window.getSelection && window.getSelection()
     if (sel && !sel.isCollapsed && t.classList.contains('nt-text')) return
-    S.noteEdit = { i, text: b.text, kind: b.kind }
+    // Another note edited meanwhile is saved first, as its Save would.
+    if (S.noteEdit && S.noteEdit.i !== i) commitPendingEdit()
+    S.noteEdit = { i, text: b.text, kind: b.kind, call: S.call.name }
     render()
     const ta = $('#note-edit'); if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length) }
     return
@@ -5385,6 +5454,8 @@ document.addEventListener('click', (e) => {
       // The run reads the user's notes: they are saved first, or it doesn't start.
       const call = S.selected
       const pid = S.notesProfile && S.notesProfile.call === call && S.notesProfile.id ? S.notesProfile.id : null
+      // A note typed or edited and not added yet is part of them.
+      if (commitPendingNotes()) render()
       NotesSync.flush(call).then(() => {
         send({ cmd: 'write_notes', call, profile: pid || undefined })
         if (S.call && S.selected === call) { S.call.notes_run = { ...(S.call.notes_run || {}), state: 'queued', had_minutes: !!S.call.notes, model: profileName(pid || (S.call.live && S.call.live.profile)), message: 'Starting…' }; render() }
@@ -5406,6 +5477,9 @@ document.addEventListener('click', (e) => {
     case 'delete': {
       const name = S.selected
       S.confirmDelete = false; S.selected = null; S.call = null
+      // A note being typed or edited for it goes with it.
+      if (sameCall(S.noteDraftCall, name)) { S.noteDraft = ''; S.noteAt = null; S.noteDraftCall = null }
+      if (S.noteEdit && sameCall(S.noteEdit.call, name)) S.noteEdit = null
       S.calls = (S.calls || []).filter((c) => c.name !== name)
       send({ cmd: 'delete', call: name })
       return go('calls')
@@ -5430,10 +5504,11 @@ function syncEditor() {
   try { ta.setSelectionRange(Math.min(at, draft.length), Math.min(end, draft.length)) } catch { /* not focused */ }
 }
 
-/** The editor's "Saved / Saving…" line, without re-rendering the editor. */
+/** The editor's (or the timeline's) "Saved / Saving… / Not saved yet" line, without re-rendering it. */
 function showNotesState() {
-  const el = $('#notes-state'), ta = $('#my-notes')
-  if (el && ta) el.textContent = notesState(NotesSync.view(ta.dataset.notesCall))
+  const el = $('#notes-state'), on = $('#my-notes') || $('.notes-tl')
+  const call = on && on.dataset.notesCall
+  if (el && call) el.textContent = notesState(NotesSync.view(call), pendingNote(call))
 }
 /** The Time button: `[m:ss] ` (time into the call; tray → Add a note… stamps `[mm:ss]`) at the caret. */
 function stampNotes() {
@@ -5622,11 +5697,14 @@ document.addEventListener('input', (e) => {
   if (e.target.id === 'find') { S.find = e.target.value; render() }
   if (e.target.id === 'ask') S.liveDraft = e.target.value // no render: typing must not be disturbed
   // The note box: the call's time is taken at the first key (what was just said), not at Enter.
-  if (e.target.id === 'note-edit' && S.noteEdit) { S.noteEdit.text = e.target.value; return }
+  if (e.target.id === 'note-edit' && S.noteEdit) { S.noteEdit.text = e.target.value; showNotesState(); return }
   if (e.target.id === 'note-input') {
     S.noteDraft = e.target.value
-    if (!S.noteDraft) S.noteAt = null
-    else if (S.noteAt == null) S.noteAt = callNow(S.call)
+    if (!S.noteDraft) { S.noteAt = null; S.noteDraftCall = null } else {
+      if (S.noteDraftCall == null) S.noteDraftCall = S.call && S.call.name
+      if (S.noteAt == null) S.noteAt = callNow(S.call)
+    }
+    showNotesState()
   }
 })
 
@@ -5686,7 +5764,7 @@ document.addEventListener('keydown', (e) => {
   }
   if (e.target.id === 'note-input') {
     if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); return addNote() }
-    if (e.key === 'Escape') { S.noteDraft = ''; S.noteAt = null; e.target.value = ''; return }
+    if (e.key === 'Escape') { S.noteDraft = ''; S.noteAt = null; S.noteDraftCall = null; e.target.value = ''; showNotesState(); return }
     return
   }
   if (e.target.id === 'note-edit') {
@@ -5838,9 +5916,12 @@ window.echo = {
    *  editor read-only, every unsaved note saved, then `close_ready` says for handshake `n` whether
    *  it worked. */
   prepareClose(n, close) {
+    // A note typed in the box or edited in place without Enter is saved too, in its own call.
+    const committed = commitPendingNotes()
     S.closing = true
     const ta = $('#my-notes')
     if (ta) ta.readOnly = true
+    if (committed && !typingNotes()) render() // the note in the list, the box empty and read-only
     clearTimeout(notesTimer)
     // Saved: the editors stay read-only until Echo is gone, or `thaw` says it stays.
     NotesSync.flushAll().then(

@@ -610,8 +610,10 @@ pub enum Transcripts {
 }
 
 /// The transcripts of the Teams meeting behind a join link: `/me/onlineMeetings?$filter=JoinWebUrl eq
-/// '…'` → its transcripts → (`content`) each one's text as WebVTT (`text/plain` is refused).
-pub fn meeting_transcripts(join_url: &str, content: bool) -> Result<Transcripts> {
+/// '…'` → its transcripts created within `window` (a series shares one online meeting: the
+/// occurrence's, `teams_transcript::occurrence_window`) → (`content`) each one's text as WebVTT
+/// (`text/plain` is refused).
+pub fn meeting_transcripts(join_url: &str, window: (DateTime<Utc>, DateTime<Utc>), content: bool) -> Result<Transcripts> {
     let token = access_token()?;
     let filter = format!("JoinWebUrl eq '{}'", join_url.replace('\'', "''"));
     let (code, body) = graph_raw(&token, &format!("{GRAPH}/me/onlineMeetings?$filter={}", urlencode(&filter)))?;
@@ -623,21 +625,38 @@ pub fn meeting_transcripts(join_url: &str, content: bool) -> Result<Transcripts>
         return Ok(Transcripts::NotGiven("Teams doesn't give this meeting to your account".into()));
     };
     let list = graph_get(&token, &format!("{GRAPH}/me/onlineMeetings/{}/transcripts", urlencode(&id)))?;
+    let out = transcripts_in(&list, window, content, |tid| {
+        graph_raw(&token, &format!("{GRAPH}/me/onlineMeetings/{}/transcripts/{}/content?$format=text/vtt", urlencode(&id), urlencode(tid)))
+    })?;
+    Ok(if out.is_empty() { Transcripts::None } else { Transcripts::Found(out) })
+}
+
+/// The transcripts of a `/transcripts` list created within `window`, oldest first; with `content`,
+/// each one's text from `fetch` (status, body). Only those are fetched: Teams expires old ones (their
+/// content answers 404), and one from months ago must not fail this occurrence's import.
+fn transcripts_in(list: &Value, (from, to): (DateTime<Utc>, DateTime<Utc>), content: bool, mut fetch: impl FnMut(&str) -> Result<(u16, String)>) -> Result<Vec<Value>> {
     let mut out = vec![];
     for t in list["value"].as_array().into_iter().flatten() {
         let Some(tid) = t["id"].as_str() else { continue };
-        if !content {
-            out.push(json!({"id": tid, "created": t["createdDateTime"], "ended": t["endDateTime"]}));
+        let created = t["createdDateTime"].as_str().and_then(|c| DateTime::parse_from_rfc3339(c).ok()).map(|c| c.with_timezone(&Utc));
+        if !created.is_some_and(|c| c >= from && c <= to) {
             continue;
         }
-        let (code, vtt) = graph_raw(&token, &format!("{GRAPH}/me/onlineMeetings/{}/transcripts/{}/content?$format=text/vtt", urlencode(&id), urlencode(tid)))?;
-        if code != 200 {
-            bail!("the transcript can't be read: {}", graph_error(code, &serde_json::from_str(&vtt).unwrap_or_default()));
+        let mut item = json!({"id": tid, "created": t["createdDateTime"], "ended": t["endDateTime"]});
+        if content {
+            let (code, vtt) = fetch(tid)?;
+            if code == 404 {
+                bail!("the transcript can't be read: it is no longer available (Teams expired it)");
+            }
+            if code != 200 {
+                bail!("the transcript can't be read: {}", graph_error(code, &serde_json::from_str(&vtt).unwrap_or_default()));
+            }
+            item["vtt"] = json!(vtt);
         }
-        out.push(json!({"id": tid, "created": t["createdDateTime"], "ended": t["endDateTime"], "vtt": vtt}));
+        out.push(item);
     }
     out.sort_by(|a, b| a["created"].as_str().cmp(&b["created"].as_str()));
-    Ok(if out.is_empty() { Transcripts::None } else { Transcripts::Found(out) })
+    Ok(out)
 }
 
 fn graph_error(code: u16, v: &Value) -> String {
@@ -918,6 +937,34 @@ pub fn find_call_chat(recording_start: DateTime<Utc>, began: Option<DateTime<Utc
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_occurrences_transcripts_are_fetched() {
+        // A bi-weekly series: two old transcripts Teams expired (404), this occurrence's readable.
+        let list = json!({"value": [
+            {"id": "may", "createdDateTime": "2026-05-20T13:31:00Z"},
+            {"id": "oct", "createdDateTime": "2026-10-21T13:32:00Z", "endDateTime": "2026-10-21T14:01:00Z"},
+            {"id": "jul", "createdDateTime": "2026-07-29T13:30:00Z"},
+        ]});
+        let at = |s: &str| DateTime::parse_from_rfc3339(s).unwrap().with_timezone(&Utc);
+        let window = (at("2026-10-21T13:00:00Z"), at("2026-10-21T14:30:00Z"));
+        let mut asked = vec![];
+        let got = transcripts_in(&list, window, true, |id| {
+            asked.push(id.to_string());
+            Ok(if id == "oct" { (200, "WEBVTT\n".to_string()) } else { (404, "{}".to_string()) })
+        })
+        .unwrap();
+        assert_eq!(asked, ["oct"]);
+        assert_eq!(got.len(), 1);
+        assert_eq!((got[0]["id"].as_str(), got[0]["vtt"].as_str()), (Some("oct"), Some("WEBVTT\n")));
+        // Without content nothing is fetched, and the list is the occurrence's too.
+        let listed = transcripts_in(&list, window, false, |_| panic!("no content asked")).unwrap();
+        assert_eq!(listed.iter().map(|t| t["id"].as_str().unwrap()).collect::<Vec<_>>(), ["oct"]);
+        // This occurrence's own transcript expired: said so, not "doesn't give this meeting".
+        let window = (at("2026-07-29T13:00:00Z"), at("2026-07-29T14:30:00Z"));
+        let e = transcripts_in(&list, window, true, |_| Ok((404, "{}".to_string()))).unwrap_err();
+        assert!(format!("{e:#}").contains("no longer available (Teams expired it)"), "{e:#}");
+    }
 
     #[test]
     fn meeting_chat_id_comes_from_the_join_link() {

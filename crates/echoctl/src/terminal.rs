@@ -71,8 +71,45 @@ struct Term {
     child: Mutex<Box<dyn portable_pty::Child + Send + Sync>>,
     out: Mutex<Ring>,
     changed: Condvar,
+    /// The AI profile whose lease it holds (a Claude session).
+    profile: Option<String>,
     /// What must live as long as the program: a Claude session's profile lease.
     _hold: Mutex<Option<Box<dyn Send>>>,
+}
+
+/// Profile leases the terminals' programs hold, by profile: until the program has exited, also after
+/// its terminal was closed.
+static HELD: Mutex<BTreeMap<String, usize>> = Mutex::new(BTreeMap::new());
+
+/// A profile's lease, counted in `HELD` while it lives.
+struct Held {
+    profile: String,
+    _lease: Box<dyn Send>,
+}
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        let mut held = HELD.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(n) = held.get_mut(&self.profile) {
+            *n -= 1;
+            if *n == 0 {
+                held.remove(&self.profile);
+            }
+        }
+    }
+}
+
+/// Does a terminal's program (a Claude session in the window) still hold this profile's lease.
+pub fn holds_profile(profile: &str) -> bool {
+    HELD.lock().unwrap_or_else(|e| e.into_inner()).contains_key(profile)
+}
+
+/// Close the Claude sessions on this profile (a sign-in needs the profile to itself; they resume by
+/// id when opened again); how many were open. Each lease goes once its program has exited.
+pub fn close_profile(profile: &str) -> usize {
+    let ids: Vec<u64> = TERMS.lock().unwrap_or_else(|e| e.into_inner()).iter().filter(|(_, t)| t.profile.as_deref() == Some(profile)).map(|(id, _)| *id).collect();
+    ids.iter().for_each(|id| close(*id));
+    ids.len()
 }
 
 /// Run when a terminal's program ends, with how long it ran.
@@ -90,8 +127,9 @@ pub fn open(key: &str, cmd: CommandBuilder, cols: u16, rows: u16) -> Result<u64>
     open_with(key, cmd, cols, rows, None, None)
 }
 
-/// `open`, keeping `hold` alive while the program runs, and calling `on_exit` when it ends.
-pub fn open_with(key: &str, mut cmd: CommandBuilder, cols: u16, rows: u16, hold: Option<Box<dyn Send>>, on_exit: Option<OnExit>) -> Result<u64> {
+/// `open`, keeping `hold` — a profile and its lease — alive while the program runs, and calling
+/// `on_exit` when it ends.
+pub fn open_with(key: &str, mut cmd: CommandBuilder, cols: u16, rows: u16, hold: Option<(String, Box<dyn Send>)>, on_exit: Option<OnExit>) -> Result<u64> {
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     let pair = native_pty_system().openpty(PtySize { rows: rows.max(2), cols: cols.max(10), pixel_width: 0, pixel_height: 0 })?;
@@ -100,6 +138,11 @@ pub fn open_with(key: &str, mut cmd: CommandBuilder, cols: u16, rows: u16, hold:
     let mut reader = pair.master.try_clone_reader()?;
     let writer = pair.master.take_writer()?;
     let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let profile = hold.as_ref().map(|(p, _)| p.clone());
+    let hold = hold.map(|(profile, lease)| {
+        *HELD.lock().unwrap_or_else(|e| e.into_inner()).entry(profile.clone()).or_default() += 1;
+        Box::new(Held { profile, _lease: lease }) as Box<dyn Send>
+    });
     let term = Arc::new(Term {
         key: key.to_string(),
         master: Mutex::new(pair.master),
@@ -107,6 +150,7 @@ pub fn open_with(key: &str, mut cmd: CommandBuilder, cols: u16, rows: u16, hold:
         child: Mutex::new(child),
         out: Mutex::new(Ring::default()),
         changed: Condvar::new(),
+        profile,
         _hold: Mutex::new(hold),
     });
     let started = Instant::now();
@@ -170,7 +214,14 @@ pub fn resize(id: u64, cols: u16, rows: u16) -> Result<()> {
 pub fn close(id: u64) {
     let term = TERMS.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
     if let Some(t) = term {
-        let _ = t.child.lock().unwrap_or_else(|e| e.into_inner()).kill();
+        let mut child = t.child.lock().unwrap_or_else(|e| e.into_inner());
+        // Its whole process group: the login shell, Claude Code and what it started (MCP servers)
+        // — one of them left holding the terminal would keep its profile's lease.
+        if let Some(pid) = child.process_id() {
+            std::thread::spawn(move || crate::ai::stop_group(pid));
+        }
+        let _ = child.kill();
+        drop(child);
         t.out.lock().unwrap_or_else(|e| e.into_inner()).exited = true;
         t.changed.notify_all();
     }
@@ -297,7 +348,7 @@ pub fn start_folder(key: &str, profile: Option<&str>, cols: u16, rows: u16) -> R
     let mut env = vec![(crate::view::SESSION_VAR, "1".into()), (crate::view::PROFILE_VAR, p.id.clone())];
     env.extend(extra_env);
     let cmd = ai::terminal_command(&p, &args, &paths::home(), &env, false)?;
-    open_with(key, cmd, cols, rows, Some(Box::new(ready)), Some(forget))
+    open_with(key, cmd, cols, rows, Some((p.id.clone(), Box::new(ready))), Some(forget))
 }
 
 /// The guarded session on the call in `dir`, on the call's own profile. Only one at a time: another
@@ -387,7 +438,7 @@ pub fn start_call(key: &str, dir: &Path, cols: u16, rows: u16) -> Result<u64> {
             close(id);
         }
     }
-    open_with(key, cmd, cols, rows, Some(Box::new(ready)), Some(forget))
+    open_with(key, cmd, cols, rows, Some((p.id.clone(), Box::new(ready))), Some(forget))
 }
 
 /// The Brain as an MCP server for a session (`echoctl brain mcp`): a config file of its own, with what
@@ -448,6 +499,23 @@ mod tests {
         assert!(c.reset && c.from == 11 && c.data.len() == CHUNK);
         // Ahead of what was written (a page from an earlier terminal): from the start too.
         assert!(r.after(r.end() + 5).reset);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn closing_a_profiles_sessions_lets_its_lease_go() {
+        let mut cmd = CommandBuilder::new("/bin/sh");
+        cmd.args(["-c", "sleep 30"]);
+        let id = open_with("claude:folder", cmd, 80, 20, Some(("acme-test".into(), Box::new(()))), None).unwrap();
+        assert!(holds_profile("acme-test") && !holds_profile("other-test"));
+        assert_eq!(close_profile("other-test"), 0);
+        assert_eq!(close_profile("acme-test"), 1);
+        assert!(read(id, 0, Duration::ZERO).is_none());
+        let t0 = Instant::now();
+        while holds_profile("acme-test") && t0.elapsed() < Duration::from_secs(10) {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(!holds_profile("acme-test"), "the lease goes with the program");
     }
 
     #[test]

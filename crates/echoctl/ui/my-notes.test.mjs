@@ -94,6 +94,29 @@ test('what is typed picks its kind', () => {
   assert.deepEqual(NoteDoc.typed('plain', 'decision'), { kind: 'decision', text: 'plain' })
 })
 
+test('the note box is added as Enter adds it, at the time its first key took (#17)', () => {
+  const file = '- [01:00] first\n- [03:00] third\n'
+  // Typed at 2:05 (and Enter not pressed): the close, a quit or Write minutes adds it there.
+  assert.equal(NoteDoc.addTyped(file, { text: '  ? who signs  ', kind: 'note', at: 125.7 }), '- [01:00] first\n- [02:05] ? who signs\n- [03:00] third\n')
+  // A time typed in the text wins over the one taken; no time at all: a general note at the end.
+  assert.equal(NoteDoc.addTyped(file, { text: '[00:10] early', kind: 'note', at: 125 }), '- [00:10] early\n- [01:00] first\n- [03:00] third\n')
+  assert.equal(NoteDoc.addTyped('', { text: 'after the call', kind: 'decision', at: null }), '- ! after the call\n')
+  // Nothing typed but spaces, or only a kind: nothing to add.
+  assert.equal(NoteDoc.addTyped(file, { text: '   ', kind: 'note', at: 5 }), null)
+  assert.equal(NoteDoc.addTyped(file, { text: '[] ', kind: 'note', at: 5 }), null)
+})
+
+test('a note edited in place is saved as Save saves it: text and kind change, time and quote stay (#17)', () => {
+  const file = '# Pricing\n- [12:05] ? Is legal OK?\n  > "SAML by Friday."\n- [12:21] keep\n'
+  assert.equal(NoteDoc.saveEdit(file, { i: 1, text: ' Legal  is OK ', kind: 'decision' }),
+    '# Pricing\n- [12:05] ! Legal is OK\n  > "SAML by Friday."\n- [12:21] keep\n')
+  // Emptied: dropped, as Save drops it (delete is the ×); a flag may be empty.
+  assert.equal(NoteDoc.saveEdit(file, { i: 1, text: '  ', kind: 'question' }), null)
+  assert.equal(NoteDoc.saveEdit(file, { i: 2, text: '', kind: 'flag' }), '# Pricing\n- [12:05] ? Is legal OK?\n  > "SAML by Friday."\n- [12:21] ⚑\n')
+  // Unchanged: the same text (nothing to save).
+  assert.equal(NoteDoc.saveEdit(file, { i: 2, text: 'keep', kind: 'note' }), file)
+})
+
 let failed = 0
 for (const [name, f] of tests) {
   try { f(); console.log(`ok - ${name}`) } catch (e) { failed++; console.log(`not ok - ${name}\n  ${e.message}`) }

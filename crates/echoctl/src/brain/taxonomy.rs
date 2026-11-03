@@ -798,41 +798,78 @@ pub fn induce(layer: &str, progress: &dyn Fn(&str)) -> Result<Value> {
 
 /// A layer's sections judged since its build, at least, before its drift is judged.
 const DRIFT_MIN: i64 = 30;
+/// Calls a layer was built from, at least, before its sections' fit is judged: a few calls about one
+/// subject put most of their sections under one topic, and that is no fault of the topics.
+const DRIFT_MIN_CALLS: usize = 6;
 
-/// The version a layer was last built in (its `build` in the history), else 0: every section counts.
-fn built_version(t: &Taxonomy, layer: &str) -> u64 {
-    t.history.iter().rev().find(|h| h["op"] == "build" && h["layer"] == layer).and_then(|h| h["version"].as_u64()).unwrap_or(0)
+/// The version a layer was last built in (its `build` in the history) and when, else 0 and "": every
+/// section counts.
+fn last_build(t: &Taxonomy, layer: &str) -> (u64, String) {
+    let h = t.history.iter().rev().find(|h| h["op"] == "build" && h["layer"] == layer);
+    (h.and_then(|h| h["version"].as_u64()).unwrap_or(0), h.and_then(|h| h["at"].as_str()).unwrap_or("").to_string())
 }
 
 fn drift_file() -> PathBuf {
     dir().join("drift.json")
 }
 
-/// Each layer's drift over the sections judged since its last build: stale when ≥ 30 of them and more
-/// than 10% fit no topic, or one level-1 topic took more than 40% of the tagged ones; or when its calls
-/// are 3× those it was built from (and 6 or more). "Not now" snoozes a layer until its sections or its
-/// calls grow by half again.
+/// Each layer's drift over the sections that came in since its last build (indexed after it and judged
+/// in its version or later — never the build's own sections tagged again): stale when ≥ 30 of them and
+/// more than 10% fit no topic, or one topic took more than 40% of the tagged ones (a level-1 topic with
+/// subtopics only when one of its subtopics did); those two only for a layer built from 6 calls or more.
+/// Or when its calls are 3× those it was built from (and 6 or more). "Not now" snoozes a layer until its
+/// sections or its calls grow by half again.
 fn drift_in(c: &Connection, t: &Taxonomy, snoozed: &Value) -> Result<Vec<Value>> {
+    // A section judged since the build, indexed after it (`?3`; "" for a build with no time: all).
+    const NEW: &str = "CAST(v.taxonomy_version AS INTEGER) >= ?2 AND (?3 = '' OR EXISTS (SELECT 1 FROM chunks ch WHERE ch.id = v.chunk_id AND coalesce(ch.created_at, '') > ?3))";
     let mut out = vec![];
     for (id, l) in &t.layers {
         let client = if id == SHARED { "-" } else { id.as_str() };
-        let since = built_version(t, id) as i64;
+        let (since, at) = last_build(t, id);
+        let since = since as i64;
         let (judged, untagged, tagged): (i64, i64, i64) = c.query_row(
-            "SELECT count(*), coalesce(sum(v.verdict = 'untagged'), 0), coalesce(sum(v.verdict = 'tagged'), 0) FROM chunk_verdicts v
-             JOIN scopes s ON s.chunk_id = v.chunk_id AND s.kind = 'client' AND s.id = ?1 WHERE CAST(v.taxonomy_version AS INTEGER) >= ?2",
-            params![client, since],
+            &format!(
+                "SELECT count(*), coalesce(sum(v.verdict = 'untagged'), 0), coalesce(sum(v.verdict = 'tagged'), 0) FROM chunk_verdicts v
+                 JOIN scopes s ON s.chunk_id = v.chunk_id AND s.kind = 'client' AND s.id = ?1 WHERE {NEW}"
+            ),
+            params![client, since, at],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )?;
-        let top: Option<(String, i64)> = c
-            .query_row(
+        // The new tagged sections per topic of a level, most first.
+        let counts = |kind: &str| -> Result<Vec<(String, i64)>> {
+            let sql = format!(
                 "SELECT k.category_id, count(DISTINCT k.chunk_id) FROM chunk_topics k
-                 JOIN chunk_verdicts v ON v.chunk_id = k.chunk_id AND v.verdict = 'tagged' AND CAST(v.taxonomy_version AS INTEGER) >= ?2
+                 JOIN chunk_verdicts v ON v.chunk_id = k.chunk_id AND v.verdict = 'tagged' AND {NEW}
                  JOIN scopes s ON s.chunk_id = k.chunk_id AND s.kind = 'client' AND s.id = ?1
-                 WHERE k.kind = 'intent_l1' GROUP BY 1 ORDER BY 2 DESC LIMIT 1",
-                params![client, since],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .ok();
+                 WHERE k.kind = ?4 GROUP BY 1 ORDER BY 2 DESC, 1"
+            );
+            Ok(c.prepare(&sql)?.query_map(params![client, since, at, kind], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?)
+        };
+        let top: Option<(String, i64)> = counts("intent_l1")?.into_iter().next();
+        // A level-1 topic split into subtopics is too broad only when one subtopic is: its biggest.
+        let of_id = |tid: &str| t.topics.iter().find(|x| topic_id(&x.layer, &x.label) == tid);
+        let subs: Vec<String> = match top.as_ref().and_then(|(tid, _)| of_id(tid)) {
+            Some(l1) => t.topics.iter().filter(|x| x.level == 2 && parent_of(t, x) == Some(l1)).map(|x| topic_id(&x.layer, &x.label)).collect(),
+            None => vec![],
+        };
+        let sub_top: Option<(String, i64)> = if subs.is_empty() { None } else { Some(counts("intent_l2")?.into_iter().find(|(k, _)| subs.contains(k)).unwrap_or_default()) };
+        // Sections tagged with that level-1 topic but none of its subtopics (the classifier may stop at
+        // level 1): a bucket of their own, as big a catch-all as any subtopic.
+        let direct: i64 = if subs.is_empty() {
+            0
+        } else {
+            let marks = (0..subs.len()).map(|i| format!("?{}", i + 4)).collect::<Vec<_>>().join(",");
+            let sql = format!(
+                "SELECT count(DISTINCT k.chunk_id) FROM chunk_topics k
+                 JOIN chunk_verdicts v ON v.chunk_id = k.chunk_id AND v.verdict = 'tagged' AND {NEW}
+                 JOIN scopes s ON s.chunk_id = k.chunk_id AND s.kind = 'client' AND s.id = ?1
+                 WHERE k.kind = 'intent_l2' AND k.category_id IN ({marks})"
+            );
+            let mut values: Vec<&dyn rusqlite::ToSql> = vec![&client, &since, &at];
+            values.extend(subs.iter().map(|x| x as &dyn rusqlite::ToSql));
+            let with_sub: i64 = c.query_row(&sql, values.as_slice(), |r| r.get(0))?;
+            top.as_ref().map(|(_, n)| (n - with_sub).max(0)).unwrap_or(0)
+        };
         let calls: i64 = c.query_row(
             "SELECT count(DISTINCT ch.source) FROM chunks ch JOIN scopes s ON s.chunk_id = ch.id AND s.kind = 'client' AND s.id = ?1
              WHERE ch.source LIKE 'call/%' AND ch.status = 'ACTIVE'",
@@ -840,14 +877,23 @@ fn drift_in(c: &Connection, t: &Taxonomy, snoozed: &Value) -> Result<Vec<Value>>
             |r| r.get(0),
         )?;
         let pct = |n: i64, of: i64| if of > 0 { (1000 * n / of) as f64 / 10.0 } else { 0.0 };
-        let top_label = top.as_ref().map(|(tid, _)| t.topics.iter().find(|x| topic_id(&x.layer, &x.label) == *tid).map(|x| x.label.clone()).unwrap_or_else(|| tid.clone()));
+        let label = |tid: &str| of_id(tid).map(|x| x.label.clone()).unwrap_or_else(|| tid.to_string());
+        let top_label = top.as_ref().map(|(tid, _)| label(tid));
         let top_pct = top.as_ref().map(|(_, n)| pct(*n, tagged)).unwrap_or(0.0);
+        // The topic the catch-all rule judges: the biggest level-1 topic, or its biggest subtopic.
+        let (broad, broad_pct) = match &sub_top {
+            Some((_, n)) if direct > *n => (top_label.clone().map(|l| format!("{l} (in none of its subtopics)")), pct(direct, tagged)),
+            Some((tid, n)) => (Some(label(tid)), pct(*n, tagged)),
+            None => (top_label.clone(), top_pct),
+        };
+        // A layer built from a few calls isn't judged by how its sections fit (unknown, 0: judged).
+        let fit = l.built_from == 0 || l.built_from >= DRIFT_MIN_CALLS;
         let mut reasons: Vec<Value> = vec![];
-        if judged >= DRIFT_MIN && pct(untagged, judged) > 10.0 {
+        if fit && judged >= DRIFT_MIN && pct(untagged, judged) > 10.0 {
             reasons.push(json!({"rule": "nothing_fits", "text": format!("{}% of its new sections fit no topic: its topics miss what the calls talk about now", pct(untagged, judged).round())}));
         }
-        if judged >= DRIFT_MIN && tagged > 0 && top_pct > 40.0 {
-            reasons.push(json!({"rule": "catch_all", "text": format!("one topic, “{}”, took {}% of its new sections: too broad to tell them apart", top_label.clone().unwrap_or_default(), top_pct.round())}));
+        if fit && judged >= DRIFT_MIN && tagged > 0 && broad_pct > 40.0 {
+            reasons.push(json!({"rule": "catch_all", "text": format!("one topic, “{}”, took {}% of its new sections: too broad to tell them apart", broad.unwrap_or_default(), broad_pct.round())}));
         }
         if l.built_from > 0 && calls >= 6 && calls >= 3 * l.built_from as i64 {
             reasons.push(json!({"rule": "outgrown", "text": format!("its topics were built from {} call{}, but it has {calls} now", l.built_from, if l.built_from == 1 { "" } else { "s" })}));
@@ -1868,7 +1914,13 @@ mod tests {
         let g = of("globex");
         assert_eq!((g["sections"].as_i64(), g["untagged"].as_i64(), g["calls"].as_i64()), (Some(40), Some(6), Some(9)), "{g}");
         let rules: Vec<&str> = g["reasons"].as_array().unwrap().iter().map(|r| r["rule"].as_str().unwrap()).collect();
-        assert_eq!(rules, ["nothing_fits", "catch_all", "outgrown"], "{g}");
+        // Built from 2 calls: how its sections fit isn't judged (#18), only that it outgrew them.
+        assert_eq!(rules, ["outgrown"], "{g}");
+        let mut t6 = t.clone();
+        t6.layers.get_mut("globex").unwrap().built_from = 0; // unknown: judged
+        let g0 = drift_in(&c, &t6, &json!({})).unwrap().into_iter().find(|x| x["layer"] == "globex").unwrap();
+        let rules: Vec<&str> = g0["reasons"].as_array().unwrap().iter().map(|r| r["rule"].as_str().unwrap()).collect();
+        assert_eq!(rules, ["nothing_fits", "catch_all"], "{g0}");
         assert_eq!((g["stale"].as_bool(), g["top"]["label"].as_str()), (Some(true), Some("Plan")));
         let a = of("acme");
         assert_eq!((a["stale"].as_bool(), a["reasons"].as_array().unwrap().len()), (Some(false), 0), "under 30 sections: not judged; 2 calls of 2");
@@ -1880,6 +1932,85 @@ mod tests {
             add("globex", &format!("call/new{}", i % 7), "untagged", 3, None);
         }
         assert_eq!(drift_in(&c, &t, &snoozed).unwrap().into_iter().find(|x| x["layer"] == "globex").unwrap()["stale"], true, "60 sections: half again");
+    }
+
+    #[test]
+    fn a_rebuild_isnt_judged_on_its_own_sections() {
+        let (_env, _root) = crate::paths::testenv::folders("brain-drift-rebuild");
+        let c = store::open(&super::super::store_path()).unwrap();
+        let mut id = 0;
+        // A section of a client ("-": the practice), indexed at `created`, tagged in version 5 with a
+        // topic (and its level-1 parent, as `classify` does), or fitting nothing.
+        let mut add = |client: &str, source: &str, created: &str, l1: Option<&str>, l2: Option<&str>| {
+            id += 1;
+            c.execute("INSERT INTO chunks(id, source, ord, status, created_at) VALUES (?1, ?2, ?1, 'ACTIVE', ?3)", params![id, source, created]).unwrap();
+            c.execute("INSERT INTO scopes(chunk_id, kind, id) VALUES (?1, 'client', ?2)", params![id, client]).unwrap();
+            c.execute("INSERT INTO chunk_verdicts(chunk_id, verdict, taxonomy_version) VALUES (?1, ?2, '5')", params![id, if l1.is_some() { "tagged" } else { "untagged" }]).unwrap();
+            for (t, kind) in [(l1, "intent_l1"), (l2, "intent_l2")] {
+                if let Some(t) = t {
+                    c.execute("INSERT INTO chunk_topics VALUES (?1, ?2, 'x', ?3)", params![id, t, kind]).unwrap();
+                }
+            }
+        };
+        let (before, after) = ("2026-10-20T10:00:00+00:00", "2026-11-02T10:00:00+00:00");
+        let topic = |layer: &str, label: &str, parent: Option<&str>| Topic { layer: layer.into(), label: label.into(), level: if parent.is_some() { 2 } else { 1 }, parent: parent.map(str::to_owned), ..Default::default() };
+        let mut t = Taxonomy::default();
+        t.layers.insert(SHARED.into(), Layer { name: "Your practice".into(), built_from: 3, ..Default::default() });
+        t.topics = vec![topic(SHARED, "A", None), topic(SHARED, "A1", Some("A")), topic(SHARED, "A2", Some("A")), topic(SHARED, "A3", Some("A")), topic(SHARED, "B", None), topic(SHARED, "C", None)];
+        t.history = vec![json!({"op": "build", "layer": SHARED, "version": 5, "at": "2026-11-01T10:00:00+00:00"}), json!({"op": "accept", "version": 6})];
+        let (a, b, cc) = (topic_id(SHARED, "A"), topic_id(SHARED, "B"), topic_id(SHARED, "C"));
+        let sub = |i: usize| topic_id(SHARED, &format!("A{}", i % 3 + 1));
+        // Built from 3 calls with 66 sections, re-tagged by the rebuild: 38 (58%) under A.
+        for i in 0..66 {
+            let (l1, l2) = if i < 38 { (Some(a.as_str()), Some(sub(i))) } else if i < 52 { (Some(b.as_str()), None) } else { (Some(cc.as_str()), None) };
+            add("-", &format!("call/p{}", i % 3), before, l1, l2.as_deref());
+        }
+        let shared = |t: &Taxonomy| drift_in(&c, t, &json!({})).unwrap().into_iter().find(|x| x["layer"] == SHARED).unwrap();
+        let s = shared(&t);
+        assert_eq!((s["stale"].as_bool(), s["sections"].as_i64()), (Some(false), Some(0)), "the build's own sections: {s}");
+        // 40 sections from 4 new calls, 70% under A, split between its subtopics.
+        for i in 0..40 {
+            let (l1, l2) = if i < 28 { (Some(a.as_str()), Some(sub(i))) } else { (Some(b.as_str()), None) };
+            add("-", &format!("call/n{}", i % 4), after, l1, l2.as_deref());
+        }
+        let s = shared(&t);
+        assert_eq!((s["stale"].as_bool(), s["sections"].as_i64(), s["calls"].as_i64()), (Some(false), Some(40), Some(7)), "{s}");
+        assert_eq!(s["top"]["label"], "A");
+        // Built from 6 calls, so judged: A's subtopics split it (none over 40%)…
+        let mut t6 = t.clone();
+        t6.layers.get_mut(SHARED).unwrap().built_from = 6;
+        assert_eq!(shared(&t6)["stale"], false, "{}", shared(&t6));
+        // …until one subtopic takes most of them.
+        for i in 0..30 {
+            add("-", &format!("call/n{}", i % 4), after, Some(&a), Some(&topic_id(SHARED, "A1")));
+        }
+        let s = shared(&t6);
+        assert_eq!(s["stale"], true, "{s}");
+        assert!(s["reasons"][0]["text"].as_str().unwrap().contains("“A1”"), "{s}");
+        // Sections tagged with a level-1 topic alone, none of its subtopics, are a catch-all too.
+        t.layers.insert("beta".into(), Layer { name: "Beta".into(), built_from: 6, ..Default::default() });
+        t.topics.extend([topic("beta", "P", None), topic("beta", "P1", Some("P")), topic("beta", "P2", Some("P")), topic("beta", "Q", None)]);
+        t.history.push(json!({"op": "build", "layer": "beta", "version": 5, "at": "2026-11-01T10:00:00+00:00"}));
+        let (pp, q) = (topic_id("beta", "P"), topic_id("beta", "Q"));
+        for i in 0..40 {
+            let (l1, l2) = if i < 28 { (&pp, None) } else if i < 32 { (&pp, Some(topic_id("beta", "P1"))) } else { (&q, None) };
+            add("beta", &format!("call/b{}", i % 6), after, Some(l1), l2.as_deref());
+        }
+        let d = drift_in(&c, &t, &json!({})).unwrap().into_iter().find(|x| x["layer"] == "beta").unwrap();
+        assert_eq!(d["stale"], true, "{d}");
+        assert!(d["reasons"][0]["text"].as_str().unwrap().contains("P (in none of its subtopics)"), "{d}");
+        // A client built from 10 calls: half its new sections under one topic with no subtopics.
+        t.layers.insert("acme".into(), Layer { name: "Acme".into(), built_from: 10, ..Default::default() });
+        t.topics.extend([topic("acme", "X", None), topic("acme", "Y", None), topic("acme", "Z", None)]);
+        t.history.push(json!({"op": "build", "layer": "acme", "version": 5, "at": "2026-11-01T10:00:00+00:00"}));
+        let (x, y, z) = (topic_id("acme", "X"), topic_id("acme", "Y"), topic_id("acme", "Z"));
+        for i in 0..40 {
+            let l1 = if i < 20 { &x } else if i < 30 { &y } else { &z };
+            add("acme", &format!("call/a{}", i % 10), after, Some(l1), None);
+        }
+        let d = drift_in(&c, &t, &json!({})).unwrap().into_iter().find(|x| x["layer"] == "acme").unwrap();
+        let rules: Vec<&str> = d["reasons"].as_array().unwrap().iter().map(|r| r["rule"].as_str().unwrap()).collect();
+        assert_eq!((d["stale"].as_bool(), rules), (Some(true), vec!["catch_all"]), "{d}");
     }
 
     #[test]
