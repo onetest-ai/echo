@@ -739,7 +739,7 @@ the CSP), then noverlap —, kept across renders (the camera too), labels where 
 a node's neighbours. Search: the Graph's box lights topics and sources by name as you type and, on Enter, asks the Brain
 (`/api/brain/search` = `store::search_in`, words and meaning, the scope) and lights the sources of its hits; People's
 box lights people by name, address, title, organisation, workstream and role. Matches and their neighbours stay lit,
-the rest dims (plain hex colours: WebGL reads no CSS), the camera flies to them; Esc clears. The hovered node's label sits on sigma's backdrop card, white by default: given the theme's colours (dark: `#26262e`, a border, a deeper shadow) in the node reducer; a lit neighbour's label is `--text-2`.
+the rest dims (plain hex colours: WebGL reads no CSS), the camera flies to them; Esc clears. The hovered node's label sits on sigma's backdrop card, white by default: given the theme's colours in the node reducer (dark `#26262e`, light white; a 1 px border, radius 6) and hidden on a dimmed node; a hovered neighbour's label is `--text-2`; a change of the system's appearance draws the graphs again (`GraphView.retheme`).
 **The window**: the **Brain** activity (`#brain/<tab>`: Topics — each layer with its summary, provisional banner and
   Accept, the tree with counts and threads; Terms; Sources; Coverage; Graph — topics on a ring grouped and coloured by
   client, sources inside at the weighted middle of their topics, related sources dashed; a click selects a node — a

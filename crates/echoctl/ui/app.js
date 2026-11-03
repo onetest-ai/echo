@@ -3950,10 +3950,10 @@ const GraphView = (() => {
         const out = { ...d, ...card, labelColor: a.pinLabel ? text : muted }
         const lit = (st.focus && st.focus.has(k)) || (hov && hov.has(k)) || k === st.sel
         const off = (st.focus && !st.focus.has(k)) || (hov && !hov.has(k))
-        if (off) return { ...out, color: dim, label: null, zIndex: 0 }
+        if (off) return { ...out, color: dim, label: null, backdropVisibility: 'hidden', zIndex: 0 }
         if ((st.match && st.match.has(k)) || k === st.sel || k === st.hover) return { ...out, highlighted: true, labelVisibility: 'visible', labelColor: text, zIndex: 3 }
         // Labels where they fit (sigma's grid, the biggest first: topics and threads); lit ones always.
-        if (lit) return { ...out, labelVisibility: 'visible', labelColor: soft, zIndex: 2 }
+        if (lit) return { ...out, labelVisibility: 'visible', labelColor: a.pinLabel ? text : soft, zIndex: 2 }
         if (a.pinLabel) return { ...out, zIndex: 1 }
         return out
       },
@@ -4010,7 +4010,11 @@ const GraphView = (() => {
     return hits
   }
   const resize = () => { for (const st of live.values()) if (st.box.isConnected) st.sigma.resize() }
-  return { draw, focus, select, find, resize, live }
+  /** The theme changed (the system's appearance): drawn again in its colours, laid out as they were. */
+  function retheme() {
+    for (const [id, st] of live) { try { st.sigma.kill() } catch { /* gone with its box */ } live.delete(id) }
+  }
+  return { draw, focus, select, find, resize, retheme, live }
 })()
 
 // The Brain's graph: documents (coloured by client) and their topics (labelled, coloured by layer);
@@ -4302,6 +4306,7 @@ document.addEventListener('keydown', (e) => {
   if (e.target.id === 'br-rename' && e.key === 'Escape') { S.br.edit = null; render() }
 })
 window.addEventListener('resize', () => { if (S.view === 'brain') GraphView.resize() })
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { GraphView.retheme(); if (S.view === 'brain') render() })
 
 /** A thread's topics and terms from the Brain (null when there is no taxonomy yet: the old glossary
  *  shows instead). Topics with their sections here; terms pinned here first, then by mentions. */
