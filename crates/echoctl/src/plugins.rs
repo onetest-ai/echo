@@ -177,19 +177,19 @@ fn describe_export(v: &Value) -> Result<String> {
 
 fn describe_sessions(v: &Value) -> Result<String> {
     let mut parts = vec![];
-    if v["plugin"].as_bool() == Some(true) {
-        parts.push("gives Claude in Echo a skill of its own (in Echo's sessions only, not your Claude Code)".to_string());
+    if v["skills"].as_bool() == Some(true) {
+        parts.push("gives Claude in Echo skills of its own — text only, in Echo's sessions, not your Claude Code".to_string());
     }
     if v["read"].as_bool() == Some(true) {
-        parts.push("lets Claude in Echo read the folders you give it".to_string());
+        parts.push("lets Claude in Echo read the folders you give it (your Echo folder session may also change them, with your permissions)".to_string());
     }
     if v["hints"].as_bool() == Some(true) {
         parts.push("tells Claude what it knows about the client or thread open in the window".to_string());
     }
     if parts.is_empty() {
-        bail!("“sessions” adds nothing (plugin, read, hints)");
+        bail!("“sessions” adds nothing (skills, read, hints)");
     }
-    let mut text = parts.join(", ");
+    let mut text = parts.join("; ");
     text[..1].make_ascii_uppercase();
     Ok(text)
 }
@@ -1091,6 +1091,7 @@ pub fn set_enabled(id: &str, on: bool) -> Result<()> {
 pub fn remove(id: &str, keep_data: bool) -> Result<()> {
     Registry::update(|r| r.installed.remove(id).map(|_| ()).ok_or_else(|| anyhow!("“{id}” isn't installed")))?;
     let _ = fs::remove_dir_all(installed_dir(id));
+    crate::grants::remove_plugin(id);
     if !keep_data {
         let _ = fs::remove_dir_all(data_dir(id));
         let _ = fs::remove_file(secrets_file(id));

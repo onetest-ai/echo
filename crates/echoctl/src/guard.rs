@@ -366,10 +366,11 @@ impl Scope {
                 }
             }
             t if t.starts_with(BRAIN_TOOLS) => Ok(()),
-            // Only the skills of the plugins Echo gave the run (`--plugin-dir`), by name (plain or `plugin:name`).
+            // Only the skills of the plugins Echo gave the run (`--plugin-dir`), by their full name (`plugin:skill`):
+            // a skill of the same name from anywhere else isn't one of them.
             "Skill" => {
                 let name = input["skill"].as_str().unwrap_or("");
-                if self.skills.iter().any(|k| name == k || name.rsplit(':').next() == Some(k.as_str())) {
+                if self.skills.iter().any(|k| name == k) {
                     Ok(())
                 } else {
                     Err(format!("the skill {name} isn't one Echo gave this routine"))
@@ -712,13 +713,16 @@ mod tests {
         let (v2, h2) = (vault.clone(), home.clone());
         let vars = move |k: &str| match k {
             RUN_READ => Some(v2.clone().into_os_string()),
-            RUN_SKILLS => Some("obsidian-vaults".into()),
+            RUN_SKILLS => Some("echo-obsidian:obsidian-vaults".into()),
             o => vars(o).or_else(|| (o == RUN_HOME).then(|| h2.clone().into_os_string())),
         };
         let s = Scope::from_vars(vars).unwrap();
         assert!(s.routine && s.ask);
         assert!(s.judge(&tool("Read", json!({"file_path": vault.join("Dana.md").display().to_string()}))).is_ok(), "a folder given to Echo's sessions");
         assert!(s.judge(&tool("Skill", json!({"skill": "echo-obsidian:obsidian-vaults"}))).is_ok(), "a skill Echo gave the run");
+        for other in ["obsidian-vaults", "evil:obsidian-vaults", "echo:process-call"] {
+            assert!(s.judge(&tool("Skill", json!({"skill": other}))).is_err(), "{other}");
+        }
         let path = |p: &Path| p.display().to_string();
         let ok = |t: &str, input: Value| s.judge(&tool(t, input)).map_err(|e| format!("{t}: {e}"));
         ok("Read", json!({"file_path": path(&home.join("calls/2026-10-24_100000-other/transcript.md"))})).unwrap();

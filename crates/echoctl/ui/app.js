@@ -2226,6 +2226,8 @@ const Plugins = {
   sections: [],
   /** [{plugin, label, run, group, keywords}] */
   palette: [],
+  /** plugin id → its document listeners and style elements (taken out when it unloads). */
+  owned: {},
   loaded: {},
   errors: {},
   /** What each slot was last drawn for: its buttons run on that. */
@@ -2234,8 +2236,11 @@ const Plugins = {
 const SLOTS = ['call.menu', 'calendar.event', 'task.actions']
 function pluginCtx(id) {
   const add = (list, item) => { list.push({ ...item, plugin: id }); render() }
+  const owned = Plugins.owned[id] = Plugins.owned[id] || { listeners: [], styles: [] }
   return {
     id,
+    /** A document listener that goes when the plugin is switched off, updated or removed. */
+    listen: (type, fn, opts) => { document.addEventListener(type, fn, opts); owned.listeners.push([type, fn, opts]) },
     call: async (command, args = {}) => {
       const r = await get(`api/plugin/${encodeURIComponent(id)}/call/${encodeURIComponent(command)}?args=${encodeURIComponent(JSON.stringify(args))}`)
       if (r && r.error) throw new Error(r.error)
@@ -2261,7 +2266,11 @@ function pluginCtx(id) {
     go: (hash) => go(hash),
     palette: { add: (item) => add(Plugins.palette, item) },
     /** Echo's own pieces, so a plugin looks like Echo. */
-    ui: { esc, setRow, setCard, sw, ICON, relDay, ago, notice: (text) => { S.notice = text; render() } },
+    ui: {
+      esc, setRow, setCard, sw, ICON, relDay, ago, notice: (text) => { S.notice = text; render() },
+      /** Its CSS in the page, taken out when it unloads. */
+      style: (css) => { const el = document.createElement('style'); el.dataset.plugin = id; el.textContent = String(css); document.head.appendChild(el); owned.styles.push(el) },
+    },
     render: () => render(),
   }
 }
@@ -2284,6 +2293,12 @@ async function loadPluginClients(snapshot) {
   render()
 }
 function unloadPlugin(id) {
+  const owned = Plugins.owned[id]
+  if (owned) {
+    for (const [type, fn, opts] of owned.listeners) document.removeEventListener(type, fn, opts)
+    for (const el of owned.styles) el.remove()
+    delete Plugins.owned[id]
+  }
   for (const k of Object.keys(Plugins.slots)) Plugins.slots[k] = Plugins.slots[k].filter((x) => x.plugin !== id)
   Plugins.palette = Plugins.palette.filter((x) => x.plugin !== id)
   Plugins.sections = Plugins.sections.filter((x) => x.plugin !== id)

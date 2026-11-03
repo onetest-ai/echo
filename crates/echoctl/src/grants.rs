@@ -1,8 +1,9 @@
 //! What plugins may reach beyond their own folder, all of it granted by the user or kept by Echo — never
 //! written by the plugin itself:
 //! - **folders** the user picked for a plugin (Echo's own folder picker): its `ctx.fs` reads only inside them;
-//! - what a plugin adds to **Claude in Echo** — a Claude Code plugin folder of its own (given to Echo's
-//!   sessions with `--plugin-dir`, never installed in the user's Claude Code) and folders those sessions may read;
+//! - what a plugin adds to **Claude in Echo** — skills (text only: Echo writes the Claude Code plugin around them
+//!   itself, so no hooks, MCP servers, agents or `!` commands can ride along; given to Echo's sessions with
+//!   `--plugin-dir`, never installed in the user's Claude Code) and folders those sessions may read;
 //! - **hints** for the window's `<echo_view>` block: a line shown to Claude when a client or thread is open.
 //!
 //! Grants live in `<config dir>/plugins/grants/<id>.json`, hints in `<config dir>/plugins/hints/<id>.json`
@@ -21,6 +22,19 @@ use crate::paths;
 
 fn grants_file(id: &str) -> PathBuf {
     paths::config_dir().join("plugins").join("grants").join(format!("{id}.json"))
+}
+
+fn session_dir(id: &str) -> PathBuf {
+    paths::config_dir().join("plugins").join("session").join(id)
+}
+
+/// A plugin removed: what Echo kept for it goes too, so another plugin installed later under the same id
+/// starts with nothing.
+pub fn remove_plugin(id: &str) {
+    drop_plugin(id);
+    let _ = std::fs::remove_file(grants_file(id));
+    let _ = std::fs::remove_file(hints_file(id));
+    let _ = std::fs::remove_dir_all(session_dir(id));
 }
 
 fn hints_file(id: &str) -> PathBuf {
@@ -80,14 +94,22 @@ pub fn resolve(id: &str, root: &str, rel: &str) -> Result<PathBuf> {
     if p.is_absolute() || p.components().any(|c| !matches!(c, Component::Normal(_))) {
         bail!("“{rel}” isn't a path inside {}", root.display());
     }
-    let full = root.join(p);
-    // A link inside may point anywhere: what it resolves to must stay inside too.
-    if let Ok(real) = dunce::canonicalize(&full) {
-        if !real.starts_with(&root) {
-            bail!("“{rel}” leads outside {}", root.display());
-        }
+    // Windows' device names (CON, NUL, COM1…) open a device, not a file, in any folder.
+    if p.components().any(|c| {
+        let n = c.as_os_str().to_string_lossy().to_ascii_uppercase();
+        let stem = n.split('.').next().unwrap_or("");
+        matches!(stem, "CON" | "PRN" | "AUX" | "NUL") || ((stem.starts_with("COM") || stem.starts_with("LPT")) && stem.len() == 4 && stem.as_bytes()[3].is_ascii_digit())
+    }) {
+        bail!("“{rel}” is a device name, not a file");
     }
-    Ok(full)
+    let full = root.join(p);
+    // A link inside may point anywhere: what it resolves to must stay inside too — and that resolved path is
+    // what is used, so a link swapped in afterwards isn't followed again.
+    match dunce::canonicalize(&full) {
+        Ok(real) if real.starts_with(&root) => Ok(real),
+        Ok(_) => bail!("“{rel}” leads outside {}", root.display()),
+        Err(_) => Ok(full),
+    }
 }
 
 // ── Claude in Echo ──
@@ -97,19 +119,48 @@ static SESSION_PLUGINS: Mutex<BTreeMap<String, PathBuf>> = Mutex::new(BTreeMap::
 /// Plugin → folders Echo's sessions may read (each one of its granted folders).
 static SESSION_READ: Mutex<BTreeMap<String, Vec<PathBuf>>> = Mutex::new(BTreeMap::new());
 
-/// Plugin `id` gives Echo's sessions the Claude Code plugin in `dir` (inside its own folder, with a
-/// `.claude-plugin/plugin.json`).
-pub fn set_session_plugin(id: &str, dir: Option<PathBuf>) -> Result<()> {
-    if let Some(d) = &dir {
-        if !d.join(".claude-plugin").join("plugin.json").is_file() {
-            bail!("{} has no .claude-plugin/plugin.json", d.display());
-        }
+/// Plugin `id`'s skills for Echo's sessions: `[{name, description, body}]` (an empty list takes them away). Echo
+/// writes the Claude Code plugin itself, in its own config folder: a `plugin.json` and one `SKILL.md` per skill
+/// with only `name` and `description` in its frontmatter — nothing else a Claude Code plugin could carry.
+pub fn set_session_skills(id: &str, skills: &Value) -> Result<()> {
+    let list = skills.as_array().ok_or_else(|| anyhow!("skills are a list"))?;
+    if list.len() > 10 {
+        bail!("at most 10 skills");
     }
-    let mut m = SESSION_PLUGINS.lock().map_err(|_| anyhow!("busy"))?;
-    match dir {
-        Some(d) => m.insert(id.into(), d),
-        None => m.remove(id),
-    };
+    let dir = session_dir(id);
+    let _ = std::fs::remove_dir_all(&dir);
+    if list.is_empty() {
+        SESSION_PLUGINS.lock().map_err(|_| anyhow!("busy"))?.remove(id);
+        return Ok(());
+    }
+    let mut files = vec![];
+    for sk in list {
+        let name = sk["name"].as_str().unwrap_or("");
+        let description = sk["description"].as_str().unwrap_or("").trim();
+        let body = sk["body"].as_str().unwrap_or("");
+        if name.is_empty() || name.len() > 40 || !name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') {
+            bail!("a skill's name is a few lowercase words with dashes");
+        }
+        if description.is_empty() || description.chars().count() > 1024 || description.contains(['\n', '\r']) {
+            bail!("skill {name}: a description of one line, up to 1024 characters");
+        }
+        if body.chars().count() > 20_000 {
+            bail!("skill {name}: its text is longer than 20,000 characters");
+        }
+        // Claude Code runs `!`…`` in a skill as a shell command when the skill loads: never from a plugin.
+        if body.contains("!`") {
+            bail!("skill {name}: “!`…`” runs a command in Claude Code; a plugin's skill is text only");
+        }
+        let md = format!("---\nname: {name}\ndescription: {}\n---\n\n{body}\n", serde_json::to_string(description)?);
+        files.push((dir.join("skills").join(name).join("SKILL.md"), md));
+    }
+    let manifest = json!({"name": format!("echo-{id}"), "version": "1.0.0", "description": format!("Skills from the Echo plugin {id}, for Claude in Echo")});
+    files.push((dir.join(".claude-plugin").join("plugin.json"), serde_json::to_string_pretty(&manifest)?));
+    for (f, text) in files {
+        std::fs::create_dir_all(f.parent().expect("a parent"))?;
+        paths::write_atomic(&f, text.as_bytes())?;
+    }
+    SESSION_PLUGINS.lock().map_err(|_| anyhow!("busy"))?.insert(id.into(), dir);
     Ok(())
 }
 
@@ -144,13 +195,15 @@ pub fn session_plugins() -> Vec<PathBuf> {
     SESSION_PLUGINS.lock().map(|m| m.iter().filter(|(id, d)| on.contains(id) && d.is_dir()).map(|(_, d)| d.clone()).collect()).unwrap_or_default()
 }
 
-/// The skills in these Claude Code plugin folders (`skills/<name>/SKILL.md`).
+/// The skills in these Claude Code plugin folders, as Claude Code names them: `<plugin name>:<skill>`.
 pub fn skill_names(dirs: &[PathBuf]) -> Vec<String> {
     let mut out = vec![];
     for d in dirs {
+        let manifest: Value = std::fs::read(d.join(".claude-plugin/plugin.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or(Value::Null);
+        let Some(plugin) = manifest["name"].as_str() else { continue };
         for e in std::fs::read_dir(d.join("skills")).into_iter().flatten().flatten() {
             if e.path().join("SKILL.md").is_file() {
-                out.push(e.file_name().to_string_lossy().to_string());
+                out.push(format!("{plugin}:{}", e.file_name().to_string_lossy()));
             }
         }
     }
@@ -188,7 +241,14 @@ pub fn set_hints(id: &str, hints: &Value) -> Result<()> {
         if text.is_empty() || (client.is_empty() && thread.is_empty()) {
             bail!("a hint needs a client or a thread, and its text");
         }
-        out.push(json!({"client": client, "thread": thread, "text": text.chars().take(600).collect::<String>()}));
+        // One line of plain text inside `<echo_view>`: no line breaks, no tags that could close the block.
+        let text: String = text.chars().map(|c| match c {
+            '<' => '‹',
+            '>' => '›',
+            c if c.is_control() => ' ',
+            c => c,
+        }).take(600).collect();
+        out.push(json!({"client": client, "thread": thread, "text": text}));
     }
     let f = hints_file(id);
     std::fs::create_dir_all(f.parent().expect("a parent"))?;

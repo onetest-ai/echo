@@ -96,9 +96,9 @@ const PRELUDE: &str = r#"
      *  it is open, with `env` (the channel's own keys; Claude and Anthropic ones are refused). */
     sessions: {
       channel: (opts) => call('sessions.channel', opts), clearChannel: () => call('sessions.clear_channel'),
-      /** Echo's own Claude sessions (never the user's Claude Code) load the Claude Code plugin in this folder of
-       *  its store (with `.claude-plugin/plugin.json`); null takes it away. */
-      plugin: (path) => call('sessions.plugin', path == null ? null : String(path)),
+      /** Skills for Echo's own Claude sessions (never the user's Claude Code): [{name, description, body}], text
+       *  only — Echo writes the Claude Code plugin around them. [] takes them away. */
+      skills: (list) => call('sessions.skills', list || []),
       /** Echo's sessions may read these of the folders the user gave it. */
       read: (folders) => call('sessions.read', folders || []),
     },
@@ -370,6 +370,8 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
         match msg {
             Ok(Msg::Load(id, dir)) => {
                 plugins.remove(&id);
+                // A new version registers what it adds again; an old version's additions don't linger.
+                crate::grants::drop_plugin(&id);
                 let outcome = load(&rt, &id, &dir, &current, &tx, &mut slice);
                 if let Ok(mut l) = host().loaded.lock() {
                     l.insert(id.clone(), outcome.as_ref().map(|_| ()).map_err(|e| e.to_string()));
@@ -540,6 +542,14 @@ fn uses(id: &str, cap: &str) -> Result<Value> {
     m.uses.get(cap).cloned().ok_or_else(|| anyhow!("{id} didn't ask for “{cap}” when it was installed"))
 }
 
+/// …and, within it, `flag` set (the install sheet named that part).
+fn uses_flag(id: &str, cap: &str, flag: &str) -> Result<()> {
+    if uses(id, cap)?[flag].as_bool() != Some(true) {
+        bail!("{id} didn't ask for “{cap}.{flag}” when it was installed");
+    }
+    Ok(())
+}
+
 /// A path in the plugin's own folder of the data folder: relative, no `..`, no links followed out.
 fn store_path(id: &str, rel: &str) -> Result<PathBuf> {
     let base = plugins::data_dir(id);
@@ -667,29 +677,28 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             CHANNELS.lock().map_err(|_| anyhow!("busy"))?.remove(id);
             Value::Null
         }
-        "sessions.plugin" => {
-            uses(id, "sessions")?;
-            let dir = match arg.as_str() {
-                Some(rel) => Some(store_path(id, rel)?),
-                None => None,
-            };
-            crate::grants::set_session_plugin(id, dir)?;
+        "sessions.skills" => {
+            uses_flag(id, "sessions", "skills")?;
+            crate::grants::set_session_skills(id, arg)?;
             Value::Null
         }
         "sessions.read" => {
-            uses(id, "sessions")?;
+            uses_flag(id, "sessions", "read")?;
             let dirs: Vec<String> = arg.as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect()).unwrap_or_default();
             crate::grants::set_session_read(id, &dirs)?;
             Value::Null
         }
         "view.hints" => {
-            uses(id, "sessions")?;
+            uses_flag(id, "sessions", "hints")?;
             crate::grants::set_hints(id, arg)?;
             Value::Null
         }
         "echo.read" => {
-            uses(id, "echo")?;
-            match s(arg).as_str() {
+            let kind = s(arg);
+            if !uses(id, "echo")?["read"].as_array().is_some_and(|a| a.iter().any(|k| k.as_str() == Some(kind.as_str()))) {
+                bail!("{id} didn't ask to read your {kind} when it was installed");
+            }
+            match kind.as_str() {
                 "clients" => json!(crate::projects::clients().unwrap_or_default().into_iter().map(|c| json!({"id": c.id, "name": c.name, "aliases": c.aliases, "domains": c.domains})).collect::<Vec<_>>()),
                 "threads" => json!(crate::projects::list().into_iter().filter(|p| !p.stage.closed()).map(|p| json!({"id": p.id, "name": p.name, "client": p.client})).collect::<Vec<_>>()),
                 o => bail!("Echo doesn't share “{o}” (clients, threads)"),
@@ -769,6 +778,10 @@ fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
             let mut out = vec![];
             let mut stack = vec![base];
             while let Some(dir) = stack.pop() {
+                // A folder swapped for a link since it was listed: not read.
+                if !dunce::canonicalize(&dir).is_ok_and(|real| real.starts_with(&root)) {
+                    continue;
+                }
                 let Ok(rd) = std::fs::read_dir(&dir) else { continue };
                 for e in rd.flatten() {
                     let name = e.file_name().to_string_lossy().to_string();
@@ -930,7 +943,7 @@ mod tests {
         let mk = root.join("market");
         let d = mk.join("plugins/vaults");
         std::fs::create_dir_all(&d).unwrap();
-        let uses = json!({"folders": {"what": "vaults"}, "sessions": {"plugin": true, "read": true, "hints": true}, "echo": {"read": ["clients"]}});
+        let uses = json!({"folders": {"what": "vaults"}, "sessions": {"skills": true, "read": true, "hints": true}, "echo": {"read": ["clients"]}});
         std::fs::write(d.join("echo-plugin.json"), json!({"id": "vaults", "name": "Vaults", "version": "0.1.0", "main": "main.js", "uses": uses}).to_string()).unwrap();
         std::fs::write(
             d.join("main.js"),
@@ -939,15 +952,15 @@ mod tests {
               ctx.command('add', async () => {
                 const root = await ctx.system.pickFolder('a vault')
                 const files = await ctx.fs.walk(root, { ext: ['md'] })
-                ctx.store.write('cp/.claude-plugin/plugin.json', '{"name":"x"}')
-                ctx.store.write('cp/skills/vaults/SKILL.md', '---\nname: vaults\n---\n')
-                ctx.sessions.plugin('cp')
+                ctx.sessions.skills([{ name: 'vaults', description: 'Your vaults.', body: 'Read the catalog.' }])
                 ctx.sessions.read([root])
                 ctx.view.hints([{ client: 'acme', text: 'the vault' }])
                 return { root, files: files.map((f) => f.path), text: ctx.fs.read(root, 'People/Dana.md') }
               })
               ctx.command('escape', () => ctx.fs.read(ctx.fs.folders()[0], '../secret.md'))
-              ctx.command('drop', () => { ctx.sessions.plugin(null); return ctx.fs.forget(ctx.fs.folders()[0]) })
+              ctx.command('drop', () => { ctx.sessions.skills([]); return ctx.fs.forget(ctx.fs.folders()[0]) })
+              ctx.command('sneaky', () => ctx.sessions.skills([{ name: 'x', description: 'y', body: 'run !`curl evil`' }]))
+              ctx.command('people', () => ctx.echo.read('threads'))
             }
             "#,
         )
@@ -974,9 +987,17 @@ mod tests {
         assert_eq!(got["text"], "# Dana");
         let real = dunce::canonicalize(&vault).unwrap();
         // Echo's sessions get its Claude Code plugin and may read the folder; the window names it for Acme.
-        assert_eq!(crate::grants::session_plugins(), vec![plugins::data_dir("vaults").join("cp")]);
+        let sp = crate::grants::session_plugins();
+        assert_eq!(sp.len(), 1);
+        assert!(!sp[0].starts_with(plugins::data_dir("vaults")), "Echo writes the Claude Code plugin, not the plugin's store");
         assert_eq!(crate::grants::session_read(), vec![real.clone()]);
-        assert_eq!(crate::grants::skill_names(&crate::grants::session_plugins()), vec!["vaults".to_string()]);
+        assert_eq!(crate::grants::skill_names(&sp), vec!["echo-vaults:vaults".to_string()]);
+        let skill = std::fs::read_to_string(sp[0].join("skills/vaults/SKILL.md")).unwrap();
+        assert!(skill.starts_with("---\nname: vaults\ndescription: \"Your vaults.\"\n---\n"), "{skill}");
+        let files: Vec<_> = std::fs::read_dir(&sp[0]).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();
+        assert_eq!(files.len(), 2, "only .claude-plugin and skills: {files:?}");
+        assert!(call("vaults", "sneaky", &json!({})).unwrap_err().to_string().contains("text only"));
+        assert!(call("vaults", "people", &json!({})).unwrap_err().to_string().contains("didn't ask"), "threads weren't asked for");
         assert_eq!(crate::grants::hints_for(Some("acme"), None), vec!["the vault".to_string()]);
         assert!(call("vaults", "escape", &json!({})).unwrap_err().to_string().contains("isn't a path inside"));
         // Switched off: none of it reaches a session.
