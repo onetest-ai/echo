@@ -186,6 +186,15 @@ fn push_new<T: PartialEq + Clone>(v: &mut Vec<T>, xs: &[T]) {
     }
 }
 
+/// One term's learned scope added to another's.
+fn merge_learned(into: &mut Term, from: &Term) {
+    let Some(l) = &from.learned else { return };
+    let x = into.learned.get_or_insert_with(LearnedScope::default);
+    push_new(&mut x.subjects, &l.subjects);
+    push_new(&mut x.people, &l.people);
+    push_new(&mut x.calls, &l.calls);
+}
+
 /// A layer rebuilt: what the user and the minutes put on its terms carries over to the new ones of the
 /// same name or spelling — pinned threads, always, the learned scope, other spellings, a description —
 /// and a term the model didn't name again is kept when it carries any of that (learned vocabulary, a
@@ -468,7 +477,9 @@ fn layers_for(t: &Taxonomy, clients: Option<&BTreeSet<String>>) -> Vec<String> {
 /// terms; tags of a node renamed or merged move to its new id (aliases); tags of a node gone are dropped.
 pub fn build_graph(c: &Connection, t: &Taxonomy) -> Result<()> {
     let tx = c.unchecked_transaction()?;
-    for (old, new) in &t.aliases {
+    // An alias whose old id names a node again (it came back) moves nothing.
+    let live: BTreeSet<String> = t.topics.iter().map(|x| topic_id(&x.layer, &x.label)).chain(t.terms.iter().map(|x| term_id(&x.layer, &x.name))).collect();
+    for (old, new) in t.aliases.iter().filter(|(old, _)| !live.contains(*old)) {
         tx.execute("UPDATE chunk_topics SET category_id = ?2 WHERE category_id = ?1", params![old, new])?;
         tx.execute("UPDATE graph_edges SET target = ?2 WHERE target = ?1 AND rel IN ('about', 'mentions')", params![old, new])?;
         tx.execute("INSERT OR REPLACE INTO graph_aliases(alias_id, node_id) VALUES (?1, ?2)", params![old, new])?;
@@ -488,6 +499,9 @@ pub fn build_graph(c: &Connection, t: &Taxonomy) -> Result<()> {
             tx.execute("INSERT INTO graph_edges(source, target, rel) VALUES (?1, ?2, 'subclass_of')", params![id, p])?;
         }
     }
+    // A tag that followed an alias to a topic of the other level takes that level (drift counts by it).
+    tx.execute("UPDATE chunk_topics SET kind = (SELECT n.kind FROM graph_nodes n WHERE n.id = chunk_topics.category_id)
+                WHERE kind IN ('intent_l1', 'intent_l2') AND category_id IN (SELECT id FROM graph_nodes WHERE kind IN ('intent_l1', 'intent_l2'))", [])?;
     // Brain's entity kinds as nodes, each term under its kind.
     let kinds: BTreeSet<&str> = t.terms.iter().map(|x| x.kind.as_str()).filter(|k| !k.is_empty()).collect();
     for k in kinds {
@@ -865,7 +879,7 @@ pub fn split(layer: &str, label: &str, progress: &dyn Fn(&str)) -> Result<Value>
     if sections.len() < 6 {
         bail!("“{}” tags only {} sections: too few to split", x.label, sections.len());
     }
-    let step = (sections.len() / SPLIT_SAMPLE).max(1);
+    let step = sections.len().div_ceil(SPLIT_SAMPLE).max(1);
     let sample: Vec<Value> = sections.iter().step_by(step).take(SPLIT_SAMPLE).map(|(i, w, text)| json!({"id": i.to_string(), "where": w, "text": text.chars().take(PREVIEW).collect::<String>()})).collect();
     progress(&format!("splitting “{}” ({} sections)", x.label, sections.len()));
     let (lname, lgoal, _) = layer_facts(layer);
@@ -880,6 +894,13 @@ pub fn split(layer: &str, label: &str, progress: &dyn Fn(&str)) -> Result<Value>
     let subs = subtopics_of(&t, &x, &v)?;
     let lock = write_lock()?;
     let mut t = current().unwrap_or_default();
+    // The model took a while: the topic must still be there, and no new label may have appeared meanwhile.
+    if !t.topics.iter().any(|y| y.layer == layer && nid(&y.label) == nid(&x.label)) {
+        bail!("“{}” changed while it was being split (a rebuild?): split it again", x.label);
+    }
+    if subs.iter().any(|n| t.topics.iter().any(|y| y.layer == layer && names(y, &n.label))) {
+        bail!("“{}” got new subtopics while it was being split: look at it again", x.label);
+    }
     if x.level == 2 {
         t.topics.retain(|y| !(y.layer == layer && nid(&y.label) == nid(&x.label)));
     }
@@ -1149,7 +1170,8 @@ pub fn apply_move(key: &str) -> Result<String> {
     if first["layer"] != SHARED {
         edit(&json!({"op": "scope", k: first["label"], "layer": first["layer"], "to": SHARED, "term": term}))?;
     }
-    for x in all.iter().filter(|x| *x != first) {
+    // The client copies merge into it — never another practice topic that happened to match too.
+    for x in all.iter().filter(|x| *x != first && x["layer"] != SHARED) {
         edit(&json!({"op": "merge", k: x["label"], "layer": x["layer"], "into": first["label"], "into_layer": SHARED, "term": term}))?;
     }
     let name = first["label"].as_str().unwrap_or("");
@@ -1169,6 +1191,22 @@ pub fn induce_all(progress: &dyn Fn(&str)) -> Result<Value> {
         out.push(induce(&l, progress).unwrap_or_else(|e| json!({"layer": l, "error": format!("{e:#}")})));
     }
     Ok(json!({"layers": out}))
+}
+
+/// Record that `old` is now `new` (a rename, merge, fold, move): what pointed at `old` points at `new` too,
+/// and `new` itself is no alias any more — so aliases never chain or loop (a fold, then a move back down,
+/// would otherwise send tags in a circle and lose them).
+fn set_alias(aliases: &mut BTreeMap<String, String>, old: String, new: String) {
+    aliases.remove(&new);
+    if old == new {
+        return;
+    }
+    for v in aliases.values_mut() {
+        if *v == old {
+            *v = new.clone();
+        }
+    }
+    aliases.insert(old, new);
 }
 
 /// A client layer never repeats the practice (#32, #33): a client topic that names a practice topic (its
@@ -1195,7 +1233,7 @@ fn fold_into_practice(t: &mut Taxonomy, layer: &str) -> Vec<String> {
             k.parent = Some(home.clone());
         }
         t.topics.retain(|x| !(x.layer == layer && nid(&x.label) == nid(label)));
-        t.aliases.insert(topic_id(layer, label), topic_id(SHARED, &p.label));
+        set_alias(&mut t.aliases, topic_id(layer, label), topic_id(SHARED, &p.label));
         folded.push(format!("topic “{label}” → the practice's “{}”", p.label));
     }
     let practice_terms: Vec<Term> = t.terms.iter().filter(|x| x.layer == SHARED).cloned().collect();
@@ -1213,14 +1251,31 @@ fn fold_into_practice(t: &mut Taxonomy, layer: &str) -> Vec<String> {
         }
     });
     for (m, into) in moved {
+        // Merged as `edit` merge does: its names become the practice term's other names, its spellings
+        // (transcription hints) its spellings; pins, always, what was learned and a description carry over.
         if let Some(pt) = t.terms.iter_mut().find(|x| x.layer == SHARED && x.name == into) {
+            for n in std::iter::once(m.name.clone()).chain(m.synonyms.clone()) {
+                if !pt.is(&n) {
+                    pt.synonyms.push(n);
+                }
+            }
+            for v in &m.variants {
+                if !pt.is(v) {
+                    pt.variants.push(v.clone());
+                }
+            }
             for th in &m.threads {
                 if !pt.threads.contains(th) {
                     pt.threads.push(th.clone());
                 }
             }
+            pt.always |= m.always;
+            if pt.description.trim().is_empty() {
+                pt.description = m.description.clone();
+            }
+            merge_learned(pt, &m);
         }
-        t.aliases.insert(term_id(layer, &m.name), term_id(SHARED, &into));
+        set_alias(&mut t.aliases, term_id(layer, &m.name), term_id(SHARED, &into));
         folded.push(format!("term “{}” → the practice's “{into}”", m.name));
     }
     folded
@@ -1663,7 +1718,7 @@ pub fn edit(op: &Value) -> Result<Taxonomy> {
                     k.parent = Some(to.clone());
                 }
             }
-            t.aliases.insert(key(&target), key(&to));
+            set_alias(&mut t.aliases, key(&target), key(&to));
         }
         "merge" => {
             let into = s("into").ok_or_else(|| anyhow!("merge into what?"))?;
@@ -1693,7 +1748,7 @@ pub fn edit(op: &Value) -> Result<Taxonomy> {
                     x.description = from.description;
                 }
                 if into_layer != layer {
-                    t.aliases.insert(key(&target), term_id(&into_layer, &into));
+                    set_alias(&mut t.aliases, key(&target), term_id(&into_layer, &into));
                     return save(t, json!({"op": "merge", "by": "you", "layer": into_layer, "target": target, "change": op}));
                 }
             } else {
@@ -1709,10 +1764,12 @@ pub fn edit(op: &Value) -> Result<Taxonomy> {
                 for syn in &from.synonyms {
                     add_synonym(x, syn);
                 }
+                // Its subtopics go under it — or, when it is a subtopic itself, under its level-1 topic.
+                let home = if x.level == 1 { into.clone() } else { x.parent.clone().unwrap_or_else(|| into.clone()) };
                 for k in t.topics.iter_mut().filter(|k| k.layer == layer && k.parent.as_deref().is_some_and(|p| same(p, &target))) {
-                    k.parent = Some(into.clone());
+                    k.parent = Some(home.clone());
                 }
-                t.aliases.insert(key(&target), topic_id(&into_layer, &into));
+                set_alias(&mut t.aliases, key(&target), topic_id(&into_layer, &into));
                 let layer = into_layer;
                 t.layers.entry(layer.clone()).or_insert_with(|| {
                     let (name, goal, audience) = layer_facts(&layer);
@@ -1720,7 +1777,7 @@ pub fn edit(op: &Value) -> Result<Taxonomy> {
                 });
                 return save(t, json!({"op": "merge", "by": "you", "layer": layer, "target": target, "change": op}));
             }
-            t.aliases.insert(key(&target), key(&into));
+            set_alias(&mut t.aliases, key(&target), key(&into));
         }
         "move" => {
             let to = s("parent");
@@ -1787,7 +1844,7 @@ pub fn edit(op: &Value) -> Result<Taxonomy> {
             }
             let x = t.terms.iter_mut().find(|x| x.layer == layer && same(&x.name, &target)).ok_or_else(|| anyhow!("no term {target:?}"))?;
             x.layer = to.clone();
-            t.aliases.insert(term_id(&layer, &target), term_id(&to, &target));
+            set_alias(&mut t.aliases, term_id(&layer, &target), term_id(&to, &target));
             t.layers.entry(to.clone()).or_insert_with(|| {
                 let (name, goal, audience) = layer_facts(&to);
                 Layer { name, goal, audience, ..Default::default() }
@@ -1824,7 +1881,7 @@ pub fn edit(op: &Value) -> Result<Taxonomy> {
                 let old = topic_id(&t.topics[j].layer, &t.topics[j].label);
                 t.topics[j].layer = to.clone();
                 let new = topic_id(&to, &t.topics[j].label);
-                t.aliases.insert(old, new);
+                set_alias(&mut t.aliases, old, new);
             }
             // Up to the practice: a parent that was the client's own isn't one there.
             if to == SHARED {
@@ -2217,7 +2274,7 @@ mod tests {
         ],
             terms: vec![
             Term { layer: SHARED.into(), name: "Widgetfactory".into(), synonyms: vec!["WF".into()], ..Default::default() },
-            Term { layer: "acme".into(), name: "WF".into(), threads: vec!["pilot".into()], ..Default::default() },
+            Term { layer: "acme".into(), name: "WF".into(), threads: vec!["pilot".into()], variants: vec!["Double-U Eff".into()], ..Default::default() },
             Term { layer: "acme".into(), name: "Acme portal".into(), ..Default::default() },
         ],
             ..Default::default()
@@ -2230,9 +2287,23 @@ mod tests {
         // A term moved up earlier (#32): the client's copy goes, its pins go to the practice's term.
         assert_eq!(t.terms.iter().filter(|x| x.layer == "acme").map(|x| x.name.as_str()).collect::<Vec<_>>(), vec!["Acme portal"]);
         assert_eq!(t.terms[0].threads, vec!["pilot".to_string()]);
+        assert!(t.terms[0].variants.contains(&"Double-U Eff".to_string()), "its spellings stay transcription hints");
         assert_eq!(t.aliases[&term_id("acme", "WF")], term_id(SHARED, "Widgetfactory"));
         // The shared layer never folds into itself.
         assert!(fold_into_practice(&mut t, SHARED).is_empty());
+    }
+
+    #[test]
+    fn aliases_never_chain_or_loop() {
+        let mut a = BTreeMap::new();
+        // Folded into the practice's x, then y merged into x too.
+        set_alias(&mut a, "acme__x".into(), "x".into());
+        set_alias(&mut a, "y".into(), "x".into());
+        assert_eq!((a["acme__x"].as_str(), a["y"].as_str()), ("x", "x"));
+        // Moved back down: x is acme's again — nothing points in a circle.
+        set_alias(&mut a, "x".into(), "acme__x".into());
+        assert!(!a.contains_key("acme__x"), "{a:?}");
+        assert_eq!((a["x"].as_str(), a["y"].as_str()), ("acme__x", "acme__x"));
     }
 
     #[test]

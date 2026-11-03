@@ -306,7 +306,7 @@ pub fn collect() -> Collected {
                     let broad = d["reasons"].as_array().into_iter().flatten().find(|r| r["rule"] == "catch_all" && r["topic"].is_object()).map(|r| r["topic"].clone());
                     let mut acts = vec![];
                     if let Some(b) = &broad {
-                        acts.push(act(&format!("Split “{}”", b["label"].as_str().unwrap_or("")), true, json!({"cmd": "brain_split_topic", "layer": b["layer"], "label": b["label"]})));
+                        acts.push(act(&format!("Split “{}”", b["label"].as_str().unwrap_or("")), true, json!({"cmd": "brain_split_topic", "layer": b["layer"], "label": b["label"], "for": layer})));
                     }
                     acts.push(act("Rebuild topics", broad.is_none(), json!({"cmd": "brain_rebuild_topics", "layer": layer})));
                     acts.push(act("Not now", false, json!({"cmd": "brain_topics_snooze", "layer": layer})));

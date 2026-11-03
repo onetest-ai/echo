@@ -1738,7 +1738,12 @@ pub fn handle(msg: &str) -> Handled {
         #[cfg(feature = "brain")]
         "brain_split_topic" => {
             let (layer, label) = (v["layer"].as_str().unwrap_or("").to_string(), v["label"].as_str().unwrap_or("").to_string());
-            let k = format!("split:{layer}");
+            // Tracked under the layer whose drift asked for it (a client's catch-all is often a practice topic).
+            let asker = v["for"].as_str().filter(|f| !f.is_empty()).unwrap_or(&layer).to_string();
+            let k = format!("split:{asker}");
+            if BRAIN_INSIGHTS.lock().map(|r| r.contains(&format!("taxonomy:{asker}")) || r.contains(&format!("taxonomy:{layer}"))).unwrap_or(false) {
+                return notice("Its topics are being rebuilt: split it when that is done");
+            }
             if !layer.is_empty() && !label.is_empty() && BRAIN_INSIGHTS.lock().map(|mut r| r.insert(k.clone())).unwrap_or(false) {
                 std::thread::spawn(move || {
                     let _end = OnEnd(Some(move || {
