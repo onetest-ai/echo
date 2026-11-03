@@ -4,5 +4,5 @@ members = ["crates/echoctl"]
 
 [workspace.package]
 edition = "2021"
-version = "0.6.0"
+version = "0.6.1"
 license = "AGPL-3.0-only"
