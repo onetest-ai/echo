@@ -338,17 +338,45 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
         "/api/brain/people" => json_reply(crate::people::everyone(chrono::Local::now().date_naive()).unwrap_or_else(|e| json!({ "error": format!("{e:#}") }))),
         // The Brain: its overview, graph and a call's "Also discussed" (?client= / ?thread= scope them).
         #[cfg(feature = "brain")]
-        p if p == "/api/brain" || p == "/api/brain/graph" => {
+        "/api/brain" => {
             let q = req.uri().query().unwrap_or("");
             let (client, thread) = (query_param(q, "client"), query_param(q, "thread"));
             let scope = client.as_deref().map(|c| ("client", c)).or(thread.as_deref().map(|t| ("thread", t)));
-            let r = if p == "/api/brain" { crate::brain::views::overview(scope) } else { crate::brain::views::graph(scope) };
-            let mut v = r.unwrap_or_else(|e| json!({ "error": format!("{e:#}") }));
+            let mut v = crate::brain::views::overview(scope).unwrap_or_else(|e| json!({ "error": format!("{e:#}") }));
             // Topic rebuilds and re-tagging running now (`brain_rebuild_topics`, `brain_retag_topics`), by layer.
-            if p == "/api/brain" {
-                v["topic_jobs"] = json!(BRAIN_INSIGHTS.lock().map(|r| r.iter().filter(|k| k.starts_with("taxonomy:") || k.starts_with("retag:") || k.starts_with("split:")).cloned().collect::<Vec<_>>()).unwrap_or_default());
+            v["topic_jobs"] = json!(BRAIN_INSIGHTS.lock().map(|r| r.iter().filter(|k| k.starts_with("taxonomy:") || k.starts_with("retag:") || k.starts_with("split:") || k.starts_with("edit:")).cloned().collect::<Vec<_>>()).unwrap_or_default());
+            if let Some(e) = BRAIN_EDIT_ERROR.lock().ok().and_then(|mut x| x.take()) {
+                v["edit_error"] = json!(e);
             }
             json_reply(v)
+        }
+        // The Brain a piece at a time (`brain::browse`): sources grouped and paged, a folder's files, the
+        // dictionary by group and letter, the graph drawn as it is opened (topics; a topic's or a client's sources).
+        #[cfg(feature = "brain")]
+        p if p.starts_with("/api/brain/browse/") => {
+            use crate::brain::browse;
+            let q = req.uri().query().unwrap_or("");
+            let (client, thread) = (query_param(q, "client"), query_param(q, "thread"));
+            let scope = client.as_deref().map(|c| ("client", c)).or(thread.as_deref().map(|t| ("thread", t)));
+            let num = |k: &str, d: usize| query_param(q, k).and_then(|v| v.parse().ok()).unwrap_or(d);
+            let r = if !crate::brain::enabled() { Err(anyhow::anyhow!("the Brain is off")) } else { match &p["/api/brain/browse/".len()..] {
+                "groups" => browse::source_groups(scope),
+                "sources" => browse::source_list(scope, &browse::ListQuery {
+                    client: query_param(q, "of"), kind: query_param(q, "kind"), root: query_param(q, "root"), channel: query_param(q, "channel"),
+                    q: query_param(q, "q"), before: query_param(q, "before"), limit: num("limit", 50),
+                }),
+                "folder" => browse::folder_files(&query_param(q, "root").unwrap_or_default(), query_param(q, "q").as_deref(), num("offset", 0), num("limit", 50)),
+                "terms" => browse::terms(scope, query_param(q, "group").as_deref(), query_param(q, "letter").as_deref(), query_param(q, "q").as_deref(), num("offset", 0), num("limit", 50)),
+                "graph" => browse::graph_topics(scope),
+                "graph-topic" => browse::graph_topic(&query_param(q, "id").unwrap_or_default(), scope, num("limit", 50)),
+                "graph-client" => browse::graph_client(&query_param(q, "id").unwrap_or_default(), num("limit", 400)),
+                "graph-search" => {
+                    let emb = crate::brain::embedder();
+                    browse::graph_search(query_param(q, "q").unwrap_or_default().trim(), scope, emb.as_ref().map(|e| e as &dyn crate::brain::embed::Embedder))
+                }
+                _ => Err(anyhow::anyhow!("not found")),
+            } };
+            json_reply(r.unwrap_or_else(|e| json!({ "error": format!("{e:#}") })))
         }
         // The Brain searched from its graphs (words and meaning, as Claude's search_knowledge): the hits'
         // sources light up. Off the main thread, as every echo:// request: the embedder may take a moment.
@@ -1185,6 +1213,9 @@ static BRAIN_LAST: std::sync::Mutex<Value> = std::sync::Mutex::new(Value::Null);
 /// Scopes whose insights are being refreshed from the window.
 #[cfg(feature = "brain")]
 static BRAIN_INSIGHTS: std::sync::Mutex<std::collections::BTreeSet<String>> = std::sync::Mutex::new(std::collections::BTreeSet::new());
+/// The last taxonomy edit's error, for the page that made it (taken once by `/api/brain`).
+#[cfg(feature = "brain")]
+static BRAIN_EDIT_ERROR: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
 /// Save one plain setting with the value the page shows now (never a toggle of a stale value).
 fn settings_set(key: &str, value: &Value) -> anyhow::Result<()> {
@@ -1760,10 +1791,26 @@ pub fn handle(msg: &str) -> Handled {
         // Settings: one plain value, as the page shows it now.
         // The taxonomy: the user's review (accept, rename, merge, move, remove, add, set).
         #[cfg(feature = "brain")]
-        "brain_taxonomy" => match crate::brain::taxonomy::edit(&v["body"]) {
-            Ok(_) => true.into(),
-            Err(e) => notice(&format!("{e:#}")),
-        },
+        // The user's edit of topics or terms, off the window's thread: on a large Brain a new version re-reads the
+        // mentions it changed (seconds). `topic_jobs` shows it running; its error comes back once (`edit_error`).
+        "brain_taxonomy" => {
+            let body = v["body"].clone();
+            if let Ok(mut r) = BRAIN_INSIGHTS.lock() {
+                r.insert("edit:taxonomy".into());
+            }
+            std::thread::spawn(move || {
+                let res = crate::brain::taxonomy::edit(&body);
+                if let Err(e) = &res {
+                    if let Ok(mut x) = BRAIN_EDIT_ERROR.lock() {
+                        *x = Some(format!("{e:#}"));
+                    }
+                }
+                if let Ok(mut r) = BRAIN_INSIGHTS.lock() {
+                    r.remove("edit:taxonomy");
+                }
+            });
+            true.into()
+        }
         // Refresh a scope's insights now (in the background; one run per scope at a time).
         #[cfg(feature = "brain")]
         "brain_insights" => {
@@ -2348,34 +2395,63 @@ fn paste_bytes(text: String, bracketed: bool) -> Vec<u8> {
 /// each call's minutes page — into `dir`, so the UI can be reviewed in an ordinary browser
 /// (`python3 -m http.server`).
 /// `echoctl window --serve <port>` (dev): the page and its API answered live on 127.0.0.1, by the same `respond` as
-/// the window, so a browser shows real data with paging and search working. Only GETs; IPC isn't there.
+/// the window, so a browser shows real data with paging and search working. With `ECHOCTL_SERVE_IPC=1` the page's
+/// messages are taken too (`POST /ipc` → `handle`, as the window's), from that page only: a per-run token in a
+/// SameSite=Strict cookie, and the request's Origin must be this server — a dev data folder's actions, never the user's.
 pub fn serve(port: u16) -> anyhow::Result<()> {
-    use std::io::{BufRead, BufReader, Write};
+    use std::io::{BufRead, BufReader, Read, Write};
     let listener = std::net::TcpListener::bind(("127.0.0.1", port))?;
-    println!("http://127.0.0.1:{}/", listener.local_addr()?.port());
+    let origin = format!("http://127.0.0.1:{}", listener.local_addr()?.port());
+    let ipc = std::env::var("ECHOCTL_SERVE_IPC").is_ok_and(|v| v == "1");
+    let token: String = if ipc { (0..32).map(|_| format!("{:x}", rand_nibble())).collect() } else { String::new() };
+    println!("{origin}/{}", if ipc { "  (IPC on)" } else { "" });
     for conn in listener.incoming().flatten() {
+        let (origin, token) = (origin.clone(), token.clone());
         std::thread::spawn(move || {
             let mut reader = BufReader::new(&conn);
             let mut line = String::new();
             if reader.read_line(&mut line).is_err() {
                 return;
             }
-            // Skip the headers.
+            let (mut length, mut cookie_ok, mut origin_ok) = (0usize, false, false);
             let mut h = String::new();
             while reader.read_line(&mut h).is_ok_and(|n| n > 2) {
+                let (k, v) = h.split_once(':').map(|(k, v)| (k.trim().to_ascii_lowercase(), v.trim().to_string())).unwrap_or_default();
+                match k.as_str() {
+                    "content-length" => length = v.parse().unwrap_or(0).min(1 << 20),
+                    "cookie" => cookie_ok = !token.is_empty() && v.split(';').any(|c| c.trim() == format!("echo_serve={token}")),
+                    "origin" => origin_ok = v == origin,
+                    _ => {}
+                }
                 h.clear();
             }
-            let path = line.split_whitespace().nth(1).unwrap_or("/").to_string();
+            let mut parts = line.split_whitespace();
+            let (method, path) = (parts.next().unwrap_or("GET").to_string(), parts.next().unwrap_or("/").to_string());
+            let mut out = &conn;
+            if method == "POST" && path == "/ipc" {
+                let mut body = vec![0u8; length];
+                let ok = reader.read_exact(&mut body).is_ok() && cookie_ok && origin_ok;
+                let answer = if ok { json!({"reply": handle(&String::from_utf8_lossy(&body)).reply}).to_string() } else { "{\"error\":\"refused\"}".into() };
+                let _ = write!(out, "HTTP/1.1 {} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}", if ok { 200 } else { 403 }, answer.len());
+                return;
+            }
             let res = respond(&Request::builder().uri(format!("echo://localhost{path}")).body(Vec::new()).expect("request"));
             let ctype = res.headers().get("Content-Type").and_then(|v| v.to_str().ok()).unwrap_or("application/octet-stream").to_string();
             let status = res.status().as_u16();
             let body = res.into_body();
-            let mut out = &conn;
-            let _ = write!(out, "HTTP/1.1 {status} OK\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+            let cookie = if !token.is_empty() && ctype.starts_with("text/html") { format!("Set-Cookie: echo_serve={token}; SameSite=Strict; HttpOnly; Path=/\r\n") } else { String::new() };
+            let _ = write!(out, "HTTP/1.1 {status} OK\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\n{cookie}Connection: close\r\n\r\n", body.len());
             let _ = out.write_all(&body);
         });
     }
     Ok(())
+}
+
+/// A random hex digit (the dev server's token), from the OS's randomness.
+fn rand_nibble() -> u8 {
+    let mut b = [0u8; 1];
+    getrandom::fill(&mut b).expect("the OS's randomness");
+    b[0] & 15
 }
 
 pub fn export(dir: &Path) -> anyhow::Result<()> {
@@ -2400,7 +2476,9 @@ pub fn export(dir: &Path) -> anyhow::Result<()> {
     #[cfg(feature = "brain")]
     {
         write("/api/brain/index.html", get("/api/brain"))?;
-        write("/api/brain/graph", get("/api/brain/graph"))?;
+        for x in ["groups", "terms", "graph"] {
+            write(&format!("/api/brain/browse/{x}"), get(&format!("/api/brain/browse/{x}")))?;
+        }
         write("/api/brain/people", get("/api/brain/people"))?;
         for c in crate::projects::clients().unwrap_or_default() {
             write(&format!("/api/brain/insights-client-{}", c.id), get(&format!("/api/brain/insights?client={}", c.id)))?;
@@ -2411,13 +2489,6 @@ pub fn export(dir: &Path) -> anyhow::Result<()> {
         write("/api/brain/sources", get("/api/brain/sources"))?;
         write("/api/brain/files", get("/api/brain/files"))?;
         write("/api/brain/numbers", get("/api/brain/numbers"))?;
-        // The graph's details panel, for each source (the export's static server can't take a query).
-        if let Ok(g) = crate::brain::views::graph(None) {
-            for n in g["nodes"].as_array().into_iter().flatten().filter(|n| n["type"] == "doc") {
-                let src = n["id"].as_str().unwrap_or("");
-                write(&format!("/api/brain/doc-{}", src.replace('/', "_")), get(&format!("/api/brain/doc?source={}", src)))?;
-            }
-        }
     }
     for p in crate::projects::list() {
         // A folder (its work and logo live under it): the project itself as its index.

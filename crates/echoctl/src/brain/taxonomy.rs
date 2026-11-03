@@ -12,7 +12,7 @@ use anyhow::{anyhow, bail, Result};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
 
 use super::store;
@@ -413,7 +413,8 @@ pub fn current() -> Option<Taxonomy> {
 /// Save a new version (immutable `vN.json`, and `current.json`) and bring the store's graph and tags
 /// in line with it.
 fn save(mut t: Taxonomy, what: Value) -> Result<Taxonomy> {
-    t.version = current().map(|c| c.version).unwrap_or(0) + 1;
+    let before = current();
+    t.version = before.as_ref().map(|c| c.version).unwrap_or(0) + 1;
     t.review_flags = review_flags(&t);
     let mut h = what.clone();
     h["version"] = json!(t.version);
@@ -426,7 +427,7 @@ fn save(mut t: Taxonomy, what: Value) -> Result<Taxonomy> {
     use std::io::Write;
     let mut log = std::fs::OpenOptions::new().create(true).append(true).open(dir().join("decisions.jsonl"))?;
     writeln!(log, "{h}")?;
-    build_graph(&store::open(&super::store_path())?, &t)?;
+    build_graph(&store::open(&super::store_path())?, &t, before.as_ref())?;
     Ok(t)
 }
 
@@ -440,11 +441,33 @@ fn review_flags(t: &Taxonomy) -> Value {
             }
         }
     }
+    // Terms (tens of thousands): each compared with its neighbours in A–Z order within its layer (near-duplicates
+    // share a beginning), and a spelling that is another term's name found through a map — never each with each.
     let mut terms = vec![];
-    for (i, a) in t.terms.iter().enumerate() {
-        for b in t.terms.iter().skip(i + 1) {
-            if a.layer == b.layer && (ratio(&a.name, &b.name) >= 0.8 || a.variants.iter().any(|v| nid(v) == nid(&b.name))) {
-                terms.push(json!({"layer": a.layer, "pair": [a.name, b.name]}));
+    let mut seen: BTreeSet<(usize, usize)> = BTreeSet::new();
+    let mut by_layer: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
+    for (i, x) in t.terms.iter().enumerate() {
+        by_layer.entry(x.layer.as_str()).or_default().push(i);
+    }
+    let mut pair = |a: usize, b: usize, terms: &mut Vec<Value>| {
+        let (a, b) = (a.min(b), a.max(b));
+        if a != b && seen.insert((a, b)) {
+            terms.push(json!({"layer": t.terms[a].layer, "pair": [t.terms[a].name, t.terms[b].name]}));
+        }
+    };
+    for (_, mut ids) in by_layer {
+        ids.sort_by_key(|i| nid(&t.terms[*i].name));
+        let by_name: HashMap<String, usize> = ids.iter().map(|i| (nid(&t.terms[*i].name), *i)).collect();
+        for (k, a) in ids.iter().enumerate() {
+            for b in ids.iter().skip(k + 1).take(12) {
+                if ratio(&t.terms[*a].name, &t.terms[*b].name) >= 0.8 {
+                    pair(*a, *b, &mut terms);
+                }
+            }
+            for v in &t.terms[*a].variants {
+                if let Some(b) = by_name.get(&nid(v)) {
+                    pair(*a, *b, &mut terms);
+                }
             }
         }
     }
@@ -475,7 +498,7 @@ fn layers_for(t: &Taxonomy, clients: Option<&BTreeSet<String>>) -> Vec<String> {
 
 /// The graph tables from a taxonomy: topics (intent_l1 / intent_l2, `subclass_of`), entity kinds and
 /// terms; tags of a node renamed or merged move to its new id (aliases); tags of a node gone are dropped.
-pub fn build_graph(c: &Connection, t: &Taxonomy) -> Result<()> {
+pub fn build_graph(c: &Connection, t: &Taxonomy, before: Option<&Taxonomy>) -> Result<()> {
     let tx = c.unchecked_transaction()?;
     // An alias whose old id names a node again (it came back) moves nothing.
     let live: BTreeSet<String> = t.topics.iter().map(|x| topic_id(&x.layer, &x.label)).chain(t.terms.iter().map(|x| term_id(&x.layer, &x.name))).collect();
@@ -535,18 +558,27 @@ pub fn build_graph(c: &Connection, t: &Taxonomy) -> Result<()> {
         tx.execute("INSERT INTO meta(key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value", params![k, v])?;
     }
     tx.commit()?;
-    mentions(c, t)?;
+    // Mentions: only the terms this version changed (a term gone took its tags with it above); everything when
+    // there is no version before, or the store never had its mentions read.
+    let scanned: bool = c.query_row("SELECT count(*) FROM sqlite_master WHERE name = 'term_scan'", [], |r| r.get::<_, i64>(0)).unwrap_or(0) > 0;
+    match before.filter(|_| scanned) {
+        Some(b) => mentions_of(c, t, &changed_terms(b, t))?,
+        None => mentions(c, t)?,
+    }
     Ok(())
 }
 
 fn word_in(hay: &str, needle: &str) -> bool {
-    let n = needle.to_lowercase();
+    word_in_lower(&hay.to_lowercase(), &needle.to_lowercase())
+}
+
+/// `word_in` on text and name already in lowercase.
+fn word_in_lower(h: &str, n: &str) -> bool {
     if n.chars().count() < 2 {
         return false;
     }
-    let h = hay.to_lowercase();
     let mut from = 0;
-    while let Some(i) = h[from..].find(&n) {
+    while let Some(i) = h[from..].find(n) {
         let s = from + i;
         let e = s + n.len();
         let before = h[..s].chars().next_back().is_none_or(|c| !c.is_alphanumeric());
@@ -560,27 +592,171 @@ fn word_in(hay: &str, needle: &str) -> bool {
 }
 
 /// Which sections mention which terms (by name or a variant, as whole words) — a client's terms only in
-/// that client's sections, shared ones anywhere: deterministic, redone on each new version or sync.
+/// that client's sections, shared ones anywhere: deterministic, no model. Every section read once against an index
+/// of the terms' names by their first word (tens of thousands of terms, millions of sections: never each against
+/// each). `term_scan` remembers the text each section was read in, so a sync reads only what changed
+/// (`mentions_changed`) and an edit only the terms it changed (`mentions_of`).
 pub fn mentions(c: &Connection, t: &Taxonomy) -> Result<()> {
-    let clients = chunk_clients(c)?;
+    let idx = NameIndex::new(t);
     let tx = c.unchecked_transaction()?;
+    tx.execute_batch(TERM_SCAN)?;
     tx.execute("DELETE FROM chunk_topics WHERE kind = 'term'", [])?;
     tx.execute("DELETE FROM graph_edges WHERE rel = 'mentions'", [])?;
-    let chunks: Vec<(i64, String)> = tx.prepare("SELECT id, title || ' ' || text FROM chunks")?.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
-    for tm in &t.terms {
-        let id = term_id(&tm.layer, &tm.name);
-        for (cid, text) in &chunks {
-            if tm.layer != SHARED && !clients.get(cid).is_some_and(|s| s.contains(&tm.layer)) {
-                continue;
-            }
-            if tm.names().any(|n| word_in(text, n)) {
-                tx.execute("INSERT INTO chunk_topics(chunk_id, category_id, category_label, kind) VALUES (?1, ?2, ?3, 'term')", params![cid, id, tm.name])?;
-                tx.execute("INSERT INTO graph_edges(source, target, rel) VALUES (?1, ?2, 'mentions')", params![format!("chunk:{cid}"), id])?;
-            }
-        }
-    }
+    tx.execute("DELETE FROM term_scan", [])?;
+    scan_chunks(&tx, t, &idx, "")?;
     tx.commit()?;
     Ok(())
+}
+
+/// After a sync: the sections new or changed since they were last read for terms (their old mentions dropped).
+pub fn mentions_changed(c: &Connection, t: &Taxonomy) -> Result<usize> {
+    let idx = NameIndex::new(t);
+    let tx = c.unchecked_transaction()?;
+    tx.execute_batch(TERM_SCAN)?;
+    // Sections gone: their scan state goes too (their tags went with them).
+    tx.execute("DELETE FROM term_scan WHERE chunk_id NOT IN (SELECT id FROM chunks)", [])?;
+    let n = scan_chunks(&tx, t, &idx, "WHERE NOT EXISTS (SELECT 1 FROM term_scan s WHERE s.chunk_id = c.id AND s.sha = coalesce(c.sha, ''))")?;
+    tx.commit()?;
+    Ok(n)
+}
+
+const TERM_SCAN: &str = "CREATE TABLE IF NOT EXISTS term_scan(chunk_id INTEGER PRIMARY KEY, sha TEXT NOT NULL);";
+
+/// Terms by the rarest word of each of their names (the word fewest names share: "10002" over "kiosk", "store"
+/// over "ai"), lowercase letters and digits: a section's words find the few terms it may mention, each then checked
+/// whole (`word_in`).
+struct NameIndex {
+    by_word: HashMap<String, Vec<(usize, String, Vec<String>)>>,
+}
+
+fn words(s: &str) -> impl Iterator<Item = String> + '_ {
+    s.split(|ch: char| !ch.is_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_lowercase)
+}
+
+impl NameIndex {
+    fn new(t: &Taxonomy) -> Self {
+        let names: Vec<(usize, &String)> = t.terms.iter().enumerate().flat_map(|(i, tm)| tm.names().filter(|n| n.chars().count() >= 2).map(move |n| (i, n))).collect();
+        let mut df: HashMap<String, usize> = HashMap::new();
+        for (_, n) in &names {
+            for w in words(n).collect::<BTreeSet<_>>() {
+                *df.entry(w).or_default() += 1;
+            }
+        }
+        let mut by_word: HashMap<String, Vec<(usize, String, Vec<String>)>> = HashMap::new();
+        for (i, n) in names {
+            let ws: Vec<String> = words(n).collect();
+            if let Some(key) = ws.iter().min_by_key(|w| (df.get(*w).copied().unwrap_or(0), std::cmp::Reverse(w.len()))) {
+                by_word.entry(key.clone()).or_default().push((i, n.to_lowercase(), ws.clone()));
+            }
+        }
+        NameIndex { by_word }
+    }
+    /// The terms (by index) this text mentions, whole words.
+    fn found(&self, text: &str) -> BTreeSet<usize> {
+        let lower = text.to_lowercase();
+        let have: std::collections::HashSet<String> = words(&lower).collect();
+        let mut out = BTreeSet::new();
+        for w in &have {
+            for (i, name, ws) in self.by_word.get(w).into_iter().flatten() {
+                if !out.contains(i) && ws.iter().all(|x| have.contains(x)) && word_in_lower(&lower, name) {
+                    out.insert(*i);
+                }
+            }
+        }
+        out
+    }
+}
+
+/// Read the sections `filter` picks (all: "") for terms, streaming: record their mentions and what was read.
+fn scan_chunks(tx: &Connection, t: &Taxonomy, idx: &NameIndex, filter: &str) -> Result<usize> {
+    let mut st = tx.prepare(&format!(
+        "SELECT c.id, coalesce(c.title, '') || ' ' || coalesce(c.text, ''), coalesce(c.sha, ''),
+                (SELECT group_concat(s.id, char(31)) FROM scopes s WHERE s.chunk_id = c.id AND s.kind = 'client') FROM chunks c {filter}"
+    ))?;
+    let mut del = tx.prepare("DELETE FROM chunk_topics WHERE chunk_id = ?1 AND kind = 'term'")?;
+    let mut del_e = tx.prepare("DELETE FROM graph_edges WHERE source = ?1 AND rel = 'mentions'")?;
+    let mut tag = tx.prepare("INSERT INTO chunk_topics(chunk_id, category_id, category_label, kind) VALUES (?1, ?2, ?3, 'term')")?;
+    let mut edge = tx.prepare("INSERT INTO graph_edges(source, target, rel) VALUES (?1, ?2, 'mentions')")?;
+    let mut done = tx.prepare("INSERT OR REPLACE INTO term_scan(chunk_id, sha) VALUES (?1, ?2)")?;
+    let incremental = !filter.is_empty();
+    let mut n = 0;
+    let mut rows = st.query([])?;
+    while let Some(r) = rows.next()? {
+        let (cid, text, sha, cl): (i64, String, String, Option<String>) = (r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?);
+        if incremental {
+            del.execute([cid])?;
+            del_e.execute([format!("chunk:{cid}")])?;
+        }
+        let clients: BTreeSet<&str> = cl.as_deref().unwrap_or("").split('\u{1f}').filter(|x| !x.is_empty()).collect();
+        for i in idx.found(&text) {
+            let tm = &t.terms[i];
+            if tm.layer != SHARED && !clients.contains(tm.layer.as_str()) {
+                continue;
+            }
+            let id = term_id(&tm.layer, &tm.name);
+            tag.execute(params![cid, id, tm.name])?;
+            edge.execute(params![format!("chunk:{cid}"), id])?;
+        }
+        done.execute(params![cid, sha])?;
+        n += 1;
+    }
+    Ok(n)
+}
+
+/// After an edit: the mentions of these terms (by id) found again — their candidates from the full-text index,
+/// each checked whole as above; the others' stay as they were.
+fn mentions_of(c: &Connection, t: &Taxonomy, ids: &BTreeSet<String>) -> Result<()> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let tx = c.unchecked_transaction()?;
+    for id in ids {
+        tx.execute("DELETE FROM chunk_topics WHERE category_id = ?1 AND kind = 'term'", [id])?;
+        tx.execute("DELETE FROM graph_edges WHERE target = ?1 AND rel = 'mentions'", [id])?;
+    }
+    let mut tag = tx.prepare("INSERT OR IGNORE INTO chunk_topics(chunk_id, category_id, category_label, kind) VALUES (?1, ?2, ?3, 'term')")?;
+    let mut edge = tx.prepare("INSERT INTO graph_edges(source, target, rel) VALUES (?1, ?2, 'mentions')")?;
+    for tm in t.terms.iter().filter(|x| ids.contains(&term_id(&x.layer, &x.name))) {
+        let id = term_id(&tm.layer, &tm.name);
+        let mut found: BTreeSet<i64> = BTreeSet::new();
+        for n in tm.names().filter(|n| n.chars().count() >= 2) {
+            let ws: Vec<String> = words(n).collect();
+            if ws.is_empty() {
+                continue;
+            }
+            let phrase = format!("\"{}\"", ws.join(" ").replace('"', "\"\""));
+            let sql = format!(
+                "SELECT c.id, coalesce(c.title, '') || ' ' || coalesce(c.text, '') FROM chunks_fts f JOIN chunks c ON c.id = f.rowid WHERE chunks_fts MATCH ?1{}",
+                if tm.layer == SHARED { "" } else { " AND EXISTS (SELECT 1 FROM scopes s WHERE s.chunk_id = c.id AND s.kind = 'client' AND s.id = ?2)" }
+            );
+            let mut st = tx.prepare(&sql)?;
+            let mut rows = if tm.layer == SHARED { st.query(params![phrase])? } else { st.query(params![phrase, tm.layer])? };
+            while let Some(r) = rows.next()? {
+                let (cid, text): (i64, String) = (r.get(0)?, r.get(1)?);
+                if !found.contains(&cid) && word_in(&text, n) {
+                    found.insert(cid);
+                }
+            }
+        }
+        for cid in found {
+            tag.execute(params![cid, id, tm.name])?;
+            edge.execute(params![format!("chunk:{cid}"), id])?;
+        }
+    }
+    drop((tag, edge));
+    tx.commit()?;
+    Ok(())
+}
+
+/// The terms an edit changed (new, or another name, spelling or layer), by id.
+fn changed_terms(before: &Taxonomy, after: &Taxonomy) -> BTreeSet<String> {
+    let sig = |x: &Term| {
+        let mut n: Vec<String> = x.names().map(|n| n.to_lowercase()).collect();
+        n.sort();
+        n
+    };
+    let old: HashMap<String, Vec<String>> = before.terms.iter().map(|x| (term_id(&x.layer, &x.name), sig(x))).collect();
+    after.terms.iter().filter(|x| old.get(&term_id(&x.layer, &x.name)) != Some(&sig(x))).map(|x| term_id(&x.layer, &x.name)).collect()
 }
 
 /// Brain's SequenceMatcher-like ratio on normalised names: 2·matches / total, matches from the
@@ -1042,7 +1218,7 @@ fn drift_in(c: &Connection, t: &Taxonomy, snoozed: &Value) -> Result<Vec<Value>>
 pub fn drift() -> Result<Vec<Value>> {
     let Some(t) = current() else { return Ok(vec![]) };
     let snoozed: Value = std::fs::read(drift_file()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or(json!({}));
-    drift_in(&store::open(&super::store_path())?, &t, &snoozed)
+    Ok(drift_kept(&t, &snoozed)?.as_ref().clone())
 }
 
 /// "Not now": the layer isn't called stale again until its new sections or its calls grow by half.
@@ -1068,7 +1244,7 @@ fn moves_file() -> PathBuf {
 /// thing (a label or synonym in common, or nearly the same label) belong to the practice; **down** — a
 /// practice topic whose tagged sections (≥ 10) all come from one client belongs to it. Turned down
 /// ones (`dismiss_move`) stay quiet.
-fn moves_in(c: &Connection, t: &Taxonomy, dismissed: &BTreeSet<String>) -> Result<Vec<Value>> {
+fn moves_in(st: &Stats, t: &Taxonomy, dismissed: &BTreeSet<String>) -> Vec<Value> {
     let mut out = vec![];
     let clients: Vec<&Topic> = t.topics.iter().filter(|x| x.layer != SHARED).collect();
     let mut seen: BTreeSet<String> = BTreeSet::new();
@@ -1096,11 +1272,25 @@ fn moves_in(c: &Connection, t: &Taxonomy, dismissed: &BTreeSet<String>) -> Resul
     // Terms: one name in several clients (or a client's and the practice's) is one thing of the practice.
     let mut tseen: BTreeSet<String> = BTreeSet::new();
     let lname = |l: &str| t.layers.get(l).map(|x| x.name.clone()).filter(|n| !n.is_empty()).unwrap_or_else(|| if l == SHARED { "your practice".into() } else { l.to_string() });
+    // Terms that share a name by any of their names, found through one index (tens of thousands of terms: never each
+    // against each).
+    let mut by_name: std::collections::HashMap<String, Vec<usize>> = std::collections::HashMap::new();
+    for (i, x) in t.terms.iter().enumerate() {
+        for n in x.names() {
+            let e = by_name.entry(nid(n)).or_default();
+            if e.last() != Some(&i) {
+                e.push(i);
+            }
+        }
+    }
     for a in t.terms.iter().filter(|x| x.layer != SHARED) {
         if tseen.contains(&term_id(&a.layer, &a.name)) {
             continue;
         }
-        let same: Vec<&Term> = t.terms.iter().filter(|b| b.layer != a.layer && (b.is(&a.name) || a.is(&b.name))).collect();
+        let mut near: Vec<usize> = a.names().flat_map(|n| by_name.get(&nid(n)).cloned().unwrap_or_default()).collect();
+        near.sort_unstable();
+        near.dedup();
+        let same: Vec<&Term> = near.into_iter().map(|i| &t.terms[i]).filter(|b| b.layer != a.layer && (b.is(&a.name) || a.is(&b.name))).collect();
         if same.is_empty() {
             continue;
         }
@@ -1122,8 +1312,7 @@ fn moves_in(c: &Connection, t: &Taxonomy, dismissed: &BTreeSet<String>) -> Resul
         if dismissed.contains(&key) {
             continue;
         }
-        let mut st = c.prepare("SELECT s.id, count(DISTINCT k.chunk_id) FROM chunk_topics k JOIN scopes s ON s.chunk_id = k.chunk_id AND s.kind = 'client' WHERE k.category_id = ?1 GROUP BY s.id")?;
-        let by: Vec<(String, i64)> = st.query_map([&id], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
+        let by: Vec<(String, i64)> = st.clients.get(&id).map(|m| m.iter().map(|(k, v)| (k.clone(), *v)).collect()).unwrap_or_default();
         let total: i64 = by.iter().map(|(_, n)| n).sum();
         if let ([(client, n)], true) = (by.as_slice(), total >= DEMOTE_MIN) {
             if client != "-" {
@@ -1133,13 +1322,13 @@ fn moves_in(c: &Connection, t: &Taxonomy, dismissed: &BTreeSet<String>) -> Resul
             }
         }
     }
-    Ok(out)
+    out
 }
 
 /// The suggested moves now (`echoctl brain taxonomy moves`, the Inbox, the Topics tab).
 pub fn moves() -> Result<Vec<Value>> {
     let Some(t) = current() else { return Ok(vec![]) };
-    moves_in(&store::open(&super::store_path())?, &t, &dismissed_moves())
+    Ok(moves_in(&*stats(None)?, &t, &dismissed_moves()))
 }
 
 fn dismissed_moves() -> BTreeSet<String> {
@@ -1511,6 +1700,70 @@ pub fn coverage(c: &Connection) -> Result<Value> {
     }))
 }
 
+/// What the tags add up to, per topic or term (in a scope): its sections, threads, clients (with sections each) and
+/// the topics terms come up in. SQL aggregates over every tag — seconds on millions of sections — so kept per store
+/// state (`stats`), never per taxonomy version: an edit shows at once with the counts it had.
+#[derive(Default)]
+pub struct Stats {
+    sections: HashMap<String, i64>,
+    threads: HashMap<String, BTreeSet<String>>,
+    clients: HashMap<String, BTreeMap<String, i64>>,
+    together: Vec<(String, String, i64)>,
+}
+
+fn stats_of(c: &Connection, scope: Option<(&str, &str)>) -> Result<Stats> {
+    let mut out = Stats::default();
+    let (sc, sp): (&str, Vec<&str>) = match scope {
+        Some((k, v)) => ("WHERE EXISTS (SELECT 1 FROM scopes x WHERE x.chunk_id = k.chunk_id AND x.kind = ?1 AND x.id = ?2)", vec![k, v]),
+        None => ("", vec![]),
+    };
+    let mut st = c.prepare(&format!("SELECT k.category_id, count(DISTINCT k.chunk_id) FROM chunk_topics k {sc} GROUP BY 1"))?;
+    for row in st.query_map(rusqlite::params_from_iter(sp.iter()), |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))? {
+        let (id, n) = row?;
+        out.sections.insert(id, n);
+    }
+    let mut st = c.prepare(&format!("SELECT k.category_id, s.kind, s.id, count(DISTINCT k.chunk_id) FROM chunk_topics k JOIN scopes s ON s.chunk_id = k.chunk_id {sc} GROUP BY 1, 2, 3"))?;
+    for row in st.query_map(rusqlite::params_from_iter(sp.iter()), |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?)))? {
+        let (id, kind, sid, n) = row?;
+        if kind == "thread" {
+            out.threads.entry(id).or_default().insert(sid);
+        } else {
+            out.clients.entry(id).or_default().insert(sid, n);
+        }
+    }
+    let mut st = c.prepare(&format!(
+        "SELECT k.category_id, b.category_id, count(DISTINCT k.chunk_id) FROM chunk_topics k JOIN chunk_topics b ON b.chunk_id = k.chunk_id AND b.kind = 'intent_l1'
+         {} k.kind = 'term' GROUP BY 1, 2",
+        if sc.is_empty() { "WHERE" } else { "WHERE EXISTS (SELECT 1 FROM scopes x WHERE x.chunk_id = k.chunk_id AND x.kind = ?1 AND x.id = ?2) AND" }
+    ))?;
+    for row in st.query_map(rusqlite::params_from_iter(sp.iter()), |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?)))? {
+        out.together.push(row?);
+    }
+    Ok(out)
+}
+
+/// A store's stats in a scope (`store::kept`).
+pub fn stats(scope: store::Scope) -> Result<std::sync::Arc<Stats>> {
+    let path = super::store_path();
+    let owned: Option<(String, String)> = scope.map(|(k, v)| (k.to_string(), v.to_string()));
+    store::kept(format!("stats|{}|{scope:?}", path.display()), store::changed_stamp(&path), move || {
+        stats_of(&store::open(&path)?, owned.as_ref().map(|(k, v)| (k.as_str(), v.as_str())))
+    })
+}
+
+/// Every layer's drift (`store::kept`: it reads every verdict since each build).
+fn drift_kept(t: &Taxonomy, snoozed: &Value) -> Result<std::sync::Arc<Vec<Value>>> {
+    let path = super::store_path();
+    let fp = format!("{}|{}|{}", store::changed_stamp(&path), t.version, snoozed);
+    let (t, snoozed) = (t.clone(), snoozed.clone());
+    store::kept(format!("drift|{}", path.display()), fp, move || drift_in(&store::open(&path)?, &t, &snoozed))
+}
+
+fn coverage_kept() -> Result<std::sync::Arc<Value>> {
+    let path = super::store_path();
+    store::kept(format!("coverage|{}", path.display()), store::changed_stamp(&path), move || coverage(&store::open(&path)?))
+}
+
 /// The taxonomy as the window and MCP show it.
 pub fn view() -> Result<Value> {
     view_in(None)
@@ -1531,25 +1784,12 @@ fn scope_layers(t: &Taxonomy, scope: store::Scope) -> Option<BTreeSet<String>> {
 /// clients and threads where it comes up (`-`: calls in none); a scope sees the shared layer and its client's.
 pub fn view_in(scope: store::Scope) -> Result<Value> {
     let Some(t) = current() else { return Ok(json!({"exists": false})) };
-    let c = store::open(&super::store_path())?;
-    let mut counts: BTreeMap<String, (i64, BTreeSet<String>, BTreeSet<String>)> = BTreeMap::new();
-    let in_scope: Option<BTreeSet<i64>> = match scope {
-        Some((k, v)) => Some(c.prepare("SELECT chunk_id FROM scopes WHERE kind = ?1 AND id = ?2")?.query_map(params![k, v], |r| r.get(0))?.collect::<Result<_, _>>()?),
-        None => None,
+    let st = stats(scope)?;
+    let all = if scope.is_some() { stats(None)? } else { st.clone() };
+    let empty = BTreeSet::new();
+    let count = |id: &str| -> (i64, BTreeSet<String>, BTreeSet<String>) {
+        (st.sections.get(id).copied().unwrap_or(0), st.threads.get(id).unwrap_or(&empty).clone(), st.clients.get(id).map(|m| m.keys().cloned().collect()).unwrap_or_default())
     };
-    let mut st = c.prepare("SELECT k.chunk_id, k.category_id, s.kind, s.id FROM chunk_topics k JOIN scopes s ON s.chunk_id = k.chunk_id")?;
-    let mut seen: BTreeSet<(i64, String)> = BTreeSet::new();
-    for row in st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?)))? {
-        let (cid, id, kind, sid) = row?;
-        if in_scope.as_ref().is_some_and(|s| !s.contains(&cid)) {
-            continue;
-        }
-        let e = counts.entry(id.clone()).or_default();
-        if seen.insert((cid, id)) {
-            e.0 += 1;
-        }
-        if kind == "thread" { e.1.insert(sid) } else { e.2.insert(sid) };
-    }
     let layers = scope_layers(&t, scope);
     let visible = |l: &String| layers.as_ref().is_none_or(|s| s.contains(l));
     // Only in closed threads' sections (#55): the archive — listed apart, out of transcription hints; still resolved.
@@ -1560,16 +1800,16 @@ pub fn view_in(scope: store::Scope) -> Result<Value> {
         }
         Value::Array(th.iter().filter_map(|t| closed.get(t).cloned()).collect())
     };
-    // Which topics a term comes up in, and a topic's terms: sections they share (no model).
-    let mut together: Vec<(String, String, i64)> = vec![];
-    {
-        let mut st = c.prepare("SELECT a.category_id, b.category_id, count(DISTINCT a.chunk_id) FROM chunk_topics a JOIN chunk_topics b ON b.chunk_id = a.chunk_id AND b.kind = 'intent_l1' WHERE a.kind = 'term' GROUP BY 1, 2")?;
-        for row in st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?)))? {
-            together.push(row?);
-        }
-    }
+    let together = &st.together;
     let label_of: BTreeMap<String, String> = t.topics.iter().map(|x| (topic_id(&x.layer, &x.label), x.label.clone())).collect();
     let name_of: BTreeMap<String, String> = t.terms.iter().map(|x| (term_id(&x.layer, &x.name), x.name.clone())).collect();
+    // Indexed both ways (tens of thousands of terms: never a scan of every pair for each).
+    let mut by_topic: BTreeMap<&str, Vec<(String, i64)>> = BTreeMap::new();
+    let mut by_term: BTreeMap<&str, Vec<(String, i64)>> = BTreeMap::new();
+    for (tm, tp, n) in together {
+        by_topic.entry(tp.as_str()).or_default().push((tm.clone(), *n));
+        by_term.entry(tm.as_str()).or_default().push((tp.clone(), *n));
+    }
     let top = |rows: Vec<(String, i64)>, names: &BTreeMap<String, String>, k: usize| -> Vec<Value> {
         let mut rows: Vec<(String, i64)> = rows.into_iter().filter(|(id, _)| names.contains_key(id)).collect();
         rows.sort_by_key(|r| std::cmp::Reverse(r.1));
@@ -1581,9 +1821,9 @@ pub fn view_in(scope: store::Scope) -> Result<Value> {
         .filter(|x| visible(&x.layer))
         .map(|x| {
             let id = topic_id(&x.layer, &x.label);
-            let (n, th, cl) = counts.get(&id).cloned().unwrap_or_default();
+            let (n, th, cl) = count(&id);
             let parent = parent_of(&t, x);
-            let terms = top(together.iter().filter(|(_, tp, _)| *tp == id).map(|(tm, _, n)| (tm.clone(), *n)).collect(), &name_of, 6);
+            let terms = top(by_topic.get(id.as_str()).cloned().unwrap_or_default(), &name_of, 6);
             json!({"id": id, "layer": x.layer, "label": x.label, "level": x.level, "parent": x.parent, "parent_id": parent.map(|p| topic_id(&p.layer, &p.label)), "parent_layer": parent.map(|p| &p.layer),
                    "description": x.description, "synonyms": x.synonyms, "sections": n, "archived": archived(&th), "threads": th, "clients": cl, "terms": terms})
         })
@@ -1594,9 +1834,9 @@ pub fn view_in(scope: store::Scope) -> Result<Value> {
         .filter(|x| visible(&x.layer))
         .map(|x| {
             let id = term_id(&x.layer, &x.name);
-            let (n, mut th, cl) = counts.get(&id).cloned().unwrap_or_default();
+            let (n, mut th, cl) = count(&id);
             th.extend(x.threads.iter().cloned());
-            let topics = top(together.iter().filter(|(tm, _, _)| *tm == id).map(|(_, tp, n)| (tp.clone(), *n)).collect(), &label_of, 3);
+            let topics = top(by_term.get(id.as_str()).cloned().unwrap_or_default(), &label_of, 3);
             json!({"id": id, "layer": x.layer, "name": x.name, "kind": x.kind, "group": x.group(), "group_set": !x.group.is_empty(), "synonyms": x.synonyms, "variants": x.variants,
                    "description": x.description, "pinned": x.threads, "always": x.always, "learned": x.learned.is_some() || x.kind == "learned", "sections": n,
                    "archived": if x.always { Value::Null } else { archived(&th) }, "threads": th, "clients": cl, "topics": topics})
@@ -1611,15 +1851,15 @@ pub fn view_in(scope: store::Scope) -> Result<Value> {
     // Each layer's drift (out of date or not), for its banner.
     let snoozed: Value = std::fs::read(drift_file()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or(json!({}));
     let mut lv = lv;
-    if let Ok(d) = drift_in(&c, &t, &snoozed) {
+    if let Ok(d) = drift_kept(&t, &snoozed) {
         for x in lv.iter_mut() {
             x["drift"] = d.iter().find(|y| y["layer"] == x["id"]).cloned().unwrap_or(Value::Null);
         }
     }
-    let moves = moves_in(&c, &t, &dismissed_moves()).unwrap_or_default();
+    let moves = moves_in(&all, &t, &dismissed_moves());
     Ok(json!({"exists": true, "version": t.version, "provisional": t.provisional(), "layers": lv, "scope": scope.map(|s| json!({"kind": s.0, "id": s.1})), "moves": moves,
               "groups": GROUPS.iter().map(|(k, l)| json!({"id": k, "label": l})).collect::<Vec<_>>(),
-              "topics": topics, "terms": terms, "coverage": coverage(&c)?, "review_flags": t.review_flags, "history": t.history}))
+              "topics": topics, "terms": terms, "coverage": coverage_kept()?.as_ref().clone(), "review_flags": t.review_flags, "history": t.history}))
 }
 
 /// The terms that hint a call's transcription: pinned to its threads, always-on ones, and its clients'
@@ -2100,12 +2340,12 @@ mod tests {
             c.execute("INSERT INTO scopes(chunk_id, kind, id) VALUES (?1, 'client', 'globex')", [i]).unwrap();
             c.execute("INSERT INTO chunk_topics VALUES (?1, 'data', 'Data', 'intent_l1')", [i]).unwrap();
         }
-        let m = moves_in(&c, &t, &BTreeSet::new()).unwrap();
+        let m = moves_in(&stats_of(&c, None).unwrap(), &t, &BTreeSet::new());
         let up = m.iter().find(|x| x["dir"] == "up").unwrap();
         assert_eq!(up["topics"].as_array().unwrap().len(), 2);
         let down = m.iter().find(|x| x["dir"] == "down").unwrap();
         assert_eq!((down["label"].as_str(), down["to"].as_str()), (Some("Data"), Some("globex")));
-        assert!(moves_in(&c, &t, &[down["key"].as_str().unwrap().to_string()].into()).unwrap().iter().all(|x| x["dir"] != "down"), "kept where it is");
+        assert!(moves_in(&stats_of(&c, None).unwrap(), &t, &[down["key"].as_str().unwrap().to_string()].into()).iter().all(|x| x["dir"] != "down"), "kept where it is");
         // Done: up — one practice topic, the other merged in as a synonym of it; down — Globex's, its tags kept.
         save(t, json!({"op": "test"})).unwrap();
         apply_move(up["key"].as_str().unwrap()).unwrap();
@@ -2119,11 +2359,65 @@ mod tests {
         c.execute("INSERT INTO chunks(id, source, ord, status, title, text) VALUES (99, 'call/a', 99, 'ACTIVE', '', '')", []).unwrap();
         c.execute("INSERT INTO scopes(chunk_id, kind, id) VALUES (99, 'client', 'acme')", []).unwrap();
         c.execute("INSERT INTO chunk_topics VALUES (99, 'globex__data', 'Data', 'intent_l1')", []).unwrap();
-        build_graph(&c, &t).unwrap();
+        build_graph(&c, &t, None).unwrap();
         assert_eq!(n("globex__data"), 12);
         // Renamed: the old label stays a synonym.
         let t = edit(&json!({"op": "rename", "label": "Commercials", "layer": SHARED, "to": "Commercial terms"})).unwrap();
         assert!(t.topics.iter().any(|x| x.label == "Commercial terms" && x.synonyms == ["Commercials"]));
+    }
+
+    #[test]
+    fn mentions_follow_edits_and_syncs_as_a_full_recount_would() {
+        let (_env, _root) = crate::paths::testenv::folders("brain-mentions");
+        let path = super::super::store_path();
+        let doc = |source: &str, client: &str, md: &str| -> store::Input {
+            let s = source.to_string();
+            store::Input { source: s.clone(), kind: "call".into(), title: s.clone(), event_date: Some("2026-10-28".into()), md: md.into(),
+                refs: json!({"threads": [{"id": format!("{client}-t"), "client": client}]}), link: Box::new(move |_| s.clone()), speaker: Box::new(|_| None) }
+        };
+        let docs = |four: &str| vec![
+            doc("call/1", "acme", "## A\nThe merchant portal launch is on Friday.\n"),
+            doc("call/2", "globex", "## B\nPilot desk review with the ops team.\n"),
+            doc("call/3", "acme", "## C\nThe pilot desk and the (MERCHANT PORTAL) share a login.\n"),
+            doc("call/4", "acme", four),
+        ];
+        store::sync(&path, docs("## D\nPortal merchants, not the product.\n"), None).unwrap();
+        let term = |layer: &str, name: &str, variants: &[&str]| Term { layer: layer.into(), name: name.into(), kind: "product".into(), variants: variants.iter().map(|v| v.to_string()).collect(), ..Default::default() };
+        let mut t = Taxonomy::default();
+        for l in [SHARED, "acme", "globex"] {
+            t.layers.insert(l.into(), Layer { name: l.into(), ..Default::default() });
+        }
+        t.terms = vec![term(SHARED, "Merchant portal", &[]), term("acme", "Pilot desk", &[]), term("globex", "Pilot desk", &[]), term(SHARED, "Ledger", &[])];
+        save(t, json!({"op": "test"})).unwrap();
+        let c = store::open(&path).unwrap();
+        let tags = || -> BTreeSet<(String, String)> {
+            c.prepare("SELECT ch.source, k.category_id FROM chunk_topics k JOIN chunks ch ON ch.id = k.chunk_id WHERE k.kind = 'term'").unwrap()
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(|x| x.unwrap()).collect()
+        };
+        let full = || -> BTreeSet<(String, String)> {
+            let before = tags();
+            mentions(&c, &current().unwrap()).unwrap();
+            let all = tags();
+            assert_eq!(before, all, "what was kept up as it went = a full recount");
+            all
+        };
+        let s = |a: &str, b: &str| (a.to_string(), b.to_string());
+        // Whole words, any case and punctuation; a client's term only in its client's sections.
+        assert_eq!(full(), [s("call/1", "term__merchant_portal"), s("call/3", "term__merchant_portal"), s("call/3", "term__acme__pilot_desk"), s("call/2", "term__globex__pilot_desk")].into());
+        // An edit: a new spelling finds more; only that term is read again.
+        edit(&json!({"op": "set", "term": true, "name": "Ledger", "layer": SHARED, "variants": ["login"]})).unwrap();
+        assert!(full().contains(&s("call/3", "term__ledger")));
+        // A merge: the merged term's mentions are the other's now.
+        edit(&json!({"op": "merge", "term": true, "name": "Ledger", "layer": SHARED, "into": "Merchant portal"})).unwrap();
+        let after = full();
+        assert!(!after.iter().any(|x| x.1 == "term__ledger") && after.contains(&s("call/3", "term__merchant_portal")));
+        // A sync that changes one section: only it is read again.
+        store::sync(&path, docs("## D\nThe merchant portal again.\n"), None).unwrap();
+        assert_eq!(mentions_changed(&c, &current().unwrap()).unwrap(), 1, "only the changed section");
+        assert!(full().contains(&s("call/4", "term__merchant_portal")));
+        // A term removed takes its mentions with it.
+        edit(&json!({"op": "remove", "term": true, "name": "Pilot desk", "layer": "globex"})).unwrap();
+        assert!(!full().iter().any(|x| x.1 == "term__globex__pilot_desk"));
     }
 
     #[test]
@@ -2338,7 +2632,7 @@ mod tests {
         let mut t = Taxonomy::default();
         t.layers.insert("acme".into(), Layer { name: "Acme".into(), ..Default::default() });
         t.topics = vec![Topic { layer: SHARED.into(), label: "Agentic delivery".into(), level: 1, ..Default::default() }, Topic { layer: "acme".into(), label: "Agentic delivery".into(), level: 1, ..Default::default() }];
-        let m = moves_in(&c, &t, &BTreeSet::new()).unwrap();
+        let m = moves_in(&stats_of(&c, None).unwrap(), &t, &BTreeSet::new());
         let up = m.iter().find(|x| x["dir"] == "up").expect("offered");
         assert!(up["why"].as_str().unwrap().starts_with("your practice has it already"), "{up}");
     }

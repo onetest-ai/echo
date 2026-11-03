@@ -5,7 +5,9 @@
 
 const $ = (sel, root = document) => root.querySelector(sel)
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
-const send = (msg) => window.ipc && window.ipc.postMessage(JSON.stringify(msg))
+// The window's IPC; in a browser against `echoctl window --serve` (dev, ECHOCTL_SERVE_IPC=1) the same message is posted.
+const send = (msg) => window.ipc ? window.ipc.postMessage(JSON.stringify(msg))
+  : location.protocol === 'http:' && location.hostname === '127.0.0.1' ? fetch('ipc', { method: 'POST', body: JSON.stringify(msg) }).catch(() => {}) : undefined
 const get = async (path) => {
   const r = await fetch(path)
   if (!r.ok) throw new Error(`${r.status} ${path}`)
@@ -3473,12 +3475,12 @@ function loadSourceState(force) {
 }
 /** A folder's files in a few words: read, waiting for the page reader, not read. */
 function folderSummary(root) {
-  const fs = ((m365.files || {})[root]) || []
-  if (!fs.length) return { line: 'Not read yet', n: 0 }
-  const by = (st) => fs.filter((f) => f.status === st).length
-  const read = by('indexed') + by('pending'), pending = fs.filter((f) => f.status === 'pending').reduce((n, f) => n + ((f.flagged || 0) - (f.read || 0)), 0)
-  const not = fs.length - read, err = by('error')
-  return { line: [`${read} file${read === 1 ? '' : 's'} read`, pending ? `${pending} page${pending === 1 ? '' : 's'} to read from their images` : '', not ? `${not} not read (${[by('twin') ? `${by('twin')} twin${by('twin') === 1 ? '' : 's'}` : '', by('skipped') ? `${by('skipped')} skipped` : '', by('unsupported') ? `${by('unsupported')} other formats` : '', err ? `${err} couldn't be read` : ''].filter(Boolean).join(', ')})` : ''].filter(Boolean).join(' · '), n: fs.length, err }
+  const fs = ((m365.files || {})[root]) || { n: 0 }
+  if (!fs.n) return { line: 'Not read yet', n: 0 }
+  const by = (st) => (fs.by_status || {})[st] || 0
+  const read = by('indexed') + by('pending'), pending = fs.pending_pages || 0
+  const not = fs.n - read, err = by('error')
+  return { line: [`${read} file${read === 1 ? '' : 's'} read`, pending ? `${pending} page${pending === 1 ? '' : 's'} to read from their images` : '', not ? `${not} not read (${[by('twin') ? `${by('twin')} twin${by('twin') === 1 ? '' : 's'}` : '', by('skipped') ? `${by('skipped')} skipped` : '', by('unsupported') ? `${by('unsupported')} other formats` : '', err ? `${err} couldn't be read` : ''].filter(Boolean).join(', ')})` : ''].filter(Boolean).join(' · '), n: fs.n, err }
 }
 function sourceLabel(x) {
   if (x.kind === 'mail') return x.id.startsWith('person:') ? `mail with ${x.id.slice(7)}` : `mail with ${x.id.replace(/^domain:/, '')}`
@@ -4310,7 +4312,10 @@ const brainQuery = () => { const [k, v] = (S.br.scope || '').split(':'); return 
 async function loadBrain() {
   const q = brainQuery()
   try { const d = await get('api/brain' + q); d.q = q; S.br.data = d } catch { /* app restarting */ }
-  if (S.br.tab === 'graph') { try { const g = await get('api/brain/graph' + q); g.q = q; S.br.graph = g } catch { /* app restarting */ } }
+  if (S.br.tab === 'graph' && (!S.br.graph || S.br.graph.q !== q)) { try { const g = await get('api/brain/browse/graph' + q); g.q = q; S.br.graph = g; S.br.gsets = [] } catch { /* app restarting */ } }
+  // Sources and the dictionary read their pages again (a sync or an edit changed them).
+  if (S.br.tab === 'sources' && S.br.src && S.br.src.key === q) { S.br.src.groups = null; S.br.src.lists = {} }
+  if (S.br.tab === 'terms' && S.br.dict) { S.br.dict.head = null; S.br.dict.lists = {} }
   if (S.br.tab === 'numbers') { try { S.br.numbers = await get('api/brain/numbers') } catch { /* app restarting */ } }
   if (S.br.tab === 'people') await loadBrainPeople()
   if (S.br.node) await loadBrainNode()
@@ -4327,12 +4332,12 @@ function brainView() {
   if (d.error) return `<div class="br"><p class="error">${esc(d.error)}</p></div>`
   const st = d.status || {}, tx = d.taxonomy || {}, sc = d.scopes || { clients: [], threads: [] }
   const scopeSel = `<label class="fchip${S.br.scope ? ' on' : ''}">${esc(S.br.scope ? (S.br.scope.startsWith('client:') ? clientName(S.br.scope.slice(7)) : ((projById(S.br.scope.slice(7)) || {}).name || 'In no thread')) : 'Everything')} ▾<select data-br-scope aria-label="Scope"><option value="">Everything</option><optgroup label="Clients">${sc.clients.map((c) => `<option value="client:${esc(c.id)}"${S.br.scope === `client:${c.id}` ? ' selected' : ''}>${esc(c.name)} · ${c.documents}</option>`).join('')}</optgroup><optgroup label="Threads">${sc.threads.map((t) => `<option value="thread:${esc(t.id)}"${S.br.scope === `thread:${t.id}` ? ' selected' : ''}>${esc(t.name)} · ${t.documents}</option>`).join('')}</optgroup></select></label>`
-  const n = { topics: (tx.topics || []).length, terms: (tx.terms || []).length, sources: (d.documents || []).length }
-  const tabs = BRAIN_TABS.map(([id, l]) => `<button class="tab" role="tab" data-br-tab="${id}" aria-selected="${S.br.tab === id}">${l}${n[id] ? `<span class="n">${n[id]}</span>` : ''}</button>`).join('')
-  const sub = st.exists ? `${st.documents} sources · ${st.chunks} sections${st.embed_model ? ` · meaning by ${esc(st.embed_model)}` : ' · words only (no embedding server)'}` : 'Empty — it fills as your calls are synced'
+  const n = { topics: (tx.topics || []).length, terms: tx.terms_n || 0, sources: st.documents || 0 }
+  const tabs = BRAIN_TABS.map(([id, l]) => `<button class="tab" role="tab" data-br-tab="${id}" aria-selected="${S.br.tab === id}">${l}${n[id] ? `<span class="n">${nf(n[id])}</span>` : ''}</button>`).join('')
+  const sub = st.exists ? `${nf(st.documents)} sources · ${nf(st.chunks)} sections${st.embed_model ? ` · meaning by ${esc(st.embed_model)}` : ' · words only (no embedding server)'}` : 'Empty — it fills as your calls are synced'
   const head = `<header class="pj-head br-head"><div class="br-title"><h2>Brain</h2><span class="tk-sub">${sub}</span><span class="grow"></span>${scopeSel}<button class="btn ghost" data-go="settings" title="Settings → Brain">Settings</button></div><div class="tabs" role="tablist">${tabs}</div></header>`
-  const body = S.br.tab === 'terms' ? brainTerms(tx) : S.br.tab === 'sources' ? brainSources(d) : S.br.tab === 'numbers' ? brainNumbers() : S.br.tab === 'coverage' ? brainCoverage(tx) : S.br.tab === 'graph' ? brainGraph() : S.br.tab === 'people' ? brainPeople() : brainTopics(tx)
-  return `<div class="br">${head}<div class="pane pj-pane wide br-pane">${body}</div></div>`
+  const body = S.br.tab === 'terms' ? brainTerms(tx) : S.br.tab === 'sources' ? brainSources() : S.br.tab === 'numbers' ? brainNumbers() : S.br.tab === 'coverage' ? brainCoverage(tx) : S.br.tab === 'graph' ? brainGraph() : S.br.tab === 'people' ? brainPeople() : brainTopics(tx)
+  return `<div class="br">${head}<div class="pane pj-pane wide br-pane" data-keep-scroll>${body}</div></div>`
 }
 function brainTopics(tx) {
   if (!tx.exists) return `<div class="wk-empty"><b>No topics yet</b><p>Claude builds them from your calls — your practice, and each client's own — and you review them here. <code>echoctl brain taxonomy build</code></p></div>`
@@ -4404,24 +4409,53 @@ function brainTopics(tx) {
   return `${top}${builds}${mv ? `<div class="br-mvs">${mv}</div>` : ''}${practice.length ? `<section class="br-layer"><div class="br-lh"><span class="cap">Your practice</span><span class="set-sub">one tree for every client: their topics sit under the practice's where they fit</span></div>${tree}</section>` : ''}${only}${arch}` || '<p class="set-sub">Nothing in this scope.</p>'
 }
 /** The dictionary (the Terms tab): every term — named things: organisations, products, initiatives… — by
- *  group, A–Z within it; a search over its name, other names and spellings; each with what it is, whose it
- *  is (the practice, or a client), the topics it comes up in and how often. A click opens it to edit. */
+ *  group, each group closed until opened, then A–Z 50 at a time (a letter jumps); a search over its name,
+ *  other names and spellings lists the matches across groups. A click opens it to edit. Tens of thousands of
+ *  terms: the app sends a page at a time (`browse::terms`). */
+function termsState() {
+  const key = brainQuery() + '|' + ((S.br.data || {}).taxonomy || {}).version
+  if (!S.br.dict || S.br.dict.key !== key) S.br.dict = { key, head: null, open: new Set(), lists: {}, q: S.br.dict ? S.br.dict.q : '' }
+  return S.br.dict
+}
+const termById = new Map()
+async function loadTermsHead() {
+  const s = termsState(), key = s.key
+  if (s.loadingHead || s.head) return
+  s.loadingHead = true
+  try { const h = await get('api/brain/browse/terms?limit=1' + brainQuery().replace('?', '&')); if (termsState().key === key) s.head = h } catch { /* app restarting */ }
+  s.loadingHead = false
+  render()
+}
+/** A group's page (`g|<group>`, from `letter`) or the search (`q`); `more` adds the next 50. */
+async function loadDictTerms(k, more, letter) {
+  const s = termsState(), cur = s.lists[k]
+  if (cur && cur.loading) return
+  const p = new URLSearchParams({ limit: '50' })
+  if (k === 'q') p.set('q', s.q)
+  else p.set('group', k.slice(2))
+  const from = letter !== undefined ? letter : cur ? cur.letter : ''
+  if (from) p.set('letter', from)
+  const offset = more && cur ? cur.items.length : 0
+  if (offset) p.set('offset', String(offset))
+  s.lists[k] = { ...(cur || { items: [] }), letter: from, loading: true }
+  if (!more) s.lists[k].items = []
+  render()
+  const asked = s.q
+  try {
+    const r = await get(`api/brain/browse/terms?${qs(p)}${brainQuery().replace('?', '&')}`)
+    if (termsState() !== s || (k === 'q' && s.q !== asked)) return
+    for (const x of r.items || []) termById.set(x.id, x)
+    s.lists[k] = { items: (more && cur ? cur.items : []).concat(r.items || []), letters: r.letters || {}, more: r.more || 0, matches: r.matches || 0, letter: from, loading: false }
+  } catch (e) { s.lists[k] = { items: [], loading: false, error: String(e) } }
+  render()
+}
 function brainTerms(tx) {
   if (!tx.exists) return '<p class="set-sub">No terms yet: they come with the topics.</p>'
+  const s = termsState()
+  if (!s.head) { setTimeout(loadTermsHead, 0); return `<div class="skeleton" style="padding:20px">${'<i></i>'.repeat(5)}</div>` }
   const layers = tx.layers || []
   const lname = (id) => id === 'shared' ? 'Practice' : ((layers.find((l) => l.id === id) || {}).name || id)
   const lcolor = (id) => { const i = layers.filter((l) => l.id !== 'shared').findIndex((l) => l.id === id); return i < 0 ? '#8a8a95' : CLIENT_COLORS[i % CLIENT_COLORS.length] }
-  const q = (S.br.tq || '').trim().toLowerCase()
-  const hit = (x) => !q || [x.name, ...(x.synonyms || []), ...(x.variants || []), x.description, x.kind].join(' ').toLowerCase().includes(q)
-  // A term mentioned only in closed threads is the archive (#55): its own folded group, still found by the box.
-  const found = (tx.terms || []).filter(hit)
-  const all = found.filter((t) => !t.archived)
-  const old = found.filter((t) => t.archived).sort((a, b) => a.name.localeCompare(b.name))
-  const g = S.br.tg || ''
-  const groups = (tx.groups || []).map((x) => ({ ...x, n: all.filter((t) => t.group === x.id).length })).filter((x) => x.n)
-  const shown = all.filter((t) => !g || t.group === g).sort((a, b) => a.name.localeCompare(b.name))
-  const chips = `<div class="dict-groups"><button class="fchip${!g ? ' on' : ''}" data-dict-group="">All · ${all.length}</button>${groups.map((x) => `<button class="fchip${g === x.id ? ' on' : ''}" data-dict-group="${esc(x.id)}">${esc(x.label)} · ${x.n}</button>`).join('')}</div>`
-  const box = `<input class="wp-in br-pq" id="dict-q" type="search" placeholder="Find a term — its name, another name, a spelling" value="${esc(S.br.tq || '')}" aria-label="Find a term">`
   const entry = (x) => {
     const names = (x.synonyms || []).length ? `<span class="dict-aka">also ${esc(x.synonyms.join(', '))}</span>` : ''
     const flags = [x.always ? '<span class="br-pin" title="Hints every call’s transcription">∞</span>' : '', (x.pinned || []).length ? '<span class="br-pin" title="Pinned to a thread: hints its calls’ transcription">📌</span>' : '', x.learned ? '<span class="dict-flag" title="Learned from the minutes">learned</span>' : ''].join('')
@@ -4429,11 +4463,58 @@ function brainTerms(tx) {
     const was = (x.archived || []).map((t) => `<span class="chip closed">${esc(closedLabel(t))}</span>`).join('')
     return `<button class="dict-e${S.br.node === x.id ? ' on' : ''}${x.archived ? ' closed' : ''}" data-br-node="${esc(x.id)}"><span class="dict-h"><b>${esc(x.name)}</b> <span class="br-cl" style="--c:${lcolor(x.layer)}">${esc(lname(x.layer))}</span> <span class="set-sub">${esc(x.kind || '')}</span>${flags}${was}<span class="grow"></span><span class="br-n" title="Sections that mention it">${x.sections || 0}</span></span>${names}${x.description ? `<span class="dict-d">${esc(x.description)}</span>` : ''}${tps ? `<span class="dict-tps">${tps}</span>` : ''}</button>`
   }
-  const arch = archiveGroup('Closed threads', old.map(entry), "out of transcription hints and Claude's current list · search and spellings still resolve them")
-  const body = !shown.length ? (old.length ? '' : `<p class="set-sub">${q ? 'Nothing matches.' : 'No terms here.'}</p>`)
-    : g ? `<div class="dict-list">${shown.map(entry).join('')}</div>`
-    : groups.map((x) => `<section class="br-layer"><div class="br-lh"><span class="cap">${esc(x.label)}</span><span class="set-sub">${x.n}</span></div><div class="dict-list">${shown.filter((t) => t.group === x.id).map(entry).join('')}</div></section>`).join('')
-  return `<div class="br-graph-bar">${box}<span class="grow"></span></div>${chips}${body}${arch}<p class="set-foot">A term is a named thing: its name, its other names (what search and Claude take for it) and its spellings (how it is written or misheard — they hint transcription). Merge two that are one thing; split off a name that is a thing of its own.</p>`
+  const list = (k) => {
+    const l = s.lists[k]
+    if (!l || (l.loading && !l.items.length)) return '<div class="bs-wait">Loading…</div>'
+    if (l.error) return `<div class="bs-wait error">${esc(l.error)}</div>`
+    const az = k === 'q' ? '' : `<div class="dict-az">${Object.entries(l.letters || {}).map(([ch, n]) => `<button class="${l.letter === ch ? 'on' : ''}" data-dict-letter="${esc(ch)}" data-dict-in="${esc(k)}" title="${n} term${n === 1 ? '' : 's'}">${esc(ch)}</button>`).join('')}${l.letter ? `<button data-dict-letter="" data-dict-in="${esc(k)}">All</button>` : ''}</div>`
+    const rows = l.items.length ? `<div class="dict-list">${l.items.map(entry).join('')}</div>` : '<div class="bs-wait">Nothing here.</div>'
+    const more = l.more > 0 ? `<button class="bs-more" data-dict-more="${esc(k)}"${l.loading ? ' disabled' : ''}>${l.loading ? 'Loading…' : `Show ${Math.min(50, l.more)} more${l.letter ? ` in ${esc(l.letter)}–Z` : ''} · ${nf(l.more)} left`}</button>` : ''
+    return az + rows + more
+  }
+  const box = `<input class="wp-in br-pq" id="dict-q" type="search" placeholder="Find a term — its name, another name, a spelling" value="${esc(s.q)}" aria-label="Find a term">`
+  const groups = s.head.groups || {}
+  const sub = `<span class="set-sub">${nf(s.head.current)} terms · ${Object.keys(groups).length} groups</span>`
+  const foot = '<p class="set-foot">A term is a named thing: its name, its other names (what search and Claude take for it) and its spellings (how it is written or misheard — they hint transcription). Merge two that are one thing; split off a name that is a thing of its own.</p>'
+  if (s.q.trim()) {
+    if (!s.lists.q) setTimeout(() => loadDictTerms('q'), 0)
+    const l = s.lists.q
+    return `<div class="br-graph-bar">${box}${sub}</div><div class="bs-acc"><div class="bs-h static"><b>${l && !l.loading ? `${nf(l.matches)} match${l.matches === 1 ? '' : 'es'}` : 'Searching…'}</b><span class="n">every group, A–Z</span></div><div class="bs-body pad">${list('q')}</div></div>${foot}`
+  }
+  const label = Object.fromEntries((tx.groups || []).map((g) => [g.id, g.label]))
+  const order = (tx.groups || []).map((g) => g.id).filter((id) => groups[id]).concat(Object.keys(groups).filter((id) => !label[id]))
+  const acc = (id, title, n, note) => {
+    const k = `g|${id}`, open = s.open.has(k)
+    return `<div class="bs-acc"><button class="bs-h" data-dict-toggle="${esc(k)}" aria-expanded="${open}"><span class="ch">${open ? '▾' : '▸'}</span><b>${esc(title)}</b>${note ? `<span class="n">${esc(note)}</span>` : ''}<span class="grow"></span><span class="n">${nf(n)}</span></button>${open ? `<div class="bs-body pad">${list(k)}</div>` : ''}</div>`
+  }
+  const accs = order.map((id) => acc(id, label[id] || id, groups[id])).join('')
+  const closed = s.head.closed ? acc('closed', 'Closed threads', s.head.closed, "out of transcription hints and Claude's current list · search and spellings still resolve them") : ''
+  return `<div class="br-graph-bar">${box}${sub}</div>${accs}${closed}${foot}`
+}
+document.addEventListener('click', (e) => {
+  const t = e.target.closest && e.target.closest('[data-dict-toggle],[data-dict-more],[data-dict-letter]')
+  if (!t) return
+  const s = termsState(), d = t.dataset
+  if (d.dictMore) return loadDictTerms(d.dictMore, true)
+  if (d.dictLetter !== undefined) return loadDictTerms(d.dictIn, false, d.dictLetter)
+  const k = d.dictToggle
+  if (s.open.has(k)) s.open.delete(k)
+  else { s.open.add(k); if (!s.lists[k]) return loadDictTerms(k) }
+  render()
+})
+let dictTimer = null
+document.addEventListener('input', (e) => {
+  if (e.target.id !== 'dict-q') return
+  const s = termsState()
+  s.q = e.target.value
+  delete s.lists.q
+  clearTimeout(dictTimer)
+  dictTimer = setTimeout(render, 300)
+})
+/** A topic or a term by id: topics come with the overview, terms as their pages were read. */
+function brItem(id) {
+  const tx = (S.br.data || {}).taxonomy || {}
+  return (tx.topics || []).find((t) => t.id === id) || termById.get(id) || (tx.terms || []).find((t) => t.id === id) || null
 }
 /** A Brain section's source outside Echo (a Teams post, a mail): opened in its own app. */
 const extAttr = (link) => link && link.startsWith('echo://file/') ? `data-br-file="${esc(link.slice(12).split('?')[0])}" title="Open the document${link.includes('page=') ? ` (page ${esc(link.split('page=')[1])})` : ''}"`
@@ -4477,56 +4558,148 @@ document.addEventListener('click', (e) => {
   send({ cmd: 'brain_sender', client: b.dataset.client, key: b.dataset.key, decision: b.dataset.sender })
   setTimeout(() => loadSourceState(true), 400)
 })
-function brainSources(d) {
-  const senders = brainSenders()
-  const docs = d.documents || []
-  if (!docs.length) return senders + '<p class="set-sub">No sources in this scope yet.</p>'
-  const threads = (x) => threadChips((x.threads || []).map((t) => t.id).concat((x.threads || []).length ? [] : ['-']))
-  const row = (x, sub) => {
-    const call = x.link && x.link.startsWith('echo://call/') ? x.link.slice(12) : ''
-    const title = sub && x.channel && (x.title || '').startsWith(x.channel + ': ') ? x.title.slice(x.channel.length + 2) : (x.title || x.source)
-    const hist = x.history ? ' <span class="br-hist" title="Dated before its thread\'s history date: kept, searched only when history is asked for">history</span>' : ''
-    return `<tr${call ? ` data-call="${esc(call)}"` : ` ${extAttr(x.link)}`}${sub ? ' class="br-sub"' : ''}><td><span class="pp-who"><span class="br-kind">${kindMark(x)}</span>${sub ? esc(title) : `<b>${esc(title)}</b>`}${hist}</span></td><td>${x.date ? esc(relDay(x.date)) : ''}</td><td>${threads(x)}</td><td class="num">${x.sections}</td></tr>`
-  }
-  // A channel is one row (its posts, newest first, open under it); a folder too (every file in it,
-  // read or not, with why); calls and mail one row each.
+// ── the Brain's sources at scale (`brain/browse.rs`): tens of thousands, a piece at a time ─────────────────
+// Clients, each opening to its kinds, channels and folders; each of those to its newest 50 and "Show 50 more".
+// Everything starts closed; a search lists what matches across all of it. Nothing loads until it is opened.
+const SRC_KINDS = [['call', '▮', 'Calls'], ['mail', '✉', 'Mail'], ['channel', '#', 'Channels'], ['file', '▣', 'Folders']]
+const nf = (n) => Number(n || 0).toLocaleString()
+/** Query parameters as Echo reads them (`%20`, never `+`, for a space). */
+const qs = (p) => p.toString().replace(/\+/g, '%20')
+function srcState() {
+  const key = brainQuery()
+  if (!S.br.src || S.br.src.key !== key) S.br.src = { key, groups: null, open: new Set(), lists: {}, kind: S.br.src ? S.br.src.kind : '', q: '', search: null }
+  return S.br.src
+}
+async function loadSourceGroups(force) {
+  const s = srcState(), key = s.key
+  if (s.loadingGroups || (s.groups && !force)) return
+  s.loadingGroups = true
+  try { const g = await get('api/brain/browse/groups' + key); if (srcState().key === key) s.groups = g } catch { /* app restarting */ }
+  s.loadingGroups = false
+  render()
+}
+/** What a list key asks for: `k|client|kind`, `ch|client|channel`, `f|client|root`, `q` (the search). */
+function srcUrl(k, cursor) {
+  const s = srcState(), sc = s.key.replace('?', '&')
+  const [t, client, x] = k.split('|')
+  if (t === 'f') return `api/brain/browse/folder?root=${encodeURIComponent(x)}&offset=${cursor || 0}&limit=50`
+  const p = new URLSearchParams({ limit: '50' })
+  if (t === 'q') { p.set('q', s.q); if (s.kind) p.set('kind', s.kind) } else p.set('of', client)
+  if (t === 'k') p.set('kind', x)
+  if (t === 'ch') p.set('channel', x)
+  if (cursor) p.set('before', cursor)
+  return `api/brain/browse/sources?${qs(p)}${sc}`
+}
+async function loadSrcList(k, more) {
+  const s = srcState()
+  const cur = s.lists[k]
+  if (cur && cur.loading) return
+  const cursor = more && cur ? (k.startsWith('f|') ? cur.items.length : cur.next) : null
+  s.lists[k] = { ...(cur || { items: [] }), loading: true }
+  render()
+  const asked = s.q
+  try {
+    const r = await get(srcUrl(k, cursor))
+    if (srcState() !== s || (k === 'q' && s.q !== asked)) return
+    const items = (more && cur ? cur.items : []).concat(r.items || [])
+    s.lists[k] = { items, next: r.next || null, total: r.total || 0, loading: false, error: r.error }
+  } catch (e) { s.lists[k] = { ...(s.lists[k] || { items: [] }), loading: false, error: String(e) } }
+  render()
+}
+const SRC_STATUS = { indexed: 'read', pending: 'read · pages waiting for the page reader', twin: 'not read', skipped: 'not read', unsupported: 'not read', error: "couldn't be read", reading: 'reading…' }
+function srcRow(x, opts) {
+  const o = opts || {}
+  const call = x.link && x.link.startsWith('echo://call/') ? x.link.slice(12) : ''
+  const fileId = (x.source || '').startsWith('file/') ? x.source.slice(5) : ''
+  const title = o.channel && x.channel && (x.title || '').startsWith(x.channel + ': ') ? x.title.slice(x.channel.length + 2) : (x.title || x.source)
+  const hist = x.history ? ' <span class="br-hist" title="Dated before its thread\'s history date: kept, searched only when history is asked for">history</span>' : ''
+  const where = o.client ? `<span class="chip">${esc(clientName(x.client || '-'))}</span>` : ''
+  const open = call ? `data-call="${esc(call)}"` : fileId ? `data-br-file="${esc(fileId)}"` : extAttr(x.link)
+  return `<div class="bs-row" ${open}><span class="k">${kindMark(x)}</span><span class="t">${esc(title)}${hist}</span><span class="d">${x.date ? esc(relDay(x.date)) : ''}</span><span class="th">${where}${threadChips((x.threads || []).map((t) => t.id))}</span><span class="num">${x.sections || ''}</span></div>`
+}
+function fileRow(f) {
+  const read = f.status === 'indexed' || f.status === 'pending'
+  const why = [SRC_STATUS[f.status] || f.status, f.pages ? `${f.pages} page${f.pages === 1 ? '' : 's'}${f.flagged ? `, ${f.read || 0}/${f.flagged} read from images` : ''}` : '', f.fidelity && f.fidelity !== 'full' ? f.fidelity : '', f.reason || ''].filter(Boolean).join(' · ')
+  return `<div class="bs-row${read ? '' : ' off'}"${read ? ` data-br-file="${esc(f.id)}"` : ''}><span class="k">${read ? '▣' : '·'}</span><span class="t">${esc(f.rel)}<span class="set-sub br-why">${esc(why)}</span></span><span class="d">${f.date ? esc(relDay(f.date)) : ''}</span><span class="th"></span><span class="num"></span></div>`
+}
+/** A list's rows, its "Show 50 more · N left", or what it is waiting for. */
+function srcListBody(k, opts) {
+  const l = srcState().lists[k]
+  if (!l || (l.loading && !l.items.length)) return '<div class="bs-wait">Loading…</div>'
+  if (l.error) return `<div class="bs-wait error">${esc(l.error)}</div>`
+  if (!l.items.length) return '<div class="bs-wait">Nothing here.</div>'
+  const rows = l.items.map((x) => (k.startsWith('f|') ? fileRow(x) : srcRow(x, opts))).join('')
+  const left = l.total - l.items.length
+  const more = left > 0 ? `<button class="bs-more" data-bs-more="${esc(k)}"${l.loading ? ' disabled' : ''}>${l.loading ? 'Loading…' : `Show ${Math.min(50, left)} more · ${nf(left)} left`}</button>` : ''
+  return rows + more
+}
+function srcAcc(k, head, body, depth) {
+  const open = srcState().open.has(k)
+  return `<div class="bs-acc${depth ? ' sub' : ''}"><button class="bs-h" data-bs-toggle="${esc(k)}" aria-expanded="${open}"><span class="ch">${open ? '▾' : '▸'}</span>${head}</button>${open ? `<div class="bs-body">${body()}</div>` : ''}</div>`
+}
+function brainSources() {
+  const s = srcState()
+  if (!s.groups) { setTimeout(loadSourceGroups, 0); return `<div class="skeleton" style="padding:20px">${'<i></i>'.repeat(5)}</div>` }
   loadSourceState()
-  const out = [], seen = new Set()
-  const STATUS = { indexed: 'read', pending: 'read · pages waiting for the page reader', twin: 'not read', skipped: 'not read', unsupported: 'not read', error: "couldn't be read", reading: 'reading…' }
-  for (const x of docs) {
-    if (x.folder) {
-      if (seen.has('f:' + x.folder)) continue
-      seen.add('f:' + x.folder)
-      const files = ((m365.files || {})[x.folder]) || []
-      const open = S.br.openCh === 'f:' + x.folder
-      const name = x.folder.split(/[\\/]/).pop()
-      const fdocs = docs.filter((y) => y.folder === x.folder)
-      out.push(`<tr data-br-ch="${esc('f:' + x.folder)}" class="br-ch" title="${esc(x.folder)}"><td><span class="pp-who"><span class="br-kind">▣</span><b>${esc(name)}</b><span class="set-sub">${esc(folderSummary(x.folder).line)} ${open ? '▾' : '▸'}</span></span></td><td>${fdocs[0] && fdocs[0].date ? esc(relDay(fdocs[0].date)) : ''}</td><td>${threads(x)}</td><td class="num">${fdocs.reduce((n, y) => n + y.sections, 0)}</td></tr>`)
-      if (open) {
-        for (const f of files) {
-          const d = fdocs.find((y) => y.source === 'file/' + f.id)
-          const histTag = d && d.history ? ' <span class="br-hist">history</span>' : ''
-          const why = [STATUS[f.status] || f.status, f.pages ? `${f.pages} page${f.pages === 1 ? '' : 's'}${f.flagged ? `, ${f.read || 0}/${f.flagged} read from images` : ''}` : '', f.fidelity && f.fidelity !== 'full' ? f.fidelity : '', f.reason || ''].filter(Boolean).join(' · ')
-          out.push(`<tr class="br-sub${d ? '' : ' br-off'}"${d ? ` data-br-file="${esc(f.id)}"` : ''}><td><span class="pp-who"><span class="br-kind">${d ? '▣' : '·'}</span>${esc(f.rel)}${histTag}<span class="set-sub br-why">${esc(why)}</span></span></td><td>${f.date ? esc(relDay(f.date)) : ''}</td><td></td><td class="num">${d ? d.sections : ''}</td></tr>`)
-        }
-      }
-      continue
-    }
-    if (!x.channel) { out.push(row(x)); continue }
-    if (seen.has(x.channel)) continue
-    seen.add(x.channel)
-    const posts = docs.filter((y) => y.channel === x.channel)
-    const open = S.br.openCh === x.channel
-    out.push(`<tr data-br-ch="${esc(x.channel)}" class="br-ch"><td><span class="pp-who"><span class="br-kind">#</span><b>${esc(x.channel)}</b><span class="set-sub">${posts.length} post${posts.length === 1 ? '' : 's'} ${open ? '▾' : '▸'}</span></span></td><td>${x.date ? esc(relDay(x.date)) : ''}</td><td>${threads(x)}</td><td class="num">${posts.reduce((n, y) => n + y.sections, 0)}</td></tr>`)
-    if (open) posts.forEach((y) => out.push(row(y, true)))
+  const g = s.groups
+  if (g.error) return `<p class="error">${esc(g.error)}</p>`
+  const byKind = g.by_kind || {}
+  const chips = `<button class="fchip${!s.kind ? ' on' : ''}" data-bs-kind="">All <b>${nf(g.total)}</b></button>` + SRC_KINDS.filter(([k]) => byKind[k]).map(([k, m, l]) => `<button class="fchip${s.kind === k ? ' on' : ''}" data-bs-kind="${k}">${m} ${l} <b>${nf(byKind[k])}</b></button>`).join('')
+  const box = `<input class="wp-in br-pq" id="bs-q" type="search" placeholder="Find a source — title, sender, file" value="${esc(s.q)}" aria-label="Find a source">`
+  // Who may speak: one line, open for the senders and the decisions waiting.
+  const sd = ((m365.state || {}).senders || {}).clients || {}
+  const waiting = Object.values(sd).reduce((n, l) => n + (l.waiting || []).length + (l.unverified || []).length, 0)
+  const anySenders = Object.values(sd).some((l) => (l.waiting || []).length || (l.unverified || []).length || (l.trusted || []).length || (l.ignored || []).length)
+  const who = anySenders ? srcAcc('senders', `<b>Who may speak</b><span class="n">mail and posts are read only from you, colleagues and senders you trust</span><span class="grow"></span>${waiting ? `<span class="warn">● ${waiting} waiting</span>` : ''}`, () => brainSenders()) : ''
+  if (s.q.trim()) {
+    const k = 'q'
+    if (!s.lists[k]) setTimeout(() => loadSrcList(k), 0)
+    const l = s.lists[k]
+    return `<div class="br-graph-bar">${box}${chips}</div><div class="bs-acc"><div class="bs-h static"><b>${l && !l.loading ? `${nf(l.total)} match${l.total === 1 ? '' : 'es'}` : 'Searching…'}</b><span class="n">newest first</span></div><div class="bs-body">${srcListBody(k, { client: true })}</div></div>`
   }
-  return `${senders}<div class="pp-card"><table class="pp-tbl"><thead><tr><th>Source</th><th>Date</th><th>Threads</th><th class="num">Sections</th></tr></thead><tbody>${out.join('')}</tbody></table></div>`
+  const KIND = Object.fromEntries(SRC_KINDS.map(([k, m, l]) => [k, [m, l]]))
+  const clients = (g.clients || []).map((c) => {
+    const kinds = (c.kinds || []).filter((k) => !s.kind || k.kind === s.kind)
+    if (!kinds.length) return ''
+    const docs = kinds.reduce((n, k) => n + k.docs, 0), secs = kinds.reduce((n, k) => n + k.sections, 0)
+    const body = () => {
+      const rows = []
+      for (const k of kinds.filter((k) => k.kind !== 'channel' && k.kind !== 'file')) {
+        const [m, l] = KIND[k.kind] || ['·', k.kind]
+        rows.push(srcAcc(`k|${c.client}|${k.kind}`, `${m} <b>${esc(l)}</b><span class="grow"></span><span class="n">${nf(k.docs)} · newest first</span>`, () => srcListBody(`k|${c.client}|${k.kind}`), 1))
+      }
+      if (!s.kind || s.kind === 'channel') {
+        for (const ch of c.channels || []) rows.push(srcAcc(`ch|${c.client}|${ch.name}`, `# <b>${esc(ch.name)}</b><span class="grow"></span><span class="n">${nf(ch.posts)} post${ch.posts === 1 ? '' : 's'}</span>`, () => srcListBody(`ch|${c.client}|${ch.name}`, { channel: true }), 1))
+      }
+      if (!s.kind || s.kind === 'file') {
+        for (const f of c.folders || []) rows.push(srcAcc(`f|${c.client}|${f.root}`, `▣ <b title="${esc(f.root)}">${esc(f.name)}</b><span class="grow"></span><span class="n">${esc(folderSummary(f.root).n ? folderSummary(f.root).line : `${nf(f.docs)} read`)}</span>`, () => srcListBody(`f|${c.client}|${f.root}`), 1))
+      }
+      return rows.join('')
+    }
+    const what = c.client === '-' ? 'your practice, internal calls' : 'client'
+    return srcAcc(`c|${c.client}`, `<b>${esc(c.name)}</b><span class="n">${what}</span><span class="grow"></span><span class="n">${nf(docs)} source${docs === 1 ? '' : 's'} · ${nf(secs)} sections</span>`, body)
+  }).join('')
+  return `<div class="br-graph-bar">${box}${chips}</div>${who}${clients || '<p class="set-sub">No sources in this scope yet.</p>'}<p class="set-foot">Everything starts closed: a client opens to its kinds, channels and folders, each to its newest 50. A search lists what matches across all of them.</p>`
 }
 document.addEventListener('click', (e) => {
-  const r = e.target.closest && e.target.closest('[data-br-ch]')
-  if (!r) return
-  S.br.openCh = S.br.openCh === r.dataset.brCh ? null : r.dataset.brCh
+  const t = e.target.closest && e.target.closest('[data-bs-toggle],[data-bs-more],[data-bs-kind]')
+  if (!t) return
+  const s = srcState(), d = t.dataset
+  if (d.bsKind !== undefined) { s.kind = d.bsKind; if (s.q.trim()) delete s.lists.q; return render() }
+  if (d.bsMore) return loadSrcList(d.bsMore, true)
+  const k = d.bsToggle
+  if (s.open.has(k)) s.open.delete(k)
+  else { s.open.add(k); if (/^(k|ch|f)\|/.test(k) && !s.lists[k]) return loadSrcList(k) }
   render()
+})
+let srcSearchTimer = null
+document.addEventListener('input', (e) => {
+  if (e.target.id !== 'bs-q') return
+  const s = srcState()
+  s.q = e.target.value
+  delete s.lists.q
+  clearTimeout(srcSearchTimer)
+  srcSearchTimer = setTimeout(render, 300)
 })
 /** The numbers lane, per client: its reporting families (Claude proposes them from the workbooks;
  *  nothing is built until accepted), what each loaded, the catalog of governed metrics, and what the
@@ -4695,51 +4868,173 @@ const GraphView = (() => {
     st.graph.forEachNode((k, a) => { const t = `${a.label || ''} ${a.search || ''}`.toLowerCase(); if (words.every((w) => t.includes(w))) hits.add(k) })
     return hits
   }
+  /** Change the drawn graph in bulk (`fn(graph)`) with the renderer off — sigma answers each dropped node and edge
+   *  one by one, which takes minutes for a few hundred sources with their links — then draw it again as it was seen. */
+  function batch(id, fn) {
+    const st = live.get(id)
+    if (!st) return null
+    const cam = st.sigma.getCamera().getState()
+    try { st.sigma.kill() } catch { /* gone with its box */ }
+    live.delete(id)
+    fn(st.graph)
+    const v = draw(st.box, st.key, () => st.graph, st.opts)
+    if (v) v.sigma.getCamera().setState(cam)
+    return v
+  }
   const resize = () => { for (const st of live.values()) if (st.box.isConnected) st.sigma.resize() }
   /** The theme changed (the system's appearance): drawn again in its colours, laid out as they were. */
   function retheme() {
     for (const [id, st] of live) { try { st.sigma.kill() } catch { /* gone with its box */ } live.delete(id) }
   }
-  return { draw, focus, select, find, resize, retheme, live }
+  return { draw, batch, focus, select, find, resize, retheme, live }
 })()
 
-// The Brain's graph: documents (coloured by client) and their topics (labelled, coloured by layer);
-// a document joins the topics its sections are tagged with, related documents join each other.
+// The Brain's graph, drawn as you go (it may hold millions of sections): topics first, laid out once — each
+// sized by its sections, coloured by whose it is, joined to the topics their sections are related to. A click on a
+// topic fans out its 50 most tagged sources; a client's chip in the legend (or zooming in on its topics) brings in its
+// sources; a search's sources come in too. At most `GRAPH_MAX` sources on screen: the oldest opened set goes first.
+// Sources are added to the drawn graph where they belong (round their topic, or amid their topics), never laid out again.
+const GRAPH_MAX = 400
 function brainGraph() {
   const g = S.br.graph
   if (!g || g.q !== brainQuery()) return `<div class="skeleton" style="padding:20px">${'<i></i>'.repeat(6)}</div>`
-  if (!g.nodes || !g.nodes.length) return '<p class="set-sub">Nothing to draw in this scope yet.</p>'
-  const clients = [...new Set(g.nodes.filter((n) => n.type === 'doc').map((n) => n.client || '-'))]
-  const legend = clients.map((c, i) => `<span class="pp-leg"><i class="br-dot" style="background:${c === '-' ? '#8a8a95' : CLIENT_COLORS[i % CLIENT_COLORS.length]}"></i>${esc(clientName(c))}</span>`).join('')
+  if (g.error) return `<p class="error">${esc(g.error)}</p>`
+  if (!g.nodes || !g.nodes.length) return '<p class="set-sub">Nothing to draw in this scope yet: topics come first, then their sources.</p>'
+  const layers = [...new Set(g.nodes.map((n) => n.layer).filter((l) => l && l !== 'shared'))]
+  const sets = S.br.gsets || []
+  const shown = new Set(sets.flatMap((s) => s.nodes.map((n) => n.id))).size
+  const chip = (s) => `<button class="fchip on" data-gset-close="${esc(s.key)}" title="Take these sources off the graph">${esc(s.label)} · ${s.nodes.length}${s.total > s.nodes.length ? ` of ${nf(s.total)}` : ''} ×</button>`
+  const legend = `<span class="pp-leg"><i class="br-dot" style="background:#8a8a95"></i>Your practice</span>` + layers.map((c, i) => `<button class="pp-leg link-btn" data-gset-client="${esc(c)}" title="Bring ${esc(clientName(c))}'s sources onto the graph"><i class="br-dot" style="background:${CLIENT_COLORS[i % CLIENT_COLORS.length]}"></i>${esc(clientName(c))}</button>`).join('')
   const box = `<input class="wp-in br-pq" id="br-gq" type="search" placeholder="Find a topic or source — Enter searches the Brain" value="${esc(S.br.gq || '')}" aria-label="Find in the graph">`
   const res = S.br.gqRes ? `<span class="set-sub br-gq-res">${esc(S.br.gqRes)}</span>` : ''
-  return `<div class="br-graph-bar">${box}${res}<span class="grow"></span>${legend}</div><div class="br-graph" id="br-graph"></div><p class="set-foot">${g.nodes.length} nodes · ${g.edges.length} links. Scroll to zoom, drag to move; hover to see a node's links, click for its details. Topics are labelled; sources by size once you zoom in.</p>`
+  const busy = S.br.gbusy ? `<span class="set-sub">${esc(S.br.gbusy)}</span>` : ''
+  return `<div class="br-graph-bar">${box}${res}${busy}<span class="grow"></span><span class="set-sub">${g.nodes.length} topics · ${shown} of ${nf(g.sources_total)} sources shown</span></div>
+    ${sets.length ? `<div class="br-graph-bar">${sets.map(chip).join('')}</div>` : ''}<div class="br-graph-bar">${legend}</div><div class="br-graph" id="br-graph"></div>
+    <p class="set-foot">Topics first. Click a topic: its sources fan out (the 50 most tagged with it). Click a client, or zoom in on its topics: its sources fill in. At most ${GRAPH_MAX} sources on screen. Scroll to zoom, drag to move; hover for a node's links.</p>`
 }
 function graphKey(g) { return `brain|${g.q}|${g.nodes.length}|${g.edges.length}|${g.nodes.slice(0, 3).map((n) => n.id).join(',')}` }
+function graphColors(g) {
+  const layers = [...new Set(g.nodes.map((n) => n.layer).filter((l) => l && l !== 'shared'))]
+  return (c) => c && c !== '-' && c !== 'shared' && layers.indexOf(c) >= 0 ? CLIENT_COLORS[layers.indexOf(c) % CLIENT_COLORS.length] : '#8a8a95'
+}
+/** Bring a set of sources onto the graph (a topic's, a client's, a search's); the oldest go past `GRAPH_MAX`. */
+async function openGraphSet(key, label, url, select) {
+  const sets = S.br.gsets || (S.br.gsets = [])
+  if (sets.some((s) => s.key === key)) { S.br.gsets = sets.filter((s) => s.key !== key).concat(sets.filter((s) => s.key === key)); return render() }
+  S.br.gbusy = `Loading ${label}…`; render()
+  try {
+    const r = await get(url)
+    if (r.error) throw new Error(r.error)
+    const set = { key, label, nodes: r.nodes || [], edges: r.edges || [], total: r.total || 0, select }
+    let next = (S.br.gsets || []).concat([set])
+    while (next.length > 1 && new Set(next.flatMap((s) => s.nodes.map((n) => n.id))).size > GRAPH_MAX) next = next.slice(1)
+    S.br.gsets = next
+    S.br.gbusy = ''
+  } catch (e) { S.br.gbusy = String(e.message || e) }
+  render()
+}
+function openTopicSources(id, label) {
+  const sc = brainQuery().replace('?', '&')
+  return openGraphSet(`topic:${id}`, label, `api/brain/browse/graph-topic?id=${encodeURIComponent(id)}&limit=50${sc}`)
+}
+function openClientSources(client) {
+  return openGraphSet(`client:${client}`, clientName(client), `api/brain/browse/graph-client?id=${encodeURIComponent(client)}&limit=${GRAPH_MAX}`)
+}
+/** The drawn graph made to hold exactly the open sets' sources (added where they belong, the rest taken off), in
+ *  one batch with the renderer off. Returns the view as drawn now. */
+function syncGraphSets(st, g) {
+  const want = new Map()
+  for (const s of S.br.gsets || []) for (const n of s.nodes) if (!want.has(n.id)) want.set(n.id, { n, s })
+  const gone = st.graph.filterNodes((k, a) => a.kind === 'doc' && !want.has(k))
+  const adds = [...want.keys()].filter((k) => !st.graph.hasNode(k))
+  if (!gone.length && !adds.length) return st
+  const color = graphColors(g)
+  return GraphView.batch('br-graph', (G) => {
+    for (const k of gone) G.dropNode(k)
+    const xs = [], ys = []
+    G.forEachNode((k, a) => { if (a.kind === 'topic') { xs.push(a.x); ys.push(a.y) } })
+    const cx = xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0, cy = ys.length ? ys.reduce((a, b) => a + b, 0) / ys.length : 0
+    const span = xs.length ? Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys), 1) : 100
+    const per = new Map()
+    const about = new Map()
+    for (const s of S.br.gsets || []) for (const e of s.edges) { if (!about.has(e.source)) about.set(e.source, []); about.get(e.source).push(e) }
+    for (const id of adds) {
+      const { n, s } = want.get(id)
+      const tops = (about.get(id) || []).filter((e) => G.hasNode(e.target))
+      let x, y
+      if (s.key.startsWith('topic:') && G.hasNode(s.key)) {
+        // A topic's sources on an arc round it, facing away from the middle.
+        const t = G.getNodeAttributes(s.key), i = per.get(s.key) || 0
+        per.set(s.key, i + 1)
+        const out = Math.atan2(t.y - cy, t.x - cx), a = out + ((i % 25) - 12) * 0.11, r = span * (0.09 + 0.035 * Math.floor(i / 25))
+        x = t.x + r * Math.cos(a); y = t.y + r * Math.sin(a)
+      } else if (tops.length) {
+        // Amid the topics it is about (weighted), a little apart.
+        const w = tops.reduce((a, e) => a + (e.weight || 1), 0)
+        x = tops.reduce((a, e) => a + G.getNodeAttribute(e.target, 'x') * (e.weight || 1), 0) / w
+        y = tops.reduce((a, e) => a + G.getNodeAttribute(e.target, 'y') * (e.weight || 1), 0) / w
+        const h = ProjectArt.hash(id)
+        x += ((h % 101) - 50) / 50 * span * 0.04; y += (((h >> 7) % 101) - 50) / 50 * span * 0.04
+      } else {
+        const h = ProjectArt.hash(id), a = (h % 360) * Math.PI / 180
+        x = cx + span * 0.12 * Math.cos(a); y = cy + span * 0.12 * Math.sin(a)
+      }
+      G.addNode(id, { x, y, size: 5 + Math.log10(1 + (n.sections || 1)) * 4, color: color(n.client || '-'), label: n.label || id, search: [n.kind, n.date, n.client && clientName(n.client)].filter(Boolean).join(' '), kind: 'doc' })
+    }
+    for (const s of S.br.gsets || []) {
+      for (const e of s.edges) {
+        if (!G.hasNode(e.source) || !G.hasNode(e.target) || G.hasEdge(e.source, e.target)) continue
+        G.addEdge(e.source, e.target, { weight: e.weight || 1, size: Math.min(2, 0.4 + (e.weight || 1) / 10), color: 'rgba(130,130,145,0.25)' })
+      }
+    }
+  }) || st
+}
 function drawGraph() {
   const box = $('#br-graph'), g = S.br.graph
   if (!box || !g || !g.nodes) return
-  const clients = [...new Set(g.nodes.filter((n) => n.type === 'doc').map((n) => n.client || '-'))]
-  const color = (c) => c && c !== '-' && c !== 'shared' && clients.indexOf(c) >= 0 ? CLIENT_COLORS[clients.indexOf(c) % CLIENT_COLORS.length] : '#8a8a95'
+  const color = graphColors(g)
   const st = GraphView.draw(box, graphKey(g), () => {
     const G = new graphology.Graph({ multi: false, type: 'undirected' })
-    const topics = g.nodes.filter((n) => n.type === 'topic')
-    // Seeds: topics on a ring by layer, documents near the middle (ForceAtlas2 does the rest).
-    topics.forEach((t, i) => { const a = (2 * Math.PI * i) / Math.max(1, topics.length); G.addNode(t.id, { x: 100 * Math.cos(a), y: 100 * Math.sin(a), size: 5 + Math.sqrt(t.sections || 1) * 1.2, color: color(t.layer), label: t.label, pinLabel: true, kind: 'topic' }) })
-    for (const n of g.nodes.filter((x) => x.type === 'doc')) {
-      const h = ProjectArt.hash(n.id)
-      G.addNode(n.id, { x: (h % 101) - 50, y: ((h >> 7) % 101) - 50, size: 2.5 + Math.sqrt(n.sections || 1) * 0.6, color: color(n.client || '-'), label: n.label || n.id, search: [n.kind, n.date, n.client && clientName(n.client)].filter(Boolean).join(' '), kind: 'doc' })
-    }
+    // Seeds: topics on a ring, a layer's together (ForceAtlas2 does the rest, once).
+    const topics = [...g.nodes].sort((a, b) => (a.layer || '').localeCompare(b.layer || ''))
+    topics.forEach((t, i) => { const a = (2 * Math.PI * i) / Math.max(1, topics.length); G.addNode(t.id, { x: 100 * Math.cos(a), y: 100 * Math.sin(a), size: 8 + Math.log10(1 + (t.sections || 0)) * 6, color: color(t.layer), label: t.label, pinLabel: true, forceLabel: true, kind: 'topic', layer: t.layer, search: `${t.sources} sources` }) })
     for (const e of g.edges) {
       if (!G.hasNode(e.source) || !G.hasNode(e.target) || G.hasEdge(e.source, e.target)) continue
-      G.addEdge(e.source, e.target, { weight: e.weight || 1, size: e.kind === 'about' ? Math.min(2.5, 0.4 + (e.weight || 1) / 8) : 0.6, color: e.kind === 'about' ? 'rgba(130,130,145,0.22)' : 'rgba(139,98,255,0.28)' })
+      G.addEdge(e.source, e.target, { weight: e.weight || 1, size: 0.6, color: 'rgba(139,98,255,0.22)' })
     }
     return G
-  }, { click: (node, a) => a.kind === 'topic' ? press({ brNode: node.replace(/^topic:/, '') }) : press({ graphDoc: node }) })
-  if (st) GraphView.select('br-graph', S.br.doc || (S.br.node ? `topic:${S.br.node}` : null))
+  }, { click: (node, a) => {
+    if (a.kind === 'topic') { const id = node.replace(/^topic:/, ''); openTopicSources(node.slice(6), a.label); return press({ brNode: id }) }
+    return press({ graphDoc: node })
+  } })
+  if (!st) return
+  const now = syncGraphSets(st, g)
+  GraphView.select('br-graph', S.br.doc || (S.br.node ? `topic:${S.br.node}` : null))
+  // Zooming in on a client's topics brings its sources in (once per zoom; nothing for the practice's).
+  if (!now.zoomWatch) {
+    now.zoomWatch = true
+    let t = null
+    now.sigma.getCamera().on('updated', (c) => {
+      clearTimeout(t)
+      if (c.ratio > 0.35) return
+      t = setTimeout(() => {
+        const mid = now.sigma.viewportToGraph({ x: box.clientWidth / 2, y: box.clientHeight / 2 })
+        let best = null, bd = Infinity
+        now.graph.forEachNode((k, a) => { if (a.kind !== 'topic' || !a.layer || a.layer === 'shared') return; const d = (a.x - mid.x) ** 2 + (a.y - mid.y) ** 2; if (d < bd) { bd = d; best = a.layer } })
+        if (best && !(S.br.gsets || []).some((s) => s.key === `client:${best}`)) openClientSources(best)
+      }, 600)
+    })
+  }
 }
-/** The graph's search: typing lights matching topics and sources (by name); Enter asks the Brain (words
- *  and meaning) and lights the sources of the sections it finds. */
+document.addEventListener('click', (e) => {
+  const t = e.target.closest && e.target.closest('[data-gset-close],[data-gset-client]')
+  if (!t) return
+  if (t.dataset.gsetClient) return openClientSources(t.dataset.gsetClient)
+  S.br.gsets = (S.br.gsets || []).filter((s) => s.key !== t.dataset.gsetClose)
+  render()
+})
+/** The graph's search: typing lights matching topics and sources (by name); Enter asks the Brain (words and
+ *  meaning), brings the sources it found onto the graph and lights them. */
 async function graphSearch(q, ask) {
   S.br.gq = q
   if (!q.trim()) { S.br.gqRes = ''; GraphView.focus('br-graph', null); return }
@@ -4747,13 +5042,16 @@ async function graphSearch(q, ask) {
   S.br.gqRes = 'searching the Brain…'; render()
   try {
     const sc = brainQuery().replace('?', '&')
-    const r = await get(`api/brain/search?q=${encodeURIComponent(q)}${sc}`)
+    const r = await get(`api/brain/browse/graph-search?q=${encodeURIComponent(q)}${sc}`)
     if (S.br.gq !== q) return
-    const hits = r.hits || []
-    const srcs = new Set(hits.map((h) => h.source).filter(Boolean))
-    const n = GraphView.focus('br-graph', srcs)
-    S.br.gqRes = r.error ? r.error : `${hits.length} section${hits.length === 1 ? '' : 's'} in ${n} source${n === 1 ? '' : 's'} shown`
-  } catch (e) { S.br.gqRes = String(e) }
+    if (r.error) throw new Error(r.error)
+    const set = { key: 'search', label: `“${q}”`, nodes: r.nodes || [], edges: r.edges || [], total: r.total || 0 }
+    S.br.gsets = (S.br.gsets || []).filter((s) => s.key !== 'search').concat([set])
+    while (S.br.gsets.length > 1 && new Set(S.br.gsets.flatMap((s) => s.nodes.map((n) => n.id))).size > GRAPH_MAX) S.br.gsets = S.br.gsets.slice(1)
+    render()
+    const n = GraphView.focus('br-graph', new Set(set.nodes.map((x) => x.id)))
+    S.br.gqRes = `${r.sections} section${r.sections === 1 ? '' : 's'} in ${n} source${n === 1 ? '' : 's'}`
+  } catch (e) { S.br.gqRes = String(e.message || e) }
   render()
 }
 
@@ -4849,10 +5147,14 @@ document.addEventListener('toggle', (e) => {
 }, true)
 document.addEventListener('input', (e) => {
   if (e.target.id === 'pp-about') { S.pj.aboutEdit = e.target.value; return }
-  if (e.target.id === 'dict-q') {
-    S.br.tq = e.target.value
-    clearTimeout(S.br.tqT)
-    S.br.tqT = setTimeout(() => { const at = e.target.selectionStart; render(); const i = $('#dict-q'); if (i) { i.focus(); i.setSelectionRange(at, at) } }, 150)
+  if (e.target.id === 'br-into-q') {
+    const q = e.target.value
+    S.br.mergeQ = q
+    clearTimeout(S.br.mergeT)
+    S.br.mergeT = setTimeout(async () => {
+      if (!q.trim()) { S.br.mergeHits = []; return render() }
+      try { const r = await get(`api/brain/browse/terms?q=${encodeURIComponent(q)}&limit=12${brainQuery().replace('?', '&')}`); if (S.br.mergeQ === q) { S.br.mergeHits = r.items || []; render() } } catch { /* app restarting */ }
+    }, 200)
     return
   }
   if (e.target.id === 'br-gq') {
@@ -4875,23 +5177,24 @@ document.addEventListener('keydown', (e) => {
  *  (rename, merge, move, remove; a term's kind, variants, pins) and its latest sections. */
 function brainNodePanel() {
   const d = S.br.data, id = S.br.node, tx = (d && d.taxonomy) || {}
-  const x = (tx.topics || []).find((t) => t.id === id) || (tx.terms || []).find((t) => t.id === id)
+  const x = brItem(id)
   if (!x) return '<div class="wp-empty">Pick a topic or a term.</div>'
   const isTerm = !!x.name, name = x.name || x.label, layer = x.layer
   // A client's topic may merge into, or sit under, one of the practice's too (one tree).
-  const same = (isTerm ? (tx.terms || []) : (tx.topics || [])).filter((t) => (t.layer === layer || (layer !== 'shared' && t.layer === 'shared')) && t.id !== id)
+  const same = (isTerm ? [] : (tx.topics || [])).filter((t) => (t.layer === layer || (layer !== 'shared' && t.layer === 'shared')) && t.id !== id)
   const l1s = (tx.topics || []).filter((t) => (t.layer === layer || (layer !== 'shared' && t.layer === 'shared')) && t.level === 1 && t.id !== id)
   const lnm = (l) => l === 'shared' ? 'practice' : (((tx.layers || []).find((y) => y.id === l) || {}).name || l)
   const ed = S.br.edit
   const body = (o) => esc(JSON.stringify({ ...o, layer, [isTerm ? 'name' : 'label']: name, term: isTerm }))
   const actions = ed === 'rename' ? `<span class="tok-in"><input id="br-rename" value="${esc(name)}" aria-label="New name" autofocus></span><button class="btn primary" data-br-do="rename">Rename</button>`
+    : ed === 'merge' && isTerm ? `<div class="br-def"><input class="wp-in" id="br-into-q" value="${esc(S.br.mergeQ || '')}" placeholder="Find the term it is the same thing as" aria-label="Merge into" autofocus>${(S.br.mergeHits || []).filter((t) => t.id !== id).map((t) => `<button class="tok link" data-br-merge-into="${esc(JSON.stringify([t.name, t.layer]))}">${esc(t.name)}${t.layer !== layer ? ` <small>${esc(lnm(t.layer))}</small>` : ''}</button>`).join('') || (S.br.mergeQ ? '<span class="set-sub">No term by that name.</span>' : '')}</div>`
     : ed === 'merge' ? `<select class="wp-in" id="br-into" aria-label="Merge into">${same.map((t) => `<option value="${esc(JSON.stringify([t.name || t.label, t.layer]))}">${esc(t.name || t.label)}${t.layer !== layer ? ` (${esc(lnm(t.layer))})` : ''}</option>`).join('')}</select><button class="btn primary" data-br-do="merge">Merge</button>`
     : ed === 'scope' ? `<select class="wp-in" id="br-scope-to" aria-label="Whose topic">${layer === 'shared' ? (tx.layers || []).filter((l) => l.id !== 'shared').map((l) => `<option value="${esc(l.id)}">Only ${esc(l.name || l.id)}</option>`).join('') : '<option value="shared">Your practice (every client)</option>'}</select><button class="btn primary" data-br-do="scope">Move</button>`
     : ed === 'define' ? `<div class="br-def"><textarea class="wp-in" id="br-desc" rows="3" aria-label="What it is" placeholder="${isTerm ? 'What it is' : "What belongs in it — and what doesn't"}">${esc(x.description || '')}</textarea><input class="wp-in" id="br-syn" value="${esc((x.synonyms || []).join(', '))}" placeholder="Other names, comma-separated" aria-label="Synonyms">${isTerm ? `<input class="wp-in" id="br-spell" value="${esc((x.variants || []).join(', '))}" placeholder="Spellings — how it is written or misheard" aria-label="Spellings"><select class="wp-in" id="br-group" aria-label="Group">${(tx.groups || []).map((g) => `<option value="${esc(g.id)}"${x.group === g.id ? ' selected' : ''}>${esc(g.label)}</option>`).join('')}</select>` : ''}<button class="btn primary" data-br-do="define">Save</button></div>`
     : ed === 'split' ? `<select class="wp-in" id="br-split" aria-label="Which name">${[...(x.synonyms || []), ...(x.variants || [])].map((n) => `<option>${esc(n)}</option>`).join('')}</select><button class="btn primary" data-br-do="split">Make it a term</button>`
     : ed === 'move' ? `<select class="wp-in" id="br-parent" aria-label="Move under"><option value="">(top level)</option>${l1s.map((t) => `<option${x.parent === t.label ? ' selected' : ''}>${esc(t.label)}</option>`).join('')}</select><button class="btn primary" data-br-do="move">Move</button>`
     : ed === 'remove' ? `<span class="set-sub">Remove it? Its tags go too.</span><button class="btn danger" data-br-op='${body({ op: 'remove' })}'>Remove</button>`
-    : `<button class="btn" data-br-edit="rename">Rename</button>${same.length ? '<button class="btn" data-br-edit="merge">Merge into…</button>' : ''}<button class="btn" data-br-edit="define">Define…</button>${isTerm ? ([...(x.synonyms || []), ...(x.variants || [])].length ? '<button class="btn" data-br-edit="split">Split off…</button>' : '') : `<button class="btn" data-br-edit="move">Move under…</button><button class="btn" data-br-split="${esc(JSON.stringify([layer, name]))}" title="Make 2–6 subtopics of it from its own sections (Claude), then tag only those again">Split into subtopics</button>`}<button class="btn" data-br-edit="scope">${layer === 'shared' ? 'Only one client…' : 'Up to the practice…'}</button><button class="btn ghost danger" data-br-edit="remove">Remove</button>`
+    : `<button class="btn" data-br-edit="rename">Rename</button>${same.length || isTerm ? '<button class="btn" data-br-edit="merge">Merge into…</button>' : ''}<button class="btn" data-br-edit="define">Define…</button>${isTerm ? ([...(x.synonyms || []), ...(x.variants || [])].length ? '<button class="btn" data-br-edit="split">Split off…</button>' : '') : `<button class="btn" data-br-edit="move">Move under…</button><button class="btn" data-br-split="${esc(JSON.stringify([layer, name]))}" title="Make 2–6 subtopics of it from its own sections (Claude), then tag only those again">Split into subtopics</button>`}<button class="btn" data-br-edit="scope">${layer === 'shared' ? 'Only one client…' : 'Up to the practice…'}</button><button class="btn ghost danger" data-br-edit="remove">Remove</button>`
   const nd = S.br.nodeData && S.br.nodeData.id === id ? S.br.nodeData : null
   const secs = !nd ? '<div class="skeleton"><i></i><i></i></div>' : nd.sections.length ? nd.sections.map((s) => {
     const call = s.link && s.link.startsWith('echo://call/') ? s.link.slice(12).split('?')[0] : ''
@@ -4967,13 +5270,22 @@ function brainDocPanel() {
 PANEL_VIEWS.push({ id: 'brain-doc', label: 'Source', icon: ICON('<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/>'), area: 'right', when: () => S.view === 'brain' && !!S.br.doc, render: brainDocPanel })
 PANEL_VIEWS.push({ id: 'brain-node', label: 'Topic', icon: ICON('<circle cx="12" cy="12" r="3"/><circle cx="5" cy="6" r="2"/><circle cx="19" cy="7" r="2"/><circle cx="7" cy="19" r="2"/><path d="M9.5 10.5 6.6 7.4M14.6 10.6l2.8-2.4M10.2 14.2l-2 3.3"/>'), area: 'right', when: () => S.view === 'brain' && !!S.br.node, render: brainNodePanel })
 
+/** The user's edit: the app makes the new version in the background (a large Brain takes seconds); the page
+ *  reads the Brain again until it is done, and says why when it couldn't be done. */
 function brainEdit(body) {
   send({ cmd: 'brain_taxonomy', body })
   S.br.edit = null
-  setTimeout(() => loadBrain().then(render), 350)
+  let tries = 0
+  const again = () => loadBrain().then(() => {
+    const d = S.br.data || {}
+    if (d.edit_error) { window.echo.notice(d.edit_error); return render() }
+    render()
+    if ((d.topic_jobs || []).includes('edit:taxonomy') && ++tries < 150) setTimeout(again, 400)
+  })
+  setTimeout(again, 250)
 }
 document.addEventListener('click', (e) => {
-  const t = e.target.closest && e.target.closest('[data-br-tab],[data-br-node],[data-br-accept],[data-br-fold],[data-br-rebuild],[data-br-split],[data-br-retag],[data-br-move],[data-dict-group],[data-br-snooze],[data-br-edit],[data-br-do],[data-br-op],[data-br-open],[data-graph-doc],[data-br-doc-open]')
+  const t = e.target.closest && e.target.closest('[data-br-tab],[data-br-node],[data-br-accept],[data-br-fold],[data-br-rebuild],[data-br-split],[data-br-retag],[data-br-move],[data-br-snooze],[data-br-edit],[data-br-do],[data-br-op],[data-br-merge-into],[data-br-open],[data-graph-doc],[data-br-doc-open]')
   if (!t) return
   const d = t.dataset
   if (d.brTab) { S.br.tab = d.brTab; go(`brain/${d.brTab}`); return loadBrain().then(render) }
@@ -4989,15 +5301,21 @@ document.addEventListener('click', (e) => {
   if (d.brFold) { const f = S.br.fold || {}; S.br.fold = { ...f, [d.brFold]: !f[d.brFold] }; return render() }
   if (d.brRebuild) { send({ cmd: 'brain_rebuild_topics', layer: d.brRebuild }); S.br.rebuilding = { ...(S.br.rebuilding || {}), [`taxonomy:${d.brRebuild}`]: true }; setTimeout(() => { S.br.rebuilding = {}; loadBrain().then(render) }, 1500); return render() }
   if (d.brSplit) { const [layer, label, asker] = JSON.parse(d.brSplit); send({ cmd: 'brain_split_topic', layer, label, for: asker || layer }); S.br.rebuilding = { ...(S.br.rebuilding || {}), [`split:${asker || layer}`]: true }; setTimeout(() => { S.br.rebuilding = {}; loadBrain().then(render) }, 1500); return render() }
-  if (d.dictGroup !== undefined) { S.br.tg = d.dictGroup; return render() }
   if (d.brMove) { send({ cmd: 'brain_topic_move', key: d.brMove, do: d.do }); return setTimeout(() => loadBrain().then(render), 400) }
   if (d.brRetag) { send({ cmd: 'brain_retag_topics', layer: d.brRetag }); S.br.rebuilding = { ...(S.br.rebuilding || {}), [`retag:${d.brRetag}`]: true }; setTimeout(() => { S.br.rebuilding = {}; loadBrain().then(render) }, 1500); return render() }
   if (d.brSnooze) { send({ cmd: 'brain_topics_snooze', layer: d.brSnooze }); return setTimeout(() => loadBrain().then(render), 300) }
-  if (d.brEdit) { S.br.edit = d.brEdit; render(); { const i = $('#br-rename'); if (i) { i.focus(); i.select() } } return }
+  if (d.brEdit) { S.br.edit = d.brEdit; S.br.mergeHits = []; S.br.mergeQ = ''; render(); { const i = $('#br-rename') || $('#br-into-q'); if (i) { i.focus(); if (i.select) i.select() } } return }
   if (d.brOp) return brainEdit(JSON.parse(d.brOp))
+  if (d.brMergeInto) {
+    const x = brItem(S.br.node)
+    if (!x) return
+    const [into, into_layer] = JSON.parse(d.brMergeInto)
+    S.br.node = null; S.br.mergeHits = []; S.br.mergeQ = ''
+    return brainEdit({ layer: x.layer, term: true, name: x.name, op: 'merge', into, into_layer })
+  }
   if (d.brDo) {
     const tx = (S.br.data || {}).taxonomy || {}
-    const x = (tx.topics || []).find((y) => y.id === S.br.node) || (tx.terms || []).find((y) => y.id === S.br.node)
+    const x = brItem(S.br.node)
     if (!x) return
     const base = { layer: x.layer, term: !!x.name, [x.name ? 'name' : 'label']: x.name || x.label }
     if (d.brDo === 'rename') { const to = ($('#br-rename') || {}).value; if (to && to.trim()) { S.br.node = null; brainEdit({ ...base, op: 'rename', to: to.trim() }) } return }
@@ -5038,7 +5356,7 @@ function threadBrain(p) {
   const terms = (tx.terms || []).filter((x) => x.sections || (x.pinned || []).includes(p.id))
     .sort((a, b) => ((b.pinned || []).includes(p.id) - (a.pinned || []).includes(p.id)) || ((b.layer !== 'shared') - (a.layer !== 'shared')) || (b.sections - a.sections))
     .filter((x) => { const k = x.name.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true }).slice(0, 30)
-  const more = (tx.terms || []).filter((x) => x.sections || (x.pinned || []).includes(p.id)).length - terms.length
+  const more = tx.terms_more || 0
   return `<div class="tt-topics">${topics.map((x) => `<span class="chipt" title="${esc(x.description || '')}">${esc(x.label)} · ${x.sections}</span>`).join('') || '<span class="set-sub">No topics tagged here yet.</span>'}</div>
     <div class="tt-terms">${terms.map((x) => `<span class="tok" title="${esc([x.kind, x.description].filter(Boolean).join(' — '))}">${esc(x.name)}<small>${esc(x.kind)}${(x.pinned || []).includes(p.id) ? ' · pinned' : ''}</small></span>`).join('')}${addTok('bterm', 'A term for this thread — a system, an acronym, a name')}</div>
     <div class="pf-sub">From the Brain — ${esc(p.client_name || 'your practice')}'s layer and yours. Transcription spells these right on this thread's calls${more > 0 ? ` · ${more} more in <a href="#brain/terms">Brain → Terms</a>` : ''}.</div>`

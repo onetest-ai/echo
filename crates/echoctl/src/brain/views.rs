@@ -8,10 +8,9 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::store::{self, Scope};
-use super::taxonomy;
 
 /// A document's link: a call opens in Echo; other sources carry their own link on their sections.
-fn doc_link(source: &str, refs: &Value) -> Option<String> {
+pub(crate) fn doc_link(source: &str, refs: &Value) -> Option<String> {
     if source.starts_with("call/") {
         return refs["call"].as_str().map(|c| format!("echo://call/{c}"));
     }
@@ -19,96 +18,31 @@ fn doc_link(source: &str, refs: &Value) -> Option<String> {
     refs["url"].as_str().filter(|u| u.starts_with("https://")).map(str::to_owned)
 }
 
+/// What the Brain holds and its topics and terms — never its documents: the Sources tab pages them
+/// (`browse::source_groups`, `browse::source_list`), tens of thousands of them.
 pub fn overview(scope: Scope) -> Result<Value> {
     let path = super::store_path();
-    let c = store::open(&path)?;
-    let docs: Vec<Value> = c
-        .prepare(
-            "SELECT d.source, d.title, d.kind, d.event_date, d.refs, (SELECT count(*) FROM chunks c WHERE c.source = d.source),
-               (SELECT count(*) FROM chunks c WHERE c.source = d.source AND c.status = 'SUPERSEDED') FROM documents d
-             WHERE ?1 IS NULL OR EXISTS (SELECT 1 FROM chunks c JOIN scopes s ON s.chunk_id = c.id WHERE c.source = d.source AND s.kind = ?1 AND s.id = ?2)
-             ORDER BY d.event_date DESC",
-        )?
-        .query_map(params![scope.map(|s| s.0), scope.map(|s| s.1)], |r| {
-            let refs: Value = r.get::<_, Option<String>>(4)?.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(Value::Null);
-            let src: String = r.get(0)?;
-            Ok(json!({"source": src, "title": r.get::<_, Option<String>>(1)?, "kind": r.get::<_, Option<String>>(2)?, "date": r.get::<_, Option<String>>(3)?,
-                      "sections": r.get::<_, i64>(5)?, "threads": refs["threads"], "link": doc_link(&src, &refs),
-                      "channel": refs["channel_name"], "folder": refs["root"], "history": r.get::<_, i64>(6)? > 0}))
-        })?
-        .collect::<Result<_, _>>()?;
+    let mut tx = super::browse::view(scope)?;
+    // Terms come a page at a time (`browse::terms`); a thread's Profile gets its own 30 (pinned here, then mentioned).
+    let terms = tx.get_mut("terms").map(Value::take).unwrap_or(json!([]));
+    let all: Vec<Value> = terms.as_array().cloned().unwrap_or_default();
+    tx["terms_n"] = json!(all.len());
+    if let Some(("thread", id)) = scope {
+        let pinned = |x: &Value| x["pinned"].as_array().into_iter().flatten().any(|t| t == id);
+        let mut mine: Vec<Value> = all.into_iter().filter(|x| x["sections"].as_i64().unwrap_or(0) > 0 || pinned(x)).collect();
+        mine.sort_by_key(|x| std::cmp::Reverse((pinned(x), x["layer"] != "shared", x["sections"].as_i64().unwrap_or(0))));
+        let mut seen = BTreeSet::new();
+        mine.retain(|x| seen.insert(x["name"].as_str().unwrap_or("").to_lowercase()));
+        tx["terms_more"] = json!(mine.len().saturating_sub(30));
+        mine.truncate(30);
+        tx["terms"] = json!(mine);
+    }
     Ok(json!({
         "status": super::status()?,
-        "scopes": store::scopes(&path)?,
-        "taxonomy": taxonomy::view_in(scope)?,
-        "documents": docs,
+        "scopes": super::browse::cached("scopes", || store::scopes(&path))?,
+        "taxonomy": tx,
         "scope": scope.map(|s| json!({"kind": s.0, "id": s.1})),
     }))
-}
-
-/// A document as the graph reads it: source, title, kind, date, refs, sections.
-type DocRow = (String, Option<String>, Option<String>, Option<String>, Value, i64);
-
-/// The graph: documents (with their client, threads, top topics) and level-1 topics as nodes; edges
-/// document → topic (how many of its sections are tagged with it) and document ↔ document (how many
-/// related section pairs join them, at least two).
-pub fn graph(scope: Scope) -> Result<Value> {
-    let c = store::open(&super::store_path())?;
-    let allowed: Option<BTreeSet<String>> = match scope {
-        Some((k, v)) => Some(
-            c.prepare("SELECT DISTINCT ch.source FROM scopes s JOIN chunks ch ON ch.id = s.chunk_id WHERE s.kind = ?1 AND s.id = ?2")?
-                .query_map(params![k, v], |r| r.get(0))?
-                .collect::<Result<_, _>>()?,
-        ),
-        None => None,
-    };
-    let ok = |s: &str| allowed.as_ref().is_none_or(|a| a.contains(s));
-    let mut nodes = vec![];
-    let docs: Vec<DocRow> = c
-        .prepare("SELECT d.source, d.title, d.kind, d.event_date, d.refs, (SELECT count(*) FROM chunks c WHERE c.source = d.source) FROM documents d")?
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get::<_, Option<String>>(4)?.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(Value::Null), r.get(5)?)))?
-        .collect::<Result<_, _>>()?;
-    for (src, title, kind, date, refs, n) in &docs {
-        if !ok(src) {
-            continue;
-        }
-        let client = refs["threads"].as_array().into_iter().flatten().find_map(|t| t["client"].as_str()).or(refs["client"].as_str());
-        nodes.push(json!({"id": src, "type": "doc", "label": title, "kind": kind, "date": date, "sections": n, "client": client,
-                          "threads": refs["threads"].as_array().into_iter().flatten().filter_map(|t| t["id"].as_str()).collect::<Vec<_>>(), "link": doc_link(src, refs)}));
-    }
-    // Document → level-1 topic, by tagged sections.
-    let mut dt: BTreeMap<(String, String), i64> = BTreeMap::new();
-    let mut st = c.prepare("SELECT ch.source, k.category_id FROM chunk_topics k JOIN chunks ch ON ch.id = k.chunk_id WHERE k.kind = 'intent_l1'")?;
-    for row in st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
-        let (s, t) = row?;
-        if ok(&s) {
-            *dt.entry((s, t)).or_default() += 1;
-        }
-    }
-    let labels: BTreeMap<String, String> = c.prepare("SELECT id, label FROM graph_nodes WHERE kind = 'intent_l1'")?.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
-    let used: BTreeSet<&String> = dt.keys().map(|(_, t)| t).collect();
-    // Each topic's layer (shared, or a client's), so the window groups and colours them by client.
-    let layer_of: BTreeMap<String, String> = taxonomy::current()
-        .map(|t| t.topics.iter().map(|x| (taxonomy::topic_id(&x.layer, &x.label), x.layer.clone())).collect())
-        .unwrap_or_default();
-    for (id, label) in &labels {
-        if used.contains(id) {
-            let n: i64 = dt.iter().filter(|((_, t), _)| t == id).map(|(_, n)| n).sum();
-            nodes.push(json!({"id": format!("topic:{id}"), "type": "topic", "label": label, "sections": n, "layer": layer_of.get(id).cloned().unwrap_or_else(|| "shared".into())}));
-        }
-    }
-    let mut edges: Vec<Value> = dt.iter().filter(|((_, t), _)| labels.contains_key(t)).map(|((s, t), n)| json!({"source": s, "target": format!("topic:{t}"), "kind": "about", "weight": n})).collect();
-    // Document ↔ document, by related section pairs.
-    let mut dd: BTreeMap<(String, String), i64> = BTreeMap::new();
-    let mut st = c.prepare("SELECT a.source, b.source FROM related r JOIN chunks a ON a.id = r.chunk_id JOIN chunks b ON b.id = r.related_id WHERE a.source < b.source")?;
-    for row in st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))? {
-        let (a, b) = row?;
-        if ok(&a) && ok(&b) {
-            *dd.entry((a, b)).or_default() += 1;
-        }
-    }
-    edges.extend(dd.into_iter().filter(|(_, n)| *n >= 2).map(|((a, b), n)| json!({"source": a, "target": b, "kind": "related", "weight": n})));
-    Ok(json!({"nodes": nodes, "edges": edges}))
 }
 
 /// "Also discussed" for a call: for each of its sections, the nearest sections of other documents
