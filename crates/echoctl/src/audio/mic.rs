@@ -183,7 +183,7 @@ impl LiveStream for MicStream {
         if self.last_device_check.elapsed() >= DEVICE_CHECK_EVERY {
             self.last_device_check = Instant::now();
             if let Some(reason) = self.device_change() {
-                return Health::Restart(reason);
+                return Health::Reopen(reason);
             }
             let host = cpal::default_host();
             let current = host
@@ -192,7 +192,7 @@ impl LiveStream for MicStream {
                 .and_then(|mut it| it.find(|d| device_id(d) == self.device_id));
             if let Some(cfg) = current.and_then(|d| d.default_input_config().ok()) {
                 if cfg.sample_rate() != self.rate {
-                    return Health::Restart(format!(
+                    return Health::Reopen(format!(
                         "\"{}\" changed rate {} → {} Hz",
                         self.device,
                         self.rate,
