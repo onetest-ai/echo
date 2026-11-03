@@ -301,7 +301,17 @@ pub fn collect() -> Collected {
             why.push_str("Rebuild makes a new version from its calls for you to review; its topics keep their place.");
             out.push(item(format!("drift:{layer}"), "brain", if layer == crate::brain::taxonomy::SHARED { "echo" } else { layer.as_str() },
                 format!("Topics for {} need a rebuild", d["name"].as_str().unwrap_or(&layer)), why, false,
-                vec![act("Rebuild topics", true, json!({"cmd": "brain_rebuild_topics", "layer": layer})), act("Not now", false, json!({"cmd": "brain_topics_snooze", "layer": layer}))],
+                {
+                    // One topic took most of the new sections (#31): Split it first; a rebuild alone doesn't fix that.
+                    let broad = d["reasons"].as_array().into_iter().flatten().find(|r| r["rule"] == "catch_all" && r["topic"].is_object()).map(|r| r["topic"].clone());
+                    let mut acts = vec![];
+                    if let Some(b) = &broad {
+                        acts.push(act(&format!("Split “{}”", b["label"].as_str().unwrap_or("")), true, json!({"cmd": "brain_split_topic", "layer": b["layer"], "label": b["label"], "for": layer})));
+                    }
+                    acts.push(act("Rebuild topics", broad.is_none(), json!({"cmd": "brain_rebuild_topics", "layer": layer})));
+                    acts.push(act("Not now", false, json!({"cmd": "brain_topics_snooze", "layer": layer})));
+                    acts
+                },
                 Some("brain/topics".into())));
         }
         if let Ok(v) = crate::brain::numbers::overview() {
