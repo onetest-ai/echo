@@ -319,6 +319,11 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
         // Projects: the list (clients, stages, each call's projects), one project, its logo.
         "/api/projects" => json_reply(projects_overview()),
         "/api/tasks" => json_reply(tasks_view()),
+        // Open work in other threads, by words in its title (#20: Link to an item in another thread…).
+        "/api/work/search" => {
+            let q = req.uri().query().unwrap_or("");
+            json_reply(json!(crate::ledger::search_open(&query_param(q, "q").unwrap_or_default(), query_param(q, "not").as_deref())))
+        }
         // Everyone across the threads (the Brain's People): who, where, what was said about them.
         "/api/brain/people" => json_reply(crate::people::everyone(chrono::Local::now().date_naive()).unwrap_or_else(|e| json!({ "error": format!("{e:#}") }))),
         // The Brain: its overview, graph and a call's "Also discussed" (?client= / ?thread= scope them).

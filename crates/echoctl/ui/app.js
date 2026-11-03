@@ -3052,6 +3052,11 @@ function workPanel() {
     n.waiting_for ? ['Waiting on', `${esc(n.waiting_for.who || 'someone')} — ${esc(n.waiting_for.what || '')}`] : null,
     (n.waiting_on || []).length ? ['Waits for', titles(n.waiting_on)] : null,
     (n.blocks || []).length ? ['Holds up', titles(n.blocks)] : null,
+    // Work in other threads (#20): the same work, or what it waits on / holds up there.
+    n.mirror_of ? ['Same as', `${xItem(n.mirror_of.thread, n.mirror_of.node, n.mirror_of.title)} <span class="set-sub">— done there: its status, owner and due show here</span> ${xUnlink(n, n.mirror_of.thread, n.mirror_of.node)}`] : null,
+    (n.also_in || []).length ? ['Also in', n.also_in.map((a) => `${xItem(a.thread, a.node, a.title)} ${xUnlink(n, a.thread, a.node)}`).join('<br>')] : null,
+    (n.xwaits || []).length ? ['Waits for', n.xwaits.map((a) => `${xItem(a.thread, a.node, a.title)}${a.owner ? ` <span class="set-sub">· ${esc(a.owner)}</span>` : ''} ${xUnlink(n, a.thread, a.node)}`).join('<br>')] : null,
+    ...(n.xrefs || []).filter((r) => r.kind === 'blocks').map((r) => ['Holds up', `${xItem(r.thread, r.node, '')} <span class="set-sub">in another thread</span>`]),
     (n.links || []).length ? ['From', n.links.filter((l) => /^https:\/\//i.test(l.url || '')).map((l) => `<a class="wp-link" href="${esc(l.url)}" data-ext title="${esc(l.url)}">↗ ${esc(l.title)}</a>`).join('')] : null,
     n.kind !== 'story' && actionItems.length ? ['Said', `“${esc(actionItems[0].quote.length > 90 ? actionItems[0].quote.slice(0, 88) + '…' : actionItems[0].quote)}”`] : null,
   ].filter(Boolean)
@@ -3067,7 +3072,9 @@ function workPanel() {
   const met = n.ac.filter((a) => a.met).length
   const criteria = n.kind === 'story' ? `<div class="wp-h">Done when · ${met} of ${n.ac.length}</div><div class="wp-ac-list">${n.ac.map((a, i) => `<label class="wp-ac${a.met ? ' met' : ''}"><input type="checkbox" data-ledger-ac="${i + 1}" ${a.met ? 'checked' : ''}><span>${esc(a.text)}</span></label>`).join('')}</div>` : ''
   const hist = (n.history || []).slice().reverse().map((h) => {
-    const what = h.by === 'human' ? (h.op === 'edit' ? `you set ${Object.keys(h.set || {}).map((k) => k === 'description' && rt ? rt.word : k.replace('_', ' ')).join(', ')}` : h.op === 'create' ? 'you created it' : `you: ${h.op}`)
+    const what = h.by === 'human' && (h.op === 'xref' || h.op === 'unxref') ? `${h.op === 'xref' ? 'you linked it to' : 'you unlinked'} ${(projById(h.thread) || {}).name || h.thread} · ${h.target}${h.op === 'xref' ? (h.kind === 'same' ? (h.master === 'here' ? ' (the same work, done here)' : ' (the same work, done there)') : h.kind === 'depends_on' ? ' (waits on it)' : ' (it waits on this)') : ''}`
+      : h.from ? `${h.effect || h.op} · heard in ${(projById(h.from.thread) || {}).name || h.from.thread}`
+      : h.by === 'human' ? (h.op === 'edit' ? `you set ${Object.keys(h.set || {}).map((k) => k === 'description' && rt ? rt.word : k.replace('_', ' ')).join(', ')}` : h.op === 'create' ? 'you created it' : `you: ${h.op}`)
       : h.op === 'answer' ? `${n.kind === 'risk' ? 'response' : 'answered'}: ${h.text || ''}`
       : h.op === 'create' ? `created${h.due_text ? ' · due ' + h.due_text : ''}` : h.effect ? `${h.effect === 'due' ? 'due ' + (h.due_text || '') : h.effect}${h.effect === 'done' || h.effect === 'held' ? '?' : ''}`
       : h.op === 'waiting' ? `waiting · ${h.who || '?'}` : h.op === 'link' ? `waits for ${h.depends_on}` : h.op === 'ac_met' ? `criterion ${h.ac} met` : h.op
@@ -3090,11 +3097,42 @@ function workPanel() {
     ${description}
     ${rows.length ? `<div class="wp-facts">${rows.map(([k, v]) => `<span>${esc(k)}</span><div>${v}</div>`).join('')}</div>` : ''}
     ${criteria}
+    ${['task', 'story', 'question'].includes(n.kind) ? xLinkBlock(n) : ''}
     ${(() => { const b = slotItems('task.actions', { kind: n.kind, node: n, project: S.pj.sel }); return b ? `<div class="acts plug-acts">${b}</div>` : '' })()}
     ${mentionsBlock(n)}
     <div class="wp-h">History</div>${hist}
   </div>`
 }
+/** An item of another thread, as a link that opens it there (#20). */
+function xItem(thread, node, title) {
+  const p = projById(thread)
+  return `<button class="wp-link" data-pj="goto-node" data-id="${esc(thread)}" data-node="${esc(node)}" title="Open it in ${esc(p ? p.name : thread)}">${esc(p ? p.name : thread)} · ${esc(node)}${title ? ' ' + esc(title) : ''}</button>`
+}
+const xUnlink = (n, thread, node) => `<button class="link-btn" data-pj="xunlink" data-node="${esc(n.id)}" data-thread="${esc(thread)}" data-target="${esc(node)}" title="Each is on its own again, with its own last values">Unlink</button>`
+/** Link to an item in another thread (#20): a search over open work by its title (no model), then how they relate. */
+function xLinkBlock(n) {
+  const x = S.pj.xlink
+  if (!x || x.node !== n.id) return `<button class="link-btn wp-xopen" data-pj="xlink-open" data-node="${esc(n.id)}">Link to an item in another thread…</button>`
+  const rows = (x.results || []).map((r) => `<div class="wp-xr"><div class="wp-xt"><b>${esc(r.thread_name)} · ${esc(r.id)}</b> ${esc(r.title)}${r.owner ? ` <span class="set-sub">· ${esc(r.owner)}</span>` : ''}</div>
+      <div class="wp-xa"><button class="btn" data-pj="xlink" data-thread="${esc(r.thread)}" data-target="${esc(r.id)}" data-kind="same" data-master="there" title="One piece of work; ${esc(r.thread_name)} does it — this one shows its status">Same work · done there</button><button class="btn" data-pj="xlink" data-thread="${esc(r.thread)}" data-target="${esc(r.id)}" data-kind="same" data-master="here" title="One piece of work; this thread does it">Done here</button><button class="btn" data-pj="xlink" data-thread="${esc(r.thread)}" data-target="${esc(r.id)}" data-kind="depends_on" title="This one waits until that one is done">Waits on it</button></div></div>`).join('')
+  return `<div class="wp-xlink"><div class="wp-h">Link to an item in another thread</div>
+    <input class="wp-in" id="wp-xq" value="${esc(x.q || '')}" placeholder="Words from its title, or its id" aria-label="Find an item in another thread" autofocus>
+    ${x.q && !(x.results || []).length ? '<p class="set-sub">No open item matches in your other threads.</p>' : rows}
+    <button class="link-btn" data-pj="xlink-close">Cancel</button></div>`
+}
+let xlinkTimer = null
+document.addEventListener('input', (e) => {
+  if (e.target.id !== 'wp-xq' || !S.pj.xlink) return
+  S.pj.xlink.q = e.target.value
+  clearTimeout(xlinkTimer)
+  xlinkTimer = setTimeout(async () => {
+    const x = S.pj.xlink
+    if (!x) return
+    try { x.results = await get(`api/work/search?q=${encodeURIComponent(x.q)}&not=${encodeURIComponent(S.pj.sel || '')}`) } catch { x.results = [] }
+    render()
+    const i = $('#wp-xq'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length) }
+  }, 250)
+})
 PANEL_VIEWS.push({ id: 'work-item', label: 'Details', icon: ICON('<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/>'), area: 'right', when: () => ((S.view === 'projects' && S.pj.tab === 'work') || S.pj.inline === S.view) && !!S.pj.node, render: workPanel })
 function ledgerEdit(body) {
   send({ cmd: 'project', op: 'ledger', id: S.pj.sel, body })
@@ -3132,7 +3170,7 @@ function taskCard(c, pile) {
   const quiet = c.quiet >= 5 && !c.due ? `<span class="tk-quiet" title="No word about it in ${c.quiet} days">quiet ${c.quiet} d</span>` : ''
   return `<button class="tk-card${c.wait ? ' tk-wait' : ''}${S.pj.node === c.id && S.pj.sel === c.project ? ' on' : ''}" data-tk="open" data-project="${esc(c.project)}" data-node="${esc(c.id)}">
     <span class="tk-t">${esc(c.title)}</span>${(() => { const w = taskWho(c, pile); return w ? `<span class="tk-who">${w}</span>` : '' })()}
-    <span class="tk-m"><span class="tk-pj">${projIcon(p, 12)}${esc(p.name)}</span><span class="grow"></span>${quiet}${dueText(c)}</span>
+    <span class="tk-m"><span class="tk-pj">${projIcon(p, 12)}${esc(p.name)}</span>${(c.also_in || []).map((a) => { const q = projById(a.thread) || { id: a.thread, name: a.thread }; return `<span class="tk-pj" title="Also raised in ${esc(q.name)} (${esc(a.node)})">${projIcon(q, 12)}${esc(q.name)}</span>` }).join('')}<span class="grow"></span>${quiet}${dueText(c)}</span>
   </button>`
 }
 function tasksView() {
@@ -4914,6 +4952,10 @@ document.addEventListener('click', (e) => {
   const a = b.dataset.pj, d = b.dataset
   switch (a) {
     case 'open': return go(`project/${d.id}/${S.pj.tab}`)
+    case 'xlink-open': S.pj.xlink = { node: d.node, q: '', results: [] }; return render()
+    case 'xlink-close': S.pj.xlink = null; return render()
+    case 'xlink': { const node = S.pj.xlink && S.pj.xlink.node; S.pj.xlink = null; return ledgerEdit({ op: 'xref', node, thread: d.thread, target: d.target, kind: d.kind, master: d.master || 'there' }) }
+    case 'xunlink': return ledgerEdit({ op: 'unxref', node: d.node, thread: d.thread, target: d.target })
     case 'node': {
       S.pj.node = d.node || null
       S.pj.editField = null
