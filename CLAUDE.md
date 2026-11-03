@@ -819,8 +819,10 @@ a git URL (`#ref`) → `git clone --depth 1`; a folder read where it is; every t
 ≤ 5000 files / 64 MB a marketplace, ≤ 400 / 20 MB a plugin). Files: `<config dir>/plugins.json`,
 `<config dir>/plugins/markets/<key>/`, `<config dir>/plugins/installed/<id>/<version>/`; settings per data folder
 `<home>/.echo/plugins/<id>/settings.json`, secrets `<config dir>/plugins/secrets/<id>.json` (0600). Install = the sheet's
-lines agreed; an update asking for more waits for a new agreement. Settings → Plugins (Installed · Discover ·
-Marketplaces; IPC `plugin_op`); `echoctl plugin list|install|update|remove|enable|disable|set|call|marketplace …`.
+lines agreed; an update asking for more waits for a new agreement. Settings → Plugins (designed on the Workbench canvas: Installed — a row each with Update / problem pills and its switch,
+the chosen one on the right with what it can do, its settings, Open its settings, Remove; Discover — categories, Featured,
+cards, the install sheet over the page saying who listed it; Marketplaces — a row each, Read again, ⋯ Hide / Remove, Add;
+IPC `plugin_op`); `echoctl plugin list|install|update|remove|enable|disable|set|call|marketplace …`.
 **Channels** (`ctx.sessions.channel({plugin, env})`, only the channel the manifest's `uses.channel` names;
 `jshost::channels`): the Echo-folder session starts with `--channels plugin:<spec>` and the env given — no `CLAUDE*` /
 `ANTHROPIC*` keys. `ctx.claude.hasPlugin` / `installPlugin` (`claude plugin list --json` / `install --scope user` through the
