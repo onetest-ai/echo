@@ -1995,7 +1995,8 @@ function settingsView() {
   const body = own ? (() => { try { return own.render() } catch (e) { return `<p class="error">${esc(own.label)}: ${esc(String((e && e.message) || e))}</p>` } })()
     : !st ? `<div class="skeleton" style="padding:20px">${'<i></i>'.repeat(6)}</div>`
     : st.config_error ? `<p class="error">Echo's settings (config.json) can't be read: ${esc(st.config_error)}</p>`
-    : (SETTINGS_BODY[sec] || SETTINGS_BODY.general)(st)
+    // A section that fails says so in its place; the rest of the window keeps working.
+    : (() => { try { return (SETTINGS_BODY[sec] || SETTINGS_BODY.general)(st) } catch (e) { console.error(e); return `<p class="error">This section couldn't be shown: ${esc(String((e && e.message) || e))}</p>` } })()
   if (own) return `<div class="settings"><aside class="set-side"><h1>Settings</h1><input class="search" id="set-q" placeholder="Search settings" value="${esc(S.setQuery || '')}" aria-label="Search settings">${nav}${pnav}</aside>
     <div class="set-main plug-main">${body}</div></div>`
   return `<div class="settings"><aside class="set-side"><h1>Settings</h1><input class="search" id="set-q" placeholder="Search settings" value="${esc(S.setQuery || '')}" aria-label="Search settings">${nav}${pnav}</aside>
@@ -2101,6 +2102,24 @@ function pluginOp(op, body = {}) {
   send({ cmd: 'plugin_op', op, ...body })
   setTimeout(() => loadPluginsView().then(render), 300)
 }
+/** One of a plugin's own settings (its manifest's `settings`): a switch, or a box saved when it changes; a
+ *  secret is never shown back, only whether it is set (an empty one forgets it). */
+function plField(id, d) {
+  const at = `data-pl-set="${esc(id)}" data-key="${esc(d.key)}"`
+  if (d.type === 'bool') return `<button class="sw${d.value ? ' on' : ''}" role="switch" aria-checked="${!!d.value}" aria-label="${esc(d.label)}" ${at} data-val="${!d.value}"></button>`
+  if (d.type === 'secret') return `<input class="set-in" type="password" ${at} placeholder="${d.set ? '•••• set — type to replace' : 'not set'}" aria-label="${esc(d.label)}" spellcheck="false" autocomplete="off">`
+  return `<input class="set-in" ${at} value="${esc(d.value == null ? '' : String(d.value))}" placeholder="${d.type === 'folder' ? '/path/to/folder' : ''}" aria-label="${esc(d.label)}" spellcheck="false">`
+}
+document.addEventListener('change', (e) => {
+  const t = e.target
+  if (!t.matches || !t.matches('input[data-pl-set]')) return
+  pluginOp('set', { id: t.dataset.plSet, key: t.dataset.key, value: t.value })
+  if (t.type === 'password') t.value = ''
+})
+document.addEventListener('click', (e) => {
+  const b = e.target.closest && e.target.closest('button[data-pl-set]')
+  if (b) pluginOp('set', { id: b.dataset.plSet, key: b.dataset.key, value: b.dataset.val === 'true' })
+})
 const plUses = (uses) => (uses || []).length ? `<ul class="pl-uses">${uses.map((u) => `<li>${esc(u)}</li>`).join('')}</ul>` : '<div class="set-sub">Uses nothing of Echo\'s.</div>'
 const plBusy = (p, key) => p.busy && p.busy[key]
 const plErr = (p, key) => p.errors && p.errors[key] ? `<div class="error">${esc(p.errors[key])}</div>` : ''
