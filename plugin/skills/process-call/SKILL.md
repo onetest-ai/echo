@@ -99,7 +99,7 @@ Name the speakers first (4a, if the transcript has "Speaker N" labels), then wri
   `transcript.md`; drop the hour when it is 0). One anchor per bullet, never a range: the turn
   that supports exactly that point — for a decision, where it was agreed; for an action, where
   it was committed — and of equally good turns, the first.
-  The live pane turns these into jumps into the transcript.
+  Echo's window turns these into jumps into the transcript.
 
 ### Shared screens (`frames`)
 If `frames` is non-empty, these are snapshots of what was on screen (slides, documents, demos),

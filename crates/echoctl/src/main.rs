@@ -690,10 +690,11 @@ enum CalendarCmd {
 enum ClaudeCmd {
     /// Install the Echo plugin into Claude Code (adds its marketplace first)
     Connect {
-        /// user = every session (default), project = shared via the repo, local = only you, in one repo
-        #[arg(long, default_value = "user", value_parser = ["user", "project", "local"])]
+        /// project = Echo's data folder, where Echo's sessions run (default); user = every Claude Code session;
+        /// local = one folder, only you
+        #[arg(long, default_value = "project", value_parser = ["user", "project", "local"])]
         scope: String,
-        /// The repo for project/local scope (default: the current directory)
+        /// The folder for project/local scope (default: Echo's data folder)
         #[arg(long)]
         project: Option<std::path::PathBuf>,
     },

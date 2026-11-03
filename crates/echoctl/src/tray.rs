@@ -1461,8 +1461,8 @@ impl Ui {
                 });
             }
             Action::ConnectClaude => {
-                std::thread::spawn(|| match app::connect_claude("user", None) {
-                    Ok(()) => app::notify("Claude Code connected", "New Claude Code sessions get Echo's live pane and /echo:process-call."),
+                std::thread::spawn(|| match app::connect_claude("project", None) {
+                    Ok(()) => app::notify("Claude Code connected", "Claude Code sessions in Echo's data folder get its status line and /echo:process-call."),
                     Err(e) => app::notify("Could not connect Claude Code", &format!("{e:#}")),
                 });
             }

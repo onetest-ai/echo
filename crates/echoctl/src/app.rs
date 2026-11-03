@@ -888,14 +888,20 @@ pub fn claude_status() -> Value {
     })
 }
 
-/// `echoctl claude connect`: add the marketplace and install the plugin at `scope`.
+/// `echoctl claude connect`: add the marketplace and install the plugin at `scope` — by default the project scope
+/// of Echo's data folder, where Echo's own Claude sessions run: Claude Code elsewhere doesn't need Echo.
 pub fn connect_claude(scope: &str, project: Option<&Path>) -> Result<()> {
     let Some(claude) = claude_bin() else {
         bail!("Claude Code is not installed (no `claude` command found) — see https://claude.com/claude-code");
     };
     let cwd = match project {
         Some(p) => p.to_path_buf(),
-        None => std::env::current_dir().unwrap_or_else(|_| user_home()),
+        None if scope == "user" => std::env::current_dir().unwrap_or_else(|_| user_home()),
+        None => {
+            let home = paths::home();
+            std::fs::create_dir_all(&home)?;
+            home
+        }
     };
     let run = |args: &[&str]| -> Result<String> {
         let out = Command::new(&claude).no_window().args(args).current_dir(&cwd).output()?;
