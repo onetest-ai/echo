@@ -844,13 +844,13 @@ fn drift_in(c: &Connection, t: &Taxonomy, snoozed: &Value) -> Result<Vec<Value>>
         let top_pct = top.as_ref().map(|(_, n)| pct(*n, tagged)).unwrap_or(0.0);
         let mut reasons: Vec<Value> = vec![];
         if judged >= DRIFT_MIN && pct(untagged, judged) > 10.0 {
-            reasons.push(json!({"rule": "nothing_fits", "text": format!("{}% of new sections fit no topic", pct(untagged, judged).round())}));
+            reasons.push(json!({"rule": "nothing_fits", "text": format!("{}% of its new sections fit no topic: its topics miss what the calls talk about now", pct(untagged, judged).round())}));
         }
         if judged >= DRIFT_MIN && tagged > 0 && top_pct > 40.0 {
-            reasons.push(json!({"rule": "catch_all", "text": format!("“{}” took {}% of the new ones", top_label.clone().unwrap_or_default(), top_pct.round())}));
+            reasons.push(json!({"rule": "catch_all", "text": format!("one topic, “{}”, took {}% of its new sections: too broad to tell them apart", top_label.clone().unwrap_or_default(), top_pct.round())}));
         }
         if l.built_from > 0 && calls >= 6 && calls >= 3 * l.built_from as i64 {
-            reasons.push(json!({"rule": "outgrown", "text": format!("built from {} call{}, now {calls}", l.built_from, if l.built_from == 1 { "" } else { "s" })}));
+            reasons.push(json!({"rule": "outgrown", "text": format!("its topics were built from {} call{}, but it has {calls} now", l.built_from, if l.built_from == 1 { "" } else { "s" })}));
         }
         let z = &snoozed[id];
         let held = z.is_object() && (judged as f64) < 1.5 * z["sections"].as_f64().unwrap_or(0.0) && (calls as f64) < 1.5 * z["calls"].as_f64().unwrap_or(0.0).max(1.0);

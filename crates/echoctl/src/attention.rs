@@ -254,7 +254,7 @@ pub fn collect() -> Collected {
     #[cfg(feature = "brain")]
     if brain_on {
         if crate::brain::taxonomy::current().is_some_and(|t| t.provisional()) {
-            out.push(item("taxonomy".into(), "brain", "echo", "Topics are provisional".into(), "Review the Brain's topics and terms, then accept them".into(), false, vec![], Some("brain/topics".into())));
+            out.push(item("taxonomy".into(), "brain", "echo", "Topics waiting for your review".into(), "Claude built topics nobody accepted yet: look through them in Brain → Topics, fix what's wrong, then Accept".into(), false, vec![], Some("brain/topics".into())));
         }
         // A topic in the wrong place (`taxonomy::moves`, no model): up to the practice, or down to a client.
         for m in crate::brain::taxonomy::moves().unwrap_or_default() {
@@ -271,9 +271,13 @@ pub fn collect() -> Collected {
         // A layer whose topics no longer fit its calls (`taxonomy::drift`, no model): rebuild it, or not now.
         for d in crate::brain::taxonomy::drift().unwrap_or_default().into_iter().filter(|d| d["stale"] == true) {
             let layer = d["layer"].as_str().unwrap_or("").to_string();
-            let why = d["reasons"].as_array().into_iter().flatten().filter_map(|r| r["text"].as_str()).collect::<Vec<_>>().join(" · ");
+            let mut why: String = d["reasons"].as_array().into_iter().flatten().filter_map(|r| r["text"].as_str()).map(|t| {
+                let mut c = t.chars();
+                c.next().map(|f| f.to_uppercase().chain(c).collect::<String>() + ". ").unwrap_or_default()
+            }).collect();
+            why.push_str("Rebuild makes a new version from its calls for you to review; its topics keep their place.");
             out.push(item(format!("drift:{layer}"), "brain", if layer == crate::brain::taxonomy::SHARED { "echo" } else { layer.as_str() },
-                format!("Topics for {} look out of date", d["name"].as_str().unwrap_or(&layer)), why, false,
+                format!("Topics for {} need a rebuild", d["name"].as_str().unwrap_or(&layer)), why, false,
                 vec![act("Rebuild topics", true, json!({"cmd": "brain_rebuild_topics", "layer": layer})), act("Not now", false, json!({"cmd": "brain_topics_snooze", "layer": layer}))],
                 Some("brain/topics".into())));
         }
