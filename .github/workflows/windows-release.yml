@@ -1,6 +1,6 @@
-# Echo for Windows on GitHub's runner: scripts/package-windows.ps1 in two phases, signed in between
-# through SignPath (https://signpath.io) once the repository has its settings, then the MSI and the
-# zip uploaded to the release.
+# Echo for Windows on GitHub's runner: scripts/package-windows.ps1 in two phases (stage, then zip and MSI), then
+# the MSI and the zip uploaded to the release. Not code-signed yet: a certificate (bought later) signs echoctl.exe
+# between the phases and the MSI after the second — the phases are split for that.
 #
 # - A release published (from the Mac, with the dmg): builds the tag, uploads the Windows assets.
 #   GitHub runs this file as it is in the tagged commit, so only tags made after it landed.
@@ -9,12 +9,6 @@
 # Nothing else builds: changes pile up on main and a release ships them. No cache either — a
 # release run (a new tag each time) could read none but main's — so every release builds from
 # scratch, ~25 minutes on GitHub's runner.
-#
-# Signing is on when the repository variable SIGNPATH_ORGANIZATION_ID is set, with the secret
-# SIGNPATH_API_TOKEN and the variables SIGNPATH_PROJECT_SLUG and SIGNPATH_POLICY_SLUG
-# (release-signing; test-signing for pull requests is not used). SignPath's artifact
-# configuration signs every .exe / .msi at the top of the artifact. Without them the files are
-# unsigned, as built by hand.
 name: Windows release
 
 on:
@@ -34,7 +28,6 @@ on:
 
 permissions:
   contents: write   # gh release upload
-  actions: read     # SignPath reads the uploaded artifact
 
 concurrency:
   group: windows-release-${{ github.event.release.tag_name || inputs.tag || github.ref }}
@@ -44,7 +37,6 @@ env:
   VULKAN_VERSION: 1.4.363.0
   WIX_VERSION: 5.0.2          # WiX 5: later versions carry a maintenance-fee EULA
   ECHO_BUILD_DIR: C:\eb       # short: the Vulkan shader generator's nested CMake hits MAX_PATH
-  SIGN: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
 
 jobs:
   windows:
@@ -109,70 +101,13 @@ jobs:
           & "$env:ECHO_STAGE_DIR\echoctl.exe" --version
           if ($LASTEXITCODE -ne 0) { throw "echoctl --version failed" }
 
-      # ── signing echoctl.exe (before it goes into the zip and the MSI) ──
-      - name: Upload echoctl.exe for signing
-        if: env.SIGN == 'true'
-        id: exe-unsigned
-        uses: actions/upload-artifact@v4
-        with:
-          name: unsigned-exe
-          path: ${{ env.ECHO_STAGE_DIR }}\echoctl.exe
-          if-no-files-found: error
-
-      - name: Sign echoctl.exe
-        if: env.SIGN == 'true'
-        uses: signpath/github-action-submit-signing-request@v1
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
-          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG }}
-          github-artifact-id: ${{ steps.exe-unsigned.outputs.artifact-id }}
-          wait-for-completion: true
-          output-artifact-directory: ${{ runner.temp }}\signed-exe
-
-      - name: Put the signed exe in the stage
-        if: env.SIGN == 'true'
-        shell: pwsh
-        run: |
-          $signed = "$env:RUNNER_TEMP\signed-exe\echoctl.exe"
-          if ((Get-AuthenticodeSignature $signed).Status -ne "Valid") { throw "the signed echoctl.exe has no valid signature" }
-          Copy-Item $signed "$env:ECHO_STAGE_DIR\echoctl.exe" -Force
+      # A code-signing step for echoctl.exe goes here, before it goes into the zip and the MSI.
 
       - name: Zip and MSI
         shell: pwsh
         run: ./scripts/package-windows.ps1 -Phase package
 
-      # ── signing the MSI ──
-      - name: Upload the MSI for signing
-        if: env.SIGN == 'true'
-        id: msi-unsigned
-        uses: actions/upload-artifact@v4
-        with:
-          name: unsigned-msi
-          path: dist\*.msi
-          if-no-files-found: error
-
-      - name: Sign the MSI
-        if: env.SIGN == 'true'
-        uses: signpath/github-action-submit-signing-request@v1
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
-          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG }}
-          github-artifact-id: ${{ steps.msi-unsigned.outputs.artifact-id }}
-          wait-for-completion: true
-          output-artifact-directory: ${{ runner.temp }}\signed-msi
-
-      - name: Put the signed MSI in dist
-        if: env.SIGN == 'true'
-        shell: pwsh
-        run: |
-          Get-ChildItem "$env:RUNNER_TEMP\signed-msi\*.msi" | ForEach-Object {
-            if ((Get-AuthenticodeSignature $_.FullName).Status -ne "Valid") { throw "$($_.Name) has no valid signature" }
-            Copy-Item $_.FullName dist\ -Force
-          }
+      # A code-signing step for the MSI goes here.
 
       - name: Keep the files
         uses: actions/upload-artifact@v4

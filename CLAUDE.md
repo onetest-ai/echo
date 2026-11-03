@@ -46,8 +46,9 @@ minutes").
   same files as a zip. CI: `.github/workflows/windows-release.yml` builds it on GitHub's runner when a release is
   published (or by hand for a tag) and uploads both; nothing else builds (changes pile up on `main`, a
   release ships them) and nothing is cached — every release builds from scratch, ~25 min; `-Phase stage` /
-  `package` split the script so SignPath signs `echoctl.exe` in between, then the MSI — on once the repository has
-  `SIGNPATH_*` settings, else unsigned as before.
+  `package` split the script so a code-signing step can sign `echoctl.exe` in between, then the MSI. Unsigned for now:
+  SignPath's free open-source signing wasn't granted (2026-11-03); a certificate will be bought later, and the site's
+  /windows/ page says what users see meanwhile (SmartScreen: More info → Run anyway).
 - Marketplace `echoctl` (`.claude-plugin/marketplace.json`): `claude plugin marketplace add
   onetest-ai/echo` + `claude plugin install echo@onetest --scope project|user|local` (project = the data folder, the default)
   (what `echoctl claude connect` runs; `ECHOCTL_MARKETPLACE` overrides the source).
