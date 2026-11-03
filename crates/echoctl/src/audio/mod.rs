@@ -604,7 +604,8 @@ mod tests {
         assert!(track.next_retry > Instant::now() + Duration::from_secs(1));
         assert_eq!(track.restarts, 2);
 
-        track.finish().unwrap();
+        let (_, err) = track.finish();
+        assert!(err.is_none(), "{err:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
