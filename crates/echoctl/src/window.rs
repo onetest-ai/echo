@@ -2347,6 +2347,37 @@ fn paste_bytes(text: String, bracketed: bool) -> Vec<u8> {
 /// (dev) Write what echo:// serves — the page, its assets, the API responses it loads first and
 /// each call's minutes page — into `dir`, so the UI can be reviewed in an ordinary browser
 /// (`python3 -m http.server`).
+/// `echoctl window --serve <port>` (dev): the page and its API answered live on 127.0.0.1, by the same `respond` as
+/// the window, so a browser shows real data with paging and search working. Only GETs; IPC isn't there.
+pub fn serve(port: u16) -> anyhow::Result<()> {
+    use std::io::{BufRead, BufReader, Write};
+    let listener = std::net::TcpListener::bind(("127.0.0.1", port))?;
+    println!("http://127.0.0.1:{}/", listener.local_addr()?.port());
+    for conn in listener.incoming().flatten() {
+        std::thread::spawn(move || {
+            let mut reader = BufReader::new(&conn);
+            let mut line = String::new();
+            if reader.read_line(&mut line).is_err() {
+                return;
+            }
+            // Skip the headers.
+            let mut h = String::new();
+            while reader.read_line(&mut h).is_ok_and(|n| n > 2) {
+                h.clear();
+            }
+            let path = line.split_whitespace().nth(1).unwrap_or("/").to_string();
+            let res = respond(&Request::builder().uri(format!("echo://localhost{path}")).body(Vec::new()).expect("request"));
+            let ctype = res.headers().get("Content-Type").and_then(|v| v.to_str().ok()).unwrap_or("application/octet-stream").to_string();
+            let status = res.status().as_u16();
+            let body = res.into_body();
+            let mut out = &conn;
+            let _ = write!(out, "HTTP/1.1 {status} OK\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+            let _ = out.write_all(&body);
+        });
+    }
+    Ok(())
+}
+
 pub fn export(dir: &Path) -> anyhow::Result<()> {
     let fetch = |path: &str| respond(&Request::builder().uri(format!("echo://localhost{path}")).body(Vec::new()).expect("request"));
     let get = |path: &str| -> Vec<u8> { fetch(path).into_body().into_owned() };
