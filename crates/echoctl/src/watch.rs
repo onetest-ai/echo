@@ -389,7 +389,7 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
                     // The arm is used up (taken above): retrying every second would only
                     // repeat the error (and the notification).
                     emit("error", json!({ "message": format!("could not start recording: {e:#}") }));
-                    crate::app::notify("Could not start recording", &format!("{e:#} — click Record to try again"));
+                    crate::app::notify("Could not start recording", &start_failed(meeting.as_ref(), &e));
                 }
             }
         }
@@ -455,6 +455,22 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
     let _ = fs::remove_file(file("watch.json"));
     emit("watch_stopped", json!({}));
     Ok(())
+}
+
+/// A recording that couldn't start: a meeting set to "Record when it starts" leaves the schedule
+/// too, or the watcher would arm it again the next second and fail (and notify) again until it
+/// ends. Returns the notification's text.
+fn start_failed(meeting: Option<&MeetingContext>, e: &anyhow::Error) -> String {
+    let scheduled = meeting
+        .and_then(|m| m.id.as_deref())
+        .filter(|id| crate::schedule::load().iter().any(|s| s.id.as_deref() == Some(*id)))
+        .is_some_and(|id| crate::schedule::remove_id(id).is_ok());
+    if scheduled {
+        let name = meeting.and_then(|m| m.subject.as_deref()).unwrap_or("this meeting");
+        format!("{e:#} — “{name}” is no longer set to record when it starts; click Record to try again")
+    } else {
+        format!("{e:#} — click Record to try again")
+    }
 }
 
 /// The profile a recording pins (`ai::pin`): the arm's choice, its meeting's, the default.
@@ -1301,6 +1317,28 @@ mod tests {
         stop().unwrap();
         assert!(read_json::<Armed>("armed.json").is_none());
         assert!(!crate::schedule::is_scheduled("ev1"));
+    }
+
+    #[test]
+    fn a_failed_start_unschedules_its_meeting_and_says_so() {
+        let (_env, _root) = crate::paths::testenv::folders("watch-start-failed");
+        let start = Utc::now() - chrono::Duration::seconds(30);
+        let m = MeetingContext {
+            id: Some("ev1".into()),
+            subject: Some("Weekly".into()),
+            start: Some(start.to_rfc3339()),
+            end: Some((start + chrono::Duration::minutes(30)).to_rfc3339()),
+            ..Default::default()
+        };
+        crate::schedule::add(m.clone()).unwrap();
+        assert!(crate::schedule::due(Utc::now()).is_some());
+        let e = anyhow::anyhow!("creating calls: read-only");
+        let text = start_failed(Some(&m), &e);
+        assert!(text.contains("“Weekly” is no longer set to record"), "{text}");
+        assert!(crate::schedule::due(Utc::now()).is_none(), "not armed again the next second");
+        // A meeting that wasn't scheduled (or none) just says to try again.
+        assert_eq!(start_failed(Some(&m), &e), "creating calls: read-only — click Record to try again");
+        assert_eq!(start_failed(None, &e), "creating calls: read-only — click Record to try again");
     }
 
     #[test]

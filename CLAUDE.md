@@ -313,7 +313,8 @@ without a sign-in: today's agenda). Each event carries `recorded` (a call matche
 id, or by subject within the event's time) and `scheduled`; calls matching no event come back
 as `calls`. "Record when it starts" → `schedule.rs` (`<home>/.echo/scheduled.json`): the watcher
 arms a scheduled meeting from 60 s before its start until its end; the entry is removed when
-its recording starts (stopping never re-arms it), when that arm is cancelled, or after the end.
+its recording starts (stopping never re-arms it), when that arm is cancelled, when its recording fails to start
+(one notification says so; no re-arm every second), or after the end.
 **A meeting nobody recorded, from its Teams transcript** (`teams_transcript.rs`): Calendar → an ended Teams event with
 no call → Import Teams transcript (IPC `calendar_import`, in the background — its state on the event, `import`; the
 outcome as a notification), ⌘K, `echoctl calendar import <event id | subject words> [--date]`. Graph: the event's
