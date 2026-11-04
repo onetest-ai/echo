@@ -61,7 +61,11 @@ minutes").
   the skills run the **sh** launcher there too (it handles MINGW paths via `cygpath`). Skills:
   `manage` (the CLI for clients, organisations, threads and their rules, the work ledger, people, calls, mail through
   `deliver`, the Brain — any session; `<echo_howto>` in Echo's window points to it; descriptions follow Anthropic's
-  skill best practices: third person, what it does, then "Use when…"), `process-call` (notes → actions → vocabulary →
+  skill best practices and Claude Code's skills docs: each description starts "Use when…" — the user's call — then what
+it does, the triggers of different skills don't overlap, SKILL.md stays short with commands in `reference.md` /
+`calls-and-settings.md` one level deep; `process-call` stays one file: a minutes run's guard reads only the call's
+folder), `brain` (search scoped by client / thread, numbers, topics and terms, senders, insights), `microsoft-365`
+(`echoctl m365`), `process-call` (notes → actions → vocabulary →
   follow-ups), `record` (arm / stop from chat), `doctor` (`echoctl up` + fix what's missing: data folder,
   permissions, model, languages; first run itself is the app's). The user's own notes during a
   call (`my-notes.md`) come from the window's Notes tab (during and after a call) or the tray's "Add a note…" while
@@ -974,6 +978,23 @@ whose manifest names the kind (`uses.deliver_provider.kinds`), its readiness tol
 (`jshost::providers`); `deliver::send` hands such a message to that plugin (`jshost::provider_send` → its `__deliver`
 command). Telegram is one (its package: bot token as its secret setting, pairing, sending through `ctx.http.fetch` to
 `api.telegram.org` only — `uses.network.hosts` —, Markdown → Telegram HTML with tables as lines). Settings → **Sends to you** (its own section, `#settings/deliver`, `/api/deliver`) lists Teams, Mail and the plugins' ways; `echoctl deliver status|test <kind>|send`.
+
+## Microsoft 365 for Claude sessions (`m365.rs`, `echoctl m365`, the plugin's `microsoft-365` skill)
+Mail, Teams, files and people on Echo's own sign-in — no msgraph skill or connector (2026-11-04: sessions got lost
+between them). The registration's token carries every scope the tenant consented (measured: Mail.Send / ReadWrite,
+Chat.ReadWrite, ChannelMessage.Send, Files.ReadWrite, Sites, People…), so `graph::request(method, path, Body, save_to,
+headers)` reaches all of it. `search` = the Search API (`/search/query`), one request per kind (mail = message, chats =
+chatMessage, files = driveItem: OneDrive and SharePoint), Microsoft's ranking, KQL passed through, `--from`, `--days`;
+a mail hit's id is the hit's `hitId`. `mail read [--thread]` / `send` / `reply [--all]` / `draft`; `teams chats
+[--with]` / `read` (the newest N of whole pages) / `send --to <address>` (their 1:1 chat through `POST /chats` with
+`users('<address>')` — no User.Read.All; made only on `--yes`, it is visible to them) or `--chat <id>` (`48:notes` =
+the user's own) / `list` / `channel` / `post`; `people`; `drive list` / `download <ref | path | id>` / `upload`; `get`
+(any GET; ConsistencyLevel only for `$search` / `$count`). **Nothing leaves without `--yes`**: without it, `{sent:
+false, would}`; a run Echo started (`ECHOCTL_HEADLESS`) can't send. The skill: search → open the best hits → search
+again in other words → answer with links; a send whose recipient and words the user gave is their yes, anything
+Claude chose is shown and waits. Measured on the account: search over all three kinds, mail / thread / chat reads,
+a Teams message and a mail to the user, an upload read back byte for byte; real sessions picked the skill (Sonnet
+answered a "what was decided" across a chat and mail; Haiku and Sonnet stopped at a drafted mail).
 
 ## The mod: a status line (and automation)
 `plugin/hooks/register.tsx` is a Claude Code mod (state contract `plugin/types/index.d.ts`, pure helpers

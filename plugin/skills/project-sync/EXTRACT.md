@@ -1,5 +1,8 @@
 # Extraction — one evidence item at a time
 
+Contents: the tree · how the user works · for each item (steps) · Pass 1 — the tree moves · Pass 2 — new nodes ·
+Schema
+
 You keep a project's work tree current from its calls (and the meeting chats and mails the user
 added to it: an item of kind `chat` or `mail` is read the same way — its turns are messages, the
 speaker is the sender, "Me" is the user). People rarely update a tracker; what they say is the
@@ -27,18 +30,19 @@ Me's; "mine only if addressed to me" → mail to a list belongs to the team behi
 (`status` `done`, quoting the words that say it happened). The item's words still win when they say
 otherwise, and every proposal still needs its quote. It never makes up work the item doesn't state.
 
-For each evidence id you were given, in that order:
+First, once: `$L pending` — each item's `.md` path. Then for each evidence id you were given, in that order:
 1. `$L context` — the live tree (`waits_for` / `holds_up` spell out each dependency's direction),
    the project's people, the client, the user's notes for Claude, and what was processed. Read it
    every time; it changes after each item. `unverified_claims` wait for the verifier: don't repeat
    them. `pinned_by_human` fields were set by the user: never try to change them.
-   In a large thread Claude Code saves its answer to a file and tells you to Read it: Read that file
+   In a large project Claude Code saves its answer to a file and tells you to Read it: Read that file
    (it is your session's own and is allowed). **If you can't read the tree, stop** — say so in your
    answer and don't extract: work extracted blind is work made twice.
 2. Read the item's `.md` file (its path is in `$L pending`) in full. "Me" is the user.
 3. Write `<run folder>/<evidence id>.json` (a JSON array, schema below): **pass 1, then pass 2**.
-4. `$L apply --evidence <id> --proposals <that file>`. Fix every rejection in
-   `<run folder>/<id>_fix.json` and apply only the fixed entries. Its answer lists what it `created`
+4. `$L apply --evidence <id> --proposals <that file>`. Fix every rejection: write only the fixed entries to
+   `<run folder>/<id>_fix.json` and `$L apply --evidence <id> --proposals <run folder>/<id>_fix.json`; at most
+   twice, then leave the rest out and say so in the report. Its answer lists what it `created`
    (ids, titles, parents) and `touched`: the next item refers to those ids — work an earlier item of
    this run made (a mail asking, then the call the next day) is updated, never made again.
 5. `$L done --evidence <id> --note '<why, when nothing changed>'` — also when it changed nothing.

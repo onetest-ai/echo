@@ -1,14 +1,13 @@
 ---
 name: process-call
-description: "Turns a recorded Echo call into a transcript and minutes: transcribes on-device, writes notes from a template (summary, decisions, action items, open questions), structured action items and vocabulary fixes for misheard names and terms. The Echo app runs it by itself after a call. Use when the user asks to process, transcribe, summarize or re-run a call, or types /echo:process-call."
+argument-hint: "[call folder | latest]"
+description: "Use when the user asks to process, transcribe, summarize or write the minutes of a recorded Echo call again, and when the Echo app runs it after a call. Transcribes on-device, then writes minutes from a template (summary, decisions, action items, open questions), structured action items and vocabulary fixes for misheard names."
 ---
 
 # echo: process a call
 
-Runs **unattended**: the Echo app starts it by itself 15 minutes after a call (or after the
-user's last note), or when the user asks (Write minutes). Do every step without asking the user
-anything; the only thing that waits for them is the follow-up offers at the end, and nothing is
-ever sent without an explicit yes.
+The call: $ARGUMENTS (none given: `latest`). Do every step without asking the user anything; only
+the follow-up offers at the end wait for them, and nothing is sent without an explicit yes.
 
 **Started by the Echo app** (`ECHOCTL_HEADLESS` is set, nobody is watching): the app claimed the
 call already, `echoctl` is on PATH, and only the Echo CLI's `context`, `actions`, `speakers`, `title`,
@@ -46,7 +45,7 @@ deal with, how they like notes and follow-ups written. Follow it for tone, empha
 
 - If `summarize` is false: don't write notes or the action items (step 5), and leave any frames
   alone. A call with frames is always summarized: the shared screens are content even when little
-  was said. Tell the user in one line (`skip_reason`) and stop after step 6 (title).
+  was said. Tell the user in one line (`skip_reason`), skip steps 3–5, do step 6 (title), then stop.
   **Unless the user asked for them explicitly** (the app's prompt says so, or the user asked you in
   this session): then write the notes anyway — the gate only keeps short calls from getting notes
   automatically. Not when `skip_reason` says there is no transcript yet: step 1 first.
@@ -56,6 +55,18 @@ deal with, how they like notes and follow-ups written. Follow it for tone, empha
 follow (user templates in `<data folder>/.echo/templates/` override the built-in ones).
 
 ## 4. Write `<dir>/notes.md`
+
+### 4a. First: name the speakers (only if the transcript has "Speaker N" labels)
+Echo already names voices from Teams' own speaking marker where it could; the rest are
+"Speaker N". `echoctl speakers <dir>` lists them: `id`, `label` (what the transcript shows),
+speaking time, first lines. Never rename a speaker whose label is already a person's name. Give a "Speaker N" a name when
+the transcript is clear about it — they introduce themselves ("this is Lena"), or someone
+addresses them by name and that speaker answers — and the name is one of the attendees
+(`colleagues` / `external`) or said in full on the call. Then run
+`echoctl speakers <dir> 2="Lena Varga" 3="Kim Ito"` (it rewrites the transcript's labels).
+Leave the others as "Speaker N"; never guess from who talked most or from the invite order. Do
+this before writing the notes, and use the names in them.
+
 Name the speakers first (4a, if the transcript has "Speaker N" labels), then write:
 - Start with `# {title}` and one line: date, duration, participants (colleagues, then external).
 - **If the user took notes** (`user_notes`): their notes are the backbone. Keep every point
@@ -127,27 +138,16 @@ for anything not already covered by the spoken notes. Written commitments are ac
 Senders are real names: they can also confirm who a remote speaker was when the transcript
 shows the same point being made. Skip greetings and "joining in 2 min".
 
-### 4a. Name the speakers (only if the transcript has "Speaker N" labels)
-Echo already names voices from Teams' own speaking marker where it could; the rest are
-"Speaker N". `echoctl speakers <dir>` lists them: `id`, `label` (what the transcript shows),
-speaking time, first lines. Never rename a speaker whose label is already a person's name. Give a "Speaker N" a name when
-the transcript is clear about it — they introduce themselves ("this is Lena"), or someone
-addresses them by name and that speaker answers — and the name is one of the attendees
-(`colleagues` / `external`) or said in full on the call. Then run
-`echoctl speakers <dir> 2="Lena Varga" 3="Kim Ito"` (it rewrites the transcript's labels).
-Leave the others as "Speaker N"; never guess from who talked most or from the invite order. Do
-this before writing the notes, and use the names in them.
-
-## 5. Write the action items: `<dir>/actions.new.json`, then `echoctl actions <dir> --apply`
-The action items from the notes, as a JSON array, written to `<dir>/actions.new.json` (never to
-`actions.json` itself):
+## 5. Write the action items, then `echoctl actions <dir> --apply <file>`
+The action items from the notes, as a JSON array, written to the file the app's prompt names
+(`actions.new-<run>.json`), else `<dir>/actions.new.json` — never to `actions.json` itself:
 `[{"id": "<kept from the current list, or none>", "task": "...", "owner": "Me" | "<name>" | null,
    "due": "<as stated>" | null, "confidence": "high" | "low", "quote": "<short supporting quote>",
    "t": <seconds into the call where it was said>, "status": "todo"}]`
-then run `echoctl actions <dir> --apply <dir>/actions.new.json`. It replaces `actions.json`, keeps
+then run `echoctl actions <dir> --apply <that file>`. It replaces `actions.json`, keeps
 the status the user gave each item meanwhile (they tick items off in Echo's window, also
 while you work), gives new items an id and removes `actions.new.json`; if it says the list is
-malformed, fix the file and run it again. On a re-run (`actions.json` exists: `echoctl actions
+malformed, fix the file and run it again until it applies. On a re-run (`actions.json` exists: `echoctl actions
 <dir>` prints it), keep each item's `id` when your item is the same action — even reworded — and
 give new actions none.
 `owner` is whoever committed. A spoken "I will…" belongs to the speaker who said it: `"Me"` only
@@ -162,17 +162,15 @@ specific one-line title (≤ 60 chars, no trailing punctuation) and run
 in a session; in a run the Echo app started, when the run ends): use that path.
 
 ## 7. Vocabulary (automatic — never ask)
-Echo spells names and jargon better when they are in the call's vocabulary. A term you learn
-here is used again only in calls with this meeting's subject or mostly these people, or whose
+A term you learn here is used again only in calls with this meeting's subject or mostly these people, or whose
 invite names it (`context.vocabulary` is this call's list). Learn from
 this call: names of people, products, tools, companies, projects and acronyms that the
 transcript **misspelled or garbled**, when you are confident of the right spelling (it appears
 in `meeting`/invite, it is a well-known product clearly meant from context — e.g. "as no is used
 internally for operations" → ServiceNow — or the speakers spell it out). Also add correctly
 transcribed but rare names that will recur (e.g. a project codename).
-- Add them yourself: `echoctl vocab add --call <dir> "ServiceNow" "Miro" …` (it validates: 2–50
-  chars, ≤ 6 words, deduped, capped at 100 with the oldest dropped). Never `--always`: that list
-  is the user's.
+- Add them yourself: `echoctl vocab add --call <dir> "ServiceNow" "Miro" …`. Never `--always`: that
+  list is the user's.
 - Don't add common words, guesses, anything only said once in passing, or a term that was only
   *written* by the transcript (it appears where it makes no sense: the recognizer put it there).
 - Never edit `transcript.md`; corrections go only into `transcript.corrected.md` if the user
@@ -188,13 +186,11 @@ the minutes page, if one was written), and one line "Learned: X, Y (undo: `echoc
 if step 7 added terms.
 
 Then **always** offer concrete follow-ups, numbered, tailored to this call — for example:
-1. post the notes to the meeting's Teams chat;
-2. create To Do tasks for my action items (with due dates);
-3. draft a follow-up email to the attendees (recap + action items + owners) — on yes, write the
-   body to `<dir>/follow-up.md` and open it in the user's mail app with `echoctl compose --to
-   <emails> [--cc …] --subject "…" --body-file <dir>/follow-up.md` (the user sends it there; mark
-   external recipients — other email domains — in your message before opening);
-4. schedule the follow-up meeting that was agreed.
-Use msgraph for the others when available. Draft first and show the draft; send or create only after
-the user says yes to that specific item ("1", "send it"). If msgraph isn't available, offer the
-drafts as text to copy.
+1. post the notes to the meeting's Teams chat (`echoctl m365 teams send --chat <its chat id> --file <dir>/notes.md
+   --ai <your model>`; the `echo:microsoft-365` skill);
+2. draft a follow-up mail to the attendees — recap, action items, owners: write it to `<dir>/follow-up.md`, then
+   `echoctl m365 mail draft --to <emails> --subject "…" --file <dir>/follow-up.md --ai <your model>` (an Outlook draft
+   for the user to send; mark external recipients — other mail domains — in your message first);
+3. put the action items into the call's thread as tasks (the `echo:manage` skill).
+Draft first and show it; send or create only after the user says yes to that item ("1", "send it"). Not signed in to
+Microsoft 365: `echoctl compose --to … --subject "…" --body-file <dir>/follow-up.md` opens it in their mail app.
