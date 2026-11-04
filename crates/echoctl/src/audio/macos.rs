@@ -14,7 +14,7 @@ use std::sync::mpsc::{self, Sender};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Result};
-use objc2::rc::Retained;
+use objc2::rc::{autoreleasepool, Retained};
 use objc2::AnyThread;
 use objc2_core_audio::*;
 use objc2_core_audio_types::{AudioBufferList, AudioStreamBasicDescription, AudioTimeStamp};
@@ -121,7 +121,8 @@ unsafe fn get_vec_scoped<T: Copy>(
 unsafe fn get_string(obj: AudioObjectID, selector: AudioObjectPropertySelector) -> Result<String> {
     let raw: *mut NSString = get(obj, selector)?;
     match Retained::from_raw(raw) {
-        Some(s) => Ok(s.to_string()),
+        // `to_string` autoreleases its UTF-8 copy: drained here, as the health checks poll from worker threads.
+        Some(s) => Ok(autoreleasepool(|_| s.to_string())),
         None => Ok(String::new()),
     }
 }

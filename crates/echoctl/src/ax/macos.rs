@@ -13,7 +13,7 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Result};
-use objc2::rc::Retained;
+use objc2::rc::{autoreleasepool, Retained};
 use objc2_foundation::NSString;
 use serde_json::{json, Map, Value};
 
@@ -83,11 +83,15 @@ impl Element {
         (err == 0 && !out.is_null()).then_some(out)
     }
 
+    /// In a pool of its own: the readers run on worker threads whose pool never drains, and both AX and the
+    /// UTF-8 conversion autorelease — hours of polling held gigabytes (2026-11-04: 7.6 GB after 2.5 h).
     fn attr(&self, name: &str) -> Option<Attr> {
-        let v = self.raw(name)?;
-        let out = unsafe { convert(v) };
-        unsafe { CFRelease(v) };
-        out
+        autoreleasepool(|_| {
+            let v = self.raw(name)?;
+            let out = unsafe { convert(v) };
+            unsafe { CFRelease(v) };
+            out
+        })
     }
 
     pub fn string(&self, name: &str) -> Option<String> {
