@@ -1,6 +1,6 @@
 ---
 name: process-call
-description: Turn a recorded Echo call into a transcript and useful notes — transcribe on-device, then write notes from a template (summary, decisions, action items, open questions), structured action items, and vocabulary fixes for misheard names and terms. The Echo app runs it by itself after a call; use it when the user asks to process, transcribe, summarize or re-run a call.
+description: "Turns a recorded Echo call into a transcript and minutes: transcribes on-device, writes notes from a template (summary, decisions, action items, open questions), structured action items and vocabulary fixes for misheard names and terms. The Echo app runs it by itself after a call. Use when the user asks to process, transcribe, summarize or re-run a call, or types /echo:process-call."
 ---
 
 # echo: process a call

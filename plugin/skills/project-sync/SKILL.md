@@ -1,6 +1,6 @@
 ---
 name: project-sync
-description: Keep an Echo project's work ledger and stakeholder map current from its calls — stories, tasks, decisions, risks and open questions, each change citing the words that caused it, an independent check of every claimed change, then who's who (roles, stances, reporting lines, organisations) as proposals for the user. The Echo app runs it by itself (extract, verify, people, as separate runs); use it only when Echo's prompt names a project and a mode.
+description: "Keeps an Echo thread's work ledger and stakeholder map current from its calls: stories, tasks, decisions, risks and open questions, each change citing the words that caused it; an independent check of every claimed change; then who's who (roles, stances, reporting lines, organisations) as proposals for the user. The Echo app runs it by itself as separate extract, verify and people runs. Use only when Echo's prompt names a project and a mode."
 ---
 
 # echo: project sync

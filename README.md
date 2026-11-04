@@ -111,8 +111,9 @@ Minutes, action items and follow-ups are written by [Claude Code](https://claude
    plugin is installed. [docs/install.md](docs/install.md) has the steps.
 2. Optional: menu → **Claude Code → Connect Claude Code** installs the Echo plugin for Claude Code
    sessions in Echo's data folder (`echoctl claude connect --scope user` for every session): a status
-   line above the prompt, `/echo:process-call`, `/echo:record` and `/echo:doctor` (it checks Echo and
-   fixes what's missing if something doesn't work).
+   line above the prompt, `/echo:process-call`, `/echo:record`, `/echo:doctor` (it checks Echo and
+   fixes what's missing if something doesn't work) and `echo:manage` (clients, threads, work, calls and mail
+   through Echo's command line, from any Claude Code session).
 
 From then on, Echo writes the minutes by itself, **15 minutes after the call** (or after your
 last note, if you are still typing): it runs Claude Code in the background on your Mac with its

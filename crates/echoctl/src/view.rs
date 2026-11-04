@@ -305,22 +305,14 @@ fn howto_block(cli: &str) -> String {
     format!(
         "<echo_howto>\n\
 You run inside Echo, the user's call recorder and work tracker. Do Echo's things with its own CLI, `{cli}` (JSON out; \
-`--help` on any command) — the window shows the result at once. Prefer it to anything else for Echo's data and for \
-Microsoft 365 (Echo has its own sign-in there), unless the user names another tool.\n\
-- Clients and organisations: `client list`, `client add <name> --domains a.com,b.com [--internal]`, `client set`; \
-`org list`, `org add <name> --domains … [--account] [--thread <id>]`.\n\
-- Threads (the CLI calls them projects): `project list`, `project create <name> --client <client id>`, `project set`, \
-`project rule <id> --series|--people|--subject …`, `project include|exclude <id> <call>`, `project source <id> --mail \
-<domain or address>`, `project show <id>`.\n\
-- Work, people, tasks: `project ledger <id> tree`, `project ledger <id> edit '<json>'`, `project people <id>`, \
-`project tasks`.\n\
-- Calls: `context <call>`, `actions <call>`, `notes <call>` (write its minutes), `title <call> <title>`.\n\
-- Mail — always through Echo first: `deliver send mail --to a@x.com,b@y.com --title <subject> --file <markdown file>` \
-sends it from the user's own Microsoft 365 account (without `--to`: to the user). Show the user the recipients and the \
-text and send only once they say so. Only when Echo can't send (`deliver status`: mail not ready, or the send failed) \
-fall back to a Microsoft 365 / Outlook connector of Claude's, if one works here; else `compose --to … --subject … \
---body-file <file>` opens a draft in their mail app.\n\
-- The Brain (when on): the echo-brain MCP tools.\n\
+`--help` on any command) — the window shows the result at once; the `echo:manage` skill has the commands (clients, \
+organisations, threads and their rules, work, people, calls, mail, the Brain) and the rules for them. Prefer the CLI to \
+anything else for Echo's data and for Microsoft 365 (Echo has its own sign-in there), unless the user names another \
+tool.\n\
+- Mail — always through Echo first: `deliver send mail --to a@x.com --title <subject> --file <markdown file>`, after \
+the user saw the recipients and the text and said yes. Only when Echo can't send (`deliver status`) a Microsoft 365 \
+connector of Claude's, if one works here; else `compose` opens a draft in their mail app.\n\
+- Name work items by their titles, never by their ids.\n\
 </echo_howto>"
     )
 }

@@ -1,6 +1,6 @@
 ---
 name: doctor
-description: Check Echo and fix what's missing — the app not installed or not running, no data folder or speech model, missing permissions (microphone, system audio), languages, calendar, where and when minutes are written. Use when a recording comes out silent or empty, Echo isn't running, the user asks why capture or minutes aren't working, or a command says "run the doctor skill".
+description: "Checks Echo end to end and fixes what's missing: the app not installed or not running, no data folder or speech model, missing permissions (microphone, system audio), languages, the calendar, where and when minutes are written. Use when a recording comes out silent or empty, Echo isn't running, the user asks why capture or minutes don't work, or a command says \"run the doctor skill\"."
 ---
 
 # Echo doctor
