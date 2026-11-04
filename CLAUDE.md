@@ -232,7 +232,7 @@ read now (or a sign-in not checked yet) keeps its items open as they were; one s
 not checked yet, failed minutes older than 14 days leave quietly. Nothing to mark read. Collected at most every 20 s,
 one collection at a time (`?fresh=1` after an action); `echoctl attention` only reads (a terminal sees neither the
 app's sign-in checks nor its update check). The page shows ≤ 5 of a kind per group ("N more like these").
-**Settings** (activity, `#settings/<section>`): General, Recording, Transcription, AI & minutes, Calendar & chat,
+**Settings** (activity, `#settings/<section>`): General (with **Appearance** — System / Light / Dark, this computer's window: `Theme`, the webview's `echo.theme`; the CSS's `:root[data-theme]`, graphs and terminals drawn again, the Minutes frame's page served with its dark rules switched on or off — `minutes::with_theme`, `?theme=`), Recording, Transcription, AI & minutes, Calendar & chat,
 About me (name, email, and `me.md` — the profile the minutes read — shown rendered by `minutes::markdown_html`, the
 minutes' safe writer, line by line, and edited in place: `settings_set me_profile`), Layout, Health (a ⚠ badge counts
 required permissions missing). **Vocabulary** is a panel view (the book beside Calls' heading, ⌘K; the old

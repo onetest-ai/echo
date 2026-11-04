@@ -493,7 +493,8 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
             }
         }
         p if p.starts_with("/minutes/") => match call_dir(&p["/minutes/".len()..]).map(|d| crate::minutes::render_for_window(&d)) {
-            Some(Ok((html, csp))) => page_reply(html, &csp),
+            // The window's theme when the user chose one (Settings → General → Appearance), else the system's.
+            Some(Ok((html, csp))) => page_reply(crate::minutes::with_theme(html, query_param(req.uri().query().unwrap_or(""), "theme").as_deref()), &csp),
             Some(Err(e)) => reply(500, "text/plain; charset=utf-8", format!("The minutes can't be shown: {e:#}").into_bytes()),
             None => reply(404, "text/plain", b"no such call".to_vec()),
         },

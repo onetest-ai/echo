@@ -85,6 +85,19 @@ pub fn render_for_window(dir: &Path) -> Result<(String, String)> {
     page(dir, true)
 }
 
+/// The page in a theme the user chose in Echo's window (`light` / `dark`), whatever the system's: its dark rules are
+/// written for the system's appearance (`prefers-color-scheme`), so they are switched on or off as a whole, and the
+/// diagrams follow. Anything else: as the system says.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn with_theme(html: String, theme: Option<&str>) -> String {
+    let (media, js) = match theme {
+        Some("dark") => ("@media all", "true"),
+        Some("light") => ("@media not all", "false"),
+        _ => return html,
+    };
+    html.replace("@media (prefers-color-scheme: dark)", media).replace("matchMedia('(prefers-color-scheme: dark)').matches", js)
+}
+
 /// Bumped when the page's rendering changes, so an open Minutes tab shows the new one.
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 const RENDER_VERSION: u32 = 8;
