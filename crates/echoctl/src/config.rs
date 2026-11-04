@@ -68,6 +68,10 @@ pub struct Config {
     /// words under the guard, nor any run Echo starts. Default: off.
     #[serde(default)]
     pub folder_skip_permissions: bool,
+    /// macOS: no Dock icon while the Echo window is closed — Echo only in the menu bar, as before 0.7.8. Off by
+    /// default: a full menu bar hides icons, and Echo then looked gone.
+    #[serde(default)]
+    pub hide_dock_icon: bool,
     /// Calls that ended before this are never written automatically (set when the switch is first
     /// on, and again on each off → on), so turning it on doesn't send a backlog of calls to a model.
     #[serde(default, skip_serializing_if = "Option::is_none")]

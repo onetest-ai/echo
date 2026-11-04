@@ -294,7 +294,10 @@ fn act(step: Step, l: &mut Leaving, win: &mut Option<crate::window::EchoWindow>,
                 terminate::cancelled();
             }
         }
-        Step::CloseWindow => *win = None,
+        Step::CloseWindow => {
+            *win = None;
+            apply_dock(false);
+        }
     }
     if l.asking_quit() != l.asking_file {
         l.asking_file = l.asking_quit();
@@ -1738,7 +1741,8 @@ mod terminate {
 fn go(then: Then, win: &mut Option<crate::window::EchoWindow>, stop: &Arc<AtomicBool>, ui: &mut Option<Ui>) -> bool {
     match then {
         Then::CloseWindow => {
-            *win = None; // closing the window leaves Echo running, in the menu bar and the Dock
+            *win = None; // closing the window leaves Echo running, in the menu bar (and the Dock unless hidden)
+            apply_dock(false);
             false
         }
         Then::Quit | Then::QuitAsked => {
@@ -1781,6 +1785,28 @@ fn thaw(win: &Option<crate::window::EchoWindow>) {
     }
 }
 
+/// Settings → General → "Hide from the Dock when the window is closed".
+fn dock_hidden() -> bool {
+    Config::load().is_ok_and(|c| c.hide_dock_icon)
+}
+
+/// macOS: the Dock icon as the setting and the window say — shown while the window is open, else unless hidden.
+/// On the event loop's (main) thread; elsewhere it does nothing.
+fn apply_dock(window_open: bool) {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
+        let Some(mtm) = objc2_foundation::MainThreadMarker::new() else { return };
+        let policy = if window_open || !dock_hidden() { NSApplicationActivationPolicy::Regular } else { NSApplicationActivationPolicy::Accessory };
+        let app = NSApplication::sharedApplication(mtm);
+        if app.activationPolicy() != policy {
+            app.setActivationPolicy(policy);
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = window_open;
+}
+
 /// Open the Echo window, or bring it forward (on `call` when one is named).
 fn show_window(target: &tao::event_loop::EventLoopWindowTarget<UiEvent>, win: &mut Option<crate::window::EchoWindow>, call: Option<&str>, proxy: &tao::event_loop::EventLoopProxy<UiEvent>) {
     match win {
@@ -1796,6 +1822,7 @@ fn show_window(target: &tao::event_loop::EventLoopWindowTarget<UiEvent>, win: &m
             let p = proxy.clone();
             match crate::window::open(target, call, move |m| drop(p.send_event(UiEvent::Ipc(m)))) {
                 Ok(w) => {
+                    apply_dock(true);
                     w.window.set_focus();
                     *win = Some(w);
                 }
@@ -1836,7 +1863,8 @@ pub fn run(app: TargetApp, stop: Arc<AtomicBool>) -> ! {
         // A Dock icon for as long as Echo runs, not only the menu bar's: macOS hides menu-bar icons
         // that don't fit (beside the notch, many of them), and Echo then looked gone. Its click opens
         // the window. Echo.app stays `LSUIElement`, so the CLI from the same binary never shows one.
-        event_loop.set_activation_policy(ActivationPolicy::Regular);
+        // Settings → General → Hide from the Dock (off by default): only while the window is open.
+        event_loop.set_activation_policy(if dock_hidden() { ActivationPolicy::Accessory } else { ActivationPolicy::Regular });
         event_loop.set_activate_ignoring_other_apps(false); // starting at login never takes the focus
         crate::app::notifications::init();
     }
