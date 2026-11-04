@@ -415,16 +415,28 @@ fn clock(secs: f64) -> String {
     format!("{:02}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60)
 }
 
-/// A call as an evidence item: its transcript (turns), chat and the user's notes (text).
-pub fn call_item(dir: &Path) -> Option<Value> {
+/// A call as an evidence item: its transcript (turns), chat and the user's notes (text). A memo split by thread
+/// (`memo.rs`) gives `thread` only its part: what the user said about another thread never becomes this one's work.
+pub fn call_item(dir: &Path, thread: Option<&str>) -> Option<Value> {
     let meta = calls::read_json(&dir.join("meta.json"));
     let started = meta["started_at"].as_str()?.to_string();
     let date = chrono::DateTime::parse_from_rfc3339(&started).ok()?.with_timezone(&Local).date_naive().to_string();
     let segs = calls::read_json(&dir.join("segments.json"));
+    // A memo split by thread: this thread's parts only. A thread the split didn't name gets the whole memo only when
+    // the user put it there by hand; one it reaches through its rules gets nothing.
+    let spans = match thread.and_then(|t| crate::memo::parts_for(dir, t).map(|s| (t, s))) {
+        Some((t, s)) if s.is_empty() && !crate::memo::whole_for(dir, t) => return None,
+        Some((_, s)) if !s.is_empty() => Some(s),
+        _ => None,
+    };
+    let within = |s: &Value| {
+        let at = s["start"].as_f64().unwrap_or(0.0);
+        spans.as_ref().is_none_or(|sp| sp.iter().any(|&(a, b)| at >= a && at < b))
+    };
     let turns: Vec<Value> = segs
         .as_array()?
         .iter()
-        .filter(|s| s["text"].as_str().is_some_and(|t| !t.trim().is_empty()))
+        .filter(|s| s["text"].as_str().is_some_and(|t| !t.trim().is_empty()) && within(s))
         .map(|s| {
             let who = match s["speaker"].as_str() {
                 Some("me") | Some("mic") => "Me".to_string(),
@@ -456,6 +468,10 @@ pub fn call_item(dir: &Path) -> Option<Value> {
         }
     }
     let stamp = calls::stamp_of(dir);
+    if crate::memo::is_memo(dir) {
+        text.insert(0, format!("## A memo\nThe user alone, thinking aloud — not a meeting: what they say they will do is theirs (\"Me\") unless \
+                                they name someone.{}", if spans.is_some() { " Only its part about this thread is here." } else { "" }));
+    }
     Some(json!({
         "id": stamp, "kind": "meeting", "source": "call", "at": started, "date": date,
         "title": meta["title"].as_str().unwrap_or(&stamp), "call": dir.file_name().map(|n| n.to_string_lossy().into_owned()),
@@ -991,7 +1007,7 @@ pub fn sync(project: &str, limit: Option<usize>) -> Result<Vec<String>> {
     let mut written = vec![];
     let mut requeue = vec![];
     for d in dirs {
-        let Some(item) = call_item(&d) else { continue };
+        let Some(item) = call_item(&d, Some(project)) else { continue };
         let id = item["id"].as_str().unwrap_or("").to_string();
         let path = l.dir.join("evidence").join(format!("{id}.json"));
         let body = serde_json::to_vec_pretty(&item)?;

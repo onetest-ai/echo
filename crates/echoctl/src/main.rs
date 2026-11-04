@@ -14,6 +14,7 @@ mod calls;
 mod config;
 mod deliver;
 mod m365;
+mod memo;
 #[cfg(any(target_os = "macos", windows))]
 mod frames;
 #[cfg(feature = "transcribe")]
@@ -414,6 +415,11 @@ enum Cmd {
     },
     /// Stop the current recording (or, when nothing records, cancel the pending arm)
     Stop,
+    /// Memos: record yourself, no call needed — start, stop; its threads are found from what you said
+    Memo {
+        #[command(subcommand)]
+        cmd: MemoCmd,
+    },
     /// Watcher / arm / agenda state as JSON
     Status,
     /// Preflight in one step: app installed/running, permissions, model, agenda (JSON)
@@ -1073,6 +1079,27 @@ enum DeliverCmd {
         /// Mail to these addresses instead of you (comma-separated)
         #[arg(long, default_value = "")]
         to: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum MemoCmd {
+    /// Record a memo now (the default microphone; nothing else records meanwhile)
+    Start {
+        /// Pin its language(s), e.g. "uk" or "en,uk" (default: the configured list)
+        #[arg(long)]
+        languages: Option<String>,
+        /// The AI profile for its minutes (default: the default profile)
+        #[arg(long)]
+        ai: Option<String>,
+    },
+    /// Stop the memo (the same as `echoctl stop`)
+    Stop,
+    /// A memo's parts by thread, from its minutes run: a JSON file of [{thread, from, to}] (seconds or mm:ss)
+    Threads {
+        call: String,
+        #[arg(long)]
+        file: std::path::PathBuf,
     },
 }
 
@@ -1875,6 +1902,19 @@ fn main() -> Result<()> {
         }
         Cmd::Join { meeting } => watch::join(meeting::MeetingContext::read_file(&meeting)?),
         Cmd::Stop => watch::stop(),
+        Cmd::Memo { cmd } => match cmd {
+            MemoCmd::Start { languages, ai } => {
+                if std::env::var_os("ECHOCTL_HEADLESS").is_some() {
+                    anyhow::bail!("refused inside a run Echo started");
+                }
+                watch::memo_start(languages.map(|l| l.split(',').map(str::to_owned).collect()), ai)
+            }
+            MemoCmd::Stop => watch::stop(),
+            MemoCmd::Threads { call, file } => {
+                println!("{}", serde_json::to_string_pretty(&memo::set_threads(&call, &file)?)?);
+                Ok(())
+            }
+        },
         Cmd::Status => watch::status(),
         Cmd::Up => {
             let installed = app::installed_app().is_some() || cfg!(windows);

@@ -49,6 +49,10 @@ Echo never records on its own. You decide, per call, in one of two ways:
 The icon tells you what is happening: **white** means idle, **green** means armed and waiting
 for the call, **orange** means recording.
 
+**A memo** — just you, no call: the **Memo** part of the Record button (or the menu bar's **Record a memo**) starts
+recording at once. Talk about one thread or several; Echo finds which from what you said, files each part under its
+thread and writes the minutes right after you stop.
+
 ## 3. Read what was said
 
 Click **Open Echo…** in the menu. Every recorded call is in the list, newest first.

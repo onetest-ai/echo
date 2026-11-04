@@ -31,6 +31,9 @@ struct Meta {
     /// The AI profile this call's live notes and minutes use (`ai.rs`), pinned at the start
     #[serde(skip_serializing_if = "Option::is_none")]
     ai_profile: Option<String>,
+    /// `memo`: the user alone, started by hand (no call; one track, the mic) — `calls::is_memo`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kind: Option<&'static str>,
     tracks: Vec<TrackInfo>,
 }
 
@@ -70,8 +73,11 @@ pub struct Recording {
     pub title: Option<String>,
     pub started_at: DateTime<Local>,
     meta: Meta,
-    remote: Track,
+    /// None for a memo: only the user's voice.
+    remote: Option<Track>,
     mic: Track,
+    /// A memo (`start_memo`): no call behind it — it ends only when the user stops it.
+    pub memo: bool,
 }
 
 impl Recording {
@@ -96,6 +102,7 @@ impl Recording {
             stop_reason: None,
             languages: languages.clone(),
             ai_profile,
+            kind: None,
             tracks: vec![],
         };
         paths::write_atomic(&dir.join("meta.json"), &serde_json::to_vec_pretty(&meta)?)?;
@@ -104,7 +111,7 @@ impl Recording {
         }
         // Both tracks share t0, so their timelines line up sample-for-sample.
         let t0 = Instant::now();
-        let remote = Track::start("remote", &dir.join("remote.wav"), audio::app_source(app), t0)?;
+        let remote = Some(Track::start("remote", &dir.join("remote.wav"), audio::app_source(app), t0)?);
         let mic = Track::start("mic", &dir.join("mic.wav"), Box::new(MicSource { app: Some(app) }), t0)?;
         // Transcribes the tracks as they are written (reads the WAVs, so it starts after them).
         #[cfg(feature = "transcribe")]
@@ -123,7 +130,41 @@ impl Recording {
             meta,
             remote,
             mic,
+            memo: false,
         })
+    }
+
+    /// A memo: the user alone, on the default microphone — no call, no other track. Titled "Memo"
+    /// until its minutes name it; its threads are found from what was said (`memo_threads`).
+    pub fn start_memo(app: TargetApp, languages: Option<Vec<String>>, ai_profile: Option<String>) -> Result<Self> {
+        let started_at = Local::now();
+        let title = Some("Memo".to_string());
+        let dir = call_dir(&started_at, title.as_deref());
+        fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+        let meta = Meta {
+            title: title.clone(),
+            app,
+            platform: std::env::consts::OS,
+            started_at,
+            ended_at: None,
+            stop_reason: None,
+            languages: languages.clone(),
+            ai_profile,
+            kind: Some("memo"),
+            tracks: vec![],
+        };
+        paths::write_atomic(&dir.join("meta.json"), &serde_json::to_vec_pretty(&meta)?)?;
+        let t0 = Instant::now();
+        // The default input, not the call app's: there is no call.
+        let mic = Track::start("mic", &dir.join("mic.wav"), Box::new(MicSource { app: None }), t0)?;
+        #[cfg(feature = "transcribe")]
+        let live = crate::live::start(&dir, None, languages);
+        #[cfg(not(feature = "transcribe"))]
+        let live = {
+            let _ = languages;
+            None
+        };
+        Ok(Recording { live, dir, t0, title, started_at, meta, remote: None, mic, memo: true })
     }
 
     /// Switch the call's AI profile mid-call. The recording owns `meta.json` until it finishes
@@ -141,7 +182,7 @@ impl Recording {
     /// Supervise both tracks; call every ~250 ms. Returns each track whose audio can no longer
     /// be written (its name, why), once.
     pub fn poll(&mut self) -> Vec<(&'static str, String)> {
-        let remote = self.remote.poll().map(|e| ("remote", e));
+        let remote = self.remote.as_mut().and_then(|r| r.poll()).map(|e| ("remote", e));
         let mic = self.mic.poll().map(|e| ("mic", e));
         remote.into_iter().chain(mic).collect()
     }
@@ -154,10 +195,12 @@ impl Recording {
     pub fn finish(self, reason: &str) -> Result<(PathBuf, Vec<TrackInfo>, Option<Live>)> {
         let Recording { live, dir, mut meta, mut remote, mut mic, .. } = self;
         // Stop both captures at the same instant so the tracks end together.
-        remote.halt();
+        if let Some(r) = remote.as_mut() {
+            r.halt();
+        }
         mic.halt();
         let mut errors = vec![];
-        for track in [remote, mic] {
+        for track in remote.into_iter().chain([mic]) {
             let (info, err) = track.finish();
             if let Some(e) = err {
                 // A writer that died never wrote the WAV's sizes: fix them, the samples are there.

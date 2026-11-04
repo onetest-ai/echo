@@ -94,6 +94,9 @@ pub struct WatchState {
     pub in_call: Option<bool>,
     pub armed: bool,
     pub recording: Option<String>,
+    /// The recording is a memo (no call behind it).
+    #[serde(default)]
+    pub memo: bool,
 }
 
 fn read_json<T: for<'de> Deserialize<'de>>(name: &str) -> Option<T> {
@@ -196,7 +199,8 @@ fn meeting_summary(m: &MeetingContext) -> serde_json::Value {
 pub enum UiState {
     Idle { in_call: Option<bool> },
     Armed,
-    Recording { title: Option<String>, since: DateTime<Local> },
+    /// `memo`: the user alone, started by hand (`Recording::start_memo`).
+    Recording { title: Option<String>, since: DateTime<Local>, memo: bool },
 }
 
 /// The watcher loop. Returns once `stop` is set, after closing any recording.
@@ -206,7 +210,7 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
         let _ = fs::rename(file("events.jsonl"), file("events.1.jsonl"));
     }
     // Requests left by a previous run (a timed-out quit, say) must not act on this one.
-    for f in ["stop.request", "quit.request", "doctor.request", "open.request", "ai-profile.request", "quit.asking", "quit.cancelled"] {
+    for f in ["stop.request", "quit.request", "doctor.request", "open.request", "ai-profile.request", "memo.request", "quit.asking", "quit.cancelled"] {
         let _ = fs::remove_file(file(f));
     }
     let detects_calls = audio::app_in_call(app).is_some();
@@ -339,6 +343,10 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
                         if ask {
                             crate::app::offer_call(app);
                         }
+                    } else if rec.as_ref().is_some_and(|r| r.memo) {
+                        // One recording at a time: a memo goes on, and this call isn't recorded.
+                        emit("call_during_memo", json!({ "app": app }));
+                        crate::app::notify("A Teams call started", "It isn't recorded while your memo records: stop the memo to record it.");
                     } else {
                         emit("call_resumed", json!({ "app": app }));
                     }
@@ -358,6 +366,30 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
         }
         // Platforms that can't detect calls start on arm and stop on `echoctl stop`.
         let call_active = detected.map(|_| in_call).unwrap_or(true);
+
+        // A memo (`echoctl memo start`, the window, the menu): the user alone, no call needed. One
+        // recording at a time: refused while one records.
+        if let Some(req) = read_json::<Value>("memo.request") {
+            let _ = fs::remove_file(file("memo.request"));
+            if rec.is_some() {
+                emit("error", json!({ "message": "a recording is on: the memo didn't start" }));
+                crate::app::notify("Memo not started", "Echo is recording already — stop that first.");
+            } else {
+                let languages = req["languages"].as_array().map(|l| l.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect::<Vec<_>>()).filter(|l| !l.is_empty());
+                let ai_profile = Some(crate::ai::pin(req["ai"].as_str().filter(|p| !p.is_empty()), None));
+                match Recording::start_memo(app, languages, ai_profile) {
+                    Ok(r) => {
+                        crate::livenotes::recording_started(&r.dir);
+                        emit("recording_started", json!({ "dir": r.dir.display().to_string(), "title": "Memo", "memo": true }));
+                        rec = Some(r);
+                    }
+                    Err(e) => {
+                        emit("error", json!({ "message": format!("could not start the memo: {e:#}") }));
+                        crate::app::notify("Could not start the memo", &format!("{e:#}"));
+                    }
+                }
+            }
+        }
 
         // 3. Start: armed + call active.
         // The arm is taken (removed) before the recording starts, under its lock: one cancelled
@@ -415,11 +447,13 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
 
         // 4. Stop: user request, or the call ended and no rejoin within the grace period.
         let user_stop = file("stop.request").exists();
-        let ended = call_ended_at.is_some_and(|t| t.elapsed() >= REJOIN_GRACE) && !in_call;
+        // A memo has no call to end: only Stop ends it.
+        let ended = call_ended_at.is_some_and(|t| t.elapsed() >= REJOIN_GRACE) && !in_call && !rec.as_ref().is_some_and(|r| r.memo);
         if rec.is_some() && (user_stop || ended) {
             // Stop ends this recording only: an arm made meanwhile stays, and waits for the next
             // call when this one goes on.
-            if user_stop && call_active {
+            // (Not for a memo: the call going on was never this recording — arm and record it.)
+            if user_stop && call_active && !rec.as_ref().is_some_and(|r| r.memo) {
                 held_arm = read_json::<Armed>("armed.json").map(|a| a.id);
                 stopped_in_call = true;
             }
@@ -436,7 +470,7 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
 
         let armed_now = file("armed.json").exists();
         on_state(match &rec {
-            Some(r) => UiState::Recording { title: r.title.clone(), since: r.started_at },
+            Some(r) => UiState::Recording { title: r.title.clone(), since: r.started_at, memo: r.memo },
             None if armed_now => UiState::Armed,
             None => UiState::Idle { in_call: detected.map(|_| in_call) },
         });
@@ -447,6 +481,7 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
             in_call: detected.map(|_| in_call),
             armed: armed_now,
             recording: rec.as_ref().map(|r| r.dir.display().to_string()),
+            memo: rec.as_ref().is_some_and(|r| r.memo),
         });
     }
 
@@ -1014,6 +1049,9 @@ fn transcribed(dir: &std::path::Path, ok: bool, detail: &str) {
                 crate::app::notify("Transcript ready", &format!("{title} — minutes at {}. Add your notes in Echo before then.", t.format("%H:%M")))
             }
             Ok(Due::At(_)) => crate::app::notify("Transcript ready", title),
+            Ok(Due::Now) if crate::memo::is_memo(dir) && crate::notes::auto_missing().is_none() => {
+                crate::app::notify("Memo saved", "Writing its minutes and finding its threads now.")
+            }
             Ok(Due::Not(NotDue::Off)) if crate::app::claude_bin().is_some() && crate::calls::minutes_gate(dir).is_none() => {
                 crate::app::notify("Transcript ready", &format!("{title} — open Echo and click Write minutes"))
             }
@@ -1162,6 +1200,19 @@ pub fn arm(title: Option<String>, meeting: Option<MeetingContext>, languages: Op
         Some(_) => println!("armed — recording starts when the call begins (expires in 15 min)"),
         None => println!("armed, but the echoctl app is not running — start it with `echoctl app start`"),
     }
+    Ok(())
+}
+
+/// `echoctl memo start`: record the user alone now — no call, no thread to pick (its threads are found
+/// from what was said). Refused while something records; the running app starts it within a second.
+pub fn memo_start(languages: Option<Vec<String>>, ai_profile: Option<String>) -> Result<()> {
+    let Some(w) = running_watcher() else { anyhow::bail!("the Echo app is not running — start it with `echoctl app start`") };
+    if let Some(r) = &w.recording {
+        anyhow::bail!("Echo is recording already ({r}) — stop that first");
+    }
+    let languages = languages.map(|l| l.into_iter().map(|x| x.trim().to_lowercase()).filter(|x| !x.is_empty()).collect::<Vec<_>>()).filter(|l| !l.is_empty());
+    write_json("memo.request", &json!({ "languages": languages, "ai": ai_profile }))?;
+    println!("recording a memo — stop it with `echoctl memo stop`");
     Ok(())
 }
 

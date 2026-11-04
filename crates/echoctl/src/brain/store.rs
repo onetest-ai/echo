@@ -232,10 +232,41 @@ fn write_scopes(tx: &Connection, id: i64, refs: &Value) -> Result<()> {
     // Its clients decide whose terms it may mention, and a write may have dropped its tags: read for terms again
     // (`taxonomy::mentions_changed`).
     tx.execute("DELETE FROM term_scan WHERE chunk_id = ?1", [id])?;
-    for (k, v) in scopes_of(refs) {
+    // A memo split by thread: a transcript section is only its part's thread's (its time says which part).
+    let narrowed = if refs["memo_parts"].as_array().is_some_and(|p| !p.is_empty()) {
+        let title: Option<String> = tx.query_row("SELECT title FROM chunks WHERE id = ?1", [id], |r| r.get(0)).ok().flatten();
+        memo_section_refs(refs, title.as_deref().unwrap_or(""))
+    } else {
+        None
+    };
+    for (k, v) in scopes_of(narrowed.as_ref().unwrap_or(refs)) {
         tx.execute("INSERT OR IGNORE INTO scopes(chunk_id, kind, id) VALUES (?1, ?2, ?3)", params![id, k, v])?;
     }
     Ok(())
+}
+
+/// A memo's transcript section scoped to the thread of the part it falls in (`[mm:ss]` at the start of its title), and
+/// a minutes section headed by a thread's name to that thread: what was said about another thread is never found within
+/// this one. A transcript section about none: no thread. Any other section (the summary): every thread of the memo.
+fn memo_section_refs(refs: &Value, title: &str) -> Option<Value> {
+    let parts = refs["memo_parts"].as_array()?;
+    let ids: Vec<&str> = match super::calls::title_time(title) {
+        Some(t) => parts.iter().filter(|p| p["from"].as_f64().is_some_and(|a| t >= a) && p["to"].as_f64().is_some_and(|b| t < b)).filter_map(|p| p["thread"].as_str()).collect(),
+        // A minutes section headed by a thread's name (the memo template's "### <thread> (00:00–02:40)"): that thread's.
+        None => {
+            let low = title.trim().to_lowercase();
+            let named: Vec<&str> = refs["threads"].as_array().into_iter().flatten()
+                .filter(|x| x["name"].as_str().is_some_and(|n| !n.is_empty() && low.starts_with(&n.to_lowercase())))
+                .filter_map(|x| x["id"].as_str()).collect();
+            if named.is_empty() {
+                return None;
+            }
+            named
+        }
+    };
+    let threads: Vec<Value> = refs["threads"].as_array().into_iter().flatten().filter(|x| x["id"].as_str().is_some_and(|i| ids.contains(&i))).cloned().collect();
+    let client = threads.iter().find_map(|x| x["client"].as_str().map(str::to_owned));
+    Some(json!({"kind": refs["kind"], "call": refs["call"], "threads": threads, "client": client}))
 }
 
 /// The sections in a scope (all when none).
@@ -823,6 +854,19 @@ pub fn status(path: &Path) -> Result<Value> {
 mod tests {
     use super::super::embed::Words;
     use super::*;
+
+    #[test]
+    fn a_memo_section_is_its_part_thread_only() {
+        let refs = json!({"kind": "call", "call": "m", "client": "acme",
+            "threads": [{"id": "acme-rollout", "name": "Acme rollout", "client": "acme"}, {"id": "globex", "name": "Globex discovery", "client": "glx"}],
+            "memo_parts": [{"thread": "acme-rollout", "from": 0.0, "to": 13.0}, {"thread": "globex", "from": 13.0, "to": 21.0}]});
+        let ids = |r: Option<Value>| r.map(|r| scopes_of(&r).into_iter().map(|(k, v)| format!("{k}:{v}")).collect::<Vec<_>>());
+        assert_eq!(ids(memo_section_refs(&refs, "[00:14] Me")), Some(vec!["thread:globex".into(), "client:glx".into()]));
+        assert_eq!(ids(memo_section_refs(&refs, "[00:02] Me")), Some(vec!["thread:acme-rollout".into(), "client:acme".into()]));
+        assert_eq!(ids(memo_section_refs(&refs, "[00:30] Me")), Some(vec!["thread:-".into(), "client:-".into()]), "about no thread");
+        assert_eq!(ids(memo_section_refs(&refs, "Globex discovery (00:13–00:21)")), Some(vec!["thread:globex".into(), "client:glx".into()]));
+        assert!(memo_section_refs(&refs, "Summary").is_none(), "the summary stays the memo's");
+    }
 
     fn input(source: &str, md: &str) -> Input {
         let s = source.to_string();

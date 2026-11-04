@@ -86,7 +86,10 @@ pub fn document(dir: &Path) -> Option<Doc> {
             md.push('\n');
         }
     }
-    // The transcript: consecutive lines of one speaker as one turn, turns packed into sections.
+    // The transcript: consecutive lines of one speaker as one turn, turns packed into sections. A memo split by thread
+    // never joins two parts in one turn or one section: each section is then one thread's (`store::memo_section_refs`).
+    let parts = crate::memo::parts(dir);
+    let part_of = |t: f64| parts.iter().position(|p| t >= p.from && t < p.to);
     let mut turns: Vec<(f64, String, String)> = vec![];
     for s in segs {
         let text = s["text"].as_str().unwrap_or("").trim();
@@ -96,7 +99,7 @@ pub fn document(dir: &Path) -> Option<Doc> {
         let w = who(s);
         let t = s["start"].as_f64().unwrap_or(0.0);
         match turns.last_mut() {
-            Some(last) if last.1 == w => {
+            Some(last) if last.1 == w && part_of(last.0) == part_of(t) => {
                 last.2.push(' ');
                 last.2.push_str(text);
             }
@@ -124,7 +127,7 @@ pub fn document(dir: &Path) -> Option<Doc> {
         pack.clear();
     };
     for t in &turns {
-        if size > 0 && size + t.2.len() > PACK {
+        if size > 0 && (size + t.2.len() > PACK || pack.last().is_some_and(|l| part_of(l.0) != part_of(t.0))) {
             flush(&mut pack, &mut md);
             size = 0;
         }
@@ -147,7 +150,11 @@ pub fn document(dir: &Path) -> Option<Doc> {
         title,
         event_date: date,
         md,
-        refs: json!({"kind": "call", "call": name, "threads": threads, "client": client}),
+        refs: if parts.is_empty() {
+            json!({"kind": "call", "call": name, "threads": threads, "client": client})
+        } else {
+            json!({"kind": "call", "call": name, "threads": threads, "client": client, "memo_parts": parts})
+        },
         call: name,
     })
 }

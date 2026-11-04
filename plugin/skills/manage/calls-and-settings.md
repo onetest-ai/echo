@@ -8,7 +8,8 @@ Contents: [During a call](#during-a-call) · [Calendar and Teams transcripts](#c
 
 ## During a call
 
-Recording itself is the `record` skill. While a call records:
+Recording itself is the `record` skill — a memo too (`echoctl memo start | stop`: the user alone, its threads found
+from what was said). While a call records:
 
 ```sh
 echoctl live show [call]                       # its live notes, answers and state (default: the latest call)

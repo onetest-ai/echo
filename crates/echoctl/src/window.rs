@@ -632,6 +632,8 @@ fn call_summary(dir: &Path) -> Value {
         "chat": dir.join("chat.json").exists(),
         "imported": crate::teams_transcript::imported(&meta),
         "minutes_at": minutes_at(dir, &meta),
+        // The user alone (`memo.rs`): a mic in the list, its threads found from what was said.
+        "memo": meta["kind"] == "memo",
     })
 }
 
@@ -676,6 +678,10 @@ fn call_detail(dir: &Path) -> Value {
         Err(e) => v["my_notes_error"] = json!(e.to_string()),
     }
     v["segments"] = segments;
+    // A memo's parts by thread (times per thread chip); empty until its minutes split it.
+    if v["memo"] == true {
+        v["memo_parts"] = json!(crate::memo::parts(dir));
+    }
     v["chat"] = read_json(&dir.join("chat.json"));
     v["frames"] = json!(frames);
     // With ids (a list from before ids gets them now, once: `calls::actions`).
@@ -1032,6 +1038,7 @@ fn state() -> Value {
     json!({
         "version": env!("CARGO_PKG_VERSION"),
         "recording": w.as_ref().and_then(|w| w.recording.clone()),
+        "recording_memo": w.as_ref().is_some_and(|w| w.memo),
         "armed": w.as_ref().is_some_and(|w| w.armed),
         "in_call": w.as_ref().and_then(|w| w.in_call),
         "home": paths::home(),
@@ -2263,6 +2270,14 @@ fn act(v: &Value) -> bool {
             false
         }
         "record" => watch::arm(None, None, languages(v), profile(v)).is_ok(),
+        // A memo: the user alone, now (the Record button's language and profile, as a call's).
+        "record_memo" => match watch::memo_start(languages(v), profile(v)) {
+            Ok(()) => true,
+            Err(e) => {
+                crate::app::notify("Memo not started", &format!("{e:#}"));
+                false
+            }
+        },
         "stop" => watch::stop().is_ok(),
         "schedule" | "unschedule" => {
             let Some(id) = v["id"].as_str() else { return false };

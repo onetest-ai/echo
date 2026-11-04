@@ -697,14 +697,17 @@ function profilePick(attr, cur, cls = 'btn', title = 'Model for this call') {
 
 /** A record button with the language picker on its right (a native select over the caret), and
  *  the AI profile picker when there is more than one. */
-function recordButton(attrs, label, primary = true) {
+/** A memo's mark: a microphone (the list, the pill, the header). */
+const MIC = (size = 13) => `<svg class="mic" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>`
+
+function recordButton(attrs, label, primary = true, memo = false) {
   const { configured, opts, cur } = langChoices()
   const cls = primary ? 'btn primary' : 'btn'
   const auto = configured.length > 1 ? `Detect (${configured.map((c) => c.toUpperCase()).join(', ')})` : 'Detect the language'
   const options = opts.map((c) => `<option value="${esc(c)}"${c === cur ? ' selected' : ''}>${esc(langName(c))}</option>`).join('')
     + `<option value=""${cur === '' ? ' selected' : ''}>${esc(auto)}</option>`
   const title = cur ? `Transcribed as ${langName(cur)}` : 'Echo detects the language'
-  return `<span class="split"><button class="${cls} split-main" ${attrs}>${esc(label)}</button><label class="${cls} split-lang" title="${esc(title)}"><span>${cur ? esc(cur.toUpperCase()) : 'Auto'}</span>${CARET}<select data-reclang aria-label="Language of the call">${options}</select></label>${profilePick('data-recprofile', recordProfile(), cls, 'Model for live notes and minutes')}</span>`
+  return `<span class="split"><button class="${cls} split-main" ${attrs}>${esc(label)}</button><label class="${cls} split-lang" title="${esc(title)}"><span>${cur ? esc(cur.toUpperCase()) : 'Auto'}</span>${CARET}<select data-reclang aria-label="Language of the call">${options}</select></label>${profilePick('data-recprofile', recordProfile(), cls, 'Model for live notes and minutes')}${memo ? `<button class="${cls} split-memo" data-cmd="record-memo" title="Record a memo — just you, starts now; its threads are found from what you say" aria-label="Record a memo">${MIC(12)}Memo</button>` : ''}</span>`
 }
 
 // ── views ──────────────────────────────────────────────────────────────────────────────────
@@ -734,6 +737,13 @@ function tickClocks() {
 function pill() {
   const st = S.state || {}
   if (st.recording) {
+    const name0 = String(st.recording).split(/[\\/]/).pop()
+    const c0 = (S.calls || []).find((x) => x.name === name0)
+    const m0 = since(c0 && c0.started_at)
+    // A memo: a mic where a call has its dot; Stop ends it at once (nothing else is recorded).
+    if (st.recording_memo) {
+      return `<div class="pill rec" role="group" aria-label="Recording a memo"><span class="pmic">${MIC(13)}</span>${m0 ? `<span class="clock" data-since="${m0}">${clock((Date.now() - m0) / 1000)}</span>` : ''}<button class="ptitle link" data-call="${esc(name0)}" title="Open the memo">Memo</button><button class="pbtn stop" data-cmd="stop"><svg viewBox="0 0 10 10" width="9" height="9" aria-hidden="true"><rect width="10" height="10" rx="2" fill="currentColor"/></svg>Stop</button></div>`
+    }
     if (S.stopAsk) {
       return `<div class="pill rec"><span class="ptitle">Stop recording?</span><button class="pbtn stop" data-cmd="stop">Stop</button><button class="pbtn ghost" data-cmd="stop-keep">Keep recording</button></div>`
     }
@@ -748,7 +758,7 @@ function pill() {
   const soon = !st.in_call && meetingSoon()
   const main = soon
     ? `<div class="pill soon" role="group" aria-label="Meeting soon"><span class="clock">${esc(hm(new Date(soon.start)))}</span><span class="ptitle">${esc(soon.subject || 'Meeting')}</span><button class="pbtn" data-arm="${esc(soon.id)}">Record it</button></div>`
-    : `<div class="pill idle">${recordButton('data-cmd="record"', st.in_call ? 'Record this call' : 'Record next call')}</div>`
+    : `<div class="pill idle">${recordButton('data-cmd="record"', st.in_call ? 'Record this call' : 'Record next call', true, true)}</div>`
   // A call being transcribed doesn't take the pill: Record stays one click away.
   const tr = (S.calls || []).find((c) => c.status === 'transcribing')
   const chip = tr ? `<button class="pchip" data-call="${esc(tr.name)}" title="${esc(tr.title)}">Writing the transcript…</button>` : ''
@@ -861,13 +871,13 @@ function list() {
       const g = d ? dayLabel(d) : 'Undated'
       const head = g !== group ? `<div class="group">${esc(g)}</div>` : ''
       group = g
-      const meta = [d ? hm(d) : '', c.imported ? 'Teams transcript' : '', c.minutes ? `${c.minutes} min` : '', c.people.length ? c.people.slice(0, 2).join(', ') + (c.people.length > 2 ? ` +${c.people.length - 2}` : '') : ''].filter(Boolean).map((x) => `<span>${esc(x)}</span>`).join('')
+      const meta = [d ? hm(d) : '', c.memo ? 'Memo' : '', c.imported ? 'Teams transcript' : '', c.minutes ? `${c.minutes} min` : '', c.people.length ? c.people.slice(0, 2).join(', ') + (c.people.length > 2 ? ` +${c.people.length - 2}` : '') : ''].filter(Boolean).map((x) => `<span>${esc(x)}</span>`).join('')
       const pjs = ((S.pj.data && S.pj.data.by_call) || {})[c.name] || []
       const icons = pjs.length ? `<span class="pj-icons">${pjs.slice(0, 3).map((p) => projIcon(p, 14)).join('')}</span>` : ''
       const due = minutesAhead(c)
       const clockChip = due ? `<span class="mn-clock" title="Minutes at ${esc(hm(due))}">⏱ ${minutesLeft(due)} min</span>` : ''
       return `${head}<button class="row" role="option" data-call="${esc(c.name)}" aria-selected="${c.name === S.selected}">
-        ${statusIcon(c.status)}
+        ${c.memo && c.status !== 'recording' ? `<span class="si memo" title="Memo" aria-label="Memo">${MIC(14)}</span>` : statusIcon(c.status)}
         <span class="t">${esc(c.title)}</span>
         <span class="m">${clockChip}${icons}${meta}</span>
       </button>`
@@ -917,7 +927,7 @@ function doc() {
   const head = `${listToggle()}<div class="head-row">
         <div style="min-width:0">
           <h2 class="selectable">${esc(c.title)}</h2>
-          <div class="facts">${d ? `<span>${esc(d.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' }))}, ${esc(hm(d))}</span>` : ''}${c.minutes ? `<span>${c.minutes} min</span>` : ''}${c.imported ? '<span title="Made from the meeting\'s Teams transcript: no audio, no live notes">from Teams transcript</span>' : ''}${people}</div>
+          <div class="facts">${c.memo ? `<span class="memo-fact">${MIC(12)} Memo</span>` : ''}${d ? `<span>${esc(d.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' }))}, ${esc(hm(d))}</span>` : ''}${c.minutes ? `<span>${c.minutes} min</span>` : ''}${c.imported ? '<span title="Made from the meeting\'s Teams transcript: no audio, no live notes">from Teams transcript</span>' : ''}${people}</div>
           ${callProjects(c)}
         </div>
         <div class="doc-actions">${callMenu(c)}</div>
@@ -5495,8 +5505,15 @@ document.addEventListener('click', (e) => {
 })
 
 /** A call's projects in its header: chips, the suggestion bar, and the picker. */
+/** A memo's span for a thread, as the chip shows it (mm:ss–mm:ss); several joined. */
+const memoSpans = (c, id) => (c.memo_parts || []).filter((x) => x.thread === id).map((x) => `${clock(x.from)}–${clock(x.to)}`).join(', ')
 function callProjects(c) {
-  const chips = (c.projects || []).map((p) => `<button class="pj-chip" data-pj="goto" data-id="${esc(p.id)}" title="${esc(WHY[p.why] || p.why)}">${projIcon(p, 14)}${esc(p.name)}</button>`).join('')
+  const chips = (c.projects || []).map((p) => {
+    const span = c.memo ? memoSpans(c, p.id) : ''
+    // A memo's threads were found from what was said: × takes it out for good (the next split leaves it out too).
+    const x = c.memo ? `<button class="pj-x" data-pj="member" data-id="${esc(p.id)}" data-call-name="${esc(c.name)}" data-how="exclude" title="Not this — never put here again" aria-label="Not ${esc(p.name)}">×</button>` : ''
+    return `<span class="pj-chip memo-pj"><button class="link-btn" data-pj="goto" data-id="${esc(p.id)}" title="${esc(c.memo && span ? 'Found from what you said' : (WHY[p.why] || p.why))}">${projIcon(p, 14)}${esc(p.name)}</button>${span ? `<span class="set-sub">${esc(span)}</span>` : ''}${x}</span>`
+  }).join('')
   const sug = (c.suggested || [])[0]
   const bar = sug ? `<div class="pj-sug">${projIcon(sug, 16)}<span class="grow">Part of <b>${esc(sug.name)}</b>? <span class="set-sub">${esc(sug.why)}</span></span><button class="btn primary" data-pj="member" data-id="${esc(sug.id)}" data-call-name="${esc(c.name)}" data-how="include">Add</button><button class="btn ghost" data-pj="member" data-id="${esc(sug.id)}" data-call-name="${esc(c.name)}" data-how="exclude">Not this</button></div>` : ''
   const all = (S.pj.data && S.pj.data.projects) || []
@@ -5834,9 +5851,11 @@ function paletteItems(target) {
     if (!kind) add('This event', 'Record it', () => {}, { disabled: e.cancelled ? 'cancelled' : e.declined ? 'you declined it' : es.past ? 'it is over' : !e.online ? 'not a Teams meeting' : 'not possible' })
   }
   // Echo's own
-  if (st.recording) add('Echo', 'Stop recording…', () => press({ cmd: 'stop-ask' }), { keywords: 'end', hint: MAC ? '⇧⌘R' : 'Ctrl+Shift+R' })
+  if (st.recording && st.recording_memo) add('Echo', 'Stop the memo', () => press({ cmd: 'stop' }), { keywords: 'end memo', hint: MAC ? '⇧⌘R' : 'Ctrl+Shift+R' })
+  else if (st.recording) add('Echo', 'Stop recording…', () => press({ cmd: 'stop-ask' }), { keywords: 'end', hint: MAC ? '⇧⌘R' : 'Ctrl+Shift+R' })
   else if (st.armed) add('Echo', 'Cancel recording the next call', () => press({ cmd: 'stop' }), { keywords: 'disarm' })
   else add('Echo', st.in_call ? 'Record this call' : 'Record the next Teams call', () => press({ cmd: 'record' }), { keywords: 'start arm' })
+  add('Echo', 'Record a memo', () => press({ cmd: 'record-memo' }), { keywords: 'memo dictate voice note myself idea', disabled: st.recording ? 'not while a recording is on' : null })
   add('Echo', 'Claude', () => claudePanel('claude-folder'), { keywords: 'terminal session ask echo folder' })
   claudeSessionActions(add)
   add('Echo', 'Vocabulary', () => press({ panelShow: 'vocabulary' }), { keywords: 'terms names words dictionary transcription learned glossary' })
@@ -6253,8 +6272,10 @@ document.addEventListener('click', (e) => {
   if (t.dataset.ask) { send({ cmd: 'live_ask', call: S.selected, kind: t.dataset.ask }); return liveBusy() }
   switch (t.dataset.cmd) {
     case 'record': return send({ cmd: 'record', languages: recordLang(), profile: pickedProfile() })
+    case 'record-memo': return send({ cmd: 'record_memo', languages: recordLang(), profile: pickedProfile() })
     case 'stop': S.stopAsk = false; render(); return send({ cmd: 'stop' })
-    case 'stop-ask': S.stopAsk = true; return render()
+    // A memo stops at once (nothing else is recorded); a call asks first.
+    case 'stop-ask': if ((S.state || {}).recording_memo) { S.stopAsk = false; render(); return send({ cmd: 'stop' }) } S.stopAsk = true; return render()
     case 'stop-keep': S.stopAsk = false; return render()
     case 'list-toggle': S.listOpen = !S.listOpen; return render()
     case 'call-menu': S.menuOpen = !S.menuOpen; return render()

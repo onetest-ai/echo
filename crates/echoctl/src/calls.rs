@@ -325,6 +325,8 @@ const BUILTIN_TEMPLATES: &[(&str, &str)] = &[
     ("default", include_str!("../templates/default.md")),
     ("discussion", include_str!("../templates/discussion.md")),
     ("status-sync", include_str!("../templates/status-sync.md")),
+    // A memo's own (`memo.rs`): never chosen by a title, only for a memo.
+    ("memo", include_str!("../templates/memo.md")),
 ];
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -361,6 +363,14 @@ fn parse_template(text: &str, stem: &str, path: String) -> Option<Template> {
         }
     }
     Some(Template { name, path, sections, keywords })
+}
+
+/// A memo's template: the user's own `memo.md` if they wrote one, else the built-in.
+fn memo_template() -> Option<Template> {
+    let own = paths::state_dir().join("templates").join("memo.md");
+    fs::read_to_string(&own).ok().and_then(|t| parse_template(&t, "memo", own.display().to_string())).or_else(|| {
+        BUILTIN_TEMPLATES.iter().find(|(stem, _)| *stem == "memo").and_then(|(stem, text)| parse_template(text, stem, format!("builtin:{stem}")))
+    })
 }
 
 /// The template for a meeting title: the first whose keyword appears in it (user templates
@@ -430,8 +440,17 @@ pub fn minutes_gate(dir: &Path) -> Option<&'static str> {
     let duration_min = duration_min(&read_json(&dir.join("meta.json")));
     let segs = read_json(&dir.join("segments.json"));
     let chars = segs.as_array().into_iter().flatten().map(|s| s["text"].as_str().map_or(0, |t| t.chars().count())).sum();
+    if crate::memo::is_memo(dir) {
+        return memo_gate(chars);
+    }
     gate(duration_min, chars, !frames_of(dir).is_empty())
 }
+
+/// A memo is deliberate: any words in it get minutes and go into its threads — no 3-minute gate.
+fn memo_gate(chars: usize) -> Option<&'static str> {
+    (chars < MIN_MEMO_CHARS).then_some("nothing was said")
+}
+const MIN_MEMO_CHARS: usize = 20;
 
 /// `echoctl context <call>`: the input bundle for writing notes, as JSON.
 pub fn context(call: &str) -> Result<()> {
@@ -494,7 +513,8 @@ pub fn context(call: &str) -> Result<()> {
         .collect();
 
     let frames = frames_of(&dir);
-    let summarize = context_gate(&dir, segs.is_empty(), duration_min, chars, !frames.is_empty());
+    let memo = crate::memo::is_memo(&dir);
+    let summarize = if memo && !segs.is_empty() { memo_gate(chars) } else { context_gate(&dir, segs.is_empty(), duration_min, chars, !frames.is_empty()) };
     // The skill reads and rewrites the action items: by id from here on (`actions`). A list that
     // can't be read doesn't stop the minutes: the new one replaces it (`apply_actions` keeps it aside).
     if let Err(e) = actions(&dir) {
@@ -523,7 +543,11 @@ pub fn context(call: &str) -> Result<()> {
         "summarize": summarize.is_none(),
         "skip_reason": summarize,
         "previous_notes": previous.map(|p| p.join("notes.md").display().to_string()),
-        "template": pick_template(subject_of(&dir).as_deref()),
+        "template": if memo { memo_template() } else { pick_template(subject_of(&dir).as_deref()) },
+        // A memo: the user alone; its threads are found from what was said (step 4b of process-call).
+        "memo": memo,
+        "open_threads": if memo { crate::memo::open_threads(&dir) } else { Value::Null },
+        "memo_parts": if memo { json!(crate::memo::parts(&dir)) } else { Value::Null },
         "frames": frames,
         "chat": fs::read(dir.join("chat.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).unwrap_or(json!([])),
         "me_profile": me_profile(),
