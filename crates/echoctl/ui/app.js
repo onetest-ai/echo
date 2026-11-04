@@ -540,8 +540,15 @@ async function loadAgenda() {
   try { S.agenda = await get('api/agenda') } catch { S.agenda = [] }
 }
 async function loadLayout() {
-  try { Layout.load(await get('api/layout')); Layout.prune(PANEL_VIEWS) } catch { /* the default layout */ }
+  const before = Layout.toJSON()
+  let saved = null
+  try { saved = await get('api/layout') } catch { /* the default layout */ }
+  // A panel opened while it was asked for (the route's Vocabulary, a click) stays open over the saved layout.
+  const now = Layout.toJSON()
+  Layout.load(saved)
+  Layout.prune(PANEL_VIEWS)
   Layout.started()
+  for (const a of Layout.AREAS) if (now[a].open && !before[a].open && now[a].active) Layout.show(now[a].active, PANEL_VIEWS)
 }
 let callSeq = 0
 async function loadCall(name) {
@@ -1599,12 +1606,24 @@ function termBody(e, key, kind, startLabel, intro, extra, running, attrs) {
 // ── Claude in the window (terminal.rs): one session, the user's own Claude Code in the data folder on the
 // profile they pick. "Ask Claude about this call" opens it: the open call reaches it in `<echo_view>`. (A second,
 // guarded session bound to one call was dropped, 2026-11-04: two Claudes confused people.)
+/** "Ask Claude about this call": the Claude panel on the call's own profile — a session on another one isn't told
+ *  about the call (`view::restrict`: a call's text stays with its profile). Not running yet: it starts on the call's
+ *  profile; running on another: the panel says so. */
+function askClaudeAboutCall() {
+  const cp = S.call && S.call.live && S.call.live.profile
+  const e = Terms.get('claude:folder'), running = !!(e && e.id != null && !e.exited)
+  if (cp && profileOf(cp) && !running) S.folderProfile = cp === ai().default ? null : cp
+  claudePanel('claude-folder')
+}
 function claudeFolderView() {
   const a = ai()
   const pick = a.profiles.length > 1 ? `<label class="term-profile">Profile <select data-term-profile>${profileOptions(S.folderProfile || a.default)}</select></label>` : ''
+  const cp = S.view === 'calls' && S.call && S.call.live && S.call.live.profile
+  const fp = S.folderProfile || a.default || 'system'
+  const other = cp && cp !== fp && profileOf(cp) ? `<div class="term-stale"><span class="grow">The open call was recorded on ${esc(profileOf(cp).name)}; Claude here runs on ${esc((profileOf(fp) || {}).name || fp)}, so it isn't told about the call. Pick ${esc(profileOf(cp).name)} as its profile to ask about it.</span></div>` : ''
   const intro = `<p>Ask Claude about anything in Echo — the call or thread you have open (it sees what you are looking at), your clients, people, tasks. It is your own Claude Code, with your settings, working in Echo's data folder.</p>${pick}`
   const saved = S.sessions && S.sessions.has(`${S.folderProfile || a.default || 'system'}:folder`)
-  return termView('claude:folder', 'claude-folder', saved ? 'Resume Claude' : 'Start Claude', intro, { profile: S.folderProfile || a.default || '' })
+  return other + termView('claude:folder', 'claude-folder', saved ? 'Resume Claude' : 'Start Claude', intro, { profile: S.folderProfile || a.default || '' })
 }
 // Claude's sparkle on a folder (the Echo folder).
 const SPARK = (x, y, r) => `<path d="M${x} ${y - r}l${r * 0.3} ${r * 0.7} ${r * 0.7} ${r * 0.3}-${r * 0.7} ${r * 0.3}-${r * 0.3} ${r * 0.7}-${r * 0.3}-${r * 0.7}-${r * 0.7}-${r * 0.3} ${r * 0.7}-${r * 0.3}z" fill="currentColor" stroke="none"/>`
@@ -6215,7 +6234,7 @@ document.addEventListener('click', (e) => {
     case 'later-manual': S.laterOpen = false; render(); return send({ cmd: 'minutes_later', call: S.selected, minutes: null })
     case 'later-clear': return send({ cmd: 'minutes_later', call: S.selected, minutes: 0 })
     case 'claude-panel': return claudePanel()
-    case 'ask-claude': return claudePanel('claude-folder')
+    case 'ask-claude': return askClaudeAboutCall()
     case 'notes-raw': S.notesRaw = true; return render()
     case 'notes-timeline': S.notesRaw = false; return render()
     case 'note-flag': return addNote('flag')

@@ -231,7 +231,9 @@ pub fn hook() -> i32 {
         }
         // How to do things in Echo: its own CLI, not whatever connector Claude Code has (2026-11-04: asked to make a
         // client or a thread it didn't know how; asked to send a mail it tried a Microsoft 365 connector not set up).
+        // Quoted, and with forward slashes on Windows: Claude Code's Bash there is Git Bash (as `hook_settings`).
         let cli = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_else(|_| "echoctl".into());
+        let cli = if cfg!(windows) { format!("\"{}\"", cli.replace('\\', "/")) } else if cli.contains(' ') { format!("'{cli}'") } else { cli };
         let how = howto_block(&cli);
         let (c, tell) = block_due(&mut sent, "howto", &session, input["source"].as_str().unwrap_or(""), &how, now);
         changed |= c;
@@ -363,8 +365,8 @@ fn restrict(v: &mut Value, own_call: Option<&str>, profile: Option<&str>, calls:
 }
 
 /// Sessions remembered at most (the oldest go first), and for this long.
-// About 50 sessions: each keeps up to three keys (its view, About me, the Brain).
-const SENT_MAX: usize = 150;
+// About 50 sessions: each keeps up to four keys (its view, About me, the Brain, how to use Echo).
+const SENT_MAX: usize = 200;
 const SENT_DAYS: i64 = 14;
 
 /// Whether to add the block to this prompt: only when the view differs from the last one this
