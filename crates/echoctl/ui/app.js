@@ -6787,8 +6787,10 @@ window.echo = {
     if (t.url) return send({ cmd: 'open_url', url: t.url })
     S.jump = t.jump != null ? t.jump : null
     // A work item: its thread's Work tab with its details open.
-    if (t.node) { S.pj.wantNode = t.node; S.pj.node = t.node }
+    if (t.node) { S.pj.wantNode = t.node; S.pj.node = t.node; S.pj.inline = null }
     go(t.hash)
+    // The route changes on hashchange, after this: the details panel exists only once it is the Work tab.
+    if (t.node) setTimeout(() => { Layout.show('work-item', panelViews()); layoutChanged() }, 300)
     if (t.person) setTimeout(() => showPerson(t.person), 300)
   },
   /** A project the page just created: open it on its Profile. */
