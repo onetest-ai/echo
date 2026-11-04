@@ -36,6 +36,11 @@ const OFFER_UNTIL_AFTER_START: chrono::Duration = chrono::Duration::minutes(4);
 const MIC_RELEASE_DEBOUNCE: Duration = Duration::from_secs(2);
 /// After the call ends, keep the recording open this long in case the user rejoins.
 const REJOIN_GRACE: Duration = Duration::from_secs(10);
+/// How often a recording looks at which call Teams is in (`call_seen`): calls back to back — the next one joined
+/// before the last one's end was seen, or within `REJOIN_GRACE` — must not run into one recording.
+const CALL_LOOK_EVERY: Duration = Duration::from_secs(5);
+/// Two readings of Teams' call timer that disagree on when the call began by more than this are two calls.
+const OTHER_CALL_BEGAN_S: i64 = 90;
 /// An arm with no call appearing within this window expires.
 const ARM_EXPIRES: Duration = Duration::from_secs(15 * 60);
 /// A watcher whose heartbeat is older than this is considered dead.
@@ -233,6 +238,12 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
     // Stopped by the user while the call went on: no scheduled meeting is armed until that call
     // ends (it would record the rest of this call as that meeting).
     let mut stopped_in_call = false;
+    // Which call the recording is of, as Teams' call window shows it (when it began, its name): read while it records.
+    let mut rec_call: Option<CallSeen> = None;
+    let mut last_call_look = Instant::now();
+    // The mic was let go and taken again during the recording (a rejoin, or the next call): only then may a call's
+    // name alone say it is another call (a title can change within one call).
+    let mut rejoined = false;
     // Keep today's agenda fresh from the calendar (if one is configured), off the main loop.
     let mut last_sync: Option<Instant> = None;
     // Sleep shows up as wall-clock time passing faster than the monotonic clock.
@@ -348,6 +359,8 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
                         emit("call_during_memo", json!({ "app": app }));
                         crate::app::notify("A Teams call started", "It isn't recorded while your memo records: stop the memo to record it.");
                     } else {
+                        rejoined = true;
+                        last_call_look = Instant::now() - CALL_LOOK_EVERY; // look at once
                         emit("call_resumed", json!({ "app": app }));
                     }
                 }
@@ -366,6 +379,44 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
         }
         // Platforms that can't detect calls start on arm and stop on `echoctl stop`.
         let call_active = detected.map(|_| in_call).unwrap_or(true);
+
+        // Calls back to back: the call going on now isn't the one being recorded (Teams' timer says it began at
+        // another time, or its window names another call) — the recording ends here, and this call is a new one:
+        // recorded when an arm waits for it (below), else offered as any call that starts.
+        if rec.as_ref().is_some_and(|r| !r.memo) && in_call && last_call_look.elapsed() >= CALL_LOOK_EVERY {
+            last_call_look = Instant::now();
+            let seen = call_seen();
+            let was_rejoin = std::mem::take(&mut rejoined);
+            match rec_call.as_mut() {
+                None => rec_call = Some(seen),
+                Some(known) if another_call(known, &seen, was_rejoin) => {
+                    emit("next_call", json!({ "app": app, "was": known.name, "now": seen.name }));
+                    stop_mute_sync(&mut mute_alive);
+                    stop_flag(&mut ui_alive);
+                    stop_flag(&mut frames_alive);
+                    stop_flag(&mut chat_alive);
+                    finish(rec.take().unwrap(), "next_call");
+                    rec_call = None;
+                    call_ended_at = None;
+                    held_arm = None;
+                    stopped_in_call = false;
+                    let ask = armed.is_none() && crate::config::Config::load().map(|c| c.ask_unscheduled()).unwrap_or(true);
+                    emit("call_started", json!({ "app": app, "armed": armed.is_some(), "ask": ask }));
+                    if ask {
+                        crate::app::offer_call(app);
+                    }
+                }
+                Some(known) => {
+                    // What wasn't readable yet (the window still opening) is taken when it is.
+                    if known.began.is_none() {
+                        known.began = seen.began;
+                    }
+                    if known.name.is_none() {
+                        known.name = seen.name;
+                    }
+                }
+            }
+        }
 
         // A memo (`echoctl memo start`, the window, the menu): the user alone, no call needed. One
         // recording at a time: refused while one records.
@@ -418,6 +469,8 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
                     }
                     chat_alive = start_chat_capture(&r.dir, r.started_at, meeting.as_ref());
                     crate::livenotes::recording_started(&r.dir);
+                    rec_call = None;
+                    last_call_look = Instant::now() - CALL_LOOK_EVERY;
                     emit("recording_started", json!({
                         "dir": r.dir.display().to_string(),
                         "title": a.title.clone().or_else(|| a.meeting.as_ref().and_then(|m| m.subject.clone())),
@@ -462,6 +515,7 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
             stop_flag(&mut frames_alive);
             stop_flag(&mut chat_alive);
             finish(rec.take().unwrap(), if user_stop { "user" } else { "call_ended" });
+            rec_call = None;
             call_ended_at = None;
         }
         if user_stop {
@@ -498,6 +552,38 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
     let _ = fs::remove_file(file("watch.json"));
     emit("watch_stopped", json!({}));
     Ok(())
+}
+
+/// Which call Teams is in, as its call window shows it: when the call began (its timer, counted from the call's start
+/// — a rejoin of the same meeting reads the same), and its name (the window's title).
+#[derive(Clone, Debug, Default, PartialEq)]
+struct CallSeen {
+    began: Option<DateTime<Utc>>,
+    name: Option<String>,
+}
+
+fn call_seen() -> CallSeen {
+    let (elapsed, title) = crate::ax::call_glance();
+    CallSeen {
+        began: elapsed.map(|e| Utc::now() - chrono::Duration::seconds(e as i64)),
+        name: title.as_deref().and_then(crate::ax::call_name),
+    }
+}
+
+/// `echoctl call-seen` (dev): what `call_seen` reads now.
+pub fn call_seen_json() -> Value {
+    let s = call_seen();
+    json!({ "began": s.began, "name": s.name })
+}
+
+/// Is `now` another call than `rec`, the one being recorded? By the timer when both were read (a new call starts its
+/// own from zero; the same meeting rejoined keeps its start); else, right after the mic came back (`rejoined`), by
+/// name. Unreadable, or a name change within an unbroken call → the same: a wrong split would cut a call short.
+fn another_call(rec: &CallSeen, now: &CallSeen, rejoined: bool) -> bool {
+    match (rec.began, now.began) {
+        (Some(a), Some(b)) => (a - b).num_seconds().abs() > OTHER_CALL_BEGAN_S,
+        _ => rejoined && matches!((&rec.name, &now.name), (Some(a), Some(b)) if !a.eq_ignore_ascii_case(b)),
+    }
 }
 
 /// A recording that couldn't start: a meeting set to "Record when it starts" leaves the schedule
@@ -1325,6 +1411,22 @@ pub fn follow_events() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn back_to_back_calls_are_told_apart_by_when_they_began() {
+        let at = |s: i64| Some(DateTime::<Utc>::from_timestamp(1_800_000_000 + s, 0).unwrap());
+        let seen = |b: Option<DateTime<Utc>>, n: Option<&str>| CallSeen { began: b, name: n.map(str::to_owned) };
+        let rec = seen(at(0), Some("Acme weekly"));
+        // The same meeting rejoined (its timer counts from its start): the same call, whatever the window says now.
+        assert!(!another_call(&rec, &seen(at(20), Some("Meeting compact view")), true));
+        // The next call: its own timer from zero, 40 minutes later — also with no break in the mic.
+        assert!(another_call(&rec, &seen(at(2400), Some("Globex sync")), false));
+        // No timer: by name, only right after the mic came back; nothing readable: never split.
+        assert!(another_call(&seen(None, Some("Acme weekly")), &seen(None, Some("Globex sync")), true));
+        assert!(!another_call(&seen(None, Some("Acme weekly")), &seen(None, Some("Globex sync")), false), "a title changing within one call");
+        assert!(!another_call(&seen(None, Some("Acme weekly")), &seen(None, Some("acme weekly")), true));
+        assert!(!another_call(&seen(None, None), &seen(at(2400), Some("Globex sync")), true));
+    }
 
     #[test]
     fn a_profile_switch_for_a_call_not_recording_is_applied_or_says_why() {

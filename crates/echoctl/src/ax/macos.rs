@@ -315,7 +315,9 @@ impl CallWindow {
             let n = windows.len();
             self.window = windows.into_iter().find(|w| holds_mic_button(w, 0));
             self.looked_at = Some(Instant::now());
-            if had != self.window.is_some() || (!had && self.window.is_none() && std::env::var_os("ECHOCTL_DEBUG").is_some()) {
+            // Found: only when debugging (a recording looks every few seconds with a fresh handle); lost: always.
+            let debug = std::env::var_os("ECHOCTL_DEBUG").is_some();
+            if (had && self.window.is_none()) || (debug && had != self.window.is_some()) || (!had && self.window.is_none() && debug) {
                 eprintln!("teams call window: {} ({n} windows)", if self.window.is_some() { "found" } else { "none" });
             }
         }

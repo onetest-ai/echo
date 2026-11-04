@@ -1287,6 +1287,14 @@ frames). A renamed call's old page (generator meta) is replaced, never another f
   whose process is still alive (a transcription child of the app that ran before) is watched
   until it exits, and the call is transcribed then if it left no transcript.
 - Sleep = wall clock outrunning the monotonic clock (> 30 s) → the recording is closed.
+- **Calls back to back** (2026-11-04: the next call ran into the last one's recording — joined before its end was
+  seen, or within `REJOIN_GRACE`): while a call records, the watcher looks every 5 s at which call Teams is in
+  (`call_seen`: the call window's timer → when the call began, counted from the call's start so a rejoin reads the same;
+  and its name, one look — `ax::call_glance`). Began more than 90 s apart → another call; with no timer, a different name
+  counts only right after the mic came back (a title can change within one call); unreadable → the same, never split on
+  doubt (`another_call`). Another call: the recording ends (`next_call`), and the call going on is new — recorded when
+  an arm waits for it, else offered. `echoctl call-seen` (hidden) prints what it reads. Measured on a live meeting: the
+  start read the same on every look.
 - Track restarts back off 1 s → 30 s (slow after 20, reset after 5 min stable); the remote
   track reopens after 5 min of exact digital zeros (≤ 10×; also what revoked TCC looks like).
 - A track whose writer fails (a full disk, a volume gone) says so at once: a `write_failed` track event, a
