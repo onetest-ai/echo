@@ -475,13 +475,13 @@ enum Cmd {
         #[arg(long, default_value_t = 30)]
         seconds: u64,
     },
-    /// (dev) Who an ad-hoc call is with: the Teams call window's title and the chat it matches
-    /// (`--name` skips the window, to check the chat match)
     /// (dev) Which call Teams is in, as a recording sees it: when it began (its timer) and its name — what tells
     /// back-to-back calls apart
     #[cfg(any(target_os = "macos", windows))]
     #[command(hide = true)]
     CallSeen,
+    /// (dev) Who an ad-hoc call is with: the Teams call window's title and the chat it matches
+    /// (`--name` skips the window, to check the chat match)
     #[cfg(any(target_os = "macos", windows))]
     #[command(hide = true)]
     CallPeople {
@@ -1672,11 +1672,11 @@ fn main() -> Result<()> {
         #[cfg(feature = "transcribe")]
         Cmd::Speaking { call } => speaking::report(&call),
         #[cfg(any(target_os = "macos", windows))]
-        #[cfg(any(target_os = "macos", windows))]
         Cmd::CallSeen => {
             println!("{}", serde_json::to_string_pretty(&watch::call_seen_json())?);
             Ok(())
         }
+        #[cfg(any(target_os = "macos", windows))]
         Cmd::CallPeople { name } => {
             let name = match name {
                 Some(n) => n,

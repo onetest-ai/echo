@@ -41,6 +41,13 @@ const REJOIN_GRACE: Duration = Duration::from_secs(10);
 const CALL_LOOK_EVERY: Duration = Duration::from_secs(5);
 /// Two readings of Teams' call timer that disagree on when the call began by more than this are two calls.
 const OTHER_CALL_BEGAN_S: i64 = 90;
+/// "Another call" must read the same on looks at least this far apart before the recording is split: a real timer's start
+/// stays put; a clock-like text the reader picked up instead (a chat time, a countdown) drifts and never confirms.
+const CONFIRM_AFTER: Duration = Duration::from_secs(9);
+/// Two readings of a start within this are the same reading.
+const SAME_BEGAN_S: i64 = 3;
+/// How long after the mic came back a different name may say "another call" (the new call's window takes a moment).
+const REJOIN_NAME_WINDOW: Duration = Duration::from_secs(30);
 /// An arm with no call appearing within this window expires.
 const ARM_EXPIRES: Duration = Duration::from_secs(15 * 60);
 /// A watcher whose heartbeat is older than this is considered dead.
@@ -241,9 +248,12 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
     // Which call the recording is of, as Teams' call window shows it (when it began, its name): read while it records.
     let mut rec_call: Option<CallSeen> = None;
     let mut last_call_look = Instant::now();
-    // The mic was let go and taken again during the recording (a rejoin, or the next call): only then may a call's
-    // name alone say it is another call (a title can change within one call).
-    let mut rejoined = false;
+    // The mic was let go and taken again during the recording (a rejoin, or the next call): for a while after, a call's
+    // name alone may say it is another call (a title can change within one call).
+    let mut rejoined_at: Option<Instant> = None;
+    // A reading that says "another call", waiting to be confirmed by a later one (`judge`).
+    let mut candidate: Option<Candidate> = None;
+    let looker = CallLook::default();
     // Keep today's agenda fresh from the calendar (if one is configured), off the main loop.
     let mut last_sync: Option<Instant> = None;
     // Sleep shows up as wall-clock time passing faster than the monotonic clock.
@@ -359,7 +369,7 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
                         emit("call_during_memo", json!({ "app": app }));
                         crate::app::notify("A Teams call started", "It isn't recorded while your memo records: stop the memo to record it.");
                     } else {
-                        rejoined = true;
+                        rejoined_at = Some(Instant::now());
                         last_call_look = Instant::now() - CALL_LOOK_EVERY; // look at once
                         emit("call_resumed", json!({ "app": app }));
                     }
@@ -381,38 +391,51 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
         let call_active = detected.map(|_| in_call).unwrap_or(true);
 
         // Calls back to back: the call going on now isn't the one being recorded (Teams' timer says it began at
-        // another time, or its window names another call) — the recording ends here, and this call is a new one:
-        // recorded when an arm waits for it (below), else offered as any call that starts.
-        if rec.as_ref().is_some_and(|r| !r.memo) && in_call && last_call_look.elapsed() >= CALL_LOOK_EVERY {
-            last_call_look = Instant::now();
-            let seen = call_seen();
-            let was_rejoin = std::mem::take(&mut rejoined);
-            match rec_call.as_mut() {
-                None => rec_call = Some(seen),
-                Some(known) if another_call(known, &seen, was_rejoin) => {
-                    emit("next_call", json!({ "app": app, "was": known.name, "now": seen.name }));
-                    stop_mute_sync(&mut mute_alive);
-                    stop_flag(&mut ui_alive);
-                    stop_flag(&mut frames_alive);
-                    stop_flag(&mut chat_alive);
-                    finish(rec.take().unwrap(), "next_call");
-                    rec_call = None;
-                    call_ended_at = None;
-                    held_arm = None;
-                    stopped_in_call = false;
-                    let ask = armed.is_none() && crate::config::Config::load().map(|c| c.ask_unscheduled()).unwrap_or(true);
-                    emit("call_started", json!({ "app": app, "armed": armed.is_some(), "ask": ask }));
-                    if ask {
-                        crate::app::offer_call(app);
-                    }
-                }
-                Some(known) => {
-                    // What wasn't readable yet (the window still opening) is taken when it is.
-                    if known.began.is_none() {
-                        known.began = seen.began;
-                    }
-                    if known.name.is_none() {
-                        known.name = seen.name;
+        // another time, steadily; or its window names another call right after the mic came back) — the recording
+        // ends here, and this call is a new one: recorded when an arm (or a scheduled meeting) waits for it, else
+        // offered as any call that starts. Looked at off this thread (`CallLook`): a busy Teams never stalls the loop.
+        if rec.as_ref().is_some_and(|r| !r.memo) && in_call {
+            if last_call_look.elapsed() >= CALL_LOOK_EVERY {
+                last_call_look = Instant::now();
+                looker.start();
+            }
+            if let Some(seen) = looker.take() {
+                let fresh_rejoin = rejoined_at.is_some_and(|t| t.elapsed() < REJOIN_NAME_WINDOW);
+                let started = rec.as_ref().map(|r| r.started_at.with_timezone(&Utc));
+                match judge(&mut rec_call, &mut candidate, seen, fresh_rejoin, started, Instant::now()) {
+                    Judged::Same => {}
+                    Judged::Other => {
+                        emit("next_call", json!({ "app": app, "was": rec_call.as_ref().and_then(|c| c.name.clone()) }));
+                        // The last call is over as far as anything that reads the events can tell (`find_call_chat`).
+                        emit("call_ended", json!({ "app": app, "recording": true, "next_call": true }));
+                        stop_mute_sync(&mut mute_alive);
+                        stop_flag(&mut ui_alive);
+                        stop_flag(&mut frames_alive);
+                        stop_flag(&mut chat_alive);
+                        finish(rec.take().unwrap(), "next_call");
+                        rec_call = None;
+                        candidate = None;
+                        rejoined_at = None;
+                        call_ended_at = None;
+                        held_arm = None;
+                        stopped_in_call = false;
+                        // A meeting set to record when it starts: armed now (it couldn't be while the last call recorded).
+                        if armed.is_none() {
+                            if let Some(m) = crate::schedule::due(now) {
+                                let subject = m.subject.clone();
+                                if arm(subject.clone(), Some(m), None, None).is_ok() {
+                                    emit("scheduled_armed", json!({ "subject": subject }));
+                                    armed = read_json("armed.json");
+                                }
+                            }
+                        }
+                        // Else asked as any call — unless the agenda offers its meeting (it does now that nothing records).
+                        let offered_by_agenda = agenda.iter().any(|m| parse_time(&m.start).is_some_and(|st| now >= st - OFFER_BEFORE && now <= st + OFFER_UNTIL_AFTER_START));
+                        let ask = armed.is_none() && !offered_by_agenda && crate::config::Config::load().map(|c| c.ask_unscheduled()).unwrap_or(true);
+                        emit("call_started", json!({ "app": app, "armed": armed.is_some(), "ask": ask }));
+                        if ask {
+                            crate::app::offer_call(app);
+                        }
                     }
                 }
             }
@@ -470,6 +493,8 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
                     chat_alive = start_chat_capture(&r.dir, r.started_at, meeting.as_ref());
                     crate::livenotes::recording_started(&r.dir);
                     rec_call = None;
+                    candidate = None;
+                    rejoined_at = None;
                     last_call_look = Instant::now() - CALL_LOOK_EVERY;
                     emit("recording_started", json!({
                         "dir": r.dir.display().to_string(),
@@ -516,6 +541,7 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
             stop_flag(&mut chat_alive);
             finish(rec.take().unwrap(), if user_stop { "user" } else { "call_ended" });
             rec_call = None;
+            candidate = None;
             call_ended_at = None;
         }
         if user_stop {
@@ -567,6 +593,84 @@ fn call_seen() -> CallSeen {
     CallSeen {
         began: elapsed.map(|e| Utc::now() - chrono::Duration::seconds(e as i64)),
         name: title.as_deref().and_then(crate::ax::call_name),
+    }
+}
+
+/// A look at the call window, taken off the watcher's thread (an accessibility query can wait seconds on a busy
+/// Teams): one at a time; its result is picked up on a later tick.
+#[derive(Default)]
+struct CallLook {
+    busy: Arc<AtomicBool>,
+    out: Arc<std::sync::Mutex<Option<CallSeen>>>,
+}
+
+impl CallLook {
+    fn start(&self) {
+        if self.busy.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let (busy, out) = (self.busy.clone(), self.out.clone());
+        std::thread::spawn(move || {
+            let seen = call_seen();
+            *out.lock().unwrap_or_else(|e| e.into_inner()) = Some(seen);
+            busy.store(false, Ordering::SeqCst);
+        });
+    }
+
+    fn take(&self) -> Option<CallSeen> {
+        self.out.lock().unwrap_or_else(|e| e.into_inner()).take()
+    }
+}
+
+/// A reading that says "another call", waiting for a later one to confirm it.
+#[derive(Clone, Debug)]
+struct Candidate {
+    seen: CallSeen,
+    at: Instant,
+}
+
+#[derive(Debug, PartialEq)]
+enum Judged {
+    Same,
+    Other,
+}
+
+/// One look at the call window against the recording's call (`rec`, filled as it is first read). `started`: when the
+/// recording started — a call that began well after it isn't the recording's own, however late it is first read.
+/// "Another call" only when a later look, `CONFIRM_AFTER` on, reads the same other call (`candidate`).
+fn judge(rec: &mut Option<CallSeen>, candidate: &mut Option<Candidate>, seen: CallSeen, rejoined: bool, started: Option<DateTime<Utc>>, now: Instant) -> Judged {
+    let known = rec.get_or_insert_with(CallSeen::default);
+    // The recording's own start, first read: never one well after the recording started (that call is a later one).
+    let late = |b: DateTime<Utc>| started.is_some_and(|s| (b - s).num_seconds() > OTHER_CALL_BEGAN_S);
+    let other = match (known.began, seen.began) {
+        (None, Some(b)) if late(b) => true,
+        _ => another_call(known, &seen, rejoined),
+    };
+    if !other {
+        *candidate = None;
+        if known.began.is_none() {
+            known.began = seen.began;
+        }
+        if known.name.is_none() {
+            known.name = seen.name;
+        }
+        return Judged::Same;
+    }
+    let same_reading = |c: &CallSeen| match (c.began, seen.began) {
+        (Some(a), Some(b)) => (a - b).num_seconds().abs() <= SAME_BEGAN_S,
+        (None, None) => c.name.is_some() && c.name == seen.name,
+        _ => false,
+    };
+    match candidate {
+        Some(c) if same_reading(&c.seen) && now.duration_since(c.at) >= CONFIRM_AFTER => {
+            *candidate = None;
+            Judged::Other
+        }
+        Some(c) if same_reading(&c.seen) => Judged::Same, // not long enough yet
+        _ => {
+            *candidate = Some(Candidate { seen, at: now });
+            Judged::Same
+        }
     }
 }
 
@@ -1411,6 +1515,45 @@ pub fn follow_events() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_split_needs_the_other_call_read_steadily() {
+        let base = DateTime::<Utc>::from_timestamp(1_800_000_000, 0).unwrap();
+        let at = |s: i64| Some(base + chrono::Duration::seconds(s));
+        let seen = |b: Option<DateTime<Utc>>| CallSeen { began: b, name: Some("x".into()) };
+        let t0 = Instant::now();
+        let after = |s: u64| t0 + Duration::from_secs(s);
+
+        // The recording's call, then the next call's timer read steadily: Same at first, Other once confirmed 9 s on.
+        let (mut rec, mut cand) = (None, None);
+        assert_eq!(judge(&mut rec, &mut cand, seen(at(0)), false, at(5), after(0)), Judged::Same);
+        assert_eq!(judge(&mut rec, &mut cand, seen(at(2400)), false, at(5), after(5)), Judged::Same, "one reading never splits");
+        assert_eq!(judge(&mut rec, &mut cand, seen(at(2401)), false, at(5), after(10)), Judged::Same, "too soon");
+        assert_eq!(judge(&mut rec, &mut cand, seen(at(2400)), false, at(5), after(15)), Judged::Other);
+
+        // A clock-like text read instead of the timer (a chat time: the same "elapsed", so its start drifts with now).
+        let (mut rec, mut cand) = (None, None);
+        judge(&mut rec, &mut cand, seen(at(0)), false, at(5), after(0));
+        for i in 1..6 {
+            let drifting = at(3000 + 5 * i as i64);
+            assert_eq!(judge(&mut rec, &mut cand, seen(drifting), false, at(5), after(5 * i)), Judged::Same, "look {i}");
+        }
+
+        // Two call windows flipping (the held call, then the new one): never steady, never split.
+        let (mut rec, mut cand) = (None, None);
+        judge(&mut rec, &mut cand, seen(at(0)), false, at(5), after(0));
+        for i in 1..6 {
+            let b = if i % 2 == 0 { at(0) } else { at(2400) };
+            assert_eq!(judge(&mut rec, &mut cand, seen(b), false, at(5), after(5 * i)), Judged::Same);
+        }
+
+        // Nothing read until the next call: its start, well after the recording started, isn't taken as the recording's.
+        let (mut rec, mut cand) = (None, None);
+        judge(&mut rec, &mut cand, CallSeen::default(), false, at(5), after(0));
+        judge(&mut rec, &mut cand, seen(at(900)), false, at(5), after(5));
+        assert_eq!(judge(&mut rec, &mut cand, seen(at(900)), false, at(5), after(15)), Judged::Other);
+        assert_eq!(rec.unwrap().began, None);
+    }
 
     #[test]
     fn back_to_back_calls_are_told_apart_by_when_they_began() {
