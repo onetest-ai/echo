@@ -197,6 +197,12 @@ impl Leaving {
 
     /// The quit `echoctl app quit` waits for is held up by a question to the user (`quit.asking`
     /// while so: the CLI keeps waiting).
+    /// Echo is stopping, or the user is being asked whether it may (a quit, an update, a folder change):
+    /// no window opens now — one opened then would lose what is typed in it.
+    fn may_open(&self) -> bool {
+        !matches!(self.phase, Phase::Going | Phase::Asking(Then::Quit | Then::QuitAsked | Then::Update(_) | Then::ChangeHome(_)))
+    }
+
     fn asking_quit(&self) -> bool {
         matches!(self.phase, Phase::Asking(Then::QuitAsked)) || matches!(self.queued, Some(Then::QuitAsked))
     }
@@ -258,7 +264,7 @@ fn ask_to_leave(question: String, proxy: &tao::event_loop::EventLoopProxy<UiEven
 }
 
 /// Do what the leave's step says.
-fn act(step: Step, l: &mut Leaving, win: &mut Option<crate::window::EchoWindow>, target: &tao::event_loop::EventLoopWindowTarget<UiEvent>, stop: &Arc<AtomicBool>, ui: &mut Option<Ui>, proxy: &tao::event_loop::EventLoopProxy<UiEvent>) {
+fn act(step: Step, l: &mut Leaving, win: &mut Option<crate::window::EchoWindow>, stop: &Arc<AtomicBool>, ui: &mut Option<Ui>, proxy: &tao::event_loop::EventLoopProxy<UiEvent>) {
     match step {
         Step::Nothing => {}
         Step::Save { n, close } => {
@@ -273,7 +279,7 @@ fn act(step: Step, l: &mut Leaving, win: &mut Option<crate::window::EchoWindow>,
                 let _ = p.send_event(UiEvent::LeaveTimeout(n));
             });
         }
-        Step::Go(then) => l.went(go(then, win, target, stop, ui)),
+        Step::Go(then) => l.went(go(then, win, stop, ui)),
         Step::Ask(question) => ask_to_leave(question, proxy),
         Step::Stay(then, why) => {
             thaw(win);
@@ -288,10 +294,7 @@ fn act(step: Step, l: &mut Leaving, win: &mut Option<crate::window::EchoWindow>,
                 terminate::cancelled();
             }
         }
-        Step::CloseWindow => {
-            *win = None;
-            set_dock_icon(target, false);
-        }
+        Step::CloseWindow => *win = None,
     }
     if l.asking_quit() != l.asking_file {
         l.asking_file = l.asking_quit();
@@ -300,7 +303,7 @@ fn act(step: Step, l: &mut Leaving, win: &mut Option<crate::window::EchoWindow>,
     // A leave that waited for that answer: its turn now.
     if let Some(next) = l.next() {
         let step = l.start(next, win.is_some());
-        act(step, l, win, target, stop, ui, proxy);
+        act(step, l, win, stop, ui, proxy);
     }
 }
 
@@ -1714,11 +1717,10 @@ mod terminate {
 }
 
 /// Do what the leave was for; whether Echo stops now.
-fn go(then: Then, win: &mut Option<crate::window::EchoWindow>, target: &tao::event_loop::EventLoopWindowTarget<UiEvent>, stop: &Arc<AtomicBool>, ui: &mut Option<Ui>) -> bool {
+fn go(then: Then, win: &mut Option<crate::window::EchoWindow>, stop: &Arc<AtomicBool>, ui: &mut Option<Ui>) -> bool {
     match then {
         Then::CloseWindow => {
-            *win = None; // closing the window leaves Echo running in the menu bar
-            set_dock_icon(target, false);
+            *win = None; // closing the window leaves Echo running, in the menu bar and the Dock
             false
         }
         Then::Quit | Then::QuitAsked => {
@@ -1761,19 +1763,28 @@ fn thaw(win: &Option<crate::window::EchoWindow>) {
     }
 }
 
-/// macOS: a menu-bar app has no Dock icon; while its window is open it gets one (and a place
-/// in Cmd-Tab), like other menu-bar apps with a main window.
-fn set_dock_icon(target: &tao::event_loop::EventLoopWindowTarget<UiEvent>, visible: bool) {
-    #[cfg(target_os = "macos")]
-    {
-        use tao::platform::macos::{ActivationPolicy, EventLoopWindowTargetExtMacOS};
-        target.set_activation_policy_at_runtime(if visible { ActivationPolicy::Regular } else { ActivationPolicy::Accessory });
-        if visible {
-            set_app_icon();
+/// Open the Echo window, or bring it forward (on `call` when one is named).
+fn show_window(target: &tao::event_loop::EventLoopWindowTarget<UiEvent>, win: &mut Option<crate::window::EchoWindow>, call: Option<&str>, proxy: &tao::event_loop::EventLoopProxy<UiEvent>) {
+    match win {
+        Some(w) => {
+            if let Some(c) = call {
+                w.show_call(c);
+            }
+            w.window.set_visible(true);
+            w.window.set_minimized(false);
+            w.window.set_focus();
+        }
+        None => {
+            let p = proxy.clone();
+            match crate::window::open(target, call, move |m| drop(p.send_event(UiEvent::Ipc(m)))) {
+                Ok(w) => {
+                    w.window.set_focus();
+                    *win = Some(w);
+                }
+                Err(e) => app::notify("Could not open the Echo window", &e.to_string()),
+            }
         }
     }
-    #[cfg(not(target_os = "macos"))]
-    let _ = (target, visible);
 }
 
 /// The onetest logo as the Dock icon of a dev build, which has no bundle icon. Echo.app keeps
@@ -1804,7 +1815,11 @@ pub fn run(app: TargetApp, stop: Arc<AtomicBool>) -> ! {
     #[cfg(target_os = "macos")]
     {
         use tao::platform::macos::{ActivationPolicy, EventLoopExtMacOS};
-        event_loop.set_activation_policy(ActivationPolicy::Accessory); // no Dock icon
+        // A Dock icon for as long as Echo runs, not only the menu bar's: macOS hides menu-bar icons
+        // that don't fit (beside the notch, many of them), and Echo then looked gone. Its click opens
+        // the window. Echo.app stays `LSUIElement`, so the CLI from the same binary never shows one.
+        event_loop.set_activation_policy(ActivationPolicy::Regular);
+        event_loop.set_activate_ignoring_other_apps(false); // starting at login never takes the focus
         crate::app::notifications::init();
     }
 
@@ -1845,37 +1860,37 @@ pub fn run(app: TargetApp, stop: Arc<AtomicBool>) -> ! {
                 if win.as_ref().is_some_and(|w| w.window.id() == window_id) =>
             {
                 let step = leaving.start(Then::CloseWindow, win.is_some());
-                act(step, &mut leaving, &mut win, target, &stop_for_ui, &mut ui, &proxy);
+                act(step, &mut leaving, &mut win, &stop_for_ui, &mut ui, &proxy);
             }
             Event::UserEvent(UiEvent::Leave(then)) => {
                 let step = leaving.start(then, win.is_some());
-                act(step, &mut leaving, &mut win, target, &stop_for_ui, &mut ui, &proxy);
+                act(step, &mut leaving, &mut win, &stop_for_ui, &mut ui, &proxy);
             }
             Event::UserEvent(UiEvent::LeaveTimeout(n)) => {
                 let step = leaving.answered(n, None);
-                act(step, &mut leaving, &mut win, target, &stop_for_ui, &mut ui, &proxy);
+                act(step, &mut leaving, &mut win, &stop_for_ui, &mut ui, &proxy);
             }
             Event::UserEvent(UiEvent::LeaveDecided(answer)) => {
                 if let Err(why) = &answer {
                     app::notify("Echo stays open", &format!("Notes typed in the Echo window couldn't be saved, and Echo couldn't ask what to do: {why}"));
                 }
                 let step = leaving.decided(answer);
-                act(step, &mut leaving, &mut win, target, &stop_for_ui, &mut ui, &proxy);
+                act(step, &mut leaving, &mut win, &stop_for_ui, &mut ui, &proxy);
             }
             Event::UserEvent(UiEvent::Ipc(msg)) => match crate::window::closing(&msg) {
                 // The page saved what it holds (or couldn't): go on, or ask — a close the page
                 // itself explains (its Try again / Close without saving).
                 Some(crate::window::Closing::Ready { ok, n }) => {
                     let step = leaving.answered(n, Some(ok));
-                    act(step, &mut leaving, &mut win, target, &stop_for_ui, &mut ui, &proxy);
+                    act(step, &mut leaving, &mut win, &stop_for_ui, &mut ui, &proxy);
                 }
                 Some(crate::window::Closing::Now) => {
                     let step = leaving.close_now();
-                    act(step, &mut leaving, &mut win, target, &stop_for_ui, &mut ui, &proxy);
+                    act(step, &mut leaving, &mut win, &stop_for_ui, &mut ui, &proxy);
                 }
                 Some(crate::window::Closing::Request) => {
                     let step = leaving.start(Then::CloseWindow, win.is_some());
-                    act(step, &mut leaving, &mut win, target, &stop_for_ui, &mut ui, &proxy);
+                    act(step, &mut leaving, &mut win, &stop_for_ui, &mut ui, &proxy);
                 }
                 // Settings in the window started a flow the menu has too: run it the same way.
                 None if crate::window::settings_action(&msg).is_some() => {
@@ -1917,11 +1932,18 @@ pub fn run(app: TargetApp, stop: Arc<AtomicBool>) -> ! {
                     }
                 }
             },
+            // The Dock icon clicked (or Echo.app opened again) with no window showing: open it — also
+            // when the menu-bar icon is hidden (no room beside the notch) or couldn't be made.
+            Event::Reopen { has_visible_windows: false, .. } if leaving.may_open() => show_window(target, &mut win, None, &proxy),
             // macOS: create the icon only once the event loop is running.
-            Event::NewEvents(StartCause::Init) => match Ui::new(proxy.clone()) {
-                Ok(u) => ui = Some(u),
-                Err(e) => eprintln!("tray icon unavailable: {e}"),
-            },
+            Event::NewEvents(StartCause::Init) => {
+                #[cfg(target_os = "macos")]
+                set_app_icon(); // once AppKit has finished launching: earlier it would put its own back
+                match Ui::new(proxy.clone()) {
+                    Ok(u) => ui = Some(u),
+                    Err(e) => eprintln!("tray icon unavailable: {e}"),
+                }
+            }
             Event::UserEvent(UiEvent::State(s)) => {
                 // `echoctl app quit` — also when the tray icon couldn't be made (no window then).
                 if app::take_quit_request() {
@@ -1942,27 +1964,8 @@ pub fn run(app: TargetApp, stop: Arc<AtomicBool>) -> ! {
             Event::UserEvent(UiEvent::Menu(id)) => {
                 if let Some(u) = ui.as_mut() {
                     u.click(&id);
-                    if let Some(call) = u.open_window.take() {
-                        match &win {
-                            Some(w) => {
-                                if let Some(c) = &call {
-                                    w.show_call(c);
-                                }
-                                w.window.set_visible(true);
-                                w.window.set_focus();
-                            }
-                            None => {
-                                let p = proxy.clone();
-                                match crate::window::open(target, call.as_deref(), move |m| drop(p.send_event(UiEvent::Ipc(m)))) {
-                                    Ok(w) => {
-                                        set_dock_icon(target, true);
-                                        w.window.set_focus();
-                                        win = Some(w);
-                                    }
-                                    Err(e) => app::notify("Could not open the Echo window", &e.to_string()),
-                                }
-                            }
-                        }
+                    if let Some(call) = u.open_window.take().filter(|_| leaving.may_open()) {
+                        show_window(target, &mut win, call.as_deref(), &proxy);
                     }
                 }
             }
