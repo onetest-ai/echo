@@ -44,7 +44,7 @@ pub(crate) fn not_me<'a>(people: impl Iterator<Item = &'a Value>, me: Option<&st
 }
 
 fn state_path() -> std::path::PathBuf {
-    paths::home().join("brain").join("sources.json")
+    crate::brain::dir().join("sources.json")
 }
 
 /// Per source key: `{since, read_at, docs, error}`.
@@ -252,7 +252,7 @@ pub struct Read {
 }
 
 fn reread_path() -> std::path::PathBuf {
-    paths::home().join("brain").join("reread.json")
+    crate::brain::dir().join("reread.json")
 }
 
 /// Read a client's sources again from the start at the next sync (a sender trusted or ignored there):

@@ -103,13 +103,13 @@ fn fwd(p: &Path) -> String {
 fn preamble(tools: Tools, cli: &str) -> String {
     let reach = match tools {
         Tools::Read => format!(
-            "You may read Echo's data folder (its calls' transcripts, minutes and action items, threads, people), search the Brain \
-             (the echo-brain tools) when it is there, and run these read-only Echo commands as {cli}, one per Bash call, plain words \
+            "You may read Echo's data folder (its calls' transcripts, minutes and action items, threads, people), search what was said \
+             and who people are (the `echo` MCP tools), and run these read-only Echo commands as {cli}, one per Bash call, plain words \
              only: {}. You change nothing.",
             guard::ROUTINE_COMMANDS.iter().map(|c| format!("`echoctl {}`", c.replace('*', "<id>"))).collect::<Vec<_>>().join(", ")
         ),
         Tools::None => "You have no tools: everything you need is below.".to_string(),
-        _ => format!("Echo's CLI is {cli}; the Brain (echo-brain tools) is there when it is on."),
+        _ => format!("Echo's CLI is {cli}; what was said and who people are: the `echo` MCP tools."),
     };
     format!(
         "Started by Echo; nobody is watching: don't ask anything, do the work and answer. Now: {}. The working folder is Echo's data \
@@ -148,14 +148,14 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
     let launcher = clis.iter().find(|c| c.contains('/') && c.contains("scripts")).cloned().unwrap_or_else(|| "echoctl".into());
     // What the Brain holds and when to go there (#34): only when it is on and the run has tools to ask it.
     #[cfg(feature = "brain")]
-    // Only where the run gets the echo-brain server (the window's builds; any tool mode but none).
+    // Only where the run gets the echo server (the window's builds; any tool mode but none).
     let brain_text = (cfg!(feature = "tray") && spec.tools != Tools::None).then(|| crate::brain::advert::block(&crate::brain::access::Access { profile: profile.id.clone(), ..Default::default() })).flatten();
     #[cfg(not(feature = "brain"))]
     let brain_text: Option<String> = None;
     let prompt = format!(
         "{}{}\n\n{}",
         preamble(spec.tools, &format!("`{launcher}` (its full path, exactly so)")),
-        brain_text.map(|b| format!("\n\n<echo_brain>\n{b}\n</echo_brain>")).unwrap_or_default(),
+        brain_text.map(|b| format!("\n\n<echo_recall>\n{b}\n</echo_recall>")).unwrap_or_default(),
         spec.prompt
     );
     let _ = fs::write(spec.run_dir.join("prompt.md"), &prompt);
@@ -205,12 +205,12 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
                 a.push("Skill".into());
             }
             a.extend(clis.iter().flat_map(|cli| guard::ROUTINE_COMMANDS.iter().map(move |c| format!("Bash({cli} {}:*)", c.split(" *").next().unwrap_or(c)))));
-            a.push("mcp__echo-brain".into());
+            a.push("mcp__echo".into());
             settings_file = Some(f);
         }
         Tools::Folder | Tools::Skip => {
             if let Some(b) = &brain {
-                a.extend(["--mcp-config".into(), b.clone(), "--allowedTools".into(), "mcp__echo-brain".into()]);
+                a.extend(["--mcp-config".into(), b.clone(), "--allowedTools".into(), "mcp__echo".into()]);
             }
             if spec.tools == Tools::Skip {
                 a.push("--dangerously-skip-permissions".into());

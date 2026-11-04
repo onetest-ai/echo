@@ -1830,8 +1830,10 @@ fn apply_dock(window_open: bool) {
 fn show_window(target: &tao::event_loop::EventLoopWindowTarget<UiEvent>, win: &mut Option<crate::window::EchoWindow>, call: Option<&str>, proxy: &tao::event_loop::EventLoopProxy<UiEvent>) {
     match win {
         Some(w) => {
-            if let Some(c) = call {
-                w.show_call(c);
+            match call {
+                Some(l) if l.starts_with("echo://") => w.open_link(l),
+                Some(c) => w.show_call(c),
+                None => {}
             }
             w.window.set_visible(true);
             w.window.set_minimized(false);
@@ -2007,6 +2009,14 @@ pub fn run(app: TargetApp, stop: Arc<AtomicBool>) -> ! {
                 match Ui::new(proxy.clone()) {
                     Ok(u) => ui = Some(u),
                     Err(e) => eprintln!("tray icon unavailable: {e}"),
+                }
+            }
+            // The system opens an echo:// link (a note in Obsidian, a mail): the window, there.
+            Event::Opened { urls } => {
+                for u in urls.iter().map(|u| u.to_string()).filter(|u| crate::links::Link::parse(u).is_some()).take(1) {
+                    if leaving.may_open() {
+                        show_window(target, &mut win, Some(&u), &proxy);
+                    }
                 }
             }
             Event::UserEvent(UiEvent::State(s)) => {

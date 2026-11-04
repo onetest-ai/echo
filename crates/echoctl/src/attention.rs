@@ -275,7 +275,7 @@ pub fn collect() -> Collected {
         }
     }
     #[cfg(feature = "brain")]
-    if brain_on {
+    if brain_on && crate::brain::EXTRAS {
         if crate::brain::taxonomy::current().is_some_and(|t| t.provisional()) {
             out.push(item("taxonomy".into(), "brain", "echo", "Topics waiting for your review".into(), "Claude built topics nobody accepted yet: look through them in Brain → Topics, fix what's wrong, then Accept".into(), false, vec![], Some("brain/topics".into())));
         }

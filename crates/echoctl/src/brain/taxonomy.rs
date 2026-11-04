@@ -263,6 +263,54 @@ pub fn learn(items: &[Learn], by: &str) -> Result<Vec<String>> {
     Ok(added)
 }
 
+/// A plugin's names for one thing (`share::dictionary_add`): merged into the term any of them already is — the
+/// client's layer first, then the practice's, then any — its other names added as synonyms or spellings; else a new
+/// term in `client`'s layer (or the practice's). Nothing is renamed or removed. One new version when anything changed.
+pub fn dictionary_add(name: &str, synonyms: &[String], spellings: &[String], kind: Option<&str>, client: Option<&str>, by: &str) -> Result<Value> {
+    let _lock = write_lock()?;
+    let mut t = current().unwrap_or_default();
+    t.layers.entry(SHARED.into()).or_insert_with(|| Layer { name: "Your practice".into(), ..Default::default() });
+    let names: Vec<String> = std::iter::once(name.to_string()).chain(synonyms.iter().cloned()).collect();
+    let keys: BTreeSet<String> = names.iter().chain(spellings).map(|n| nid(n)).filter(|k| !k.is_empty()).collect();
+    let is_it = |x: &Term| std::iter::once(&x.name).chain(&x.synonyms).chain(&x.variants).any(|n| keys.contains(&nid(n)));
+    let layer = client.unwrap_or(SHARED);
+    let pos = t.terms.iter().position(|x| x.layer == layer && is_it(x)).or_else(|| t.terms.iter().position(|x| x.layer == SHARED && is_it(x))).or_else(|| t.terms.iter().position(is_it));
+    let (term, added, new) = match pos {
+        Some(i) => {
+            let x = &mut t.terms[i];
+            let mut added = vec![];
+            let known = |x: &Term, n: &str| std::iter::once(&x.name).chain(&x.synonyms).chain(&x.variants).any(|k| nid(k) == nid(n));
+            for n in &names {
+                if !known(x, n) {
+                    x.synonyms.push(n.clone());
+                    added.push(n.clone());
+                }
+            }
+            for n in spellings {
+                if !known(x, n) {
+                    x.variants.push(n.clone());
+                    added.push(n.clone());
+                }
+            }
+            (x.name.clone(), added, false)
+        }
+        None => {
+            if !t.layers.contains_key(layer) {
+                let n = crate::projects::clients().ok().and_then(|cs| cs.into_iter().find(|c| c.id == layer).map(|c| c.name)).unwrap_or_else(|| layer.to_string());
+                t.layers.insert(layer.to_string(), Layer { name: n, ..Default::default() });
+            }
+            let mut syn: Vec<String> = vec![];
+            push_new(&mut syn, synonyms);
+            t.terms.push(Term { layer: layer.to_string(), name: name.to_string(), kind: kind.unwrap_or("other").to_string(), synonyms: syn, variants: spellings.to_vec(), ..Default::default() });
+            (name.to_string(), names.iter().chain(spellings).cloned().collect(), true)
+        }
+    };
+    if !added.is_empty() {
+        save(t, json!({"op": "dictionary_add", "by": by, "term": term, "added": added}))?;
+    }
+    Ok(json!({"term": term, "added": added, "new": new}))
+}
+
 /// Every learned term (with its scope).
 pub fn learned() -> Vec<Term> {
     current().map(|t| t.terms.into_iter().filter(|x| x.learned.is_some()).collect()).unwrap_or_default()

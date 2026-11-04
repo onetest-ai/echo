@@ -265,7 +265,7 @@ pub fn hook() -> i32 {
 }
 
 /// What this session may see of the Brain: its AI profile, and for a call's session that call's client, else its
-/// threads, else the call itself — as its echo-brain server is narrowed (`terminal::start_call`).
+/// threads, else the call itself — as its echo server is narrowed (`terminal::start_call`).
 #[cfg(feature = "brain")]
 fn session_access() -> Option<crate::brain::access::Access> {
     let profile = std::env::var(PROFILE_VAR).ok().filter(|p| !p.is_empty())?;

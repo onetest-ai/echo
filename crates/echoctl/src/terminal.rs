@@ -599,7 +599,7 @@ pub fn start_folder(key: &str, profile: Option<&str>, pick: Option<&str>, cols: 
     // The Brain beside the user's own MCP servers (read-only; its tools allowed without asking).
     #[cfg(feature = "brain")]
     if let Some(f) = brain_mcp_config(&std::env::current_exe()?, &["--profile".into(), p.id.clone(), "--who".into(), "folder".into()]) {
-        args.splice(0..0, ["--mcp-config".to_string(), f, "--allowedTools".into(), "mcp__echo-brain".into()]);
+        args.splice(0..0, ["--mcp-config".to_string(), f, "--allowedTools".into(), "mcp__echo".into()]);
     }
     let mut env = vec![(crate::view::SESSION_VAR, "1".into()), (crate::view::PROFILE_VAR, p.id.clone())];
     env.extend(extra_env);
@@ -661,7 +661,7 @@ pub fn start_call(key: &str, dir: &Path, pick: Option<&str>, cols: u16, rows: u1
     let brain = brain_mcp_config(&exe, &access);
     let with_brain = brain.is_some();
     if let Some(f) = brain {
-        args.extend(["--mcp-config".into(), f, "--allowedTools".into(), "mcp__echo-brain".into()]);
+        args.extend(["--mcp-config".into(), f, "--allowedTools".into(), "mcp__echo".into()]);
     }
     if p.kind == ai::Kind::Local {
         if let Some(m) = p.notes_model() {
@@ -680,7 +680,7 @@ pub fn start_call(key: &str, dir: &Path, pick: Option<&str>, cols: u16, rows: u1
              transcript, give me a three-line overview, then wait for my questions.",
             dir.display(),
             dir.display(),
-            if with_brain { ", and search the user's Brain with the echo-brain tools — their other calls, mail, chats and documents about this call's client or threads (cite the source and time)" } else { "" }
+            if with_brain { ", and search what was said elsewhere with the `echo` tools — the user's other calls, mail, chats and documents about this call's client or threads (cite the source and time)" } else { "" }
         ));
     }
     let mut env: Vec<(&str, String)> = vec![
@@ -702,7 +702,8 @@ pub fn start_call(key: &str, dir: &Path, pick: Option<&str>, cols: u16, rows: u1
     open_with(key, cmd, cols, rows, Some((p.id.clone(), Box::new(ready))), Some(forget))
 }
 
-/// The Brain as an MCP server for a session (`echoctl brain mcp`): a config file of its own, with what
+/// Echo's own MCP server for a session (`echoctl mcp`: what was said, people, echo:// links — on whether or not the
+/// Brain is): a config file of its own, with what
 /// the session may read — its AI profile's sources only (strict routing), and for a call's session
 /// that call's client, else its threads, else the call itself.
 #[cfg(not(feature = "brain"))]
@@ -712,18 +713,13 @@ pub(crate) fn brain_mcp_config(_exe: &Path, _access: &[String]) -> Option<String
 
 #[cfg(feature = "brain")]
 pub(crate) fn brain_mcp_config(exe: &Path, access: &[String]) -> Option<String> {
-    // The Brain switched off: its server isn't offered to Claude.
-    #[cfg(feature = "brain")]
-    if !crate::brain::enabled() {
-        return None;
-    }
     use sha2::{Digest, Sha256};
     let tag: String = Sha256::digest(access.join("\0").as_bytes()).iter().take(6).map(|b| format!("{b:02x}")).collect();
-    let f = paths::config_dir().join("minutes-run").join(format!("brain-mcp-{tag}.json"));
+    let f = paths::config_dir().join("minutes-run").join(format!("echo-mcp-{tag}.json"));
     std::fs::create_dir_all(f.parent()?).ok()?;
-    let mut args: Vec<String> = vec!["brain".into(), "mcp".into()];
+    let mut args: Vec<String> = vec!["mcp".into()];
     args.extend(access.iter().cloned());
-    let v = serde_json::json!({"mcpServers": {"echo-brain": {"command": exe.display().to_string(), "args": args}}});
+    let v = serde_json::json!({"mcpServers": {"echo": {"command": exe.display().to_string(), "args": args}}});
     std::fs::write(&f, serde_json::to_vec_pretty(&v).ok()?).ok()?;
     Some(f.display().to_string())
 }

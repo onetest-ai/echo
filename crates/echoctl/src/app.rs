@@ -121,7 +121,26 @@ fn record_app_path() {
     let _ = fs::create_dir_all(&dir);
     if fs::read_to_string(dir.join(APP_PATH_FILE)).ok().as_deref() != Some(&*exe.to_string_lossy()) {
         let _ = fs::write(dir.join(APP_PATH_FILE), exe.to_string_lossy().as_bytes());
-    }
+    }    #[cfg(windows)]
+    register_link_scheme(&exe);
+}
+
+/// Windows: echo:// links (a note in Obsidian, a mail) open this Echo — `HKCU\Software\Classes\echo`, its command
+/// `"<echoctl.exe>" app open --link "%1"`, written at each start so it follows the install folder. (macOS: Info.plist.)
+#[cfg(windows)]
+fn register_link_scheme(exe: &std::path::Path) {
+    use windows::core::HSTRING;
+    use windows::Win32::System::Registry::{RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ};
+    let set = |key: &str, name: Option<&str>, value: &str| {
+        let wide: Vec<u16> = value.encode_utf16().chain([0]).collect();
+        let name = name.map(HSTRING::from);
+        unsafe {
+            let _ = RegSetKeyValueW(HKEY_CURRENT_USER, &HSTRING::from(key), name.as_ref().map(|n| windows::core::PCWSTR(n.as_ptr())).unwrap_or(windows::core::PCWSTR::null()), REG_SZ.0, Some(wide.as_ptr() as *const _), (wide.len() * 2) as u32);
+        }
+    };
+    set(r"Software\Classes\echo", None, "URL:Echo link");
+    set(r"Software\Classes\echo", Some("URL Protocol"), "");
+    set(r"Software\Classes\echo\shell\open\command", None, &format!("\"{}\" app open --link \"%1\"", exe.display()));
 }
 
 /// Look for a new release at start and every 6 h; notify once per version.

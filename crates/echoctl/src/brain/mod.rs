@@ -27,9 +27,30 @@ use std::path::PathBuf;
 
 use crate::paths;
 
-/// `<home>/brain/knowledge.sqlite`: the user's one Brain, beside their calls.
+/// Recall's folder, `<home>/recall` (Echo before 0.8.0 called it the Brain: `<home>/brain`, moved here the first time
+/// it is asked for).
+pub fn dir() -> PathBuf {
+    let new = paths::home().join("recall");
+    if !new.exists() {
+        let old = paths::home().join("brain");
+        if old.is_dir() {
+            if let Err(e) = std::fs::rename(&old, &new) {
+                eprintln!("recall: can't move {} to {}: {e}", old.display(), new.display());
+                return old;
+            }
+        }
+    }
+    new
+}
+
+/// Topics, their tags, drift and moves, insights and the numbers lane: switched off in 0.8.0 — they didn't survive
+/// our tests (Recall keeps the sources, search and the dictionary; lasting facts are the Knowledge plugin's). Their
+/// code stays until it is removed; nothing runs it and the window shows none of it.
+pub const EXTRAS: bool = false;
+
+/// `<home>/recall/knowledge.sqlite`: the user's one index of what was said, beside their calls.
 pub fn store_path() -> PathBuf {
-    paths::home().join("brain").join("knowledge.sqlite")
+    dir().join("knowledge.sqlite")
 }
 
 /// Settings → Brain, per computer: `<config dir>/brain.json` (0600: it may hold a key).
@@ -109,6 +130,8 @@ pub fn sync() -> Result<store::Report> {
     if crate::graph::account().is_some() {
         match sources::sync(emb.as_ref().map(|e| e as &dyn embed::Embedder)) {
             Ok((read, s)) => {
+                r.touched.extend(s.touched);
+                r.gone.extend(s.gone);
                 r.added += s.added;
                 r.changed += s.changed;
                 r.removed += s.removed + read.removed;
@@ -158,7 +181,7 @@ pub fn sync() -> Result<store::Report> {
         cs.into_iter().min()
     };
     // The numbers lane: clients with accepted families, built again when their workbooks changed.
-    for (client, r) in numbers::refresh() {
+    for (client, r) in if EXTRAS { numbers::refresh() } else { vec![] } {
         match r {
             Ok(v) => eprintln!("brain: numbers {client}: {} facts", v["summary"]["facts"]),
             Err(e) => eprintln!("brain: numbers {client}: {e:#}"),
@@ -173,6 +196,8 @@ pub fn sync() -> Result<store::Report> {
     // were last read (`term_scan`, cleared by every write of a section). A store from before Brain's meta keys
     // and entity-kind nodes gets its graph rebuilt once.
     taxonomy::mentions_after_sync(&store::open(&store_path())?)?;
+    #[cfg(feature = "js")]
+    crate::share::sources_changed(&r.touched, &r.gone);
     Ok(r)
 }
 
@@ -235,7 +260,21 @@ fn fingerprint() -> u64 {
 
 /// Keep the Brain current in the app: every 5 minutes, a sync when the calls (or the threads, or the
 /// model) changed since the last one; a failure is retried at the next change or after an hour.
+/// Once, after the update that turned the Brain into Recall: say what went and why (only to someone who had topics).
+fn tell_recall() {
+    let mark = dir().join("recall-notice");
+    if EXTRAS || mark.exists() || taxonomy::current().is_none_or(|t| t.topics.is_empty()) {
+        return;
+    }
+    crate::app::notify(
+        "The Brain is now Recall",
+        "Topics, the graph, insights and numbers didn't survive our tests, so they're switched off. Recall keeps your sources, search and the dictionary; lasting facts go to Knowledge (the Obsidian plugin).",
+    );
+    let _ = std::fs::write(mark, chrono::Local::now().to_rfc3339());
+}
+
 pub fn start_scheduler() {
+    tell_recall();
     // The old learned vocabulary moves into the taxonomy once (transcription reads both meanwhile).
     std::thread::spawn(|| {
         if let Ok(mut cfg) = crate::config::Config::load() {
@@ -271,13 +310,13 @@ pub fn start_scheduler() {
             match sync() {
                 Ok(r) => {
                     // New sections get their topics once a taxonomy exists (Claude, on the default profile).
-                    if r.chunks > 0 && taxonomy::current().is_some() {
+                    if EXTRAS && r.chunks > 0 && taxonomy::current().is_some() {
                         if let Err(e) = taxonomy::classify(None, false, &|_| {}) {
                             eprintln!("brain: tagging: {e:#}");
                         }
                     }
                     // Insights for scopes whose sections changed (at most daily each, a daily cap, only when quiet).
-                    if let Err(e) = insights::tick() {
+                    if let Err(e) = if EXTRAS { insights::tick().map(|_| ()) } else { Ok(()) } {
                         eprintln!("brain: insights: {e:#}");
                     }
                     failed_at = r.embed_error.as_ref().map(|_| std::time::Instant::now());
@@ -309,4 +348,18 @@ pub fn status() -> Result<Value> {
         "vision_key": s.vision_key.as_deref().is_some_and(|k| !k.is_empty())});
     v["path"] = serde_json::json!(store_path());
     Ok(v)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_brains_folder_becomes_recalls() {
+        let (_env, root) = crate::paths::testenv::folders("recall-dir");
+        let old = crate::paths::home().join("brain");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("knowledge.sqlite"), b"x").unwrap();
+        assert_eq!(super::store_path(), crate::paths::home().join("recall").join("knowledge.sqlite"));
+        assert!(!old.exists() && super::store_path().exists(), "moved, not copied");
+        assert!(root.exists());
+    }
 }

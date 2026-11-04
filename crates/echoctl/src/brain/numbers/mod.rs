@@ -172,7 +172,7 @@ impl Config {
 }
 
 pub fn dir(client: &str) -> PathBuf {
-    crate::paths::home().join("brain").join("numbers").join(client)
+    crate::brain::dir().join("numbers").join(client)
 }
 
 pub fn load_config(client: &str) -> Option<Config> {
@@ -260,7 +260,7 @@ pub fn served() -> Vec<String> {
 
 /// Clients with facts or a config.
 pub fn clients() -> Vec<String> {
-    let mut out: Vec<String> = std::fs::read_dir(crate::paths::home().join("brain").join("numbers"))
+    let mut out: Vec<String> = std::fs::read_dir(crate::brain::dir().join("numbers"))
         .into_iter()
         .flatten()
         .flatten()
@@ -357,29 +357,6 @@ pub fn get_metric(a: &Value) -> Result<Value> {
     }
     Ok(json!({"client": client, "metric": name, "unit": m["unit"], "desc": m["desc"], "definition": m["definition"], "rows": out, "count": out.len(), "truncated": capped,
               "guidance": "Quote values as given, with their source_file; say when a figure was restated or the sources conflict. No rows = not modeled for that filter."}))
-}
-
-/// `get_metric_history`: every report of one metric-month (each file that reported it).
-pub fn get_metric_history(a: &Value) -> Result<Value> {
-    let name = a["name"].as_str().or(a["metric"].as_str()).ok_or_else(|| anyhow!("name: which metric"))?;
-    // Only accepted families answer: a proposal is never served as numbers.
-    let clients: Vec<String> = a["client"].as_str().map(|c| vec![c.to_string()]).unwrap_or_else(served).into_iter().filter(|c| load_config(c).is_some_and(|c| c.accepted())).collect();
-    let Some((client, m)) = clients.iter().find_map(|c| load_catalog(c).get(name).cloned().map(|m| (c.clone(), m))) else {
-        return Ok(json!({"status": "not_modeled", "reason": format!("no governed metric {name:?}")}));
-    };
-    let c = super::store::open(&super::store_path())?;
-    ensure_schema(&c)?;
-    let rows: Vec<Value> = c
-        .prepare(
-            "SELECT grain, entity, month, value, source_file, reported_in, is_current FROM fact_reports WHERE client = ?1 AND family = ?2 AND metric = ?3
-               AND (?4 IS NULL OR lower(entity) = lower(?4)) AND (?5 IS NULL OR month = ?5) AND (?6 IS NULL OR grain = ?6) ORDER BY grain, entity, month, reported_in LIMIT 300",
-        )?
-        .query_map(rusqlite::params![client, m["family"].as_str(), m["metric"].as_str(), a["entity"].as_str(), a["month"].as_str(), a["grain"].as_str()], |r| {
-            Ok(json!({"grain": r.get::<_, String>(0)?, "entity": r.get::<_, String>(1)?, "month": r.get::<_, Option<String>>(2)?, "value": r.get::<_, f64>(3)?,
-                      "source_file": r.get::<_, String>(4)?, "reported_in": r.get::<_, Option<String>>(5)?, "is_current": r.get::<_, i64>(6)? == 1}))
-        })?
-        .collect::<Result<_, _>>()?;
-    Ok(json!({"client": client, "metric": name, "reports": rows, "count": rows.len()}))
 }
 
 /// What the window shows: per client, the config's state, families, the catalog and the last build.

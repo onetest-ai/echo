@@ -517,8 +517,13 @@ fn body(md: &str, images: &mut Images) -> Body {
                 Tag::Strong => out.push_str("<strong>"),
                 Tag::Strikethrough => out.push_str("<del>"),
                 Tag::Link { dest_url, .. } => {
-                    let ok = dest_url.starts_with("https://");
-                    if ok {
+                    // https, and echo:// links Echo knows (a call at a moment, a thread, a client, a person, a mail):
+                    // the window routes those (`window.echo.openLink`), the system opens Echo at them.
+                    let echo = crate::links::Link::parse(&dest_url).is_some();
+                    let ok = dest_url.starts_with("https://") || echo;
+                    if echo {
+                        out.push_str(&format!("<a href=\"{}\" data-echo-link>", esc(&dest_url)));
+                    } else if ok {
                         out.push_str(&format!("<a href=\"{}\" rel=\"noopener noreferrer\">", esc(&dest_url)));
                     }
                     links.push(ok);
@@ -798,6 +803,7 @@ const EMBED_JS: &str = "(function () {
     e.preventDefault();
     var u = a.getAttribute('href') || a.getAttributeNS(XLINK, 'href') || '';
     if (/^https:\\/\\//i.test(u)) post({ echo: 'open', url: u });
+    else if (/^echo:\\/\\//i.test(u)) post({ echo: 'link', link: u });
   }, true);
   // Words selected here: the window tells Echo's Claude terminals what \"this\" is.
   var selT = null;

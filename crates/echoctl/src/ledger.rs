@@ -1137,7 +1137,7 @@ fn links_of(v: &Value) -> Vec<Value> {
 
 fn link_ok(l: &Value) -> bool {
     l["title"].as_str().is_some_and(|t| !t.trim().is_empty() && t.chars().count() <= 200)
-        && l["url"].as_str().is_some_and(|u| u.starts_with("https://") && u.len() <= 2000 && !u.chars().any(char::is_whitespace))
+        && l["url"].as_str().is_some_and(|u| (u.starts_with("https://") || crate::links::Link::parse(u).is_some()) && u.len() <= 2000 && !u.chars().any(char::is_whitespace))
 }
 
 /// A description as kept: trimmed, empty = none, cut at `MAX_DESC` characters.
@@ -1162,7 +1162,7 @@ pub fn record_open(n: &Node) -> bool {
 
 fn check_links(v: &Value) -> Result<()> {
     if !(v.is_null() || v.as_array().is_some_and(|a| a.len() <= MAX_LINKS && a.iter().all(link_ok))) {
-        bail!("links is a list of at most {MAX_LINKS} {{title, url}}, url https://");
+        bail!("links is a list of at most {MAX_LINKS} {{title, url}}, url https:// or an echo:// link");
     }
     Ok(())
 }
@@ -2674,7 +2674,8 @@ pub fn tree(project: &str) -> Result<Value> {
         "nodes": nodes, "notes": t.notes,
         "processed": t.order.len(), "pending": pend,
         // Each evidence item's call: history entries name the call they came from.
-        "evidence": t.evidence.iter().map(|(k, v)| (k.clone(), json!({"title": v["title"], "call": v["call"], "date": v["date"], "kind": v["kind"], "url": v["url"], "from": v["turns"][0]["speaker"].as_str().filter(|_| v["kind"] == "mail")}))).collect::<serde_json::Map<String, Value>>(),
+        "evidence": t.evidence.iter().map(|(k, v)| (k.clone(), json!({"title": v["title"], "call": v["call"], "date": v["date"], "kind": v["kind"], "url": v["url"],
+            "link": v["call"].as_str().map(|c| format!("echo://call/{c}")), "from": v["turns"][0]["speaker"].as_str().filter(|_| v["kind"] == "mail")}))).collect::<serde_json::Map<String, Value>>(),
         "roots": t.nodes.values().filter(|x| x.kind == "epic" && x.state != "merged" && x.state != "deleted").map(|x| &x.id).collect::<Vec<_>>(),
     }))
 }

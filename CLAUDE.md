@@ -189,6 +189,20 @@ Prompts follow `config.scheduled` (calendar meetings) and `config.unscheduled` (
 `scripts/build-plugin.sh` must replace `plugin/bin/echoctl` by rename, never overwrite in place:
 macOS SIGKILLs (exit 137) a binary rewritten in place.
 
+## `echo://` links (`links.rs`)
+How anything outside the window (a note in Echo's vault, a mail) points at what Echo keeps: `echo://call/<folder>[?t=<s>]`,
+`echo://thread/<id>`, `echo://client/<id>`, `echo://person/<People key>`, `echo://mail/<source id>`, `echo://task/<thread>/<item
+id>` (its thread's Work tab with its details open; Details → Copy link) (`Link::parse`: no `..`,
+no extra slashes). Registered with the system (macOS `CFBundleURLTypes` in Info.plist → tao's `Event::Opened`; Windows
+`HKCU\Software\Classes\echo` → `echoctl app open --link "%1"`, rewritten at each start beside `app-path`). The window routes
+them (`window.echo.openLink` → `/api/link` = `links::target`: a call at a moment → its Transcript with the jump, else
+Minutes; a thread → Brief; a client → Overview; a person → their thread's People with their panel; a mail → its
+Outlook / Teams link); the page and the minutes frame (`{echo: 'link'}`) take clicks on them; `markdown_html` keeps them
+(`data-echo-link`). `echoctl read <link>` gives Claude the text behind one, read-only (a call's minutes and its turns
+±90 s around the moment, a thread's people and calls, a client's threads, a person's card, a mail's facts, a work item with
+where it was said). A work item's `links` take `echo://` links beside https; `context.links` gives a minutes run the links of
+the call's threads, clients, previous meeting and known people, which process-call puts on the names (never its own).
+
 ## The Echo window (`window.rs`, `ui/`)
 Menu → Open Echo… (or `echoctl app open [--call <name>]`, or a recent call) opens one window:
 Calls (list + Minutes / Transcript / Chat / Screens / Actions — one Transcript tab: live while the call records, with a
@@ -601,6 +615,15 @@ task created from this call within a minute of the item's moment sharing a third
 moment; ¾ when farther) shows its task as a chip instead of a second line (`action_tasks`).
 
 ## The Brain (`brain/`; plan and phases: `docs/brain-design.md`)
+**Since 0.8.0 the window calls it Recall** (2026-11-04, the user): the index of what was said — sources, search,
+related, the dictionary; activity Recall (tabs Sources, Dictionary, People), Settings → Recall (Use Recall), `<echo_recall>`
+for sessions, the `echo` MCP. Its folder is `<home>/recall` (`brain::dir`, the old `<home>/brain` moved there the first
+time it is asked for). The window shows it inside one **Knowledge** activity (`#brain/<tab>`): the plugins' tabs first
+(slot `knowledge.tab` — `{id, label, render, after}`, `#brain/<plugin>:<id>/<its route>`, `ctx.where().tab`; the Knowledge
+plugin's notes and graph), then Recall's; Settings → Knowledge holds Recall's card. **Switched off** (`brain::EXTRAS` / app.js `RECALL_EXTRAS`, false: they didn't survive our tests;
+code kept until removed): topics (builds, tagging, drift, moves, split, their Inbox items), insights, the numbers lane,
+the Graph and Coverage tabs; one notification says so (`tell_recall`, once, to someone who had topics). Lasting facts
+are the Knowledge plugin's (Echo's own Obsidian vault). The code and these notes keep "brain".
 Cross-call intelligence as Echo's own: Brain (onetest-ai/applied_skills `bundles/brain`) ported into the app — **one per
 user**, **facts only** (calls now; Teams channels, mail and thread folders next — the stakeholder map and the work ledger
 are referenced by id, never ingested), **nothing copied** (every section links back: `echo://call/<name>?t=<s>`, later a
@@ -952,6 +975,16 @@ codes) — and registers the channel; its Settings section checks the bot, Bun a
 bot reacts 👀 and Claude answers through the channel; it still works after `--resume`; messages sent while the session
 was closed aren't read. A Claude Code started from inside another (`CLAUDE_CODE_CHILD_SESSION` inherited) keeps no
 transcript, so it can't be resumed.
+**Echo's data for plugins** (`share.rs`, `uses.echo`): `ctx.echo.read(kind, arg)` — `clients`, `threads`, `people`
+(People's: key, name, organisation, title, threads, `echo://person` link), `dictionary` (`{terms: [{name, synonyms,
+spellings, kind, group, client}]}`), `sources` (`{kind, thread, since, limit}` → calls with minutes and Recall's mail and
+channel posts, newest first) and `source` (`call:<folder>` | `mail:<Recall source>` → `{id, kind, title, date, text,
+link, threads, profile, transcript?}`: a call's minutes + transcript, a mail's or post's facts; `profile` = the AI profile
+its text may go to, none when its threads disagree). `uses.echo.write: ["dictionary"]` → `ctx.echo.dictionary.add({name,
+synonyms, spellings, kind, client})` (`taxonomy::dictionary_add`: merged into the term any of its names is, else a new
+one; never renames or removes). Events: `minutes_written {id, link}` (the app's run or a session's), `sources_changed
+{changed, removed}` (after a Recall sync). A read kind this Echo doesn't know is named on the install sheet and granted
+nothing — the plugin still installs.
 **What plugins may reach beyond their store** (`grants.rs`, granted by the user or kept by Echo, never written by the plugin):
 **folders** the user picked in Echo's own picker (`ctx.system.pickFolder` → `<config dir>/plugins/grants/<id>.json`;
 `ECHOCTL_PICK_FOLDER` answers it in tests) — `ctx.fs.walk / list / read` only inside them (plain relative paths, links
