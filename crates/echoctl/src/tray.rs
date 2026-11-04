@@ -197,6 +197,12 @@ impl Leaving {
 
     /// The quit `echoctl app quit` waits for is held up by a question to the user (`quit.asking`
     /// while so: the CLI keeps waiting).
+    /// Echo is stopping, or the user is being asked whether it may (a quit, an update, a folder change):
+    /// no window opens now — one opened then would lose what is typed in it.
+    fn may_open(&self) -> bool {
+        !matches!(self.phase, Phase::Going | Phase::Asking(Then::Quit | Then::QuitAsked | Then::Update(_) | Then::ChangeHome(_)))
+    }
+
     fn asking_quit(&self) -> bool {
         matches!(self.phase, Phase::Asking(Then::QuitAsked)) || matches!(self.queued, Some(Then::QuitAsked))
     }
@@ -1813,7 +1819,7 @@ pub fn run(app: TargetApp, stop: Arc<AtomicBool>) -> ! {
         // that don't fit (beside the notch, many of them), and Echo then looked gone. Its click opens
         // the window. Echo.app stays `LSUIElement`, so the CLI from the same binary never shows one.
         event_loop.set_activation_policy(ActivationPolicy::Regular);
-        set_app_icon();
+        event_loop.set_activate_ignoring_other_apps(false); // starting at login never takes the focus
         crate::app::notifications::init();
     }
 
@@ -1928,12 +1934,16 @@ pub fn run(app: TargetApp, stop: Arc<AtomicBool>) -> ! {
             },
             // The Dock icon clicked (or Echo.app opened again) with no window showing: open it — also
             // when the menu-bar icon is hidden (no room beside the notch) or couldn't be made.
-            Event::Reopen { has_visible_windows: false, .. } => show_window(target, &mut win, None, &proxy),
+            Event::Reopen { has_visible_windows: false, .. } if leaving.may_open() => show_window(target, &mut win, None, &proxy),
             // macOS: create the icon only once the event loop is running.
-            Event::NewEvents(StartCause::Init) => match Ui::new(proxy.clone()) {
-                Ok(u) => ui = Some(u),
-                Err(e) => eprintln!("tray icon unavailable: {e}"),
-            },
+            Event::NewEvents(StartCause::Init) => {
+                #[cfg(target_os = "macos")]
+                set_app_icon(); // once AppKit has finished launching: earlier it would put its own back
+                match Ui::new(proxy.clone()) {
+                    Ok(u) => ui = Some(u),
+                    Err(e) => eprintln!("tray icon unavailable: {e}"),
+                }
+            }
             Event::UserEvent(UiEvent::State(s)) => {
                 // `echoctl app quit` — also when the tray icon couldn't be made (no window then).
                 if app::take_quit_request() {
@@ -1954,7 +1964,7 @@ pub fn run(app: TargetApp, stop: Arc<AtomicBool>) -> ! {
             Event::UserEvent(UiEvent::Menu(id)) => {
                 if let Some(u) = ui.as_mut() {
                     u.click(&id);
-                    if let Some(call) = u.open_window.take() {
+                    if let Some(call) = u.open_window.take().filter(|_| leaving.may_open()) {
                         show_window(target, &mut win, call.as_deref(), &proxy);
                     }
                 }
