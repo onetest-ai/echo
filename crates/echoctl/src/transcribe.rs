@@ -1076,13 +1076,18 @@ pub(crate) fn render_markdown(
     if let Some(people) = meeting.map(|m| m.people()).filter(|p| !p.is_empty()) {
         md.insert_str(md.len() - 1, &format!("- **Invited:** {}\n", people.join(", ")));
     }
+    // A memo is one voice from start to end: paragraphs of ~10 s keep its times usable (the minutes cite them, its
+    // threads are split by them); a call's turns are as long as the speaker's.
+    let turn_cap = if crate::memo::is_memo(dir) { 10.0 } else { f64::INFINITY };
     // Merge consecutive segments of the same speaker (and language) into one paragraph.
     let mut i = 0;
     while i < segs.len() {
         let s = &segs[i];
         let mut text = s.text.clone();
         let mut j = i + 1;
-        while j < segs.len() && segs[j].speaker == s.speaker && segs[j].name == s.name && segs[j].lang == s.lang && segs[j].start - segs[j - 1].end < 2.0 {
+        while j < segs.len() && segs[j].speaker == s.speaker && segs[j].name == s.name && segs[j].lang == s.lang && segs[j].start - segs[j - 1].end < 2.0
+            && segs[j].start - s.start < turn_cap
+        {
             text.push(' ');
             text.push_str(&segs[j].text);
             j += 1;

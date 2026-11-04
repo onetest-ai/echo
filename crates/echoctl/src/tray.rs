@@ -596,7 +596,8 @@ fn status_text(state: &UiState) -> String {
         UiState::Idle { in_call: Some(true) } => "Teams call in progress — not recording".into(),
         UiState::Idle { .. } => "Not recording".into(),
         UiState::Armed => "Armed — recording starts with the next call".into(),
-        UiState::Recording { title, since } => format!(
+        UiState::Recording { since, memo: true, .. } => format!("● Recording a memo · since {}", since.format("%H:%M")),
+        UiState::Recording { title, since, .. } => format!(
             "● Recording{} · since {}",
             title.as_deref().map(|t| format!(" · {t}")).unwrap_or_default(),
             since.format("%H:%M")
@@ -821,6 +822,8 @@ fn language_name(code: &str) -> String {
 #[derive(Clone)]
 enum Action {
     Record,
+    /// Record the user alone now (`watch::memo_start`).
+    Memo,
     CheckUpdates,
     RecordIn(String),
     Stop,
@@ -881,6 +884,7 @@ struct Ui {
     tray: TrayIcon,
     status: MenuItem,
     record: Submenu,
+    memo: MenuItem,
     stop: MenuItem,
     note: MenuItem,
     actions: HashMap<MenuId, Action>,
@@ -955,6 +959,7 @@ impl Ui {
             tray,
             status: MenuItem::new("", false, None),
             record: Submenu::new("", true),
+            memo: MenuItem::new("", false, None),
             stop: MenuItem::new("", false, None),
             note: MenuItem::new("", false, None),
             actions: HashMap::new(),
@@ -999,11 +1004,12 @@ impl Ui {
             let it = self.item(&format!("Only {}", language_name(code)), true, Some(Action::RecordIn(code.clone())));
             let _ = self.record.append(&it);
         }
+        self.memo = self.item("Record a memo", true, Some(Action::Memo));
         self.stop = self.item("Stop recording", false, Some(Action::Stop));
         self.note = self.item("Add a note…", false, Some(Action::AddNote));
         let sep = PredefinedMenuItem::separator;
         let open = self.item("Open Echo…", true, Some(Action::OpenWindow(None)));
-        let _ = menu.append_items(&[&self.status, &sep(), &self.record, &self.stop, &self.note, &sep(), &open, &sep()]);
+        let _ = menu.append_items(&[&self.status, &sep(), &self.record, &self.memo, &self.stop, &self.note, &sep(), &open, &sep()]);
 
         // Upcoming meetings (today)
         let _ = menu.append(&MenuItem::new("Upcoming", false, None));
@@ -1307,12 +1313,14 @@ impl Ui {
                 self.stop.set_text("Cancel");
                 self.stop.set_enabled(true);
             }
-            UiState::Recording { .. } => {
+            UiState::Recording { memo, .. } => {
                 self.record.set_enabled(false);
-                self.stop.set_text("Stop recording");
+                self.stop.set_text(if *memo { "Stop the memo" } else { "Stop recording" });
                 self.stop.set_enabled(true);
             }
         }
+        // One recording at a time: a memo starts whenever nothing records.
+        self.memo.set_enabled(!matches!(state, UiState::Recording { .. }));
         self.note.set_enabled(matches!(state, UiState::Recording { .. }));
         if self.quit.is_enabled() {
             self.quit.set_text(if matches!(state, UiState::Recording { .. }) {
@@ -1393,6 +1401,11 @@ impl Ui {
     fn run(&mut self, action: Action) {
         match action {
             Action::Record => drop(watch::arm(None, None, None, None)),
+            Action::Memo => {
+                if let Err(e) = watch::memo_start(None, None) {
+                    app::notify("Memo not started", &format!("{e:#}"));
+                }
+            }
             Action::RecordIn(code) => drop(watch::arm(None, None, Some(vec![code]), None)),
             Action::Stop => drop(watch::stop()),
             Action::ArmMeeting(m) => drop(watch::arm(m.subject.clone(), Some(*m), None, None)),

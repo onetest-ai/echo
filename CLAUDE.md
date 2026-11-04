@@ -366,6 +366,25 @@ min) `teams_transcript::scan` checks the last 3 days' ended Teams meetings of op
 days) and offers each
 one with a transcript once (Import · Not this → `dismissed`). Measured: a short and a half-hour meeting, each with its cues and chat messages.
 
+## Memos (`memo.rs`, `Recording::start_memo`; boards: the Workbench canvas's "Memos" row)
+The user alone, recorded by hand — no call, no thread to pick (2026-11-04, the user: "the thread identification should be
+automatic, as within one memo a person can do multiple threads"). Started from the Record button's **Memo** segment,
+the menu bar's Record a memo, ⌘K or `echoctl memo start` (IPC `record_memo`; `memo.request`, taken by the watcher);
+`meta.json` `kind: memo`; one track, the default microphone (`MicSource { app: None }`), no Teams tap, mute sync, UI
+capture, frames or chat. One recording at a time: refused while one records; arms and calls wait — a Teams call that
+starts during a memo is told (`call_during_memo`) and not recorded. Only Stop ends it (no "call ended"); the pill's Stop
+doesn't ask. Its transcript is in ~10 s paragraphs (one voice: `render_markdown`'s `turn_cap`) so the times mean
+something. Minutes come right after (`auto_due`: no 15-minute wait), for any memo with words (`memo_gate`: no 3-minute
+gate), with the memo template (`templates/memo.md`). **Threads from what was said**: `context` gives the run `memo` and
+`open_threads` (id, name, client, brief, terms, people); process-call's step 4b splits the memo into parts by thread and
+runs `echoctl memo threads <call> --file memo-threads.new.json` (`RUN_COMMANDS`; the guard lets the run write that
+file) — unknown, closed and excluded threads dropped, spans clamped; the memo is pinned to each thread, and pins an
+earlier split made but this one doesn't name are taken back (never the user's own); `<call>/memo-threads.json`. A
+thread's sync reads only its part (`ledger::call_item(dir, Some(thread))`, `memo::parts_for`; a memo pinned by hand
+gives the whole). The window: a mic in the list and the header, chips with each part's times, × = Not this (the
+thread's exclusion; a later split leaves it out). Measured: a two-thread memo (Acme, then Globex) split 0–13 s / 13–21
+s, titled from what was said, its to-dos under the right thread, each thread's evidence only its part.
+
 ## Projects (`projects.rs`; plan and phases: `docs/projects-design.md`)
 **The window calls them Threads** (the activity, + Thread, New thread, the palette, Settings — the user's word, since
 2026-10-30); the code, the CLI (`echoctl project …`), the API and the data folder (`<home>/projects/`) keep "project".

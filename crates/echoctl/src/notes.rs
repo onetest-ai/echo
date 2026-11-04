@@ -340,7 +340,9 @@ pub fn auto_due(dir: &Path, cfg: &Config, now: DateTime<Local>, own: Option<&Run
         return Due::Not(NotDue::NotReady); // the user's notes can't be read (the Notes tab says why)
     }
     let last = noted.map_or(ended.with_timezone(&Local), |n| n.max(ended.with_timezone(&Local)));
-    let mut at = last + chrono::Duration::from_std(AUTO_DELAY).unwrap_or_default();
+    // A memo has no call notes to wait for: its minutes (and its threads) come as soon as it is transcribed.
+    let delay = if crate::memo::is_memo(dir) { chrono::Duration::zero() } else { chrono::Duration::from_std(AUTO_DELAY).unwrap_or_default() };
+    let mut at = last + delay;
     match later(dir) {
         Some(None) => return Due::Not(NotDue::Held),
         Some(Some(t)) => at = at.max(t),
@@ -1491,7 +1493,7 @@ pub(crate) fn rule_path(p: &Path) -> String {
 /// (others' words) unattended, so it can't change Echo's settings, read the calendar or chats, or
 /// quit Echo — nor work on another call (`calls::resolve_call` inside a run). The guard
 /// (`guard.rs`) holds every Bash call to these, as plain commands.
-pub const RUN_COMMANDS: [&str; 7] = ["context", "actions", "speakers", "title", "vocab add", "frames", "transcribe"];
+pub const RUN_COMMANDS: [&str; 8] = ["context", "actions", "speakers", "title", "vocab add", "frames", "transcribe", "memo threads"];
 
 /// The only tools a run has: no web, no agents, and with `--strict-mcp-config` no MCP server.
 const RUN_TOOLS: &str = "Bash,Read,Glob,Grep,Edit,Write,Skill";

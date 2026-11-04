@@ -56,6 +56,20 @@ follow (user templates in `<data folder>/.echo/templates/` override the built-in
 
 ## 4. Write `<dir>/notes.md`
 
+### 4b. A memo first: find its threads (only when `memo` is true)
+A memo is the user alone, thinking aloud — no speakers (skip 4a), no chat, no screens. Its threads come from what
+was said, never from a picker:
+1. Read the transcript against `open_threads` (each: `id`, name, client, brief, terms, people).
+2. Split the memo into stretches by the thread each is about — a memo can cover several, one after another, and
+   come back to one. A stretch belongs to a thread only when its words clearly concern it: its name, client, people,
+   terms or the brief's subject. Unsure, or about none: leave it out (it goes under "Other").
+3. Write `<dir>/memo-threads.new.json` — `[{"thread": "<id>", "from": "mm:ss", "to": "mm:ss"}]`, ids only from
+   `open_threads` — and run `echoctl memo threads <dir> --file <dir>/memo-threads.new.json`. Use the `parts` it
+   prints (it drops unknown or closed threads and ones the user took this memo out of, saying why).
+4. Write the notes with the memo template (`template`): one section per kept part, in the memo's order.
+Action items: `owner` "Me" unless the user named someone. Step 6 always applies: the memo's title is "Memo" until
+you name it from what was said.
+
 ### 4a. First: name the speakers (only if the transcript has "Speaker N" labels)
 Echo already names voices from Teams' own speaking marker where it could; the rest are
 "Speaker N". `echoctl speakers <dir>` lists them: `id`, `label` (what the transcript shows),
@@ -155,8 +169,8 @@ when the user's own track ("Me") said it. A commitment written in the chat belon
 `"Me"` when that is the user (`me.name`). `null` when nobody took it.
 `high` only when someone clearly committed ("I'll send it by Friday"). Empty array if none.
 
-## 6. Title (unscheduled calls only)
-If the call has no meeting subject (folder name is just a timestamp or a generic title), write a
+## 6. Title (unscheduled calls and memos)
+If the call has no meeting subject (folder name is just a timestamp or a generic title, or it is a memo), write a
 specific one-line title (≤ 60 chars, no trailing punctuation) and run
 `echoctl title <dir> "<title>"` — it prints the call's folder afterwards (renamed to match at once
 in a session; in a run the Echo app started, when the run ends): use that path.

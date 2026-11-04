@@ -527,7 +527,8 @@ fn native(p: &str) -> PathBuf {
 /// The minutes a run writes: `notes.md`, and the new action list it applies (`actions.new*.json`,
 /// the app's prompt names the run's own: `calls::actions_new_of`).
 fn minutes_file(p: &Path) -> bool {
-    p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n == "notes.md" || (n.starts_with("actions.new") && n.ends_with(".json")))
+    // A memo's split by thread too (`memo threads <call> --file memo-threads.new.json`).
+    p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n == "notes.md" || n == "memo-threads.new.json" || (n.starts_with("actions.new") && n.ends_with(".json")))
 }
 
 /// A glob that could reach outside the folder it is given: absolute, from home, going up, or with
