@@ -989,11 +989,13 @@ a `claude` / `local` profile reads only its own settings, so Echo passes the plu
 **Is Claude Code really set up** (`claude_setup.rs`, 2026-11-04: found isn't working): `check()` = it starts (`claude
 --version`, 15 s, its own folder first on the PATH — an npm install is a node script), a terminal finds it (the login
 shell's `command -v claude` between markers; Windows: the PATH), and Claude Code lists Echo's plugin where Echo's
-sessions run; `status()` keeps it a minute and recounts in the background (`/api/settings` `claude_code`, Settings →
+sessions run (its record in `CLAUDE_CONFIG_DIR` when set); `status()` keeps it ten minutes, checks again at once
+after Check again / Connect / Add to PATH — once more after a check already running — and recounts in the background (`/api/settings` `claude_code`, Settings →
 Health's Claude Code rows, the Settings badge, General's plugin row — no longer the bundled copy's presence).
 `connect_claude` refuses a `claude` that doesn't start and, after Claude Code says installed, checks its own list and
-the files (else an error naming the command to run). **Add to PATH** / `echoctl claude path`: one marked line in
-`.zshrc` / `.bash_profile` (Windows: the user PATH). `echoctl claude` prints the check. User guide: `docs/install.md`.
+the files (else an error naming the command to run). **Add to PATH** / `echoctl claude path`: one marked line, the folder single-quoted, in `$ZDOTDIR/.zshrc`, or bash's
+first existing of `.bash_profile` / `.bash_login` / `.profile` (Windows: the user PATH, unexpanded `REG_EXPAND_SZ`, and
+the change broadcast — `app::add_to_user_path`, `install_cli` too; the check reads the stored PATH, not Echo's own). `echoctl claude` prints the check. User guide: `docs/install.md`.
 Mute sync: while recording, the watcher polls Teams' microphone button via Accessibility / UI
 Automation (`ax::MuteWatch`, label "Unmute…" ⇒ muted) every 400 ms; muted ⇒ `audio::mic::MUTED` makes the mic
 track record silence; events `mic_muted`/`mic_unmuted` drive the status line. `config.follow_app_mute`
