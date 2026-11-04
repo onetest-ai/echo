@@ -15,7 +15,7 @@ it isn't; `echoctl app start`. If a command fails for a reason that isn't the in
 
 ## Rules
 
-- **Ask before what leaves the computer or can't be undone**: sending mail, deleting a thread or a client,
+- **Ask before what leaves the computer or can't be undone**: sending a message, deleting a thread or a client,
   rejecting a suggestion for good. Say exactly what will happen (recipients, text, what is removed), then do it
   only after the user's yes.
 - **Name things by their names**, never by ids: say "the task *Send the SOW draft*", not `T043`. Ids are for the
@@ -152,18 +152,10 @@ echoctl attention                                    # what waits for the user's
 `<call>` is a call's folder name (from the calls list, `project show`, or `latest`). Recording itself is the
 `record` skill.
 
-## Mail
+## Mail, Teams, files
 
-Always through Echo first: it sends from the user's own Microsoft 365 account with Echo's sign-in.
-
-1. Write the message as a Markdown file. Show the user the recipients, subject and text; wait for their yes.
-2. `echoctl deliver status` — mail ready?
-3. `echoctl deliver send mail --to a@x.example,b@y.example --title "Subject" --file message.md`
-   (without `--to`: to the user themselves). Add `--ai <model>` when you wrote the text: the mail says so.
-
-Only if Echo can't send (status says mail isn't ready, or the send failed): a Microsoft 365 / Outlook connector of
-your own, if one works here; else `echoctl compose --to … --subject … --body-file message.txt`, which opens a draft
-in the user's mail app for them to send.
+The `echo:microsoft-365` skill: search across mail, chats and files, mail, Teams messages and channel posts, people,
+OneDrive — on Echo's own sign-in, nothing sent without the user's yes.
 
 ## The Brain (when it is on)
 

@@ -975,6 +975,23 @@ whose manifest names the kind (`uses.deliver_provider.kinds`), its readiness tol
 command). Telegram is one (its package: bot token as its secret setting, pairing, sending through `ctx.http.fetch` to
 `api.telegram.org` only — `uses.network.hosts` —, Markdown → Telegram HTML with tables as lines). Settings → **Sends to you** (its own section, `#settings/deliver`, `/api/deliver`) lists Teams, Mail and the plugins' ways; `echoctl deliver status|test <kind>|send`.
 
+## Microsoft 365 for Claude sessions (`m365.rs`, `echoctl m365`, the plugin's `microsoft-365` skill)
+Mail, Teams, files and people on Echo's own sign-in — no msgraph skill or connector (2026-11-04: sessions got lost
+between them). The registration's token carries every scope the tenant consented (measured: Mail.Send / ReadWrite,
+Chat.ReadWrite, ChannelMessage.Send, Files.ReadWrite, Sites, People…), so `graph::request(method, path, Body, save_to,
+headers)` reaches all of it. `search` = the Search API (`/search/query`), one request per kind (mail = message, chats =
+chatMessage, files = driveItem: OneDrive and SharePoint), Microsoft's ranking, KQL passed through, `--from`, `--days`;
+a mail hit's id is the hit's `hitId`. `mail read [--thread]` / `send` / `reply [--all]` / `draft`; `teams chats
+[--with]` / `read` (the newest N of whole pages) / `send --to <address>` (their 1:1 chat through `POST /chats` with
+`users('<address>')` — no User.Read.All; made only on `--yes`, it is visible to them) or `--chat <id>` (`48:notes` =
+the user's own) / `list` / `channel` / `post`; `people`; `drive list` / `download <ref | path | id>` / `upload`; `get`
+(any GET; ConsistencyLevel only for `$search` / `$count`). **Nothing leaves without `--yes`**: without it, `{sent:
+false, would}`; a run Echo started (`ECHOCTL_HEADLESS`) can't send. The skill: search → open the best hits → search
+again in other words → answer with links; a send whose recipient and words the user gave is their yes, anything
+Claude chose is shown and waits. Measured on the account: search over all three kinds, mail / thread / chat reads,
+a Teams message and a mail to the user, an upload read back byte for byte; real sessions picked the skill (Sonnet
+answered a "what was decided" across a chat and mail; Haiku and Sonnet stopped at a drafted mail).
+
 ## The mod: a status line (and automation)
 `plugin/hooks/register.tsx` is a Claude Code mod (state contract `plugin/types/index.d.ts`, pure helpers
 `hooks/view.ts`) and only a **status line** above the prompt (2026-11-03, the user's call: the live pane and its call

@@ -309,9 +309,9 @@ You run inside Echo, the user's call recorder and work tracker. Do Echo's things
 organisations, threads and their rules, work, people, calls, mail, the Brain) and the rules for them. Prefer the CLI to \
 anything else for Echo's data and for Microsoft 365 (Echo has its own sign-in there), unless the user names another \
 tool.\n\
-- Mail — always through Echo first: `deliver send mail --to a@x.com --title <subject> --file <markdown file>`, after \
-the user saw the recipients and the text and said yes. Only when Echo can't send (`deliver status`) a Microsoft 365 \
-connector of Claude's, if one works here; else `compose` opens a draft in their mail app.\n\
+- Microsoft 365 — mail, Teams, files, people, and finding what someone wrote: `m365 …` on Echo's own sign-in (the \
+`echo:microsoft-365` skill), never another connector unless it can't; nothing sent before the user saw it and said \
+yes (`--yes` only then).\n\
 - Name work items by their titles, never by their ids.\n\
 </echo_howto>"
     )

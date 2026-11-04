@@ -7,7 +7,8 @@
 //!
 //! The app registration is a setting (`config.graph_client_id`, default CodeMie's public
 //! client, which a tenant's admin may have to approve; an organisation can register its own public client with redirect
-//! `http://localhost` and delegated `Calendars.Read`). Only read-only scopes are requested.
+//! `http://localhost` and delegated `Calendars.Read`). Only read-only scopes are requested; the token carries every
+//! scope the tenant consented for the registration, which `m365.rs` (mail, Teams, OneDrive) relies on.
 //! Tokens live in `<config dir>/graph.json` (mode 0600) — like `gh` and the msgraph skill; the
 //! Keychain would re-prompt after every re-signed build.
 
@@ -714,6 +715,73 @@ pub fn post(path: &str, body: &Value) -> Result<Value> {
     let text = String::from_utf8_lossy(&out.stdout).into_owned();
     let (body, code) = text.rsplit_once('\n').unwrap_or(("", &text));
     let code: u16 = code.trim().parse().unwrap_or(0);
+    let v: Value = if body.trim().is_empty() { json!({}) } else { serde_json::from_str(body).unwrap_or_else(|_| json!({"raw": body.chars().take(300).collect::<String>()})) };
+    if !(200..300).contains(&code) {
+        let m = v["error"]["message"].as_str().unwrap_or("").trim();
+        bail!("Microsoft 365 refused it (HTTP {code}{})", if m.is_empty() { String::new() } else { format!(": {m}") });
+    }
+    Ok(v)
+}
+
+/// What a `request` sends: nothing, JSON, or a file's bytes.
+pub enum Body<'a> {
+    None,
+    Json(&'a Value),
+    File(&'a std::path::Path),
+}
+
+/// Any Graph call (`m365.rs`): `method` on `path` (after `/v1.0`, or a full `https://graph.microsoft.com/…` URL —
+/// a `@odata.nextLink`), with `body`; `save_to` writes the answer's bytes there instead (a download — redirects
+/// followed, the token not sent on to the storage host). The answer's JSON (`{}` for an empty one; `{saved}` for a
+/// download), or the error in words. `headers`: extra ones (`ConsistencyLevel: eventual`).
+pub fn request(method: &str, path: &str, body: Body, save_to: Option<&std::path::Path>, headers: &[&str]) -> Result<Value> {
+    let token = access_token()?;
+    let url = if path.starts_with("https://graph.microsoft.com/") { path.to_string() } else { format!("{GRAPH}{path}") };
+    let mut config = format!(
+        "url = {}
+request = {}
+header = {}
+write-out = \"\\n%{{http_code}}\"\n",
+        quote(&url),
+        quote(method),
+        quote(&format!("Authorization: Bearer {token}"))
+    );
+    for h in headers {
+        config.push_str(&format!("header = {}\n", quote(h)));
+    }
+    match body {
+        Body::None => {}
+        Body::Json(v) => config.push_str(&format!("header = \"Content-Type: application/json\"\ndata-binary = {}\n", quote(&v.to_string()))),
+        Body::File(f) => config.push_str(&format!("header = \"Content-Type: application/octet-stream\"\ndata-binary = {}\n", quote(&format!("@{}", f.display())))),
+    }
+    if let Some(out) = save_to {
+        // curl drops the Authorization header on a redirect to another host (the download URL is pre-signed).
+        config.push_str(&format!("location\noutput = {}\n", quote(&out.display().to_string())));
+    }
+    let mut child = Command::new("curl").no_window()
+        .args(["-sS", "-K", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("running curl")?;
+    child.stdin.take().unwrap().write_all(config.as_bytes())?;
+    let out = child.wait_with_output()?;
+    if !out.status.success() {
+        bail!("network error: {}", String::from_utf8_lossy(&out.stderr).trim());
+    }
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    let (body, code) = text.rsplit_once('\n').unwrap_or(("", &text));
+    let code: u16 = code.trim().parse().unwrap_or(0);
+    if let Some(out) = save_to {
+        if !(200..300).contains(&code) {
+            let err = std::fs::read_to_string(out).unwrap_or_default();
+            let _ = std::fs::remove_file(out);
+            let v: Value = serde_json::from_str(&err).unwrap_or_default();
+            bail!("Microsoft 365 refused it (HTTP {code}{})", v["error"]["message"].as_str().map(|m| format!(": {m}")).unwrap_or_default());
+        }
+        return Ok(json!({"saved": out}));
+    }
     let v: Value = if body.trim().is_empty() { json!({}) } else { serde_json::from_str(body).unwrap_or_else(|_| json!({"raw": body.chars().take(300).collect::<String>()})) };
     if !(200..300).contains(&code) {
         let m = v["error"]["message"].as_str().unwrap_or("").trim();

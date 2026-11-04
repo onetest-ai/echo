@@ -83,8 +83,8 @@ Click **Check again** after fixing something. The same check from a terminal: `e
 **Settings → General → Claude Code plugin → Connect** (or the menu: **Claude Code → Connect Claude Code**).
 
 This installs Echo's plugin into Claude Code for Echo's data folder: the status line, `/echo:process-call`,
-`/echo:record`, `/echo:doctor` and `echo:manage` — the last one teaches Claude to make clients and threads, file
-work and send mail through Echo, in any Claude Code session. Echo then checks Claude Code really lists it. If it doesn't, the notification says
+`/echo:record`, `/echo:doctor`, `echo:manage` (clients, threads, work through Echo) and `echo:microsoft-365` (mail,
+Teams, files and people through Echo's own Microsoft 365 sign-in) — in any Claude Code session. Echo then checks Claude Code really lists it. If it doesn't, the notification says
 so and what to run instead. It never reports success for a plugin that isn't there.
 
 For every Claude Code session on this computer, not only Echo's, use `echoctl claude connect --scope user`.

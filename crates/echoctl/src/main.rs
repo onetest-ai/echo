@@ -13,6 +13,7 @@ mod calendar;
 mod calls;
 mod config;
 mod deliver;
+mod m365;
 #[cfg(any(target_os = "macos", windows))]
 mod frames;
 #[cfg(feature = "transcribe")]
@@ -247,6 +248,12 @@ enum Cmd {
     Plugin {
         #[command(subcommand)]
         cmd: PluginCmd,
+    },
+    /// Microsoft 365 on Echo's sign-in: search mail, chats and files; mail; Teams; people; OneDrive (JSON). Sending
+    /// needs --yes: without it, what would be sent
+    M365 {
+        #[command(subcommand)]
+        cmd: M365Cmd,
     },
     /// Where Echo sends things to you: Teams (your chat with yourself), mail, and the ways plugins add
     Deliver {
@@ -1070,6 +1077,163 @@ enum DeliverCmd {
 }
 
 #[derive(Subcommand)]
+enum M365Cmd {
+    /// Search mail, Teams chats and files (OneDrive, SharePoint) at once, most relevant first (KQL allowed)
+    Search {
+        query: String,
+        /// What to search: mail, chats, files (comma-separated)
+        #[arg(long, default_value = "mail,chats,files")]
+        r#in: String,
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+        /// Only mail and chat messages from this person (name or address)
+        #[arg(long)]
+        from: Option<String>,
+        /// Only the last N days
+        #[arg(long)]
+        days: Option<i64>,
+    },
+    /// Mail: read, send, reply, draft
+    Mail {
+        #[command(subcommand)]
+        cmd: M365Mail,
+    },
+    /// Teams: chats, read, send, teams and channels, post
+    Teams {
+        #[command(subcommand)]
+        cmd: M365Teams,
+    },
+    /// People by name or address: their addresses, title, department, company
+    People {
+        query: String,
+        #[arg(long, default_value_t = 8)]
+        limit: usize,
+    },
+    /// OneDrive: list, download, upload
+    Drive {
+        #[command(subcommand)]
+        cmd: M365Drive,
+    },
+    /// Any Microsoft Graph GET (a path after /v1.0), read only
+    Get { path: String },
+}
+
+#[derive(Subcommand)]
+enum M365Mail {
+    /// One mail (--thread: its whole conversation)
+    Read {
+        id: String,
+        #[arg(long)]
+        thread: bool,
+    },
+    /// Send a mail from your account; its text a Markdown file. Without --yes: what would be sent
+    Send {
+        #[arg(long, required = true)]
+        to: Vec<String>,
+        #[arg(long)]
+        cc: Vec<String>,
+        #[arg(long)]
+        subject: String,
+        #[arg(long)]
+        file: std::path::PathBuf,
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Reply to a mail (--all: to everyone on it). Without --yes: what would be sent
+    Reply {
+        id: String,
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        file: std::path::PathBuf,
+        #[arg(long)]
+        yes: bool,
+    },
+    /// A draft in your Drafts (nothing sent): its Outlook link
+    Draft {
+        #[arg(long)]
+        to: Vec<String>,
+        #[arg(long)]
+        cc: Vec<String>,
+        #[arg(long)]
+        subject: String,
+        #[arg(long)]
+        file: std::path::PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum M365Teams {
+    /// Your chats, latest first (--with: a person's name or address, or words of the topic)
+    Chats {
+        #[arg(long)]
+        with: Option<String>,
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+    },
+    /// A chat's messages
+    Read {
+        chat: String,
+        #[arg(long, default_value_t = 7)]
+        days: i64,
+        #[arg(long, default_value_t = 100)]
+        limit: usize,
+    },
+    /// A message to a chat (--chat) or a person (--to: their 1:1 chat). Without --yes: what would be sent
+    Send {
+        #[arg(long)]
+        chat: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long)]
+        file: std::path::PathBuf,
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Your teams, or (with a team id) its channels
+    List { team: Option<String> },
+    /// A channel's posts with their replies
+    Channel {
+        team: String,
+        channel: String,
+        #[arg(long, default_value_t = 7)]
+        days: i64,
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+    },
+    /// A new post in a channel. Without --yes: what would be posted
+    Post {
+        team: String,
+        channel: String,
+        #[arg(long)]
+        subject: Option<String>,
+        #[arg(long)]
+        file: std::path::PathBuf,
+        #[arg(long)]
+        yes: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum M365Drive {
+    /// A folder's items (a path from the root; none: the root)
+    List { path: Option<String> },
+    /// A file into a local file or folder: a search hit's ref, a OneDrive path, or an item id
+    Download {
+        item: String,
+        #[arg(long, default_value = ".")]
+        out: std::path::PathBuf,
+    },
+    /// A local file into OneDrive at a path. Without --yes: what would be uploaded
+    Upload {
+        file: std::path::PathBuf,
+        path: String,
+        #[arg(long)]
+        yes: bool,
+    },
+}
+
+#[derive(Subcommand)]
 enum MarketCmd {
     List,
     Add {
@@ -1403,6 +1567,36 @@ fn main() -> Result<()> {
         Cmd::Org { cmd } => org_command(cmd),
         Cmd::Plugin { cmd } => plugin_command(cmd),
         Cmd::Deliver { cmd } => deliver_command(cmd),
+        Cmd::M365 { cmd } => {
+            let v = match cmd {
+                M365Cmd::Search { query, r#in, limit, from, days } => {
+                    m365::search(&query, &r#in.split(',').map(|k| k.trim().to_string()).filter(|k| !k.is_empty()).collect::<Vec<_>>(), limit, from.as_deref(), days)?
+                }
+                M365Cmd::Mail { cmd } => match cmd {
+                    M365Mail::Read { id, thread } => m365::mail_read(&id, thread)?,
+                    M365Mail::Send { to, cc, subject, file, yes } => m365::mail_send(&to, &cc, &subject, &file, yes)?,
+                    M365Mail::Reply { id, all, file, yes } => m365::mail_reply(&id, all, &file, yes)?,
+                    M365Mail::Draft { to, cc, subject, file } => m365::mail_draft(&to, &cc, &subject, &file)?,
+                },
+                M365Cmd::Teams { cmd } => match cmd {
+                    M365Teams::Chats { with, limit } => m365::chats(with.as_deref(), limit)?,
+                    M365Teams::Read { chat, days, limit } => m365::chat_read(&chat, days, limit)?,
+                    M365Teams::Send { chat, to, file, yes } => m365::chat_send(chat.as_deref(), to.as_deref(), &file, yes)?,
+                    M365Teams::List { team } => m365::teams(team.as_deref())?,
+                    M365Teams::Channel { team, channel, days, limit } => m365::channel_read(&team, &channel, days, limit)?,
+                    M365Teams::Post { team, channel, subject, file, yes } => m365::channel_post(&team, &channel, subject.as_deref(), &file, yes)?,
+                },
+                M365Cmd::People { query, limit } => m365::people(&query, limit)?,
+                M365Cmd::Drive { cmd } => match cmd {
+                    M365Drive::List { path } => m365::drive_list(path.as_deref())?,
+                    M365Drive::Download { item, out } => m365::drive_download(&item, &out)?,
+                    M365Drive::Upload { file, path, yes } => m365::drive_upload(&file, &path, yes)?,
+                },
+                M365Cmd::Get { path } => m365::get(&path)?,
+            };
+            println!("{}", serde_json::to_string_pretty(&v)?);
+            Ok(())
+        }
         Cmd::Context { call } => calls::context(&call),
         Cmd::Title { call, title } => calls::set_title(&call, &title),
         Cmd::Note { text } => calls::note(&text.join(" ")),
