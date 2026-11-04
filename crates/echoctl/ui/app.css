@@ -1818,7 +1818,11 @@ select.set-in { width: auto; margin-right: 6px; }
 .br-fold { display: inline-flex; align-items: center; justify-content: center; }
 
 /* Memos (memo.rs): a mic in the list, the pill and the header; the Record button's Memo segment; a thread chip's part */
-.split .split-memo { display: inline-flex; align-items: center; gap: 4px; border-left: 1px solid rgba(20,20,24,0.3); padding: 0 10px; }
+.pill.idle { gap: 6px; }
+/* Record a memo: beside the Record button, not part of it — the same height and round ends, outlined, quieter. */
+.pmemo { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 11px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent); background: var(--surface); color: var(--accent-ink); font: inherit; font-size: 12px; font-weight: 600; white-space: nowrap; cursor: default; }
+.pmemo:hover { background: var(--accent-soft); }
+.pmemo:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .pill .pmic { display: inline-flex; color: var(--recording); }
 .si.memo { color: var(--accent-ink); }
 .memo-fact { display: inline-flex; align-items: center; gap: 4px; }

@@ -707,7 +707,7 @@ function recordButton(attrs, label, primary = true, memo = false) {
   const options = opts.map((c) => `<option value="${esc(c)}"${c === cur ? ' selected' : ''}>${esc(langName(c))}</option>`).join('')
     + `<option value=""${cur === '' ? ' selected' : ''}>${esc(auto)}</option>`
   const title = cur ? `Transcribed as ${langName(cur)}` : 'Echo detects the language'
-  return `<span class="split"><button class="${cls} split-main" ${attrs}>${esc(label)}</button><label class="${cls} split-lang" title="${esc(title)}"><span>${cur ? esc(cur.toUpperCase()) : 'Auto'}</span>${CARET}<select data-reclang aria-label="Language of the call">${options}</select></label>${profilePick('data-recprofile', recordProfile(), cls, 'Model for live notes and minutes')}${memo ? `<button class="${cls} split-memo" data-cmd="record-memo" title="Record a memo — just you, starts now; its threads are found from what you say" aria-label="Record a memo">${MIC(12)}Memo</button>` : ''}</span>`
+  return `<span class="split"><button class="${cls} split-main" ${attrs}>${esc(label)}</button><label class="${cls} split-lang" title="${esc(title)}"><span>${cur ? esc(cur.toUpperCase()) : 'Auto'}</span>${CARET}<select data-reclang aria-label="Language of the call">${options}</select></label>${profilePick('data-recprofile', recordProfile(), cls, 'Model for live notes and minutes')}</span>${memo ? `<button class="pmemo" data-cmd="record-memo" title="Record a memo — just you, starts now; its threads are found from what you say" aria-label="Record a memo">${MIC(12)}Memo</button>` : ''}`
 }
 
 // ── views ──────────────────────────────────────────────────────────────────────────────────
