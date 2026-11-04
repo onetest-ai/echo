@@ -104,8 +104,14 @@ const PRELUDE: &str = r#"
     },
     /** A line for Claude when a client or thread is open in the window: [{client | thread, text}] (replaces all). */
     view: { hints: (list) => call('view.hints', list || []) },
-    /** Echo's own data, read-only: 'clients' | 'threads'. */
-    echo: { read: (kind) => call('echo.read', kind) },
+    /** Echo's own data, read-only: 'clients' | 'threads' | 'people' | 'dictionary' | 'sources' (opts: kind, thread,
+     *  since, limit) | 'source' (an id: call:<folder> | mail:<source>). Events: 'minutes_written' {id, link},
+     *  'sources_changed' {changed, removed}. */
+    echo: {
+      read: (kind, arg) => call('echo.read', arg === undefined ? kind : [kind, arg]),
+      /** Names for one thing into the user's dictionary (uses.echo.write: dictionary): {name, synonyms, spellings, kind, client}. */
+      dictionary: { add: (term) => call('echo.dictionary.add', term) },
+    },
     /** The folders the user gave this plugin (Echo's picker), read-only: paths relative to one of them. */
     fs: {
       folders: () => call('fs.folders'),
@@ -313,7 +319,6 @@ pub fn call_within(plugin: &str, command: &str, args: &Value, timeout: Duration)
 }
 
 /// Tell every loaded plugin about something that happened in Echo (`ctx.on(name, fn)`).
-#[allow(dead_code)]
 pub fn event(name: &str, payload: &Value) {
     if let Some(h) = HOST.get() {
         let _ = h.tx.send(Msg::Event(name.into(), payload.to_string()));
@@ -696,15 +701,31 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
             Value::Null
         }
         "echo.read" => {
-            let kind = s(arg);
-            if !uses(id, "echo")?["read"].as_array().is_some_and(|a| a.iter().any(|k| k.as_str() == Some(kind.as_str()))) {
+            let (kind, opt) = match arg {
+                Value::Array(a) => (a.first().and_then(|k| k.as_str()).unwrap_or("").to_string(), a.get(1).cloned().unwrap_or(Value::Null)),
+                _ => (s(arg), Value::Null),
+            };
+            // `source` is read under `sources`'s grant too, and the other way round: both are the same data.
+            let asked = |k: &str| uses(id, "echo").is_ok_and(|u| u["read"].as_array().is_some_and(|a| a.iter().any(|x| x.as_str() == Some(k))));
+            let granted = asked(&kind) || (matches!(kind.as_str(), "source" | "sources") && (asked("source") || asked("sources")));
+            if !granted {
                 bail!("{id} didn't ask to read your {kind} when it was installed");
             }
             match kind.as_str() {
+                "source" => crate::share::source(opt.as_str().unwrap_or(""))?,
+                "sources" => crate::share::sources(&opt)?,
+                "people" => crate::share::people()?,
+                "dictionary" => crate::share::dictionary()?,
                 "clients" => json!(crate::projects::clients().unwrap_or_default().into_iter().map(|c| json!({"id": c.id, "name": c.name, "aliases": c.aliases, "domains": c.domains})).collect::<Vec<_>>()),
                 "threads" => json!(crate::projects::list().into_iter().filter(|p| !p.stage.closed()).map(|p| json!({"id": p.id, "name": p.name, "client": p.client})).collect::<Vec<_>>()),
-                o => bail!("Echo doesn't share “{o}” (clients, threads)"),
+                o => bail!("Echo doesn't share “{o}” (clients, threads, people, dictionary, sources, source)"),
             }
+        }
+        "echo.dictionary.add" => {
+            if !uses(id, "echo")?["write"].as_array().is_some_and(|a| a.iter().any(|k| k == "dictionary")) {
+                bail!("{id} didn't ask to add to your dictionary when it was installed");
+            }
+            crate::share::dictionary_add(id, arg)?
         }
         "fs.folders" => {
             uses(id, "folders")?;

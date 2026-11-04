@@ -109,6 +109,8 @@ pub fn sync() -> Result<store::Report> {
     if crate::graph::account().is_some() {
         match sources::sync(emb.as_ref().map(|e| e as &dyn embed::Embedder)) {
             Ok((read, s)) => {
+                r.touched.extend(s.touched);
+                r.gone.extend(s.gone);
                 r.added += s.added;
                 r.changed += s.changed;
                 r.removed += s.removed + read.removed;
@@ -173,6 +175,8 @@ pub fn sync() -> Result<store::Report> {
     // were last read (`term_scan`, cleared by every write of a section). A store from before Brain's meta keys
     // and entity-kind nodes gets its graph rebuilt once.
     taxonomy::mentions_after_sync(&store::open(&store_path())?)?;
+    #[cfg(feature = "js")]
+    crate::share::sources_changed(&r.touched, &r.gone);
     Ok(r)
 }
 

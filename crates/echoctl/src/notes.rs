@@ -751,7 +751,11 @@ fn notify_outcome(dir: &Path) {
     let title = call_title(dir);
     match r.state.as_str() {
         // Said once, here, once the run is `done` (the watcher's own check skips calls with a run).
-        "done" => crate::app::notify("Minutes ready", &title),
+        "done" => {
+            crate::app::notify("Minutes ready", &title);
+            #[cfg(feature = "js")]
+            crate::share::minutes_written(dir);
+        }
         "needs_login" => crate::app::notify("Claude Code needs you to sign in", &r.message.unwrap_or_default()),
         "failed" => crate::app::notify("Couldn't write minutes", &format!("{title}: {}", r.message.unwrap_or_default())),
         _ => {}

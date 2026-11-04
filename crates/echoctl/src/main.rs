@@ -56,6 +56,8 @@ mod speakers;
 #[cfg(feature = "transcribe")]
 mod speaking;
 mod schedule;
+#[cfg(feature = "js")]
+mod share;
 mod signin;
 mod watch;
 #[cfg(feature = "transcribe")]

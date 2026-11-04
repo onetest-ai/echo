@@ -205,13 +205,45 @@ fn describe_folders(v: &Value) -> Result<String> {
     Ok(format!("Reads the {what} you pick, on this computer — only those"))
 }
 
+/// What `uses.echo.read` may name, with how the sheet says it.
+const ECHO_READS: &[(&str, &str)] = &[
+    ("clients", "the names of your clients"),
+    ("threads", "the names of your threads"),
+    ("people", "who the people in your threads are"),
+    ("dictionary", "your dictionary"),
+    ("sources", "your calls' minutes and transcripts and the facts of your threads' mail and channels"),
+    ("source", "your calls' minutes and transcripts and the facts of your threads' mail and channels"),
+    ("calls", "your calls' minutes and transcripts"),
+];
+
 fn describe_echo(v: &Value) -> Result<String> {
     let read = strings(v, "read")?;
-    only("Echo data", &read, &["clients", "threads"])?;
-    if read.is_empty() {
-        bail!("“echo” reads nothing (clients, threads)");
+    let write = strings(v, "write")?;
+    if read.is_empty() && write.is_empty() {
+        bail!("“echo” reads nothing ({})", ECHO_READS.iter().map(|(k, _)| *k).collect::<Vec<_>>().join(", "));
     }
-    Ok(format!("Reads the names of your {} in Echo", read.join(" and ")))
+    // A kind a newer Echo has means nothing here: named on the sheet, never granted (an older Echo degrades, the
+    // plugin still installs).
+    let mut said: Vec<&str> = vec![];
+    for k in &read {
+        if let Some((_, words)) = ECHO_READS.iter().find(|(x, _)| x == k) {
+            if !said.contains(words) {
+                said.push(words);
+            }
+        }
+    }
+    let unknown: Vec<&str> = read.iter().chain(&write).map(String::as_str).filter(|k| !ECHO_READS.iter().any(|(x, _)| x == k) && *k != "dictionary").collect();
+    let mut lines = vec![];
+    if !said.is_empty() {
+        lines.push(format!("Reads {} in Echo", join_words(&said)));
+    }
+    if write.iter().any(|w| w == "dictionary") {
+        lines.push("Adds names to your Echo dictionary".to_string());
+    }
+    if !unknown.is_empty() {
+        lines.push(format!("Asks for things this Echo doesn't have yet: {}", unknown.join(", ")));
+    }
+    Ok(lines.join(". "))
 }
 
 /// The permission sheet's lines for a manifest's `uses`, in order; an unknown capability or a bad

@@ -963,6 +963,16 @@ codes) — and registers the channel; its Settings section checks the bot, Bun a
 bot reacts 👀 and Claude answers through the channel; it still works after `--resume`; messages sent while the session
 was closed aren't read. A Claude Code started from inside another (`CLAUDE_CODE_CHILD_SESSION` inherited) keeps no
 transcript, so it can't be resumed.
+**Echo's data for plugins** (`share.rs`, `uses.echo`): `ctx.echo.read(kind, arg)` — `clients`, `threads`, `people`
+(People's: key, name, organisation, title, threads, `echo://person` link), `dictionary` (`{terms: [{name, synonyms,
+spellings, kind, group, client}]}`), `sources` (`{kind, thread, since, limit}` → calls with minutes and Recall's mail and
+channel posts, newest first) and `source` (`call:<folder>` | `mail:<Recall source>` → `{id, kind, title, date, text,
+link, threads, profile, transcript?}`: a call's minutes + transcript, a mail's or post's facts; `profile` = the AI profile
+its text may go to, none when its threads disagree). `uses.echo.write: ["dictionary"]` → `ctx.echo.dictionary.add({name,
+synonyms, spellings, kind, client})` (`taxonomy::dictionary_add`: merged into the term any of its names is, else a new
+one; never renames or removes). Events: `minutes_written {id, link}` (the app's run or a session's), `sources_changed
+{changed, removed}` (after a Recall sync). A read kind this Echo doesn't know is named on the install sheet and granted
+nothing — the plugin still installs.
 **What plugins may reach beyond their store** (`grants.rs`, granted by the user or kept by Echo, never written by the plugin):
 **folders** the user picked in Echo's own picker (`ctx.system.pickFolder` → `<config dir>/plugins/grants/<id>.json`;
 `ECHOCTL_PICK_FOLDER` answers it in tests) — `ctx.fs.walk / list / read` only inside them (plain relative paths, links

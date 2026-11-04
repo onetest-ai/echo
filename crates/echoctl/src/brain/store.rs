@@ -319,6 +319,11 @@ pub struct Input {
 
 #[derive(Debug, Default, serde::Serialize)]
 pub struct Report {
+    /// Sources added or changed, and gone (for plugins: `sources_changed`).
+    #[serde(skip)]
+    pub touched: Vec<String>,
+    #[serde(skip)]
+    pub gone: Vec<String>,
     pub added: usize,
     pub changed: usize,
     pub removed: usize,
@@ -407,6 +412,7 @@ pub fn sync_kinds(path: &Path, inputs: Vec<Input>, emb: Option<&dyn Embedder>, k
         } else {
             rep.added += 1;
         }
+        rep.touched.push(i.source.clone());
         let cs = chunk::chunk(&i.md, MAX_CHARS);
         todo.push((i, h, cs));
     }
@@ -429,6 +435,7 @@ pub fn sync_kinds(path: &Path, inputs: Vec<Input>, emb: Option<&dyn Embedder>, k
         delete_chunks(&tx, &ids)?;
         tx.execute("DELETE FROM documents WHERE source = ?1", [s])?;
         rep.removed += 1;
+        rep.gone.push(s.clone());
     }
     let now = chrono::Utc::now().to_rfc3339();
     for (i, h, cs) in &todo {

@@ -1188,6 +1188,8 @@ fn notify_notes_ready() {
             let meta: serde_json::Value = fs::read(dir.join("meta.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
             let title = meta["title"].as_str().map(str::to_owned).unwrap_or_else(|| "your call".into());
             crate::app::notify("Minutes ready", &title);
+            #[cfg(feature = "js")]
+            crate::share::minutes_written(dir);
             return false;
         }
         since.elapsed() < NOTES_WAIT
