@@ -31,7 +31,8 @@ macOS 14.2 or later today. Windows is in progress.
      (the other people in the call, from Teams only). *Accessibility* is optional: with it,
      Echo knows when you mute yourself in Teams and who is speaking.
 
-That's it. The octopus is now in your menu bar.
+That's it. The octopus is now in your menu bar and in the Dock. Step by step, with a check after each step, Windows
+included: [docs/install.md](docs/install.md).
 
 ## 2. Record a call
 
@@ -104,7 +105,9 @@ Click a meeting for details, a recap of last time, and the Record button.
 
 Minutes, action items and follow-ups are written by [Claude Code](https://claude.com/claude-code).
 
-1. Install Claude Code and sign in. That is all Echo needs to write minutes.
+1. Install Claude Code and sign in. That is all Echo needs to write minutes. **Settings → Health → Claude Code**
+   checks it really works: that it starts, that a terminal finds it (else **Add to PATH**), and that its Echo
+   plugin is installed. [docs/install.md](docs/install.md) has the steps.
 2. Optional: menu → **Claude Code → Connect Claude Code** installs the Echo plugin for Claude Code
    sessions in Echo's data folder (`echoctl claude connect --scope user` for every session): a status
    line above the prompt, `/echo:process-call`, `/echo:record` and `/echo:doctor` (it checks Echo and

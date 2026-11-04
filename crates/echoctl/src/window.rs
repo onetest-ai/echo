@@ -1169,6 +1169,8 @@ fn settings_snapshot() -> Value {
         "graph_custom": c.is_some_and(|c| c.graph_client_id.is_some()),
         "health": health,
         "stale_plugins": crate::app::stale_plugins(),
+        // Claude Code really set up: it runs, a terminal finds it, its plugin is in (checked in the background).
+        "claude_code": crate::claude_setup::status(false),
         "models": crate::models::list_value().ok(),
         "downloading": crate::app::downloading().map(|(n, pct)| json!({ "name": n, "pct": pct })),
     });
