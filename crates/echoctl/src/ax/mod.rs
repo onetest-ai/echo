@@ -371,6 +371,12 @@ pub fn call_began_in(dir: &std::path::Path) -> Option<f64> {
     })
 }
 
+/// The call's timer (seconds) and the window's title, read from one look at the call window (`watch::call_seen`).
+pub fn call_glance() -> (Option<u64>, Option<String>) {
+    let Some(mut w) = CallWindow::teams() else { return (None, None) };
+    (w.tree_node().as_ref().and_then(timer_in), w.title())
+}
+
 /// The call window's title right now (`echoctl` dev aid and the call's names).
 pub fn call_title() -> Option<String> {
     CallWindow::teams()?.title()
