@@ -1136,6 +1136,9 @@ enum M365Mail {
         subject: String,
         #[arg(long)]
         file: std::path::PathBuf,
+        /// A model wrote or edited the text (its name): the message says so
+        #[arg(long)]
+        ai: Option<String>,
         #[arg(long)]
         yes: bool,
     },
@@ -1146,6 +1149,9 @@ enum M365Mail {
         all: bool,
         #[arg(long)]
         file: std::path::PathBuf,
+        /// A model wrote or edited the text (its name): the message says so
+        #[arg(long)]
+        ai: Option<String>,
         #[arg(long)]
         yes: bool,
     },
@@ -1159,6 +1165,9 @@ enum M365Mail {
         subject: String,
         #[arg(long)]
         file: std::path::PathBuf,
+        /// A model wrote or edited the text (its name): the message says so
+        #[arg(long)]
+        ai: Option<String>,
     },
 }
 
@@ -1187,6 +1196,9 @@ enum M365Teams {
         to: Option<String>,
         #[arg(long)]
         file: std::path::PathBuf,
+        /// A model wrote or edited the text (its name): the message says so
+        #[arg(long)]
+        ai: Option<String>,
         #[arg(long)]
         yes: bool,
     },
@@ -1209,6 +1221,9 @@ enum M365Teams {
         subject: Option<String>,
         #[arg(long)]
         file: std::path::PathBuf,
+        /// A model wrote or edited the text (its name): the message says so
+        #[arg(long)]
+        ai: Option<String>,
         #[arg(long)]
         yes: bool,
     },
@@ -1574,17 +1589,17 @@ fn main() -> Result<()> {
                 }
                 M365Cmd::Mail { cmd } => match cmd {
                     M365Mail::Read { id, thread } => m365::mail_read(&id, thread)?,
-                    M365Mail::Send { to, cc, subject, file, yes } => m365::mail_send(&to, &cc, &subject, &file, yes)?,
-                    M365Mail::Reply { id, all, file, yes } => m365::mail_reply(&id, all, &file, yes)?,
-                    M365Mail::Draft { to, cc, subject, file } => m365::mail_draft(&to, &cc, &subject, &file)?,
+                    M365Mail::Send { to, cc, subject, file, ai, yes } => m365::mail_send(&to, &cc, &subject, &file, ai.as_deref(), yes)?,
+                    M365Mail::Reply { id, all, file, ai, yes } => m365::mail_reply(&id, all, &file, ai.as_deref(), yes)?,
+                    M365Mail::Draft { to, cc, subject, file, ai } => m365::mail_draft(&to, &cc, &subject, &file, ai.as_deref())?,
                 },
                 M365Cmd::Teams { cmd } => match cmd {
                     M365Teams::Chats { with, limit } => m365::chats(with.as_deref(), limit)?,
                     M365Teams::Read { chat, days, limit } => m365::chat_read(&chat, days, limit)?,
-                    M365Teams::Send { chat, to, file, yes } => m365::chat_send(chat.as_deref(), to.as_deref(), &file, yes)?,
+                    M365Teams::Send { chat, to, file, ai, yes } => m365::chat_send(chat.as_deref(), to.as_deref(), &file, ai.as_deref(), yes)?,
                     M365Teams::List { team } => m365::teams(team.as_deref())?,
                     M365Teams::Channel { team, channel, days, limit } => m365::channel_read(&team, &channel, days, limit)?,
-                    M365Teams::Post { team, channel, subject, file, yes } => m365::channel_post(&team, &channel, subject.as_deref(), &file, yes)?,
+                    M365Teams::Post { team, channel, subject, file, ai, yes } => m365::channel_post(&team, &channel, subject.as_deref(), &file, ai.as_deref(), yes)?,
                 },
                 M365Cmd::People { query, limit } => m365::people(&query, limit)?,
                 M365Cmd::Drive { cmd } => match cmd {

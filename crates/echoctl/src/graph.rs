@@ -774,6 +774,7 @@ write-out = \"\\n%{{http_code}}\"\n",
     let (body, code) = text.rsplit_once('\n').unwrap_or(("", &text));
     let code: u16 = code.trim().parse().unwrap_or(0);
     if let Some(out) = save_to {
+        // `out` is the caller's own scratch file (m365 renames it into place): an error's body is read from it, and it goes.
         if !(200..300).contains(&code) {
             let err = std::fs::read_to_string(out).unwrap_or_default();
             let _ = std::fs::remove_file(out);

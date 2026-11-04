@@ -5,7 +5,10 @@
 //!
 //! **Nothing leaves without `--yes`**: a send, a reply, a post or an upload without it only says what would go where
 //! (`{sent: false, would}`) — the session shows that to the user and runs it again with `--yes` after their yes. A run
-//! Echo started (minutes, a thread's sync) can't send at all.
+//! Echo started (minutes, a thread's sync, a routine) can't send or draft (`ECHOCTL_HEADLESS`). Both are conventions the
+//! session follows, not a lock: `--yes` is a flag a model can pass, and a session allowed every command (the folder
+//! session with no permission prompts, a routine in skip mode) could unset the variable. The real gate is Claude
+//! Code's own permission prompt on the command — what a session reads (mail, chats) is others' words.
 
 use std::path::Path;
 
@@ -18,8 +21,11 @@ use crate::graph::{self, Body};
 /// Search's kinds, as the CLI names them, and the Search API's entity type for each.
 pub const KINDS: [(&str, &str); 3] = [("mail", "message"), ("chats", "chatMessage"), ("files", "driveItem")];
 
-/// A path segment or query value, percent-encoded.
+/// A path segment or query value, percent-encoded. A segment of only dots is encoded too: curl would resolve `..`.
 fn enc(s: &str) -> String {
+    if !s.is_empty() && s.bytes().all(|b| b == b'.') {
+        return "%2E".repeat(s.len());
+    }
     s.bytes()
         .map(|b| match b {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
@@ -57,8 +63,9 @@ fn hit(kind: &str, h: &Value) -> Value {
     let mut v = match kind {
         "mail" => json!({"id": r["id"], "subject": r["subject"], "from": person(&r["from"]), "at": r["receivedDateTime"].as_str().or(r["sentDateTime"].as_str()),
                           "conversation": r["conversationId"], "url": r["webLink"]}),
-        "chats" => json!({"id": r["id"], "chat": r["chatId"].as_str().or(r["channelIdentity"]["channelId"].as_str()), "from": person(&r["from"]),
-                           "at": r["createdDateTime"], "url": r["webUrl"].as_str().or(r["webLink"].as_str())}),
+        // A chat message has its chat; a channel post its team and channel (`teams channel <team> <channel>`).
+        "chats" => json!({"id": r["id"], "chat": r["chatId"], "team": r["channelIdentity"]["teamId"], "channel": r["channelIdentity"]["channelId"],
+                           "from": person(&r["from"]), "at": r["createdDateTime"], "url": r["webUrl"].as_str().or(r["webLink"].as_str())}),
         _ => json!({"id": r["id"], "name": r["name"], "url": r["webUrl"], "at": r["lastModifiedDateTime"], "by": r["lastModifiedBy"]["user"]["displayName"],
                      "ref": r["parentReference"]["driveId"].as_str().zip(r["id"].as_str()).map(|(d, i)| format!("drives/{d}/items/{i}"))}),
     };
@@ -83,6 +90,11 @@ pub fn search(query: &str, kinds: &[String], limit: usize, from: Option<&str>, d
         let mut q = query.trim().to_string();
         if let (Some(f), true) = (from, *entity != "driveItem") {
             q = format!("{q} from:\"{}\"", f.replace('"', ""));
+        }
+        // The date in the query, so the ranking is over that window (measured: received / sent / LastModifiedTime).
+        if let Some(s) = since {
+            let field = match *entity { "message" => "received", "chatMessage" => "sent", _ => "LastModifiedTime" };
+            q = format!("{q} {field}>={}", s.format("%Y-%m-%d"));
         }
         let body = json!({"requests": [{"entityTypes": [entity], "query": {"queryString": q}, "from": 0, "size": limit.clamp(1, 50)}]});
         match graph::request("POST", "/search/query", Body::Json(&body), None, &[]) {
@@ -127,6 +139,14 @@ fn recipients(list: &[String]) -> Result<Vec<Value>> {
         .collect()
 }
 
+/// What a model wrote says so, in every channel (`deliver::ai_notice`): `ai` = the model's name.
+fn with_notice(html: String, ai: Option<&str>) -> String {
+    match ai.map(str::trim).filter(|m| !m.is_empty()) {
+        Some(m) => format!("{html}<p><em>{}</em></p>", crate::deliver::ai_notice(m).replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")),
+        None => html,
+    }
+}
+
 fn markdown_file(file: &Path) -> Result<(String, String)> {
     let md = std::fs::read_to_string(file).with_context(|| format!("reading {}", file.display()))?;
     if md.trim().is_empty() {
@@ -137,12 +157,13 @@ fn markdown_file(file: &Path) -> Result<(String, String)> {
 }
 
 /// A new mail from the user's account (kept in Sent): `to`, `cc`, `subject`, the Markdown `file` as its body.
-pub fn mail_send(to: &[String], cc: &[String], subject: &str, file: &Path, yes: bool) -> Result<Value> {
+pub fn mail_send(to: &[String], cc: &[String], subject: &str, file: &Path, ai: Option<&str>, yes: bool) -> Result<Value> {
     let (to, cc) = (recipients(to)?, recipients(cc)?);
     if to.is_empty() {
         bail!("no recipient (--to)");
     }
     let (md, html) = markdown_file(file)?;
+    let html = with_notice(html, ai);
     let would = json!({"to": to, "cc": cc, "subject": subject, "text": md});
     if !yes {
         return Ok(not_sent(would));
@@ -153,9 +174,10 @@ pub fn mail_send(to: &[String], cc: &[String], subject: &str, file: &Path, yes: 
 }
 
 /// A reply to mail `id` (`all`: to everyone on it), the Markdown `file` above the quoted mail.
-pub fn mail_reply(id: &str, all: bool, file: &Path, yes: bool) -> Result<Value> {
+pub fn mail_reply(id: &str, all: bool, file: &Path, ai: Option<&str>, yes: bool) -> Result<Value> {
     let m = graph::message(id)?;
     let (md, html) = markdown_file(file)?;
+    let html = with_notice(html, ai);
     let would = json!({"reply_to": {"subject": m["subject"], "from": m["from"], "at": m["at"]}, "to": if all { "everyone on it" } else { "its sender" }, "text": md});
     if !yes {
         return Ok(not_sent(would));
@@ -166,8 +188,10 @@ pub fn mail_reply(id: &str, all: bool, file: &Path, yes: bool) -> Result<Value> 
 }
 
 /// A draft in the user's Drafts (nothing is sent): its link, to open and send from Outlook.
-pub fn mail_draft(to: &[String], cc: &[String], subject: &str, file: &Path) -> Result<Value> {
+pub fn mail_draft(to: &[String], cc: &[String], subject: &str, file: &Path, ai: Option<&str>) -> Result<Value> {
+    not_in_run()?;
     let (_, html) = markdown_file(file)?;
+    let html = with_notice(html, ai);
     let v = graph::request("POST", "/me/messages", Body::Json(&json!({"subject": subject, "body": {"contentType": "HTML", "content": html}, "toRecipients": recipients(to)?, "ccRecipients": recipients(cc)?})), None, &[])?;
     Ok(json!({"draft": true, "id": v["id"], "url": v["webLink"]}))
 }
@@ -234,8 +258,9 @@ fn one_on_one(email: &str) -> Result<String> {
 }
 
 /// A message in a chat: `chat` by its id, or `to` a person by address (their 1:1 chat). Its text: the Markdown `file`.
-pub fn chat_send(chat: Option<&str>, to: Option<&str>, file: &Path, yes: bool) -> Result<Value> {
+pub fn chat_send(chat: Option<&str>, to: Option<&str>, file: &Path, ai: Option<&str>, yes: bool) -> Result<Value> {
     let (md, html) = markdown_file(file)?;
+    let html = with_notice(html, ai);
     let id = match (chat, to) {
         (Some(c), None) => c.to_string(),
         // A person: the preview names them; their 1:1 chat is opened (made, if new — visible to them) only to send.
@@ -284,8 +309,9 @@ pub fn channel_read(team: &str, channel: &str, days: i64, limit: usize) -> Resul
 }
 
 /// A new post in a channel (`subject` optional), the Markdown `file` as its text.
-pub fn channel_post(team: &str, channel: &str, subject: Option<&str>, file: &Path, yes: bool) -> Result<Value> {
+pub fn channel_post(team: &str, channel: &str, subject: Option<&str>, file: &Path, ai: Option<&str>, yes: bool) -> Result<Value> {
     let (md, html) = markdown_file(file)?;
+    let html = with_notice(html, ai);
     let would = json!({"team": team, "channel": channel, "subject": subject, "text": md});
     if !yes {
         return Ok(not_sent(would));
@@ -332,15 +358,26 @@ pub fn drive_list(path: Option<&str>) -> Result<Value> {
 fn content_path(item: &str) -> String {
     if item.starts_with("drives/") {
         format!("/{}/content", item.split('/').map(enc).collect::<Vec<_>>().join("/"))
-    } else if item.contains('/') || item.contains('.') {
-        format!("/me/drive/root:/{}:/content", enc_path(item))
-    } else {
+    } else if looks_like_item_id(item) {
         format!("/me/drive/items/{}/content", enc(item))
+    } else {
+        format!("/me/drive/root:/{}:/content", enc_path(item))
     }
+}
+
+/// A drive item's id rather than a name: personal OneDrive's `<hex>!<n>`, or a business id (`01` + 32 capitals and
+/// digits). Anything else is a path, a root file without an extension (`README`) too.
+fn looks_like_item_id(s: &str) -> bool {
+    !s.contains('/')
+        && (s.split_once('!').is_some_and(|(a, b)| !a.is_empty() && a.bytes().all(|c| c.is_ascii_hexdigit()) && !b.is_empty() && b.bytes().all(|c| c.is_ascii_digit()))
+            || (s.len() >= 30 && s.starts_with("01") && s.bytes().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())))
 }
 
 /// A file's bytes into `out` (a folder: its name kept).
 pub fn drive_download(item: &str, out: &Path) -> Result<Value> {
+    if out.as_os_str() == "-" {
+        bail!("--out is a file or a folder (not stdout)");
+    }
     let target = if out.is_dir() {
         // Its own name, from its metadata (the same path without /content).
         let path = content_path(item);
@@ -350,7 +387,15 @@ pub fn drive_download(item: &str, out: &Path) -> Result<Value> {
     } else {
         out.to_path_buf()
     };
-    graph::request("GET", &content_path(item), Body::None, Some(&target), &[])?;
+    // Into a file beside it, renamed over the target only once the whole answer came: a refused or broken download
+    // never replaces (or removes) what was there.
+    let part = target.with_file_name(format!(".{}.echo-part", target.file_name().and_then(|n| n.to_str()).unwrap_or("download")));
+    let got = graph::request("GET", &content_path(item), Body::None, Some(&part), &[]);
+    if let Err(e) = got {
+        let _ = std::fs::remove_file(&part);
+        return Err(e);
+    }
+    std::fs::rename(&part, &target).with_context(|| format!("saving {}", target.display()))?;
     Ok(json!({"saved": target, "bytes": std::fs::metadata(&target).map(|m| m.len()).unwrap_or(0)}))
 }
 
@@ -400,7 +445,11 @@ mod tests {
     fn drive_paths_and_items_are_told_apart_and_encoded() {
         assert_eq!(content_path("drives/d!1/items/x"), "/drives/d%211/items/x/content");
         assert_eq!(content_path("Documents/Q4 plan.docx"), "/me/drive/root:/Documents/Q4%20plan.docx:/content");
-        assert_eq!(content_path("01ABCDEF"), "/me/drive/items/01ABCDEF/content");
+        assert_eq!(content_path("01ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"), "/me/drive/items/01ABCDEFGHIJKLMNOPQRSTUVWXYZ234567/content");
+        assert_eq!(content_path("D4648F06C91D9D3D!54927"), "/me/drive/items/D4648F06C91D9D3D%2154927/content");
+        assert_eq!(content_path("README"), "/me/drive/root:/README:/content", "a root file with no extension is a path");
+        assert_eq!(content_path("../../x"), "/me/drive/root:/%2E%2E/%2E%2E/x:/content", "dot segments never resolve");
+        assert_eq!(enc(".."), "%2E%2E");
     }
 
     #[test]
@@ -408,10 +457,12 @@ mod tests {
         let f = std::env::temp_dir().join(format!("echo-test-m365-{}.md", std::process::id()));
         std::fs::write(&f, "Hi **Bob**").unwrap();
         // No sign-in is touched: the preview comes first.
-        let v = mail_send(&["bob@acme.example".into()], &[], "Hello", &f, false).unwrap();
+        let v = mail_send(&["bob@acme.example".into()], &[], "Hello", &f, Some("sonnet"), false).unwrap();
         assert_eq!(v["sent"], false);
         assert_eq!(v["would"]["to"][0]["emailAddress"]["address"], "bob@acme.example");
-        assert!(mail_send(&["not an address".into()], &[], "x", &f, false).is_err());
+        assert!(mail_send(&["not an address".into()], &[], "x", &f, None, false).is_err());
+        assert!(with_notice("<p>x</p>".into(), Some("sonnet")).contains("sonnet"), "a model's text says so");
+        assert_eq!(with_notice("<p>x</p>".into(), None), "<p>x</p>");
         let u = drive_upload(&f, "Documents/x.md", false).unwrap();
         assert_eq!(u["sent"], false);
         let _ = std::fs::remove_file(&f);
