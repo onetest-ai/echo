@@ -229,6 +229,15 @@ pub fn hook() -> i32 {
         if let (true, Some(t)) = (tell, me) {
             blocks.push(about_me_block(&t));
         }
+        // How to do things in Echo: its own CLI, not whatever connector Claude Code has (2026-11-04: asked to make a
+        // client or a thread it didn't know how; asked to send a mail it tried a Microsoft 365 connector not set up).
+        let cli = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_else(|_| "echoctl".into());
+        let how = howto_block(&cli);
+        let (c, tell) = block_due(&mut sent, "howto", &session, input["source"].as_str().unwrap_or(""), &how, now);
+        changed |= c;
+        if tell {
+            blocks.push(how);
+        }
         // What the Brain holds for this session and when to go there (#34): only when it is on.
         #[cfg(feature = "brain")]
         if let Some(b) = session_access().and_then(|a| crate::brain::advert::session_block(&a)) {
@@ -286,6 +295,32 @@ fn block_due(sent: &mut Value, kind: &str, session: &str, source: &str, text: &s
         }
     }
     (!session.is_empty(), true)
+}
+
+/// How a session in Echo's window does Echo's own things: through its CLI (`cli`, this Echo's binary), which acts as
+/// the window does and with Echo's own Microsoft 365 sign-in.
+fn howto_block(cli: &str) -> String {
+    format!(
+        "<echo_howto>\n\
+You run inside Echo, the user's call recorder and work tracker. Do Echo's things with its own CLI, `{cli}` (JSON out; \
+`--help` on any command) — the window shows the result at once. Prefer it to anything else for Echo's data and for \
+Microsoft 365 (Echo has its own sign-in there), unless the user names another tool.\n\
+- Clients and organisations: `client list`, `client add <name> --domains a.com,b.com [--internal]`, `client set`; \
+`org list`, `org add <name> --domains … [--account] [--thread <id>]`.\n\
+- Threads (the CLI calls them projects): `project list`, `project create <name> --client <client id>`, `project set`, \
+`project rule <id> --series|--people|--subject …`, `project include|exclude <id> <call>`, `project source <id> --mail \
+<domain or address>`, `project show <id>`.\n\
+- Work, people, tasks: `project ledger <id> tree`, `project ledger <id> edit '<json>'`, `project people <id>`, \
+`project tasks`.\n\
+- Calls: `context <call>`, `actions <call>`, `notes <call>` (write its minutes), `title <call> <title>`.\n\
+- Mail: `deliver send mail --to a@x.com,b@y.com --title <subject> --file <markdown file>` sends it from the user's own \
+Microsoft 365 account through Echo (without `--to`: to the user). Show the user the recipients and the text and send \
+only once they say so. `deliver status` says whether mail can be sent; if not, `compose --to … --subject … \
+--body-file <file>` opens a draft in their mail app instead. Don't use a Microsoft 365 / Outlook connector of Claude's \
+for this unless the user asks for it: it may not be set up for them.\n\
+- The Brain (when on): the echo-brain MCP tools.\n\
+</echo_howto>"
+    )
 }
 
 /// About me for a session: the user's own words, marked as theirs.

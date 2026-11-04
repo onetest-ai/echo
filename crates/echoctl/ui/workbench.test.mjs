@@ -43,18 +43,21 @@ test('a calendar event offers what the card offered before', () => {
   assert.equal(eventAction({}, st({ recordable: false })), null)
 })
 
-test('no layout saved: views in their own areas, the right panel open, the bottom one closed', () => {
+test('no layout saved: views in their own areas, both panels closed', () => {
   Layout.load(undefined)
   const e = Layout.effective(1180, 760, VIEWS)
   assert.deepEqual([e.right.views, e.bottom.views], [['tasks'], ['claude']])
-  assert.equal(e.right.shown, true)
+  assert.equal(e.right.shown, false)
   assert.equal(e.bottom.shown, false)
 })
 
-test('a saved layout that says nothing about a panel keeps its default (right open)', () => {
-  Layout.load({})
+test('the window opening closes the right panel, however it was saved; its size and view stay', () => {
+  Layout.load({ right: { open: true, size: 400, active: 'tasks' } })
   assert.equal(Layout.effective(1180, 760, VIEWS).right.shown, true)
-  Layout.load({ bottom: { size: 300 } })
+  Layout.started()
+  assert.equal(Layout.effective(1180, 760, VIEWS).right.shown, false)
+  assert.deepEqual(Layout.toJSON().right, { open: false, size: 400, active: 'tasks' })
+  Layout.show('tasks', VIEWS)
   assert.equal(Layout.effective(1180, 760, VIEWS).right.shown, true)
 })
 
@@ -115,7 +118,7 @@ test('views of a removed plugin are forgotten', () => {
 test('malformed saved values fall back to the defaults', () => {
   Layout.load({ right: { open: 'yes', size: 99999, active: 4 }, bottom: { size: 'big' }, views: { claude: { area: 'left' } } })
   const j = Layout.toJSON()
-  assert.deepEqual(j.right, { open: true, size: 900, active: null }) // 'yes' isn't a choice: the default
+  assert.deepEqual(j.right, { open: false, size: 900, active: null }) // 'yes' isn't a choice: the default
   assert.equal(j.bottom.size, 220)
   assert.deepEqual(j.views, {})
 })

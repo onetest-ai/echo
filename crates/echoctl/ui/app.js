@@ -375,7 +375,7 @@ const PANEL_VIEWS = []
 const Layout = (() => {
   const AREAS = ['right', 'bottom']
   const SIZE = { right: 320, bottom: 220 }
-  const fresh = () => ({ right: { open: true, size: SIZE.right, active: null }, bottom: { open: false, size: SIZE.bottom, active: null }, views: {} })
+  const fresh = () => ({ right: { open: false, size: SIZE.right, active: null }, bottom: { open: false, size: SIZE.bottom, active: null }, views: {} })
   let L = fresh()
   const num = (v, lo, hi, d) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d)
   const areaOf = (v) => (L.views[v.id] && AREAS.includes(L.views[v.id].area) ? L.views[v.id].area : v.area)
@@ -391,6 +391,9 @@ const Layout = (() => {
       }
       for (const [id, v] of Object.entries(o.views || {})) if (v && AREAS.includes(v.area)) L.views[id] = { area: v.area }
     },
+    /** The window opening: the right panel starts closed, whatever was saved — it opens when asked for
+     *  (2026-11-04, the user: "closed unless the user opens it, on start always"). Its size and view stay. */
+    started() { L.right.open = false },
     toJSON() { return JSON.parse(JSON.stringify(L)) },
     /** The known views in an area, in their own order. */
     views(area, known) { return known.filter((v) => areaOf(v) === area).map((v) => v.id) },
@@ -538,6 +541,7 @@ async function loadAgenda() {
 }
 async function loadLayout() {
   try { Layout.load(await get('api/layout')); Layout.prune(PANEL_VIEWS) } catch { /* the default layout */ }
+  Layout.started()
 }
 let callSeq = 0
 async function loadCall(name) {
@@ -674,6 +678,8 @@ function signinNote(p) {
     default: return s.error ? note(`${name}: ${esc(s.error)}`, btn(`data-signin-check="${id}"`, 'Check again', 'btn ghost') + signIn(), 'error') : ''
   }
 }
+/** A fold's chevron: right when closed, down when open (drawn, not a text glyph — "▸" was too faint to see). */
+const CHEV = (open) => `<svg class="chev${open ? ' open' : ''}" viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M3.5 1.5L7 5l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`
 const CARET = '<svg viewBox="0 0 10 6" width="8" height="5" aria-hidden="true"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>'
 /** A compact native select over a label (as the language picker): `data-<attr>`. */
 function profilePick(attr, cur, cls = 'btn', title = 'Model for this call') {
@@ -792,10 +798,10 @@ function panel(area, eff) {
     <div class="panel-body">${v ? v.render() : ''}</div>`
 }
 
-/** Show Claude: the call's session on a call (or `view`), else the folder's; again: hide it. */
+/** Show Claude (the Echo-folder session); again: hide it. With `view`: show that one. */
 function claudePanel(view) {
   const known = panelViews()
-  const id = view || (S.view === 'calls' && S.selected ? 'claude-call' : 'claude-folder')
+  const id = view || 'claude-folder'
   const a = Layout.area(id, known)
   if (!a) return
   const eff = Layout.effective(window.innerWidth, window.innerHeight, known, S.overlay)
@@ -1495,7 +1501,6 @@ function termStart(kind, key, extra = {}) {
   if (!e) { S.notice = "The terminal can't be shown (xterm.js didn't load)."; return render() }
   e.exited = false; e.starting = true; e.signin = null; e.error = null; e.from = 0; e.term.reset()
   if (S.termOutput) delete S.termOutput[key]
-  if (kind === 'claude-call') for (const [k, o] of Terms) if (k !== key && k.startsWith('claude:call:') && o.id != null) { o.id = null; o.exited = true } // one call session at a time
   const slot = document.querySelector(`.term-slot[data-term="${CSS.escape(key)}"]`)
   const dims = slot ? (() => { slot.appendChild(e.el); try { e.fit.fit() } catch {} return { cols: e.term.cols, rows: e.term.rows } })() : { cols: 100, rows: 30 }
   send({ cmd: 'pty_open', kind, key, ...extra, ...dims })
@@ -1537,8 +1542,7 @@ function claudeTools(key, kind, extra, running) {
 }
 /** ⌘K: restart a Claude panel's session (plugins and settings read afresh) or start a new conversation there. */
 function claudeSessionActions(add) {
-  const panels = [['claude-folder', 'claude:folder', 'Claude · Echo folder', { profile: S.folderProfile || ai().default || undefined }]]
-  if (S.view === 'calls' && S.selected && S.call && !S.call.error) panels.push(['claude-call', callKey(S.call.name), 'Claude · this call', { call: S.call.name }])
+  const panels = [['claude-folder', 'claude:folder', 'Claude', { profile: S.folderProfile || ai().default || undefined }]]
   for (const [kind, key, label, extra] of panels) {
     const e = Terms.get(key), running = !!(e && e.id != null && !e.exited)
     const act = (session) => () => {
@@ -1592,40 +1596,19 @@ function termBody(e, key, kind, startLabel, intro, extra, running, attrs) {
     : e && e.starting ? '<div class="term-bar"><span class="grow">Starting Claude Code…</span></div>' : ''
   return `<div class="term-wrap">${head}<div class="term-slot" data-term="${esc(key)}"></div></div>`
 }
-// ── Claude in the window: two sessions (terminal.rs). The call's is guarded and on the call's own
-// AI profile; the folder's is the user's own Claude Code on the profile they pick.
-const stampOf = (name) => String(name || '').slice(0, 17)
-const callKey = (name) => `claude:call:${stampOf(name)}`
-/** The call a running call session is on (one at a time), if any. */
-function callSessionOn() {
-  for (const [k, e] of Terms) if (k.startsWith('claude:call:') && e.id != null && !e.exited) return k.slice('claude:call:'.length)
-  return null
-}
-function claudeCallView() {
-  const c = S.call
-  if (!S.selected || !c || c.error) return '<p class="panel-empty">Open a call to ask Claude about it.</p>'
-  const key = callKey(c.name), p = profileOf(c.live && c.live.profile)
-  const pname = p ? p.name : (c.live && c.live.profile) || 'the call\'s profile'
-  const banner = `<div class="term-banner"><b>Guarded</b> · reads this call${c.status === 'recording' ? ' (the transcript so far)' : ''} and the earlier minutes of this meeting · can't change or send anything · ${esc(pname)}, this call's profile</div>`
-  const on = callSessionOn()
-  const elsewhere = on && on !== stampOf(c.name)
-    ? `<div class="term-bar"><span class="grow">Claude is on ${esc(titleOf(((S.calls || []).find((x) => stampOf(x.name) === on) || {}).name || on))}.</span></div>` : ''
-  const intro = `${elsewhere}<p>Ask Claude about <b>${esc(c.title)}</b>: what was decided, who asked for what, what you missed. It reads the transcript, chat, minutes and your notes of this call and the earlier minutes of the same meeting — it can't change anything.</p><p class="hint">On ${esc(pname)}, the profile this call was recorded with.</p>`
-  // A conversation about this call on its profile that can go on: Resume, not a new one.
-  const saved = S.sessions && S.sessions.has(`${(c.live && c.live.profile) || 'system'}:${stampOf(c.name)}`)
-  return banner + termView(key, 'claude-call', saved ? 'Resume the conversation about this call' : on && on !== stampOf(c.name) ? 'Open Claude on this call' : 'Ask Claude about this call', intro, { call: c.name })
-}
+// ── Claude in the window (terminal.rs): one session, the user's own Claude Code in the data folder on the
+// profile they pick. "Ask Claude about this call" opens it: the open call reaches it in `<echo_view>`. (A second,
+// guarded session bound to one call was dropped, 2026-11-04: two Claudes confused people.)
 function claudeFolderView() {
   const a = ai()
   const pick = a.profiles.length > 1 ? `<label class="term-profile">Profile <select data-term-profile>${profileOptions(S.folderProfile || a.default)}</select></label>` : ''
-  const intro = `<p>Your own Claude Code in the Echo data folder — your settings and permissions, every call's files at hand.</p>${pick}`
+  const intro = `<p>Ask Claude about anything in Echo — the call or thread you have open (it sees what you are looking at), your clients, people, tasks. It is your own Claude Code, with your settings, working in Echo's data folder.</p>${pick}`
   const saved = S.sessions && S.sessions.has(`${S.folderProfile || a.default || 'system'}:folder`)
   return termView('claude:folder', 'claude-folder', saved ? 'Resume Claude' : 'Start Claude', intro, { profile: S.folderProfile || a.default || '' })
 }
-// Claude's sparkle, in a speech bubble (this call) or on a folder (the Echo folder).
+// Claude's sparkle on a folder (the Echo folder).
 const SPARK = (x, y, r) => `<path d="M${x} ${y - r}l${r * 0.3} ${r * 0.7} ${r * 0.7} ${r * 0.3}-${r * 0.7} ${r * 0.3}-${r * 0.3} ${r * 0.7}-${r * 0.3}-${r * 0.7}-${r * 0.7}-${r * 0.3} ${r * 0.7}-${r * 0.3}z" fill="currentColor" stroke="none"/>`
-PANEL_VIEWS.push({ id: 'claude-call', label: 'Claude · this call', icon: ICON(`<path d="M4 5h16v11H10l-5 4v-4H4z"/>${SPARK(12, 10.5, 4)}`), area: 'bottom', when: () => S.view === 'calls' && !!S.selected, render: claudeCallView })
-PANEL_VIEWS.push({ id: 'claude-folder', label: 'Claude · Echo folder', icon: ICON(`<path d="M3 6h6l2 2h10v11H3z"/>${SPARK(12, 13.5, 3.6)}`), area: 'bottom', when: () => S.view !== 'settings', render: claudeFolderView })
+PANEL_VIEWS.push({ id: 'claude-folder', label: 'Claude', icon: ICON(`<path d="M3 6h6l2 2h10v11H3z"/>${SPARK(12, 13.5, 3.6)}`), area: 'bottom', when: () => S.view !== 'settings', render: claudeFolderView })
 
 // ── Minutes: the page as it would be sent, in a sandboxed frame (`/minutes/<call>`) ───────────
 const SHOW_FILE = /Windows/.test(navigator.userAgent) ? 'Show in Explorer' : 'Show in Finder'
@@ -2209,7 +2192,7 @@ function brainSettings(st) {
   const last = b.last ? (b.last.error ? `<span class="error">${esc(b.last.error)}</span>` : `Last sync: ${b.last.added || 0} added, ${b.last.changed || 0} changed, ${b.last.removed || 0} removed, ${b.last.embedded || 0} embedded${b.last.embed_error ? ` · <span class="error">${esc(b.last.embed_error)}</span>` : ''}`) : (b.built_at ? `Updated ${esc(relDay(String(b.built_at).slice(0, 10)))}` : '')
   const u = b.usage || {}, by = u.by || {}
   const sum = (o) => Object.values(o || {}).reduce((n, k) => n + k, 0)
-  const asked = `${u.claude || 0} time${u.claude === 1 ? '' : 's'} in the last ${u.days || 7} days` + (u.claude ? ` — ${[['folder', 'the Echo folder session'], ['call', 'call sessions'], ['routine', 'routines']].filter(([k]) => sum(by[k])).map(([k, l]) => `${l} ${sum(by[k])}`).join(' · ')}` : '')
+  const asked = `${u.claude || 0} time${u.claude === 1 ? '' : 's'} in the last ${u.days || 7} days` + (u.claude ? ` — ${[['folder', 'Claude in the window'], ['call', 'call sessions'], ['routine', 'routines']].filter(([k]) => sum(by[k])).map(([k, l]) => `${l} ${sum(by[k])}`).join(' · ')}` : '')
   const seen = by.window ? ` · in the window: Also discussed ${by.window.also_discussed || 0}, Mentioned also in ${by.window.mentioned_also_in || 0}` : ''
   const usageRow = setRow('How much it is used', `Claude asked it ${asked}${seen}. Claude sees what it holds and when to ask it at the start of every Echo session.`, '')
   return setCard('', [
@@ -2718,7 +2701,7 @@ const SETTINGS_BODY = {
       const ctl = (out ? `<button class="btn primary" data-signin="${esc(p.id)}">Sign in…</button>` : '') + (isDef ? '' : `<button class="btn" data-set="default_profile" data-val='${esc(JSON.stringify(p.id))}'>Make default</button>`)
       return setRow(`${esc(p.name)} ${isDef ? '<span class="tag rec">Default for new calls</span>' : ''}<span class="tag">${kind(p)}</span>`, `${who}${p.notes_model ? ` · minutes: ${esc(p.notes_model)}` : ''}${p.live_model ? ` · live notes: ${esc(p.live_model)}` : ''}`, ctl)
     })
-    const add = '<div class="set-sub" style="padding:10px 14px">Add a profile: <code>echoctl ai add-claude &lt;name&gt;</code> (a Claude account) or <code>echoctl ai add-local &lt;name&gt; --url …</code> (a model on this computer) — or ask Claude in the Echo folder session.</div>'
+    const add = '<div class="set-sub" style="padding:10px 14px">Add a profile: <code>echoctl ai add-claude &lt;name&gt;</code> (a Claude account) or <code>echoctl ai add-local &lt;name&gt; --url …</code> (a model on this computer) — or ask Claude in the window.</div>'
     return `<h2>AI &amp; minutes</h2><p class="set-lead">Which model and account writes each call's live notes and minutes. A call keeps the profile it was recorded with.</p>` +
       `<section class="set-sec"><h3>Profiles</h3><div class="set-card">${rows.join('')}${add}</div></section>` +
       setCard('Minutes', [
@@ -2730,7 +2713,7 @@ const SETTINGS_BODY = {
         setRow('Also write a minutes page file', "An HTML file in the call's folder, for sharing.", sw('minutes_page', st.minutes_page, 'Minutes page file')),
       ]) +
       setCard('Claude in the window', [
-        setRow('Echo folder session: no permission prompts', `Starts it with <code>--dangerously-skip-permissions</code>: Claude runs any command and tool without asking — it can talk to your other sessions and close your tasks in other systems. ${st.folder_skip_permissions ? '<span class="warn">On.</span> ' : ''}Takes effect the next time the session starts. A call's session stays guarded.`, sw('folder_skip_permissions', st.folder_skip_permissions, 'Echo folder session: no permission prompts')),
+        setRow('Claude in the window: no permission prompts', `Starts it with <code>--dangerously-skip-permissions</code>: Claude runs any command and tool without asking — it can talk to your other sessions and close your tasks in other systems. ${st.folder_skip_permissions ? '<span class="warn">On.</span> ' : ''}Takes effect the next time the session starts.`, sw('folder_skip_permissions', st.folder_skip_permissions, 'Claude in the window: no permission prompts')),
       ])
   },
   calendar(st) {
@@ -2854,7 +2837,7 @@ function projectList(data) {
   if (clients.length && !data.error) for (const k of [...pjFolded]) if (k !== '-' && !clients.some((c) => c.id === k)) pjFold(k)
   const none = open.filter((p) => !p.client || !clients.some((c) => c.id === p.client))
   if (none.length) groups.push(clients.length ? fold('-', none, '<div class="pj-group">No client</div>') : `<div class="pj-group">Threads</div>${none.map(row).join('')}`)
-  const closedRows = closed.length ? `<button class="pj-group pj-fold" data-pj="toggle-closed" aria-expanded="${S.pj.showClosed}">${S.pj.showClosed ? '▾' : '▸'} Closed · ${closed.length}</button>${S.pj.showClosed ? closed.map(row).join('') : ''}` : ''
+  const closedRows = closed.length ? `<button class="pj-group pj-fold" data-pj="toggle-closed" aria-expanded="${S.pj.showClosed}">${CHEV(S.pj.showClosed)} Closed · ${closed.length}</button>${S.pj.showClosed ? closed.map(row).join('') : ''}` : ''
   const err = data.error ? `<p class="error" style="padding:10px">${esc(data.error)}</p>` : ''
   const fc = data.found_count || 0
   const found = `<button class="pj-row pj-found${S.pj.found ? ' on' : ''}${fc ? '' : ' quiet'}" data-pj="found"><span class="pj-spark" aria-hidden="true">✦</span><b class="grow">Found for you</b>${fc ? `<span class="pj-badge">${fc}</span>` : ''}</button>`
@@ -3313,7 +3296,7 @@ function taskWho(c, pile) {
 function othersPile(all, key) {
   if (!all.length) return ''
   const open = S.tk.more[key]
-  return `<section class="tk-others"><button class="tk-more" data-tk="more" data-pile="${key}">${open ? '▾' : '▸'} Others · ${all.length} <span class="set-sub">— other people's work in your threads: not handed over by you, not stopping you</span></button>${open ? `<div class="tk-others-cards">${all.map((c) => taskCard(c, 'others')).join('')}</div>` : ''}</section>`
+  return `<section class="tk-others"><button class="tk-more" data-tk="more" data-pile="${key}">${CHEV(open)} Others · ${all.length} <span class="set-sub">— other people's work in your threads: not handed over by you, not stopping you</span></button>${open ? `<div class="tk-others-cards">${all.map((c) => taskCard(c, 'others')).join('')}</div>` : ''}</section>`
 }
 function taskCard(c, pile) {
   const p = projById(c.project) || { id: c.project, name: c.project }
@@ -4375,7 +4358,7 @@ function brainTopics(tx) {
     const flag = ca ? `<span class="br-flag" title="Took ${ca}% of ${esc(lname(x.layer))}'s new sections: a catch-all — split it, or rebuild">took ${ca}% of new</span>` : ''
     const chip = x.layer !== 'shared' ? `<span class="br-cl" style="--c:${lcolor(x.layer)}">${esc(lname(x.layer))}</span>` : ''
     const syn = (x.synonyms || []).length ? ` · also ${esc(x.synonyms.slice(0, 3).join(', '))}` : ''
-    const fold = sub.length ? `<button class="br-fold" data-br-fold="${esc(x.id)}" aria-expanded="${isOpen}" title="${isOpen ? 'Fold' : 'Show'} ${sub.length} subtopic${sub.length === 1 ? '' : 's'}">${isOpen ? '▾' : '▸'}</button>` : '<span class="br-fold"></span>'
+    const fold = sub.length ? `<button class="br-fold" data-br-fold="${esc(x.id)}" aria-expanded="${isOpen}" title="${isOpen ? 'Fold' : 'Show'} ${sub.length} subtopic${sub.length === 1 ? '' : 's'}">${CHEV(isOpen)}</button>` : '<span class="br-fold"></span>'
     const subs = sub.length && !isOpen ? ` <span class="set-sub">· ${sub.length} sub${sub.some((k) => k.layer !== 'shared') ? `, ${[...new Set(sub.filter((k) => k.layer !== 'shared').map((k) => lname(k.layer)))].map(esc).join(', ')}` : ''}</span>` : ''
     return `<div class="br-tr${top ? '' : ' l2'}${S.br.node === x.id ? ' on' : ''}">${fold}<button class="br-tm" data-br-node="${esc(x.id)}"><span class="br-tn">${top ? `<b>${esc(x.label)}</b>` : esc(x.label)} ${chip}${subs}${flag}</span>${x.description || syn ? `<span class="br-td">${esc(x.description || '')}${syn}</span>` : ''}</button>
       <span class="br-bar" title="${x.sections || 0} sections · ${pct}%"><i style="width:${Math.round(100 * (x.sections || 0) / max)}%"></i></span><span class="br-n">${x.sections || 0}<small> · ${pct}%</small></span><span class="br-th">${threadChips(x.threads)}</span></div>${isOpen ? sub.map((k) => row(k, false)).join('') : ''}`
@@ -4497,7 +4480,7 @@ function brainTerms(tx) {
   const order = (tx.groups || []).map((g) => g.id).filter((id) => groups[id]).concat(Object.keys(groups).filter((id) => !label[id]))
   const acc = (id, title, n, note) => {
     const k = `g|${id}`, open = s.open.has(k)
-    return `<div class="bs-acc"><button class="bs-h" data-dict-toggle="${esc(k)}" aria-expanded="${open}"><span class="ch">${open ? '▾' : '▸'}</span><b>${esc(title)}</b>${note ? `<span class="n">${esc(note)}</span>` : ''}<span class="grow"></span><span class="n">${nf(n)}</span></button>${open ? `<div class="bs-body pad">${list(k)}</div>` : ''}</div>`
+    return `<div class="bs-acc"><button class="bs-h" data-dict-toggle="${esc(k)}" aria-expanded="${open}"><span class="ch">${CHEV(open)}</span><b>${esc(title)}</b>${note ? `<span class="n">${esc(note)}</span>` : ''}<span class="grow"></span><span class="n">${nf(n)}</span></button>${open ? `<div class="bs-body pad">${list(k)}</div>` : ''}</div>`
   }
   const accs = order.map((id) => acc(id, label[id] || id, groups[id])).join('')
   const closed = s.head.closed ? acc('closed', 'Closed threads', s.head.closed, "out of transcription hints and Claude's current list · search and spellings still resolve them") : ''
@@ -4652,7 +4635,7 @@ function srcListBody(k, opts) {
 }
 function srcAcc(k, head, body, depth) {
   const open = srcState().open.has(k)
-  return `<div class="bs-acc${depth ? ' sub' : ''}"><button class="bs-h" data-bs-toggle="${esc(k)}" aria-expanded="${open}"><span class="ch">${open ? '▾' : '▸'}</span>${head}</button>${open ? `<div class="bs-body">${body()}</div>` : ''}</div>`
+  return `<div class="bs-acc${depth ? ' sub' : ''}"><button class="bs-h" data-bs-toggle="${esc(k)}" aria-expanded="${open}"><span class="ch">${CHEV(open)}</span>${head}</button>${open ? `<div class="bs-body">${body()}</div>` : ''}</div>`
 }
 function brainSources() {
   const s = srcState()
@@ -5326,7 +5309,8 @@ document.addEventListener('click', (e) => {
     return loadBrainNode().then(render)
   }
   if (d.brAccept) return brainEdit({ op: 'accept', layer: d.brAccept })
-  if (d.brFold) { const f = S.br.fold || {}; S.br.fold = { ...f, [d.brFold]: !f[d.brFold] }; return render() }
+  // Folded = it was open: one click opens a closed one (it took two — a closed topic had no `fold` entry yet).
+  if (d.brFold) { S.br.fold = { ...(S.br.fold || {}), [d.brFold]: t.getAttribute('aria-expanded') === 'true' }; return render() }
   if (d.brRebuild) { send({ cmd: 'brain_rebuild_topics', layer: d.brRebuild }); S.br.rebuilding = { ...(S.br.rebuilding || {}), [`taxonomy:${d.brRebuild}`]: true }; setTimeout(() => { S.br.rebuilding = {}; loadBrain().then(render) }, 1500); return render() }
   if (d.brSplit) { const [layer, label, asker] = JSON.parse(d.brSplit); send({ cmd: 'brain_split_topic', layer, label, for: asker || layer }); S.br.rebuilding = { ...(S.br.rebuilding || {}), [`split:${asker || layer}`]: true }; setTimeout(() => { S.br.rebuilding = {}; loadBrain().then(render) }, 1500); return render() }
   if (d.brMove) { send({ cmd: 'brain_topic_move', key: d.brMove, do: d.do }); return setTimeout(() => loadBrain().then(render), 400) }
@@ -5805,7 +5789,7 @@ function paletteItems(target) {
   if (st.recording) add('Echo', 'Stop recording…', () => press({ cmd: 'stop-ask' }), { keywords: 'end', hint: MAC ? '⇧⌘R' : 'Ctrl+Shift+R' })
   else if (st.armed) add('Echo', 'Cancel recording the next call', () => press({ cmd: 'stop' }), { keywords: 'disarm' })
   else add('Echo', st.in_call ? 'Record this call' : 'Record the next Teams call', () => press({ cmd: 'record' }), { keywords: 'start arm' })
-  add('Echo', 'Claude · Echo folder', () => claudePanel('claude-folder'), { keywords: 'terminal session ask' })
+  add('Echo', 'Claude', () => claudePanel('claude-folder'), { keywords: 'terminal session ask echo folder' })
   claudeSessionActions(add)
   add('Echo', 'Vocabulary', () => press({ panelShow: 'vocabulary' }), { keywords: 'terms names words dictionary transcription learned glossary' })
   add('Echo', 'Show or hide Inbox', () => press({ panelFlip: 'needs' }), { keywords: 'needs you notifications attention decide review', hint: NY_HINT })
@@ -6231,7 +6215,7 @@ document.addEventListener('click', (e) => {
     case 'later-manual': S.laterOpen = false; render(); return send({ cmd: 'minutes_later', call: S.selected, minutes: null })
     case 'later-clear': return send({ cmd: 'minutes_later', call: S.selected, minutes: 0 })
     case 'claude-panel': return claudePanel()
-    case 'ask-claude': return claudePanel('claude-call')
+    case 'ask-claude': return claudePanel('claude-folder')
     case 'notes-raw': S.notesRaw = true; return render()
     case 'notes-timeline': S.notesRaw = false; return render()
     case 'note-flag': return addNote('flag')

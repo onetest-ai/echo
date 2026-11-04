@@ -188,8 +188,8 @@ recording dot and first, the final one after, its live notes beside it either wa
 (idle Record ▾ with language + profile, armed + Cancel, meeting soon + Record it, recording: clock, title, Stop that
 asks first; "Writing the transcript…" beside it), the activity bar (`ACTIVITIES`: Calls `list-detail`, Calendar
 `single`, and at its foot **Settings** — ⌘/Ctrl+, — `single`; ⌘/Ctrl+1…9), the primary view, right and bottom panels (`PANEL_VIEWS`, none yet: drawn only when a view is
-in them; the first is **My notes**, right by default, open unless closed — in a narrow window only when asked
-for, over the page), a status bar. The call header's actions are one ⋯ menu (folder, minutes page, delete) plus the
+in them; the first is **My notes**, right by default; the right panel starts **closed** every time the window opens and opens
+when asked for — `Layout.started()`, the user 2026-11-04 —, in a narrow window over the page), a status bar. The call header's actions are one ⋯ menu (folder, minutes page, delete) plus the
 My notes button; the Minutes tab's bar only says what is going on. Echo's own views are registry entries like a plugin's will be (`CALL_TABS`, `EVENT_ACTIONS`;
 the block between `// ── workbench` and `// end of the workbench block` has no DOM: `ui/workbench.test.mjs`).
 `Layout` keeps where panel views go and which panels are open in `<config dir>/window-layout.json` (per computer;
@@ -243,8 +243,14 @@ element is made once and moved into its panel slot after every render (a hidden 
 panel moves keep it; keys inside `.xterm` all go to it (⌘/Ctrl+Esc gives focus back) except `termKey`'s: on macOS
 ⌘C copies the selection, ⌘A selects all and ⌘V pastes through the app (IPC `pty_paste` → `pbpaste`, bracketed when the
 program asked; no text → Ctrl+V for Claude Code's image paste) — the window has no Edit menu, so WebKit's own never
-runs —, and Ctrl/Shift+Enter send ESC CR (a new line in Claude Code's prompt). Two panel views (bottom by
-default): **Claude · this call** — guarded on the call's own profile (`ai::for_call`; a sign-in problem comes back
+runs —, and Ctrl/Shift+Enter send ESC CR (a new line in Claude Code's prompt). **One panel view now, "Claude"** (2026-11-04, the user: two sessions confused people): the Echo-folder session below;
+"Ask Claude about this call" opens it, and the open call reaches it through `<echo_view>`. At its start it gets
+`<echo_howto>` (`view::howto_block`): how to do Echo's things with this Echo's CLI — clients, organisations, threads,
+work, calls — and mail through `deliver send mail --to` (Echo's own Microsoft 365 sign-in; the user confirms first;
+not signed in → `compose`), not a Microsoft 365 connector of Claude's (2026-11-04: it tried an enterprise connector
+that wasn't set up). Measured: a fresh session made a client and a thread, and for a mail checked `deliver status`.
+The call's guarded session below is still in the app (`terminal.rs`, `pty_open {kind: call}`), no longer in the
+window. Was: two panel views (bottom by default): **Claude · this call** — guarded on the call's own profile (`ai::for_call`; a sign-in problem comes back
 with its profile → Sign in…): the minutes run's guard with `ECHOCTL_RUN_MODE=ask` (Read/Glob/Grep in the call and the
 previous minutes, Bash only `echoctl context` — `guard::ASK_COMMANDS` —, no Edit/Write/Skill), `--tools
 Bash,Read,Glob,Grep --strict-mcp-config --permission-mode default`, allow rules for reading the call, headless,
