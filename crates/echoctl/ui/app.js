@@ -3287,7 +3287,9 @@ function workPanel() {
     (n.also_in || []).length ? ['Also in', n.also_in.map((a) => `${xItem(a.thread, a.node, a.title)} ${xUnlink(n, a.thread, a.node)}`).join('<br>')] : null,
     (n.xwaits || []).length ? ['Waits for', n.xwaits.map((a) => `${xItem(a.thread, a.node, a.title)}${a.owner ? ` <span class="set-sub">· ${esc(a.owner)}</span>` : ''} ${xUnlink(n, a.thread, a.node)}`).join('<br>')] : null,
     ...(n.xrefs || []).filter((r) => r.kind === 'blocks').map((r) => ['Holds up', `${xItem(r.thread, r.node, '')} <span class="set-sub">in another thread</span> ${xUnlink(n, r.thread, r.node)}`]),
-    (n.links || []).length ? ['From', n.links.filter((l) => /^https:\/\//i.test(l.url || '')).map((l) => `<a class="wp-link" href="${esc(l.url)}" data-ext title="${esc(l.url)}">↗ ${esc(l.title)}</a>`).join('')] : null,
+    (n.links || []).length ? ['From', n.links.filter((l) => /^(https|echo):\/\//i.test(l.url || '')).map((l) => /^echo:/i.test(l.url) ? `<a class="wp-link" href="${esc(l.url)}" title="In Echo">→ ${esc(l.title)}</a>` : `<a class="wp-link" href="${esc(l.url)}" data-ext title="${esc(l.url)}">↗ ${esc(l.title)}</a>`).join('')] : null,
+    // Its own echo:// link: for a note, a mail, Knowledge — it opens here.
+    S.pj.sel ? ['Link', `<button class="link-btn" data-copy="echo://task/${esc(S.pj.sel)}/${esc(n.id)}" title="echo://task/${esc(S.pj.sel)}/${esc(n.id)}">Copy link</button>`] : null,
     n.kind !== 'story' && actionItems.length ? ['Said', `“${esc(actionItems[0].quote.length > 90 ? actionItems[0].quote.slice(0, 88) + '…' : actionItems[0].quote)}”`] : null,
   ].filter(Boolean)
   // What the work is: an agent's from the words that created it, or yours (then it stays yours).
@@ -6784,6 +6786,8 @@ window.echo = {
     if (t.error) return window.echo.notice(`Echo can't open that link: ${t.error}`)
     if (t.url) return send({ cmd: 'open_url', url: t.url })
     S.jump = t.jump != null ? t.jump : null
+    // A work item: its thread's Work tab with its details open.
+    if (t.node) { S.pj.wantNode = t.node; S.pj.node = t.node }
     go(t.hash)
     if (t.person) setTimeout(() => showPerson(t.person), 300)
   },

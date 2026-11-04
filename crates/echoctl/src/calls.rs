@@ -542,7 +542,7 @@ pub fn context(call: &str) -> Result<()> {
         "heading_budget": heading_budget(chars),
         "summarize": summarize.is_none(),
         "skip_reason": summarize,
-        "previous_notes": previous.map(|p| p.join("notes.md").display().to_string()),
+        "previous_notes": previous.as_ref().map(|p| p.join("notes.md").display().to_string()),
         "template": if memo { memo_template() } else { pick_template(subject_of(&dir).as_deref()) },
         // A memo: the user alone; its threads are found from what was said (step 4b of process-call).
         "memo": memo,
@@ -558,9 +558,48 @@ pub fn context(call: &str) -> Result<()> {
         // The live notes a model kept during the call (on this call's own profile): a draft to check
         // against the transcript, never a source on its own; times in seconds.
         "live_notes": live_notes_for_minutes(&dir),
+        // echo:// links the minutes may use (Echo opens them; plain Markdown links): this call's threads and client,
+        // the previous meeting of the series, the people Echo knows by address.
+        "links": minutes_links(&dir, meeting.as_ref(), previous.as_deref()),
     });
     println!("{}", serde_json::to_string_pretty(&out)?);
     Ok(())
+}
+
+/// The echo:// links a call's minutes may carry: `{threads, clients, previous, people}`, each with its `link`. People
+/// only when People knows them (a link Echo couldn't open helps nobody).
+fn minutes_links(dir: &Path, meeting: Option<&crate::meeting::MeetingContext>, previous: Option<&Path>) -> Value {
+    let pjs = crate::projects::of_call(dir).unwrap_or_default();
+    let clients: Vec<Value> = {
+        let orgs = crate::projects::clients().unwrap_or_default();
+        let mut ids: Vec<&str> = pjs.iter().filter_map(|(p, _)| p.client.as_deref()).collect();
+        ids.dedup();
+        ids.iter().filter_map(|c| orgs.iter().find(|o| o.id == *c)).map(|o| json!({"name": o.name, "link": format!("echo://client/{}", o.id)})).collect()
+    };
+    let known: std::collections::BTreeSet<String> = crate::people::everyone(chrono::Local::now().date_naive())
+        .ok()
+        .and_then(|v| v["people"].as_array().map(|a| a.iter().filter_map(|x| x["key"].as_str().map(str::to_owned)).collect()))
+        .unwrap_or_default();
+    let mut seen = std::collections::BTreeSet::new();
+    let people: Vec<Value> = meeting
+        .map(|m| m.organizer.iter().chain(m.attendees.iter()).collect::<Vec<_>>())
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|p| {
+            let e = p.email.as_deref()?.trim().to_lowercase();
+            (known.contains(&e) && seen.insert(e.clone())).then(|| json!({"name": crate::people::display(&p.name), "link": format!("echo://person/{e}")}))
+        })
+        .collect();
+    json!({
+        "threads": pjs.iter().map(|(p, _)| json!({"name": p.name, "link": format!("echo://thread/{}", p.id)})).collect::<Vec<_>>(),
+        "clients": clients,
+        "previous": previous.map(|p| {
+            let m = read_json(&p.join("meta.json"));
+            let name = p.file_name().unwrap_or_default().to_string_lossy().to_string();
+            json!({"title": m["title"], "date": m["started_at"].as_str().and_then(|s| s.get(..10)), "link": format!("echo://call/{name}")})
+        }),
+        "people": people,
+    })
 }
 
 /// The call's live notes for the minutes: what the model on the call's profile kept during the call

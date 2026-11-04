@@ -191,14 +191,17 @@ macOS SIGKILLs (exit 137) a binary rewritten in place.
 
 ## `echo://` links (`links.rs`)
 How anything outside the window (a note in Echo's vault, a mail) points at what Echo keeps: `echo://call/<folder>[?t=<s>]`,
-`echo://thread/<id>`, `echo://client/<id>`, `echo://person/<People key>`, `echo://mail/<source id>` (`Link::parse`: no `..`,
+`echo://thread/<id>`, `echo://client/<id>`, `echo://person/<People key>`, `echo://mail/<source id>`, `echo://task/<thread>/<item
+id>` (its thread's Work tab with its details open; Details → Copy link) (`Link::parse`: no `..`,
 no extra slashes). Registered with the system (macOS `CFBundleURLTypes` in Info.plist → tao's `Event::Opened`; Windows
 `HKCU\Software\Classes\echo` → `echoctl app open --link "%1"`, rewritten at each start beside `app-path`). The window routes
 them (`window.echo.openLink` → `/api/link` = `links::target`: a call at a moment → its Transcript with the jump, else
 Minutes; a thread → Brief; a client → Overview; a person → their thread's People with their panel; a mail → its
 Outlook / Teams link); the page and the minutes frame (`{echo: 'link'}`) take clicks on them; `markdown_html` keeps them
 (`data-echo-link`). `echoctl read <link>` gives Claude the text behind one, read-only (a call's minutes and its turns
-±90 s around the moment, a thread's people and calls, a client's threads, a person's card, a mail's facts).
+±90 s around the moment, a thread's people and calls, a client's threads, a person's card, a mail's facts, a work item with
+where it was said). A work item's `links` take `echo://` links beside https; `context.links` gives a minutes run the links of
+the call's threads, clients, previous meeting and known people, which process-call puts on the names (never its own).
 
 ## The Echo window (`window.rs`, `ui/`)
 Menu → Open Echo… (or `echoctl app open [--call <name>]`, or a recent call) opens one window:

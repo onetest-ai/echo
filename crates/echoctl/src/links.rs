@@ -17,6 +17,8 @@ pub enum Link {
     Person(String),
     /// A mail conversation or Teams post by the Brain's source id (`mail/…`, `channel/…`).
     Mail(String),
+    /// A work item of a thread's ledger: a story, a task, a decision, a risk, a question (`T043`).
+    Task { thread: String, id: String },
 }
 
 /// Percent-decoding of a link's parts (UTF-8).
@@ -60,6 +62,11 @@ impl Link {
             "client" => Link::Client(clean(&id, false)?),
             "person" => Link::Person(clean(&id, false)?),
             // A Brain source id has one slash or two (`mail/<id>`, `channel/<key>/<id>`).
+            "task" => {
+                let (thread, item) = id.split_once('/')?;
+                let ok = !item.is_empty() && item.len() <= 40 && item.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+                Link::Task { thread: clean(thread, false)?, id: ok.then(|| item.to_string())? }
+            }
             "mail" | "post" => Link::Mail(clean(&id, true).filter(|x| x.starts_with("mail/") || x.starts_with("channel/"))?),
             _ => return None,
         })
@@ -148,6 +155,39 @@ pub fn read(link: &str) -> Result<String> {
             out.push_str(&person_text(&v));
         }
         Link::Mail(src) => out.push_str(&mail_text(&src)?),
+        Link::Task { thread, id } => out.push_str(&task_text(&thread, &id)?),
+    }
+    Ok(out)
+}
+
+/// A work item as text: its kind, title, state, owners, due, description, and where it was said (links).
+fn task_text(thread: &str, id: &str) -> Result<String> {
+    let t = crate::ledger::tree(thread).map_err(|_| anyhow!("no thread {thread:?}"))?;
+    let n = t["nodes"].get(id).filter(|n| n.is_object()).ok_or_else(|| anyhow!("no item {id} in {thread}"))?;
+    let mut out = format!("# {} — {} ({})\nThread: echo://thread/{thread}\n", n["title"].as_str().unwrap_or(""), n["kind"].as_str().unwrap_or(""), n["state"].as_str().unwrap_or(""));
+    for (k, l) in [("internal_owner", "Owner"), ("client_owner", "Client owner"), ("due", "Due")] {
+        if let Some(v) = n[k].as_str() {
+            out.push_str(&format!("{l}: {v}\n"));
+        }
+    }
+    if let Some(d) = n["description"].as_str() {
+        out.push_str(&format!("\n{d}\n"));
+    }
+    let ev = &t["evidence"];
+    let said: Vec<String> = n["history"].as_array().into_iter().flatten().filter_map(|h| {
+        let e = &ev[h["evidence"].as_str()?];
+        let quote = h["quote"].as_str().filter(|q| !q.is_empty())?;
+        // A call's moment: the turn's time (hh:mm:ss) on its link.
+        let secs = h["ts"].as_str().map(|t| t.split(':').fold(0u64, |a, x| a * 60 + x.parse::<u64>().unwrap_or(0)));
+        let link = match (e["link"].as_str(), secs) {
+            (Some(l), Some(t)) => Some(format!("{l}?t={t}")),
+            (Some(l), None) => Some(l.to_string()),
+            _ => e["url"].as_str().map(str::to_owned),
+        };
+        Some(format!("- {}{} — “{quote}” ({}, {}){}", h["op"].as_str().unwrap_or(""), h["effect"].as_str().map(|x| format!(" {x}")).unwrap_or_default(), e["title"].as_str().unwrap_or(""), e["date"].as_str().unwrap_or(""), link.map(|l| format!(" {l}")).unwrap_or_default()))
+    }).take(20).collect();
+    if !said.is_empty() {
+        out.push_str(&format!("\n## Where it was said\n{}\n", said.join("\n")));
     }
     Ok(out)
 }
@@ -225,6 +265,10 @@ pub fn target(link: &str) -> Result<Value> {
             serde_json::json!({"hash": format!("project/{t}/people"), "person": key})
         }
         Link::Mail(src) => serde_json::json!({"url": mail_url(&src).ok_or_else(|| anyhow!("Echo has no link to that mail"))?}),
+        Link::Task { thread, id } => {
+            crate::projects::load(&thread).map_err(|_| anyhow!("no thread {thread:?}"))?;
+            serde_json::json!({"hash": format!("project/{thread}/work"), "node": id})
+        }
     })
 }
 
@@ -263,6 +307,9 @@ mod tests {
         assert_eq!(Link::parse("echo://person/jane%40acme.example"), Some(Link::Person("jane@acme.example".into())));
         assert_eq!(Link::parse("echo://mail/mail/22c3f6bf0128d167"), Some(Link::Mail("mail/22c3f6bf0128d167".into())));
         assert_eq!(Link::parse("echo://mail/channel/abc/123"), Some(Link::Mail("channel/abc/123".into())));
+        assert_eq!(Link::parse("echo://task/acme-pilot/T043"), Some(Link::Task { thread: "acme-pilot".into(), id: "T043".into() }));
+        assert_eq!(Link::parse("echo://task/acme-pilot"), None);
+        assert_eq!(Link::parse("echo://task/acme-pilot/T0/../x"), None);
         for bad in ["echo://call/../../etc", "echo://call/a/b", "echo://thread/", "echo://mail/../x", "echo://nope/x", "https://call/x", "echo://person/%2e%2e"] {
             assert_eq!(Link::parse(bad), None, "{bad}");
         }

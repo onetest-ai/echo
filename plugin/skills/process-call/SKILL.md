@@ -38,7 +38,7 @@ minutes already can be done again.
 `echoctl context <dir>` prints JSON — use its numbers, don't recompute them:
 `duration_min`, `transcript_chars`, `chars_by_speaker`, `dominant_language`, `colleagues` /
 `external`, `user_notes` + `user_headings`, `heading_budget`, `summarize` + `skip_reason`,
-`previous_notes`, `vocabulary`, `template`, `frames`, `chat`, `me_profile`, `projects`, `live_notes`.
+`previous_notes`, `vocabulary`, `template`, `frames`, `chat`, `me_profile`, `projects`, `live_notes`, `links`.
 
 `me_profile` (if set) is the user's own description — role, team, the people and terms they
 deal with, how they like notes and follow-ups written. Follow it for tone, emphasis and naming.
@@ -114,6 +114,11 @@ Name the speakers first (4a, if the transcript has "Speaker N" labels), then wri
   things the way the project does and to see continuity across calls with other titles (a decision
   from an earlier call revisited here). They are context, not content: write only what this call
   said.
+- **Links into Echo.** `links` gives `echo://` links for this call's `threads` and `clients`, the
+  `previous` meeting of the series and the `people` Echo knows. Use them as plain Markdown links
+  where the name appears anyway: people in the attendees line (`[Jane Doe](echo://person/…)`), the
+  thread or client once in the header, the previous meeting in "Since last time". Only links from
+  `links`, copied exactly — never make one up. Times stay `[mm:ss]`.
 - Ground every line in the transcript. Leave a section out rather than pad it.
 - **Diagrams:** when a process, flow or architecture was walked through (or the user asks for
   one), draw it as a ```` ```mermaid ```` block (`flowchart TD`; one short line per node, `<br>` for
