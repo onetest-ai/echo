@@ -161,7 +161,9 @@ octopus as one layer) that `actool` (Xcode 26) compiles into `Assets.car` (`CFBu
 rounded-square `.iconset`. Dev builds (no bundle) set the round logo as the Dock icon at
 runtime. macOS: a Dock icon for as long as the app runs (`ActivationPolicy::Regular` at start; Echo.app stays
 `LSUIElement`, so the CLI from the same binary never shows one) — a menu-bar icon can be hidden (no room beside the
-notch) and Echo then looked gone; a click on it with no window showing opens the window (`Event::Reopen`). Notifications (macOS) go
+notch) and Echo then looked gone; a click on it with no window showing opens the window (`Event::Reopen`). Settings →
+General → Hide from the Dock when the window is closed (`config.hide_dock_icon`, off by default; macOS only): then the
+icon shows only while the window is open (`tray::apply_dock`, AppKit's activation policy on open and close). Notifications (macOS) go
 through UserNotifications as Echo.app (its icon; a click opens the window — "Update available" asks to
 install instead, `app::Click`; asks permission at
 first start); dev builds fall back to osascript, which macOS shows as Script Editor. Menu: status, Record, Stop,
@@ -319,7 +321,7 @@ answered by the quit it rides on: yes on exit, no when that quit is cancelled. T
 also if it fails (a drop guard). `app quit` takes that path with or
 without a tray icon (`quit.asking` — this Echo's pid — while the user is asked about it; `quit.cancelled` says why →
 exit 1). `app::ask_checked` tells a dialog that couldn't be shown from one not answered (Echo stays, and says so).
-Closing the window keeps the app in the menu bar and the Dock. Minutes need
+Closing the window keeps the app in the menu bar and the Dock (unless Hide from the Dock is on). Minutes need
 Claude: a call without them shows when they come, or the `/echo:process-call` command. Dev: `echoctl window
 --selftest` (opens the real webview, page fetches via echo:// and reports over IPC; a sandboxed test frame proves
 its IPC posts are dropped; the close handshake answers with its number),

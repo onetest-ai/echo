@@ -129,7 +129,7 @@ If the minutes fail, the Minutes tab says why and **Show log** shows what Claude
 
 | What you see | What to do |
 | --- | --- |
-| No octopus in the menu bar | Click Echo in the Dock, or open it from Applications. A full menu bar hides icons. |
+| No octopus in the menu bar | Click Echo in the Dock, or open it from Applications. A full menu bar hides icons. (Settings → General → *Hide from the Dock when the window is closed* takes it out of the Dock; it's off unless you turned it on.) |
 | A recording is silent | Settings → Health: *System Audio Recording* and *Microphone* need a ✓. Run `/echo:doctor` in Claude Code. |
 | "Claude Code is not installed" | Step 3, then **Check again** in Settings → Health. |
 | `claude: command not found` in a terminal | Settings → Health → **Add to PATH** (or `echoctl claude path`), then a new terminal. |

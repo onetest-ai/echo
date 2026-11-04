@@ -2684,6 +2684,7 @@ const SETTINGS_BODY = {
     return `<h2>General</h2>` + setCard('', [
       setRow('Data folder', `<code>${esc(st.home)}</code> — calls, transcripts and minutes live here.`, actBtn('change_home', 'Change…')),
       setRow('Start at login', 'Echo runs in the menu bar from when you log in.', sw('autostart', st.autostart, 'Start at login')),
+      /Mac/.test(navigator.platform || navigator.userAgent) ? setRow('Hide from the Dock when the window is closed', st.hide_dock_icon ? 'Echo shows in the Dock only while its window is open; otherwise only in the menu bar.' : 'Echo stays in the Dock while it runs: click it to open the window, even when a full menu bar hides its icon.', sw('hide_dock_icon', st.hide_dock_icon, 'Hide from the Dock when the window is closed')) : '',
       setRow('Command line', st.cli ? '<code>echoctl</code> is on your PATH.' : 'Install <code>echoctl</code> so scripts and Claude Code can drive Echo.', st.cli ? '<span class="set-ok">Installed ✓</span>' : actBtn('install_cli', 'Install…')),
       setRow('Claude Code plugin', "Echo's skills in your own Claude Code: record, minutes, doctor.", claudePluginCtl(st.claude_code)),
       setRow(`Echo ${esc(st.version)}`, st.update ? `Version ${esc(st.update)} is available.` : 'Echo checks for updates every 6 hours.', upd),

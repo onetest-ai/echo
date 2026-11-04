@@ -1153,6 +1153,7 @@ fn settings_snapshot() -> Value {
         "auto_minutes": c.is_some_and(|c| c.auto_minutes),
         "project_sync": c.is_some_and(|c| c.project_sync),
         "folder_skip_permissions": c.is_some_and(|c| c.folder_skip_permissions),
+        "hide_dock_icon": c.is_some_and(|c| c.hide_dock_icon),
         "capture_frames": c.is_some_and(|c| c.capture_frames),
         "follow_app_mute": on(c.map(|c| c.follow_app_mute)),
         "capture_ui": on(c.map(|c| c.capture_ui)),
@@ -1284,6 +1285,7 @@ fn settings_set(key: &str, value: &Value) -> anyhow::Result<()> {
         "auto_minutes" => cfg.set_auto_minutes(b()?),
         "project_sync" => cfg.project_sync = b()?,
         "folder_skip_permissions" => cfg.folder_skip_permissions = b()?,
+        "hide_dock_icon" => cfg.hide_dock_icon = b()?,
         "capture_frames" => {
             cfg.capture_frames = b()?;
             #[cfg(target_os = "macos")]
