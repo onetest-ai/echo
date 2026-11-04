@@ -799,9 +799,15 @@ pub fn claude_bin() -> Option<PathBuf> {
     p.is_file().then_some(p)
 }
 
+/// Claude Code's record of its plugins: in `CLAUDE_CONFIG_DIR` when set (a terminal that exports it installs
+/// there), else `~/.claude`.
+fn installed_plugins_file() -> PathBuf {
+    std::env::var_os("CLAUDE_CONFIG_DIR").filter(|d| !d.is_empty()).map(PathBuf::from).unwrap_or_else(|| user_home().join(".claude")).join("plugins/installed_plugins.json")
+}
+
 /// The Echo plugin's installs, from Claude Code's own records: [(scope, project)].
 fn plugin_installs() -> Vec<(String, Option<String>)> {
-    let path = user_home().join(".claude/plugins/installed_plugins.json");
+    let path = installed_plugins_file();
     let v: Value = fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
     let plugins = v.get("plugins").unwrap_or(&v);
     plugins
@@ -817,7 +823,7 @@ fn plugin_installs() -> Vec<(String, Option<String>)> {
 /// Echo plugin installs older than this Echo: [{scope, project, version}]. An old plugin's terminal
 /// pane did things the app does now (it claimed every transcribed call for its own minutes).
 pub fn stale_plugins() -> Vec<Value> {
-    let path = user_home().join(".claude/plugins/installed_plugins.json");
+    let path = installed_plugins_file();
     let v: Value = fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
     let plugins = v.get("plugins").unwrap_or(&v);
     plugins
@@ -863,7 +869,7 @@ pub fn update_plugins() -> Result<String> {
 
 /// Where Claude Code installed the Echo plugin (the newest user-scope install, else any).
 pub fn plugin_root() -> Option<PathBuf> {
-    let path = user_home().join(".claude/plugins/installed_plugins.json");
+    let path = installed_plugins_file();
     let v: Value = fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
     let plugins = v.get("plugins").unwrap_or(&v);
     let mut installs: Vec<Value> = plugins
@@ -983,17 +989,9 @@ pub fn install_cli() -> Result<()> {
     }
     #[cfg(windows)]
     {
-        let dir = target.parent().unwrap().display().to_string();
-        let script = format!(
-            "$p = [Environment]::GetEnvironmentVariable('Path','User'); \
-             if (($p -split ';') -notcontains '{d}') {{ [Environment]::SetEnvironmentVariable('Path', ($p.TrimEnd(';') + ';{d}'), 'User') }}",
-            d = dir.replace('\'', "''")
-        );
-        let ok = Command::new("powershell").no_window().args(["-NoProfile", "-Command", &script]).status()?.success();
-        if !ok {
-            bail!("could not update the user PATH");
-        }
-        println!("added {dir} to your PATH (open a new terminal)");
+        let dir = target.parent().unwrap();
+        add_to_user_path(dir)?;
+        println!("added {} to your PATH (open a new terminal)", dir.display());
         Ok(())
     }
     #[cfg(not(any(target_os = "macos", windows)))]
@@ -1001,6 +999,26 @@ pub fn install_cli() -> Result<()> {
         let _ = target;
         bail!("not supported on this platform")
     }
+}
+
+/// Windows: `dir` at the end of the user PATH (once). Its value is read and written unexpanded, as the
+/// `REG_EXPAND_SZ` it is (`%USERPROFILE%\…` stays so), an absent one is made, and Windows is told the
+/// environment changed, so terminals opened from now on have it.
+#[cfg(windows)]
+pub fn add_to_user_path(dir: &Path) -> Result<()> {
+    let d = dir.display().to_string().replace('\'', "''");
+    let script = format!(
+        "$k = Get-Item 'HKCU:\\Environment'; $p = $k.GetValue('Path', '', 'DoNotExpandEnvironmentNames'); \
+         $parts = @($p -split ';' | Where-Object {{ $_ }}); \
+         if ($parts -notcontains '{d}') {{ \
+           New-ItemProperty -Path 'HKCU:\\Environment' -Name Path -PropertyType ExpandString -Value (($parts + '{d}') -join ';') -Force | Out-Null; \
+           [Environment]::SetEnvironmentVariable('ECHO_PATH_CHANGED', '1', 'User'); [Environment]::SetEnvironmentVariable('ECHO_PATH_CHANGED', $null, 'User') }}"
+    );
+    let ok = Command::new("powershell").no_window().args(["-NoProfile", "-Command", &script]).status()?.success();
+    if !ok {
+        bail!("could not update the user PATH");
+    }
+    Ok(())
 }
 
 // ── native dialogs ─────────────────────────────────────────────────────────────────────────
