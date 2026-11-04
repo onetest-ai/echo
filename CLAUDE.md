@@ -986,6 +986,14 @@ the data folder** by default (where Echo's own Claude sessions run; `--scope use
 a `claude` / `local` profile reads only its own settings, so Echo passes the plugin shipped with the app
 (`--plugin-dir`, `notes::plugin_dir`). "Claude Code ✓" counts a user-scope install or one whose folder is the data folder
 (after `home set` Connect is offered again).
+**Is Claude Code really set up** (`claude_setup.rs`, 2026-11-04: found isn't working): `check()` = it starts (`claude
+--version`, 15 s, its own folder first on the PATH — an npm install is a node script), a terminal finds it (the login
+shell's `command -v claude` between markers; Windows: the PATH), and Claude Code lists Echo's plugin where Echo's
+sessions run; `status()` keeps it a minute and recounts in the background (`/api/settings` `claude_code`, Settings →
+Health's Claude Code rows, the Settings badge, General's plugin row — no longer the bundled copy's presence).
+`connect_claude` refuses a `claude` that doesn't start and, after Claude Code says installed, checks its own list and
+the files (else an error naming the command to run). **Add to PATH** / `echoctl claude path`: one marked line in
+`.zshrc` / `.bash_profile` (Windows: the user PATH). `echoctl claude` prints the check. User guide: `docs/install.md`.
 Mute sync: while recording, the watcher polls Teams' microphone button via Accessibility / UI
 Automation (`ax::MuteWatch`, label "Unmute…" ⇒ muted) every 400 ms; muted ⇒ `audio::mic::MUTED` makes the mic
 track record silence; events `mic_muted`/`mic_unmuted` drive the status line. `config.follow_app_mute`

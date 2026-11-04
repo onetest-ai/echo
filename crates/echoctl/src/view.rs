@@ -315,11 +315,11 @@ Microsoft 365 (Echo has its own sign-in there), unless the user names another to
 - Work, people, tasks: `project ledger <id> tree`, `project ledger <id> edit '<json>'`, `project people <id>`, \
 `project tasks`.\n\
 - Calls: `context <call>`, `actions <call>`, `notes <call>` (write its minutes), `title <call> <title>`.\n\
-- Mail: `deliver send mail --to a@x.com,b@y.com --title <subject> --file <markdown file>` sends it from the user's own \
-Microsoft 365 account through Echo (without `--to`: to the user). Show the user the recipients and the text and send \
-only once they say so. `deliver status` says whether mail can be sent; if not, `compose --to … --subject … \
---body-file <file>` opens a draft in their mail app instead. Don't use a Microsoft 365 / Outlook connector of Claude's \
-for this unless the user asks for it: it may not be set up for them.\n\
+- Mail — always through Echo first: `deliver send mail --to a@x.com,b@y.com --title <subject> --file <markdown file>` \
+sends it from the user's own Microsoft 365 account (without `--to`: to the user). Show the user the recipients and the \
+text and send only once they say so. Only when Echo can't send (`deliver status`: mail not ready, or the send failed) \
+fall back to a Microsoft 365 / Outlook connector of Claude's, if one works here; else `compose --to … --subject … \
+--body-file <file>` opens a draft in their mail app.\n\
 - The Brain (when on): the echo-brain MCP tools.\n\
 </echo_howto>"
     )

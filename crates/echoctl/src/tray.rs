@@ -835,6 +835,8 @@ enum Action {
     NotesAnywhere,
     NotesChoose,
     ConnectClaude,
+    /// Claude Code's folder on the PATH of new terminals (Settings → Health).
+    ClaudePath,
     InstallCli,
     Update,
     EditProfile,
@@ -1355,6 +1357,7 @@ impl Ui {
             "change_home" => Action::ChangeHome,
             "install_cli" => Action::InstallCli,
             "connect_claude" => Action::ConnectClaude,
+            "claude_path" => Action::ClaudePath,
             "notes_choose" => Action::NotesChoose,
             "notes_anywhere" => Action::NotesAnywhere,
             "check_updates" => Action::CheckUpdates,
@@ -1464,9 +1467,21 @@ impl Ui {
                 });
             }
             Action::ConnectClaude => {
-                std::thread::spawn(|| match app::connect_claude("project", None) {
-                    Ok(()) => app::notify("Claude Code connected", "Claude Code sessions in Echo's data folder get its status line and /echo:process-call."),
-                    Err(e) => app::notify("Could not connect Claude Code", &format!("{e:#}")),
+                std::thread::spawn(|| {
+                    match app::connect_claude("project", None) {
+                        Ok(()) => app::notify("Claude Code connected", "Claude Code lists Echo's plugin in Echo's data folder: its sessions get the status line and /echo:process-call."),
+                        Err(e) => app::notify("Could not connect Claude Code", &format!("{e:#}")),
+                    }
+                    crate::claude_setup::status(true);
+                });
+            }
+            Action::ClaudePath => {
+                std::thread::spawn(|| {
+                    match crate::claude_setup::add_to_path() {
+                        Ok(what) => app::notify("Claude Code is on your PATH", &format!("{what} Open a new terminal to use `claude`.")),
+                        Err(e) => app::notify("Couldn't add Claude Code to your PATH", &format!("{e:#}")),
+                    }
+                    crate::claude_setup::status(true);
                 });
             }
             Action::Update => {
@@ -1587,7 +1602,10 @@ impl Ui {
                     Err(e) => app::notify("Command-line tool not installed", &format!("{e:#}")),
                 });
             }
-            Action::Recheck => self.health = health(),
+            Action::Recheck => {
+                self.health = health();
+                crate::claude_setup::status(true);
+            }
             Action::AskPermissions => app::request_permissions(),
             Action::ConnectServer => {
                 #[cfg(feature = "transcribe")]

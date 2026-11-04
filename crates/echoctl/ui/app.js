@@ -2094,8 +2094,37 @@ function saveMeProfile() {
 async function loadSettings() {
   try { S.settings = await get('api/settings') } catch { /* app restarting */ }
 }
-/** Required permissions not granted: Settings' badge. */
-const settingsWarnings = () => ((S.settings && S.settings.health) || []).filter((c) => c.required && c.status !== 'granted').length
+/** Required permissions not granted, and Claude Code not ready for Echo: Settings' badge. */
+const settingsWarnings = () => ((S.settings && S.settings.health) || []).filter((c) => c.required && c.status !== 'granted').length + claudeProblems((S.settings || {}).claude_code)
+/** Claude Code missing, not starting, or without Echo's plugin where Echo's sessions run (`claude_setup::check`). */
+const claudeProblems = (cc) => !cc || cc.checking && !('plugin' in cc) ? 0 : (!cc.path || cc.error ? 1 : 0) + (cc.path && !cc.error && !cc.plugin ? 1 : 0)
+/** The Claude Code plugin's control: installed (as Claude Code lists it), or Connect. */
+function claudePluginCtl(cc) {
+  if (!cc || !('plugin' in cc)) return '<span class="set-sub">Checking…</span>'
+  if (!cc.path || cc.error) return '<span class="set-sub">Needs Claude Code — see Health</span>'
+  return cc.plugin ? '<span class="set-ok">Installed ✓</span>' : actBtn('connect_claude', 'Connect')
+}
+/** The check runs in the app's background: read the settings again shortly (one timer, however often drawn). */
+let claudeTimer = null
+function claudeRecheckSoon() { if (!claudeTimer) claudeTimer = setTimeout(() => { claudeTimer = null; loadSettings().then(render) }, 2500) }
+/** Settings → Health's Claude Code rows: it runs, a terminal finds it, Echo's plugin is in. */
+function claudeRows(cc) {
+  const ok = '<span class="set-ok">✓</span>', bad = '<span class="warn">✗</span>', warn = '<span class="warn">⚠</span>'
+  if (!('plugin' in cc)) { claudeRecheckSoon(); return [setRow('<span class="set-sub">…</span> Claude Code', 'Checking that it runs, that a terminal finds it, and that it has Echo\'s plugin…', '')] }
+  if (cc.checking) claudeRecheckSoon()
+  const get = actBtn('open_settings_url', 'Get Claude Code', 'https://claude.com/claude-code')
+  if (!cc.path) return [setRow(`${bad} Claude Code`, 'Not installed. Echo needs it to write minutes and for Claude in the window. Install it, sign in once in a terminal (<code>claude</code>), then Check again.', get)]
+  if (cc.error) return [setRow(`${bad} Claude Code`, `Found at <code>${esc(cc.path)}</code>, but it doesn't start: ${esc(cc.error)}. Reinstall it, then Check again.`, get)]
+  const rows = [setRow(`${ok} Claude Code`, `${esc(cc.version)} · <code>${esc(cc.path)}</code>`, '')]
+  const t = cc.terminal || {}
+  if (t.ok === true) rows.push(setRow(`${ok} In a terminal`, `<code>claude</code> runs there${t.found && t.found !== cc.path ? ` (<code>${esc(t.found)}</code>)` : ''}.`, ''))
+  else if (t.ok === false) rows.push(setRow(`${warn} In a terminal`, `A terminal can't find <code>claude</code>: <code>${esc(t.dir || '')}</code> isn't on your PATH. Echo still runs it; you can't type <code>claude</code> yet.${t.rc === null && !/Windows/.test(navigator.userAgent) ? ` Add that folder to your shell's PATH yourself (${esc(String(t.shell || '').split('/').pop())}).` : ''}`, t.rc === null && !/Windows/.test(navigator.userAgent) ? '' : actBtn('claude_path', 'Add to PATH')))
+  else rows.push(setRow(`<span class="set-sub">?</span> In a terminal`, `Couldn't check: ${esc(t.why || 'no answer')}.`, ''))
+  const where = (cc.installs || []).map((i) => i.scope === 'user' ? 'every session' : esc(String(i.project || '').split(/[\\/]/).pop() || i.scope)).join(', ')
+  rows.push(cc.plugin ? setRow(`${ok} Echo plugin`, `Claude Code lists it (${where}).`, '')
+    : setRow(`${bad} Echo plugin`, `Claude Code doesn't list Echo's plugin where Echo's sessions run${where ? ` (only: ${where})` : ''}: no /echo:process-call, record or doctor there.`, actBtn('connect_claude', 'Connect')))
+  return rows
+}
 const setRow = (title, sub, control, id = '') => `<div class="set-row"${id ? ` id="set-${id}"` : ''}><div><b>${title}</b>${sub ? `<div class="set-sub">${sub}</div>` : ''}</div><div class="set-ctl">${control}</div></div>`
 const setCard = (head, rows) => `<section class="set-sec">${head ? `<h3>${esc(head)}</h3>` : ''}<div class="set-card">${rows.join('')}</div></section>`
 const sw = (key, on, label) => `<button class="sw${on ? ' on' : ''}" role="switch" aria-checked="${!!on}" aria-label="${esc(label)}" data-set="${key}" data-val="${!on}"></button>`
@@ -2652,12 +2681,11 @@ const SETTINGS_BODY = {
   plugins: pluginsSettings,
   general(st) {
     const upd = st.update ? actBtn('update', `Update to ${st.update}…`, '', true) : actBtn('check_updates', 'Check for updates')
-    const plugin = (S.state && S.state.notes) || {}
     return `<h2>General</h2>` + setCard('', [
       setRow('Data folder', `<code>${esc(st.home)}</code> — calls, transcripts and minutes live here.`, actBtn('change_home', 'Change…')),
       setRow('Start at login', 'Echo runs in the menu bar from when you log in.', sw('autostart', st.autostart, 'Start at login')),
       setRow('Command line', st.cli ? '<code>echoctl</code> is on your PATH.' : 'Install <code>echoctl</code> so scripts and Claude Code can drive Echo.', st.cli ? '<span class="set-ok">Installed ✓</span>' : actBtn('install_cli', 'Install…')),
-      setRow('Claude Code plugin', "Echo's skills in your own Claude Code: record, minutes, doctor.", plugin.plugin ? '<span class="set-ok">Installed ✓</span>' : actBtn('connect_claude', 'Connect')),
+      setRow('Claude Code plugin', "Echo's skills in your own Claude Code: record, minutes, doctor.", claudePluginCtl(st.claude_code)),
       setRow(`Echo ${esc(st.version)}`, st.update ? `Version ${esc(st.update)} is available.` : 'Echo checks for updates every 6 hours.', upd),
     ])
   },
@@ -2769,7 +2797,7 @@ const SETTINGS_BODY = {
       return setRow(`${mark} ${esc(c.name)}`, ok ? esc(c.why) : `${esc(c.why)}<div class="set-sub">${esc(c.how)}</div>`, ok || !c.url ? '' : actBtn('open_settings_url', 'Open settings', c.url))
     })
     const stale = st.stale_plugins || []
-    const plugin = stale.length ? setCard('Claude Code', [setRow('<span class="warn">✗</span> An older Echo plugin', `${stale.map((s) => `${esc(s.version)} (${esc(s.scope)}${s.project ? ', ' + esc(String(s.project).split(/[\\/]/).pop()) : ''})`).join(', ')} — an older one can hold calls back from Write minutes. Restart Claude Code after updating.`, '<button class="btn" data-cmd-ipc="update_plugins">Update it</button>')]) : ''
+    const plugin = setCard('Claude Code', claudeRows(st.claude_code || { checking: true }).concat(stale.length ? [setRow('<span class="warn">✗</span> An older Echo plugin', `${stale.map((s) => `${esc(s.version)} (${esc(s.scope)}${s.project ? ', ' + esc(String(s.project).split(/[\\/]/).pop()) : ''})`).join(', ')} — an older one can hold calls back from Write minutes. Restart Claude Code after updating.`, '<button class="btn" data-cmd-ipc="update_plugins">Update it</button>')] : []))
     return `<h2>Health</h2><p class="set-lead">What Echo needs from this computer.</p>` + plugin + setCard('Permissions', rows) +
       setCard('', [setRow('Ask again', 'macOS asks for each permission Echo is missing.', actBtn('ask_permissions', 'Ask for permissions') + actBtn('recheck', 'Check again'))])
   },

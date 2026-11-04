@@ -43,6 +43,7 @@ mod recorder;
 mod nemo;
 #[cfg(feature = "transcribe")]
 mod remote;
+mod claude_setup;
 #[cfg(feature = "js")]
 mod claudejob;
 #[cfg(feature = "js")]
@@ -130,7 +131,7 @@ enum Cmd {
         #[arg(long = "session")]
         session_id: Option<String>,
     },
-    /// Claude Code integration: status, or install the Echo plugin
+    /// Claude Code integration: is it set up (it runs, a terminal finds it, Echo's plugin is in), install the plugin, or put it on the PATH
     Claude {
         #[command(subcommand)]
         cmd: Option<ClaudeCmd>,
@@ -702,6 +703,8 @@ enum ClaudeCmd {
         #[arg(long)]
         project: Option<std::path::PathBuf>,
     },
+    /// Put Claude Code's folder on the PATH of new terminals (zsh / bash startup file; Windows: the user PATH)
+    Path,
 }
 
 #[derive(Subcommand)]
@@ -1637,10 +1640,17 @@ fn main() -> Result<()> {
         Cmd::Claim { call, session, session_id } => calls::claim(&call, session.as_deref(), session_id.as_deref()),
         Cmd::Claude { cmd } => match cmd {
             None => {
-                println!("{}", serde_json::to_string_pretty(&app::claude_status())?);
+                // What Claude Code lists, and whether it really works: it runs, a terminal finds it.
+                let mut v = app::claude_status();
+                v["check"] = claude_setup::check();
+                println!("{}", serde_json::to_string_pretty(&v)?);
                 Ok(())
             }
             Some(ClaudeCmd::Connect { scope, project }) => app::connect_claude(&scope, project.as_deref()),
+            Some(ClaudeCmd::Path) => {
+                println!("{} Open a new terminal to use `claude`.", claude_setup::add_to_path()?);
+                Ok(())
+            }
         },
         Cmd::Events { follow } => {
             anyhow::ensure!(follow, "only `events --follow` is supported");

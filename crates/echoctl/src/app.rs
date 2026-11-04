@@ -900,6 +900,8 @@ pub fn connect_claude(scope: &str, project: Option<&Path>) -> Result<()> {
     let Some(claude) = claude_bin() else {
         bail!("Claude Code is not installed (no `claude` command found) — see https://claude.com/claude-code");
     };
+    // Found isn't working: a `claude` that doesn't start can't install anything either.
+    crate::claude_setup::version_of(&claude).map_err(|e| anyhow::anyhow!("Claude Code at {} doesn't run: {e:#}", claude.display()))?;
     let cwd = match project {
         Some(p) => p.to_path_buf(),
         None if scope == "user" => std::env::current_dir().unwrap_or_else(|_| user_home()),
@@ -922,6 +924,15 @@ pub fn connect_claude(scope: &str, project: Option<&Path>) -> Result<()> {
         run(&["plugin", "marketplace", "add", &marketplace_source(), "--scope", scope])?;
     }
     run(&["plugin", "install", &format!("echo@{MARKETPLACE}"), "--scope", scope])?;
+    // Claude Code said yes: is it in its own list, where Echo's sessions see it, with its files there?
+    let here = |s: &str, p: &Option<String>| s == scope && (scope == "user" || p.as_deref().is_some_and(|p| same_folder(Path::new(p), &cwd)));
+    if !plugin_installs().iter().any(|(s, p)| here(s, p)) {
+        bail!("Claude Code finished, but the Echo plugin isn't in its list of plugins ({scope} scope{}) — try `claude plugin install echo@{MARKETPLACE} --scope {scope}` in a terminal there",
+            if scope == "user" { String::new() } else { format!(", {}", cwd.display()) });
+    }
+    if plugin_root().is_none() {
+        bail!("Claude Code lists the Echo plugin, but its files aren't there — install it again");
+    }
     println!("Echo plugin installed ({scope} scope{}) — open a new Claude Code session or run /reload-plugins",
         if scope == "user" { String::new() } else { format!(", {}", cwd.display()) });
     Ok(())
