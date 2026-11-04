@@ -2264,6 +2264,15 @@ function documentsSettings(b, s, field) {
   return setCard('Documents (thread folders)', rows)
 }
 
+/** The plugins' rows of Settings → Knowledge (the Knowledge plugin's switch and reading state), each its own card. */
+function knowledgeSettings() {
+  return (Plugins.slots['knowledge.settings'] || []).map((x) => {
+    let html = ''
+    try { html = x.render() } catch (e) { html = `<p class="error">${esc(String((e && e.message) || e))}</p>` }
+    return html ? setCard(x.label || 'Notes', [html]) : ''
+  }).join('')
+}
+
 function brainSettings(st) {
   const b = st.brain
   if (!b) return '<p class="set-sub">This build of Echo has no Recall.</p>'
@@ -2571,7 +2580,8 @@ const Plugins = {
   targets: {},
 }
 // `knowledge.tab`: a tab of the Knowledge activity ({id, label, render() → HTML, after(box)}), `#brain/<plugin>:<id>/<its route>`.
-const SLOTS = ['call.menu', 'calendar.event', 'task.actions', 'knowledge.tab']
+// `knowledge.settings`: rows in Settings → Knowledge ({render() → setRow(…) HTML}), above Recall's card.
+const SLOTS = ['call.menu', 'calendar.event', 'task.actions', 'knowledge.tab', 'knowledge.settings']
 function pluginCtx(id) {
   const add = (list, item) => { list.push({ ...item, plugin: id }); render() }
   const owned = Plugins.owned[id] = Plugins.owned[id] || { listeners: [], styles: [] }
@@ -2715,7 +2725,7 @@ document.addEventListener('click', (e) => {
 })
 
 const SETTINGS_BODY = {
-  brain: brainSettings,
+  brain: (st) => knowledgeSettings() + brainSettings(st),
   plugins: pluginsSettings,
   general(st) {
     const upd = st.update ? actBtn('update', `Update to ${st.update}…`, '', true) : actBtn('check_updates', 'Check for updates')
