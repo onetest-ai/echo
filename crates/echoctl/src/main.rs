@@ -24,6 +24,7 @@ mod grants;
 mod guard;
 mod ledger;
 mod livenotes;
+mod links;
 #[cfg(feature = "transcribe")]
 mod live;
 mod meeting;
@@ -266,6 +267,9 @@ enum Cmd {
         #[command(subcommand)]
         cmd: VocabCmd,
     },
+    /// What Echo holds behind an echo:// link, as text (for Claude): a call's minutes and the turns around its moment,
+    /// a thread, a client, a person, a mail's facts. Read-only
+    Read { link: String },
     /// Input bundle for writing a call's notes (JSON): sizes, languages, attendees, gate
     Context {
         #[arg(default_value = "latest")]
@@ -559,8 +563,11 @@ enum AppCmd {
     /// Show the Echo window (calls, notes, transcripts), optionally at one call
     Open {
         /// Call folder name
-        #[arg(long)]
+        #[arg(long, conflicts_with = "link")]
         call: Option<String>,
+        /// An echo:// link (a call at a moment, a thread, a client, a person, a mail) — what the system calls
+        #[arg(long)]
+        link: Option<String>,
     },
     /// Stop the app (a recording in progress is saved first)
     Quit,
@@ -1644,6 +1651,10 @@ fn main() -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&v)?);
             Ok(())
         }
+        Cmd::Read { link } => {
+            print!("{}", links::read(&link)?);
+            Ok(())
+        }
         Cmd::Context { call } => calls::context(&call),
         Cmd::Title { call, title } => calls::set_title(&call, &title),
         Cmd::Note { text } => calls::note(&text.join(" ")),
@@ -1729,7 +1740,13 @@ fn main() -> Result<()> {
             }
             Some(AppCmd::Run { app: target, no_tray, background }) => app::run(target, !no_tray, background),
             Some(AppCmd::Start) => app::start(),
-            Some(AppCmd::Open { call }) => app::open_window(call),
+            Some(AppCmd::Open { call, link }) => match link {
+                Some(l) => {
+                    anyhow::ensure!(links::Link::parse(&l).is_some(), "not an echo:// link Echo knows: {l}");
+                    app::open_window(Some(l))
+                }
+                None => app::open_window(call),
+            },
             Some(AppCmd::Quit) => app::quit(),
             Some(AppCmd::InstallCli) => app::install_cli(),
             Some(AppCmd::Update { check }) => update::cli(check),

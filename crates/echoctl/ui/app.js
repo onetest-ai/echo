@@ -575,6 +575,8 @@ async function loadCall(name) {
 // ── routing: #calls, #call/<name>/<tab>, #today ────────────────────────────────────────────
 function route() {
   const h = decodeURIComponent(location.hash.slice(1))
+  // An echo:// link the window was opened at (the system, `echoctl app open --link`): routed where it points.
+  if (h.startsWith('link=')) { history.replaceState(null, '', '#'); S.view = 'calls'; setTimeout(() => window.echo.openLink(h.slice(5))); return }
   // A plugin's activity (`ctx.activities.add`): `#<plugin>:<id>` and anything after a slash is its own.
   const pa = ACTIVITIES.find((a) => a.plugin && (h === a.id || h.startsWith(a.id + '/')))
   if (pa) { S.view = pa.id; S.plRoute = h.slice(pa.id.length + 1); S.plRoutes = { ...(S.plRoutes || {}), [pa.id]: S.plRoute }; return }
@@ -4570,6 +4572,12 @@ function brainTerms(tx) {
   return `<div class="br-graph-bar">${box}${sub}</div>${accs}${closed}${foot}`
 }
 document.addEventListener('click', (e) => {
+  const a = e.target.closest && e.target.closest('a[href^="echo://"]')
+  if (!a) return
+  e.preventDefault()
+  window.echo.openLink(a.getAttribute('href'))
+}, true)
+document.addEventListener('click', (e) => {
   const t = e.target.closest && e.target.closest('[data-dict-toggle],[data-dict-more],[data-dict-letter]')
   if (!t) return
   const s = termsState(), d = t.dataset
@@ -6557,6 +6565,7 @@ window.addEventListener('message', (e) => {
     showSelPop()
   }
   else if (d.echo === 'open' && typeof d.url === 'string' && /^https:\/\//i.test(d.url)) send({ cmd: 'open_url', url: d.url })
+  else if (d.echo === 'link' && typeof d.link === 'string' && /^echo:\/\//i.test(d.link)) window.echo.openLink(d.link)
   // Words selected in the minutes: what "this" means to Claude (`viewState`).
   else if (d.echo === 'sel' && typeof d.text === 'string') { frameSel = d.text.slice(0, 400); reportView() }
 })
@@ -6730,6 +6739,16 @@ window.echo = {
     else render()
   },
   openCall(name) { go(`call/${name}/minutes`) },
+  /** An echo:// link (a call at a moment, a thread, a client, a person, a mail): where Echo keeps it, or its mail in Outlook. */
+  async openLink(link) {
+    let t
+    try { t = await get(`api/link?u=${encodeURIComponent(link)}`) } catch { return }
+    if (t.error) return window.echo.notice(`Echo can't open that link: ${t.error}`)
+    if (t.url) return send({ cmd: 'open_url', url: t.url })
+    S.jump = t.jump != null ? t.jump : null
+    go(t.hash)
+    if (t.person) setTimeout(() => showPerson(t.person), 300)
+  },
   /** A project the page just created: open it on its Profile. */
   async projectCreated(id) {
     // From a calendar event: that event is in it, and its meeting series is its first rule.

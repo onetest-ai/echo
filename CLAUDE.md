@@ -189,6 +189,17 @@ Prompts follow `config.scheduled` (calendar meetings) and `config.unscheduled` (
 `scripts/build-plugin.sh` must replace `plugin/bin/echoctl` by rename, never overwrite in place:
 macOS SIGKILLs (exit 137) a binary rewritten in place.
 
+## `echo://` links (`links.rs`)
+How anything outside the window (a note in Echo's vault, a mail) points at what Echo keeps: `echo://call/<folder>[?t=<s>]`,
+`echo://thread/<id>`, `echo://client/<id>`, `echo://person/<People key>`, `echo://mail/<source id>` (`Link::parse`: no `..`,
+no extra slashes). Registered with the system (macOS `CFBundleURLTypes` in Info.plist → tao's `Event::Opened`; Windows
+`HKCU\Software\Classes\echo` → `echoctl app open --link "%1"`, rewritten at each start beside `app-path`). The window routes
+them (`window.echo.openLink` → `/api/link` = `links::target`: a call at a moment → its Transcript with the jump, else
+Minutes; a thread → Brief; a client → Overview; a person → their thread's People with their panel; a mail → its
+Outlook / Teams link); the page and the minutes frame (`{echo: 'link'}`) take clicks on them; `markdown_html` keeps them
+(`data-echo-link`). `echoctl read <link>` gives Claude the text behind one, read-only (a call's minutes and its turns
+±90 s around the moment, a thread's people and calls, a client's threads, a person's card, a mail's facts).
+
 ## The Echo window (`window.rs`, `ui/`)
 Menu → Open Echo… (or `echoctl app open [--call <name>]`, or a recent call) opens one window:
 Calls (list + Minutes / Transcript / Chat / Screens / Actions — one Transcript tab: live while the call records, with a
