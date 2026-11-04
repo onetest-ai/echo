@@ -61,7 +61,11 @@ minutes").
   the skills run the **sh** launcher there too (it handles MINGW paths via `cygpath`). Skills:
   `manage` (the CLI for clients, organisations, threads and their rules, the work ledger, people, calls, mail through
   `deliver`, the Brain — any session; `<echo_howto>` in Echo's window points to it; descriptions follow Anthropic's
-  skill best practices: third person, what it does, then "Use when…"), `process-call` (notes → actions → vocabulary →
+  skill best practices and Claude Code's skills docs: each description starts "Use when…" — the user's call — then what
+it does, the triggers of different skills don't overlap, SKILL.md stays short with commands in `reference.md` /
+`calls-and-settings.md` one level deep; `process-call` stays one file: a minutes run's guard reads only the call's
+folder), `brain` (search scoped by client / thread, numbers, topics and terms, senders, insights), `microsoft-365`
+(`echoctl m365`), `process-call` (notes → actions → vocabulary →
   follow-ups), `record` (arm / stop from chat), `doctor` (`echoctl up` + fix what's missing: data folder,
   permissions, model, languages; first run itself is the app's). The user's own notes during a
   call (`my-notes.md`) come from the window's Notes tab (during and after a call) or the tray's "Add a note…" while

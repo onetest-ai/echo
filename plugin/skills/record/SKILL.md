@@ -1,6 +1,6 @@
 ---
 name: record
-description: "Starts or stops recording a Teams call with Echo, with the call's language and title when given. Use when the user says \"record\", \"record this call\", \"record in Ukrainian\", \"stop recording\", \"stop\" or \"don't record this\" (stop also cancels a pending arm)."
+description: "Use when the user says \"record this call\", \"record in Ukrainian\", \"stop recording\" or \"don't record this\". Starts or stops Echo's recording of a Teams call, optionally pinning its language and title."
 argument-hint: "[stop] | [language: en|uk|ru|es…] [title]"
 ---
 

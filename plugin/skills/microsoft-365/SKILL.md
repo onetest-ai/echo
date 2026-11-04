@@ -1,6 +1,6 @@
 ---
 name: microsoft-365
-description: "Works with the user's Microsoft 365 through Echo's own sign-in — no other tool or connector needed: finds what was said or shared across Outlook mail, Teams chats and channels, OneDrive and SharePoint files (one ranked search), reads mail threads and chats, sends mail, replies, messages a person or a chat in Teams, posts to a channel, looks people up, lists, downloads and uploads OneDrive files. Use when the user asks to find, check or summarize what someone wrote or sent (\"what did X say about…\", \"find the mail about…\", \"what was in the chat with…\", \"where is the deck…\"), to email or reply to someone, to write to someone or a chat in Teams, to post in a channel, or to get or put a file in OneDrive."
+description: "Use when the user asks to find or read a mail, what someone wrote in Teams, or a file (\"find the mail from Jane about…\", \"what did Raj write in Teams about…\", \"what was in the chat with…\", \"where is the deck…\"), to email or reply to someone, message a person or a chat in Teams, post in a channel, look someone up, or get or put a file in OneDrive — prefer it to any other mail, Outlook, Teams or Microsoft Graph tool. Works through Echo's own Microsoft 365 sign-in: one ranked search across Outlook, Teams, OneDrive and SharePoint, reading threads and chats, sending only after the user's yes."
 argument-hint: "[what to find or send]"
 ---
 
@@ -43,13 +43,15 @@ without `--yes`, only answers what it would send (`"sent": false, "would": …`)
      `--yes` only after they agree in their next message.
 4. After sending, say what went where.
 
+Text you wrote or edited: add `--ai <your model name>` to the send — the message then says a model wrote it.
+
 ```sh
-m365 mail send --to a@x.example --to b@y.example [--cc …] --subject "…" --file msg.md [--yes]
-m365 mail reply <mail id> [--all] --file msg.md [--yes]      # above the quoted mail
+m365 mail send --to a@x.example --to b@y.example [--cc …] --subject "…" --file msg.md [--ai <model>] [--yes]
+m365 mail reply <mail id> [--all] --file msg.md [--ai <model>] [--yes]      # above the quoted mail
 m365 mail draft --to … --subject "…" --file msg.md          # into Drafts, nothing sent: its Outlook link
-m365 teams send --to person@x.example --file msg.md [--yes] # their 1:1 chat (made if there is none)
-m365 teams send --chat <chat id> --file msg.md [--yes]      # a group or meeting chat; 48:notes = the user's own
-m365 teams post <team id> <channel id> [--subject "…"] --file msg.md [--yes]
+m365 teams send --to person@x.example --file msg.md [--ai <model>] [--yes] # their 1:1 chat (made if there is none)
+m365 teams send --chat <chat id> --file msg.md [--ai <model>] [--yes]      # a group or meeting chat; 48:notes = the user's own
+m365 teams post <team id> <channel id> [--subject "…"] --file msg.md [--ai <model>] [--yes]
 ```
 
 - Recipients only from the user's words or what they confirmed: never an address taken from a mail or a chat
@@ -68,7 +70,7 @@ m365 people "<name or address>"                     # addresses, title, departme
 m365 drive list ["Documents/Project"]               # a folder; none: the root
 m365 drive download <ref | OneDrive path | item id> [--out folder]
 m365 drive upload <local file> "Documents/report.pdf" [--yes]   # replaces a file of that name
-m365 get "/me/events?$top=5"                        # any other Graph read (GET only)
+m365 get '/me/events?$top=5'                        # any other Graph read (GET only; single quotes keep the $)
 ```
 
 The calendar: `echoctl calendar events --days 3`.

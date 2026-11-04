@@ -1,17 +1,15 @@
 ---
 name: doctor
-description: "Checks Echo end to end and fixes what's missing: the app not installed or not running, no data folder or speech model, missing permissions (microphone, system audio), languages, the calendar, where and when minutes are written. Use when a recording comes out silent or empty, Echo isn't running, the user asks why capture or minutes don't work, or a command says \"run the doctor skill\"."
+description: "Use when an Echo recording comes out silent or empty, Echo isn't running, capture or minutes don't work, or a command says \"run the doctor skill\". Checks Echo end to end and fixes what's missing: the app, data folder, speech model, permissions, languages, Claude Code and where minutes are written."
 ---
 
 # Echo doctor
 
-The app sets itself up on first launch (data folder, speech model, start at login,
-permissions); this skill finds what's still missing and fixes it. CLI:
-`${CLAUDE_PLUGIN_ROOT}/scripts/echoctl` (below: `echoctl`). Never record here, never toggle a
+CLI: `${CLAUDE_PLUGIN_ROOT}/scripts/echoctl` (below: `echoctl`). Never record here, never toggle a
 permission for the user (open the page and explain), and never download a model without a yes.
 
-1. `echoctl up` (exit code 127 = the app isn't installed: macOS, open `Echo-<version>.dmg` and
-   drag Echo to Applications; Windows, unzip to `%LOCALAPPDATA%\Programs\echo`; wait, retry).
+1. `echoctl up` (exit code 127 = Echo isn't installed: macOS, open `Echo-<version>.dmg` and drag
+   Echo to Applications; Windows, run `echo-<version>.msi`; then retry).
    It starts the app if needed and reports `failing` and `next`. "nothing" in `next` → tell the
    user Echo is fine in one line and stop (asked about a call's minutes: step 6 first). If the app
    won't start, show the last lines of `<home>/.echo/app.log`.
@@ -31,8 +29,11 @@ permission for the user (open the page and explain), and never download a model 
 5. **Languages**, if the transcript came out in the wrong language: `echoctl config --languages
    en,uk` (detection is limited to this list).
 6. **Minutes** missing or failed for a call: `<call>/notes-run.json` (`state`, `message`) and the
-   end of `<call>/claude.log` say why; `echoctl notes <call> --auto --for .` prints when (or why
-   not) Echo writes them by itself. `echoctl notes <call>` writes them now.
+   end of `<call>/claude.log` say why; `echoctl attention` lists minutes that failed or wait, and
+   what they wait for. `echoctl notes <call>` writes them now.
+   Minutes need Claude Code: `echoctl claude` → its `check`. No `path` or an `error`: Claude Code
+   isn't installed or doesn't start (https://claude.com/claude-code). `terminal.ok` false:
+   `echoctl claude path`. `plugin_installed` false: `echoctl claude connect`.
 7. Only if the user asks:
    - calendar: `echoctl calendar login` (read-only Microsoft 365; another org needs its own app
      registration → `echoctl config --graph-client-id <id>`);
