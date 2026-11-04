@@ -159,7 +159,9 @@ recording = orange. The app icon comes from the onetest logo (`packaging/macos/o
 octopus as one layer) that `actool` (Xcode 26) compiles into `Assets.car` (`CFBundleIconName`)
 + `echo.icns` — macOS 26 puts any other icon on a grey tile. No such actool → our own
 rounded-square `.iconset`. Dev builds (no bundle) set the round logo as the Dock icon at
-runtime; the Dock icon shows only while the Echo window is open. Notifications (macOS) go
+runtime. macOS: a Dock icon for as long as the app runs (`ActivationPolicy::Regular` at start; Echo.app stays
+`LSUIElement`, so the CLI from the same binary never shows one) — a menu-bar icon can be hidden (no room beside the
+notch) and Echo then looked gone; a click on it with no window showing opens the window (`Event::Reopen`). Notifications (macOS) go
 through UserNotifications as Echo.app (its icon; a click opens the window — "Update available" asks to
 install instead, `app::Click`; asks permission at
 first start); dev builds fall back to osascript, which macOS shows as Script Editor. Menu: status, Record, Stop,
@@ -311,7 +313,7 @@ answered by the quit it rides on: yes on exit, no when that quit is cancelled. T
 also if it fails (a drop guard). `app quit` takes that path with or
 without a tray icon (`quit.asking` — this Echo's pid — while the user is asked about it; `quit.cancelled` says why →
 exit 1). `app::ask_checked` tells a dialog that couldn't be shown from one not answered (Echo stays, and says so).
-Closing the window keeps the app in the menu bar; macOS shows a Dock icon only while it is open. Minutes need
+Closing the window keeps the app in the menu bar and the Dock. Minutes need
 Claude: a call without them shows when they come, or the `/echo:process-call` command. Dev: `echoctl window
 --selftest` (opens the real webview, page fetches via echo:// and reports over IPC; a sandboxed test frame proves
 its IPC posts are dropped; the close handshake answers with its number),
