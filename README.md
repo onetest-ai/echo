@@ -97,7 +97,8 @@ Click a meeting for details, a recap of last time, and the Record button.
 
 ![Calendar week](docs/images/calendar.jpg)
 
-> Echo signs in with CodeMie's public app registration by default. Your organisation's IT may need
+> Echo signs in with the public app registration of [CodeMie Code](https://github.com/codemie-ai/codemie-code) (its
+> [Microsoft 365 skill](https://github.com/codemie-ai/codemie-code/tree/main/src/agents/plugins/claude/plugin/skills/msgraph) uses the same one) by default. Your organisation's IT may need
 > to approve it, or register its own app for you: put its ID under menu → Calendar → Change app
 > (client) ID.
 

@@ -96,7 +96,8 @@ For every Claude Code session on this computer, not only Echo's, use `echoctl cl
 **Settings → Calendar & chat → Account → Sign in…** Your browser opens your organisation's sign-in. Echo reads
 your calendar and meeting chats, and sends mail you ask Claude to send, through its own sign-in.
 
-Echo uses CodeMie's public app registration. If your IT blocks it, ask them to approve it, or to register an app
+Echo signs in with the public app registration of [CodeMie Code](https://github.com/codemie-ai/codemie-code), the open-source Claude Code
+wrapper — the same one its [Microsoft 365 skill](https://github.com/codemie-ai/codemie-code/tree/main/src/agents/plugins/claude/plugin/skills/msgraph) uses, so your IT may have approved it already. If your IT blocks it, ask them to approve it, or to register an app
 for you and put its ID under **App registration → Change…** on the same page.
 
 **Check:** the **Calendar** view shows today's meetings.
