@@ -381,7 +381,13 @@ runs `echoctl memo threads <call> --file memo-threads.new.json` (`RUN_COMMANDS`;
 file) — unknown, closed and excluded threads dropped, spans clamped; the memo is pinned to each thread, and pins an
 earlier split made but this one doesn't name are taken back (never the user's own); `<call>/memo-threads.json`. A
 thread's sync reads only its part (`ledger::call_item(dir, Some(thread))`, `memo::parts_for`; a memo pinned by hand
-gives the whole). The window: a mic in the list and the header, chips with each part's times, × = Not this (the
+gives the whole; one it reaches only through its rules gets nothing — `memo::whole_for`). The run may read only
+`<call>/memo-threads.new.json` through `memo threads`, and dropped entries are named by id and why, never echoed; each
+check and pin runs under the threads' lock (a "Not this" clicked meanwhile wins), the record is saved even after a
+partial failure, and a thread closed since keeps the memo (its archive). Stopping a memo never holds an arm or blocks
+the Teams call going on. The Brain scopes a memo's sections by part: turns and packs never cross a part, a transcript
+section is its part's thread's by its `[mm:ss]`, a minutes section headed by a thread's name that thread's, the
+summary every thread's (`store::memo_section_refs`, refs `memo_parts`). The window: a mic in the list and the header, chips with each part's times, × = Not this (the
 thread's exclusion; a later split leaves it out). Measured: a two-thread memo (Acme, then Globex) split 0–13 s / 13–21
 s, titled from what was said, its to-dos under the right thread, each thread's evidence only its part.
 

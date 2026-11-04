@@ -452,7 +452,8 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
         if rec.is_some() && (user_stop || ended) {
             // Stop ends this recording only: an arm made meanwhile stays, and waits for the next
             // call when this one goes on.
-            if user_stop && call_active {
+            // (Not for a memo: the call going on was never this recording — arm and record it.)
+            if user_stop && call_active && !rec.as_ref().is_some_and(|r| r.memo) {
                 held_arm = read_json::<Armed>("armed.json").map(|a| a.id);
                 stopped_in_call = true;
             }

@@ -737,16 +737,19 @@ function tickClocks() {
 function pill() {
   const st = S.state || {}
   if (st.recording) {
+    const name0 = String(st.recording).split(/[\\/]/).pop()
+    const c0 = (S.calls || []).find((x) => x.name === name0)
+    const m0 = since(c0 && c0.started_at)
+    // A memo: a mic where a call has its dot; Stop ends it at once (nothing else is recorded).
+    if (st.recording_memo) {
+      return `<div class="pill rec" role="group" aria-label="Recording a memo"><span class="pmic">${MIC(13)}</span>${m0 ? `<span class="clock" data-since="${m0}">${clock((Date.now() - m0) / 1000)}</span>` : ''}<button class="ptitle link" data-call="${esc(name0)}" title="Open the memo">Memo</button><button class="pbtn stop" data-cmd="stop"><svg viewBox="0 0 10 10" width="9" height="9" aria-hidden="true"><rect width="10" height="10" rx="2" fill="currentColor"/></svg>Stop</button></div>`
+    }
     if (S.stopAsk) {
       return `<div class="pill rec"><span class="ptitle">Stop recording?</span><button class="pbtn stop" data-cmd="stop">Stop</button><button class="pbtn ghost" data-cmd="stop-keep">Keep recording</button></div>`
     }
     const name = String(st.recording).split(/[\\/]/).pop()
     const c = (S.calls || []).find((x) => x.name === name)
     const t0 = since(c && c.started_at)
-    // A memo: a mic where a call has its dot; Stop ends it at once (nothing else is recorded).
-    if (st.recording_memo) {
-      return `<div class="pill rec" role="group" aria-label="Recording a memo"><span class="pmic">${MIC(13)}</span>${t0 ? `<span class="clock" data-since="${t0}">${clock((Date.now() - t0) / 1000)}</span>` : ''}<button class="ptitle link" data-call="${esc(name)}" title="Open the memo">Memo</button><button class="pbtn stop" data-cmd="stop"><svg viewBox="0 0 10 10" width="9" height="9" aria-hidden="true"><rect width="10" height="10" rx="2" fill="currentColor"/></svg>Stop</button></div>`
-    }
     return `<div class="pill rec" role="group" aria-label="Recording"><span class="dot" aria-hidden="true"></span>${t0 ? `<span class="clock" data-since="${t0}">${clock((Date.now() - t0) / 1000)}</span>` : ''}<button class="ptitle link" data-call="${esc(name)}" title="Open this call">${esc(titleOf(st.recording))}</button><button class="pbtn stop" data-cmd="stop-ask"><svg viewBox="0 0 10 10" width="9" height="9" aria-hidden="true"><rect width="10" height="10" rx="2" fill="currentColor"/></svg>Stop</button></div>`
   }
   if (st.armed) {
@@ -6271,7 +6274,8 @@ document.addEventListener('click', (e) => {
     case 'record': return send({ cmd: 'record', languages: recordLang(), profile: pickedProfile() })
     case 'record-memo': return send({ cmd: 'record_memo', languages: recordLang(), profile: pickedProfile() })
     case 'stop': S.stopAsk = false; render(); return send({ cmd: 'stop' })
-    case 'stop-ask': S.stopAsk = true; return render()
+    // A memo stops at once (nothing else is recorded); a call asks first.
+    case 'stop-ask': if ((S.state || {}).recording_memo) { S.stopAsk = false; render(); return send({ cmd: 'stop' }) } S.stopAsk = true; return render()
     case 'stop-keep': S.stopAsk = false; return render()
     case 'list-toggle': S.listOpen = !S.listOpen; return render()
     case 'call-menu': S.menuOpen = !S.menuOpen; return render()

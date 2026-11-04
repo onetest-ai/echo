@@ -89,75 +89,127 @@ fn seconds(v: &Value) -> Option<f64> {
     s.split(':').try_fold(0f64, |acc, x| x.trim().parse::<f64>().ok().map(|n| acc * 60.0 + n))
 }
 
-/// `echoctl memo threads <call> --file <json>`: the minutes run's split — `[{thread, from, to}]` — checked and applied.
-/// Unknown or closed threads, ones the user took the memo out of, and spans outside the memo are dropped (each said);
-/// the memo is pinned to the threads that remain, and unpinned from those an earlier split put it in and this one
-/// doesn't name. Returns what was kept and what was dropped.
+/// `echoctl memo threads <call> --file <call>/memo-threads.new.json`: the minutes run's split — `[{thread, from, to}]` —
+/// checked and applied. The file must be that one, in the memo's own folder (a run reads nothing else through this).
+/// Unknown or closed threads, ones the user took the memo out of, and spans outside the memo are dropped (said by
+/// thread id and why, never by content); the memo is pinned to the threads that remain — each check and pin under the
+/// threads' lock, so a "Not this" clicked meanwhile wins — and unpinned from open threads an earlier split put it in and
+/// this one doesn't name (never from a closed thread: the archive keeps it; never the user's own pins).
 pub fn set_threads(call: &str, file: &Path) -> Result<Value> {
     let dir = calls::resolve_call(call)?;
     if !is_memo(&dir) {
         bail!("{} isn't a memo", dir.display());
     }
-    let raw: Value = serde_json::from_slice(&std::fs::read(file).with_context(|| format!("reading {}", file.display()))?)
-        .with_context(|| format!("{} isn't JSON", file.display()))?;
+    let own = dir.join("memo-threads.new.json");
+    let same = dunce::canonicalize(file).ok().zip(dunce::canonicalize(&own).ok()).is_some_and(|(a, b)| a == b);
+    if !same {
+        bail!("the split goes in {} (only that file is read)", own.display());
+    }
+    let raw: Value = serde_json::from_slice(&std::fs::read(&own).with_context(|| format!("reading {}", own.display()))?)
+        .with_context(|| format!("{} isn't JSON", own.display()))?;
     let items = raw.as_array().or_else(|| raw["parts"].as_array()).cloned().unwrap_or_default();
     let stamp = calls::stamp_of(&dir);
-    let all = projects::list();
     let length = memo_length(&dir);
     let mut parts: Vec<Part> = vec![];
     let mut dropped = vec![];
+    let drop = |dropped: &mut Vec<Value>, id: &str, why: &str| dropped.push(json!({"thread": id.chars().take(80).collect::<String>(), "why": why}));
+    let known: Vec<String> = projects::list().into_iter().map(|p| p.id).collect();
     for it in &items {
         let id = it["thread"].as_str().unwrap_or("").trim();
         let (Some(from), Some(to)) = (seconds(&it["from"]), seconds(&it["to"])) else {
-            dropped.push(json!({"item": it, "why": "from and to must be times"}));
+            drop(&mut dropped, id, "from and to must be times");
             continue;
         };
-        let Some(p) = all.iter().find(|p| p.id == id) else {
-            dropped.push(json!({"item": it, "why": "no such thread"}));
-            continue;
-        };
-        if p.stage.closed() {
-            dropped.push(json!({"item": it, "why": "a closed thread"}));
-            continue;
-        }
-        if p.exclusions.contains(&stamp) {
-            dropped.push(json!({"item": it, "why": "the user took this memo out of that thread"}));
+        if !known.iter().any(|k| k == id) {
+            drop(&mut dropped, id, "no such thread");
             continue;
         }
         let (from, to) = (from.max(0.0), length.map_or(to, |l| to.min(l + 1.0)));
         if to <= from {
-            dropped.push(json!({"item": it, "why": "the span is empty or outside the memo"}));
+            drop(&mut dropped, id, "the span is empty or outside the memo");
             continue;
         }
-        parts.push(Part { thread: p.id.clone(), from, to });
+        parts.push(Part { thread: id.to_string(), from, to });
     }
     parts.sort_by(|a, b| a.from.total_cmp(&b.from));
     let before = load(&dir);
-    let threads: Vec<String> = parts.iter().map(|p| p.thread.clone()).fold(vec![], |mut v, t| {
-        if !v.contains(&t) {
-            v.push(t);
+    // Pin each named thread under its lock: closed, or the user's "Not this" (even one clicked a moment ago) → dropped.
+    let mut pinned: Vec<String> = vec![];
+    let mut refused: Vec<String> = vec![];
+    let mut failure = None;
+    let mut threads: Vec<String> = vec![];
+    for p in &parts {
+        if !threads.contains(&p.thread) {
+            threads.push(p.thread.clone());
         }
-        v
-    });
-    // Pins this split adds, and the earlier split's that it no longer names (the user's own pins stay).
-    let mut pinned = vec![];
+    }
     for t in &threads {
-        let p = all.iter().find(|p| &p.id == t).expect("checked above");
-        if !p.pins.contains(&stamp) {
-            projects::set_membership(t, &dir, "include")?;
-            pinned.push(t.clone());
-        } else if before.pinned.contains(t) {
-            pinned.push(t.clone());
+        let mut why: Option<&'static str> = None;
+        let mut added = false;
+        let r = projects::update(t, |p| {
+            if p.stage.closed() {
+                why = Some("a closed thread");
+            } else if p.exclusions.contains(&stamp) {
+                why = Some("the user took this memo out of that thread");
+            } else if !p.pins.contains(&stamp) {
+                p.pins.push(stamp.clone());
+                added = true;
+            }
+            Ok(())
+        });
+        match (r, why) {
+            (Err(e), _) => {
+                failure = Some(e);
+                break;
+            }
+            (Ok(_), Some(w)) => {
+                drop(&mut dropped, t, w);
+                refused.push(t.clone());
+            }
+            // Ours if this split added it, or an earlier split did (the user's own pins stay theirs).
+            (Ok(_), None) if added || before.pinned.contains(t) => pinned.push(t.clone()),
+            (Ok(_), None) => {}
         }
     }
-    for t in before.pinned.iter().filter(|t| !threads.contains(t)) {
-        if all.iter().any(|p| &p.id == t && p.pins.contains(&stamp)) {
-            projects::set_membership(t, &dir, "rules")?;
+    parts.retain(|p| !refused.contains(&p.thread));
+    if failure.is_none() {
+        // An earlier split's pins this one doesn't name: taken back — not from a closed thread (its archive keeps it).
+        for t in before.pinned.iter().filter(|t| !threads.contains(t) || refused.contains(t)) {
+            let r = projects::update(t, |p| {
+                if !p.stage.closed() {
+                    p.pins.retain(|s| s != &stamp);
+                }
+                Ok(())
+            });
+            match r {
+                Ok(p) if p.pins.contains(&stamp) => pinned.push(t.clone()), // kept (closed): still the split's
+                Ok(_) => {}
+                Err(e) => {
+                    pinned.push(t.clone());
+                    failure = Some(e);
+                }
+            }
         }
+    } else {
+        // Stopped part-way: what the earlier split pinned is still ours to take back later.
+        let rest: Vec<String> = before.pinned.iter().filter(|t| !pinned.contains(t)).cloned().collect();
+        pinned.extend(rest);
     }
-    let saved = Saved { parts: parts.clone(), pinned, at: chrono::Local::now().to_rfc3339() };
+    // Saved even after a failure, so the pins made are known as the split's.
+    let saved = Saved { parts: if failure.is_some() { before.parts } else { parts.clone() }, pinned, at: chrono::Local::now().to_rfc3339() };
     paths::write_atomic(&dir.join(FILE), &serde_json::to_vec_pretty(&saved)?)?;
+    if let Some(e) = failure {
+        return Err(e.context("the split was applied in part"));
+    }
     Ok(json!({"parts": parts, "dropped": dropped}))
+}
+
+/// Whether `thread` gets a memo's whole text: a thread the user put it in by hand, when no split names it. A thread
+/// the memo reaches through its rules (its title matching a subject rule) gets nothing the split didn't give it.
+pub fn whole_for(dir: &Path, thread: &str) -> bool {
+    let saved = load(dir);
+    let stamp = calls::stamp_of(dir);
+    !saved.pinned.iter().any(|t| t == thread) && projects::load(thread).is_ok_and(|p| p.pins.contains(&stamp))
 }
 
 /// The memo's length in seconds (its last segment's end), when it is transcribed.
@@ -180,7 +232,7 @@ mod tests {
         let globex = projects::create("Globex discovery", None, None).unwrap();
         let done = projects::create("Old pilot", None, Some(projects::Stage::Done)).unwrap();
         let call = dir.display().to_string();
-        let file = root.join("split.json");
+        let file = dir.join("memo-threads.new.json");
         let write = |v: Value| std::fs::write(&file, v.to_string()).unwrap();
 
         write(json!([{"thread": acme.id, "from": "00:00", "to": "00:13"}, {"thread": globex.id, "from": 13, "to": 99},
@@ -188,6 +240,11 @@ mod tests {
         let out = set_threads(&call, &file).unwrap();
         assert_eq!(out["parts"].as_array().unwrap().len(), 2);
         assert_eq!(out["dropped"].as_array().unwrap().len(), 2, "a closed thread and an unknown one are dropped: {out}");
+        assert!(out["dropped"].to_string().len() < 300, "said by id and why, never by content: {out}");
+        // Only the memo's own split file is read.
+        let elsewhere = root.join("x.json");
+        std::fs::write(&elsewhere, "[]").unwrap();
+        assert!(set_threads(&call, &elsewhere).is_err());
         assert_eq!(parts_for(&dir, &globex.id), Some(vec![(13.0, 22.0)]), "clamped to the memo's end");
         let stamp = calls::stamp_of(&dir);
         assert!(projects::load(&acme.id).unwrap().pins.contains(&stamp) && projects::load(&globex.id).unwrap().pins.contains(&stamp));
@@ -205,6 +262,17 @@ mod tests {
         write(json!([]));
         set_threads(&call, &file).unwrap();
         assert!(projects::load(&acme.id).unwrap().pins.contains(&stamp));
+        assert!(whole_for(&dir, &acme.id), "a thread pinned by hand gets the whole memo");
+        assert!(!whole_for(&dir, &globex.id));
+
+        // A thread closed since keeps the memo when a new split doesn't name it (its archive).
+        let delta = projects::create("Delta", None, None).unwrap();
+        write(json!([{"thread": delta.id, "from": 0, "to": 5}]));
+        set_threads(&call, &file).unwrap();
+        projects::set_stage(&delta.id, projects::Stage::Done, None).unwrap();
+        write(json!([]));
+        set_threads(&call, &file).unwrap();
+        assert!(projects::load(&delta.id).unwrap().pins.contains(&stamp), "closed: kept");
     }
 
     #[test]

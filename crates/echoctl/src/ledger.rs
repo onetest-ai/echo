@@ -422,8 +422,13 @@ pub fn call_item(dir: &Path, thread: Option<&str>) -> Option<Value> {
     let started = meta["started_at"].as_str()?.to_string();
     let date = chrono::DateTime::parse_from_rfc3339(&started).ok()?.with_timezone(&Local).date_naive().to_string();
     let segs = calls::read_json(&dir.join("segments.json"));
-    // A memo pinned by hand to a thread its split didn't name: the whole memo, as for a call.
-    let spans = thread.and_then(|t| crate::memo::parts_for(dir, t)).filter(|s| !s.is_empty());
+    // A memo split by thread: this thread's parts only. A thread the split didn't name gets the whole memo only when
+    // the user put it there by hand; one it reaches through its rules gets nothing.
+    let spans = match thread.and_then(|t| crate::memo::parts_for(dir, t).map(|s| (t, s))) {
+        Some((t, s)) if s.is_empty() && !crate::memo::whole_for(dir, t) => return None,
+        Some((_, s)) if !s.is_empty() => Some(s),
+        _ => None,
+    };
     let within = |s: &Value| {
         let at = s["start"].as_f64().unwrap_or(0.0);
         spans.as_ref().is_none_or(|sp| sp.iter().any(|&(a, b)| at >= a && at < b))
