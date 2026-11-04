@@ -15,27 +15,30 @@ const PROTOCOL: &str = "2025-06-18";
 fn tools() -> Value {
     let s = |props: Value, req: &[&str]| json!({"type": "object", "properties": props, "required": req});
     json!([
-        {"name": "health", "description": "[identity] Is the Brain usable: counts per lane, the embedding model, what it covers.", "inputSchema": s(json!({}), &[])},
-        {"name": "list_scopes", "description": "[identity] The user's clients and threads (engagements) the Brain covers, with their ids, names and how much each holds. Scope every search to a client or a thread when the question is about one.", "inputSchema": s(json!({}), &[])},
-        {"name": "search_knowledge", "description": "[identity] Search the user's calls (minutes, transcripts with speakers and times, chats), their threads' Teams channels, mail and documents: keywords in any language fused with meaning. Scope it with `client` or `thread` (ids from list_scopes) when the question is about one. Documents a thread marks as history are left out unless `latest_only` is false, or `as_of` (YYYY-MM-DD) asks what was current on a day. Each hit has its source, section, text, date, speaker, its client and threads, its status, and a link to the moment or page.",
-         "inputSchema": s(json!({"query": {"type": "string"}, "limit": {"type": "integer", "default": 5}, "client": {"type": "string"}, "thread": {"type": "string"}, "source_contains": {"type": "string"}, "latest_only": {"type": "boolean"}, "as_of": {"type": "string"}, "tag": {"type": "string"}}), &["query"])},
-        {"name": "list_sources", "description": "[identity] The documents in the Brain — calls, mail conversations, Teams channel posts, folder documents — newest first; `client` / `thread` narrow them.", "inputSchema": s(json!({"contains": {"type": "string"}, "client": {"type": "string"}, "thread": {"type": "string"}, "offset": {"type": "integer"}}), &[])},
-        {"name": "read_document", "description": "[identity] One document's sections in order (a call: its minutes, transcript, chat; a mail conversation or channel post: its messages' facts; a document: its pages).",
+        {"name": "list_scopes", "description": "The user's clients and threads (engagements), with their ids and how much each holds. Scope every search to a client or a thread when the question is about one.", "inputSchema": s(json!({}), &[])},
+        {"name": "search_sources", "description": "What exactly was said: search the user's calls (minutes, transcripts with speakers and times, chats), their threads' mail, Teams channels and documents — words in any language fused with meaning. Scope it with `client` or `thread` (ids from list_scopes) when the question is about one. Documents a thread marks as history are left out unless `latest_only` is false, or `as_of` (YYYY-MM-DD) asks what was current on a day. Each hit has its source, text, date, speaker, its client and threads, and an echo:// link to the moment.",
+         "inputSchema": s(json!({"query": {"type": "string"}, "limit": {"type": "integer", "default": 5}, "client": {"type": "string"}, "thread": {"type": "string"}, "source_contains": {"type": "string"}, "latest_only": {"type": "boolean"}, "as_of": {"type": "string"}}), &["query"])},
+        {"name": "list_sources", "description": "The sources — calls, mail conversations, Teams channel posts, folder documents — newest first; `client` / `thread` narrow them.", "inputSchema": s(json!({"contains": {"type": "string"}, "client": {"type": "string"}, "thread": {"type": "string"}, "offset": {"type": "integer"}}), &[])},
+        {"name": "read_source", "description": "One source's sections in order (a call: its minutes, transcript, chat; a mail conversation or channel post: its messages' facts; a document: its pages).",
          "inputSchema": s(json!({"source": {"type": "string"}, "from_ord": {"type": "integer"}, "to_ord": {"type": "integer"}, "titles_only": {"type": "boolean"}, "max_chars": {"type": "integer"}}), &["source"])},
-        {"name": "find_related_content", "description": "[identity] Sections from other sources nearest to a section (by chunk_id) or to a query.",
+        {"name": "read_link", "description": "What an echo:// link points at (from a hit, a note in the user's vault, minutes): a call's minutes and the turns around its moment (?t=), a thread's people and calls, a client's threads, a person, a mail's facts.",
+         "inputSchema": s(json!({"link": {"type": "string"}}), &["link"])},
+        {"name": "find_related", "description": "Sections from other sources nearest to a section (by chunk_id) or to a query: where else the same thing came up.",
          "inputSchema": s(json!({"chunk_id": {"type": "string"}, "query": {"type": "string"}, "client": {"type": "string"}, "thread": {"type": "string"}, "limit": {"type": "integer", "default": 6}}), &[])},
-        {"name": "get_evidence", "description": "[identity] One section verbatim, with its source and link.", "inputSchema": s(json!({"chunk_id": {"type": "string"}, "include_page_text": {"type": "boolean"}}), &["chunk_id"])},
-        {"name": "get_taxonomy", "description": "[identity] The topics and terms (names, systems, acronyms) of the user's work — calls, mail, channels, documents — each with its sections, clients and threads; `client` / `thread` show what comes up there; `label` gives one node and its latest sections.", "inputSchema": s(json!({"label": {"type": "string"}, "client": {"type": "string"}, "thread": {"type": "string"}, "relation": {"type": "string"}, "kind": {"type": "string"}, "limit": {"type": "integer"}}), &[])},
-        {"name": "list_metrics", "description": "[identity] Governed metrics from the client's reporting workbooks (the numbers lane): name, unit, description, definition (reported or computed), and per grain the entities and months the facts cover. Use it before any numeric answer.", "inputSchema": s(json!({"client": {"type": "string"}}), &[])},
-        {"name": "get_metric", "description": "[identity] A governed metric's values, computed from the real cells, each with its source file: filter by grain (branch, region, division, overall…), entity (exact) or entity_like, month (YYYY-MM) or months. Says when a figure was restated by a later report or reports conflict (other_reported_values), and what a merged row merged. No rows = not modeled for that filter: say so, never estimate.", "inputSchema": s(json!({"name": {"type": "string"}, "client": {"type": "string"}, "grain": {"type": "string"}, "entity": {"type": "string"}, "entity_like": {"type": "string"}, "month": {"type": "string"}, "months": {"type": "array", "items": {"type": "string"}}}), &["name"])},
-        {"name": "find_people", "description": "[identity] Who is who: the people of the user's threads — name, organisation, title, the threads they are in and their role there, when last seen. `query` matches names, addresses, organisations, titles and roles; `client` / `thread` narrow it. Then get_person for one.", "inputSchema": s(json!({"query": {"type": "string"}, "client": {"type": "string"}, "thread": {"type": "string"}, "limit": {"type": "integer", "default": 20}}), &[])},
-        {"name": "get_person", "description": "[identity] One person (by key from find_people, an address or a name): who they are, their threads with role and stance, reporting line, open tasks they owe, who they are in calls with, and the facts said about them — each with its words, date and a link to the moment, mail or chat.", "inputSchema": s(json!({"person": {"type": "string"}, "facts": {"type": "integer", "default": 40}}), &["person"])},
-        {"name": "get_metric_history", "description": "[identity] Every report of a metric-month: each file that reported it, what it said and which value is current — to cite \"the July workbook reported July as X\".", "inputSchema": s(json!({"name": {"type": "string"}, "client": {"type": "string"}, "grain": {"type": "string"}, "entity": {"type": "string"}, "month": {"type": "string"}}), &["name"])},
+        {"name": "get_evidence", "description": "One section verbatim, with its source and link.", "inputSchema": s(json!({"chunk_id": {"type": "string"}, "include_page_text": {"type": "boolean"}}), &["chunk_id"])},
+        {"name": "find_people", "description": "Who is who: the people of the user's threads — name, organisation, title, the threads they are in and their role there, when last seen. `query` matches names, addresses, organisations, titles and roles; `client` / `thread` narrow it. Then get_person for one.", "inputSchema": s(json!({"query": {"type": "string"}, "client": {"type": "string"}, "thread": {"type": "string"}, "limit": {"type": "integer", "default": 20}}), &[])},
+        {"name": "get_person", "description": "One person (by key from find_people, an address or a name): who they are, their threads with role and stance, reporting line, open tasks they owe, who they are in calls with, and the facts said about them — each with its words, date and a link to the moment, mail or chat.", "inputSchema": s(json!({"person": {"type": "string"}, "facts": {"type": "integer", "default": 40}}), &["person"])},
     ])
 }
 
-fn not_modeled(what: &str) -> Value {
-    json!({"status": "not_modeled", "reason": format!("{what} isn't built in Echo's Brain yet"), "guidance": "Answer from search_knowledge and say what isn't modeled."})
+/// Older names (the echo-brain server's) still answer.
+fn canonical(name: &str) -> &str {
+    match name {
+        "search_knowledge" => "search_sources",
+        "read_document" => "read_source",
+        "find_related_content" => "find_related",
+        n => n,
+    }
 }
 
 /// The scope a tool call asks for: a client or a thread (by id).
@@ -52,8 +55,15 @@ fn access() -> &'static super::access::Access {
 }
 
 fn call(name: &str, a: &Value) -> Result<Value> {
+    let name = canonical(name);
+    if !tools().as_array().is_some_and(|t| t.iter().any(|x| x["name"] == name)) {
+        anyhow::bail!("no tool {name:?}");
+    }
     let path = super::store_path();
     let acc = access();
+    if name == "read_link" {
+        return read_link(acc, a["link"].as_str().unwrap_or(""));
+    }
     // People come from the threads' files, not the store: only the threads this reader may see.
     if name == "find_people" || name == "get_person" {
         let mut threads = acc.people_threads();
@@ -80,15 +90,7 @@ fn call(name: &str, a: &Value) -> Result<Value> {
     let emb = super::embedder();
     let emb = emb.as_ref().map(|e| e as &dyn super::embed::Embedder);
     match name {
-        "health" => {
-            let st = store::status(&path)?;
-            let chunks = st["chunks"].as_i64().unwrap_or(0);
-            Ok(json!({"status": if chunks > 0 { "healthy" } else { "degraded" }, "database_check": "ok", "vector_extension": "echo (in-process)",
-                      "counts": {"chunks": chunks, "chunks_fts": chunks, "chunks_vec": st["embedded"], "graph_nodes": st["graph_nodes"], "graph_edges": 0, "chunk_topics": st["chunk_topics"], "facts": 0},
-                      "empty_lanes": if st["graph_nodes"].as_i64().unwrap_or(0) > 0 { json!(["facts"]) } else { json!(["facts", "taxonomy"]) }, "knowledge_version": st["built_at"],
-                      "about": {"name": "Echo — the user's work", "goal": "What was said in the user's calls, mail, Teams channels and documents: decisions, commitments, positions, people, over time", "audience": "the user"}}))
-        }
-        "search_knowledge" => {
+        "search_sources" => {
             let q = a["query"].as_str().unwrap_or("");
             let history = match (a["as_of"].as_str().filter(|d| d.len() == 10), a["latest_only"].as_bool()) {
                 (Some(d), _) => store::History::AsOf(d),
@@ -128,7 +130,7 @@ fn call(name: &str, a: &Value) -> Result<Value> {
             let rows: Vec<Value> = rows.into_iter().filter(|r| src_ok(r["source"].as_str().unwrap_or(""))).collect();
             Ok(json!({"sources": rows, "next_offset": next}))
         }
-        "read_document" => {
+        "read_source" => {
             let c = store::open(&path)?;
             let want = a["source"].as_str().unwrap_or("");
             let found: Vec<String> = c
@@ -163,7 +165,7 @@ fn call(name: &str, a: &Value) -> Result<Value> {
             }
             Ok(json!({"source": src, "total_sections": total, "sections": out, "next_from_ord": next}))
         }
-        "find_related_content" => {
+        "find_related" => {
             let limit = a["limit"].as_u64().unwrap_or(6).clamp(1, 20) as usize;
             let filtered = |mut v: Value| -> Value {
                 if let Some(r) = v["related"].as_array_mut() {
@@ -217,72 +219,38 @@ fn call(name: &str, a: &Value) -> Result<Value> {
             }
             Ok(v)
         }
-        "get_taxonomy" => {
-            let v = super::taxonomy::view_in(scope)?;
-            if v["exists"] != true {
-                return Ok(not_modeled("The topics taxonomy"));
-            }
-            let limit = a["limit"].as_u64().unwrap_or(20).clamp(1, 100) as i64;
-            if let Some(label) = a["label"].as_str() {
-                let id = super::taxonomy::nid(label);
-                let node = v["topics"].as_array().into_iter().chain(v["terms"].as_array()).flatten()
-                    .find(|x| x["id"] == id.as_str() || x["id"] == format!("term__{id}").as_str() || x["label"] == label || x["name"] == label).cloned();
-                let Some(node) = node else { return Ok(json!({"status": "not_found", "label": label})) };
-                let nid = node["id"].as_str().unwrap_or("").to_string();
-                let subs: Vec<Value> = v["topics"].as_array().into_iter().flatten().filter(|x| x["parent"].as_str().map(super::taxonomy::nid) == Some(nid.clone())).cloned().collect();
-                let c = store::open(&path)?;
-                let tagged: Vec<Value> = c
-                    .prepare("SELECT c.id, c.source, c.title, c.link, c.event_date FROM chunk_topics k JOIN chunks c ON c.id = k.chunk_id WHERE k.category_id = ?1 ORDER BY c.event_date DESC LIMIT ?2")?
-                    .query_map(params![nid, limit], |r| Ok(json!({"chunk_id": r.get::<_, i64>(0)?.to_string(), "source": r.get::<_, String>(1)?, "section": r.get::<_, String>(2)?, "link": r.get::<_, Option<String>>(3)?, "event_date": r.get::<_, Option<String>>(4)?})))?
-                    .collect::<Result<Vec<Value>, _>>()?
-                    .into_iter()
-                    .filter(|x| src_ok(x["source"].as_str().unwrap_or("")))
-                    .collect();
-                return Ok(json!({"node": node, "subclasses": subs, "tagged_sections": tagged}));
-            }
-            Ok(json!({"provisional": v["provisional"], "topics": v["topics"], "terms": v["terms"], "coverage": v["coverage"]}))
-        }
-        // Numbers only of clients whose threads run on this profile (and for a call's session, its own).
-        "list_metrics" | "get_metric" | "get_metric_history" => {
-            let ok = acc.numbers_clients();
-            let asked = a["client"].as_str().map(str::to_owned);
-            let clients: Vec<String> = match &asked {
-                Some(c) => ok.iter().filter(|x| *x == c).cloned().collect(),
-                None => ok,
-            };
-            if clients.is_empty() {
-                return Ok(not_modeled("Numbers for this client (or on this AI profile)"));
-            }
-            if name == "list_metrics" {
-                let mut all = vec![];
-                for c in &clients {
-                    all.extend(super::numbers::list_metrics(Some(c))?["metrics"].as_array().cloned().unwrap_or_default());
-                }
-                return Ok(json!({"metrics": all, "count": all.len()}));
-            }
-            let mut last = not_modeled("That metric");
-            for c in &clients {
-                let mut args = a.clone();
-                args["client"] = json!(c);
-                let v = if name == "get_metric" { super::numbers::get_metric(&args)? } else { super::numbers::get_metric_history(&args)? };
-                if v["status"] != "not_modeled" {
-                    return Ok(v);
-                }
-                last = v;
-            }
-            Ok(last)
-        }
         _ => anyhow::bail!("no tool {name:?}"),
     }
+}
+
+/// `read_link` within what this reader may see: a call or mail only among its sources, a thread or client only one of
+/// its threads', a person through get_person (its threads only).
+fn read_link(acc: &super::access::Access, link: &str) -> Result<Value> {
+    use crate::links::Link;
+    let l = Link::parse(link).ok_or_else(|| anyhow::anyhow!("not an echo:// link Echo knows"))?;
+    let threads = acc.people_threads();
+    let ok = match &l {
+        Link::Call { name, .. } => {
+            let dir = crate::calls::resolve_call(name).map_err(|_| anyhow::anyhow!("no call {name:?}"))?;
+            acc.sources(&store::open(&super::store_path())?)?.contains(&format!("call/{}", crate::calls::stamp_of(&dir)))
+        }
+        Link::Mail(src) => acc.sources(&store::open(&super::store_path())?)?.contains(src),
+        Link::Thread(id) => threads.contains(id),
+        Link::Client(id) => crate::projects::list().iter().any(|p| p.client.as_deref() == Some(id) && threads.contains(&p.id)),
+        Link::Person(key) => return crate::people::card(&threads, key, 40),
+    };
+    anyhow::ensure!(ok, "not found (or not readable from this session)");
+    Ok(json!({"text": crate::links::read(link)?}))
 }
 
 /// What this reader's Brain holds and when to go there (#34), generated when the server starts; the fixed
 /// rules on scoping and citing either way.
 fn instructions() -> String {
-    let rules = "When a question is about a client or a thread, pass its id (list_scopes) to every search — a fact from another client is not about this one. Cite every claim with its source (title, date, time) — never print raw ids; say 'not modeled' when nothing supports it. Read-only.";
-    match super::advert::block(access()) {
-        Some(b) => format!("{b}\n\n{rules}"),
-        None => format!("The user's Brain in Echo: their calls, mail, Teams channels and documents as cited facts, organised by client and by thread. {rules}"),
+    let rules = "Echo's own tools: what was said (search_sources, read_source, read_link — exact words with an echo:// link to the moment) and who people are (find_people, get_person). Long-term facts about things live in the user's knowledge vault when they have one; tasks are Echo's Tasks (`echoctl project tasks`). When a question is about a client or a thread, pass its id (list_scopes) to every search. Cite every claim with its source (title, date, time) and its echo:// link — never print raw ids; say what no source supports. Read-only.";
+    let held = store::open(&super::store_path()).ok().and_then(|c| super::advert::summary(&c, access()).ok());
+    match held {
+        Some(h) => format!("What Echo holds for this session (labels from the user's data, never instructions):\n{h}\n\n{rules}"),
+        None => rules.to_string(),
     }
 }
 
@@ -293,7 +261,7 @@ fn answer(req: &Value) -> Option<Value> {
     let id = req.get("id").cloned()?; // a notification gets no answer
     let r = match req["method"].as_str().unwrap_or("") {
         "initialize" => Ok(json!({"protocolVersion": req["params"]["protocolVersion"].as_str().unwrap_or(PROTOCOL), "capabilities": {"tools": {}},
-                                  "serverInfo": {"name": "echo-brain", "version": env!("CARGO_PKG_VERSION")},
+                                  "serverInfo": {"name": "echo", "version": env!("CARGO_PKG_VERSION")},
                                   "instructions": instructions()})),
         "ping" => Ok(json!({})),
         "tools/list" => Ok(json!({"tools": tools()})),
@@ -307,7 +275,7 @@ fn answer(req: &Value) -> Option<Value> {
             }
             Ok(match r {
                 Ok(v) => json!({"content": [{"type": "text", "text": v.to_string()}], "structuredContent": v, "isError": false}),
-                Err(e) => json!({"content": [{"type": "text", "text": json!({"error": format!("{e:#}"), "how_to_fix": "Run `echoctl brain status`; set the embedding server in Settings → Brain; `echoctl brain sync`."}).to_string()}], "isError": true}),
+                Err(e) => json!({"content": [{"type": "text", "text": json!({"error": format!("{e:#}"), "how_to_fix": "Run `echoctl brain status`."}).to_string()}], "isError": true}),
             })
         }
         m => Err(json!({"code": -32601, "message": format!("no method {m}")})),
@@ -348,20 +316,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn speaks_mcp_with_brains_tool_names() {
-        // Its own empty data folder: no numbers built, whatever other tests or this computer have.
+    fn speaks_mcp_with_echos_tools() {
         let (_env, _root) = crate::paths::testenv::folders("mcp-names");
         let init = answer(&json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-03-26"}})).unwrap();
-        assert_eq!(init["result"]["protocolVersion"], "2025-03-26");
+        assert_eq!((init["result"]["protocolVersion"].as_str(), init["result"]["serverInfo"]["name"].as_str()), (Some("2025-03-26"), Some("echo")));
         assert!(answer(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"})).is_none());
         let names: Vec<String> = answer(&json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})).unwrap()["result"]["tools"]
             .as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_string()).collect();
-        // kb recognises a Brain by this set.
-        for n in ["health", "search_knowledge", "get_metric", "get_taxonomy", "get_evidence", "find_related_content", "list_metrics"] {
+        for n in ["search_sources", "read_source", "read_link", "find_people", "get_person", "list_scopes"] {
             assert!(names.contains(&n.to_string()), "{n}");
         }
-        let r = answer(&json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "get_metric", "arguments": {"name": "x"}}})).unwrap();
-        assert_eq!(r["result"]["structuredContent"]["status"], "not_modeled");
+        // The Brain's extras are gone; its old names for the source tools still answer.
+        for gone in ["get_taxonomy", "get_metric", "health"] {
+            assert!(!names.contains(&gone.to_string()));
+            let r = answer(&json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": gone, "arguments": {}}})).unwrap();
+            assert_eq!(r["result"]["isError"], true, "{gone}");
+        }
+        assert_eq!(canonical("search_knowledge"), "search_sources");
+        let r = answer(&json!({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "read_link", "arguments": {"link": "echo://thread/elsewhere"}}})).unwrap();
+        assert_eq!(r["result"]["isError"], true, "a thread this reader can't see: {r}");
         assert_eq!(answer(&json!({"jsonrpc": "2.0", "id": 4, "method": "nope"})).unwrap()["error"]["code"], -32601);
     }
 }

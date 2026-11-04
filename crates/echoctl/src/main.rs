@@ -267,6 +267,23 @@ enum Cmd {
         #[command(subcommand)]
         cmd: VocabCmd,
     },
+    /// Echo's MCP server for Claude sessions (stdio): what was said, people, echo:// links — read-only, one AI
+    /// profile's sources (narrowed for a call's session)
+    #[cfg(feature = "brain")]
+    #[command(hide = true)]
+    Mcp {
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        client: Option<String>,
+        #[arg(long)]
+        thread: Vec<String>,
+        #[arg(long)]
+        call: Option<String>,
+        /// Who runs it (folder | call | routine), for the usage counts
+        #[arg(long)]
+        who: Option<String>,
+    },
     /// What Echo holds behind an echo:// link, as text (for Claude): a call's minutes and the turns around its moment,
     /// a thread, a client, a person, a mail's facts. Read-only
     Read { link: String },
@@ -1650,6 +1667,11 @@ fn main() -> Result<()> {
             };
             println!("{}", serde_json::to_string_pretty(&v)?);
             Ok(())
+        }
+        #[cfg(feature = "brain")]
+        Cmd::Mcp { profile, client, thread, call, who } => {
+            let access = brain::access::Access { profile: profile.unwrap_or_else(ai::default_id), client, threads: thread, call };
+            brain::mcp::serve(Some(access), who)
         }
         Cmd::Read { link } => {
             print!("{}", links::read(&link)?);

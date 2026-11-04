@@ -13,12 +13,11 @@ use super::store;
 
 /// When to go to the Brain first, and how (fixed; the model sees it with what the Brain holds).
 pub const WHEN: &str = "When to use it — before Microsoft 365, files or guessing:\n\
-- What was said, decided, promised or asked — by whom, when — across calls, mail, Teams channels and documents: search_knowledge first; cite the source and its time. Go to Microsoft 365 or files only for what the Brain doesn't hold (not indexed yet, outside its sources, live state like today's calendar).\n\
+- What was said, decided, promised or asked — by whom, when — across calls, mail, Teams channels and documents: search_sources first; cite the source, its time and its echo:// link (read_link opens one). Go to Microsoft 365 or files only for what Echo doesn't hold (not indexed yet, live state like today's calendar).\n\
 - Who someone is, their role, what was said about them: find_people / get_person.\n\
-- Figures from reporting workbooks: list_metrics / get_metric — never a number read from text.\n\
 - Before a brief, a meeting prep, a follow-up or a summary of a client or thread: search it, scoped to that client or thread.\n\
-- Scope every search by client or thread when the question is about one (ids from list_scopes); say \"not in the Brain\" when nothing supports an answer.\n\
-Its tools are the echo-brain MCP server's (mcp__echo-brain__…); load them by name if they are deferred.";
+- Scope every search by client or thread when the question is about one (ids from list_scopes); say what no source supports.\n\
+Its tools are Echo's MCP server's (mcp__echo__…); load them by name if they are deferred.";
 
 /// A document's source, kind, date and refs.
 type DocRow = (String, Option<String>, Option<String>, Option<String>);

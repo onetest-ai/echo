@@ -55,7 +55,7 @@ pub const ROUTINE_COMMANDS: [&str; 13] = [
     "project tasks", "project ledger * tree", "client list", "org list",
 ];
 /// The Brain's MCP tools, as Claude Code names them (`mcp__<server>__<tool>`; all read-only).
-pub const BRAIN_TOOLS: &str = "mcp__echo-brain__";
+pub const BRAIN_TOOLS: &str = "mcp__echo__";
 
 /// The ledger steps a sync run may take (`echoctl project ledger <id> <step>`).
 pub const PROJECT_STEPS: [&str; 8] = ["pending", "context", "apply", "done", "verify-prep", "verify-apply", "people-context", "people-apply"];
@@ -684,9 +684,9 @@ mod tests {
     fn the_windows_session_on_a_call_reads_and_changes_nothing() {
         let root = fixture("ask");
         let s = Scope { ask: true, ..scope(&root) };
-        assert!(s.judge(&json!({"tool_name": "mcp__echo-brain__search_knowledge", "tool_input": {"query": "budget"}})).is_ok(), "the Brain reads");
+        assert!(s.judge(&json!({"tool_name": "mcp__echo__search_sources", "tool_input": {"query": "budget"}})).is_ok(), "the Brain reads");
         assert!(s.judge(&json!({"tool_name": "mcp__other__send_mail", "tool_input": {}})).is_err(), "nothing else");
-        assert!(Scope { ask: false, ..scope(&root) }.judge(&json!({"tool_name": "mcp__echo-brain__search_knowledge", "tool_input": {}})).is_err(), "not in a minutes run");
+        assert!(Scope { ask: false, ..scope(&root) }.judge(&json!({"tool_name": "mcp__echo__search_sources", "tool_input": {}})).is_err(), "not in a minutes run");
         let call = root.join("calls/2026-10-25_100000-call");
         let path = |p: &Path| p.display().to_string();
         let ok = |t: &str, input: Value| s.judge(&tool(t, input)).map_err(|e| format!("{t}: {e}"));
@@ -752,7 +752,7 @@ mod tests {
         ok("Grep", json!({"pattern": "budget", "path": path(&home.join("calls"))})).unwrap();
         ok("Bash", json!({"command": "echoctl project tasks"})).unwrap();
         ok("Bash", json!({"command": "echoctl project ledger acme tree"})).unwrap();
-        ok("mcp__echo-brain__search_knowledge", json!({"query": "budget"})).unwrap();
+        ok("mcp__echo__search_sources", json!({"query": "budget"})).unwrap();
         ok("Glob", json!({"pattern": "projects/*/ledger/*.jsonl"})).unwrap();
         // The session's own saved output (a long command answer), named by Claude Code's hook input.
         let claude = std::env::temp_dir().join(format!("echo-guard-claude-{}", std::process::id()));
