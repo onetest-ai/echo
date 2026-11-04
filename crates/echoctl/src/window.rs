@@ -410,6 +410,8 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
             let (client, thread) = (query_param(q, "client"), query_param(q, "thread"));
             let scope = client.as_deref().map(|c| ("client", c)).or(thread.as_deref().map(|t| ("thread", t)));
             json_reply(match scope {
+                // Insights are off (`brain::EXTRAS`): none to show.
+                Some(_) if !crate::brain::EXTRAS => json!({ "off": true }),
                 Some(s) => crate::brain::insights::view(s).map(|mut v| {
                     v["running"] = json!(BRAIN_INSIGHTS.lock().map(|r| r.contains(&format!("{}:{}", s.0, s.1))).unwrap_or(false));
                     v
@@ -1463,7 +1465,7 @@ fn brain_sync_now() {
             let r = match crate::brain::sync() {
                 Ok(r) => {
                     // New sections get their topics, as after the scheduler's sync.
-                    if r.chunks > 0 && crate::brain::taxonomy::current().is_some() {
+                    if crate::brain::EXTRAS && r.chunks > 0 && crate::brain::taxonomy::current().is_some() {
                         if let Err(e) = crate::brain::taxonomy::classify(None, false, &|_| {}) {
                             eprintln!("brain: tagging: {e:#}");
                         }

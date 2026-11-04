@@ -155,7 +155,7 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
     let prompt = format!(
         "{}{}\n\n{}",
         preamble(spec.tools, &format!("`{launcher}` (its full path, exactly so)")),
-        brain_text.map(|b| format!("\n\n<echo_brain>\n{b}\n</echo_brain>")).unwrap_or_default(),
+        brain_text.map(|b| format!("\n\n<echo_recall>\n{b}\n</echo_recall>")).unwrap_or_default(),
         spec.prompt
     );
     let _ = fs::write(spec.run_dir.join("prompt.md"), &prompt);

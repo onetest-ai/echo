@@ -47,7 +47,7 @@ const S = {
   sessions: null, // Claude conversations that can be resumed (`<profile>:folder`, `<profile>:<stamp>`)
   settings: null, // Settings' snapshot (`api/settings`)
   tk: { data: null, project: '', sort: 'due', more: {} }, // Tasks: across projects
-  br: { tab: 'topics', scope: '', data: null, graph: null, node: null, nodeData: null, edit: null }, // the Brain
+  br: { tab: 'sources', scope: '', data: null, graph: null, node: null, nodeData: null, edit: null }, // the Brain
   pj: { client: null, adding: null, pfEdit: null, menu: false, work: null, node: null, openOnly: true, view: 'tree', kind: '', owner: '', editField: null, found: false, foundData: null, data: null, sel: null, tab: 'brief', detail: null, briefEdit: null, showClosed: false, confirmDelete: false, newClient: false, picker: false }, // Projects
   setSection: 'general', // Settings' open section
   noteDraft: '', // the note being typed in My notes' box
@@ -335,7 +335,7 @@ const ACTIVITIES = [
   { id: 'calendar', label: 'Calendar', layout: 'single', icon: ICON('<rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/>') },
   { id: 'projects', label: 'Threads', layout: 'single', icon: ICON('<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M8 13h8"/>') },
   { id: 'tasks', label: 'Tasks', layout: 'single', icon: ICON('<rect x="4" y="4" width="16" height="16" rx="3.5"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/>') },
-  { id: 'brain', label: 'Brain', layout: 'single', when: () => brainOn(), icon: ICON('<path d="M9 4.5a3 3 0 0 0-3 3 3 3 0 0 0-2 5.2A3.2 3.2 0 0 0 7.5 18 2.5 2.5 0 0 0 12 19V6a2 2 0 0 0-3-1.5z"/><path d="M15 4.5a3 3 0 0 1 3 3 3 3 0 0 1 2 5.2A3.2 3.2 0 0 1 16.5 18 2.5 2.5 0 0 1 12 19"/>') },
+  { id: 'brain', label: 'Knowledge', layout: 'single', when: () => brainOn() || knowledgeTabs().length > 0, icon: ICON('<path d="M9 4.5a3 3 0 0 0-3 3 3 3 0 0 0-2 5.2A3.2 3.2 0 0 0 7.5 18 2.5 2.5 0 0 0 12 19V6a2 2 0 0 0-3-1.5z"/><path d="M15 4.5a3 3 0 0 1 3 3 3 3 0 0 1 2 5.2A3.2 3.2 0 0 1 16.5 18 2.5 2.5 0 0 1 12 19"/>') },
   { id: 'settings', label: 'Settings', layout: 'single', bottom: true, icon: ICON('<circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/>') },
 ]
 /** A call's tabs, in order. `x` = what the call has: `{recording, chat, frames, actions}` (counts, or
@@ -587,9 +587,10 @@ function route() {
   if (sm && sm[1] === 'vocabulary') { S.view = 'calls'; setTimeout(() => { Layout.show('vocabulary', panelViews()); layoutChanged() }); return }
   if (sm) { S.view = 'settings'; if (sm[1]) S.setSection = sm[1]; return }
   if (h === 'tasks') { S.view = 'tasks'; return }
-  const bm = h.match(/^brain(?:\/(\w+))?$/)
-  if (bm && !brainOn()) { S.view = 'calls'; return }
-  if (bm) { S.view = 'brain'; if (bm[1]) S.br.tab = bm[1]; return }
+  // Knowledge: Recall's tabs and the plugins' (`knowledge.tab`, `#brain/<plugin>:<id>/<its route>`).
+  const bm = h.match(/^brain(?:\/([\w:-]+)(?:\/(.*))?)?$/)
+  if (bm && !brainOn() && !knowledgeTabs().length) { S.view = 'calls'; return }
+  if (bm) { S.view = 'brain'; if (bm[1]) S.br.tab = bm[1]; S.plRoute = bm[2] || ''; return }
   if (h === 'found') { S.view = 'projects'; S.pj.found = true; S.pj.client = null; S.pj.sel = null; S.pj.detail = null; return }
   const cm2 = h.match(/^client\/([a-z0-9-]+)(?:\/(\w+))?$/)
   if (cm2) {
@@ -2115,7 +2116,7 @@ function eventProjects(e) {
 // a download run as the tray's own actions (`settings_action`). ────────────────────────────────
 const SETTINGS_SECTIONS = [
   ['general', 'General'], ['recording', 'Recording'], ['transcription', 'Transcription'], ['ai', 'AI & minutes'],
-  ['calendar', 'Calendar & chat'], ['brain', 'Brain'], ['me', 'About me'], ['deliver', 'Sends to you'], ['plugins', 'Plugins'], ['layout', 'Layout'], ['health', 'Health'],
+  ['calendar', 'Calendar & chat'], ['brain', 'Knowledge'], ['me', 'About me'], ['deliver', 'Sends to you'], ['plugins', 'Plugins'], ['layout', 'Layout'], ['health', 'Health'],
 ]
 /** Save the profile as edited; shown rendered again once the app has it. */
 function saveMeProfile() {
@@ -2265,9 +2266,9 @@ function documentsSettings(b, s, field) {
 
 function brainSettings(st) {
   const b = st.brain
-  if (!b) return '<p class="set-sub">This build of Echo has no Brain.</p>'
-  const onRow = setRow('Use the Brain', 'Cross-call memory: your calls, channels, mail and folders indexed for search, topics, insights and Claude. Off: nothing is read, indexed or offered to Claude, and it leaves the window — what it holds stays on disk for when you turn it back on.', sw('brain_enabled', b.enabled !== false, 'Use the Brain'))
-  if (b.enabled === false) return setCard('', [onRow]) + `<p class="set-foot">Kept in <code>${esc(b.path || 'brain/')}</code>.</p>`
+  if (!b) return '<p class="set-sub">This build of Echo has no Recall.</p>'
+  const onRow = setRow('Use Recall', 'What was said, findable: your calls, and your threads\' channels, mail and folders, indexed for search — by words and by meaning — with a link back to the moment, for you and for Claude. Off: nothing is read or indexed and it leaves the window — what it holds stays on disk for when you turn it back on.', sw('brain_enabled', b.enabled !== false, 'Use Recall'))
+  if (b.enabled === false) return setCard('Recall', [onRow]) + `<p class="set-foot">Kept in <code>${esc(b.path || 'brain/')}</code>.</p>`
   const s = b.settings || {}
   const field = (key, val, ph, label, type = 'text') => `<input class="set-in" type="${type}" data-brain-set="${key}" value="${esc(val || '')}" placeholder="${esc(ph)}" aria-label="${esc(label)}" spellcheck="false">`
   const api = `<select class="set-in" data-brain-set="brain_api" aria-label="API"><option value="ollama"${s.api !== 'openai' ? ' selected' : ''}>Ollama</option><option value="openai"${s.api === 'openai' ? ' selected' : ''}>OpenAI-compatible</option></select>`
@@ -2279,13 +2280,13 @@ function brainSettings(st) {
   const asked = `${u.claude || 0} time${u.claude === 1 ? '' : 's'} in the last ${u.days || 7} days` + (u.claude ? ` — ${[['folder', 'Claude in the window'], ['call', 'call sessions'], ['routine', 'routines']].filter(([k]) => sum(by[k])).map(([k, l]) => `${l} ${sum(by[k])}`).join(' · ')}` : '')
   const seen = by.window ? ` · in the window: Also discussed ${by.window.also_discussed || 0}, Mentioned also in ${by.window.mentioned_also_in || 0}` : ''
   const usageRow = setRow('How much it is used', `Claude asked it ${asked}${seen}. Claude sees what it holds and when to ask it at the start of every Echo session.`, '')
-  return setCard('', [
+  return setCard('Recall', [
     onRow,
     usageRow,
     setRow('What it holds', `${held}${last ? `<br>${last}` : ''}`, b.syncing ? '<span class="set-sub">Syncing…</span>' : '<button class="btn" data-brain-sync>Sync now</button>'),
-    setRow('Keep it current', 'Echo adds new and changed calls, channel posts, mail and folder files by itself (checked every 5 minutes).', sw('brain_auto', b.auto, 'Keep the Brain current')),
+    setRow('Keep it current', 'Echo adds new and changed calls, channel posts, mail and folder files by itself (checked every 5 minutes).', sw('brain_auto', b.auto, 'Keep Recall current')),
   ]) + setCard('Meaning (embeddings)', [
-    setRow('Server', 'Echo runs no model: it asks yours. Ollama (e.g. http://localhost:11434) or any OpenAI-compatible server. Without one, the Brain searches by words only.', `${api}${field('brain_endpoint', s.endpoint, 'http://localhost:11434', 'Server address')}`),
+    setRow('Server', 'Echo runs no model: it asks yours. Ollama (e.g. http://localhost:11434) or any OpenAI-compatible server. Without one, Recall searches by words only.', `${api}${field('brain_endpoint', s.endpoint, 'http://localhost:11434', 'Server address')}`),
     setRow('Model', 'An embedding model that knows your languages (e.g. qwen3-embedding, bge-m3). Another model embeds everything again.', field('brain_model', s.model, 'qwen3-embedding', 'Model')),
     setRow('Key', 'Only for a server that wants one (sent as a bearer token; kept on this computer).', field('brain_key', '', s.key ? '•••• set — type to replace' : 'none', 'Key', 'password')),
   ]) + documentsSettings(b, s, field) + `<p class="set-foot">Sources come from your threads — their calls, Teams channels, mail and folders, set on each thread's Profile. Stored in <code>${esc(b.path || 'brain/')}</code>.</p>`
@@ -2569,7 +2570,8 @@ const Plugins = {
   /** What each slot was last drawn for: its buttons run on that. */
   targets: {},
 }
-const SLOTS = ['call.menu', 'calendar.event', 'task.actions']
+// `knowledge.tab`: a tab of the Knowledge activity ({id, label, render() → HTML, after(box)}), `#brain/<plugin>:<id>/<its route>`.
+const SLOTS = ['call.menu', 'calendar.event', 'task.actions', 'knowledge.tab']
 function pluginCtx(id) {
   const add = (list, item) => { list.push({ ...item, plugin: id }); render() }
   const owned = Plugins.owned[id] = Plugins.owned[id] || { listeners: [], styles: [] }
@@ -2610,7 +2612,7 @@ function pluginCtx(id) {
     /** Open one of Echo's own panel views, e.g. `claude-folder` (the Claude · Echo folder session). */
     openEchoPanel: (view) => { if (view.includes(':')) return; go('calls'); setTimeout(() => { Layout.show(view, panelViews()); layoutChanged() }, 50) },
     /** Where the window is: the activity and the Settings section (`#settings/<plugin>:<id>`). */
-    where: () => ({ view: S.view, section: S.setSection, route: S.plRoute || '' }),
+    where: () => ({ view: S.view, section: S.setSection, route: S.plRoute || '', tab: S.view === 'brain' ? S.br.tab : undefined }),
     go: (hash) => go(hash),
     palette: { add: (item) => add(Plugins.palette, item) },
     /** Echo's own pieces, so a plugin looks like Echo. */
@@ -3679,7 +3681,7 @@ function projectProfile(p, data) {
     ${row('Calls', calls)}
     ${row('Sources', sources)}
     ${row('People', people)}
-    ${row(S.pj.tbrain && S.pj.tbrain.taxonomy && S.pj.tbrain.taxonomy.exists ? 'Topics & terms' : 'Terms', terms)}
+    ${row(RECALL_EXTRAS && S.pj.tbrain && S.pj.tbrain.taxonomy && S.pj.tbrain.taxonomy.exists ? 'Topics & terms' : 'Terms', terms)}
     ${row('Notes for Claude', notes)}
     ${row('Look', look)}
     ${row('AI', aiRow)}
@@ -4375,7 +4377,14 @@ document.addEventListener('drop', (e) => {
 // Its topics and terms to review (two layers: your practice, and each client's), the sources it
 // holds, its coverage, and a graph of documents around their topics. Asking is Claude's job (the
 // window's Claude sessions have the Brain); this shows and edits what it is made of.
-const BRAIN_TABS = [['topics', 'Topics'], ['terms', 'Terms'], ['people', 'People'], ['sources', 'Sources'], ['numbers', 'Numbers'], ['coverage', 'Coverage'], ['graph', 'Graph']]
+/** Recall's tabs. Topics, numbers, coverage and the graph were the Brain's and didn't survive our tests (0.8.0, `brain::EXTRAS`):
+ *  their views stay in the code until removed, never shown. */
+const RECALL_EXTRAS = false
+/** The plugins' tabs of Knowledge (its notes, its graph), before Recall's. */
+const knowledgeTabs = () => (Plugins.slots['knowledge.tab'] || []).map((x) => ({ ...x, tab: `${x.plugin}:${x.id}` }))
+const BRAIN_TABS = RECALL_EXTRAS
+  ? [['topics', 'Topics'], ['terms', 'Terms'], ['people', 'People'], ['sources', 'Sources'], ['numbers', 'Numbers'], ['coverage', 'Coverage'], ['graph', 'Graph']]
+  : [['sources', 'Sources'], ['terms', 'Dictionary'], ['people', 'People']]
 const brainQuery = () => { const [k, v] = (S.br.scope || '').split(':'); return k && v ? `?${k}=${encodeURIComponent(v)}` : '' }
 async function loadBrain() {
   const q = brainQuery()
@@ -4402,6 +4411,19 @@ async function loadBrainNode() {
 const clientName = (id) => id === '-' ? 'No client' : ((projClient(id) || {}).name || id)
 const threadChips = (ids) => (ids || []).filter((t) => t !== '-').map((t) => projById(t)).filter(Boolean).map((p) => `<span class="tk-pj">${projIcon(p, 12)}${esc(p.name)}</span>`).join('') + ((ids || []).includes('-') ? '<span class="tk-pj br-none">no thread</span>' : '')
 function brainView() {
+  const ktabs = knowledgeTabs()
+  const kt = ktabs.find((x) => x.tab === S.br.tab)
+  const ktabsHtml = ktabs.map((x) => `<button class="tab" role="tab" data-br-tab="${esc(x.tab)}" aria-selected="${S.br.tab === x.tab}">${esc(x.label)}</button>`).join('')
+  // Recall off: only the plugins' tabs.
+  if (kt || !brainOn()) {
+    const t = kt || ktabs[0]
+    if (!t) return ''
+    S.br.tab = t.tab
+    let html = ''
+    try { html = t.render() } catch (e) { html = `<p class="error">${esc(t.label)}: ${esc(String((e && e.message) || e))}</p>` }
+    const recallTabs = brainOn() ? BRAIN_TABS.map(([id, l]) => `<button class="tab" role="tab" data-br-tab="${id}" aria-selected="false">${l}</button>`).join('') : ''
+    return `<div class="br">${`<header class="pj-head br-head"><div class="br-title"><h2>Knowledge</h2></div><div class="tabs" role="tablist">${ktabsHtml}${recallTabs}</div></header>`}<div class="pane pj-pane wide br-pane plug-act" data-keep-scroll data-ktab="${esc(t.tab)}">${html}</div></div>`
+  }
   const d = S.br.data
   if (!d) return `<div class="skeleton" style="padding:20px">${'<i></i>'.repeat(6)}</div>`
   if (d.error) return `<div class="br"><p class="error">${esc(d.error)}</p></div>`
@@ -4412,7 +4434,8 @@ function brainView() {
   const n = { topics: (tx.topics || []).length, terms: tx.terms_n || 0, sources: inScope != null ? inScope : st.documents || 0 }
   const tabs = BRAIN_TABS.map(([id, l]) => `<button class="tab" role="tab" data-br-tab="${id}" aria-selected="${S.br.tab === id}">${l}${n[id] ? `<span class="n">${nf(n[id])}</span>` : ''}</button>`).join('')
   const sub = st.exists ? `${nf(st.documents)} sources · ${nf(st.chunks)} sections${st.embed_model ? ` · meaning by ${esc(st.embed_model)}` : ' · words only (no embedding server)'}` : 'Empty — it fills as your calls are synced'
-  const head = `<header class="pj-head br-head"><div class="br-title"><h2>Brain</h2><span class="tk-sub">${sub}</span><span class="grow"></span>${scopeSel}<button class="btn ghost" data-go="settings" title="Settings → Brain">Settings</button></div><div class="tabs" role="tablist">${tabs}</div></header>`
+  if (!BRAIN_TABS.some(([t]) => t === S.br.tab)) S.br.tab = 'sources'
+  const head = `<header class="pj-head br-head"><div class="br-title"><h2>Knowledge</h2><span class="tk-sub">${sub}</span><span class="grow"></span>${scopeSel}<button class="btn ghost" data-go="settings" title="Settings → Recall">Settings</button></div><div class="tabs" role="tablist">${ktabsHtml}${tabs}</div></header>`
   const body = S.br.tab === 'terms' ? brainTerms(tx) : S.br.tab === 'sources' ? brainSources() : S.br.tab === 'numbers' ? brainNumbers() : S.br.tab === 'coverage' ? brainCoverage(tx) : S.br.tab === 'graph' ? brainGraph() : S.br.tab === 'people' ? brainPeople() : brainTopics(tx)
   return `<div class="br">${head}<div class="pane pj-pane wide br-pane" data-keep-scroll>${body}</div></div>`
 }
@@ -5465,9 +5488,10 @@ function threadBrain(p) {
     .sort((a, b) => ((b.pinned || []).includes(p.id) - (a.pinned || []).includes(p.id)) || ((b.layer !== 'shared') - (a.layer !== 'shared')) || (b.sections - a.sections))
     .filter((x) => { const k = x.name.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true }).slice(0, 30)
   const more = tx.terms_more || 0
-  return `<div class="tt-topics">${topics.map((x) => `<span class="chipt" title="${esc(x.description || '')}">${esc(x.label)} · ${x.sections}</span>`).join('') || '<span class="set-sub">No topics tagged here yet.</span>'}</div>
+  const topicRow = RECALL_EXTRAS ? `<div class="tt-topics">${topics.map((x) => `<span class="chipt" title="${esc(x.description || '')}">${esc(x.label)} · ${x.sections}</span>`).join('') || '<span class="set-sub">No topics tagged here yet.</span>'}</div>` : ''
+  return `${topicRow}
     <div class="tt-terms">${terms.map((x) => `<span class="tok" title="${esc([x.kind, x.description].filter(Boolean).join(' — '))}">${esc(x.name)}<small>${esc(x.kind)}${(x.pinned || []).includes(p.id) ? ' · pinned' : ''}</small></span>`).join('')}${addTok('bterm', 'A term for this thread — a system, an acronym, a name')}</div>
-    <div class="pf-sub">From the Brain — ${esc(p.client_name || 'your practice')}'s layer and yours. Transcription spells these right on this thread's calls${more > 0 ? ` · ${more} more in <a href="#brain/terms">Brain → Terms</a>` : ''}.</div>`
+    <div class="pf-sub">From your dictionary — ${esc(p.client_name || 'your practice')}'s terms and yours. Transcription spells these right on this thread's calls${more > 0 ? ` · ${more} more in <a href="#brain/terms">Recall → Dictionary</a>` : ''}.</div>`
 }
 
 /** Insights of a client or a thread (`brain/insights.rs`): what no single call shows, each citing two
@@ -5483,7 +5507,7 @@ async function loadInsights(kind, id, force) {
 }
 const INSIGHT_KIND = { moved: ['Position moved', 'warn'], slipping: ['Keeps slipping', 'danger'], recurs: ['Comes back', 'info'], contradiction: ['Contradiction', 'accent'], open: ['Still open', 'mute'] }
 function insightsBlock(kind, id, name) {
-  if (!brainOn()) return ''
+  if (!brainOn() || !RECALL_EXTRAS) return ''
   const k = `${kind}:${id}`
   if (insights.key !== k) { loadInsights(kind, id); return '' }
   const d = insights.data
@@ -6107,6 +6131,10 @@ function render() {
     patch(primary, `<main class="main">${noticesBar()}${settingsView()}</main>`)
   } else if (S.view === 'brain') {
     patch(primary, `<main class="main">${noticesBar()}${brainView()}</main>`)
+    // A plugin's Knowledge tab draws after the page is in (its graph).
+    const kt = knowledgeTabs().find((x) => x.tab === S.br.tab)
+    const box = kt && primary.querySelector(`[data-ktab="${CSS.escape(kt.tab)}"]`)
+    try { if (box && kt.after) kt.after(box) } catch (e) { console.error(e) }
     drawGraph()
     drawPeople()
   } else if (S.view === 'tasks') {

@@ -172,7 +172,7 @@ impl Config {
 }
 
 pub fn dir(client: &str) -> PathBuf {
-    crate::paths::home().join("brain").join("numbers").join(client)
+    crate::brain::dir().join("numbers").join(client)
 }
 
 pub fn load_config(client: &str) -> Option<Config> {
@@ -260,7 +260,7 @@ pub fn served() -> Vec<String> {
 
 /// Clients with facts or a config.
 pub fn clients() -> Vec<String> {
-    let mut out: Vec<String> = std::fs::read_dir(crate::paths::home().join("brain").join("numbers"))
+    let mut out: Vec<String> = std::fs::read_dir(crate::brain::dir().join("numbers"))
         .into_iter()
         .flatten()
         .flatten()

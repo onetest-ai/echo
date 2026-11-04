@@ -612,6 +612,15 @@ task created from this call within a minute of the item's moment sharing a third
 moment; ¾ when farther) shows its task as a chip instead of a second line (`action_tasks`).
 
 ## The Brain (`brain/`; plan and phases: `docs/brain-design.md`)
+**Since 0.8.0 the window calls it Recall** (2026-11-04, the user): the index of what was said — sources, search,
+related, the dictionary; activity Recall (tabs Sources, Dictionary, People), Settings → Recall (Use Recall), `<echo_recall>`
+for sessions, the `echo` MCP. Its folder is `<home>/recall` (`brain::dir`, the old `<home>/brain` moved there the first
+time it is asked for). The window shows it inside one **Knowledge** activity (`#brain/<tab>`): the plugins' tabs first
+(slot `knowledge.tab` — `{id, label, render, after}`, `#brain/<plugin>:<id>/<its route>`, `ctx.where().tab`; the Knowledge
+plugin's notes and graph), then Recall's; Settings → Knowledge holds Recall's card. **Switched off** (`brain::EXTRAS` / app.js `RECALL_EXTRAS`, false: they didn't survive our tests;
+code kept until removed): topics (builds, tagging, drift, moves, split, their Inbox items), insights, the numbers lane,
+the Graph and Coverage tabs; one notification says so (`tell_recall`, once, to someone who had topics). Lasting facts
+are the Knowledge plugin's (Echo's own Obsidian vault). The code and these notes keep "brain".
 Cross-call intelligence as Echo's own: Brain (onetest-ai/applied_skills `bundles/brain`) ported into the app — **one per
 user**, **facts only** (calls now; Teams channels, mail and thread folders next — the stakeholder map and the work ledger
 are referenced by id, never ingested), **nothing copied** (every section links back: `echo://call/<name>?t=<s>`, later a

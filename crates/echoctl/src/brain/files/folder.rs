@@ -9,7 +9,7 @@
 
 use super::{pdf, render, route, vision, Page};
 use crate::brain::store::{self, Input};
-use crate::{paths, projects};
+use crate::projects;
 use anyhow::{anyhow, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
@@ -38,7 +38,7 @@ pub fn ensure_schema(c: &Connection) -> Result<()> {
 }
 
 pub fn assets_dir(id: &str) -> PathBuf {
-    paths::home().join("brain").join("assets").join(id)
+    crate::brain::dir().join("assets").join(id)
 }
 
 fn new_id(root: &str, rel: &str) -> String {

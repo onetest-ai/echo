@@ -94,7 +94,7 @@ fn cache_path(profile: &str, about: &str, msgs: &[Msg]) -> std::path::PathBuf {
         h.update(format!("{}\0{}\0{}\0{}\n", m.i, m.at, m.from, m.text).as_bytes());
     }
     let k: String = h.finalize().iter().take(16).map(|b| format!("{b:02x}")).collect();
-    paths::home().join("brain").join("digests").join(format!("{k}.json"))
+    crate::brain::dir().join("digests").join(format!("{k}.json"))
 }
 
 /// Was this read before (no model needed)?
