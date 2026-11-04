@@ -1418,6 +1418,30 @@ const panelViews = () => PANEL_VIEWS.filter((v) => !v.when || v.when())
 // loses the scrollback. Output comes by a long poll of `api/pty/<id>?from=<byte>` (all of it after
 // a window reopens: the app keeps 2 MB); keys and size go back over IPC.
 const Terms = new Map() // key → {id, term, fit, el, from, exited, polling, cols, rows}
+
+/** Light or dark as the user chose (Settings → General → Appearance; this computer's window), else the system's.
+ *  The CSS already has both (`:root[data-theme]`); graphs and terminals are drawn again in the new colours. */
+const Theme = (() => {
+  const KEY = 'echo.theme'
+  const read = () => { try { const v = localStorage.getItem(KEY); return v === 'light' || v === 'dark' ? v : '' } catch { return '' } }
+  const apply = () => {
+    const v = read()
+    if (v) document.documentElement.dataset.theme = v; else delete document.documentElement.dataset.theme
+    document.documentElement.style.colorScheme = v || ''
+  }
+  return {
+    chosen: read,
+    apply,
+    set(v) {
+      try { if (v) localStorage.setItem(KEY, v); else localStorage.removeItem(KEY) } catch { /* storage off */ }
+      apply()
+      GraphView.retheme()
+      for (const e of Terms.values()) if (e.term) e.term.options.theme = termTheme()
+      render()
+    },
+  }
+})()
+Theme.apply()
 const termTheme = () => {
   const css = getComputedStyle(document.documentElement)
   const v = (n) => css.getPropertyValue(n).trim()
@@ -1646,7 +1670,7 @@ function minutesTab(c) {
   const busy = run && (run.state === 'queued' || run.state === 'running')
   // The first minutes being written: their box until they are done (the file appears mid-run).
   if (!c.notes || (busy && !run.had_minutes)) return minutesHint(c, 'No minutes yet', 'The transcript is ready.')
-  const frame = `<iframe id="minutes-frame" sandbox="allow-scripts" referrerpolicy="no-referrer" title="Minutes" src="minutes/${encodeURIComponent(c.name)}?v=${encodeURIComponent(c.minutes_rev || '')}"></iframe>`
+  const frame = `<iframe id="minutes-frame" sandbox="allow-scripts" referrerpolicy="no-referrer" title="Minutes" src="minutes/${encodeURIComponent(c.name)}?v=${encodeURIComponent(c.minutes_rev || '')}${Theme.chosen() ? `&theme=${Theme.chosen()}` : ''}"></iframe>`
   return { bar: minutesBar(c), frame }
 }
 
@@ -2693,6 +2717,7 @@ const SETTINGS_BODY = {
     const upd = st.update ? actBtn('update', `Update to ${st.update}…`, '', true) : actBtn('check_updates', 'Check for updates')
     return `<h2>General</h2>` + setCard('', [
       setRow('Data folder', `<code>${esc(st.home)}</code> — calls, transcripts and minutes live here.`, actBtn('change_home', 'Change…')),
+      setRow('Appearance', 'Light or dark for Echo’s window on this computer — or as your system is set.', `<div class="seg" role="group" aria-label="Appearance">${[['', 'System'], ['light', 'Light'], ['dark', 'Dark']].map(([v, l]) => `<button data-theme-set="${v}" aria-pressed="${Theme.chosen() === v}">${l}</button>`).join('')}</div>`),
       setRow('Start at login', 'Echo runs in the menu bar from when you log in.', sw('autostart', st.autostart, 'Start at login')),
       /Mac/.test(navigator.platform || navigator.userAgent) ? setRow('Hide from the Dock when the window is closed', st.hide_dock_icon ? 'Echo shows in the Dock only while its window is open; otherwise only in the menu bar.' : 'Echo stays in the Dock while it runs: click it to open the window, even when a full menu bar hides its icon.', sw('hide_dock_icon', st.hide_dock_icon, 'Hide from the Dock when the window is closed')) : '',
       setRow('Command line', st.cli ? '<code>echoctl</code> is on your PATH.' : 'Install <code>echoctl</code> so scripts and Claude Code can drive Echo.', st.cli ? '<span class="set-ok">Installed ✓</span>' : actBtn('install_cli', 'Install…')),
@@ -5412,7 +5437,12 @@ document.addEventListener('keydown', (e) => {
   if (e.target.id === 'br-rename' && e.key === 'Escape') { S.br.edit = null; render() }
 })
 window.addEventListener('resize', () => { if (S.view === 'brain') GraphView.resize() })
-matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { GraphView.retheme(); if (S.view === 'brain') render() })
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  if (Theme.chosen()) return // the user's choice holds
+  GraphView.retheme()
+  for (const e of Terms.values()) if (e.term) e.term.options.theme = termTheme()
+  render()
+})
 
 /** A thread's topics and terms from the Brain (null when there is no taxonomy yet: the old glossary
  *  shows instead). Topics with their sections here; terms pinned here first, then by mentions. */
@@ -6159,7 +6189,7 @@ document.addEventListener('click', (e) => {
   const menuWas = S.menuOpen
   if (menuWas && !(e.target.closest && e.target.closest('[data-cmd="call-menu"]'))) S.menuOpen = false
   if (S.laterOpen && !(e.target.closest && e.target.closest('[data-cmd^="later-"]'))) { S.laterOpen = false; render() }
-  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-go],[data-conv-keep],[data-br-pclosed],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
+  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-theme-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-go],[data-conv-keep],[data-br-pclosed],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
   if (!t) { if (menuWas) render(); return }
   // Sign-ins (`signin.rs`): shown at once (starting / stopping / checking) until the next poll
   // brings the app's state.
@@ -6194,6 +6224,7 @@ document.addEventListener('click', (e) => {
   if (t.dataset.langDel) { const l = (S.settings.languages || []).filter((x) => x !== t.dataset.langDel); S.settings.languages = l; send({ cmd: 'settings_set', key: 'languages', value: l }); return render() }
   if (t.dataset.vocabDel) { const v = (S.settings.vocabulary || []).filter((x) => x !== t.dataset.vocabDel); S.settings.vocabulary = v; send({ cmd: 'settings_set', key: 'vocabulary', value: v }); return render() }
   if (t.dataset.reclangSet !== undefined) { setRecordLang(t.dataset.reclangSet); return render() }
+  if (t.dataset.themeSet !== undefined) return Theme.set(t.dataset.themeSet)
   if (t.dataset.layoutMove) { Layout.move(t.dataset.layoutMove, t.dataset.to, PANEL_VIEWS); return layoutChanged() }
   if (t.dataset.layoutReset !== undefined) { Layout.load({}); return layoutChanged() }
   if (t.dataset.termOutput) { S.termOutput = S.termOutput || {}; S.termOutput[t.dataset.termOutput] = !S.termOutput[t.dataset.termOutput]; return render() }
