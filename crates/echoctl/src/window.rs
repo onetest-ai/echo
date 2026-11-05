@@ -2156,6 +2156,11 @@ pub fn handle(msg: &str) -> Handled {
             Err(e) => notice(&format!("{e:#}")),
         },
         // Where the window's panels and views go (`Layout` in app.js); nothing else reads it.
+        // My work's Claude icon: the user's words about one task, done by `claude -p` in the background.
+        "task_ask" => match crate::today::ask_task(v["ask"].as_str().unwrap_or(""), v["project"].as_str().unwrap_or(""), v["node"].as_str().unwrap_or(""), v["text"].as_str().unwrap_or("")) {
+            Ok(()) => true.into(),
+            Err(e) => notice(&format!("{e:#}")),
+        },
         // A call opened with its minutes: they are read (Today's "new").
         "minutes_seen" => {
             if let Some(d) = call_named(&v) {

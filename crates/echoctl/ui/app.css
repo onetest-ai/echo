@@ -1900,14 +1900,21 @@ select.set-in { width: auto; margin-right: 6px; }
 .td-now { display: flex; align-items: center; gap: 8px; color: var(--recording); font-size: 11px; font-family: var(--mono); }
 .td-now::after { content: ""; flex: 1; height: 1px; background: var(--recording); }
 .td-tasks { display: flex; flex-direction: column; gap: 6px; }
-.td-task { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 10px; align-items: start; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.td-task { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px 10px; align-items: start; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
 .td-task:hover { border-color: var(--line-strong); background: var(--surface); }
-.td-task-t { font-size: 13px; line-height: 1.4; color: var(--text); text-decoration: none; }
-.td-task-t:hover { text-decoration: underline; }
+.td-task-t { font-size: 13px; line-height: 1.4; }
+.td-task-t a { color: var(--text); text-decoration: none; }
+.td-task-t a:hover { text-decoration: underline; }
+.td-task-t .td-due { display: inline-flex; vertical-align: -3px; margin-right: 6px; padding: 0; }
 .td-task-m { grid-column: 1 / -1; display: flex; align-items: center; gap: 5px; font: 11.5px var(--mono); color: var(--text-3); }
-.td-close { margin-left: auto; width: 22px; height: 22px; color: var(--text-3); }
-.td-close svg { width: 15px; height: 15px; }
+.td-icos { margin-left: auto; display: flex; gap: 2px; }
+.td-ico { width: 28px; height: 28px; color: var(--text-3); }
+.td-ico svg { width: 18px; height: 18px; }
+.td-task:hover .td-ico { color: var(--text-2); }
+.td-ico:hover { color: var(--accent-ink); }
 .td-task:hover .td-close { color: var(--accent-ink); }
+.td-askbar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; margin-bottom: 8px; border-radius: 8px; background: var(--accent-soft); font-size: 12.5px; }
+.td-askbar.failed { background: color-mix(in srgb, var(--warn) 14%, transparent); }
 .td-modal { position: fixed; inset: 0; z-index: 30; background: rgb(0 0 0 / 0.35); display: flex; align-items: center; justify-content: center; }
 .td-dialog { width: min(440px, calc(100vw - 32px)); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--r-panel); box-shadow: var(--shadow); padding: 18px; display: flex; flex-direction: column; gap: 8px; }
 .td-dialog h3 { margin: 0; font-size: 15px; font-weight: 650; }

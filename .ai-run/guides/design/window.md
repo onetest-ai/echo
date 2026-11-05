@@ -239,6 +239,13 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
 - A task closes from My work only through its close icon: a dialog asks first, with an optional comment kept in its
   history (a human edit's `note`, ≤ 500 chars). A one-click tick closed tasks by accident; a thread's sync closes what
   its calls and mail show done, so this is for what they don't.
+- Each task card has two icons: Claude (a dialog: what should change — "move it two weeks later") and close. The ask runs
+  `claude -p` with no tools on the thread's AI profile (`today::ask_task`, `livenotes::complete_text`; IPC `task_ask`):
+  the task (title, state, due, owners, description, its last quotes) and today's date go in as context, an edit comes
+  back as JSON — only due, state, owners, title kept (`parse_edit`) — and Echo applies it as the user's own edit with the
+  words as its note; the outcome (`<home>/.echo/task-asks.json`, `/api/today` `asks`) shows above My work with Undo. A
+  session in the Claude panel was tried first: interactive, a workspace-trust prompt, slower — the user wants `-p`.
+- The date icon sits before the title's words.
 - The header counts your late tasks. Ideas from the Meeting Notebook plugin (onetest-ai/echo-plugins#1) by Adam
   Auerbach: the late count, minutes' state and new minutes, closing from My work.
 - An empty part isn't drawn. Not yet: Needs you now (tagged / burning in the last 24 h) — the next step.

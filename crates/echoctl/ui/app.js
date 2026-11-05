@@ -1065,8 +1065,12 @@ function todayView() {
     const pj = all.find((x) => x.id === t.project)
     const where = [kind, who, pj ? pj.name : ''].filter(Boolean).map(esc).join(' · ')
     // Close… asks first in a dialog (`todayCloseDialog`); the title opens the task.
-    const close = `<button class="icon-btn td-close" data-today-close="${esc(t.id)}" data-project="${esc(t.project)}" data-title="${esc(t.title)}" title="Close this task…" aria-label="Close “${esc(t.title)}”…">${ICON('<circle cx="12" cy="12" r="8"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/>')}</button>`
-    return `<div class="td-task"><a class="td-task-t" href="${esc(t.link)}">${esc(t.title)}</a>${dueChip(t)}<span class="td-task-m">${pj ? projIcon(pj, 12) : ''}${where}${close}</span></div>`
+    const attrs = `data-project="${esc(t.project)}" data-title="${esc(t.title)}" data-node="${esc(t.id)}"`
+    // Ask Claude to do something with it ("move it two weeks"), and close it — each asks first in a dialog.
+    const ask = `<button class="icon-btn td-ico" data-today-ask="1" ${attrs} title="Ask Claude to change this task…" aria-label="Ask Claude about “${esc(t.title)}”…">${ICON('<path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/><path d="M18.5 15.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>')}</button>`
+    const close = `<button class="icon-btn td-ico" data-today-close="${esc(t.id)}" ${attrs} title="Close this task…" aria-label="Close “${esc(t.title)}”…">${ICON('<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/>')}</button>`
+    // The date's icon before the title's words.
+    return `<div class="td-task"><span class="td-task-t">${dueChip(t)}<a href="${esc(t.link)}">${esc(t.title)}</a></span><span class="td-task-m">${pj ? projIcon(pj, 12) : ''}${where}<span class="td-icos">${ask}${close}</span></span></div>`
   }
   const w = d.work || {}
   // One list by date: late first (the oldest first), then by due date; whose it is stays on each card.
@@ -1075,9 +1079,29 @@ function todayView() {
     ...((w.waiting && w.waiting.items) || []).map((t) => [t, 'waiting for', t.waiting_for && t.waiting_for.who])]
   tasks.sort(([a], [b]) => (b.late ? 1 : 0) - (a.late ? 1 : 0) || String(a.due || '9999').localeCompare(String(b.due || '9999')))
   const cards2 = tasks.map(([t, kind, who]) => card(t, kind, who))
-  const work = cards2.length ? `<section class="td-sec"><h2>My work · this week <button class="link-btn" data-go="tasks">Tasks</button></h2><div class="td-tasks">${cards2.join('')}</div></section>` : ''
+  const work = cards2.length || S.todayAskId ? `<section class="td-sec"><h2>My work · this week <button class="link-btn" data-go="tasks">Tasks</button></h2>${todayAskBar()}<div class="td-tasks">${cards2.join('')}</div></section>` : ''
   const empty = !cards && !day && !work ? '<div class="empty"><div><h3>A quiet day</h3><p>No meetings today and nothing on you in Tasks.</p></div></div>' : ''
   return `<div class="td">${head}${cards}<div class="td-grid">${day}${work}</div>${empty}</div>${todayCloseDialog()}`
+}
+
+/** Today → a task's Claude icon: the user's words go to Echo (IPC `task_ask`), which runs `claude -p` (no tools, the
+ *  thread's profile) with the task as context and applies its edit as the user's own; Today reads the outcome
+ *  (`asks`) until it is there and shows it with Undo. */
+function todayAsk(c, text) {
+  const id = `ask-${Date.now()}`
+  S.todayAskId = id
+  send({ cmd: 'task_ask', ask: id, project: c.project, node: c.node, text })
+  let n = 0
+  const poll = () => loadToday().then(() => { render(); const a = ((S.today && S.today.asks) || []).find((x) => x.id === id); if ((!a || a.state === 'working') && ++n < 60) setTimeout(poll, 2000) })
+  setTimeout(poll, 1000)
+}
+/** The last ask's outcome above My work: what Claude changed (Undo), why it didn't, or that it is working. */
+function todayAskBar() {
+  const a = S.todayAskId && ((S.today && S.today.asks) || []).find((x) => x.id === S.todayAskId)
+  if (!S.todayAskId) return ''
+  if (!a || a.state === 'working') return '<div class="td-askbar"><span class="set-sub">Claude is on it…</span></div>'
+  const undo = a.state === 'done' && a.mid ? `<button class="link-btn" data-today-undo="${esc(a.mid)}" data-project="${esc(a.project)}">Undo</button>` : ''
+  return `<div class="td-askbar${a.state === 'failed' ? ' failed' : ''}"><span class="grow">${esc(a.say || '')}</span>${undo}<button class="icon-btn" data-today-askoff="1" aria-label="Dismiss">×</button></div>`
 }
 
 /** Today → Close…: a dialog — closing a task by hand asks first, with an optional comment (kept in its history).
@@ -1085,6 +1109,13 @@ function todayView() {
 function todayCloseDialog() {
   const c = S.todayClose
   if (!c) return ''
+  if (c.ask) return `<div class="td-modal" data-today-keep="1"><div class="td-dialog" role="dialog" aria-modal="true" aria-labelledby="td-dlg-h">
+    <h3 id="td-dlg-h">Ask Claude about this task</h3>
+    <p>${esc(c.title)}</p>
+    <label for="td-ask-text" class="set-sub">What should change — its date, state, owner or title; you can undo it</label>
+    <textarea id="td-ask-text" rows="3" placeholder="Move it two weeks later"></textarea>
+    <div class="td-dialog-a"><button class="btn ghost" data-today-keep="1">Cancel</button><button class="btn primary" data-today-ask-send="1">Ask Claude</button></div>
+  </div></div>`
   return `<div class="td-modal" data-today-keep="1"><div class="td-dialog" role="dialog" aria-modal="true" aria-labelledby="td-dlg-h">
     <h3 id="td-dlg-h">Close this task?</h3>
     <p>${esc(c.title)}</p>
@@ -6524,7 +6555,7 @@ document.addEventListener('click', (e) => {
   if (S.laterOpen && !(e.target.closest && e.target.closest('[data-cmd^="later-"]'))) { S.laterOpen = false; render() }
   // The sidebar open over a narrow page closes on a click beside it.
   if (S.barOver && !(e.target.closest && e.target.closest('.actbar'))) { S.barOver = false; render() }
-  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-theme-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-go],[data-conv-keep],[data-br-pclosed],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-up],[data-today-seen],[data-today-done],[data-today-retry],[data-today-close],[data-today-keep],[data-prep-write],[data-ev-prep],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
+  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-theme-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-go],[data-conv-keep],[data-br-pclosed],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-up],[data-today-seen],[data-today-done],[data-today-retry],[data-today-close],[data-today-keep],[data-today-ask],[data-today-ask-send],[data-today-undo],[data-today-askoff],[data-prep-write],[data-ev-prep],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
   if (!t) { if (menuWas) render(); return }
   // Sign-ins (`signin.rs`): shown at once (starting / stopping / checking) until the next poll
   // brings the app's state.
@@ -6628,6 +6659,21 @@ document.addEventListener('click', (e) => {
     setTimeout(() => loadToday().then(render), 800)
     return
   }
+  if (t.dataset.todayAsk) {
+    S.todayClose = { ask: true, project: t.dataset.project, node: t.dataset.node, title: t.dataset.title }
+    render()
+    const n = $('#td-ask-text'); if (n) n.focus()
+    return
+  }
+  if (t.dataset.todayAskSend) {
+    const c = S.todayClose, text = (($('#td-ask-text') || {}).value || '').trim()
+    if (!c || !text) return
+    S.todayClose = null
+    todayAsk(c, text)
+    return render()
+  }
+  if (t.dataset.todayUndo) { send({ cmd: 'project', op: 'ledger', id: t.dataset.project, body: { op: 'undo', target: t.dataset.todayUndo } }); S.todayAskId = null; setTimeout(() => loadToday().then(render), 800); return render() }
+  if (t.dataset.todayAskoff) { S.todayAskId = null; return render() }
   if (t.dataset.todayClose) {
     S.todayClose = { project: t.dataset.project, node: t.dataset.todayClose, title: t.dataset.title }
     render()
@@ -7034,6 +7080,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && S.selNote) return hideSelPop()
   if (e.key === 'Escape' && S.lightbox) { S.lightbox = null; return render() }
   if (e.key === 'Escape' && S.todayClose) { S.todayClose = null; return render() }
+  if (e.key === 'Enter' && !e.shiftKey && e.target.id === 'td-ask-text') { e.preventDefault(); const b = $('[data-today-ask-send]'); if (b) b.click(); return }
   if (e.key === 'Escape' && (S.stopAsk || S.listOpen || S.menuOpen || S.laterOpen || S.convAsk || S.overlay || S.barOver)) { S.barOver = false; S.convAsk = null; S.stopAsk = false; S.listOpen = false; S.menuOpen = false; S.laterOpen = false; S.overlay = false; return render() }
   if ((MAC ? e.metaKey : e.ctrlKey) && e.key === ',') { e.preventDefault(); return goActivity('settings') }
   if ((MAC ? e.metaKey : e.ctrlKey) && e.key === '`') { e.preventDefault(); return claudePanel() }
