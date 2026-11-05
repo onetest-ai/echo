@@ -1016,7 +1016,9 @@ function todayView() {
   const date = now.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })
   const meetings = (d.day || []).filter((x) => x.kind === 'meeting').length
   const mine = (d.work && d.work.mine) || { items: [], total: 0 }
-  const head = `<header class="td-head"><h1>Today</h1><span class="set-sub">${esc(date)}${meetings ? ` · ${meetings} meeting${meetings === 1 ? '' : 's'}` : ''}${mine.total ? ` · ${mine.total} task${mine.total === 1 ? '' : 's'} on you` : ''}</span></header>`
+  // How many of yours are late, beside the meetings and tasks (from the Meeting Notebook plugin's Today).
+  const late = (mine.items || []).filter((t) => t.late).length
+  const head = `<header class="td-head"><h1>Today</h1><span class="set-sub">${esc(date)}${meetings ? ` · ${meetings} meeting${meetings === 1 ? '' : 's'}` : ''}${mine.total ? ` · ${mine.total} task${mine.total === 1 ? '' : 's'} on you` : ''}${late ? ` · <span class="warn">${late} late</span>` : ''}</span></header>`
   const cards = (d.cards || []).map((c) => `<section class="td-card"><div class="td-card-h"><b>${esc(c.title)}</b><span class="set-sub">${esc([c.about, c.at ? hm(new Date(c.at)) : ''].filter(Boolean).join(' · '))}</span><button class="btn ghost" data-today-seen="${esc(c.key)}">Got it</button></div><div class="td-md">${c.html}</div>${c.notice ? `<p class="set-sub">${esc(c.notice)}</p>` : ''}</section>`).join('')
   // Your day: a line a meeting or call, the line "now" between past and to come.
   let nowDrawn = false
