@@ -84,6 +84,12 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
 - macOS: transparent title bar with content under it (`with_fullsize_content_view`); the strip posts
   `window_drag` / `window_zoom` (`window::window_cmd`). Windows keeps its native title bar.
 
+### Copy and paste
+- macOS: the app has its own menu bar — Echo (Hide, Hide Others, Quit) and Edit (Undo, Redo, Cut, Copy, Paste, Select
+  All; `tray::app_menu`, muda's predefined items, made once AppKit has launched). WebKit takes ⌘C, ⌘V, ⌘X, ⌘A and ⌘Z
+  only from a menu: without one nothing in the window could be copied. Quit goes through `applicationShouldTerminate:`.
+- Text is selectable everywhere but the window's chrome (buttons, bars, tabs, panel heads).
+
 ### Workbench layout
 - Fixed areas: a 40 px top strip with the **Record pill** at its centre (idle Record ▾ with language + profile;
   armed + Cancel; meeting soon + Record it; recording: clock, title, Stop that asks first), the activity bar, the

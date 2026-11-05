@@ -67,9 +67,9 @@ body {
   font: 13px/1.5 var(--font);
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
-  user-select: none;
-  -webkit-user-select: none;
 }
+/* Text can be selected and copied anywhere (⌘C through the Edit menu); the window's chrome can't. */
+button, .actbar, .topbar, .statusbar, .tabs, .panel-head, .list-head, .group, .pf-l { user-select: none; -webkit-user-select: none; }
 .selectable, .doc, .transcript, .chat { user-select: text; -webkit-user-select: text; }
 button { font: inherit; color: inherit; }
 ::selection { background: var(--accent-soft); }
