@@ -92,9 +92,9 @@ button { font: inherit; color: inherit; }
 
 .topbar {
   grid-area: top; position: relative; display: flex; align-items: center; justify-content: center;
-  background: var(--sidebar); border-bottom: 1px solid var(--line); padding: 0 12px; min-width: 0;
+  background: var(--sidebar); border-bottom: 1px solid var(--line); padding: 0 12px 0 40px; min-width: 0;
 }
-.wb.mac .topbar { padding-left: 84px; } /* the traffic lights */
+.wb.mac .topbar { padding-left: 112px; } /* the traffic lights and the sidebar's switch */
 .pill-slot { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
 .pill-note { position: absolute; top: 38px; left: 50%; transform: translateX(-50%); z-index: 7; background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--r-panel); padding: 8px 10px; box-shadow: var(--shadow); max-width: min(520px, 90vw); }
 .pill {
@@ -144,8 +144,9 @@ button { font: inherit; color: inherit; }
 .act-label { display: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .act:hover { background: var(--line); color: var(--text); }
 .act[aria-current="page"] { background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
-.act-fold { height: 28px; color: var(--text-3); }
-.act-fold svg { width: 15px; height: 15px; }
+/* Its switch sits in the title strip, after the traffic lights on macOS. */
+.bar-flip { position: absolute; left: 8px; top: 7px; color: var(--text-3); }
+.wb.mac .bar-flip { left: 78px; }
 .wb:not(.bar-open):not(.bar-over) .act:hover::after {
   content: attr(data-hint) "\2002" attr(data-key); position: absolute; left: calc(100% + 8px); top: 50%; transform: translateY(-50%);
   padding: 3px 9px; border-radius: var(--r-control); background: var(--surface); border: 1px solid var(--line-strong);
@@ -155,7 +156,6 @@ button { font: inherit; color: inherit; }
 .wb.bar-open .acts, .wb.bar-over .acts { align-items: stretch; padding: 8px; }
 .wb.bar-open .act, .wb.bar-over .act { width: 100%; height: 32px; justify-content: flex-start; padding: 0 10px; }
 .wb.bar-open .act-label, .wb.bar-over .act-label { display: block; }
-.wb.bar-open .act-fold, .wb.bar-over .act-fold { height: 30px; }
 .wb.bar-over .actbar { width: 200px; box-shadow: var(--shadow); }
 .act:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 

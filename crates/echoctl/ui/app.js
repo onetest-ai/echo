@@ -778,10 +778,15 @@ function pill() {
 const BAR_KEY = MAC ? '⌘\\' : 'Ctrl+\\'
 const BAR_ICON = (open) => ICON(`<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/><path d="${open ? 'M15.5 10l-2 2 2 2' : 'M13.5 10l2 2-2 2'}"/>`)
 /** The activity bar: folded to icons by default (each one's name and keys in a hint beside it), or open with the names
- *  and counts (⌘\ / Ctrl+\, its foot button, ⌘K; remembered in the window's layout). */
+ *  and counts (⌘\ / Ctrl+\, the switch in the title strip after the traffic lights — `barButton` —, ⌘K; remembered in
+ *  the window's layout). */
+function barButton() {
+  const open = Layout.effective(window.innerWidth, window.innerHeight, panelViews(), S.overlay, S.barOver).bar.open
+  const what = open ? 'Fold the sidebar' : 'Expand the sidebar'
+  return `<button class="icon-btn bar-flip" data-cmd="bar-flip" aria-expanded="${open}" aria-label="${what}" title="${what} (${esc(BAR_KEY)})">${BAR_ICON(open)}</button>`
+}
 function actbar() {
   const eff = Layout.effective(window.innerWidth, window.innerHeight, panelViews(), S.overlay, S.barOver)
-  const open = eff.bar.open
   const btn = (a, i) => {
     const found = a.id === 'projects' && S.pj.data ? S.pj.data.found_count || 0 : 0
     const badge = a.id === 'settings' && settingsWarnings() ? `<span class="act-badge" aria-label="${settingsWarnings()} to fix">${settingsWarnings()}</span>`
@@ -795,8 +800,7 @@ function actbar() {
   const n = nyOpen().length, urgent = nyOpen().some((i) => i.urgent)
   const shown = Layout.AREAS.some((a) => eff[a].shown && eff[a].active === 'needs')
   const needs = `<button class="act${shown ? ' pressed' : ''}" data-panel-flip="needs" aria-pressed="${shown}" aria-label="Inbox" data-hint="Inbox" data-key="${esc(NY_HINT)}">${NY_ENTRY}<span class="act-label">Inbox</span>${n ? `<span class="act-badge${urgent ? '' : ' new'}" aria-label="${n} open">${n}</span>` : ''}</button>`
-  const fold = `<button class="act act-fold" data-cmd="bar-flip" aria-expanded="${open}" aria-label="${open ? 'Fold the sidebar' : 'Expand the sidebar'}" data-hint="${open ? 'Fold' : 'Expand'}" data-key="${esc(BAR_KEY)}">${BAR_ICON(open)}<span class="act-label">Fold</span></button>`
-  return `<nav class="acts" aria-label="Activities">${top.map(btn).join('')}<span class="acts-grow"></span>${needs}${bottom.map((a) => btn(a, acts.indexOf(a))).join('')}${fold}</nav>`
+  return `<nav class="acts" aria-label="Activities">${top.map(btn).join('')}<span class="acts-grow"></span>${needs}${bottom.map((a) => btn(a, acts.indexOf(a))).join('')}</nav>`
 }
 
 function statusbar() {
@@ -6141,7 +6145,7 @@ function render() {
   wb.classList.toggle('bottom-folded', eff.bottom.folded)
   wb.style.setProperty('--right-w', `${eff.right.size}px`)
   wb.style.setProperty('--bottom-h', `${eff.bottom.size}px`)
-  patch($('#r-top'), `<div class="pill-slot">${pill()}</div>`)
+  patch($('#r-top'), `${barButton()}<div class="pill-slot">${pill()}</div>`)
   patch($('#r-act'), actbar())
   patch($('#r-status'), statusbar())
   patch($('#r-right'), panel('right', eff))
