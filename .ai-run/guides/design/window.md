@@ -119,6 +119,9 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   oddly on a desktop); the editor's head and foot stay, its body scrolls; the list's head (Ask Claude, New template)
   stays and its rows scroll; a template chosen or made is scrolled into view. Tried with 44: the page stays put, a
   render is ~1 ms. No filter over the list (tried, not wanted: Ask Claude finds or makes one).
+- Short of room (a tall panel below): the list keeps four rows (220 px) and the editor 320 px, and only then the page
+  scrolls — cards are never squeezed. Settings' side keeps its items' size and scrolls (they used to squeeze, which read
+  as the font changing when Claude's panel opened).
 - The window's Minutes leave out the minutes' header (between their title and first section: date, duration, people,
   Since last time) — the call's own header shows those; the page opened in a browser, the HTML file and `notes.md`
   keep it (`minutes::render_page`, `embed`).
