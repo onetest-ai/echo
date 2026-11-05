@@ -274,7 +274,9 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   (its new part read here, the answer typed by the user and sent by their click on Reply / Reply all —
   `m365::mail_reply_text`, IPC `needs_reply`; Open in Outlook beside it), I'll do it (a dialog: the task's words and its
   thread — the task is theirs, due today, under Follow-ups → From Teams and mail in that thread, made once; IPC
-  `needs_decide`), Won't do. An item leaves when answered (the next read no longer finds it) or decided
+  `needs_decide`; the thread preselected when Echo finds it — the one whose Teams chat it is, else one with the sender among
+  its people by address, then by name — else Choose a thread…, and nothing is made until one is chosen), Won't do.
+  A 1:1 chat is labelled by the person ("Chat with Dana Kowal"). An item leaves when answered (the next read no longer finds it) or decided
   (`<home>/.echo/needs.json`, decisions kept two days). No snooze, no fold, no notifications: only in Today.
 - ⌘K on Today acts on it (target "Today"): Needs you now's items (Reply in Teams / Read and reply, I'll do it, Won't do),
   Prepare / Show prep for meetings still to come, and Close / Ask Claude for each task this week — each the click on its

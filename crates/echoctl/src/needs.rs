@@ -84,8 +84,19 @@ fn automated(addr: &str, name: &str, subject: &str) -> bool {
         || ["accepted:", "declined:", "tentative:", "canceled:", "cancelled:", "automatic reply", "out of office"].iter().any(|p| s.starts_with(p))
 }
 
+/// The open thread an item likely belongs to: the one whose Teams chat it is, else one with its sender among its
+/// people (by address, then by name) — preselected for I'll do it; none when nothing matches.
+fn thread_for(threads: &[crate::projects::Project], chat: &str, email: &str, name: &str) -> Option<String> {
+    let open = || threads.iter().filter(|p| !p.stage.closed());
+    let by_chat = open().find(|p| !chat.is_empty() && p.sources.iter().any(|s| s.kind == "teams_chat" && s.id == chat));
+    let by_mail = || open().find(|p| !email.is_empty() && p.people.iter().any(|m| m.email.as_deref().is_some_and(|e| e.eq_ignore_ascii_case(email))));
+    let by_name = || open().find(|p| !name.trim().is_empty() && p.people.iter().any(|m| m.name.eq_ignore_ascii_case(name.trim())));
+    by_chat.or_else(by_mail).or_else(by_name).map(|p| p.id.clone())
+}
+
 /// Teams: 1:1 chats whose last word isn't the user's, @mentions of the user with no word of theirs after.
 fn teams_tagged(me: &str, since: DateTime<Utc>) -> Result<Vec<Value>> {
+    let threads = crate::projects::list();
     let v = graph::request("GET", "/me/chats?$expand=lastMessagePreview,members&$orderby=lastMessagePreview/createdDateTime%20desc&$top=30", Body::None, None, &[])?;
     let mut out = vec![];
     for c in v["value"].as_array().into_iter().flatten() {
@@ -104,10 +115,11 @@ fn teams_tagged(me: &str, since: DateTime<Utc>) -> Result<Vec<Value>> {
             if !email.is_empty() && !trusted(email) {
                 continue;
             }
+            let name = last["from"]["user"]["displayName"].as_str().unwrap_or("");
             out.push(json!({
-                "id": format!("teams:{chat}"), "kind": "tagged", "source": "teams", "from": last["from"]["user"]["displayName"],
-                "where": "Teams chat", "at": last["createdDateTime"], "line": plain(last["body"]["content"].as_str().unwrap_or("")).chars().take(160).collect::<String>(),
-                "chat": chat,
+                "id": format!("teams:{chat}"), "kind": "tagged", "source": "teams", "from": name,
+                "where": if name.is_empty() { "Teams chat".to_string() } else { format!("Chat with {name}") }, "at": last["createdDateTime"], "line": plain(last["body"]["content"].as_str().unwrap_or("")).chars().take(160).collect::<String>(),
+                "chat": chat, "thread": thread_for(&threads, chat, email, name),
             }));
             continue;
         }
@@ -119,10 +131,14 @@ fn teams_tagged(me: &str, since: DateTime<Utc>) -> Result<Vec<Value>> {
                 && at(&m["createdDateTime"]).is_some_and(|t| mine_last.is_none_or(|l| t > l))
         });
         if let Some(m) = hit {
+            let from_id = m["from"]["user"]["id"].as_str().unwrap_or("");
+            let email = c["members"].as_array().into_iter().flatten().find(|x| x["userId"].as_str() == Some(from_id)).and_then(|x| x["email"].as_str()).unwrap_or("");
+            let thread = thread_for(&threads, chat, email, m["from"]["user"]["displayName"].as_str().unwrap_or(""));
             out.push(json!({
                 "id": format!("teams:{chat}:{}", m["id"].as_str().unwrap_or("")), "kind": "tagged", "source": "teams", "from": m["from"]["user"]["displayName"],
                 "where": c["topic"].as_str().filter(|t| !t.is_empty()).map(|t| format!("@you in {t}")).unwrap_or_else(|| "@you in a group chat".into()),
                 "at": m["createdDateTime"], "line": plain(m["body"]["content"].as_str().unwrap_or("")).chars().take(160).collect::<String>(), "chat": chat, "url": m["webUrl"],
+                "thread": thread,
             }));
         }
     }
@@ -132,6 +148,7 @@ fn teams_tagged(me: &str, since: DateTime<Utc>) -> Result<Vec<Value>> {
 /// Mail with the user in To, from a colleague or a trusted sender, not automated, with no reply of theirs since.
 fn mail_tagged(since: DateTime<Utc>) -> Result<Vec<Value>> {
     let me = graph::my_address()?.to_lowercase();
+    let threads = crate::projects::list();
     let path = format!(
         "/me/mailFolders/inbox/messages?$filter=receivedDateTime%20ge%20{}&$select=id,subject,from,toRecipients,receivedDateTime,conversationId,webLink,bodyPreview&$top=50",
         since.format("%Y-%m-%dT%H:%M:%SZ")
@@ -164,6 +181,7 @@ fn mail_tagged(since: DateTime<Utc>) -> Result<Vec<Value>> {
         out.push(json!({
             "id": format!("mail:{conv}"), "kind": "tagged", "source": "mail", "from": m["from"]["emailAddress"]["name"], "where": "Mail to you",
             "at": m["receivedDateTime"], "line": subject.chars().take(160).collect::<String>(), "message": m["id"], "url": m["webLink"],
+            "thread": thread_for(&threads, "", &from, m["from"]["emailAddress"]["name"].as_str().unwrap_or("")),
         }));
     }
     Ok(out)
@@ -394,6 +412,28 @@ mod tests {
         assert!(automated("dana@acme.example", "Dana", "Accepted: Weekly sync"));
         assert!(automated("payroll@acme.example", "Auto payroll", "Salary"));
         assert!(!automated("dana@acme.example", "Dana Kowal", "Pilot user list"));
+    }
+
+    #[test]
+    fn an_item_finds_its_thread_by_chat_then_people() {
+        let (_env, _) = paths::testenv::folders("needs-thread");
+        let a = crate::projects::create("Pilot", None, None).unwrap();
+        let b = crate::projects::create("Rollout", None, None).unwrap();
+        crate::projects::update(&a.id, |p| {
+            p.sources.push(crate::projects::Source { kind: "teams_chat".into(), id: "19:pilot".into(), name: None, exclude: vec![] });
+            Ok(())
+        })
+        .unwrap();
+        crate::projects::update(&b.id, |p| {
+            p.people.push(serde_json::from_value(json!({"name": "Dana Kowal", "email": "dana@acme.example"})).unwrap());
+            Ok(())
+        })
+        .unwrap();
+        let ts = crate::projects::list();
+        assert_eq!(thread_for(&ts, "19:pilot", "dana@acme.example", "Dana Kowal").as_deref(), Some(a.id.as_str()), "its chat first");
+        assert_eq!(thread_for(&ts, "19:other", "DANA@acme.example", "").as_deref(), Some(b.id.as_str()), "then the address");
+        assert_eq!(thread_for(&ts, "", "", "dana kowal").as_deref(), Some(b.id.as_str()), "then the name");
+        assert_eq!(thread_for(&ts, "", "lee@acme.example", "Lee"), None);
     }
 
     #[test]
