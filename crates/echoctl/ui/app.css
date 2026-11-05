@@ -1954,7 +1954,7 @@ select.set-in { width: auto; margin-right: 6px; }
 .tp-lh { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
 .tp-row { display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left; padding: 10px 14px; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: inherit; font: inherit; }
 .tp-row:last-child { border-bottom: 0; }
-.tp-row.on { background: var(--accent-soft, rgba(124, 92, 255, 0.10)); box-shadow: inset 2px 0 0 var(--accent); }
+.tp-row.on { background: var(--accent-soft, rgba(124, 92, 255, 0.10)); }
 .tp-n { display: flex; align-items: center; gap: 8px; }
 .tp-tag { font-size: 11px; padding: 1px 7px; border-radius: 9px; background: var(--bg); color: var(--text-2); white-space: nowrap; }
 .tp-tag.ed { background: rgba(240, 162, 74, 0.16); color: var(--warn); }
