@@ -1064,9 +1064,9 @@ function todayView() {
   const card = (t, kind, who) => {
     const pj = all.find((x) => x.id === t.project)
     const where = [kind, who, pj ? pj.name : ''].filter(Boolean).map(esc).join(' · ')
-    // Done right here (the user's own edit, as in Work); the card opens the task.
-    const tick = `<button class="td-tick" data-today-done="${esc(t.id)}" data-project="${esc(t.project)}" title="Mark it done" aria-label="Mark “${esc(t.title)}” done"></button>`
-    return `<div class="td-task">${tick}<a class="td-task-t" href="${esc(t.link)}">${esc(t.title)}</a>${dueChip(t)}<span class="td-task-m">${pj ? projIcon(pj, 12) : ''}${where}</span></div>`
+    // Close… asks first in a dialog (`todayCloseDialog`); the title opens the task.
+    const close = `<button class="icon-btn td-close" data-today-close="${esc(t.id)}" data-project="${esc(t.project)}" data-title="${esc(t.title)}" title="Close this task…" aria-label="Close “${esc(t.title)}”…">${ICON('<circle cx="12" cy="12" r="8"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/>')}</button>`
+    return `<div class="td-task"><a class="td-task-t" href="${esc(t.link)}">${esc(t.title)}</a>${dueChip(t)}<span class="td-task-m">${pj ? projIcon(pj, 12) : ''}${where}${close}</span></div>`
   }
   const w = d.work || {}
   // One list by date: late first (the oldest first), then by due date; whose it is stays on each card.
@@ -1077,7 +1077,21 @@ function todayView() {
   const cards2 = tasks.map(([t, kind, who]) => card(t, kind, who))
   const work = cards2.length ? `<section class="td-sec"><h2>My work · this week <button class="link-btn" data-go="tasks">Tasks</button></h2><div class="td-tasks">${cards2.join('')}</div></section>` : ''
   const empty = !cards && !day && !work ? '<div class="empty"><div><h3>A quiet day</h3><p>No meetings today and nothing on you in Tasks.</p></div></div>' : ''
-  return `<div class="td">${head}${cards}<div class="td-grid">${day}${work}</div>${empty}</div>`
+  return `<div class="td">${head}${cards}<div class="td-grid">${day}${work}</div>${empty}</div>${todayCloseDialog()}`
+}
+
+/** Today → Close…: a dialog — closing a task by hand asks first, with an optional comment (kept in its history).
+ *  A thread's sync closes tasks by itself when its calls and mail say so; this is for what they don't. */
+function todayCloseDialog() {
+  const c = S.todayClose
+  if (!c) return ''
+  return `<div class="td-modal" data-today-keep="1"><div class="td-dialog" role="dialog" aria-modal="true" aria-labelledby="td-dlg-h">
+    <h3 id="td-dlg-h">Close this task?</h3>
+    <p>${esc(c.title)}</p>
+    <label for="td-close-note" class="set-sub">A comment, if you like — why it's done, or where</label>
+    <textarea id="td-close-note" rows="3" placeholder="Sent the diagram to Ravi on Tuesday"></textarea>
+    <div class="td-dialog-a"><button class="btn ghost" data-today-keep="1">Cancel</button><button class="btn primary" data-today-done="${esc(c.node)}" data-project="${esc(c.project)}">Close it</button></div>
+  </div></div>`
 }
 
 /** A meeting still to come (Calls → Coming up today, `echo://prep`): its header and the Prep tab; Transcript and
@@ -6510,7 +6524,7 @@ document.addEventListener('click', (e) => {
   if (S.laterOpen && !(e.target.closest && e.target.closest('[data-cmd^="later-"]'))) { S.laterOpen = false; render() }
   // The sidebar open over a narrow page closes on a click beside it.
   if (S.barOver && !(e.target.closest && e.target.closest('.actbar'))) { S.barOver = false; render() }
-  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-theme-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-go],[data-conv-keep],[data-br-pclosed],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-up],[data-today-seen],[data-today-done],[data-today-retry],[data-prep-write],[data-ev-prep],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
+  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-theme-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-go],[data-conv-keep],[data-br-pclosed],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-up],[data-today-seen],[data-today-done],[data-today-retry],[data-today-close],[data-today-keep],[data-prep-write],[data-ev-prep],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
   if (!t) { if (menuWas) render(); return }
   // Sign-ins (`signin.rs`): shown at once (starting / stopping / checking) until the next poll
   // brings the app's state.
@@ -6614,8 +6628,18 @@ document.addEventListener('click', (e) => {
     setTimeout(() => loadToday().then(render), 800)
     return
   }
+  if (t.dataset.todayClose) {
+    S.todayClose = { project: t.dataset.project, node: t.dataset.todayClose, title: t.dataset.title }
+    render()
+    const n = $('#td-close-note'); if (n) n.focus()
+    return
+  }
+  // Cancel, or a click on the dimmed page around the dialog (not inside it).
+  if (t.dataset.todayKeep && (t.tagName === 'BUTTON' || e.target === t)) { S.todayClose = null; return render() }
   if (t.dataset.todayDone) {
-    send({ cmd: 'project', op: 'ledger', id: t.dataset.project, body: { op: 'edit', node: t.dataset.todayDone, set: { state: 'done' } } })
+    const note = ($('#td-close-note') || {}).value || ''
+    S.todayClose = null
+    send({ cmd: 'project', op: 'ledger', id: t.dataset.project, body: { op: 'edit', node: t.dataset.todayDone, set: { state: 'done' }, note: note.trim() || undefined } })
     // Gone from My work at once; Today is read again once the ledger has it.
     if (S.today && S.today.work) for (const k of ['mine', 'owed', 'waiting']) if (S.today.work[k]) S.today.work[k].items = S.today.work[k].items.filter((x) => !(x.id === t.dataset.todayDone && x.project === t.dataset.project))
     setTimeout(() => loadToday().then(render), 800)
@@ -7009,6 +7033,7 @@ document.addEventListener('keydown', (e) => {
   if (e.target.id === 'sel-note' && e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); return commentSelection() }
   if (e.key === 'Escape' && S.selNote) return hideSelPop()
   if (e.key === 'Escape' && S.lightbox) { S.lightbox = null; return render() }
+  if (e.key === 'Escape' && S.todayClose) { S.todayClose = null; return render() }
   if (e.key === 'Escape' && (S.stopAsk || S.listOpen || S.menuOpen || S.laterOpen || S.convAsk || S.overlay || S.barOver)) { S.barOver = false; S.convAsk = null; S.stopAsk = false; S.listOpen = false; S.menuOpen = false; S.laterOpen = false; S.overlay = false; return render() }
   if ((MAC ? e.metaKey : e.ctrlKey) && e.key === ',') { e.preventDefault(); return goActivity('settings') }
   if ((MAC ? e.metaKey : e.ctrlKey) && e.key === '`') { e.preventDefault(); return claudePanel() }

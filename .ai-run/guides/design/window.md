@@ -234,6 +234,13 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
 - Your day: today's agenda in time order with a line at now — each meeting its threads, its call once recorded (Open the
   call), Show prep / Prepare, Record when it starts / Don't record; a call of today with no meeting on its own line.
 - My work · this week: a card a task due by the end of this week or late (the rest stays in Tasks), one list by date — late first, the oldest first; whose it is (I owe, owed to me, waiting for) on each card — its date as an icon (late: a warning, today: an accent calendar, later this week: a grey one; the date in its hint), its thread under it; the list scrolls inside its card.
+- Your day also says each call's minutes: Writing / Minutes at HH:MM / New minutes with what they hold (decisions,
+  actions, questions — new until the call is opened, `<home>/.echo/minutes-seen.json`) / Minutes failed + Try again.
+- A task closes from My work only through its close icon: a dialog asks first, with an optional comment kept in its
+  history (a human edit's `note`, ≤ 500 chars). A one-click tick closed tasks by accident; a thread's sync closes what
+  its calls and mail show done, so this is for what they don't.
+- The header counts your late tasks. Ideas from the Meeting Notebook plugin (onetest-ai/echo-plugins#1) by Adam
+  Auerbach: the late count, minutes' state and new minutes, closing from My work.
 - An empty part isn't drawn. Not yet: Needs you now (tagged / burning in the last 24 h) — the next step.
 
 ### A prep before each meeting (`prep.rs`)

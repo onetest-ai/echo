@@ -1900,13 +1900,20 @@ select.set-in { width: auto; margin-right: 6px; }
 .td-now { display: flex; align-items: center; gap: 8px; color: var(--recording); font-size: 11px; font-family: var(--mono); }
 .td-now::after { content: ""; flex: 1; height: 1px; background: var(--recording); }
 .td-tasks { display: flex; flex-direction: column; gap: 6px; }
-.td-task { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 3px 10px; align-items: start; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.td-task { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 10px; align-items: start; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
 .td-task:hover { border-color: var(--line-strong); background: var(--surface); }
 .td-task-t { font-size: 13px; line-height: 1.4; color: var(--text); text-decoration: none; }
 .td-task-t:hover { text-decoration: underline; }
-.td-task-m { grid-column: 2 / -1; display: flex; align-items: center; gap: 5px; font: 11.5px var(--mono); color: var(--text-3); }
-.td-tick { width: 16px; height: 16px; margin-top: 2px; border-radius: 4px; border: 1.5px solid var(--line-strong); background: none; padding: 0; cursor: default; }
-.td-tick:hover { border-color: var(--accent); background: var(--accent-soft); }
+.td-task-m { grid-column: 1 / -1; display: flex; align-items: center; gap: 5px; font: 11.5px var(--mono); color: var(--text-3); }
+.td-close { margin-left: auto; width: 22px; height: 22px; color: var(--text-3); }
+.td-close svg { width: 15px; height: 15px; }
+.td-task:hover .td-close { color: var(--accent-ink); }
+.td-modal { position: fixed; inset: 0; z-index: 30; background: rgb(0 0 0 / 0.35); display: flex; align-items: center; justify-content: center; }
+.td-dialog { width: min(440px, calc(100vw - 32px)); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--r-panel); box-shadow: var(--shadow); padding: 18px; display: flex; flex-direction: column; gap: 8px; }
+.td-dialog h3 { margin: 0; font-size: 15px; font-weight: 650; }
+.td-dialog p { margin: 0; color: var(--text-2); }
+.td-dialog textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--line-strong); border-radius: var(--r-control); background: var(--bg); color: var(--text); font: inherit; padding: 8px; resize: vertical; }
+.td-dialog-a { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 .td-due { display: inline-flex; color: var(--text-3); padding-top: 1px; }
 .td-due svg { width: 16px; height: 16px; }
 .td-due.today { color: var(--accent-ink); }
