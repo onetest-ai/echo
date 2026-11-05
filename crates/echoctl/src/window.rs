@@ -751,6 +751,8 @@ fn call_detail(dir: &Path) -> Value {
     v["minutes_rev"] = json!(crate::minutes::revision(dir));
     v["rev"] = json!(rev);
     v["has_log"] = json!(dir.join(crate::notes::LOG).exists());
+    // What kind of meeting it was (the header's chip).
+    v["meeting_type"] = crate::calls::meeting_type(dir);
     // The template its minutes follow and why (a word of its title, the user's choice, Default).
     v["template"] = crate::calls::template_of(dir);
     v["meeting_subject"] = json!(crate::meeting::MeetingContext::load(dir).ok().flatten().and_then(|m| m.subject).filter(|s| !s.trim().is_empty()));
@@ -2175,6 +2177,11 @@ pub fn handle(msg: &str) -> Handled {
             Err(e) => notice(&format!("{e:#}")),
         },
         // Where the window's panels and views go (`Layout` in app.js); nothing else reads it.
+        // The call header's meeting type: the user's, kept from then on.
+        "set_meeting_type" => match crate::calls::set_meeting_type(v["call"].as_str().unwrap_or(""), v["kind"].as_str().unwrap_or("")) {
+            Ok(_) => true.into(),
+            Err(e) => notice(&format!("{e:#}")),
+        },
         // Settings → Templates: save one (a built-in keeps its id: edited), take the user's file away (Reset / Delete).
         "template_save" => {
             let words: Vec<String> = v["match"].as_array().into_iter().flatten().filter_map(|w| w.as_str().map(str::to_owned)).collect();

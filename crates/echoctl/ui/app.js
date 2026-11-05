@@ -997,7 +997,7 @@ function doc() {
   const head = `${listToggle()}<div class="head-row">
         <div style="min-width:0">
           <h2 class="selectable">${esc(c.title)}</h2>
-          <div class="facts">${c.memo ? `<span class="memo-fact">${MIC(12)} Memo</span>` : ''}${d ? `<span>${esc(d.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' }))}, ${esc(hm(d))}</span>` : ''}${c.minutes ? `<span>${c.minutes} min</span>` : ''}${c.imported ? '<span title="Made from the meeting\'s Teams transcript: no audio, no live notes">from Teams transcript</span>' : ''}${people}</div>
+          <div class="facts">${c.memo ? `<span class="memo-fact">${MIC(12)} Memo</span>` : ''}${d ? `<span>${esc(d.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' }))}, ${esc(hm(d))}</span>` : ''}${c.minutes ? `<span>${c.minutes} min</span>` : ''}${meetingTypeChip(c)}${c.imported ? '<span title="Made from the meeting\'s Teams transcript: no audio, no live notes">from Teams transcript</span>' : ''}${people}</div>
           ${callProjects(c)}
         </div>
         <div class="doc-actions">${callMenu(c)}</div>
@@ -1236,6 +1236,23 @@ function writeAgainWith(c) {
   const items = list.map((x) => `<button class="menu-item" role="menuitem" data-tpl-again="${esc(x.id)}"${busy ? ' disabled title="The minutes are being written now"' : ''}>${esc(tplName(x.id))}</button>`).join('')
   return `<div class="menu-sep" role="separator"></div><div class="menu-label">Write again with</div>${items}<button class="menu-item" role="menuitem" data-tpl-edit>Edit templates…</button><div class="menu-sep" role="separator"></div>`
 }
+
+/** What kind of meeting it was — Client, Partner, 1:1, Internal, Industry & Analyst, Other — guessed from who was
+ *  invited, settled by the minutes, changed here by the user (kept from then on). Not on a memo. */
+const MEETING_TYPES = [['client', 'Client'], ['partner', 'Partner'], ['one-on-one', '1:1'], ['internal', 'Internal'], ['industry', 'Industry & Analyst'], ['other', 'Other']]
+function meetingTypeChip(c) {
+  const t = c.meeting_type
+  if (!t || c.memo) return ''
+  const hint = t.by === 'you' ? 'You set this' : t.by === 'echo' ? 'Set by the minutes — change it if it is wrong' : 'Guessed from who was invited — the minutes settle it'
+  return `<label class="mt-chip${t.by === 'guess' ? ' guess' : ''}" title="${esc(hint)}">${esc(t.label)} ▾<select data-meeting-type aria-label="Kind of meeting">${MEETING_TYPES.map(([k, l]) => `<option value="${k}"${t.type === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`
+}
+document.addEventListener('change', (e) => {
+  if (!e.target.matches || !e.target.matches('[data-meeting-type]') || !S.call) return
+  const kind = e.target.value
+  send({ cmd: 'set_meeting_type', call: S.selected, kind })
+  S.call.meeting_type = { type: kind, label: (MEETING_TYPES.find(([k]) => k === kind) || [, kind])[1], by: 'you' }
+  render()
+})
 
 /** The call's one set of actions: a ⋯ menu (the folder, the minutes page, delete). */
 function callMenu(c) {

@@ -84,6 +84,15 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
 - macOS: transparent title bar with content under it (`with_fullsize_content_view`); the strip posts
   `window_drag` / `window_zoom` (`window::window_cmd`). Windows keeps its native title bar.
 
+### Meeting type (`calls::meeting_type`, `meta.json` `meeting_type`; idea from the Meeting Notebook plugin)
+- What kind of meeting a call was, beside whose (threads and clients say that): Client, Partner, 1:1, Internal,
+  Industry & Analyst, Other. Guessed from who was invited (a memo: Other; the user and one colleague: 1:1; colleagues
+  only: Internal; anyone from outside: Client — the same colleague split as the minutes' context); the minutes run
+  settles it from what was said (`echoctl type <dir> <type>`, in `notes::RUN_COMMANDS`, its own call only); the user
+  changes it with the chip in the call's facts (`set_meeting_type`, `by: you` — kept: a run never replaces it).
+- The chip: the type and ▾ over a hidden select; a guess dashed and lighter. `{type}` is a template value.
+- Not yet: picking a template by type, filters by type in Calls and Tasks, using it in Today and prep.
+
 ### Settings → Templates (`templatesSettings`, `/api/templates`, `calls::templates_view`)
 - Its own section after AI & minutes (that one has enough): the shapes Claude writes in, a tab per kind. Minutes now;
   Tasks (the forms of what Run with Claude writes: a mail, a Teams message, a doc, a plan) comes with that feature.

@@ -1511,7 +1511,7 @@ pub(crate) fn rule_path(p: &Path) -> String {
 /// (others' words) unattended, so it can't change Echo's settings, read the calendar or chats, or
 /// quit Echo — nor work on another call (`calls::resolve_call` inside a run). The guard
 /// (`guard.rs`) holds every Bash call to these, as plain commands.
-pub const RUN_COMMANDS: [&str; 8] = ["context", "actions", "speakers", "title", "vocab add", "frames", "transcribe", "memo threads"];
+pub const RUN_COMMANDS: [&str; 9] = ["context", "actions", "speakers", "title", "type", "vocab add", "frames", "transcribe", "memo threads"];
 
 /// The only tools a run has: no web, no agents, and with `--strict-mcp-config` no MCP server.
 const RUN_TOOLS: &str = "Bash,Read,Glob,Grep,Edit,Write,Skill";

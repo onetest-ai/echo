@@ -450,6 +450,7 @@ pub const TEMPLATE_VALUES: &[(&str, &str)] = &[
     ("colleagues", "the colleagues on the call, linked"),
     ("external", "the people from outside, linked"),
     ("organizer", "who sent the invite (`meeting.organizer`)"),
+    ("type", "what kind of meeting it was: Client, Partner, 1:1, Internal, Industry & Analyst, Other (`meeting_type`)"),
     ("thread", "the call's threads, linked from `links.threads`"),
     ("client", "the call's clients, linked from `links.clients`"),
     ("previous", "the previous meeting of this series, linked from `links.previous`"),
@@ -624,6 +625,80 @@ fn duration_min(meta: &Value) -> f64 {
     }
 }
 
+/// Colleagues vs external attendees (the user left out): by the user's email domain and internal organisations', and
+/// a colleague invited on a client address is still a colleague (`people::Colleagues`).
+fn attendees_split(meeting: Option<&MeetingContext>, cfg: &Config) -> (Vec<String>, Vec<String>) {
+    let my_domain = cfg.me.as_ref().and_then(|p| p.email.as_deref()).and_then(domain);
+    let (mut colleagues, mut external) = (vec![], vec![]);
+    if let Some(m) = meeting {
+        let book = crate::people::colleagues();
+        let theirs = book.among(m.organizer.iter().chain(m.attendees.iter()).map(|p| (p.name.as_str(), p.email.as_deref())));
+        for p in m.organizer.iter().chain(m.attendees.iter()) {
+            let is_me = cfg.me.as_ref().is_some_and(|me| me.email.is_some() && me.email == p.email);
+            if is_me {
+                continue;
+            }
+            let label = match &p.email {
+                Some(e) => format!("{} <{e}>", p.name),
+                None => p.name.clone(),
+            };
+            let colleague = p.email.as_deref().is_some_and(|e| theirs.contains(&e.trim().to_lowercase()));
+            match (p.email.as_deref().and_then(domain), &my_domain) {
+                (Some(d), Some(mine)) if &d != mine && !colleague => external.push(label),
+                _ => colleagues.push(label),
+            }
+        }
+        colleagues.dedup();
+        external.dedup();
+    }
+    (colleagues, external)
+}
+
+/// The kinds of meeting a call can be: what it was, beside whose (its threads and clients say that).
+pub const MEETING_TYPES: [(&str, &str); 6] =
+    [("client", "Client"), ("partner", "Partner"), ("one-on-one", "1:1"), ("internal", "Internal"), ("industry", "Industry & Analyst"), ("other", "Other")];
+
+/// A call's meeting type: `meta.json` `meeting_type` — set by the user (`by: you`, kept), or by its minutes run (`by:
+/// echo`) — else a guess from who was invited: a memo is Other; the user and one colleague 1:1; colleagues only
+/// Internal; anyone from outside Client (the minutes tell Partner and Industry & Analyst apart).
+pub fn meeting_type(dir: &Path) -> Value {
+    let label = |t: &str| MEETING_TYPES.iter().find(|(k, _)| *k == t).map(|(_, l)| *l).unwrap_or("Other");
+    let set = &read_json(&dir.join("meta.json"))["meeting_type"];
+    if let Some(t) = set["type"].as_str().filter(|t| MEETING_TYPES.iter().any(|(k, _)| k == t)) {
+        return json!({"type": t, "label": label(t), "by": set["by"].as_str().unwrap_or("echo")});
+    }
+    let t = if crate::memo::is_memo(dir) {
+        "other"
+    } else {
+        let cfg = Config::load().unwrap_or_default();
+        let meeting = MeetingContext::load(dir).ok().flatten();
+        let (colleagues, external) = attendees_split(meeting.as_ref(), &cfg);
+        match (colleagues.len(), external.len(), meeting.is_some()) {
+            (_, _, false) => "other",
+            (_, e, _) if e > 0 => "client",
+            (1, 0, _) => "one-on-one",
+            _ => "internal",
+        }
+    };
+    json!({"type": t, "label": label(t), "by": "guess"})
+}
+
+/// `echoctl type <call> <type>`: the user's choice (kept from then on), or — inside a minutes run Echo started — the
+/// run's, which never replaces the user's.
+pub fn set_meeting_type(call: &str, kind: &str) -> Result<Value> {
+    anyhow::ensure!(MEETING_TYPES.iter().any(|(k, _)| *k == kind), "a meeting type is one of: {}", MEETING_TYPES.map(|(k, _)| k).join(", "));
+    let dir = resolve_call(call)?;
+    let by = if crate::notes::headless() { "echo" } else { "you" };
+    if by == "echo" && meeting_type(&dir)["by"] == "you" {
+        return Ok(json!({"kept": meeting_type(&dir), "why": "the user chose it"}));
+    }
+    update_meta(&dir, |m| {
+        m["meeting_type"] = json!({"type": kind, "by": by});
+        Ok(())
+    })?;
+    Ok(meeting_type(&dir))
+}
+
 /// The minutes gate for a call, as `context` applies it (the skill's), from its files: why it is
 /// too thin, or None.
 pub fn minutes_gate(dir: &Path) -> Option<&'static str> {
@@ -668,31 +743,7 @@ pub fn context(call: &str) -> Result<()> {
     }
     let dominant_language = by_lang.iter().max_by_key(|(_, v)| v.as_u64().unwrap_or(0)).map(|(k, _)| k.clone());
 
-    // Colleagues vs external attendees: by the user's email domain and internal organisations', and a
-    // colleague invited on a client address is still a colleague (`people::Colleagues`).
-    let my_domain = cfg.me.as_ref().and_then(|p| p.email.as_deref()).and_then(domain);
-    let (mut colleagues, mut external) = (vec![], vec![]);
-    if let Some(m) = &meeting {
-        let book = crate::people::colleagues();
-        let theirs = book.among(m.organizer.iter().chain(m.attendees.iter()).map(|p| (p.name.as_str(), p.email.as_deref())));
-        for p in m.organizer.iter().chain(m.attendees.iter()) {
-            let is_me = cfg.me.as_ref().is_some_and(|me| me.email.is_some() && me.email == p.email);
-            if is_me {
-                continue;
-            }
-            let label = match &p.email {
-                Some(e) => format!("{} <{e}>", p.name),
-                None => p.name.clone(),
-            };
-            let colleague = p.email.as_deref().is_some_and(|e| theirs.contains(&e.trim().to_lowercase()));
-            match (p.email.as_deref().and_then(domain), &my_domain) {
-                (Some(d), Some(mine)) if &d != mine && !colleague => external.push(label),
-                _ => colleagues.push(label),
-            }
-        }
-        colleagues.dedup();
-        external.dedup();
-    }
+    let (colleagues, external) = attendees_split(meeting.as_ref(), &cfg);
 
     let user_notes = dir.join(USER_NOTES);
     let user_headings: Vec<String> = fs::read_to_string(&user_notes)
@@ -723,6 +774,8 @@ pub fn context(call: &str) -> Result<()> {
         "meeting": meeting,
         "colleagues": colleagues,
         "external": external,
+        // What kind of meeting it was, so far (a guess from who was invited, or the user's: `by`).
+        "meeting_type": meeting_type(&dir),
         "transcript_chars": chars,
         "chars_by_speaker": by_speaker,
         "chars_by_language": by_lang,
@@ -1716,6 +1769,49 @@ mod tests {
         let before = fs::read_to_string(&f).unwrap();
         template_save(Some(&id), "", &t.keywords, &t.header, &t.sections).unwrap();
         assert_eq!(fs::read_to_string(&f).unwrap(), before);
+    }
+
+    #[test]
+    fn a_meeting_type_is_guessed_from_who_came_and_the_users_choice_is_kept() {
+        let (_env, root) = crate::paths::testenv::folders("calls-meeting-type");
+        let p = |n: &str, e: &str| crate::meeting::Person { name: n.into(), email: Some(e.into()) };
+        let me = p("Dana Kowal", "dana@acme.example");
+        Config { me: Some(me.clone()), ..Default::default() }.save().unwrap();
+        let call = |name: &str, people: Vec<crate::meeting::Person>| {
+            let d = root.join("home/calls").join(name);
+            fs::create_dir_all(&d).unwrap();
+            fs::write(d.join("meta.json"), r#"{"title":"Sync","started_at":"2026-11-04T10:00:00+02:00","ended_at":"2026-11-04T10:30:00+02:00"}"#).unwrap();
+            let m = MeetingContext { subject: Some("Sync".into()), attendees: people, ..Default::default() };
+            fs::write(d.join(crate::meeting::FILE), serde_json::to_vec(&m).unwrap()).unwrap();
+            d
+        };
+        let one = call("2026-11-04_100000-a", vec![me.clone(), p("Lee Park", "lee@acme.example")]);
+        let team = call("2026-11-04_110000-b", vec![me.clone(), p("Lee Park", "lee@acme.example"), p("Kim Ito", "kim@acme.example")]);
+        let client = call("2026-11-04_120000-c", vec![me.clone(), p("Ann Ruiz", "ann@contoso.example")]);
+        assert_eq!(meeting_type(&one), json!({"type": "one-on-one", "label": "1:1", "by": "guess"}));
+        assert_eq!(meeting_type(&team)["type"], "internal");
+        assert_eq!(meeting_type(&client)["type"], "client");
+        // The minutes run settles it; the user's choice is kept from then on, the run's never replaces it.
+        let in_run = |on: bool| {
+            if on {
+                std::env::set_var(crate::notes::HEADLESS, "1");
+                std::env::set_var(crate::guard::RUN_CALL, &client);
+            } else {
+                std::env::remove_var(crate::notes::HEADLESS);
+                std::env::remove_var(crate::guard::RUN_CALL);
+            }
+        };
+        in_run(true);
+        set_meeting_type(&client.display().to_string(), "partner").unwrap();
+        assert_eq!(meeting_type(&client)["by"], "echo");
+        in_run(false);
+        set_meeting_type(&client.display().to_string(), "industry").unwrap();
+        assert_eq!(meeting_type(&client), json!({"type": "industry", "label": "Industry & Analyst", "by": "you"}));
+        in_run(true);
+        set_meeting_type(&client.display().to_string(), "client").unwrap();
+        in_run(false);
+        assert_eq!(meeting_type(&client)["type"], "industry");
+        assert!(set_meeting_type(&client.display().to_string(), "board").is_err());
     }
 
     #[test]
