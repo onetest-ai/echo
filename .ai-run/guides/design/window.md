@@ -121,11 +121,19 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   one line there as if the user had: `Work on this task: "<title>" (echo://task/<thread>/<id>). Use
   /my-skills:<skill>. <words>`. The rest is the user's conversation: their permissions, Echo's skills (read,
   microsoft-365 — a send shows what would go and waits for their yes —, manage to close the task).
-- Skills are Claude Code skills: a name, when to use it (Claude picks by it; only that sits in the context until one
-  is used) and what to do. Echo's own (Follow-up mail) are built in; the user's, and Echo's as they changed them, are
-  `<home>/.echo/skills/<id>/SKILL.md`; Echo writes them as a plugin, `my-skills` (`<config>/my-skills/`), afresh each
-  time the panel's session starts (`terminal::start_folder`, `--plugin-dir`). The Templates page's third tab edits
-  them as it does minutes templates (Built in, Edited + Reset, Yours + Delete, Ask Claude).
+- Skills are Agent Skills (agentskills.io): a folder — `SKILL.md` (frontmatter `name`, `description`, optional
+  `license`, `compatibility`, `metadata`, `allowed-tools`; then what to do) and, as needed, `scripts/`,
+  `references/`, `assets/`. Echo keeps the catalogue, not the content: the Skills tab lists them (description in two
+  lines, what the folder holds, problems, off), checks each by the spec (name = its folder's, lower-case and single
+  hyphens ≤ 64; a description ≤ 1,024; compatibility ≤ 500; SKILL.md ≤ 500 lines) — one with problems stays out of
+  Claude — and shows one read-only (its SKILL.md through the minutes' safe writer); the content is written in VS Code
+  (Open in VS Code, Show in Finder) or by Claude (Ask Claude). Echo's own (Follow-up mail) are built in and read-only
+  until Customize copies them to the user's folder (Reset takes the copy away); New skill makes a folder with a
+  SKILL.md to fill in and opens it; Delete moves one of the user's to the trash; On / off. The user's live in
+  `<home>/.echo/skills/<id>/` (git or a copy from elsewhere works); Echo copies the valid ones that are on, every
+  file, into a plugin `my-skills` (`<config>/my-skills/`) each time the panel's session starts (`--plugin-dir`).
+- The Send to Claude dialog: the task and its thread on top; Just the task, then each usable skill, one line each
+  (its description cut, whole in its hint), the chosen one marked; a two-line note; Send.
 - The card's other Claude icon (Ask Claude) stays: a one-shot change to the task's own fields ("move it two weeks").
 - Only the panel's session: Echo has no way into the user's own Claude Code sessions elsewhere.
 - Not yet: action modes from the minutes (claude: the skill and prompt ready on the action; manual: how to do it).
