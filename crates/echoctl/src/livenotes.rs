@@ -481,6 +481,16 @@ fn complete(p: &Profile, system: &str, user: &str, max_tokens: u32, whole: bool,
 }
 
 /// One prompt, one answer, no tools (the Brain's taxonomy jobs): on `model` (else the profile's
+/// A model's JSON answer: the whole text, or what lies between its first `{` and last `}` (a code fence or words
+/// around it allowed). None when there is none — never a panic, whatever order the braces come in.
+pub(crate) fn json_answer(text: &str) -> Option<serde_json::Value> {
+    let t = text.trim().trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim();
+    serde_json::from_str(t).ok().or_else(|| {
+        let (a, b) = (t.find('{')?, t.rfind('}')?);
+        (a < b).then(|| serde_json::from_str(&t[a..=b]).ok()).flatten()
+    })
+}
+
 /// minutes model) — a local profile answers through its own server.
 #[cfg_attr(not(feature = "brain"), allow(dead_code))]
 pub(crate) fn complete_text(p: &Profile, system: &str, user: &str, max_tokens: u32) -> Result<String> {
@@ -1625,6 +1635,14 @@ pub fn handle_requests() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_json_answer_is_read_or_not_never_a_panic() {
+        assert_eq!(json_answer("```json\n{\"a\": 1}\n```").unwrap()["a"], 1);
+        assert_eq!(json_answer("Here it is: {\"a\": 2} hope it helps").unwrap()["a"], 2);
+        assert!(json_answer("} sorry, no {").is_none());
+        assert!(json_answer("nothing").is_none());
+    }
 
     #[test]
     fn the_transcript_keeps_the_live_notes() {

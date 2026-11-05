@@ -1758,8 +1758,8 @@ fn main() -> Result<()> {
         Cmd::Classify => {
             let agenda = watch::agenda();
             let n = calls::classify(&agenda)?;
-            let types = calls::meeting_types();
-            let out: Vec<_> = agenda.iter().map(|m| serde_json::json!({"subject": m.subject, "start": m.start, "type": calls::event_type(m, &types)})).collect();
+            let book = calls::type_book();
+            let out: Vec<_> = agenda.iter().map(|m| serde_json::json!({"subject": m.subject, "start": m.start, "type": calls::event_type_in(m, &book)})).collect();
             println!("{}", serde_json::to_string_pretty(&serde_json::json!({"classified": n, "meetings": out}))?);
             Ok(())
         }

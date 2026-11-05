@@ -1237,8 +1237,6 @@ function writeAgainWith(c) {
   return `<div class="menu-sep" role="separator"></div><div class="menu-label">Write again with</div>${items}<button class="menu-item" role="menuitem" data-tpl-edit>Edit templates…</button><div class="menu-sep" role="separator"></div>`
 }
 
-/** What kind of meeting it was — Client, Partner, 1:1, Internal, Industry & Analyst, Other — guessed from who was
- *  invited, settled by the minutes, changed here by the user (kept from then on). Not on a memo. */
 /** A calendar meeting's type, from its invite (or a guess while it isn't typed yet); set here for its whole series. */
 function eventTypeChip(e) {
   const t = e.meeting_type
@@ -1256,6 +1254,8 @@ document.addEventListener('change', (e) => {
   for (const ev of (S.cal.data && S.cal.data.events) || []) if (ev.meeting_type && ev.meeting_type.key === key) ev.meeting_type = { ...ev.meeting_type, type: kind, label: name, by: 'you' }
   render()
 })
+/** What kind of meeting it was — Client, Partner, 1:1, Internal, Industry & Analyst, Other — guessed from who was
+ *  invited, settled by the minutes, changed here by the user (kept from then on). Not on a memo. */
 function meetingTypeChip(c) {
   const t = c.meeting_type
   if (!t || c.memo) return ''
@@ -2535,7 +2535,12 @@ function settingsView() {
 // Each change is saved at once (`template_save`, `<home>/.echo/templates/<id>.md`); the next minutes follow it.
 const TPL = { data: null, sel: null, draft: null, word: '', tab: 'minutes', mtSel: null, mtDraft: null }
 const tplName = (id) => id ? id.charAt(0).toUpperCase() + id.slice(1).replace(/-/g, ' ') : ''
-async function loadTemplates() {
+/** One read at a time: renders asking meanwhile share it. */
+function loadTemplates() {
+  if (!TPL.loading) TPL.loading = readTemplates().finally(() => { TPL.loading = null })
+  return TPL.loading
+}
+async function readTemplates() {
   try { TPL.data = await get('api/templates') } catch (e) { TPL.data = { error: String((e && e.message) || e) } }
   const list = (TPL.data && TPL.data.templates) || []
   if (TPL.sel && !TPL.draft) { const t = list.find((x) => x.id === TPL.sel); TPL.draft = t ? tplDraft(t) : null; if (!t) TPL.sel = null }

@@ -89,12 +89,16 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   Analyst, Other — or the user's own (below). It belongs to the meeting, so it is known before it starts:
   - **by its invite**: the app types today's and tomorrow's meetings with the prep scheduler — one model call with no
     tools on the default profile reads each new one's subject, organiser, colleagues and outsiders' domains against
-    every type's how to tell it (`calls::classify`); kept per series (`series::key_of`; a one-off by its event) in
-    `<home>/.echo/meeting-types-of.json`, so a series is typed once; `echoctl classify` runs it now;
+    every type's how to tell it (`calls::classify`, 20 a call, after the preps so a Prepare click never waits on it);
+    kept per calendar series (`id:<series>`), a one-off by its event (`event:<id>`) — never by subject, two "Sync"s
+    are not one — in `<home>/.echo/meeting-types-of.json`, changed only under its lock (`update_state`), and the user's
+    choice made while the model was asked stays; meetings the model left out are asked again the next day, not every
+    pass; `echoctl classify` runs it now;
   - while not typed yet, a guess from who is invited (alone: Other; anyone from outside: Client; one colleague: 1:1;
     more: Internal; the user counted out by address in any case, each person once);
   - the calendar card's chip sets it for the whole series (`set_event_type`, `by: you`).
-- A call takes its meeting's (`by: invite`); its minutes refine it (step 3b, `echoctl type`, in `notes::RUN_COMMANDS`,
+- A call takes its meeting's (`by: invite`; the user's choice on the calendar stays `by: you` on the call, so no minutes
+  run replaces it); its minutes refine it (step 3b, `echoctl type`, in `notes::RUN_COMMANDS`,
   its own call only, decided under the call's meta lock); the user's choice on the call (the chip in its facts,
   `set_meeting_type`) is above all and no run replaces it. Order: the call's own (you, then the minutes) → the
   meeting's (you, then the invite) → the guess. `{type}` is a template value, settled before the minutes are written.

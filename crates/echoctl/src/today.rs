@@ -254,8 +254,7 @@ fn save_ask(v: Value) {
 
 /// The model's edit, kept to the allowed fields (a date as a date, a state as one of the user's).
 fn parse_edit(text: &str) -> Option<(serde_json::Map<String, Value>, String)> {
-    let t = text.trim().trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim();
-    let v: Value = serde_json::from_str(t).ok().or_else(|| serde_json::from_str(&t[t.find('{')?..=t.rfind('}')?]).ok())?;
+    let v = crate::livenotes::json_answer(text)?;
     let say = v["say"].as_str().unwrap_or("").trim().chars().take(300).collect::<String>();
     let mut set = serde_json::Map::new();
     for (k, x) in v["set"].as_object()?.iter() {

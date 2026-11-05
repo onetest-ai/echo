@@ -1011,7 +1011,7 @@ fn calendar(q: &str) -> Value {
     let scheduled: Vec<(String, Vec<String>)> = crate::schedule::load().into_iter().filter_map(|m| Some((m.id?, m.languages))).collect();
     let raw_events = RAW_EVENTS.lock().unwrap_or_else(|e| e.into_inner()).clone();
     let offers = crate::teams_transcript::offers();
-    let mtypes = crate::calls::meeting_types();
+    let tbook = crate::calls::type_book();
     let mut to_check = vec![];
     let mut out = vec![];
     for mut e in events {
@@ -1045,7 +1045,7 @@ fn calendar(q: &str) -> Value {
         }
         // What kind of meeting it is, from its invite (set right here, for the whole series).
         if let Some(m) = e["id"].as_str().and_then(|id| meetings.get(id)) {
-            e["meeting_type"] = crate::calls::event_type(m, &mtypes);
+            e["meeting_type"] = crate::calls::event_type_in(m, &tbook);
         }
         // A recurring meeting: its series and what Echo does with every meeting of it (set right here).
         if let Some(m) = e["id"].as_str().and_then(|id| meetings.get(id)).filter(|m| m.series_id.is_some()) {
@@ -2183,7 +2183,6 @@ pub fn handle(msg: &str) -> Handled {
             Ok(_) => true.into(),
             Err(e) => notice(&format!("{e:#}")),
         },
-        // Where the window's panels and views go (`Layout` in app.js); nothing else reads it.
         // The calendar's chip: a meeting's type, the user's, for its whole series.
         "set_event_type" => match crate::calls::set_event_type(v["key"].as_str().unwrap_or(""), v["kind"].as_str().unwrap_or("")) {
             Ok(()) => true.into(),
@@ -2261,6 +2260,7 @@ pub fn handle(msg: &str) -> Handled {
             }
             false.into()
         }
+        // Where the window's panels and views go (`Layout` in app.js); nothing else reads it.
         "save_layout" => {
             if let Err(e) = save_layout(&v["layout"]) {
                 eprintln!("window layout not saved: {e:#}");
