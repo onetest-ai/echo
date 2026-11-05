@@ -1877,7 +1877,7 @@ select.set-in { width: auto; margin-right: 6px; }
 .ev-prep { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
 /* Today: cards delivered to Echo, your day, your work. */
-.td { padding: 18px 24px 32px; display: flex; flex-direction: column; gap: 16px; max-width: 1200px; }
+.td { padding: 18px 24px 32px; display: flex; flex-direction: column; gap: 16px; }
 .td-head { display: flex; align-items: baseline; gap: 12px; }
 .td-head h1 { margin: 0; font-size: 20px; font-weight: 650; }
 .td-card { border: 1px solid var(--line); border-radius: var(--r-panel); background: var(--surface); padding: 12px 16px; display: flex; flex-direction: column; gap: 6px; }
