@@ -4,9 +4,13 @@ match: [daily, sync, standup, stand-up, status, weekly]
 ---
 # {title}
 
-{date} · {duration} · {participants} · {thread}
+**When:** {date} · {duration}
 
-Since last time ({previous}): {what moved since then, in one line — only when there is real continuity}
+**Who:** {participants}
+
+**Thread:** {thread}
+
+**Since last time** ({previous}): {what moved since then, in one line — only when there is real continuity}
 
 ## Summary
 One sentence: the overall state of the work. Then **Highlights**: 3–7 bullets, each `**Topic:** what was said, with names and numbers [mm:ss]`. Then **Key dates**: up to three dates or deadlines that were said, each `**date** — what falls on it [mm:ss]`, only when any were. Risks go under Blockers & risks.

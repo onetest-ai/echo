@@ -112,6 +112,9 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   with… is in the call's ⋯ menu: the other templates (not while minutes are being written) and Edit templates…
   (IPC `write_notes` + `template`, kept in the call's `meta.json` `template`, so later runs follow it too; a template
   since deleted falls back to the title's). `calls::template_of`.
+- The built-ins' header is labelled lines, a paragraph each — **When:** {date} · {duration}, **Who:** {participants},
+  **Thread:** {thread}, **Since last time** ({previous}): … — plain text, no block of its own (a smaller boxed block was
+  rejected). The editor's fields grow with what is in them (`field-sizing: content`): every line break in view.
 - The window's Minutes leave out the minutes' header (between their title and first section: date, duration, people,
   Since last time) — the call's own header shows those; the page opened in a browser, the HTML file and `notes.md`
   keep it (`minutes::render_page`, `embed`).

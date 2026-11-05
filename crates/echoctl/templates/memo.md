@@ -4,7 +4,7 @@ match: []
 ---
 # {title}
 
-{date} · {duration} · Memo
+**When:** {date} · {duration}
 
 ## Summary
 1–2 lines: what the memo is about, naming each thread it covers.

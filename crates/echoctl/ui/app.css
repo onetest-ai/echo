@@ -1989,7 +1989,6 @@ select.set-in { width: auto; margin-right: 6px; }
 .tp-add { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; height: 38px; border: 1px dashed var(--line-strong); border-radius: var(--r-control); background: transparent; color: var(--text-2); font: inherit; }
 .tp-add:hover { border-color: var(--accent); color: var(--accent); }
 .tp-add svg { width: 14px; height: 14px; }
-.tp-hd textarea { font-family: var(--mono, ui-monospace, Menlo, monospace); font-size: 12px; color: var(--text); }
 .tp-vals { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .tp-val { height: 22px; padding: 0 7px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--text-2); font: 11.5px/1 var(--mono, ui-monospace, Menlo, monospace); }
 .tp-val:hover { border-color: var(--accent); color: var(--accent); }
@@ -2012,3 +2011,5 @@ select.set-in { width: auto; margin-right: 6px; }
 .tp-list .set-card { overflow: hidden; }
 .menu .menu-label { padding: 4px 10px 2px; font-size: 11px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
 .menu .menu-item:disabled { opacity: 0.45; }
+/* Template fields grow with what is in them: every line, its line breaks included, in view (no scroll inside). */
+.tp-s textarea, .tp-hd textarea { field-sizing: content; min-height: 3.2em; resize: none; overflow: hidden; font-size: 12.5px; line-height: 1.5; }
