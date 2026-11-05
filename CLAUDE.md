@@ -210,7 +210,7 @@ recording dot and first, the final one after, its live notes beside it either wa
 **A workbench** (`docs/plugins-design.md`): fixed areas — a 40 px top strip with the **Record pill** at its centre
 (idle Record ▾ with language + profile, armed + Cancel, meeting soon + Record it, recording: clock, title, Stop that
 asks first; "Writing the transcript…" beside it), the activity bar (`ACTIVITIES`: Calls `list-detail`, Calendar
-`single`, and at its foot **Settings** — ⌘/Ctrl+, — `single`; ⌘/Ctrl+1…9), the primary view, right and bottom panels (`PANEL_VIEWS`, none yet: drawn only when a view is
+`single`, and at its foot **Settings** — ⌘/Ctrl+, — `single`; ⌘/Ctrl+1…9; **folded to icons by default** — each one's name and keys in a hint beside it — or open with names and counts: ⌘\\ / Ctrl+\\, the button in the title strip (after the traffic lights), ⌘K; `Layout`'s `bar`, saved with the layout; below 900 px it opens over the page, never saved), the primary view, right and bottom panels (`PANEL_VIEWS`, none yet: drawn only when a view is
 in them; the first is **My notes**, right by default; the right panel starts **closed** every time the window opens and opens
 when asked for — `Layout.started()`, the user 2026-11-04 —, in a narrow window over the page), a status bar. The call header's actions are one ⋯ menu (folder, minutes page, delete) plus the
 My notes button; the Minutes tab's bar only says what is going on. Echo's own views are registry entries like a plugin's will be (`CALL_TABS`, `EVENT_ACTIONS`;

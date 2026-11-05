@@ -61,6 +61,19 @@ test('the window opening closes the right panel, however it was saved; its size 
   assert.equal(Layout.effective(1180, 760, VIEWS).right.shown, true)
 })
 
+test('the activity bar starts folded, opens and is remembered; narrow, it opens only over the page', () => {
+  Layout.load(undefined)
+  assert.deepEqual(Layout.effective(1180, 760, VIEWS).bar, { open: false, over: false })
+  Layout.toggleBar()
+  assert.deepEqual(Layout.effective(1180, 760, VIEWS).bar, { open: true, over: false })
+  Layout.load(Layout.toJSON())
+  assert.equal(Layout.effective(1180, 760, VIEWS).bar.open, true)
+  assert.deepEqual(Layout.effective(800, 760, VIEWS).bar, { open: false, over: false })
+  assert.deepEqual(Layout.effective(800, 760, VIEWS, false, true).bar, { open: true, over: true })
+  Layout.load({ bar: { open: 'yes' } })
+  assert.equal(Layout.effective(1180, 760, VIEWS).bar.open, false)
+})
+
 test('an area with no views is never drawn, even when saved open', () => {
   Layout.load({ right: { open: true }, bottom: { open: true } })
   const e = Layout.effective(1180, 760, [])
