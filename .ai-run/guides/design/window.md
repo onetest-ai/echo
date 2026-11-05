@@ -117,8 +117,8 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   rejected). The editor's fields grow with what is in them (`field-sizing: content`): every line break in view.
 - One scroll on Templates, the card's: the page and its heading stay put (a page scrolling away with its header reads
   oddly on a desktop); the editor's head and foot stay, its body scrolls; the list's head (Ask Claude, New template)
-  stays and its rows scroll. Past 8 templates a Filter field (name and words) sits in that head; a template chosen or
-  made is scrolled into view. Tried with 44: the page stays put, a render is ~1 ms.
+  stays and its rows scroll; a template chosen or made is scrolled into view. Tried with 44: the page stays put, a
+  render is ~1 ms. No filter over the list (tried, not wanted: Ask Claude finds or makes one).
 - The window's Minutes leave out the minutes' header (between their title and first section: date, duration, people,
   Since last time) — the call's own header shows those; the page opened in a browser, the HTML file and `notes.md`
   keep it (`minutes::render_page`, `embed`).
