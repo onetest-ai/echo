@@ -450,7 +450,7 @@ pub const TEMPLATE_VALUES: &[(&str, &str)] = &[
     ("colleagues", "the colleagues on the call, linked"),
     ("external", "the people from outside, linked"),
     ("organizer", "who sent the invite (`meeting.organizer`)"),
-    ("type", "what kind of meeting it was (`meeting_type`'s name: Client, Internal…)"),
+    ("type", "what kind of meeting it was, as settled in step 3b (`meeting_type.label`: Client, Internal…)"),
     ("thread", "the call's threads, linked from `links.threads`"),
     ("client", "the call's clients, linked from `links.clients`"),
     ("previous", "the previous meeting of this series, linked from `links.previous`"),
@@ -630,13 +630,20 @@ fn duration_min(meta: &Value) -> f64 {
 fn attendees_split(meeting: Option<&MeetingContext>, cfg: &Config) -> (Vec<String>, Vec<String>) {
     let my_domain = cfg.me.as_ref().and_then(|p| p.email.as_deref()).and_then(domain);
     let (mut colleagues, mut external) = (vec![], vec![]);
+    let mut seen = std::collections::HashSet::new();
     if let Some(m) = meeting {
         let book = crate::people::colleagues();
         let theirs = book.among(m.organizer.iter().chain(m.attendees.iter()).map(|p| (p.name.as_str(), p.email.as_deref())));
         for p in m.organizer.iter().chain(m.attendees.iter()) {
-            let is_me = cfg.me.as_ref().is_some_and(|me| me.email.is_some() && me.email == p.email);
-            if is_me {
+            let same = |a: Option<&str>, b: Option<&str>| a.zip(b).is_some_and(|(a, b)| a.trim().eq_ignore_ascii_case(b.trim()));
+            if cfg.me.as_ref().is_some_and(|me| same(me.email.as_deref(), p.email.as_deref())) {
                 continue;
+            }
+            // One person once, however their names are written (organizer and attendee, "Park, Lee").
+            if let Some(e) = p.email.as_deref().map(|e| e.trim().to_lowercase()) {
+                if !seen.insert(e) {
+                    continue;
+                }
             }
             let label = match &p.email {
                 Some(e) => format!("{} <{e}>", p.name),
@@ -728,26 +735,45 @@ pub fn meeting_type_remove(id: &str) -> Result<()> {
 /// echo`) — else a guess from who was invited: a memo is Other; the user and one colleague 1:1; colleagues only
 /// Internal; anyone from outside Client (the minutes tell Partner and Industry & Analyst apart).
 pub fn meeting_type(dir: &Path) -> Value {
+    meeting_type_in(dir, &meeting_types(), || {
+        let meeting = MeetingContext::load(dir).ok().flatten();
+        let (colleagues, external) = attendees_split(meeting.as_ref(), &Config::load().unwrap_or_default());
+        guess_type(meeting.is_some(), colleagues.len(), external.len())
+    })
+}
+
+/// A call's meeting type and every type, the list read once (the window's call page).
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn meeting_type_and_types(dir: &Path) -> (Value, Vec<Value>) {
     let all = meeting_types();
+    let t = meeting_type_in(dir, &all, || {
+        let meeting = MeetingContext::load(dir).ok().flatten();
+        let (colleagues, external) = attendees_split(meeting.as_ref(), &Config::load().unwrap_or_default());
+        guess_type(meeting.is_some(), colleagues.len(), external.len())
+    });
+    (t, all)
+}
+
+/// `meeting_type` among these types, the guess made only when nothing was set (`context` passes its own counts).
+fn meeting_type_in(dir: &Path, all: &[Value], guess: impl FnOnce() -> &'static str) -> Value {
     let label = |t: &str| all.iter().find(|x| x["id"] == t).and_then(|x| x["name"].as_str()).unwrap_or("Other").to_string();
     let set = &read_json(&dir.join("meta.json"))["meeting_type"];
     if let Some(t) = set["type"].as_str().filter(|t| all.iter().any(|x| x["id"] == *t)) {
         return json!({"type": t, "label": label(t), "by": set["by"].as_str().unwrap_or("echo")});
     }
-    let t = if crate::memo::is_memo(dir) {
-        "other"
-    } else {
-        let cfg = Config::load().unwrap_or_default();
-        let meeting = MeetingContext::load(dir).ok().flatten();
-        let (colleagues, external) = attendees_split(meeting.as_ref(), &cfg);
-        match (colleagues.len(), external.len(), meeting.is_some()) {
-            (_, _, false) => "other",
-            (_, e, _) if e > 0 => "client",
-            (1, 0, _) => "one-on-one",
-            _ => "internal",
-        }
-    };
+    let t = if crate::memo::is_memo(dir) { "other" } else { guess() };
     json!({"type": t, "label": label(t), "by": "guess"})
+}
+
+/// The guess from who was invited (the user left out): no invite, or nobody but the user — Other; anyone from outside
+/// — Client; one colleague — 1:1; more — Internal.
+fn guess_type(invited: bool, colleagues: usize, external: usize) -> &'static str {
+    match (invited, colleagues, external) {
+        (false, _, _) | (true, 0, 0) => "other",
+        (_, _, e) if e > 0 => "client",
+        (_, 1, _) => "one-on-one",
+        _ => "internal",
+    }
 }
 
 /// `echoctl type <call> <type>`: the user's choice (kept from then on), or — inside a minutes run Echo started — the
@@ -757,13 +783,17 @@ pub fn set_meeting_type(call: &str, kind: &str) -> Result<Value> {
     anyhow::ensure!(all.iter().any(|t| t["id"] == kind), "a meeting type is one of: {}", all.iter().filter_map(|t| t["id"].as_str()).collect::<Vec<_>>().join(", "));
     let dir = resolve_call(call)?;
     let by = if crate::notes::headless() { "echo" } else { "you" };
-    if by == "echo" && meeting_type(&dir)["by"] == "you" {
+    // Decided under the call's lock: a choice of the user's made a moment ago is never written over by a run.
+    let kept = update_meta(&dir, |m| {
+        if by == "echo" && m["meeting_type"]["by"] == "you" {
+            return Ok(true);
+        }
+        m["meeting_type"] = json!({"type": kind, "by": by});
+        Ok(false)
+    })?;
+    if kept {
         return Ok(json!({"kept": meeting_type(&dir), "why": "the user chose it"}));
     }
-    update_meta(&dir, |m| {
-        m["meeting_type"] = json!({"type": kind, "by": by});
-        Ok(())
-    })?;
     Ok(meeting_type(&dir))
 }
 
@@ -812,6 +842,7 @@ pub fn context(call: &str) -> Result<()> {
     let dominant_language = by_lang.iter().max_by_key(|(_, v)| v.as_u64().unwrap_or(0)).map(|(k, _)| k.clone());
 
     let (colleagues, external) = attendees_split(meeting.as_ref(), &cfg);
+    let types = meeting_types();
 
     let user_notes = dir.join(USER_NOTES);
     let user_headings: Vec<String> = fs::read_to_string(&user_notes)
@@ -843,9 +874,9 @@ pub fn context(call: &str) -> Result<()> {
         "colleagues": colleagues,
         "external": external,
         // What kind of meeting it was, so far (a guess from who was invited, or the user's: `by`), and every kind with
-        // how to tell it (step 6b settles it).
-        "meeting_type": meeting_type(&dir),
-        "meeting_types": meeting_types().iter().map(|t| json!({"id": t["id"], "name": t["name"], "about": t["about"]})).collect::<Vec<_>>(),
+        // how to tell it (step 3b settles it).
+        "meeting_type": meeting_type_in(&dir, &types, || guess_type(meeting.is_some(), colleagues.len(), external.len())),
+        "meeting_types": types.iter().map(|t| json!({"id": t["id"], "name": t["name"], "about": t["about"]})).collect::<Vec<_>>(),
         "transcript_chars": chars,
         "chars_by_speaker": by_speaker,
         "chars_by_language": by_lang,
@@ -1861,7 +1892,21 @@ mod tests {
         assert_eq!(meeting_type(&one), json!({"type": "one-on-one", "label": "1:1", "by": "guess"}));
         assert_eq!(meeting_type(&team)["type"], "internal");
         assert_eq!(meeting_type(&client)["type"], "client");
+        // The user by another case, a person listed twice, a meeting with the user alone.
+        let twice = call("2026-11-04_130000-d", vec![p("Dana Kowal", "DANA@acme.example"), p("Lee Park", "lee@acme.example"), p("Park, Lee", "Lee@acme.example")]);
+        assert_eq!(meeting_type(&twice)["type"], "one-on-one");
+        let alone = call("2026-11-04_140000-e", vec![me.clone()]);
+        assert_eq!(meeting_type(&alone)["type"], "other");
         // The minutes run settles it; the user's choice is kept from then on, the run's never replaces it.
+        // Inside a run, as Echo starts one — and out again even when an assert fails (the variables are the process's).
+        struct Out;
+        impl Drop for Out {
+            fn drop(&mut self) {
+                std::env::remove_var(crate::notes::HEADLESS);
+                std::env::remove_var(crate::guard::RUN_CALL);
+            }
+        }
+        let _out = Out;
         let in_run = |on: bool| {
             if on {
                 std::env::set_var(crate::notes::HEADLESS, "1");

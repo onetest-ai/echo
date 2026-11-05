@@ -1243,7 +1243,7 @@ function meetingTypeChip(c) {
   const t = c.meeting_type
   if (!t || c.memo) return ''
   const hint = t.by === 'you' ? 'You set this' : t.by === 'echo' ? 'Set by the minutes — change it if it is wrong' : 'Guessed from who was invited — the minutes settle it'
-  return `<label class="mt-chip${t.by === 'guess' ? ' guess' : ''}" title="${esc(hint)}">${esc(t.label)} ▾<select data-meeting-type aria-label="Kind of meeting">${(c.meeting_types || []).map(([k, l]) => `<option value="${k}"${t.type === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`
+  return `<label class="mt-chip${t.by === 'guess' ? ' guess' : ''}" title="${esc(hint)}">${esc(t.label)} ▾<select data-meeting-type aria-label="Kind of meeting">${(c.meeting_types || []).map(([k, l]) => `<option value="${esc(k)}"${t.type === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`
 }
 document.addEventListener('change', (e) => {
   if (!e.target.matches || !e.target.matches('[data-meeting-type]') || !S.call) return

@@ -64,6 +64,12 @@ deal with, how they like notes and follow-ups written. Follow it for tone, empha
   including formats it shows (a table's columns, bullet shapes, bold labels).
 `template.header` and `template.sections` are the same, split.
 
+## 3b. Meeting type (before you write)
+`context.meeting_type` is what kind of meeting it was so far: the user's choice (`by: "you"` — leave it), else a guess
+from who was invited. `context.meeting_types` lists every kind the user has — `id`, `name`, and `about`: how to tell
+it. Settle it from what was said and who took part, by those `about`s, and run `echoctl type <dir> <id>` when it
+differs from the guess. Never for a memo. Settle it before step 4: a template's `{type}` is this one.
+
 ## 4. Write `<dir>/notes.md`
 
 ### 4b. A memo first: find its threads (only when `memo` is true)
@@ -189,12 +195,6 @@ If the call has no meeting subject (folder name is just a timestamp or a generic
 specific one-line title (≤ 60 chars, no trailing punctuation) and run
 `echoctl title <dir> "<title>"` — it prints the call's folder afterwards (renamed to match at once
 in a session; in a run the Echo app started, when the run ends): use that path.
-
-## 6b. Meeting type
-`context.meeting_type` is what kind of meeting it was so far: the user's choice (`by: "you"` — leave it), else a guess
-from who was invited. `context.meeting_types` lists every kind the user has — `id`, `name`, and `about`: how to tell
-it. Settle it from what was said and who took part, by those `about`s, and run `echoctl type <dir> <id>` when it
-differs from the guess. Never for a memo.
 
 ## 7. Vocabulary (automatic — never ask)
 A term you learn here is used again only in calls with this meeting's subject or mostly these people, or whose

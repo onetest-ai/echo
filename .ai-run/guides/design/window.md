@@ -96,6 +96,10 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   differently (Edited, Reset) and the user adds their own (`<home>/.echo/meeting-types.json`); one list in the code
   (`calls::meeting_types`) feeds the chip, the editor, the context and `echoctl templates`. A type taken away: its
   calls fall back to their guess. The guess from who was invited stays for Echo's Client, 1:1, Internal and Other.
+- The minutes settle the type before they write (step 3b), so a template's `{type}` is the settled one. A run's
+  `echoctl type` is decided under the call's meta lock: a choice of the user's made a moment before is never written
+  over. The guess counts the user out by address in any case and each person once (organizer and attendee, two
+  spellings of a name); a meeting with the user alone is Other.
 - Not yet: picking a template by type, filters by type in Calls and Tasks, using it in Today and prep.
 
 ### Settings → Templates (`templatesSettings`, `/api/templates`, `calls::templates_view`)
