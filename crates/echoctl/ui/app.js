@@ -1019,10 +1019,13 @@ function upcomingDoc() {
       <div class="facts">${when ? `<span>${esc(when)}</span>` : ''}${mins ? `<span>${mins} min</span>` : ''}${people}</div>${ev ? eventProjects(ev) : ''}</div>
       <div class="doc-actions">${p ? `<button class="btn ghost" data-copy="${esc(p.link)}" title="Its echo:// link">Copy link</button>` : ''}</div></div>
     <div class="tabs" role="tablist"><button class="tab" role="tab" aria-selected="true">Prep</button><button class="tab" role="tab" aria-selected="false" disabled title="Once it is recorded">Transcript</button><button class="tab" role="tab" aria-selected="false" disabled title="Once it is recorded">Minutes</button></div>`
-  if (!u && !p) return { head, pane: S.upPrep ? '<p class="set-sub">This meeting isn\'t in today\'s calendar any more.</p>' : `<div class="skeleton">${'<i></i>'.repeat(6)}</div>` }
+  // Being written (from the calendar, any day): read it again until it is there.
+  const writing = (u && u.writing) || (S.upPrep && S.upPrep.writing)
+  if (writing && !S.upPoll) S.upPoll = setTimeout(() => { S.upPoll = null; loadUpcoming().then(render) }, 2000)
+  if (!u && !p) return { head, pane: writing ? '<div class="empty"><div><h3>Writing the prep…</h3><p>From last time, what is open in its threads, what is new and who is coming.</p></div></div>' : S.upPrep ? '<p class="set-sub">This meeting isn\'t in today\'s calendar any more.</p>' : `<div class="skeleton">${'<i></i>'.repeat(6)}</div>` }
   if (!p) {
-    const busy = u && u.writing
-    return { head, pane: `<div class="empty"><div><h3>${busy ? 'Writing the prep…' : 'No prep yet'}</h3><p>${busy ? 'From last time, what is open in its threads, what is new and who is coming.' : u && u.threads.length ? 'Echo writes it this morning for every meeting of a thread.' : 'This meeting is in no thread: Echo prepares a thread\'s meetings.'}</p>${busy ? '' : `<button class="btn primary" data-prep-write="${esc(S.upSel)}">Prepare now</button>`}</div></div>` }
+    const busy = writing
+    return { head, pane: `<div class="empty"><div><h3>${busy ? 'Writing the prep…' : 'No prep yet'}</h3><p>${busy ? 'From last time, what is open in its threads, what is new and who is coming.' : u && u.threads.length ? 'Echo writes it this morning for every meeting of a thread.' : 'This meeting is in no thread: Echo prepares it when you ask, from its people\'s mail and Teams.'}</p>${busy ? '' : `<button class="btn primary" data-prep-write="${esc(S.upSel)}">Prepare now</button>`}</div></div>` }
   }
   return { head, pane: prepView(p, !!u) }
 }
@@ -1044,10 +1047,10 @@ function prepView(p, again) {
   }).join('')
   const expected = p.expected ? sec('Expected from you', exp ? `<ul>${exp}</ul>` : '<p class="set-sub" style="margin:0">Nothing waits on you.</p>') : ''
   const open = (p.open || []).length ? sec('Open with these people', `<ul>${p.open.map((o) => `<li><b>${KIND[o.kind] || esc(o.kind)}</b> <a href="${esc(o.link)}">${esc(o.title)}</a>${o.owner ? ` · ${esc(o.owner)}` : ''}${o.late ? ' · <span class="warn">late</span>' : o.due ? ` · ${esc(day(o.due))}` : ''}</li>`).join('')}</ul>`) : ''
-  const fresh = (p.new_since || []).length ? sec('New since then', `<ul>${p.new_since.map((n) => `<li>${esc(day(n.date))} · ${n.kind === 'mail' ? 'Mail' : 'Chat'}${n.from ? ` from ${esc(n.from)}` : ''}: ${n.url && /^https:\/\//.test(n.url) ? `<a data-ext href="${esc(n.url)}">${esc(n.title || '')}</a>` : esc(n.title || '')}</li>`).join('')}</ul>`) : ''
+  const fresh = (p.new_since || []).length ? sec('New since then', `<ul>${p.new_since.map((n) => `<li>${esc(day(n.date))} · ${n.kind === 'mail' ? 'Mail' : 'Chat'}${n.from ? ` from ${esc(n.from)}` : ''}: ${n.url && /^https:\/\//.test(n.url) ? `<a data-ext href="${esc(n.url)}">${esc(n.title || '')}</a>` : esc(n.title || '')}${n.snippet ? ` <span class="set-sub">“${esc(n.snippet)}”</span>` : ''}</li>`).join('')}</ul>`) : ''
   // The new faces first, then by calls together; ten at most.
   const ppl = [...(p.people || [])].sort((a, b) => (b.new - a.new) || (b.calls - a.calls)), more = ppl.length - 10
-  const who = ppl.slice(0, 10).map((x) => `<div class="pr-who"><span>${x.link ? `<a href="${esc(x.link)}">${esc(x.name)}</a>` : esc(x.name)}${x.role ? ` <span class="set-sub">· ${esc(x.role)}</span>` : ''}</span>${x.new ? '<span class="chip warn-chip">new</span>' : `<span class="set-sub pr-n">${x.calls} call${x.calls === 1 ? '' : 's'}</span>`}</div>`).join('') + (more > 0 ? `<div class="set-sub">and ${more} more</div>` : '')
+  const who = ppl.slice(0, 10).map((x) => `<div class="pr-who"><span>${x.link ? `<a href="${esc(x.link)}">${esc(x.name)}</a>` : esc(x.name)}${x.role ? ` <span class="set-sub">· ${esc(x.role)}</span>` : ''}</span>${x.new ? '<span class="chip warn-chip">new</span>' : (x.calls ? `<span class="set-sub pr-n">${x.calls} call${x.calls === 1 ? '' : 's'}</span>` : '')}</div>`).join('') + (more > 0 ? `<div class="set-sub">and ${more} more</div>` : '')
   const short = p.summary ? sec('In short', `<p class="pr-short">${esc(p.summary)}</p>`) : p.error ? `<p class="set-sub">${esc(p.error)}</p>` : ''
   const foot = `<div class="pr-foot"><span class="set-sub">Written ${esc(p.written_at ? hm(new Date(p.written_at)) : '')}${p.model ? ` · ${esc(p.model)}` : ''}</span>${again ? `<button class="btn ghost" data-prep-write="${esc(p.id)}">Write it again</button>` : ''}</div>`
   const empty = !short && !last && !open && !fresh ? '<p class="set-sub">Nothing to go on yet: no earlier meeting with minutes, nothing open in its threads.</p>' : ''
@@ -2206,6 +2209,7 @@ function eventDetail(e, now) {
     <dl>${e.organizer ? `<dt>Organizer</dt><dd>${esc(e.organizer)}</dd>` : ''}${e.people ? `<dt>People</dt><dd>${e.people}</dd>` : ''}${e.location ? `<dt>Where</dt><dd>${esc(e.location)}</dd>` : ''}${e.recorded ? `<dt>${e.recorded.imported ? 'Call' : 'Recording'}</dt><dd>${e.recorded.imported ? 'from the Teams transcript' : STATUS[e.recorded.status] || esc(e.recorded.status)}${e.recorded.minutes ? `, ${e.recorded.minutes} min` : ''}</dd>` : ''}</dl>
     ${acts || slotItems('calendar.event', { kind: 'event', event: e }) ? `<div class="acts">${acts}${slotItems('calendar.event', { kind: 'event', event: e })}</div>` : ''}${why ? `<p class="why">${esc(why)}</p>` : ''}
     ${eventProjects(e)}
+    ${eventPrep(e, st)}
     ${seriesEditor(e)}
     ${e.recap && e.recap.length ? `<div><b style="font-size:12px">Last time</b><ul>${e.recap.map((r) => `<li>${esc(r)}</li>`).join('')}</ul></div>` : ''}
   </aside>`
@@ -3831,6 +3835,18 @@ function seriesBlock(p) {
   const when = (x) => x.next ? `next ${esc(new Date(x.next).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }))}` : x.calls ? `${x.calls} call${x.calls === 1 ? '' : 's'}` : ''
   return list.map((x) => `<div class="se-row"><span class="se-t">${esc(x.subject || 'A meeting')}</span><span class="pf-sub se-when">${when(x)}<button class="pj-x" data-series-unlink="${esc(x.key)}" title="Not this thread's: its meetings stop joining it" aria-label="Take ${esc(x.subject || 'this series')} out of the thread">×</button></span><span class="pf-sub se-what">${esc(seriesSummary(x.rule))}</span></div>`).join('')
     + '<div class="pf-sub">Set what Echo does with a series on one of its meetings in the calendar.</div>'
+}
+
+/** Any meeting in the calendar: Prepare it (a thread's meetings get one each morning by themselves); once written,
+ *  Show prep (Calls → Coming up today, or the recorded call's Prep tab) and Prepare again. */
+function eventPrep(e, st) {
+  const p = e.prep
+  if (!p) return ''
+  if (p.writing) return '<div class="ev-prep"><span class="set-sub">Writing the prep…</span></div>'
+  const again = st.past ? '' : `<button class="link-btn" data-prep-write="${esc(p.id)}" data-prep-open="1">Prepare again</button>`
+  if (p.ready) return `<div class="ev-prep"><button class="btn" data-ev-prep="${esc(p.id)}">Show prep</button>${again}</div>`
+  if (st.past) return ''
+  return `<div class="ev-prep"><button class="btn" data-prep-write="${esc(p.id)}" data-prep-open="1">Prepare</button><span class="set-sub">last time, what is open, what is new, who is coming</span></div>`
 }
 
 /** A recurring meeting in the calendar: record every meeting of its series or not (the default), and in which
@@ -6412,7 +6428,7 @@ document.addEventListener('click', (e) => {
   if (S.laterOpen && !(e.target.closest && e.target.closest('[data-cmd^="later-"]'))) { S.laterOpen = false; render() }
   // The sidebar open over a narrow page closes on a click beside it.
   if (S.barOver && !(e.target.closest && e.target.closest('.actbar'))) { S.barOver = false; render() }
-  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-theme-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-go],[data-conv-keep],[data-br-pclosed],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-up],[data-prep-write],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
+  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-theme-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-go],[data-conv-keep],[data-br-pclosed],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-up],[data-prep-write],[data-ev-prep],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
   if (!t) { if (menuWas) render(); return }
   // Sign-ins (`signin.rs`): shown at once (starting / stopping / checking) until the next poll
   // brings the app's state.
@@ -6511,7 +6527,18 @@ document.addEventListener('click', (e) => {
   if (t.dataset.unschedule) { send({ cmd: 'unschedule', id: t.dataset.unschedule }); const e = (S.cal.data.events || []).find((x) => x.id === t.dataset.unschedule); if (e) e.scheduled = false; return render() }
   if (t.dataset.call) { S.listOpen = false; return go(`call/${t.dataset.call}/${S.tab}`) }
   if (t.dataset.up) { S.listOpen = false; return go(`upcoming/${t.dataset.up}`) }
-  if (t.dataset.prepWrite) { send({ cmd: 'project', op: 'prep_write', prep: t.dataset.prepWrite }); setTimeout(() => loadUpcoming().then(render), 800); return }
+  if (t.dataset.prepWrite) {
+    send({ cmd: 'project', op: 'prep_write', prep: t.dataset.prepWrite })
+    // From the calendar: open it in Calls, where it shows as it is written.
+    if (t.dataset.prepOpen) { S.cal.selected = null; return go(`upcoming/${t.dataset.prepWrite}`) }
+    setTimeout(() => loadUpcoming().then(render), 800); return
+  }
+  if (t.dataset.evPrep) {
+    // A recorded meeting's prep is its call's Prep tab; one still to come is in Coming up today.
+    const ev = S.cal.data && (S.cal.data.events || []).find((x) => x.prep && x.prep.id === t.dataset.evPrep)
+    S.cal.selected = null
+    return ev && ev.recorded ? go(`call/${ev.recorded.name}/prep`) : go(`upcoming/${t.dataset.evPrep}`)
+  }
   if (t.dataset.minutesOf) return go(`call/${t.dataset.minutesOf}/notes`)
   if (t.dataset.tab) return go(`call/${S.selected}/${t.dataset.tab}`)
   if (t.dataset.at) { S.jump = Number(t.dataset.at); S.find = ''; return go(`call/${S.selected}/transcript`) }

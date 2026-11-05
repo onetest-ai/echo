@@ -235,6 +235,10 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   risks with no response; questions not answered — each `echo://task`), New since then (the threads' mail and chat
   evidence after the last meeting: titles and senders, never the text), Who's coming (the invite less the user, with
   role / stance from People, calls together, new; the window shows ten).
+- A meeting in no thread has no sources of its own: New since then comes from Microsoft 365 instead — mail and Teams
+  with its people since the last meeting, else 14 days (`microsoft365`, the user's own sign-in; one line a conversation
+  or chat, subject or "Teams message from …" and its link; a chat's first words shown, never sent to the model). A
+  thread's meetings don't search: its mail and chats are its sources already. Plugins can add sources later.
 - Only this meeting's items: one said in an earlier occurrence of its series stays; one said only in meetings of
   another recurring series goes, without a model (an item made by hand takes its story's calls, else its sibling
   items' — `said_in`); the rest (one-off meetings, mail, unknown) are numbered `[cN]` and the same model call that
@@ -245,6 +249,9 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   a call with its Prep tab (Transcript and Minutes once recorded; Prepare now / Write it again: IPC `project {op:
   prep_write, prep}`, one at a time). A recorded call finds its prep by its event (`prep::of_call`) → its first tab,
   Prep. Not in Calendar: the user, "it belongs in Calls".
+- From the calendar, any meeting on any day (in a thread or not): **Prepare** (IPC `prep_write`; the meeting from
+  today's agenda or the calendar shown, `RAW_EVENTS`) opens Coming up today while it is written; once written, **Show
+  prep** and Prepare again. A meeting in no thread runs on its last occurrence's call profile, else the default.
 - `echo://prep/<id>` (recorded → its call's Prep tab, else `#upcoming/<id>`), `echoctl read`, MCP `read_link` (only
   when all its threads are the reader's), `echoctl prep --upcoming | --show ID | --write ID`.
 - Measured on a copy: a weekly with 31 people, 8 open items, 8 new mails — about 6 s on sonnet.

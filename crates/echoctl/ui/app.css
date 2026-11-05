@@ -1874,3 +1874,4 @@ select.set-in { width: auto; margin-right: 6px; }
 .warn-chip { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
 .si.up { color: var(--accent-ink); }
 @media (max-width: 1100px) { .pr { grid-template-columns: minmax(0, 1fr); } }
+.ev-prep { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
