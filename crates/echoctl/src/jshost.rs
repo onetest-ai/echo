@@ -773,6 +773,8 @@ fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
     match op {
         // A Claude Code run on one of the user's AI profiles: Echo's guarded run (`claudejob.rs`).
         "claude.run" => {
+            // Only what its install sheet said: running Claude Code at all, and with permission checks skipped.
+            plugins::may_run_claude(&plugins::read_manifest(&package_dir(id)?)?.uses, arg["tools"].as_str().unwrap_or(""))?;
             let spec = crate::claudejob::Spec::from_value(arg, &plugins::data_dir(id))?;
             let (answer, model, usage) = crate::claudejob::run(&spec)?;
             Ok(json!({"answer": answer, "model": model, "usage": usage}))
@@ -873,6 +875,8 @@ fn service_async(id: &str, op: &str, arg: &Value) -> Result<Value> {
         }
         "deliver.send" => {
             let kind = arg[0].as_str().unwrap_or("");
+            // Only the ways its install sheet named, or its own.
+            plugins::may_send(&plugins::read_manifest(&package_dir(id)?)?.uses, kind)?;
             let m = &arg[1];
             let s = |k: &str| m[k].as_str().map(str::to_owned);
             let to: Vec<String> = m["mail_to"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect()).unwrap_or_default();

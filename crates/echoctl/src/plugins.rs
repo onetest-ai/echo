@@ -97,8 +97,35 @@ fn join_words(w: &[&str]) -> String {
     }
 }
 
-fn describe_claude(_: &Value) -> Result<String> {
-    Ok("Runs Claude Code on your AI profiles, with the permissions you pick".into())
+fn describe_claude(v: &Value) -> Result<String> {
+    Ok(if v["skip"].as_bool() == Some(true) {
+        "Runs Claude Code on your AI profiles, with the permissions you pick — or with every permission check skipped".into()
+    } else {
+        "Runs Claude Code on your AI profiles, with the permissions you pick".into()
+    })
+}
+
+/// May a plugin with these `uses` start a Claude Code run with `tools` (`claudejob::Spec`)? Only with `claude` on its
+/// install sheet; skipping every permission check only when the sheet said so too (`claude.skip`).
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
+pub fn may_run_claude(uses: &serde_json::Map<String, Value>, tools: &str) -> Result<()> {
+    let Some(c) = uses.get("claude") else { bail!("it didn't ask to run Claude Code when it was installed") };
+    if tools == "skip" && c["skip"].as_bool() != Some(true) {
+        bail!("it didn't ask to run Claude Code with permission checks skipped when it was installed");
+    }
+    Ok(())
+}
+
+/// May a plugin with these `uses` send by `kind`? Only a way its install sheet named (`deliver.to`), or its own (the
+/// kinds it provides, `deliver_provider.kinds`).
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
+pub fn may_send(uses: &serde_json::Map<String, Value>, kind: &str) -> Result<()> {
+    let named = |cap: &str, key: &str| uses.get(cap).and_then(|v| v[key].as_array()).is_some_and(|a| a.iter().any(|k| k.as_str() == Some(kind)));
+    if named("deliver", "to") || named("deliver_provider", "kinds") {
+        Ok(())
+    } else {
+        bail!("it didn't ask to send by “{kind}” when it was installed")
+    }
 }
 
 fn describe_schedule(_: &Value) -> Result<String> {
@@ -1411,6 +1438,24 @@ pub fn print_review(r: &Review) {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_plugin_runs_claude_and_sends_only_as_its_install_sheet_said() {
+        let uses = |v: Value| v.as_object().cloned().unwrap();
+        // No `claude`: no run at all; `claude` without `skip`: any run but one with permission checks skipped.
+        assert!(may_run_claude(&uses(json!({})), "none").is_err());
+        let plain = uses(json!({"claude": {}}));
+        assert!(may_run_claude(&plain, "read").is_ok() && may_run_claude(&plain, "folder").is_ok());
+        assert!(may_run_claude(&plain, "skip").is_err());
+        assert!(may_run_claude(&uses(json!({"claude": {"skip": true}})), "skip").is_ok());
+        assert!(describe_claude(&json!({"skip": true})).unwrap().contains("skipped"));
+        // Sends: the ways its sheet named, or its own way.
+        let sched = uses(json!({"deliver": {"to": ["teams", "telegram"]}}));
+        assert!(may_send(&sched, "teams").is_ok() && may_send(&sched, "telegram").is_ok());
+        assert!(may_send(&sched, "mail").is_err());
+        let tg = uses(json!({"deliver_provider": {"kinds": ["telegram"]}}));
+        assert!(may_send(&tg, "telegram").is_ok() && may_send(&tg, "teams").is_err());
+    }
     use super::*;
 
     fn plugin(root: &Path, id: &str, version: &str, uses: Value) -> PathBuf {
