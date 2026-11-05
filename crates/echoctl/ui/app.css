@@ -2005,7 +2005,7 @@ select.set-in { width: auto; margin-right: 6px; }
 .tp-info.on, .tp-info:hover { color: var(--accent); }
 .tp-pop { border: 1px solid var(--line); border-radius: var(--r-control); background: var(--bg); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
 .tp-pop ul { margin: 0; padding-left: 16px; display: flex; flex-direction: column; gap: 2px; }
-.tp-lha { display: flex; gap: 6px; }
+.tp-lha { display: flex; gap: 6px; flex: 1 0 100%; justify-content: space-between; }
 /* Fields that look like fields: the surface, a visible border, ink text (grey read as "not editable"). */
 .tp-s { background: var(--surface); }
 .tp-s textarea, .tp-hd textarea { background: var(--surface); border: 1px solid var(--line-strong); border-radius: 6px; padding: 6px 8px; color: var(--text); }
