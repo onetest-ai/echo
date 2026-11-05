@@ -35,6 +35,8 @@ fn off() -> Vec<String> {
 
 /// A `SKILL.md`'s frontmatter (one `key: value` a line, values unquoted) and body.
 fn split(text: &str) -> Option<(Vec<(String, String)>, String)> {
+    // As Claude Code reads it: a byte-order mark and Windows line ends are fine.
+    let text = text.trim_start_matches('\u{feff}').replace("\r\n", "\n");
     let (front, body) = text.strip_prefix("---\n").and_then(|t| t.split_once("\n---"))?;
     let fields = front
         .lines()
@@ -90,6 +92,10 @@ fn walk(d: &Path) -> Vec<PathBuf> {
     while let Some(p) = stack.pop() {
         for e in fs::read_dir(&p).into_iter().flatten().flatten() {
             let path = e.path();
+            // A link is left out: one pointing back up would never end, one pointing out would copy what isn't the skill.
+            if e.file_type().is_ok_and(|t| t.is_symlink()) {
+                continue;
+            }
             if path.is_dir() {
                 stack.push(path);
             } else if let Ok(r) = path.strip_prefix(d) {
@@ -137,8 +143,10 @@ fn known(id: &str) -> Option<Value> {
 /// A new skill of the user's: its folder with a `SKILL.md` to fill in (the window opens it in VS Code).
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn create(name: &str) -> Result<PathBuf> {
-    let id = crate::recorder::slugify(name).chars().take(64).collect::<String>().trim_end_matches('-').to_string();
-    anyhow::ensure!(!id.is_empty(), "give the skill a name");
+    // Claude Code's rule for a skill's name: latin lower-case letters, digits and single hyphens.
+    let id = crate::recorder::slugify(name).chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect::<String>().split('-').filter(|p| !p.is_empty()).collect::<Vec<_>>().join("-");
+    let id = id.chars().take(64).collect::<String>().trim_end_matches('-').to_string();
+    anyhow::ensure!(!id.is_empty(), "give the skill a name in latin letters (Claude Code's rule for skill names) — its text can be in any language");
     anyhow::ensure!(known(&id).is_none() && !dir().join(&id).exists(), "a skill named {id} exists already");
     let d = dir().join(&id);
     fs::create_dir_all(&d)?;
@@ -179,20 +187,41 @@ pub fn remove(id: &str) -> Result<()> {
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn set_on(id: &str, on: bool) -> Result<()> {
     anyhow::ensure!(known(id).is_some(), "there is no skill {id}");
-    let mut offs = off();
-    offs.retain(|o| o != id);
-    if !on {
-        offs.push(id.to_string());
-    }
-    fs::create_dir_all(paths::state_dir())?;
-    paths::write_atomic(&off_file(), &serde_json::to_vec_pretty(&offs)?)?;
-    Ok(())
+    crate::calls::update_state(&off_file(), |offs: &mut Vec<String>| {
+        offs.retain(|o| o != id);
+        if !on {
+            offs.push(id.to_string());
+        }
+        Ok(())
+    })
 }
 
 /// A skill's folder (the user's), for VS Code or Finder.
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn folder(id: &str) -> Option<PathBuf> {
     known(id).and_then(|s| s["folder"].as_str().map(PathBuf::from))
+}
+
+/// What the panel's session would load now (the skills that are on and valid, every file): when it differs from what
+/// it started with, the panel says "Restart to update" (`terminal::loaded_now`).
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn fingerprint() -> (String, Option<std::time::SystemTime>) {
+    use sha2::Digest as _;
+    let mut h = sha2::Sha256::new();
+    let mut at = None;
+    for s in list().into_iter().filter(|s| s["on"] == true && s["problems"].as_array().is_some_and(|p| p.is_empty())) {
+        h.update(s["id"].as_str().unwrap_or("").as_bytes());
+        h.update(s["text"].as_str().unwrap_or("").as_bytes());
+        if let Some(d) = s["folder"].as_str() {
+            for f in walk(Path::new(d)) {
+                h.update(f.to_string_lossy().as_bytes());
+                let p = Path::new(d).join(&f);
+                h.update(fs::read(&p).unwrap_or_default());
+                at = at.max(fs::metadata(&p).and_then(|m| m.modified()).ok());
+            }
+        }
+    }
+    (h.finalize().iter().take(8).map(|x| format!("{x:02x}")).collect(), at)
 }
 
 /// The `my-skills` plugin, written afresh: the skills that are on and valid, every file of each.
@@ -278,5 +307,16 @@ mod tests {
         assert_eq!(list()[0]["kind"], "builtin");
         assert!(remove("follow-up-mail").is_err());
         assert!(create("Follow up mail").is_err(), "Echo's name");
+        assert!(create("Звіт").is_err(), "a name Claude Code wouldn't take");
+        assert_eq!(create("Звіт for Acme").unwrap().file_name().unwrap(), "for-acme");
+        // Windows line ends and a byte-order mark read as Claude Code reads them.
+        let crlf = dir().join("crlf-skill");
+        fs::create_dir_all(&crlf).unwrap();
+        fs::write(crlf.join("SKILL.md"), "\u{feff}---\r\nname: crlf-skill\r\ndescription: Use when x.\r\n---\r\nbody\r\n").unwrap();
+        assert!(list().into_iter().find(|s| s["id"] == "crlf-skill").unwrap()["problems"].as_array().unwrap().is_empty());
+        // What the session would load changes with a skill switched off.
+        let before = fingerprint().0;
+        set_on("crlf-skill", false).unwrap();
+        assert_ne!(fingerprint().0, before);
     }
 }

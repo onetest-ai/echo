@@ -820,7 +820,7 @@ fn event_types() -> serde_json::Map<String, Value> {
 
 /// Change a JSON state file under its lock (`<file>.lock`), read inside it, written atomically: the app, the window
 /// and `echoctl` never undo each other.
-fn update_state<T, S: serde::de::DeserializeOwned + serde::Serialize + Default>(file: &Path, f: impl FnOnce(&mut S) -> Result<T>) -> Result<T> {
+pub(crate) fn update_state<T, S: serde::de::DeserializeOwned + serde::Serialize + Default>(file: &Path, f: impl FnOnce(&mut S) -> Result<T>) -> Result<T> {
     fs::create_dir_all(paths::state_dir())?;
     let _l = crate::plugins::wait_lock(&file.with_extension("lock"))?;
     // Not there yet: empty. There but not readable (a hand edit gone wrong): an error — never written over with nothing.

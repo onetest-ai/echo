@@ -316,6 +316,9 @@ fn loaded_now(profile: Option<&str>, folder: bool) -> Vec<(String, String, Optio
             let at = files.iter().filter_map(|f| mtime(f)).max();
             out.push((format!("Skills from the {name} plugin changed"), h.finalize().iter().take(8).map(|x| format!("{x:02x}")).collect(), at));
         }
+        // The user's own skills (Settings → Templates → Skills): made, changed, switched on or off since it started.
+        let (h, at) = crate::skills::fingerprint();
+        out.push(("Your skills changed".to_string(), h, at));
     }
     out
 }
