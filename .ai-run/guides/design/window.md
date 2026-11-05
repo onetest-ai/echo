@@ -84,23 +84,27 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
 - macOS: transparent title bar with content under it (`with_fullsize_content_view`); the strip posts
   `window_drag` / `window_zoom` (`window::window_cmd`). Windows keeps its native title bar.
 
-### Meeting type (`calls::meeting_type`, `meta.json` `meeting_type`; idea from the Meeting Notebook plugin)
-- What kind of meeting a call was, beside whose (threads and clients say that): Client, Partner, 1:1, Internal,
-  Industry & Analyst, Other. Guessed from who was invited (a memo: Other; the user and one colleague: 1:1; colleagues
-  only: Internal; anyone from outside: Client — the same colleague split as the minutes' context); the minutes run
-  settles it from what was said (`echoctl type <dir> <type>`, in `notes::RUN_COMMANDS`, its own call only); the user
-  changes it with the chip in the call's facts (`set_meeting_type`, `by: you` — kept: a run never replaces it).
-- The chip: the type and ▾ over a hidden select; a guess dashed and lighter. `{type}` is a template value.
-- The types are a list the user owns — Settings → Templates → Meeting types: each a name and how to tell it (`about`),
-  which the minutes classify a call by (`context.meeting_types`; the skill names none itself). Echo's six can be told
-  differently (Edited, Reset) and the user adds their own (`<home>/.echo/meeting-types.json`); one list in the code
-  (`calls::meeting_types`) feeds the chip, the editor, the context and `echoctl templates`. A type taken away: its
-  calls fall back to their guess. The guess from who was invited stays for Echo's Client, 1:1, Internal and Other.
-- The minutes settle the type before they write (step 3b), so a template's `{type}` is the settled one. A run's
-  `echoctl type` is decided under the call's meta lock: a choice of the user's made a moment before is never written
-  over. The guess counts the user out by address in any case and each person once (organizer and attendee, two
-  spellings of a name); a meeting with the user alone is Other.
-- Not yet: picking a template by type, filters by type in Calls and Tasks, using it in Today and prep.
+### Meeting type (`calls::meeting_type`, `calls::event_type`; idea from the Meeting Notebook plugin)
+- What kind of meeting it is, beside whose (threads and clients say that): Client, Partner, 1:1, Internal, Industry &
+  Analyst, Other — or the user's own (below). It belongs to the meeting, so it is known before it starts:
+  - **by its invite**: the app types today's and tomorrow's meetings with the prep scheduler — one model call with no
+    tools on the default profile reads each new one's subject, organiser, colleagues and outsiders' domains against
+    every type's how to tell it (`calls::classify`); kept per series (`series::key_of`; a one-off by its event) in
+    `<home>/.echo/meeting-types-of.json`, so a series is typed once; `echoctl classify` runs it now;
+  - while not typed yet, a guess from who is invited (alone: Other; anyone from outside: Client; one colleague: 1:1;
+    more: Internal; the user counted out by address in any case, each person once);
+  - the calendar card's chip sets it for the whole series (`set_event_type`, `by: you`).
+- A call takes its meeting's (`by: invite`); its minutes refine it (step 3b, `echoctl type`, in `notes::RUN_COMMANDS`,
+  its own call only, decided under the call's meta lock); the user's choice on the call (the chip in its facts,
+  `set_meeting_type`) is above all and no run replaces it. Order: the call's own (you, then the minutes) → the
+  meeting's (you, then the invite) → the guess. `{type}` is a template value, settled before the minutes are written.
+- Chips: the type and ▾ over a hidden select; a guess dashed and lighter; the hint says who set it.
+- The types are a list the user owns — Settings → Templates → Meeting types: each a name and how to tell it, which
+  both the invite classifier and the minutes go by (`context.meeting_types`). Echo's six can be told differently
+  (Edited, Reset) and the user adds their own (`<home>/.echo/meeting-types.json`); one list (`calls::meeting_types`)
+  feeds the chips, the editor, the context and `echoctl templates`. A type taken away: its calls and meetings go back
+  to their guess.
+- Not yet: picking a template by type; filters by type in Calls and Tasks; the type in Today and Prep.
 
 ### Settings → Templates (`templatesSettings`, `/api/templates`, `calls::templates_view`)
 - Its own section after AI & minutes (that one has enough): the shapes Claude writes in, a tab per kind. Minutes now;

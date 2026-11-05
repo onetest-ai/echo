@@ -320,6 +320,9 @@ enum Cmd {
         #[arg(default_value = "latest")]
         call: String,
     },
+    /// Type the agenda's meetings by their invites now (JSON: each meeting's type and who set it)
+    #[command(hide = true)]
+    Classify,
     /// Set what kind of meeting a call was: client, partner, one-on-one, internal, industry, other (yours is kept)
     Type { call: String, kind: String },
     /// Set a call's title (one line, clamped) and rename its folder (inside a minutes run, when it ends)
@@ -1752,6 +1755,14 @@ fn main() -> Result<()> {
         }
         Cmd::Context { call } => calls::context(&call),
         Cmd::Title { call, title } => calls::set_title(&call, &title),
+        Cmd::Classify => {
+            let agenda = watch::agenda();
+            let n = calls::classify(&agenda)?;
+            let types = calls::meeting_types();
+            let out: Vec<_> = agenda.iter().map(|m| serde_json::json!({"subject": m.subject, "start": m.start, "type": calls::event_type(m, &types)})).collect();
+            println!("{}", serde_json::to_string_pretty(&serde_json::json!({"classified": n, "meetings": out}))?);
+            Ok(())
+        }
         Cmd::Type { call, kind } => {
             println!("{}", serde_json::to_string(&calls::set_meeting_type(&call, &kind)?)?);
             Ok(())

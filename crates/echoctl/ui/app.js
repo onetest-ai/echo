@@ -1239,10 +1239,27 @@ function writeAgainWith(c) {
 
 /** What kind of meeting it was — Client, Partner, 1:1, Internal, Industry & Analyst, Other — guessed from who was
  *  invited, settled by the minutes, changed here by the user (kept from then on). Not on a memo. */
+/** A calendar meeting's type, from its invite (or a guess while it isn't typed yet); set here for its whole series. */
+function eventTypeChip(e) {
+  const t = e.meeting_type
+  if (!t || !t.key) return ''
+  const types = ((TPL.data && TPL.data.meeting_types) || []).map((x) => [x.id, x.name])
+  if (!types.length) { if (!TPL.data) loadTemplates().then(render); return ` <span class="mt-chip${t.by === 'guess' ? ' guess' : ''}">${esc(t.label)}</span>` }
+  const hint = t.by === 'you' ? 'You set this — for every meeting of the series' : t.by === 'invite' ? 'From its invite — change it for every meeting of the series' : 'Guessed from who is invited'
+  return ` <label class="mt-chip${t.by === 'guess' ? ' guess' : ''}" title="${esc(hint)}">${esc(t.label)} ▾<select data-event-type="${esc(t.key)}" aria-label="Kind of meeting">${types.map(([k, l]) => `<option value="${esc(k)}"${t.type === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`
+}
+document.addEventListener('change', (e) => {
+  if (!e.target.matches || !e.target.matches('[data-event-type]')) return
+  const key = e.target.dataset.eventType, kind = e.target.value
+  send({ cmd: 'set_event_type', key, kind })
+  const name = (((TPL.data && TPL.data.meeting_types) || []).find((x) => x.id === kind) || {}).name || kind
+  for (const ev of (S.cal.data && S.cal.data.events) || []) if (ev.meeting_type && ev.meeting_type.key === key) ev.meeting_type = { ...ev.meeting_type, type: kind, label: name, by: 'you' }
+  render()
+})
 function meetingTypeChip(c) {
   const t = c.meeting_type
   if (!t || c.memo) return ''
-  const hint = t.by === 'you' ? 'You set this' : t.by === 'echo' ? 'Set by the minutes — change it if it is wrong' : 'Guessed from who was invited — the minutes settle it'
+  const hint = t.by === 'you' ? 'You set this' : t.by === 'echo' ? 'Settled by the minutes — change it if it is wrong' : t.by === 'invite' ? 'From the meeting\'s invite — the minutes may settle it' : 'Guessed from who was invited — the minutes settle it'
   return `<label class="mt-chip${t.by === 'guess' ? ' guess' : ''}" title="${esc(hint)}">${esc(t.label)} ▾<select data-meeting-type aria-label="Kind of meeting">${(c.meeting_types || []).map(([k, l]) => `<option value="${esc(k)}"${t.type === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`
 }
 document.addEventListener('change', (e) => {
@@ -2402,7 +2419,7 @@ function eventDetail(e, now) {
   const why = e.recorded ? '' : e.import && e.import.error ? e.import.error : kind === 'import' ? (e.transcript ? 'Not recorded, but Teams transcribed it' : e.transcript === false ? 'Not recorded, and Teams has no transcript of it (yet)' : 'Not recorded. If Teams transcribed it') + ' — Echo makes a call of its transcript and chat; minutes, threads and the Brain follow.' : e.no_notetakers ? 'The organizer asked for no notetakers.' : e.declined ? 'You declined this meeting.' : e.cancelled ? 'This meeting was cancelled.' : !e.online ? 'Not a Teams meeting.' : st.past ? 'This meeting is over and was not recorded.' : ''
   return `<aside class="detail">
     <button class="btn ghost close" data-calclose="1" aria-label="Close">Close</button>
-    <h2 class="selectable">${esc(e.subject)}</h2><div class="when">${esc(when)}</div>
+    <h2 class="selectable">${esc(e.subject)}</h2><div class="when">${esc(when)}${eventTypeChip(e)}</div>
     <dl>${e.organizer ? `<dt>Organizer</dt><dd>${esc(e.organizer)}</dd>` : ''}${e.people ? `<dt>People</dt><dd>${e.people}</dd>` : ''}${e.location ? `<dt>Where</dt><dd>${esc(e.location)}</dd>` : ''}${e.recorded ? `<dt>${e.recorded.imported ? 'Call' : 'Recording'}</dt><dd>${e.recorded.imported ? 'from the Teams transcript' : STATUS[e.recorded.status] || esc(e.recorded.status)}${e.recorded.minutes ? `, ${e.recorded.minutes} min` : ''}</dd>` : ''}</dl>
     ${acts || slotItems('calendar.event', { kind: 'event', event: e }) ? `<div class="acts">${acts}${slotItems('calendar.event', { kind: 'event', event: e })}</div>` : ''}${why ? `<p class="why">${esc(why)}</p>` : ''}
     ${eventProjects(e)}

@@ -553,6 +553,12 @@ pub fn start_scheduler() {
     std::thread::spawn(|| loop {
         std::thread::sleep(std::time::Duration::from_secs(60));
         if !crate::notes::quitting() && !RUNNING.swap(true, Ordering::SeqCst) {
+            // Today's and tomorrow's meetings typed by their invites, before they start (once a series).
+            let by = (chrono::Local::now() + chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
+            let soon: Vec<MeetingContext> = crate::watch::agenda().into_iter().filter(|m| m.start.as_deref().and_then(|s| s.get(..10)).is_some_and(|d| d <= by.as_str())).collect();
+            if let Err(e) = crate::calls::classify(&soon) {
+                eprintln!("meeting types: {e:#}");
+            }
             for m in due() {
                 if crate::notes::quitting() {
                     break;
