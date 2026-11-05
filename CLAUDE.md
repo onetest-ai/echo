@@ -457,6 +457,21 @@ their icons; ⌘K goes to any project. A project is drawn as its logo, else its 
 from `PJ_SYMBOLS`, else an identicon from its id (`ProjectArt`, no DOM: `ui/projects.test.mjs`), in its colour. API: `/api/projects`
 (overview + `by_call`), `/api/project/<id>[/logo]`; IPC `project {op, …}` (`window::project_op`).
 
+**A prep before each meeting** (`prep.rs`; the user, 2026-11-05: "in the morning the meetings of threads get their
+briefs; one click on the calendar shows it"): for today's calendar meetings of an open thread (the app checks every 5
+minutes — the morning's, one added later; ≥ 5 min before the start; `prep::start_scheduler`), `<home>/prep/<id>/prep.json`
+(`id` = 16 hex of sha256(event id)) — gathered without a model: Last time (the previous meeting of the subject with
+minutes: highlights, open actions, its link), Open with these people (the threads' open tasks owned by someone in the
+invite or the user, late first; risks with no response; questions not answered — each `echo://task`), New since then (the
+threads' mail and chat evidence after the last meeting: titles and senders, never the text), Who's coming (the invite
+less the user, with role / stance from People, calls together, new) — then "In short", 3–5 sentences to the user as
+"you", by the threads' AI profile (`livenotes::complete_text`; only when every thread runs on the same one — strict
+routing; else facts only). Calls → **Coming up today** (the list's first group, `/api/upcoming`) opens a meeting still
+to come as a call with its Prep tab (Transcript and Minutes once recorded; Prepare now / Write it again: IPC `project
+{op: prep_write, prep}`); a recorded call finds its prep by its event (`prep::of_call`) → the **Prep** tab, first.
+`echo://prep/<id>` (`links.rs`; a recorded one → its call's Prep tab, else `#upcoming/<id>`), `echoctl read`, MCP
+`read_link` (only when all its threads are the reader's); `echoctl prep --upcoming | --show ID | --write ID`.
+Measured on a copy: a weekly with 31 people, 8 open items, 8 new mails — 6 s on sonnet.
 **Meeting series** (`series.rs`; set on a recurring meeting in the calendar — "Every meeting of this series": Record /
 Don't record, a language, nothing else (the user, 2026-11-05: "a simple setting, record the series or not and in which
 language"); `echoctl series list [--thread] | set <key> <json>`): `<home>/projects/series.json` keyed `id:<seriesMasterId>`

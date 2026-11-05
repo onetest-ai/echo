@@ -238,6 +238,11 @@ fn read_link(acc: &super::access::Access, link: &str) -> Result<Value> {
         Link::Thread(id) | Link::Task { thread: id, .. } => threads.contains(id),
         Link::Client(id) => crate::projects::list().iter().any(|p| p.client.as_deref() == Some(id) && threads.contains(&p.id)),
         Link::Person(key) => return crate::people::card(&threads, key, 40),
+        // A prep: only when all its threads are this reader's.
+        Link::Prep(id) => crate::prep::load(id).is_some_and(|p| {
+            let ts: Vec<&str> = p["threads"].as_array().into_iter().flatten().filter_map(|t| t["id"].as_str()).collect();
+            !ts.is_empty() && ts.iter().all(|t| threads.iter().any(|x| x == t))
+        }),
     };
     anyhow::ensure!(ok, "not found (or not readable from this session)");
     Ok(json!({"text": crate::links::read(link)?}))

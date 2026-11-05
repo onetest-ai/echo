@@ -335,6 +335,9 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
         "/api/brain/sources" => json_reply(json!({ "state": crate::brain::sources::state(), "senders": crate::brain::senders::view(), "signed_in": crate::graph::account().is_some(), "syncing": BRAIN_SYNC.load(std::sync::atomic::Ordering::SeqCst) })),
         // Projects: the list (clients, stages, each call's projects), one project, its logo.
         "/api/projects" => json_reply(projects_overview()),
+        // Today's meetings still to come, with their threads and preps (Calls → Coming up today).
+        "/api/upcoming" => json_reply(crate::prep::upcoming()),
+        p if p.starts_with("/api/prep/") => json_reply(crate::prep::load(&p["/api/prep/".len()..]).unwrap_or_else(|| json!({ "error": "no prep yet" }))),
         "/api/tasks" => json_reply(tasks_view()),
         // Open work in other threads, by words in its title (#20: Link to an item in another thread…).
         "/api/work/search" => {
@@ -722,6 +725,8 @@ fn call_detail(dir: &Path) -> Value {
     v["notes_changed"] = json!(dir.join("notes.md").exists() && mtime(calls::USER_NOTES).zip(written).is_some_and(|(n, w)| n > w));
     v["notes_run"] = json!(run);
     v["auto"] = crate::notes::auto_state(dir);
+    // The prep written before it (by its calendar event): the call's Prep tab.
+    v["prep"] = crate::prep::of_call(dir).unwrap_or(Value::Null);
     v["minutes_rev"] = json!(crate::minutes::revision(dir));
     v["rev"] = json!(rev);
     v["has_log"] = json!(dir.join(crate::notes::LOG).exists());
@@ -1538,6 +1543,11 @@ fn project_op(v: &Value) -> anyhow::Result<Option<String>> {
         // A Teams channel or a mail rule the thread reads into the Brain (`brain::sources`).
         // A meeting series' rule, one field at a time (`field`, `value`; null = Echo's default).
         // Not this thread's: its meetings of that series stop joining it.
+        // Prepare (a meeting with no prep) / Write it again: in the background.
+        "prep_write" => {
+            let m = crate::prep::meeting(&s("prep").unwrap_or_default()).ok_or_else(|| anyhow::anyhow!("that meeting isn't in today's calendar"))?;
+            anyhow::ensure!(crate::prep::start(m), "a prep is being written: try again in a minute");
+        }
         "series_unlink" => {
             let key = s("key").unwrap_or_default();
             pj::update(&id, |p| {

@@ -342,6 +342,7 @@ const ACTIVITIES = [
  *  null for actions not written yet). One Transcript tab: live while the call records (with its live
  *  notes beside it), the final transcript after — and the live notes stay beside it. */
 const CALL_TABS = [
+  { id: 'prep', label: 'Prep', when: (x) => !!x.prep },
   { id: 'minutes', label: 'Minutes' },
   { id: 'transcript', label: 'Transcript' },
   { id: 'chat', label: 'Chat', when: (x) => x.chat > 0, count: (x) => x.chat },
@@ -485,6 +486,12 @@ async function loadCalls(reset) {
     S.callsNext = rest.length ? S.callsNext : r.next
     S.callsTotal = r.total; S.error = null
   } catch (e) { S.error = String(e) }
+  await loadUpcoming()
+}
+/** Today's meetings still to come (Calls → Coming up today), and the open one's prep. */
+async function loadUpcoming() {
+  try { S.up = await get('api/upcoming') } catch { /* app restarting */ }
+  if (S.upSel) { try { const id = S.upSel, p = await get('api/prep/' + id); if (S.upSel === id) S.upPrep = p } catch { /* app restarting */ } }
 }
 async function loadMoreCalls() {
   if (!S.callsNext || S.callsMore) return
@@ -617,6 +624,13 @@ function route() {
     return
   }
   S.view = 'calls'
+  // A meeting still to come: its prep (echo://prep, Coming up today).
+  const um = h.match(/^upcoming\/([0-9a-f]{1,32})$/)
+  if (um) {
+    if (S.upSel !== um[1]) { S.upSel = um[1]; S.upPrep = null; S.selected = null; S.call = null; setTimeout(() => loadUpcoming().then(render)) }
+    return
+  }
+  S.upSel = null
   const m = h.match(/^call\/([^/]+)(?:\/(\w+))?$/)
   if (m) {
     // Another call: a note typed or edited on this one goes into its notes first.
@@ -913,6 +927,17 @@ function list() {
       </button>`
     }).join('') + (S.callsNext ? `<div class="rows-more" data-calls-more>${S.callsMore ? 'Loading…' : `${calls.length} of ${S.callsTotal}`}</div>` : '')
   }
+  // Today's meetings still to come, each a call-to-be with its prep.
+  const ups = !q && S.up && S.up.meetings ? S.up.meetings : []
+  const upRows = ups.length ? `<div class="group">Coming up today</div>` + ups.map((u) => {
+    const st = u.writing ? 'Writing the prep…' : u.prep ? (u.prep.error && !u.prep.written_at ? 'Prep failed' : 'Prep ready') : u.threads.length ? 'Prep soon' : 'No thread'
+    return `<button class="row up-row" role="option" data-up="${esc(u.id)}" aria-selected="${S.upSel === u.id}">
+      <span class="si up" aria-hidden="true">${ICON('<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>').replace('width="20" height="20"', 'width="14" height="14"')}</span>
+      <span class="t">${esc(u.subject || 'A meeting')}</span>
+      <span class="m"><span>${u.start ? esc(hm(new Date(u.start))) : ''}</span>${u.threads.length ? `<span>${esc(u.threads.map((t) => t.name).join(', '))}</span>` : ''}<span>${esc(st)}</span></span>
+    </button>`
+  }).join('') : ''
+  if (upRows && body !== undefined) body = upRows + body
   return `<section class="list">
     <div class="list-head"><div class="list-title"><h1>Calls</h1><button class="icon-btn" data-panel-show="vocabulary" title="Vocabulary — names and terms transcription should hear right" aria-label="Vocabulary">${BOOK}</button></div><input class="search" id="q" placeholder="Search titles and people" value="${esc(S.query)}" aria-label="Search calls"></div>
     <div class="rows" role="listbox" aria-label="Calls">${body}</div>
@@ -937,6 +962,7 @@ function emptyMain() {
  *  Minutes tab with minutes, the pane's bar and its frame apart, so a refresh that changes the bar
  *  never reloads the page in the frame (`render`). */
 function doc() {
+  if (S.upSel) return upcomingDoc()
   if (!S.selected) return { plain: emptyMain() }
   const c = S.call
   if (!c) return { plain: `<div class="pane"><div class="skeleton">${'<i></i>'.repeat(10)}</div></div>` }
@@ -946,7 +972,7 @@ function doc() {
   const chat = Array.isArray(c.chat) ? c.chat : []
   const frames = Array.isArray(c.frames) ? c.frames : []
   const actions = Array.isArray(c.actions) ? c.actions : null
-  const tabs = callTabs({ recording: c.status === 'recording', chat: chat.length, frames: frames.length, actions: actions ? actions.length : null })
+  const tabs = callTabs({ recording: c.status === 'recording', chat: chat.length, frames: frames.length, actions: actions ? actions.length : null, prep: !!c.prep })
   // While a call records (or is transcribed), open it on its Transcript once; once its minutes are
   // written, on Minutes once. The user's own choice stays. (`live` was the Transcript's live twin.)
   if (S.tab === 'live') S.tab = 'transcript'
@@ -966,6 +992,48 @@ function doc() {
   const body = tabBody(c, segs, chat, frames, actions)
   const confirm = S.confirmDelete ? confirmBox(c) : ''
   return typeof body === 'string' ? { head, pane: confirm + body } : { head, bar: confirm + body.bar, frame: body.frame }
+}
+
+/** A meeting still to come (Calls → Coming up today, `echo://prep`): its header and the Prep tab; Transcript and
+ *  Minutes come once it is recorded. */
+function upcomingDoc() {
+  const u = ((S.up && S.up.meetings) || []).find((x) => x.id === S.upSel)
+  const p = S.upPrep && !S.upPrep.error ? S.upPrep : null
+  const title = (u && u.subject) || (p && p.subject) || 'A meeting'
+  const start = (u && u.start) || (p && p.start), end = (u && u.end) || (p && p.end)
+  const threads = (u && u.threads) || (p && p.threads) || []
+  const when = start ? `${new Date(start).toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })}, ${hm(new Date(start))}${end ? `–${hm(new Date(end))}` : ''}` : ''
+  const chips = threads.map((t) => `<a class="pj-chip" href="echo://thread/${esc(t.id)}">${esc(t.name)}</a>`).join('')
+  const head = `${listToggle()}<div class="head-row"><div style="min-width:0"><h2 class="selectable">${esc(title)}</h2>
+      <div class="facts">${when ? `<span>${esc(when)}</span>` : ''}${u ? `<span>${u.people} people</span>` : ''}</div>${chips ? `<div class="pj-chips">${chips}</div>` : ''}</div>
+      <div class="doc-actions">${p ? `<button class="btn ghost" data-copy="${esc(p.link)}" title="Its echo:// link">Copy link</button>` : ''}</div></div>
+    <div class="tabs" role="tablist"><button class="tab" role="tab" aria-selected="true">Prep</button><button class="tab" role="tab" aria-selected="false" disabled title="Once it is recorded">Transcript</button><button class="tab" role="tab" aria-selected="false" disabled title="Once it is recorded">Minutes</button></div>`
+  if (!u && !p) return { head, pane: S.upPrep ? '<p class="set-sub">This meeting isn\'t in today\'s calendar any more.</p>' : `<div class="skeleton">${'<i></i>'.repeat(6)}</div>` }
+  if (!p) {
+    const busy = u && u.writing
+    return { head, pane: `<div class="empty"><div><h3>${busy ? 'Writing the prep…' : 'No prep yet'}</h3><p>${busy ? 'From last time, what is open in its threads, what is new and who is coming.' : u && u.threads.length ? 'Echo writes it this morning for every meeting of a thread.' : 'This meeting is in no thread: Echo prepares a thread\'s meetings.'}</p>${busy ? '' : `<button class="btn primary" data-prep-write="${esc(S.upSel)}">Prepare now</button>`}</div></div>` }
+  }
+  return { head, pane: prepView(p, !!u) }
+}
+
+/** A prep: In short, then Last time, Open with these people, New since then; Who's coming beside. `again`: it can
+ *  be written again (the meeting is still to come). Its text is the user's own records, escaped. */
+function prepView(p, again) {
+  if (!p) return ''
+  const day = (d) => d ? new Date(d.length > 10 ? d : d + 'T12:00').toLocaleDateString([], { day: 'numeric', month: 'short' }) : ''
+  const sec = (title, items) => items ? `<section class="pr-sec"><h3>${title}</h3>${items}</section>` : ''
+  const l = p.last_time
+  const last = l ? sec(`Last time · <a href="${esc(l.link)}">${esc(day(l.date))}</a>`, `<ul>${(l.highlights || []).map((h) => `<li>${esc(h)}</li>`).join('')}${(l.open_actions || []).map((a) => `<li><b>Still to do</b> ${esc(a.task)}${a.owner ? ` · ${esc(a.owner)}` : ''}</li>`).join('')}</ul>`) : ''
+  const KIND = { task: 'Task', risk: 'Risk', question: 'Question' }
+  const open = (p.open || []).length ? sec('Open with these people', `<ul>${p.open.map((o) => `<li><b>${KIND[o.kind] || esc(o.kind)}</b> <a href="${esc(o.link)}">${esc(o.title)}</a>${o.owner ? ` · ${esc(o.owner)}` : ''}${o.late ? ' · <span class="warn">late</span>' : o.due ? ` · ${esc(day(o.due))}` : ''}</li>`).join('')}</ul>`) : ''
+  const fresh = (p.new_since || []).length ? sec('New since then', `<ul>${p.new_since.map((n) => `<li>${esc(day(n.date))} · ${n.kind === 'mail' ? 'Mail' : 'Chat'}${n.from ? ` from ${esc(n.from)}` : ''}: ${n.url && /^https:\/\//.test(n.url) ? `<a data-ext href="${esc(n.url)}">${esc(n.title || '')}</a>` : esc(n.title || '')}</li>`).join('')}</ul>`) : ''
+  // The new faces first, then by calls together; ten at most.
+  const ppl = [...(p.people || [])].sort((a, b) => (b.new - a.new) || (b.calls - a.calls)), more = ppl.length - 10
+  const who = ppl.slice(0, 10).map((x) => `<div class="pr-who"><span>${x.link ? `<a href="${esc(x.link)}">${esc(x.name)}</a>` : esc(x.name)}${x.role ? ` <span class="set-sub">· ${esc(x.role)}</span>` : ''}</span>${x.new ? '<span class="chip warn-chip">new</span>' : `<span class="set-sub pr-n">${x.calls} call${x.calls === 1 ? '' : 's'}</span>`}</div>`).join('') + (more > 0 ? `<div class="set-sub">and ${more} more</div>` : '')
+  const short = p.summary ? sec('In short', `<p class="pr-short">${esc(p.summary)}</p>`) : p.error ? `<p class="set-sub">${esc(p.error)}</p>` : ''
+  const foot = `<div class="pr-foot"><span class="set-sub">Written ${esc(p.written_at ? hm(new Date(p.written_at)) : '')}${p.model ? ` · ${esc(p.model)}` : ''}</span>${again ? `<button class="btn ghost" data-prep-write="${esc(p.id)}">Write it again</button>` : ''}</div>`
+  const empty = !short && !last && !open && !fresh ? '<p class="set-sub">Nothing to go on yet: no earlier meeting with minutes, nothing open in its threads.</p>' : ''
+  return `<div class="pr"><article class="pr-main">${short}${last}${open}${fresh}${empty}</article><aside class="pr-side">${who ? sec("Who's coming", who) : ''}${foot}</aside></div>`
 }
 
 /** The call's one set of actions: a ⋯ menu (the folder, the minutes page, delete). */
@@ -1036,6 +1104,7 @@ function turnsHtml(segs, q, jump, marks = []) {
 }
 
 function tabBody(c, segs, chat, frames, actions) {
+  if (S.tab === 'prep') return prepView(c.prep, false)
   if (S.tab === 'transcript') {
     // Live notes kept (or being kept): the transcript with them beside it, as during the call.
     if (hasLive(c)) return liveTab(c, segs)
@@ -6293,7 +6362,7 @@ function placeDetail() {
 
 /** What the screen depends on: re-render only when it changes (keeps selection and scroll). */
 // (the minute too: the pill's "meeting soon" comes and goes with the clock)
-const fingerprint = () => JSON.stringify([S.state, S.calls, S.call, S.agenda, S.cal.data, S.cal.selected, S.settings, S.pj.data, S.pj.detail, S.pj.foundData, S.pj.work, S.pj.series, Math.floor(Date.now() / 60000)])
+const fingerprint = () => JSON.stringify([S.state, S.calls, S.call, S.agenda, S.cal.data, S.cal.selected, S.settings, S.pj.data, S.pj.detail, S.pj.foundData, S.pj.work, S.pj.series, S.up, S.upPrep, Math.floor(Date.now() / 60000)])
 
 // A thread's meeting series (Profile → Meetings): open one; set a field.
 function seriesSet(el, field, value) {
@@ -6325,7 +6394,7 @@ document.addEventListener('click', (e) => {
   if (S.laterOpen && !(e.target.closest && e.target.closest('[data-cmd^="later-"]'))) { S.laterOpen = false; render() }
   // The sidebar open over a narrow page closes on a click beside it.
   if (S.barOver && !(e.target.closest && e.target.closest('.actbar'))) { S.barOver = false; render() }
-  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-theme-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-go],[data-conv-keep],[data-br-pclosed],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
+  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-theme-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-go],[data-conv-keep],[data-br-pclosed],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-up],[data-prep-write],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
   if (!t) { if (menuWas) render(); return }
   // Sign-ins (`signin.rs`): shown at once (starting / stopping / checking) until the next poll
   // brings the app's state.
@@ -6423,6 +6492,8 @@ document.addEventListener('click', (e) => {
   if (t.dataset.schedule) { send({ cmd: 'schedule', id: t.dataset.schedule, languages: recordLang(), profile: pickedProfile() }); const e = (S.cal.data.events || []).find((x) => x.id === t.dataset.schedule); if (e) e.scheduled = true; return render() }
   if (t.dataset.unschedule) { send({ cmd: 'unschedule', id: t.dataset.unschedule }); const e = (S.cal.data.events || []).find((x) => x.id === t.dataset.unschedule); if (e) e.scheduled = false; return render() }
   if (t.dataset.call) { S.listOpen = false; return go(`call/${t.dataset.call}/${S.tab}`) }
+  if (t.dataset.up) { S.listOpen = false; return go(`upcoming/${t.dataset.up}`) }
+  if (t.dataset.prepWrite) { send({ cmd: 'project', op: 'prep_write', prep: t.dataset.prepWrite }); setTimeout(() => loadUpcoming().then(render), 800); return }
   if (t.dataset.minutesOf) return go(`call/${t.dataset.minutesOf}/notes`)
   if (t.dataset.tab) return go(`call/${S.selected}/${t.dataset.tab}`)
   if (t.dataset.at) { S.jump = Number(t.dataset.at); S.find = ''; return go(`call/${S.selected}/transcript`) }
@@ -7028,7 +7099,7 @@ window.echo = {
   if (S.view === 'projects') await loadProject()
   if (S.view === 'tasks') await loadTasks()
   if (S.view === 'brain') await loadBrain()
-  if (S.view === 'calls' && !S.selected && S.calls && S.calls.length) S.selected = S.calls[0].name, history.replaceState(null, '', `#call/${S.selected}/minutes`)
+  if (S.view === 'calls' && !S.selected && !S.upSel && S.calls && S.calls.length) S.selected = S.calls[0].name, history.replaceState(null, '', `#call/${S.selected}/minutes`)
   if (S.selected) await loadCall(S.selected)
   if (S.view === 'calendar') await loadCalendar()
   render()
