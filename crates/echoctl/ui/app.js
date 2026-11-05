@@ -1951,7 +1951,7 @@ function claudeFolderView() {
 }
 // Claude's sparkle on a folder (the Echo folder).
 const SPARK = (x, y, r) => `<path d="M${x} ${y - r}l${r * 0.3} ${r * 0.7} ${r * 0.7} ${r * 0.3}-${r * 0.7} ${r * 0.3}-${r * 0.3} ${r * 0.7}-${r * 0.3}-${r * 0.7}-${r * 0.7}-${r * 0.3} ${r * 0.7}-${r * 0.3}z" fill="currentColor" stroke="none"/>`
-PANEL_VIEWS.push({ id: 'claude-folder', label: 'Claude', icon: ICON(`<path d="M3 6h6l2 2h10v11H3z"/>${SPARK(12, 13.5, 3.6)}`), area: 'bottom', when: () => S.view !== 'settings', render: claudeFolderView })
+PANEL_VIEWS.push({ id: 'claude-folder', label: 'Claude', icon: ICON(`<path d="M3 6h6l2 2h10v11H3z"/>${SPARK(12, 13.5, 3.6)}`), area: 'bottom', render: claudeFolderView })
 
 // ── Minutes: the page as it would be sent, in a sandboxed frame (`/minutes/<call>`) ───────────
 const SHOW_FILE = /Windows/.test(navigator.userAgent) ? 'Show in Explorer' : 'Show in Finder'
@@ -2505,11 +2505,11 @@ async function loadTemplates() {
   const list = (TPL.data && TPL.data.templates) || []
   if (TPL.sel && !TPL.draft) { const t = list.find((x) => x.id === TPL.sel); TPL.draft = t ? tplDraft(t) : null; if (!t) TPL.sel = null }
 }
-const tplDraft = (t) => ({ id: t.id, kind: t.kind, memo: t.memo, match: [...(t.match || [])], sections: (t.sections || []).map((s) => ({ heading: s.heading, instruction: s.instruction })) })
+const tplDraft = (t) => ({ id: t.id, kind: t.kind, memo: t.memo, header: t.header || '', match: [...(t.match || [])], sections: (t.sections || []).map((s) => ({ heading: s.heading, instruction: s.instruction })) })
 function tplSave() {
   const d = TPL.draft
   if (!d || !d.id) return
-  send({ cmd: 'template_save', id: d.id, match: d.match, sections: d.sections })
+  send({ cmd: 'template_save', id: d.id, header: d.header, match: d.match, sections: d.sections })
   if (d.kind === 'builtin') d.kind = 'edited'
   setTimeout(() => loadTemplates().then(render), 400)
 }
@@ -2525,7 +2525,7 @@ function templatesSettings() {
   }).join('')
   const kinds = '<div class="tp-kinds" role="tablist" aria-label="Kind of template"><button class="tp-kind on" role="tab" aria-selected="true">Minutes <span class="set-sub">' + list.length + '</span></button></div>'
   const head = `<div class="tp-head"><h2>Templates</h2><p class="set-sub">The shapes Claude writes in. A call's minutes follow the template with a word of its title; the rest follow Default.</p>${kinds}</div>`
-  const listBox = `<div class="tp-list"><div class="tp-lh"><span class="set-sub">Minutes templates</span><button class="btn" data-tpl-new>${ICON('<path d="M12 5v14M5 12h14"/>')}New template</button></div><div class="set-card">${rows}</div></div>`
+  const listBox = `<div class="tp-list"><div class="tp-lh"><span class="set-sub">Minutes templates</span><span class="tp-lha"><button class="btn ghost" data-tpl-claude title="Claude makes or changes a template from what you tell it">${ICON('<path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/>')}Ask Claude</button><button class="btn" data-tpl-new>${ICON('<path d="M12 5v14M5 12h14"/>')}New template</button></span></div><div class="set-card">${rows}</div></div>`
   return `${head}<div class="tp-grid">${listBox}${templateEditor()}</div>`
 }
 function templateEditor() {
@@ -2545,20 +2545,32 @@ function templateEditor() {
   const foot = isNew ? `<span class="grow"></span><button class="btn ghost" data-tpl-cancel>Cancel</button><button class="btn primary" data-tpl-create>Create</button>`
     : '<span class="grow set-sub">Saved as you change it · the next minutes follow it</span>'
   return `<div class="tp-ed"><div class="tp-eh"><b>${esc(isNew ? 'New template' : tplName(d.id))}</b>${tag}<span class="grow"></span>${act}<button class="icon-btn" data-tpl-close aria-label="Close">${ICON('<path d="M6 6l12 12M18 6L6 18"/>')}</button></div>
-    <div class="tp-eb">${name}${words}<div class="tp-lrow"><span class="tp-l">Sections — in this order</span><span class="set-sub grow">Claude writes each, following its words</span><button class="link-btn" data-tpl-add>+ Add a section</button></div>${secs}
+    <div class="tp-eb">${name}${words}<div class="tp-f"><div class="tp-lrow tp-hl"><label class="tp-l" for="tp-hd">Header — how the minutes start</label><button class="icon-btn tp-info${TPL.info ? ' on' : ''}" data-tpl-info aria-expanded="${TPL.info ? 'true' : 'false'}" title="Values and how a header is read" aria-label="Values and how a header is read">${ICON('<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8h.01"/>')}</button></div><div class="tp-s tp-hd"><textarea id="tp-hd" rows="${Math.min(10, Math.max(2, (d.header || '').split('\n').reduce((n, l) => n + Math.max(1, Math.ceil(l.length / 90)), 0) + 1))}" placeholder="# {title}">${esc(d.header || '')}</textarea></div>${TPL.info ? `<div class="tp-pop" role="note"><div class="tp-vals">${((TPL.data && TPL.data.values) || []).map((v) => `<button class="tp-val" data-tpl-val="${esc(v.name)}" title="${esc(v.means)}">{${esc(v.name)}}</button>`).join('')}</div><ul class="set-sub"><li>A value is filled in from the call — click one to put it where the cursor is; one with nothing to fill goes, with what is around it.</li><li>Anything else in {…} is an instruction in your words: “{one line on why we met}”.</li><li>A line that says when it applies (“only when…”) is left out otherwise; the rest is kept as written.</li><li>Easier still: ask Claude to write the template for you.</li></ul></div>` : ''}</div><div class="tp-lrow"><span class="tp-l">Sections — in this order</span><span class="set-sub grow">Claude writes each, following its words</span><button class="link-btn" data-tpl-add>+ Add a section</button></div>${secs}
     <button class="tp-add" data-tpl-add>${ICON('<path d="M12 5v14M5 12h14"/>')}Add a section</button></div><div class="tp-ef">${foot}</div></div>`
 }
 
 // Templates: picking, the editor's buttons, and its fields saved when they change.
 document.addEventListener('click', (e) => {
   if (S.tplMenu && !e.target.closest('.tp-again')) { S.tplMenu = false; render() }
-  const t = e.target.closest('[data-tpl-pick],[data-tpl-new],[data-tpl-close],[data-tpl-cancel],[data-tpl-create],[data-tpl-reset],[data-tpl-del],[data-tpl-word-x],[data-tpl-up],[data-tpl-down],[data-tpl-sx],[data-tpl-add],[data-tpl-again],[data-tpl-menu]')
+  const t = e.target.closest('[data-tpl-info],[data-tpl-claude],[data-tpl-val],[data-tpl-pick],[data-tpl-new],[data-tpl-close],[data-tpl-cancel],[data-tpl-create],[data-tpl-reset],[data-tpl-del],[data-tpl-word-x],[data-tpl-up],[data-tpl-down],[data-tpl-sx],[data-tpl-add],[data-tpl-again],[data-tpl-menu]')
   if (!t) return
   const d = TPL.draft
-  if (t.dataset.tplPick) { const x = ((TPL.data && TPL.data.templates) || []).find((y) => y.id === t.dataset.tplPick); TPL.sel = x ? x.id : null; TPL.draft = x ? tplDraft(x) : null; TPL.word = ''; return render() }
+  if (t.dataset.tplInfo !== undefined) { TPL.info = !TPL.info; return render() }
+  // Templates are mostly made with Claude: its panel, here (it sees Settings → Templates; `echoctl templates`).
+  if (t.dataset.tplClaude !== undefined) return claudePanel('claude-folder')
+  if (t.dataset.tplVal && d) {
+    // At the caret in the header (where it was last), else at its end.
+    const ta = $('#tp-hd'), v = `{${t.dataset.tplVal}}`, at = TPL.caret != null ? TPL.caret : (d.header || '').length
+    d.header = (d.header || '').slice(0, at) + v + (d.header || '').slice(at)
+    TPL.caret = at + v.length
+    tplSave(); render()
+    const n = $('#tp-hd'); if (n) { n.focus(); n.setSelectionRange(TPL.caret, TPL.caret) }
+    return void ta
+  }
+  if (t.dataset.tplPick) { TPL.caret = null; const x = ((TPL.data && TPL.data.templates) || []).find((y) => y.id === t.dataset.tplPick); TPL.sel = x ? x.id : null; TPL.draft = x ? tplDraft(x) : null; TPL.word = ''; return render() }
   if (t.dataset.tplNew !== undefined) {
     const def = ((TPL.data && TPL.data.templates) || []).find((y) => y.id === 'default')
-    TPL.sel = null; TPL.draft = { id: null, kind: 'yours', name: '', match: [], sections: def ? tplDraft(def).sections : [{ heading: 'Summary', instruction: '' }] }
+    TPL.sel = null; TPL.draft = { id: null, kind: 'yours', name: '', header: def ? def.header : '', match: [], sections: def ? tplDraft(def).sections : [{ heading: 'Summary', instruction: '' }] }
     render(); const n = $('#tp-name'); if (n) n.focus(); return
   }
   if (t.dataset.tplClose !== undefined || t.dataset.tplCancel !== undefined) { TPL.sel = null; TPL.draft = null; return render() }
@@ -2566,7 +2578,7 @@ document.addEventListener('click', (e) => {
     const name = (($('#tp-name') || {}).value || '').trim()
     if (!name) { const n = $('#tp-name'); if (n) n.focus(); return }
     d.name = name
-    send({ cmd: 'template_save', name, match: d.match, sections: d.sections })
+    send({ cmd: 'template_save', name, header: d.header, match: d.match, sections: d.sections })
     TPL.pending = name
     setTimeout(() => loadTemplates().then(() => { const id = name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-|-$/g, ''); const x = (TPL.data.templates || []).find((y) => y.id === id); if (x) { TPL.sel = x.id; TPL.draft = tplDraft(x) } render() }), 400)
     return
@@ -2590,7 +2602,8 @@ document.addEventListener('click', (e) => {
 document.addEventListener('change', (e) => {
   const el = e.target, d = TPL.draft
   if (!d || !el.matches) return
-  if (el.matches('[data-tpl-h]')) { d.sections[+el.dataset.tplH].heading = el.value.trim() || 'Untitled'; tplSave() }
+  if (el.id === 'tp-hd') { d.header = el.value; tplSave() }
+  else if (el.matches('[data-tpl-h]')) { d.sections[+el.dataset.tplH].heading = el.value.trim() || 'Untitled'; tplSave() }
   else if (el.matches('[data-tpl-i]')) { d.sections[+el.dataset.tplI].instruction = el.value; tplSave() }
 })
 document.addEventListener('input', (e) => {
@@ -2599,8 +2612,11 @@ document.addEventListener('input', (e) => {
   if (el.matches('[data-tpl-h]')) d.sections[+el.dataset.tplH].heading = el.value
   else if (el.matches('[data-tpl-i]')) d.sections[+el.dataset.tplI].instruction = el.value
   else if (el.id === 'tp-word') TPL.word = el.value
+  else if (el.id === 'tp-hd') { d.header = el.value; TPL.caret = el.selectionStart }
   else if (el.id === 'tp-name') d.name = el.value
 })
+// The header's caret, so a value clicked goes where the user was.
+document.addEventListener('selectionchange', () => { const a = document.activeElement; if (a && a.id === 'tp-hd') TPL.caret = a.selectionStart })
 document.addEventListener('keydown', (e) => {
   // A word: Enter (or a comma) adds it.
   if (e.target.id !== 'tp-word' || !TPL.draft || !(e.key === 'Enter' || e.key === ',')) return

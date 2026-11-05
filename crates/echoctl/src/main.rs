@@ -260,6 +260,9 @@ enum Cmd {
         #[command(subcommand)]
         cmd: OrgCmd,
     },
+    /// Minutes templates (JSON): each one's words, header and sections, the {values} they may use, and the folder for
+    /// your own (a template there named like a built-in changes it)
+    Templates,
     /// Today → Needs you now (JSON): what waits on you from the last day in Teams and mail; --refresh reads them again
     #[command(hide = true)]
     Needs {
@@ -1678,6 +1681,12 @@ fn main() -> Result<()> {
         Cmd::Project { cmd } => project_command(cmd),
         Cmd::Client { cmd } => client_command(cmd),
         Cmd::Org { cmd } => org_command(cmd),
+        Cmd::Templates => {
+            let mut v = calls::templates_view();
+            v["folder"] = serde_json::json!(paths::state_dir().join("templates"));
+            println!("{}", serde_json::to_string_pretty(&v)?);
+            Ok(())
+        }
         Cmd::Needs { refresh } => {
             if refresh {
                 needs::refresh()?;

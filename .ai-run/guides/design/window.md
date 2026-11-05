@@ -93,6 +93,20 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   (`template_save` → `<home>/.echo/templates/<id>.md`, which `pick_template` already read first); a built-in keeps its id
   and becomes Edited, Reset to built-in takes the user's file away; New template takes its id from its name; Delete.
   Taken-away files go to `.echo/trash/templates/`. Built-in instructions are one line each (they show as written).
+- A template is a reference, not a list of fields: `process-call` reads its whole text (`context.template.text`) and
+  follows it — its **header** (all before the first `## `: `{…}` filled in, a line saying when it applies left out
+  otherwise, the rest as written, frontmatter and title formats included) and each `## ` section's words, tables and
+  formats. The minutes' first lines (title, date · duration · participants, Since last time) used to be fixed in the
+  skill; they are the built-ins' header now, so a template of one's own (a YAML frontmatter, "# Meeting Minutes: …", a
+  decision table) is made and edited in the window without losing anything. The editor shows the header as its first
+  card (monospace).
+- `{values}` are one list in the code (`calls::TEMPLATE_VALUES`: title, date, time, duration, participants, colleagues,
+  external, organizer, thread, client, previous, me, language — each with where it comes from), given to the window
+  (`/api/templates` `values`) and to the skill (`context.template_values`); a test keeps the built-ins to it. One with
+  nothing to fill goes with its separator. Any other `{…}` is an instruction in the template's words (Peter's way).
+  The window shows them behind an ⓘ by the header (a click puts one at the cursor) — templates are mostly made with
+  Claude: Ask Claude by the list opens its panel, which Settings now has too (it was off there); `echoctl templates`
+  gives Claude the templates, values and folder, and the manage skill shows the file's shape.
 - A call's Minutes says which template wrote them and why ("the title has "sync"", "chosen for this call") with
   Write again with… a menu of the templates (IPC `write_notes` + `template`: kept in the call's `meta.json` `template`,
   so later runs follow it too; a template since deleted falls back to the title's). `calls::template_of`.

@@ -333,6 +333,11 @@ const BUILTIN_TEMPLATES: &[(&str, &str)] = &[
 pub struct Template {
     pub name: String,
     pub path: String,
+    /// The whole template below its frontmatter: what the minutes skill follows, as a reference (header, sections,
+    /// their tables and instructions as written).
+    pub text: String,
+    /// What comes before its first section (`## `): the minutes' start — title line, participants, frontmatter.
+    pub header: String,
     pub sections: Vec<Value>,
     #[serde(skip)]
     keywords: Vec<String>,
@@ -355,14 +360,17 @@ fn parse_template(text: &str, stem: &str, path: String) -> Option<Template> {
                 .collect();
         }
     }
+    // The header: everything before the first `## ` line.
+    let first = if body.starts_with("## ") { Some(0) } else { body.find("\n## ").map(|i| i + 1) };
+    let (header, rest) = body.split_at(first.unwrap_or(body.len()));
     let mut sections = vec![];
-    for chunk in body.split("\n## ").map(|c| c.trim_start_matches("## ")) {
+    for chunk in rest.split("\n## ").map(|c| c.trim_start_matches("## ")) {
         let (heading, instruction) = chunk.split_once('\n').unwrap_or((chunk, ""));
         if !heading.trim().is_empty() {
             sections.push(json!({ "heading": heading.trim(), "instruction": instruction.trim() }));
         }
     }
-    Some(Template { name, path, sections, keywords })
+    Some(Template { name, path, text: body.trim().to_string(), header: header.trim().to_string(), sections, keywords })
 }
 
 /// A memo's template: the user's own `memo.md` if they wrote one, else the built-in.
@@ -413,20 +421,42 @@ fn all_templates() -> Vec<Template> {
     all
 }
 
+/// The values a template may name in braces (`{date}`), each with where it comes from in the minutes' `context`: the
+/// window lists them under a template's header, the skill fills them in. Any other `{…}` is an instruction in the
+/// template's own words ("{one line on why we met}").
+pub const TEMPLATE_VALUES: &[(&str, &str)] = &[
+    ("title", "the meeting's title (its invite's subject, else the call's title)"),
+    ("date", "the day of the call, as 2026-11-04 (`started_at`)"),
+    ("time", "when it started, as 14:00 (`started_at`, local time)"),
+    ("duration", "how long it was, as 43 min (`duration_min`)"),
+    ("participants", "who took part: colleagues, then external, each linked from `links.people`"),
+    ("colleagues", "the colleagues on the call, linked"),
+    ("external", "the people from outside, linked"),
+    ("organizer", "who sent the invite (`meeting.organizer`)"),
+    ("thread", "the call's threads, linked from `links.threads`"),
+    ("client", "the call's clients, linked from `links.clients`"),
+    ("previous", "the previous meeting of this series, linked from `links.previous`"),
+    ("me", "the user's name (`me.name`)"),
+    ("language", "the language the minutes are written in (`dominant_language`)"),
+];
+
+fn template_values() -> Value {
+    json!(TEMPLATE_VALUES.iter().map(|(n, m)| json!({"name": n, "means": m})).collect::<Vec<_>>())
+}
+
 /// Settings → Templates → Minutes: each template — `kind` built-in, edited (the user's over a built-in) or yours —
 /// with the words of a title it is used for and its sections. Built-ins first, in their order; then the user's by name.
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn templates_view() -> Value {
     let builtin: Vec<&str> = BUILTIN_TEMPLATES.iter().map(|(s, _)| *s).collect();
     let mut out: Vec<Value> = all_templates()
         .into_iter()
         .map(|t| {
             let kind = if t.path.starts_with("builtin:") { "builtin" } else if builtin.contains(&t.name.as_str()) { "edited" } else { "yours" };
-            json!({"id": t.name, "kind": kind, "match": t.keywords, "sections": t.sections, "memo": t.name == "memo"})
+            json!({"id": t.name, "kind": kind, "match": t.keywords, "header": t.header, "sections": t.sections, "memo": t.name == "memo"})
         })
         .collect();
     out.sort_by_key(|t| (builtin.iter().position(|b| t["id"] == *b).unwrap_or(usize::MAX), t["id"].as_str().unwrap_or("").to_string()));
-    json!({"templates": out})
+    json!({"templates": out, "values": template_values()})
 }
 
 /// A template's id from a name: lower case, words joined by `-` (`Client kickoff` → `client-kickoff`).
@@ -446,7 +476,7 @@ fn template_id(name: &str) -> String {
 /// Save a template the user made or changed: `<home>/.echo/templates/<id>.md`. A built-in keeps its id (so it is
 /// edited, and Reset brings Echo's back); a new one takes its id from `name` and may not take an existing one.
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
-pub fn template_save(id: Option<&str>, name: &str, words: &[String], sections: &[Value]) -> Result<String> {
+pub fn template_save(id: Option<&str>, name: &str, words: &[String], header: &str, sections: &[Value]) -> Result<String> {
     let known: Vec<String> = all_templates().into_iter().map(|t| t.name).collect();
     let id = match id.filter(|i| !i.is_empty()) {
         Some(i) => {
@@ -463,6 +493,11 @@ pub fn template_save(id: Option<&str>, name: &str, words: &[String], sections: &
     let one_line = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
     let words: Vec<String> = words.iter().map(|w| one_line(w).to_lowercase().replace([',', '[', ']', '"'], "")).filter(|w| !w.is_empty()).collect();
     let mut body = format!("---\nname: {id}\nmatch: [{}]\n---\n", words.join(", "));
+    // Its header as written, but a line starting a section stays one level down (it is the header's).
+    let header: Vec<String> = header.trim().lines().map(|l| if l.starts_with("## ") { format!("#{l}") } else { l.to_string() }).collect();
+    if !header.is_empty() {
+        body.push_str(&format!("{}\n\n", header.join("\n")));
+    }
     let mut n = 0;
     for s in sections {
         let heading = one_line(s["heading"].as_str().unwrap_or("")).trim_start_matches('#').trim().to_string();
@@ -670,6 +705,8 @@ pub fn context(call: &str) -> Result<()> {
         "skip_reason": summarize,
         "previous_notes": previous.as_ref().map(|p| p.join("notes.md").display().to_string()),
         "template": if memo { memo_template() } else { template_for(&dir).or_else(|| pick_template(subject_of(&dir).as_deref())) },
+        // What `{date}`, `{participants}`… in it stand for.
+        "template_values": template_values(),
         // A memo: the user alone; its threads are found from what was said (step 4b of process-call).
         "memo": memo,
         "open_threads": if memo { crate::memo::open_threads(&dir) } else { Value::Null },
@@ -1580,17 +1617,19 @@ mod tests {
         assert_eq!(kind("discussion").as_deref(), Some("builtin"));
         // A built-in changed: edited, and the minutes follow the change.
         let secs = vec![json!({"heading": "Decisions", "instruction": "Who owns each.\n## Not a heading"}), json!({"heading": "  ", "instruction": "dropped"})];
-        template_save(Some("discussion"), "", &["review".into(), "Retro, x".into()], &secs).unwrap();
+        template_save(Some("discussion"), "", &["review".into(), "Retro, x".into()], "# {title}\n## not a section", &secs).unwrap();
         assert_eq!(kind("discussion").as_deref(), Some("edited"));
         let t = pick_template(Some("Sprint retro x")).unwrap();
         assert_eq!(t.name, "discussion");
         assert_eq!(t.sections.len(), 1, "an empty heading is no section; a '## ' line stays inside its section");
         assert!(t.sections[0]["instruction"].as_str().unwrap().contains("### Not a heading"));
+        assert_eq!(t.header, "# {title}\n### not a section", "the header kept, before the sections");
+        assert!(t.text.starts_with("# {title}") && t.text.contains("## Decisions"), "the whole template for the skill");
         // A new one of the user's: its id from its name, not a taken one, at least one section.
-        assert_eq!(template_save(None, "Client Kickoff!", &["kickoff".into()], &secs).unwrap(), "client-kickoff");
+        assert_eq!(template_save(None, "Client Kickoff!", &["kickoff".into()], "", &secs).unwrap(), "client-kickoff");
         assert_eq!(kind("client-kickoff").as_deref(), Some("yours"));
-        assert!(template_save(None, "client kickoff", &[], &secs).is_err(), "taken");
-        assert!(template_save(None, "Empty", &[], &[]).is_err(), "no section");
+        assert!(template_save(None, "client kickoff", &[], "", &secs).is_err(), "taken");
+        assert!(template_save(None, "Empty", &[], "", &[]).is_err(), "no section");
         assert_eq!(pick_template(Some("Acme kickoff")).unwrap().name, "client-kickoff");
         // A call: its title's template, then the one chosen for it (Write again with…), and why.
         let d = root.join("home/calls/2026-11-04_100000-weekly-sync");
@@ -1611,6 +1650,25 @@ mod tests {
     }
 
     #[test]
+    fn a_template_with_its_own_frontmatter_and_tables_round_trips() {
+        let (_env, _) = crate::paths::testenv::folders("calls-template-rich");
+        // A minutes format of its own: YAML frontmatter, a title format, a decision table.
+        let header = "---\ndate: {date}\nattendees:\n  - {each participant}\n---\n\n# Meeting Minutes: {title}";
+        let table = "| # | Decision | Options Considered | Agreed Option | Rationale | ADR Reference |\n|---|---|---|---|---|---|\nOne row per decision [mm:ss]; ADR-TBD when none.";
+        let secs = vec![json!({"heading": "Decisions", "instruction": table}), json!({"heading": "Action Items", "instruction": "- owner — task"})];
+        let id = template_save(None, "Minutes format", &["steering".into()], header, &secs).unwrap();
+        let t = all_templates().into_iter().find(|t| t.name == id).unwrap();
+        assert_eq!(t.header, header);
+        assert_eq!(t.sections, secs);
+        assert!(t.text.starts_with("---\ndate: {date}") && t.text.contains(table), "the skill reads it whole: {}", t.text);
+        // Saved again unchanged (an edit elsewhere in the window): the same file.
+        let f = templates_dir().join(format!("{id}.md"));
+        let before = fs::read_to_string(&f).unwrap();
+        template_save(Some(&id), "", &t.keywords, &t.header, &t.sections).unwrap();
+        assert_eq!(fs::read_to_string(&f).unwrap(), before);
+    }
+
+    #[test]
     fn the_summary_has_its_shape_and_its_recap_is_the_purpose() {
         // Each built-in template but the memo's asks for the shape: purpose, Highlights, Key dates.
         for (name, body) in BUILTIN_TEMPLATES.iter().filter(|(n, _)| *n != "memo") {
@@ -1619,6 +1677,12 @@ mod tests {
             assert_eq!(s["heading"], "Summary", "{name}");
             let i = s["instruction"].as_str().unwrap();
             assert!(i.starts_with("One sentence") && i.contains("**Highlights**") && i.contains("**Key dates**"), "{name}: {i}");
+        }
+        // Every one-word `{value}` in a built-in is one the skill is told about; longer ones are instructions.
+        for (name, body) in BUILTIN_TEMPLATES {
+            for v in body.split('{').skip(1).filter_map(|r| r.split_once('}').map(|(v, _)| v)).filter(|v| !v.contains(' ')) {
+                assert!(TEMPLATE_VALUES.iter().any(|(n, _)| *n == v), "{name}: {{{v}}} is not a known value");
+            }
         }
         // Minutes in that shape: a call's recap with no decisions is its purpose, then its highlights and dates.
         let md = "# T\n\n## Summary\nTo agree the pilot scope with Acme.\n\n**Highlights**\n- **Scope:** two sites first, Dana Kowal [03:10]\n\n**Key dates**\n- **24 Nov** — pilot starts [12:05]\n";
