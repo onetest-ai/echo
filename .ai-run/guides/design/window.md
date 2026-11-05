@@ -93,12 +93,15 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
     kept per calendar series (`id:<series>`), a one-off by its event (`event:<id>`) — never by subject, two "Sync"s
     are not one — in `<home>/.echo/meeting-types-of.json`, changed only under its lock (`update_state`), and the user's
     choice made while the model was asked stays; meetings the model left out are asked again the next day, not every
-    pass; `echoctl classify` runs it now;
+    pass, but a failed call (no AI ready, the network) notes nothing and the next pass asks again; a series whose type
+    was taken away is asked again; the window is the next hour back to the end of tomorrow, by time, not by the UTC
+    string's date; a types file gone wrong by hand is an error, never written over (`update_state`, the plugins'
+    `wait_lock`); `echoctl classify` runs it now;
   - while not typed yet, a guess from who is invited (alone: Other; anyone from outside: Client; one colleague: 1:1;
     more: Internal; the user counted out by address in any case, each person once);
   - the calendar card's chip sets it for the whole series (`set_event_type`, `by: you`).
 - A call takes its meeting's (`by: invite`; the user's choice on the calendar stays `by: you` on the call, so no minutes
-  run replaces it); its minutes refine it (step 3b, `echoctl type`, in `notes::RUN_COMMANDS`,
+  run replaces it — `echoctl type` in a run checks it as well as the call's own); its minutes refine it (step 3b, `echoctl type`, in `notes::RUN_COMMANDS`,
   its own call only, decided under the call's meta lock); the user's choice on the call (the chip in its facts,
   `set_meeting_type`) is above all and no run replaces it. Order: the call's own (you, then the minutes) → the
   meeting's (you, then the invite) → the guess. `{type}` is a template value, settled before the minutes are written.

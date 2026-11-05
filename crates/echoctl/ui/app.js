@@ -2535,8 +2535,10 @@ function settingsView() {
 // Each change is saved at once (`template_save`, `<home>/.echo/templates/<id>.md`); the next minutes follow it.
 const TPL = { data: null, sel: null, draft: null, word: '', tab: 'minutes', mtSel: null, mtDraft: null }
 const tplName = (id) => id ? id.charAt(0).toUpperCase() + id.slice(1).replace(/-/g, ' ') : ''
-/** One read at a time: renders asking meanwhile share it. */
-function loadTemplates() {
+/** One read at a time: renders asking meanwhile share it. `fresh` (after a save): a read that starts after it —
+ *  one already on its way may have left before the save. */
+function loadTemplates(fresh) {
+  if (fresh) return (TPL.loading || Promise.resolve()).then(() => loadTemplates())
   if (!TPL.loading) TPL.loading = readTemplates().finally(() => { TPL.loading = null })
   return TPL.loading
 }
@@ -7510,7 +7512,7 @@ window.echo = {
   /** A template saved (its id) or taken away (null): the list read again; a new one becomes the one edited; the one
    *  edited takes its kind from the list (Edited once Echo has the file). */
   templateSaved(id, created, which) {
-    loadTemplates().then(() => {
+    loadTemplates(true).then(() => {
       if (which === 'mt') {
         const mts = (TPL.data && TPL.data.meeting_types) || [], rm = TPL.mtRemoving
         TPL.mtRemoving = null

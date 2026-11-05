@@ -566,8 +566,13 @@ pub fn start_scheduler() {
         // Today's and tomorrow's meetings typed by their invites, before they start (once a series) — after the preps,
         // so a Prepare click is never kept waiting by it.
         if !crate::notes::quitting() {
-            let by = (chrono::Local::now() + chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
-            let soon: Vec<MeetingContext> = crate::watch::agenda().into_iter().filter(|m| m.start.as_deref().and_then(|s| s.get(..10)).is_some_and(|d| d <= by.as_str())).collect();
+            // From an hour ago to the end of tomorrow, local time (the agenda's times are UTC).
+            let now = chrono::Local::now();
+            let end = (now.date_naive() + chrono::Duration::days(2)).and_hms_opt(0, 0, 0).and_then(|t| t.and_local_timezone(chrono::Local).single());
+            let soon: Vec<MeetingContext> = crate::watch::agenda()
+                .into_iter()
+                .filter(|m| crate::watch::meeting_start(m).is_some_and(|s| s >= now - chrono::Duration::hours(1) && end.is_none_or(|e| s < e)))
+                .collect();
             if let Err(e) = crate::calls::classify(&soon) {
                 eprintln!("meeting types: {e:#}");
             }

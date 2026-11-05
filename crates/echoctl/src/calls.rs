@@ -635,15 +635,15 @@ fn attendees_split(meeting: Option<&MeetingContext>, cfg: &Config) -> (Vec<Strin
         let book = crate::people::colleagues();
         let theirs = book.among(m.organizer.iter().chain(m.attendees.iter()).map(|p| (p.name.as_str(), p.email.as_deref())));
         for p in m.organizer.iter().chain(m.attendees.iter()) {
-            let same = |a: Option<&str>, b: Option<&str>| a.zip(b).is_some_and(|(a, b)| a.trim().eq_ignore_ascii_case(b.trim()));
-            if cfg.me.as_ref().is_some_and(|me| same(me.email.as_deref(), p.email.as_deref())) {
+            let same = |a: Option<&str>, b: Option<&str>| a.zip(b).is_some_and(|(a, b)| !a.trim().is_empty() && a.trim().eq_ignore_ascii_case(b.trim()));
+            // The user: by address, else (no address in About me yet) by name.
+            if cfg.me.as_ref().is_some_and(|me| same(me.email.as_deref(), p.email.as_deref()) || (me.email.is_none() && same(Some(&me.name), Some(&p.name)))) {
                 continue;
             }
-            // One person once, however their names are written (organizer and attendee, "Park, Lee").
-            if let Some(e) = p.email.as_deref().map(|e| e.trim().to_lowercase()) {
-                if !seen.insert(e) {
-                    continue;
-                }
+            // One person once: by address, however their name is written ("Park, Lee"); by name when there is none.
+            let who = p.email.as_deref().map(|e| e.trim().to_lowercase()).unwrap_or_else(|| p.name.trim().to_lowercase());
+            if !seen.insert(who) {
+                continue;
             }
             let label = match &p.email {
                 Some(e) => format!("{} <{e}>", p.name),
@@ -735,12 +735,17 @@ pub fn meeting_type_remove(id: &str) -> Result<()> {
 /// echo`) — else a guess from who was invited: a memo is Other; the user and one colleague 1:1; colleagues only
 /// Internal; anyone from outside Client (the minutes tell Partner and Industry & Analyst apart).
 pub fn meeting_type(dir: &Path) -> Value {
-    meeting_type_and_types(dir).0
+    meeting_type_in(dir, &meeting_types(), None)
 }
 
 /// `meeting_type` among these types; the meeting and its attendees read once (`counts`: the split the minutes'
 /// context has already made).
 fn meeting_type_in(dir: &Path, all: &[Value], counts: Option<(usize, usize)>) -> Value {
+    meeting_type_of(dir, all, counts, MeetingContext::load(dir).ok().flatten().as_ref())
+}
+
+/// `meeting_type_in` with the call's meeting already read.
+fn meeting_type_of(dir: &Path, all: &[Value], counts: Option<(usize, usize)>, meeting: Option<&MeetingContext>) -> Value {
     let label = |t: &str| all.iter().find(|x| x["id"] == t).and_then(|x| x["name"].as_str()).unwrap_or("Other").to_string();
     let set = &read_json(&dir.join("meta.json"))["meeting_type"];
     if let Some(t) = set["type"].as_str().filter(|t| all.iter().any(|x| x["id"] == *t)) {
@@ -749,17 +754,16 @@ fn meeting_type_in(dir: &Path, all: &[Value], counts: Option<(usize, usize)>) ->
     if crate::memo::is_memo(dir) {
         return json!({"type": "other", "label": label("other"), "by": "guess"});
     }
-    let meeting = MeetingContext::load(dir).ok().flatten();
     let book = TypeBook { all: all.to_vec(), kept: event_types(), cfg: Config::load().unwrap_or_default() };
     // Its meeting's, typed before it started — the user's choice there stays theirs here (the minutes leave it).
-    if let Some(m) = &meeting {
+    if let Some(m) = meeting {
         let e = event_type_in(m, &book);
         if e["by"] != "guess" {
             return json!({"type": e["type"], "label": e["label"], "by": if e["by"] == "you" { "you" } else { "invite" }});
         }
     }
     let (c, x) = counts.unwrap_or_else(|| {
-        let (c, x) = attendees_split(meeting.as_ref(), &book.cfg);
+        let (c, x) = attendees_split(meeting, &book.cfg);
         (c.len(), x.len())
     });
     let t = guess_type(meeting.is_some(), c, x);
@@ -785,8 +789,10 @@ pub fn set_meeting_type(call: &str, kind: &str) -> Result<Value> {
     let dir = resolve_call(call)?;
     let by = if crate::notes::headless() { "echo" } else { "you" };
     // Decided under the call's lock: a choice of the user's made a moment ago is never written over by a run.
+    // The user's choice on the calendar counts as theirs on the call too.
+    let on_calendar = by == "echo" && meeting_type_in(&dir, &all, None)["by"] == "you";
     let kept = update_meta(&dir, |m| {
-        if by == "echo" && m["meeting_type"]["by"] == "you" {
+        if by == "echo" && (on_calendar || m["meeting_type"]["by"] == "you") {
             return Ok(true);
         }
         m["meeting_type"] = json!({"type": kind, "by": by});
@@ -816,16 +822,13 @@ fn event_types() -> serde_json::Map<String, Value> {
 /// and `echoctl` never undo each other.
 fn update_state<T, S: serde::de::DeserializeOwned + serde::Serialize + Default>(file: &Path, f: impl FnOnce(&mut S) -> Result<T>) -> Result<T> {
     fs::create_dir_all(paths::state_dir())?;
-    let lock = file.with_extension("lock");
-    let t = std::time::Instant::now();
-    let _l = loop {
-        if let Some(l) = crate::app::FileLock::try_take(&lock)? {
-            break l;
-        }
-        anyhow::ensure!(t.elapsed() < std::time::Duration::from_secs(10), "{} is being changed by another process", file.display());
-        std::thread::sleep(std::time::Duration::from_millis(20));
+    let _l = crate::plugins::wait_lock(&file.with_extension("lock"))?;
+    // Not there yet: empty. There but not readable (a hand edit gone wrong): an error — never written over with nothing.
+    let mut v: S = match fs::read(file) {
+        Ok(b) => serde_json::from_slice(&b).with_context(|| format!("{} can't be read — fix it or move it away", file.display()))?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => S::default(),
+        Err(e) => return Err(e).with_context(|| format!("reading {}", file.display())),
     };
-    let mut v: S = fs::read(file).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
     let out = f(&mut v)?;
     paths::write_atomic(file, &serde_json::to_vec_pretty(&v)?)?;
     Ok(out)
@@ -891,7 +894,9 @@ pub fn classify(meetings: &[MeetingContext]) -> Result<usize> {
         let Some(k) = event_key(m) else { continue };
         let fresh = match have.get(&k) {
             None => true,
-            Some(v) => v["by"] == "guess" && v["tried"].as_str() != Some(today.as_str()),
+            Some(v) if v["by"] == "guess" => v["tried"].as_str() != Some(today.as_str()),
+            // Its type taken away since (Settings → Meeting types): ask again — unless the user set it, theirs to redo.
+            Some(v) => v["by"] == "invite" && !types.iter().any(|t| t["id"] == v["type"]),
         };
         if fresh && !todo.iter().any(|(t, _)| *t == k) {
             todo.push((k, m));
@@ -913,13 +918,14 @@ pub fn classify(meetings: &[MeetingContext]) -> Result<usize> {
                 if outside.is_empty() { "none".into() } else { outside.join(", ") }
             ));
         }
-        let answer = crate::ai::ready(&crate::ai::default_id()).and_then(|r| crate::livenotes::complete_text(r.profile(), CLASSIFY_SYSTEM, &format!("Kinds:\n{kinds}\nMeetings:\n{list}"), 800));
-        let v = answer.ok().and_then(|a| crate::livenotes::json_answer(&a)).unwrap_or(Value::Null);
+        // No answer (no AI ready, the network, an answer that can't be read): nothing noted — the next pass asks again.
+        let answer = crate::ai::ready(&crate::ai::default_id()).and_then(|r| crate::livenotes::complete_text(r.profile(), CLASSIFY_SYSTEM, &format!("Kinds:\n{kinds}\nMeetings:\n{list}"), 800))?;
+        let v = crate::livenotes::json_answer(&answer).ok_or_else(|| anyhow::anyhow!("the classifier's answer couldn't be read"))?;
         n += update_state(&event_types_file(), |all: &mut serde_json::Map<String, Value>| {
             let mut n = 0;
             for (i, (k, _)) in chunk.iter().enumerate() {
-                // Typed meanwhile (the user's chip, another classifier): that one stays.
-                if all.get(k).is_some_and(|x| x["by"] == "you" || x["by"] == "invite") {
+                // Typed meanwhile (the user's chip, another classifier) with a type there still is: that one stays.
+                if all.get(k).is_some_and(|x| x["by"] == "you" || (x["by"] == "invite" && types.iter().any(|t| t["id"] == x["type"]))) {
                     continue;
                 }
                 match v["kinds"][(i + 1).to_string()].as_str().filter(|kind| types.iter().any(|t| t["id"] == *kind)) {
@@ -938,9 +944,9 @@ pub fn classify(meetings: &[MeetingContext]) -> Result<usize> {
 
 /// A call's meeting type and every type, the list read once (the window's call page).
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
-pub fn meeting_type_and_types(dir: &Path) -> (Value, Vec<Value>) {
+pub fn meeting_type_and_types(dir: &Path, meeting: Option<&MeetingContext>) -> (Value, Vec<Value>) {
     let all = meeting_types();
-    (meeting_type_in(dir, &all, None), all)
+    (meeting_type_of(dir, &all, None, meeting), all)
 }
 
 /// The minutes gate for a call, as `context` applies it (the skill's), from its files: why it is
@@ -1021,7 +1027,7 @@ pub fn context(call: &str) -> Result<()> {
         "external": external,
         // What kind of meeting it was, so far (a guess from who was invited, or the user's: `by`), and every kind with
         // how to tell it (step 3b settles it).
-        "meeting_type": meeting_type_in(&dir, &types, Some((colleagues.len(), external.len()))),
+        "meeting_type": meeting_type_of(&dir, &types, Some((colleagues.len(), external.len())), meeting.as_ref()),
         "meeting_types": types.iter().map(|t| json!({"id": t["id"], "name": t["name"], "about": t["about"]})).collect::<Vec<_>>(),
         "transcript_chars": chars,
         "chars_by_speaker": by_speaker,
@@ -2054,14 +2060,30 @@ mod tests {
         set_event_type(&key, "client").unwrap();
         assert_eq!(event_type_in(&m, &type_book())["type"], "client");
         assert_eq!(meeting_type(&team), json!({"type": "client", "label": "Client", "by": "you"}));
+        // …not even inside a run (the call's own run, as Echo starts one).
+        std::env::set_var(crate::notes::HEADLESS, "1");
+        std::env::set_var(crate::guard::RUN_CALL, &team);
+        set_meeting_type(&team.display().to_string(), "partner").unwrap();
+        std::env::remove_var(crate::notes::HEADLESS);
+        std::env::remove_var(crate::guard::RUN_CALL);
+        assert_eq!(meeting_type(&team)["type"], "client", "a run never replaces the user's choice on the calendar");
         set_meeting_type(&team.display().to_string(), "internal").unwrap();
         assert_eq!(meeting_type(&team)["by"], "you");
+        // A types file gone wrong by hand is an error, never written over with nothing.
+        fs::write(meeting_types_file(), "[{\"id\": \"x\",}]").unwrap();
+        assert!(meeting_type_save(None, "Board", "b").is_err());
+        assert_eq!(fs::read_to_string(meeting_types_file()).unwrap(), "[{\"id\": \"x\",}]");
+        fs::remove_file(meeting_types_file()).unwrap();
         assert!(set_event_type("../x", "client").is_err() && set_event_type(&key, "nope").is_err());
         // The user by another case, a person listed twice, a meeting with the user alone.
         let twice = call("2026-11-04_130000-d", vec![p("Dana Kowal", "DANA@acme.example"), p("Lee Park", "lee@acme.example"), p("Park, Lee", "Lee@acme.example")]);
         assert_eq!(meeting_type(&twice)["type"], "one-on-one");
         let alone = call("2026-11-04_140000-e", vec![me.clone()]);
         assert_eq!(meeting_type(&alone)["type"], "other");
+        // No address in About me yet: the user is told by name.
+        Config { me: Some(crate::meeting::Person { name: "Dana Kowal".into(), email: None }), ..Default::default() }.save().unwrap();
+        let named = call("2026-11-04_150000-f", vec![p("Dana Kowal", "dana@acme.example"), p("Lee Park", "lee@acme.example")]);
+        assert_eq!(meeting_type(&named)["type"], "one-on-one");
         // The minutes run settles it; the user's choice is kept from then on, the run's never replaces it.
         // Inside a run, as Echo starts one — and out again even when an assert fails (the variables are the process's).
         struct Out;

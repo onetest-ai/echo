@@ -480,7 +480,6 @@ fn complete(p: &Profile, system: &str, user: &str, max_tokens: u32, whole: bool,
     }
 }
 
-/// One prompt, one answer, no tools (the Brain's taxonomy jobs): on `model` (else the profile's
 /// A model's JSON answer: the whole text, or what lies between its first `{` and last `}` (a code fence or words
 /// around it allowed). None when there is none — never a panic, whatever order the braces come in.
 pub(crate) fn json_answer(text: &str) -> Option<serde_json::Value> {
@@ -491,6 +490,7 @@ pub(crate) fn json_answer(text: &str) -> Option<serde_json::Value> {
     })
 }
 
+/// One prompt, one answer, no tools (the Brain's taxonomy jobs): on `model` (else the profile's
 /// minutes model) — a local profile answers through its own server.
 #[cfg_attr(not(feature = "brain"), allow(dead_code))]
 pub(crate) fn complete_text(p: &Profile, system: &str, user: &str, max_tokens: u32) -> Result<String> {

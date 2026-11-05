@@ -752,12 +752,13 @@ fn call_detail(dir: &Path) -> Value {
     v["rev"] = json!(rev);
     v["has_log"] = json!(dir.join(crate::notes::LOG).exists());
     // What kind of meeting it was (the header's chip).
-    let (mt, types) = crate::calls::meeting_type_and_types(dir);
+    let meeting = crate::meeting::MeetingContext::load(dir).ok().flatten();
+    let (mt, types) = crate::calls::meeting_type_and_types(dir, meeting.as_ref());
     v["meeting_type"] = mt;
     v["meeting_types"] = json!(types.iter().map(|t| json!([t["id"], t["name"]])).collect::<Vec<_>>());
     // The template its minutes follow and why (a word of its title, the user's choice, Default).
     v["template"] = crate::calls::template_of(dir);
-    v["meeting_subject"] = json!(crate::meeting::MeetingContext::load(dir).ok().flatten().and_then(|m| m.subject).filter(|s| !s.trim().is_empty()));
+    v["meeting_subject"] = json!(meeting.and_then(|m| m.subject).filter(|s| !s.trim().is_empty()));
     // Its projects (and the ones it may belong to): the header's chips and suggestion bar.
     match crate::projects::of_call(dir) {
         Ok(ps) => {
