@@ -23,6 +23,7 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
 | `src/attention.rs` | Needs you (Inbox): collects pending decisions, Done list |
 | `src/calendar.rs`, `src/schedule.rs` | Calendar data; "Record when it starts" list |
 | `src/series.rs` | a meeting series' rule: record every meeting or not, its language |
+| `src/prep.rs` | a meeting's prep: gathered facts + "In short"; Coming up today; the scheduler |
 | `src/teams_transcript.rs` | import an unrecorded meeting from its Teams transcript; background check / scan |
 | `src/minutes.rs` | `render_for_window`, `with_theme`, `EMBED_JS` (the minutes frame) |
 | `ui/index.html`, `ui/app.js`, `ui/app.css` | the page (vanilla JS, compiled in); `ui/vendor/` xterm.js, sigma, graphology |
@@ -224,6 +225,30 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   only; × = not this thread's (`Project.not_series`). `echoctl series list [--thread] | set <key> <json>`.
 - The event card is 400 px wide (`min(400px, 100vw − 24px)`).
 
+### A prep before each meeting (`prep.rs`)
+- For today's calendar meetings of an open thread, written without being asked (the app checks every 5 minutes —
+  the morning's, one added later; ≥ 5 min before the start; `prep::start_scheduler`): `<home>/prep/<id>/prep.json`,
+  `id` = 16 hex of sha256(event id). Nothing in a call folder: a call folder is still made only by a recording.
+- Gathered without a model: **Expected from you** first (the user's open tasks in these threads, late first; what
+  they still owe from last time; mail since then with them in To — one line each, or "Nothing waits on you"), Last time (the previous meeting of the subject with minutes — highlights, open actions,
+  its link), Open with these people (the threads' open tasks owned by someone in the invite or the user, late first;
+  risks with no response; questions not answered — each `echo://task`), New since then (the threads' mail and chat
+  evidence after the last meeting: titles and senders, never the text), Who's coming (the invite less the user, with
+  role / stance from People, calls together, new; the window shows ten).
+- Only this meeting's items: one said in an earlier occurrence of its series stays; one said only in meetings of
+  another recurring series goes, without a model (an item made by hand takes its story's calls, else its sibling
+  items' — `said_in`); the rest (one-off meetings, mail, unknown) are numbered `[cN]` and the same model call that
+  writes In short picks which will come up (`{relevant, in_short}`; unreadable → this series' items only).
+- Then "In short" (≤ 90 words) to the user as "you", on the threads' AI profile
+  (`livenotes::complete_text`) — only when every thread runs on the same profile (strict routing), else facts only.
+- Calls → **Coming up today** (the list's first group, `/api/upcoming`, `#upcoming/<id>`): a meeting still to come is
+  a call with its Prep tab (Transcript and Minutes once recorded; Prepare now / Write it again: IPC `project {op:
+  prep_write, prep}`, one at a time). A recorded call finds its prep by its event (`prep::of_call`) → its first tab,
+  Prep. Not in Calendar: the user, "it belongs in Calls".
+- `echo://prep/<id>` (recorded → its call's Prep tab, else `#upcoming/<id>`), `echoctl read`, MCP `read_link` (only
+  when all its threads are the reader's), `echoctl prep --upcoming | --show ID | --write ID`.
+- Measured on a copy: a weekly with 31 people, 8 open items, 8 new mails — about 6 s on sonnet.
+
 ### Import a Teams transcript (`teams_transcript.rs`)
 1. Calendar → an ended Teams event with no call → Import Teams transcript (IPC `calendar_import`, background;
    state on the event, outcome as a notification), ⌘K, or `echoctl calendar import <event id | subject> [--date]`.
@@ -282,6 +307,7 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
 | `<home>/.echo/scheduled.json` | meetings to record when they start | `schedule.rs` |
 | `<home>/projects/series.json` | meeting series' rules (record or not, language) | `series.rs` |
 | `<home>/.echo/series-armed.json` | occurrences a series already put in "Record when it starts" | `series.rs` |
+| `<home>/prep/<id>/prep.json` | a meeting's prep | `prep.rs` |
 | `<home>/.echo/teams-transcripts.json` | known transcripts / offers (rechecked hourly until a day after, kept 30 days) | `teams_transcript.rs` |
 | `<home>/.echo/quit.asking`, `quit.cancelled` | an `app quit` being asked / refused | `app.rs` |
 | `<call>/my-notes.md`, `my-notes.<HHMMSS>.md` | the user's notes; a kept conflicting version | window, tray (`echoctl note`) |

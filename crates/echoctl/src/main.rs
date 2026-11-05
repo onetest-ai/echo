@@ -35,6 +35,7 @@ mod paths;
 mod plugins;
 mod projects;
 mod people;
+mod prep;
 mod projectsync;
 mod tasks;
 mod teams_transcript;
@@ -222,10 +223,18 @@ enum Cmd {
         #[command(subcommand)]
         cmd: LiveCmd,
     },
-    /// "Last time" for a recurring call (JSON): the previous occurrence's open actions and highlights
+    /// "Last time" for a recurring call (JSON): the previous occurrence's open actions and highlights. With
+    /// --upcoming: today's meetings and their preps; --show / --write ID: a meeting's prep (written by its threads'
+    /// AI profile)
     Prep {
         #[arg(default_value = "latest")]
         call: String,
+        #[arg(long)]
+        upcoming: bool,
+        #[arg(long)]
+        show: Option<String>,
+        #[arg(long)]
+        write: Option<String>,
     },
     /// The Brain: cross-call intelligence over calls (later channels, mail, folders) (JSON)
     #[cfg(feature = "brain")]
@@ -1955,8 +1964,18 @@ fn main() -> Result<()> {
                 Ok(())
             }
         },
-        Cmd::Prep { call } => {
-            println!("{}", serde_json::to_string_pretty(&calls::prep(&calls::resolve_call(&call)?))?);
+        Cmd::Prep { call, upcoming, show, write } => {
+            let v = if upcoming {
+                prep::upcoming()
+            } else if let Some(id) = show {
+                prep::load(&id).ok_or_else(|| anyhow::anyhow!("no prep {id:?}"))?
+            } else if let Some(id) = write {
+                anyhow::ensure!(std::env::var_os("ECHOCTL_HEADLESS").is_none(), "not inside a run Echo started");
+                prep::write(&prep::meeting(&id).ok_or_else(|| anyhow::anyhow!("that meeting isn't in today's calendar"))?)?
+            } else {
+                calls::prep(&calls::resolve_call(&call)?)
+            };
+            println!("{}", serde_json::to_string_pretty(&v)?);
             Ok(())
         }
         Cmd::Pending { session } => calls::pending(session.as_deref()),

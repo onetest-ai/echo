@@ -85,6 +85,8 @@ pub fn run(app: TargetApp, tray: bool, background: bool) -> Result<()> {
     // Minutes written by themselves, 15 minutes after a call (`notes::auto_due`).
     crate::notes::start_scheduler();
     crate::projectsync::start_scheduler();
+    // Preps for today's meetings of threads (`prep.rs`).
+    crate::prep::start_scheduler();
     // Plugins' host halves (`jshost.rs`): their code, inside Echo.
     #[cfg(feature = "js")]
     crate::jshost::sync();

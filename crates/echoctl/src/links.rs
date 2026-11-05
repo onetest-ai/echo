@@ -19,6 +19,8 @@ pub enum Link {
     Mail(String),
     /// A work item of a thread's ledger: a story, a task, a decision, a risk, a question (`T043`).
     Task { thread: String, id: String },
+    /// A meeting's prep (`prep.rs`) by its id.
+    Prep(String),
 }
 
 /// Percent-decoding of a link's parts (UTF-8).
@@ -67,6 +69,7 @@ impl Link {
                 let ok = !item.is_empty() && item.len() <= 40 && item.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
                 Link::Task { thread: clean(thread, false)?, id: ok.then(|| item.to_string())? }
             }
+            "prep" => Link::Prep(Some(id).filter(|x| !x.is_empty() && x.len() <= 32 && x.bytes().all(|b| b.is_ascii_hexdigit()))?),
             "mail" | "post" => Link::Mail(clean(&id, true).filter(|x| x.starts_with("mail/") || x.starts_with("channel/"))?),
             _ => return None,
         })
@@ -156,6 +159,7 @@ pub fn read(link: &str) -> Result<String> {
         }
         Link::Mail(src) => out.push_str(&mail_text(&src)?),
         Link::Task { thread, id } => out.push_str(&task_text(&thread, &id)?),
+        Link::Prep(id) => out.push_str(&format!("# Prep\n\n{}", crate::prep::as_text(&crate::prep::load(&id).ok_or_else(|| anyhow!("no prep {id:?}"))?))),
     }
     Ok(out)
 }
@@ -268,6 +272,14 @@ pub fn target(link: &str) -> Result<Value> {
         Link::Task { thread, id } => {
             crate::projects::load(&thread).map_err(|_| anyhow!("no thread {thread:?}"))?;
             serde_json::json!({"hash": format!("project/{thread}/work"), "node": id})
+        }
+        // A recorded meeting: its call's Prep tab; one still to come: Calls → Coming up today.
+        Link::Prep(id) => {
+            crate::prep::load(&id).ok_or_else(|| anyhow!("no prep {id:?}"))?;
+            match crate::calls::all_calls().into_iter().find(|d| crate::prep::of_call(d).is_some_and(|p| p["id"] == id)) {
+                Some(d) => serde_json::json!({"hash": format!("call/{}/prep", d.file_name().unwrap_or_default().to_string_lossy())}),
+                None => serde_json::json!({"hash": format!("upcoming/{id}")}),
+            }
         }
     })
 }
