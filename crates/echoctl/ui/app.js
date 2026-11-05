@@ -579,6 +579,8 @@ async function loadCall(name) {
     // one), or a newer fetch was started: only the newest answer counts.
     if (S.selected !== name || mine !== callSeq) return
     S.call = c
+    // Its minutes are read now (Today's "new" goes): once per call and minutes a session.
+    if (c.notes && S.seenMinutes !== `${c.name}:${(c.notes_run && c.notes_run.finished_at) || ''}`) { S.seenMinutes = `${c.name}:${(c.notes_run && c.notes_run.finished_at) || ''}`; send({ cmd: 'minutes_seen', call: c.name }) }
     // A file that can't be read isn't "empty": the editor stays away from it (`notesTab` says why).
     if (c.my_notes_error == null) NotesSync.seen(S.call.name, S.call.my_notes || '', epoch)
     syncEditor()
@@ -1030,7 +1032,10 @@ function todayView() {
     const acts = []
     // Its minutes (from the Meeting Notebook plugin's Today): writing, coming at a time, written, or failed — Try again.
     const mn = x.minutes || {}
-    if (x.call && mn.state === 'ready') acts.push(`<button class="btn ghost" data-call="${esc(x.call)}" data-call-tab="minutes">Minutes</button>`)
+    // New minutes (not opened yet) stand out, with what they hold — what to read after a busy day.
+    const ct = mn.counts || {}
+    const held = [ct.decisions ? `${ct.decisions} decision${ct.decisions === 1 ? '' : 's'}` : '', ct.actions ? `${ct.actions} action${ct.actions === 1 ? '' : 's'}` : '', ct.questions ? `${ct.questions} question${ct.questions === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')
+    if (x.call && mn.state === 'ready') acts.push(`<button class="btn${mn.unread ? ' primary' : ' ghost'}" data-call="${esc(x.call)}" data-call-tab="minutes">${mn.unread ? 'New minutes' : 'Minutes'}</button>${held ? `<span class="set-sub">${esc(held)}</span>` : ''}`)
     else if (x.call) acts.push(`<button class="btn ghost" data-call="${esc(x.call)}">Open the call</button>`)
     if (mn.state === 'writing') acts.push('<span class="set-sub">Writing the minutes…</span>')
     else if (mn.state === 'transcribing') acts.push('<span class="set-sub">Transcribing…</span>')

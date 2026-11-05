@@ -74,7 +74,56 @@ fn cards() -> Vec<Value> {
         .collect()
 }
 
-/// A call's minutes as Today shows them: being written, coming at a time, written, or failed (with why).
+fn seen_file() -> PathBuf {
+    paths::state_dir().join("minutes-seen.json")
+}
+
+/// When each call's minutes were last opened in the window: the minutes file's time then (`stamp` → seconds).
+fn seen_map() -> serde_json::Map<String, Value> {
+    fs::read(seen_file()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+}
+
+fn notes_time(dir: &std::path::Path) -> Option<u64> {
+    fs::metadata(dir.join("notes.md")).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs())
+}
+
+/// The window opened a call with its minutes: they are read (until they are written again).
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn minutes_seen(dir: &std::path::Path) -> Result<()> {
+    let Some(t) = notes_time(dir) else { return Ok(()) };
+    let mut m = seen_map();
+    m.insert(calls::stamp_of(dir), json!(t));
+    // Only this month's (a stamp starts with its date).
+    let keep = (Local::now() - chrono::Duration::days(31)).format("%Y-%m-%d").to_string();
+    m.retain(|k, _| k.as_str() >= keep.as_str());
+    fs::create_dir_all(paths::state_dir())?;
+    paths::write_atomic(&seen_file(), &serde_json::to_vec(&m)?)?;
+    Ok(())
+}
+
+/// What the minutes hold, for a glance: decisions and open questions (bullets under those headings) and actions.
+fn counts(dir: &std::path::Path) -> Value {
+    let md = fs::read_to_string(dir.join("notes.md")).unwrap_or_default();
+    let mut section = String::new();
+    let (mut decisions, mut questions) = (0, 0);
+    for line in md.lines() {
+        let l = line.trim_start();
+        if let Some(h) = l.strip_prefix("## ") {
+            section = h.to_lowercase();
+        } else if l.starts_with("- ") || l.starts_with("* ") || l.starts_with("| ") && !l.contains("---") {
+            if section.contains("decision") {
+                decisions += 1;
+            } else if section.contains("question") {
+                questions += 1;
+            }
+        }
+    }
+    let actions = calls::read_json(&dir.join(calls::ACTIONS)).as_array().map_or(0, Vec::len);
+    json!({"decisions": decisions, "actions": actions, "questions": questions})
+}
+
+/// A call's minutes as Today shows them: being written, coming at a time, written (new until opened, with what they
+/// hold), or failed (with why).
 fn minutes(dir: &std::path::Path) -> Value {
     let written = dir.join("notes.md").exists();
     let run = crate::notes::status(dir);
@@ -83,7 +132,8 @@ fn minutes(dir: &std::path::Path) -> Value {
         return json!({"state": "writing"});
     }
     if written {
-        return json!({"state": "ready"});
+        let unread = notes_time(dir).is_some_and(|t| seen_map().get(&calls::stamp_of(dir)).and_then(Value::as_u64) != Some(t));
+        return json!({"state": "ready", "unread": unread, "counts": counts(dir)});
     }
     if let Some(r) = run.as_ref().filter(|r| r.state == "failed" || r.state == "needs_login") {
         return json!({"state": "failed", "why": r.message});
@@ -193,6 +243,20 @@ mod tests {
         assert_eq!(cards().len(), 1);
         put_card(&msg("Wednesday", "Third")).unwrap();
         assert_eq!(cards().len(), 2, "the next card from that source shows again");
+    }
+
+    #[test]
+    fn minutes_are_new_until_opened_and_say_what_they_hold() {
+        let (_env, home) = paths::testenv::folders("today-minutes");
+        let dir = home.join("calls").join("2026-11-05_100000-acme-sync");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("notes.md"), "# Acme sync\n\n## Decisions\n- Pilot in Berlin\n- SSO first\n\n## Open questions\n- Who signs off?\n").unwrap();
+        fs::write(dir.join(calls::ACTIONS), r#"[{"id": "a1", "task": "Send the diagram"}]"#).unwrap();
+        let m = minutes(&dir);
+        assert_eq!((m["state"].as_str(), m["unread"].as_bool()), (Some("ready"), Some(true)));
+        assert_eq!(m["counts"], json!({"decisions": 2, "actions": 1, "questions": 1}));
+        minutes_seen(&dir).unwrap();
+        assert_eq!(minutes(&dir)["unread"], false);
     }
 
     #[test]

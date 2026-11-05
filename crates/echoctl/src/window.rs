@@ -2156,6 +2156,13 @@ pub fn handle(msg: &str) -> Handled {
             Err(e) => notice(&format!("{e:#}")),
         },
         // Where the window's panels and views go (`Layout` in app.js); nothing else reads it.
+        // A call opened with its minutes: they are read (Today's "new").
+        "minutes_seen" => {
+            if let Some(d) = call_named(&v) {
+                let _ = crate::today::minutes_seen(&d);
+            }
+            false.into()
+        }
         // Today: Got it on a card (hidden until its source sends the next).
         "today_seen" => match crate::today::seen(v["key"].as_str().unwrap_or("")) {
             Ok(()) => true.into(),
