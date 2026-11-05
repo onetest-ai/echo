@@ -1114,7 +1114,8 @@ function needsDialog() {
   const item = (((S.today && S.today.needs) || {}).items || []).find((x) => x.id === c.id) || {}
   if (c.kind === 'todo') {
     const threads = ((S.pj.data && S.pj.data.projects) || []).filter((p) => p.group !== 'closed')
-    const pick = `<select id="nd-thread" class="set-in">${threads.map((p) => `<option value="${esc(p.id)}"${p.id === item.thread ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select>`
+    // Its thread when Echo found one (its chat, its sender among the thread's people); else the user picks.
+    const pick = `<select id="nd-thread" class="set-in">${item.thread ? '' : '<option value="" selected disabled>Choose a thread…</option>'}${threads.map((p) => `<option value="${esc(p.id)}"${p.id === item.thread ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select>`
     return `<div class="td-modal" data-needs-off="1"><div class="td-dialog" role="dialog" aria-modal="true" aria-labelledby="nd-dlg">
       <h3 id="nd-dlg">A task of yours</h3><label for="nd-title" class="set-sub">What to do</label><textarea id="nd-title" rows="2">${esc(item.line || '')}</textarea>
       <label for="nd-thread" class="set-sub">In which thread</label>${pick}
@@ -6768,6 +6769,7 @@ document.addEventListener('click', (e) => {
   if (t.dataset.needsTodo) { S.needsDlg = { kind: 'todo', id: t.dataset.needsTodo }; return render() }
   if (t.dataset.needsTodoOk) {
     const id = t.dataset.needsTodoOk, thread = ($('#nd-thread') || {}).value, title = ($('#nd-title') || {}).value
+    if (!thread) { const el = $('#nd-thread'); if (el) el.focus(); return }
     send({ cmd: 'needs_decide', id, how: 'todo', thread, title })
     S.needsDlg = null
     if (S.today && S.today.needs) S.today.needs.items = S.today.needs.items.filter((x) => x.id !== id)
