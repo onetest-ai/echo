@@ -457,6 +457,16 @@ their icons; ⌘K goes to any project. A project is drawn as its logo, else its 
 from `PJ_SYMBOLS`, else an identicon from its id (`ProjectArt`, no DOM: `ui/projects.test.mjs`), in its colour. API: `/api/projects`
 (overview + `by_call`), `/api/project/<id>[/logo]`; IPC `project {op, …}` (`window::project_op`).
 
+**Meeting series** (`series.rs`; set on a recurring meeting in the calendar — "Every meeting of this series": Record /
+Don't record, a language, nothing else (the user, 2026-11-05: "a simple setting, record the series or not and in which
+language"); `echoctl series list [--thread] | set <key> <json>`): `<home>/projects/series.json` keyed `id:<seriesMasterId>`
+else `subject:<normalised>` (a rule of either key applies). Record → each occurrence put in "Record when it starts" once
+after an agenda sync (`schedule_always`, `<home>/.echo/series-armed.json` — cancelling one is never undone); Don't record
+is the default — a meeting of a calendar series gets no "Record?" offer unless its series says Record (or Ask, CLI only)
+(`may_offer`; the user, 2026-11-05: "by default every series: don't record"); a one-off meeting is asked about as before; the language fills an arm where nobody chose one (`fill`, in `watch::arm`). A choice
+on the Record button still wins. A thread's Profile → Meetings lists its series (from its calls — a calendar series id, or
+another call of that subject — and its upcoming agenda), read only, × = not this thread's (`Project.not_series`: their
+meetings don't join it whatever its rules say; pins still do; IPC `project {op: series_unlink}`).
 **The work ledger** (`ledger.rs`, taska's ported; `<home>/projects/<id>/ledger/`): `events.jsonl` (append-only, one write
 per batch) folded into Workstream (epic, `E01 General` first) › Story (criteria) › Task (action / session /
 dependency, owners, due, client-owed) + decision / risk / question records. Stories and tasks carry a `description`

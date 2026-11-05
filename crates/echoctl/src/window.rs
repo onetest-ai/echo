@@ -476,6 +476,10 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
             if let Some(id) = rest.strip_suffix("/people") {
                 return json_reply(people_view(crate::people::of_thread(id, chrono::Local::now().date_naive())));
             }
+            // Its meeting series and what Echo does with them (Profile → Meetings).
+            if let Some(id) = rest.strip_suffix("/series") {
+                return json_reply(crate::series::of_thread(id).unwrap_or_else(|e| json!({ "error": format!("{e:#}") })));
+            }
             // Its work ledger: the tree, and the last sync.
             if let Some(id) = rest.strip_suffix("/work") {
                 return json_reply(match crate::ledger::tree(id) {
@@ -999,6 +1003,10 @@ fn calendar(q: &str) -> Value {
             e["projects"] = json!(crate::projects::of_call(&dir).map(|ps| ps.iter().map(|(p, w)| crate::projects::chip(p, w)).collect::<Vec<_>>()).unwrap_or_default());
         } else if let Some(m) = e["id"].as_str().and_then(|id| meetings.get(id)) {
             e["projects"] = json!(crate::projects::for_event(m));
+        }
+        // A recurring meeting: its series and what Echo does with every meeting of it (set right here).
+        if let Some(m) = e["id"].as_str().and_then(|id| meetings.get(id)).filter(|m| m.series_id.is_some()) {
+            e["series"] = json!({ "key": crate::series::key_of(m), "rule": crate::series::rule_for(m) });
         }
         if let Some(st) = e["id"].as_str().and_then(|id| IMPORTS.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(id).cloned())) {
             e["import"] = st;
@@ -1528,6 +1536,21 @@ fn project_op(v: &Value) -> anyhow::Result<Option<String>> {
             })?;
         }
         // A Teams channel or a mail rule the thread reads into the Brain (`brain::sources`).
+        // A meeting series' rule, one field at a time (`field`, `value`; null = Echo's default).
+        // Not this thread's: its meetings of that series stop joining it.
+        "series_unlink" => {
+            let key = s("key").unwrap_or_default();
+            pj::update(&id, |p| {
+                if !p.not_series.contains(&key) {
+                    p.not_series.push(key.clone());
+                }
+                Ok(())
+            })?;
+        }
+        "series_set" => {
+            let field = s("field").unwrap_or_default();
+            crate::series::set(&s("key").unwrap_or_default(), s("subject").as_deref(), &json!({ field: v["value"].clone() }))?;
+        }
         "source_add" => {
             let kind = s("kind").unwrap_or_default();
             let sid = s("source").unwrap_or_default().trim().to_string();

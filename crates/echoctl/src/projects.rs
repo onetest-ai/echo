@@ -393,6 +393,10 @@ pub struct Project {
     /// rules say (Needs you's "Not this" on a Teams transcript offered for it).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub not_events: Vec<String>,
+    /// Meeting series taken out of it (`series::keys_of`): their meetings don't join it whatever its rules say
+    /// (Profile → Meetings, ×). Its pins still do.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub not_series: Vec<String>,
     #[serde(default)]
     pub sources: Vec<Source>,
     #[serde(default)]
@@ -487,6 +491,12 @@ impl CallFacts {
     }
 }
 
+/// A call's meeting-series keys, as `series::keys_of` gives them.
+fn series_keys(f: &CallFacts) -> Vec<String> {
+    let m = MeetingContext { series_id: f.series_id.clone(), subject: f.subject.clone(), ..Default::default() };
+    crate::series::keys_of(&m)
+}
+
 fn domain_of(key: &str) -> Option<&str> {
     key.rsplit_once('@').map(|(_, d)| d)
 }
@@ -529,6 +539,9 @@ pub fn matches(p: &Project, clients: &[Client], f: &CallFacts) -> Option<&'stati
         return Some("pinned");
     }
     if f.event_id.as_ref().is_some_and(|e| p.not_events.contains(e)) {
+        return None;
+    }
+    if !p.not_series.is_empty() && series_keys(f).iter().any(|k| p.not_series.contains(k)) {
         return None;
     }
     if let (Some(since), Some(started)) = (p.since.as_deref().and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok()), f.started) {
@@ -752,6 +765,7 @@ pub fn create(name: &str, client: Option<&str>, stage: Option<Stage>) -> Result<
         exclusions: vec![],
         events: vec![],
         not_events: vec![],
+        not_series: vec![],
         board: None,
         sources: vec![],
         people: vec![],
@@ -1548,6 +1562,7 @@ mod tests {
             exclusions: vec![],
             events: vec![],
         not_events: vec![],
+        not_series: vec![],
             board: None,
             sources: vec![],
             people: vec![],

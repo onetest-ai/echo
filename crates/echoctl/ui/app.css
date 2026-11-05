@@ -1847,3 +1847,12 @@ select.set-in { width: auto; margin-right: 6px; }
 .memo-fact { display: inline-flex; align-items: center; gap: 4px; }
 .pj-chip.memo-pj { display: inline-flex; align-items: center; gap: 6px; }
 .pj-chip.memo-pj .set-sub { font-variant-numeric: tabular-nums; }
+
+/* A thread's meeting series (Profile → Meetings), and a recurring meeting's row in the calendar. */
+.se-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 10px; padding: 5px 0; }
+.se-what { grid-column: 1 / -1; }
+.se-t { font-weight: 600; }
+.se-when { text-align: right; }
+.se-cal { display: flex; flex-direction: column; gap: 6px; }
+.se-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.se-line .seg button { padding: 0 10px; }
