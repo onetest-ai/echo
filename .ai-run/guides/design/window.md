@@ -245,6 +245,9 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   a call with its Prep tab (Transcript and Minutes once recorded; Prepare now / Write it again: IPC `project {op:
   prep_write, prep}`, one at a time). A recorded call finds its prep by its event (`prep::of_call`) → its first tab,
   Prep. Not in Calendar: the user, "it belongs in Calls".
+- From the calendar, any meeting on any day (in a thread or not): **Prepare** (IPC `prep_write`; the meeting from
+  today's agenda or the calendar shown, `RAW_EVENTS`) opens Coming up today while it is written; once written, **Show
+  prep** and Prepare again. A meeting in no thread runs on its last occurrence's call profile, else the default.
 - `echo://prep/<id>` (recorded → its call's Prep tab, else `#upcoming/<id>`), `echoctl read`, MCP `read_link` (only
   when all its threads are the reader's), `echoctl prep --upcoming | --show ID | --write ID`.
 - Measured on a copy: a weekly with 31 people, 8 open items, 8 new mails — about 6 s on sonnet.

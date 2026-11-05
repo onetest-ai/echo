@@ -416,7 +416,12 @@ pub fn write(m: &MeetingContext) -> Result<Value> {
         }
     }
     number(&mut p);
-    let profiles: std::collections::BTreeSet<String> = threads.iter().map(|t| t.ai_profile.clone().unwrap_or_else(crate::ai::default_id)).collect();
+    let mut profiles: std::collections::BTreeSet<String> = threads.iter().map(|t| t.ai_profile.clone().unwrap_or_else(crate::ai::default_id)).collect();
+    // A meeting in no thread (prepared by hand): its facts are its last occurrence's, so that call's profile; else the default.
+    if threads.is_empty() {
+        let last = p["last_time"]["call"].as_str().and_then(|c| calls::resolve_call(c).ok()).and_then(|d| crate::ai::call_profile_id(&d).ok());
+        profiles.insert(last.unwrap_or_else(crate::ai::default_id));
+    }
     let started = std::time::Instant::now();
     if profiles.len() == 1 {
         let profile = profiles.into_iter().next().unwrap_or_default();
@@ -463,6 +468,12 @@ pub fn due() -> Vec<MeetingContext> {
 }
 
 static WRITING: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// Is this prep being written now?
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn writing(id: &str) -> bool {
+    WRITING.lock().unwrap_or_else(|e| e.into_inner()).as_deref() == Some(id)
+}
 static RUNNING: AtomicBool = AtomicBool::new(false);
 
 /// Write a prep in the background (the window's Prepare / Write it again); false when one is being written.

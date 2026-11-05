@@ -337,7 +337,10 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
         "/api/projects" => json_reply(projects_overview()),
         // Today's meetings still to come, with their threads and preps (Calls → Coming up today).
         "/api/upcoming" => json_reply(crate::prep::upcoming()),
-        p if p.starts_with("/api/prep/") => json_reply(crate::prep::load(&p["/api/prep/".len()..]).unwrap_or_else(|| json!({ "error": "no prep yet" }))),
+        p if p.starts_with("/api/prep/") => {
+            let id = &p["/api/prep/".len()..];
+            json_reply(crate::prep::load(id).unwrap_or_else(|| json!({ "error": "no prep yet", "writing": crate::prep::writing(id) })))
+        }
         "/api/tasks" => json_reply(tasks_view()),
         // Open work in other threads, by words in its title (#20: Link to an item in another thread…).
         "/api/work/search" => {
@@ -1009,6 +1012,12 @@ fn calendar(q: &str) -> Value {
         } else if let Some(m) = e["id"].as_str().and_then(|id| meetings.get(id)) {
             e["projects"] = json!(crate::projects::for_event(m));
         }
+        // Its prep (`prep.rs`): Show prep when written; a meeting of a thread today can be prepared now; another day's
+        // gets one on its morning.
+        if let Some(eid) = e["id"].as_str() {
+            let id = crate::prep::id_of(eid);
+            e["prep"] = json!({ "id": id, "ready": crate::prep::load(&id).is_some(), "writing": crate::prep::writing(&id) });
+        }
         // A recurring meeting: its series and what Echo does with every meeting of it (set right here).
         if let Some(m) = e["id"].as_str().and_then(|id| meetings.get(id)).filter(|m| m.series_id.is_some()) {
             e["series"] = json!({ "key": crate::series::key_of(m), "rule": crate::series::rule_for(m) });
@@ -1545,7 +1554,11 @@ fn project_op(v: &Value) -> anyhow::Result<Option<String>> {
         // Not this thread's: its meetings of that series stop joining it.
         // Prepare (a meeting with no prep) / Write it again: in the background.
         "prep_write" => {
-            let m = crate::prep::meeting(&s("prep").unwrap_or_default()).ok_or_else(|| anyhow::anyhow!("that meeting isn't in today's calendar"))?;
+            // Today's agenda, else the calendar the window shows (any day).
+            let id = s("prep").unwrap_or_default();
+            let m = crate::prep::meeting(&id)
+                .or_else(|| RAW_EVENTS.lock().unwrap_or_else(|e| e.into_inner()).iter().find(|r| r["id"].as_str().is_some_and(|e| crate::prep::id_of(e) == id)).and_then(crate::calendar::to_meeting))
+                .ok_or_else(|| anyhow::anyhow!("that meeting isn't in the calendar Echo shows"))?;
             anyhow::ensure!(crate::prep::start(m), "a prep is being written: try again in a minute");
         }
         "series_unlink" => {
