@@ -1849,7 +1849,7 @@ select.set-in { width: auto; margin-right: 6px; }
 .pj-chip.memo-pj .set-sub { font-variant-numeric: tabular-nums; }
 
 /* A thread's meeting series (Profile → Meetings), and a recurring meeting's row in the calendar. */
-.se-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 10px; padding: 5px 0; }
+.se-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 10px; padding: 5px 0; width: 100%; flex: 0 0 100%; }
 .se-what { grid-column: 1 / -1; }
 .se-t { font-weight: 600; }
 .se-when { text-align: right; }
