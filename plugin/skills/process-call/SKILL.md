@@ -64,6 +64,12 @@ deal with, how they like notes and follow-ups written. Follow it for tone, empha
   including formats it shows (a table's columns, bullet shapes, bold labels).
 `template.header` and `template.sections` are the same, split.
 
+## 3b. Meeting type (before you write)
+`context.meeting_type` is what kind of meeting it was so far: the user's choice (`by: "you"` — leave it), else a guess
+from who was invited. `context.meeting_types` lists every kind the user has — `id`, `name`, and `about`: how to tell
+it. Settle it from what was said and who took part, by those `about`s, and run `echoctl type <dir> <id>` when it
+differs from the guess. Never for a memo. Settle it before step 4: a template's `{type}` is this one.
+
 ## 4. Write `<dir>/notes.md`
 
 ### 4b. A memo first: find its threads (only when `memo` is true)

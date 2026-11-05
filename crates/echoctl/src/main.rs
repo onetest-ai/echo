@@ -320,6 +320,11 @@ enum Cmd {
         #[arg(default_value = "latest")]
         call: String,
     },
+    /// Type the agenda's meetings by their invites now (JSON: each meeting's type and who set it)
+    #[command(hide = true)]
+    Classify,
+    /// Set what kind of meeting a call was: client, partner, one-on-one, internal, industry, other (yours is kept)
+    Type { call: String, kind: String },
     /// Set a call's title (one line, clamped) and rename its folder (inside a minutes run, when it ends)
     Title { call: String, title: String },
     /// Add your own note to the call being recorded ("# Heading" lines shape the minutes)
@@ -1750,6 +1755,18 @@ fn main() -> Result<()> {
         }
         Cmd::Context { call } => calls::context(&call),
         Cmd::Title { call, title } => calls::set_title(&call, &title),
+        Cmd::Classify => {
+            let agenda = watch::agenda();
+            let n = calls::classify(&agenda)?;
+            let book = calls::type_book();
+            let out: Vec<_> = agenda.iter().map(|m| serde_json::json!({"subject": m.subject, "start": m.start, "type": calls::event_type_in(m, &book)})).collect();
+            println!("{}", serde_json::to_string_pretty(&serde_json::json!({"classified": n, "meetings": out}))?);
+            Ok(())
+        }
+        Cmd::Type { call, kind } => {
+            println!("{}", serde_json::to_string(&calls::set_meeting_type(&call, &kind)?)?);
+            Ok(())
+        }
         Cmd::Note { text } => calls::note(&text.join(" ")),
         Cmd::Action { call, id, status } => calls::action_command(&call, &id, &status),
         Cmd::Actions { call, apply } => calls::actions_command(&call, apply.as_deref()),

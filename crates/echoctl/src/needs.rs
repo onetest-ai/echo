@@ -247,8 +247,7 @@ fn waiting_on_me(items: Vec<Value>, asked: &mut serde_json::Map<String, Value>) 
         let list: String = fresh.iter().enumerate().map(|(i, x)| format!("{}. from {} ({}): {}\n", i + 1, x["from"].as_str().unwrap_or("someone"), x["where"].as_str().unwrap_or(""), x["line"].as_str().unwrap_or(""))).collect();
         let answer = crate::ai::ready(&crate::ai::default_id()).and_then(|r| crate::livenotes::complete_text(r.profile(), ASKS_SYSTEM, &list, 200));
         let keep: Option<Vec<u64>> = answer.ok().and_then(|t| {
-            let t = t.trim().trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim().to_string();
-            let v: Value = serde_json::from_str(&t).ok().or_else(|| serde_json::from_str(&t[t.find('{')?..=t.rfind('}')?]).ok())?;
+            let v = crate::livenotes::json_answer(&t)?;
             Some(v["keep"].as_array()?.iter().filter_map(Value::as_u64).collect())
         });
         if let Some(keep) = keep {
@@ -272,8 +271,7 @@ fn confirm(p: &crate::projects::Project, texts: &[(String, String)]) -> Result<V
     let ready = crate::ai::ready(&profile)?;
     let body: String = texts.iter().rev().take(15).rev().map(|(a, t)| format!("{a}: {}\n", t.chars().take(400).collect::<String>())).collect();
     let answer = crate::livenotes::complete_text(ready.profile(), HOT_SYSTEM, &body, 300)?;
-    let t = answer.trim().trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim();
-    let v: Value = serde_json::from_str(t).ok().or_else(|| serde_json::from_str(&t[t.find('{')?..=t.rfind('}')?]).ok()).ok_or_else(|| anyhow!("the answer couldn't be read"))?;
+    let v = crate::livenotes::json_answer(&answer).ok_or_else(|| anyhow!("the answer couldn't be read"))?;
     let quote = v["quote"].as_str().unwrap_or("").trim().to_string();
     let quoted = !quote.is_empty() && texts.iter().any(|(_, t)| t.contains(&quote));
     Ok(json!({"hot": v["hot"] == true && quoted, "line": v["line"].as_str().unwrap_or("").chars().take(160).collect::<String>(), "quote": quote}))

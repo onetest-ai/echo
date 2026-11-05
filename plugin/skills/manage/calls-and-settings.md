@@ -103,6 +103,11 @@ is an instruction in the template's words; the rest is kept as written. Under ea
 in the user's words and formats (a table, bullets). Show the user the template before writing it; the next minutes
 of a matching call follow it, and Write again with… in a call's Minutes uses it at once.
 
+Meeting types (what kind of meeting a call was — Client, Internal… — and how to tell each, which the minutes classify
+by) are in the same output as `meeting_types`; the user changes them in Settings → Templates → Meeting types
+(`<data folder>/.echo/meeting-types.json`, `[{"id", "name", "about"}]`: a built-in's id changes it). `echoctl type
+<call> <id>` sets one call's.
+
 ## Settings
 
 `echoctl config` with no flags prints them. One flag a setting:

@@ -751,9 +751,14 @@ fn call_detail(dir: &Path) -> Value {
     v["minutes_rev"] = json!(crate::minutes::revision(dir));
     v["rev"] = json!(rev);
     v["has_log"] = json!(dir.join(crate::notes::LOG).exists());
+    // What kind of meeting it was (the header's chip).
+    let meeting = crate::meeting::MeetingContext::load(dir).ok().flatten();
+    let (mt, types) = crate::calls::meeting_type_and_types(dir, meeting.as_ref());
+    v["meeting_type"] = mt;
+    v["meeting_types"] = json!(types.iter().map(|t| json!([t["id"], t["name"]])).collect::<Vec<_>>());
     // The template its minutes follow and why (a word of its title, the user's choice, Default).
     v["template"] = crate::calls::template_of(dir);
-    v["meeting_subject"] = json!(crate::meeting::MeetingContext::load(dir).ok().flatten().and_then(|m| m.subject).filter(|s| !s.trim().is_empty()));
+    v["meeting_subject"] = json!(meeting.and_then(|m| m.subject).filter(|s| !s.trim().is_empty()));
     // Its projects (and the ones it may belong to): the header's chips and suggestion bar.
     match crate::projects::of_call(dir) {
         Ok(ps) => {
@@ -1007,6 +1012,7 @@ fn calendar(q: &str) -> Value {
     let scheduled: Vec<(String, Vec<String>)> = crate::schedule::load().into_iter().filter_map(|m| Some((m.id?, m.languages))).collect();
     let raw_events = RAW_EVENTS.lock().unwrap_or_else(|e| e.into_inner()).clone();
     let offers = crate::teams_transcript::offers();
+    let tbook = crate::calls::type_book();
     let mut to_check = vec![];
     let mut out = vec![];
     for mut e in events {
@@ -1037,6 +1043,10 @@ fn calendar(q: &str) -> Value {
         if let Some(eid) = e["id"].as_str() {
             let id = crate::prep::id_of(eid);
             e["prep"] = json!({ "id": id, "ready": crate::prep::load(&id).is_some(), "writing": crate::prep::writing(&id) });
+        }
+        // What kind of meeting it is, from its invite (set right here, for the whole series).
+        if let Some(m) = e["id"].as_str().and_then(|id| meetings.get(id)) {
+            e["meeting_type"] = crate::calls::event_type_in(m, &tbook);
         }
         // A recurring meeting: its series and what Echo does with every meeting of it (set right here).
         if let Some(m) = e["id"].as_str().and_then(|id| meetings.get(id)).filter(|m| m.series_id.is_some()) {
@@ -2174,7 +2184,25 @@ pub fn handle(msg: &str) -> Handled {
             Ok(_) => true.into(),
             Err(e) => notice(&format!("{e:#}")),
         },
-        // Where the window's panels and views go (`Layout` in app.js); nothing else reads it.
+        // The calendar's chip: a meeting's type, the user's, for its whole series.
+        "set_event_type" => match crate::calls::set_event_type(v["key"].as_str().unwrap_or(""), v["kind"].as_str().unwrap_or("")) {
+            Ok(()) => true.into(),
+            Err(e) => notice(&format!("{e:#}")),
+        },
+        // The call header's meeting type: the user's, kept from then on.
+        "set_meeting_type" => match crate::calls::set_meeting_type(v["call"].as_str().unwrap_or(""), v["kind"].as_str().unwrap_or("")) {
+            Ok(_) => true.into(),
+            Err(e) => notice(&format!("{e:#}")),
+        },
+        // Settings → Templates → Meeting types: save one (a built-in keeps its id), take the user's away.
+        "meeting_type_save" => match crate::calls::meeting_type_save(v["id"].as_str(), v["name"].as_str().unwrap_or(""), v["about"].as_str().unwrap_or("")) {
+            Ok(id) => Handled { refresh: false, reply: Some(format!("window.echo && window.echo.templateSaved({}, {}, 'mt')", json!(id), v["id"].as_str().is_none_or(str::is_empty))) },
+            Err(e) => notice(&format!("{e:#}")),
+        },
+        "meeting_type_remove" => match crate::calls::meeting_type_remove(v["id"].as_str().unwrap_or("")) {
+            Ok(()) => Handled { refresh: false, reply: Some("window.echo && window.echo.templateSaved(null, false, 'mt')".into()) },
+            Err(e) => notice(&format!("{e:#}")),
+        },
         // Settings → Templates: save one (a built-in keeps its id: edited), take the user's file away (Reset / Delete).
         "template_save" => {
             let words: Vec<String> = v["match"].as_array().into_iter().flatten().filter_map(|w| w.as_str().map(str::to_owned)).collect();
@@ -2233,6 +2261,7 @@ pub fn handle(msg: &str) -> Handled {
             }
             false.into()
         }
+        // Where the window's panels and views go (`Layout` in app.js); nothing else reads it.
         "save_layout" => {
             if let Err(e) = save_layout(&v["layout"]) {
                 eprintln!("window layout not saved: {e:#}");

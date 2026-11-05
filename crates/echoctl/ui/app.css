@@ -2024,3 +2024,8 @@ select.set-in { width: auto; margin-right: 6px; }
 /* Template fields grow with what is in them: every line, its line breaks included, in view (no scroll inside). */
 .tp-s textarea, .tp-hd textarea { field-sizing: content; min-height: 3.2em; resize: none; overflow: hidden; font-size: 12.5px; line-height: 1.5; }
 .tp-main .tp-eb { flex: 1 1 auto; }
+/* A call's meeting type, in its facts: a quiet chip with a select over it; a guess in a lighter ink. */
+.mt-chip { position: relative; display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line); color: var(--text-2); font-size: 12px; }
+.mt-chip.guess { color: var(--text-3); border-style: dashed; }
+.mt-chip:hover { border-color: var(--line-strong); color: var(--text); }
+.mt-chip select { position: absolute; inset: 0; opacity: 0; width: 100%; }

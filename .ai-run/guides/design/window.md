@@ -84,6 +84,35 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
 - macOS: transparent title bar with content under it (`with_fullsize_content_view`); the strip posts
   `window_drag` / `window_zoom` (`window::window_cmd`). Windows keeps its native title bar.
 
+### Meeting type (`calls::meeting_type`, `calls::event_type`; idea from the Meeting Notebook plugin)
+- What kind of meeting it is, beside whose (threads and clients say that): Client, Partner, 1:1, Internal, Industry &
+  Analyst, Other — or the user's own (below). It belongs to the meeting, so it is known before it starts:
+  - **by its invite**: the app types today's and tomorrow's meetings with the prep scheduler — one model call with no
+    tools on the default profile reads each new one's subject, organiser, colleagues and outsiders' domains against
+    every type's how to tell it (`calls::classify`, 20 a call, after the preps so a Prepare click never waits on it);
+    kept per calendar series (`id:<series>`), a one-off by its event (`event:<id>`) — never by subject, two "Sync"s
+    are not one — in `<home>/.echo/meeting-types-of.json`, changed only under its lock (`update_state`), and the user's
+    choice made while the model was asked stays; meetings the model left out are asked again the next day, not every
+    pass, but a failed call (no AI ready, the network) notes nothing and the next pass asks again; a series whose type
+    was taken away is asked again; the window is the next hour back to the end of tomorrow, by time, not by the UTC
+    string's date; a types file gone wrong by hand is an error, never written over (`update_state`, the plugins'
+    `wait_lock`); `echoctl classify` runs it now;
+  - while not typed yet, a guess from who is invited (alone: Other; anyone from outside: Client; one colleague: 1:1;
+    more: Internal; the user counted out by address in any case, each person once);
+  - the calendar card's chip sets it for the whole series (`set_event_type`, `by: you`).
+- A call takes its meeting's (`by: invite`; the user's choice on the calendar stays `by: you` on the call, so no minutes
+  run replaces it — `echoctl type` in a run checks it as well as the call's own); its minutes refine it (step 3b, `echoctl type`, in `notes::RUN_COMMANDS`,
+  its own call only, decided under the call's meta lock); the user's choice on the call (the chip in its facts,
+  `set_meeting_type`) is above all and no run replaces it. Order: the call's own (you, then the minutes) → the
+  meeting's (you, then the invite) → the guess. `{type}` is a template value, settled before the minutes are written.
+- Chips: the type and ▾ over a hidden select; a guess dashed and lighter; the hint says who set it.
+- The types are a list the user owns — Settings → Templates → Meeting types: each a name and how to tell it, which
+  both the invite classifier and the minutes go by (`context.meeting_types`). Echo's six can be told differently
+  (Edited, Reset) and the user adds their own (`<home>/.echo/meeting-types.json`); one list (`calls::meeting_types`)
+  feeds the chips, the editor, the context and `echoctl templates`. A type taken away: its calls and meetings go back
+  to their guess.
+- Not yet: picking a template by type; filters by type in Calls and Tasks; the type in Today and Prep.
+
 ### Settings → Templates (`templatesSettings`, `/api/templates`, `calls::templates_view`)
 - Its own section after AI & minutes (that one has enough): the shapes Claude writes in, a tab per kind. Minutes now;
   Tasks (the forms of what Run with Claude writes: a mail, a Teams message, a doc, a plan) comes with that feature.

@@ -519,8 +519,8 @@ impl Registry {
     }
 }
 
-/// An exclusive file lock, waited for (≤ 30 s: a fetch holds a marketplace's).
-fn wait_lock(path: &Path) -> Result<crate::app::FileLock> {
+/// An exclusive file lock, waited for (≤ 30 s: a fetch holds a marketplace's). Echo's shared JSON files use it too.
+pub(crate) fn wait_lock(path: &Path) -> Result<crate::app::FileLock> {
     let t = std::time::Instant::now();
     loop {
         if let Some(l) = crate::app::FileLock::try_take(path)? {
