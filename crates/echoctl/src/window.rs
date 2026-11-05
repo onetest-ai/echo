@@ -2180,7 +2180,8 @@ pub fn handle(msg: &str) -> Handled {
             let words: Vec<String> = v["match"].as_array().into_iter().flatten().filter_map(|w| w.as_str().map(str::to_owned)).collect();
             let sections: Vec<Value> = v["sections"].as_array().cloned().unwrap_or_default();
             match crate::calls::template_save(v["id"].as_str(), v["name"].as_str().unwrap_or(""), &words, v["header"].as_str().unwrap_or(""), &sections) {
-                Ok(id) => Handled { refresh: false, reply: Some(format!("window.echo && window.echo.templateSaved({})", json!(id))) },
+                // `true`: a new one (the window selects it).
+                Ok(id) => Handled { refresh: false, reply: Some(format!("window.echo && window.echo.templateSaved({}, {})", json!(id), v["id"].as_str().is_none_or(str::is_empty))) },
                 Err(e) => notice(&format!("{e:#}")),
             }
         }
@@ -2313,16 +2314,6 @@ fn act(v: &Value) -> bool {
         }
         "write_notes" => {
             let Some(d) = call else { return false };
-            // Write again with… another template: the call's from now on.
-            if let Some(t) = v["template"].as_str().filter(|t| !t.is_empty()) {
-                if crate::notes::status(&d).is_some_and(|r| crate::notes::pending(&r)) {
-                    return true;
-                }
-                if let Err(e) = crate::calls::choose_template(&d, t) {
-                    crate::notes::refuse(&d, &format!("{e:#}"));
-                    return true;
-                }
-            }
             // Another profile for this run: it becomes the call's (`notes-run.json` records which
             // profile and model wrote the minutes). Not while a run of this call is on.
             if let Some(id) = profile(v) {
@@ -2334,6 +2325,16 @@ fn act(v: &Value) -> bool {
                         crate::notes::refuse(&d, &format!("{e:#}"));
                         return true;
                     }
+                }
+            }
+            // Write again with… another template: the call's from now on — chosen last, once nothing else can refuse.
+            if let Some(t) = v["template"].as_str().filter(|t| !t.is_empty()) {
+                if crate::notes::status(&d).is_some_and(|r| crate::notes::pending(&r)) {
+                    return true;
+                }
+                if let Err(e) = crate::calls::choose_template(&d, t) {
+                    crate::notes::refuse(&d, &format!("{e:#}"));
+                    return true;
                 }
             }
             crate::notes::start_in_background(d);

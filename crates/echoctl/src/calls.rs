@@ -396,26 +396,45 @@ fn templates_dir() -> PathBuf {
 }
 
 /// Every template: the user's (`<home>/.echo/templates/*.md`) first, overriding a built-in of the same name.
+/// Bumped by each save and removal of a template.
+static TEMPLATES_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 fn all_templates() -> Vec<Template> {
-    let mut all = vec![];
-    let mut seen = std::collections::HashSet::new();
+    type Key = (u64, Vec<(PathBuf, Option<std::time::SystemTime>, u64)>);
+    static CACHE: std::sync::Mutex<Option<(Key, Vec<Template>)>> = std::sync::Mutex::new(None);
     let mut files: Vec<PathBuf> = fs::read_dir(templates_dir())
         .map(|rd| rd.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().is_some_and(|x| x == "md")).collect())
         .unwrap_or_default();
     files.sort();
-    // A template is its file: the user's `<id>.md` is the template `<id>` (its frontmatter `name` aside), so the
-    // window's Reset, Delete and saving always find the file they mean.
+    // Read again only when a file came, went or changed (a call's page asks on every refresh).
+    // Echo's own saves count too, whatever the clock's grain.
+    let key: Key = (TEMPLATES_GEN.load(std::sync::atomic::Ordering::SeqCst), files.iter().map(|f| (f.clone(), fs::metadata(f).ok().and_then(|m| m.modified().ok()), fs::metadata(f).map(|m| m.len()).unwrap_or(0))).collect());
+    let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((k, all)) = cache.as_ref() {
+        if *k == key {
+            return all.clone();
+        }
+    }
+    let builtin_ids: Vec<&str> = BUILTIN_TEMPLATES.iter().map(|(s, _)| *s).collect();
+    // A template is its file: the user's `<id>.md` is template `<id>` — or, when its frontmatter names a built-in
+    // (`name: default`, how one was changed before Settings → Templates), that built-in. Saving, Reset and Delete go
+    // to the file it came from (`path`).
     let user = files.iter().filter_map(|f| {
         let text = fs::read_to_string(f).ok()?;
         let stem = f.file_stem()?.to_string_lossy().to_string();
-        parse_template(&text, &stem, f.display().to_string()).map(|t| Template { name: stem, ..t })
+        let t = parse_template(&text, &stem, f.display().to_string())?;
+        let id = if builtin_ids.contains(&t.name.as_str()) { t.name.clone() } else { stem };
+        Some(Template { name: id, ..t })
     });
     let builtin = BUILTIN_TEMPLATES.iter().filter_map(|(stem, text)| parse_template(text, stem, format!("builtin:{stem}")));
+    let mut all = vec![];
+    let mut seen = std::collections::HashSet::new();
     for t in user.chain(builtin) {
         if seen.insert(t.name.clone()) {
             all.push(t);
         }
     }
+    *cache = Some((key, all.clone()));
     all
 }
 
@@ -457,23 +476,22 @@ pub fn templates_view() -> Value {
     json!({"templates": out, "values": template_values()})
 }
 
-/// An id that names a file in the templates folder and nothing outside it.
-fn safe_id(id: &str) -> bool {
-    !id.is_empty() && !id.starts_with('.') && !id.contains(['/', '\\', '\0'])
+/// The user's file a template comes from (none: it is Echo's own).
+fn file_of(id: &str) -> Option<PathBuf> {
+    all_templates().into_iter().find(|t| t.name == id && !t.path.starts_with("builtin:")).map(|t| PathBuf::from(t.path))
 }
 
-/// A template's id from a name: lower case, words joined by `-` (`Client kickoff` → `client-kickoff`).
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+/// A new template's id from its name: the call folders' slug (`Client kickoff` → `client-kickoff`), never a name
+/// Windows keeps for its devices.
 fn template_id(name: &str) -> String {
-    let mut id = String::new();
-    for c in name.trim().to_lowercase().chars() {
-        if c.is_alphanumeric() {
-            id.push(c);
-        } else if !id.ends_with('-') && !id.is_empty() {
-            id.push('-');
-        }
+    let id = crate::recorder::slugify(name).trim_end_matches('-').to_string();
+    let reserved = ["con", "prn", "aux", "nul"].contains(&id.as_str())
+        || (id.len() == 4 && (id.starts_with("com") || id.starts_with("lpt")) && id.ends_with(|c: char| c.is_ascii_digit()));
+    if reserved {
+        format!("{id}-template")
+    } else {
+        id
     }
-    id.chars().take(60).collect::<String>().trim_end_matches('-').to_string()
 }
 
 /// Save a template the user made or changed: `<home>/.echo/templates/<id>.md`. A built-in keeps its id (so it is
@@ -483,7 +501,7 @@ pub fn template_save(id: Option<&str>, name: &str, words: &[String], header: &st
     let known: Vec<String> = all_templates().into_iter().map(|t| t.name).collect();
     let id = match id.filter(|i| !i.is_empty()) {
         Some(i) => {
-            anyhow::ensure!(safe_id(i) && known.iter().any(|k| k == i), "there is no template {i}");
+            anyhow::ensure!(known.iter().any(|k| k == i), "there is no template {i}");
             i.to_string()
         }
         None => {
@@ -514,8 +532,11 @@ pub fn template_save(id: Option<&str>, name: &str, words: &[String], header: &st
         n += 1;
     }
     anyhow::ensure!(n > 0, "a template needs at least one section");
+    // Its own file; a built-in changed for the first time: `<id>.md` (its id is Echo's, no path in it).
+    let file = file_of(&id).unwrap_or_else(|| templates_dir().join(format!("{id}.md")));
     fs::create_dir_all(templates_dir())?;
-    paths::write_atomic(&templates_dir().join(format!("{id}.md")), body.trim_end().as_bytes())?;
+    paths::write_atomic(&file, body.trim_end().as_bytes())?;
+    TEMPLATES_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     Ok(id)
 }
 
@@ -523,12 +544,12 @@ pub fn template_save(id: Option<&str>, name: &str, words: &[String], header: &st
 /// `.echo/trash/templates/`).
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn template_remove(id: &str) -> Result<()> {
-    anyhow::ensure!(safe_id(id), "no such template");
-    let f = templates_dir().join(format!("{id}.md"));
-    anyhow::ensure!(f.exists(), "{id} is Echo's own: nothing to take away");
+    let f = file_of(id).ok_or_else(|| anyhow::anyhow!("{id} is Echo's own: nothing to take away"))?;
+    let stem = f.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
     let bin = trash_dir().join("templates");
     fs::create_dir_all(&bin)?;
-    fs::rename(&f, bin.join(format!("{id}-{}.md", chrono::Utc::now().format("%Y%m%d%H%M%S"))))?;
+    fs::rename(&f, bin.join(format!("{stem}-{}.md", chrono::Utc::now().format("%Y%m%d%H%M%S"))))?;
+    TEMPLATES_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     Ok(())
 }
 
@@ -1656,17 +1677,26 @@ mod tests {
         assert_eq!(kind("client-kickoff"), None);
         assert_eq!(fs::read_dir(trash_dir().join("templates")).unwrap().count(), 2);
         assert_eq!(template_of(&d)["id"], "status-sync");
-        // A template is its file: a hand-written one whose frontmatter names a built-in is its own, and can be deleted.
-        fs::write(templates_dir().join("my-discussion.md"), "---\nname: discussion\nmatch: [x]\n---\n## A\nb\n").unwrap();
-        assert_eq!(kind("my-discussion").as_deref(), Some("yours"));
+        // A file named after itself is its own template; one whose frontmatter names a built-in changes that built-in, as
+        // before Settings → Templates — saved and taken away through that same file.
+        fs::write(templates_dir().join("ours.md"), "---\nname: ours\nmatch: [x]\n---\n## A\nb\n").unwrap();
+        assert_eq!(kind("ours").as_deref(), Some("yours"));
+        fs::write(templates_dir().join("our-minutes.md"), "---\nname: discussion\nmatch: [x]\n---\n## A\nb\n").unwrap();
+        assert_eq!(kind("discussion").as_deref(), Some("edited"));
+        assert_eq!(kind("our-minutes"), None);
+        template_save(Some("discussion"), "", &["y".into()], "", &secs).unwrap();
+        assert!(fs::read_to_string(templates_dir().join("our-minutes.md")).unwrap().contains("match: [y]"), "its own file");
+        assert!(!templates_dir().join("discussion.md").exists());
+        template_remove("discussion").unwrap();
         assert_eq!(kind("discussion").as_deref(), Some("builtin"));
-        template_remove("my-discussion").unwrap();
+        template_remove("ours").unwrap();
         // A new one never writes over a file that is there, whatever its frontmatter says.
         fs::write(templates_dir().join("kickoff.md"), "---\nname: something-else\nmatch: []\n---\n## A\nb\n").unwrap();
         assert!(template_save(None, "Kickoff", &[], "", &secs).is_err());
         // Nothing outside the folder.
         assert!(template_save(Some("../../x"), "", &[], "", &secs).is_err());
-        assert!(template_remove("../x").is_err() && template_remove("a/b").is_err());
+        assert!(template_remove("../x").is_err() && template_remove("C:notes").is_err() && template_remove("default").is_err());
+        assert_eq!(template_id("CON"), "con-template", "no device name on Windows");
     }
 
     #[test]

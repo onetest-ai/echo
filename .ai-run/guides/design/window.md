@@ -125,10 +125,16 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
 - The window's Minutes leave out the minutes' header (between their title and first section: date, duration, people,
   Since last time) — the call's own header shows those; the page opened in a browser, the HTML file and `notes.md`
   keep it (`minutes::render_page`, `embed`).
-- A template is its file: a user's `<id>.md` is template `<id>` whatever its frontmatter `name` says, so Reset, Delete
-  and saving find the file they mean; a new one never writes over a file that is there; an id with a path in it is
-  refused. Saves are answered by the app (`window.echo.templateSaved(id)`): the list is read once, a new template is
-  selected by the id the app gave it, and Edited shows once the file is there.
+- A template is its file: a user's `<id>.md` is template `<id>`; one whose frontmatter names a built-in (`name:
+  default`, how one was changed before Settings → Templates) changes that built-in, as it always did. Saving, Reset and
+  Delete go to the file the template came from (paths from the folder, never from an id the page sent); a new one takes
+  the call folders' slug (`recorder::slugify`; not a Windows device name), never a file that is there. The list is read
+  again only when the folder changes (or Echo saved). Saves are answered by the app (`templateSaved(id, created)`): a
+  new one is selected; Reset / Delete leave the editor as it is until done; a word typed and not yet added counts.
+- A minutes run records the template it followed with the model (`notes-run.json` `minutes.template`); the notice names
+  that one, while the minutes are as the run left them. Write again with… chooses the template only once the profile
+  is set (nothing pins it when the run is refused). The window leaves out only the header's paragraphs before the first
+  section — a list, a figure or anything else there stays.
 - The summary's shape in the built-ins (from the Meeting Notebook plugin): one sentence on what it was for, Highlights
   3–7 "**Topic:** … [mm:ss]", Risks & issues only when raised, up to three Key dates.
 

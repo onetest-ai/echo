@@ -70,6 +70,18 @@ fn title_of(dir: &Path) -> String {
         .unwrap_or_else(|| dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())
 }
 
+/// The HTML from its first element that isn't a paragraph (`<p>…</p>`, blanks between).
+fn skip_paragraphs(html: &str) -> &str {
+    let mut rest = html;
+    loop {
+        let t = rest.trim_start();
+        match t.strip_prefix("<p>").or_else(|| t.strip_prefix("<p ")).and_then(|_| t.find("</p>")) {
+            Some(end) => rest = &t[end + 4..],
+            None => return t,
+        }
+    }
+}
+
 /// The page of the call in `dir` (it needs `notes.md`), and its CSP; `embed`: the copy the
 /// window's Minutes tab shows (one more script: timestamps and links talk to the window).
 fn page(dir: &Path, embed: bool) -> Result<(String, String)> {
@@ -79,7 +91,7 @@ fn page(dir: &Path, embed: bool) -> Result<(String, String)> {
     // they follow too ("· Default template"): a page sent to others doesn't need it.
     let mut by = crate::notes::minutes_model(dir);
     if embed {
-        if let Some(t) = crate::calls::template_of(dir)["id"].as_str().filter(|t| *t != "memo") {
+        if let Some(t) = crate::notes::minutes_template(dir) {
             let mut name = t.replace('-', " ");
             if let Some(c) = name.get_mut(0..1) {
                 c.make_ascii_uppercase();
@@ -277,7 +289,8 @@ fn render_page(md: &str, title: &str, model: Option<&str>, load: &Loader, frames
     let main = match body.html.find("</h1>") {
         Some(i) => {
             let rest = &body.html[i + 5..];
-            let rest = if embed { rest.find("<h2").map_or(rest, |j| &rest[j..]) } else { rest };
+            // Only the header's own paragraphs go; a list, a figure or anything else before the first section stays.
+            let rest = if embed { skip_paragraphs(rest) } else { rest };
             format!("{}{top}{rest}", &body.html[..i + 5])
         }
         None => format!("<h1>{}</h1>{top}{}", esc(title), body.html),
@@ -998,6 +1011,10 @@ mod tests {
         let (window, _) = render_page(md, "Sync", Some("sonnet"), &load, &[], true);
         assert!(!window.contains("17 min") && !window.contains("Since last time"), "the call's header shows them");
         assert!(window.contains("Written by AI (Echo, sonnet)") && window.contains("We met."));
+        // Anything but the header's paragraphs before the first section stays: a list of the user's, a figure.
+        let md2 = "# Sync\n\n**When:** 2026-11-03\n\n- a point of mine\n\n## Summary\nWe met.\n";
+        let (w2, _) = render_page(md2, "Sync", None, &load, &[], true);
+        assert!(!w2.contains("2026-11-03") && w2.contains("a point of mine"), "{w2}");
     }
 
     #[test]

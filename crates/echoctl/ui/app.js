@@ -2508,9 +2508,16 @@ async function loadTemplates() {
   if (TPL.sel && !TPL.draft) { const t = list.find((x) => x.id === TPL.sel); TPL.draft = t ? tplDraft(t) : null; if (!t) TPL.sel = null }
 }
 const tplDraft = (t) => ({ id: t.id, kind: t.kind, memo: t.memo, header: t.header || '', match: [...(t.match || [])], sections: (t.sections || []).map((s) => ({ heading: s.heading, instruction: s.instruction })) })
+/** A word typed in the words box and not yet added (no Enter): it counts once anything is saved. */
+function tplWord() {
+  const d = TPL.draft, w = (TPL.word || '').trim().toLowerCase().replace(/,/g, '')
+  if (d && w && !d.match.includes(w)) d.match.push(w)
+  TPL.word = ''
+}
 function tplSave() {
   const d = TPL.draft
   if (!d || !d.id) return
+  tplWord()
   send({ cmd: 'template_save', id: d.id, header: d.header, match: d.match, sections: d.sections })
 }
 function templatesSettings() {
@@ -2569,7 +2576,7 @@ document.addEventListener('click', (e) => {
   if (t.dataset.tplPick) { TPL.scrollTo = true; TPL.caret = null; const x = ((TPL.data && TPL.data.templates) || []).find((y) => y.id === t.dataset.tplPick); TPL.sel = x ? x.id : null; TPL.draft = x ? tplDraft(x) : null; TPL.word = ''; return render() }
   if (t.dataset.tplNew !== undefined) {
     const def = ((TPL.data && TPL.data.templates) || []).find((y) => y.id === 'default')
-    TPL.sel = null; TPL.draft = { id: null, kind: 'yours', name: '', header: def ? def.header : '', match: [], sections: def ? tplDraft(def).sections : [{ heading: 'Summary', instruction: '' }] }
+    TPL.sel = null; TPL.word = ''; TPL.draft = { id: null, kind: 'yours', name: '', header: def ? def.header : '', match: [], sections: def ? tplDraft(def).sections : [{ heading: 'Summary', instruction: '' }] }
     render(); const n = $('#tp-name'); if (n) n.focus(); return
   }
   if (t.dataset.tplClose !== undefined || t.dataset.tplCancel !== undefined) { TPL.sel = null; TPL.draft = null; return render() }
@@ -2577,15 +2584,16 @@ document.addEventListener('click', (e) => {
     const name = (($('#tp-name') || {}).value || '').trim()
     if (!name) { const n = $('#tp-name'); if (n) n.focus(); return }
     d.name = name
+    tplWord()
+    // The app answers `templateSaved(id, true)` and the window selects it; a refusal leaves the draft, with the notice.
     send({ cmd: 'template_save', name, header: d.header, match: d.match, sections: d.sections })
-    TPL.creating = true // `templateSaved(id)` selects it; a refusal leaves the draft as it is, with the notice
     return
   }
   if (t.dataset.tplReset !== undefined || t.dataset.tplDel !== undefined) {
+    // The editor stays as it is until the app answers (`templateSaved(null)`); a refusal changes nothing.
+    TPL.removing = { id: d.id, del: t.dataset.tplDel !== undefined }
     send({ cmd: 'template_remove', id: d.id })
-    if (t.dataset.tplDel !== undefined) TPL.sel = null
-    TPL.draft = null
-    return render()
+    return
   }
   if (t.dataset.tplWordX) { d.match.splice(+t.dataset.tplWordX, 1); tplSave(); return render() }
   const move = (i, j) => { const s = d.sections; [s[i], s[j]] = [s[j], s[i]]; tplSave(); render() }
@@ -2608,6 +2616,7 @@ document.addEventListener('change', (e) => {
   const el = e.target, d = TPL.draft
   if (!d || !el.matches) return
   if (el.id === 'tp-hd') { d.header = el.value; tplSave() }
+  else if (el.id === 'tp-word') { tplSave(); render() }
   else if (el.matches('[data-tpl-h]')) { d.sections[+el.dataset.tplH].heading = el.value.trim() || 'Untitled'; tplSave() }
   else if (el.matches('[data-tpl-i]')) { d.sections[+el.dataset.tplI].instruction = el.value; tplSave() }
 })
@@ -7418,11 +7427,17 @@ const typingNotes = () => document.activeElement && (document.activeElement.id =
 window.echo = {
   /** A template saved (its id) or taken away (null): the list read again; a new one becomes the one edited; the one
    *  edited takes its kind from the list (Edited once Echo has the file). */
-  templateSaved(id) {
+  templateSaved(id, created) {
     loadTemplates().then(() => {
       const list = (TPL.data && TPL.data.templates) || []
-      if (TPL.creating && id) { TPL.creating = false; const x = list.find((y) => y.id === id); if (x) { TPL.sel = x.id; TPL.draft = tplDraft(x); TPL.scrollTo = true } }
-      else if (TPL.draft && TPL.draft.id) { const x = list.find((y) => y.id === TPL.draft.id); if (x) TPL.draft.kind = x.kind }
+      const rm = TPL.removing
+      TPL.removing = null
+      if (created && id) { const x = list.find((y) => y.id === id); if (x) { TPL.sel = x.id; TPL.draft = tplDraft(x); TPL.scrollTo = true } }
+      else if (id === null && rm) {
+        // Deleted: nothing chosen. Reset: Echo's own again, in the editor.
+        const x = !rm.del && list.find((y) => y.id === rm.id)
+        TPL.sel = x ? x.id : null; TPL.draft = x ? tplDraft(x) : null
+      } else if (TPL.draft && TPL.draft.id) { const x = list.find((y) => y.id === TPL.draft.id); if (x) TPL.draft.kind = x.kind }
       render()
     })
   },

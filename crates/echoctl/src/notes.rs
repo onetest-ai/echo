@@ -89,6 +89,9 @@ pub struct Written {
     pub model: String,
     pub at: DateTime<Local>,
     pub sha256: String,
+    /// The minutes template the run followed (`calls::template_of` when it started).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub template: Option<String>,
 }
 
 /// Asked for (Write minutes, `echoctl notes`), or started by the app on its own.
@@ -1057,6 +1060,8 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
     let profile = ready.profile();
     let model = profile.notes_model();
     let label = format!("{} · {}", profile.name, model.as_deref().unwrap_or("Claude Code's default model"));
+    // The template this run follows, named on the minutes it writes.
+    let template = crate::calls::template_of(dir)["id"].as_str().filter(|t| *t != "memo").map(str::to_owned);
     r.profile = Some(profile.id.clone());
     r.model = Some(label.clone());
     save(dir, &r);
@@ -1272,7 +1277,7 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
     conclude(&mut r, profile, &ended, &label, &cfg.notes_model_label());
     if r.state == "done" {
         let sha256 = fs::read(dir.join("notes.md")).map(|b| hex(&sha2::Sha256::digest(&b))).unwrap_or_default();
-        r.minutes = Some(Written { model: label.clone(), at: Local::now(), sha256 });
+        r.minutes = Some(Written { model: label.clone(), at: Local::now(), sha256, template: template.clone() });
     }
     let _ = writeln!(log, "{}  {} ({}s)", stamp(), match r.state.as_str() {
         "done" => "Minutes written.".to_string(),
@@ -1379,9 +1384,18 @@ fn hex(b: &[u8]) -> String {
 /// has the hash that run left): an update that replaced them and then failed, a session's rewrite
 /// or a hand edit leaves no model to name.
 pub fn minutes_model(dir: &Path) -> Option<String> {
+    written(dir).map(|w| w.model)
+}
+
+/// The template the minutes shown were written with — while they are as that run left them.
+pub fn minutes_template(dir: &Path) -> Option<String> {
+    written(dir)?.template
+}
+
+fn written(dir: &Path) -> Option<Written> {
     let w = raw(dir)?.minutes?;
     let now = fs::read(dir.join("notes.md")).ok()?;
-    (hex(&sha2::Sha256::digest(&now)) == w.sha256).then_some(w.model)
+    (hex(&sha2::Sha256::digest(&now)) == w.sha256).then_some(w)
 }
 
 /// How Claude Code left a minutes run.
@@ -2210,7 +2224,7 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("notes.md"), "# Minutes\n").unwrap();
         let sha256 = hex(&sha2::Sha256::digest(b"# Minutes\n"));
-        let written = Written { model: "Work · sonnet".into(), at: Local::now(), sha256 };
+        let written = Written { model: "Work · sonnet".into(), at: Local::now(), sha256, template: None };
         save(&dir, &Run { state: "done".into(), minutes: Some(written.clone()), ..Default::default() });
         assert_eq!(minutes_model(&dir).as_deref(), Some("Work · sonnet"));
         // An update queued, running, failed with another model: still the one that wrote them.
