@@ -509,7 +509,7 @@ label.split-lang:focus-within { outline: 2px solid var(--accent); outline-offset
 .tag.no { color: var(--text-3); }
 
 .detail {
-  position: fixed; right: 14px; top: 64px; width: 300px; max-height: calc(100vh - 88px); z-index: 5;
+  position: fixed; right: 14px; top: 64px; width: min(400px, calc(100vw - 24px)); max-height: calc(100vh - 88px); z-index: 5;
   border: 1px solid var(--line-strong); border-radius: var(--r-panel); box-shadow: var(--shadow);
   padding: 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; background: var(--surface);
 }
@@ -1854,5 +1854,7 @@ select.set-in { width: auto; margin-right: 6px; }
 .se-t { font-weight: 600; }
 .se-when { text-align: right; }
 .se-cal { display: flex; flex-direction: column; gap: 6px; }
-.se-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.se-line { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; min-width: 0; }
+.se-line .seg { flex: none; }
+.se-line .fchip { min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; }
 .se-line .seg button { padding: 0 10px; }
