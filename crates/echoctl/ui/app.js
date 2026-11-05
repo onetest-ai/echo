@@ -6227,6 +6227,8 @@ function paletteTarget() {
     if (e) return { kind: 'event', e, label: e.subject || 'Event' }
   }
   if (S.view === 'calls' && S.selected && S.call && !S.call.error) return { kind: 'call', c: S.call, label: S.call.title }
+  if (S.view === 'calls' && S.upSel) return { kind: 'upcoming', id: S.upSel, label: (S.upPrep && S.upPrep.meeting && S.upPrep.meeting.subject) || 'Coming up' }
+  if (S.view === 'today' && S.today) return { kind: 'today', d: S.today, label: 'Today' }
   return null
 }
 /** Every action for the target, Echo's own, and where to go. `disabled`: why it can't run now. */
@@ -6255,6 +6257,39 @@ function paletteItems(target) {
     if (kind === 'join' || kind === 'record') add('This event', es.live ? 'Record it' : 'Record when it starts', () => press({ schedule: e.id }))
     if (kind === 'import') add('This event', 'Import Teams transcript', () => press({ calImport: e.id }), { keywords: 'missed unrecorded transcript teams', disabled: e.import && e.import.busy ? 'importing now' : null })
     if (!kind) add('This event', 'Record it', () => {}, { disabled: e.cancelled ? 'cancelled' : e.declined ? 'you declined it' : es.past ? 'it is over' : !e.online ? 'not a Teams meeting' : 'not possible' })
+  }
+  if (target && target.kind === 'event' && target.e.prep) {
+    const p = target.e.prep
+    if (p.ready) add('This event', 'Show its prep', () => press({ evPrep: p.id }), { keywords: 'brief prepare meeting' })
+    if (!p.writing && !eventState(target.e, new Date()).past) add('This event', p.ready ? 'Prepare it again' : 'Prepare for this meeting', () => press({ prepWrite: p.id, prepOpen: '1' }), { keywords: 'prep brief before meeting' })
+  }
+  if (target && target.kind === 'upcoming') {
+    const p = S.upPrep && S.upPrep.prep
+    add('This meeting', p ? 'Write the prep again' : 'Prepare this meeting', () => press({ prepWrite: target.id }), { keywords: 'prep brief before', disabled: S.upPrep && S.upPrep.writing ? 'the prep is being written' : null })
+  }
+  if (target && target.kind === 'today') {
+    const d = target.d, now = new Date()
+    // Needs you now; meetings still to come: their prep; each task this week: close it, or ask Claude to change it.
+    for (const x of (d.needs && d.needs.items) || []) {
+      const name = `${x.from || ''} — ${x.line || ''}`
+      if (x.source === 'mail') add('Needs you now', `Read and reply: ${name}`, () => press({ needsRead: x.id }), { keywords: 'mail answer' })
+      else if (x.app_url || x.chat) add('Needs you now', `Reply in Teams: ${name}`, () => press({ needsOpen: x.app_url || '', chat: x.chat || '' }), { keywords: 'teams answer chat' })
+      add('Needs you now', `I'll do it: ${name}`, () => press({ needsTodo: x.id }), { keywords: 'task todo' })
+      add('Needs you now', `Won't do: ${name}`, () => press({ needsWont: x.id }), { keywords: 'ignore dismiss' })
+    }
+    for (const x of d.day || []) {
+      const end = x.end ? new Date(x.end) : x.start ? new Date(x.start) : null
+      if (!x.prep || x.prep.writing || (end && end < now)) continue
+      const name = x.subject || x.title || 'meeting'
+      if (x.prep.ready) add('Today', `Show prep: ${name}`, () => press({ evPrep: x.prep.id, evCall: x.call || '' }), { keywords: 'prep brief meeting' })
+      else add('Today', `Prepare: ${name}`, () => press({ prepWrite: x.prep.id, prepOpen: '1' }), { keywords: 'prep brief meeting before' })
+    }
+    const w = d.work || {}
+    for (const t of ['mine', 'owed', 'waiting'].flatMap((k) => (w[k] && w[k].items) || [])) {
+      const attrs = { project: t.project, title: t.title, node: t.id }
+      add('My work', `Close: ${t.title}`, () => press({ todayClose: t.id, ...attrs }), { keywords: 'task done finish complete' })
+      add('My work', `Ask Claude: ${t.title}`, () => press({ todayAsk: '1', ...attrs }), { keywords: 'task change move due later' })
+    }
   }
   // Echo's own
   if (st.recording && st.recording_memo) add('Echo', 'Stop the memo', () => press({ cmd: 'stop' }), { keywords: 'end memo', hint: MAC ? '⇧⌘R' : 'Ctrl+Shift+R' })

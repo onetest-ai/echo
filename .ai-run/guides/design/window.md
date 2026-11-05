@@ -276,6 +276,10 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   thread — the task is theirs, due today, under Follow-ups → From Teams and mail in that thread, made once; IPC
   `needs_decide`), Won't do. An item leaves when answered (the next read no longer finds it) or decided
   (`<home>/.echo/needs.json`, decisions kept two days). No snooze, no fold, no notifications: only in Today.
+- ⌘K on Today acts on it (target "Today"): Needs you now's items (Reply in Teams / Read and reply, I'll do it, Won't do),
+  Prepare / Show prep for meetings still to come, and Close / Ask Claude for each task this week — each the click on its
+  button (`press`), so the dialogs ask first as they do. A calendar event with a prep: Show its prep, Prepare for this
+  meeting / Prepare it again; a meeting coming up in Calls: Prepare this meeting / Write the prep again.
 
 ### A prep before each meeting (`prep.rs`)
 - For today's calendar meetings of an open thread, written without being asked (the app checks every 5 minutes —
