@@ -70,13 +70,36 @@ fn title_of(dir: &Path) -> String {
         .unwrap_or_else(|| dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())
 }
 
+/// The HTML from its first element that isn't a paragraph (`<p>…</p>`, blanks between).
+fn skip_paragraphs(html: &str) -> &str {
+    let mut rest = html;
+    loop {
+        let t = rest.trim_start();
+        match t.strip_prefix("<p>").or_else(|| t.strip_prefix("<p ")).and_then(|_| t.find("</p>")) {
+            Some(end) => rest = &t[end + 4..],
+            None => return t,
+        }
+    }
+}
+
 /// The page of the call in `dir` (it needs `notes.md`), and its CSP; `embed`: the copy the
 /// window's Minutes tab shows (one more script: timestamps and links talk to the window).
 fn page(dir: &Path, embed: bool) -> Result<(String, String)> {
     let md = fs::read_to_string(dir.join("notes.md")).with_context(|| format!("{} has no minutes yet", dir.display()))?;
     let load = |name: &str| frame_bytes(dir, name);
-    // The model is named only while the minutes are as the run that wrote them left them.
-    Ok(render_page(&md, &title_of(dir), crate::notes::minutes_model(dir).as_deref(), &load, &kept_frames(dir), embed))
+    // The model is named only while the minutes are as the run that wrote them left them. In the window, the template
+    // they follow too ("· Default template"): a page sent to others doesn't need it.
+    let mut by = crate::notes::minutes_model(dir);
+    if embed {
+        if let Some(t) = crate::notes::minutes_template(dir) {
+            let mut name = t.replace('-', " ");
+            if let Some(c) = name.get_mut(0..1) {
+                c.make_ascii_uppercase();
+            }
+            by = Some(by.map(|m| format!("{m} · {name} template")).unwrap_or_else(|| format!("{name} template")));
+        }
+    }
+    Ok(render_page(&md, &title_of(dir), by.as_deref(), &load, &kept_frames(dir), embed))
 }
 
 /// The page for the window's Minutes tab, rendered now (no file written), and its CSP.
@@ -261,9 +284,15 @@ fn render_page(md: &str, title: &str, model: Option<&str>, load: &Loader, frames
     top.push_str(&format!(
         "<p class=\"note\">Written by AI ({by}) from an automatic transcript. Check names, figures and commitments before you share it.</p>"
     ));
-    // Under the notes' own title, else under one made from the call's.
+    // Under the notes' own title, else under one made from the call's. In the window, without the lines between that
+    // title and the first section (the template's header: date, duration, people…): the call's own header shows them.
     let main = match body.html.find("</h1>") {
-        Some(i) => format!("{}{top}{}", &body.html[..i + 5], &body.html[i + 5..]),
+        Some(i) => {
+            let rest = &body.html[i + 5..];
+            // Only the header's own paragraphs go; a list, a figure or anything else before the first section stays.
+            let rest = if embed { skip_paragraphs(rest) } else { rest };
+            format!("{}{top}{rest}", &body.html[..i + 5])
+        }
         None => format!("<h1>{}</h1>{top}{}", esc(title), body.html),
     };
 
@@ -959,8 +988,9 @@ code { font-size: 12px; }
 /// its own (the call's header shows it).
 const EMBED_CSS: &str = "
 body { background: var(--bg); }
-main { max-width: 1280px; margin: 0; padding: 22px 32px 48px; border: 0; border-radius: 0; box-shadow: none; }
+main { max-width: 1280px; margin: 0; padding: 14px 32px 48px; border: 0; border-radius: 0; box-shadow: none; }
 main > h1:first-child { display: none; }
+main > h1:first-child + .note { margin-top: 0; }
 .mynote { margin: 6px 0 10px; padding: 6px 10px; border-radius: 8px; font-size: 13px; line-height: 1.5;
   background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); color: var(--fg); }
 .mynote b { font-weight: 600; margin-right: 2px; }
@@ -971,6 +1001,21 @@ main > h1:first-child { display: none; }
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_window_leaves_out_the_minutes_header_the_page_keeps_it() {
+        let md = "# Sync\n\n2026-11-03 · 17 min · Dana, Lee\n\nSince last time: more\n\n## Summary\nWe met.\n";
+        let load = |_: &str| None;
+        let (page, _) = render_page(md, "Sync", Some("sonnet"), &load, &[], false);
+        assert!(page.contains("17 min") && page.contains("Since last time") && page.contains("We met."));
+        let (window, _) = render_page(md, "Sync", Some("sonnet"), &load, &[], true);
+        assert!(!window.contains("17 min") && !window.contains("Since last time"), "the call's header shows them");
+        assert!(window.contains("Written by AI (Echo, sonnet)") && window.contains("We met."));
+        // Anything but the header's paragraphs before the first section stays: a list of the user's, a figure.
+        let md2 = "# Sync\n\n**When:** 2026-11-03\n\n- a point of mine\n\n## Summary\nWe met.\n";
+        let (w2, _) = render_page(md2, "Sync", None, &load, &[], true);
+        assert!(!w2.contains("2026-11-03") && w2.contains("a point of mine"), "{w2}");
+    }
 
     #[test]
     fn a_profile_renders_line_by_line_and_safely() {

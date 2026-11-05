@@ -234,7 +234,7 @@ pub fn recap_from_notes(md: &str) -> Vec<String> {
                 out.extend(Some(clean(l)).filter(|t| !filler(t)));
             } else if out.is_empty() && !l.starts_with('#') {
                 // a summary paragraph: its first sentence
-                out.extend(Some(clean(l.split(". ").next().unwrap_or(l))).filter(|t| !filler(t)));
+                out.extend(Some(clean(l.split(". ").next().unwrap_or(l)).trim_end_matches('.').to_string()).filter(|t| !filler(t)));
             }
         }
         out
@@ -333,6 +333,11 @@ const BUILTIN_TEMPLATES: &[(&str, &str)] = &[
 pub struct Template {
     pub name: String,
     pub path: String,
+    /// The whole template below its frontmatter: what the minutes skill follows, as a reference (header, sections,
+    /// their tables and instructions as written).
+    pub text: String,
+    /// What comes before its first section (`## `): the minutes' start — title line, participants, frontmatter.
+    pub header: String,
     pub sections: Vec<Value>,
     #[serde(skip)]
     keywords: Vec<String>,
@@ -355,14 +360,17 @@ fn parse_template(text: &str, stem: &str, path: String) -> Option<Template> {
                 .collect();
         }
     }
+    // The header: everything before the first `## ` line.
+    let first = if body.starts_with("## ") { Some(0) } else { body.find("\n## ").map(|i| i + 1) };
+    let (header, rest) = body.split_at(first.unwrap_or(body.len()));
     let mut sections = vec![];
-    for chunk in body.split("\n## ").map(|c| c.trim_start_matches("## ")) {
+    for chunk in rest.split("\n## ").map(|c| c.trim_start_matches("## ")) {
         let (heading, instruction) = chunk.split_once('\n').unwrap_or((chunk, ""));
         if !heading.trim().is_empty() {
             sections.push(json!({ "heading": heading.trim(), "instruction": instruction.trim() }));
         }
     }
-    Some(Template { name, path, sections, keywords })
+    Some(Template { name, path, text: body.trim().to_string(), header: header.trim().to_string(), sections, keywords })
 }
 
 /// A memo's template: the user's own `memo.md` if they wrote one, else the built-in.
@@ -373,31 +381,213 @@ fn memo_template() -> Option<Template> {
     })
 }
 
-/// The template for a meeting title: the first whose keyword appears in it (user templates
-/// first), else `default`.
-pub fn pick_template(title: Option<&str>) -> Option<Template> {
-    let mut all = vec![];
-    let mut seen = std::collections::HashSet::new();
-    // User templates (<home>/.echo/templates/*.md) override built-ins of the same name.
-    let mut files: Vec<PathBuf> = fs::read_dir(paths::state_dir().join("templates"))
+/// The template for a meeting title among these, and why: the first with a word of the title (the user's first), with
+/// that word, else Default (no word).
+fn pick_in<'a>(all: &'a [Template], title: Option<&str>) -> Option<(&'a Template, Option<String>)> {
+    let t = title.unwrap_or("").to_lowercase();
+    let all = || all.iter().filter(|t| t.name != "memo");
+    all()
+        .find_map(|tpl| tpl.keywords.iter().find(|k| t.contains(k.as_str())).map(|k| (tpl, Some(k.clone()))))
+        .or_else(|| all().find(|tpl| tpl.name == "default").map(|t| (t, None)))
+}
+
+fn templates_dir() -> PathBuf {
+    paths::state_dir().join("templates")
+}
+
+/// Every template: the user's (`<home>/.echo/templates/*.md`) first, overriding a built-in of the same name.
+/// Bumped by each save and removal of a template.
+static TEMPLATES_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn all_templates() -> Vec<Template> {
+    type Key = (u64, Vec<(PathBuf, Option<std::time::SystemTime>, u64)>);
+    static CACHE: std::sync::Mutex<Option<(Key, Vec<Template>)>> = std::sync::Mutex::new(None);
+    let mut files: Vec<PathBuf> = fs::read_dir(templates_dir())
         .map(|rd| rd.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().is_some_and(|x| x == "md")).collect())
         .unwrap_or_default();
     files.sort();
+    // Read again only when a file came, went or changed (a call's page asks on every refresh).
+    // Echo's own saves count too, whatever the clock's grain.
+    let key: Key = (TEMPLATES_GEN.load(std::sync::atomic::Ordering::SeqCst), files.iter().map(|f| (f.clone(), fs::metadata(f).ok().and_then(|m| m.modified().ok()), fs::metadata(f).map(|m| m.len()).unwrap_or(0))).collect());
+    let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((k, all)) = cache.as_ref() {
+        if *k == key {
+            return all.clone();
+        }
+    }
+    let builtin_ids: Vec<&str> = BUILTIN_TEMPLATES.iter().map(|(s, _)| *s).collect();
+    // A template is its file: the user's `<id>.md` is template `<id>` — or, when its frontmatter names a built-in
+    // (`name: default`, how one was changed before Settings → Templates), that built-in. Saving, Reset and Delete go
+    // to the file it came from (`path`).
     let user = files.iter().filter_map(|f| {
         let text = fs::read_to_string(f).ok()?;
-        parse_template(&text, &f.file_stem()?.to_string_lossy(), f.display().to_string())
+        let stem = f.file_stem()?.to_string_lossy().to_string();
+        let t = parse_template(&text, &stem, f.display().to_string())?;
+        let id = if builtin_ids.contains(&t.name.as_str()) { t.name.clone() } else { stem };
+        Some(Template { name: id, ..t })
     });
     let builtin = BUILTIN_TEMPLATES.iter().filter_map(|(stem, text)| parse_template(text, stem, format!("builtin:{stem}")));
+    let mut all = vec![];
+    let mut seen = std::collections::HashSet::new();
     for t in user.chain(builtin) {
         if seen.insert(t.name.clone()) {
             all.push(t);
         }
     }
-    let t = title.unwrap_or("").to_lowercase();
-    all.iter()
-        .find(|tpl| tpl.keywords.iter().any(|k| t.contains(k.as_str())))
-        .or_else(|| all.iter().find(|tpl| tpl.name == "default"))
-        .cloned()
+    *cache = Some((key, all.clone()));
+    all
+}
+
+/// The values a template may name in braces (`{date}`), each with where it comes from in the minutes' `context`: the
+/// window lists them under a template's header, the skill fills them in. Any other `{…}` is an instruction in the
+/// template's own words ("{one line on why we met}").
+pub const TEMPLATE_VALUES: &[(&str, &str)] = &[
+    ("title", "the meeting's title (its invite's subject, else the call's title)"),
+    ("date", "the day of the call, as 2026-11-04 (`started_at`)"),
+    ("time", "when it started, as 14:00 (`started_at`, local time)"),
+    ("duration", "how long it was, as 43 min (`duration_min`)"),
+    ("participants", "who took part: colleagues, then external, each linked from `links.people`"),
+    ("colleagues", "the colleagues on the call, linked"),
+    ("external", "the people from outside, linked"),
+    ("organizer", "who sent the invite (`meeting.organizer`)"),
+    ("thread", "the call's threads, linked from `links.threads`"),
+    ("client", "the call's clients, linked from `links.clients`"),
+    ("previous", "the previous meeting of this series, linked from `links.previous`"),
+    ("me", "the user's name (`me.name`)"),
+    ("language", "the language the minutes are written in (`dominant_language`)"),
+];
+
+fn template_values() -> Value {
+    json!(TEMPLATE_VALUES.iter().map(|(n, m)| json!({"name": n, "means": m})).collect::<Vec<_>>())
+}
+
+/// Settings → Templates → Minutes: each template — `kind` built-in, edited (the user's over a built-in) or yours —
+/// with the words of a title it is used for and its sections. Built-ins first, in their order; then the user's by name.
+pub fn templates_view() -> Value {
+    let builtin: Vec<&str> = BUILTIN_TEMPLATES.iter().map(|(s, _)| *s).collect();
+    let mut out: Vec<Value> = all_templates()
+        .into_iter()
+        .map(|t| {
+            let kind = if t.path.starts_with("builtin:") { "builtin" } else if builtin.contains(&t.name.as_str()) { "edited" } else { "yours" };
+            json!({"id": t.name, "kind": kind, "match": t.keywords, "header": t.header, "sections": t.sections, "memo": t.name == "memo"})
+        })
+        .collect();
+    out.sort_by_key(|t| (builtin.iter().position(|b| t["id"] == *b).unwrap_or(usize::MAX), t["id"].as_str().unwrap_or("").to_string()));
+    json!({"templates": out, "values": template_values()})
+}
+
+/// The user's file a template comes from (none: it is Echo's own).
+fn file_of(id: &str) -> Option<PathBuf> {
+    all_templates().into_iter().find(|t| t.name == id && !t.path.starts_with("builtin:")).map(|t| PathBuf::from(t.path))
+}
+
+/// A new template's id from its name: the call folders' slug (`Client kickoff` → `client-kickoff`), never a name
+/// Windows keeps for its devices.
+fn template_id(name: &str) -> String {
+    let id = crate::recorder::slugify(name).trim_end_matches('-').to_string();
+    let reserved = ["con", "prn", "aux", "nul"].contains(&id.as_str())
+        || (id.len() == 4 && (id.starts_with("com") || id.starts_with("lpt")) && id.ends_with(|c: char| c.is_ascii_digit()));
+    if reserved {
+        format!("{id}-template")
+    } else {
+        id
+    }
+}
+
+/// Save a template the user made or changed: `<home>/.echo/templates/<id>.md`. A built-in keeps its id (so it is
+/// edited, and Reset brings Echo's back); a new one takes its id from `name` and may not take an existing one.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn template_save(id: Option<&str>, name: &str, words: &[String], header: &str, sections: &[Value]) -> Result<String> {
+    let known: Vec<String> = all_templates().into_iter().map(|t| t.name).collect();
+    let id = match id.filter(|i| !i.is_empty()) {
+        Some(i) => {
+            anyhow::ensure!(known.iter().any(|k| k == i), "there is no template {i}");
+            i.to_string()
+        }
+        None => {
+            let i = template_id(name);
+            anyhow::ensure!(!i.is_empty(), "give the template a name");
+            // Not one there is, by name or by file (a file of the user's is never written over).
+            anyhow::ensure!(!known.contains(&i) && !templates_dir().join(format!("{i}.md")).exists(), "a template named {i} exists already");
+            i
+        }
+    };
+    let one_line = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let words: Vec<String> = words.iter().map(|w| one_line(w).to_lowercase().replace([',', '[', ']', '"'], "")).filter(|w| !w.is_empty()).collect();
+    let mut body = format!("---\nname: {id}\nmatch: [{}]\n---\n", words.join(", "));
+    // Its header as written, but a line starting a section stays one level down (it is the header's).
+    let header: Vec<String> = header.trim().lines().map(|l| if l.starts_with("## ") { format!("#{l}") } else { l.to_string() }).collect();
+    if !header.is_empty() {
+        body.push_str(&format!("{}\n\n", header.join("\n")));
+    }
+    let mut n = 0;
+    for s in sections {
+        let heading = one_line(s["heading"].as_str().unwrap_or("")).trim_start_matches('#').trim().to_string();
+        if heading.is_empty() {
+            continue;
+        }
+        // A line of its own words starting "## " would start another section: it stays one level down.
+        let words: Vec<String> = s["instruction"].as_str().unwrap_or("").trim().lines().map(|l| if l.starts_with("## ") { format!("#{l}") } else { l.to_string() }).collect();
+        body.push_str(&format!("## {heading}\n{}\n\n", words.join("\n")));
+        n += 1;
+    }
+    anyhow::ensure!(n > 0, "a template needs at least one section");
+    // Its own file; a built-in changed for the first time: `<id>.md` (its id is Echo's, no path in it).
+    let file = file_of(&id).unwrap_or_else(|| templates_dir().join(format!("{id}.md")));
+    fs::create_dir_all(templates_dir())?;
+    paths::write_atomic(&file, body.trim_end().as_bytes())?;
+    TEMPLATES_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    Ok(id)
+}
+
+/// Take the user's file of a template away: an edited built-in is Echo's own again, one of theirs is gone (kept in
+/// `.echo/trash/templates/`).
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn template_remove(id: &str) -> Result<()> {
+    let f = file_of(id).ok_or_else(|| anyhow::anyhow!("{id} is Echo's own: nothing to take away"))?;
+    let stem = f.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+    let bin = trash_dir().join("templates");
+    fs::create_dir_all(&bin)?;
+    fs::rename(&f, bin.join(format!("{stem}-{}.md", chrono::Utc::now().format("%Y%m%d%H%M%S"))))?;
+    TEMPLATES_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    Ok(())
+}
+
+/// Write a call's minutes again with another template: kept in its `meta.json` for the next runs too.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn choose_template(dir: &Path, id: &str) -> Result<()> {
+    anyhow::ensure!(all_templates().iter().any(|t| t.name == id && t.name != "memo"), "there is no template {id}");
+    update_meta(dir, |m| {
+        m["template"] = json!(id);
+        Ok(())
+    })
+}
+
+/// The template a call's minutes follow and why: the user's choice for it (`meta.json` `template`, Write again
+/// with…), a word of its title, or Default. A memo's is the memo template.
+pub fn template_of(dir: &Path) -> Value {
+    template_in(dir, &all_templates()).1
+}
+
+/// The template a call's minutes follow (`template_of`), whole.
+fn template_for(dir: &Path) -> Option<Template> {
+    template_in(dir, &all_templates()).0
+}
+
+/// `template_of` among these templates (read once), with the template itself.
+fn template_in(dir: &Path, all: &[Template]) -> (Option<Template>, Value) {
+    if crate::memo::is_memo(dir) {
+        return (None, json!({"id": "memo", "why": "memo"}));
+    }
+    let chosen = read_json(&dir.join("meta.json"))["template"].as_str().and_then(|c| all.iter().find(|t| t.name == c && t.name != "memo"));
+    if let Some(t) = chosen {
+        return (Some(t.clone()), json!({"id": t.name, "why": "chosen"}));
+    }
+    match pick_in(all, subject_of(dir).as_deref()) {
+        Some((t, Some(w))) => (Some(t.clone()), json!({"id": t.name, "why": "word", "word": w})),
+        Some((t, None)) => (Some(t.clone()), json!({"id": t.name, "why": "default"})),
+        None => (None, Value::Null),
+    }
 }
 
 /// Why a transcribed call is too thin for minutes (None: it isn't). Shared screens make a call
@@ -543,7 +733,9 @@ pub fn context(call: &str) -> Result<()> {
         "summarize": summarize.is_none(),
         "skip_reason": summarize,
         "previous_notes": previous.as_ref().map(|p| p.join("notes.md").display().to_string()),
-        "template": if memo { memo_template() } else { pick_template(subject_of(&dir).as_deref()) },
+        "template": if memo { memo_template() } else { template_for(&dir) },
+        // What `{date}`, `{participants}`… in it stand for.
+        "template_values": template_values(),
         // A memo: the user alone; its threads are found from what was said (step 4b of process-call).
         "memo": memo,
         "open_threads": if memo { crate::memo::open_threads(&dir) } else { Value::Null },
@@ -1445,6 +1637,106 @@ mod tests {
         assert_eq!(recap_from_notes(md), vec!["Keep X out", "Meet weekly"]);
         let md = "# T\n\n## Summary\nWe agreed on the plan. Then more.\n";
         assert_eq!(recap_from_notes(md), vec!["We agreed on the plan"]);
+    }
+
+    #[test]
+    fn templates_are_edited_made_reset_and_chosen_for_a_call() {
+        let (_env, root) = crate::paths::testenv::folders("calls-templates");
+        let kind = |id: &str| templates_view()["templates"].as_array().unwrap().iter().find(|t| t["id"] == id).map(|t| t["kind"].as_str().unwrap().to_string());
+        assert_eq!(kind("discussion").as_deref(), Some("builtin"));
+        // A built-in changed: edited, and the minutes follow the change.
+        let secs = vec![json!({"heading": "Decisions", "instruction": "Who owns each.\n## Not a heading"}), json!({"heading": "  ", "instruction": "dropped"})];
+        template_save(Some("discussion"), "", &["review".into(), "Retro, x".into()], "# {title}\n## not a section", &secs).unwrap();
+        assert_eq!(kind("discussion").as_deref(), Some("edited"));
+        let t = pick_in(&all_templates(), Some("Sprint retro x")).unwrap().0.clone();
+        assert_eq!(t.name, "discussion");
+        assert_eq!(t.sections.len(), 1, "an empty heading is no section; a '## ' line stays inside its section");
+        assert!(t.sections[0]["instruction"].as_str().unwrap().contains("### Not a heading"));
+        assert_eq!(t.header, "# {title}\n### not a section", "the header kept, before the sections");
+        assert!(t.text.starts_with("# {title}") && t.text.contains("## Decisions"), "the whole template for the skill");
+        // A new one of the user's: its id from its name, not a taken one, at least one section.
+        assert_eq!(template_save(None, "Client Kickoff!", &["kickoff".into()], "", &secs).unwrap(), "client-kickoff");
+        assert!(!template_id(&"word ".repeat(30)).ends_with('-'), "a long name cut at a word's end");
+        assert_eq!(kind("client-kickoff").as_deref(), Some("yours"));
+        assert!(template_save(None, "client kickoff", &[], "", &secs).is_err(), "taken");
+        assert!(template_save(None, "Empty", &[], "", &[]).is_err(), "no section");
+        assert_eq!(pick_in(&all_templates(), Some("Acme kickoff")).unwrap().0.name, "client-kickoff");
+        // A call: its title's template, then the one chosen for it (Write again with…), and why.
+        let d = root.join("home/calls/2026-11-04_100000-weekly-sync");
+        fs::create_dir_all(&d).unwrap();
+        fs::write(d.join("meta.json"), r#"{"title":"Weekly sync","started_at":"2026-11-04T10:00:00+02:00"}"#).unwrap();
+        assert_eq!(template_of(&d), json!({"id": "status-sync", "why": "word", "word": "sync"}));
+        choose_template(&d, "client-kickoff").unwrap();
+        assert_eq!(template_of(&d), json!({"id": "client-kickoff", "why": "chosen"}));
+        assert!(choose_template(&d, "memo").is_err() && choose_template(&d, "nope").is_err());
+        // Reset and delete: the user's files go to the trash; a choice of a gone template falls back.
+        template_remove("discussion").unwrap();
+        assert_eq!(kind("discussion").as_deref(), Some("builtin"));
+        assert!(template_remove("discussion").is_err(), "Echo's own: nothing to take away");
+        template_remove("client-kickoff").unwrap();
+        assert_eq!(kind("client-kickoff"), None);
+        assert_eq!(fs::read_dir(trash_dir().join("templates")).unwrap().count(), 2);
+        assert_eq!(template_of(&d)["id"], "status-sync");
+        // A file named after itself is its own template; one whose frontmatter names a built-in changes that built-in, as
+        // before Settings → Templates — saved and taken away through that same file.
+        fs::write(templates_dir().join("ours.md"), "---\nname: ours\nmatch: [x]\n---\n## A\nb\n").unwrap();
+        assert_eq!(kind("ours").as_deref(), Some("yours"));
+        fs::write(templates_dir().join("our-minutes.md"), "---\nname: discussion\nmatch: [x]\n---\n## A\nb\n").unwrap();
+        assert_eq!(kind("discussion").as_deref(), Some("edited"));
+        assert_eq!(kind("our-minutes"), None);
+        template_save(Some("discussion"), "", &["y".into()], "", &secs).unwrap();
+        assert!(fs::read_to_string(templates_dir().join("our-minutes.md")).unwrap().contains("match: [y]"), "its own file");
+        assert!(!templates_dir().join("discussion.md").exists());
+        template_remove("discussion").unwrap();
+        assert_eq!(kind("discussion").as_deref(), Some("builtin"));
+        template_remove("ours").unwrap();
+        // A new one never writes over a file that is there, whatever its frontmatter says.
+        fs::write(templates_dir().join("kickoff.md"), "---\nname: something-else\nmatch: []\n---\n## A\nb\n").unwrap();
+        assert!(template_save(None, "Kickoff", &[], "", &secs).is_err());
+        // Nothing outside the folder.
+        assert!(template_save(Some("../../x"), "", &[], "", &secs).is_err());
+        assert!(template_remove("../x").is_err() && template_remove("C:notes").is_err() && template_remove("default").is_err());
+        assert_eq!(template_id("CON"), "con-template", "no device name on Windows");
+    }
+
+    #[test]
+    fn a_template_with_its_own_frontmatter_and_tables_round_trips() {
+        let (_env, _) = crate::paths::testenv::folders("calls-template-rich");
+        // A minutes format of its own: YAML frontmatter, a title format, a decision table.
+        let header = "---\ndate: {date}\nattendees:\n  - {each participant}\n---\n\n# Meeting Minutes: {title}";
+        let table = "| # | Decision | Options Considered | Agreed Option | Rationale | ADR Reference |\n|---|---|---|---|---|---|\nOne row per decision [mm:ss]; ADR-TBD when none.";
+        let secs = vec![json!({"heading": "Decisions", "instruction": table}), json!({"heading": "Action Items", "instruction": "- owner — task"})];
+        let id = template_save(None, "Minutes format", &["steering".into()], header, &secs).unwrap();
+        let t = all_templates().into_iter().find(|t| t.name == id).unwrap();
+        assert_eq!(t.header, header);
+        assert_eq!(t.sections, secs);
+        assert!(t.text.starts_with("---\ndate: {date}") && t.text.contains(table), "the skill reads it whole: {}", t.text);
+        // Saved again unchanged (an edit elsewhere in the window): the same file.
+        let f = templates_dir().join(format!("{id}.md"));
+        let before = fs::read_to_string(&f).unwrap();
+        template_save(Some(&id), "", &t.keywords, &t.header, &t.sections).unwrap();
+        assert_eq!(fs::read_to_string(&f).unwrap(), before);
+    }
+
+    #[test]
+    fn the_summary_has_its_shape_and_its_recap_is_the_purpose() {
+        // Each built-in template but the memo's asks for the shape: purpose, Highlights, Key dates.
+        for (name, body) in BUILTIN_TEMPLATES.iter().filter(|(n, _)| *n != "memo") {
+            let t = parse_template(body, name, "t".into()).unwrap();
+            let s = &t.sections[0];
+            assert_eq!(s["heading"], "Summary", "{name}");
+            let i = s["instruction"].as_str().unwrap();
+            assert!(i.starts_with("One sentence") && i.contains("**Highlights**") && i.contains("**Key dates**"), "{name}: {i}");
+        }
+        // Every one-word `{value}` in a built-in is one the skill is told about; longer ones are instructions.
+        for (name, body) in BUILTIN_TEMPLATES {
+            for v in body.split('{').skip(1).filter_map(|r| r.split_once('}').map(|(v, _)| v)).filter(|v| !v.contains(' ')) {
+                assert!(TEMPLATE_VALUES.iter().any(|(n, _)| *n == v), "{name}: {{{v}}} is not a known value");
+            }
+        }
+        // Minutes in that shape: a call's recap with no decisions is its purpose, then its highlights and dates.
+        let md = "# T\n\n## Summary\nTo agree the pilot scope with Acme.\n\n**Highlights**\n- **Scope:** two sites first, Dana Kowal [03:10]\n\n**Key dates**\n- **24 Nov** — pilot starts [12:05]\n";
+        assert_eq!(recap_from_notes(md), vec!["To agree the pilot scope with Acme", "Scope: two sites first, Dana Kowal", "24 Nov — pilot starts"]);
     }
 
     #[test]

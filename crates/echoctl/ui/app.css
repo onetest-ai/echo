@@ -712,6 +712,8 @@ body.resizing-x iframe, body.resizing-y iframe { pointer-events: none; }
 .settings { display: grid; grid-template-columns: 210px minmax(0, 1fr); height: 100%; min-height: 0; background: var(--surface); }
 .set-side { background: var(--sidebar); border-right: 1px solid var(--line); padding: 14px 10px; display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
 .set-side h1 { margin: 0 0 10px 10px; font-size: 15px; font-weight: 650; }
+/* Its items keep their size when the window is short (a panel open below): the side scrolls instead of squeezing them. */
+.set-side > * { flex-shrink: 0; }
 .set-side .search { margin-bottom: 8px; height: 28px; font-size: 12px; }
 .set-nav { display: flex; align-items: center; width: 100%; text-align: left; height: 30px; padding: 0 10px; border: 0; border-radius: 6px; background: none; color: var(--text-2); font: inherit; cursor: default; }
 .set-nav:hover { background: var(--line); color: var(--text); }
@@ -1941,3 +1943,84 @@ select.set-in { width: auto; margin-right: 6px; }
 .td-dialog select { width: 100%; height: 30px; padding: 0 8px; border-radius: var(--r-control); border: 1px solid var(--line-strong); background: var(--surface); color: var(--text); font: inherit; font-size: 13px; }
 .nd-mail { max-height: 280px; overflow-y: auto; white-space: pre-wrap; font-size: 12.5px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r-control); background: var(--bg); }
 @media (max-width: 900px) { .nd-row { grid-template-columns: 10px minmax(0, 1fr); } .nd-a { grid-column: 2; justify-content: flex-start; } }
+
+/* Settings → Templates: kinds as tabs; the list and the chosen template's editor side by side. */
+.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.set-main.tp-main { max-width: 1180px; overflow-y: auto; padding-bottom: 16px; }
+/* One scroll, the card's: the page stays put; the editor's head and foot stay, its body scrolls; the list's head stays,
+   its rows scroll. */
+.tp-main .tp-grid { flex: 1 1 auto; min-height: 320px; align-items: stretch; } /* shorter (a tall panel below): the page scrolls */
+.tp-main .tp-list { min-height: 0; display: flex; flex-direction: column; }
+.tp-main .tp-list > .set-card { min-height: 220px; overflow-y: auto; } /* four rows at least, never squeezed */
+.tp-main .tp-ed { align-self: stretch; }
+.tp-main > .set-foot { display: none; }
+.tp-head h2 { margin: 0; }
+.tp-head p { margin: 4px 0 0; }
+.tp-kinds { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin: 6px 0 12px; }
+.tp-kind { height: 30px; padding: 0 12px; border: 0; background: transparent; color: var(--text-2); font: inherit; border-bottom: 2px solid transparent; display: inline-flex; align-items: center; gap: 6px; }
+.tp-kind.on { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+.tp-grid { display: grid; grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.tp-main .tp-ed { max-height: none; height: 100%; min-height: 320px; }
+.tp-lh { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 6px; }
+.tp-lh > .set-sub { flex: 1 0 100%; }
+.tp-lha .btn svg { width: 13px; height: 13px; }
+.tp-row { display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left; padding: 10px 14px; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: inherit; font: inherit; }
+.tp-row:last-child { border-bottom: 0; }
+.tp-row.on { background: var(--accent-soft, rgba(124, 92, 255, 0.10)); }
+.tp-n { display: flex; align-items: center; gap: 8px; }
+.tp-tag { font-size: 11px; padding: 1px 7px; border-radius: 9px; background: var(--bg); color: var(--text-2); white-space: nowrap; }
+.tp-tag.ed { background: rgba(240, 162, 74, 0.16); color: var(--warn); }
+.tp-tag.mine { background: var(--accent-soft, rgba(124, 92, 255, 0.16)); color: var(--accent); }
+.tp-ed { border: 1px solid var(--line); border-radius: var(--r-panel); background: var(--surface); display: flex; flex-direction: column; min-height: 0; max-height: 100%; }
+.tp-empty { padding: 24px 16px; text-align: center; }
+.tp-eh { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.tp-eh .grow, .tp-ef .grow { flex: 1; min-width: 0; }
+.tp-eb { padding: 12px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; min-height: 0; }
+.tp-ef { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line); }
+.tp-f { display: flex; flex-direction: column; gap: 5px; }
+.tp-l { font-size: 11px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+.tp-lrow { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.tp-words { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.tp-chip { display: inline-flex; align-items: center; gap: 2px; height: 22px; padding: 0 2px 0 9px; border-radius: 11px; background: var(--bg); font-size: 12px; }
+.tp-chip button { width: 18px; height: 18px; border: 0; background: transparent; color: var(--text-3); padding: 0; font: inherit; cursor: default; }
+.tp-words input { width: 90px; height: 22px; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 12px; outline: none; }
+.tp-s { border: 1px solid var(--line); border-radius: var(--r-control); padding: 6px 8px 8px; display: flex; flex-direction: column; gap: 4px; background: var(--bg); }
+.tp-s:focus-within { border-color: var(--accent); }
+.tp-sh { display: flex; align-items: center; gap: 2px; }
+.tp-sh input { flex: 1 1 auto; min-width: 0; height: 26px; border: 0; background: transparent; color: var(--text); font: inherit; font-weight: 600; outline: none; }
+.tp-sh .icon-btn { width: 24px; height: 24px; }
+.tp-sh .icon-btn svg { width: 14px; height: 14px; }
+.tp-sh .icon-btn:disabled { opacity: 0.35; }
+.tp-s textarea { width: 100%; box-sizing: border-box; border: 0; background: transparent; color: var(--text-2); font: inherit; font-size: 12.5px; line-height: 1.5; resize: vertical; outline: none; padding: 0; }
+.tp-eh .btn svg, .tp-lh .btn svg, .tp-eb > .btn svg { width: 13px; height: 13px; }
+@media (max-width: 900px) { .tp-grid { grid-template-columns: minmax(0, 1fr); } }
+.tp-lrow .grow { flex: 1; min-width: 0; }
+.tp-sh .tp-del:not(:disabled):hover { color: var(--danger, #d64545); }
+.tp-add { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; height: 38px; border: 1px dashed var(--line-strong); border-radius: var(--r-control); background: transparent; color: var(--text-2); font: inherit; }
+.tp-add:hover { border-color: var(--accent); color: var(--accent); }
+.tp-add svg { width: 14px; height: 14px; }
+.tp-vals { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.tp-val { height: 22px; padding: 0 7px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--text-2); font: 11.5px/1 var(--mono, ui-monospace, Menlo, monospace); }
+.tp-val:hover { border-color: var(--accent); color: var(--accent); }
+.tp-hl { align-items: center; justify-content: flex-start; }
+.tp-info { width: 22px; height: 22px; color: var(--text-3); }
+.tp-info svg { width: 15px; height: 15px; }
+.tp-info.on, .tp-info:hover { color: var(--accent); }
+.tp-pop { border: 1px solid var(--line); border-radius: var(--r-control); background: var(--bg); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.tp-pop ul { margin: 0; padding-left: 16px; display: flex; flex-direction: column; gap: 2px; }
+.tp-lha { display: flex; gap: 6px; flex: 1 0 100%; justify-content: space-between; }
+/* Fields that look like fields: the surface, a visible border, ink text (grey read as "not editable"). */
+.tp-s { background: var(--surface); }
+.tp-s textarea, .tp-hd textarea { background: var(--surface); border: 1px solid var(--line-strong); border-radius: 6px; padding: 6px 8px; color: var(--text); }
+.tp-s textarea:focus, .tp-hd textarea:focus { border-color: var(--accent); }
+.tp-hd { padding: 0; border: 0; }
+.tp-sh input { border-bottom: 1px solid transparent; border-radius: 0; }
+.tp-sh input:hover { border-bottom-color: var(--line-strong); }
+.tp-sh input:focus { border-bottom-color: var(--accent); }
+.tp-s:focus-within { border-color: var(--line); }
+.tp-list .set-card { overflow: hidden; }
+.menu .menu-label { padding: 4px 10px 2px; font-size: 11px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+.menu .menu-item:disabled { opacity: 0.45; }
+/* Template fields grow with what is in them: every line, its line breaks included, in view (no scroll inside). */
+.tp-s textarea, .tp-hd textarea { field-sizing: content; min-height: 3.2em; resize: none; overflow: hidden; font-size: 12.5px; line-height: 1.5; }
+.tp-main .tp-eb { flex: 1 1 auto; }

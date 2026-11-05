@@ -84,6 +84,60 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
 - macOS: transparent title bar with content under it (`with_fullsize_content_view`); the strip posts
   `window_drag` / `window_zoom` (`window::window_cmd`). Windows keeps its native title bar.
 
+### Settings → Templates (`templatesSettings`, `/api/templates`, `calls::templates_view`)
+- Its own section after AI & minutes (that one has enough): the shapes Claude writes in, a tab per kind. Minutes now;
+  Tasks (the forms of what Run with Claude writes: a mail, a Teams message, a doc, a plan) comes with that feature.
+- Minutes: a narrow list (Built in · Edited · Yours, the words of a title each is for) and the chosen one edited beside
+  it, wide — the words as chips (Enter or a comma adds one), its sections in order: heading and what to write, ↑ ↓,
+  a trash icon (not on the last one), + Add a section above and as a dashed tile below. Each change is saved at once
+  (`template_save` → `<home>/.echo/templates/<id>.md`, which `pick_template` already read first); a built-in keeps its id
+  and becomes Edited, Reset to built-in takes the user's file away; New template takes its id from its name; Delete.
+  Taken-away files go to `.echo/trash/templates/`. Built-in instructions are one line each (they show as written).
+- A template is a reference, not a list of fields: `process-call` reads its whole text (`context.template.text`) and
+  follows it — its **header** (all before the first `## `: `{…}` filled in, a line saying when it applies left out
+  otherwise, the rest as written, frontmatter and title formats included) and each `## ` section's words, tables and
+  formats. The minutes' first lines (title, date · duration · participants, Since last time) used to be fixed in the
+  skill; they are the built-ins' header now, so a template of one's own (a YAML frontmatter, "# Meeting Minutes: …", a
+  decision table) is made and edited in the window without losing anything. The editor shows the header as its first
+  card (monospace).
+- `{values}` are one list in the code (`calls::TEMPLATE_VALUES`: title, date, time, duration, participants, colleagues,
+  external, organizer, thread, client, previous, me, language — each with where it comes from), given to the window
+  (`/api/templates` `values`) and to the skill (`context.template_values`); a test keeps the built-ins to it. One with
+  nothing to fill goes with its separator. Any other `{…}` is an instruction in the template's words (Peter's way).
+  The window shows them behind an ⓘ by the header (a click puts one at the cursor) — templates are mostly made with
+  Claude: Ask Claude by the list opens its panel, which Settings now has too (it was off there); `echoctl templates`
+  gives Claude the templates, values and folder, and the manage skill shows the file's shape.
+- A call's minutes name their template in the AI notice, in the window only ("Written by AI (Echo, … · sonnet · Default
+  template)" — a page sent to others doesn't carry it); a bar of its own above them took too much room. Write again
+  with… is in the call's ⋯ menu: the other templates (not while minutes are being written) and Edit templates…
+  (IPC `write_notes` + `template`, kept in the call's `meta.json` `template`, so later runs follow it too; a template
+  since deleted falls back to the title's). `calls::template_of`.
+- The built-ins' header is labelled lines, a paragraph each — **When:** {date} · {duration}, **Who:** {participants},
+  **Thread:** {thread}, **Since last time** ({previous}): … — plain text, no block of its own (a smaller boxed block was
+  rejected). The editor's fields grow with what is in them (`field-sizing: content`): every line break in view.
+- One scroll on Templates, the card's: the page and its heading stay put (a page scrolling away with its header reads
+  oddly on a desktop); the editor's head and foot stay, its body scrolls; the list's head (Ask Claude, New template)
+  stays and its rows scroll; a template chosen or made is scrolled into view. Tried with 44: the page stays put, a
+  render is ~1 ms. No filter over the list (tried, not wanted: Ask Claude finds or makes one).
+- Short of room (a tall panel below): the list keeps four rows (220 px) and the editor 320 px, and only then the page
+  scrolls — cards are never squeezed. Settings' side keeps its items' size and scrolls (they used to squeeze, which read
+  as the font changing when Claude's panel opened).
+- The window's Minutes leave out the minutes' header (between their title and first section: date, duration, people,
+  Since last time) — the call's own header shows those; the page opened in a browser, the HTML file and `notes.md`
+  keep it (`minutes::render_page`, `embed`).
+- A template is its file: a user's `<id>.md` is template `<id>`; one whose frontmatter names a built-in (`name:
+  default`, how one was changed before Settings → Templates) changes that built-in, as it always did. Saving, Reset and
+  Delete go to the file the template came from (paths from the folder, never from an id the page sent); a new one takes
+  the call folders' slug (`recorder::slugify`; not a Windows device name), never a file that is there. The list is read
+  again only when the folder changes (or Echo saved). Saves are answered by the app (`templateSaved(id, created)`): a
+  new one is selected; Reset / Delete leave the editor as it is until done; a word typed and not yet added counts.
+- A minutes run records the template it followed with the model (`notes-run.json` `minutes.template`); the notice names
+  that one, while the minutes are as the run left them. Write again with… chooses the template only once the profile
+  is set (nothing pins it when the run is refused). The window leaves out only the header's paragraphs before the first
+  section — a list, a figure or anything else there stays.
+- The summary's shape in the built-ins (from the Meeting Notebook plugin): one sentence on what it was for, Highlights
+  3–7 "**Topic:** … [mm:ss]", Risks & issues only when raised, up to three Key dates.
+
 ### Copy and paste
 - macOS: the app has its own menu bar — Echo (Hide, Hide Others, Quit) and Edit (Undo, Redo, Cut, Copy, Paste, Select
   All; `tray::app_menu`, muda's predefined items, made once AppKit has launched). WebKit takes ⌘C, ⌘V, ⌘X, ⌘A and ⌘Z
