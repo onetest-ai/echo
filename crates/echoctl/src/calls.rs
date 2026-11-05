@@ -474,11 +474,7 @@ pub fn templates_view() -> Value {
         })
         .collect();
     out.sort_by_key(|t| (builtin.iter().position(|b| t["id"] == *b).unwrap_or(usize::MAX), t["id"].as_str().unwrap_or("").to_string()));
-    json!({"templates": out, "values": template_values(), "meeting_types": meeting_types(), "skills": crate::skills::list().into_iter().map(|mut s| {
-        // Its SKILL.md for the window to read, through the minutes' safe writer.
-        s["html"] = json!(crate::minutes::markdown_html(s["body"].as_str().unwrap_or("")));
-        s
-    }).collect::<Vec<_>>()})
+    json!({"templates": out, "values": template_values(), "meeting_types": meeting_types(), "skills": crate::skills::list()})
 }
 
 /// The user's file a template comes from (none: it is Echo's own).

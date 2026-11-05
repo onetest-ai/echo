@@ -132,8 +132,13 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   SKILL.md to fill in and opens it; Delete moves one of the user's to the trash; On / off. The user's live in
   `<home>/.echo/skills/<id>/` (git or a copy from elsewhere works); Echo copies the valid ones that are on, every
   file, into a plugin `my-skills` (`<config>/my-skills/`) each time the panel's session starts (`--plugin-dir`).
-- The Send to Claude dialog: the task and its thread on top; Just the task, then each usable skill, one line each
-  (its description cut, whole in its hint), the chosen one marked; a two-line note; Send.
+- Built for 10–20 skills: the catalogue's rows are one line of name, kind, problems and an on/off switch, the
+  description below in one line; the viewer shows the SKILL.md as written (no rendering).
+- The Send to Claude dialog: the task and its thread on top; one field for the skill — Just the task, or type to find
+  one — its suggestions ranked by fit (the task's title and thread's words, stemmed, in a skill's name and description;
+  then how often the user chose it, kept in the window), the best marked "fits best" and chosen at once when it clearly
+  leads (the cross takes it back to Just the task); a two-line note; Send. Later the minutes' choice for an action
+  goes first.
 - The card's other Claude icon (Ask Claude) stays: a one-shot change to the task's own fields ("move it two weeks").
 - Only the panel's session: Echo has no way into the user's own Claude Code sessions elsewhere.
 - Not yet: action modes from the minutes (claude: the skill and prompt ready on the action; manual: how to do it).

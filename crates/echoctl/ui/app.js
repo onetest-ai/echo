@@ -1155,17 +1155,44 @@ function todayAskBar() {
  *  A thread's sync closes tasks by itself when its calls and mail say so; this is for what they don't. */
 /** Send to Claude: a task into the Claude panel's live session — typed there as if by the user, with the skill
  *  chosen (`/my-skills:<id>`) and the user's own words; the conversation goes on there. */
+/** How well each skill fits a task: the task's words (its title, its thread) in the skill's name and description —
+ *  a word of four letters or more, a short stem (follow-up ~ follow, reports ~ report) — then how often the user chose
+ *  it before. Best first. Pure: `skillFit.test.mjs`-ready. */
+function rankSkills(skills, text, used) {
+  const stem = (w) => w.replace(/(ing|ed|es|s)$/, '').slice(0, 7)
+  const words = (t) => new Set(String(t || '').toLowerCase().split(/[^a-zа-яё0-9]+/i).filter((w) => w.length >= 4).map(stem))
+  const want = words(text)
+  return skills
+    .map((x) => {
+      const hay = words(`${x.id.replace(/-/g, ' ')} ${x.description || ''}`)
+      let fit = 0
+      for (const w of want) if (hay.has(w)) fit++
+      return { x, fit, used: (used && used[x.id]) || 0 }
+    })
+    .sort((a, b) => b.fit - a.fit || b.used - a.used || a.x.id.localeCompare(b.x.id))
+}
+const skillUse = () => { try { return JSON.parse(localStorage.getItem('echo.skillUse') || '{}') } catch { return {} } }
 function sendClaudeDialog() {
   const c = S.claudeSend
   if (!c) return ''
   if (!TPL.data) loadTemplates().then(render)
-  // Skills Claude can use: on and valid.
+  // Skills Claude can use (on and valid), found by name or description: many fit in one field.
   const skills = ((TPL.data && TPL.data.skills) || []).filter((x) => x.on && !(x.problems || []).length)
   const thread = ((S.pj.data && S.pj.data.projects) || []).find((p) => p.id === c.project)
-  const row = (id, label, sub) => `<button class="sc-opt${(c.skill || '') === id ? ' on' : ''}" data-sc-skill="${esc(id)}" title="${esc(sub)}" aria-pressed="${(c.skill || '') === id}"><b>${esc(label)}</b><span>${esc(sub)}</span></button>`
+  const ranked = rankSkills(skills, `${c.title} ${thread ? thread.name : ''}`, skillUse())
+  // A clear best fit is chosen when the dialog opens (the cross takes it back to Just the task).
+  if (c.skill === undefined) c.skill = ranked[0] && ranked[0].fit > 0 && (!ranked[1] || ranked[0].fit > ranked[1].fit) ? ranked[0].x.id : ''
+  const best = ranked[0] && ranked[0].fit > 0 ? ranked[0].x.id : null
+  const chosen = skills.find((x) => x.id === c.skill)
+  const q = (c.q || '').trim().toLowerCase()
+  const found = ranked.map((r) => r.x).filter((x) => !q || tplName(x.id).toLowerCase().includes(q) || (x.description || '').toLowerCase().includes(q)).slice(0, 6)
+  const picker = chosen
+    ? `<div class="sc-chosen"><b>${esc(tplName(chosen.id))}</b><span title="${esc(chosen.description)}">${esc(chosen.description)}</span><button class="icon-btn" data-sc-skill="" aria-label="No skill — just the task" title="No skill — just the task">${ICON('<path d="M6 6l12 12M18 6L6 18"/>')}</button></div>`
+    : `<input id="sc-q" class="sc-q" placeholder="Just the task — or type to find a skill (${skills.length})" value="${esc(c.q || '')}" autocomplete="off" aria-label="Skill">
+       ${c.open ? `<div class="sc-sugg" role="listbox">${found.map((x) => `<button class="sc-opt" role="option" data-sc-skill="${esc(x.id)}" title="${esc(x.description)}"><b>${esc(tplName(x.id))}${x.id === best ? ' <em class="sc-best">fits best</em>' : ''}</b><span>${esc(x.description)}</span></button>`).join('') || '<div class="set-sub" style="padding:6px 10px">No skill has that in its name or description.</div>'}</div>` : ''}`
   return `<div class="td-modal" data-sc-off="1"><div class="td-dialog sc-dialog" role="dialog" aria-modal="true" aria-labelledby="sc-h">
     <div class="sc-head"><h3 id="sc-h">Send to Claude</h3><div class="sc-task">${thread ? `${projIcon(thread, 14)}<span class="set-sub">${esc(thread.name)}</span> · ` : ''}<span>${esc(c.title)}</span></div></div>
-    <div class="sc-list" role="group" aria-label="How">${row('', 'Just the task', 'Claude reads it and asks what you want done')}${skills.map((x) => row(x.id, tplName(x.id), x.description)).join('')}</div>
+    <div class="sc-pick">${picker}</div>
     <textarea id="sc-words" class="sc-words" rows="2" placeholder="Anything to add — optional (Keep it short; Dana is away until the 12th)">${esc(c.words || '')}</textarea>
     <div class="sc-foot"><span class="set-sub">Opens the Claude panel; you go on there. Nothing goes to anyone without your OK.</span><span class="grow"></span><button class="btn ghost" data-sc-off="1">Cancel</button><button class="btn primary" data-sc-send>Send</button></div></div></div>`
 }
@@ -2633,8 +2660,10 @@ function skillsList(sks) {
   const rows = sks.map((t) => {
     const [tag, cls] = SK_TAG[t.kind] || SK_TAG.builtin
     const bad = (t.problems || []).length
-    const meta = [skFiles(t.files), bad ? `<span class="warn">⚠ ${bad} to fix</span>` : '', t.on ? '' : 'off'].filter(Boolean).join(' · ')
-    return `<button class="tp-row${TPL.skSel === t.id ? ' on' : ''}${t.on ? '' : ' sk-off'}" data-sk-pick="${esc(t.id)}"><span class="tp-n"><b>${esc(tplName(t.id))}</b><span class="tp-tag${cls}">${tag}</span></span><span class="set-sub sk-desc">${esc(t.description)}</span>${meta ? `<span class="set-sub">${meta}</span>` : ''}</button>`
+    return `<div class="tp-row sk-row${TPL.skSel === t.id ? ' on' : ''}${t.on ? '' : ' sk-off'}" data-sk-pick="${esc(t.id)}" role="button" tabindex="0" aria-current="${TPL.skSel === t.id}">
+      <span class="tp-n"><b>${esc(tplName(t.id))}</b><span class="tp-tag${cls}">${tag}</span>${bad ? `<span class="warn" title="${esc(t.problems.join('; '))}">⚠ ${bad}</span>` : ''}<span class="grow"></span>
+      <label class="sk-switch" title="${t.on ? 'On — Claude can use it' : 'Off — kept out of Claude'}"><input type="checkbox" data-sk-toggle="${esc(t.id)}"${t.on ? ' checked' : ''} aria-label="${esc(tplName(t.id))} on"><i></i></label></span>
+      <span class="set-sub sk-desc">${esc(t.description)}</span></div>`
   }).join('')
   return `<div class="tp-list"><div class="tp-lh"><span class="set-sub">What Claude does with a task you send it — each a skill folder, written in VS Code or by Claude</span><span class="tp-lha"><button class="btn ghost" data-tpl-claude>${ICON('<path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/>')}Ask Claude</button><button class="btn" data-sk-new>${ICON('<path d="M12 5v14M5 12h14"/>')}New skill</button></span></div><div class="set-card">${rows}</div></div>`
 }
@@ -2654,12 +2683,10 @@ function skillEditor() {
   const open = d.folder ? `<button class="btn" data-sk-open="code">Open in VS Code</button><button class="btn ghost" data-sk-open="finder">Show in Finder</button>` : ''
   const probs = (d.problems || []).length ? `<div class="sk-probs"><b>To fix before Claude can use it</b><ul>${d.problems.map((p) => `<li>${esc(p)}</li>`).join('')}</ul></div>` : ''
   return `<div class="tp-ed"><div class="tp-eh"><b>${esc(tplName(d.id))}</b><span class="tp-tag${cls}">${tag}</span><span class="grow"></span>
-      <label class="sk-on" title="Off: it stays out of Claude's sessions"><input type="checkbox" data-sk-on${d.on ? ' checked' : ''}> On</label>
       <button class="icon-btn" data-sk-cancel aria-label="Close">${ICON('<path d="M6 6l12 12M18 6L6 18"/>')}</button></div>
     <div class="tp-eb">${probs}
-      <div class="tp-f"><span class="tp-l">When Claude uses it</span><div>${esc(d.description)}</div></div>
-      <div class="tp-f"><span class="tp-l">In its folder</span><div class="set-sub">SKILL.md${skFiles(d.files) ? ' · ' + esc(skFiles(d.files)) : ''} · in Claude as /my-skills:${esc(d.id)}</div></div>
-      <div class="tp-f"><span class="tp-l">SKILL.md</span><div class="doc sk-doc">${d.html || ''}</div></div></div>
+      <div class="set-sub">SKILL.md${skFiles(d.files) ? ' · ' + esc(skFiles(d.files)) : ''} · in Claude as /my-skills:${esc(d.id)}</div>
+      <pre class="sk-raw selectable">${esc(d.text || '')}</pre></div>
     <div class="tp-ef">${open}<span class="grow"></span>${life}</div></div>`
 }
 function typeEditor() {
@@ -2699,11 +2726,19 @@ function templateEditor() {
 
 // Send to Claude: open the dialog, choose a skill, send.
 document.addEventListener('click', (e) => {
+  // A click anywhere else in the dialog folds its suggestions away.
+  if (S.claudeSend && S.claudeSend.open && !e.target.closest('.sc-pick')) { S.claudeSend.open = false; render() }
   const t = e.target.closest('[data-claude-task],[data-sc-send],[data-sc-off],[data-sc-skill]')
   if (!t) return
-  if (t.dataset.scSkill !== undefined && S.claudeSend) { S.claudeSend.words = (($('#sc-words') || {}).value || ''); S.claudeSend.skill = t.dataset.scSkill; return render() }
+  if (t.dataset.scSkill !== undefined && S.claudeSend) {
+    S.claudeSend.words = (($('#sc-words') || {}).value || '')
+    Object.assign(S.claudeSend, { skill: t.dataset.scSkill, q: '', open: false })
+    render()
+    const n = $(t.dataset.scSkill ? '#sc-words' : '#sc-q'); if (n) n.focus()
+    return
+  }
   if (t.dataset.claudeTask) {
-    S.claudeSend = { project: t.dataset.project, node: t.dataset.claudeTask, title: t.dataset.title, skill: '', words: '' }
+    S.claudeSend = { project: t.dataset.project, node: t.dataset.claudeTask, title: t.dataset.title, skill: undefined, words: '', open: true }
     if (!TPL.data) loadTemplates().then(render)
     return render()
   }
@@ -2711,20 +2746,31 @@ document.addEventListener('click', (e) => {
   if (t.dataset.scSend !== undefined) {
     const c = S.claudeSend
     const skill = c.skill || ''
+    if (skill) { const u = skillUse(); u[skill] = (u[skill] || 0) + 1; try { localStorage.setItem('echo.skillUse', JSON.stringify(u)) } catch { /* private mode */ } }
     const words = (($('#sc-words') || {}).value || '').trim()
     S.claudeSend = null
     render()
     sendToClaude(`Work on this task: "${c.title}" (echo://task/${c.project}/${c.node}).${skill ? ` Use /my-skills:${skill}.` : ''}${words ? ` ${words}` : ''}`)
   }
 })
+document.addEventListener('input', (e) => {
+  if (S.claudeSend && e.target.id === 'sc-q') { Object.assign(S.claudeSend, { q: e.target.value, open: true }); render() }
+  if (S.claudeSend && e.target.id === 'sc-words') S.claudeSend.words = e.target.value
+})
+document.addEventListener('focusin', (e) => {
+  if (S.claudeSend && e.target.id === 'sc-q' && !S.claudeSend.open) { S.claudeSend.open = true; render() }
+})
 document.addEventListener('keydown', (e) => {
   if (!S.claudeSend) return
+  if (e.target.id === 'sc-q' && e.key === 'Enter') { e.preventDefault(); const f = document.querySelector('.sc-sugg [data-sc-skill]'); if (f) f.click(); return }
+  if (e.key === 'Escape' && S.claudeSend.open) { S.claudeSend.open = false; return render() }
   if (e.key === 'Escape') { S.claudeSend = null; render() }
   else if (e.key === 'Enter' && e.target.id === 'sc-words') { e.preventDefault(); const b = document.querySelector('[data-sc-send]'); if (b) b.click() }
 })
 
 // Templates: picking, the editor's buttons, and its fields saved when they change.
 document.addEventListener('click', (e) => {
+  if (e.target.closest('.sk-switch')) return // the switch's own change does it
   const sk = e.target.closest('[data-sk-pick],[data-sk-new],[data-sk-cancel],[data-sk-create],[data-sk-remove],[data-sk-customize],[data-sk-open]')
   if (sk) {
     if (sk.dataset.skPick) { TPL.skSel = sk.dataset.skPick; TPL.skNew = null; return render() }
@@ -2810,7 +2856,13 @@ document.addEventListener('change', (e) => {
   // A meeting type's name or how to tell it: saved when it changes (a new one waits for Create).
   const m = TPL.mtDraft
   if (m && m.id && (e.target.id === 'mt-name' || e.target.id === 'mt-about')) return send({ cmd: 'meeting_type_save', id: m.id, name: m.name, about: m.about })
-  if (e.target.matches && e.target.matches('[data-sk-on]') && TPL.skSel) return send({ cmd: 'skill_on', id: TPL.skSel, on: e.target.checked })
+  if (e.target.matches && e.target.matches('[data-sk-toggle]')) {
+    const id = e.target.dataset.skToggle, on = e.target.checked
+    const x = ((TPL.data && TPL.data.skills) || []).find((y) => y.id === id)
+    if (x) x.on = on
+    send({ cmd: 'skill_on', id, on })
+    return render()
+  }
   const el = e.target, d = TPL.draft
   if (!d || !el.matches) return
   if (el.id === 'tp-hd') { d.header = el.value; tplSave() }

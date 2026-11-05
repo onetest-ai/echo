@@ -108,9 +108,8 @@ pub fn list() -> Vec<Value> {
     let mut out = vec![];
     let item = |id: &str, kind: &str, text: Option<String>, folder: Option<PathBuf>, files: Value| {
         let desc = text.as_deref().and_then(split).and_then(|(f, _)| f.into_iter().find(|(k, _)| k == "description").map(|(_, v)| v)).unwrap_or_default();
-        let body = text.as_deref().and_then(split).map(|(_, b)| b).unwrap_or_default();
         json!({"id": id, "kind": kind, "description": desc, "on": !offs.iter().any(|o| o == id), "problems": problems(id, text.as_deref()),
-               "files": files, "folder": folder, "body": body})
+               "files": files, "folder": folder, "text": text})
     };
     for (id, files) in BUILTIN {
         let mine = dir().join(id);
