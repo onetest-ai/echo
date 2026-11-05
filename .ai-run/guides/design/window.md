@@ -235,6 +235,10 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   risks with no response; questions not answered — each `echo://task`), New since then (the threads' mail and chat
   evidence after the last meeting: titles and senders, never the text), Who's coming (the invite less the user, with
   role / stance from People, calls together, new; the window shows ten).
+- A meeting in no thread has no sources of its own: New since then comes from Microsoft 365 instead — mail and Teams
+  with its people since the last meeting, else 14 days (`microsoft365`, the user's own sign-in; one line a conversation
+  or chat, subject or "Teams message from …" and its link; a chat's first words shown, never sent to the model). A
+  thread's meetings don't search: its mail and chats are its sources already. Plugins can add sources later.
 - Only this meeting's items: one said in an earlier occurrence of its series stays; one said only in meetings of
   another recurring series goes, without a model (an item made by hand takes its story's calls, else its sibling
   items' — `said_in`); the rest (one-off meetings, mail, unknown) are numbered `[cN]` and the same model call that

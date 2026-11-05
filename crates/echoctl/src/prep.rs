@@ -225,6 +225,54 @@ fn new_since(thread_ids: &[String], since: Option<&str>, me: Option<&str>) -> Ve
     out
 }
 
+/// For a meeting in no thread: mail and Teams with its people since the last meeting (else the last 14 days), through
+/// Echo's own Microsoft 365 sign-in — a source of "New since then" (a thread's come from its sources; plugins may add
+/// more later): one line a
+/// mail conversation or a chat, subject or chat and sender, with its link. Only the people of the invite (the user
+/// left out, at most 8); nothing without a sign-in. The text never reaches the model: a chat line keeps its first words
+/// for the window only (`snippet`).
+fn microsoft365(m: &MeetingContext, since: Option<&str>) -> Vec<Value> {
+    if crate::graph::account().is_none() {
+        return vec![];
+    }
+    let me = crate::config::Config::load().ok().and_then(|c| c.me).and_then(|p| p.email).map(|e| e.to_lowercase());
+    let emails: Vec<String> = m.organizer.iter().chain(&m.attendees).filter_map(|p| p.email.as_deref().map(str::to_lowercase)).filter(|e| me.as_deref() != Some(e.as_str()) && crate::deliver::valid_address(e)).take(8).collect();
+    if emails.is_empty() {
+        return vec![];
+    }
+    let days = since
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|s| (Utc::now() - s.with_timezone(&Utc)).num_days().clamp(1, 30))
+        .unwrap_or(14);
+    let mut out: Vec<Value> = vec![];
+    let mail_q = format!("({})", emails.iter().map(|e| format!("from:\"{e}\" OR to:\"{e}\"")).collect::<Vec<_>>().join(" OR "));
+    if let Ok(v) = crate::m365::search(&mail_q, &["mail".to_string()], 25, None, Some(days)) {
+        let mut seen = std::collections::HashSet::new();
+        for h in v["results"].as_array().into_iter().flatten() {
+            // One line a conversation: its newest mail (the hits come newest first within the window).
+            if !seen.insert(h["conversation"].as_str().unwrap_or(h["id"].as_str().unwrap_or("")).to_string()) {
+                continue;
+            }
+            out.push(json!({"kind": "mail", "source": "outlook", "date": h["at"].as_str().and_then(|a| a.get(..10)), "title": h["subject"],
+                            "from": h["from"]["name"], "url": h["url"]}));
+        }
+    }
+    let chat_q = format!("({})", emails.iter().map(|e| format!("from:\"{e}\"")).collect::<Vec<_>>().join(" OR "));
+    if let Ok(v) = crate::m365::search(&chat_q, &["chats".to_string()], 25, None, Some(days)) {
+        let mut seen = std::collections::HashSet::new();
+        for h in v["results"].as_array().into_iter().flatten() {
+            if !seen.insert(h["chat"].as_str().or(h["channel"].as_str()).unwrap_or("").to_string()) {
+                continue;
+            }
+            let snippet: String = h["summary"].as_str().unwrap_or("").chars().take(100).collect();
+            out.push(json!({"kind": "chat", "source": "teams", "date": h["at"].as_str().and_then(|a| a.get(..10)),
+                            "title": format!("Teams message from {}", h["from"]["name"].as_str().unwrap_or("someone")), "snippet": snippet,
+                            "from": h["from"]["name"], "url": h["url"]}));
+        }
+    }
+    out
+}
+
 /// Who's coming: the invite's people, with what the threads know of them (role, stance, calls, new).
 fn people(m: &MeetingContext, thread_ids: &[String]) -> Vec<Value> {
     let today = Local::now().date_naive();
@@ -245,7 +293,8 @@ fn people(m: &MeetingContext, thread_ids: &[String]) -> Vec<Value> {
             "stance": place.as_ref().and_then(|pl| pl["stance"].as_str()),
             "org": k.and_then(|k| k["org"].as_str()),
             "calls": k.and_then(|k| k["calls"].as_u64()).unwrap_or(0),
-            "new": k.is_none_or(|k| k["new"].as_bool().unwrap_or(false)),
+            // New to the threads; a meeting in no thread knows nobody, so it says nothing.
+            "new": !thread_ids.is_empty() && k.is_none_or(|k| k["new"].as_bool().unwrap_or(false)),
             "link": k.and_then(|k| k["key"].as_str()).map(|key| format!("echo://person/{key}")),
         }));
     }
@@ -312,7 +361,13 @@ fn gather(m: &MeetingContext, threads: &[projects::Project]) -> Value {
     let mine_owner = |o: &str| { let o = o.trim().to_lowercase(); o == "me" || (!my_name.is_empty() && o == my_name) };
     let series = series_of(m);
     let (mine, open): (Vec<Value>, Vec<Value>) = open_with(&ids, &names, &series).into_iter().partition(|o| o["kind"] == "task" && o["owner"].as_str().is_some_and(mine_owner));
-    let news = new_since(&ids, last["date"].as_str(), me.as_ref().and_then(|p| p.email.as_deref()));
+    let mut news = new_since(&ids, last["date"].as_str(), me.as_ref().and_then(|p| p.email.as_deref()));
+    // A thread's mail and chats are its sources already (read into its work); a meeting in no thread has only its people:
+    // their mail and Teams through Microsoft 365.
+    if ids.is_empty() {
+        news.extend(microsoft365(m, last["date"].as_str()));
+        news.sort_by(|a, b| b["date"].as_str().cmp(&a["date"].as_str()));
+    }
     json!({
         "event": m.id, "subject": subject, "start": m.start, "end": m.end,
         "threads": threads.iter().map(|p| json!({"id": p.id, "name": p.name})).collect::<Vec<_>>(),
