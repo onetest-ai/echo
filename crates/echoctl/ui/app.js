@@ -1052,7 +1052,9 @@ function todayView() {
   const card = (t, kind, who) => {
     const pj = all.find((x) => x.id === t.project)
     const where = [kind, who, pj ? pj.name : ''].filter(Boolean).map(esc).join(' · ')
-    return `<a class="td-task" href="${esc(t.link)}"><span class="td-task-t">${esc(t.title)}</span>${dueChip(t)}<span class="td-task-m">${pj ? projIcon(pj, 12) : ''}${where}</span></a>`
+    // Done right here (the user's own edit, as in Work); the card opens the task.
+    const tick = `<button class="td-tick" data-today-done="${esc(t.id)}" data-project="${esc(t.project)}" title="Mark it done" aria-label="Mark “${esc(t.title)}” done"></button>`
+    return `<div class="td-task">${tick}<a class="td-task-t" href="${esc(t.link)}">${esc(t.title)}</a>${dueChip(t)}<span class="td-task-m">${pj ? projIcon(pj, 12) : ''}${where}</span></div>`
   }
   const w = d.work || {}
   // One list by date: late first (the oldest first), then by due date; whose it is stays on each card.
@@ -6496,7 +6498,7 @@ document.addEventListener('click', (e) => {
   if (S.laterOpen && !(e.target.closest && e.target.closest('[data-cmd^="later-"]'))) { S.laterOpen = false; render() }
   // The sidebar open over a narrow page closes on a click beside it.
   if (S.barOver && !(e.target.closest && e.target.closest('.actbar'))) { S.barOver = false; render() }
-  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-theme-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-go],[data-conv-keep],[data-br-pclosed],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-up],[data-today-seen],[data-prep-write],[data-ev-prep],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
+  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-theme-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-go],[data-conv-keep],[data-br-pclosed],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-up],[data-today-seen],[data-today-done],[data-prep-write],[data-ev-prep],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
   if (!t) { if (menuWas) render(); return }
   // Sign-ins (`signin.rs`): shown at once (starting / stopping / checking) until the next poll
   // brings the app's state.
@@ -6595,6 +6597,13 @@ document.addEventListener('click', (e) => {
   if (t.dataset.unschedule) { send({ cmd: 'unschedule', id: t.dataset.unschedule }); const e = ((S.cal.data && S.cal.data.events) || []).find((x) => x.id === t.dataset.unschedule); if (e) e.scheduled = false; if (S.view === 'today') setTimeout(() => loadToday().then(render), 400); return render() }
   if (t.dataset.call) { S.listOpen = false; return go(`call/${t.dataset.call}/${S.tab}`) }
   if (t.dataset.up) { S.listOpen = false; return go(`upcoming/${t.dataset.up}`) }
+  if (t.dataset.todayDone) {
+    send({ cmd: 'project', op: 'ledger', id: t.dataset.project, body: { op: 'edit', node: t.dataset.todayDone, set: { state: 'done' } } })
+    // Gone from My work at once; Today is read again once the ledger has it.
+    if (S.today && S.today.work) for (const k of ['mine', 'owed', 'waiting']) if (S.today.work[k]) S.today.work[k].items = S.today.work[k].items.filter((x) => !(x.id === t.dataset.todayDone && x.project === t.dataset.project))
+    setTimeout(() => loadToday().then(render), 800)
+    return render()
+  }
   if (t.dataset.todaySeen) { send({ cmd: 'today_seen', key: t.dataset.todaySeen }); if (S.today) S.today.cards = (S.today.cards || []).filter((c) => c.key !== t.dataset.todaySeen); return render() }
   if (t.dataset.prepWrite) {
     send({ cmd: 'project', op: 'prep_write', prep: t.dataset.prepWrite })
