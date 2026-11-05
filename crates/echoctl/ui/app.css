@@ -1945,9 +1945,11 @@ select.set-in { width: auto; margin-right: 6px; }
 /* Settings → Templates: kinds as tabs; the list and the chosen template's editor side by side. */
 .vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .set-main.tp-main { max-width: 1180px; overflow: hidden; padding-bottom: 16px; }
-/* One scroll, the card's: the page stays put; the editor's head and foot stay, its body scrolls; the list scrolls apart. */
+/* One scroll, the card's: the page stays put; the editor's head and foot stay, its body scrolls; the list's head stays,
+   its rows scroll. */
 .tp-main .tp-grid { flex: 1 1 auto; min-height: 0; align-items: stretch; }
-.tp-main .tp-list { min-height: 0; overflow-y: auto; }
+.tp-main .tp-list { min-height: 0; display: flex; flex-direction: column; }
+.tp-main .tp-list > .set-card { min-height: 0; overflow-y: auto; }
 .tp-main .tp-ed { align-self: stretch; }
 .tp-main > .set-foot { display: none; }
 .tp-head h2 { margin: 0; }
@@ -2019,3 +2021,5 @@ select.set-in { width: auto; margin-right: 6px; }
 .menu .menu-item:disabled { opacity: 0.45; }
 /* Template fields grow with what is in them: every line, its line breaks included, in view (no scroll inside). */
 .tp-s textarea, .tp-hd textarea { field-sizing: content; min-height: 3.2em; resize: none; overflow: hidden; font-size: 12.5px; line-height: 1.5; }
+.tp-q { flex: 1 0 100%; height: 28px; }
+.tp-main .tp-eb { flex: 1 1 auto; }

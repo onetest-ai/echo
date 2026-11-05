@@ -2518,14 +2518,18 @@ function templatesSettings() {
   if (TPL.data.error) return `<h2>Templates</h2><p class="error">${esc(TPL.data.error)}</p>`
   const list = TPL.data.templates || []
   const TAG = { builtin: ['Built in', ''], edited: ['Edited', ' ed'], yours: ['Yours', ' mine'] }
-  const rows = list.map((t) => {
+  // Many templates: a filter by name and words over the list.
+  const q = (TPL.q || '').trim().toLowerCase()
+  const shown = q ? list.filter((t) => tplName(t.id).toLowerCase().includes(q) || (t.match || []).some((w) => w.includes(q))) : list
+  const rows = shown.map((t) => {
     const [tag, cls] = TAG[t.kind] || TAG.builtin
     const used = t.memo ? 'Memos only — a part per thread' : t.id === 'default' ? 'Any call no other template matches' : (t.match || []).join(', ') || 'Only when you choose it for a call'
     return `<button class="tp-row${TPL.sel === t.id ? ' on' : ''}" data-tpl-pick="${esc(t.id)}"${TPL.sel === t.id ? ' aria-current="true"' : ''}><span class="tp-n"><b>${esc(tplName(t.id))}</b><span class="tp-tag${cls}">${tag}</span></span><span class="set-sub">${esc(used)} · ${(t.sections || []).length} section${(t.sections || []).length === 1 ? '' : 's'}</span></button>`
   }).join('')
   const kinds = '<div class="tp-kinds" role="tablist" aria-label="Kind of template"><button class="tp-kind on" role="tab" aria-selected="true">Minutes <span class="set-sub">' + list.length + '</span></button></div>'
   const head = `<div class="tp-head"><h2>Templates</h2><p class="set-sub">The shapes Claude writes in. A call's minutes follow the template with a word of its title; the rest follow Default.</p>${kinds}</div>`
-  const listBox = `<div class="tp-list"><div class="tp-lh"><span class="set-sub">Minutes templates</span><span class="tp-lha"><button class="btn ghost" data-tpl-claude title="Claude makes or changes a template from what you tell it">${ICON('<path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/>')}Ask Claude</button><button class="btn" data-tpl-new>${ICON('<path d="M12 5v14M5 12h14"/>')}New template</button></span></div><div class="set-card">${rows}</div></div>`
+  const filter = list.length > 8 ? `<input class="search tp-q" id="tp-q" placeholder="Filter templates" value="${esc(TPL.q || '')}" aria-label="Filter templates">` : ''
+  const listBox = `<div class="tp-list"><div class="tp-lh"><span class="set-sub">Minutes templates</span><span class="tp-lha"><button class="btn ghost" data-tpl-claude title="Claude makes or changes a template from what you tell it">${ICON('<path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/>')}Ask Claude</button><button class="btn" data-tpl-new>${ICON('<path d="M12 5v14M5 12h14"/>')}New template</button></span>${filter}</div><div class="set-card">${rows || '<p class="set-sub" style="padding:10px 14px">No template has that in its name or words.</p>'}</div></div>`
   return `${head}<div class="tp-grid">${listBox}${templateEditor()}</div>`
 }
 function templateEditor() {
@@ -2566,7 +2570,7 @@ document.addEventListener('click', (e) => {
     const n = $('#tp-hd'); if (n) { n.focus(); n.setSelectionRange(TPL.caret, TPL.caret) }
     return void ta
   }
-  if (t.dataset.tplPick) { TPL.caret = null; const x = ((TPL.data && TPL.data.templates) || []).find((y) => y.id === t.dataset.tplPick); TPL.sel = x ? x.id : null; TPL.draft = x ? tplDraft(x) : null; TPL.word = ''; return render() }
+  if (t.dataset.tplPick) { TPL.scrollTo = true; TPL.caret = null; const x = ((TPL.data && TPL.data.templates) || []).find((y) => y.id === t.dataset.tplPick); TPL.sel = x ? x.id : null; TPL.draft = x ? tplDraft(x) : null; TPL.word = ''; return render() }
   if (t.dataset.tplNew !== undefined) {
     const def = ((TPL.data && TPL.data.templates) || []).find((y) => y.id === 'default')
     TPL.sel = null; TPL.draft = { id: null, kind: 'yours', name: '', header: def ? def.header : '', match: [], sections: def ? tplDraft(def).sections : [{ heading: 'Summary', instruction: '' }] }
@@ -2613,6 +2617,7 @@ document.addEventListener('change', (e) => {
 })
 document.addEventListener('input', (e) => {
   const el = e.target, d = TPL.draft
+  if (el.id === 'tp-q') { TPL.q = el.value; return render() }
   if (!d || !el.matches) return
   if (el.matches('[data-tpl-h]')) d.sections[+el.dataset.tplH].heading = el.value
   else if (el.matches('[data-tpl-i]')) d.sections[+el.dataset.tplI].instruction = el.value
@@ -6659,6 +6664,8 @@ function render() {
     try { if (pact.after) pact.after(primary) } catch (e) { console.error(e) }
   } else if (S.view === 'settings') {
     patch(primary, `<main class="main">${noticesBar()}${settingsView()}</main>`)
+    // The template just chosen or made, in view in a long list.
+    if (TPL.scrollTo) { TPL.scrollTo = false; const r = $('.tp-row.on'); if (r) r.scrollIntoView({ block: 'nearest' }) }
   } else if (S.view === 'brain') {
     patch(primary, `<main class="main">${noticesBar()}${brainView()}</main>`)
     // A plugin's Knowledge tab draws after the page is in (its graph).
@@ -7419,7 +7426,7 @@ window.echo = {
   templateSaved(id) {
     loadTemplates().then(() => {
       const list = (TPL.data && TPL.data.templates) || []
-      if (TPL.creating && id) { TPL.creating = false; const x = list.find((y) => y.id === id); if (x) { TPL.sel = x.id; TPL.draft = tplDraft(x) } }
+      if (TPL.creating && id) { TPL.creating = false; TPL.q = ''; const x = list.find((y) => y.id === id); if (x) { TPL.sel = x.id; TPL.draft = tplDraft(x); TPL.scrollTo = true } }
       else if (TPL.draft && TPL.draft.id) { const x = list.find((y) => y.id === TPL.draft.id); if (x) TPL.draft.kind = x.kind }
       render()
     })
