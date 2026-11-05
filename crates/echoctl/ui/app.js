@@ -1053,9 +1053,12 @@ function todayView() {
     return `<a class="td-task" href="${esc(t.link)}"><span class="td-task-t">${esc(t.title)}</span>${dueChip(t)}<span class="td-task-m">${pj ? projIcon(pj, 12) : ''}${where}</span></a>`
   }
   const w = d.work || {}
-  const cards2 = [...((w.mine && w.mine.items) || []).map((t) => card(t, 'I owe', '')),
-    ...((w.owed && w.owed.items) || []).map((t) => card(t, 'owed to me', t.owner)),
-    ...((w.waiting && w.waiting.items) || []).map((t) => card(t, 'waiting for', t.waiting_for && t.waiting_for.who))]
+  // One list by date: late first (the oldest first), then by due date; whose it is stays on each card.
+  const tasks = [...((w.mine && w.mine.items) || []).map((t) => [t, 'I owe', '']),
+    ...((w.owed && w.owed.items) || []).map((t) => [t, 'owed to me', t.owner]),
+    ...((w.waiting && w.waiting.items) || []).map((t) => [t, 'waiting for', t.waiting_for && t.waiting_for.who])]
+  tasks.sort(([a], [b]) => (b.late ? 1 : 0) - (a.late ? 1 : 0) || String(a.due || '9999').localeCompare(String(b.due || '9999')))
+  const cards2 = tasks.map(([t, kind, who]) => card(t, kind, who))
   const work = cards2.length ? `<section class="td-sec"><h2>My work · this week <button class="link-btn" data-go="tasks">Tasks</button></h2><div class="td-tasks">${cards2.join('')}</div></section>` : ''
   const empty = !cards && !day && !work ? '<div class="empty"><div><h3>A quiet day</h3><p>No meetings today and nothing on you in Tasks.</p></div></div>' : ''
   return `<div class="td">${head}${cards}<div class="td-grid">${day}${work}</div>${empty}</div>`
