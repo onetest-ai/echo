@@ -753,6 +753,7 @@ fn call_detail(dir: &Path) -> Value {
     v["has_log"] = json!(dir.join(crate::notes::LOG).exists());
     // What kind of meeting it was (the header's chip).
     v["meeting_type"] = crate::calls::meeting_type(dir);
+    v["meeting_types"] = json!(crate::calls::meeting_types().iter().map(|t| json!([t["id"], t["name"]])).collect::<Vec<_>>());
     // The template its minutes follow and why (a word of its title, the user's choice, Default).
     v["template"] = crate::calls::template_of(dir);
     v["meeting_subject"] = json!(crate::meeting::MeetingContext::load(dir).ok().flatten().and_then(|m| m.subject).filter(|s| !s.trim().is_empty()));
@@ -2180,6 +2181,15 @@ pub fn handle(msg: &str) -> Handled {
         // The call header's meeting type: the user's, kept from then on.
         "set_meeting_type" => match crate::calls::set_meeting_type(v["call"].as_str().unwrap_or(""), v["kind"].as_str().unwrap_or("")) {
             Ok(_) => true.into(),
+            Err(e) => notice(&format!("{e:#}")),
+        },
+        // Settings → Templates → Meeting types: save one (a built-in keeps its id), take the user's away.
+        "meeting_type_save" => match crate::calls::meeting_type_save(v["id"].as_str(), v["name"].as_str().unwrap_or(""), v["about"].as_str().unwrap_or("")) {
+            Ok(id) => Handled { refresh: false, reply: Some(format!("window.echo && window.echo.templateSaved({}, {}, 'mt')", json!(id), v["id"].as_str().is_none_or(str::is_empty))) },
+            Err(e) => notice(&format!("{e:#}")),
+        },
+        "meeting_type_remove" => match crate::calls::meeting_type_remove(v["id"].as_str().unwrap_or("")) {
+            Ok(()) => Handled { refresh: false, reply: Some("window.echo && window.echo.templateSaved(null, false, 'mt')".into()) },
             Err(e) => notice(&format!("{e:#}")),
         },
         // Settings → Templates: save one (a built-in keeps its id: edited), take the user's file away (Reset / Delete).

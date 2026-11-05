@@ -192,14 +192,9 @@ in a session; in a run the Echo app started, when the run ends): use that path.
 
 ## 6b. Meeting type
 `context.meeting_type` is what kind of meeting it was so far: the user's choice (`by: "you"` — leave it), else a guess
-from who was invited. Settle it from what was said, with one of:
-- `client` — a client's or prospect's people, about their work;
-- `partner` — a technology or alliance partner's people;
-- `one-on-one` — the user and one colleague;
-- `internal` — colleagues only, more than two;
-- `industry` — industry or analyst people (a briefing, an analyst call);
-- `other` — none of these (a memo, a personal call).
-Run `echoctl type <dir> <type>` when it differs from the guess. Never for a memo.
+from who was invited. `context.meeting_types` lists every kind the user has — `id`, `name`, and `about`: how to tell
+it. Settle it from what was said and who took part, by those `about`s, and run `echoctl type <dir> <id>` when it
+differs from the guess. Never for a memo.
 
 ## 7. Vocabulary (automatic — never ask)
 A term you learn here is used again only in calls with this meeting's subject or mostly these people, or whose

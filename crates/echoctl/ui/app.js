@@ -1239,18 +1239,17 @@ function writeAgainWith(c) {
 
 /** What kind of meeting it was — Client, Partner, 1:1, Internal, Industry & Analyst, Other — guessed from who was
  *  invited, settled by the minutes, changed here by the user (kept from then on). Not on a memo. */
-const MEETING_TYPES = [['client', 'Client'], ['partner', 'Partner'], ['one-on-one', '1:1'], ['internal', 'Internal'], ['industry', 'Industry & Analyst'], ['other', 'Other']]
 function meetingTypeChip(c) {
   const t = c.meeting_type
   if (!t || c.memo) return ''
   const hint = t.by === 'you' ? 'You set this' : t.by === 'echo' ? 'Set by the minutes — change it if it is wrong' : 'Guessed from who was invited — the minutes settle it'
-  return `<label class="mt-chip${t.by === 'guess' ? ' guess' : ''}" title="${esc(hint)}">${esc(t.label)} ▾<select data-meeting-type aria-label="Kind of meeting">${MEETING_TYPES.map(([k, l]) => `<option value="${k}"${t.type === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`
+  return `<label class="mt-chip${t.by === 'guess' ? ' guess' : ''}" title="${esc(hint)}">${esc(t.label)} ▾<select data-meeting-type aria-label="Kind of meeting">${(c.meeting_types || []).map(([k, l]) => `<option value="${k}"${t.type === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`
 }
 document.addEventListener('change', (e) => {
   if (!e.target.matches || !e.target.matches('[data-meeting-type]') || !S.call) return
   const kind = e.target.value
   send({ cmd: 'set_meeting_type', call: S.selected, kind })
-  S.call.meeting_type = { type: kind, label: (MEETING_TYPES.find(([k]) => k === kind) || [, kind])[1], by: 'you' }
+  S.call.meeting_type = { type: kind, label: ((S.call.meeting_types || []).find(([k]) => k === kind) || [, kind])[1], by: 'you' }
   render()
 })
 
@@ -2517,7 +2516,7 @@ function settingsView() {
 // (built in), Echo's changed by the user (edited: Reset brings Echo's back) and the user's own; the chosen one is
 // edited on the right — the words of a meeting's title it is for, its sections in order (heading + what to write).
 // Each change is saved at once (`template_save`, `<home>/.echo/templates/<id>.md`); the next minutes follow it.
-const TPL = { data: null, sel: null, draft: null, word: '' }
+const TPL = { data: null, sel: null, draft: null, word: '', tab: 'minutes', mtSel: null, mtDraft: null }
 const tplName = (id) => id ? id.charAt(0).toUpperCase() + id.slice(1).replace(/-/g, ' ') : ''
 async function loadTemplates() {
   try { TPL.data = await get('api/templates') } catch (e) { TPL.data = { error: String((e && e.message) || e) } }
@@ -2547,10 +2546,36 @@ function templatesSettings() {
     const used = t.memo ? 'Memos only — a part per thread' : t.id === 'default' ? 'Any call no other template matches' : (t.match || []).join(', ') || 'Only when you choose it for a call'
     return `<button class="tp-row${TPL.sel === t.id ? ' on' : ''}" data-tpl-pick="${esc(t.id)}"${TPL.sel === t.id ? ' aria-current="true"' : ''}><span class="tp-n"><b>${esc(tplName(t.id))}</b><span class="tp-tag${cls}">${tag}</span></span><span class="set-sub">${esc(used)} · ${(t.sections || []).length} section${(t.sections || []).length === 1 ? '' : 's'}</span></button>`
   }).join('')
-  const kinds = '<div class="tp-kinds" role="tablist" aria-label="Kind of template"><button class="tp-kind on" role="tab" aria-selected="true">Minutes <span class="set-sub">' + list.length + '</span></button></div>'
+  const mts = TPL.data.meeting_types || []
+  const tab = (id, label, n) => `<button class="tp-kind${TPL.tab === id ? ' on' : ''}" role="tab" aria-selected="${TPL.tab === id}" data-tpl-tab="${id}">${label} <span class="set-sub">${n}</span></button>`
+  const kinds = `<div class="tp-kinds" role="tablist" aria-label="Kind of template">${tab('minutes', 'Minutes', list.length)}${tab('types', 'Meeting types', mts.length)}</div>`
   const head = `<div class="tp-head"><h2>Templates</h2><p class="set-sub">The shapes Claude writes in. A call's minutes follow the template with a word of its title; the rest follow Default.</p>${kinds}</div>`
   const listBox = `<div class="tp-list"><div class="tp-lh"><span class="set-sub">Minutes templates</span><span class="tp-lha"><button class="btn ghost" data-tpl-claude title="Claude makes or changes a template from what you tell it">${ICON('<path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/>')}Ask Claude</button><button class="btn" data-tpl-new>${ICON('<path d="M12 5v14M5 12h14"/>')}New template</button></span></div><div class="set-card">${rows}</div></div>`
+  if (TPL.tab === 'types') return `${head}<div class="tp-grid">${typesList(mts)}${typeEditor()}</div>`
   return `${head}<div class="tp-grid">${listBox}${templateEditor()}</div>`
+}
+/** Templates → Meeting types: the kinds a call can be, and how to tell each — what the minutes classify a call by. */
+function typesList(mts) {
+  const TAG = { builtin: ['Built in', ''], edited: ['Edited', ' ed'], yours: ['Yours', ' mine'] }
+  const rows = mts.map((t) => {
+    const [tag, cls] = TAG[t.kind] || TAG.builtin
+    return `<button class="tp-row${TPL.mtSel === t.id ? ' on' : ''}" data-mt-pick="${esc(t.id)}"><span class="tp-n"><b>${esc(t.name)}</b><span class="tp-tag${cls}">${tag}</span></span><span class="set-sub">${esc(t.about)}</span></button>`
+  }).join('')
+  return `<div class="tp-list"><div class="tp-lh"><span class="set-sub">What a call can be, and how to tell — the minutes classify each call by these</span><span class="tp-lha"><button class="btn ghost" data-tpl-claude>${ICON('<path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/>')}Ask Claude</button><button class="btn" data-mt-new>${ICON('<path d="M12 5v14M5 12h14"/>')}New type</button></span></div><div class="set-card">${rows}</div></div>`
+}
+function typeEditor() {
+  const d = TPL.mtDraft
+  if (!d) return '<div class="tp-ed tp-empty set-sub">Choose a type to see and change how it is told.</div>'
+  const isNew = !d.id
+  const tag = isNew ? '' : `<span class="tp-tag${d.kind === 'edited' ? ' ed' : d.kind === 'yours' ? ' mine' : ''}">${{ builtin: 'Built in', edited: 'Edited', yours: 'Yours' }[d.kind] || ''}</span>`
+  const act = isNew ? '' : d.kind === 'edited' ? `<button class="btn ghost" data-mt-remove>${ICON('<path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.6M4 4v4.6h4.6"/>')}Reset to built-in</button>`
+    : d.kind === 'yours' ? `<button class="btn ghost" data-mt-remove data-del="1">${ICON('<path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/>')}Delete</button>` : ''
+  const foot = isNew ? '<span class="grow"></span><button class="btn ghost" data-mt-cancel>Cancel</button><button class="btn primary" data-mt-create>Create</button>'
+    : '<span class="grow set-sub">Saved as you change it · the next minutes classify by it</span>'
+  return `<div class="tp-ed"><div class="tp-eh"><b>${esc(isNew ? 'New meeting type' : d.name)}</b>${tag}<span class="grow"></span>${act}<button class="icon-btn" data-mt-cancel aria-label="Close">${ICON('<path d="M6 6l12 12M18 6L6 18"/>')}</button></div>
+    <div class="tp-eb"><div class="tp-f"><label class="tp-l" for="mt-name">Name</label><input id="mt-name" class="set-in" value="${esc(d.name)}" placeholder="Steering committee"></div>
+    <div class="tp-f"><label class="tp-l" for="mt-about">How to tell it</label><div class="tp-s tp-hd"><textarea id="mt-about" placeholder="Who takes part and what it is about — the minutes read this to decide.">${esc(d.about)}</textarea></div></div>
+    ${d.id === 'one-on-one' || d.id === 'internal' || d.id === 'client' || d.id === 'other' ? '<p class="set-sub">Before the minutes are written, Echo also guesses this one from who was invited.</p>' : ''}</div><div class="tp-ef">${foot}</div></div>`
 }
 function templateEditor() {
   const d = TPL.draft
@@ -2575,6 +2600,19 @@ function templateEditor() {
 
 // Templates: picking, the editor's buttons, and its fields saved when they change.
 document.addEventListener('click', (e) => {
+  const mt = e.target.closest('[data-tpl-tab],[data-mt-pick],[data-mt-new],[data-mt-cancel],[data-mt-create],[data-mt-remove]')
+  if (mt) {
+    const list = (TPL.data && TPL.data.meeting_types) || []
+    if (mt.dataset.tplTab) { TPL.tab = mt.dataset.tplTab; return render() }
+    if (mt.dataset.mtPick) { const x = list.find((y) => y.id === mt.dataset.mtPick); TPL.mtSel = x ? x.id : null; TPL.mtDraft = x ? { ...x } : null; return render() }
+    if (mt.dataset.mtNew !== undefined) { TPL.mtSel = null; TPL.mtDraft = { id: null, kind: 'yours', name: '', about: '' }; render(); const n = $('#mt-name'); if (n) n.focus(); return }
+    if (mt.dataset.mtCancel !== undefined) { TPL.mtSel = null; TPL.mtDraft = null; return render() }
+    if (mt.dataset.mtCreate !== undefined) {
+      const d = TPL.mtDraft; if (!d.name.trim()) { const n = $('#mt-name'); if (n) n.focus(); return }
+      return send({ cmd: 'meeting_type_save', name: d.name, about: d.about })
+    }
+    if (mt.dataset.mtRemove !== undefined) { TPL.mtRemoving = { id: TPL.mtDraft.id, del: !!mt.dataset.del }; return send({ cmd: 'meeting_type_remove', id: TPL.mtDraft.id }) }
+  }
   const t = e.target.closest('[data-tpl-info],[data-tpl-claude],[data-tpl-val],[data-tpl-pick],[data-tpl-new],[data-tpl-close],[data-tpl-cancel],[data-tpl-create],[data-tpl-reset],[data-tpl-del],[data-tpl-word-x],[data-tpl-up],[data-tpl-down],[data-tpl-sx],[data-tpl-add],[data-tpl-again],[data-tpl-edit]')
   if (!t) return
   const d = TPL.draft
@@ -2630,6 +2668,9 @@ document.addEventListener('click', (e) => {
   }
 })
 document.addEventListener('change', (e) => {
+  // A meeting type's name or how to tell it: saved when it changes (a new one waits for Create).
+  const m = TPL.mtDraft
+  if (m && m.id && (e.target.id === 'mt-name' || e.target.id === 'mt-about')) return send({ cmd: 'meeting_type_save', id: m.id, name: m.name, about: m.about })
   const el = e.target, d = TPL.draft
   if (!d || !el.matches) return
   if (el.id === 'tp-hd') { d.header = el.value; tplSave() }
@@ -2638,6 +2679,8 @@ document.addEventListener('change', (e) => {
   else if (el.matches('[data-tpl-i]')) { d.sections[+el.dataset.tplI].instruction = el.value; tplSave() }
 })
 document.addEventListener('input', (e) => {
+  if (TPL.mtDraft && e.target.id === 'mt-name') TPL.mtDraft.name = e.target.value
+  if (TPL.mtDraft && e.target.id === 'mt-about') TPL.mtDraft.about = e.target.value
   const el = e.target, d = TPL.draft
   if (!d || !el.matches) return
   if (el.matches('[data-tpl-h]')) d.sections[+el.dataset.tplH].heading = el.value
@@ -7444,8 +7487,17 @@ const typingNotes = () => document.activeElement && (document.activeElement.id =
 window.echo = {
   /** A template saved (its id) or taken away (null): the list read again; a new one becomes the one edited; the one
    *  edited takes its kind from the list (Edited once Echo has the file). */
-  templateSaved(id, created) {
+  templateSaved(id, created, which) {
     loadTemplates().then(() => {
+      if (which === 'mt') {
+        const mts = (TPL.data && TPL.data.meeting_types) || [], rm = TPL.mtRemoving
+        TPL.mtRemoving = null
+        const pick = created && id ? id : id === null && rm && !rm.del ? rm.id : id === null ? null : TPL.mtSel
+        const x = mts.find((y) => y.id === pick)
+        if (created || id === null) { TPL.mtSel = x ? x.id : null; TPL.mtDraft = x ? { ...x } : null }
+        else if (x && TPL.mtDraft) TPL.mtDraft.kind = x.kind
+        return render()
+      }
       const list = (TPL.data && TPL.data.templates) || []
       const rm = TPL.removing
       TPL.removing = null

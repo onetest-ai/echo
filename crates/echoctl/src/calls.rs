@@ -450,7 +450,7 @@ pub const TEMPLATE_VALUES: &[(&str, &str)] = &[
     ("colleagues", "the colleagues on the call, linked"),
     ("external", "the people from outside, linked"),
     ("organizer", "who sent the invite (`meeting.organizer`)"),
-    ("type", "what kind of meeting it was: Client, Partner, 1:1, Internal, Industry & Analyst, Other (`meeting_type`)"),
+    ("type", "what kind of meeting it was (`meeting_type`'s name: Client, Internal…)"),
     ("thread", "the call's threads, linked from `links.threads`"),
     ("client", "the call's clients, linked from `links.clients`"),
     ("previous", "the previous meeting of this series, linked from `links.previous`"),
@@ -474,7 +474,7 @@ pub fn templates_view() -> Value {
         })
         .collect();
     out.sort_by_key(|t| (builtin.iter().position(|b| t["id"] == *b).unwrap_or(usize::MAX), t["id"].as_str().unwrap_or("").to_string()));
-    json!({"templates": out, "values": template_values()})
+    json!({"templates": out, "values": template_values(), "meeting_types": meeting_types()})
 }
 
 /// The user's file a template comes from (none: it is Echo's own).
@@ -654,17 +654,84 @@ fn attendees_split(meeting: Option<&MeetingContext>, cfg: &Config) -> (Vec<Strin
     (colleagues, external)
 }
 
-/// The kinds of meeting a call can be: what it was, beside whose (its threads and clients say that).
-pub const MEETING_TYPES: [(&str, &str); 6] =
-    [("client", "Client"), ("partner", "Partner"), ("one-on-one", "1:1"), ("internal", "Internal"), ("industry", "Industry & Analyst"), ("other", "Other")];
+/// The kinds of meeting a call can be — what it was, beside whose (its threads and clients say that) — and how to tell
+/// each: the minutes run classifies a call by these. The user changes them and adds their own in Settings → Templates →
+/// Meeting types (`<home>/.echo/meeting-types.json`).
+const MEETING_TYPES: [(&str, &str, &str); 6] = [
+    ("client", "Client", "A client's or prospect's people take part, about their work: a status meeting, a workshop, a demo, a negotiation."),
+    ("partner", "Partner", "A technology or alliance partner's people: a vendor, a reseller, a joint offering or go-to-market."),
+    ("one-on-one", "1:1", "The user and one colleague, nobody else."),
+    ("internal", "Internal", "Colleagues only, more than two: a team sync, a planning, a review inside the company."),
+    ("industry", "Industry & Analyst", "Industry or analyst people: an analyst briefing, a conference or market call."),
+    ("other", "Other", "None of these: a memo, a personal call."),
+];
+
+fn meeting_types_file() -> PathBuf {
+    paths::state_dir().join("meeting-types.json")
+}
+
+/// Every meeting type: Echo's (as the user changed them) then the user's own — `{id, name, about, kind}`, kind builtin /
+/// edited / yours.
+pub fn meeting_types() -> Vec<Value> {
+    let own: Vec<Value> = fs::read(meeting_types_file()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    let of = |id: &str| own.iter().find(|t| t["id"] == id);
+    let mut out: Vec<Value> = MEETING_TYPES
+        .iter()
+        .map(|(id, name, about)| match of(id) {
+            Some(t) => json!({"id": id, "name": t["name"].as_str().unwrap_or(name), "about": t["about"].as_str().unwrap_or(about), "kind": "edited"}),
+            None => json!({"id": id, "name": name, "about": about, "kind": "builtin"}),
+        })
+        .collect();
+    for t in own.iter().filter(|t| t["id"].as_str().is_some_and(|i| !MEETING_TYPES.iter().any(|(b, _, _)| *b == i))) {
+        out.push(json!({"id": t["id"], "name": t["name"], "about": t["about"], "kind": "yours"}));
+    }
+    out
+}
+
+/// Save a meeting type the user changed (a built-in keeps its id) or made (its id from its name).
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn meeting_type_save(id: Option<&str>, name: &str, about: &str) -> Result<String> {
+    let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
+    anyhow::ensure!(!name.is_empty(), "give the type a name");
+    let all = meeting_types();
+    let id = match id.filter(|i| !i.is_empty()) {
+        Some(i) => {
+            anyhow::ensure!(all.iter().any(|t| t["id"] == i), "there is no meeting type {i}");
+            i.to_string()
+        }
+        None => {
+            let i = crate::recorder::slugify(&name).trim_end_matches('-').to_string();
+            anyhow::ensure!(!i.is_empty() && !all.iter().any(|t| t["id"] == i.as_str()), "a meeting type named {name} exists already");
+            i
+        }
+    };
+    let mut own: Vec<Value> = fs::read(meeting_types_file()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    own.retain(|t| t["id"] != id.as_str());
+    own.push(json!({"id": id, "name": name.chars().take(40).collect::<String>(), "about": about.trim().chars().take(600).collect::<String>()}));
+    fs::create_dir_all(paths::state_dir())?;
+    paths::write_atomic(&meeting_types_file(), &serde_json::to_vec_pretty(&own)?)?;
+    Ok(id)
+}
+
+/// Take the user's change of a built-in away (Reset) or one of their own (Delete).
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn meeting_type_remove(id: &str) -> Result<()> {
+    let mut own: Vec<Value> = fs::read(meeting_types_file()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    let before = own.len();
+    own.retain(|t| t["id"] != id);
+    anyhow::ensure!(own.len() < before, "{id} is Echo's own: nothing to take away");
+    paths::write_atomic(&meeting_types_file(), &serde_json::to_vec_pretty(&own)?)?;
+    Ok(())
+}
 
 /// A call's meeting type: `meta.json` `meeting_type` — set by the user (`by: you`, kept), or by its minutes run (`by:
 /// echo`) — else a guess from who was invited: a memo is Other; the user and one colleague 1:1; colleagues only
 /// Internal; anyone from outside Client (the minutes tell Partner and Industry & Analyst apart).
 pub fn meeting_type(dir: &Path) -> Value {
-    let label = |t: &str| MEETING_TYPES.iter().find(|(k, _)| *k == t).map(|(_, l)| *l).unwrap_or("Other");
+    let all = meeting_types();
+    let label = |t: &str| all.iter().find(|x| x["id"] == t).and_then(|x| x["name"].as_str()).unwrap_or("Other").to_string();
     let set = &read_json(&dir.join("meta.json"))["meeting_type"];
-    if let Some(t) = set["type"].as_str().filter(|t| MEETING_TYPES.iter().any(|(k, _)| k == t)) {
+    if let Some(t) = set["type"].as_str().filter(|t| all.iter().any(|x| x["id"] == *t)) {
         return json!({"type": t, "label": label(t), "by": set["by"].as_str().unwrap_or("echo")});
     }
     let t = if crate::memo::is_memo(dir) {
@@ -686,7 +753,8 @@ pub fn meeting_type(dir: &Path) -> Value {
 /// `echoctl type <call> <type>`: the user's choice (kept from then on), or — inside a minutes run Echo started — the
 /// run's, which never replaces the user's.
 pub fn set_meeting_type(call: &str, kind: &str) -> Result<Value> {
-    anyhow::ensure!(MEETING_TYPES.iter().any(|(k, _)| *k == kind), "a meeting type is one of: {}", MEETING_TYPES.map(|(k, _)| k).join(", "));
+    let all = meeting_types();
+    anyhow::ensure!(all.iter().any(|t| t["id"] == kind), "a meeting type is one of: {}", all.iter().filter_map(|t| t["id"].as_str()).collect::<Vec<_>>().join(", "));
     let dir = resolve_call(call)?;
     let by = if crate::notes::headless() { "echo" } else { "you" };
     if by == "echo" && meeting_type(&dir)["by"] == "you" {
@@ -774,8 +842,10 @@ pub fn context(call: &str) -> Result<()> {
         "meeting": meeting,
         "colleagues": colleagues,
         "external": external,
-        // What kind of meeting it was, so far (a guess from who was invited, or the user's: `by`).
+        // What kind of meeting it was, so far (a guess from who was invited, or the user's: `by`), and every kind with
+        // how to tell it (step 6b settles it).
         "meeting_type": meeting_type(&dir),
+        "meeting_types": meeting_types().iter().map(|t| json!({"id": t["id"], "name": t["name"], "about": t["about"]})).collect::<Vec<_>>(),
         "transcript_chars": chars,
         "chars_by_speaker": by_speaker,
         "chars_by_language": by_lang,
@@ -1812,6 +1882,22 @@ mod tests {
         in_run(false);
         assert_eq!(meeting_type(&client)["type"], "industry");
         assert!(set_meeting_type(&client.display().to_string(), "board").is_err());
+        // The list is the user's to change: a built-in told differently (Edited, Reset), a type of their own.
+        let kind = |id: &str| meeting_types().into_iter().find(|t| t["id"] == id).map(|t| t["kind"].as_str().unwrap().to_string());
+        meeting_type_save(Some("partner"), "Partner", "An alliance partner: Microsoft, AWS, a reseller.").unwrap();
+        assert_eq!(kind("partner").as_deref(), Some("edited"));
+        assert!(meeting_types().iter().any(|t| t["about"] == "An alliance partner: Microsoft, AWS, a reseller."));
+        meeting_type_remove("partner").unwrap();
+        assert_eq!(kind("partner").as_deref(), Some("builtin"));
+        assert!(meeting_type_remove("partner").is_err(), "Echo's own: nothing to take away");
+        assert_eq!(meeting_type_save(None, "Board meeting", "The board or a steering committee.").unwrap(), "board-meeting");
+        assert_eq!(kind("board-meeting").as_deref(), Some("yours"));
+        assert!(meeting_type_save(None, "Board meeting", "again").is_err(), "taken");
+        set_meeting_type(&client.display().to_string(), "board-meeting").unwrap();
+        assert_eq!(meeting_type(&client), json!({"type": "board-meeting", "label": "Board meeting", "by": "you"}));
+        // A type taken away: the call falls back to its guess.
+        meeting_type_remove("board-meeting").unwrap();
+        assert_eq!(meeting_type(&client)["by"], "guess");
     }
 
     #[test]
