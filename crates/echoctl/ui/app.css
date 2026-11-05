@@ -1086,6 +1086,7 @@ a.wp-src { text-decoration: none; cursor: pointer; }
 .pf-proj .pf-sub { white-space: nowrap; }
 .pf-sub.pf-inl { flex-basis: auto; }
 .pf-v .fchip { margin-left: auto; }
+.pf-v .fchip.pf-start { margin-left: 0; } /* a row's own value (AI), not its Change ▾ */
 
 /* A message for a moment: floats under the Record pill, over the page (nothing shifts) */
 .toasts { position: fixed; top: 46px; left: 50%; transform: translateX(-50%); z-index: 45; display: flex; flex-direction: column; gap: 6px; width: min(560px, calc(100vw - 32px)); pointer-events: none; }
@@ -1849,7 +1850,7 @@ select.set-in { width: auto; margin-right: 6px; }
 .pj-chip.memo-pj .set-sub { font-variant-numeric: tabular-nums; }
 
 /* A thread's meeting series (Profile → Meetings), and a recurring meeting's row in the calendar. */
-.se-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 10px; padding: 5px 0; }
+.se-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 10px; padding: 5px 0; width: 100%; flex: 0 0 100%; }
 .se-what { grid-column: 1 / -1; }
 .se-t { font-weight: 600; }
 .se-when { text-align: right; }
