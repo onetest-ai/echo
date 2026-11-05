@@ -74,6 +74,29 @@ fn cards() -> Vec<Value> {
         .collect()
 }
 
+/// A call's minutes as Today shows them: being written, coming at a time, written, or failed (with why).
+fn minutes(dir: &std::path::Path) -> Value {
+    let written = dir.join("notes.md").exists();
+    let run = crate::notes::status(dir);
+    if let Some(r) = run.as_ref().filter(|r| r.state == "queued" || r.state == "running") {
+        let _ = r;
+        return json!({"state": "writing"});
+    }
+    if written {
+        return json!({"state": "ready"});
+    }
+    if let Some(r) = run.as_ref().filter(|r| r.state == "failed" || r.state == "needs_login") {
+        return json!({"state": "failed", "why": r.message});
+    }
+    let auto = crate::notes::auto_state(dir);
+    match auto["due"].as_str() {
+        Some("at") => json!({"state": "at", "at": auto["at"]}),
+        Some("now") => json!({"state": "writing"}),
+        Some("not_ready") => json!({"state": "transcribing"}),
+        _ => json!({"state": "none"}),
+    }
+}
+
 fn time(s: Option<&str>) -> Option<DateTime<Utc>> {
     s.and_then(|t| DateTime::parse_from_rfc3339(t).ok()).map(|t| t.with_timezone(&Utc))
 }
@@ -101,8 +124,9 @@ fn day() -> Vec<Value> {
             used[i] = true;
         }
         let pid = crate::prep::id_of(&event);
+        let minutes = hit.map(|i| minutes(&calls_today[i].0));
         out.push(json!({
-            "kind": "meeting", "subject": m.subject, "start": m.start, "end": m.end, "event": event,
+            "kind": "meeting", "subject": m.subject, "start": m.start, "end": m.end, "event": event, "minutes": minutes,
             "people": m.attendees.len() + m.organizer.iter().count(),
             "threads": crate::projects::for_event(&m),
             "call": hit.map(|i| calls_today[i].0.file_name().unwrap_or_default().to_string_lossy().into_owned()),
@@ -113,7 +137,7 @@ fn day() -> Vec<Value> {
     for (i, (d, meta, _)) in calls_today.iter().enumerate().filter(|(i, _)| !used[*i]) {
         let _ = i;
         out.push(json!({
-            "kind": "call", "subject": meta["title"], "start": meta["started_at"], "end": meta["ended_at"],
+            "kind": "call", "subject": meta["title"], "start": meta["started_at"], "end": meta["ended_at"], "minutes": minutes(d),
             "call": d.file_name().unwrap_or_default().to_string_lossy(),
         }));
     }

@@ -1890,7 +1890,7 @@ select.set-in { width: auto; margin-right: 6px; }
 .td-sec h2 .link-btn { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 500; }
 .td-row { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
 .td-row:first-of-type { border-top: 0; }
-.td-row.past { opacity: 0.6; }
+.td-row.past .td-t, .td-row.past .td-s { opacity: 0.6; }
 .td-t { font-size: 12px; color: var(--text-2); padding-top: 2px; white-space: nowrap; }
 .td-card-h [data-today-seen] { margin-left: auto; }
 .td-b { display: flex; flex-direction: column; gap: 6px; min-width: 0; }

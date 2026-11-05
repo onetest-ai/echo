@@ -1028,7 +1028,14 @@ function todayView() {
     const line = !nowDrawn && st && st > now ? (nowDrawn = true, `<div class="td-now"><span>${esc(hm(now))}</span></div>`) : ''
     const chips = (x.threads || []).map((p) => `<span class="pj-chip"><button class="link-btn" data-pj="goto" data-id="${esc(p.id)}">${projIcon(p, 14)}${esc(p.name)}</button></span>`).join('')
     const acts = []
-    if (x.call) acts.push(`<button class="btn ghost" data-call="${esc(x.call)}">Open the call</button>`)
+    // Its minutes (from the Meeting Notebook plugin's Today): writing, coming at a time, written, or failed — Try again.
+    const mn = x.minutes || {}
+    if (x.call && mn.state === 'ready') acts.push(`<button class="btn ghost" data-call="${esc(x.call)}" data-call-tab="minutes">Minutes</button>`)
+    else if (x.call) acts.push(`<button class="btn ghost" data-call="${esc(x.call)}">Open the call</button>`)
+    if (mn.state === 'writing') acts.push('<span class="set-sub">Writing the minutes…</span>')
+    else if (mn.state === 'transcribing') acts.push('<span class="set-sub">Transcribing…</span>')
+    else if (mn.state === 'at' && mn.at) acts.push(`<span class="set-sub">Minutes at ${esc(hm(new Date(mn.at)))}</span>`)
+    else if (mn.state === 'failed') acts.push(`<span class="warn" title="${esc(mn.why || '')}">Minutes failed</span><button class="btn" data-today-retry="${esc(x.call)}">Try again</button>`)
     if (x.prep && x.prep.ready) acts.push(`<button class="btn${past ? ' ghost' : ' primary'}" data-ev-prep="${esc(x.prep.id)}" data-ev-call="${esc(x.call || '')}">Show prep</button>`)
     else if (x.prep && x.prep.writing) acts.push('<span class="set-sub">Writing the prep…</span>')
     else if (x.prep && !past) acts.push(`<button class="btn" data-prep-write="${esc(x.prep.id)}" data-prep-open="1">Prepare</button>`)
@@ -6498,7 +6505,7 @@ document.addEventListener('click', (e) => {
   if (S.laterOpen && !(e.target.closest && e.target.closest('[data-cmd^="later-"]'))) { S.laterOpen = false; render() }
   // The sidebar open over a narrow page closes on a click beside it.
   if (S.barOver && !(e.target.closest && e.target.closest('.actbar'))) { S.barOver = false; render() }
-  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-theme-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-go],[data-conv-keep],[data-br-pclosed],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-up],[data-today-seen],[data-today-done],[data-prep-write],[data-ev-prep],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
+  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-theme-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-go],[data-conv-keep],[data-br-pclosed],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-up],[data-today-seen],[data-today-done],[data-today-retry],[data-prep-write],[data-ev-prep],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
   if (!t) { if (menuWas) render(); return }
   // Sign-ins (`signin.rs`): shown at once (starting / stopping / checking) until the next poll
   // brings the app's state.
@@ -6595,8 +6602,13 @@ document.addEventListener('click', (e) => {
   if (t.dataset.calImport) { send({ cmd: 'calendar_import', id: t.dataset.calImport }); const e = (S.cal.data.events || []).find((x) => x.id === t.dataset.calImport); if (e) e.import = { busy: true }; return render() }
   if (t.dataset.schedule) { send({ cmd: 'schedule', id: t.dataset.schedule, languages: recordLang(), profile: pickedProfile() }); const e = ((S.cal.data && S.cal.data.events) || []).find((x) => x.id === t.dataset.schedule); if (e) e.scheduled = true; if (S.view === 'today') setTimeout(() => loadToday().then(render), 400); return render() }
   if (t.dataset.unschedule) { send({ cmd: 'unschedule', id: t.dataset.unschedule }); const e = ((S.cal.data && S.cal.data.events) || []).find((x) => x.id === t.dataset.unschedule); if (e) e.scheduled = false; if (S.view === 'today') setTimeout(() => loadToday().then(render), 400); return render() }
-  if (t.dataset.call) { S.listOpen = false; return go(`call/${t.dataset.call}/${S.tab}`) }
+  if (t.dataset.call) { S.listOpen = false; return go(`call/${t.dataset.call}/${t.dataset.callTab || S.tab}`) }
   if (t.dataset.up) { S.listOpen = false; return go(`upcoming/${t.dataset.up}`) }
+  if (t.dataset.todayRetry) {
+    send({ cmd: 'write_notes', call: t.dataset.todayRetry })
+    setTimeout(() => loadToday().then(render), 800)
+    return
+  }
   if (t.dataset.todayDone) {
     send({ cmd: 'project', op: 'ledger', id: t.dataset.project, body: { op: 'edit', node: t.dataset.todayDone, set: { state: 'done' } } })
     // Gone from My work at once; Today is read again once the ledger has it.
