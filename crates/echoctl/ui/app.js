@@ -1970,6 +1970,14 @@ function minutesTab(c) {
 const notesNowBtn = (run) => {
   return run && run.state === 'queued' && run.wait === 'call' && run.may_start && !run.now ? '<button class="btn ghost" data-cmd="notes-now" title="Start them now; the other call keeps recording, and both share this computer">Write now</button>' : ''
 }
+/** Which template wrote a call's minutes and why; Write again with… another (its own from then on). */
+function minutesTemplate(c) {
+  const t = c.template
+  const why = t.why === 'word' ? ` (the title has “${esc(t.word)}”)` : t.why === 'chosen' ? ' (chosen for this call)' : ''
+  const list = ((TPL.data && TPL.data.templates) || []).filter((x) => !x.memo)
+  const menu = S.tplMenu ? `<div class="tp-menu" role="menu">${list.length ? list.map((x) => `<button class="tp-mi${x.id === t.id ? ' on' : ''}" role="menuitem" data-tpl-again="${esc(x.id)}">${esc(tplName(x.id))}${x.id === t.id ? '<span class="set-sub">used now</span>' : x.kind === 'yours' ? '<span class="set-sub">yours</span>' : ''}</button>`).join('') : '<span class="set-sub" style="padding:6px 10px">Reading templates…</span>'}<div class="tp-hr"></div><button class="tp-mi" role="menuitem" data-go="settings/templates">Edit templates in Settings</button></div>` : ''
+  return `<span class="grow set-sub">From the <b>${esc(tplName(t.id))}</b> template${why}</span><span class="tp-again"><button class="btn ghost" data-tpl-menu aria-expanded="${S.tplMenu ? 'true' : 'false'}">Write again with…</button>${menu}</span>`
+}
 function minutesBar(c) {
   const run = c.notes_run
   const log = c.has_log ? '<button class="btn ghost" data-cmd="show-log">Show log</button>' : ''
@@ -1981,6 +1989,7 @@ function minutesBar(c) {
     const signin = p && p.kind === 'claude' ? `<button class="btn ghost" data-signin="${esc(p.id)}">Sign in…</button>` : ''
     status = `<span class="grow warn">The last update didn't finish: ${esc(run.message || '')}</span>${signin}<button class="btn ghost" data-cmd="write-notes">Try again</button>${log}`
   } else if (run && run.state === 'skipped') status = `<span class="grow">${esc(run.message || 'The last update wrote nothing.')}</span>`
+  if (!status && c.template && c.template.id && c.template.why !== 'memo') status = minutesTemplate(c)
   // Opening or showing the page is in the call's ⋯ menu: this bar is only for what is going on.
   return status
 }
@@ -2404,7 +2413,7 @@ function eventProjects(e) {
 // (`settings_set`, the value shown, never a toggle of a stale one); flows with a dialog, a sign-in or
 // a download run as the tray's own actions (`settings_action`). ────────────────────────────────
 const SETTINGS_SECTIONS = [
-  ['general', 'General'], ['recording', 'Recording'], ['transcription', 'Transcription'], ['ai', 'AI & minutes'],
+  ['general', 'General'], ['recording', 'Recording'], ['transcription', 'Transcription'], ['ai', 'AI & minutes'], ['templates', 'Templates'],
   ['calendar', 'Calendar & chat'], ['brain', 'Knowledge'], ['me', 'About me'], ['deliver', 'Sends to you'], ['plugins', 'Plugins'], ['layout', 'Layout'], ['health', 'Health'],
 ]
 /** Save the profile as edited; shown rendered again once the app has it. */
@@ -2482,8 +2491,124 @@ function settingsView() {
   if (own) return `<div class="settings"><aside class="set-side"><h1>Settings</h1><input class="search" id="set-q" placeholder="Search settings" value="${esc(S.setQuery || '')}" aria-label="Search settings">${nav}${pnav}</aside>
     <div class="set-main plug-main">${body}</div></div>`
   return `<div class="settings"><aside class="set-side"><h1>Settings</h1><input class="search" id="set-q" placeholder="Search settings" value="${esc(S.setQuery || '')}" aria-label="Search settings">${nav}${pnav}</aside>
-    <div class="set-main${sec === 'plugins' ? ' pl-main' : ''}">${body}<p class="set-foot">Saved as you change it.</p></div></div>`
+    <div class="set-main${sec === 'plugins' ? ' pl-main' : sec === 'templates' ? ' tp-main' : ''}">${body}<p class="set-foot">Saved as you change it.</p></div></div>`
 }
+
+// ── Settings → Templates: the shapes Claude writes in, a tab per kind (Minutes now). Minutes templates: Echo's
+// (built in), Echo's changed by the user (edited: Reset brings Echo's back) and the user's own; the chosen one is
+// edited on the right — the words of a meeting's title it is for, its sections in order (heading + what to write).
+// Each change is saved at once (`template_save`, `<home>/.echo/templates/<id>.md`); the next minutes follow it.
+const TPL = { data: null, sel: null, draft: null, word: '' }
+const tplName = (id) => id ? id.charAt(0).toUpperCase() + id.slice(1).replace(/-/g, ' ') : ''
+async function loadTemplates() {
+  try { TPL.data = await get('api/templates') } catch (e) { TPL.data = { error: String((e && e.message) || e) } }
+  const list = (TPL.data && TPL.data.templates) || []
+  if (TPL.sel && !TPL.draft) { const t = list.find((x) => x.id === TPL.sel); TPL.draft = t ? tplDraft(t) : null; if (!t) TPL.sel = null }
+}
+const tplDraft = (t) => ({ id: t.id, kind: t.kind, memo: t.memo, match: [...(t.match || [])], sections: (t.sections || []).map((s) => ({ heading: s.heading, instruction: s.instruction })) })
+function tplSave() {
+  const d = TPL.draft
+  if (!d || !d.id) return
+  send({ cmd: 'template_save', id: d.id, match: d.match, sections: d.sections })
+  if (d.kind === 'builtin') d.kind = 'edited'
+  setTimeout(() => loadTemplates().then(render), 400)
+}
+function templatesSettings() {
+  if (!TPL.data) { loadTemplates().then(render); return `<h2>Templates</h2><div class="skeleton" style="padding:20px">${'<i></i>'.repeat(4)}</div>` }
+  if (TPL.data.error) return `<h2>Templates</h2><p class="error">${esc(TPL.data.error)}</p>`
+  const list = TPL.data.templates || []
+  const TAG = { builtin: ['Built in', ''], edited: ['Edited', ' ed'], yours: ['Yours', ' mine'] }
+  const rows = list.map((t) => {
+    const [tag, cls] = TAG[t.kind] || TAG.builtin
+    const used = t.memo ? 'Memos only — a part per thread' : t.id === 'default' ? 'Any call no other template matches' : (t.match || []).join(', ') || 'Only when you choose it for a call'
+    return `<button class="tp-row${TPL.sel === t.id ? ' on' : ''}" data-tpl-pick="${esc(t.id)}"${TPL.sel === t.id ? ' aria-current="true"' : ''}><span class="tp-n"><b>${esc(tplName(t.id))}</b><span class="tp-tag${cls}">${tag}</span></span><span class="set-sub">${esc(used)} · ${(t.sections || []).length} section${(t.sections || []).length === 1 ? '' : 's'}</span></button>`
+  }).join('')
+  const kinds = '<div class="tp-kinds" role="tablist" aria-label="Kind of template"><button class="tp-kind on" role="tab" aria-selected="true">Minutes <span class="set-sub">' + list.length + '</span></button></div>'
+  const head = `<div class="tp-head"><h2>Templates</h2><p class="set-sub">The shapes Claude writes in. A call's minutes follow the template with a word of its title; the rest follow Default.</p>${kinds}</div>`
+  const listBox = `<div class="tp-list"><div class="tp-lh"><span class="set-sub">Minutes templates</span><button class="btn" data-tpl-new>${ICON('<path d="M12 5v14M5 12h14"/>')}New template</button></div><div class="set-card">${rows}</div></div>`
+  return `${head}<div class="tp-grid">${listBox}${templateEditor()}</div>`
+}
+function templateEditor() {
+  const d = TPL.draft
+  if (!d) return '<div class="tp-ed tp-empty set-sub">Choose a template to see and change it.</div>'
+  const isNew = !d.id
+  const TAG = { builtin: 'Built in', edited: 'Edited', yours: 'Yours' }
+  const tag = isNew ? '' : `<span class="tp-tag${d.kind === 'edited' ? ' ed' : d.kind === 'yours' ? ' mine' : ''}">${TAG[d.kind] || ''}</span>`
+  const act = isNew ? '' : d.kind === 'edited' ? `<button class="btn ghost" data-tpl-reset title="Back to Echo's own ${esc(tplName(d.id))} template">${ICON('<path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.6M4 4v4.6h4.6"/>')}Reset to built-in</button>`
+    : d.kind === 'yours' ? `<button class="btn ghost" data-tpl-del>${ICON('<path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/>')}Delete</button>` : ''
+  const name = isNew ? `<div class="tp-f"><label class="tp-l" for="tp-name">Name</label><input id="tp-name" class="set-in" placeholder="Client kickoff" value="${esc(d.name || '')}"></div>` : ''
+  const words = d.memo ? '<p class="set-sub">Used for memos: a part per thread.</p>' : d.id === 'default' ? '<p class="set-sub">Used for any call no other template matches.</p>'
+    : `<div class="tp-f"><span class="tp-l">Used when the title has</span><div class="tp-words">${d.match.map((w, i) => `<span class="tp-chip">${esc(w)}<button data-tpl-word-x="${i}" aria-label="Remove ${esc(w)}">×</button></span>`).join('')}<label for="tp-word" class="vh">Add a word</label><input id="tp-word" placeholder="+ word" value="${esc(TPL.word)}"></div></div>`
+  const secs = d.sections.map((s, i) => `<div class="tp-s"><div class="tp-sh"><label for="tp-h-${i}" class="vh">Heading</label><input id="tp-h-${i}" data-tpl-h="${i}" value="${esc(s.heading)}">
+      <button class="icon-btn" data-tpl-up="${i}" title="Move up" aria-label="Move ${esc(s.heading)} up"${i ? '' : ' disabled'}>${ICON('<path d="M6 15l6-6 6 6"/>')}</button><button class="icon-btn" data-tpl-down="${i}" title="Move down" aria-label="Move ${esc(s.heading)} down"${i < d.sections.length - 1 ? '' : ' disabled'}>${ICON('<path d="M6 9l6 6 6-6"/>')}</button><button class="icon-btn tp-del" data-tpl-sx="${i}" title="${d.sections.length > 1 ? 'Remove this section' : 'A template needs one section'}" aria-label="Remove the section ${esc(s.heading)}"${d.sections.length > 1 ? '' : ' disabled'}>${ICON('<path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/>')}</button></div>
+      <label for="tp-i-${i}" class="vh">What to write in ${esc(s.heading)}</label><textarea id="tp-i-${i}" data-tpl-i="${i}" rows="${Math.min(6, Math.max(2, Math.ceil((s.instruction || '').length / 60)))}">${esc(s.instruction)}</textarea></div>`).join('')
+  const foot = isNew ? `<span class="grow"></span><button class="btn ghost" data-tpl-cancel>Cancel</button><button class="btn primary" data-tpl-create>Create</button>`
+    : '<span class="grow set-sub">Saved as you change it · the next minutes follow it</span>'
+  return `<div class="tp-ed"><div class="tp-eh"><b>${esc(isNew ? 'New template' : tplName(d.id))}</b>${tag}<span class="grow"></span>${act}<button class="icon-btn" data-tpl-close aria-label="Close">${ICON('<path d="M6 6l12 12M18 6L6 18"/>')}</button></div>
+    <div class="tp-eb">${name}${words}<div class="tp-lrow"><span class="tp-l">Sections — in this order</span><span class="set-sub grow">Claude writes each, following its words</span><button class="link-btn" data-tpl-add>+ Add a section</button></div>${secs}
+    <button class="tp-add" data-tpl-add>${ICON('<path d="M12 5v14M5 12h14"/>')}Add a section</button></div><div class="tp-ef">${foot}</div></div>`
+}
+
+// Templates: picking, the editor's buttons, and its fields saved when they change.
+document.addEventListener('click', (e) => {
+  if (S.tplMenu && !e.target.closest('.tp-again')) { S.tplMenu = false; render() }
+  const t = e.target.closest('[data-tpl-pick],[data-tpl-new],[data-tpl-close],[data-tpl-cancel],[data-tpl-create],[data-tpl-reset],[data-tpl-del],[data-tpl-word-x],[data-tpl-up],[data-tpl-down],[data-tpl-sx],[data-tpl-add],[data-tpl-again],[data-tpl-menu]')
+  if (!t) return
+  const d = TPL.draft
+  if (t.dataset.tplPick) { const x = ((TPL.data && TPL.data.templates) || []).find((y) => y.id === t.dataset.tplPick); TPL.sel = x ? x.id : null; TPL.draft = x ? tplDraft(x) : null; TPL.word = ''; return render() }
+  if (t.dataset.tplNew !== undefined) {
+    const def = ((TPL.data && TPL.data.templates) || []).find((y) => y.id === 'default')
+    TPL.sel = null; TPL.draft = { id: null, kind: 'yours', name: '', match: [], sections: def ? tplDraft(def).sections : [{ heading: 'Summary', instruction: '' }] }
+    render(); const n = $('#tp-name'); if (n) n.focus(); return
+  }
+  if (t.dataset.tplClose !== undefined || t.dataset.tplCancel !== undefined) { TPL.sel = null; TPL.draft = null; return render() }
+  if (t.dataset.tplCreate !== undefined) {
+    const name = (($('#tp-name') || {}).value || '').trim()
+    if (!name) { const n = $('#tp-name'); if (n) n.focus(); return }
+    d.name = name
+    send({ cmd: 'template_save', name, match: d.match, sections: d.sections })
+    TPL.pending = name
+    setTimeout(() => loadTemplates().then(() => { const id = name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-|-$/g, ''); const x = (TPL.data.templates || []).find((y) => y.id === id); if (x) { TPL.sel = x.id; TPL.draft = tplDraft(x) } render() }), 400)
+    return
+  }
+  if (t.dataset.tplReset !== undefined || t.dataset.tplDel !== undefined) {
+    send({ cmd: 'template_remove', id: d.id })
+    if (t.dataset.tplDel !== undefined) { TPL.sel = null; TPL.draft = null } else TPL.draft = null
+    setTimeout(() => loadTemplates().then(render), 400)
+    return render()
+  }
+  if (t.dataset.tplWordX) { d.match.splice(+t.dataset.tplWordX, 1); tplSave(); return render() }
+  const move = (i, j) => { const s = d.sections; [s[i], s[j]] = [s[j], s[i]]; tplSave(); render() }
+  if (t.dataset.tplUp) return move(+t.dataset.tplUp, +t.dataset.tplUp - 1)
+  if (t.dataset.tplDown) return move(+t.dataset.tplDown, +t.dataset.tplDown + 1)
+  if (t.dataset.tplSx) { d.sections.splice(+t.dataset.tplSx, 1); tplSave(); return render() }
+  if (t.dataset.tplAdd !== undefined) { d.sections.push({ heading: 'New section', instruction: '' }); render(); const h = $(`#tp-h-${d.sections.length - 1}`); if (h) { h.focus(); h.select() } return }
+  // A call's Minutes: Write again with… a template (the call's from now on).
+  if (t.dataset.tplMenu !== undefined) { S.tplMenu = !S.tplMenu; if (S.tplMenu && !TPL.data) loadTemplates().then(render); return render() }
+  if (t.dataset.tplAgain) { S.tplMenu = false; send({ cmd: 'write_notes', call: S.selected, template: t.dataset.tplAgain }); if (S.call) { S.call.notes_run = { ...(S.call.notes_run || {}), state: 'queued', had_minutes: !!S.call.notes, message: 'Starting…' } } return render() }
+})
+document.addEventListener('change', (e) => {
+  const el = e.target, d = TPL.draft
+  if (!d || !el.matches) return
+  if (el.matches('[data-tpl-h]')) { d.sections[+el.dataset.tplH].heading = el.value.trim() || 'Untitled'; tplSave() }
+  else if (el.matches('[data-tpl-i]')) { d.sections[+el.dataset.tplI].instruction = el.value; tplSave() }
+})
+document.addEventListener('input', (e) => {
+  const el = e.target, d = TPL.draft
+  if (!d || !el.matches) return
+  if (el.matches('[data-tpl-h]')) d.sections[+el.dataset.tplH].heading = el.value
+  else if (el.matches('[data-tpl-i]')) d.sections[+el.dataset.tplI].instruction = el.value
+  else if (el.id === 'tp-word') TPL.word = el.value
+  else if (el.id === 'tp-name') d.name = el.value
+})
+document.addEventListener('keydown', (e) => {
+  // A word: Enter (or a comma) adds it.
+  if (e.target.id !== 'tp-word' || !TPL.draft || !(e.key === 'Enter' || e.key === ',')) return
+  e.preventDefault()
+  const w = e.target.value.trim().toLowerCase()
+  if (w && !TPL.draft.match.includes(w)) { TPL.draft.match.push(w); tplSave() }
+  TPL.word = ''; render(); const n = $('#tp-word'); if (n) n.focus()
+})
 
 /** The profile the minutes read (me.md): shown rendered (the minutes' own safe Markdown), edited in place. */
 function meProfileCard(mp) {
@@ -3014,6 +3139,7 @@ document.addEventListener('click', (e) => {
 })
 
 const SETTINGS_BODY = {
+  templates: () => templatesSettings(),
   brain: (st) => knowledgeSettings() + brainSettings(st),
   plugins: pluginsSettings,
   general(st) {
@@ -7267,6 +7393,7 @@ async function tick() {
 const typingNotes = () => document.activeElement && (document.activeElement.id === 'my-notes' || document.activeElement.id === 'me-profile')
 
 window.echo = {
+  templateSaved() { loadTemplates().then(render) },
   async refresh() {
     await loadCalls(); if (S.selected) await loadCall(S.selected); if (S.view === 'calendar') await loadCalendar(true); if (S.view === 'settings') await loadSettings()
     await loadProjects(); if (S.view === 'projects') await loadProject()

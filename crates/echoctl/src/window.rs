@@ -347,6 +347,8 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
             let id = query_param(req.uri().query().unwrap_or(""), "id").unwrap_or_default();
             json_reply(crate::graph::message(&id).map(|m| json!({"subject": m["subject"], "from": m["from"], "at": m["at"], "text": m["text"], "url": m["url"]})).unwrap_or_else(|e| json!({ "error": format!("{e:#}") })))
         }
+        // Settings → Templates: the minutes templates, Echo's and the user's.
+        "/api/templates" => json_reply(crate::calls::templates_view()),
         "/api/today" => {
             let mut v = crate::today::view(&tasks_view());
             // A Teams transcript being imported, or why it wasn't (the calendar's own state, by event).
@@ -749,6 +751,8 @@ fn call_detail(dir: &Path) -> Value {
     v["minutes_rev"] = json!(crate::minutes::revision(dir));
     v["rev"] = json!(rev);
     v["has_log"] = json!(dir.join(crate::notes::LOG).exists());
+    // The template its minutes follow and why (a word of its title, the user's choice, Default).
+    v["template"] = crate::calls::template_of(dir);
     v["meeting_subject"] = json!(crate::meeting::MeetingContext::load(dir).ok().flatten().and_then(|m| m.subject).filter(|s| !s.trim().is_empty()));
     // Its projects (and the ones it may belong to): the header's chips and suggestion bar.
     match crate::projects::of_call(dir) {
@@ -2171,6 +2175,19 @@ pub fn handle(msg: &str) -> Handled {
             Err(e) => notice(&format!("{e:#}")),
         },
         // Where the window's panels and views go (`Layout` in app.js); nothing else reads it.
+        // Settings → Templates: save one (a built-in keeps its id: edited), take the user's file away (Reset / Delete).
+        "template_save" => {
+            let words: Vec<String> = v["match"].as_array().into_iter().flatten().filter_map(|w| w.as_str().map(str::to_owned)).collect();
+            let sections: Vec<Value> = v["sections"].as_array().cloned().unwrap_or_default();
+            match crate::calls::template_save(v["id"].as_str(), v["name"].as_str().unwrap_or(""), &words, &sections) {
+                Ok(id) => Handled { refresh: false, reply: Some(format!("window.echo && window.echo.templateSaved({})", json!(id))) },
+                Err(e) => notice(&format!("{e:#}")),
+            }
+        }
+        "template_remove" => match crate::calls::template_remove(v["id"].as_str().unwrap_or("")) {
+            Ok(()) => Handled { refresh: false, reply: Some("window.echo && window.echo.templateSaved(null)".into()) },
+            Err(e) => notice(&format!("{e:#}")),
+        },
         // Today → Needs you now: I'll do it (a task, in a thread) or Won't do; Refresh reads Teams and mail again.
         "needs_decide" => match crate::needs::decide(v["id"].as_str().unwrap_or(""), v["how"].as_str().unwrap_or(""), v["thread"].as_str(), v["title"].as_str()) {
             Ok(_) => true.into(),
@@ -2296,6 +2313,16 @@ fn act(v: &Value) -> bool {
         }
         "write_notes" => {
             let Some(d) = call else { return false };
+            // Write again with… another template: the call's from now on.
+            if let Some(t) = v["template"].as_str().filter(|t| !t.is_empty()) {
+                if crate::notes::status(&d).is_some_and(|r| crate::notes::pending(&r)) {
+                    return true;
+                }
+                if let Err(e) = crate::calls::choose_template(&d, t) {
+                    crate::notes::refuse(&d, &format!("{e:#}"));
+                    return true;
+                }
+            }
             // Another profile for this run: it becomes the call's (`notes-run.json` records which
             // profile and model wrote the minutes). Not while a run of this call is on.
             if let Some(id) = profile(v) {

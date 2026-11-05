@@ -84,6 +84,21 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
 - macOS: transparent title bar with content under it (`with_fullsize_content_view`); the strip posts
   `window_drag` / `window_zoom` (`window::window_cmd`). Windows keeps its native title bar.
 
+### Settings → Templates (`templatesSettings`, `/api/templates`, `calls::templates_view`)
+- Its own section after AI & minutes (that one has enough): the shapes Claude writes in, a tab per kind. Minutes now;
+  Tasks (the forms of what Run with Claude writes: a mail, a Teams message, a doc, a plan) comes with that feature.
+- Minutes: a narrow list (Built in · Edited · Yours, the words of a title each is for) and the chosen one edited beside
+  it, wide — the words as chips (Enter or a comma adds one), its sections in order: heading and what to write, ↑ ↓,
+  a trash icon (not on the last one), + Add a section above and as a dashed tile below. Each change is saved at once
+  (`template_save` → `<home>/.echo/templates/<id>.md`, which `pick_template` already read first); a built-in keeps its id
+  and becomes Edited, Reset to built-in takes the user's file away; New template takes its id from its name; Delete.
+  Taken-away files go to `.echo/trash/templates/`. Built-in instructions are one line each (they show as written).
+- A call's Minutes says which template wrote them and why ("the title has "sync"", "chosen for this call") with
+  Write again with… a menu of the templates (IPC `write_notes` + `template`: kept in the call's `meta.json` `template`,
+  so later runs follow it too; a template since deleted falls back to the title's). `calls::template_of`.
+- The summary's shape in the built-ins (from the Meeting Notebook plugin): one sentence on what it was for, Highlights
+  3–7 "**Topic:** … [mm:ss]", Risks & issues only when raised, up to three Key dates.
+
 ### Copy and paste
 - macOS: the app has its own menu bar — Echo (Hide, Hide Others, Quit) and Edit (Undo, Redo, Cut, Copy, Paste, Select
   All; `tray::app_menu`, muda's predefined items, made once AppKit has launched). WebKit takes ⌘C, ⌘V, ⌘X, ⌘A and ⌘Z
