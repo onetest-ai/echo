@@ -272,9 +272,14 @@ fn render_page(md: &str, title: &str, model: Option<&str>, load: &Loader, frames
     top.push_str(&format!(
         "<p class=\"note\">Written by AI ({by}) from an automatic transcript. Check names, figures and commitments before you share it.</p>"
     ));
-    // Under the notes' own title, else under one made from the call's.
+    // Under the notes' own title, else under one made from the call's. In the window, without the lines between that
+    // title and the first section (the template's header: date, duration, people…): the call's own header shows them.
     let main = match body.html.find("</h1>") {
-        Some(i) => format!("{}{top}{}", &body.html[..i + 5], &body.html[i + 5..]),
+        Some(i) => {
+            let rest = &body.html[i + 5..];
+            let rest = if embed { rest.find("<h2").map_or(rest, |j| &rest[j..]) } else { rest };
+            format!("{}{top}{rest}", &body.html[..i + 5])
+        }
         None => format!("<h1>{}</h1>{top}{}", esc(title), body.html),
     };
 
@@ -983,6 +988,17 @@ main > h1:first-child + .note { margin-top: 0; }
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_window_leaves_out_the_minutes_header_the_page_keeps_it() {
+        let md = "# Sync\n\n2026-11-03 · 17 min · Dana, Lee\n\nSince last time: more\n\n## Summary\nWe met.\n";
+        let load = |_: &str| None;
+        let (page, _) = render_page(md, "Sync", Some("sonnet"), &load, &[], false);
+        assert!(page.contains("17 min") && page.contains("Since last time") && page.contains("We met."));
+        let (window, _) = render_page(md, "Sync", Some("sonnet"), &load, &[], true);
+        assert!(!window.contains("17 min") && !window.contains("Since last time"), "the call's header shows them");
+        assert!(window.contains("Written by AI (Echo, sonnet)") && window.contains("We met."));
+    }
 
     #[test]
     fn a_profile_renders_line_by_line_and_safely() {
