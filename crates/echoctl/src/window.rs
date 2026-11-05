@@ -342,6 +342,7 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
             json_reply(crate::prep::load(id).unwrap_or_else(|| json!({ "error": "no prep yet", "writing": crate::prep::writing(id) })))
         }
         "/api/tasks" => json_reply(tasks_view()),
+        "/api/today" => json_reply(crate::today::view(&tasks_view())),
         // Open work in other threads, by words in its title (#20: Link to an item in another thread…).
         "/api/work/search" => {
             let q = req.uri().query().unwrap_or("");
@@ -2155,6 +2156,11 @@ pub fn handle(msg: &str) -> Handled {
             Err(e) => notice(&format!("{e:#}")),
         },
         // Where the window's panels and views go (`Layout` in app.js); nothing else reads it.
+        // Today: Got it on a card (hidden until its source sends the next).
+        "today_seen" => match crate::today::seen(v["key"].as_str().unwrap_or("")) {
+            Ok(()) => true.into(),
+            Err(e) => notice(&format!("{e:#}")),
+        },
         "view_state" => {
             if let Err(e) = crate::view::save(&v["view"]) {
                 eprintln!("window view not saved: {e:#}");

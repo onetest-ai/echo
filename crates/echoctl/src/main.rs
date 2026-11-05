@@ -38,6 +38,7 @@ mod people;
 mod prep;
 mod projectsync;
 mod tasks;
+mod today;
 mod teams_transcript;
 mod view;
 mod vocab;

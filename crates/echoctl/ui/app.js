@@ -331,6 +331,7 @@ const brainOn = () => !(typeof S !== 'undefined' && S.state && S.state.brain ===
 /** The activities shown: those whose `when` (if any) holds. */
 const shownActivities = () => ACTIVITIES.filter((a) => !a.when || a.when())
 const ACTIVITIES = [
+  { id: 'today', label: 'Today', layout: 'single', icon: ICON('<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8"/>') },
   { id: 'calls', label: 'Calls', layout: 'list-detail', icon: ICON('<path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2"/>') },
   { id: 'calendar', label: 'Calendar', layout: 'single', icon: ICON('<rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/>') },
   { id: 'projects', label: 'Threads', layout: 'single', icon: ICON('<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M8 13h8"/>') },
@@ -507,6 +508,9 @@ async function loadMoreCalls() {
 async function loadProjects() {
   try { S.pj.data = await get('api/projects') } catch { /* app restarting */ }
 }
+async function loadToday() {
+  try { S.today = await get('api/today') } catch { /* app restarting */ }
+}
 async function loadTasks() {
   try { S.tk.data = await get('api/tasks') } catch { /* app restarting */ }
 }
@@ -603,6 +607,8 @@ function route() {
   if (sm && sm[1] === 'vocabulary') { S.view = 'calls'; setTimeout(() => { Layout.show('vocabulary', panelViews()); layoutChanged() }); return }
   if (sm) { S.view = 'settings'; if (sm[1]) S.setSection = sm[1]; return }
   if (h === 'tasks') { S.view = 'tasks'; return }
+  // The window opens on Today.
+  if (h === 'today' || h === '') { S.view = 'today'; return }
   // Knowledge: Recall's tabs and the plugins' (`knowledge.tab`, `#brain/<plugin>:<id>/<its route>`).
   const bm = h.match(/^brain(?:\/([\w:-]+)(?:\/(.*))?)?$/)
   if (bm && !brainOn() && !knowledgeTabs().length) { S.view = 'calls'; return }
@@ -641,7 +647,7 @@ function route() {
 const go = (hash) => { if (location.hash.slice(1) !== hash) location.hash = hash; else render() }
 /** An activity, where the user left it (the open call and tab; the calendar's day or week). */
 const goActivity = (id) => go(ACTIVITIES.some((a) => a.id === id && a.plugin) ? ((S.plRoutes || {})[id] ? `${id}/${S.plRoutes[id]}` : id) : id === 'calendar' ? `calendar/${S.cal.mode}` : id === 'settings' ? `settings/${S.setSection}`
-  : id === 'tasks' ? 'tasks' : id === 'brain' ? `brain/${S.br.tab}`
+  : id === 'tasks' ? 'tasks' : id === 'today' ? 'today' : id === 'brain' ? `brain/${S.br.tab}`
   : id === 'projects' ? (S.pj.found ? 'found' : S.pj.client ? `client/${S.pj.client}/${S.pj.ctab || 'overview'}` : S.pj.sel ? `project/${S.pj.sel}/${S.pj.tab}` : 'projects') : (S.selected ? `call/${S.selected}/${S.tab}` : 'calls'))
 
 // ── language of the next recording (Record ▾) ──────────────────────────────────────────────
@@ -998,6 +1004,44 @@ function doc() {
   const body = tabBody(c, segs, chat, frames, actions)
   const confirm = S.confirmDelete ? confirmBox(c) : ''
   return typeof body === 'string' ? { head, pane: confirm + body } : { head, bar: confirm + body.bar, frame: body.frame }
+}
+
+/** Today (the first activity; the window opens on it): cards delivered to Echo (a routine's morning brief — Got it
+ *  hides one until its source sends the next), your day (today's meetings: the call, Show prep or Prepare, Record when
+ *  it starts) and your work (Tasks' piles, a few of each). An empty part isn't drawn. */
+function todayView() {
+  const d = S.today
+  if (!d) return `<div class="skeleton" style="padding:22px">${'<i></i>'.repeat(8)}</div>`
+  const now = new Date()
+  const date = now.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })
+  const meetings = (d.day || []).filter((x) => x.kind === 'meeting').length
+  const mine = (d.work && d.work.mine) || { items: [], total: 0 }
+  const head = `<header class="td-head"><h1>Today</h1><span class="set-sub">${esc(date)}${meetings ? ` · ${meetings} meeting${meetings === 1 ? '' : 's'}` : ''}${mine.total ? ` · ${mine.total} task${mine.total === 1 ? '' : 's'} on you` : ''}</span></header>`
+  const cards = (d.cards || []).map((c) => `<section class="td-card"><div class="td-card-h"><b>${esc(c.title)}</b><span class="set-sub">${esc([c.about, c.at ? hm(new Date(c.at)) : ''].filter(Boolean).join(' · '))}</span><button class="btn ghost" data-today-seen="${esc(c.key)}">Got it</button></div><div class="td-md">${c.html}</div>${c.notice ? `<p class="set-sub">${esc(c.notice)}</p>` : ''}</section>`).join('')
+  // Your day: a line a meeting or call, the line "now" between past and to come.
+  let nowDrawn = false
+  const rows = (d.day || []).map((x) => {
+    const st = x.start ? new Date(x.start) : null, en = x.end ? new Date(x.end) : null
+    const past = en ? en < now : st ? st < now : false
+    const line = !nowDrawn && st && st > now ? (nowDrawn = true, `<div class="td-now"><span>${esc(hm(now))}</span></div>`) : ''
+    const chips = (x.threads || []).map((p) => `<span class="pj-chip"><button class="link-btn" data-pj="goto" data-id="${esc(p.id)}">${projIcon(p, 14)}${esc(p.name)}</button></span>`).join('')
+    const acts = []
+    if (x.call) acts.push(`<button class="btn ghost" data-call="${esc(x.call)}">Open the call</button>`)
+    if (x.prep && x.prep.ready) acts.push(`<button class="btn${past ? ' ghost' : ' primary'}" data-ev-prep="${esc(x.prep.id)}" data-ev-call="${esc(x.call || '')}">Show prep</button>`)
+    else if (x.prep && x.prep.writing) acts.push('<span class="set-sub">Writing the prep…</span>')
+    else if (x.prep && !past) acts.push(`<button class="btn" data-prep-write="${esc(x.prep.id)}" data-prep-open="1">Prepare</button>`)
+    if (x.kind === 'meeting' && !past && !x.call) acts.push(x.scheduled ? `<button class="btn ghost" data-unschedule="${esc(x.event)}">Don't record</button>` : `<button class="btn ghost" data-schedule="${esc(x.event)}">Record when it starts</button>`)
+    return `${line}<div class="td-row${past ? ' past' : ''}"><span class="td-t mono">${st ? esc(hm(st)) : ''}</span><div class="td-b"><div class="td-s"><b>${esc(x.subject || 'A call')}</b>${chips}</div><div class="td-a">${acts.join('')}</div></div></div>`
+  }).join('') + (!nowDrawn && (d.day || []).length ? `<div class="td-now"><span>${esc(hm(now))}</span></div>` : '')
+  const day = (d.day || []).length ? `<section class="td-sec"><h2>Your day</h2>${rows}</section>` : ''
+  // Your work: what you owe (late first), what is owed to you, what you wait for.
+  const item = (t, who) => `<li><a href="${esc(t.link)}">${esc(t.title)}</a>${t.late ? ' · <span class="warn">late</span>' : t.due ? ` · ${esc(new Date(t.due + 'T12:00').toLocaleDateString([], { day: 'numeric', month: 'short' }))}` : ''}${who ? ` · <span class="set-sub">${esc(who)}</span>` : ''}</li>`
+  const pile = (title, p, who) => p && p.items.length ? `<div class="td-pile"><h3>${title}${p.total > p.items.length ? ` <span class="set-sub">${p.total}</span>` : ''}</h3><ul>${p.items.map((t) => item(t, who(t))).join('')}</ul></div>` : ''
+  const w = d.work || {}
+  const piles = pile('I owe', w.mine, () => '') + pile('Owed to me', w.owed, (t) => t.owner) + pile('Waiting for others', w.waiting, (t) => t.waiting_for && t.waiting_for.who)
+  const work = piles ? `<section class="td-sec"><h2>My work <button class="link-btn" data-go="tasks">Tasks</button></h2>${piles}</section>` : ''
+  const empty = !cards && !day && !work ? '<div class="empty"><div><h3>A quiet day</h3><p>No meetings today and nothing on you in Tasks.</p></div></div>' : ''
+  return `<div class="td">${head}${cards}<div class="td-grid">${day}${work}</div>${empty}</div>`
 }
 
 /** A meeting still to come (Calls → Coming up today, `echo://prep`): its header and the Prep tab; Transcript and
@@ -6315,6 +6359,8 @@ function render() {
     try { if (box && kt.after) kt.after(box) } catch (e) { console.error(e) }
     drawGraph()
     drawPeople()
+  } else if (S.view === 'today') {
+    patch(primary, `<main class="main">${noticesBar()}${todayView()}</main>`)
   } else if (S.view === 'tasks') {
     patch(primary, `<main class="main">${noticesBar()}${tasksView()}</main>`)
   } else if (S.view === 'projects') {
@@ -6396,7 +6442,7 @@ function placeDetail() {
 
 /** What the screen depends on: re-render only when it changes (keeps selection and scroll). */
 // (the minute too: the pill's "meeting soon" comes and goes with the clock)
-const fingerprint = () => JSON.stringify([S.state, S.calls, S.call, S.agenda, S.cal.data, S.cal.selected, S.settings, S.pj.data, S.pj.detail, S.pj.foundData, S.pj.work, S.pj.series, S.up, S.upPrep, Math.floor(Date.now() / 60000)])
+const fingerprint = () => JSON.stringify([S.state, S.calls, S.call, S.agenda, S.cal.data, S.cal.selected, S.settings, S.pj.data, S.pj.detail, S.pj.foundData, S.pj.work, S.pj.series, S.up, S.upPrep, S.today, Math.floor(Date.now() / 60000)])
 
 // A thread's meeting series (Profile → Meetings): open one; set a field.
 function seriesSet(el, field, value) {
@@ -6428,7 +6474,7 @@ document.addEventListener('click', (e) => {
   if (S.laterOpen && !(e.target.closest && e.target.closest('[data-cmd^="later-"]'))) { S.laterOpen = false; render() }
   // The sidebar open over a narrow page closes on a click beside it.
   if (S.barOver && !(e.target.closest && e.target.closest('.actbar'))) { S.barOver = false; render() }
-  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-theme-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-go],[data-conv-keep],[data-br-pclosed],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-up],[data-prep-write],[data-ev-prep],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
+  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-theme-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-go],[data-conv-keep],[data-br-pclosed],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-up],[data-today-seen],[data-prep-write],[data-ev-prep],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
   if (!t) { if (menuWas) render(); return }
   // Sign-ins (`signin.rs`): shown at once (starting / stopping / checking) until the next poll
   // brings the app's state.
@@ -6523,10 +6569,11 @@ document.addEventListener('click', (e) => {
   if (t.dataset.calmode) { S.cal.mode = t.dataset.calmode; S.cal.offset = 0; S.cal.data = null; go(`calendar/${S.cal.mode}`); return loadCalendar().then(render) }
   if (t.dataset.calnav !== undefined) { const n = Number(t.dataset.calnav); S.cal.offset = n === 0 ? 0 : S.cal.offset + n; S.cal.data = null; render(); return loadCalendar().then(render) }
   if (t.dataset.calImport) { send({ cmd: 'calendar_import', id: t.dataset.calImport }); const e = (S.cal.data.events || []).find((x) => x.id === t.dataset.calImport); if (e) e.import = { busy: true }; return render() }
-  if (t.dataset.schedule) { send({ cmd: 'schedule', id: t.dataset.schedule, languages: recordLang(), profile: pickedProfile() }); const e = (S.cal.data.events || []).find((x) => x.id === t.dataset.schedule); if (e) e.scheduled = true; return render() }
-  if (t.dataset.unschedule) { send({ cmd: 'unschedule', id: t.dataset.unschedule }); const e = (S.cal.data.events || []).find((x) => x.id === t.dataset.unschedule); if (e) e.scheduled = false; return render() }
+  if (t.dataset.schedule) { send({ cmd: 'schedule', id: t.dataset.schedule, languages: recordLang(), profile: pickedProfile() }); const e = ((S.cal.data && S.cal.data.events) || []).find((x) => x.id === t.dataset.schedule); if (e) e.scheduled = true; if (S.view === 'today') setTimeout(() => loadToday().then(render), 400); return render() }
+  if (t.dataset.unschedule) { send({ cmd: 'unschedule', id: t.dataset.unschedule }); const e = ((S.cal.data && S.cal.data.events) || []).find((x) => x.id === t.dataset.unschedule); if (e) e.scheduled = false; if (S.view === 'today') setTimeout(() => loadToday().then(render), 400); return render() }
   if (t.dataset.call) { S.listOpen = false; return go(`call/${t.dataset.call}/${S.tab}`) }
   if (t.dataset.up) { S.listOpen = false; return go(`upcoming/${t.dataset.up}`) }
+  if (t.dataset.todaySeen) { send({ cmd: 'today_seen', key: t.dataset.todaySeen }); if (S.today) S.today.cards = (S.today.cards || []).filter((c) => c.key !== t.dataset.todaySeen); return render() }
   if (t.dataset.prepWrite) {
     send({ cmd: 'project', op: 'prep_write', prep: t.dataset.prepWrite })
     // From the calendar: open it in Calls, where it shows as it is written.
@@ -6535,6 +6582,7 @@ document.addEventListener('click', (e) => {
   }
   if (t.dataset.evPrep) {
     // A recorded meeting's prep is its call's Prep tab; one still to come is in Coming up today.
+    if (t.dataset.evCall) return go(`call/${t.dataset.evCall}/prep`)
     const ev = S.cal.data && (S.cal.data.events || []).find((x) => x.prep && x.prep.id === t.dataset.evPrep)
     S.cal.selected = null
     return ev && ev.recorded ? go(`call/${ev.recorded.name}/prep`) : go(`upcoming/${t.dataset.evPrep}`)
@@ -6939,6 +6987,7 @@ window.addEventListener('hashchange', async () => {
   if (S.view === 'settings') { await loadSettings(); render() }
   if (S.view === 'projects') { await loadProjects(); await loadProject(); render() }
   if (S.view === 'tasks') { await loadTasks(); render() }
+  if (S.view === 'today') { await loadToday(); render() }
   if (S.view === 'brain') { await loadBrain(); render() }
   if (S.view === 'calls' && S.selected && !S.call) { await loadCall(S.selected); render() }
 })
@@ -6981,6 +7030,7 @@ window.echo = {
     await loadCalls(); if (S.selected) await loadCall(S.selected); if (S.view === 'calendar') await loadCalendar(true); if (S.view === 'settings') await loadSettings()
     await loadProjects(); if (S.view === 'projects') await loadProject()
     if (S.view === 'tasks') { await loadTasks(); if (S.pj.node) await loadWork() }
+    if (S.view === 'today') await loadToday()
     if (typingNotes()) S.renderOnBlur = true
     else render()
   },
@@ -7143,6 +7193,7 @@ window.echo = {
   await loadPluginClients()
   if (S.view === 'projects') await loadProject()
   if (S.view === 'tasks') await loadTasks()
+  if (S.view === 'today') await loadToday()
   if (S.view === 'brain') await loadBrain()
   if (S.view === 'calls' && !S.selected && !S.upSel && S.calls && S.calls.length) S.selected = S.calls[0].name, history.replaceState(null, '', `#call/${S.selected}/minutes`)
   if (S.selected) await loadCall(S.selected)

@@ -225,6 +225,17 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   only; × = not this thread's (`Project.not_series`). `echoctl series list [--thread] | set <key> <json>`.
 - The event card is 400 px wide (`min(400px, 100vw − 24px)`).
 
+### Today (`today.rs`, `#today`, `/api/today`; the first activity, the window opens on it)
+- Cards delivered to Echo itself: `deliver` kind `today` ("Echo's Today page" on an install sheet; always ready;
+  reserved — no plugin provides it). A routine's or a plugin's message becomes its source's card (the source = its
+  `about`, else its title; a new one replaces the old, ≤ 20 kept), rendered by Echo's safe writer with the AI notice;
+  Got it (IPC `today_seen`) hides it until that source sends the next. `<home>/.echo/today-cards.json`. The morning
+  brief is a Scheduler routine delivered here; Echo writes no brief itself.
+- Your day: today's agenda in time order with a line at now — each meeting its threads, its call once recorded (Open the
+  call), Show prep / Prepare, Record when it starts / Don't record; a call of today with no meeting on its own line.
+- My work: Tasks' piles (`tasks::across`), a few of each — I owe (late first), Owed to me, Waiting for others.
+- An empty part isn't drawn. Not yet: Needs you now (tagged / burning in the last 24 h) — the next step.
+
 ### A prep before each meeting (`prep.rs`)
 - For today's calendar meetings of an open thread, written without being asked (the app checks every 5 minutes —
   the morning's, one added later; ≥ 5 min before the start; `prep::start_scheduler`): `<home>/prep/<id>/prep.json`,
