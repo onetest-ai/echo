@@ -258,7 +258,24 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   call with its minutes like any other.
 - The header counts your late tasks. Ideas from the Meeting Notebook plugin (onetest-ai/echo-plugins#1) by Adam
   Auerbach: the late count, minutes' state and new minutes, closing from My work.
-- An empty part isn't drawn. Not yet: Needs you now (tagged / burning in the last 24 h) — the next step.
+- An empty part isn't drawn.
+- The heading greets by the time of day and the first name in About me ("Good morning, Dana"): before 5 Good night, to
+  12 Good morning, to 18 Good afternoon, then Good evening. The date and counts stay beside it.
+- **Needs you now** (`needs.rs`, `/api/today` `needs`, `echoctl needs [--refresh]`): what waits on the user from the last
+  24 h, read through Echo's Microsoft 365 sign-in every 5 minutes by the app. Tagged: a 1:1 chat whose last word isn't
+  theirs; an @mention of them in a group or meeting chat with no word of theirs after; a mail with them in To (not Cc)
+  from a colleague or a sender trusted for a client, no invite, nothing automated (no-reply, "Auto …" senders,
+  accept/decline), no reply of theirs since in its conversation. Then one model call with no tools on the default
+  profile keeps those that wait on them — a question, a request, something to decide; thanks, "ok", FYIs and reports go
+  (cached per item and its words; a failed call keeps all). Hot: in the meeting chats of open threads, after the user's
+  last word, a burst (≥ 5 messages from ≥ 2 people in 30 min) or urgency words, confirmed by a model with no tools on
+  the thread's profile that must quote one message word for word (checked). Hot items first, with a warn dot.
+- Each item: Reply in Teams (the Teams app on that message, `msteams:` — `open_url` allows it), Read and reply for a mail
+  (its new part read here, the answer typed by the user and sent by their click on Reply / Reply all —
+  `m365::mail_reply_text`, IPC `needs_reply`; Open in Outlook beside it), I'll do it (a dialog: the task's words and its
+  thread — the task is theirs, due today, under Follow-ups → From Teams and mail in that thread, made once; IPC
+  `needs_decide`), Won't do. An item leaves when answered (the next read no longer finds it) or decided
+  (`<home>/.echo/needs.json`, decisions kept two days). No snooze, no fold, no notifications: only in Today.
 
 ### A prep before each meeting (`prep.rs`)
 - For today's calendar meetings of an open thread, written without being asked (the app checks every 5 minutes —

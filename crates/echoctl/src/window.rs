@@ -342,6 +342,11 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
             json_reply(crate::prep::load(id).unwrap_or_else(|| json!({ "error": "no prep yet", "writing": crate::prep::writing(id) })))
         }
         "/api/tasks" => json_reply(tasks_view()),
+        // A mail of Needs you now, to read it here (its new part as text, escaped by the page).
+        "/api/needs/mail" => {
+            let id = query_param(req.uri().query().unwrap_or(""), "id").unwrap_or_default();
+            json_reply(crate::graph::message(&id).map(|m| json!({"subject": m["subject"], "from": m["from"], "at": m["at"], "text": m["text"], "url": m["url"]})).unwrap_or_else(|e| json!({ "error": format!("{e:#}") })))
+        }
         "/api/today" => {
             let mut v = crate::today::view(&tasks_view());
             // A Teams transcript being imported, or why it wasn't (the calendar's own state, by event).
@@ -2166,6 +2171,27 @@ pub fn handle(msg: &str) -> Handled {
             Err(e) => notice(&format!("{e:#}")),
         },
         // Where the window's panels and views go (`Layout` in app.js); nothing else reads it.
+        // Today → Needs you now: I'll do it (a task, in a thread) or Won't do; Refresh reads Teams and mail again.
+        "needs_decide" => match crate::needs::decide(v["id"].as_str().unwrap_or(""), v["how"].as_str().unwrap_or(""), v["thread"].as_str(), v["title"].as_str()) {
+            Ok(_) => true.into(),
+            Err(e) => notice(&format!("{e:#}")),
+        },
+        // Read and reply (a mail of Needs you now): the user's words, sent by their click.
+        "needs_reply" => match crate::m365::mail_reply_text(v["message"].as_str().unwrap_or(""), v["all"] == true, v["text"].as_str().unwrap_or(""), None, true) {
+            Ok(_) => {
+                let _ = crate::needs::decide(v["id"].as_str().unwrap_or(""), "wont", None, None);
+                notice("Sent")
+            }
+            Err(e) => notice(&format!("{e:#}")),
+        },
+        "needs_refresh" => {
+            std::thread::spawn(|| {
+                if let Err(e) = crate::needs::refresh() {
+                    eprintln!("needs you now: {e:#}");
+                }
+            });
+            false.into()
+        }
         // My work's Claude icon: the user's words about one task, done by `claude -p` in the background.
         "task_ask" => match crate::today::ask_task(v["ask"].as_str().unwrap_or(""), v["project"].as_str().unwrap_or(""), v["node"].as_str().unwrap_or(""), v["text"].as_str().unwrap_or("")) {
             Ok(()) => true.into(),
@@ -2427,7 +2453,7 @@ fn act(v: &Value) -> bool {
         }
         "open_url" => {
             // The web, and a note in Obsidian (`obsidian://open?vault=…&file=…`: it only opens the note).
-            if let Some(u) = v["url"].as_str().filter(|u| u.starts_with("https://") || u.starts_with("obsidian://open?")) {
+            if let Some(u) = v["url"].as_str().filter(|u| u.starts_with("https://") || u.starts_with("obsidian://open?") || u.starts_with("msteams:/")) {
                 open_external(u);
             }
             false

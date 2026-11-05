@@ -22,7 +22,7 @@ use crate::graph::{self, Body};
 pub const KINDS: [(&str, &str); 3] = [("mail", "message"), ("chats", "chatMessage"), ("files", "driveItem")];
 
 /// A path segment or query value, percent-encoded. A segment of only dots is encoded too: curl would resolve `..`.
-fn enc(s: &str) -> String {
+pub(crate) fn enc(s: &str) -> String {
     if !s.is_empty() && s.bytes().all(|b| b == b'.') {
         return "%2E".repeat(s.len());
     }
@@ -175,8 +175,15 @@ pub fn mail_send(to: &[String], cc: &[String], subject: &str, file: &Path, ai: O
 
 /// A reply to mail `id` (`all`: to everyone on it), the Markdown `file` above the quoted mail.
 pub fn mail_reply(id: &str, all: bool, file: &Path, ai: Option<&str>, yes: bool) -> Result<Value> {
+    let (md, _) = markdown_file(file)?;
+    mail_reply_text(id, all, &md, ai, yes)
+}
+
+/// A reply in the user's own words (Today's Read and reply: their click on Reply is the yes).
+pub fn mail_reply_text(id: &str, all: bool, md: &str, ai: Option<&str>, yes: bool) -> Result<Value> {
+    anyhow::ensure!(!md.trim().is_empty(), "the reply is empty");
     let m = graph::message(id)?;
-    let (md, html) = markdown_file(file)?;
+    let html = crate::minutes::markdown_html(md);
     let html = with_notice(html, ai);
     let would = json!({"reply_to": {"subject": m["subject"], "from": m["from"], "at": m["at"]}, "to": if all { "everyone on it" } else { "its sender" }, "text": md});
     if !yes {

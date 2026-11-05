@@ -1020,7 +1020,10 @@ function todayView() {
   const mine = (d.work && d.work.mine) || { items: [], total: 0 }
   // How many of yours are late, beside the meetings and tasks (from the Meeting Notebook plugin's Today).
   const late = (mine.items || []).filter((t) => t.late).length
-  const head = `<header class="td-head"><h1>Today</h1><span class="set-sub">${esc(date)}${meetings ? ` · ${meetings} meeting${meetings === 1 ? '' : 's'}` : ''}${mine.total ? ` · ${mine.total} task${mine.total === 1 ? '' : 's'} on you` : ''}${late ? ` · <span class="warn">${late} late</span>` : ''}</span></header>`
+  // Hello by the time of day, by the user's first name (About me).
+  const hr = now.getHours(), first = (d.me || '').trim().split(/\s+/)[0]
+  const hello = `${hr < 5 ? 'Good night' : hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening'}${first ? `, ${first}` : ''}`
+  const head = `<header class="td-head"><h1>${esc(hello)}</h1><span class="set-sub">${esc(date)}${meetings ? ` · ${meetings} meeting${meetings === 1 ? '' : 's'}` : ''}${mine.total ? ` · ${mine.total} task${mine.total === 1 ? '' : 's'} on you` : ''}${late ? ` · <span class="warn">${late} late</span>` : ''}</span></header>`
   const cards = (d.cards || []).map((c) => `<section class="td-card"><div class="td-card-h"><b>${esc(c.title)}</b><span class="set-sub">${esc([c.about, c.at ? hm(new Date(c.at)) : ''].filter(Boolean).join(' · '))}</span><button class="btn ghost" data-today-seen="${esc(c.key)}">Got it</button></div><div class="td-md">${c.html}</div>${c.notice ? `<p class="set-sub">${esc(c.notice)}</p>` : ''}</section>`).join('')
   // Your day: a line a meeting or call, the line "now" between past and to come.
   let nowDrawn = false
@@ -1086,7 +1089,43 @@ function todayView() {
   const cards2 = tasks.map(([t, kind, who]) => card(t, kind, who))
   const work = cards2.length || S.todayAskId ? `<section class="td-sec"><h2>My work · this week <button class="link-btn" data-go="tasks">Tasks</button></h2>${todayAskBar()}<div class="td-tasks">${cards2.join('')}</div></section>` : ''
   const empty = !cards && !day && !work ? '<div class="empty"><div><h3>A quiet day</h3><p>No meetings today and nothing on you in Tasks.</p></div></div>' : ''
-  return `<div class="td">${head}${cards}<div class="td-grid">${day}${work}</div>${empty}</div>${todayCloseDialog()}`
+  return `<div class="td">${head}${needsView(d.needs)}${cards}<div class="td-grid">${day}${work}</div>${empty}</div>${todayCloseDialog()}${needsDialog()}`
+}
+
+/** Today → Needs you now: tagged in the last day, or burning where you watch (`needs.rs`) — hot first. Reply in Teams
+ *  (the app) or Read and reply (a mail, here); I'll do it (a task, in a thread) or Won't do. Empty: not drawn. */
+function needsView(n) {
+  const items = (n && n.items) || []
+  if (!items.length) return ''
+  const ago = (t) => { const m = Math.round((Date.now() - new Date(t)) / 60000); return m < 60 ? `${Math.max(m, 1)} min` : `${Math.round(m / 60)} h` }
+  const rows = items.map((x) => {
+    const reply = x.source === 'mail' ? `<button class="btn" data-needs-read="${esc(x.id)}">Read and reply</button>`
+      : x.app_url || x.chat ? `<button class="btn" data-needs-open="${esc(x.app_url || '')}" data-chat="${esc(x.chat || '')}">Reply in Teams</button>` : ''
+    return `<div class="nd-row"><span class="nd-dot ${x.kind === 'hot' ? 'hot' : ''}" aria-label="${x.kind === 'hot' ? 'Burning' : 'For you'}"></span>
+      <div class="nd-b"><div><b>${esc(x.where || '')}</b> <span class="set-sub">— ${esc(x.line || '')}</span></div><div class="mono set-sub">${esc(x.from || '')} · ${esc(ago(x.at))} ago${x.quote ? ` · “${esc(x.quote)}”` : ''}</div></div>
+      <div class="nd-a">${reply}<button class="btn primary" data-needs-todo="${esc(x.id)}">I'll do it</button><button class="btn ghost" data-needs-wont="${esc(x.id)}">Won't do</button></div></div>`
+  }).join('')
+  return `<section class="td-card nd" aria-labelledby="nd-h"><div class="td-card-h"><b id="nd-h">Needs you now</b><span class="set-sub">the last 24 h · where you watch · goes away when you answer</span></div>${rows}</section>`
+}
+/** The dialogs of Needs you now: I'll do it (a task's title and its thread), Read and reply (the mail, your answer). */
+function needsDialog() {
+  const c = S.needsDlg
+  if (!c) return ''
+  const item = (((S.today && S.today.needs) || {}).items || []).find((x) => x.id === c.id) || {}
+  if (c.kind === 'todo') {
+    const threads = ((S.pj.data && S.pj.data.projects) || []).filter((p) => p.group !== 'closed')
+    const pick = `<select id="nd-thread" class="set-in">${threads.map((p) => `<option value="${esc(p.id)}"${p.id === item.thread ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select>`
+    return `<div class="td-modal" data-needs-off="1"><div class="td-dialog" role="dialog" aria-modal="true" aria-labelledby="nd-dlg">
+      <h3 id="nd-dlg">A task of yours</h3><label for="nd-title" class="set-sub">What to do</label><textarea id="nd-title" rows="2">${esc(item.line || '')}</textarea>
+      <label for="nd-thread" class="set-sub">In which thread</label>${pick}
+      <div class="td-dialog-a"><button class="btn ghost" data-needs-off="1">Cancel</button><button class="btn primary" data-needs-todo-ok="${esc(c.id)}">Add to Tasks</button></div></div></div>`
+  }
+  const m = c.mail
+  const body = !m ? '<p class="set-sub">Reading the mail…</p>' : m.error ? `<p class="warn">${esc(m.error)}</p>` : `<p><b>${esc(m.subject || '')}</b><br><span class="set-sub">${esc((m.from && (m.from.name || m.from.email)) || '')}</span></p><div class="nd-mail">${esc(m.text || '')}</div>`
+  return `<div class="td-modal" data-needs-off="1"><div class="td-dialog wide" role="dialog" aria-modal="true" aria-labelledby="nd-dlg">
+    <h3 id="nd-dlg">Read and reply</h3>${body}
+    <label for="nd-reply" class="set-sub">Your answer — sent when you click Reply</label><textarea id="nd-reply" rows="4"></textarea>
+    <div class="td-dialog-a">${m && m.url ? `<button class="link-btn" data-ext href="${esc(m.url)}" data-needs-outlook="${esc(m.url)}">Open in Outlook</button><span class="grow"></span>` : ''}<button class="btn ghost" data-needs-off="1">Cancel</button><button class="btn" data-needs-send="${esc(c.id)}" data-all="1">Reply all</button><button class="btn primary" data-needs-send="${esc(c.id)}">Reply</button></div></div></div>`
 }
 
 /** Today → a task's Claude icon: the user's words go to Echo (IPC `task_ask`), which runs `claude -p` (no tools, the
@@ -6560,7 +6599,7 @@ document.addEventListener('click', (e) => {
   if (S.laterOpen && !(e.target.closest && e.target.closest('[data-cmd^="later-"]'))) { S.laterOpen = false; render() }
   // The sidebar open over a narrow page closes on a click beside it.
   if (S.barOver && !(e.target.closest && e.target.closest('.actbar'))) { S.barOver = false; render() }
-  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-theme-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-go],[data-conv-keep],[data-br-pclosed],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-up],[data-today-seen],[data-today-done],[data-today-retry],[data-today-import],[data-today-close],[data-today-keep],[data-today-ask],[data-today-ask-send],[data-today-undo],[data-today-askoff],[data-prep-write],[data-ev-prep],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
+  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-theme-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-go],[data-conv-keep],[data-br-pclosed],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-up],[data-today-seen],[data-today-done],[data-today-retry],[data-today-import],[data-today-close],[data-today-keep],[data-today-ask],[data-today-ask-send],[data-needs-open],[data-needs-wont],[data-needs-todo],[data-needs-todo-ok],[data-needs-read],[data-needs-send],[data-needs-outlook],[data-needs-off],[data-today-undo],[data-today-askoff],[data-prep-write],[data-ev-prep],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
   if (!t) { if (menuWas) render(); return }
   // Sign-ins (`signin.rs`): shown at once (starting / stopping / checking) until the next poll
   // brings the app's state.
@@ -6685,6 +6724,37 @@ document.addEventListener('click', (e) => {
     todayAsk(c, text)
     return render()
   }
+  if (t.dataset.needsOpen !== undefined && t.dataset.needsOpen !== null && (t.dataset.needsOpen || t.dataset.chat)) {
+    // The Teams app on that message (its link as msteams:), else the chat.
+    const u = t.dataset.needsOpen || `msteams:/l/chat/${encodeURIComponent(t.dataset.chat)}/0`
+    return send({ cmd: 'open_url', url: u })
+  }
+  if (t.dataset.needsWont) { send({ cmd: 'needs_decide', id: t.dataset.needsWont, how: 'wont' }); if (S.today && S.today.needs) S.today.needs.items = S.today.needs.items.filter((x) => x.id !== t.dataset.needsWont); return render() }
+  if (t.dataset.needsTodo) { S.needsDlg = { kind: 'todo', id: t.dataset.needsTodo }; return render() }
+  if (t.dataset.needsTodoOk) {
+    const id = t.dataset.needsTodoOk, thread = ($('#nd-thread') || {}).value, title = ($('#nd-title') || {}).value
+    send({ cmd: 'needs_decide', id, how: 'todo', thread, title })
+    S.needsDlg = null
+    if (S.today && S.today.needs) S.today.needs.items = S.today.needs.items.filter((x) => x.id !== id)
+    setTimeout(() => loadToday().then(render), 800)
+    return render()
+  }
+  if (t.dataset.needsRead) {
+    const item = ((S.today.needs || {}).items || []).find((x) => x.id === t.dataset.needsRead)
+    const c = S.needsDlg = { kind: 'mail', id: t.dataset.needsRead, message: item && item.message, mail: null }
+    get('api/needs/mail?id=' + encodeURIComponent(c.message || '')).then((m) => { if (S.needsDlg === c) { c.mail = m; render() } })
+    return render()
+  }
+  if (t.dataset.needsSend) {
+    const c = S.needsDlg, text = (($('#nd-reply') || {}).value || '').trim()
+    if (!c || !text) return
+    send({ cmd: 'needs_reply', id: c.id, message: c.message, text, all: t.dataset.all === '1' })
+    S.needsDlg = null
+    if (S.today && S.today.needs) S.today.needs.items = S.today.needs.items.filter((x) => x.id !== c.id)
+    return render()
+  }
+  if (t.dataset.needsOutlook) return send({ cmd: 'open_url', url: t.dataset.needsOutlook })
+  if (t.dataset.needsOff && (t.tagName === 'BUTTON' || e.target === t)) { S.needsDlg = null; return render() }
   if (t.dataset.todayUndo) { send({ cmd: 'project', op: 'ledger', id: t.dataset.project, body: { op: 'undo', target: t.dataset.todayUndo } }); S.todayAskId = null; setTimeout(() => loadToday().then(render), 800); return render() }
   if (t.dataset.todayAskoff) { S.todayAskId = null; return render() }
   if (t.dataset.todayClose) {
@@ -7093,6 +7163,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && S.selNote) return hideSelPop()
   if (e.key === 'Escape' && S.lightbox) { S.lightbox = null; return render() }
   if (e.key === 'Escape' && S.todayClose) { S.todayClose = null; return render() }
+  if (e.key === 'Escape' && S.needsDlg) { S.needsDlg = null; return render() }
   if (e.key === 'Enter' && !e.shiftKey && e.target.id === 'td-ask-text') { e.preventDefault(); const b = $('[data-today-ask-send]'); if (b) b.click(); return }
   if (e.key === 'Escape' && (S.stopAsk || S.listOpen || S.menuOpen || S.laterOpen || S.convAsk || S.overlay || S.barOver)) { S.barOver = false; S.convAsk = null; S.stopAsk = false; S.listOpen = false; S.menuOpen = false; S.laterOpen = false; S.overlay = false; return render() }
   if ((MAC ? e.metaKey : e.ctrlKey) && e.key === ',') { e.preventDefault(); return goActivity('settings') }

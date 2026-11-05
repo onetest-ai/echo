@@ -1928,3 +1928,16 @@ select.set-in { width: auto; margin-right: 6px; }
 /* The list scrolls inside its card: the page stays put. */
 .td-tasks { max-height: min(62vh, 560px); overflow-y: auto; padding-right: 2px; }
 @media (max-width: 1000px) { .td-grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* Today → Needs you now: a row an item — a dot (burning: warn), where and the line, who and when, its actions. */
+.nd .td-card-h { margin-bottom: 4px; }
+.nd-row { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 4px 10px; align-items: start; padding: 8px 0; border-top: 1px solid var(--line); }
+.nd-row:first-of-type { border-top: 0; }
+.nd-dot { width: 8px; height: 8px; border-radius: 4px; background: var(--accent); margin-top: 6px; }
+.nd-dot.hot { background: var(--warn); }
+.nd-b { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.nd-a { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.td-dialog.wide { width: min(640px, calc(100vw - 32px)); }
+.td-dialog select { width: 100%; height: 30px; padding: 0 8px; border-radius: var(--r-control); border: 1px solid var(--line-strong); background: var(--surface); color: var(--text); font: inherit; font-size: 13px; }
+.nd-mail { max-height: 280px; overflow-y: auto; white-space: pre-wrap; font-size: 12.5px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r-control); background: var(--bg); }
+@media (max-width: 900px) { .nd-row { grid-template-columns: 10px minmax(0, 1fr); } .nd-a { grid-column: 2; justify-content: flex-start; } }

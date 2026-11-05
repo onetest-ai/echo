@@ -315,7 +315,8 @@ pub fn ask_task(id: &str, project: &str, node: &str, words: &str) -> Result<()> 
 
 /// `/api/today`: the day, the work and the cards (`tasks`: the Tasks view, made by the window with its calendar).
 pub fn view(tasks: &Value) -> Value {
-    json!({"date": Local::now().to_rfc3339(), "day": day(), "work": work(tasks), "cards": cards(), "asks": load_asks()})
+    json!({"date": Local::now().to_rfc3339(), "day": day(), "work": work(tasks), "cards": cards(), "asks": load_asks(), "needs": crate::needs::view(),
+           "me": crate::config::Config::load().ok().and_then(|c| c.me).map(|p| p.name)})
 }
 
 #[cfg(test)]

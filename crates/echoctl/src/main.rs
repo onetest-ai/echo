@@ -15,6 +15,7 @@ mod config;
 mod deliver;
 mod m365;
 mod memo;
+mod needs;
 #[cfg(any(target_os = "macos", windows))]
 mod frames;
 #[cfg(feature = "transcribe")]
@@ -258,6 +259,12 @@ enum Cmd {
     Org {
         #[command(subcommand)]
         cmd: OrgCmd,
+    },
+    /// Today → Needs you now (JSON): what waits on you from the last day in Teams and mail; --refresh reads them again
+    #[command(hide = true)]
+    Needs {
+        #[arg(long)]
+        refresh: bool,
     },
     /// What Echo does with every meeting of a series: record always / ask / never, and in which language
     Series {
@@ -1671,6 +1678,13 @@ fn main() -> Result<()> {
         Cmd::Project { cmd } => project_command(cmd),
         Cmd::Client { cmd } => client_command(cmd),
         Cmd::Org { cmd } => org_command(cmd),
+        Cmd::Needs { refresh } => {
+            if refresh {
+                needs::refresh()?;
+            }
+            println!("{}", serde_json::to_string_pretty(&needs::view())?);
+            Ok(())
+        }
         Cmd::Series { cmd } => {
             let v = match cmd {
                 SeriesCmd::List { thread: Some(t) } => series::of_thread(&t)?,
