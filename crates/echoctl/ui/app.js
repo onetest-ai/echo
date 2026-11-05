@@ -1034,12 +1034,25 @@ function todayView() {
     return `${line}<div class="td-row${past ? ' past' : ''}"><span class="td-t mono">${st ? esc(hm(st)) : ''}</span><div class="td-b"><div class="td-s"><b>${esc(x.subject || 'A call')}</b>${chips}</div><div class="td-a">${acts.join('')}</div></div></div>`
   }).join('') + (!nowDrawn && (d.day || []).length ? `<div class="td-now"><span>${esc(hm(now))}</span></div>` : '')
   const day = (d.day || []).length ? `<section class="td-sec"><h2>Your day</h2>${rows}</section>` : ''
-  // Your work: what you owe (late first), what is owed to you, what you wait for.
-  const item = (t, who) => `<li><a href="${esc(t.link)}">${esc(t.title)}</a>${t.late ? ' · <span class="warn">late</span>' : t.due ? ` · ${esc(new Date(t.due + 'T12:00').toLocaleDateString([], { day: 'numeric', month: 'short' }))}` : ''}${who ? ` · <span class="set-sub">${esc(who)}</span>` : ''}</li>`
-  const pile = (title, p, who) => p && p.items.length ? `<div class="td-pile"><h3>${title}${p.total > p.items.length ? ` <span class="set-sub">${p.total}</span>` : ''}</h3><ul>${p.items.map((t) => item(t, who(t))).join('')}</ul></div>` : ''
+  // My work: a card a task due this week or late — what you owe, what is owed to you, what you wait for.
+  const all = (S.pj.data && S.pj.data.projects) || []
+  const today0 = new Date(); today0.setHours(0, 0, 0, 0)
+  const dueChip = (t) => {
+    if (t.late) return '<span class="chip td-late">late</span>'
+    if (!t.due) return ''
+    const d = new Date(t.due + 'T12:00'), same = d.toDateString() === today0.toDateString()
+    return `<span class="chip td-due">${same ? 'today' : esc(d.toLocaleDateString([], { weekday: 'short' }))}</span>`
+  }
+  const card = (t, kind, who) => {
+    const pj = all.find((x) => x.id === t.project)
+    const where = [kind, who, pj ? pj.name : ''].filter(Boolean).map(esc).join(' · ')
+    return `<a class="td-task" href="${esc(t.link)}"><span class="td-task-t">${esc(t.title)}</span>${dueChip(t)}<span class="td-task-m">${pj ? projIcon(pj, 12) : ''}${where}</span></a>`
+  }
   const w = d.work || {}
-  const piles = pile('I owe', w.mine, () => '') + pile('Owed to me', w.owed, (t) => t.owner) + pile('Waiting for others', w.waiting, (t) => t.waiting_for && t.waiting_for.who)
-  const work = piles ? `<section class="td-sec"><h2>My work <button class="link-btn" data-go="tasks">Tasks</button></h2>${piles}</section>` : ''
+  const cards2 = [...((w.mine && w.mine.items) || []).map((t) => card(t, 'I owe', '')),
+    ...((w.owed && w.owed.items) || []).map((t) => card(t, 'owed to me', t.owner)),
+    ...((w.waiting && w.waiting.items) || []).map((t) => card(t, 'waiting for', t.waiting_for && t.waiting_for.who))]
+  const work = cards2.length ? `<section class="td-sec"><h2>My work · this week <button class="link-btn" data-go="tasks">Tasks</button></h2><div class="td-tasks">${cards2.join('')}</div></section>` : ''
   const empty = !cards && !day && !work ? '<div class="empty"><div><h3>A quiet day</h3><p>No meetings today and nothing on you in Tasks.</p></div></div>' : ''
   return `<div class="td">${head}${cards}<div class="td-grid">${day}${work}</div>${empty}</div>`
 }

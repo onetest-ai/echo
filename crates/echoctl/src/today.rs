@@ -121,24 +121,28 @@ fn day() -> Vec<Value> {
     out
 }
 
-/// Your work, from Tasks' piles: what you owe (late first), what is owed to you, what you wait for — a few of each.
+/// Your work, from Tasks' piles — only what is due by the end of this week or late (the rest stays in Tasks): what you
+/// owe, what is owed to you, what you wait for; late first, then by date.
 fn work(tasks: &Value) -> Value {
-    let pile = |name: &str, n: usize| -> Value {
-        let all = tasks["piles"][name].as_array().cloned().unwrap_or_default();
+    let today = Local::now().date_naive();
+    let week_end = today + chrono::Duration::days(6 - i64::from(chrono::Datelike::weekday(&today).num_days_from_monday()));
+    let this_week = |t: &Value| t["late"] == true || t["due"].as_str().and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()).is_some_and(|d| d <= week_end);
+    let pile = |name: &str| -> Value {
+        let mut all: Vec<&Value> = tasks["piles"][name].as_array().into_iter().flatten().filter(|t| this_week(t)).collect();
+        all.sort_by_key(|t| (t["late"] != true, t["due"].as_str().unwrap_or("9999").to_string()));
         let items: Vec<Value> = all
             .iter()
-            .take(n)
             .map(|t| {
                 json!({
                     "title": t["title"], "due": t["due"], "late": t["late"], "owner": t["owner"], "project": t["project"],
-                    "waiting_for": t["waiting_for"],
+                    "waiting_for": t["waiting_for"], "story": t["story"]["title"],
                     "link": format!("echo://task/{}/{}", t["project"].as_str().unwrap_or(""), t["id"].as_str().unwrap_or("")),
                 })
             })
             .collect();
-        json!({"items": items, "total": all.len()})
+        json!({"items": items, "total": items.len()})
     };
-    json!({"mine": pile("mine", 6), "owed": pile("owed", 4), "waiting": pile("waiting", 4)})
+    json!({"mine": pile("mine"), "owed": pile("owed"), "waiting": pile("waiting"), "week_end": week_end.to_string()})
 }
 
 /// `/api/today`: the day, the work and the cards (`tasks`: the Tasks view, made by the window with its calendar).
@@ -168,10 +172,17 @@ mod tests {
     }
 
     #[test]
-    fn work_takes_a_few_of_each_pile_with_their_links() {
-        let tasks = json!({"piles": {"mine": [{"id": "T1", "project": "p", "title": "A", "late": true}, {"id": "T2", "project": "p", "title": "B"}], "owed": [], "waiting": []}});
+    fn work_is_this_weeks_and_late_tasks_late_first_with_their_links() {
+        let today = Local::now().date_naive();
+        let later = (today + chrono::Duration::days(30)).to_string();
+        let tasks = json!({"piles": {"mine": [
+            {"id": "T2", "project": "p", "title": "Today", "due": today.to_string()},
+            {"id": "T1", "project": "p", "title": "Late", "late": true, "due": "2020-01-01"},
+            {"id": "T3", "project": "p", "title": "Next month", "due": later},
+            {"id": "T4", "project": "p", "title": "No date"}], "owed": [], "waiting": []}});
         let w = work(&tasks);
-        assert_eq!(w["mine"]["total"], 2);
+        let titles: Vec<&str> = w["mine"]["items"].as_array().unwrap().iter().map(|x| x["title"].as_str().unwrap()).collect();
+        assert_eq!(titles, vec!["Late", "Today"], "this week's and late ones, late first");
         assert_eq!(w["mine"]["items"][0]["link"], "echo://task/p/T1");
         assert_eq!(w["owed"]["items"].as_array().unwrap().len(), 0);
     }
