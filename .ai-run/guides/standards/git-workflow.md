@@ -5,10 +5,19 @@
 ## Branch Naming Convention
 
 - base branch: main
-- pattern: short free-form feature name (e.g. `brain-rework`, `fix-plugin-settings`); no prefix
+- pattern: `<type>/<kebab-case-description>`
+
+| Type | Use for | Example |
+|---|---|---|
+| `feat/` | new features | `feat/memo-threads` |
+| `fix/` | bug fixes | `fix/plugin-settings` |
+| `refactor/` | restructuring without behaviour change | `refactor/brain-store` |
+| `chore/` | maintenance, dependencies, releases prep | `chore/update-deps` |
+| `ci/` | CI and packaging scripts | `ci/windows-release` |
+| `docs/` | documentation and guides | `docs/ai-guides` |
 
 ### Rules
-- R1. Feature work goes on a named branch (`brain-rework`, `plugins`, `obsidian-a`) merged to `main` through a GitHub pull request with a merge commit (`Merge pull request #75 from onetest-ai/brain-rework`); small commits also land on `main` directly (convention from history; no branch protection evidence in the repository).
+- R1. Branch from `main` as `<type>/<kebab-case-description>` with a type from the table above, and merge back to `main` through a GitHub pull request with a merge commit. Older branches (`brain-rework`, `plugins`) predate this pattern; don't rename them. No ticket prefix: the tracker is GitHub Issues, so reference an issue in the PR body (`Closes #N`).
 
 ## Commit Message Format
 
