@@ -5,6 +5,7 @@
 ## Tests and checks
 
 ### Rules
+- R0. Every change in behaviour starts from acceptance criteria and ends with them checked: each criterion has a functional test — a Rust test that proves the behaviour, a node test over an `app.js` block, or a check in the running window (`echoctl window --serve` on a copy of a data folder, never the user's real one); tests are written with the change, not on request, and run with the quality gates before it is called done. Evidence: `crates/echoctl/ui/workbench.test.mjs`
 - R1. A test that touches the data folder or config dir takes `paths::testenv::folders(name)` first and keeps the guard alive; it is the only code that sets `ECHOCTL_HOME` / `ECHOCTL_CONFIG_DIR` (the variables are process-wide). Evidence: `crates/echoctl/src/paths.rs::testenv.folders`
 - R2. Write Rust tests as a `#[cfg(test)] mod tests` at the end of the module they test, each named as the behaviour it proves in snake_case (`only_this_calls_files_and_the_previous_minutes`). Evidence: `crates/echoctl/src/guard.rs::only_this_calls_files_and_the_previous_minutes`
 - R3. Wait for a lock just released with `testenv::eventually`, not a fixed sleep (on macOS a child process holds the descriptor until it execs). Evidence: `crates/echoctl/src/paths.rs::eventually`

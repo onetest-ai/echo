@@ -61,7 +61,10 @@ stakeholder-map model in `docs/projects-design.md`. Recall indexing of mail, cha
 - Transcription: `vocab::for_call` adds the glossaries of the meeting's threads; `vocab add` from a thread's call also
   adds to its glossary.
 - A thread is drawn as its logo, else its client's (`icon: "client"`), else a `PJ_SYMBOLS` symbol, else an identicon
-  from its id (`ProjectArt`).
+  from its id (`ProjectArt`). Profile → Look offers only the pattern (in its colour) or its own logo; a thread that
+  picked a symbol or its client's logo keeps it, with "Use the pattern".
+- Profile has no People or Terms rows (People has its tab, terms Knowledge → Dictionary); its Meetings row lists the
+  thread's meeting series read only, × takes one out (`Project.not_series`; set a series on a meeting in the calendar).
 
 ### The work ledger
 Model (taska's, see `docs/projects-design.md`): `ledger/events.jsonl` folded into Workstream (`E01 General` first) ›

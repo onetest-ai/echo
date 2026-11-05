@@ -84,7 +84,7 @@ how that area works. Update the note in the same change when you alter it.
 | Rule | Trigger | Action |
 |---|---|---|
 | Check Guides First | ANY task | Match request to category and load the P0 guide before searching broadly |
-| Testing | "write tests" / "run tests" | ONLY then |
+| Acceptance first | ANY change in behaviour | Write its acceptance criteria before the code; each criterion gets a functional test (a Rust test of the behaviour, a window node test, or a check in the running window on made-up or copied data — `.ai-run/guides/testing/testing.md`); run them and the quality gates before calling it done, and say which criteria were checked how |
 | Git Operations | "commit" / "push" / "PR" / "MR" | Only then; load `.ai-run/guides/standards/git-workflow.md` |
 | Shell | ANY shell command | Use bash/Linux-compatible syntax |
 | A call's text goes only to its pinned AI profile; Claude Code starts through ai::claude_command | starting a Claude job or changing AI profiles | load `.ai-run/guides/integrations/claude-code-runs.md` |

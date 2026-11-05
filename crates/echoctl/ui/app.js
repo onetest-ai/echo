@@ -375,7 +375,8 @@ const PANEL_VIEWS = []
 const Layout = (() => {
   const AREAS = ['right', 'bottom']
   const SIZE = { right: 320, bottom: 220 }
-  const fresh = () => ({ right: { open: false, size: SIZE.right, active: null }, bottom: { open: false, size: SIZE.bottom, active: null }, views: {} })
+  // `bar`: the activity bar, folded to its icons (the default) or open with their names.
+  const fresh = () => ({ right: { open: false, size: SIZE.right, active: null }, bottom: { open: false, size: SIZE.bottom, active: null }, views: {}, bar: { open: false } })
   let L = fresh()
   const num = (v, lo, hi, d) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d)
   const areaOf = (v) => (L.views[v.id] && AREAS.includes(L.views[v.id].area) ? L.views[v.id].area : v.area)
@@ -390,6 +391,7 @@ const Layout = (() => {
         L[a] = { open: typeof s.open === 'boolean' ? s.open : L[a].open, size: num(s.size, 160, 900, SIZE[a]), active: typeof s.active === 'string' ? s.active : null }
       }
       for (const [id, v] of Object.entries(o.views || {})) if (v && AREAS.includes(v.area)) L.views[id] = { area: v.area }
+      if (o.bar && typeof o.bar.open === 'boolean') L.bar.open = o.bar.open
     },
     /** The window opening: the right panel starts closed, whatever was saved — it opens when asked for
      *  (2026-11-04, the user: "closed unless the user opens it, on start always"). Its size and view stay. */
@@ -408,6 +410,8 @@ const Layout = (() => {
       return true
     },
     toggle(area) { if (AREAS.includes(area)) L[area].open = !L[area].open },
+    /** The activity bar: open with its names, or folded to its icons. */
+    toggleBar() { L.bar.open = !L.bar.open },
     /** A panel dragged to `size` px (null: back to its default). */
     resize(area, size) { if (AREAS.includes(area)) L[area].size = size == null ? SIZE[area] : num(size, 160, 900, SIZE[area]) },
     show(id, known) { const a = this.area(id, known); if (a) { L[a].open = true; L[a].active = id } },
@@ -415,9 +419,11 @@ const Layout = (() => {
     prune(known) { for (const id of Object.keys(L.views)) if (!known.some((v) => v.id === id)) delete L.views[id] },
     /** What to draw at this window size: an area with no views is not drawn; below 900 px wide the
      *  right panel opens over the page — only when asked for there (`overlay`: this session's
-     *  choice, never saved) — and below 600 px high the bottom one is folded to its tab strip. */
-    effective(width, height, known, overlay = false) {
+     *  choice, never saved) — and below 600 px high the bottom one is folded to its tab strip. The activity bar
+     *  open takes its width only at 900 px and up; narrower, it opens over the page when asked (`barOver`). */
+    effective(width, height, known, overlay = false, barOver = false) {
       const out = { narrow: width < 900 }
+      out.bar = { open: out.narrow ? barOver : L.bar.open, over: out.narrow && barOver }
       for (const a of AREAS) {
         const ids = this.views(a, known)
         const active = ids.includes(L[a].active) ? L[a].active : ids[0] || null
@@ -532,6 +538,9 @@ async function loadProject() {
   try { const d = await get('api/project/' + encodeURIComponent(id)); if (S.pj.sel === id) S.pj.detail = d } catch { /* app restarting */ }
   if (S.pj.tab === 'people') await loadPeople()
   if ((S.pj.tab === 'profile' || S.pj.tab === 'brief') && (!S.pj.tbrain || S.pj.tbrain.thread !== S.pj.sel)) await loadThreadBrain()
+  if (S.pj.tab === 'profile') {
+    try { const d = await get('api/project/' + encodeURIComponent(id) + '/series'); if (S.pj.sel === id) S.pj.series = { id, ...d } } catch { /* app restarting */ }
+  }
   if (S.pj.tab === 'work') {
     try { const w = await get('api/project/' + encodeURIComponent(id) + '/work'); if (S.pj.sel === id) S.pj.work = w } catch { /* app restarting */ }
   }
@@ -769,20 +778,31 @@ function pill() {
   return main + chip + (sign ? `<div class="pill-note">${sign}</div>` : '')
 }
 
+const BAR_KEY = MAC ? '⌘\\' : 'Ctrl+\\'
+const BAR_ICON = (open) => ICON(`<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/><path d="${open ? 'M15.5 10l-2 2 2 2' : 'M13.5 10l2 2-2 2'}"/>`)
+/** The activity bar: folded to icons by default (each one's name and keys in a hint beside it), or open with the names
+ *  and counts (⌘\ / Ctrl+\, the switch in the title strip after the traffic lights — `barButton` —, ⌘K; remembered in
+ *  the window's layout). */
+function barButton() {
+  const open = Layout.effective(window.innerWidth, window.innerHeight, panelViews(), S.overlay, S.barOver).bar.open
+  const what = open ? 'Fold the sidebar' : 'Expand the sidebar'
+  return `<button class="icon-btn bar-flip" data-cmd="bar-flip" aria-expanded="${open}" aria-label="${what}" title="${what} (${esc(BAR_KEY)})">${BAR_ICON(open)}</button>`
+}
 function actbar() {
+  const eff = Layout.effective(window.innerWidth, window.innerHeight, panelViews(), S.overlay, S.barOver)
   const btn = (a, i) => {
     const found = a.id === 'projects' && S.pj.data ? S.pj.data.found_count || 0 : 0
     const badge = a.id === 'settings' && settingsWarnings() ? `<span class="act-badge" aria-label="${settingsWarnings()} to fix">${settingsWarnings()}</span>`
       : found ? `<span class="act-badge new" aria-label="${found} found for you">${found}</span>` : ''
-    return `<button class="act" data-go="${esc(a.id)}"${S.view === a.id ? ' aria-current="page"' : ''} title="${esc(a.label)} (${a.id === 'settings' ? MOD + ',' : MOD + (i + 1)})">${a.icon}<span>${esc(a.label)}</span>${badge}</button>`
+    const key = a.id === 'settings' ? MOD + ',' : MOD + (i + 1)
+    return `<button class="act" data-go="${esc(a.id)}"${S.view === a.id ? ' aria-current="page"' : ''} aria-label="${esc(a.label)}" data-hint="${esc(a.label)}" data-key="${esc(key)}">${a.icon}<span class="act-label">${esc(a.label)}</span>${badge}</button>`
   }
   const acts = shownActivities()
   const top = acts.filter((a) => !a.bottom), bottom = acts.filter((a) => a.bottom)
   // Inbox: not an activity — it shows or hides its panel over whatever is open.
   const n = nyOpen().length, urgent = nyOpen().some((i) => i.urgent)
-  const eff = Layout.effective(window.innerWidth, window.innerHeight, panelViews(), S.overlay)
   const shown = Layout.AREAS.some((a) => eff[a].shown && eff[a].active === 'needs')
-  const needs = `<button class="act${shown ? ' pressed' : ''}" data-panel-flip="needs" aria-pressed="${shown}" title="Inbox (${NY_HINT})">${NY_ENTRY}<span>Inbox</span>${n ? `<span class="act-badge${urgent ? '' : ' new'}" aria-label="${n} open">${n}</span>` : ''}</button>`
+  const needs = `<button class="act${shown ? ' pressed' : ''}" data-panel-flip="needs" aria-pressed="${shown}" aria-label="Inbox" data-hint="Inbox" data-key="${esc(NY_HINT)}">${NY_ENTRY}<span class="act-label">Inbox</span>${n ? `<span class="act-badge${urgent ? '' : ' new'}" aria-label="${n} open">${n}</span>` : ''}</button>`
   return `<nav class="acts" aria-label="Activities">${top.map(btn).join('')}<span class="acts-grow"></span>${needs}${bottom.map((a) => btn(a, acts.indexOf(a))).join('')}</nav>`
 }
 
@@ -831,6 +851,13 @@ function claudePanel(view) {
 
 let layoutTimer = null
 /** The layout changed: draw it, and save it a moment later (one write for a burst of changes). */
+/** The activity bar open or folded; in a narrow window it opens over the page for now (not saved). */
+function flipBar() {
+  if (window.innerWidth < 900) { S.barOver = !S.barOver; return render() }
+  Layout.toggleBar()
+  layoutChanged()
+}
+
 function layoutChanged() {
   clearTimeout(layoutTimer)
   layoutTimer = setTimeout(() => send({ cmd: 'save_layout', layout: Layout.toJSON() }), 500)
@@ -2092,6 +2119,7 @@ function eventDetail(e, now) {
     <dl>${e.organizer ? `<dt>Organizer</dt><dd>${esc(e.organizer)}</dd>` : ''}${e.people ? `<dt>People</dt><dd>${e.people}</dd>` : ''}${e.location ? `<dt>Where</dt><dd>${esc(e.location)}</dd>` : ''}${e.recorded ? `<dt>${e.recorded.imported ? 'Call' : 'Recording'}</dt><dd>${e.recorded.imported ? 'from the Teams transcript' : STATUS[e.recorded.status] || esc(e.recorded.status)}${e.recorded.minutes ? `, ${e.recorded.minutes} min` : ''}</dd>` : ''}</dl>
     ${acts || slotItems('calendar.event', { kind: 'event', event: e }) ? `<div class="acts">${acts}${slotItems('calendar.event', { kind: 'event', event: e })}</div>` : ''}${why ? `<p class="why">${esc(why)}</p>` : ''}
     ${eventProjects(e)}
+    ${seriesEditor(e)}
     ${e.recap && e.recap.length ? `<div><b style="font-size:12px">Last time</b><ul>${e.recap.map((r) => `<li>${esc(r)}</li>`).join('')}</ul></div>` : ''}
   </aside>`
 }
@@ -3669,19 +3697,15 @@ function projectProfile(p, data) {
   const calls = (p.rules || []).map((r, i) => tok(RULE_TOKEN(r, p.client_name), { op: 'rule-remove', index: i })).join('') + addTok('rule', "a meeting's subject (empty for the client's people)", ruleKind)
     + `<div class="pf-sub">${p.call_count} call${p.call_count === 1 ? '' : 's'} match${pins || outs ? ` · ${[pins ? `${pins} pinned` : '', outs ? `${outs} taken out by hand` : ''].filter(Boolean).join(', ')}` : ''}</div>`
   const sources = threadSources(p, cl)
-  const people = (p.people || []).map((m) => tok(`${esc(m.name)}${m.role ? ` · ${esc(m.role)}` : ''}`, { op: 'person-remove', name: m.name, email: m.email || '' }, m.email || '')).join('') + addTok('person', 'Name, email, role — e.g. Dana Kowal, dana@x.com, sponsor')
-  const terms = threadBrain(p) || ((p.terms || []).slice(0, 24).map((t) => tok(esc(t.term), { op: 'term-remove', term: t.term }, [t.kind, t.note].filter(Boolean).join(' · '))).join('') + addTok('term', 'A term — a system, an acronym, a name')
-    + `<div class="pf-sub">Hint transcription on its calls${(p.terms || []).length > 24 ? ` · ${p.terms.length - 24} more` : ''}</div>`)
   const notes = S.pj.pfEdit === 'notes' ? `<textarea class="pf-in pj-notes" id="pj-f-notes" data-pj-field="notes" data-id="${id}" rows="3" aria-label="Notes for Claude" autofocus>${esc(p.notes || '')}</textarea>`
     : `<button class="pf-text${p.notes ? '' : ' empty'}" data-pj="pf-edit" data-what="notes">${p.notes ? esc(p.notes) : 'What the minutes and Claude should know — what people call things, what to leave out'}</button>`
   // Look and AI: not on the board; the same row style.
-  const symbols = `<button class="pj-pick${!p.icon ? ' on' : ''}" data-pj="icon" data-icon="" title="Its pattern" aria-label="Its pattern">${projIcon({ ...p, icon: null, has_logo: false }, 22)}</button>` +
-    (cl && cl.logo_v ? `<button class="pj-pick${p.icon === 'client' ? ' on' : ''}" data-pj="icon" data-icon="client" title="The client's logo" aria-label="The client's logo">${projIcon({ ...p, icon: 'client', has_logo: false, client_logo_v: cl.logo_v }, 22)}</button>` : '') +
-    Object.keys(PJ_SYMBOLS).map((k) => `<button class="pj-pick${p.icon === k ? ' on' : ''}" data-pj="icon" data-icon="${k}" title="${k}" aria-label="${k}">${projIcon({ ...p, icon: k, has_logo: false }, 22)}</button>`).join('')
   const colors = PJ_COLORS.map((c) => `<button class="pj-swatch${p.color === c ? ' on' : ''}" style="background:${c}" data-pj="color" data-color="${c}" aria-label="Colour ${c}"></button>`).join('')
-  const look = `<div class="pf-look">${symbols}</div><div class="pf-look"><span class="pj-swatches">${colors}</span><span class="pj-logo-drop" data-drop-op="logo" data-id="${id}" title="Drop an image here">${p.has_logo ? projIcon(p, 22) : '<span class="pj-logo-empty">logo</span>'}</span>${logoPicker('logo', p.id, p.has_logo ? 'Change logo…' : 'Use a logo…')}${p.has_logo ? '<button class="link-btn" data-pj="logo-remove">Remove</button>' : ''}</div>`
+  // Its look: a pattern made from it (in its colour), or its own logo — the symbols and the client's logo were dropped
+  // (the user, 2026-11-05); a thread that picked one still shows it.
+  const look = `<div class="pf-look">${p.has_logo ? '' : `<span title="Made from the thread, in its colour">${projIcon({ ...p, icon: null }, 22)}</span>`}<span class="pj-swatches">${colors}</span><span class="pj-logo-drop" data-drop-op="logo" data-id="${id}" title="Drop an image here">${p.has_logo ? projIcon(p, 22) : '<span class="pj-logo-empty">logo</span>'}</span>${logoPicker('logo', p.id, p.has_logo ? 'Change logo…' : 'Use a logo…')}${p.has_logo ? '<button class="link-btn" data-pj="logo-remove">Remove</button>' : ''}${p.icon && !p.has_logo ? '<button class="link-btn" data-pj="icon" data-icon="">Use the pattern</button>' : ''}</div>`
   const profiles = ai().profiles || []
-  const aiRow = `<label class="fchip">${esc(p.ai_profile ? profileName(p.ai_profile) : `The default · ${profileName(ai().default) || 'built in'}`)} ▾<select data-pj-field="ai_profile" data-id="${id}" aria-label="AI profile"><option value="">The default (${esc(profileName(ai().default) || 'built in')})</option>${profiles.map((x) => `<option value="${esc(x.id)}"${p.ai_profile === x.id ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>`
+  const aiRow = `<label class="fchip pf-start">${esc(p.ai_profile ? profileName(p.ai_profile) : `The default · ${profileName(ai().default) || 'built in'}`)} ▾<select data-pj-field="ai_profile" data-id="${id}" aria-label="AI profile"><option value="">The default (${esc(profileName(ai().default) || 'built in')})</option>${profiles.map((x) => `<option value="${esc(x.id)}"${p.ai_profile === x.id ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>`
     + (S.pj.pfEdit === 'model' ? `<input class="pf-in" data-pj-field="model" data-id="${id}" value="${esc(p.model || '')}" placeholder="sonnet" aria-label="Model" autofocus>` : `<button class="tok" data-pj="pf-edit" data-what="model">model: ${esc(p.model || "the profile's minutes model")}</button>`)
     + `<div class="pf-sub">What Claude runs on for this thread's sync and questions, whichever profile a call was recorded on.</div>`
   return `<div class="pf-card">
@@ -3691,14 +3715,50 @@ function projectProfile(p, data) {
     ${row('Since', since)}
     ${brainOn() ? row('History', history) : ''}
     ${row('Calls', calls)}
+    ${row('Meetings', seriesBlock(p))}
     ${row('Sources', sources)}
-    ${row('People', people)}
-    ${row(RECALL_EXTRAS && S.pj.tbrain && S.pj.tbrain.taxonomy && S.pj.tbrain.taxonomy.exists ? 'Topics & terms' : 'Terms', terms)}
     ${row('Notes for Claude', notes)}
     ${row('Look', look)}
     ${row('AI', aiRow)}
   </div>
   <p class="pf-foot">Saved as you change it · <code>projects/${id}/</code> · Delete in ⋯</p>`
+}
+
+/** What a series' rule does, in a few words (no rule: not recorded). */
+function seriesSummary(r) {
+  r = r || {}
+  const parts = []
+  parts.push(r.record === 'always' ? 'recorded' : r.record === 'ask' ? 'asks to record' : 'not recorded')
+  if (r.languages && r.languages.length) parts.push(r.languages.map(langName).join(', '))
+  return parts.join(' · ')
+}
+
+/** A thread's meeting series (Profile → Meetings): what Echo does with each, read only — set from a meeting in the
+ *  calendar —; × takes one out of the thread (`series_unlink`). */
+function seriesBlock(p) {
+  const d = S.pj.series && S.pj.series.id === p.id ? S.pj.series : null
+  if (!d) return '<span class="pf-sub">Reading its meetings…</span>'
+  if (d.error) return `<span class="pf-sub">${esc(d.error)}</span>`
+  const list = d.series || []
+  if (!list.length) return '<span class="pf-sub">No meeting series yet. A meeting that recurs in this thread shows here.</span>'
+  const when = (x) => x.next ? `next ${esc(new Date(x.next).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }))}` : x.calls ? `${x.calls} call${x.calls === 1 ? '' : 's'}` : ''
+  return list.map((x) => `<div class="se-row"><span class="se-t">${esc(x.subject || 'A meeting')}</span><span class="pf-sub se-when">${when(x)}<button class="pj-x" data-series-unlink="${esc(x.key)}" title="Not this thread's: its meetings stop joining it" aria-label="Take ${esc(x.subject || 'this series')} out of the thread">×</button></span><span class="pf-sub se-what">${esc(seriesSummary(x.rule))}</span></div>`).join('')
+    + '<div class="pf-sub">Set what Echo does with a series on one of its meetings in the calendar.</div>'
+}
+
+/** A recurring meeting in the calendar: record every meeting of its series or not (the default), and in which
+ *  language — that's all. A choice on the Record button for one meeting still wins. */
+function seriesEditor(e) {
+  const x = e.series
+  if (!x || !x.key) return ''
+  const r = x.rule || {}
+  // Not recorded unless set: Don't record is the default (no rule).
+  const rec = r.record === 'always'
+  const btn = (on, v, l) => `<button data-series-set="record" data-val="${esc(JSON.stringify(v))}" aria-pressed="${on}">${esc(l)}</button>`
+  const opts = [['', 'Any language'], ...LANG_LIST.map((l) => [l, langName(l)])], cur = (r.languages || [])[0] || ''
+  const lang = `<label class="fchip">${esc((opts.find(([v]) => v === cur) || opts[0])[1])} ▾<select data-series-field="languages" aria-label="Language">${opts.map(([v, l]) => `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`
+  return `<div class="se-cal"><b style="font-size:12px">Every meeting of this series</b>
+    <div class="se-line" data-series-key="${esc(x.key)}" data-series-subject="${esc(e.subject || '')}"><div class="seg" role="group" aria-label="Record every meeting">${btn(rec, 'always', 'Record')}${btn(!rec, null, "Don't record")}</div>${lang}</div></div>`
 }
 
 /** A client's page (`#client/<id>`): its names, domains, whether it is the user's own company, its logo and projects. */
@@ -5937,6 +5997,7 @@ function paletteItems(target) {
   for (const i of nyOpen().slice(0, 8)) add('Inbox', i.title, nyShow, { keywords: i.why })
   add('Echo', 'Show or hide My notes', () => press({ panelFlip: 'notes' }), { disabled: S.view === 'calls' && S.selected ? null : 'open a call first' })
   add('Echo', 'Show or hide the bottom panel', () => { Layout.toggle('bottom'); layoutChanged() })
+  add('Echo', 'Expand or fold the sidebar', flipBar, { keywords: 'activity bar labels names drawer', hint: BAR_KEY })
   add('Echo', 'Check for updates', () => press({ act: 'check_updates' }))
   add('Echo', 'Ask for permissions', () => press({ act: 'ask_permissions' }), { keywords: 'microphone screen accessibility health' })
   // Go to
@@ -6111,14 +6172,16 @@ function render() {
       <section class="panel bottom" id="r-bottom" aria-label="Bottom panel"></section><footer class="statusbar" id="r-status"></footer></div><div id="r-over"></div>`
   }
   const wb = $('#wb')
-  const eff = Layout.effective(window.innerWidth, window.innerHeight, panelViews(), S.overlay)
+  const eff = Layout.effective(window.innerWidth, window.innerHeight, panelViews(), S.overlay, S.barOver)
+  wb.classList.toggle('bar-open', eff.bar.open && !eff.bar.over)
+  wb.classList.toggle('bar-over', eff.bar.over)
   wb.classList.toggle('has-right', eff.right.shown)
   wb.classList.toggle('right-over', eff.right.overlay)
   wb.classList.toggle('has-bottom', eff.bottom.shown)
   wb.classList.toggle('bottom-folded', eff.bottom.folded)
   wb.style.setProperty('--right-w', `${eff.right.size}px`)
   wb.style.setProperty('--bottom-h', `${eff.bottom.size}px`)
-  patch($('#r-top'), `<div class="pill-slot">${pill()}</div>`)
+  patch($('#r-top'), `${barButton()}<div class="pill-slot">${pill()}</div>`)
   patch($('#r-act'), actbar())
   patch($('#r-status'), statusbar())
   patch($('#r-right'), panel('right', eff))
@@ -6230,13 +6293,38 @@ function placeDetail() {
 
 /** What the screen depends on: re-render only when it changes (keeps selection and scroll). */
 // (the minute too: the pill's "meeting soon" comes and goes with the clock)
-const fingerprint = () => JSON.stringify([S.state, S.calls, S.call, S.agenda, S.cal.data, S.cal.selected, S.settings, S.pj.data, S.pj.detail, S.pj.foundData, S.pj.work, Math.floor(Date.now() / 60000)])
+const fingerprint = () => JSON.stringify([S.state, S.calls, S.call, S.agenda, S.cal.data, S.cal.selected, S.settings, S.pj.data, S.pj.detail, S.pj.foundData, S.pj.work, S.pj.series, Math.floor(Date.now() / 60000)])
+
+// A thread's meeting series (Profile → Meetings): open one; set a field.
+function seriesSet(el, field, value) {
+  const ed = el.closest('[data-series-key]')
+  if (!ed) return
+  send({ cmd: 'project', op: 'series_set', key: ed.dataset.seriesKey, subject: ed.dataset.seriesSubject, field, value })
+  // The calendar shows it from its own data: read it again.
+  if (S.view === 'calendar') setTimeout(() => loadCalendar(true).then(render), 300)
+}
+document.addEventListener('click', (e) => {
+  const t = e.target.closest && e.target.closest('[data-series-set],[data-series-unlink]')
+  if (!t) return
+  if (t.dataset.seriesUnlink) return send({ cmd: 'project', op: 'series_unlink', id: S.pj.sel, key: t.dataset.seriesUnlink })
+  let v
+  try { v = JSON.parse(t.dataset.val) } catch { return }
+  seriesSet(t, t.dataset.seriesSet, v)
+})
+document.addEventListener('change', (e) => {
+  const t = e.target.closest && e.target.closest('[data-series-field]')
+  if (!t) return
+  const f = t.dataset.seriesField
+  seriesSet(t, f, f === 'languages' ? (t.value ? [t.value] : []) : t.value || null)
+})
 
 document.addEventListener('click', (e) => {
   // Any click closes the call's ⋯ menu (its own button toggles it).
   const menuWas = S.menuOpen
   if (menuWas && !(e.target.closest && e.target.closest('[data-cmd="call-menu"]'))) S.menuOpen = false
   if (S.laterOpen && !(e.target.closest && e.target.closest('[data-cmd^="later-"]'))) { S.laterOpen = false; render() }
+  // The sidebar open over a narrow page closes on a click beside it.
+  if (S.barOver && !(e.target.closest && e.target.closest('.actbar'))) { S.barOver = false; render() }
   const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-theme-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-go],[data-conv-keep],[data-br-pclosed],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
   if (!t) { if (menuWas) render(); return }
   // Sign-ins (`signin.rs`): shown at once (starting / stopping / checking) until the next poll
@@ -6326,7 +6414,7 @@ document.addEventListener('click', (e) => {
     if (S.overlay && t.dataset.panelToggle === 'right') { S.overlay = false; return render() } // a narrow window's overlay closes; the saved layout stays
     Layout.toggle(t.dataset.panelToggle); return layoutChanged()
   }
-  if (t.dataset.go) return goActivity(t.dataset.go)
+  if (t.dataset.go) { S.barOver = false; return goActivity(t.dataset.go) }
   if (t.dataset.ev !== undefined) { S.cal.selected = S.cal.selected === t.dataset.ev ? null : t.dataset.ev; return render() }
   if (t.dataset.calclose) { S.cal.selected = null; return render() }
   if (t.dataset.calmode) { S.cal.mode = t.dataset.calmode; S.cal.offset = 0; S.cal.data = null; go(`calendar/${S.cal.mode}`); return loadCalendar().then(render) }
@@ -6363,6 +6451,7 @@ document.addEventListener('click', (e) => {
     case 'later-manual': S.laterOpen = false; render(); return send({ cmd: 'minutes_later', call: S.selected, minutes: null })
     case 'later-clear': return send({ cmd: 'minutes_later', call: S.selected, minutes: 0 })
     case 'claude-panel': return claudePanel()
+    case 'bar-flip': return flipBar()
     case 'ask-claude': return askClaudeAboutCall()
     case 'notes-raw': S.notesRaw = true; return render()
     case 'notes-timeline': S.notesRaw = false; return render()
@@ -6708,9 +6797,10 @@ document.addEventListener('keydown', (e) => {
   if (e.target.id === 'sel-note' && e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); return commentSelection() }
   if (e.key === 'Escape' && S.selNote) return hideSelPop()
   if (e.key === 'Escape' && S.lightbox) { S.lightbox = null; return render() }
-  if (e.key === 'Escape' && (S.stopAsk || S.listOpen || S.menuOpen || S.laterOpen || S.convAsk || S.overlay)) { S.convAsk = null; S.stopAsk = false; S.listOpen = false; S.menuOpen = false; S.laterOpen = false; S.overlay = false; return render() }
+  if (e.key === 'Escape' && (S.stopAsk || S.listOpen || S.menuOpen || S.laterOpen || S.convAsk || S.overlay || S.barOver)) { S.barOver = false; S.convAsk = null; S.stopAsk = false; S.listOpen = false; S.menuOpen = false; S.laterOpen = false; S.overlay = false; return render() }
   if ((MAC ? e.metaKey : e.ctrlKey) && e.key === ',') { e.preventDefault(); return goActivity('settings') }
   if ((MAC ? e.metaKey : e.ctrlKey) && e.key === '`') { e.preventDefault(); return claudePanel() }
+  if ((MAC ? e.metaKey : e.ctrlKey) && !e.shiftKey && !e.altKey && e.key === '\\') { e.preventDefault(); return flipBar() }
   // ⌘1…9 / Ctrl+1…9: the activities, in the bar's order.
   if ((MAC ? e.metaKey : e.ctrlKey) && !e.altKey && !e.shiftKey && /^[1-9]$/.test(e.key)) {
     const a = shownActivities()[Number(e.key) - 1]

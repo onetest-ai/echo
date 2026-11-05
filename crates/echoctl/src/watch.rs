@@ -335,7 +335,8 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
                 let mut ev = meeting_summary(m);
                 // `ask` (config `scheduled`): the app asks with a dialog; `previous_notes`:
                 // recurring recap, for clients.
-                let ask = crate::config::Config::load().map(|c| c.ask_scheduled()).unwrap_or(true);
+                // A series set to never record isn't asked about.
+                let ask = crate::config::Config::load().map(|c| c.ask_scheduled()).unwrap_or(true) && crate::series::may_offer(m);
                 ev["ask"] = json!(ask);
                 if ask {
                     crate::app::offer_meeting(m.clone());
@@ -1376,6 +1377,11 @@ fn recover(app_started: DateTime<Utc>) {
 
 /// `echoctl arm`: opt in to recording the current/next call.
 pub fn arm(title: Option<String>, meeting: Option<MeetingContext>, languages: Option<Vec<String>>, ai_profile: Option<String>) -> Result<()> {
+    // Its series' language, where nobody chose one.
+    let meeting = meeting.map(|mut m| {
+        crate::series::fill(&mut m);
+        m
+    });
     // A meeting scheduled or joined with a language (the window's Record ▾) carries it.
     let languages = languages.or_else(|| meeting.as_ref().map(|m| m.languages.clone()));
     let languages = languages.map(|l| l.into_iter().map(|x| x.trim().to_lowercase()).filter(|x| !x.is_empty()).collect::<Vec<_>>())

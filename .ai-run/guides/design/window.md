@@ -22,6 +22,7 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
 | `src/view.rs` | what the window shows → `<echo_view>` for Claude sessions (`view-hook`), `<echo_howto>` (`howto_block`) |
 | `src/attention.rs` | Needs you (Inbox): collects pending decisions, Done list |
 | `src/calendar.rs`, `src/schedule.rs` | Calendar data; "Record when it starts" list |
+| `src/series.rs` | a meeting series' rule: record every meeting or not, its language |
 | `src/teams_transcript.rs` | import an unrecorded meeting from its Teams transcript; background check / scan |
 | `src/minutes.rs` | `render_for_window`, `with_theme`, `EMBED_JS` (the minutes frame) |
 | `ui/index.html`, `ui/app.js`, `ui/app.css` | the page (vanilla JS, compiled in); `ui/vendor/` xterm.js, sigma, graphology |
@@ -86,6 +87,10 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
 - Fixed areas: a 40 px top strip with the **Record pill** at its centre (idle Record ▾ with language + profile;
   armed + Cancel; meeting soon + Record it; recording: clock, title, Stop that asks first), the activity bar, the
   primary view, right and bottom panels, a status bar.
+- The activity bar is folded to icons by default (48 px; each icon's name and keys in an instant hint beside it) or
+  open with names and counts (200 px): ⌘\\ / Ctrl+\\, the switch in the title strip after the traffic lights
+  (`barButton`), ⌘K; `Layout`'s `bar`, saved with the layout. Below 900 px it opens over the page and closes on a click
+  beside it or Esc (never saved). Its switch sits in the strip as on the design it came from.
 - Registries in a no-DOM block of `app.js` (`// ── workbench` … `// end of the workbench block`): `ACTIVITIES`
   (Calls `list-detail`, Calendar `single`, Settings `single` at the foot; ⌘/Ctrl+1…9, ⌘/Ctrl+,), `PANEL_VIEWS`,
   `CALL_TABS`, `EVENT_ACTIONS`. Echo's own views are entries like a plugin's.
@@ -209,6 +214,15 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
 - "Record when it starts" → `<home>/.echo/scheduled.json` (`schedule.rs`): the watcher arms it from 60 s before
   start until its end. Removed when its recording starts (Stop never re-arms), its arm is cancelled, its recording
   fails to start (one notification, no re-arm every second), or after the end.
+- **A meeting series** (`series.rs`; a recurring event's card: "Every meeting of this series" — Record / Don't record
+  and a language, nothing else, the user's call: no other settings there). `<home>/projects/series.json`, keyed
+  `id:<seriesMasterId>` else `subject:<normalised>` (a rule of either key applies). Don't record is the default: a
+  series' meeting gets no "Record?" offer unless its series says Record (`may_offer`); Record puts each occurrence in
+  "Record when it starts" once after an agenda sync (`schedule_always`, `<home>/.echo/series-armed.json` — cancelling
+  one is never undone); its language fills an arm where nobody chose one (`fill`, in `watch::arm`). A one-off meeting
+  is asked about as before; a choice on the Record button wins. A thread's Profile → Meetings lists its series read
+  only; × = not this thread's (`Project.not_series`). `echoctl series list [--thread] | set <key> <json>`.
+- The event card is 400 px wide (`min(400px, 100vw − 24px)`).
 
 ### Import a Teams transcript (`teams_transcript.rs`)
 1. Calendar → an ended Teams event with no call → Import Teams transcript (IPC `calendar_import`, background;
@@ -266,6 +280,8 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
 | `<home>/.echo/sessions.json`, `session-history.json` | Claude session ids per profile; past conversations | `terminal.rs` |
 | `<home>/.echo/attention.json` | Inbox Done list (7 days) and open items | `attention.rs` |
 | `<home>/.echo/scheduled.json` | meetings to record when they start | `schedule.rs` |
+| `<home>/projects/series.json` | meeting series' rules (record or not, language) | `series.rs` |
+| `<home>/.echo/series-armed.json` | occurrences a series already put in "Record when it starts" | `series.rs` |
 | `<home>/.echo/teams-transcripts.json` | known transcripts / offers (rechecked hourly until a day after, kept 30 days) | `teams_transcript.rs` |
 | `<home>/.echo/quit.asking`, `quit.cancelled` | an `app quit` being asked / refused | `app.rs` |
 | `<call>/my-notes.md`, `my-notes.<HHMMSS>.md` | the user's notes; a kept conflicting version | window, tray (`echoctl note`) |
