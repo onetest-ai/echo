@@ -381,19 +381,14 @@ fn memo_template() -> Option<Template> {
     })
 }
 
-/// The template for a meeting title: the first whose keyword appears in it (user templates
-/// first), else `default`.
-pub fn pick_template(title: Option<&str>) -> Option<Template> {
-    pick_why(title).map(|(t, _)| t)
-}
-
-/// The template for a title and why: the keyword of the title it matched, or None (Default).
-fn pick_why(title: Option<&str>) -> Option<(Template, Option<String>)> {
-    let all: Vec<Template> = all_templates().into_iter().filter(|t| t.name != "memo").collect();
+/// The template for a meeting title among these, and why: the first with a word of the title (the user's first), with
+/// that word, else Default (no word).
+fn pick_in<'a>(all: &'a [Template], title: Option<&str>) -> Option<(&'a Template, Option<String>)> {
     let t = title.unwrap_or("").to_lowercase();
-    all.iter()
-        .find_map(|tpl| tpl.keywords.iter().find(|k| t.contains(k.as_str())).map(|k| (tpl.clone(), Some(k.clone()))))
-        .or_else(|| all.iter().find(|tpl| tpl.name == "default").map(|t| (t.clone(), None)))
+    let all = || all.iter().filter(|t| t.name != "memo");
+    all()
+        .find_map(|tpl| tpl.keywords.iter().find(|k| t.contains(k.as_str())).map(|k| (tpl, Some(k.clone()))))
+        .or_else(|| all().find(|tpl| tpl.name == "default").map(|t| (t, None)))
 }
 
 fn templates_dir() -> PathBuf {
@@ -408,9 +403,12 @@ fn all_templates() -> Vec<Template> {
         .map(|rd| rd.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().is_some_and(|x| x == "md")).collect())
         .unwrap_or_default();
     files.sort();
+    // A template is its file: the user's `<id>.md` is the template `<id>` (its frontmatter `name` aside), so the
+    // window's Reset, Delete and saving always find the file they mean.
     let user = files.iter().filter_map(|f| {
         let text = fs::read_to_string(f).ok()?;
-        parse_template(&text, &f.file_stem()?.to_string_lossy(), f.display().to_string())
+        let stem = f.file_stem()?.to_string_lossy().to_string();
+        parse_template(&text, &stem, f.display().to_string()).map(|t| Template { name: stem, ..t })
     });
     let builtin = BUILTIN_TEMPLATES.iter().filter_map(|(stem, text)| parse_template(text, stem, format!("builtin:{stem}")));
     for t in user.chain(builtin) {
@@ -459,6 +457,11 @@ pub fn templates_view() -> Value {
     json!({"templates": out, "values": template_values()})
 }
 
+/// An id that names a file in the templates folder and nothing outside it.
+fn safe_id(id: &str) -> bool {
+    !id.is_empty() && !id.starts_with('.') && !id.contains(['/', '\\', '\0'])
+}
+
 /// A template's id from a name: lower case, words joined by `-` (`Client kickoff` → `client-kickoff`).
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 fn template_id(name: &str) -> String {
@@ -470,7 +473,7 @@ fn template_id(name: &str) -> String {
             id.push('-');
         }
     }
-    id.trim_end_matches('-').chars().take(60).collect()
+    id.chars().take(60).collect::<String>().trim_end_matches('-').to_string()
 }
 
 /// Save a template the user made or changed: `<home>/.echo/templates/<id>.md`. A built-in keeps its id (so it is
@@ -480,13 +483,14 @@ pub fn template_save(id: Option<&str>, name: &str, words: &[String], header: &st
     let known: Vec<String> = all_templates().into_iter().map(|t| t.name).collect();
     let id = match id.filter(|i| !i.is_empty()) {
         Some(i) => {
-            anyhow::ensure!(known.iter().any(|k| k == i), "there is no template {i}");
+            anyhow::ensure!(safe_id(i) && known.iter().any(|k| k == i), "there is no template {i}");
             i.to_string()
         }
         None => {
             let i = template_id(name);
             anyhow::ensure!(!i.is_empty(), "give the template a name");
-            anyhow::ensure!(!known.contains(&i), "a template named {i} exists already");
+            // Not one there is, by name or by file (a file of the user's is never written over).
+            anyhow::ensure!(!known.contains(&i) && !templates_dir().join(format!("{i}.md")).exists(), "a template named {i} exists already");
             i
         }
     };
@@ -519,7 +523,7 @@ pub fn template_save(id: Option<&str>, name: &str, words: &[String], header: &st
 /// `.echo/trash/templates/`).
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn template_remove(id: &str) -> Result<()> {
-    anyhow::ensure!(!id.is_empty() && template_id(id) == id, "no such template");
+    anyhow::ensure!(safe_id(id), "no such template");
     let f = templates_dir().join(format!("{id}.md"));
     anyhow::ensure!(f.exists(), "{id} is Echo's own: nothing to take away");
     let bin = trash_dir().join("templates");
@@ -528,8 +532,6 @@ pub fn template_remove(id: &str) -> Result<()> {
     Ok(())
 }
 
-/// The template a call's minutes follow and why: the user's choice for it (`meta.json` `template`, Write again
-/// with…), a word of its title, or Default. A memo's is the memo template.
 /// Write a call's minutes again with another template: kept in its `meta.json` for the next runs too.
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn choose_template(dir: &Path, id: &str) -> Result<()> {
@@ -540,25 +542,31 @@ pub fn choose_template(dir: &Path, id: &str) -> Result<()> {
     })
 }
 
+/// The template a call's minutes follow and why: the user's choice for it (`meta.json` `template`, Write again
+/// with…), a word of its title, or Default. A memo's is the memo template.
 pub fn template_of(dir: &Path) -> Value {
-    if crate::memo::is_memo(dir) {
-        return json!({"id": "memo", "why": "memo"});
-    }
-    let chosen = read_json(&dir.join("meta.json"))["template"].as_str().map(str::to_owned).filter(|c| all_templates().iter().any(|t| &t.name == c));
-    if let Some(c) = chosen {
-        return json!({"id": c, "why": "chosen"});
-    }
-    match pick_why(subject_of(dir).as_deref()) {
-        Some((t, Some(w))) => json!({"id": t.name, "why": "word", "word": w}),
-        Some((t, None)) => json!({"id": t.name, "why": "default"}),
-        None => Value::Null,
-    }
+    template_in(dir, &all_templates()).1
 }
 
 /// The template a call's minutes follow (`template_of`), whole.
 fn template_for(dir: &Path) -> Option<Template> {
-    let id = template_of(dir)["id"].as_str()?.to_string();
-    all_templates().into_iter().find(|t| t.name == id)
+    template_in(dir, &all_templates()).0
+}
+
+/// `template_of` among these templates (read once), with the template itself.
+fn template_in(dir: &Path, all: &[Template]) -> (Option<Template>, Value) {
+    if crate::memo::is_memo(dir) {
+        return (None, json!({"id": "memo", "why": "memo"}));
+    }
+    let chosen = read_json(&dir.join("meta.json"))["template"].as_str().and_then(|c| all.iter().find(|t| t.name == c && t.name != "memo"));
+    if let Some(t) = chosen {
+        return (Some(t.clone()), json!({"id": t.name, "why": "chosen"}));
+    }
+    match pick_in(all, subject_of(dir).as_deref()) {
+        Some((t, Some(w))) => (Some(t.clone()), json!({"id": t.name, "why": "word", "word": w})),
+        Some((t, None)) => (Some(t.clone()), json!({"id": t.name, "why": "default"})),
+        None => (None, Value::Null),
+    }
 }
 
 /// Why a transcribed call is too thin for minutes (None: it isn't). Shared screens make a call
@@ -704,7 +712,7 @@ pub fn context(call: &str) -> Result<()> {
         "summarize": summarize.is_none(),
         "skip_reason": summarize,
         "previous_notes": previous.as_ref().map(|p| p.join("notes.md").display().to_string()),
-        "template": if memo { memo_template() } else { template_for(&dir).or_else(|| pick_template(subject_of(&dir).as_deref())) },
+        "template": if memo { memo_template() } else { template_for(&dir) },
         // What `{date}`, `{participants}`… in it stand for.
         "template_values": template_values(),
         // A memo: the user alone; its threads are found from what was said (step 4b of process-call).
@@ -1619,7 +1627,7 @@ mod tests {
         let secs = vec![json!({"heading": "Decisions", "instruction": "Who owns each.\n## Not a heading"}), json!({"heading": "  ", "instruction": "dropped"})];
         template_save(Some("discussion"), "", &["review".into(), "Retro, x".into()], "# {title}\n## not a section", &secs).unwrap();
         assert_eq!(kind("discussion").as_deref(), Some("edited"));
-        let t = pick_template(Some("Sprint retro x")).unwrap();
+        let t = pick_in(&all_templates(), Some("Sprint retro x")).unwrap().0.clone();
         assert_eq!(t.name, "discussion");
         assert_eq!(t.sections.len(), 1, "an empty heading is no section; a '## ' line stays inside its section");
         assert!(t.sections[0]["instruction"].as_str().unwrap().contains("### Not a heading"));
@@ -1627,10 +1635,11 @@ mod tests {
         assert!(t.text.starts_with("# {title}") && t.text.contains("## Decisions"), "the whole template for the skill");
         // A new one of the user's: its id from its name, not a taken one, at least one section.
         assert_eq!(template_save(None, "Client Kickoff!", &["kickoff".into()], "", &secs).unwrap(), "client-kickoff");
+        assert!(!template_id(&"word ".repeat(30)).ends_with('-'), "a long name cut at a word's end");
         assert_eq!(kind("client-kickoff").as_deref(), Some("yours"));
         assert!(template_save(None, "client kickoff", &[], "", &secs).is_err(), "taken");
         assert!(template_save(None, "Empty", &[], "", &[]).is_err(), "no section");
-        assert_eq!(pick_template(Some("Acme kickoff")).unwrap().name, "client-kickoff");
+        assert_eq!(pick_in(&all_templates(), Some("Acme kickoff")).unwrap().0.name, "client-kickoff");
         // A call: its title's template, then the one chosen for it (Write again with…), and why.
         let d = root.join("home/calls/2026-11-04_100000-weekly-sync");
         fs::create_dir_all(&d).unwrap();
@@ -1647,6 +1656,17 @@ mod tests {
         assert_eq!(kind("client-kickoff"), None);
         assert_eq!(fs::read_dir(trash_dir().join("templates")).unwrap().count(), 2);
         assert_eq!(template_of(&d)["id"], "status-sync");
+        // A template is its file: a hand-written one whose frontmatter names a built-in is its own, and can be deleted.
+        fs::write(templates_dir().join("my-discussion.md"), "---\nname: discussion\nmatch: [x]\n---\n## A\nb\n").unwrap();
+        assert_eq!(kind("my-discussion").as_deref(), Some("yours"));
+        assert_eq!(kind("discussion").as_deref(), Some("builtin"));
+        template_remove("my-discussion").unwrap();
+        // A new one never writes over a file that is there, whatever its frontmatter says.
+        fs::write(templates_dir().join("kickoff.md"), "---\nname: something-else\nmatch: []\n---\n## A\nb\n").unwrap();
+        assert!(template_save(None, "Kickoff", &[], "", &secs).is_err());
+        // Nothing outside the folder.
+        assert!(template_save(Some("../../x"), "", &[], "", &secs).is_err());
+        assert!(template_remove("../x").is_err() && template_remove("a/b").is_err());
     }
 
     #[test]

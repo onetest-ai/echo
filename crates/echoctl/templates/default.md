@@ -3,7 +3,9 @@ name: default
 match: []
 ---
 # {title}
+
 {date} · {duration} · {participants} · {thread}
+
 Since last time ({previous}): {what moved since then, in one line — only when there is real continuity}
 
 ## Summary

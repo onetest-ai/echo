@@ -1227,6 +1227,16 @@ function prepView(p, again) {
   return `<div class="pr"><article class="pr-main">${short}${expected}${last}${open}${fresh}${empty}</article><aside class="pr-side">${who ? sec("Who's coming", who) : ''}${foot}</aside></div>`
 }
 
+/** The ⋯ menu's Write again with…: each minutes template but the one used now (the call's from then on), and the
+ *  way to Settings → Templates. Not while minutes are being written. */
+function writeAgainWith(c) {
+  if (!TPL.data) { loadTemplates().then(render); return '' }
+  const run = c.notes_run, busy = run && (run.state === 'queued' || run.state === 'running')
+  const list = (TPL.data.templates || []).filter((x) => !x.memo && x.id !== c.template.id)
+  const items = list.map((x) => `<button class="menu-item" role="menuitem" data-tpl-again="${esc(x.id)}"${busy ? ' disabled title="The minutes are being written now"' : ''}>${esc(tplName(x.id))}</button>`).join('')
+  return `<div class="menu-sep" role="separator"></div><div class="menu-label">Write again with</div>${items}<button class="menu-item" role="menuitem" data-tpl-edit>Edit templates…</button><div class="menu-sep" role="separator"></div>`
+}
+
 /** The call's one set of actions: a ⋯ menu (the folder, the minutes page, delete). */
 function callMenu(c) {
   const item = (cmd, label, cls = '') => `<button class="menu-item${cls}" role="menuitem" data-cmd="${cmd}">${esc(label)}</button>`
@@ -1235,6 +1245,7 @@ function callMenu(c) {
     c.notes ? item('open-minutes', 'Open minutes in browser') : '',
     c.notes ? item('reveal-minutes', `${SHOW_FILE.replace('Show in', 'Show minutes in')}`) : '',
     c.notes ? item('write-notes', 'Write minutes again') : '',
+    c.notes && c.template && c.template.why !== 'memo' ? writeAgainWith(c) : '',
     item('ask-claude', 'Ask Claude about this call'),
     slotItems('call.menu', { kind: 'call', call: c }, 'menu'),
     '<div class="menu-sep" role="separator"></div>',
@@ -1970,14 +1981,6 @@ function minutesTab(c) {
 const notesNowBtn = (run) => {
   return run && run.state === 'queued' && run.wait === 'call' && run.may_start && !run.now ? '<button class="btn ghost" data-cmd="notes-now" title="Start them now; the other call keeps recording, and both share this computer">Write now</button>' : ''
 }
-/** Which template wrote a call's minutes and why; Write again with… another (its own from then on). */
-function minutesTemplate(c) {
-  const t = c.template
-  const why = t.why === 'word' ? ` (the title has “${esc(t.word)}”)` : t.why === 'chosen' ? ' (chosen for this call)' : ''
-  const list = ((TPL.data && TPL.data.templates) || []).filter((x) => !x.memo)
-  const menu = S.tplMenu ? `<div class="tp-menu" role="menu">${list.length ? list.map((x) => `<button class="tp-mi${x.id === t.id ? ' on' : ''}" role="menuitem" data-tpl-again="${esc(x.id)}">${esc(tplName(x.id))}${x.id === t.id ? '<span class="set-sub">used now</span>' : x.kind === 'yours' ? '<span class="set-sub">yours</span>' : ''}</button>`).join('') : '<span class="set-sub" style="padding:6px 10px">Reading templates…</span>'}<div class="tp-hr"></div><button class="tp-mi" role="menuitem" data-go="settings/templates">Edit templates in Settings</button></div>` : ''
-  return `<span class="grow set-sub">From the <b>${esc(tplName(t.id))}</b> template${why}</span><span class="tp-again"><button class="btn ghost" data-tpl-menu aria-expanded="${S.tplMenu ? 'true' : 'false'}">Write again with…</button>${menu}</span>`
-}
 function minutesBar(c) {
   const run = c.notes_run
   const log = c.has_log ? '<button class="btn ghost" data-cmd="show-log">Show log</button>' : ''
@@ -1989,7 +1992,6 @@ function minutesBar(c) {
     const signin = p && p.kind === 'claude' ? `<button class="btn ghost" data-signin="${esc(p.id)}">Sign in…</button>` : ''
     status = `<span class="grow warn">The last update didn't finish: ${esc(run.message || '')}</span>${signin}<button class="btn ghost" data-cmd="write-notes">Try again</button>${log}`
   } else if (run && run.state === 'skipped') status = `<span class="grow">${esc(run.message || 'The last update wrote nothing.')}</span>`
-  if (!status && c.template && c.template.id && c.template.why !== 'memo') status = minutesTemplate(c)
   // Opening or showing the page is in the call's ⋯ menu: this bar is only for what is going on.
   return status
 }
@@ -2510,8 +2512,6 @@ function tplSave() {
   const d = TPL.draft
   if (!d || !d.id) return
   send({ cmd: 'template_save', id: d.id, header: d.header, match: d.match, sections: d.sections })
-  if (d.kind === 'builtin') d.kind = 'edited'
-  setTimeout(() => loadTemplates().then(render), 400)
 }
 function templatesSettings() {
   if (!TPL.data) { loadTemplates().then(render); return `<h2>Templates</h2><div class="skeleton" style="padding:20px">${'<i></i>'.repeat(4)}</div>` }
@@ -2551,8 +2551,7 @@ function templateEditor() {
 
 // Templates: picking, the editor's buttons, and its fields saved when they change.
 document.addEventListener('click', (e) => {
-  if (S.tplMenu && !e.target.closest('.tp-again')) { S.tplMenu = false; render() }
-  const t = e.target.closest('[data-tpl-info],[data-tpl-claude],[data-tpl-val],[data-tpl-pick],[data-tpl-new],[data-tpl-close],[data-tpl-cancel],[data-tpl-create],[data-tpl-reset],[data-tpl-del],[data-tpl-word-x],[data-tpl-up],[data-tpl-down],[data-tpl-sx],[data-tpl-add],[data-tpl-again],[data-tpl-menu]')
+  const t = e.target.closest('[data-tpl-info],[data-tpl-claude],[data-tpl-val],[data-tpl-pick],[data-tpl-new],[data-tpl-close],[data-tpl-cancel],[data-tpl-create],[data-tpl-reset],[data-tpl-del],[data-tpl-word-x],[data-tpl-up],[data-tpl-down],[data-tpl-sx],[data-tpl-add],[data-tpl-again],[data-tpl-edit]')
   if (!t) return
   const d = TPL.draft
   if (t.dataset.tplInfo !== undefined) { TPL.info = !TPL.info; return render() }
@@ -2579,14 +2578,13 @@ document.addEventListener('click', (e) => {
     if (!name) { const n = $('#tp-name'); if (n) n.focus(); return }
     d.name = name
     send({ cmd: 'template_save', name, header: d.header, match: d.match, sections: d.sections })
-    TPL.pending = name
-    setTimeout(() => loadTemplates().then(() => { const id = name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-|-$/g, ''); const x = (TPL.data.templates || []).find((y) => y.id === id); if (x) { TPL.sel = x.id; TPL.draft = tplDraft(x) } render() }), 400)
+    TPL.creating = true // `templateSaved(id)` selects it; a refusal leaves the draft as it is, with the notice
     return
   }
   if (t.dataset.tplReset !== undefined || t.dataset.tplDel !== undefined) {
     send({ cmd: 'template_remove', id: d.id })
-    if (t.dataset.tplDel !== undefined) { TPL.sel = null; TPL.draft = null } else TPL.draft = null
-    setTimeout(() => loadTemplates().then(render), 400)
+    if (t.dataset.tplDel !== undefined) TPL.sel = null
+    TPL.draft = null
     return render()
   }
   if (t.dataset.tplWordX) { d.match.splice(+t.dataset.tplWordX, 1); tplSave(); return render() }
@@ -2595,9 +2593,16 @@ document.addEventListener('click', (e) => {
   if (t.dataset.tplDown) return move(+t.dataset.tplDown, +t.dataset.tplDown + 1)
   if (t.dataset.tplSx) { d.sections.splice(+t.dataset.tplSx, 1); tplSave(); return render() }
   if (t.dataset.tplAdd !== undefined) { d.sections.push({ heading: 'New section', instruction: '' }); render(); const h = $(`#tp-h-${d.sections.length - 1}`); if (h) { h.focus(); h.select() } return }
-  // A call's Minutes: Write again with… a template (the call's from now on).
-  if (t.dataset.tplMenu !== undefined) { S.tplMenu = !S.tplMenu; if (S.tplMenu && !TPL.data) loadTemplates().then(render); return render() }
-  if (t.dataset.tplAgain) { S.tplMenu = false; send({ cmd: 'write_notes', call: S.selected, template: t.dataset.tplAgain }); if (S.call) { S.call.notes_run = { ...(S.call.notes_run || {}), state: 'queued', had_minutes: !!S.call.notes, message: 'Starting…' } } return render() }
+  // A call's ⋯ menu: Write again with… a template (the call's from now on), or the templates in Settings.
+  if (t.dataset.tplEdit !== undefined) { S.menuOpen = false; return go('settings/templates') }
+  if (t.dataset.tplAgain) {
+    const run = S.call && S.call.notes_run
+    if (t.disabled || (run && (run.state === 'queued' || run.state === 'running'))) return
+    S.menuOpen = false
+    send({ cmd: 'write_notes', call: S.selected, template: t.dataset.tplAgain })
+    if (S.call) S.call.notes_run = { ...(S.call.notes_run || {}), state: 'queued', had_minutes: !!S.call.notes, message: 'Starting…' }
+    return render()
+  }
 })
 document.addEventListener('change', (e) => {
   const el = e.target, d = TPL.draft
@@ -7409,7 +7414,16 @@ async function tick() {
 const typingNotes = () => document.activeElement && (document.activeElement.id === 'my-notes' || document.activeElement.id === 'me-profile')
 
 window.echo = {
-  templateSaved() { loadTemplates().then(render) },
+  /** A template saved (its id) or taken away (null): the list read again; a new one becomes the one edited; the one
+   *  edited takes its kind from the list (Edited once Echo has the file). */
+  templateSaved(id) {
+    loadTemplates().then(() => {
+      const list = (TPL.data && TPL.data.templates) || []
+      if (TPL.creating && id) { TPL.creating = false; const x = list.find((y) => y.id === id); if (x) { TPL.sel = x.id; TPL.draft = tplDraft(x) } }
+      else if (TPL.draft && TPL.draft.id) { const x = list.find((y) => y.id === TPL.draft.id); if (x) TPL.draft.kind = x.kind }
+      render()
+    })
+  },
   async refresh() {
     await loadCalls(); if (S.selected) await loadCall(S.selected); if (S.view === 'calendar') await loadCalendar(true); if (S.view === 'settings') await loadSettings()
     await loadProjects(); if (S.view === 'projects') await loadProject()

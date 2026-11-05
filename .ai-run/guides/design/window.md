@@ -107,9 +107,15 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   The window shows them behind an ⓘ by the header (a click puts one at the cursor) — templates are mostly made with
   Claude: Ask Claude by the list opens its panel, which Settings now has too (it was off there); `echoctl templates`
   gives Claude the templates, values and folder, and the manage skill shows the file's shape.
-- A call's Minutes says which template wrote them and why ("the title has "sync"", "chosen for this call") with
-  Write again with… a menu of the templates (IPC `write_notes` + `template`: kept in the call's `meta.json` `template`,
-  so later runs follow it too; a template since deleted falls back to the title's). `calls::template_of`.
+- A call's minutes name their template in the AI notice, in the window only ("Written by AI (Echo, … · sonnet · Default
+  template)" — a page sent to others doesn't carry it); a bar of its own above them took too much room. Write again
+  with… is in the call's ⋯ menu: the other templates (not while minutes are being written) and Edit templates…
+  (IPC `write_notes` + `template`, kept in the call's `meta.json` `template`, so later runs follow it too; a template
+  since deleted falls back to the title's). `calls::template_of`.
+- A template is its file: a user's `<id>.md` is template `<id>` whatever its frontmatter `name` says, so Reset, Delete
+  and saving find the file they mean; a new one never writes over a file that is there; an id with a path in it is
+  refused. Saves are answered by the app (`window.echo.templateSaved(id)`): the list is read once, a new template is
+  selected by the id the app gave it, and Edited shows once the file is there.
 - The summary's shape in the built-ins (from the Meeting Notebook plugin): one sentence on what it was for, Highlights
   3–7 "**Topic:** … [mm:ss]", Risks & issues only when raised, up to three Key dates.
 

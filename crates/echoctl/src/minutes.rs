@@ -75,8 +75,19 @@ fn title_of(dir: &Path) -> String {
 fn page(dir: &Path, embed: bool) -> Result<(String, String)> {
     let md = fs::read_to_string(dir.join("notes.md")).with_context(|| format!("{} has no minutes yet", dir.display()))?;
     let load = |name: &str| frame_bytes(dir, name);
-    // The model is named only while the minutes are as the run that wrote them left them.
-    Ok(render_page(&md, &title_of(dir), crate::notes::minutes_model(dir).as_deref(), &load, &kept_frames(dir), embed))
+    // The model is named only while the minutes are as the run that wrote them left them. In the window, the template
+    // they follow too ("· Default template"): a page sent to others doesn't need it.
+    let mut by = crate::notes::minutes_model(dir);
+    if embed {
+        if let Some(t) = crate::calls::template_of(dir)["id"].as_str().filter(|t| *t != "memo") {
+            let mut name = t.replace('-', " ");
+            if let Some(c) = name.get_mut(0..1) {
+                c.make_ascii_uppercase();
+            }
+            by = Some(by.map(|m| format!("{m} · {name} template")).unwrap_or_else(|| format!("{name} template")));
+        }
+    }
+    Ok(render_page(&md, &title_of(dir), by.as_deref(), &load, &kept_frames(dir), embed))
 }
 
 /// The page for the window's Minutes tab, rendered now (no file written), and its CSP.
@@ -959,8 +970,9 @@ code { font-size: 12px; }
 /// its own (the call's header shows it).
 const EMBED_CSS: &str = "
 body { background: var(--bg); }
-main { max-width: 1280px; margin: 0; padding: 22px 32px 48px; border: 0; border-radius: 0; box-shadow: none; }
+main { max-width: 1280px; margin: 0; padding: 14px 32px 48px; border: 0; border-radius: 0; box-shadow: none; }
 main > h1:first-child { display: none; }
+main > h1:first-child + .note { margin-top: 0; }
 .mynote { margin: 6px 0 10px; padding: 6px 10px; border-radius: 8px; font-size: 13px; line-height: 1.5;
   background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); color: var(--fg); }
 .mynote b { font-weight: 600; margin-right: 2px; }

@@ -1983,12 +1983,6 @@ select.set-in { width: auto; margin-right: 6px; }
 .tp-sh .icon-btn:disabled { opacity: 0.35; }
 .tp-s textarea { width: 100%; box-sizing: border-box; border: 0; background: transparent; color: var(--text-2); font: inherit; font-size: 12.5px; line-height: 1.5; resize: vertical; outline: none; padding: 0; }
 .tp-eh .btn svg, .tp-lh .btn svg, .tp-eb > .btn svg { width: 13px; height: 13px; }
-.tp-again { position: relative; }
-.tp-menu { position: absolute; right: 0; top: calc(100% + 4px); width: 240px; z-index: 20; border: 1px solid var(--line-strong); border-radius: var(--r-panel); background: var(--surface); box-shadow: 0 12px 30px rgba(0, 0, 0, 0.25); padding: 6px; display: flex; flex-direction: column; gap: 1px; }
-.tp-mi { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: var(--text); font: inherit; text-align: left; width: 100%; }
-.tp-mi:hover, .tp-mi.on { background: var(--bg); }
-.tp-mi .set-sub { margin-left: auto; }
-.tp-hr { height: 1px; background: var(--line); margin: 4px 2px; }
 @media (max-width: 900px) { .tp-grid { grid-template-columns: minmax(0, 1fr); } }
 .tp-lrow .grow { flex: 1; min-width: 0; }
 .tp-sh .tp-del:not(:disabled):hover { color: var(--danger, #d64545); }
@@ -2016,3 +2010,5 @@ select.set-in { width: auto; margin-right: 6px; }
 .tp-sh input:focus { border-bottom-color: var(--accent); }
 .tp-s:focus-within { border-color: var(--line); }
 .tp-list .set-card { overflow: hidden; }
+.menu .menu-label { padding: 4px 10px 2px; font-size: 11px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+.menu .menu-item:disabled { opacity: 0.45; }
