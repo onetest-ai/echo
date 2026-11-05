@@ -342,7 +342,17 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
             json_reply(crate::prep::load(id).unwrap_or_else(|| json!({ "error": "no prep yet", "writing": crate::prep::writing(id) })))
         }
         "/api/tasks" => json_reply(tasks_view()),
-        "/api/today" => json_reply(crate::today::view(&tasks_view())),
+        "/api/today" => {
+            let mut v = crate::today::view(&tasks_view());
+            // A Teams transcript being imported, or why it wasn't (the calendar's own state, by event).
+            let imports = IMPORTS.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_default();
+            for x in v["day"].as_array_mut().into_iter().flatten() {
+                if let Some(st) = x["event"].as_str().and_then(|e| imports.get(e)) {
+                    x["import"] = st.clone();
+                }
+            }
+            json_reply(v)
+        }
         // Open work in other threads, by words in its title (#20: Link to an item in another thread…).
         "/api/work/search" => {
             let q = req.uri().query().unwrap_or("");

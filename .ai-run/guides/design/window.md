@@ -246,6 +246,10 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   words as its note; the outcome (`<home>/.echo/task-asks.json`, `/api/today` `asks`) shows above My work with Undo. A
   session in the Claude panel was tried first: interactive, a workspace-trust prompt, slower — the user wants `-p`.
 - The date icon sits before the title's words.
+- A Teams meeting of today that is over and wasn't recorded offers **Import Teams transcript** in Your day, as the calendar
+  does (IPC `calendar_import`; the event from the calendar shown or fetched; known transcript or "if Teams transcribed
+  it"; Importing… and its error from the calendar's own state, `IMPORTS`, added to `/api/today`). Once imported it is a
+  call with its minutes like any other.
 - The header counts your late tasks. Ideas from the Meeting Notebook plugin (onetest-ai/echo-plugins#1) by Adam
   Auerbach: the late count, minutes' state and new minutes, closing from My work.
 - An empty part isn't drawn. Not yet: Needs you now (tagged / burning in the last 24 h) — the next step.

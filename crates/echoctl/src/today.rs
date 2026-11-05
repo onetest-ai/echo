@@ -165,6 +165,8 @@ fn day() -> Vec<Value> {
         })
         .collect();
     let scheduled: Vec<String> = crate::schedule::load().into_iter().filter_map(|m| m.id).collect();
+    // What the calendar knows of Teams' transcripts (for a meeting nobody recorded).
+    let offers = crate::teams_transcript::offers();
     let mut used = vec![false; calls_today.len()];
     let mut out: Vec<Value> = vec![];
     for m in crate::watch::agenda() {
@@ -175,8 +177,12 @@ fn day() -> Vec<Value> {
         }
         let pid = crate::prep::id_of(&event);
         let minutes = hit.map(|i| minutes(&calls_today[i].0));
+        // A Teams meeting over and not recorded: its transcript may be imported (known: true / false / unknown).
+        let ended = time(m.end.as_deref()).is_some_and(|e| e + chrono::Duration::minutes(10) <= Utc::now());
+        let transcript = (hit.is_none() && ended && m.join_url.is_some()).then(|| offers.get(&event).map(|o| o["transcript"].clone()).unwrap_or(Value::Null));
         out.push(json!({
             "kind": "meeting", "subject": m.subject, "start": m.start, "end": m.end, "event": event, "minutes": minutes,
+            "importable": transcript.is_some(), "transcript": transcript,
             "people": m.attendees.len() + m.organizer.iter().count(),
             "threads": crate::projects::for_event(&m),
             "call": hit.map(|i| calls_today[i].0.file_name().unwrap_or_default().to_string_lossy().into_owned()),
