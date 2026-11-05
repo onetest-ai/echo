@@ -1904,6 +1904,10 @@ select.set-in { width: auto; margin-right: 6px; }
 .td-task:hover { border-color: var(--line-strong); background: var(--surface); }
 .td-task-t { font-size: 13px; line-height: 1.4; }
 .td-task-m { grid-column: 1 / -1; display: flex; align-items: center; gap: 5px; font: 11.5px var(--mono); color: var(--text-3); }
-.td-late { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
-.td-due { background: var(--line); color: var(--text-2); }
+.td-due { display: inline-flex; color: var(--text-3); padding-top: 1px; }
+.td-due svg { width: 16px; height: 16px; }
+.td-due.today { color: var(--accent-ink); }
+.td-due.late { color: var(--warn); }
+/* The list scrolls inside its card: the page stays put. */
+.td-tasks { max-height: min(62vh, 560px); overflow-y: auto; padding-right: 2px; }
 @media (max-width: 1000px) { .td-grid { grid-template-columns: minmax(0, 1fr); } }

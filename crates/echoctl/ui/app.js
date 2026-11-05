@@ -1037,11 +1037,15 @@ function todayView() {
   // My work: a card a task due this week or late — what you owe, what is owed to you, what you wait for.
   const all = (S.pj.data && S.pj.data.projects) || []
   const today0 = new Date(); today0.setHours(0, 0, 0, 0)
+  // The date as an icon (words don't fit a narrow card): late, today, later this week; the date in its hint.
+  const CAL = '<rect x="4" y="5.5" width="16" height="14" rx="2.5"/><path d="M4 10h16M9 3.5v4M15 3.5v4"/>'
   const dueChip = (t) => {
-    if (t.late) return '<span class="chip td-late">late</span>'
-    if (!t.due) return ''
-    const d = new Date(t.due + 'T12:00'), same = d.toDateString() === today0.toDateString()
-    return `<span class="chip td-due">${same ? 'today' : esc(d.toLocaleDateString([], { weekday: 'short' }))}</span>`
+    const d = t.due ? new Date(t.due + 'T12:00') : null
+    const when = d ? d.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'short' }) : ''
+    if (t.late) return `<span class="td-due late" title="Late${when ? ` — was due ${esc(when)}` : ''}" aria-label="Late">${ICON('<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17h.01"/>')}</span>`
+    if (!d) return ''
+    const today = d.toDateString() === today0.toDateString()
+    return `<span class="td-due${today ? ' today' : ''}" title="Due ${today ? 'today' : esc(when)}" aria-label="Due ${today ? 'today' : esc(when)}">${ICON(today ? CAL + '<circle cx="12" cy="14.5" r="1.6" fill="currentColor"/>' : CAL)}</span>`
   }
   const card = (t, kind, who) => {
     const pj = all.find((x) => x.id === t.project)

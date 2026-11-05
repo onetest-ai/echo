@@ -233,7 +233,7 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   brief is a Scheduler routine delivered here; Echo writes no brief itself.
 - Your day: today's agenda in time order with a line at now — each meeting its threads, its call once recorded (Open the
   call), Show prep / Prepare, Record when it starts / Don't record; a call of today with no meeting on its own line.
-- My work · this week: a card a task due by the end of this week or late (the rest stays in Tasks) — I owe, owed to me, waiting for — its date as a chip (late / today / a weekday), its thread under it.
+- My work · this week: a card a task due by the end of this week or late (the rest stays in Tasks) — I owe, owed to me, waiting for — its date as an icon (late: a warning, today: an accent calendar, later this week: a grey one; the date in its hint), its thread under it; the list scrolls inside its card.
 - An empty part isn't drawn. Not yet: Needs you now (tagged / burning in the last 24 h) — the next step.
 
 ### A prep before each meeting (`prep.rs`)
