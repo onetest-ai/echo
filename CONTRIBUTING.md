@@ -2,7 +2,7 @@
 
 Thanks for helping. Bug reports and ideas are welcome as GitHub issues; pull requests too.
 
-- Keep the hard rules from `CLAUDE.md`: recording is opt-in per call, transcription stays on the
+- Keep the hard rules from `AGENTS.md`: recording is opt-in per call, transcription stays on the
   device, and only text is kept.
 - Before a pull request, run the checks: `cargo clippy`, `cargo test`,
   `cargo check --target x86_64-pc-windows-msvc --no-default-features` and `scripts/check-mod.sh`.
