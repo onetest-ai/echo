@@ -115,6 +115,8 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
 - The built-ins' header is labelled lines, a paragraph each — **When:** {date} · {duration}, **Who:** {participants},
   **Thread:** {thread}, **Since last time** ({previous}): … — plain text, no block of its own (a smaller boxed block was
   rejected). The editor's fields grow with what is in them (`field-sizing: content`): every line break in view.
+- One scroll on Templates, the card's: the page and its heading stay put (a page scrolling away with its header reads
+  oddly on a desktop); the editor's head and foot stay, its body scrolls; the list scrolls on its own.
 - The window's Minutes leave out the minutes' header (between their title and first section: date, duration, people,
   Since last time) — the call's own header shows those; the page opened in a browser, the HTML file and `notes.md`
   keep it (`minutes::render_page`, `embed`).

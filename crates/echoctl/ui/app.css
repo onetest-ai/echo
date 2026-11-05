@@ -1944,13 +1944,19 @@ select.set-in { width: auto; margin-right: 6px; }
 
 /* Settings → Templates: kinds as tabs; the list and the chosen template's editor side by side. */
 .vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.set-main.tp-main { max-width: 1180px; }
+.set-main.tp-main { max-width: 1180px; overflow: hidden; padding-bottom: 16px; }
+/* One scroll, the card's: the page stays put; the editor's head and foot stay, its body scrolls; the list scrolls apart. */
+.tp-main .tp-grid { flex: 1 1 auto; min-height: 0; align-items: stretch; }
+.tp-main .tp-list { min-height: 0; overflow-y: auto; }
+.tp-main .tp-ed { align-self: stretch; }
+.tp-main > .set-foot { display: none; }
 .tp-head h2 { margin: 0; }
 .tp-head p { margin: 4px 0 0; }
 .tp-kinds { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin: 6px 0 12px; }
 .tp-kind { height: 30px; padding: 0 12px; border: 0; background: transparent; color: var(--text-2); font: inherit; border-bottom: 2px solid transparent; display: inline-flex; align-items: center; gap: 6px; }
 .tp-kind.on { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
 .tp-grid { display: grid; grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.tp-main .tp-ed { max-height: none; height: 100%; }
 .tp-lh { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 6px; }
 .tp-lh > .set-sub { flex: 1 0 100%; }
 .tp-lha .btn svg { width: 13px; height: 13px; }
@@ -1961,7 +1967,7 @@ select.set-in { width: auto; margin-right: 6px; }
 .tp-tag { font-size: 11px; padding: 1px 7px; border-radius: 9px; background: var(--bg); color: var(--text-2); white-space: nowrap; }
 .tp-tag.ed { background: rgba(240, 162, 74, 0.16); color: var(--warn); }
 .tp-tag.mine { background: var(--accent-soft, rgba(124, 92, 255, 0.16)); color: var(--accent); }
-.tp-ed { border: 1px solid var(--line); border-radius: var(--r-panel); background: var(--surface); display: flex; flex-direction: column; max-height: calc(100vh - 170px); position: sticky; top: 0; }
+.tp-ed { border: 1px solid var(--line); border-radius: var(--r-panel); background: var(--surface); display: flex; flex-direction: column; min-height: 0; max-height: 100%; }
 .tp-empty { padding: 24px 16px; text-align: center; }
 .tp-eh { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
 .tp-eh .grow, .tp-ef .grow { flex: 1; min-width: 0; }
