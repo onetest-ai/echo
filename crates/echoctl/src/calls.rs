@@ -234,7 +234,7 @@ pub fn recap_from_notes(md: &str) -> Vec<String> {
                 out.extend(Some(clean(l)).filter(|t| !filler(t)));
             } else if out.is_empty() && !l.starts_with('#') {
                 // a summary paragraph: its first sentence
-                out.extend(Some(clean(l.split(". ").next().unwrap_or(l))).filter(|t| !filler(t)));
+                out.extend(Some(clean(l.split(". ").next().unwrap_or(l)).trim_end_matches('.').to_string()).filter(|t| !filler(t)));
             }
         }
         out
@@ -1445,6 +1445,21 @@ mod tests {
         assert_eq!(recap_from_notes(md), vec!["Keep X out", "Meet weekly"]);
         let md = "# T\n\n## Summary\nWe agreed on the plan. Then more.\n";
         assert_eq!(recap_from_notes(md), vec!["We agreed on the plan"]);
+    }
+
+    #[test]
+    fn the_summary_has_its_shape_and_its_recap_is_the_purpose() {
+        // Each built-in template but the memo's asks for the shape: purpose, Highlights, Key dates.
+        for (name, body) in BUILTIN_TEMPLATES.iter().filter(|(n, _)| *n != "memo") {
+            let t = parse_template(body, name, "t".into()).unwrap();
+            let s = &t.sections[0];
+            assert_eq!(s["heading"], "Summary", "{name}");
+            let i = s["instruction"].as_str().unwrap();
+            assert!(i.starts_with("One sentence") && i.contains("**Highlights**") && i.contains("**Key dates**"), "{name}: {i}");
+        }
+        // Minutes in that shape: a call's recap with no decisions is its purpose, then its highlights and dates.
+        let md = "# T\n\n## Summary\nTo agree the pilot scope with Acme.\n\n**Highlights**\n- **Scope:** two sites first, Dana Kowal [03:10]\n\n**Key dates**\n- **24 Nov** — pilot starts [12:05]\n";
+        assert_eq!(recap_from_notes(md), vec!["To agree the pilot scope with Acme", "Scope: two sites first, Dana Kowal", "24 Nov — pilot starts"]);
     }
 
     #[test]
