@@ -2394,6 +2394,10 @@ fn human_event_here(project: &str, body: &Value) -> Result<Value> {
     let now = Local::now().to_rfc3339();
     let date = last.as_ref().and_then(|c| s(&t.evidence[c]["date"])).unwrap_or_else(|| now[..10].to_string());
     let mut e = json!({"type": "human", "op": op, "by": "human", "evidence": last, "date": date, "at": now});
+    // The user's own words with an edit (why they closed it), kept in its history.
+    if let Some(note) = body["note"].as_str().map(str::trim).filter(|t| !t.is_empty()) {
+        e["note"] = json!(note.chars().take(500).collect::<String>());
+    }
     if op == "create" {
         let k = body["kind"].as_str().unwrap_or("");
         let par = body["parent"].as_str();

@@ -13,7 +13,7 @@ use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 
 /// Echo's own ways to send; a plugin adds others (`ctx.deliver.provide`).
-pub const BUILTIN: [&str; 2] = ["teams", "mail"];
+pub const BUILTIN: [&str; 3] = ["teams", "mail", "today"];
 
 /// A way to send's name, as manifests and routines write it.
 pub fn valid_kind(k: &str) -> bool {
@@ -27,12 +27,14 @@ pub fn status() -> Value {
     let provided = crate::jshost::providers();
     #[cfg(not(feature = "js"))]
     let provided: Vec<Value> = vec![];
-    json!({"teams": ms.is_some(), "mail": ms.is_some(), "account": ms, "provided": provided})
+    json!({"teams": ms.is_some(), "mail": ms.is_some(), "today": true, "account": ms, "provided": provided})
 }
 
 /// Can `kind` be sent to now? (Why not, otherwise.)
 pub fn ready(kind: &str) -> Result<()> {
     match kind {
+        // Echo's own Today page: always there.
+        "today" => Ok(()),
         "teams" | "mail" if crate::graph::account().is_some() => Ok(()),
         "teams" | "mail" => bail!("not signed in to Microsoft 365 (Settings → Calendar & chat)"),
         #[cfg(feature = "js")]
@@ -80,6 +82,7 @@ pub fn send(kind: &str, m: &Msg) -> Result<()> {
     let notice = m.ai.map(ai_notice);
     let foot_lines: Vec<String> = [m.about.map(str::to_owned), notice.clone()].into_iter().flatten().collect();
     match kind {
+        "today" => crate::today::put_card(m),
         "teams" => {
             let foot: String = foot_lines.iter().map(|a| format!("<p><em>{}</em></p>", esc(a))).collect();
             let html = format!("<h3>{}</h3>{}{foot}", esc(m.title), crate::minutes::markdown_html(m.markdown));

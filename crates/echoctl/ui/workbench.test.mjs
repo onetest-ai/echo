@@ -15,8 +15,8 @@ const test = (name, f) => tests.push([name, f])
 const ids = (tabs) => tabs.map((t) => t[0])
 const VIEWS = [{ id: 'claude', label: 'Claude', area: 'bottom' }, { id: 'tasks', label: 'Tasks', area: 'right' }]
 
-test('Calls (list beside the call) comes first, Calendar (one column) second, Settings at the bottom', () => {
-  assert.deepEqual(ACTIVITIES.map((a) => [a.id, a.layout, !!a.bottom]), [['calls', 'list-detail', false], ['calendar', 'single', false], ['projects', 'single', false], ['tasks', 'single', false], ['brain', 'single', false], ['settings', 'single', true]])
+test('Today comes first, then Calls (list beside the call) and Calendar (one column), Settings at the bottom', () => {
+  assert.deepEqual(ACTIVITIES.map((a) => [a.id, a.layout, !!a.bottom]), [['today', 'single', false], ['calls', 'list-detail', false], ['calendar', 'single', false], ['projects', 'single', false], ['tasks', 'single', false], ['brain', 'single', false], ['settings', 'single', true]])
 })
 
 test('a call that records shows its Transcript first, with a dot; chat and screens only when there are any', () => {

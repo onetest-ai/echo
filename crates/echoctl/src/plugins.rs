@@ -144,6 +144,7 @@ fn describe_deliver(v: &Value) -> Result<String> {
         .iter()
         .map(|t| match t.as_str() {
             "teams" => "Teams (your chat with yourself)".to_string(),
+            "today" => "Echo's Today page".to_string(),
             "mail" => "mail (to you, or to the addresses you set on a routine)".to_string(),
             k => format!("{} (through the plugin that adds it)", title_case(k)),
         })

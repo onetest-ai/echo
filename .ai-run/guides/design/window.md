@@ -84,6 +84,12 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
 - macOS: transparent title bar with content under it (`with_fullsize_content_view`); the strip posts
   `window_drag` / `window_zoom` (`window::window_cmd`). Windows keeps its native title bar.
 
+### Copy and paste
+- macOS: the app has its own menu bar — Echo (Hide, Hide Others, Quit) and Edit (Undo, Redo, Cut, Copy, Paste, Select
+  All; `tray::app_menu`, muda's predefined items, made once AppKit has launched). WebKit takes ⌘C, ⌘V, ⌘X, ⌘A and ⌘Z
+  only from a menu: without one nothing in the window could be copied. Quit goes through `applicationShouldTerminate:`.
+- Text is selectable everywhere but the window's chrome (buttons, bars, tabs, panel heads).
+
 ### Workbench layout
 - Fixed areas: a 40 px top strip with the **Record pill** at its centre (idle Record ▾ with language + profile;
   armed + Cancel; meeting soon + Record it; recording: clock, title, Stop that asks first), the activity bar, the
@@ -224,6 +230,56 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   is asked about as before; a choice on the Record button wins. A thread's Profile → Meetings lists its series read
   only; × = not this thread's (`Project.not_series`). `echoctl series list [--thread] | set <key> <json>`.
 - The event card is 400 px wide (`min(400px, 100vw − 24px)`).
+
+### Today (`today.rs`, `#today`, `/api/today`; the first activity, the window opens on it)
+- Cards delivered to Echo itself: `deliver` kind `today` ("Echo's Today page" on an install sheet; always ready;
+  reserved — no plugin provides it). A routine's or a plugin's message becomes its source's card (the source = its
+  `about`, else its title; a new one replaces the old, ≤ 20 kept), rendered by Echo's safe writer with the AI notice;
+  Got it (IPC `today_seen`) hides it until that source sends the next. `<home>/.echo/today-cards.json`. The morning
+  brief is a Scheduler routine delivered here; Echo writes no brief itself.
+- Your day: today's agenda in time order with a line at now — each meeting its threads, its call once recorded (Open the
+  call), Show prep / Prepare, Record when it starts / Don't record; a call of today with no meeting on its own line.
+- My work · this week: a card a task due by the end of this week or late (the rest stays in Tasks), one list by date — late first, the oldest first; whose it is (I owe, owed to me, waiting for) on each card — its date as an icon (late: a warning, today: an accent calendar, later this week: a grey one; the date in its hint), its thread under it; the list scrolls inside its card.
+- Your day also says each call's minutes: Writing / Minutes at HH:MM / New minutes with what they hold (decisions,
+  actions, questions — new until the call is opened, `<home>/.echo/minutes-seen.json`) / Minutes failed + Try again.
+- A task closes from My work only through its close icon: a dialog asks first, with an optional comment kept in its
+  history (a human edit's `note`, ≤ 500 chars). A one-click tick closed tasks by accident; a thread's sync closes what
+  its calls and mail show done, so this is for what they don't.
+- Each task card has two icons: Claude (a dialog: what should change — "move it two weeks later") and close. The ask runs
+  `claude -p` with no tools on the thread's AI profile (`today::ask_task`, `livenotes::complete_text`; IPC `task_ask`):
+  the task (title, state, due, owners, description, its last quotes) and today's date go in as context, an edit comes
+  back as JSON — only due, state, owners, title kept (`parse_edit`) — and Echo applies it as the user's own edit with the
+  words as its note; the outcome (`<home>/.echo/task-asks.json`, `/api/today` `asks`) shows above My work with Undo. A
+  session in the Claude panel was tried first: interactive, a workspace-trust prompt, slower — the user wants `-p`.
+- The date icon sits before the title's words.
+- A Teams meeting of today that is over and wasn't recorded offers **Import Teams transcript** in Your day, as the calendar
+  does (IPC `calendar_import`; the event from the calendar shown or fetched; known transcript or "if Teams transcribed
+  it"; Importing… and its error from the calendar's own state, `IMPORTS`, added to `/api/today`). Once imported it is a
+  call with its minutes like any other.
+- The header counts your late tasks. Ideas from the Meeting Notebook plugin (onetest-ai/echo-plugins#1) by Adam
+  Auerbach: the late count, minutes' state and new minutes, closing from My work.
+- An empty part isn't drawn.
+- The heading greets by the time of day and the first name in About me ("Good morning, Dana"): before 5 Good night, to
+  12 Good morning, to 18 Good afternoon, then Good evening. The date and counts stay beside it.
+- **Needs you now** (`needs.rs`, `/api/today` `needs`, `echoctl needs [--refresh]`): what waits on the user from the last
+  24 h, read through Echo's Microsoft 365 sign-in every 5 minutes by the app. Tagged: a 1:1 chat whose last word isn't
+  theirs; an @mention of them in a group or meeting chat with no word of theirs after; a mail with them in To (not Cc)
+  from a colleague or a sender trusted for a client, no invite, nothing automated (no-reply, "Auto …" senders,
+  accept/decline), no reply of theirs since in its conversation. Then one model call with no tools on the default
+  profile keeps those that wait on them — a question, a request, something to decide; thanks, "ok", FYIs and reports go
+  (cached per item and its words; a failed call keeps all). Hot: in the meeting chats of open threads, after the user's
+  last word, a burst (≥ 5 messages from ≥ 2 people in 30 min) or urgency words, confirmed by a model with no tools on
+  the thread's profile that must quote one message word for word (checked). Hot items first, with a warn dot.
+- Each item: Reply in Teams (the Teams app on that message, `msteams:` — `open_url` allows it), Read and reply for a mail
+  (its new part read here, the answer typed by the user and sent by their click on Reply / Reply all —
+  `m365::mail_reply_text`, IPC `needs_reply`; Open in Outlook beside it), I'll do it (a dialog: the task's words and its
+  thread — the task is theirs, due today, under Follow-ups → From Teams and mail in that thread, made once; IPC
+  `needs_decide`), Won't do. An item leaves when answered (the next read no longer finds it) or decided
+  (`<home>/.echo/needs.json`, decisions kept two days). No snooze, no fold, no notifications: only in Today.
+- ⌘K on Today acts on it (target "Today"): Needs you now's items (Reply in Teams / Read and reply, I'll do it, Won't do),
+  Prepare / Show prep for meetings still to come, and Close / Ask Claude for each task this week — each the click on its
+  button (`press`), so the dialogs ask first as they do. A calendar event with a prep: Show its prep, Prepare for this
+  meeting / Prepare it again; a meeting coming up in Calls: Prepare this meeting / Write the prep again.
 
 ### A prep before each meeting (`prep.rs`)
 - For today's calendar meetings of an open thread, written without being asked (the app checks every 5 minutes —

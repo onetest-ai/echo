@@ -331,6 +331,7 @@ const brainOn = () => !(typeof S !== 'undefined' && S.state && S.state.brain ===
 /** The activities shown: those whose `when` (if any) holds. */
 const shownActivities = () => ACTIVITIES.filter((a) => !a.when || a.when())
 const ACTIVITIES = [
+  { id: 'today', label: 'Today', layout: 'single', icon: ICON('<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8"/>') },
   { id: 'calls', label: 'Calls', layout: 'list-detail', icon: ICON('<path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2"/>') },
   { id: 'calendar', label: 'Calendar', layout: 'single', icon: ICON('<rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/>') },
   { id: 'projects', label: 'Threads', layout: 'single', icon: ICON('<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M8 13h8"/>') },
@@ -507,6 +508,9 @@ async function loadMoreCalls() {
 async function loadProjects() {
   try { S.pj.data = await get('api/projects') } catch { /* app restarting */ }
 }
+async function loadToday() {
+  try { S.today = await get('api/today') } catch { /* app restarting */ }
+}
 async function loadTasks() {
   try { S.tk.data = await get('api/tasks') } catch { /* app restarting */ }
 }
@@ -575,6 +579,8 @@ async function loadCall(name) {
     // one), or a newer fetch was started: only the newest answer counts.
     if (S.selected !== name || mine !== callSeq) return
     S.call = c
+    // Its minutes are read now (Today's "new" goes): once per call and minutes a session.
+    if (c.notes && S.seenMinutes !== `${c.name}:${(c.notes_run && c.notes_run.finished_at) || ''}`) { S.seenMinutes = `${c.name}:${(c.notes_run && c.notes_run.finished_at) || ''}`; send({ cmd: 'minutes_seen', call: c.name }) }
     // A file that can't be read isn't "empty": the editor stays away from it (`notesTab` says why).
     if (c.my_notes_error == null) NotesSync.seen(S.call.name, S.call.my_notes || '', epoch)
     syncEditor()
@@ -603,6 +609,8 @@ function route() {
   if (sm && sm[1] === 'vocabulary') { S.view = 'calls'; setTimeout(() => { Layout.show('vocabulary', panelViews()); layoutChanged() }); return }
   if (sm) { S.view = 'settings'; if (sm[1]) S.setSection = sm[1]; return }
   if (h === 'tasks') { S.view = 'tasks'; return }
+  // The window opens on Today.
+  if (h === 'today' || h === '') { S.view = 'today'; return }
   // Knowledge: Recall's tabs and the plugins' (`knowledge.tab`, `#brain/<plugin>:<id>/<its route>`).
   const bm = h.match(/^brain(?:\/([\w:-]+)(?:\/(.*))?)?$/)
   if (bm && !brainOn() && !knowledgeTabs().length) { S.view = 'calls'; return }
@@ -641,7 +649,7 @@ function route() {
 const go = (hash) => { if (location.hash.slice(1) !== hash) location.hash = hash; else render() }
 /** An activity, where the user left it (the open call and tab; the calendar's day or week). */
 const goActivity = (id) => go(ACTIVITIES.some((a) => a.id === id && a.plugin) ? ((S.plRoutes || {})[id] ? `${id}/${S.plRoutes[id]}` : id) : id === 'calendar' ? `calendar/${S.cal.mode}` : id === 'settings' ? `settings/${S.setSection}`
-  : id === 'tasks' ? 'tasks' : id === 'brain' ? `brain/${S.br.tab}`
+  : id === 'tasks' ? 'tasks' : id === 'today' ? 'today' : id === 'brain' ? `brain/${S.br.tab}`
   : id === 'projects' ? (S.pj.found ? 'found' : S.pj.client ? `client/${S.pj.client}/${S.pj.ctab || 'overview'}` : S.pj.sel ? `project/${S.pj.sel}/${S.pj.tab}` : 'projects') : (S.selected ? `call/${S.selected}/${S.tab}` : 'calls'))
 
 // ── language of the next recording (Record ▾) ──────────────────────────────────────────────
@@ -998,6 +1006,167 @@ function doc() {
   const body = tabBody(c, segs, chat, frames, actions)
   const confirm = S.confirmDelete ? confirmBox(c) : ''
   return typeof body === 'string' ? { head, pane: confirm + body } : { head, bar: confirm + body.bar, frame: body.frame }
+}
+
+/** Today (the first activity; the window opens on it): cards delivered to Echo (a routine's morning brief — Got it
+ *  hides one until its source sends the next), your day (today's meetings: the call, Show prep or Prepare, Record when
+ *  it starts) and your work (Tasks' piles, a few of each). An empty part isn't drawn. */
+function todayView() {
+  const d = S.today
+  if (!d) return `<div class="skeleton" style="padding:22px">${'<i></i>'.repeat(8)}</div>`
+  const now = new Date()
+  const date = now.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })
+  const meetings = (d.day || []).filter((x) => x.kind === 'meeting').length
+  const mine = (d.work && d.work.mine) || { items: [], total: 0 }
+  // How many of yours are late, beside the meetings and tasks (from the Meeting Notebook plugin's Today).
+  const late = (mine.items || []).filter((t) => t.late).length
+  // Hello by the time of day, by the user's first name (About me).
+  const hr = now.getHours(), first = (d.me || '').trim().split(/\s+/)[0]
+  const hello = `${hr < 5 ? 'Good night' : hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening'}${first ? `, ${first}` : ''}`
+  const head = `<header class="td-head"><h1>${esc(hello)}</h1><span class="set-sub">${esc(date)}${meetings ? ` · ${meetings} meeting${meetings === 1 ? '' : 's'}` : ''}${mine.total ? ` · ${mine.total} task${mine.total === 1 ? '' : 's'} on you` : ''}${late ? ` · <span class="warn">${late} late</span>` : ''}</span></header>`
+  const cards = (d.cards || []).map((c) => `<section class="td-card"><div class="td-card-h"><b>${esc(c.title)}</b><span class="set-sub">${esc([c.about, c.at ? hm(new Date(c.at)) : ''].filter(Boolean).join(' · '))}</span><button class="btn ghost" data-today-seen="${esc(c.key)}">Got it</button></div><div class="td-md">${c.html}</div>${c.notice ? `<p class="set-sub">${esc(c.notice)}</p>` : ''}</section>`).join('')
+  // Your day: a line a meeting or call, the line "now" between past and to come.
+  let nowDrawn = false
+  const rows = (d.day || []).map((x) => {
+    const st = x.start ? new Date(x.start) : null, en = x.end ? new Date(x.end) : null
+    const past = en ? en < now : st ? st < now : false
+    const line = !nowDrawn && st && st > now ? (nowDrawn = true, `<div class="td-now"><span>${esc(hm(now))}</span></div>`) : ''
+    const chips = (x.threads || []).map((p) => `<span class="pj-chip"><button class="link-btn" data-pj="goto" data-id="${esc(p.id)}">${projIcon(p, 14)}${esc(p.name)}</button></span>`).join('')
+    const acts = []
+    // Its minutes (from the Meeting Notebook plugin's Today): writing, coming at a time, written, or failed — Try again.
+    const mn = x.minutes || {}
+    // New minutes (not opened yet) stand out, with what they hold — what to read after a busy day.
+    const ct = mn.counts || {}
+    const held = [ct.decisions ? `${ct.decisions} decision${ct.decisions === 1 ? '' : 's'}` : '', ct.actions ? `${ct.actions} action${ct.actions === 1 ? '' : 's'}` : '', ct.questions ? `${ct.questions} question${ct.questions === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')
+    if (x.call && mn.state === 'ready') acts.push(`<button class="btn${mn.unread ? ' primary' : ' ghost'}" data-call="${esc(x.call)}" data-call-tab="minutes">${mn.unread ? 'New minutes' : 'Minutes'}</button>${held ? `<span class="set-sub">${esc(held)}</span>` : ''}`)
+    else if (x.call) acts.push(`<button class="btn ghost" data-call="${esc(x.call)}">Open the call</button>`)
+    if (mn.state === 'writing') acts.push('<span class="set-sub">Writing the minutes…</span>')
+    else if (mn.state === 'transcribing') acts.push('<span class="set-sub">Transcribing…</span>')
+    else if (mn.state === 'at' && mn.at) acts.push(`<span class="set-sub">Minutes at ${esc(hm(new Date(mn.at)))}</span>`)
+    else if (mn.state === 'failed') acts.push(`<span class="warn" title="${esc(mn.why || '')}">Minutes failed</span><button class="btn" data-today-retry="${esc(x.call)}">Try again</button>`)
+    if (x.prep && x.prep.ready) acts.push(`<button class="btn${past ? ' ghost' : ' primary'}" data-ev-prep="${esc(x.prep.id)}" data-ev-call="${esc(x.call || '')}">Show prep</button>`)
+    else if (x.prep && x.prep.writing) acts.push('<span class="set-sub">Writing the prep…</span>')
+    else if (x.prep && !past) acts.push(`<button class="btn" data-prep-write="${esc(x.prep.id)}" data-prep-open="1">Prepare</button>`)
+    // Over and not recorded: its Teams transcript, as the calendar offers it.
+    if (x.importable && x.transcript !== false) {
+      if (x.import && x.import.busy) acts.push('<span class="set-sub">Importing the Teams transcript…</span>')
+      else acts.push(`<button class="btn" data-today-import="${esc(x.event)}">Import Teams transcript</button>${x.import && x.import.error ? `<span class="warn">${esc(x.import.error)}</span>` : x.transcript === true ? '' : '<span class="set-sub">if Teams transcribed it</span>'}`)
+    }
+    if (x.kind === 'meeting' && !past && !x.call) acts.push(x.scheduled ? `<button class="btn ghost" data-unschedule="${esc(x.event)}">Don't record</button>` : `<button class="btn ghost" data-schedule="${esc(x.event)}">Record when it starts</button>`)
+    return `${line}<div class="td-row${past ? ' past' : ''}"><span class="td-t mono">${st ? esc(hm(st)) : ''}</span><div class="td-b"><div class="td-s"><b>${esc(x.subject || 'A call')}</b>${chips}</div><div class="td-a">${acts.join('')}</div></div></div>`
+  }).join('') + (!nowDrawn && (d.day || []).length ? `<div class="td-now"><span>${esc(hm(now))}</span></div>` : '')
+  const day = (d.day || []).length ? `<section class="td-sec"><h2>Your day</h2>${rows}</section>` : ''
+  // My work: a card a task due this week or late — what you owe, what is owed to you, what you wait for.
+  const all = (S.pj.data && S.pj.data.projects) || []
+  const today0 = new Date(); today0.setHours(0, 0, 0, 0)
+  // The date as an icon (words don't fit a narrow card): late, today, later this week; the date in its hint.
+  const CAL = '<rect x="4" y="5.5" width="16" height="14" rx="2.5"/><path d="M4 10h16M9 3.5v4M15 3.5v4"/>'
+  const dueChip = (t) => {
+    const d = t.due ? new Date(t.due + 'T12:00') : null
+    const when = d ? d.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'short' }) : ''
+    if (t.late) return `<span class="td-due late" title="Late${when ? ` — was due ${esc(when)}` : ''}" aria-label="Late">${ICON('<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17h.01"/>')}</span>`
+    if (!d) return ''
+    const today = d.toDateString() === today0.toDateString()
+    return `<span class="td-due${today ? ' today' : ''}" title="Due ${today ? 'today' : esc(when)}" aria-label="Due ${today ? 'today' : esc(when)}">${ICON(today ? CAL + '<circle cx="12" cy="14.5" r="1.6" fill="currentColor"/>' : CAL)}</span>`
+  }
+  const card = (t, kind, who) => {
+    const pj = all.find((x) => x.id === t.project)
+    const where = [kind, who, pj ? pj.name : ''].filter(Boolean).map(esc).join(' · ')
+    // Close… asks first in a dialog (`todayCloseDialog`); the title opens the task.
+    const attrs = `data-project="${esc(t.project)}" data-title="${esc(t.title)}" data-node="${esc(t.id)}"`
+    // Ask Claude to do something with it ("move it two weeks"), and close it — each asks first in a dialog.
+    const ask = `<button class="icon-btn td-ico" data-today-ask="1" ${attrs} title="Ask Claude to change this task…" aria-label="Ask Claude about “${esc(t.title)}”…">${ICON('<path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/><path d="M18.5 15.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>')}</button>`
+    const close = `<button class="icon-btn td-ico" data-today-close="${esc(t.id)}" ${attrs} title="Close this task…" aria-label="Close “${esc(t.title)}”…">${ICON('<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/>')}</button>`
+    // The date's icon before the title's words.
+    return `<div class="td-task"><span class="td-task-t">${dueChip(t)}<a href="${esc(t.link)}">${esc(t.title)}</a></span><span class="td-task-m">${pj ? projIcon(pj, 12) : ''}${where}<span class="td-icos">${ask}${close}</span></span></div>`
+  }
+  const w = d.work || {}
+  // One list by date: late first (the oldest first), then by due date; whose it is stays on each card.
+  const tasks = [...((w.mine && w.mine.items) || []).map((t) => [t, 'I owe', '']),
+    ...((w.owed && w.owed.items) || []).map((t) => [t, 'owed to me', t.owner]),
+    ...((w.waiting && w.waiting.items) || []).map((t) => [t, 'waiting for', t.waiting_for && t.waiting_for.who])]
+  tasks.sort(([a], [b]) => (b.late ? 1 : 0) - (a.late ? 1 : 0) || String(a.due || '9999').localeCompare(String(b.due || '9999')))
+  const cards2 = tasks.map(([t, kind, who]) => card(t, kind, who))
+  const work = cards2.length || S.todayAskId ? `<section class="td-sec"><h2>My work · this week <button class="link-btn" data-go="tasks">Tasks</button></h2>${todayAskBar()}<div class="td-tasks">${cards2.join('')}</div></section>` : ''
+  const empty = !cards && !day && !work ? '<div class="empty"><div><h3>A quiet day</h3><p>No meetings today and nothing on you in Tasks.</p></div></div>' : ''
+  return `<div class="td">${head}${needsView(d.needs)}${cards}<div class="td-grid">${day}${work}</div>${empty}</div>${todayCloseDialog()}${needsDialog()}`
+}
+
+/** Today → Needs you now: tagged in the last day, or burning where you watch (`needs.rs`) — hot first. Reply in Teams
+ *  (the app) or Read and reply (a mail, here); I'll do it (a task, in a thread) or Won't do. Empty: not drawn. */
+function needsView(n) {
+  const items = (n && n.items) || []
+  if (!items.length) return ''
+  const ago = (t) => { const m = Math.round((Date.now() - new Date(t)) / 60000); return m < 60 ? `${Math.max(m, 1)} min` : `${Math.round(m / 60)} h` }
+  const rows = items.map((x) => {
+    const reply = x.source === 'mail' ? `<button class="btn" data-needs-read="${esc(x.id)}">Read and reply</button>`
+      : x.app_url || x.chat ? `<button class="btn" data-needs-open="${esc(x.app_url || '')}" data-chat="${esc(x.chat || '')}">Reply in Teams</button>` : ''
+    return `<div class="nd-row"><span class="nd-dot ${x.kind === 'hot' ? 'hot' : ''}" aria-label="${x.kind === 'hot' ? 'Burning' : 'For you'}"></span>
+      <div class="nd-b"><div><b>${esc(x.where || '')}</b> <span class="set-sub">— ${esc(x.line || '')}</span></div><div class="mono set-sub">${esc(x.from || '')} · ${esc(ago(x.at))} ago${x.quote ? ` · “${esc(x.quote)}”` : ''}</div></div>
+      <div class="nd-a">${reply}<button class="btn primary" data-needs-todo="${esc(x.id)}">I'll do it</button><button class="btn ghost" data-needs-wont="${esc(x.id)}">Won't do</button></div></div>`
+  }).join('')
+  return `<section class="td-card nd" aria-labelledby="nd-h"><div class="td-card-h"><b id="nd-h">Needs you now</b><span class="set-sub">the last 24 h · where you watch · goes away when you answer</span></div>${rows}</section>`
+}
+/** The dialogs of Needs you now: I'll do it (a task's title and its thread), Read and reply (the mail, your answer). */
+function needsDialog() {
+  const c = S.needsDlg
+  if (!c) return ''
+  const item = (((S.today && S.today.needs) || {}).items || []).find((x) => x.id === c.id) || {}
+  if (c.kind === 'todo') {
+    const threads = ((S.pj.data && S.pj.data.projects) || []).filter((p) => p.group !== 'closed')
+    const pick = `<select id="nd-thread" class="set-in">${threads.map((p) => `<option value="${esc(p.id)}"${p.id === item.thread ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select>`
+    return `<div class="td-modal" data-needs-off="1"><div class="td-dialog" role="dialog" aria-modal="true" aria-labelledby="nd-dlg">
+      <h3 id="nd-dlg">A task of yours</h3><label for="nd-title" class="set-sub">What to do</label><textarea id="nd-title" rows="2">${esc(item.line || '')}</textarea>
+      <label for="nd-thread" class="set-sub">In which thread</label>${pick}
+      <div class="td-dialog-a"><button class="btn ghost" data-needs-off="1">Cancel</button><button class="btn primary" data-needs-todo-ok="${esc(c.id)}">Add to Tasks</button></div></div></div>`
+  }
+  const m = c.mail
+  const body = !m ? '<p class="set-sub">Reading the mail…</p>' : m.error ? `<p class="warn">${esc(m.error)}</p>` : `<p><b>${esc(m.subject || '')}</b><br><span class="set-sub">${esc((m.from && (m.from.name || m.from.email)) || '')}</span></p><div class="nd-mail">${esc(m.text || '')}</div>`
+  return `<div class="td-modal" data-needs-off="1"><div class="td-dialog wide" role="dialog" aria-modal="true" aria-labelledby="nd-dlg">
+    <h3 id="nd-dlg">Read and reply</h3>${body}
+    <label for="nd-reply" class="set-sub">Your answer — sent when you click Reply</label><textarea id="nd-reply" rows="4"></textarea>
+    <div class="td-dialog-a">${m && m.url ? `<button class="link-btn" data-ext href="${esc(m.url)}" data-needs-outlook="${esc(m.url)}">Open in Outlook</button><span class="grow"></span>` : ''}<button class="btn ghost" data-needs-off="1">Cancel</button><button class="btn" data-needs-send="${esc(c.id)}" data-all="1">Reply all</button><button class="btn primary" data-needs-send="${esc(c.id)}">Reply</button></div></div></div>`
+}
+
+/** Today → a task's Claude icon: the user's words go to Echo (IPC `task_ask`), which runs `claude -p` (no tools, the
+ *  thread's profile) with the task as context and applies its edit as the user's own; Today reads the outcome
+ *  (`asks`) until it is there and shows it with Undo. */
+function todayAsk(c, text) {
+  const id = `ask-${Date.now()}`
+  S.todayAskId = id
+  send({ cmd: 'task_ask', ask: id, project: c.project, node: c.node, text })
+  let n = 0
+  const poll = () => loadToday().then(() => { render(); const a = ((S.today && S.today.asks) || []).find((x) => x.id === id); if ((!a || a.state === 'working') && ++n < 60) setTimeout(poll, 2000) })
+  setTimeout(poll, 1000)
+}
+/** The last ask's outcome above My work: what Claude changed (Undo), why it didn't, or that it is working. */
+function todayAskBar() {
+  const a = S.todayAskId && ((S.today && S.today.asks) || []).find((x) => x.id === S.todayAskId)
+  if (!S.todayAskId) return ''
+  if (!a || a.state === 'working') return '<div class="td-askbar"><span class="set-sub">Claude is on it…</span></div>'
+  const undo = a.state === 'done' && a.mid ? `<button class="link-btn" data-today-undo="${esc(a.mid)}" data-project="${esc(a.project)}">Undo</button>` : ''
+  return `<div class="td-askbar${a.state === 'failed' ? ' failed' : ''}"><span class="grow">${esc(a.say || '')}</span>${undo}<button class="icon-btn" data-today-askoff="1" aria-label="Dismiss">×</button></div>`
+}
+
+/** Today → Close…: a dialog — closing a task by hand asks first, with an optional comment (kept in its history).
+ *  A thread's sync closes tasks by itself when its calls and mail say so; this is for what they don't. */
+function todayCloseDialog() {
+  const c = S.todayClose
+  if (!c) return ''
+  if (c.ask) return `<div class="td-modal" data-today-keep="1"><div class="td-dialog" role="dialog" aria-modal="true" aria-labelledby="td-dlg-h">
+    <h3 id="td-dlg-h">Ask Claude about this task</h3>
+    <p>${esc(c.title)}</p>
+    <label for="td-ask-text" class="set-sub">What should change — its date, state, owner or title; you can undo it</label>
+    <textarea id="td-ask-text" rows="3" placeholder="Move it two weeks later"></textarea>
+    <div class="td-dialog-a"><button class="btn ghost" data-today-keep="1">Cancel</button><button class="btn primary" data-today-ask-send="1">Ask Claude</button></div>
+  </div></div>`
+  return `<div class="td-modal" data-today-keep="1"><div class="td-dialog" role="dialog" aria-modal="true" aria-labelledby="td-dlg-h">
+    <h3 id="td-dlg-h">Close this task?</h3>
+    <p>${esc(c.title)}</p>
+    <label for="td-close-note" class="set-sub">A comment, if you like — why it's done, or where</label>
+    <textarea id="td-close-note" rows="3" placeholder="Sent the diagram to Ravi on Tuesday"></textarea>
+    <div class="td-dialog-a"><button class="btn ghost" data-today-keep="1">Cancel</button><button class="btn primary" data-today-done="${esc(c.node)}" data-project="${esc(c.project)}">Close it</button></div>
+  </div></div>`
 }
 
 /** A meeting still to come (Calls → Coming up today, `echo://prep`): its header and the Prep tab; Transcript and
@@ -6058,6 +6227,8 @@ function paletteTarget() {
     if (e) return { kind: 'event', e, label: e.subject || 'Event' }
   }
   if (S.view === 'calls' && S.selected && S.call && !S.call.error) return { kind: 'call', c: S.call, label: S.call.title }
+  if (S.view === 'calls' && S.upSel) return { kind: 'upcoming', id: S.upSel, label: (S.upPrep && S.upPrep.meeting && S.upPrep.meeting.subject) || 'Coming up' }
+  if (S.view === 'today' && S.today) return { kind: 'today', d: S.today, label: 'Today' }
   return null
 }
 /** Every action for the target, Echo's own, and where to go. `disabled`: why it can't run now. */
@@ -6086,6 +6257,39 @@ function paletteItems(target) {
     if (kind === 'join' || kind === 'record') add('This event', es.live ? 'Record it' : 'Record when it starts', () => press({ schedule: e.id }))
     if (kind === 'import') add('This event', 'Import Teams transcript', () => press({ calImport: e.id }), { keywords: 'missed unrecorded transcript teams', disabled: e.import && e.import.busy ? 'importing now' : null })
     if (!kind) add('This event', 'Record it', () => {}, { disabled: e.cancelled ? 'cancelled' : e.declined ? 'you declined it' : es.past ? 'it is over' : !e.online ? 'not a Teams meeting' : 'not possible' })
+  }
+  if (target && target.kind === 'event' && target.e.prep) {
+    const p = target.e.prep
+    if (p.ready) add('This event', 'Show its prep', () => press({ evPrep: p.id }), { keywords: 'brief prepare meeting' })
+    if (!p.writing && !eventState(target.e, new Date()).past) add('This event', p.ready ? 'Prepare it again' : 'Prepare for this meeting', () => press({ prepWrite: p.id, prepOpen: '1' }), { keywords: 'prep brief before meeting' })
+  }
+  if (target && target.kind === 'upcoming') {
+    const p = S.upPrep && S.upPrep.prep
+    add('This meeting', p ? 'Write the prep again' : 'Prepare this meeting', () => press({ prepWrite: target.id }), { keywords: 'prep brief before', disabled: S.upPrep && S.upPrep.writing ? 'the prep is being written' : null })
+  }
+  if (target && target.kind === 'today') {
+    const d = target.d, now = new Date()
+    // Needs you now; meetings still to come: their prep; each task this week: close it, or ask Claude to change it.
+    for (const x of (d.needs && d.needs.items) || []) {
+      const name = `${x.from || ''} — ${x.line || ''}`
+      if (x.source === 'mail') add('Needs you now', `Read and reply: ${name}`, () => press({ needsRead: x.id }), { keywords: 'mail answer' })
+      else if (x.app_url || x.chat) add('Needs you now', `Reply in Teams: ${name}`, () => press({ needsOpen: x.app_url || '', chat: x.chat || '' }), { keywords: 'teams answer chat' })
+      add('Needs you now', `I'll do it: ${name}`, () => press({ needsTodo: x.id }), { keywords: 'task todo' })
+      add('Needs you now', `Won't do: ${name}`, () => press({ needsWont: x.id }), { keywords: 'ignore dismiss' })
+    }
+    for (const x of d.day || []) {
+      const end = x.end ? new Date(x.end) : x.start ? new Date(x.start) : null
+      if (!x.prep || x.prep.writing || (end && end < now)) continue
+      const name = x.subject || x.title || 'meeting'
+      if (x.prep.ready) add('Today', `Show prep: ${name}`, () => press({ evPrep: x.prep.id, evCall: x.call || '' }), { keywords: 'prep brief meeting' })
+      else add('Today', `Prepare: ${name}`, () => press({ prepWrite: x.prep.id, prepOpen: '1' }), { keywords: 'prep brief meeting before' })
+    }
+    const w = d.work || {}
+    for (const t of ['mine', 'owed', 'waiting'].flatMap((k) => (w[k] && w[k].items) || [])) {
+      const attrs = { project: t.project, title: t.title, node: t.id }
+      add('My work', `Close: ${t.title}`, () => press({ todayClose: t.id, ...attrs }), { keywords: 'task done finish complete' })
+      add('My work', `Ask Claude: ${t.title}`, () => press({ todayAsk: '1', ...attrs }), { keywords: 'task change move due later' })
+    }
   }
   // Echo's own
   if (st.recording && st.recording_memo) add('Echo', 'Stop the memo', () => press({ cmd: 'stop' }), { keywords: 'end memo', hint: MAC ? '⇧⌘R' : 'Ctrl+Shift+R' })
@@ -6315,6 +6519,8 @@ function render() {
     try { if (box && kt.after) kt.after(box) } catch (e) { console.error(e) }
     drawGraph()
     drawPeople()
+  } else if (S.view === 'today') {
+    patch(primary, `<main class="main">${noticesBar()}${todayView()}</main>`)
   } else if (S.view === 'tasks') {
     patch(primary, `<main class="main">${noticesBar()}${tasksView()}</main>`)
   } else if (S.view === 'projects') {
@@ -6396,7 +6602,7 @@ function placeDetail() {
 
 /** What the screen depends on: re-render only when it changes (keeps selection and scroll). */
 // (the minute too: the pill's "meeting soon" comes and goes with the clock)
-const fingerprint = () => JSON.stringify([S.state, S.calls, S.call, S.agenda, S.cal.data, S.cal.selected, S.settings, S.pj.data, S.pj.detail, S.pj.foundData, S.pj.work, S.pj.series, S.up, S.upPrep, Math.floor(Date.now() / 60000)])
+const fingerprint = () => JSON.stringify([S.state, S.calls, S.call, S.agenda, S.cal.data, S.cal.selected, S.settings, S.pj.data, S.pj.detail, S.pj.foundData, S.pj.work, S.pj.series, S.up, S.upPrep, S.today, Math.floor(Date.now() / 60000)])
 
 // A thread's meeting series (Profile → Meetings): open one; set a field.
 function seriesSet(el, field, value) {
@@ -6428,7 +6634,7 @@ document.addEventListener('click', (e) => {
   if (S.laterOpen && !(e.target.closest && e.target.closest('[data-cmd^="later-"]'))) { S.laterOpen = false; render() }
   // The sidebar open over a narrow page closes on a click beside it.
   if (S.barOver && !(e.target.closest && e.target.closest('.actbar'))) { S.barOver = false; render() }
-  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-theme-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-go],[data-conv-keep],[data-br-pclosed],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-up],[data-prep-write],[data-ev-prep],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
+  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-theme-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-go],[data-conv-keep],[data-br-pclosed],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-up],[data-today-seen],[data-today-done],[data-today-retry],[data-today-import],[data-today-close],[data-today-keep],[data-today-ask],[data-today-ask-send],[data-needs-open],[data-needs-wont],[data-needs-todo],[data-needs-todo-ok],[data-needs-read],[data-needs-send],[data-needs-outlook],[data-needs-off],[data-today-undo],[data-today-askoff],[data-prep-write],[data-ev-prep],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
   if (!t) { if (menuWas) render(); return }
   // Sign-ins (`signin.rs`): shown at once (starting / stopping / checking) until the next poll
   // brings the app's state.
@@ -6523,10 +6729,87 @@ document.addEventListener('click', (e) => {
   if (t.dataset.calmode) { S.cal.mode = t.dataset.calmode; S.cal.offset = 0; S.cal.data = null; go(`calendar/${S.cal.mode}`); return loadCalendar().then(render) }
   if (t.dataset.calnav !== undefined) { const n = Number(t.dataset.calnav); S.cal.offset = n === 0 ? 0 : S.cal.offset + n; S.cal.data = null; render(); return loadCalendar().then(render) }
   if (t.dataset.calImport) { send({ cmd: 'calendar_import', id: t.dataset.calImport }); const e = (S.cal.data.events || []).find((x) => x.id === t.dataset.calImport); if (e) e.import = { busy: true }; return render() }
-  if (t.dataset.schedule) { send({ cmd: 'schedule', id: t.dataset.schedule, languages: recordLang(), profile: pickedProfile() }); const e = (S.cal.data.events || []).find((x) => x.id === t.dataset.schedule); if (e) e.scheduled = true; return render() }
-  if (t.dataset.unschedule) { send({ cmd: 'unschedule', id: t.dataset.unschedule }); const e = (S.cal.data.events || []).find((x) => x.id === t.dataset.unschedule); if (e) e.scheduled = false; return render() }
-  if (t.dataset.call) { S.listOpen = false; return go(`call/${t.dataset.call}/${S.tab}`) }
+  if (t.dataset.schedule) { send({ cmd: 'schedule', id: t.dataset.schedule, languages: recordLang(), profile: pickedProfile() }); const e = ((S.cal.data && S.cal.data.events) || []).find((x) => x.id === t.dataset.schedule); if (e) e.scheduled = true; if (S.view === 'today') setTimeout(() => loadToday().then(render), 400); return render() }
+  if (t.dataset.unschedule) { send({ cmd: 'unschedule', id: t.dataset.unschedule }); const e = ((S.cal.data && S.cal.data.events) || []).find((x) => x.id === t.dataset.unschedule); if (e) e.scheduled = false; if (S.view === 'today') setTimeout(() => loadToday().then(render), 400); return render() }
+  if (t.dataset.call) { S.listOpen = false; return go(`call/${t.dataset.call}/${t.dataset.callTab || S.tab}`) }
   if (t.dataset.up) { S.listOpen = false; return go(`upcoming/${t.dataset.up}`) }
+  if (t.dataset.todayImport) {
+    send({ cmd: 'calendar_import', id: t.dataset.todayImport })
+    // Read again until it is in: the import runs in the background (about a minute).
+    let n = 0
+    const poll = () => loadToday().then(() => { render(); const x = ((S.today && S.today.day) || []).find((d) => d.event === t.dataset.todayImport); if (x && !x.call && (!x.import || x.import.busy) && ++n < 60) setTimeout(poll, 3000) })
+    setTimeout(poll, 600)
+    return
+  }
+  if (t.dataset.todayRetry) {
+    send({ cmd: 'write_notes', call: t.dataset.todayRetry })
+    setTimeout(() => loadToday().then(render), 800)
+    return
+  }
+  if (t.dataset.todayAsk) {
+    S.todayClose = { ask: true, project: t.dataset.project, node: t.dataset.node, title: t.dataset.title }
+    render()
+    const n = $('#td-ask-text'); if (n) n.focus()
+    return
+  }
+  if (t.dataset.todayAskSend) {
+    const c = S.todayClose, text = (($('#td-ask-text') || {}).value || '').trim()
+    if (!c || !text) return
+    S.todayClose = null
+    todayAsk(c, text)
+    return render()
+  }
+  if (t.dataset.needsOpen !== undefined && t.dataset.needsOpen !== null && (t.dataset.needsOpen || t.dataset.chat)) {
+    // The Teams app on that message (its link as msteams:), else the chat.
+    const u = t.dataset.needsOpen || `msteams:/l/chat/${encodeURIComponent(t.dataset.chat)}/0`
+    return send({ cmd: 'open_url', url: u })
+  }
+  if (t.dataset.needsWont) { send({ cmd: 'needs_decide', id: t.dataset.needsWont, how: 'wont' }); if (S.today && S.today.needs) S.today.needs.items = S.today.needs.items.filter((x) => x.id !== t.dataset.needsWont); return render() }
+  if (t.dataset.needsTodo) { S.needsDlg = { kind: 'todo', id: t.dataset.needsTodo }; return render() }
+  if (t.dataset.needsTodoOk) {
+    const id = t.dataset.needsTodoOk, thread = ($('#nd-thread') || {}).value, title = ($('#nd-title') || {}).value
+    send({ cmd: 'needs_decide', id, how: 'todo', thread, title })
+    S.needsDlg = null
+    if (S.today && S.today.needs) S.today.needs.items = S.today.needs.items.filter((x) => x.id !== id)
+    setTimeout(() => loadToday().then(render), 800)
+    return render()
+  }
+  if (t.dataset.needsRead) {
+    const item = ((S.today.needs || {}).items || []).find((x) => x.id === t.dataset.needsRead)
+    const c = S.needsDlg = { kind: 'mail', id: t.dataset.needsRead, message: item && item.message, mail: null }
+    get('api/needs/mail?id=' + encodeURIComponent(c.message || '')).then((m) => { if (S.needsDlg === c) { c.mail = m; render() } })
+    return render()
+  }
+  if (t.dataset.needsSend) {
+    const c = S.needsDlg, text = (($('#nd-reply') || {}).value || '').trim()
+    if (!c || !text) return
+    send({ cmd: 'needs_reply', id: c.id, message: c.message, text, all: t.dataset.all === '1' })
+    S.needsDlg = null
+    if (S.today && S.today.needs) S.today.needs.items = S.today.needs.items.filter((x) => x.id !== c.id)
+    return render()
+  }
+  if (t.dataset.needsOutlook) return send({ cmd: 'open_url', url: t.dataset.needsOutlook })
+  if (t.dataset.needsOff && (t.tagName === 'BUTTON' || e.target === t)) { S.needsDlg = null; return render() }
+  if (t.dataset.todayUndo) { send({ cmd: 'project', op: 'ledger', id: t.dataset.project, body: { op: 'undo', target: t.dataset.todayUndo } }); S.todayAskId = null; setTimeout(() => loadToday().then(render), 800); return render() }
+  if (t.dataset.todayAskoff) { S.todayAskId = null; return render() }
+  if (t.dataset.todayClose) {
+    S.todayClose = { project: t.dataset.project, node: t.dataset.todayClose, title: t.dataset.title }
+    render()
+    const n = $('#td-close-note'); if (n) n.focus()
+    return
+  }
+  // Cancel, or a click on the dimmed page around the dialog (not inside it).
+  if (t.dataset.todayKeep && (t.tagName === 'BUTTON' || e.target === t)) { S.todayClose = null; return render() }
+  if (t.dataset.todayDone) {
+    const note = ($('#td-close-note') || {}).value || ''
+    S.todayClose = null
+    send({ cmd: 'project', op: 'ledger', id: t.dataset.project, body: { op: 'edit', node: t.dataset.todayDone, set: { state: 'done' }, note: note.trim() || undefined } })
+    // Gone from My work at once; Today is read again once the ledger has it.
+    if (S.today && S.today.work) for (const k of ['mine', 'owed', 'waiting']) if (S.today.work[k]) S.today.work[k].items = S.today.work[k].items.filter((x) => !(x.id === t.dataset.todayDone && x.project === t.dataset.project))
+    setTimeout(() => loadToday().then(render), 800)
+    return render()
+  }
+  if (t.dataset.todaySeen) { send({ cmd: 'today_seen', key: t.dataset.todaySeen }); if (S.today) S.today.cards = (S.today.cards || []).filter((c) => c.key !== t.dataset.todaySeen); return render() }
   if (t.dataset.prepWrite) {
     send({ cmd: 'project', op: 'prep_write', prep: t.dataset.prepWrite })
     // From the calendar: open it in Calls, where it shows as it is written.
@@ -6535,6 +6818,7 @@ document.addEventListener('click', (e) => {
   }
   if (t.dataset.evPrep) {
     // A recorded meeting's prep is its call's Prep tab; one still to come is in Coming up today.
+    if (t.dataset.evCall) return go(`call/${t.dataset.evCall}/prep`)
     const ev = S.cal.data && (S.cal.data.events || []).find((x) => x.prep && x.prep.id === t.dataset.evPrep)
     S.cal.selected = null
     return ev && ev.recorded ? go(`call/${ev.recorded.name}/prep`) : go(`upcoming/${t.dataset.evPrep}`)
@@ -6913,6 +7197,9 @@ document.addEventListener('keydown', (e) => {
   if (e.target.id === 'sel-note' && e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); return commentSelection() }
   if (e.key === 'Escape' && S.selNote) return hideSelPop()
   if (e.key === 'Escape' && S.lightbox) { S.lightbox = null; return render() }
+  if (e.key === 'Escape' && S.todayClose) { S.todayClose = null; return render() }
+  if (e.key === 'Escape' && S.needsDlg) { S.needsDlg = null; return render() }
+  if (e.key === 'Enter' && !e.shiftKey && e.target.id === 'td-ask-text') { e.preventDefault(); const b = $('[data-today-ask-send]'); if (b) b.click(); return }
   if (e.key === 'Escape' && (S.stopAsk || S.listOpen || S.menuOpen || S.laterOpen || S.convAsk || S.overlay || S.barOver)) { S.barOver = false; S.convAsk = null; S.stopAsk = false; S.listOpen = false; S.menuOpen = false; S.laterOpen = false; S.overlay = false; return render() }
   if ((MAC ? e.metaKey : e.ctrlKey) && e.key === ',') { e.preventDefault(); return goActivity('settings') }
   if ((MAC ? e.metaKey : e.ctrlKey) && e.key === '`') { e.preventDefault(); return claudePanel() }
@@ -6939,6 +7226,7 @@ window.addEventListener('hashchange', async () => {
   if (S.view === 'settings') { await loadSettings(); render() }
   if (S.view === 'projects') { await loadProjects(); await loadProject(); render() }
   if (S.view === 'tasks') { await loadTasks(); render() }
+  if (S.view === 'today') { await loadToday(); render() }
   if (S.view === 'brain') { await loadBrain(); render() }
   if (S.view === 'calls' && S.selected && !S.call) { await loadCall(S.selected); render() }
 })
@@ -6981,6 +7269,7 @@ window.echo = {
     await loadCalls(); if (S.selected) await loadCall(S.selected); if (S.view === 'calendar') await loadCalendar(true); if (S.view === 'settings') await loadSettings()
     await loadProjects(); if (S.view === 'projects') await loadProject()
     if (S.view === 'tasks') { await loadTasks(); if (S.pj.node) await loadWork() }
+    if (S.view === 'today') await loadToday()
     if (typingNotes()) S.renderOnBlur = true
     else render()
   },
@@ -7143,6 +7432,7 @@ window.echo = {
   await loadPluginClients()
   if (S.view === 'projects') await loadProject()
   if (S.view === 'tasks') await loadTasks()
+  if (S.view === 'today') await loadToday()
   if (S.view === 'brain') await loadBrain()
   if (S.view === 'calls' && !S.selected && !S.upSel && S.calls && S.calls.length) S.selected = S.calls[0].name, history.replaceState(null, '', `#call/${S.selected}/minutes`)
   if (S.selected) await loadCall(S.selected)

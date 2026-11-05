@@ -87,6 +87,8 @@ pub fn run(app: TargetApp, tray: bool, background: bool) -> Result<()> {
     crate::projectsync::start_scheduler();
     // Preps for today's meetings of threads (`prep.rs`).
     crate::prep::start_scheduler();
+    // Today → Needs you now: Teams and mail of the last day, every 5 minutes (`needs.rs`).
+    crate::needs::start_scheduler();
     // Plugins' host halves (`jshost.rs`): their code, inside Echo.
     #[cfg(feature = "js")]
     crate::jshost::sync();

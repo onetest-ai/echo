@@ -1854,6 +1854,24 @@ fn show_window(target: &tao::event_loop::EventLoopWindowTarget<UiEvent>, win: &m
 }
 
 /// The onetest logo as the Dock icon of a dev build, which has no bundle icon. Echo.app keeps
+/// macOS: the app's menu bar — Echo (Hide, Hide Others, Quit) and Edit (Undo, Redo, Cut, Copy, Paste, Select All). WebKit
+/// takes ⌘C, ⌘V, ⌘X, ⌘A and ⌘Z only from a menu: without one, nothing in the window could be copied or pasted. Quit
+/// goes through `applicationShouldTerminate:` as ⌘Q always did (`terminate`).
+#[cfg(target_os = "macos")]
+fn app_menu() -> Option<Menu> {
+    let m = Menu::new();
+    let app = Submenu::with_items("Echo", true, &[&PredefinedMenuItem::hide(None), &PredefinedMenuItem::hide_others(None), &PredefinedMenuItem::separator(), &PredefinedMenuItem::quit(None)]).ok()?;
+    let edit = Submenu::with_items(
+        "Edit",
+        true,
+        &[&PredefinedMenuItem::undo(None), &PredefinedMenuItem::redo(None), &PredefinedMenuItem::separator(), &PredefinedMenuItem::cut(None), &PredefinedMenuItem::copy(None), &PredefinedMenuItem::paste(None), &PredefinedMenuItem::select_all(None)],
+    )
+    .ok()?;
+    m.append_items(&[&app, &edit]).ok()?;
+    m.init_for_nsapp();
+    Some(m)
+}
+
 /// its icns (the full rounded-square icon).
 #[cfg(target_os = "macos")]
 fn set_app_icon() {
@@ -1917,6 +1935,9 @@ pub fn run(app: TargetApp, stop: Arc<AtomicBool>) -> ! {
     });
 
     let mut ui: Option<Ui> = None;
+    // macOS: the app's own menu bar (Echo, Edit), kept for as long as the loop runs.
+    #[cfg(target_os = "macos")]
+    let mut _app_menu: Option<Menu> = None;
     let mut win: Option<crate::window::EchoWindow> = None;
     let mut leaving = Leaving::default();
     app::UI_LOOP.store(true, Ordering::SeqCst);
@@ -2005,7 +2026,10 @@ pub fn run(app: TargetApp, stop: Arc<AtomicBool>) -> ! {
             // macOS: create the icon only once the event loop is running.
             Event::NewEvents(StartCause::Init) => {
                 #[cfg(target_os = "macos")]
-                set_app_icon(); // once AppKit has finished launching: earlier it would put its own back
+                {
+                    set_app_icon(); // once AppKit has finished launching: earlier it would put its own back
+                    _app_menu = app_menu();
+                }
                 match Ui::new(proxy.clone()) {
                     Ok(u) => ui = Some(u),
                     Err(e) => eprintln!("tray icon unavailable: {e}"),
