@@ -235,7 +235,11 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   risks with no response; questions not answered — each `echo://task`), New since then (the threads' mail and chat
   evidence after the last meeting: titles and senders, never the text), Who's coming (the invite less the user, with
   role / stance from People, calls together, new; the window shows ten).
-- Then "In short", 3–5 sentences (≤ 90 words) to the user as "you", on the threads' AI profile
+- Only this meeting's items: one said in an earlier occurrence of its series stays; one said only in meetings of
+  another recurring series goes, without a model (an item made by hand takes its story's calls, else its sibling
+  items' — `said_in`); the rest (one-off meetings, mail, unknown) are numbered `[cN]` and the same model call that
+  writes In short picks which will come up (`{relevant, in_short}`; unreadable → this series' items only).
+- Then "In short" (≤ 90 words) to the user as "you", on the threads' AI profile
   (`livenotes::complete_text`) — only when every thread runs on the same profile (strict routing), else facts only.
 - Calls → **Coming up today** (the list's first group, `/api/upcoming`, `#upcoming/<id>`): a meeting still to come is
   a call with its Prep tab (Transcript and Minutes once recorded; Prepare now / Write it again: IPC `project {op:

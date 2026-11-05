@@ -930,11 +930,17 @@ function list() {
   // Today's meetings still to come, each a call-to-be with its prep.
   const ups = !q && S.up && S.up.meetings ? S.up.meetings : []
   const upRows = ups.length ? `<div class="group">Coming up today</div>` + ups.map((u) => {
-    const st = u.writing ? 'Writing the prep…' : u.prep ? (u.prep.error && !u.prep.written_at ? 'Prep failed' : 'Prep ready') : u.threads.length ? 'Prep soon' : 'No thread'
-    return `<button class="row up-row" role="option" data-up="${esc(u.id)}" aria-selected="${S.upSel === u.id}">
-      <span class="si up" aria-hidden="true">${ICON('<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>').replace('width="20" height="20"', 'width="14" height="14"')}</span>
+    // As a call's row: only its icon differs (a clock: still to come).
+    const st = u.start ? new Date(u.start) : null, en = u.end ? new Date(u.end) : null
+    const mins = st && en ? Math.round((en - st) / 60000) : 0
+    const names = u.names || []
+    const meta = [st ? hm(st) : '', mins ? `${mins} min` : '', names.length ? names.slice(0, 2).join(', ') + (names.length > 2 ? ` +${names.length - 2}` : '') : ''].filter(Boolean).map((x) => `<span>${esc(x)}</span>`).join('')
+    const pjs = u.projects || []
+    const icons = pjs.length ? `<span class="pj-icons">${pjs.slice(0, 3).map((p) => projIcon(p, 14)).join('')}</span>` : ''
+    return `<button class="row" role="option" data-up="${esc(u.id)}" aria-selected="${S.upSel === u.id}" title="${esc(u.writing ? 'Writing the prep…' : u.prep ? 'Prep ready' : 'No prep yet')}">
+      <span class="si up" aria-label="Coming up">${ICON('<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>').replace('width="20" height="20"', 'width="14" height="14"')}</span>
       <span class="t">${esc(u.subject || 'A meeting')}</span>
-      <span class="m"><span>${u.start ? esc(hm(new Date(u.start))) : ''}</span>${u.threads.length ? `<span>${esc(u.threads.map((t) => t.name).join(', '))}</span>` : ''}<span>${esc(st)}</span></span>
+      <span class="m">${icons}${meta}</span>
     </button>`
   }).join('') : ''
   if (upRows && body !== undefined) body = upRows + body
@@ -1001,11 +1007,16 @@ function upcomingDoc() {
   const p = S.upPrep && !S.upPrep.error ? S.upPrep : null
   const title = (u && u.subject) || (p && p.subject) || 'A meeting'
   const start = (u && u.start) || (p && p.start), end = (u && u.end) || (p && p.end)
-  const threads = (u && u.threads) || (p && p.threads) || []
-  const when = start ? `${new Date(start).toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })}, ${hm(new Date(start))}${end ? `–${hm(new Date(end))}` : ''}` : ''
-  const chips = threads.map((t) => `<a class="pj-chip" href="echo://thread/${esc(t.id)}">${esc(t.name)}</a>`).join('')
+  const when = start ? `${new Date(start).toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })}, ${hm(new Date(start))}` : ''
+  // As a call's header: the thread's icon and name, opening it.
+  const all = (S.pj.data && S.pj.data.projects) || []
+  // A call's header, before the call: its day and time, length, people, thread chips (+ Thread, as in the calendar).
+  const mins = start && end ? Math.round((new Date(end) - new Date(start)) / 60000) : 0
+  const names = (u && u.names) || (p && p.people ? p.people.map((x) => x.name) : [])
+  const people = names.length ? `<span class="people">${esc(names.slice(0, 6).join(', '))}${names.length > 6 ? ` and ${names.length - 6} more` : ''}</span>` : ''
+  const ev = u ? { id: u.event, subject: u.subject, projects: u.projects || [] } : null
   const head = `${listToggle()}<div class="head-row"><div style="min-width:0"><h2 class="selectable">${esc(title)}</h2>
-      <div class="facts">${when ? `<span>${esc(when)}</span>` : ''}${u ? `<span>${u.people} people</span>` : ''}</div>${chips ? `<div class="pj-chips">${chips}</div>` : ''}</div>
+      <div class="facts">${when ? `<span>${esc(when)}</span>` : ''}${mins ? `<span>${mins} min</span>` : ''}${people}</div>${ev ? eventProjects(ev) : ''}</div>
       <div class="doc-actions">${p ? `<button class="btn ghost" data-copy="${esc(p.link)}" title="Its echo:// link">Copy link</button>` : ''}</div></div>
     <div class="tabs" role="tablist"><button class="tab" role="tab" aria-selected="true">Prep</button><button class="tab" role="tab" aria-selected="false" disabled title="Once it is recorded">Transcript</button><button class="tab" role="tab" aria-selected="false" disabled title="Once it is recorded">Minutes</button></div>`
   if (!u && !p) return { head, pane: S.upPrep ? '<p class="set-sub">This meeting isn\'t in today\'s calendar any more.</p>' : `<div class="skeleton">${'<i></i>'.repeat(6)}</div>` }
