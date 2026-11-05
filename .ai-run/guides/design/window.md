@@ -229,7 +229,8 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
 - For today's calendar meetings of an open thread, written without being asked (the app checks every 5 minutes —
   the morning's, one added later; ≥ 5 min before the start; `prep::start_scheduler`): `<home>/prep/<id>/prep.json`,
   `id` = 16 hex of sha256(event id). Nothing in a call folder: a call folder is still made only by a recording.
-- Gathered without a model: Last time (the previous meeting of the subject with minutes — highlights, open actions,
+- Gathered without a model: **Expected from you** first (the user's open tasks in these threads, late first; what
+  they still owe from last time; mail since then with them in To — one line each, or "Nothing waits on you"), Last time (the previous meeting of the subject with minutes — highlights, open actions,
   its link), Open with these people (the threads' open tasks owned by someone in the invite or the user, late first;
   risks with no response; questions not answered — each `echo://task`), New since then (the threads' mail and chat
   evidence after the last meeting: titles and senders, never the text), Who's coming (the invite less the user, with

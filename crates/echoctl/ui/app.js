@@ -1025,6 +1025,13 @@ function prepView(p, again) {
   const l = p.last_time
   const last = l ? sec(`Last time · <a href="${esc(l.link)}">${esc(day(l.date))}</a>`, `<ul>${(l.highlights || []).map((h) => `<li>${esc(h)}</li>`).join('')}${(l.open_actions || []).map((a) => `<li><b>Still to do</b> ${esc(a.task)}${a.owner ? ` · ${esc(a.owner)}` : ''}</li>`).join('')}</ul>`) : ''
   const KIND = { task: 'Task', risk: 'Risk', question: 'Question' }
+  // What waits on the user: their tasks, what they still owe from last time, mail to them — or that nothing does.
+  const exp = (p.expected || []).map((x) => {
+    const title = x.kind === 'reply' ? (x.url && /^https:\/\//.test(x.url) ? `<a data-ext href="${esc(x.url)}">${esc(x.title)}</a>` : esc(x.title)) : x.link ? `<a href="${esc(x.link)}">${esc(x.title)}</a>` : esc(x.title)
+    const what = x.kind === 'reply' ? `<b>Reply</b> to ${esc(x.from || '')}: ` : x.kind === 'action' ? '<b>From last time</b> ' : ''
+    return `<li>${what}${title}${x.late ? ' · <span class="warn">late</span>' : x.due ? ` · ${esc(day(x.due))}` : ''}</li>`
+  }).join('')
+  const expected = p.expected ? sec('Expected from you', exp ? `<ul>${exp}</ul>` : '<p class="set-sub" style="margin:0">Nothing waits on you.</p>') : ''
   const open = (p.open || []).length ? sec('Open with these people', `<ul>${p.open.map((o) => `<li><b>${KIND[o.kind] || esc(o.kind)}</b> <a href="${esc(o.link)}">${esc(o.title)}</a>${o.owner ? ` · ${esc(o.owner)}` : ''}${o.late ? ' · <span class="warn">late</span>' : o.due ? ` · ${esc(day(o.due))}` : ''}</li>`).join('')}</ul>`) : ''
   const fresh = (p.new_since || []).length ? sec('New since then', `<ul>${p.new_since.map((n) => `<li>${esc(day(n.date))} · ${n.kind === 'mail' ? 'Mail' : 'Chat'}${n.from ? ` from ${esc(n.from)}` : ''}: ${n.url && /^https:\/\//.test(n.url) ? `<a data-ext href="${esc(n.url)}">${esc(n.title || '')}</a>` : esc(n.title || '')}</li>`).join('')}</ul>`) : ''
   // The new faces first, then by calls together; ten at most.
@@ -1033,7 +1040,7 @@ function prepView(p, again) {
   const short = p.summary ? sec('In short', `<p class="pr-short">${esc(p.summary)}</p>`) : p.error ? `<p class="set-sub">${esc(p.error)}</p>` : ''
   const foot = `<div class="pr-foot"><span class="set-sub">Written ${esc(p.written_at ? hm(new Date(p.written_at)) : '')}${p.model ? ` · ${esc(p.model)}` : ''}</span>${again ? `<button class="btn ghost" data-prep-write="${esc(p.id)}">Write it again</button>` : ''}</div>`
   const empty = !short && !last && !open && !fresh ? '<p class="set-sub">Nothing to go on yet: no earlier meeting with minutes, nothing open in its threads.</p>' : ''
-  return `<div class="pr"><article class="pr-main">${short}${last}${open}${fresh}${empty}</article><aside class="pr-side">${who ? sec("Who's coming", who) : ''}${foot}</aside></div>`
+  return `<div class="pr"><article class="pr-main">${short}${expected}${last}${open}${fresh}${empty}</article><aside class="pr-side">${who ? sec("Who's coming", who) : ''}${foot}</aside></div>`
 }
 
 /** The call's one set of actions: a ⋯ menu (the folder, the minutes page, delete). */

@@ -134,7 +134,7 @@ fn open_with(thread_ids: &[String], names: &[String]) -> Vec<Value> {
 }
 
 /// Mail and meeting chats the threads read since the last meeting (titles and who — never the text).
-fn new_since(thread_ids: &[String], since: Option<&str>) -> Vec<Value> {
+fn new_since(thread_ids: &[String], since: Option<&str>, me: Option<&str>) -> Vec<Value> {
     let since = since.and_then(|s| s.get(..10)).unwrap_or("");
     let mut out: Vec<Value> = vec![];
     for id in thread_ids {
@@ -146,11 +146,12 @@ fn new_since(thread_ids: &[String], since: Option<&str>) -> Vec<Value> {
                 continue;
             }
             let from = v["from"]["name"].as_str().or(v["people"][0].as_str()).unwrap_or("");
-            out.push(json!({"kind": kind, "date": date, "title": v["title"], "from": from, "url": v["url"]}));
+            // Addressed to the user themselves (in To, not a list or a copy).
+            let to_me = me.is_some_and(|me| v["to"].as_array().is_some_and(|t| t.iter().any(|x| x["email"].as_str().is_some_and(|e| e.eq_ignore_ascii_case(me)))));
+            out.push(json!({"kind": kind, "date": date, "title": v["title"], "from": from, "url": v["url"], "to_me": to_me}));
         }
     }
     out.sort_by(|a, b| b["date"].as_str().cmp(&a["date"].as_str()));
-    out.truncate(MAX_LINES);
     out
 }
 
@@ -185,18 +186,41 @@ fn people(m: &MeetingContext, thread_ids: &[String]) -> Vec<Value> {
     out
 }
 
+/// What is expected from the user: their open tasks in these threads (late first), what they still owe from last
+/// time, and mails since then addressed to them — one line each.
+fn expected(mine: &[Value], last: &Value, news: &[Value], mine_owner: &dyn Fn(&str) -> bool) -> Vec<Value> {
+    let mut out: Vec<Value> = mine.iter().map(|o| json!({"kind": "task", "title": o["title"], "due": o["due"], "late": o["late"], "link": o["link"]})).collect();
+    for a in last["open_actions"].as_array().into_iter().flatten().filter(|a| a["owner"].as_str().is_some_and(mine_owner)) {
+        out.push(json!({"kind": "action", "title": a["task"], "link": last["link"]}));
+    }
+    for n in news.iter().filter(|n| n["to_me"] == true && n["kind"] == "mail") {
+        out.push(json!({"kind": "reply", "title": n["title"], "from": n["from"], "date": n["date"], "url": n["url"]}));
+    }
+    let mut seen = std::collections::HashSet::new();
+    out.retain(|x| seen.insert(x["title"].as_str().unwrap_or("").trim().to_lowercase()));
+    out.sort_by_key(|x| !x["late"].as_bool().unwrap_or(false));
+    out.truncate(MAX_LINES);
+    out
+}
+
 /// Everything but "In short", gathered without a model.
 fn gather(m: &MeetingContext, threads: &[projects::Project]) -> Value {
     let ids: Vec<String> = threads.iter().map(|p| p.id.clone()).collect();
     let subject = m.subject.clone().unwrap_or_default();
     let last = if subject.trim().is_empty() { Value::Null } else { last_time(&subject) };
-    let names: Vec<String> = m.organizer.iter().chain(&m.attendees).map(|p| p.name.clone()).chain(crate::config::Config::load().ok().and_then(|c| c.me).map(|p| p.name)).collect();
+    let me = crate::config::Config::load().ok().and_then(|c| c.me);
+    let my_name = me.as_ref().map(|p| p.name.to_lowercase()).unwrap_or_default();
+    let names: Vec<String> = m.organizer.iter().chain(&m.attendees).map(|p| p.name.clone()).chain(me.as_ref().map(|p| p.name.clone())).collect();
+    let mine_owner = |o: &str| { let o = o.trim().to_lowercase(); o == "me" || (!my_name.is_empty() && o == my_name) };
+    let (mine, open): (Vec<Value>, Vec<Value>) = open_with(&ids, &names).into_iter().partition(|o| o["kind"] == "task" && o["owner"].as_str().is_some_and(mine_owner));
+    let news = new_since(&ids, last["date"].as_str(), me.as_ref().and_then(|p| p.email.as_deref()));
     json!({
         "event": m.id, "subject": subject, "start": m.start, "end": m.end,
         "threads": threads.iter().map(|p| json!({"id": p.id, "name": p.name})).collect::<Vec<_>>(),
         "last_time": last,
-        "open": open_with(&ids, &names),
-        "new_since": new_since(&ids, last["date"].as_str()),
+        "expected": expected(&mine, &last, &news, &mine_owner),
+        "open": open,
+        "new_since": news.into_iter().take(MAX_LINES).collect::<Vec<_>>(),
         "people": people(m, &ids),
     })
 }
@@ -211,6 +235,13 @@ pub fn as_text(p: &Value) -> String {
         }
         for a in l["open_actions"].as_array().into_iter().flatten() {
             s += &format!("- still to do: {} ({})\n", a["task"].as_str().unwrap_or(""), a["owner"].as_str().unwrap_or("nobody named"));
+        }
+    }
+    if let Some(e) = p["expected"].as_array().filter(|e| !e.is_empty()) {
+        s += "\nExpected from you:\n";
+        for x in e {
+            let what = match x["kind"].as_str() { Some("reply") => format!("reply to {}: ", x["from"].as_str().unwrap_or("")), Some("action") => "from last time: ".into(), _ => String::new() };
+            s += &format!("- {what}{}{}\n", x["title"].as_str().unwrap_or(""), if x["late"] == true { ", late" } else { "" });
         }
     }
     if let Some(o) = p["open"].as_array().filter(|o| !o.is_empty()) {
@@ -337,6 +368,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn expected_from_you_is_your_tasks_last_times_actions_and_mail_to_you_once_each() {
+        let mine = vec![json!({"kind": "task", "title": "Send the diagram", "late": false, "link": "echo://task/t/T1"}), json!({"kind": "task", "title": "Book the room", "late": true, "link": "echo://task/t/T2"})];
+        let last = json!({"link": "echo://call/x", "open_actions": [{"task": "send the diagram", "owner": "Me"}, {"task": "Call legal", "owner": "Dana Kowal"}, {"task": "Draft the scope", "owner": "Artem Example"}]});
+        let news = vec![json!({"kind": "mail", "title": "Pilot user list", "from": "Dana Kowal", "to_me": true}), json!({"kind": "mail", "title": "Team news", "to_me": false})];
+        let me = |o: &str| { let o = o.to_lowercase(); o == "me" || o == "artem example" };
+        let e = expected(&mine, &last, &news, &me);
+        let titles: Vec<&str> = e.iter().map(|x| x["title"].as_str().unwrap()).collect();
+        assert_eq!(titles, vec!["Book the room", "Send the diagram", "Draft the scope", "Pilot user list"], "late first; a duplicate once; not others' or a list's");
+    }
+
+    #[test]
     fn ids_are_hex_and_nothing_else_is_read() {
         let id = id_of("AAMkADhj=+/x");
         assert_eq!(id.len(), 16);
@@ -353,5 +395,8 @@ mod tests {
         let t = as_text(&p);
         assert!(t.contains("Pilot before December") && t.contains("still to do: Send the diagram (Me)") && t.contains("risk SSO may slip") && t.contains("Dana Kowal, sponsor"));
         assert!(!t.contains("New since then"));
+        let e = json!({"expected": [{"kind": "reply", "title": "Pilot user list", "from": "Dana Kowal"}, {"kind": "task", "title": "Send the diagram", "late": true}]});
+        let t = as_text(&e);
+        assert!(t.contains("Expected from you") && t.contains("reply to Dana Kowal: Pilot user list") && t.contains("Send the diagram, late"));
     }
 }
