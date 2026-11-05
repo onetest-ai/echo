@@ -2029,3 +2029,11 @@ select.set-in { width: auto; margin-right: 6px; }
 .mt-chip.guess { color: var(--text-3); border-style: dashed; }
 .mt-chip:hover { border-color: var(--line-strong); color: var(--text); }
 .mt-chip select { position: absolute; inset: 0; opacity: 0; width: 100%; }
+/* Send to Claude: a skill to pick (or just the task), a line of the user's own. */
+.sc-list { display: flex; flex-direction: column; gap: 2px; max-height: 300px; overflow-y: auto; margin: 4px 0 10px; }
+.sc-opt { display: flex; gap: 10px; align-items: flex-start; padding: 7px 8px; border-radius: var(--r-control); }
+.sc-opt:hover { background: var(--bg); }
+.sc-opt input { margin-top: 3px; }
+.sc-opt span { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.sc-opt .set-sub { white-space: normal; }
+.td-dialog .set-in { width: 100%; box-sizing: border-box; }

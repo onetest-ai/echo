@@ -2194,6 +2194,15 @@ pub fn handle(msg: &str) -> Handled {
             Ok(_) => true.into(),
             Err(e) => notice(&format!("{e:#}")),
         },
+        // Settings → Templates → Skills: save one (a built-in keeps its id), take the user's away.
+        "skill_save" => match crate::skills::save(v["id"].as_str(), v["name"].as_str().unwrap_or(""), v["description"].as_str().unwrap_or(""), v["body"].as_str().unwrap_or("")) {
+            Ok(id) => Handled { refresh: false, reply: Some(format!("window.echo && window.echo.templateSaved({}, {}, 'sk')", json!(id), v["id"].as_str().is_none_or(str::is_empty))) },
+            Err(e) => notice(&format!("{e:#}")),
+        },
+        "skill_remove" => match crate::skills::remove(v["id"].as_str().unwrap_or("")) {
+            Ok(()) => Handled { refresh: false, reply: Some("window.echo && window.echo.templateSaved(null, false, 'sk')".into()) },
+            Err(e) => notice(&format!("{e:#}")),
+        },
         // Settings → Templates → Meeting types: save one (a built-in keeps its id), take the user's away.
         "meeting_type_save" => match crate::calls::meeting_type_save(v["id"].as_str(), v["name"].as_str().unwrap_or(""), v["about"].as_str().unwrap_or("")) {
             Ok(id) => Handled { refresh: false, reply: Some(format!("window.echo && window.echo.templateSaved({}, {}, 'mt')", json!(id), v["id"].as_str().is_none_or(str::is_empty))) },

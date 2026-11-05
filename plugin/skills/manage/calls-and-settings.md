@@ -108,6 +108,11 @@ by) are in the same output as `meeting_types`; the user changes them in Settings
 (`<data folder>/.echo/meeting-types.json`, `[{"id", "name", "about"}]`: a built-in's id changes it). `echoctl type
 <call> <id>` sets one call's.
 
+Skills (Settings → Templates → Skills) are Claude Code skills for the work a task asks for — `echoctl templates`
+lists them as `skills`. To make or change one, write `<data folder>/.echo/skills/<id>/SKILL.md` (frontmatter `name:
+<id>` and `description: "Use when…"`, then what to do; Echo's own id changes it). Echo's Claude panel loads them as
+`/my-skills:<id>` when its session starts.
+
 ## Settings
 
 `echoctl config` with no flags prints them. One flag a setting:

@@ -1077,8 +1077,10 @@ function todayView() {
     // Ask Claude to do something with it ("move it two weeks"), and close it — each asks first in a dialog.
     const ask = `<button class="icon-btn td-ico" data-today-ask="1" ${attrs} title="Ask Claude to change this task…" aria-label="Ask Claude about “${esc(t.title)}”…">${ICON('<path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/><path d="M18.5 15.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>')}</button>`
     const close = `<button class="icon-btn td-ico" data-today-close="${esc(t.id)}" ${attrs} title="Close this task…" aria-label="Close “${esc(t.title)}”…">${ICON('<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/>')}</button>`
+    // Work on it in the Claude panel, with a skill (a follow-up mail…).
+    const work = `<button class="icon-btn td-ico" data-claude-task="${esc(t.id)}" ${attrs} title="Send to Claude — work on it in the Claude panel" aria-label="Send “${esc(t.title)}” to Claude…">${ICON('<path d="M4 6h16v10H8l-4 3z"/><path d="M9 10.5h6M9 13h3.5"/>')}</button>`
     // The date's icon before the title's words.
-    return `<div class="td-task"><span class="td-task-t">${dueChip(t)}<a href="${esc(t.link)}">${esc(t.title)}</a></span><span class="td-task-m">${pj ? projIcon(pj, 12) : ''}${where}<span class="td-icos">${ask}${close}</span></span></div>`
+    return `<div class="td-task"><span class="td-task-t">${dueChip(t)}<a href="${esc(t.link)}">${esc(t.title)}</a></span><span class="td-task-m">${pj ? projIcon(pj, 12) : ''}${where}<span class="td-icos">${work}${ask}${close}</span></span></div>`
   }
   const w = d.work || {}
   // One list by date: late first (the oldest first), then by due date; whose it is stays on each card.
@@ -1151,6 +1153,37 @@ function todayAskBar() {
 
 /** Today → Close…: a dialog — closing a task by hand asks first, with an optional comment (kept in its history).
  *  A thread's sync closes tasks by itself when its calls and mail say so; this is for what they don't. */
+/** Send to Claude: a task into the Claude panel's live session — typed there as if by the user, with the skill
+ *  chosen (`/my-skills:<id>`) and the user's own words; the conversation goes on there. */
+function sendClaudeDialog() {
+  const c = S.claudeSend
+  if (!c) return ''
+  const skills = (TPL.data && TPL.data.skills) || []
+  if (!TPL.data) loadTemplates().then(render)
+  const opt = (id, label, sub) => `<label class="sc-opt"><input type="radio" name="sc-skill" value="${esc(id)}"${(c.skill || '') === id ? ' checked' : ''} data-sc-skill="${esc(id)}"><span><b>${esc(label)}</b>${sub ? `<span class="set-sub">${esc(sub)}</span>` : ''}</span></label>`
+  return `<div class="td-modal" data-sc-off="1"><div class="td-dialog wide" role="dialog" aria-modal="true" aria-labelledby="sc-h">
+    <h3 id="sc-h">Send to Claude</h3><p class="set-sub">${esc(c.title)}</p>
+    <div class="sc-list">${opt('', 'Just the task', 'Claude reads it and asks what you want')}${skills.map((s) => opt(s.id, tplName(s.id), s.description)).join('')}</div>
+    <label for="sc-words" class="set-sub">Anything to add — optional</label><input id="sc-words" class="set-in" placeholder="Keep it short; Dana is on holiday until the 12th" value="${esc(c.words || '')}">
+    <div class="td-dialog-a"><span class="grow set-sub">It goes to the Claude panel; you go on there. Nothing is sent to anyone without your OK.</span><button class="btn ghost" data-sc-off="1">Cancel</button><button class="btn primary" data-sc-send>Send</button></div></div></div>`
+}
+/** Type a line into the Claude panel's session: started (or resumed) first when it isn't running, and typed once it
+ *  has drawn and gone quiet — earlier keys would land in its start-up. */
+function sendToClaude(line) {
+  const key = 'claude:folder'
+  claudePanel('claude-folder')
+  const e = termEntry(key)
+  if (!e) { S.notice = "The Claude panel can't be shown."; return render() }
+  const type = () => send({ cmd: 'pty_input', id: e.id, data: line.replace(/[\r\n]+/g, ' ') + '\r' })
+  if (e.id != null && !e.exited && !e.starting) return type()
+  if (!(e.id != null && !e.exited)) termStart('claude-folder', key, { profile: S.folderProfile || ai().default || '' })
+  const t0 = Date.now()
+  const wait = setInterval(() => {
+    const quiet = e.lastData && Date.now() - e.lastData > 1500
+    if (e.id != null && !e.exited && !e.starting && quiet) { clearInterval(wait); type() }
+    else if (e.exited || Date.now() - t0 > 30000) { clearInterval(wait); S.notice = 'Claude didn\'t start — send it again once the panel shows Claude.'; render() }
+  }, 300)
+}
 function todayCloseDialog() {
   const c = S.todayClose
   if (!c) return ''
@@ -1837,7 +1870,7 @@ async function termPoll(e) {
     try { r = await get(`api/pty/${id}?from=${e.from}`) } catch { if (e.id === id) { e.exited = true; render() } break }
     if (e.id !== id) break
     if (r.reset) e.term.reset()
-    if (r.data) e.term.write(bytes(r.data))
+    if (r.data) { e.term.write(bytes(r.data)); e.lastData = Date.now() }
     e.from = r.next
     if (r.exited && !r.data) {
       if (!e.exited) { e.exited = true; try { S.sessions = new Set(await get('api/sessions')) } catch { /* as it was */ } render() }
@@ -2572,10 +2605,12 @@ function templatesSettings() {
   }).join('')
   const mts = TPL.data.meeting_types || []
   const tab = (id, label, n) => `<button class="tp-kind${TPL.tab === id ? ' on' : ''}" role="tab" aria-selected="${TPL.tab === id}" data-tpl-tab="${id}">${label} <span class="set-sub">${n}</span></button>`
-  const kinds = `<div class="tp-kinds" role="tablist" aria-label="Kind of template">${tab('minutes', 'Minutes', list.length)}${tab('types', 'Meeting types', mts.length)}</div>`
+  const sks = TPL.data.skills || []
+  const kinds = `<div class="tp-kinds" role="tablist" aria-label="Kind of template">${tab('minutes', 'Minutes', list.length)}${tab('types', 'Meeting types', mts.length)}${tab('skills', 'Skills', sks.length)}</div>`
   const head = `<div class="tp-head"><h2>Templates</h2><p class="set-sub">The shapes Claude writes in. A call's minutes follow the template with a word of its title; the rest follow Default.</p>${kinds}</div>`
   const listBox = `<div class="tp-list"><div class="tp-lh"><span class="set-sub">Minutes templates</span><span class="tp-lha"><button class="btn ghost" data-tpl-claude title="Claude makes or changes a template from what you tell it">${ICON('<path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/>')}Ask Claude</button><button class="btn" data-tpl-new>${ICON('<path d="M12 5v14M5 12h14"/>')}New template</button></span></div><div class="set-card">${rows}</div></div>`
   if (TPL.tab === 'types') return `${head}<div class="tp-grid">${typesList(mts)}${typeEditor()}</div>`
+  if (TPL.tab === 'skills') return `${head}<div class="tp-grid">${skillsList(sks)}${skillEditor()}</div>`
   return `${head}<div class="tp-grid">${listBox}${templateEditor()}</div>`
 }
 /** Templates → Meeting types: the kinds a call can be, and how to tell each — what the minutes classify a call by. */
@@ -2586,6 +2621,31 @@ function typesList(mts) {
     return `<button class="tp-row${TPL.mtSel === t.id ? ' on' : ''}" data-mt-pick="${esc(t.id)}"><span class="tp-n"><b>${esc(t.name)}</b><span class="tp-tag${cls}">${tag}</span></span><span class="set-sub">${esc(t.about)}</span></button>`
   }).join('')
   return `<div class="tp-list"><div class="tp-lh"><span class="set-sub">What a call can be, and how to tell — the minutes classify each call by these</span><span class="tp-lha"><button class="btn ghost" data-tpl-claude>${ICON('<path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/>')}Ask Claude</button><button class="btn" data-mt-new>${ICON('<path d="M12 5v14M5 12h14"/>')}New type</button></span></div><div class="set-card">${rows}</div></div>`
+}
+/** Templates → Skills: Claude Code skills for the work a task asks for — Send to Claude on a task names one. Only
+ *  their "when to use it" sits in Claude's context until one is used. */
+function skillsList(sks) {
+  const TAG = { builtin: ['Built in', ''], edited: ['Edited', ' ed'], yours: ['Yours', ' mine'] }
+  const rows = sks.map((t) => {
+    const [tag, cls] = TAG[t.kind] || TAG.builtin
+    return `<button class="tp-row${TPL.skSel === t.id ? ' on' : ''}" data-sk-pick="${esc(t.id)}"><span class="tp-n"><b>${esc(tplName(t.id))}</b><span class="tp-tag${cls}">${tag}</span></span><span class="set-sub">${esc(t.description)}</span></button>`
+  }).join('')
+  return `<div class="tp-list"><div class="tp-lh"><span class="set-sub">What Claude does with a task you send it — a follow-up mail, a status, a plan</span><span class="tp-lha"><button class="btn ghost" data-tpl-claude>${ICON('<path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/>')}Ask Claude</button><button class="btn" data-sk-new>${ICON('<path d="M12 5v14M5 12h14"/>')}New skill</button></span></div><div class="set-card">${rows}</div></div>`
+}
+function skillEditor() {
+  const d = TPL.skDraft
+  if (!d) return '<div class="tp-ed tp-empty set-sub">Choose a skill to see and change what Claude does with it.</div>'
+  const isNew = !d.id
+  const tag = isNew ? '' : `<span class="tp-tag${d.kind === 'edited' ? ' ed' : d.kind === 'yours' ? ' mine' : ''}">${{ builtin: 'Built in', edited: 'Edited', yours: 'Yours' }[d.kind] || ''}</span>`
+  const act = isNew ? '' : d.kind === 'edited' ? `<button class="btn ghost" data-sk-remove>${ICON('<path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.6M4 4v4.6h4.6"/>')}Reset to built-in</button>`
+    : d.kind === 'yours' ? `<button class="btn ghost" data-sk-remove data-del="1">${ICON('<path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/>')}Delete</button>` : ''
+  const foot = isNew ? '<span class="grow"></span><button class="btn ghost" data-sk-cancel>Cancel</button><button class="btn primary" data-sk-create>Create</button>'
+    : `<span class="grow set-sub">Saved as you change it · in Claude as /my-skills:${esc(d.id)}</span>`
+  return `<div class="tp-ed"><div class="tp-eh"><b>${esc(isNew ? 'New skill' : tplName(d.id))}</b>${tag}<span class="grow"></span>${act}<button class="icon-btn" data-sk-cancel aria-label="Close">${ICON('<path d="M6 6l12 12M18 6L6 18"/>')}</button></div>
+    <div class="tp-eb">${isNew ? '<div class="tp-f"><label class="tp-l" for="sk-name">Name</label><input id="sk-name" class="set-in" placeholder="Status report" value="' + esc(d.name || '') + '"></div>' : ''}
+    <div class="tp-f"><label class="tp-l" for="sk-desc">When to use it</label><div class="tp-s tp-hd"><textarea id="sk-desc" placeholder="Use when a task is to send the client a weekly status…">${esc(d.description)}</textarea></div><span class="set-sub">Claude picks a skill by this, so start with “Use when…”.</span></div>
+    <div class="tp-f"><label class="tp-l" for="sk-body">What to do</label><div class="tp-s tp-hd"><textarea id="sk-body" placeholder="1. Read the task… 2. Write… 3. Show me before sending…">${esc(d.body)}</textarea></div></div></div>
+    <div class="tp-ef">${foot}</div></div>`
 }
 function typeEditor() {
   const d = TPL.mtDraft
@@ -2622,8 +2682,45 @@ function templateEditor() {
     <button class="tp-add" data-tpl-add>${ICON('<path d="M12 5v14M5 12h14"/>')}Add a section</button></div><div class="tp-ef">${foot}</div></div>`
 }
 
+// Send to Claude: open the dialog, choose a skill, send.
+document.addEventListener('click', (e) => {
+  const t = e.target.closest('[data-claude-task],[data-sc-send],[data-sc-off]')
+  if (!t) return
+  if (t.dataset.claudeTask) {
+    S.claudeSend = { project: t.dataset.project, node: t.dataset.claudeTask, title: t.dataset.title, skill: '', words: '' }
+    if (!TPL.data) loadTemplates().then(render)
+    return render()
+  }
+  if (t.dataset.scOff !== undefined && (t.tagName === 'BUTTON' || e.target === t)) { S.claudeSend = null; return render() }
+  if (t.dataset.scSend !== undefined) {
+    const c = S.claudeSend
+    const skill = (document.querySelector('[data-sc-skill]:checked') || {}).value || ''
+    const words = (($('#sc-words') || {}).value || '').trim()
+    S.claudeSend = null
+    render()
+    sendToClaude(`Work on this task: "${c.title}" (echo://task/${c.project}/${c.node}).${skill ? ` Use /my-skills:${skill}.` : ''}${words ? ` ${words}` : ''}`)
+  }
+})
+document.addEventListener('keydown', (e) => {
+  if (!S.claudeSend) return
+  if (e.key === 'Escape') { S.claudeSend = null; render() }
+  else if (e.key === 'Enter' && e.target.id === 'sc-words') { e.preventDefault(); const b = document.querySelector('[data-sc-send]'); if (b) b.click() }
+})
+
 // Templates: picking, the editor's buttons, and its fields saved when they change.
 document.addEventListener('click', (e) => {
+  const sk = e.target.closest('[data-sk-pick],[data-sk-new],[data-sk-cancel],[data-sk-create],[data-sk-remove]')
+  if (sk) {
+    const list = (TPL.data && TPL.data.skills) || []
+    if (sk.dataset.skPick) { const x = list.find((y) => y.id === sk.dataset.skPick); TPL.skSel = x ? x.id : null; TPL.skDraft = x ? { ...x } : null; return render() }
+    if (sk.dataset.skNew !== undefined) { TPL.skSel = null; TPL.skDraft = { id: null, kind: 'yours', name: '', description: 'Use when ', body: '' }; render(); const n = $('#sk-name'); if (n) n.focus(); return }
+    if (sk.dataset.skCancel !== undefined) { TPL.skSel = null; TPL.skDraft = null; return render() }
+    if (sk.dataset.skCreate !== undefined) {
+      const d = TPL.skDraft; if (!(d.name || '').trim()) { const n = $('#sk-name'); if (n) n.focus(); return }
+      return send({ cmd: 'skill_save', name: d.name, description: d.description, body: d.body })
+    }
+    if (sk.dataset.skRemove !== undefined) { TPL.skRemoving = { id: TPL.skDraft.id, del: !!sk.dataset.del }; return send({ cmd: 'skill_remove', id: TPL.skDraft.id }) }
+  }
   const mt = e.target.closest('[data-tpl-tab],[data-mt-pick],[data-mt-new],[data-mt-cancel],[data-mt-create],[data-mt-remove]')
   if (mt) {
     const list = (TPL.data && TPL.data.meeting_types) || []
@@ -2695,6 +2792,8 @@ document.addEventListener('change', (e) => {
   // A meeting type's name or how to tell it: saved when it changes (a new one waits for Create).
   const m = TPL.mtDraft
   if (m && m.id && (e.target.id === 'mt-name' || e.target.id === 'mt-about')) return send({ cmd: 'meeting_type_save', id: m.id, name: m.name, about: m.about })
+  const k = TPL.skDraft
+  if (k && k.id && (e.target.id === 'sk-desc' || e.target.id === 'sk-body')) return send({ cmd: 'skill_save', id: k.id, description: k.description, body: k.body })
   const el = e.target, d = TPL.draft
   if (!d || !el.matches) return
   if (el.id === 'tp-hd') { d.header = el.value; tplSave() }
@@ -2703,6 +2802,9 @@ document.addEventListener('change', (e) => {
   else if (el.matches('[data-tpl-i]')) { d.sections[+el.dataset.tplI].instruction = el.value; tplSave() }
 })
 document.addEventListener('input', (e) => {
+  if (TPL.skDraft && e.target.id === 'sk-name') TPL.skDraft.name = e.target.value
+  if (TPL.skDraft && e.target.id === 'sk-desc') TPL.skDraft.description = e.target.value
+  if (TPL.skDraft && e.target.id === 'sk-body') TPL.skDraft.body = e.target.value
   if (TPL.mtDraft && e.target.id === 'mt-name') TPL.mtDraft.name = e.target.value
   if (TPL.mtDraft && e.target.id === 'mt-about') TPL.mtDraft.about = e.target.value
   const el = e.target, d = TPL.draft
@@ -3852,7 +3954,7 @@ function workPanel() {
     return `<div class="wp-ev"><div class="wp-ev-top"><span class="set-sub">${esc(relDay(h.date))}</span><b>${esc(what)}</b>${h.speaker ? `<span class="set-sub">${esc(h.speaker)}</span>` : ''}<span class="grow"></span>${mark}</div>${h.quote ? `<div class="wp-q">“${esc(h.quote)}” ${srcs}</div>` : ''}</div>`
   }).join('')
   return `<div class="wp">
-    <div class="wp-top"><span class="wk-id">${esc(n.id)}</span><span class="wk-k ${esc(n.kind === 'task' ? n.type : n.kind)}">${esc(kind)}</span><span class="grow"></span><button class="btn" data-pj="edit-title">Edit</button></div>
+    <div class="wp-top"><span class="wk-id">${esc(n.id)}</span><span class="wk-k ${esc(n.kind === 'task' ? n.type : n.kind)}">${esc(kind)}</span><span class="grow"></span>${['task', 'story', 'question'].includes(n.kind) ? `<button class="btn ghost" data-claude-task="${esc(n.id)}" data-project="${esc(S.pj.sel)}" data-title="${esc(n.title)}" title="Work on it in the Claude panel, with a skill">Send to Claude</button>` : ''}<button class="btn" data-pj="edit-title">Edit</button></div>
     ${edit === 'title' ? `<textarea class="wp-title" data-ledger-set="title" rows="1" aria-label="Title" autofocus>${esc(n.title)}</textarea>` : `<h3 class="wp-name">${esc(n.title)}</h3>`}
     ${path.length ? `<div class="set-sub">${esc(path.join(' › '))}</div>` : ''}
     ${description}
@@ -6530,6 +6632,7 @@ function paletteItems(target) {
       const attrs = { project: t.project, title: t.title, node: t.id }
       add('My work', `Close: ${t.title}`, () => press({ todayClose: t.id, ...attrs }), { keywords: 'task done finish complete' })
       add('My work', `Ask Claude: ${t.title}`, () => press({ todayAsk: '1', ...attrs }), { keywords: 'task change move due later' })
+      add('My work', `Send to Claude: ${t.title}`, () => press({ claudeTask: t.id, ...attrs }), { keywords: 'work on it skill follow-up mail session' })
     }
   }
   // Echo's own
@@ -6698,6 +6801,13 @@ setInterval(() => { if (document.visibilityState === 'visible') reportView(true)
 function render() {
   if (plTyping()) { S.renderOnBlur = true; return }
   reportView()
+  // Send to Claude's dialog: over whichever view the task was in (Today, a thread's Work, Tasks).
+  {
+    let h = document.getElementById('sc-holder')
+    if (!h) { h = document.createElement('div'); h.id = 'sc-holder'; document.body.appendChild(h) }
+    const html = sendClaudeDialog()
+    if (h._html !== html) { h.innerHTML = html; h._html = html; if (html && !h.contains(document.activeElement)) { const w = h.querySelector('#sc-words'); if (w) w.focus() } }
+  }
   // Animate entering a view / call / tab, never a background refresh.
   const key = `${S.view}|${S.selected}|${S.tab}`
   const entering = key !== lastKey
@@ -7513,6 +7623,15 @@ window.echo = {
    *  edited takes its kind from the list (Edited once Echo has the file). */
   templateSaved(id, created, which) {
     loadTemplates(true).then(() => {
+      if (which === 'sk') {
+        const sks = (TPL.data && TPL.data.skills) || [], rm = TPL.skRemoving
+        TPL.skRemoving = null
+        const pick = created && id ? id : id === null && rm && !rm.del ? rm.id : id === null ? null : TPL.skSel
+        const x = sks.find((y) => y.id === pick)
+        if (created || id === null) { TPL.skSel = x ? x.id : null; TPL.skDraft = x ? { ...x } : null }
+        else if (x && TPL.skDraft) TPL.skDraft.kind = x.kind
+        return render()
+      }
       if (which === 'mt') {
         const mts = (TPL.data && TPL.data.meeting_types) || [], rm = TPL.mtRemoving
         TPL.mtRemoving = null

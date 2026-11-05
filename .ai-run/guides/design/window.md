@@ -113,6 +113,23 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   to their guess.
 - Not yet: picking a template by type; filters by type in Calls and Tasks; the type in Today and Prep.
 
+### Send to Claude and skills (`skills.rs`, Settings → Templates → Skills)
+- Work on a task happens in the Claude panel's own live session, not in one-shot `claude -p` runs (a draft, a change,
+  another draft would be a loop of runs starting from nothing each time). Send to Claude — an icon on My work's cards,
+  a button in a task's details, ⌘K — opens a small dialog: Just the task, or one of the skills, and a line of the
+  user's own; Send opens the panel (starts or resumes its session, waits until it has drawn and gone quiet) and types
+  one line there as if the user had: `Work on this task: "<title>" (echo://task/<thread>/<id>). Use
+  /my-skills:<skill>. <words>`. The rest is the user's conversation: their permissions, Echo's skills (read,
+  microsoft-365 — a send shows what would go and waits for their yes —, manage to close the task).
+- Skills are Claude Code skills: a name, when to use it (Claude picks by it; only that sits in the context until one
+  is used) and what to do. Echo's own (Follow-up mail) are built in; the user's, and Echo's as they changed them, are
+  `<home>/.echo/skills/<id>/SKILL.md`; Echo writes them as a plugin, `my-skills` (`<config>/my-skills/`), afresh each
+  time the panel's session starts (`terminal::start_folder`, `--plugin-dir`). The Templates page's third tab edits
+  them as it does minutes templates (Built in, Edited + Reset, Yours + Delete, Ask Claude).
+- The card's other Claude icon (Ask Claude) stays: a one-shot change to the task's own fields ("move it two weeks").
+- Only the panel's session: Echo has no way into the user's own Claude Code sessions elsewhere.
+- Not yet: action modes from the minutes (claude: the skill and prompt ready on the action; manual: how to do it).
+
 ### Settings → Templates (`templatesSettings`, `/api/templates`, `calls::templates_view`)
 - Its own section after AI & minutes (that one has enough): the shapes Claude writes in, a tab per kind. Minutes now;
   Tasks (the forms of what Run with Claude writes: a mail, a Teams message, a doc, a plan) comes with that feature.

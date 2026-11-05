@@ -60,6 +60,7 @@ mod speakers;
 mod speaking;
 mod schedule;
 mod series;
+mod skills;
 #[cfg(feature = "js")]
 mod share;
 mod signin;

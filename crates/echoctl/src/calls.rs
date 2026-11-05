@@ -474,7 +474,7 @@ pub fn templates_view() -> Value {
         })
         .collect();
     out.sort_by_key(|t| (builtin.iter().position(|b| t["id"] == *b).unwrap_or(usize::MAX), t["id"].as_str().unwrap_or("").to_string()));
-    json!({"templates": out, "values": template_values(), "meeting_types": meeting_types()})
+    json!({"templates": out, "values": template_values(), "meeting_types": meeting_types(), "skills": crate::skills::list()})
 }
 
 /// The user's file a template comes from (none: it is Echo's own).

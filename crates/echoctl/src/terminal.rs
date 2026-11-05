@@ -578,6 +578,12 @@ pub fn start_folder(key: &str, profile: Option<&str>, pick: Option<&str>, cols: 
     for d in crate::grants::session_plugins() {
         args.extend(["--plugin-dir".into(), d.display().to_string()]);
     }
+    // The user's skills (Settings → Templates → Skills), as a plugin of their own: only their descriptions in its
+    // context until one is used; Send to Claude on a task names one.
+    match crate::skills::plugin() {
+        Ok(d) => args.extend(["--plugin-dir".into(), d.display().to_string()]),
+        Err(e) => eprintln!("skills: {e:#}"),
+    }
     // Echo's own plugin (status line, record / minutes / doctor skills): installed in this folder's project scope it
     // reaches Claude Code as the user set it up; a profile of its own reads only its own settings, so it gets the
     // plugin shipped with the app.
