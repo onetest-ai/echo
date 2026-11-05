@@ -56,6 +56,7 @@ mod speakers;
 #[cfg(feature = "transcribe")]
 mod speaking;
 mod schedule;
+mod series;
 #[cfg(feature = "js")]
 mod share;
 mod signin;
@@ -247,6 +248,11 @@ enum Cmd {
     Org {
         #[command(subcommand)]
         cmd: OrgCmd,
+    },
+    /// What Echo does with every meeting of a series: record always / ask / never, and in which language
+    Series {
+        #[command(subcommand)]
+        cmd: SeriesCmd,
     },
     /// Echo plugins from marketplaces: list, install, update, remove, settings
     Plugin {
@@ -1323,6 +1329,23 @@ enum MarketCmd {
 }
 
 #[derive(Subcommand)]
+enum SeriesCmd {
+    /// Every rule; with --thread, that thread's series (from its calls and its calendar) with theirs
+    List {
+        #[arg(long)]
+        thread: Option<String>,
+    },
+    /// Change a series' rule: KEY as `series list` gives it (id:… or subject:…); JSON with the fields to set —
+    /// record (always|ask|never), languages; null = Echo's default
+    Set {
+        key: String,
+        json: String,
+        #[arg(long)]
+        subject: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
 enum OrgCmd {
     /// Every organisation (`account: false` = not a client)
     List,
@@ -1638,6 +1661,19 @@ fn main() -> Result<()> {
         Cmd::Project { cmd } => project_command(cmd),
         Cmd::Client { cmd } => client_command(cmd),
         Cmd::Org { cmd } => org_command(cmd),
+        Cmd::Series { cmd } => {
+            let v = match cmd {
+                SeriesCmd::List { thread: Some(t) } => series::of_thread(&t)?,
+                SeriesCmd::List { thread: None } => serde_json::to_value(series::load())?,
+                SeriesCmd::Set { key, json, subject } => {
+                    anyhow::ensure!(std::env::var_os("ECHOCTL_HEADLESS").is_none(), "not inside a run Echo started");
+                    let patch: serde_json::Value = anyhow::Context::context(serde_json::from_str(&json), "the change isn't JSON")?;
+                    serde_json::json!({"rule": series::set(&key, subject.as_deref(), &patch)?})
+                }
+            };
+            println!("{}", serde_json::to_string_pretty(&v)?);
+            Ok(())
+        }
         Cmd::Plugin { cmd } => plugin_command(cmd),
         Cmd::Deliver { cmd } => deliver_command(cmd),
         Cmd::M365 { cmd } => {

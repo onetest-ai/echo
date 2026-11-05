@@ -538,6 +538,9 @@ async function loadProject() {
   try { const d = await get('api/project/' + encodeURIComponent(id)); if (S.pj.sel === id) S.pj.detail = d } catch { /* app restarting */ }
   if (S.pj.tab === 'people') await loadPeople()
   if ((S.pj.tab === 'profile' || S.pj.tab === 'brief') && (!S.pj.tbrain || S.pj.tbrain.thread !== S.pj.sel)) await loadThreadBrain()
+  if (S.pj.tab === 'profile') {
+    try { const d = await get('api/project/' + encodeURIComponent(id) + '/series'); if (S.pj.sel === id) S.pj.series = { id, ...d } } catch { /* app restarting */ }
+  }
   if (S.pj.tab === 'work') {
     try { const w = await get('api/project/' + encodeURIComponent(id) + '/work'); if (S.pj.sel === id) S.pj.work = w } catch { /* app restarting */ }
   }
@@ -2116,6 +2119,7 @@ function eventDetail(e, now) {
     <dl>${e.organizer ? `<dt>Organizer</dt><dd>${esc(e.organizer)}</dd>` : ''}${e.people ? `<dt>People</dt><dd>${e.people}</dd>` : ''}${e.location ? `<dt>Where</dt><dd>${esc(e.location)}</dd>` : ''}${e.recorded ? `<dt>${e.recorded.imported ? 'Call' : 'Recording'}</dt><dd>${e.recorded.imported ? 'from the Teams transcript' : STATUS[e.recorded.status] || esc(e.recorded.status)}${e.recorded.minutes ? `, ${e.recorded.minutes} min` : ''}</dd>` : ''}</dl>
     ${acts || slotItems('calendar.event', { kind: 'event', event: e }) ? `<div class="acts">${acts}${slotItems('calendar.event', { kind: 'event', event: e })}</div>` : ''}${why ? `<p class="why">${esc(why)}</p>` : ''}
     ${eventProjects(e)}
+    ${seriesEditor(e)}
     ${e.recap && e.recap.length ? `<div><b style="font-size:12px">Last time</b><ul>${e.recap.map((r) => `<li>${esc(r)}</li>`).join('')}</ul></div>` : ''}
   </aside>`
 }
@@ -3693,9 +3697,6 @@ function projectProfile(p, data) {
   const calls = (p.rules || []).map((r, i) => tok(RULE_TOKEN(r, p.client_name), { op: 'rule-remove', index: i })).join('') + addTok('rule', "a meeting's subject (empty for the client's people)", ruleKind)
     + `<div class="pf-sub">${p.call_count} call${p.call_count === 1 ? '' : 's'} match${pins || outs ? ` · ${[pins ? `${pins} pinned` : '', outs ? `${outs} taken out by hand` : ''].filter(Boolean).join(', ')}` : ''}</div>`
   const sources = threadSources(p, cl)
-  const people = (p.people || []).map((m) => tok(`${esc(m.name)}${m.role ? ` · ${esc(m.role)}` : ''}`, { op: 'person-remove', name: m.name, email: m.email || '' }, m.email || '')).join('') + addTok('person', 'Name, email, role — e.g. Dana Kowal, dana@x.com, sponsor')
-  const terms = threadBrain(p) || ((p.terms || []).slice(0, 24).map((t) => tok(esc(t.term), { op: 'term-remove', term: t.term }, [t.kind, t.note].filter(Boolean).join(' · '))).join('') + addTok('term', 'A term — a system, an acronym, a name')
-    + `<div class="pf-sub">Hint transcription on its calls${(p.terms || []).length > 24 ? ` · ${p.terms.length - 24} more` : ''}</div>`)
   const notes = S.pj.pfEdit === 'notes' ? `<textarea class="pf-in pj-notes" id="pj-f-notes" data-pj-field="notes" data-id="${id}" rows="3" aria-label="Notes for Claude" autofocus>${esc(p.notes || '')}</textarea>`
     : `<button class="pf-text${p.notes ? '' : ' empty'}" data-pj="pf-edit" data-what="notes">${p.notes ? esc(p.notes) : 'What the minutes and Claude should know — what people call things, what to leave out'}</button>`
   // Look and AI: not on the board; the same row style.
@@ -3715,14 +3716,50 @@ function projectProfile(p, data) {
     ${row('Since', since)}
     ${brainOn() ? row('History', history) : ''}
     ${row('Calls', calls)}
+    ${row('Meetings', seriesBlock(p))}
     ${row('Sources', sources)}
-    ${row('People', people)}
-    ${row(RECALL_EXTRAS && S.pj.tbrain && S.pj.tbrain.taxonomy && S.pj.tbrain.taxonomy.exists ? 'Topics & terms' : 'Terms', terms)}
     ${row('Notes for Claude', notes)}
     ${row('Look', look)}
     ${row('AI', aiRow)}
   </div>
   <p class="pf-foot">Saved as you change it · <code>projects/${id}/</code> · Delete in ⋯</p>`
+}
+
+/** What a series' rule does, in a few words (no rule: not recorded). */
+function seriesSummary(r) {
+  r = r || {}
+  const parts = []
+  parts.push(r.record === 'always' ? 'recorded' : r.record === 'ask' ? 'asks to record' : 'not recorded')
+  if (r.languages && r.languages.length) parts.push(r.languages.map(langName).join(', '))
+  return parts.join(' · ')
+}
+
+/** A thread's meeting series (Profile → Meetings): what Echo does with each, read only — set from a meeting in the
+ *  calendar —; × takes one out of the thread (`series_unlink`). */
+function seriesBlock(p) {
+  const d = S.pj.series && S.pj.series.id === p.id ? S.pj.series : null
+  if (!d) return '<span class="pf-sub">Reading its meetings…</span>'
+  if (d.error) return `<span class="pf-sub">${esc(d.error)}</span>`
+  const list = d.series || []
+  if (!list.length) return '<span class="pf-sub">No meeting series yet. A meeting that recurs in this thread shows here.</span>'
+  const when = (x) => x.next ? `next ${esc(new Date(x.next).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }))}` : x.calls ? `${x.calls} call${x.calls === 1 ? '' : 's'}` : ''
+  return list.map((x) => `<div class="se-row"><span class="se-t">${esc(x.subject || 'A meeting')}</span><span class="pf-sub se-when">${when(x)}<button class="pj-x" data-series-unlink="${esc(x.key)}" title="Not this thread's: its meetings stop joining it" aria-label="Take ${esc(x.subject || 'this series')} out of the thread">×</button></span><span class="pf-sub se-what">${esc(seriesSummary(x.rule))}</span></div>`).join('')
+    + '<div class="pf-sub">Set what Echo does with a series on one of its meetings in the calendar.</div>'
+}
+
+/** A recurring meeting in the calendar: record every meeting of its series or not (the default), and in which
+ *  language — that's all. A choice on the Record button for one meeting still wins. */
+function seriesEditor(e) {
+  const x = e.series
+  if (!x || !x.key) return ''
+  const r = x.rule || {}
+  // Not recorded unless set: Don't record is the default (no rule).
+  const rec = r.record === 'always'
+  const btn = (on, v, l) => `<button data-series-set="record" data-val="${esc(JSON.stringify(v))}" aria-pressed="${on}">${esc(l)}</button>`
+  const opts = [['', 'Any language'], ...LANG_LIST.map((l) => [l, langName(l)])], cur = (r.languages || [])[0] || ''
+  const lang = `<label class="fchip">${esc((opts.find(([v]) => v === cur) || opts[0])[1])} ▾<select data-series-field="languages" aria-label="Language">${opts.map(([v, l]) => `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`
+  return `<div class="se-cal"><b style="font-size:12px">Every meeting of this series</b>
+    <div class="se-line" data-series-key="${esc(x.key)}" data-series-subject="${esc(e.subject || '')}"><div class="seg" role="group" aria-label="Record every meeting">${btn(rec, 'always', 'Record')}${btn(!rec, null, "Don't record")}</div>${lang}</div></div>`
 }
 
 /** A client's page (`#client/<id>`): its names, domains, whether it is the user's own company, its logo and projects. */
@@ -6257,7 +6294,30 @@ function placeDetail() {
 
 /** What the screen depends on: re-render only when it changes (keeps selection and scroll). */
 // (the minute too: the pill's "meeting soon" comes and goes with the clock)
-const fingerprint = () => JSON.stringify([S.state, S.calls, S.call, S.agenda, S.cal.data, S.cal.selected, S.settings, S.pj.data, S.pj.detail, S.pj.foundData, S.pj.work, Math.floor(Date.now() / 60000)])
+const fingerprint = () => JSON.stringify([S.state, S.calls, S.call, S.agenda, S.cal.data, S.cal.selected, S.settings, S.pj.data, S.pj.detail, S.pj.foundData, S.pj.work, S.pj.series, Math.floor(Date.now() / 60000)])
+
+// A thread's meeting series (Profile → Meetings): open one; set a field.
+function seriesSet(el, field, value) {
+  const ed = el.closest('[data-series-key]')
+  if (!ed) return
+  send({ cmd: 'project', op: 'series_set', key: ed.dataset.seriesKey, subject: ed.dataset.seriesSubject, field, value })
+  // The calendar shows it from its own data: read it again.
+  if (S.view === 'calendar') setTimeout(() => loadCalendar(true).then(render), 300)
+}
+document.addEventListener('click', (e) => {
+  const t = e.target.closest && e.target.closest('[data-series-set],[data-series-unlink]')
+  if (!t) return
+  if (t.dataset.seriesUnlink) return send({ cmd: 'project', op: 'series_unlink', id: S.pj.sel, key: t.dataset.seriesUnlink })
+  let v
+  try { v = JSON.parse(t.dataset.val) } catch { return }
+  seriesSet(t, t.dataset.seriesSet, v)
+})
+document.addEventListener('change', (e) => {
+  const t = e.target.closest && e.target.closest('[data-series-field]')
+  if (!t) return
+  const f = t.dataset.seriesField
+  seriesSet(t, f, f === 'languages' ? (t.value ? [t.value] : []) : t.value || null)
+})
 
 document.addEventListener('click', (e) => {
   // Any click closes the call's ⋯ menu (its own button toggles it).

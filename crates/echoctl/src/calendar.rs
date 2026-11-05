@@ -213,6 +213,10 @@ fn store(events: &[Value], quiet: bool) -> Result<()> {
     meetings.sort_by(|a, b| a.start.cmp(&b.start));
     let n = meetings.len();
     watch::write_agenda(&meetings)?;
+    // Meetings of a series set to record always: "Record when it starts", each once.
+    if let Err(e) = crate::series::schedule_always(&meetings) {
+        eprintln!("series: {e:#}");
+    }
     if !quiet {
         println!("{}", json!({ "synced": true, "meetings": n }));
     }
