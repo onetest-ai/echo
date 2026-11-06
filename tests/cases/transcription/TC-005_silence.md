@@ -3,9 +3,9 @@ id: TC-005
 title: Silence produces no made-up text
 priority: medium
 type: functional
-requirements: [F-STT-03]
+requirements: [F-STT-02]
 module: transcription
-run: person
+run: agent
 platform: macos
 tags: [transcription]
 external_id: TC-TRN-006
@@ -16,12 +16,25 @@ external_id: TC-TRN-006
 **Module:** Transcription | **Priority:** Medium | **Type:** Functional
 
 ## Preconditions
+- Test data built by `tests/fixtures/make-data.sh <dir>`; the shell has run `. <dir>/env`
+- The speech model is linked into the test config: `ln -s "$HOME/Library/Application Support/echo/models" "$ECHOCTL_CONFIG_DIR/models"`, then `target/debug/echoctl model use large-v3-turbo-q5_0`
+- The clips are in `tests/fixtures/audio/clips/` (no network needed)
+
+## Test Data
+
+| Field | Value |
+|-------|-------|
+| Conversation | long-silence: 3 turns with 20 s of silence |
 
 ## Steps
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Record a call with 2 minutes of silence in the middle (typing allowed) | No text in that stretch |
+| 1 | Run `target/debug/echoctl config --languages en` | Exit code 0 |
+| 2 | Run `python3 tests/fixtures/audio/make_audio.py build long-silence "$ECHOCTL_HOME/calls/2026-11-06_120000-waiting-for-the-demo"` | It prints the call folder, its length and its turns |
+| 3 | Run `target/debug/echoctl transcribe 2026-11-06_120000-waiting-for-the-demo` | "done in …"; the folder has `transcript.md` and `segments.json`, and no `.wav` files |
+| 4 | Run `python3 tests/fixtures/audio/make_audio.py score "$ECHOCTL_HOME/calls/2026-11-06_120000-waiting-for-the-demo"` | Exit code 0; `"pass": true` |
+| 5 | In the score, read `transcribed_in_silence` | An empty list: nothing in the 20 s without speech |
 
 ## Expected Final State
-No hallucinated lines during silence.
+Twenty seconds without speech produce no text; the words around them are transcribed.

@@ -1,0 +1,70 @@
+{
+ "about": "Short made-up calls with known words, for transcription and recording tests. Each turn: who (me = the mic track, anyone else = the remote track), text, lang, and gap (seconds of silence before it). Voices: azure:<voice> (gpt-4o-mini-tts, English) or eleven:<voice id> (eleven_multilingual_v2, Ukrainian and Russian). People and companies are invented.",
+ "voices": {
+  "me": "azure:ash",
+  "dana": "azure:coral",
+  "omar": "azure:onyx",
+  "me_uk": "eleven:9oLzyMRRRWl0OdCCVwlU",
+  "olena_uk": "eleven:X1WtgMmQUBwtiAPn4j1P",
+  "olena_ru": "eleven:2o2uQnlGaNuV3ObRpxXt"
+ },
+ "conversations": [
+  {
+   "id": "acme-sync",
+   "title": "Acme weekly sync",
+   "what": "A client call: a decision and two action items with owners and dates.",
+   "turns": [
+    {"who": "me", "voice": "me", "lang": "en", "gap": 1.0, "text": "Morning Dana, let's go through the single sign-on rollout."},
+    {"who": "dana", "voice": "dana", "lang": "en", "gap": 0.8, "text": "Sure. We still need the SSO checklist from you, ideally by the end of today."},
+    {"who": "me", "voice": "me", "lang": "en", "gap": 0.7, "text": "I'll send the checklist this afternoon, before four o'clock."},
+    {"who": "dana", "voice": "dana", "lang": "en", "gap": 0.8, "text": "Great. And the pilot, do we start with the Berlin office or with Madrid?"},
+    {"who": "me", "voice": "me", "lang": "en", "gap": 0.7, "text": "Let's agree on Berlin first. Madrid follows two weeks later."},
+    {"who": "dana", "voice": "dana", "lang": "en", "gap": 0.8, "text": "Agreed, Berlin first. I'll book the training room for Thursday."}
+   ]
+  },
+  {
+   "id": "two-remotes",
+   "title": "Globex pilot kickoff",
+   "what": "Two people on the remote side (one track, two voices) and the user; numbers and names.",
+   "turns": [
+    {"who": "dana", "voice": "dana", "lang": "en", "gap": 1.0, "text": "Hi everyone, Omar is joining us from the security team today."},
+    {"who": "omar", "voice": "omar", "lang": "en", "gap": 0.8, "text": "Hello. I have three questions about data retention, it's a short list."},
+    {"who": "me", "voice": "me", "lang": "en", "gap": 0.7, "text": "Go ahead, Omar. We keep transcripts for ninety days by default."},
+    {"who": "omar", "voice": "omar", "lang": "en", "gap": 0.8, "text": "Ninety days works. Can the audio be deleted right after transcription?"},
+    {"who": "me", "voice": "me", "lang": "en", "gap": 0.7, "text": "Yes, the audio is deleted as soon as the transcript is written."},
+    {"who": "dana", "voice": "dana", "lang": "en", "gap": 0.8, "text": "Then I'll send the pilot plan to both of you by Friday."}
+   ]
+  },
+  {
+   "id": "mixed-languages",
+   "title": "Initech planning",
+   "what": "Ukrainian, Russian and English in one call; each line must stay in its own language.",
+   "turns": [
+    {"who": "me", "voice": "me_uk", "lang": "uk", "gap": 1.0, "text": "Привіт, Олено. Давай швидко пройдемося по плану на наступний тиждень."},
+    {"who": "olena", "voice": "olena_ru", "lang": "ru", "gap": 0.8, "text": "Привет. У меня два вопроса: бюджет на обучение и сроки по пилоту."},
+    {"who": "me", "voice": "me_uk", "lang": "uk", "gap": 0.7, "text": "Бюджет вже погоджений. Пілот стартує в понеділок, їй-богу без затримок."},
+    {"who": "olena", "voice": "olena_uk", "lang": "uk", "gap": 0.8, "text": "Чудово, тоді я підготую звіт і надішлю його до середи."},
+    {"who": "me", "voice": "me", "lang": "en", "gap": 0.7, "text": "And please copy Dana on that report, she asked for it."}
+   ]
+  },
+  {
+   "id": "long-silence",
+   "title": "Waiting for the demo",
+   "what": "Twenty seconds in which nobody speaks; nothing may be transcribed there.",
+   "turns": [
+    {"who": "me", "voice": "me", "lang": "en", "gap": 1.0, "text": "Let me share my screen, give me a moment to find the right window."},
+    {"who": "dana", "voice": "dana", "lang": "en", "gap": 20.0, "text": "I can see it now. The dashboard looks much cleaner than last week."},
+    {"who": "me", "voice": "me", "lang": "en", "gap": 0.7, "text": "Thanks, we removed two of the old charts."}
+   ]
+  },
+  {
+   "id": "very-short",
+   "title": "Quick check",
+   "what": "Under twenty seconds: transcribed, but too short for automatic minutes.",
+   "turns": [
+    {"who": "dana", "voice": "dana", "lang": "en", "gap": 1.0, "text": "Quick one: is the call at three still on?"},
+    {"who": "me", "voice": "me", "lang": "en", "gap": 0.7, "text": "Yes, three o'clock, same link."}
+   ]
+  }
+ ]
+}
