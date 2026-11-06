@@ -57,7 +57,7 @@
   },
   {
    "id": "F-CALLS-06",
-   "feature": "A call opens on Minutes when it has minutes, else on Transcript; while it records or is transcribed it opens on Transcript and moves to Minutes once they are written, unless the user picked a tab",
+   "feature": "A call opens on the tab picked last (kept from call to call; Minutes at first, and Minutes when the kept tab doesn't exist for the call); while it records or is transcribed it opens on Transcript and moves to Minutes once they are written, unless the user picked a tab",
    "priority": "high",
    "check": "agent",
    "axes": [

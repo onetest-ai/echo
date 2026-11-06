@@ -1,6 +1,6 @@
 ---
 id: TC-012
-title: The right panel is closed at every window open but keeps its last tab
+title: The right panel is closed at every window open and the Inbox button does not restore its last tab
 priority: medium
 type: functional
 requirements: [F-WS-04]
@@ -10,7 +10,7 @@ platform: any
 tags: [shell, panels]
 ---
 
-# TC-012: The right panel is closed at every window open but keeps its last tab
+# TC-012: The right panel is closed at every window open and the Inbox button does not restore its last tab
 
 **Module:** Window shell | **Priority:** Medium | **Type:** Functional
 
@@ -27,11 +27,11 @@ tags: [shell, panels]
 |---|--------|----------------|
 | 1 | Navigate to `{{base_url}}/#today` and click the activity button "Inbox", then the tab "Vocabulary" | The right panel is open on "Vocabulary" |
 | 2 | Wait 1 s and reload `{{base_url}}/#today` | No "Close the panel" button: the panel is closed |
-| 3 | Click the activity button "Inbox" | The panel opens; the tab "Vocabulary" is the one selected (the last tab is kept) |
-| 4 | Run `. <dir>/env && cat "$ECHOCTL_CONFIG_DIR/window-layout.json"` | `"right"` has `"active": "vocabulary"` |
+| 3 | Click the activity button "Inbox" | The panel opens on the tab "Inbox" (selected) with "Nothing needs you"; "Vocabulary" is not the selected tab: the button shows Inbox, not the last tab |
+| 4 | Run `. <dir>/env && cat "$ECHOCTL_CONFIG_DIR/window-layout.json"` | `"right"` has `"active": "needs"` (Inbox replaced Vocabulary as the panel's active view) |
 
 ## Expected Final State
-The panel opens on the tab it had last.
+The panel was closed after the reload; the Inbox button opened it on Inbox, not on Vocabulary.
 
 ## Teardown
 - Click "Close the panel"; Navigate to `{{base_url}}/#settings/layout` and click "Reset" in the card "Reset the layout".

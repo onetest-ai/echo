@@ -30,7 +30,7 @@ tags: [plugins, remove]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Save a setting so there is data: `echoctl plugin set acme-notes greeting "good morning"` | Prints the setting with `"value": "good morning"` |
+| 1 | Save a setting so there is data: `echoctl plugin set acme-notes greeting "good morning"` | Prints nothing (setting a value is silent); `echoctl plugin set acme-notes greeting` then prints the setting with `"value": "good morning"` |
 | 2 | Navigate to `{{base_url}}/#settings/plugins` (tab "Installed"), click "Remove…", then "Remove, keep data" | The tab "Installed" has no count and says "No plugins yet — Discover lists what your marketplaces offer." |
 | 3 | Run `echoctl plugin list` | `"installed": []` |
 | 4 | Run `cat "$ECHOCTL_HOME/.echo/plugins/acme-notes/settings.json"` | The file still holds `good morning` |

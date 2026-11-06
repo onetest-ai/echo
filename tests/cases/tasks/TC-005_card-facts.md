@@ -30,7 +30,7 @@ tags: [tasks, cards]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Navigate to `{{base_url}}/#tasks` and wait for the text "I owe" | "I owe 2" |
+| 1 | Reload `{{base_url}}/` fully (`location.reload()`; a hash-only Navigate keeps the old data and shows "no date" for T001), navigate to `{{base_url}}/#tasks` and wait for the text "I owe" | "I owe 2" |
 | 2 | Read the card "Draft the Globex pilot plan" | Under the title the story "Pilot plan"; the thread "Globex pilot"; a date whose tooltip is "Overdue" (`.tk-due.late`) |
 | 3 | Read the card "Send Acme the SSO checklist" | The story "SSO for the Berlin pilot"; the thread "Acme rollout"; a date whose tooltip is "Due" and which is not marked late |
 | 4 | Click "Others · 1" and read the card "Answer the security questionnaire" | The owner "Omar Haddad"; the thread "Acme rollout"; the text "no date" |

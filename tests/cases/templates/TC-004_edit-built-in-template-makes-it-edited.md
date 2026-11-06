@@ -25,7 +25,7 @@ tags: [templates]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Navigate to `{{base_url}}/#settings/templates`, click the row "Status sync"; run `ls "$ECHOCTL_HOME/.echo/templates"` in Bash (`. <dir>/env` first) | The editor shows the tag "Built in"; the folder is empty |
+| 1 | Navigate to `{{base_url}}/#settings/templates`, click the row "Status sync"; run `ls "$ECHOCTL_HOME/.echo/templates" 2>/dev/null` in Bash (`. <dir>/env` first) | The editor shows the tag "Built in"; nothing is listed (the folder does not exist yet or is empty) |
 | 2 | Replace the text of the first section's box ("What to write in Summary") with `Two lines on the week for Acme.` and press Tab | The box holds that text |
 | 3 | Wait 1 s and read the row "Status sync" and the editor's title bar | The row shows the tag "Edited"; the editor shows "Edited" and a button "Reset to built-in" |
 | 4 | Run `ls "$ECHOCTL_HOME/.echo/templates"` and `grep -n 'Two lines on the week' "$ECHOCTL_HOME/.echo/templates"/status-sync.md` | The folder holds `status-sync.md`; the grep prints one line with `Two lines on the week for Acme.` |

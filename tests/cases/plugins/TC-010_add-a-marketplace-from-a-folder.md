@@ -29,7 +29,7 @@ tags: [plugins, marketplaces]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Navigate to `{{base_url}}/#settings/plugins`, click the tab "Marketplaces", type the path of `$M` (print it with `echo "$M"`) in "Marketplace", type `acme-local` in "Name" and click "Add" | After a moment the tab reads "Marketplaces" with the count `2`; a row "acme-local" with the path of `$M` and "1 plugin · read today" |
+| 1 | Navigate to `{{base_url}}/#settings/plugins`, click the tab "Marketplaces", type the path of `$M` (print it with `echo "$M"`) in "Marketplace", type `acme-local` in "Name" and click "Add" | After a moment the tab reads "Marketplaces" with the count `2`; a row "acme-local" with the path of the folder (`$(cd "$M" && pwd -P)`; `/var` and `/private/var` are the same folder on macOS) and "1 plugin · read today" |
 | 2 | Run `echoctl plugin list` | `markets` holds `onetest` and `acme-local` (`"count": 1`, `"built_in": false`) |
 | 3 | Click "Read again" on the row "acme-local" | The row still reads "1 plugin · read today" |
 

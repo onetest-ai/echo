@@ -26,7 +26,7 @@ tags: [settings, me]
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | Navigate to `{{base_url}}/#settings/me`; find the card "Your profile" | It shows the heading "About me" with the lines "Name:", "Role:", "Company / team:" and a button "Edit"; the text "Who reads it" lists minutes, live notes and the Brain's reader |
-| 2 | Click "Edit" | A text box ("me-profile") opens with the same lines |
+| 2 | Click "Edit" | A text box named "Your profile (Markdown)" (`textarea#me-profile`) opens with the same lines |
 | 3 | Replace its text with `I lead delivery at Initech. Write to me in short bullets.` | The box holds that sentence |
 | 4 | Press the platform save shortcut (`ControlOrMeta+s`) | The box closes; the card shows `I lead delivery at Initech. Write to me in short bullets.` and the button "Edit" |
 | 5 | Wait 1 s, run `. <dir>/env && cat "$ECHOCTL_HOME/.echo/me.md"` | The file holds `I lead delivery at Initech. Write to me in short bullets.` |

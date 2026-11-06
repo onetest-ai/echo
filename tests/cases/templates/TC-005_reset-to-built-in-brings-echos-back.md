@@ -27,8 +27,8 @@ tags: [templates]
 |---|--------|----------------|
 | 1 | Navigate to `{{base_url}}/#settings/templates`, open "Status sync", replace the text of the box "What to write in Summary" with `Two lines on the week for Acme.` and press Tab | The row shows the tag "Edited" |
 | 2 | Click "Reset to built-in" | The row "Status sync" shows the tag "Built in"; the editor shows no "Reset to built-in" button; the Summary box holds the built-in text, not `Two lines on the week for Acme.` |
-| 3 | Run `ls "$ECHOCTL_HOME/.echo/templates"` in Bash (`. <dir>/env` first) | The folder is empty |
-| 4 | Run `ls "$ECHOCTL_HOME/.echo/trash/templates"` | One file named `status-sync-<digits>.md` |
+| 3 | Run `ls "$ECHOCTL_HOME/.echo/templates" 2>/dev/null` in Bash (`. <dir>/env` first) | Nothing is listed (the folder is empty or does not exist) |
+| 4 | Run `ls "$ECHOCTL_HOME/.echo/trash/templates" | grep -c "^status-sync-[0-9]*\.md$"` | One more than before this case (an earlier case may already have put one there) |
 
 ## Expected Final State
 Status sync is Echo's again; the user's edit sits in `.echo/trash/templates`.

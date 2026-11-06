@@ -29,7 +29,7 @@ tags: [tasks, filters, mode]
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | Navigate to `{{base_url}}/#tasks` and wait for the text "I owe" | "I owe 2" |
-| 2 | Select "By hand" in `[aria-label="Who does it"]` | The chip reads "By hand ▾"; every pile shows "Nothing here" (no task has a mode yet) |
+| 2 | Select "By hand" in `select[aria-label="Who does it"]` (the Details also has a button group with that label, so scope to `select`) | The chip reads "By hand ▾"; every pile shows "Nothing here" (no task has a mode yet) |
 | 3 | Select "Anyone", click the card "Draft the Globex pilot plan", and in the Details press "By hand" (`[data-mode-set="manual"]`) | The button "By hand" is pressed (`aria-pressed="true"`); a row "How" appears with "not said" |
 | 4 | Select "By hand" in "Who does it" | "I owe 1" with only "Draft the Globex pilot plan", which shows a hand icon (aria-label "You do it by hand"); "Send Acme the SSO checklist" is not shown |
 | 5 | Select "Claude can do" | Every pile shows "Nothing here" |
