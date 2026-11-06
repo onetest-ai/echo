@@ -277,11 +277,12 @@ scenarios: far fewer runners than cases, and the cases meet each other the way a
    "result", "steps_total", "steps_completed", "failure_step", "failure_reason", "screenshot"}], "console_errors",
    "duration_seconds", "notes"}`. Screenshots: `tests/reports/screenshots/<S-NN>-<stage>-<area>-<TC-NNN>.png`.
 
-**Leading a run (the lead):** per scenario, `tests/fixtures/serve.sh up <new dir> <port>`, dispatch one runner with
+**Leading a run (the lead):** run the scenarios, then the standalone cases (those in no scenario), each on fresh data as a one-stage scenario. Per scenario, `tests/fixtures/serve.sh up <new dir> <port>`, dispatch one runner with
 the scenario path, base_url and env file, then `serve.sh down`. Scenarios with `data: standard` each get fresh data
 (they may change it). The report counts stages (cases) as well as scenarios. `run: person` cases are listed as
 skipped (person).
 
 **Writing one:** order the stages so that a stage that changes data comes after the stages that read what it
-changes, and give a stage "Depends on" only when it cannot run without the earlier one. Every `run: agent` case is
-in at least one scenario; a new case goes into an existing scenario where it fits the journey, or a new one.
+changes, and give a stage "Depends on" only when it cannot run without the earlier one. A case may be a stage of
+one or more scenarios, or stand alone: put it into a scenario when it belongs to a user's journey (that is cheaper to
+run and closer to how the app is used), and leave it alone when it doesn't fit one.
