@@ -2301,7 +2301,7 @@ fn check_edit(sets: &Value, n: &BTreeMap<String, Node>) -> Result<()> {
             "mode" if !(v.is_null() || v.as_str().is_some_and(|m| crate::taskmodes::MODES.contains(&m))) => bail!("mode is null or one of {:?}", crate::taskmodes::MODES),
             "how" if !(v.is_null() || v.as_str().is_some_and(|t| t.chars().count() <= crate::taskmodes::MAX_HOW)) => bail!("how is text of at most {} characters", crate::taskmodes::MAX_HOW),
             "prompt" if !(v.is_null() || v.as_str().is_some_and(|t| t.chars().count() <= crate::taskmodes::MAX_PROMPT)) => bail!("prompt is text of at most {} characters", crate::taskmodes::MAX_PROMPT),
-            "skill" if !(v.is_null() || v.as_str().is_some_and(|k| !k.is_empty() && k.len() <= 64 && k.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'))) => bail!("skill is null or a skill's id"),
+            "skill" if !(v.is_null() || v.as_str().is_some_and(crate::skills::valid_id)) => bail!("skill is null or a skill's id"),
             "description" if !(v.is_null() || v.as_str().is_some_and(|t| t.chars().count() <= MAX_DESC)) => bail!("description is text of at most {MAX_DESC} characters"),
             k if !HUMAN_FIELDS.contains(&k) => bail!("editable fields: {HUMAN_FIELDS:?}"),
             _ => {}
@@ -2634,7 +2634,8 @@ pub fn call_changes(project: &str, stamp: &str) -> Result<Value> {
             c["node"] = json!({"id": n.id, "kind": n.kind, "type": n.task_type, "title": n.title, "state": n.state, "due": n.due,
                                "owner": n.internal_owner.as_ref().or(n.client_owner.as_ref()),
                                // The user's own open task: who does it (the window's What moved beside the minutes).
-                               "mine": n.kind == "task" && n.internal_owner.as_deref().is_some_and(|o| me.is(o)),
+                               // As the Tasks piles tell it: the client's owner first when the client owes it.
+                               "mine": n.kind == "task" && if n.client_owed { n.client_owner.as_ref().or(n.internal_owner.as_ref()) } else { n.internal_owner.as_ref().or(n.client_owner.as_ref()) }.is_some_and(|o| me.is(o)),
                                "mode": crate::taskmodes::of(&modes, project, n)});
             if let Some(d) = h["depends_on"].as_str().and_then(|d| t.nodes.get(d)) {
                 c["depends_on_title"] = json!(d.title);
@@ -2651,46 +2652,7 @@ fn words(s: &str) -> BTreeSet<String> {
     norm(s).split_whitespace().filter(|w| w.len() > 2).map(str::to_owned).collect()
 }
 
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
-fn hms(ts: &str) -> Option<f64> {
-    let p: Vec<f64> = ts.split(':').map(|x| x.parse().ok()).collect::<Option<_>>()?;
-    Some(p.iter().fold(0.0, |a, x| a * 60.0 + x))
-}
 
-/// The task an action item became, if any: one created from this call within a minute of the item's
-/// moment whose words share a third of the item's (or, with no moment, half). Deterministic.
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
-pub fn match_actions(actions: &[Value], changes: &[(String, Value)]) -> BTreeMap<String, Value> {
-    let mut out = BTreeMap::new();
-    let mut used = BTreeSet::new();
-    for a in actions {
-        let (Some(id), Some(text)) = (a["id"].as_str(), a["task"].as_str()) else { continue };
-        let aw = words(text);
-        if aw.is_empty() {
-            continue;
-        }
-        let best = changes
-            .iter()
-            .filter(|(p, c)| c["op"] == "create" && c["node"]["kind"] == "task" && !used.contains(&format!("{p}/{}", c["node"]["id"])))
-            .filter_map(|(p, c)| {
-                let tw = words(&format!("{} {}", c["node"]["title"].as_str().unwrap_or(""), c["quote"].as_str().unwrap_or("")));
-                let share = aw.intersection(&tw).count() as f64 / aw.len() as f64;
-                let near = a["t"].as_f64().zip(c["ts"].as_str().and_then(hms)).map(|(x, y)| (x - y).abs() <= 60.0);
-                let ok = match near {
-                    Some(true) => share >= 0.34,
-                    Some(false) => share >= 0.75,
-                    None => share >= 0.5,
-                };
-                ok.then_some((share + if near == Some(true) { 1.0 } else { 0.0 }, p, c))
-            })
-            .max_by(|x, y| x.0.total_cmp(&y.0));
-        if let Some((_, p, c)) = best {
-            used.insert(format!("{p}/{}", c["node"]["id"]));
-            out.insert(id.to_owned(), json!({"project": p, "id": c["node"]["id"], "title": c["node"]["title"], "state": c["node"]["state"]}));
-        }
-    }
-    out
-}
 
 pub fn tree(project: &str) -> Result<Value> {
     let t = fold_linked(project)?;
@@ -2803,14 +2765,6 @@ mod tests {
         assert_eq!(ch[0]["node"]["id"], "S001", "in the order said");
         assert_eq!(ch[1]["node"]["due"], "2026-10-30");
 
-        let all: Vec<(String, Value)> = ch.iter().map(|x| (id.clone(), x.clone())).collect();
-        let m = match_actions(&[
-            json!({"id": "a1", "task": "Have the SAML config ready by Friday", "t": 790.0}),
-            json!({"id": "a2", "task": "Book the Berlin flights", "t": 790.0}),
-            json!({"id": "a3", "task": "SAML config ready", "t": 3000.0}),
-        ], &all);
-        assert_eq!(m["a1"]["id"], "T001");
-        assert!(!m.contains_key("a2") && !m.contains_key("a3"), "unrelated words; a task taken once: {m:?}");
     }
 
     #[test]

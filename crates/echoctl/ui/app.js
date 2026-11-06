@@ -937,11 +937,13 @@ function list() {
   // Today's meetings still to come, each a call-to-be with its prep.
   const ups = !q && S.up && S.up.meetings ? S.up.meetings : []
   // Folded by default (a full day is a long list): a head like a call's row — how many, and the next one.
-  const nx = ups[0], nxAt = nx && nx.start ? hm(new Date(nx.start)) : ''
+  // The next to start (one already going is "Now").
+  const nowMs = Date.now(), nx = ups.find((u) => !u.start || new Date(u.start) > nowMs) || ups[0]
+  const going = nx && nx.start && new Date(nx.start) <= nowMs, nxAt = nx && nx.start ? hm(new Date(nx.start)) : ''
   const upHead = `<button class="row up-fold" data-up-fold aria-expanded="${!!S.upOpen}" title="${S.upOpen ? 'Fold' : 'Show them'}">
       <span class="si up" aria-hidden="true">${ICON('<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>').replace('width="20" height="20"', 'width="14" height="14"')}</span>
       <span class="t">Coming up today<span class="up-n">${ups.length}</span></span>
-      <span class="m">${nx ? `<span>Next ${esc(nxAt)}</span><span>${esc(nx.subject || 'A meeting')}</span>` : ''}</span>
+      <span class="m">${nx ? `<span>${going ? 'Now' : `Next ${esc(nxAt)}`}</span><span>${esc(nx.subject || 'A meeting')}</span>` : ''}</span>
       <span class="up-chev" aria-hidden="true">${ICON('<path d="M9 6l6 6-6 6"/>')}</span>
     </button>`
   const upRows = ups.length ? upHead + (S.upOpen ? ups : []).map((u) => {
@@ -1451,8 +1453,8 @@ function tabBody(c, segs, chat, frames, actions) {
 }
 
 /** What this call changed in its threads' work (`ledger::call_changes`): one line per change, in
- *  the order said — what happened, to which item, the words, the verifier's mark. A task an action
- *  item became shows on that item instead (`action_tasks`); changes the verifier called wrong, none. */
+ *  the order said — what happened, to which item, the words, the verifier's mark; changes the verifier called
+ *  wrong, none. */
 const CC_KIND = { story: 'New story', task: 'New task', decision: 'Decision', risk: 'Risk', question: 'Question' }
 function ccWhat(x) {
   const n = x.node
@@ -2765,8 +2767,11 @@ document.addEventListener('click', (e) => {
   if (t.dataset.modeSet) {
     send({ cmd: 'project', op: 'ledger', id: t.dataset.project, body: { op: 'edit', node: t.dataset.node, set: { mode: t.dataset.modeSet } } })
     setTimeout(async () => {
+      // The details' own tree (the switch is there), then the view under them.
+      if (S.pj.work && S.pj.sel === t.dataset.project) await loadWork()
       if (S.view === 'today') await loadToday()
       else if (S.view === 'tasks') await loadTasks()
+      else if (S.view === 'projects') await loadProject()
       else if (S.selected) await loadCall(S.selected)
       render()
     }, 400)

@@ -785,8 +785,6 @@ fn call_detail(dir: &Path) -> Value {
                     Some(c)
                 })
                 .collect();
-            let actions: Vec<Value> = calls::read_json(&dir.join("actions.json")).as_array().cloned().unwrap_or_default();
-            v["action_tasks"] = json!(crate::ledger::match_actions(&actions, &all));
             v["changes"] = json!(changes);
         }
         Err(e) => v["projects_error"] = json!(format!("{e:#}")),

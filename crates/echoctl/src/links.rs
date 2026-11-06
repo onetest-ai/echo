@@ -231,15 +231,17 @@ fn recent_calls(thread: &str, n: usize) -> Vec<std::path::PathBuf> {
     calls.into_iter().rev().take(n).collect()
 }
 
-/// The last `n` calls with minutes of `dir`'s meeting series — the same invite subject — newest first, with that
-/// subject; none for a call without one.
+/// The last `n` calls with minutes of `dir`'s meeting series — the same invite subject (a call with no invite, an
+/// ad-hoc one, has no series) — newest first among the last 300 calls, with that subject.
 fn series_calls(dir: &std::path::Path, n: usize) -> Option<(String, Vec<std::path::PathBuf>)> {
-    let subject = crate::calls::previous_subject(dir)?;
+    let invite = |d: &std::path::Path| crate::meeting::MeetingContext::load(d).ok().flatten().and_then(|m| m.subject).filter(|s| !s.trim().is_empty());
+    let subject = invite(dir)?;
     let want = subject.trim().to_lowercase();
     let calls = crate::calls::all_calls()
         .into_iter()
         .rev()
-        .filter(|d| d.join("notes.md").is_file() && crate::calls::previous_subject(d).is_some_and(|s| s.trim().to_lowercase() == want))
+        .take(300)
+        .filter(|d| d.join("notes.md").is_file() && invite(d).is_some_and(|s| s.trim().to_lowercase() == want))
         .take(n)
         .collect();
     Some((subject, calls))
@@ -366,7 +368,8 @@ mod tests {
         let mk = |name: &str, title: &str, notes: bool| {
             let d = crate::paths::calls_dir().join(name);
             std::fs::create_dir_all(&d).unwrap();
-            std::fs::write(d.join("meta.json"), serde_json::json!({"title": title}).to_string()).unwrap();
+            std::fs::write(d.join("meta.json"), "{}").unwrap();
+            std::fs::write(d.join("meeting.json"), serde_json::json!({"subject": title}).to_string()).unwrap();
             if notes {
                 std::fs::write(d.join("notes.md"), "# x").unwrap();
             }
@@ -377,6 +380,10 @@ mod tests {
         mk("2026-10-09_100000-other", "Other", true);
         mk("2026-10-15_100000-acme-weekly", "acme weekly", false);
         mk("2026-10-22_100000-acme-weekly", "Acme Weekly", true);
+        let adhoc = crate::paths::calls_dir().join("2026-10-23_100000-adhoc");
+        std::fs::create_dir_all(&adhoc).unwrap();
+        std::fs::write(adhoc.join("meta.json"), serde_json::json!({"title": "Acme weekly"}).to_string()).unwrap();
+        assert!(series_calls(&adhoc, 3).is_none(), "no invite, no series");
         let (subject, calls) = series_calls(&first, 3).unwrap();
         assert_eq!(subject, "Acme weekly");
         let names: Vec<String> = calls.iter().map(|d| d.file_name().unwrap().to_string_lossy().into_owned()).collect();

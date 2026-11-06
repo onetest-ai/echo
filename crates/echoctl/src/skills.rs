@@ -69,6 +69,11 @@ fn split(text: &str) -> Option<(Vec<(String, String)>, String)> {
     Some((fields, body.trim_start_matches('\n').trim().to_string()))
 }
 
+/// A skill's name as the spec takes it: lower-case letters, digits and single hyphens, at most 64.
+pub fn valid_id(n: &str) -> bool {
+    !n.is_empty() && n.len() <= 64 && n.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') && !n.starts_with('-') && !n.ends_with('-') && !n.contains("--")
+}
+
 /// What the spec asks of a skill named `id` with this `SKILL.md`: the problems (none: it can be used).
 fn problems(id: &str, text: Option<&str>) -> Vec<String> {
     let Some(text) = text else { return vec!["no SKILL.md".into()] };
@@ -78,8 +83,7 @@ fn problems(id: &str, text: Option<&str>) -> Vec<String> {
     match get("name") {
         None | Some("") => out.push("no name in its frontmatter".into()),
         Some(n) => {
-            let ok = n.len() <= 64 && n.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') && !n.starts_with('-') && !n.ends_with('-') && !n.contains("--");
-            if !ok {
+            if !valid_id(n) {
                 out.push(format!("name \"{n}\": lower-case letters, digits and single hyphens, at most 64"));
             } else if n != id {
                 out.push(format!("name \"{n}\" isn't its folder's name, {id}"));

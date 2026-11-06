@@ -54,10 +54,12 @@ fn time(s: Option<&str>) -> Option<DateTime<Utc>> {
 /// Today's meetings still to come or going on, each with its threads and its prep's state — "Coming up today".
 pub fn upcoming() -> Value {
     let now = Utc::now();
+    let scheduled: Vec<String> = crate::schedule::load().into_iter().filter_map(|m| m.id).collect();
     let list: Vec<Value> = crate::watch::agenda()
         .into_iter()
-        // Only the meetings the user accepted (or organises): an invite left open or tentative isn't their day yet.
-        .filter(|m| m.accepted() && time(m.end.as_deref()).is_none_or(|e| e > now))
+        // Only the meetings the user accepted (or organises), or set to record: an invite left open or tentative isn't
+        // their day yet.
+        .filter(|m| (m.accepted() || m.id.as_ref().is_some_and(|i| scheduled.contains(i))) && time(m.end.as_deref()).is_none_or(|e| e > now))
         .filter_map(|m| {
             let event = m.id.clone().filter(|i| !i.is_empty())?;
             let id = id_of(&event);
@@ -577,10 +579,9 @@ pub fn start_scheduler() {
             if let Err(e) = crate::calls::classify(&soon) {
                 eprintln!("meeting types: {e:#}");
             }
-            // The user's own open tasks: who can do each, Claude or they (once a day a task, until they choose).
-            if let Err(e) = crate::taskmodes::classify() {
-                eprintln!("task modes: {e:#}");
-            }
+            // The user's own open tasks: who can do each, Claude or they (once a day a task, until they choose) — on a
+            // thread of its own, one pass at a time: its model calls never hold up a prep.
+            crate::taskmodes::classify_in_background();
         }
         std::thread::sleep(std::time::Duration::from_secs(240));
     });
