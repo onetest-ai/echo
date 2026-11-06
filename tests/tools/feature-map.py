@@ -175,7 +175,7 @@ nav{width:380px;min-width:320px;border-right:1px solid var(--line);display:flex;
 .row:hover{background:rgb(127 127 140 / .09)} .row.on{background:var(--accent-soft);color:var(--text)} .row.on .lbl b,.row.on .lbl{color:var(--text)}
 .tw{width:14px;display:flex;justify-content:center;color:var(--text-3);flex:none} .tw .i{font-size:16px;transition:transform .12s} .tw.open .i{transform:rotate(90deg)}
 .lbl{overflow:hidden;text-overflow:ellipsis;flex:1;color:var(--text)} .lbl .k{font-family:var(--mono);font-size:11px;color:var(--text-3);margin-right:5px}
-.cnt{color:var(--text-3);font-size:11px;flex:none;font-variant-numeric:tabular-nums} .mini{width:52px;flex:none}
+.cnt{color:var(--text-3);font-size:11px;flex:none;font-variant-numeric:tabular-nums} .frac{width:38px;text-align:right} .mini{width:52px;flex:none}
 .kids{margin-left:15px;padding-left:6px;border-left:1px solid var(--line-strong)}
 .st{width:8px;height:8px;border-radius:50%;flex:none} .st.ok{box-shadow:0 0 0 2px rgb(12 163 12 / .18)} .st.no{box-shadow:0 0 0 2px rgb(208 59 59 / .16)}
 .p{font-size:10.5px;font-weight:600;padding:0 6px;border-radius:9px;flex:none;line-height:17px}
@@ -255,7 +255,7 @@ function featRow(f){const on=S.sel==='f:'+f.id,op=S.open.has('f:'+f.id),cs=f.age
 function tree(){let h='';
  if(S.mode==='area'){for(const s of ['stable','rework']){const as=D.areas.filter(a=>a.status===s);if(!as.length)continue;h+=`<div class="grp">${s==='stable'?'Areas':'Being reworked'}</div>`;
   for(const a of as){const all=D.features.filter(f=>f.area===a.prefix),fs=all.filter(match);if(S.q&&!fs.length)continue;const op=S.open.has('a:'+a.prefix)||!!S.q;
-   h+=`<div class="row${S.sel==='a:'+a.prefix?' on':''}" data-sel="a:${a.prefix}" data-tog="a:${a.prefix}">${tw(op)}${ic(op?'folderOpen':'folder','style="color:var(--accent)"')}<span class="lbl"><b style="font-weight:550">${esc(a.name)}</b></span><span class="mini">${meter(all)}</span><span class="cnt">${all.filter(f=>cov(f)!=='no').length}/${all.length}</span></div>`;
+   h+=`<div class="row${S.sel==='a:'+a.prefix?' on':''}" data-sel="a:${a.prefix}" data-tog="a:${a.prefix}">${tw(op)}${ic(op?'folderOpen':'folder','style="color:var(--accent)"')}<span class="lbl"><b style="font-weight:550">${esc(a.name)}</b></span><span class="mini">${meter(all)}</span><span class="cnt frac">${all.filter(f=>cov(f)!=='no').length}/${all.length}</span></div>`;
    if(op)h+=`<div class="kids">${fs.map(featRow).join('')}</div>`}}}
  else if(S.mode==='scen'){h+='<div class="grp">Agent scenarios</div>';for(const [p,s] of Object.entries(D.scenarios)){const op=S.open.has('s:'+p)||!!S.q;
    h+=`<div class="row${S.sel==='s:'+p?' on':''}" data-sel="s:${esc(p)}" data-tog="s:${esc(p)}">${tw(op)}${ic('route','style="color:var(--accent)"')}<span class="lbl"><span class="k">${esc(s.id)}</span>${esc(s.title)}</span><span class="cnt">${s.cases.length}</span></div>`;
