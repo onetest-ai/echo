@@ -172,6 +172,10 @@ fn day() -> Vec<Value> {
     for m in crate::watch::agenda() {
         let Some(event) = m.id.clone().filter(|i| !i.is_empty()) else { continue };
         let hit = calls_today.iter().position(|(_, _, cm)| cm.as_ref().and_then(|c| c.id.as_deref()) == Some(event.as_str()));
+        // Only the meetings the user accepted (or organises) — unless they recorded it, or set it to record.
+        if !m.accepted() && hit.is_none() && !scheduled.contains(&event) {
+            continue;
+        }
         if let Some(i) = hit {
             used[i] = true;
         }
@@ -215,7 +219,7 @@ fn work(tasks: &Value) -> Value {
             .map(|t| {
                 json!({
                     "id": t["id"], "title": t["title"], "due": t["due"], "late": t["late"], "owner": t["owner"], "project": t["project"],
-                    "waiting_for": t["waiting_for"], "story": t["story"]["title"],
+                    "waiting_for": t["waiting_for"], "story": t["story"]["title"], "mode": t["mode"],
                     "link": format!("echo://task/{}/{}", t["project"].as_str().unwrap_or(""), t["id"].as_str().unwrap_or("")),
                 })
             })

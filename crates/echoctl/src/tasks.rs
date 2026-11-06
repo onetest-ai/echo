@@ -24,6 +24,11 @@ const QUIET_DAYS: i64 = 5;
 /// Or one due within this many days.
 const DUE_SOON: i64 = 3;
 
+/// Whose a task is: the client's owner first when the client owes it, else ours (the Tasks piles, What moved).
+pub fn owner_of(n: &Node) -> Option<&String> {
+    if n.client_owed { n.client_owner.as_ref().or(n.internal_owner.as_ref()) } else { n.internal_owner.as_ref().or(n.client_owner.as_ref()) }
+}
+
 /// Who "I" am in a ledger: the transcripts' "Me", and the user's name, first name and email.
 pub struct Me(Vec<String>);
 
@@ -59,10 +64,10 @@ fn days(from: &str, to: NaiveDate) -> Option<i64> {
 
 /// One open task as a card: where it is, who has it, when it's due, what it waits for, how long
 /// nobody said a word about it.
-fn card(p: &Project, n: &Node, nodes: &BTreeMap<String, Node>, ev: &BTreeMap<String, Value>, today: NaiveDate, me: &Me) -> (String, Value) {
+#[allow(clippy::too_many_arguments)]
+fn card(p: &Project, n: &Node, nodes: &BTreeMap<String, Node>, ev: &BTreeMap<String, Value>, today: NaiveDate, me: &Me, modes: &serde_json::Map<String, Value>) -> (String, Value) {
     let story = n.parent.as_ref().and_then(|s| nodes.get(s)).filter(|s| s.kind == "story");
-    // The client's owner first when the client owes it.
-    let owner = if n.client_owed { n.client_owner.clone().or(n.internal_owner.clone()) } else { n.internal_owner.clone().or(n.client_owner.clone()) };
+    let owner = owner_of(n).cloned();
     let client = owner.is_some() && owner == n.client_owner && n.internal_owner.as_deref() != owner.as_deref();
     let last = n.history.iter().rev().find(|h| h["date"].is_string());
     let quiet = last.and_then(|h| days(h["date"].as_str()?, today));
@@ -94,6 +99,8 @@ fn card(p: &Project, n: &Node, nodes: &BTreeMap<String, Node>, ev: &BTreeMap<Str
             "quiet": quiet, "last": last_call.map(|e| json!({"date": e["date"], "call": e["call"], "title": e["title"]})),
             // One piece of work raised in several threads (#20): this card stands for all of them.
             "also_in": n.also_in,
+            // Who does it: the user's choice, else Echo's guess (`taskmodes`), else null.
+            "mode": if pile == "mine" { crate::taskmodes::of(modes, &p.id, n) } else { Value::Null },
         }),
     )
 }
@@ -148,6 +155,7 @@ fn across_with(list: &[Project], me: &Me, meetings: &[MeetingContext], today: Na
     let mut errors = vec![];
     // Asks: per person, the items to raise, with the project they're in.
     let mut asks: Vec<(String, Option<String>, Value)> = vec![];
+    let modes = crate::taskmodes::guesses();
     for p in list.iter().filter(|p| !p.stage.closed()) {
         let t = match ledger::fold_linked(&p.id) {
             Ok(t) => t,
@@ -158,7 +166,7 @@ fn across_with(list: &[Project], me: &Me, meetings: &[MeetingContext], today: Na
         };
         // A mirror (#20) is shown once, as its master's card in the master's thread.
         let tasks: Vec<&Node> = t.nodes.values().filter(|n| n.kind == "task" && open(&n.state) && n.merged_into.is_none() && n.mirror_of.as_ref().is_none_or(|m| m["closed_thread"] == true)).collect();
-        let mut cards: BTreeMap<String, (String, Value)> = tasks.iter().map(|n| (n.id.clone(), card(p, n, &t.nodes, &t.evidence, today, me))).collect();
+        let mut cards: BTreeMap<String, (String, Value)> = tasks.iter().map(|n| (n.id.clone(), card(p, n, &t.nodes, &t.evidence, today, me, &modes))).collect();
         // Waiting for others = what stops me doing what I owe: the open work my tasks wait on (not
         // mine; it leaves Others / Nobody named for here) and the people they wait on (a card each).
         let mut waits: Vec<Value> = vec![];

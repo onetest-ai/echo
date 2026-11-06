@@ -20,17 +20,16 @@ test('Today comes first, then Calls (list beside the call) and Calendar (one col
 })
 
 test('a call that records shows its Transcript first, with a dot; chat and screens only when there are any', () => {
-  assert.deepEqual(ids(callTabs({ recording: true, chat: 0, frames: 0, actions: null })), ['transcript', 'minutes', 'actions'])
-  assert.equal(callTabs({ recording: true, chat: 0, frames: 0, actions: null })[0][3], true)
-  assert.deepEqual(callTabs({ recording: false, chat: 3, frames: 2, actions: 4 }), [
+  assert.deepEqual(ids(callTabs({ recording: true, chat: 0, frames: 0 })), ['transcript', 'minutes'])
+  assert.equal(callTabs({ recording: true, chat: 0, frames: 0 })[0][3], true)
+  assert.deepEqual(callTabs({ recording: false, chat: 3, frames: 2 }), [
     ['minutes', 'Minutes', ''], ['transcript', 'Transcript', ''],
-    ['chat', 'Chat', 3], ['screens', 'Screens', 2], ['actions', 'Actions', 4],
+    ['chat', 'Chat', 3], ['screens', 'Screens', 2],
   ])
 })
 
-test('Actions shows no count before the minutes, and 0 for a call without any', () => {
-  assert.equal(callTabs({ live: false, chat: 0, frames: 0, actions: null }).at(-1)[2], '')
-  assert.equal(callTabs({ live: false, chat: 0, frames: 0, actions: 0 }).at(-1)[2], 0)
+test('no Actions tab: the minutes list the action items, What moved beside them the tasks', () => {
+  assert.ok(!ids(callTabs({ recording: false, chat: 0, frames: 0 })).includes('actions'))
 })
 
 test('a calendar event offers what the card offered before', () => {

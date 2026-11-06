@@ -162,6 +162,25 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   for both, skill included, so that tasks can later go to Yolo by themselves. The user chose full autonomy knowingly:
   the task's own words still reach the run as data by its link, never typed as an instruction.
 - Only the panel's session: Echo has no way into the user's own Claude Code sessions elsewhere.
+- Who does a task (`taskmodes.rs`, from Adam Auerbach's Meeting Notebook, echo-plugins#1): the user's own open tasks
+  are Claude can (`prompt`: what to hand back, a `skill`) or By hand (`how`). The user's choice is on the task in its
+  ledger (`mode`, `how`, `prompt`, `skill`, pinned); until then Echo's guess (`<home>/.echo/task-modes.json`, dashed in
+  the window), one model call per thread on its AI profile, once a day a task (the prep scheduler; `echoctl
+  classify`). On cards (Today's My work, What moved, Tasks) an icon only — Claude Code's mark or a hand, Echo's guess
+  faded, its how on hover; Tasks has a filter (Anyone / Claude can do / By hand). The switch and the how (or what
+  Claude hands back), editable, are in the task's details (`modeRows`), field by field the user's over the guess. A
+  card on Today opens the task's details in the right panel, Today staying put (`data-tk="open"`, Enter too; its ✦
+  and Close are their own). A Claude one's ✦ / Send to Claude opens the Claude dialog with its prompt as the note and its skill chosen — Work on
+  it / Yolo, no third button (the user: one Run with Claude mechanism). Claude Code's own mark (thesvg.org, mono)
+  stands for Claude everywhere: the panel, Ask Claude, Send to Claude, Work on it, the status bar.
+- A task's read (`echoctl read echo://task/…`, where Work on it and Yolo start) says who does it and gives the context:
+  the thread's last 3 calls with minutes, and the last 3 of the meeting series it was raised in (the invite's subject,
+  as "Since last time" goes) that the thread's don't already list — links only; Claude opens what it needs.
+- What moved (`callChanges`): what a call changed in its threads, beside the minutes as the live notes are beside the
+  transcript (its own scroll; under 1000 px it is hidden), the user's own open tasks first with who does each. It was
+  above the Actions tab's items; action items are everything said, the user's tasks are what is theirs to do. The
+  Actions tab is gone (Nov 2026): the minutes list the action items with their moments, What moved has the tasks;
+  `actions.json` stays (the minutes, Today's counts, thread sync and `echoctl actions` use it).
 - Not yet: action modes from the minutes (claude: the skill and prompt ready on the action; manual: how to do it).
 
 ### Settings → Templates (`templatesSettings`, `/api/templates`, `calls::templates_view`)
@@ -422,11 +441,15 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   the morning's, one added later; ≥ 5 min before the start; `prep::start_scheduler`): `<home>/prep/<id>/prep.json`,
   `id` = 16 hex of sha256(event id). Nothing in a call folder: a call folder is still made only by a recording.
 - Gathered without a model: **Expected from you** first (the user's open tasks in these threads, late first; what
-  they still owe from last time; mail since then with them in To — one line each, or "Nothing waits on you"), Last time (the previous meeting of the subject with minutes — highlights, open actions,
-  its link), Open with these people (the threads' open tasks owned by someone in the invite or the user, late first;
+  they still owe from last time; mail since then with them in To — one line each, or "Nothing waits on you"), Last time (the previous meeting of the subject with minutes — highlights, Still to do: the
+  tasks that very call raised or moved, still open (`ledger::open_tasks_of_call`; its action items were never ticked,
+  the tasks they became are), its link), Open with these people (the threads' open tasks owned by someone in the invite or the user, late first;
   risks with no response; questions not answered — each `echo://task`), New since then (the threads' mail and chat
   evidence after the last meeting: titles and senders, never the text), Who's coming (the invite less the user, with
   role / stance from People, calls together, new; the window shows ten).
+- Expected from you and Open with these people pick the threads' tasks by people, not by the meeting's sub-topic: a
+  thread whose meetings run on several sub-topics brings all of them. Kept so on purpose for now (Nov 2026, the
+  user: see how useful it is); narrowing them to the tasks raised in this series' calls is the change if it isn't.
 - A meeting in no thread has no sources of its own: New since then comes from Microsoft 365 instead — mail and Teams
   with its people since the last meeting, else 14 days (`microsoft365`, the user's own sign-in; one line a conversation
   or chat, subject or "Teams message from …" and its link; a chat's first words shown, never sent to the model). A

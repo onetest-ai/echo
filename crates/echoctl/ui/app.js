@@ -46,7 +46,7 @@ const S = {
   folderProfile: null, // the AI profile picked for Claude · Echo folder (null: the default)
   sessions: null, // Claude conversations that can be resumed (`<profile>:folder`, `<profile>:<stamp>`)
   settings: null, // Settings' snapshot (`api/settings`)
-  tk: { data: null, project: '', sort: 'due', more: {} }, // Tasks: across projects
+  tk: { data: null, project: '', sort: 'due', mode: '', more: {} }, // Tasks: across projects
   br: { tab: 'sources', scope: '', data: null, graph: null, node: null, nodeData: null, edit: null }, // the Brain
   pj: { client: null, adding: null, pfEdit: null, menu: false, work: null, node: null, openOnly: true, view: 'tree', kind: '', owner: '', editField: null, found: false, foundData: null, data: null, sel: null, tab: 'brief', detail: null, briefEdit: null, showClosed: false, confirmDelete: false, newClient: false, picker: false }, // Projects
   setSection: 'general', // Settings' open section
@@ -339,16 +339,15 @@ const ACTIVITIES = [
   { id: 'brain', label: 'Knowledge', layout: 'single', when: () => brainOn() || knowledgeTabs().length > 0, icon: ICON('<path d="M9 4.5a3 3 0 0 0-3 3 3 3 0 0 0-2 5.2A3.2 3.2 0 0 0 7.5 18 2.5 2.5 0 0 0 12 19V6a2 2 0 0 0-3-1.5z"/><path d="M15 4.5a3 3 0 0 1 3 3 3 3 0 0 1 2 5.2A3.2 3.2 0 0 1 16.5 18 2.5 2.5 0 0 1 12 19"/>') },
   { id: 'settings', label: 'Settings', layout: 'single', bottom: true, icon: ICON('<circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/>') },
 ]
-/** A call's tabs, in order. `x` = what the call has: `{recording, chat, frames, actions}` (counts, or
- *  null for actions not written yet). One Transcript tab: live while the call records (with its live
- *  notes beside it), the final transcript after — and the live notes stay beside it. */
+/** A call's tabs, in order. `x` = what the call has: `{recording, chat, frames}` (counts). One Transcript tab: live
+ *  while the call records (with its live notes beside it), the final transcript after — and the live notes stay
+ *  beside it. No Actions tab: the minutes list the action items, What moved beside them the user's tasks. */
 const CALL_TABS = [
   { id: 'prep', label: 'Prep', when: (x) => !!x.prep },
   { id: 'minutes', label: 'Minutes' },
   { id: 'transcript', label: 'Transcript' },
   { id: 'chat', label: 'Chat', when: (x) => x.chat > 0, count: (x) => x.chat },
   { id: 'screens', label: 'Screens', when: (x) => x.frames > 0, count: (x) => x.frames },
-  { id: 'actions', label: 'Actions', count: (x) => x.actions ?? '' },
 ]
 /** The tabs a call shows: `[id, label, count ('' = none)]`; while it records, Transcript comes first
  *  with a fourth element, `true` (its recording dot). */
@@ -839,7 +838,7 @@ function statusbar() {
   // The terminal panel: a toggle here, where VS Code keeps it.
   parts.push(`<button class="sb-btn" data-pal-open title="Actions (${MAC ? '⌘K' : 'Ctrl+K'})">Actions ${MAC ? '⌘K' : 'Ctrl+K'}</button>`)
   const live = [...Terms.entries()].some(([k, e]) => k.startsWith('claude:') && e.id != null && !e.exited)
-  parts.push(`<button class="sb-btn" data-cmd="claude-panel" title="Claude (${MOD}\`)">${live ? '● ' : ''}Claude</button>`)
+  parts.push(`<button class="sb-btn" data-cmd="claude-panel" title="Claude (${MOD}\`)">${live ? '● ' : ''}<span class="sb-claude">${ICON(CLAUDE_MARK)}</span>Claude</button>`)
   return `${soon}<span class="grow"></span>${parts.join('')}`
 }
 
@@ -937,7 +936,17 @@ function list() {
   }
   // Today's meetings still to come, each a call-to-be with its prep.
   const ups = !q && S.up && S.up.meetings ? S.up.meetings : []
-  const upRows = ups.length ? `<div class="group">Coming up today</div>` + ups.map((u) => {
+  // Folded by default (a full day is a long list): a head like a call's row — how many, and the next one.
+  // One going on now first ("Now"), else the next to start.
+  const nowMs = Date.now(), nx = ups.find((u) => u.start && new Date(u.start) <= nowMs) || ups[0]
+  const going = nx && nx.start && new Date(nx.start) <= nowMs, nxAt = nx && nx.start ? hm(new Date(nx.start)) : ''
+  const upHead = `<button class="row up-fold" data-up-fold aria-expanded="${!!S.upOpen}" title="${S.upOpen ? 'Fold' : 'Show them'}">
+      <span class="si up" aria-hidden="true">${ICON('<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>').replace('width="20" height="20"', 'width="14" height="14"')}</span>
+      <span class="t">Coming up today<span class="up-n">${ups.length}</span></span>
+      <span class="m">${nx ? `<span>${going ? 'Now' : `Next ${esc(nxAt)}`}</span><span>${esc(nx.subject || 'A meeting')}</span>` : ''}</span>
+      <span class="up-chev" aria-hidden="true">${ICON('<path d="M9 6l6 6-6 6"/>')}</span>
+    </button>`
+  const upRows = ups.length ? upHead + (S.upOpen ? ups : []).map((u) => {
     // As a call's row: only its icon differs (a clock: still to come).
     const st = u.start ? new Date(u.start) : null, en = u.end ? new Date(u.end) : null
     const mins = st && en ? Math.round((en - st) / 60000) : 0
@@ -985,8 +994,7 @@ function doc() {
   const segs = Array.isArray(c.segments) ? c.segments : []
   const chat = Array.isArray(c.chat) ? c.chat : []
   const frames = Array.isArray(c.frames) ? c.frames : []
-  const actions = Array.isArray(c.actions) ? c.actions : null
-  const tabs = callTabs({ recording: c.status === 'recording', chat: chat.length, frames: frames.length, actions: actions ? actions.length : null, prep: !!c.prep })
+  const tabs = callTabs({ recording: c.status === 'recording', chat: chat.length, frames: frames.length, prep: !!c.prep })
   // While a call records (or is transcribed), open it on its Transcript once; once its minutes are
   // written, on Minutes once. The user's own choice stays. (`live` was the Transcript's live twin.)
   if (S.tab === 'live') S.tab = 'transcript'
@@ -1003,9 +1011,9 @@ function doc() {
         <div class="doc-actions">${callMenu(c)}</div>
       </div>
       <div class="tabs" role="tablist">${tabs.map(([id, label, n, rec]) => `<button class="tab" role="tab" data-tab="${id}" aria-selected="${S.tab === id}">${rec ? '<span class="tab-rec" aria-label="Recording"></span>' : ''}${label}${n !== '' ? `<span class="n">${n}</span>` : ''}</button>`).join('')}</div>${notices()}`
-  const body = tabBody(c, segs, chat, frames, actions)
+  const body = tabBody(c, segs, chat, frames)
   const confirm = S.confirmDelete ? confirmBox(c) : ''
-  return typeof body === 'string' ? { head, pane: confirm + body } : { head, bar: confirm + body.bar, frame: body.frame }
+  return typeof body === 'string' ? { head, pane: confirm + body } : { head, bar: confirm + body.bar, frame: body.frame, side: body.side }
 }
 
 /** Today (the first activity; the window opens on it): cards delivered to Echo (a routine's morning brief — Got it
@@ -1076,9 +1084,10 @@ function todayView() {
     const attrs = `data-project="${esc(t.project)}" data-title="${esc(t.title)}" data-node="${esc(t.id)}"`
     const close = `<button class="icon-btn td-ico" data-today-close="${esc(t.id)}" ${attrs} title="Close this task…" aria-label="Close “${esc(t.title)}”…">${ICON('<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/>')}</button>`
     // Claude: one dialog — work on it in the panel, or Yolo (Claude does it on its own), with a skill.
-    const work = `<button class="icon-btn td-ico" data-claude-task="${esc(t.id)}" data-today="1" ${attrs} title="Claude — work on this task, or Yolo" aria-label="Claude: “${esc(t.title)}”…">${ICON('<path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/><path d="M18.5 15.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>')}</button>`
+    const work = `<button class="icon-btn td-ico" data-claude-task="${esc(t.id)}" data-today="1"${modeData(t)} ${attrs} title="Claude — work on this task, or Yolo" aria-label="Claude: “${esc(t.title)}”…">${ICON('<path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/><path d="M18.5 15.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>')}</button>`
     // The date's icon before the title's words.
-    return `<div class="td-task"><span class="td-task-t">${dueChip(t)}<a href="${esc(t.link)}">${esc(t.title)}</a></span><span class="td-task-m">${pj ? projIcon(pj, 12) : ''}${where}<span class="td-icos">${work}${close}</span></span></div>`
+    // The card opens the task's details in the right panel, Today staying put (its icons do their own thing).
+    return `<div class="td-task${S.pj.inline === 'today' && S.pj.node === t.id && S.pj.sel === t.project ? ' on' : ''}" data-tk="open" data-project="${esc(t.project)}" data-node="${esc(t.id)}" role="button" tabindex="0" title="Open its details"><span class="td-task-t">${dueChip(t)}<span class="td-task-title">${esc(t.title)}</span></span><span class="td-task-m">${pj ? projIcon(pj, 12) : ''}${where}<span class="td-icos">${kind === 'I owe' ? modeIcon(t.mode) : ''}${work}${close}</span></span></div>`
   }
   const w = d.work || {}
   // One list by date: late first (the oldest first), then by due date; whose it is stays on each card.
@@ -1194,10 +1203,11 @@ function sendClaudeDialog() {
     : `<input id="sc-q" class="sc-q" placeholder="Just the task — or type to find a skill (${skills.length})" value="${esc(c.q || '')}" autocomplete="off" aria-label="Skill">
        ${c.open ? `<div class="sc-sugg" role="listbox">${found.map((x) => `<button class="sc-opt" role="option" data-sc-skill="${esc(x.id)}" title="${esc(x.description)}"><b>${esc(tplName(x.id))}${x.id === best ? ' <em class="sc-best">fits best</em>' : ''}</b><span>${esc(x.description)}</span></button>`).join('') || '<div class="set-sub" style="padding:6px 10px">No skill has that in its name or description.</div>'}</div>` : ''}`
   return `<div class="td-modal" data-sc-off="1"><div class="td-dialog sc-dialog" role="dialog" aria-modal="true" aria-labelledby="sc-h">
-    <div class="sc-head"><h3 id="sc-h">Claude</h3><div class="sc-task">${thread ? `${projIcon(thread, 14)}<span class="set-sub">${esc(thread.name)}</span> · ` : ''}<span>${esc(c.title)}</span></div></div>
+    <div class="sc-head"><h3 id="sc-h"><span class="md-ico claude">${ICON(CLAUDE_MARK)}</span>Claude</h3><div class="sc-task">${thread ? `${projIcon(thread, 14)}<span class="set-sub">${esc(thread.name)}</span> · ` : ''}<span>${esc(c.title)}</span></div></div>
     <div class="sc-pick">${picker}</div>
+    ${c.hint ? `<div class="sc-hint set-sub" title="Echo's guess — Claude reads it with the task">Echo suggests: ${esc(c.hint)}</div>` : ''}
     <textarea id="sc-words" class="sc-words" rows="2" placeholder="Anything to add — optional (Keep it short; Dana is away until the 12th)">${esc(c.words || '')}</textarea>
-    <div class="sc-foot"><button class="btn primary" data-sc-send title="In the Claude panel, with you">${ICON('<path d="M12 3.5v17M3.5 12h17M6 6l12 12M18 6L6 18"/>')}Work on it</button>${yolo}<button class="btn ghost" data-sc-off="1">Cancel</button><span class="grow"></span><span class="set-sub">${c.today ? 'Yolo: Claude does it on its own.' : ''}</span></div></div></div>`
+    <div class="sc-foot"><button class="btn primary" data-sc-send title="In the Claude panel, with you">${ICON(CLAUDE_MARK)}Work on it</button>${yolo}<button class="btn ghost" data-sc-off="1">Cancel</button><span class="grow"></span><span class="set-sub">${c.today ? 'Yolo: Claude does it on its own.' : ''}</span></div></div></div>`
 }
 /** Type a line into the Claude panel's session: started (or resumed) first when it isn't running, and typed once it
  *  has drawn and gone quiet — earlier keys would land in its start-up. */
@@ -1290,7 +1300,7 @@ function prepView(p, again) {
   const day = (d) => d ? new Date(d.length > 10 ? d : d + 'T12:00').toLocaleDateString([], { day: 'numeric', month: 'short' }) : ''
   const sec = (title, items) => items ? `<section class="pr-sec"><h3>${title}</h3>${items}</section>` : ''
   const l = p.last_time
-  const last = l ? sec(`Last time · <a href="${esc(l.link)}">${esc(day(l.date))}</a>`, `<ul>${(l.highlights || []).map((h) => `<li>${esc(h)}</li>`).join('')}${(l.open_actions || []).map((a) => `<li><b>Still to do</b> ${esc(a.task)}${a.owner ? ` · ${esc(a.owner)}` : ''}</li>`).join('')}</ul>`) : ''
+  const last = l ? sec(`Last time · <a href="${esc(l.link)}">${esc(day(l.date))}</a>`, `<ul>${(l.highlights || []).map((h) => `<li>${esc(h)}</li>`).join('')}${(l.open_actions || []).map((a) => `<li><b>Still to do</b> ${a.link ? `<a href="${esc(a.link)}">${esc(a.task)}</a>` : esc(a.task)}${a.owner ? ` · ${esc(a.owner)}` : ''}</li>`).join('')}</ul>`) : ''
   const KIND = { task: 'Task', risk: 'Risk', question: 'Question' }
   // What waits on the user: their tasks, what they still owe from last time, mail to them — or that nothing does.
   const exp = (p.expected || []).map((x) => {
@@ -1421,7 +1431,7 @@ function turnsHtml(segs, q, jump, marks = []) {
   }).join('')}</div>`
 }
 
-function tabBody(c, segs, chat, frames, actions) {
+function tabBody(c, segs, chat, frames) {
   if (S.tab === 'prep') return prepView(c.prep, false)
   if (S.tab === 'transcript') {
     // Live notes kept (or being kept): the transcript with them beside it, as during the call.
@@ -1439,34 +1449,12 @@ function tabBody(c, segs, chat, frames, actions) {
   if (S.tab === 'screens') {
     return `<div class="frames">${frames.map((f) => `<button class="frame" data-frame="${esc(f.url)}"><img src="${esc(f.url)}" alt="Shared screen at ${clock(f.t || 0)}" loading="lazy"><span>${clock(f.t || 0)}</span></button>`).join('')}</div>`
   }
-  if (S.tab === 'actions') {
-    if (!actions && c.actions_error) return minutesHint(c, "The action items can't be read", `${c.actions_error} — the next minutes replace them (the file is kept beside them).`)
-    if (!actions) return minutesHint(c, 'No action items yet', 'Action items come with the minutes.')
-    const changed = callChanges(c)
-    if (!actions.length) return `${changed}<p style="color:var(--text-3)">No action items in this call.</p>`
-    const links = c.action_tasks || {}
-    return `${changed}${changed ? '<div class="cc-h">Action items</div>' : ''}<div class="todo">${actions.map((a) => {
-      const k = links[a.id], kp = k && projById(k.project)
-      const done = a.status === 'done'
-      // By its id, with the status wanted: a list rewritten meanwhile can't make it another item.
-      return `<div class="item${done ? ' done' : ''}">
-        <button class="check" role="checkbox" aria-checked="${done}" data-toggle="${esc(a.id || '')}" data-status="${done ? 'todo' : 'done'}" aria-label="${done ? 'Mark to do' : 'Mark done'}"${a.id ? '' : ' disabled'}></button>
-        <div><div class="task">${esc(a.task)}</div><div class="meta">
-          <span class="owner${a.owner === 'Me' ? ' me' : ''}">${esc(a.owner || 'Unassigned')}</span>
-          ${a.due ? `<span class="due">Due ${esc(a.due)}</span>` : ''}
-          ${a.confidence === 'low' ? '<span class="uncertain">Uncertain</span>' : ''}
-          ${k ? `<button class="cc-link" data-tk="open" data-project="${esc(k.project)}" data-node="${esc(k.id)}" title="Tracked as ${esc(k.title)}">${k.state === 'done' ? '✓ ' : ''}${kp ? projIcon(kp, 12) : ''}${esc(k.id)}</button>` : ''}
-        </div></div>
-        ${typeof a.t === 'number' ? `<button class="btn ghost" data-at="${a.t}">${clock(a.t)}</button>` : '<span></span>'}
-      </div>`
-    }).join('')}</div>`
-  }
   return minutesTab(c)
 }
 
 /** What this call changed in its threads' work (`ledger::call_changes`): one line per change, in
- *  the order said — what happened, to which item, the words, the verifier's mark. A task an action
- *  item became shows on that item instead (`action_tasks`); changes the verifier called wrong, none. */
+ *  the order said — what happened, to which item, the words, the verifier's mark; changes the verifier called
+ *  wrong, none. */
 const CC_KIND = { story: 'New story', task: 'New task', decision: 'Decision', risk: 'Risk', question: 'Question' }
 function ccWhat(x) {
   const n = x.node
@@ -1483,11 +1471,44 @@ function ccWhat(x) {
   if (x.op === 'answer') return [n.kind === 'risk' ? 'Response' : 'Answered', 'done']
   return [x.op, 'move']
 }
+const TASK_DONE = new Set(['done', 'cancelled', 'merged', 'deleted'])
+// Claude Code's own mark (thesvg.org/icon/claude-code, mono), filled — the other icons are strokes.
+const CLAUDE_MARK = '<path fill="currentColor" stroke="none" fill-rule="evenodd" d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z"/>'
+const HAND_MARK = '<path d="M8 13V6.5a1.5 1.5 0 0 1 3 0V12M11 11V5a1.5 1.5 0 0 1 3 0v6M14 11V6.5a1.5 1.5 0 0 1 3 0V14c0 3.5-2.5 6-6 6h-.5a6 6 0 0 1-4.6-2.2L4.5 15.6a1.5 1.5 0 0 1 2.3-1.9L8 15"/>'
+/** Who does one of the user's tasks (`taskmodes`), as an icon: Claude's mark or a hand — Echo's guess faded. Its
+ *  how, and the switch, are in the task's details (`modeRows`). */
+function modeIcon(m) {
+  if (!m || !m.mode) return ''
+  const claude = m.mode === 'claude', guess = m.by === 'guess'
+  const tip = `${claude ? 'Claude can do it' : 'You do it by hand'}${guess ? " — Echo's guess" : ''}${!claude && m.how ? `: ${m.how}` : ''}`
+  return `<span class="md-ico${claude ? ' claude' : ''}${guess ? ' guess' : ''}" title="${esc(tip)}" aria-label="${esc(tip)}">${ICON(claude ? CLAUDE_MARK : HAND_MARK)}</span>`
+}
+/** A Claude one's ✦ carries its skill into the Claude dialog, and its prompt: the user's own as their note; Echo's
+ *  guess — model output from others' words — only as a hint beside it, never typed as theirs (Claude reads it with
+ *  the task, as data). */
+const modeData = (n) => {
+  const m = n.mode
+  if (!m || m.mode !== 'claude') return ''
+  const p = m.prompt || ''
+  return ` data-skill="${esc(m.skill || '')}"${m.prompt_by === 'you' ? ` data-prompt="${esc(p)}"` : ` data-hint="${esc(p)}"`}`
+}
+/** The task's details: who does it (a switch; a click keeps the user's choice on the task), and its how — or what
+ *  Claude hands back — written by Echo's guess or by hand (`edit`: the details' own field editor). */
+function modeRows(project, n, val) {
+  const m = n.who_does || {}, guess = m.by === 'guess'
+  const seg = (k, mark, label) => `<button class="md-seg${m.mode === k ? ' on' : ''}${m.mode === k && guess ? ' guess' : ''}" data-mode-set="${k}" data-project="${esc(project)}" data-node="${esc(n.id)}" aria-pressed="${m.mode === k}">${ICON(mark)}${label}</button>`
+  const rows = [['Who does it', `<span class="md-segs" role="group" aria-label="Who does it">${seg('claude', CLAUDE_MARK, 'Claude can')}${seg('manual', HAND_MARK, 'By hand')}</span>${guess ? ' <span class="set-sub">Echo\'s guess</span>' : ''}`]]
+  if (m.mode === 'manual') rows.push(['How', val('how', m.how, 'not said', `<input class="wp-in" data-ledger-set="how" value="${esc(m.how || '')}" maxlength="200" aria-label="How" autofocus>`)])
+  if (m.mode === 'claude') rows.push(['Claude hands back', val('prompt', m.prompt, 'not said', `<textarea class="wp-in" data-ledger-set="prompt" rows="3" maxlength="600" aria-label="What Claude hands back" autofocus>${esc(m.prompt || '')}</textarea>`)])
+  return rows
+}
+/** What the call changed in its threads, beside the minutes: each thread's changes, the user's own open tasks first
+ *  with who does each (`modeIcon`; a click opens the task's details). */
 function callChanges(c) {
   const blocks = (c.changes || []).map((g) => {
     const p = projById(g.project) || { id: g.project, name: g.project }
-    const linked = new Set(Object.values(c.action_tasks || {}).filter((k) => k.project === g.project).map((k) => k.id))
-    const rows = g.changes.filter((x) => x.verdict !== 'wrong' && !(x.op === 'create' && linked.has(x.node.id)))
+    const rows = g.changes.filter((x) => x.verdict !== 'wrong')
+      .sort((a, b) => (b.node.mine && !TASK_DONE.has(b.node.state) ? 1 : 0) - (a.node.mine && !TASK_DONE.has(a.node.state) ? 1 : 0))
     const head = `<div class="cc-th">${projIcon(p, 14)}<b>${esc(p.name)}</b>`
     if (!g.read) {
       // Not read yet: being read now, due at a time (15 min after the call, then the next look), or
@@ -1500,23 +1521,23 @@ function callChanges(c) {
       const canSync = !g.syncing && (g.queued || at)
       return `${head}<span class="set-sub">${why}</span><span class="grow"></span>${canSync ? `<button class="link-btn" data-cc-sync="${esc(g.project)}">Sync now</button>` : ''}</div>`
     }
-    const hidden = linked.size ? ` · ${linked.size} on the action items below` : ''
-    if (!rows.length) return `${head}<span class="set-sub">nothing changed${hidden}</span></div>`
-    return `${head}<span class="set-sub">${rows.length} change${rows.length === 1 ? '' : 's'}${hidden}</span></div><div class="cc-list">${rows.map((x) => {
+    if (!rows.length) return `${head}<span class="set-sub">nothing changed</span></div>`
+    return `${head}<span class="set-sub">${rows.length} change${rows.length === 1 ? '' : 's'}</span></div><div class="cc-list">${rows.map((x) => {
       const [what, cls] = ccWhat(x)
       const mark = x.applied === false && x.verdict === 'supports' ? '<span class="wk-v weak" title="You set this yourself; the call\'s words are kept in its history">kept yours</span>'
         : x.verdict === 'weak' ? '<span class="wk-v weak">weak · to review</span>'
         : x.op !== 'create' && x.verdict == null && x.applied === false ? '<span class="wk-v">to check</span>' : ''
       const ts = x.ts ? hms(x.ts) : null
       return `<div class="cc-row"><span class="cc-what ${esc(cls)}">${esc(what)}</span>
-        <div class="cc-main"><button class="cc-node" data-tk="open" data-project="${esc(g.project)}" data-node="${esc(x.node.id)}"><span class="wk-id">${esc(x.node.id)}</span> ${esc(x.node.title)}</button>
+        <div class="cc-main"><button class="cc-node" data-tk="open" data-project="${esc(g.project)}" data-node="${esc(x.node.id)}"><span class="wk-id">${esc(x.node.id)}</span>${x.node.mine && !TASK_DONE.has(x.node.state) ? ` ${modeIcon(x.node.mode)}` : ''} ${esc(x.node.title)}</button>
         ${x.op === 'link' ? `<div class="cc-dep">for <button class="cc-node inline" data-tk="open" data-project="${esc(g.project)}" data-node="${esc(x.depends_on)}"><span class="wk-id">${esc(x.depends_on)}</span> ${esc(x.depends_on_title || '')}</button></div>`
           : x.op === 'waiting' && x.what ? `<div class="cc-dep">on ${esc(x.who || 'someone')} — ${esc(x.what)}</div>` : ''}
-        ${x.quote ? `<div class="cc-q">“${esc(x.quote)}”${x.speaker ? ` <span>— ${esc(x.speaker)}</span>` : ''}</div>` : ''}</div>
+        ${x.quote ? `<div class="cc-q">“${esc(x.quote)}”${x.speaker ? ` <span>— ${esc(x.speaker)}</span>` : ''}</div>` : ''}
+</div>
         ${mark}${ts != null ? `<button class="btn ghost" data-at="${ts}">${clock(ts)}</button>` : '<span></span>'}</div>`
     }).join('')}</div>`
   })
-  return blocks.length ? `<section class="cc"><div class="cc-h">What this call changed</div>${blocks.join('')}</section>` : ''
+  return blocks.length ? `<section class="cc"><div class="cc-h">What moved</div>${blocks.join('')}</section>` : ''
 }
 const hms = (s) => String(s).split(':').reduce((a, x) => a * 60 + Number(x), 0)
 
@@ -2076,9 +2097,7 @@ function claudeFolderView() {
   const saved = S.sessions && S.sessions.has(`${S.folderProfile || a.default || 'system'}:folder`)
   return other + termView('claude:folder', 'claude-folder', saved ? 'Resume Claude' : 'Start Claude', intro, { profile: S.folderProfile || a.default || '' })
 }
-// Claude's sparkle on a folder (the Echo folder).
-const SPARK = (x, y, r) => `<path d="M${x} ${y - r}l${r * 0.3} ${r * 0.7} ${r * 0.7} ${r * 0.3}-${r * 0.7} ${r * 0.3}-${r * 0.3} ${r * 0.7}-${r * 0.3}-${r * 0.7}-${r * 0.7}-${r * 0.3} ${r * 0.7}-${r * 0.3}z" fill="currentColor" stroke="none"/>`
-PANEL_VIEWS.push({ id: 'claude-folder', label: 'Claude', icon: ICON(`<path d="M3 6h6l2 2h10v11H3z"/>${SPARK(12, 13.5, 3.6)}`), area: 'bottom', render: claudeFolderView })
+PANEL_VIEWS.push({ id: 'claude-folder', label: 'Claude', icon: ICON(CLAUDE_MARK), area: 'bottom', render: claudeFolderView })
 
 // ── Minutes: the page as it would be sent, in a sandboxed frame (`/minutes/<call>`) ───────────
 const SHOW_FILE = /Windows/.test(navigator.userAgent) ? 'Show in Explorer' : 'Show in Finder'
@@ -2088,7 +2107,7 @@ function minutesTab(c) {
   // The first minutes being written: their box until they are done (the file appears mid-run).
   if (!c.notes || (busy && !run.had_minutes)) return minutesHint(c, 'No minutes yet', 'The transcript is ready.')
   const frame = `<iframe id="minutes-frame" sandbox="allow-scripts" referrerpolicy="no-referrer" title="Minutes" src="minutes/${encodeURIComponent(c.name)}?v=${encodeURIComponent(c.minutes_rev || '')}${Theme.chosen() ? `&theme=${Theme.chosen()}` : ''}"></iframe>`
-  return { bar: minutesBar(c), frame }
+  return { bar: minutesBar(c), frame, side: callChanges(c) }
 }
 
 /** Above the page: an update going on or one that didn't finish, notes changed since, and the file. */
@@ -2302,8 +2321,8 @@ function prepCard(c) {
   const a = p.open_actions || [], h = p.highlights || []
   const mine = S.prepOpen[c.name]
   const open = (mine !== undefined ? mine : c.status === 'recording' && !(c.live.notes && c.live.notes.updated_at)) ? ' open' : ''
-  return `<details class="prep" data-prep="${esc(c.name)}"${open}><summary>Last time${p.date ? ` (${esc(p.date)})` : ''}: ${a.length} open action${a.length === 1 ? '' : 's'}, ${h.length} highlight${h.length === 1 ? '' : 's'}</summary>
-    ${a.length ? `<h3>Open actions</h3><ul>${a.map((x) => `<li>${x.owner ? `<span class="owner">${esc(x.owner)}</span> ` : ''}${esc(x.task)}${x.due ? ` <span class="muted">due ${esc(x.due)}</span>` : ''}</li>`).join('')}</ul>` : ''}
+  return `<details class="prep" data-prep="${esc(c.name)}"${open}><summary>Last time${p.date ? ` (${esc(p.date)})` : ''}: ${a.length} still to do, ${h.length} highlight${h.length === 1 ? '' : 's'}</summary>
+    ${a.length ? `<h3>Still to do</h3><ul>${a.map((x) => `<li>${x.owner ? `<span class="owner">${esc(x.owner)}</span> ` : ''}${x.link ? `<a href="${esc(x.link)}">${esc(x.task)}</a>` : esc(x.task)}${x.due ? ` <span class="muted">due ${esc(x.due)}</span>` : ''}</li>`).join('')}</ul>` : ''}
     ${h.length ? `<h3>Highlights</h3><ul>${h.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
   </details>`
 }
@@ -2348,7 +2367,7 @@ function liveTab(c, segs) {
           ${prepCard(c)}
         </div>
         <!-- Questions about the call go to its Claude session (the call's own profile, guarded). -->
-        <div class="live-ask"><button class="btn" data-cmd="ask-claude">Ask Claude about this call</button></div>
+        <div class="live-ask"><button class="btn" data-cmd="ask-claude">${ICON(CLAUDE_MARK)}Ask Claude about this call</button></div>
         <div class="live-answers">${liveAnswers(c)}</div>
       </section>
     </div>
@@ -2658,7 +2677,7 @@ function templatesSettings() {
   const sks = TPL.data.skills || []
   const kinds = `<div class="tp-kinds" role="tablist" aria-label="Kind of template">${tab('minutes', 'Minutes', list.length)}${tab('types', 'Meeting types', mts.length)}${tab('skills', 'Skills', sks.length)}</div>`
   const head = `<div class="tp-head"><h2>Templates</h2><p class="set-sub">The shapes Claude writes in. A call's minutes follow the template with a word of its title; the rest follow Default.</p>${kinds}</div>`
-  const listBox = `<div class="tp-list"><div class="tp-lh"><span class="set-sub">Minutes templates</span><span class="tp-lha"><button class="btn ghost" data-tpl-claude title="Claude makes or changes a template from what you tell it">${ICON('<path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/>')}Ask Claude</button><button class="btn" data-tpl-new>${ICON('<path d="M12 5v14M5 12h14"/>')}New template</button></span></div><div class="set-card">${rows}</div></div>`
+  const listBox = `<div class="tp-list"><div class="tp-lh"><span class="set-sub">Minutes templates</span><span class="tp-lha"><button class="btn ghost" data-tpl-claude title="Claude makes or changes a template from what you tell it">${ICON(CLAUDE_MARK)}Ask Claude</button><button class="btn" data-tpl-new>${ICON('<path d="M12 5v14M5 12h14"/>')}New template</button></span></div><div class="set-card">${rows}</div></div>`
   if (TPL.tab === 'types') return `${head}<div class="tp-grid">${typesList(mts)}${typeEditor()}</div>`
   if (TPL.tab === 'skills') return `${head}<div class="tp-grid">${skillsList(sks)}${skillEditor()}</div>`
   return `${head}<div class="tp-grid">${listBox}${templateEditor()}</div>`
@@ -2670,7 +2689,7 @@ function typesList(mts) {
     const [tag, cls] = TAG[t.kind] || TAG.builtin
     return `<button class="tp-row${TPL.mtSel === t.id ? ' on' : ''}" data-mt-pick="${esc(t.id)}"><span class="tp-n"><b>${esc(t.name)}</b><span class="tp-tag${cls}">${tag}</span></span><span class="set-sub">${esc(t.about)}</span></button>`
   }).join('')
-  return `<div class="tp-list"><div class="tp-lh"><span class="set-sub">What a call can be, and how to tell — the minutes classify each call by these</span><span class="tp-lha"><button class="btn ghost" data-tpl-claude>${ICON('<path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/>')}Ask Claude</button><button class="btn" data-mt-new>${ICON('<path d="M12 5v14M5 12h14"/>')}New type</button></span></div><div class="set-card">${rows}</div></div>`
+  return `<div class="tp-list"><div class="tp-lh"><span class="set-sub">What a call can be, and how to tell — the minutes classify each call by these</span><span class="tp-lha"><button class="btn ghost" data-tpl-claude>${ICON(CLAUDE_MARK)}Ask Claude</button><button class="btn" data-mt-new>${ICON('<path d="M12 5v14M5 12h14"/>')}New type</button></span></div><div class="set-card">${rows}</div></div>`
 }
 /** Templates → Skills: Agent Skills (a folder: SKILL.md, scripts/, references/, assets/) for the work a task asks for.
  *  Echo keeps the catalogue — what there is, valid or not, on or off — and shows each; their content is written in VS
@@ -2686,7 +2705,7 @@ function skillsList(sks) {
       <label class="sk-switch" title="${t.on ? 'On — Claude can use it' : 'Off — kept out of Claude'}"><input type="checkbox" data-sk-toggle="${esc(t.id)}"${t.on ? ' checked' : ''} aria-label="${esc(tplName(t.id))} on"><i></i></label></span>
       <span class="set-sub sk-desc">${esc(t.description)}</span></div>`
   }).join('')
-  return `<div class="tp-list"><div class="tp-lh"><span class="set-sub">What Claude does with a task you send it — each a skill folder, written in your editor or by Claude</span><span class="tp-lha"><button class="btn ghost" data-tpl-claude>${ICON('<path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/>')}Ask Claude</button><button class="btn" data-sk-new>${ICON('<path d="M12 5v14M5 12h14"/>')}New skill</button></span></div><div class="set-card">${rows}</div></div>`
+  return `<div class="tp-list"><div class="tp-lh"><span class="set-sub">What Claude does with a task you send it — each a skill folder, written in your editor or by Claude</span><span class="tp-lha"><button class="btn ghost" data-tpl-claude>${ICON(CLAUDE_MARK)}Ask Claude</button><button class="btn" data-sk-new>${ICON('<path d="M12 5v14M5 12h14"/>')}New skill</button></span></div><div class="set-card">${rows}</div></div>`
 }
 function skillEditor() {
   if (TPL.skNew) {
@@ -2749,8 +2768,12 @@ function templateEditor() {
 document.addEventListener('click', (e) => {
   // A click anywhere else in the dialog folds its suggestions away.
   if (S.claudeSend && S.claudeSend.open && !e.target.closest('.sc-pick')) { S.claudeSend.open = false; render() }
-  const t = e.target.closest('[data-claude-task],[data-sc-send],[data-sc-yolo],[data-sc-off],[data-sc-skill]')
+  const t = e.target.closest('[data-claude-task],[data-sc-send],[data-sc-yolo],[data-sc-off],[data-sc-skill],[data-mode-set]')
   if (!t) return
+  // Who does it: the user's choice, kept on the task (pinned: Echo's guess never overwrites it).
+  if (t.dataset.modeSet) {
+    return ledgerEdit({ op: 'edit', node: t.dataset.node, set: { mode: t.dataset.modeSet } }, t.dataset.project)
+  }
   if (t.dataset.scSkill !== undefined && S.claudeSend) {
     S.claudeSend.words = (($('#sc-words') || {}).value || '')
     Object.assign(S.claudeSend, { skill: t.dataset.scSkill, q: '', open: false })
@@ -2759,7 +2782,8 @@ document.addEventListener('click', (e) => {
     return
   }
   if (t.dataset.claudeTask) {
-    S.claudeSend = { project: t.dataset.project, node: t.dataset.claudeTask, title: t.dataset.title, today: !!t.dataset.today, skill: undefined, words: '', open: true }
+    // A task Claude can do comes with its own words (what to hand back) and skill (`taskmodes`).
+    S.claudeSend = { project: t.dataset.project, node: t.dataset.claudeTask, title: t.dataset.title, today: !!t.dataset.today, skill: t.dataset.skill || undefined, words: t.dataset.prompt || '', hint: t.dataset.hint || '', open: !t.dataset.skill }
     if (!TPL.data) loadTemplates().then(render)
     return render()
   }
@@ -4016,6 +4040,7 @@ function workPanel() {
     n.kind === 'task' ? ['Handed over by', val('delegated_by', n.delegated_by, n.creator ? `${n.creator} (said it)` : 'not known', `<input class="wp-in" data-ledger-set="delegated_by" value="${esc(n.delegated_by || '')}" placeholder="Me, or a name" aria-label="Handed over by" autofocus>`)] : null,
     n.client_owner ? ['Client owes', esc(n.client_owner)] : null,
     n.kind === 'task' || n.kind === 'story' ? ['Due', val('due', n.due ? new Date(n.due + 'T12:00').toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }) : '', 'no date', `<input class="wp-in" type="date" data-ledger-set="due" value="${esc(n.due || '')}" aria-label="Due" autofocus>`) + ((n.due_history || []).length > 1 ? ` <span class="set-sub">moved ${n.due_history.length - 1}×</span>` : '')] : null,
+    ...(n.kind === 'task' ? modeRows(S.pj.sel, n, val) : []),
     n.waiting_for ? ['Waiting on', `${esc(n.waiting_for.who || 'someone')} — ${esc(n.waiting_for.what || '')}`] : null,
     (n.waiting_on || []).length ? ['Waits for', titles(n.waiting_on)] : null,
     (n.blocks || []).length ? ['Holds up', titles(n.blocks)] : null,
@@ -4060,7 +4085,7 @@ function workPanel() {
     return `<div class="wp-ev"><div class="wp-ev-top"><span class="set-sub">${esc(relDay(h.date))}</span><b>${esc(what)}</b>${h.speaker ? `<span class="set-sub">${esc(h.speaker)}</span>` : ''}<span class="grow"></span>${mark}</div>${h.quote ? `<div class="wp-q">“${esc(h.quote)}” ${srcs}</div>` : ''}</div>`
   }).join('')
   return `<div class="wp">
-    <div class="wp-top"><span class="wk-id">${esc(n.id)}</span><span class="wk-k ${esc(n.kind === 'task' ? n.type : n.kind)}">${esc(kind)}</span><span class="grow"></span>${['task', 'story', 'question'].includes(n.kind) ? `<button class="btn ghost" data-claude-task="${esc(n.id)}" data-project="${esc(S.pj.sel)}" data-title="${esc(n.title)}" title="Work on it in the Claude panel, with a skill">Send to Claude</button>` : ''}<button class="btn" data-pj="edit-title">Edit</button></div>
+    <div class="wp-top"><span class="wk-id">${esc(n.id)}</span><span class="wk-k ${esc(n.kind === 'task' ? n.type : n.kind)}">${esc(kind)}</span><span class="grow"></span>${['task', 'story', 'question'].includes(n.kind) ? `<button class="btn ghost" data-claude-task="${esc(n.id)}" data-project="${esc(S.pj.sel)}" data-title="${esc(n.title)}"${modeData({ mode: n.who_does })} title="Send to Claude — work on it in the Claude panel, with a skill" aria-label="Send to Claude">Send to <span class="md-ico claude">${ICON(CLAUDE_MARK)}</span></button>` : ''}<button class="btn" data-pj="edit-title">Edit</button></div>
     ${edit === 'title' ? `<textarea class="wp-title" data-ledger-set="title" rows="1" aria-label="Title" autofocus>${esc(n.title)}</textarea>` : `<h3 class="wp-name">${esc(n.title)}</h3>`}
     ${path.length ? `<div class="set-sub">${esc(path.join(' › '))}</div>` : ''}
     ${description}
@@ -4103,11 +4128,17 @@ document.addEventListener('input', (e) => {
   }, 250)
 })
 PANEL_VIEWS.push({ id: 'work-item', label: 'Details', icon: ICON('<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/>'), area: 'right', when: () => ((S.view === 'projects' && S.pj.tab === 'work') || S.pj.inline === S.view) && !!S.pj.node, render: workPanel })
-function ledgerEdit(body) {
-  send({ cmd: 'project', op: 'ledger', id: S.pj.sel, body })
+function ledgerEdit(body, project = S.pj.sel) {
+  send({ cmd: 'project', op: 'ledger', id: project, body })
   setTimeout(async () => {
     if (S.view === 'projects') await loadProject()
-    else { await loadWork(); if (S.view === 'tasks') await loadTasks(); else if (S.selected) await loadCall(S.selected) }
+    else {
+      if (S.pj.work && S.pj.sel === project) await loadWork()
+      // Today's cards carry the task's mode (its ✦ the prompt): read again too.
+      if (S.view === 'today') await loadToday()
+      else if (S.view === 'tasks') await loadTasks()
+      else if (S.selected) await loadCall(S.selected)
+    }
     render()
   }, 300)
 }
@@ -4139,7 +4170,7 @@ function taskCard(c, pile) {
   const quiet = c.quiet >= 5 && !c.due ? `<span class="tk-quiet" title="No word about it in ${c.quiet} days">quiet ${c.quiet} d</span>` : ''
   return `<button class="tk-card${c.wait ? ' tk-wait' : ''}${S.pj.node === c.id && S.pj.sel === c.project ? ' on' : ''}" data-tk="open" data-project="${esc(c.project)}" data-node="${esc(c.id)}">
     <span class="tk-t">${esc(c.title)}</span>${(() => { const w = taskWho(c, pile); return w ? `<span class="tk-who">${w}</span>` : '' })()}
-    <span class="tk-m"><span class="tk-pj">${projIcon(p, 12)}${esc(p.name)}</span>${(c.also_in || []).map((a) => { const q = projById(a.thread) || { id: a.thread, name: a.thread }; return `<span class="tk-pj" title="Also raised in ${esc(q.name)} (${esc(a.node)})">${projIcon(q, 12)}${esc(q.name)}</span>` }).join('')}<span class="grow"></span>${quiet}${dueText(c)}</span>
+    <span class="tk-m">${c.mine ? modeIcon(c.mode) : ''}<span class="tk-pj">${projIcon(p, 12)}${esc(p.name)}</span>${(c.also_in || []).map((a) => { const q = projById(a.thread) || { id: a.thread, name: a.thread }; return `<span class="tk-pj" title="Also raised in ${esc(q.name)} (${esc(a.node)})">${projIcon(q, 12)}${esc(q.name)}</span>` }).join('')}<span class="grow"></span>${quiet}${dueText(c)}</span>
   </button>`
 }
 function tasksView() {
@@ -4156,18 +4187,21 @@ function tasksView() {
   }
   const projChip = `<label class="fchip${pick ? ' on' : ''}">${esc(pick ? name(pick) : 'All threads')} ▾<select data-tk-project aria-label="Thread"><option value="">All threads</option>${projects.map((p) => `<option value="${esc(p.id)}"${pick === p.id ? ' selected' : ''}>${esc(p.name)} · ${p.tasks}</option>`).join('')}</select></label>`
   const sortChip = `<label class="fchip">${esc((TASK_SORTS.find(([k]) => k === S.tk.sort) || TASK_SORTS[0])[1])} ▾<select data-tk-sort aria-label="Order">${TASK_SORTS.map(([k, l]) => `<option value="${k}"${S.tk.sort === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`
-  const head = `<header class="tk-head"><h2>Tasks</h2><span class="tk-sub">across ${projects.length} active project${projects.length === 1 ? '' : 's'}</span><span class="grow"></span>${projChip}${sortChip}</header>`
+  // Who does it (`taskmodes`): your tasks Claude can do, or the ones by hand.
+  const MODES = [['', 'Anyone'], ['claude', 'Claude can do'], ['manual', 'By hand']]
+  const modeChip = `<label class="fchip${S.tk.mode ? ' on' : ''}">${esc((MODES.find(([k]) => k === S.tk.mode) || MODES[0])[1])} ▾<select data-tk-mode aria-label="Who does it">${MODES.map(([k, l]) => `<option value="${k}"${S.tk.mode === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`
+  const head = `<header class="tk-head"><h2>Tasks</h2><span class="tk-sub">across ${projects.length} active project${projects.length === 1 ? '' : 's'}</span><span class="grow"></span>${projChip}${modeChip}${sortChip}</header>`
   if (!projects.length) return `<div class="tk">${head}<div class="wk-empty"><b>No active threads</b><p>Tasks come from your threads' calls: each thread's Work tab reads them into stories and tasks.</p><button class="btn primary" data-go="projects">Open Threads</button></div></div>`
   const total = TASK_PILES.reduce((n, [k]) => n + ((d.piles || {})[k] || []).length, 0) + ((d.piles || {}).others || []).length
   if (!total) return `<div class="tk">${head}<div class="wk-empty"><b>No open tasks</b><p>Once a thread's calls are synced, what was promised, owed and waited on shows here — from every thread at once.</p></div></div>`
   const cols = TASK_PILES.map(([k, label]) => {
-    const all = ((d.piles || {})[k] || []).filter((c) => !pick || c.project === pick).slice().sort(sorts[S.tk.sort] || sorts.due)
+    const all = ((d.piles || {})[k] || []).filter((c) => (!pick || c.project === pick) && (!S.tk.mode || (c.mode && c.mode.mode === S.tk.mode))).slice().sort(sorts[S.tk.sort] || sorts.due)
     const open = S.tk.more[k], shown = open ? all : all.slice(0, TASK_SHOWN)
     const more = all.length > TASK_SHOWN ? `<button class="tk-more" data-tk="more" data-pile="${k}">${open ? 'Show fewer' : `+ ${all.length - TASK_SHOWN}`}</button>` : ''
     return `<section class="tk-col"><h3>${esc(label)} <span>${all.length}</span></h3>${shown.map((c) => taskCard(c, k)).join('') || '<p class="tk-none">Nothing here</p>'}${more}</section>`
   }).join('')
   const errs = (d.errors || []).length ? `<p class="set-sub tk-err">${d.errors.map((e) => `${esc(name(e.project))}: ${esc(e.error)}`).join(' · ')}</p>` : ''
-  const others = ((d.piles || {}).others || []).filter((c) => !pick || c.project === pick).slice().sort(sorts[S.tk.sort] || sorts.due)
+  const others = ((d.piles || {}).others || []).filter((c) => (!pick || c.project === pick) && (!S.tk.mode || (c.mode && c.mode.mode === S.tk.mode))).slice().sort(sorts[S.tk.sort] || sorts.due)
   return `<div class="tk">${head}${errs}<div class="tk-cols">${cols}</div>${othersPile(others, 'others')}</div>`
 }
 /** What to ask whom, next time you meet (right panel): late, due-soon and quiet things they owe,
@@ -4186,9 +4220,16 @@ function asksPanel() {
   return `<div class="asks"><div class="asks-h"><b>Asks · by person</b><span>next time you meet</span></div>${rows || '<p class="set-sub">Nothing to chase: nobody owes you anything late, due soon or gone quiet.</p>'}<p class="asks-foot">Computed from what went quiet, what's due and what's owed — never a model's guess.</p></div>`
 }
 PANEL_VIEWS.push({ id: 'asks', label: 'Asks', icon: ICON('<path d="M5 18.5V7a2.5 2.5 0 0 1 2.5-2.5h9A2.5 2.5 0 0 1 19 7v6a2.5 2.5 0 0 1-2.5 2.5H9z"/><path d="M10 9.2a2 2 0 1 1 2.6 1.9c-.4.2-.6.5-.6.9v.3M12 14v.01"/>'), area: 'right', when: () => S.view === 'tasks', render: asksPanel })
+// A card that isn't a button (Today's tasks) opens with Enter or Space too.
+document.addEventListener('keydown', (e) => {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('[data-tk][role="button"]')) { e.preventDefault(); e.target.click() }
+})
 document.addEventListener('click', async (e) => {
   const b = e.target.closest && e.target.closest('[data-tk]')
   if (!b) return
+  // A button or link inside a card that opens (Today's ✦ and Close) is its own.
+  const inner = e.target.closest('button, a, input, select, textarea')
+  if (inner && inner !== b && b.contains(inner)) return
   e.preventDefault()
   const d = b.dataset
   if (d.tk === 'more') { S.tk.more[d.pile] = !S.tk.more[d.pile]; return render() }
@@ -4215,6 +4256,7 @@ document.addEventListener('change', (e) => {
   const t = e.target
   if (t.matches && t.matches('[data-tk-project]')) { S.tk.project = t.value; render() }
   if (t.matches && t.matches('[data-tk-sort]')) { S.tk.sort = t.value; render() }
+  if (t.matches && t.matches('[data-tk-mode]')) { S.tk.mode = t.value; render() }
 })
 
 /** Projects Echo would make from calls in none (`projects::found`): accept, merge, reject. */
@@ -6688,7 +6730,7 @@ function paletteItems(target) {
   if (target && target.kind === 'call') {
     const c = target.c, busy = c.notes_run && (c.notes_run.state === 'queued' || c.notes_run.state === 'running')
     const transcribed = !['recording', 'transcribing'].includes(c.status)
-    for (const [id, label] of callTabs({ recording: c.status === 'recording', chat: (c.chat || []).length, frames: (c.frames || []).length, actions: Array.isArray(c.actions) ? c.actions.length : null })) {
+    for (const [id, label] of callTabs({ recording: c.status === 'recording', chat: (c.chat || []).length, frames: (c.frames || []).length })) {
       add('This call', `Open ${label}`, () => press({ tab: id }), { keywords: 'tab show' })
     }
     add('This call', c.notes ? 'Write minutes again' : 'Write minutes', () => press({ cmd: 'write-notes' }), { keywords: 'notes update claude', disabled: !transcribed ? 'after the transcript is ready' : busy ? 'minutes are being written' : null })
@@ -7020,10 +7062,12 @@ function render() {
         if (pane.dataset.mode !== 'frame') {
           pane.dataset.mode = 'frame'
           pane.classList.add('framed')
-          patch(pane, '<div id="minutes-bar"></div><div class="minutes-slot" id="minutes-slot"></div>')
+          patch(pane, '<div id="minutes-bar"></div><div class="minutes-split"><div class="minutes-slot" id="minutes-slot"></div><aside class="minutes-side" id="minutes-side" aria-label="What moved"></aside></div>')
         }
         patch($('#minutes-bar'), d.bar)
         patch($('#minutes-slot'), d.frame)
+        patch($('#minutes-side'), d.side || '')
+        $('#minutes-side').hidden = !d.side
       } else {
         if (pane.dataset.mode === 'frame') { pane.dataset.mode = ''; pane.classList.remove('framed') }
         patch(pane, d.pane)
@@ -7101,7 +7145,7 @@ document.addEventListener('click', (e) => {
   if (S.laterOpen && !(e.target.closest && e.target.closest('[data-cmd^="later-"]'))) { S.laterOpen = false; render() }
   // The sidebar open over a narrow page closes on a click beside it.
   if (S.barOver && !(e.target.closest && e.target.closest('.actbar'))) { S.barOver = false; render() }
-  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-theme-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-go],[data-conv-keep],[data-br-pclosed],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-up],[data-today-seen],[data-today-done],[data-today-retry],[data-today-import],[data-today-close],[data-today-keep],[data-needs-open],[data-needs-wont],[data-needs-todo],[data-needs-todo-ok],[data-needs-read],[data-needs-send],[data-needs-outlook],[data-needs-off],[data-today-askoff],[data-prep-write],[data-ev-prep],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
+  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-theme-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-go],[data-conv-keep],[data-br-pclosed],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-up],[data-up-fold],[data-today-seen],[data-today-done],[data-today-retry],[data-today-import],[data-today-close],[data-today-keep],[data-needs-open],[data-needs-wont],[data-needs-todo],[data-needs-todo-ok],[data-needs-read],[data-needs-send],[data-needs-outlook],[data-needs-off],[data-today-askoff],[data-prep-write],[data-ev-prep],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
   if (!t) { if (menuWas) render(); return }
   // Sign-ins (`signin.rs`): shown at once (starting / stopping / checking) until the next poll
   // brings the app's state.
@@ -7199,6 +7243,7 @@ document.addEventListener('click', (e) => {
   if (t.dataset.schedule) { send({ cmd: 'schedule', id: t.dataset.schedule, languages: recordLang(), profile: pickedProfile() }); const e = ((S.cal.data && S.cal.data.events) || []).find((x) => x.id === t.dataset.schedule); if (e) e.scheduled = true; if (S.view === 'today') setTimeout(() => loadToday().then(render), 400); return render() }
   if (t.dataset.unschedule) { send({ cmd: 'unschedule', id: t.dataset.unschedule }); const e = ((S.cal.data && S.cal.data.events) || []).find((x) => x.id === t.dataset.unschedule); if (e) e.scheduled = false; if (S.view === 'today') setTimeout(() => loadToday().then(render), 400); return render() }
   if (t.dataset.call) { S.listOpen = false; return go(`call/${t.dataset.call}/${t.dataset.callTab || S.tab}`) }
+  if (t.dataset.upFold !== undefined) { S.upOpen = !S.upOpen; return render() }
   if (t.dataset.up) { S.listOpen = false; return go(`upcoming/${t.dataset.up}`) }
   if (t.dataset.todayImport) {
     send({ cmd: 'calendar_import', id: t.dataset.todayImport })
@@ -7283,11 +7328,6 @@ document.addEventListener('click', (e) => {
   if (t.dataset.frame) { S.lightbox = t.dataset.frame; return render() }
   if (t.dataset.close) { S.lightbox = null; return render() }
   if (t.dataset.copy) { send({ cmd: 'copy', text: t.dataset.copy }); t.textContent = 'Copied'; return }
-  if (t.dataset.toggle) {
-    const a = S.call && S.call.actions && S.call.actions.find((x) => x.id === t.dataset.toggle)
-    if (a) { a.status = t.dataset.status; render() } // optimistic; the file follows (or a notice says why not)
-    return send({ cmd: 'toggle_action', call: S.selected, id: t.dataset.toggle, status: t.dataset.status })
-  }
   if (t.dataset.arm !== undefined) return send({ cmd: 'arm_meeting', id: t.dataset.arm, languages: recordLang(), profile: pickedProfile() })
   if (t.dataset.join !== undefined) return send({ cmd: 'join_meeting', id: t.dataset.join, languages: recordLang(), profile: pickedProfile() })
   if (t.dataset.ask) { send({ cmd: 'live_ask', call: S.selected, kind: t.dataset.ask }); return liveBusy() }

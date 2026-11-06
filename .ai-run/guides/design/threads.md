@@ -189,9 +189,9 @@ Every open thread's open tasks in piles:
 - `ledger::call_changes`: per thread the call is in, every history entry whose evidence is this call, in the order
   said, with words, speaker, time and weak / to check / kept-yours; mentions and entries the verifier called wrong
   are hidden. A thread that hasn't read the call says so.
-- `ledger::match_actions`: an action item became a task when a task created from this call is within a minute of the
-  item's moment and shares a third of its words (half with no moment; ¾ when farther) → shown as a chip
-  (`action_tasks`), not a second line.
+- Shown as What moved beside the call's minutes, the user's own tasks first with who does each (`taskmodes`); the
+  call's Actions tab and its action-item ↔ task matcher are gone (Nov 2026): action items became tasks, tasks are
+  what gets closed. `ledger::open_tasks_of_call` gives a call's still-open tasks (prep's Last time, Still to do).
 
 ### Client page (`tasks::client`)
 Overview (the user's `projects/clients/<id>.md` + a card per thread: stage, calls, stories done, open tasks by pile,

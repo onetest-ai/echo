@@ -193,7 +193,70 @@ fn task_text(thread: &str, id: &str) -> Result<String> {
     if !said.is_empty() {
         out.push_str(&format!("\n## Where it was said\n{}\n", said.join("\n")));
     }
+    // Who does it (`taskmodes`): the user's choice, else Echo's guess — said which, and on one line: a guess is model
+    // output from others' words, a suggestion, never the user's instruction.
+    let m = &n["who_does"];
+    let line = |v: &Value| v.as_str().map(|t| t.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|t| !t.is_empty());
+    let whose = |by: &Value| if by == "you" { "the user's" } else { "Echo's guess, a suggestion — not the user's words" };
+    match m["mode"].as_str() {
+        Some("claude") => out.push_str(&format!(
+            "\n## Who does it\nClaude can ({}){}{}\n",
+            whose(&m["by"]),
+            line(&m["prompt"]).map(|p| format!("; to hand back ({}): {p}", whose(&m["prompt_by"]))).unwrap_or_default(),
+            m["skill"].as_str().map(|k| format!("; skill ({}): /my-skills:{k}", whose(&m["skill_by"]))).unwrap_or_default()
+        )),
+        Some(_) => out.push_str(&format!("\n## Who does it\nThe user, by hand ({}){}\n", whose(&m["by"]), line(&m["how"]).map(|h| format!("; how ({}): {h}", whose(&m["how_by"]))).unwrap_or_default())),
+        None => {}
+    }
+    // The context its work starts from: the thread's last calls, and the last of the meeting series it was raised in
+    // (by the invite's subject, as "Since last time" goes) that the thread's don't already list.
+    // Only calls on the thread's own AI profile: a call's text goes nowhere else (strict routing).
+    let profile = crate::projects::load(thread).ok().and_then(|p| p.ai_profile).unwrap_or_else(crate::ai::default_id);
+    let ours = |d: &std::path::Path| crate::ai::call_profile_id(d).is_ok_and(|p| p == profile);
+    let recent: Vec<std::path::PathBuf> = recent_calls(thread, &ours, 3);
+    if !recent.is_empty() {
+        out.push_str(&format!("\n## The thread's last calls\n{}\n", recent.iter().map(|d| call_line(d)).collect::<Vec<_>>().join("\n")));
+    }
+    let raised_in = n["history"].as_array().into_iter().flatten().find_map(|h| ev[h["evidence"].as_str()?]["call"].as_str().map(str::to_owned));
+    if let Some((subject, series)) = raised_in.and_then(|c| series_calls(&crate::paths::calls_dir().join(c), &|d| ours(d) && !recent.iter().any(|r| r == d), 3)) {
+        let more: Vec<String> = series.iter().map(|d| call_line(d)).collect();
+        if !more.is_empty() {
+            out.push_str(&format!("\n## The last calls of its series ({subject})\n{}\n", more.join("\n")));
+        }
+    }
     Ok(out)
+}
+
+/// A call as one line: its title, date and link (the reader opens the ones it needs).
+fn call_line(d: &std::path::Path) -> String {
+    let name = d.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+    let meta = crate::calls::read_json(&d.join("meta.json"));
+    format!("- {} ({}) echo://call/{name}", meta["title"].as_str().unwrap_or(&name), name.get(..10).unwrap_or(""))
+}
+
+/// A thread's last `n` calls with minutes that `keep` keeps, newest first.
+fn recent_calls(thread: &str, keep: &dyn Fn(&std::path::Path) -> bool, n: usize) -> Vec<std::path::PathBuf> {
+    let Ok(p) = crate::projects::load(thread) else { return vec![] };
+    let mut calls: Vec<std::path::PathBuf> = crate::projects::calls_of(&p).unwrap_or_default().into_iter().map(|(d, _)| d).filter(|d| d.join("notes.md").is_file()).collect();
+    calls.sort();
+    calls.into_iter().rev().filter(|d| keep(d)).take(n).collect()
+}
+
+/// The last `n` calls with minutes of `dir`'s meeting series — the same invite subject; unlike "Since last time", a
+/// call with no invite (an ad-hoc one, its title only) has no series here: a generic title would gather strangers —
+/// newest first among the last 300 calls, with that subject.
+fn series_calls(dir: &std::path::Path, keep: &dyn Fn(&std::path::Path) -> bool, n: usize) -> Option<(String, Vec<std::path::PathBuf>)> {
+    let invite = |d: &std::path::Path| crate::meeting::MeetingContext::load(d).ok().flatten().and_then(|m| m.subject).filter(|s| !s.trim().is_empty());
+    let subject = invite(dir)?;
+    let want = subject.trim().to_lowercase();
+    let calls = crate::calls::all_calls()
+        .into_iter()
+        .rev()
+        .take(300)
+        .filter(|d| d.join("notes.md").is_file() && invite(d).is_some_and(|s| s.trim().to_lowercase() == want) && keep(d))
+        .take(n)
+        .collect();
+    Some((subject, calls))
 }
 
 fn person_text(v: &Value) -> String {
@@ -310,6 +373,49 @@ pub fn person_thread(key: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_series_is_its_calls_with_minutes_by_the_invites_subject() {
+        let (_env, _) = crate::paths::testenv::folders("links-series");
+        let mk = |name: &str, title: &str, notes: bool| {
+            let d = crate::paths::calls_dir().join(name);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join("meta.json"), "{}").unwrap();
+            std::fs::write(d.join("meeting.json"), serde_json::json!({"subject": title}).to_string()).unwrap();
+            if notes {
+                std::fs::write(d.join("notes.md"), "# x").unwrap();
+            }
+            d
+        };
+        let first = mk("2026-10-01_100000-acme-weekly", "Acme weekly", true);
+        mk("2026-10-08_100000-acme-weekly", "Acme weekly", true);
+        mk("2026-10-09_100000-other", "Other", true);
+        mk("2026-10-15_100000-acme-weekly", "acme weekly", false);
+        mk("2026-10-22_100000-acme-weekly", "Acme Weekly", true);
+        let adhoc = crate::paths::calls_dir().join("2026-10-23_100000-adhoc");
+        std::fs::create_dir_all(&adhoc).unwrap();
+        std::fs::write(adhoc.join("meta.json"), serde_json::json!({"title": "Acme weekly"}).to_string()).unwrap();
+        assert!(series_calls(&adhoc, &|_| true, 3).is_none(), "no invite, no series");
+        let (subject, calls) = series_calls(&first, &|_| true, 3).unwrap();
+        assert_eq!(subject, "Acme weekly");
+        let names: Vec<String> = calls.iter().map(|d| d.file_name().unwrap().to_string_lossy().into_owned()).collect();
+        assert_eq!(names, ["2026-10-22_100000-acme-weekly", "2026-10-08_100000-acme-weekly", "2026-10-01_100000-acme-weekly"], "newest first, with minutes, any case");
+        // Those the thread lists already are passed over before counting: the older ones come in.
+        let (_, older) = series_calls(&first, &|d| !d.ends_with("2026-10-22_100000-acme-weekly"), 1).unwrap();
+        assert!(older[0].ends_with("2026-10-08_100000-acme-weekly"));
+    }
+
+    #[test]
+    fn a_task_says_who_does_it() {
+        let (_env, _) = crate::paths::testenv::folders("links-task-mode");
+        let id = crate::projects::create("Aurora", None, None).unwrap().id;
+        let st = crate::ledger::human_event(&id, &serde_json::json!({"op": "create", "kind": "story", "parent": "E01", "title": "Pilot"})).unwrap();
+        let t = crate::ledger::human_event(&id, &serde_json::json!({"op": "create", "kind": "task", "parent": st["id"], "title": "Book the room"})).unwrap();
+        let tid = t["id"].as_str().unwrap();
+        crate::ledger::human_event(&id, &serde_json::json!({"op": "edit", "node": tid, "set": {"mode": "manual", "how": "Call the venue"}})).unwrap();
+        let text = task_text(&id, tid).unwrap();
+        assert!(text.contains("## Who does it\nThe user, by hand (the user's); how (the user's): Call the venue"), "{text}");
+    }
 
     #[test]
     fn links_parse_and_refuse_paths() {

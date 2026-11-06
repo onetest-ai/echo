@@ -54,9 +54,12 @@ fn time(s: Option<&str>) -> Option<DateTime<Utc>> {
 /// Today's meetings still to come or going on, each with its threads and its prep's state — "Coming up today".
 pub fn upcoming() -> Value {
     let now = Utc::now();
+    let scheduled = kept_anyway();
     let list: Vec<Value> = crate::watch::agenda()
         .into_iter()
-        .filter(|m| time(m.end.as_deref()).is_none_or(|e| e > now))
+        // Only the meetings the user accepted (or organises), set to record or recorded: an invite left open or
+        // tentative isn't their day yet.
+        .filter(|m| (m.accepted() || m.id.as_ref().is_some_and(|i| scheduled.contains(i))) && time(m.end.as_deref()).is_none_or(|e| e > now))
         .filter_map(|m| {
             let event = m.id.clone().filter(|i| !i.is_empty())?;
             let id = id_of(&event);
@@ -88,14 +91,8 @@ fn last_time(subject: &str) -> Value {
     let Some(prev) = calls::previous_with_notes(subject, None) else { return Value::Null };
     let meta = calls::read_json(&prev.join("meta.json"));
     let name = prev.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let open: Vec<Value> = calls::read_json(&prev.join(calls::ACTIONS))
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|a| a["status"].as_str() != Some("done"))
-        .filter_map(|a| Some(json!({"task": a["task"].as_str().filter(|t| !t.trim().is_empty())?, "owner": a["owner"]})))
-        .take(MAX_LINES)
-        .collect();
+    // Still to do: the tasks that call raised in its threads, still open (its action items aren't ticked; tasks are).
+    let open: Vec<Value> = ledger::open_tasks_of_call(&prev).into_iter().take(MAX_LINES).collect();
     json!({
         "call": name, "link": format!("echo://call/{name}"), "date": meta["started_at"],
         "highlights": calls::recap_from_notes(&fs::read_to_string(prev.join("notes.md")).unwrap_or_default()),
@@ -515,6 +512,8 @@ pub fn due() -> Vec<MeetingContext> {
     crate::watch::agenda()
         .into_iter()
         .filter(|m| time(m.start.as_deref()).is_some_and(|s| s > soon))
+        // Only the meetings the user's day lists (accepted, organised, set to record): no prep for an open invite.
+        .filter(|m| m.accepted() || m.id.as_ref().is_some_and(|i| crate::schedule::load().into_iter().any(|s| s.id.as_deref() == Some(i.as_str()))))
         .filter(|m| m.id.as_deref().is_some_and(|i| !i.is_empty() && load(&id_of(i)).is_none()))
         .filter(|m| projects::of_meeting(m).iter().any(|p| !p.stage.closed()))
         .collect()
@@ -576,9 +575,21 @@ pub fn start_scheduler() {
             if let Err(e) = crate::calls::classify(&soon) {
                 eprintln!("meeting types: {e:#}");
             }
+            // The user's own open tasks: who can do each, Claude or they (once a day a task, until they choose) — on a
+            // thread of its own, one pass at a time: its model calls never hold up a prep.
+            crate::taskmodes::classify_in_background();
         }
         std::thread::sleep(std::time::Duration::from_secs(240));
     });
+}
+
+/// Meetings Coming up today keeps though not accepted: set to record, or recorded today (their event ids); Today's
+/// day checks the same from what it has at hand.
+fn kept_anyway() -> Vec<String> {
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let mut ids: Vec<String> = crate::schedule::load().into_iter().filter_map(|m| m.id).collect();
+    ids.extend(crate::calls::all_calls().into_iter().filter(|d| crate::calls::stamp_of(d).starts_with(&today)).filter_map(|d| MeetingContext::load(&d).ok().flatten().and_then(|m| m.id)));
+    ids
 }
 
 /// The agenda meeting of a prep id.

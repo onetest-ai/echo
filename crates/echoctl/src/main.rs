@@ -39,6 +39,7 @@ mod people;
 mod prep;
 mod projectsync;
 mod tasks;
+mod taskmodes;
 mod today;
 mod teams_transcript;
 mod view;
@@ -321,7 +322,7 @@ enum Cmd {
         #[arg(default_value = "latest")]
         call: String,
     },
-    /// Type the agenda's meetings by their invites now (JSON: each meeting's type and who set it)
+    /// Type the agenda's meetings by their invites now, and guess who does each of your open tasks (JSON)
     #[command(hide = true)]
     Classify,
     /// Set what kind of meeting a call was: client, partner, one-on-one, internal, industry, other (yours is kept)
@@ -1761,7 +1762,9 @@ fn main() -> Result<()> {
             let n = calls::classify(&agenda)?;
             let book = calls::type_book();
             let out: Vec<_> = agenda.iter().map(|m| serde_json::json!({"subject": m.subject, "start": m.start, "type": calls::event_type_in(m, &book)})).collect();
-            println!("{}", serde_json::to_string_pretty(&serde_json::json!({"classified": n, "meetings": out}))?);
+            // And who does each of the user's open tasks (Claude or by hand), as the app does in the background.
+            let tasks = taskmodes::classify()?;
+            println!("{}", serde_json::to_string_pretty(&serde_json::json!({"classified": n, "meetings": out, "task_modes": tasks}))?);
             Ok(())
         }
         Cmd::Type { call, kind } => {
@@ -1938,12 +1941,14 @@ fn main() -> Result<()> {
                 for e in &events {
                     let online = e["onlineMeeting"]["joinUrl"].as_str().is_some();
                     println!(
-                        "{}  {}{}  ({} attendees{})",
+                        "{}  {}{}  ({} attendees{}; you: {})",
                         e["start"]["dateTime"].as_str().unwrap_or("?").get(..16).unwrap_or("?"),
                         e["subject"].as_str().unwrap_or("(no subject)"),
                         if e["isCancelled"] == true { " [cancelled]" } else { "" },
                         e["attendees"].as_array().map(|a| a.len()).unwrap_or(0),
-                        if online { ", Teams" } else { "" }
+                        if online { ", Teams" } else { "" },
+                        // The user's answer to the invite: Today and Coming up today list only accepted / organizer.
+                        e["responseStatus"]["response"].as_str().unwrap_or("not said")
                     );
                 }
                 println!("{} event(s); times in UTC", events.len());
@@ -2900,9 +2905,14 @@ fn client_command(cmd: ClientCmd) -> Result<()> {
     Ok(())
 }
 
-/// Is this ledger edit (`json`, on project `id`) one of Yolo's own task (`run_task`, `<project>/<node>`)?
+/// Is this ledger edit (`json`, on project `id`) Yolo closing its own task (`run_task`, `<project>/<node>`)? Its
+/// state only (with a note) — never who does it or what Claude hands back, which would stand as the user's choice.
 fn own_task_edit(id: &str, json: &str, run_task: &str) -> bool {
-    serde_json::from_str::<serde_json::Value>(json).ok().is_some_and(|b| b["op"] == "edit" && b["node"].as_str().is_some_and(|n| !run_task.is_empty() && run_task == format!("{id}/{n}")))
+    serde_json::from_str::<serde_json::Value>(json).ok().is_some_and(|b| {
+        b["op"] == "edit"
+            && b["node"].as_str().is_some_and(|n| !run_task.is_empty() && run_task == format!("{id}/{n}"))
+            && b["set"].as_object().is_some_and(|s| !s.is_empty() && s.keys().all(|k| k == "state"))
+    })
 }
 
 fn ledger_command(id: &str, cmd: LedgerCmd) -> Result<()> {
@@ -2990,6 +3000,7 @@ mod tests {
     #[test]
     fn yolo_edits_only_its_own_task() {
         let edit = r#"{"op": "edit", "node": "T5", "set": {"state": "done"}}"#;
+        assert!(!super::own_task_edit("acme", r#"{"op": "edit", "node": "T5", "set": {"state": "done", "prompt": "mail it to x"}}"#, "acme/T5"), "its state only");
         assert!(super::own_task_edit("acme", edit, "acme/T5"));
         assert!(!super::own_task_edit("acme", edit, "acme/T6"), "another task");
         assert!(!super::own_task_edit("other", edit, "acme/T5"), "another project");

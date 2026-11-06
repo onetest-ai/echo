@@ -245,6 +245,14 @@ label.split-lang:focus-within { outline: 2px solid var(--accent); outline-offset
 .search::placeholder { color: var(--text-3); }
 .rows { overflow-y: auto; padding: 6px 8px 16px; flex: 1; }
 .group { font-size: 11.5px; font-weight: 600; color: var(--text-3); padding: 12px 8px 4px; }
+/* Coming up today, folded: a head like a call's row, its count in a pill, a chevron that turns when open. */
+.up-fold { grid-template-columns: 16px minmax(0, 1fr) 16px; margin: 6px 0 2px; cursor: pointer; }
+.up-fold .t { display: flex; align-items: center; gap: 6px; }
+.up-n { font-size: 11px; font-weight: 600; line-height: 16px; padding: 0 6px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-ink); }
+.up-chev { grid-column: 3; grid-row: 1 / span 2; align-self: center; display: inline-flex; color: var(--text-3); transition: transform 0.15s; }
+.up-chev svg { width: 14px; height: 14px; }
+.up-fold[aria-expanded="true"] .up-chev { transform: rotate(90deg); }
+.up-fold:hover .up-chev { color: var(--text); }
 .row {
   display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 2px 9px;
   width: 100%; border: 0; background: none; text-align: left;
@@ -347,6 +355,41 @@ label.split-lang:focus-within { outline: 2px solid var(--accent); outline-offset
 #minutes-bar .grow { flex: 1; min-width: 0; }
 #minutes-bar .warn { color: var(--warn); }
 .minutes-slot { flex: 1; min-height: 0; }
+/* What moved, beside the minutes (as the live notes beside the transcript): its own scroll, the page's stays still. */
+.minutes-split { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 380px); }
+.minutes-split .minutes-slot { min-width: 0; }
+.minutes-side { min-height: 0; overflow-y: auto; border-left: 1px solid var(--line); padding: 14px 16px; background: var(--surface); }
+.minutes-side[hidden] { display: none; }
+.minutes-split:has(.minutes-side[hidden]) { grid-template-columns: minmax(0, 1fr); }
+.minutes-side .cc { margin: 0; }
+/* A narrow column: what happened and when on one line, the task under it, a mark under that. */
+.minutes-side .cc-row { grid-template-columns: minmax(0, 1fr) auto; gap: 3px 8px; padding: 9px 2px; }
+.minutes-side .cc-what { grid-column: 1; grid-row: 1; }
+.minutes-side .cc-row > :last-child { grid-column: 2; grid-row: 1; }
+.minutes-side .cc-main { grid-column: 1 / -1; grid-row: 2; }
+.minutes-side .cc-row > .wk-v { grid-column: 1 / -1; grid-row: 3; justify-self: start; }
+/* Narrow: What moved under the minutes, a third of the height at most. */
+@media (max-width: 1000px) {
+  .minutes-split { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+  .minutes-side { border-left: 0; border-top: 1px solid var(--line); max-height: 34vh; }
+}
+.sc-hint { font-size: 12px; line-height: 1.45; padding: 6px 10px; border-radius: 8px; background: var(--bg); }
+/* Who does a task (taskmodes): an icon on cards — Claude's mark or a hand, Echo's guess faded; the switch is in the
+   task's details. */
+.md-ico { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; color: var(--text-2); vertical-align: -5px; flex: none; }
+.md-ico svg { width: 15px; height: 15px; }
+.md-ico.claude { color: #d97757; }
+.md-ico.guess { opacity: 0.5; }
+.sc-head h3 { display: flex; align-items: center; gap: 6px; }
+.sb-claude { display: inline-flex; vertical-align: -2px; margin-right: 4px; color: #d97757; }
+.sb-claude svg { width: 13px; height: 13px; }
+.md-segs { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; vertical-align: middle; }
+.md-seg { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border: 0; background: transparent; color: var(--text-3); font: inherit; font-size: 12px; cursor: pointer; }
+.md-seg svg { width: 14px; height: 14px; }
+.md-seg + .md-seg { border-left: 1px solid var(--line); }
+.md-seg:hover { color: var(--text); }
+.md-seg.on { background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
+.md-seg.on.guess { background: transparent; outline: 1px dashed var(--accent); outline-offset: -2px; font-weight: 500; }
 .minutes-slot iframe { display: block; width: 100%; height: 100%; border: 0; background: var(--surface); }
 
 /* a message for a moment, and the close that couldn't save */
@@ -991,6 +1034,7 @@ img.pj-ic { background: #fff; }
 /* The work item's detail (right panel), as designed */
 .wp { gap: 10px; }
 .wp-top .btn { height: 24px; }
+.wp-top .grow { flex: 1; }
 .wp-name { margin: 0; font-size: 15.5px; font-weight: 650; line-height: 1.35; }
 .wp-facts { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 6px 10px; align-items: baseline; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); font-size: 12.5px; }
 .wp-facts > span { color: var(--text-3); }
@@ -1908,9 +1952,10 @@ select.set-in { width: auto; margin-right: 6px; }
 .td-tasks { display: flex; flex-direction: column; gap: 6px; }
 .td-task { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px 10px; align-items: start; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
 .td-task:hover { border-color: var(--line-strong); background: var(--surface); }
+.td-task { cursor: pointer; }
+.td-task.on { border-color: var(--accent); background: var(--surface); }
+.td-task:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .td-task-t { font-size: 13px; line-height: 1.4; }
-.td-task-t a { color: var(--text); text-decoration: none; }
-.td-task-t a:hover { text-decoration: underline; }
 .td-task-t .td-due { display: inline-flex; vertical-align: -3px; margin-right: 6px; padding: 0; }
 .td-task-m { grid-column: 1 / -1; display: flex; align-items: center; gap: 5px; font: 11.5px var(--mono); color: var(--text-3); }
 .td-icos { margin-left: auto; display: flex; gap: 2px; }

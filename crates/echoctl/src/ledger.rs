@@ -34,9 +34,9 @@ const VERIFIED_OPS: [&str; 4] = ["ac_met", "link", "waiting", "answer"];
 const KINDS: [&str; 6] = ["epic", "story", "task", "risk", "decision", "question"];
 const TASK_TYPES: [&str; 3] = ["action", "session", "dependency"];
 const CLOSED: [&str; 4] = ["done", "cancelled", "merged", "deleted"];
-const HUMAN_FIELDS: [&str; 16] = [
+const HUMAN_FIELDS: [&str; 20] = [
     "title", "internal_owner", "client_owner", "due", "state", "parent", "type", "client_owed", "waiting_for", "column", "links", "description", "delegated_by",
-    "decided_by", "likelihood", "impact",
+    "decided_by", "likelihood", "impact", "mode", "how", "prompt", "skill",
 ];
 /// A risk's likelihood and impact.
 const LEVELS: [&str; 3] = ["low", "med", "high"];
@@ -1104,6 +1104,12 @@ pub struct Node {
     /// A risk's likelihood and impact: low | med | high.
     pub likelihood: Option<String>,
     pub impact: Option<String>,
+    /// Who does it (`taskmodes`): `claude` — Claude can, with `prompt` (what to hand back) and a `skill`; `manual` —
+    /// the user, with `how`. Only the user's choice is here; Echo's guess is kept beside the ledger.
+    pub mode: Option<String>,
+    pub how: Option<String>,
+    pub prompt: Option<String>,
+    pub skill: Option<String>,
     #[serde(skip)]
     unlinked: Vec<String>,
     pub created: Option<String>,
@@ -1199,6 +1205,10 @@ fn node_of(e: &Value) -> Node {
         decided_by: s(&f["decided_by"]),
         likelihood: level_of(&f["likelihood"]),
         impact: level_of(&f["impact"]),
+        mode: None,
+        how: None,
+        prompt: None,
+        skill: None,
         unlinked: vec![],
         created: s(&e["date"]),
         created_in: s(&e["evidence"]),
@@ -1263,6 +1273,15 @@ fn set_field(n: &mut Node, field: &str, v: &Value, human: bool) -> bool {
         "decided_by" => n.decided_by = s(v),
         "likelihood" => n.likelihood = level_of(v),
         "impact" => n.impact = level_of(v),
+        "mode" => n.mode = v.as_str().filter(|m| crate::taskmodes::MODES.contains(m)).map(str::to_owned),
+        "how" | "prompt" | "skill" => {
+            let t = v.as_str().map(str::trim).filter(|t| !t.is_empty()).map(str::to_owned);
+            match field {
+                "how" => n.how = t,
+                "prompt" => n.prompt = t,
+                _ => n.skill = t,
+            }
+        }
         _ => return false,
     }
     true
@@ -2279,6 +2298,10 @@ fn check_edit(sets: &Value, n: &BTreeMap<String, Node>) -> Result<()> {
             "internal_owner" | "client_owner" | "delegated_by" | "decided_by" | "type" if !(v.is_null() || v.is_string()) => bail!("{k} must be text"),
             "likelihood" | "impact" if !(v.is_null() || level_of(v).is_some()) => bail!("{k} is null or one of {LEVELS:?}"),
             "links" => check_links(v)?,
+            "mode" if !(v.is_null() || v.as_str().is_some_and(|m| crate::taskmodes::MODES.contains(&m))) => bail!("mode is null or one of {:?}", crate::taskmodes::MODES),
+            "how" if !(v.is_null() || v.as_str().is_some_and(|t| t.chars().count() <= crate::taskmodes::MAX_HOW)) => bail!("how is text of at most {} characters", crate::taskmodes::MAX_HOW),
+            "prompt" if !(v.is_null() || v.as_str().is_some_and(|t| t.chars().count() <= crate::taskmodes::MAX_PROMPT)) => bail!("prompt is text of at most {} characters", crate::taskmodes::MAX_PROMPT),
+            "skill" if !(v.is_null() || v.as_str().is_some_and(crate::skills::valid_id)) => bail!("skill is null or a skill's id"),
             "description" if !(v.is_null() || v.as_str().is_some_and(|t| t.chars().count() <= MAX_DESC)) => bail!("description is text of at most {MAX_DESC} characters"),
             k if !HUMAN_FIELDS.contains(&k) => bail!("editable fields: {HUMAN_FIELDS:?}"),
             _ => {}
@@ -2593,7 +2616,33 @@ pub fn search_open(q: &str, not: Option<&str>) -> Vec<Value> {
 }
 
 /// The tree for the window and `ledger tree`: every node, the workstreams first.
-/// What one call changed in a project's work (the call's Actions tab): every history entry whose
+/// The tasks a call raised or moved in these threads that are still open — what is still to do from it (a call's
+/// action items aren't ticked; the tasks they became are): `{task, owner, due, state, link}`, each once.
+pub fn open_tasks_from(projects: &[String], stamp: &str) -> Vec<Value> {
+    let mut out: Vec<Value> = vec![];
+    for p in projects {
+        let Ok(c) = call_changes(p, stamp) else { continue };
+        for x in c["changes"].as_array().into_iter().flatten() {
+            let n = &x["node"];
+            let open = n["state"].as_str().is_some_and(|s| !closed(s));
+            // A change the verifier called wrong didn't happen (What moved hides it too).
+            if x["verdict"] == "wrong" || n["kind"] != "task" || !open || out.iter().any(|o| o["link"] == format!("echo://task/{p}/{}", n["id"].as_str().unwrap_or(""))) {
+                continue;
+            }
+            out.push(json!({"task": n["title"], "owner": n["owner"], "due": n["due"], "state": n["state"],
+                            "link": format!("echo://task/{p}/{}", n["id"].as_str().unwrap_or(""))}));
+        }
+    }
+    out
+}
+
+/// `open_tasks_from` for a call folder: its threads, its stamp.
+pub fn open_tasks_of_call(dir: &std::path::Path) -> Vec<Value> {
+    let projects: Vec<String> = crate::projects::of_call(dir).map(|ps| ps.into_iter().map(|(p, _)| p.id).collect()).unwrap_or_default();
+    open_tasks_from(&projects, &calls::stamp_of(dir))
+}
+
+/// What one call changed in a project's work (What moved, beside its minutes): every history entry whose
 /// evidence is this call, by node, in the order said — new nodes, status changes, dates, links,
 /// waits, criteria met — with the words, the verifier's mark, and the node as it is now. Mentions
 /// are left out (they change nothing). `read`: the sync has read the call; `queued`: it will.
@@ -2604,11 +2653,15 @@ pub fn call_changes(project: &str, stamp: &str) -> Result<Value> {
     let read = t.order.iter().any(|e| e == stamp);
     let queued = !read && pending(project)?.iter().any(|e| e["id"] == stamp);
     let mut out: Vec<Value> = vec![];
+    let (me, modes) = (crate::tasks::Me::of(crate::config::Config::load().ok().and_then(|c| c.me).as_ref()), crate::taskmodes::guesses());
     for n in t.nodes.values().filter(|n| n.state != "merged" && n.state != "deleted" && n.kind != "epic") {
         for h in n.history.iter().filter(|h| h["evidence"] == stamp && h["by"] != "human" && h["effect"] != "mention" && !h["op"].as_str().is_some_and(|o| o.starts_with("suggest_"))) {
             let mut c = h.clone();
             c["node"] = json!({"id": n.id, "kind": n.kind, "type": n.task_type, "title": n.title, "state": n.state, "due": n.due,
-                               "owner": n.internal_owner.as_ref().or(n.client_owner.as_ref())});
+                               "owner": n.internal_owner.as_ref().or(n.client_owner.as_ref()),
+                               // The user's own open task: who does it (the window's What moved beside the minutes).
+                               "mine": n.kind == "task" && crate::tasks::owner_of(n).is_some_and(|o| me.is(o)),
+                               "mode": crate::taskmodes::of(&modes, project, n)});
             if let Some(d) = h["depends_on"].as_str().and_then(|d| t.nodes.get(d)) {
                 c["depends_on_title"] = json!(d.title);
             }
@@ -2624,54 +2677,20 @@ fn words(s: &str) -> BTreeSet<String> {
     norm(s).split_whitespace().filter(|w| w.len() > 2).map(str::to_owned).collect()
 }
 
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
-fn hms(ts: &str) -> Option<f64> {
-    let p: Vec<f64> = ts.split(':').map(|x| x.parse().ok()).collect::<Option<_>>()?;
-    Some(p.iter().fold(0.0, |a, x| a * 60.0 + x))
-}
 
-/// The task an action item became, if any: one created from this call within a minute of the item's
-/// moment whose words share a third of the item's (or, with no moment, half). Deterministic.
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
-pub fn match_actions(actions: &[Value], changes: &[(String, Value)]) -> BTreeMap<String, Value> {
-    let mut out = BTreeMap::new();
-    let mut used = BTreeSet::new();
-    for a in actions {
-        let (Some(id), Some(text)) = (a["id"].as_str(), a["task"].as_str()) else { continue };
-        let aw = words(text);
-        if aw.is_empty() {
-            continue;
-        }
-        let best = changes
-            .iter()
-            .filter(|(p, c)| c["op"] == "create" && c["node"]["kind"] == "task" && !used.contains(&format!("{p}/{}", c["node"]["id"])))
-            .filter_map(|(p, c)| {
-                let tw = words(&format!("{} {}", c["node"]["title"].as_str().unwrap_or(""), c["quote"].as_str().unwrap_or("")));
-                let share = aw.intersection(&tw).count() as f64 / aw.len() as f64;
-                let near = a["t"].as_f64().zip(c["ts"].as_str().and_then(hms)).map(|(x, y)| (x - y).abs() <= 60.0);
-                let ok = match near {
-                    Some(true) => share >= 0.34,
-                    Some(false) => share >= 0.75,
-                    None => share >= 0.5,
-                };
-                ok.then_some((share + if near == Some(true) { 1.0 } else { 0.0 }, p, c))
-            })
-            .max_by(|x, y| x.0.total_cmp(&y.0));
-        if let Some((_, p, c)) = best {
-            used.insert(format!("{p}/{}", c["node"]["id"]));
-            out.insert(id.to_owned(), json!({"project": p, "id": c["node"]["id"], "title": c["node"]["title"], "state": c["node"]["state"]}));
-        }
-    }
-    out
-}
 
 pub fn tree(project: &str) -> Result<Value> {
     let t = fold_linked(project)?;
     let pend = pending(project)?.len();
     let mut nodes = serde_json::to_value(&t.nodes)?;
-    for (_, x) in nodes.as_object_mut().into_iter().flatten() {
+    let modes = crate::taskmodes::guesses();
+    for (id, x) in nodes.as_object_mut().into_iter().flatten() {
         if let Some(d) = x["description"].as_str().map(crate::minutes::markdown_html) {
             x["description_html"] = json!(d);
+        }
+        // Who does it, the user's choice or Echo's guess (the task's details show and change it).
+        if let Some(n) = t.nodes.get(id).filter(|n| n.kind == "task") {
+            x["who_does"] = crate::taskmodes::of(&modes, project, n);
         }
     }
     Ok(json!({
@@ -2765,20 +2784,16 @@ mod tests {
         ]).unwrap();
         mark_processed(&id, ev, "").unwrap();
         let c = call_changes(&id, ev).unwrap();
+        // Still to do from that call: its open tasks (not the story, not a mention), each once, by its link.
+        let todo = open_tasks_from(std::slice::from_ref(&id), ev);
+        assert_eq!(todo.len(), 1, "{todo:?}");
+        assert_eq!((todo[0]["task"].as_str(), todo[0]["link"].as_str()), (Some("SAML config"), Some(format!("echo://task/{id}/T001").as_str())));
         assert_eq!(c["read"], true);
         let ch = c["changes"].as_array().unwrap();
         assert_eq!(ch.len(), 2, "a mention changes nothing: {c}");
         assert_eq!(ch[0]["node"]["id"], "S001", "in the order said");
         assert_eq!(ch[1]["node"]["due"], "2026-10-30");
 
-        let all: Vec<(String, Value)> = ch.iter().map(|x| (id.clone(), x.clone())).collect();
-        let m = match_actions(&[
-            json!({"id": "a1", "task": "Have the SAML config ready by Friday", "t": 790.0}),
-            json!({"id": "a2", "task": "Book the Berlin flights", "t": 790.0}),
-            json!({"id": "a3", "task": "SAML config ready", "t": 3000.0}),
-        ], &all);
-        assert_eq!(m["a1"]["id"], "T001");
-        assert!(!m.contains_key("a2") && !m.contains_key("a3"), "unrelated words; a task taken once: {m:?}");
     }
 
     #[test]
@@ -2855,6 +2870,15 @@ mod tests {
         assert!(human_event(&id, &json!({"op": "edit", "node": "T001", "set": {"due": "soon"}})).is_err());
         assert!(human_event(&id, &json!({"op": "edit", "node": "T001", "set": {"state": "finished"}})).is_err());
         assert!(human_event(&id, &json!({"op": "edit", "node": "T999", "set": {"title": "x"}})).is_err());
+        // Who does it: the user's choice on the task, pinned; Echo's guess never overwrites it.
+        human_event(&id, &json!({"op": "edit", "node": "T001", "set": {"mode": "claude", "prompt": "Draft the SAML runbook.", "skill": "follow-up-mail"}})).unwrap();
+        let n = fold(&Ledger::of(&id).unwrap()).unwrap().nodes["T001"].clone();
+        assert_eq!((n.mode.as_deref(), n.prompt.as_deref(), n.skill.as_deref()), (Some("claude"), Some("Draft the SAML runbook."), Some("follow-up-mail")));
+        assert!(n.pinned.iter().any(|f| f == "mode"));
+        let guess = serde_json::from_value(json!({format!("{id}/T001"): {"mode": "manual", "how": "x"}})).unwrap();
+        assert_eq!(crate::taskmodes::of(&guess, &id, &n)["by"], "you", "the user's choice over Echo's guess");
+        assert!(human_event(&id, &json!({"op": "edit", "node": "T001", "set": {"mode": "robot"}})).is_err());
+        assert!(human_event(&id, &json!({"op": "edit", "node": "T001", "set": {"skill": "Rm -rf"}})).is_err());
         let c = human_event(&id, &json!({"op": "create", "kind": "task", "parent": "S001", "title": "Book the room"})).unwrap();
         assert_eq!(c["id"], "T002");
         assert!(human_event(&id, &json!({"op": "create", "kind": "task", "parent": "E01", "title": "No story"})).is_err());
