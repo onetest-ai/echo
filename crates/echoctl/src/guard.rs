@@ -68,8 +68,8 @@ pub const RUN_VAULT: &str = "ECHOCTL_RUN_VAULT";
 /// `RUN_MODE=vault`: the conversation's mode — `ask` (reads), `curate` (also edits, each one asked) or `research` (also
 /// searches the web, each page fetched asked).
 pub const RUN_CHAT: &str = "ECHOCTL_RUN_CHAT";
-/// The vault's sources folder, relative to its root (`raw_inbox`): never written by a vault's run. Set for an ingest
-/// run, and for a conversation in a vault that has one.
+/// The vault's sources folder, relative to its root: never written by a vault's run. Set for every conversation and
+/// ingest run (`raw_inbox` for a vault without one); without it they may do nothing.
 pub const RUN_SOURCES: &str = "ECHOCTL_RUN_SOURCES";
 
 /// The ledger steps a sync run may take (`echoctl project ledger <id> <step>`).
@@ -115,6 +115,9 @@ pub struct VaultScope {
     skills: Vec<String>,
     /// The sources folder, relative to the root (`RUN_SOURCES`): read, never written.
     sources: Option<PathBuf>,
+    /// Windows' name rules bind reads too (there `.git.` is `.git` and `aux.md` a device): `cfg!(windows)`, a field
+    /// so that both are tested.
+    windows: bool,
 }
 
 /// The kind of run in a vault.
@@ -561,7 +564,10 @@ impl VaultScope {
                     Some("research") => Chat::Research,
                     other => return Err(format!("{other:?} isn't a conversation's mode")),
                 };
-                Ok(VaultScope { root: folder(RUN_VAULT, "vault")?, mode: VaultMode::Chat(chat), skills, sources })
+                if sources.is_none() {
+                    return Err("the conversation names no sources folder".into());
+                }
+                Ok(VaultScope { root: folder(RUN_VAULT, "vault")?, mode: VaultMode::Chat(chat), skills, sources, windows: cfg!(windows) })
             }
             "ingest" => {
                 let copy = folder(RUN_DIR, "scratch copy")?;
@@ -577,7 +583,7 @@ impl VaultScope {
                 if skills.len() != 1 {
                     return Err("an ingest run loads one skill, the vault's ingest skill".into());
                 }
-                Ok(VaultScope { root: copy, mode: VaultMode::Ingest, skills, sources })
+                Ok(VaultScope { root: copy, mode: VaultMode::Ingest, skills, sources, windows: cfg!(windows) })
             }
             "lint" => {
                 let root = folder(RUN_VAULT, "vault")?;
@@ -585,7 +591,7 @@ impl VaultScope {
                 if run.starts_with(&root) {
                     return Err(format!("the AI check's folder {} is inside the vault", run.display()));
                 }
-                Ok(VaultScope { root, mode: VaultMode::Lint { findings: run.join("findings.json") }, skills: vec![], sources: None })
+                Ok(VaultScope { root, mode: VaultMode::Lint { findings: run.join("findings.json") }, skills: vec![], sources: None, windows: cfg!(windows) })
             }
             other => Err(format!("{other} isn't a run in a vault")),
         }
@@ -611,6 +617,8 @@ impl VaultScope {
                 self.readable(&p, own_results(call).as_deref())?;
                 Ok(Decision::Allow)
             }
+            // Claude Code calls it `path`: one that said `file_path` would be judged at the root and search elsewhere.
+            "Grep" | "Glob" if input.get("file_path").is_some() => Err(format!("{tool} takes a path, not a file_path")),
             "Grep" | "Glob" => {
                 let results = own_results(call);
                 // No path: where Claude Code works, the root Echo started it in.
@@ -668,13 +676,13 @@ impl VaultScope {
         }
         match &self.mode {
             VaultMode::Chat(Chat::Curate) => {
-                let rel = self.rel(&p)?;
+                let rel = self.plain_rel(&p)?;
                 self.writable(rel)?;
                 Ok(Decision::Ask(format!("Echo shows every change to the vault before it is made: {}", rel.display())))
             }
             VaultMode::Chat(_) => Err("this conversation reads the vault; it changes nothing (Curate does)".into()),
             VaultMode::Ingest => {
-                let rel = self.rel(&p)?;
+                let rel = self.plain_rel(&p)?;
                 // The run's own notes for Echo: its steps and what it changed.
                 if rel == Path::new(".echo-ingest/changes.json") || rel == Path::new(".echo-ingest/steps.json") {
                     return Ok(Decision::Allow);
@@ -704,21 +712,28 @@ impl VaultScope {
         }
     }
 
-    /// Readable: inside the root but not git's folder, or the session's own saved tool output (`results`).
+    /// Readable: inside the root but not git's folder, or the session's own saved tool output (`results`). Its names
+    /// need be plain only on Windows, which reads `.git.` as `.git`: elsewhere `Acme Inc./` and `aux.md` are just names.
     fn readable(&self, p: &Path, results: Option<&Path>) -> Result<(), String> {
         if results.is_some_and(|r| p.starts_with(r)) {
             return Ok(());
         }
-        if self.rel(p)?.components().any(|c| lower(c) == ".git") {
+        let rel = if self.windows { self.plain_rel(p)? } else { self.rel(p)? };
+        if rel.components().any(|c| lower(c) == ".git") {
             return Err(format!("{} is git's folder, not the vault's", p.display()));
         }
         Ok(())
     }
 
-    /// `p` (resolved) inside the root, each name in it plain; refused outside it.
+    /// `p` (resolved) inside the root; refused outside it.
     fn rel<'a>(&self, p: &'a Path) -> Result<&'a Path, String> {
         let what = if self.mode == VaultMode::Ingest { "the run's copy of the vault" } else { "the vault" };
-        let rel = p.strip_prefix(&self.root).map_err(|_| format!("only {what} can be used, not {}", p.display()))?;
+        p.strip_prefix(&self.root).map_err(|_| format!("only {what} can be used, not {}", p.display()))
+    }
+
+    /// …and each name in it plain (a write's, on every system).
+    fn plain_rel<'a>(&self, p: &'a Path) -> Result<&'a Path, String> {
+        let rel = self.rel(p)?;
         match rel.components().map(|c| c.as_os_str().to_string_lossy()).find(|n| !plain(n)) {
             Some(n) => Err(format!("“{n}” isn't a plain file name ({})", p.display())),
             None => Ok(rel),
@@ -730,7 +745,11 @@ impl VaultScope {
     /// `[.]git`), or its fixed part — the folders before its first wildcard, absolute or from `from` — isn't readable
     /// (a link out). Several globs in one (Grep splits its `glob` at spaces and commas) each on its own.
     fn glob(&self, g: &str, from: &Path, results: Option<&Path>) -> Result<(), String> {
-        for one in g.split(|c: char| c.is_whitespace() || c == ',').filter(|s| !s.is_empty()) {
+        // Claude Code splits at JavaScript's whitespace, which Rust's misses some of (U+FEFF).
+        if g.chars().any(bent) {
+            return Err(format!("the pattern {g:?} holds a character no path does (an invisible one, or whitespace but a space)"));
+        }
+        for one in g.split([' ', ',']).filter(|s| !s.is_empty()) {
             let one = one.replace('\\', "/");
             let parts: Vec<&str> = one.split('/').collect();
             if one.starts_with('~') || one.contains(['{', '}']) || parts.contains(&"..") {
@@ -785,15 +804,20 @@ fn named(raw: &str, base: &Path) -> PathBuf {
 }
 
 /// A path a run in a vault names, as it is on disk (untrusted-text R4): a relative one, or none, from `base`; links
-/// resolved — and refused where one points nowhere, as a write would go through it. Refused whatever it resolves to:
-/// one from home (`~`, which Claude Code expands), one going up (`..`: past a link, the folder above isn't the one
-/// Claude Code means) or holding a control character.
+/// resolved — and refused where one points nowhere, as a write would go through it. Refused by its text alone, before
+/// any file-system call: a network path (`\\host\share`, `//host`, `\\?\UNC\…`, `\\.\…`: looking it up has Windows
+/// connect to the host, maybe with the user's credentials); one from home (`~`, which Claude Code expands); one going
+/// up (`..`: past a link, the folder above isn't the one Claude Code means); one holding a character no path does
+/// (`bent`) or that trimming changes (Claude Code trims Grep's and Glob's `path`, JavaScript's `trim()`).
 fn vault_path(raw: Option<&str>, base: &Path) -> Result<PathBuf, String> {
     let Some(raw) = raw.filter(|r| !r.is_empty()) else {
         return Ok(base.to_path_buf());
     };
-    if raw.starts_with('~') || raw.split(['/', '\\']).any(|s| s == "..") || raw.chars().any(char::is_control) {
-        return Err(format!("{raw:?} isn't a path a run can follow (no ~, .. or control characters)"));
+    if raw.len() >= 2 && raw.as_bytes()[..2].iter().all(|b| matches!(b, b'/' | b'\\')) {
+        return Err(format!("{raw} is a network path: not looked up"));
+    }
+    if raw.starts_with('~') || raw.split(['/', '\\']).any(|s| s == "..") || raw.trim() != raw || raw.chars().any(bent) {
+        return Err(format!("{raw:?} isn't a path a run can follow (no ~, .., invisible characters or whitespace but a space inside)"));
     }
     let full = named(raw, base);
     let mut rest = vec![];
@@ -811,6 +835,15 @@ fn vault_path(raw: Option<&str>, base: &Path) -> Result<PathBuf, String> {
         rest.push(name);
         at = parent;
     }
+}
+
+/// A character no path a run names holds: a control or format character (Unicode Cf — U+FEFF, U+200B…: invisible),
+/// or whitespace other than the ASCII space. JavaScript's `trim()` and `\s`, which Claude Code uses on paths and
+/// globs, take U+FEFF as whitespace; Rust's `is_whitespace` doesn't.
+fn bent(c: char) -> bool {
+    c.is_control()
+        || (c.is_whitespace() && c != ' ')
+        || matches!(c as u32, 0xAD | 0x600..=0x605 | 0x61C | 0x6DD | 0x70F | 0x890..=0x891 | 0x8E2 | 0x180E | 0x200B..=0x200F | 0x202A..=0x202E | 0x2060..=0x206F | 0xFEFF | 0xFFF9..=0xFFFB | 0x110BD | 0x110CD | 0x13430..=0x1343F | 0x1BCA0..=0x1BCA3 | 0x1D173..=0x1D17A | 0xE0001 | 0xE0020..=0xE007F)
 }
 
 /// A name that means one file wherever Echo runs: no stream (`:`), no trailing dot or space (Windows drops them), no
@@ -1855,16 +1888,19 @@ mod tests {
             vars.extend(sources.map(|x| (RUN_SOURCES, x.into())));
             Scope::from_vars(vars_of(vars))
         };
-        assert!(chat(Some(os(&v)), Some("ask"), None).is_ok(), "a vault without a sources folder");
-        assert!(chat(None, Some("ask"), None).is_err(), "no vault");
-        assert!(chat(Some("".into()), Some("ask"), None).is_err());
-        assert!(chat(Some("vault".into()), Some("ask"), None).is_err(), "a relative root");
-        assert!(chat(Some(os(&root.join("gone"))), Some("ask"), None).is_err());
-        assert!(chat(Some(os(&v.join("CLAUDE.md"))), Some("ask"), None).is_err(), "a file");
-        assert!(chat(Some(os(&v)), None, None).is_err(), "no mode");
-        assert!(chat(Some(os(&v)), Some("edit"), None).is_err(), "an unknown mode");
-        assert!(chat(Some(os(&v)), Some("Curate"), None).is_err());
-        assert!(chat(Some(os(&v)), Some("curate"), Some("")).is_ok(), "an empty sources folder is none");
+        let inbox = Some("raw_inbox");
+        assert!(chat(Some(os(&v)), Some("ask"), inbox).is_ok());
+        // Echo always names the sources folder (`raw_inbox` for a vault without one, ruling R11).
+        assert!(chat(Some(os(&v)), Some("ask"), None).is_err(), "no sources folder");
+        assert!(chat(Some(os(&v)), Some("curate"), Some("")).is_err(), "an empty one");
+        assert!(chat(None, Some("ask"), inbox).is_err(), "no vault");
+        assert!(chat(Some("".into()), Some("ask"), inbox).is_err());
+        assert!(chat(Some("vault".into()), Some("ask"), inbox).is_err(), "a relative root");
+        assert!(chat(Some(os(&root.join("gone"))), Some("ask"), inbox).is_err());
+        assert!(chat(Some(os(&v.join("CLAUDE.md"))), Some("ask"), inbox).is_err(), "a file");
+        assert!(chat(Some(os(&v)), None, inbox).is_err(), "no mode");
+        assert!(chat(Some(os(&v)), Some("edit"), inbox).is_err(), "an unknown mode");
+        assert!(chat(Some(os(&v)), Some("Curate"), inbox).is_err());
         for bad in ["../outside", "/abs", "raw_inbox/../..", "./raw_inbox"] {
             assert!(chat(Some(os(&v)), Some("curate"), Some(bad)).is_err(), "sources {bad:?}");
         }
@@ -1966,9 +2002,105 @@ mod tests {
             assert!(denied(s.decide(&tool("Skill", input.clone()))), "{input}");
         }
         // On a managed profile the vault's skills come as its plugin: their full names, and only those.
-        let managed = Scope::from_vars(vars_of(vec![(RUN_MODE, "vault".into()), (RUN_VAULT, v.as_os_str().to_owned()), (RUN_CHAT, "ask".into()), (RUN_SKILLS, "v1:process-inbox".into())])).unwrap();
+        let managed = Scope::from_vars(vars_of(vec![(RUN_MODE, "vault".into()), (RUN_VAULT, v.as_os_str().to_owned()), (RUN_CHAT, "ask".into()), (RUN_SKILLS, "v1:process-inbox".into()), (RUN_SOURCES, "raw_inbox".into())])).unwrap();
         assert_eq!(managed.decide(&tool("Skill", json!({"skill": "v1:process-inbox"}))), Decision::Allow);
         assert!(denied(managed.decide(&tool("Skill", json!({"skill": "process-inbox"})))));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn unicode_whitespace_never_bends_a_path() {
+        let (root, v) = vault_fixture("unicode");
+        let s = chat_scope(&v, "curate");
+        let outside = p(&root.join("outside"));
+        // Claude Code trims Grep's and Glob's `path` (JavaScript's `trim()`) before it searches: what it searches must
+        // be what the guard judged.
+        for path in [
+            "\u{a0}/etc".to_string(),
+            format!("\u{feff}{outside}"),
+            ".git\u{a0}".into(),
+            "knowledge/linked-out\u{a0}".into(),
+            "\u{a0}~/x".into(),
+            " /etc".into(),
+            format!("{outside}\u{3000}"),
+            "knowledge\u{2003}".into(),
+            "know\u{200b}ledge".into(),
+            "knowledge\u{2028}".into(),
+        ] {
+            for t in ["Grep", "Glob"] {
+                assert!(denied(s.decide(&tool(t, json!({"pattern": "*", "path": path})))), "{t} path {path:?}");
+            }
+            assert!(denied(s.decide(&tool("Glob", json!({"pattern": format!("{path}/*")})))), "Glob pattern {path:?}");
+        }
+        // Claude Code splits Grep's `glob` at JavaScript's whitespace, U+FEFF among it.
+        for glob in ["*.md\u{feff}.git/**", "*.md\u{a0}.git/**", "\u{feff}/etc/*"] {
+            assert!(denied(s.decide(&tool("Grep", json!({"pattern": "x", "glob": glob})))), "{glob:?}");
+        }
+        for t in ["Read", "Write", "Edit"] {
+            let f = format!("{}\u{feff}", p(&v.join("knowledge/clients/acme.md")));
+            assert!(denied(s.decide(&tool(t, json!({"file_path": f, "content": "x"})))), "{t}");
+        }
+        // An ASCII space inside a name stays part of the name.
+        assert!(asked(s.decide(&tool("Write", json!({"file_path": p(&v.join("knowledge/clients/Acme Corp.md")), "content": "x"})))));
+        assert_eq!(s.decide(&tool("Grep", json!({"pattern": "x", "path": "knowledge/clients", "glob": "Acme Corp*"}))), Decision::Allow);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn network_paths_are_refused_by_their_text() {
+        // Looking one up has Windows connect to the host, maybe with the user's credentials.
+        let (root, v) = vault_fixture("unc");
+        let s = chat_scope(&v, "curate");
+        for path in [r"\\host\share\x.md", "//host/share/x.md", r"\\?\UNC\host\share\x.md", r"\\.\pipe\x", r"/\host\share\x.md", r"\/host/share/x.md"] {
+            for (t, input) in [
+                ("Read", json!({"file_path": path})),
+                ("Write", json!({"file_path": path, "content": "x"})),
+                ("Grep", json!({"pattern": "x", "path": path})),
+                ("Glob", json!({"pattern": "*", "path": path})),
+                ("Glob", json!({"pattern": format!("{path}/*")})),
+            ] {
+                assert!(denied(s.decide(&tool(t, input.clone()))), "{t} {input}");
+            }
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_search_with_a_file_path_is_refused() {
+        // Claude Code names it `path`; a hook that saw the raw `file_path` would judge the root instead.
+        let (root, v) = vault_fixture("file-path");
+        let s = chat_scope(&v, "ask");
+        for t in ["Grep", "Glob"] {
+            for fp in [json!("/etc"), json!(p(&v.join("knowledge"))), Value::Null] {
+                assert!(denied(s.decide(&tool(t, json!({"pattern": "*", "file_path": fp})))), "{t} {fp}");
+            }
+        }
+        assert_eq!(s.decide(&tool("Grep", json!({"pattern": "x", "path": p(&v.join("knowledge"))}))), Decision::Allow);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    // The odd names can't be made on Windows.
+    #[cfg(unix)]
+    #[test]
+    fn odd_names_are_read_except_on_windows() {
+        let (root, v) = vault_fixture("odd-names");
+        put(&v, "knowledge/clients/Acme Inc./x.md");
+        put(&v, "knowledge/aux.md");
+        let odd = ["knowledge/clients/Acme Inc./x.md", "knowledge/aux.md"];
+        let mut s = chat_scope(&v, "curate");
+        s.vault.as_mut().unwrap().windows = false;
+        for f in odd {
+            assert_eq!(s.decide(&tool("Read", json!({"file_path": p(&v.join(f))}))), Decision::Allow, "{f}");
+            assert_eq!(s.decide(&tool("Grep", json!({"pattern": "x", "path": p(&v.join(f))}))), Decision::Allow, "{f}");
+            assert!(denied(s.decide(&tool("Write", json!({"file_path": p(&v.join(f)), "content": "x"})))), "{f}: never written");
+        }
+        // Windows takes `.git.` as `.git` and `aux.md` as a device: there such a name isn't read either.
+        s.vault.as_mut().unwrap().windows = true;
+        for f in odd.into_iter().chain([".git./config", ".git /config"]) {
+            assert!(denied(s.decide(&tool("Read", json!({"file_path": p(&v.join(f))})))), "{f}");
+            assert!(denied(s.decide(&tool("Write", json!({"file_path": p(&v.join(f)), "content": "x"})))), "{f}");
+        }
+        assert_eq!(s.decide(&tool("Read", json!({"file_path": p(&v.join("knowledge/clients/acme.md"))}))), Decision::Allow);
         let _ = fs::remove_dir_all(&root);
     }
 
