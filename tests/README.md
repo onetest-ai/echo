@@ -33,7 +33,6 @@ Run by hand before a release, on a real machine with a real Teams call.
 | [02-permissions.md](02-permissions.md) | Microphone, System Audio Recording, Accessibility, Screen Recording |
 | [03-recording.md](03-recording.md) | Arming, recording, stopping, interruptions |
 | [04-transcription.md](04-transcription.md) | Transcript quality, languages, audio removal |
-| [05-window.md](05-window.md) | The Echo window: calls, tabs, calendar views |
 | [06-calendar-chat.md](06-calendar-chat.md) | Microsoft 365 sign-in, scheduled recordings, meeting chat |
 | [07-claude-plugin.md](07-claude-plugin.md) | Claude Code plugin: setup, automatic minutes, Write minutes, live pane |
 | [08-cli.md](08-cli.md) | `echoctl` on the PATH |
