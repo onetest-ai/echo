@@ -576,6 +576,10 @@ pub fn start_scheduler() {
             if let Err(e) = crate::calls::classify(&soon) {
                 eprintln!("meeting types: {e:#}");
             }
+            // The user's own open tasks: who can do each, Claude or they (once a day a task, until they choose).
+            if let Err(e) = crate::taskmodes::classify() {
+                eprintln!("task modes: {e:#}");
+            }
         }
         std::thread::sleep(std::time::Duration::from_secs(240));
     });

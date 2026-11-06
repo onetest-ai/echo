@@ -34,9 +34,9 @@ const VERIFIED_OPS: [&str; 4] = ["ac_met", "link", "waiting", "answer"];
 const KINDS: [&str; 6] = ["epic", "story", "task", "risk", "decision", "question"];
 const TASK_TYPES: [&str; 3] = ["action", "session", "dependency"];
 const CLOSED: [&str; 4] = ["done", "cancelled", "merged", "deleted"];
-const HUMAN_FIELDS: [&str; 16] = [
+const HUMAN_FIELDS: [&str; 20] = [
     "title", "internal_owner", "client_owner", "due", "state", "parent", "type", "client_owed", "waiting_for", "column", "links", "description", "delegated_by",
-    "decided_by", "likelihood", "impact",
+    "decided_by", "likelihood", "impact", "mode", "how", "prompt", "skill",
 ];
 /// A risk's likelihood and impact.
 const LEVELS: [&str; 3] = ["low", "med", "high"];
@@ -1104,6 +1104,12 @@ pub struct Node {
     /// A risk's likelihood and impact: low | med | high.
     pub likelihood: Option<String>,
     pub impact: Option<String>,
+    /// Who does it (`taskmodes`): `claude` — Claude can, with `prompt` (what to hand back) and a `skill`; `manual` —
+    /// the user, with `how`. Only the user's choice is here; Echo's guess is kept beside the ledger.
+    pub mode: Option<String>,
+    pub how: Option<String>,
+    pub prompt: Option<String>,
+    pub skill: Option<String>,
     #[serde(skip)]
     unlinked: Vec<String>,
     pub created: Option<String>,
@@ -1199,6 +1205,10 @@ fn node_of(e: &Value) -> Node {
         decided_by: s(&f["decided_by"]),
         likelihood: level_of(&f["likelihood"]),
         impact: level_of(&f["impact"]),
+        mode: None,
+        how: None,
+        prompt: None,
+        skill: None,
         unlinked: vec![],
         created: s(&e["date"]),
         created_in: s(&e["evidence"]),
@@ -1263,6 +1273,15 @@ fn set_field(n: &mut Node, field: &str, v: &Value, human: bool) -> bool {
         "decided_by" => n.decided_by = s(v),
         "likelihood" => n.likelihood = level_of(v),
         "impact" => n.impact = level_of(v),
+        "mode" => n.mode = v.as_str().filter(|m| crate::taskmodes::MODES.contains(m)).map(str::to_owned),
+        "how" | "prompt" | "skill" => {
+            let t = v.as_str().map(str::trim).filter(|t| !t.is_empty()).map(str::to_owned);
+            match field {
+                "how" => n.how = t,
+                "prompt" => n.prompt = t,
+                _ => n.skill = t,
+            }
+        }
         _ => return false,
     }
     true
@@ -2279,6 +2298,10 @@ fn check_edit(sets: &Value, n: &BTreeMap<String, Node>) -> Result<()> {
             "internal_owner" | "client_owner" | "delegated_by" | "decided_by" | "type" if !(v.is_null() || v.is_string()) => bail!("{k} must be text"),
             "likelihood" | "impact" if !(v.is_null() || level_of(v).is_some()) => bail!("{k} is null or one of {LEVELS:?}"),
             "links" => check_links(v)?,
+            "mode" if !(v.is_null() || v.as_str().is_some_and(|m| crate::taskmodes::MODES.contains(&m))) => bail!("mode is null or one of {:?}", crate::taskmodes::MODES),
+            "how" if !(v.is_null() || v.as_str().is_some_and(|t| t.chars().count() <= crate::taskmodes::MAX_HOW)) => bail!("how is text of at most {} characters", crate::taskmodes::MAX_HOW),
+            "prompt" if !(v.is_null() || v.as_str().is_some_and(|t| t.chars().count() <= crate::taskmodes::MAX_PROMPT)) => bail!("prompt is text of at most {} characters", crate::taskmodes::MAX_PROMPT),
+            "skill" if !(v.is_null() || v.as_str().is_some_and(|k| !k.is_empty() && k.len() <= 64 && k.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'))) => bail!("skill is null or a skill's id"),
             "description" if !(v.is_null() || v.as_str().is_some_and(|t| t.chars().count() <= MAX_DESC)) => bail!("description is text of at most {MAX_DESC} characters"),
             k if !HUMAN_FIELDS.contains(&k) => bail!("editable fields: {HUMAN_FIELDS:?}"),
             _ => {}
@@ -2855,6 +2878,15 @@ mod tests {
         assert!(human_event(&id, &json!({"op": "edit", "node": "T001", "set": {"due": "soon"}})).is_err());
         assert!(human_event(&id, &json!({"op": "edit", "node": "T001", "set": {"state": "finished"}})).is_err());
         assert!(human_event(&id, &json!({"op": "edit", "node": "T999", "set": {"title": "x"}})).is_err());
+        // Who does it: the user's choice on the task, pinned; Echo's guess never overwrites it.
+        human_event(&id, &json!({"op": "edit", "node": "T001", "set": {"mode": "claude", "prompt": "Draft the SAML runbook.", "skill": "follow-up-mail"}})).unwrap();
+        let n = fold(&Ledger::of(&id).unwrap()).unwrap().nodes["T001"].clone();
+        assert_eq!((n.mode.as_deref(), n.prompt.as_deref(), n.skill.as_deref()), (Some("claude"), Some("Draft the SAML runbook."), Some("follow-up-mail")));
+        assert!(n.pinned.iter().any(|f| f == "mode"));
+        let guess = serde_json::from_value(json!({format!("{id}/T001"): {"mode": "manual", "how": "x"}})).unwrap();
+        assert_eq!(crate::taskmodes::of(&guess, &id, &n)["by"], "you", "the user's choice over Echo's guess");
+        assert!(human_event(&id, &json!({"op": "edit", "node": "T001", "set": {"mode": "robot"}})).is_err());
+        assert!(human_event(&id, &json!({"op": "edit", "node": "T001", "set": {"skill": "Rm -rf"}})).is_err());
         let c = human_event(&id, &json!({"op": "create", "kind": "task", "parent": "S001", "title": "Book the room"})).unwrap();
         assert_eq!(c["id"], "T002");
         assert!(human_event(&id, &json!({"op": "create", "kind": "task", "parent": "E01", "title": "No story"})).is_err());
