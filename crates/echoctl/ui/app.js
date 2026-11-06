@@ -2773,17 +2773,7 @@ document.addEventListener('click', (e) => {
   if (!t) return
   // Who does it: the user's choice, kept on the task (pinned: Echo's guess never overwrites it).
   if (t.dataset.modeSet) {
-    send({ cmd: 'project', op: 'ledger', id: t.dataset.project, body: { op: 'edit', node: t.dataset.node, set: { mode: t.dataset.modeSet } } })
-    setTimeout(async () => {
-      // The details' own tree (the switch is there), then the view under them.
-      if (S.pj.work && S.pj.sel === t.dataset.project) await loadWork()
-      if (S.view === 'today') await loadToday()
-      else if (S.view === 'tasks') await loadTasks()
-      else if (S.view === 'projects') await loadProject()
-      else if (S.selected) await loadCall(S.selected)
-      render()
-    }, 400)
-    return
+    return ledgerEdit({ op: 'edit', node: t.dataset.node, set: { mode: t.dataset.modeSet } }, t.dataset.project)
   }
   if (t.dataset.scSkill !== undefined && S.claudeSend) {
     S.claudeSend.words = (($('#sc-words') || {}).value || '')
@@ -4139,11 +4129,17 @@ document.addEventListener('input', (e) => {
   }, 250)
 })
 PANEL_VIEWS.push({ id: 'work-item', label: 'Details', icon: ICON('<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/>'), area: 'right', when: () => ((S.view === 'projects' && S.pj.tab === 'work') || S.pj.inline === S.view) && !!S.pj.node, render: workPanel })
-function ledgerEdit(body) {
-  send({ cmd: 'project', op: 'ledger', id: S.pj.sel, body })
+function ledgerEdit(body, project = S.pj.sel) {
+  send({ cmd: 'project', op: 'ledger', id: project, body })
   setTimeout(async () => {
     if (S.view === 'projects') await loadProject()
-    else { await loadWork(); if (S.view === 'tasks') await loadTasks(); else if (S.selected) await loadCall(S.selected) }
+    else {
+      if (S.pj.work && S.pj.sel === project) await loadWork()
+      // Today's cards carry the task's mode (its ✦ the prompt): read again too.
+      if (S.view === 'today') await loadToday()
+      else if (S.view === 'tasks') await loadTasks()
+      else if (S.selected) await loadCall(S.selected)
+    }
     render()
   }, 300)
 }

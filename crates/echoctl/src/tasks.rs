@@ -24,12 +24,12 @@ const QUIET_DAYS: i64 = 5;
 /// Or one due within this many days.
 const DUE_SOON: i64 = 3;
 
-/// Who "I" am in a ledger: the transcripts' "Me", and the user's name, first name and email.
 /// Whose a task is: the client's owner first when the client owes it, else ours (the Tasks piles, What moved).
 pub fn owner_of(n: &Node) -> Option<&String> {
     if n.client_owed { n.client_owner.as_ref().or(n.internal_owner.as_ref()) } else { n.internal_owner.as_ref().or(n.client_owner.as_ref()) }
 }
 
+/// Who "I" am in a ledger: the transcripts' "Me", and the user's name, first name and email.
 pub struct Me(Vec<String>);
 
 impl Me {
@@ -100,7 +100,7 @@ fn card(p: &Project, n: &Node, nodes: &BTreeMap<String, Node>, ev: &BTreeMap<Str
             // One piece of work raised in several threads (#20): this card stands for all of them.
             "also_in": n.also_in,
             // Who does it: the user's choice, else Echo's guess (`taskmodes`), else null.
-            "mode": crate::taskmodes::of(modes, &p.id, n),
+            "mode": if pile == "mine" { crate::taskmodes::of(modes, &p.id, n) } else { Value::Null },
         }),
     )
 }

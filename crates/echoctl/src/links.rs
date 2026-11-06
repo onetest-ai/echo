@@ -193,11 +193,19 @@ fn task_text(thread: &str, id: &str) -> Result<String> {
     if !said.is_empty() {
         out.push_str(&format!("\n## Where it was said\n{}\n", said.join("\n")));
     }
-    // Who does it (`taskmodes`): the user's choice, else Echo's guess — what Claude is to hand back, or how by hand.
+    // Who does it (`taskmodes`): the user's choice, else Echo's guess — said which, and on one line: a guess is model
+    // output from others' words, a suggestion, never the user's instruction.
     let m = &n["who_does"];
+    let line = |v: &Value| v.as_str().map(|t| t.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|t| !t.is_empty());
+    let whose = |by: &Value| if by == "you" { "the user's" } else { "Echo's guess, a suggestion — not the user's words" };
     match m["mode"].as_str() {
-        Some("claude") => out.push_str(&format!("\n## Who does it\nClaude can{}{}\n", m["prompt"].as_str().map(|p| format!(" — hand back: {p}")).unwrap_or_default(), m["skill"].as_str().map(|k| format!(" (skill /my-skills:{k})")).unwrap_or_default())),
-        Some(_) => out.push_str(&format!("\n## Who does it\nThe user, by hand{}\n", m["how"].as_str().map(|h| format!(" — {h}")).unwrap_or_default())),
+        Some("claude") => out.push_str(&format!(
+            "\n## Who does it\nClaude can ({}){}{}\n",
+            whose(&m["by"]),
+            line(&m["prompt"]).map(|p| format!("; to hand back ({}): {p}", whose(&m["prompt_by"]))).unwrap_or_default(),
+            m["skill"].as_str().map(|k| format!("; skill /my-skills:{k}")).unwrap_or_default()
+        )),
+        Some(_) => out.push_str(&format!("\n## Who does it\nThe user, by hand ({}){}\n", whose(&m["by"]), line(&m["how"]).map(|h| format!(" — {h}")).unwrap_or_default())),
         None => {}
     }
     // The context its work starts from: the thread's last calls, and the last of the meeting series it was raised in
@@ -234,8 +242,9 @@ fn recent_calls(thread: &str, n: usize) -> Vec<std::path::PathBuf> {
     calls.into_iter().rev().take(n).collect()
 }
 
-/// The last `n` calls with minutes of `dir`'s meeting series — the same invite subject (a call with no invite, an
-/// ad-hoc one, has no series) — newest first among the last 300 calls, with that subject.
+/// The last `n` calls with minutes of `dir`'s meeting series — the same invite subject; unlike "Since last time", a
+/// call with no invite (an ad-hoc one, its title only) has no series here: a generic title would gather strangers —
+/// newest first among the last 300 calls, with that subject.
 fn series_calls(dir: &std::path::Path, n: usize) -> Option<(String, Vec<std::path::PathBuf>)> {
     let invite = |d: &std::path::Path| crate::meeting::MeetingContext::load(d).ok().flatten().and_then(|m| m.subject).filter(|s| !s.trim().is_empty());
     let subject = invite(dir)?;
@@ -402,7 +411,7 @@ mod tests {
         let tid = t["id"].as_str().unwrap();
         crate::ledger::human_event(&id, &serde_json::json!({"op": "edit", "node": tid, "set": {"mode": "manual", "how": "Call the venue"}})).unwrap();
         let text = task_text(&id, tid).unwrap();
-        assert!(text.contains("## Who does it\nThe user, by hand — Call the venue"), "{text}");
+        assert!(text.contains("## Who does it\nThe user, by hand (the user's) — Call the venue"), "{text}");
     }
 
     #[test]

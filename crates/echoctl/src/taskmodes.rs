@@ -29,7 +29,8 @@ pub fn guesses() -> Map<String, Value> {
 /// mode is theirs); `by`: "you" when they chose the mode, "guess" when Echo did; null when neither has one.
 pub fn of(guesses: &Map<String, Value>, project: &str, n: &Node) -> Value {
     let g = guesses.get(&format!("{project}/{}", n.id)).cloned().unwrap_or_default();
-    let pick = |mine: &Option<String>, k: &str| mine.clone().map(Value::from).unwrap_or_else(|| g[k].clone());
+    // A field the user set — or cleared — is theirs (pinned); only one they never touched falls back to the guess.
+    let pick = |mine: &Option<String>, k: &str| if n.pinned.iter().any(|p| p == k) { json!(mine) } else { mine.clone().map(Value::from).unwrap_or_else(|| g[k].clone()) };
     let mode = pick(&n.mode, "mode");
     if !mode.is_string() {
         return Value::Null;
@@ -37,7 +38,7 @@ pub fn of(guesses: &Map<String, Value>, project: &str, n: &Node) -> Value {
     json!({"mode": mode, "how": pick(&n.how, "how"), "prompt": pick(&n.prompt, "prompt"), "skill": pick(&n.skill, "skill"),
            "by": if n.mode.is_some() { "you" } else { "guess" },
            // A guessed prompt is model output from others' words: shown as a suggestion, never typed as the user's.
-           "prompt_by": if n.prompt.is_some() { "you" } else { "guess" }})
+           "prompt_by": if n.pinned.iter().any(|p| p == "prompt") { "you" } else { "guess" }})
 }
 
 const SYSTEM: &str = "You sort the user's own open tasks. Can Claude do each one for them — draft and send a mail or a \
@@ -66,8 +67,17 @@ fn guess_of(x: &Value, skills: &[String]) -> Option<Value> {
 pub fn classify_in_background() {
     use std::sync::atomic::{AtomicBool, Ordering};
     static RUNNING: AtomicBool = AtomicBool::new(false);
-    if RUNNING.swap(true, Ordering::SeqCst) {
-        return;
+    // At most once an hour (a pass folds every thread's ledger), and one at a time.
+    static LAST: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+    {
+        let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+        if last.is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(3600)) {
+            return;
+        }
+        if RUNNING.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        *last = Some(std::time::Instant::now());
     }
     std::thread::spawn(|| {
         if let Err(e) = classify() {
@@ -78,7 +88,8 @@ pub fn classify_in_background() {
 }
 
 /// Guess the mode of the user's open tasks that have none (each tried once a day): a call per thread, on its
-/// AI profile (a task's words go only there), at most 20 tasks a call. How many were guessed.
+/// AI profile (a task's words go only there), at most 8 tasks a call. How many were guessed. Guesses for what is no
+/// longer one of the user's open tasks go.
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn classify() -> Result<usize> {
     let today = chrono::Local::now().date_naive();
@@ -86,6 +97,13 @@ pub fn classify() -> Result<usize> {
     let mine = crate::tasks::across(&[], today, &now)?;
     let have = guesses();
     let day = today.to_string();
+    let open: Vec<String> = mine["piles"]["mine"].as_array().into_iter().flatten().filter_map(|t| Some(format!("{}/{}", t["project"].as_str()?, t["id"].as_str()?))).collect();
+    if have.keys().any(|k| !open.contains(k)) {
+        crate::calls::update_state(&file(), |all: &mut Map<String, Value>| {
+            all.retain(|k, _| open.contains(k));
+            Ok(())
+        })?;
+    }
     let mut by_thread: Vec<(String, Vec<String>)> = vec![];
     for t in mine["piles"]["mine"].as_array().into_iter().flatten() {
         let (Some(p), Some(id)) = (t["project"].as_str(), t["id"].as_str()) else { continue };

@@ -54,10 +54,7 @@ fn time(s: Option<&str>) -> Option<DateTime<Utc>> {
 /// Today's meetings still to come or going on, each with its threads and its prep's state — "Coming up today".
 pub fn upcoming() -> Value {
     let now = Utc::now();
-    // Set to record, or recorded today: kept as Today keeps them, accepted or not.
-    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-    let mut scheduled: Vec<String> = crate::schedule::load().into_iter().filter_map(|m| m.id).collect();
-    scheduled.extend(crate::calls::all_calls().into_iter().rev().take_while(|d| crate::calls::stamp_of(d).starts_with(&today)).filter_map(|d| MeetingContext::load(&d).ok().flatten().and_then(|m| m.id)));
+    let scheduled = kept_anyway();
     let list: Vec<Value> = crate::watch::agenda()
         .into_iter()
         // Only the meetings the user accepted (or organises), set to record or recorded: an invite left open or
@@ -588,6 +585,14 @@ pub fn start_scheduler() {
         }
         std::thread::sleep(std::time::Duration::from_secs(240));
     });
+}
+
+/// Meetings Today and Coming up today keep though not accepted: set to record, or recorded today (their event ids).
+pub fn kept_anyway() -> Vec<String> {
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let mut ids: Vec<String> = crate::schedule::load().into_iter().filter_map(|m| m.id).collect();
+    ids.extend(crate::calls::all_calls().into_iter().filter(|d| crate::calls::stamp_of(d).starts_with(&today)).filter_map(|d| MeetingContext::load(&d).ok().flatten().and_then(|m| m.id)));
+    ids
 }
 
 /// The agenda meeting of a prep id.
