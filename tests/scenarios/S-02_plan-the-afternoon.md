@@ -2,7 +2,7 @@
 id: S-02
 title: Plan the afternoon: what's left today, the calendar, set a meeting to record and change your mind
 run: agent
-data: standard
+data: small
 cases:
   - tests/cases/today/TC-001_your-day-only-accepted-meetings.md
   - tests/cases/today/TC-002_your-day-line-now.md

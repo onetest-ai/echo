@@ -2,7 +2,7 @@
 id: S-03
 title: Tidy the calls: a call without minutes, delete one, take it back
 run: agent
-data: standard
+data: small
 cases:
   - tests/cases/window/TC-006_call-without-minutes.md
   - tests/cases/window/TC-008_delete-call.md

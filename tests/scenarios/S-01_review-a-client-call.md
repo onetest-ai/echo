@@ -2,7 +2,7 @@
 id: S-01
 title: Review a client call: find it, read the minutes, check a point, note a follow-up
 run: agent
-data: standard
+data: small
 cases:
   - tests/cases/window/TC-001_calls-list-by-day.md
   - tests/cases/window/TC-002_calls-search.md

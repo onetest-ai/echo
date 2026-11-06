@@ -2,7 +2,7 @@
 id: S-04
 title: The CLI on the same data: tasks by who has to move, the app's state
 run: agent
-data: standard
+data: small
 cases:
   - tests/cases/cli/TC-001_project-tasks-piles.md
   - tests/cases/cli/TC-002_status-without-app.md
