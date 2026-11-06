@@ -1722,6 +1722,13 @@ pub fn summary() -> Value {
 /// arguments in `login.args` and does what `login` says: `ok` (`after.json` becomes the status),
 /// `fail`, `hang` (its pid in `login.pid`, then it sleeps); `-p` reads its prompt and prints
 /// `p.reply`. Installing it forgets this process's observations and cached checks.
+///
+/// Chat mode (`--input-format stream-json`, an Ask conversation): its arguments go to `argv` (one per line), its
+/// working folder to `cwd`, the run's scope (`ECHOCTL_RUN_*`) to `env`, its pid to `pids`; it reads stdin line by line
+/// into `chat.in.jsonl`, and per user message plays the next `chat.<n>.jsonl` (`n` counted in `chat.n`, across its
+/// processes; `chat.jsonl` when there is none). A played `control_request` line waits for a `control_response` on
+/// stdin; `{"_hang":true}` reads stdin from then on and ignores it (an interrupt too); `{"_exit":3}` says
+/// `fake claude crashed` on stderr and exits 3.
 #[cfg(test)]
 pub mod fake {
     use super::*;
@@ -1742,6 +1749,34 @@ pub mod fake {
             r#"#!/bin/sh
 d="$CLAUDE_CONFIG_DIR"
 [ -f "$d/stubborn" ] && trap '' TERM
+case " $* " in
+*" --input-format stream-json "*)
+  [ -n "$d" ] || exit 9
+  printf '%s\n' "$@" > "$d/argv"
+  pwd > "$d/cwd"
+  for k in MODE VAULT CHAT SKILLS SOURCES; do eval "printf '%s=%s\n' ECHOCTL_RUN_$k \"\$ECHOCTL_RUN_$k\""; done > "$d/env"
+  echo $$ >> "$d/pids"
+  log() { printf '%s\n' "$1" >> "$d/chat.in.jsonl"; }
+  play() {
+    while IFS= read -r out <&3; do
+      case "$out" in
+      '{"_hang":true}') while IFS= read -r l; do log "$l"; done; exec sleep 60 ;;
+      '{"_exit":'*) echo "fake claude crashed" >&2; exit 3 ;;
+      *'"type":"control_request"'*) printf '%s\n' "$out"
+        while IFS= read -r l; do log "$l"; case "$l" in *'"control_response"'*) break ;; esac; done ;;
+      *) printf '%s\n' "$out" ;;
+      esac
+    done 3< "$1"
+  }
+  while IFS= read -r line; do
+    log "$line"
+    case "$line" in *'"type":"user"'*)
+      n=$(( $(cat "$d/chat.n" 2>/dev/null || echo 0) + 1 )); echo $n > "$d/chat.n"
+      if [ -f "$d/chat.$n.jsonl" ]; then play "$d/chat.$n.jsonl"; elif [ -f "$d/chat.jsonl" ]; then play "$d/chat.jsonl"; fi ;;
+    esac
+  done
+  exit 0 ;;
+esac
 case "$1 $2" in
 "auth status") echo x >> "$d/status.count"; [ -f "$d/slow" ] && sleep 1; [ -f "$d/stall" ] && sleep 30; cat "$d/status.json" ;;
 "-p "*) cat > /dev/null; cat "$d/p.reply" ;;

@@ -7,15 +7,16 @@
 //! only from the vault-page writer ([`page::render_fragment`], untrusted-text R3). The parser never panics on a line:
 //! one that isn't JSON is counted and skipped, one it doesn't know is ignored, and every size it keeps is bounded.
 
-// Nothing calls the parser until the chat process, ingest runs and AI checks (plan 2, Tasks 5 onward) do.
-#![allow(dead_code)]
+// Its callers (Ask's conversations, `chat.rs`) are behind the `tray` feature.
+#![cfg_attr(not(feature = "tray"), allow(dead_code))]
 
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use super::{diff, page, Vault};
+use super::{diff, page, scan, Vault};
 
 /// A streaming text block is rendered again at most this often (K12-05: 10 renders per second).
 const RENDER_EVERY: Duration = Duration::from_millis(100);
@@ -49,6 +50,8 @@ struct Block {
     json: String,
     started: Instant,
     last_render: Option<Instant>,
+    /// Text came that no render has shown yet (the throttle held it back).
+    dirty: bool,
 }
 
 /// The state of one Claude Code process's stdout.
@@ -64,11 +67,13 @@ pub struct Parser {
     tools: HashMap<String, String>,
     /// The last known content of the steps file.
     steps: Option<String>,
+    /// The vault's index for this turn's renders (read at its first render; `Some(None)`: it couldn't be read).
+    index: Option<Option<Arc<scan::Index>>>,
 }
 
 impl Parser {
     pub fn new(vault: &Vault) -> Parser {
-        Parser { vault: vault.clone(), bad: 0, session: None, blocks: HashMap::new(), next_block: 0, streamed: HashSet::new(), tools: HashMap::new(), steps: None }
+        Parser { vault: vault.clone(), bad: 0, session: None, blocks: HashMap::new(), next_block: 0, streamed: HashSet::new(), tools: HashMap::new(), steps: None, index: None }
     }
 
     /// One stdout line → its events.
@@ -116,12 +121,34 @@ impl Parser {
         out
     }
 
+    /// No line came for a while: what the throttle held back of a block still streaming is rendered now (text that
+    /// arrived less than 100 ms before a pause), at most as often as the throttle allows.
+    pub fn tick(&mut self, now: Instant) -> Vec<Value> {
+        let mut keys: Vec<_> = self.blocks.iter().filter(|(_, b)| b.dirty && b.last_render.is_none_or(|t| now.saturating_duration_since(t) >= RENDER_EVERY)).map(|(k, _)| k.clone()).collect();
+        keys.sort_by_key(|k| (self.blocks[k].started, k.1));
+        let mut out = vec![];
+        for k in keys {
+            if let Some(mut b) = self.blocks.remove(&k) {
+                b.dirty = false;
+                b.last_render = Some(now);
+                out.push(match b.kind {
+                    Kind::Thinking => self.thinking_event(&b, false, now),
+                    _ => self.text_event(&b, false),
+                });
+                self.blocks.insert(k, b);
+            }
+        }
+        out
+    }
+
     /// Lines that were not JSON.
+    #[allow(dead_code)] // for ingest runs' status (plan 2, Task 12)
     pub fn bad_lines(&self) -> usize {
         self.bad
     }
 
     /// The session id of the latest `init` line (Echo reads it from there, not from what it passed).
+    #[allow(dead_code)] // for a conversation's history and ingest runs (plan 2, Tasks 7 and 12)
     pub fn session_id(&self) -> Option<&str> {
         self.session.as_deref()
     }
@@ -167,6 +194,8 @@ impl Parser {
     }
 
     fn result(&mut self, v: &Value) -> Vec<Value> {
+        // The turn is over: the next one reads the vault's index again (a page may have been written meanwhile).
+        self.index = None;
         let u = &v["usage"];
         let n = |k: &str| u[k].as_u64().unwrap_or(0);
         let tokens_in = n("input_tokens").saturating_add(n("cache_read_input_tokens")).saturating_add(n("cache_creation_input_tokens"));
@@ -215,7 +244,7 @@ impl Parser {
                 let thinking = matches!(kind, Kind::Thinking);
                 let id = self.block_id();
                 let text = cb["text"].as_str().or_else(|| cb["thinking"].as_str()).unwrap_or("");
-                let b = Block { kind, id, parent, text: String::new(), json: String::new(), started: now, last_render: None };
+                let b = Block { kind, id, parent, text: String::new(), json: String::new(), started: now, last_render: None, dirty: false };
                 let mut b = b;
                 push_capped(&mut b.text, text, BLOCK_MAX);
                 let out = if thinking { vec![self.thinking_event(&b, false, now)] } else { vec![] };
@@ -229,6 +258,7 @@ impl Parser {
                 let Some(mut b) = self.blocks.remove(&key) else { return vec![] };
                 let d = &ev["delta"];
                 let mut out = vec![];
+                let before = b.text.len();
                 match (&b.kind, d["type"].as_str()) {
                     (Kind::Thinking, Some("thinking_delta")) => push_capped(&mut b.text, d["thinking"].as_str().unwrap_or(""), BLOCK_MAX),
                     (Kind::Text, Some("text_delta")) => push_capped(&mut b.text, d["text"].as_str().unwrap_or(""), BLOCK_MAX),
@@ -236,7 +266,9 @@ impl Parser {
                     _ => {}
                 }
                 let due = b.last_render.is_none_or(|t| now.saturating_duration_since(t) >= RENDER_EVERY);
+                b.dirty |= b.text.len() > before;
                 if due && !b.text.is_empty() && !matches!(b.kind, Kind::Tool { .. }) {
+                    b.dirty = false;
                     b.last_render = Some(now);
                     out.push(match b.kind {
                         Kind::Thinking => self.thinking_event(&b, false, now),
@@ -275,8 +307,10 @@ impl Parser {
         with_parent(e, b.parent.as_deref())
     }
 
-    fn text_event(&self, b: &Block, done: bool) -> Value {
-        with_parent(json!({"type": "text", "block": b.id, "html": page::render_fragment(&self.vault, &b.text), "done": done}), b.parent.as_deref())
+    fn text_event(&mut self, b: &Block, done: bool) -> Value {
+        // The index is read once a turn, not at every render (a scan stats every page).
+        let ix = self.index.get_or_insert_with(|| scan::index(&self.vault).ok()).clone();
+        with_parent(json!({"type": "text", "block": b.id, "html": page::render_fragment(&self.vault, ix.as_deref(), &b.text), "done": done}), b.parent.as_deref())
     }
 
     /// A complete tool call: its `tool` event (once per id) and, for the steps file, a `todo` event.
@@ -342,12 +376,12 @@ impl Parser {
                 Some("text") if !streamed => {
                     let text = b["text"].as_str().unwrap_or("");
                     if !text.is_empty() {
-                        let blk = Block { kind: Kind::Text, id: self.block_id(), parent: parent.clone(), text: cap(text, BLOCK_MAX), json: String::new(), started: now, last_render: None };
+                        let blk = Block { kind: Kind::Text, id: self.block_id(), parent: parent.clone(), text: cap(text, BLOCK_MAX), json: String::new(), started: now, last_render: None, dirty: false };
                         out.push(self.text_event(&blk, true));
                     }
                 }
                 Some("thinking") if !streamed => {
-                    let blk = Block { kind: Kind::Thinking, id: self.block_id(), parent: parent.clone(), text: cap(b["thinking"].as_str().unwrap_or(""), BLOCK_MAX), json: String::new(), started: now, last_render: None };
+                    let blk = Block { kind: Kind::Thinking, id: self.block_id(), parent: parent.clone(), text: cap(b["thinking"].as_str().unwrap_or(""), BLOCK_MAX), json: String::new(), started: now, last_render: None, dirty: false };
                     out.push(self.thinking_event(&blk, true, now));
                 }
                 _ => {}

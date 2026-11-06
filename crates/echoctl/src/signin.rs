@@ -466,16 +466,18 @@ fn run(p: &Profile, generation: u64) {
     finish(p, generation, outcome);
 }
 
-/// The window's Claude sessions on a profile hold its lease while they run: closed for a sign-in.
+/// The window's Claude sessions and Ask's conversations on a profile hold its lease while they run: closed for a
+/// sign-in (they resume by id).
 #[cfg(feature = "tray")]
 fn close_sessions(profile: &str) {
     crate::terminal::close_profile(profile);
+    crate::knowledge::chat::close_profile(profile);
 }
 
 #[cfg(not(feature = "tray"))]
 fn close_sessions(_profile: &str) {}
 
-/// Is a Claude session in the window (still) what holds the profile.
+/// Is a Claude session in the window or an Ask conversation (still) what holds the profile.
 #[cfg(feature = "tray")]
 fn session_holds(profile: &str) -> bool {
     crate::terminal::holds_profile(profile)
@@ -854,6 +856,36 @@ mod tests {
         assert!(fs::read_to_string(fake::file(&p, "login.args")).unwrap().starts_with("auth login --claudeai"));
         assert_eq!(ai::Settings::load().unwrap().get("w").unwrap().account.as_deref(), Some("pat@example.com · example corp"), "first use recorded");
         crate::paths::testenv::eventually("the lease is released", || ai::lease(&p).is_ok());
+        until("threads ended", idle);
+    }
+
+    /// Ask's conversations on the profile hold its lease: a sign-in closes them (they resume). Ingest runs and AI checks
+    /// join this test when they exist (plan 2, Tasks 12 and 14).
+    #[cfg(feature = "tray")]
+    #[test]
+    fn sign_in_closes_chats_runs_and_checks() {
+        use crate::knowledge::chat;
+        let (_env, root) = crate::paths::testenv::folders("signin-chats");
+        reset();
+        let _fake = fake::install(&root);
+        chat::reset();
+        let p = fake::profile("w", None, &fake::signed_in("pat@example.com"));
+        fs::write(fake::file(&p, "after.json"), fake::signed_in("pat@example.com")).unwrap();
+        fs::write(fake::file(&p, "login"), "ok").unwrap();
+        fs::write(fake::file(&p, "chat.jsonl"), chat::turn("Noted.")).unwrap();
+        let t = crate::knowledge::fixture::twin(&root.join("twin"));
+        let v = crate::knowledge::add(&t, crate::knowledge::AddOpts { name: Some("Twin".into()), profile: Some("w".into()), ..Default::default() }).unwrap();
+        let id = chat::send(&v.id, None, "What did Northwind Retail decide?", chat::Mode::Ask, &[]).unwrap();
+        chat::turn_events(&v.id, &id);
+        assert!(chat::live().contains(&id) && crate::terminal::holds_profile("w"));
+        start("w");
+        until("signed in", || json(&p)["just"] == true);
+        assert!(!chat::live().contains(&id), "the sign-in closed it");
+        chat::send(&v.id, Some(&id), "And the pricing?", chat::Mode::Ask, &[]).unwrap();
+        chat::turn_events(&v.id, &id);
+        let argv = fs::read_to_string(fake::file(&p, "argv")).unwrap();
+        assert!(argv.contains(&format!("--resume\n{id}\n")), "resumable: {argv}");
+        chat::reset();
         until("threads ended", idle);
     }
 

@@ -293,6 +293,39 @@ fn renders_are_throttled() {
 }
 
 #[test]
+fn text_before_a_pause_still_renders() {
+    let (_env, root) = crate::paths::testenv::folders("kn-st-tick");
+    let v = vault(&root);
+    let mut p = Parser::new(&v);
+    let t0 = Instant::now();
+    let delta = |t: &str| stream_ev(0, json!({"type": "content_block_delta", "delta": {"type": "text_delta", "text": t}}));
+    p.feed_at(&stream_ev(0, json!({"type": "content_block_start", "content_block": {"type": "text", "text": ""}})), t0);
+    assert_eq!(of_type(&p.feed_at(&delta("Northwind "), t0), "text").len(), 1);
+    assert!(p.feed_at(&delta("Retail"), t0 + Duration::from_millis(40)).is_empty(), "throttled");
+    // No line for a while: the tick renders what the throttle held back, once.
+    assert!(p.tick(t0 + Duration::from_millis(60)).is_empty(), "not 100 ms since the last render");
+    let ev = p.tick(t0 + Duration::from_millis(100));
+    assert_eq!(types(&ev), ["text"]);
+    assert!(ev[0]["html"].as_str().unwrap().contains("Northwind Retail") && ev[0]["done"] == false, "{ev:?}");
+    assert!(p.tick(t0 + Duration::from_millis(400)).is_empty(), "nothing new");
+}
+
+#[test]
+fn the_vaults_index_is_read_once_a_turn() {
+    let (_env, root) = crate::paths::testenv::folders("kn-st-index");
+    let v = vault(&root);
+    let mut p = Parser::new(&v);
+    let t0 = Instant::now();
+    let cite = "See `knowledge/clients/beta.md`.";
+    assert!(!html_of(&text_block(&mut p, 0, &[cite], t0)).contains("#kn:"), "no such page yet");
+    // A page made during the turn: its index is the turn's.
+    fixture::write(&v.root, "knowledge/clients/beta.md", "---\ntitle: Beta\n---\n# Beta\n");
+    assert!(!html_of(&text_block(&mut p, 1, &[cite], t0)).contains("#kn:"));
+    p.feed(&line(json!({"type": "result", "subtype": "success", "usage": {}})));
+    assert!(html_of(&text_block(&mut p, 2, &[cite], t0)).contains("#kn:knowledge/clients/beta.md"), "read again for the next turn");
+}
+
+#[test]
 fn permission_requests_and_denials() {
     let (_env, root) = crate::paths::testenv::folders("kn-st-perm");
     let v = vault(&root);
@@ -408,5 +441,5 @@ fn huge_numbers_do_not_overflow() {
     let mut p = Parser::new(&v);
     let ev = p.feed(&format!(r#"{{"type":"result","usage":{{"input_tokens":{m},"cache_read_input_tokens":{m},"cache_creation_input_tokens":{m},"output_tokens":1}}}}"#, m = u64::MAX));
     assert_eq!(ev[0]["tokens_in"], u64::MAX);
-    assert_eq!(tool_result_summary("Read", &format!("{}\ta\n1\tb", u64::MAX), false).0.is_empty(), false);
+    assert!(!tool_result_summary("Read", &format!("{}\ta\n1\tb", u64::MAX), false).0.is_empty());
 }

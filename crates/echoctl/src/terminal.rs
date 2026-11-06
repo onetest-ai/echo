@@ -77,12 +77,14 @@ struct Term {
     loaded: Vec<(String, String)>,
     /// Stopped by Echo (closed, restarted): its exit isn't Claude Code refusing a conversation.
     stopped: std::sync::atomic::AtomicBool,
+    /// The Claude Code conversation it runs (a Claude session's `--session-id` / `--resume`).
+    session: Option<String>,
     /// What must live as long as the program: a Claude session's profile lease.
     _hold: Mutex<Option<Box<dyn Send>>>,
 }
 
-/// Profile leases the terminals' programs hold, by profile: until the program has exited, also after
-/// its terminal was closed.
+/// Profile leases the terminals' programs — and Ask's conversations (`knowledge::chat`) — hold, by profile: until the
+/// program has exited, also after its terminal was closed.
 static HELD: Mutex<BTreeMap<String, usize>> = Mutex::new(BTreeMap::new());
 
 /// A profile's lease, counted in `HELD` while it lives.
@@ -103,7 +105,14 @@ impl Drop for Held {
     }
 }
 
-/// Does a terminal's program (a Claude session in the window) still hold this profile's lease.
+/// `lease` on `profile`, counted in what the window's programs hold until the returned box is dropped (when the
+/// program has exited): a sign-in closes them first (`holds_profile`).
+pub(crate) fn hold(profile: String, lease: Box<dyn Send>) -> Box<dyn Send> {
+    *HELD.lock().unwrap_or_else(|e| e.into_inner()).entry(profile.clone()).or_default() += 1;
+    Box::new(Held { profile, _lease: lease })
+}
+
+/// Does a terminal's program (a Claude session in the window) or an Ask conversation still hold this profile's lease.
 pub fn holds_profile(profile: &str) -> bool {
     HELD.lock().unwrap_or_else(|e| e.into_inner()).contains_key(profile)
 }
@@ -128,12 +137,12 @@ fn get(id: u64) -> Option<Arc<Term>> {
 
 /// Start `cmd` in a new terminal of `cols`×`rows`, for `key`; its id.
 pub fn open(key: &str, cmd: CommandBuilder, cols: u16, rows: u16) -> Result<u64> {
-    open_with(key, cmd, cols, rows, None, None)
+    open_with(key, cmd, cols, rows, None, None, None)
 }
 
 /// `open`, keeping `hold` — a profile and its lease — alive while the program runs, and calling
-/// `on_exit` when it ends.
-pub fn open_with(key: &str, mut cmd: CommandBuilder, cols: u16, rows: u16, hold: Option<(String, Box<dyn Send>)>, on_exit: Option<OnExit>) -> Result<u64> {
+/// `on_exit` when it ends; `session`: the Claude Code conversation it runs.
+pub fn open_with(key: &str, mut cmd: CommandBuilder, cols: u16, rows: u16, hold: Option<(String, Box<dyn Send>)>, on_exit: Option<OnExit>, session: Option<String>) -> Result<u64> {
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     let pair = native_pty_system().openpty(PtySize { rows: rows.max(2), cols: cols.max(10), pixel_width: 0, pixel_height: 0 })?;
@@ -143,10 +152,7 @@ pub fn open_with(key: &str, mut cmd: CommandBuilder, cols: u16, rows: u16, hold:
     let writer = pair.master.take_writer()?;
     let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let profile = hold.as_ref().map(|(p, _)| p.clone());
-    let hold = hold.map(|(profile, lease)| {
-        *HELD.lock().unwrap_or_else(|e| e.into_inner()).entry(profile.clone()).or_default() += 1;
-        Box::new(Held { profile, _lease: lease }) as Box<dyn Send>
-    });
+    let hold = hold.map(|(profile, lease)| self::hold(profile, lease));
     let term = Arc::new(Term {
         key: key.to_string(),
         master: Mutex::new(pair.master),
@@ -156,6 +162,7 @@ pub fn open_with(key: &str, mut cmd: CommandBuilder, cols: u16, rows: u16, hold:
         changed: Condvar::new(),
         loaded: if key.starts_with("claude:") { loaded_now(profile.as_deref(), key.starts_with("claude:folder")).into_iter().map(|(w, f, _)| (w, f)).collect() } else { vec![] },
         stopped: std::sync::atomic::AtomicBool::new(false),
+        session,
         profile,
         _hold: Mutex::new(hold),
     });
@@ -260,10 +267,11 @@ pub fn close(id: u64) {
     }
 }
 
-/// Echo is going: every terminal's program is stopped.
+/// Echo is going: every terminal's program is stopped, and every Ask conversation's.
 pub fn close_all() {
     let ids: Vec<u64> = TERMS.lock().unwrap_or_else(|e| e.into_inner()).keys().copied().collect();
     ids.into_iter().for_each(close);
+    crate::knowledge::chat::close_all();
 }
 
 /// The open terminals with what a Claude session among them hasn't loaded: `{id, key, exited, stale}` —
@@ -388,7 +396,7 @@ fn history() -> BTreeMap<String, Vec<serde_json::Value>> {
 /// One writer of the session files at a time (exit handlers run on their own threads).
 static SESSIONS_LOCK: Mutex<()> = Mutex::new(());
 
-fn remember(key: &str, id: &str) {
+pub(crate) fn remember(key: &str, id: &str) {
     let _one = SESSIONS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut all = history();
     let list = all.entry(key.to_string()).or_default();
@@ -406,6 +414,16 @@ fn remember(key: &str, id: &str) {
     }
 }
 
+/// Is `id` one of the conversations started for `store_key`.
+pub(crate) fn listed(store_key: &str, id: &str) -> bool {
+    history().get(store_key).is_some_and(|l| l.iter().any(|e| e["id"] == id))
+}
+
+/// Is a terminal (its program still running) on the Claude Code conversation `id`.
+pub fn live_session(id: &str) -> bool {
+    TERMS.lock().unwrap_or_else(|e| e.into_inner()).values().any(|t| t.session.as_deref() == Some(id) && !t.out.lock().unwrap_or_else(|e| e.into_inner()).exited)
+}
+
 /// Which conversation the next start of `store_key` takes (#44): `new` — a fresh one (the current stays in the
 /// list); an id from its list — that one again; anything else — as it is (resume the current).
 fn choose_session(store_key: &str, pick: Option<&str>) -> Result<()> {
@@ -415,7 +433,7 @@ fn choose_session(store_key: &str, pick: Option<&str>) -> Result<()> {
             set_session(store_key, None);
             Ok(())
         }
-        Some(id) if history().get(store_key).is_some_and(|l| l.iter().any(|e| e["id"] == id)) => {
+        Some(id) if listed(store_key, id) => {
             set_session(store_key, Some(id));
             Ok(())
         }
@@ -456,7 +474,7 @@ pub fn conversations(store_key: &str) -> serde_json::Value {
 }
 
 /// A conversation's transcript in a Claude Code folder (any project of it).
-fn transcript(cfg: &Path, id: &str) -> Option<PathBuf> {
+pub(crate) fn transcript(cfg: &Path, id: &str) -> Option<PathBuf> {
     if id.is_empty() || !id.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
         return None;
     }
@@ -506,7 +524,7 @@ pub fn saved_sessions() -> Vec<String> {
     session_ids().into_keys().collect()
 }
 
-fn new_uuid() -> String {
+pub(crate) fn new_uuid() -> String {
     let mut b = [0u8; 16];
     let _ = getrandom::fill(&mut b);
     b[6] = (b[6] & 0x0f) | 0x40;
@@ -557,6 +575,7 @@ pub fn start_folder(key: &str, profile: Option<&str>, pick: Option<&str>, cols: 
     let p = ready.profile().clone();
     choose_session(&format!("{}:folder", p.id), pick)?;
     let (mut args, _, forget) = session_args(&format!("{}:folder", p.id));
+    let session = args[1].clone();
     if let Some(m) = (p.kind == ai::Kind::Local).then(|| p.notes_model()).flatten() {
         args.extend(["--model".into(), m]);
     }
@@ -608,7 +627,7 @@ pub fn start_folder(key: &str, profile: Option<&str>, pick: Option<&str>, cols: 
     let mut env = vec![(crate::view::SESSION_VAR, "1".into()), (crate::view::PROFILE_VAR, p.id.clone())];
     env.extend(extra_env);
     let cmd = ai::terminal_command(&p, &args, &paths::home(), &env, false)?;
-    open_with(key, cmd, cols, rows, Some((p.id.clone(), Box::new(ready))), Some(forget))
+    open_with(key, cmd, cols, rows, Some((p.id.clone(), Box::new(ready))), Some(forget), Some(session))
 }
 
 /// The store key of the Ask session of a vault (on the vault's own profile).
@@ -616,24 +635,17 @@ pub fn vault_store_key(v: &crate::knowledge::Vault) -> String {
     format!("{}:vault:{}", v.profile, v.id)
 }
 
+fn vault_plugins_dir() -> PathBuf {
+    paths::config_dir().join("minutes-run").join("vault-plugins")
+}
+
 /// A vault's skills and commands as a Claude Code plugin, for a profile that loads only its own settings (written into
-/// Echo's config folder; the vault's own files, untouched).
+/// Echo's config folder; the vault's own files, untouched). One folder per content, `<vault id>-<hash>` (spec K12-15):
+/// reused while it is there, so a start never changes or deletes what a running session reads.
 fn vault_plugin(v: &crate::knowledge::Vault) -> Result<Option<std::path::PathBuf>> {
-    let dir = paths::config_dir().join("minutes-run").join("vault-plugins").join(&v.id);
-    let _ = std::fs::remove_dir_all(&dir);
-    let mut any = false;
-    let copy_tree = |from: &std::path::Path, to: &std::path::Path| -> Result<()> {
-        for rel in crate::knowledge::detect::walk(from, &[], |_| true) {
-            let src = crate::knowledge::join(from, &rel);
-            if std::fs::metadata(&src).map(|m| m.len()).unwrap_or(0) > (1 << 20) {
-                continue;
-            }
-            let dst = crate::knowledge::join(to, &rel);
-            std::fs::create_dir_all(dst.parent().expect("a parent"))?;
-            std::fs::copy(&src, &dst)?;
-        }
-        Ok(())
-    };
+    use sha2::Digest as _;
+    // What goes in: (path in the plugin, contents).
+    let mut files: Vec<(String, Vec<u8>)> = vec![];
     for s in v.detected.skills.iter().filter(|s| s.kind != "agents") {
         let src = crate::knowledge::join(&v.root, &s.path);
         if !src.is_file() {
@@ -641,20 +653,62 @@ fn vault_plugin(v: &crate::knowledge::Vault) -> Result<Option<std::path::PathBuf
         }
         if s.kind == "skill" {
             let folder = src.parent().expect("a skill's folder");
-            copy_tree(folder, &dir.join("skills").join(folder.file_name().unwrap_or_default()))?;
+            let name = folder.file_name().unwrap_or_default().to_string_lossy().into_owned();
+            for rel in crate::knowledge::detect::walk(folder, &[], |_| true) {
+                let f = crate::knowledge::join(folder, &rel);
+                if std::fs::metadata(&f).map(|m| m.len()).unwrap_or(0) > (1 << 20) {
+                    continue;
+                }
+                files.push((format!("skills/{name}/{rel}"), std::fs::read(&f)?));
+            }
         } else {
-            std::fs::create_dir_all(dir.join("commands"))?;
-            std::fs::copy(&src, dir.join("commands").join(src.file_name().unwrap_or_default()))?;
+            files.push((format!("commands/{}", src.file_name().unwrap_or_default().to_string_lossy()), std::fs::read(&src)?));
         }
-        any = true;
     }
-    if !any {
+    if files.is_empty() {
         return Ok(None);
     }
-    let manifest = serde_json::json!({"name": v.id, "version": "1.0.0", "description": format!("The skills of the knowledge vault {}", v.name)});
-    std::fs::create_dir_all(dir.join(".claude-plugin"))?;
-    paths::write_atomic(&dir.join(".claude-plugin").join("plugin.json"), serde_json::to_string_pretty(&manifest)?.as_bytes())?;
+    files.sort();
+    let manifest = serde_json::to_string_pretty(&serde_json::json!({"name": v.id, "version": "1.0.0", "description": format!("The skills of the knowledge vault {}", v.name)}))?;
+    let mut h = sha2::Sha256::new();
+    h.update(manifest.as_bytes());
+    for (rel, b) in &files {
+        h.update(format!("\0{rel}\0{}\0", b.len()).as_bytes());
+        h.update(b);
+    }
+    let hash: String = h.finalize().iter().take(8).map(|x| format!("{x:02x}")).collect();
+    let base = vault_plugins_dir();
+    let dir = base.join(format!("{}-{hash}", v.id));
+    if dir.join(".claude-plugin").join("plugin.json").is_file() {
+        return Ok(Some(dir));
+    }
+    // Built beside it, then moved into place whole: a start at the same moment finds it complete or not at all.
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let tmp = base.join(format!(".{}-{hash}.{}-{}", v.id, std::process::id(), SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst)));
+    let built = (|| -> Result<()> {
+        for (rel, b) in files.iter().chain(std::iter::once(&(".claude-plugin/plugin.json".to_string(), manifest.into_bytes()))) {
+            let dst = crate::knowledge::join(&tmp, rel);
+            std::fs::create_dir_all(dst.parent().expect("a parent"))?;
+            std::fs::write(&dst, b)?;
+        }
+        Ok(())
+    })();
+    let moved = built.and_then(|()| std::fs::rename(&tmp, &dir).map_err(Into::into));
+    if moved.is_err() {
+        let _ = std::fs::remove_dir_all(&tmp);
+        if !dir.join(".claude-plugin").join("plugin.json").is_file() {
+            moved?;
+        }
+    }
     Ok(Some(dir))
+}
+
+/// At app start no session reads the generated skills plugins (Echo's sessions ended with the Echo before): every
+/// folder goes, built again as a session needs it (spec K12-15).
+pub fn prune_vault_plugins() {
+    for e in std::fs::read_dir(vault_plugins_dir()).into_iter().flatten().flatten() {
+        let _ = if e.file_type().is_ok_and(|t| t.is_dir()) { std::fs::remove_dir_all(e.path()) } else { std::fs::remove_file(e.path()) };
+    }
 }
 
 /// What a vault's Ask session adds for profile `p`: on a managed profile (its own settings only) the vault's skills as a
@@ -692,11 +746,21 @@ pub fn start_vault(key: &str, vault: &str, pick: Option<&str>, cols: u16, rows: 
     if !crate::knowledge::available(&v) {
         bail!("the vault's folder isn't there: {}", v.root.display());
     }
+    let store = vault_store_key(&v);
+    // One process per conversation (spec K12-12): not one live in Ask.
+    let next = match pick {
+        Some("new") => None,
+        Some(id) if !id.is_empty() => Some(id.to_string()),
+        _ => session_ids().get(&store).cloned(),
+    };
+    if next.is_some_and(|id| crate::knowledge::chat::live().contains(&id)) {
+        bail!("This conversation is open in Ask — continue it there, or take it to the terminal panel from Ask");
+    }
     let ready = ai::ready(&v.profile)?;
     let p = ready.profile().clone();
-    let store = vault_store_key(&v);
     choose_session(&store, pick)?;
     let (mut args, _, forget) = session_args(&store);
+    let session = args[1].clone();
     if let Some(m) = (p.kind == ai::Kind::Local).then(|| p.notes_model()).flatten() {
         args.extend(["--model".into(), m]);
     }
@@ -705,19 +769,28 @@ pub fn start_vault(key: &str, vault: &str, pick: Option<&str>, cols: u16, rows: 
     }
     args.extend(vault_args(&v, &p)?);
     let cmd = ai::terminal_command(&p, &args, &v.root, &[], false)?;
-    open_with(key, cmd, cols, rows, Some((p.id.clone(), Box::new(ready))), Some(forget))
+    open_with(key, cmd, cols, rows, Some((p.id.clone(), Box::new(ready))), Some(forget), Some(session))
 }
 
 /// The command to continue a vault's session in a terminal, on *Claude Code (as configured)*:
 /// `cd <vault> && claude --resume <id>`, the folder quoted for the shell. `None` on a managed profile.
 pub fn vault_resume_command(vault: &str) -> Option<String> {
     let v = crate::knowledge::get(vault).ok()?;
+    resume_command(vault, &session_ids().get(&vault_store_key(&v)).cloned()?)
+}
+
+/// The command to continue conversation `id` of a vault in a terminal (an Ask conversation taken to the terminal
+/// too): as `vault_resume_command`, for any of its conversations.
+pub fn resume_command(vault: &str, id: &str) -> Option<String> {
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
+        return None;
+    }
+    let v = crate::knowledge::get(vault).ok()?;
     // A managed profile's routing (its config folder, base URL, keys) can't be written out as a line to copy without
     // its keys: its sessions continue in Echo's panel.
     if ai::Settings::load().ok()?.get(&v.profile).ok()?.kind != ai::Kind::System {
         return None;
     }
-    let id = session_ids().get(&vault_store_key(&v)).cloned()?;
     let root = v.root.display().to_string();
     Some(if cfg!(windows) {
         format!("cd /d \"{root}\" && claude --resume {id}")
@@ -789,6 +862,7 @@ pub fn start_call(key: &str, dir: &Path, pick: Option<&str>, cols: u16, rows: u1
     }
     choose_session(&format!("{}:{}", p.id, calls::stamp_of(&dir)), pick)?;
     let (session, resumed, forget) = session_args(&format!("{}:{}", p.id, calls::stamp_of(&dir)));
+    let conversation = session[1].clone();
     args.extend(session);
     if !resumed {
         let title = calls::read_json(&dir.join("meta.json"))["title"].as_str().unwrap_or("this call").to_string();
@@ -818,7 +892,7 @@ pub fn start_call(key: &str, dir: &Path, pick: Option<&str>, cols: u16, rows: u1
             close(id);
         }
     }
-    open_with(key, cmd, cols, rows, Some((p.id.clone(), Box::new(ready))), Some(forget))
+    open_with(key, cmd, cols, rows, Some((p.id.clone(), Box::new(ready))), Some(forget), Some(conversation))
 }
 
 /// Echo's own MCP server for a session (`echoctl mcp`: what was said, people, echo:// links — on whether or not the
@@ -891,6 +965,9 @@ mod tests {
         let (args, ..) = session_args(&vault_store_key(&v));
         let line = vault_resume_command(&v.id).expect("a line for Claude Code as configured");
         assert_eq!(line, format!("cd '{}' && claude --resume {}", v.root.display(), args[1]), "the folder quoted whole");
+        let other_id = "11111111-2222-4333-8444-555566667777";
+        assert_eq!(resume_command(&v.id, other_id), Some(format!("cd '{}' && claude --resume {other_id}", v.root.display())), "any of its conversations");
+        assert_eq!(resume_command(&v.id, "x; rm -rf ~"), None, "only an id");
         let mut settings = ai::Settings::load().unwrap();
         settings.profiles.push(profile("client-x", "claude"));
         settings.save().unwrap();
@@ -955,6 +1032,54 @@ mod tests {
     }
 
     #[test]
+    fn plugin_folders_are_per_hash() {
+        let (_env, root) = crate::paths::testenv::folders("terminal-plugin-hash");
+        let t = crate::knowledge::fixture::twin(&root.join("twin"));
+        let v = crate::knowledge::add(&t, crate::knowledge::AddOpts { name: Some("Twin".into()), ..Default::default() }).unwrap();
+        let managed = profile("work", "claude");
+        let dir_of = |a: Vec<String>| PathBuf::from(&a[a.iter().position(|x| x == "--plugin-dir").unwrap() + 1]);
+        let first = dir_of(vault_args(&v, &managed).unwrap());
+        let name = first.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(name.starts_with("twin-") && name.len() > "twin-".len(), "{name}");
+        let skill = first.join("skills/s/SKILL.md");
+        let written = std::fs::metadata(&skill).unwrap().modified().unwrap();
+        // A second start while the first still reads its plugin: the same folder, nothing rebuilt under it.
+        std::thread::sleep(Duration::from_millis(20));
+        assert_eq!(dir_of(vault_args(&v, &managed).unwrap()), first);
+        assert_eq!(std::fs::metadata(&skill).unwrap().modified().unwrap(), written);
+        // A skill edited: a folder of its own; the first stays for whoever reads it.
+        crate::knowledge::fixture::write(&t, ".claude/skills/s/SKILL.md", "---\nname: s\ndescription: Does s better\n---\n# S\n");
+        let second = dir_of(vault_args(&v, &managed).unwrap());
+        assert_ne!(second, first);
+        assert!(skill.is_file());
+        assert!(std::fs::read_to_string(second.join("skills/s/SKILL.md")).unwrap().contains("better"));
+        // At app start no session uses them: they go.
+        prune_vault_plugins();
+        assert!(!first.exists() && !second.exists());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn ask_conversations_dont_become_the_panels_current() {
+        let (_env, root) = crate::paths::testenv::folders("terminal-ask-current");
+        let _fake = ai::fake::install(&root);
+        crate::knowledge::chat::reset();
+        let p = ai::fake::profile("w", None, &ai::fake::signed_in("pat@example.com"));
+        let t = crate::knowledge::fixture::twin(&root.join("twin"));
+        let v = crate::knowledge::add(&t, crate::knowledge::AddOpts { name: Some("Twin".into()), profile: Some("w".into()), ..Default::default() }).unwrap();
+        let store = vault_store_key(&v);
+        let panel = "11111111-2222-4333-8444-555566667777";
+        set_session(&store, Some(panel));
+        std::fs::write(ai::fake::file(&p, "chat.jsonl"), crate::knowledge::chat::turn("Noted.")).unwrap();
+        let id = crate::knowledge::chat::send(&v.id, None, "What changed at Northwind Retail?", crate::knowledge::chat::Mode::Ask, &[]).unwrap();
+        crate::knowledge::chat::turn_events(&v.id, &id);
+        crate::knowledge::chat::reset();
+        assert!(listed(&store, &id), "the panel lists it too");
+        assert_eq!(session_ids().get(&store).map(String::as_str), Some(panel), "its Resume opens what it did");
+        assert_eq!(resume_command(&v.id, &id), None, "a managed profile's conversation continues in Echo's panel");
+    }
+
+    #[test]
     fn the_ring_numbers_bytes_and_keeps_the_last_ones() {
         let mut r = Ring::default();
         r.push(b"hello ");
@@ -976,7 +1101,7 @@ mod tests {
     fn closing_a_profiles_sessions_lets_its_lease_go() {
         let mut cmd = CommandBuilder::new("/bin/sh");
         cmd.args(["-c", "sleep 30"]);
-        let id = open_with("claude:folder", cmd, 80, 20, Some(("acme-test".into(), Box::new(()))), None).unwrap();
+        let id = open_with("claude:folder", cmd, 80, 20, Some(("acme-test".into(), Box::new(()))), None, None).unwrap();
         assert!(holds_profile("acme-test") && !holds_profile("other-test"));
         assert_eq!(close_profile("other-test"), 0);
         assert_eq!(close_profile("acme-test"), 1);

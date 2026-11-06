@@ -27,11 +27,14 @@ is `recall.md`. The window rules are `.ai-run/guides/window/window-ui.md`; untru
 | `git.rs` | The only git calls (`info`, `init`, `first_commit`, `dirty`, `commit_paths`): literal pathspecs, both pipes drained, 20 s then SIGTERM |
 | `starter.rs` | The twin starter (23 files compiled in), `create`, the `/twin` skill in a vault and for all sessions |
 | `api.rs` | `/api/kn/...` routes, the IPC actions (`kn_*`), the folder picker, background jobs |
+| `stream.rs` | Claude Code's stream-json lines → Echo's events (`Parser`: `feed`, `tick`, `finish`) |
+| `chat.rs` (`tray`) | Ask's conversations: a Claude Code process per conversation (`send`, `read`, `stop`, `close_profile`, `live`, `sweep`) |
 | `ui/knowledge.js`, `ui/knowledge.css` | The window's Knowledge: pure blocks tested by `ui/knowledge.test.mjs`, then the `Kn` module |
 
 Hooks elsewhere: `notes.rs::notify_outcome` and `watch.rs::notify_notes_ready` call `export::minutes_written` (both
-writers of minutes, D16); `attention.rs` shows a failed save in the Inbox; `terminal.rs` starts Ask sessions
-(`start_vault`, `vault_args`); `minutes.rs::page_html` is the safe Markdown writer for pages; `links.rs` (the top
+writers of minutes, D16); `attention.rs` shows a failed save in the Inbox; `terminal.rs` starts the vault's panel
+sessions (`start_vault`, `vault_args`), counts the leases chats hold (`hold`, `holds_profile`) and stops them on quit
+(`close_all`); `signin.rs` closes a profile's chats before a sign-in; `minutes.rs::page_html` is the safe Markdown writer for pages; `links.rs` (the top
 module) lets an `echo://call/` link survive a retitle by its stamp.
 
 ## How it works
@@ -184,6 +187,27 @@ Recall when on, then plugins' Knowledge tabs. Actions are IPC `kn_*`; long ones 
 - **No two functions with one name** in `knowledge.js`: the later declaration wins silently.
 The node test guards all three. Success messages clear after 4 s; errors and "not committed" wait for OK.
 
+### Ask's conversations (`chat.rs`)
+A conversation is one Claude Code session id throughout (`--session-id` first, `--resume` after: measured to keep the
+id). Its process runs spec §5.4's command (`chat::args`) through `ai::prepare_claude` in the vault's root, with the
+guard's scope (`ECHOCTL_RUN_MODE=vault`, `_VAULT`, `_CHAT`, `_SKILLS`, `_SOURCES`, all always set) in the process's
+environment and in the conversation's own `--settings` file. It holds the profile's lease (`ai::ready`) until it has
+exited; `terminal::holds_profile` counts it, so a sign-in closes it (`signin.rs`) as it does the panel's sessions.
+Three threads per process: stdout's lines into a channel; the parser reading them (a `Parser::tick` after 100 ms
+without a line, so text right before a pause shows), which numbers events into the conversation's ring (the last
+5 000) and wakes the page's long poll; stderr's last lines, for the error when it dies mid-turn. A `can_use_tool`
+request waits in `pending` (`waiting` in the chunk) until answered; any other control request is answered at once
+with `{"subtype":"error",…}` (the SDKs' shape) so Claude Code never waits on Echo. *Stop* denies what waits, sends an
+interrupt, and ends the process if the turn hasn't ended 5 s later. A mode change ends the process; the next start
+resumes. At most 3 processes (the longest idle ends for a fourth); one idle 10 min with no turn ends (a 30 s sweep).
+The panel and Ask refuse a conversation live in the other (`terminal::live_session`, `chat::live`). A conversation
+started in Ask is remembered under `vault_store_key` but never set as the panel's current (D44). The parser holds the
+vault's index for a turn (read at its first render, dropped at its `result`), not one scan per render.
+
+The generated skills plugin of a managed profile is `vault-plugins/<vault id>-<hash of its contents>/`: built beside
+it and renamed into place, reused while there, so a start never changes what a running session reads; the app removes
+them all at start, when none can be in use.
+
 ## Decisions
 
 | Decision | Why |
@@ -210,7 +234,8 @@ The node test guards all three. Success messages clear after 4 s; errors and "no
 | `<home>/.echo/knowledge/<id>/index.json` | Echo's index of the vault | `scan::index` |
 | `<home>/.echo/knowledge/<id>/save.lock` | One save at a time into the vault | `export` |
 | `<call>/knowledge.json` (+ `.knowledge.lock`) | Where the call's minutes were saved, and the call's choice | `export` (never a Claude run) |
-| `<config>/minutes-run/vault-plugins/<id>/` | The vault's skills as a plugin, for managed profiles | `terminal::vault_plugin` |
+| `<config>/minutes-run/vault-plugins/<id>-<hash>/` | The vault's skills as a plugin, for managed profiles, one folder per content | `terminal::vault_plugin` (removed at app start) |
+| `<home>/.echo/knowledge/<id>/chat/<conversation>/settings.json` | A conversation's guard hook and scope `env` (rewritten at each of its starts) | `chat::start` |
 | `~/.claude/skills/<name>/SKILL.md` | `/twin` for all sessions, on request | `starter::global_twin` |
 | Window local storage `echo.kn.*` | Last vault, dismissed welcome card, unsaved drafts | the page (per viewer) |
 

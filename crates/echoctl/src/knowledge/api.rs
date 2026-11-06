@@ -82,6 +82,14 @@ pub fn route(rest: &str, query: &str) -> Result<Reply> {
         bail!("the vault's folder isn't there: {}", v.root.display());
     }
     let to_vault = |p: &str| scan::vault_rel(&v, p);
+    // An Ask conversation's events after `from` (spec K12-06): at once when there are some, else when some come or
+    // after 25 s (a long poll, as `/api/pty`).
+    #[cfg(feature = "tray")]
+    if let Some(conversation) = what.strip_prefix("chat/") {
+        let from = query_param(query, "from").and_then(|f| f.parse().ok()).unwrap_or(0);
+        let c = super::chat::read(&v.id, conversation, from, std::time::Duration::from_secs(25)).ok_or_else(|| anyhow!("no such conversation"))?;
+        return Ok(Reply::Json(json!({ "events": c.events, "next": c.next, "live": c.live, "busy": c.busy, "waiting": c.waiting })));
+    }
     Ok(Reply::Json(match what {
         "tree" => {
             let ix = scan::index(&v)?;
@@ -94,6 +102,9 @@ pub fn route(rest: &str, query: &str) -> Result<Reply> {
             json!({ "rev": ix.rev, "root": v.path("pages"), "index": v.path("index"), "notes": v.path("notes"), "pages": pages })
         }
         "rev" => json!({ "rev": scan::rev(&v) }),
+        // Ask's conversations in the vault.
+        #[cfg(feature = "tray")]
+        "chats" => super::chat::list_value(&v),
         "page" => page::read(&v, &rel_param(query)?)?,
         "find" => {
             let ix = scan::index(&v)?;
@@ -367,6 +378,22 @@ pub fn act(cmd: &str, v: &Value) -> Result<Value> {
         }
         "kn_past" => Ok(if v["apply"].as_bool().unwrap_or(false) { export::save_past(s(v, "id"))? } else { export::past(s(v, "id"))? }),
         "kn_import_plugin" => Ok(json!({ "connected": super::import_plugin_vaults()? })),
+        // Ask (spec K12-07, K12-09, K12-12): a message (a new conversation when none is named), Stop, and a conversation
+        // taken to the terminal panel. Only pages are named in a message here (attached calls are K12-10's).
+        #[cfg(feature = "tray")]
+        "kn_chat_send" => {
+            let context = v["context"].as_array().map(Vec::as_slice).unwrap_or(&[]).iter().map(|x| x["page"].as_str().map(str::to_owned).ok_or_else(|| anyhow!("only pages can be named in a message"))).collect::<Result<Vec<_>>>()?;
+            let mode = super::chat::Mode::parse(s(v, "mode"))?;
+            let id = super::chat::send(s(v, "id"), v["conversation"].as_str().filter(|c| !c.is_empty()), s(v, "text"), mode, &context)?;
+            Ok(json!({ "conversation": id }))
+        }
+        #[cfg(feature = "tray")]
+        "kn_chat_stop" => {
+            super::chat::stop(s(v, "conversation"));
+            Ok(json!({ "stopped": true }))
+        }
+        #[cfg(feature = "tray")]
+        "kn_chat_terminal" => super::chat::to_terminal(s(v, "id"), s(v, "conversation")),
         other => bail!("no action {other}"),
     }
 }
@@ -504,6 +531,33 @@ mod tests {
         let n = act("kn_new", &json!({"name": "Fresh", "pick": e["seq"], "git": false, "minutes": "auto"})).unwrap();
         assert_eq!(n["vault"]["id"], "fresh");
         assert!(root.join("empty/knowledge/CATALOG.md").is_file());
+    }
+
+    #[cfg(all(unix, feature = "tray"))]
+    #[test]
+    fn chat_routes_and_actions() {
+        let (_env, root) = crate::paths::testenv::folders("kn-api-chat");
+        let _fake = crate::ai::fake::install(&root);
+        knowledge::chat::reset();
+        let p = crate::ai::fake::profile("w", None, &crate::ai::fake::signed_in("pat@example.com"));
+        std::fs::write(crate::ai::fake::file(&p, "chat.jsonl"), knowledge::chat::turn("Noted.")).unwrap();
+        let t = fixture::twin(&root.join("twin"));
+        let v = knowledge::add(&t, AddOpts { name: Some("Twin".into()), profile: Some("w".into()), ..Default::default() }).unwrap();
+        let sent = act("kn_chat_send", &json!({"id": v.id, "text": "What is new at Acme?", "mode": "ask", "context": [{"page": "knowledge/clients/acme.md"}]})).unwrap();
+        let id = sent["conversation"].as_str().unwrap().to_string();
+        knowledge::chat::turn_events(&v.id, &id);
+        let c = json(&format!("{}/chat/{id}", v.id), "from=0");
+        assert_eq!(c["events"][0]["type"], "user");
+        assert_eq!(c["events"][0]["context"][0]["page"], "knowledge/clients/acme.md");
+        assert!(c["next"].as_u64().unwrap() >= 3 && c["live"] == true && c["busy"] == false && c["waiting"] == false, "{c}");
+        assert!(json(&format!("{}/chats", v.id), "").as_array().unwrap().iter().any(|x| x["id"] == id.as_str()));
+        assert!(route(&format!("{}/chat/nope", v.id), "from=0").is_err());
+        assert!(act("kn_chat_send", &json!({"id": v.id, "text": "Hi", "mode": "shell"})).is_err());
+        assert!(act("kn_chat_stop", &json!({"conversation": id})).is_ok());
+        let moved = act("kn_chat_terminal", &json!({"id": v.id, "conversation": id})).unwrap();
+        assert_eq!(moved["conversation"], id.as_str());
+        assert!(!knowledge::chat::live().contains(&id));
+        knowledge::chat::reset();
     }
 
     #[test]

@@ -218,7 +218,7 @@ pub fn settings(exe: &Path, calls: &str) -> Value {
 /// A run in a knowledge vault's own settings (`--settings`): the guard on every tool call, and the run's scope in `env`
 /// (`ECHOCTL_RUN_MODE`, `ECHOCTL_RUN_VAULT`…), which outranks the same keys in the vault's own `.claude/settings.json`
 /// (spec D40; measured with Claude Code 2.1.310, design note V10 fact 2).
-#[allow(dead_code)] // Its first caller is the vault conversation (plan 2, Task 5).
+#[cfg_attr(not(feature = "tray"), allow(dead_code))] // its caller, Ask's conversation (`knowledge::chat`), is `tray`'s
 pub fn settings_for(scope: &[(String, String)], exe: &Path) -> Value {
     let env: serde_json::Map<String, Value> = scope.iter().map(|(k, v)| (k.clone(), Value::String(v.clone()))).collect();
     json!({

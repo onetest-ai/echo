@@ -20,6 +20,8 @@ pub mod page;
 pub mod scan;
 pub mod starter;
 pub mod stream;
+#[cfg(feature = "tray")]
+pub mod chat;
 
 #[cfg(test)]
 mod export_tests;
@@ -70,6 +72,24 @@ pub struct GitRule {
     pub commit: bool,
 }
 
+/// What Ask may do in a vault (Settings → Ask, spec D39).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AskRule {
+    /// Research (the web) is offered.
+    #[serde(default = "yes")]
+    pub research: bool,
+}
+
+impl Default for AskRule {
+    fn default() -> Self {
+        AskRule { research: true }
+    }
+}
+
+fn yes() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Vault {
     pub id: String,
@@ -85,6 +105,8 @@ pub struct Vault {
     pub minutes: MinutesRule,
     #[serde(default)]
     pub git: GitRule,
+    #[serde(default)]
+    pub ask: AskRule,
     /// `twin@1` for a vault made from Echo's starter.
     #[serde(default)]
     pub template: Option<String>,
@@ -339,6 +361,7 @@ pub fn add(root: &Path, opts: AddOpts) -> Result<Vault> {
             overrides: BTreeMap::new(),
             minutes: MinutesRule { mode: opts.minutes.unwrap_or_else(|| "auto".into()), ..Default::default() },
             git: GitRule { commit: opts.commit.unwrap_or(false) },
+            ask: AskRule::default(),
             template: opts.template,
             added_at: chrono::Local::now().to_rfc3339(),
         };
@@ -348,8 +371,8 @@ pub fn add(root: &Path, opts: AddOpts) -> Result<Vault> {
 }
 
 /// Change one setting of a vault (`name`, `profile`, `minutes`, `scope`, `clients`, `threads`, `tag`, `transcript`,
-/// `chat`, `commit`, or an override of `pages` / `index` / `notes` / `naming` / `templates` / `sources`; `""` takes an
-/// override back).
+/// `chat`, `commit`, `ask.research`, or an override of `pages` / `index` / `notes` / `naming` / `templates` /
+/// `sources`; `""` takes an override back).
 pub fn set(id: &str, key: &str, value: &str) -> Result<Vault> {
     refuse_headless()?;
     update(|r| {
@@ -379,6 +402,7 @@ pub fn set(id: &str, key: &str, value: &str) -> Result<Vault> {
             "transcript" => v.minutes.transcript = parse_bool(value)?,
             "chat" => v.minutes.chat = parse_bool(value)?,
             "commit" => v.git.commit = parse_bool(value)?,
+            "ask.research" => v.ask.research = parse_bool(value)?,
             k if OVERRIDES.contains(&k) => {
                 if value.trim().is_empty() {
                     v.overrides.remove(k);
@@ -435,6 +459,7 @@ pub fn vault_value(v: &Vault) -> Value {
         "overrides": v.overrides,
         "minutes": v.minutes,
         "commit": v.git.commit,
+        "ask": v.ask,
         "git": git,
         "template": v.template,
         "added_at": v.added_at,
@@ -526,6 +551,19 @@ mod tests {
         assert_eq!(set(&v.id, "name", "Second brain").unwrap().name, "Second brain");
         assert!(set(&v.id, "name", "  ").is_err());
         assert!(set(&v.id, "colour", "red").is_err());
+        assert!(v.ask.research, "Research is offered unless turned off");
+        assert!(!set(&v.id, "ask.research", "off").unwrap().ask.research);
+    }
+
+    #[test]
+    fn a_vault_saved_before_ask_still_reads() {
+        let (_env, root) = paths::testenv::folders("kn-old-vault");
+        let t = fixture::twin(&root.join("twin"));
+        let v = add(&t, opts("Twin")).unwrap();
+        let mut j = serde_json::to_value(Registry { vaults: vec![v] }).unwrap();
+        j["vaults"][0].as_object_mut().unwrap().remove("ask");
+        std::fs::write(registry_file(), j.to_string()).unwrap();
+        assert!(get("twin").unwrap().ask.research);
     }
 
     #[test]

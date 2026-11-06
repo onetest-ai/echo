@@ -1876,6 +1876,8 @@ fn set_app_icon() {
 /// (and closed any recording).
 pub fn run(app: TargetApp, stop: Arc<AtomicBool>) -> ! {
     let stop_for_ui = stop.clone();
+    // Ask's generated skills plugins: none is in use before a session starts (spec K12-15); before the window can start one.
+    crate::terminal::prune_vault_plugins();
     #[allow(unused_mut)]
     let mut event_loop = EventLoopBuilder::<UiEvent>::with_user_event().build();
     #[cfg(target_os = "macos")]

@@ -173,14 +173,15 @@ pub fn render(v: &Vault, rel: &str, text: &str) -> Result<String> {
 /// Model text (an Ask answer) as the vault-page writer shows it: raw HTML as text, links decided as in a page. A `code`
 /// span whose whole text is an existing page of the vault (vault-relative, or relative to the pages root) links like
 /// a wikilink to it; any other `code` stays code. No frontmatter handling. Model text reaches HTML only through here
-/// (untrusted-text R3).
-#[allow(dead_code)] // the Ask chat view (plan 2, Task 5) is its first caller
-pub fn render_fragment(v: &Vault, text: &str) -> String {
+/// (untrusted-text R3). `ix`: the vault's index, which the caller holds for a turn (`None`: it couldn't be read, and
+/// only https links are kept).
+#[cfg_attr(not(feature = "tray"), allow(dead_code))] // its caller, the stream parser, serves Ask (`tray`)
+pub fn render_fragment(v: &Vault, ix: Option<&scan::Index>, text: &str) -> String {
     let linked = link_code_paths(v, text);
     let breaks = line_breaks(v);
-    match scan::index(v) {
-        Ok(ix) => {
-            let r = Resolver::new(&ix);
+    match ix {
+        Some(ix) => {
+            let r = Resolver::new(ix);
             // Model text keeps only https links, links to a page of the vault and vault images (spec K12-05, X-T10).
             let hook = |dest: &str, image: bool| {
                 let out = decide(v, &r, "", &from_vault_root(v, dest), image)?;
@@ -188,7 +189,7 @@ pub fn render_fragment(v: &Vault, text: &str) -> String {
             };
             crate::minutes::page_html(&linked, breaks, &hook)
         }
-        Err(_) => crate::minutes::page_html(&linked, breaks, &|dest, image| (!image && dest.starts_with("https://")).then(|| dest.to_string())),
+        None => crate::minutes::page_html(&linked, breaks, &|dest, image| (!image && dest.starts_with("https://")).then(|| dest.to_string())),
     }
 }
 
