@@ -148,7 +148,6 @@ impl Parser {
     }
 
     /// The session id of the latest `init` line (Echo reads it from there, not from what it passed).
-    #[allow(dead_code)] // for a conversation's history and ingest runs (plan 2, Tasks 7 and 12)
     pub fn session_id(&self) -> Option<&str> {
         self.session.as_deref()
     }

@@ -894,13 +894,41 @@ pub fn stop_group(pid: u32) {
     }
 }
 
-#[cfg(unix)]
-fn stop_group_with(pid: u32, reap: &dyn Fn()) {
-    let group = -(pid as i32);
+/// `stop_group`'s first step, at once — TERM to the group (Unix; on Windows the tree is ended, `taskkill /T /F`) — for
+/// a caller that can't wait (Echo quitting); `finish_stop_group` (in the background) does the rest.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))] // its caller, Ask's conversations, is `tray`'s
+pub fn term_group(pid: u32) {
+    #[cfg(unix)]
     // SAFETY: signalling a process group we created for a child of ours.
     unsafe {
-        libc::kill(group, libc::SIGTERM);
+        libc::kill(-(pid as i32), libc::SIGTERM);
     }
+    #[cfg(windows)]
+    stop_group(pid);
+}
+
+/// The rest of stopping a group `term_group` signalled: KILL to what is left of it after 3 s (Unix).
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn finish_stop_group(pid: u32) {
+    #[cfg(unix)]
+    escalate(pid, &|| {});
+    #[cfg(windows)]
+    let _ = pid;
+}
+
+#[cfg(unix)]
+fn stop_group_with(pid: u32, reap: &dyn Fn()) {
+    // SAFETY: signalling a process group we created for a child of ours.
+    unsafe {
+        libc::kill(-(pid as i32), libc::SIGTERM);
+    }
+    escalate(pid, reap);
+}
+
+/// Wait up to 3 s for process group `pid` to be gone after its TERM, then KILL what is left of it.
+#[cfg(unix)]
+fn escalate(pid: u32, reap: &dyn Fn()) {
+    let group = -(pid as i32);
     let t = Instant::now();
     while t.elapsed() < Duration::from_secs(3) {
         reap();
@@ -1728,7 +1756,8 @@ pub fn summary() -> Value {
 /// into `chat.in.jsonl`, and per user message plays the next `chat.<n>.jsonl` (`n` counted in `chat.n`, across its
 /// processes; `chat.jsonl` when there is none). A played `control_request` line waits for a `control_response` on
 /// stdin; `{"_hang":true}` reads stdin from then on and ignores it (an interrupt too); `{"_exit":3}` says
-/// `fake claude crashed` on stderr and exits 3.
+/// `fake claude crashed` on stderr and exits 3. Any other run (a Claude session in a terminal) writes its arguments
+/// to `session.argv` and exits.
 #[cfg(test)]
 pub mod fake {
     use super::*;
@@ -1786,6 +1815,7 @@ case "$1 $2" in
   fail) echo "Login failed: Request failed with status code 400" >&2; exit 1 ;;
   hang) echo $$ > "$d/login.pid"; exec sleep 60 ;;
   esac ;;
+*) [ -n "$d" ] && printf '%s\n' "$@" > "$d/session.argv" ;;
 esac
 "#,
         )

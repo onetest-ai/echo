@@ -195,12 +195,19 @@ environment and in the conversation's own `--settings` file. It holds the profil
 exited; `terminal::holds_profile` counts it, so a sign-in closes it (`signin.rs`) as it does the panel's sessions.
 Three threads per process: stdout's lines into a channel; the parser reading them (a `Parser::tick` after 100 ms
 without a line, so text right before a pause shows), which numbers events into the conversation's ring (the last
-5 000) and wakes the page's long poll; stderr's last lines, for the error when it dies mid-turn. A `can_use_tool`
+5 000; a streaming block's superseded render keeps its number but not its HTML, so only the latest holds the block)
+and wakes the page's long poll; stderr's last lines, for the error when it dies mid-turn. The conversation resumes
+from its process's `init` line (or first `result`) on: a first process that dies before it leaves no session, and
+the next start is new again. A `can_use_tool`
 request waits in `pending` (`waiting` in the chunk) until answered; any other control request is answered at once
 with `{"subtype":"error",…}` (the SDKs' shape) so Claude Code never waits on Echo. *Stop* denies what waits, sends an
-interrupt, and ends the process if the turn hasn't ended 5 s later. A mode change ends the process; the next start
+interrupt, and ends the process if the turn hasn't ended 5 s later (that deadline is armed before the writes, which
+can block). Ending a process sends its group TERM at once (Echo quitting doesn't wait) and KILL 3 s later in the
+background. A mode change ends the process; the next start
 resumes. At most 3 processes (the longest idle ends for a fourth); one idle 10 min with no turn ends (a 30 s sweep).
-The panel and Ask refuse a conversation live in the other (`terminal::live_session`, `chat::live`). A conversation
+The panel and Ask refuse a conversation live in the other (`terminal::live_session`, `chat::live`). One Ask ran
+(its `chat/<id>/` folder is there) resumes in the panel without `--dangerously-skip-permissions`, whatever *no
+permission prompts* says (D41); the panel's own conversations keep the switch. A conversation
 started in Ask is remembered under `vault_store_key` but never set as the panel's current (D44). The parser holds the
 vault's index for a turn (read at its first render, dropped at its `result`), not one scan per render.
 

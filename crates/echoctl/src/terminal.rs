@@ -764,7 +764,8 @@ pub fn start_vault(key: &str, vault: &str, pick: Option<&str>, cols: u16, rows: 
     if let Some(m) = (p.kind == ai::Kind::Local).then(|| p.notes_model()).flatten() {
         args.extend(["--model".into(), m]);
     }
-    if crate::config::Config::load().is_ok_and(|c| c.folder_skip_permissions) {
+    // An Ask conversation continued here keeps its prompts, whatever *no permission prompts* says (D41).
+    if crate::config::Config::load().is_ok_and(|c| c.folder_skip_permissions) && !crate::knowledge::chat::started_in_ask(&v, &session) {
         args.push("--dangerously-skip-permissions".into());
     }
     args.extend(vault_args(&v, &p)?);
@@ -1077,6 +1078,43 @@ mod tests {
         assert!(listed(&store, &id), "the panel lists it too");
         assert_eq!(session_ids().get(&store).map(String::as_str), Some(panel), "its Resume opens what it did");
         assert_eq!(resume_command(&v.id, &id), None, "a managed profile's conversation continues in Echo's panel");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn ask_conversations_in_the_panel_keep_their_prompts() {
+        let (_env, root) = crate::paths::testenv::folders("terminal-ask-prompts");
+        let _fake = ai::fake::install(&root);
+        crate::knowledge::chat::reset();
+        let p = ai::fake::profile("w", None, &ai::fake::signed_in("pat@example.com"));
+        let t = crate::knowledge::fixture::twin(&root.join("twin"));
+        let v = crate::knowledge::add(&t, crate::knowledge::AddOpts { name: Some("Twin".into()), profile: Some("w".into()), ..Default::default() }).unwrap();
+        let mut cfg = crate::config::Config::load().unwrap();
+        cfg.folder_skip_permissions = true;
+        cfg.save().unwrap();
+        std::fs::write(ai::fake::file(&p, "chat.jsonl"), crate::knowledge::chat::turn("Noted.")).unwrap();
+        let id = crate::knowledge::chat::send(&v.id, None, "What did Northwind Retail decide?", crate::knowledge::chat::Mode::Research, &[]).unwrap();
+        crate::knowledge::chat::turn_events(&v.id, &id);
+        crate::knowledge::chat::to_terminal(&v.id, &id).unwrap();
+        let session = || std::fs::read_to_string(ai::fake::file(&p, "session.argv")).unwrap_or_default();
+        let until = |what: &str, f: &dyn Fn() -> bool| {
+            let t0 = Instant::now();
+            while !f() {
+                assert!(t0.elapsed() < Duration::from_secs(10), "timed out waiting for {what}");
+                std::thread::sleep(Duration::from_millis(30));
+            }
+        };
+        // An Ask conversation taken to the panel: its prompts stay (D41), whatever *no permission prompts* says.
+        let pty = start_vault("claude:vault:twin", &v.id, Some(&id), 80, 20).unwrap();
+        until("the session started", &|| session().contains(&format!("--resume\n{id}\n")));
+        assert!(!session().contains("--dangerously-skip-permissions"), "{}", session());
+        close(pty);
+        // The panel's own conversation keeps the user's switch.
+        let pty = start_vault("claude:vault:twin:new", &v.id, Some("new"), 80, 20).unwrap();
+        until("the new session started", &|| session().contains("--session-id"));
+        assert!(session().contains("--dangerously-skip-permissions"), "{}", session());
+        close(pty);
+        crate::knowledge::chat::reset();
     }
 
     #[test]

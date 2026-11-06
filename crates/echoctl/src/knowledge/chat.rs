@@ -14,7 +14,7 @@
 
 use anyhow::{anyhow, bail, Result};
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::io::{BufRead as _, BufReader, Read, Write as _};
 use std::path::Path;
 use std::process::{Child, ChildStdin};
@@ -178,11 +178,14 @@ struct State {
     turn: u64,
     /// Permission requests waiting for the user: request id → the request, its input whole.
     pending: BTreeMap<String, Value>,
-    /// Claude Code has the conversation (a process ran it, or it is from the vault's list): the next start resumes it.
+    /// Claude Code has the conversation (a process of it began its session, or it is from the vault's list): the next
+    /// start resumes it.
     started: bool,
     last_active: Instant,
     /// When it was last used, for the list.
     active_at: Option<String>,
+    /// A streaming block's latest render (block → its event's number), while the block streams.
+    renders: HashMap<String, u64>,
 }
 
 struct Proc {
@@ -203,7 +206,22 @@ impl State {
     }
 
     fn push(&mut self, mut e: Value) {
-        e["n"] = json!(self.end());
+        let n = self.end();
+        e["n"] = json!(n);
+        // A streaming block's newer render supersedes the one before, which then keeps no copy of the block (one per
+        // render would hold a long answer many times over); its number stays.
+        let heavy = match e["type"].as_str() {
+            Some("text") => Some("html"),
+            Some("thinking") => Some("text"),
+            _ => None,
+        };
+        if let (Some(field), Some(block)) = (heavy, e["block"].as_str().map(str::to_owned)) {
+            let before = if e["done"] == true { self.renders.remove(&block) } else { self.renders.insert(block, n) };
+            if let Some(old) = before.and_then(|m| m.checked_sub(self.start)).and_then(|i| self.events.get_mut(i as usize)).and_then(Value::as_object_mut) {
+                old.remove(field);
+                old.insert("superseded".into(), json!(true));
+            }
+        }
         self.events.push_back(e);
         if self.events.len() > KEEP {
             self.events.pop_front();
@@ -227,7 +245,7 @@ impl State {
 
 impl Conv {
     fn new(id: &str, v: &Vault, started: bool) -> Arc<Conv> {
-        let state = State { start: 0, events: VecDeque::new(), proc: None, busy: false, turn: 0, pending: BTreeMap::new(), started, last_active: now(), active_at: None };
+        let state = State { start: 0, events: VecDeque::new(), proc: None, busy: false, turn: 0, pending: BTreeMap::new(), started, last_active: now(), active_at: None, renders: HashMap::new() };
         Arc::new(Conv { id: id.into(), vault: v.id.clone(), profile: v.profile.clone(), state: Mutex::new(state), changed: Condvar::new(), sending: Mutex::new(()) })
     }
 }
@@ -404,7 +422,8 @@ fn start(c: &Arc<Conv>, v: &Vault, mode: Mode, resume: bool, first: &str) -> Res
     {
         let mut st = lock(&c.state);
         st.proc = Some(Proc { gen, pid: child.id(), mode, profile: p.id.clone(), stdin: Arc::new(Mutex::new(child.stdin.take())), stopped: stopped.clone(), ending: false });
-        st.started = true;
+        // A new process numbers its blocks from b1 again.
+        st.renders.clear();
         st.touch();
     }
     if !resume {
@@ -445,10 +464,20 @@ fn end(st: &mut State) -> bool {
     if let Ok(mut s) = p.stdin.try_lock() {
         s.take();
     }
+    // TERM now — Echo quitting doesn't wait for a thread (K12-12) —, KILL to what is left 3 s later, in the background.
     let pid = p.pid;
-    std::thread::spawn(move || ai::stop_group(pid));
+    ai::term_group(pid);
+    #[cfg(test)]
+    if NO_ESCALATION.load(Ordering::SeqCst) {
+        return true;
+    }
+    std::thread::spawn(move || ai::finish_stop_group(pid));
     true
 }
+
+/// (tests) `end` leaves out its KILL thread: what it does at once has to stop a process (quitting doesn't wait).
+#[cfg(test)]
+static NO_ESCALATION: AtomicBool = AtomicBool::new(false);
 
 /// `r`'s lines to `f` until it says stop or `r` ends (a line longer than `LINE_MAX` is dropped).
 fn each_line(r: impl Read, mut f: impl FnMut(String) -> bool) {
@@ -513,11 +542,18 @@ fn watch(c: Arc<Conv>, v: Vault, gen: u64, mut child: Child, stopped: Arc<Atomic
     }
     std::thread::spawn(move || {
         let mut parser = stream::Parser::new(&v);
+        let mut begun = false;
         loop {
             match rx.recv_timeout(TICK) {
                 Ok(line) => {
                     let control = line.contains("\"control_request\"").then(|| serde_json::from_str::<Value>(&line).ok()).flatten().filter(|x| x["type"] == "control_request");
                     let events = parser.feed(&line);
+                    // Its `init` line: Claude Code has the session now, so from here on it resumes. A first process that
+                    // dies before that leaves none, and the next start is new again.
+                    if !begun && parser.session_id().is_some() {
+                        begun = true;
+                        lock(&c.state).started = true;
+                    }
                     took(&c, events, control);
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {
@@ -565,6 +601,7 @@ fn took(c: &Conv, events: Vec<Value>, control: Option<Value>) {
         for e in events {
             if e["type"] == "result" {
                 st.busy = false;
+                st.started = true;
                 st.pending.clear();
                 st.touch();
             }
@@ -642,10 +679,7 @@ pub fn stop(conversation: &str) {
         c.changed.notify_all();
         (stdin, gen, st.turn, denied)
     };
-    for id in denied {
-        let _ = write_line(&stdin, &json!({"type": "control_response", "response": {"subtype": "success", "request_id": id, "response": {"behavior": "deny", "message": "The user stopped this turn."}}}));
-    }
-    let _ = write_line(&stdin, &json!({"type": "control_request", "request_id": format!("echo-stop-{gen}-{turn}"), "request": {"subtype": "interrupt"}}));
+    // The deadline first: the writes below wait while Claude Code doesn't read its input.
     let deadline = now() + STOP_AFTER;
     std::thread::spawn(move || loop {
         std::thread::sleep(Duration::from_millis(50));
@@ -659,6 +693,10 @@ pub fn stop(conversation: &str) {
             return;
         }
     });
+    for id in denied {
+        let _ = write_line(&stdin, &json!({"type": "control_response", "response": {"subtype": "success", "request_id": id, "response": {"behavior": "deny", "message": "The user stopped this turn."}}}));
+    }
+    let _ = write_line(&stdin, &json!({"type": "control_request", "request_id": format!("echo-stop-{gen}-{turn}"), "request": {"subtype": "interrupt"}}));
 }
 
 /// End the processes of the conversations on `profile` (a sign-in needs the profile to itself); how many. They resume.
@@ -700,14 +738,23 @@ pub fn sweep() {
 }
 
 /// `sweep`, every 30 s from the first start on.
+static SWEEPER: std::sync::Once = std::sync::Once::new();
+
 fn sweeper() {
-    static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(|| {
+    // Tests sweep by themselves: a sweep of its own could fire between a test's clock skew and its check.
+    #[cfg(not(test))]
+    SWEEPER.call_once(|| {
         std::thread::spawn(|| loop {
             std::thread::sleep(Duration::from_secs(30));
             sweep();
         });
     });
+}
+
+/// Was conversation `id` of `v` ever run by Ask (Echo's folder of it, `chat/<id>/`, is there): continued in the terminal
+/// panel it keeps its prompts (D41) — it may have read web pages or others' words.
+pub fn started_in_ask(v: &Vault, id: &str) -> bool {
+    valid_id(id) && super::cache_dir(&v.id).join("chat").join(id).is_dir()
 }
 
 /// The vault's conversations for Ask's list (the `chats` route): those of its list Claude Code kept and those Echo
@@ -767,6 +814,7 @@ pub(crate) fn reset() {
     }
     lock(&CHATS).clear();
     *lock(&SKEW) = Duration::ZERO;
+    NO_ESCALATION.store(false, Ordering::SeqCst);
 }
 
 /// (tests) The clock runs `by` further ahead (idle stops, a stop's 5 s).
@@ -1068,7 +1116,8 @@ mod tests {
         let p = signed_in();
         let v = vault(&root, "w");
         let asks = json!({"type": "control_request", "request_id": "req-7", "request": {"subtype": "can_use_tool", "tool_name": "Edit", "input": {"file_path": format!("{}/knowledge/clients/acme.md", v.root.display()), "old_string": "# Acme Corp\n", "new_string": "# Acme Corp\n\nPilot on 18 November.\n"}}});
-        script(&p, "chat.1.jsonl", &format!("{asks}\n{{\"_hang\":true}}\n"));
+        let init = turn("").lines().next().unwrap().to_string(); // Claude Code's `init` comes first
+        script(&p, "chat.1.jsonl", &format!("{init}\n{asks}\n{{\"_hang\":true}}\n"));
         let id = send(&v.id, None, "Note the pilot date on Acme", Mode::Curate, &[]).unwrap();
         let ev = events_until(&v.id, &id, |_, c| c.waiting);
         assert_eq!(of_type(&ev, "permission")[0]["request"], "req-7");
@@ -1208,6 +1257,102 @@ mod tests {
         assert_eq!(ev[0]["action"], "signin");
         assert_eq!(ev[0]["profile"], "w");
         assert!(live().is_empty());
+    }
+
+    #[test]
+    fn a_first_start_that_dies_before_its_session_starts_new_again() {
+        let (_env, root) = crate::paths::testenv::folders("chat-first-dies");
+        let _fake = fake::install(&root);
+        let _clean = clean();
+        let p = signed_in();
+        let v = vault(&root, "w");
+        // Claude Code refused at once (a flag it doesn't know): no `init`, no session.
+        script(&p, "chat.1.jsonl", "{\"_exit\":3}\n");
+        let id = send(&v.id, None, "What is open with Acme?", Mode::Ask, &[]).unwrap();
+        events_until(&v.id, &id, |_, c| !c.busy && !c.live);
+        script(&p, "chat.2.jsonl", &turn("Here it is."));
+        send(&v.id, Some(&id), "What is open with Acme?", Mode::Ask, &[]).unwrap();
+        turn_events(&v.id, &id);
+        let a = argv(&p);
+        assert_eq!(value_of(&a, "--session-id"), Some(id.as_str()), "{a:?}");
+        assert!(value_of(&a, "--resume").is_none(), "there is nothing to resume: {a:?}");
+    }
+
+    #[test]
+    fn the_tests_sweep_by_themselves() {
+        let (_env, root) = crate::paths::testenv::folders("chat-no-sweeper");
+        let _fake = fake::install(&root);
+        let _clean = clean();
+        let p = signed_in();
+        let v = vault(&root, "w");
+        script(&p, "chat.jsonl", &turn("Noted."));
+        let id = send(&v.id, None, "Hello", Mode::Ask, &[]).unwrap();
+        turn_events(&v.id, &id);
+        // A sweep of its own could fire between a test's clock skew and its check.
+        assert!(!SWEEPER.is_completed(), "no sweeper thread in tests");
+    }
+
+    #[test]
+    fn quitting_stops_chats_at_once() {
+        let (_env, root) = crate::paths::testenv::folders("chat-quit");
+        let _fake = fake::install(&root);
+        let _clean = clean();
+        let p = signed_in();
+        let v = vault(&root, "w");
+        script(&p, "chat.1.jsonl", "{\"_hang\":true}\n");
+        let id = send(&v.id, None, "Summarise Northwind Retail", Mode::Ask, &[]).unwrap();
+        until("the turn going", || file(&p, "chat.in.jsonl").contains("Northwind"));
+        // Echo quits right after: only what `close_all` does before it returns counts.
+        NO_ESCALATION.store(true, Ordering::SeqCst);
+        close_all();
+        until("its process stopped", || gone(&file(&p, "pids")));
+        events_until(&v.id, &id, |_, c| !c.live);
+    }
+
+    #[test]
+    fn a_stop_whose_writes_block_still_ends_the_process() {
+        let (_env, root) = crate::paths::testenv::folders("chat-stop-blocked");
+        let _fake = fake::install(&root);
+        let _clean = clean();
+        let p = signed_in();
+        let v = vault(&root, "w");
+        script(&p, "chat.1.jsonl", "{\"_hang\":true}\n");
+        let id = send(&v.id, None, "Summarise Northwind Retail", Mode::Ask, &[]).unwrap();
+        let c = lock(&CHATS).get(&id).cloned().unwrap();
+        let stdin = lock(&c.state).proc.as_ref().unwrap().stdin.clone();
+        // Its input is busy (a write that doesn't get through): Stop's own writes wait.
+        let held = lock(&stdin);
+        let stopping = { let id = id.clone(); std::thread::spawn(move || stop(&id)) };
+        std::thread::sleep(Duration::from_millis(200));
+        skew(Duration::from_secs(5));
+        until("the stop's 5 s ended it", || gone(&file(&p, "pids")));
+        drop(held);
+        stopping.join().unwrap();
+        let ev = events_until(&v.id, &id, |_, c| !c.busy && !c.live);
+        assert_eq!(ev.last().unwrap()["kind"], "stopped");
+    }
+
+    #[test]
+    fn a_block_rendered_many_times_keeps_one_copy() {
+        let (_env, root) = crate::paths::testenv::folders("chat-one-copy");
+        let v = vault(&root, "system");
+        let c = Conv::new(ID, &v, false);
+        let mut st = lock(&c.state);
+        let long = "Northwind Retail fixes forward. ".repeat(200);
+        for i in 1..=50 {
+            st.push(json!({"type": "text", "block": "b1", "html": format!("<p>{}</p>", &long[..long.len() * i / 50]), "done": false}));
+            st.push(json!({"type": "thinking", "block": "b2", "text": &long[..long.len() * i / 50], "done": false}));
+        }
+        st.push(json!({"type": "text", "block": "b1", "html": format!("<p>{long}</p>"), "done": true}));
+        assert_eq!(st.events.iter().filter(|e| e.get("html").is_some()).count(), 1, "the latest render only");
+        assert_eq!(st.events.iter().filter(|e| e["type"] == "thinking" && e.get("text").is_some()).count(), 1);
+        assert_eq!(st.events.back().unwrap()["html"].as_str().unwrap().len(), long.len() + 7);
+        assert!(st.events.iter().enumerate().all(|(i, e)| e["n"] == i as u64), "numbers stay as they were");
+        assert!(st.events[0]["superseded"] == true);
+        // A new process numbers its blocks again from b1: its first render supersedes nothing of the last one's.
+        st.renders.clear();
+        st.push(json!({"type": "text", "block": "b1", "html": "<p>Again</p>", "done": false}));
+        assert!(st.events[100].get("html").is_some());
     }
 
     #[test]
