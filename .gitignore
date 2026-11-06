@@ -35,3 +35,4 @@ docs/superpowers/qa-tasks/*/**/*.local.*
 
 # functional test reports and screenshots (made-up data, but kept per machine)
 /tests/reports/
+/.playwright-mcp/
