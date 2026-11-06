@@ -215,7 +215,7 @@ fn work(tasks: &Value) -> Value {
             .map(|t| {
                 json!({
                     "id": t["id"], "title": t["title"], "due": t["due"], "late": t["late"], "owner": t["owner"], "project": t["project"],
-                    "waiting_for": t["waiting_for"], "story": t["story"]["title"],
+                    "waiting_for": t["waiting_for"], "story": t["story"]["title"], "mode": t["mode"],
                     "link": format!("echo://task/{}/{}", t["project"].as_str().unwrap_or(""), t["id"].as_str().unwrap_or("")),
                 })
             })

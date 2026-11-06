@@ -162,6 +162,16 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   for both, skill included, so that tasks can later go to Yolo by themselves. The user chose full autonomy knowingly:
   the task's own words still reach the run as data by its link, never typed as an instruction.
 - Only the panel's session: Echo has no way into the user's own Claude Code sessions elsewhere.
+- Who does a task (`taskmodes.rs`, from Adam Auerbach's Meeting Notebook, echo-plugins#1): the user's own open tasks
+  are Claude can (`prompt`: what to hand back, a `skill`) or By hand (`how`). The user's choice is on the task in its
+  ledger (`mode`, `how`, `prompt`, `skill`, pinned); until then Echo's guess (`<home>/.echo/task-modes.json`, dashed in
+  the window), one model call per thread on its AI profile, once a day a task (the prep scheduler; `echoctl
+  classify`). Shown as a two-way switch on Today's My work cards and in What moved, a tag on Tasks cards with a filter
+  (Anyone / Claude can do / By hand). A Claude one's ✦ opens the Claude dialog with its prompt as the note and its
+  skill chosen — Work on it / Yolo, no third button (the user: one Run with Claude mechanism).
+- What moved (`callChanges`): what a call changed in its threads, beside the minutes as the live notes are beside the
+  transcript (its own scroll; under 1000 px it is hidden), the user's own open tasks first with who does each. It was
+  above the Actions tab's items; action items are everything said, the user's tasks are what is theirs to do.
 - Not yet: action modes from the minutes (claude: the skill and prompt ready on the action; manual: how to do it).
 
 ### Settings → Templates (`templatesSettings`, `/api/templates`, `calls::templates_view`)

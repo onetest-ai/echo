@@ -347,6 +347,34 @@ label.split-lang:focus-within { outline: 2px solid var(--accent); outline-offset
 #minutes-bar .grow { flex: 1; min-width: 0; }
 #minutes-bar .warn { color: var(--warn); }
 .minutes-slot { flex: 1; min-height: 0; }
+/* What moved, beside the minutes (as the live notes beside the transcript): its own scroll, the page's stays still. */
+.minutes-split { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 380px); }
+.minutes-split .minutes-slot { min-width: 0; }
+.minutes-side { min-height: 0; overflow-y: auto; border-left: 1px solid var(--line); padding: 14px 16px; background: var(--surface); }
+.minutes-side[hidden] { display: none; }
+.minutes-split:has(.minutes-side[hidden]) { grid-template-columns: minmax(0, 1fr); }
+.minutes-side .cc { margin: 0; }
+/* A narrow column: what happened and when on one line, the task under it, a mark under that. */
+.minutes-side .cc-row { grid-template-columns: minmax(0, 1fr) auto; gap: 3px 8px; padding: 9px 2px; }
+.minutes-side .cc-what { grid-column: 1; grid-row: 1; }
+.minutes-side .cc-row > :last-child { grid-column: 2; grid-row: 1; }
+.minutes-side .cc-main { grid-column: 1 / -1; grid-row: 2; }
+.minutes-side .cc-row > .wk-v { grid-column: 1 / -1; grid-row: 3; justify-self: start; }
+.minutes-side .md-how { flex-basis: 100%; white-space: normal; }
+@media (max-width: 1000px) { .minutes-split { grid-template-columns: minmax(0, 1fr); } .minutes-side { display: none; } }
+/* Who does a task (taskmodes): Claude can / By hand; Echo's guess dashed until the user picks. */
+.md-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 4px; min-width: 0; }
+.md-segs { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; flex: none; }
+.md-seg { height: 22px; padding: 0 8px; border: 0; background: transparent; color: var(--text-3); font: inherit; font-size: 11.5px; cursor: pointer; }
+.md-seg + .md-seg { border-left: 1px solid var(--line); }
+.md-seg:hover { color: var(--text); }
+.md-seg.on { background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
+.md-seg.on.guess { background: transparent; outline: 1px dashed var(--accent); outline-offset: -2px; font-weight: 500; }
+.md-send { width: 24px; height: 24px; color: var(--accent-ink); }
+.md-send svg { width: 16px; height: 16px; }
+.md-how { flex: 1 1 160px; min-width: 0; font-size: 11.5px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk-mode { font-size: 10.5px; padding: 0 6px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-ink); }
+.tk-mode.guess { background: transparent; border: 1px dashed var(--accent); }
 .minutes-slot iframe { display: block; width: 100%; height: 100%; border: 0; background: var(--surface); }
 
 /* a message for a moment, and the close that couldn't save */

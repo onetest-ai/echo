@@ -322,7 +322,7 @@ enum Cmd {
         #[arg(default_value = "latest")]
         call: String,
     },
-    /// Type the agenda's meetings by their invites now (JSON: each meeting's type and who set it)
+    /// Type the agenda's meetings by their invites now, and guess who does each of your open tasks (JSON)
     #[command(hide = true)]
     Classify,
     /// Set what kind of meeting a call was: client, partner, one-on-one, internal, industry, other (yours is kept)
@@ -1762,7 +1762,9 @@ fn main() -> Result<()> {
             let n = calls::classify(&agenda)?;
             let book = calls::type_book();
             let out: Vec<_> = agenda.iter().map(|m| serde_json::json!({"subject": m.subject, "start": m.start, "type": calls::event_type_in(m, &book)})).collect();
-            println!("{}", serde_json::to_string_pretty(&serde_json::json!({"classified": n, "meetings": out}))?);
+            // And who does each of the user's open tasks (Claude or by hand), as the app does in the background.
+            let tasks = taskmodes::classify()?;
+            println!("{}", serde_json::to_string_pretty(&serde_json::json!({"classified": n, "meetings": out, "task_modes": tasks}))?);
             Ok(())
         }
         Cmd::Type { call, kind } => {

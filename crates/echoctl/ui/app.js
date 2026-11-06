@@ -46,7 +46,7 @@ const S = {
   folderProfile: null, // the AI profile picked for Claude · Echo folder (null: the default)
   sessions: null, // Claude conversations that can be resumed (`<profile>:folder`, `<profile>:<stamp>`)
   settings: null, // Settings' snapshot (`api/settings`)
-  tk: { data: null, project: '', sort: 'due', more: {} }, // Tasks: across projects
+  tk: { data: null, project: '', sort: 'due', mode: '', more: {} }, // Tasks: across projects
   br: { tab: 'sources', scope: '', data: null, graph: null, node: null, nodeData: null, edit: null }, // the Brain
   pj: { client: null, adding: null, pfEdit: null, menu: false, work: null, node: null, openOnly: true, view: 'tree', kind: '', owner: '', editField: null, found: false, foundData: null, data: null, sel: null, tab: 'brief', detail: null, briefEdit: null, showClosed: false, confirmDelete: false, newClient: false, picker: false }, // Projects
   setSection: 'general', // Settings' open section
@@ -1005,7 +1005,7 @@ function doc() {
       <div class="tabs" role="tablist">${tabs.map(([id, label, n, rec]) => `<button class="tab" role="tab" data-tab="${id}" aria-selected="${S.tab === id}">${rec ? '<span class="tab-rec" aria-label="Recording"></span>' : ''}${label}${n !== '' ? `<span class="n">${n}</span>` : ''}</button>`).join('')}</div>${notices()}`
   const body = tabBody(c, segs, chat, frames, actions)
   const confirm = S.confirmDelete ? confirmBox(c) : ''
-  return typeof body === 'string' ? { head, pane: confirm + body } : { head, bar: confirm + body.bar, frame: body.frame }
+  return typeof body === 'string' ? { head, pane: confirm + body } : { head, bar: confirm + body.bar, frame: body.frame, side: body.side }
 }
 
 /** Today (the first activity; the window opens on it): cards delivered to Echo (a routine's morning brief — Got it
@@ -1076,9 +1076,9 @@ function todayView() {
     const attrs = `data-project="${esc(t.project)}" data-title="${esc(t.title)}" data-node="${esc(t.id)}"`
     const close = `<button class="icon-btn td-ico" data-today-close="${esc(t.id)}" ${attrs} title="Close this task…" aria-label="Close “${esc(t.title)}”…">${ICON('<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/>')}</button>`
     // Claude: one dialog — work on it in the panel, or Yolo (Claude does it on its own), with a skill.
-    const work = `<button class="icon-btn td-ico" data-claude-task="${esc(t.id)}" data-today="1" ${attrs} title="Claude — work on this task, or Yolo" aria-label="Claude: “${esc(t.title)}”…">${ICON('<path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/><path d="M18.5 15.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>')}</button>`
+    const work = `<button class="icon-btn td-ico" data-claude-task="${esc(t.id)}" data-today="1"${modeData(t)} ${attrs} title="Claude — work on this task, or Yolo" aria-label="Claude: “${esc(t.title)}”…">${ICON('<path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/><path d="M18.5 15.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>')}</button>`
     // The date's icon before the title's words.
-    return `<div class="td-task"><span class="td-task-t">${dueChip(t)}<a href="${esc(t.link)}">${esc(t.title)}</a></span><span class="td-task-m">${pj ? projIcon(pj, 12) : ''}${where}<span class="td-icos">${work}${close}</span></span></div>`
+    return `<div class="td-task"><span class="td-task-t">${dueChip(t)}<a href="${esc(t.link)}">${esc(t.title)}</a></span><span class="td-task-m">${pj ? projIcon(pj, 12) : ''}${where}<span class="td-icos">${work}${close}</span></span>${kind === 'I owe' ? modeLine(t.project, t, true) : ''}</div>`
   }
   const w = d.work || {}
   // One list by date: late first (the oldest first), then by due date; whose it is stays on each card.
@@ -1442,10 +1442,10 @@ function tabBody(c, segs, chat, frames, actions) {
   if (S.tab === 'actions') {
     if (!actions && c.actions_error) return minutesHint(c, "The action items can't be read", `${c.actions_error} — the next minutes replace them (the file is kept beside them).`)
     if (!actions) return minutesHint(c, 'No action items yet', 'Action items come with the minutes.')
-    const changed = callChanges(c)
-    if (!actions.length) return `${changed}<p style="color:var(--text-3)">No action items in this call.</p>`
+    // What the call changed in its threads is beside the minutes (What moved).
+    if (!actions.length) return '<p style="color:var(--text-3)">No action items in this call.</p>'
     const links = c.action_tasks || {}
-    return `${changed}${changed ? '<div class="cc-h">Action items</div>' : ''}<div class="todo">${actions.map((a) => {
+    return `<div class="todo">${actions.map((a) => {
       const k = links[a.id], kp = k && projById(k.project)
       const done = a.status === 'done'
       // By its id, with the status wanted: a list rewritten meanwhile can't make it another item.
@@ -1483,11 +1483,26 @@ function ccWhat(x) {
   if (x.op === 'answer') return [n.kind === 'risk' ? 'Response' : 'Answered', 'done']
   return [x.op, 'move']
 }
+const TASK_DONE = new Set(['done', 'cancelled', 'merged', 'deleted'])
+/** Who does one of the user's tasks (`taskmodes`): Claude or by hand — Echo's guess dashed until the user picks (a
+ *  click keeps their choice on the task); a manual one's how; a Claude one's ✦, the Claude dialog with its prompt
+ *  and skill — except on Today, whose card has its ✦ already (`modeData` gives it the same). */
+const modeData = (n) => n.mode && n.mode.mode === 'claude' ? ` data-prompt="${esc(n.mode.prompt || '')}" data-skill="${esc(n.mode.skill || '')}"` : ''
+function modeLine(project, n, today) {
+  const m = (n.mode && n.mode.mode) || '', guess = n.mode && n.mode.by === 'guess'
+  const seg = (k, label, tip) => `<button class="md-seg${m === k ? ' on' : ''}${m === k && guess ? ' guess' : ''}" data-mode-set="${k}" data-project="${esc(project)}" data-node="${esc(n.id)}" aria-pressed="${m === k}" title="${esc(m === k && guess ? `Echo's guess: ${tip} — click to keep it` : tip)}">${label}</button>`
+  const send = m === 'claude' && !today ? `<button class="icon-btn md-send" data-claude-task="${esc(n.id)}" data-project="${esc(project)}" data-title="${esc(n.title)}" data-prompt="${esc(n.mode.prompt || '')}" data-skill="${esc(n.mode.skill || '')}" title="Send to Claude" aria-label="Send “${esc(n.title)}” to Claude">${ICON('<path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/><path d="M18.5 15.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>')}</button>` : ''
+  const how = m === 'manual' && n.mode.how ? `<span class="md-how" title="How">${esc(n.mode.how)}</span>`
+    : m === 'claude' && n.mode.prompt ? `<span class="md-how" title="What Claude hands back">${esc(n.mode.prompt)}</span>` : ''
+  return `<div class="md-line"><span class="md-segs" role="group" aria-label="Who does it">${seg('claude', 'Claude can', 'Claude can do it')}${seg('manual', 'By hand', 'You do it by hand')}</span>${send}${how}</div>`
+}
+/** What the call changed in its threads, beside the minutes: each thread's changes, the user's own open tasks first
+ *  with who does each (`modeLine`: Claude or by hand, and ✦ to send it to Claude). */
 function callChanges(c) {
   const blocks = (c.changes || []).map((g) => {
     const p = projById(g.project) || { id: g.project, name: g.project }
-    const linked = new Set(Object.values(c.action_tasks || {}).filter((k) => k.project === g.project).map((k) => k.id))
-    const rows = g.changes.filter((x) => x.verdict !== 'wrong' && !(x.op === 'create' && linked.has(x.node.id)))
+    const rows = g.changes.filter((x) => x.verdict !== 'wrong')
+      .sort((a, b) => (b.node.mine && !TASK_DONE.has(b.node.state) ? 1 : 0) - (a.node.mine && !TASK_DONE.has(a.node.state) ? 1 : 0))
     const head = `<div class="cc-th">${projIcon(p, 14)}<b>${esc(p.name)}</b>`
     if (!g.read) {
       // Not read yet: being read now, due at a time (15 min after the call, then the next look), or
@@ -1500,9 +1515,8 @@ function callChanges(c) {
       const canSync = !g.syncing && (g.queued || at)
       return `${head}<span class="set-sub">${why}</span><span class="grow"></span>${canSync ? `<button class="link-btn" data-cc-sync="${esc(g.project)}">Sync now</button>` : ''}</div>`
     }
-    const hidden = linked.size ? ` · ${linked.size} on the action items below` : ''
-    if (!rows.length) return `${head}<span class="set-sub">nothing changed${hidden}</span></div>`
-    return `${head}<span class="set-sub">${rows.length} change${rows.length === 1 ? '' : 's'}${hidden}</span></div><div class="cc-list">${rows.map((x) => {
+    if (!rows.length) return `${head}<span class="set-sub">nothing changed</span></div>`
+    return `${head}<span class="set-sub">${rows.length} change${rows.length === 1 ? '' : 's'}</span></div><div class="cc-list">${rows.map((x) => {
       const [what, cls] = ccWhat(x)
       const mark = x.applied === false && x.verdict === 'supports' ? '<span class="wk-v weak" title="You set this yourself; the call\'s words are kept in its history">kept yours</span>'
         : x.verdict === 'weak' ? '<span class="wk-v weak">weak · to review</span>'
@@ -1512,11 +1526,12 @@ function callChanges(c) {
         <div class="cc-main"><button class="cc-node" data-tk="open" data-project="${esc(g.project)}" data-node="${esc(x.node.id)}"><span class="wk-id">${esc(x.node.id)}</span> ${esc(x.node.title)}</button>
         ${x.op === 'link' ? `<div class="cc-dep">for <button class="cc-node inline" data-tk="open" data-project="${esc(g.project)}" data-node="${esc(x.depends_on)}"><span class="wk-id">${esc(x.depends_on)}</span> ${esc(x.depends_on_title || '')}</button></div>`
           : x.op === 'waiting' && x.what ? `<div class="cc-dep">on ${esc(x.who || 'someone')} — ${esc(x.what)}</div>` : ''}
-        ${x.quote ? `<div class="cc-q">“${esc(x.quote)}”${x.speaker ? ` <span>— ${esc(x.speaker)}</span>` : ''}</div>` : ''}</div>
+        ${x.quote ? `<div class="cc-q">“${esc(x.quote)}”${x.speaker ? ` <span>— ${esc(x.speaker)}</span>` : ''}</div>` : ''}
+        ${x.node.mine && !TASK_DONE.has(x.node.state) ? modeLine(g.project, x.node) : ''}</div>
         ${mark}${ts != null ? `<button class="btn ghost" data-at="${ts}">${clock(ts)}</button>` : '<span></span>'}</div>`
     }).join('')}</div>`
   })
-  return blocks.length ? `<section class="cc"><div class="cc-h">What this call changed</div>${blocks.join('')}</section>` : ''
+  return blocks.length ? `<section class="cc"><div class="cc-h">What moved</div>${blocks.join('')}</section>` : ''
 }
 const hms = (s) => String(s).split(':').reduce((a, x) => a * 60 + Number(x), 0)
 
@@ -2088,7 +2103,7 @@ function minutesTab(c) {
   // The first minutes being written: their box until they are done (the file appears mid-run).
   if (!c.notes || (busy && !run.had_minutes)) return minutesHint(c, 'No minutes yet', 'The transcript is ready.')
   const frame = `<iframe id="minutes-frame" sandbox="allow-scripts" referrerpolicy="no-referrer" title="Minutes" src="minutes/${encodeURIComponent(c.name)}?v=${encodeURIComponent(c.minutes_rev || '')}${Theme.chosen() ? `&theme=${Theme.chosen()}` : ''}"></iframe>`
-  return { bar: minutesBar(c), frame }
+  return { bar: minutesBar(c), frame, side: callChanges(c) }
 }
 
 /** Above the page: an update going on or one that didn't finish, notes changed since, and the file. */
@@ -2749,8 +2764,19 @@ function templateEditor() {
 document.addEventListener('click', (e) => {
   // A click anywhere else in the dialog folds its suggestions away.
   if (S.claudeSend && S.claudeSend.open && !e.target.closest('.sc-pick')) { S.claudeSend.open = false; render() }
-  const t = e.target.closest('[data-claude-task],[data-sc-send],[data-sc-yolo],[data-sc-off],[data-sc-skill]')
+  const t = e.target.closest('[data-claude-task],[data-sc-send],[data-sc-yolo],[data-sc-off],[data-sc-skill],[data-mode-set]')
   if (!t) return
+  // Who does it: the user's choice, kept on the task (pinned: Echo's guess never overwrites it).
+  if (t.dataset.modeSet) {
+    send({ cmd: 'project', op: 'ledger', id: t.dataset.project, body: { op: 'edit', node: t.dataset.node, set: { mode: t.dataset.modeSet } } })
+    setTimeout(async () => {
+      if (S.view === 'today') await loadToday()
+      else if (S.view === 'tasks') await loadTasks()
+      else if (S.selected) await loadCall(S.selected)
+      render()
+    }, 400)
+    return
+  }
   if (t.dataset.scSkill !== undefined && S.claudeSend) {
     S.claudeSend.words = (($('#sc-words') || {}).value || '')
     Object.assign(S.claudeSend, { skill: t.dataset.scSkill, q: '', open: false })
@@ -2759,7 +2785,8 @@ document.addEventListener('click', (e) => {
     return
   }
   if (t.dataset.claudeTask) {
-    S.claudeSend = { project: t.dataset.project, node: t.dataset.claudeTask, title: t.dataset.title, today: !!t.dataset.today, skill: undefined, words: '', open: true }
+    // A task Claude can do comes with its own words (what to hand back) and skill (`taskmodes`).
+    S.claudeSend = { project: t.dataset.project, node: t.dataset.claudeTask, title: t.dataset.title, today: !!t.dataset.today, skill: t.dataset.skill || undefined, words: t.dataset.prompt || '', open: !t.dataset.skill }
     if (!TPL.data) loadTemplates().then(render)
     return render()
   }
@@ -4139,7 +4166,7 @@ function taskCard(c, pile) {
   const quiet = c.quiet >= 5 && !c.due ? `<span class="tk-quiet" title="No word about it in ${c.quiet} days">quiet ${c.quiet} d</span>` : ''
   return `<button class="tk-card${c.wait ? ' tk-wait' : ''}${S.pj.node === c.id && S.pj.sel === c.project ? ' on' : ''}" data-tk="open" data-project="${esc(c.project)}" data-node="${esc(c.id)}">
     <span class="tk-t">${esc(c.title)}</span>${(() => { const w = taskWho(c, pile); return w ? `<span class="tk-who">${w}</span>` : '' })()}
-    <span class="tk-m"><span class="tk-pj">${projIcon(p, 12)}${esc(p.name)}</span>${(c.also_in || []).map((a) => { const q = projById(a.thread) || { id: a.thread, name: a.thread }; return `<span class="tk-pj" title="Also raised in ${esc(q.name)} (${esc(a.node)})">${projIcon(q, 12)}${esc(q.name)}</span>` }).join('')}<span class="grow"></span>${quiet}${dueText(c)}</span>
+    <span class="tk-m">${c.mine && c.mode ? `<span class="tk-mode${c.mode.by === 'guess' ? ' guess' : ''}" title="${c.mode.by === 'guess' ? "Echo's guess" : 'Your choice'}">${c.mode.mode === 'claude' ? 'Claude can' : 'By hand'}</span>` : ''}<span class="tk-pj">${projIcon(p, 12)}${esc(p.name)}</span>${(c.also_in || []).map((a) => { const q = projById(a.thread) || { id: a.thread, name: a.thread }; return `<span class="tk-pj" title="Also raised in ${esc(q.name)} (${esc(a.node)})">${projIcon(q, 12)}${esc(q.name)}</span>` }).join('')}<span class="grow"></span>${quiet}${dueText(c)}</span>
   </button>`
 }
 function tasksView() {
@@ -4156,18 +4183,21 @@ function tasksView() {
   }
   const projChip = `<label class="fchip${pick ? ' on' : ''}">${esc(pick ? name(pick) : 'All threads')} ▾<select data-tk-project aria-label="Thread"><option value="">All threads</option>${projects.map((p) => `<option value="${esc(p.id)}"${pick === p.id ? ' selected' : ''}>${esc(p.name)} · ${p.tasks}</option>`).join('')}</select></label>`
   const sortChip = `<label class="fchip">${esc((TASK_SORTS.find(([k]) => k === S.tk.sort) || TASK_SORTS[0])[1])} ▾<select data-tk-sort aria-label="Order">${TASK_SORTS.map(([k, l]) => `<option value="${k}"${S.tk.sort === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`
-  const head = `<header class="tk-head"><h2>Tasks</h2><span class="tk-sub">across ${projects.length} active project${projects.length === 1 ? '' : 's'}</span><span class="grow"></span>${projChip}${sortChip}</header>`
+  // Who does it (`taskmodes`): your tasks Claude can do, or the ones by hand.
+  const MODES = [['', 'Anyone'], ['claude', 'Claude can do'], ['manual', 'By hand']]
+  const modeChip = `<label class="fchip${S.tk.mode ? ' on' : ''}">${esc((MODES.find(([k]) => k === S.tk.mode) || MODES[0])[1])} ▾<select data-tk-mode aria-label="Who does it">${MODES.map(([k, l]) => `<option value="${k}"${S.tk.mode === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`
+  const head = `<header class="tk-head"><h2>Tasks</h2><span class="tk-sub">across ${projects.length} active project${projects.length === 1 ? '' : 's'}</span><span class="grow"></span>${projChip}${modeChip}${sortChip}</header>`
   if (!projects.length) return `<div class="tk">${head}<div class="wk-empty"><b>No active threads</b><p>Tasks come from your threads' calls: each thread's Work tab reads them into stories and tasks.</p><button class="btn primary" data-go="projects">Open Threads</button></div></div>`
   const total = TASK_PILES.reduce((n, [k]) => n + ((d.piles || {})[k] || []).length, 0) + ((d.piles || {}).others || []).length
   if (!total) return `<div class="tk">${head}<div class="wk-empty"><b>No open tasks</b><p>Once a thread's calls are synced, what was promised, owed and waited on shows here — from every thread at once.</p></div></div>`
   const cols = TASK_PILES.map(([k, label]) => {
-    const all = ((d.piles || {})[k] || []).filter((c) => !pick || c.project === pick).slice().sort(sorts[S.tk.sort] || sorts.due)
+    const all = ((d.piles || {})[k] || []).filter((c) => (!pick || c.project === pick) && (!S.tk.mode || (c.mode && c.mode.mode === S.tk.mode))).slice().sort(sorts[S.tk.sort] || sorts.due)
     const open = S.tk.more[k], shown = open ? all : all.slice(0, TASK_SHOWN)
     const more = all.length > TASK_SHOWN ? `<button class="tk-more" data-tk="more" data-pile="${k}">${open ? 'Show fewer' : `+ ${all.length - TASK_SHOWN}`}</button>` : ''
     return `<section class="tk-col"><h3>${esc(label)} <span>${all.length}</span></h3>${shown.map((c) => taskCard(c, k)).join('') || '<p class="tk-none">Nothing here</p>'}${more}</section>`
   }).join('')
   const errs = (d.errors || []).length ? `<p class="set-sub tk-err">${d.errors.map((e) => `${esc(name(e.project))}: ${esc(e.error)}`).join(' · ')}</p>` : ''
-  const others = ((d.piles || {}).others || []).filter((c) => !pick || c.project === pick).slice().sort(sorts[S.tk.sort] || sorts.due)
+  const others = ((d.piles || {}).others || []).filter((c) => (!pick || c.project === pick) && (!S.tk.mode || (c.mode && c.mode.mode === S.tk.mode))).slice().sort(sorts[S.tk.sort] || sorts.due)
   return `<div class="tk">${head}${errs}<div class="tk-cols">${cols}</div>${othersPile(others, 'others')}</div>`
 }
 /** What to ask whom, next time you meet (right panel): late, due-soon and quiet things they owe,
@@ -4215,6 +4245,7 @@ document.addEventListener('change', (e) => {
   const t = e.target
   if (t.matches && t.matches('[data-tk-project]')) { S.tk.project = t.value; render() }
   if (t.matches && t.matches('[data-tk-sort]')) { S.tk.sort = t.value; render() }
+  if (t.matches && t.matches('[data-tk-mode]')) { S.tk.mode = t.value; render() }
 })
 
 /** Projects Echo would make from calls in none (`projects::found`): accept, merge, reject. */
@@ -7020,10 +7051,12 @@ function render() {
         if (pane.dataset.mode !== 'frame') {
           pane.dataset.mode = 'frame'
           pane.classList.add('framed')
-          patch(pane, '<div id="minutes-bar"></div><div class="minutes-slot" id="minutes-slot"></div>')
+          patch(pane, '<div id="minutes-bar"></div><div class="minutes-split"><div class="minutes-slot" id="minutes-slot"></div><aside class="minutes-side" id="minutes-side" aria-label="What moved"></aside></div>')
         }
         patch($('#minutes-bar'), d.bar)
         patch($('#minutes-slot'), d.frame)
+        patch($('#minutes-side'), d.side || '')
+        $('#minutes-side').hidden = !d.side
       } else {
         if (pane.dataset.mode === 'frame') { pane.dataset.mode = ''; pane.classList.remove('framed') }
         patch(pane, d.pane)
