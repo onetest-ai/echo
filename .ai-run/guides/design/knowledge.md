@@ -123,7 +123,8 @@ failed save shows on the chip and in the Inbox with *Save again*.
 ### git
 Every call is in `git.rs`, with `GIT_LITERAL_PATHSPECS=1` (a page named `[x].md` is never a pattern that takes in
 the user's `x.md`), both output pipes read as they come (a 100 KB file in History would otherwise stall git), and on
-the 20 s timeout SIGTERM first, so git removes its `index.lock`, then SIGKILL. Before writing, Echo records which of its paths are already changed; it commits only those
+the 20 s timeout SIGTERM first, so git removes its `index.lock`, then SIGKILL. Before writing, Echo records which of its paths are already changed — a path git
+can't answer for (not a repository, a broken one, too slow, no git) counts as changed (ruling R30) —; it commits only those
 that were clean, `git add -- <new>` then `git commit --only -m <message> -- <paths>`, with the user's own identity.
 Never push, pull, fetch, checkout, stash, reset or `--no-verify`. A connected vault commits nothing until its switch
 is on (D6); a vault Echo creates starts with one commit and commits on (off when it has no git). A file the user had changed is saved but not
@@ -231,8 +232,8 @@ that fails leaves none. git is asked about a file the first time the turn asks t
 can be made, one `git status` per file), whatever the commit switch says then; at the turn's `result` (or its process's
 end) the vault is read again and, when it commits *now* (X-G4), the edited files that were clean go into one
 `commit_paths`, `Ask: <first line of the question, ≤ 60 chars>`, and a `committed` notice says so. A file the user had
-changed is left out; a `not-committed` notice names it, and says each reason (that, or why git didn't commit) once a
-conversation. A Curate or Research turn in which Claude Code itself refuses a tool the mode asks about
+changed is left out; a `not-committed` notice names it — each such file once a conversation, as each reason git gives
+for not committing (when git can't commit there at all, its reason comes first, not the user's changes). A Curate or Research turn in which Claude Code itself refuses a tool the mode asks about
 (`system`/`permission_denied`) with a reason that isn't the guard's (`guard::VAULT_WHO`, the guard's signature on its
 refusals) gets the error "This Claude Code doesn't hand permission prompts to Echo" with the `terminal` action (ruling
 R28): a host that never got the prompt. An attached call is named by its folder (or stamp), resolved in the data

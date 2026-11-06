@@ -398,3 +398,20 @@ fn page_writes_leave_an_activity_line() {
     assert_eq!((e[0].by.as_str(), e[0].kind.as_str(), e[0].path.as_str()), ("minutes", "new", "knowledge/notes/2026-11-05-weekly-delivery-sync.md"));
     assert_eq!(e[0].r#ref.as_deref(), Some("2026-11-05_090012-weekly-delivery-sync"));
 }
+
+#[test]
+fn a_save_git_cant_answer_for_says_why_it_isnt_committed() {
+    let (_env, root) = crate::paths::testenv::folders("kn-pg-unanswered");
+    let v = twin(&root);
+    // The vault commits, but git can't answer here (a broken `.git`): the file counts as changed (R30), and the reason
+    // shown is git's, not the user's changes.
+    let v = super::set(&v.id, "commit", "true").unwrap();
+    std::fs::write(v.root.join(".git"), format!("gitdir: {}\n", root.join("no-such-repository").display())).unwrap();
+    let base = read(&v, "knowledge/clients/acme.md").unwrap()["base"].as_str().unwrap().to_string();
+    let r = save(&v, "knowledge/clients/acme.md", "# Acme Corp\n\nPilot on 18 November.\n", &base, None).unwrap();
+    let commit = r["commit"].as_str().unwrap();
+    assert!(commit.starts_with("skipped: ") && !commit.contains("changes of yours"), "{commit}");
+    if git::program().is_some() {
+        assert_eq!(commit, "skipped: the vault isn't in a git repository");
+    }
+}

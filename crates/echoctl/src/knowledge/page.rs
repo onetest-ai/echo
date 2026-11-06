@@ -450,7 +450,8 @@ fn commit_one(v: &Vault, paths: &[PathBuf], dirty: &[PathBuf], message: &str) ->
     }
     let clean: Vec<PathBuf> = paths.iter().filter(|p| !dirty.contains(p)).cloned().collect();
     if clean.is_empty() {
-        return git::Commit::Skipped("the file had changes of yours that weren't committed".into()).label();
+        // A file git couldn't answer for counts as changed (R30): when git can't commit here, that is the reason.
+        return git::Commit::Skipped(git::blocked(&v.root).unwrap_or_else(|| "the file had changes of yours that weren't committed".into())).label();
     }
     git::commit_paths(&v.root, &clean, message).label()
 }

@@ -142,10 +142,17 @@ pub(super) fn record(v: &Vault, conversation: &str, e: &Edit) {
 
 /// The turn is over: when the vault commits now (`v` read at the turn's end), the files it edited that were clean
 /// before it are committed in one commit, `Ask: <the question's first line>`. The notices that say so — why something
-/// wasn't committed only once a conversation (X-G4): the reasons `told` before are left out, and the new ones returned.
+/// wasn't committed only once a conversation (X-G4), each file the user had changed once: the reasons `told` before
+/// are left out, and the new ones returned.
 pub(super) fn commit(v: &Vault, t: &Turn, told: &BTreeSet<String>) -> (Vec<Value>, Vec<String>) {
     if !v.git.commit || t.edited.is_empty() {
         return (vec![], vec![]);
+    }
+    let not = |text: String| json!({"type": "notice", "kind": "not-committed", "text": text});
+    // git can't commit here now: that is the reason, not the user's changes (a file git couldn't answer for counts as
+    // changed, R30).
+    if let Some(why) = git::blocked(&v.root) {
+        return if told.contains(&why) { (vec![], vec![]) } else { (vec![not(format!("Not committed: {why}"))], vec![why]) };
     }
     // The notices, and why a file wasn't committed (the reason, the notice's text).
     let (mut out, mut reasons): (Vec<Value>, Vec<(String, String)>) = (vec![], vec![]);
@@ -160,13 +167,17 @@ pub(super) fn commit(v: &Vault, t: &Turn, told: &BTreeSet<String>) -> (Vec<Value
             git::Commit::Off => {}
         }
     }
+    let mut fresh: Vec<String> = reasons.into_iter().filter(|(why, _)| !told.contains(why)).map(|(why, text)| {
+        out.push(not(text));
+        why
+    }).collect();
+    // The files the user had changed, each said once.
+    let yours: Vec<&str> = yours.iter().map(|(rel, _)| rel.as_str()).filter(|rel| !told.contains(&format!("changes of yours: {rel}"))).collect();
     if !yours.is_empty() {
-        let names: Vec<&str> = yours.iter().map(|(rel, _)| rel.as_str()).collect();
-        reasons.push(("changes of yours".into(), format!("Not committed: {} had changes of yours that weren't committed", names.join(", "))));
+        out.push(not(format!("Not committed: {} had changes of yours that weren't committed", yours.join(", "))));
+        fresh.extend(yours.iter().map(|rel| format!("changes of yours: {rel}")));
     }
-    let fresh: Vec<(String, String)> = reasons.into_iter().filter(|(why, _)| !told.contains(why)).collect();
-    out.extend(fresh.iter().map(|(_, text)| json!({"type": "notice", "kind": "not-committed", "text": text})));
-    (out, fresh.into_iter().map(|(why, _)| why).collect())
+    (out, fresh)
 }
 
 #[cfg(all(test, unix))]
@@ -264,9 +275,9 @@ mod tests {
         let beta = v.root.join("knowledge/clients/beta.md");
         let of = |tool: &str, input: Value| card(&v, &json!({"tool_name": tool, "input": input})).fields;
         let twice = of("Edit", json!({"file_path": beta, "old_string": "- one\n", "new_string": "- uno\n"}));
-        assert!(twice.get("diff").is_none() && twice["error"].as_str().is_some_and(|e| e.contains("2 times")), "{twice:?}");
+        assert!(twice.get("hunks").is_none() && twice.get("error").and_then(Value::as_str).is_some_and(|e| e.contains("2 times")), "{twice:?}");
         let missing = of("Edit", json!({"file_path": beta, "old_string": "- two\n", "new_string": "- dos\n", "replace_all": false}));
-        assert!(missing.get("diff").is_none() && missing["error"].as_str().is_some_and(|e| e.contains("isn't in")), "{missing:?}");
+        assert!(missing.get("hunks").is_none() && missing.get("error").and_then(Value::as_str).is_some_and(|e| e.contains("isn't in")), "{missing:?}");
         let all = of("Edit", json!({"file_path": beta, "old_string": "- one\n", "new_string": "- uno\n", "replace_all": true}));
         assert_eq!((all["plus"].as_u64(), all["minus"].as_u64()), (Some(2), Some(2)), "every occurrence: {all:?}");
         let whole = of("Write", json!({"file_path": beta, "content": "# Beta\n"}));
@@ -279,11 +290,11 @@ mod tests {
         let one = of("Edit", json!({"file_path": v.root.join("knowledge/clients/long.md"), "old_string": "Line 20\n", "new_string": "Line twenty\n"}));
         assert_eq!(one["hunks"].as_array().map(Vec::len), Some(1), "{one:?}");
         assert_eq!(one["hunks"][0].as_array().map(Vec::len), Some(8), "{one:?}");
-        assert_eq!((one["plus"].as_u64(), one["minus"].as_u64(), one.get("diff")), (Some(1), Some(1), None));
+        assert_eq!((one["plus"].as_u64(), one["minus"].as_u64(), one.get("error")), (Some(1), Some(1), None));
         let outside = of("Edit", json!({"file_path": root.join("outside.md"), "old_string": "a", "new_string": "b"}));
-        assert!(outside.get("diff").is_none() && outside["error"].is_string(), "{outside:?}");
+        assert!(outside.get("hunks").is_none() && outside.get("error").is_some_and(Value::is_string), "{outside:?}");
         let gone = of("Edit", json!({"file_path": v.root.join("knowledge/clients/none.md"), "old_string": "a", "new_string": "b"}));
-        assert!(gone.get("diff").is_none() && gone["error"].is_string(), "{gone:?}");
+        assert!(gone.get("hunks").is_none() && gone.get("error").is_some_and(Value::is_string), "{gone:?}");
     }
 
     #[test]
@@ -469,6 +480,46 @@ mod tests {
         assert_eq!(commits(&v), "3");
         let not: Vec<&Value> = of_type(&ev, "notice").into_iter().filter(|n| n["kind"] == "not-committed").collect();
         assert_eq!(not.len(), 1, "said once in the conversation: {not:?}");
+        // Another file the user had changed, in a later turn: it gets its own notice, once (X-G4 per file).
+        let third = v.root.join("knowledge/notes/2026-01-03-c.md");
+        std::fs::write(&third, "---\ntitle: Third sync\ntags: [meeting]\n---\n# Third\n\nMy notes.\n").unwrap();
+        apply(&p, 5, &third, "---\ntitle: Third sync\ntags: [meeting]\n---\n# Third sync\n\nMy notes.\n");
+        let three = ask("req-5", "toolu_5", "Edit", json!({"file_path": third, "old_string": "# Third\n", "new_string": "# Third sync\n"}));
+        script(&p, "chat.3.jsonl", &lines(&[three, json!({"_apply": 5}), done("toolu_5", true), end(&[])]));
+        send(&v.id, Some(&id), "Name the third sync", Mode::Curate, &[]).unwrap();
+        let ev = events_until(&v.id, &id, |ev, c| !c.busy && of_type(ev, "notice").iter().filter(|n| n["kind"] == "not-committed").count() == 2);
+        let not: Vec<&Value> = of_type(&ev, "notice").into_iter().filter(|n| n["kind"] == "not-committed").collect();
+        assert!(not[1]["text"].as_str().is_some_and(|t| t.contains("2026-01-03-c.md") && !t.contains("2026-01-02-b.md")), "{not:?}");
+        assert_eq!(commits(&v), "3", "nothing of the user's committed");
+    }
+
+    #[test]
+    fn a_status_git_cant_answer_never_lets_a_turn_commit() {
+        let (_env, root) = crate::paths::testenv::folders("chat-commit-unanswered");
+        let _iso = git::tests::isolated(&root, true);
+        let _fake = fake::install(&root);
+        let _clean = clean();
+        let p = signed_in();
+        let Some(v) = git_vault(&root, &[]) else { return };
+        let second = v.root.join("knowledge/notes/2026-01-02-b.md");
+        std::fs::write(&second, "---\ntitle: Second sync\ntags: [meeting]\n---\n# Second sync\n\nMy draft.\n").unwrap();
+        apply(&p, 1, &second, "---\ntitle: Second sync\ntags: [meeting]\n---\n# Second sync (moved)\n\nMy draft.\n");
+        let edit = ask("req-1", "toolu_1", "Edit", json!({"file_path": second, "old_string": "# Second sync\n", "new_string": "# Second sync (moved)\n"}));
+        script(&p, "chat.1.jsonl", &lines(&[init(), edit, json!({"_apply": 1}), done("toolu_1", true), end(&[])]));
+        // git can't answer when the card is made (a broken `.git` in its place), and is back by the turn's end.
+        let (git_dir, away) = (v.root.join(".git"), v.root.join(".git-away"));
+        std::fs::rename(&git_dir, &away).unwrap();
+        std::fs::write(&git_dir, format!("gitdir: {}\n", root.join("no-such-repository").display())).unwrap();
+        let id = send(&v.id, None, "Mark the second sync as moved", Mode::Curate, &[]).unwrap();
+        events_until(&v.id, &id, |_, c| c.waiting);
+        std::fs::remove_file(&git_dir).unwrap();
+        std::fs::rename(&away, &git_dir).unwrap();
+        permit(&id, "req-1", true, false, None).unwrap();
+        let ev = events_until(&v.id, &id, |ev, c| !c.busy && !of_type(ev, "notice").is_empty());
+        // Never a file git couldn't vouch for: the user's change stays theirs.
+        assert_eq!(commits(&v), "1", "{ev:#?}");
+        assert!(git::out(&v.root, &["status", "--porcelain"]).unwrap().contains("knowledge/notes/2026-01-02-b.md"));
+        assert!(of_type(&ev, "notice").iter().all(|n| n["kind"] == "not-committed"), "{ev:#?}");
     }
 
     #[test]

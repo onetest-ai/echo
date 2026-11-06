@@ -190,14 +190,15 @@ fn arg(p: &Path) -> String {
     p.to_string_lossy().into_owned()
 }
 
-/// Which of `paths` have uncommitted changes (staged, unstaged or untracked) — before Echo writes them.
+/// Which of `paths` have uncommitted changes (staged, unstaged or untracked) — before Echo writes them. A path git
+/// can't answer for (not a repository, a broken one, too slow, no git) counts as changed: Echo never commits a file git
+/// didn't say was clean (ruling R30).
 pub fn dirty(root: &Path, paths: &[PathBuf]) -> Vec<PathBuf> {
     paths
         .iter()
-        .filter(|p| p.exists())
-        .filter(|p| {
-            let a = arg(p);
-            out(root, &["status", "--porcelain", "--", &a]).is_some_and(|s| !s.trim().is_empty())
+        .filter(|p| match out(root, &["status", "--porcelain", "--", &arg(p)]) {
+            Some(s) => p.exists() && !s.trim().is_empty(),
+            None => true,
         })
         .cloned()
         .collect()
@@ -356,5 +357,30 @@ pub(crate) mod tests {
         let r = info(&root);
         std::env::remove_var("ECHOCTL_NO_GIT");
         assert_eq!(r, None);
+    }
+
+    #[test]
+    fn a_status_git_cant_answer_counts_as_changed() {
+        let (_env, root) = crate::paths::testenv::folders("kn-git-unanswered");
+        let _iso = isolated(&root, true);
+        // Ruling R30: when git can't say a file is clean, Echo never commits it.
+        let r = root.join("broken");
+        std::fs::create_dir_all(&r).unwrap();
+        std::fs::write(r.join("page.md"), "# A page\n").unwrap();
+        std::fs::write(r.join(".git"), format!("gitdir: {}\n", root.join("no-such-repository").display())).unwrap();
+        let asked = vec![r.join("page.md"), r.join("new.md")];
+        if program().is_some() {
+            assert_eq!(dirty(&r, &asked), asked, "a broken repository: every asked path");
+        }
+        std::env::set_var("ECHOCTL_NO_GIT", "1");
+        let none = dirty(&r, &asked);
+        std::env::remove_var("ECHOCTL_NO_GIT");
+        assert_eq!(none, asked, "no git: every asked path");
+        // A repository that answers: a clean file and a new one are nobody's changes.
+        let good = root.join("good");
+        if !repo(&good) {
+            return;
+        }
+        assert!(dirty(&good, &[good.join("first.md"), good.join("new.md")]).is_empty());
     }
 }
