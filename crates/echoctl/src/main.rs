@@ -1941,12 +1941,14 @@ fn main() -> Result<()> {
                 for e in &events {
                     let online = e["onlineMeeting"]["joinUrl"].as_str().is_some();
                     println!(
-                        "{}  {}{}  ({} attendees{})",
+                        "{}  {}{}  ({} attendees{}; you: {})",
                         e["start"]["dateTime"].as_str().unwrap_or("?").get(..16).unwrap_or("?"),
                         e["subject"].as_str().unwrap_or("(no subject)"),
                         if e["isCancelled"] == true { " [cancelled]" } else { "" },
                         e["attendees"].as_array().map(|a| a.len()).unwrap_or(0),
-                        if online { ", Teams" } else { "" }
+                        if online { ", Teams" } else { "" },
+                        // The user's answer to the invite: Today and Coming up today list only accepted / organizer.
+                        e["responseStatus"]["response"].as_str().unwrap_or("not said")
                     );
                 }
                 println!("{} event(s); times in UTC", events.len());
