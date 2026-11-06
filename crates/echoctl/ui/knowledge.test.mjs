@@ -1,5 +1,5 @@
-// Knowledge in the window (knowledge.js): routes, the switcher, a call's Knowledge chip, the tree, the graph's filters
-// and unsaved edits — the blocks as they ship. Run by scripts/check-mod.sh (`node crates/echoctl/ui/knowledge.test.mjs`).
+// Knowledge in the window (knowledge.js): routes, the switcher, a call's Knowledge chip, the tree, the graph's filters,
+// unsaved edits and Ask (turns, tool rows, @ mentions, following the bottom) — the blocks as they ship. Run by scripts/check-mod.sh (`node crates/echoctl/ui/knowledge.test.mjs`).
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
@@ -21,6 +21,9 @@ const { knRepel, knForceSim, knLabelPlan, knGraphHits, knShortLabel } = load(['k
 const { knPlainPrompt } = load(['kn-prompt'], ['knPlainPrompt'])
 const { knKeepDraft, knRestoreDraft, knDropDraft } = load(['kn-draft'], ['knKeepDraft', 'knRestoreDraft', 'knDropDraft'])
 const { knLineDiff } = load(['kn-diff'], ['knLineDiff'])
+const { knChatTurns, knChatReadOutside, knFollow, knAnswerInto } = load(['kn-chat'], ['knChatTurns', 'knChatReadOutside', 'knFollow', 'knAnswerInto'])
+const { knToolRows } = load(['kn-tools'], ['knToolRows'])
+const { knMention, knMentionPick, knChatMessage } = load(['kn-mention'], ['knMention', 'knMentionPick', 'knChatMessage'])
 
 const tests = []
 const test = (name, f) => tests.push([name, f])
@@ -328,6 +331,145 @@ test('tab_counts_only_where_something_waits', () => {
   assert.deepEqual(knTabCounts(), { ingest: null, health: null })
   const c = knTabCounts({ waiting: 6, needs: 3 })
   for (const tab of ['pages', 'graph', 'settings', 'ask', 'home']) assert.equal(c[tab], undefined, `${tab} never shows a number`)
+})
+
+// ── Ask (spec K13) ──
+test('routes: Ask, a new conversation or one of them', () => {
+  assert.deepEqual(knParseRoute('kn/my-twin/ask'), { vault: 'my-twin', tab: 'ask', path: '' })
+  const id = '6f2c9e1a-1b2c-4d5e-8f90-123456789abc'
+  assert.deepEqual(knParseRoute(`kn/my-twin/ask/${id}`), { vault: 'my-twin', tab: 'ask', path: id })
+  assert.equal(knRouteOf({ vault: 'my-twin', tab: 'ask', path: id }), `kn/my-twin/ask/${id}`)
+  assert.equal(knParseRoute('kn/my-twin/ingest'), null, 'a tab appears only when its view works')
+})
+
+const Q = 'What did Lena Hartmann and I settle on Northwind Retail\'s pricing?'
+const TURN = [
+  { n: 0, type: 'notice', kind: 'history', text: 'Its history can\'t be shown here; continuing works.' },
+  { n: 1, type: 'user', text: Q, context: [{ page: 'knowledge/clients/northwind-retail.md' }] },
+  { n: 2, type: 'thinking', block: 'b1', done: false, superseded: true },
+  { n: 3, type: 'thinking', block: 'b1', text: 'A decision question — start from the index.', done: true, seconds: 3 },
+  { n: 4, type: 'tool', id: 'toolu_01', name: 'Read', verb: 'Read', target: 'knowledge/CATALOG.md', detail: 'lines 1–180', path: 'knowledge/CATALOG.md', readonly: true },
+  { n: 5, type: 'tool_result', id: 'toolu_01', ok: true, summary: '180 lines', preview: '| Page | Summary |', lines: [1, 180] },
+  { n: 6, type: 'text', block: 'b2', html: '<p>From your</p>', done: false },
+  { n: 7, type: 'text', block: 'b2', html: '<p>From your knowledge base: two things.</p>', done: true },
+  { n: 8, type: 'permission', request: 'req_7', tool: 'Edit', path: 'knowledge/clients/northwind-retail.md', hunks: [[['=', '## Decisions'], ['+', '- 2026-11-05 — Fix forward, no rollback.']]], plus: 1, minus: 0 },
+  { n: 9, type: 'answered', request: 'req_7', allow: true, always: false },
+  { n: 10, type: 'result', tokens_in: 18200, tokens_out: 1100, cache_read: 0.61, cost: 0.21, seconds: 38, stop: 'end_turn' },
+  { n: 11, type: 'suggestion', text: 'Which of these decisions has an owner?' },
+]
+
+test('K13-T1 a conversation folds into turns: the message, thinking, tools, text, a card, the result', () => {
+  const turns = knChatTurns(TURN)
+  assert.equal(turns.length, 2, 'what came before any message (the history notice), then one turn')
+  assert.equal(turns[0].user, null)
+  assert.deepEqual(turns[0].blocks.map((b) => [b.kind, b.text]), [['notice', 'Its history can\'t be shown here; continuing works.']])
+  const t = turns[1]
+  assert.equal(t.user.text, Q)
+  assert.deepEqual(t.user.context, [{ page: 'knowledge/clients/northwind-retail.md' }])
+  assert.deepEqual(t.blocks.map((b) => b.kind), ['thinking', 'tools', 'text', 'permission'], 'in order; superseded renders skipped')
+  assert.deepEqual([t.blocks[0].text, t.blocks[0].done, t.blocks[0].seconds], ['A decision question — start from the index.', true, 3])
+  assert.equal(t.blocks[1].items.length, 1)
+  assert.equal(t.blocks[1].items[0].result.summary, '180 lines', 'a result joins its call')
+  assert.deepEqual([t.blocks[2].html, t.blocks[2].done], ['<p>From your knowledge base: two things.</p>', true], 'the later render of a block replaces it')
+  assert.deepEqual(t.blocks[3].answer && [t.blocks[3].answer.allow, t.blocks[3].answer.always], [true, false], 'the card knows its answer')
+  assert.deepEqual([t.result.tokens_in, t.result.cost], [18200, 0.21])
+  assert.equal(t.suggestion, 'Which of these decisions has an owner?')
+})
+
+test('K13-T1 a streaming block is one block; a finished one is never replaced by a later process\'s block of that name', () => {
+  const live = knChatTurns([TURN[1], { n: 2, type: 'text', block: 'b1', html: '<p>Two</p>', done: false }, { n: 3, type: 'text', block: 'b1', html: '<p>Two things</p>', done: false }])
+  assert.deepEqual(live[0].blocks.map((b) => [b.kind, b.html, b.done]), [['text', '<p>Two things</p>', false]])
+  assert.equal(live[0].result, null, 'still answering')
+  // A mode change restarts the process: its blocks are named b1… again.
+  const again = knChatTurns([...TURN, { n: 12, type: 'user', text: 'And the gateway?', context: [] }, { n: 13, type: 'text', block: 'b2', html: '<p>Still open.</p>', done: true }])
+  assert.equal(again.length, 3)
+  assert.equal(again[1].blocks[2].html, '<p>From your knowledge base: two things.</p>', 'the first answer stays')
+  assert.deepEqual(again[2].blocks.map((b) => b.html), ['<p>Still open.</p>'])
+  const sub = knChatTurns([TURN[1], { n: 2, type: 'text', block: 'b1', html: '<p>Sub-agent words</p>', done: true, parent: 'toolu_09' }])
+  assert.deepEqual(sub[0].blocks, [], 'a sub-agent\'s own text is not the answer')
+  const history = knChatTurns([{ n: 0, type: 'user', text: 'Hi', context: [] }, { n: 1, type: 'text', block: 'h1', html: '<p>Hello</p>', done: true }, { n: 2, type: 'user', text: 'Again', context: [] }, { n: 3, type: 'text', block: 'b1', html: '<p>Hello again</p>', done: false }])
+  assert.deepEqual(history.map((x) => x.blocks.map((b) => b.block)), [['h1'], ['b1']])
+})
+
+test('K13-T1 notices and errors stay in their turn; D41 knows when a conversation read the web or others\' words', () => {
+  const t = knChatTurns([TURN[1], { n: 2, type: 'error', text: 'This Claude Code doesn\'t hand permission prompts to Echo', action: 'terminal' }, { n: 3, type: 'notice', kind: 'committed', text: 'Committed 1 file · 3f9c2d1' }])
+  assert.deepEqual(t[0].blocks.map((b) => [b.kind, b.action || b.text]), [['error', 'terminal'], ['notice', 'Committed 1 file · 3f9c2d1']])
+  assert.equal(knChatReadOutside(TURN), false, 'pages only')
+  assert.equal(knChatReadOutside([{ n: 0, type: 'user', text: 'Brief me', context: [{ call: '2026-11-05-0900-northwind-weekly', title: 'Northwind weekly', date: '2026-11-05' }] }]), true, 'an attached call')
+  assert.equal(knChatReadOutside([{ n: 0, type: 'tool', id: 't', name: 'WebSearch', verb: 'Searched the web', target: '"pricing"', readonly: true }]), true, 'Research searched')
+  assert.equal(knChatReadOutside([{ n: 0, type: 'tool', id: 't', name: 'WebFetch', verb: 'Opened', target: 'example.com/x', readonly: true }]), true)
+})
+
+const T = (id, name, verb, target, detail, result) => ({ type: 'tool', id, name, verb, target, detail, readonly: !['Edit', 'Write', 'Agent'].includes(name), result: result === undefined ? { ok: true, summary: 'done' } : result })
+const ok = (summary) => ({ ok: true, summary })
+const line = (item, o) => { const r = knToolRows([item], o); assert.equal(r.length, 1); return r[0] }
+
+test('K13-T2 a tool call is one line: verb, target and result', () => {
+  assert.equal(line(T('1', 'Read', 'Read', 'knowledge/CATALOG.md', 'lines 1–180', ok('180 lines'))).text, 'Read knowledge/CATALOG.md · lines 1–180')
+  assert.equal(line(T('1', 'Read', 'Read', 'knowledge/notes/2026-10-14-architecture-review.md', '', ok('96 lines'))).text, 'Read knowledge/notes/2026-10-14-architecture-review.md · 96 lines', 'a whole file: how many lines')
+  assert.equal(line(T('2', 'Grep', 'Searched', '"northwind"', 'in knowledge/notes/', ok('6 files'))).text, 'Searched "northwind" in knowledge/notes/ · 6 files')
+  assert.equal(line(T('3', 'Glob', 'Searched', 'knowledge/**/*.md', '', ok('12 files'))).text, 'Searched knowledge/**/*.md · 12 files')
+  assert.equal(line(T('4', 'Skill', 'Used skill', 'twin', '', ok('Launching skill: twin'))).text, 'Used skill twin')
+  assert.equal(line(T('5', 'Edit', 'Edited', 'knowledge/clients/northwind-retail.md', '+4 −1', ok('The file has been updated.'))).text, 'Edited knowledge/clients/northwind-retail.md +4 −1')
+  assert.equal(line(T('6', 'Write', 'Created', 'knowledge/topics/pricing.md', '12 lines', ok('File created'))).text, 'Created knowledge/topics/pricing.md · 12 lines')
+  assert.equal(line(T('7', 'WebSearch', 'Searched the web', '"per-stream pricing delivery platform"', '', ok('Web search results for query'))).text, 'Searched the web "per-stream pricing delivery platform"', 'no result count in the events')
+  assert.equal(line(T('8', 'WebFetch', 'Opened', 'example.com/reports/pricing', '', ok('# Pricing'))).text, 'Opened example.com/reports/pricing')
+  assert.equal(line(T('9', 'Agent', 'Delegated', 'Find the pricing notes', '', ok('Found two notes'))).text, 'Delegated Find the pricing notes')
+  const r = line(T('1', 'Read', 'Read', 'knowledge/clients/gone.md', '', { ok: false, summary: 'File does not exist.' }))
+  assert.deepEqual([r.text, r.error], ['Read knowledge/clients/gone.md · File does not exist.', 'File does not exist.'], 'a failed call says why')
+  assert.equal(line(T('1', 'Read', 'Read', 'knowledge/CATALOG.md', '', null)).running, true, 'no result yet: running')
+  assert.equal(line(T('1', 'Read', 'Read', 'knowledge/CATALOG.md', '', null), { ended: true }).running, false, 'the turn ended without one')
+  assert.equal(line(T('1', 'Read', 'Read', 'knowledge/CATALOG.md', '', ok('3 lines'))).code, true, 'a path is shown as code')
+})
+
+test('K13-T2 three or more read-only calls in a row fold into one line', () => {
+  const read = (i) => T(`r${i}`, 'Read', 'Read', `knowledge/notes/${i}.md`, '', ok('9 lines'))
+  const three = knToolRows([read(1), read(2), read(3)])
+  assert.deepEqual(three.map((r) => [r.kind, r.text]), [['fold', 'Read 3 files']])
+  assert.equal(three[0].rows.length, 3, 'it opens to its calls')
+  const grep = (i) => T(`g${i}`, 'Grep', 'Searched', '"pricing"', '', ok('2 files'))
+  assert.equal(knToolRows([read(1), read(2), grep(1), read(3), grep(2)])[0].text, 'Read 3 files, searched 2 times')
+  const edit = T('e', 'Edit', 'Edited', 'knowledge/a.md', '+1 −0')
+  assert.deepEqual(knToolRows([read(1), read(2), edit]).map((r) => r.kind), ['row', 'row', 'row'], 'two reads then an edit don\'t fold')
+  assert.deepEqual(knToolRows([read(1), edit, read(2), read(3), read(4)]).map((r) => r.kind), ['row', 'row', 'fold'])
+  const running = knToolRows([read(1), read(2), { ...read(3), result: null }])
+  assert.equal(running[0].running, true, 'a fold with a call still running spins')
+})
+
+test('K13-T3 @ opens the page picker; picking puts the page in a chip; the message carries its path', () => {
+  assert.deepEqual(knMention('What about @cli', 15), { query: 'cli', start: 11 })
+  assert.deepEqual(knMention('@', 1), { query: '', start: 0 }, 'just typed: the picker with nothing found yet')
+  assert.equal(knMention('Mail lena@example.com', 21), null, 'an address is no mention')
+  assert.equal(knMention('@cli and more', 13), null, 'a space ends it')
+  assert.equal(knMention('No mention here', 15), null)
+  const text = 'Risks with @north today'
+  const m = knMention(text, 17)
+  assert.deepEqual(m, { query: 'north', start: 11 })
+  const p = knMentionPick(text, m, 17, 'Northwind Retail')
+  assert.deepEqual(p, { text: 'Risks with Northwind Retail today', caret: 27 })
+  const msg = knChatMessage(p.text, [{ page: 'knowledge/clients/northwind-retail.md', title: 'Northwind Retail' }])
+  assert.deepEqual(msg, { text: 'Risks with Northwind Retail today', context: [{ page: 'knowledge/clients/northwind-retail.md' }] })
+  assert.ok(!msg.text.includes('@'), 'the text without the mention mark')
+  assert.deepEqual(knChatMessage('  Brief me\n', [{ call: '2026-11-05-0900-northwind-weekly', title: 'Northwind weekly' }, { call: '2026-11-04-1400-helios-review', anyway: true }]), {
+    text: 'Brief me', context: [{ call: '2026-11-05-0900-northwind-weekly' }, { call: '2026-11-04-1400-helios-review', anyway: true }],
+  }, 'calls by their names, never a path; *Attach anyway* only on its call')
+})
+
+test('K13-T4 the view follows the bottom only while you are there', () => {
+  const bottom = { top: 800, height: 1400, view: 600 }
+  assert.deepEqual(knFollow(bottom, { n: 9 }), { scroll: true, jump: false })
+  const up = { top: 600, height: 1400, view: 600 }
+  assert.deepEqual(knFollow(up, { n: 9 }), { scroll: false, jump: true }, 'scrolled up 200 px: stays, "Jump to the latest" shows')
+  assert.deepEqual(knFollow({ ...up, jump: true }, null), { scroll: false, jump: true }, 'scrolling while up keeps it')
+  assert.deepEqual(knFollow({ ...bottom, jump: true }, null), { scroll: false, jump: false }, 'back at the bottom: gone')
+  assert.deepEqual(knFollow({ top: 0, height: 300, view: 600 }, { n: 1 }), { scroll: true, jump: false }, 'nothing to scroll yet')
+})
+
+test('an answer saved as a page carries its source; added to a page, it goes under a dated heading', () => {
+  const page = '---\ntitle: Pricing\ndate: 2026-11-06\ntags: []\nsource: \nsummary: ""\n---\n\n# Pricing\n'
+  assert.equal(knAnswerInto(page, '- A platform fee.', { source: 'echo-ask 6f2c9e1a' }), '---\ntitle: Pricing\ndate: 2026-11-06\ntags: []\nsource: echo-ask 6f2c9e1a\nsummary: ""\n---\n\n# Pricing\n\n- A platform fee.\n')
+  assert.equal(knAnswerInto('# Pricing\n', 'Text.', { source: 'echo-ask x' }), '---\nsource: echo-ask x\n---\n\n# Pricing\n\nText.\n', 'no properties yet')
+  assert.equal(knAnswerInto('# Northwind Retail\n\nA client.\n\n', 'Two things.', { heading: '2026-11-06 — from Ask' }), '# Northwind Retail\n\nA client.\n\n## 2026-11-06 — from Ask\n\nTwo things.\n')
 })
 
 let failed = 0

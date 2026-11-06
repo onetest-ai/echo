@@ -180,7 +180,8 @@ managed profile's routing can't be written out as a line to copy without its key
 path, a skill's name) has its control characters removed.
 
 ### The window
-Routes `#kn/<vault>/<pages|graph|settings>[/<path>]`; `#brain/...` stays Recall. The switcher lists vaults, then
+Routes `#kn/<vault>/<pages|graph|ask|settings>[/<path>]` (Ask's last part is a conversation id, kept apart from the
+page Pages has open); `#brain/...` stays Recall. The switcher lists vaults, then
 Recall when on, then plugins' Knowledge tabs. Actions are IPC `kn_*`; long ones run as jobs the page polls
 (`/api/kn/jobs`). Rules learned the hard way:
 - **No `confirm()`, `alert()` or `prompt()`**: the webview (wry) shows none and `confirm()` returns false, so the
@@ -189,6 +190,23 @@ Recall when on, then plugins' Knowledge tabs. Actions are IPC `kn_*`; long ones 
   buttons: the app would act on the same click. Knowledge uses `data-kn-*`.
 - **No two functions with one name** in `knowledge.js`: the later declaration wins silently.
 The node test guards all three. Success messages clear after 4 s; errors and "not committed" wait for OK.
+
+**The Ask tab** (spec K13, `knowledge.js` blocks `kn-chat`, `kn-tools`, `kn-mention`): the header's *Ask* opens a new
+conversation in it; *Run in Claude* and *Ask about it* put `/<skill> ` or the page (a chip) in its composer; the
+panel's vault session is ⋯ → *Open Ask in the terminal panel*. The page long-polls `/api/kn/<vault>/chat/<id>` while
+the tab shows, keeps the events (a block's older render drops its copy) and folds them into turns (`knChatTurns`:
+superseded renders skipped, a streaming block replaced until done, a sub-agent's own text left out). The thread is not
+part of `view()`'s string: `syncThread` fills it by keyed blocks and replaces only a block whose HTML changed, so a
+streaming answer re-renders alone and the composer is never re-created by the stream; the header, the rail and the
+composer's bar are patched by the functions `view()` draws them with. It follows the bottom only while the user is
+there (`knFollow`), and always shows a message the user just sent. Tool rows come from the events' `verb`, `target` and
+`detail` (`knToolRows`; three or more read-only calls in a row fold); the events carry no result count for a web
+search and no file length for a read, so those rows say less than K13-03's examples. `@` searches the vault's index
+(`find`), puts the page's title in the text and the page in a chip; *Attach* lists the calls with minutes
+(`/api/calls`); `{mismatch}` puts *Attach anyway* on that call's chip. Cards: ⌘↵ allows the first waiting one, Esc
+denies it (else Esc stops the turn). *Open in the terminal panel* says D41's sentence first when the conversation used
+the web or an attached call. *Save as a page* and *Add to a page* rebuild the answer's Markdown from its HTML in the
+page (the events carry no other copy) and open the editor; nothing is written until Save.
 
 ### Ask's conversations (`chat.rs`)
 A conversation is one Claude Code session id throughout (`--session-id` first, `--resume` after: measured to keep the
@@ -293,7 +311,9 @@ identical); checks found 5 pages not in the index and 10 broken links, all real.
 
 - Rename, move and delete of pages are left to Obsidian and Finder (D14).
 - Minutes are routed through a vault's own skill only later (D3); today the note is Echo's minutes as written.
-- The rail (links, outline, history) is hidden under 1100 px wide.
+- The rail (links, outline, history) is hidden under 1100 px wide; so is Ask's (*Continue elsewhere* moves to the
+  conversation's ⋯).
+- Ask's new conversation shows no suggestions yet: K11-02's list comes with Home.
 - Retiring the Obsidian plugin's vault part is a separate change in `onetest-ai/echo-plugins`; until then *Connect
   from the Obsidian plugin* imports its vaults.
 - The minutes preview in the dev browser pane is blank (the pane blocks iframes); the app's webview shows it.

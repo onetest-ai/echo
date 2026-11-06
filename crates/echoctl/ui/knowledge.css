@@ -330,3 +330,225 @@ button.kn-leg:hover { background: var(--line); color: var(--text); }
 .kn-sheet.kn-ask { width: 440px; }
 .kn-ask .kn-sheet-b p { margin: 0; }
 .kn-twin-text { max-height: 260px; overflow: auto; }
+
+/* Ask (spec K13): the conversations, the conversation, This conversation. The thread is a column of blocks; a
+   streaming block is replaced alone, so nothing above it moves. */
+.kn-chat { flex: 1; display: grid; grid-template-columns: 216px minmax(0, 1fr) 262px; min-height: 0; }
+.kn-chat.no-rail { grid-template-columns: 216px minmax(0, 1fr); }
+.kn-chat.no-list { grid-template-columns: minmax(0, 1fr) 262px; }
+.kn-chat.no-list.no-rail { grid-template-columns: minmax(0, 1fr); }
+.kn-convs { border-right: 1px solid var(--line); background: var(--sidebar); display: flex; flex-direction: column; min-height: 0; }
+.kn-convs-h { padding: 10px 10px 6px; display: flex; flex-direction: column; gap: 8px; }
+.kn-convs-row { display: flex; align-items: center; gap: 6px; }
+.kn-convs-row b { flex: 1; font-size: 12.5px; }
+.kn-convs-row .btn svg { width: 12px; height: 12px; }
+.kn-convs-l { flex: 1; overflow-y: auto; padding: 0 0 10px; }
+.kn-cvg { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-3); font-weight: 600; padding: 10px 16px 4px; }
+.kn-cvi { display: flex; flex-direction: column; gap: 2px; width: calc(100% - 12px); margin: 0 6px; padding: 7px 10px; border: 0; border-radius: 8px; background: none; color: var(--text); font: inherit; text-align: left; cursor: default; }
+.kn-cvi:hover { background: var(--line); }
+.kn-cvi.on { background: var(--accent-soft); }
+.kn-cvi b { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kn-cvi.on b { color: var(--accent-ink); }
+.kn-cvi span { font-size: 11px; color: var(--text-3); display: flex; gap: 6px; align-items: center; white-space: nowrap; overflow: hidden; }
+.kn-cv-none { padding: 6px 16px; margin: 0; }
+.kn-live { width: 7px; height: 7px; border-radius: 4px; background: var(--me); box-shadow: 0 0 0 3px color-mix(in srgb, var(--me) 22%, transparent); flex: none; }
+.kn-conv { display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--surface); position: relative; }
+.kn-conv-h { display: flex; align-items: center; gap: 8px; padding: 6px 14px 6px 8px; border-bottom: 1px solid var(--line); min-height: 41px; }
+.kn-conv-h > b { font-size: 13px; font-weight: 650; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kn-conv-h .kn-head-menu { top: 30px; width: 260px; }
+.kn-thread { flex: 1; overflow-y: auto; padding: 18px 0 20px; position: relative; overflow-anchor: none; }
+.kn-thread-in { max-width: 760px; margin: 0 auto; padding: 0 22px; display: flex; flex-direction: column; gap: 10px; }
+.kn-jump[hidden] { display: none; }
+.kn-jump { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(100% + 4px); z-index: 3; box-shadow: var(--shadow); }
+.kn-msg-u { align-self: flex-end; max-width: 86%; margin-top: 8px; background: var(--accent-soft); border-radius: 14px 14px 4px 14px; padding: 9px 13px; font-size: 13.5px; line-height: 1.5; display: flex; flex-direction: column; gap: 6px; }
+.kn-msg-u:first-child { margin-top: 0; }
+.kn-msg-t { white-space: pre-wrap; overflow-wrap: anywhere; }
+.kn-msg-meta { display: flex; gap: 6px; flex-wrap: wrap; }
+.kn-who { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-3); }
+.kn-who b { color: var(--text); font-weight: 600; }
+.kn-av { width: 22px; height: 22px; border-radius: 7px; background: #d97757; color: #fff; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; font-size: 11px; flex: none; }
+.kn-av.big { width: 40px; height: 40px; border-radius: 12px; font-size: 18px; }
+.kn-think-w { display: flex; flex-direction: column; gap: 6px; }
+.kn-think { display: inline-flex; align-items: center; gap: 7px; font: inherit; font-size: 12.5px; color: var(--text-3); background: none; border: 0; padding: 0; align-self: flex-start; cursor: default; }
+.kn-think:disabled { opacity: 1; }
+.kn-think .kn-car { font-size: 9px; min-width: 6px; }
+.kn-shim { background: linear-gradient(90deg, var(--text-3), var(--text), var(--text-3)); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: kn-shim 2s linear infinite; }
+@keyframes kn-shim { to { background-position: -200% 0; } }
+.kn-think-body { border-left: 2px solid var(--line-strong); padding: 2px 0 2px 12px; color: var(--text-3); font-size: 12.5px; white-space: pre-wrap; }
+.kn-tools { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); overflow: hidden; }
+.kn-trow { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 9px; align-items: center; width: 100%; padding: 6px 11px; font: inherit; font-size: 12.5px; text-align: left; border: 0; border-bottom: 1px solid var(--line); background: none; color: inherit; min-height: 31px; cursor: default; }
+.kn-tools > :last-child { border-bottom: 0; }
+.kn-trow:hover { background: var(--line); }
+.kn-trow:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.kn-trow .ti { color: var(--text-3); display: flex; }
+.kn-trow .ti svg { width: 14px; height: 14px; }
+.kn-trow .tx { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; color: var(--text-2); }
+.kn-trow .tv { font-weight: 600; color: var(--text); }
+.kn-trow code { font-family: var(--mono); font-size: 11.5px; color: var(--text); }
+.kn-trow .td { color: var(--text-3); }
+.kn-trow .td.err, .kn-trow.err .td { color: var(--danger); }
+.kn-trow.err .ti { color: var(--warn); }
+.kn-trow .tt { font-family: var(--mono); font-size: 10.5px; color: var(--text-3); display: flex; gap: 8px; align-items: center; }
+.kn-trow .tt .kn-car { font-family: var(--font); font-size: 9px; }
+.kn-trow.sub { padding-left: 36px; background: var(--surface); }
+.kn-trow.sub:hover { background: var(--line); }
+.kn-trow.run .ti { color: var(--accent-ink); }
+.kn-pm { font-family: var(--mono); font-size: 11px; white-space: nowrap; }
+.kn-pm .a { color: var(--me); }
+.kn-pm .d { color: var(--danger); }
+.kn-tdet { padding: 8px 12px 10px 36px; border-bottom: 1px solid var(--line); background: var(--surface); display: flex; flex-direction: column; gap: 4px; }
+.kn-tdet-h { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-3); font-weight: 600; }
+.kn-tdet pre { margin: 0 0 4px; font: 11px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; color: var(--text-2); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+.kn-tdet .btn { align-self: flex-start; }
+.kn-spin { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--accent-soft); border-top-color: var(--accent); animation: kn-spin .9s linear infinite; display: inline-block; flex: none; box-sizing: border-box; }
+@keyframes kn-spin { to { transform: rotate(360deg); } }
+.kn-ans { font-size: 14px; line-height: 1.62; overflow-wrap: anywhere; }
+.kn-ans > :first-child { margin-top: 0; }
+.kn-ans p { margin: 0 0 10px; }
+.kn-ans ul, .kn-ans ol { margin: 0 0 10px; padding-left: 20px; }
+.kn-ans li { margin: 5px 0; }
+.kn-ans h1, .kn-ans h2, .kn-ans h3, .kn-ans h4 { font-size: 14.5px; margin: 14px 0 6px; }
+.kn-ans code { font-family: var(--mono); font-size: 12.5px; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+.kn-ans pre { font: 12px/1.55 var(--mono); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; overflow: auto; }
+.kn-ans pre code { border: 0; padding: 0; background: none; }
+.kn-ans a { color: var(--accent-ink); text-decoration: none; }
+.kn-ans a:hover { text-decoration: underline; }
+.kn-ans a[href^="#kn:"] { background: var(--accent-soft); border-radius: 5px; padding: 0 5px; font-weight: 600; font-size: 12.5px; }
+.kn-ans a[href^="#kn:"] code { background: none; border: 0; padding: 0; color: inherit; }
+.kn-ans table { border-collapse: collapse; margin: 0 0 10px; font-size: 13px; }
+.kn-ans th, .kn-ans td { border: 1px solid var(--line); padding: 3px 8px; text-align: left; }
+/* The caret at the end of a block still streaming. */
+.kn-ans.live > :last-child:not(ul):not(ol)::after, .kn-ans.live > :is(ul, ol):last-child > li:last-child::after { content: ""; display: inline-block; width: 7px; height: 15px; background: var(--accent); vertical-align: -2px; margin-left: 2px; animation: kn-blink 1s steps(2) infinite; border-radius: 1px; }
+.kn-ans.live:empty::after { content: ""; display: inline-block; width: 7px; height: 15px; background: var(--accent); animation: kn-blink 1s steps(2) infinite; border-radius: 1px; }
+@keyframes kn-blink { 50% { opacity: 0; } }
+.kn-res { display: flex; gap: 12px; font-size: 11.5px; color: var(--text-3); align-items: center; flex-wrap: wrap; }
+.kn-res span { display: inline-flex; gap: 5px; align-items: center; }
+.kn-acts-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.kn-acts-row .btn svg { width: 13px; height: 13px; }
+.kn-acts-row .grow { flex: 1; }
+.kn-sug { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 3px 11px; border-radius: 13px; border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); color: var(--accent-ink); background: none; font: inherit; font-size: 12px; text-align: left; cursor: default; }
+.kn-sug:hover { background: var(--accent-soft); }
+.kn-sug svg { width: 12px; height: 12px; flex: none; }
+.kn-notice { align-self: center; font-size: 11.5px; color: var(--text-3); display: inline-flex; gap: 6px; align-items: center; border: 1px solid var(--line); border-radius: 12px; padding: 3px 11px; background: var(--bg); max-width: 100%; }
+.kn-notice svg { width: 12px; height: 12px; flex: none; }
+.kn-notice.warn { color: var(--warn); }
+.kn-chat-err { align-items: center; }
+.kn-chat-err .btn svg { width: 13px; height: 13px; }
+.kn-todo { display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; color: var(--text-2); }
+.kn-todo div { display: flex; gap: 7px; align-items: center; }
+.kn-todo svg { width: 13px; height: 13px; color: var(--me); }
+.kn-todo i { width: 11px; height: 11px; border-radius: 50%; border: 1.5px solid var(--line-strong); }
+.kn-todo .done span { text-decoration: line-through; color: var(--text-3); }
+/* A permission card, inline where Claude asked. */
+.kn-perm { border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent); border-radius: 12px; background: var(--surface); box-shadow: 0 0 0 4px var(--accent-soft), var(--shadow); overflow: hidden; margin: 4px 0; }
+.kn-perm-h { display: flex; gap: 10px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.kn-perm-h .pi { width: 26px; height: 26px; border-radius: 7px; background: var(--accent-soft); color: var(--accent-ink); display: flex; align-items: center; justify-content: center; flex: none; }
+.kn-perm-h .pi svg { width: 14px; height: 14px; }
+.kn-perm-h > div { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.kn-perm-h b { font-size: 13px; }
+.kn-perm-h code { font-family: var(--mono); font-size: 11.5px; color: var(--text-2); overflow-wrap: anywhere; }
+.kn-perm .kn-perm-diff { margin: 0; border: 0; border-radius: 0; border-bottom: 1px solid var(--line); max-height: 220px; overflow: auto; }
+.kn-perm .kn-perm-diff .del { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--danger) 50%, transparent); }
+.kn-perm-note { font-size: 12.5px; color: var(--text-2); padding: 10px 14px; border-bottom: 1px solid var(--line); display: flex; gap: 8px; align-items: flex-start; }
+.kn-perm-note svg { width: 14px; height: 14px; color: var(--warn); flex: none; margin-top: 2px; }
+.kn-perm-url { font: 12px/1.5 var(--mono); padding: 10px 14px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; background: var(--bg); }
+.kn-perm-url b { color: var(--accent-ink); font-weight: 600; }
+.kn-perm-f { display: flex; gap: 8px; align-items: center; padding: 10px 14px; flex-wrap: wrap; }
+.kn-perm-f .grow { flex: 1; }
+.kn-perm-f .btn { flex: none; }
+.kn-perm-f .kn-check { font-size: 12px; color: var(--text-2); }
+.kn-perm-f .btn.primary .kn-kbd { border-color: rgb(255 255 255 / .35); color: rgb(255 255 255 / .85); }
+.kn-perm-why { display: flex; gap: 8px; align-items: flex-end; padding: 0 14px 12px; }
+.kn-perm-why textarea { flex: 1; min-height: 44px; resize: vertical; font: inherit; font-size: 12.5px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--bg); color: var(--text); padding: 6px 8px; }
+.kn-perm-done { display: flex; gap: 7px; align-items: center; font-size: 12px; color: var(--text-3); min-width: 0; }
+.kn-perm-done > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kn-perm-done svg { width: 13px; height: 13px; flex: none; }
+.kn-perm-done.ok svg { color: var(--me); }
+.kn-perm-done.no svg { color: var(--danger); }
+.kn-perm-done b { font-weight: 600; color: var(--text-2); }
+.kn-perm-done code { font-family: var(--mono); font-size: 11.5px; }
+.kn-kbd { font-family: var(--mono); font-size: 10.5px; color: var(--text-3); border: 1px solid var(--line-strong); border-radius: 4px; padding: 0 4px; line-height: 16px; white-space: nowrap; }
+/* A new conversation. */
+.kn-hero { display: flex; flex-direction: column; gap: 14px; align-items: center; text-align: center; padding: 34px 0 10px; }
+.kn-hero h2 { margin: 0; font-size: 21px; font-weight: 650; }
+.kn-hero > p { margin: -6px 0 0; color: var(--text-3); font-size: 13px; max-width: 480px; }
+.kn-modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; width: 100%; text-align: left; }
+.kn-modes.two { grid-template-columns: repeat(2, 1fr); }
+.kn-mode { border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; font: inherit; font-size: 12px; color: var(--text-2); background: none; text-align: left; cursor: default; }
+.kn-mode:hover { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.kn-mode.on { border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: var(--accent-soft); }
+.kn-mode b { display: block; font-size: 12.5px; color: var(--text); margin-bottom: 2px; }
+/* The composer. */
+.kn-cmp-wrap { position: relative; padding: 0 22px 14px; max-width: 804px; width: 100%; margin: 0 auto; box-sizing: border-box; }
+.kn-cmp { border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface); display: flex; flex-direction: column; box-shadow: var(--shadow); position: relative; }
+.kn-cmp:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+.kn-cmp textarea { border: 0; outline: 0; resize: none; background: none; color: var(--text); font: inherit; font-size: 13.5px; line-height: 1.5; padding: 11px 13px 4px; min-height: 46px; max-height: 220px; box-sizing: border-box; }
+.kn-cmp textarea::placeholder { color: var(--text-3); }
+.kn-cmp-chips { display: flex; gap: 6px; padding: 0 12px; flex-wrap: wrap; }
+.kn-cmp-chips:not(:empty) { padding-top: 10px; }
+.kn-cmp-f { display: flex; align-items: center; gap: 8px; padding: 6px 8px 8px 10px; }
+.kn-cmp-f .grow { flex: 1; }
+.kn-cmp-line { font-size: 11.5px; color: var(--text-3); padding: 0 12px 9px; display: flex; gap: 6px; align-items: flex-start; }
+.kn-cmp-line svg { width: 13px; height: 13px; flex: none; margin-top: 1px; }
+.kn-cmp-line.warn { color: var(--warn); }
+.kn-cmp-err { display: flex; gap: 8px; align-items: center; margin: 8px 8px 0; padding: 6px 6px 6px 10px; border-radius: 8px; font-size: 12.5px; background: color-mix(in srgb, var(--warn) 10%, transparent); color: var(--text); }
+.kn-cmp-err > svg { width: 14px; height: 14px; color: var(--warn); flex: none; }
+.kn-cmp-err .grow { flex: 1; }
+.kn-ctx { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 4px 0 7px; border-radius: 6px; border: 0; background: var(--accent-soft); color: var(--accent-ink); font: 600 11px/1 var(--mono); white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; cursor: default; }
+button.kn-ctx { padding-right: 7px; }
+.kn-ctx svg { width: 11px; height: 11px; flex: none; }
+.kn-ctx.call { background: color-mix(in srgb, var(--spk3) 14%, transparent); color: var(--spk3); font-family: var(--font); }
+.kn-ctx.warn { background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--warn); }
+.kn-ctx-x { border: 0; background: none; color: inherit; opacity: .7; padding: 0 2px; display: inline-flex; cursor: default; }
+.kn-ctx-x:hover { opacity: 1; }
+.kn-ctx-x svg { width: 10px; height: 10px; }
+.kn-ctx-why { display: flex; gap: 8px; align-items: center; flex-basis: 100%; font-size: 12px; color: var(--text-2); }
+.kn-ctx-why > svg { width: 13px; height: 13px; color: var(--warn); flex: none; }
+.kn-iconish { width: 26px; height: 26px; border: 0; border-radius: 6px; background: none; color: var(--text-3); display: inline-flex; align-items: center; justify-content: center; cursor: default; }
+.kn-iconish:hover { background: var(--line); color: var(--text); }
+.kn-iconish svg { width: 15px; height: 15px; }
+.kn-modesw button { height: 24px; padding: 0 10px; font-size: 12px; }
+.kn-prof { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px 0 5px; border-radius: 12px; border: 1px solid var(--line); background: none; font: inherit; font-size: 11.5px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; cursor: default; }
+.kn-prof:hover { background: var(--line); }
+.kn-prof i { width: 15px; height: 15px; border-radius: 5px; background: #d97757; color: #fff; font: 700 9px/15px var(--font); text-align: center; font-style: normal; flex: none; }
+.kn-send { width: 30px; height: 30px; border-radius: 15px; background: var(--accent); color: #fff; border: 0; display: inline-flex; align-items: center; justify-content: center; flex: none; cursor: default; }
+.kn-send:disabled { opacity: .6; }
+.kn-send svg { width: 15px; height: 15px; }
+.kn-send.stop { background: var(--text); color: var(--surface); }
+.kn-send:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.kn-picker-slot { position: relative; }
+.kn-picker { position: absolute; bottom: 6px; left: 10px; width: 440px; max-width: calc(100% - 20px); z-index: 8; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 10px; box-shadow: var(--shadow); padding: 5px; display: flex; flex-direction: column; }
+.kn-pk { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 6px 9px; border-radius: 7px; border: 0; background: none; color: var(--text); font: inherit; font-size: 12.5px; text-align: left; cursor: default; }
+.kn-pk:hover, .kn-pk.on { background: var(--accent-soft); }
+.kn-pk svg { width: 14px; height: 14px; color: var(--text-3); }
+.kn-pk b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kn-pk span { color: var(--text-3); font: 11px var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
+.kn-pk-none { padding: 6px 9px; font-size: 12px; color: var(--text-3); }
+.kn-pk-q { margin: 2px 4px 4px; }
+/* This conversation (the right rail). */
+.kn-crail { border-left: 1px solid var(--line); background: var(--surface); overflow-y: auto; padding: 12px 14px 16px; display: flex; flex-direction: column; gap: 16px; min-height: 0; }
+.kn-crail h4 { margin: 0 0 7px; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-3); font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
+.kn-crail code { font-family: var(--mono); font-size: 11px; }
+.kn-rf { display: flex; justify-content: space-between; gap: 8px; width: calc(100% + 12px); padding: 4px 6px; margin: 0 -6px; border: 0; border-radius: 5px; background: none; color: var(--text); font: 11.5px var(--mono); text-align: left; cursor: default; }
+button.kn-rf:hover { background: var(--line); }
+.kn-rf b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.kn-rf span { color: var(--text-3); white-space: nowrap; }
+.kn-allow { font-size: 12px; display: flex; flex-direction: column; gap: 6px; }
+.kn-al { display: flex; gap: 7px; align-items: flex-start; color: var(--text-2); }
+.kn-al svg { width: 13px; height: 13px; flex: none; margin-top: 2px; }
+.kn-al.y svg { color: var(--me); }
+.kn-al.n svg { color: var(--text-3); }
+.kn-al.q svg { color: var(--warn); }
+.kn-al code { color: var(--text); }
+.kn-cost { font-size: 12px; color: var(--text-2); display: flex; flex-direction: column; gap: 3px; }
+.kn-cost b { font-size: 15px; color: var(--text); }
+.kn-cmdbox { font: 11px/1.5 var(--mono); background: var(--bg); border: 1px solid var(--line); color: var(--text); border-radius: 8px; padding: 8px 10px; white-space: pre-wrap; overflow-wrap: anywhere; margin-bottom: 8px; }
+.kn-crail .kn-acts .btn svg { width: 13px; height: 13px; }
+.kn-cont-sub { margin-top: 6px; }
+.kn-addto-list { display: flex; flex-direction: column; max-height: 300px; overflow-y: auto; padding: 0 8px; }
+@media (max-width: 860px) {
+  .kn-chat, .kn-chat.no-rail { grid-template-columns: 190px minmax(0, 1fr); }
+  .kn-chat.no-list, .kn-chat.no-list.no-rail { grid-template-columns: minmax(0, 1fr); }
+  .kn-modes { grid-template-columns: 1fr; }
+  .kn-prof { max-width: 140px; }
+}

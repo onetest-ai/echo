@@ -5,7 +5,7 @@
 'use strict'
 
 // ── kn-route: `#kn/<vault>/<tab>/<path>` (a page's path encoded as one part) ──
-const KN_TABS = ['pages', 'graph', 'settings']
+const KN_TABS = ['pages', 'graph', 'ask', 'settings']
 /** `decodeURIComponent`, or `null` for a broken escape (a `%` that is the name's own). */
 function knDecode(s) {
   try { return decodeURIComponent(s) } catch { return null }
@@ -352,10 +352,140 @@ function knLineDiff(mine, theirs, context = 3) {
 }
 // end of the kn-diff block
 
+// ── kn-chat: an Ask conversation's events (spec §5.3) folded into turns — a message and what Claude did until its result ──
+/** Turns `{ user, blocks, result, suggestion }`, in order; what came before any message (a history notice) is a turn
+ *  without `user`. A block is `thinking` or `text` (one per streamed block: a later render replaces the one before until
+ *  it is done; superseded renders and a sub-agent's own words are skipped), `tools` (a run of calls, each with its
+ *  `result`), `permission` (with its `answer`), or a `notice` (its own kind in `what`), `error` or `todo`. */
+function knChatTurns(events) {
+  const turns = [], calls = new Map(), cards = new Map()
+  let t = null
+  const cur = () => t || (turns.push(t = { user: null, blocks: [], result: null, suggestion: null }), t)
+  for (const e of events || []) {
+    if (!e || e.superseded) continue
+    switch (e.type) {
+      case 'user': turns.push(t = { user: e, blocks: [], result: null, suggestion: null }); break
+      case 'thinking': case 'text': {
+        if (e.parent) break
+        const bs = cur().blocks, b = { kind: e.type, block: e.block, n: e.n, html: e.html, text: e.text, done: !!e.done, seconds: e.seconds }
+        // A process numbers its blocks from b1: only a block still streaming is this one's earlier render.
+        const i = bs.findIndex((x) => x.kind === e.type && x.block === e.block && !x.done)
+        if (i >= 0) bs[i] = b; else bs.push(b)
+        break
+      }
+      case 'tool': {
+        const bs = cur().blocks
+        let g = bs[bs.length - 1]
+        if (!g || g.kind !== 'tools') bs.push(g = { kind: 'tools', n: e.n, items: [] })
+        const item = { ...e, result: null }
+        g.items.push(item)
+        calls.set(e.id, item)
+        break
+      }
+      case 'tool_result': { const c = calls.get(e.id); if (c) c.result = e; break }
+      case 'permission': { const b = { ...e, kind: 'permission', answer: null }; cur().blocks.push(b); cards.set(e.request, b); break }
+      case 'answered': { const b = cards.get(e.request); if (b) b.answer = e; break }
+      case 'result': cur().result = e; break
+      case 'suggestion': cur().suggestion = e.text; break
+      case 'notice': case 'error': case 'todo': cur().blocks.push({ ...e, kind: e.type, what: e.kind }); break
+      // `denied`: the call's own row says why.
+    }
+  }
+  return turns
+}
+/** Did the conversation read web pages or others' words (Research, an attached call)? Then the terminal panel says so
+ *  first (D41). */
+function knChatReadOutside(events) {
+  return (events || []).some((e) => e && ((e.type === 'tool' && (e.name === 'WebSearch' || e.name === 'WebFetch')) || (e.type === 'user' && (e.context || []).some((c) => c && c.call))))
+}
+/** Follow the bottom only while there (K13-10): `top`, `height`, `view` are the thread's scrollTop, scrollHeight and
+ *  clientHeight before `event` is drawn (`null`: the user scrolled), `jump` whether "Jump to the latest" shows now. */
+function knFollow({ top = 0, height = 0, view = 0, jump = false } = {}, event) {
+  const bottom = height - top - view <= 32
+  if (!event) return { scroll: false, jump: bottom ? false : !!jump }
+  return { scroll: bottom, jump: !bottom }
+}
+/** An answer from Ask in a page's Markdown (K13-06): with `source` in its properties (Save as a page, the default page
+ *  format has an empty one), or under a dated `heading` at its end (Add to a page). */
+function knAnswerInto(text, md, { heading = '', source = '' } = {}) {
+  let t = String(text || '')
+  if (source) {
+    const fm = /^---\r?\n([\s\S]*?)\r?\n---[^\S\r\n]*(\r?\n|$)/.exec(t)
+    if (fm) {
+      const lines = fm[1].split(/\r?\n/)
+      const i = lines.findIndex((l) => /^source\s*:/.test(l))
+      if (i >= 0) lines[i] = `source: ${source}`; else lines.push(`source: ${source}`)
+      t = `---\n${lines.join('\n')}\n---\n${t.slice(fm[0].length)}`
+    } else t = `---\nsource: ${source}\n---\n\n${t}`
+  }
+  return `${t.replace(/\s+$/, '')}\n\n${heading ? `## ${heading}\n\n` : ''}${String(md || '').trim()}\n`
+}
+// end of the kn-chat block
+
+// ── kn-tools: a turn's tool calls as rows (K13-03) — one line each; three or more read-only calls in a row fold ──
+const KN_FOLD = { Read: ['read', 'file', 'files'], Grep: ['searched', 'time', 'times'], Glob: ['searched', 'time', 'times'], WebSearch: ['searched the web', 'time', 'times'], WebFetch: ['opened', 'page', 'pages'], Skill: ['used', 'skill', 'skills'] }
+/** One call: verb, target (`code` when it is a path or a name), `where` it searched, an edit's `pm`, the `note` after
+ *  the dot (a read's lines, a search's count, a failure's reason), and `text`, the whole line in words. The events
+ *  carry no result count for a web search and no file length for a read. */
+function knToolRow(x, ended) {
+  const d = x.detail || '', r = x.result
+  const error = r && r.ok === false ? r.summary || 'It failed.' : ''
+  const summary = r && !error ? r.summary || '' : ''
+  let where = '', pm = '', note = d
+  if (x.name === 'Read') note = d || summary
+  else if (x.name === 'Grep' || x.name === 'Glob') { where = d; note = summary }
+  else if (x.name === 'Edit') { pm = d; note = '' }
+  if (error) note = error
+  const text = [x.verb, x.target, where, pm].filter(Boolean).join(' ') + (note ? ` · ${note}` : '')
+  return { kind: 'row', id: x.id, name: x.name, verb: x.verb, target: x.target, path: x.path, code: ['Read', 'Edit', 'Write', 'Glob', 'Skill', 'WebFetch'].includes(x.name), where, pm, note, error, running: !r && !ended, text, at: x.at, done: r && r.at, input: x.input, preview: r ? r.preview : '' }
+}
+function knFoldLabel(items) {
+  const n = new Map()
+  for (const x of items) { const k = (KN_FOLD[x.name] || [String(x.verb || x.name).toLowerCase(), 'time', 'times']).join('|'); n.set(k, (n.get(k) || 0) + 1) }
+  const s = [...n].map(([k, c]) => { const [verb, one, many] = k.split('|'); return `${verb} ${c} ${c === 1 ? one : many}` }).join(', ')
+  return s.charAt(0).toUpperCase() + s.slice(1)
+}
+/** The rows of a run of calls (each with its `result`): a row each, a `fold` (its `rows` inside) for three or more
+ *  read-only calls in a row. `ended`: the turn is over. */
+function knToolRows(items, { ended = false } = {}) {
+  const out = []
+  for (let i = 0; i < items.length;) {
+    let j = i
+    while (j < items.length && items[j].readonly) j++
+    if (j - i >= 3) {
+      const rows = items.slice(i, j).map((x) => knToolRow(x, ended))
+      out.push({ kind: 'fold', id: rows[0].id, text: knFoldLabel(items.slice(i, j)), rows, running: rows.some((r) => r.running), errors: rows.filter((r) => r.error).length })
+      i = j
+    } else out.push(knToolRow(items[i++], ended))
+  }
+  return out
+}
+// end of the kn-tools block
+
+// ── kn-mention: `@` in Ask's composer — a page picked from Echo's index goes in as a chip, its title in the words ──
+/** The mention typed up to `caret`: `{ query, start }` (`start`: its `@`), or null. An `@` starts one only at the start
+ *  or after a space (never in an address); a space ends it. */
+function knMention(text, caret) {
+  const before = String(text).slice(0, caret)
+  const m = /(^|\s)@([^\s@]*)$/.exec(before)
+  return m ? { query: m[2], start: before.length - m[2].length - 1 } : null
+}
+/** The text once mention `m` (typed up to `caret`) is picked: `words` in its place, and where the caret goes. */
+function knMentionPick(text, m, caret, words) {
+  const t = String(text), w = String(words)
+  return { text: t.slice(0, m.start) + w + t.slice(caret), caret: m.start + w.length }
+}
+/** What `kn_chat_send` takes from the composer: the words, and its chips as pages and calls — a call by its name, never
+ *  a path, with `anyway` only on the one the user said *Attach anyway* to. */
+function knChatMessage(text, chips) {
+  return { text: String(text).trim(), context: (chips || []).map((c) => c.page ? { page: c.page } : c.anyway ? { call: c.call, anyway: true } : { call: c.call }) }
+}
+// end of the kn-mention block
+
 /** Knowledge's views and state (`S.kn`). */
 const Kn = (() => {
   const st = () => {
-    if (!S.kn) S.kn = { data: null, vault: '', tab: 'pages', path: '', tree: null, page: null, filter: 'all', q: '', hits: null, open: new Set(), rail: 'links', hist: null, ver: null, edit: null, graph: null, gopt: { hideIndex: true, isolated: true, tags: false, color: 'folder', depth: 0, sel: null, hidden: [] }, gq: '', settings: null, checks: null, sheet: null, switcher: false, menu: null, busy: {}, error: null, chip: null, lastVault: null, ovr: {} }
+    if (!S.kn) S.kn = { data: null, vault: '', tab: 'pages', path: '', tree: null, page: null, filter: 'all', q: '', hits: null, open: new Set(), rail: 'links', hist: null, ver: null, edit: null, graph: null, gopt: { hideIndex: true, isolated: true, tags: false, color: 'folder', depth: 0, sel: null, hidden: [] }, gq: '', settings: null, checks: null, sheet: null, switcher: false, menu: null, busy: {}, error: null, chip: null, lastVault: null, ovr: {}, chat: null, askConv: '' }
     return S.kn
   }
   const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms))
@@ -380,6 +510,26 @@ const Kn = (() => {
     recall: I('<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5M8.5 11h5M11 8.5v5"/>'),
     plug: I('<path d="M9 3.5v4M15 3.5v4M6.5 7.5h11V11a5.5 5.5 0 0 1-11 0z"/><path d="M12 16.5v4"/>'),
     graph: I('<circle cx="6" cy="7" r="2.3"/><circle cx="17.5" cy="6" r="2.3"/><circle cx="12" cy="17" r="2.3"/><path d="M8 8l2.8 7M15.8 7.6L13 15M8.3 7l7-.8"/>'),
+    // Ask
+    at: I('<circle cx="12" cy="12" r="3.6"/><path d="M15.6 12v1.6a2.6 2.6 0 0 0 5.2 0V12a8.8 8.8 0 1 0-3.4 6.9"/>'),
+    clip: I('<path d="M20 11.5l-7.8 7.8a5 5 0 0 1-7.1-7.1l8.2-8.2a3.4 3.4 0 0 1 4.8 4.8l-8.2 8.2a1.7 1.7 0 0 1-2.4-2.4l7.5-7.5"/>'),
+    stop: I('<rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor"/>'),
+    up: I('<path d="M12 19V5M6 11l6-6 6 6"/>'),
+    globe: I('<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.5 2.6 3.6 5.3 3.6 8.5s-1.1 5.9-3.6 8.5c-2.5-2.6-3.6-5.3-3.6-8.5S9.5 6.1 12 3.5z"/>'),
+    edit: I('<path d="M4.5 19.5h4l10-10a2.8 2.8 0 0 0-4-4l-10 10z"/><path d="M13.5 6.5l4 4"/>'),
+    search: I('<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>'),
+    bolt: I('<path d="M13 3.5L5.5 13.5H12l-1 7 7.5-10H12z"/>'),
+    files: I('<path d="M8.5 3.5h6l4 4V17a.5.5 0 0 1-.5.5H8.5A.5.5 0 0 1 8 17V4a.5.5 0 0 1 .5-.5z"/><path d="M14.5 3.5V8h4M5 7v13a.5.5 0 0 0 .5.5H14"/>'),
+    agent: I('<circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/>'),
+    term: I('<rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="M7.5 10l3 2.5-3 2.5M12.5 15.5h4"/>'),
+    copy: I('<rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6A1.5 1.5 0 0 0 14 4.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/>'),
+    clock: I('<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>', 12),
+    call: I('<path d="M6.5 4.5h3l1.5 4-2 1.5a10 10 0 0 0 5 5l1.5-2 4 1.5v3a1.5 1.5 0 0 1-1.6 1.5A15.5 15.5 0 0 1 5 6.1a1.5 1.5 0 0 1 1.5-1.6z"/>'),
+    asks: I('<circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.5a2.5 2.5 0 0 1 4.8 1c0 1.7-2.4 2-2.4 3.5M12 17v.1"/>'),
+    no: I('<circle cx="12" cy="12" r="8.5"/><path d="M6 6l12 12"/>'),
+    side: I('<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M9.5 4.5v15"/>', 15),
+    save: I('<path d="M5 4.5h11l3.5 3.5v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5.5a1 1 0 0 1 1-1z"/><path d="M8 4.5v5h7v-5M8 20v-6h8v6"/>'),
+    lock: I('<rect x="5.5" y="10.5" width="13" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/>'),
   }
   const GEM_BIG = I('<path d="M6.5 3.5h11l3.5 5-9 12-9-12z"/><path d="M3 8.5h18M9.5 3.5l-1 5 3.5 12 3.5-12-1-5"/>', 22)
   const vaults = () => ((st().data || {}).vaults || [])
@@ -451,6 +601,7 @@ const Kn = (() => {
       if (s.path && (!s.page || s.page.path !== s.path || s.page.vault !== v.id)) await loadPage()
     } else if (s.tab === 'graph') await loadGraph()
     else if (s.tab === 'settings') await loadSettings()
+    else if (s.tab === 'ask') { openChat(s.askConv); await loadChats() }
   }
   async function loadTree() {
     const s = st(), v = vault()
@@ -518,9 +669,12 @@ const Kn = (() => {
     if (r.vault !== s.vault) { s.page = null; s.tree = null; s.graph = null; s.settings = null; s.edit = null; s.hits = null; s.q = ''; s.gq = ''; s.gopt.hidden = [] }
     s.vault = r.vault || s.lastVault || (vaults()[0] || {}).id || ''
     s.tab = r.tab
-    if (r.path !== undefined && r.path !== s.path) { s.path = r.path; s.ver = null }
+    // Ask's part of the route is a conversation, not the page Pages keeps open.
+    if (r.tab === 'ask') { s.askConv = r.path || ''; openChat(s.askConv) } else if (r.path !== undefined && r.path !== s.path) { s.path = r.path; s.ver = null }
     s.source = 'vault'
   }
+  /** The route's last part for the tab open now. */
+  const here = () => (st().tab === 'ask' ? st().askConv || '' : st().path || '')
   const goVault = (id, tab = 'pages', path = '') => go(knRouteOf({ vault: id, tab, path }))
   /** Knowledge's own view (a vault, or none yet) rather than Recall's or a plugin's tab. */
   function active() {
@@ -535,7 +689,7 @@ const Kn = (() => {
     const s = st()
     if (s.source === 'recall' && recallOn()) return `brain/${(S.br && S.br.tab) || 'sources'}`
     const id = s.vault || s.lastVault || (() => { try { return localStorage.getItem('echo.kn.vault') } catch { return null } })() || ((s.data && s.data.vaults[0]) || {}).id
-    return id ? knRouteOf({ vault: id, tab: s.tab || 'pages', path: s.path || '' }) : 'kn'
+    return id ? knRouteOf({ vault: id, tab: s.tab || 'pages', path: here() }) : 'kn'
   }
 
   // ── the header: Knowledge, the switcher, the vault's place, actions ──
@@ -569,14 +723,14 @@ const Kn = (() => {
     const g = v.git
     const where = v.available === false ? '<span class="kn-meta warn">The folder isn\'t there</span>'
       : `<span class="kn-meta"><code title="${esc(v.root)}">${esc(short(v.root))}</code>${g ? ` · ${IC.git} ${esc(g.branch || 'detached')}` : ''}${v.pages != null ? ` · ${nf(v.pages)} pages` : ''}</span>`
-    const menu = s.menu === 'vault' ? `<div class="menu kn-head-menu" role="menu"><button class="menu-item" role="menuitem" data-kn="reveal" data-path="">${/Windows/.test(navigator.userAgent) ? 'Show in Explorer' : 'Show in Finder'}</button><button class="menu-item" role="menuitem" data-kn="obsidian" data-path="${esc((s.tree || {}).index || '')}">Open in Obsidian</button><button class="menu-item" role="menuitem" data-kn="reread">Read the folder again</button><div class="menu-sep" role="separator"></div><button class="menu-item" role="menuitem" data-kn="tab" data-kn-tab="settings">Vault settings</button></div>` : ''
-    const acts = v.available === false ? '' : `<button class="btn sm" data-kn="ask" title="Claude in this vault's folder">${IC.ask} Ask</button><button class="btn sm" data-kn="newpage">${IC.plus} New page</button><span class="kn-rel"><button class="icon-btn" data-kn="menu" data-menu="vault" aria-haspopup="menu" aria-expanded="${s.menu === 'vault'}" aria-label="More">${IC.more}</button>${menu}</span>`
+    const menu = s.menu === 'vault' ? `<div class="menu kn-head-menu" role="menu"><button class="menu-item" role="menuitem" data-kn="reveal" data-path="">${/Windows/.test(navigator.userAgent) ? 'Show in Explorer' : 'Show in Finder'}</button><button class="menu-item" role="menuitem" data-kn="obsidian" data-path="${esc((s.tree || {}).index || '')}">Open in Obsidian</button><button class="menu-item" role="menuitem" data-kn="reread">Read the folder again</button><button class="menu-item" role="menuitem" data-kn="ask-panel">Open Ask in the terminal panel</button><div class="menu-sep" role="separator"></div><button class="menu-item" role="menuitem" data-kn="tab" data-kn-tab="settings">Vault settings</button></div>` : ''
+    const acts = v.available === false ? '' : `<button class="btn sm" data-kn="ask" title="A new conversation with Claude Code in this vault">${IC.ask} Ask</button><button class="btn sm" data-kn="newpage">${IC.plus} New page</button><span class="kn-rel"><button class="icon-btn" data-kn="menu" data-menu="vault" aria-haspopup="menu" aria-expanded="${s.menu === 'vault'}" aria-label="More">${IC.more}</button>${menu}</span>`
     return `<header class="kn-head">${title()}${where}<span class="grow"></span>${acts}</header>`
   }
   function tabs() {
     const s = st()
     const t = (id, label) => `<button class="tab" role="tab" data-kn="tab" data-kn-tab="${id}" aria-selected="${s.tab === id}">${label}</button>`
-    return `<div class="kn-tabs"><div class="tabs" role="tablist">${t('pages', 'Pages')}${t('graph', 'Graph')}${t('settings', 'Settings')}</div></div>`
+    return `<div class="kn-tabs"><div class="tabs" role="tablist">${t('pages', 'Pages')}${t('graph', 'Graph')}${t('ask', 'Ask')}${t('settings', 'Settings')}</div></div>`
   }
 
   // ── nothing connected yet ──
@@ -1281,6 +1435,7 @@ const Kn = (() => {
       case 'twin': return twinSheet()
       case 'save': return saveSheet()
       case 'sample': return sampleSheet()
+      case 'addto': return addToSheet()
     }
     return ''
   }
@@ -1296,21 +1451,26 @@ const Kn = (() => {
       const id = (vaults().find((x) => x.id === (s.lastVault || last)) || vaults()[0]).id
       s.vault = id
       s.source = 'vault'
-      history.replaceState(null, '', `#${knRouteOf({ vault: id, tab: s.tab || 'pages', path: s.path || '' })}`)
+      history.replaceState(null, '', `#${knRouteOf({ vault: id, tab: s.tab || 'pages', path: here() })}`)
       loadVault().then(render)
       return `<div class="kn">${head()}${tabs()}<div class="kn-body"><div class="skeleton" style="padding:20px"><i></i><i></i><i></i></div></div></div>`
     }
     if (!v) return `<div class="kn">${head()}<div class="kn-tabs kn-tabs-empty"></div><div class="kn-body">${emptyView()}</div></div>`
     if (v.available === false) return `<div class="kn">${head()}<div class="kn-tabs kn-tabs-empty"></div><div class="kn-body">${missingView(v)}</div></div>`
-    const body = s.tab === 'graph' ? graphView() : s.tab === 'settings' ? settingsView() : pagesView()
+    const body = s.tab === 'graph' ? graphView() : s.tab === 'settings' ? settingsView() : s.tab === 'ask' ? chatView() : pagesView()
     return `<div class="kn">${head()}${tabs()}<div class="kn-body">${body}</div></div>`
   }
   function after() {
     const s = st()
     if (s.tab === 'graph') drawGraph()
     if (s.tab === 'pages' && s.rail === 'links') drawMini()
+    if (s.tab === 'ask' && vault()) { syncThread(); fitQ(); pollChat() }
     if (s.scrollTo) { const el = document.getElementById(s.scrollTo); if (el) el.scrollIntoView({ block: 'start' }); s.scrollTo = null }
-    if (s.focus) { const el = document.getElementById(s.focus); if (el) { el.focus(); if (el.select && s.focusSelect) el.select() } s.focus = null; s.focusSelect = false }
+    if (s.focus) {
+      const el = document.getElementById(s.focus)
+      if (el) { el.focus(); if (el.select && s.focusSelect) el.select(); else if (el.id === 'kn-chat-q') el.setSelectionRange(el.value.length, el.value.length) }
+      s.focus = null; s.focusSelect = false
+    }
   }
 
   // ── actions ──
@@ -1408,10 +1568,13 @@ const Kn = (() => {
       done(r.git === 'committed' ? `${r.vault.name} is ready, in git.` : r.git === 'no identity' ? `${r.vault.name} is ready. git has no name and email set, so the first commit wasn't made.` : `${r.vault.name} is ready.`)
     } catch (err) { x.error = String(err.message || err); render() }
   }
-  async function openNewPage(name) {
+  /** K6-02's sheet; `answer` (`{ md, source }`): an answer from Ask, put into the new page's editor (K13-06). */
+  async function openNewPage(name, answer) {
     const s = st(), v = vault()
+    // From Ask the tree may not be loaded yet: the sheet lists its folders.
+    if (!s.tree || s.tree.vault !== v.id) await loadTree()
     const folder = s.path ? s.path.split('/').slice(0, -1).join('/') : (s.tree && s.tree.root) || ''
-    s.sheet = { kind: 'newpage', name: name || '', folder: name ? (s.tree && s.tree.root) || folder : folder, template: '', row: true, templates: await listTemplates(v) }
+    s.sheet = { kind: 'newpage', name: name || '', folder: name ? (s.tree && s.tree.root) || folder : folder, template: '', row: true, templates: await listTemplates(v), answer }
     s.focus = 'kn-pname'
     render()
   }
@@ -1433,6 +1596,8 @@ const Kn = (() => {
       goVault(v.id, 'pages', r.path)
       await loadPage()
       await startEdit()
+      // An answer from Ask: in the editor with its source, saved when the user saves.
+      if (x.answer && s.edit) { onEditInput(knAnswerInto(s.edit.text, x.answer.md, { source: x.answer.source })); render() }
     } catch (err) { x.error = String(err.message || err); render() }
   }
   async function openRows(paths) {
@@ -1483,6 +1648,642 @@ const Kn = (() => {
     const e = Terms.get(q.key)
     if (e && e.id != null && !e.exited && e.from > 400 && Date.now() - q.at > 2500) { send({ cmd: 'pty_input', id: e.id, data: `${q.prompt}\r` }); s.queued = null }
     else if (Date.now() - q.at > 60000) s.queued = null
+  }
+
+  // ── Ask: a conversation with Claude Code in the vault (spec K13) ──
+  // The thread is drawn apart from the rest of the view: `view()` leaves it empty and `syncThread` fills it block by
+  // block, replacing only a block whose HTML changed (K13-10: a streaming block re-renders alone). The other parts that
+  // change with the stream (the header, the rail, the composer's bar) are patched by `refreshChat`, each by the same
+  // function `view()` draws it with. Text and thinking are others' words: `esc()`, or the HTML Echo's writer made.
+  const MOD_KEY = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '') ? '⌘↵' : 'Ctrl+↵'
+  const MODES = [['ask', 'Ask'], ['curate', 'Curate'], ['research', 'Research']]
+  const MODE_LINE = {
+    ask: [IC.lock, 'Ask reads your pages. It changes nothing.'],
+    curate: [IC.edit, 'Curate reads, and edits pages after you allow each edit.'],
+    research: [IC.warn, 'Research also searches the web. Searches and pages it opens may receive words from your pages.'],
+  }
+  const TOOL_IC = { Read: IC.file, Grep: IC.search, Glob: IC.search, Skill: IC.bolt, Edit: IC.edit, Write: IC.edit, WebSearch: IC.globe, WebFetch: IC.globe, Agent: IC.agent, Task: IC.agent }
+  const SPIN = '<span class="kn-spin" aria-hidden="true"></span>'
+  const researchOn = () => !(vault() && vault().ask && vault().ask.research === false)
+  const askShown = () => S.view === 'brain' && st().source === 'vault' && st().tab === 'ask' && !!vault()
+  const kTok = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n || 0))
+  const usd = (c) => (c < 0.01 ? '<$0.01' : `$${c.toFixed(2)}`)
+  const patchEl = (id, html) => { const el = document.getElementById(id); if (el) patch(el, html) }
+  /** The conversations list: as the user left it, else open when the window is wide enough. */
+  const listOpen = () => { const o = chat().listOpen; return o === null ? window.innerWidth >= 860 : o }
+  /** Ask's own conversation in the open vault (D44: not the panel's current one) and everything the view keeps of it. */
+  function chat() {
+    const s = st()
+    if (!s.chat || s.chat.vault !== s.vault) s.chat = { vault: s.vault, id: '', events: [], next: 0, live: false, busy: false, waiting: false, renders: {}, loaded: false, gone: null, mode: 'ask', draft: '', chips: [], picker: null, error: null, sending: false, open: {}, always: {}, whyOpen: null, follow: true, top: 0, jump: false, list: null, listQ: '', listOpen: null, command: null, polling: null }
+    return s.chat
+  }
+  /** Show conversation `id` ('' a new one); the composer keeps what is typed in it. */
+  function openChat(id) {
+    const c = chat()
+    if (c.id === (id || '')) return
+    Object.assign(c, { id: id || '', events: [], next: 0, live: false, busy: false, waiting: false, renders: {}, loaded: false, gone: null, error: null, open: {}, always: {}, whyOpen: null, follow: true, top: 0, jump: false, command: null })
+  }
+  async function loadChats() {
+    const c = chat(), v = vault()
+    if (!v) return
+    try { const r = await get(`api/kn/${enc(v.id)}/chats`); if (st().chat === c && Array.isArray(r)) { c.list = r; patchEl('kn-convs-l', convItems()); patchEl('kn-conv-h', convHead()) } } catch { /* the app restarting */ }
+  }
+  /** The conversation's events by long poll (K12-06) while Ask shows it. */
+  async function pollChat() {
+    const c = chat(), id = c.id, v = vault()
+    if (!id || c.polling === id || c.gone) return
+    c.polling = id
+    try {
+      while (st().chat === c && c.id === id && askShown()) {
+        let r
+        try { r = await get(`api/kn/${enc(v.id)}/chat/${enc(id)}?from=${c.next}`) } catch { await sleep(1500); continue }
+        if (st().chat !== c || c.id !== id) return
+        if (r.error) { c.gone = /no such/.test(r.error) ? 'This conversation isn\'t one of this vault\'s any more.' : r.error; refreshChat(); return }
+        tookChat(c, r)
+      }
+    } finally { if (c.polling === id) c.polling = null }
+  }
+  /** A chunk of events: kept (a streaming block's older render drops its copy, as the app's own list does), drawn. */
+  function tookChat(c, r) {
+    const evs = r.events || []
+    if (evs.length && evs[0].n < c.next) { c.events = []; c.renders = {} } // Echo started again: from its first event
+    const before = chatMeasure()
+    for (const e of evs) {
+      if (c.loaded) e.at = Date.now()
+      if ((e.type === 'text' || e.type === 'thinking') && e.block && !e.superseded) {
+        const k = `${e.type}:${e.block}`, old = c.renders[k]
+        if (old) { old.superseded = true; delete old.html; delete old.text }
+        if (e.done) delete c.renders[k]; else c.renders[k] = e
+      }
+      c.events.push(e)
+    }
+    c.next = r.next
+    const ended = c.busy && !r.busy
+    Object.assign(c, { live: !!r.live, busy: !!r.busy, waiting: !!r.waiting, loaded: true })
+    const sent = evs.some((e) => e.type === 'user')
+    if (ended || sent) loadChats()
+    // A message the user just sent is always shown, wherever the thread was scrolled to.
+    refreshChat(evs[evs.length - 1] || null, sent && before ? { ...before, top: before.height - before.view } : before)
+  }
+  function turnsOf(c) {
+    if (c._ev !== c.events || c._n !== c.events.length) { c._turns = knChatTurns(c.events); c._ev = c.events; c._n = c.events.length }
+    return c._turns
+  }
+  /** The first card still waiting for an answer (⌘↵ allows it, Esc denies it). */
+  function firstWaiting(c) {
+    const t = turnsOf(c)[turnsOf(c).length - 1]
+    return t && !t.result && c.live ? t.blocks.find((b) => b.kind === 'permission' && !b.answer) || null : null
+  }
+  function chatMeasure() {
+    const el = document.getElementById('kn-thread')
+    return el ? { top: el.scrollTop, height: el.scrollHeight, view: el.clientHeight, jump: chat().jump } : null
+  }
+  function setJump(on) { const c = chat(); c.jump = !!on; const b = document.getElementById('kn-jump'); if (b) b.hidden = !on }
+  function onThreadScroll(el) {
+    const c = chat(), m = { top: el.scrollTop, height: el.scrollHeight, view: el.clientHeight, jump: c.jump }
+    c.follow = knFollow(m, true).scroll
+    c.top = el.scrollTop
+    setJump(knFollow(m, null).jump)
+  }
+  /** What changed with the stream, drawn where it is — never the whole view (the composer keeps its text and caret). */
+  function refreshChat(event = null, before = null) {
+    if (!askShown() || !document.getElementById('kn-thread')) return
+    const c = chat()
+    patchEl('kn-conv-h', convHead())
+    patchEl('kn-crail', railBody())
+    patchEl('kn-convs-l', convItems())
+    patchEl('kn-cmp-chips', chipsHtml())
+    patchEl('kn-cmp-note', composerNote())
+    patchEl('kn-cmp-f', composerFoot())
+    drawPicker()
+    const q = document.getElementById('kn-chat-q')
+    if (q) q.placeholder = placeholder()
+    syncThread(event, before, c)
+  }
+  /** The thread, block by block: a block whose HTML changed is replaced alone, new ones appended; it follows the
+   *  bottom only while the user is there (K13-10). */
+  function syncThread(event = null, before = null, c = chat()) {
+    const box = document.getElementById('kn-thread-in'), sc = document.getElementById('kn-thread')
+    if (!box || !sc) return
+    const fresh = !box._parts, parts = threadParts(c), old = box._parts || []
+    let i = 0
+    for (; i < parts.length && i < old.length && old[i][0] === parts[i][0]; i++) {
+      if (old[i][1] === parts[i][1]) continue
+      const t = document.createElement('template')
+      t.innerHTML = parts[i][1]
+      box.children[i].replaceWith(t.content)
+    }
+    while (box.children.length > i) box.lastElementChild.remove()
+    if (i < parts.length) box.insertAdjacentHTML('beforeend', parts.slice(i).map((x) => x[1]).join(''))
+    box._parts = parts
+    if (fresh) sc.scrollTop = c.follow ? sc.scrollHeight : c.top
+    else if (before) { const f = knFollow(before, event); if (f.scroll) sc.scrollTop = sc.scrollHeight; setJump(f.jump) }
+    tickRunning()
+  }
+  /** Seconds on the calls still running, counted here (the events carry no clock). */
+  let runTimer = null
+  function tickRunning() {
+    const draw = () => { const now = Date.now(); for (const el of document.querySelectorAll('[data-kn-since]')) el.textContent = `${Math.max(0, Math.round((now - Number(el.dataset.knSince)) / 1000))} s` }
+    draw()
+    if (runTimer || !document.querySelector('[data-kn-since]')) return
+    runTimer = setInterval(() => { if (!document.querySelector('[data-kn-since]')) { clearInterval(runTimer); runTimer = null } else draw() }, 1000)
+  }
+  function fitQ() { const q = document.getElementById('kn-chat-q'); if (q) { q.style.height = 'auto'; q.style.height = `${Math.min(q.scrollHeight, 220)}px` } }
+
+  function chatView() {
+    const c = chat(), narrow = window.innerWidth < 1100, open = listOpen()
+    const list = open ? `<div class="kn-convs"><div class="kn-convs-h"><div class="kn-convs-row"><b>Conversations</b><button class="btn sm" data-kn="chat-new">${IC.plus} New</button></div><input class="search" id="kn-chat-find" placeholder="Find a conversation" aria-label="Find a conversation" value="${esc(c.listQ)}" autocomplete="off" spellcheck="false"></div><div class="kn-convs-l" id="kn-convs-l" data-keep-scroll>${convItems()}</div></div>` : ''
+    const conv = `<div class="kn-conv"><div class="kn-conv-h" id="kn-conv-h">${convHead()}</div><div class="kn-thread" id="kn-thread"><div class="kn-thread-in" id="kn-thread-in"></div></div>${composerHtml()}</div>`
+    return `<div class="kn-chat${open ? '' : ' no-list'}${narrow ? ' no-rail' : ''}">${list}${conv}${narrow ? '' : `<aside class="kn-crail" id="kn-crail" data-keep-scroll>${railBody()}</aside>`}</div>`
+  }
+  function whenOf(at) {
+    if (!at) return ''
+    const d = new Date(at)
+    if (isNaN(d)) return ''
+    const days = (Date.now() - d) / 864e5
+    return d.toDateString() === new Date().toDateString() ? hm(d) : days < 6 ? d.toLocaleDateString([], { weekday: 'short' }) : d.toLocaleDateString([], { day: 'numeric', month: 'short' })
+  }
+  function convItems() {
+    const c = chat()
+    if (!c.list) return '<div class="skeleton" style="padding:12px"><i></i><i></i></div>'
+    const q = c.listQ.trim().toLowerCase()
+    const rows = c.list.filter((x) => !q || String(x.title || '').toLowerCase().includes(q))
+    const today = (x) => x.at && new Date(x.at).toDateString() === new Date().toDateString()
+    const item = (x) => `<button class="kn-cvi${x.id === c.id ? ' on' : ''}" data-kn="conv" data-id="${esc(x.id)}" title="${esc(x.title || '')}"><b>${esc(x.title || 'A conversation')}</b><span>${x.live ? '<i class="kn-live" aria-label="running"></i>' : ''}${x.busy ? 'answering · ' : ''}${esc(whenOf(x.at))}</span></button>`
+    const fresh = !c.id ? `<button class="kn-cvi on" data-kn="chat-new"><b>New conversation</b><span>${esc((MODES.find((m) => m[0] === c.mode) || MODES[0])[1])}</span></button>` : ''
+    const now = rows.filter(today), earlier = rows.filter((x) => !today(x))
+    return `${now.length || fresh ? '<div class="kn-cvg">Today</div>' : ''}${fresh}${now.map(item).join('')}${earlier.length ? `<div class="kn-cvg">Earlier</div>${earlier.map(item).join('')}` : ''}${!rows.length && !fresh ? `<p class="set-sub kn-cv-none">${q ? 'None matches.' : 'No conversations yet.'}</p>` : ''}`
+  }
+  function convHead() {
+    const s = st(), c = chat(), narrow = window.innerWidth < 1100
+    const first = turnsOf(c).find((t) => t.user)
+    const listed = (c.list || []).find((x) => x.id === c.id)
+    const title = !c.id ? 'New conversation' : String((first && first.user.text) || (listed && listed.title) || 'A conversation').split('\n')[0].slice(0, 120)
+    const mode = researchOn() || c.mode !== 'research' ? c.mode : 'ask'
+    const tag = { ask: 'tag', curate: 'tag acc', research: 'tag warn' }[mode]
+    const menu = narrow && c.id ? `<span class="kn-rel"><button class="icon-btn" data-kn="menu" data-menu="conv" aria-haspopup="menu" aria-expanded="${s.menu === 'conv'}" aria-label="Continue elsewhere">${IC.more}</button>${s.menu === 'conv' ? `<div class="menu kn-head-menu" role="menu">${continueItems(true)}</div>` : ''}</span>` : ''
+    return `<button class="icon-btn" data-kn="convs-fold" aria-label="${listOpen() ? 'Hide' : 'Show'} the conversations" aria-expanded="${listOpen()}" title="Conversations">${IC.side}</button><b title="${esc(title)}">${esc(title)}</b><span class="${tag}">${esc((MODES.find((m) => m[0] === mode) || MODES[0])[1])}</span>${menu}`
+  }
+  const sysProfile = () => { const v = vault(), p = v && typeof profileOf === 'function' && profileOf(v.profile); return !!(p && p.kind === 'system') }
+  /** Continue elsewhere (K13-08): the terminal panel; on Claude Code (as configured) also the command for a terminal. */
+  function continueItems(menu) {
+    const c = chat(), off = c.id ? '' : ' disabled'
+    return menu ? `<button class="menu-item" role="menuitem" data-kn="chat-terminal"${off}>${IC.term} Open in the terminal panel</button>${sysProfile() ? `<button class="menu-item" role="menuitem" data-kn="chat-command"${off}>${IC.copy} Copy the terminal command</button>` : ''}`
+      : `<div class="kn-acts"><button class="btn sm" data-kn="chat-terminal"${off}>${IC.term} Open in the terminal panel</button>${sysProfile() ? `<button class="btn ghost sm" data-kn="chat-command"${off}>${IC.copy} Copy the command</button>` : ''}</div>`
+  }
+  function railBody() {
+    const c = chat(), v = vault(), turns = turnsOf(c)
+    const root = String((v.paths || {}).pages || '')
+    const shown = (p) => (root && p.startsWith(`${root}/`) ? p.slice(root.length + 1) : p)
+    const mode = researchOn() || c.mode !== 'research' ? c.mode : 'ask'
+    const modeName = (MODES.find((m) => m[0] === mode) || MODES[0])[1]
+    const al = (k, t) => `<div class="kn-al ${k}">${k === 'y' ? IC.check : k === 'q' ? IC.asks : IC.no}<span>${t}</span></div>`
+    const skills = (((v.detected || {}).skills) || []).filter((x) => x.kind !== 'agents').map((x) => `<code>${esc(x.name)}</code>`)
+    const sk = skills.length ? al('y', `Its skills: ${skills.join(', ')}`) : ''
+    const cards = turns.flatMap((t) => t.blocks.filter((b) => b.kind === 'permission' && b.answer && b.answer.allow && b.answer.always))
+    const edits = cards.some((b) => b.tool !== 'WebFetch')
+    const domains = [...new Set(cards.filter((b) => b.tool === 'WebFetch' && b.domain).map((b) => b.domain))]
+    const read = al('y', 'Read and search inside the vault')
+    const allowed = mode === 'curate' ? read + sk + al(edits ? 'y' : 'q', edits ? 'Edit and write pages — allowed for this conversation' : 'Edit and write pages — asks each time') + al('n', 'Never <code>CLAUDE.md</code>, <code>AGENTS.md</code>, <code>.claude/</code>') + al('n', 'No web, no commands')
+      : mode === 'research' ? read + sk + al('y', 'Search the web') + al('q', 'Open a web page — asks per site') + domains.map((d) => al('y', `Open pages on <code>${esc(d)}</code> — allowed here`)).join('') + al('n', 'No edits, no commands')
+        : read + sk + al('n', 'No edits, no web, no commands')
+    const allowBox = `<div><h4>Allowed to <span>${esc(modeName)}</span></h4><div class="kn-allow">${allowed}</div></div>`
+    const ai = `<div><h4>AI</h4><div class="set-sub">${esc(profName(v.profile))} — the vault's profile. Change it in Settings → Git &amp; AI.</div></div>`
+    if (!c.id) return `<div><h4>This conversation</h4><div class="set-sub">Starts when you send. It is a Claude Code session: it also shows in <code>claude --resume</code> and in the terminal panel.</div></div>${allowBox}${ai}`
+    const reads = new Map()
+    for (const e of c.events) if (e.type === 'tool' && e.name === 'Read' && e.path) { const r = reads.get(e.path) || []; r.push(e.detail ? e.detail.replace(/^lines /, '') : 'all'); reads.set(e.path, r) }
+    const readList = [...reads].map(([p, rs]) => {
+      const r = rs.includes('all') ? 'all' : [...new Set(rs)].join(', ')
+      return /\.md$/i.test(p) ? `<button class="kn-rf" data-kn="open" data-path="${esc(p)}" title="${esc(p)}"><b>${esc(shown(p))}</b><span>${esc(r)}</span></button>` : `<div class="kn-rf" title="${esc(p)}"><b>${esc(shown(p))}</b><span>${esc(r)}</span></div>`
+    }).join('') || '<div class="set-sub">Nothing yet.</div>'
+    const res = turns.map((t) => t.result).filter(Boolean)
+    const sum = (k) => res.reduce((a, r) => a + (Number(r[k]) || 0), 0)
+    const priced = res.some((r) => r.cost), last = res[res.length - 1]
+    const cost = !res.length ? '<div class="set-sub">Nothing yet.</div>'
+      : priced ? `<div class="kn-cost"><b>${esc(usd(sum('cost')))}</b><span>${kTok(sum('tokens_in'))} in · ${kTok(sum('tokens_out'))} out · ${many(res.length, 'turn')}</span></div>`
+        : `<div class="kn-cost"><b>${kTok(sum('tokens_in'))} in · ${kTok(sum('tokens_out'))} out</b><span>${many(res.length, 'turn')}${last.cache_read ? ` · cache ${Math.round(last.cache_read * 100)} %` : ''}</span></div>`
+    return `<div><h4>This conversation${c.live ? ' <span class="tag ok">live</span>' : ''}</h4><div class="set-sub">A Claude Code session in <code>${esc(short(v.root))}</code></div></div>
+      <div><h4>Read so far <span>${reads.size}</span></h4>${readList}</div>${allowBox}<div><h4>Cost</h4>${cost}</div>
+      <div><h4>Continue elsewhere</h4>${c.command ? `<div class="kn-cmdbox selectable">${esc(c.command)}</div>` : ''}${continueItems(false)}<div class="set-sub kn-cont-sub">${sysProfile() ? 'It stops here first: a conversation runs in one place at a time.' : 'This profile keeps its own settings, so it continues in Echo\'s terminal panel.'}</div></div>`
+  }
+  const placeholder = () => { const c = chat(); return firstWaiting(c) ? 'Waiting for your answer above' : c.busy ? 'Claude is answering — Esc stops it' : `Ask ${(vault() || {}).name || 'the vault'} — @ to mention a page` }
+  function composerHtml() {
+    const c = chat()
+    return `<div class="kn-cmp-wrap"><button class="btn sm kn-jump" id="kn-jump" data-kn="jump"${c.jump ? '' : ' hidden'}>Jump to the latest ↓</button><div class="kn-cmp" id="kn-cmp"><div id="kn-picker" class="kn-picker-slot">${pickerHtml()}</div><div id="kn-cmp-note">${composerNote()}</div><div class="kn-cmp-chips" id="kn-cmp-chips">${chipsHtml()}</div>
+      <textarea id="kn-chat-q" rows="1" placeholder="${esc(placeholder())}" aria-label="Your message" spellcheck="true">${esc(c.draft)}</textarea><div id="kn-cmp-f">${composerFoot()}</div></div></div>`
+  }
+  function composerNote() { const c = chat(); return c.error ? `<div class="kn-cmp-err" role="alert">${IC.warn}<span class="grow">${esc(c.error)}</span><button class="icon-btn" data-kn="chat-err-x" aria-label="Dismiss">${IC.close}</button></div>` : '' }
+  function composerFoot() {
+    const c = chat(), v = vault()
+    const modes = MODES.filter(([id]) => id !== 'research' || researchOn())
+    const mode = modes.some(([id]) => id === c.mode) ? c.mode : 'ask'
+    const seg = `<div class="seg kn-modesw" role="radiogroup" aria-label="Mode">${modes.map(([id, l]) => `<button role="radio" aria-checked="${mode === id}" aria-pressed="${mode === id}" data-kn="mode" data-kn-mode="${id}">${l}</button>`).join('')}</div>`
+    const p = typeof profileOf === 'function' && profileOf(v.profile)
+    const model = p && (p.notes_model_label || p.notes_model)
+    const go = c.busy ? `<button class="kn-send stop" data-kn="chat-stop" title="Stop (Esc)" aria-label="Stop">${IC.stop}</button>`
+      : `<span class="kn-kbd">${MOD_KEY}</span><button class="kn-send" data-kn="chat-send" title="Send (${MOD_KEY})" aria-label="Send"${c.sending ? ' disabled' : ''}>${c.sending ? SPIN : IC.up}</button>`
+    const [icon, line] = MODE_LINE[mode]
+    return `<div class="kn-cmp-f"><button class="kn-iconish" data-kn="mention" title="Mention a page" aria-label="Mention a page">${IC.at}</button><button class="kn-iconish" data-kn="attach" title="Attach a call or memo" aria-label="Attach a call or memo">${IC.clip}</button>${seg}<span class="grow"></span><button class="kn-prof" data-kn="tab" data-kn-tab="settings" title="This vault's AI profile — in its Settings"><i>C</i>${esc(profName(v.profile))}${model ? ` · ${esc(model)}` : ''}</button>${go}</div><div class="kn-cmp-line${mode === 'research' ? ' warn' : ''}">${icon}<span>${line}</span></div>`
+  }
+  function chipsHtml() {
+    return chat().chips.map((x, i) => {
+      const rm = `<button class="kn-ctx-x" data-kn="chip-x" data-kn-chip="${i}" aria-label="Remove">${IC.close}</button>`
+      if (x.page) return `<span class="kn-ctx" title="${esc(x.page)}">${IC.at}${esc(x.title || x.page.split('/').pop())}${rm}</span>`
+      const why = x.mismatch ? `<span class="kn-ctx-why">${IC.warn}<span>This call's text goes only to ${esc(x.mismatch.call_name || 'its own profile')}; this vault is read by ${esc(x.mismatch.vault_name || 'another profile')}.</span><button class="btn sm" data-kn="chip-anyway" data-kn-chip="${i}">Attach anyway</button></span>` : ''
+      return `<span class="kn-ctx call${x.mismatch ? ' warn' : ''}" title="${esc(x.title || x.call)}">${IC.call}${esc(x.title || x.call)}${x.anyway ? ' · anyway' : ''}${rm}</span>${why}`
+    }).join('')
+  }
+  function pickerHtml() {
+    const p = chat().picker
+    if (!p) return ''
+    if (p.kind === 'pages') {
+      const hits = (p.hits || []).slice(0, 8)
+      const rows = hits.map((h, i) => `<button class="kn-pk${i === p.sel ? ' on' : ''}" data-kn="pick-page" data-kn-chip="${i}" role="option" aria-selected="${i === p.sel}">${IC.file}<b>${esc(h.title || h.path.split('/').pop())}</b><span>${esc(h.path)}</span></button>`).join('')
+      const none = !p.query ? '<div class="kn-pk-none">Type to find a page.</div>' : p.hits && !hits.length ? `<div class="kn-pk-none">No page matches “${esc(p.query)}”.</div>` : !p.hits ? '<div class="kn-pk-none">Finding…</div>' : ''
+      return `<div class="kn-picker" role="listbox" aria-label="Pages"><div class="kn-menu-h">Pages${p.query ? ` · “${esc(p.query)}”` : ''}</div>${rows}${none}<div class="menu-sep" role="separator"></div><button class="kn-pk${p.sel === hits.length ? ' on' : ''}" data-kn="attach">${IC.call}<b>Attach a call or memo…</b><span>its minutes</span></button></div>`
+    }
+    return `<div class="kn-picker" role="listbox" aria-label="Calls and memos"><div class="kn-menu-h">A call or memo — its minutes go with the message</div><input class="search kn-pk-q" id="kn-attach-q" placeholder="Find a call or memo" aria-label="Find a call or memo" value="${esc(p.query)}" autocomplete="off" spellcheck="false"><div id="kn-pk-list">${callRows()}</div></div>`
+  }
+  function callRows() {
+    const p = chat().picker, hits = (p.hits || []).slice(0, 10)
+    const rows = hits.map((x, i) => `<button class="kn-pk${i === p.sel ? ' on' : ''}" data-kn="pick-call" data-kn-chip="${i}" role="option" aria-selected="${i === p.sel}">${x.memo ? IC.lock : IC.call}<b>${esc(x.title)}</b><span>${esc(x.started_at ? new Date(x.started_at).toLocaleDateString([], { day: 'numeric', month: 'short' }) : '')}${(x.people || []).length ? ` · ${esc(x.people.slice(0, 2).join(', '))}` : ''}</span></button>`).join('')
+    return `${rows}${p.hits && !hits.length ? '<div class="kn-pk-none">No call with minutes matches.</div>' : !p.hits ? '<div class="kn-pk-none">Finding…</div>' : ''}`
+  }
+  /** The picker drawn again — the calls' list alone while its search field is there (it keeps its focus and text). */
+  function drawPicker() {
+    const p = chat().picker, list = document.getElementById('kn-pk-list')
+    if (p && p.kind === 'calls' && list) return patch(list, callRows())
+    patchEl('kn-picker', pickerHtml())
+  }
+  function heroHtml() {
+    const c = chat(), v = vault()
+    const mode = (id, name, what) => `<button class="kn-mode${c.mode === id ? ' on' : ''}" data-kn="mode" data-kn-mode="${id}" aria-pressed="${c.mode === id}"><b>${name}</b>${what}</button>`
+    return `<div class="kn-hero"><span class="kn-av big">C</span><h2>Ask ${esc(v.name)}</h2><p>A Claude Code session in the vault's folder, with its skills and rules. Answers link the pages they used.</p>
+      <div class="kn-modes${researchOn() ? '' : ' two'}">${mode('ask', 'Ask', 'Reads your pages. Changes nothing.')}${mode('curate', 'Curate', 'Edits pages, each edit after your yes.')}${researchOn() ? mode('research', 'Research', 'Also searches and opens websites.') : ''}</div></div>`
+  }
+  /** The thread as `[key, html]`, one element each, in order. */
+  function threadParts(c) {
+    if (c.gone) return [['gone', `<div class="kn-none"><p class="error">${esc(c.gone)}</p><button class="btn" data-kn="chat-new">New conversation</button></div>`]]
+    if (!c.id) return [['hero', heroHtml()]]
+    const turns = turnsOf(c), out = [], wait = firstWaiting(c)
+    if (!turns.length) return [['load', '<div class="skeleton" style="padding:8px 0"><i></i><i></i><i></i></div>']]
+    turns.forEach((t, i) => {
+      const last = i === turns.length - 1, live = last && c.busy, ended = !!t.result || !live
+      if (t.user) out.push([`u${i}`, msgHtml(t.user)])
+      if (t.user && (t.blocks.length || live)) out.push([`w${i}`, '<div class="kn-who"><span class="kn-av">C</span><b>Claude</b></div>'])
+      t.blocks.forEach((b, j) => out.push([`b${i}.${j}`, blockHtml(b, `${i}.${j}`, { ended, live, first: b === wait })]))
+      if (live && !t.blocks.some((b) => b.kind !== 'notice')) out.push([`p${i}`, '<div class="kn-think live"><span class="kn-shim">Thinking…</span></div>'])
+      if (t.result) out.push([`r${i}`, resultHtml(t.result)])
+      if (t.result && t.blocks.some((b) => b.kind === 'text' && b.html)) out.push([`a${i}`, actsHtml(t, i, last && !c.busy)])
+    })
+    return out
+  }
+  function msgHtml(u) {
+    const ctx = (u.context || []).map((x) => x.page ? `<button class="kn-ctx" data-kn="open" data-path="${esc(x.page)}" title="${esc(x.page)}">${IC.at}${esc(x.page.split('/').pop())}</button>` : `<span class="kn-ctx call" title="${esc(x.date || '')}">${IC.call}${esc(x.title || x.call || 'A call')}</span>`).join('')
+    return `<div class="kn-msg-u"><div class="kn-msg-t selectable">${esc(u.text)}</div>${ctx ? `<div class="kn-msg-meta">${ctx}</div>` : ''}</div>`
+  }
+  function blockHtml(b, key, o) {
+    const c = chat()
+    switch (b.kind) {
+      case 'thinking': {
+        const can = b.done && String(b.text || '').trim(), open = can && c.open[`t:${key}`]
+        const label = b.done ? `Thought for ${b.seconds || 0} s` : '<span class="kn-shim">Thinking…</span>'
+        return `<div class="kn-think-w"><button class="kn-think${b.done || !o.live ? '' : ' live'}" data-kn="think" data-id="${key}" aria-expanded="${!!open}"${can ? '' : ' disabled'}><span class="kn-car">${can ? (open ? '▾' : '▸') : ''}</span>${b.done || o.live ? label : 'Thinking stopped'}</button>${open ? `<div class="kn-think-body selectable">${esc(b.text)}</div>` : ''}</div>`
+      }
+      case 'text': return `<div class="kn-ans selectable${!b.done && o.live ? ' live' : ''}">${b.html || ''}</div>`
+      case 'tools': return toolsHtml(b, o.ended)
+      case 'permission': return cardHtml(b, o.first)
+      case 'notice': {
+        const icon = { committed: IC.git, 'not-committed': IC.warn, 'attached-anyway': IC.call, stopped: IC.stop }[b.what] || IC.info
+        return `<div class="kn-notice${b.what === 'not-committed' ? ' warn' : ''}">${icon}<span>${esc(b.text)}</span></div>`
+      }
+      case 'error': {
+        const act = b.action === 'signin' ? `<button class="btn primary sm" data-kn="signin" data-kn-profile="${esc(b.profile || vault().profile)}">Sign in…</button>` : b.action === 'terminal' ? `<button class="btn sm" data-kn="chat-terminal">${IC.term} Open in the terminal panel</button>` : ''
+        return `<div class="kn-warn kn-chat-err" role="alert">${IC.warn}<span class="grow">${esc(b.text)}</span>${act}</div>`
+      }
+      case 'todo': return `<div class="kn-todo">${(b.items || []).map((x) => `<div class="${esc(x.state)}">${x.state === 'done' ? IC.check : x.state === 'active' ? SPIN : '<i></i>'}<span>${esc(x.text)}</span></div>`).join('')}</div>`
+    }
+    return '<div hidden></div>'
+  }
+  function toolsHtml(b, ended) {
+    const c = chat()
+    const secs = (ms) => `${(ms / 1000).toFixed(1)} s`
+    const where = (w) => (w ? ` ${/^in /.test(w) ? `in <code>${esc(w.slice(3))}</code>` : esc(w)}` : '')
+    const pm = (t) => esc(t).replace(/(\+\d+)/, '<span class="a">$1</span>').replace(/(−\d+)/, '<span class="d">$1</span>')
+    const detail = (r) => `<div class="kn-tdet">${r.input && Object.keys(r.input).length ? `<div class="kn-tdet-h">Asked</div><pre>${esc(JSON.stringify(r.input, null, 2))}</pre>` : ''}${r.preview ? `<div class="kn-tdet-h">Result</div><pre>${esc(r.preview)}</pre>` : ''}${r.path && /\.md$/i.test(r.path) ? `<button class="btn ghost sm" data-kn="open" data-path="${esc(r.path)}">${IC.file} Open the page</button>` : ''}</div>`
+    const one = (r, sub) => {
+      const open = c.open[r.id]
+      const icon = r.running ? SPIN : r.error ? IC.warn : TOOL_IC[r.name] || IC.bolt
+      const target = r.target ? ` ${r.code ? `<code>${esc(r.target)}</code>` : esc(r.target)}` : ''
+      const time = r.running && r.at ? `<span data-kn-since="${r.at}"></span>` : r.at && r.done ? secs(r.done - r.at) : ''
+      return `<button class="kn-trow${sub ? ' sub' : ''}${r.running ? ' run' : ''}${r.error ? ' err' : ''}" data-kn="tool-open" data-id="${esc(r.id)}" aria-expanded="${!!open}"><span class="ti">${icon}</span><span class="tx"><span class="tv">${esc(r.verb)}</span>${target}${where(r.where)}${r.pm ? ` <span class="kn-pm">${pm(r.pm)}</span>` : ''}${r.note ? ` <span class="td">· ${esc(r.note)}</span>` : ''}</span><span class="tt">${time}</span></button>${open ? detail(r) : ''}`
+    }
+    const rows = knToolRows(b.items, { ended }).map((r) => {
+      if (r.kind !== 'fold') return one(r)
+      const open = c.open[`f:${r.id}`]
+      return `<button class="kn-trow fold${r.running ? ' run' : ''}" data-kn="tool-open" data-id="f:${esc(r.id)}" aria-expanded="${!!open}"><span class="ti">${r.running ? SPIN : IC.files}</span><span class="tx"><span class="tv">${esc(r.text)}</span>${r.errors ? ` <span class="td err">· ${r.errors} failed</span>` : ''}</span><span class="tt"><span class="kn-car">${open ? '▾' : '▸'}</span></span></button>${open ? r.rows.map((x) => one(x, true)).join('') : ''}`
+    }).join('')
+    return `<div class="kn-tools">${rows}</div>`
+  }
+  /** A permission card (K13-04), inline where Claude asked; answered, one line. */
+  function cardHtml(b, first) {
+    const c = chat(), req = esc(b.request), path = b.path || (b.input && b.input.file_path) || ''
+    const kbd = (k) => (first ? ` <span class="kn-kbd">${k}</span>` : '')
+    if (b.answer) {
+      const a = b.answer, web = b.tool === 'WebFetch'
+      const what = web ? (b.domain || b.url || 'a web page') : path || b.tool
+      const how = !a.allow ? 'Denied' : !a.always ? 'Allowed' : web ? `Allowed ${b.domain || 'this site'} for this conversation` : 'Allowed — edits are allowed for the rest of this conversation'
+      return `<div class="kn-perm-done ${a.allow ? 'ok' : 'no'}">${a.allow ? IC.check : IC.close}<span><b>${esc(how)}</b> · ${web ? 'open' : b.tool === 'Write' ? 'write' : b.tool === 'Edit' ? 'edit' : 'use'} <code>${esc(what)}</code></span></div>`
+    }
+    const why = c.whyOpen === b.request ? `<div class="kn-perm-why"><textarea id="kn-why" rows="2" placeholder="What Claude should do instead" aria-label="Tell Claude why"></textarea><button class="btn sm" data-kn="permit" data-kn-req="${req}" data-kn-how="deny">Deny and tell Claude</button></div>` : ''
+    if (b.tool === 'WebFetch') {
+      const url = String(b.url || (b.input && b.input.url) || '')
+      const m = b.domain && /^(https?:\/\/)([^/?#]*)([\s\S]*)$/i.exec(url)
+      const shown = m ? `${esc(m[1])}<b>${esc(m[2])}</b>${esc(m[3])}` : esc(url)
+      return `<div class="kn-perm"><div class="kn-perm-h"><span class="pi">${IC.globe}</span><div><b>Claude wants to open a web page</b>${b.domain ? `<code>${esc(b.domain)}</code>` : ''}</div></div>
+        <div class="kn-perm-url selectable">${shown}</div><div class="kn-perm-note">${IC.warn}<span>Words from your vault may be in this address. Echo shows it exactly as Claude asked for it.</span></div>
+        <div class="kn-perm-f"><button class="btn primary sm" data-kn="permit" data-kn-req="${req}" data-kn-how="once">Allow once${kbd(MOD_KEY)}</button>${b.domain ? `<button class="btn sm" data-kn="permit" data-kn-req="${req}" data-kn-how="always">Allow ${esc(b.domain)} here</button>` : ''}<button class="btn sm" data-kn="permit" data-kn-req="${req}" data-kn-how="deny">Deny${kbd('esc')}</button><button class="btn ghost sm" data-kn="why" data-kn-req="${req}">Tell Claude why…</button></div>${why}</div>`
+    }
+    const edit = b.tool === 'Edit' || b.tool === 'Write'
+    const pmh = edit && !b.error ? `<span class="kn-pm">${b.plus ? `<span class="a">+${b.plus}</span>` : ''}${b.plus && b.minus ? ' ' : ''}${b.minus ? `<span class="d">−${b.minus}</span>` : ''}</span>` : ''
+    const diff = (b.hunks || []).map((h, k) => (k ? '<div class="hd">…</div>' : '') + h.map(([o, l]) => `<div class="${o === '+' ? 'add' : o === '-' ? 'del' : ''}">${o === '+' ? '+' : o === '-' ? '−' : ' '} ${esc(l)}</div>`).join('')).join('')
+    const body = b.error ? `<div class="kn-perm-note">${IC.warn}<span>Echo can't show this change: ${esc(b.error)}. If you allow it, Claude Code's own tool says whether it worked.</span></div>` : diff ? `<div class="kn-diff kn-perm-diff">${diff}</div>` : ''
+    const title = b.tool === 'Edit' ? 'Claude wants to edit a page' : b.tool === 'Write' ? 'Claude wants to write a page' : `Claude wants to use ${esc(b.tool)}`
+    const always = edit ? `<span class="grow"></span><label class="kn-check"><input type="checkbox" data-kn-always="${req}"${c.always[b.request] ? ' checked' : ''}> Allow edits for the rest of this conversation</label>` : ''
+    return `<div class="kn-perm"><div class="kn-perm-h"><span class="pi">${edit ? IC.edit : IC.asks}</span><div><b>${title}</b>${path ? `<code>${esc(path)}</code>` : ''}</div>${pmh}</div>${body}
+      <div class="kn-perm-f"><button class="btn primary sm" data-kn="permit" data-kn-req="${req}" data-kn-how="once">Allow${kbd(MOD_KEY)}</button><button class="btn sm" data-kn="permit" data-kn-req="${req}" data-kn-how="deny">Deny${kbd('esc')}</button><button class="btn ghost sm" data-kn="why" data-kn-req="${req}">Tell Claude why…</button>${always}</div>${why}</div>`
+  }
+  function resultHtml(r) {
+    return `<div class="kn-res">${r.seconds != null ? `<span>${IC.clock}${r.seconds} s</span>` : ''}<span>${kTok(r.tokens_in)} in · ${kTok(r.tokens_out)} out</span>${r.cache_read ? `<span>cache ${Math.round(r.cache_read * 100)} %</span>` : ''}${r.cost ? `<span>${esc(usd(r.cost))}</span>` : ''}</div>`
+  }
+  function actsHtml(t, i, last) {
+    const sug = last && t.suggestion ? `<span class="grow"></span><button class="kn-sug" data-kn="ans-sug" data-kn-turn="${i}">${IC.ask}<span>${esc(t.suggestion)}</span></button>` : ''
+    return `<div class="kn-acts-row"><button class="btn ghost sm" data-kn="ans-copy" data-kn-turn="${i}">${IC.copy} Copy</button><button class="btn ghost sm" data-kn="ans-save" data-kn-turn="${i}">${IC.save} Save as a page</button><button class="btn ghost sm" data-kn="ans-add" data-kn-turn="${i}">${IC.edit} Add to a page</button>${sug}</div>`
+  }
+  /** An answer's Markdown, from the HTML Echo's writer made of it (the events carry no other copy): paragraphs, lists,
+   *  headings, code, page links as wikilinks (from the pages' folder), https links. */
+  function mdOf(html) {
+    const root = new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html').body
+    const pages = String(((vault() || {}).paths || {}).pages || '')
+    const inline = (n) => [...n.childNodes].map((x) => {
+      if (x.nodeType === 3) return x.textContent
+      if (x.nodeType !== 1) return ''
+      const t = x.tagName, inner = inline(x)
+      if (t === 'STRONG' || t === 'B') return `**${inner}**`
+      if (t === 'EM' || t === 'I') return `*${inner}*`
+      if (t === 'CODE') return `\`${x.textContent}\``
+      if (t === 'BR') return '\n'
+      if (t === 'UL' || t === 'OL') return ''
+      if (t === 'A') {
+        const h = x.getAttribute('href') || ''
+        if (h.startsWith('#kn:')) {
+          let p = (knDecode(h.slice(4)) ?? h.slice(4)).replace(/\.md$/i, '')
+          if (pages && p.startsWith(`${pages}/`)) p = p.slice(pages.length + 1)
+          const words = x.textContent.trim()
+          return !words || p.endsWith(words.replace(/\.md$/i, '')) ? `[[${p}]]` : `[[${p}|${words}]]`
+        }
+        return /^https:\/\//i.test(h) ? `[${inner}](${h})` : inner
+      }
+      return inner
+    }).join('')
+    const blocks = (n, depth) => [...n.children].map((x) => {
+      const t = x.tagName
+      if (/^H[1-6]$/.test(t)) return `${'#'.repeat(Number(t[1]))} ${inline(x).trim()}`
+      if (t === 'UL' || t === 'OL') {
+        return [...x.children].map((li, i) => {
+          const subs = [...li.children].filter((y) => y.tagName === 'UL' || y.tagName === 'OL')
+          return `${'  '.repeat(depth)}${t === 'OL' ? `${i + 1}.` : '-'} ${inline(li).trim()}${subs.map((y) => `\n${blocks({ children: [y] }, depth + 1)}`).join('')}`
+        }).join('\n')
+      }
+      if (t === 'PRE') return `\`\`\`\n${x.textContent.replace(/\n$/, '')}\n\`\`\``
+      if (t === 'BLOCKQUOTE') return blocks(x, 0).split('\n').map((l) => `> ${l}`).join('\n')
+      if (t === 'HR') return '---'
+      if (t === 'TABLE') return [...x.querySelectorAll('tr')].map((tr, i) => { const cells = [...tr.children].map((td) => inline(td).trim().replace(/\|/g, '\\|')); return `| ${cells.join(' | ')} |${i === 0 ? `\n|${cells.map(() => ' --- |').join('')}` : ''}` }).join('\n')
+      return inline(x).trim()
+    }).filter(Boolean).join('\n\n')
+    return blocks(root, 0)
+  }
+  function answerOf(i) {
+    const t = turnsOf(chat())[i]
+    return t ? { md: t.blocks.filter((b) => b.kind === 'text' && b.html).map((b) => mdOf(b.html)).join('\n\n').trim(), question: t.user ? t.user.text : '' } : null
+  }
+  async function sendChat() {
+    const s = st(), c = chat(), v = vault()
+    const q = document.getElementById('kn-chat-q')
+    if (q) c.draft = q.value
+    const m = knChatMessage(c.draft, c.chips)
+    if (!m.text || c.sending || !v) return
+    if (c.busy) { c.error = 'Wait for this answer, or stop it.'; return refreshChat() }
+    if (c.mode === 'research' && !researchOn()) c.mode = 'ask'
+    c.sending = true; c.error = null; c.picker = null
+    refreshChat()
+    try {
+      const r = await run('kn_chat_send', { id: v.id, conversation: c.id || undefined, text: m.text, mode: c.mode, context: m.context })
+      if (st().chat !== c) return
+      // A call on another AI profile (X-P3): *Attach anyway* on that call's chip, then it is sent again.
+      if (r && r.mismatch) { const x = c.chips.find((ch) => ch.call && ch.call === r.mismatch.attached) || c.chips.find((ch) => ch.call && !ch.anyway); if (x) x.mismatch = r.mismatch; return }
+      c.draft = ''; c.chips = []
+      if (q) { q.value = ''; fitQ() }
+      if (!c.id && r && r.conversation) {
+        openChat(r.conversation)
+        s.askConv = r.conversation
+        history.replaceState(null, '', `#${knRouteOf({ vault: v.id, tab: 'ask', path: r.conversation })}`)
+      }
+      c.follow = true
+      loadChats()
+    } catch (e) { if (st().chat === c) c.error = String(e.message || e) } finally {
+      c.sending = false
+      if (st().chat === c) { refreshChat(); pollChat() }
+    }
+  }
+  async function stopChat() {
+    const c = chat()
+    if (!c.id || !c.busy) return
+    try { await run('kn_chat_stop', { conversation: c.id }) } catch (e) { c.error = String(e.message || e); refreshChat() }
+  }
+  async function permitChat(request, how) {
+    const c = chat()
+    const why = how === 'deny' && c.whyOpen === request ? ((document.getElementById('kn-why') || {}).value || '').trim() : ''
+    const always = how === 'always' || (how === 'once' && !!c.always[request])
+    try {
+      await run('kn_chat_permit', { conversation: c.id, request, allow: how !== 'deny', always: how !== 'deny' && always, message: why || undefined }, `permit:${request}`)
+      if (c.whyOpen === request) c.whyOpen = null
+    } catch (e) { c.error = String(e.message || e) }
+    refreshChat()
+  }
+  /** Continue in the terminal panel (K13-08): this process stops, the panel resumes the same conversation; one that read
+   *  web pages or others' words says first what changes there (D41). */
+  async function toTerminal() {
+    const c = chat(), v = vault()
+    st().menu = null
+    if (!c.id) return ask()
+    const go = async () => {
+      try {
+        const r = await run('kn_chat_terminal', { id: v.id, conversation: c.id }, 'terminal')
+        if (typeof claudePanel === 'function') claudePanel('claude-vault')
+        if (typeof termRestart === 'function') termRestart('claude-vault', `claude:vault:${v.id}`, { vault: v.id }, r.conversation)
+        done('It continues in the terminal panel.')
+      } catch (e) { say(String(e.message || e)) }
+    }
+    if (knChatReadOutside(c.events)) return askFirst('Open it in the terminal panel?', 'This conversation read web pages or others\' words. In the terminal it can run commands, with your usual prompts.', 'Open in the terminal panel', go)
+    go()
+  }
+  /** The command that continues it in a terminal (Claude Code as configured): it stops here first. */
+  async function copyCommand() {
+    const c = chat(), v = vault()
+    st().menu = null
+    try {
+      const r = await run('kn_chat_terminal', { id: v.id, conversation: c.id }, 'terminal')
+      if (!r.command) return say('This profile continues only in Echo\'s terminal panel.')
+      c.command = r.command
+      try { await navigator.clipboard.writeText(r.command) } catch { /* not allowed: it shows in the rail */ }
+      refreshChat()
+      done('Copied. It stopped here — run it in a terminal.')
+    } catch (e) { say(String(e.message || e)) }
+  }
+  /** Ask, with the composer focused (K10-03); `fill` puts something in it first (K13-11). `current`: Ask's conversation,
+   *  or a new one when there is none (`false`: always a new one). */
+  function askHere(fill, current = true) {
+    const s = st(), v = vault()
+    if (!v) return
+    s.menu = null
+    const c = chat()
+    if (fill) fill(c)
+    s.focus = 'kn-chat-q'
+    goVault(v.id, 'ask', current ? c.id : '')
+  }
+  function onChatInput(t) {
+    const c = chat()
+    c.draft = t.value
+    fitQ()
+    const m = knMention(t.value, t.selectionStart)
+    if (m) {
+      const was = c.picker && c.picker.kind === 'pages' ? c.picker : null
+      if (!was || was.query !== m.query) { c.picker = { kind: 'pages', query: m.query, start: m.start, sel: 0, hits: was ? was.hits : null }; findPages(m.query) } else was.start = m.start
+    } else if (c.picker && c.picker.kind === 'pages') c.picker = null
+    patchEl('kn-picker', pickerHtml())
+  }
+  let findTimer = null
+  function findPages(q) {
+    clearTimeout(findTimer)
+    const c = chat(), v = vault()
+    if (!q) { if (c.picker) c.picker.hits = []; return }
+    findTimer = setTimeout(async () => {
+      let r
+      try { r = await get(`api/kn/${enc(v.id)}/find?q=${enc(q)}`) } catch { return }
+      const p = chat().picker
+      if (!p || p.kind !== 'pages' || p.query !== q) return
+      const seen = new Set()
+      p.hits = (r.hits || []).filter((h) => h.path && !seen.has(h.path) && seen.add(h.path))
+      p.sel = 0
+      patchEl('kn-picker', pickerHtml())
+    }, 120)
+  }
+  function openAttach() {
+    const c = chat()
+    c.picker = { kind: 'calls', query: '', sel: 0, hits: null }
+    patchEl('kn-picker', pickerHtml())
+    findCalls('')
+    const q = document.getElementById('kn-attach-q')
+    if (q) q.focus()
+  }
+  let callTimer = null
+  function findCalls(q) {
+    clearTimeout(callTimer)
+    callTimer = setTimeout(async () => {
+      let r
+      try { r = await get(`api/calls?limit=40&q=${enc(q)}`) } catch { return }
+      const p = chat().picker
+      if (!p || p.kind !== 'calls' || p.query !== q) return
+      // Only calls with minutes: their minutes are what goes with the message (K12-10).
+      p.hits = (r.calls || []).filter((x) => x.status === 'notes')
+      p.sel = 0
+      drawPicker()
+    }, q ? 150 : 0)
+  }
+  function pickPage(i) {
+    const c = chat(), p = c.picker, h = p && p.hits && p.hits[i]
+    const q = document.getElementById('kn-chat-q')
+    if (!h || !q) return
+    const caret = q.selectionStart
+    const m = knMention(q.value, caret) || { start: caret, query: '' }
+    const title = h.title || h.path.split('/').pop().replace(/\.md$/i, '')
+    const out = knMentionPick(q.value, m, caret, title)
+    q.value = out.text
+    q.setSelectionRange(out.caret, out.caret)
+    c.draft = out.text
+    if (!c.chips.some((x) => x.page === h.path)) c.chips.push({ page: h.path, title })
+    c.picker = null
+    patchEl('kn-picker', '')
+    patchEl('kn-cmp-chips', chipsHtml())
+    q.focus()
+    fitQ()
+  }
+  function pickCall(i) {
+    const c = chat(), p = c.picker, x = p && p.hits && p.hits[i]
+    if (!x) return
+    if (!c.chips.some((ch) => ch.call === x.name)) c.chips.push({ call: x.name, title: x.title, memo: !!x.memo })
+    c.picker = null
+    patchEl('kn-picker', '')
+    patchEl('kn-cmp-chips', chipsHtml())
+    const q = document.getElementById('kn-chat-q')
+    if (q) q.focus()
+  }
+  /** Keys in Ask: the picker's ↑↓ ↵ Esc; ⌘↵ allows the waiting card or sends; Esc denies it or stops the turn. */
+  function chatKey(e) {
+    const c = chat(), mod = e.metaKey || e.ctrlKey, id = e.target && e.target.id
+    const p = c.picker
+    if (p && (id === 'kn-chat-q' || id === 'kn-attach-q')) {
+      const n = (p.hits || []).slice(0, p.kind === 'pages' ? 8 : 10).length + (p.kind === 'pages' ? 1 : 0)
+      if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && n) { e.preventDefault(); p.sel = (p.sel + (e.key === 'ArrowDown' ? 1 : n - 1)) % n; drawPicker(); return true }
+      if ((e.key === 'Enter' && !mod && !e.shiftKey) || (e.key === 'Tab' && n)) {
+        e.preventDefault()
+        if (p.kind === 'pages') { if (p.sel < (p.hits || []).slice(0, 8).length) pickPage(p.sel); else openAttach() } else pickCall(p.sel)
+        return true
+      }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); c.picker = null; patchEl('kn-picker', ''); if (id === 'kn-attach-q') { const q = document.getElementById('kn-chat-q'); if (q) q.focus() } return true }
+    }
+    if (id === 'kn-why') {
+      if (mod && e.key === 'Enter') { e.preventDefault(); permitChat(c.whyOpen, 'deny'); return true }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); c.whyOpen = null; refreshChat(); return true }
+      return false
+    }
+    const card = firstWaiting(c)
+    if (mod && e.key === 'Enter') {
+      if (card) { e.preventDefault(); permitChat(card.request, 'once'); return true }
+      if (id === 'kn-chat-q') { e.preventDefault(); sendChat(); return true }
+      return false
+    }
+    if (e.key === 'Escape' && (card || c.busy)) { e.preventDefault(); e.stopPropagation(); if (card) permitChat(card.request, 'deny'); else stopChat(); return true }
+    return false
+  }
+  function addToList() {
+    const x = st().sheet
+    return !x.q.trim() ? '<p class="set-sub">Type a page\'s title or path.</p>' : !x.hits ? '<div class="skeleton"><i></i><i></i></div>'
+      : x.hits.slice(0, 12).map((h) => `<button class="kn-bl" data-kn="addto-page" data-path="${esc(h.path)}"><b>${IC.file} ${esc(h.title || h.path.split('/').pop())}</b><span>${esc(h.path)}</span></button>`).join('') || '<p class="set-sub">No page matches.</p>'
+  }
+  function addToSheet() {
+    const x = st().sheet
+    const body = `<input class="search kn-in" id="kn-addq" placeholder="Find a page" value="${esc(x.q)}" autocomplete="off" spellcheck="false" aria-label="Find a page"><div class="kn-addto-list" id="kn-addto-list">${addToList()}</div><p class="set-sub">The answer goes at the end, under a heading with today's date. Nothing is saved until you press Save.</p>`
+    return sheet('Add the answer to a page', body, '<span class="grow"></span><button class="btn ghost" data-kn="sheet-close">Cancel</button>', IC.edit)
+  }
+  /** Add to a page (K13-06): that page's editor, the answer appended under a dated heading, saved by Save (K6-01). */
+  async function addToPage(path, md) {
+    const s = st(), v = vault()
+    s.sheet = null
+    if (s.edit && s.edit.dirty) return say('Save or cancel the page you are editing first.')
+    s.edit = null
+    s.path = path
+    s.page = null
+    goVault(v.id, 'pages', path)
+    await loadPage()
+    const p = s.page
+    if (!p || p.error || !p.editable) return say(p && p.error ? p.error : 'This page can\'t be edited in Echo.')
+    const d = new Date(), day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    s.edit = { path, base: p.base, text: p.text || '', dirty: true, preview: p.html, message: `Add an answer from Ask to ${path}` }
+    s.focus = 'kn-edit'
+    onEditInput(knAnswerInto(p.text || '', md, { heading: `${day} — from Ask` }))
+    render()
   }
 
   // ── the call page: the chip, the ⋯ menu's entries, the countdown's line, the save sheet ──
@@ -1580,6 +2381,7 @@ const Kn = (() => {
     add('Knowledge', 'Connect a folder…', () => { go(home()); openConnect() }, { keywords: 'vault obsidian knowledge second brain add' })
     add('Knowledge', 'Start a new vault…', () => { go(home()); openNew() }, { keywords: 'vault twin knowledge create' })
     if (vault()) add('Knowledge', `Find a page in ${vault().name}…`, () => { goVault(vault().id, 'pages', st().path); st().focus = 'kn-find'; render() }, { keywords: 'open page knowledge search' })
+    if (vault() && vault().available !== false) add('Knowledge', `Ask ${vault().name}…`, () => { st().source = 'vault'; askHere(null, false) }, { keywords: 'claude question chat conversation knowledge' })
     if (S.view === 'calls' && S.call && S.call.notes && S.call.knowledge && (S.call.knowledge.vaults || []).length) add('Knowledge', 'Save the minutes to Knowledge…', () => openSave(S.call.name), { keywords: 'vault note export' })
   }
   function openNew() {
@@ -1604,7 +2406,7 @@ const Kn = (() => {
   document.addEventListener('click', async (e) => {
     const s = st()
     // A link in a page: another page, a missing one to make, the web.
-    const a = e.target.closest && e.target.closest('.kn-doc a, .kn-props a')
+    const a = e.target.closest && e.target.closest('.kn-doc a, .kn-props a, .kn-ans a')
     if (a && !a.matches('[data-echo-link], a[href^="echo://"]')) {
       e.preventDefault()
       const href = a.getAttribute('href') || ''
@@ -1637,15 +2439,64 @@ const Kn = (() => {
       case 'connect': return openConnect()
       case 'new': return openNew()
       case 'import': try { const r = await run('kn_import_plugin', {}, 'import'); await refreshAll(); done(`${r.connected} vault${r.connected === 1 ? '' : 's'} connected from the Obsidian plugin.`) } catch (err) { say(String(err.message || err)) } return
-      case 'tab': e.preventDefault(); s.menu = null; return goVault(s.vault, d.knTab, d.knTab === 'pages' ? s.path : '')
+      case 'tab': e.preventDefault(); s.menu = null; return goVault(s.vault, d.knTab, d.knTab === 'pages' ? s.path : d.knTab === 'ask' ? chat().id : '')
       case 'menu': s.menu = s.menu === d.menu ? null : d.menu; return render()
       case 'reveal': s.menu = null; send({ cmd: 'kn_reveal', id: s.vault, path: d.path || '' }); return render()
       case 'obsidian': s.menu = null; send({ cmd: 'kn_obsidian', id: s.vault, path: d.path || '' }); return render()
       case 'copy': s.menu = null; try { await navigator.clipboard.writeText(d.text) } catch { /* not allowed */ } return done('Copied.')
       case 'reread': try { await run('kn_reread', { id: s.vault }, 'reread'); await refreshAll(); done('Read again.') } catch (err) { say(String(err.message || err)) } return
-      case 'ask': return ask()
-      case 'ask-about': return ask(`/twin What do the notes say about ${d.path}? Read it first.`)
-      case 'run-skill': return ask(`/${d.name}`)
+      // Ask (K10-03, K13-11): the header's Ask is a new conversation; a page or a skill goes into Ask's composer.
+      case 'ask': return askHere(null, false)
+      case 'ask-panel': s.menu = null; render(); return ask()
+      case 'ask-about': {
+        const title = ((s.tree && s.tree.pages.find((p) => p.path === d.path)) || {}).title || d.path.split('/').pop().replace(/\.md$/i, '')
+        return askHere((c) => { if (!c.chips.some((x) => x.page === d.path)) c.chips.push({ page: d.path, title }) })
+      }
+      case 'run-skill': return askHere((c) => { const cmd = `/${knPlainPrompt(d.name)} `; if (!c.draft.startsWith(cmd)) c.draft = cmd + c.draft })
+      case 'chat-new': s.menu = null; return askHere(null, false)
+      case 'conv': return goVault(s.vault, 'ask', d.id)
+      case 'convs-fold': chat().listOpen = !listOpen(); return render()
+      case 'mode': { chat().mode = d.knMode; refreshChat(); const q = document.getElementById('kn-chat-q'); if (q) q.focus(); return }
+      case 'chat-send': return sendChat()
+      case 'chat-stop': return stopChat()
+      case 'chat-err-x': chat().error = null; return refreshChat()
+      case 'permit': return permitChat(d.knReq, d.knHow)
+      case 'why': { const c = chat(); c.whyOpen = c.whyOpen === d.knReq ? null : d.knReq; refreshChat(); const w = document.getElementById('kn-why'); if (w) w.focus(); return }
+      case 'tool-open': { const c = chat(); c.open[d.id] = !c.open[d.id]; return syncThread() }
+      case 'think': { const c = chat(); c.open[`t:${d.id}`] = !c.open[`t:${d.id}`]; return syncThread() }
+      case 'jump': { const sc = document.getElementById('kn-thread'); if (sc) sc.scrollTop = sc.scrollHeight; return setJump(false) }
+      case 'mention': {
+        const q = document.getElementById('kn-chat-q')
+        if (!q) return
+        const at = q.selectionStart, pre = q.value.slice(0, at), ins = !pre || /\s$/.test(pre) ? '@' : ' @'
+        q.value = pre + ins + q.value.slice(q.selectionEnd)
+        q.focus()
+        q.setSelectionRange(at + ins.length, at + ins.length)
+        return onChatInput(q)
+      }
+      case 'attach': return openAttach()
+      case 'pick-page': return pickPage(Number(d.knChip))
+      case 'pick-call': return pickCall(Number(d.knChip))
+      case 'chip-x': chat().chips.splice(Number(d.knChip), 1); return patchEl('kn-cmp-chips', chipsHtml())
+      case 'chip-anyway': { const x = chat().chips[Number(d.knChip)]; if (x) { x.anyway = true; x.mismatch = null } return sendChat() }
+      case 'chat-terminal': return toTerminal()
+      case 'chat-command': return copyCommand()
+      case 'signin': send({ cmd: 'sign_in', profile: d.knProfile }); return done('Sign in in your browser, then send again.')
+      case 'ans-copy': { const a = answerOf(Number(d.knTurn)); if (!a) return; try { await navigator.clipboard.writeText(a.md) } catch { /* not allowed */ } return done('Copied.') }
+      case 'ans-save': {
+        const a = answerOf(Number(d.knTurn)), c = chat()
+        if (!a) return
+        const name = String(a.question || 'An answer').split('\n')[0].replace(/[?.!\s]+$/, '').slice(0, 60)
+        return openNewPage(name, { md: a.md, source: `echo-ask ${c.id}` })
+      }
+      case 'ans-add': { const a = answerOf(Number(d.knTurn)); if (!a) return; s.sheet = { kind: 'addto', md: a.md, q: '', hits: null }; s.focus = 'kn-addq'; return render() }
+      case 'addto-page': return addToPage(d.path, (s.sheet || {}).md || '')
+      case 'ans-sug': {
+        const t = turnsOf(chat())[Number(d.knTurn)], q = document.getElementById('kn-chat-q')
+        if (!t || !t.suggestion || !q) return
+        chat().draft = q.value = t.suggestion
+        q.focus(); q.setSelectionRange(q.value.length, q.value.length); return fitQ()
+      }
       case 'newpage': return openNewPage(d.name)
       case 'filter': s.filter = d.filter; s.q = ''; s.hits = null; return render()
       case 'fold': if (s.open.has(d.path)) s.open.delete(d.path); else s.open.add(d.path); return render()
@@ -1758,6 +2609,20 @@ const Kn = (() => {
     if (t.id === 'kn-stem') { const x = st().sheet; if (x) x.stemEdited = true; return }
     if (t.id === 'kn-name') { const x = st().sheet; if (x) { x.name = t.value; if (x.kind === 'new') render() } return }
     if (t.id === 'kn-twin-name') { const x = st().sheet; if (x) { x.name = t.value.trim(); x.text = null; clearTimeout(Kn._twinTimer); Kn._twinTimer = setTimeout(loadTwinText, 250) } return }
+    // Ask
+    if (t.id === 'kn-chat-q') return onChatInput(t)
+    if (t.id === 'kn-chat-find') { chat().listQ = t.value; return patchEl('kn-convs-l', convItems()) }
+    if (t.id === 'kn-attach-q') { const p = chat().picker; if (p && p.kind === 'calls') { p.query = t.value; p.hits = null; drawPicker(); findCalls(t.value) } return }
+    if (t.id === 'kn-addq') {
+      const x = st().sheet, v = vault(), q = t.value
+      if (!x || x.kind !== 'addto') return
+      x.q = q; x.hits = null
+      clearTimeout(Kn._addTimer)
+      Kn._addTimer = setTimeout(async () => {
+        if (q.trim()) { try { const r = await get(`api/kn/${enc(v.id)}/find?q=${enc(q)}`); if (st().sheet !== x || x.q !== q) return; const seen = new Set(); x.hits = (r.hits || []).filter((h) => h.path && !seen.has(h.path) && seen.add(h.path)) } catch { return } }
+        patchEl('kn-addto-list', addToList())
+      }, 120)
+    }
   })
   document.addEventListener('change', async (e) => {
     const t = e.target, s = st()
@@ -1773,6 +2638,7 @@ const Kn = (() => {
       const list = new Set((v.minutes[key] || []).concat([t.value]))
       return setVault(key, [...list].join(','))
     }
+    if (t.dataset.knAlways) { chat().always[t.dataset.knAlways] = t.checked; return }
     if (t.dataset.knForm && s.sheet) {
       const k = t.dataset.knForm
       if (k === 'minutes') s.sheet.minutes = t.value
@@ -1793,6 +2659,9 @@ const Kn = (() => {
     const s = st()
     if (e.key === 'Escape' && s.asking) { s.asking = null; e.stopPropagation(); return render() }
     if (e.key === 'Escape' && (s.sheet || s.switcher || s.menu || s.chip)) { s.sheet = null; s.switcher = false; s.menu = null; s.chip = null; e.stopPropagation(); return render() }
+    // Ask's keys, inside its view (a terminal or another field keeps its own).
+    if (s.tab === 'ask' && askShown() && (e.target === document.body || e.target === document.documentElement || (e.target.closest && e.target.closest('.kn-chat'))) && chatKey(e)) return
+    if (e.target.id === 'kn-addq' && e.key === 'Enter') { const x = s.sheet; const h = x && x.hits && x.hits[0]; if (h) addToPage(h.path, x.md) }
     if (e.target.id === 'kn-edit' && (e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); return save(false) }
     if (e.target.id === 'kn-find' && e.key === 'Enter') { const h = s.hits && s.hits.hits[0]; if (h) openPage(h.path) }
     if (e.target.id === 'kn-gfind' && e.key === 'Enter' && gview) { const id = gview.best(); if (id) { s.gopt.sel = id; gview.center(id); render() } }
@@ -1800,6 +2669,8 @@ const Kn = (() => {
     if (e.target.id === 'kn-pname' && e.key === 'Enter') newPageGo()
     if (e.target.id === 'kn-ovr' && e.key === 'Enter') { const b = document.querySelector('[data-kn="ovr-save"]'); if (b) b.click() }
   }, true)
+  // Ask's thread: follow the bottom only while the user is there (scroll events don't bubble).
+  document.addEventListener('scroll', (e) => { if (e.target && e.target.id === 'kn-thread') onThreadScroll(e.target) }, true)
   // Leaving the window with unsaved text: the draft is kept; ask anyway.
   window.addEventListener('beforeunload', (e) => { if (S && S.kn && S.kn.edit && S.kn.edit.dirty) { e.preventDefault(); e.returnValue = '' } })
 
