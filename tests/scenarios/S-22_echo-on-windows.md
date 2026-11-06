@@ -2,7 +2,7 @@
 id: S-22
 title: Echo on Windows: build, install, record, the window, login, updates, mute, notifications, frames
 run: person
-env: a Windows 10 2004+/11 machine or VM with Teams and the MSVC toolchain
+env: a Windows 10 2004+/11 machine with Teams and the MSVC toolchain
 cases:
   - tests/cases/windows/TC-001_build.md
   - tests/cases/windows/TC-002_install-first-run.md
@@ -17,7 +17,7 @@ cases:
 
 # S-22: Echo on Windows: build, install, record, the window, login, updates, mute, notifications, frames
 
-**Environment:** a Windows 10 2004+/11 machine or VM with Teams and the MSVC toolchain
+**Environment:** a Windows 10 2004+/11 machine with Teams and the MSVC toolchain
 
 **Story:** The Windows build from source to a recorded call: package, install, first run, record with Teams, the window, sign-in start and quit, updates, mute, notifications and the tray, screen frames.
 
