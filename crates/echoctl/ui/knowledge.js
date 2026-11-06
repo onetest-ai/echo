@@ -316,6 +316,11 @@ function knRestoreDraft(store, vault, path, base) {
 function knDropDraft(store, vault, path) {
   try { store.removeItem(knDraftKey(vault, path)) } catch { /* storage off */ }
 }
+/** The text a page's editor starts from: its unsaved text kept for this base, else the file's `text`. */
+function knEditText(store, vault, path, base, text) {
+  const kept = store ? knRestoreDraft(store, vault, path, base) : null
+  return kept != null ? kept : text
+}
 // end of the kn-draft block
 
 // ── kn-diff: your text against the file on disk, line by line — ['=' | '-' (only yours) | '+' (only on disk), line], runs
@@ -367,7 +372,7 @@ function knChatTurns(events) {
       case 'user': turns.push(t = { user: e, blocks: [], result: null, suggestion: null }); break
       case 'thinking': case 'text': {
         if (e.parent) break
-        const bs = cur().blocks, b = { kind: e.type, block: e.block, n: e.n, html: e.html, text: e.text, done: !!e.done, seconds: e.seconds }
+        const bs = cur().blocks, b = { kind: e.type, block: e.block, n: e.n, html: e.html, md: e.md, text: e.text, done: !!e.done, seconds: e.seconds }
         // A process numbers its blocks from b1: only a block still streaming is this one's earlier render.
         const i = bs.findIndex((x) => x.kind === e.type && x.block === e.block && !x.done)
         if (i >= 0) bs[i] = b; else bs.push(b)
@@ -420,7 +425,69 @@ function knAnswerInto(text, md, { heading = '', source = '' } = {}) {
   }
   return `${t.replace(/\s+$/, '')}\n\n${heading ? `## ${heading}\n\n` : ''}${String(md || '').trim()}\n`
 }
+/** A turn's answer as Claude wrote it: its finished text blocks' Markdown (`md`, ruling R33), for Copy, Save as a
+ *  page and Add to a page. */
+function knAnswerMd(turn) {
+  return ((turn && turn.blocks) || []).filter((b) => b.kind === 'text' && b.md).map((b) => b.md.trim()).join('\n\n')
+}
+/** The last turn's first card still waiting (⌘↵ allows it, Esc denies it): not answered by Echo yet, nor from this
+ *  page (`local`: requests answered here before Echo's `answered` comes). */
+function knWaitingCard(turns, live, local = {}) {
+  const t = turns[turns.length - 1]
+  return t && !t.result && live ? t.blocks.find((b) => b.kind === 'permission' && !b.answer && !local[b.request]) || null : null
+}
+/** What a key does in Ask: `allow` or `deny` the waiting card, `send`, `stop`, `blocked` (⌘↵ in a composer with text
+ *  while a card waits: nothing is sent and the card isn't answered — that keystroke meant "send"), or null (not Ask's).
+ *  Nothing while an input method composes. */
+function knChatKey({ key, mod = false, composing = false, card = false, inComposer = false, typed = false, busy = false } = {}) {
+  if (composing) return null
+  if (key === 'Enter' && mod) return card ? (inComposer && typed ? 'blocked' : 'allow') : inComposer ? 'send' : null
+  if (key === 'Escape') return card ? 'deny' : busy ? 'stop' : null
+  return null
+}
+/** A message sent from the composer (`pending`): `landed` once a `user` event comes (the composer empties), `failed`
+ *  when an error came instead (a sign-in needed: the text stays, to send again), else null. */
+function knSentLanded(pending, events) {
+  if (!pending) return null
+  if (events.some((e) => e.type === 'user')) return 'landed'
+  return events.some((e) => e.type === 'error') ? 'failed' : null
+}
 // end of the kn-chat block
+
+// ── kn-poll: an Ask conversation's long poll — one loop per open conversation, each chunk merged once ──
+/** Open conversation `id` ('' a new one): its events start afresh, and a loop still polling for the open before stops
+ *  (a new `gen`); a new loop may start at once. The open's `gen`. */
+function knChatOpen(c, id) {
+  c.gen = (c.gen || 0) + 1
+  Object.assign(c, { id: id || '', events: [], next: 0, renders: {}, loaded: false, live: false, busy: false, waiting: false, polling: null })
+  return c.gen
+}
+/** May the loop started for open `gen` go on? */
+function knPollKeep(c, gen) { return c.gen === gen }
+/** The answer to a request made `from` event `from` by the loop of open `gen`, merged once: null when it is stale
+ *  (another open since, or the view moved on from `from`), else what came — `{ events, sent, ended }`. A streaming
+ *  block's older render drops its copy (as Echo's own list does); a new message starts the blocks' names afresh. */
+function knChatTake(c, gen, from, r, now) {
+  if (c.gen !== gen || from !== c.next) return null
+  const evs = r.events || []
+  // Echo started again: asked past its end, it answers from its first event.
+  if (evs.length && evs[0].n < c.next) { c.events = []; c.renders = {} }
+  for (const e of evs) {
+    if (c.loaded) e.at = now
+    if (e.type === 'user') c.renders = {}
+    if ((e.type === 'text' || e.type === 'thinking') && e.block && !e.superseded) {
+      const k = `${e.type}:${e.block}`, old = c.renders[k]
+      if (old) { old.superseded = true; delete old.html; delete old.text }
+      if (e.done) delete c.renders[k]; else c.renders[k] = e
+    }
+    c.events.push(e)
+  }
+  c.next = r.next
+  const ended = c.busy && !r.busy
+  Object.assign(c, { live: !!r.live, busy: !!r.busy, waiting: !!r.waiting, loaded: true })
+  return { events: evs, sent: evs.some((e) => e.type === 'user'), ended }
+}
+// end of the kn-poll block
 
 // ── kn-tools: a turn's tool calls as rows (K13-03) — one line each; three or more read-only calls in a row fold ──
 const KN_FOLD = { Read: ['read', 'file', 'files'], Grep: ['searched', 'time', 'times'], Glob: ['searched', 'time', 'times'], WebSearch: ['searched the web', 'time', 'times'], WebFetch: ['opened', 'page', 'pages'], Skill: ['used', 'skill', 'skills'] }
@@ -1674,66 +1741,62 @@ const Kn = (() => {
   /** Ask's own conversation in the open vault (D44: not the panel's current one) and everything the view keeps of it. */
   function chat() {
     const s = st()
-    if (!s.chat || s.chat.vault !== s.vault) s.chat = { vault: s.vault, id: '', events: [], next: 0, live: false, busy: false, waiting: false, renders: {}, loaded: false, gone: null, mode: 'ask', draft: '', chips: [], picker: null, error: null, sending: false, open: {}, always: {}, whyOpen: null, follow: true, top: 0, jump: false, list: null, listQ: '', listOpen: null, command: null, polling: null }
+    if (!s.chat || s.chat.vault !== s.vault) s.chat = { vault: s.vault, id: '', events: [], next: 0, live: false, busy: false, waiting: false, renders: {}, loaded: false, gone: null, mode: 'ask', draft: '', chips: [], picker: null, error: null, sending: false, pending: null, open: {}, always: {}, local: {}, whyOpen: null, follow: true, top: 0, jump: false, list: null, listQ: '', listOpen: null, command: null, polling: null, gen: 0 }
     return s.chat
   }
-  /** Show conversation `id` ('' a new one); the composer keeps what is typed in it. */
+  /** Show conversation `id` ('' a new one): a new open (`knChatOpen`), so a loop polling the one before stops; the
+   *  composer keeps what is typed in it. */
   function openChat(id) {
     const c = chat()
     if (c.id === (id || '')) return
-    Object.assign(c, { id: id || '', events: [], next: 0, live: false, busy: false, waiting: false, renders: {}, loaded: false, gone: null, error: null, open: {}, always: {}, whyOpen: null, follow: true, top: 0, jump: false, command: null })
+    knChatOpen(c, id)
+    Object.assign(c, { gone: null, error: null, open: {}, always: {}, local: {}, whyOpen: null, follow: true, top: 0, jump: false, command: null })
   }
   async function loadChats() {
     const c = chat(), v = vault()
     if (!v) return
     try { const r = await get(`api/kn/${enc(v.id)}/chats`); if (st().chat === c && Array.isArray(r)) { c.list = r; patchEl('kn-convs-l', convItems()); patchEl('kn-conv-h', convHead()) } } catch { /* the app restarting */ }
   }
-  /** The conversation's events by long poll (K12-06) while Ask shows it. */
+  /** The conversation's events by long poll (K12-06) while Ask shows it: one loop per open (`gen`), each answer
+   *  merged only into the open and the point it was asked for (`knChatTake`). */
   async function pollChat() {
-    const c = chat(), id = c.id, v = vault()
-    if (!id || c.polling === id || c.gone) return
-    c.polling = id
+    const c = chat(), v = vault()
+    if (!c.id || c.gone || c.polling === c.gen) return
+    const gen = c.polling = c.gen, id = c.id
     try {
-      while (st().chat === c && c.id === id && askShown()) {
+      while (st().chat === c && knPollKeep(c, gen) && askShown()) {
+        const from = c.next
         let r
-        try { r = await get(`api/kn/${enc(v.id)}/chat/${enc(id)}?from=${c.next}`) } catch { await sleep(1500); continue }
-        if (st().chat !== c || c.id !== id) return
+        try { r = await get(`api/kn/${enc(v.id)}/chat/${enc(id)}?from=${from}`) } catch { await sleep(1500); continue }
+        if (st().chat !== c || !knPollKeep(c, gen)) return
         if (r.error) { c.gone = /no such/.test(r.error) ? 'This conversation isn\'t one of this vault\'s any more.' : r.error; refreshChat(); return }
-        tookChat(c, r)
+        tookChat(c, gen, from, r)
       }
-    } finally { if (c.polling === id) c.polling = null }
+    } finally { if (c.polling === gen) c.polling = null }
   }
-  /** A chunk of events: kept (a streaming block's older render drops its copy, as the app's own list does), drawn. */
-  function tookChat(c, r) {
-    const evs = r.events || []
-    if (evs.length && evs[0].n < c.next) { c.events = []; c.renders = {} } // Echo started again: from its first event
+  /** A chunk of events, merged once (`knChatTake`) and drawn. */
+  function tookChat(c, gen, from, r) {
     const before = chatMeasure()
-    for (const e of evs) {
-      if (c.loaded) e.at = Date.now()
-      if ((e.type === 'text' || e.type === 'thinking') && e.block && !e.superseded) {
-        const k = `${e.type}:${e.block}`, old = c.renders[k]
-        if (old) { old.superseded = true; delete old.html; delete old.text }
-        if (e.done) delete c.renders[k]; else c.renders[k] = e
-      }
-      c.events.push(e)
+    const got = knChatTake(c, gen, from, r, Date.now())
+    if (!got) return
+    // The message sent from here: the composer empties once it lands; a sign-in error keeps it to send again.
+    const landed = knSentLanded(c.pending, got.events)
+    if (landed === 'landed') {
+      const q = document.getElementById('kn-chat-q')
+      if (q && q.value.trim() === c.pending.text) { q.value = ''; c.draft = ''; fitQ() }
+      c.chips = []
     }
-    c.next = r.next
-    const ended = c.busy && !r.busy
-    Object.assign(c, { live: !!r.live, busy: !!r.busy, waiting: !!r.waiting, loaded: true })
-    const sent = evs.some((e) => e.type === 'user')
-    if (ended || sent) loadChats()
+    if (landed) c.pending = null
+    if (got.ended || got.sent) loadChats()
     // A message the user just sent is always shown, wherever the thread was scrolled to.
-    refreshChat(evs[evs.length - 1] || null, sent && before ? { ...before, top: before.height - before.view } : before)
+    refreshChat(got.events[got.events.length - 1] || null, got.sent && before ? { ...before, top: before.height - before.view } : before)
   }
   function turnsOf(c) {
     if (c._ev !== c.events || c._n !== c.events.length) { c._turns = knChatTurns(c.events); c._ev = c.events; c._n = c.events.length }
     return c._turns
   }
-  /** The first card still waiting for an answer (⌘↵ allows it, Esc denies it). */
-  function firstWaiting(c) {
-    const t = turnsOf(c)[turnsOf(c).length - 1]
-    return t && !t.result && c.live ? t.blocks.find((b) => b.kind === 'permission' && !b.answer) || null : null
-  }
+  /** The first card still waiting for the user (⌘↵ allows it, Esc denies it). */
+  const firstWaiting = (c) => knWaitingCard(turnsOf(c), c.live, c.local)
   function chatMeasure() {
     const el = document.getElementById('kn-thread')
     return el ? { top: el.scrollTop, height: el.scrollHeight, view: el.clientHeight, jump: chat().jump } : null
@@ -1934,7 +1997,7 @@ const Kn = (() => {
       t.blocks.forEach((b, j) => out.push([`b${i}.${j}`, blockHtml(b, `${i}.${j}`, { ended, live, first: b === wait })]))
       if (live && !t.blocks.some((b) => b.kind !== 'notice')) out.push([`p${i}`, '<div class="kn-think live"><span class="kn-shim">Thinking…</span></div>'])
       if (t.result) out.push([`r${i}`, resultHtml(t.result)])
-      if (t.result && t.blocks.some((b) => b.kind === 'text' && b.html)) out.push([`a${i}`, actsHtml(t, i, last && !c.busy)])
+      if (t.result && knAnswerMd(t)) out.push([`a${i}`, actsHtml(t, i, last && !c.busy)])
     })
     return out
   }
@@ -1989,8 +2052,10 @@ const Kn = (() => {
   function cardHtml(b, first) {
     const c = chat(), req = esc(b.request), path = b.path || (b.input && b.input.file_path) || ''
     const kbd = (k) => (first ? ` <span class="kn-kbd">${k}</span>` : '')
-    if (b.answer) {
-      const a = b.answer, web = b.tool === 'WebFetch'
+    // Answered from this page: shown as answered once Echo took it, before its `answered` comes; asked once.
+    const local = c.local[b.request], a = b.answer || (local && !local.pending ? local : null), off = local ? ' disabled' : ''
+    if (a) {
+      const web = b.tool === 'WebFetch'
       const what = web ? (b.domain || b.url || 'a web page') : path || b.tool
       const how = !a.allow ? 'Denied' : !a.always ? 'Allowed' : web ? `Allowed ${b.domain || 'this site'} for this conversation` : 'Allowed — edits are allowed for the rest of this conversation'
       return `<div class="kn-perm-done ${a.allow ? 'ok' : 'no'}">${a.allow ? IC.check : IC.close}<span><b>${esc(how)}</b> · ${web ? 'open' : b.tool === 'Write' ? 'write' : b.tool === 'Edit' ? 'edit' : 'use'} <code>${esc(what)}</code></span></div>`
@@ -2002,16 +2067,16 @@ const Kn = (() => {
       const shown = m ? `${esc(m[1])}<b>${esc(m[2])}</b>${esc(m[3])}` : esc(url)
       return `<div class="kn-perm"><div class="kn-perm-h"><span class="pi">${IC.globe}</span><div><b>Claude wants to open a web page</b>${b.domain ? `<code>${esc(b.domain)}</code>` : ''}</div></div>
         <div class="kn-perm-url selectable">${shown}</div><div class="kn-perm-note">${IC.warn}<span>Words from your vault may be in this address. Echo shows it exactly as Claude asked for it.</span></div>
-        <div class="kn-perm-f"><button class="btn primary sm" data-kn="permit" data-kn-req="${req}" data-kn-how="once">Allow once${kbd(MOD_KEY)}</button>${b.domain ? `<button class="btn sm" data-kn="permit" data-kn-req="${req}" data-kn-how="always">Allow ${esc(b.domain)} here</button>` : ''}<button class="btn sm" data-kn="permit" data-kn-req="${req}" data-kn-how="deny">Deny${kbd('esc')}</button><button class="btn ghost sm" data-kn="why" data-kn-req="${req}">Tell Claude why…</button></div>${why}</div>`
+        <div class="kn-perm-f"><button class="btn primary sm" data-kn="permit" data-kn-req="${req}" data-kn-how="once"${off}>Allow once${kbd(MOD_KEY)}</button>${b.domain ? `<button class="btn sm" data-kn="permit" data-kn-req="${req}" data-kn-how="always"${off}>Allow ${esc(b.domain)} here</button>` : ''}<button class="btn sm" data-kn="permit" data-kn-req="${req}" data-kn-how="deny"${off}>Deny${kbd('esc')}</button><button class="btn ghost sm" data-kn="why" data-kn-req="${req}">Tell Claude why…</button></div>${why}</div>`
     }
     const edit = b.tool === 'Edit' || b.tool === 'Write'
     const pmh = edit && !b.error ? `<span class="kn-pm">${b.plus ? `<span class="a">+${b.plus}</span>` : ''}${b.plus && b.minus ? ' ' : ''}${b.minus ? `<span class="d">−${b.minus}</span>` : ''}</span>` : ''
     const diff = (b.hunks || []).map((h, k) => (k ? '<div class="hd">…</div>' : '') + h.map(([o, l]) => `<div class="${o === '+' ? 'add' : o === '-' ? 'del' : ''}">${o === '+' ? '+' : o === '-' ? '−' : ' '} ${esc(l)}</div>`).join('')).join('')
-    const body = b.error ? `<div class="kn-perm-note">${IC.warn}<span>Echo can't show this change: ${esc(b.error)}. If you allow it, Claude Code's own tool says whether it worked.</span></div>` : diff ? `<div class="kn-diff kn-perm-diff">${diff}</div>` : ''
+    const body = b.error ? `<div class="kn-perm-note">${IC.warn}<span>${esc(b.error)}. If you allow it, Claude Code's own tool says whether it worked.</span></div>` : diff ? `<div class="kn-diff kn-perm-diff">${diff}</div>` : ''
     const title = b.tool === 'Edit' ? 'Claude wants to edit a page' : b.tool === 'Write' ? 'Claude wants to write a page' : `Claude wants to use ${esc(b.tool)}`
     const always = edit ? `<span class="grow"></span><label class="kn-check"><input type="checkbox" data-kn-always="${req}"${c.always[b.request] ? ' checked' : ''}> Allow edits for the rest of this conversation</label>` : ''
     return `<div class="kn-perm"><div class="kn-perm-h"><span class="pi">${edit ? IC.edit : IC.asks}</span><div><b>${title}</b>${path ? `<code>${esc(path)}</code>` : ''}</div>${pmh}</div>${body}
-      <div class="kn-perm-f"><button class="btn primary sm" data-kn="permit" data-kn-req="${req}" data-kn-how="once">Allow${kbd(MOD_KEY)}</button><button class="btn sm" data-kn="permit" data-kn-req="${req}" data-kn-how="deny">Deny${kbd('esc')}</button><button class="btn ghost sm" data-kn="why" data-kn-req="${req}">Tell Claude why…</button>${always}</div>${why}</div>`
+      <div class="kn-perm-f"><button class="btn primary sm" data-kn="permit" data-kn-req="${req}" data-kn-how="once"${off}>Allow${kbd(MOD_KEY)}</button><button class="btn sm" data-kn="permit" data-kn-req="${req}" data-kn-how="deny"${off}>Deny${kbd('esc')}</button><button class="btn ghost sm" data-kn="why" data-kn-req="${req}">Tell Claude why…</button>${always}</div>${why}</div>`
   }
   function resultHtml(r) {
     return `<div class="kn-res">${r.seconds != null ? `<span>${IC.clock}${r.seconds} s</span>` : ''}<span>${kTok(r.tokens_in)} in · ${kTok(r.tokens_out)} out</span>${r.cache_read ? `<span>cache ${Math.round(r.cache_read * 100)} %</span>` : ''}${r.cost ? `<span>${esc(usd(r.cost))}</span>` : ''}</div>`
@@ -2020,70 +2085,30 @@ const Kn = (() => {
     const sug = last && t.suggestion ? `<span class="grow"></span><button class="kn-sug" data-kn="ans-sug" data-kn-turn="${i}">${IC.ask}<span>${esc(t.suggestion)}</span></button>` : ''
     return `<div class="kn-acts-row"><button class="btn ghost sm" data-kn="ans-copy" data-kn-turn="${i}">${IC.copy} Copy</button><button class="btn ghost sm" data-kn="ans-save" data-kn-turn="${i}">${IC.save} Save as a page</button><button class="btn ghost sm" data-kn="ans-add" data-kn-turn="${i}">${IC.edit} Add to a page</button>${sug}</div>`
   }
-  /** An answer's Markdown, from the HTML Echo's writer made of it (the events carry no other copy): paragraphs, lists,
-   *  headings, code, page links as wikilinks (from the pages' folder), https links. */
-  function mdOf(html) {
-    const root = new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html').body
-    const pages = String(((vault() || {}).paths || {}).pages || '')
-    const inline = (n) => [...n.childNodes].map((x) => {
-      if (x.nodeType === 3) return x.textContent
-      if (x.nodeType !== 1) return ''
-      const t = x.tagName, inner = inline(x)
-      if (t === 'STRONG' || t === 'B') return `**${inner}**`
-      if (t === 'EM' || t === 'I') return `*${inner}*`
-      if (t === 'CODE') return `\`${x.textContent}\``
-      if (t === 'BR') return '\n'
-      if (t === 'UL' || t === 'OL') return ''
-      if (t === 'A') {
-        const h = x.getAttribute('href') || ''
-        if (h.startsWith('#kn:')) {
-          let p = (knDecode(h.slice(4)) ?? h.slice(4)).replace(/\.md$/i, '')
-          if (pages && p.startsWith(`${pages}/`)) p = p.slice(pages.length + 1)
-          const words = x.textContent.trim()
-          return !words || p.endsWith(words.replace(/\.md$/i, '')) ? `[[${p}]]` : `[[${p}|${words}]]`
-        }
-        return /^https:\/\//i.test(h) ? `[${inner}](${h})` : inner
-      }
-      return inner
-    }).join('')
-    const blocks = (n, depth) => [...n.children].map((x) => {
-      const t = x.tagName
-      if (/^H[1-6]$/.test(t)) return `${'#'.repeat(Number(t[1]))} ${inline(x).trim()}`
-      if (t === 'UL' || t === 'OL') {
-        return [...x.children].map((li, i) => {
-          const subs = [...li.children].filter((y) => y.tagName === 'UL' || y.tagName === 'OL')
-          return `${'  '.repeat(depth)}${t === 'OL' ? `${i + 1}.` : '-'} ${inline(li).trim()}${subs.map((y) => `\n${blocks({ children: [y] }, depth + 1)}`).join('')}`
-        }).join('\n')
-      }
-      if (t === 'PRE') return `\`\`\`\n${x.textContent.replace(/\n$/, '')}\n\`\`\``
-      if (t === 'BLOCKQUOTE') return blocks(x, 0).split('\n').map((l) => `> ${l}`).join('\n')
-      if (t === 'HR') return '---'
-      if (t === 'TABLE') return [...x.querySelectorAll('tr')].map((tr, i) => { const cells = [...tr.children].map((td) => inline(td).trim().replace(/\|/g, '\\|')); return `| ${cells.join(' | ')} |${i === 0 ? `\n|${cells.map(() => ' --- |').join('')}` : ''}` }).join('\n')
-      return inline(x).trim()
-    }).filter(Boolean).join('\n\n')
-    return blocks(root, 0)
-  }
+  /** A turn's answer for Copy, Save as a page and Add to a page: its Markdown as Claude wrote it (ruling R33). */
   function answerOf(i) {
     const t = turnsOf(chat())[i]
-    return t ? { md: t.blocks.filter((b) => b.kind === 'text' && b.html).map((b) => mdOf(b.html)).join('\n\n').trim(), question: t.user ? t.user.text : '' } : null
+    return t ? { md: knAnswerMd(t), question: t.user ? t.user.text : '' } : null
   }
   async function sendChat() {
     const s = st(), c = chat(), v = vault()
     const q = document.getElementById('kn-chat-q')
     if (q) c.draft = q.value
     const m = knChatMessage(c.draft, c.chips)
-    if (!m.text || c.sending || !v) return
+    // One message at a time: the one just sent hasn't come back yet.
+    if (!m.text || c.sending || !v || (c.pending && Date.now() - c.pending.at < 30000)) return
     if (c.busy) { c.error = 'Wait for this answer, or stop it.'; return refreshChat() }
     if (c.mode === 'research' && !researchOn()) c.mode = 'ask'
     c.sending = true; c.error = null; c.picker = null
+    // The composer empties when the message comes back as a `user` event — which, in a conversation already polled, can
+    // come before this call's answer; a sign-in error keeps it (M2).
+    c.pending = { text: m.text, at: Date.now() }
     refreshChat()
     try {
       const r = await run('kn_chat_send', { id: v.id, conversation: c.id || undefined, text: m.text, mode: c.mode, context: m.context })
       if (st().chat !== c) return
       // A call on another AI profile (X-P3): *Attach anyway* on that call's chip, then it is sent again.
-      if (r && r.mismatch) { const x = c.chips.find((ch) => ch.call && ch.call === r.mismatch.attached) || c.chips.find((ch) => ch.call && !ch.anyway); if (x) x.mismatch = r.mismatch; return }
-      c.draft = ''; c.chips = []
-      if (q) { q.value = ''; fitQ() }
+      if (r && r.mismatch) { c.pending = null; const x = c.chips.find((ch) => ch.call && ch.call === r.mismatch.attached) || c.chips.find((ch) => ch.call && !ch.anyway); if (x) x.mismatch = r.mismatch; return }
       if (!c.id && r && r.conversation) {
         openChat(r.conversation)
         s.askConv = r.conversation
@@ -2091,7 +2116,7 @@ const Kn = (() => {
       }
       c.follow = true
       loadChats()
-    } catch (e) { if (st().chat === c) c.error = String(e.message || e) } finally {
+    } catch (e) { if (st().chat === c) { c.pending = null; c.error = String(e.message || e) } } finally {
       c.sending = false
       if (st().chat === c) { refreshChat(); pollChat() }
     }
@@ -2101,14 +2126,20 @@ const Kn = (() => {
     if (!c.id || !c.busy) return
     try { await run('kn_chat_stop', { conversation: c.id }) } catch (e) { c.error = String(e.message || e); refreshChat() }
   }
+  /** Answer card `request` — once: a second click or ⌘↵ while the answer goes, or before Echo's `answered` comes, does
+   *  nothing (`c.local`). */
   async function permitChat(request, how) {
     const c = chat()
+    if (!request || c.local[request]) return
     const why = how === 'deny' && c.whyOpen === request ? ((document.getElementById('kn-why') || {}).value || '').trim() : ''
     const always = how === 'always' || (how === 'once' && !!c.always[request])
+    const answer = c.local[request] = { allow: how !== 'deny', always: how !== 'deny' && always, pending: true }
+    refreshChat()
     try {
-      await run('kn_chat_permit', { conversation: c.id, request, allow: how !== 'deny', always: how !== 'deny' && always, message: why || undefined }, `permit:${request}`)
+      await run('kn_chat_permit', { conversation: c.id, request, allow: answer.allow, always: answer.always, message: why || undefined }, `permit:${request}`)
+      answer.pending = false
       if (c.whyOpen === request) c.whyOpen = null
-    } catch (e) { c.error = String(e.message || e) }
+    } catch (e) { delete c.local[request]; c.error = String(e.message || e) }
     refreshChat()
   }
   /** Continue in the terminal panel (K13-08): this process stops, the panel resumes the same conversation; one that read
@@ -2231,6 +2262,8 @@ const Kn = (() => {
   }
   /** Keys in Ask: the picker's ↑↓ ↵ Esc; ⌘↵ allows the waiting card or sends; Esc denies it or stops the turn. */
   function chatKey(e) {
+    // An input method composing owns Enter, Esc and the arrows (M10).
+    if (e.isComposing || e.keyCode === 229) return false
     const c = chat(), mod = e.metaKey || e.ctrlKey, id = e.target && e.target.id
     const p = c.picker
     if (p && (id === 'kn-chat-q' || id === 'kn-attach-q')) {
@@ -2248,14 +2281,19 @@ const Kn = (() => {
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); c.whyOpen = null; refreshChat(); return true }
       return false
     }
-    const card = firstWaiting(c)
-    if (mod && e.key === 'Enter') {
-      if (card) { e.preventDefault(); permitChat(card.request, 'once'); return true }
-      if (id === 'kn-chat-q') { e.preventDefault(); sendChat(); return true }
-      return false
-    }
-    if (e.key === 'Escape' && (card || c.busy)) { e.preventDefault(); e.stopPropagation(); if (card) permitChat(card.request, 'deny'); else stopChat(); return true }
-    return false
+    const card = firstWaiting(c), q = document.getElementById('kn-chat-q')
+    const typed = !!((q && q.value.trim()) || c.chips.length)
+    const act = knChatKey({ key: e.key, mod, card: !!card, inComposer: id === 'kn-chat-q', typed, busy: c.busy })
+    if (!act) return false
+    e.preventDefault()
+    if (e.key === 'Escape') e.stopPropagation()
+    if (act === 'allow') permitChat(card.request, 'once')
+    else if (act === 'deny') permitChat(card.request, 'deny')
+    else if (act === 'send') sendChat()
+    else if (act === 'stop') stopChat()
+    // The "send" keystroke while a card waits answers nothing (item 2): it says what waits.
+    else if (act === 'blocked') { c.error = 'Answer the card above first.'; refreshChat() }
+    return true
   }
   function addToList() {
     const x = st().sheet
@@ -2280,9 +2318,11 @@ const Kn = (() => {
     const p = s.page
     if (!p || p.error || !p.editable) return say(p && p.error ? p.error : 'This page can\'t be edited in Echo.')
     const d = new Date(), day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-    s.edit = { path, base: p.base, text: p.text || '', dirty: true, preview: p.html, message: `Add an answer from Ask to ${path}` }
+    // From the page's unsaved text kept in this window, as Edit does, so the kept draft isn't written over (M1).
+    const text = knEditText(store(), v.id, p.path, p.base, p.text || '')
+    s.edit = { path, base: p.base, text, dirty: true, preview: p.html, message: `Add an answer from Ask to ${path}` }
     s.focus = 'kn-edit'
-    onEditInput(knAnswerInto(p.text || '', md, { heading: `${day} — from Ask` }))
+    onEditInput(knAnswerInto(text, md, { heading: `${day} — from Ask` }))
     render()
   }
 

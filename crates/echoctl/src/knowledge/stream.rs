@@ -306,10 +306,16 @@ impl Parser {
         with_parent(e, b.parent.as_deref())
     }
 
+    /// A text block's render; the finished one also carries the block's Markdown as Claude wrote it (`md`, ruling R33:
+    /// what the page copies and saves — rebuilding it from the HTML loses nesting).
     fn text_event(&mut self, b: &Block, done: bool) -> Value {
         // The index is read once a turn, not at every render (a scan stats every page).
         let ix = self.index.get_or_insert_with(|| scan::index(&self.vault).ok()).clone();
-        with_parent(json!({"type": "text", "block": b.id, "html": page::render_fragment(&self.vault, ix.as_deref(), &b.text), "done": done}), b.parent.as_deref())
+        let mut e = json!({"type": "text", "block": b.id, "html": page::render_fragment(&self.vault, ix.as_deref(), &b.text), "done": done});
+        if done {
+            e["md"] = json!(b.text);
+        }
+        with_parent(e, b.parent.as_deref())
     }
 
     /// A complete tool call: its `tool` event (once per id) and, for the steps file, a `todo` event.

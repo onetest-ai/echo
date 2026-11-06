@@ -19,9 +19,10 @@ const { knBuildTree } = load(['kn-tree'], ['knBuildTree'])
 const { knFilterGraph, knIsolatedCount, knGraphStart } = load(['kn-graph'], ['knFilterGraph', 'knIsolatedCount', 'knGraphStart'])
 const { knRepel, knForceSim, knLabelPlan, knGraphHits, knShortLabel } = load(['kn-force'], ['knRepel', 'knForceSim', 'knLabelPlan', 'knGraphHits', 'knShortLabel'])
 const { knPlainPrompt } = load(['kn-prompt'], ['knPlainPrompt'])
-const { knKeepDraft, knRestoreDraft, knDropDraft } = load(['kn-draft'], ['knKeepDraft', 'knRestoreDraft', 'knDropDraft'])
+const { knKeepDraft, knRestoreDraft, knDropDraft, knEditText } = load(['kn-draft'], ['knKeepDraft', 'knRestoreDraft', 'knDropDraft', 'knEditText'])
 const { knLineDiff } = load(['kn-diff'], ['knLineDiff'])
-const { knChatTurns, knChatReadOutside, knFollow, knAnswerInto } = load(['kn-chat'], ['knChatTurns', 'knChatReadOutside', 'knFollow', 'knAnswerInto'])
+const { knChatTurns, knChatReadOutside, knFollow, knAnswerInto, knAnswerMd, knWaitingCard, knChatKey, knSentLanded } = load(['kn-chat'], ['knChatTurns', 'knChatReadOutside', 'knFollow', 'knAnswerInto', 'knAnswerMd', 'knWaitingCard', 'knChatKey', 'knSentLanded'])
+const { knChatOpen, knPollKeep, knChatTake } = load(['kn-poll'], ['knChatOpen', 'knPollKeep', 'knChatTake'])
 const { knToolRows } = load(['kn-tools'], ['knToolRows'])
 const { knMention, knMentionPick, knChatMessage } = load(['kn-mention'], ['knMention', 'knMentionPick', 'knChatMessage'])
 
@@ -470,6 +471,112 @@ test('an answer saved as a page carries its source; added to a page, it goes und
   assert.equal(knAnswerInto(page, '- A platform fee.', { source: 'echo-ask 6f2c9e1a' }), '---\ntitle: Pricing\ndate: 2026-11-06\ntags: []\nsource: echo-ask 6f2c9e1a\nsummary: ""\n---\n\n# Pricing\n\n- A platform fee.\n')
   assert.equal(knAnswerInto('# Pricing\n', 'Text.', { source: 'echo-ask x' }), '---\nsource: echo-ask x\n---\n\n# Pricing\n\nText.\n', 'no properties yet')
   assert.equal(knAnswerInto('# Northwind Retail\n\nA client.\n\n', 'Two things.', { heading: '2026-11-06 — from Ask' }), '# Northwind Retail\n\nA client.\n\n## 2026-11-06 — from Ask\n\nTwo things.\n')
+})
+
+// ── Ask, fix round 1 ──
+const A = [
+  { n: 0, type: 'user', text: 'What did Lena Hartmann decide?', context: [] },
+  { n: 1, type: 'text', block: 'b1', html: '<p>Two things.</p>', md: 'Two things.', done: true },
+  { n: 2, type: 'result', tokens_in: 10, tokens_out: 5, seconds: 2 },
+]
+const A2 = [
+  { n: 3, type: 'user', text: 'And the gateway?', context: [] },
+  { n: 4, type: 'text', block: 'b1', html: '<p>Still open.</p>', md: 'Still open.', done: true },
+  { n: 5, type: 'result', tokens_in: 12, tokens_out: 4, seconds: 1 },
+]
+const chunk = (events, next, o = {}) => ({ events: events.map((e) => ({ ...e })), next, live: true, busy: false, waiting: false, ...o })
+
+test('the poll: A → New → A within 25 s loads A once, the old request is dropped', () => {
+  const c = { busy: false }
+  const g1 = knChatOpen(c, 'A') // its loop asks from 0 …
+  const g2 = knChatOpen(c, '')
+  assert.equal(c.polling, null, 'opening another one lets a new loop start')
+  const g3 = knChatOpen(c, 'A')
+  assert.ok(g1 !== g2 && g2 !== g3)
+  assert.equal(knPollKeep(c, g1), false, 'the first loop stops')
+  assert.equal(knPollKeep(c, g3), true)
+  assert.ok(knChatTake(c, g3, 0, chunk([...A, ...A2], 6), 1000))
+  assert.equal(knChatTake(c, g1, 0, chunk(A, 3), 2000), null, '… and its answer, coming back late, is dropped')
+  assert.deepEqual(c.events.map((e) => e.n), [0, 1, 2, 3, 4, 5])
+  assert.equal(knChatTurns(c.events).length, 2, 'A\'s earlier turn is there')
+})
+
+test('the poll: A → B → A within 25 s polls A once; a chunk is merged once', () => {
+  const c = { busy: false }
+  const g1 = knChatOpen(c, 'A')
+  assert.ok(knChatTake(c, g1, 0, chunk(A, 3), 1000))
+  knChatOpen(c, 'B')
+  const g3 = knChatOpen(c, 'A')
+  assert.deepEqual(c.events, [], 'A again starts afresh')
+  assert.equal(knChatTake(c, g1, 3, chunk(A2, 6), 2000), null, 'the first loop\'s request (from 3) is stale')
+  assert.ok(knChatTake(c, g3, 0, chunk([...A, ...A2], 6), 3000))
+  assert.equal(knChatTake(c, g3, 0, chunk([...A, ...A2], 6), 3000), null, 'asked from 0, but the view is at 6 now: not merged twice')
+  assert.deepEqual(c.events.map((e) => e.n), [0, 1, 2, 3, 4, 5], 'no duplicates, no "Echo started again" reset')
+  assert.deepEqual(knChatTurns(c.events).map((t) => t.user.text), ['What did Lena Hartmann decide?', 'And the gateway?'])
+  // Echo started again: asked from 6, it answers from its first event — the list is rebuilt from it.
+  assert.ok(knChatTake(c, g3, 6, chunk([{ n: 0, type: 'notice', kind: 'history', text: 'Its history can\'t be shown here; continuing works.' }], 1), 4000))
+  assert.deepEqual(c.events.map((e) => e.type), ['notice'])
+})
+
+test('the poll: a new message starts the blocks\' names afresh (a cut answer keeps its text)', () => {
+  const c = { busy: false }
+  const g = knChatOpen(c, 'A')
+  knChatTake(c, g, 0, chunk([A[0], { n: 1, type: 'text', block: 'b1', html: '<p>Half an ans</p>', done: false }, { n: 2, type: 'notice', kind: 'stopped', text: 'Stopped' }], 3), 0)
+  knChatTake(c, g, 3, chunk([A2[0], { n: 4, type: 'text', block: 'b1', html: '<p>New</p>', done: false }], 5, { busy: true }), 0)
+  const t = knChatTurns(c.events)
+  assert.deepEqual(t.map((x) => x.blocks.filter((b) => b.kind === 'text').map((b) => b.html)), [['<p>Half an ans</p>'], ['<p>New</p>']])
+  // Within a turn a block's older render drops its copy.
+  knChatTake(c, g, 5, chunk([{ n: 5, type: 'text', block: 'b1', html: '<p>New text</p>', done: false }], 6, { busy: true }), 0)
+  assert.equal(c.events[4].html, undefined)
+  assert.equal(c.events[4].superseded, true)
+})
+
+test('⌘↵ in a composer with text never answers a card; Esc denies, then stops; nothing while composing', () => {
+  const k = (o) => knChatKey({ key: 'Enter', mod: true, ...o })
+  assert.equal(k({ card: true, inComposer: true, typed: true }), 'blocked', 'the "send" keystroke doesn\'t approve an edit')
+  assert.equal(k({ card: true, inComposer: true, typed: false }), 'allow', 'an empty composer answers the card')
+  assert.equal(k({ card: true, inComposer: false }), 'allow')
+  assert.equal(k({ card: false, inComposer: true, typed: true }), 'send')
+  assert.equal(k({ card: false, inComposer: false }), null)
+  assert.equal(knChatKey({ key: 'Enter', mod: false, inComposer: true, typed: true }), null, 'Enter alone is a new line')
+  assert.equal(knChatKey({ key: 'Escape', card: true, busy: true }), 'deny')
+  assert.equal(knChatKey({ key: 'Escape', busy: true }), 'stop')
+  assert.equal(knChatKey({ key: 'Escape' }), null)
+  assert.equal(k({ card: true, composing: true }), null, 'an input method composing')
+  assert.equal(knChatKey({ key: 'Escape', busy: true, composing: true }), null)
+})
+
+test('the card waiting: answered by Echo or from this page, it waits no more', () => {
+  const ev = [A[0], { n: 1, type: 'permission', request: 'req_1', tool: 'Edit', path: 'knowledge/a.md', hunks: [], plus: 1, minus: 0 }, { n: 2, type: 'permission', request: 'req_2', tool: 'WebFetch', url: 'https://example.com/a', domain: 'example.com' }]
+  const turns = knChatTurns(ev)
+  assert.equal(knWaitingCard(turns, true).request, 'req_1')
+  assert.equal(knWaitingCard(turns, true, { req_1: { allow: true } }).request, 'req_2', 'a second ⌘↵ goes to the next card, not the same one again')
+  assert.equal(knWaitingCard(turns, true, { req_1: { allow: true }, req_2: { allow: false } }), null)
+  assert.equal(knWaitingCard(turns, false), null, 'no process: nothing waits')
+  assert.equal(knWaitingCard(knChatTurns([...ev, { n: 3, type: 'answered', request: 'req_1', allow: true, always: false }]), true).request, 'req_2')
+})
+
+test('Copy and Save use the answer\'s Markdown as Claude wrote it (md), not its HTML', () => {
+  const md = '1. Deployment\n   - hosted\n\n   ```\n   fix forward\n   ```\n2. Pricing'
+  const t = knChatTurns([A[0], { n: 1, type: 'text', block: 'b1', html: '<ol><li>flattened</li></ol>', md, done: true }, { n: 2, type: 'tool', id: 't', name: 'Read', verb: 'Read', target: 'a.md', readonly: true }, { n: 3, type: 'text', block: 'b3', html: '<p>And more.</p>', md: 'And more.', done: true }])
+  assert.equal(knAnswerMd(t[0]), `${md}\n\nAnd more.`)
+  assert.equal(knAnswerMd(knChatTurns([A[0], { n: 1, type: 'text', block: 'b1', html: '<p>Half</p>', done: false }])[0]), '', 'a block still streaming has none')
+})
+
+test('Add to a page starts from the page\'s kept unsaved text, as Edit does (it never writes over it)', () => {
+  const store = new Map()
+  const s = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) }
+  knKeepDraft(s, 'my-twin', 'knowledge/clients/northwind-retail.md', 'base1', '# Northwind Retail\n\nMy unsaved line.\n')
+  assert.equal(knEditText(s, 'my-twin', 'knowledge/clients/northwind-retail.md', 'base1', '# Northwind Retail\n'), '# Northwind Retail\n\nMy unsaved line.\n')
+  assert.equal(knEditText(s, 'my-twin', 'knowledge/clients/northwind-retail.md', 'base2', '# Northwind Retail\n'), '# Northwind Retail\n', 'changed on disk since: the file')
+  assert.equal(knEditText(null, 'my-twin', 'knowledge/a.md', 'b', '# A\n'), '# A\n', 'storage off')
+})
+
+test('a message sent stays in the composer until it lands; a sign-in error keeps it', () => {
+  assert.equal(knSentLanded(null, [A[0]]), null, 'nothing sent from here')
+  assert.equal(knSentLanded({ text: 'What did Lena Hartmann decide?' }, [A[0], A[1]]), 'landed')
+  assert.equal(knSentLanded({ text: 'Hi' }, [{ n: 0, type: 'error', text: 'Claude · Work needs you to sign in again', action: 'signin' }]), 'failed')
+  assert.equal(knSentLanded({ text: 'Hi' }, []), null, 'not yet')
 })
 
 let failed = 0

@@ -131,6 +131,26 @@ fn ask_turn_becomes_events() {
 }
 
 #[test]
+fn a_finished_text_block_carries_its_markdown() {
+    let (_env, root) = crate::paths::testenv::folders("kn-st-md");
+    let v = vault(&root);
+    let mut p = Parser::new(&v);
+    // What the page's Copy, Save as a page and Add to a page use (ruling R33): the block as Claude wrote it.
+    let parts = ["1. Deployment\n", "   - hosted, see `knowledge/clients/northwind-retail.md`\n\n", "   ```\n   fix forward\n   ```\n", "2. Pricing <b>per stream</b>\n"];
+    let ev = text_block(&mut p, 0, &parts, Instant::now());
+    let texts = of_type(&ev, "text");
+    let last = texts.last().unwrap();
+    assert_eq!(last["done"], true);
+    assert_eq!(last["md"].as_str(), Some(parts.concat().as_str()), "{last}");
+    assert!(texts.iter().filter(|e| e["done"] != true).all(|e| e.get("md").is_none()), "a render still streaming carries none: {texts:?}");
+    // A text that came whole (no partial messages), and a replayed transcript's, carry it too.
+    let whole = p.feed(&line(json!({"type": "assistant", "message": {"id": "msg_whole", "content": [{"type": "text", "text": "Two things.\n\n- one"}]}, "parent_tool_use_id": null})));
+    assert_eq!(whole[0]["md"].as_str(), Some("Two things.\n\n- one"), "{whole:?}");
+    let replayed = replay("ask-turn", &v);
+    assert!(of_type(&replayed, "text").iter().filter(|e| e["done"] == true).all(|e| e["md"].as_str().is_some_and(|m| !m.is_empty())), "{replayed:?}");
+}
+
+#[test]
 fn model_text_is_rendered_safely() {
     let (_env, root) = crate::paths::testenv::folders("kn-st-safe");
     let v = vault(&root);

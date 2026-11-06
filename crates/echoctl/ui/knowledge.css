@@ -23,6 +23,9 @@
 .kn-meta svg { width: 12px; height: 12px; flex: none; }
 .kn-meta.warn { color: var(--warn); }
 .kn-head .btn svg { width: 14px; height: 14px; }
+/* app.css's `.primary` lays out the window's main area (grid-area main, a column, sizes 0): a `.btn.primary` here is a
+   button — a row (its label and its key hint side by side), sized by what it holds. The main pane keeps its rule. */
+:is(.kn, .kn-sheet-back, .kn-pop) .btn.primary { display: inline-flex; flex-direction: row; grid-area: auto; min-width: auto; min-height: auto; }
 .kn-switch-menu { left: 0; top: 34px; width: 330px; right: auto; }
 .kn-head-menu, .kn-page-menu { right: 0; top: 30px; }
 .kn-menu-h { font-size: 10.5px; color: var(--text-3); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; padding: 7px 10px 3px; }

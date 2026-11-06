@@ -85,8 +85,9 @@ pub(super) fn card(v: &Vault, r: &Value) -> Card {
             c.fields.insert("plus".into(), json!(plus));
             c.fields.insert("minus".into(), json!(minus));
         }
+        // The one place the card's reason is worded as a sentence the page shows as it is.
         Err(why) => {
-            c.fields.insert("error".into(), json!(why));
+            c.fields.insert("error".into(), json!(format!("Echo can't show this change: {why}")));
         }
     }
     c
@@ -94,13 +95,13 @@ pub(super) fn card(v: &Vault, r: &Value) -> Card {
 
 /// The file the request names, through the vault's path check, and its text now.
 fn on_disk(v: &Vault, tool: &str, input: &Value) -> Result<Edit, String> {
-    let rel = stream::tool_path(tool, input, v).ok_or("Echo can't show this change: it isn't a file of this vault")?;
-    let full = page::inside(v, &rel).map_err(|e| format!("Echo can't show this change: {e}"))?;
+    let rel = stream::tool_path(tool, input, v).ok_or("it isn't a file of this vault")?;
+    let full = page::inside(v, &rel).map_err(|e| e.to_string())?;
     let old = match std::fs::read(&full) {
-        Ok(b) if b.len() as u64 > scan::READ_MAX => Before::Unread(format!("Echo can't show this change: {rel} is too large")),
-        Ok(b) => String::from_utf8(b).map_or_else(|_| Before::Unread(format!("Echo can't show this change: {rel} isn't text")), Before::Text),
+        Ok(b) if b.len() as u64 > scan::READ_MAX => Before::Unread(format!("{rel} is too large")),
+        Ok(b) => String::from_utf8(b).map_or_else(|_| Before::Unread(format!("{rel} isn't text")), Before::Text),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Before::Missing,
-        Err(e) => Before::Unread(format!("Echo can't show this change: {rel} can't be read ({e})")),
+        Err(e) => Before::Unread(format!("{rel} can't be read ({e})")),
     };
     Ok(Edit { rel, full, old })
 }
@@ -116,10 +117,10 @@ fn proposed(tool: &str, input: &Value, rel: &str, cur: Option<&str>) -> Result<S
     let (old, new) = (s("old_string"), s("new_string"));
     let n = if old.is_empty() { 0 } else { cur.matches(old).count() };
     match (n, input["replace_all"] == true) {
-        (0, _) => Err(format!("The text to replace isn't in {rel} now")),
+        (0, _) => Err(format!("the text to replace isn't in {rel} now")),
         (_, true) => Ok(cur.replace(old, new)),
         (1, false) => Ok(cur.replacen(old, new, 1)),
-        (n, false) => Err(format!("The text to replace is in {rel} {n} times, not once")),
+        (n, false) => Err(format!("the text to replace is in {rel} {n} times, not once")),
     }
 }
 
@@ -295,6 +296,27 @@ mod tests {
         assert!(outside.get("hunks").is_none() && outside.get("error").is_some_and(Value::is_string), "{outside:?}");
         let gone = of("Edit", json!({"file_path": v.root.join("knowledge/clients/none.md"), "old_string": "a", "new_string": "b"}));
         assert!(gone.get("hunks").is_none() && gone.get("error").is_some_and(Value::is_string), "{gone:?}");
+    }
+
+    #[test]
+    fn a_cards_error_says_once_that_echo_cant_show_the_change() {
+        let (_env, root) = crate::paths::testenv::folders("chat-card-errors");
+        let v = vault(&root, "w");
+        fixture::write(&v.root, "knowledge/clients/beta.md", "# Beta\n\n- one\n- one\n");
+        std::fs::write(v.root.join("knowledge/clients/legacy.md"), b"# Legacy\n\xff\xfe old bytes\n").unwrap();
+        let beta = v.root.join("knowledge/clients/beta.md");
+        let of = |tool: &str, input: Value| card(&v, &json!({"tool_name": tool, "input": input})).fields;
+        let cards = [
+            of("Edit", json!({"file_path": beta, "old_string": "- one\n", "new_string": "- uno\n"})),
+            of("Edit", json!({"file_path": beta, "old_string": "- two\n", "new_string": "- dos\n"})),
+            of("Edit", json!({"file_path": v.root.join("knowledge/clients/none.md"), "old_string": "a", "new_string": "b"})),
+            of("Edit", json!({"file_path": root.join("outside.md"), "old_string": "a", "new_string": "b"})),
+            of("Write", json!({"file_path": v.root.join("knowledge/clients/legacy.md"), "content": "# Legacy\n"})),
+        ];
+        for c in cards {
+            let e = c["error"].as_str().unwrap_or_else(|| panic!("an error: {c:?}"));
+            assert!(e.starts_with("Echo can't show this change: ") && e.matches("can't show this change").count() == 1, "{e}");
+        }
     }
 
     #[test]

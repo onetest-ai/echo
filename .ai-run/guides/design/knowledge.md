@@ -194,7 +194,9 @@ The node test guards all three. Success messages clear after 4 s; errors and "no
 **The Ask tab** (spec K13, `knowledge.js` blocks `kn-chat`, `kn-tools`, `kn-mention`): the header's *Ask* opens a new
 conversation in it; *Run in Claude* and *Ask about it* put `/<skill> ` or the page (a chip) in its composer; the
 panel's vault session is ⋯ → *Open Ask in the terminal panel*. The page long-polls `/api/kn/<vault>/chat/<id>` while
-the tab shows, keeps the events (a block's older render drops its copy) and folds them into turns (`knChatTurns`:
+the tab shows — one loop per open conversation (`kn-poll`: each open has a `gen`; a loop of an earlier open stops, and an
+answer is merged only into the open and the `from` it was asked for, so switching A → B → A never loads or drops A twice)
+—, keeps the events (a block's older render drops its copy; a new message starts the blocks' names afresh) and folds them into turns (`knChatTurns`:
 superseded renders skipped, a streaming block replaced until done, a sub-agent's own text left out). The thread is not
 part of `view()`'s string: `syncThread` fills it by keyed blocks and replaces only a block whose HTML changed, so a
 streaming answer re-renders alone and the composer is never re-created by the stream; the header, the rail and the
@@ -203,10 +205,15 @@ there (`knFollow`), and always shows a message the user just sent. Tool rows com
 `detail` (`knToolRows`; three or more read-only calls in a row fold); the events carry no result count for a web
 search and no file length for a read, so those rows say less than K13-03's examples. `@` searches the vault's index
 (`find`), puts the page's title in the text and the page in a chip; *Attach* lists the calls with minutes
-(`/api/calls`); `{mismatch}` puts *Attach anyway* on that call's chip. Cards: ⌘↵ allows the first waiting one, Esc
-denies it (else Esc stops the turn). *Open in the terminal panel* says D41's sentence first when the conversation used
-the web or an attached call. *Save as a page* and *Add to a page* rebuild the answer's Markdown from its HTML in the
-page (the events carry no other copy) and open the editor; nothing is written until Save.
+(`/api/calls`); `{mismatch}` puts *Attach anyway* on that call's chip. The composer empties only when the message comes
+back as a `user` event (a sign-in error keeps the text). Cards: ⌘↵ allows the first waiting one — but never from a
+composer holding text (that keystroke meant "send": "Answer the card above first."), Esc denies it (else Esc stops the
+turn), nothing while an input method composes; a card is answered once (a second click waits for nothing). *Open in the
+terminal panel* says D41's sentence first when the conversation used the web or an attached call. Copy, *Save as a
+page* and *Add to a page* use the answer's Markdown as Claude wrote it: a finished text event carries it as `md`
+(`stream.rs`, ruling R33; renders still streaming carry none). Both pages open in the editor, from the page's kept
+unsaved text when there is one; nothing is written until Save. Knowledge's `.btn.primary` is a row: app.css's
+`.primary` (the window's main area: grid area, a column) would otherwise stack a button's label and key hint.
 
 ### Ask's conversations (`chat.rs`)
 A conversation is one Claude Code session id throughout (`--session-id` first, `--resume` after: measured to keep the
@@ -236,7 +243,8 @@ vault's index for a turn (read at its first render, dropped at its `result`), no
 `can_use_tool` request's `permission` event gets Echo's own diff of the file on disk now, read through `page::inside`
 (`Edit`: `old_string` must be in the file exactly once, or everywhere with `replace_all`; `Write`: the whole file, or a
 new one), sent as `hunks` (`diff::hunks` with 3 lines of context: `[[["=" | "-" | "+", line], …], …]`) with `plus` and
-`minus` — or `error` when Echo can't show it; *Allow* stays possible, and Claude Code's own tool then fails and says so.
+`minus` — or `error` when Echo can't show it (a sentence the page shows as it is, "Echo can't show this change: …", worded
+in `card` alone); *Allow* stays possible, and Claude Code's own tool then fails and says so.
 A file Echo can't read as text (over 2 MB, not UTF-8) keeps its path all the same: an allowed edit of it still gets its
 activity line (nothing counted) and its commit. `permit` answers (allow sends the request's `input` back as
 `updatedInput`; deny sends the user's words, if any). *Always* is the conversation's own state, kept across its
