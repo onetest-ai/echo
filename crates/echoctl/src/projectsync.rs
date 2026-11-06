@@ -149,6 +149,11 @@ pub fn run(id: &str) -> Result<Value> {
         }
     };
     save_state(id, &v);
+    // A thread whose work was read again: the plugins that asked hear it (its id, how many were read, how many wait).
+    #[cfg(feature = "js")]
+    if v["state"] == "done" {
+        crate::jshost::event("thread_synced", &json!({"thread": id, "processed": v["processed"], "left": v["left"]}));
+    }
     if v["state"] == "failed" {
         bail!("{}", v["message"].as_str().unwrap_or("the sync failed"));
     }

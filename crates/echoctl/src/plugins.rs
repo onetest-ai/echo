@@ -72,7 +72,56 @@ const CAPABILITIES: &[Capability] = &[
     Capability { id: "sessions", ready: true, describe: describe_sessions },
     Capability { id: "folders", ready: true, describe: describe_folders },
     Capability { id: "echo", ready: true, describe: describe_echo },
+    Capability { id: "events", ready: true, describe: describe_events },
 ];
+
+/// What happens in Echo that a plugin may hear (`uses.events.on`, `ctx.on`), with the sheet's words. Payloads carry
+/// ids and what a plugin can act on — a call's folder name and title, a meeting's id and subject, a thread's id —
+/// never the call's words (a plugin reads those through `echo.read`).
+pub const EVENTS: &[(&str, &str)] = &[
+    ("meeting_soon", "a meeting is about to start"),
+    ("call_started", "a Teams call starts"),
+    ("call_ended", "a Teams call ends"),
+    ("recording_started", "a recording starts"),
+    ("recording_stopped", "a recording stops"),
+    ("transcribed", "a call's transcript is ready"),
+    ("minutes_written", "a call's minutes are written"),
+    ("thread_synced", "a thread's work is updated from its calls and mail"),
+    ("sources_changed", "Echo's sources change"),
+];
+
+fn describe_events(v: &Value) -> Result<String> {
+    let on = strings(v, "on")?;
+    if on.is_empty() {
+        bail!("“events” hears nothing ({})", EVENTS.iter().map(|(k, _)| *k).collect::<Vec<_>>().join(", "));
+    }
+    // As `echo`: one a newer Echo has is named on the sheet and never delivered here.
+    let words: Vec<&str> = EVENTS.iter().filter(|(k, _)| on.iter().any(|o| o == k)).map(|(_, w)| *w).collect();
+    let unknown: Vec<&str> = on.iter().map(String::as_str).filter(|o| !EVENTS.iter().any(|(k, _)| k == o)).collect();
+    let mut lines = vec![];
+    if !words.is_empty() {
+        lines.push(format!("Knows when {}", join_words(&words)));
+    }
+    if !unknown.is_empty() {
+        lines.push(format!("Asks for things this Echo doesn't have yet: {}", unknown.join(", ")));
+    }
+    Ok(lines.join(". "))
+}
+
+/// The events a plugin hears: those its `uses.events.on` names that Echo has; and, as before `events` existed,
+/// `minutes_written` and `sources_changed` with any `echo.read` (they say a source it may read is new).
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
+pub fn heard_events(uses: &serde_json::Map<String, Value>) -> Vec<String> {
+    let mut out: Vec<String> = uses.get("events").map(|e| strings(e, "on").unwrap_or_default()).unwrap_or_default().into_iter().filter(|o| EVENTS.iter().any(|(k, _)| k == o)).collect();
+    if uses.get("echo").is_some_and(|e| e["read"].as_array().is_some_and(|r| !r.is_empty())) {
+        for k in ["minutes_written", "sources_changed"] {
+            if !out.iter().any(|o| o == k) {
+                out.push(k.into());
+            }
+        }
+    }
+    out
+}
 
 fn strings(v: &Value, key: &str) -> Result<Vec<String>> {
     match &v[key] {

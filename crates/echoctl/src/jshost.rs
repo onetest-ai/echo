@@ -69,7 +69,19 @@ const PRELUDE: &str = r#"
     log: (...a) => call('log', ['info', a.map(String).join(' ')]),
     command: (name, fn) => { commands[name] = fn },
     every: (seconds, fn) => { timers.push({ every: Math.max(10, seconds) * 1000, next: 0, fn }) },
-    on: (event, fn) => { (handlers[event] = handlers[event] || []).push(fn) },
+    /** Hear an event (`uses.events.on`): a promise, refused (and the handler dropped) for one not asked for. */
+    on: (event, fn) => {
+      try {
+        call('events.on', String(event))
+      } catch (e) {
+        call('log', ['error', `ctx.on(${event}): ${e.message}`])
+        const refused = Promise.reject(e)
+        refused.catch(() => {}) // the plugin may not look: then it is only logged
+        return refused
+      }
+      (handlers[event] = handlers[event] || []).push(fn)
+      return Promise.resolve(true)
+    },
     store: {
       read: (path) => call('store.read', path),
       write: (path, text) => call('store.write', [path, String(text)]),
@@ -318,7 +330,7 @@ pub fn call_within(plugin: &str, command: &str, args: &Value, timeout: Duration)
     }
 }
 
-/// Tell every loaded plugin about something that happened in Echo (`ctx.on(name, fn)`).
+/// Tell the loaded plugins that asked for it (`uses.events.on`) about something that happened in Echo (`ctx.on`).
 pub fn event(name: &str, payload: &Value) {
     if let Some(h) = HOST.get() {
         let _ = h.tx.send(Msg::Event(name.into(), payload.to_string()));
@@ -330,6 +342,8 @@ pub fn event(name: &str, payload: &Value) {
 struct Plugin {
     ctx: Context,
     calls: HashMap<u64, Sender<Result<Value, String>>>,
+    /// The events it was given at install (`plugins::heard_events`): only those reach it.
+    hears: Vec<String>,
 }
 
 /// The id of the plugin whose JavaScript runs now (what `__host` acts for) and its calls' replies.
@@ -385,7 +399,8 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
                 }
                 match outcome {
                     Ok(ctx) => {
-                        plugins.insert(id, Plugin { ctx, calls: HashMap::new() });
+                        let hears = plugins::read_manifest(&dir).map(|m| plugins::heard_events(&m.uses)).unwrap_or_default();
+                        plugins.insert(id, Plugin { ctx, calls: HashMap::new(), hears });
                     }
                     Err(e) => eprintln!("plugins: {id}: {e:#}"),
                 }
@@ -418,7 +433,7 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
                 });
             }
             Ok(Msg::Event(name, payload)) => {
-                for (id, p) in &plugins {
+                for (id, p) in plugins.iter().filter(|(_, p)| p.hears.contains(&name)) {
                     set_current(&current, id);
                     let ctx = p.ctx.clone();
                     slice(&mut || ctx.with(|c| drop(c.globals().get::<_, Function>("__event").and_then(|f| f.call::<_, ()>((name.clone(), payload.clone()))))));
@@ -575,6 +590,14 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
         "log" => {
             eprintln!("plugin {id}: [{}] {}", s(&arg[0]), s(&arg[1]));
             Value::Null
+        }
+        "events.on" => {
+            let name = s(arg);
+            let m = plugins::read_manifest(&package_dir(id)?)?;
+            if !plugins::heard_events(&m.uses).contains(&name) {
+                bail!("{id} didn't ask to hear “{name}” when it was installed (uses.events.on)");
+            }
+            json!(true)
         }
         "store.read" => match std::fs::read_to_string(store_path(id, &s(arg))?) {
             Ok(t) => json!(t),
@@ -973,6 +996,52 @@ mod tests {
         assert_eq!(call("hello", "md", &json!({})).unwrap(), crate::minutes::markdown_html("**hi** <b>"));
         assert!(plugins::data_dir("hello").join("notes/a.txt").is_file());
         plugins::remove("hello", false).unwrap();
+        sync();
+    }
+
+    #[test]
+    fn a_plugin_hears_only_the_events_it_asked_for() {
+        let (_env, root) = paths::testenv::folders("jshost-events");
+        let mk = root.join("market");
+        let main = r#"
+            export function apply(ctx) {
+              const heard = []
+              let refused = ''
+              ctx.on('minutes_written', (p) => { heard.push(p.call) }).catch((e) => { refused = String(e.message || e) })
+              ctx.command('heard', () => ({ heard, refused }))
+            }
+        "#;
+        let mut entries = vec![];
+        for (id, uses) in [("hears", json!({"events": {"on": ["minutes_written"]}})), ("deaf", json!({}))] {
+            let d = mk.join("plugins").join(id);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join("echo-plugin.json"), json!({"id": id, "name": id, "version": "0.1.0", "main": "main.js", "uses": uses}).to_string()).unwrap();
+            std::fs::write(d.join("main.js"), main).unwrap();
+            entries.push(json!({"id": id, "source": format!("./plugins/{id}")}));
+        }
+        std::fs::write(mk.join("echo-marketplace.json"), json!({"name": "t", "plugins": entries}).to_string()).unwrap();
+        let name = plugins::market_add(mk.to_str().unwrap(), Some("t")).unwrap();
+        plugins::refresh(&name).unwrap();
+        for id in ["hears", "deaf"] {
+            let agreed = plugins::review(id, Some(&name)).unwrap().uses;
+            plugins::install(id, Some(&name), &agreed).unwrap();
+        }
+        sync();
+        let ready = |id: &str| (0..50).any(|_| call(id, "heard", &json!({})).is_ok() || { std::thread::sleep(Duration::from_millis(50)); false });
+        assert!(ready("hears") && ready("deaf"), "{:?} {:?}", call("hears", "heard", &json!({})), call("deaf", "heard", &json!({})));
+        event("minutes_written", &json!({"id": "call:2026-11-06_100000-acme", "call": "2026-11-06_100000-acme", "title": "Acme"}));
+        let got = (0..50).find_map(|_| {
+            let v = call("hears", "heard", &json!({})).unwrap();
+            if v["heard"].as_array().is_some_and(|a| !a.is_empty()) { Some(v) } else { std::thread::sleep(Duration::from_millis(50)); None }
+        });
+        assert_eq!(got.unwrap()["heard"], json!(["2026-11-06_100000-acme"]));
+        let deaf = call("deaf", "heard", &json!({})).unwrap();
+        assert_eq!(deaf["heard"], json!([]), "not asked: not delivered");
+        assert!(deaf["refused"].as_str().unwrap().contains("didn't ask to hear"), "{deaf}");
+        assert!(plugins::review("hears", Some(&name)).unwrap().uses.iter().any(|l| l.contains("Knows when a call's minutes are written")), "the sheet says it");
+        for id in ["hears", "deaf"] {
+            plugins::remove(id, false).unwrap();
+        }
         sync();
     }
 
