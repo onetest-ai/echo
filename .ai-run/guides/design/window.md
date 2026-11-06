@@ -173,6 +173,9 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   and Close are their own). A Claude one's ✦ / Send to Claude opens the Claude dialog with its prompt as the note and its skill chosen — Work on
   it / Yolo, no third button (the user: one Run with Claude mechanism). Claude Code's own mark (thesvg.org, mono)
   stands for Claude everywhere: the panel, Ask Claude, Send to Claude, Work on it, the status bar.
+- A task's read (`echoctl read echo://task/…`, where Work on it and Yolo start) says who does it and gives the context:
+  the thread's last 3 calls with minutes, and the last 3 of the meeting series it was raised in (the invite's subject,
+  as "Since last time" goes) that the thread's don't already list — links only; Claude opens what it needs.
 - What moved (`callChanges`): what a call changed in its threads, beside the minutes as the live notes are beside the
   transcript (its own scroll; under 1000 px it is hidden), the user's own open tasks first with who does each. It was
   above the Actions tab's items; action items are everything said, the user's tasks are what is theirs to do. The
