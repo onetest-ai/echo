@@ -1198,7 +1198,7 @@ function sendClaudeDialog() {
     <div class="sc-head"><h3 id="sc-h">Claude</h3><div class="sc-task">${thread ? `${projIcon(thread, 14)}<span class="set-sub">${esc(thread.name)}</span> · ` : ''}<span>${esc(c.title)}</span></div></div>
     <div class="sc-pick">${picker}</div>
     <textarea id="sc-words" class="sc-words" rows="2" placeholder="Anything to add — optional (Keep it short; Dana is away until the 12th)">${esc(c.words || '')}</textarea>
-    <div class="sc-foot"><span class="set-sub">${c.today ? 'Yolo: Claude does it on its own.' : ''}</span><span class="grow"></span><button class="btn ghost" data-sc-off="1">Cancel</button>${yolo}<button class="btn primary" data-sc-send title="In the Claude panel, with you">${ICON('<path d="M12 3.5v17M3.5 12h17M6 6l12 12M18 6L6 18"/>')}Work on it</button></div></div></div>`
+    <div class="sc-foot"><button class="btn primary" data-sc-send title="In the Claude panel, with you">${ICON('<path d="M12 3.5v17M3.5 12h17M6 6l12 12M18 6L6 18"/>')}Work on it</button>${yolo}<button class="btn ghost" data-sc-off="1">Cancel</button><span class="grow"></span><span class="set-sub">${c.today ? 'Yolo: Claude does it on its own.' : ''}</span></div></div></div>`
 }
 /** Type a line into the Claude panel's session: started (or resumed) first when it isn't running, and typed once it
  *  has drawn and gone quiet — earlier keys would land in its start-up. */
