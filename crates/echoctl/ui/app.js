@@ -7034,7 +7034,12 @@ function render() {
     drawGraph()
     drawPeople()
   } else if (S.view === 'today') {
+    const rows = $('.td-rows'), keep = rows ? rows.scrollTop : null
     patch(primary, `<main class="main">${noticesBar()}${todayView()}</main>`)
+    // Your day opens on now: the line at the top with what comes next under it (one row of the past above it);
+    // drawn again, it stays where it was scrolled.
+    const r = $('.td-rows'), now = r && r.querySelector('.td-now')
+    if (r && r !== rows) r.scrollTop = keep != null ? keep : now ? Math.max(0, now.getBoundingClientRect().top - r.getBoundingClientRect().top - 64) : 0
   } else if (S.view === 'tasks') {
     patch(primary, `<main class="main">${noticesBar()}${tasksView()}</main>`)
   } else if (S.view === 'projects') {
