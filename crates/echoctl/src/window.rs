@@ -249,6 +249,9 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
         "/api/layout" => json_reply(load_layout()),
         "/api/settings" => json_reply(settings_snapshot()),
         "/api/attention" => {
+            // Marketplaces fetched again in the background now and then: a plugin's update reaches the Inbox without
+            // a visit to Settings → Plugins.
+            refresh_markets_for_inbox();
             // What runs, read first: a job ending meanwhile then shows as running over a list that may
             // still hold its item, never as an item with its buttons back.
             let (busy, failed) = attention_busy();
@@ -1864,6 +1867,25 @@ fn deliver_op(v: &Value) -> Handled {
         }
         o => notice(&format!("unknown delivery operation “{o}”")),
     }
+}
+
+/// For the Inbox: at most every 10 minutes, off the request, the stale marketplaces fetched again — quietly (Settings
+/// shows no "Reading…" for it) — and the Inbox read again after, so a newly found update shows at once.
+fn refresh_markets_for_inbox() {
+    static LAST: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+    {
+        let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+        if last.is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(600)) {
+            return;
+        }
+        *last = Some(std::time::Instant::now());
+    }
+    std::thread::spawn(|| {
+        if crate::plugins::any_stale() {
+            crate::plugins::refresh_stale(false);
+            crate::attention::stale();
+        }
+    });
 }
 
 /// Marketplaces not fetched for a while, fetched again (one pass at a time, in the background).

@@ -603,10 +603,12 @@ function route() {
   if (pa) { S.view = pa.id; S.plRoute = h.slice(pa.id.length + 1); S.plRoutes = { ...(S.plRoutes || {}), [pa.id]: S.plRoute }; return }
   const cm = h.match(/^calendar(?:\/(day|week))?$/)
   if (cm) { S.view = 'calendar'; if (cm[1]) S.cal.mode = cm[1]; return }
-  const sm = h.match(/^settings(?:\/([a-z0-9:-]+))?$/)
+  // settings/plugins/<id>: that plugin picked (an Inbox update item opens it).
+  const sm = h.match(/^settings(?:\/([a-z0-9:-]+))?(?:\/([a-z0-9-]+))?$/)
+  if (sm && sm[2] && sm[1] !== 'plugins') sm[2] = undefined // only Plugins picks one of its own
   // The vocabulary was a Settings section: its old link opens its panel, over the calls.
   if (sm && sm[1] === 'vocabulary') { S.view = 'calls'; setTimeout(() => { Layout.show('vocabulary', panelViews()); layoutChanged() }); return }
-  if (sm) { S.view = 'settings'; if (sm[1]) S.setSection = sm[1]; return }
+  if (sm) { S.view = 'settings'; if (sm[1]) S.setSection = sm[1]; if (sm[1] === 'plugins' && sm[2]) { Object.assign(S, { plSel: sm[2], plTab: 'installed', plSheet: null, plQuery: '', plMenu: null }); history.replaceState(null, '', '#settings/plugins') } return }
   if (h === 'tasks') { S.view = 'tasks'; return }
   // The window opens on Today.
   if (h === 'today' || h === '') { S.view = 'today'; return }
@@ -1786,6 +1788,7 @@ const NY_ICON = {
   health: ICON('<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17v.01"/>'),
   update: ICON('<path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19.5h14"/>'),
 }
+NY_ICON['plugin-update'] = NY_ICON.update
 const NY_ENTRY = ICON('<path d="M4 13l3-8h10l3 8v6H4z"/><path d="M4 13h5l1 2h4l1-2h5"/>')
 function needsPanel() {
   const d = NY.data
@@ -1833,7 +1836,8 @@ document.addEventListener('click', (e) => {
   if (!t) return
   if (t.dataset.nyFilter) { NY.filter = t.dataset.nyFilter; return render() }
   if (t.dataset.nyMore) { NY.more.add(t.dataset.nyMore); return render() }
-  if (t.dataset.nyGo) return go(t.dataset.nyGo)
+  // The same place again (another plugin picked meanwhile): read the hash again, not just redraw.
+  if (t.dataset.nyGo) { if (decodeURIComponent(location.hash.slice(1)) === t.dataset.nyGo) { route(); return render() } return go(t.dataset.nyGo) }
   const i = nyOpen().find((x) => x.key === t.dataset.nyAct)
   const a = i && (i.actions || [])[Number(t.dataset.k)]
   if (!a) return
@@ -3087,7 +3091,8 @@ async function loadPluginsView() {
 }
 function pluginOp(op, body = {}) {
   send({ cmd: 'plugin_op', op, ...body })
-  setTimeout(() => loadPluginsView().then(render), 300)
+  // The Inbox too: a plugin updated leaves it at once.
+  setTimeout(() => { loadAttention(true); loadPluginsView().then(render) }, 300)
 }
 /** One of a plugin's own settings (its manifest's `settings`): a switch, or a box saved when it changes; a
  *  secret is never shown back, only whether it is set (Forget empties it). */

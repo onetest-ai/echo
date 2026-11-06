@@ -1184,12 +1184,26 @@ pub fn install(id: &str, market: Option<&str>, agreed: &[String]) -> Result<Inst
 
 /// An update waiting for an installed plugin: the newer offer's review (`None` = up to date or gone).
 pub fn update_for(p: &Installed) -> Option<Review> {
-    let o = catalog(&p.market)?.plugins.into_iter().find(|o| o.id == p.id)?;
-    let m = o.manifest.as_ref()?;
-    if !crate::update::newer(&m.version, &p.version) {
-        return None;
-    }
-    review_of(&p.market, &o, Some(p)).ok()
+    update_in(p, &catalog(&p.market)?)
+}
+
+/// The same, from a catalog already read.
+fn update_in(p: &Installed, c: &Catalog) -> Option<Review> {
+    let o = c.plugins.iter().find(|o| o.id == p.id)?;
+    crate::update::newer(&o.manifest.as_ref()?.version, &p.version).then(|| review_of(&p.market, o, Some(p)).ok()).flatten()
+}
+
+/// Every installed plugin of `r` with an update waiting (from its marketplace's last fetched catalog, no network;
+/// each catalog read once).
+pub fn updates_in(r: &Registry) -> Vec<(Installed, Review)> {
+    let mut catalogs: std::collections::HashMap<String, Option<Catalog>> = std::collections::HashMap::new();
+    r.installed
+        .values()
+        .filter_map(|p| {
+            let c = catalogs.entry(p.market.clone()).or_insert_with(|| catalog(&p.market)).as_ref()?;
+            update_in(p, c).map(|u| (p.clone(), u))
+        })
+        .collect()
 }
 
 /// Install the waiting update of `id`; one that asks for more is refused unless those lines were agreed.
@@ -1469,6 +1483,8 @@ fn background(key: String, what: &str, f: impl FnOnce() -> Result<()> + Send + '
         if let Ok(mut b) = BUSY.lock() {
             b.remove(&key);
         }
+        // Installed, updated or removed: the Inbox (its update items) is read again, not from its cache.
+        crate::attention::stale();
     });
 }
 
@@ -1628,9 +1644,17 @@ mod tests {
         refresh(&name).unwrap();
         let p = Registry::load().unwrap().installed["demo"].clone();
         let rv = update_for(&p).unwrap();
+        // The Inbox lists it (`attention`): every installed plugin with an update waiting.
+        let waiting = updates_in(&Registry::load().unwrap());
+        assert_eq!(waiting.iter().map(|(p, u)| (p.id.as_str(), u.version.as_str())).collect::<Vec<_>>(), [("demo", "0.2.0")]);
+        // Its Inbox item: what it says and where it goes.
+        let item = crate::attention::update_item(&waiting[0].0, &waiting[0].1);
+        assert_eq!((item["title"].as_str(), item["go"].as_str(), item["version"].as_str()), (Some("Plugin demo 0.2.0 is available"), Some("settings/plugins/demo"), Some("0.2.0")));
+        assert!(item["why"].as_str().unwrap().contains("it asks for more"), "{item}");
         assert_eq!(rv.new_uses.len(), 1);
         assert!(update("demo", &[]).unwrap_err().to_string().contains("asks for more"));
         assert_eq!(update("demo", &rv.new_uses).unwrap().unwrap().version, "0.2.0");
+        assert!(updates_in(&Registry::load().unwrap()).is_empty(), "updated: nothing waits");
         assert_eq!(fs::read_dir(installed_dir("demo")).unwrap().count(), 1, "the old version's files are gone");
         set_enabled("demo", false).unwrap();
         assert!(enabled().is_empty());
