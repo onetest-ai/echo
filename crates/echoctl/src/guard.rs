@@ -627,7 +627,7 @@ impl VaultScope {
                 // Grep's `pattern` is a regular expression over the lines: it picks no file.
                 let glob = if tool == "Glob" { text(input, "pattern")? } else { text(input, "glob")? };
                 if let Some(g) = glob {
-                    self.glob(g, &p, results.as_deref())?;
+                    self.glob(tool == "Glob", g, &p, results.as_deref())?;
                 }
                 Ok(Decision::Allow)
             }
@@ -740,11 +740,14 @@ impl VaultScope {
         }
     }
 
-    /// A glob of Glob (`pattern`) or Grep (`glob`), searched from `from`, in every reading the tools may give it
-    /// (`readings`): refused when one starts from home (`~`), climbs (`..`), could name `.git` (also through wildcards
-    /// and classes: `.gi?`, `[.]git`, `.git[/]config`), or its fixed part — up to the last folder before its first
-    /// wildcard, absolute or from `from` — isn't readable (a link out, the file system's root).
-    fn glob(&self, g: &str, from: &Path, results: Option<&Path>) -> Result<(), String> {
+    /// A glob of Glob (`pattern`, `whole`) or Grep (`glob`), searched from `from`, in each of the globs the tool
+    /// hands ripgrep for it (`readings`), read by a glob matcher as globset reads it (`parse_glob`; what it can't
+    /// read is refused). Refused when one starts from home (`~`) or climbs (`..`); when a segment of it other than
+    /// `**` could name `.git` in any spelling (`*`, `.g*`, `[!]]git`, `.GIT`); for Grep when it ends in `**` (it would
+    /// take a `.git` folder, which undoes Claude Code's own `!.git`); for Glob when it starts with `!` (it would list
+    /// everything else) or is only `**` from the vault's root; or when its fixed part — up to the last folder before
+    /// its first wildcard, absolute or from `from` — isn't readable (a link out, the file system's root).
+    fn glob(&self, whole: bool, g: &str, from: &Path, results: Option<&Path>) -> Result<(), String> {
         // Claude Code splits at JavaScript's whitespace, which Rust's misses some of (U+FEFF).
         if g.chars().any(bent) {
             return Err(format!("the pattern {g:?} holds a character no path does (an invisible one, or whitespace but a space)"));
@@ -753,21 +756,41 @@ impl VaultScope {
         if !self.windows && g.contains('\\') {
             return Err(format!("the pattern {g:?} has a backslash: an escape here, not a folder's separator"));
         }
-        for one in readings(&g.replace('\\', "/"))? {
+        for one in readings(&g.replace('\\', "/"), whole)? {
             let parts: Vec<&str> = one.split('/').collect();
             if one.starts_with('~') || parts.contains(&"..") {
                 return Err(format!("the pattern {one} reaches outside the vault"));
             }
-            if parts.iter().any(|s| could_name(s, ".git")) || class_holds_separator(&one) {
-                return Err(format!("the pattern {one} reaches into git's folder"));
+            // Grep's `!…` only leaves files out; Glob's would list all the rest.
+            let excludes = one.starts_with('!');
+            if excludes && whole {
+                return Err(format!("the pattern {one} would list everything it doesn't name, git's folder too"));
+            }
+            let segs = parse_glob(one.strip_prefix('!').unwrap_or(&one).trim_matches('/'))?;
+            if excludes {
+                continue;
+            }
+            if segs.iter().any(names_git) {
+                return Err(format!("the pattern {one} could name git's folder"));
+            }
+            if !whole && matches!(segs.last(), Some(Seg::Any)) {
+                return Err(format!("the pattern {one} ends in **: it would take git's folder too"));
             }
             let fixed = match one.find(['*', '?', '[']) {
                 Some(w) => &one[..one[..w].rfind('/').map_or(0, |s| s + 1)],
                 None => one.as_str(),
             };
-            if !fixed.is_empty() {
+            let start = if fixed.is_empty() {
+                from.to_path_buf()
+            } else {
                 let p = vault_path(Some(fixed), from)?;
                 self.readable(&p, results).map_err(|e| format!("the pattern {one}: {e}"))?;
+                p
+            };
+            // Glob's `**` alone, from the root, lists the vault's `.git` too; from a folder inside, only that folder.
+            let rest = parse_glob(one[fixed.len()..].trim_matches('/'))?;
+            if whole && start == self.root && !one[fixed.len()..].is_empty() && rest.iter().all(|s| matches!(s, Seg::Any)) {
+                return Err(format!("the pattern {one} lists everything in the vault, git's folder too"));
             }
         }
         Ok(())
@@ -794,15 +817,16 @@ impl VaultScope {
     }
 }
 
-/// Every glob Grep or Glob may take `g` for: the whole of it (Glob doesn't split its pattern), its pieces between
-/// spaces, each with its braces expanded (`clients/{a,b}.md` is `clients/a.md` and `clients/b.md`) — and those
-/// pieces' pieces between commas, braces as they are (Grep splits its `glob` so where a piece has no braces).
-fn readings(g: &str) -> Result<Vec<String>, String> {
+/// The globs Claude Code (2.1.310) hands ripgrep for `g`, braces expanded (`clients/{a,b}.md` is `clients/a.md` and
+/// `clients/b.md`): Glob's pattern whole (`whole`); Grep's `glob` split at spaces, and a piece without both braces at
+/// its commas too. A tool never sends the others, and the matcher would refuse some legitimate ones among them
+/// (`*.md **/*.txt` read whole has `**` glued to a name).
+fn readings(g: &str, whole: bool) -> Result<Vec<String>, String> {
+    let pieces: Vec<&str> = if whole { vec![g] } else { g.split(' ').flat_map(|p| if p.contains('{') && p.contains('}') { vec![p] } else { p.split(',').collect() }).collect() };
     let mut out = vec![];
-    for r in std::iter::once(g).chain(g.split(' ')).filter(|r| !r.is_empty()) {
+    for r in pieces.into_iter().filter(|r| !r.is_empty()) {
         out.extend(alternatives(r)?);
     }
-    out.extend(g.split([' ', ',']).filter(|r| !r.is_empty()).map(str::to_owned));
     if out.len() > 1024 {
         return Err("the pattern has too many parts".into());
     }
@@ -830,26 +854,130 @@ fn alternatives(g: &str) -> Result<Vec<String>, String> {
     Ok(out.into_iter().map(|o| o + rest).collect())
 }
 
-/// Does a character class (`[…]`) in `g` hold a folder's separator — `.git[/]config` is `.git/config`? A class with
-/// no end is taken as holding the rest.
-fn class_holds_separator(g: &str) -> bool {
-    let mut chars = g.chars();
-    while let Some(c) = chars.next() {
-        if c != '[' {
-            continue;
+/// One step of a glob's name, as globset (ripgrep's) reads it.
+#[derive(Debug)]
+enum Tok {
+    /// A character as it is.
+    Char(char),
+    /// `?`: any one character.
+    One,
+    /// `*`: any run of characters within the name.
+    Star,
+    /// `[…]`: one character in these ranges — or, `[!…]` / `[^…]`, not in them.
+    Class { not: bool, ranges: Vec<(char, char)> },
+}
+
+/// A glob's segment (between `/`): `**`, any number of whole folders; or a name.
+#[derive(Debug)]
+enum Seg {
+    Any,
+    Name(Vec<Tok>),
+}
+
+/// A glob (braces expanded) as globset reads it, segment by segment. Refused: what globset refuses (a class without
+/// its `]`, which also takes `[]` and `[!]`; a range backwards; `**` beside other characters) and a brace or a
+/// backslash left over — whatever the guard can't read, it doesn't let through.
+fn parse_glob(g: &str) -> Result<Vec<Seg>, String> {
+    g.split('/').map(|s| {
+        if s == "**" {
+            return Ok(Seg::Any);
         }
-        // Its first member may be `]` (after a `!` or `^`), which then doesn't end it.
-        let mut first = true;
-        for m in chars.by_ref() {
-            match m {
-                '/' => return true,
-                '!' | '^' if first => continue,
-                ']' if !first => break,
-                _ => first = false,
-            }
+        if s.contains("**") {
+            return Err(format!("`**` is a folder of its own, not part of {s}"));
+        }
+        let cs: Vec<char> = s.chars().collect();
+        let mut toks = vec![];
+        let mut i = 0;
+        while i < cs.len() {
+            toks.push(match cs[i] {
+                '?' => Tok::One,
+                '*' => Tok::Star,
+                c @ ('{' | '}' | '\\') => return Err(format!("{s} has a {c} the guard doesn't read")),
+                '[' => {
+                    i += 1;
+                    let not = matches!(cs.get(i), Some('!' | '^'));
+                    i += usize::from(not);
+                    let mut ranges = vec![];
+                    loop {
+                        let c = *cs.get(i).ok_or_else(|| format!("{s} has a class without its ]"))?;
+                        // A `]` first is itself; a `-` first or last too.
+                        if c == ']' && !ranges.is_empty() {
+                            break;
+                        }
+                        match (cs.get(i + 1), cs.get(i + 2)) {
+                            (Some('-'), Some(&d)) if d != ']' => {
+                                if d < c {
+                                    return Err(format!("{s} has a range backwards"));
+                                }
+                                ranges.push((c, d));
+                                i += 3;
+                            }
+                            _ => {
+                                ranges.push((c, c));
+                                i += 1;
+                            }
+                        }
+                    }
+                    Tok::Class { not, ranges }
+                }
+                c => Tok::Char(c),
+            });
+            i += 1;
+        }
+        Ok(Seg::Name(toks))
+    }).collect()
+}
+
+impl Tok {
+    fn takes(&self, c: char) -> bool {
+        match self {
+            Tok::Char(x) => *x == c,
+            Tok::One | Tok::Star => true,
+            Tok::Class { not, ranges } => ranges.iter().any(|&(a, b)| a <= c && c <= b) != *not,
         }
     }
-    false
+}
+
+/// Can the name's steps `toks` match a name spelled `name` (each place: the characters it may be)?
+fn name_matches(toks: &[Tok], name: &[Vec<char>]) -> bool {
+    // How much of the name the steps so far can have matched: each count they may be at.
+    let mut at = vec![false; name.len() + 1];
+    at[0] = true;
+    for t in toks {
+        let mut next = vec![false; name.len() + 1];
+        if let Tok::Star = t {
+            if let Some(first) = at.iter().position(|&a| a) {
+                next[first..].fill(true);
+            }
+        } else {
+            for (k, cs) in name.iter().enumerate() {
+                if at[k] && cs.iter().any(|&c| t.takes(c)) {
+                    next[k + 1] = true;
+                }
+            }
+        }
+        at = next;
+    }
+    at[name.len()]
+}
+
+/// Each character of `name` with every one a file system that ignores case takes for it (`fold`): `g`, `G`; `i`,
+/// `I`, `ı`; …
+fn spellings(name: &str) -> Vec<Vec<char>> {
+    name.chars()
+        .map(|c| {
+            let key = fold(&c.to_string());
+            let mut v: Vec<char> = [c, '\u{131}', '\u{17F}', '\u{212A}'].into_iter().chain(c.to_uppercase()).chain(c.to_lowercase()).filter(|x| fold(&x.to_string()) == key).collect();
+            v.sort_unstable();
+            v.dedup();
+            v
+        })
+        .collect()
+}
+
+/// Could this segment name `.git`, in any spelling a file system that ignores case takes for it?
+fn names_git(seg: &Seg) -> bool {
+    matches!(seg, Seg::Name(t) if name_matches(t, &spellings(".git")))
 }
 
 /// A field of a tool call that, when given, is text.
@@ -920,45 +1048,6 @@ fn plain(n: &str) -> bool {
     let stem = upper.split('.').next().unwrap_or("");
     let device = matches!(stem, "CON" | "PRN" | "AUX" | "NUL") || ((stem.starts_with("COM") || stem.starts_with("LPT")) && stem.len() == 4 && stem.as_bytes()[3].is_ascii_digit());
     !(device || n.contains(':') || n.ends_with(['.', ' ']) || n.chars().any(char::is_control))
-}
-
-/// Could the glob segment `seg` match the name `name`, in any case? A segment of wildcards only (`*`, `**`) names
-/// nothing in particular — Claude Code's Grep and Glob leave `.git` out of those themselves — and is let through.
-fn could_name(seg: &str, name: &str) -> bool {
-    if seg.chars().all(|c| c == '*') {
-        return false;
-    }
-    let g: Vec<char> = fold(seg).chars().collect();
-    let s: Vec<char> = fold(name).chars().collect();
-    // How much of `name` the glob so far can have matched: each count it may be at.
-    let mut at = vec![false; s.len() + 1];
-    at[0] = true;
-    let mut i = 0;
-    while i < g.len() {
-        let mut next = vec![false; s.len() + 1];
-        if g[i] == '*' {
-            if let Some(first) = at.iter().position(|&a| a) {
-                next[first..].fill(true);
-            }
-        } else {
-            let mut any = g[i] == '?';
-            // A class (`[…]`) taken as any one character: it may refuse more, never less.
-            if g[i] == '[' {
-                if let Some(e) = g[i + 1..].iter().skip(1).position(|&c| c == ']') {
-                    any = true;
-                    i += e + 2;
-                }
-            }
-            for (k, c) in s.iter().enumerate() {
-                if at[k] && (any || *c == g[i]) {
-                    next[k + 1] = true;
-                }
-            }
-        }
-        at = next;
-        i += 1;
-    }
-    at[s.len()]
 }
 
 /// A path's name folded as file systems that ignore case fold it: `.CLAUDE` is `.claude`, and through upper case `ſ`
@@ -2198,6 +2287,83 @@ mod tests {
         // A glob from the file system's root starts there: its fixed part is `/`.
         for g in ["/*", "/**/secret.md", "/??/x/*"] {
             assert!(denied(s.decide(&tool("Glob", json!({"pattern": g})))), "{g}");
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Does glob `g` match `path`, spelled exactly so, as globset would? `**` takes any number of whole folders.
+    fn glob_matches(g: &str, path: &str) -> Result<bool, String> {
+        fn walk(segs: &[Seg], names: &[&str]) -> bool {
+            match segs.split_first() {
+                None => names.is_empty(),
+                Some((Seg::Any, rest)) => (0..=names.len()).any(|k| walk(rest, &names[k..])),
+                Some((Seg::Name(t), rest)) => names.split_first().is_some_and(|(n, more)| name_matches(t, &n.chars().map(|c| vec![c]).collect::<Vec<_>>()) && walk(rest, more)),
+            }
+        }
+        Ok(walk(&parse_glob(g)?, &path.split('/').collect::<Vec<_>>()))
+    }
+
+    #[test]
+    fn the_glob_matcher_reads_globs_as_globset_does() {
+        let m = |g: &str, p: &str| glob_matches(g, p).unwrap_or(false);
+        // Classes: `!` or `^` negates; a `]` first is itself; ranges; a `-` first or last is itself.
+        assert!(m("[!]]", "a") && !m("[!]]", "]"));
+        assert!(m("[]a]", "]") && m("[]a]", "a") && !m("[]a]", "b"));
+        assert!(m("[a-c]", "b") && !m("[a-c]", "d"));
+        assert!(m("[^x]git", ".git") && !m("[^x]git", "xgit"));
+        assert!(m("[-a]", "-") && m("[a-]", "-") && !m("[a-]", "b"));
+        // `*` and `?` stay within a name.
+        assert!(m("*", "abc") && m("*", ".git") && !m("*", "a/b"));
+        assert!(m("*.md", "x.md") && m("*.md", ".md") && !m("*.md", "x/y.md"));
+        assert!(m("?", "a") && !m("?", "ab") && !m("?", "a/b"));
+        // `**`: any number of whole folders, at the start, in the middle, at the end.
+        assert!(m("**/x", "x") && m("**/x", "a/x") && m("**/x", "a/b/x") && !m("**/x", "a/y"));
+        assert!(m("a/**/b", "a/b") && m("a/**/b", "a/x/b") && m("a/**/b", "a/x/y/b") && !m("a/**/b", "a/x/c"));
+        assert!(m("a/**", "a/x") && m("a/**", "a/x/y") && !m("a/**", "b/x"));
+        // What globset refuses, or what a run never needs (a brace left after expansion, a backslash), is refused.
+        for g in ["[", "[]", "[!]", "[abc", "a**b", "**a", "a/**b/c", "[z-a]", "{a,b}", r"a\b"] {
+            assert!(parse_glob(g).is_err(), "{g}");
+        }
+        // Every spelling a file system that ignores case takes for `.git`.
+        let git = spellings(".git");
+        let names_it = |g: &str| matches!(parse_glob(g).as_deref(), Ok([Seg::Name(t)]) if name_matches(t, &git));
+        for g in [".git", ".GIT", ".Git", ".gıt", ".[!g]it", "[!x]GIT", "*", ".g*"] {
+            assert!(names_it(g), "{g}");
+        }
+        for g in [".gitignore", "*.md", "git", ".[!gG]it"] {
+            assert!(!names_it(g), "{g}");
+        }
+    }
+
+    #[test]
+    fn what_can_reach_git_is_decided_by_a_glob_matcher() {
+        // Claude Code's Grep passes `--hidden --glob '!.git' … --glob <piece>`, and a later glob that takes the `.git`
+        // folder undoes `!.git`; its Glob passes one `--glob <pattern>` with `--files --hidden --no-ignore`.
+        let (root, v) = vault_fixture("matcher");
+        let s = chat_scope(&v, "ask");
+        let grep = |g: &str| s.decide(&tool("Grep", json!({"pattern": "x", "glob": g})));
+        let glob = |g: &str| s.decide(&tool("Glob", json!({"pattern": g})));
+        for g in ["*", "**", "**/*", ".g*", "[.]git", "[!]]git", "[^x]git", "?git", ".gi?", "{.git,x}", "knowledge/**", "**/", "*.md *", ".GIT", ".Gıt", ".GI?", ".Gı*"] {
+            assert!(denied(grep(g)), "Grep {g}");
+        }
+        // `!` excludes: it can't take `.git` back.
+        for g in ["*.md", "**/*.md", "clients/*.md", "*.{md,txt}", "*.md **/*.txt", "!*.md"] {
+            assert_eq!(grep(g), Decision::Allow, "Grep {g}");
+        }
+        // Glob's `!x` would list everything else, `.git` too.
+        for g in ["*", "**", "**/*", "*/config", "[!]]git/*", ".g[h-j]t/*", ".GIT/*", "**/", "!*.md", "!x"] {
+            assert!(denied(glob(g)), "Glob {g}");
+        }
+        for g in ["*.md", "**/*.md", "knowledge/**", "knowledge/**/*.md", "clients/{a,b}.md"] {
+            assert_eq!(glob(g), Decision::Allow, "Glob {g}");
+        }
+        // `**` alone lists the vault's `.git` from its root, however that is named; from a folder inside, it doesn't.
+        assert!(denied(glob(&format!("{}/**", p(&v)))));
+        assert!(denied(s.decide(&tool("Glob", json!({"pattern": "**", "path": p(&v)})))));
+        assert_eq!(s.decide(&tool("Glob", json!({"pattern": "**", "path": "knowledge"}))), Decision::Allow);
+        // What the matcher can't read is refused.
+        for g in ["[abc", "a**b", "[]", "[z-a]/*.md"] {
+            assert!(denied(grep(g)) && denied(glob(g)), "{g}");
         }
         let _ = fs::remove_dir_all(&root);
     }
