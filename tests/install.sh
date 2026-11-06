@@ -50,4 +50,7 @@ if [ -n "$left" ]; then
   echo "warning: paths not moved in:" >&2
   echo "$left" >&2
 fi
+# The pre-push hook (functional map up to date before a push) lives in the repo; point git at it.
+git config core.hooksPath .githooks
+
 echo "manual-qa installed for Echo: cases in $tests/cases, reports in $tests/reports"

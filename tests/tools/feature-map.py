@@ -12,6 +12,9 @@ The map is split so features of different parts of the app can be worked on in p
                                               every agent case in a scenario (exit 1 on a problem)
   tests/tools/feature-map.py render [OUT]     the map as one HTML page with coverage (default
                                               tests/reports/feature-map.html)
+  tests/tools/feature-map.py changes [BASE]   what this branch changed in the map against BASE (default main): the
+                                              features added, changed and removed — the PR's "Map:" line — and a
+                                              warning when app code changed but the map didn't (exit 1)
 
 Coverage: a case lists the features it checks in its frontmatter (`requirements: [F-CALLS-01, …]`); a scenario lists
 its cases (`cases:`). A feature is covered by agent cases, manual cases, or none.
@@ -299,6 +302,43 @@ kpis();draw();
 </script></body></html>"""
 
 
+APP_CODE = ("crates/", "plugin/")
+
+
+def changes(base):
+    """The map's features on BASE vs the working tree, and whether app code changed without the map."""
+    import subprocess
+    root = TESTS.parent
+    git = lambda *a: subprocess.run(["git", *a], cwd=root, capture_output=True, text=True, check=True).stdout
+    merge_base = git("merge-base", base, "HEAD").strip()
+    old = {}
+    for name in git("ls-tree", "--name-only", f"{merge_base}:tests/feature-map/areas").split() if git("ls-tree", merge_base, "tests/feature-map/areas") else []:
+        a = json.loads(git("show", f"{merge_base}:tests/feature-map/areas/{name}"))
+        old.update({f["id"]: f for f in a["features"]})
+    new = {f["id"]: {k: v for k, v in f.items() if k not in ("area", "file")} for f in load_map()["features"]}
+    added = sorted(set(new) - set(old))
+    removed = sorted(set(old) - set(new))
+    changed = sorted(i for i in set(new) & set(old) if new[i] != old[i])
+    files = set(git("diff", "--name-only", merge_base).split()) | set(git("ls-files", "--others", "--exclude-standard").split())
+    code = sorted(f for f in files if f.startswith(APP_CODE))
+    touched_map = any(f.startswith("tests/feature-map/") for f in files)
+    def ids(xs):
+        if len(xs) <= 12:
+            return ", ".join(xs)
+        by = {}
+        for x in xs:
+            by[x.rsplit("-", 1)[0]] = by.get(x.rsplit("-", 1)[0], 0) + 1
+        return f"{len(xs)} features ({', '.join(f'{k} {n}' for k, n in by.items())})"
+    parts = [f"added {ids(added)}" if added else "", f"changed {ids(changed)}" if changed else "", f"removed {ids(removed)}" if removed else ""]
+    line = "; ".join(p for p in parts if p) or "no change"
+    print(f"Map: {line}")
+    if code and not touched_map:
+        print(f"warning: {len(code)} app file(s) changed ({', '.join(code[:5])}{' …' if len(code) > 5 else ''}) but tests/feature-map/ didn't.")
+        print("Update the features this changes, or say in the PR why the behaviour doesn't change (\"Map: no behaviour change — <why>\").")
+        return 1
+    return 0
+
+
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else "check"
     doc, cases, scenarios = load()
@@ -308,6 +348,8 @@ def main():
             print(p)
         print(f"{len(doc['features'])} features, {len(cases)} cases, {len(scenarios)} scenarios: {len(ps)} problem(s)")
         sys.exit(1 if ps else 0)
+    if cmd == "changes":
+        sys.exit(changes(sys.argv[2] if len(sys.argv) > 2 else "main"))
     if cmd == "render":
         out = Path(sys.argv[2]) if len(sys.argv) > 2 else TESTS / "reports" / "feature-map.html"
         covered, n = render(doc, cases, scenarios, out)
