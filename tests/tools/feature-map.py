@@ -182,7 +182,7 @@ nav{width:380px;min-width:320px;border-right:1px solid var(--line);display:flex;
 .p.critical{color:var(--danger);background:rgb(196 49 75 / .1)} .p.high{color:var(--warn);background:rgb(178 91 0 / .1)} .p.medium,.p.low{color:var(--text-3);background:rgb(127 127 140 / .1)}
 section{flex:1;overflow:auto;padding:28px 36px 80px}
 .crumb{font-size:12px;color:var(--text-3);display:flex;gap:6px;align-items:center;margin-bottom:6px}
-h2{font-size:21px;margin:0 0 6px;font-weight:650;letter-spacing:-.02em} .lead{font-size:15px;line-height:1.55;max-width:820px;margin:4px 0 14px;color:var(--text)}
+h2{font-size:21px;margin:0 0 6px;font-weight:650;letter-spacing:-.02em} .lead{font-size:15px;line-height:1.55;margin:4px 0 14px;color:var(--text)}
 h3{font-size:11px;margin:26px 0 10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);font-weight:600;display:flex;align-items:center;gap:8px}
 h3::after{content:"";flex:1;height:1px;background:var(--line)}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
@@ -204,7 +204,7 @@ a.lnk{color:var(--accent-ink);cursor:pointer;text-decoration:none} a.lnk:hover{t
 .ax .where{grid-column:2;font-size:11.5px;color:var(--text-3)}
 .empty{color:var(--text-3);padding:4px 0}
 code{font:11.5px var(--mono);background:rgb(127 127 140 / .12);padding:1px 5px;border-radius:4px}
-.about{font-size:13.5px;color:var(--text-2);max-width:980px;line-height:1.65} .about p{margin:0 0 12px} .about ul{margin:0 0 12px;padding-left:20px} .about li{margin:0 0 6px} .about b{color:var(--text);font-weight:600}
+.about{font-size:13.5px;color:var(--text-2);line-height:1.65} .about p{margin:0 0 12px} .about ul{margin:0 0 12px;padding-left:20px} .about li{margin:0 0 6px} .about b{color:var(--text);font-weight:600}
 .tip{position:fixed;pointer-events:none;background:var(--text);color:var(--bg);padding:6px 9px;border-radius:7px;font-size:12px;max-width:360px;display:none;z-index:9;box-shadow:var(--shadow)}
 </style></head><body>
 <header><div class="brand"><h1>__TITLE__</h1><span>tests/feature-map · rebuild with <span class="mono">tests/tools/feature-map.py render</span></span></div><div class="kpis" id="kpis"></div></header>
