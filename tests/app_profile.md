@@ -28,11 +28,22 @@ agent tests it. This file is given to every manual-qa role; where it differs fro
    Claude Code runs that need a signed-in account). The lead lists them in the report as `skipped (manual)` and never
    tries them.
 6. **A PASS needs evidence**: a Playwright snapshot for a window step, the command's output for a CLI step.
+7. **Agent runs execute scenarios, not single cases** (see "Scenarios" below): one runner per scenario, fresh data
+   per scenario, and **the browser stays open** from one runner to the next — never close the page or the browser.
 
 ## Starting the app under test
 
+For a scenario, one command builds fresh data and serves the window on it, and one stops it:
+
 ```bash
-cargo build
+cargo build                                            # once per run
+tests/fixtures/serve.sh up "$(mktemp -d)/s01" 47930    # prints base_url=… env=<dir>/env
+tests/fixtures/serve.sh down <that dir>                # after the scenario
+```
+
+What it does, step by step (to do it by hand):
+
+```bash
 dir="$(mktemp -d)/echo-test"; mkdir -p "$dir"
 tests/fixtures/make-data.sh "$dir"
 . "$dir/env"
@@ -245,3 +256,30 @@ Cases live in `tests/cases/<suite>/TC-NNN_<slug>.md` in the manual-qa format, wi
 
 Steps use `{{base_url}}` for the window and `echoctl …` (after `. <dir>/env`) for the CLI; test data comes from the
 table above — a case that needs more adds it in its Preconditions with the `echoctl` commands that make it.
+
+## Scenarios
+
+A **case** is one behaviour (the unit of coverage, `tests/cases/`). A **scenario** is a user's journey that chains
+cases in one run (`tests/scenarios/S-NN_<slug>.md`): its frontmatter lists the case files in order (`cases:`), and its
+**Stages** table gives each stage's case, the stages it depends on, and any glue step before it. Agent runs execute
+scenarios: far fewer runners than cases, and the cases meet each other the way a user meets them.
+
+**Running one (the runner):**
+1. Load `{{base_url}}/` first (the cookie), in the browser already open — don't open a new one, don't close it.
+2. For each stage in order: do its "Before it" glue, read the stage's case file, and run its steps exactly as a single
+   case (each step's expected result checked by snapshot or command output; the case's teardown at its end).
+3. A failed step fails **that stage**: record actual vs expected, a screenshot, the console; then go on with the next
+   stage, unless it lists the failed stage under "Depends on" — then it is BLOCKED (with the reason).
+4. End with one JSON block for the scenario: `{"scenario_id", "title", "result" (PASS only if every stage passed;
+   FAIL if any failed; BLOCKED if none could run), "stages": [{"stage", "case" (area/TC-NNN), "title", "priority",
+   "result", "steps_total", "steps_completed", "failure_step", "failure_reason", "screenshot"}], "console_errors",
+   "duration_seconds", "notes"}`. Screenshots: `tests/reports/screenshots/<S-NN>-<stage>-<area>-<TC-NNN>.png`.
+
+**Leading a run (the lead):** per scenario, `tests/fixtures/serve.sh up <new dir> <port>`, dispatch one runner with
+the scenario path, base_url and env file, then `serve.sh down`. Scenarios with `data: standard` each get fresh data
+(they may change it). The report counts stages (cases) as well as scenarios. `run: manual` cases are listed as
+skipped (manual).
+
+**Writing one:** order the stages so that a stage that changes data comes after the stages that read what it
+changes, and give a stage "Depends on" only when it cannot run without the earlier one. Every `run: agent` case is
+in at least one scenario; a new case goes into an existing scenario where it fits the journey, or a new one.

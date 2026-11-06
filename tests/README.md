@@ -6,9 +6,11 @@ to the code (`cargo test`, `scripts/check-mod.sh`).
 
 | Path | What |
 |---|---|
-| `cases/<area>/TC-NNN_<slug>.md` | One case each, in the manual-qa format; `run: agent` (an agent runs it) or `run: manual` (a person) |
+| `cases/<area>/TC-NNN_<slug>.md` | One behaviour each (the unit of coverage), in the manual-qa format; `run: agent` (an agent runs it) or `run: manual` (a person) |
+| `scenarios/S-NN_<slug>.md` | A user's journey that chains cases by path, in stages: what agent runs execute |
 | `app_profile.md` | Echo for the test agents: rules, starting the app on test data, the data, routes, fragile areas |
 | `fixtures/make-data.sh <dir>` | Builds a made-up data folder (Acme, Globex, Initech; calls, threads, tasks, today's agenda) |
+| `fixtures/serve.sh up <dir> <port>` / `down <dir>` | Fresh data plus the window served on it, for one scenario |
 | `install.sh` | Installs the manual-qa agent team (arozumenko/sdlc-skills) on this machine, pointed at this folder |
 | `reports/` | Run reports and screenshots (git-ignored) |
 
@@ -16,11 +18,22 @@ to the code (`cargo test`, `scripts/check-mod.sh`).
 
 1. Once per machine: `tests/install.sh`, then restart Claude Code in the repo (it loads the agents and Playwright MCP).
 2. `cargo build`.
-3. Start Claude Code with the lead as the active agent (`claude --agent test-run-lead`) and give it a suite, e.g.
-   "run tests/cases/today". It builds the data, serves the window, runs each `run: agent` case, and writes
-   `tests/reports/RUN-<date>-NNN.md`; `run: manual` cases are listed for a person.
+3. Start Claude Code with the lead as the active agent (`claude --agent test-run-lead`) and give it scenarios, e.g.
+   "run tests/scenarios". Per scenario it serves the window on fresh data, one runner goes through its stages (the
+   browser stays open between scenarios), and the report goes to `tests/reports/RUN-<date>-NNN.md`, counting
+   scenarios and their stages; `run: manual` cases are listed for a person.
 
-Writing cases: `test-author` (or by hand) following `app_profile.md` → "Writing a case".
+Writing cases: `test-author` (or by hand) following `app_profile.md` → "Writing a case"; then put each agent case
+into a scenario (`app_profile.md` → "Scenarios").
+
+## Scenarios
+
+| Scenario | Stages | Journey |
+|---|---|---|
+| [S-01](scenarios/S-01_review-a-client-call.md) | 7 | Review a client call: find it, read the minutes, check a point, note a follow-up |
+| [S-02](scenarios/S-02_plan-the-afternoon.md) | 5 | Plan the afternoon: Today, the calendar, set a meeting to record and take it back |
+| [S-03](scenarios/S-03_tidy-the-calls.md) | 2 | Tidy the calls: a call without minutes, delete one, restore it |
+| [S-04](scenarios/S-04_the-cli-on-the-data.md) | 2 | The CLI on the same data |
 
 ## Areas
 
