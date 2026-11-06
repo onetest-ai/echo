@@ -12,6 +12,7 @@ const block = (name) => {
 }
 const load = (names, exports) => new Function(`${names.map(block).join('\n')}\nreturn { ${exports.join(', ')} }`)()
 const { knParseRoute, knRouteOf } = load(['kn-route'], ['knParseRoute', 'knRouteOf'])
+const { knTabCounts } = load(['kn-tabs'], ['knTabCounts'])
 const { knSwitcherEntries } = load(['kn-switcher'], ['knSwitcherEntries'])
 const { knChipState } = load(['kn-chip'], ['knChipState'])
 const { knBuildTree } = load(['kn-tree'], ['knBuildTree'])
@@ -317,6 +318,16 @@ test('a graph over 5,000 pages starts with the open page\'s neighbours', () => {
 test('text typed into a session has no control characters', () => {
   assert.equal(knPlainPrompt('/twin What about notes/a\rb.md?\n'), '/twin What about notes/a b.md?')
   assert.equal(knPlainPrompt('/run-skill\u001b[2J'), '/run-skill [2J')
+})
+
+test('tab_counts_only_where_something_waits', () => {
+  assert.deepEqual(knTabCounts({ waiting: 0, needs: 0 }), { ingest: null, health: null }, 'no number at 0')
+  assert.deepEqual(knTabCounts({ waiting: 6, needs: 3 }), { ingest: 6, health: 3 })
+  assert.deepEqual(knTabCounts({ waiting: 6, needs: 0 }), { ingest: 6, health: null })
+  assert.deepEqual(knTabCounts({}), { ingest: null, health: null }, 'missing counts: none')
+  assert.deepEqual(knTabCounts(), { ingest: null, health: null })
+  const c = knTabCounts({ waiting: 6, needs: 3 })
+  for (const tab of ['pages', 'graph', 'settings', 'ask', 'home']) assert.equal(c[tab], undefined, `${tab} never shows a number`)
 })
 
 let failed = 0

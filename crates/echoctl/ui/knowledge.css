@@ -34,6 +34,9 @@
 .kn-sp { display: inline-block; width: 14px; flex: none; }
 .menu-item svg { width: 14px; height: 14px; flex: none; }
 .kn-tabs { padding: 4px 14px 0; border-bottom: 1px solid var(--line); flex: none; }
+.kn-tabs .tabs { overflow-x: auto; scrollbar-width: none; }
+.kn-tabs .tabs::-webkit-scrollbar { display: none; }
+.kn-tabs .tab { flex: none; white-space: nowrap; }
 .kn-tabs-empty { padding: 0; min-height: 10px; }
 .kn-body { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
 

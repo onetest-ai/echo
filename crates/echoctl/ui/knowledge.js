@@ -27,6 +27,14 @@ function knRouteOf({ vault, tab = 'pages', path = '' }) {
 }
 // end of the kn-route block
 
+// ── kn-tabs: which tabs show a number (only where something waits) ──
+/** `{ ingest, health }`: what waits to be ingested and what needs a look; `null` at 0 or when missing, so no badge. */
+function knTabCounts({ waiting, needs } = {}) {
+  const n = (v) => (Number.isFinite(v) && v > 0 ? v : null)
+  return { ingest: n(waiting), health: n(needs) }
+}
+// end of the kn-tabs block
+
 // ── kn-switcher: what the header's switcher lists ──
 function knSwitcherEntries(vaults, recallOn, pluginTabs) {
   const out = [{ kind: 'head', label: 'Your vaults' }]
