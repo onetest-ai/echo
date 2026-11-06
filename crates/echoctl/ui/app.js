@@ -936,9 +936,14 @@ function list() {
   }
   // Today's meetings still to come, each a call-to-be with its prep.
   const ups = !q && S.up && S.up.meetings ? S.up.meetings : []
-  // Folded by default (a full day is a long list): the head says how many and what is next.
-  const next = ups[0] && ups[0].start ? `next ${hm(new Date(ups[0].start))}` : ''
-  const upHead = `<button class="group group-fold" data-up-fold aria-expanded="${!!S.upOpen}">${ICON(S.upOpen ? '<path d="M6 9l6 6 6-6"/>' : '<path d="M9 6l6 6-6 6"/>')}Coming up today<span class="group-n">${ups.length}${next ? ` · ${esc(next)}` : ''}</span></button>`
+  // Folded by default (a full day is a long list): a head like a call's row — how many, and the next one.
+  const nx = ups[0], nxAt = nx && nx.start ? hm(new Date(nx.start)) : ''
+  const upHead = `<button class="row up-fold" data-up-fold aria-expanded="${!!S.upOpen}" title="${S.upOpen ? 'Fold' : 'Show them'}">
+      <span class="si up" aria-hidden="true">${ICON('<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>').replace('width="20" height="20"', 'width="14" height="14"')}</span>
+      <span class="t">Coming up today<span class="up-n">${ups.length}</span></span>
+      <span class="m">${nx ? `<span>Next ${esc(nxAt)}</span><span>${esc(nx.subject || 'A meeting')}</span>` : ''}</span>
+      <span class="up-chev" aria-hidden="true">${ICON('<path d="M9 6l6 6-6 6"/>')}</span>
+    </button>`
   const upRows = ups.length ? upHead + (S.upOpen ? ups : []).map((u) => {
     // As a call's row: only its icon differs (a clock: still to come).
     const st = u.start ? new Date(u.start) : null, en = u.end ? new Date(u.end) : null
