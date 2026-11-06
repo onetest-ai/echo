@@ -35,7 +35,7 @@ impl TargetApp {
 /// instead of Teams (`tests/tools/testcall`, a call between two Macs on the local network), so the whole
 /// recording path runs without a Teams account. A release build never reads it.
 #[allow(dead_code)]
-fn test_call_app() -> Option<&'static [&'static str]> {
+pub fn test_call_app() -> Option<&'static [&'static str]> {
     #[cfg(debug_assertions)]
     {
         static APP: std::sync::OnceLock<Option<Vec<&'static str>>> = std::sync::OnceLock::new();

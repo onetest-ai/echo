@@ -8,7 +8,7 @@
 //   testcall dial <host>:7766 [--me mic.wav --me-device "BlackHole 2ch"] [--play x.wav] [--quiet]
 //
 // --play: what this side says (a wav; 16 kHz mono after conversion), streamed in real time.
-// --me / --me-device: what the user says, played into a virtual device (BlackHole) whose input this app opens as its
+// --me / --me-device: what the user says, played (by an ffmpeg child, not this app) into a virtual device (BlackHole) whose input this app opens as its
 //   microphone and sends — so Echo records it as "Me" from the device the call app uses. Without --me-device the app
 //   opens no microphone (the serving side needs none).
 // --quiet: don't play what comes in (the other side's speakers).
@@ -138,7 +138,27 @@ let speaker = quiet ? nil : Player(device: nil)
 let say: [Float] = opt("--play").map(load) ?? []
 let meSay: [Float] = opt("--me").map(load) ?? []
 var mic: Mic?
-var meOut: Player?
+var feeder: Process?
+
+/// ffmpeg playing a wav into the output device of this name (its audiotoolbox index, from ffmpeg's own list).
+func feed(_ wav: String, into name: String) {
+    guard let ffmpeg = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"].first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else { die("no ffmpeg") }
+    let list = Process(), pipe = Pipe()
+    list.executableURL = URL(fileURLWithPath: ffmpeg)
+    list.arguments = ["-hide_banner", "-f", "lavfi", "-i", "anullsrc", "-t", "0.01", "-f", "audiotoolbox", "-list_devices", "true", "-"]
+    list.standardError = pipe; list.standardOutput = FileHandle.nullDevice
+    try! list.run(); list.waitUntilExit()
+    let text = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    guard let line = text.split(separator: "\n").first(where: { $0.contains("] \(name),") || $0.contains(" \(name), ") }),
+          let open = line.lastIndex(of: "["), let close = line[open...].firstIndex(of: "]"),
+          let index = Int(line[line.index(after: open)..<close]) else { die("ffmpeg has no output device named \(name)") }
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: ffmpeg)
+    p.arguments = ["-v", "error", "-re", "-i", wav, "-f", "audiotoolbox", "-audio_device_index", String(index), "-"]
+    p.standardInput = FileHandle.nullDevice
+    try! p.run()
+    feeder = p
+}
 
 func send(_ type: UInt8, _ payload: Data = Data()) {
     var d = Data([type, UInt8(payload.count & 0xff), UInt8(payload.count >> 8)])
@@ -172,7 +192,9 @@ func begin() {
         if let name = opt("--me-device") {
             guard let dev = device(named: name) else { die("no audio device named \(name)") }
             mic = Mic(device: dev) { frame in queue.async { sendAudio(frame) } }
-            if !meSay.isEmpty { meOut = Player(device: dev); meOut!.play(meSay[...]) }
+            // The user's lines go into the virtual device from another process (ffmpeg, no bundle id): what this
+            // app plays is the remote side, and Echo takes all of it — the user's words must not be among it.
+            if let me = opt("--me") { feed(me, into: name) }
             total = max(total, meSay.count)
         }
         var i = 0
