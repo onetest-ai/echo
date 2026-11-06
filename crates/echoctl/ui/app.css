@@ -1879,15 +1879,19 @@ select.set-in { width: auto; margin-right: 6px; }
 .ev-prep { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
 /* Today: cards delivered to Echo, your day, your work. */
-.td { padding: 18px 24px 32px; display: flex; flex-direction: column; gap: 16px; min-height: 0; flex: 1 1 auto; overflow-y: auto; }
+/* One scroll per card, as Templates: the head and Needs you now stay, Your day and My work scroll inside; the page
+   itself scrolls only when the window is too short for the cards' least height. */
+.td { padding: 18px 24px 24px; display: flex; flex-direction: column; gap: 16px; min-height: 0; flex: 1 1 auto; overflow-y: auto; }
 .td-head { display: flex; align-items: baseline; gap: 12px; }
 .td-head h1 { margin: 0; font-size: 20px; font-weight: 650; }
 .td-card { border: 1px solid var(--line); border-radius: var(--r-panel); background: var(--surface); padding: 12px 16px; display: flex; flex-direction: column; gap: 6px; }
 .td-card-h { display: flex; align-items: center; gap: 10px; }
 .td-md { font-size: 13px; line-height: 1.55; }
 .td-md > :first-child { margin-top: 0; } .td-md > :last-child { margin-bottom: 0; }
-.td-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.td-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 16px; align-items: start; flex: 1 1 auto; min-height: 280px; }
 .td-sec { border: 1px solid var(--line); border-radius: var(--r-panel); background: var(--surface); padding: 12px 16px; }
+.td-grid > .td-sec { display: flex; flex-direction: column; min-height: 0; max-height: 100%; }
+.td-rows, .td-tasks { min-height: 0; overflow-y: auto; }
 .td-sec h2 { margin: 0 0 8px; font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-3); display: flex; align-items: center; gap: 8px; }
 .td-sec h2 .link-btn { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 500; }
 .td-row { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
@@ -1928,8 +1932,12 @@ select.set-in { width: auto; margin-right: 6px; }
 .td-due.today { color: var(--accent-ink); }
 .td-due.late { color: var(--warn); }
 /* The list scrolls inside its card: the page stays put. */
-.td-tasks { max-height: min(62vh, 560px); overflow-y: auto; padding-right: 2px; }
-@media (max-width: 1000px) { .td-grid { grid-template-columns: minmax(0, 1fr); } }
+.td-tasks { padding-right: 2px; }
+/* Narrow: the cards one above the other, and the page scrolls (each card still at most a screen's worth). */
+@media (max-width: 1000px) {
+  .td-grid { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; flex: none; }
+  .td-grid > .td-sec { max-height: 80vh; }
+}
 
 /* Today → Needs you now: a row an item — a dot (burning: warn), where and the line, who and when, its actions. */
 .nd .td-card-h { margin-bottom: 4px; }
