@@ -57,8 +57,9 @@ fn split(text: &str) -> Option<(Vec<(String, String)>, String)> {
         }
         if let Some((k, v)) = l.split_once(':') {
             let v = v.trim();
-            if matches!(v, ">" | ">-" | ">+" | "|" | "|-" | "|+") {
-                block = Some((fields.len(), if v.starts_with('>') { " " } else { "\n" }));
+            // Nothing after the colon: a plain value on the indented lines under it, folded as `>` is.
+            if matches!(v, "" | ">" | ">-" | ">+" | "|" | "|-" | "|+") {
+                block = Some((fields.len(), if v.starts_with('|') { "\n" } else { " " }));
                 fields.push((k.trim().to_string(), String::new()));
             } else {
                 fields.push((k.trim().to_string(), v.trim_matches('"').trim_matches('\'').to_string()));
@@ -114,7 +115,8 @@ fn walk(d: &Path) -> Vec<PathBuf> {
         for e in fs::read_dir(&p).into_iter().flatten().flatten() {
             let path = e.path();
             // A link is left out: one pointing back up would never end, one pointing out would copy what isn't the skill.
-            if e.file_type().is_ok_and(|t| t.is_symlink()) {
+            // So is what is hidden (`.git`, `.DS_Store`, an editor's swap file): not the skill's, and it changes by itself.
+            if e.file_type().is_ok_and(|t| t.is_symlink()) || e.file_name().to_string_lossy().starts_with('.') {
                 continue;
             }
             if path.is_dir() {
@@ -259,13 +261,17 @@ pub fn fingerprint() -> (String, Option<std::time::SystemTime>) {
 pub fn plugin() -> Result<PathBuf> {
     let base = paths::config_dir().join(PLUGIN);
     let done = base.join(fingerprint().0);
+    // Each use is marked (`.used`): the sweep goes by the last use, not by when a version was made.
+    let used = |d: &Path| fs::write(d.join(".used"), b"");
     if done.join(".claude-plugin/plugin.json").exists() {
+        used(&done)?;
         return Ok(done);
     }
     fs::create_dir_all(&base)?;
     let root = base.join(format!(".new-{}-{}", std::process::id(), chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)));
     let built = build_plugin(&root);
     if built.is_ok() && fs::rename(&root, &done).is_ok() {
+        used(&done)?;
         sweep_plugins(&base, &done);
         return Ok(done);
     }
@@ -273,15 +279,17 @@ pub fn plugin() -> Result<PathBuf> {
     let _ = fs::remove_dir_all(&root);
     built?;
     anyhow::ensure!(done.join(".claude-plugin/plugin.json").exists(), "the skills plugin couldn't be put in place");
+    used(&done)?;
     Ok(done)
 }
 
-/// Old versions of the plugin (a week untouched), and half-made ones left by a crash.
+/// Old versions of the plugin (unused for a week), and half-made ones left by a crash.
 fn sweep_plugins(base: &Path, keep: &Path) {
     let week = std::time::Duration::from_secs(7 * 24 * 3600);
     for e in fs::read_dir(base).into_iter().flatten().flatten() {
         let p = e.path();
-        let old = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|a| a > week);
+        let last = fs::metadata(p.join(".used")).or_else(|_| e.metadata());
+        let old = last.and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|a| a > week);
         if p != keep && old && p.is_dir() {
             let _ = fs::remove_dir_all(&p);
         }
@@ -386,6 +394,12 @@ mod tests {
         fs::write(folded.join("SKILL.md"), "---\nname: folded-skill\ndescription: >\n  Use when a weekly\n  report is due.\nlicense: MIT\n---\nbody\n").unwrap();
         let f = list().into_iter().find(|s| s["id"] == "folded-skill").unwrap();
         assert_eq!(f["description"], "Use when a weekly report is due.");
+        fs::write(folded.join("SKILL.md"), "---\nname: folded-skill\ndescription:\n  Use when a weekly\n  report is due.\n---\nbody\n").unwrap();
+        assert_eq!(list().into_iter().find(|s| s["id"] == "folded-skill").unwrap()["description"], "Use when a weekly report is due.", "a plain value on the lines under");
+        // What is hidden is not the skill's: Finder's .DS_Store changes nothing.
+        let before = fingerprint().0;
+        fs::write(folded.join(".DS_Store"), "x").unwrap();
+        assert_eq!(fingerprint().0, before);
         assert!(f["problems"].as_array().unwrap().is_empty(), "{f}");
         // What the session would load changes with a skill switched off.
         let before = fingerprint().0;

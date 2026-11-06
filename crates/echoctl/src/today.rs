@@ -237,11 +237,13 @@ fn load_asks() -> Vec<Value> {
 
 #[cfg_attr(not(feature = "js"), allow(dead_code))]
 fn save_ask(v: Value) {
-    let mut all = load_asks();
-    all.retain(|x| x["id"] != v["id"]);
-    all.insert(0, v);
-    all.truncate(10);
-    let _ = fs::create_dir_all(paths::state_dir()).and_then(|_| paths::write_atomic(&asks_file(), &serde_json::to_vec(&all).unwrap_or_default()));
+    // Runs end on their own threads: under the lock, re-read.
+    let _ = calls::update_state(&asks_file(), |all: &mut Vec<Value>| {
+        all.retain(|x| x["id"] != v["id"]);
+        all.insert(0, v);
+        all.truncate(10);
+        Ok(())
+    });
 }
 
 /// What Yolo tells Claude: the same task line Work on it types in the panel (the task by its link only, its words
@@ -285,7 +287,7 @@ pub fn yolo_task(id: &str, project: &str, node: &str, skill: &str, words: &str) 
         run_dir: paths::config_dir().join("yolo").join(id),
         timeout: std::time::Duration::from_secs(20 * 60),
         plugins: vec![],
-        as_user: true,
+        task: Some(format!("{project}/{node}")),
     };
     let (id, title) = (id.to_string(), title);
     save_ask(json!({"id": id, "state": "working", "title": title, "at": Local::now().to_rfc3339()}));

@@ -140,7 +140,8 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   `<home>/.echo/skills/<id>/` (git or a copy from elsewhere works); Echo copies the valid ones that are on, every
   file, into a plugin `my-skills` each time the panel's session or a Yolo run starts (`--plugin-dir`): one folder per
   version (`<config>/my-skills/<fingerprint>/`, made under another name and renamed into place, never changed after,
-  a week-old one swept), so a live session keeps what it loaded. The fingerprint is each file's name, size and time.
+  swept a week after its last use), so a live session keeps what it loaded. The fingerprint is each file's name, size
+  and time; hidden files (`.git`, `.DS_Store`) are not the skill's.
 - Built for 10–20 skills: the catalogue's rows are one line of name, kind, problems and an on/off switch, the
   description below in one line; the viewer shows the SKILL.md as written (no rendering).
 - The Send to Claude dialog: the task and its thread on top; one field for the skill — Just the task, or type to find
@@ -153,8 +154,10 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   Work on it (the panel, above; the main button) and Yolo — Claude Code does it on its own in the background
   (`today::yolo_task` → `claudejob` with `--dangerously-skip-permissions` on the thread's profile, the user's skills as
   a `--plugin-dir`; the prompt is Work on it's line plus "nobody will answer; sending included, the user said yes in
-  advance"); its answer shows above My work. A Yolo run is the user's own: Echo's CLI answers it without the headless limits (it
-  closes its task), and a profile of its own gets Echo's plugin as the panel does. Yolo is offered from Today only (a task's details keep Send to Claude). It
+  advance"); its answer shows above My work. A Yolo run may edit its own task, nothing else of the ledger (`guard::RUN_TASK`; the
+  CLI's other headless limits stay — settings, recording), and a profile of its own gets Echo's plugin as the panel
+  does. Work on it types into the panel only on the thread's AI profile: not running, the panel starts on it; running
+  on another, it says so (a task's text stays with its profile). Yolo is offered from Today only (a task's details keep Send to Claude). It
   replaced Change it, a tool-less `claude -p` edit of the task's fields with Undo (Nov 2026): the user wanted one input
   for both, skill included, so that tasks can later go to Yolo by themselves. The user chose full autonomy knowingly:
   the task's own words still reach the run as data by its link, never typed as an instruction.

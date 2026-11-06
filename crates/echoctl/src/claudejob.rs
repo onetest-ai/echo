@@ -66,9 +66,9 @@ pub struct Spec {
     pub timeout: Duration,
     /// More plugins for the run (`--plugin-dir`): Yolo's task gets the user's skills.
     pub plugins: Vec<PathBuf>,
-    /// The user's own run (Yolo), not a plugin's: Echo's CLI answers it as it answers the user (no headless limits),
-    /// and a profile of its own gets Echo's plugin too (its skills: manage, Microsoft 365), as the panel does.
-    pub as_user: bool,
+    /// Yolo's task (`<project>/<node>`): the run may edit that one task (`guard::RUN_TASK`; the CLI's other headless
+    /// limits stay), and a profile of its own gets Echo's plugin (manage, Microsoft 365), as the panel does.
+    pub task: Option<String>,
 }
 
 impl Spec {
@@ -97,7 +97,7 @@ impl Spec {
             run_dir: store.join(rel),
             timeout: Duration::from_secs(minutes * 60),
             plugins: vec![],
-            as_user: false,
+            task: None,
         })
     }
 }
@@ -184,7 +184,7 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
         for d in session_plugins.iter().chain(&spec.plugins) {
             a.extend(["--plugin-dir".into(), d.display().to_string()]);
         }
-        if spec.as_user && profile.kind.managed() {
+        if spec.task.is_some() && profile.kind.managed() {
             a.extend(["--plugin-dir".into(), plugin.display().to_string()]);
         }
     }
@@ -232,8 +232,8 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
     let child = notes::admit_child(|| {
         let mut c = crate::ai::prepare_claude(profile, &a, &cwd, false)?;
         c.env("ECHOCTL_BIN", &exe);
-        if spec.as_user {
-            c.env_remove(notes::HEADLESS);
+        if let Some(t) = &spec.task {
+            c.env(guard::RUN_TASK, t);
         }
         if spec.tools == Tools::Read {
             c.env(guard::RUN_MODE, "routine").env(guard::RUN_HOME, &home).env(guard::RUN_CLIS, clis.join("\n"));

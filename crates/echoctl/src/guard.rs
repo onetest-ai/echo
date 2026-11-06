@@ -49,6 +49,8 @@ pub const RUN_SKILLS: &str = "ECHOCTL_RUN_SKILLS";
 /// More folders a read-only routine may read (one per line): the ones plugins gave Echo's sessions (an
 /// Obsidian vault the user picked).
 pub const RUN_READ: &str = "ECHOCTL_RUN_READ";
+/// Yolo's run (`claudejob`): the one task it may edit, `<project>/<node>` (`echoctl project ledger <project> edit`).
+pub const RUN_TASK: &str = "ECHOCTL_RUN_TASK";
 /// The Echo commands a read-only routine may run (`*` = any one word: an id).
 pub const ROUTINE_COMMANDS: [&str; 13] = [
     "context", "attention", "prep", "previous", "status", "calendar events", "project list", "project show", "project of",
