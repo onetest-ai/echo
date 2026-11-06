@@ -797,6 +797,9 @@ pub struct Applied {
     pub skipped: Vec<Skipped>,
     /// The commit's label (`<id>`, `off`, `skipped: …`).
     pub commit: String,
+    /// The written files the commit took (vault-relative): a file with changes of the user's is written but left out
+    /// (X-G2). Empty when nothing was committed.
+    pub committed: Vec<String>,
 }
 
 /// Write fixes: each file only if it is still the text its fixes were computed on (several fixes of one file go in
@@ -859,6 +862,10 @@ pub fn apply(v: &Vault, fixes: &[Fix]) -> Result<Applied> {
         1 => page::commit_one(v, &written, &dirty, &format!("Echo: Health fix in {}", out.written[0])),
         n => page::commit_one(v, &written, &dirty, &format!("Echo: Health fixes in {n} files")),
     };
+    // `written` and `out.written` are the same files, in the same order: the commit took those that were clean before.
+    if activity::commit_id(&out.commit).is_some() {
+        out.committed = out.written.iter().zip(&written).filter(|(_, f)| !dirty.contains(f)).map(|(p, _)| p.clone()).collect();
+    }
     // A file the user had changed isn't in the commit, so its line names none.
     for (path, full, old, new) in &done {
         activity::changed(v, path, "health", None, Some(old), new, activity::commit_id(&out.commit).filter(|_| !dirty.contains(full)));

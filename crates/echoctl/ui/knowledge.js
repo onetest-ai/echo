@@ -33,6 +33,10 @@ function knTabCounts({ waiting, needs } = {}) {
   const n = (v) => (Number.isFinite(v) && v > 0 ? v : null)
   return { ingest: n(waiting), health: n(needs) }
 }
+/** A tab's accessible name: with Health's number, "Health, 3 need you" (the number alone would read "Health3"). */
+function knTabLabel(label, needs) {
+  return needs ? `${label}, ${needs} ${needs === 1 ? 'needs' : 'need'} you` : label
+}
 // end of the kn-tabs block
 
 // ── kn-switcher: what the header's switcher lists ──
@@ -634,8 +638,10 @@ function knTrendPath(points, { w = 300, h = 44, lo = 60, hi = 100 } = {}) {
 }
 /** *Fix all*'s sheet from `/health?fixes=<kind>`: a row per fix, ticked unless its key is in `off` — never a guess (it is
  *  fixed on its own finding, ruling R36); one Echo couldn't compute says why, unticked. `items` is what `kn_fix_all`
- *  takes: each ticked fix by its key, with the `base` and `sha` of the diff shown (ruling R37); `files` how many files. */
-function knFixAll(fixes, findings, off = new Set()) {
+ *  takes: each ticked fix by its key, with the `base` and `sha` of the diff shown (ruling R37); `files` how many files.
+ *  `shown`: the rows drawn — the first `first`, the rest folded into `more` ({n, ticked}) until `open`; folded ones are
+ *  sent all the same. */
+function knFixAll(fixes, findings, off = new Set(), { open = false, first = 4 } = {}) {
   const by = new Map((findings || []).map((f) => [f.key, f]))
   const rows = (fixes || []).filter((x) => x && !x.guess).map((x) => {
     const f = by.get(x.key) || {}, page = (f.pages || [])[0] || []
@@ -643,20 +649,37 @@ function knFixAll(fixes, findings, off = new Set()) {
     return { key: x.key, choice: x.choice || '', base: x.base, sha: x.sha, path: x.path || page[0] || '', line: page[1] ?? null, title: f.title || '', hunks: x.hunks || [], plus: x.plus || 0, minus: x.minus || 0, error: x.error || (ok ? '' : 'Echo can\'t show this fix'), on: ok && !off.has(x.key) }
   })
   const on = rows.filter((r) => r.on)
-  return { rows, items: on.map((r) => ({ key: r.key, choice: r.choice, base: r.base, sha: r.sha })), files: new Set(on.map((r) => r.path)).size }
+  const fold = !open && rows.length > first + 1, rest = fold ? rows.slice(first) : []
+  return { rows, shown: fold ? rows.slice(0, first) : rows, more: fold ? { n: rest.length, ticked: rest.filter((r) => r.on).length } : null,
+    items: on.map((r) => ({ key: r.key, choice: r.choice, base: r.base, sha: r.sha })), files: new Set(on.map((r) => r.path)).size }
 }
-/** What came of `kn_fix` / `kn_fix_all` (`{written, changed_since, skipped, commit}`) in Echo's words — `text`, and
- *  `wait` when something wasn't done (said until OK; else it goes by itself). `findings` name the skipped ones. A
- *  commit takes only files without changes of the user's (X-G2), and the answer doesn't name them: said so for several. */
+/** What came of `kn_fix` / `kn_fix_all` (`{written, committed, changed_since, skipped, commit}`) in Echo's words —
+ *  `text`, and `wait` when something wasn't done (said until OK; else it goes by itself). `findings` name the skipped
+ *  ones. A commit takes only the written files without changes of the user's (X-G2): `committed` names them. */
 function knFixSummary(r, findings = []) {
   const title = (k) => ((findings || []).find((f) => f.key === k) || {}).title || 'a finding'
   const written = r.written || [], commit = String(r.commit || ''), skipped = /^skipped: /.test(commit)
-  const committed = commit && commit !== 'off' && !skipped ? ` Committed ${written.length > 1 ? 'those without changes of yours ' : ''}(${commit}).` : ''
+  const left = commit && commit !== 'off' && !skipped && Array.isArray(r.committed) ? written.filter((p) => !r.committed.includes(p)) : []
+  const committed = commit && commit !== 'off' && !skipped ? ` Committed (${commit})${left.length ? `, but not ${left.join(', ')}: ${left.length === 1 ? 'it' : 'they'} had changes of yours` : ''}.` : ''
   const out = []
   if (written.length) out.push(`${written.length === 1 ? `Fixed: ${written[0]}` : `Fixed in ${written.length} files`}.${skipped ? ` Not committed: ${commit.slice(9)}.` : committed}`)
   for (const p of r.changed_since || []) out.push(`${p} changed since Echo showed its fix, so it was left as it is.`)
   for (const s of r.skipped || []) out.push(`Not fixed: ${title(s.key)} — ${String(s.why).replace(/\.$/, '')}.`)
-  return { text: out.join(' ') || 'Nothing was changed.', wait: !written.length || skipped || out.length > 1 }
+  return { text: out.join(' ') || 'Nothing was changed.', wait: !written.length || skipped || left.length > 0 || out.length > 1 }
+}
+/** What the vault's view asks for Health as it loads — Echo caches the checks per revision, so asking is cheap: on the
+ *  Health tab `all` (the findings, score and history, then the finding shown) — a settings change isn't in the pages'
+ *  rev the poll watches —, unless the user only `picked` another finding of the list shown (`finding`); elsewhere `count`
+ *  (for the tab's number) only when there are no findings of this vault (a settings change empties them), else null. */
+function knHealthLoad(h, { vault, tab, picked = false }) {
+  const have = !!(h && h.data && h.vault === vault)
+  if (tab === 'health') return have && picked ? 'finding' : 'all'
+  return have ? null : 'count'
+}
+/** Health's state for `vault`: nothing loaded yet. From an `old` one (a settings change) it keeps how the user looks at
+ *  it — the filter, *Show ignored* — and is a new object, so a load started for the old one doesn't land in it. */
+function knHealthState(vault, old = null) {
+  return { vault, data: null, rev: null, at: 0, error: null, detail: null, want: '', choice: {}, filter: (old && old.filter) || 'all', showIgnored: !!(old && old.showIgnored), loading: false, picked: false }
 }
 // end of the kn-health block
 
@@ -774,8 +797,9 @@ const Kn = (() => {
     try { localStorage.setItem('echo.kn.vault', v.id) } catch { /* off */ }
     if (v.available === false) return
     // Health's number on its tab (Needs you), wherever the vault opens; the Health tab loads it with its view.
-    const h = hl()
-    if (s.tab !== 'health' && !h.data && !h.loading) { h.loading = true; loadHealth({ detail: false }).then(() => { h.loading = false; render() }) }
+    const h = hl(), want = knHealthLoad(h, { vault: v.id, tab: s.tab, picked: h.picked })
+    h.picked = false
+    if (want === 'count' && !h.loading) { h.loading = true; loadHealth({ detail: false }).then(() => { h.loading = false; render() }) }
     if (s.tab === 'pages') {
       if (!s.tree || s.tree.vault !== v.id) await loadTree()
       if (!s.path) s.path = (s.tree && s.tree.index) || ''
@@ -783,7 +807,7 @@ const Kn = (() => {
     } else if (s.tab === 'graph') await loadGraph()
     else if (s.tab === 'settings') await loadSettings()
     else if (s.tab === 'ask') { openChat(s.askConv); await loadChats() }
-    else if (s.tab === 'health') { if (h.data) await loadFinding(); else await loadHealth() }
+    else if (s.tab === 'health') { if (want === 'finding') await loadFinding(); else await loadHealth() }
   }
   async function loadTree() {
     const s = st(), v = vault()
@@ -850,7 +874,7 @@ const Kn = (() => {
     try { d = await get(`api/kn/${enc(v.id)}/health/${enc(sel.key)}${choice ? `?choice=${enc(choice)}` : ''}`) } catch (e) { d = { error: String(e.message || e) } }
     if (hl() === h && h.want === want) h.detail = { ...d, key: sel.key, want }
   }
-  async function refreshAll() { st().tree = null; st().page = null; st().graph = null; await load(); render() }
+  async function refreshAll() { st().tree = null; st().page = null; st().graph = null; hlReset(false); await load(); render() }
 
   /** Polled with the window (every 2 s while Knowledge shows): a change on disk shows within a tick. */
   let ticks = 0
@@ -944,7 +968,7 @@ const Kn = (() => {
     const s = st()
     const h = s.hl && s.hl.vault === s.vault && s.hl.data
     const n = knTabCounts({ needs: h ? knHealthList(h.findings).needs : 0 })
-    const t = (id, label, count) => `<button class="tab" role="tab" data-kn="tab" data-kn-tab="${id}" aria-selected="${s.tab === id}">${label}${count ? `<span class="kn-cnt" title="${count} ${count === 1 ? 'needs' : 'need'} you">${nf(count)}</span>` : ''}</button>`
+    const t = (id, label, count) => `<button class="tab" role="tab" data-kn="tab" data-kn-tab="${id}" aria-selected="${s.tab === id}"${count ? ` aria-label="${esc(knTabLabel(label, count))}" title="${esc(knTabLabel(label, count))}"` : ''}>${label}${count ? `<span class="kn-cnt" aria-hidden="true">${nf(count)}</span>` : ''}</button>`
     return `<div class="kn-tabs"><div class="tabs" role="tablist">${t('pages', 'Pages')}${t('graph', 'Graph')}${t('ask', 'Ask')}${t('health', 'Health', n.health)}${t('settings', 'Settings')}</div></div>`
   }
 
@@ -1468,9 +1492,19 @@ const Kn = (() => {
   // aren't here yet: the card says "code checks only" and has no *Run AI checks*. ──
   function hl() {
     const s = st()
-    if (!s.hl || s.hl.vault !== s.vault) s.hl = { vault: s.vault, data: null, rev: null, at: 0, error: null, detail: null, want: '', choice: {}, filter: 'all', showIgnored: false, loading: false }
+    if (!s.hl || s.hl.vault !== s.vault) s.hl = knHealthState(s.vault)
     return s.hl
   }
+  /** After a change to the vault's settings (the meeting tag, the index, the pages' folder…): Health emptied — how it is
+   *  looked at kept — and asked again, since the poll watches the pages' rev and a setting doesn't change it. */
+  function hlReset(reload = true) {
+    const s = st(), v = vault()
+    s.hl = knHealthState(s.vault, s.hl && s.hl.vault === s.vault ? s.hl : null)
+    if (reload && v && v.available !== false) loadHealth({ detail: s.tab === 'health' }).then(render)
+  }
+  /** Once the page is drawn, focus the first of `selectors` that is there and enabled: where the user was. */
+  const focusOn = (...selectors) => setTimeout(() => { for (const q of selectors) { const el = document.querySelector(q); if (el && !el.disabled) { el.focus(); return } } })
+  const kindId = (k) => `kn-fi-${String(k.kind).replace(/[^\w-]/g, '')}${k.ignored ? '-x' : ''}`
   const hlList = () => { const h = hl(), d = h.data || {}; return knHealthList(d.findings, { filter: h.filter, ignored: d.ignored, showIgnored: h.showIgnored }) }
   const hlFinding = (key) => { const d = hl().data || {}; return [...(d.findings || []), ...(d.ignored || [])].find((f) => f.key === key) || null }
   const isoDay = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -1483,7 +1517,9 @@ const Kn = (() => {
     const h = hl(), d = h.data
     if (!d) return `<div class="kn-hl">${h.error ? `<div class="kn-none"><p class="error">${esc(h.error)}</p></div>` : '<div class="skeleton" style="padding:24px"><i></i><i></i><i></i></div>'}</div>`
     const list = hlList(), sel = knHealthSelect(list, st().hlKey)
-    return `<div class="kn-hl" data-keep-scroll><div class="kn-hl-in">${hlTop(list)}<div class="kn-hl-f${sel ? '' : ' kn-hl-none'}">${hlFindings(list, sel)}${sel ? hlDetail(sel) : ''}</div></div></div>`
+    // A check again that failed: said over what Health found before, until one works.
+    const stale = h.error ? `<div class="kn-warn kn-hl-err" role="alert">${IC.warn}<span class="grow">Health couldn't check again: ${esc(h.error)}. What it found before is below.</span><button class="btn sm" data-kn="hl-retry" id="kn-hl-retry">Check again</button></div>` : ''
+    return `<div class="kn-hl" data-keep-scroll><div class="kn-hl-in">${stale}${hlTop(list)}<div class="kn-hl-f${sel ? '' : ' kn-hl-none'}">${hlFindings(list, sel)}${sel ? hlDetail(sel) : ''}</div></div></div>`
   }
   /** The score card and *How Health checks* (K16-01). */
   function hlTop(list) {
@@ -1512,45 +1548,47 @@ const Kn = (() => {
   /** The findings by group and kind, with the filters and *Show ignored*. */
   function hlFindings(list, sel) {
     const h = hl(), d = h.data
-    const f = (id, label) => `<button class="${h.filter === id ? 'on' : ''}" data-kn="hl-filter" data-kn-filter="${id}" aria-pressed="${h.filter === id}">${label}</button>`
-    const fi = (k) => `<button class="kn-fi${sel && sel.kind === k ? ' on' : ''}${k.group === 'needs' && !k.ignored ? ' need' : ''}" data-kn="hl-pick" data-kn-key="${esc(k.keys[0])}"${sel && sel.kind === k ? ' aria-current="true"' : ''}><span class="nb">${nf(k.n)}</span><b>${esc(k.name)}</b><span class="tg"><span class="kn-mtag${k.by === 'ai' ? ' ai' : ''}">${k.by === 'ai' ? 'AI' : 'code'}</span></span><span class="m">${esc(k.meta)}</span></button>`
+    const f = (id, label) => `<button class="${h.filter === id ? 'on' : ''}" id="kn-hlf-${id}" data-kn="hl-filter" data-kn-filter="${id}" aria-pressed="${h.filter === id}">${label}</button>`
+    const fi = (k) => `<button class="kn-fi${sel && sel.kind === k ? ' on' : ''}${k.group === 'needs' && !k.ignored ? ' need' : ''}" id="${kindId(k)}" data-kn="hl-pick" data-kn-key="${esc(k.keys[0])}"${sel && sel.kind === k ? ' aria-current="true"' : ''}><span class="nb">${nf(k.n)}</span><b>${esc(k.name)}</b><span class="tg"><span class="kn-mtag${k.by === 'ai' ? ' ai' : ''}">${k.by === 'ai' ? 'AI' : 'code'}</span></span><span class="m">${esc(k.meta)}</span></button>`
     const groups = list.groups.map((g) => `<div class="kn-fg"><span>${esc(g.label)}</span><span>${esc(g.sub)}</span></div>${g.kinds.map(fi).join('')}`).join('')
     const none = list.groups.length ? '' : `<p class="set-sub kn-fnone">${h.filter === 'ai' && !d.ai ? 'AI checks haven\'t run yet.' : (d.findings || []).length ? 'Nothing under this filter.' : 'Nothing to fix. Echo checks again after every change it sees.'}</p>`
-    const ign = (d.ignored || []).length ? `<button class="kn-lnk kn-fign" data-kn="hl-ignored" aria-pressed="${h.showIgnored}">${h.showIgnored ? 'Hide ignored' : `Show ignored (${nf(d.ignored.length)})`}</button>` : ''
+    const ign = (d.ignored || []).length ? `<button class="kn-lnk kn-fign" id="kn-hl-ignored" data-kn="hl-ignored" aria-pressed="${h.showIgnored}">${h.showIgnored ? 'Hide ignored' : `Show ignored (${nf(d.ignored.length)})`}</button>` : ''
     return `<div class="kn-flist"><div class="top"><span class="set-sub">${many(list.kinds, 'kind')} · ${nf(list.needs)} ${list.needs === 1 ? 'needs' : 'need'} you</span><div class="kn-filters" role="group" aria-label="Show">${f('all', 'All')}${f('needs', 'Needs you')}${f('code', 'By code')}${f('ai', 'AI')}</div></div>${groups}${none}${ign}</div>`
   }
   /** The kind shown: what it means, *Fix all* where it applies, its findings — the one shown open with its fix. */
   function hlDetail(sel) {
     const k = sel.kind, x = KN_HEALTH_KINDS[k.kind]
-    const fixAll = x && x[2] && !k.ignored && k.fixAll > 1 ? `<button class="btn sm primary" data-kn="hl-fixall" data-kn-kind="${esc(k.kind)}">${esc(x[2](k.fixAll))}…</button>` : ''
+    const fixAll = x && x[2] && !k.ignored && k.fixAll > 1 ? `<button class="btn sm primary" id="kn-hl-fixall" data-kn="hl-fixall" data-kn-kind="${esc(k.kind)}">${esc(x[2](k.fixAll))}…</button>` : ''
     const keys = k.keys.slice(0, 50)
     if (!keys.includes(sel.key)) keys.push(sel.key)
     const more = k.n > keys.length ? `<div class="set-sub">and ${nf(k.n - keys.length)} more</div>` : ''
     const d = hl().data || {}, by = new Map([...(d.findings || []), ...(d.ignored || [])].map((f) => [f.key, f]))
     return `<div class="kn-fdet"><div class="kn-fdet-h"><div class="row"><h3>${esc(x ? x[1](k.n) : k.name)}</h3>${k.by === 'ai' ? '<span class="kn-mtag ai">AI</span>' : ''}${k.ignored ? '<span class="kn-mtag">ignored</span>' : k.group === 'needs' ? '<span class="kn-mtag you">needs you</span>' : ''}${fixAll}</div><p>${esc(k.why || '')}</p></div>
-      <div class="kn-fdet-b">${keys.map((key) => (key === sel.key ? hlOpen(by.get(key)) : hlRow(by.get(key)))).join('')}${more}</div></div>`
+      <div class="kn-fdet-b">${keys.map((key, i) => (key === sel.key ? hlOpen(by.get(key), i) : hlRow(by.get(key), i))).join('')}${more}</div></div>`
   }
   /** A finding of the kind, not the one shown: a row to open it. */
-  function hlRow(f) {
+  function hlRow(f, i) {
     if (!f) return ''
     const [p, lines] = pagesOf(f)[0] || ['', []]
-    return `<button class="kn-fx kn-fx-row" data-kn="hl-pick" data-kn-key="${esc(f.key)}">${IC.file}<span><code>${esc(where(p, lines))}</code><span class="set-sub">${esc(f.title)}</span></span></button>`
+    return `<button class="kn-fx kn-fx-row" id="kn-fx-${i}" data-kn="hl-pick" data-kn-key="${esc(f.key)}">${IC.file}<span><code>${esc(where(p, lines))}</code><span class="set-sub">${esc(f.title)}</span></span></button>`
   }
   /** The finding shown (K16-07): its pages with their lines (*Open*), the ways to fix it, the fix's diff — or why there
-   *  is none —, and *Ask about it* · *Ignore* · *Fix*. */
-  function hlOpen(f) {
+   *  is none —, and *Ask about it* · *Ignore* · *Fix*. It takes its row's id (`i`), so a row opened from the keyboard keeps
+   *  the focus. */
+  function hlOpen(f, i) {
     if (!f) return ''
     const s = st(), h = hl(), dt = h.detail, v = vault()
-    const pages = pagesOf(f).map(([p, lines]) => `<div class="kn-fx-p"><code>${esc(where(p, lines))}</code><button class="btn ghost sm" data-kn="open" data-path="${esc(p)}">Open</button></div>`).join('')
+    const card = `class="kn-fx on" id="kn-fx-${i}" tabindex="-1"`
+    const pages = pagesOf(f).map(([p, lines], j) => `<div class="kn-fx-p"><code>${esc(where(p, lines))}</code><button class="btn ghost sm" id="kn-hl-open-${j}" data-kn="open" data-path="${esc(p)}">Open</button></div>`).join('')
     const head = `<div class="kn-fx-h">${IC.file}<div><b>${esc(f.title)}</b>${pages}</div></div>`
-    if (!dt || dt.key !== f.key) return `<div class="kn-fx on">${head}<div class="skeleton" style="padding:12px"><i></i><i></i></div></div>`
+    if (!dt || dt.key !== f.key) return `<div ${card}>${head}<div class="skeleton" style="padding:12px"><i></i><i></i></div></div>`
     const choices = dt.choices || [], fixes = choices.filter((c) => c.choice !== 'create' && c.choice !== 'taxonomy')
     const fx = dt.fix || {}, cur = fx.error ? h.choice[f.key] || '' : fx.choice || ''
     const listed = fixes.some((c) => c.choice === cur)
     // A single way to fix it isn't offered as a choice when it is Echo's own (properties, an index row).
     const pick = !fixes.length || (fixes.length === 1 && listed && !h.choice[f.key]) ? ''
-      : fixes.length > 4 ? `<div class="kn-fx-ch"><select class="set-in" data-kn-hl-choice="${esc(f.key)}" aria-label="How to fix it">${listed ? '' : '<option value="">Pick one…</option>'}${fixes.map((c) => `<option value="${esc(c.choice)}"${c.choice === cur ? ' selected' : ''}>${esc(c.label)}</option>`).join('')}</select></div>`
-        : `<div class="kn-fx-ch" role="group" aria-label="How to fix it">${fixes.map((c) => `<button class="btn sm${c.choice === cur ? ' on' : ''}" data-kn="hl-choice" data-kn-key="${esc(f.key)}" data-kn-choice="${esc(c.choice)}" aria-pressed="${c.choice === cur}">${esc(c.label)}</button>`).join('')}</div>`
+      : fixes.length > 4 ? `<div class="kn-fx-ch"><select class="set-in" id="kn-hl-choice" data-kn-hl-choice="${esc(f.key)}" aria-label="How to fix it">${listed ? '' : '<option value="">Pick one…</option>'}${fixes.map((c) => `<option value="${esc(c.choice)}"${c.choice === cur ? ' selected' : ''}>${esc(c.label)}</option>`).join('')}</select></div>`
+        : `<div class="kn-fx-ch" role="group" aria-label="How to fix it">${fixes.map((c, j) => `<button class="btn sm${c.choice === cur ? ' on' : ''}" id="kn-hlc-${j}" data-kn="hl-choice" data-kn-key="${esc(f.key)}" data-kn-choice="${esc(c.choice)}" aria-pressed="${c.choice === cur}">${esc(c.label)}</button>`).join('')}</div>`
     const to = choices.find((c) => c.choice === cur && c.to)
     const only = !pick && listed && fixes.find((c) => c.choice === cur)
     const toLine = to ? `<div class="kn-fx-to set-sub">→ <b>${esc(to.to)}</b>${to.why ? ` · ${esc(to.why)}` : ''}${fx.guess ? ' · a guess' : ''}</div>`
@@ -1561,12 +1599,12 @@ const Kn = (() => {
     const tax = choices.some((c) => c.choice === 'taxonomy') && ((v.detected || {}).taxonomies || []).find((t) => /TAG/i.test(t))
     const ok = !!(diff && fx.base && fx.sha), busy = s.busy.hlfix
     const note = ok ? (fx.guess ? 'A guess, so Fix all leaves it out. Written only if the page still reads as it does now.' : 'Written only if the page still reads as it does now.') : ''
-    const acts = `<button class="btn ghost sm" data-kn="hl-ask" data-kn-key="${esc(f.key)}">${IC.ask} Ask about it</button>`
-      + `<button class="btn ghost sm" data-kn="hl-ignore" data-kn-key="${esc(f.key)}" data-kn-on="${!dt.ignored}">${dt.ignored ? 'List again' : 'Ignore'}</button>`
-      + (choices.some((c) => c.choice === 'create') && dt.new_page ? `<button class="btn sm" data-kn="hl-create" data-name="${esc(dt.new_page.name)}" data-kn-folder="${esc(dt.new_page.folder)}">Create the page</button>` : '')
-      + (tax ? `<button class="btn sm" data-kn="open" data-path="${esc(tax)}">Open the taxonomy</button>` : '')
-      + (ok ? `<button class="btn primary sm" data-kn="hl-fix"${busy ? ' disabled' : ''}>${busy ? 'Fixing…' : 'Fix'}</button>` : '')
-    return `<div class="kn-fx on">${head}${pick}${toLine}${diff ? `<div class="kn-fx-d">${pmOf(fx)}</div>${diff}` : ''}${reason}<div class="kn-fx-f"><span class="grow">${note}</span>${acts}</div></div>`
+    const acts = `<button class="btn ghost sm" id="kn-hl-ask" data-kn="hl-ask" data-kn-key="${esc(f.key)}">${IC.ask} Ask about it</button>`
+      + `<button class="btn ghost sm" id="kn-hl-ign" data-kn="hl-ignore" data-kn-key="${esc(f.key)}" data-kn-on="${!dt.ignored}">${dt.ignored ? 'List again' : 'Ignore'}</button>`
+      + (choices.some((c) => c.choice === 'create') && dt.new_page ? `<button class="btn sm" id="kn-hl-create" data-kn="hl-create" data-name="${esc(dt.new_page.name)}" data-kn-folder="${esc(dt.new_page.folder)}">Create the page</button>` : '')
+      + (tax ? `<button class="btn sm" id="kn-hl-tax" data-kn="open" data-path="${esc(tax)}">Open the taxonomy</button>` : '')
+      + (ok ? `<button class="btn primary sm" id="kn-hl-fix" data-kn="hl-fix"${busy ? ' disabled' : ''}>${busy ? 'Fixing…' : 'Fix'}</button>` : '')
+    return `<div ${card}>${head}${pick}${toLine}${diff ? `<div class="kn-fx-d">${pmOf(fx)}</div>${diff}` : ''}${reason}<div class="kn-fx-f"><span class="grow">${note}</span>${acts}</div></div>`
   }
   /** *Fix all* (K16-04): every fix of the kind as Echo found it, ticked; a guess is never one (R36). */
   async function openFixAll(kind) {
@@ -1579,14 +1617,18 @@ const Kn = (() => {
       x.fixes = d.fixes || []
       x.findings = d.findings || []
     } catch (e) { x.error = String(e.message || e); x.fixes = [] }
-    if (st().sheet === x) render()
+    if (st().sheet !== x) return
+    render()
+    // The keyboard goes to the sheet: its first fix, else Apply, else Cancel.
+    const first = knFixAll(x.fixes, x.findings, x.off).shown.findIndex((r) => !r.error)
+    focusOn(`#kn-fa-${first}`, '#kn-fa-apply', '#kn-fa-cancel')
   }
   function fixAllSheet() {
-    const s = st(), x = s.sheet, v = vault(), k = KN_HEALTH_KINDS[x.fixKind] || []
-    if (!x.fixes) return sheet('Fix all', '<div class="skeleton"><i></i><i></i><i></i></div>', '<span class="grow"></span><button class="btn ghost" data-kn="sheet-close">Cancel</button>', IC.check)
-    const fa = knFixAll(x.fixes, x.findings, x.off), n = fa.items.length
-    const row = (r) => `<div class="kn-fixall-row"><input type="checkbox" data-kn-fixall="${esc(r.key)}"${r.on ? ' checked' : ''}${r.error ? ' disabled' : ''} aria-label="${esc(`Fix ${r.title || r.path}`)}"><div class="kn-fx"><div class="kn-fx-h">${IC.file}<div><code>${esc(where(r.path, r.line == null ? [] : [r.line]))}</code><div class="set-sub">${esc(r.title)}</div></div>${r.error ? '' : pmOf(r)}</div>${r.error ? `<div class="kn-fx-why set-sub">${esc(String(r.error).replace(/\.$/, ''))}.</div>` : `<div class="kn-diff">${hunkRows(r.hunks)}</div>`}</div></div>`
-    const body = `<p class="set-sub">Each fix as Echo found it. Untick any you'd rather leave.</p>${x.error ? `<p class="error">${esc(x.error)}</p>` : ''}${fa.rows.map(row).join('') || '<p class="set-sub">Nothing left to fix here.</p>'}`
+    const x = st().sheet, k = KN_HEALTH_KINDS[x.fixKind] || []
+    if (!x.fixes) return sheet('Fix all', '<div class="skeleton"><i></i><i></i><i></i></div>', '<span class="grow"></span><button class="btn ghost" id="kn-fa-cancel" data-kn="sheet-close">Cancel</button>', IC.check)
+    const fa = knFixAll(x.fixes, x.findings, x.off, { open: x.open })
+    const row = (r, i) => `<div class="kn-fixall-row"><input type="checkbox" id="kn-fa-${i}" data-kn-fixall="${esc(r.key)}"${r.on ? ' checked' : ''}${r.error ? ' disabled' : ''} aria-label="${esc(`Fix ${r.title || r.path}`)}"><div class="kn-fx"><div class="kn-fx-h">${IC.file}<div><code>${esc(where(r.path, r.line == null ? [] : [r.line]))}</code><div class="set-sub">${esc(r.title)}</div></div>${r.error ? '' : pmOf(r)}</div>${r.error ? `<div class="kn-fx-why set-sub">${esc(String(r.error).replace(/\.$/, ''))}.</div>` : `<div class="kn-diff">${hunkRows(r.hunks)}</div>`}</div></div>`
+    const body = `<p class="set-sub">Each fix as Echo found it. Untick any you'd rather leave.</p>${x.error ? `<p class="error">${esc(x.error)}</p>` : ''}${fa.shown.map(row).join('') || '<p class="set-sub">Nothing left to fix here.</p>'}${fa.more ? `<button class="kn-lnk kn-fa-more" id="kn-fa-more" data-kn="hl-fa-more">${nf(fa.more.n)} more, ${fa.more.ticked === fa.more.n ? 'ticked' : `${nf(fa.more.ticked)} ticked`} — show them</button>` : ''}`
     return sheet(esc(k[2] ? k[2](fa.rows.length) : 'Fix all'), body, `<span class="kn-fa-foot" id="kn-fixall-f">${fixAllFoot(fa, x.fixKind)}</span>`, IC.check)
   }
   /** The sheet's foot: how many files (index rows also write the vault's log line), whether they are committed, *Apply
@@ -1594,19 +1636,21 @@ const Kn = (() => {
   function fixAllFoot(fa, kind) {
     const s = st(), v = vault(), n = fa.items.length, log = kind === 'not_in_index' && n && (v.detected || {}).log
     const commits = v.commit ? 'one commit of these files' : v.git ? 'commits are off for this vault: the files are written, nothing is committed' : 'the files are written'
-    return `<span class="set-sub grow">${many(fa.files, 'file')}${log ? ` and a line in ${esc(log)}` : ''} · ${commits}</span><button class="btn ghost" data-kn="sheet-close">Cancel</button><button class="btn primary" data-kn="hl-fixall-go"${!n || s.busy.fixall ? ' disabled' : ''}>${s.busy.fixall ? 'Applying…' : `Apply ${n}`}</button>`
+    return `<span class="set-sub grow">${many(fa.files, 'file')}${log ? ` and a line in ${esc(log)}` : ''} · ${commits}</span><button class="btn ghost" id="kn-fa-cancel" data-kn="sheet-close">Cancel</button><button class="btn primary" id="kn-fa-apply" data-kn="hl-fixall-go"${!n || s.busy.fixall ? ' disabled' : ''}>${s.busy.fixall ? 'Applying…' : `Apply ${n}`}</button>`
   }
-  /** After *Fix* or *Fix all*: Health checked again, and what was written and what wasn't, said. */
-  async function fixed(r) {
+  /** After *Fix* or *Fix all*: Health checked again, what was written and what wasn't said, and the focus put on the
+   *  first of `selectors` there (the next finding's same button, else the finding shown, else its kind). */
+  async function fixed(r, selectors) {
     const d = hl().data || {}, m = knFixSummary(r, [...(d.findings || []), ...(d.ignored || [])])
     await loadHealth()
     render()
     if (m.wait) say(m.text); else done(m.text)
+    focusOn(...selectors, '.kn-fx.on', '.kn-fi.on')
   }
   async function fixOne() {
     const v = vault(), dt = hl().detail, fx = (dt && dt.fix) || {}
     if (!fx.base || !fx.sha) return
-    try { await fixed(await run('kn_fix', { id: v.id, key: dt.key, choice: fx.choice || '', base: fx.base, sha: fx.sha }, 'hlfix')) } catch (err) { say(`Not fixed: ${err.message || err}`) }
+    try { await fixed(await run('kn_fix', { id: v.id, key: dt.key, choice: fx.choice || '', base: fx.base, sha: fx.sha }, 'hlfix'), ['#kn-hl-fix']) } catch (err) { say(`Not fixed: ${err.message || err}`) }
   }
   async function fixAllGo() {
     const s = st(), x = s.sheet, v = vault(), items = knFixAll(x.fixes, x.findings, x.off).items
@@ -1614,12 +1658,15 @@ const Kn = (() => {
     try {
       const r = await run('kn_fix_all', { id: v.id, items }, 'fixall')
       if (st().sheet === x) s.sheet = null
-      await fixed(r)
-    } catch (err) { x.error = String(err.message || err); render() }
+      await fixed(r, ['#kn-hl-fixall'])
+    } catch (err) {
+      // The sheet closed meanwhile: said, not lost.
+      if (st().sheet === x) { x.error = String(err.message || err); render() } else say(`Not fixed: ${err.message || err}`)
+    }
   }
   async function ignoreFinding(key, on) {
     const v = vault()
-    try { await run('kn_ignore', { id: v.id, key, on }, 'hlignore'); await loadHealth(); render(); done(on ? 'Ignored: it no longer counts. Show ignored lists it.' : 'Listed again.') } catch (err) { say(String(err.message || err)) }
+    try { await run('kn_ignore', { id: v.id, key, on }, 'hlignore'); await loadHealth(); render(); done(on ? 'Ignored: it no longer counts. Show ignored lists it.' : 'Listed again.'); focusOn('#kn-hl-ign', '.kn-fx.on', '.kn-fi.on') } catch (err) { say(String(err.message || err)) }
   }
   /** *Ask about it*: a new conversation with the finding — what it is, its pages as chips — in the composer. */
   function askAboutFinding(key) {
@@ -2004,6 +2051,7 @@ const Kn = (() => {
       const r = await run('kn_set', { id: v.id, key, value })
       const i = st().data.vaults.findIndex((x) => x.id === v.id)
       if (i >= 0) st().data.vaults[i] = r.vault
+      hlReset()
       if (st().tab === 'settings') await loadSettings()
       render()
     } catch (e) { say(String(e.message || e)) }
@@ -2727,7 +2775,7 @@ const Kn = (() => {
     if (!d) { load().then(render); return '' }
     const rows = d.vaults.map((v) => `<div class="set-row"><div class="kn-vrow"><span class="kn-gem">${IC.gem}</span><div><b>${esc(v.name)}${v.minutes && v.minutes.mode === 'auto' ? ' <span class="tag acc">★ minutes</span>' : ''}${v.available === false ? ' <span class="tag warn">folder not found</span>' : ''}</b><div class="set-sub kn-path-line" title="${esc(v.root)}"><code><bdi>${esc(short(v.root))}</bdi></code></div><div class="set-sub">${[v.pages != null ? many(v.pages, 'page') : '', v.git ? 'git' : '', v.minutes.mode === 'ask' ? 'minutes when I ask' : v.minutes.mode === 'off' ? 'no minutes' : '', esc(profName(v.profile))].filter(Boolean).join(' · ')}</div></div></div><div class="set-ctl"><button class="btn sm" data-kn="settings-open" data-id="${esc(v.id)}">Open</button></div></div>`).join('')
     const add = `<div class="set-row"><div><b>Add a vault</b><div class="set-sub">Connect a folder you already have, or start a new one from Echo's twin starter.</div></div><div class="set-ctl"><button class="btn sm" data-kn="connect">Connect a folder…</button><button class="btn sm" data-kn="new">Start a new vault…</button></div></div>`
-    return `<div class="set-sec"><h3>Vaults</h3><div class="set-card">${rows}${add}</div><p class="set-foot">Each vault's structure, meeting minutes, skills and checks are in Knowledge → the vault → Settings.</p></div>`
+    return `<div class="set-sec"><h3>Vaults</h3><div class="set-card">${rows}${add}</div><p class="set-foot">Each vault's structure, meeting minutes and skills are in Knowledge → the vault → Settings, and its checks in the vault's Health.</p></div>`
   }
   function paletteActions(add) {
     add('Knowledge', 'Connect a folder…', () => { go(home()); openConnect() }, { keywords: 'vault obsidian knowledge second brain add' })
@@ -2883,12 +2931,14 @@ const Kn = (() => {
       case 'ovr-reset': { const k = s.ovr.key; s.ovr = {}; await setVault(k, ''); return }
       case 'ovr-save': {
         const val = (document.getElementById('kn-ovr') || {}).value || ''
-        try { const r = await run('kn_set', { id: v.id, key: s.ovr.key, value: val }); const i = s.data.vaults.findIndex((x) => x.id === v.id); if (i >= 0) s.data.vaults[i] = r.vault; s.ovr = {}; s.tree = null; s.graph = null; await loadSettings(); render() } catch (err) { s.ovr.error = String(err.message || err); render() }
+        try { const r = await run('kn_set', { id: v.id, key: s.ovr.key, value: val }); const i = s.data.vaults.findIndex((x) => x.id === v.id); if (i >= 0) s.data.vaults[i] = r.vault; s.ovr = {}; s.tree = null; s.graph = null; hlReset(); await loadSettings(); render() } catch (err) { s.ovr.error = String(err.message || err); render() }
         return
       }
       // Health (K16-01, -04, -07)
       case 'hl-filter': hl().filter = d.knFilter; render(); await loadFinding(); return render()
-      case 'hl-pick': return goVault(s.vault, 'health', d.knKey)
+      case 'hl-pick': hl().picked = true; return goVault(s.vault, 'health', d.knKey)
+      case 'hl-retry': await loadHealth(); return render()
+      case 'hl-fa-more': if (s.sheet && s.sheet.kind === 'fixall') { s.sheet.open = true; render(); focusOn('#kn-fa-4') } return
       case 'hl-ignored': hl().showIgnored = !hl().showIgnored; render(); await loadFinding(); return render()
       case 'hl-choice': return pickChoice(d.knKey, d.knChoice)
       case 'hl-fix': return fixOne()

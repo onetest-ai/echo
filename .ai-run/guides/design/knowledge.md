@@ -176,8 +176,8 @@ when already there) and inline. Not in the index: slice 1's row (`catalog::inser
 place in the text they are given, so *Fix all* applies several to one file in one write; one with nothing left to do
 there (another fix removed its row) is `skipped`, with why. `apply` writes each file only if its sha256 is still the
 fixes' `base` (else `changed_since`, left as it is), by `write_atomic`, then one commit of the written files that were
-clean before (X-G2, `git::dirty` fails safe — `log.md` included) and one activity line per page (`by: health`, the
-commit id only for a file in the commit). A fix depends on more than its file — the whole index (the closest page),
+clean before (X-G2, `git::dirty` fails safe — `log.md` included), named in `committed`, and one activity line per page
+(`by: health`, the commit id only for a file in the commit). A fix depends on more than its file — the whole index (the closest page),
 the page a row is for, today's date — so the page sends back both the `base` and the `sha` of the text it was shown
 (ruling R37): `kn_fix` / `kn_fix_all` take `{key, choice?, base, sha}`, compute each fix again and write it only when
 both match.
@@ -261,8 +261,11 @@ unsaved text when there is one; nothing is written until Save. Knowledge's `.btn
 `.primary` (the window's main area: grid area, a column) would otherwise stack a button's label and key hint.
 
 **The Health tab** (spec K16-01, -04, -07; `knowledge.js` block `kn-health`): `/health` is asked when a vault opens
-(the tab's number: findings in *Needs you*), stamped with the vault's `rev`, and asked again when the 2 s poll sees the
-rev change. The list groups findings by group (Needs you · Should fix · Tidy), then by kind (`knHealthList`; *All ·
+(the tab's number: findings in *Needs you*; its accessible name "Health, 3 need you"), stamped with the vault's `rev`,
+and asked again when the 2 s poll sees the rev change, whenever the tab is entered (`knHealthLoad`: only picking
+another finding of the list asks for that finding alone), and after any change to the vault's settings or Read again
+(`knHealthState` empties it, keeping the filter; the pages' rev doesn't see settings, Rust's revision does). A check
+again that fails is said over what was found before, with *Check again*. The list groups findings by group (Needs you · Should fix · Tidy), then by kind (`knHealthList`; *All ·
 Needs you · By code · AI* filter it, the counts never change with the filter; *Show ignored* adds an Ignored group).
 The route names one finding (`health/<key>`, the key encoded once); `knHealthSelect` falls back to the first of its kind
 (a finding just fixed or ignored is gone), then the first. The kind shown lists its findings; only the one shown is
@@ -270,9 +273,12 @@ fetched (`health/<key>?choice=`): its pages with lines (*Open*), the ways to fix
 taxonomy's tags), the diff from `hunks`, *Ask about it* (a new Ask conversation: the finding's sentence and its pages as
 chips, nothing sent), *Ignore* / *List again*, *Create the page*, *Open the taxonomy*, *Fix*. *Fix* and *Fix all* send
 keys with the `base` and `sha` of the diff shown (R37); *Fix all*'s sheet comes from `/health?fixes=<kind>`, leaves
-guesses out (R36) and redraws only its foot when a box is ticked, so focus stays. The answer is said by `knFixSummary`:
-what was written goes by itself; anything changed since, skipped or not committed waits for OK. The answer doesn't name
-the files the commit took, so for several files it says "Committed those without changes of yours". The trend is 30
+guesses out (R36), shows four diffs and folds the rest ("5 more, ticked — show them"; folded fixes are sent too), and
+redraws only its foot when a box is ticked. The answer is said by `knFixSummary`: what was written goes by itself;
+anything changed since, skipped or not committed — a file `committed` leaves out had changes of the user's — waits for
+OK. Every control has an id, so the window's redraw gives the focus back; a row opened from the keyboard hands its id to
+the opened card, the sheet takes the focus to its first fix, and after *Fix*, *Fix all* or *Ignore* it goes to the next
+finding's same button. The trend is 30
 days of `history`, a day without a point a gap (`knHealthTrend`, `knTrendPath`). Before any AI check the card says
 "code checks only", Freshness is left out and there is no *Run AI checks* yet (it comes with the AI checks, K16-05).
 

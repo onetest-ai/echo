@@ -644,3 +644,6 @@ button.kn-rf:hover { background: var(--line); }
   .kn-hl-score .kn-hbars { grid-column: 1 / -1; }
 }
 .kn-fa-foot { display: contents; }
+.kn-fx.on:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.kn-hl-err { align-items: center; }
+.kn-fa-more { align-self: flex-start; font-size: 12px; padding: 2px 0; }

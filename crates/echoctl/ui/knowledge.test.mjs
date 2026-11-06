@@ -12,7 +12,7 @@ const block = (name) => {
 }
 const load = (names, exports) => new Function(`${names.map(block).join('\n')}\nreturn { ${exports.join(', ')} }`)()
 const { knParseRoute, knRouteOf } = load(['kn-route'], ['knParseRoute', 'knRouteOf'])
-const { knTabCounts } = load(['kn-tabs'], ['knTabCounts'])
+const { knTabCounts, knTabLabel } = load(['kn-tabs'], ['knTabCounts', 'knTabLabel'])
 const { knSwitcherEntries } = load(['kn-switcher'], ['knSwitcherEntries'])
 const { knChipState } = load(['kn-chip'], ['knChipState'])
 const { knBuildTree } = load(['kn-tree'], ['knBuildTree'])
@@ -25,7 +25,7 @@ const { knChatTurns, knChatReadOutside, knFollow, knAnswerInto, knAnswerMd, knWa
 const { knChatOpen, knPollKeep, knChatTake } = load(['kn-poll'], ['knChatOpen', 'knPollKeep', 'knChatTake'])
 const { knToolRows } = load(['kn-tools'], ['knToolRows'])
 const { knMention, knMentionPick, knChatMessage } = load(['kn-mention'], ['knMention', 'knMentionPick', 'knChatMessage'])
-const { knHealthList, knHealthSelect, knHealthTrend, knTrendPath, knFixAll, knFixSummary } = load(['kn-health'], ['knHealthList', 'knHealthSelect', 'knHealthTrend', 'knTrendPath', 'knFixAll', 'knFixSummary'])
+const { knHealthList, knHealthSelect, knHealthTrend, knTrendPath, knFixAll, knFixSummary, knHealthLoad, knHealthState } = load(['kn-health'], ['knHealthList', 'knHealthSelect', 'knHealthTrend', 'knTrendPath', 'knFixAll', 'knFixSummary', 'knHealthLoad', 'knHealthState'])
 
 const tests = []
 const test = (name, f) => tests.push([name, f])
@@ -693,13 +693,53 @@ test('Fix all sends each ticked fix by its key with the base and sha of the diff
 test('what a fix did, in Echo\'s words: what was written, what wasn\'t and why', () => {
   assert.deepEqual(knFixSummary({ written: ['knowledge/notes/a.md'], changed_since: [], skipped: [], commit: 'a1b2c3d' }), { text: 'Fixed: knowledge/notes/a.md. Committed (a1b2c3d).', wait: false })
   assert.deepEqual(knFixSummary({ written: ['knowledge/CATALOG.md', 'knowledge/log.md'], changed_since: [], skipped: [], commit: 'off' }), { text: 'Fixed in 2 files.', wait: false })
-  // The commit leaves out a file with changes of yours, and the answer doesn't name the files it took.
-  assert.deepEqual(knFixSummary({ written: ['knowledge/a.md', 'knowledge/b.md'], changed_since: [], skipped: [], commit: 'a1b2c3d' }), { text: 'Fixed in 2 files. Committed those without changes of yours (a1b2c3d).', wait: false })
+  // The commit takes only files without changes of yours (X-G2): `committed` names them.
+  assert.deepEqual(knFixSummary({ written: ['knowledge/a.md', 'knowledge/b.md'], committed: ['knowledge/a.md', 'knowledge/b.md'], changed_since: [], skipped: [], commit: 'a1b2c3d' }), { text: 'Fixed in 2 files. Committed (a1b2c3d).', wait: false })
+  assert.deepEqual(knFixSummary({ written: ['knowledge/a.md', 'knowledge/b.md'], committed: ['knowledge/a.md'], changed_since: [], skipped: [], commit: 'a1b2c3d' }), { text: 'Fixed in 2 files. Committed (a1b2c3d), but not knowledge/b.md: it had changes of yours.', wait: true })
+  assert.equal(knFixSummary({ written: ['knowledge/a.md', 'knowledge/b.md', 'knowledge/c.md'], committed: ['knowledge/a.md'], changed_since: [], skipped: [], commit: 'a1b2c3d' }).text, 'Fixed in 3 files. Committed (a1b2c3d), but not knowledge/b.md, knowledge/c.md: they had changes of yours.')
   const r = knFixSummary({ written: ['knowledge/a.md', 'knowledge/b.md'], changed_since: ['knowledge/c.md'], skipped: [{ key: KB2, why: 'Echo\'s page for it is a guess: fix it on its own' }], commit: 'skipped: the file had changes of yours that weren\'t committed' }, FINDINGS)
   assert.equal(r.text, 'Fixed in 2 files. Not committed: the file had changes of yours that weren\'t committed. knowledge/c.md changed since Echo showed its fix, so it was left as it is. Not fixed: ../../notes/2026-8-27-lena-pricing-1-1.md leads to no page — Echo\'s page for it is a guess: fix it on its own.')
   assert.equal(r.wait, true, 'something wasn\'t done: said until OK')
   assert.equal(knFixSummary({ written: [], changed_since: [], skipped: [{ key: 'gone:x', why: 'that finding isn\'t there any more' }], commit: 'off' }).text, 'Not fixed: a finding — that finding isn\'t there any more.')
   assert.deepEqual(knFixSummary({ written: [], changed_since: [], skipped: [], commit: 'off' }), { text: 'Nothing was changed.', wait: true })
+})
+
+// ── Health, fix round 1 ──
+test('Health is asked again whenever its tab is entered (a settings change isn\'t in the pages\' rev); picking a finding asks for that one', () => {
+  const h = { vault: 'my-twin', data: { findings: [] } }
+  assert.equal(knHealthLoad(h, { vault: 'my-twin', tab: 'health' }), 'all', 'entering Health with its findings loaded: asked again')
+  assert.equal(knHealthLoad(h, { vault: 'my-twin', tab: 'health', picked: true }), 'finding', 'another finding of the list shown: that one alone')
+  assert.equal(knHealthLoad(null, { vault: 'my-twin', tab: 'health', picked: true }), 'all')
+  assert.equal(knHealthLoad({ vault: 'team-wiki', data: { findings: [] } }, { vault: 'my-twin', tab: 'health', picked: true }), 'all', 'another vault\'s findings')
+  assert.equal(knHealthLoad(h, { vault: 'my-twin', tab: 'pages' }), null, 'elsewhere, with the tab\'s number there: nothing')
+  assert.equal(knHealthLoad({ vault: 'my-twin', data: null }, { vault: 'my-twin', tab: 'settings' }), 'count', 'after a settings change emptied it: the number again')
+})
+
+test('a settings change empties Health but keeps how you look at it; an answer still coming for the old state is dropped', () => {
+  const fresh = knHealthState('my-twin')
+  assert.deepEqual([fresh.vault, fresh.data, fresh.filter, fresh.showIgnored, fresh.choice], ['my-twin', null, 'all', false, {}])
+  const old = { ...fresh, data: { findings: [] }, rev: 'r1', at: 5, detail: { key: KB1 }, want: KB1, choice: { [KB1]: 'remove' }, filter: 'needs', showIgnored: true, error: 'x' }
+  const s = knHealthState('my-twin', old)
+  assert.deepEqual([s.data, s.rev, s.detail, s.choice, s.error, s.filter, s.showIgnored], [null, null, null, {}, null, 'needs', true])
+  assert.notEqual(s, old, 'a new state: a load that started for the old one doesn\'t land in it')
+})
+
+test('Fix all shows the first fixes and folds the rest, which stay ticked and are sent', () => {
+  const nine = Array.from({ length: 9 }, (_, i) => ({ key: `broken:knowledge/notes/n${i}.md:[[Northwind Retail]]`, choice: 'to', path: `knowledge/notes/n${i}.md`, base: `b${i}`, sha: `s${i}`, guess: false, hunks: [], plus: 1, minus: 1 }))
+  const s = knFixAll(nine, [])
+  assert.deepEqual([s.shown.map((r) => r.key), s.more], [nine.slice(0, 4).map((x) => x.key), { n: 5, ticked: 5 }])
+  assert.equal(s.items.length, 9, 'the folded fixes are sent too')
+  assert.deepEqual(knFixAll(nine, [], new Set([nine[6].key])).more, { n: 5, ticked: 4 })
+  const open = knFixAll(nine, [], new Set(), { open: true })
+  assert.deepEqual([open.shown.length, open.more], [9, null], 'shown, all of them')
+  const five = knFixAll(nine.slice(0, 5), [])
+  assert.deepEqual([five.shown.length, five.more], [5, null], 'one more than four isn\'t folded')
+})
+
+test('a tab with a number says it in its name: "Health, 3 need you"', () => {
+  assert.equal(knTabLabel('Health', 3), 'Health, 3 need you')
+  assert.equal(knTabLabel('Health', 1), 'Health, 1 needs you')
+  assert.equal(knTabLabel('Health', null), 'Health')
 })
 
 let failed = 0

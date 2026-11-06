@@ -177,6 +177,38 @@ fn fix_all_writes_what_did_not_change_since_in_one_commit() {
 }
 
 #[test]
+fn the_answer_names_the_files_the_commit_took() {
+    // A file with changes of the user's is fixed but left out of the commit (X-G2): the page says which.
+    let (_env, root) = crate::paths::testenv::folders("kn-health-committed");
+    if git::program().is_none() {
+        return;
+    }
+    let _iso = git::tests::isolated(&root, true);
+    let t = fixture::twin(&root.join("twin"));
+    fixture::write(&t, "knowledge/clients/northwind-retail.md", "---\ntitle: Northwind Retail\n---\n# Northwind Retail\n");
+    for n in 1..=3 {
+        fixture::write(&t, &format!("knowledge/topics/t{n}.md"), &format!("---\ntitle: T{n}\n---\nWith [[Northwind Retail]] ({n}).\n"));
+    }
+    assert!(git::tests::repo(&t));
+    // Lena Hartmann's own change, not committed, before Echo shows the fixes.
+    fixture::write(&t, "knowledge/topics/t3.md", "---\ntitle: T3\n---\nWith [[Northwind Retail]] (3), noted by Lena Hartmann.\n");
+    let v = knowledge::add(&t, AddOpts { name: Some("Twin".into()), commit: Some(true), ..Default::default() }).unwrap();
+    let fixes: Vec<Fix> = findings(&v, &scan::index(&v).unwrap()).into_iter().filter(|f| f.kind == "broken").map(|f| fix(&v, &f.key, None).unwrap()).collect();
+    let a = apply(&v, &fixes).unwrap();
+    assert_eq!(a.written, ["knowledge/topics/t1.md", "knowledge/topics/t2.md", "knowledge/topics/t3.md"]);
+    assert_eq!(a.committed, ["knowledge/topics/t1.md", "knowledge/topics/t2.md"], "{}", a.commit);
+    let files = git::out(&t, &["show", "--name-only", "--format=", "HEAD"]).unwrap();
+    assert_eq!(files.lines().collect::<Vec<_>>(), a.committed);
+    // Commits off: nothing committed, nothing named.
+    let off = knowledge::set(&v.id, "commit", "false").unwrap();
+    // (Index rows only where the index has a table for the page's folder.)
+    let again: Vec<Fix> = findings(&off, &scan::index(&off).unwrap()).into_iter().filter(|f| f.kind == "not_in_index").filter_map(|f| fix(&off, &f.key, None).ok()).collect();
+    assert!(!again.is_empty());
+    let b = apply(&off, &again).unwrap();
+    assert!(!b.written.is_empty() && b.committed.is_empty() && b.commit == "off", "{b:?}");
+}
+
+#[test]
 fn an_ignored_finding_is_neither_listed_nor_counted() {
     // K16-T7: ignore a finding; scan again.
     let (_env, root) = crate::paths::testenv::folders("kn-health-ignore");
