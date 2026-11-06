@@ -136,7 +136,8 @@ installed) has commits off. Restore refuses a page with uncommitted changes (the
 Deterministic and read-only, recomputed after each scan: pages not in the index, broken links, isolated pages, pages
 without properties, tags not in the taxonomy, the meeting tag missing from the taxonomy. `checks::in_scope` is the one
 rule for which pages count: not the index, a taxonomy or a folder's `README.md` — the tree's *Not in index* filter
-and the page rail use it too. The one fix is *Add N rows…*: one write of the index, one commit.
+and the page rail use it too. They are shown in Health (spec-2 K16; the vault's Settings only says "Checks are in
+Health" and links there, K16-10); the page rail keeps *Add a row…* for its own page.
 
 Slice 2 adds four kinds (spec-2 K16-02): index rows to missing pages (`dead_rows`: the index's own links that lead
 nowhere — no longer counted as broken links too), properties a folder usually has (a key on ≥ 80 % of a folder's
@@ -224,8 +225,8 @@ managed profile's routing can't be written out as a line to copy without its key
 path, a skill's name) has its control characters removed.
 
 ### The window
-Routes `#kn/<vault>/<pages|graph|ask|settings>[/<path>]` (Ask's last part is a conversation id, kept apart from the
-page Pages has open); `#brain/...` stays Recall. The switcher lists vaults, then
+Routes `#kn/<vault>/<pages|graph|ask|health|settings>[/<path>]` (Ask's last part is a conversation id and Health's a
+finding's key, each kept apart from the page Pages has open); `#brain/...` stays Recall. The switcher lists vaults, then
 Recall when on, then plugins' Knowledge tabs. Actions are IPC `kn_*`; long ones run as jobs the page polls
 (`/api/kn/jobs`). Rules learned the hard way:
 - **No `confirm()`, `alert()` or `prompt()`**: the webview (wry) shows none and `confirm()` returns false, so the
@@ -258,6 +259,22 @@ page* and *Add to a page* use the answer's Markdown as Claude wrote it: a finish
 (`stream.rs`, ruling R33; renders still streaming carry none). Both pages open in the editor, from the page's kept
 unsaved text when there is one; nothing is written until Save. Knowledge's `.btn.primary` is a row: app.css's
 `.primary` (the window's main area: grid area, a column) would otherwise stack a button's label and key hint.
+
+**The Health tab** (spec K16-01, -04, -07; `knowledge.js` block `kn-health`): `/health` is asked when a vault opens
+(the tab's number: findings in *Needs you*), stamped with the vault's `rev`, and asked again when the 2 s poll sees the
+rev change. The list groups findings by group (Needs you · Should fix · Tidy), then by kind (`knHealthList`; *All ·
+Needs you · By code · AI* filter it, the counts never change with the filter; *Show ignored* adds an Ignored group).
+The route names one finding (`health/<key>`, the key encoded once); `knHealthSelect` falls back to the first of its kind
+(a finding just fixed or ignored is gone), then the first. The kind shown lists its findings; only the one shown is
+fetched (`health/<key>?choice=`): its pages with lines (*Open*), the ways to fix it (a `<select>` past four, as a
+taxonomy's tags), the diff from `hunks`, *Ask about it* (a new Ask conversation: the finding's sentence and its pages as
+chips, nothing sent), *Ignore* / *List again*, *Create the page*, *Open the taxonomy*, *Fix*. *Fix* and *Fix all* send
+keys with the `base` and `sha` of the diff shown (R37); *Fix all*'s sheet comes from `/health?fixes=<kind>`, leaves
+guesses out (R36) and redraws only its foot when a box is ticked, so focus stays. The answer is said by `knFixSummary`:
+what was written goes by itself; anything changed since, skipped or not committed waits for OK. The answer doesn't name
+the files the commit took, so for several files it says "Committed those without changes of yours". The trend is 30
+days of `history`, a day without a point a gap (`knHealthTrend`, `knTrendPath`). Before any AI check the card says
+"code checks only", Freshness is left out and there is no *Run AI checks* yet (it comes with the AI checks, K16-05).
 
 ### Ask's conversations (`chat.rs`)
 A conversation is one Claude Code session id throughout (`--session-id` first, `--resume` after: measured to keep the

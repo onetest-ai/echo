@@ -5,7 +5,7 @@
 'use strict'
 
 // ── kn-route: `#kn/<vault>/<tab>/<path>` (a page's path encoded as one part) ──
-const KN_TABS = ['pages', 'graph', 'ask', 'settings']
+const KN_TABS = ['pages', 'graph', 'ask', 'health', 'settings']
 /** `decodeURIComponent`, or `null` for a broken escape (a `%` that is the name's own). */
 function knDecode(s) {
   try { return decodeURIComponent(s) } catch { return null }
@@ -549,10 +549,121 @@ function knChatMessage(text, chips) {
 }
 // end of the kn-mention block
 
+// ── kn-health: Health's findings by group and kind under a filter, the finding shown, the 30-day trend with its gaps,
+// Fix all's items and what a fix did (spec K16). The page names a finding only by its key ──
+const KN_HEALTH_GROUPS = [['needs', 'Needs you', 'only you can decide'], ['should', 'Should fix', 'most by code'], ['tidy', 'Tidy', 'when there is time']]
+const knS = (n, one, many) => (n === 1 ? one : many)
+/** A code check's kind: its name in the list, the heading of its findings (n of them) and, where *Fix all* applies, the
+ *  sheet's title. */
+const KN_HEALTH_KINDS = {
+  not_in_index: ['Not in the index', (n) => `${n} ${knS(n, 'page isn\'t', 'pages aren\'t')} in the index`, (n) => `Add ${n} ${knS(n, 'row', 'rows')} to the index`],
+  broken: ['Broken links', (n) => `${n} ${knS(n, 'link leads', 'links lead')} to no page`, (n) => `Fix ${n} broken ${knS(n, 'link', 'links')}`],
+  isolated: ['Pages with no links', (n) => `${n} ${knS(n, 'page has', 'pages have')} no links`],
+  no_props: ['Without properties', (n) => `${n} ${knS(n, 'page has', 'pages have')} no properties`, (n) => `Add properties to ${n} ${knS(n, 'page', 'pages')}`],
+  unknown_tag: ['Tags not in the taxonomy', (n) => `${n} ${knS(n, 'tag isn\'t', 'tags aren\'t')} in the taxonomy`],
+  meeting_tag_missing: ['The meeting tag', () => 'The taxonomy doesn\'t allow the meeting tag'],
+  dead_row: ['Index rows to missing pages', (n) => `${n} index ${knS(n, 'row leads', 'rows lead')} to no page`, (n) => `Fix ${n} index ${knS(n, 'row', 'rows')}`],
+  usual_prop: ['Missing a usual property', (n) => `${n} usual ${knS(n, 'property is', 'properties are')} missing`],
+  duplicate_title: ['Pages that share a title', (n) => `${n} ${knS(n, 'title is', 'titles are')} on more than one page`],
+  oversized_index: ['An oversized index', () => 'The index is too big to read first'],
+}
+/** The findings under `filter` — `all`, `needs` (Needs you), `code` or `ai` — by group, then by kind in Echo's order:
+ *  each kind with its count `n`, its keys, how many have a fix (`fixable`) and how many *Fix all* takes (`fixAll`, never
+ *  a guess). Empty groups are left out; the ignored findings are a group of their own with `showIgnored`. `kinds` and
+ *  `needs` (findings in Needs you: the tab's number) count the findings not ignored, whatever the filter. */
+function knHealthList(findings, { filter = 'all', ignored = [], showIgnored = false } = {}) {
+  const keep = (f) => (filter === 'needs' ? f.group === 'needs' : filter === 'code' ? f.by === 'code' : filter === 'ai' ? f.by === 'ai' : true)
+  const kindsOf = (list, ign) => {
+    const by = new Map()
+    for (const f of list) {
+      let k = by.get(f.kind)
+      if (!k) by.set(f.kind, (k = { kind: f.kind, by: f.by, group: f.group, ignored: ign, n: 0, keys: [], fixable: 0, fixAll: 0, name: (KN_HEALTH_KINDS[f.kind] || [f.title])[0], title: f.title, why: f.why }))
+      k.n++
+      k.keys.push(f.key)
+      if (f.fixable) k.fixable++
+      if (f.fix_all) k.fixAll++
+    }
+    return [...by.values()].map((k) => ({ ...k, meta: k.by === 'code' && k.fixable ? `${k.fixable} fixable by code` : k.n > 1 ? `${k.title} · ${k.n - 1} more` : k.title }))
+  }
+  const all = findings || [], shown = all.filter(keep)
+  const groups = KN_HEALTH_GROUPS.map(([id, label, sub]) => ({ id, label, sub, kinds: kindsOf(shown.filter((f) => f.group === id), false) })).filter((g) => g.kinds.length)
+  const off = showIgnored ? kindsOf((ignored || []).filter(keep), true) : []
+  if (off.length) groups.push({ id: 'ignored', label: 'Ignored', sub: 'not counted', kinds: off })
+  return { groups, kinds: new Set(all.map((f) => f.kind)).size, needs: all.filter((f) => f.group === 'needs').length }
+}
+/** The finding shown: `key` when it is listed, else the first of its kind (one just fixed or ignored), else the first
+ *  listed — `{ kind, key }` (`kind`: its entry in `list`), or null when nothing is. */
+function knHealthSelect(list, key) {
+  const kinds = list.groups.flatMap((g) => g.kinds)
+  const has = key ? kinds.find((k) => k.keys.includes(key)) : null
+  if (has) return { kind: has, key }
+  const k = (key && kinds.find((x) => x.kind === String(key).split(':')[0])) || kinds[0]
+  return k ? { kind: k, key: k.keys[0] } : null
+}
+/** The trend: a point a day for the `days` days up to `today` (`YYYY-MM-DD`), its score `null` on a day none was kept;
+ *  `first` and `last` the days with one, `delta` last − first (null with fewer than two). */
+function knHealthTrend(history, today, days = 30) {
+  const by = new Map((history || []).map((p) => [p.day, p.score]))
+  const t = Date.parse(`${today}T00:00:00Z`)
+  const points = []
+  for (let i = days - 1; i >= 0; i--) {
+    const day = new Date(t - i * 864e5).toISOString().slice(0, 10)
+    points.push({ day, score: by.has(day) ? by.get(day) : null })
+  }
+  const kept = points.filter((p) => p.score != null)
+  const first = kept[0] || null, last = kept[kept.length - 1] || null
+  return { points, first, last, delta: kept.length > 1 ? last.score - first.score : null }
+}
+/** The trend drawn in a `w`×`h` box: a line and the area under it for each run of days with a score — a day without one
+ *  is a gap, never bridged — and a dot for a day alone between gaps; `end` the last point. */
+function knTrendPath(points, { w = 300, h = 44, lo = 60, hi = 100 } = {}) {
+  const n = points.length
+  const low = Math.min(lo, ...points.filter((p) => p.score != null).map((p) => Math.floor(p.score / 10) * 10))
+  const x = (i) => +(n > 1 ? 3 + (i * (w - 6)) / (n - 1) : w / 2).toFixed(1)
+  const y = (v) => +(h - 4 - ((v - low) / Math.max(1, hi - low)) * (h - 8)).toFixed(1)
+  const runs = []
+  let cur = null
+  points.forEach((p, i) => {
+    if (p.score == null) { cur = null; return }
+    if (!cur) runs.push((cur = []))
+    cur.push([x(i), y(p.score)])
+  })
+  const lines = runs.filter((r) => r.length > 1).map((r) => r.map(([a, b], j) => `${j ? 'L' : 'M'}${a},${b}`).join(''))
+  const area = runs.filter((r) => r.length > 1).map((r, i) => `${lines[i]}L${r[r.length - 1][0]},${h}L${r[0][0]},${h}Z`).join('')
+  return { line: lines.join(''), area, dots: runs.filter((r) => r.length === 1).map((r) => r[0]), end: runs.length ? runs[runs.length - 1][runs[runs.length - 1].length - 1] : null }
+}
+/** *Fix all*'s sheet from `/health?fixes=<kind>`: a row per fix, ticked unless its key is in `off` — never a guess (it is
+ *  fixed on its own finding, ruling R36); one Echo couldn't compute says why, unticked. `items` is what `kn_fix_all`
+ *  takes: each ticked fix by its key, with the `base` and `sha` of the diff shown (ruling R37); `files` how many files. */
+function knFixAll(fixes, findings, off = new Set()) {
+  const by = new Map((findings || []).map((f) => [f.key, f]))
+  const rows = (fixes || []).filter((x) => x && !x.guess).map((x) => {
+    const f = by.get(x.key) || {}, page = (f.pages || [])[0] || []
+    const ok = !x.error && !!x.base && !!x.sha
+    return { key: x.key, choice: x.choice || '', base: x.base, sha: x.sha, path: x.path || page[0] || '', line: page[1] ?? null, title: f.title || '', hunks: x.hunks || [], plus: x.plus || 0, minus: x.minus || 0, error: x.error || (ok ? '' : 'Echo can\'t show this fix'), on: ok && !off.has(x.key) }
+  })
+  const on = rows.filter((r) => r.on)
+  return { rows, items: on.map((r) => ({ key: r.key, choice: r.choice, base: r.base, sha: r.sha })), files: new Set(on.map((r) => r.path)).size }
+}
+/** What came of `kn_fix` / `kn_fix_all` (`{written, changed_since, skipped, commit}`) in Echo's words — `text`, and
+ *  `wait` when something wasn't done (said until OK; else it goes by itself). `findings` name the skipped ones. A
+ *  commit takes only files without changes of the user's (X-G2), and the answer doesn't name them: said so for several. */
+function knFixSummary(r, findings = []) {
+  const title = (k) => ((findings || []).find((f) => f.key === k) || {}).title || 'a finding'
+  const written = r.written || [], commit = String(r.commit || ''), skipped = /^skipped: /.test(commit)
+  const committed = commit && commit !== 'off' && !skipped ? ` Committed ${written.length > 1 ? 'those without changes of yours ' : ''}(${commit}).` : ''
+  const out = []
+  if (written.length) out.push(`${written.length === 1 ? `Fixed: ${written[0]}` : `Fixed in ${written.length} files`}.${skipped ? ` Not committed: ${commit.slice(9)}.` : committed}`)
+  for (const p of r.changed_since || []) out.push(`${p} changed since Echo showed its fix, so it was left as it is.`)
+  for (const s of r.skipped || []) out.push(`Not fixed: ${title(s.key)} — ${String(s.why).replace(/\.$/, '')}.`)
+  return { text: out.join(' ') || 'Nothing was changed.', wait: !written.length || skipped || out.length > 1 }
+}
+// end of the kn-health block
+
 /** Knowledge's views and state (`S.kn`). */
 const Kn = (() => {
   const st = () => {
-    if (!S.kn) S.kn = { data: null, vault: '', tab: 'pages', path: '', tree: null, page: null, filter: 'all', q: '', hits: null, open: new Set(), rail: 'links', hist: null, ver: null, edit: null, graph: null, gopt: { hideIndex: true, isolated: true, tags: false, color: 'folder', depth: 0, sel: null, hidden: [] }, gq: '', settings: null, checks: null, sheet: null, switcher: false, menu: null, busy: {}, error: null, chip: null, lastVault: null, ovr: {}, chat: null, askConv: '' }
+    if (!S.kn) S.kn = { data: null, vault: '', tab: 'pages', path: '', tree: null, page: null, filter: 'all', q: '', hits: null, open: new Set(), rail: 'links', hist: null, ver: null, edit: null, graph: null, gopt: { hideIndex: true, isolated: true, tags: false, color: 'folder', depth: 0, sel: null, hidden: [] }, gq: '', settings: null, sheet: null, switcher: false, menu: null, busy: {}, error: null, chip: null, lastVault: null, ovr: {}, chat: null, askConv: '', hl: null, hlKey: '' }
     return S.kn
   }
   const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms))
@@ -662,6 +773,9 @@ const Kn = (() => {
     s.lastVault = v.id
     try { localStorage.setItem('echo.kn.vault', v.id) } catch { /* off */ }
     if (v.available === false) return
+    // Health's number on its tab (Needs you), wherever the vault opens; the Health tab loads it with its view.
+    const h = hl()
+    if (s.tab !== 'health' && !h.data && !h.loading) { h.loading = true; loadHealth({ detail: false }).then(() => { h.loading = false; render() }) }
     if (s.tab === 'pages') {
       if (!s.tree || s.tree.vault !== v.id) await loadTree()
       if (!s.path) s.path = (s.tree && s.tree.index) || ''
@@ -669,6 +783,7 @@ const Kn = (() => {
     } else if (s.tab === 'graph') await loadGraph()
     else if (s.tab === 'settings') await loadSettings()
     else if (s.tab === 'ask') { openChat(s.askConv); await loadChats() }
+    else if (s.tab === 'health') { if (h.data) await loadFinding(); else await loadHealth() }
   }
   async function loadTree() {
     const s = st(), v = vault()
@@ -706,7 +821,34 @@ const Kn = (() => {
   }
   async function loadSettings() {
     const s = st(), v = vault()
-    try { s.settings = await get(`api/kn/${enc(v.id)}/settings`); s.checks = await get(`api/kn/${enc(v.id)}/checks`) } catch (e) { s.error = String(e.message || e) }
+    try { s.settings = await get(`api/kn/${enc(v.id)}/settings`) } catch (e) { s.error = String(e.message || e) }
+  }
+  /** Health's findings, score and history (`/health`, checked by code when asked), stamped with the vault's rev so the
+   *  poll sees a change on disk; then the finding shown, with its fix. */
+  async function loadHealth({ detail = true } = {}) {
+    const v = vault(), h = hl()
+    let rev = null
+    try { rev = (await get(`api/kn/${enc(v.id)}/rev`)).rev } catch { /* the app restarting */ }
+    try {
+      const d = await get(`api/kn/${enc(v.id)}/health`)
+      if (hl() !== h) return
+      if (d.error) { h.error = d.error; return }
+      Object.assign(h, { data: d, rev, at: Date.now(), error: null })
+    } catch (e) { h.error = String(e.message || e); return }
+    if (detail) await loadFinding(true)
+  }
+  /** The finding shown (the route's, else the first of its kind, else the first): its choices and the fix of the one
+   *  picked, with the diff (`health/<key>`, the key encoded once). `force`: asked again though it is the one shown. */
+  async function loadFinding(force = false) {
+    const v = vault(), h = hl()
+    const sel = h.data && knHealthSelect(hlList(), st().hlKey)
+    if (!sel) { h.detail = null; return }
+    const choice = h.choice[sel.key] || '', want = `${sel.key}\n${choice}`
+    if (!force && h.detail && h.detail.want === want) return
+    h.want = want
+    let d
+    try { d = await get(`api/kn/${enc(v.id)}/health/${enc(sel.key)}${choice ? `?choice=${enc(choice)}` : ''}`) } catch (e) { d = { error: String(e.message || e) } }
+    if (hl() === h && h.want === want) h.detail = { ...d, key: sel.key, want }
   }
   async function refreshAll() { st().tree = null; st().page = null; st().graph = null; await load(); render() }
 
@@ -719,9 +861,12 @@ const Kn = (() => {
     if (!v || v.available === false || S.view !== 'brain' || !s.vault) return
     let rev
     try { rev = (await get(`api/kn/${enc(v.id)}/rev`)).rev } catch { return }
-    const known = s.tree ? s.tree.rev : s.graph ? s.graph.rev : null
+    const h = s.hl && s.hl.vault === v.id && s.hl.data ? s.hl : null
+    const known = s.tree ? s.tree.rev : s.graph ? s.graph.rev : h ? h.rev : null
     if (!known || rev === known) return
     await loadTree()
+    // Health's findings, its number on the tab and the diff shown follow the change.
+    if (h) await loadHealth({ detail: s.tab === 'health' })
     if (s.edit) {
       // Editing: the file changed under the editor? Say so; never replace what is typed.
       try { const p = await get(`api/kn/${enc(v.id)}/page?path=${enc(s.edit.path)}`); if (p.base && p.base !== s.edit.base) s.edit.conflict = { base: p.base, text: p.text, mtime: p.mtime } } catch { /* gone */ }
@@ -736,12 +881,13 @@ const Kn = (() => {
     if (r.vault !== s.vault) { s.page = null; s.tree = null; s.graph = null; s.settings = null; s.edit = null; s.hits = null; s.q = ''; s.gq = ''; s.gopt.hidden = [] }
     s.vault = r.vault || s.lastVault || (vaults()[0] || {}).id || ''
     s.tab = r.tab
-    // Ask's part of the route is a conversation, not the page Pages keeps open.
-    if (r.tab === 'ask') { s.askConv = r.path || ''; openChat(s.askConv) } else if (r.path !== undefined && r.path !== s.path) { s.path = r.path; s.ver = null }
+    // Ask's part of the route is a conversation and Health's a finding's key, not the page Pages keeps open.
+    if (r.tab === 'ask') { s.askConv = r.path || ''; openChat(s.askConv) } else if (r.tab === 'health') s.hlKey = r.path || ''
+    else if (r.path !== undefined && r.path !== s.path) { s.path = r.path; s.ver = null }
     s.source = 'vault'
   }
   /** The route's last part for the tab open now. */
-  const here = () => (st().tab === 'ask' ? st().askConv || '' : st().path || '')
+  const here = () => (st().tab === 'ask' ? st().askConv || '' : st().tab === 'health' ? st().hlKey || '' : st().path || '')
   const goVault = (id, tab = 'pages', path = '') => go(knRouteOf({ vault: id, tab, path }))
   /** Knowledge's own view (a vault, or none yet) rather than Recall's or a plugin's tab. */
   function active() {
@@ -796,8 +942,10 @@ const Kn = (() => {
   }
   function tabs() {
     const s = st()
-    const t = (id, label) => `<button class="tab" role="tab" data-kn="tab" data-kn-tab="${id}" aria-selected="${s.tab === id}">${label}</button>`
-    return `<div class="kn-tabs"><div class="tabs" role="tablist">${t('pages', 'Pages')}${t('graph', 'Graph')}${t('ask', 'Ask')}${t('settings', 'Settings')}</div></div>`
+    const h = s.hl && s.hl.vault === s.vault && s.hl.data
+    const n = knTabCounts({ needs: h ? knHealthList(h.findings).needs : 0 })
+    const t = (id, label, count) => `<button class="tab" role="tab" data-kn="tab" data-kn-tab="${id}" aria-selected="${s.tab === id}">${label}${count ? `<span class="kn-cnt" title="${count} ${count === 1 ? 'needs' : 'need'} you">${nf(count)}</span>` : ''}</button>`
+    return `<div class="kn-tabs"><div class="tabs" role="tablist">${t('pages', 'Pages')}${t('graph', 'Graph')}${t('ask', 'Ask')}${t('health', 'Health', n.health)}${t('settings', 'Settings')}</div></div>`
   }
 
   // ── nothing connected yet ──
@@ -1250,7 +1398,7 @@ const Kn = (() => {
 
   // ── a vault's Settings ──
   function settingsView() {
-    const s = st(), x = s.settings, v = vault(), c = s.checks
+    const s = st(), x = s.settings, v = vault()
     if (!x || !v || x.vault.id !== v.id) return '<div class="kn-vset"><div class="skeleton" style="padding:24px"><i></i><i></i><i></i></div></div>'
     const d = v.detected || {}, P = v.paths || {}
     const row = (t, sub, ctl, id) => `<div class="set-row"${id ? ` id="${id}"` : ''}><div><b>${t}</b><div class="set-sub">${sub}</div></div><div class="set-ctl">${ctl}</div></div>`
@@ -1258,8 +1406,7 @@ const Kn = (() => {
     const change = (key, label, value, sub) => editing === key
       ? `<div class="set-row"><div><b>${label}</b><div class="kn-inline"><input class="search" id="kn-ovr" value="${esc(s.ovr.value)}" aria-label="${esc(label)}" spellcheck="false"><button class="btn primary sm" data-kn="ovr-save">Save</button><button class="btn ghost sm" data-kn="ovr-cancel">Cancel</button>${(v.overrides || {})[key] ? '<button class="btn ghost sm" data-kn="ovr-reset">As detected</button>' : ''}</div>${s.ovr.error ? `<div class="error">${esc(s.ovr.error)}</div>` : ''}</div><div></div></div>`
       : row(label, `${value ? `<code>${esc(value)}</code>` : '<span class="set-sub">none found</span>'}${sub ? ` — ${sub}` : ''}${(v.overrides || {})[key] ? ' <span class="tag">changed by you</span>' : ''}`, `<button class="btn ghost sm" data-kn="ovr" data-key="${key}" data-value="${esc(value || '')}">Change</button>`)
-    const nav = [['vs-structure', 'Structure'], ['vs-minutes', 'Meeting minutes'], ['vs-schema', 'Schema & vocabulary'], ['vs-skills', 'Skills'], ['vs-checks', 'Checks'], ['vs-git', 'Git & AI']]
-    const findings = c ? (c.not_in_index.length ? 1 : 0) + (c.broken.length ? 1 : 0) + (c.isolated.length ? 1 : 0) + (c.no_props.length ? 1 : 0) + (c.unknown_tags.length ? 1 : 0) + (c.meeting_tag_missing ? 1 : 0) : 0
+    const nav = [['vs-structure', 'Structure'], ['vs-minutes', 'Meeting minutes'], ['vs-schema', 'Schema & vocabulary'], ['vs-skills', 'Skills'], ['vs-git', 'Git & AI']]
     const m = v.minutes || {}
     const sel = (key, opts, val) => `<select class="set-in" data-kn-set="${key}" aria-label="${esc(key)}">${opts.map(([k, l]) => `<option value="${k}"${k === val ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>`
     const scopeSome = m.scope === 'some'
@@ -1274,22 +1421,9 @@ const Kn = (() => {
     const skillRow = (k) => row(`${esc(k.name)} <span class="tag">${k.kind === 'command' ? '.claude/commands' : '.claude/skills'}</span>`, k.description ? `<span class="kn-clamp" title="${esc(k.description)}">${esc(k.description)}</span>` : 'no description', `<button class="btn sm" data-kn="run-skill" data-name="${esc(k.name)}">Run in Claude</button><button class="btn ghost sm" data-kn="open-tab" data-path="${esc(k.path)}">Open</button>`)
     const twinRow = x.has_twin ? row(`Use /twin from any Claude Code session${x.global_twin ? ` <span class="tag ok">installed as /${esc(x.global_twin)}</span>` : ''}`, x.global_twin ? `In <code>~/.claude/skills/${esc(x.global_twin)}/</code> — your own Claude Code. Sessions on other AI profiles don't see it.` : `A copy of this vault's twin skill with its paths, in <code>~/.claude/skills/${esc(x.global_twin_name)}/</code> — shown first, yours to remove.`, x.global_twin ? `<button class="btn sm" data-kn="twin-global">Update</button><button class="btn ghost sm" data-kn="twin-remove">Remove</button>` : `<button class="btn sm" data-kn="twin-global-ask">Install…</button>`)
       : row('twin <span class="tag acc">Echo starter</span>', 'Find, answer and remember — not in this vault. Adds <code>.claude/skills/twin/SKILL.md</code>; nothing else changes.', `<button class="btn sm" data-kn="twin-add"${s.busy.twin ? ' disabled' : ''}>Add…</button>`)
-    const show = (k) => s.showCheck === k
-    const list = (k, items, fmt) => show(k) ? `<div class="kn-check-list">${items.slice(0, 60).map(fmt).join('')}${items.length > 60 ? `<div class="set-sub">and ${items.length - 60} more</div>` : ''}</div>` : ''
-    const openP = (p, sub) => `<button class="kn-check-item" data-kn="open-tab" data-path="${esc(p)}"><span>${esc(p.replace(/^[^/]*\//, ''))}</span>${sub ? `<span class="set-sub">${esc(sub)}</span>` : ''}</button>`
-    const checkRow = (k, n, t, sub, extra = '') => n ? `${row(`${t}`, sub, `${extra}<button class="btn ghost sm" data-kn="show-check" data-check="${k}">${show(k) ? 'Hide' : 'Show'}</button>`)}` : ''
-    const checks = !c ? '<div class="skeleton" style="padding:12px"><i></i></div>' : findings === 0 && !c.no_index ? row('Nothing to fix', 'Every page is in the index, every link leads somewhere, every page has its properties.', '') : [
-      c.no_index ? row('No index page', 'Claude finds pages through an index (<code>CATALOG.md</code>, <code>index.md</code>…). Set one under Structure.', '') : '',
-      checkRow('index', c.not_in_index.length, `${c.not_in_index.length} page${c.not_in_index.length === 1 ? ' isn\'t' : 's aren\'t'} in the index`, 'Claude finds pages through the index, so these are hard to find.', `<button class="btn sm" data-kn="rows-all">Add ${c.not_in_index.length} row${c.not_in_index.length === 1 ? '' : 's'}…</button>`) + list('index', c.not_in_index, (p) => openP(p)),
-      checkRow('broken', c.broken.length, `${c.broken.length} broken link${c.broken.length === 1 ? '' : 's'}`, 'Links to pages or files that aren\'t there.') + list('broken', c.broken, ([p, l]) => openP(p, `→ ${l}`)),
-      checkRow('isolated', c.isolated.length, `${c.isolated.length} isolated page${c.isolated.length === 1 ? '' : 's'}`, 'No links in or out.') + list('isolated', c.isolated, (p) => openP(p)),
-      checkRow('props', c.no_props.length, `${c.no_props.length} page${c.no_props.length === 1 ? '' : 's'} without properties`, 'No frontmatter: no tags, date or source.') + list('props', c.no_props, (p) => openP(p)),
-      checkRow('tags', c.unknown_tags.length, `${c.unknown_tags.length} tag${c.unknown_tags.length === 1 ? '' : 's'} not in the taxonomy`, `Tags missing from <code>${esc(x.tag_file || 'the tag taxonomy')}</code>.`) + list('tags', c.unknown_tags, ([p, t]) => openP(p, `#${t}`)),
-      c.meeting_tag_missing ? row(`Meeting notes get #${esc(c.meeting_tag_missing)}`, `It isn't in <code>${esc(x.tag_file || 'the taxonomy')}</code>: add it there, or choose another tag under Meeting minutes.`, '') : '',
-    ].join('')
     const g = v.git
     const profiles = (typeof ai === 'function' ? ai().profiles : []) || []
-    return `<div class="kn-vset"><nav class="kn-vset-nav">${nav.map(([id, l]) => `<button class="set-nav" data-kn="vs-go" data-to="${id}">${l}${id === 'vs-checks' && findings ? `<span class="set-warn">${findings}</span>` : ''}</button>`).join('')}<span class="grow"></span><button class="set-nav danger" data-kn="remove-ask">Remove from Echo…</button></nav>
+    return `<div class="kn-vset"><nav class="kn-vset-nav">${nav.map(([id, l]) => `<button class="set-nav" data-kn="vs-go" data-to="${id}">${l}</button>`).join('')}<button class="set-nav" data-kn="tab" data-kn-tab="health">Health<span class="kn-nav-r" aria-hidden="true">→</span></button><span class="grow"></span><button class="set-nav danger" data-kn="remove-ask">Remove from Echo…</button></nav>
     <div class="kn-vset-main" data-keep-scroll>
       <section class="set-sec" id="vs-structure"><h3>Structure</h3><div class="set-card">
         ${row('Name', '', `<input class="set-in" data-kn-set="name" value="${esc(v.name)}" aria-label="The vault's name">`)}
@@ -1317,7 +1451,7 @@ const Kn = (() => {
         ${agents.length ? row(`${agents.length} for other agents`, `${agents.map((k) => esc(k.name)).join(' · ')} — in <code>.agents/skills/</code>`, '') : ''}
         ${twinRow}
       </div></section>
-      <section class="set-sec" id="vs-checks"><h3>Checks <span class="kn-h3-sub">read just now · changes nothing</span></h3><div class="set-card">${checks}</div></section>
+      <section class="set-sec" id="vs-checks"><h3>Checks</h3><div class="kn-info">${IC.info}<span>Checks are in <button class="kn-lnk" data-kn="tab" data-kn-tab="health">Health</button>.</span></div></section>
       <section class="set-sec" id="vs-git"><h3>Git & AI</h3><div class="set-card">
         ${row('Git', g ? `${(g.remotes || []).length ? `<code>${esc(g.remotes.join(', '))}</code> · ` : ''}${IC.git} ${esc(g.branch || 'detached HEAD')}${g.changed ? ` · ${g.changed} file${g.changed === 1 ? '' : 's'} changed and not committed — yours; Echo never commits them` : ' · clean'}${g.busy ? ` · <span class="warn">${esc(g.busy)}</span>` : ''}` : (st().data || {}).git ? 'Not a git repository — pages have no history in Echo.' : 'git isn\'t installed — pages have no history in Echo.', `<button class="btn ghost sm" data-kn="reveal" data-path="">Reveal</button>`)}
         ${g ? row('Commit what Echo writes', v.commit ? 'One commit per change, only Echo\'s files; never a push, pull or branch switch.' : 'Off: Echo writes the files and leaves committing to you.', `<button class="sw${v.commit ? ' on' : ''}" role="switch" aria-checked="${!!v.commit}" data-kn="set-bool" data-key="commit" data-val="${!v.commit}" aria-label="Commit what Echo writes"></button>`) : ''}
@@ -1326,6 +1460,184 @@ const Kn = (() => {
         ${row('Echo\'s index of this vault', `In Echo's data folder, not in the vault${x.cache_bytes ? ` · ${kb(x.cache_bytes)}` : ''} · rebuilt on its own`, `<button class="btn ghost sm" data-kn="reread">Rebuild</button>`)}
       </div></section>
     </div></div>`
+  }
+
+  // ── Health (spec K16): the score and its trend, how Health checks, the findings by group and kind, the finding shown
+  // with its fix as a diff. Findings are named by key only, and a fix is sent back with the base and sha of the diff
+  // shown (ruling R37). Titles, page names, lines, reasons and diff lines are others' words: esc(). AI checks (Task 14)
+  // aren't here yet: the card says "code checks only" and has no *Run AI checks*. ──
+  function hl() {
+    const s = st()
+    if (!s.hl || s.hl.vault !== s.vault) s.hl = { vault: s.vault, data: null, rev: null, at: 0, error: null, detail: null, want: '', choice: {}, filter: 'all', showIgnored: false, loading: false }
+    return s.hl
+  }
+  const hlList = () => { const h = hl(), d = h.data || {}; return knHealthList(d.findings, { filter: h.filter, ignored: d.ignored, showIgnored: h.showIgnored }) }
+  const hlFinding = (key) => { const d = hl().data || {}; return [...(d.findings || []), ...(d.ignored || [])].find((f) => f.key === key) || null }
+  const isoDay = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  /** A finding's pages, each once with its lines. */
+  const pagesOf = (f) => { const m = new Map(); for (const [p, l] of (f && f.pages) || []) { if (!m.has(p)) m.set(p, []); if (l != null) m.get(p).push(l) } return [...m] }
+  const where = (p, lines) => `${p}${lines.length ? ` · ${lines.length === 1 ? 'line' : 'lines'} ${lines.join(', ')}` : ''}`
+  const hunkRows = (hunks) => (hunks || []).map((h, k) => (k ? '<div class="hd">…</div>' : '') + h.map(([o, l]) => `<div class="${o === '+' ? 'add' : o === '-' ? 'del' : ''}">${o === '+' ? '+' : o === '-' ? '−' : ' '} ${esc(l)}</div>`).join('')).join('')
+  const pmOf = (x) => `<span class="kn-pm">${x.plus ? `<span class="a">+${x.plus}</span>` : ''}${x.plus && x.minus ? ' ' : ''}${x.minus ? `<span class="d">−${x.minus}</span>` : ''}</span>`
+  function healthView() {
+    const h = hl(), d = h.data
+    if (!d) return `<div class="kn-hl">${h.error ? `<div class="kn-none"><p class="error">${esc(h.error)}</p></div>` : '<div class="skeleton" style="padding:24px"><i></i><i></i><i></i></div>'}</div>`
+    const list = hlList(), sel = knHealthSelect(list, st().hlKey)
+    return `<div class="kn-hl" data-keep-scroll><div class="kn-hl-in">${hlTop(list)}<div class="kn-hl-f${sel ? '' : ' kn-hl-none'}">${hlFindings(list, sel)}${sel ? hlDetail(sel) : ''}</div></div></div>`
+  }
+  /** The score card and *How Health checks* (K16-01). */
+  function hlTop(list) {
+    const h = hl(), d = h.data, v = vault(), sc = d.score || {}, total = sc.total == null ? 100 : sc.total
+    const today = isoDay(), tr = knHealthTrend(d.history, today, 30), p = knTrendPath(tr.points, { w: 300, h: 44 })
+    const word = total >= 80 ? 'Tidy' : total >= 60 ? 'Mostly tidy' : 'Needs tidying'
+    const head = list.needs ? `${word}, with ${many(list.needs, 'thing')} only you can decide` : word
+    const delta = tr.delta == null ? '' : `<span class="tag ${tr.delta >= 0 ? 'ok' : 'warn'}">${tr.delta >= 0 ? '+' : '−'}${Math.abs(tr.delta)} in 30 days</span>`
+    const day = (x) => (x.day === today ? 'today' : new Date(`${x.day}T12:00:00`).toLocaleDateString([], { day: 'numeric', month: 'short' }))
+    const since = tr.first && tr.first.day !== tr.last.day ? `${day(tr.first)} ${tr.first.score} · ${day(tr.last)} ${tr.last.score}` : 'The trend starts today: one point a day.'
+    const dot = ([x, y], r) => `<circle cx="${x}" cy="${y}" r="${r}" fill="var(--accent)"/>`
+    const spark = `<svg class="kn-spark" viewBox="0 0 300 44" preserveAspectRatio="none" aria-hidden="true"><path d="${p.area}" fill="var(--accent-soft)"/><path d="${p.line}" fill="none" stroke="var(--accent)" stroke-width="1.8" vector-effect="non-scaling-stroke"/>${p.dots.map((x) => dot(x, 2)).join('')}${p.end ? dot(p.end, 3) : ''}</svg>`
+    const num = (x) => nf(Math.round(x * 10) / 10)
+    const bars = (sc.categories || []).map(([name, pts, w]) => `<span>${esc(name)}</span><div class="kn-hbar" role="img" aria-label="${esc(name)}: ${num(pts)} of ${w}"><i style="width:${Math.max(0, Math.min(100, Math.round((pts / w) * 100)))}%"></i></div><span>${num(pts)}/${w}</span>`).join('')
+    const prof = (typeof profileOf === 'function' && profileOf(v.profile)) || {}
+    const lastAi = d.ai ? `last ${esc(whenOf(d.ai.at))}${d.ai.cost != null ? `, ${esc(usd(d.ai.cost))}` : ''}` : 'not run yet'
+    return `<div class="kn-hl-top">
+      <div class="kn-card"><div class="kn-hl-score"><div class="kn-ring" style="--p:${total}%" role="img" aria-label="Score ${total} of 100"><span>${total}<small>of 100</small></span></div>
+        <div class="kn-trend"><b>${esc(head)} ${delta}${sc.code_only ? '<span class="tag">code checks only</span>' : ''}</b>${spark}<div class="set-sub">${esc(since)} · checked ${esc(hm(new Date(h.at)))}</div></div>
+        <div class="kn-hbars">${bars}</div></div></div>
+      <div class="kn-card"><div class="kn-card-h"><h3>How Health checks</h3></div><div class="kn-hrun">
+        <div class="r"><div><b>By code <span class="kn-mtag">no model</span></b><div class="set-sub">after every change Echo sees · checked ${esc(hm(new Date(h.at)))}</div></div><span class="tag ok">always</span></div>
+        <div class="r"><div><b>AI checks <span class="kn-mtag ai">AI</span></b><div class="set-sub">when you ask · ${esc(prof.name || v.profile || 'the vault\'s AI profile')} · ${lastAi}</div></div></div>
+      </div></div></div>`
+  }
+  /** The findings by group and kind, with the filters and *Show ignored*. */
+  function hlFindings(list, sel) {
+    const h = hl(), d = h.data
+    const f = (id, label) => `<button class="${h.filter === id ? 'on' : ''}" data-kn="hl-filter" data-kn-filter="${id}" aria-pressed="${h.filter === id}">${label}</button>`
+    const fi = (k) => `<button class="kn-fi${sel && sel.kind === k ? ' on' : ''}${k.group === 'needs' && !k.ignored ? ' need' : ''}" data-kn="hl-pick" data-kn-key="${esc(k.keys[0])}"${sel && sel.kind === k ? ' aria-current="true"' : ''}><span class="nb">${nf(k.n)}</span><b>${esc(k.name)}</b><span class="tg"><span class="kn-mtag${k.by === 'ai' ? ' ai' : ''}">${k.by === 'ai' ? 'AI' : 'code'}</span></span><span class="m">${esc(k.meta)}</span></button>`
+    const groups = list.groups.map((g) => `<div class="kn-fg"><span>${esc(g.label)}</span><span>${esc(g.sub)}</span></div>${g.kinds.map(fi).join('')}`).join('')
+    const none = list.groups.length ? '' : `<p class="set-sub kn-fnone">${h.filter === 'ai' && !d.ai ? 'AI checks haven\'t run yet.' : (d.findings || []).length ? 'Nothing under this filter.' : 'Nothing to fix. Echo checks again after every change it sees.'}</p>`
+    const ign = (d.ignored || []).length ? `<button class="kn-lnk kn-fign" data-kn="hl-ignored" aria-pressed="${h.showIgnored}">${h.showIgnored ? 'Hide ignored' : `Show ignored (${nf(d.ignored.length)})`}</button>` : ''
+    return `<div class="kn-flist"><div class="top"><span class="set-sub">${many(list.kinds, 'kind')} · ${nf(list.needs)} ${list.needs === 1 ? 'needs' : 'need'} you</span><div class="kn-filters" role="group" aria-label="Show">${f('all', 'All')}${f('needs', 'Needs you')}${f('code', 'By code')}${f('ai', 'AI')}</div></div>${groups}${none}${ign}</div>`
+  }
+  /** The kind shown: what it means, *Fix all* where it applies, its findings — the one shown open with its fix. */
+  function hlDetail(sel) {
+    const k = sel.kind, x = KN_HEALTH_KINDS[k.kind]
+    const fixAll = x && x[2] && !k.ignored && k.fixAll > 1 ? `<button class="btn sm primary" data-kn="hl-fixall" data-kn-kind="${esc(k.kind)}">${esc(x[2](k.fixAll))}…</button>` : ''
+    const keys = k.keys.slice(0, 50)
+    if (!keys.includes(sel.key)) keys.push(sel.key)
+    const more = k.n > keys.length ? `<div class="set-sub">and ${nf(k.n - keys.length)} more</div>` : ''
+    const d = hl().data || {}, by = new Map([...(d.findings || []), ...(d.ignored || [])].map((f) => [f.key, f]))
+    return `<div class="kn-fdet"><div class="kn-fdet-h"><div class="row"><h3>${esc(x ? x[1](k.n) : k.name)}</h3>${k.by === 'ai' ? '<span class="kn-mtag ai">AI</span>' : ''}${k.ignored ? '<span class="kn-mtag">ignored</span>' : k.group === 'needs' ? '<span class="kn-mtag you">needs you</span>' : ''}${fixAll}</div><p>${esc(k.why || '')}</p></div>
+      <div class="kn-fdet-b">${keys.map((key) => (key === sel.key ? hlOpen(by.get(key)) : hlRow(by.get(key)))).join('')}${more}</div></div>`
+  }
+  /** A finding of the kind, not the one shown: a row to open it. */
+  function hlRow(f) {
+    if (!f) return ''
+    const [p, lines] = pagesOf(f)[0] || ['', []]
+    return `<button class="kn-fx kn-fx-row" data-kn="hl-pick" data-kn-key="${esc(f.key)}">${IC.file}<span><code>${esc(where(p, lines))}</code><span class="set-sub">${esc(f.title)}</span></span></button>`
+  }
+  /** The finding shown (K16-07): its pages with their lines (*Open*), the ways to fix it, the fix's diff — or why there
+   *  is none —, and *Ask about it* · *Ignore* · *Fix*. */
+  function hlOpen(f) {
+    if (!f) return ''
+    const s = st(), h = hl(), dt = h.detail, v = vault()
+    const pages = pagesOf(f).map(([p, lines]) => `<div class="kn-fx-p"><code>${esc(where(p, lines))}</code><button class="btn ghost sm" data-kn="open" data-path="${esc(p)}">Open</button></div>`).join('')
+    const head = `<div class="kn-fx-h">${IC.file}<div><b>${esc(f.title)}</b>${pages}</div></div>`
+    if (!dt || dt.key !== f.key) return `<div class="kn-fx on">${head}<div class="skeleton" style="padding:12px"><i></i><i></i></div></div>`
+    const choices = dt.choices || [], fixes = choices.filter((c) => c.choice !== 'create' && c.choice !== 'taxonomy')
+    const fx = dt.fix || {}, cur = fx.error ? h.choice[f.key] || '' : fx.choice || ''
+    const listed = fixes.some((c) => c.choice === cur)
+    // A single way to fix it isn't offered as a choice when it is Echo's own (properties, an index row).
+    const pick = !fixes.length || (fixes.length === 1 && listed && !h.choice[f.key]) ? ''
+      : fixes.length > 4 ? `<div class="kn-fx-ch"><select class="set-in" data-kn-hl-choice="${esc(f.key)}" aria-label="How to fix it">${listed ? '' : '<option value="">Pick one…</option>'}${fixes.map((c) => `<option value="${esc(c.choice)}"${c.choice === cur ? ' selected' : ''}>${esc(c.label)}</option>`).join('')}</select></div>`
+        : `<div class="kn-fx-ch" role="group" aria-label="How to fix it">${fixes.map((c) => `<button class="btn sm${c.choice === cur ? ' on' : ''}" data-kn="hl-choice" data-kn-key="${esc(f.key)}" data-kn-choice="${esc(c.choice)}" aria-pressed="${c.choice === cur}">${esc(c.label)}</button>`).join('')}</div>`
+    const to = choices.find((c) => c.choice === cur && c.to)
+    const only = !pick && listed && fixes.find((c) => c.choice === cur)
+    const toLine = to ? `<div class="kn-fx-to set-sub">→ <b>${esc(to.to)}</b>${to.why ? ` · ${esc(to.why)}` : ''}${fx.guess ? ' · a guess' : ''}</div>`
+      : only ? `<div class="kn-fx-to set-sub">${esc(only.label)}</div>` : ''
+    const diff = (fx.hunks || []).length ? `<div class="kn-diff">${hunkRows(fx.hunks)}</div>` : ''
+    const why = dt.error || (fx.error && (f.fixable || fixes.length) ? fx.error : '')
+    const reason = why ? `<div class="kn-fx-why set-sub">${esc(String(why).replace(/\.$/, ''))}.</div>` : ''
+    const tax = choices.some((c) => c.choice === 'taxonomy') && ((v.detected || {}).taxonomies || []).find((t) => /TAG/i.test(t))
+    const ok = !!(diff && fx.base && fx.sha), busy = s.busy.hlfix
+    const note = ok ? (fx.guess ? 'A guess, so Fix all leaves it out. Written only if the page still reads as it does now.' : 'Written only if the page still reads as it does now.') : ''
+    const acts = `<button class="btn ghost sm" data-kn="hl-ask" data-kn-key="${esc(f.key)}">${IC.ask} Ask about it</button>`
+      + `<button class="btn ghost sm" data-kn="hl-ignore" data-kn-key="${esc(f.key)}" data-kn-on="${!dt.ignored}">${dt.ignored ? 'List again' : 'Ignore'}</button>`
+      + (choices.some((c) => c.choice === 'create') && dt.new_page ? `<button class="btn sm" data-kn="hl-create" data-name="${esc(dt.new_page.name)}" data-kn-folder="${esc(dt.new_page.folder)}">Create the page</button>` : '')
+      + (tax ? `<button class="btn sm" data-kn="open" data-path="${esc(tax)}">Open the taxonomy</button>` : '')
+      + (ok ? `<button class="btn primary sm" data-kn="hl-fix"${busy ? ' disabled' : ''}>${busy ? 'Fixing…' : 'Fix'}</button>` : '')
+    return `<div class="kn-fx on">${head}${pick}${toLine}${diff ? `<div class="kn-fx-d">${pmOf(fx)}</div>${diff}` : ''}${reason}<div class="kn-fx-f"><span class="grow">${note}</span>${acts}</div></div>`
+  }
+  /** *Fix all* (K16-04): every fix of the kind as Echo found it, ticked; a guess is never one (R36). */
+  async function openFixAll(kind) {
+    const s = st(), v = vault()
+    const x = (s.sheet = { kind: 'fixall', fixKind: kind, fixes: null, findings: [], off: new Set(), error: null })
+    render()
+    try {
+      const d = await get(`api/kn/${enc(v.id)}/health?fixes=${enc(kind)}`)
+      if (d.error) throw new Error(d.error)
+      x.fixes = d.fixes || []
+      x.findings = d.findings || []
+    } catch (e) { x.error = String(e.message || e); x.fixes = [] }
+    if (st().sheet === x) render()
+  }
+  function fixAllSheet() {
+    const s = st(), x = s.sheet, v = vault(), k = KN_HEALTH_KINDS[x.fixKind] || []
+    if (!x.fixes) return sheet('Fix all', '<div class="skeleton"><i></i><i></i><i></i></div>', '<span class="grow"></span><button class="btn ghost" data-kn="sheet-close">Cancel</button>', IC.check)
+    const fa = knFixAll(x.fixes, x.findings, x.off), n = fa.items.length
+    const row = (r) => `<div class="kn-fixall-row"><input type="checkbox" data-kn-fixall="${esc(r.key)}"${r.on ? ' checked' : ''}${r.error ? ' disabled' : ''} aria-label="${esc(`Fix ${r.title || r.path}`)}"><div class="kn-fx"><div class="kn-fx-h">${IC.file}<div><code>${esc(where(r.path, r.line == null ? [] : [r.line]))}</code><div class="set-sub">${esc(r.title)}</div></div>${r.error ? '' : pmOf(r)}</div>${r.error ? `<div class="kn-fx-why set-sub">${esc(String(r.error).replace(/\.$/, ''))}.</div>` : `<div class="kn-diff">${hunkRows(r.hunks)}</div>`}</div></div>`
+    const body = `<p class="set-sub">Each fix as Echo found it. Untick any you'd rather leave.</p>${x.error ? `<p class="error">${esc(x.error)}</p>` : ''}${fa.rows.map(row).join('') || '<p class="set-sub">Nothing left to fix here.</p>'}`
+    return sheet(esc(k[2] ? k[2](fa.rows.length) : 'Fix all'), body, `<span class="kn-fa-foot" id="kn-fixall-f">${fixAllFoot(fa, x.fixKind)}</span>`, IC.check)
+  }
+  /** The sheet's foot: how many files (index rows also write the vault's log line), whether they are committed, *Apply
+   *  N* — redrawn alone when a fix is (un)ticked, so the checkbox keeps the focus. */
+  function fixAllFoot(fa, kind) {
+    const s = st(), v = vault(), n = fa.items.length, log = kind === 'not_in_index' && n && (v.detected || {}).log
+    const commits = v.commit ? 'one commit of these files' : v.git ? 'commits are off for this vault: the files are written, nothing is committed' : 'the files are written'
+    return `<span class="set-sub grow">${many(fa.files, 'file')}${log ? ` and a line in ${esc(log)}` : ''} · ${commits}</span><button class="btn ghost" data-kn="sheet-close">Cancel</button><button class="btn primary" data-kn="hl-fixall-go"${!n || s.busy.fixall ? ' disabled' : ''}>${s.busy.fixall ? 'Applying…' : `Apply ${n}`}</button>`
+  }
+  /** After *Fix* or *Fix all*: Health checked again, and what was written and what wasn't, said. */
+  async function fixed(r) {
+    const d = hl().data || {}, m = knFixSummary(r, [...(d.findings || []), ...(d.ignored || [])])
+    await loadHealth()
+    render()
+    if (m.wait) say(m.text); else done(m.text)
+  }
+  async function fixOne() {
+    const v = vault(), dt = hl().detail, fx = (dt && dt.fix) || {}
+    if (!fx.base || !fx.sha) return
+    try { await fixed(await run('kn_fix', { id: v.id, key: dt.key, choice: fx.choice || '', base: fx.base, sha: fx.sha }, 'hlfix')) } catch (err) { say(`Not fixed: ${err.message || err}`) }
+  }
+  async function fixAllGo() {
+    const s = st(), x = s.sheet, v = vault(), items = knFixAll(x.fixes, x.findings, x.off).items
+    if (!items.length) return
+    try {
+      const r = await run('kn_fix_all', { id: v.id, items }, 'fixall')
+      if (st().sheet === x) s.sheet = null
+      await fixed(r)
+    } catch (err) { x.error = String(err.message || err); render() }
+  }
+  async function ignoreFinding(key, on) {
+    const v = vault()
+    try { await run('kn_ignore', { id: v.id, key, on }, 'hlignore'); await loadHealth(); render(); done(on ? 'Ignored: it no longer counts. Show ignored lists it.' : 'Listed again.') } catch (err) { say(String(err.message || err)) }
+  }
+  /** *Ask about it*: a new conversation with the finding — what it is, its pages as chips — in the composer. */
+  function askAboutFinding(key) {
+    const f = hlFinding(key), v = vault()
+    if (!f || !v) return
+    const line = `Health found this in ${v.name}: ${f.title}. ${f.why}`
+    const titleOf = (p) => ((st().tree && st().tree.pages.find((x) => x.path === p)) || {}).title || p.split('/').pop().replace(/\.md$/i, '')
+    askHere((c) => {
+      for (const [p] of pagesOf(f)) if (!c.chips.some((x) => x.page === p)) c.chips.push({ page: p, title: titleOf(p) })
+      if (!c.draft.includes(line)) c.draft = c.draft.trim() ? `${line}\n\n${c.draft}` : `${line}\n\n`
+    }, false)
+  }
+  async function pickChoice(key, choice) {
+    const h = hl()
+    h.choice[key] = choice
+    render()
+    await loadFinding()
+    render()
   }
 
   // ── sheets: connect, new vault, new page, rows, remove, global twin, save minutes ──
@@ -1503,6 +1815,7 @@ const Kn = (() => {
       case 'save': return saveSheet()
       case 'sample': return sampleSheet()
       case 'addto': return addToSheet()
+      case 'fixall': return fixAllSheet()
     }
     return ''
   }
@@ -1524,7 +1837,7 @@ const Kn = (() => {
     }
     if (!v) return `<div class="kn">${head()}<div class="kn-tabs kn-tabs-empty"></div><div class="kn-body">${emptyView()}</div></div>`
     if (v.available === false) return `<div class="kn">${head()}<div class="kn-tabs kn-tabs-empty"></div><div class="kn-body">${missingView(v)}</div></div>`
-    const body = s.tab === 'graph' ? graphView() : s.tab === 'settings' ? settingsView() : s.tab === 'ask' ? chatView() : pagesView()
+    const body = s.tab === 'graph' ? graphView() : s.tab === 'settings' ? settingsView() : s.tab === 'ask' ? chatView() : s.tab === 'health' ? healthView() : pagesView()
     return `<div class="kn">${head()}${tabs()}<div class="kn-body">${body}</div></div>`
   }
   function after() {
@@ -1679,7 +1992,6 @@ const Kn = (() => {
     try {
       const r = await run('kn_index_add', { id: v.id, paths: x.paths }, 'rows')
       s.sheet = null
-      s.checks = null
       await loadTree()
       if (s.tab === 'settings') await loadSettings()
       if (s.path) await loadPage()
@@ -2422,6 +2734,7 @@ const Kn = (() => {
     add('Knowledge', 'Start a new vault…', () => { go(home()); openNew() }, { keywords: 'vault twin knowledge create' })
     if (vault()) add('Knowledge', `Find a page in ${vault().name}…`, () => { goVault(vault().id, 'pages', st().path); st().focus = 'kn-find'; render() }, { keywords: 'open page knowledge search' })
     if (vault() && vault().available !== false) add('Knowledge', `Ask ${vault().name}…`, () => { st().source = 'vault'; askHere(null, false) }, { keywords: 'claude question chat conversation knowledge' })
+    if (vault() && vault().available !== false) add('Knowledge', 'Open Health', () => { st().source = 'vault'; goVault(vault().id, 'health', st().hlKey) }, { keywords: 'checks score broken links fix index tidy knowledge' })
     if (S.view === 'calls' && S.call && S.call.notes && S.call.knowledge && (S.call.knowledge.vaults || []).length) add('Knowledge', 'Save the minutes to Knowledge…', () => openSave(S.call.name), { keywords: 'vault note export' })
   }
   function openNew() {
@@ -2479,7 +2792,7 @@ const Kn = (() => {
       case 'connect': return openConnect()
       case 'new': return openNew()
       case 'import': try { const r = await run('kn_import_plugin', {}, 'import'); await refreshAll(); done(`${r.connected} vault${r.connected === 1 ? '' : 's'} connected from the Obsidian plugin.`) } catch (err) { say(String(err.message || err)) } return
-      case 'tab': e.preventDefault(); s.menu = null; return goVault(s.vault, d.knTab, d.knTab === 'pages' ? s.path : d.knTab === 'ask' ? chat().id : '')
+      case 'tab': e.preventDefault(); s.menu = null; return goVault(s.vault, d.knTab, d.knTab === 'pages' ? s.path : d.knTab === 'ask' ? chat().id : d.knTab === 'health' ? s.hlKey : '')
       case 'menu': s.menu = s.menu === d.menu ? null : d.menu; return render()
       case 'reveal': s.menu = null; send({ cmd: 'kn_reveal', id: s.vault, path: d.path || '' }); return render()
       case 'obsidian': s.menu = null; send({ cmd: 'kn_obsidian', id: s.vault, path: d.path || '' }); return render()
@@ -2573,10 +2886,26 @@ const Kn = (() => {
         try { const r = await run('kn_set', { id: v.id, key: s.ovr.key, value: val }); const i = s.data.vaults.findIndex((x) => x.id === v.id); if (i >= 0) s.data.vaults[i] = r.vault; s.ovr = {}; s.tree = null; s.graph = null; await loadSettings(); render() } catch (err) { s.ovr.error = String(err.message || err); render() }
         return
       }
+      // Health (K16-01, -04, -07)
+      case 'hl-filter': hl().filter = d.knFilter; render(); await loadFinding(); return render()
+      case 'hl-pick': return goVault(s.vault, 'health', d.knKey)
+      case 'hl-ignored': hl().showIgnored = !hl().showIgnored; render(); await loadFinding(); return render()
+      case 'hl-choice': return pickChoice(d.knKey, d.knChoice)
+      case 'hl-fix': return fixOne()
+      case 'hl-ignore': return ignoreFinding(d.knKey, d.knOn === 'true')
+      case 'hl-ask': return askAboutFinding(d.knKey)
+      case 'hl-create': {
+        const folder = d.knFolder
+        await openNewPage(d.name)
+        const x = st().sheet
+        // In the linking page's folder, when the sheet lists it.
+        if (x && x.kind === 'newpage' && (st().tree || { pages: [] }).pages.some((p) => p.path.split('/').slice(0, -1).join('/') === folder)) { x.folder = folder; render() }
+        return
+      }
+      case 'hl-fixall': return openFixAll(d.knKind)
+      case 'hl-fixall-go': return fixAllGo()
       case 'set-bool': return setVault(d.key, d.val)
       case 'scope-clear': await setVault('clients', ''); return setVault('threads', '')
-      case 'show-check': s.showCheck = s.showCheck === d.check ? null : d.check; return render()
-      case 'rows-all': return openRows((s.checks || {}).not_in_index || [])
       case 'rows': return openRows([d.path])
       case 'rows-go': return rowsGo()
       case 'past': {
@@ -2679,6 +3008,12 @@ const Kn = (() => {
       return setVault(key, [...list].join(','))
     }
     if (t.dataset.knAlways) { chat().always[t.dataset.knAlways] = t.checked; return }
+    if (t.dataset.knHlChoice && t.value) return pickChoice(t.dataset.knHlChoice, t.value)
+    if (t.dataset.knFixall && s.sheet && s.sheet.kind === 'fixall') {
+      const x = s.sheet
+      if (t.checked) x.off.delete(t.dataset.knFixall); else x.off.add(t.dataset.knFixall)
+      return patchEl('kn-fixall-f', fixAllFoot(knFixAll(x.fixes, x.findings, x.off), x.fixKind))
+    }
     if (t.dataset.knForm && s.sheet) {
       const k = t.dataset.knForm
       if (k === 'minutes') s.sheet.minutes = t.value

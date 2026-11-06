@@ -1,5 +1,5 @@
 // Knowledge in the window (knowledge.js): routes, the switcher, a call's Knowledge chip, the tree, the graph's filters,
-// unsaved edits and Ask (turns, tool rows, @ mentions, following the bottom) — the blocks as they ship. Run by scripts/check-mod.sh (`node crates/echoctl/ui/knowledge.test.mjs`).
+// unsaved edits, Ask (turns, tool rows, @ mentions, following the bottom) and Health (findings, the trend, fixes) — the blocks as they ship. Run by scripts/check-mod.sh (`node crates/echoctl/ui/knowledge.test.mjs`).
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
@@ -25,6 +25,7 @@ const { knChatTurns, knChatReadOutside, knFollow, knAnswerInto, knAnswerMd, knWa
 const { knChatOpen, knPollKeep, knChatTake } = load(['kn-poll'], ['knChatOpen', 'knPollKeep', 'knChatTake'])
 const { knToolRows } = load(['kn-tools'], ['knToolRows'])
 const { knMention, knMentionPick, knChatMessage } = load(['kn-mention'], ['knMention', 'knMentionPick', 'knChatMessage'])
+const { knHealthList, knHealthSelect, knHealthTrend, knTrendPath, knFixAll, knFixSummary } = load(['kn-health'], ['knHealthList', 'knHealthSelect', 'knHealthTrend', 'knTrendPath', 'knFixAll', 'knFixSummary'])
 
 const tests = []
 const test = (name, f) => tests.push([name, f])
@@ -577,6 +578,128 @@ test('a message sent stays in the composer until it lands; a sign-in error keeps
   assert.equal(knSentLanded({ text: 'What did Lena Hartmann decide?' }, [A[0], A[1]]), 'landed')
   assert.equal(knSentLanded({ text: 'Hi' }, [{ n: 0, type: 'error', text: 'Claude · Work needs you to sign in again', action: 'signin' }]), 'failed')
   assert.equal(knSentLanded({ text: 'Hi' }, []), null, 'not yet')
+})
+
+// ── Health (spec K16) ──
+test('routes: Health, and a finding named by its key', () => {
+  assert.deepEqual(knParseRoute('kn/my-twin/health'), { vault: 'my-twin', tab: 'health', path: '' })
+  assert.deepEqual(knParseRoute('kn/my-twin/health/broken%3Aa'), { vault: 'my-twin', tab: 'health', path: 'broken:a' })
+  const key = 'broken:knowledge/notes/2026-10-29-northwind-checkout-retro.md:[[Northwind Retail|NR]]'
+  assert.equal(knRouteOf({ vault: 'my-twin', tab: 'health', path: key }), `kn/my-twin/health/${encodeURIComponent(key)}`)
+  assert.equal(knParseRoute(knRouteOf({ vault: 'my-twin', tab: 'health', path: key })).path, key, 'encoded once, decoded once')
+  const pct = 'broken:knowledge/a.md:(50%20plan.md)'
+  assert.equal(knParseRoute(knRouteOf({ vault: 'my-twin', tab: 'health', path: pct })).path, pct, 'a key holding %20 stays as it is')
+})
+
+// Made-up findings, as `/api/kn/<vault>/health` gives them (Echo's order: by kind, then key).
+const F = (key, group, by, title, o = {}) => ({ key, kind: key.split(':')[0], group, by, pages: o.pages || [[key.split(':')[1], o.line ?? null]], title, why: 'What it means.', fixable: !!o.fixable, fix_all: !!o.fix_all })
+const KB1 = 'broken:knowledge/notes/2026-10-29-northwind-checkout-retro.md:[[Northwind Retail]]'
+const KB2 = 'broken:knowledge/activities/platform/delivery-platform.md:(../../notes/2026-8-27-lena-pricing-1-1.md)'
+const KN1 = 'not_in_index:knowledge/clients/helios.md'
+const KN2 = 'not_in_index:knowledge/clients/aurora.md'
+const FINDINGS = [
+  F('unknown_tag:knowledge/topics/ai-strategy.md:#tokenomics', 'needs', 'code', '#tokenomics isn\'t in the taxonomy'),
+  F('unknown_tag:knowledge/topics/dark-factory.md:#dark-factory', 'needs', 'code', '#dark-factory isn\'t in the taxonomy'),
+  F('duplicate_title:knowledge/activities/weekly-sync.md,knowledge/notes/weekly-sync.md', 'needs', 'code', '“Weekly sync” is the title of 2 pages', { pages: [['knowledge/activities/weekly-sync.md', null], ['knowledge/notes/weekly-sync.md', null]] }),
+  F(KN1, 'should', 'code', 'Helios isn\'t in CATALOG.md', { fixable: true, fix_all: true }),
+  F(KN2, 'should', 'code', 'Aurora isn\'t in CATALOG.md', { fixable: true, fix_all: true }),
+  F(KB1, 'should', 'code', '[[Northwind Retail]] leads to no page', { line: 14, fixable: true, fix_all: true }),
+  F(KB2, 'should', 'code', '../../notes/2026-8-27-lena-pricing-1-1.md leads to no page', { line: 31, fixable: true }),
+  F('broken:knowledge/media/2026-09-ai-summit-talk.md:[[summit-slides]]', 'should', 'code', '[[summit-slides]] leads to no page', { line: 8 }),
+  F('isolated:knowledge/notes/2026-01-03-c.md', 'tidy', 'code', 'C has no links'),
+]
+const AI = F('contradiction:knowledge/clients/northwind-retail.md,knowledge/notes/2026-11-05-northwind-weekly-delivery-sync.md', 'needs', 'ai', 'Northwind go-live: 12 Dec or 9 Jan')
+
+test('K16-T8 findings are grouped Needs you · Should fix · Tidy, by kind with counts, and filtered', () => {
+  const l = knHealthList(FINDINGS)
+  assert.deepEqual(l.groups.map((g) => [g.id, g.label]), [['needs', 'Needs you'], ['should', 'Should fix'], ['tidy', 'Tidy']])
+  assert.deepEqual(l.groups.map((g) => g.kinds.map((k) => [k.kind, k.n])), [[['unknown_tag', 2], ['duplicate_title', 1]], [['not_in_index', 2], ['broken', 3]], [['isolated', 1]]])
+  assert.deepEqual([l.kinds, l.needs], [5, 3], 'five kinds; three findings need you — the tab\'s number')
+  const broken = l.groups[1].kinds[1]
+  assert.deepEqual([broken.name, broken.fixable, broken.fixAll, broken.meta], ['Broken links', 2, 1, '2 fixable by code'], 'a guess has a fix, but Fix all leaves it out')
+  assert.deepEqual(broken.keys, [KB1, KB2, 'broken:knowledge/media/2026-09-ai-summit-talk.md:[[summit-slides]]'])
+  assert.equal(l.groups[0].kinds[0].meta, '#tokenomics isn\'t in the taxonomy · 1 more', 'nothing to fix by code: what it is about')
+  assert.deepEqual(knHealthList(FINDINGS, { filter: 'needs' }).groups.map((g) => g.id), ['needs'])
+  const all = [...FINDINGS, AI]
+  assert.deepEqual(knHealthList(all, { filter: 'ai' }).groups.flatMap((g) => g.kinds.map((k) => k.kind)), ['contradiction'])
+  assert.deepEqual(knHealthList(all, { filter: 'code' }).groups.flatMap((g) => g.kinds.filter((k) => k.by !== 'code')), [])
+  assert.deepEqual(knHealthList(all, { filter: 'ai' }).needs, 4, 'the counts are the whole list\'s, whatever the filter')
+  assert.deepEqual(knHealthList(FINDINGS, { filter: 'ai' }).groups, [], 'no AI check yet: nothing under AI')
+  // Ignored findings are neither listed nor counted; Show ignored lists them apart.
+  const ignored = [F('isolated:knowledge/notes/2026-01-04-d.md', 'tidy', 'code', 'D has no links'), F('unknown_tag:knowledge/topics/x.md:#later', 'needs', 'code', '#later isn\'t in the taxonomy')]
+  assert.deepEqual(knHealthList(FINDINGS, { ignored }).groups.map((g) => g.id), ['needs', 'should', 'tidy'])
+  const shown = knHealthList(FINDINGS, { ignored, showIgnored: true })
+  assert.deepEqual(shown.groups.map((g) => g.id), ['needs', 'should', 'tidy', 'ignored'])
+  assert.deepEqual(shown.groups[3].kinds.map((k) => [k.kind, k.n, k.ignored]), [['isolated', 1, true], ['unknown_tag', 1, true]])
+  assert.deepEqual([shown.kinds, shown.needs], [5, 3], 'ignored findings don\'t count')
+  assert.deepEqual(knHealthList([]), { groups: [], kinds: 0, needs: 0 })
+})
+
+test('K16-T8 the finding shown: the route\'s, else the first of its kind (one just fixed or ignored), else the first', () => {
+  const l = knHealthList(FINDINGS)
+  const summit = 'broken:knowledge/media/2026-09-ai-summit-talk.md:[[summit-slides]]'
+  assert.deepEqual([knHealthSelect(l, summit).key, knHealthSelect(l, summit).kind.kind], [summit, 'broken'])
+  assert.equal(knHealthSelect(l, 'broken:knowledge/notes/gone.md:[[Gone]]').key, KB1, 'gone: the first of its kind')
+  assert.equal(knHealthSelect(l, '').key, FINDINGS[0].key)
+  assert.equal(knHealthSelect(l, 'stale:knowledge/a.md').key, FINDINGS[0].key, 'a kind no longer listed: the first')
+  assert.equal(knHealthSelect(knHealthList(FINDINGS, { filter: 'needs' }), KB1).kind.kind, 'unknown_tag', 'filtered out: the first shown')
+  assert.equal(knHealthSelect(knHealthList([]), KB1), null)
+})
+
+test('K16-T8 the trend: thirty days of the history, a day without a score drawn as a gap', () => {
+  const history = [['2026-09-20', 60], ['2026-10-09', 74], ['2026-10-10', 75], ['2026-10-11', 75], ['2026-10-20', 80], ['2026-11-05', 81], ['2026-11-06', 82], ['2026-11-07', 82]].map(([day, score]) => ({ day, score, categories: [] }))
+  const t = knHealthTrend(history, '2026-11-07')
+  assert.equal(t.points.length, 30)
+  assert.deepEqual([t.points[0].day, t.points[29].day], ['2026-10-09', '2026-11-07'])
+  assert.deepEqual(t.points.slice(0, 4).map((p) => p.score), [74, 75, 75, null])
+  assert.equal(t.points.filter((p) => p.score != null).length, 7, 'older than thirty days: not in the trend')
+  assert.deepEqual([t.first.day, t.last.day, t.delta], ['2026-10-09', '2026-11-07', 8])
+  const p = knTrendPath(t.points, { w: 300, h: 44 })
+  assert.equal((p.line.match(/M/g) || []).length, 2, 'two runs of days with a score: two lines')
+  assert.match(p.line, /^M3,[\d.]+L13\.1,[\d.]+L23\.3,[\d.]+M276\.7,[\d.]+L286\.9,[\d.]+L297,[\d.]+$/, 'no line across a gap')
+  assert.equal((p.area.match(/Z/g) || []).length, 2)
+  assert.deepEqual(p.dots.map(([x]) => x), [114.5], 'a day alone between gaps is a dot (20 Oct)')
+  assert.equal(p.end[0], 297, 'the last point: today')
+  // Across a change of the clocks the days are still one apart.
+  assert.deepEqual(knHealthTrend([], '2026-10-27', 3).points.map((x) => x.day), ['2026-10-25', '2026-10-26', '2026-10-27'])
+  const none = knHealthTrend([], '2026-11-07')
+  assert.equal(none.delta, null)
+  assert.deepEqual(knTrendPath(none.points), { line: '', area: '', dots: [], end: null })
+  const one = knHealthTrend([{ day: '2026-11-07', score: 100, categories: [] }], '2026-11-07')
+  assert.deepEqual([one.delta, knTrendPath(one.points).line, knTrendPath(one.points).dots.length], [null, '', 1], 'the first check: a dot, no change to tell')
+})
+
+test('Fix all sends each ticked fix by its key with the base and sha of the diff shown; a guess is never in it', () => {
+  const hunk = [['-', 'Agreed with [[Northwind Retail]] to add a 3-D Secure fallback.'], ['+', 'Agreed with [[clients/northwind-retail|Northwind Retail]] to add a 3-D Secure fallback.']]
+  const fixes = [
+    { key: KB1, choice: 'to', path: 'knowledge/notes/2026-10-29-northwind-checkout-retro.md', base: 'b1', sha: 's1', guess: false, hunks: [hunk], plus: 1, minus: 1 },
+    { key: KB2, choice: 'to', path: 'knowledge/activities/platform/delivery-platform.md', base: 'b2', sha: 's2', guess: true, hunks: [hunk], plus: 1, minus: 1 },
+    { key: KN1, choice: 'row', path: 'knowledge/CATALOG.md', base: 'b3', sha: 's3', guess: false, hunks: [[['+', '| [Helios](clients/helios.md) | Helios | 2026-11-07 |']]], plus: 1, minus: 0 },
+    { key: KN2, choice: 'row', path: 'knowledge/CATALOG.md', base: 'b3', sha: 's4', guess: false, hunks: [[['+', '| [Aurora](clients/aurora.md) | Aurora | 2026-11-07 |']]], plus: 1, minus: 0 },
+    { key: 'broken:knowledge/notes/x.md:[[Gone]]', error: 'the link isn\'t there any more' },
+  ]
+  const s = knFixAll(fixes, FINDINGS)
+  assert.deepEqual(s.rows.map((r) => r.key), [KB1, KN1, KN2, 'broken:knowledge/notes/x.md:[[Gone]]'], 'a guess is fixed on its own finding only')
+  assert.deepEqual(s.items, [{ key: KB1, choice: 'to', base: 'b1', sha: 's1' }, { key: KN1, choice: 'row', base: 'b3', sha: 's3' }, { key: KN2, choice: 'row', base: 'b3', sha: 's4' }])
+  assert.equal(s.files, 2, 'two rows in one index: one file')
+  assert.deepEqual([s.rows[0].line, s.rows[0].title, s.rows[0].on], [14, '[[Northwind Retail]] leads to no page', true])
+  assert.deepEqual([s.rows[3].on, s.rows[3].error], [false, 'the link isn\'t there any more'], 'one Echo couldn\'t compute: why, unticked')
+  const off = knFixAll(fixes, FINDINGS, new Set([KN1, KN2]))
+  assert.deepEqual([off.items.map((i) => i.key), off.files], [[KB1], 1], 'unticked: left out')
+  const bare = knFixAll([{ key: KB1, choice: 'to', path: 'p.md', base: 'b1', guess: false, hunks: [hunk] }], FINDINGS)
+  assert.deepEqual([bare.items, bare.rows[0].on], [[], false], 'without the sha of what was shown, never sent')
+})
+
+test('what a fix did, in Echo\'s words: what was written, what wasn\'t and why', () => {
+  assert.deepEqual(knFixSummary({ written: ['knowledge/notes/a.md'], changed_since: [], skipped: [], commit: 'a1b2c3d' }), { text: 'Fixed: knowledge/notes/a.md. Committed (a1b2c3d).', wait: false })
+  assert.deepEqual(knFixSummary({ written: ['knowledge/CATALOG.md', 'knowledge/log.md'], changed_since: [], skipped: [], commit: 'off' }), { text: 'Fixed in 2 files.', wait: false })
+  // The commit leaves out a file with changes of yours, and the answer doesn't name the files it took.
+  assert.deepEqual(knFixSummary({ written: ['knowledge/a.md', 'knowledge/b.md'], changed_since: [], skipped: [], commit: 'a1b2c3d' }), { text: 'Fixed in 2 files. Committed those without changes of yours (a1b2c3d).', wait: false })
+  const r = knFixSummary({ written: ['knowledge/a.md', 'knowledge/b.md'], changed_since: ['knowledge/c.md'], skipped: [{ key: KB2, why: 'Echo\'s page for it is a guess: fix it on its own' }], commit: 'skipped: the file had changes of yours that weren\'t committed' }, FINDINGS)
+  assert.equal(r.text, 'Fixed in 2 files. Not committed: the file had changes of yours that weren\'t committed. knowledge/c.md changed since Echo showed its fix, so it was left as it is. Not fixed: ../../notes/2026-8-27-lena-pricing-1-1.md leads to no page — Echo\'s page for it is a guess: fix it on its own.')
+  assert.equal(r.wait, true, 'something wasn\'t done: said until OK')
+  assert.equal(knFixSummary({ written: [], changed_since: [], skipped: [{ key: 'gone:x', why: 'that finding isn\'t there any more' }], commit: 'off' }).text, 'Not fixed: a finding — that finding isn\'t there any more.')
+  assert.deepEqual(knFixSummary({ written: [], changed_since: [], skipped: [], commit: 'off' }), { text: 'Nothing was changed.', wait: true })
 })
 
 let failed = 0
