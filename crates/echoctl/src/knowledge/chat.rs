@@ -28,7 +28,7 @@ use crate::{ai, guard, paths, terminal};
 mod attach;
 mod permits;
 
-pub use attach::attach_call;
+pub use attach::{attach_call, Mismatch};
 
 /// At most this many conversations have a process at once (D38); for another, the longest idle stops.
 const MAX_LIVE: usize = 3;
@@ -203,6 +203,8 @@ struct State {
     always_domains: BTreeSet<String>,
     /// What the turn going asked and edited, for its end.
     this_turn: permits::Turn,
+    /// Why files weren't committed, said once in the conversation (X-G4).
+    told: BTreeSet<String>,
     /// Claude Code has the conversation (a process of it began its session, or it is from the vault's list): the next
     /// start resumes it.
     started: bool,
@@ -290,6 +292,7 @@ impl Conv {
             always_edits: false,
             always_domains: BTreeSet::new(),
             this_turn: permits::Turn::default(),
+            told: BTreeSet::new(),
             started,
             last_active: now(),
             active_at: None,
@@ -612,8 +615,8 @@ fn watch(c: Arc<Conv>, v: Vault, gen: u64, mut child: Child, stopped: Arc<Atomic
         loop {
             match rx.recv_timeout(TICK) {
                 Ok(line) => {
-                    // The lines Echo acts on itself: a control request, and a turn's `result` (its permission denials).
-                    let raw = (line.contains("\"control_request\"") || line.contains("\"permission_denials\"")).then(|| serde_json::from_str::<Value>(&line).ok()).flatten().filter(|x| x["type"] == "control_request" || x["type"] == "result");
+                    // The lines Echo acts on itself: a control request, and Claude Code's own refusal of a call.
+                    let raw = (line.contains("\"control_request\"") || line.contains("\"permission_denied\"")).then(|| serde_json::from_str::<Value>(&line).ok()).flatten().filter(|x| x["type"] == "control_request" || (x["type"] == "system" && x["subtype"] == "permission_denied"));
                     let events = parser.feed(&line);
                     // Its `init` line: Claude Code has the session now, so from here on it resumes. A first process that
                     // dies before that leaves none, and the next start is new again.
@@ -649,11 +652,13 @@ fn response(id: &str, r: Value) -> Value {
     json!({"type": "control_response", "response": {"subtype": "success", "request_id": id, "response": r}})
 }
 
-/// Events from the process's output, and the line itself when Echo acts on it (`raw`: a control request, or a turn's
-/// `result`). A permission request becomes a card with Echo's diff (K12-08) that waits for the user (`permit`; Stop
-/// denies it) — or Echo answers it, for what the user allowed for the rest of the conversation; any other control
-/// request gets an error answer, so Claude Code never waits for Echo. An allowed edit that comes back done is a line of
-/// the vault's activity (ruling R25); the turn's end commits what it edited (K12-14).
+/// Events from the process's output, and the line itself when Echo acts on it (`raw`: a control request, or Claude
+/// Code's `permission_denied`). A permission request becomes a card with Echo's diff (K12-08) that waits for the user
+/// (`permit`; Stop denies it) — or Echo answers it, for what the user allowed for the rest of the conversation; any other
+/// control request gets an error answer, so Claude Code never waits for Echo. A call the mode asks about, refused by
+/// Claude Code itself and not by the guard, means this Claude Code doesn't hand its prompts to Echo (ruling R28). An
+/// allowed edit that comes back done is a line of the vault's activity (ruling R25); the turn's end commits what it
+/// edited (K12-14).
 fn took(c: &Conv, v: &Vault, mut events: Vec<Value>, raw: Option<Value>) {
     if events.is_empty() && raw.is_none() {
         return; // nothing to wake the page for
@@ -661,7 +666,7 @@ fn took(c: &Conv, v: &Vault, mut events: Vec<Value>, raw: Option<Value>) {
     let control = raw.as_ref().filter(|r| r["type"] == "control_request");
     // The card reads the file and asks git: before the lock.
     let card = control.filter(|r| r["request"]["subtype"] == "can_use_tool").map(|r| permits::card(v, &r["request"]));
-    let denied: Vec<&str> = raw.as_ref().filter(|r| r["type"] == "result").and_then(|r| r["permission_denials"].as_array()).map(|a| a.iter().filter_map(|d| d["tool_name"].as_str()).collect()).unwrap_or_default();
+    let refused = raw.as_ref().filter(|r| r["type"] == "system");
     let (mut answer, mut done, mut ended) = (None, vec![], None);
     {
         let mut st = lock(&c.state);
@@ -677,7 +682,6 @@ fn took(c: &Conv, v: &Vault, mut events: Vec<Value>, raw: Option<Value>) {
                             o.extend(card.fields);
                         }
                     }
-                    st.this_turn.asked = true;
                     // Clean before the turn: the first time the turn asks about the file, before any edit of it is made.
                     if let (Some(e), Some(clean)) = (&card.edit, card.clean) {
                         st.this_turn.clean.entry(e.full.clone()).or_insert(clean);
@@ -703,6 +707,13 @@ fn took(c: &Conv, v: &Vault, mut events: Vec<Value>, raw: Option<Value>) {
                 }
             }
         }
+        if let Some(r) = refused {
+            let asked = st.proc.as_ref().map(|p| p.mode.asked()).unwrap_or_default();
+            let tool = r["tool_name"].as_str().unwrap_or("");
+            if asked.contains(&tool) && !r["message"].as_str().unwrap_or("").contains(guard::VAULT_WHO) {
+                st.this_turn.unasked = true;
+            }
+        }
         let mut after = vec![];
         for e in events {
             match e["type"].as_str() {
@@ -718,10 +729,8 @@ fn took(c: &Conv, v: &Vault, mut events: Vec<Value>, raw: Option<Value>) {
                     st.pending.clear();
                     st.touch();
                     let t = std::mem::take(&mut st.this_turn);
-                    // Curate or Research refused what it asks about, and no request came: this Claude Code doesn't hand
-                    // its prompts to Echo (K12-08); the terminal panel asks there.
-                    let asked = st.proc.as_ref().map(|p| p.mode.asked()).unwrap_or_default();
-                    if !t.asked && denied.iter().any(|d| asked.contains(d)) {
+                    // This Claude Code doesn't hand its prompts to Echo (K12-08); the terminal panel asks there.
+                    if t.unasked {
                         after.push(json!({"type": "error", "text": "This Claude Code doesn't hand permission prompts to Echo", "action": "terminal"}));
                     }
                     ended = Some(t);
@@ -746,14 +755,20 @@ fn took(c: &Conv, v: &Vault, mut events: Vec<Value>, raw: Option<Value>) {
     }
 }
 
-/// A turn is over: when the vault commits, what it edited that was clean before it is committed (K12-14), and its
-/// notices say so.
+/// A turn is over: when the vault commits — its switch as it is now (X-G4) —, what it edited that was clean before it is
+/// committed (K12-14), and its notices say so.
 fn committed(c: &Conv, v: &Vault, t: &permits::Turn) {
-    let notices = permits::commit(v, t);
+    if t.edited.is_empty() {
+        return;
+    }
+    let Ok(v) = super::get(&v.id) else { return };
+    let told = lock(&c.state).told.clone();
+    let (notices, reasons) = permits::commit(&v, t, &told);
     if notices.is_empty() {
         return;
     }
     let mut st = lock(&c.state);
+    st.told.extend(reasons);
     for n in notices {
         st.push(n);
     }

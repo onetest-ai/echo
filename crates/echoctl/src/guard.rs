@@ -71,6 +71,9 @@ pub const RUN_CHAT: &str = "ECHOCTL_RUN_CHAT";
 /// The vault's sources folder, relative to its root: never written by a vault's run. Set for every conversation and
 /// ingest run (`raw_inbox` for a vault without one); without it they may do nothing.
 pub const RUN_SOURCES: &str = "ECHOCTL_RUN_SOURCES";
+/// How the guard signs a refusal in a conversation in a vault (`<this>: <why>` on stderr): Ask tells its refusals from
+/// Claude Code's own by it.
+pub const VAULT_WHO: &str = "Echo (this conversation in the vault)";
 
 /// The ledger steps a sync run may take (`echoctl project ledger <id> <step>`).
 pub const PROJECT_STEPS: [&str; 8] = ["pending", "context", "apply", "done", "verify-prep", "verify-apply", "people-context", "people-apply"];
@@ -178,7 +181,7 @@ pub fn command() -> i32 {
         Ok("ask") => "Echo (this call's Claude session reads only)",
         Ok("project") => "Echo's project sync",
         Ok("routine") => "Echo (this routine reads only)",
-        Ok("vault") => "Echo (this conversation in the vault)",
+        Ok("vault") => VAULT_WHO,
         Ok("ingest") => "Echo's ingest run",
         Ok("lint") => "Echo's AI check",
         _ => "Echo's minutes run",

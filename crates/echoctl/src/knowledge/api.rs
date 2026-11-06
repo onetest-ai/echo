@@ -384,16 +384,25 @@ pub fn act(cmd: &str, v: &Value) -> Result<Value> {
         #[cfg(feature = "tray")]
         "kn_chat_send" => {
             use super::chat::Context;
-            let context = v["context"].as_array().map(Vec::as_slice).unwrap_or(&[]).iter().map(|x| match (x["page"].as_str(), x["call"].as_str()) {
-                (Some(p), None) => Ok(Context::Page(p.to_owned())),
-                (None, Some(c)) => Ok(Context::Call { dir: call_named(c)?, anyway: x["anyway"].as_bool().unwrap_or(false) }),
-                _ => Err(anyhow!("a message is about pages and calls only")),
-            }).collect::<Result<Vec<_>>>()?;
+            // The calls as the page named them, by their folders: a mismatch names the one that needs *Attach anyway*.
+            let (mut context, mut named) = (vec![], vec![]);
+            for x in v["context"].as_array().map(Vec::as_slice).unwrap_or(&[]) {
+                match (x["page"].as_str(), x["call"].as_str()) {
+                    (Some(p), None) => context.push(Context::Page(p.to_owned())),
+                    (None, Some(c)) => {
+                        let dir = call_named(c)?;
+                        named.push((c, dir.clone()));
+                        context.push(Context::Call { dir, anyway: x["anyway"].as_bool().unwrap_or(false) });
+                    }
+                    _ => bail!("a message is about pages and calls only"),
+                }
+            }
             let mode = super::chat::Mode::parse(s(v, "mode"))?;
             match super::chat::send(s(v, "id"), v["conversation"].as_str().filter(|c| !c.is_empty()), s(v, "text"), mode, &context) {
                 Ok(id) => Ok(json!({ "conversation": id })),
-                Err(e) => match e.downcast_ref::<export::ProfileMismatch>() {
-                    Some(m) => Ok(json!({ "mismatch": { "call": m.call, "vault": m.vault } })),
+                // As `kn_save_minutes` answers (the profiles' ids), with the call and the profiles' names.
+                Err(e) => match e.downcast_ref::<super::chat::Mismatch>() {
+                    Some(m) => Ok(json!({ "mismatch": { "call": m.call, "vault": m.vault, "attached": named.iter().find(|(_, d)| *d == m.dir).map(|(c, _)| *c), "call_name": m.call_name, "vault_name": m.vault_name } })),
                     None => Err(e),
                 },
             }

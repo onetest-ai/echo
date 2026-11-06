@@ -374,6 +374,42 @@ fn a_failed_result_is_an_error_event() {
 }
 
 #[test]
+fn domains_only_for_plain_urls() {
+    // Ruling R27: a fetch has a domain only where Echo reads its host as Claude Code's fetch (Node's URL) does.
+    for (url, want) in [
+        ("https://example.com/pricing", Some("example.com")),
+        ("https://u@example.com/", Some("example.com")),
+        ("https://user:pw@example.com/a?b#c", Some("example.com")),
+        ("https://example.com:8443/x", Some("example.com")),
+        ("HTTPS://EXAMPLE.com/", Some("example.com")),
+        ("http://example.com./", Some("example.com")),
+        ("https://example.com.evil.com/", Some("example.com.evil.com")),
+        ("ftp://example.com/", None),
+        ("https://evil.com\\@example.com/", None),
+        ("https://a@b@example.com/", None),
+        ("https://example%2Ecom/", None),
+        ("https://ex\u{e4}mple.com/", None),
+        ("https://example.com\u{3002}evil.com/", None),
+        ("https://exa mple.com/", None),
+        ("https://exa\tmple.com/", None),
+        (" https://example.com/", None),
+        ("https://[::1]/", None),
+        ("https://example.com:80x/", None),
+        ("https:///evil.com/", None),
+        ("https:evil.com", None),
+        ("https://", None),
+    ] {
+        assert_eq!(domain_of(url).as_deref(), want, "{url:?}");
+    }
+    // A card without one shows the URL as it is.
+    let (_env, root) = crate::paths::testenv::folders("kn-st-domains");
+    let v = vault(&root);
+    let ev = Parser::new(&v).feed(&line(json!({"type": "control_request", "request_id": "r1", "request": {"subtype": "can_use_tool", "tool_name": "WebFetch", "input": {"url": "https://evil.com\\@example.com/", "prompt": "p"}}})));
+    assert!(ev[0].get("domain").is_none(), "{}", ev[0]);
+    assert_eq!(ev[0]["url"], "https://evil.com\\@example.com/");
+}
+
+#[test]
 fn tool_lines_use_the_k13_03_texts() {
     let (_env, root) = crate::paths::testenv::folders("kn-st-tools");
     let v = vault(&root);

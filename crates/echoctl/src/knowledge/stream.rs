@@ -493,13 +493,27 @@ pub fn tool_path(_name: &str, input: &Value, v: &Vault) -> Option<String> {
     vault_rel(v, p).filter(|r| !r.is_empty())
 }
 
-/// `example.com` from a URL (no userinfo, port or case).
+/// `example.com` from a fetched URL — only from a plain one, whose host Echo reads as the fetch itself does (Node's URL,
+/// ruling R27): http or https, no `\`, whitespace or control character, at most one `@` before the host, and a host of
+/// ASCII letters, digits, `.` and `-` (lowercased, a trailing dot dropped; a `:port` of digits ignored). Any other URL
+/// has no domain: its card shows the URL, and Echo never allows it by itself.
 fn domain_of(url: &str) -> Option<String> {
-    let (_, rest) = url.split_once("://")?;
+    if url.chars().any(|c| c == '\\' || c.is_whitespace() || c.is_control()) {
+        return None;
+    }
+    let (scheme, rest) = url.split_once("://")?;
+    if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
+        return None;
+    }
     let auth = rest.split(['/', '?', '#']).next()?;
-    let host = auth.rsplit('@').next()?;
-    let host = if host.starts_with('[') { host.split_once(']').map_or(host, |(h, _)| h.trim_start_matches('[')) } else { host.split(':').next()? };
-    (!host.is_empty()).then(|| host.to_ascii_lowercase())
+    let at: Vec<&str> = auth.split('@').collect();
+    let (host, port) = match at[..] {
+        [h] | [_, h] => h.split_once(':').unwrap_or((h, "")),
+        _ => return None,
+    };
+    let host = host.strip_suffix('.').unwrap_or(host);
+    let plain = !host.is_empty() && host.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-') && port.bytes().all(|b| b.is_ascii_digit());
+    plain.then(|| host.to_ascii_lowercase())
 }
 
 /// `example.com/pricing` from a URL, cut at 60 characters.

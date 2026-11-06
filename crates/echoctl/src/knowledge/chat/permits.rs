@@ -6,7 +6,7 @@
 //! had changed is never committed.
 
 use serde_json::{json, Map, Value};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
 
 use crate::knowledge::{activity, diff, git, page, scan, stream, Vault};
@@ -17,8 +17,17 @@ pub(super) struct Edit {
     pub rel: String,
     /// Joined to the vault's root (`page::inside`: links followed and kept inside).
     pub full: PathBuf,
-    /// Its text before; `None`: there was no file.
-    pub old: Option<String>,
+    pub old: Before,
+}
+
+/// A file before an edit.
+pub(super) enum Before {
+    /// There was none.
+    Missing,
+    Text(String),
+    /// Echo can't read it as text (too large, not UTF-8, unreadable): why. The edit still has its activity line and
+    /// commit, with nothing counted.
+    Unread(String),
 }
 
 /// What a turn did, kept from its message to its end (K12-08, K12-14).
@@ -26,25 +35,26 @@ pub(super) struct Edit {
 pub(super) struct Turn {
     /// The user's message: its first line names the commit.
     pub question: String,
-    /// A permission request came.
-    pub asked: bool,
+    /// Claude Code refused a call it should have asked Echo about, and not because of the guard (K12-08, ruling R28).
+    pub unasked: bool,
     /// Allowed edits waiting for their result, by tool call id.
     pub allowed: HashMap<String, Edit>,
     /// Files an allowed edit changed: vault-relative path → the file.
     pub edited: BTreeMap<String, PathBuf>,
     /// Per file, whether git had no uncommitted changes in it when the turn first asked to edit it — before any edit of
-    /// the turn could be made. Only when the vault commits.
+    /// the turn could be made. Whatever the commit switch says now: it is read at the turn's end.
     pub clean: HashMap<PathBuf, bool>,
 }
 
 /// What Echo adds to a permission event, and what it read for it.
 #[derive(Default)]
 pub(super) struct Card {
-    /// `diff` (`[["=" | "-" | "+", line], …]`), `plus` and `minus`; or `error`, why Echo can't show the change.
+    /// `hunks` (the changes with 3 lines around them: `[[["=" | "-" | "+", line], …], …]`), `plus` and `minus`; or
+    /// `error`, why Echo can't show the change.
     pub fields: Map<String, Value>,
     /// An `Edit` or `Write` of a file of the vault.
     pub edit: Option<Edit>,
-    /// The file had no uncommitted changes (asked only when the vault commits).
+    /// The file had no uncommitted changes.
     pub clean: Option<bool>,
 }
 
@@ -57,22 +67,21 @@ pub(super) fn card(v: &Vault, r: &Value) -> Card {
     }
     let input = &r["input"];
     let mut c = Card::default();
-    let shown = match on_disk(v, tool, input) {
-        Err(why) => Err(why),
-        Ok(edit) => {
-            let after = proposed(tool, input, &edit);
-            if v.git.commit {
-                c.clean = Some(git::dirty(&v.root, std::slice::from_ref(&edit.full)).is_empty());
-            }
-            let before = edit.old.clone();
-            c.edit = Some(edit);
-            after.map(|new| diff::lines(before.as_deref().unwrap_or(""), &new))
-        }
-    };
+    let shown = on_disk(v, tool, input).and_then(|edit| {
+        c.clean = Some(git::dirty(&v.root, std::slice::from_ref(&edit.full)).is_empty());
+        let d = match &edit.old {
+            Before::Unread(why) => Err(why.clone()),
+            Before::Missing => proposed(tool, input, &edit.rel, None).map(|new| diff::lines("", &new)),
+            Before::Text(cur) => proposed(tool, input, &edit.rel, Some(cur)).map(|new| diff::lines(cur, &new)),
+        };
+        c.edit = Some(edit);
+        d
+    });
     match shown {
         Ok(d) => {
             let (plus, minus) = diff::counts(&d);
-            c.fields.insert("diff".into(), json!(d.iter().map(|(k, l)| json!([k.to_string(), l])).collect::<Vec<_>>()));
+            let line = |(k, l): &(char, String)| json!([k.to_string(), l]);
+            c.fields.insert("hunks".into(), json!(diff::hunks(&d, 3).iter().map(|h| h.iter().map(line).collect::<Vec<_>>()).collect::<Vec<_>>()));
             c.fields.insert("plus".into(), json!(plus));
             c.fields.insert("minus".into(), json!(minus));
         }
@@ -83,69 +92,81 @@ pub(super) fn card(v: &Vault, r: &Value) -> Card {
     c
 }
 
-/// The file the request names and its text now, read through the vault's path check.
+/// The file the request names, through the vault's path check, and its text now.
 fn on_disk(v: &Vault, tool: &str, input: &Value) -> Result<Edit, String> {
     let rel = stream::tool_path(tool, input, v).ok_or("Echo can't show this change: it isn't a file of this vault")?;
     let full = page::inside(v, &rel).map_err(|e| format!("Echo can't show this change: {e}"))?;
     let old = match std::fs::read(&full) {
-        Ok(b) if b.len() as u64 > scan::READ_MAX => return Err(format!("Echo can't show this change: {rel} is too large")),
-        Ok(b) => Some(String::from_utf8(b).map_err(|_| format!("Echo can't show this change: {rel} isn't text"))?),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Err(e) => return Err(format!("Echo can't show this change: {rel} can't be read ({e})")),
+        Ok(b) if b.len() as u64 > scan::READ_MAX => Before::Unread(format!("Echo can't show this change: {rel} is too large")),
+        Ok(b) => String::from_utf8(b).map_or_else(|_| Before::Unread(format!("Echo can't show this change: {rel} isn't text")), Before::Text),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Before::Missing,
+        Err(e) => Before::Unread(format!("Echo can't show this change: {rel} can't be read ({e})")),
     };
     Ok(Edit { rel, full, old })
 }
 
-/// The file's text once the tool has run: `Write`'s content; `Edit`'s `old_string` replaced once — it must be in the
-/// file exactly once — or, with `replace_all`, everywhere.
-fn proposed(tool: &str, input: &Value, e: &Edit) -> Result<String, String> {
+/// The file's text once the tool has run (`cur`: its text now, `None` when there is no file): `Write`'s content;
+/// `Edit`'s `old_string` replaced once — it must be in the file exactly once — or, with `replace_all`, everywhere.
+fn proposed(tool: &str, input: &Value, rel: &str, cur: Option<&str>) -> Result<String, String> {
     let s = |k: &str| input[k].as_str().unwrap_or("");
     if tool == "Write" {
         return Ok(s("content").to_owned());
     }
-    let Some(cur) = e.old.as_deref() else { return Err(format!("{} isn't there", e.rel)) };
+    let Some(cur) = cur else { return Err(format!("{rel} isn't there")) };
     let (old, new) = (s("old_string"), s("new_string"));
     let n = if old.is_empty() { 0 } else { cur.matches(old).count() };
     match (n, input["replace_all"] == true) {
-        (0, _) => Err(format!("The text to replace isn't in {} now", e.rel)),
+        (0, _) => Err(format!("The text to replace isn't in {rel} now")),
         (_, true) => Ok(cur.replace(old, new)),
         (1, false) => Ok(cur.replacen(old, new, 1)),
-        (n, false) => Err(format!("The text to replace is in {} {n} times, not once", e.rel)),
+        (n, false) => Err(format!("The text to replace is in {rel} {n} times, not once")),
     }
 }
 
-/// An allowed edit came back done: its line in the vault's activity, its text now against its text before.
+/// An allowed edit came back done: its line in the vault's activity, its text now against its text before — or, when
+/// Echo can't read either as text, the line with nothing counted.
 pub(super) fn record(v: &Vault, conversation: &str, e: &Edit) {
-    match std::fs::read_to_string(&e.full) {
-        Ok(new) => activity::changed(v, &e.rel, "ask", Some(conversation), e.old.as_deref(), &new, None),
-        Err(err) => eprintln!("knowledge: the edit of {} in {} can't be read back: {err}", e.rel, v.id),
+    let now = std::fs::read(&e.full).ok().filter(|b| b.len() as u64 <= scan::READ_MAX).and_then(|b| String::from_utf8(b).ok());
+    match (&e.old, now) {
+        (Before::Text(old), Some(new)) => activity::changed(v, &e.rel, "ask", Some(conversation), Some(old), &new, None),
+        (Before::Missing, Some(new)) => activity::changed(v, &e.rel, "ask", Some(conversation), None, &new, None),
+        (old, _) => {
+            let kind = if matches!(old, Before::Missing) { "new" } else { "edit" };
+            let line = activity::Entry { at: chrono::Local::now().to_rfc3339(), path: e.rel.clone(), kind: kind.into(), by: "ask".into(), r#ref: Some(conversation.into()), plus: 0, minus: 0, commit: None };
+            if let Err(err) = activity::record(v, line) {
+                eprintln!("knowledge: activity of {} in {}: {err:#}", e.rel, v.id);
+            }
+        }
     }
 }
 
-/// The turn is over: when the vault commits, the files it edited that were clean before it are committed in one
-/// commit, `Ask: <the question's first line>`. The notices that say so.
-pub(super) fn commit(v: &Vault, t: &Turn) -> Vec<Value> {
+/// The turn is over: when the vault commits now (`v` read at the turn's end), the files it edited that were clean
+/// before it are committed in one commit, `Ask: <the question's first line>`. The notices that say so — why something
+/// wasn't committed only once a conversation (X-G4): the reasons `told` before are left out, and the new ones returned.
+pub(super) fn commit(v: &Vault, t: &Turn, told: &BTreeSet<String>) -> (Vec<Value>, Vec<String>) {
     if !v.git.commit || t.edited.is_empty() {
-        return vec![];
+        return (vec![], vec![]);
     }
+    // The notices, and why a file wasn't committed (the reason, the notice's text).
+    let (mut out, mut reasons): (Vec<Value>, Vec<(String, String)>) = (vec![], vec![]);
     let (clean, yours): (Vec<_>, Vec<_>) = t.edited.iter().partition(|(_, full)| t.clean.get(*full) == Some(&true));
-    let notice = |kind: &str, text: String| json!({"type": "notice", "kind": kind, "text": text});
-    let mut out = vec![];
     if !clean.is_empty() {
         let paths: Vec<PathBuf> = clean.iter().map(|(_, full)| (*full).clone()).collect();
         let first = t.question.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
         let message = format!("Ask: {}", first.chars().take(60).collect::<String>().trim_end());
         match git::commit_paths(&v.root, &paths, &message) {
-            git::Commit::Done(id) => out.push(notice("committed", format!("Committed {} file{} \u{b7} {id}", paths.len(), if paths.len() == 1 { "" } else { "s" }))),
-            git::Commit::Skipped(why) => out.push(notice("not-committed", format!("Not committed: {why}"))),
+            git::Commit::Done(id) => out.push(json!({"type": "notice", "kind": "committed", "text": format!("Committed {} file{} \u{b7} {id}", paths.len(), if paths.len() == 1 { "" } else { "s" })})),
+            git::Commit::Skipped(why) => reasons.push((why.clone(), format!("Not committed: {why}"))),
             git::Commit::Off => {}
         }
     }
     if !yours.is_empty() {
         let names: Vec<&str> = yours.iter().map(|(rel, _)| rel.as_str()).collect();
-        out.push(notice("not-committed", format!("Not committed: {} had changes of yours that weren't committed", names.join(", "))));
+        reasons.push(("changes of yours".into(), format!("Not committed: {} had changes of yours that weren't committed", names.join(", "))));
     }
-    out
+    let fresh: Vec<(String, String)> = reasons.into_iter().filter(|(why, _)| !told.contains(why)).collect();
+    out.extend(fresh.iter().map(|(_, text)| json!({"type": "notice", "kind": "not-committed", "text": text})));
+    (out, fresh.into_iter().map(|(why, _)| why).collect())
 }
 
 #[cfg(all(test, unix))]
@@ -154,6 +175,7 @@ mod tests {
     use super::super::{events_until, permit, read, send, turn, turn_events, Mode};
     use super::*;
     use crate::ai::{self, fake};
+    use crate::guard;
     use crate::knowledge::{activity, fixture, git, AddOpts};
     use serde_json::json;
     use std::path::Path;
@@ -219,8 +241,8 @@ mod tests {
         let shown = of_type(&ev, "permission")[0].clone();
         assert_eq!(shown["path"], "knowledge/clients/acme.md");
         assert_eq!((shown["plus"].as_u64(), shown["minus"].as_u64()), (Some(2), Some(0)), "{shown}");
-        let diff = shown["diff"].as_array().cloned().unwrap_or_default();
-        assert!(diff.contains(&json!(["+", "Pilot on 18 November."])) && diff.contains(&json!(["=", "# Acme Corp"])), "Echo's diff of the file on disk: {shown}");
+        let hunk = shown["hunks"][0].as_array().cloned().unwrap_or_default();
+        assert!(hunk.contains(&json!(["+", "Pilot on 18 November."])) && hunk.contains(&json!(["=", "# Acme Corp"])), "Echo's diff of the file on disk: {shown}");
         // It waits for the user: nothing answered, the turn still going.
         std::thread::sleep(Duration::from_millis(300));
         let c = read(&v.id, &id, 0, Duration::ZERO).unwrap();
@@ -248,9 +270,16 @@ mod tests {
         let all = of("Edit", json!({"file_path": beta, "old_string": "- one\n", "new_string": "- uno\n", "replace_all": true}));
         assert_eq!((all["plus"].as_u64(), all["minus"].as_u64()), (Some(2), Some(2)), "every occurrence: {all:?}");
         let whole = of("Write", json!({"file_path": beta, "content": "# Beta\n"}));
-        assert_eq!(whole["diff"], json!([["=", "# Beta"], ["-", ""], ["-", "- one"], ["-", "- one"]]), "the whole file against the one on disk");
+        assert_eq!(whole["hunks"], json!([[["=", "# Beta"], ["-", ""], ["-", "- one"], ["-", "- one"]]]), "the whole file against the one on disk");
         let new = of("Write", json!({"file_path": v.root.join("knowledge/clients/gamma.md"), "content": "# Gamma\n\nNew.\n"}));
-        assert_eq!(new["diff"], json!([["+", "# Gamma"], ["+", ""], ["+", "New."]]), "a new file");
+        assert_eq!(new["hunks"], json!([[["+", "# Gamma"], ["+", ""], ["+", "New."]]]), "a new file");
+        // A long page: the changes with three lines around them, not every line of it.
+        let long: String = (1..=40).map(|i| format!("Line {i}\n")).collect();
+        fixture::write(&v.root, "knowledge/clients/long.md", &long);
+        let one = of("Edit", json!({"file_path": v.root.join("knowledge/clients/long.md"), "old_string": "Line 20\n", "new_string": "Line twenty\n"}));
+        assert_eq!(one["hunks"].as_array().map(Vec::len), Some(1), "{one:?}");
+        assert_eq!(one["hunks"][0].as_array().map(Vec::len), Some(8), "{one:?}");
+        assert_eq!((one["plus"].as_u64(), one["minus"].as_u64(), one.get("diff")), (Some(1), Some(1), None));
         let outside = of("Edit", json!({"file_path": root.join("outside.md"), "old_string": "a", "new_string": "b"}));
         assert!(outside.get("diff").is_none() && outside["error"].is_string(), "{outside:?}");
         let gone = of("Edit", json!({"file_path": v.root.join("knowledge/clients/none.md"), "old_string": "a", "new_string": "b"}));
@@ -282,7 +311,7 @@ mod tests {
         assert_eq!(a[1]["response"]["response"]["updatedInput"]["content"], "# Beta Inc\n\nA new client.\n");
         let cards = of_type(&ev, "permission");
         assert_eq!(cards.len(), 2);
-        assert_eq!(cards[1]["diff"], json!([["+", "# Beta Inc"], ["+", ""], ["+", "A new client."]]), "the diff still happens");
+        assert_eq!(cards[1]["hunks"], json!([[["+", "# Beta Inc"], ["+", ""], ["+", "A new client."]]]), "the diff still happens");
         let answered = of_type(&ev, "answered");
         assert_eq!(answered.len(), 2, "{ev:#?}");
         assert!(answered.iter().all(|x| x["allow"] == true && x["always"] == true));
@@ -337,14 +366,58 @@ mod tests {
         let a = answers(&p);
         assert_eq!(a[1]["response"]["response"]["behavior"], "deny");
         assert!(a[1]["response"]["response"]["message"].as_str().is_some_and(|m| !m.trim().is_empty()));
-        // K12-08: a Curate turn whose edit is refused with no request — this Claude Code doesn't hand its prompts over.
-        script(&p, "chat.3.jsonl", &lines(&[done("toolu_3", false), end(&["Edit"])]));
-        send(&v.id, Some(&id), "Add the pilot line", Mode::Curate, &[]).unwrap();
+    }
+
+    /// Claude Code's own refusal of a tool (`system`/`permission_denied`) with `message`.
+    fn refused(tool: &str, message: &str) -> Value {
+        json!({"type": "system", "subtype": "permission_denied", "tool_name": tool, "tool_use_id": "toolu_x", "message": message})
+    }
+
+    #[test]
+    fn a_host_that_keeps_its_prompts_points_to_the_terminal() {
+        let (_env, root) = crate::paths::testenv::folders("chat-fallback");
+        let _fake = fake::install(&root);
+        let _clean = clean();
+        let p = signed_in();
+        let v = vault(&root, "w");
+        let fallback = |ev: &[Value]| of_type(ev, "error").iter().filter(|e| e["action"] == "terminal").count();
+        // The guard refusing an edit of an instruction file is no missing prompt.
+        let guard_said = format!("{}: CLAUDE.md is an instruction file; a conversation doesn't change it", guard::VAULT_WHO);
+        script(&p, "chat.1.jsonl", &lines(&[init(), refused("Edit", &guard_said), done("toolu_x", false), end(&["Edit"])]));
+        let id = send(&v.id, None, "Add the pilot rule to CLAUDE.md", Mode::Curate, &[]).unwrap();
+        let ev = turn_events(&v.id, &id);
+        assert_eq!(fallback(&ev), 0, "the guard's refusal: {ev:#?}");
+        // In Ask nothing is asked about: a refusal there is none either.
+        script(&p, "chat.2.jsonl", &lines(&[init(), refused("Edit", "Claude requested permissions to write to knowledge/clients/acme.md, but you haven't granted it yet."), end(&["Edit"])]));
+        send(&v.id, Some(&id), "Fix the typo on Acme's page", Mode::Ask, &[]).unwrap();
+        let ev = events_until(&v.id, &id, |ev, c| !c.busy && of_type(ev, "result").len() == 2);
+        assert_eq!(fallback(&ev), 0, "{ev:#?}");
+        // Curate, and Claude Code refused the edit itself without asking Echo (`host-only-denied.jsonl`): K12-08.
+        let acme = v.root.join("knowledge/clients/acme.md");
+        script(&p, "chat.3.jsonl", &lines(&[init(), refused("Edit", &format!("Claude requested permissions to write to {}, but you haven't granted it yet.", acme.display())), done("toolu_x", false), end(&["Edit"])]));
+        send(&v.id, Some(&id), "Add the pilot line to Acme's page", Mode::Curate, &[]).unwrap();
         let ev = events_until(&v.id, &id, |ev, c| !c.busy && of_type(ev, "result").len() == 3);
-        let errors = of_type(&ev, "error");
+        let errors: Vec<&Value> = of_type(&ev, "error").into_iter().filter(|e| e["action"] == "terminal").collect();
         assert_eq!(errors.len(), 1, "{ev:#?}");
         assert_eq!(errors[0]["text"], "This Claude Code doesn't hand permission prompts to Echo");
-        assert_eq!(errors[0]["action"], "terminal");
+    }
+
+    /// The twin vault in a git repository with one commit (`extra` files in it too), on profile `w`, committing what
+    /// Echo writes. None without git.
+    fn git_vault(root: &Path, extra: &[(&str, &[u8])]) -> Option<Vault> {
+        git::program()?;
+        let t = fixture::twin(&root.join("twin"));
+        for (rel, bytes) in extra {
+            std::fs::write(t.join(rel), bytes).unwrap();
+        }
+        for args in [&["init", "-q", "-b", "main"][..], &["add", "-A"], &["commit", "-q", "-m", "The vault"]] {
+            assert!(git::run(&t, args).unwrap().status.success(), "{args:?}");
+        }
+        Some(crate::knowledge::add(&t, AddOpts { name: Some("Twin".into()), profile: Some("w".into()), commit: Some(true), ..Default::default() }).unwrap())
+    }
+
+    fn commits(v: &Vault) -> String {
+        git::out(&v.root, &["rev-list", "--count", "HEAD"]).unwrap()
     }
 
     #[test]
@@ -353,15 +426,9 @@ mod tests {
         let _iso = git::tests::isolated(&root, true);
         let _fake = fake::install(&root);
         let _clean = clean();
-        if git::program().is_none() {
-            return;
-        }
         let p = signed_in();
-        let t = fixture::twin(&root.join("twin"));
-        for args in [&["init", "-q", "-b", "main"][..], &["add", "-A"], &["commit", "-q", "-m", "The vault"]] {
-            assert!(git::run(&t, args).unwrap().status.success(), "{args:?}");
-        }
-        let v = crate::knowledge::add(&t, AddOpts { name: Some("Twin".into()), profile: Some("w".into()), commit: Some(true), ..Default::default() }).unwrap();
+        let Some(v) = git_vault(&root, &[]) else { return };
+        let t = v.root.clone();
         let acme = v.root.join("knowledge/clients/acme.md");
         let second = v.root.join("knowledge/notes/2026-01-02-b.md");
         // The user's own change, not committed.
@@ -388,6 +455,20 @@ mod tests {
         let short = git::out(&t, &["rev-parse", "--short", "HEAD"]).unwrap();
         assert!(notices.iter().any(|n| n["kind"] == "committed" && n["text"] == format!("Committed 1 file \u{b7} {short}").as_str()), "{notices:?}");
         assert!(notices.iter().any(|n| n["kind"] == "not-committed" && n["text"].as_str().is_some_and(|t| t.contains("2026-01-02-b.md"))), "{notices:?}");
+        // The next turn edits both again: the clean one is committed; why the other isn't was said once (X-G4).
+        apply(&p, 3, &acme, &ACME_AFTER.replace("18 November", "25 November"));
+        apply(&p, 4, &second, "---\ntitle: Second sync\ntags: [meeting]\n---\n# Second sync\n\nMy draft.\n\nPilot on 25 November.\n");
+        let one = ask("req-3", "toolu_3", "Edit", json!({"file_path": acme, "old_string": "18 November", "new_string": "25 November"}));
+        let two = ask("req-4", "toolu_4", "Edit", json!({"file_path": second, "old_string": "18 November", "new_string": "25 November"}));
+        script(&p, "chat.2.jsonl", &lines(&[one, json!({"_apply": 3}), done("toolu_3", true), two, json!({"_apply": 4}), done("toolu_4", true), end(&[])]));
+        send(&v.id, Some(&id), "The pilot moves to 25 November", Mode::Curate, &[]).unwrap();
+        events_until(&v.id, &id, |_, c| c.waiting);
+        permit(&id, "req-3", true, true, None).unwrap();
+        // A turn's notices come together: once its second `committed` is there, all of them are.
+        let ev = events_until(&v.id, &id, |ev, c| !c.busy && of_type(ev, "notice").iter().filter(|n| n["kind"] == "committed").count() == 2);
+        assert_eq!(commits(&v), "3");
+        let not: Vec<&Value> = of_type(&ev, "notice").into_iter().filter(|n| n["kind"] == "not-committed").collect();
+        assert_eq!(not.len(), 1, "said once in the conversation: {not:?}");
     }
 
     #[test]
@@ -432,22 +513,101 @@ mod tests {
             init(),
             fetch("req-1", "toolu_1", "https://example.com/pricing"), done("toolu_1", true),
             fetch("req-2", "toolu_2", "https://example.com/team"), done("toolu_2", true),
-            fetch("req-3", "toolu_3", "https://contoso.example/rates"), done("toolu_3", true),
+            fetch("req-3", "toolu_3", "https://Pat@EXAMPLE.com:443/about"), done("toolu_3", true),
+            // Ruling R27: a URL whose host Echo can't read as the fetch does has no domain, and is never Echo's to allow.
+            fetch("req-4", "toolu_4", "https://evil.com\\@example.com/"), done("toolu_4", false),
+            fetch("req-5", "toolu_5", "https://example.com.evil.com/"), done("toolu_5", false),
+            fetch("req-6", "toolu_6", "https://evilexample.com/"), done("toolu_6", false),
+            fetch("req-7", "toolu_7", "https://contoso.example/rates"), done("toolu_7", true),
             end(&[]),
         ]));
         let id = send(&v.id, None, "Compare Northwind Retail's prices with the market", Mode::Research, &[]).unwrap();
         events_until(&v.id, &id, |_, c| c.waiting);
         permit(&id, "req-1", true, true, None).unwrap();
-        // example.com's next page is Echo's to allow; contoso.example's waits for the user.
-        let ev = events_until(&v.id, &id, |ev, c| c.waiting && of_type(ev, "permission").len() == 3);
+        // example.com's next pages are Echo's to allow; the others wait for the user, one by one.
+        for (n, req) in [(4, "req-4"), (5, "req-5"), (6, "req-6")] {
+            events_until(&v.id, &id, |ev, c| c.waiting && of_type(ev, "permission").len() == n);
+            permit(&id, req, false, false, None).unwrap();
+        }
+        let ev = events_until(&v.id, &id, |ev, c| c.waiting && of_type(ev, "permission").len() == 7);
         let cards = of_type(&ev, "permission");
-        assert_eq!(cards.iter().map(|c| c["domain"].as_str().unwrap_or("")).collect::<Vec<_>>(), ["example.com", "example.com", "contoso.example"]);
+        assert_eq!(cards.iter().map(|c| c["domain"].as_str().unwrap_or("")).collect::<Vec<_>>(), ["example.com", "example.com", "example.com", "", "example.com.evil.com", "evilexample.com", "contoso.example"]);
+        assert_eq!(cards[3]["url"], "https://evil.com\\@example.com/", "the URL as it is, with no domain");
         let a = answers(&p);
-        assert_eq!(a.iter().map(|x| x["response"]["request_id"].as_str().unwrap_or("")).collect::<Vec<_>>(), ["req-1", "req-2"], "{a:?}");
-        assert!(a.iter().all(|x| x["response"]["response"]["behavior"] == "allow"));
-        assert_eq!(of_type(&ev, "answered").len(), 2);
-        permit(&id, "req-3", true, false, None).unwrap();
+        let allowed: Vec<&str> = a.iter().filter(|x| x["response"]["response"]["behavior"] == "allow").map(|x| x["response"]["request_id"].as_str().unwrap_or("")).collect();
+        assert_eq!(allowed, ["req-1", "req-2", "req-3"], "{a:?}");
+        assert_eq!(a.len(), 6, "the user answered the three others: {a:?}");
+        assert_eq!(of_type(&ev, "answered").iter().filter(|x| x["allow"] == true).count(), 3);
+        permit(&id, "req-7", true, false, None).unwrap();
         turn_events(&v.id, &id);
-        assert_eq!(answers(&p).len(), 3);
+        assert_eq!(answers(&p).len(), 7);
+    }
+
+    #[test]
+    fn the_commit_switch_is_read_at_each_turns_end() {
+        let (_env, root) = crate::paths::testenv::folders("chat-commit-switch");
+        let _iso = git::tests::isolated(&root, true);
+        let _fake = fake::install(&root);
+        let _clean = clean();
+        let p = signed_in();
+        let Some(v) = git_vault(&root, &[]) else { return };
+        let page = |rel: &str| v.root.join(rel);
+        let edit = |n: u32, rel: &str, old: &str, new: &str| {
+            let full = page(rel);
+            apply(&p, n, &full, &std::fs::read_to_string(&full).unwrap().replace(old, new));
+            vec![ask(&format!("req-{n}"), &format!("toolu_{n}"), "Edit", json!({"file_path": full, "old_string": old, "new_string": new})), json!({"_apply": n}), done(&format!("toolu_{n}"), true)]
+        };
+        let turn_of = |first: bool, steps: Vec<Value>| lines(&[if first { vec![init()] } else { vec![] }, steps, vec![end(&[])]].concat());
+        script(&p, "chat.1.jsonl", &turn_of(true, edit(1, "knowledge/clients/acme.md", "# Acme Corp\n", "# Acme Corp\n\nPilot on 18 November.\n")));
+        let id = send(&v.id, None, "Note the pilot on Acme", Mode::Curate, &[]).unwrap();
+        events_until(&v.id, &id, |_, c| c.waiting);
+        permit(&id, "req-1", true, false, None).unwrap();
+        events_until(&v.id, &id, |ev, c| !c.busy && !of_type(ev, "notice").is_empty());
+        assert_eq!(commits(&v), "2");
+        // *Commit what Echo writes* turned off between two turns of the same process: nothing is committed (X-G4).
+        crate::knowledge::set(&v.id, "commit", "false").unwrap();
+        script(&p, "chat.2.jsonl", &turn_of(false, edit(2, "knowledge/notes/2026-01-03-c.md", "# Third\n", "# Third sync\n")));
+        send(&v.id, Some(&id), "Name the third sync", Mode::Curate, &[]).unwrap();
+        events_until(&v.id, &id, |_, c| c.waiting);
+        permit(&id, "req-2", true, false, None).unwrap();
+        events_until(&v.id, &id, |ev, c| !c.busy && of_type(ev, "result").len() == 2);
+        // An Ask turn, then Curate again: its process starts with commits off, and they are turned on mid-turn.
+        script(&p, "chat.3.jsonl", &turn("Acme has the pilot."));
+        send(&v.id, Some(&id), "What is on Acme?", Mode::Ask, &[]).unwrap();
+        events_until(&v.id, &id, |ev, c| !c.busy && of_type(ev, "result").len() == 3);
+        assert_eq!(commits(&v), "2", "the second turn's edit wasn't committed");
+        script(&p, "chat.4.jsonl", &turn_of(true, edit(4, "knowledge/notes/2026-01-02-b.md", "# Second sync\n", "# Second sync (moved)\n")));
+        send(&v.id, Some(&id), "Mark the second sync as moved", Mode::Curate, &[]).unwrap();
+        events_until(&v.id, &id, |_, c| c.waiting);
+        crate::knowledge::set(&v.id, "commit", "true").unwrap();
+        permit(&id, "req-4", true, false, None).unwrap();
+        events_until(&v.id, &id, |ev, c| !c.busy && of_type(ev, "notice").iter().filter(|n| n["kind"] == "committed").count() == 2);
+        assert_eq!(commits(&v), "3");
+        assert_eq!(git::out(&v.root, &["show", "--name-only", "--format=", "HEAD"]).unwrap().trim(), "knowledge/notes/2026-01-02-b.md");
+    }
+
+    #[test]
+    fn edits_of_files_echo_cant_show_are_still_recorded() {
+        let (_env, root) = crate::paths::testenv::folders("chat-unshown");
+        let _iso = git::tests::isolated(&root, true);
+        let _fake = fake::install(&root);
+        let _clean = clean();
+        let p = signed_in();
+        let Some(v) = git_vault(&root, &[("knowledge/clients/legacy.md", &b"# Legacy\n\xff\xfe old bytes\n"[..])]) else { return };
+        let legacy = v.root.join("knowledge/clients/legacy.md");
+        apply(&p, 1, &legacy, "# Legacy\n\nFixed.\n");
+        script(&p, "chat.1.jsonl", &lines(&[init(), ask("req-1", "toolu_1", "Write", json!({"file_path": legacy, "content": "# Legacy\n\nFixed.\n"})), json!({"_apply": 1}), done("toolu_1", true), end(&[])]));
+        let id = send(&v.id, None, "Rewrite the legacy page as text", Mode::Curate, &[]).unwrap();
+        let ev = events_until(&v.id, &id, |_, c| c.waiting);
+        let shown = of_type(&ev, "permission")[0].clone();
+        assert!(shown.get("hunks").is_none() && shown["error"].as_str().is_some_and(|e| e.contains("isn't text")), "{shown}");
+        // Allowed all the same: its line (no texts to count) and its commit.
+        permit(&id, "req-1", true, false, None).unwrap();
+        let ev = events_until(&v.id, &id, |ev, c| !c.busy && !of_type(ev, "notice").is_empty());
+        let l = all_lines(&v);
+        assert_eq!(l.len(), 1, "{l:?}");
+        assert_eq!((l[0].path.as_str(), l[0].by.as_str(), l[0].plus, l[0].minus), ("knowledge/clients/legacy.md", "ask", 0, 0));
+        assert_eq!(commits(&v), "2", "{ev:#?}");
+        assert_eq!(git::out(&v.root, &["show", "--name-only", "--format=", "HEAD"]).unwrap().trim(), "knowledge/clients/legacy.md");
     }
 }
