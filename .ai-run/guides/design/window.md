@@ -166,12 +166,17 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   are Claude can (`prompt`: what to hand back, a `skill`) or By hand (`how`). The user's choice is on the task in its
   ledger (`mode`, `how`, `prompt`, `skill`, pinned); until then Echo's guess (`<home>/.echo/task-modes.json`, dashed in
   the window), one model call per thread on its AI profile, once a day a task (the prep scheduler; `echoctl
-  classify`). Shown as a two-way switch on Today's My work cards and in What moved, a tag on Tasks cards with a filter
-  (Anyone / Claude can do / By hand). A Claude one's ✦ opens the Claude dialog with its prompt as the note and its
-  skill chosen — Work on it / Yolo, no third button (the user: one Run with Claude mechanism).
+  classify`). On cards (Today's My work, What moved, Tasks) an icon only — Claude Code's mark or a hand, Echo's guess
+  faded, its how on hover; Tasks has a filter (Anyone / Claude can do / By hand). The switch and the how (or what
+  Claude hands back), editable, are in the task's details (`modeRows`), field by field the user's over the guess. A
+  Claude one's ✦ / Send to Claude opens the Claude dialog with its prompt as the note and its skill chosen — Work on
+  it / Yolo, no third button (the user: one Run with Claude mechanism). Claude Code's own mark (thesvg.org, mono)
+  stands for Claude everywhere: the panel, Ask Claude, Send to Claude, Work on it, the status bar.
 - What moved (`callChanges`): what a call changed in its threads, beside the minutes as the live notes are beside the
   transcript (its own scroll; under 1000 px it is hidden), the user's own open tasks first with who does each. It was
-  above the Actions tab's items; action items are everything said, the user's tasks are what is theirs to do.
+  above the Actions tab's items; action items are everything said, the user's tasks are what is theirs to do. The
+  Actions tab is gone (Nov 2026): the minutes list the action items with their moments, What moved has the tasks;
+  `actions.json` stays (the minutes, Today's counts, thread sync and `echoctl actions` use it).
 - Not yet: action modes from the minutes (claude: the skill and prompt ready on the action; manual: how to do it).
 
 ### Settings → Templates (`templatesSettings`, `/api/templates`, `calls::templates_view`)

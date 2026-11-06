@@ -2696,9 +2696,14 @@ pub fn tree(project: &str) -> Result<Value> {
     let t = fold_linked(project)?;
     let pend = pending(project)?.len();
     let mut nodes = serde_json::to_value(&t.nodes)?;
-    for (_, x) in nodes.as_object_mut().into_iter().flatten() {
+    let modes = crate::taskmodes::guesses();
+    for (id, x) in nodes.as_object_mut().into_iter().flatten() {
         if let Some(d) = x["description"].as_str().map(crate::minutes::markdown_html) {
             x["description_html"] = json!(d);
+        }
+        // Who does it, the user's choice or Echo's guess (the task's details show and change it).
+        if let Some(n) = t.nodes.get(id).filter(|n| n.kind == "task") {
+            x["who_does"] = crate::taskmodes::of(&modes, project, n);
         }
     }
     Ok(json!({

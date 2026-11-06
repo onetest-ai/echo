@@ -25,15 +25,17 @@ pub fn guesses() -> Map<String, Value> {
     std::fs::read(file()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
 }
 
-/// A task's mode for the window: the user's (`by: "you"`), else Echo's guess (`by: "guess"`), else null.
+/// A task's mode for the window, field by field the user's over Echo's guess (a how written by hand on a guessed
+/// mode is theirs); `by`: "you" when they chose the mode, "guess" when Echo did; null when neither has one.
 pub fn of(guesses: &Map<String, Value>, project: &str, n: &Node) -> Value {
-    if n.mode.is_some() {
-        return json!({"mode": n.mode, "how": n.how, "prompt": n.prompt, "skill": n.skill, "by": "you"});
+    let g = guesses.get(&format!("{project}/{}", n.id)).cloned().unwrap_or_default();
+    let pick = |mine: &Option<String>, k: &str| mine.clone().map(Value::from).unwrap_or_else(|| g[k].clone());
+    let mode = pick(&n.mode, "mode");
+    if !mode.is_string() {
+        return Value::Null;
     }
-    match guesses.get(&format!("{project}/{}", n.id)) {
-        Some(g) if g["mode"].is_string() => json!({"mode": g["mode"], "how": g["how"], "prompt": g["prompt"], "skill": g["skill"], "by": "guess"}),
-        _ => Value::Null,
-    }
+    json!({"mode": mode, "how": pick(&n.how, "how"), "prompt": pick(&n.prompt, "prompt"), "skill": pick(&n.skill, "skill"),
+           "by": if n.mode.is_some() { "you" } else { "guess" }})
 }
 
 const SYSTEM: &str = "You sort the user's own open tasks. Can Claude do each one for them — draft and send a mail or a \
