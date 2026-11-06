@@ -37,3 +37,4 @@ docs/superpowers/qa-tasks/*/**/*.local.*
 /tests/reports/
 /.playwright-mcp/
 __pycache__/
+/tests/tools/testcall/build/
