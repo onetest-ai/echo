@@ -17,6 +17,7 @@ and has Claude Code write the minutes. One Rust binary, `echoctl`, is both the a
 | AI jobs | `ai.rs`, `livenotes.rs`, `notes.rs`, `guard.rs`, `projectsync.rs` | live notes, minutes runs, thread syncs on the call's AI profile | headless Claude Code under the `run-guard` hook; state files per call / thread |
 | Threads and ledger | `projects.rs`, `ledger.rs`, `people.rs`, `tasks.rs` | clients, threads (projects), work ledger, people | `<home>/projects/` files |
 | Recall (Brain) | `brain/` (feature `brain`) | SQLite index of calls, mail, posts, folders; MCP server | `<home>/recall/`, `echoctl brain mcp` |
+| Knowledge vaults | `knowledge/` | the user's folders of notes: detection, Echo's index of them, pages, checks, minutes saved as notes, the twin starter | `<home>/.echo/knowledge/`, `/api/kn/…`, IPC `kn_*`, `echoctl knowledge` |
 | Echo plugins | `plugins.rs`, `jshost.rs`, `claudejob.rs`, `share.rs` (feature `js`) | third-party packages with a host half (QuickJS) and a client half (window) | `ctx` services, slots and registries |
 | Claude Code plugin | `plugin/` | status-line mod + skills (`process-call`, `manage`, `record`, ...) | only `plugin/scripts/echoctl` and the data folder's files |
 
@@ -46,6 +47,8 @@ Evidence: `crates/echoctl/src/watch.rs::run_loop`, `crates/echoctl/src/recorder.
 | State dir | `paths::state_dir` = `<home>/.echo` | `config.json`, `armed.json`, `*.request`, `quit.asking`, `health.json`, `events.jsonl`, `watch.json`, `agenda.json`, `scheduled.json`, `app.log` | CLI writes requests; the watcher takes them and writes state |
 | A call folder | `paths::calls_dir` + `<ts>-<slug>` (`calls::stamp_of` keeps its identity across retitles) | `meta.json`, `meeting.json`, `mic.wav` / `remote.wav` (until transcribed), `live.jsonl`, `live-notes.json`, `transcript.md`, `segments.json`, `my-notes.md`, `chat.json`, `frames/` | recorder and transcription |
 | ... its minutes | same folder | `notes.md`, `actions.json`, `notes-run.json`, `claude.log` | only a Claude Code run (`notes.md`, actions via `echoctl actions --apply`); `notes-run.json` by `notes.rs` |
+| ... where its minutes were saved | same folder | `knowledge.json` (vault, note, sha256, commit; the call's choice) | `knowledge::export`, never a Claude run |
+| Knowledge vaults | `<home>/.echo/knowledge/` | `vaults.json` (+ `vaults.lock`), `<id>/index.json` (Echo's index of a vault; never in the vault) | the app and `echoctl knowledge` |
 
 Evidence: `crates/echoctl/src/paths.rs::state_dir`, `crates/echoctl/src/paths.rs::calls_dir`, `crates/echoctl/src/paths.rs::config_dir`
 
@@ -121,5 +124,5 @@ Related guides: `capture/capture-and-transcription.md`, `window/window-ui.md`, `
 `plugins/plugin-authoring.md`, `development/dev-workflow.md`.
 
 Background design per area (why things are the way they are) lives in `.ai-run/guides/design/`: `recording.md`
-(capture, app flow), `window.md`, `threads.md` (threads, ledger, people), `recall.md`, `plugins.md`, `claude-code.md`
+(capture, app flow), `window.md`, `threads.md` (threads, ledger, people), `recall.md`, `knowledge.md` (vaults), `plugins.md`, `claude-code.md`
 (the plugin, sessions, runs) and `ai-and-minutes.md` (AI profiles, live notes, minutes).

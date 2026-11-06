@@ -28,6 +28,8 @@ use crate::{calls, paths, watch};
 const INDEX: &str = include_str!("../ui/index.html");
 const APP_JS: &str = include_str!("../ui/app.js");
 const APP_CSS: &str = include_str!("../ui/app.css");
+const KN_JS: &str = include_str!("../ui/knowledge.js");
+const KN_CSS: &str = include_str!("../ui/knowledge.css");
 const OCTOPUS_SVG: &str = include_str!("../assets/octopus.svg");
 /// The onetest logo (violet disc, the full octopus character), 192 px, for the window.
 const LOGO_PNG: &[u8] = include_bytes!("../assets/onetest-logo.png");
@@ -235,6 +237,17 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
         "/" | "/index.html" => reply(200, "text/html; charset=utf-8", index_html().into_bytes()),
         "/assets/app.js" => reply(200, "text/javascript; charset=utf-8", APP_JS.as_bytes().to_vec()),
         "/assets/app.css" => reply(200, "text/css; charset=utf-8", APP_CSS.as_bytes().to_vec()),
+        "/assets/knowledge.js" => reply(200, "text/javascript; charset=utf-8", KN_JS.as_bytes().to_vec()),
+        "/assets/knowledge.css" => reply(200, "text/css; charset=utf-8", KN_CSS.as_bytes().to_vec()),
+        // Knowledge (spec K4–K9): the vaults, a vault's tree, pages, graph, checks, history, images; the folder picked.
+        "/api/kn" => json_reply(crate::knowledge::api::state()),
+        "/api/kn-resume" => json_reply(json!({ "command": query_param(req.uri().query().unwrap_or(""), "vault").and_then(|v| crate::terminal::vault_resume_command(&v)) })),
+        p if p.starts_with("/api/kn/") => match crate::knowledge::api::route(&p["/api/kn/".len()..], req.uri().query().unwrap_or("")) {
+            Ok(crate::knowledge::api::Reply::Json(v)) => json_reply(v),
+            Ok(crate::knowledge::api::Reply::Bytes(b, mime)) => reply(200, mime, b),
+            Err(_) if p.ends_with("/asset") => reply(404, "text/plain", b"not found".to_vec()),
+            Err(e) => json_reply(json!({ "error": format!("{e:#}") })),
+        },
         "/assets/logo.png" => reply(200, "image/png", LOGO_PNG.to_vec()),
         "/assets/vendor/xterm.js" => reply(200, "text/javascript; charset=utf-8", XTERM_JS.as_bytes().to_vec()),
         "/assets/vendor/xterm-addon-fit.js" => reply(200, "text/javascript; charset=utf-8", XTERM_FIT_JS.as_bytes().to_vec()),
@@ -262,9 +275,10 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
         // A Claude panel's conversations (#44): `?call=<name>` (this call's) or `?profile=<id>` (the Echo folder's).
         "/api/conversations" => {
             let q = req.uri().query().unwrap_or("");
-            let key = match query_param(q, "call") {
-                Some(name) => crate::calls::resolve_call(&name).and_then(|d| crate::terminal::call_store_key(&d)).ok(),
-                None => Some(crate::terminal::folder_store_key(query_param(q, "profile").filter(|p| !p.is_empty()).as_deref())),
+            let key = match (query_param(q, "call"), query_param(q, "vault")) {
+                (_, Some(vault)) => crate::knowledge::get(&vault).ok().map(|v| crate::terminal::vault_store_key(&v)),
+                (Some(name), _) => crate::calls::resolve_call(&name).and_then(|d| crate::terminal::call_store_key(&d)).ok(),
+                _ => Some(crate::terminal::folder_store_key(query_param(q, "profile").filter(|p| !p.is_empty()).as_deref())),
             };
             json_reply(key.map(|k| crate::terminal::conversations(&k)).unwrap_or_else(|| json!([])))
         }
@@ -758,6 +772,8 @@ fn call_detail(dir: &Path) -> Value {
         }
         Err(e) => v["projects_error"] = json!(format!("{e:#}")),
     }
+    // Where its minutes go (spec K3-09): what was saved, the vaults that will take it, the ones offering an update.
+    v["knowledge"] = crate::knowledge::export::call_value(dir);
     let profile = crate::ai::call_profile_id(dir);
     v["live"] = json!({
         "profile_error": profile.as_ref().err().map(|e| format!("{e:#}")),
@@ -1958,6 +1974,33 @@ pub fn handle(msg: &str) -> Handled {
         },
         #[cfg(feature = "brain")]
         "brain_topics_snooze" => v["layer"].as_str().is_some_and(|l| crate::brain::taxonomy::snooze(l).is_ok()).into(),
+        // Knowledge: the system's folder dialog (the page polls `/api/kn/pick`), a file shown in Finder / Explorer or
+        // opened in Obsidian, and every other `kn_*` action as a job the page polls (`/api/kn/jobs`).
+        "kn_pick" => {
+            crate::knowledge::api::pick(if v["for"] == "new" { "A folder for the new vault (new or empty)" } else { "A folder of notes to connect — nothing in it changes" });
+            false.into()
+        }
+        "kn_reveal" => {
+            if let Ok(p) = crate::knowledge::api::file_of(v["id"].as_str().unwrap_or(""), v["path"].as_str().unwrap_or("")) {
+                if p.is_dir() { crate::app::reveal(&p) } else { crate::app::reveal_file(&p) }
+            }
+            false.into()
+        }
+        "kn_obsidian" => {
+            if let Ok(u) = crate::knowledge::api::obsidian_uri(v["id"].as_str().unwrap_or(""), v["path"].as_str().unwrap_or("")) {
+                open_external(&u);
+            }
+            false.into()
+        }
+        cmd if cmd.starts_with("kn_") => {
+            let (op, cmd, args) = (cmd.to_string(), cmd.to_string(), v.clone());
+            let seq = crate::knowledge::api::start_job(&op, move || {
+                let r = crate::knowledge::api::act(&cmd, &args);
+                crate::attention::stale();
+                r
+            });
+            Handled { refresh: false, reply: Some(format!("window.echo && window.echo.knJob && window.echo.knJob({seq})")) }
+        }
         "deliver_op" => deliver_op(&v),
         // A plugin's command from Echo's own places (an Inbox item's button): in the background.
         #[cfg(feature = "js")]
@@ -2082,6 +2125,8 @@ pub fn handle(msg: &str) -> Handled {
                 }
                 // Claude in the data folder, on the profile picked (the default when none).
                 "claude-folder" => crate::terminal::start_folder(&key, v["profile"].as_str().filter(|p| !p.is_empty()), v["session"].as_str(), cols, rows).map(|id| (id, key.clone())),
+                // Claude in a knowledge vault's folder, on the vault's own profile.
+                "claude-vault" => crate::terminal::start_vault(&key, v["vault"].as_str().unwrap_or(""), v["session"].as_str(), cols, rows).map(|id| (id, key.clone())),
                 // Claude on one call, guarded, on the call's own profile.
                 "claude-call" => match call_named(&v) {
                     Some(dir) => crate::terminal::start_call(&key, &dir, v["session"].as_str(), cols, rows).map(|id| (id, key.clone())),
@@ -2524,7 +2569,7 @@ pub fn export(dir: &Path) -> anyhow::Result<()> {
         Ok(())
     };
     write("index.html", get("/"))?;
-    for p in ["/assets/app.js", "/assets/app.css", "/assets/logo.png", "/assets/vendor/sigma.min.js", "/assets/vendor/graphology.umd.min.js", "/assets/vendor/graphology-library.min.js", "/api/state", "/api/calls", "/api/agenda", "/api/layout", "/api/settings", "/api/plugins", "/api/deliver", "/api/sessions", "/api/ptys"] {
+    for p in ["/assets/app.js", "/assets/app.css", "/assets/knowledge.js", "/assets/knowledge.css", "/api/kn", "/assets/logo.png", "/assets/vendor/sigma.min.js", "/assets/vendor/graphology.umd.min.js", "/assets/vendor/graphology-library.min.js", "/api/state", "/api/calls", "/api/agenda", "/api/layout", "/api/settings", "/api/plugins", "/api/deliver", "/api/sessions", "/api/ptys"] {
         write(p, get(p))?;
     }
     let week_start = chrono::Local::now().date_naive().pred_opt().unwrap_or_default().format("%Y-%m-%d");
@@ -2666,6 +2711,37 @@ pub fn selftest() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn get_json(path: &str) -> Value {
+        let r = respond(&Request::builder().uri(format!("echo://localhost{path}")).body(Vec::new()).expect("request"));
+        serde_json::from_slice(r.body()).unwrap_or(Value::Null)
+    }
+
+    #[test]
+    fn knowledge_is_served_by_the_window() {
+        let (_env, root) = crate::paths::testenv::folders("window-kn");
+        let t = crate::knowledge::fixture::twin(&root.join("twin"));
+        crate::knowledge::add(&t, crate::knowledge::AddOpts { name: Some("Twin".into()), ..Default::default() }).unwrap();
+        assert_eq!(get_json("/api/kn")["vaults"][0]["id"], "twin");
+        assert_eq!(get_json("/api/kn/twin/page?path=knowledge%2Fclients%2Facme.md")["title"], "Acme Corp");
+        assert!(get_json("/api/kn/twin/page?path=..%2F..%2Fx.md")["error"].is_string(), "a bad path is an error, not a page");
+        let js = respond(&Request::builder().uri("echo://localhost/assets/knowledge.js").body(Vec::new()).unwrap());
+        assert_eq!(js.status(), 200);
+        assert!(index_html().find("assets/knowledge.js").unwrap() < index_html().find("assets/app.js").unwrap(), "Knowledge's script loads before app.js");
+        let img = respond(&Request::builder().uri("echo://localhost/api/kn/twin/asset?path=knowledge%2Fnope.png").body(Vec::new()).unwrap());
+        assert_eq!(img.status(), 404);
+    }
+
+    #[test]
+    fn call_detail_names_the_vaults_that_take_it() {
+        let (_env, root) = crate::paths::testenv::folders("window-kn-call");
+        let t = crate::knowledge::fixture::twin(&root.join("twin"));
+        crate::knowledge::add(&t, crate::knowledge::AddOpts { name: Some("My twin".into()), ..Default::default() }).unwrap();
+        let call = crate::knowledge::fixture::call("2026-11-05_090012-weekly", "Weekly", "system", crate::knowledge::fixture::MINUTES);
+        let d = call_detail(&call);
+        assert_eq!(d["knowledge"]["targets"][0]["name"], "My twin");
+        assert_eq!(d["knowledge"]["record"]["saved"], json!([]));
+    }
 
     #[test]
     fn the_calls_list_comes_a_page_at_a_time_and_searches_in_the_app() {

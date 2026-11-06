@@ -335,7 +335,7 @@ const ACTIVITIES = [
   { id: 'calendar', label: 'Calendar', layout: 'single', icon: ICON('<rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/>') },
   { id: 'projects', label: 'Threads', layout: 'single', icon: ICON('<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M8 13h8"/>') },
   { id: 'tasks', label: 'Tasks', layout: 'single', icon: ICON('<rect x="4" y="4" width="16" height="16" rx="3.5"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/>') },
-  { id: 'brain', label: 'Knowledge', layout: 'single', when: () => brainOn() || knowledgeTabs().length > 0, icon: ICON('<path d="M9 4.5a3 3 0 0 0-3 3 3 3 0 0 0-2 5.2A3.2 3.2 0 0 0 7.5 18 2.5 2.5 0 0 0 12 19V6a2 2 0 0 0-3-1.5z"/><path d="M15 4.5a3 3 0 0 1 3 3 3 3 0 0 1 2 5.2A3.2 3.2 0 0 1 16.5 18 2.5 2.5 0 0 1 12 19"/>') },
+  { id: 'brain', label: 'Knowledge', layout: 'single', icon: ICON('<path d="M9 4.5a3 3 0 0 0-3 3 3 3 0 0 0-2 5.2A3.2 3.2 0 0 0 7.5 18 2.5 2.5 0 0 0 12 19V6a2 2 0 0 0-3-1.5z"/><path d="M15 4.5a3 3 0 0 1 3 3 3 3 0 0 1 2 5.2A3.2 3.2 0 0 1 16.5 18 2.5 2.5 0 0 1 12 19"/>') },
   { id: 'settings', label: 'Settings', layout: 'single', bottom: true, icon: ICON('<circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/>') },
 ]
 /** A call's tabs, in order. `x` = what the call has: `{recording, chat, frames, actions}` (counts, or
@@ -596,10 +596,13 @@ function route() {
   if (sm && sm[1] === 'vocabulary') { S.view = 'calls'; setTimeout(() => { Layout.show('vocabulary', panelViews()); layoutChanged() }); return }
   if (sm) { S.view = 'settings'; if (sm[1]) S.setSection = sm[1]; return }
   if (h === 'tasks') { S.view = 'tasks'; return }
-  // Knowledge: Recall's tabs and the plugins' (`knowledge.tab`, `#brain/<plugin>:<id>/<its route>`).
+  // Knowledge: your vaults (`#kn/<vault>/<tab>/<page>`, knowledge.js), Recall's tabs and the plugins'
+  // (`knowledge.tab`, `#brain/<plugin>:<id>/<its route>`).
+  const kr = knParseRoute(h)
+  if (kr) { S.view = 'brain'; Kn.route(kr); return }
   const bm = h.match(/^brain(?:\/([\w:-]+)(?:\/(.*))?)?$/)
-  if (bm && !brainOn() && !knowledgeTabs().length) { S.view = 'calls'; return }
-  if (bm) { S.view = 'brain'; if (bm[1]) S.br.tab = bm[1]; S.plRoute = bm[2] || ''; return }
+  if (bm && !brainOn() && !knowledgeTabs().length) { S.view = 'brain'; Kn.setSource('vault'); return }
+  if (bm) { S.view = 'brain'; if (bm[1]) S.br.tab = bm[1]; S.plRoute = bm[2] || ''; Kn.setSource(String(S.br.tab).includes(':') ? 'plugin' : 'recall'); return }
   if (h === 'found') { S.view = 'projects'; S.pj.found = true; S.pj.client = null; S.pj.sel = null; S.pj.detail = null; return }
   const cm2 = h.match(/^client\/([a-z0-9-]+)(?:\/(\w+))?$/)
   if (cm2) {
@@ -627,7 +630,7 @@ function route() {
 const go = (hash) => { if (location.hash.slice(1) !== hash) location.hash = hash; else render() }
 /** An activity, where the user left it (the open call and tab; the calendar's day or week). */
 const goActivity = (id) => go(ACTIVITIES.some((a) => a.id === id && a.plugin) ? ((S.plRoutes || {})[id] ? `${id}/${S.plRoutes[id]}` : id) : id === 'calendar' ? `calendar/${S.cal.mode}` : id === 'settings' ? `settings/${S.setSection}`
-  : id === 'tasks' ? 'tasks' : id === 'brain' ? `brain/${S.br.tab}`
+  : id === 'tasks' ? 'tasks' : id === 'brain' ? Kn.home()
   : id === 'projects' ? (S.pj.found ? 'found' : S.pj.client ? `client/${S.pj.client}/${S.pj.ctab || 'overview'}` : S.pj.sel ? `project/${S.pj.sel}/${S.pj.tab}` : 'projects') : (S.selected ? `call/${S.selected}/${S.tab}` : 'calls'))
 
 // ── language of the next recording (Record ▾) ──────────────────────────────────────────────
@@ -976,6 +979,7 @@ function callMenu(c) {
     c.notes ? item('open-minutes', 'Open minutes in browser') : '',
     c.notes ? item('reveal-minutes', `${SHOW_FILE.replace('Show in', 'Show minutes in')}`) : '',
     c.notes ? item('write-notes', 'Write minutes again') : '',
+    Kn.callMenuItems(c),
     item('ask-claude', 'Ask Claude about this call'),
     slotItems('call.menu', { kind: 'call', call: c }, 'menu'),
     '<div class="menu-sep" role="separator"></div>',
@@ -1599,7 +1603,7 @@ async function loadPtyInfo() {
 /** A Claude panel's conversation controls (#44): Restart, New conversation, Conversations ▾ — and, when it runs
  *  older plugins or skills than installed, Restart to update. */
 function claudeTools(key, kind, extra, running) {
-  const data = `data-term-kind="${esc(kind)}" data-term-key="${esc(key)}"${extra.call ? ` data-term-call="${esc(extra.call)}"` : ''}`
+  const data = `data-term-kind="${esc(kind)}" data-term-key="${esc(key)}"${extra.call ? ` data-term-call="${esc(extra.call)}"` : ''}${extra.vault ? ` data-term-vault="${esc(extra.vault)}"` : ''}`
   // Only when it matters: the session runs older plugins or skills than installed. Restart and a new conversation
   // are ⌘K actions (claudeSessionActions).
   const stale = running && S.ptyStale && S.ptyStale[key]
@@ -1647,7 +1651,7 @@ async function termRestart(kind, key, extra, session) {
 function termView(key, kind, startLabel, intro = '', extra = {}) {
   const e = Terms.get(key)
   const running = e && e.id != null && !e.exited
-  const attrs = `data-term-start="${esc(kind)}" data-term-key="${esc(key)}"${extra.call ? ` data-term-call="${esc(extra.call)}"` : ''}`
+  const attrs = `data-term-start="${esc(kind)}" data-term-key="${esc(key)}"${extra.call ? ` data-term-call="${esc(extra.call)}"` : ''}${extra.vault ? ` data-term-vault="${esc(extra.vault)}"` : ''}`
   const head = key.startsWith('claude:') ? claudeTools(key, kind, extra, running) : ''
   return head + termBody(e, key, kind, startLabel, intro, extra, running, attrs)
 }
@@ -1692,6 +1696,8 @@ function claudeFolderView() {
 // Claude's sparkle on a folder (the Echo folder).
 const SPARK = (x, y, r) => `<path d="M${x} ${y - r}l${r * 0.3} ${r * 0.7} ${r * 0.7} ${r * 0.3}-${r * 0.7} ${r * 0.3}-${r * 0.3} ${r * 0.7}-${r * 0.3}-${r * 0.7}-${r * 0.7}-${r * 0.3} ${r * 0.7}-${r * 0.3}z" fill="currentColor" stroke="none"/>`
 PANEL_VIEWS.push({ id: 'claude-folder', label: 'Claude', icon: ICON(`<path d="M3 6h6l2 2h10v11H3z"/>${SPARK(12, 13.5, 3.6)}`), area: 'bottom', when: () => S.view !== 'settings', render: claudeFolderView })
+// Claude in the open vault's folder (knowledge.js `Kn.askView`): its skills and rules, a session of its own.
+PANEL_VIEWS.push({ id: 'claude-vault', get label() { return Kn.askLabel() }, icon: ICON(`<path d="M6.5 3.5h11l3.5 5-9 12-9-12z"/>${SPARK(12, 13.5, 3.2)}`), area: 'bottom', when: () => S.view === 'brain' && !!Kn.vaultId(), render: () => Kn.askView() })
 
 // ── Minutes: the page as it would be sent, in a sandboxed frame (`/minutes/<call>`) ───────────
 const SHOW_FILE = /Windows/.test(navigator.userAgent) ? 'Show in Explorer' : 'Show in Finder'
@@ -1822,7 +1828,7 @@ function minutesHint(c, heading, lead) {
       ? `Claude Code writes them with <b>${esc(p.name)}</b> (${esc(model)}), ${esc(profileWhere(p))}.`
       : `Claude Code writes them with <b>${esc(model)}</b>, as it is set up (menu → AI for calls → Minutes model, while it is the profile new calls use).`
   const pick = ai().profiles.length > 1 || (ai().profiles.length && !p) ? `<label class="notes-pick">Model <select data-notesprofile aria-label="Model for these minutes">${p ? '' : '<option value="" selected>Choose…</option>'}${profileOptions(pid)}</select></label>` : ''
-  return box(heading, `${ring}<p>${esc(lead)}</p>${moved}<p class="alt">${where}</p>${sign}`,
+  return box(heading, `${ring}<p>${esc(lead)}</p>${moved}${Kn.countdownLine(c)}<p class="alt">${where}</p>${sign}`,
     `${pick}<button class="btn primary" data-cmd="write-notes">${label}</button>${later}${log}`) + session
 }
 
@@ -2753,7 +2759,7 @@ document.addEventListener('click', (e) => {
 })
 
 const SETTINGS_BODY = {
-  brain: (st) => knowledgeSettings() + brainSettings(st),
+  brain: (st) => Kn.settingsVaults() + knowledgeSettings() + brainSettings(st),
   plugins: pluginsSettings,
   general(st) {
     const upd = st.update ? actBtn('update', `Update to ${st.update}…`, '', true) : actBtn('check_updates', 'Check for updates')
@@ -4494,7 +4500,7 @@ function brainView() {
     let html = ''
     try { html = t.render() } catch (e) { html = `<p class="error">${esc(t.label)}: ${esc(String((e && e.message) || e))}</p>` }
     const recallTabs = brainOn() ? BRAIN_TABS.map(([id, l]) => `<button class="tab" role="tab" data-br-tab="${id}" aria-selected="false">${l}</button>`).join('') : ''
-    return `<div class="br">${`<header class="pj-head br-head"><div class="br-title"><h2>Knowledge</h2></div><div class="tabs" role="tablist">${ktabsHtml}${recallTabs}</div></header>`}<div class="pane pj-pane wide br-pane plug-act" data-keep-scroll data-ktab="${esc(t.tab)}">${html}</div></div>`
+    return `<div class="br">${`<header class="pj-head br-head"><div class="br-title">${Kn.title()}</div><div class="tabs" role="tablist">${ktabsHtml}${recallTabs}</div></header>`}<div class="pane pj-pane wide br-pane plug-act" data-keep-scroll data-ktab="${esc(t.tab)}">${html}</div></div>`
   }
   const d = S.br.data
   if (!d) return `<div class="skeleton" style="padding:20px">${'<i></i>'.repeat(6)}</div>`
@@ -4507,7 +4513,7 @@ function brainView() {
   const tabs = BRAIN_TABS.map(([id, l]) => `<button class="tab" role="tab" data-br-tab="${id}" aria-selected="${S.br.tab === id}">${l}${n[id] ? `<span class="n">${nf(n[id])}</span>` : ''}</button>`).join('')
   const sub = st.exists ? `${nf(st.documents)} sources · ${nf(st.chunks)} sections${st.embed_model ? ` · meaning by ${esc(st.embed_model)}` : ' · words only (no embedding server)'}` : 'Empty — it fills as your calls are synced'
   if (!BRAIN_TABS.some(([t]) => t === S.br.tab)) S.br.tab = 'sources'
-  const head = `<header class="pj-head br-head"><div class="br-title"><h2>Knowledge</h2><span class="tk-sub">${sub}</span><span class="grow"></span>${scopeSel}<button class="btn ghost" data-go="settings" title="Settings → Recall">Settings</button></div><div class="tabs" role="tablist">${ktabsHtml}${tabs}</div></header>`
+  const head = `<header class="pj-head br-head"><div class="br-title">${Kn.title()}<span class="tk-sub">${sub}</span><span class="grow"></span>${scopeSel}<button class="btn ghost" data-go="settings" title="Settings → Recall">Settings</button></div><div class="tabs" role="tablist">${ktabsHtml}${tabs}</div></header>`
   const body = S.br.tab === 'terms' ? brainTerms(tx) : S.br.tab === 'sources' ? brainSources() : S.br.tab === 'numbers' ? brainNumbers() : S.br.tab === 'coverage' ? brainCoverage(tx) : S.br.tab === 'graph' ? brainGraph() : S.br.tab === 'people' ? brainPeople() : brainTopics(tx)
   return `<div class="br">${head}<div class="pane pj-pane wide br-pane" data-keep-scroll>${body}</div></div>`
 }
@@ -5653,8 +5659,8 @@ function callProjects(c) {
   const all = (S.pj.data && S.pj.data.projects) || []
   const mine = new Set((c.projects || []).map((p) => p.id))
   const picker = S.pj.picker ? `<div class="menu pj-menu" role="menu">${all.filter((p) => p.group !== 'closed').map((p) => `<button class="menu-item" role="menuitemcheckbox" aria-checked="${mine.has(p.id)}" data-pj="member" data-id="${esc(p.id)}" data-call-name="${esc(c.name)}" data-how="${mine.has(p.id) ? 'exclude' : 'include'}">${mine.has(p.id) ? '✓ ' : ''}${projIcon(p, 14)} ${esc(p.name)}</button>`).join('') || '<div class="menu-item set-sub">No threads yet</div>'}<div class="menu-sep" role="separator"></div><button class="menu-item" role="menuitem" data-pj="from-call" data-call-name="${esc(c.name)}">New thread from this call…</button></div>` : ''
-  if (c.projects_error) return `<div class="pj-chips"><span class="set-sub">Projects: ${esc(c.projects_error)}</span></div>`
-  return `<div class="pj-chips">${chips}<span class="pj-add-wrap"><button class="pj-chip add" data-pj="picker" aria-haspopup="menu" aria-expanded="${S.pj.picker}">+ Thread</button>${picker}</span></div>${bar}`
+  if (c.projects_error) return `<div class="pj-chips"><span class="set-sub">Projects: ${esc(c.projects_error)}</span>${Kn.callChip(c)}</div>`
+  return `<div class="pj-chips">${chips}<span class="pj-add-wrap"><button class="pj-chip add" data-pj="picker" aria-haspopup="menu" aria-expanded="${S.pj.picker}">+ Thread</button>${picker}</span>${Kn.callChip(c)}</div>${bar}`
 }
 
 function projectSend(op, extra = {}) {
@@ -5991,6 +5997,7 @@ function paletteItems(target) {
   else add('Echo', st.in_call ? 'Record this call' : 'Record the next Teams call', () => press({ cmd: 'record' }), { keywords: 'start arm' })
   add('Echo', 'Record a memo', () => press({ cmd: 'record-memo' }), { keywords: 'memo dictate voice note myself idea', disabled: st.recording ? 'not while a recording is on' : null })
   add('Echo', 'Claude', () => claudePanel('claude-folder'), { keywords: 'terminal session ask echo folder' })
+  Kn.paletteActions(add)
   claudeSessionActions(add)
   add('Echo', 'Vocabulary', () => press({ panelShow: 'vocabulary' }), { keywords: 'terms names words dictionary transcription learned glossary' })
   add('Echo', 'Show or hide Inbox', () => press({ panelFlip: 'needs' }), { keywords: 'needs you notifications attention decide review', hint: NY_HINT })
@@ -6186,7 +6193,7 @@ function render() {
   patch($('#r-status'), statusbar())
   patch($('#r-right'), panel('right', eff))
   patch($('#r-bottom'), panel('bottom', eff))
-  patch($('#r-over'), `<div class="toasts" role="status" aria-live="polite">${toasts()}</div>` + (S.lightbox ? `<div class="lightbox" data-close="1"><img src="${esc(S.lightbox)}" alt="Shared screen"></div>` : ''))
+  patch($('#r-over'), `<div class="toasts" role="status" aria-live="polite">${toasts()}</div>` + (S.lightbox ? `<div class="lightbox" data-close="1"><img src="${esc(S.lightbox)}" alt="Shared screen"></div>` : '') + Kn.overlay())
   // The primary area in the activity's layout; switching layouts starts it afresh.
   const primary = $('#r-primary')
   const layout = (ACTIVITIES.find((a) => a.id === S.view) || ACTIVITIES[0]).layout
@@ -6204,6 +6211,9 @@ function render() {
     try { if (pact.after) pact.after(primary) } catch (e) { console.error(e) }
   } else if (S.view === 'settings') {
     patch(primary, `<main class="main">${noticesBar()}${settingsView()}</main>`)
+  } else if (S.view === 'brain' && Kn.active()) {
+    patch(primary, `<main class="main plug-act">${noticesBar()}${Kn.view()}</main>`)
+    Kn.after()
   } else if (S.view === 'brain') {
     patch(primary, `<main class="main">${noticesBar()}${brainView()}</main>`)
     // A plugin's Knowledge tab draws after the page is in (its graph).
@@ -6368,7 +6378,7 @@ document.addEventListener('click', (e) => {
   if (t.dataset.brPclosed !== undefined) { S.br.pClosed = !S.br.pClosed; return render() }
   if (t.dataset.convKeep !== undefined) { S.convAsk = null; return render() }
   if (t.dataset.conv || t.dataset.convGo !== undefined) {
-    const extra = t.dataset.termCall ? { call: t.dataset.termCall } : { profile: S.folderProfile || ai().default || undefined }
+    const extra = t.dataset.termCall ? { call: t.dataset.termCall } : t.dataset.termVault ? { vault: t.dataset.termVault } : { profile: S.folderProfile || ai().default || undefined }
     const key = t.dataset.termKey
     const v = t.dataset.convGo !== undefined ? t.dataset.convGo : t.dataset.conv === 'restart' ? '' : t.dataset.conv
     const e = Terms.get(key)
@@ -6380,7 +6390,7 @@ document.addEventListener('click', (e) => {
   if (t.dataset.termStart) {
     const sel = t.closest('.panel-body') && t.closest('.panel-body').querySelector('[data-term-profile]')
     if (sel) S.folderProfile = sel.value
-    return termStart(t.dataset.termStart, t.dataset.termKey, { call: t.dataset.termCall, profile: sel ? sel.value : undefined })
+    return termStart(t.dataset.termStart, t.dataset.termKey, { call: t.dataset.termCall, vault: t.dataset.termVault, profile: sel ? sel.value : undefined })
   }
   if (t.dataset.noteEdit !== undefined) {
     const i = Number(t.dataset.noteEdit), b = S.call && NoteDoc.parse(NotesSync.view(S.call.name).draft)[i]
@@ -6823,7 +6833,7 @@ window.addEventListener('hashchange', async () => {
   if (S.view === 'settings') { await loadSettings(); render() }
   if (S.view === 'projects') { await loadProjects(); await loadProject(); render() }
   if (S.view === 'tasks') { await loadTasks(); render() }
-  if (S.view === 'brain') { await loadBrain(); render() }
+  if (S.view === 'brain') { await loadBrain(); if (Kn.active()) { await Kn.load(); await Kn.resume() } render() }
   if (S.view === 'calls' && S.selected && !S.call) { await loadCall(S.selected); render() }
 })
 
@@ -6843,6 +6853,8 @@ async function tick() {
   if (ticks % 10 === 1 || (ticks % 3 === 0 && (NY.busy.size || Object.keys((NY.data || {}).busy || {}).length))) await loadAttention()
   if (ticks % (S.view === 'projects' ? 5 : 15) === 0) { await loadProjects(); if (S.view === 'projects') await loadProject() }
   if (S.view === 'tasks' && ticks % 15 === 0) { await loadTasks(); if (S.pj.node) await loadWork() }
+  if (S.view === 'brain' && Kn.active()) await Kn.tick()
+  Kn.feedQueued()
   // The selected call is fetched again whenever anything it shows changed (`/rev`: its files,
   // the live notes' and the minutes run's state, when the minutes come), whatever its status.
   if (S.selected) {
@@ -6858,7 +6870,7 @@ async function tick() {
   const busy = document.querySelector('input:focus:not(#ask), select:focus') || (sel && !sel.isCollapsed)
   if (fingerprint() !== lastPrint && (!busy || changed)) render()
 }
-const typingNotes = () => document.activeElement && (document.activeElement.id === 'my-notes' || document.activeElement.id === 'me-profile')
+const typingNotes = () => document.activeElement && (document.activeElement.id === 'my-notes' || document.activeElement.id === 'me-profile' || document.activeElement.id === 'kn-edit')
 
 window.echo = {
   async refresh() {
@@ -7027,7 +7039,7 @@ window.echo = {
   await loadPluginClients()
   if (S.view === 'projects') await loadProject()
   if (S.view === 'tasks') await loadTasks()
-  if (S.view === 'brain') await loadBrain()
+  if (S.view === 'brain') { await loadBrain(); if (Kn.active()) await Kn.load() }
   if (S.view === 'calls' && !S.selected && S.calls && S.calls.length) S.selected = S.calls[0].name, history.replaceState(null, '', `#call/${S.selected}/minutes`)
   if (S.selected) await loadCall(S.selected)
   if (S.view === 'calendar') await loadCalendar()

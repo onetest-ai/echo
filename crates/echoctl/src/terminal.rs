@@ -589,6 +589,10 @@ pub fn start_folder(key: &str, profile: Option<&str>, pick: Option<&str>, cols: 
     for d in crate::grants::session_read() {
         args.extend(["--add-dir".into(), d.display().to_string()]);
     }
+    // The user's knowledge vaults on this profile (spec K9-04).
+    for d in folder_vault_dirs(&p.id) {
+        args.extend(["--add-dir".into(), d.display().to_string()]);
+    }
     // What the window shows, before each prompt: a settings file of its own with only that hook (the
     // user's own settings apply as ever).
     let folder = paths::config_dir().join("minutes-run");
@@ -605,6 +609,121 @@ pub fn start_folder(key: &str, profile: Option<&str>, pick: Option<&str>, cols: 
     env.extend(extra_env);
     let cmd = ai::terminal_command(&p, &args, &paths::home(), &env, false)?;
     open_with(key, cmd, cols, rows, Some((p.id.clone(), Box::new(ready))), Some(forget))
+}
+
+/// The store key of the Ask session of a vault (on the vault's own profile).
+pub fn vault_store_key(v: &crate::knowledge::Vault) -> String {
+    format!("{}:vault:{}", v.profile, v.id)
+}
+
+/// A vault's skills and commands as a Claude Code plugin, for a profile that loads only its own settings (written into
+/// Echo's config folder; the vault's own files, untouched).
+fn vault_plugin(v: &crate::knowledge::Vault) -> Result<Option<std::path::PathBuf>> {
+    let dir = paths::config_dir().join("minutes-run").join("vault-plugins").join(&v.id);
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut any = false;
+    let copy_tree = |from: &std::path::Path, to: &std::path::Path| -> Result<()> {
+        for rel in crate::knowledge::detect::walk(from, &[], |_| true) {
+            let src = crate::knowledge::join(from, &rel);
+            if std::fs::metadata(&src).map(|m| m.len()).unwrap_or(0) > (1 << 20) {
+                continue;
+            }
+            let dst = crate::knowledge::join(to, &rel);
+            std::fs::create_dir_all(dst.parent().expect("a parent"))?;
+            std::fs::copy(&src, &dst)?;
+        }
+        Ok(())
+    };
+    for s in v.detected.skills.iter().filter(|s| s.kind != "agents") {
+        let src = crate::knowledge::join(&v.root, &s.path);
+        if !src.is_file() {
+            continue;
+        }
+        if s.kind == "skill" {
+            let folder = src.parent().expect("a skill's folder");
+            copy_tree(folder, &dir.join("skills").join(folder.file_name().unwrap_or_default()))?;
+        } else {
+            std::fs::create_dir_all(dir.join("commands"))?;
+            std::fs::copy(&src, dir.join("commands").join(src.file_name().unwrap_or_default()))?;
+        }
+        any = true;
+    }
+    if !any {
+        return Ok(None);
+    }
+    let manifest = serde_json::json!({"name": v.id, "version": "1.0.0", "description": format!("The skills of the knowledge vault {}", v.name)});
+    std::fs::create_dir_all(dir.join(".claude-plugin"))?;
+    paths::write_atomic(&dir.join(".claude-plugin").join("plugin.json"), serde_json::to_string_pretty(&manifest)?.as_bytes())?;
+    Ok(Some(dir))
+}
+
+/// What a vault's Ask session adds for profile `p`: on a managed profile (its own settings only) the vault's skills as a
+/// plugin and a pointer to its rules — never the `project` setting source, which would let the vault's settings
+/// override the profile's routing. On Claude Code as configured, nothing: it loads the vault's skills and rules itself.
+pub fn vault_args(v: &crate::knowledge::Vault, p: &ai::Profile) -> Result<Vec<String>> {
+    if !p.kind.managed() {
+        return Ok(vec![]);
+    }
+    let mut args = vec![];
+    if let Some(d) = vault_plugin(v)? {
+        args.extend(["--plugin-dir".to_string(), d.display().to_string()]);
+    }
+    let rules: Vec<&str> = v.detected.schema.iter().map(String::as_str).collect();
+    let rules = if rules.is_empty() { "the vault's README.md".to_string() } else { rules.join(" and ") };
+    args.extend(["--append-system-prompt".to_string(), format!("You are working in the knowledge vault “{}” ({}). Its rules for agents are in {rules}: read them before you change anything. Its skills are named /{}:<skill>.", v.name, v.root.display(), v.id)]);
+    Ok(args)
+}
+
+/// Vaults outside the data folder that the Echo-folder session on `profile` may read (a vault inside the data folder is
+/// readable there like the rest of it).
+pub fn folder_vault_dirs(profile: &str) -> Vec<std::path::PathBuf> {
+    let home = dunce::canonicalize(paths::home()).unwrap_or_else(|_| paths::home());
+    crate::knowledge::list().unwrap_or_default().into_iter().filter(|v| v.profile == profile && crate::knowledge::available(v)).filter_map(|v| dunce::canonicalize(&v.root).ok()).filter(|r| !r.starts_with(&home)).collect()
+}
+
+/// Claude in a knowledge vault's folder, on the vault's own profile (spec K9): the vault's skills and rules, a session
+/// of its own that continues in a terminal.
+pub fn start_vault(key: &str, vault: &str, pick: Option<&str>, cols: u16, rows: u16) -> Result<u64> {
+    running_already(key)?;
+    if stopping(key) {
+        bail!("the previous session is still stopping — try again in a moment");
+    }
+    let v = crate::knowledge::get(vault)?;
+    if !crate::knowledge::available(&v) {
+        bail!("the vault's folder isn't there: {}", v.root.display());
+    }
+    let ready = ai::ready(&v.profile)?;
+    let p = ready.profile().clone();
+    let store = vault_store_key(&v);
+    choose_session(&store, pick)?;
+    let (mut args, _, forget) = session_args(&store);
+    if let Some(m) = (p.kind == ai::Kind::Local).then(|| p.notes_model()).flatten() {
+        args.extend(["--model".into(), m]);
+    }
+    if crate::config::Config::load().is_ok_and(|c| c.folder_skip_permissions) {
+        args.push("--dangerously-skip-permissions".into());
+    }
+    args.extend(vault_args(&v, &p)?);
+    let cmd = ai::terminal_command(&p, &args, &v.root, &[], false)?;
+    open_with(key, cmd, cols, rows, Some((p.id.clone(), Box::new(ready))), Some(forget))
+}
+
+/// The command to continue a vault's session in a terminal, on *Claude Code (as configured)*:
+/// `cd <vault> && claude --resume <id>`, the folder quoted for the shell. `None` on a managed profile.
+pub fn vault_resume_command(vault: &str) -> Option<String> {
+    let v = crate::knowledge::get(vault).ok()?;
+    // A managed profile's routing (its config folder, base URL, keys) can't be written out as a line to copy without
+    // its keys: its sessions continue in Echo's panel.
+    if ai::Settings::load().ok()?.get(&v.profile).ok()?.kind != ai::Kind::System {
+        return None;
+    }
+    let id = session_ids().get(&vault_store_key(&v)).cloned()?;
+    let root = v.root.display().to_string();
+    Some(if cfg!(windows) {
+        format!("cd /d \"{root}\" && claude --resume {id}")
+    } else {
+        format!("cd '{}' && claude --resume {id}", root.replace('\'', "'\\''"))
+    })
 }
 
 /// The guarded session on the call in `dir`, on the call's own profile. Only one at a time: another
@@ -740,6 +859,61 @@ fn claude_new_enough() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn profile(id: &str, kind: &str) -> ai::Profile {
+        serde_json::from_value(serde_json::json!({"id": id, "name": id, "kind": kind})).unwrap()
+    }
+
+    #[test]
+    fn a_vault_session_hands_its_skills_to_a_managed_profile() {
+        let (_env, root) = crate::paths::testenv::folders("terminal-vault");
+        let t = crate::knowledge::fixture::twin(&root.join("twin"));
+        let v = crate::knowledge::add(&t, crate::knowledge::AddOpts { name: Some("My twin".into()), ..Default::default() }).unwrap();
+        assert_eq!(vault_store_key(&v), format!("{}:vault:my-twin", v.profile));
+        let managed = vault_args(&v, &profile("work", "claude")).unwrap();
+        let at = managed.iter().position(|a| a == "--plugin-dir").expect("the vault's skills as a plugin");
+        let dir = std::path::PathBuf::from(&managed[at + 1]);
+        assert!(dir.join(".claude-plugin/plugin.json").is_file());
+        assert!(dir.join("skills/s/SKILL.md").is_file(), "the vault's skill");
+        assert!(dir.join("commands/c.md").is_file(), "and its command");
+        let sp = managed.iter().position(|a| a == "--append-system-prompt").expect("the rules pointer");
+        assert!(managed[sp + 1].contains("AGENTS.md") && managed[sp + 1].contains("My twin"));
+        assert!(!managed.iter().any(|a| a.contains("project")), "never the project setting source");
+        assert!(vault_args(&v, &profile("system", "system")).unwrap().is_empty(), "as configured, Claude Code loads the vault itself");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_vault_session_continues_in_a_terminal_only_as_configured() {
+        let (_env, root) = crate::paths::testenv::folders("terminal-vault-resume");
+        let t = crate::knowledge::fixture::twin(&root.join("tw$x;y`z"));
+        let v = crate::knowledge::add(&t, crate::knowledge::AddOpts { name: Some("My twin".into()), profile: Some("system".into()), ..Default::default() }).unwrap();
+        let (args, ..) = session_args(&vault_store_key(&v));
+        let line = vault_resume_command(&v.id).expect("a line for Claude Code as configured");
+        assert_eq!(line, format!("cd '{}' && claude --resume {}", v.root.display(), args[1]), "the folder quoted whole");
+        let mut settings = ai::Settings::load().unwrap();
+        settings.profiles.push(profile("client-x", "claude"));
+        settings.save().unwrap();
+        let other = crate::knowledge::fixture::twin(&root.join("other"));
+        let o = crate::knowledge::add(&other, crate::knowledge::AddOpts { name: Some("Client".into()), profile: Some("client-x".into()), ..Default::default() }).unwrap();
+        let _ = session_args(&vault_store_key(&o));
+        assert_eq!(vault_resume_command(&o.id), None, "a managed profile's routing can't be copied as a line without its keys");
+    }
+
+    #[test]
+    fn the_folder_session_reads_only_vaults_of_its_profile_outside_the_data_folder() {
+        let (_env, root) = crate::paths::testenv::folders("terminal-folder-vaults");
+        let mine = crate::knowledge::fixture::twin(&root.join("mine"));
+        let theirs = crate::knowledge::fixture::twin(&root.join("theirs"));
+        let inside = crate::knowledge::fixture::twin(&crate::paths::home().join("knowledge/inside"));
+        let add = |p: &std::path::Path, name: &str, profile: &str| crate::knowledge::add(p, crate::knowledge::AddOpts { name: Some(name.into()), profile: Some(profile.into()), ..Default::default() }).unwrap();
+        add(&mine, "Mine", "system");
+        add(&theirs, "Theirs", "client-x");
+        add(&inside, "Inside", "system");
+        let dirs = folder_vault_dirs("system");
+        assert_eq!(dirs, vec![dunce::canonicalize(&mine).unwrap()]);
+        assert!(folder_vault_dirs("nobody").is_empty());
+    }
 
     #[test]
     fn a_panel_starts_a_new_conversation_and_goes_back_to_an_old_one() {

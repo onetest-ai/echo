@@ -1,0 +1,240 @@
+# Knowledge vaults — design
+
+A **vault** is a folder of Markdown the user owns: an Obsidian vault, a git repository, a shared drive's folder, or
+one Echo starts from its twin starter. Echo connects several, shows them in the Knowledge activity (Pages, Graph,
+Settings), saves each call's minutes into them as a note with a row in the vault's index, and starts Claude Code in a
+vault to ask it things. Echo never changes a vault on connect; it writes only what the user saves, and commits only
+when the vault's switch says so.
+
+Related: the spec and its acceptance walkthrough are `tasks/knowledge/spec.md` (requirements K1–K9, decisions
+D1–D19); the mockups are `tasks/knowledge/mockups/knowledge.html`. Recall (the other half of the Knowledge activity)
+is `recall.md`. The window rules are `.ai-run/guides/window/window-ui.md`; untrusted text is
+`.ai-run/guides/security/untrusted-text.md`. Manual cases are `tests/12-knowledge.md`.
+
+## Modules
+
+| File (`crates/echoctl/src/knowledge/`) | Role |
+|---|---|
+| `mod.rs` | `Vault`, `MinutesRule`, `GitRule`, the registry (`list`, `get`, `add`, `set`, `remove`, `reread`), `Vault::path` (detected unless overridden), refusals, `import_plugin_vaults` |
+| `detect.rs` | What a folder is made of (`detect`), the walk (`walk`, `WALK_MAX` 60 000, no symlinks followed), `skills` |
+| `fm.rs` | Echo's own frontmatter reader (`split`, `parse` → `Prop::{Text, List, Raw}`); no YAML crate |
+| `scan.rs` | Echo's index of a vault (`index`, memory + `index.json`, re-read where size or mtime changed), `rev`, `search` |
+| `links.rs` | Link resolution as Obsidian does it (`Resolver`), `edges`, `backlinks`, `graph` (nodes, edges, hubs) |
+| `checks.rs` | Read-only checks (`run`) and the one rule for which pages the index should list (`in_scope`) |
+| `catalog.rs` | Writing one row into the index's right table (`insert`, `row`, `cell`) |
+| `page.rs` | Reading a page for the window (`read`: safe HTML, outline, backlinks, local graph), `save`, `create`, history, `restore`, index rows, assets, `inside` (path checks) |
+| `export.rs` | Minutes → a note: the rule (`targets`), `save_by_rules`, `minutes_written`, on demand (`save`, `preview`), the call's record (`<call>/knowledge.json`) |
+| `git.rs` | The only git calls (`info`, `init`, `first_commit`, `dirty`, `commit_paths`): literal pathspecs, both pipes drained, 20 s then SIGTERM |
+| `starter.rs` | The twin starter (23 files compiled in), `create`, the `/twin` skill in a vault and for all sessions |
+| `api.rs` | `/api/kn/...` routes, the IPC actions (`kn_*`), the folder picker, background jobs |
+| `ui/knowledge.js`, `ui/knowledge.css` | The window's Knowledge: pure blocks tested by `ui/knowledge.test.mjs`, then the `Kn` module |
+
+Hooks elsewhere: `notes.rs::notify_outcome` and `watch.rs::notify_notes_ready` call `export::minutes_written` (both
+writers of minutes, D16); `attention.rs` shows a failed save in the Inbox; `terminal.rs` starts Ask sessions
+(`start_vault`, `vault_args`); `minutes.rs::page_html` is the safe Markdown writer for pages; `links.rs` (the top
+module) lets an `echo://call/` link survive a retitle by its stamp.
+
+## How it works
+
+### A vault and its paths
+`vaults.json` holds the list per data folder (`<home>/.echo/knowledge/`), changed under `vaults.lock`, re-read first,
+written atomically. Each entry keeps what detection found (`detected`) and the user's changes (`overrides`, keys
+`pages`, `index`, `notes`, `naming`, `templates`, `sources`); `Vault::path(key)` returns the override, else the
+detected value. *Read again* re-detects and keeps the overrides. A vault's id is the slug of its name.
+
+Refused as a vault: the data folder, a folder that holds it, the home folder or a disk root, a folder already
+connected, and a folder inside or around a connected one. A headless Claude run can't add, change or save into a
+vault (`refuse_headless`).
+
+### What Echo finds (`detect`)
+In this order, each rule first-match:
+- **Sources** (never pages): `raw_inbox`, `inbox`, `sources` or `raw` at the root; `.staging` too.
+- **Pages root**: the shallowest folder (root, then two levels) with `.obsidian/`; else `knowledge`, `wiki`, `pages`,
+  `docs` or `vault` when it holds at least 60 % of the `.md` files; else the root.
+- **Templates**: Obsidian's `templates.json` folder, else `templates` / `Templates` in the pages root.
+- **Index**: `CATALOG.md`, `INDEX.md`, `index.md`, `Home.md`, `README.md` in the pages root, else the root's
+  `README.md`.
+- **Notes**: `notes`, `meetings`, `Meetings`, `Notes` in the pages root. **Naming** is `{date} {title}.md` when at
+  least half its files start `YYYY-MM-DD ` (and more than with a dash), else `{date}-{slug}.md`.
+- **Taxonomies**: files in the pages root named `*TAXONOMY*` or `tags.md`. **Rules for agents**: `AGENTS.md` /
+  `CLAUDE.md` at the root and in the pages root. **Skills**: `.claude/skills/*/SKILL.md`, `.claude/commands/*.md`,
+  and `.agents/skills/*` (for other agents, listed apart). **Ledgers**: root `*.json` named like log/state/sync.
+  **Log**: `log.md`. **Obsidian**: `useMarkdownLinks`, `newLinkFormat`, `attachmentFolderPath`, `strictLineBreaks`.
+- **Machinery** is never a page: dot-folders, sources, templates, `node_modules`, anything outside the pages root.
+
+### Echo's index of a vault (`scan`)
+One `Page` per `.md` under the pages root: title (frontmatter `title`, else the first H1, else the file name),
+properties, tags (frontmatter and inline `#tag` outside code), headings, links (wikilinks, embeds, Markdown links),
+size, mtime. Files over 2 MB are read in part. The index is kept in memory and in `<home>/.echo/knowledge/<id>/
+index.json`; each read stats the files (`rev`) and re-reads only the changed ones. The window polls `rev` every 2 s
+while Knowledge shows, so a change made in Obsidian appears within a tick.
+
+**Links** resolve as Obsidian does: a wikilink with a folder by its path, else by its name (the page in the linking
+page's folder first); a Markdown link relative to the page, then from the pages root, percent-decoded, then by name
+(`ING%20Bank.md`). A Markdown link to an in-vault
+file that isn't a page, or to anything outside the vault, is not broken.
+
+### Reading and editing
+`page::read` renders the body with `minutes::page_html`: the minutes' writer (raw HTML shown as text), every link and
+image decided by Echo — another page (`#kn:`), a missing one to make (`#kn-new:`), `echo://`, https; images only from
+inside the vault (`/api/kn/<id>/asset`). In an Obsidian vault a single newline is a line break unless its *Strict
+line breaks* is on; elsewhere CommonMark. Backlink and search lines are shown as plain text (`plain_line`). Links carry
+the path percent-encoded (a name's own `%` survives); a page is linked from outside as `echo://page/<vault>/<path>`
+(⋯ → *Copy echo:// link*), which opens it in the window — Recall's MCP never reads a page through it. A page that
+isn't UTF-8 is shown but not edited. Paths are checked against the vault's real folder up to the nearest folder that
+exists, so a link above a folder still to be made can't lead out.
+
+The editor edits the raw file. *Save* writes only over the text it opened (`base`, a sha256); a change on disk since
+then stops the save with *Compare* (a line diff), *Take theirs* and *Keep mine*. Unsaved text is kept in the window's
+local storage per page and base, so a reload or a page change keeps it while the file is unchanged. Line endings are
+kept. History is `git log` of the file; *Restore* writes an old version back as a new commit — history is never
+rewritten.
+
+### Minutes into a vault (`export`)
+A vault's **rule** (`minutes`): mode `auto` / `ask` / `off`, scope (all calls; calls, not memos; some clients and
+threads), the meeting tag, and whether the transcript and chat go in (off). When minutes are written — by Echo's run
+or the user's own `/echo:process-call` session — `minutes_written` saves the call into every vault whose rule takes it
+**and** whose AI profile is the call's (D7), on a thread of its own, and the notification names the vaults.
+
+The note is written by Echo, no model (D3): Echo's frontmatter (`title`, `date`, `meeting`, `tags`, `participants`,
+`duration`, `client` as a link when the client has a page, `threads`, `source: echo://call/…`, `origin: echo`,
+`echo_call`, `summary`) and the minutes' body. Its file name follows the vault's naming; a row goes into the index's
+table for notes (by heading, then the table with most links into the notes folder), in date order, and the index's
+*Last update* is refreshed. With a `log.md`, one line is appended (D18).
+
+Saves into one vault go one at a time: `save.lock` in Echo's folder for the vault is held from reading the call's
+record to writing it (the note, the index row, the log line), across the window, the CLI and Echo's threads — else
+two saves read the same index and one row is lost. git is asked which files are dirty *before* the note is compared,
+so nothing slow runs between that check and the write. A vault whose folder is gone stays a target of its rule: its
+save is tried, fails, and the failure shows. The Save sheet's preview and Settings → Meeting minutes → *Preview*
+(the newest call on the vault's profile, `export::sample`) use the save's own decisions — the notes folder, the free
+name (`-2`), the row as `catalog::insert` would write it — so what is shown is what is written.
+
+`<call>/knowledge.json` records each save (vault, path, sha256, how, index, commit) and the call's own choice. When
+the minutes are written again, a note is replaced only if it is byte-identical to what Echo wrote (D11); otherwise
+the chip says *not updated*. Notes saved by hand get an *Update in …* offer instead of an automatic update (D17). A
+failed save shows on the chip and in the Inbox with *Save again*.
+
+### git
+Every call is in `git.rs`, with `GIT_LITERAL_PATHSPECS=1` (a page named `[x].md` is never a pattern that takes in
+the user's `x.md`), both output pipes read as they come (a 100 KB file in History would otherwise stall git), and on
+the 20 s timeout SIGTERM first, so git removes its `index.lock`, then SIGKILL. Before writing, Echo records which of its paths are already changed; it commits only those
+that were clean, `git add -- <new>` then `git commit --only -m <message> -- <paths>`, with the user's own identity.
+Never push, pull, fetch, checkout, stash, reset or `--no-verify`. A connected vault commits nothing until its switch
+is on (D6); a vault Echo creates starts with one commit and commits on (off when it has no git). A file the user had changed is saved but not
+committed, and the message says why — once per vault and reason. A vault made without git (or without git
+installed) has commits off. Restore refuses a page with uncommitted changes (they aren't in the history yet).
+
+### Checks
+Deterministic and read-only, recomputed after each scan: pages not in the index, broken links, isolated pages, pages
+without properties, tags not in the taxonomy, the meeting tag missing from the taxonomy. `checks::in_scope` is the one
+rule for which pages count: not the index, a taxonomy or a folder's `README.md` — the tree's *Not in index* filter
+and the page rail use it too. The one fix is *Add N rows…*: one write of the index, one commit.
+
+### Graph
+Built in the window from `/api/kn/<id>/graph` and drawn live on a canvas by `graphCanvas` in `knowledge.js`, the
+mockup's engine (`future/mockups/assets/graph.js`) brought in, not the Brain's sigma `GraphView`. Sigma lays out once
+and freezes, but a vault's graph is something you handle. The forces are d3-force's, in the `kn-force` block
+(`knForceSim`, node-tested): many-body repulsion (exact under 600 pages, Barnes–Hut above), link springs, a pull to
+the centre (1.6× for a page with no links, so they ring the rest closely), velocity decay. It cools until it settles,
+then nothing is drawn until something changes.
+- **Moving around.** Drag a page and its links pull its neighbours along, held warm until let go; drag the background
+  to pan, scroll to zoom, *+ / − / fit* buttons. Click selects (the card), double click opens the page. Hover lights a
+  page's neighbours and links and dims the rest; *Find* rings the matches (count in the box), Enter flies to the most
+  linked one.
+- **Labels.** The hovered or selected page always, in full; neighbours and matches next; then the biggest pages, and
+  all of them zoomed in or in a graph of 80 or fewer. None is drawn over another (`knLabelPlan`).
+- **What it shows.** Index pages (hubs) are hidden by default so the real structure shows; isolated pages and tags as
+  nodes are switches (the isolated count is of what is shown); a local graph to depth 1–3. A folder in the legend
+  hides its pages. Colour by folder or by the top 9 tags, the rest grey. Over 5 000 pages it starts as the open page's
+  local graph (else the index's), with a line saying why; *Off* draws them all.
+- **Kept, not redone.** One view per vault, across renders and tabs. A filter keeps where pages were (one brought back
+  returns there; a new one starts beside what it links to) and moves the rest there in view. A change on disk, picked
+  up by the 2 s poll even when the Graph was opened without Pages, only nudges the layout and leaves the camera where
+  the user put it. Positions last for the window's life, not across restarts.
+- **The page's local graph** in the rail is the same engine, labels on hover, a click opens the page.
+
+### The starter and `/twin`
+`starter::create` writes the 23 files of `crates/echoctl/templates/knowledge/twin/` (source:
+`tasks/knowledge/starter-vault/`) into a new folder (via a temporary folder, then a rename), fills `{{vault.name}}`,
+`{{vault.owner}}` (Settings → About me) and `{{vault.date}}`, and makes the first commit when git is there. Skills:
+`twin` (find, answer, remember) and `process-inbox` (sources → pages), no Python (D10). *Add the twin skill* writes
+only `.claude/skills/twin/SKILL.md` into a vault that has none. *Use /twin from any Claude Code session* writes
+`~/.claude/skills/<name>/SKILL.md` — the vault's id, with `-twin` added unless it has it — with absolute paths, marked
+as Echo's; *Remove* deletes only that folder (D19).
+
+### Ask in the vault
+The existing Claude panel, kind `claude-vault`, one session per vault (store key `<profile>:vault:<id>`), resumable
+in a terminal. On *Claude Code (as configured)* the vault's own skills and `CLAUDE.md` load by themselves. On a
+managed profile Echo copies the vault's skills and commands into a plugin under `<config>/minutes-run/vault-plugins/
+<id>` and points the session at the vault's rules with `--append-system-prompt` — never by adding the `project`
+setting source (D8). The Echo-folder session gets `--add-dir` for the vaults on its profile. *Continue in Terminal*
+(`cd <vault> && claude --resume <id>`, quoted for the shell) is offered on *Claude Code (as configured)* only: a
+managed profile's routing can't be written out as a line to copy without its keys. Text Echo types into a session (a
+path, a skill's name) has its control characters removed.
+
+### The window
+Routes `#kn/<vault>/<pages|graph|settings>[/<path>]`; `#brain/...` stays Recall. The switcher lists vaults, then
+Recall when on, then plugins' Knowledge tabs. Actions are IPC `kn_*`; long ones run as jobs the page polls
+(`/api/kn/jobs`). Rules learned the hard way:
+- **No `confirm()`, `alert()` or `prompt()`**: the webview (wry) shows none and `confirm()` returns false, so the
+  action silently never runs. Ask in the page (`askFirst`).
+- **Attributes the app's global click handler reads** (`data-tab`, `data-call`, …) can't be used for Knowledge's own
+  buttons: the app would act on the same click. Knowledge uses `data-kn-*`.
+- **No two functions with one name** in `knowledge.js`: the later declaration wins silently.
+The node test guards all three. Success messages clear after 4 s; errors and "not committed" wait for OK.
+
+## Decisions
+
+| Decision | Why |
+|---|---|
+| Vaults are part of Echo, not the Obsidian plugin (D1, 2026-11-05); the plugin's *Notes* tab stays | Minutes, the call page and recording are core; one Knowledge for everyone |
+| Nothing written on connect; Echo's index lives in Echo's data folder (D4) | A vault works as it is |
+| The list is per data folder (D5) | A dev data folder gets its own vaults |
+| Connected vaults: write only, commits off by default; created vaults commit (D6) | The owner's twin sat on a feature branch with 28 uncommitted files |
+| Automatic saves only on the vault's AI profile (D7); across profiles only on demand, after a warning naming both | Strict profile routing |
+| The note is Echo's minutes as they are, no model (D3); minutes only, transcript and chat opt-in (D12) | Cheap, the same every time; others' words stay in Echo |
+| Re-written minutes replace a note only if it is unchanged (D11) | The user's edits win |
+| Checks read-only, one fix (D13); no rename, move or delete (D14) | No risk, no broken links |
+| Frontmatter read by Echo's own small reader; written only for Echo's notes (D15). YAML block scalars (`|`, `>`) read as text | No new dependency; nothing reformatted |
+| Reader and editor follow the vault's Obsidian settings (link style, strict line breaks) | The page looks as it does in Obsidian |
+| Pages, tree, rail and checks share `checks::in_scope` | One rule in one place: they disagreed before |
+| The Save sheet shows the index row as written (K3-05); *Add rows* shows description · date, the row on hover | Exactness where one row is being decided; readability for many |
+| The Knowledge graph has its own canvas force layout; Recall keeps sigma | A vault's graph is handled by hand (pages dragged, the layout reacting), and it stays at or under 5 000 pages; sigma lays out once and freezes, which suits the Brain's millions of sections |
+
+## Files and state
+
+| Path | What | Written by |
+|---|---|---|
+| `<home>/.echo/knowledge/vaults.json` (+ `vaults.lock`) | The vault list | Settings, Knowledge, `echoctl knowledge` |
+| `<home>/.echo/knowledge/<id>/index.json` | Echo's index of the vault | `scan::index` |
+| `<home>/.echo/knowledge/<id>/save.lock` | One save at a time into the vault | `export` |
+| `<call>/knowledge.json` (+ `.knowledge.lock`) | Where the call's minutes were saved, and the call's choice | `export` (never a Claude run) |
+| `<config>/minutes-run/vault-plugins/<id>/` | The vault's skills as a plugin, for managed profiles | `terminal::vault_plugin` |
+| `~/.claude/skills/<name>/SKILL.md` | `/twin` for all sessions, on request | `starter::global_twin` |
+| Window local storage `echo.kn.*` | Last vault, dismissed welcome card, unsaved drafts | the page (per viewer) |
+
+The spec's `<id>/state.json` was not needed: what it would hold is per viewer and lives in local storage.
+
+## Measured
+
+Release build, a made-up vault of 5 000 pages (`scan::tests::five_thousand_pages_scan_in_time`, ignored by default):
+cold scan 0.98 s, from the cache 48 ms, edges 4 ms. The graph's layout step (node, Barnes–Hut): 1.2 ms at 1 000 pages,
+4.7 ms at 3 000, 8.2 ms at 5 000. Drawing 10 000 links and 5 000 dots, measured in the dev browser: one stroke per
+link and one fill per dot are 4 and 2 times faster than one path of all of them, so each is drawn on its own. A `rev` poll is a stat walk only. The owner's twin (185 pages,
+`CATALOG.md` 101 KB, 93 notes, 13 skills): detection equals a hand probe; connecting it changed no file (`git status`
+identical); checks found 5 pages not in the index and 10 broken links, all real.
+
+## Known gaps
+
+- Rename, move and delete of pages are left to Obsidian and Finder (D14).
+- Minutes are routed through a vault's own skill only later (D3); today the note is Echo's minutes as written.
+- The rail (links, outline, history) is hidden under 1100 px wide.
+- Retiring the Obsidian plugin's vault part is a separate change in `onetest-ai/echo-plugins`; until then *Connect
+  from the Obsidian plugin* imports its vaults.
+- The minutes preview in the dev browser pane is blank (the pane blocks iframes); the app's webview shows it.
+- *Continue in Terminal* is not offered on managed profiles (K9-03's managed half): their sessions continue in
+  Echo's panel.
+- X-S1's "scans pause during transcription" has nothing to pause: Echo scans a vault only when the window asks
+  (a stat walk every 2 s while Knowledge shows, a re-read of changed files on a request).
+- The notification names the vaults before their save runs; a failure then shows on the chip and in the Inbox.

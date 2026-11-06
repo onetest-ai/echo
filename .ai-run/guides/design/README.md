@@ -13,6 +13,7 @@ when a change touches how an area works, not just what a rule says. Where a note
 | AI profiles, sign-in, live notes, minutes runs, updates | `ai-and-minutes.md` | `../integrations/claude-code-runs.md`, `../security/untrusted-text.md` | `docs/live-notes-design.md` |
 | Threads, clients, work ledger, people, tasks | `threads.md` | `../development/threads-and-ledger.md` | `docs/projects-design.md` |
 | Recall (the Brain) | `recall.md` | `../data/recall-store.md` | `docs/brain-design.md` |
+| Knowledge vaults: connect, the twin starter, minutes into a vault, pages, graph, Ask | `knowledge.md` | `../window/window-ui.md`, `../security/untrusted-text.md` | `tasks/knowledge/spec.md` |
 | Echo plugins | `plugins.md` | `../plugins/echo-plugins.md`, `../plugins/plugin-authoring.md` | `docs/plugins-design.md`, `docs/obsidian-design.md` |
 | Claude Code plugin, sessions, `echoctl m365` | `claude-code.md` | `../plugins/claude-code-plugin.md` | `docs/install.md` (users) |
 

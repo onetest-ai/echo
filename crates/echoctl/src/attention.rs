@@ -75,6 +75,22 @@ pub fn collect() -> Collected {
             continue;
         }
         let stamp = crate::calls::stamp_of(&d);
+        // Minutes that couldn't be saved into a vault (its folder gone, a disk error): Save again.
+        match crate::knowledge::export::failure(&d) {
+            Some((vault, vname, error)) => out.push(item(
+                format!("knowledge:{stamp}"),
+                "knowledge",
+                "echo",
+                format!("Minutes not saved to {vname}: {}", call_title(&d)),
+                error.chars().take(200).collect(),
+                false,
+                vec![act("Save again", true, json!({"cmd": "kn_save_minutes", "call": name, "vault": vault}))],
+                Some(format!("call/{name}/minutes")),
+            )),
+            None => {
+                c.quiet.insert(format!("knowledge:{stamp}"));
+            }
+        }
         // The state as the user sees it (`notes::status`): a run whose owner died is failed there.
         let Some(run) = crate::notes::status(&d) else {
             c.quiet.insert(format!("minutes-wait:{stamp}"));

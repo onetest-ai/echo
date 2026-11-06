@@ -17,6 +17,7 @@ what they can't: permissions, real audio, Microsoft 365, Claude Code, installs a
 | [09-lifecycle-updates.md](09-lifecycle-updates.md) | Start at login, quit, single instance, updates |
 | [10-windows.md](10-windows.md) | Windows build |
 | [11-privacy.md](11-privacy.md) | Opt-in, local data, nothing kept that shouldn't be |
+| [12-knowledge.md](12-knowledge.md) | Knowledge vaults: connect, start a vault, minutes into a vault, editing, Ask, the graph |
 
 ## Format
 

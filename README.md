@@ -141,6 +141,12 @@ name, or, for the built-in profile, `default` to use whatever your Claude Code i
 call, Echo's window shows the transcript as it happens, and the Notes tab (or menu → **Add a
 note…**) takes your own notes.
 
+**Keep them with your notes.** Knowledge → **Connect a folder…** adds a folder of Markdown you already keep (an
+Obsidian vault, a git repository), or **Start a new vault…** makes one from Echo's starter, with a `/twin` skill to
+ask it. Echo saves each call's minutes there as a note with a row in the vault's index, by itself or when you ask (a
+call's ⋯ → **Save to Knowledge…**). Connecting changes no file; in a folder you connected, Echo writes only what it
+saves and leaves committing to you.
+
 <details>
 <summary>Install the plugin by hand, or for one project</summary>
 

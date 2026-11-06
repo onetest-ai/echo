@@ -32,3 +32,5 @@ docs/superpowers/tasks/*/**/task-*-brief.md
 docs/superpowers/tasks/*/**/task-*-report.md
 docs/superpowers/qa-tasks/*/**/*.local.*
 .claude/settings.local.json
+.idea
+tasks

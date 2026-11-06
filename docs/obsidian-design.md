@@ -1,5 +1,10 @@
 # Obsidian vaults — plan (draft, 2026-11-03)
 
+> **Superseded for vaults on 2026-11-05.** Vaults are part of Echo (Knowledge → the vault: Pages, Graph, Settings),
+> including vaults Echo starts from its twin starter — see `.ai-run/guides/design/knowledge.md`. The plugin's *Notes*
+> tab stays; retiring its vault browsing is a change in `onetest-ai/echo-plugins`. "The vault and the Brain stay apart"
+> still holds. The rest of this page is kept for its reasoning.
+
 An Echo plugin (v4: it carries its own code; Echo adds only primitives) in `onetest-ai/echo-plugins/plugins/obsidian`.
 Screens: the Echo Workbench canvas, row "Plugins — Obsidian".
 

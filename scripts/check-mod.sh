@@ -21,6 +21,8 @@ node crates/echoctl/ui/palette.test.mjs
 node crates/echoctl/ui/projects.test.mjs
 # The org chart's layout: governance band, workstream columns, their leads (OrgLayout).
 node crates/echoctl/ui/org-chart.test.mjs
+# Knowledge in the window: routes, the switcher, a call's chip, the tree, the graph's filters, unsaved edits.
+node crates/echoctl/ui/knowledge.test.mjs
 types="plugin/.claude-plugin/types/claude-code/index.d.ts"
 if [[ ! -f "$types" ]]; then
   types=$(ls -t /private/tmp/claude-*/bundled-skills/*/*/plugin-authoring/types/claude-code.d.ts 2>/dev/null | head -1 || true)

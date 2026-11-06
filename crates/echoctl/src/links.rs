@@ -19,6 +19,8 @@ pub enum Link {
     Mail(String),
     /// A work item of a thread's ledger: a story, a task, a decision, a risk, a question (`T043`).
     Task { thread: String, id: String },
+    /// A page of a Knowledge vault (`echo://page/<vault>/<path in the vault>`): it opens in the window only.
+    Page { vault: String, path: String },
 }
 
 /// Percent-decoding of a link's parts (UTF-8).
@@ -68,6 +70,10 @@ impl Link {
                 Link::Task { thread: clean(thread, false)?, id: ok.then(|| item.to_string())? }
             }
             "mail" | "post" => Link::Mail(clean(&id, true).filter(|x| x.starts_with("mail/") || x.starts_with("channel/"))?),
+            "page" => {
+                let (vault, page) = id.split_once('/')?;
+                Link::Page { vault: clean(vault, false)?, path: clean(page, true)? }
+            }
             _ => return None,
         })
     }
@@ -79,7 +85,15 @@ fn clock(s: u64) -> String {
 
 /// The call folder a link names (as `calls::resolve_call` finds it: a renamed folder by its stamp).
 fn call_dir(name: &str) -> Result<PathBuf> {
-    crate::calls::resolve_call(name).map_err(|_| anyhow!("no call {name:?}"))
+    crate::calls::resolve_call(name).or_else(|e| {
+        // A link written before the call was retitled (its folder renamed): the stamp at the start of the name.
+        let stamp = name.get(..17).filter(|s| s.len() == 17 && name.as_bytes().get(17).is_none_or(|b| *b == b'-'));
+        let dir = stamp.and_then(crate::calls::by_stamp).ok_or(e)?;
+        if crate::notes::headless() {
+            return crate::calls::resolve_call(&dir.file_name().unwrap_or_default().to_string_lossy());
+        }
+        Ok(dir)
+    }).map_err(|_| anyhow!("no call {name:?}"))
 }
 
 /// `echoctl read <link>`: what Echo holds behind a link, as text for Claude — a call's minutes (and its turns around
@@ -156,6 +170,8 @@ pub fn read(link: &str) -> Result<String> {
         }
         Link::Mail(src) => out.push_str(&mail_text(&src)?),
         Link::Task { thread, id } => out.push_str(&task_text(&thread, &id)?),
+        // A vault's pages are read in the vault (a session there, on its profile), never through a link.
+        Link::Page { .. } => bail!("a vault's page is read in the vault: open it in Echo's Knowledge"),
     }
     Ok(out)
 }
@@ -269,6 +285,11 @@ pub fn target(link: &str) -> Result<Value> {
             crate::projects::load(&thread).map_err(|_| anyhow!("no thread {thread:?}"))?;
             serde_json::json!({"hash": format!("project/{thread}/work"), "node": id})
         }
+        Link::Page { vault, path } => {
+            let v = crate::knowledge::get(&vault).map_err(|_| anyhow!("no vault {vault:?}"))?;
+            let part: String = path.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect();
+            serde_json::json!({"hash": format!("kn/{}/pages/{part}", v.id)})
+        }
     })
 }
 
@@ -297,6 +318,31 @@ pub fn person_thread(key: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_vault_page_link_opens_the_page() {
+        let (_env, root) = crate::paths::testenv::folders("links-page");
+        let t = crate::knowledge::fixture::twin(&root.join("twin"));
+        let v = crate::knowledge::add(&t, crate::knowledge::AddOpts { name: Some("My twin".into()), ..Default::default() }).unwrap();
+        let link = format!("echo://page/{}/knowledge/clients/acme%20corp.md", v.id);
+        assert_eq!(Link::parse(&link), Some(Link::Page { vault: v.id.clone(), path: "knowledge/clients/acme corp.md".into() }));
+        assert_eq!(Link::parse("echo://page/my-twin/../secrets.md"), None);
+        assert_eq!(target(&link).unwrap()["hash"], format!("kn/{}/pages/knowledge%2Fclients%2Facme%20corp.md", v.id));
+        assert!(target("echo://page/nobody/a.md").is_err(), "no such vault");
+        assert!(read(&link).is_err(), "a vault's pages are read in the vault, not through a link");
+    }
+
+    #[test]
+    fn renamed_call_link_still_opens() {
+        let (_env, _root) = crate::paths::testenv::folders("links-renamed");
+        let d = crate::paths::calls_dir().join("2026-11-05_090012-weekly-sync");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("meta.json"), r#"{"title": "Weekly sync"}"#).unwrap();
+        // A note saved before the call was retitled links its old folder name.
+        std::fs::rename(&d, crate::paths::calls_dir().join("2026-11-05_090012-northwind-weekly-sync")).unwrap();
+        assert_eq!(target("echo://call/2026-11-05_090012-weekly-sync").unwrap()["hash"], "call/2026-11-05_090012-northwind-weekly-sync/minutes");
+        assert!(target("echo://call/2026-11-05_093000-never-was").is_err());
+    }
+
     use super::*;
 
     #[test]
@@ -354,6 +400,7 @@ mod tests {
         let t = read("echo://call/2026-10-28_110000-aurora?t=720").unwrap();
         assert!(t.contains("Aurora weekly") && t.contains("[12:05] Lena Varga: Then SSO has to land first.") && !t.contains("Later talk"), "{t}");
         assert!(t.contains("SSO lands first"), "the minutes too: {t}");
-        assert!(read("echo://call/2026-10-28_110000-nope").is_err());
+        // A name with this call's stamp is this call, retitled (`calls::stamp_of`); a stamp no call has is nothing.
+        assert!(read("echo://call/2026-10-28_120000-nope").is_err());
     }
 }

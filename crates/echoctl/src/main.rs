@@ -21,6 +21,7 @@ mod frames;
 mod gpu;
 mod graph;
 mod grants;
+mod knowledge;
 mod guard;
 mod ledger;
 mod livenotes;
@@ -258,6 +259,11 @@ enum Cmd {
     Plugin {
         #[command(subcommand)]
         cmd: PluginCmd,
+    },
+    /// Your knowledge vaults — folders of Markdown you own: connect, start one, read pages, save minutes (JSON)
+    Knowledge {
+        #[command(subcommand)]
+        cmd: KnowledgeCmd,
     },
     /// Microsoft 365 on Echo's sign-in: search mail, chats and files; mail; Teams; people; OneDrive (JSON). Sending
     /// needs --yes: without it, what would be sent
@@ -1052,6 +1058,87 @@ enum ClientCmd {
 }
 
 #[derive(Subcommand)]
+enum KnowledgeCmd {
+    /// The vaults Echo knows (JSON)
+    List,
+    /// What connecting a folder would find; changes nothing (JSON)
+    Detect { folder: std::path::PathBuf },
+    /// Connect a folder of notes as it is; nothing in it changes
+    Add {
+        folder: std::path::PathBuf,
+        #[arg(long)]
+        name: Option<String>,
+        /// The AI profile that reads it (default: the default profile)
+        #[arg(long)]
+        profile: Option<String>,
+        /// Save calls' minutes here: auto, ask or off
+        #[arg(long)]
+        minutes: Option<String>,
+    },
+    /// Change a vault's setting: name, profile, minutes, scope, clients, threads, tag, transcript, chat, commit, or
+    /// pages / index / notes / naming / templates / sources ("" takes an override back)
+    Set { vault: String, key: String, value: String },
+    /// Detect the vault's structure again (your changes stay)
+    Reread { vault: String },
+    /// Forget a vault (its folder is left as it is)
+    Remove { vault: String },
+    /// Start a new vault from Echo's twin starter (in Echo's data folder unless --folder)
+    New {
+        name: String,
+        #[arg(long)]
+        folder: Option<std::path::PathBuf>,
+        /// A plain folder, no git repository
+        #[arg(long)]
+        no_git: bool,
+        /// Save calls' minutes here: auto, ask or off
+        #[arg(long, default_value = "auto")]
+        minutes: String,
+    },
+    /// A vault's pages, or the ones matching --q (title, path, #tag, words) (JSON)
+    Pages {
+        vault: String,
+        #[arg(long)]
+        q: Option<String>,
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+    },
+    /// One page: properties, links, backlinks (JSON)
+    Read { vault: String, path: String },
+    /// The vault's checks: pages not in the index, broken links, isolated pages, pages without properties (JSON)
+    Check { vault: String },
+    /// Add index rows for pages the index doesn't list (vault-relative paths)
+    IndexAdd { vault: String, paths: Vec<String> },
+    /// Save a call's minutes into a vault (its note and index row). Without --vault: the vaults whose rules take it
+    SaveMinutes {
+        call: String,
+        #[arg(long)]
+        vault: Option<String>,
+        /// A new note beside one you changed
+        #[arg(long)]
+        new: bool,
+        /// Write over the note even though you changed it
+        #[arg(long)]
+        replace: bool,
+        /// Save it even though the vault is read by another AI profile than the call's
+        #[arg(long)]
+        anyway: bool,
+    },
+    /// The twin skill: add it to a vault that has none, or (--global) install it for all your Claude Code sessions
+    Twin {
+        vault: String,
+        /// Install it in ~/.claude/skills for every Claude Code session
+        #[arg(long)]
+        global: bool,
+        /// Take Echo's copy out of ~/.claude/skills
+        #[arg(long)]
+        remove: bool,
+        /// The global skill's name (default: the vault's id)
+        #[arg(long)]
+        name: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
 enum PluginCmd {
     /// Installed plugins, what the marketplaces offer, and the marketplaces (JSON)
     List,
@@ -1675,6 +1762,7 @@ fn main() -> Result<()> {
             Ok(())
         }
         Cmd::Plugin { cmd } => plugin_command(cmd),
+        Cmd::Knowledge { cmd } => knowledge_command(cmd),
         Cmd::Deliver { cmd } => deliver_command(cmd),
         Cmd::M365 { cmd } => {
             let v = match cmd {
@@ -2662,6 +2750,66 @@ fn deliver_command(cmd: DeliverCmd) -> Result<()> {
             println!("Sent");
         }
     }
+    Ok(())
+}
+
+fn knowledge_command(cmd: KnowledgeCmd) -> Result<()> {
+    use knowledge as kn;
+    let v = match cmd {
+        KnowledgeCmd::List => serde_json::Value::Array(kn::list()?.iter().map(kn::vault_value).collect()),
+        KnowledgeCmd::Detect { folder } => serde_json::to_value(kn::detect::detect(&folder)?)?,
+        KnowledgeCmd::Add { folder, name, profile, minutes } => kn::vault_value(&kn::add(&folder, kn::AddOpts { name, profile, minutes, ..Default::default() })?),
+        KnowledgeCmd::Set { vault, key, value } => kn::vault_value(&kn::set(&vault, &key, &value)?),
+        KnowledgeCmd::Reread { vault } => {
+            kn::refuse_headless()?;
+            kn::vault_value(&kn::reread(&vault)?)
+        }
+        KnowledgeCmd::Remove { vault } => {
+            kn::remove(&vault)?;
+            serde_json::json!({ "removed": vault })
+        }
+        KnowledgeCmd::Pages { vault, q, limit } => {
+            let v = kn::get(&vault)?;
+            let ix = kn::scan::index(&v)?;
+            match q {
+                Some(q) => serde_json::Value::Array(kn::scan::search(&v, &ix, &q, limit)),
+                None => serde_json::json!(ix.pages.values().take(limit).map(|p| serde_json::json!({ "path": kn::scan::vault_rel(&v, &p.path), "title": p.title, "tags": p.tags })).collect::<Vec<_>>()),
+            }
+        }
+        KnowledgeCmd::Read { vault, path } => {
+            let mut p = kn::page::read(&kn::get(&vault)?, &path)?;
+            if let Some(o) = p.as_object_mut() {
+                o.remove("html");
+            }
+            p
+        }
+        KnowledgeCmd::Check { vault } => {
+            let v = kn::get(&vault)?;
+            let ix = kn::scan::index(&v)?;
+            serde_json::to_value(kn::checks::run(&v, &ix))?
+        }
+        KnowledgeCmd::IndexAdd { vault, paths } => kn::page::index_add(&kn::get(&vault)?, &paths)?,
+        KnowledgeCmd::SaveMinutes { call, vault, new, replace, anyway } => {
+            kn::refuse_headless()?;
+            let dir = calls::resolve_call(&call)?;
+            match vault {
+                Some(id) => serde_json::to_value(kn::export::save(&dir, &id, kn::export::How::Manual(kn::export::Manual { new, replace, anyway, ..Default::default() }))?)?,
+                None => serde_json::to_value(kn::export::save_by_rules(&dir))?,
+            }
+        }
+        KnowledgeCmd::New { name, folder, no_git, minutes } => kn::starter::created_value(&kn::starter::create(&name, folder, !no_git, &minutes)?),
+        KnowledgeCmd::Twin { vault, global, remove, name } => {
+            let v = kn::get(&vault)?;
+            if remove {
+                serde_json::json!({ "removed": kn::starter::global_twin_remove(&v)? })
+            } else if global {
+                serde_json::json!({ "installed": kn::starter::global_twin(&v, name.as_deref())? })
+            } else {
+                serde_json::json!({ "added": kn::starter::add_twin_skill(&v)? })
+            }
+        }
+    };
+    println!("{}", serde_json::to_string_pretty(&v)?);
     Ok(())
 }
 

@@ -69,6 +69,7 @@ how that area works. Update the note in the same change when you alter it.
 | Capture | change recording, capture, transcription or live notes | "change when a recording starts or stops", "add a speech engine", "change the vocabulary hint", "change live notes" | .ai-run/guides/capture/capture-and-transcription.md | - |
 | Claude Code plugin | change the Claude Code plugin in plugin/ | "edit a skill", "change the launcher", "change the status line" | - | .ai-run/guides/plugins/claude-code-plugin.md |
 | Data | change the Recall store | "add a column", "serve Recall data to a session" | - | .ai-run/guides/data/recall-store.md |
+| Knowledge vaults | change vaults, the minutes saved into them, or the Knowledge pages | "connect a vault", "change how minutes land in a vault", "add a check" | .ai-run/guides/design/knowledge.md | .ai-run/guides/window/window-ui.md |
 | Development | write or change files the app keeps | "write a new JSON state file", "change meta.json", "bump the version" | .ai-run/guides/development/rust-conventions.md | .ai-run/guides/development/dev-workflow.md |
 | Echo plugins | build or extend Echo plugins | "add a ctx service", "add a capability", "add a slot", "test a plugin locally" | .ai-run/guides/plugins/echo-plugins.md | .ai-run/guides/plugins/plugin-authoring.md |
 | Integration | run Claude Code or change AI profiles | "start a new Claude job", "change routing variables", "test a sign-in" | .ai-run/guides/integrations/claude-code-runs.md | - |

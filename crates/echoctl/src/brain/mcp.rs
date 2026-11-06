@@ -238,6 +238,8 @@ fn read_link(acc: &super::access::Access, link: &str) -> Result<Value> {
         Link::Thread(id) | Link::Task { thread: id, .. } => threads.contains(id),
         Link::Client(id) => crate::projects::list().iter().any(|p| p.client.as_deref() == Some(id) && threads.contains(&p.id)),
         Link::Person(key) => return crate::people::card(&threads, key, 40),
+        // Recall never reads a vault (they stay apart); a session reads it in its folder, on its profile.
+        Link::Page { .. } => false,
     };
     anyhow::ensure!(ok, "not found (or not readable from this session)");
     Ok(json!({"text": crate::links::read(link)?}))

@@ -425,8 +425,87 @@ pub fn markdown_html(md: &str) -> String {
     body(&lines.join("\n"), &mut images).html
 }
 
+/// A vault page's link or image, decided by its caller: `(destination, is an image)` → the `href` / `src` to keep, or
+/// `None` for text only.
+pub type PageLinks<'a> = &'a dyn Fn(&str, bool) -> Option<String>;
+
+/// A vault page's Markdown body as safe HTML (spec K5-04): the minutes' writer — raw HTML shown as text — without their
+/// `[mm:ss]` marks and screenshots, every link and image decided by `link`. `[[wikilinks]]` (and `![[embeds]]`) reach
+/// `link` as `wiki:<target>`; text inside code stays code. `breaks`: a single newline is a line break (Obsidian's way).
+pub fn page_html(md: &str, breaks: bool, link: PageLinks) -> String {
+    let load = |_: &str| None;
+    let mut images = Images { load: &load, frames: &[], embedded: vec![], left: 0 };
+    body_mode(&wikilinks_as_links(md), &mut images, Some(link), breaks).html
+}
+
+/// `[[t]]`, `[[t|alias]]`, `![[t]]` outside code → `[alias](<wiki:t>)` / `![t](<wiki:t>)`.
+fn wikilinks_as_links(md: &str) -> String {
+    let mut out = String::with_capacity(md.len());
+    let mut fence: Option<String> = None;
+    for line in md.split_inclusive('\n') {
+        let t = line.trim_start();
+        if let Some(f) = &fence {
+            if t.starts_with(f.as_str()) {
+                fence = None;
+            }
+            out.push_str(line);
+            continue;
+        }
+        if t.starts_with("```") || t.starts_with("~~~") {
+            fence = Some(t[..3].to_string());
+            out.push_str(line);
+            continue;
+        }
+        if t.starts_with("    ") || line.starts_with('\t') {
+            out.push_str(line);
+            continue;
+        }
+        // Inline code spans are kept as they are.
+        let mut in_code = false;
+        let mut rest = line;
+        while !rest.is_empty() {
+            if in_code {
+                match rest.find('`') {
+                    Some(i) => { out.push_str(&rest[..=i]); rest = &rest[i + 1..]; in_code = false; }
+                    None => { out.push_str(rest); rest = ""; }
+                }
+                continue;
+            }
+            let tick = rest.find('`');
+            let open = rest.find("[[");
+            match (open, tick) {
+                (Some(o), t) if t.is_none_or(|t| o < t) => {
+                    let (before, after) = rest.split_at(o);
+                    let embed = before.ends_with('!');
+                    match after[2..].find("]]") {
+                        Some(j) if !after[2..2 + j].contains(['\n', '[']) && !after[2..2 + j].trim().is_empty() => {
+                            let inner = &after[2..2 + j];
+                            let (target, alias) = inner.split_once('|').map(|(a, b)| (a.trim(), b.trim())).unwrap_or((inner.trim(), inner.trim()));
+                            let shown = if alias.is_empty() { target } else { alias };
+                            let text = shown.replace('[', "\\[").replace(']', "\\]");
+                            let dest = target.replace('%', "%25").replace('>', "%3E").replace('<', "%3C");
+                            out.push_str(if embed { &before[..before.len() - 1] } else { before });
+                            out.push_str(&format!("{}[{text}](<wiki:{dest}>)", if embed { "!" } else { "" }));
+                            rest = &after[2 + j + 2..];
+                        }
+                        _ => { out.push_str(&rest[..o + 2]); rest = &rest[o + 2..]; }
+                    }
+                }
+                (_, Some(t)) => { out.push_str(&rest[..=t]); rest = &rest[t + 1..]; in_code = true; }
+                _ => { out.push_str(rest); rest = ""; }
+            }
+        }
+    }
+    out
+}
+
 /// The notes' Markdown as HTML. Raw HTML in it is shown as text.
 fn body(md: &str, images: &mut Images) -> Body {
+    body_mode(md, images, None, false)
+}
+
+/// The writer: the minutes' (`page: None`) or a vault page's (links and images decided by `page`).
+fn body_mode(md: &str, images: &mut Images, page: Option<PageLinks>, breaks: bool) -> Body {
     let mut opts = Options::empty();
     opts.insert(Options::ENABLE_TABLES);
     opts.insert(Options::ENABLE_STRIKETHROUGH);
@@ -464,14 +543,14 @@ fn body(md: &str, images: &mut Images) -> Body {
                 text.push_str(t);
                 continue;
             }
-            Event::SoftBreak => {
+            Event::SoftBreak if !breaks => {
                 text.push('\n');
                 continue;
             }
             _ => {}
         }
         if !text.is_empty() {
-            out.push_str(&times(&esc(&text)));
+            out.push_str(&if page.is_some() { esc(&text) } else { times(&esc(&text)) });
             text.clear();
         }
         match ev {
@@ -516,6 +595,16 @@ fn body(md: &str, images: &mut Images) -> Body {
                 Tag::Emphasis => out.push_str("<em>"),
                 Tag::Strong => out.push_str("<strong>"),
                 Tag::Strikethrough => out.push_str("<del>"),
+                Tag::Link { dest_url, .. } if page.is_some() => {
+                    let href = page.and_then(|f| f(&dest_url, false));
+                    match &href {
+                        Some(h) if crate::links::Link::parse(h).is_some() => out.push_str(&format!("<a href=\"{}\" data-echo-link>", esc(h))),
+                        Some(h) if h.starts_with("https://") || h.starts_with("http://") => out.push_str(&format!("<a href=\"{}\" rel=\"noopener noreferrer\">", esc(h))),
+                        Some(h) => out.push_str(&format!("<a href=\"{}\" data-kn-link>", esc(h))),
+                        None => {}
+                    }
+                    links.push(href.is_some());
+                }
                 Tag::Link { dest_url, .. } => {
                     // https, and echo:// links Echo knows (a call at a moment, a thread, a client, a person, a mail):
                     // the window routes those (`window.echo.openLink`), the system opens Echo at them.
@@ -567,20 +656,26 @@ fn body(md: &str, images: &mut Images) -> Body {
                 TagEnd::Link => out.push_str(if links.pop() == Some(true) { "</a>" } else { "" }),
                 TagEnd::Image => {
                     let (dest, alt) = image.take().unwrap_or_default();
-                    out.push_str(&figure(&dest, &alt, images));
+                    match page {
+                        Some(f) => match f(&dest, true) {
+                            Some(src) => out.push_str(&format!("<img class=\"kn-img\" src=\"{}\" alt=\"{}\" loading=\"lazy\">", esc(&src), esc(alt.trim()))),
+                            None => out.push_str(&format!("<span class=\"figref\">[{}]</span>", esc(if alt.trim().is_empty() { "image" } else { alt.trim() }))),
+                        },
+                        None => out.push_str(&figure(&dest, &alt, images)),
+                    }
                 }
                 _ => {}
             },
             Event::Code(t) => out.push_str(&format!("<code>{}</code>", esc(&t))),
             Event::Html(t) | Event::InlineHtml(t) => out.push_str(&esc(&t)), // shown, never markup
-            Event::HardBreak => out.push_str("<br>"),
+            Event::HardBreak | Event::SoftBreak => out.push_str("<br>"),
             Event::Rule => out.push_str("<hr>"),
             Event::TaskListMarker(done) => out.push_str(if done { "<input type=\"checkbox\" checked disabled> " } else { "<input type=\"checkbox\" disabled> " }),
             _ => {}
         }
     }
     if !text.is_empty() {
-        out.push_str(&times(&esc(&text)));
+        out.push_str(&if page.is_some() { esc(&text) } else { times(&esc(&text)) });
     }
     b
 }

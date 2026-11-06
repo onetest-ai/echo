@@ -85,7 +85,7 @@ the code is `jshost.rs`). Obsidian's plan: `docs/obsidian-design.md`.
 |---|---|
 | `scheduler` | Routines: the user's prompts on a schedule (`routines/<id>.md` in its store, templates in its package), runs with tokens and cost, its own Settings section |
 | `telegram` | A channel into the Echo-folder session (`access.json` in its store: allowlist of the paired chat id, `TELEGRAM_ACCESS_MODE=static`) and a delivery provider (bot token as a secret, `api.telegram.org` only) |
-| `obsidian` | The user's own vaults: survey → one no-tools Claude run → a description the user confirms → one `obsidian-vaults` skill for sessions; an activity browsing a vault as Obsidian does. Never indexed into the Brain |
+| `obsidian` | Its *Notes* tab (Echo's own facts). Its vault browsing (survey, description, `obsidian-vaults` skill, an activity browsing a vault) is superseded by Echo's own Knowledge vaults (2026-11-05, `knowledge.md`) and retires in `onetest-ai/echo-plugins`; Echo imports its vaults. Never indexed into the Brain |
 
 ## Decisions
 

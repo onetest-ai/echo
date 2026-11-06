@@ -1,0 +1,9 @@
+# Written as .gitignore in a new vault.
+.DS_Store
+Thumbs.db
+# Obsidian's per-device state (the vault settings themselves are kept)
+knowledge/.obsidian/workspace*.json
+knowledge/.obsidian/cache
+knowledge/.trash/
+# Converters' scratch space
+.staging/

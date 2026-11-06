@@ -752,7 +752,9 @@ fn notify_outcome(dir: &Path) {
     match r.state.as_str() {
         // Said once, here, once the run is `done` (the watcher's own check skips calls with a run).
         "done" => {
-            crate::app::notify("Minutes ready", &title);
+            // Into the vaults that take them (spec K3-04), on a thread of their own.
+            let vaults = crate::knowledge::export::minutes_written(dir);
+            crate::app::notify("Minutes ready", &with_vaults(&title, &vaults));
             #[cfg(feature = "js")]
             crate::share::minutes_written(dir);
         }
@@ -760,6 +762,11 @@ fn notify_outcome(dir: &Path) {
         "failed" => crate::app::notify("Couldn't write minutes", &format!("{title}: {}", r.message.unwrap_or_default())),
         _ => {}
     }
+}
+
+/// "<title> · saved to My twin" when the minutes go into vaults.
+pub fn with_vaults(title: &str, vaults: &[String]) -> String {
+    if vaults.is_empty() { title.to_string() } else { format!("{title} · saved to {}", vaults.join(", ")) }
 }
 
 fn call_title(dir: &Path) -> String {
