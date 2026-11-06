@@ -1,0 +1,29 @@
+---
+id: TC-004
+title: Transcription works offline
+priority: critical
+type: functional
+module: privacy
+run: manual
+platform: macos
+tags: [privacy, transcription]
+external_id: TC-PRIV-004
+---
+
+# TC-004: Transcription works offline
+
+**Module:** Privacy | **Priority:** Critical | **Type:** Functional
+
+## Preconditions
+- The built-in speech model downloaded; no transcription server connected
+
+## Steps
+
+| # | Action | Expected Result |
+|---|--------|----------------|
+| 1 | Turn Wi-Fi off and record a call (a second device speaking to the mic will do) | — |
+| 2 | Let it transcribe | The transcript is produced |
+| 3 | (Optional) watch Echo's connections with `nettop` during transcription | None |
+
+## Expected Final State
+Transcription needs no network.
