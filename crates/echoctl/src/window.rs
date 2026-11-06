@@ -2267,8 +2267,9 @@ pub fn handle(msg: &str) -> Handled {
             });
             false.into()
         }
-        // My work's Claude icon: the user's words about one task, done by `claude -p` in the background.
-        "task_ask" => match crate::today::ask_task(v["ask"].as_str().unwrap_or(""), v["project"].as_str().unwrap_or(""), v["node"].as_str().unwrap_or(""), v["text"].as_str().unwrap_or("")) {
+        // My work's Claude dialog → Yolo: the task, its skill and the user's words, done by Claude on its own.
+        #[cfg(feature = "js")]
+        "task_yolo" => match crate::today::yolo_task(v["ask"].as_str().unwrap_or(""), v["project"].as_str().unwrap_or(""), v["node"].as_str().unwrap_or(""), v["skill"].as_str().unwrap_or(""), v["text"].as_str().unwrap_or("")) {
             Ok(()) => true.into(),
             Err(e) => notice(&format!("{e:#}")),
         },

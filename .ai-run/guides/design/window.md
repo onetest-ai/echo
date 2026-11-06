@@ -147,10 +147,14 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   alphabet — `rankSkills`, `skill-fit.test.mjs`), the best marked "fits best" and chosen at once when it clearly leads
   (decided once the skills are loaded); the field keeps the caret while it redraws (the cross takes it back to Just the task); a two-line note; Work on it. Later the minutes' choice for an action
   goes first.
-- One Claude icon on My work's cards (✦; ⌘K "Claude: <task>"), one dialog, two actions on the same text: Work on it
-  (the panel, above) and Change it — a one-shot `claude -p` change to the task's own fields ("move it two weeks"), its
-  outcome above My work with Undo. Change it is the main button until a skill is chosen; it is offered from Today only
-  (a task's details keep Send to Claude, work only). Two icons for "Claude" read alike, so they were made one (Nov 2026).
+- One Claude icon on My work's cards (✦; ⌘K "Claude: <task>"), one dialog, two actions on the same skill and words:
+  Work on it (the panel, above; the main button) and Yolo — Claude Code does it on its own in the background
+  (`today::yolo_task` → `claudejob` with `--dangerously-skip-permissions` on the thread's profile, the user's skills as
+  a `--plugin-dir`; the prompt is Work on it's line plus "nobody will answer; sending included, the user said yes in
+  advance"); its answer shows above My work. Yolo is offered from Today only (a task's details keep Send to Claude). It
+  replaced Change it, a tool-less `claude -p` edit of the task's fields with Undo (Nov 2026): the user wanted one input
+  for both, skill included, so that tasks can later go to Yolo by themselves. The user chose full autonomy knowingly:
+  the task's own words still reach the run as data by its link, never typed as an instruction.
 - Only the panel's session: Echo has no way into the user's own Claude Code sessions elsewhere.
 - Not yet: action modes from the minutes (claude: the skill and prompt ready on the action; manual: how to do it).
 

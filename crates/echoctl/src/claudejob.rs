@@ -64,6 +64,8 @@ pub struct Spec {
     /// Where the run's files go.
     pub run_dir: PathBuf,
     pub timeout: Duration,
+    /// More plugins for the run (`--plugin-dir`): Yolo's task gets the user's skills.
+    pub plugins: Vec<PathBuf>,
 }
 
 impl Spec {
@@ -91,6 +93,7 @@ impl Spec {
             tools: Tools::parse(&s("tools"))?,
             run_dir: store.join(rel),
             timeout: Duration::from_secs(minutes * 60),
+            plugins: vec![],
         })
     }
 }
@@ -174,7 +177,7 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
     // What plugins add to Echo's sessions: their skills, and folders to read (also for a read-only run).
     let (session_plugins, session_read) = (crate::grants::session_plugins(), crate::grants::session_read());
     if spec.tools != Tools::None {
-        for d in &session_plugins {
+        for d in session_plugins.iter().chain(&spec.plugins) {
             a.extend(["--plugin-dir".into(), d.display().to_string()]);
         }
     }

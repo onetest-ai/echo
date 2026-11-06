@@ -1075,8 +1075,8 @@ function todayView() {
     // Close… asks first in a dialog (`todayCloseDialog`); the title opens the task.
     const attrs = `data-project="${esc(t.project)}" data-title="${esc(t.title)}" data-node="${esc(t.id)}"`
     const close = `<button class="icon-btn td-ico" data-today-close="${esc(t.id)}" ${attrs} title="Close this task…" aria-label="Close “${esc(t.title)}”…">${ICON('<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/>')}</button>`
-    // Claude: one dialog — change the task ("move it two weeks", a `claude -p` run) or work on it in the panel, with a skill.
-    const work = `<button class="icon-btn td-ico" data-claude-task="${esc(t.id)}" data-today="1" ${attrs} title="Claude — change this task, or work on it" aria-label="Claude: “${esc(t.title)}”…">${ICON('<path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/><path d="M18.5 15.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>')}</button>`
+    // Claude: one dialog — work on it in the panel, or Yolo (Claude does it on its own), with a skill.
+    const work = `<button class="icon-btn td-ico" data-claude-task="${esc(t.id)}" data-today="1" ${attrs} title="Claude — work on this task, or Yolo" aria-label="Claude: “${esc(t.title)}”…">${ICON('<path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/><path d="M18.5 15.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>')}</button>`
     // The date's icon before the title's words.
     return `<div class="td-task"><span class="td-task-t">${dueChip(t)}<a href="${esc(t.link)}">${esc(t.title)}</a></span><span class="td-task-m">${pj ? projIcon(pj, 12) : ''}${where}<span class="td-icos">${work}${close}</span></span></div>`
   }
@@ -1129,31 +1129,31 @@ function needsDialog() {
     <div class="td-dialog-a">${m && m.url ? `<button class="link-btn" data-ext href="${esc(m.url)}" data-needs-outlook="${esc(m.url)}">Open in Outlook</button><span class="grow"></span>` : ''}<button class="btn ghost" data-needs-off="1">Cancel</button><button class="btn" data-needs-send="${esc(c.id)}" data-all="1">Reply all</button><button class="btn primary" data-needs-send="${esc(c.id)}">Reply</button></div></div></div>`
 }
 
-/** Today → a task's Claude icon: the user's words go to Echo (IPC `task_ask`), which runs `claude -p` (no tools, the
- *  thread's profile) with the task as context and applies its edit as the user's own; Today reads the outcome
- *  (`asks`) until it is there and shows it with Undo. */
-function todayAsk(c, text) {
+/** Today → the Claude dialog's Yolo: the task, its skill and the user's words go to Echo (IPC `task_yolo`), which has
+ *  Claude Code do it on its own in the background (the thread's profile); Today reads the outcome (`asks`) until it is
+ *  there — a run may take minutes. */
+function todayYolo(c, skill, text) {
   const id = `ask-${Date.now()}`
   S.todayAskId = id
-  send({ cmd: 'task_ask', ask: id, project: c.project, node: c.node, text })
+  send({ cmd: 'task_yolo', ask: id, project: c.project, node: c.node, skill, text })
   let n = 0
-  const poll = () => loadToday().then(() => { render(); const a = ((S.today && S.today.asks) || []).find((x) => x.id === id); if ((!a || a.state === 'working') && ++n < 60) setTimeout(poll, 2000) })
+  const poll = () => loadToday().then(() => { render(); const a = ((S.today && S.today.asks) || []).find((x) => x.id === id); if ((!a || a.state === 'working') && ++n < 300) setTimeout(poll, 5000) })
   setTimeout(poll, 1000)
 }
 /** The last ask's outcome above My work: what Claude changed (Undo), why it didn't, or that it is working. */
 function todayAskBar() {
   const a = S.todayAskId && ((S.today && S.today.asks) || []).find((x) => x.id === S.todayAskId)
   if (!S.todayAskId) return ''
-  if (!a || a.state === 'working') return '<div class="td-askbar"><span class="set-sub">Claude is on it…</span></div>'
+  if (!a || a.state === 'working') return '<div class="td-askbar"><span class="set-sub">Yolo: Claude is on it…</span></div>'
   const undo = a.state === 'done' && a.mid ? `<button class="link-btn" data-today-undo="${esc(a.mid)}" data-project="${esc(a.project)}">Undo</button>` : ''
   return `<div class="td-askbar${a.state === 'failed' ? ' failed' : ''}"><span class="grow">${esc(a.say || '')}</span>${undo}<button class="icon-btn" data-today-askoff="1" aria-label="Dismiss">×</button></div>`
 }
 
 /** Today → Close…: a dialog — closing a task by hand asks first, with an optional comment (kept in its history).
  *  A thread's sync closes tasks by itself when its calls and mail say so; this is for what they don't. */
-/** The Claude dialog for a task, two actions on one text: Work on it — into the Claude panel's live session, typed
- *  there as if by the user, with the skill chosen (`/my-skills:<id>`) and the user's words; the conversation goes on
- *  there. Change it (from Today) — the words to `todayAsk`, a `claude -p` run that edits the task, with Undo. */
+/** The Claude dialog for a task, two actions on the same skill and words: Work on it — into the Claude panel's live
+ *  session, typed there as if by the user (`/my-skills:<id>`, the user's words); the conversation goes on there.
+ *  Yolo (from Today) — `todayYolo`: Claude does it on its own, sending included. */
 // ── skill fit: how well each skill fits a task (no DOM: `skill-fit.test.mjs`) ────────────────────────
 /** The task's words (its title, its thread) in each skill's name and description — words of four letters or more,
  *  any alphabet, cut to a short stem (follow-up ~ follow, reports ~ report), the common ones left out — then how
@@ -1188,8 +1188,8 @@ function sendClaudeDialog() {
   const chosen = skills.find((x) => x.id === c.skill)
   const q = (c.q || '').trim().toLowerCase()
   const found = ranked.map((r) => r.x).filter((x) => !q || tplName(x.id).toLowerCase().includes(q) || (x.description || '').toLowerCase().includes(q)).slice(0, 6)
-  // Change it: from Today only (its outcome shows there); the main action when no skill is chosen.
-  const change = c.today ? `<button class="btn${chosen ? '' : ' primary'}" data-sc-change title="Claude changes the task — its date, state, owner or title; you can undo it">Change it</button>` : ''
+  // Yolo: from Today only (its outcome shows there).
+  const yolo = c.today ? `<button class="btn" data-sc-yolo title="Claude does it on its own, in the background — sending included">${ICON('<path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/><path d="M18.5 15.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>')}Yolo</button>` : ''
   const picker = chosen
     ? `<div class="sc-chosen"><b>${esc(tplName(chosen.id))}</b><span title="${esc(chosen.description)}">${esc(chosen.description)}</span><button class="icon-btn" data-sc-skill="" aria-label="No skill — just the task" title="No skill — just the task">${ICON('<path d="M6 6l12 12M18 6L6 18"/>')}</button></div>`
     : `<input id="sc-q" class="sc-q" placeholder="Just the task — or type to find a skill (${skills.length})" value="${esc(c.q || '')}" autocomplete="off" aria-label="Skill">
@@ -1197,8 +1197,8 @@ function sendClaudeDialog() {
   return `<div class="td-modal" data-sc-off="1"><div class="td-dialog sc-dialog" role="dialog" aria-modal="true" aria-labelledby="sc-h">
     <div class="sc-head"><h3 id="sc-h">Claude</h3><div class="sc-task">${thread ? `${projIcon(thread, 14)}<span class="set-sub">${esc(thread.name)}</span> · ` : ''}<span>${esc(c.title)}</span></div></div>
     <div class="sc-pick">${picker}</div>
-    <textarea id="sc-words" class="sc-words" rows="2" placeholder="${c.today ? 'What to do — Move it two weeks later; or a note for the work' : 'Anything to add — optional (Keep it short; Dana is away until the 12th)'}">${esc(c.words || '')}</textarea>
-    <div class="sc-foot"><span class="set-sub">${c.today ? 'Change it: Claude edits the task, you can undo. Work on it: the Claude panel, you go on there.' : 'Opens the Claude panel; you go on there.'} Nothing goes to anyone without your OK.</span><span class="grow"></span><button class="btn ghost" data-sc-off="1">Cancel</button>${change}<button class="btn${change && !chosen ? '' : ' primary'}" data-sc-send>Work on it</button></div></div></div>`
+    <textarea id="sc-words" class="sc-words" rows="2" placeholder="Anything to add — optional (Keep it short; Dana is away until the 12th)">${esc(c.words || '')}</textarea>
+    <div class="sc-foot"><span class="set-sub">${c.today ? 'Yolo: Claude does it on its own.' : ''}</span><span class="grow"></span><button class="btn ghost" data-sc-off="1">Cancel</button>${yolo}<button class="btn primary" data-sc-send title="In the Claude panel, with you">${ICON('<path d="M12 3.5v17M3.5 12h17M6 6l12 12M18 6L6 18"/>')}Work on it</button></div></div></div>`
 }
 /** Type a line into the Claude panel's session: started (or resumed) first when it isn't running, and typed once it
  *  has drawn and gone quiet — earlier keys would land in its start-up. */
@@ -2737,7 +2737,7 @@ function templateEditor() {
 document.addEventListener('click', (e) => {
   // A click anywhere else in the dialog folds its suggestions away.
   if (S.claudeSend && S.claudeSend.open && !e.target.closest('.sc-pick')) { S.claudeSend.open = false; render() }
-  const t = e.target.closest('[data-claude-task],[data-sc-send],[data-sc-change],[data-sc-off],[data-sc-skill]')
+  const t = e.target.closest('[data-claude-task],[data-sc-send],[data-sc-yolo],[data-sc-off],[data-sc-skill]')
   if (!t) return
   if (t.dataset.scSkill !== undefined && S.claudeSend) {
     S.claudeSend.words = (($('#sc-words') || {}).value || '')
@@ -2752,11 +2752,11 @@ document.addEventListener('click', (e) => {
     return render()
   }
   if (t.dataset.scOff !== undefined && (t.tagName === 'BUTTON' || e.target === t)) { S.claudeSend = null; return render() }
-  if (t.dataset.scChange !== undefined) {
+  if (t.dataset.scYolo !== undefined) {
     const c = S.claudeSend, text = (($('#sc-words') || {}).value || '').trim()
-    if (!text) { const n = $('#sc-words'); if (n) n.focus(); S.notice = 'Say what should change — Move it two weeks later'; return render() }
+    if (c.skill) { const u = skillUse(); u[c.skill] = (u[c.skill] || 0) + 1; try { localStorage.setItem('echo.skillUse', JSON.stringify(u)) } catch { /* private mode */ } }
     S.claudeSend = null
-    todayAsk(c, text)
+    todayYolo(c, c.skill || '', text)
     return render()
   }
   if (t.dataset.scSend !== undefined) {
