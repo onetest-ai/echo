@@ -204,7 +204,7 @@ a.lnk{color:var(--accent-ink);cursor:pointer;text-decoration:none} a.lnk:hover{t
 .ax .where{grid-column:2;font-size:11.5px;color:var(--text-3)}
 .empty{color:var(--text-3);padding:4px 0}
 code{font:11.5px var(--mono);background:rgb(127 127 140 / .12);padding:1px 5px;border-radius:4px}
-.about{font-size:13px;color:var(--text-2);max-width:820px;white-space:pre-wrap;line-height:1.6}
+.about{font-size:13.5px;color:var(--text-2);max-width:980px;line-height:1.65} .about p{margin:0 0 12px} .about ul{margin:0 0 12px;padding-left:20px} .about li{margin:0 0 6px} .about b{color:var(--text);font-weight:600}
 .tip{position:fixed;pointer-events:none;background:var(--text);color:var(--bg);padding:6px 9px;border-radius:7px;font-size:12px;max-width:360px;display:none;z-index:9;box-shadow:var(--shadow)}
 </style></head><body>
 <header><div class="brand"><h1>__TITLE__</h1><span>tests/feature-map · rebuild with <span class="mono">tests/tools/feature-map.py render</span></span></div><div class="kpis" id="kpis"></div></header>
@@ -220,6 +220,15 @@ document.querySelector('[data-mode=area]').innerHTML=ic('grid')+'Areas';document
 document.getElementById('qi').innerHTML=ic('search');
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const md=s=>esc(s).replace(/`([^`]+)`/g,'<code>$1</code>');
+// The about text: paragraphs and "- " lists, their wrapped lines joined; **bold** and `code`.
+const inl=s=>md(s).replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>');
+function prose(t){const out=[];let list=null,para=[];const flush=()=>{if(para.length){out.push(`<p>${inl(para.join(' '))}</p>`);para=[]}};
+ for(const raw of t.split('\n')){const l=raw.trim();
+  if(!l){flush();if(list){out.push(`<ul>${list.map(x=>`<li>${inl(x)}</li>`).join('')}</ul>`);list=null}continue}
+  if(l.startsWith('- ')){flush();(list=list||[]).push(l.slice(2));continue}
+  if(list&&raw.startsWith('  ')){list[list.length-1]+=' '+l;continue}
+  para.push(l)}
+ flush();if(list)out.push(`<ul>${list.map(x=>`<li>${inl(x)}</li>`).join('')}</ul>`);return out.join('')}
 const F=Object.fromEntries(D.features.map(f=>[f.id,f]));
 const cov=f=>f.agent.length?'ok':f.manual.length?'man':'no';
 const COV={ok:'Covered by an agent case',man:'Manual cases only',no:'Not covered'};
@@ -260,7 +269,7 @@ const item=(id,txt,side,lead='')=>`<div class="item">${lead}<span class="id">${i
 function pane(){const el=document.getElementById('pane'),[k,v]=(S.sel||':').split(/:(.*)/s);let h='';
  if(!S.sel||k==='m'){h=`<div class="crumb">${ic('grid')} Overview</div><h2>Coverage by area</h2><div class="legend">${['ok','man','no'].map(c=>`<span>${st(c)} ${COV[c]}</span>`).join('')}</div><div class="grid">`+
   D.areas.map(a=>{const fs=D.features.filter(f=>f.area===a.prefix),{o,m,n}=counts(fs);return `<div class="tile${a.status==='rework'?' rework':''}" data-sel="a:${a.prefix}">${ring(fs)}<div class="t"><b>${esc(a.name)}</b><span class="mut">${n} features · ${o} agent · ${m} manual${a.status==='rework'?' · rework':''}</span></div></div>`}).join('')+'</div>'+
-  `<h3>About this map</h3><div class="about">${esc(D.about)}</div>`}
+  `<h3>About this map</h3><div class="about">${prose(D.about)}</div>`}
  else if(k==='a'){const a=D.areas.find(x=>x.prefix===v),fs=D.features.filter(f=>f.area===v);
   h=`<div class="crumb">${ic('folder')} Area · F-${esc(v)}${a.status==='rework'?' · being reworked':''}</div><div style="display:flex;gap:16px;align-items:center">${ring(fs,64)}<div><h2>${esc(a.name)}</h2><div class="mut">${esc(a.notes)}</div></div></div>`;
   for(const c of ['no','man','ok']){const g=fs.filter(f=>cov(f)===c);if(!g.length)continue;h+=`<h3>${st(c)} ${COV[c]} · ${g.length}</h3><div class="card list">${g.map(f=>item(`<a class="lnk" data-sel="f:${f.id}">${f.id}</a>`,md(f.feature),prio(f.priority)+' '+(f.check==='agent'?ic('bot'):ic('hand')))).join('')}</div>`}}
