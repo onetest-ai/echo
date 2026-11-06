@@ -3,6 +3,7 @@ id: TC-012
 title: Each AI profile's minutes model is used, and a wrong one is explained
 priority: medium
 type: functional
+requirements: [F-AI-01, F-SET-12, F-AI-08]
 module: claude
 run: manual
 platform: macos

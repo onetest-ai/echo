@@ -1,0 +1,81 @@
+{
+ "prefix": "PRIV",
+ "name": "Privacy",
+ "order": 270,
+ "status": "stable",
+ "notes": "Opt-in, local data, what leaves the computer",
+ "features": [
+  {
+   "id": "F-PRIV-01",
+   "feature": "Nothing is recorded unless the user opts in for that call; a meeting series records only when set to",
+   "priority": "critical",
+   "check": "manual",
+   "axes": [
+    "series.record",
+    "set.when_record"
+   ]
+  },
+  {
+   "id": "F-PRIV-02",
+   "feature": "Only Teams' audio is recorded as the other side (macOS)",
+   "priority": "critical",
+   "check": "manual",
+   "axes": []
+  },
+  {
+   "id": "F-PRIV-03",
+   "feature": "No audio is kept once a call is transcribed, unless Keep audio files is on",
+   "priority": "critical",
+   "check": "manual",
+   "axes": [
+    "set.audio"
+   ]
+  },
+  {
+   "id": "F-PRIV-04",
+   "feature": "Transcription works offline, on the computer or a server the user connected",
+   "priority": "critical",
+   "check": "manual",
+   "axes": [
+    "set.server"
+   ]
+  },
+  {
+   "id": "F-PRIV-05",
+   "feature": "Echo connects only where the user expects (their AI profile, Microsoft 365, GitHub for updates and marketplaces, their servers)",
+   "priority": "critical",
+   "check": "manual",
+   "axes": []
+  },
+  {
+   "id": "F-PRIV-06",
+   "feature": "Sign-in tokens and keys are private files and never logged",
+   "priority": "critical",
+   "check": "manual",
+   "axes": []
+  },
+  {
+   "id": "F-PRIV-07",
+   "feature": "A call's text goes only to the AI profile pinned to it",
+   "priority": "critical",
+   "check": "manual",
+   "axes": [
+    "call.profile"
+   ]
+  },
+  {
+   "id": "F-PRIV-08",
+   "feature": "Text from others (titles, transcripts, chat, minutes, mail, names, plugin text) is shown as text, never run: no markup or script from it takes effect",
+   "priority": "critical",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-PRIV-09",
+   "feature": "A Claude Code session sends or creates nothing on the user's behalf (mail, Teams message, task) without an explicit yes to that item",
+   "priority": "critical",
+   "check": "manual",
+   "axes": []
+  }
+ ]
+}

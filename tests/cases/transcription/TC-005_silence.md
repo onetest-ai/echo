@@ -3,6 +3,7 @@ id: TC-005
 title: Silence produces no made-up text
 priority: medium
 type: functional
+requirements: [F-STT-03]
 module: transcription
 run: manual
 platform: macos

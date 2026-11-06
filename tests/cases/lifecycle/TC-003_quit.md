@@ -3,6 +3,7 @@ id: TC-003
 title: Quit leaves no process and restarts normally
 priority: high
 type: functional
+requirements: [F-LIFE-03]
 module: lifecycle
 run: manual
 platform: macos

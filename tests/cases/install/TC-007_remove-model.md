@@ -3,6 +3,7 @@ id: TC-007
 title: Remove a model; the one in use is protected
 priority: low
 type: functional
+requirements: [F-SET-09, F-LIFE-01]
 module: install
 run: manual
 platform: any

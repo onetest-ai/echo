@@ -3,6 +3,7 @@ id: TC-003
 title: Use the default data folder
 priority: high
 type: functional
+requirements: [F-LIFE-01]
 module: install
 run: manual
 platform: any

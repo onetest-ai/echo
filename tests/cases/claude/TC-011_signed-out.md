@@ -3,6 +3,7 @@ id: TC-011
 title: Claude Code signed out: the window says what to do, and Try again works after signing in
 priority: high
 type: functional
+requirements: [F-MIN-09, F-AI-04]
 module: claude
 run: manual
 platform: macos

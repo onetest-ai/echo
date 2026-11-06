@@ -3,6 +3,7 @@ id: TC-003
 title: Settings installs echoctl on the PATH
 priority: high
 type: functional
+requirements: [F-SET-05]
 module: cli
 run: manual
 platform: macos

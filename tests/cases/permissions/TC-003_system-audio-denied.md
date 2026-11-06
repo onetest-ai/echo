@@ -3,6 +3,7 @@ id: TC-003
 title: System audio denied is flagged, not silently recorded
 priority: critical
 type: functional
+requirements: [F-SET-17, F-REC-15]
 module: permissions
 run: manual
 platform: macos

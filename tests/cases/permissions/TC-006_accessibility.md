@@ -3,6 +3,7 @@ id: TC-006
 title: Accessibility enables mute sync and speaker names; without it recording still works
 priority: high
 type: functional
+requirements: [F-SET-17, F-REC-10]
 module: permissions
 run: manual
 platform: macos

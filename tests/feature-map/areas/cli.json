@@ -1,0 +1,104 @@
+{
+ "prefix": "CLI",
+ "name": "CLI",
+ "order": 240,
+ "status": "stable",
+ "notes": "`echoctl` commands not covered by an area above",
+ "features": [
+  {
+   "id": "F-CLI-01",
+   "feature": "`echoctl --help` and each subcommand's `--help` list the commands; most print JSON",
+   "priority": "low",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-CLI-02",
+   "feature": "Every command works on the data folder of `ECHOCTL_HOME` / `ECHOCTL_CONFIG_DIR`",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-CLI-03",
+   "feature": "`echoctl status` without the app reports no watcher and today's agenda",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "app.record"
+   ]
+  },
+  {
+   "id": "F-CLI-04",
+   "feature": "`project list / show / of / people / found` give threads, their calls with why, a call's threads and suggestions, people, candidates — as the window shows them",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "thread.membership",
+    "found.client"
+   ]
+  },
+  {
+   "id": "F-CLI-05",
+   "feature": "`project create / set / rule / include / exclude / reset / delete` change a thread as the window does",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "thread.rules",
+    "thread.stage"
+   ]
+  },
+  {
+   "id": "F-CLI-06",
+   "feature": "`project ledger <id> tree` and `edit` (edit, ac_set, link, merge, delete, accept, reject, undo, create) read and change the work as the user",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "node.kind",
+    "node.state"
+   ]
+  },
+  {
+   "id": "F-CLI-07",
+   "feature": "`project tasks` sorts open tasks into the piles and asks by person",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "card.pile"
+   ]
+  },
+  {
+   "id": "F-CLI-08",
+   "feature": "`context`, `actions`, `action`, `title`, `type`, `note`, `html`, `delete`, `restore` work on one call by folder name or path",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "call.kind"
+   ]
+  },
+  {
+   "id": "F-CLI-09",
+   "feature": "`read <echo://…>` gives the text behind a call (around a moment), thread, client, person, task or prep link, read only",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-CLI-10",
+   "feature": "`series list / set`, `client` and `org` commands, `config` show and change what the window shows",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "series.record",
+    "org.account"
+   ]
+  },
+  {
+   "id": "F-CLI-11",
+   "feature": "`doctor`, `up`, `model`, `app`, `home`, `arm`, `stop`, `join`, `memo`, `calendar` drive the real machine",
+   "priority": "high",
+   "check": "manual",
+   "axes": []
+  }
+ ]
+}

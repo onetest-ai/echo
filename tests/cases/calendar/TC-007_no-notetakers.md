@@ -3,6 +3,7 @@ id: TC-007
 title: A meeting marked no_notetakers is labelled so
 priority: low
 type: functional
+requirements: [F-CAL-05]
 module: calendar
 run: manual
 platform: macos

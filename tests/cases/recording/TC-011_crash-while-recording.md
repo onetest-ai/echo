@@ -3,6 +3,7 @@ id: TC-011
 title: A crash while recording is repaired on restart
 priority: low
 type: functional
+requirements: [F-REC-11]
 module: recording
 run: manual
 platform: macos

@@ -1,0 +1,77 @@
+{
+ "prefix": "PPL",
+ "name": "People",
+ "order": 80,
+ "status": "stable",
+ "notes": "A thread's or a client's People tab and person panel",
+ "features": [
+  {
+   "id": "F-PPL-01",
+   "feature": "People shows Map, Org chart or List (remembered), the stance legend and + Person (on a thread)",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "person.in_thread"
+   ]
+  },
+  {
+   "id": "F-PPL-02",
+   "feature": "The Map places people and organisations by influence × interest in four quadrants, the rest in \"Not placed yet\"; dragging one to a quadrant sets it",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "person.levels"
+   ]
+  },
+  {
+   "id": "F-PPL-03",
+   "feature": "With nobody in the thread it says so and offers the people seen in its calls",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "person.in_thread"
+   ]
+  },
+  {
+   "id": "F-PPL-04",
+   "feature": "The List shows each person's name, new / quiet tags, side (your company, their organisation, their domain) and role (threads, on a client)",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "person.side",
+    "person.recency"
+   ]
+  },
+  {
+   "id": "F-PPL-05",
+   "feature": "A person's panel shows who they are (Echo's summary or the user's), their place in the thread (role, stance, influence, interest, workstream, governance, works for), details (title, organisation, group, reports to, matters, phone), what Echo saw, facts, often with, changes; each value is edited in place",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "person.place",
+    "person.field_source",
+    "person.about",
+    "person.facts"
+   ]
+  },
+  {
+   "id": "F-PPL-06",
+   "feature": "Suggestions from the sync's people pass (\"Is Dana a champion?\", with the quote) are answered Yes / No / Change…; three show, \"N more\"",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "person.suggestion"
+   ]
+  },
+  {
+   "id": "F-PPL-07",
+   "feature": "\"Same person as…\" merges two people, a suggested match is answered, and a merge can be split; an unknown domain offers \"Name this organisation\"",
+   "priority": "low",
+   "check": "agent",
+   "axes": [
+    "person.maybe_same",
+    "person.side"
+   ]
+  }
+ ]
+}

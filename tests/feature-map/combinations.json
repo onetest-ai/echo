@@ -1,0 +1,112 @@
+[
+ {
+  "axes": [
+   "node.owner",
+   "node.delegated",
+   "node.wait",
+   "node.state",
+   "node.due",
+   "node.mode"
+  ],
+  "why": "Decide the Tasks pile (incl. blocked-but-mine and wait cards), Today's My work (this week or late), the Asks panel, the late badge and the Who does it filter"
+ },
+ {
+  "axes": [
+   "node.kind",
+   "node.type",
+   "node.state",
+   "node.text",
+   "node.wait"
+  ],
+  "why": "Decide the status word and colour (answered, handled, no response, held, waiting) and the board column a card lands in"
+ },
+ {
+  "axes": [
+   "call.status",
+   "call.run",
+   "call.auto",
+   "ai.signin",
+   "set.claude_code"
+  ],
+  "why": "Decide what the Minutes tab says and offers, Today's minutes state, the list's ⏱ and the Inbox's minutes items"
+ },
+ {
+  "axes": [
+   "meeting.timing",
+   "meeting.flags",
+   "meeting.recorded",
+   "meeting.transcript",
+   "meeting.scheduled"
+  ],
+  "why": "Decide the calendar card's one action (`EVENT_ACTIONS`) and the block's style"
+ },
+ {
+  "axes": [
+   "meeting.response",
+   "meeting.timing",
+   "meeting.prep",
+   "meeting.recorded"
+  ],
+  "why": "Decide which meetings Your day shows and what each offers (Prepare, Show prep, Record when it starts, Import)"
+ },
+ {
+  "axes": [
+   "thread.rules",
+   "thread.membership",
+   "thread.since",
+   "thread.stage"
+  ],
+  "why": "Membership here means pins and exclusions. Decide which calls a thread holds; closed threads take no new calls; a suggestion never assigns"
+ },
+ {
+  "axes": [
+   "call.kind",
+   "call.threads",
+   "call.type_by"
+  ],
+  "why": "Decide the call header's chips (memo spans and ×, suggestion bar, guess vs. set type)"
+ },
+ {
+  "axes": [
+   "person.in_thread",
+   "person.levels",
+   "person.side"
+  ],
+  "why": "Decide where a person sits (map quadrant, tray, list side)"
+ },
+ {
+  "axes": [
+   "plugin.offer",
+   "plugin.enabled",
+   "plugin.update",
+   "market.kind",
+   "plugin.uses"
+  ],
+  "why": "Decide the card's button, the sheet's warning and lines, and the Inbox's plugin update"
+ },
+ {
+  "axes": [
+   "app.record",
+   "ai.count",
+   "ai.signin"
+  ],
+  "why": "Decide the Record pill's content, its pickers and sign-in note"
+ },
+ {
+  "axes": [
+   "live.enabled",
+   "live.state",
+   "call.status",
+   "ai.count"
+  ],
+  "why": "Decide the live header, the model picker and why there are no notes yet"
+ },
+ {
+  "axes": [
+   "inbox.kind",
+   "inbox.urgent",
+   "inbox.count"
+  ],
+  "why": "Decide grouping, order, folding and the activity bar badge's colour"
+ }
+]

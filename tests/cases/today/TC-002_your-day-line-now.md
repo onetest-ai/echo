@@ -3,6 +3,7 @@ id: TC-002
 title: Your day draws the line "now" between past and coming meetings
 priority: medium
 type: regression
+requirements: [F-TODAY-02]
 module: today
 run: agent
 platform: any

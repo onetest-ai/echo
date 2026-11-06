@@ -3,6 +3,7 @@ id: TC-005
 title: Skip the model at first run and download it later
 priority: high
 type: functional
+requirements: [F-LIFE-01, F-SET-09]
 module: install
 run: manual
 platform: any

@@ -3,6 +3,7 @@ id: TC-006
 title: Notifications come from Echo and open its window
 priority: high
 type: functional
+requirements: [F-LIFE-06]
 module: lifecycle
 run: manual
 platform: macos

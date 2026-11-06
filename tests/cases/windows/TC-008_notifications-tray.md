@@ -3,6 +3,7 @@ id: TC-008
 title: Notifications and the tray icon on Windows
 priority: high
 type: functional
+requirements: [F-WIN-06]
 module: windows
 run: manual
 platform: windows

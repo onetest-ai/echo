@@ -3,6 +3,7 @@ id: TC-002
 title: Install and first run on Windows
 priority: critical
 type: functional
+requirements: [F-WIN-01]
 module: windows
 run: manual
 platform: windows

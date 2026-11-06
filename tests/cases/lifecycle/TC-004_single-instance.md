@@ -3,6 +3,7 @@ id: TC-004
 title: Only one Echo runs at a time
 priority: high
 type: functional
+requirements: [F-LIFE-04]
 module: lifecycle
 run: manual
 platform: macos

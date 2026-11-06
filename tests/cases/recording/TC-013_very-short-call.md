@@ -3,6 +3,7 @@ id: TC-013
 title: A very short call gets a transcript and no automatic minutes
 priority: low
 type: functional
+requirements: [F-MIN-08]
 module: recording
 run: manual
 platform: macos

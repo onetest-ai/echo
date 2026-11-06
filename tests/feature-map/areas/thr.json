@@ -1,0 +1,205 @@
+{
+ "prefix": "THR",
+ "name": "Threads",
+ "order": 60,
+ "status": "stable",
+ "notes": "List, create, delete, brief, calls, profile (stage, client, rules, sources), Found for you, sync",
+ "features": [
+  {
+   "id": "F-THR-01",
+   "feature": "The Threads list groups open threads by client (outside clients first, then the user's company, then No client); each client folds (remembered) and its name opens the client; closed threads sit under \"Closed · N\"",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "thread.stage",
+    "thread.client",
+    "org.internal"
+   ]
+  },
+  {
+   "id": "F-THR-02",
+   "feature": "Each thread row shows its icon, name, call count and last call day; Threads opens the last thread on its tab; with none picked \"Pick a thread\", with none at all \"No threads yet\"",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "thread.calls",
+    "thread.look"
+   ]
+  },
+  {
+   "id": "F-THR-03",
+   "feature": "\"Found for you\" shows its count in the list and as a badge on the Threads activity",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "found.count"
+   ]
+  },
+  {
+   "id": "F-THR-04",
+   "feature": "New thread (+) opens a name box and a client choice; Enter makes the thread",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "thread.client"
+   ]
+  },
+  {
+   "id": "F-THR-05",
+   "feature": "A new thread can be made from a call's \"+ Thread\" or a calendar card: named after it, the call pinned (?)",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "call.threads",
+    "meeting.threads"
+   ],
+   "review": true
+  },
+  {
+   "id": "F-THR-06",
+   "feature": "Thread actions → Delete… asks first; Move to trash removes the thread (brief, profile, work) and leaves its calls",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "thread.calls"
+   ]
+  },
+  {
+   "id": "F-THR-07",
+   "feature": "A thread is renamed with `echoctl project set <id> --name` (no window control) and the window shows the new name",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-THR-08",
+   "feature": "A thread's header shows icon, name, client tag, stage tag, call count, since, last call; tabs Brief, Work (open count), Calls (count), People (count), Profile",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "thread.stage",
+    "thread.client"
+   ]
+  },
+  {
+   "id": "F-THR-09",
+   "feature": "Thread actions lists Open <client>, Claude about this thread, Sync now, Delete…",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "thread.client"
+   ]
+  },
+  {
+   "id": "F-THR-10",
+   "feature": "Brief shows the thread's own Markdown (or \"Nothing yet…\") and its 5 latest calls; Edit, ⌘S saves, Esc cancels",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "thread.brief"
+   ]
+  },
+  {
+   "id": "F-THR-11",
+   "feature": "Calls lists each call with why it belongs (meeting series, client's people, Teams chat, subject, added by hand); Unpin for a pinned one, Take out for one a rule put in; \"N taken out by hand\"",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "thread.membership"
+   ]
+  },
+  {
+   "id": "F-THR-12",
+   "feature": "Profile → Stage picks one of Lead, Proposal, Negotiation, Kickoff, Active, On hold, Wrap-up, Done, Lost, Cancelled, shows its history; a closed stage moves the thread to Closed and it takes no call started after",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "thread.stage"
+   ]
+  },
+  {
+   "id": "F-THR-13",
+   "feature": "Profile → Client chooses, changes or clears the client, or makes a new one inline; Organisations adds an existing or new counterpart, × unlinks it",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "thread.client",
+    "thread.orgs"
+   ]
+  },
+  {
+   "id": "F-THR-14",
+   "feature": "Profile → Calls adds rules (meeting series, the client's people, subject contains, Teams chat) and removes them; the count of matching, pinned and taken-out calls follows",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "thread.rules",
+    "thread.membership"
+   ]
+  },
+  {
+   "id": "F-THR-15",
+   "feature": "Profile → Since, History (only with Recall on), Notes for Claude, Look (colour, own logo), AI profile and model are edited in place and saved at once",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "thread.since",
+    "thread.notes",
+    "thread.look",
+    "thread.ai",
+    "set.recall"
+   ]
+  },
+  {
+   "id": "F-THR-16",
+   "feature": "Profile → Meetings lists the thread's meeting series read only (next, calls); × says the series isn't this thread's",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "series.key"
+   ]
+  },
+  {
+   "id": "F-THR-17",
+   "feature": "Profile → Sources shows meeting chats (offered from its calls), channels, mail (suggested from the client's domains) and folders with how each was read or its error; without Recall or Microsoft 365 it says what is and isn't read",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "thread.sources",
+    "set.recall",
+    "m365.signin"
+   ]
+  },
+  {
+   "id": "F-THR-18",
+   "feature": "Found for you lists candidate threads (a series, an organisation, a chat) with why, their calls, a client choice (none / new from the domain / existing) and Add to a thread; Accept makes it, Reject never suggests it again",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "found.client",
+    "found.org"
+   ]
+  },
+  {
+   "id": "F-THR-19",
+   "feature": "Membership is computed from rules, pins, exclusions, since and closed stage — never written into a call; suggestions never assign (`project show`, `project of`)",
+   "priority": "critical",
+   "check": "agent",
+   "axes": [
+    "thread.rules",
+    "thread.membership",
+    "thread.stage"
+   ]
+  },
+  {
+   "id": "F-THR-20",
+   "feature": "A thread's sync (extract, verify, people) runs on its AI profile after its calls are 15 minutes old, or on Sync now, and reads them into its work",
+   "priority": "high",
+   "check": "manual",
+   "axes": [
+    "thread.sync",
+    "thread.ai"
+   ]
+  }
+ ]
+}

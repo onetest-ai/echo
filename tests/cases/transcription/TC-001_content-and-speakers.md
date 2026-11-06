@@ -3,6 +3,7 @@ id: TC-001
 title: The transcript has the right words, speakers and order
 priority: critical
 type: functional
+requirements: [F-TR-01, F-STT-04, F-STT-03]
 module: transcription
 run: manual
 platform: any

@@ -3,6 +3,7 @@ id: TC-001
 title: Connect Claude Code installs Echo's plugin
 priority: high
 type: functional
+requirements: [F-CC-06]
 module: claude
 run: manual
 platform: macos

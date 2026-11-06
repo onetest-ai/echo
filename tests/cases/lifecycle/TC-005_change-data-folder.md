@@ -3,6 +3,7 @@ id: TC-005
 title: Changing the data folder restarts on it and leaves the old one alone
 priority: low
 type: functional
+requirements: [F-LIFE-05]
 module: lifecycle
 run: manual
 platform: macos

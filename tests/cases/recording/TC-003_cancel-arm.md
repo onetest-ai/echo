@@ -3,6 +3,7 @@ id: TC-003
 title: Cancelling an arm records nothing
 priority: high
 type: functional
+requirements: [F-REC-02, F-REC-03]
 module: recording
 run: manual
 platform: macos

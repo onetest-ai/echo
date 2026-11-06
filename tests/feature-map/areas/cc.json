@@ -1,0 +1,90 @@
+{
+ "prefix": "CC",
+ "name": "Claude Code runs",
+ "order": 220,
+ "status": "stable",
+ "notes": "The guard, claims, the Claude panel, the plugin",
+ "features": [
+  {
+   "id": "F-CC-01",
+   "feature": "A minutes run can read only its call's folder (and the previous minutes of the meeting), write only `notes.md` and its actions file, and run only Echo's run commands, whatever the user's settings allow",
+   "priority": "critical",
+   "check": "manual",
+   "axes": []
+  },
+  {
+   "id": "F-CC-02",
+   "feature": "A run is refused when admin policy can switch hooks off, or Claude Code is older than Echo needs",
+   "priority": "high",
+   "check": "manual",
+   "axes": [
+    "ai.kind"
+   ]
+  },
+  {
+   "id": "F-CC-03",
+   "feature": "One run per call: a session's claim holds while its process works; an explicit Write minutes takes over a session's fresh claim, automatic minutes yield",
+   "priority": "high",
+   "check": "manual",
+   "axes": [
+    "call.run",
+    "call.auto"
+   ]
+  },
+  {
+   "id": "F-CC-04",
+   "feature": "A thread's sync runs may only read its ledger and write their own run files; a Yolo run may change only its own task",
+   "priority": "high",
+   "check": "manual",
+   "axes": []
+  },
+  {
+   "id": "F-CC-05",
+   "feature": "The Claude panel (status bar, ⌘`, ⌘K) runs the Echo-folder session; closing the window keeps it; Restart and New conversation ask first while it runs; it knows what the window shows",
+   "priority": "medium",
+   "check": "manual",
+   "axes": [
+    "ai.default"
+   ]
+  },
+  {
+   "id": "F-CC-06",
+   "feature": "Connect Claude Code installs Echo's plugin where Echo's sessions run; older installs show in Health and the Inbox with Update it",
+   "priority": "high",
+   "check": "manual",
+   "axes": [
+    "set.claude_code"
+   ]
+  },
+  {
+   "id": "F-CC-07",
+   "feature": "The status line in a Claude Code session shows Echo, recording / armed / next meeting, and toasts a failed transcription or an expired arm",
+   "priority": "medium",
+   "check": "manual",
+   "axes": [
+    "app.record"
+   ]
+  },
+  {
+   "id": "F-CC-08",
+   "feature": "In a Claude Code session, /echo:doctor is quiet when Echo is fine and, with something missing (a permission), names it and opens its settings page without changing anything",
+   "priority": "high",
+   "check": "manual",
+   "axes": []
+  },
+  {
+   "id": "F-CC-09",
+   "feature": "In a Claude Code session, plain words arm, pin the language of and stop a recording (\"record my next call in Ukrainian\", \"stop recording\")",
+   "priority": "medium",
+   "check": "manual",
+   "axes": []
+  },
+  {
+   "id": "F-CC-10",
+   "feature": "In a Claude Code session, the live pane follows a recording: a band above the prompt with [ Live ], the transcript as it comes, then a rolling summary, highlights and actions",
+   "priority": "medium",
+   "check": "manual",
+   "axes": []
+  }
+ ]
+}

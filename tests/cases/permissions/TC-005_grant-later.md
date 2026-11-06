@@ -3,6 +3,7 @@ id: TC-005
 title: A permission granted later is picked up
 priority: high
 type: functional
+requirements: [F-SET-17]
 module: permissions
 run: manual
 platform: macos

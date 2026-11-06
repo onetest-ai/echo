@@ -3,6 +3,7 @@ id: TC-002
 title: With start at login off, Echo doesn't start
 priority: low
 type: functional
+requirements: [F-LIFE-02]
 module: lifecycle
 run: manual
 platform: any

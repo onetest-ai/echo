@@ -3,6 +3,7 @@ id: TC-014
 title: Notes during a recording: Time inserts the call's time; tray notes join them
 priority: high
 type: functional
+requirements: [F-NOTES-10]
 module: window
 run: manual
 platform: macos

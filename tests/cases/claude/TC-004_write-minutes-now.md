@@ -3,6 +3,7 @@ id: TC-004
 title: Write minutes from the window, and for a call too short for automatic ones
 priority: high
 type: functional
+requirements: [F-MIN-13, F-MIN-08]
 module: claude
 run: manual
 platform: macos

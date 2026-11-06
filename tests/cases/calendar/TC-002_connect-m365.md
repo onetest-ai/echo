@@ -3,6 +3,7 @@ id: TC-002
 title: Connect Microsoft 365 signs in and fills the calendar
 priority: high
 type: functional
+requirements: [F-M365-01, F-PRIV-06]
 module: calendar
 run: manual
 platform: macos

@@ -3,6 +3,7 @@ id: TC-001
 title: Record the next call from the menu
 priority: critical
 type: functional
+requirements: [F-REC-02, F-REC-08, F-REC-13]
 module: recording
 run: manual
 platform: macos

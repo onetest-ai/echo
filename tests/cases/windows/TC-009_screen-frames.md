@@ -3,6 +3,7 @@ id: TC-009
 title: Shared-screen frames on Windows
 priority: low
 type: functional
+requirements: [F-WIN-06, F-REC-12]
 module: windows
 run: manual
 platform: windows

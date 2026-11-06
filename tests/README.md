@@ -8,6 +8,8 @@ to the code (`cargo test`, `scripts/check-mod.sh`).
 |---|---|
 | `cases/<area>/TC-NNN_<slug>.md` | One behaviour each (the unit of coverage), in the manual-qa format; `run: agent` (an agent runs it) or `run: manual` (a person) |
 | `scenarios/S-NN_<slug>.md` | A user's journey that chains cases by path, in stages: what agent runs execute |
+| `feature-map/` | The functional map: `areas/<prefix>.json` (features), `axes/<entity>.json` (state axes), combinations, hostile content |
+| `tools/feature-map.py check` / `render` | Checks the map and the cases' links; draws the map with coverage to `reports/feature-map.html` |
 | `app_profile.md` | Echo for the test agents: rules, starting the app on test data, the data, routes, fragile areas |
 | `fixtures/make-data.sh <dir>` | Builds a made-up data folder (Acme, Globex, Initech; calls, threads, tasks, today's agenda) |
 | `fixtures/serve.sh up <dir> <port>` / `down <dir>` | Fresh data plus the window served on it, for one scenario |

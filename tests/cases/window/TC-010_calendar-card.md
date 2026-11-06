@@ -3,6 +3,7 @@ id: TC-010
 title: A meeting's card opens beside it and closes
 priority: medium
 type: functional
+requirements: [F-CAL-07, F-CAL-08]
 module: window
 run: agent
 platform: any
@@ -29,8 +30,8 @@ external_id: TC-WIN-009
 |---|--------|----------------|
 | 1 | Navigate to `{{base_url}}/#calendar/week` | Today's column has Globex design review |
 | 2 | Click "Globex design review" | A card opens beside the meeting, fully inside the window: title, date and time, Organizer "Sam Rivera", People, "Record when it starts", "+ Thread", "Prepare" and "Close" |
-| 3 | Scroll the grid a little | The card stays level with the meeting |
+| 3 | Scroll the grid a little | The card stays with the meeting and fully inside the window (level with it where there is room; near the window's bottom it is held inside) |
 | 4 | Click "Close" on the card | The card goes |
 
 ## Expected Final State
-The card opens beside its meeting, follows it on scroll and closes.
+The card opens beside its meeting, stays with it inside the window on scroll, and closes.

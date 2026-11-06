@@ -3,6 +3,7 @@ id: TC-011
 title: The native window opens and closes with its Dock icon
 priority: medium
 type: functional
+requirements: [F-LIFE-08]
 module: window
 run: manual
 platform: macos

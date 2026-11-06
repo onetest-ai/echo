@@ -3,6 +3,7 @@ id: TC-002
 title: Search filters the Calls list by title and by person
 priority: high
 type: functional
+requirements: [F-CALLS-03]
 module: window
 run: agent
 platform: any

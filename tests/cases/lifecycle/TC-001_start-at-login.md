@@ -3,6 +3,7 @@ id: TC-001
 title: Echo starts at login when set to
 priority: high
 type: functional
+requirements: [F-LIFE-02]
 module: lifecycle
 run: manual
 platform: any

@@ -3,6 +3,7 @@ id: TC-001
 title: The Calls list groups calls by day, newest first
 priority: high
 type: functional
+requirements: [F-CALLS-01]
 module: window
 run: agent
 platform: any

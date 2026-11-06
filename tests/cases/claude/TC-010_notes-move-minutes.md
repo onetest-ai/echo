@@ -3,6 +3,7 @@ id: TC-010
 title: A note added after the call moves the minutes' time
 priority: medium
 type: functional
+requirements: [F-MIN-14, F-NOTES-06]
 module: claude
 run: manual
 platform: macos

@@ -3,6 +3,7 @@ id: TC-005
 title: A meeting set to record arms itself and records when joined
 priority: critical
 type: functional
+requirements: [F-CAL-10]
 module: calendar
 run: manual
 platform: macos

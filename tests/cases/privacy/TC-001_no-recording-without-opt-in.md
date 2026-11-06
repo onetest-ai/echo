@@ -3,6 +3,7 @@ id: TC-001
 title: Nothing records without opting in
 priority: critical
 type: functional
+requirements: [F-PRIV-01, F-REC-03]
 module: privacy
 run: manual
 platform: any

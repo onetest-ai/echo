@@ -3,6 +3,7 @@ id: TC-010
 title: The Mac sleeping closes the recording
 priority: low
 type: functional
+requirements: [F-REC-11]
 module: recording
 run: manual
 platform: macos

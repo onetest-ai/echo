@@ -3,6 +3,7 @@ id: TC-007
 title: An update is offered and installed, keeping everything
 priority: high
 type: functional
+requirements: [F-LIFE-07]
 module: lifecycle
 run: manual
 platform: macos

@@ -3,6 +3,7 @@ id: TC-002
 title: /echo:doctor reports a healthy setup and explains a missing permission
 priority: high
 type: functional
+requirements: [F-CC-08]
 module: claude
 run: manual
 platform: macos

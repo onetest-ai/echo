@@ -3,6 +3,7 @@ id: TC-008
 title: Declined and cancelled meetings are greyed and not offered for recording
 priority: low
 type: functional
+requirements: [F-CAL-05]
 module: calendar
 run: manual
 platform: macos

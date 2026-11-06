@@ -3,6 +3,7 @@ id: TC-006
 title: A long call transcribes and the Mac stays usable
 priority: medium
 type: functional
+requirements: [F-STT-06, F-STT-01]
 module: transcription
 run: manual
 platform: macos

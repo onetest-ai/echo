@@ -1,0 +1,171 @@
+{
+ "prefix": "WORK",
+ "name": "Work ledger",
+ "order": 70,
+ "status": "stable",
+ "notes": "A thread's Work tab and the Details drawer",
+ "features": [
+  {
+   "id": "F-WORK-01",
+   "feature": "The Work tab has saved views (Board, Tree, + New view; rename, duplicate, delete), remembered per thread",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "view.layout"
+   ]
+  },
+  {
+   "id": "F-WORK-02",
+   "feature": "The bar filters by layout, kind (with counts), owner (Anyone, Nobody named, each name) and Open only; on a board Group by (none, story, owner) and Fields ▾",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "node.kind",
+    "node.owner",
+    "node.state",
+    "view.filters",
+    "view.group"
+   ]
+  },
+  {
+   "id": "F-WORK-03",
+   "feature": "The sync line says Not synced yet / Synced HH:MM / Reading… / Sync failed, how many calls wait to be read and how many items wait for review",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "thread.sync",
+    "thread.review"
+   ]
+  },
+  {
+   "id": "F-WORK-04",
+   "feature": "The board's columns (To do, In progress, Waiting, Blocked, Done) hold tasks and questions; a card shows id, story, owner avatar (client-owed marked), title, kind, due (late in red), waiting on, holds up, last call",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "node.state",
+    "node.wait",
+    "node.due",
+    "node.owner",
+    "node.type"
+   ]
+  },
+  {
+   "id": "F-WORK-05",
+   "feature": "Dragging a card to another column sets its state as the user's edit (undoable); Waiting takes no drop",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "node.state",
+    "node.column"
+   ]
+  },
+  {
+   "id": "F-WORK-06",
+   "feature": "A column's menu renames, recolours, sets its state and limit (over the limit shows), moves, hides or deletes it (not the last of its state); + Column adds one; \"N hidden\" shows them again",
+   "priority": "low",
+   "check": "agent",
+   "axes": [
+    "view.columns"
+   ]
+  },
+  {
+   "id": "F-WORK-07",
+   "feature": "The tree shows workstreams › stories (criteria m / n, due) › tasks and questions, decisions and risks at the story's level, with statuses (to do, answered, handled, no response, held, waiting…)",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "node.kind",
+    "node.type",
+    "node.state",
+    "node.text"
+   ]
+  },
+  {
+   "id": "F-WORK-08",
+   "feature": "\"To review\" lists suggested merges and moves (Yes / No) and weak \"done\"s (\"Is X done?\")",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "node.suggestion",
+    "node.history"
+   ]
+  },
+  {
+   "id": "F-WORK-09",
+   "feature": "A card or row opens the Details drawer: id, kind, Send to Claude (tasks, stories, questions), the title (click to edit), thread › story path, the description or a record's Answer / Decision / Response (Markdown, Add / edit, ⌘S)",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "node.kind",
+    "node.text"
+   ]
+  },
+  {
+   "id": "F-WORK-10",
+   "feature": "Details → Status changes the state (to do, in progress, blocked, done or held, cancelled; a question open / answered); History says \"you set state · undo\" and `echoctl project tasks` shows it",
+   "priority": "critical",
+   "check": "agent",
+   "axes": [
+    "node.state",
+    "node.kind"
+   ]
+  },
+  {
+   "id": "F-WORK-11",
+   "feature": "Details edits Owner, Handed over by, Due, Decided by, Likelihood and Impact as fit the kind; criteria are ticked in \"Done when · m of n\"",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "node.kind",
+    "node.criteria",
+    "node.risk_levels"
+   ]
+  },
+  {
+   "id": "F-WORK-12",
+   "feature": "Details → Who does it switches Claude can / By hand (Echo's guess shown faded) with its How or what Claude hands back",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "node.mode"
+   ]
+  },
+  {
+   "id": "F-WORK-13",
+   "feature": "History lists the user's edits (each with undo) and the sync's entries with quote, speaker, source (a call's moment opens the call, a mail opens Outlook) and mark (verified, weak, wrong, to check, kept yours); undo restores the value before",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "node.history"
+   ]
+  },
+  {
+   "id": "F-WORK-14",
+   "feature": "Waits for, Holds up and Waiting on link to those items; Copy link gives `echo://task/<thread>/<id>`",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "node.wait"
+   ]
+  },
+  {
+   "id": "F-WORK-15",
+   "feature": "\"Link to an item in another thread\" finds open items by title or id; Same work · done there / done here, or depends; a mirror shows its master's status, owner and due; Unlink undoes both sides",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "node.xthread"
+   ]
+  },
+  {
+   "id": "F-WORK-16",
+   "feature": "A field the user set is never overwritten by a later sync: the call's words are kept in history as \"kept yours\"",
+   "priority": "critical",
+   "check": "manual",
+   "axes": [
+    "node.history"
+   ]
+  }
+ ]
+}

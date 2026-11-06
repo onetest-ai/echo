@@ -3,6 +3,7 @@ id: TC-003
 title: A call with minutes opens on its Minutes with their sections
 priority: critical
 type: functional
+requirements: [F-CALLS-05, F-CALLS-06, F-CALLS-07, F-MIN-01, F-MIN-02, F-MIN-04]
 module: window
 run: agent
 platform: any

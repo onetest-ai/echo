@@ -3,6 +3,7 @@ id: TC-007
 title: Shared-screen snapshots: opt-in, needs Screen Recording, one frame per change
 priority: medium
 type: functional
+requirements: [F-REC-12, F-SET-08]
 module: permissions
 run: manual
 platform: macos

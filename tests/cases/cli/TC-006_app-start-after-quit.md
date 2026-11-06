@@ -3,6 +3,7 @@ id: TC-006
 title: echoctl app start brings Echo back after a quit
 priority: low
 type: functional
+requirements: [F-LIFE-03, F-CLI-03]
 module: cli
 run: manual
 platform: macos

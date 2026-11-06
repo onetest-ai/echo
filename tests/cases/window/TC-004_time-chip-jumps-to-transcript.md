@@ -3,6 +3,7 @@ id: TC-004
 title: A time chip in the minutes jumps to that moment of the transcript
 priority: high
 type: functional
+requirements: [F-MIN-03]
 module: window
 run: agent
 platform: any

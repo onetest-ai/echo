@@ -1,0 +1,86 @@
+{
+ "prefix": "PREP",
+ "name": "Prep",
+ "order": 120,
+ "status": "stable",
+ "notes": "Meeting preps, Coming up today",
+ "features": [
+  {
+   "id": "F-PREP-01",
+   "feature": "Calls → \"Coming up today\" (folded) counts today's meetings still to come and names the next (\"Now\" for one going on); open, each row shows time, length, people, thread icons and opens its prep",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "meeting.timing",
+    "prep.state"
+   ]
+  },
+  {
+   "id": "F-PREP-02",
+   "feature": "A coming meeting opens like a call: date, length, people, thread chips (+ Thread), Copy link, a Prep tab; Transcript and Minutes are disabled until it is recorded",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "prep.thread"
+   ]
+  },
+  {
+   "id": "F-PREP-03",
+   "feature": "Without a prep it says \"No prep yet\" (a thread's meetings get one in the morning; others are prepared when asked); while written, \"Writing the prep…\" until it is there",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "prep.state",
+    "prep.thread"
+   ]
+  },
+  {
+   "id": "F-PREP-04",
+   "feature": "A prep shows In short, Expected from you (or \"Nothing waits on you\"), Last time (highlights, Still to do), Open with these people, New since then (titles and senders only), Who's coming (ten, new first), when and with which model it was written, Write it again",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "prep.sections",
+    "prep.people"
+   ]
+  },
+  {
+   "id": "F-PREP-05",
+   "feature": "Preps are written by themselves for today's meetings of open threads, at least 5 minutes before they start",
+   "priority": "high",
+   "check": "manual",
+   "axes": [
+    "prep.thread"
+   ]
+  },
+  {
+   "id": "F-PREP-06",
+   "feature": "Prepare (Today, calendar card, Coming up today, ⌘K) writes a prep with the threads' AI profile and opens it; In short only when all its threads share one profile",
+   "priority": "high",
+   "check": "manual",
+   "axes": [
+    "prep.profiles",
+    "meeting.prep"
+   ]
+  },
+  {
+   "id": "F-PREP-07",
+   "feature": "A recorded call whose meeting had a prep has a Prep tab (?)",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "call.extras"
+   ],
+   "review": true
+  },
+  {
+   "id": "F-PREP-08",
+   "feature": "`echoctl prep --upcoming` and `--show ID` print today's meetings and a prep as JSON",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "prep.state"
+   ]
+  }
+ ]
+}

@@ -3,6 +3,7 @@ id: TC-009
 title: On the newest version nothing is offered
 priority: low
 type: functional
+requirements: [F-LIFE-07]
 module: lifecycle
 run: manual
 platform: macos

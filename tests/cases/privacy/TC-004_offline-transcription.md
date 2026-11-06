@@ -3,6 +3,7 @@ id: TC-004
 title: Transcription works offline
 priority: critical
 type: functional
+requirements: [F-PRIV-04]
 module: privacy
 run: manual
 platform: macos

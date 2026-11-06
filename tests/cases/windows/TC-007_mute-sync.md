@@ -3,6 +3,7 @@ id: TC-007
 title: Mute sync and Teams UI text on Windows
 priority: high
 type: functional
+requirements: [F-WIN-06, F-REC-10]
 module: windows
 run: manual
 platform: windows

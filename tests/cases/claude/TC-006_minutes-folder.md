@@ -3,6 +3,7 @@ id: TC-006
 title: Minutes run in the chosen folder with its settings
 priority: low
 type: functional
+requirements: [F-SET-12]
 module: claude
 run: manual
 platform: macos

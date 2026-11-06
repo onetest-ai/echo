@@ -3,6 +3,7 @@ id: TC-013
 title: The minutes run can only touch its own call, whatever the user's settings allow
 priority: critical
 type: functional
+requirements: [F-CC-01]
 module: claude
 run: manual
 platform: macos

@@ -1,0 +1,43 @@
+{
+ "prefix": "VOC",
+ "name": "Vocabulary",
+ "order": 170,
+ "status": "stable",
+ "notes": "The Vocabulary panel and `echoctl vocab`",
+ "features": [
+  {
+   "id": "F-VOC-01",
+   "feature": "The Vocabulary panel opens from the book beside Calls, ⌘K or `#settings/vocabulary`",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-VOC-02",
+   "feature": "\"Every call\" terms are added (≤ 50 chars) and removed (×) and saved",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "vocab.list"
+   ]
+  },
+  {
+   "id": "F-VOC-03",
+   "feature": "\"Learned from calls\" lists each term with its meetings, people and calls; Always moves it to every call, Remove forgets it; a filter shows past 6 terms",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "vocab.scope"
+   ]
+  },
+  {
+   "id": "F-VOC-04",
+   "feature": "Transcription hints a call with the always terms, its threads' glossaries and the learned terms of its meeting or people only",
+   "priority": "high",
+   "check": "manual",
+   "axes": [
+    "vocab.scope"
+   ]
+  }
+ ]
+}

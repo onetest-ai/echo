@@ -3,6 +3,7 @@ id: TC-006
 title: Sign-in tokens are private and never logged
 priority: high
 type: functional
+requirements: [F-PRIV-06]
 module: privacy
 run: manual
 platform: macos

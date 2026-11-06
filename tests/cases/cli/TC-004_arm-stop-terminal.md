@@ -3,6 +3,7 @@ id: TC-004
 title: Arming and stopping from the terminal drives the recording like the menu
 priority: medium
 type: functional
+requirements: [F-CLI-11, F-REC-02, F-REC-13]
 module: cli
 run: manual
 platform: macos

@@ -3,6 +3,7 @@ id: TC-009
 title: A recorded meeting's chat comes with the call
 priority: high
 type: functional
+requirements: [F-M365-03, F-CALLS-14, F-PRIV-08]
 module: calendar
 run: manual
 platform: macos

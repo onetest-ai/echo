@@ -3,6 +3,7 @@ id: TC-002
 title: Each sentence stays in the language it was spoken in
 priority: high
 type: functional
+requirements: [F-STT-02]
 module: transcription
 run: manual
 platform: macos

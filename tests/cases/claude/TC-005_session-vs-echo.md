@@ -3,6 +3,7 @@ id: TC-005
 title: A session can't write a call's minutes while Echo writes them, and the other way round
 priority: medium
 type: functional
+requirements: [F-CC-03, F-MIN-11]
 module: claude
 run: manual
 platform: macos

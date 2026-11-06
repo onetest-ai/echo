@@ -3,6 +3,7 @@ id: TC-012
 title: Ask when calls start: Echo's own dialog decides per call
 priority: high
 type: functional
+requirements: [F-REC-03, F-SET-06]
 module: recording
 run: manual
 platform: macos

@@ -3,6 +3,7 @@ id: TC-005
 title: Start at sign-in, quit and the CLI on Windows
 priority: high
 type: functional
+requirements: [F-WIN-04]
 module: windows
 run: manual
 platform: windows

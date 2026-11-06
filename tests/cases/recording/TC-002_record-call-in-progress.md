@@ -3,6 +3,7 @@ id: TC-002
 title: Record a call already in progress
 priority: critical
 type: functional
+requirements: [F-REC-01]
 module: recording
 run: manual
 platform: macos

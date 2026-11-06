@@ -3,6 +3,7 @@ id: TC-003
 title: Record a Teams call on Windows
 priority: critical
 type: functional
+requirements: [F-WIN-02]
 module: windows
 run: manual
 platform: windows

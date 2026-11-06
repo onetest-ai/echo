@@ -3,6 +3,7 @@ id: TC-004
 title: An arm expires after 15 minutes
 priority: low
 type: functional
+requirements: [F-REC-02]
 module: recording
 run: manual
 platform: macos

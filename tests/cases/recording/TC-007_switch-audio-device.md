@@ -3,6 +3,7 @@ id: TC-007
 title: Switching audio devices mid-call keeps recording in sync
 priority: high
 type: functional
+requirements: [F-REC-09]
 module: recording
 run: manual
 platform: macos

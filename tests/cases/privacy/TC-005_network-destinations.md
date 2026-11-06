@@ -3,6 +3,7 @@ id: TC-005
 title: Echo connects only where the user expects
 priority: high
 type: functional
+requirements: [F-PRIV-05, F-PRIV-07]
 module: privacy
 run: manual
 platform: macos

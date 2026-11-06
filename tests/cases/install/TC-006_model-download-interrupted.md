@@ -3,6 +3,7 @@ id: TC-006
 title: An interrupted model download fails cleanly
 priority: low
 type: functional
+requirements: [F-LIFE-01]
 module: install
 run: manual
 platform: macos

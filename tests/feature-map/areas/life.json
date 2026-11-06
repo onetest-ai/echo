@@ -1,0 +1,71 @@
+{
+ "prefix": "LIFE",
+ "name": "Lifecycle and updates",
+ "order": 260,
+ "status": "stable",
+ "notes": "Install, login, quit, single instance, data folder, updates",
+ "features": [
+  {
+   "id": "F-LIFE-01",
+   "feature": "The DMG installs on a fresh Mac; first run chooses the data folder (or the default) and downloads a speech model (now or later; an interrupted download fails cleanly; the model in use can't be removed)",
+   "priority": "critical",
+   "check": "manual",
+   "axes": []
+  },
+  {
+   "id": "F-LIFE-02",
+   "feature": "Echo starts at login when set to, and doesn't when not",
+   "priority": "high",
+   "check": "manual",
+   "axes": [
+    "set.general"
+   ]
+  },
+  {
+   "id": "F-LIFE-03",
+   "feature": "Quit saves the window's notes first, ends every process, and Echo starts normally again (`echoctl app start`)",
+   "priority": "critical",
+   "check": "manual",
+   "axes": []
+  },
+  {
+   "id": "F-LIFE-04",
+   "feature": "Only one Echo runs at a time",
+   "priority": "high",
+   "check": "manual",
+   "axes": []
+  },
+  {
+   "id": "F-LIFE-05",
+   "feature": "Changing the data folder restarts Echo on the new one and leaves the old one alone",
+   "priority": "high",
+   "check": "manual",
+   "axes": []
+  },
+  {
+   "id": "F-LIFE-06",
+   "feature": "Notifications come from Echo and open its window; \"Update available\" asks to install",
+   "priority": "medium",
+   "check": "manual",
+   "axes": []
+  },
+  {
+   "id": "F-LIFE-07",
+   "feature": "An update is offered, installs after saving and quitting, keeps everything, and never while a call records; on the newest version nothing is offered",
+   "priority": "critical",
+   "check": "manual",
+   "axes": [
+    "app.record"
+   ]
+  },
+  {
+   "id": "F-LIFE-08",
+   "feature": "Closing the window keeps Echo in the menu bar and the Dock (unless Hide from the Dock); a Dock click opens it again",
+   "priority": "medium",
+   "check": "manual",
+   "axes": [
+    "set.general"
+   ]
+  }
+ ]
+}

@@ -3,6 +3,7 @@ id: TC-003
 title: Another app (client) ID is used for sign-in, and default returns
 priority: low
 type: functional
+requirements: [F-M365-01, F-SET-13]
 module: calendar
 run: manual
 platform: macos

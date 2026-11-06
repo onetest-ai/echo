@@ -3,6 +3,7 @@ id: TC-003
 title: With one language set, nothing comes out in another
 priority: high
 type: functional
+requirements: [F-STT-02, F-SET-07]
 module: transcription
 run: manual
 platform: macos

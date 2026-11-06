@@ -1,0 +1,82 @@
+{
+ "prefix": "AI",
+ "name": "AI profiles",
+ "order": 180,
+ "status": "stable",
+ "notes": "Profiles, pinning, routing, sign-in",
+ "features": [
+  {
+   "id": "F-AI-01",
+   "feature": "AI & minutes lists the profiles with their kind (Built in, Claude account, Model on a host), \"Default for new calls\", minutes and live models; Make default changes it",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "ai.kind",
+    "ai.default"
+   ]
+  },
+  {
+   "id": "F-AI-02",
+   "feature": "With several profiles the Record button, the minutes and the Live tab offer a profile picker; with one they don't",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "ai.count"
+   ]
+  },
+  {
+   "id": "F-AI-03",
+   "feature": "A call keeps the profile it was recorded with; changing the default later never moves it",
+   "priority": "critical",
+   "check": "manual",
+   "axes": [
+    "call.profile"
+   ]
+  },
+  {
+   "id": "F-AI-04",
+   "feature": "A job whose profile is missing, unreadable, signed out or on another account fails with the reason, never on another profile",
+   "priority": "critical",
+   "check": "manual",
+   "axes": [
+    "ai.signin",
+    "call.profile"
+   ]
+  },
+  {
+   "id": "F-AI-05",
+   "feature": "A Claude profile signs in from the window (Sign in…, Cancel), the tray or `echoctl ai login`; \"Signed in as …\"; another account asks \"Use X\"",
+   "priority": "high",
+   "check": "manual",
+   "axes": [
+    "ai.signin"
+   ]
+  },
+  {
+   "id": "F-AI-06",
+   "feature": "Admin policy that could route Claude Code or switch hooks off refuses the runs it would affect",
+   "priority": "high",
+   "check": "manual",
+   "axes": [
+    "ai.kind"
+   ]
+  },
+  {
+   "id": "F-AI-07",
+   "feature": "`echoctl ai status / add-local / add-claude / default / remove` manage profiles as the window shows them",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "ai.kind",
+    "ai.file"
+   ]
+  },
+  {
+   "id": "F-AI-08",
+   "feature": "A minutes model Claude Code can't use fails with what's wrong and where to change it (the menu and `echoctl ai set`)",
+   "priority": "medium",
+   "check": "manual",
+   "axes": []
+  }
+ ]
+}

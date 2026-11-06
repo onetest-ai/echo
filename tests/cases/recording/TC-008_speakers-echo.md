@@ -3,6 +3,7 @@ id: TC-008
 title: On speakers, the other side isn't duplicated as Me
 priority: high
 type: functional
+requirements: [F-STT-03]
 module: recording
 run: manual
 platform: macos

@@ -3,6 +3,7 @@ id: TC-003
 title: Minutes are written automatically 15 minutes after a call
 priority: critical
 type: functional
+requirements: [F-MIN-14, F-MIN-07]
 module: claude
 run: manual
 platform: macos

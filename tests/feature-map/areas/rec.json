@@ -1,0 +1,140 @@
+{
+ "prefix": "REC",
+ "name": "Recording and capture",
+ "order": 200,
+ "status": "stable",
+ "notes": "Arm, record, stop, memos, tracks, frames, chat, tray",
+ "features": [
+  {
+   "id": "F-REC-01",
+   "feature": "The Record pill offers Record next call (Record this call while in one), its language and profile, and Memo; \"Writing the transcript…\" shows beside it while a call is transcribed",
+   "priority": "critical",
+   "check": "agent",
+   "axes": [
+    "app.record",
+    "ai.count"
+   ]
+  },
+  {
+   "id": "F-REC-02",
+   "feature": "Record arms Echo: the pill says \"Armed — records the next Teams call\" with Cancel; the arm records the next call or expires after 15 minutes",
+   "priority": "critical",
+   "check": "manual",
+   "axes": [
+    "app.record"
+   ]
+  },
+  {
+   "id": "F-REC-03",
+   "feature": "Nothing records without an arm and a call; Ask mode shows Echo's own \"Record?\" dialog per call, Manual only records when asked",
+   "priority": "critical",
+   "check": "manual",
+   "axes": [
+    "set.when_record"
+   ]
+  },
+  {
+   "id": "F-REC-04",
+   "feature": "A meeting about to start shows in the pill with its time and Record it",
+   "priority": "high",
+   "check": "manual",
+   "axes": [
+    "app.record"
+   ]
+  },
+  {
+   "id": "F-REC-05",
+   "feature": "While recording the pill shows a clock and the title (opens the call); Stop asks \"Stop recording?\" (Stop / Keep recording); Stop ends the recording, not the call, and doesn't record it again",
+   "priority": "high",
+   "check": "manual",
+   "axes": [
+    "app.record"
+   ]
+  },
+  {
+   "id": "F-REC-06",
+   "feature": "A memo records the user's mic alone; Stop ends it without asking; its threads come from what was said",
+   "priority": "high",
+   "check": "manual",
+   "axes": [
+    "call.kind"
+   ]
+  },
+  {
+   "id": "F-REC-07",
+   "feature": "A call is two tracks, the mic and Teams' audio; a recording's folder is never reused",
+   "priority": "critical",
+   "check": "manual",
+   "axes": []
+  },
+  {
+   "id": "F-REC-08",
+   "feature": "A short drop and rejoin stays one recording; the call's end stops it after 10 s; a confirmed other call back to back starts a new one",
+   "priority": "high",
+   "check": "manual",
+   "axes": []
+  },
+  {
+   "id": "F-REC-09",
+   "feature": "Switching audio devices keeps recording in sync; a track that fails to write notifies once",
+   "priority": "high",
+   "check": "manual",
+   "axes": []
+  },
+  {
+   "id": "F-REC-10",
+   "feature": "Muted in Teams, the mic track records silence",
+   "priority": "high",
+   "check": "manual",
+   "axes": [
+    "set.capture"
+   ]
+  },
+  {
+   "id": "F-REC-11",
+   "feature": "The Mac sleeping closes the recording; after a crash the recording is repaired and transcribed on the next start",
+   "priority": "high",
+   "check": "manual",
+   "axes": []
+  },
+  {
+   "id": "F-REC-12",
+   "feature": "Shared screens (opt-in) are kept only while someone else shares, one frame per change; frames the minutes don't cite go to the trash for 30 days",
+   "priority": "medium",
+   "check": "manual",
+   "axes": [
+    "set.capture"
+   ]
+  },
+  {
+   "id": "F-REC-13",
+   "feature": "The tray icon shows idle, armed and recording; its menu has status, Record, Stop, recent calls and Echo's flows",
+   "priority": "high",
+   "check": "manual",
+   "axes": [
+    "app.record"
+   ]
+  },
+  {
+   "id": "F-REC-14",
+   "feature": "At first launch macOS asks for Microphone and System Audio Recording up front, and every prompt names Echo",
+   "priority": "critical",
+   "check": "manual",
+   "axes": []
+  },
+  {
+   "id": "F-REC-15",
+   "feature": "A missing Microphone or System Audio permission is flagged before and during a call, and the other track is still recorded",
+   "priority": "critical",
+   "check": "manual",
+   "axes": []
+  },
+  {
+   "id": "F-REC-16",
+   "feature": "Recording and transcription work without Microsoft 365 (no Chat tab, no calendar title)",
+   "priority": "medium",
+   "check": "manual",
+   "axes": []
+  }
+ ]
+}

@@ -3,6 +3,7 @@ id: TC-001
 title: The Windows build and package
 priority: critical
 type: functional
+requirements: [F-WIN-01]
 module: windows
 run: manual
 platform: windows

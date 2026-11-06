@@ -1,0 +1,35 @@
+{
+ "entity": "org (client and organisation)",
+ "axes": [
+  {
+   "axis": "org.account",
+   "values": "client (account) / organisation that isn't a client",
+   "where": "`projects::clients`, `projects::orgs`"
+  },
+  {
+   "axis": "org.internal",
+   "values": "outside / the user's company",
+   "where": "`clients.json` `internal`"
+  },
+  {
+   "axis": "org.domains",
+   "values": "none / one / several; aliases none / some",
+   "where": "`clients.json`"
+  },
+  {
+   "axis": "org.threads",
+   "values": "none / open threads / closed threads only",
+   "where": "app.js `clientView`"
+  },
+  {
+   "axis": "org.about",
+   "values": "empty / Markdown",
+   "where": "`projects/clients/<id>.md`"
+  },
+  {
+   "axis": "org.logo",
+   "values": "none / logo",
+   "where": "`projects/clients/<id>.<ext>`"
+  }
+ ]
+}

@@ -3,6 +3,7 @@ id: TC-002
 title: Choose the data folder at first launch
 priority: critical
 type: functional
+requirements: [F-LIFE-01]
 module: install
 run: manual
 platform: any

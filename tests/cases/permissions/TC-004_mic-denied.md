@@ -3,6 +3,7 @@ id: TC-004
 title: Microphone denied: the others are still recorded
 priority: high
 type: functional
+requirements: [F-SET-17, F-REC-15]
 module: permissions
 run: manual
 platform: macos

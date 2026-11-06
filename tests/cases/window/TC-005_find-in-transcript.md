@@ -3,6 +3,7 @@ id: TC-005
 title: Find in transcript highlights the turns that match
 priority: medium
 type: functional
+requirements: [F-TR-01, F-TR-02]
 module: window
 run: agent
 platform: any

@@ -1,0 +1,149 @@
+{
+ "prefix": "CAL",
+ "name": "Calendar",
+ "order": 50,
+ "status": "stable",
+ "notes": "Day and week, event cards, scheduling, series, Teams transcript import",
+ "features": [
+  {
+   "id": "F-CAL-01",
+   "feature": "Calendar shows a rolling Week (yesterday, today, 5 ahead) or a Day; `#calendar` opens Week; the heading names the day or the range",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "meeting.timing"
+   ]
+  },
+  {
+   "id": "F-CAL-02",
+   "feature": "Earlier ‹, Today and Later › move by a day or a week",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-CAL-03",
+   "feature": "Today's column has the line \"now\"; hours are sized to fit the working day; overlapping meetings sit side by side",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "meeting.timing"
+   ]
+  },
+  {
+   "id": "F-CAL-04",
+   "feature": "A meeting block shows recorded (green), \"Will record\", past, and opens its card; a recorded call with no meeting shows as its own block that opens the call",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "meeting.recorded",
+    "meeting.scheduled",
+    "meeting.timing"
+   ]
+  },
+  {
+   "id": "F-CAL-05",
+   "feature": "Declined and cancelled meetings are greyed, \"No notetakers\" and \"Transcript\" (Teams has one) are tagged, all-day events sit in their own row",
+   "priority": "medium",
+   "check": "manual",
+   "axes": [
+    "meeting.flags",
+    "meeting.transcript"
+   ]
+  },
+  {
+   "id": "F-CAL-06",
+   "feature": "Without Microsoft 365 the calendar says \"Showing today's meetings only…\" and shows today's agenda; a read error says \"Can't read the calendar\"",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "m365.signin"
+   ]
+  },
+  {
+   "id": "F-CAL-07",
+   "feature": "A meeting's card shows subject, when, kind chip, organizer, people, where, its recording; Close closes it; it stays open across Day / Week",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "meeting.recorded"
+   ]
+  },
+  {
+   "id": "F-CAL-08",
+   "feature": "The card offers one action by the meeting's state: Open notes, Import Teams transcript, Don't record (with the language it will use), Join and record + Record it, Record it / Record when it starts; nothing for a declined, cancelled, no_notetakers or offline one",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "meeting.action",
+    "meeting.flags",
+    "meeting.timing"
+   ]
+  },
+  {
+   "id": "F-CAL-09",
+   "feature": "Record when it starts schedules a coming meeting (`scheduled.json`), and Don't record takes it back",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "meeting.scheduled"
+   ]
+  },
+  {
+   "id": "F-CAL-10",
+   "feature": "A scheduled meeting arms itself a minute before it starts and records when joined; it leaves the list once its recording starts, its arm is cancelled, its start fails or it ends",
+   "priority": "critical",
+   "check": "manual",
+   "axes": [
+    "meeting.scheduled"
+   ]
+  },
+  {
+   "id": "F-CAL-11",
+   "feature": "The card's kind chip sets the type for every meeting of its series (\"You set this — for every meeting of the series\")",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "meeting.type_by"
+   ]
+  },
+  {
+   "id": "F-CAL-12",
+   "feature": "\"+ Thread\" on a card adds the meeting to a thread (× takes a hand-added one out) or makes a new thread from it",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "meeting.threads"
+   ]
+  },
+  {
+   "id": "F-CAL-13",
+   "feature": "A recurring meeting's card sets \"Every meeting of this series\": Record / Don't record (the default) and its language; Record puts each occurrence in Record when it starts once",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "series.record",
+    "series.languages"
+   ]
+  },
+  {
+   "id": "F-CAL-14",
+   "feature": "Join and record opens the meeting in Teams and records as soon as the user is in",
+   "priority": "high",
+   "check": "manual",
+   "axes": [
+    "meeting.action"
+   ]
+  },
+  {
+   "id": "F-CAL-15",
+   "feature": "Import Teams transcript on an ended, unrecorded Teams meeting makes a call from its transcript and chat (Importing…, its error, a notification); refused when Teams has none or a call exists",
+   "priority": "high",
+   "check": "manual",
+   "axes": [
+    "meeting.transcript",
+    "meeting.recorded"
+   ]
+  }
+ ]
+}

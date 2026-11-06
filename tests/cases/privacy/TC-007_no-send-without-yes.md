@@ -3,6 +3,7 @@ id: TC-007
 title: Follow-ups are never sent without an explicit yes
 priority: critical
 type: functional
+requirements: [F-PRIV-09]
 module: privacy
 run: manual
 platform: any

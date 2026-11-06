@@ -3,6 +3,7 @@ id: TC-006
 title: A transcribed call without minutes offers to write them
 priority: high
 type: functional
+requirements: [F-MIN-06]
 module: window
 run: agent
 platform: any

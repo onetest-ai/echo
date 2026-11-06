@@ -3,6 +3,7 @@ id: TC-012
 title: Open minutes in browser and Show in Finder use the call's files
 priority: low
 type: functional
+requirements: [F-CALLS-17]
 module: window
 run: manual
 platform: macos

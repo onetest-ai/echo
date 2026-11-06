@@ -3,6 +3,7 @@ id: TC-011
 title: Recording works without Microsoft 365
 priority: medium
 type: functional
+requirements: [F-REC-16, F-CALLS-07]
 module: calendar
 run: manual
 platform: macos

@@ -1,0 +1,107 @@
+{
+ "prefix": "NOTES",
+ "name": "My notes",
+ "order": 40,
+ "status": "stable",
+ "notes": "The My notes panel and `my-notes.md`",
+ "features": [
+  {
+   "id": "F-NOTES-01",
+   "feature": "The My notes button on a call toggles its panel (right by default); with no call open it says \"Open a call to take notes for it\"",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-NOTES-02",
+   "feature": "A note typed and Enter is added as Note, ? Question, ! Decision or ☐ To-do, and the panel says \"Saved\"",
+   "priority": "critical",
+   "check": "agent",
+   "axes": [
+    "call.notes"
+   ]
+  },
+  {
+   "id": "F-NOTES-03",
+   "feature": "A to-do's box ticks it done and back",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "call.notes"
+   ]
+  },
+  {
+   "id": "F-NOTES-04",
+   "feature": "A note edited in place changes text and kind (Enter saves, Esc cancels); emptied it is dropped; × deletes it",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "call.notes"
+   ]
+  },
+  {
+   "id": "F-NOTES-05",
+   "feature": "Edit as text shows `my-notes.md` itself; a line starting with # becomes a heading in the timeline; ← Timeline goes back",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "call.notes"
+   ]
+  },
+  {
+   "id": "F-NOTES-06",
+   "feature": "Notes are saved to the call's `my-notes.md` a second after typing and on blur; an unchanged text is never written again",
+   "priority": "critical",
+   "check": "agent",
+   "axes": [
+    "call.notes"
+   ]
+  },
+  {
+   "id": "F-NOTES-07",
+   "feature": "A note typed but not added is added and saved when another call opens, Write minutes is pressed, or the window closes",
+   "priority": "critical",
+   "check": "agent",
+   "axes": [
+    "call.notes"
+   ]
+  },
+  {
+   "id": "F-NOTES-08",
+   "feature": "Notes show as dots on transcript turns and as callouts under the minutes line of the same time (else the nearest within 3 min), never written into the minutes",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "call.notes",
+    "call.status"
+   ]
+  },
+  {
+   "id": "F-NOTES-09",
+   "feature": "An unreadable `my-notes.md` says so with Show folder; a file changed outside while typing keeps the other version as `my-notes.<HHMMSS>.md` and says where",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "call.notes"
+   ]
+  },
+  {
+   "id": "F-NOTES-10",
+   "feature": "While recording, a note is timed from its first key; Time inserts the call's time; Flag marks the moment; notes from the tray or `echoctl note` join them",
+   "priority": "high",
+   "check": "manual",
+   "axes": [
+    "call.status"
+   ]
+  },
+  {
+   "id": "F-NOTES-11",
+   "feature": "Notes that can't be saved show Retry; closing the window with unsaved notes asks \"Try again / Close without saving\"",
+   "priority": "high",
+   "check": "manual",
+   "axes": [
+    "call.notes"
+   ]
+  }
+ ]
+}

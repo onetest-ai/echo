@@ -3,6 +3,7 @@ id: TC-013
 title: The window updates on its own when a recording ends
 priority: medium
 type: functional
+requirements: [F-CALLS-18]
 module: window
 run: manual
 platform: macos

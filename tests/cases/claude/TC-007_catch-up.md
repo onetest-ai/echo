@@ -3,6 +3,7 @@ id: TC-007
 title: Calls missed while Echo was quit get their minutes on the next start
 priority: medium
 type: functional
+requirements: [F-MIN-18, F-MIN-14]
 module: claude
 run: manual
 platform: macos

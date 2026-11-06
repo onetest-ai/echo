@@ -3,6 +3,7 @@ id: TC-006
 title: A short drop and rejoin stays one recording
 priority: high
 type: functional
+requirements: [F-REC-08]
 module: recording
 run: manual
 platform: macos

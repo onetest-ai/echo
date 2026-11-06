@@ -3,6 +3,7 @@ id: TC-010
 title: An ad-hoc call's chat comes with the call
 priority: medium
 type: functional
+requirements: [F-M365-03]
 module: calendar
 run: manual
 platform: macos

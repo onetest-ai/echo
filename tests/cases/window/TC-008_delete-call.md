@@ -3,6 +3,7 @@ id: TC-008
 title: Deleting a call asks first, then moves it to the trash
 priority: high
 type: functional
+requirements: [F-CALLS-12, F-CALLS-13]
 module: window
 run: agent
 platform: any

@@ -3,6 +3,7 @@ id: TC-008
 title: The live pane follows a recorded call in a session
 priority: medium
 type: functional
+requirements: [F-CC-10]
 module: claude
 run: manual
 platform: macos

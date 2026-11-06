@@ -3,6 +3,7 @@ id: TC-009
 title: Notes taken during a call shape its minutes
 priority: high
 type: functional
+requirements: [F-NOTES-10, F-MIN-13]
 module: claude
 run: manual
 platform: macos

@@ -3,6 +3,7 @@ id: TC-009
 title: What you say while muted in Teams isn't recorded
 priority: high
 type: functional
+requirements: [F-REC-10]
 module: recording
 run: manual
 platform: macos

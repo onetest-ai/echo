@@ -3,6 +3,7 @@ id: TC-001
 title: echoctl project tasks sorts open tasks into the user's and others' piles
 priority: medium
 type: functional
+requirements: [F-CLI-07, F-CLI-02]
 module: cli
 run: agent
 platform: any

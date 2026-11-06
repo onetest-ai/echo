@@ -3,6 +3,7 @@ id: TC-004
 title: Download the speech model at first run
 priority: critical
 type: functional
+requirements: [F-LIFE-01, F-SET-09]
 module: install
 run: manual
 platform: any

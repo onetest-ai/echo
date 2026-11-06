@@ -3,6 +3,7 @@ id: TC-001
 title: Install from the DMG on a fresh Mac
 priority: critical
 type: functional
+requirements: [F-LIFE-01]
 module: install
 run: manual
 platform: macos

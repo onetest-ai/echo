@@ -3,6 +3,7 @@ id: TC-003
 title: A task card in My work opens the task's details on the right
 priority: high
 type: functional
+requirements: [F-TODAY-03, F-TASK-07]
 module: today
 run: agent
 platform: any

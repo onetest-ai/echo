@@ -3,6 +3,7 @@ id: TC-002
 title: echoctl status reports no watcher and today's agenda when the app isn't running
 priority: medium
 type: functional
+requirements: [F-CLI-03]
 module: cli
 run: agent
 platform: any

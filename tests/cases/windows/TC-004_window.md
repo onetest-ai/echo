@@ -3,6 +3,7 @@ id: TC-004
 title: The window on Windows
 priority: high
 type: functional
+requirements: [F-WIN-03]
 module: windows
 run: manual
 platform: windows

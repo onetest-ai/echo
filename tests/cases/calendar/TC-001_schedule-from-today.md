@@ -3,6 +3,7 @@ id: TC-001
 title: Record when it starts schedules a coming meeting, and Don't record undoes it
 priority: critical
 type: functional
+requirements: [F-CAL-09]
 module: calendar
 run: agent
 platform: any

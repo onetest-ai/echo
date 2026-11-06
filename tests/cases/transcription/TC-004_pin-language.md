@@ -3,6 +3,7 @@ id: TC-004
 title: A language pinned for one call applies to that call only
 priority: medium
 type: functional
+requirements: [F-STT-02]
 module: transcription
 run: manual
 platform: macos

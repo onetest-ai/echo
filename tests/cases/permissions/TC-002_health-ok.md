@@ -3,6 +3,7 @@ id: TC-002
 title: Health shows everything granted
 priority: critical
 type: functional
+requirements: [F-SET-17]
 module: permissions
 run: manual
 platform: macos

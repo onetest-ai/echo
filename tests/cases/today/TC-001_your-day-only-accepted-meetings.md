@@ -3,6 +3,7 @@ id: TC-001
 title: Your day lists only the meetings the user accepted
 priority: high
 type: regression
+requirements: [F-TODAY-02, F-TODAY-01]
 module: today
 run: agent
 platform: any

@@ -3,6 +3,7 @@ id: TC-002
 title: Only the call app's audio is recorded as Remote
 priority: critical
 type: functional
+requirements: [F-PRIV-02]
 module: privacy
 run: manual
 platform: macos

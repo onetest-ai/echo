@@ -3,6 +3,7 @@ id: TC-006
 title: Join and record opens Teams and records as soon as you are in
 priority: high
 type: functional
+requirements: [F-CAL-14]
 module: calendar
 run: manual
 platform: macos

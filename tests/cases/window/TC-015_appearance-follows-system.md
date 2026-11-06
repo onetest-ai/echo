@@ -3,6 +3,7 @@ id: TC-015
 title: The window follows the system's light and dark appearance
 priority: low
 type: functional
+requirements: [F-SET-04]
 module: window
 run: manual
 platform: macos

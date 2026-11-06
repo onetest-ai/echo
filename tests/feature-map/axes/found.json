@@ -1,0 +1,20 @@
+{
+ "entity": "found (Found for you candidate)",
+ "axes": [
+  {
+   "axis": "found.count",
+   "values": "0 / n",
+   "where": "`projects::found`, `found_count`"
+  },
+  {
+   "axis": "found.client",
+   "values": "none / new client from a domain / an existing client",
+   "where": "app.js `foundView` (`new_client`, `client`)"
+  },
+  {
+   "axis": "found.org",
+   "values": "none / known organisation / new organisation (counterpart)",
+   "where": "app.js `foundView` (`c.org.new`)"
+  }
+ ]
+}

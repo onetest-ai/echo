@@ -3,6 +3,7 @@ id: TC-008
 title: No update during a recording
 priority: low
 type: functional
+requirements: [F-LIFE-07]
 module: lifecycle
 run: manual
 platform: macos

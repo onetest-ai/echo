@@ -3,6 +3,7 @@ id: TC-005
 title: echoctl doctor reports permissions and the model from the running app
 priority: low
 type: functional
+requirements: [F-CLI-11, F-SET-17]
 module: cli
 run: manual
 platform: macos

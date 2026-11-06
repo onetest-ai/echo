@@ -1,0 +1,71 @@
+{
+ "prefix": "TPL",
+ "name": "Templates",
+ "order": 160,
+ "status": "stable",
+ "notes": "Minutes templates and meeting types",
+ "features": [
+  {
+   "id": "F-TPL-01",
+   "feature": "Settings → Templates has tabs Minutes N, Meeting types N, Skills N",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TPL-02",
+   "feature": "The minutes list shows each template as Built in, Edited or Yours with what it is for (any call no other matches, memos only, its title words, only when chosen)",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "template.kind",
+    "template.use"
+   ]
+  },
+  {
+   "id": "F-TPL-03",
+   "feature": "The editor saves each change at once: the header card with its {values} (ⓘ inserts one), title words as chips (Enter or comma adds, × removes), sections (heading, what to write, ↑ ↓, trash but on the last, + Add a section)",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "template.kind"
+   ]
+  },
+  {
+   "id": "F-TPL-04",
+   "feature": "Changing a built-in makes it Edited; Reset to built-in brings Echo's back; Delete moves the user's own to `.echo/trash/templates`; New template takes its id from its name",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "template.kind"
+   ]
+  },
+  {
+   "id": "F-TPL-05",
+   "feature": "Meeting types lists Echo's six and the user's own, each with how to tell it; Name and How to tell it are edited; New, Reset to built-in, Delete",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "mtype.kind"
+   ]
+  },
+  {
+   "id": "F-TPL-06",
+   "feature": "A call's minutes follow the template whose words are in its title, else Default (a template chosen for the call wins)",
+   "priority": "high",
+   "check": "manual",
+   "axes": [
+    "template.use"
+   ]
+  },
+  {
+   "id": "F-TPL-07",
+   "feature": "`echoctl templates` lists the templates, the values and the folder",
+   "priority": "low",
+   "check": "agent",
+   "axes": [
+    "template.kind"
+   ]
+  }
+ ]
+}

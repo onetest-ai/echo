@@ -3,6 +3,7 @@ id: TC-014
 title: Record and stop from a chat
 priority: medium
 type: functional
+requirements: [F-CC-09, F-REC-02, F-STT-02]
 module: claude
 run: manual
 platform: macos

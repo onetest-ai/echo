@@ -3,6 +3,7 @@ id: TC-006
 title: Update on Windows
 priority: low
 type: functional
+requirements: [F-WIN-05]
 module: windows
 run: manual
 platform: windows

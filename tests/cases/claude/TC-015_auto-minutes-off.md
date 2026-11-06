@@ -3,6 +3,7 @@ id: TC-015
 title: Automatic minutes off: nothing is written until asked
 priority: medium
 type: functional
+requirements: [F-MIN-14]
 module: claude
 run: manual
 platform: macos

@@ -253,6 +253,8 @@ Cases live in `tests/cases/<suite>/TC-NNN_<slug>.md` in the manual-qa format, wi
 
 - `run: agent | manual` — who can run it (rule 5).
 - `platform: any | macos | windows` — `any` for the window and the CLI in serve mode.
+- `requirements: [F-AREA-NN, …]` — the features of the functional map (`tests/feature-map/areas/*.json`) the case
+  checks; a case that checks a behaviour the map doesn't list adds the feature to its area's file first.
 
 Steps use `{{base_url}}` for the window and `echoctl …` (after `. <dir>/env`) for the CLI; test data comes from the
 table above — a case that needs more adds it in its Preconditions with the `echoctl` commands that make it.

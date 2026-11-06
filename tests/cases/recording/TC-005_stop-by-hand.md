@@ -3,6 +3,7 @@ id: TC-005
 title: Stopping by hand ends the recording, not the call
 priority: critical
 type: functional
+requirements: [F-REC-05]
 module: recording
 run: manual
 platform: macos

@@ -3,6 +3,7 @@ id: TC-004
 title: Sign out removes the token and falls back to today's agenda
 priority: medium
 type: functional
+requirements: [F-M365-01, F-CAL-06]
 module: calendar
 run: manual
 platform: macos

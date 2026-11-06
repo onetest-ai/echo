@@ -3,6 +3,7 @@ id: TC-003
 title: No audio is kept once a call is transcribed
 priority: critical
 type: functional
+requirements: [F-PRIV-03]
 module: privacy
 run: manual
 platform: any

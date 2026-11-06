@@ -3,6 +3,7 @@ id: TC-001
 title: Permission prompts come at first launch and name Echo
 priority: critical
 type: functional
+requirements: [F-REC-14]
 module: permissions
 run: manual
 platform: macos
