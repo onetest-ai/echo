@@ -377,7 +377,7 @@ pub fn open_path(path: &Path) {
     let _ = Command::new("explorer").arg(path).status();
 }
 
-/// Open a folder in VS Code (a skill to edit), else with its default app.
+/// Open a folder in VS Code (the skills folder), else with its default app.
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn open_in_code(path: &Path) {
     #[cfg(target_os = "macos")]

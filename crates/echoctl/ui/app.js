@@ -2680,13 +2680,13 @@ function skillsList(sks) {
       <label class="sk-switch" title="${t.on ? 'On — Claude can use it' : 'Off — kept out of Claude'}"><input type="checkbox" data-sk-toggle="${esc(t.id)}"${t.on ? ' checked' : ''} aria-label="${esc(tplName(t.id))} on"><i></i></label></span>
       <span class="set-sub sk-desc">${esc(t.description)}</span></div>`
   }).join('')
-  return `<div class="tp-list"><div class="tp-lh"><span class="set-sub">What Claude does with a task you send it — each a skill folder, written in VS Code or by Claude</span><span class="tp-lha"><button class="btn ghost" data-tpl-claude>${ICON('<path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/>')}Ask Claude</button><button class="btn" data-sk-new>${ICON('<path d="M12 5v14M5 12h14"/>')}New skill</button></span></div><div class="set-card">${rows}</div></div>`
+  return `<div class="tp-list"><div class="tp-lh"><span class="set-sub">What Claude does with a task you send it — each a skill folder, written in your editor or by Claude</span><span class="tp-lha"><button class="btn ghost" data-tpl-claude>${ICON('<path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/>')}Ask Claude</button><button class="btn" data-sk-new>${ICON('<path d="M12 5v14M5 12h14"/>')}New skill</button></span></div><div class="set-card">${rows}</div></div>`
 }
 function skillEditor() {
   if (TPL.skNew) {
     return `<div class="tp-ed"><div class="tp-eh"><b>New skill</b><span class="grow"></span><button class="icon-btn" data-sk-cancel aria-label="Close">${ICON('<path d="M6 6l12 12M18 6L6 18"/>')}</button></div>
       <div class="tp-eb"><div class="tp-f"><label class="tp-l" for="sk-name">Name</label><input id="sk-name" class="set-in" placeholder="Status report" value="${esc(TPL.skNew.name || '')}"></div>
-      <p class="set-sub">Echo makes its folder with a SKILL.md to fill in and opens it in VS Code. Or ask Claude to write it for you.</p></div>
+      <p class="set-sub">Echo makes its folder with a SKILL.md to fill in and opens it in your editor. Or ask Claude to write it for you.</p></div>
       <div class="tp-ef"><span class="grow"></span><button class="btn ghost" data-sk-cancel>Cancel</button><button class="btn primary" data-sk-create>Create and open</button></div></div>`
   }
   const d = ((TPL.data && TPL.data.skills) || []).find((x) => x.id === TPL.skSel)
@@ -2695,7 +2695,7 @@ function skillEditor() {
   const life = d.kind === 'builtin' ? `<button class="btn" data-sk-customize title="Copy Echo's skill to your folder, to change it">Customize</button>`
     : d.kind === 'customized' ? `<button class="btn ghost" data-sk-remove title="Back to Echo's own">${ICON('<path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.6M4 4v4.6h4.6"/>')}Reset</button>`
     : `<button class="btn ghost" data-sk-remove data-del="1">${ICON('<path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/>')}Delete</button>`
-  const open = d.folder ? `<button class="btn" data-sk-open="code">Open in VS Code</button><button class="btn ghost" data-sk-open="finder">Show in Finder</button>` : ''
+  const open = d.folder ? `<button class="btn" data-sk-open="code" title="All your skills, as one folder in VS Code">Open in VS Code</button><button class="btn ghost" data-sk-open="finder">Show in Finder</button>` : ''
   const probs = (d.problems || []).length ? `<div class="sk-probs"><b>To fix before Claude can use it</b><ul>${d.problems.map((p) => `<li>${esc(p)}</li>`).join('')}</ul></div>` : ''
   return `<div class="tp-ed"><div class="tp-eh"><b>${esc(tplName(d.id))}</b><span class="tp-tag${cls}">${tag}</span><span class="grow"></span>
       <button class="icon-btn" data-sk-cancel aria-label="Close">${ICON('<path d="M6 6l12 12M18 6L6 18"/>')}</button></div>
