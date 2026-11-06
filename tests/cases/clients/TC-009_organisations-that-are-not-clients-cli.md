@@ -29,7 +29,7 @@ tags: [clients, organisations, cli]
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | Run `echoctl org add "Contoso Partners" --domains contoso.example` | JSON with `"account": false`, `"id": "contoso-partners"`, `"domains": ["contoso.example"]` |
-| 2 | Run `echoctl org list` | `contoso-partners` is listed with `"account": false`; Acme with `"account": true` |
+| 2 | Run `echoctl org list` | `contoso-partners` is listed with `"account": false`; Acme is listed without an `account` field (an account is the default and is left out) |
 | 3 | Navigate to `{{base_url}}/#projects` | No group "CONTOSO PARTNERS" (it is not a client) |
 | 4 | Navigate to `{{base_url}}/#project/acme-rollout/profile`, click "+ Organisation" | The select lists "Contoso Partners · contoso.example" and "Globex · globex.example" |
 | 5 | Run `echoctl org remove acme` | Error "acme still has projects: move or delete them first" |

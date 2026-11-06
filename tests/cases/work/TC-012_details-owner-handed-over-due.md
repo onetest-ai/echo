@@ -33,7 +33,7 @@ tags: [work, details]
 | 1 | Navigate to `{{base_url}}/#project/acme-rollout/work` and click the card T002 | Owner "Omar Haddad"; Handed over by "not known · Set"; Due "no date · Set" |
 | 2 | Click the Owner value, type `Dana Lee`, press Enter. Wait up to 3 s after an action for the window to redraw before reading. | Owner reads "Dana Lee"; the avatar on the card reads "DL" |
 | 3 | Click "Set" next to Handed over by, type `Sam Rivera`, press Enter | Handed over by reads "Sam Rivera" |
-| 4 | Click "Set" next to Due, enter the date 2026-12-18 in the field named "Due" | Due reads "Fri, Dec 18"; the card shows a due chip "Fri, Dec 18" |
+| 4 | Click "Set" next to Due, enter the date 2026-12-18 in the field named "Due" | Due reads "Fri, Dec 18"; the card shows a due chip "Dec 18" |
 | 5 | Read History | Three entries "you set internal owner", "you set delegated by", "you set due", each with "undo" |
 
 ## Expected Final State

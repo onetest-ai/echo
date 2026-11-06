@@ -2668,7 +2668,12 @@ pub fn serve(port: u16) -> anyhow::Result<()> {
             if method == "POST" && path == "/ipc" {
                 let mut body = vec![0u8; length];
                 let ok = reader.read_exact(&mut body).is_ok() && cookie_ok && origin_ok;
-                let answer = if ok { json!({"reply": handle(&String::from_utf8_lossy(&body)).reply}).to_string() } else { "{\"error\":\"refused\"}".into() };
+                let answer = if ok {
+                    let h = handle(&String::from_utf8_lossy(&body));
+                    json!({"reply": h.reply, "refresh": h.refresh}).to_string()
+                } else {
+                    "{\"error\":\"refused\"}".into()
+                };
                 let _ = write!(out, "HTTP/1.1 {} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}", if ok { 200 } else { 403 }, answer.len());
                 return;
             }
