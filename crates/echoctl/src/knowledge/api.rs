@@ -378,14 +378,31 @@ pub fn act(cmd: &str, v: &Value) -> Result<Value> {
         }
         "kn_past" => Ok(if v["apply"].as_bool().unwrap_or(false) { export::save_past(s(v, "id"))? } else { export::past(s(v, "id"))? }),
         "kn_import_plugin" => Ok(json!({ "connected": super::import_plugin_vaults()? })),
-        // Ask (spec K12-07, K12-09, K12-12): a message (a new conversation when none is named), Stop, and a conversation
-        // taken to the terminal panel. Only pages are named in a message here (attached calls are K12-10's).
+        // Ask (spec K12-07…K12-10, K12-12): a message (a new conversation when none is named) about pages and calls — a
+        // call on another profile answered with both profiles, for *Attach anyway* —, a permission answered, Stop, and a
+        // conversation taken to the terminal panel.
         #[cfg(feature = "tray")]
         "kn_chat_send" => {
-            let context = v["context"].as_array().map(Vec::as_slice).unwrap_or(&[]).iter().map(|x| x["page"].as_str().map(str::to_owned).ok_or_else(|| anyhow!("only pages can be named in a message"))).collect::<Result<Vec<_>>>()?;
+            use super::chat::Context;
+            let context = v["context"].as_array().map(Vec::as_slice).unwrap_or(&[]).iter().map(|x| match (x["page"].as_str(), x["call"].as_str()) {
+                (Some(p), None) => Ok(Context::Page(p.to_owned())),
+                (None, Some(c)) => Ok(Context::Call { dir: call_named(c)?, anyway: x["anyway"].as_bool().unwrap_or(false) }),
+                _ => Err(anyhow!("a message is about pages and calls only")),
+            }).collect::<Result<Vec<_>>>()?;
             let mode = super::chat::Mode::parse(s(v, "mode"))?;
-            let id = super::chat::send(s(v, "id"), v["conversation"].as_str().filter(|c| !c.is_empty()), s(v, "text"), mode, &context)?;
-            Ok(json!({ "conversation": id }))
+            match super::chat::send(s(v, "id"), v["conversation"].as_str().filter(|c| !c.is_empty()), s(v, "text"), mode, &context) {
+                Ok(id) => Ok(json!({ "conversation": id })),
+                Err(e) => match e.downcast_ref::<export::ProfileMismatch>() {
+                    Some(m) => Ok(json!({ "mismatch": { "call": m.call, "vault": m.vault } })),
+                    None => Err(e),
+                },
+            }
+        }
+        #[cfg(feature = "tray")]
+        "kn_chat_permit" => {
+            let message = v["message"].as_str().map(str::to_owned);
+            super::chat::permit(s(v, "conversation"), s(v, "request"), v["allow"].as_bool().unwrap_or(false), v["always"].as_bool().unwrap_or(false), message)?;
+            Ok(json!({ "answered": s(v, "request") }))
         }
         #[cfg(feature = "tray")]
         "kn_chat_stop" => {
@@ -396,6 +413,16 @@ pub fn act(cmd: &str, v: &Value) -> Result<Value> {
         "kn_chat_terminal" => super::chat::to_terminal(s(v, "id"), s(v, "conversation")),
         other => bail!("no action {other}"),
     }
+}
+
+/// A call the page names as the window does everywhere — its folder's name, or its stamp when it was retitled since —:
+/// only a folder of Echo's calls, never a path (untrusted-text R4).
+#[cfg(feature = "tray")]
+fn call_named(name: &str) -> Result<PathBuf> {
+    let mut parts = std::path::Path::new(name).components();
+    let plain = matches!((parts.next(), parts.next()), (Some(std::path::Component::Normal(_)), None));
+    let dir = plain.then(|| crate::paths::calls_dir().join(name)).filter(|d| d.join("meta.json").is_file());
+    dir.or_else(|| plain.then(|| crate::calls::by_stamp(&crate::calls::stamp_of(std::path::Path::new(name)))).flatten()).ok_or_else(|| anyhow!("that isn't one of Echo's calls"))
 }
 
 /// A file of a vault the window may reveal in Finder / Explorer or open in Obsidian (checked like any page path).
@@ -553,6 +580,8 @@ mod tests {
         assert!(json(&format!("{}/chats", v.id), "").as_array().unwrap().iter().any(|x| x["id"] == id.as_str()));
         assert!(route(&format!("{}/chat/nope", v.id), "from=0").is_err());
         assert!(act("kn_chat_send", &json!({"id": v.id, "text": "Hi", "mode": "shell"})).is_err());
+        assert!(act("kn_chat_send", &json!({"id": v.id, "text": "Hi", "mode": "ask", "context": [{"file": "/etc/hosts"}]})).is_err(), "pages and calls only");
+        assert!(act("kn_chat_permit", &json!({"conversation": id, "request": "req-none", "allow": true})).is_err(), "no such question waits");
         assert!(act("kn_chat_stop", &json!({"conversation": id})).is_ok());
         let moved = act("kn_chat_terminal", &json!({"id": v.id, "conversation": id})).unwrap();
         assert_eq!(moved["conversation"], id.as_str());

@@ -1756,7 +1756,8 @@ pub fn summary() -> Value {
 /// into `chat.in.jsonl`, and per user message plays the next `chat.<n>.jsonl` (`n` counted in `chat.n`, across its
 /// processes; `chat.jsonl` when there is none). A played `control_request` line waits for a `control_response` on
 /// stdin; `{"_hang":true}` reads stdin from then on and ignores it (an interrupt too); `{"_exit":3}` says
-/// `fake claude crashed` on stderr and exits 3. Any other run (a Claude session in a terminal) writes its arguments
+/// `fake claude crashed` on stderr and exits 3; `{"_apply":N}` copies `apply.N` over the file `apply.N.to` names (Claude
+/// Code making an edit the host allowed). Any other run (a Claude session in a terminal) writes its arguments
 /// to `session.argv` and exits.
 #[cfg(test)]
 pub mod fake {
@@ -1791,6 +1792,7 @@ case " $* " in
       case "$out" in
       '{"_hang":true}') while IFS= read -r l; do log "$l"; done; exec sleep 60 ;;
       '{"_exit":'*) echo "fake claude crashed" >&2; exit 3 ;;
+      '{"_apply":'*) k=${out#'{"_apply":'}; k=${k%'}'}; cp "$d/apply.$k" "$(cat "$d/apply.$k.to")" ;;
       *'"type":"control_request"'*) printf '%s\n' "$out"
         while IFS= read -r l; do log "$l"; case "$l" in *'"control_response"'*) break ;; esac; done ;;
       *) printf '%s\n' "$out" ;;

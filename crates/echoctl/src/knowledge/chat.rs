@@ -14,7 +14,7 @@
 
 use anyhow::{anyhow, bail, Result};
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::io::{BufRead as _, BufReader, Read, Write as _};
 use std::path::Path;
 use std::process::{Child, ChildStdin};
@@ -24,6 +24,11 @@ use std::time::{Duration, Instant};
 
 use super::{stream, Vault};
 use crate::{ai, guard, paths, terminal};
+
+mod attach;
+mod permits;
+
+pub use attach::attach_call;
 
 /// At most this many conversations have a process at once (D38); for another, the longest idle stops.
 const MAX_LIVE: usize = 3;
@@ -89,6 +94,12 @@ impl Mode {
         }
         t
     }
+
+    /// The tools asked about through the host, a card each (D24): Curate's edits, Research's fetched pages.
+    fn asked(self) -> Vec<&'static str> {
+        let allowed = self.allowed();
+        self.tools().into_iter().filter(|t| !allowed.contains(t)).collect()
+    }
 }
 
 /// How a process takes up its conversation: a new one (its id, and the first message, which names it) or one Claude
@@ -96,6 +107,14 @@ impl Mode {
 pub enum Session {
     New { id: String, first: String },
     Resume(String),
+}
+
+/// What a message is about (K12-07, K12-10): a page of the vault, or a call whose minutes go with it.
+pub enum Context {
+    Page(String),
+    /// A call's folder, found by Echo from the name the page uses (never a path from the page), and whether the user
+    /// said *Attach anyway* to a call on another profile (X-P3).
+    Call { dir: std::path::PathBuf, anyway: bool },
 }
 
 /// What the page gets of a conversation: its events from `from` on, where to ask next, and its state.
@@ -176,8 +195,14 @@ struct State {
     busy: bool,
     /// Messages so far (a stop's timer is for one turn).
     turn: u64,
-    /// Permission requests waiting for the user: request id → the request, its input whole.
-    pending: BTreeMap<String, Value>,
+    /// Permission requests waiting for the user, by request id.
+    pending: BTreeMap<String, Pending>,
+    /// The user allowed edits for the rest of the conversation (*always*): Echo answers them itself, as it does
+    /// fetches of these domains. The conversation's, so a restart (a mode change) keeps them.
+    always_edits: bool,
+    always_domains: BTreeSet<String>,
+    /// What the turn going asked and edited, for its end.
+    this_turn: permits::Turn,
     /// Claude Code has the conversation (a process of it began its session, or it is from the vault's list): the next
     /// start resumes it.
     started: bool,
@@ -186,6 +211,16 @@ struct State {
     active_at: Option<String>,
     /// A streaming block's latest render (block → its event's number), while the block streams.
     renders: HashMap<String, u64>,
+}
+
+/// A permission request waiting for the user.
+struct Pending {
+    /// The request, its input whole (an allow sends it back as it is).
+    request: Value,
+    /// An edit's file as Echo read it for the card: its activity line and the turn's commit, once done.
+    edit: Option<permits::Edit>,
+    /// A `WebFetch`'s domain.
+    domain: Option<String>,
 }
 
 struct Proc {
@@ -245,7 +280,21 @@ impl State {
 
 impl Conv {
     fn new(id: &str, v: &Vault, started: bool) -> Arc<Conv> {
-        let state = State { start: 0, events: VecDeque::new(), proc: None, busy: false, turn: 0, pending: BTreeMap::new(), started, last_active: now(), active_at: None, renders: HashMap::new() };
+        let state = State {
+            start: 0,
+            events: VecDeque::new(),
+            proc: None,
+            busy: false,
+            turn: 0,
+            pending: BTreeMap::new(),
+            always_edits: false,
+            always_domains: BTreeSet::new(),
+            this_turn: permits::Turn::default(),
+            started,
+            last_active: now(),
+            active_at: None,
+            renders: HashMap::new(),
+        };
         Arc::new(Conv { id: id.into(), vault: v.id.clone(), profile: v.profile.clone(), state: Mutex::new(state), changed: Condvar::new(), sending: Mutex::new(()) })
     }
 }
@@ -304,13 +353,19 @@ fn page_of(v: &Vault, rel: &str) -> Result<String> {
     Ok(rel.to_string())
 }
 
-/// The user's text as Claude Code reads it: with the pages it is about named.
-fn message(text: &str, pages: &[String]) -> String {
-    if pages.is_empty() {
-        return text.to_string();
+/// The user's text as Claude Code reads it: with the pages it is about named, and the minutes of the calls attached
+/// after it, each framed as others' words (K12-10).
+fn message(text: &str, pages: &[String], calls: &[attach::Attached]) -> String {
+    let mut m = text.to_string();
+    if !pages.is_empty() {
+        let named: Vec<String> = pages.iter().map(|p| format!("`{p}`")).collect();
+        m.push_str(&format!("\n\n(The pages this is about: {})", named.join(", ")));
     }
-    let named: Vec<String> = pages.iter().map(|p| format!("`{p}`")).collect();
-    format!("{text}\n\n(The pages this is about: {})", named.join(", "))
+    for c in calls {
+        m.push_str("\n\n");
+        m.push_str(&c.text);
+    }
+    m
 }
 
 fn write_line(stdin: &Mutex<Option<ChildStdin>>, v: &Value) -> std::io::Result<()> {
@@ -321,10 +376,11 @@ fn write_line(stdin: &Mutex<Option<ChildStdin>>, v: &Value) -> std::io::Result<(
 }
 
 /// Send `text` to a conversation of vault `vault` (a new one when `conversation` is None), in `mode`, naming the pages
-/// of `context`: its process is started (or restarted with `--resume` for another mode, D25) and the message written
-/// (K12-07). The conversation's id. A sign-in needed is an `error` event of the conversation with the profile's sign-in
-/// action (K12-13).
-pub fn send(vault: &str, conversation: Option<&str>, text: &str, mode: Mode, context: &[String]) -> Result<String> {
+/// of `context` and carrying the minutes of its calls (K12-10; a call on another profile is refused unless the user
+/// said *Attach anyway*, and then recorded as a notice): its process is started (or restarted with `--resume` for
+/// another mode, D25) and the message written (K12-07). The conversation's id. A sign-in needed is an `error` event of
+/// the conversation with the profile's sign-in action (K12-13).
+pub fn send(vault: &str, conversation: Option<&str>, text: &str, mode: Mode, context: &[Context]) -> Result<String> {
     let text = text.trim();
     if text.is_empty() {
         bail!("Write a message first");
@@ -339,7 +395,13 @@ pub fn send(vault: &str, conversation: Option<&str>, text: &str, mode: Mode, con
     if mode == Mode::Research && !v.ask.research {
         bail!("Research is off for this vault (its Settings → Ask)");
     }
-    let pages = context.iter().map(|p| page_of(&v, p)).collect::<Result<Vec<_>>>()?;
+    let (mut pages, mut calls) = (vec![], vec![]);
+    for x in context {
+        match x {
+            Context::Page(p) => pages.push(page_of(&v, p)?),
+            Context::Call { dir, anyway } => calls.push(attach_call(&v, dir, *anyway)?),
+        }
+    }
     let c = match conversation {
         Some(id) => conv_of(&v, id).ok_or_else(|| anyhow!("that conversation isn't one of this vault's"))?,
         None => {
@@ -370,16 +432,20 @@ pub fn send(vault: &str, conversation: Option<&str>, text: &str, mode: Mode, con
     let stdin = {
         let mut st = lock(&c.state);
         let stdin = st.running().map(|p| p.stdin.clone()).ok_or_else(|| anyhow!("Claude Code stopped — send it again"))?;
-        let context: Vec<Value> = pages.iter().map(|p| json!({"page": p})).collect();
+        let context: Vec<Value> = pages.iter().map(|p| json!({"page": p})).chain(calls.iter().map(|a| json!({"call": a.call, "title": a.title, "date": a.date}))).collect();
         st.push(json!({"type": "user", "text": text, "context": context}));
+        for a in calls.iter().filter_map(|a| a.across.as_ref()) {
+            st.push(json!({"type": "notice", "kind": "attached-anyway", "text": a}));
+        }
         st.busy = true;
         st.turn += 1;
+        st.this_turn = permits::Turn { question: text.to_string(), ..Default::default() };
         st.touch();
         c.changed.notify_all();
         stdin
     };
     // Its reader ends the turn if the process is gone.
-    write_line(&stdin, &json!({"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": message(text, &pages)}]}})).map_err(|e| anyhow!("Claude Code didn't take the message: {e}"))?;
+    write_line(&stdin, &json!({"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": message(text, &pages, &calls)}]}})).map_err(|e| anyhow!("Claude Code didn't take the message: {e}"))?;
     Ok(c.id.clone())
 }
 
@@ -546,7 +612,8 @@ fn watch(c: Arc<Conv>, v: Vault, gen: u64, mut child: Child, stopped: Arc<Atomic
         loop {
             match rx.recv_timeout(TICK) {
                 Ok(line) => {
-                    let control = line.contains("\"control_request\"").then(|| serde_json::from_str::<Value>(&line).ok()).flatten().filter(|x| x["type"] == "control_request");
+                    // The lines Echo acts on itself: a control request, and a turn's `result` (its permission denials).
+                    let raw = (line.contains("\"control_request\"") || line.contains("\"permission_denials\"")).then(|| serde_json::from_str::<Value>(&line).ok()).flatten().filter(|x| x["type"] == "control_request" || x["type"] == "result");
                     let events = parser.feed(&line);
                     // Its `init` line: Claude Code has the session now, so from here on it resumes. A first process that
                     // dies before that leaves none, and the next start is new again.
@@ -554,57 +621,116 @@ fn watch(c: Arc<Conv>, v: Vault, gen: u64, mut child: Child, stopped: Arc<Atomic
                         begun = true;
                         lock(&c.state).started = true;
                     }
-                    took(&c, events, control);
+                    took(&c, &v, events, raw);
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {
                     let events = parser.tick(Instant::now());
                     if !events.is_empty() {
-                        took(&c, events, None);
+                        took(&c, &v, events, None);
                     }
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
             }
         }
-        took(&c, parser.finish(), None);
+        took(&c, &v, parser.finish(), None);
         let code = child.wait().ok().and_then(|s| s.code());
         let words = {
             let (m, cv) = &*tail;
             let t = cv.wait_timeout_while(lock(m), Duration::from_millis(500), |t| !t.done).unwrap_or_else(|e| e.into_inner()).0;
             t.lines.iter().rev().map(|l| l.trim().to_string()).find(|l| !l.is_empty())
         };
-        exited(&c, gen, stopped.load(Ordering::SeqCst), code, words);
+        exited(&c, &v, gen, stopped.load(Ordering::SeqCst), code, words);
         drop(held);
     });
 }
 
-/// Events from the process's output, and a control request it made: a permission request waits for the user (Stop
-/// denies it; plan 2, Task 6 answers it); any other gets an error answer, so Claude Code never waits for Echo.
-fn took(c: &Conv, events: Vec<Value>, control: Option<Value>) {
-    if events.is_empty() && control.is_none() {
+/// The answer to control request `id`.
+fn response(id: &str, r: Value) -> Value {
+    json!({"type": "control_response", "response": {"subtype": "success", "request_id": id, "response": r}})
+}
+
+/// Events from the process's output, and the line itself when Echo acts on it (`raw`: a control request, or a turn's
+/// `result`). A permission request becomes a card with Echo's diff (K12-08) that waits for the user (`permit`; Stop
+/// denies it) — or Echo answers it, for what the user allowed for the rest of the conversation; any other control
+/// request gets an error answer, so Claude Code never waits for Echo. An allowed edit that comes back done is a line of
+/// the vault's activity (ruling R25); the turn's end commits what it edited (K12-14).
+fn took(c: &Conv, v: &Vault, mut events: Vec<Value>, raw: Option<Value>) {
+    if events.is_empty() && raw.is_none() {
         return; // nothing to wake the page for
     }
-    let mut answer = None;
+    let control = raw.as_ref().filter(|r| r["type"] == "control_request");
+    // The card reads the file and asks git: before the lock.
+    let card = control.filter(|r| r["request"]["subtype"] == "can_use_tool").map(|r| permits::card(v, &r["request"]));
+    let denied: Vec<&str> = raw.as_ref().filter(|r| r["type"] == "result").and_then(|r| r["permission_denials"].as_array()).map(|a| a.iter().filter_map(|d| d["tool_name"].as_str()).collect()).unwrap_or_default();
+    let (mut answer, mut done, mut ended) = (None, vec![], None);
     {
         let mut st = lock(&c.state);
         if let Some(r) = control {
             let id = r["request_id"].as_str().unwrap_or("").to_string();
-            match r["request"]["subtype"].as_str() {
-                Some("can_use_tool") => {
-                    st.pending.insert(id, r["request"].clone());
+            let req = &r["request"];
+            match card {
+                Some(card) => {
+                    let mut domain = None;
+                    if let Some(e) = events.iter_mut().find(|e| e["type"] == "permission" && e["request"] == id.as_str()) {
+                        domain = e["domain"].as_str().map(str::to_owned);
+                        if let Some(o) = e.as_object_mut() {
+                            o.extend(card.fields);
+                        }
+                    }
+                    st.this_turn.asked = true;
+                    // Clean before the turn: the first time the turn asks about the file, before any edit of it is made.
+                    if let (Some(e), Some(clean)) = (&card.edit, card.clean) {
+                        st.this_turn.clean.entry(e.full.clone()).or_insert(clean);
+                    }
+                    let echos = match req["tool_name"].as_str() {
+                        Some("Edit" | "Write") => st.always_edits,
+                        Some("WebFetch") => domain.as_ref().is_some_and(|d| st.always_domains.contains(d)),
+                        _ => false,
+                    };
+                    if echos {
+                        if let (Some(e), Some(call)) = (card.edit, req["tool_use_id"].as_str()) {
+                            st.this_turn.allowed.insert(call.to_owned(), e);
+                        }
+                        events.push(json!({"type": "answered", "request": id, "allow": true, "always": true}));
+                        answer = st.proc.as_ref().map(|p| (p.stdin.clone(), response(&id, json!({"behavior": "allow", "updatedInput": req["input"]}))));
+                    } else {
+                        st.pending.insert(id, Pending { request: req.clone(), edit: card.edit, domain });
+                    }
                 }
-                other => {
-                    let error = format!("Echo doesn't answer {} requests", other.unwrap_or("these"));
+                None => {
+                    let error = format!("Echo doesn't answer {} requests", req["subtype"].as_str().unwrap_or("these"));
                     answer = st.proc.as_ref().map(|p| (p.stdin.clone(), json!({"type": "control_response", "response": {"subtype": "error", "request_id": id, "error": error}})));
                 }
             }
         }
+        let mut after = vec![];
         for e in events {
-            if e["type"] == "result" {
-                st.busy = false;
-                st.started = true;
-                st.pending.clear();
-                st.touch();
+            match e["type"].as_str() {
+                Some("tool_result") => {
+                    if let Some(x) = e["id"].as_str().and_then(|id| st.this_turn.allowed.remove(id)).filter(|_| e["ok"] == true) {
+                        st.this_turn.edited.insert(x.rel.clone(), x.full.clone());
+                        done.push(x);
+                    }
+                }
+                Some("result") => {
+                    st.busy = false;
+                    st.started = true;
+                    st.pending.clear();
+                    st.touch();
+                    let t = std::mem::take(&mut st.this_turn);
+                    // Curate or Research refused what it asks about, and no request came: this Claude Code doesn't hand
+                    // its prompts to Echo (K12-08); the terminal panel asks there.
+                    let asked = st.proc.as_ref().map(|p| p.mode.asked()).unwrap_or_default();
+                    if !t.asked && denied.iter().any(|d| asked.contains(d)) {
+                        after.push(json!({"type": "error", "text": "This Claude Code doesn't hand permission prompts to Echo", "action": "terminal"}));
+                    }
+                    ended = Some(t);
+                }
+                _ => {}
             }
+            st.push(e);
+        }
+        for e in after {
             st.push(e);
         }
         c.changed.notify_all();
@@ -612,33 +738,59 @@ fn took(c: &Conv, events: Vec<Value>, control: Option<Value>) {
     if let Some((stdin, a)) = answer {
         let _ = write_line(&stdin, &a);
     }
+    for e in &done {
+        permits::record(v, &c.id, e);
+    }
+    if let Some(t) = ended {
+        committed(c, v, &t);
+    }
 }
 
-/// The process ended: a turn still going ends — stopped by Echo, or with an error saying why.
-fn exited(c: &Conv, gen: u64, stopped: bool, code: Option<i32>, words: Option<String>) {
+/// A turn is over: when the vault commits, what it edited that was clean before it is committed (K12-14), and its
+/// notices say so.
+fn committed(c: &Conv, v: &Vault, t: &permits::Turn) {
+    let notices = permits::commit(v, t);
+    if notices.is_empty() {
+        return;
+    }
     let mut st = lock(&c.state);
-    if st.proc.as_ref().is_some_and(|p| p.gen == gen) {
-        st.proc = None;
+    for n in notices {
+        st.push(n);
     }
-    // Cards nobody can answer now.
-    for id in std::mem::take(&mut st.pending).into_keys() {
-        st.push(json!({"type": "answered", "request": id, "allow": false, "always": false}));
-    }
-    if st.busy {
-        st.busy = false;
-        if stopped {
-            st.push(json!({"type": "notice", "kind": "stopped", "text": "Stopped"}));
-        } else {
-            let why = match (words, code) {
-                (Some(w), _) => format!(": {}", w.chars().take(300).collect::<String>()),
-                (None, Some(n)) => format!(" (exit code {n})"),
-                (None, None) => String::new(),
-            };
-            st.push(json!({"type": "error", "text": format!("Claude Code stopped before the answer ended{why}")}));
-        }
-    }
-    st.touch();
     c.changed.notify_all();
+}
+
+/// The process ended: a turn still going ends — stopped by Echo, or with an error saying why —, and what it edited is
+/// committed as at a turn's end.
+fn exited(c: &Conv, v: &Vault, gen: u64, stopped: bool, code: Option<i32>, words: Option<String>) {
+    let t = {
+        let mut st = lock(&c.state);
+        let current = st.proc.as_ref().is_some_and(|p| p.gen == gen);
+        if current {
+            st.proc = None;
+        }
+        // Cards nobody can answer now.
+        for id in std::mem::take(&mut st.pending).into_keys() {
+            st.push(json!({"type": "answered", "request": id, "allow": false, "always": false}));
+        }
+        if st.busy {
+            st.busy = false;
+            if stopped {
+                st.push(json!({"type": "notice", "kind": "stopped", "text": "Stopped"}));
+            } else {
+                let why = match (words, code) {
+                    (Some(w), _) => format!(": {}", w.chars().take(300).collect::<String>()),
+                    (None, Some(n)) => format!(" (exit code {n})"),
+                    (None, None) => String::new(),
+                };
+                st.push(json!({"type": "error", "text": format!("Claude Code stopped before the answer ended{why}")}));
+            }
+        }
+        st.touch();
+        c.changed.notify_all();
+        if current { std::mem::take(&mut st.this_turn) } else { permits::Turn::default() }
+    };
+    committed(c, v, &t);
 }
 
 /// The events of conversation `conversation` of vault `vault` from event `from` on; waits up to `wait` for some (or
@@ -697,6 +849,37 @@ pub fn stop(conversation: &str) {
         let _ = write_line(&stdin, &json!({"type": "control_response", "response": {"subtype": "success", "request_id": id, "response": {"behavior": "deny", "message": "The user stopped this turn."}}}));
     }
     let _ = write_line(&stdin, &json!({"type": "control_request", "request_id": format!("echo-stop-{gen}-{turn}"), "request": {"subtype": "interrupt"}}));
+}
+
+/// Answer permission request `request` of conversation `conversation` (`kn_chat_permit`, K12-08): allow it once, or
+/// with `always` for the rest of the conversation — every later edit, or that page's domain, which Echo then answers
+/// itself (the guard still applies to each) —, or deny it, `message` going to Claude with the refusal.
+pub fn permit(conversation: &str, request: &str, allow: bool, always: bool, message: Option<String>) -> Result<()> {
+    let c = lock(&CHATS).get(conversation).cloned().ok_or_else(|| anyhow!("no such conversation"))?;
+    let (stdin, answer) = {
+        let mut st = lock(&c.state);
+        let stdin = st.running().map(|p| p.stdin.clone()).ok_or_else(|| anyhow!("its Claude Code isn't running any more"))?;
+        let p = st.pending.remove(request).ok_or_else(|| anyhow!("that question isn't waiting any more"))?;
+        let r = if allow {
+            match p.request["tool_name"].as_str() {
+                Some("Edit" | "Write") if always => st.always_edits = true,
+                Some("WebFetch") if always => st.always_domains.extend(p.domain),
+                _ => {}
+            }
+            if let (Some(e), Some(call)) = (p.edit, p.request["tool_use_id"].as_str()) {
+                st.this_turn.allowed.insert(call.to_owned(), e);
+            }
+            json!({"behavior": "allow", "updatedInput": p.request["input"]})
+        } else {
+            let said: String = message.as_deref().map(str::trim).unwrap_or("").chars().take(TEXT_MAX).collect();
+            let m = if said.is_empty() { "The user declined this.".to_string() } else { format!("The user declined this and said: {said}") };
+            json!({"behavior": "deny", "message": m})
+        };
+        st.push(json!({"type": "answered", "request": request, "allow": allow, "always": allow && always}));
+        c.changed.notify_all();
+        (stdin, response(request, r))
+    };
+    write_line(&stdin, &answer).map_err(|e| anyhow!("Claude Code didn't take the answer: {e}"))
 }
 
 /// End the processes of the conversations on `profile` (a sign-in needs the profile to itself); how many. They resume.
@@ -872,7 +1055,7 @@ mod tests {
     const ASK: &str = "Read,Grep,Glob,Skill,Agent";
 
     /// Stops this test's conversations when it ends (declared after the fake and the folders: dropped first).
-    struct Clean;
+    pub(super) struct Clean;
 
     impl Drop for Clean {
         fn drop(&mut self) {
@@ -880,12 +1063,12 @@ mod tests {
         }
     }
 
-    fn clean() -> Clean {
+    pub(super) fn clean() -> Clean {
         reset();
         Clean
     }
 
-    fn vault(root: &Path, profile: &str) -> Vault {
+    pub(super) fn vault(root: &Path, profile: &str) -> Vault {
         let t = fixture::twin(&root.join("twin"));
         crate::knowledge::add(&t, AddOpts { name: Some("Twin".into()), profile: Some(profile.into()), ..Default::default() }).unwrap()
     }
@@ -895,7 +1078,7 @@ mod tests {
     }
 
     /// A managed profile signed in, answered by the fake.
-    fn signed_in() -> ai::Profile {
+    pub(super) fn signed_in() -> ai::Profile {
         fake::profile("w", None, &fake::signed_in("pat@example.com"))
     }
 
@@ -903,7 +1086,7 @@ mod tests {
         args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).map(String::as_str)
     }
 
-    fn file(p: &ai::Profile, name: &str) -> String {
+    pub(super) fn file(p: &ai::Profile, name: &str) -> String {
         std::fs::read_to_string(fake::file(p, name)).unwrap_or_default()
     }
 
@@ -911,11 +1094,11 @@ mod tests {
         file(p, "argv").lines().map(str::to_owned).collect()
     }
 
-    fn script(p: &ai::Profile, name: &str, lines: &str) {
+    pub(super) fn script(p: &ai::Profile, name: &str, lines: &str) {
         std::fs::write(fake::file(p, name), lines).unwrap();
     }
 
-    fn of_type<'a>(ev: &'a [Value], t: &str) -> Vec<&'a Value> {
+    pub(super) fn of_type<'a>(ev: &'a [Value], t: &str) -> Vec<&'a Value> {
         ev.iter().filter(|e| e["type"] == t).collect()
     }
 
@@ -923,7 +1106,7 @@ mod tests {
         unsafe { libc::kill(pid.trim().parse().unwrap(), 0) != 0 }
     }
 
-    fn until(what: &str, f: impl Fn() -> bool) {
+    pub(super) fn until(what: &str, f: impl Fn() -> bool) {
         let t = Instant::now();
         while !f() {
             assert!(t.elapsed() < Duration::from_secs(10), "timed out waiting for {what}");
@@ -1017,7 +1200,7 @@ mod tests {
         cfg.folder_skip_permissions = true;
         cfg.save().unwrap();
         script(&p, "chat.1.jsonl", &turn("Northwind Retail fixes forward."));
-        let id = send(&v.id, None, "What did we decide with Northwind Retail?", Mode::Ask, &["knowledge/clients/acme.md".into()]).unwrap();
+        let id = send(&v.id, None, "What did we decide with Northwind Retail?", Mode::Ask, &[Context::Page("knowledge/clients/acme.md".into())]).unwrap();
         let ev = turn_events(&v.id, &id);
         assert_eq!(ev[0]["type"], "user");
         assert_eq!(ev[0]["text"], "What did we decide with Northwind Retail?");
@@ -1060,7 +1243,7 @@ mod tests {
         // Others are refused: an empty or oversized message, a page outside the vault, a conversation not the vault's.
         assert!(send(&v.id, Some(&id), "  ", Mode::Ask, &[]).is_err());
         assert!(send(&v.id, Some(&id), &"x".repeat(20_001), Mode::Ask, &[]).is_err());
-        assert!(send(&v.id, Some(&id), "Hi", Mode::Ask, &["../outside.md".into()]).is_err());
+        assert!(send(&v.id, Some(&id), "Hi", Mode::Ask, &[Context::Page("../outside.md".into())]).is_err());
         assert!(send(&v.id, Some("00000000-0000-4000-8000-000000000000"), "Hi", Mode::Ask, &[]).is_err());
         assert!(read(&v.id, "../../etc", 0, Duration::ZERO).is_none());
     }

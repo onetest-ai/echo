@@ -193,10 +193,10 @@ fn quoted(s: &str) -> String {
     format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', " "))
 }
 
-/// A call's facts the note is written from.
-struct Facts {
-    title: String,
-    date: String,
+/// A call's facts the note is written from (and an attached call's, in Ask).
+pub(super) struct Facts {
+    pub(super) title: String,
+    pub(super) date: String,
     minutes: i64,
     meeting: String,
     participants: Vec<String>,
@@ -204,11 +204,11 @@ struct Facts {
     threads: Vec<String>,
     link: String,
     stamp: String,
-    profile: Option<String>,
-    notes: String,
+    pub(super) profile: Option<String>,
+    pub(super) notes: String,
 }
 
-fn facts(call: &Path) -> Result<Facts> {
+pub(super) fn facts(call: &Path) -> Result<Facts> {
     let notes = std::fs::read_to_string(call.join("notes.md")).map_err(|_| anyhow!("this call has no minutes yet"))?;
     let meta = crate::calls::read_json(&call.join("meta.json"));
     let name = call.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
