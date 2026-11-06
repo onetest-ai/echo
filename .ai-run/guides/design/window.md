@@ -441,11 +441,15 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   the morning's, one added later; ≥ 5 min before the start; `prep::start_scheduler`): `<home>/prep/<id>/prep.json`,
   `id` = 16 hex of sha256(event id). Nothing in a call folder: a call folder is still made only by a recording.
 - Gathered without a model: **Expected from you** first (the user's open tasks in these threads, late first; what
-  they still owe from last time; mail since then with them in To — one line each, or "Nothing waits on you"), Last time (the previous meeting of the subject with minutes — highlights, open actions,
-  its link), Open with these people (the threads' open tasks owned by someone in the invite or the user, late first;
+  they still owe from last time; mail since then with them in To — one line each, or "Nothing waits on you"), Last time (the previous meeting of the subject with minutes — highlights, Still to do: the
+  tasks that very call raised or moved, still open (`ledger::open_tasks_of_call`; its action items were never ticked,
+  the tasks they became are), its link), Open with these people (the threads' open tasks owned by someone in the invite or the user, late first;
   risks with no response; questions not answered — each `echo://task`), New since then (the threads' mail and chat
   evidence after the last meeting: titles and senders, never the text), Who's coming (the invite less the user, with
   role / stance from People, calls together, new; the window shows ten).
+- Expected from you and Open with these people pick the threads' tasks by people, not by the meeting's sub-topic: a
+  thread whose meetings run on several sub-topics brings all of them. Kept so on purpose for now (Nov 2026, the
+  user: see how useful it is); narrowing them to the tasks raised in this series' calls is the change if it isn't.
 - A meeting in no thread has no sources of its own: New since then comes from Microsoft 365 instead — mail and Teams
   with its people since the last meeting, else 14 days (`microsoft365`, the user's own sign-in; one line a conversation
   or chat, subject or "Teams message from …" and its link; a chat's first words shown, never sent to the model). A
