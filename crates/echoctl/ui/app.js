@@ -1145,12 +1145,9 @@ function todayAskBar() {
   const a = S.todayAskId && ((S.today && S.today.asks) || []).find((x) => x.id === S.todayAskId)
   if (!S.todayAskId) return ''
   if (!a || a.state === 'working') return '<div class="td-askbar"><span class="set-sub">Yolo: Claude is on it…</span></div>'
-  const undo = a.state === 'done' && a.mid ? `<button class="link-btn" data-today-undo="${esc(a.mid)}" data-project="${esc(a.project)}">Undo</button>` : ''
-  return `<div class="td-askbar${a.state === 'failed' ? ' failed' : ''}"><span class="grow">${esc(a.say || '')}</span>${undo}<button class="icon-btn" data-today-askoff="1" aria-label="Dismiss">×</button></div>`
+  return `<div class="td-askbar${a.state === 'failed' ? ' failed' : ''}"><span class="grow">${esc(a.say || '')}</span><button class="icon-btn" data-today-askoff="1" aria-label="Dismiss">×</button></div>`
 }
 
-/** Today → Close…: a dialog — closing a task by hand asks first, with an optional comment (kept in its history).
- *  A thread's sync closes tasks by itself when its calls and mail say so; this is for what they don't. */
 /** The Claude dialog for a task, two actions on the same skill and words: Work on it — into the Claude panel's live
  *  session, typed there as if by the user (`/my-skills:<id>`, the user's words); the conversation goes on there.
  *  Yolo (from Today) — `todayYolo`: Claude does it on its own, sending included. */
@@ -1174,6 +1171,8 @@ function rankSkills(skills, text, used) {
 }
 // end of the skill fit block
 const skillUse = () => { try { return JSON.parse(localStorage.getItem('echo.skillUse') || '{}') } catch { return {} } }
+/** One more use of a skill, for the ranking's tie-break. */
+const bumpSkillUse = (id) => { if (!id) return; const u = skillUse(); u[id] = (u[id] || 0) + 1; try { localStorage.setItem('echo.skillUse', JSON.stringify(u)) } catch { /* private mode */ } }
 function sendClaudeDialog() {
   const c = S.claudeSend
   if (!c) return ''
@@ -1210,8 +1209,9 @@ function sendToClaude(line) {
   // Claude asking something (a permission, a choice) would take the keys as its answer: then nothing is typed.
   const asking = () => {
     const b = e.term.buffer.active, lines = []
-    for (let y = Math.max(0, b.length - 14); y < b.length; y++) lines.push((b.getLine(y) && b.getLine(y).translateToString(true)) || '')
-    return /Do you want to|❯\s*1\.|\b1\.\s*Yes\b|Esc to cancel|trust the files/i.test(lines.join('\n'))
+    for (let y = Math.max(0, b.length - 10); y < b.length; y++) lines.push((b.getLine(y) && b.getLine(y).translateToString(true)) || '')
+    // Claude Code's own choice prompt (its ❯ cursor on option 1, "Esc to cancel"), not words in Claude's answer.
+    return /❯\s*1\.|Esc to cancel|trust the files/.test(lines.join('\n'))
   }
   // The line, then Enter on its own a moment later: in one burst a terminal app takes it all for a paste.
   const type = () => {
@@ -1229,6 +1229,8 @@ function sendToClaude(line) {
     else if (e.exited || Date.now() - since > 30000) { clearInterval(wait); S.notice = 'Claude didn\'t start — send it again once the panel shows Claude.'; render() }
   }, 300)
 }
+/** Today → Close…: a dialog — closing a task by hand asks first, with an optional comment (kept in its history).
+ *  A thread's sync closes tasks by itself when its calls and mail say so; this is for what they don't. */
 function todayCloseDialog() {
   const c = S.todayClose
   if (!c) return ''
@@ -2754,7 +2756,7 @@ document.addEventListener('click', (e) => {
   if (t.dataset.scOff !== undefined && (t.tagName === 'BUTTON' || e.target === t)) { S.claudeSend = null; return render() }
   if (t.dataset.scYolo !== undefined) {
     const c = S.claudeSend, text = (($('#sc-words') || {}).value || '').trim()
-    if (c.skill) { const u = skillUse(); u[c.skill] = (u[c.skill] || 0) + 1; try { localStorage.setItem('echo.skillUse', JSON.stringify(u)) } catch { /* private mode */ } }
+    bumpSkillUse(c.skill)
     S.claudeSend = null
     todayYolo(c, c.skill || '', text)
     return render()
@@ -2762,7 +2764,7 @@ document.addEventListener('click', (e) => {
   if (t.dataset.scSend !== undefined) {
     const c = S.claudeSend
     const skill = c.skill || ''
-    if (skill) { const u = skillUse(); u[skill] = (u[skill] || 0) + 1; try { localStorage.setItem('echo.skillUse', JSON.stringify(u)) } catch { /* private mode */ } }
+    bumpSkillUse(skill)
     const words = (($('#sc-words') || {}).value || '').trim()
     S.claudeSend = null
     render()
@@ -2781,10 +2783,17 @@ document.addEventListener('focusin', (e) => {
 })
 document.addEventListener('keydown', (e) => {
   if (!S.claudeSend) return
-  if (e.target.id === 'sc-q' && e.key === 'Enter') { e.preventDefault(); const f = document.querySelector('.sc-sugg [data-sc-skill]'); if (f) f.click(); return }
+  // Enter in the skill field: the first match of what was typed; with nothing typed, on to the note (just the task).
+  if (e.target.id === 'sc-q' && e.key === 'Enter') {
+    e.preventDefault()
+    const f = S.claudeSend.q && S.claudeSend.q.trim() && document.querySelector('.sc-sugg [data-sc-skill]')
+    if (f) return f.click()
+    S.claudeSend.open = false; render(); const n = $('#sc-words'); if (n) n.focus()
+    return
+  }
   if (e.key === 'Escape' && S.claudeSend.open) { S.claudeSend.open = false; return render() }
   if (e.key === 'Escape') { S.claudeSend = null; render() }
-  else if (e.key === 'Enter' && e.target.id === 'sc-words') { e.preventDefault(); const b = document.querySelector('.sc-foot .btn.primary'); if (b) b.click() }
+  else if (e.key === 'Enter' && !e.shiftKey && e.target.id === 'sc-words') { e.preventDefault(); const b = document.querySelector('.sc-foot .btn.primary'); if (b) b.click() }
 })
 
 // Templates: picking, the editor's buttons, and its fields saved when they change.
@@ -7081,7 +7090,7 @@ document.addEventListener('click', (e) => {
   if (S.laterOpen && !(e.target.closest && e.target.closest('[data-cmd^="later-"]'))) { S.laterOpen = false; render() }
   // The sidebar open over a narrow page closes on a click beside it.
   if (S.barOver && !(e.target.closest && e.target.closest('.actbar'))) { S.barOver = false; render() }
-  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-theme-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-go],[data-conv-keep],[data-br-pclosed],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-up],[data-today-seen],[data-today-done],[data-today-retry],[data-today-import],[data-today-close],[data-today-keep],[data-needs-open],[data-needs-wont],[data-needs-todo],[data-needs-todo-ok],[data-needs-read],[data-needs-send],[data-needs-outlook],[data-needs-off],[data-today-undo],[data-today-askoff],[data-prep-write],[data-ev-prep],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
+  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-theme-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-go],[data-conv-keep],[data-br-pclosed],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-up],[data-today-seen],[data-today-done],[data-today-retry],[data-today-import],[data-today-close],[data-today-keep],[data-needs-open],[data-needs-wont],[data-needs-todo],[data-needs-todo-ok],[data-needs-read],[data-needs-send],[data-needs-outlook],[data-needs-off],[data-today-askoff],[data-prep-write],[data-ev-prep],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
   if (!t) { if (menuWas) render(); return }
   // Sign-ins (`signin.rs`): shown at once (starting / stopping / checking) until the next poll
   // brings the app's state.
@@ -7225,7 +7234,6 @@ document.addEventListener('click', (e) => {
   }
   if (t.dataset.needsOutlook) return send({ cmd: 'open_url', url: t.dataset.needsOutlook })
   if (t.dataset.needsOff && (t.tagName === 'BUTTON' || e.target === t)) { S.needsDlg = null; return render() }
-  if (t.dataset.todayUndo) { send({ cmd: 'project', op: 'ledger', id: t.dataset.project, body: { op: 'undo', target: t.dataset.todayUndo } }); S.todayAskId = null; setTimeout(() => loadToday().then(render), 800); return render() }
   if (t.dataset.todayAskoff) { S.todayAskId = null; return render() }
   if (t.dataset.todayClose) {
     S.todayClose = { project: t.dataset.project, node: t.dataset.todayClose, title: t.dataset.title }

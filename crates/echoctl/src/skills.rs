@@ -9,7 +9,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde_json::{json, Value};
 
 use crate::paths;
@@ -33,17 +33,38 @@ fn off() -> Vec<String> {
     fs::read(off_file()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
 }
 
-/// A `SKILL.md`'s frontmatter (one `key: value` a line, values unquoted) and body.
+/// A `SKILL.md`'s frontmatter (top-level `key: value` lines, values unquoted; a block value — `>` or `|` and the
+/// indented lines under it — folded to one line or kept as lines) and body.
 fn split(text: &str) -> Option<(Vec<(String, String)>, String)> {
     // As Claude Code reads it: a byte-order mark and Windows line ends are fine.
     let text = text.trim_start_matches('\u{feff}').replace("\r\n", "\n");
     let (front, body) = text.strip_prefix("---\n").and_then(|t| t.split_once("\n---"))?;
-    let fields = front
-        .lines()
-        .filter(|l| !l.starts_with(' ') && !l.starts_with('\t'))
-        .filter_map(|l| l.split_once(':'))
-        .map(|(k, v)| (k.trim().to_string(), v.trim().trim_matches('"').trim_matches('\'').to_string()))
-        .collect();
+    let mut fields: Vec<(String, String)> = vec![];
+    let mut block: Option<(usize, &str)> = None; // the field a block value goes to, and how it joins
+    for l in front.lines() {
+        let indented = l.starts_with(' ') || l.starts_with('\t');
+        if let (true, Some((i, join))) = (indented || l.trim().is_empty(), block) {
+            let v = &mut fields[i].1;
+            if !v.is_empty() && !l.trim().is_empty() {
+                v.push_str(join);
+            }
+            v.push_str(l.trim());
+            continue;
+        }
+        block = None;
+        if indented {
+            continue;
+        }
+        if let Some((k, v)) = l.split_once(':') {
+            let v = v.trim();
+            if matches!(v, ">" | ">-" | ">+" | "|" | "|-" | "|+") {
+                block = Some((fields.len(), if v.starts_with('>') { " " } else { "\n" }));
+                fields.push((k.trim().to_string(), String::new()));
+            } else {
+                fields.push((k.trim().to_string(), v.trim_matches('"').trim_matches('\'').to_string()));
+            }
+        }
+    }
     Some((fields, body.trim_start_matches('\n').trim().to_string()))
 }
 
@@ -179,8 +200,12 @@ pub fn remove(id: &str) -> Result<()> {
     anyhow::ensure!(s["kind"] != "builtin", "{id} is Echo's own: nothing to take away");
     let bin = paths::state_dir().join("trash").join("skills");
     fs::create_dir_all(&bin)?;
-    fs::rename(dir().join(id), bin.join(format!("{id}-{}", chrono::Utc::now().format("%Y%m%d%H%M%S"))))?;
-    Ok(())
+    fs::rename(dir().join(id), bin.join(format!("{id}-{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"))))?;
+    // A new skill of the same name later starts on.
+    crate::calls::update_state(&off_file(), |offs: &mut Vec<String>| {
+        offs.retain(|o| o != id);
+        Ok(())
+    })
 }
 
 /// Switch a skill on or off: off, it stays out of the Claude panel's session.
@@ -212,26 +237,59 @@ pub fn fingerprint() -> (String, Option<std::time::SystemTime>) {
     for s in list().into_iter().filter(|s| s["on"] == true && s["problems"].as_array().is_some_and(|p| p.is_empty())) {
         h.update(s["id"].as_str().unwrap_or("").as_bytes());
         h.update(s["text"].as_str().unwrap_or("").as_bytes());
+        // Each file by its name, size and time — not its bytes: a folder of assets is read every poll otherwise.
         if let Some(d) = s["folder"].as_str() {
             for f in walk(Path::new(d)) {
                 h.update(f.to_string_lossy().as_bytes());
-                let p = Path::new(d).join(&f);
-                h.update(fs::read(&p).unwrap_or_default());
-                at = at.max(fs::metadata(&p).and_then(|m| m.modified()).ok());
+                let m = fs::metadata(Path::new(d).join(&f)).ok();
+                h.update(m.as_ref().map(|m| m.len()).unwrap_or(0).to_le_bytes());
+                let t = m.and_then(|m| m.modified().ok());
+                h.update(format!("{t:?}").as_bytes());
+                at = at.max(t);
             }
         }
     }
     (h.finalize().iter().take(8).map(|x| format!("{x:02x}")).collect(), at)
 }
 
-/// The `my-skills` plugin, written afresh: the skills that are on and valid, every file of each.
+/// The `my-skills` plugin as the skills are now (those on and valid, every file of each): one folder per version
+/// (`<config>/my-skills/<fingerprint>/`), written whole under another name and renamed into place, never changed
+/// after — a session or a Yolo run that loaded one keeps it while another is made. Versions a week old go.
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn plugin() -> Result<PathBuf> {
-    let root = paths::config_dir().join(PLUGIN);
-    let skills = root.join("skills");
-    if skills.exists() {
-        fs::remove_dir_all(&skills).with_context(|| format!("clearing {}", skills.display()))?;
+    let base = paths::config_dir().join(PLUGIN);
+    let done = base.join(fingerprint().0);
+    if done.join(".claude-plugin/plugin.json").exists() {
+        return Ok(done);
     }
+    fs::create_dir_all(&base)?;
+    let root = base.join(format!(".new-{}-{}", std::process::id(), chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)));
+    let built = build_plugin(&root);
+    if built.is_ok() && fs::rename(&root, &done).is_ok() {
+        sweep_plugins(&base, &done);
+        return Ok(done);
+    }
+    // Failed, or another start made the same version first.
+    let _ = fs::remove_dir_all(&root);
+    built?;
+    anyhow::ensure!(done.join(".claude-plugin/plugin.json").exists(), "the skills plugin couldn't be put in place");
+    Ok(done)
+}
+
+/// Old versions of the plugin (a week untouched), and half-made ones left by a crash.
+fn sweep_plugins(base: &Path, keep: &Path) {
+    let week = std::time::Duration::from_secs(7 * 24 * 3600);
+    for e in fs::read_dir(base).into_iter().flatten().flatten() {
+        let p = e.path();
+        let old = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|a| a > week);
+        if p != keep && old && p.is_dir() {
+            let _ = fs::remove_dir_all(&p);
+        }
+    }
+}
+
+fn build_plugin(root: &Path) -> Result<()> {
+    let skills = root.join("skills");
     fs::create_dir_all(root.join(".claude-plugin"))?;
     paths::write_atomic(
         &root.join(".claude-plugin/plugin.json"),
@@ -257,7 +315,7 @@ pub fn plugin() -> Result<PathBuf> {
             }
         }
     }
-    Ok(root)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -298,10 +356,18 @@ mod tests {
         assert!(!root.join("skills/status-report").exists(), "off");
         assert!(!root.join("skills/Bad_Skill").exists(), "invalid");
         set_on("status-report", true).unwrap();
+        let first = root;
         let root = plugin().unwrap();
+        assert_ne!(root, first, "a new version beside the old one");
+        assert!(first.join("skills/follow-up-mail/SKILL.md").is_file(), "the old one stays whole for a session that loaded it");
+        assert_eq!(plugin().unwrap(), root, "unchanged skills: the same version");
         assert_eq!(fs::read_to_string(root.join("skills/status-report/scripts/collect.sh")).unwrap(), "echo hi");
         assert!(root.join("skills/status-report/references/FORMAT.md").is_file());
-        // Taken away: theirs to the trash, Echo's back to built in.
+        // Taken away: theirs to the trash, Echo's back to built in; one made again later starts on.
+        set_on("status-report", false).unwrap();
+        remove("status-report").unwrap();
+        create("Status report").unwrap();
+        assert_eq!(list().into_iter().find(|s| s["id"] == "status-report").unwrap()["on"], true);
         remove("status-report").unwrap();
         remove("follow-up-mail").unwrap();
         assert_eq!(list()[0]["kind"], "builtin");
@@ -314,6 +380,13 @@ mod tests {
         fs::create_dir_all(&crlf).unwrap();
         fs::write(crlf.join("SKILL.md"), "\u{feff}---\r\nname: crlf-skill\r\ndescription: Use when x.\r\n---\r\nbody\r\n").unwrap();
         assert!(list().into_iter().find(|s| s["id"] == "crlf-skill").unwrap()["problems"].as_array().unwrap().is_empty());
+        // A description written as a YAML block: its lines, folded.
+        let folded = dir().join("folded-skill");
+        fs::create_dir_all(&folded).unwrap();
+        fs::write(folded.join("SKILL.md"), "---\nname: folded-skill\ndescription: >\n  Use when a weekly\n  report is due.\nlicense: MIT\n---\nbody\n").unwrap();
+        let f = list().into_iter().find(|s| s["id"] == "folded-skill").unwrap();
+        assert_eq!(f["description"], "Use when a weekly report is due.");
+        assert!(f["problems"].as_array().unwrap().is_empty(), "{f}");
         // What the session would load changes with a skill switched off.
         let before = fingerprint().0;
         set_on("crlf-skill", false).unwrap();

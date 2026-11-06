@@ -284,12 +284,19 @@ pub fn yolo_task(id: &str, project: &str, node: &str, skill: &str, words: &str) 
         tools: crate::claudejob::Tools::Skip,
         run_dir: paths::config_dir().join("yolo").join(id),
         timeout: std::time::Duration::from_secs(20 * 60),
-        plugins: crate::skills::plugin().into_iter().collect(),
+        plugins: vec![],
+        as_user: true,
     };
     let (id, title) = (id.to_string(), title);
     save_ask(json!({"id": id, "state": "working", "title": title, "at": Local::now().to_rfc3339()}));
     std::thread::spawn(move || {
-        let mut v = match crate::claudejob::run(&spec) {
+        let mut spec = spec;
+        // The user's skills as they are now (off the window's thread: it copies their files).
+        let out = crate::skills::plugin().and_then(|d| {
+            spec.plugins = vec![d];
+            crate::claudejob::run(&spec)
+        });
+        let mut v = match out {
             Ok((answer, _, _)) => json!({"state": "done", "say": answer.trim().chars().take(400).collect::<String>()}),
             Err(e) => json!({"state": "failed", "say": format!("{e:#}")}),
         };
