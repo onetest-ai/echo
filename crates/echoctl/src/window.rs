@@ -2194,6 +2194,35 @@ pub fn handle(msg: &str) -> Handled {
             Ok(_) => true.into(),
             Err(e) => notice(&format!("{e:#}")),
         },
+        // Settings → Templates → Skills: Echo keeps the catalogue; a skill's content is written in an editor or by Claude.
+        // A new or customized skill opens its SKILL.md in the default editor; "Open in VS Code" opens all the skills.
+        "skill_new" | "skill_customize" => {
+            let made = if v["cmd"] == "skill_new" { crate::skills::create(v["name"].as_str().unwrap_or("")) } else { crate::skills::customize(v["id"].as_str().unwrap_or("")) };
+            match made {
+                Ok(d) => {
+                    crate::app::open_path(&d.join("SKILL.md"));
+                    let id = d.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
+                    Handled { refresh: false, reply: Some(format!("window.echo && window.echo.templateSaved({}, true, 'sk')", json!(id))) }
+                }
+                Err(e) => notice(&format!("{e:#}")),
+            }
+        }
+        "skill_remove" => match crate::skills::remove(v["id"].as_str().unwrap_or("")) {
+            Ok(()) => Handled { refresh: false, reply: Some("window.echo && window.echo.templateSaved(null, false, 'sk')".into()) },
+            Err(e) => notice(&format!("{e:#}")),
+        },
+        "skill_on" => match crate::skills::set_on(v["id"].as_str().unwrap_or(""), v["on"] == true) {
+            Ok(()) => Handled { refresh: false, reply: Some(format!("window.echo && window.echo.templateSaved({}, false, 'sk')", json!(v["id"]))) },
+            Err(e) => notice(&format!("{e:#}")),
+        },
+        "skill_open" => {
+            match crate::skills::folder(v["id"].as_str().unwrap_or("")) {
+                Some(d) if v["how"] == "finder" => crate::app::reveal_file(&d.join("SKILL.md")),
+                Some(d) => crate::app::open_in_code(d.parent().unwrap_or(&d)),
+                None => return notice("Echo's own skill: Customize it to have a folder of your own"),
+            }
+            false.into()
+        }
         // Settings → Templates → Meeting types: save one (a built-in keeps its id), take the user's away.
         "meeting_type_save" => match crate::calls::meeting_type_save(v["id"].as_str(), v["name"].as_str().unwrap_or(""), v["about"].as_str().unwrap_or("")) {
             Ok(id) => Handled { refresh: false, reply: Some(format!("window.echo && window.echo.templateSaved({}, {}, 'mt')", json!(id), v["id"].as_str().is_none_or(str::is_empty))) },
@@ -2238,8 +2267,9 @@ pub fn handle(msg: &str) -> Handled {
             });
             false.into()
         }
-        // My work's Claude icon: the user's words about one task, done by `claude -p` in the background.
-        "task_ask" => match crate::today::ask_task(v["ask"].as_str().unwrap_or(""), v["project"].as_str().unwrap_or(""), v["node"].as_str().unwrap_or(""), v["text"].as_str().unwrap_or("")) {
+        // My work's Claude dialog → Yolo: the task, its skill and the user's words, done by Claude on its own.
+        #[cfg(feature = "js")]
+        "task_yolo" => match crate::today::yolo_task(v["ask"].as_str().unwrap_or(""), v["project"].as_str().unwrap_or(""), v["node"].as_str().unwrap_or(""), v["skill"].as_str().unwrap_or(""), v["text"].as_str().unwrap_or("")) {
             Ok(()) => true.into(),
             Err(e) => notice(&format!("{e:#}")),
         },

@@ -316,6 +316,9 @@ fn loaded_now(profile: Option<&str>, folder: bool) -> Vec<(String, String, Optio
             let at = files.iter().filter_map(|f| mtime(f)).max();
             out.push((format!("Skills from the {name} plugin changed"), h.finalize().iter().take(8).map(|x| format!("{x:02x}")).collect(), at));
         }
+        // The user's own skills (Settings → Templates → Skills): made, changed, switched on or off since it started.
+        let (h, at) = crate::skills::fingerprint();
+        out.push(("Your skills changed".to_string(), h, at));
     }
     out
 }
@@ -577,6 +580,12 @@ pub fn start_folder(key: &str, profile: Option<&str>, pick: Option<&str>, cols: 
     // (skills) and the folders the user gave them to read (an Obsidian vault…).
     for d in crate::grants::session_plugins() {
         args.extend(["--plugin-dir".into(), d.display().to_string()]);
+    }
+    // The user's skills (Settings → Templates → Skills), as a plugin of their own: only their descriptions in its
+    // context until one is used; Send to Claude on a task names one.
+    match crate::skills::plugin() {
+        Ok(d) => args.extend(["--plugin-dir".into(), d.display().to_string()]),
+        Err(e) => eprintln!("skills: {e:#}"),
     }
     // Echo's own plugin (status line, record / minutes / doctor skills): installed in this folder's project scope it
     // reaches Claude Code as the user set it up; a profile of its own reads only its own settings, so it gets the

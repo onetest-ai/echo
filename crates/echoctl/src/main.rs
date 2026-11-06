@@ -60,6 +60,7 @@ mod speakers;
 mod speaking;
 mod schedule;
 mod series;
+mod skills;
 #[cfg(feature = "js")]
 mod share;
 mod signin;
@@ -2899,10 +2900,20 @@ fn client_command(cmd: ClientCmd) -> Result<()> {
     Ok(())
 }
 
+/// Is this ledger edit (`json`, on project `id`) one of Yolo's own task (`run_task`, `<project>/<node>`)?
+fn own_task_edit(id: &str, json: &str, run_task: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(json).ok().is_some_and(|b| b["op"] == "edit" && b["node"].as_str().is_some_and(|n| !run_task.is_empty() && run_task == format!("{id}/{n}")))
+}
+
 fn ledger_command(id: &str, cmd: LedgerCmd) -> Result<()> {
     // Inside a run Echo started: the agent's steps, on that run's project only (a read-only routine:
     // the tree).
-    if notes::headless() && !(matches!(cmd, LedgerCmd::Tree) && routine_reads()) {
+    // Yolo's run: an edit of its own task (`guard::RUN_TASK`), nothing else of the ledger's.
+    let own_task = match &cmd {
+        LedgerCmd::Edit { json } => own_task_edit(id, json, &std::env::var(guard::RUN_TASK).unwrap_or_default()),
+        _ => false,
+    };
+    if notes::headless() && !own_task && !(matches!(cmd, LedgerCmd::Tree) && routine_reads()) {
         let own = std::env::var(guard::RUN_PROJECT).unwrap_or_default();
         let agent_step = matches!(cmd, LedgerCmd::Pending | LedgerCmd::Context | LedgerCmd::Apply { .. } | LedgerCmd::Done { .. } | LedgerCmd::VerifyPrep { .. } | LedgerCmd::VerifyApply { .. } | LedgerCmd::PeopleContext { .. } | LedgerCmd::PeopleApply { .. });
         if own.is_empty() || own != id || !agent_step {
@@ -2972,4 +2983,17 @@ fn ledger_command(id: &str, cmd: LedgerCmd) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn yolo_edits_only_its_own_task() {
+        let edit = r#"{"op": "edit", "node": "T5", "set": {"state": "done"}}"#;
+        assert!(super::own_task_edit("acme", edit, "acme/T5"));
+        assert!(!super::own_task_edit("acme", edit, "acme/T6"), "another task");
+        assert!(!super::own_task_edit("other", edit, "acme/T5"), "another project");
+        assert!(!super::own_task_edit("acme", edit, ""), "not a Yolo run");
+        assert!(!super::own_task_edit("acme", r#"{"op": "create", "node": "T5"}"#, "acme/T5"), "only an edit");
+    }
 }

@@ -377,6 +377,26 @@ pub fn open_path(path: &Path) {
     let _ = Command::new("explorer").arg(path).status();
 }
 
+/// Open a folder in VS Code (the skills folder), else with its default app.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn open_in_code(path: &Path) {
+    #[cfg(target_os = "macos")]
+    {
+        if Command::new("open").args(["-b", "com.microsoft.VSCode"]).arg(path).status().is_ok_and(|s| s.success()) {
+            return;
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const NO_WINDOW: u32 = 0x0800_0000;
+        if Command::new("cmd").args(["/C", "code"]).arg(path).creation_flags(NO_WINDOW).status().is_ok_and(|s| s.success()) {
+            return;
+        }
+    }
+    open_path(path);
+}
+
 /// Show a file selected in Finder / Explorer.
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn reveal_file(path: &Path) {

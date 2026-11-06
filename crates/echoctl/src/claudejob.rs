@@ -64,6 +64,11 @@ pub struct Spec {
     /// Where the run's files go.
     pub run_dir: PathBuf,
     pub timeout: Duration,
+    /// More plugins for the run (`--plugin-dir`): Yolo's task gets the user's skills.
+    pub plugins: Vec<PathBuf>,
+    /// Yolo's task (`<project>/<node>`): the run may edit that one task (`guard::RUN_TASK`; the CLI's other headless
+    /// limits stay), and a profile of its own gets Echo's plugin (manage, Microsoft 365), as the panel does.
+    pub task: Option<String>,
 }
 
 impl Spec {
@@ -91,6 +96,8 @@ impl Spec {
             tools: Tools::parse(&s("tools"))?,
             run_dir: store.join(rel),
             timeout: Duration::from_secs(minutes * 60),
+            plugins: vec![],
+            task: None,
         })
     }
 }
@@ -174,8 +181,11 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
     // What plugins add to Echo's sessions: their skills, and folders to read (also for a read-only run).
     let (session_plugins, session_read) = (crate::grants::session_plugins(), crate::grants::session_read());
     if spec.tools != Tools::None {
-        for d in &session_plugins {
+        for d in session_plugins.iter().chain(&spec.plugins) {
             a.extend(["--plugin-dir".into(), d.display().to_string()]);
+        }
+        if spec.task.is_some() && profile.kind.managed() {
+            a.extend(["--plugin-dir".into(), plugin.display().to_string()]);
         }
     }
     match spec.tools {
@@ -222,6 +232,9 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
     let child = notes::admit_child(|| {
         let mut c = crate::ai::prepare_claude(profile, &a, &cwd, false)?;
         c.env("ECHOCTL_BIN", &exe);
+        if let Some(t) = &spec.task {
+            c.env(guard::RUN_TASK, t);
+        }
         if spec.tools == Tools::Read {
             c.env(guard::RUN_MODE, "routine").env(guard::RUN_HOME, &home).env(guard::RUN_CLIS, clis.join("\n"));
             c.env(guard::RUN_READ, session_read.iter().map(|d| d.display().to_string()).collect::<Vec<_>>().join("\n"));

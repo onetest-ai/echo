@@ -477,6 +477,25 @@ pub fn detach(c: &mut Command) {
     let _ = c;
 }
 
+/// The marks of a Claude Code session Echo itself was started from (`echoctl app start` in a session's Bash tool): a
+/// session Echo starts is its own, not that one's child — inherited, they turn its transcript saving off (nothing to
+/// resume) and point it at the other session's messaging and bridge.
+const PARENT_SESSION: &[&str] = &[
+    "CLAUDECODE",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_SESSION_ATTENDED",
+    "CLAUDE_CODE_BRIDGE_SESSION_ID",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SSE_PORT",
+    "CLAUDE_CODE_EXECPATH",
+    "CLAUDE_PID",
+    "CLAUDE_EFFORT",
+    "AI_AGENT",
+];
+
 /// The command for Claude Code with profile `p` (built, not started; tested).
 fn build_command(p: &Profile, claude: &Path, args: &[String], cwd: &Path, stdin: bool, use_shell: bool) -> Command {
     let managed = p.kind.managed();
@@ -513,6 +532,9 @@ fn build_command(p: &Profile, claude: &Path, args: &[String], cwd: &Path, stdin:
         }
         c
     };
+    for k in PARENT_SESSION {
+        c.env_remove(k);
+    }
     c.current_dir(cwd)
         .env(crate::notes::HEADLESS, "1")
         .env("ECHOCTL_HOME", paths::home())
@@ -2060,6 +2082,8 @@ mod tests {
         assert_eq!(auth.get_args().count(), 2, "`claude auth` takes no --setting-sources");
         let system = build_command(&system_profile(), Path::new("/bin/claude"), &["-p".into()], &root, false, false);
         assert!(!system.get_envs().any(|(k, _)| k == "ANTHROPIC_BASE_URL"), "system: the user's own setup");
+        // Started from inside a Claude Code session, Echo's are still sessions of their own (transcripts saved).
+        assert!(system.get_envs().any(|(k, v)| k == "CLAUDE_CODE_CHILD_SESSION" && v.is_none()), "not a child of the session Echo came from");
         assert_eq!(system.get_args().count(), 1);
     }
 
