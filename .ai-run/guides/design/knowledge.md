@@ -238,3 +238,141 @@ identical); checks found 5 pages not in the index and 10 broken links, all real.
 - X-S1's "scans pause during transcription" has nothing to pause: Echo scans a vault only when the window asks
   (a stat walk every 2 s while Knowledge shows, a re-read of changed files on a request).
 - The notification names the vaults before their save runs; a failure then shows on the chip and in the Inbox.
+
+## Chat protocol
+
+Recorded from Claude Code **2.1.310** on 6 November 2026 (plan 2, Task 0; spec V10, V11). The raw lines, scrubbed, are
+in `crates/echoctl/src/knowledge/testdata/stream/` (`README.md` there says how); Echo's parser and fake replay them.
+The command was the one of spec §5.4, plus `--permission-prompt-tool stdio` (see *The host permission request*).
+
+**Lines on stdout** (one JSON object per line; every one has `session_id`, most have `uuid`):
+
+- `{"type":"system","subtype":"init","cwd","session_id","tools":[…],"model","permissionMode","claude_code_version",…}`
+  first, then `system`/`status` (`"status":"requesting"`) before each model request. Other `system` subtypes seen:
+  `thinking_tokens` (`estimated_tokens`, `estimated_tokens_delta`), `task_summary` (`detail`), `post_turn_summary`
+  (`status_category`, `status_detail`, `needs_action`), `task_started` / `task_progress` / `task_updated` /
+  `task_notification` (a sub-agent run: `task_id`, `tool_use_id`, `subagent_type`, `description`), `permission_denied`.
+  Echo ignores a `system` subtype it does not know. The tool list names the Agent tool `Task`; its `tool_use` is named
+  `Agent`. `TodoWrite` is **not** in `tools` in print mode, even when passed to `--tools` (the `todo` event of §5.3 has
+  no source in this version unless another tool shows up).
+- `{"type":"stream_event","event":{…},"parent_tool_use_id":null|"toolu_…","session_id","uuid","api_message_id"}` — `event`
+  is an Anthropic streaming event: `message_start` (`message`), `content_block_start` (`index`, `content_block` with
+  `type` `thinking` | `text` | `tool_use` (`id`, `name`, `input:{}`)), `content_block_delta` (`index`, `delta`:
+  `thinking_delta {thinking, estimated_tokens}` — the text is empty with this model, `signature_delta`,
+  `text_delta {text}`, `input_json_delta {partial_json}`), `content_block_stop {index}`, `message_delta`
+  (`delta.stop_reason`: `tool_use` | `end_turn`; `usage`), `message_stop`. A tool's input arrives as `partial_json`
+  fragments that join to one JSON object; a fragment can cut a word or a path in two. A sub-agent's events carry its
+  tool_use id in `parent_tool_use_id`.
+- `{"type":"assistant","message":{"id","role":"assistant","content":[…blocks…],"stop_reason","usage"}, "parent_tool_use_id"}`
+  — the finished message, **one line per content block** (a thinking block, then a `tool_use` block, then a `text`
+  block each come as their own `assistant` line with the same `message.id`; `stop_reason` is null on them). Blocks:
+  `{"type":"thinking","thinking":"","signature"}`, `{"type":"text","text"}`,
+  `{"type":"tool_use","id":"toolu_…","name":"Grep","input":{…},"caller":{"type":"direct"}}`. The finished block follows
+  its deltas and precedes its `content_block_stop`.
+- `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id","content":"<text>","is_error"?}]},
+  "parent_tool_use_id","tool_use_result":…,"tool_result_meta"?}` — a tool's result (`content` is a string for the tools
+  seen; `tool_use_result` is the structured form: for `Edit` `{filePath, oldString, newString, originalFile, …}`, for
+  `Grep` `{mode, filenames, numFiles, content?}`, for a refused call the string `"Error: <message>"`). A `user` line with
+  `content:[{"type":"text",…}]` is the harness's own text (a skill's body after `Skill`; `[Request interrupted by user]`).
+- `{"type":"rate_limit_event","rate_limit_info":{"status","rateLimitType",…}}` — ignore.
+- `{"type":"result","subtype":"success"|"error_during_execution","is_error","stop_reason","terminal_reason",
+  "num_turns","duration_ms","duration_api_ms","total_cost_usd","usage":{input_tokens, cache_read_input_tokens,
+  cache_creation_input_tokens, output_tokens,…},"modelUsage":{<model>:{inputTokens,outputTokens,cacheReadInputTokens,
+  costUSD,…}},"permission_denials":[{tool_name,tool_use_id,tool_input}],"result":"<final text>","session_id"}` — one per
+  turn, always last for the turn. `cost` for §5.3 is `total_cost_usd`; `tokens_in` is
+  `input_tokens + cache_read_input_tokens + cache_creation_input_tokens`; the cache share is
+  `cache_read / tokens_in`. `modelUsage` can be absent on an aborted turn.
+- `{"type":"prompt_suggestion","suggestion":"commit this","uuid","session_id"}` — after the `result`, **only sometimes**
+  (3 of 10 turns with `--prompt-suggestions` produced one; none after a plain Q&A, a tool-less answer, a denied edit or a fetch). The window
+  must not wait for it: show it if it comes before the next user message.
+
+**The user message** the host writes: `{"type":"user","message":{"role":"user","content":[{"type":"text","text":"…"}]}}`.
+Claude Code does not echo it back (no `--replay-user-messages`), so Echo numbers the `user` event itself. A second
+message may be written after the `result`; the same process keeps the conversation.
+
+**The host permission request.** `--permission-prompts host` **alone does not deliver** a request in `-p
+--input-format stream-json`: the tool is refused at once with `{"type":"system","subtype":"permission_denied",
+"tool_name","tool_use_id","message":"Claude requested permissions to write to <path>, but you haven't granted it yet."}`
+and an `is_error` tool result (`host-only-denied.jsonl`; an `initialize` control request did not change that). The
+request arrives as a control request only with the hidden flag **`--permission-prompt-tool stdio`** (the one the SDKs
+pass; absent from `--help`, accepted in 2.1.310). So K12-08 keeps `--permission-prompts host` for the intent and adds
+`--permission-prompt-tool stdio`; Echo's MCP server (`brain/mcp.rs`) is **not** needed as the prompt tool. Because the
+flag is hidden, the fake (Task 5) and a startup self-check (a request must arrive for an `Edit` of a fresh file in a
+test vault, else the Curate and Research modes stay off) guard against a later version dropping it.
+
+Request (stdout):
+
+```json
+{"type":"control_request","request_id":"<uuid>","request":{"subtype":"can_use_tool","tool_name":"Edit","display_name":"Edit",
+ "input":{"file_path":"/VAULT/knowledge/clients/northwind-retail.md","old_string":"…","new_string":"…","replace_all":false},
+ "description":"knowledge/clients/northwind-retail.md","decision_reason":"probe","decision_reason_type":"hook",
+ "decision_reason_hook_event":"PreToolUse","decision_reason_hook_source":"settings","tool_use_id":"toolu_…",
+ "agent_id":"a09f…"}}
+```
+
+`agent_id` is present only when a sub-agent made the call. Without a hook, the request has `permission_suggestions`
+(`[{"type":"setMode","mode":"acceptEdits","destination":"session"}]`) instead of the `decision_reason*` fields. For
+`WebFetch` the `input` is `{url, prompt}`. `input.file_path` is absolute: the page shows it relative to the vault.
+The diff for §5.3's `permission` event is computed from `old_string`/`new_string` and the file on disk.
+
+Answer (stdin), allow — `updatedInput` is **required** and is the (possibly edited) `input`:
+
+```json
+{"type":"control_response","response":{"subtype":"success","request_id":"<same>","response":{"behavior":"allow","updatedInput":{…the request's input…}}}}
+```
+
+Deny: `…"response":{"behavior":"deny","message":"The user declined this change."}`. The model sees `message` as the
+tool result (`is_error:true`; `tool_result_meta` gets `permission_decision:{decision:"reject",source:"user_reject"}`),
+the call lands in `result.permission_denials`, the file is unchanged, and the turn goes on (the model answers).
+"Always allow" has no field of its own; it is Echo's `--allowed-tools`/session state, never sent.
+
+**Interrupt.** Write `{"type":"control_request","request_id":"<any>","request":{"subtype":"interrupt"}}`. Answer on
+stdout: `{"type":"control_response","response":{"subtype":"success","request_id":"<same>","response":{"still_queued":[]}}}`,
+then the partial `assistant` message, `{"type":"user",…"[Request interrupted by user]"}`, and
+`{"type":"result","subtype":"error_during_execution","is_error":true,"terminal_reason":"aborted_streaming",
+"stop_reason":null,"total_cost_usd":0,"errors":["[ede_diagnostic] …"]}`. The process stayed alive and the pipe open;
+Echo treats this result as "stopped", not as a failure. (The probe closed stdin afterwards; the process exited 1.)
+
+**Resume.** `--resume <id>` starts a **new** `session_id` (the `init` line shows it) and keeps the context (the follow-up
+was answered with no tool call). Echo stores the id from the latest `init`/`result`, not the one it passed.
+
+**V10's five facts** (probe vault: the starter's `.claude/settings.json` plus `{"permissions":{"allow":["Edit"]},
+"env":{"PROBE_SCOPE":"project"}}`; `--setting-sources project`; `--settings` with a `PreToolUse` hook that logs its
+input and `$PROBE_SCOPE` and answers *ask* for `Edit`/`Write`/`WebFetch`, and `"env":{"PROBE_SCOPE":"flag"}`):
+
+1. **A hook's *ask* reaches the host even with an allow rule for `Edit` — holds, with a caveat.** With `Edit` allowed in
+   `--allowed-tools` **and** in `--settings` (`permissions.allow`), the hook's *ask* still produced the control request
+   (`decision_reason_type:"hook"`), and the file changed only after the host answered. The caveat: the allow rule in the
+   vault's own `.claude/settings.json` was **ignored** ("Ignoring 1 permissions.allow entry from .claude/settings.json:
+   this workspace has not been trusted") because the probe folder had never been trusted in Claude Code. So a vault
+   cannot grant itself an allow rule until the user trusts it interactively; Echo's own `--allowed-tools` and
+   `--settings` are the sources that count. Not tested: an allow rule in the user's own `~/.claude/settings.json`
+   (ruling R4 keeps the probe off it) — the flag-source result above is the nearest test of it.
+2. **A `--settings` `env` key outranks the same key in the folder's `.claude/settings.json` — holds.** The hook saw
+   `PROBE_SCOPE=flag` in every call (all runs); the same run without the key in `--settings` saw `project` (so project
+   `env` is applied even in an untrusted folder, and the flag wins when both are set).
+3. **The `PreToolUse` hook fires for an `Agent`'s own tool calls — holds.** A turn that told the model to read a file
+   through the `Agent` tool logged two hook calls: `Agent` (no `agent_id`) and `Read` with `agent_id`
+   (`a859…`) and `agent_type:"general-purpose"`. The `WebFetch` run shows the same through the host request
+   (`agent_id` of the `web-fetch` sub-agent). The hook input has `session_id`, `transcript_path`, `cwd`,
+   `scratchpad_dir`, `permission_mode`, `effort`, `prompt_id`, `hook_event_name`, `tool_name`, `tool_input`,
+   `tool_use_id` (+ `agent_id`, `agent_type` for sub-agents).
+4. **`Grep` doesn't follow a symlinked folder out of the vault — holds for a directory search, not for an explicit
+   path.** With `knowledge/linked-out -> ../../outside` (a folder holding a unique word), `Grep` with `path: knowledge`
+   returned "No files found"; `Grep` with `path: knowledge/linked-out/secret.md` found the file **outside** the vault.
+   So the guard must still deny a path argument that resolves (after symlinks) outside the vault; relying on Grep's
+   recursion rule is not enough.
+5. **Long tool output is saved under the user's `~/.claude`, even with `--no-session-persistence`.** A `Grep` of 25.2 KB
+   returned `<persisted-output>` text ("Output too large (25.2KB). Full output saved to: <path>", plus a 2 KB preview)
+   at `~/.claude/projects/<vault path, every non-alphanumeric as ->/<session id>/tool-results/<tool_use id>.txt`. With
+   `--no-session-persistence` the same folder and file are written, but no `<session id>.jsonl` transcript is. The
+   `tool_result` text the stream carries is the persisted-output text, so a `tool_result` event's `preview` is that 2 KB
+   preview and its path points into `~/.claude`, outside the vault: the guard's path rule must allow reading
+   `tool-results/` files of the run's own session (or Echo never offers them), and a run that must leave nothing behind
+   must delete that folder itself.
+
+**V11 (transcript → events).** The transcript `.jsonl` named by the hook's `transcript_path`
+(`~/.claude/projects/<slug>/<session id>.jsonl`) holds the same messages as stdout (`user` / `assistant` lines) among bookkeeping lines of other
+types (`attachment`, `queue-operation`, `api-request*`, `cost-state`, …) a reader must skip; the live
+stream is therefore the source for the window, and reading the transcript back is only for a conversation opened later.
+The stream's `assistant` lines (finished blocks) and `user` `tool_result` lines are what that reader maps to §5.3.
