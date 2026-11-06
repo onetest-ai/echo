@@ -19,6 +19,10 @@
 //! for the run, never from the tool call (a settings `env` could set them too: only the user's or
 //! an admin's, which the run can't write). Measured with Claude Code 2.1.310: a `cat` of another call that an
 //! allow rule permitted, and a Read inside the working folder, were both refused.
+//!
+//! Runs in a knowledge vault (`RUN_MODE=vault`, `ingest`, `lint`: `VaultScope`) have rules of their own, and the
+//! guard may also *ask*: it prints the hook's `ask` answer and Claude Code asks the user before the call (a
+//! conversation's every edit and fetched page, spec D24).
 use serde_json::{json, Value};
 use std::io::{Read as _, Write as _};
 use std::path::{Component, Path, PathBuf};
@@ -37,6 +41,8 @@ pub const ASK_COMMANDS: [&str; 1] = ["context"];
 /// `RUN_MODE=project`: a project's sync run (`projectsync.rs`) — its ledger folder (reads), the run's
 /// own folder in it (its proposal and verdict files), the project's id (its ledger commands).
 pub const RUN_LEDGER: &str = "ECHOCTL_RUN_LEDGER";
+/// The run's own folder: a sync run's in its ledger; an ingest run's scratch copy of the vault (its whole world); an AI
+/// check's folder, where it writes only `findings.json`.
 pub const RUN_DIR: &str = "ECHOCTL_RUN_DIR";
 pub const RUN_PROJECT: &str = "ECHOCTL_RUN_PROJECT";
 /// The project-sync skill's own folder: its instructions, readable by the run.
@@ -56,6 +62,15 @@ pub const ROUTINE_COMMANDS: [&str; 13] = [
 ];
 /// The Brain's MCP tools, as Claude Code names them (`mcp__<server>__<tool>`; all read-only).
 pub const BRAIN_TOOLS: &str = "mcp__echo__";
+/// `RUN_MODE=vault` (a conversation in a knowledge vault) and `lint` (an AI check of it): the vault's root.
+/// `RUN_MODE=ingest` (an ingest run) works in its scratch copy, `RUN_DIR`.
+pub const RUN_VAULT: &str = "ECHOCTL_RUN_VAULT";
+/// `RUN_MODE=vault`: the conversation's mode — `ask` (reads), `curate` (also edits, each one asked) or `research` (also
+/// searches the web, each page fetched asked).
+pub const RUN_CHAT: &str = "ECHOCTL_RUN_CHAT";
+/// The vault's sources folder, relative to its root (`raw_inbox`): never written by a vault's run. Set for an ingest
+/// run, and for a conversation in a vault that has one.
+pub const RUN_SOURCES: &str = "ECHOCTL_RUN_SOURCES";
 
 /// The ledger steps a sync run may take (`echoctl project ledger <id> <step>`).
 pub const PROJECT_STEPS: [&str; 8] = ["pending", "context", "apply", "done", "verify-prep", "verify-apply", "people-context", "people-apply"];
@@ -78,6 +93,47 @@ pub struct Scope {
     extra: Vec<PathBuf>,
     /// …and load these skills (`RUN_SKILLS`).
     skills: Vec<String>,
+    /// A run in a knowledge vault (`RUN_MODE=vault`, `ingest`, `lint`): judged by its own rules alone.
+    vault: Option<VaultScope>,
+}
+
+/// The guard's answer to a tool call: go; ask the user first (the host's permission card); or refuse, saying why.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Decision {
+    Allow,
+    Ask(String),
+    Deny(String),
+}
+
+/// What a run in a knowledge vault may touch — read from the environment Echo set for it, never from a tool call.
+#[derive(Debug)]
+pub struct VaultScope {
+    /// The vault's root (a conversation, an AI check) or the scratch copy's (an ingest run): canonical.
+    root: PathBuf,
+    mode: VaultMode,
+    /// The skills the run may load, exactly as Echo named them (`RUN_SKILLS`).
+    skills: Vec<String>,
+    /// The sources folder, relative to the root (`RUN_SOURCES`): read, never written.
+    sources: Option<PathBuf>,
+}
+
+/// The kind of run in a vault.
+#[derive(Debug, PartialEq, Eq)]
+pub enum VaultMode {
+    /// A conversation in the vault (`RUN_MODE=vault`).
+    Chat(Chat),
+    /// An ingest run in a scratch copy of the vault (`RUN_MODE=ingest`).
+    Ingest,
+    /// An AI check (`RUN_MODE=lint`): it reads the vault and writes only `findings` (`<RUN_DIR>/findings.json`).
+    Lint { findings: PathBuf },
+}
+
+/// A conversation's mode (`RUN_CHAT`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Chat {
+    Ask,
+    Curate,
+    Research,
 }
 
 #[derive(Debug)]
@@ -89,7 +145,8 @@ struct ProjectScope {
     skill: Option<PathBuf>,
 }
 
-/// `echoctl run-guard`: judge the tool call on stdin; the exit code is Claude Code's answer.
+/// `echoctl run-guard`: judge the tool call on stdin; the exit code (and, to ask, the answer on stdout) is Claude
+/// Code's answer.
 pub fn command() -> i32 {
     let verdict = std::panic::catch_unwind(|| {
         let mut raw = String::new();
@@ -97,22 +154,39 @@ pub fn command() -> i32 {
             .read_to_string(&mut raw)
             .map_err(|e| format!("the tool call can't be read: {e}"))
             .and_then(|_| serde_json::from_str::<Value>(&raw).map_err(|e| format!("the tool call isn't JSON: {e}")))
-            .and_then(|call| Scope::from_env()?.judge(&call))
+            .and_then(|call| Ok(Scope::from_env()?.decide(&call)))
+            .unwrap_or_else(Decision::Deny)
     })
-    .unwrap_or_else(|_| Err("the guard failed".into()));
-    match verdict {
-        Ok(()) => 0,
-        Err(why) => {
-            let who = match std::env::var(RUN_MODE).as_deref() {
-                Ok("ask") => "Echo (this call's Claude session reads only)",
-                Ok("project") => "Echo's project sync",
-                Ok("routine") => "Echo (this routine reads only)",
-                _ => "Echo's minutes run",
-            };
-            let _ = writeln!(std::io::stderr(), "{who}: {why}");
-            2
+    .unwrap_or_else(|_| Decision::Deny("the guard failed".into()));
+    let why = match verdict {
+        Decision::Allow => return 0,
+        // The host's permission card: Claude Code shows it even where an allow rule says allow (design note, V10).
+        Decision::Ask(why) => {
+            let mut out = std::io::stdout();
+            match writeln!(out, "{}", ask_answer(&why)).and_then(|_| out.flush()) {
+                Ok(()) => return 0,
+                // Exit 0 without the answer would read as allowed.
+                Err(e) => format!("the question can't be passed on ({e}): {why}"),
+            }
         }
-    }
+        Decision::Deny(why) => why,
+    };
+    let who = match std::env::var(RUN_MODE).as_deref() {
+        Ok("ask") => "Echo (this call's Claude session reads only)",
+        Ok("project") => "Echo's project sync",
+        Ok("routine") => "Echo (this routine reads only)",
+        Ok("vault") => "Echo (this conversation in the vault)",
+        Ok("ingest") => "Echo's ingest run",
+        Ok("lint") => "Echo's AI check",
+        _ => "Echo's minutes run",
+    };
+    let _ = writeln!(std::io::stderr(), "{who}: {why}");
+    2
+}
+
+/// The hook's answer that has Claude Code ask the user (its host's permission card) before the call.
+fn ask_answer(why: &str) -> Value {
+    json!({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask", "permissionDecisionReason": why}})
 }
 
 /// A minutes run works only on its own call: `dir` must be the call `run_call` names (the
@@ -134,13 +208,31 @@ pub fn settings(exe: &Path, calls: &str) -> Value {
     json!({
         "disableAllHooks": false,
         "claudeMdExcludes": [format!("{calls}/**")],
-        "hooks": {"PreToolUse": [{"matcher": "*", "hooks": [{
-            "type": "command",
-            "command": hook_command(exe),
-            "timeout": 10,
-            "onFailure": "block",
-        }]}]},
+        "hooks": guard_hooks(exe),
     })
+}
+
+/// A run in a knowledge vault's own settings (`--settings`): the guard on every tool call, and the run's scope in `env`
+/// (`ECHOCTL_RUN_MODE`, `ECHOCTL_RUN_VAULT`…), which outranks the same keys in the vault's own `.claude/settings.json`
+/// (spec D40; measured with Claude Code 2.1.310, design note V10 fact 2).
+#[allow(dead_code)] // Its first caller is the vault conversation (plan 2, Task 5).
+pub fn settings_for(scope: &[(String, String)], exe: &Path) -> Value {
+    let env: serde_json::Map<String, Value> = scope.iter().map(|(k, v)| (k.clone(), Value::String(v.clone()))).collect();
+    json!({
+        "disableAllHooks": false,
+        "hooks": guard_hooks(exe),
+        "env": env,
+    })
+}
+
+/// The guard as the `PreToolUse` hook of every tool, blocking the call when the guard doesn't run.
+fn guard_hooks(exe: &Path) -> Value {
+    json!({"PreToolUse": [{"matcher": "*", "hooks": [{
+        "type": "command",
+        "command": hook_command(exe),
+        "timeout": 10,
+        "onFailure": "block",
+    }]}]})
 }
 
 /// The guard as a hook command line: this very binary. Single quotes for a POSIX shell; on
@@ -176,6 +268,10 @@ impl Scope {
     }
 
     fn from_vars(var: impl Fn(&str) -> Option<std::ffi::OsString>) -> Result<Scope, String> {
+        if let Some(mode) = var(RUN_MODE).and_then(|m| m.into_string().ok()).filter(|m| matches!(m.as_str(), "vault" | "ingest" | "lint")) {
+            let v = VaultScope::from_vars(&mode, &var)?;
+            return Ok(Scope { call: v.root.clone(), previous: None, clis: vec![], ask: true, project: None, routine: false, extra: vec![], skills: vec![], vault: Some(v) });
+        }
         let clis_of = |v: Option<std::ffi::OsString>| -> Vec<String> { v.and_then(|c| c.into_string().ok()).unwrap_or_default().lines().filter(|l| !l.is_empty()).map(str::to_owned).collect() };
         if var(RUN_MODE).is_some_and(|m| m == "project") {
             let ledger = var(RUN_LEDGER).filter(|c| !c.is_empty()).ok_or("this isn't a sync run Echo started")?;
@@ -190,7 +286,7 @@ impl Scope {
                 return Err("the run names no Echo CLI".into());
             }
             let skill = var(RUN_SKILL).and_then(|d| dunce::canonicalize(d).ok()).filter(|d| d.ends_with("project-sync"));
-            return Ok(Scope { call: ledger, previous: None, clis, ask: false, project: Some(ProjectScope { id, run_dir, skill }), routine: false, extra: vec![], skills: vec![] });
+            return Ok(Scope { call: ledger, previous: None, clis, ask: false, project: Some(ProjectScope { id, run_dir, skill }), routine: false, extra: vec![], skills: vec![], vault: None });
         }
         if var(RUN_MODE).is_some_and(|m| m == "routine") {
             let home = var(RUN_HOME).filter(|c| !c.is_empty()).ok_or("this isn't a routine Echo started")?;
@@ -204,7 +300,7 @@ impl Scope {
             }
             let extra = var(RUN_READ).map(|v| v.to_string_lossy().lines().filter(|l| !l.is_empty()).filter_map(|l| dunce::canonicalize(l).ok()).filter(|p| p.is_dir()).collect()).unwrap_or_default();
             let skills = var(RUN_SKILLS).map(|v| v.to_string_lossy().lines().filter(|l| !l.is_empty()).map(str::to_owned).collect()).unwrap_or_default();
-            return Ok(Scope { call: home, previous: None, clis, ask: true, project: None, routine: true, extra, skills });
+            return Ok(Scope { call: home, previous: None, clis, ask: true, project: None, routine: true, extra, skills, vault: None });
         }
         let call = var(RUN_CALL).filter(|c| !c.is_empty()).ok_or("this isn't a minutes run Echo started")?;
         let call = dunce::canonicalize(&call).map_err(|e| format!("the run's call folder can't be found: {e}"))?;
@@ -217,11 +313,28 @@ impl Scope {
             return Err("the run names no Echo CLI".into());
         }
         let ask = var(RUN_MODE).is_some_and(|m| m == "ask");
-        Ok(Scope { call, previous, clis, ask, project: None, routine: false, extra: vec![], skills: vec![] })
+        Ok(Scope { call, previous, clis, ask, project: None, routine: false, extra: vec![], skills: vec![], vault: None })
     }
 
-    /// Allowed, or why not.
+    /// The answer to a tool call. Only a run in a vault is ever asked about; the other runs are allowed or refused.
+    pub fn decide(&self, call: &Value) -> Decision {
+        if let Some(v) = &self.vault {
+            return v.decide(call);
+        }
+        match self.judge(call) {
+            Ok(()) => Decision::Allow,
+            Err(why) => Decision::Deny(why),
+        }
+    }
+
+    /// Allowed, or why not (for a run in a vault: a call it asks the user about isn't allowed yet).
     pub fn judge(&self, call: &Value) -> Result<(), String> {
+        if let Some(v) = &self.vault {
+            return match v.decide(call) {
+                Decision::Allow => Ok(()),
+                Decision::Ask(why) | Decision::Deny(why) => Err(why),
+            };
+        }
         let tool = call["tool_name"].as_str().unwrap_or("");
         let input = &call["tool_input"];
         if let Some(ps) = &self.project {
@@ -245,6 +358,9 @@ impl Scope {
             "Edit" | "Write" => {
                 let raw = input["file_path"].as_str();
                 let p = resolve(raw)?;
+                if p.strip_prefix(&self.call).is_ok_and(instruction_file) {
+                    return Err(format!("{} is an instruction file Claude Code would load: not written", p.display()));
+                }
                 if p.parent() != Some(self.call.as_path()) || !minutes_file(&p) {
                     return Err(format!("a minutes run writes only notes.md and its new action list in this call's folder, not {}", p.display()));
                 }
@@ -421,6 +537,360 @@ impl Scope {
     }
 }
 
+impl VaultScope {
+    /// From the run's environment, as Echo set it (spec D40, untrusted-text R5): anything missing or malformed, and
+    /// the run may do nothing.
+    fn from_vars(mode: &str, var: &impl Fn(&str) -> Option<std::ffi::OsString>) -> Result<VaultScope, String> {
+        let folder = |k: &str, what: &str| -> Result<PathBuf, String> {
+            let raw = PathBuf::from(var(k).filter(|v| !v.is_empty()).ok_or_else(|| format!("the run names no {what}"))?);
+            if !raw.is_absolute() {
+                return Err(format!("the {what} {} isn't an absolute path", raw.display()));
+            }
+            dunce::canonicalize(&raw).ok().filter(|d| d.is_dir()).ok_or_else(|| format!("the {what} {} isn't a folder", raw.display()))
+        };
+        let skills: Vec<String> = var(RUN_SKILLS).map(|v| v.to_string_lossy().lines().filter(|l| !l.is_empty()).map(str::to_owned).collect()).unwrap_or_default();
+        let sources = match var(RUN_SOURCES).filter(|s| !s.is_empty()).map(PathBuf::from) {
+            Some(s) if !s.components().all(|c| matches!(c, Component::Normal(_))) => return Err(format!("the sources folder {} isn't a folder inside the vault", s.display())),
+            s => s,
+        };
+        match mode {
+            "vault" => {
+                let chat = match var(RUN_CHAT).and_then(|c| c.into_string().ok()).as_deref() {
+                    Some("ask") => Chat::Ask,
+                    Some("curate") => Chat::Curate,
+                    Some("research") => Chat::Research,
+                    other => return Err(format!("{other:?} isn't a conversation's mode")),
+                };
+                Ok(VaultScope { root: folder(RUN_VAULT, "vault")?, mode: VaultMode::Chat(chat), skills, sources })
+            }
+            "ingest" => {
+                let copy = folder(RUN_DIR, "scratch copy")?;
+                // Only where Echo makes one (`…/ingest/<run>/vault`, spec K15-02): never the vault itself, which the
+                // run would then change unreviewed.
+                let called = |p: Option<&Path>, n: &str| p.and_then(Path::file_name).is_some_and(|f| f == n);
+                if !called(Some(&copy), "vault") || !called(copy.parent().and_then(Path::parent), "ingest") {
+                    return Err(format!("{} isn't an ingest run's scratch copy", copy.display()));
+                }
+                if sources.is_none() {
+                    return Err("the ingest run names no sources folder".into());
+                }
+                if skills.len() != 1 {
+                    return Err("an ingest run loads one skill, the vault's ingest skill".into());
+                }
+                Ok(VaultScope { root: copy, mode: VaultMode::Ingest, skills, sources })
+            }
+            "lint" => {
+                let root = folder(RUN_VAULT, "vault")?;
+                let run = folder(RUN_DIR, "run folder")?;
+                if run.starts_with(&root) {
+                    return Err(format!("the AI check's folder {} is inside the vault", run.display()));
+                }
+                Ok(VaultScope { root, mode: VaultMode::Lint { findings: run.join("findings.json") }, skills: vec![], sources: None })
+            }
+            other => Err(format!("{other} isn't a run in a vault")),
+        }
+    }
+
+    /// The answer to a tool call (spec K12-03, K15-05, K16-05): reads inside the root (or the session's own saved tool
+    /// output), writes as the mode allows — a conversation's edits and fetched pages always asked about (D24) —, the
+    /// skills Echo named; no command (D31), no MCP tool, nothing else. A sub-agent's calls are judged the same.
+    pub fn decide(&self, call: &Value) -> Decision {
+        self.judge(call).unwrap_or_else(Decision::Deny)
+    }
+
+    fn judge(&self, call: &Value) -> Result<Decision, String> {
+        let tool = call["tool_name"].as_str().unwrap_or("");
+        let input = &call["tool_input"];
+        let chat = match self.mode {
+            VaultMode::Chat(c) => Some(c),
+            _ => None,
+        };
+        match tool {
+            "Read" => {
+                let p = vault_path(text(input, "file_path")?, &self.base(call)?)?;
+                self.readable(&p, own_results(call).as_deref())?;
+                Ok(Decision::Allow)
+            }
+            "Grep" | "Glob" => {
+                let results = own_results(call);
+                // No path: where Claude Code works, the root Echo started it in.
+                let p = vault_path(text(input, "path")?, &self.base(call)?)?;
+                self.readable(&p, results.as_deref())?;
+                // Grep's `pattern` is a regular expression over the lines: it picks no file.
+                let glob = if tool == "Glob" { text(input, "pattern")? } else { text(input, "glob")? };
+                if let Some(g) = glob {
+                    self.glob(g, &p, results.as_deref())?;
+                }
+                Ok(Decision::Allow)
+            }
+            "Edit" | "Write" => self.write(call, input),
+            "Skill" if !matches!(self.mode, VaultMode::Lint { .. }) => {
+                // The name Claude Code goes by, and the older key: both must be the vault's.
+                let names: Vec<&str> = [text(input, "skill")?, text(input, "command")?].into_iter().flatten().collect();
+                if names.is_empty() {
+                    return Err("no skill named".into());
+                }
+                for n in names {
+                    let n = n.strip_prefix('/').unwrap_or(n);
+                    if !self.skills.iter().any(|k| k == n) {
+                        return Err(format!("the skill {n:?} isn't one Echo gave this run"));
+                    }
+                }
+                Ok(Decision::Allow)
+            }
+            // A sub-agent in the vault itself: the guard sees its own calls (design note V10, fact 3) — not in a
+            // worktree of its own, nor run remotely, where the guard sees nothing.
+            "Agent" if chat.is_some() => {
+                if !input["isolation"].is_null() {
+                    return Err("a sub-agent works in the vault itself, not in a copy or remotely".into());
+                }
+                Ok(Decision::Allow)
+            }
+            "WebSearch" | "WebFetch" if chat != Some(Chat::Research) => Err("only a Research conversation uses the web".into()),
+            "WebSearch" => Ok(Decision::Allow),
+            "WebFetch" => Ok(Decision::Ask("Echo asks before Claude reads a web page".into())),
+            "Bash" => Err("no command runs in a vault's run".into()),
+            "" => Err("no tool named".into()),
+            other => Err(format!("{other} isn't available in {}", self.run())),
+        }
+    }
+
+    /// Edit or Write: in Curate a page of the vault, asked about every time; in an ingest run a file of its copy (the
+    /// user reviews the copy's changes); in an AI check its findings.
+    fn write(&self, call: &Value, input: &Value) -> Result<Decision, String> {
+        let raw = text(input, "file_path")?.ok_or("no path given")?;
+        let base = self.base(call)?;
+        let p = vault_path(Some(raw), &base)?;
+        // A link there would be written through.
+        let at = named(raw, &base);
+        if std::fs::symlink_metadata(&at).is_ok_and(|m| m.file_type().is_symlink()) {
+            return Err(format!("{} is a link: not written", at.display()));
+        }
+        match &self.mode {
+            VaultMode::Chat(Chat::Curate) => {
+                let rel = self.rel(&p)?;
+                self.writable(rel)?;
+                Ok(Decision::Ask(format!("Echo shows every change to the vault before it is made: {}", rel.display())))
+            }
+            VaultMode::Chat(_) => Err("this conversation reads the vault; it changes nothing (Curate does)".into()),
+            VaultMode::Ingest => {
+                let rel = self.rel(&p)?;
+                // The run's own notes for Echo: its steps and what it changed.
+                if rel == Path::new(".echo-ingest/changes.json") || rel == Path::new(".echo-ingest/steps.json") {
+                    return Ok(Decision::Allow);
+                }
+                if rel.components().next().is_some_and(|c| lower(c) == ".echo-ingest") {
+                    return Err(format!("an ingest run writes only changes.json and steps.json in .echo-ingest, not {}", rel.display()));
+                }
+                self.writable(rel)?;
+                Ok(Decision::Allow)
+            }
+            VaultMode::Lint { findings } if p == *findings => Ok(Decision::Allow),
+            VaultMode::Lint { findings } => Err(format!("an AI check writes only {}, not {}", findings.display(), p.display())),
+        }
+    }
+
+    /// A page or file a run may write, by its path inside the root: never an instruction file, the tools' own files or
+    /// a source (D29: sources are the user's, as added).
+    fn writable(&self, rel: &Path) -> Result<(), String> {
+        if instruction_file(rel) {
+            Err(format!("{} is an instruction file Claude Code would load: not written", rel.display()))
+        } else if machinery(rel) {
+            Err(format!("{} belongs to the vault's tools: not written", rel.display()))
+        } else if self.sources.as_ref().is_some_and(|s| under(rel, s)) {
+            Err(format!("{} is in the sources folder: a source is never changed", rel.display()))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Readable: inside the root but not git's folder, or the session's own saved tool output (`results`).
+    fn readable(&self, p: &Path, results: Option<&Path>) -> Result<(), String> {
+        if results.is_some_and(|r| p.starts_with(r)) {
+            return Ok(());
+        }
+        if self.rel(p)?.components().any(|c| lower(c) == ".git") {
+            return Err(format!("{} is git's folder, not the vault's", p.display()));
+        }
+        Ok(())
+    }
+
+    /// `p` (resolved) inside the root, each name in it plain; refused outside it.
+    fn rel<'a>(&self, p: &'a Path) -> Result<&'a Path, String> {
+        let what = if self.mode == VaultMode::Ingest { "the run's copy of the vault" } else { "the vault" };
+        let rel = p.strip_prefix(&self.root).map_err(|_| format!("only {what} can be used, not {}", p.display()))?;
+        match rel.components().map(|c| c.as_os_str().to_string_lossy()).find(|n| !plain(n)) {
+            Some(n) => Err(format!("“{n}” isn't a plain file name ({})", p.display())),
+            None => Ok(rel),
+        }
+    }
+
+    /// A glob of Glob (`pattern`) or Grep (`glob`), searched from `from`: refused when it starts from home (`~`), has
+    /// braces (`{..,x}` expands to a way up), climbs (`..`), could name `.git` (also through wildcards: `.gi?`,
+    /// `[.]git`), or its fixed part — the folders before its first wildcard, absolute or from `from` — isn't readable
+    /// (a link out). Several globs in one (Grep splits its `glob` at spaces and commas) each on its own.
+    fn glob(&self, g: &str, from: &Path, results: Option<&Path>) -> Result<(), String> {
+        for one in g.split(|c: char| c.is_whitespace() || c == ',').filter(|s| !s.is_empty()) {
+            let one = one.replace('\\', "/");
+            let parts: Vec<&str> = one.split('/').collect();
+            if one.starts_with('~') || one.contains(['{', '}']) || parts.contains(&"..") {
+                return Err(format!("the pattern {one} reaches outside the vault"));
+            }
+            if parts.iter().any(|s| could_name(s, ".git")) {
+                return Err(format!("the pattern {one} reaches into git's folder"));
+            }
+            let fixed = parts.iter().take_while(|s| !s.contains(['*', '?', '['])).copied().collect::<Vec<_>>().join("/");
+            if !fixed.is_empty() {
+                let p = vault_path(Some(&fixed), from)?;
+                self.readable(&p, results).map_err(|e| format!("the pattern {one}: {e}"))?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Where Claude Code works (its hook input's `cwd`): what a relative path, or none, starts from. Else the root.
+    /// It only says what a path names; whether that may be used is the scope's to say.
+    fn base(&self, call: &Value) -> Result<PathBuf, String> {
+        let Some(cwd) = text(call, "cwd")?.filter(|c| !c.is_empty()).map(native) else {
+            return Ok(self.root.clone());
+        };
+        match dunce::canonicalize(&cwd) {
+            Ok(real) if cwd.is_absolute() => Ok(real),
+            _ => Err(format!("Claude Code's folder {} can't be found", cwd.display())),
+        }
+    }
+
+    fn run(&self) -> &'static str {
+        match self.mode {
+            VaultMode::Chat(_) => "a conversation in a vault",
+            VaultMode::Ingest => "an ingest run",
+            VaultMode::Lint { .. } => "an AI check",
+        }
+    }
+}
+
+/// A field of a tool call that, when given, is text.
+fn text<'a>(v: &'a Value, key: &str) -> Result<Option<&'a str>, String> {
+    match &v[key] {
+        Value::Null => Ok(None),
+        Value::String(s) => Ok(Some(s)),
+        _ => Err(format!("{key} isn't text")),
+    }
+}
+
+/// `raw` as Claude Code takes it: an absolute path, or one from `base`.
+fn named(raw: &str, base: &Path) -> PathBuf {
+    let p = native(raw);
+    if p.is_absolute() { p } else { base.join(p) }
+}
+
+/// A path a run in a vault names, as it is on disk (untrusted-text R4): a relative one, or none, from `base`; links
+/// resolved — and refused where one points nowhere, as a write would go through it. Refused whatever it resolves to:
+/// one from home (`~`, which Claude Code expands), one going up (`..`: past a link, the folder above isn't the one
+/// Claude Code means) or holding a control character.
+fn vault_path(raw: Option<&str>, base: &Path) -> Result<PathBuf, String> {
+    let Some(raw) = raw.filter(|r| !r.is_empty()) else {
+        return Ok(base.to_path_buf());
+    };
+    if raw.starts_with('~') || raw.split(['/', '\\']).any(|s| s == "..") || raw.chars().any(char::is_control) {
+        return Err(format!("{raw:?} isn't a path a run can follow (no ~, .. or control characters)"));
+    }
+    let full = named(raw, base);
+    let mut rest = vec![];
+    let mut at = full.as_path();
+    loop {
+        if let Ok(real) = dunce::canonicalize(at) {
+            return Ok(rest.iter().rev().fold(real, |acc, n| acc.join(n)));
+        }
+        if std::fs::symlink_metadata(at).is_ok() {
+            return Err(format!("{} is a link that points nowhere", at.display()));
+        }
+        let (Some(parent), Some(name)) = (at.parent(), at.file_name()) else {
+            return Err(format!("{raw} can't be resolved"));
+        };
+        rest.push(name);
+        at = parent;
+    }
+}
+
+/// A name that means one file wherever Echo runs: no stream (`:`), no trailing dot or space (Windows drops them), no
+/// device name (`CON`, `NUL`, `COM1`… open a device in any folder), no control character.
+fn plain(n: &str) -> bool {
+    let upper = n.to_ascii_uppercase();
+    let stem = upper.split('.').next().unwrap_or("");
+    let device = matches!(stem, "CON" | "PRN" | "AUX" | "NUL") || ((stem.starts_with("COM") || stem.starts_with("LPT")) && stem.len() == 4 && stem.as_bytes()[3].is_ascii_digit());
+    !(device || n.contains(':') || n.ends_with(['.', ' ']) || n.chars().any(char::is_control))
+}
+
+/// Could the glob segment `seg` match the name `name`, in any case? A segment of wildcards only (`*`, `**`) names
+/// nothing in particular — Claude Code's Grep and Glob leave `.git` out of those themselves — and is let through.
+fn could_name(seg: &str, name: &str) -> bool {
+    if seg.chars().all(|c| c == '*') {
+        return false;
+    }
+    let g: Vec<char> = fold(seg).chars().collect();
+    let s: Vec<char> = fold(name).chars().collect();
+    // How much of `name` the glob so far can have matched: each count it may be at.
+    let mut at = vec![false; s.len() + 1];
+    at[0] = true;
+    let mut i = 0;
+    while i < g.len() {
+        let mut next = vec![false; s.len() + 1];
+        if g[i] == '*' {
+            if let Some(first) = at.iter().position(|&a| a) {
+                next[first..].fill(true);
+            }
+        } else {
+            let mut any = g[i] == '?';
+            // A class (`[…]`) taken as any one character: it may refuse more, never less.
+            if g[i] == '[' {
+                if let Some(e) = g[i + 1..].iter().skip(1).position(|&c| c == ']') {
+                    any = true;
+                    i += e + 2;
+                }
+            }
+            for (k, c) in s.iter().enumerate() {
+                if at[k] && (any || *c == g[i]) {
+                    next[k + 1] = true;
+                }
+            }
+        }
+        at = next;
+        i += 1;
+    }
+    at[s.len()]
+}
+
+/// A path's name folded as file systems that ignore case fold it: `.CLAUDE` is `.claude`, and through upper case `ſ`
+/// is `s`, `ı` is `i`, `ﬁ` is `fi` (NTFS compares upper case; APFS folds case).
+fn lower(c: Component) -> String {
+    fold(&c.as_os_str().to_string_lossy())
+}
+
+fn fold(s: &str) -> String {
+    s.to_uppercase().to_lowercase()
+}
+
+/// Is `rel` in `folder` (both inside the root), in any case: a file system that ignores case finds it there.
+fn under(rel: &Path, folder: &Path) -> bool {
+    let mut r = rel.components();
+    folder.components().all(|f| r.next().is_some_and(|c| lower(c) == lower(f)))
+}
+
+/// The vault's tools' own files, which no run in it writes: Claude Code's MCP servers (`.mcp.json`), other agents'
+/// rules and skills (`.agents/`), git's (`.git/`: its config and hooks run commands) and Obsidian's (`.obsidian/`: its
+/// settings and plugins).
+fn machinery(rel: &Path) -> bool {
+    rel.components().any(|c| matches!(lower(c).as_str(), ".mcp.json" | ".agents" | ".git" | ".obsidian"))
+}
+
+/// An instruction file Claude Code would load by itself: `CLAUDE.md` (in any case, in any folder), `CLAUDE.local.md`,
+/// `AGENTS.md`, anything under `.claude/` (`.CLAUDE/` too, on file systems that ignore case) — its `@imports` would
+/// load other files with no tool call. `rel`: the path inside the run's folder.
+pub fn instruction_file(rel: &Path) -> bool {
+    rel.components().any(|c| matches!(lower(c).as_str(), "claude.md" | "claude.local.md" | "agents.md" | ".claude"))
+}
+
 /// A command line as the shell would split it, for plain commands only: no variables or command
 /// substitution anywhere (`$`, backtick), no line breaks, and outside quotes none of the characters
 /// that make a command more than one program with its words (lists, pipes, redirects, subshells,
@@ -553,6 +1023,7 @@ mod tests {
             routine: false,
             extra: vec![],
             skills: vec![],
+            vault: None,
         }
     }
 
@@ -793,7 +1264,7 @@ mod tests {
                 fs::create_dir_all(root.join("calls").join(d)).unwrap();
                 fs::write(root.join("calls").join(d).join("transcript.md"), "x").unwrap();
             }
-            let s = Scope { call: dunce::canonicalize(root.join("calls").join(own)).unwrap(), previous: None, clis: vec!["echoctl".into()], ask: false, project: None, routine: false, extra: vec![], skills: vec![] };
+            let s = Scope { call: dunce::canonicalize(root.join("calls").join(own)).unwrap(), previous: None, clis: vec!["echoctl".into()], ask: false, project: None, routine: false, extra: vec![], skills: vec![], vault: None };
             let p = |f: &str| root.join("calls").join(twin).join(f).display().to_string();
             for (t, input) in [
                 ("Read", json!({"file_path": p("transcript.md")})),
@@ -953,5 +1424,582 @@ mod tests {
         } else {
             assert_eq!(hook["command"], r"'/Apps/Echo'\''s.app/echoctl' run-guard");
         }
+    }
+
+    // ── Runs in a knowledge vault (`RUN_MODE=vault`, `ingest`, `lint`) ──
+
+    fn put(base: &Path, rel: &str) {
+        let f = base.join(rel);
+        fs::create_dir_all(f.parent().unwrap()).unwrap();
+        fs::write(f, "x").unwrap();
+    }
+
+    /// A made-up vault in a temp folder (`<root>/vault`), folders beside it (`outside/`, `other/`) and, on Unix, links
+    /// out of it: a folder (`knowledge/linked-out`) and a file (`knowledge/page-link.md`).
+    fn vault_fixture(name: &str) -> (PathBuf, PathBuf) {
+        let root = std::env::temp_dir().join(format!("echo-guard-vault-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let v = root.join("vault");
+        for f in [
+            "knowledge/clients/acme.md", "knowledge/notes/2026-11-05-sync.md", "raw_inbox/a.md", "CLAUDE.md", "AGENTS.md", ".mcp.json", ".git/config",
+            ".claude/rules/x.md", ".claude/skills/process-inbox/SKILL.md", ".obsidian/app.json", ".agents/skills/x/SKILL.md",
+        ] {
+            put(&v, f);
+        }
+        put(&root, "outside/secret.md");
+        put(&root, "other/x.md");
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(root.join("outside"), v.join("knowledge/linked-out")).unwrap();
+            std::os::unix::fs::symlink(root.join("outside/secret.md"), v.join("knowledge/page-link.md")).unwrap();
+        }
+        (root, v)
+    }
+
+    /// An ingest run's scratch copy, where Echo keeps it (`<home>/.echo/knowledge/<id>/ingest/<run>/vault`).
+    fn copy_fixture(root: &Path) -> PathBuf {
+        let c = root.join("home/.echo/knowledge/v1/ingest/r1/vault");
+        for f in ["knowledge/clients/acme.md", "raw_inbox/x.md", ".claude/settings.json", ".claude/skills/process-inbox/SKILL.md", "CLAUDE.local.md", ".obsidian/app.json", ".agents/x.md", ".echo-ingest/README.md"] {
+            put(&c, f);
+        }
+        c
+    }
+
+    fn vars_of(pairs: Vec<(&'static str, std::ffi::OsString)>) -> impl Fn(&str) -> Option<std::ffi::OsString> {
+        move |k| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| v.clone())
+    }
+
+    /// A conversation in vault `v`: its mode `chat`, its sources folder `raw_inbox`, its skills.
+    fn chat_scope(v: &Path, chat: &str) -> Scope {
+        Scope::from_vars(vars_of(vec![(RUN_MODE, "vault".into()), (RUN_VAULT, v.into()), (RUN_CHAT, chat.into()), (RUN_SKILLS, "process-inbox\ntwin-notes".into()), (RUN_SOURCES, "raw_inbox".into())])).unwrap()
+    }
+
+    fn ingest_scope(copy: &Path) -> Scope {
+        Scope::from_vars(vars_of(vec![(RUN_MODE, "ingest".into()), (RUN_DIR, copy.into()), (RUN_SOURCES, "raw_inbox".into()), (RUN_SKILLS, "process-inbox".into())])).unwrap()
+    }
+
+    fn lint_scope(v: &Path, run: &Path) -> Scope {
+        Scope::from_vars(vars_of(vec![(RUN_MODE, "lint".into()), (RUN_VAULT, v.into()), (RUN_DIR, run.into()), (RUN_SKILLS, "process-inbox".into())])).unwrap()
+    }
+
+    fn p(path: &Path) -> String {
+        path.display().to_string()
+    }
+
+    /// Refused, saying why.
+    fn denied(d: Decision) -> bool {
+        matches!(d, Decision::Deny(why) if !why.is_empty())
+    }
+
+    /// Asked, saying why.
+    fn asked(d: Decision) -> bool {
+        matches!(d, Decision::Ask(why) if !why.is_empty())
+    }
+
+    #[test]
+    fn vault_mode_allows_only_reads_inside() {
+        let (root, v) = vault_fixture("reads");
+        for chat in ["ask", "curate", "research"] {
+            let s = chat_scope(&v, chat);
+            let d = |t: &str, input: Value| s.decide(&tool(t, input));
+            for f in ["knowledge/clients/acme.md", "CLAUDE.md", ".claude/skills/process-inbox/SKILL.md", "raw_inbox/a.md"] {
+                assert_eq!(d("Read", json!({"file_path": p(&v.join(f))})), Decision::Allow, "{chat}: {f}");
+            }
+            assert_eq!(d("Read", json!({"file_path": "knowledge/clients/acme.md"})), Decision::Allow, "{chat}: relative to the vault");
+            assert_eq!(d("Grep", json!({"pattern": "Acme"})), Decision::Allow, "{chat}: Grep with no path searches the vault");
+            assert_eq!(d("Grep", json!({"pattern": "Acme", "path": p(&v)})), Decision::Allow, "{chat}");
+            assert_eq!(d("Glob", json!({"pattern": "**/*.md"})), Decision::Allow, "{chat}");
+            for (t, input) in [
+                ("Read", json!({"file_path": format!("{}/../other/x.md", p(&v))})),
+                ("Read", json!({"file_path": "knowledge/../../other/x.md"})),
+                ("Read", json!({"file_path": p(&root.join("other/x.md"))})),
+                ("Read", json!({"file_path": p(&v.join(".git/config"))})),
+                ("Read", json!({"file_path": p(&v.join(".GIT/config"))})),
+                ("Read", json!({"file_path": "/etc/hosts"})),
+                ("Read", json!({"file_path": "~/.ssh/id_ed25519"})),
+                ("Read", json!({"file_path": "~"})),
+                ("Read", json!({"file_path": 42})),
+                ("Grep", json!({"pattern": "x", "glob": ".git/**"})),
+                ("Grep", json!({"pattern": "x", "path": "/"})),
+                ("Glob", json!({"pattern": "*", "path": p(&root)})),
+            ] {
+                assert!(denied(d(t, input.clone())), "{chat}: {t} {input}");
+            }
+            #[cfg(unix)]
+            for f in ["knowledge/linked-out/secret.md", "knowledge/page-link.md"] {
+                assert!(denied(d("Read", json!({"file_path": p(&v.join(f))}))), "{chat}: through a link out of the vault: {f}");
+            }
+        }
+        // `..` past a link: on disk `deep/../../x.md` is the vault's `a/x.md`, but Claude Code drops `deep/..` as words
+        // and reads `x.md` beside the vault. So any `..` is refused.
+        #[cfg(unix)]
+        {
+            fs::create_dir_all(v.join("a/b/c")).unwrap();
+            put(&v, "a/x.md");
+            put(&root, "x.md");
+            std::os::unix::fs::symlink(v.join("a/b/c"), v.join("deep")).unwrap();
+            let s = chat_scope(&v, "ask");
+            assert!(denied(s.decide(&tool("Read", json!({"file_path": format!("{}/deep/../../x.md", p(&v))})))));
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn edits_are_always_asked() {
+        let (root, v) = vault_fixture("asked");
+        let s = chat_scope(&v, "curate");
+        let page = p(&v.join("knowledge/clients/acme.md"));
+        let new = p(&v.join("knowledge/clients/northwind.md"));
+        assert!(asked(s.decide(&tool("Edit", json!({"file_path": page, "old_string": "a", "new_string": "b"})))));
+        assert!(asked(s.decide(&tool("Write", json!({"file_path": new, "content": "# Northwind"})))));
+        assert!(asked(s.decide(&tool("Write", json!({"file_path": p(&v.join("knowledge/new-folder/page.md")), "content": "x"})))), "a page in a new folder");
+        assert!(asked(s.decide(&tool("Edit", json!({"file_path": "knowledge/clients/acme.md", "old_string": "a", "new_string": "b"})))), "relative to the vault");
+        // Whatever the call says about itself, the mode Claude Code is in, or a sub-agent making it.
+        for call in [
+            json!({"tool_name": "Edit", "tool_input": {"file_path": page, "old_string": "a", "new_string": "b", "permissionDecision": "allow", "approved": true}}),
+            json!({"tool_name": "Write", "tool_input": {"file_path": new, "content": "x"}, "permission_mode": "bypassPermissions"}),
+            json!({"tool_name": "Write", "tool_input": {"file_path": new, "content": "x"}, "permission_mode": "acceptEdits"}),
+            json!({"tool_name": "Edit", "tool_input": {"file_path": page, "old_string": "a", "new_string": "b"}, "agent_id": "a1", "agent_type": "general-purpose"}),
+        ] {
+            assert!(asked(s.decide(&call)), "{call}");
+        }
+        // Never allowed outright: judged as allowed-or-not, a call that is asked about isn't allowed.
+        assert!(s.judge(&tool("Edit", json!({"file_path": page}))).is_err());
+        // Ask and Research change nothing.
+        for chat in ["ask", "research"] {
+            let s = chat_scope(&v, chat);
+            assert!(denied(s.decide(&tool("Edit", json!({"file_path": page, "old_string": "a", "new_string": "b"})))), "{chat}");
+            assert!(denied(s.decide(&tool("Write", json!({"file_path": new, "content": "x"})))), "{chat}");
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn curate_never_writes_instructions_machinery_or_sources() {
+        let (root, v) = vault_fixture("curate");
+        let s = chat_scope(&v, "curate");
+        for f in [
+            "claude.md", "CLAUDE.md", "notes/CLAUDE.md", "knowledge/CLAUDE.local.md", "AGENTS.md", "knowledge/agents.md", ".claude/rules/x.md", ".claude/settings.json",
+            ".CLAUDE/settings.json", "knowledge/.claude/skills/x/SKILL.md", ".mcp.json", "knowledge/.MCP.json", ".agents/skills/x/SKILL.md", ".git/config",
+            ".git/hooks/post-commit", ".obsidian/app.json", "knowledge/.obsidian/plugins/x/main.js", "raw_inbox/a.md", "raw_inbox/new.md", "RAW_INBOX/b.md",
+            "raw_inbox/echo/2026-11-05-sync.md",
+        ] {
+            for t in ["Edit", "Write"] {
+                assert!(denied(s.decide(&tool(t, json!({"file_path": p(&v.join(f)), "content": "x"})))), "{t} {f}");
+            }
+        }
+        // Outside the vault, however it is spelled.
+        for f in [p(&root.join("other/x.md")), format!("{}/../other/x.md", p(&v)), "/etc/x.md".into(), "~/x.md".into(), "../other/x.md".into()] {
+            assert!(denied(s.decide(&tool("Write", json!({"file_path": f, "content": "x"})))), "{f}");
+        }
+        // Names Windows would bend into another file: a stream, a trailing dot or space, a device.
+        for f in ["CLAUDE.md::$DATA", "CLAUDE.md.", "CLAUDE.md ", "AGENTS.md:x", "knowledge/NUL", "knowledge/con.md", "knowledge/COM1.txt", "knowledge/lpt9", "knowledge/a\u{0}.md"] {
+            assert!(denied(s.decide(&tool("Write", json!({"file_path": p(&v.join(f)), "content": "x"})))), "{f:?}");
+        }
+        assert!(asked(s.decide(&tool("Write", json!({"file_path": p(&v.join("knowledge/console.md")), "content": "x"})))), "not a device name");
+        // Letters a file system that ignores case takes as ASCII ones (`ſ` as `s`, `ı` as `i`), in folders not made yet.
+        for f in ["knowledge/.obſidian/plugins/x/main.js", "knowledge/.gıt/hooks/post-commit", "knowledge/agentſ.md", "notes/.agentſ/x.md"] {
+            assert!(denied(s.decide(&tool("Write", json!({"file_path": p(&v.join(f)), "content": "x"})))), "{f}");
+        }
+        // A sources folder not made yet, named in another case: a file system that ignores case takes it as the same.
+        let later = Scope::from_vars(vars_of(vec![(RUN_MODE, "vault".into()), (RUN_VAULT, v.as_os_str().to_owned()), (RUN_CHAT, "curate".into()), (RUN_SOURCES, "inbox/new".into())])).unwrap();
+        assert!(denied(later.decide(&tool("Write", json!({"file_path": p(&v.join("Inbox/NEW/x.md")), "content": "x"})))));
+        assert!(asked(later.decide(&tool("Write", json!({"file_path": p(&v.join("inbox/newer.md")), "content": "x"})))), "beside it");
+        #[cfg(unix)]
+        {
+            let link = |to: PathBuf, at: &str| std::os::unix::fs::symlink(to, v.join(at)).unwrap();
+            link(v.join("CLAUDE.md"), "knowledge/rules.md");
+            link(v.join("knowledge/clients/acme.md"), "knowledge/alias.md");
+            link(root.join("outside/new.md"), "knowledge/dangling.md");
+            link(root.join("outside/no-folder"), "knowledge/dangling-dir");
+            for f in ["knowledge/page-link.md", "knowledge/linked-out/new.md", "knowledge/rules.md", "knowledge/alias.md", "knowledge/dangling.md", "knowledge/dangling-dir/new.md"] {
+                for t in ["Edit", "Write"] {
+                    assert!(denied(s.decide(&tool(t, json!({"file_path": p(&v.join(f)), "content": "x"})))), "{t} through a link: {f}");
+                }
+            }
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn webfetch_is_asked_only_in_research() {
+        let (root, v) = vault_fixture("web");
+        let fetch = json!({"url": "https://example.com", "prompt": "the title"});
+        let search = json!({"query": "Northwind Retail"});
+        let s = chat_scope(&v, "research");
+        assert!(asked(s.decide(&tool("WebFetch", fetch.clone()))));
+        // The web-fetch sub-agent's own call (design note V10).
+        assert!(asked(s.decide(&json!({"tool_name": "WebFetch", "tool_input": fetch, "agent_id": "a2", "agent_type": "web-fetch"}))));
+        assert_eq!(s.decide(&tool("WebSearch", search.clone())), Decision::Allow);
+        for chat in ["ask", "curate"] {
+            let s = chat_scope(&v, chat);
+            assert!(denied(s.decide(&tool("WebFetch", fetch.clone()))), "{chat}");
+            assert!(denied(s.decide(&tool("WebSearch", search.clone()))), "{chat}");
+        }
+        let copy = copy_fixture(&root);
+        let run = root.join("lint-run");
+        fs::create_dir_all(&run).unwrap();
+        for s in [ingest_scope(&copy), lint_scope(&v, &run)] {
+            assert!(denied(s.decide(&tool("WebFetch", fetch.clone()))));
+            assert!(denied(s.decide(&tool("WebSearch", search.clone()))));
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn grep_and_glob_stay_inside() {
+        let (root, v) = vault_fixture("search");
+        let s = chat_scope(&v, "ask");
+        let d = |t: &str, input: Value| s.decide(&tool(t, input));
+        for (t, input) in [
+            ("Grep", json!({"pattern": "Acme"})),
+            ("Grep", json!({"pattern": "Acme", "path": "knowledge"})),
+            ("Grep", json!({"pattern": "Acme", "path": p(&v.join("knowledge")), "glob": "*.md"})),
+            ("Grep", json!({"pattern": "Acme", "glob": "knowledge/**/*.md"})),
+            // A regular expression picks lines, not files.
+            ("Grep", json!({"pattern": r"\d{4}-\d{2}-\d{2} /api/v1", "path": p(&v)})),
+            ("Glob", json!({"pattern": "knowledge/**/*.md"})),
+            ("Glob", json!({"pattern": format!("{}/knowledge/**/*.md", p(&v))})),
+            ("Glob", json!({"pattern": "*.md", "path": "knowledge/clients"})),
+            ("Glob", json!({"pattern": "**/.claude/**/*.md"})),
+        ] {
+            assert_eq!(d(t, input.clone()), Decision::Allow, "{t} {input}");
+        }
+        for (t, input) in [
+            ("Grep", json!({"pattern": "x", "glob": ".git/**"})),
+            ("Grep", json!({"pattern": "x", "glob": "**/.git/**"})),
+            ("Grep", json!({"pattern": "x", "glob": ".GIT/*"})),
+            ("Grep", json!({"pattern": "x", "glob": "**/.gi?/config"})),
+            ("Grep", json!({"pattern": "x", "glob": "[.]git/*"})),
+            ("Grep", json!({"pattern": "x", "glob": "knowledge/.gıt/*"})),
+            ("Read", json!({"file_path": p(&v.join(".gıt/config"))})),
+            ("Grep", json!({"pattern": "x", "glob": "*.md .git/**"})),
+            ("Grep", json!({"pattern": "x", "glob": "*.md,.git/**"})),
+            ("Grep", json!({"pattern": "x", "glob": "{.git,x}/*"})),
+            ("Grep", json!({"pattern": "x", "glob": "../*"})),
+            ("Grep", json!({"pattern": "x", "path": "/"})),
+            ("Grep", json!({"pattern": "x", "path": p(&root)})),
+            ("Grep", json!({"pattern": "x", "path": ".."})),
+            ("Grep", json!({"pattern": "x", "path": ".git"})),
+            ("Grep", json!({"pattern": "x", "path": p(&v.join(".git"))})),
+            ("Grep", json!({"pattern": "x", "path": "~"})),
+            ("Glob", json!({"pattern": "../*"})),
+            ("Glob", json!({"pattern": "../../outside/*"})),
+            ("Glob", json!({"pattern": "/etc/*"})),
+            ("Glob", json!({"pattern": "/"})),
+            ("Glob", json!({"pattern": "~/x"})),
+            ("Glob", json!({"pattern": format!("{}/../other/*", p(&v))})),
+            ("Glob", json!({"pattern": format!("{}/*", p(&root))})),
+            ("Glob", json!({"pattern": "{..,x}/*"})),
+            ("Glob", json!({"pattern": ".git/*"})),
+            ("Glob", json!({"pattern": "*", "path": p(&root.join("outside"))})),
+        ] {
+            assert!(denied(d(t, input.clone())), "{t} {input}");
+        }
+        #[cfg(unix)]
+        for (t, input) in [
+            ("Glob", json!({"pattern": "*", "path": "knowledge/linked-out"})),
+            // Grep follows an explicit path through a link out of the vault (design note V10, fact 4).
+            ("Grep", json!({"pattern": "x", "path": "knowledge/linked-out/secret.md"})),
+            ("Grep", json!({"pattern": "x", "glob": "knowledge/linked-out/*"})),
+            ("Glob", json!({"pattern": format!("{}/knowledge/linked-out/*", p(&v))})),
+        ] {
+            assert!(denied(d(t, input.clone())), "{t} {input}");
+        }
+        // No path is where Claude Code works: inside the vault, or not.
+        let at = |cwd: &Path| json!({"tool_name": "Grep", "tool_input": {"pattern": "x"}, "cwd": p(cwd)});
+        assert_eq!(s.decide(&at(&v)), Decision::Allow);
+        assert_eq!(s.decide(&at(&v.join("knowledge"))), Decision::Allow);
+        assert!(denied(s.decide(&at(&root.join("other")))));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn own_results_are_readable() {
+        let (root, v) = vault_fixture("results");
+        let claude = root.join("claude/projects/-vault");
+        let results = claude.join("s1/tool-results");
+        put(&results, "toolu_1.txt");
+        put(&claude, "s2/tool-results/toolu_2.txt");
+        let copy = copy_fixture(&root);
+        let run = root.join("lint-run");
+        fs::create_dir_all(&run).unwrap();
+        let call = |t: &str, input: Value, session: &str| json!({"tool_name": t, "tool_input": input, "session_id": session, "transcript_path": p(&claude.join(format!("{session}.jsonl")))});
+        for (name, s) in [("ask", chat_scope(&v, "ask")), ("ingest", ingest_scope(&copy)), ("lint", lint_scope(&v, &run))] {
+            assert_eq!(s.decide(&call("Read", json!({"file_path": p(&results.join("toolu_1.txt"))}), "s1")), Decision::Allow, "{name}: its own saved output");
+            assert_eq!(s.decide(&call("Grep", json!({"pattern": "x", "path": p(&results)}), "s1")), Decision::Allow, "{name}");
+            assert!(denied(s.decide(&call("Read", json!({"file_path": p(&results.join("toolu_1.txt"))}), "s2"))), "{name}: not another session's");
+            assert!(denied(s.decide(&call("Read", json!({"file_path": p(&claude.join("s1.jsonl"))}), "s1"))), "{name}: not the transcript");
+            assert!(denied(s.decide(&call("Glob", json!({"pattern": "../*.jsonl", "path": p(&results)}), "s1"))), "{name}: a pattern climbing out of it");
+            assert!(denied(s.decide(&call("Write", json!({"file_path": p(&results.join("toolu_1.txt")), "content": "x"}), "s1"))), "{name}: read, never written");
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn ingest_mode_writes_only_the_copy() {
+        let (root, v) = vault_fixture("ingest");
+        let copy = copy_fixture(&root);
+        let s = ingest_scope(&copy);
+        let d = |t: &str, input: Value| s.decide(&tool(t, input));
+        for (t, f) in [
+            ("Write", "knowledge/clients/northwind.md"),
+            ("Edit", "knowledge/clients/acme.md"),
+            ("Write", "knowledge/notes/2026-11-05-sync.md"),
+            ("Write", ".echo-ingest/changes.json"),
+            ("Write", ".echo-ingest/steps.json"),
+            ("Edit", ".echo-ingest/steps.json"),
+        ] {
+            assert_eq!(d(t, json!({"file_path": p(&copy.join(f)), "content": "x"})), Decision::Allow, "{t} {f}: written without asking — the user reviews the run's changes");
+        }
+        assert_eq!(d("Read", json!({"file_path": p(&copy.join("raw_inbox/x.md"))})), Decision::Allow, "its sources, to read");
+        assert_eq!(d("Grep", json!({"pattern": "x"})), Decision::Allow, "no path: the copy");
+        assert_eq!(d("Skill", json!({"skill": "process-inbox"})), Decision::Allow);
+        for f in [
+            "raw_inbox/x.md", "raw_inbox/new.md", ".claude/settings.json", ".claude/skills/process-inbox/SKILL.md", "CLAUDE.local.md", "CLAUDE.md", "AGENTS.md",
+            ".mcp.json", ".agents/x.md", ".obsidian/app.json", ".git/config", ".echo-ingest/other.json", ".echo-ingest/changes.json.bak", ".echo-ingest",
+        ] {
+            assert!(denied(d("Write", json!({"file_path": p(&copy.join(f)), "content": "x"}))), "{f}");
+        }
+        for (t, input) in [
+            ("Write", json!({"file_path": p(&v.join("knowledge/clients/acme.md")), "content": "x"})),
+            ("Write", json!({"file_path": p(&root.join("other/x.md")), "content": "x"})),
+            ("Write", json!({"file_path": "../x.md", "content": "x"})),
+            ("Bash", json!({"command": "python3 x.py"})),
+            ("Skill", json!({"skill": "twin"})),
+            ("Skill", json!({"skill": "v1:process-inbox"})),
+            ("Grep", json!({"pattern": "x", "path": p(&v)})),
+            ("Read", json!({"file_path": p(&v.join("knowledge/clients/acme.md"))})),
+            ("Agent", json!({"description": "x", "prompt": "x", "subagent_type": "general-purpose"})),
+            ("mcp__echo__search_sources", json!({"query": "x"})),
+        ] {
+            assert!(denied(d(t, input.clone())), "{t} {input}");
+        }
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(root.join("outside"), copy.join("knowledge/out")).unwrap();
+            assert!(denied(d("Write", json!({"file_path": p(&copy.join("knowledge/out/x.md")), "content": "x"}))), "through a link out of the copy");
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn lint_mode_writes_only_its_findings() {
+        let (root, v) = vault_fixture("lint");
+        let run = root.join("health/run-1");
+        fs::create_dir_all(&run).unwrap();
+        let s = lint_scope(&v, &run);
+        let d = |t: &str, input: Value| s.decide(&tool(t, input));
+        assert_eq!(d("Read", json!({"file_path": p(&v.join("knowledge/clients/acme.md"))})), Decision::Allow);
+        assert_eq!(d("Grep", json!({"pattern": "Acme"})), Decision::Allow);
+        assert_eq!(d("Write", json!({"file_path": p(&run.join("findings.json")), "content": "{}"})), Decision::Allow);
+        for (t, input) in [
+            ("Write", json!({"file_path": p(&v.join("knowledge/clients/acme.md")), "content": "x"})),
+            ("Edit", json!({"file_path": p(&v.join("knowledge/clients/acme.md")), "old_string": "a", "new_string": "b"})),
+            ("Write", json!({"file_path": p(&run.join("other.json")), "content": "x"})),
+            ("Write", json!({"file_path": p(&run.join("findings.json.tmp")), "content": "x"})),
+            ("Write", json!({"file_path": p(&run.join("x/findings.json")), "content": "x"})),
+            ("Write", json!({"file_path": p(&v.join("findings.json")), "content": "x"})),
+            ("Read", json!({"file_path": p(&v.join(".git/config"))})),
+            ("Skill", json!({"skill": "process-inbox"})),
+            ("Bash", json!({"command": "cat findings.json"})),
+            ("Agent", json!({"description": "x", "prompt": "x"})),
+        ] {
+            assert!(denied(d(t, input.clone())), "{t} {input}");
+        }
+        #[cfg(unix)]
+        {
+            let run2 = root.join("health/run-2");
+            fs::create_dir_all(&run2).unwrap();
+            std::os::unix::fs::symlink(v.join("knowledge/clients/acme.md"), run2.join("findings.json")).unwrap();
+            assert!(denied(lint_scope(&v, &run2).decide(&tool("Write", json!({"file_path": p(&run2.join("findings.json")), "content": "x"})))), "a link in its place");
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn vault_scope_comes_only_from_echo() {
+        let (root, v) = vault_fixture("scope");
+        let other = root.join("other");
+        let s = chat_scope(&v, "ask");
+        let claims = json!({"root": p(&other), "cwd": p(&other), "ECHOCTL_RUN_VAULT": p(&other), "ECHOCTL_RUN_CHAT": "curate", "env": {"ECHOCTL_RUN_VAULT": p(&other)}, "skills": ["evil"]});
+        let with = |extra: Value| {
+            let mut input = claims.clone();
+            input.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            input
+        };
+        // A tool input naming another root, mode or skill changes nothing.
+        assert!(denied(s.decide(&tool("Read", with(json!({"file_path": p(&other.join("x.md"))}))))));
+        assert_eq!(s.decide(&tool("Read", with(json!({"file_path": "x.md"})))), Decision::Allow, "x.md is the vault's (not there yet), not other/x.md");
+        assert!(denied(s.decide(&tool("Grep", with(json!({"pattern": "x", "path": p(&other)}))))));
+        assert!(denied(s.decide(&tool("Edit", with(json!({"file_path": p(&v.join("knowledge/clients/acme.md")), "old_string": "a", "new_string": "b"}))))));
+        assert!(denied(s.decide(&tool("Skill", with(json!({"skill": "evil"}))))));
+        assert_eq!(s.decide(&tool("Read", with(json!({"file_path": p(&v.join("knowledge/clients/acme.md"))})))), Decision::Allow);
+        // Claude Code's own folder only says what a relative path names; the vault stays the vault.
+        let elsewhere = json!({"tool_name": "Read", "tool_input": {"file_path": "x.md"}, "cwd": p(&other)});
+        assert!(denied(s.decide(&elsewhere)));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn without_its_scope_a_vault_run_allows_nothing() {
+        let (root, v) = vault_fixture("no-scope");
+        let copy = copy_fixture(&root);
+        let run = root.join("health/run-1");
+        fs::create_dir_all(&run).unwrap();
+        let os = |p: &Path| p.as_os_str().to_owned();
+        let chat = |vault: Option<std::ffi::OsString>, mode: Option<&str>, sources: Option<&str>| {
+            let mut vars = vec![(RUN_MODE, "vault".into())];
+            vars.extend(vault.map(|x| (RUN_VAULT, x)));
+            vars.extend(mode.map(|m| (RUN_CHAT, m.into())));
+            vars.extend(sources.map(|x| (RUN_SOURCES, x.into())));
+            Scope::from_vars(vars_of(vars))
+        };
+        assert!(chat(Some(os(&v)), Some("ask"), None).is_ok(), "a vault without a sources folder");
+        assert!(chat(None, Some("ask"), None).is_err(), "no vault");
+        assert!(chat(Some("".into()), Some("ask"), None).is_err());
+        assert!(chat(Some("vault".into()), Some("ask"), None).is_err(), "a relative root");
+        assert!(chat(Some(os(&root.join("gone"))), Some("ask"), None).is_err());
+        assert!(chat(Some(os(&v.join("CLAUDE.md"))), Some("ask"), None).is_err(), "a file");
+        assert!(chat(Some(os(&v)), None, None).is_err(), "no mode");
+        assert!(chat(Some(os(&v)), Some("edit"), None).is_err(), "an unknown mode");
+        assert!(chat(Some(os(&v)), Some("Curate"), None).is_err());
+        assert!(chat(Some(os(&v)), Some("curate"), Some("")).is_ok(), "an empty sources folder is none");
+        for bad in ["../outside", "/abs", "raw_inbox/../..", "./raw_inbox"] {
+            assert!(chat(Some(os(&v)), Some("curate"), Some(bad)).is_err(), "sources {bad:?}");
+        }
+        // A minutes run's variables don't make a vault run.
+        let call_vars = vars_of(vec![(RUN_MODE, "vault".into()), (RUN_CALL, os(&v)), (RUN_CLIS, "echoctl".into())]);
+        assert!(Scope::from_vars(call_vars).is_err());
+        // An ingest run: its copy where Echo keeps one, its sources, exactly one skill.
+        let ingest = |dir: &Path, sources: Option<&str>, skills: &str| {
+            let mut vars = vec![(RUN_MODE, "ingest".into()), (RUN_DIR, os(dir)), (RUN_SKILLS, skills.into())];
+            vars.extend(sources.map(|x| (RUN_SOURCES, x.into())));
+            Scope::from_vars(vars_of(vars))
+        };
+        assert!(ingest(&copy, Some("raw_inbox"), "process-inbox").is_ok());
+        assert!(ingest(&v, Some("raw_inbox"), "process-inbox").is_err(), "the vault itself is no scratch copy");
+        assert!(ingest(&copy, None, "process-inbox").is_err(), "no sources folder");
+        assert!(ingest(&copy, Some("raw_inbox"), "").is_err(), "no skill");
+        assert!(ingest(&copy, Some("raw_inbox"), "process-inbox\ntwin").is_err(), "two skills");
+        assert!(Scope::from_vars(vars_of(vec![(RUN_MODE, "ingest".into()), (RUN_SOURCES, "raw_inbox".into()), (RUN_SKILLS, "process-inbox".into())])).is_err(), "no copy");
+        // An AI check: the vault, and its own folder outside it.
+        let lint = |vault: Option<&Path>, dir: Option<&Path>| {
+            let mut vars = vec![(RUN_MODE, "lint".into())];
+            vars.extend(vault.map(|x| (RUN_VAULT, os(x))));
+            vars.extend(dir.map(|x| (RUN_DIR, os(x))));
+            Scope::from_vars(vars_of(vars))
+        };
+        assert!(lint(Some(&v), Some(&run)).is_ok());
+        assert!(lint(None, Some(&run)).is_err());
+        assert!(lint(Some(&v), None).is_err());
+        assert!(lint(Some(&v), Some(&root.join("gone"))).is_err());
+        assert!(lint(Some(&v), Some(&v.join("knowledge"))).is_err(), "its folder inside the vault");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn bash_and_other_tools_are_refused_in_every_vault_mode() {
+        let (root, v) = vault_fixture("tools");
+        let copy = copy_fixture(&root);
+        let run = root.join("health/run-1");
+        fs::create_dir_all(&run).unwrap();
+        let scopes = [("ask", chat_scope(&v, "ask")), ("curate", chat_scope(&v, "curate")), ("research", chat_scope(&v, "research")), ("ingest", ingest_scope(&copy)), ("lint", lint_scope(&v, &run))];
+        for (name, s) in &scopes {
+            for (t, input) in [
+                ("Bash", json!({"command": "ls"})),
+                ("Bash", json!({"command": "echoctl context x"})),
+                ("Bash", json!({"command": "python3 x.py"})),
+                ("NotebookEdit", json!({"notebook_path": p(&v.join("x.ipynb")), "new_source": "x"})),
+                ("mcp__echo__search_sources", json!({"query": "x"})),
+                ("mcp__other__send_mail", json!({})),
+                ("Task", json!({"prompt": "x"})),
+                ("TodoWrite", json!({"todos": []})),
+                ("KillShell", json!({})),
+                ("", json!({})),
+            ] {
+                assert!(denied(s.decide(&tool(t, input.clone()))), "{name}: {t} {input}");
+            }
+            assert!(denied(s.decide(&json!("not a tool call"))), "{name}");
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_sub_agent_works_in_the_vault_itself() {
+        let (root, v) = vault_fixture("agent");
+        let agent = json!({"description": "find Acme", "prompt": "find Acme", "subagent_type": "general-purpose"});
+        for chat in ["ask", "curate", "research"] {
+            let s = chat_scope(&v, chat);
+            assert_eq!(s.decide(&tool("Agent", agent.clone())), Decision::Allow, "{chat}");
+            for isolation in ["worktree", "remote"] {
+                let mut a = agent.clone();
+                a["isolation"] = json!(isolation);
+                assert!(denied(s.decide(&tool("Agent", a))), "{chat}: {isolation}");
+            }
+            // Its own calls are judged as any other (the hook sees them, with `agent_id`).
+            let by_agent = |t: &str, input: Value| json!({"tool_name": t, "tool_input": input, "agent_id": "a1", "agent_type": "general-purpose"});
+            assert_eq!(s.decide(&by_agent("Read", json!({"file_path": p(&v.join("knowledge/clients/acme.md"))}))), Decision::Allow);
+            assert!(denied(s.decide(&by_agent("Read", json!({"file_path": p(&root.join("other/x.md"))})))));
+            assert!(denied(s.decide(&by_agent("Bash", json!({"command": "ls"})))));
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn only_the_vaults_skills_run() {
+        let (root, v) = vault_fixture("skills");
+        let s = chat_scope(&v, "ask");
+        for k in ["process-inbox", "twin-notes", "/process-inbox"] {
+            assert_eq!(s.decide(&tool("Skill", json!({"skill": k}))), Decision::Allow, "{k}");
+        }
+        for input in [
+            json!({"skill": "pdf"}),
+            json!({"skill": "echo:process-call"}),
+            json!({"skill": "v1:process-inbox"}),
+            json!({"skill": ""}),
+            json!({}),
+            json!({"skill": "process-inbox", "command": "pdf"}),
+            json!({"command": "pdf"}),
+            json!({"skill": 7}),
+        ] {
+            assert!(denied(s.decide(&tool("Skill", input.clone()))), "{input}");
+        }
+        // On a managed profile the vault's skills come as its plugin: their full names, and only those.
+        let managed = Scope::from_vars(vars_of(vec![(RUN_MODE, "vault".into()), (RUN_VAULT, v.as_os_str().to_owned()), (RUN_CHAT, "ask".into()), (RUN_SKILLS, "v1:process-inbox".into())])).unwrap();
+        assert_eq!(managed.decide(&tool("Skill", json!({"skill": "v1:process-inbox"}))), Decision::Allow);
+        assert!(denied(managed.decide(&tool("Skill", json!({"skill": "process-inbox"})))));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn instruction_files_by_name_in_any_case_and_folder() {
+        for f in ["CLAUDE.md", "claude.md", "notes/CLAUDE.md", "CLAUDE.local.md", "x/claude.LOCAL.md", "AGENTS.md", "knowledge/agents.md", "AGENTſ.md", ".claude", ".claude/rules/x.md", ".CLAUDE/x", "knowledge/.claude/skills/s/SKILL.md"] {
+            assert!(instruction_file(Path::new(f)), "{f}");
+        }
+        for f in ["notes.md", "knowledge/claude-notes.md", "my.claude/x.md", "CLAUDE.md.bak", ".mcp.json", ".git/config", "knowledge/agents/x.md"] {
+            assert!(!instruction_file(Path::new(f)), "{f}");
+        }
+    }
+
+    #[test]
+    fn an_ask_is_printed_for_the_host() {
+        let a = ask_answer("Echo shows every change first");
+        assert_eq!(a["hookSpecificOutput"]["hookEventName"], "PreToolUse");
+        assert_eq!(a["hookSpecificOutput"]["permissionDecision"], "ask");
+        assert_eq!(a["hookSpecificOutput"]["permissionDecisionReason"], "Echo shows every change first");
+    }
+
+    #[test]
+    fn the_vault_runs_settings_carry_the_guard_and_the_scope() {
+        let scope = [(RUN_MODE.to_string(), "vault".to_string()), (RUN_VAULT.to_string(), "/vaults/twin".to_string()), (RUN_CHAT.to_string(), "curate".to_string())];
+        let s = settings_for(&scope, Path::new("/Apps/Echo.app/echoctl"));
+        assert_eq!(s["hooks"]["PreToolUse"][0]["matcher"], "*", "every tool");
+        let hook = &s["hooks"]["PreToolUse"][0]["hooks"][0];
+        assert!(hook["command"].as_str().unwrap().ends_with(" run-guard"));
+        assert_eq!(hook["onFailure"], "block");
+        assert_eq!(s["disableAllHooks"], false);
+        assert_eq!(s["env"], json!({"ECHOCTL_RUN_MODE": "vault", "ECHOCTL_RUN_VAULT": "/vaults/twin", "ECHOCTL_RUN_CHAT": "curate"}));
+        assert!(s.get("claudeMdExcludes").is_none(), "the vault's own rules load");
     }
 }
