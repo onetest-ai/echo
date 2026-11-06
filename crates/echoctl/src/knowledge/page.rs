@@ -170,6 +170,69 @@ pub fn render(v: &Vault, rel: &str, text: &str) -> Result<String> {
     Ok(crate::minutes::page_html(body, line_breaks(v), &|dest, image| decide(v, &r, &page_rel, dest, image)))
 }
 
+/// Model text (an Ask answer) as the vault-page writer shows it: raw HTML as text, links decided as in a page. A `code`
+/// span whose whole text is an existing page of the vault (vault-relative, or relative to the pages root) links like
+/// a wikilink to it; any other `code` stays code. No frontmatter handling. Model text reaches HTML only through here
+/// (untrusted-text R3).
+#[allow(dead_code)] // the Ask chat view (plan 2, Task 5) is its first caller
+pub fn render_fragment(v: &Vault, text: &str) -> String {
+    let linked = link_code_paths(v, text);
+    let breaks = line_breaks(v);
+    match scan::index(v) {
+        Ok(ix) => {
+            let r = Resolver::new(&ix);
+            crate::minutes::page_html(&linked, breaks, &|dest, image| decide(v, &r, "", dest, image))
+        }
+        Err(_) => crate::minutes::page_html(&linked, breaks, &|dest, image| (!image && dest.starts_with("https://")).then(|| dest.to_string())),
+    }
+}
+
+/// `` `knowledge/x.md` `` → `[[x.md|knowledge/x.md]]` when that names an existing page; fenced code and every other
+/// span are left alone.
+fn link_code_paths(v: &Vault, text: &str) -> String {
+    let page_of = |s: &str| -> Option<String> {
+        let s = s.trim();
+        if s.is_empty() || s.len() > 300 || s.contains(['[', ']', '|', '\\', '\n']) || s.starts_with('/') || s.split('/').any(|c| c.is_empty() || c == ".." || c == ".") {
+            return None;
+        }
+        [s.to_string(), scan::vault_rel(v, s)].into_iter().find(|c| scan::is_page_path(v, c) && inside(v, c).is_ok_and(|p| p.is_file())).and_then(|c| scan::page_rel(v, &c))
+    };
+    let mut out = String::with_capacity(text.len());
+    let mut fence = false;
+    for l in text.split_inclusive('\n') {
+        let t = l.trim_start();
+        if t.starts_with("```") || t.starts_with("~~~") {
+            fence = !fence;
+        }
+        if fence || t.starts_with("```") || t.starts_with("~~~") {
+            out.push_str(l);
+            continue;
+        }
+        let mut rest = l;
+        while let Some(i) = rest.find('`') {
+            let run = rest[i..].chars().take_while(|&c| c == '`').count();
+            let (before, after) = rest.split_at(i + run);
+            out.push_str(before);
+            rest = after;
+            // Only a single-backtick span can be a path; longer runs are copied.
+            let Some(j) = rest.find('`').filter(|_| run == 1) else { continue };
+            if rest[j..].starts_with("``") {
+                continue;
+            }
+            match page_of(&rest[..j]) {
+                Some(page) => {
+                    out.truncate(out.len() - 1);
+                    out.push_str(&format!("[[{page}|{}]]", &rest[..j]));
+                }
+                None => out.push_str(&rest[..j + 1]),
+            }
+            rest = &rest[j + 1..];
+        }
+        out.push_str(rest);
+    }
+    out
+}
+
 /// A page's first paragraph of prose, as plain text (not a heading, table, code, rule or a lone image), at most 200
 /// characters.
 fn first_prose(body: &str) -> String {

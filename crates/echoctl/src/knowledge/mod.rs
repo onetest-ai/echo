@@ -19,6 +19,7 @@ pub mod links;
 pub mod page;
 pub mod scan;
 pub mod starter;
+pub mod stream;
 
 #[cfg(test)]
 mod export_tests;
