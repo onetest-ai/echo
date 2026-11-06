@@ -352,6 +352,11 @@ fn claude_folder(profile: &str) -> Option<PathBuf> {
     (p.kind == ai::Kind::Claude).then(|| p.config_folder())
 }
 
+/// The Claude Code folder of AI profile `profile` (the user's own when it has none of its own).
+pub(crate) fn claude_folder_of(profile: &str) -> PathBuf {
+    claude_folder(profile).unwrap_or_else(own_claude_folder)
+}
+
 /// The open terminals: `(id, key, exited)`.
 pub fn list() -> Vec<(u64, String, bool)> {
     TERMS
@@ -456,7 +461,7 @@ pub fn call_store_key(dir: &Path) -> Result<String> {
 pub fn conversations(store_key: &str) -> serde_json::Value {
     let current = session_ids().get(store_key).cloned();
     let profile = store_key.split(':').next().unwrap_or("");
-    let cfg = claude_folder(profile).unwrap_or_else(own_claude_folder);
+    let cfg = claude_folder_of(profile);
     let mut list = history().remove(store_key).unwrap_or_default();
     // Only conversations Claude Code kept (one refused or never used has no transcript), and the current one.
     list.retain(|e| e["id"].as_str().is_some_and(|id| current.as_deref() == Some(id) || transcript(&cfg, id).is_some()));

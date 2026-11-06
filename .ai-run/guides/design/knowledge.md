@@ -443,3 +443,10 @@ input and `$PROBE_SCOPE` and answers *ask* for `Edit`/`Write`/`WebFetch`, and `"
 types (`attachment`, `queue-operation`, `api-request*`, `cost-state`, …) a reader must skip; the live
 stream is therefore the source for the window, and reading the transcript back is only for a conversation opened later.
 The stream's `assistant` lines (finished blocks) and `user` `tool_result` lines are what that reader maps to §5.3.
+`knowledge/transcript.rs` is that reader: it feeds those lines through `stream::Parser` (so tool rows and summaries match
+live ones), makes the user's own text a `user` event (Echo's "pages this is about" and attached-minutes framing cut off;
+hook, command and meta text skipped) and skips sidechain lines. Its blocks are named `h1…` so a live process's `b1…` can't
+meet them. `chat::read` and `chat::send` open it once for a resumable conversation with no process and no events, pushing
+the events into the ring (numbered like live ones, so a later message follows them); a transcript that isn't one
+(no JSON line with a `type`) or is missing gives a `notice` (`kind: history`): "Its history can't be shown here;
+continuing works." Permissions and todos aren't in transcripts.

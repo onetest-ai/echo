@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use super::{stream, Vault};
+use super::{stream, transcript, Vault};
 use crate::{ai, guard, paths, terminal};
 
 mod attach;
@@ -208,6 +208,8 @@ struct State {
     /// Claude Code has the conversation (a process of it began its session, or it is from the vault's list): the next
     /// start resumes it.
     started: bool,
+    /// Its past was looked up in Claude Code's transcript (once, K12-11): the events it gave come first.
+    history: bool,
     last_active: Instant,
     /// When it was last used, for the list.
     active_at: Option<String>,
@@ -294,6 +296,7 @@ impl Conv {
             this_turn: permits::Turn::default(),
             told: BTreeSet::new(),
             started,
+            history: false,
             last_active: now(),
             active_at: None,
             renders: HashMap::new(),
@@ -420,6 +423,7 @@ pub fn send(vault: &str, conversation: Option<&str>, text: &str, mode: Mode, con
     if lock(&c.state).busy {
         bail!("Wait for this answer, or stop it");
     }
+    open_history(&c, &v);
     if let Err(e) = running(&c, &v, mode, text) {
         let Some(s) = e.downcast_ref::<ai::SignInNeeded>() else {
             if conversation.is_none() {
@@ -808,11 +812,35 @@ fn exited(c: &Conv, v: &Vault, gen: u64, stopped: bool, code: Option<i32>, words
     committed(c, v, &t);
 }
 
+/// A conversation Echo holds no process or events of shows what Claude Code's transcript has (K12-11), numbered as live
+/// events are, so a message sent later follows them without renumbering. Once; a transcript that can't be read is said
+/// in a notice.
+fn open_history(c: &Conv, v: &Vault) {
+    {
+        let st = lock(&c.state);
+        if !st.started || st.history || st.proc.is_some() || st.end() > 0 {
+            return;
+        }
+    }
+    let past = transcript::events(&terminal::claude_folder_of(&c.profile), &c.id, v);
+    let mut st = lock(&c.state);
+    if !st.started || st.history || st.proc.is_some() || st.end() > 0 {
+        return;
+    }
+    st.history = true;
+    match past {
+        Some(events) => events.into_iter().for_each(|e| st.push(e)),
+        None => st.push(json!({"type": "notice", "kind": "history", "text": "Its history can't be shown here; continuing works."})),
+    }
+    c.changed.notify_all();
+}
+
 /// The events of conversation `conversation` of vault `vault` from event `from` on; waits up to `wait` for some (or
 /// for its state to change) when there are none yet (K12-06). None: no such conversation of the vault.
 pub fn read(vault: &str, conversation: &str, from: u64, wait: Duration) -> Option<ChatChunk> {
     let v = super::get(vault).ok()?;
     let c = conv_of(&v, conversation)?;
+    open_history(&c, &v);
     let deadline = Instant::now() + wait;
     let mut st = lock(&c.state);
     let seen = st.flags();
@@ -956,7 +984,8 @@ pub fn started_in_ask(v: &Vault, id: &str) -> bool {
 }
 
 /// The vault's conversations for Ask's list (the `chats` route): those of its list Claude Code kept and those Echo
-/// holds, newest first — `{id, at, title, live, busy}`. Titles from the history are Task 7's.
+/// holds, newest first — `{id, at, title, live, busy}`; a title is the first thing the user asked, read from Claude Code's
+/// transcript (`terminal::conversations`), else from the conversation's own first message.
 pub fn list_value(v: &Vault) -> Value {
     let mut out: Vec<Value> = terminal::conversations(&terminal::vault_store_key(v)).as_array().cloned().unwrap_or_default();
     for c in all().into_iter().filter(|c| c.vault == v.id && c.profile == v.profile) {
@@ -1568,5 +1597,58 @@ mod tests {
         assert_eq!(mine["live"], true);
         assert_eq!(mine["busy"], false);
         assert!(mine["at"].is_string());
+    }
+
+    /// `body` as conversation `ID`'s transcript in the profile's Claude Code folder, listed under the vault's key.
+    fn past(p: &ai::Profile, v: &Vault, body: &str) {
+        let dir = p.config_folder().join("projects/-made-up");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(format!("{ID}.jsonl")), body).unwrap();
+        crate::terminal::remember(&crate::terminal::vault_store_key(v), ID);
+    }
+
+    #[test]
+    fn a_past_conversation_opens_from_its_transcript_and_continues() {
+        let (_env, root) = crate::paths::testenv::folders("chat-history");
+        let _fake = fake::install(&root);
+        let _clean = clean();
+        let p = signed_in();
+        let v = vault(&root, "w");
+        past(&p, &v, &include_str!("testdata/transcript/ask-session.jsonl").replace("/VAULT", &v.root.to_string_lossy()));
+        // No process and no events: the page reads the transcript, numbered from 0 as live events are.
+        let c = read(&v.id, ID, 0, Duration::from_millis(50)).unwrap();
+        let t: Vec<&str> = c.events.iter().map(|e| e["type"].as_str().unwrap()).collect();
+        assert_eq!(t, ["user", "tool", "tool_result", "thinking", "text"], "{:#?}", c.events);
+        assert_eq!(c.events.iter().map(|e| e["n"].as_u64().unwrap()).collect::<Vec<_>>(), [0, 1, 2, 3, 4]);
+        assert!((c.next, c.live, c.busy) == (5, false, false));
+        // Read again: not twice.
+        assert_eq!(read(&v.id, ID, 5, Duration::from_millis(50)).unwrap().events.len(), 0);
+        // Continuing it: the live events follow, the history keeps its numbers.
+        script(&p, "chat.jsonl", &turn("Fixed."));
+        assert_eq!(send(&v.id, Some(ID), "Yes, fix it", Mode::Ask, &[]).unwrap(), ID);
+        let live = events_until(&v.id, ID, |ev, c| !c.busy && of_type(ev, "result").len() == 1);
+        assert_eq!(live[..5], c.events[..], "the history is as it was");
+        assert_eq!(live[5]["type"], "user");
+        assert_eq!(live[5]["n"], 5);
+        assert!(live.iter().skip(5).all(|e| e["n"].as_u64().unwrap() >= 5));
+        assert_eq!(value_of(&argv(&p), "--resume"), Some(ID));
+    }
+
+    #[test]
+    fn a_transcript_that_cant_be_read_is_said_in_the_conversation() {
+        let (_env, root) = crate::paths::testenv::folders("chat-history-broken");
+        let _fake = fake::install(&root);
+        let _clean = clean();
+        let p = signed_in();
+        let v = vault(&root, "w");
+        past(&p, &v, "this is not a transcript\n");
+        let c = read(&v.id, ID, 0, Duration::from_millis(50)).unwrap();
+        assert_eq!(c.events.len(), 1, "{:#?}", c.events);
+        assert_eq!((c.events[0]["type"].as_str(), c.events[0]["n"].as_u64()), (Some("notice"), Some(0)));
+        assert_eq!(c.events[0]["text"], "Its history can't be shown here; continuing works.");
+        // A conversation never started has no past to show.
+        script(&p, "chat.jsonl", &turn("Hi."));
+        let id = send(&v.id, None, "Hello", Mode::Ask, &[]).unwrap();
+        assert!(turn_events(&v.id, &id).iter().all(|e| e["type"] != "notice"));
     }
 }

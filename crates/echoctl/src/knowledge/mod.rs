@@ -21,6 +21,8 @@ pub mod scan;
 pub mod starter;
 pub mod stream;
 #[cfg(feature = "tray")]
+pub mod transcript;
+#[cfg(feature = "tray")]
 pub mod chat;
 
 #[cfg(test)]
