@@ -58,9 +58,10 @@ pub struct MeetingContext {
 pub const FILE: &str = "meeting.json";
 
 impl MeetingContext {
-    /// One the user accepted (or organises) — or one whose source doesn't say: what Today and Coming up today list.
+    /// One the user accepted (or organises), one that asked for no answer (Graph's `none`: a town hall, a list's
+    /// invite), or one whose source doesn't say: what Today and Coming up today list. Not: tentative, not answered.
     pub fn accepted(&self) -> bool {
-        self.response.as_deref().is_none_or(|r| matches!(r, "accepted" | "organizer"))
+        self.response.as_deref().is_none_or(|r| matches!(r, "accepted" | "organizer" | "none"))
     }
 
     pub fn load(call_dir: &Path) -> Result<Option<Self>> {

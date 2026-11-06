@@ -1206,6 +1206,7 @@ function sendClaudeDialog() {
   return `<div class="td-modal" data-sc-off="1"><div class="td-dialog sc-dialog" role="dialog" aria-modal="true" aria-labelledby="sc-h">
     <div class="sc-head"><h3 id="sc-h"><span class="md-ico claude">${ICON(CLAUDE_MARK)}</span>Claude</h3><div class="sc-task">${thread ? `${projIcon(thread, 14)}<span class="set-sub">${esc(thread.name)}</span> · ` : ''}<span>${esc(c.title)}</span></div></div>
     <div class="sc-pick">${picker}</div>
+    ${c.hint ? `<div class="sc-hint set-sub" title="Echo's guess — Claude reads it with the task">Echo suggests: ${esc(c.hint)}</div>` : ''}
     <textarea id="sc-words" class="sc-words" rows="2" placeholder="Anything to add — optional (Keep it short; Dana is away until the 12th)">${esc(c.words || '')}</textarea>
     <div class="sc-foot"><button class="btn primary" data-sc-send title="In the Claude panel, with you">${ICON(CLAUDE_MARK)}Work on it</button>${yolo}<button class="btn ghost" data-sc-off="1">Cancel</button><span class="grow"></span><span class="set-sub">${c.today ? 'Yolo: Claude does it on its own.' : ''}</span></div></div></div>`
 }
@@ -1483,8 +1484,15 @@ function modeIcon(m) {
   const tip = `${claude ? 'Claude can do it' : 'You do it by hand'}${guess ? " — Echo's guess" : ''}${!claude && m.how ? `: ${m.how}` : ''}`
   return `<span class="md-ico${claude ? ' claude' : ''}${guess ? ' guess' : ''}" title="${esc(tip)}" aria-label="${esc(tip)}">${ICON(claude ? CLAUDE_MARK : HAND_MARK)}</span>`
 }
-/** A Claude one's ✦ carries its prompt and skill into the Claude dialog. */
-const modeData = (n) => n.mode && n.mode.mode === 'claude' ? ` data-prompt="${esc(n.mode.prompt || '')}" data-skill="${esc(n.mode.skill || '')}"` : ''
+/** A Claude one's ✦ carries its skill into the Claude dialog, and its prompt: the user's own as their note; Echo's
+ *  guess — model output from others' words — only as a hint beside it, never typed as theirs (Claude reads it with
+ *  the task, as data). */
+const modeData = (n) => {
+  const m = n.mode
+  if (!m || m.mode !== 'claude') return ''
+  const p = m.prompt || ''
+  return ` data-skill="${esc(m.skill || '')}"${m.prompt_by === 'you' ? ` data-prompt="${esc(p)}"` : ` data-hint="${esc(p)}"`}`
+}
 /** The task's details: who does it (a switch; a click keeps the user's choice on the task), and its how — or what
  *  Claude hands back — written by Echo's guess or by hand (`edit`: the details' own field editor). */
 function modeRows(project, n, val) {
@@ -2786,7 +2794,7 @@ document.addEventListener('click', (e) => {
   }
   if (t.dataset.claudeTask) {
     // A task Claude can do comes with its own words (what to hand back) and skill (`taskmodes`).
-    S.claudeSend = { project: t.dataset.project, node: t.dataset.claudeTask, title: t.dataset.title, today: !!t.dataset.today, skill: t.dataset.skill || undefined, words: t.dataset.prompt || '', open: !t.dataset.skill }
+    S.claudeSend = { project: t.dataset.project, node: t.dataset.claudeTask, title: t.dataset.title, today: !!t.dataset.today, skill: t.dataset.skill || undefined, words: t.dataset.prompt || '', hint: t.dataset.hint || '', open: !t.dataset.skill }
     if (!TPL.data) loadTemplates().then(render)
     return render()
   }

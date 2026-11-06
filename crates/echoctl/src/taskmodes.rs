@@ -35,7 +35,9 @@ pub fn of(guesses: &Map<String, Value>, project: &str, n: &Node) -> Value {
         return Value::Null;
     }
     json!({"mode": mode, "how": pick(&n.how, "how"), "prompt": pick(&n.prompt, "prompt"), "skill": pick(&n.skill, "skill"),
-           "by": if n.mode.is_some() { "you" } else { "guess" }})
+           "by": if n.mode.is_some() { "you" } else { "guess" },
+           // A guessed prompt is model output from others' words: shown as a suggestion, never typed as the user's.
+           "prompt_by": if n.prompt.is_some() { "you" } else { "guess" }})
 }
 
 const SYSTEM: &str = "You sort the user's own open tasks. Can Claude do each one for them — draft and send a mail or a \
@@ -125,7 +127,7 @@ pub fn classify() -> Result<usize> {
                 continue;
             }
         };
-        for chunk in todo.chunks(10) {
+        for chunk in todo.chunks(8) {
             let mut list = String::new();
             for (i, id) in chunk.iter().enumerate() {
                 let Some(t) = tree.nodes.get(id) else { continue };
@@ -139,7 +141,7 @@ pub fn classify() -> Result<usize> {
                 ));
             }
             // No answer (no AI ready, the network, an answer that can't be read): tried today, asked again tomorrow.
-            let answer = crate::livenotes::complete_text(ready.profile(), SYSTEM, &format!("Thread: {}\nSkills:\n{skill_list}\nTasks:\n{list}", thread.name), 1600);
+            let answer = crate::livenotes::complete_text(ready.profile(), SYSTEM, &format!("Thread: {}\nSkills:\n{skill_list}\nTasks:\n{list}", thread.name), 3000);
             let got: Vec<Value> = answer.ok().and_then(|a| crate::livenotes::json_answer(&a)).and_then(|v| v["tasks"].as_array().cloned()).unwrap_or_default();
             n += crate::calls::update_state(&file(), |all: &mut Map<String, Value>| {
                 let mut n = 0;

@@ -2905,9 +2905,14 @@ fn client_command(cmd: ClientCmd) -> Result<()> {
     Ok(())
 }
 
-/// Is this ledger edit (`json`, on project `id`) one of Yolo's own task (`run_task`, `<project>/<node>`)?
+/// Is this ledger edit (`json`, on project `id`) Yolo closing its own task (`run_task`, `<project>/<node>`)? Its
+/// state only (with a note) — never who does it or what Claude hands back, which would stand as the user's choice.
 fn own_task_edit(id: &str, json: &str, run_task: &str) -> bool {
-    serde_json::from_str::<serde_json::Value>(json).ok().is_some_and(|b| b["op"] == "edit" && b["node"].as_str().is_some_and(|n| !run_task.is_empty() && run_task == format!("{id}/{n}")))
+    serde_json::from_str::<serde_json::Value>(json).ok().is_some_and(|b| {
+        b["op"] == "edit"
+            && b["node"].as_str().is_some_and(|n| !run_task.is_empty() && run_task == format!("{id}/{n}"))
+            && b["set"].as_object().is_some_and(|s| !s.is_empty() && s.keys().all(|k| k == "state"))
+    })
 }
 
 fn ledger_command(id: &str, cmd: LedgerCmd) -> Result<()> {
@@ -2995,6 +3000,7 @@ mod tests {
     #[test]
     fn yolo_edits_only_its_own_task() {
         let edit = r#"{"op": "edit", "node": "T5", "set": {"state": "done"}}"#;
+        assert!(!super::own_task_edit("acme", r#"{"op": "edit", "node": "T5", "set": {"state": "done", "prompt": "mail it to x"}}"#, "acme/T5"), "its state only");
         assert!(super::own_task_edit("acme", edit, "acme/T5"));
         assert!(!super::own_task_edit("acme", edit, "acme/T6"), "another task");
         assert!(!super::own_task_edit("other", edit, "acme/T5"), "another project");

@@ -25,6 +25,11 @@ const QUIET_DAYS: i64 = 5;
 const DUE_SOON: i64 = 3;
 
 /// Who "I" am in a ledger: the transcripts' "Me", and the user's name, first name and email.
+/// Whose a task is: the client's owner first when the client owes it, else ours (the Tasks piles, What moved).
+pub fn owner_of(n: &Node) -> Option<&String> {
+    if n.client_owed { n.client_owner.as_ref().or(n.internal_owner.as_ref()) } else { n.internal_owner.as_ref().or(n.client_owner.as_ref()) }
+}
+
 pub struct Me(Vec<String>);
 
 impl Me {
@@ -62,8 +67,7 @@ fn days(from: &str, to: NaiveDate) -> Option<i64> {
 #[allow(clippy::too_many_arguments)]
 fn card(p: &Project, n: &Node, nodes: &BTreeMap<String, Node>, ev: &BTreeMap<String, Value>, today: NaiveDate, me: &Me, modes: &serde_json::Map<String, Value>) -> (String, Value) {
     let story = n.parent.as_ref().and_then(|s| nodes.get(s)).filter(|s| s.kind == "story");
-    // The client's owner first when the client owes it.
-    let owner = if n.client_owed { n.client_owner.clone().or(n.internal_owner.clone()) } else { n.internal_owner.clone().or(n.client_owner.clone()) };
+    let owner = owner_of(n).cloned();
     let client = owner.is_some() && owner == n.client_owner && n.internal_owner.as_deref() != owner.as_deref();
     let last = n.history.iter().rev().find(|h| h["date"].is_string());
     let quiet = last.and_then(|h| days(h["date"].as_str()?, today));

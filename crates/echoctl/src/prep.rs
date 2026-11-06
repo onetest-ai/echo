@@ -54,11 +54,14 @@ fn time(s: Option<&str>) -> Option<DateTime<Utc>> {
 /// Today's meetings still to come or going on, each with its threads and its prep's state — "Coming up today".
 pub fn upcoming() -> Value {
     let now = Utc::now();
-    let scheduled: Vec<String> = crate::schedule::load().into_iter().filter_map(|m| m.id).collect();
+    // Set to record, or recorded today: kept as Today keeps them, accepted or not.
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let mut scheduled: Vec<String> = crate::schedule::load().into_iter().filter_map(|m| m.id).collect();
+    scheduled.extend(crate::calls::all_calls().into_iter().rev().take_while(|d| crate::calls::stamp_of(d).starts_with(&today)).filter_map(|d| MeetingContext::load(&d).ok().flatten().and_then(|m| m.id)));
     let list: Vec<Value> = crate::watch::agenda()
         .into_iter()
-        // Only the meetings the user accepted (or organises), or set to record: an invite left open or tentative isn't
-        // their day yet.
+        // Only the meetings the user accepted (or organises), set to record or recorded: an invite left open or
+        // tentative isn't their day yet.
         .filter(|m| (m.accepted() || m.id.as_ref().is_some_and(|i| scheduled.contains(i))) && time(m.end.as_deref()).is_none_or(|e| e > now))
         .filter_map(|m| {
             let event = m.id.clone().filter(|i| !i.is_empty())?;

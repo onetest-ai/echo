@@ -2634,8 +2634,7 @@ pub fn call_changes(project: &str, stamp: &str) -> Result<Value> {
             c["node"] = json!({"id": n.id, "kind": n.kind, "type": n.task_type, "title": n.title, "state": n.state, "due": n.due,
                                "owner": n.internal_owner.as_ref().or(n.client_owner.as_ref()),
                                // The user's own open task: who does it (the window's What moved beside the minutes).
-                               // As the Tasks piles tell it: the client's owner first when the client owes it.
-                               "mine": n.kind == "task" && if n.client_owed { n.client_owner.as_ref().or(n.internal_owner.as_ref()) } else { n.internal_owner.as_ref().or(n.client_owner.as_ref()) }.is_some_and(|o| me.is(o)),
+                               "mine": n.kind == "task" && crate::tasks::owner_of(n).is_some_and(|o| me.is(o)),
                                "mode": crate::taskmodes::of(&modes, project, n)});
             if let Some(d) = h["depends_on"].as_str().and_then(|d| t.nodes.get(d)) {
                 c["depends_on_title"] = json!(d.title);

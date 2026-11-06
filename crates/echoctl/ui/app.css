@@ -368,7 +368,12 @@ label.split-lang:focus-within { outline: 2px solid var(--accent); outline-offset
 .minutes-side .cc-row > :last-child { grid-column: 2; grid-row: 1; }
 .minutes-side .cc-main { grid-column: 1 / -1; grid-row: 2; }
 .minutes-side .cc-row > .wk-v { grid-column: 1 / -1; grid-row: 3; justify-self: start; }
-@media (max-width: 1000px) { .minutes-split { grid-template-columns: minmax(0, 1fr); } .minutes-side { display: none; } }
+/* Narrow: What moved under the minutes, a third of the height at most. */
+@media (max-width: 1000px) {
+  .minutes-split { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+  .minutes-side { border-left: 0; border-top: 1px solid var(--line); max-height: 34vh; }
+}
+.sc-hint { font-size: 12px; line-height: 1.45; padding: 6px 10px; border-radius: 8px; background: var(--bg); }
 /* Who does a task (taskmodes): an icon on cards — Claude's mark or a hand, Echo's guess faded; the switch is in the
    task's details. */
 .md-ico { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; color: var(--text-2); vertical-align: -5px; flex: none; }

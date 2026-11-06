@@ -764,14 +764,12 @@ fn call_detail(dir: &Path) -> Value {
         Ok(ps) => {
             v["projects"] = ps.iter().map(|(p, w)| crate::projects::chip(p, w)).collect();
             v["suggested"] = json!(crate::projects::suggest(dir).unwrap_or_default());
-            // What this call changed in each project's work, and the tasks its action items became.
+            // What this call changed in each project's work.
             let stamp = calls::stamp_of(dir);
-            let mut all = vec![];
             let changes: Vec<Value> = ps
                 .iter()
                 .filter_map(|(p, _)| {
                     let mut c = crate::ledger::call_changes(&p.id, &stamp).ok()?;
-                    all.extend(c["changes"].as_array().into_iter().flatten().map(|x| (p.id.clone(), x.clone())));
                     c["project"] = json!(p.id);
                     // Not read yet: whether its sync is reading now, or when it will (the call settles
                     // first, `projectsync::SETTLE` after it ended; the scheduler looks every 5 minutes).

@@ -282,8 +282,8 @@ mod tests {
             e["responseStatus"] = json!({"response": r});
             to_meeting(&e).unwrap()
         };
-        assert!(with("accepted").accepted() && with("organizer").accepted());
-        assert!(!with("tentativelyAccepted").accepted() && !with("notResponded").accepted() && !with("none").accepted());
+        assert!(with("accepted").accepted() && with("organizer").accepted() && with("none").accepted(), "none: no answer asked");
+        assert!(!with("tentativelyAccepted").accepted() && !with("notResponded").accepted());
         assert!(to_meeting(&ev("Sync", at, true)).unwrap().accepted(), "a source that doesn't say: kept");
     }
 

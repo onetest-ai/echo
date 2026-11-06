@@ -202,13 +202,16 @@ fn task_text(thread: &str, id: &str) -> Result<String> {
     }
     // The context its work starts from: the thread's last calls, and the last of the meeting series it was raised in
     // (by the invite's subject, as "Since last time" goes) that the thread's don't already list.
-    let recent = recent_calls(thread, 3);
+    // Only calls on the thread's own AI profile: a call's text goes nowhere else (strict routing).
+    let profile = crate::projects::load(thread).ok().and_then(|p| p.ai_profile).unwrap_or_else(crate::ai::default_id);
+    let ours = |d: &std::path::Path| crate::ai::call_profile_id(d).is_ok_and(|p| p == profile);
+    let recent: Vec<std::path::PathBuf> = recent_calls(thread, 3).into_iter().filter(|d| ours(d)).collect();
     if !recent.is_empty() {
         out.push_str(&format!("\n## The thread's last calls\n{}\n", recent.iter().map(|d| call_line(d)).collect::<Vec<_>>().join("\n")));
     }
     let raised_in = n["history"].as_array().into_iter().flatten().find_map(|h| ev[h["evidence"].as_str()?]["call"].as_str().map(str::to_owned));
     if let Some((subject, series)) = raised_in.and_then(|c| series_calls(&crate::paths::calls_dir().join(c), 3)) {
-        let more: Vec<String> = series.iter().filter(|d| !recent.contains(d)).map(|d| call_line(d)).collect();
+        let more: Vec<String> = series.iter().filter(|d| !recent.contains(d) && ours(d)).map(|d| call_line(d)).collect();
         if !more.is_empty() {
             out.push_str(&format!("\n## The last calls of its series ({subject})\n{}\n", more.join("\n")));
         }
