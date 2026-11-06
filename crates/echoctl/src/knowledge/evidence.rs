@@ -40,6 +40,19 @@ mod tests {
     }
 
     #[test]
+    fn quotes_in_other_scripts_punctuation_and_lines() {
+        let text = "Рішення: ПЕРЕНЕСТИ\n  Пілот   на 18 Листопада, далі — без змін.";
+        assert!(found(text, "перенести пілот на 18 листопада"), "Cyrillic, mixed case, other spacing, across a line");
+        assert!(!found(text, "перенести пілот на 19 листопада"));
+        assert!(!found(text, "пілот на"), "fewer than three words");
+        let t = "He said, \"we'll ship it -- on Friday!\" (probably).";
+        assert!(found(t, "\"We'll ship it, on Friday\""), "punctuation around and inside the quote");
+        assert!(found(t, "ship it on friday"));
+        assert!(found("first line ends here\nsecond line starts", "ends here second line"), "a quote may cross a newline");
+        assert!(!found(t, "ship, it"), "two words after punctuation is still two words");
+    }
+
+    #[test]
     fn pdf_is_not_a_text_source() {
         for ok in ["a.md", "b.TXT", "c/d.csv", "e.json"] {
             assert!(text_source(Path::new(ok)), "{ok}");

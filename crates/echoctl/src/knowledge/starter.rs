@@ -93,6 +93,7 @@ pub fn create(name: &str, folder: Option<PathBuf>, git: bool, minutes: &str) -> 
     let tmp = parent.join(format!("{}.tmp-echo", dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "vault".into())));
     let _ = std::fs::remove_dir_all(&tmp);
     let mut first_id = None;
+    let mut lines_written = 0usize;
     let made = (|| -> Result<String> {
         std::fs::create_dir_all(&tmp)?;
         let (owner, date) = (owner(), chrono::Local::now().format("%Y-%m-%d").to_string());
@@ -101,7 +102,8 @@ pub fn create(name: &str, folder: Option<PathBuf>, git: bool, minutes: &str) -> 
             let p = super::join(&tmp, out);
             std::fs::create_dir_all(p.parent().expect("a parent"))?;
             let filled = text.replace("{{vault.name}}", name).replace("{{vault.owner}}", &owner).replace("{{vault.date}}", &date);
-            std::fs::write(&p, filled)?;
+            std::fs::write(&p, &filled)?;
+            lines_written += filled.lines().count();
         }
         if !git {
             return Ok("off".into());
@@ -140,12 +142,10 @@ pub fn create(name: &str, folder: Option<PathBuf>, git: bool, minutes: &str) -> 
         bail!("couldn't make {}: {e}", dir.display());
     }
     let vault = super::add(&dir, super::AddOpts { name: Some(name.into()), profile: None, minutes: Some(minutes.into()), commit: Some(git_state == "committed"), template: Some(TEMPLATE.into()) })?;
-    if let Some(id) = first_id {
-        let plus = FILES.iter().map(|(_, t)| t.lines().count()).sum();
-        let e = super::activity::Entry { at: chrono::Local::now().to_rfc3339(), path: String::new(), kind: "new".into(), by: "starter".into(), r#ref: Some(TEMPLATE.into()), plus, minus: 0, commit: Some(id) };
-        if let Err(err) = super::activity::record(&vault, e) {
-            eprintln!("knowledge: activity of the new vault {}: {err:#}", vault.id);
-        }
+    // Every new vault is a change Echo made; the commit is named when there was one.
+    let e = super::activity::Entry { at: chrono::Local::now().to_rfc3339(), path: String::new(), kind: "new".into(), by: "starter".into(), r#ref: Some(TEMPLATE.into()), plus: lines_written, minus: 0, commit: first_id };
+    if let Err(err) = super::activity::record(&vault, e) {
+        eprintln!("knowledge: activity of the new vault {}: {err:#}", vault.id);
     }
     Ok(Created { vault, git: git_state })
 }
@@ -280,6 +280,17 @@ mod tests {
         assert!(!c.vault.git.commit, "without git there is nothing to commit");
         assert_eq!(c.vault.minutes.mode, "auto");
         assert!(!root.join("home/knowledge/my-twin.tmp-echo").exists());
+    }
+
+    #[test]
+    fn every_new_vault_leaves_a_starter_line() {
+        let (_env, root) = crate::paths::testenv::folders("kn-new-activity");
+        let c = create("No git", Some(root.join("plain")), false, "auto").unwrap();
+        let e = crate::knowledge::activity::recent(&c.vault, "2000-01-01T00:00:00+00:00");
+        assert_eq!(e.len(), 1, "git off still leaves the line");
+        assert_eq!((e[0].by.as_str(), e[0].kind.as_str(), e[0].path.as_str(), e[0].commit.clone()), ("starter", "new", "", None));
+        let written: usize = crate::knowledge::detect::walk(&root.join("plain"), &[], |_| true).iter().chain([".claude/skills/process-inbox/SKILL.md".to_string(), ".claude/skills/twin/SKILL.md".to_string(), "knowledge/.obsidian/app.json".to_string(), "knowledge/.obsidian/templates.json".to_string()].iter()).filter(|p| !p.starts_with(".git/")).map(|p| std::fs::read_to_string(root.join("plain").join(p)).unwrap().lines().count()).sum();
+        assert_eq!(e[0].plus, written, "the lines actually written (names filled in, .gitignore included)");
     }
 
     #[test]

@@ -15,7 +15,7 @@ pub const KEEP: usize = 2000;
 pub struct Entry {
     /// When (RFC 3339).
     pub at: String,
-    /// The vault-relative path.
+    /// The vault-relative path. The starter's line has an empty path: "the whole vault" (Home shows "The vault").
     pub path: String,
     /// `new` or `edit`.
     pub kind: String,
@@ -53,8 +53,15 @@ pub fn record(v: &Vault, e: Entry) -> Result<()> {
         }
         std::thread::sleep(std::time::Duration::from_millis(5));
     };
-    let old = std::fs::read_to_string(file(v)).unwrap_or_default();
-    let mut lines: Vec<&str> = old.lines().filter(|l| !l.trim().is_empty()).collect();
+    // Only a log that isn't there is empty; any other read error stops here, so the file is never rewritten from nothing.
+    let old = match std::fs::read(file(v)) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => vec![],
+        Err(e) => return Err(e.into()),
+    };
+    // A line that isn't UTF-8 is dropped; it doesn't cost the others.
+    let old: Vec<&str> = old.split(|b| *b == b'\n').filter_map(|l| std::str::from_utf8(l).ok()).collect();
+    let mut lines: Vec<&str> = old.into_iter().filter(|l| !l.trim().is_empty()).collect();
     let line = serde_json::to_string(&e)?;
     lines.push(&line);
     let from = lines.len().saturating_sub(KEEP);
@@ -67,7 +74,8 @@ pub fn record(v: &Vault, e: Entry) -> Result<()> {
 /// Lines at or after `since` (RFC 3339), newest first. A line that doesn't read is skipped.
 pub fn recent(v: &Vault, since: &str) -> Vec<Entry> {
     let since = chrono::DateTime::parse_from_rfc3339(since).ok();
-    let text = std::fs::read_to_string(file(v)).unwrap_or_default();
+    let bytes = std::fs::read(file(v)).unwrap_or_default();
+    let text = String::from_utf8_lossy(&bytes);
     let mut out: Vec<(chrono::DateTime<chrono::FixedOffset>, Entry)> = text
         .lines()
         .filter_map(|l| serde_json::from_str::<Entry>(l).ok())
@@ -125,6 +133,46 @@ mod tests {
         assert!(text.lines().all(|l| serde_json::from_str::<Entry>(l).is_ok()), "every line is whole");
         assert_eq!(recent(&v, "2000-01-01T00:00:00+00:00").len(), 400);
         assert!(recent(&v, "2999-01-01T00:00:00+00:00").is_empty());
+    }
+
+    #[test]
+    fn record_waits_for_the_lock() {
+        let (_env, root) = crate::paths::testenv::folders("kn-act-wait");
+        let v = vault(&root);
+        std::fs::create_dir_all(dir(&v)).unwrap();
+        let held = crate::app::FileLock::try_take(&dir(&v).join("activity.lock")).unwrap().expect("the lock is free");
+        let w = { let v = v.clone(); std::thread::spawn(move || record(&v, entry(1)).unwrap()) };
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        assert!(!file(&v).exists(), "nothing is written while another holder has the lock");
+        drop(held);
+        w.join().unwrap();
+        assert_eq!(std::fs::read_to_string(file(&v)).unwrap().lines().count(), 1);
+    }
+
+    #[test]
+    fn a_bad_line_does_not_cost_the_good_ones() {
+        let (_env, root) = crate::paths::testenv::folders("kn-act-bad");
+        let v = vault(&root);
+        std::fs::create_dir_all(dir(&v)).unwrap();
+        let mut seed = serde_json::to_string(&entry(1)).unwrap().into_bytes();
+        seed.extend(b"\n\xff\xfe not utf-8\n");
+        seed.extend(serde_json::to_string(&entry(2)).unwrap().into_bytes());
+        seed.push(b'\n');
+        std::fs::write(file(&v), seed).unwrap();
+        record(&v, entry(3)).unwrap();
+        let text = std::fs::read_to_string(file(&v)).unwrap();
+        let plus: Vec<usize> = text.lines().map(|l| serde_json::from_str::<Entry>(l).unwrap().plus).collect();
+        assert_eq!(plus, [1, 2, 3], "the unreadable line is dropped, the others stay");
+    }
+
+    #[test]
+    fn an_unreadable_log_is_never_overwritten() {
+        let (_env, root) = crate::paths::testenv::folders("kn-act-unreadable");
+        let v = vault(&root);
+        // A directory where the log should be: reading it fails, and that is not "empty".
+        std::fs::create_dir_all(file(&v)).unwrap();
+        assert!(record(&v, entry(1)).is_err());
+        assert!(file(&v).is_dir(), "left as it was");
     }
 
     #[test]

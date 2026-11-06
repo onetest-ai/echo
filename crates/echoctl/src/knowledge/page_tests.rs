@@ -393,7 +393,7 @@ fn page_writes_leave_an_activity_line() {
     let m = super::starter::create("Activity twin", Some(root.join("act-twin")), false, "auto").unwrap().vault;
     let call = fixture::call("2026-11-05_090012-weekly-delivery-sync", "Weekly delivery sync", "system", fixture::MINUTES);
     super::export::save(&call, &m.id, super::export::How::Auto).unwrap();
-    let e = recent(&m, "2000-01-01T00:00:00+00:00");
+    let e: Vec<_> = recent(&m, "2000-01-01T00:00:00+00:00").into_iter().filter(|e| e.by != "starter").collect();
     assert_eq!(e.len(), 1);
     assert_eq!((e[0].by.as_str(), e[0].kind.as_str(), e[0].path.as_str()), ("minutes", "new", "knowledge/notes/2026-11-05-weekly-delivery-sync.md"));
     assert_eq!(e[0].r#ref.as_deref(), Some("2026-11-05_090012-weekly-delivery-sync"));
