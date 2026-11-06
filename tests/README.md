@@ -45,6 +45,11 @@ into a scenario (`app_profile.md` → "Scenarios").
 | [S-11](scenarios/S-11_set-echo-up-your-way.md) | 36 | Set Echo up your way: appearance, recording, languages, About me, a template, a meeting type, the vocabulary |
 | [S-12](scenarios/S-12_skills-and-ai-profiles-and-plugins.md) | 30 | Skills and AI: skills on and off, AI profiles and the default, plugins and marketplaces |
 | [S-13](scenarios/S-13_find-your-way-around.md) | 18 | Find your way around: the activity bar, panels, layout, the actions palette, the status bar and shortcuts |
+| [S-23](scenarios/S-23_a-busy-day-of-calls-and-minutes-in-every-state.md) | 27 | A busy day of calls and minutes in every state: icons, countdown and Not yet, memo and Teams import, chat, screens, live notes, what moved, failed and waiting runs, the prep tab, delete and restore (`standard` data) |
+| [S-24](scenarios/S-24_the-calendar-preps-and-the-inbox-on-a-busy-day.md) | 33 | The calendar, preps and the Inbox on a busy day: block and card states, responses, series, preps with every section, the Inbox's badge, groups, folds, buttons and decisions (`standard` data) |
+| [S-25](scenarios/S-25_who-owes-what-on-a-full-board.md) | 21 | Who owes what on a full board: Tasks, piles, filters, badges, the board and its columns (`standard` data) |
+| [S-26](scenarios/S-26_ten-threads-in-every-stage.md) | 24 | Ten threads in every stage: membership, people and clients (`standard` data) |
+| [S-27](scenarios/S-27_others-words-everywhere.md) | 16 | Others' words everywhere: nothing runs, nothing breaks (the `hostile` data set: markup, script, `javascript:` links, long words, right-to-left, emoji, Markdown in every place) |
 
 ## Areas
 
