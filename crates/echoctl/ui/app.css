@@ -1939,9 +1939,10 @@ select.set-in { width: auto; margin-right: 6px; }
 .td-tasks { display: flex; flex-direction: column; gap: 6px; }
 .td-task { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px 10px; align-items: start; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
 .td-task:hover { border-color: var(--line-strong); background: var(--surface); }
+.td-task { cursor: pointer; }
+.td-task.on { border-color: var(--accent); background: var(--surface); }
+.td-task:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .td-task-t { font-size: 13px; line-height: 1.4; }
-.td-task-t a { color: var(--text); text-decoration: none; }
-.td-task-t a:hover { text-decoration: underline; }
 .td-task-t .td-due { display: inline-flex; vertical-align: -3px; margin-right: 6px; padding: 0; }
 .td-task-m { grid-column: 1 / -1; display: flex; align-items: center; gap: 5px; font: 11.5px var(--mono); color: var(--text-3); }
 .td-icos { margin-left: auto; display: flex; gap: 2px; }

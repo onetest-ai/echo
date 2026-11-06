@@ -169,7 +169,8 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   classify`). On cards (Today's My work, What moved, Tasks) an icon only — Claude Code's mark or a hand, Echo's guess
   faded, its how on hover; Tasks has a filter (Anyone / Claude can do / By hand). The switch and the how (or what
   Claude hands back), editable, are in the task's details (`modeRows`), field by field the user's over the guess. A
-  Claude one's ✦ / Send to Claude opens the Claude dialog with its prompt as the note and its skill chosen — Work on
+  card on Today opens the task's details in the right panel, Today staying put (`data-tk="open"`, Enter too; its ✦
+  and Close are their own). A Claude one's ✦ / Send to Claude opens the Claude dialog with its prompt as the note and its skill chosen — Work on
   it / Yolo, no third button (the user: one Run with Claude mechanism). Claude Code's own mark (thesvg.org, mono)
   stands for Claude everywhere: the panel, Ask Claude, Send to Claude, Work on it, the status bar.
 - What moved (`callChanges`): what a call changed in its threads, beside the minutes as the live notes are beside the
