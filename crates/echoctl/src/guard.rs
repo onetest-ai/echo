@@ -115,8 +115,8 @@ pub struct VaultScope {
     skills: Vec<String>,
     /// The sources folder, relative to the root (`RUN_SOURCES`): read, never written.
     sources: Option<PathBuf>,
-    /// Windows' name rules bind reads too (there `.git.` is `.git` and `aux.md` a device): `cfg!(windows)`, a field
-    /// so that both are tested.
+    /// Windows' rules: names bind reads too (there `.git.` is `.git` and `aux.md` a device), and a backslash in a glob
+    /// separates folders (elsewhere it escapes the next character). `cfg!(windows)`, a field so that both are tested.
     windows: bool,
 }
 
@@ -740,27 +740,33 @@ impl VaultScope {
         }
     }
 
-    /// A glob of Glob (`pattern`) or Grep (`glob`), searched from `from`: refused when it starts from home (`~`), has
-    /// braces (`{..,x}` expands to a way up), climbs (`..`), could name `.git` (also through wildcards: `.gi?`,
-    /// `[.]git`), or its fixed part — the folders before its first wildcard, absolute or from `from` — isn't readable
-    /// (a link out). Several globs in one (Grep splits its `glob` at spaces and commas) each on its own.
+    /// A glob of Glob (`pattern`) or Grep (`glob`), searched from `from`, in every reading the tools may give it
+    /// (`readings`): refused when one starts from home (`~`), climbs (`..`), could name `.git` (also through wildcards
+    /// and classes: `.gi?`, `[.]git`, `.git[/]config`), or its fixed part — up to the last folder before its first
+    /// wildcard, absolute or from `from` — isn't readable (a link out, the file system's root).
     fn glob(&self, g: &str, from: &Path, results: Option<&Path>) -> Result<(), String> {
         // Claude Code splits at JavaScript's whitespace, which Rust's misses some of (U+FEFF).
         if g.chars().any(bent) {
             return Err(format!("the pattern {g:?} holds a character no path does (an invisible one, or whitespace but a space)"));
         }
-        for one in g.split([' ', ',']).filter(|s| !s.is_empty()) {
-            let one = one.replace('\\', "/");
+        // A backslash separates folders on Windows; elsewhere ripgrep takes it as an escape (`.\git` is `.git`).
+        if !self.windows && g.contains('\\') {
+            return Err(format!("the pattern {g:?} has a backslash: an escape here, not a folder's separator"));
+        }
+        for one in readings(&g.replace('\\', "/"))? {
             let parts: Vec<&str> = one.split('/').collect();
-            if one.starts_with('~') || one.contains(['{', '}']) || parts.contains(&"..") {
+            if one.starts_with('~') || parts.contains(&"..") {
                 return Err(format!("the pattern {one} reaches outside the vault"));
             }
-            if parts.iter().any(|s| could_name(s, ".git")) {
+            if parts.iter().any(|s| could_name(s, ".git")) || class_holds_separator(&one) {
                 return Err(format!("the pattern {one} reaches into git's folder"));
             }
-            let fixed = parts.iter().take_while(|s| !s.contains(['*', '?', '['])).copied().collect::<Vec<_>>().join("/");
+            let fixed = match one.find(['*', '?', '[']) {
+                Some(w) => &one[..one[..w].rfind('/').map_or(0, |s| s + 1)],
+                None => one.as_str(),
+            };
             if !fixed.is_empty() {
-                let p = vault_path(Some(&fixed), from)?;
+                let p = vault_path(Some(fixed), from)?;
                 self.readable(&p, results).map_err(|e| format!("the pattern {one}: {e}"))?;
             }
         }
@@ -788,6 +794,64 @@ impl VaultScope {
     }
 }
 
+/// Every glob Grep or Glob may take `g` for: the whole of it (Glob doesn't split its pattern), its pieces between
+/// spaces, each with its braces expanded (`clients/{a,b}.md` is `clients/a.md` and `clients/b.md`) — and those
+/// pieces' pieces between commas, braces as they are (Grep splits its `glob` so where a piece has no braces).
+fn readings(g: &str) -> Result<Vec<String>, String> {
+    let mut out = vec![];
+    for r in std::iter::once(g).chain(g.split(' ')).filter(|r| !r.is_empty()) {
+        out.extend(alternatives(r)?);
+    }
+    out.extend(g.split([' ', ',']).filter(|r| !r.is_empty()).map(str::to_owned));
+    if out.len() > 1024 {
+        return Err("the pattern has too many parts".into());
+    }
+    Ok(out)
+}
+
+/// The globs braces make of `g`: one group after another, none inside another (ripgrep has no nested groups), each
+/// closed; at most 256.
+fn alternatives(g: &str) -> Result<Vec<String>, String> {
+    let mut out = vec![String::new()];
+    let mut rest = g;
+    while let Some(open) = rest.find(['{', '}']) {
+        let close = rest[open + 1..].find(['{', '}']).map(|c| open + 1 + c);
+        let close = match close {
+            Some(c) if rest.as_bytes()[open] == b'{' && rest.as_bytes()[c] == b'}' => c,
+            _ => return Err(format!("the pattern {g} has braces that don't pair (or one group inside another)")),
+        };
+        let (head, choices) = (&rest[..open], rest[open + 1..close].split(',').collect::<Vec<_>>());
+        out = out.iter().flat_map(|o| choices.iter().map(move |c| format!("{o}{head}{c}"))).collect();
+        if out.len() > 256 {
+            return Err(format!("the pattern {g} has too many alternatives"));
+        }
+        rest = &rest[close + 1..];
+    }
+    Ok(out.into_iter().map(|o| o + rest).collect())
+}
+
+/// Does a character class (`[…]`) in `g` hold a folder's separator — `.git[/]config` is `.git/config`? A class with
+/// no end is taken as holding the rest.
+fn class_holds_separator(g: &str) -> bool {
+    let mut chars = g.chars();
+    while let Some(c) = chars.next() {
+        if c != '[' {
+            continue;
+        }
+        // Its first member may be `]` (after a `!` or `^`), which then doesn't end it.
+        let mut first = true;
+        for m in chars.by_ref() {
+            match m {
+                '/' => return true,
+                '!' | '^' if first => continue,
+                ']' if !first => break,
+                _ => first = false,
+            }
+        }
+    }
+    false
+}
+
 /// A field of a tool call that, when given, is text.
 fn text<'a>(v: &'a Value, key: &str) -> Result<Option<&'a str>, String> {
     match &v[key] {
@@ -805,16 +869,19 @@ fn named(raw: &str, base: &Path) -> PathBuf {
 
 /// A path a run in a vault names, as it is on disk (untrusted-text R4): a relative one, or none, from `base`; links
 /// resolved — and refused where one points nowhere, as a write would go through it. Refused by its text alone, before
-/// any file-system call: a network path (`\\host\share`, `//host`, `\\?\UNC\…`, `\\.\…`: looking it up has Windows
-/// connect to the host, maybe with the user's credentials); one from home (`~`, which Claude Code expands); one going
-/// up (`..`: past a link, the folder above isn't the one Claude Code means); one holding a character no path does
-/// (`bent`) or that trimming changes (Claude Code trims Grep's and Glob's `path`, JavaScript's `trim()`).
+/// any file-system call: a network path (`\\host\share`, `//host`, `\\?\UNC\…`, `\\.\…`, `\??\UNC\…`: looking it up
+/// has Windows connect to the host, maybe with the user's credentials); one from home (`~`, which Claude Code
+/// expands); one going up (`..`: past a link, the folder above isn't the one Claude Code means); one holding a
+/// character no path does (`bent`) or that trimming changes (Claude Code trims Grep's and Glob's `path`, JavaScript's
+/// `trim()`).
 fn vault_path(raw: Option<&str>, base: &Path) -> Result<PathBuf, String> {
     let Some(raw) = raw.filter(|r| !r.is_empty()) else {
         return Ok(base.to_path_buf());
     };
-    if raw.len() >= 2 && raw.as_bytes()[..2].iter().all(|b| matches!(b, b'/' | b'\\')) {
-        return Err(format!("{raw} is a network path: not looked up"));
+    // A network path, also in the NT form (`\??\UNC\host\…`, `/??/…`), which Windows passes on as it is.
+    let nt = raw.starts_with(['/', '\\']) && raw[1..].split(['/', '\\']).next() == Some("??");
+    if nt || (raw.len() >= 2 && raw.as_bytes()[..2].iter().all(|b| matches!(b, b'/' | b'\\'))) {
+        return Err(format!("{raw:?} is a network path: not looked up"));
     }
     if raw.starts_with('~') || raw.split(['/', '\\']).any(|s| s == "..") || raw.trim() != raw || raw.chars().any(bent) {
         return Err(format!("{raw:?} isn't a path a run can follow (no ~, .., invisible characters or whitespace but a space inside)"));
@@ -2051,7 +2118,19 @@ mod tests {
         // Looking one up has Windows connect to the host, maybe with the user's credentials.
         let (root, v) = vault_fixture("unc");
         let s = chat_scope(&v, "curate");
-        for path in [r"\\host\share\x.md", "//host/share/x.md", r"\\?\UNC\host\share\x.md", r"\\.\pipe\x", r"/\host\share\x.md", r"\/host/share/x.md"] {
+        for path in [
+            r"\\host\share\x.md",
+            "//host/share/x.md",
+            r"\\?\UNC\host\share\x.md",
+            r"\\.\pipe\x",
+            r"/\host\share\x.md",
+            r"\/host/share/x.md",
+            // The NT form, which Windows hands to the network as it is.
+            r"\??\UNC\host\share\x.md",
+            "/??/UNC/host/share/x.md",
+            r"\??/UNC/host/share/x.md",
+            r"/??\C:\x.md",
+        ] {
             for (t, input) in [
                 ("Read", json!({"file_path": path})),
                 ("Write", json!({"file_path": path, "content": "x"})),
@@ -2061,6 +2140,64 @@ mod tests {
             ] {
                 assert!(denied(s.decide(&tool(t, input.clone()))), "{t} {input}");
             }
+        }
+        // Where a backslash separates folders, a glob naming one is refused too.
+        let mut w = chat_scope(&v, "ask");
+        w.vault.as_mut().unwrap().windows = true;
+        for g in [r"\\host\share\*", r"\??\UNC\host\share\*", r"\\?\UNC\host\share\*"] {
+            assert!(denied(w.decide(&tool("Glob", json!({"pattern": g})))), "{g}");
+        }
+        // The reason shows the path escaped, as it came.
+        match s.decide(&tool("Read", json!({"file_path": "\\\\host\\\u{1b}[31m"}))) {
+            Decision::Deny(why) => assert!(!why.contains('\u{1b}'), "{why}"),
+            d => panic!("{d:?}"),
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_backslash_in_a_glob_is_an_escape_off_windows() {
+        let (root, v) = vault_fixture("backslash");
+        let mut s = chat_scope(&v, "ask");
+        s.vault.as_mut().unwrap().windows = false;
+        // ripgrep there reads `\g` as `g`: `.\git` is `.git`.
+        for g in [r".\git/**", r".gi\t/*", r"\.git/*", r".\git .\git/**", r"knowledge\*.md"] {
+            assert!(denied(s.decide(&tool("Glob", json!({"pattern": g})))), "Glob {g}");
+            assert!(denied(s.decide(&tool("Grep", json!({"pattern": "x", "glob": g})))), "Grep {g}");
+        }
+        // On Windows a backslash separates folders.
+        s.vault.as_mut().unwrap().windows = true;
+        for g in [r"knowledge\**\*.md", r"knowledge\clients\*.md"] {
+            assert_eq!(s.decide(&tool("Glob", json!({"pattern": g}))), Decision::Allow, "Glob {g}");
+            assert_eq!(s.decide(&tool("Grep", json!({"pattern": "x", "glob": g}))), Decision::Allow, "Grep {g}");
+        }
+        for g in [r".git\*", r"knowledge\..\..\outside\*", r"**\.gi?\config"] {
+            assert!(denied(s.decide(&tool("Glob", json!({"pattern": g})))), "{g}");
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn brackets_braces_and_splits_never_reach_git() {
+        let (root, v) = vault_fixture("brackets");
+        let s = chat_scope(&v, "ask");
+        // Glob takes its pattern whole; Grep splits its glob at spaces, and at commas outside braces. A class can hold a
+        // dot, a space, a comma or a separator; braces expand.
+        let mut refused = vec!["[ .]git/*", "[,.]git/*", "{.,x}git/*", ".[g]it/*", "**/[ .]git/config", ".git[/]config", "**/.git[]/]*", "{a,{.,x}}git/*", "{.git/*", "{..,x}/*"];
+        if cfg!(unix) {
+            refused.push("{knowledge/linked-out,x}/*");
+        }
+        for g in refused {
+            assert!(denied(s.decide(&tool("Glob", json!({"pattern": g})))), "Glob {g}");
+            assert!(denied(s.decide(&tool("Grep", json!({"pattern": "x", "glob": g})))), "Grep {g}");
+        }
+        for g in ["knowledge/*.md", "clients/{a,b}.md", "*.{md,txt}", "knowledge/**/*.{md,pdf}"] {
+            assert_eq!(s.decide(&tool("Glob", json!({"pattern": g}))), Decision::Allow, "Glob {g}");
+            assert_eq!(s.decide(&tool("Grep", json!({"pattern": "x", "glob": g}))), Decision::Allow, "Grep {g}");
+        }
+        // A glob from the file system's root starts there: its fixed part is `/`.
+        for g in ["/*", "/**/secret.md", "/??/x/*"] {
+            assert!(denied(s.decide(&tool("Glob", json!({"pattern": g})))), "{g}");
         }
         let _ = fs::remove_dir_all(&root);
     }
