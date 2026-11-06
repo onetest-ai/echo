@@ -2639,9 +2639,11 @@ pub fn serve(port: u16) -> anyhow::Result<()> {
     let origin = format!("http://127.0.0.1:{}", listener.local_addr()?.port());
     let ipc = std::env::var("ECHOCTL_SERVE_IPC").is_ok_and(|v| v == "1");
     let token: String = if ipc { (0..32).map(|_| format!("{:x}", rand_nibble())).collect() } else { String::new() };
+    // Cookies belong to the host, not the port: each server its own name, so two served windows don't log each other out.
+    let name = format!("echo_serve_{}", listener.local_addr()?.port());
     println!("{origin}/{}", if ipc { "  (IPC on)" } else { "" });
     for conn in listener.incoming().flatten() {
-        let (origin, token) = (origin.clone(), token.clone());
+        let (origin, token, name) = (origin.clone(), token.clone(), name.clone());
         std::thread::spawn(move || {
             let mut reader = BufReader::new(&conn);
             let mut line = String::new();
@@ -2654,7 +2656,7 @@ pub fn serve(port: u16) -> anyhow::Result<()> {
                 let (k, v) = h.split_once(':').map(|(k, v)| (k.trim().to_ascii_lowercase(), v.trim().to_string())).unwrap_or_default();
                 match k.as_str() {
                     "content-length" => length = v.parse().unwrap_or(0).min(1 << 20),
-                    "cookie" => cookie_ok = !token.is_empty() && v.split(';').any(|c| c.trim() == format!("echo_serve={token}")),
+                    "cookie" => cookie_ok = !token.is_empty() && v.split(';').any(|c| c.trim() == format!("{name}={token}")),
                     "origin" => origin_ok = v == origin,
                     _ => {}
                 }
@@ -2674,7 +2676,7 @@ pub fn serve(port: u16) -> anyhow::Result<()> {
             let ctype = res.headers().get("Content-Type").and_then(|v| v.to_str().ok()).unwrap_or("application/octet-stream").to_string();
             let status = res.status().as_u16();
             let body = res.into_body();
-            let cookie = if !token.is_empty() && ctype.starts_with("text/html") { format!("Set-Cookie: echo_serve={token}; SameSite=Strict; HttpOnly; Path=/\r\n") } else { String::new() };
+            let cookie = if !token.is_empty() && ctype.starts_with("text/html") { format!("Set-Cookie: {name}={token}; SameSite=Strict; HttpOnly; Path=/\r\n") } else { String::new() };
             let _ = write!(out, "HTTP/1.1 {status} OK\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\n{cookie}Connection: close\r\n\r\n", body.len());
             let _ = out.write_all(&body);
         });
