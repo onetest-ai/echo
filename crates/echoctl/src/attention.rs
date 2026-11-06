@@ -52,6 +52,9 @@ pub struct Collected {
     keep_kinds: BTreeSet<&'static str>,
     quiet: BTreeSet<String>,
     quiet_kinds: BTreeSet<&'static str>,
+    /// The version each installed plugin has now, by its update item's key: an update item gone is Done only when
+    /// the plugin has the version it offered (not when the offer went away).
+    installed: BTreeMap<String, String>,
 }
 
 /// Failed minutes are news for 14 days; after that they leave the list without counting as done.
@@ -362,6 +365,11 @@ pub fn collect() -> Collected {
     }
     // A plugin with a newer version in its marketplace: one item each, opening it in Settings → Plugins (an update
     // that asks for more says so; it shows its sheet there before anything changes).
+    // Installed, it is Done (fold); gone otherwise — the marketplace took it back — it leaves quietly.
+    c.quiet_kinds.insert("plugin-update");
+    if let Ok(r) = crate::plugins::Registry::load() {
+        c.installed = r.installed.values().map(|p| (format!("plugin-update:{}", p.id), p.version.clone())).collect();
+    }
     match crate::plugins::updates() {
         Ok(ups) => {
             for (p, u) in ups.into_iter().filter(|(_, u)| u.blocked.is_none()) {
@@ -371,8 +379,10 @@ pub fn collect() -> Collected {
                     n => format!(" — it asks for {n} more things"),
                 };
                 let why: String = format!("{} → {}, from {}{more}", p.version, u.version, u.market).chars().take(200).collect();
-                out.push(item(format!("plugin-update:{}", p.id), "plugin-update", "echo", format!("{} {} is available", u.name, u.version).chars().take(120).collect(), why, false,
-                    vec![], Some(format!("settings/plugins/{}", p.id))));
+                let mut it = item(format!("plugin-update:{}", p.id), "plugin-update", "echo", format!("{} {} is available", u.name, u.version).chars().take(120).collect(), why, false,
+                    vec![], Some(format!("settings/plugins/{}", p.id)));
+                it["version"] = json!(u.version);
+                out.push(it);
             }
         }
         // The registry can't be read: what it had stays open, not Done.
@@ -420,9 +430,10 @@ fn fold(rec: &mut Value, got: &Collected, now: chrono::DateTime<chrono::Utc>) ->
         if k.is_empty() || keys.contains(&k) {
             continue;
         }
+        let installed = b["version"].as_str().is_some_and(|v| got.installed.get(&k).is_some_and(|have| have == v));
         if got.keep.contains(&k) || got.keep_kinds.contains(kind) {
             open.push(b);
-        } else if !(got.quiet.contains(&k) || got.quiet_kinds.contains(kind)) {
+        } else if installed || !(got.quiet.contains(&k) || got.quiet_kinds.contains(kind)) {
             done.push(json!({"key": k, "title": b["title"], "group": b["group"], "kind": kind, "at": now.to_rfc3339()}));
         }
     }
@@ -549,6 +560,26 @@ mod tests {
         assert_eq!(p["actions"][0]["ipc"]["cmd"], "notes_now");
         // Waiting for the model: nothing to start early.
         assert!(find("Review")["actions"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_plugin_update_is_done_only_once_installed() {
+        let now = chrono::Utc::now();
+        let mut up = item("plugin-update:demo".into(), "plugin-update", "echo", "Demo 0.2.0 is available".into(), String::new(), false, vec![], None);
+        up["version"] = json!("0.2.0");
+        let with = |installed: &str| {
+            let mut c = got(&[]);
+            c.quiet_kinds.insert("plugin-update");
+            c.installed.insert("plugin-update:demo".into(), installed.into());
+            c
+        };
+        let mut rec = Value::Null;
+        fold(&mut rec, &got(&[&up]), now);
+        fold(&mut rec, &with("0.1.0"), now);
+        assert!(rec["done"].as_array().unwrap().is_empty(), "the offer went away, nothing was installed: not Done");
+        fold(&mut rec, &got(&[&up]), now);
+        fold(&mut rec, &with("0.2.0"), now);
+        assert_eq!(rec["done"][0]["key"], "plugin-update:demo", "installed: Done");
     }
 
     #[test]

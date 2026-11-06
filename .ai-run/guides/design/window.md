@@ -276,7 +276,8 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   accept, permissions, an Echo update, a plugin update (one per installed plugin with a newer version in its
   marketplace's last fetched catalog, each read once, `plugins::updates`; reading the Inbox fetches a stale
   marketplace again in the background; it opens `#settings/plugins/<id>` — Installed tab, that plugin picked —
-  where its sheet shows before anything changes; one that asks for more says so; installed, it moves to Done). Each item carries the IPC message its own place sends, or the hash to go to.
+  where its sheet shows before anything changes; one that asks for more says so; it moves to Done only once the
+  plugin has that version — an offer taken back leaves quietly). Each item carries the IPC message its own place sends, or the hash to go to.
 - Entry above Settings in the activity bar (count; warn colour when something blocks work); toggles the panel
   (⇧⌘I; Ctrl+Shift+U on Windows, where Ctrl+Shift+I is WebView2's DevTools).
 - A clicked decision keeps its item "working" until it is gone: a background job's (`busy` by item key) while it
