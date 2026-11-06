@@ -6,7 +6,7 @@ to the code (`cargo test`, `scripts/check-mod.sh`).
 
 | Path | What |
 |---|---|
-| `cases/<area>/TC-NNN_<slug>.md` | One behaviour each (the unit of coverage), in the manual-qa format; `run: agent` (an agent runs it) or `run: manual` (a person) |
+| `cases/<area>/TC-NNN_<slug>.md` | One behaviour each (the unit of coverage), in the manual-qa format; `run: agent` (an agent runs it) or `run: person` (a person) |
 | `scenarios/S-NN_<slug>.md` | A user's journey that chains cases by path, in stages: what agent runs execute |
 | `feature-map/` | The functional map: `areas/<prefix>.json` (features), `axes/<entity>.json` (state axes), combinations, hostile content |
 | `tools/feature-map.py check` / `render` | Checks the map and the cases' links; draws the map with coverage to `reports/feature-map.html` |
@@ -23,7 +23,7 @@ to the code (`cargo test`, `scripts/check-mod.sh`).
 3. Start Claude Code with the lead as the active agent (`claude --agent test-run-lead`) and give it scenarios, e.g.
    "run tests/scenarios". Per scenario it serves the window on fresh data, one runner goes through its stages (the
    browser stays open between scenarios), and the report goes to `tests/reports/RUN-<date>-NNN.md`, counting
-   scenarios and their stages; `run: manual` cases are listed for a person.
+   scenarios and their stages; `run: person` cases are listed for a person.
 
 Writing cases: `test-author` (or by hand) following `app_profile.md` → "Writing a case"; then put each agent case
 into a scenario (`app_profile.md` → "Scenarios").
@@ -39,7 +39,7 @@ into a scenario (`app_profile.md` → "Scenarios").
 
 ## Areas
 
-| Area | Agent | Manual | What |
+| Area | Agent | Person | What |
 |---|---|---|---|
 | `cases/today` | 3 | 0 | Today: Your day, My work |
 | `cases/window` | 10 | 5 | Calls, minutes, transcript, notes, delete, calendar views |
@@ -54,9 +54,9 @@ into a scenario (`app_profile.md` → "Scenarios").
 | `cases/lifecycle` | 0 | 9 | Login, quit, single instance, updates, notifications |
 | `cases/windows` | 0 | 9 | The Windows build |
 
-## Manual cases
+## Person-run cases
 
-`run: manual` cases are run by a person on a real machine: a real Teams call (a second person or account speaking),
+`run: person` cases are run by a person on a real machine: a real Teams call (a second person or account speaking),
 Microsoft 365, a signed-in Claude Code, installs and updates. `external_id` keeps each one's id from the older
 scenario files. Use made-up meeting content; never paste real transcripts into a report.
 
@@ -73,7 +73,7 @@ permissions with `tccutil reset All ai.onetest.echo`.
 
 ### Run log
 
-Copy this block into `tests/runs/<date>-<version>-<machine>.md` (git-ignored) and fill it in, or add the manual
+Copy this block into `tests/runs/<date>-<version>-<machine>.md` (git-ignored) and fill it in, or add the person-run
 results to the lead's report in `tests/reports/`.
 
 ```markdown

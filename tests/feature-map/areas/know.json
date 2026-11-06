@@ -23,28 +23,28 @@
    "id": "F-KNOW-03",
    "feature": "Recall's Sources, Dictionary and People tabs browse what was indexed, by client or thread",
    "priority": "medium",
-   "check": "manual",
+   "check": "person",
    "axes": []
   },
   {
    "id": "F-KNOW-04",
    "feature": "Who may speak into Recall through mail and channels is decided per client (Trust, Ignore, Read anyway, Keep out)",
    "priority": "high",
-   "check": "manual",
+   "check": "person",
    "axes": []
   },
   {
    "id": "F-KNOW-05",
    "feature": "Claude sessions get Recall as a read-only MCP server scoped to their AI profile",
    "priority": "high",
-   "check": "manual",
+   "check": "person",
    "axes": []
   },
   {
    "id": "F-KNOW-06",
    "feature": "Plugins add tabs and settings rows to Knowledge (e.g. Obsidian vaults)",
    "priority": "low",
-   "check": "manual",
+   "check": "person",
    "axes": []
   }
  ]

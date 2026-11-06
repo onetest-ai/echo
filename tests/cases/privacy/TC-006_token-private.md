@@ -5,7 +5,7 @@ priority: high
 type: functional
 requirements: [F-PRIV-06]
 module: privacy
-run: manual
+run: person
 platform: macos
 tags: [privacy, m365]
 external_id: TC-PRIV-006

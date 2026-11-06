@@ -5,7 +5,7 @@ priority: medium
 type: functional
 requirements: [F-M365-03]
 module: calendar
-run: manual
+run: person
 platform: macos
 tags: [chat, m365]
 external_id: TC-CHAT-002

@@ -38,7 +38,7 @@
    "id": "F-PLUG-04",
    "feature": "Installing adds the plugin enabled and its window part (buttons in its slots, panels, Settings section, ⌘K entries) loads; switching it off takes all of it out, on brings it back",
    "priority": "high",
-   "check": "manual",
+   "check": "person",
    "axes": [
     "plugin.enabled"
    ]
@@ -47,7 +47,7 @@
    "id": "F-PLUG-05",
    "feature": "An installed plugin's detail shows where it came from, the enable switch, Open its settings, Update to X or why not, Remove… (keep data / delete it), its own settings (switch, text, folder, secret with Forget) and what it can do",
    "priority": "high",
-   "check": "manual",
+   "check": "person",
    "axes": [
     "plugin.enabled",
     "plugin.update",
@@ -58,7 +58,7 @@
    "id": "F-PLUG-06",
    "feature": "An update that asks for more shows the new lines on a sheet and waits for a yes",
    "priority": "high",
-   "check": "manual",
+   "check": "person",
    "axes": [
     "plugin.update",
     "plugin.uses"
@@ -78,7 +78,7 @@
    "id": "F-PLUG-08",
    "feature": "A plugin hears only the Echo events it named (meeting soon, call start / end, recording start / stop, transcript ready, minutes written, thread synced, sources changed), with ids and titles, never the words",
    "priority": "high",
-   "check": "manual",
+   "check": "person",
    "axes": [
     "plugin.uses"
    ]
@@ -87,7 +87,7 @@
    "id": "F-PLUG-09",
    "feature": "A plugin's Claude runs use only the user's AI profiles; its session skills reach only Echo's own sessions",
    "priority": "high",
-   "check": "manual",
+   "check": "person",
    "axes": [
     "plugin.uses",
     "ai.kind"

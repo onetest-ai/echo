@@ -130,7 +130,7 @@
    "id": "F-MIN-13",
    "feature": "Write minutes (and Write minutes again) runs Claude Code headless on the call's profile; the minutes and action items appear and a \"Minutes ready\" notification comes",
    "priority": "critical",
-   "check": "manual",
+   "check": "person",
    "axes": [
     "call.run",
     "ai.signin"
@@ -140,7 +140,7 @@
    "id": "F-MIN-14",
    "feature": "Automatic minutes are written 15 minutes after the call or the last note, only for calls ended after the switch was turned on; off writes nothing until asked",
    "priority": "critical",
-   "check": "manual",
+   "check": "person",
    "axes": [
     "call.auto",
     "set.minutes"
@@ -150,7 +150,7 @@
    "id": "F-MIN-15",
    "feature": "Write again with another template rewrites the minutes in it and later runs keep it; the items are disabled while minutes are being written",
    "priority": "medium",
-   "check": "manual",
+   "check": "person",
    "axes": [
     "call.run",
     "template.kind"
@@ -160,7 +160,7 @@
    "id": "F-MIN-16",
    "feature": "With Claude Code not installed or Echo's plugin not connected, the Minutes tab says what to do instead of offering Write minutes",
    "priority": "high",
-   "check": "manual",
+   "check": "person",
    "axes": [
     "set.claude_code"
    ]
@@ -169,7 +169,7 @@
    "id": "F-MIN-17",
    "feature": "A memo gets minutes at once with the memo template, in parts by thread; the opt-in minutes page file is written beside the notes",
    "priority": "low",
-   "check": "manual",
+   "check": "person",
    "axes": [
     "call.kind",
     "set.minutes"
@@ -179,7 +179,7 @@
    "id": "F-MIN-18",
    "feature": "Calls whose automatic minutes were missed while Echo was quit get them within a minute of the next start, by Echo and not by a session",
    "priority": "medium",
-   "check": "manual",
+   "check": "person",
    "axes": []
   }
  ]

@@ -48,7 +48,7 @@
    "id": "F-PREP-05",
    "feature": "Preps are written by themselves for today's meetings of open threads, at least 5 minutes before they start",
    "priority": "high",
-   "check": "manual",
+   "check": "person",
    "axes": [
     "prep.thread"
    ]
@@ -57,7 +57,7 @@
    "id": "F-PREP-06",
    "feature": "Prepare (Today, calendar card, Coming up today, ⌘K) writes a prep with the threads' AI profile and opens it; In short only when all its threads share one profile",
    "priority": "high",
-   "check": "manual",
+   "check": "person",
    "axes": [
     "prep.profiles",
     "meeting.prep"

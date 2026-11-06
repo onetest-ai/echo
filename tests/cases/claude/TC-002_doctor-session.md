@@ -5,7 +5,7 @@ priority: high
 type: functional
 requirements: [F-CC-08]
 module: claude
-run: manual
+run: person
 platform: macos
 tags: [plugin, doctor]
 external_id: TC-CLA-002

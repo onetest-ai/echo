@@ -41,7 +41,7 @@
    "id": "F-SET-05",
    "feature": "General → data folder Change…, Start at login, Hide from the Dock (macOS), Command line Install…, Claude Code plugin Connect, the version with Check for updates / Update to X",
    "priority": "high",
-   "check": "manual",
+   "check": "person",
    "axes": [
     "set.general",
     "set.claude_code"
@@ -88,7 +88,7 @@
    "id": "F-SET-10",
    "feature": "Transcription → server: Echo server…, OpenAI-compatible (address, model, key; Connect checks it), Disconnect; Transcribe for other computers shows its address and key",
    "priority": "medium",
-   "check": "manual",
+   "check": "person",
    "axes": [
     "set.server"
    ]
@@ -153,7 +153,7 @@
    "id": "F-SET-17",
    "feature": "Health → Claude Code (runs, found in a terminal, Echo's plugin; Get, Connect, Add to PATH), an older Echo plugin (Update), each permission with Open settings, Ask for permissions, Check again; Settings shows a ⚠ count",
    "priority": "high",
-   "check": "manual",
+   "check": "person",
    "axes": [
     "set.claude_code",
     "set.health"

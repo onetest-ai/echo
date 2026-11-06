@@ -5,7 +5,7 @@ priority: medium
 type: functional
 requirements: [F-MIN-14, F-NOTES-06]
 module: claude
-run: manual
+run: person
 platform: macos
 tags: [notes, minutes, auto]
 external_id: TC-CLA-015

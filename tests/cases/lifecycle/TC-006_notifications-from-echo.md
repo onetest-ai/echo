@@ -5,7 +5,7 @@ priority: high
 type: functional
 requirements: [F-LIFE-06]
 module: lifecycle
-run: manual
+run: person
 platform: macos
 tags: [lifecycle, notifications]
 external_id: TC-LIFE-006

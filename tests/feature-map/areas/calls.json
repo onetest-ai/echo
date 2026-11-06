@@ -161,7 +161,7 @@
    "id": "F-CALLS-17",
    "feature": "Show folder, Open minutes in browser and Show minutes in Finder open the call's own files",
    "priority": "medium",
-   "check": "manual",
+   "check": "person",
    "axes": [
     "call.status"
    ]
@@ -170,7 +170,7 @@
    "id": "F-CALLS-18",
    "feature": "The open call refreshes by itself within a few seconds when its files change (a recording ends, minutes are written) without reloading the minutes",
    "priority": "high",
-   "check": "manual",
+   "check": "person",
    "axes": [
     "call.status",
     "call.run"

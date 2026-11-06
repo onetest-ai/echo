@@ -5,7 +5,7 @@ priority: low
 type: functional
 requirements: [F-LIFE-03, F-CLI-03]
 module: cli
-run: manual
+run: person
 platform: macos
 tags: [cli, lifecycle]
 external_id: TC-CLI-004

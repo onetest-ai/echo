@@ -5,7 +5,7 @@ priority: critical
 type: functional
 requirements: [F-WIN-01]
 module: windows
-run: manual
+run: person
 platform: windows
 tags: [windows, install]
 external_id: TC-WINOS-002

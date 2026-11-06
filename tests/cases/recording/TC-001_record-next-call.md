@@ -5,7 +5,7 @@ priority: critical
 type: functional
 requirements: [F-REC-02, F-REC-08, F-REC-13]
 module: recording
-run: manual
+run: person
 platform: macos
 tags: [recording, arm]
 external_id: TC-REC-001

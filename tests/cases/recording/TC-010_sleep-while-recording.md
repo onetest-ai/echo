@@ -5,7 +5,7 @@ priority: low
 type: functional
 requirements: [F-REC-11]
 module: recording
-run: manual
+run: person
 platform: macos
 tags: [recording, lifecycle]
 external_id: TC-REC-011

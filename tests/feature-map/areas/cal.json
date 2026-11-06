@@ -45,7 +45,7 @@
    "id": "F-CAL-05",
    "feature": "Declined and cancelled meetings are greyed, \"No notetakers\" and \"Transcript\" (Teams has one) are tagged, all-day events sit in their own row",
    "priority": "medium",
-   "check": "manual",
+   "check": "person",
    "axes": [
     "meeting.flags",
     "meeting.transcript"
@@ -93,7 +93,7 @@
    "id": "F-CAL-10",
    "feature": "A scheduled meeting arms itself a minute before it starts and records when joined; it leaves the list once its recording starts, its arm is cancelled, its start fails or it ends",
    "priority": "critical",
-   "check": "manual",
+   "check": "person",
    "axes": [
     "meeting.scheduled"
    ]
@@ -130,7 +130,7 @@
    "id": "F-CAL-14",
    "feature": "Join and record opens the meeting in Teams and records as soon as the user is in",
    "priority": "high",
-   "check": "manual",
+   "check": "person",
    "axes": [
     "meeting.action"
    ]
@@ -139,7 +139,7 @@
    "id": "F-CAL-15",
    "feature": "Import Teams transcript on an ended, unrecorded Teams meeting makes a call from its transcript and chat (Importing…, its error, a notification); refused when Teams has none or a call exists",
    "priority": "high",
-   "check": "manual",
+   "check": "person",
    "axes": [
     "meeting.transcript",
     "meeting.recorded"

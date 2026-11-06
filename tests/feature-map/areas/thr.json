@@ -195,7 +195,7 @@
    "id": "F-THR-20",
    "feature": "A thread's sync (extract, verify, people) runs on its AI profile after its calls are 15 minutes old, or on Sync now, and reads them into its work",
    "priority": "high",
-   "check": "manual",
+   "check": "person",
    "axes": [
     "thread.sync",
     "thread.ai"

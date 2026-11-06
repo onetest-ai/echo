@@ -5,7 +5,7 @@ priority: low
 type: functional
 requirements: [F-LIFE-01]
 module: install
-run: manual
+run: person
 platform: macos
 tags: [install, model]
 external_id: TC-INST-006

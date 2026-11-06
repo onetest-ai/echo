@@ -5,7 +5,7 @@ priority: medium
 type: functional
 requirements: [F-REC-12, F-SET-08]
 module: permissions
-run: manual
+run: person
 platform: macos
 tags: [permissions, frames]
 external_id: TC-PERM-007

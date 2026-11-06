@@ -68,7 +68,7 @@
    "id": "F-WS-08",
    "feature": "An `echo://` link opens its place in the window (a call at a moment, a thread, a client, a person, a task, a prep)",
    "priority": "medium",
-   "check": "manual",
+   "check": "person",
    "axes": []
   }
  ]

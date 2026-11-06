@@ -5,7 +5,7 @@ priority: critical
 type: functional
 requirements: [F-SET-17]
 module: permissions
-run: manual
+run: person
 platform: macos
 tags: [permissions, health]
 external_id: TC-PERM-002

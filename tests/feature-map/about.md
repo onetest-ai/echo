@@ -4,13 +4,13 @@ What Echo does, as behaviours a user can see or use: one feature per entry, grou
 things:
 
 - **Coverage.** Each case in `tests/cases/` names the features it checks in its frontmatter, e.g.
-  `requirements: [F-CALLS-01, F-MIN-03]`. This page shows, per feature, whether it has agent cases, manual cases, or
+  `requirements: [F-CALLS-01, F-MIN-03]`. This page shows, per feature, whether it has agent cases, person-run cases, or
   none.
 - **Test data.** Each entity's **state axes** tell the data generator (`tests/fixtures/make-data.sh` and its
   successors) which states, and which combinations of them, must exist in a data set.
 
 Each feature has a **priority** (critical: the core promise, data loss or privacy; high; medium; low), a **check**
-(`agent`: the served window or the CLI on made-up data can show it; `manual`: it needs a real call, Teams,
+(`agent`: the served window or the CLI on made-up data can show it; `person`: it needs a real call, Teams,
 Microsoft 365, a signed-in Claude Code, macOS permissions, an install or update, the tray, or Windows) and the
 **axes** its behaviour depends on (`entity.axis`). Axes that no feature names yet (`meeting.response`,
 `call.today_minutes`) belong to Today and are kept for the data generator while Today is reworked.

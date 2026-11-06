@@ -5,7 +5,7 @@ priority: low
 type: functional
 requirements: [F-LIFE-05]
 module: lifecycle
-run: manual
+run: person
 platform: macos
 tags: [lifecycle, data-folder]
 external_id: TC-LIFE-005

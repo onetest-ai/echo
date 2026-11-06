@@ -5,7 +5,7 @@ priority: medium
 type: functional
 requirements: [F-CC-03, F-MIN-11]
 module: claude
-run: manual
+run: person
 platform: macos
 tags: [minutes, claim]
 external_id: TC-CLA-004, TC-CLA-013

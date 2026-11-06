@@ -89,7 +89,7 @@
    "id": "F-NOTES-10",
    "feature": "While recording, a note is timed from its first key; Time inserts the call's time; Flag marks the moment; notes from the tray or `echoctl note` join them",
    "priority": "high",
-   "check": "manual",
+   "check": "person",
    "axes": [
     "call.status"
    ]
@@ -98,7 +98,7 @@
    "id": "F-NOTES-11",
    "feature": "Notes that can't be saved show Retry; closing the window with unsaved notes asks \"Try again / Close without saving\"",
    "priority": "high",
-   "check": "manual",
+   "check": "person",
    "axes": [
     "call.notes"
    ]

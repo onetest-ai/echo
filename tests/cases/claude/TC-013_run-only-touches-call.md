@@ -5,7 +5,7 @@ priority: critical
 type: functional
 requirements: [F-CC-01]
 module: claude
-run: manual
+run: person
 platform: macos
 tags: [security, guard]
 external_id: TC-CLA-012

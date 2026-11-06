@@ -5,7 +5,7 @@ priority: critical
 type: functional
 requirements: [F-PRIV-02]
 module: privacy
-run: manual
+run: person
 platform: macos
 tags: [privacy, capture]
 external_id: TC-PRIV-002

@@ -5,7 +5,7 @@ priority: high
 type: functional
 requirements: [F-LIFE-03]
 module: lifecycle
-run: manual
+run: person
 platform: macos
 tags: [lifecycle]
 external_id: TC-LIFE-003

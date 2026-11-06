@@ -48,7 +48,7 @@
    "id": "F-SKILL-05",
    "feature": "New skill makes its folder with a SKILL.md and opens it; Open in VS Code and Show in Finder open the folder; a skill changed since the panel's session started shows \"Restart to update\"",
    "priority": "low",
-   "check": "manual",
+   "check": "person",
    "axes": [
     "skill.kind"
    ]

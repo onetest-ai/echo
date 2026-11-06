@@ -5,7 +5,7 @@ priority: medium
 type: functional
 requirements: [F-M365-01, F-CAL-06]
 module: calendar
-run: manual
+run: person
 platform: macos
 tags: [calendar, m365]
 external_id: TC-CAL-002

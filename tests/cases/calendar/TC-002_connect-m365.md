@@ -5,7 +5,7 @@ priority: high
 type: functional
 requirements: [F-M365-01, F-PRIV-06]
 module: calendar
-run: manual
+run: person
 platform: macos
 tags: [calendar, m365, signin]
 external_id: TC-CAL-001

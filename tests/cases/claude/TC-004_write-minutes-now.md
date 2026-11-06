@@ -5,7 +5,7 @@ priority: high
 type: functional
 requirements: [F-MIN-13, F-MIN-08]
 module: claude
-run: manual
+run: person
 platform: macos
 tags: [minutes]
 external_id: TC-CLA-009

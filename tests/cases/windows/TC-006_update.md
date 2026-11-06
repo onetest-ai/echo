@@ -5,7 +5,7 @@ priority: low
 type: functional
 requirements: [F-WIN-05]
 module: windows
-run: manual
+run: person
 platform: windows
 tags: [windows, update]
 external_id: TC-WINOS-006

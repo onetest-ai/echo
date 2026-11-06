@@ -5,7 +5,7 @@ priority: medium
 type: functional
 requirements: [F-CALLS-18]
 module: window
-run: manual
+run: person
 platform: macos
 tags: [calls, recording]
 external_id: TC-WIN-007

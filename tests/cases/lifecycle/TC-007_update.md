@@ -5,7 +5,7 @@ priority: high
 type: functional
 requirements: [F-LIFE-07]
 module: lifecycle
-run: manual
+run: person
 platform: macos
 tags: [update]
 external_id: TC-UPD-001

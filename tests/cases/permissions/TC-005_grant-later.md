@@ -5,7 +5,7 @@ priority: high
 type: functional
 requirements: [F-SET-17]
 module: permissions
-run: manual
+run: person
 platform: macos
 tags: [permissions]
 external_id: TC-PERM-005

@@ -5,7 +5,7 @@ priority: low
 type: functional
 requirements: [F-SET-04]
 module: window
-run: manual
+run: person
 platform: macos
 tags: [appearance]
 external_id: TC-WIN-010

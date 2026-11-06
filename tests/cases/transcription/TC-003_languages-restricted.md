@@ -5,7 +5,7 @@ priority: high
 type: functional
 requirements: [F-STT-02, F-SET-07]
 module: transcription
-run: manual
+run: person
 platform: macos
 tags: [transcription, languages]
 external_id: TC-TRN-004

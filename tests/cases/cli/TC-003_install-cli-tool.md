@@ -5,7 +5,7 @@ priority: high
 type: functional
 requirements: [F-SET-05]
 module: cli
-run: manual
+run: person
 platform: macos
 tags: [cli, install]
 external_id: TC-CLI-001

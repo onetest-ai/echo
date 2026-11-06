@@ -5,7 +5,7 @@ priority: medium
 type: functional
 requirements: [F-CC-10]
 module: claude
-run: manual
+run: person
 platform: macos
 tags: [live]
 external_id: TC-CLA-007

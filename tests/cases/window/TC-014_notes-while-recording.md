@@ -5,7 +5,7 @@ priority: high
 type: functional
 requirements: [F-NOTES-10]
 module: window
-run: manual
+run: person
 platform: macos
 tags: [notes, recording]
 external_id: TC-WIN-011

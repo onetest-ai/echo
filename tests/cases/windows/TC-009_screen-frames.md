@@ -5,7 +5,7 @@ priority: low
 type: functional
 requirements: [F-WIN-06, F-REC-12]
 module: windows
-run: manual
+run: person
 platform: windows
 tags: [windows, frames]
 external_id: TC-WINOS-009

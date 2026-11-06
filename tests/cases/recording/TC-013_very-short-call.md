@@ -5,7 +5,7 @@ priority: low
 type: functional
 requirements: [F-MIN-08]
 module: recording
-run: manual
+run: person
 platform: macos
 tags: [recording, minutes]
 external_id: TC-REC-013

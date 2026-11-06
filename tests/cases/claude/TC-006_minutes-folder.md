@@ -5,7 +5,7 @@ priority: low
 type: functional
 requirements: [F-SET-12]
 module: claude
-run: manual
+run: person
 platform: macos
 tags: [minutes, settings]
 external_id: TC-CLA-005

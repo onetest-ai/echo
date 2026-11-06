@@ -34,7 +34,7 @@
    "id": "F-VOC-04",
    "feature": "Transcription hints a call with the always terms, its threads' glossaries and the learned terms of its meeting or people only",
    "priority": "high",
-   "check": "manual",
+   "check": "person",
    "axes": [
     "vocab.scope"
    ]

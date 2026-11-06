@@ -9,7 +9,7 @@
    "id": "F-M365-01",
    "feature": "Sign in… opens the browser and comes back signed in; Sign out forgets the token and the calendar falls back to today's agenda; another app id or tenant can be set",
    "priority": "high",
-   "check": "manual",
+   "check": "person",
    "axes": [
     "m365.signin"
    ]
@@ -18,7 +18,7 @@
    "id": "F-M365-02",
    "feature": "The calendar's week comes from Microsoft 365 without blocking the window",
    "priority": "high",
-   "check": "manual",
+   "check": "person",
    "axes": [
     "m365.signin"
    ]
@@ -27,7 +27,7 @@
    "id": "F-M365-03",
    "feature": "A recorded meeting's chat (and an ad-hoc call's) is kept with the call",
    "priority": "medium",
-   "check": "manual",
+   "check": "person",
    "axes": [
     "m365.signin",
     "set.capture"
@@ -37,7 +37,7 @@
    "id": "F-M365-04",
    "feature": "Send a test, `deliver send` and routines send only to the user's own Teams chat and mailbox (or a plugin's way)",
    "priority": "high",
-   "check": "manual",
+   "check": "person",
    "axes": [
     "deliver.way"
    ]
@@ -46,7 +46,7 @@
    "id": "F-M365-05",
    "feature": "`echoctl m365` sends nothing without `--yes`: it answers what would be sent",
    "priority": "critical",
-   "check": "manual",
+   "check": "person",
    "axes": [
     "m365.signin"
    ]
@@ -55,7 +55,7 @@
    "id": "F-M365-06",
    "feature": "Thread mail and chats are read only from the user, colleagues and trusted, authenticated senders; others wait in the Inbox",
    "priority": "high",
-   "check": "manual",
+   "check": "person",
    "axes": [
     "thread.sources"
    ]

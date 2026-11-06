@@ -5,7 +5,7 @@ priority: high
 type: functional
 requirements: [F-STT-03]
 module: recording
-run: manual
+run: person
 platform: macos
 tags: [recording, echo]
 external_id: TC-REC-008

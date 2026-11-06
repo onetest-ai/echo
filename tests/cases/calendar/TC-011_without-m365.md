@@ -5,7 +5,7 @@ priority: medium
 type: functional
 requirements: [F-REC-16, F-CALLS-07]
 module: calendar
-run: manual
+run: person
 platform: macos
 tags: [recording, m365]
 external_id: TC-CHAT-003

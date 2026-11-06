@@ -5,7 +5,7 @@ priority: high
 type: functional
 requirements: [F-WIN-04]
 module: windows
-run: manual
+run: person
 platform: windows
 tags: [windows, lifecycle]
 external_id: TC-WINOS-005

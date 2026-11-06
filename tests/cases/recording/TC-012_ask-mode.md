@@ -5,7 +5,7 @@ priority: high
 type: functional
 requirements: [F-REC-03, F-SET-06]
 module: recording
-run: manual
+run: person
 platform: macos
 tags: [recording, ask]
 external_id: TC-REC-014

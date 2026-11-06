@@ -5,7 +5,7 @@ priority: high
 type: functional
 requirements: [F-LIFE-02]
 module: lifecycle
-run: manual
+run: person
 platform: any
 tags: [lifecycle, login]
 external_id: TC-LIFE-001

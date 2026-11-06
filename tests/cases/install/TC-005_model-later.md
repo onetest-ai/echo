@@ -5,7 +5,7 @@ priority: high
 type: functional
 requirements: [F-LIFE-01, F-SET-09]
 module: install
-run: manual
+run: person
 platform: any
 tags: [install, model]
 external_id: TC-INST-005

@@ -5,7 +5,7 @@ priority: high
 type: functional
 requirements: [F-WIN-06, F-REC-10]
 module: windows
-run: manual
+run: person
 platform: windows
 tags: [windows, mute]
 external_id: TC-WINOS-007

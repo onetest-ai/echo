@@ -5,7 +5,7 @@ priority: medium
 type: functional
 requirements: [F-STT-02]
 module: transcription
-run: manual
+run: person
 platform: macos
 tags: [transcription, languages]
 external_id: TC-TRN-005

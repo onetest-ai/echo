@@ -5,7 +5,7 @@ priority: critical
 type: functional
 requirements: [F-PRIV-01, F-REC-03]
 module: privacy
-run: manual
+run: person
 platform: any
 tags: [privacy, opt-in]
 external_id: TC-PRIV-001

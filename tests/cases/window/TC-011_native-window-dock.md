@@ -5,7 +5,7 @@ priority: medium
 type: functional
 requirements: [F-LIFE-08]
 module: window
-run: manual
+run: person
 platform: macos
 tags: [window, native]
 external_id: TC-WIN-001

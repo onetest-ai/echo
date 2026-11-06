@@ -5,7 +5,7 @@ priority: medium
 type: functional
 requirements: [F-CC-09, F-REC-02, F-STT-02]
 module: claude
-run: manual
+run: person
 platform: macos
 tags: [record, plugin]
 external_id: TC-CLA-014

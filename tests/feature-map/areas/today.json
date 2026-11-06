@@ -30,14 +30,14 @@
    "id": "F-TODAY-04",
    "feature": "Needs you now lists what waits on the user from Teams and mail in the last 24 h (burning first), with Reply in Teams / Read and reply, I'll do it (a task in a thread), Won't do",
    "priority": "high",
-   "check": "manual",
+   "check": "person",
    "axes": []
   },
   {
    "id": "F-TODAY-05",
    "feature": "Cards sent to Today by routines or plugins show until Got it",
    "priority": "low",
-   "check": "manual",
+   "check": "person",
    "axes": []
   },
   {

@@ -17,7 +17,7 @@ The map is split so features of different parts of the app can be worked on in p
                                               warning when app code changed but the map didn't (exit 1)
 
 Coverage: a case lists the features it checks in its frontmatter (`requirements: [F-CALLS-01, …]`); a scenario lists
-its cases (`cases:`). A feature is covered by agent cases, manual cases, or none.
+its cases (`cases:`). A feature is covered by agent cases, person-run cases, or none.
 """
 import html
 import json
@@ -100,8 +100,8 @@ def problems(doc, cases, scenarios):
             out.append(f"{f['id']}: unknown area {f['area']}")
         if not f["id"].startswith(f"F-{f['area']}-"):
             out.append(f"{f['id']}: id doesn't match its area {f['area']}")
-        if f["priority"] not in PRIORITIES or f["check"] not in ("agent", "manual"):
-            out.append(f"{f['id']}: priority/check must be one of {PRIORITIES} / agent, manual")
+        if f["priority"] not in PRIORITIES or f["check"] not in ("agent", "person"):
+            out.append(f"{f['id']}: priority/check must be one of {PRIORITIES} / agent, person")
         out += [f"{f['id']}: unknown axis {x}" for x in f["axes"] if x not in axes]
     for c in doc["combinations"]:
         out += [f"combination: unknown axis {x}" for x in c["axes"] if x not in axes]
@@ -115,10 +115,10 @@ def problems(doc, cases, scenarios):
 
 
 def coverage(doc, cases):
-    by = {f["id"]: {"agent": [], "manual": []} for f in doc["features"]}
+    by = {f["id"]: {"agent": [], "person": []} for f in doc["features"]}
     for path, c in cases.items():
         for r in c["requirements"]:
-            if r in by and c["run"] in ("agent", "manual"):
+            if r in by and c["run"] in ("agent", "person"):
                 by[r][c["run"]].append(path)
     return by
 
@@ -129,7 +129,7 @@ def render(doc, cases, scenarios, out):
     data = {
         "title": doc["title"], "about": doc["about"],
         "areas": doc["areas"],
-        "features": [{**f, "agent": cov[f["id"]]["agent"], "manual": cov[f["id"]]["manual"]} for f in doc["features"]],
+        "features": [{**f, "agent": cov[f["id"]]["agent"], "person": cov[f["id"]]["person"]} for f in doc["features"]],
         "axes": {a["axis"]: {"entity": a["entity"], "values": a["values"], "where": a["where"]} for a in doc["axes"]},
         "combinations": doc["combinations"], "hostile": doc["hostile"],
         "cases": cases, "scenarios": scenarios,
@@ -137,7 +137,7 @@ def render(doc, cases, scenarios, out):
     page = PAGE.replace("__DATA__", json.dumps(data, ensure_ascii=False).replace("</", "<\\/")).replace("__TITLE__", html.escape(doc["title"]))
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(page, encoding="utf-8")
-    covered = sum(bool(cov[f["id"]]["agent"] or cov[f["id"]]["manual"]) for f in doc["features"])
+    covered = sum(bool(cov[f["id"]]["agent"] or cov[f["id"]]["person"]) for f in doc["features"])
     return covered, len(doc["features"])
 
 
@@ -233,27 +233,27 @@ function prose(t){const out=[];let list=null,para=[];const flush=()=>{if(para.le
   para.push(l)}
  flush();if(list)out.push(`<ul>${list.map(x=>`<li>${inl(x)}</li>`).join('')}</ul>`);return out.join('')}
 const F=Object.fromEntries(D.features.map(f=>[f.id,f]));
-const cov=f=>f.agent.length?'ok':f.manual.length?'man':'no';
-const COV={ok:'Covered by an agent case',man:'Manual cases only',no:'Not covered'};
+const cov=f=>f.agent.length?'ok':f.person.length?'man':'no';
+const COV={ok:'Covered by an agent case',man:'Covered only by person-run cases',no:'Not covered'};
 const st=k=>`<span class="st ${k}" title="${COV[k]}"></span>`;
 const prio=p=>`<span class="p ${p}">${p}</span>`;
 const scenOf=path=>Object.entries(D.scenarios).filter(([,s])=>s.cases.includes(path)).map(([p,s])=>({path:p,...s}));
 const caseName=p=>{const c=D.cases[p];return c?`${c.area}/${c.id}`:p};
 const counts=fs=>({o:fs.filter(f=>cov(f)==='ok').length,m:fs.filter(f=>cov(f)==='man').length,n:fs.length});
 function meter(fs){const {o,m,n}=counts(fs),x=n-o-m,N=n||1;
- return `<div class="meter" data-tip="${o} by agent cases · ${m} manual only · ${x} not covered">${o?`<i class="ok" style="width:${o/N*100}%"></i>`:''}${m?`<i class="man" style="width:${m/N*100}%"></i>`:''}${x?`<i class="no" style="width:${x/N*100}%"></i>`:''}</div>`}
+ return `<div class="meter" data-tip="${o} by agent cases · ${m} person-run only · ${x} not covered">${o?`<i class="ok" style="width:${o/N*100}%"></i>`:''}${m?`<i class="man" style="width:${m/N*100}%"></i>`:''}${x?`<i class="no" style="width:${x/N*100}%"></i>`:''}</div>`}
 function ring(fs,size=44){const {o,m,n}=counts(fs),r=size/2-4,C=2*Math.PI*r,N=n||1,seg=(v,off,col)=>v?`<circle r="${r}" cx="${size/2}" cy="${size/2}" fill="none" stroke="${col}" stroke-width="5" stroke-dasharray="${Math.max(v/N*C-2,0.5)} ${C}" stroke-dashoffset="${-off/N*C}" transform="rotate(-90 ${size/2} ${size/2})"/>`:'';
  const pct=Math.round((o+m)/N*100);
- return `<svg class="ring" width="${size}" height="${size}" data-tip="${o} by agent cases · ${m} manual only · ${n-o-m} not covered"><circle r="${r}" cx="${size/2}" cy="${size/2}" fill="none" stroke="var(--line-strong)" stroke-width="5"/>${seg(o,0,'var(--ok)')}${seg(m,o,'var(--man)')}<text x="50%" y="50%" dy=".35em" text-anchor="middle" font-size="11" font-weight="600" fill="var(--text)">${pct}%</text></svg>`}
+ return `<svg class="ring" width="${size}" height="${size}" data-tip="${o} by agent cases · ${m} person-run only · ${n-o-m} not covered"><circle r="${r}" cx="${size/2}" cy="${size/2}" fill="none" stroke="var(--line-strong)" stroke-width="5"/>${seg(o,0,'var(--ok)')}${seg(m,o,'var(--man)')}<text x="50%" y="50%" dy=".35em" text-anchor="middle" font-size="11" font-weight="600" fill="var(--text)">${pct}%</text></svg>`}
 const S={mode:'area',sel:null,open:new Set(),q:''};
 function kpis(){const fs=D.features,ag=fs.filter(f=>f.check==='agent'),cr=fs.filter(f=>f.priority==='critical');
  const k=(l,v,t,list)=>`<div class="kpi">${list?ring(list,38):''}<div class="t"><b>${v}<small> / ${t}</small></b><span class="l">${l}</span></div></div>`;
  document.getElementById('kpis').innerHTML=k('features covered',fs.filter(f=>cov(f)!=='no').length,fs.length,fs)+k('critical covered',cr.filter(f=>cov(f)!=='no').length,cr.length,cr)+k('agent-checkable, with agent case',ag.filter(f=>f.agent.length).length,ag.length,ag.map(f=>({...f,manual:[]})))+
  `<div class="kpi"><div class="t"><b>${Object.keys(D.cases).length}<small> cases</small></b><span class="l">${Object.keys(D.scenarios).length} scenarios · ${Object.values(D.cases).filter(c=>c.run==='agent').length} agent cases</span></div></div>`}
-const match=f=>!S.q||(f.id+' '+f.feature+' '+f.axes.join(' ')+' '+f.agent.concat(f.manual).map(caseName).join(' ')).toLowerCase().includes(S.q);
+const match=f=>!S.q||(f.id+' '+f.feature+' '+f.axes.join(' ')+' '+f.agent.concat(f.person).map(caseName).join(' ')).toLowerCase().includes(S.q);
 const tw=(open,has=true)=>`<span class="tw${open?' open':''}">${has?ic('chev'):''}</span>`;
 function caseRow(p,n){const c=D.cases[p]||{};return `<div class="row${S.sel==='c:'+p?' on':''}" data-sel="c:${esc(p)}">${tw(false,false)}${n?`<span class="cnt">${n}</span>`:''}${ic(c.run==='agent'?'bot':'hand','style="color:var(--text-3)"')}<span class="lbl"><span class="k">${esc(caseName(p))}</span>${esc(c.title)}</span></div>`}
-function featRow(f){const on=S.sel==='f:'+f.id,op=S.open.has('f:'+f.id),cs=f.agent.concat(f.manual);
+function featRow(f){const on=S.sel==='f:'+f.id,op=S.open.has('f:'+f.id),cs=f.agent.concat(f.person);
  return `<div class="row${on?' on':''}" data-sel="f:${f.id}" data-tog="${cs.length?'f:'+f.id:''}">${tw(op,cs.length)}${st(cov(f))}<span class="lbl" title="${esc(f.feature)}"><span class="k">${f.id.replace('F-','')}</span>${esc(f.feature)}</span>${f.priority==='critical'||f.priority==='high'?prio(f.priority):''}</div>`+(op&&cs.length?`<div class="kids">${cs.map(p=>caseRow(p)).join('')}</div>`:'')}
 function tree(){let h='';
  if(S.mode==='area'){for(const s of ['stable','rework']){const as=D.areas.filter(a=>a.status===s);if(!as.length)continue;h+=`<div class="grp">${s==='stable'?'Areas':'Being reworked'}</div>`;
@@ -263,20 +263,20 @@ function tree(){let h='';
  else if(S.mode==='scen'){h+='<div class="grp">Agent scenarios</div>';for(const [p,s] of Object.entries(D.scenarios)){const op=S.open.has('s:'+p)||!!S.q;
    h+=`<div class="row${S.sel==='s:'+p?' on':''}" data-sel="s:${esc(p)}" data-tog="s:${esc(p)}">${tw(op)}${ic('route','style="color:var(--accent)"')}<span class="lbl"><span class="k">${esc(s.id)}</span>${esc(s.title)}</span><span class="cnt">${s.cases.length}</span></div>`;
    if(op)h+=`<div class="kids">${s.cases.map((c,i)=>caseRow(c,i+1)).join('')}</div>`}
-  const man=Object.keys(D.cases).filter(p=>D.cases[p].run==='manual');const op=S.open.has('manual');
-  h+=`<div class="grp">For a person</div><div class="row" data-sel="m:" data-tog="manual">${tw(op)}${ic('hand','style="color:var(--text-3)"')}<span class="lbl">Manual cases</span><span class="cnt">${man.length}</span></div>`+(op?`<div class="kids">${man.map(p=>caseRow(p)).join('')}</div>`:'')}
+  const man=Object.keys(D.cases).filter(p=>D.cases[p].run==='person');const op=S.open.has('person');
+  h+=`<div class="grp">For a person</div><div class="row" data-sel="m:" data-tog="person">${tw(op)}${ic('hand','style="color:var(--text-3)"')}<span class="lbl">Person-run cases</span><span class="cnt">${man.length}</span></div>`+(op?`<div class="kids">${man.map(p=>caseRow(p)).join('')}</div>`:'')}
  else{for(const pr of ['critical','high','medium','low']){const no=D.features.filter(f=>f.priority===pr&&cov(f)==='no'&&match(f)),ma=D.features.filter(f=>f.priority===pr&&f.check==='agent'&&cov(f)==='man'&&match(f));
    if(!no.length&&!ma.length)continue;h+=`<div class="grp">${pr} · ${no.length} not covered${ma.length?` · ${ma.length} could be agent`:''}</div>`+no.map(featRow).join('')+ma.map(featRow).join('')}}
  document.getElementById('tree').innerHTML=h||'<div class="empty" style="padding:12px">Nothing matches</div>'}
 const item=(id,txt,side,lead='')=>`<div class="item">${lead}<span class="id">${id}</span><span class="txt">${txt}</span>${side?`<span class="side">${side}</span>`:''}</div>`;
 function pane(){const el=document.getElementById('pane'),[k,v]=(S.sel||':').split(/:(.*)/s);let h='';
  if(!S.sel||k==='m'){h=`<div class="crumb">${ic('grid')} Overview</div><h2>Coverage by area</h2><div class="legend">${['ok','man','no'].map(c=>`<span>${st(c)} ${COV[c]}</span>`).join('')}</div><div class="grid">`+
-  D.areas.map(a=>{const fs=D.features.filter(f=>f.area===a.prefix),{o,m,n}=counts(fs);return `<div class="tile${a.status==='rework'?' rework':''}" data-sel="a:${a.prefix}">${ring(fs)}<div class="t"><b>${esc(a.name)}</b><span class="mut">${n} features · ${o} agent · ${m} manual${a.status==='rework'?' · rework':''}</span></div></div>`}).join('')+'</div>'+
+  D.areas.map(a=>{const fs=D.features.filter(f=>f.area===a.prefix),{o,m,n}=counts(fs);return `<div class="tile${a.status==='rework'?' rework':''}" data-sel="a:${a.prefix}">${ring(fs)}<div class="t"><b>${esc(a.name)}</b><span class="mut">${n} features · ${o} agent · ${m} person${a.status==='rework'?' · rework':''}</span></div></div>`}).join('')+'</div>'+
   `<h3>About this map</h3><div class="about">${prose(D.about)}</div>`}
  else if(k==='a'){const a=D.areas.find(x=>x.prefix===v),fs=D.features.filter(f=>f.area===v);
   h=`<div class="crumb">${ic('folder')} Area · F-${esc(v)}${a.status==='rework'?' · being reworked':''}</div><div style="display:flex;gap:16px;align-items:center">${ring(fs,64)}<div><h2>${esc(a.name)}</h2><div class="mut">${esc(a.notes)}</div></div></div>`;
   for(const c of ['no','man','ok']){const g=fs.filter(f=>cov(f)===c);if(!g.length)continue;h+=`<h3>${st(c)} ${COV[c]} · ${g.length}</h3><div class="card list">${g.map(f=>item(`<a class="lnk" data-sel="f:${f.id}">${f.id}</a>`,md(f.feature),prio(f.priority)+' '+(f.check==='agent'?ic('bot'):ic('hand')))).join('')}</div>`}}
- else if(k==='f'){const f=F[v],cs=f.agent.concat(f.manual),sc=[...new Map(cs.flatMap(scenOf).map(s=>[s.path,s])).values()],combos=D.combinations.filter(c=>c.axes.some(x=>f.axes.includes(x)));
+ else if(k==='f'){const f=F[v],cs=f.agent.concat(f.person),sc=[...new Map(cs.flatMap(scenOf).map(s=>[s.path,s])).values()],combos=D.combinations.filter(c=>c.axes.some(x=>f.axes.includes(x)));
   h=`<div class="crumb">${ic('folder')}<a class="lnk" data-sel="a:${f.area}">${esc((D.areas.find(a=>a.prefix===f.area)||{}).name)}</a> › <span class="mono">${f.id}</span></div><p class="lead">${md(f.feature)}</p>
   <div class="tags"><span class="tag">${st(cov(f))} ${COV[cov(f)]}</span>${prio(f.priority)}<span class="tag">${f.check==='agent'?ic('bot')+' An agent can check it':ic('hand')+' Needs a person'}</span>${f.review?'<span class="tag">needs review</span>':''}</div>
   <h3>Cases · ${cs.length}</h3>${cs.length?`<div class="card list">${cs.map(p=>item(`<a class="lnk" data-sel="c:${esc(p)}">${esc(caseName(p))}</a>`,esc(D.cases[p].title),'',ic(D.cases[p].run==='agent'?'bot':'hand'))).join('')}</div>`:'<div class="empty">No case checks it yet.</div>'}
@@ -284,7 +284,7 @@ function pane(){const el=document.getElementById('pane'),[k,v]=(S.sel||':').spli
   <h3>State axes · ${f.axes.length}</h3>${f.axes.length?`<div class="card">${f.axes.map(a=>`<div class="ax"><span class="mono">${esc(a)}</span><span>${md((D.axes[a]||{}).values)}</span><span class="where">${md((D.axes[a]||{}).where)}</span></div>`).join('')}</div>`:'<div class="empty">None.</div>'}
   ${combos.length?`<h3>Combinations that involve it</h3>${combos.map(c=>`<div class="card" style="padding:12px 14px"><div>${c.axes.map(a=>`<span class="chip" data-tip="${esc((D.axes[a]||{}).values)}">${esc(a)}</span>`).join('<span class="mut"> × </span>')}</div><div class="small mut" style="margin-top:6px">${md(c.why)}</div></div>`).join('')}`:''}
   <h3>Source</h3><div class="mono mut">tests/feature-map/${esc(f.file)}</div>`}
- else if(k==='c'){const c=D.cases[v];h=`<div class="crumb">${ic(c.run==='agent'?'bot':'hand')} ${c.run==='agent'?'Agent case':'Manual case'} · <span class="mono">${esc(caseName(v))}</span></div><h2>${esc(c.title)}</h2><div class="mono mut">${esc(v)}</div>
+ else if(k==='c'){const c=D.cases[v];h=`<div class="crumb">${ic(c.run==='agent'?'bot':'hand')} ${c.run==='agent'?'Agent case':'Person-run case'} · <span class="mono">${esc(caseName(v))}</span></div><h2>${esc(c.title)}</h2><div class="mono mut">${esc(v)}</div>
   <h3>Checks · ${c.requirements.length}</h3>${c.requirements.length?`<div class="card list">${c.requirements.map(r=>F[r]?item(`<a class="lnk" data-sel="f:${r}">${r}</a>`,esc(F[r].feature),prio(F[r].priority),st(cov(F[r]))):item(esc(r),'<span class="mut">unknown feature</span>')).join('')}</div>`:'<div class="empty">No features linked.</div>'}
   <h3>In scenarios</h3>${scenOf(v).length?`<div class="card list">${scenOf(v).map(s=>item(`<a class="lnk" data-sel="s:${esc(s.path)}">${esc(s.id)}</a>`,esc(s.title),'stage '+(s.cases.indexOf(v)+1),ic('route'))).join('')}</div>`:'<div class="empty">None.</div>'}`}
  else if(k==='s'){const s=D.scenarios[v],fs=[...new Set(s.cases.flatMap(c=>(D.cases[c]||{requirements:[]}).requirements))].filter(r=>F[r]);

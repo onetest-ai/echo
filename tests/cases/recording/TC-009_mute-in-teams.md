@@ -5,7 +5,7 @@ priority: high
 type: functional
 requirements: [F-REC-10]
 module: recording
-run: manual
+run: person
 platform: macos
 tags: [recording, mute, accessibility]
 external_id: TC-REC-009

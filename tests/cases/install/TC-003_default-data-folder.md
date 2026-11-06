@@ -5,7 +5,7 @@ priority: high
 type: functional
 requirements: [F-LIFE-01]
 module: install
-run: manual
+run: person
 platform: any
 tags: [install, data-folder]
 external_id: TC-INST-003

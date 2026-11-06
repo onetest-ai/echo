@@ -5,7 +5,7 @@ priority: critical
 type: functional
 requirements: [F-TR-01, F-STT-04, F-STT-03]
 module: transcription
-run: manual
+run: person
 platform: any
 tags: [transcription]
 external_id: TC-TRN-001

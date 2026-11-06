@@ -108,7 +108,7 @@
    "id": "F-TASK-11",
    "feature": "Work on it types one line (the task's link, the skill, the note) into the Claude panel's session on the thread's AI profile; another profile running or Claude asking something gives a notice instead",
    "priority": "high",
-   "check": "manual",
+   "check": "person",
    "axes": [
     "thread.ai"
    ]
@@ -117,7 +117,7 @@
    "id": "F-TASK-12",
    "feature": "Yolo has Claude Code do the task on its own in the background on the thread's profile; the outcome shows above My work; the run may change only its own task",
    "priority": "high",
-   "check": "manual",
+   "check": "person",
    "axes": [
     "thread.ai"
    ]

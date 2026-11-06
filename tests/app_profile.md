@@ -24,8 +24,8 @@ agent tests it. This file is given to every manual-qa role; where it differs fro
    `ECHOCTL_CONFIG_DIR` and unsets Claude Code's session variables). A command without it would touch the real data.
 4. **Steps are the window (Playwright MCP) or the CLI (Bash).** The runner may use Bash only for `echoctl` with the
    run's env, reading files in the run's data folder, and `tests/fixtures/*`. No other scripts, no edits to the repo.
-5. **`run: manual` cases are for a person** (a real call, Teams, macOS permissions, an install, the tray, Windows,
-   Claude Code runs that need a signed-in account). The lead lists them in the report as `skipped (manual)` and never
+5. **`run: person` cases are for a person** (a real call, Teams, macOS permissions, an install, the tray, Windows,
+   Claude Code runs that need a signed-in account). The lead lists them in the report as `skipped (person)` and never
    tries them.
 6. **A PASS needs evidence**: a Playwright snapshot for a window step, the command's output for a CLI step.
 7. **Agent runs execute scenarios, not single cases** (see "Scenarios" below): one runner per scenario, fresh data
@@ -112,7 +112,7 @@ Elements the app acts on carry `data-*` attributes (`data-call`, `data-go`, `dat
 
 - Today redraws every minute (the clock on the line "now"): take a snapshot again rather than reuse an old ref.
 - Buttons that start Claude Code (Prepare, Write minutes, Send to Claude, Yolo) need a signed-in Claude Code account:
-  a case may check the button and the dialog, not the run's result, unless it is `run: manual`.
+  a case may check the button and the dialog, not the run's result, unless it is `run: person`.
 - Microsoft 365 (mail, Teams, calendar sync) is not signed in on test data: those views show their sign-in state.
 - The data folder's `.echo/` holds the app's state files; a case reads them only when its steps say so.
 - **First paint is empty.** Right after `browser_navigate` the snapshot can show `main` empty and an extra
@@ -221,7 +221,7 @@ All verified on the test data in a live session. Roles and names first, then the
 Areas that have **no `run: agent` case yet** (from `tests/README.md` → Areas): Tasks, Threads (brief/work/calls/people/profile),
 clients, Inbox and right panels, Settings (all sections), Plugins, the actions palette, Calls extras (What moved,
 Call actions menu, thread chip), Today's task details (only TC-003). `claude`, `privacy`, `transcription`, `install`,
-`permissions`, `recording`, `lifecycle`, `windows` stay manual. Proposed, all on the test data, `platform: any`:
+`permissions`, `recording`, `lifecycle`, `windows` stay person-run. Proposed, all on the test data, `platform: any`:
 
 | Suite | Folder | Priority | Description |
 |---|---|---|---|
@@ -237,7 +237,7 @@ Call actions menu, thread chip), Today's task details (only TC-003). `claude`, `
 
 ## Out of Scope / Manual Setup Required
 
-Cases that need these are `run: manual` or only check the button and its dialog, never the result:
+Cases that need these are `run: person` or only check the button and its dialog, never the result:
 
 - Microsoft 365: sign-in, calendar sync, mail, Teams, meeting chat (Settings → Calendar & chat "Sign in…", "Sends to you").
 - Claude Code runs: Write minutes / Write minutes again, Prepare, Send to Claude, Yolo, Ask Claude about this call,
@@ -251,7 +251,7 @@ Cases that need these are `run: manual` or only check the button and its dialog,
 
 Cases live in `tests/cases/<suite>/TC-NNN_<slug>.md` in the manual-qa format, with two more frontmatter fields:
 
-- `run: agent | manual` — who can run it (rule 5).
+- `run: agent | person` — who can run it (rule 5).
 - `platform: any | macos | windows` — `any` for the window and the CLI in serve mode.
 - `requirements: [F-AREA-NN, …]` — the features of the functional map (`tests/feature-map/areas/*.json`) the case
   checks; a case that checks a behaviour the map doesn't list adds the feature to its area's file first.
@@ -279,8 +279,8 @@ scenarios: far fewer runners than cases, and the cases meet each other the way a
 
 **Leading a run (the lead):** per scenario, `tests/fixtures/serve.sh up <new dir> <port>`, dispatch one runner with
 the scenario path, base_url and env file, then `serve.sh down`. Scenarios with `data: standard` each get fresh data
-(they may change it). The report counts stages (cases) as well as scenarios. `run: manual` cases are listed as
-skipped (manual).
+(they may change it). The report counts stages (cases) as well as scenarios. `run: person` cases are listed as
+skipped (person).
 
 **Writing one:** order the stages so that a stage that changes data comes after the stages that read what it
 changes, and give a stage "Depends on" only when it cannot run without the earlier one. Every `run: agent` case is

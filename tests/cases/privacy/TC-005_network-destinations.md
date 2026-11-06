@@ -5,7 +5,7 @@ priority: high
 type: functional
 requirements: [F-PRIV-05, F-PRIV-07]
 module: privacy
-run: manual
+run: person
 platform: macos
 tags: [privacy, network]
 external_id: TC-PRIV-005

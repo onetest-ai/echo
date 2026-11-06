@@ -5,7 +5,7 @@ priority: critical
 type: functional
 requirements: [F-WIN-02]
 module: windows
-run: manual
+run: person
 platform: windows
 tags: [windows, recording]
 external_id: TC-WINOS-003

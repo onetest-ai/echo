@@ -5,7 +5,7 @@ priority: medium
 type: functional
 requirements: [F-CLI-11, F-REC-02, F-REC-13]
 module: cli
-run: manual
+run: person
 platform: macos
 tags: [cli, recording]
 external_id: TC-CLI-002

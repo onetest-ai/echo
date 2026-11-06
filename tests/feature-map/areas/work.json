@@ -162,7 +162,7 @@
    "id": "F-WORK-16",
    "feature": "A field the user set is never overwritten by a later sync: the call's words are kept in history as \"kept yours\"",
    "priority": "critical",
-   "check": "manual",
+   "check": "person",
    "axes": [
     "node.history"
    ]

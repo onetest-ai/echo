@@ -5,7 +5,7 @@ priority: high
 type: functional
 requirements: [F-NOTES-10, F-MIN-13]
 module: claude
-run: manual
+run: person
 platform: macos
 tags: [notes, minutes]
 external_id: TC-CLA-008

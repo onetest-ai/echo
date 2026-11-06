@@ -5,7 +5,7 @@ priority: low
 type: functional
 requirements: [F-CALLS-17]
 module: window
-run: manual
+run: person
 platform: macos
 tags: [minutes, native]
 external_id: TC-WIN-003

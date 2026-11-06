@@ -5,7 +5,7 @@ priority: critical
 type: functional
 requirements: [F-PRIV-03]
 module: privacy
-run: manual
+run: person
 platform: any
 tags: [privacy, audio]
 external_id: TC-PRIV-003, TC-TRN-002

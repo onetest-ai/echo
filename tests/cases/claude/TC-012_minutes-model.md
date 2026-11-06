@@ -5,7 +5,7 @@ priority: medium
 type: functional
 requirements: [F-AI-01, F-SET-12, F-AI-08]
 module: claude
-run: manual
+run: person
 platform: macos
 tags: [minutes, ai-profile]
 external_id: TC-CLA-011

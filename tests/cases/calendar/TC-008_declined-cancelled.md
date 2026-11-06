@@ -5,7 +5,7 @@ priority: low
 type: functional
 requirements: [F-CAL-05]
 module: calendar
-run: manual
+run: person
 platform: macos
 tags: [calendar]
 external_id: TC-CAL-007

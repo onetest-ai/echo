@@ -5,7 +5,7 @@ priority: low
 type: functional
 requirements: [F-CLI-11, F-SET-17]
 module: cli
-run: manual
+run: person
 platform: macos
 tags: [cli, doctor]
 external_id: TC-CLI-003
