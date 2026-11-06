@@ -56,7 +56,17 @@ the code is `jshost.rs`). Obsidian's plan: `docs/obsidian-design.md`.
 ### What a plugin reaches beyond its store
 - **Echo's data** (`uses.echo`, `share.rs`): read kinds `clients`, `threads`, `people`, `dictionary`, `sources`,
   `source`; a source carries the AI `profile` its text may go to. Write: only adding to the dictionary
-  (`taxonomy::dictionary_add`, merges, never renames or removes). Events: `minutes_written`, `sources_changed`.
+  (`taxonomy::dictionary_add`, merges, never renames or removes).
+- **Echo's events** (`uses.events.on`, #59): `plugins::EVENTS` — a meeting soon, a Teams call starting / ending, a
+  recording starting / stopping, a transcript ready, minutes written, a thread synced, sources changed — each with
+  the sheet's words ("Knows when …"). Only the plugins that named one hear it (`jshost` `Plugin.hears`); `ctx.on` for
+  one not named is refused. Payloads are ids and titles (a call's folder name, a meeting's id and subject, a
+  thread's id; `watch::for_plugins`), never the words — `echo.read` reads those; the sheet's words name the text that
+  comes (a subject, a title). A plugin reading sources (`echo.read` source / sources) hears `minutes_written` /
+  `sources_changed` without naming them (they came with it before `events` existed); others no longer hear them.
+  One grant per loaded plugin (`jshost::hears`, from the manifest it loaded with): `ctx.on` checks it, delivery
+  filters by it. From the app only (a CLI process has no host), as they happen, no replay; no `brain_synced`
+  (`sources_changed` says a Recall sync changed something).
 - **Folders** the user picked in Echo's own picker (`grants.rs`), read-only, links not followed.
 - **Echo's sessions** (`uses.sessions`): skills as text — Echo writes the Claude Code plugin itself
   (`<config dir>/plugins/session/<id>/`, `echo-<id>`; `grants::set_session_skills` keeps only name and description,

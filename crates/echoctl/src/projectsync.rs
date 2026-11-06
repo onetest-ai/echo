@@ -94,6 +94,9 @@ pub fn run(id: &str) -> Result<Value> {
     if pending.is_empty() && claims == 0 && for_people.is_empty() {
         let v = json!({"state": "done", "at": started.to_rfc3339(), "message": "nothing new", "written": written.len(), "processed": 0});
         save_state(id, &v);
+        // Announced as a sync that read the calls is (new mail or chat may have been written).
+        #[cfg(feature = "js")]
+        crate::jshost::event("thread_synced", &json!({"thread": id, "processed": 0, "left": 0}));
         return Ok(v);
     }
     save_state(id, &json!({"state": "running", "at": started.to_rfc3339(), "message": format!("reading {} call{}", pending.len(), if pending.len() == 1 { "" } else { "s" })}));
@@ -149,6 +152,11 @@ pub fn run(id: &str) -> Result<Value> {
         }
     };
     save_state(id, &v);
+    // A thread whose work was read again: the plugins that asked hear it (its id, how many were read, how many wait).
+    #[cfg(feature = "js")]
+    if v["state"] == "done" {
+        crate::jshost::event("thread_synced", &json!({"thread": id, "processed": v["processed"], "left": v["left"]}));
+    }
     if v["state"] == "failed" {
         bail!("{}", v["message"].as_str().unwrap_or("the sync failed"));
     }

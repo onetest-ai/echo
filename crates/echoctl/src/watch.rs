@@ -163,6 +163,11 @@ pub fn running_watcher() -> Option<WatchState> {
 }
 
 fn emit(event: &str, mut data: serde_json::Value) {
+    // The plugins that asked to hear it (the app's host; none in a CLI process): ids and titles, not content.
+    #[cfg(feature = "js")]
+    if let Some(p) = for_plugins(event, &data) {
+        crate::jshost::event(event, &p);
+    }
     if let Some(obj) = data.as_object_mut() {
         obj.insert("event".into(), json!(event));
         obj.insert("ts".into(), json!(Local::now().to_rfc3339()));
@@ -173,6 +178,23 @@ fn emit(event: &str, mut data: serde_json::Value) {
     if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(file("events.jsonl")) {
         let _ = writeln!(f, "{line}");
     }
+}
+
+/// An event as a plugin hears it (`plugins::EVENTS`): a call by its folder's name (not its path), a meeting by its
+/// id, subject and start; None for one plugins don't hear.
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
+fn for_plugins(event: &str, d: &serde_json::Value) -> Option<serde_json::Value> {
+    let call = || d["dir"].as_str().and_then(|p| Path::new(p).file_name()).map(|f| f.to_string_lossy().into_owned());
+    Some(match event {
+        "meeting_soon" => json!({"id": d["id"], "subject": d["subject"], "start": d["start"]}),
+        "call_started" => json!({"app": d["app"]}),
+        // `next_call`: Teams went straight on to another call (not a hang-up); the next call_started follows at once.
+        "call_ended" => json!({"app": d["app"], "recording": d["recording"], "next_call": d["next_call"] == true}),
+        "recording_started" => json!({"call": call(), "title": d["title"], "memo": d["memo"] == true}),
+        "recording_stopped" => json!({"call": call(), "duration_s": d["duration_s"], "reason": d["reason"]}),
+        "transcribed" => json!({"call": call(), "ok": d["ok"]}),
+        _ => return None,
+    })
 }
 
 fn parse_time(s: &Option<String>) -> Option<DateTime<Utc>> {
@@ -1523,6 +1545,14 @@ pub fn follow_events() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_plugin_hears_a_call_by_its_name_not_its_path() {
+        let p = for_plugins("recording_started", &json!({"dir": "/Users/x/echo/calls/2026-11-06_100000-acme", "title": "Acme"})).unwrap();
+        assert_eq!(p, json!({"call": "2026-11-06_100000-acme", "title": "Acme", "memo": false}));
+        assert_eq!(for_plugins("transcribed", &json!({"dir": "/a/b/c", "ok": true, "error": "x"})).unwrap(), json!({"call": "c", "ok": true}));
+        assert!(for_plugins("error", &json!({"message": "x"})).is_none(), "not one plugins hear");
+    }
 
     #[test]
     fn a_split_needs_the_other_call_read_steadily() {
