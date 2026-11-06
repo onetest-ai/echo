@@ -145,10 +145,10 @@ pages, folders of ≥ 5, pages that have properties), duplicate titles (case and
 
 ### Health (`health.rs`)
 A **finding** is one thing a check found: `kind`, `group` (`needs` · `should` · `tidy`), `by` (`code` · `ai`), its
-pages (vault-relative, with a line where there is one), a title, what it means and whether Echo has a fix to show
-without asking (`fixable`). Its **key** is `kind:` + its pages, sorted, + what it is about (`[[link]]` / `(dest)`,
+pages (vault-relative, with a line where there is one), a title, what it means, whether Echo has a fix to show
+without asking (`fixable`) and whether *Fix all* applies it (`fix_all`: never a guessed page). Its **key** is `kind:` + its pages, sorted, + what it is about (`[[link]]` / `(dest)`,
 `#tag`, the property's key): the same across scans, so the page names findings only by key — never by path — and
-`health.json` keeps ignored keys across rescans. The same broken link twice on a page is one finding with both lines.
+`health.json` keeps ignored keys across rescans. `health/<key>` takes the key as the window decoded it (once). The same broken link twice on a page is one finding with both lines.
 Code checks run when Health, Home or the CLI asks, from Echo's index, cached per revision: the index's `rev`, the index
 file's and the tag taxonomy's size and time (either may sit outside the pages root) and the vault's settings.
 
@@ -162,17 +162,24 @@ the checks are first computed on a day and whenever the score changes.
 **Fixes** are pure: `fix(v, key, choice)` reads the file now and returns its diff, its new text and the text's
 sha256 (`base`); nothing is written. A broken link points to the closest page — the same name in another folder, the
 same name but for case or spacing, else a name 1 edit away (names of 3+ characters) or 2 (6+), so a short name never
-matches anything; nearest, then shallowest — as `[[path|what it showed]]`, or a Markdown link with its folder as
-written when that leads there, else the path from the file; or *Remove the link, keep its text*; or *Create the page*
-(the window's New page). An index row to a missing page points to the closest page, else is removed. Without
+matches anything; nearest, then shallowest — as `[[path|what it showed]]` (`\|` on a table row), or a Markdown link
+with its folder as written when that leads there, else the path from the file; or *Remove the link, keep its text*;
+or *Create the page* (the window's New page). A name edits away is a **guess** (ruling R36: Echo's notes are named by
+date, so a deleted week's note is 2 edits from the next week's): offered on its own finding with its diff
+(`guess: true`), never by *Fix all*. An index row to a missing page points only to the same name elsewhere (or but for
+case or spacing), else it is removed: a table row goes, a line of prose keeps the link's words. Without
 properties: `title` (H1, else the name), `date` (from the name, else the first commit), `tags: []`, in the file's own
 line endings. A tag not in the taxonomy: replaced by a tag the taxonomy allows that the user picks, in `tags` (dropped
-when already there) and inline. Not in the index: slice 1's row (`catalog::insert`; Health writes no `log.md` line).
-Each fix is a list of operations that find their place in the text they are given, so *Fix all* applies several to
-one file in one write. `apply` writes each file only if its sha256 is still the fixes' `base` (else `changed_since`,
-left as it is), by `write_atomic`, then one commit of the written files that were clean before (X-G2, `git::dirty`
-fails safe) and one activity line each (`by: health`). `kn_fix` / `kn_fix_all` take `{key, choice?, base}` — the base
-of the diff the page showed — and compute each fix again before `apply`.
+when already there) and inline. Not in the index: slice 1's row (`catalog::insert`) and its `log.md` line
+(`page::log_rows`, as `index_add` writes it), in the same commit. Each fix is a list of operations that find their
+place in the text they are given, so *Fix all* applies several to one file in one write; one with nothing left to do
+there (another fix removed its row) is `skipped`, with why. `apply` writes each file only if its sha256 is still the
+fixes' `base` (else `changed_since`, left as it is), by `write_atomic`, then one commit of the written files that were
+clean before (X-G2, `git::dirty` fails safe — `log.md` included) and one activity line per page (`by: health`, the
+commit id only for a file in the commit). A fix depends on more than its file — the whole index (the closest page),
+the page a row is for, today's date — so the page sends back both the `base` and the `sha` of the text it was shown
+(ruling R37): `kn_fix` / `kn_fix_all` take `{key, choice?, base, sha}`, compute each fix again and write it only when
+both match.
 
 ### Graph
 Built in the window from `/api/kn/<id>/graph` and drawn live on a canvas by `graphCanvas` in `knowledge.js`, the

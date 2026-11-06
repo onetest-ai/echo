@@ -64,8 +64,11 @@ pub struct Finding {
     pub title: String,
     /// What it means, in one sentence.
     pub why: String,
-    /// Echo has a fix to show without asking anything (*Fix all* applies it).
+    /// Echo has a fix to show without asking anything.
     pub fixable: bool,
+    /// *Fix all* applies that fix: it is no guess (a broken link's near name is offered only on its own finding).
+    #[serde(default)]
+    pub fix_all: bool,
     #[serde(skip)]
     pub(super) subject: Subject,
 }
@@ -113,6 +116,11 @@ pub struct Score {
 // ── findings ──
 
 fn made(kind: &str, pages: Vec<(String, Option<u32>)>, about: Option<String>, title: String, fixable: bool, subject: Subject) -> Finding {
+    made_sure(kind, pages, about, title, fixable, fixable, subject)
+}
+
+/// `fix_all`: *Fix all* may apply its fix (it is no guess).
+fn made_sure(kind: &str, pages: Vec<(String, Option<u32>)>, about: Option<String>, title: String, fixable: bool, fix_all: bool, subject: Subject) -> Finding {
     let (group, why) = CODE.iter().find(|(k, ..)| *k == kind).map_or((Group::Tidy, ""), |(_, g, w)| (*g, *w));
     let mut names: Vec<&str> = pages.iter().map(|(p, _)| p.as_str()).collect();
     names.sort();
@@ -122,7 +130,7 @@ fn made(kind: &str, pages: Vec<(String, Option<u32>)>, about: Option<String>, ti
         key.push(':');
         key.push_str(&a);
     }
-    Finding { key, kind: kind.into(), group, by: By::Code, pages, title, why: why.into(), fixable, subject }
+    Finding { key, kind: kind.into(), group, by: By::Code, pages, title, why: why.into(), fixable, fix_all, subject }
 }
 
 /// A link as its key writes it: `[[…]]` (`![[…]]` for an embed) or `(…)`.
@@ -163,8 +171,9 @@ fn compute(v: &Vault, ix: &Index) -> Vec<Finding> {
         out.push(made("not_in_index", vec![(at(p), None)], None, format!("{} isn't in {index_name}", title(p)), true, Subject::None));
     }
     for (p, lines, l) in grouped(c.broken_links.iter().cloned()) {
-        let fixable = closest(ix, Some(p.as_str()), &l).is_some();
-        out.push(made("broken", lines.iter().map(|n| (at(&p), Some(*n))).collect(), Some(written(&l)), format!("{} leads to no page", shown(&l)), fixable, Subject::Link(l)));
+        let near = closest(ix, Some(p.as_str()), &l, true);
+        let (fixable, sure) = (near.is_some(), near.is_some_and(|n| !n.guess));
+        out.push(made_sure("broken", lines.iter().map(|n| (at(&p), Some(*n))).collect(), Some(written(&l)), format!("{} leads to no page", shown(&l)), fixable, sure, Subject::Link(l)));
     }
     for p in &c.isolated {
         out.push(made("isolated", vec![(at(p), None)], None, format!("{} has no links", title(p)), false, Subject::None));
@@ -266,8 +275,8 @@ enum Op {
     Relink { link: RawLink, to: String },
     /// The link replaced by its text.
     Unlink(RawLink),
-    /// The line holding the link removed (an index row).
-    DropLine(RawLink),
+    /// The table row holding the link removed (an index row); elsewhere the link replaced by its text.
+    DropRow(RawLink),
     /// Text put before the first line (properties).
     Prepend(String),
     /// A tag replaced on the page.
@@ -286,16 +295,19 @@ pub struct Fix {
     pub base: String,
     pub diff: Vec<(char, String)>,
     pub text: String,
+    pub guess: bool,
     ops: Vec<Op>,
 }
 
 impl Fix {
-    /// As the window shows it: the changes with 3 lines around them (`hunks`, as permission cards) and the counts.
+    /// As the window shows it: the changes with 3 lines around them (`hunks`, as permission cards), the counts, whether
+    /// it rests on a guessed page, and the sha256 of the text it writes (`sha`), which the page sends back with `base`
+    /// so that only the change it showed is written (ruling R37).
     pub fn value(&self) -> Value {
         let (plus, minus) = diff::counts(&self.diff);
         let line = |(k, l): &(char, String)| json!([k.to_string(), l]);
         let hunks: Vec<Vec<Value>> = diff::hunks(&self.diff, 3).iter().map(|h| h.iter().map(line).collect()).collect();
-        json!({ "key": self.key, "choice": self.choice, "path": self.path, "base": self.base, "hunks": hunks, "plus": plus, "minus": minus })
+        json!({ "key": self.key, "choice": self.choice, "path": self.path, "base": self.base, "sha": page::sha(self.text.as_bytes()), "guess": self.guess, "hunks": hunks, "plus": plus, "minus": minus })
     }
 }
 
@@ -347,11 +359,21 @@ fn distance(a: &[char], b: &[char]) -> usize {
     row[b.len()]
 }
 
-/// The page a link that leads nowhere most likely means (pages-root-relative), and why: the same name in another
-/// folder, the same name but for case or spacing, or a name at most 2 edits away (and at most a third of it changed,
-/// so a short name never matches anything). The nearest wins, then the shallowest and shortest path. `from`: the
-/// linking page, never its own answer.
-fn closest(ix: &Index, from: Option<&str>, link: &RawLink) -> Option<(String, &'static str)> {
+/// The page a link that leads nowhere most likely means.
+struct Near {
+    /// Pages-root-relative.
+    to: String,
+    why: &'static str,
+    /// A name some edits away, not the same name: offered on its own finding, never by *Fix all* (ruling R36 — Echo's
+    /// dated notes are a few edits from each other).
+    guess: bool,
+}
+
+/// The page a link that leads nowhere most likely means: the same name in another folder, the same name but for case
+/// or spacing, or — with `guesses` — a name at most 2 edits away (and at most a third of it changed, so a short name
+/// never matches anything). The nearest wins, then the shallowest and shortest path. `from`: the linking page, never
+/// its own answer.
+fn closest(ix: &Index, from: Option<&str>, link: &RawLink, guesses: bool) -> Option<Near> {
     let bare = Resolver::bare(link);
     let name = strip_md(bare.rsplit('/').next().unwrap_or(&bare)).trim().to_string();
     if name.is_empty() {
@@ -370,7 +392,7 @@ fn closest(ix: &Index, from: Option<&str>, link: &RawLink) -> Option<(String, &'
             ((1, 0), "the same name but for case or spacing")
         } else {
             let have: Vec<char> = norm_name(stem).chars().collect();
-            if have.len().abs_diff(want.len()) > 2 {
+            if !guesses || have.len().abs_diff(want.len()) > 2 {
                 continue;
             }
             match distance(&want, &have) {
@@ -384,7 +406,7 @@ fn closest(ix: &Index, from: Option<&str>, link: &RawLink) -> Option<(String, &'
             best = Some((k, p, why));
         }
     }
-    best.map(|(_, p, why)| (p.clone(), why))
+    best.map(|((tier, ..), p, why)| Near { to: p.clone(), why, guess: tier == 2 })
 }
 
 /// `to` (vault-relative) from folder `from_dir` (vault-relative).
@@ -585,15 +607,44 @@ fn retag(text: &str, from: &str, to: &str) -> Result<String> {
     Ok(out.into_iter().flatten().collect())
 }
 
+/// A line of a table, whose cells `|` separates.
+fn table_row(line: &str) -> bool {
+    line.trim_start().starts_with('|')
+}
+
+/// Each `|` written `\|` (those escaped already kept).
+fn escape_pipes(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 1);
+    let mut prev = None;
+    for c in s.chars() {
+        if c == '|' && prev != Some('\\') {
+            out.push('\\');
+        }
+        out.push(c);
+        prev = Some(c);
+    }
+    out
+}
+
+/// `line` with `link` replaced by its text.
+fn unlinked(line: &str, link: &RawLink) -> String {
+    if link.wiki {
+        replaced(line, wiki_spans(line, &link.target, link.embed).into_iter().map(|r| (r, wiki_text(&link.target))).collect())
+    } else {
+        replaced(line, md_spans(line, &link.target).into_iter().map(|[whole, t, _]| (whole, line[t.0..t.1].to_string())).collect())
+    }
+}
+
 fn run(op: &Op, text: &str) -> Result<String> {
     match op {
         Op::Relink { link, to } if link.wiki => on_link_lines(text, link, |l| {
+            // On a table row the alias's `|` would split the row's cells.
+            let to = if table_row(l) { escape_pipes(to) } else { to.clone() };
             Some(replaced(l, wiki_spans(l, &link.target, link.embed).into_iter().map(|r| (r, format!("{}[[{to}]]", if link.embed { "!" } else { "" }))).collect()))
         }),
         Op::Relink { link, to } => on_link_lines(text, link, |l| Some(replaced(l, md_spans(l, &link.target).into_iter().map(|[_, _, dest]| (dest, to.clone())).collect()))),
-        Op::Unlink(link) if link.wiki => on_link_lines(text, link, |l| Some(replaced(l, wiki_spans(l, &link.target, link.embed).into_iter().map(|r| (r, wiki_text(&link.target))).collect()))),
-        Op::Unlink(link) => on_link_lines(text, link, |l| Some(replaced(l, md_spans(l, &link.target).into_iter().map(|[whole, t, _]| (whole, l[t.0..t.1].to_string())).collect()))),
-        Op::DropLine(link) => on_link_lines(text, link, |_| None),
+        Op::Unlink(link) => on_link_lines(text, link, |l| Some(unlinked(l, link))),
+        Op::DropRow(link) => on_link_lines(text, link, |l| if table_row(l) { None } else { Some(unlinked(l, link)) }),
         Op::Prepend(s) => Ok(format!("{s}{text}")),
         Op::Retag { from, to } => retag(text, from, to),
         Op::Row(folder, note, desc, date) => match catalog::insert(text, folder, note, desc, date, &chrono::Local::now().format("%Y-%m-%d").to_string()) {
@@ -637,12 +688,15 @@ fn file_of(v: &Vault, f: &Finding) -> Result<String> {
 }
 
 /// What `choice` (`None`: the fix Echo would make by itself) does to `path`, whose text is `text`.
-fn plan(v: &Vault, ix: &Index, f: &Finding, choice: Option<&str>, path: &str, text: &str) -> Result<(String, Vec<Op>)> {
+/// The choice made, its operations, and whether it rests on a guessed page.
+fn plan(v: &Vault, ix: &Index, f: &Finding, choice: Option<&str>, path: &str, text: &str) -> Result<(String, Vec<Op>, bool)> {
     let link = || match &f.subject {
         Subject::Link(l) => Ok(l.clone()),
         _ => Err(anyhow!("Echo has no fix for this")),
     };
-    let near = |l: &RawLink| closest(ix, scan::page_rel(v, path).as_deref(), l).map(|(to, _)| Op::Relink { link: l.clone(), to: relinked(v, ix, path, l, &to) });
+    // An index row is pointed only at the same name (R36); a broken link may be pointed at a near one, flagged.
+    let guesses = f.kind == "broken";
+    let near = |l: &RawLink| closest(ix, scan::page_rel(v, path).as_deref(), l, guesses).map(|n| (Op::Relink { link: l.clone(), to: relinked(v, ix, path, l, &n.to) }, n.guess));
     let choice = match (f.kind.as_str(), choice) {
         (_, Some(c)) => c.to_string(),
         ("broken", None) => "to".into(),
@@ -652,10 +706,15 @@ fn plan(v: &Vault, ix: &Index, f: &Finding, choice: Option<&str>, path: &str, te
         ("unknown_tag", None) => bail!("Pick a tag the taxonomy allows"),
         _ => bail!("Echo has no fix for this"),
     };
+    let mut guess = false;
     let ops = match (f.kind.as_str(), choice.as_str()) {
-        ("broken" | "dead_row", "to") => vec![near(&link()?).ok_or_else(|| anyhow!("Nothing close to point it to"))?],
+        ("broken" | "dead_row", "to") => {
+            let (op, g) = near(&link()?).ok_or_else(|| anyhow!("Nothing close to point it to"))?;
+            guess = g;
+            vec![op]
+        }
         ("broken", "remove") => vec![Op::Unlink(link()?)],
-        ("dead_row", "remove") => vec![Op::DropLine(link()?)],
+        ("dead_row", "remove") => vec![Op::DropRow(link()?)],
         ("broken", "create") => bail!("A new page is made with New page"),
         ("no_props", "props") => vec![Op::Prepend(properties(v, path, text))],
         ("not_in_index", "row") => {
@@ -669,7 +728,7 @@ fn plan(v: &Vault, ix: &Index, f: &Finding, choice: Option<&str>, path: &str, te
         ("unknown_tag", "taxonomy") => bail!("The taxonomy opens in Pages"),
         _ => bail!("“{choice}” isn't a fix for this"),
     };
-    Ok((choice, ops))
+    Ok((choice, ops, guess))
 }
 
 /// The fix of finding `key` by `choice` (`None`: the one Echo would make by itself), against its file as it is now.
@@ -684,9 +743,9 @@ pub fn fix(v: &Vault, key: &str, choice: Option<&str>) -> Result<Fix> {
         bail!("{path} is too large for Echo to change");
     }
     let old = std::str::from_utf8(&bytes).map_err(|_| anyhow!("{path} isn't UTF-8 text, so Echo doesn't change it"))?;
-    let (choice, ops) = plan(v, &ix, &f, choice, &path, old)?;
+    let (choice, ops, guess) = plan(v, &ix, &f, choice, &path, old)?;
     let new = ops.iter().try_fold(old.to_string(), |t, op| run(op, &t))?;
-    Ok(Fix { key: key.into(), choice, path, base: page::sha(&bytes), diff: diff::lines(old, &new), text: new, ops })
+    Ok(Fix { key: key.into(), choice, path, base: page::sha(&bytes), diff: diff::lines(old, &new), text: new, guess, ops })
 }
 
 /// The ways finding `f` can be fixed, Echo's own suggestion first.
@@ -696,9 +755,9 @@ fn choices_of(v: &Vault, ix: &Index, f: &Finding) -> Vec<Choice> {
         "broken" | "dead_row" => {
             let mut out = vec![];
             if let Subject::Link(l) = &f.subject {
-                if let Some((to, why)) = closest(ix, f.pages.first().and_then(|(p, _)| scan::page_rel(v, p)).as_deref(), l) {
-                    let to = scan::vault_rel(v, &to);
-                    out.push(Choice { choice: "to".into(), label: format!("Point it to {to}"), to: Some(to), why: Some(why.into()) });
+                if let Some(n) = closest(ix, f.pages.first().and_then(|(p, _)| scan::page_rel(v, p)).as_deref(), l, f.kind == "broken") {
+                    let to = scan::vault_rel(v, &n.to);
+                    out.push(Choice { choice: "to".into(), label: format!("Point it to {to}"), to: Some(to), why: Some(n.why.into()) });
                 }
             }
             if f.kind == "broken" {
@@ -720,6 +779,13 @@ fn choices_of(v: &Vault, ix: &Index, f: &Finding) -> Vec<Choice> {
     }
 }
 
+/// A fix not written, and why (it had nothing left to do, it isn't there any more, it was a guess…).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Skipped {
+    pub key: String,
+    pub why: String,
+}
+
 /// What came of writing fixes.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct Applied {
@@ -727,13 +793,15 @@ pub struct Applied {
     pub written: Vec<String>,
     /// Files that changed since their fix was computed: left as they are.
     pub changed_since: Vec<String>,
+    /// Fixes not made, and why: in a file written, one with nothing left to do there (another fix of the file did it).
+    pub skipped: Vec<Skipped>,
     /// The commit's label (`<id>`, `off`, `skipped: …`).
     pub commit: String,
 }
 
 /// Write fixes: each file only if it is still the text its fixes were computed on (several fixes of one file go in
-/// together), through `write_atomic`; then one commit of the written files that had no changes of the user's (when the
-/// vault commits) and an activity line per file.
+/// together), through `write_atomic`, and slice 1's `log.md` line when rows went into the index; then one commit of
+/// the written files that had no changes of the user's (when the vault commits) and an activity line per page.
 pub fn apply(v: &Vault, fixes: &[Fix]) -> Result<Applied> {
     super::refuse_headless()?;
     if !super::available(v) {
@@ -747,10 +815,13 @@ pub fn apply(v: &Vault, fixes: &[Fix]) -> Result<Applied> {
         }
     }
     let full: Vec<PathBuf> = files.iter().map(|(p, _)| page::inside(v, p)).collect::<Result<_>>()?;
+    let is_row = |o: &Op| matches!(o, Op::Row(..));
+    let log = v.detected.log.clone().filter(|_| fixes.iter().any(|f| f.ops.iter().any(is_row)));
     // git is asked first: between a file's check and its write nothing slow runs.
-    let dirty = if v.git.commit { git::dirty(&v.root, &full) } else { vec![] };
+    let targets: Vec<PathBuf> = full.iter().cloned().chain(log.iter().map(|l| super::join(&v.root, l))).collect();
+    let dirty = if v.git.commit { git::dirty(&v.root, &targets) } else { vec![] };
     let mut out = Applied::default();
-    let (mut done, mut written) = (vec![], vec![]);
+    let (mut done, mut written, mut rows) = (vec![], vec![], 0);
     for ((path, fs), full) in files.iter().zip(&full) {
         let now = std::fs::read(full).ok();
         let base = now.as_deref().map(page::sha);
@@ -759,28 +830,38 @@ pub fn apply(v: &Vault, fixes: &[Fix]) -> Result<Applied> {
             out.changed_since.push(path.to_string());
         }
         let Some(old) = now.filter(|_| !fresh.is_empty()).and_then(|b| String::from_utf8(b).ok()) else { continue };
-        let mut new = old.clone();
+        let (mut new, mut rows_here) = (old.clone(), 0);
         for f in fresh {
             match f.ops.iter().try_fold(new.clone(), |t, op| run(op, &t)) {
-                Ok(t) => new = t,
-                Err(_) => out.changed_since.push(path.to_string()),
+                Ok(t) => {
+                    new = t;
+                    rows_here += f.ops.iter().filter(|o| is_row(o)).count();
+                }
+                Err(e) => out.skipped.push(Skipped { key: f.key.clone(), why: format!("{e:#}") }),
             }
         }
         if new != old {
             crate::paths::write_atomic(full, new.as_bytes())?;
             out.written.push(path.to_string());
             written.push(full.clone());
-            done.push((path.to_string(), old, new));
+            done.push((path.to_string(), full, old, new));
+            rows += rows_here;
         }
     }
-    out.changed_since.dedup();
+    if let (Some(index), Some(log), true) = (v.path("index"), &log, rows > 0) {
+        if let Some(l) = page::log_rows(v, &index, rows)? {
+            out.written.push(log.clone());
+            written.push(l);
+        }
+    }
     out.commit = match written.len() {
         0 => git::Commit::Off.label(),
         1 => page::commit_one(v, &written, &dirty, &format!("Echo: Health fix in {}", out.written[0])),
         n => page::commit_one(v, &written, &dirty, &format!("Echo: Health fixes in {n} files")),
     };
-    for (path, old, new) in &done {
-        activity::changed(v, path, "health", None, Some(old), new, activity::commit_id(&out.commit));
+    // A file the user had changed isn't in the commit, so its line names none.
+    for (path, full, old, new) in &done {
+        activity::changed(v, path, "health", None, Some(old), new, activity::commit_id(&out.commit).filter(|_| !dirty.contains(full)));
     }
     Ok(out)
 }
@@ -903,13 +984,13 @@ fn scored(v: &Vault, ix: &Index) -> (Vec<Finding>, Vec<Finding>, Score, State) {
 // ── what the window and the CLI ask ──
 
 /// Health as the window shows it: the score, the findings (and the ignored ones apart), the history, the last AI
-/// check. `fixes_of`: a kind whose fixable findings' fixes are wanted too (*Fix all*'s sheet).
+/// check. `fixes_of`: a kind whose findings *Fix all* fixes, with their fixes (its sheet).
 pub fn view(v: &Vault, fixes_of: Option<&str>) -> Result<Value> {
     let ix = scan::index(v)?;
     let (shown, ignored, s, state) = scored(v, &ix);
     let mut j = json!({ "score": s, "findings": shown, "ignored": ignored, "history": state.history, "ai": state.ai, "pages": scope_pages(v, &ix) });
     if let Some(kind) = fixes_of {
-        let fixes: Vec<Value> = shown.iter().filter(|f| f.kind == kind && f.fixable).map(|f| fix(v, &f.key, None).map_or_else(|e| json!({ "key": f.key, "error": format!("{e:#}") }), |x| x.value())).collect();
+        let fixes: Vec<Value> = shown.iter().filter(|f| f.kind == kind && f.fix_all).map(|f| fix(v, &f.key, None).map_or_else(|e| json!({ "key": f.key, "error": format!("{e:#}") }), |x| x.value())).collect();
         j["fixes"] = json!(fixes);
     }
     Ok(j)

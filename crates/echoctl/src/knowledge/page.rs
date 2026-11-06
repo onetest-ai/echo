@@ -664,6 +664,18 @@ pub fn index_rows(v: &Vault, rels: &[String]) -> Result<Vec<Value>> {
     }).collect()
 }
 
+/// The `log.md` line for `added` pages put in the index (D18), appended when the vault keeps a log: its path.
+pub(super) fn log_rows(v: &Vault, index: &str, added: usize) -> Result<Option<PathBuf>> {
+    let Some(l) = v.detected.log.as_ref().map(|l| super::join(&v.root, l)).filter(|l| l.is_file()) else { return Ok(None) };
+    let mut t = std::fs::read_to_string(&l)?;
+    if !t.ends_with('\n') {
+        t.push('\n');
+    }
+    t.push_str(&format!("- {} · changed · {index} · {added} page{} added to the index by Echo\n", today(), if added == 1 { "" } else { "s" }));
+    crate::paths::write_atomic(&l, t.as_bytes())?;
+    Ok(Some(l))
+}
+
 /// Add index rows for `rels`: one write of the index (and a log line), one commit.
 pub fn index_add(v: &Vault, rels: &[String]) -> Result<Value> {
     super::refuse_headless()?;
@@ -691,15 +703,7 @@ pub fn index_add(v: &Vault, rels: &[String]) -> Result<Value> {
     if added > 0 {
         crate::paths::write_atomic(&ipath, text.as_bytes())?;
         written.push(ipath);
-        if let Some(l) = log.filter(|l| l.is_file()) {
-            let mut t = std::fs::read_to_string(&l)?;
-            if !t.ends_with('\n') {
-                t.push('\n');
-            }
-            t.push_str(&format!("- {} · changed · {index} · {added} page{} added to the index by Echo\n", today(), if added == 1 { "" } else { "s" }));
-            crate::paths::write_atomic(&l, t.as_bytes())?;
-            written.push(l);
-        }
+        written.extend(log_rows(v, &index, added)?);
     }
     let commit = if written.is_empty() { "off".into() } else { commit_one(v, &written, &dirty, &format!("Echo: {added} page{} added to the index", if added == 1 { "" } else { "s" })) };
     if added > 0 {

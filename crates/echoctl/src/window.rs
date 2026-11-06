@@ -2733,6 +2733,19 @@ mod tests {
     }
 
     #[test]
+    fn a_health_finding_is_named_by_its_key_decoded_once() {
+        // A Markdown link to a page with a space is written `%20`, and so is its finding's key.
+        let (_env, root) = crate::paths::testenv::folders("window-kn-health");
+        let t = crate::knowledge::fixture::twin(&root.join("twin"));
+        crate::knowledge::fixture::write(&t, "knowledge/topics/retro.md", "---\ntitle: Retro\n---\nSee [the plan](Pricing%20Plan.md).\n");
+        crate::knowledge::add(&t, crate::knowledge::AddOpts { name: Some("Twin".into()), ..Default::default() }).unwrap();
+        let key = "broken:knowledge/topics/retro.md:(Pricing%20Plan.md)";
+        let enc: String = key.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect();
+        let d = get_json(&format!("/api/kn/twin/health/{enc}"));
+        assert_eq!(d["finding"]["key"], key, "{d}");
+    }
+
+    #[test]
     fn call_detail_names_the_vaults_that_take_it() {
         let (_env, root) = crate::paths::testenv::folders("window-kn-call");
         let t = crate::knowledge::fixture::twin(&root.join("twin"));

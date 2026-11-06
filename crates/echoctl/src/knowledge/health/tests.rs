@@ -75,7 +75,7 @@ fn cats(s: &Score) -> Vec<(&str, f64, u32)> {
 }
 
 fn found(kind: &str, page: &str, by: By) -> Finding {
-    Finding { key: format!("{kind}:{page}"), kind: kind.into(), group: Group::Should, by, pages: vec![(page.into(), None)], title: String::new(), why: String::new(), fixable: false, subject: Subject::None }
+    Finding { key: format!("{kind}:{page}"), kind: kind.into(), group: Group::Should, by, pages: vec![(page.into(), None)], title: String::new(), why: String::new(), fixable: false, fix_all: false, subject: Subject::None }
 }
 
 #[test]
@@ -113,8 +113,12 @@ fn broken_links_point_to_the_closest_page() {
     assert_eq!(to_client.path, "knowledge/topics/retro.md");
     assert_eq!(removed(&to_client), ["Agreed with [[Northwind Retail]] to add a fallback."]);
     assert_eq!(added(&to_client), ["Agreed with [[clients/northwind-retail|Northwind Retail]] to add a fallback."]);
+    assert!(!to_client.guess);
     let to_note = fix(&v, &key("(notes/2026-1-05-a.md)"), None).unwrap();
     assert_eq!(added(&to_note), ["See [the sync](notes/2026-11-05-a.md)."]);
+    assert!(to_note.guess, "one character apart: offered, but a guess");
+    let fix_all = |k: &str| f.iter().find(|x| x.key == k).unwrap().fix_all;
+    assert!(fix_all(&key("[[Northwind Retail]]")) && !fix_all(&key("(notes/2026-1-05-a.md)")));
     let choices = |k: &str| detail(&v, k, None).unwrap()["choices"].as_array().unwrap().iter().map(|c| c["choice"].as_str().unwrap().to_string()).collect::<Vec<_>>();
     let d = detail(&v, &key("[[Northwind Retail]]"), None).unwrap();
     assert_eq!(d["choices"][0]["to"], "knowledge/clients/northwind-retail.md");
@@ -167,6 +171,9 @@ fn fix_all_writes_what_did_not_change_since_in_one_commit() {
     let lines = crate::knowledge::activity::recent(&v, "2000-01-01T00:00:00+00:00");
     assert_eq!(lines.len(), 2);
     assert!(lines.iter().all(|e| e.by == "health" && e.commit.is_some() && (e.plus, e.minus) == (1, 1)));
+    // Echo's own write is a new revision: the links it fixed resolve, so their findings are gone.
+    let after: Vec<String> = findings(&v, &scan::index(&v).unwrap()).into_iter().filter(|f| f.kind == "broken").map(|f| f.key).collect();
+    assert_eq!(after, ["broken:knowledge/topics/t2.md:[[Northwind Retail]]"]);
 }
 
 #[test]
@@ -307,4 +314,121 @@ fn a_new_vault_scores_100_on_code_checks_only() {
     assert_eq!(h["findings"], json!([]));
     assert_eq!((h["score"]["total"].as_u64(), h["score"]["code_only"].as_bool()), (Some(100), Some(true)));
     assert_eq!(h["history"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn a_dated_note_is_never_guessed_for_fix_all() {
+    // Ruling R36: Echo's notes are named by date, so a deleted week's note is 2 edits from the next week's.
+    let (_env, root) = crate::paths::testenv::folders("kn-health-guess");
+    let t = fixture::twin(&root.join("twin"));
+    let catalog = std::fs::read_to_string(t.join("knowledge/CATALOG.md")).unwrap();
+    fixture::write(&t, "knowledge/CATALOG.md", &format!("{catalog}| [2026-01-09-weekly-sync.md](notes/2026-01-09-weekly-sync.md) | gone | 2026-01-09 |\n"));
+    fixture::write(&t, "knowledge/notes/2026-01-16-weekly-sync.md", "---\ntitle: Weekly sync\n---\n# Weekly sync\n");
+    fixture::write(&t, "knowledge/topics/plan.md", "---\ntitle: Plan\n---\nAs agreed in [[2026-01-09-weekly-sync]].\n");
+    let v = knowledge::add(&t, AddOpts { name: Some("Twin".into()), ..Default::default() }).unwrap();
+    let f = findings(&v, &scan::index(&v).unwrap());
+    // An index row: only the same name elsewhere, or but for case or spacing; else removed.
+    let dead = "dead_row:knowledge/CATALOG.md:(notes/2026-01-09-weekly-sync.md)";
+    let choices = |k: &str| detail(&v, k, None).unwrap()["choices"].as_array().unwrap().iter().map(|c| c["choice"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+    assert_eq!(choices(dead), ["remove"], "no guessed page for an index row");
+    assert_eq!(fix(&v, dead, None).unwrap().choice, "remove");
+    // A broken link: the near name is offered on its own finding, with its diff, but never in Fix all.
+    let broken = "broken:knowledge/topics/plan.md:[[2026-01-09-weekly-sync]]";
+    let b = f.iter().find(|x| x.key == broken).unwrap();
+    assert!(b.fixable && !b.fix_all, "offered alone, not in Fix all");
+    let alone = fix(&v, broken, None).unwrap();
+    assert!(alone.guess);
+    assert_eq!(added(&alone), ["As agreed in [[notes/2026-01-16-weekly-sync|2026-01-09-weekly-sync]]."]);
+    let sheet = view(&v, Some("broken")).unwrap();
+    assert!(!sheet["fixes"].as_array().unwrap().iter().any(|x| x["key"] == broken), "not in Fix all's sheet");
+    assert!(view(&v, Some("dead_row")).unwrap()["fixes"].as_array().unwrap().iter().any(|x| x["key"] == dead && x["choice"] == "remove"));
+}
+
+#[test]
+fn an_index_row_fix_writes_slice_1s_log_line_in_the_same_commit() {
+    let (_env, root) = crate::paths::testenv::folders("kn-health-log");
+    if git::program().is_none() {
+        return;
+    }
+    let _iso = git::tests::isolated(&root, true);
+    let t = fixture::twin(&root.join("twin"));
+    fixture::write(&t, "log.md", "# Log\n\n- 2026-01-01 · created · the vault\n");
+    assert!(git::tests::repo(&t));
+    let v = knowledge::add(&t, AddOpts { name: Some("Twin".into()), commit: Some(true), ..Default::default() }).unwrap();
+    assert_eq!(v.detected.log.as_deref(), Some("log.md"));
+    let row = fix(&v, "not_in_index:knowledge/notes/2026-01-03-c.md", None).unwrap();
+    let a = apply(&v, &[row]).unwrap();
+    assert_eq!(a.written, ["knowledge/CATALOG.md", "log.md"]);
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    assert!(std::fs::read_to_string(t.join("log.md")).unwrap().ends_with(&format!("- {today} · changed · knowledge/CATALOG.md · 1 page added to the index by Echo\n")));
+    let files = git::out(&t, &["show", "--name-only", "--format=", "HEAD"]).unwrap();
+    assert_eq!(files.lines().collect::<Vec<_>>(), ["knowledge/CATALOG.md", "log.md"], "one commit with both");
+}
+
+/// The twin with dead index rows: a wikilink on a table row, a link both on a row and in prose, two on one row.
+fn dead_rows(root: &Path) -> Vault {
+    let t = fixture::twin(&root.join("twin"));
+    let catalog = std::fs::read_to_string(t.join("knowledge/CATALOG.md")).unwrap();
+    fixture::write(&t, "knowledge/CATALOG.md", &format!("{catalog}| [[Northwind Retail]] | Northwind | 2026-01-02 |\n| [old.md](notes/old.md) | gone | 2026-01-06 |\n| [x.md](notes/x-gone.md) and [y.md](notes/y-gone.md) | two | 2026-01-07 |\n\nSee also [the old notes](notes/old.md) for history.\n"));
+    fixture::write(&t, "knowledge/clients/northwind-retail.md", "---\ntitle: Northwind Retail\n---\n# Northwind Retail\n");
+    knowledge::add(&t, AddOpts { name: Some("Twin".into()), ..Default::default() }).unwrap()
+}
+
+#[test]
+fn a_relinked_table_row_keeps_its_cells() {
+    let (_env, root) = crate::paths::testenv::folders("kn-health-cells");
+    let v = dead_rows(&root);
+    // On a table row the alias's `|` is escaped, else it splits the row's cells.
+    let to = fix(&v, "dead_row:knowledge/CATALOG.md:[[Northwind Retail]]", None).unwrap();
+    assert_eq!(added(&to), ["| [[clients/northwind-retail\\|Northwind Retail]] | Northwind | 2026-01-02 |"]);
+}
+
+#[test]
+fn a_dead_link_in_prose_keeps_its_words() {
+    let (_env, root) = crate::paths::testenv::folders("kn-health-prose");
+    let v = dead_rows(&root);
+    // Removing: the table row goes; a line of prose keeps its words.
+    let old = fix(&v, "dead_row:knowledge/CATALOG.md:(notes/old.md)", Some("remove")).unwrap();
+    assert_eq!(removed(&old), ["| [old.md](notes/old.md) | gone | 2026-01-06 |", "See also [the old notes](notes/old.md) for history."]);
+    assert_eq!(added(&old), ["See also the old notes for history."]);
+}
+
+#[test]
+fn a_fix_with_nothing_left_to_do_is_skipped_not_changed_since() {
+    let (_env, root) = crate::paths::testenv::folders("kn-health-skip");
+    let v = dead_rows(&root);
+    // Two dead links on one row: the first fix removes the row, the second has nothing left to do — skipped, with why.
+    let x = fix(&v, "dead_row:knowledge/CATALOG.md:(notes/x-gone.md)", None).unwrap();
+    let y = fix(&v, "dead_row:knowledge/CATALOG.md:(notes/y-gone.md)", None).unwrap();
+    let a = apply(&v, &[x, y]).unwrap();
+    assert_eq!((a.written, a.changed_since), (vec!["knowledge/CATALOG.md".to_string()], vec![]));
+    assert_eq!(a.skipped.iter().map(|s| s.key.as_str()).collect::<Vec<_>>(), ["dead_row:knowledge/CATALOG.md:(notes/y-gone.md)"]);
+    assert!(a.skipped[0].why.contains("isn't there"), "{}", a.skipped[0].why);
+}
+
+#[test]
+fn a_file_left_out_of_the_commit_has_no_commit_in_its_activity() {
+    let (_env, root) = crate::paths::testenv::folders("kn-health-act");
+    if git::program().is_none() {
+        return;
+    }
+    let _iso = git::tests::isolated(&root, true);
+    let t = fixture::twin(&root.join("twin"));
+    fixture::write(&t, "knowledge/clients/northwind-retail.md", "---\ntitle: Northwind Retail\n---\n# Northwind Retail\n");
+    for n in 1..=2 {
+        fixture::write(&t, &format!("knowledge/topics/t{n}.md"), &format!("---\ntitle: T{n}\n---\nWith [[Northwind Retail]] ({n}).\n"));
+    }
+    assert!(git::tests::repo(&t));
+    // Lena Hartmann's own change, not committed, before Health looks.
+    fixture::write(&t, "knowledge/topics/t2.md", "---\ntitle: T2\n---\nWith [[Northwind Retail]] (2), not committed yet.\n");
+    let v = knowledge::add(&t, AddOpts { name: Some("Twin".into()), commit: Some(true), ..Default::default() }).unwrap();
+    let fixes: Vec<Fix> = ["knowledge/topics/t1.md", "knowledge/topics/t2.md"].iter().map(|p| fix(&v, &format!("broken:{p}:[[Northwind Retail]]"), None).unwrap()).collect();
+    let a = apply(&v, &fixes).unwrap();
+    assert_eq!(a.written.len(), 2);
+    let files = git::out(&t, &["show", "--name-only", "--format=", "HEAD"]).unwrap();
+    assert_eq!(files.lines().collect::<Vec<_>>(), ["knowledge/topics/t1.md"], "only the file that was clean");
+    let lines = crate::knowledge::activity::recent(&v, "2000-01-01T00:00:00+00:00");
+    let commit_of = |p: &str| lines.iter().find(|e| e.path == p).unwrap().commit.clone();
+    assert!(commit_of("knowledge/topics/t1.md").is_some());
+    assert_eq!(commit_of("knowledge/topics/t2.md"), None, "it isn't in the commit");
 }
