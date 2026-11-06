@@ -2,7 +2,7 @@
 id: S-15
 title: First day on a fresh Mac: install, folder, model, permissions, the CLI and Claude Code
 run: person
-env: a fresh macOS VM restored to a clean snapshot each run (not this Mac: it has Echo and its permissions already), the release DMG
+env: the second Mac: a test user account where Echo has never been (reset between runs: the app, its data and config folders and LaunchAgent removed; its permissions reset by the user), the release DMG
 cases:
   - tests/cases/install/TC-001_dmg-fresh-mac.md
   - tests/cases/install/TC-002_choose-data-folder.md
@@ -17,7 +17,7 @@ cases:
 
 # S-15: First day on a fresh Mac: install, folder, model, permissions, the CLI and Claude Code
 
-**Environment:** a fresh macOS VM restored to a clean snapshot each run (not this Mac: it has Echo and its permissions already), the release DMG
+**Environment:** the second Mac: a test user account where Echo has never been (reset between runs: the app, its data and config folders and LaunchAgent removed; its permissions reset by the user), the release DMG
 
 **Story:** A new user downloads Echo, installs it, picks where calls live, gets the speech model, grants what Echo asks for, puts the CLI on the PATH, connects Claude Code, and finds Echo there after the next login.
 
@@ -36,4 +36,4 @@ cases:
 | 9 | `lifecycle/TC-001_start-at-login.md` | 1 | — |
 
 ## Notes
-- Stages 4–5 answer macOS permission prompts: only inside the test VM.
+- Stages 4–5 check that the macOS permission prompts appear and name Echo; answering them is the user's (a security setting).

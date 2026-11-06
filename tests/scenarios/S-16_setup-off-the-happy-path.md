@@ -2,7 +2,7 @@
 id: S-16
 title: Setup off the happy path: default folder, model later, broken download, denied permissions
 run: person
-env: a fresh macOS VM restored to a clean snapshot each run (not this Mac: it has Echo and its permissions already), the release DMG
+env: the second Mac: a test user account where Echo has never been (reset between runs: the app, its data and config folders and LaunchAgent removed; its permissions reset by the user), the release DMG
 cases:
   - tests/cases/install/TC-003_default-data-folder.md
   - tests/cases/install/TC-005_model-later.md
@@ -16,7 +16,7 @@ cases:
 
 # S-16: Setup off the happy path: default folder, model later, broken download, denied permissions
 
-**Environment:** a fresh macOS VM restored to a clean snapshot each run (not this Mac: it has Echo and its permissions already), the release DMG
+**Environment:** the second Mac: a test user account where Echo has never been (reset between runs: the app, its data and config folders and LaunchAgent removed; its permissions reset by the user), the release DMG
 
 **Story:** The same first run, but the user takes the defaults, postpones the model, loses Wi-Fi during a download, removes a model, and refuses permissions before granting them later.
 
@@ -34,4 +34,4 @@ cases:
 | 8 | `permissions/TC-007_screen-recording-frames.md` | — | — |
 
 ## Notes
-- Permission stages reset with `tccutil reset All ai.onetest.echo` inside the VM.
+- Permission stages need Echo's permissions reset first (`tccutil reset All ai.onetest.echo`, by the user) and the prompts answered by the user.
