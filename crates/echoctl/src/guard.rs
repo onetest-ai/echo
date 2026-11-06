@@ -115,8 +115,8 @@ pub struct VaultScope {
     skills: Vec<String>,
     /// The sources folder, relative to the root (`RUN_SOURCES`): read, never written.
     sources: Option<PathBuf>,
-    /// Windows' rules: names bind reads too (there `.git.` is `.git` and `aux.md` a device), and a backslash in a glob
-    /// separates folders (elsewhere it escapes the next character). `cfg!(windows)`, a field so that both are tested.
+    /// Windows' rule: names bind reads too (there `.git.` is `.git` and `aux.md` a device). `cfg!(windows)`, a field
+    /// so that both are tested.
     windows: bool,
 }
 
@@ -740,43 +740,36 @@ impl VaultScope {
         }
     }
 
-    /// A glob of Glob (`pattern`, `whole`) or Grep (`glob`), searched from `from`, in each of the globs the tool
-    /// hands ripgrep for it (`readings`), read by a glob matcher as globset reads it (`parse_glob`; what it can't
-    /// read is refused). Refused when one starts from home (`~`) or climbs (`..`); when a segment of it other than
-    /// `**` could name `.git` in any spelling (`*`, `.g*`, `[!]]git`, `.GIT`); for Grep when it ends in `**` (it would
-    /// take a `.git` folder, which undoes Claude Code's own `!.git`); for Glob when it starts with `!` (it would list
-    /// everything else) or is only `**` from the vault's root; or when its fixed part — up to the last folder before
-    /// its first wildcard, absolute or from `from` — isn't readable (a link out, the file system's root).
+    /// A glob of Glob (`pattern`, `whole`) or Grep (`glob`), searched from `from`: each of the globs the tool hands
+    /// ripgrep for it (`readings`) is in the subset the guard reads exactly (ruling R17: literal text, `*`, `**` as a
+    /// whole folder, flat braces; `safe`). Refused when one starts from home (`~`) or climbs (`..`); when a segment of
+    /// it other than `**` could name `.git` in any spelling (`*`, `.g*`, `.GIT`: `names_git`); for Grep when it ends
+    /// in `**` (it would take a `.git` folder, which undoes Claude Code's own `!.git`); for Glob when it is only `**`
+    /// from the vault's root; or when its fixed part — up to the last folder before its first `*`, absolute or from
+    /// `from` — isn't readable (a link out, the file system's root). A Grep piece starting with `!` only leaves files
+    /// out.
     fn glob(&self, whole: bool, g: &str, from: &Path, results: Option<&Path>) -> Result<(), String> {
         // Claude Code splits at JavaScript's whitespace, which Rust's misses some of (U+FEFF).
         if g.chars().any(bent) {
             return Err(format!("the pattern {g:?} holds a character no path does (an invisible one, or whitespace but a space)"));
         }
-        // A backslash separates folders on Windows; elsewhere ripgrep takes it as an escape (`.\git` is `.git`).
-        if !self.windows && g.contains('\\') {
-            return Err(format!("the pattern {g:?} has a backslash: an escape here, not a folder's separator"));
-        }
-        for one in readings(&g.replace('\\', "/"), whole)? {
+        for one in readings(g, whole)? {
             let parts: Vec<&str> = one.split('/').collect();
             if one.starts_with('~') || parts.contains(&"..") {
                 return Err(format!("the pattern {one} reaches outside the vault"));
             }
-            // Grep's `!…` only leaves files out; Glob's would list all the rest.
-            let excludes = one.starts_with('!');
-            if excludes && whole {
-                return Err(format!("the pattern {one} would list everything it doesn't name, git's folder too"));
-            }
-            let segs = parse_glob(one.strip_prefix('!').unwrap_or(&one).trim_matches('/'))?;
-            if excludes {
+            // Grep's `!…` can't bring git's folder back (Glob's never gets here: `safe`).
+            if one.starts_with('!') {
                 continue;
             }
+            let segs = parse_glob(one.trim_matches('/'));
             if segs.iter().any(names_git) {
                 return Err(format!("the pattern {one} could name git's folder"));
             }
             if !whole && matches!(segs.last(), Some(Seg::Any)) {
                 return Err(format!("the pattern {one} ends in **: it would take git's folder too"));
             }
-            let fixed = match one.find(['*', '?', '[']) {
+            let fixed = match one.find('*') {
                 Some(w) => &one[..one[..w].rfind('/').map_or(0, |s| s + 1)],
                 None => one.as_str(),
             };
@@ -788,8 +781,8 @@ impl VaultScope {
                 p
             };
             // Glob's `**` alone, from the root, lists the vault's `.git` too; from a folder inside, only that folder.
-            let rest = parse_glob(one[fixed.len()..].trim_matches('/'))?;
-            if whole && start == self.root && !one[fixed.len()..].is_empty() && rest.iter().all(|s| matches!(s, Seg::Any)) {
+            let rest = &one[fixed.len()..];
+            if whole && start == self.root && !rest.is_empty() && parse_glob(rest.trim_matches('/')).iter().all(|s| matches!(s, Seg::Any)) {
                 return Err(format!("the pattern {one} lists everything in the vault, git's folder too"));
             }
         }
@@ -817,14 +810,14 @@ impl VaultScope {
     }
 }
 
-/// The globs Claude Code (2.1.310) hands ripgrep for `g`, braces expanded (`clients/{a,b}.md` is `clients/a.md` and
-/// `clients/b.md`): Glob's pattern whole (`whole`); Grep's `glob` split at spaces, and a piece without both braces at
-/// its commas too. A tool never sends the others, and the matcher would refuse some legitimate ones among them
-/// (`*.md **/*.txt` read whole has `**` glued to a name).
+/// The globs Claude Code (2.1.310) hands ripgrep for `g` — Glob's pattern whole (`whole`); Grep's `glob` split at
+/// spaces, and a piece without both braces at its commas too —, each in the safe subset (`safe`), braces expanded
+/// (`clients/{a,b}.md` is `clients/a.md` and `clients/b.md`). A tool never sends the others.
 fn readings(g: &str, whole: bool) -> Result<Vec<String>, String> {
     let pieces: Vec<&str> = if whole { vec![g] } else { g.split(' ').flat_map(|p| if p.contains('{') && p.contains('}') { vec![p] } else { p.split(',').collect() }).collect() };
     let mut out = vec![];
-    for r in pieces.into_iter().filter(|r| !r.is_empty()) {
+    for r in pieces {
+        safe(r, whole)?;
         out.extend(alternatives(r)?);
     }
     if out.len() > 1024 {
@@ -833,9 +826,37 @@ fn readings(g: &str, whole: bool) -> Result<Vec<String>, String> {
     Ok(out)
 }
 
+/// Is `g` — Glob's pattern (`whole`) or a piece of Grep's — in the subset the guard reads exactly (ruling R17):
+/// literal text, `*` within a name, `**` as a whole folder, `/`, flat braces (`alternatives`)? Refused: nothing, or
+/// `#` first (ripgrep takes either as no glob: Glob would list everything); `!` but first in a Grep piece (an
+/// exclusion: Glob's would list all the rest); `?`, `[`, `]`, `\` (globset's classes and escapes, on every system);
+/// a space in Glob's (ripgrep drops one at the end: `* ` is `*`); `**` beside anything but a `/` (beside a brace
+/// globset reads it as two `*` in a name).
+fn safe(g: &str, whole: bool) -> Result<(), String> {
+    let body = if whole { g } else { g.strip_prefix('!').unwrap_or(g) };
+    if body.is_empty() || g.starts_with('#') {
+        return Err(format!("the pattern {g:?} is empty or a comment to ripgrep, not a glob"));
+    }
+    if let Some(c) = body.chars().find(|c| matches!(c, '?' | '[' | ']' | '\\' | '!')) {
+        return Err(format!("the pattern {g:?} has a {c:?}: a search glob holds only names, `*`, `**` and braces (and Grep's `!` first)"));
+    }
+    if whole && body.contains(' ') {
+        return Err(format!("the pattern {g:?} has a space: a folder whose name has one is searched with `path`"));
+    }
+    if body.split('/').any(|s| s.contains("**") && s != "**") {
+        return Err(format!("the pattern {g:?} has `**` beside other characters: it is a folder of its own"));
+    }
+    Ok(())
+}
+
 /// The globs braces make of `g`: one group after another, none inside another (ripgrep has no nested groups), each
-/// closed; at most 256.
+/// closed, its alternatives literal text and `*` — none empty (globset drops it: `{,a}` is `a`), none with `**`; no
+/// comma beside them (that piece goes to ripgrep whole, which reads the comma as itself); no `*` meeting another
+/// across a brace (`*{*,a}` is two `*` in a name to globset, not `**`); at most 256.
 fn alternatives(g: &str) -> Result<Vec<String>, String> {
+    if !g.contains(['{', '}']) {
+        return Ok(vec![g.to_string()]);
+    }
     let mut out = vec![String::new()];
     let mut rest = g;
     while let Some(open) = rest.find(['{', '}']) {
@@ -845,26 +866,46 @@ fn alternatives(g: &str) -> Result<Vec<String>, String> {
             _ => return Err(format!("the pattern {g} has braces that don't pair (or one group inside another)")),
         };
         let (head, choices) = (&rest[..open], rest[open + 1..close].split(',').collect::<Vec<_>>());
-        out = out.iter().flat_map(|o| choices.iter().map(move |c| format!("{o}{head}{c}"))).collect();
-        if out.len() > 256 {
+        if head.contains(',') {
+            return Err(format!("the pattern {g} has a comma beside its braces: ripgrep reads it as itself"));
+        }
+        if choices.iter().any(|c| c.is_empty() || c.contains("**")) {
+            return Err(format!("the pattern {g} has an alternative that is empty or holds `**`"));
+        }
+        let mut next = vec![];
+        for o in &out {
+            let o = join(o, head)?;
+            for c in &choices {
+                next.push(join(&o, c)?);
+            }
+        }
+        if next.len() > 256 {
             return Err(format!("the pattern {g} has too many alternatives"));
         }
+        out = next;
         rest = &rest[close + 1..];
     }
-    Ok(out.into_iter().map(|o| o + rest).collect())
+    if rest.contains(',') {
+        return Err(format!("the pattern {g} has a comma beside its braces: ripgrep reads it as itself"));
+    }
+    out.iter().map(|o| join(o, rest)).collect()
 }
 
-/// One step of a glob's name, as globset (ripgrep's) reads it.
+/// `a` and then `b`, across a brace: refused where a `*` meets another.
+fn join(a: &str, b: &str) -> Result<String, String> {
+    if a.ends_with('*') && b.starts_with('*') {
+        return Err(format!("in {a}{b} a `*` meets another across a brace: globset reads them as two `*` in a name, not `**`"));
+    }
+    Ok(format!("{a}{b}"))
+}
+
+/// One step of a name in a glob of the safe subset.
 #[derive(Debug)]
 enum Tok {
     /// A character as it is.
     Char(char),
-    /// `?`: any one character.
-    One,
     /// `*`: any run of characters within the name.
     Star,
-    /// `[…]`: one character in these ranges — or, `[!…]` / `[^…]`, not in them.
-    Class { not: bool, ranges: Vec<(char, char)> },
 }
 
 /// A glob's segment (between `/`): `**`, any number of whole folders; or a name.
@@ -874,110 +915,39 @@ enum Seg {
     Name(Vec<Tok>),
 }
 
-/// A glob (braces expanded) as globset reads it, segment by segment. Refused: what globset refuses (a class without
-/// its `]`, which also takes `[]` and `[!]`; a range backwards; `**` beside other characters) and a brace or a
-/// backslash left over — whatever the guard can't read, it doesn't let through.
-fn parse_glob(g: &str) -> Result<Vec<Seg>, String> {
-    g.split('/').map(|s| {
-        if s == "**" {
-            return Ok(Seg::Any);
-        }
-        if s.contains("**") {
-            return Err(format!("`**` is a folder of its own, not part of {s}"));
-        }
-        let cs: Vec<char> = s.chars().collect();
-        let mut toks = vec![];
-        let mut i = 0;
-        while i < cs.len() {
-            toks.push(match cs[i] {
-                '?' => Tok::One,
-                '*' => Tok::Star,
-                c @ ('{' | '}' | '\\') => return Err(format!("{s} has a {c} the guard doesn't read")),
-                '[' => {
-                    i += 1;
-                    let not = matches!(cs.get(i), Some('!' | '^'));
-                    i += usize::from(not);
-                    let mut ranges = vec![];
-                    loop {
-                        let c = *cs.get(i).ok_or_else(|| format!("{s} has a class without its ]"))?;
-                        // A `]` first is itself; a `-` first or last too.
-                        if c == ']' && !ranges.is_empty() {
-                            break;
-                        }
-                        match (cs.get(i + 1), cs.get(i + 2)) {
-                            (Some('-'), Some(&d)) if d != ']' => {
-                                if d < c {
-                                    return Err(format!("{s} has a range backwards"));
-                                }
-                                ranges.push((c, d));
-                                i += 3;
-                            }
-                            _ => {
-                                ranges.push((c, c));
-                                i += 1;
-                            }
-                        }
-                    }
-                    Tok::Class { not, ranges }
-                }
-                c => Tok::Char(c),
-            });
-            i += 1;
-        }
-        Ok(Seg::Name(toks))
-    }).collect()
+/// A glob of the safe subset (`safe`, braces expanded), segment by segment.
+fn parse_glob(g: &str) -> Vec<Seg> {
+    g.split('/').map(|s| if s == "**" { Seg::Any } else { Seg::Name(s.chars().map(|c| if c == '*' { Tok::Star } else { Tok::Char(c) }).collect()) }).collect()
 }
 
-impl Tok {
-    fn takes(&self, c: char) -> bool {
-        match self {
-            Tok::Char(x) => *x == c,
-            Tok::One | Tok::Star => true,
-            Tok::Class { not, ranges } => ranges.iter().any(|&(a, b)| a <= c && c <= b) != *not,
-        }
-    }
-}
-
-/// Can the name's steps `toks` match a name spelled `name` (each place: the characters it may be)?
-fn name_matches(toks: &[Tok], name: &[Vec<char>]) -> bool {
+/// Could this segment name `.git`, in any spelling a file system that ignores case takes for it (`fold`: `.GIT`,
+/// `.gıt`)? A `*` takes any run of characters, none too; a character, one that folds as it does.
+fn names_git(seg: &Seg) -> bool {
+    let Seg::Name(toks) = seg else {
+        return false;
+    };
+    let name: Vec<String> = ".git".chars().map(|c| fold(&c.to_string())).collect();
     // How much of the name the steps so far can have matched: each count they may be at.
     let mut at = vec![false; name.len() + 1];
     at[0] = true;
     for t in toks {
         let mut next = vec![false; name.len() + 1];
-        if let Tok::Star = t {
-            if let Some(first) = at.iter().position(|&a| a) {
-                next[first..].fill(true);
+        match t {
+            Tok::Star => {
+                if let Some(first) = at.iter().position(|&a| a) {
+                    next[first..].fill(true);
+                }
             }
-        } else {
-            for (k, cs) in name.iter().enumerate() {
-                if at[k] && cs.iter().any(|&c| t.takes(c)) {
-                    next[k + 1] = true;
+            Tok::Char(c) => {
+                let c = fold(&c.to_string());
+                for (k, n) in name.iter().enumerate() {
+                    next[k + 1] = at[k] && *n == c;
                 }
             }
         }
         at = next;
     }
     at[name.len()]
-}
-
-/// Each character of `name` with every one a file system that ignores case takes for it (`fold`): `g`, `G`; `i`,
-/// `I`, `ı`; …
-fn spellings(name: &str) -> Vec<Vec<char>> {
-    name.chars()
-        .map(|c| {
-            let key = fold(&c.to_string());
-            let mut v: Vec<char> = [c, '\u{131}', '\u{17F}', '\u{212A}'].into_iter().chain(c.to_uppercase()).chain(c.to_lowercase()).filter(|x| fold(&x.to_string()) == key).collect();
-            v.sort_unstable();
-            v.dedup();
-            v
-        })
-        .collect()
-}
-
-/// Could this segment name `.git`, in any spelling a file system that ignores case takes for it?
-fn names_git(seg: &Seg) -> bool {
-    matches!(seg, Seg::Name(t) if name_matches(t, &spellings(".git")))
 }
 
 /// A field of a tool call that, when given, is text.
@@ -2230,7 +2200,7 @@ mod tests {
                 assert!(denied(s.decide(&tool(t, input.clone()))), "{t} {input}");
             }
         }
-        // Where a backslash separates folders, a glob naming one is refused too.
+        // On Windows a glob naming one is refused too.
         let mut w = chat_scope(&v, "ask");
         w.vault.as_mut().unwrap().windows = true;
         for g in [r"\\host\share\*", r"\??\UNC\host\share\*", r"\\?\UNC\host\share\*"] {
@@ -2245,23 +2215,17 @@ mod tests {
     }
 
     #[test]
-    fn a_backslash_in_a_glob_is_an_escape_off_windows() {
+    fn a_backslash_in_a_glob_is_refused_on_every_system() {
+        // ripgrep reads `\` in a glob as an escape (`.\git` is `.git`); its `ignore` crate builds globs that way on
+        // every system, so on Windows too the guard doesn't take it as a folder's separator.
         let (root, v) = vault_fixture("backslash");
         let mut s = chat_scope(&v, "ask");
-        s.vault.as_mut().unwrap().windows = false;
-        // ripgrep there reads `\g` as `g`: `.\git` is `.git`.
-        for g in [r".\git/**", r".gi\t/*", r"\.git/*", r".\git .\git/**", r"knowledge\*.md"] {
-            assert!(denied(s.decide(&tool("Glob", json!({"pattern": g})))), "Glob {g}");
-            assert!(denied(s.decide(&tool("Grep", json!({"pattern": "x", "glob": g})))), "Grep {g}");
-        }
-        // On Windows a backslash separates folders.
-        s.vault.as_mut().unwrap().windows = true;
-        for g in [r"knowledge\**\*.md", r"knowledge\clients\*.md"] {
-            assert_eq!(s.decide(&tool("Glob", json!({"pattern": g}))), Decision::Allow, "Glob {g}");
-            assert_eq!(s.decide(&tool("Grep", json!({"pattern": "x", "glob": g}))), Decision::Allow, "Grep {g}");
-        }
-        for g in [r".git\*", r"knowledge\..\..\outside\*", r"**\.gi?\config"] {
-            assert!(denied(s.decide(&tool("Glob", json!({"pattern": g})))), "{g}");
+        for windows in [false, true] {
+            s.vault.as_mut().unwrap().windows = windows;
+            for g in [r".\git/**", r".gi\t/*", r"\.git/*", r".\git .\git/**", r"knowledge\*.md", r"knowledge\**\*.md", r"knowledge\clients\*.md", r".git\*", r"knowledge\..\..\outside\*"] {
+                assert!(denied(s.decide(&tool("Glob", json!({"pattern": g})))), "Glob {g} (windows: {windows})");
+                assert!(denied(s.decide(&tool("Grep", json!({"pattern": "x", "glob": g})))), "Grep {g} (windows: {windows})");
+            }
         }
         let _ = fs::remove_dir_all(&root);
     }
@@ -2291,48 +2255,65 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
     }
 
-    /// Does glob `g` match `path`, spelled exactly so, as globset would? `**` takes any number of whole folders.
-    fn glob_matches(g: &str, path: &str) -> Result<bool, String> {
-        fn walk(segs: &[Seg], names: &[&str]) -> bool {
-            match segs.split_first() {
-                None => names.is_empty(),
-                Some((Seg::Any, rest)) => (0..=names.len()).any(|k| walk(rest, &names[k..])),
-                Some((Seg::Name(t), rest)) => names.split_first().is_some_and(|(n, more)| name_matches(t, &n.chars().map(|c| vec![c]).collect::<Vec<_>>()) && walk(rest, more)),
-            }
+    #[test]
+    fn the_safe_subset_is_all_a_search_glob_may_use() {
+        // Ruling R17: literal text, `*` within a name, `**` as a whole folder, `/`, and flat braces of literal text and
+        // `*` — nothing whose reading by globset or ripgrep the guard would have to guess. Glob's pattern is read whole
+        // (`readings(g, true)`); Grep's glob in pieces (`readings(g, false)`).
+        let glob = |g: &str| readings(g, true);
+        let grep = |g: &str| readings(g, false);
+        for g in [
+            "*.md", "**/*.md", "knowledge/**", "knowledge/**/*.md", "clients/{a,b}.md", "*.{md,txt}", "{*.md,*.txt}", "**/{README,NOTES}*", "{knowledge,notes}/**/*.md",
+            "знания/*.md", "notes/会议-*.md", "Kunde_Müller-2026.md", "a,b.md", "notes#1.md", "(draft)@x+y=z;~'%^$&.md",
+        ] {
+            assert!(glob(g).is_ok() && grep(g).is_ok(), "{g}");
         }
-        Ok(walk(&parse_glob(g)?, &path.split('/').collect::<Vec<_>>()))
+        // Refused for both tools, each line one rule.
+        for g in [
+            "?git", ".gi?",                                                  // `?`
+            "[.]git", "x[y", "a]b",                                          // a class, or half of one
+            r".gi\t", r"knowledge\*.md",                                     // an escape, on every system
+            "#x", "#",                                                       // a comment to ripgrep: no glob at all
+            "",                                                              // nothing
+            "{!}x", "a!b", "!!x",                                            // `!` but first in a Grep piece
+            "a**b", "**x/y.md", "x/***/y.md", "**{a,b}", "{knowledge/,notes/}**/config", // `**` beside anything but `/`
+            "{knowledge/**/x.md,y.md}",                                      // `**` in braces
+            "x/*{*,a}/config", "{a*,b}*/config",                             // a `*` meeting another across a brace
+            "{,a}.md", "x{a,}", "{}",                                        // an empty alternative (globset drops it)
+            "a,{b,c}", "{a,b},c",                                            // a comma beside braces
+            "{a,{b,c}}", "{a", "a}",                                         // nested, unpaired
+        ] {
+            assert!(glob(g).is_err() && grep(g).is_err(), "{g:?}");
+        }
+        // Glob: never an exclusion (ripgrep would list all the rest), never a space (it drops one at the end: `* ` is `*`).
+        for g in ["!x", "!*.md", "* ", "notes/Acme Corp.md"] {
+            assert!(glob(g).is_err(), "Glob {g:?}");
+        }
+        // Grep: pieces at spaces, and at commas when they don't hold both braces; an exclusion first in one; none empty.
+        assert_eq!(grep("!**/*.tmp *.md").unwrap(), ["!**/*.tmp", "*.md"]);
+        assert_eq!(grep("*.md,*.txt clients/{a,b}.md").unwrap(), ["*.md", "*.txt", "clients/a.md", "clients/b.md"]);
+        assert_eq!(glob("**/*.{md,txt}").unwrap(), ["**/*.md", "**/*.txt"]);
+        for g in ["!", "*.md,", ",*.md", "*.md  *.txt", " *.md", "*.md "] {
+            assert!(grep(g).is_err(), "Grep {g:?}");
+        }
     }
 
     #[test]
-    fn the_glob_matcher_reads_globs_as_globset_does() {
-        let m = |g: &str, p: &str| glob_matches(g, p).unwrap_or(false);
-        // Classes: `!` or `^` negates; a `]` first is itself; ranges; a `-` first or last is itself.
-        assert!(m("[!]]", "a") && !m("[!]]", "]"));
-        assert!(m("[]a]", "]") && m("[]a]", "a") && !m("[]a]", "b"));
-        assert!(m("[a-c]", "b") && !m("[a-c]", "d"));
-        assert!(m("[^x]git", ".git") && !m("[^x]git", "xgit"));
-        assert!(m("[-a]", "-") && m("[a-]", "-") && !m("[a-]", "b"));
-        // `*` and `?` stay within a name.
-        assert!(m("*", "abc") && m("*", ".git") && !m("*", "a/b"));
-        assert!(m("*.md", "x.md") && m("*.md", ".md") && !m("*.md", "x/y.md"));
-        assert!(m("?", "a") && !m("?", "ab") && !m("?", "a/b"));
-        // `**`: any number of whole folders, at the start, in the middle, at the end.
-        assert!(m("**/x", "x") && m("**/x", "a/x") && m("**/x", "a/b/x") && !m("**/x", "a/y"));
-        assert!(m("a/**/b", "a/b") && m("a/**/b", "a/x/b") && m("a/**/b", "a/x/y/b") && !m("a/**/b", "a/x/c"));
-        assert!(m("a/**", "a/x") && m("a/**", "a/x/y") && !m("a/**", "b/x"));
-        // What globset refuses, or what a run never needs (a brace left after expansion, a backslash), is refused.
-        for g in ["[", "[]", "[!]", "[abc", "a**b", "**a", "a/**b/c", "[z-a]", "{a,b}", r"a\b"] {
-            assert!(parse_glob(g).is_err(), "{g}");
+    fn a_segment_names_git_by_its_letters_and_stars() {
+        // A segment of the safe subset is literal text and `*` (any run of characters within a name): it is matched
+        // against `.git` itself, in every spelling a file system that ignores case takes for it (`.GIT`, `.gıt`). Grep
+        // pieces with no folder in front: nothing but that match decides them.
+        let (root, v) = vault_fixture("segments");
+        let s = chat_scope(&v, "ask");
+        let grep = |g: &str| s.decide(&tool("Grep", json!({"pattern": "x", "glob": g})));
+        for g in ["*", ".*", "*t", "*.*", "*i*", "*g*", ".g*", ".G*T", ".Gı*", "*ıT", "**/x/.gi*", "x/.GIT/*.md"] {
+            assert!(denied(grep(g)), "Grep {g}");
         }
-        // Every spelling a file system that ignores case takes for `.git`.
-        let git = spellings(".git");
-        let names_it = |g: &str| matches!(parse_glob(g).as_deref(), Ok([Seg::Name(t)]) if name_matches(t, &git));
-        for g in [".git", ".GIT", ".Git", ".gıt", ".[!g]it", "[!x]GIT", "*", ".g*"] {
-            assert!(names_it(g), "{g}");
+        for g in [".gitignore", "*.md", "git*", ".gi", "x*", ".g*x", "*.git.*", ".git.md", "**/.gitkeep", "*.GIT*x"] {
+            assert_eq!(grep(g), Decision::Allow, "Grep {g}");
         }
-        for g in [".gitignore", "*.md", "git", ".[!gG]it"] {
-            assert!(!names_it(g), "{g}");
-        }
+        assert!(denied(s.decide(&tool("Glob", json!({"pattern": ".G*T/config"})))));
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -2365,6 +2346,41 @@ mod tests {
         for g in ["[abc", "a**b", "[]", "[z-a]/*.md"] {
             assert!(denied(grep(g)) && denied(glob(g)), "{g}");
         }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn search_globs_use_a_safe_subset_the_guard_checks_exactly() {
+        // Ruling R17. Each refused one, read by ripgrep, reached `.git`, searched all, or read otherwise than the guard
+        // did: `[a-c-h]` is `[a-h]` to globset; `[!x]` and `[.-0]` take a `/`; `#x` is a comment (no glob: Glob lists
+        // everything); `{!}x` is the name `!x`, not an exclusion; `a,{.git,b}` reads as two globs but goes as one.
+        let (root, v) = vault_fixture("subset");
+        let s = chat_scope(&v, "ask");
+        let grep = |g: &str| s.decide(&tool("Grep", json!({"pattern": "x", "glob": g})));
+        let glob = |g: &str| s.decide(&tool("Glob", json!({"pattern": g})));
+        for g in ["*", "**", "**/*", "*.*", ".g*", ".[a-c-h]it", "*[!x].git", "knowledge[.-0].git", "[!]]git", "?git", r".gi\t", "#x", "", "{!}x", "a,{.git,b}"] {
+            assert!(denied(grep(g)), "Grep {g:?}");
+        }
+        for g in ["*", "**", "**/*", "#x", "", "[!.]*", "**/[!.]*", "!x", "*/config", ".GIT/*", ".G*T/*"] {
+            assert!(denied(glob(g)), "Glob {g:?}");
+        }
+        for g in ["*.md", "**/*.md", "clients/*.md", "*.{md,txt}", "!**/*.tmp *.md", "Northwind *.md"] {
+            assert_eq!(grep(g), Decision::Allow, "Grep {g:?}");
+        }
+        for g in ["*.md", "**/*.md", "knowledge/**", "knowledge/**/*.md", "clients/{a,b}.md", "notes/*.md", "**/*.{md,txt}"] {
+            assert_eq!(glob(g), Decision::Allow, "Glob {g:?}");
+        }
+        // Beyond the ruling's lists: `**` beside a brace is two `*` to globset (`{a/,x/}**/config` listed `x/.git/config`
+        // and not `a/config`), so are two `*` meeting across one; a space in Glob's pattern is dropped at its end.
+        for g in ["{knowledge/,notes/}**/config", "knowledge/*{*,a}/config", "{knowledge/**/x.md,y.md}", "{,.}.git/x.md"] {
+            assert!(denied(grep(g)) && denied(glob(g)), "{g:?}");
+        }
+        for g in ["* ", ".g* ", "!*.md", "#"] {
+            assert!(denied(glob(g)), "Glob {g:?}");
+        }
+        // A folder with a space in its name is searched through `path`.
+        put(&v, "knowledge/Acme Corp/x.md");
+        assert_eq!(s.decide(&tool("Glob", json!({"pattern": "*.md", "path": "knowledge/Acme Corp"}))), Decision::Allow);
         let _ = fs::remove_dir_all(&root);
     }
 
