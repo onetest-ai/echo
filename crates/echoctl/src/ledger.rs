@@ -2616,11 +2616,6 @@ pub fn search_open(q: &str, not: Option<&str>) -> Vec<Value> {
 }
 
 /// The tree for the window and `ledger tree`: every node, the workstreams first.
-/// What one call changed in a project's work (the call's Actions tab): every history entry whose
-/// evidence is this call, by node, in the order said — new nodes, status changes, dates, links,
-/// waits, criteria met — with the words, the verifier's mark, and the node as it is now. Mentions
-/// are left out (they change nothing). `read`: the sync has read the call; `queued`: it will.
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 /// The tasks a call raised or moved in these threads that are still open — what is still to do from it (a call's
 /// action items aren't ticked; the tasks they became are): `{task, owner, due, state, link}`, each once.
 pub fn open_tasks_from(projects: &[String], stamp: &str) -> Vec<Value> {
@@ -2630,7 +2625,8 @@ pub fn open_tasks_from(projects: &[String], stamp: &str) -> Vec<Value> {
         for x in c["changes"].as_array().into_iter().flatten() {
             let n = &x["node"];
             let open = n["state"].as_str().is_some_and(|s| !closed(s));
-            if n["kind"] != "task" || !open || out.iter().any(|o| o["link"] == format!("echo://task/{p}/{}", n["id"].as_str().unwrap_or(""))) {
+            // A change the verifier called wrong didn't happen (What moved hides it too).
+            if x["verdict"] == "wrong" || n["kind"] != "task" || !open || out.iter().any(|o| o["link"] == format!("echo://task/{p}/{}", n["id"].as_str().unwrap_or(""))) {
                 continue;
             }
             out.push(json!({"task": n["title"], "owner": n["owner"], "due": n["due"], "state": n["state"],
@@ -2646,6 +2642,11 @@ pub fn open_tasks_of_call(dir: &std::path::Path) -> Vec<Value> {
     open_tasks_from(&projects, &calls::stamp_of(dir))
 }
 
+/// What one call changed in a project's work (What moved, beside its minutes): every history entry whose
+/// evidence is this call, by node, in the order said — new nodes, status changes, dates, links,
+/// waits, criteria met — with the words, the verifier's mark, and the node as it is now. Mentions
+/// are left out (they change nothing). `read`: the sync has read the call; `queued`: it will.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn call_changes(project: &str, stamp: &str) -> Result<Value> {
     let l = Ledger::of(project)?;
     let t = fold(&l)?;

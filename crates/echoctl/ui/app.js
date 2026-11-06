@@ -937,8 +937,8 @@ function list() {
   // Today's meetings still to come, each a call-to-be with its prep.
   const ups = !q && S.up && S.up.meetings ? S.up.meetings : []
   // Folded by default (a full day is a long list): a head like a call's row — how many, and the next one.
-  // The next to start (one already going is "Now").
-  const nowMs = Date.now(), nx = ups.find((u) => !u.start || new Date(u.start) > nowMs) || ups[0]
+  // One going on now first ("Now"), else the next to start.
+  const nowMs = Date.now(), nx = ups.find((u) => u.start && new Date(u.start) <= nowMs) || ups[0]
   const going = nx && nx.start && new Date(nx.start) <= nowMs, nxAt = nx && nx.start ? hm(new Date(nx.start)) : ''
   const upHead = `<button class="row up-fold" data-up-fold aria-expanded="${!!S.upOpen}" title="${S.upOpen ? 'Fold' : 'Show them'}">
       <span class="si up" aria-hidden="true">${ICON('<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>').replace('width="20" height="20"', 'width="14" height="14"')}</span>
@@ -994,8 +994,7 @@ function doc() {
   const segs = Array.isArray(c.segments) ? c.segments : []
   const chat = Array.isArray(c.chat) ? c.chat : []
   const frames = Array.isArray(c.frames) ? c.frames : []
-  const actions = Array.isArray(c.actions) ? c.actions : null
-  const tabs = callTabs({ recording: c.status === 'recording', chat: chat.length, frames: frames.length, actions: actions ? actions.length : null, prep: !!c.prep })
+  const tabs = callTabs({ recording: c.status === 'recording', chat: chat.length, frames: frames.length, prep: !!c.prep })
   // While a call records (or is transcribed), open it on its Transcript once; once its minutes are
   // written, on Minutes once. The user's own choice stays. (`live` was the Transcript's live twin.)
   if (S.tab === 'live') S.tab = 'transcript'
@@ -1012,7 +1011,7 @@ function doc() {
         <div class="doc-actions">${callMenu(c)}</div>
       </div>
       <div class="tabs" role="tablist">${tabs.map(([id, label, n, rec]) => `<button class="tab" role="tab" data-tab="${id}" aria-selected="${S.tab === id}">${rec ? '<span class="tab-rec" aria-label="Recording"></span>' : ''}${label}${n !== '' ? `<span class="n">${n}</span>` : ''}</button>`).join('')}</div>${notices()}`
-  const body = tabBody(c, segs, chat, frames, actions)
+  const body = tabBody(c, segs, chat, frames)
   const confirm = S.confirmDelete ? confirmBox(c) : ''
   return typeof body === 'string' ? { head, pane: confirm + body } : { head, bar: confirm + body.bar, frame: body.frame, side: body.side }
 }
@@ -1432,7 +1431,7 @@ function turnsHtml(segs, q, jump, marks = []) {
   }).join('')}</div>`
 }
 
-function tabBody(c, segs, chat, frames, actions) {
+function tabBody(c, segs, chat, frames) {
   if (S.tab === 'prep') return prepView(c.prep, false)
   if (S.tab === 'transcript') {
     // Live notes kept (or being kept): the transcript with them beside it, as during the call.
@@ -6731,7 +6730,7 @@ function paletteItems(target) {
   if (target && target.kind === 'call') {
     const c = target.c, busy = c.notes_run && (c.notes_run.state === 'queued' || c.notes_run.state === 'running')
     const transcribed = !['recording', 'transcribing'].includes(c.status)
-    for (const [id, label] of callTabs({ recording: c.status === 'recording', chat: (c.chat || []).length, frames: (c.frames || []).length, actions: Array.isArray(c.actions) ? c.actions.length : null })) {
+    for (const [id, label] of callTabs({ recording: c.status === 'recording', chat: (c.chat || []).length, frames: (c.frames || []).length })) {
       add('This call', `Open ${label}`, () => press({ tab: id }), { keywords: 'tab show' })
     }
     add('This call', c.notes ? 'Write minutes again' : 'Write minutes', () => press({ cmd: 'write-notes' }), { keywords: 'notes update claude', disabled: !transcribed ? 'after the transcript is ready' : busy ? 'minutes are being written' : null })

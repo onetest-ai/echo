@@ -32,13 +32,14 @@ pub fn of(guesses: &Map<String, Value>, project: &str, n: &Node) -> Value {
     // A field the user set — or cleared — is theirs (pinned); only one they never touched falls back to the guess.
     let pick = |mine: &Option<String>, k: &str| if n.pinned.iter().any(|p| p == k) { json!(mine) } else { mine.clone().map(Value::from).unwrap_or_else(|| g[k].clone()) };
     let mode = pick(&n.mode, "mode");
+    let mine = |k: &str| if n.pinned.iter().any(|p| p == k) { "you" } else { "guess" };
     if !mode.is_string() {
-        return Value::Null;
+        // The user cleared it: theirs, no mode — and not to be guessed again.
+        return if n.pinned.iter().any(|p| p == "mode") { json!({"mode": null, "by": "you"}) } else { Value::Null };
     }
+    // Who wrote each field: a guessed one is model output from others' words — a suggestion, never the user's.
     json!({"mode": mode, "how": pick(&n.how, "how"), "prompt": pick(&n.prompt, "prompt"), "skill": pick(&n.skill, "skill"),
-           "by": if n.mode.is_some() { "you" } else { "guess" },
-           // A guessed prompt is model output from others' words: shown as a suggestion, never typed as the user's.
-           "prompt_by": if n.pinned.iter().any(|p| p == "prompt") { "you" } else { "guess" }})
+           "by": mine("mode"), "how_by": mine("how"), "prompt_by": mine("prompt"), "skill_by": mine("skill")})
 }
 
 const SYSTEM: &str = "You sort the user's own open tasks. Can Claude do each one for them — draft and send a mail or a \
@@ -98,9 +99,12 @@ pub fn classify() -> Result<usize> {
     let have = guesses();
     let day = today.to_string();
     let open: Vec<String> = mine["piles"]["mine"].as_array().into_iter().flatten().filter_map(|t| Some(format!("{}/{}", t["project"].as_str()?, t["id"].as_str()?))).collect();
-    if have.keys().any(|k| !open.contains(k)) {
+    // A thread that couldn't be read this time keeps its guesses (its tasks aren't in the piles, not gone).
+    let unread: Vec<String> = mine["errors"].as_array().into_iter().flatten().filter_map(|e| e["project"].as_str().map(|p| format!("{p}/"))).collect();
+    let keep = |k: &String| open.contains(k) || unread.iter().any(|p| k.starts_with(p));
+    if have.keys().any(|k| !keep(k)) {
         crate::calls::update_state(&file(), |all: &mut Map<String, Value>| {
-            all.retain(|k, _| open.contains(k));
+            all.retain(|k, _| keep(k));
             Ok(())
         })?;
     }

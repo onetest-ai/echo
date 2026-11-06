@@ -168,13 +168,12 @@ fn day() -> Vec<Value> {
     // What the calendar knows of Teams' transcripts (for a meeting nobody recorded).
     let offers = crate::teams_transcript::offers();
     let mut used = vec![false; calls_today.len()];
-    let kept = crate::prep::kept_anyway();
     let mut out: Vec<Value> = vec![];
     for m in crate::watch::agenda() {
         let Some(event) = m.id.clone().filter(|i| !i.is_empty()) else { continue };
         let hit = calls_today.iter().position(|(_, _, cm)| cm.as_ref().and_then(|c| c.id.as_deref()) == Some(event.as_str()));
         // Only the meetings the user accepted (or organises) — unless they recorded it, or set it to record.
-        if !m.accepted() && !kept.contains(&event) {
+        if !m.accepted() && hit.is_none() && !scheduled.contains(&event) {
             continue;
         }
         if let Some(i) = hit {

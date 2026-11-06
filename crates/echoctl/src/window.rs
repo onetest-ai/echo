@@ -2294,13 +2294,6 @@ pub fn handle(msg: &str) -> Handled {
             }
             false.into()
         }
-        "toggle_action" => {
-            let (Some(dir), Some(id), Some(status)) = (call_named(&v), v["id"].as_str(), v["status"].as_str()) else { return false.into() };
-            match calls::set_action_status(&dir, id, status) {
-                Ok(()) => true.into(),
-                Err(e) => notice(&format!("{e:#}")),
-            }
-        }
         // The user's notes from the Notes tab (`calls::save_my_notes`); the page learns what the
         // file holds now.
         "save_my_notes" => {

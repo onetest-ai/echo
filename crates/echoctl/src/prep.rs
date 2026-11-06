@@ -512,6 +512,8 @@ pub fn due() -> Vec<MeetingContext> {
     crate::watch::agenda()
         .into_iter()
         .filter(|m| time(m.start.as_deref()).is_some_and(|s| s > soon))
+        // Only the meetings the user's day lists (accepted, organised, set to record): no prep for an open invite.
+        .filter(|m| m.accepted() || m.id.as_ref().is_some_and(|i| crate::schedule::load().into_iter().any(|s| s.id.as_deref() == Some(i.as_str()))))
         .filter(|m| m.id.as_deref().is_some_and(|i| !i.is_empty() && load(&id_of(i)).is_none()))
         .filter(|m| projects::of_meeting(m).iter().any(|p| !p.stage.closed()))
         .collect()
@@ -581,8 +583,9 @@ pub fn start_scheduler() {
     });
 }
 
-/// Meetings Today and Coming up today keep though not accepted: set to record, or recorded today (their event ids).
-pub fn kept_anyway() -> Vec<String> {
+/// Meetings Coming up today keeps though not accepted: set to record, or recorded today (their event ids); Today's
+/// day checks the same from what it has at hand.
+fn kept_anyway() -> Vec<String> {
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     let mut ids: Vec<String> = crate::schedule::load().into_iter().filter_map(|m| m.id).collect();
     ids.extend(crate::calls::all_calls().into_iter().filter(|d| crate::calls::stamp_of(d).starts_with(&today)).filter_map(|d| MeetingContext::load(&d).ok().flatten().and_then(|m| m.id)));
