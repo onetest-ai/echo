@@ -23,7 +23,7 @@ Each file is one run, one JSON object per line, in the order the lines passed:
 | `webfetch.jsonl` | A `WebFetch` asked through the host; the request carries the `agent_id` of the `web-fetch` sub-agent that made the call; `task_*` system events. |
 | `interrupt.jsonl` | An `interrupt` control request sent 2.5 s into a long answer: its `control_response`, the `[Request interrupted by user]` message and the `error_during_execution` `result`. |
 | `suggestion.jsonl` | A tool turn ending in a `prompt_suggestion` line after the `result`. |
-| `resume.jsonl` | `--resume <id>` of the `ask-turn` session: a follow-up answered from the earlier context, under a new `session_id`. |
+| `resume.jsonl` | `--resume <id>` of the `ask-turn` session: a follow-up answered from the earlier context; the same `session_id` as `ask-turn`. The first line records the `--resume` id. |
 | `host-only-denied.jsonl` | `--permission-prompts host` alone: no `control_request`; the `Edit` is refused with a `permission_denied` system event. |
 
 ## Scrub

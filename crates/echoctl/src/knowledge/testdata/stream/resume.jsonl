@@ -1,3 +1,4 @@
+{"_sent":{"command":"claude -p ... --resume 00000000-0000-4000-8000-000000000001"}}
 {"_sent":{"type":"user","message":{"role":"user","content":[{"type":"text","text":"And who is our own contact there?"}]}}}
 {"type":"system","subtype":"init","cwd":"/VAULT","session_id":"00000000-0000-4000-8000-000000000001","tools":["Task","Glob","Grep","Read","Skill"],"model":"claude-haiku-5-5","permissionMode":"default","claude_code_version":"2.1.310"}
 {"type":"system","subtype":"status","status":"requesting","session_id":"00000000-0000-4000-8000-000000000001","uuid":"00000000-0000-4000-8000-000000000002"}

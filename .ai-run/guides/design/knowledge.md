@@ -333,8 +333,10 @@ then the partial `assistant` message, `{"type":"user",…"[Request interrupted b
 "stop_reason":null,"total_cost_usd":0,"errors":["[ede_diagnostic] …"]}`. The process stayed alive and the pipe open;
 Echo treats this result as "stopped", not as a failure. (The probe closed stdin afterwards; the process exited 1.)
 
-**Resume.** `--resume <id>` starts a **new** `session_id` (the `init` line shows it) and keeps the context (the follow-up
-was answered with no tool call). Echo stores the id from the latest `init`/`result`, not the one it passed.
+**Resume.** `--resume <id>` keeps the **same** `session_id` (the `init` line and every later line show the id passed;
+checked against the raw ids: ask-turn and resume both carry one id) and keeps the context (the follow-up was answered
+with no tool call). `resume.jsonl` starts with a `_sent` line recording the `--resume` id. Echo still reads the id from
+the latest `init` rather than assuming it.
 
 **V10's five facts** (probe vault: the starter's `.claude/settings.json` plus `{"permissions":{"allow":["Edit"]},
 "env":{"PROBE_SCOPE":"project"}}`; `--setting-sources project`; `--settings` with a `PreToolUse` hook that logs its
