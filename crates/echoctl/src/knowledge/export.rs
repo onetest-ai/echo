@@ -555,7 +555,7 @@ fn save_into(call: &Path, v: &Vault, how: How, commit: bool) -> Result<(Saved, V
     let candidates: Vec<PathBuf> = [entry.as_ref().filter(|_| !new_note).map(|e| super::join(&v.root, &e.path)), index_rel.as_ref().map(|i| super::join(&v.root, i)), log_rel.as_ref().map(|l| super::join(&v.root, l))].into_iter().flatten().collect();
     let dirty_before = if v.git.commit { git::dirty(&v.root, &candidates) } else { vec![] };
     // Where: the note this call already has here (unless a new one is asked for), else a free name.
-    let (rel, state) = match entry.as_ref().filter(|_| !new_note) {
+    let (rel, state, was) = match entry.as_ref().filter(|_| !new_note) {
         Some(e) if super::join(&v.root, &e.path).exists() => {
             let now = std::fs::read(super::join(&v.root, &e.path))?;
             if sha(&now) == sha(text.as_bytes()) {
@@ -569,12 +569,12 @@ fn save_into(call: &Path, v: &Vault, how: How, commit: bool) -> Result<(Saved, V
                 });
                 return Ok((Saved { vault: v.id.clone(), path: e.path.clone(), state: "kept".into(), index: "listed".into(), commit: "off".into() }, vec![]));
             }
-            (e.path.clone(), "updated")
+            (e.path.clone(), "updated", String::from_utf8(now).ok())
         }
         _ => {
             let stem = manual.as_ref().and_then(|m| m.stem.clone());
             let name = file_name(&naming, &f.date, &f.title, stem.as_deref());
-            (free_name(v, &format!("{notes_dir}/{name}"))?, "saved")
+            (free_name(v, &format!("{notes_dir}/{name}"))?, "saved", None)
         }
     };
     let note_abs = super::join(&v.root, &rel);
@@ -628,6 +628,9 @@ fn save_into(call: &Path, v: &Vault, how: How, commit: bool) -> Result<(Saved, V
     let hash = sha(text.as_bytes());
     let how_label = if manual.is_some() { "manual" } else { "auto" };
     let entry_out = Entry { vault: v.id.clone(), path: rel.clone(), sha256: hash, at: chrono::Local::now().to_rfc3339(), how: how_label.into(), state: state.into(), index: index.clone(), commit: commit_label.clone(), anyway: anyway || entry.as_ref().is_some_and(|e| e.anyway) };
+    let call_id = call.file_name().map(|n| n.to_string_lossy().into_owned());
+    // An update whose old text can't be read as text is recorded as a new note (the diff needs both sides).
+    super::activity::changed(v, &rel, "minutes", call_id.as_deref(), was.as_deref(), &text, super::activity::commit_id(&commit_label));
     update(call, |r| {
         // A new note beside a kept one becomes the call's note here.
         r.saved.retain(|e| e.vault != v.id);

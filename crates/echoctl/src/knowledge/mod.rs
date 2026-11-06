@@ -5,10 +5,13 @@
 //! The list of vaults is per data folder: `<home>/.echo/knowledge/vaults.json`, changed under a lock, re-read first and
 //! written atomically.
 
+pub mod activity;
 pub mod api;
 pub mod catalog;
 pub mod checks;
 pub mod detect;
+pub mod diff;
+pub mod evidence;
 pub mod export;
 pub mod fm;
 pub mod git;

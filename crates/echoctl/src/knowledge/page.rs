@@ -389,6 +389,7 @@ pub fn save(v: &Vault, rel: &str, text: &str, base: &str, message: Option<&str>)
     crate::paths::write_atomic(&full, text.as_bytes())?;
     let message = message.map(str::trim).filter(|m| !m.is_empty()).map(str::to_owned).unwrap_or_else(|| format!("Edit {rel}"));
     let commit = commit_one(v, std::slice::from_ref(&full), &dirty, &message);
+    super::activity::changed(v, rel, "editor", None, std::str::from_utf8(&old).ok(), &text, super::activity::commit_id(&commit));
     Ok(json!({ "path": rel, "base": sha(text.as_bytes()), "commit": commit }))
 }
 
@@ -478,7 +479,8 @@ pub fn create(v: &Vault, folder: &str, name: &str, template: Option<&str>, add_r
             }
         }
     }
-    commit_one(v, &written, &dirty, &format!("Add {rel}"));
+    let commit = commit_one(v, &written, &dirty, &format!("Add {rel}"));
+    super::activity::changed(v, &rel, "new-page", None, None, &text, super::activity::commit_id(&commit));
     Ok(rel)
 }
 
@@ -551,6 +553,7 @@ pub fn restore(v: &Vault, rel: &str, rev: &str) -> Result<Value> {
     }
     crate::paths::write_atomic(&full, text.as_bytes())?;
     let commit = commit_one(v, std::slice::from_ref(&full), &dirty, &format!("Restore {rel} to {rev}"));
+    super::activity::changed(v, rel, "editor", Some(rev), std::str::from_utf8(&current).ok(), &text, super::activity::commit_id(&commit));
     Ok(json!({ "path": rel, "base": sha(text.as_bytes()), "commit": commit }))
 }
 
@@ -583,6 +586,7 @@ pub fn index_add(v: &Vault, rels: &[String]) -> Result<Value> {
     let targets: Vec<PathBuf> = std::iter::once(ipath.clone()).chain(log.iter().cloned()).collect();
     let dirty = if v.git.commit { git::dirty(&v.root, &targets) } else { vec![] };
     let mut text = std::fs::read_to_string(&ipath)?;
+    let before = text.clone();
     let (mut added, mut skipped) = (0, vec![]);
     for rel in rels {
         checked(v, rel)?;
@@ -611,6 +615,9 @@ pub fn index_add(v: &Vault, rels: &[String]) -> Result<Value> {
         }
     }
     let commit = if written.is_empty() { "off".into() } else { commit_one(v, &written, &dirty, &format!("Echo: {added} page{} added to the index", if added == 1 { "" } else { "s" })) };
+    if added > 0 {
+        super::activity::changed(v, &index, "index-rows", None, Some(&before), &text, super::activity::commit_id(&commit));
+    }
     Ok(json!({ "added": added, "skipped": skipped, "commit": commit }))
 }
 

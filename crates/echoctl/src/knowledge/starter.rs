@@ -92,6 +92,7 @@ pub fn create(name: &str, folder: Option<PathBuf>, git: bool, minutes: &str) -> 
     std::fs::create_dir_all(&parent)?;
     let tmp = parent.join(format!("{}.tmp-echo", dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "vault".into())));
     let _ = std::fs::remove_dir_all(&tmp);
+    let mut first_id = None;
     let made = (|| -> Result<String> {
         std::fs::create_dir_all(&tmp)?;
         let (owner, date) = (owner(), chrono::Local::now().format("%Y-%m-%d").to_string());
@@ -110,7 +111,10 @@ pub fn create(name: &str, folder: Option<PathBuf>, git: bool, minutes: &str) -> 
         }
         super::git::init(&tmp)?;
         Ok(match super::git::first_commit(&tmp, "Start the vault from Echo's twin starter") {
-            super::git::Commit::Done(_) => "committed".into(),
+            super::git::Commit::Done(id) => {
+                first_id = Some(id);
+                "committed".into()
+            }
             super::git::Commit::Skipped(why) if why.contains("user name") => "no identity".into(),
             other => other.label(),
         })
@@ -136,6 +140,13 @@ pub fn create(name: &str, folder: Option<PathBuf>, git: bool, minutes: &str) -> 
         bail!("couldn't make {}: {e}", dir.display());
     }
     let vault = super::add(&dir, super::AddOpts { name: Some(name.into()), profile: None, minutes: Some(minutes.into()), commit: Some(git_state == "committed"), template: Some(TEMPLATE.into()) })?;
+    if let Some(id) = first_id {
+        let plus = FILES.iter().map(|(_, t)| t.lines().count()).sum();
+        let e = super::activity::Entry { at: chrono::Local::now().to_rfc3339(), path: String::new(), kind: "new".into(), by: "starter".into(), r#ref: Some(TEMPLATE.into()), plus, minus: 0, commit: Some(id) };
+        if let Err(err) = super::activity::record(&vault, e) {
+            eprintln!("knowledge: activity of the new vault {}: {err:#}", vault.id);
+        }
+    }
     Ok(Created { vault, git: git_state })
 }
 

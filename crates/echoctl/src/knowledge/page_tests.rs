@@ -335,3 +335,66 @@ fn paths_cannot_leave_the_vault() {
     assert!(read(&v, "AGENTS.md").is_ok());
     assert!(read(&v, ".claude/skills/s/SKILL.md").is_ok());
 }
+
+#[test]
+fn page_writes_leave_an_activity_line() {
+    use super::activity::recent;
+    let (_env, root) = crate::paths::testenv::folders("kn-pg-activity");
+    let git_here = git::program().is_some();
+    let _iso = git_here.then(|| git::tests::isolated(&root, true));
+    let v = twin(&root);
+    let all = |v: &super::Vault| {
+        let mut e = recent(v, "2000-01-01T00:00:00+00:00");
+        e.reverse();
+        e
+    };
+    assert!(all(&v).is_empty());
+
+    // A save: one "edit" by the editor, counted in lines.
+    let path = "knowledge/clients/acme.md";
+    let base = read(&v, path).unwrap()["base"].as_str().unwrap().to_string();
+    save(&v, path, "---\ntitle: Acme Corp\ntags: [client]\n---\n# Acme Corp\n\nSee [[2026-01-01-a]].\nOne more line.\n", &base, None).unwrap();
+    let e = all(&v);
+    assert_eq!(e.len(), 1);
+    assert_eq!((e[0].path.as_str(), e[0].kind.as_str(), e[0].by.as_str(), e[0].plus, e[0].minus), (path, "edit", "editor", 1, 0));
+    assert_eq!(e[0].commit, None, "this vault doesn't commit");
+
+    // A new page.
+    let rel = create(&v, "knowledge/topics", "Pricing ideas", None, false).unwrap();
+    let e = all(&v);
+    assert_eq!(e.len(), 2);
+    assert_eq!((e[1].path.as_str(), e[1].kind.as_str(), e[1].by.as_str(), e[1].minus), (rel.as_str(), "new", "new-page", 0));
+    assert!(e[1].plus > 3);
+
+    // Index rows for a page the index lacks.
+    index_add(&v, &["knowledge/notes/2026-01-03-c.md".to_string()]).unwrap();
+    let e = all(&v);
+    assert_eq!(e.len(), 3);
+    assert_eq!((e[2].path.as_str(), e[2].kind.as_str(), e[2].by.as_str()), ("knowledge/CATALOG.md", "edit", "index-rows"));
+    assert!(e[2].plus >= 1);
+
+    // A restore (needs history): the version is the ref, and the commit is the new commit.
+    if git_here {
+        assert!(git::tests::repo(&v.root));
+        let v = super::set(&v.id, "commit", "true").unwrap();
+        let p = "knowledge/notes/2026-01-02-b.md";
+        let base = read(&v, p).unwrap()["base"].as_str().unwrap().to_string();
+        save(&v, p, "# Second sync, changed\n", &base, None).unwrap();
+        let first = history(&v, p)["versions"].as_array().unwrap().last().unwrap()["rev"].as_str().unwrap().to_string();
+        restore(&v, p, &first).unwrap();
+        let e = all(&v);
+        assert_eq!(e.len(), 5);
+        assert!(e[3].commit.is_some(), "a save that was committed names the commit");
+        assert_eq!((e[4].path.as_str(), e[4].by.as_str(), e[4].r#ref.as_deref()), (p, "editor", Some(first.as_str())));
+        assert!(e[4].commit.is_some());
+    }
+
+    // A minutes save in a vault Echo made.
+    let m = super::starter::create("Activity twin", Some(root.join("act-twin")), false, "auto").unwrap().vault;
+    let call = fixture::call("2026-11-05_090012-weekly-delivery-sync", "Weekly delivery sync", "system", fixture::MINUTES);
+    super::export::save(&call, &m.id, super::export::How::Auto).unwrap();
+    let e = recent(&m, "2000-01-01T00:00:00+00:00");
+    assert_eq!(e.len(), 1);
+    assert_eq!((e[0].by.as_str(), e[0].kind.as_str(), e[0].path.as_str()), ("minutes", "new", "knowledge/notes/2026-11-05-weekly-delivery-sync.md"));
+    assert_eq!(e[0].r#ref.as_deref(), Some("2026-11-05_090012-weekly-delivery-sync"));
+}
