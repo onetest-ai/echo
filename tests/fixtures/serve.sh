@@ -6,16 +6,15 @@
 set -euo pipefail
 
 root="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
-usage="usage: serve.sh up <dir> <port> [--set small|standard|hostile] | down <dir>"
+usage="usage: serve.sh up <dir> <port> [--set small|standard|hostile] [--now TIME] | down <dir>"
 cmd="${1:?$usage}"
 dir="${2:?$usage}"
 
 case "$cmd" in
   up)
     port="${3:?$usage}"
-    data_set="small"
-    if [ "${4:-}" = "--set" ]; then data_set="${5:?$usage}"; fi
-    python3 "$root/tests/fixtures/make_data.py" "$dir" --set "$data_set" > /dev/null
+    # Anything after the port goes to make_data.py: --set SET (small by default), --now TIME.
+    python3 "$root/tests/fixtures/make_data.py" "$dir" "${@:4}" > /dev/null
     dir="$(cd "$dir" && pwd)"
     (
       . "$dir/env"

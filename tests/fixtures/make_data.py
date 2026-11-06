@@ -45,7 +45,7 @@ class Data:
         # Outside any Claude Code session (a run inside one would be refused or marked as a child).
         for k in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_CHILD_SESSION", "AI_AGENT"):
             self.env.pop(k, None)
-        self.now = datetime.now().astimezone()
+        self.now = NOW or datetime.now().astimezone()
         self.rng = random.Random(20261106)
         self.manifest = {"set": name, "built_at": iso(self.now), "home": self.home, "calls": [], "threads": [], "clients": [],
                          "items": [], "people": [], "agenda": [], "axes": {}, "combinations": [], "skipped": {}, "hostile": []}
@@ -2127,11 +2127,19 @@ def build_standard(d, hostile=False):
                           "automatic minutes are on and calls are due.")
 
 
+NOW = None
+
+
 def main():
     ap = argparse.ArgumentParser(description="Build a made-up Echo data folder for functional tests.")
     ap.add_argument("dir")
     ap.add_argument("--set", choices=["small", "standard", "hostile"], default="small")
+    ap.add_argument("--now", help="build as if it were this local time (ISO, e.g. 2026-11-06T12:00): for checks that "
+                    "don't depend on Today matching the real clock, at hours the real now can't be built")
     a = ap.parse_args()
+    global NOW
+    if a.now:
+        NOW = datetime.fromisoformat(a.now).astimezone()
     base = os.path.abspath(a.dir)
     home = os.path.expanduser("~")
     if base == home or base == os.path.join(home, "echo") or base.startswith(os.path.join(home, "echo") + os.sep):
@@ -2139,6 +2147,10 @@ def main():
     if os.path.exists(os.path.join(base, "home")) or os.path.exists(os.path.join(base, "config")):
         sys.exit(f"{base} already holds test data: give an empty folder")
     d = Data(base, a.set)
+    # Today holds calls hours ago and meetings hours ahead, relative to now. Close to midnight there is no room:
+    # past calls would be pinned to 00:05 together (one stamp, evidence items that collide) or meetings to 23:50.
+    if not 6 <= d.now.hour < 22:
+        sys.exit(f"it is {d.now:%H:%M}: build test data between 06:00 and 22:00 (today needs hours before and after now)")
     if not os.access(d.bin, os.X_OK):
         sys.exit(f"no {d.bin}: run cargo build first")
     os.makedirs(d.home)

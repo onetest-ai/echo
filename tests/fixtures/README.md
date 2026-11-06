@@ -13,6 +13,10 @@ tests/fixtures/serve.sh up <empty dir> <port> [--set small|standard|hostile]
 tests/fixtures/serve.sh down <dir>
 ```
 
+Build between 06:00 and 22:00: today's calls lie hours before now and its meetings hours after, so near midnight
+the generator refuses (it would pin several calls to one stamp). For checks that don't need Today to match the real
+clock, `--now 2026-11-06T12:00` builds as of that time (`serve.sh up <dir> <port> --set standard --now …`).
+
 `<dir>/home` is the data folder (`ECHOCTL_HOME`), `<dir>/config` the settings (`ECHOCTL_CONFIG_DIR`), `<dir>/env`
 sets them for a shell (`. <dir>/env`), and `<dir>/manifest.json` says what the set holds.
 
