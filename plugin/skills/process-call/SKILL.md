@@ -148,10 +148,12 @@ Name the speakers first (4a, if the transcript has "Speaker N" labels), then wri
   Echo's window turns these into jumps into the transcript.
 
 ### Shared screens (`frames`)
-If `frames` is non-empty, these are snapshots of what was on screen (slides, documents, demos),
-each with `t` (seconds into the call, same clock as the transcript). Look at them with Read —
-all of them if ≤ 12, otherwise the ones nearest to decisions, numbers and "as you can see"
-moments plus an even spread. Use what they show to fill gaps the audio leaves (figures on a
+If `frames.count` is above 0, the call has snapshots of what was on screen (slides, documents,
+demos), each with `t` (seconds into the call, same clock as the transcript). `frames.sample` holds
+up to 12 of them (all of them when there are no more): the biggest changes on screen plus an
+even spread. On a longer call, `frames.index` (`frames.jsonl` in the call's folder) lists them
+all, one JSON line each — Read it. Look at the frames with Read: the sample, and on a longer call
+also the ones nearest to decisions, numbers and "as you can see" moments. Use what they show to fill gaps the audio leaves (figures on a
 slide, names on a diagram, the agenda) and add a short **On screen** section: one bullet per
 meaningful frame, `[mm:ss]` + what it showed, only facts visible in the image: describe what
 you can actually read or see in it, never what the conversation at that moment suggests it
@@ -161,7 +163,7 @@ Teams UI.
 
 Then prune: keep exactly the frames the **On screen** section cites and move the rest to Echo's trash (video
 tiles, Teams UI, near-duplicates of a kept slide) — `echoctl frames <dir> --keep
-<file1>,<file2>,…` (names as in `frames`), or `--keep none` if none was useful. Frames you
+<file1>,<file2>,…` (names as in `frames.index`), or `--keep none` if none was useful. Frames you
 didn't look at (more than 12) are judged by their neighbours: keep one per distinct slide.
 
 ### Meeting chat (`chat`)

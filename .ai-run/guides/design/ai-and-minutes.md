@@ -167,8 +167,10 @@ Write now and Not yet ▾; the calls list shows ⏱ for calls ended in the last 
 - `echoctl run-guard`: a `PreToolUse` command hook with `onFailure: block`, in the run's own settings file
   (`<config dir>/minutes-run/<run>.json`, removed after; `disableAllHooks: false`, `claudeMdExcludes` for `calls/**`).
 - Allows only: Bash = `<cli> <notes::RUN_COMMANDS> …` as plain words (no `$`, backtick, newline, or
-  `;&|<>(){}*?[]~#!` outside quotes); Read in the run's call folder (canonical) and the previous minutes of the same
-  meeting; Glob/Grep with a path in the call folder (no absolute, `~`, `..` or brace patterns); Edit/Write of only
+  `;&|<>(){}*?[]~#!` outside quotes); Read in the run's call folder (canonical), the previous minutes of the same
+  meeting and the session's own `tool-results` (a command answer too long to show, which Claude Code saves there —
+  named by the hook's `transcript_path` + `session_id`, never another session's; #98); Glob/Grep with a path in the
+  call folder or those tool results (no absolute, `~`, `..` or brace patterns); Edit/Write of only
   `notes.md` and `actions.new*.json` at the folder's top, never through a link; Skill `echo:process-call`. Anything
   else, or anything it can't judge (a panic too), exits 2.
 - Scope only from the environment: `ECHOCTL_RUN_CALL` (a folder with `meta.json`), `ECHOCTL_RUN_PREVIOUS`,
@@ -185,6 +187,8 @@ Write now and Not yet ▾; the calls list shows ⏱ for calls ended in the last 
   `--model`; the mod does nothing and `pending` / `claim` refuse.
 - `title` inside a run sets the title, marks `title_from_run`, and leaves the folder rename to the run's end
   (`calls::rename_to_title`); a terminal `echoctl title` on a call with a run waits too (`notes::run_active`).
+- `context` stays small however long the call: `frames` is `{count, index, sample}` — up to 12 frames (the biggest
+  changes on screen, then an even spread), the full list in the call's `frames.jsonl` (#98).
 - By design a run still changes two things outside its call: learned vocabulary for this meeting and pruned frames
   moved to the trash (purged by the app after the run, `calls::purge_trash`, not by `frames --keep`).
 

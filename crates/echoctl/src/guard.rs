@@ -232,11 +232,14 @@ impl Scope {
         if self.routine {
             return self.judge_routine(call, tool, input);
         }
+        // A command's answer too long to show goes to the session's own tool results, for the model to Read there.
+        let results = own_results(call);
+        let theirs = |p: &Path| results.as_ref().is_some_and(|r| p.starts_with(r));
         match tool {
             "Bash" => self.bash(input["command"].as_str().unwrap_or("")),
             "Read" => {
                 let p = resolve(input["file_path"].as_str())?;
-                if self.inside(&p) || self.previous.as_ref() == Some(&p) {
+                if self.inside(&p) || self.previous.as_ref() == Some(&p) || theirs(&p) {
                     Ok(())
                 } else {
                     Err(format!("only {} can be read, not {}", self.place(), p.display()))
@@ -258,7 +261,7 @@ impl Scope {
             }
             "Glob" | "Grep" => {
                 let p = resolve(input["path"].as_str()).map_err(|e| format!("{tool} needs a path in this call's folder ({e})"))?;
-                if !self.inside(&p) {
+                if !self.inside(&p) && !theirs(&p) {
                     return Err(format!("{tool} works only in {}, not {}", self.place(), p.display()));
                 }
                 let pattern = if tool == "Glob" { input["pattern"].as_str() } else { input["glob"].as_str() };
@@ -680,6 +683,20 @@ mod tests {
         ] {
             assert!(s.judge(&tool(t, input.clone())).is_err(), "{t} {input}");
         }
+        // A long call's context saved by Claude Code (#98): this session's own copy may be read, nobody else's.
+        let claude = std::env::temp_dir().join(format!("echo-guard-minutes-claude-{}", std::process::id()));
+        let results = claude.join("m1/tool-results");
+        fs::create_dir_all(&results).unwrap();
+        fs::write(results.join("ctx.txt"), "x").unwrap();
+        let read = |session: &str| json!({"tool_name": "Read", "tool_input": {"file_path": path(&results.join("ctx.txt"))},
+                                          "session_id": session, "transcript_path": path(&claude.join("m1.jsonl"))});
+        assert!(s.judge(&read("m1")).is_ok(), "its own saved output");
+        assert!(s.judge(&read("other")).is_err(), "not another session's");
+        let in_results = |input: Value| json!({"tool_name": "Write", "tool_input": input, "session_id": "m1", "transcript_path": path(&claude.join("m1.jsonl"))});
+        assert!(s.judge(&in_results(json!({"file_path": path(&results.join("notes.md")), "content": "x"}))).is_err(), "read, never written");
+        let climb = json!({"tool_name": "Glob", "tool_input": {"path": path(&results), "pattern": "../../*.jsonl"}, "session_id": "m1", "transcript_path": path(&claude.join("m1.jsonl"))});
+        assert!(s.judge(&climb).is_err(), "a pattern climbing out of it");
+        let _ = fs::remove_dir_all(&claude);
     }
 
     #[test]
