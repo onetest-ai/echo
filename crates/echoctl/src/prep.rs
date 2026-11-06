@@ -91,14 +91,8 @@ fn last_time(subject: &str) -> Value {
     let Some(prev) = calls::previous_with_notes(subject, None) else { return Value::Null };
     let meta = calls::read_json(&prev.join("meta.json"));
     let name = prev.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let open: Vec<Value> = calls::read_json(&prev.join(calls::ACTIONS))
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|a| a["status"].as_str() != Some("done"))
-        .filter_map(|a| Some(json!({"task": a["task"].as_str().filter(|t| !t.trim().is_empty())?, "owner": a["owner"]})))
-        .take(MAX_LINES)
-        .collect();
+    // Still to do: the tasks that call raised in its threads, still open (its action items aren't ticked; tasks are).
+    let open: Vec<Value> = ledger::open_tasks_of_call(&prev).into_iter().take(MAX_LINES).collect();
     json!({
         "call": name, "link": format!("echo://call/{name}"), "date": meta["started_at"],
         "highlights": calls::recap_from_notes(&fs::read_to_string(prev.join("notes.md")).unwrap_or_default()),

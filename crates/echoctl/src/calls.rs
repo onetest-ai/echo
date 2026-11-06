@@ -163,16 +163,8 @@ pub fn prep(dir: &Path) -> Value {
         .and_then(|t| DateTime::parse_from_rfc3339(t).ok())
         .map(|t| t.format("%-d %b").to_string())
         .unwrap_or_default();
-    let open: Vec<Value> = read_json(&prev.join("actions.json"))
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|a| a["status"].as_str() != Some("done"))
-        .filter_map(|a| {
-            let task = a["task"].as_str().filter(|t| !t.trim().is_empty())?;
-            Some(json!({ "task": task, "owner": a["owner"], "due": a["due"] }))
-        })
-        .collect();
+    // Still to do: the tasks that call raised in its threads, still open (its action items aren't ticked; tasks are).
+    let open = crate::ledger::open_tasks_of_call(&prev);
     json!({
         "call": prev.file_name().map(|n| n.to_string_lossy().into_owned()),
         "date": date,
@@ -1915,7 +1907,7 @@ mod tests {
         mk("2026-10-30_120000-sync", Some("## Decisions\n\n- Later\n"), "[]"); // after this one: not "last time"
         let p = prep(&now);
         assert_eq!(p["call"], "2026-10-16_120000-sync");
-        assert_eq!(p["open_actions"].as_array().unwrap().len(), 1);
+        assert_eq!(p["open_actions"], json!([]), "from its threads' tasks (none here), not its action items");
         assert_eq!(p["highlights"][0], "Lisbon first");
     }
 

@@ -2621,6 +2621,31 @@ pub fn search_open(q: &str, not: Option<&str>) -> Vec<Value> {
 /// waits, criteria met — with the words, the verifier's mark, and the node as it is now. Mentions
 /// are left out (they change nothing). `read`: the sync has read the call; `queued`: it will.
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
+/// The tasks a call raised or moved in these threads that are still open — what is still to do from it (a call's
+/// action items aren't ticked; the tasks they became are): `{task, owner, due, state, link}`, each once.
+pub fn open_tasks_from(projects: &[String], stamp: &str) -> Vec<Value> {
+    let mut out: Vec<Value> = vec![];
+    for p in projects {
+        let Ok(c) = call_changes(p, stamp) else { continue };
+        for x in c["changes"].as_array().into_iter().flatten() {
+            let n = &x["node"];
+            let open = n["state"].as_str().is_some_and(|s| !closed(s));
+            if n["kind"] != "task" || !open || out.iter().any(|o| o["link"] == format!("echo://task/{p}/{}", n["id"].as_str().unwrap_or(""))) {
+                continue;
+            }
+            out.push(json!({"task": n["title"], "owner": n["owner"], "due": n["due"], "state": n["state"],
+                            "link": format!("echo://task/{p}/{}", n["id"].as_str().unwrap_or(""))}));
+        }
+    }
+    out
+}
+
+/// `open_tasks_from` for a call folder: its threads, its stamp.
+pub fn open_tasks_of_call(dir: &std::path::Path) -> Vec<Value> {
+    let projects: Vec<String> = crate::projects::of_call(dir).map(|ps| ps.into_iter().map(|(p, _)| p.id).collect()).unwrap_or_default();
+    open_tasks_from(&projects, &calls::stamp_of(dir))
+}
+
 pub fn call_changes(project: &str, stamp: &str) -> Result<Value> {
     let l = Ledger::of(project)?;
     let t = fold(&l)?;
@@ -2758,6 +2783,10 @@ mod tests {
         ]).unwrap();
         mark_processed(&id, ev, "").unwrap();
         let c = call_changes(&id, ev).unwrap();
+        // Still to do from that call: its open tasks (not the story, not a mention), each once, by its link.
+        let todo = open_tasks_from(std::slice::from_ref(&id), ev);
+        assert_eq!(todo.len(), 1, "{todo:?}");
+        assert_eq!((todo[0]["task"].as_str(), todo[0]["link"].as_str()), (Some("SAML config"), Some(format!("echo://task/{id}/T001").as_str())));
         assert_eq!(c["read"], true);
         let ch = c["changes"].as_array().unwrap();
         assert_eq!(ch.len(), 2, "a mention changes nothing: {c}");

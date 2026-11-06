@@ -1301,7 +1301,7 @@ function prepView(p, again) {
   const day = (d) => d ? new Date(d.length > 10 ? d : d + 'T12:00').toLocaleDateString([], { day: 'numeric', month: 'short' }) : ''
   const sec = (title, items) => items ? `<section class="pr-sec"><h3>${title}</h3>${items}</section>` : ''
   const l = p.last_time
-  const last = l ? sec(`Last time · <a href="${esc(l.link)}">${esc(day(l.date))}</a>`, `<ul>${(l.highlights || []).map((h) => `<li>${esc(h)}</li>`).join('')}${(l.open_actions || []).map((a) => `<li><b>Still to do</b> ${esc(a.task)}${a.owner ? ` · ${esc(a.owner)}` : ''}</li>`).join('')}</ul>`) : ''
+  const last = l ? sec(`Last time · <a href="${esc(l.link)}">${esc(day(l.date))}</a>`, `<ul>${(l.highlights || []).map((h) => `<li>${esc(h)}</li>`).join('')}${(l.open_actions || []).map((a) => `<li><b>Still to do</b> ${a.link ? `<a href="${esc(a.link)}">${esc(a.task)}</a>` : esc(a.task)}${a.owner ? ` · ${esc(a.owner)}` : ''}</li>`).join('')}</ul>`) : ''
   const KIND = { task: 'Task', risk: 'Risk', question: 'Question' }
   // What waits on the user: their tasks, what they still owe from last time, mail to them — or that nothing does.
   const exp = (p.expected || []).map((x) => {
@@ -2322,8 +2322,8 @@ function prepCard(c) {
   const a = p.open_actions || [], h = p.highlights || []
   const mine = S.prepOpen[c.name]
   const open = (mine !== undefined ? mine : c.status === 'recording' && !(c.live.notes && c.live.notes.updated_at)) ? ' open' : ''
-  return `<details class="prep" data-prep="${esc(c.name)}"${open}><summary>Last time${p.date ? ` (${esc(p.date)})` : ''}: ${a.length} open action${a.length === 1 ? '' : 's'}, ${h.length} highlight${h.length === 1 ? '' : 's'}</summary>
-    ${a.length ? `<h3>Open actions</h3><ul>${a.map((x) => `<li>${x.owner ? `<span class="owner">${esc(x.owner)}</span> ` : ''}${esc(x.task)}${x.due ? ` <span class="muted">due ${esc(x.due)}</span>` : ''}</li>`).join('')}</ul>` : ''}
+  return `<details class="prep" data-prep="${esc(c.name)}"${open}><summary>Last time${p.date ? ` (${esc(p.date)})` : ''}: ${a.length} still to do, ${h.length} highlight${h.length === 1 ? '' : 's'}</summary>
+    ${a.length ? `<h3>Still to do</h3><ul>${a.map((x) => `<li>${x.owner ? `<span class="owner">${esc(x.owner)}</span> ` : ''}${x.link ? `<a href="${esc(x.link)}">${esc(x.task)}</a>` : esc(x.task)}${x.due ? ` <span class="muted">due ${esc(x.due)}</span>` : ''}</li>`).join('')}</ul>` : ''}
     ${h.length ? `<h3>Highlights</h3><ul>${h.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
   </details>`
 }
