@@ -15,6 +15,7 @@ pub mod evidence;
 pub mod export;
 pub mod fm;
 pub mod git;
+pub mod health;
 pub mod links;
 pub mod page;
 pub mod scan;

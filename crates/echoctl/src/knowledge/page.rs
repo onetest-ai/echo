@@ -17,7 +17,7 @@ const EDIT_MAX: u64 = scan::READ_MAX;
 /// Images are served up to this size.
 const ASSET_MAX: u64 = 10 << 20;
 
-fn sha(b: &[u8]) -> String {
+pub(super) fn sha(b: &[u8]) -> String {
     use sha2::Digest as _;
     sha2::Sha256::digest(b).iter().map(|x| format!("{x:02x}")).collect()
 }
@@ -444,7 +444,7 @@ fn with_line_endings(old: &[u8], text: &str) -> String {
     }
 }
 
-fn commit_one(v: &Vault, paths: &[PathBuf], dirty: &[PathBuf], message: &str) -> String {
+pub(super) fn commit_one(v: &Vault, paths: &[PathBuf], dirty: &[PathBuf], message: &str) -> String {
     if !v.git.commit {
         return git::Commit::Off.label();
     }
@@ -498,7 +498,7 @@ fn fill_template(t: &str, title: &str) -> String {
 }
 
 /// The index row for a page (vault-relative), and the section it goes in.
-fn row_for(v: &Vault, rel: &str) -> Result<(String, String, String, String)> {
+pub(super) fn row_for(v: &Vault, rel: &str) -> Result<(String, String, String, String)> {
     let index = v.path("index").ok_or_else(|| anyhow!("the vault has no index"))?;
     let full = inside(v, rel)?;
     let text = scan::read_capped(&full).unwrap_or_default();

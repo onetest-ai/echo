@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use std::path::Path;
 use std::sync::Mutex;
 
-use super::{checks, export, links, page, scan, starter, Vault};
+use super::{checks, export, health, links, page, scan, starter, Vault};
 
 fn query_param(q: &str, key: &str) -> Option<String> {
     q.split('&').find_map(|kv| {
@@ -90,6 +90,10 @@ pub fn route(rest: &str, query: &str) -> Result<Reply> {
         let c = super::chat::read(&v.id, conversation, from, std::time::Duration::from_secs(25)).ok_or_else(|| anyhow!("no such conversation"))?;
         return Ok(Reply::Json(json!({ "events": c.events, "next": c.next, "live": c.live, "busy": c.busy, "waiting": c.waiting })));
     }
+    // One Health finding, named by its key (percent-encoded by the page), with its choices and a fix's diff (K16-07).
+    if let Some(key) = what.strip_prefix("health/") {
+        return Ok(Reply::Json(health::detail(&v, &links::percent_decode(key), query_param(query, "choice").as_deref().filter(|c| !c.is_empty()))?));
+    }
     Ok(Reply::Json(match what {
         "tree" => {
             let ix = scan::index(&v)?;
@@ -140,6 +144,8 @@ pub fn route(rest: &str, query: &str) -> Result<Reply> {
                 "meeting_tag_missing": c.meeting_tag_missing, "no_index": c.no_index,
             })
         }
+        // Health: the score, its findings and history; `fixes=<kind>` adds that kind's fixes (*Fix all*, K16-04).
+        "health" => health::view(&v, query_param(query, "fixes").as_deref().filter(|k| !k.is_empty()))?,
         "rows" => {
             let paths: Vec<String> = query_param(query, "paths").and_then(|p| serde_json::from_str(&p).ok()).unwrap_or_default();
             json!({ "rows": page::index_rows(&v, &paths)? })
@@ -378,6 +384,11 @@ pub fn act(cmd: &str, v: &Value) -> Result<Value> {
         }
         "kn_past" => Ok(if v["apply"].as_bool().unwrap_or(false) { export::save_past(s(v, "id"))? } else { export::past(s(v, "id"))? }),
         "kn_import_plugin" => Ok(json!({ "connected": super::import_plugin_vaults()? })),
+        // Health (K16-03, -04, -07): fixes named by their findings' keys, each written only when the file is still the
+        // one whose diff the page showed (`base`) — the page never sends a path or a text.
+        "kn_fix" => fix_findings(&vault_of(s(v, "id"))?, std::slice::from_ref(v)),
+        "kn_fix_all" => fix_findings(&vault_of(s(v, "id"))?, v["items"].as_array().map(Vec::as_slice).unwrap_or(&[])),
+        "kn_ignore" => Ok(json!({ "ignored": health::ignore(&vault_of(s(v, "id"))?, s(v, "key"), v["on"].as_bool().unwrap_or(true))? })),
         // Ask (spec K12-07…K12-10, K12-12): a message (a new conversation when none is named) about pages and calls — a
         // call on another profile answered with both profiles, for *Attach anyway* —, a permission answered, Stop, and a
         // conversation taken to the terminal panel.
@@ -422,6 +433,29 @@ pub fn act(cmd: &str, v: &Value) -> Result<Value> {
         "kn_chat_terminal" => super::chat::to_terminal(s(v, "id"), s(v, "conversation")),
         other => bail!("no action {other}"),
     }
+}
+
+/// Fix findings `items` (`{key, choice?, base}`): each fix computed again against its file now and written only if that
+/// is the text the page showed (`base`); one commit. A finding gone or without that fix is `skipped`, with why.
+fn fix_findings(vault: &Vault, items: &[Value]) -> Result<Value> {
+    let (mut fixes, mut changed, mut skipped) = (vec![], vec![], vec![]);
+    for x in items {
+        if s(x, "base").is_empty() {
+            bail!("which version of the file?");
+        }
+        match health::fix(vault, s(x, "key"), x["choice"].as_str().filter(|c| !c.is_empty())) {
+            Ok(f) if f.base == s(x, "base") => fixes.push(f),
+            Ok(f) => changed.push(f.path),
+            Err(e) => skipped.push(json!({ "key": s(x, "key"), "why": format!("{e:#}") })),
+        }
+    }
+    let mut a = health::apply(vault, &fixes)?;
+    a.changed_since.extend(changed);
+    a.changed_since.sort();
+    a.changed_since.dedup();
+    let mut out = serde_json::to_value(a)?;
+    out["skipped"] = json!(skipped);
+    Ok(out)
 }
 
 /// A call the page names as the window does everywhere — its folder's name, or its stamp when it was retitled since —:
@@ -596,6 +630,37 @@ mod tests {
         assert_eq!(moved["conversation"], id.as_str());
         assert!(!knowledge::chat::live().contains(&id));
         knowledge::chat::reset();
+    }
+
+    #[test]
+    fn health_routes_and_actions() {
+        let (_env, root) = crate::paths::testenv::folders("kn-api-health");
+        let v = vault(&root);
+        fixture::write(&v.root, "knowledge/clients/northwind-retail.md", "---\ntitle: Northwind Retail\n---\n# Northwind Retail\n");
+        fixture::write(&v.root, "knowledge/topics/retro.md", "---\ntitle: Retro\n---\nWith [[Northwind Retail]].\n");
+        let key = "broken:knowledge/topics/retro.md:[[Northwind Retail]]";
+        let enc = |k: &str| k.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect::<String>();
+        let h = json(&format!("{}/health", v.id), "fixes=broken");
+        assert!(h["findings"].as_array().unwrap().iter().any(|f| f["key"] == key && f["group"] == "should" && f["by"] == "code"));
+        assert_eq!(h["fixes"][0]["key"], key);
+        assert!(h["score"]["total"].is_u64() && h["history"].is_array() && h["pages"].is_u64());
+        let d = json(&format!("{}/health/{}", v.id, enc(key)), "");
+        assert_eq!(d["finding"]["key"], key);
+        assert_eq!(d["fix"]["base"], h["fixes"][0]["base"]);
+        // The page names findings by key; a path never reaches a file.
+        assert!(route(&format!("{}/health/..%2F..%2Fetc%2Fpasswd", v.id), "").is_err());
+        assert!(act("kn_fix", &json!({"id": v.id, "key": key})).is_err(), "which version of the file");
+        let r = act("kn_fix", &json!({"id": v.id, "key": "../../etc/passwd", "base": "x"})).unwrap();
+        assert_eq!(r["skipped"][0]["key"], "../../etc/passwd");
+        // Not the text whose diff the page showed: nothing written.
+        let r = act("kn_fix", &json!({"id": v.id, "key": key, "base": "0".repeat(64)})).unwrap();
+        assert_eq!((r["written"].clone(), r["changed_since"].clone()), (json!([]), json!(["knowledge/topics/retro.md"])));
+        let r = act("kn_fix_all", &json!({"id": v.id, "items": [{"key": key, "base": d["fix"]["base"]}]})).unwrap();
+        assert_eq!(r["written"], json!(["knowledge/topics/retro.md"]));
+        assert!(std::fs::read_to_string(v.root.join("knowledge/topics/retro.md")).unwrap().contains("[[clients/northwind-retail|Northwind Retail]]"));
+        let iso = "isolated:knowledge/notes/2026-01-03-c.md";
+        assert_eq!(act("kn_ignore", &json!({"id": v.id, "key": iso, "on": true})).unwrap()["ignored"], json!([iso]));
+        assert!(json(&format!("{}/health", v.id), "")["ignored"].as_array().unwrap().iter().any(|f| f["key"] == iso));
     }
 
     #[test]

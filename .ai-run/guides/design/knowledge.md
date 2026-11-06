@@ -21,6 +21,7 @@ is `recall.md`. The window rules are `.ai-run/guides/window/window-ui.md`; untru
 | `scan.rs` | Echo's index of a vault (`index`, memory + `index.json`, re-read where size or mtime changed), `rev`, `search` |
 | `links.rs` | Link resolution as Obsidian does it (`Resolver`), `edges`, `backlinks`, `graph` (nodes, edges, hubs) |
 | `checks.rs` | Read-only checks (`run`) and the one rule for which pages the index should list (`in_scope`) |
+| `health.rs` | Health (spec-2 K16): findings with stable keys (`findings`, cached per revision), the score (`score`), fixes as diffs (`fix`) written with a base check (`apply`), `ignore`, `health.json`, the window's `view` / `detail`, the CLI's `check` |
 | `catalog.rs` | Writing one row into the index's right table (`insert`, `row`, `cell`) |
 | `page.rs` | Reading a page for the window (`read`: safe HTML, outline, backlinks, local graph), `save`, `create`, history, `restore`, index rows, assets, `inside` (path checks) |
 | `export.rs` | Minutes → a note: the rule (`targets`), `save_by_rules`, `minutes_written`, on demand (`save`, `preview`), the call's record (`<call>/knowledge.json`) |
@@ -136,6 +137,42 @@ Deterministic and read-only, recomputed after each scan: pages not in the index,
 without properties, tags not in the taxonomy, the meeting tag missing from the taxonomy. `checks::in_scope` is the one
 rule for which pages count: not the index, a taxonomy or a folder's `README.md` — the tree's *Not in index* filter
 and the page rail use it too. The one fix is *Add N rows…*: one write of the index, one commit.
+
+Slice 2 adds four kinds (spec-2 K16-02): index rows to missing pages (`dead_rows`: the index's own links that lead
+nowhere — no longer counted as broken links too), properties a folder usually has (a key on ≥ 80 % of a folder's
+pages, folders of ≥ 5, pages that have properties), duplicate titles (case and spacing ignored) and an oversized index
+(> 150 KB or > 1,500 table rows). `echoctl knowledge check` keeps slice 1's keys as they were and adds these and `score`.
+
+### Health (`health.rs`)
+A **finding** is one thing a check found: `kind`, `group` (`needs` · `should` · `tidy`), `by` (`code` · `ai`), its
+pages (vault-relative, with a line where there is one), a title, what it means and whether Echo has a fix to show
+without asking (`fixable`). Its **key** is `kind:` + its pages, sorted, + what it is about (`[[link]]` / `(dest)`,
+`#tag`, the property's key): the same across scans, so the page names findings only by key — never by path — and
+`health.json` keeps ignored keys across rescans. The same broken link twice on a page is one finding with both lines.
+Code checks run when Health, Home or the CLI asks, from Echo's index, cached per revision: the index's `rev`, the index
+file's and the tag taxonomy's size and time (either may sit outside the pages root) and the vault's settings.
+
+**The score** is §5.7: per category, `weight × max(0, 1 − 5 × pages touched ÷ pages in scope)`, the pages in scope
+being `in_scope`'s; Freshness (AI kinds only) only once an AI check has run (`code_only` until then); the total rounded
+half up. Isolated pages count in no category. Ignored findings are neither listed (they come back under *Show
+ignored*) nor counted. The AI kinds are named in `AI_KINDS` for `lint`: `contradiction` and `possible_duplicate`
+count in Consistency, `stale` in Freshness. One point a day (the day's last) is kept for 90 days; it is written when
+the checks are first computed on a day and whenever the score changes.
+
+**Fixes** are pure: `fix(v, key, choice)` reads the file now and returns its diff, its new text and the text's
+sha256 (`base`); nothing is written. A broken link points to the closest page — the same name in another folder, the
+same name but for case or spacing, else a name 1 edit away (names of 3+ characters) or 2 (6+), so a short name never
+matches anything; nearest, then shallowest — as `[[path|what it showed]]`, or a Markdown link with its folder as
+written when that leads there, else the path from the file; or *Remove the link, keep its text*; or *Create the page*
+(the window's New page). An index row to a missing page points to the closest page, else is removed. Without
+properties: `title` (H1, else the name), `date` (from the name, else the first commit), `tags: []`, in the file's own
+line endings. A tag not in the taxonomy: replaced by a tag the taxonomy allows that the user picks, in `tags` (dropped
+when already there) and inline. Not in the index: slice 1's row (`catalog::insert`; Health writes no `log.md` line).
+Each fix is a list of operations that find their place in the text they are given, so *Fix all* applies several to
+one file in one write. `apply` writes each file only if its sha256 is still the fixes' `base` (else `changed_since`,
+left as it is), by `write_atomic`, then one commit of the written files that were clean before (X-G2, `git::dirty`
+fails safe) and one activity line each (`by: health`). `kn_fix` / `kn_fix_all` take `{key, choice?, base}` — the base
+of the diff the page showed — and compute each fix again before `apply`.
 
 ### Graph
 Built in the window from `/api/kn/<id>/graph` and drawn live on a canvas by `graphCanvas` in `knowledge.js`, the
@@ -285,6 +322,7 @@ them all at start, when none can be in use.
 | The note is Echo's minutes as they are, no model (D3); minutes only, transcript and chat opt-in (D12) | Cheap, the same every time; others' words stay in Echo |
 | Re-written minutes replace a note only if it is unchanged (D11) | The user's edits win |
 | Checks read-only, one fix (D13); no rename, move or delete (D14) | No risk, no broken links |
+| Health's fixes are computed again from the finding's key and written only over the text whose diff was shown (spec-2 X-T8, D34) | The page never sends a path or a text; nothing changes unseen |
 | Frontmatter read by Echo's own small reader; written only for Echo's notes (D15). YAML block scalars (`|`, `>`) read as text | No new dependency; nothing reformatted |
 | Reader and editor follow the vault's Obsidian settings (link style, strict line breaks) | The page looks as it does in Obsidian |
 | Pages, tree, rail and checks share `checks::in_scope` | One rule in one place: they disagreed before |
@@ -298,6 +336,7 @@ them all at start, when none can be in use.
 | `<home>/.echo/knowledge/vaults.json` (+ `vaults.lock`) | The vault list | Settings, Knowledge, `echoctl knowledge` |
 | `<home>/.echo/knowledge/<id>/index.json` | Echo's index of the vault | `scan::index` |
 | `<home>/.echo/knowledge/<id>/save.lock` | One save at a time into the vault | `export` |
+| `<home>/.echo/knowledge/<id>/health.json` (+ `health.lock`) | Score history (90 days), ignored findings' keys, the last AI check (`ai`, written by `lint`) | `health` (lock + re-read + `write_atomic`) |
 | `<call>/knowledge.json` (+ `.knowledge.lock`) | Where the call's minutes were saved, and the call's choice | `export` (never a Claude run) |
 | `<config>/minutes-run/vault-plugins/<id>-<hash>/` | The vault's skills as a plugin, for managed profiles, one folder per content | `terminal::vault_plugin` (removed at app start) |
 | `<home>/.echo/knowledge/<id>/chat/<conversation>/settings.json` | A conversation's guard hook and scope `env` (rewritten at each of its starts) | `chat::start` |

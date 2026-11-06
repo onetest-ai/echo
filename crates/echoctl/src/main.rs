@@ -1104,7 +1104,9 @@ enum KnowledgeCmd {
     },
     /// One page: properties, links, backlinks (JSON)
     Read { vault: String, path: String },
-    /// The vault's checks: pages not in the index, broken links, isolated pages, pages without properties (JSON)
+    /// The vault's checks and Health score: pages not in the index, broken links, isolated pages, pages without
+    /// properties, unknown tags, index rows to missing pages, usual properties missing, duplicate titles, an oversized
+    /// index (JSON)
     Check { vault: String },
     /// Add index rows for pages the index doesn't list (vault-relative paths)
     IndexAdd { vault: String, paths: Vec<String> },
@@ -2783,11 +2785,7 @@ fn knowledge_command(cmd: KnowledgeCmd) -> Result<()> {
             }
             p
         }
-        KnowledgeCmd::Check { vault } => {
-            let v = kn::get(&vault)?;
-            let ix = kn::scan::index(&v)?;
-            serde_json::to_value(kn::checks::run(&v, &ix))?
-        }
+        KnowledgeCmd::Check { vault } => kn::health::check(&kn::get(&vault)?)?,
         KnowledgeCmd::IndexAdd { vault, paths } => kn::page::index_add(&kn::get(&vault)?, &paths)?,
         KnowledgeCmd::SaveMinutes { call, vault, new, replace, anyway } => {
             kn::refuse_headless()?;
