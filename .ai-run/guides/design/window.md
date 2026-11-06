@@ -145,9 +145,12 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   one — its suggestions ranked by fit (the task's title and thread's words, stemmed, in a skill's name and description;
   then how often the user chose it, kept in the window; common words like "send" or "next" count for nothing; any
   alphabet — `rankSkills`, `skill-fit.test.mjs`), the best marked "fits best" and chosen at once when it clearly leads
-  (decided once the skills are loaded); the field keeps the caret while it redraws (the cross takes it back to Just the task); a two-line note; Send. Later the minutes' choice for an action
+  (decided once the skills are loaded); the field keeps the caret while it redraws (the cross takes it back to Just the task); a two-line note; Work on it. Later the minutes' choice for an action
   goes first.
-- The card's other Claude icon (Ask Claude) stays: a one-shot change to the task's own fields ("move it two weeks").
+- One Claude icon on My work's cards (✦; ⌘K "Claude: <task>"), one dialog, two actions on the same text: Work on it
+  (the panel, above) and Change it — a one-shot `claude -p` change to the task's own fields ("move it two weeks"), its
+  outcome above My work with Undo. Change it is the main button until a skill is chosen; it is offered from Today only
+  (a task's details keep Send to Claude, work only). Two icons for "Claude" read alike, so they were made one (Nov 2026).
 - Only the panel's session: Echo has no way into the user's own Claude Code sessions elsewhere.
 - Not yet: action modes from the minutes (claude: the skill and prompt ready on the action; manual: how to do it).
 
@@ -400,7 +403,7 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   A 1:1 chat is labelled by the person ("Chat with Dana Kowal"). An item leaves when answered (the next read no longer finds it) or decided
   (`<home>/.echo/needs.json`, decisions kept two days). No snooze, no fold, no notifications: only in Today.
 - ⌘K on Today acts on it (target "Today"): Needs you now's items (Reply in Teams / Read and reply, I'll do it, Won't do),
-  Prepare / Show prep for meetings still to come, and Close / Ask Claude for each task this week — each the click on its
+  Prepare / Show prep for meetings still to come, and Close / Claude for each task this week — each the click on its
   button (`press`), so the dialogs ask first as they do. A calendar event with a prep: Show its prep, Prepare for this
   meeting / Prepare it again; a meeting coming up in Calls: Prepare this meeting / Write the prep again.
 

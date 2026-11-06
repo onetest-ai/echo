@@ -2049,6 +2049,7 @@ select.set-in { width: auto; margin-right: 6px; }
 .sc-words:focus { border-color: var(--accent); outline: none; }
 .sc-foot { display: flex; align-items: center; gap: 8px; }
 .sc-foot .set-sub { font-size: 11.5px; }
+.sc-foot .btn { flex: none; white-space: nowrap; }
 /* Skills: a catalogue row, its description in two lines; the viewer's problems and SKILL.md. */
 .sk-desc { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .tp-row.sk-off b { color: var(--text-3); }

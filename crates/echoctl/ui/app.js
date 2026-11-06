@@ -1074,13 +1074,11 @@ function todayView() {
     const where = [kind, who, pj ? pj.name : ''].filter(Boolean).map(esc).join(' · ')
     // Close… asks first in a dialog (`todayCloseDialog`); the title opens the task.
     const attrs = `data-project="${esc(t.project)}" data-title="${esc(t.title)}" data-node="${esc(t.id)}"`
-    // Ask Claude to do something with it ("move it two weeks"), and close it — each asks first in a dialog.
-    const ask = `<button class="icon-btn td-ico" data-today-ask="1" ${attrs} title="Ask Claude to change this task…" aria-label="Ask Claude about “${esc(t.title)}”…">${ICON('<path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/><path d="M18.5 15.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>')}</button>`
     const close = `<button class="icon-btn td-ico" data-today-close="${esc(t.id)}" ${attrs} title="Close this task…" aria-label="Close “${esc(t.title)}”…">${ICON('<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.2l2.4 2.4 4.6-4.9"/>')}</button>`
-    // Work on it in the Claude panel, with a skill (a follow-up mail…).
-    const work = `<button class="icon-btn td-ico" data-claude-task="${esc(t.id)}" ${attrs} title="Send to Claude — work on it in the Claude panel" aria-label="Send “${esc(t.title)}” to Claude…">${ICON('<path d="M4 6h16v10H8l-4 3z"/><path d="M9 10.5h6M9 13h3.5"/>')}</button>`
+    // Claude: one dialog — change the task ("move it two weeks", a `claude -p` run) or work on it in the panel, with a skill.
+    const work = `<button class="icon-btn td-ico" data-claude-task="${esc(t.id)}" data-today="1" ${attrs} title="Claude — change this task, or work on it" aria-label="Claude: “${esc(t.title)}”…">${ICON('<path d="M12 3.5l1.9 5 5 1.9-5 1.9-1.9 5-1.9-5-5-1.9 5-1.9z"/><path d="M18.5 15.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>')}</button>`
     // The date's icon before the title's words.
-    return `<div class="td-task"><span class="td-task-t">${dueChip(t)}<a href="${esc(t.link)}">${esc(t.title)}</a></span><span class="td-task-m">${pj ? projIcon(pj, 12) : ''}${where}<span class="td-icos">${work}${ask}${close}</span></span></div>`
+    return `<div class="td-task"><span class="td-task-t">${dueChip(t)}<a href="${esc(t.link)}">${esc(t.title)}</a></span><span class="td-task-m">${pj ? projIcon(pj, 12) : ''}${where}<span class="td-icos">${work}${close}</span></span></div>`
   }
   const w = d.work || {}
   // One list by date: late first (the oldest first), then by due date; whose it is stays on each card.
@@ -1153,8 +1151,9 @@ function todayAskBar() {
 
 /** Today → Close…: a dialog — closing a task by hand asks first, with an optional comment (kept in its history).
  *  A thread's sync closes tasks by itself when its calls and mail say so; this is for what they don't. */
-/** Send to Claude: a task into the Claude panel's live session — typed there as if by the user, with the skill
- *  chosen (`/my-skills:<id>`) and the user's own words; the conversation goes on there. */
+/** The Claude dialog for a task, two actions on one text: Work on it — into the Claude panel's live session, typed
+ *  there as if by the user, with the skill chosen (`/my-skills:<id>`) and the user's words; the conversation goes on
+ *  there. Change it (from Today) — the words to `todayAsk`, a `claude -p` run that edits the task, with Undo. */
 // ── skill fit: how well each skill fits a task (no DOM: `skill-fit.test.mjs`) ────────────────────────
 /** The task's words (its title, its thread) in each skill's name and description — words of four letters or more,
  *  any alphabet, cut to a short stem (follow-up ~ follow, reports ~ report), the common ones left out — then how
@@ -1189,15 +1188,17 @@ function sendClaudeDialog() {
   const chosen = skills.find((x) => x.id === c.skill)
   const q = (c.q || '').trim().toLowerCase()
   const found = ranked.map((r) => r.x).filter((x) => !q || tplName(x.id).toLowerCase().includes(q) || (x.description || '').toLowerCase().includes(q)).slice(0, 6)
+  // Change it: from Today only (its outcome shows there); the main action when no skill is chosen.
+  const change = c.today ? `<button class="btn${chosen ? '' : ' primary'}" data-sc-change title="Claude changes the task — its date, state, owner or title; you can undo it">Change it</button>` : ''
   const picker = chosen
     ? `<div class="sc-chosen"><b>${esc(tplName(chosen.id))}</b><span title="${esc(chosen.description)}">${esc(chosen.description)}</span><button class="icon-btn" data-sc-skill="" aria-label="No skill — just the task" title="No skill — just the task">${ICON('<path d="M6 6l12 12M18 6L6 18"/>')}</button></div>`
     : `<input id="sc-q" class="sc-q" placeholder="Just the task — or type to find a skill (${skills.length})" value="${esc(c.q || '')}" autocomplete="off" aria-label="Skill">
        ${c.open ? `<div class="sc-sugg" role="listbox">${found.map((x) => `<button class="sc-opt" role="option" data-sc-skill="${esc(x.id)}" title="${esc(x.description)}"><b>${esc(tplName(x.id))}${x.id === best ? ' <em class="sc-best">fits best</em>' : ''}</b><span>${esc(x.description)}</span></button>`).join('') || '<div class="set-sub" style="padding:6px 10px">No skill has that in its name or description.</div>'}</div>` : ''}`
   return `<div class="td-modal" data-sc-off="1"><div class="td-dialog sc-dialog" role="dialog" aria-modal="true" aria-labelledby="sc-h">
-    <div class="sc-head"><h3 id="sc-h">Send to Claude</h3><div class="sc-task">${thread ? `${projIcon(thread, 14)}<span class="set-sub">${esc(thread.name)}</span> · ` : ''}<span>${esc(c.title)}</span></div></div>
+    <div class="sc-head"><h3 id="sc-h">Claude</h3><div class="sc-task">${thread ? `${projIcon(thread, 14)}<span class="set-sub">${esc(thread.name)}</span> · ` : ''}<span>${esc(c.title)}</span></div></div>
     <div class="sc-pick">${picker}</div>
-    <textarea id="sc-words" class="sc-words" rows="2" placeholder="Anything to add — optional (Keep it short; Dana is away until the 12th)">${esc(c.words || '')}</textarea>
-    <div class="sc-foot"><span class="set-sub">Opens the Claude panel; you go on there. Nothing goes to anyone without your OK.</span><span class="grow"></span><button class="btn ghost" data-sc-off="1">Cancel</button><button class="btn primary" data-sc-send>Send</button></div></div></div>`
+    <textarea id="sc-words" class="sc-words" rows="2" placeholder="${c.today ? 'What to do — Move it two weeks later; or a note for the work' : 'Anything to add — optional (Keep it short; Dana is away until the 12th)'}">${esc(c.words || '')}</textarea>
+    <div class="sc-foot"><span class="set-sub">${c.today ? 'Change it: Claude edits the task, you can undo. Work on it: the Claude panel, you go on there.' : 'Opens the Claude panel; you go on there.'} Nothing goes to anyone without your OK.</span><span class="grow"></span><button class="btn ghost" data-sc-off="1">Cancel</button>${change}<button class="btn${change && !chosen ? '' : ' primary'}" data-sc-send>Work on it</button></div></div></div>`
 }
 /** Type a line into the Claude panel's session: started (or resumed) first when it isn't running, and typed once it
  *  has drawn and gone quiet — earlier keys would land in its start-up. */
@@ -1231,13 +1232,6 @@ function sendToClaude(line) {
 function todayCloseDialog() {
   const c = S.todayClose
   if (!c) return ''
-  if (c.ask) return `<div class="td-modal" data-today-keep="1"><div class="td-dialog" role="dialog" aria-modal="true" aria-labelledby="td-dlg-h">
-    <h3 id="td-dlg-h">Ask Claude about this task</h3>
-    <p>${esc(c.title)}</p>
-    <label for="td-ask-text" class="set-sub">What should change — its date, state, owner or title; you can undo it</label>
-    <textarea id="td-ask-text" rows="3" placeholder="Move it two weeks later"></textarea>
-    <div class="td-dialog-a"><button class="btn ghost" data-today-keep="1">Cancel</button><button class="btn primary" data-today-ask-send="1">Ask Claude</button></div>
-  </div></div>`
   return `<div class="td-modal" data-today-keep="1"><div class="td-dialog" role="dialog" aria-modal="true" aria-labelledby="td-dlg-h">
     <h3 id="td-dlg-h">Close this task?</h3>
     <p>${esc(c.title)}</p>
@@ -2743,7 +2737,7 @@ function templateEditor() {
 document.addEventListener('click', (e) => {
   // A click anywhere else in the dialog folds its suggestions away.
   if (S.claudeSend && S.claudeSend.open && !e.target.closest('.sc-pick')) { S.claudeSend.open = false; render() }
-  const t = e.target.closest('[data-claude-task],[data-sc-send],[data-sc-off],[data-sc-skill]')
+  const t = e.target.closest('[data-claude-task],[data-sc-send],[data-sc-change],[data-sc-off],[data-sc-skill]')
   if (!t) return
   if (t.dataset.scSkill !== undefined && S.claudeSend) {
     S.claudeSend.words = (($('#sc-words') || {}).value || '')
@@ -2753,11 +2747,18 @@ document.addEventListener('click', (e) => {
     return
   }
   if (t.dataset.claudeTask) {
-    S.claudeSend = { project: t.dataset.project, node: t.dataset.claudeTask, title: t.dataset.title, skill: undefined, words: '', open: true }
+    S.claudeSend = { project: t.dataset.project, node: t.dataset.claudeTask, title: t.dataset.title, today: !!t.dataset.today, skill: undefined, words: '', open: true }
     if (!TPL.data) loadTemplates().then(render)
     return render()
   }
   if (t.dataset.scOff !== undefined && (t.tagName === 'BUTTON' || e.target === t)) { S.claudeSend = null; return render() }
+  if (t.dataset.scChange !== undefined) {
+    const c = S.claudeSend, text = (($('#sc-words') || {}).value || '').trim()
+    if (!text) { const n = $('#sc-words'); if (n) n.focus(); S.notice = 'Say what should change — Move it two weeks later'; return render() }
+    S.claudeSend = null
+    todayAsk(c, text)
+    return render()
+  }
   if (t.dataset.scSend !== undefined) {
     const c = S.claudeSend
     const skill = c.skill || ''
@@ -2783,7 +2784,7 @@ document.addEventListener('keydown', (e) => {
   if (e.target.id === 'sc-q' && e.key === 'Enter') { e.preventDefault(); const f = document.querySelector('.sc-sugg [data-sc-skill]'); if (f) f.click(); return }
   if (e.key === 'Escape' && S.claudeSend.open) { S.claudeSend.open = false; return render() }
   if (e.key === 'Escape') { S.claudeSend = null; render() }
-  else if (e.key === 'Enter' && e.target.id === 'sc-words') { e.preventDefault(); const b = document.querySelector('[data-sc-send]'); if (b) b.click() }
+  else if (e.key === 'Enter' && e.target.id === 'sc-words') { e.preventDefault(); const b = document.querySelector('.sc-foot .btn.primary'); if (b) b.click() }
 })
 
 // Templates: picking, the editor's buttons, and its fields saved when they change.
@@ -6716,8 +6717,7 @@ function paletteItems(target) {
     for (const t of ['mine', 'owed', 'waiting'].flatMap((k) => (w[k] && w[k].items) || [])) {
       const attrs = { project: t.project, title: t.title, node: t.id }
       add('My work', `Close: ${t.title}`, () => press({ todayClose: t.id, ...attrs }), { keywords: 'task done finish complete' })
-      add('My work', `Ask Claude: ${t.title}`, () => press({ todayAsk: '1', ...attrs }), { keywords: 'task change move due later' })
-      add('My work', `Send to Claude: ${t.title}`, () => press({ claudeTask: t.id, ...attrs }), { keywords: 'work on it skill follow-up mail session' })
+      add('My work', `Claude: ${t.title}`, () => press({ claudeTask: t.id, today: '1', ...attrs }), { keywords: 'ask send change move due later work on it skill follow-up mail session' })
     }
   }
   // Echo's own
@@ -7081,7 +7081,7 @@ document.addEventListener('click', (e) => {
   if (S.laterOpen && !(e.target.closest && e.target.closest('[data-cmd^="later-"]'))) { S.laterOpen = false; render() }
   // The sidebar open over a narrow page closes on a click beside it.
   if (S.barOver && !(e.target.closest && e.target.closest('.actbar'))) { S.barOver = false; render() }
-  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-theme-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-go],[data-conv-keep],[data-br-pclosed],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-up],[data-today-seen],[data-today-done],[data-today-retry],[data-today-import],[data-today-close],[data-today-keep],[data-today-ask],[data-today-ask-send],[data-needs-open],[data-needs-wont],[data-needs-todo],[data-needs-todo-ok],[data-needs-read],[data-needs-send],[data-needs-outlook],[data-needs-off],[data-today-undo],[data-today-askoff],[data-prep-write],[data-ev-prep],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
+  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-theme-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-go],[data-conv-keep],[data-br-pclosed],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-up],[data-today-seen],[data-today-done],[data-today-retry],[data-today-import],[data-today-close],[data-today-keep],[data-needs-open],[data-needs-wont],[data-needs-todo],[data-needs-todo-ok],[data-needs-read],[data-needs-send],[data-needs-outlook],[data-needs-off],[data-today-undo],[data-today-askoff],[data-prep-write],[data-ev-prep],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-toggle],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
   if (!t) { if (menuWas) render(); return }
   // Sign-ins (`signin.rs`): shown at once (starting / stopping / checking) until the next poll
   // brings the app's state.
@@ -7192,19 +7192,6 @@ document.addEventListener('click', (e) => {
     send({ cmd: 'write_notes', call: t.dataset.todayRetry })
     setTimeout(() => loadToday().then(render), 800)
     return
-  }
-  if (t.dataset.todayAsk) {
-    S.todayClose = { ask: true, project: t.dataset.project, node: t.dataset.node, title: t.dataset.title }
-    render()
-    const n = $('#td-ask-text'); if (n) n.focus()
-    return
-  }
-  if (t.dataset.todayAskSend) {
-    const c = S.todayClose, text = (($('#td-ask-text') || {}).value || '').trim()
-    if (!c || !text) return
-    S.todayClose = null
-    todayAsk(c, text)
-    return render()
   }
   if (t.dataset.needsOpen !== undefined && t.dataset.needsOpen !== null && (t.dataset.needsOpen || t.dataset.chat)) {
     // The Teams app on that message (its link as msteams:), else the chat.
@@ -7647,7 +7634,6 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && S.lightbox) { S.lightbox = null; return render() }
   if (e.key === 'Escape' && S.todayClose) { S.todayClose = null; return render() }
   if (e.key === 'Escape' && S.needsDlg) { S.needsDlg = null; return render() }
-  if (e.key === 'Enter' && !e.shiftKey && e.target.id === 'td-ask-text') { e.preventDefault(); const b = $('[data-today-ask-send]'); if (b) b.click(); return }
   if (e.key === 'Escape' && (S.stopAsk || S.listOpen || S.menuOpen || S.laterOpen || S.convAsk || S.overlay || S.barOver)) { S.barOver = false; S.convAsk = null; S.stopAsk = false; S.listOpen = false; S.menuOpen = false; S.laterOpen = false; S.overlay = false; return render() }
   if ((MAC ? e.metaKey : e.ctrlKey) && e.key === ',') { e.preventDefault(); return goActivity('settings') }
   if ((MAC ? e.metaKey : e.ctrlKey) && e.key === '`') { e.preventDefault(); return claudePanel() }
