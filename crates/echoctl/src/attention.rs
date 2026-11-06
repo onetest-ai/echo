@@ -362,10 +362,23 @@ pub fn collect() -> Collected {
     }
     // A plugin with a newer version in its marketplace: one item each, opening it in Settings → Plugins (an update
     // that asks for more says so; it shows its sheet there before anything changes).
-    for (p, u) in crate::plugins::updates().into_iter().filter(|(_, u)| u.blocked.is_none()) {
-        let why = if u.new_uses.is_empty() { format!("{} → {}, from {}", p.version, u.version, u.market) } else { format!("{} → {} — it asks for more: {}", p.version, u.version, u.new_uses.join("; ")) };
-        out.push(item(format!("plugin-update:{}", p.id), "update", "echo", format!("{} {} is available", u.name, u.version), why, false,
-            vec![], Some(format!("settings/plugins/{}", p.id))));
+    match crate::plugins::updates() {
+        Ok(ups) => {
+            for (p, u) in ups.into_iter().filter(|(_, u)| u.blocked.is_none()) {
+                let more = match u.new_uses.len() {
+                    0 => String::new(),
+                    1 => format!(" — it asks for more: {}", u.new_uses[0]),
+                    n => format!(" — it asks for {n} more things"),
+                };
+                let why: String = format!("{} → {}, from {}{more}", p.version, u.version, u.market).chars().take(200).collect();
+                out.push(item(format!("plugin-update:{}", p.id), "plugin-update", "echo", format!("{} {} is available", u.name, u.version).chars().take(120).collect(), why, false,
+                    vec![], Some(format!("settings/plugins/{}", p.id))));
+            }
+        }
+        // The registry can't be read: what it had stays open, not Done.
+        Err(_) => {
+            c.keep_kinds.insert("plugin-update");
+        }
     }
     // What plugins put here (`ctx.inbox.set`): their buttons call their own commands.
     #[cfg(feature = "js")]

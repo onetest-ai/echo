@@ -1192,9 +1192,22 @@ pub fn update_for(p: &Installed) -> Option<Review> {
     review_of(&p.market, &o, Some(p)).ok()
 }
 
-/// Every installed plugin with an update waiting (from its marketplace's last fetched catalog, no network).
-pub fn updates() -> Vec<(Installed, Review)> {
-    Registry::load().map(|r| r.installed.into_values().filter_map(|p| update_for(&p).map(|u| (p, u))).collect()).unwrap_or_default()
+/// Every installed plugin with an update waiting (from its marketplace's last fetched catalog, no network; each
+/// catalog read once). An error when the registry can't be read (the Inbox then keeps what it had).
+pub fn updates() -> Result<Vec<(Installed, Review)>> {
+    let r = Registry::load()?;
+    let mut catalogs: std::collections::HashMap<String, Option<Catalog>> = std::collections::HashMap::new();
+    let mut out = vec![];
+    for p in r.installed.into_values() {
+        let Some(c) = catalogs.entry(p.market.clone()).or_insert_with(|| catalog(&p.market)) else { continue };
+        let Some(o) = c.plugins.iter().find(|o| o.id == p.id) else { continue };
+        if o.manifest.as_ref().is_some_and(|m| crate::update::newer(&m.version, &p.version)) {
+            if let Ok(u) = review_of(&p.market, o, Some(&p)) {
+                out.push((p, u));
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// Install the waiting update of `id`; one that asks for more is refused unless those lines were agreed.
@@ -1634,11 +1647,14 @@ mod tests {
         let p = Registry::load().unwrap().installed["demo"].clone();
         let rv = update_for(&p).unwrap();
         // The Inbox lists it (`attention`): every installed plugin with an update waiting.
-        assert_eq!(updates().iter().map(|(p, u)| (p.id.as_str(), u.version.as_str())).collect::<Vec<_>>(), [("demo", "0.2.0")]);
+        assert_eq!(updates().unwrap().iter().map(|(p, u)| (p.id.as_str(), u.version.as_str())).collect::<Vec<_>>(), [("demo", "0.2.0")]);
+        let item = crate::attention::collect().items.into_iter().find(|i| i["key"] == "plugin-update:demo").expect("an Inbox item");
+        assert_eq!((item["title"].as_str(), item["go"].as_str()), (Some("Plugin demo 0.2.0 is available"), Some("settings/plugins/demo")));
+        assert!(item["why"].as_str().unwrap().contains("it asks for more"), "{item}");
         assert_eq!(rv.new_uses.len(), 1);
         assert!(update("demo", &[]).unwrap_err().to_string().contains("asks for more"));
         assert_eq!(update("demo", &rv.new_uses).unwrap().unwrap().version, "0.2.0");
-        assert!(updates().is_empty(), "updated: nothing waits");
+        assert!(updates().unwrap().is_empty(), "updated: nothing waits");
         assert_eq!(fs::read_dir(installed_dir("demo")).unwrap().count(), 1, "the old version's files are gone");
         set_enabled("demo", false).unwrap();
         assert!(enabled().is_empty());

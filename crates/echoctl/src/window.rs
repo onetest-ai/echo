@@ -249,6 +249,9 @@ fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
         "/api/layout" => json_reply(load_layout()),
         "/api/settings" => json_reply(settings_snapshot()),
         "/api/attention" => {
+            // A marketplace not fetched for a while is fetched again in the background: a plugin's update reaches
+            // the Inbox without a visit to Settings → Plugins.
+            refresh_plugin_markets();
             // What runs, read first: a job ending meanwhile then shows as running over a list that may
             // still hold its item, never as an item with its buttons back.
             let (busy, failed) = attention_busy();
