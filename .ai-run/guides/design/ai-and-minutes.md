@@ -187,8 +187,10 @@ Write now and Not yet ▾; the calls list shows ⏱ for calls ended in the last 
   `--model`; the mod does nothing and `pending` / `claim` refuse.
 - `title` inside a run sets the title, marks `title_from_run`, and leaves the folder rename to the run's end
   (`calls::rename_to_title`); a terminal `echoctl title` on a call with a run waits too (`notes::run_active`).
-- `context` stays small however long the call: `frames` is `{count, index, sample}` — up to 12 frames (the biggest
-  changes on screen, then an even spread), the full list in the call's `frames.jsonl` (#98).
+- `context` doesn't grow with a call's frames: `frames` is `{count, index, sample}` — up to 12 frames (the call cut in
+  12 stretches, from each the one that changed the screen most), the full list in the call's `frames.jsonl` (#98).
+  Other fields (`chat`) can still make it too long to show; the run then Reads its saved copy (above). The window's
+  session on a call shares that judge, so it may Read its own saved output too.
 - By design a run still changes two things outside its call: learned vocabulary for this meeting and pruned frames
   moved to the trash (purged by the app after the run, `calls::purge_trash`, not by `frames --keep`).
 

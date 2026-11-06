@@ -233,8 +233,7 @@ impl Scope {
             return self.judge_routine(call, tool, input);
         }
         // A command's answer too long to show goes to the session's own tool results, for the model to Read there.
-        let results = own_results(call);
-        let theirs = |p: &Path| results.as_ref().is_some_and(|r| p.starts_with(r));
+        let theirs = |p: &Path| own_results(call).is_some_and(|r| p.starts_with(&r));
         match tool {
             "Bash" => self.bash(input["command"].as_str().unwrap_or("")),
             "Read" => {

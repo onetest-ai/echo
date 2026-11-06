@@ -1332,8 +1332,9 @@ pub fn compose(to: &[String], cc: &[String], subject: &str, body_file: &Path) ->
 /// `echoctl frames <call> --keep a.jpg,b.jpg | none`: keep only the frames the notes use,
 /// delete the rest (talking heads, Teams UI, near-duplicates) and rewrite `frames.jsonl`.
 pub fn prune_frames(call: &str, keep: &[String]) -> Result<()> {
-    // `.` from inside the call has no name of its own (#98).
-    let dir = dunce::canonicalize(resolve_call(call)?)?;
+    let dir = resolve_call(call)?;
+    // `.` from inside the call has no name of its own (#98): its full path has.
+    let dir = if dir.file_name().is_none() { dunce::canonicalize(&dir)? } else { dir };
     let name = |p: &str| Path::new(p).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let keep: std::collections::HashSet<String> = keep.iter().filter(|k| k.as_str() != "none").map(|k| name(k)).collect();
     // Never deleted outright: what is pruned goes to `.echo/trash/<call>.frames/` (with its
@@ -1381,26 +1382,18 @@ pub fn prune_frames(call: &str, keep: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// Key frames saved during the call (`frames.jsonl`): `[{t, file, change}]`, file absolute.
 /// A call's shared screens for its minutes, small however long the call (#98): how many, the index that lists them
-/// all (`frames.jsonl`, read in the call's folder), and up to 12 to look at — the biggest changes on screen, then an
-/// even spread — in time order.
+/// all (`frames.jsonl` in the call's folder, its files relative to it), and up to 12 to look at — the call cut in 12
+/// equal stretches, from each the frame that changed the screen most — in time order.
 fn frames_for_minutes(dir: &Path, all: &[Value]) -> Value {
     const SAMPLE: usize = 12;
-    let mut pick: Vec<usize> = (0..all.len()).collect();
-    if all.len() > SAMPLE {
-        let change = |i: &usize| all[*i]["change"].as_f64().unwrap_or(0.0);
-        pick.sort_by(|a, b| change(b).total_cmp(&change(a)));
-        let ranked = std::mem::take(&mut pick);
-        let spread = SAMPLE - SAMPLE / 2;
-        // Where the spread meets one already picked, the next biggest change takes its place.
-        for k in ranked.iter().take(SAMPLE / 2).copied().chain((0..spread).map(|i| i * (all.len() - 1) / (spread - 1))).chain(ranked.iter().copied()) {
-            if pick.len() < SAMPLE && !pick.contains(&k) {
-                pick.push(k);
-            }
-        }
-        pick.sort_unstable();
-    }
+    let change = |i: usize| all[i]["change"].as_f64().unwrap_or(0.0);
+    let pick: Vec<usize> = if all.len() <= SAMPLE {
+        (0..all.len()).collect()
+    } else {
+        // Of equal changes (a new screen is 1.0; an older index has none), the stretch's first.
+        (0..SAMPLE).filter_map(|s| (s * all.len() / SAMPLE..(s + 1) * all.len() / SAMPLE).reduce(|a, b| if change(b) > change(a) { b } else { a })).collect()
+    };
     json!({
         "count": all.len(),
         "index": (!all.is_empty()).then(|| dir.join("frames.jsonl").display().to_string()),
@@ -1408,6 +1401,7 @@ fn frames_for_minutes(dir: &Path, all: &[Value]) -> Value {
     })
 }
 
+/// Key frames saved during the call (`frames.jsonl`): `[{t, file, change}]`, file absolute.
 fn frames_of(dir: &Path) -> Vec<Value> {
     fs::read_to_string(dir.join("frames.jsonl"))
         .unwrap_or_default()
@@ -2239,8 +2233,12 @@ mod tests {
         assert_eq!((many["count"].as_u64(), ts.len()), (Some(150), 12));
         assert!(ts.windows(2).all(|w| w[0] < w[1]), "in time order, once each");
         assert!(ts.contains(&(40 * 30)) && ts.contains(&(90 * 30)), "the biggest changes on screen");
-        assert!(ts.first() == Some(&0) && ts.last() == Some(&(149 * 30)), "spread over the whole call");
-        assert_eq!(many["index"], json!(Path::new("/c/frames.jsonl").display().to_string()));
+        assert!(ts.first() == Some(&0) && ts.last() >= Some(&(137 * 30)), "spread over the whole call");
+        // All alike (a new screen each time, or an index from before `change`): still spread, not the call's start.
+        let alike: Vec<Value> = (0..150).map(|i| json!({"t": i, "change": 1.0})).collect();
+        let ts: Vec<u64> = frames_for_minutes(dir, &alike)["sample"].as_array().unwrap().iter().map(|f| f["t"].as_u64().unwrap()).collect();
+        assert_eq!(ts, (0..12).map(|s| s * 150 / 12).collect::<Vec<u64>>());
+        assert_eq!(many["index"], json!(dir.join("frames.jsonl").display().to_string()));
         assert!(frames_for_minutes(dir, &[])["index"].is_null());
     }
 
