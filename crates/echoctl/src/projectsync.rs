@@ -94,6 +94,9 @@ pub fn run(id: &str) -> Result<Value> {
     if pending.is_empty() && claims == 0 && for_people.is_empty() {
         let v = json!({"state": "done", "at": started.to_rfc3339(), "message": "nothing new", "written": written.len(), "processed": 0});
         save_state(id, &v);
+        // Announced as a sync that read the calls is (new mail or chat may have been written).
+        #[cfg(feature = "js")]
+        crate::jshost::event("thread_synced", &json!({"thread": id, "processed": 0, "left": 0}));
         return Ok(v);
     }
     save_state(id, &json!({"state": "running", "at": started.to_rfc3339(), "message": format!("reading {} call{}", pending.len(), if pending.len() == 1 { "" } else { "s" })}));

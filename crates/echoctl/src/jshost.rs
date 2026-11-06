@@ -117,8 +117,8 @@ const PRELUDE: &str = r#"
     /** A line for Claude when a client or thread is open in the window: [{client | thread, text}] (replaces all). */
     view: { hints: (list) => call('view.hints', list || []) },
     /** Echo's own data, read-only: 'clients' | 'threads' | 'people' | 'dictionary' | 'sources' (opts: kind, thread,
-     *  since, limit) | 'source' (an id: call:<folder> | mail:<source>). Events: 'minutes_written' {id, link},
-     *  'sources_changed' {changed, removed}. */
+     *  since, limit) | 'source' (an id: call:<folder> | mail:<source>). Its events (`ctx.on`, uses.events.on —
+     *  minutes_written and sources_changed come with reading sources): `plugins::EVENTS`. */
     echo: {
       read: (kind, arg) => call('echo.read', arg === undefined ? kind : [kind, arg]),
       /** Names for one thing into the user's dictionary (uses.echo.write: dictionary): {name, synonyms, spellings, kind, client}. */
@@ -342,8 +342,6 @@ pub fn event(name: &str, payload: &Value) {
 struct Plugin {
     ctx: Context,
     calls: HashMap<u64, Sender<Result<Value, String>>>,
-    /// The events it was given at install (`plugins::heard_events`): only those reach it.
-    hears: Vec<String>,
 }
 
 /// The id of the plugin whose JavaScript runs now (what `__host` acts for) and its calls' replies.
@@ -399,14 +397,14 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
                 }
                 match outcome {
                     Ok(ctx) => {
-                        let hears = plugins::read_manifest(&dir).map(|m| plugins::heard_events(&m.uses)).unwrap_or_default();
-                        plugins.insert(id, Plugin { ctx, calls: HashMap::new(), hears });
+                        plugins.insert(id, Plugin { ctx, calls: HashMap::new() });
                     }
                     Err(e) => eprintln!("plugins: {id}: {e:#}"),
                 }
             }
             Ok(Msg::Unload(id)) => {
                 plugins.remove(&id);
+                hears().lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
                 crate::grants::drop_plugin(&id);
                 if let Ok(mut l) = host().loaded.lock() {
                     l.remove(&id);
@@ -433,7 +431,8 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>) {
                 });
             }
             Ok(Msg::Event(name, payload)) => {
-                for (id, p) in plugins.iter().filter(|(_, p)| p.hears.contains(&name)) {
+                let heard = hears().lock().unwrap_or_else(|e| e.into_inner()).clone();
+                for (id, p) in plugins.iter().filter(|(id, _)| heard.get(*id).is_some_and(|h| h.contains(&name))) {
                     set_current(&current, id);
                     let ctx = p.ctx.clone();
                     slice(&mut || ctx.with(|c| drop(c.globals().get::<_, Function>("__event").and_then(|f| f.call::<_, ()>((name.clone(), payload.clone()))))));
@@ -476,8 +475,16 @@ fn set_current(current: &Mutex<Current>, id: &str) {
     }
 }
 
+/// The events each loaded plugin hears (`plugins::heard_events`, set as it loads): what `ctx.on` checks and what
+/// the host delivers — one grant, read once from the manifest that loaded.
+fn hears() -> &'static Mutex<HashMap<String, Vec<String>>> {
+    static HEARS: std::sync::OnceLock<Mutex<HashMap<String, Vec<String>>>> = std::sync::OnceLock::new();
+    HEARS.get_or_init(Default::default)
+}
+
 fn load(rt: &Runtime, id: &str, dir: &Path, current: &Arc<Mutex<Current>>, tx: &Sender<Msg>, slice: &mut dyn FnMut(&mut dyn FnMut())) -> Result<Context> {
     let m = plugins::read_manifest(dir)?;
+    hears().lock().unwrap_or_else(|e| e.into_inner()).insert(id.into(), plugins::heard_events(&m.uses));
     let main = m.main.ok_or_else(|| anyhow!("no host half"))?;
     let file = plugins::inside_plugin(dir, &main)?;
     let source = std::fs::read_to_string(&file).map_err(|e| anyhow!("{main}: {e}"))?;
@@ -593,8 +600,7 @@ fn service(id: &str, op: &str, arg: &Value) -> Result<Value> {
         }
         "events.on" => {
             let name = s(arg);
-            let m = plugins::read_manifest(&package_dir(id)?)?;
-            if !plugins::heard_events(&m.uses).contains(&name) {
+            if !hears().lock().unwrap_or_else(|e| e.into_inner()).get(id).is_some_and(|h| h.contains(&name)) {
                 bail!("{id} didn't ask to hear “{name}” when it was installed (uses.events.on)");
             }
             json!(true)

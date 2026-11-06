@@ -188,7 +188,8 @@ fn for_plugins(event: &str, d: &serde_json::Value) -> Option<serde_json::Value> 
     Some(match event {
         "meeting_soon" => json!({"id": d["id"], "subject": d["subject"], "start": d["start"]}),
         "call_started" => json!({"app": d["app"]}),
-        "call_ended" => json!({"app": d["app"], "recording": d["recording"]}),
+        // `next_call`: Teams went straight on to another call (not a hang-up); the next call_started follows at once.
+        "call_ended" => json!({"app": d["app"], "recording": d["recording"], "next_call": d["next_call"] == true}),
         "recording_started" => json!({"call": call(), "title": d["title"], "memo": d["memo"] == true}),
         "recording_stopped" => json!({"call": call(), "duration_s": d["duration_s"], "reason": d["reason"]}),
         "transcribed" => json!({"call": call(), "ok": d["ok"]}),

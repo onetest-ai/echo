@@ -185,9 +185,8 @@ pub fn dictionary_add(_plugin: &str, _v: &Value) -> Result<Value> {
 /// Tell the plugins a call's minutes are written (the app's run or a session's).
 pub fn minutes_written(dir: &Path) {
     let (id, link) = call_id(dir);
-    let title = crate::calls::read_json(&dir.join("meta.json"))["title"].clone();
-    let call = dir.file_name().map(|f| f.to_string_lossy().into_owned());
-    crate::jshost::event("minutes_written", &json!({"id": id, "link": link, "call": call, "title": title}));
+    let call = id.strip_prefix("call:").unwrap_or(&id).to_string();
+    crate::jshost::event("minutes_written", &json!({"id": id, "link": link, "call": call, "title": crate::calls::read_json(&dir.join("meta.json"))["title"]}));
 }
 
 /// Tell the plugins which of Recall's mail and channel posts are new, changed or gone after a sync.
