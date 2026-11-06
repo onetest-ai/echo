@@ -273,7 +273,9 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
 ### Needs you (Inbox) (`attention.rs`, `/api/attention`, panel id `needs`)
 - Collected from where each decision lives, no model: sign-ins (urgent when the default profile or waiting minutes
   need it), failed minutes (14 days), senders, people suggestions, Found for you, To review, topics/numbers to
-  accept, permissions, an update. Each item carries the IPC message its own place sends, or the hash to go to.
+  accept, permissions, an Echo update, a plugin update (one per installed plugin with a newer version in its
+  marketplace's last fetched catalog, `plugins::updates`; it opens `#settings/plugins/<id>`, where its sheet shows
+  before anything changes — one that asks for more says so in the item). Each item carries the IPC message its own place sends, or the hash to go to.
 - Entry above Settings in the activity bar (count; warn colour when something blocks work); toggles the panel
   (⇧⌘I; Ctrl+Shift+U on Windows, where Ctrl+Shift+I is WebView2's DevTools).
 - A clicked decision keeps its item "working" until it is gone: a background job's (`busy` by item key) while it
@@ -283,7 +285,7 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   unreadable source keeps its items open. Collected at most every 20 s, one at a time (`?fresh=1` after an
   action). `echoctl attention` only reads (a terminal sees neither sign-in nor update checks).
 
-### Settings (`#settings/<section>`)
+### Settings (`#settings/<section>`; `#settings/plugins/<id>` picks that plugin)
 - Sections: General (incl. Appearance), Recording, Transcription, AI & minutes, Calendar & chat, About me, Layout,
   Health (⚠ badge = missing required permissions); plugins add theirs.
 - `/api/settings` = one snapshot (`window::settings_snapshot`). Plain values save at once with the value shown —

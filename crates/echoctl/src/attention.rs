@@ -360,6 +360,13 @@ pub fn collect() -> Collected {
     if let Some(v) = crate::update::AVAILABLE.lock().ok().and_then(|a| a.as_ref().map(|r| r.version.clone())) {
         out.push(item("update".into(), "update", "echo", format!("Echo {v} is available"), "Installs after Echo saves and quits".into(), false, vec![act("Update…", true, json!({"cmd": "settings_action", "action": "update", "arg": ""}))], None));
     }
+    // A plugin with a newer version in its marketplace: one item each, opening it in Settings → Plugins (an update
+    // that asks for more says so; it shows its sheet there before anything changes).
+    for (p, u) in crate::plugins::updates().into_iter().filter(|(_, u)| u.blocked.is_none()) {
+        let why = if u.new_uses.is_empty() { format!("{} → {}, from {}", p.version, u.version, u.market) } else { format!("{} → {} — it asks for more: {}", p.version, u.version, u.new_uses.join("; ")) };
+        out.push(item(format!("plugin-update:{}", p.id), "update", "echo", format!("{} {} is available", u.name, u.version), why, false,
+            vec![], Some(format!("settings/plugins/{}", p.id))));
+    }
     // What plugins put here (`ctx.inbox.set`): their buttons call their own commands.
     #[cfg(feature = "js")]
     for (plugin, key, it) in crate::jshost::inbox_items() {

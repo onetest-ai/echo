@@ -1192,6 +1192,11 @@ pub fn update_for(p: &Installed) -> Option<Review> {
     review_of(&p.market, &o, Some(p)).ok()
 }
 
+/// Every installed plugin with an update waiting (from its marketplace's last fetched catalog, no network).
+pub fn updates() -> Vec<(Installed, Review)> {
+    Registry::load().map(|r| r.installed.into_values().filter_map(|p| update_for(&p).map(|u| (p, u))).collect()).unwrap_or_default()
+}
+
 /// Install the waiting update of `id`; one that asks for more is refused unless those lines were agreed.
 pub fn update(id: &str, agreed: &[String]) -> Result<Option<Installed>> {
     let p = Registry::load()?.installed.get(id).cloned().ok_or_else(|| anyhow!("“{id}” isn't installed"))?;
@@ -1628,9 +1633,12 @@ mod tests {
         refresh(&name).unwrap();
         let p = Registry::load().unwrap().installed["demo"].clone();
         let rv = update_for(&p).unwrap();
+        // The Inbox lists it (`attention`): every installed plugin with an update waiting.
+        assert_eq!(updates().iter().map(|(p, u)| (p.id.as_str(), u.version.as_str())).collect::<Vec<_>>(), [("demo", "0.2.0")]);
         assert_eq!(rv.new_uses.len(), 1);
         assert!(update("demo", &[]).unwrap_err().to_string().contains("asks for more"));
         assert_eq!(update("demo", &rv.new_uses).unwrap().unwrap().version, "0.2.0");
+        assert!(updates().is_empty(), "updated: nothing waits");
         assert_eq!(fs::read_dir(installed_dir("demo")).unwrap().count(), 1, "the old version's files are gone");
         set_enabled("demo", false).unwrap();
         assert!(enabled().is_empty());

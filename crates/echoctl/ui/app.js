@@ -603,10 +603,11 @@ function route() {
   if (pa) { S.view = pa.id; S.plRoute = h.slice(pa.id.length + 1); S.plRoutes = { ...(S.plRoutes || {}), [pa.id]: S.plRoute }; return }
   const cm = h.match(/^calendar(?:\/(day|week))?$/)
   if (cm) { S.view = 'calendar'; if (cm[1]) S.cal.mode = cm[1]; return }
-  const sm = h.match(/^settings(?:\/([a-z0-9:-]+))?$/)
+  // settings/plugins/<id>: that plugin picked (an Inbox update item opens it).
+  const sm = h.match(/^settings(?:\/([a-z0-9:-]+))?(?:\/([a-z0-9-]+))?$/)
   // The vocabulary was a Settings section: its old link opens its panel, over the calls.
   if (sm && sm[1] === 'vocabulary') { S.view = 'calls'; setTimeout(() => { Layout.show('vocabulary', panelViews()); layoutChanged() }); return }
-  if (sm) { S.view = 'settings'; if (sm[1]) S.setSection = sm[1]; return }
+  if (sm) { S.view = 'settings'; if (sm[1]) S.setSection = sm[1]; if (sm[1] === 'plugins' && sm[2]) S.plSel = sm[2]; return }
   if (h === 'tasks') { S.view = 'tasks'; return }
   // The window opens on Today.
   if (h === 'today' || h === '') { S.view = 'today'; return }
