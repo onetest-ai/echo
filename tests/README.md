@@ -36,6 +36,15 @@ into a scenario (`app_profile.md` → "Scenarios").
 | [S-02](scenarios/S-02_plan-the-afternoon.md) | 5 | Plan the afternoon: Today, the calendar, set a meeting to record and take it back |
 | [S-03](scenarios/S-03_tidy-the-calls.md) | 2 | Tidy the calls: a call without minutes, delete one, restore it |
 | [S-04](scenarios/S-04_the-cli-on-the-data.md) | 2 | The CLI on the same data |
+| [S-05](scenarios/S-05_start-and-run-a-thread.md) | 17 | Start and run a thread: create it, brief, rules, calls, rename, stage, close |
+| [S-06](scenarios/S-06_shape-the-work.md) | 17 | Shape the work: board, tree, edit, undo, link, merge and reject a proposal |
+| [S-07](scenarios/S-07_clients-and-people.md) | 17 | Clients and people: client pages, domains, a thread's people, a person's details |
+| [S-08](scenarios/S-08_who-owes-what.md) | 14 | Who owes what: the piles, the filters, a card, closing a task, Claude's dialog, Asks |
+| [S-09](scenarios/S-09_a-calls-housekeeping.md) | 11 | A call's housekeeping: list, minutes, kind, thread, tabs and the actions menu |
+| [S-10](scenarios/S-10_inbox-and-prep-on-a-quiet-day.md) | 8 | Inbox and prep on a quiet day: nothing waits, meetings still to come |
+| [S-11](scenarios/S-11_set-echo-up-your-way.md) | 36 | Set Echo up your way: appearance, recording, languages, About me, a template, a meeting type, the vocabulary |
+| [S-12](scenarios/S-12_skills-and-ai-profiles-and-plugins.md) | 30 | Skills and AI: skills on and off, AI profiles and the default, plugins and marketplaces |
+| [S-13](scenarios/S-13_find-your-way-around.md) | 18 | Find your way around: the activity bar, panels, layout, the actions palette, the status bar and shortcuts |
 
 ## Areas
 
