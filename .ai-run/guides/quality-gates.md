@@ -39,3 +39,11 @@ Run order is fastest-to-slowest.
 **Pass**: exit 0 and the last line `tsc: clean`, or `skip tsc: …` when no type declarations exist
 **Fail**: non-zero exit from any step
 **Skip if**: the tsc step only skips itself when no Claude Code type declarations are found
+
+### functional
+
+**Run**: the manual-qa team on `tests/cases/<area>` (`claude --agent test-run-lead`, "run tests/cases/<area>"; once per machine `tests/install.sh`); `run: manual` cases by a person
+**Side effects**: builds a made-up data folder under the OS temp dir, serves the window on a localhost port for the run, writes `tests/reports/` (git-ignored)
+**Pass**: every case run is PASS (a `run: manual` case is listed, not run, unless a person ran it)
+**Fail**: any FAIL or BLOCKED
+**When**: mandatory — before a change is called done or its PR opened, the areas it touches; before a release, every `critical` case — `.ai-run/guides/testing/testing.md` R4

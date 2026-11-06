@@ -1,8 +1,31 @@
-# Manual test cases
+# Functional tests
 
-Scenarios a person runs by hand before a release, on a real machine with a real Teams call.
-The automated tests live next to the code (`cargo test`, `scripts/check-mod.sh`); these cover
-what they can't: permissions, real audio, Microsoft 365, Claude Code, installs and updates.
+Cases that check Echo the way a user meets it: the window, the CLI, and what only a person can try on a real machine
+(permissions, real audio, Teams, Microsoft 365, Claude Code runs, installs and updates). The automated tests live next
+to the code (`cargo test`, `scripts/check-mod.sh`).
+
+| Path | What |
+|---|---|
+| `cases/<area>/TC-NNN_<slug>.md` | One case each, in the manual-qa format; `run: agent` (an agent runs it) or `run: manual` (a person) |
+| `app_profile.md` | Echo for the test agents: rules, starting the app on test data, the data, routes, fragile areas |
+| `fixtures/make-data.sh <dir>` | Builds a made-up data folder (Acme, Globex, Initech; calls, threads, tasks, today's agenda) |
+| `install.sh` | Installs the manual-qa agent team (arozumenko/sdlc-skills) on this machine, pointed at this folder |
+| `reports/` | Run reports and screenshots (git-ignored) |
+| `NN-*.md` | The older manual scenarios, being rewritten into `cases/` (a rewritten file goes) |
+
+## Running
+
+1. Once per machine: `tests/install.sh`, then restart Claude Code in the repo (it loads the agents and Playwright MCP).
+2. `cargo build`.
+3. Start Claude Code with the lead as the active agent (`claude --agent test-run-lead`) and give it a suite, e.g.
+   "run tests/cases/today". It builds the data, serves the window, runs each `run: agent` case, and writes
+   `tests/reports/RUN-<date>-NNN.md`; `run: manual` cases are listed for a person.
+
+Writing cases: `test-author` (or by hand) following `app_profile.md` → "Writing a case".
+
+## The older scenarios
+
+Run by hand before a release, on a real machine with a real Teams call.
 
 | File | Area |
 |---|---|
@@ -18,7 +41,8 @@ what they can't: permissions, real audio, Microsoft 365, Claude Code, installs a
 | [10-windows.md](10-windows.md) | Windows build |
 | [11-privacy.md](11-privacy.md) | Opt-in, local data, nothing kept that shouldn't be |
 
-## Format
+
+### Format
 
 Each case has an ID (`TC-<AREA>-<NNN>`), a priority and the platform it applies to.
 
@@ -30,7 +54,7 @@ Steps are numbered; **Expected** lists what must be true. A case passes only if 
 line holds. Use made-up meeting content where you can; never paste real transcripts into a
 report.
 
-## Test machines
+### Test machines
 
 - **Fresh Mac:** a user account that has never run Echo (no `~/Library/Application Support/echo`,
   no `~/Echo`), macOS 14.2 or later, Teams (new) installed and signed in.
@@ -41,7 +65,7 @@ To reset a Mac to "fresh": quit Echo, then remove `~/Library/Application Support
 data folder you chose, `~/Library/LaunchAgents/ai.onetest.echo.plist` if present, and reset
 permissions with `tccutil reset All ai.onetest.echo`.
 
-## Run log
+### Run log
 
 Copy this block into `tests/runs/<date>-<version>-<machine>.md` (git-ignored if it contains
 anything real) and fill it in.

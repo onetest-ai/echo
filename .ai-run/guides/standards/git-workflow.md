@@ -34,7 +34,7 @@ Examples: `Memos: record yourself, no call; …` · `Echo X.Y.Z` (a release). Th
 
 ### Rules
 - R1. Merge into `main` by merge commit. Evidence: recorded user decision
-- R2. A release is a commit `Echo X.Y.Z` on `main` plus a published GitHub release; publishing triggers `.github/workflows/windows-release.yml`, the only CI, which builds and uploads the Windows MSI and zip (nothing builds on push or pull request).
+- R2. A release is a commit `Echo X.Y.Z` on `main` plus a published GitHub release, made after every `critical` functional case passed on that commit (`tests/cases/`, quality-gates.md, functional); publishing triggers `.github/workflows/windows-release.yml`, the only CI, which builds and uploads the Windows MSI and zip (nothing builds on push or pull request).
 
 ## Anti-Patterns
 

@@ -32,3 +32,6 @@ docs/superpowers/tasks/*/**/task-*-brief.md
 docs/superpowers/tasks/*/**/task-*-report.md
 docs/superpowers/qa-tasks/*/**/*.local.*
 .claude/settings.local.json
+
+# functional test reports and screenshots (made-up data, but kept per machine)
+/tests/reports/
