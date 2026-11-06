@@ -49,11 +49,20 @@ pub struct MeetingContext {
     /// The AI profile chosen for this recording (the window's Record menu); none = the default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ai_profile: Option<String>,
+    /// The user's answer to the invite (Graph `responseStatus.response`: accepted, organizer, tentativelyAccepted,
+    /// notResponded, none); none when the source doesn't say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response: Option<String>,
 }
 
 pub const FILE: &str = "meeting.json";
 
 impl MeetingContext {
+    /// One the user accepted (or organises) — or one whose source doesn't say: what Today and Coming up today list.
+    pub fn accepted(&self) -> bool {
+        self.response.as_deref().is_none_or(|r| matches!(r, "accepted" | "organizer"))
+    }
+
     pub fn load(call_dir: &Path) -> Result<Option<Self>> {
         let p = call_dir.join(FILE);
         if !p.exists() {

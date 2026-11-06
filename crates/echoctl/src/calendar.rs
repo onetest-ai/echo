@@ -133,6 +133,7 @@ pub fn to_meeting(ev: &Value) -> Option<MeetingContext> {
         organizer: ev.get("organizer").and_then(person),
         attendees,
         join_url: ev.pointer("/onlineMeeting/joinUrl").and_then(Value::as_str).map(str::to_owned),
+        response: ev.pointer("/responseStatus/response").and_then(Value::as_str).map(str::to_owned),
         vocabulary: vec![],
         source: Some("calendar".into()),
         languages: vec![],
@@ -271,6 +272,19 @@ mod tests {
         assert!(convert(&ev("Over", now - Duration::minutes(40), true), now).is_none());
         let m = convert(&ev("Daily sync", soon, true), now).unwrap();
         assert_eq!(m.organizer.unwrap().name, "Daniel");
+    }
+
+    #[test]
+    fn a_meeting_is_the_users_once_accepted() {
+        let at = Utc::now();
+        let with = |r: &str| {
+            let mut e = ev("Sync", at, true);
+            e["responseStatus"] = json!({"response": r});
+            to_meeting(&e).unwrap()
+        };
+        assert!(with("accepted").accepted() && with("organizer").accepted());
+        assert!(!with("tentativelyAccepted").accepted() && !with("notResponded").accepted() && !with("none").accepted());
+        assert!(to_meeting(&ev("Sync", at, true)).unwrap().accepted(), "a source that doesn't say: kept");
     }
 
     #[test]

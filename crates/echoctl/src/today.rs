@@ -172,6 +172,10 @@ fn day() -> Vec<Value> {
     for m in crate::watch::agenda() {
         let Some(event) = m.id.clone().filter(|i| !i.is_empty()) else { continue };
         let hit = calls_today.iter().position(|(_, _, cm)| cm.as_ref().and_then(|c| c.id.as_deref()) == Some(event.as_str()));
+        // Only the meetings the user accepted (or organises) — unless they recorded it anyway.
+        if hit.is_none() && !m.accepted() {
+            continue;
+        }
         if let Some(i) = hit {
             used[i] = true;
         }

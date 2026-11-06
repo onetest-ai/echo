@@ -56,7 +56,8 @@ pub fn upcoming() -> Value {
     let now = Utc::now();
     let list: Vec<Value> = crate::watch::agenda()
         .into_iter()
-        .filter(|m| time(m.end.as_deref()).is_none_or(|e| e > now))
+        // Only the meetings the user accepted (or organises): an invite left open or tentative isn't their day yet.
+        .filter(|m| m.accepted() && time(m.end.as_deref()).is_none_or(|e| e > now))
         .filter_map(|m| {
             let event = m.id.clone().filter(|i| !i.is_empty())?;
             let id = id_of(&event);
