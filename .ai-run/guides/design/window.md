@@ -133,10 +133,10 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   lines, what the folder holds, problems, off), checks each by the spec (name = its folder's, lower-case and single
   hyphens ≤ 64; a description ≤ 1,024; compatibility ≤ 500; SKILL.md ≤ 500 lines; a byte-order mark and Windows line
   ends read as Claude Code reads them; links inside a folder left out) — one with problems stays out of
-  Claude — and shows one read-only (its SKILL.md through the minutes' safe writer); the content is written in VS Code
-  (Open in VS Code, Show in Finder) or by Claude (Ask Claude). Echo's own (Follow-up mail) are built in and read-only
+  Claude — and shows one read-only (its SKILL.md through the minutes' safe writer); the content is written in an editor
+  (Open in VS Code opens the whole skills folder; Show in Finder) or by Claude (Ask Claude). Echo's own (Follow-up mail) are built in and read-only
   until Customize copies them to the user's folder (Reset takes the copy away); New skill makes a folder with a
-  SKILL.md to fill in and opens it; Delete moves one of the user's to the trash; On / off. The user's live in
+  SKILL.md to fill in and opens it (New skill and Customize open the SKILL.md in the default editor); Delete moves one of the user's to the trash; On / off. The user's live in
   `<home>/.echo/skills/<id>/` (git or a copy from elsewhere works); Echo copies the valid ones that are on, every
   file, into a plugin `my-skills` (`<config>/my-skills/`) each time the panel's session starts (`--plugin-dir`).
 - Built for 10–20 skills: the catalogue's rows are one line of name, kind, problems and an on/off switch, the
