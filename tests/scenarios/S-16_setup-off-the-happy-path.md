@@ -2,7 +2,7 @@
 id: S-16
 title: Setup off the happy path: default folder, model later, broken download, denied permissions
 run: person
-env: the second Mac: a test user account where Echo has never been (reset between runs: the app, its data and config folders and LaunchAgent removed; its permissions reset by the user), the release DMG
+env: a Mac with a dedicated test user account where Echo has never been (reset between runs: the app, its data and config folders and LaunchAgent removed; its permissions reset by the user), the release DMG
 cases:
   - tests/cases/install/TC-003_default-data-folder.md
   - tests/cases/install/TC-005_model-later.md
@@ -16,7 +16,7 @@ cases:
 
 # S-16: Setup off the happy path: default folder, model later, broken download, denied permissions
 
-**Environment:** the second Mac: a test user account where Echo has never been (reset between runs: the app, its data and config folders and LaunchAgent removed; its permissions reset by the user), the release DMG
+**Environment:** a Mac with a dedicated test user account where Echo has never been (reset between runs: the app, its data and config folders and LaunchAgent removed; its permissions reset by the user), the release DMG
 
 **Story:** The same first run, but the user takes the defaults, postpones the model, loses Wi-Fi during a download, removes a model, and refuses permissions before granting them later.
 
