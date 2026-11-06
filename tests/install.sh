@@ -36,6 +36,11 @@ for a in "${agents[@]}"; do
   fi
 done
 
+# The run-metrics hooks write next to the run reports: tests/reports/metrics (not a reports/ folder at the root).
+for f in .claude/hooks/manual-qa/*.mjs; do
+  perl -pi -e "s{join\(PROJECT_DIR, 'reports'}{join(PROJECT_DIR, 'tests', 'reports'}g" "$f"
+done
+
 # The hooks give each role `.agents/manual-qa/app_profile.md`: the same file as tests/app_profile.md.
 mkdir -p .agents/manual-qa
 ln -sfn "../../$tests/app_profile.md" .agents/manual-qa/app_profile.md
