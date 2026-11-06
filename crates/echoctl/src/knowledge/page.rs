@@ -181,9 +181,31 @@ pub fn render_fragment(v: &Vault, text: &str) -> String {
     match scan::index(v) {
         Ok(ix) => {
             let r = Resolver::new(&ix);
-            crate::minutes::page_html(&linked, breaks, &|dest, image| decide(v, &r, "", dest, image))
+            // Model text keeps only https links, links to a page of the vault and vault images (spec K12-05, X-T10).
+            let hook = |dest: &str, image: bool| {
+                let out = decide(v, &r, "", &from_vault_root(v, dest), image)?;
+                (out.starts_with("https://") || out.starts_with("#kn:") || (image && out.starts_with("api/kn/"))).then_some(out)
+            };
+            crate::minutes::page_html(&linked, breaks, &hook)
         }
         Err(_) => crate::minutes::page_html(&linked, breaks, &|dest, image| (!image && dest.starts_with("https://")).then(|| dest.to_string())),
+    }
+}
+
+/// A link target as written from the vault root (Claude's working folder) → relative to the pages root: the vault's
+/// root (absolute paths) and the pages folder are stripped. Web links and the like are returned as they are.
+fn from_vault_root(v: &Vault, dest: &str) -> String {
+    let (prefix, t) = dest.strip_prefix("wiki:").map_or(("", dest), |t| ("wiki:", t));
+    if t.contains("://") || t.starts_with('#') {
+        return dest.to_string();
+    }
+    let t = super::links::percent_decode(t).replace('\\', "/");
+    let root = v.root.to_string_lossy().replace('\\', "/");
+    let t = t.strip_prefix(root.trim_end_matches('/')).filter(|r| r.starts_with('/')).map_or(t.as_str(), |r| r.trim_start_matches('/'));
+    let pages = v.path("pages").unwrap_or_default();
+    match t.strip_prefix(&format!("{pages}/")).filter(|_| !pages.is_empty()) {
+        Some(rest) => format!("{prefix}{rest}"),
+        None => format!("{prefix}{t}"),
     }
 }
 

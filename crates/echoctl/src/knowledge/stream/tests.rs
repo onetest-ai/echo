@@ -115,6 +115,7 @@ fn ask_turn_becomes_events() {
     }
     let last_text = texts.iter().rposition(|_| true).map(|_| html_of(&ev)).unwrap();
     assert!(last_text.starts_with("<p>"), "{last_text}");
+    assert!(last_text.contains("href=\"#kn:knowledge/clients/northwind-retail.md\""), "the cited path is a page link: {last_text}");
     let last_text_at = t.iter().rposition(|x| *x == "text").unwrap();
     assert!(pos("tool") < last_text_at, "the answer follows the tools: {t:?}");
 
@@ -379,4 +380,33 @@ fn tool_lines_use_the_k13_03_texts() {
     let (sum, _, lines) = tool_result_summary("Edit", "Error: file changed\nsecond line", true);
     assert_eq!((sum.as_str(), lines), ("Error: file changed", None));
     assert_eq!(tool_result_summary("Skill", "", false).0, "done");
+}
+
+#[test]
+fn model_links_keep_only_safe_targets() {
+    let (_env, root) = crate::paths::testenv::folders("kn-st-links2");
+    let v = vault(&root);
+    let mut p = Parser::new(&v);
+    let abs = format!("{}/knowledge/clients/northwind-retail.md", v.root.display());
+    let md = format!("[a](http://x.example/p) [b](echo://call/x) [[nobody]] [c](../../etc/passwd) ![](https://x.example/t.png) [d](https://x.example/ok) [e](knowledge/clients/northwind-retail.md) [f]({abs}) [[knowledge/clients/northwind-retail]]");
+    let html = html_of(&text_block(&mut p, 0, &[&md], Instant::now()));
+    for bad in ["http://x.example", "echo://", "data-echo-link", "kn-new", "etc/passwd\"", "<img"] {
+        assert!(!html.contains(bad), "{bad}: {html}");
+    }
+    assert!(html.contains("nobody") && html.starts_with("<p>a b nobody c "), "the label stays as text: {html}");
+    assert!(html.contains("href=\"https://x.example/ok\""), "{html}");
+    assert_eq!(html.matches("href=\"#kn:knowledge/clients/northwind-retail.md\"").count(), 3, "vault-relative, absolute, path wikilink: {html}");
+}
+
+#[test]
+fn huge_numbers_do_not_overflow() {
+    let (_env, root) = crate::paths::testenv::folders("kn-st-ovf");
+    let v = vault(&root);
+    let r = tool_line("Read", &json!({"file_path": "a.md", "offset": u64::MAX, "limit": u64::MAX}), &v);
+    assert!(r.2.starts_with("lines "), "{r:?}");
+    tool_line("Read", &json!({"file_path": "a.md", "offset": u64::MAX, "limit": 5}), &v);
+    let mut p = Parser::new(&v);
+    let ev = p.feed(&format!(r#"{{"type":"result","usage":{{"input_tokens":{m},"cache_read_input_tokens":{m},"cache_creation_input_tokens":{m},"output_tokens":1}}}}"#, m = u64::MAX));
+    assert_eq!(ev[0]["tokens_in"], u64::MAX);
+    assert_eq!(tool_result_summary("Read", &format!("{}\ta\n1\tb", u64::MAX), false).0.is_empty(), false);
 }

@@ -169,7 +169,7 @@ impl Parser {
     fn result(&mut self, v: &Value) -> Vec<Value> {
         let u = &v["usage"];
         let n = |k: &str| u[k].as_u64().unwrap_or(0);
-        let tokens_in = n("input_tokens") + n("cache_read_input_tokens") + n("cache_creation_input_tokens");
+        let tokens_in = n("input_tokens").saturating_add(n("cache_read_input_tokens")).saturating_add(n("cache_creation_input_tokens"));
         let aborted = v["terminal_reason"] == "aborted_streaming";
         let mut out = vec![];
         if v["is_error"] == true && !aborted {
@@ -491,7 +491,7 @@ pub fn tool_line(name: &str, input: &Value, v: &Vault) -> (String, String, Strin
         "Read" => {
             let (off, lim) = (input["offset"].as_u64(), input["limit"].as_u64());
             let detail = match (off, lim) {
-                (Some(o), Some(l)) if l > 0 => format!("lines {o}\u{2013}{}", o + l - 1),
+                (Some(o), Some(l)) if l > 0 => format!("lines {o}\u{2013}{}", o.saturating_add(l - 1)),
                 (None, Some(l)) if l > 0 => format!("lines 1\u{2013}{l}"),
                 (Some(o), _) if o > 1 => format!("from line {o}"),
                 _ => String::new(),
@@ -539,7 +539,7 @@ pub fn tool_result_summary(name: &str, content: &str, is_error: bool) -> (String
                 let num = |l: &str| l.split_once('\t').and_then(|(a, _)| a.trim().parse::<u64>().ok());
                 lines = content.lines().find_map(num).zip(content.lines().rev().find_map(num));
                 match lines {
-                    Some((a, z)) => format!("{} lines", z - a.min(z) + 1),
+                    Some((a, z)) => format!("{} lines", z.saturating_sub(a).saturating_add(1)),
                     None => first(),
                 }
             }
