@@ -29,3 +29,6 @@ external_id: TC-REC-005
 
 ## Expected Final State
 Stop means stop, for the rest of that call.
+
+## Notes
+- The pill's "Stop recording?" dialog and Teams staying connected need a person. An agent covers the rest with TestCall: `echoctl stop` ends the recording and the call is not recorded again (`recording/TC-015`), and Ctrl-C ends a capture (`recording/TC-016`).

@@ -27,3 +27,6 @@ external_id: TC-REC-011
 
 ## Expected Final State
 Sleep ends a recording cleanly.
+
+## Notes
+- Stays person-run: the Mac's sleep and wake. The repair of an unfinished recording is run by an agent in `recording/TC-011`.

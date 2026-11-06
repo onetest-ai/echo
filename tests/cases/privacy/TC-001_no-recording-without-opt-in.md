@@ -5,9 +5,9 @@ priority: critical
 type: functional
 requirements: [F-PRIV-01, F-REC-03]
 module: privacy
-run: person
-platform: any
-tags: [privacy, opt-in]
+run: agent
+platform: macos
+tags: [privacy, opt-in, second-instance]
 external_id: TC-PRIV-001
 ---
 
@@ -16,15 +16,39 @@ external_id: TC-PRIV-001
 **Module:** Privacy | **Priority:** Critical | **Type:** Functional
 
 ## Preconditions
-- Echo idle: not armed, nothing scheduled, no series set to record always
+- Test data built by `tests/fixtures/make-data.sh <dir>`; `target/debug/echoctl` is the debug build from this checkout (`cargo build`)
+- This Mac has the test call app (`tests/tools/testcall/build.sh` built `tests/tools/testcall/build/TestCall.app`), BlackHole 2ch and ffmpeg; Microphone and System Audio Recording are granted to the process running the steps and to TestCall; nothing else on this Mac plays audio or uses BlackHole
+- Every Bash call starts with the prelude (a fresh shell each time; the steps below call it "the prelude"): `. <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; CONV="$D/conv"; APP="$PWD/tests/tools/testcall/build/TestCall.app/Contents/MacOS/testcall"; export D CONV APP ECHOCTL_CALL_APP_BUNDLE=ai.onetest.echo.testcall`
+- The speech model is linked into the test config: `ln -s "$HOME/Library/Application Support/echo/models" "$ECHOCTL_CONFIG_DIR/models"`, then `target/debug/echoctl model use large-v3-turbo-q5_0` and `target/debug/echoctl config --languages en`
+- Both ends of the call run on this Mac: `serve` and `dial` on `127.0.0.1`, as in the steps
+- **Needs a second app instance.** Echo's watcher (arm, record when the call starts, stop) runs only inside `echoctl app run`. The user's own Echo holds `app.lock` in its own config folder; this run's `ECHOCTL_CONFIG_DIR` has another one (`app.rs`, `try_lock`), so a second instance on the test data folder is not refused by the lock. If step 2 still finds "Echo is already running" in `$D/app.out`, the case is BLOCKED, not failed
+- Echo idle: not armed, nothing scheduled, no series set to record always (true of the test data)
+
+## Test Data
+
+| Field | Value |
+|-------|-------|
+| Conversation | very-short (9 s), twice |
+| Mode | "Only when I click Record" (`config --unscheduled manual`, set by step 2): no dialog opens |
 
 ## Steps
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Join three Teams calls during a day | The menu-bar icon stays idle in every call |
-| 2 | Check the Calls list | No new call |
-| 3 | Run `find <data folder> -name '*.wav'` | Nothing |
+| 1 | Run the prelude, then `python3 tests/fixtures/audio/make_audio.py build very-short "$CONV"` | It prints the folder, the length and the turns of very-short; `$CONV` holds `mic.wav`, `remote.wav` and `expected.json` |
+| 2 | Run the prelude, then `target/debug/echoctl config --unscheduled manual --auto-minutes false`, `target/debug/echoctl ai live off`, `nohup target/debug/echoctl app run --no-tray --background > "$D/app.out" 2>&1 & echo $! > "$D/app.pid"`, `sleep 6`, `target/debug/echoctl status` | The config calls exit 0. `status` prints `watcher` with a `pid`, `app` "teams", `recording` null and `armed` false; `armed` is null; no "already running" in `$D/app.out` |
+| 3 | Run the prelude, then `ls "$ECHOCTL_HOME/calls" > "$D/before.txt"; wc -l < "$D/before.txt"; "$APP" serve --port 7792 --play "$CONV/remote.wav" --quiet & "$APP" dial 127.0.0.1:7792 --me "$CONV/mic.wav" --me-device "BlackHole 2ch" & sleep 5; target/debug/echoctl status; wait` | At 5 s `watcher.in_call` is true (the watcher sees the call), `watcher.recording` null, `watcher.armed` false, `armed` null |
+| 4 | Run the prelude, then `sleep 15; "$APP" serve --port 7792 --play "$CONV/remote.wav" --quiet & "$APP" dial 127.0.0.1:7792 --me "$CONV/mic.wav" --me-device "BlackHole 2ch" & sleep 5; target/debug/echoctl status; wait` | The same for a second call |
+| 5 | Run the prelude, then `sleep 15; ls "$ECHOCTL_HOME/calls" > "$D/after.txt"; diff "$D/before.txt" "$D/after.txt"; grep -c call_started "$ECHOCTL_HOME/.echo/events.jsonl"; grep -c recording_started "$ECHOCTL_HOME/.echo/events.jsonl"` | The folder list is unchanged (diff prints nothing); `call_started` count is 2, `recording_started` count is 0 |
+| 6 | Run the prelude, then `grep call_started "$ECHOCTL_HOME/.echo/events.jsonl"` | Both events say `"armed":false` and `"ask":false` |
+| 7 | Run the prelude, then `find "$ECHOCTL_HOME" "$ECHOCTL_CONFIG_DIR" -name '*.wav'` | Nothing is printed |
 
 ## Expected Final State
-Without the user's opt-in no call is recorded and no audio exists.
+Two test calls came and went on an idle Echo; no call was recorded, no folder was added and no audio exists.
+
+## Teardown
+- Run the prelude, then `target/debug/echoctl app quit`; if it does not stop within 30 s, `kill $(cat "$D/app.pid")`
+- Run `target/debug/echoctl status`: `watcher` is `null`
+
+## Notes
+- The "Ask when they start" dialog (Echo's own "Record?") opens a native window, so the ask mode is `recording/TC-012` (person); this case runs the manual mode, where nothing is asked and nothing is recorded.

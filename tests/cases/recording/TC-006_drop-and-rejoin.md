@@ -28,3 +28,6 @@ external_id: TC-REC-006
 
 ## Expected Final State
 A glitch doesn't split the call.
+
+## Notes
+- Stays person-run: a real Teams drop and rejoin. TestCall cannot rejoin: its `serve` accepts one connection and exits when it drops (`tests/tools/testcall/main.swift`), so the 10 s `REJOIN_GRACE` (`watch.rs`) cannot be exercised with it yet.

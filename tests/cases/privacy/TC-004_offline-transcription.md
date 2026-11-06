@@ -28,3 +28,6 @@ external_id: TC-PRIV-004
 
 ## Expected Final State
 Transcription needs no network.
+
+## Notes
+- Stays person-run: Wi-Fi is switched off by a person. TestCall can serve the call on `127.0.0.1`, so the call itself still works with the network off.

@@ -24,6 +24,8 @@ agent tests it. This file is given to every manual-qa role; where it differs fro
    `ECHOCTL_CONFIG_DIR` and unsets Claude Code's session variables). A command without it would touch the real data.
 4. **Steps are the window (Playwright MCP) or the CLI (Bash).** The runner may use Bash only for `echoctl` with the
    run's env, reading files in the run's data folder, and `tests/fixtures/*`. No other scripts, no edits to the repo.
+   One exception: a case that says it records with the test call may also run TestCall, `afplay`, `nohup`, `kill`,
+   `sleep`, `ls`, `grep`, `cat` and `find` on the run's own folders (see "Recording with the test call" below).
 5. **`run: person` cases are for a person** (a real call, Teams, macOS permissions, an install, the tray, Windows,
    Claude Code runs that need a signed-in account). The lead lists them in the report as `skipped (person)` and never
    tries them.
@@ -220,8 +222,8 @@ All verified on the test data in a live session. Roles and names first, then the
 
 Areas that have **no `run: agent` case yet** (from `tests/README.md` → Areas): Tasks, Threads (brief/work/calls/people/profile),
 clients, Inbox and right panels, Settings (all sections), Plugins, the actions palette, Calls extras (What moved,
-Call actions menu, thread chip), Today's task details (only TC-003). `claude`, `privacy`, `transcription`, `install`,
-`permissions`, `recording`, `lifecycle`, `windows` stay person-run. Proposed, all on the test data, `platform: any`:
+Call actions menu, thread chip), Today's task details (only TC-003). `claude`, `install`, `permissions`, `lifecycle`, `windows` stay person-run (`recording`, and part of `privacy`,
+`transcription`, `window` and `cli`, now run with the test call). Proposed, all on the test data, `platform: any`:
 
 | Suite | Folder | Priority | Description |
 |---|---|---|---|
@@ -235,6 +237,32 @@ Call actions menu, thread chip), Today's task details (only TC-003). `claude`, `
 | plugins | tests/cases/plugins/ | Medium | (1) Installed tab says "No plugins yet"; (2) Discover shows the category chips and Featured cards each with "Install" (not pressed); (3) category chip "Chat" leaves Telegram only; (4) "Search plugins" "sched" leaves Scheduler; (5) Marketplaces tab shows the built-in "onetest" with "Read again" and the Add form (not submitted); installs, updates and a marketplace add stay manual |
 | palette | tests/cases/window/ (extend) | Low | (1) Actions opens the dialog with TODAY, MY WORK, ECHO, GO TO groups; (2) typing "Globex pilot" lists the thread and its call, Enter opens `#project/globex-pilot/brief`; (3) "Settings: Plugins" opens that section; (4) Esc closes and focus returns |
 
+## Recording with the test call
+
+Recording cases (`tests/cases/recording/`, some of `privacy/`, `transcription/`, `window/`, `cli/`) run with TestCall
+instead of Teams: a debug build with `ECHOCTL_CALL_APP_BUNDLE=ai.onetest.echo.testcall` treats TestCall as the call app
+(`crates/echoctl/src/apps.rs`, `test_call_app`). The user's lines are played by ffmpeg into BlackHole 2ch, which
+TestCall holds as its microphone (the mic track); the other side's lines are what TestCall plays (the remote track, the
+tap on TestCall). The known conversations (`tests/fixtures/audio/README.md`: `acme-sync` 36 s, `very-short` 9 s,
+`long-silence` 36 s, `two-remotes` 34 s, `mixed-languages` 31 s) are built with `make_audio.py build` and scored with
+`make_audio.py score`.
+
+- **Needs on the Mac:** TestCall built (`tests/tools/testcall/build.sh`), BlackHole 2ch, ffmpeg, the speech model linked
+  into the run's config (see `transcription/TC-001`). Both ends of the call run on this Mac (`serve` and `dial` on `127.0.0.1`). Port 7792; TestCall serves one call and exits when the connection drops, so it cannot
+  rejoin and cannot switch devices.
+- **Prelude** (each Bash call is a fresh shell): `. <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; CONV="$D/conv"; APP="$PWD/tests/tools/testcall/build/TestCall.app/Contents/MacOS/testcall"; export D CONV APP ECHOCTL_CALL_APP_BUNDLE=ai.onetest.echo.testcall`
+- **A call, recorded by `echoctl capture`** (no app running): `"$APP" serve --port 7792 --play "$CONV/remote.wav" --quiet & "$APP" dial 127.0.0.1:7792 --me "$CONV/mic.wav" --me-device "BlackHole 2ch" & sleep 2; target/debug/echoctl capture --seconds 42 --title "<title>"; wait`.
+  The last line `capture` prints is the call folder. Then `cp "$CONV/expected.json" <call folder>/`,
+  `target/debug/echoctl transcribe <call folder> [--keep-audio]`, `make_audio.py score <call folder>`.
+- **The watcher** (arm, record when the call starts, stop, ask mode) runs only inside `echoctl app`. Cases that need it
+  start a second app instance on the run's own data folder and config: `nohup target/debug/echoctl app run --no-tray --background > "$D/app.out" 2>&1 & echo $! > "$D/app.pid"`
+  (never `app start`, which may open the installed app), and stop it with `echoctl app quit`. The single-instance lock
+  is `<config dir>/app.lock` (`app.rs`, `try_lock`), so the user's own Echo does not refuse it; if "Echo is already
+  running" appears in `$D/app.out`, the case is BLOCKED. Such cases are tagged `second-instance`, set
+  `config --unscheduled manual` (no native "Record?" dialog) and `ai live off` (no Claude Code run).
+- The first seconds of a watcher-recorded call can be clipped (the watcher needs a moment to see the call): watcher
+  cases assert on words from the middle and end of a call, not on a whole-call score.
+
 ## Out of Scope / Manual Setup Required
 
 Cases that need these are `run: person` or only check the button and its dialog, never the result:
@@ -242,7 +270,8 @@ Cases that need these are `run: person` or only check the button and its dialog,
 - Microsoft 365: sign-in, calendar sync, mail, Teams, meeting chat (Settings → Calendar & chat "Sign in…", "Sends to you").
 - Claude Code runs: Write minutes / Write minutes again, Prepare, Send to Claude, Yolo, Ask Claude about this call,
   "Sync now" (What moved, thread work), "Claude" panel in the footer, "Claude can" work, "Claude about this thread".
-- Recording and the tray: "Record next call", "Memo", "Record when it starts", permissions prompts, Health's
+- The tray, "Memo", Teams itself and permissions prompts ("Record next call" and recording a call run with the test
+  call: see "Recording with the test call"): Health's
   "Ask for permissions".
 - Plugin marketplaces over the network, installs, updates, "Check for updates", speech model downloads, "Read again".
 - Anything that reads the real machine (Settings → General "Installed ✓", Health): see Fragile areas.

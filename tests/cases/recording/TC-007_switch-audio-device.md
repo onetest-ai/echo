@@ -29,3 +29,6 @@ external_id: TC-REC-007
 
 ## Expected Final State
 Device switches don't break or desync the recording.
+
+## Notes
+- Stays person-run: the device switch happens inside Teams. TestCall cannot switch devices mid-call yet (it opens the one `--me-device` for the whole call), so no agent case covers a mic that changes.

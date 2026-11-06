@@ -29,3 +29,6 @@ external_id: TC-REC-014
 
 ## Expected Final State
 Ask mode needs no Claude Code and records only on yes.
+
+## Notes
+- Stays person-run: Echo's "Record?" dialog is a native window an agent cannot answer. The manual mode (a call starts, nothing is asked, nothing is recorded) is run by an agent in `privacy/TC-001`; the recording on yes is the same path as `recording/TC-001`.

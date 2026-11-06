@@ -27,3 +27,6 @@ external_id: TC-TRN-007
 
 ## Expected Final State
 Long calls finish in reasonable time without blocking the Mac.
+
+## Notes
+- Stays person-run: it needs 60 minutes or more. The longest known conversation is under 40 s.

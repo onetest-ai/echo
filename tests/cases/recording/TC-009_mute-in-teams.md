@@ -30,3 +30,6 @@ external_id: TC-REC-009
 
 ## Expected Final State
 Teams' mute is honoured.
+
+## Notes
+- Stays person-run: Teams' own mute button and the Accessibility reading of it. TestCall has no mute.

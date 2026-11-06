@@ -27,3 +27,6 @@ external_id: TC-REC-008
 
 ## Expected Final State
 Echo cancellation keeps the speakers' sound out of your track.
+
+## Notes
+- Stays person-run: it needs a real microphone hearing real speakers. The test call's mic is BlackHole (no acoustic path), so TestCall shows no echo to cancel; its remote track is checked for wrong speakers by `recording/TC-014` and `TC-018`.

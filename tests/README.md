@@ -51,15 +51,15 @@ into a scenario (`app_profile.md` → "Scenarios").
 | Area | Agent | Person | What |
 |---|---|---|---|
 | `cases/today` | 3 | 0 | Today: Your day, My work |
-| `cases/window` | 10 | 5 | Calls, minutes, transcript, notes, delete, calendar views |
+| `cases/window` | 12 | 3 | Calls, minutes, transcript, notes, delete, calendar views |
 | `cases/calendar` | 1 | 10 | Scheduling, Microsoft 365 calendar, meeting chat |
-| `cases/cli` | 2 | 4 | `echoctl` commands |
+| `cases/cli` | 3 | 3 | `echoctl` commands |
 | `cases/claude` | 0 | 15 | Claude Code plugin and minutes runs |
-| `cases/privacy` | 0 | 7 | Opt-in, local data, what goes online |
-| `cases/transcription` | 0 | 6 | Transcript quality and languages |
+| `cases/privacy` | 3 | 4 | Opt-in, local data, what goes online |
+| `cases/transcription` | 5 | 1 | Transcript quality and languages |
 | `cases/install` | 0 | 7 | DMG, first run, data folder, models |
 | `cases/permissions` | 0 | 7 | macOS permissions and Health |
-| `cases/recording` | 0 | 13 | Arming, recording, stopping, interruptions |
+| `cases/recording` | 11 | 8 | Arming, recording, stopping, interruptions |
 | `cases/lifecycle` | 0 | 9 | Login, quit, single instance, updates, notifications |
 | `cases/windows` | 0 | 9 | The Windows build |
 
