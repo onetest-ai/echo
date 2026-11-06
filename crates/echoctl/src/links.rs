@@ -193,7 +193,31 @@ fn task_text(thread: &str, id: &str) -> Result<String> {
     if !said.is_empty() {
         out.push_str(&format!("\n## Where it was said\n{}\n", said.join("\n")));
     }
+    // Who does it (`taskmodes`): the user's choice, else Echo's guess — what Claude is to hand back, or how by hand.
+    let m = &n["who_does"];
+    match m["mode"].as_str() {
+        Some("claude") => out.push_str(&format!("\n## Who does it\nClaude can{}{}\n", m["prompt"].as_str().map(|p| format!(" — hand back: {p}")).unwrap_or_default(), m["skill"].as_str().map(|k| format!(" (skill /my-skills:{k})")).unwrap_or_default())),
+        Some(_) => out.push_str(&format!("\n## Who does it\nThe user, by hand{}\n", m["how"].as_str().map(|h| format!(" — {h}")).unwrap_or_default())),
+        None => {}
+    }
+    let recent = recent_calls(thread, 3);
+    if !recent.is_empty() {
+        out.push_str(&format!("\n## The thread's last calls\n{}\n", recent.join("\n")));
+    }
     Ok(out)
+}
+
+/// A thread's last `n` calls with minutes, newest first, one line each: its title, date and link — the context a
+/// task's work starts from (the reader opens the ones it needs).
+fn recent_calls(thread: &str, n: usize) -> Vec<String> {
+    let Ok(p) = crate::projects::load(thread) else { return vec![] };
+    let mut calls: Vec<std::path::PathBuf> = crate::projects::calls_of(&p).unwrap_or_default().into_iter().map(|(d, _)| d).filter(|d| d.join("notes.md").is_file()).collect();
+    calls.sort();
+    calls.iter().rev().take(n).map(|d| {
+        let name = d.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+        let meta = crate::calls::read_json(&d.join("meta.json"));
+        format!("- {} ({}) echo://call/{name}", meta["title"].as_str().unwrap_or(&name), name.get(..10).unwrap_or(""))
+    }).collect()
 }
 
 fn person_text(v: &Value) -> String {
@@ -310,6 +334,18 @@ pub fn person_thread(key: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_task_says_who_does_it() {
+        let (_env, _) = crate::paths::testenv::folders("links-task-mode");
+        let id = crate::projects::create("Aurora", None, None).unwrap().id;
+        let st = crate::ledger::human_event(&id, &serde_json::json!({"op": "create", "kind": "story", "parent": "E01", "title": "Pilot"})).unwrap();
+        let t = crate::ledger::human_event(&id, &serde_json::json!({"op": "create", "kind": "task", "parent": st["id"], "title": "Book the room"})).unwrap();
+        let tid = t["id"].as_str().unwrap();
+        crate::ledger::human_event(&id, &serde_json::json!({"op": "edit", "node": tid, "set": {"mode": "manual", "how": "Call the venue"}})).unwrap();
+        let text = task_text(&id, tid).unwrap();
+        assert!(text.contains("## Who does it\nThe user, by hand — Call the venue"), "{text}");
+    }
 
     #[test]
     fn links_parse_and_refuse_paths() {
