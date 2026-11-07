@@ -12,7 +12,7 @@ and has Claude Code write the minutes. One Rust binary, `echoctl`, is both the a
 | App (watcher loop) | `crates/echoctl/src/watch.rs`, `app.rs` | detects calls, records, transcribes, schedules jobs; one per user | takes control files in `<home>/.echo/`, writes `watch.json`, appends `events.jsonl` |
 | Recorder + capture | `recorder.rs`, `audio/`, `ax/`, `permissions/` | two `audio::Track`s, Teams UI reading, OS permissions | WAVs and `*.jsonl` in the call folder |
 | Transcription | `live.rs`, `transcribe.rs`, `nemo.rs`, `remote.rs` | live pass during the call, final transcript after | reads the growing WAVs, writes `live.jsonl`, `transcript.md`, `segments.json` |
-| CLI | `main.rs` (`Cmd` and its sub-enums) | every user / plugin / skill entry point; prints JSON | request files for the running app; direct reads of the data folder |
+| CLI | `main.rs` (`Cmd` and its dispatch), `cli/<area>.rs` (an area's sub-enums and what they run) | every user / plugin / skill entry point; prints JSON | request files for the running app; direct reads of the data folder |
 | Tray + window | `tray.rs`, `window/` (one file per area), `terminal.rs`, `ui/` | menu-bar icon; a wry webview served over `echo://`; Claude in a PTY | HTTP-like `/api/...` routes (`window::respond`), IPC messages (`window::handle`) |
 | AI jobs | `ai.rs`, `livenotes.rs`, `notes.rs`, `guard.rs`, `projectsync.rs` | live notes, minutes runs, thread syncs on the call's AI profile | headless Claude Code under the `run-guard` hook; state files per call / thread |
 | Threads and ledger | `projects.rs`, `ledger.rs`, `people.rs`, `tasks.rs` | clients, threads (projects), work ledger, people | `<home>/projects/` files |
@@ -90,7 +90,7 @@ Evidence: `crates/echoctl/src/paths.rs::state_dir`, `crates/echoctl/src/paths.rs
 ### Constraints
 | Do not | Do instead | Why | Evidence |
 |---|---|---|---|
-| Put a new CLI command anywhere but a variant of `Cmd` (or its sub-enum) in `main.rs` | Add the variant with a doc comment; hide dev ones with `#[command(hide = true)]` | clap's help and the skills' references read from it | `crates/echoctl/src/main.rs::Cmd` |
+| Put a new CLI command anywhere but a variant of `Cmd` in `main.rs` or of its area's sub-enum in `cli/<area>.rs` | Add the variant with a doc comment; hide dev ones with `#[command(hide = true)]`; a body longer than a line goes in the area's `cli/` module | clap's help and the skills' references read from it | `crates/echoctl/src/main.rs::Cmd` |
 | Add a new app request without a cleanup entry | Add it to the list at the top of `watch::run_loop` | a stale request would act on the next start | `crates/echoctl/src/watch.rs::run_loop` |
 | Give a headless run a new command by widening Bash | Add it to the mode's list (`RUN_COMMANDS`, `PROJECT_STEPS`) and check it in the CLI too | the guard allows only listed commands as plain words | `crates/echoctl/src/guard.rs::PROJECT_STEPS` |
 | Put model judgment in Rust or deterministic steps in a skill | A JSON CLI command for facts, the skill step for judgment | runs stay cheap, testable and guarded | `crates/echoctl/src/calls.rs::minutes_gate` |
@@ -98,7 +98,7 @@ Evidence: `crates/echoctl/src/paths.rs::state_dir`, `crates/echoctl/src/paths.rs
 ### Read first
 | When you are | Exemplar | Why this one | Tests |
 |---|---|---|---|
-| adding a CLI subcommand | `crates/echoctl/src/main.rs::PluginCmd` | clap derive enum with doc comments as help, hidden ones `#[command(hide = true)]` | no covering test |
+| adding a CLI subcommand | `crates/echoctl/src/cli/plugin.rs::PluginCmd` | clap derive enum with doc comments as help, hidden ones `#[command(hide = true)]` | no covering test |
 | adding an app request (CLI → running app) | `crates/echoctl/src/watch.rs::stop` | writes `stop.request`, the loop takes and removes it | no covering test |
 | adding a window action | `crates/echoctl/src/window/settings.rs::handle` | IPC message → shared function → `{refresh, reply}` | no covering test |
 | adding a background job | `crates/echoctl/src/projectsync.rs::start_scheduler` | own thread, due check, state file, failure backoff | no covering test |
