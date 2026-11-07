@@ -78,14 +78,15 @@ scenario files. Use made-up meeting content; never paste real transcripts into a
 
 ### Test machines
 
-- **Fresh Mac:** a user account that has never run Echo (no `~/Library/Application Support/echo`,
-  no `~/Echo`), macOS 14.2 or later, Teams (new) installed and signed in.
+- **Fresh Mac:** a Mac where Echo has never been (nothing of Echo's in the account: `tests/tools/clean-mac.sh`
+  finds nothing), macOS 14.2 or later, Teams (new) installed and signed in. S-15 and S-16 run there as
+  `run: agent` with user steps (`tests/app_profile.md` → Clean-install runs).
 - **Dev Mac:** your usual machine, for the regression run.
 - **Windows:** Windows 10 2004 or later / Windows 11, Teams installed.
 
-To reset a Mac to "fresh": quit Echo, then remove `~/Library/Application Support/echo`, the
-data folder you chose, `~/Library/LaunchAgents/ai.onetest.echo.plist` if present, and reset
-permissions with `tccutil reset All ai.onetest.echo`.
+To reset a Mac to "fresh": `tests/tools/clean-mac.sh` shows what Echo left, `--yes --app` removes it (the app,
+its config and data folders, the LaunchAgent, the Claude Code plugin, caches); then run the `tccutil reset` lines
+(and the `sudo rm` of the CLI link) it prints.
 
 ### Run log
 

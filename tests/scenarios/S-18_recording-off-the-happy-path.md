@@ -25,6 +25,9 @@ cases:
   - tests/cases/recording/TC-010_sleep-while-recording.md
   - tests/cases/recording/TC-012_ask-mode.md
   - tests/cases/transcription/TC-006_long-call.md
+  - tests/cases/recording/TC-020_call-with-system-audio-denied.md
+  - tests/cases/recording/TC-021_call-with-mic-denied.md
+  - tests/cases/recording/TC-022_shared-screen-snapshots.md
 ---
 
 # S-18: Recording off the happy path: mid-call starts, cancels, drops, devices, mute, sleep, crashes
@@ -57,6 +60,9 @@ cases:
 | 18 | `recording/TC-010_sleep-while-recording.md` | — | — |
 | 19 | `recording/TC-012_ask-mode.md` | — | — |
 | 20 | `transcription/TC-006_long-call.md` | — | — |
+| 21 | `recording/TC-020_call-with-system-audio-denied.md` | — | System Audio Recording denied for Echo (permissions/TC-003, S-16) |
+| 22 | `recording/TC-021_call-with-mic-denied.md` | — | Microphone denied for Echo (permissions/TC-004, S-16) |
+| 23 | `recording/TC-022_shared-screen-snapshots.md` | — | "Save snapshots of shared screens" on (permissions/TC-007, S-16) |
 
 ## Notes
 - Each stage is its own call; none depends on another except mute on Accessibility.

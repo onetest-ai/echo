@@ -19,16 +19,19 @@ agent tests it. This file is given to every manual-qa role; where it differs fro
    copy or name the real data folder (`~/echo`), real calls, people or companies — not in cases, steps, reports or
    screenshots.
 2. **The build under test** is `target/debug/echoctl` from this checkout. Build it first: `cargo build`. A case never
-   installs, quits or restarts the real Echo app.
+   installs, quits or restarts the real Echo app, except the clean-install runs (S-15, S-16: "Clean-install runs"
+   below), which install the release on a Mac where Echo has never been.
 3. **Every `echoctl` command runs with the run's data folder**: `. <dir>/env` first (it sets `ECHOCTL_HOME` and
    `ECHOCTL_CONFIG_DIR` and unsets Claude Code's session variables). A command without it would touch the real data.
 4. **Steps are the window (Playwright MCP) or the CLI (Bash).** The runner may use Bash only for `echoctl` with the
    run's env, reading files in the run's data folder, and `tests/fixtures/*`. No other scripts, no edits to the repo.
    One exception: a case that says it records with the test call may also run TestCall, `afplay`, `nohup`, `kill`,
    `sleep`, `ls`, `grep`, `cat` and `find` on the run's own folders (see "Recording with the test call" below).
+   Another: the clean-install runs use the commands their cases name ("Clean-install runs" below).
 5. **`run: person` cases are for a person** (a real call, Teams, macOS permissions, an install, the tray, Windows,
    Claude Code runs that need a signed-in account). The lead lists them in the report as `skipped (person)` and never
-   tries them.
+   tries them. A case or scenario that is `run: agent` but needs the user for a moment (a macOS prompt, a password,
+   System Settings, a logout) lists those moments in `user_steps:`, and its steps say "**The user does:** …".
 6. **A PASS needs evidence**: a Playwright snapshot for a window step, the command's output for a CLI step.
 7. **Agent runs execute scenarios, not single cases** (see "Scenarios" below): one runner per scenario, fresh data
    per scenario, and **the browser stays open** from one runner to the next — never close the page or the browser.
@@ -223,7 +226,7 @@ All verified on the test data in a live session. Roles and names first, then the
 
 Areas that have **no `run: agent` case yet** (from `tests/README.md` → Areas): Tasks, Threads (brief/work/calls/people/profile),
 clients, Inbox and right panels, Settings (all sections), Plugins, the actions palette, Calls extras (What moved,
-Call actions menu, thread chip), Today's task details (only TC-003). `claude`, `install`, `permissions`, `lifecycle`, `windows` stay person-run (`recording`, and part of `privacy`,
+Call actions menu, thread chip), Today's task details (only TC-003). `windows` and the rest of `claude`, `install`, `permissions`, `lifecycle` stay person-run (their S-15/S-16 cases are agent runs with user steps) (`recording`, and part of `privacy`,
 `transcription`, `window` and `cli`, now run with the test call). Proposed, all on the test data, `platform: any`:
 
 | Suite | Folder | Priority | Description |
@@ -264,9 +267,42 @@ tap on TestCall). The known conversations (`tests/fixtures/audio/README.md`: `ac
 - The first seconds of a watcher-recorded call can be clipped (the watcher needs a moment to see the call): watcher
   cases assert on words from the middle and end of a call, not on a whole-call score.
 
+## Clean-install runs
+
+S-15 and S-16 test the release as a new user meets it, on a Mac where Echo has never been: no test data, no
+`serve.sh`. Rules 1–3 don't apply to them; everything else does.
+
+- **Before:** `tests/tools/clean-mac.sh` (a dry run) must find nothing of Echo's. If it finds something, the run stops
+  and asks the user to reset: `tests/tools/clean-mac.sh --yes --app`, then the `tccutil reset` lines it prints (the
+  user runs those). `RUN="$(mktemp -d)/S-15"` (or S-16) holds the DMG and the run's notes.
+- **The installed app's CLI:** `E=/Applications/Echo.app/Contents/MacOS/echoctl` (`$E app`, `$E status`,
+  `$E model list`, `$E doctor --json`, `$E claude`) until cli/TC-003 puts `echoctl` on the PATH.
+- **The window:** `ECHOCTL_SERVE_IPC=1 nohup $E window --serve 48150 > "$RUN/serve.log" 2>&1 & echo $! > "$RUN/pid"`,
+  then Playwright on `http://127.0.0.1:48150/`: the real install's window, whose buttons reach the running app.
+  Stop it with `kill "$(cat "$RUN/pid")"` (only that pid). It shows the real Settings, but its buttons that start an
+  app action (Connect, Install…, a model's Download / Use / Remove, Ask for permissions, Re-check) do nothing there:
+  only Echo's own window runs them (`settings_action` → `tray.rs`), so **the user clicks them in Echo's own window**
+  when the run asks, and the run checks the result with `$E`. Its Health permissions are checked in the server's own
+  process (they show "?"): read them with `$E doctor --json`, which asks the running app.
+- **Install by dragging in Finder** (a user step): an app copied in Terminal keeps the quarantine flag without the
+  "moved by the user" mark, and macOS runs it translocated (`/private/var/folders/…/AppTranslocation/…`). Check
+  after the first start: `ps -o command= -p $($E app | python3 -c 'import json,sys;print(json.load(sys.stdin)["running"])')`
+  and `~/Library/Application Support/echo/app-path` point into /Applications/Echo.app.
+- **Notifications:** macOS shows no banner for the app in front; a notification Echo sends while its window is in
+  front is only in Notification Center. Bring another app to the front before triggering one.
+- **Echo's first-run questions** are AppleScript dialogs (`display dialog`, `choose folder`; they give up after
+  120 s). The run clicks them through System Events (`osascript -e 'tell application "System Events" to …'`) if its
+  terminal is allowed to (Accessibility, the user's choice); otherwise it names the button and the user clicks it.
+- **User steps:** before each, the run says in its session exactly what will appear and what to do, and waits. The run
+  never clicks a macOS prompt, types a password or changes System Settings; a check that needs a look at a banner or
+  an icon is confirmed by the user (or by a screenshot, if the user gave the terminal Screen Recording).
+- **Processes:** the run signals only the server it started (its saved pid), never anything matched by a pattern.
+- **After S-15** Echo stays installed. S-16 starts from a reset, and only when the user says so.
+
 ## Out of Scope / Manual Setup Required
 
-Cases that need these are `run: person` or only check the button and its dialog, never the result:
+Cases that need these are `run: person` or only check the button and its dialog, never the result (except the
+clean-install runs, below, on a Mac where Echo has never been):
 
 - Microsoft 365: sign-in, calendar sync, mail, Teams, meeting chat (Settings → Calendar & chat "Sign in…", "Sends to you").
 - Claude Code runs: Write minutes / Write minutes again, Prepare, Send to Claude, Yolo, Ask Claude about this call,
@@ -283,6 +319,8 @@ Cases live in `tests/cases/<suite>/TC-NNN_<slug>.md` in the manual-qa format, wi
 
 - `run: agent | person` — who can run it (rule 5).
 - `platform: any | macos | windows` — `any` for the window and the CLI in serve mode.
+- `user_steps: ['…', …]` — only for a `run: agent` case that needs the user for a moment (rule 5): what the user
+  does, so the lead can say so before the run.
 - `requirements: [F-AREA-NN, …]` — the features of the functional map (`tests/feature-map/areas/*.json`) the case
   checks; a case that checks a behaviour the map doesn't list adds the feature to its area's file first.
 

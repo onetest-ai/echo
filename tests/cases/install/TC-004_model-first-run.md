@@ -5,7 +5,7 @@ priority: critical
 type: functional
 requirements: [F-LIFE-01, F-SET-09]
 module: install
-run: person
+run: agent
 platform: any
 tags: [install, model]
 external_id: TC-INST-004
@@ -16,15 +16,16 @@ external_id: TC-INST-004
 **Module:** Install | **Priority:** Critical | **Type:** Functional
 
 ## Preconditions
-- A fresh Mac account (tests/README.md → Test machines): no Echo settings, data folder or permissions
+- A Mac where Echo has never been (app_profile.md → Clean-install runs): `tests/tools/clean-mac.sh` (dry run) finds nothing of Echo's; otherwise the run stops and asks the user to reset it
+- The folder question answered (install/TC-002)
 
 ## Steps
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | At "Download the speech model now?" click "Download" | The suggested model (on Apple Silicon `large-v3-turbo-q5_0`) with its size |
-| 2 | Menu → Speech models during the download | Progress in % |
-| 3 | Wait | "Speech model ready"; the model marked in use; its file under `~/Library/Application Support/echo/models/`, not in the data folder |
+| 1 | At "Download the speech model now?" read the dialog, then click "Download" (System Events, or **the user does:** click it when the run asks) | The dialog names the suggested model (on Apple Silicon `large-v3-turbo-q5_0`) with its size |
+| 2 | During the download: `$E model list`; Settings → Transcription in the window (served: app_profile.md → Clean-install runs) | Progress in % |
+| 3 | Wait until it ends | "Speech model ready" (notification: the user confirms, or `$E model list` marks it in use); the file is in `~/Library/Application Support/echo/models/`, nothing under the data folder's `.echo/models` |
 
 ## Expected Final State
 The model is downloaded once to the app's folder and used.

@@ -5,10 +5,14 @@ priority: high
 type: functional
 requirements: [F-LIFE-06]
 module: lifecycle
-run: person
+run: agent
 platform: macos
 tags: [lifecycle, notifications]
 external_id: TC-LIFE-006
+user_steps:
+  - 'at the notifications prompt the user clicks Allow when the run asks'
+  - 'the user confirms each banner''s icon (or grants the terminal Screen Recording, their choice)'
+  - 'the user turns Echo''s notifications off in System Settings when the run asks'
 ---
 
 # TC-006: Notifications come from Echo and open its window
@@ -16,16 +20,16 @@ external_id: TC-LIFE-006
 **Module:** Lifecycle | **Priority:** High | **Type:** Functional
 
 ## Preconditions
-- A fresh Mac account
+- Echo opened for the first time on a Mac where it has never been (S-15); `E=/Applications/Echo.app/Contents/MacOS/echoctl`
 
 ## Steps
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Open Echo for the first time; Allow notifications | — |
-| 2 | Trigger one (finish a recording, or Menu → Claude Code → Connect Claude Code) | The banner has Echo's icon (purple rounded square with the octopus), not a blank one |
-| 3 | Click it | The Echo window opens |
-| 4 | Turn Echo's notifications off in System Settings; trigger one | Nothing shows |
+| 1 | **The user does:** when the notifications prompt for Echo appears, click Allow when the run asks | — |
+| 2 | Trigger one with another app in front (no banner is shown for the app in front): "Command-line tool installed" or "Claude Code connected" (cli/TC-003, claude/TC-001), or the model-ready one | A banner, or the item in Notification Center, with Echo's icon (purple rounded square with the octopus), not a blank one: the user confirms |
+| 3 | **The user does:** click it (the banner or the Notification Center item) before dismissing it | The Echo window opens |
+| 4 | **The user does:** turn Echo's notifications off in System Settings → Notifications when the run asks; then triggers one again as in step 2 | Nothing shows (the user confirms) |
 
 ## Expected Final State
-Notifications are Echo's own and lead to the window.
+Echo's notifications carry its icon and open Echo.

@@ -5,7 +5,7 @@ priority: low
 type: functional
 requirements: [F-SET-09, F-LIFE-01]
 module: install
-run: person
+run: agent
 platform: any
 tags: [install, model]
 external_id: TC-INST-007
@@ -16,14 +16,14 @@ external_id: TC-INST-007
 **Module:** Install | **Priority:** Low | **Type:** Functional
 
 ## Preconditions
-- Two models downloaded, one in use
+- Echo installed and running; two models downloaded, one in use (download a second one in Settings → Transcription first); `E=/Applications/Echo.app/Contents/MacOS/echoctl`
 
 ## Steps
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Menu → Speech models → the unused one → "Remove (… MB)…" → "Remove" | It is deleted and leaves the list |
-| 2 | Try the same on the model in use (or the language-ID helper) | Refused, or a clear question first; Echo keeps a working model |
+| 1 | **The user does:** Echo's own window → Settings → Transcription → the unused model → "Remove (… MB)…" → "Remove" | It is deleted (its file is gone from `~/Library/Application Support/echo/models/`) and leaves the list |
+| 2 | Try the same on the model in use (or the language-ID helper); also `$E model remove <the one in use>` | Refused, or a clear question first; `$E model list` still has a model in use |
 
 ## Expected Final State
 Models can be removed without breaking transcription.
