@@ -77,7 +77,8 @@ pub struct Change {
     /// Added lines left out because they link to a rejected new page (D28), and the change saying so.
     pub dropped: Vec<String>,
     pub note: Option<String>,
-    /// `undecided`, `approved`, `rejected`, `written` or `changed` (in the vault since the run).
+    /// `undecided`, `approved`, `rejected`, `written`, `changed` (in the vault since the run) or `blocked` (Echo can't
+    /// write it: `note` says why).
     pub state: String,
     /// The user's text, not the run's.
     pub edited: bool,
@@ -87,10 +88,13 @@ pub struct Change {
     approved: bool,
     #[serde(skip)]
     force: bool,
-    /// The file as the run found it (`None`: the vault's changed since, and Echo kept no copy of it).
+    /// The file's sha256 as it was copied.
     #[serde(skip)]
     base_sha: Option<String>,
-    /// The diff's left side: the base, else the vault's file now.
+    /// The file as the run found it (`None` for a new one, or when Echo kept no copy of it).
+    #[serde(skip)]
+    base: Option<String>,
+    /// The diff's left side: the base, else (or for a changed one) the vault's file now.
     #[serde(skip)]
     left: String,
     /// What would be written.
@@ -162,27 +166,40 @@ pub(super) fn files_under(root: &Path) -> Vec<String> {
     out
 }
 
-/// When a run ends: the files of its copy that it created or changed (`review.json`), how many.
-pub(super) fn find(v: &Vault, dir: &Path) -> Result<usize> {
+/// When a run ends: the files of its copy that it created or changed (`review.json`) — how many, and how many of them
+/// Echo can't write into the vault. The vault's file as it was copied is kept (`base/`) for each modified one still so
+/// now, so its diff and activity line stay the run's own however the vault changes before the write.
+pub(super) fn find(v: &Vault, dir: &Path) -> Result<(usize, usize)> {
     let bases: Value = serde_json::from_slice(&std::fs::read(dir.join("bases.json"))?)?;
     let copy = dir.join("vault");
-    let mut found = vec![];
+    let (mut found, mut blocked) = (vec![], 0);
     for rel in files_under(&copy) {
         if rel == NOTES || rel.starts_with(&format!("{NOTES}/")) || !writable(v, &rel) {
             continue;
         }
-        match bases["files"][&rel].as_str() {
-            Some(b) if *b == sources::file_sha(&super::super::join(&copy, &rel))? => {}
-            Some(_) => found.push(Found { path: rel, new: false }),
-            None => found.push(Found { path: rel, new: true }),
+        let base = bases["files"][&rel].as_str();
+        if base.is_some_and(|b| sources::file_sha(&super::super::join(&copy, &rel)).is_ok_and(|now| now == b)) {
+            continue;
         }
+        match page::inside(v, &rel) {
+            Err(_) => blocked += 1,
+            Ok(full) => {
+                let kept = super::super::join(&dir.join("base"), &rel);
+                let still = base.is_some_and(|b| std::fs::read(&full).is_ok_and(|now| sha(&now) == b));
+                if still && !kept.exists() {
+                    std::fs::create_dir_all(kept.parent().expect("a parent"))?;
+                    std::fs::copy(&full, &kept)?;
+                }
+            }
+        }
+        found.push(Found { path: rel, new: base.is_none() });
     }
     let n = found.len();
     update_review(dir, |r| {
         r.found = found;
         Ok(())
     })?;
-    Ok(n)
+    Ok((n, blocked))
 }
 
 /// A change's kind (K15-07).
@@ -309,7 +326,7 @@ fn drop_rejected(changes: &mut [Change]) {
     if rejected.is_empty() {
         return;
     }
-    for c in changes.iter_mut().filter(|c| matches!(c.kind, "index" | "log") && !c.edited && c.state != "written") {
+    for c in changes.iter_mut().filter(|c| matches!(c.kind, "index" | "log") && !c.edited && !matches!(c.state.as_str(), "written" | "blocked")) {
         let dir = c.path.rsplit_once('/').map_or("", |(d, _)| d).to_string();
         let proposed = String::from_utf8_lossy(&c.text).into_owned();
         let (mut kept, mut pages) = (vec![], BTreeSet::new());
@@ -351,15 +368,17 @@ pub fn changes(v: &Vault, run: &str) -> Result<Vec<Change>> {
     let review = read_review(&dir)?;
     let bases: Value = serde_json::from_slice(&std::fs::read(dir.join("bases.json"))?)?;
     let copy = dir.join("vault");
-    let copy_v = Vault { root: copy.clone(), ..v.clone() };
     let notes = notes(&copy);
     let mut texts = HashMap::new();
     let mut out = vec![];
     for f in &review.found {
-        let run_bytes = std::fs::read(page::inside(&copy_v, &f.path)?)?;
+        // A path of Echo's own walk of the copy (no link followed): read as it is, whatever its name.
+        let run_bytes = std::fs::read(super::super::join(&copy, &f.path))?;
         let a = review.answers.get(&f.path).cloned().unwrap_or_default();
         let base_sha = bases["files"][&f.path].as_str().map(str::to_owned);
-        let now = std::fs::read(page::inside(v, &f.path)?).ok();
+        // A path the vault can't take (a name Windows can't, a folder that is a link out): shown, never written.
+        let blocked = page::inside(v, &f.path).err().map(|e| format!("can't be written: {e:#}"));
+        let now = if blocked.is_none() { std::fs::read(super::super::join(&v.root, &f.path)).ok() } else { None };
         let kept = super::super::join(&dir.join("base"), &f.path);
         let base: Option<String> = if f.new {
             Some(String::new())
@@ -370,13 +389,20 @@ pub fn changes(v: &Vault, run: &str) -> Result<Vec<Change>> {
         };
         let kind = kind(v, &f.path, f.new);
         let text = a.text.clone().map(String::into_bytes).unwrap_or(run_bytes);
-        let left = base.clone().unwrap_or_else(|| now.as_ref().map(|b| String::from_utf8_lossy(b).into_owned()).unwrap_or_default());
         let proposed = String::from_utf8_lossy(&text).into_owned();
-        let rows = (a.text.is_none() && base.is_some() && matches!(kind, "index" | "log")).then(|| additions(kind, &diff::lines(&left, &proposed), &proposed)).flatten();
+        let rows = (a.text.is_none() && base.is_some() && matches!(kind, "index" | "log")).then(|| additions(kind, &diff::lines(base.as_deref().unwrap_or(""), &proposed), &proposed)).flatten();
+        // Changed in the vault since the run: not as it was copied, and not as the run would write it.
+        let same = now.as_deref() == Some(text.as_slice());
+        let moved = if f.new { now.is_some() } else { now.as_deref().map(sha) != base_sha };
+        let changed = blocked.is_none() && rows.is_none() && !same && moved;
         let mut state = if a.state.is_empty() { "undecided".to_string() } else { a.state.clone() };
-        if base.is_none() && !a.force && matches!(state.as_str(), "undecided" | "approved") {
+        if blocked.is_some() {
+            state = "blocked".into();
+        } else if changed && !a.force && matches!(state.as_str(), "undecided" | "approved") {
             state = "changed".into();
         }
+        // Compare (K6's) for a changed one: from the vault's file now; else the run's own diff.
+        let left = if state == "changed" { now.as_ref().map(|b| String::from_utf8_lossy(b).into_owned()).unwrap_or_default() } else { base.clone().or_else(|| now.as_ref().map(|b| String::from_utf8_lossy(b).into_owned())).unwrap_or_default() };
         let (why, given) = notes.get(&f.path).cloned().unwrap_or_default();
         let (quotes, invented, unchecked) = checked(&copy, &r.sources, &given, &mut texts);
         let quote_note = match (quotes.is_empty(), unchecked > 0) {
@@ -396,16 +422,17 @@ pub fn changes(v: &Vault, run: &str) -> Result<Vec<Change>> {
             invented,
             quote_note,
             dropped: vec![],
-            note: None,
-            state,
+            note: blocked.clone(),
             edited: a.text.is_some(),
             new_file: f.new,
-            approved: a.state == "approved",
+            approved: a.state == "approved" && blocked.is_none(),
             force: a.force,
             base_sha,
+            base: if f.new { None } else { base },
             left,
             text,
             rows: rows.unwrap_or_default(),
+            state,
         };
         c.fill();
         out.push(c);
@@ -422,8 +449,14 @@ pub fn changes_value(v: &Vault, run: &str) -> Result<Value> {
     Ok(json!({
         "run": r,
         "changes": all,
-        "counts": { "all": all.len(), "undecided": count("undecided"), "approved": count("approved"), "rejected": count("rejected"), "written": count("written"), "changed": count("changed") },
+        "counts": { "all": all.len(), "undecided": count("undecided"), "approved": count("approved"), "rejected": count("rejected"), "written": count("written"), "changed": count("changed"), "blocked": count("blocked") },
     }))
+}
+
+/// A change's whole proposed text, for *Edit* (K15-08): the run's (with D28's lines left out), or the user's edit.
+pub fn proposed(v: &Vault, run: &str, path: &str) -> Result<Value> {
+    let c = changes(v, run)?.into_iter().find(|c| c.path == path).ok_or_else(|| anyhow!("this run has no change to {path}"))?;
+    Ok(json!({ "path": c.path, "text": String::from_utf8_lossy(&c.text), "edited": c.edited, "state": c.state }))
 }
 
 /// An answer to a change (K15-08, -09).
@@ -450,11 +483,12 @@ fn reviewing(v: &Vault, run: &str) -> Result<PathBuf> {
 /// Answer the change to `path` (one of the run's own, by its path).
 pub fn decide(v: &Vault, run: &str, path: &str, d: Decision) -> Result<()> {
     let dir = reviewing(v, run)?;
-    if let Decision::Take = d {
-        let now = changes(v, run)?.into_iter().find(|c| c.path == path).map(|c| c.state);
-        if now.as_deref() != Some("changed") {
-            bail!("Take the run's is for a change made in the vault since the run");
-        }
+    let now = changes(v, run)?.into_iter().find(|c| c.path == path).ok_or_else(|| anyhow!("this run has no change to {path}"))?;
+    if now.state == "blocked" {
+        bail!("{path} {}", now.note.unwrap_or_default());
+    }
+    if matches!(d, Decision::Take) && now.state != "changed" {
+        bail!("Take the run's is for a change made in the vault since the run");
     }
     update_review(&dir, |r| {
         if !r.found.iter().any(|f| f.path == path) {
@@ -484,8 +518,9 @@ pub fn decide(v: &Vault, run: &str, path: &str, d: Decision) -> Result<()> {
 /// *Approve the rest*: every change not answered yet; how many.
 pub fn approve_rest(v: &Vault, run: &str) -> Result<usize> {
     let dir = reviewing(v, run)?;
+    let blocked: Vec<String> = changes(v, run)?.into_iter().filter(|c| c.state == "blocked").map(|c| c.path).collect();
     update_review(&dir, |r| {
-        let open: Vec<String> = r.found.iter().filter(|f| !r.answers.contains_key(&f.path)).map(|f| f.path.clone()).collect();
+        let open: Vec<String> = r.found.iter().filter(|f| !r.answers.contains_key(&f.path) && !blocked.contains(&f.path)).map(|f| f.path.clone()).collect();
         for p in &open {
             r.answers.insert(p.clone(), Answer { state: "approved".into(), ..Default::default() });
         }
@@ -518,7 +553,8 @@ enum Out {
 
 /// What writing `c` over the vault's file as it is `now` comes to.
 fn outcome(c: &Change, now: Option<Vec<u8>>, today: &str) -> Out {
-    if c.adds_only {
+    // *Take the run's* takes the run's whole text, an index's or a log's too.
+    if c.adds_only && !c.force {
         let Some(cur) = now.as_ref().and_then(|b| String::from_utf8(b.clone()).ok()) else { return Out::Stale };
         let mut t = cur.clone();
         for (heading, line) in &c.rows {
@@ -543,8 +579,9 @@ fn outcome(c: &Change, now: Option<Vec<u8>>, today: &str) -> Out {
     }
     let fresh = c.force || if c.new_file { now.is_none() } else { now.as_deref().map(sha) == c.base_sha };
     match now {
-        _ if !fresh => Out::Stale,
+        // Already as the run would write it (a write that stopped midway, written again): written, not changed.
         Some(b) if b == c.text => Out::Same,
+        _ if !fresh => Out::Stale,
         old => Out::Write { old, new: c.text.clone() },
     }
 }
@@ -562,7 +599,7 @@ fn message(v: &Vault, run_sources: &[String]) -> String {
 /// new one), else "changed in the vault since the run"; then one commit of the written files that were clean before
 /// (when the vault commits), the activity lines, the run's sources Done (kept N of M); the copy goes once nothing is
 /// left to decide.
-pub fn write(v: &Vault, run: &str) -> Result<Written> {
+pub fn write(v: &Vault, run: &str, only: &[String]) -> Result<Written> {
     let dir = reviewing(v, run)?;
     if !super::super::available(v) {
         bail!("the vault's folder isn't there: {}", v.root.display());
@@ -570,7 +607,11 @@ pub fn write(v: &Vault, run: &str) -> Result<Written> {
     let r = find_run(v, run)?;
     let _save = export::vault_lock(v)?;
     let all = changes(v, run)?;
-    let todo: Vec<&Change> = all.iter().filter(|c| c.approved).collect();
+    if let Some(p) = only.iter().find(|p| !all.iter().any(|c| &c.path == *p)) {
+        bail!("this run has no change to {p}");
+    }
+    let todo: Vec<&Change> = all.iter().filter(|c| c.approved && (only.is_empty() || only.contains(&c.path))).collect();
+    let blocked: Vec<&str> = all.iter().filter(|c| c.state == "blocked").map(|c| c.path.as_str()).collect();
     let full: Vec<PathBuf> = todo.iter().map(|c| page::inside(v, &c.path)).collect::<Result<_>>()?;
     // git is asked first: between a file's check and its write nothing slow runs.
     let dirty = if v.git.commit { git::dirty(&v.root, &full) } else { vec![] };
@@ -585,7 +626,14 @@ pub fn write(v: &Vault, run: &str) -> Result<Written> {
         };
         match outcome(c, now, &today) {
             Out::Stale => out.changed_since.push(c.path.clone()),
-            Out::Same => out.written.push(c.path.clone()),
+            Out::Same => {
+                out.written.push(c.path.clone());
+                // Echo's change is in the file (written before, by a write that stopped midway): its line and commit.
+                if c.base.as_deref().map(str::as_bytes) != Some(c.text.as_slice()) && !c.adds_only {
+                    written.push(full.clone());
+                    done.push((c.path.clone(), full.clone(), c.base.clone().map(String::into_bytes), c.text.clone()));
+                }
+            }
             Out::Write { old, new } => {
                 std::fs::create_dir_all(full.parent().expect("a parent"))?;
                 paths::write_atomic(full, &new)?;
@@ -612,7 +660,7 @@ pub fn write(v: &Vault, run: &str) -> Result<Written> {
             }
         }
         let kept = rv.answers.values().filter(|a| a.state == "written").count();
-        let finished = rv.found.iter().all(|f| rv.answers.get(&f.path).is_some_and(|a| matches!(a.state.as_str(), "written" | "rejected")));
+        let finished = rv.found.iter().all(|f| blocked.contains(&f.path.as_str()) || rv.answers.get(&f.path).is_some_and(|a| matches!(a.state.as_str(), "written" | "rejected")));
         Ok((kept, finished))
     })?;
     (out.kept, out.finished) = (kept, finished);
@@ -639,8 +687,10 @@ pub fn discard(v: &Vault, run: &str) -> Result<()> {
     super::super::refuse_headless()?;
     let dir = run_dir(v, run)?;
     let r = effective(v, find_run(v, run)?);
-    if r.state == "running" {
-        bail!("Stop the run first");
+    match r.state.as_str() {
+        "running" => bail!("Stop the run first"),
+        "done" => bail!("This run is done: its changes are written"),
+        _ => {}
     }
     let _ = std::fs::remove_dir_all(&dir);
     update_run(v, run, |l, r| {

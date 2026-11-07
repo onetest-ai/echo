@@ -2837,9 +2837,20 @@ fn ingest_run_command(v: &knowledge::Vault, cmd: IngestCmd) -> Result<serde_json
     };
     match cmd {
         IngestCmd::Run { sources } => {
+            // Ctrl-C (or a TERM) stops the run's Claude Code with this CLI, never leaves it running.
+            let _ = ctrlc::set_handler(|| {
+                ingest::stop_all("Stopped from the command line");
+            });
             let started = ingest::start(v, &sources)?;
-            // Its 20 minutes, and a moment for its end.
-            ingest::wait(&started.run, std::time::Duration::from_secs(21 * 60));
+            // Until it ends; what it waits for (a call's transcription, X-S2) is said as it waits.
+            let mut said: Option<String> = None;
+            while !ingest::wait(&started.run, std::time::Duration::from_secs(2)) {
+                let waiting = ingest::status(v, &started.run, u64::MAX)?["waiting"].as_str().map(str::to_owned);
+                if let Some(w) = waiting.as_deref().filter(|w| said.as_deref() != Some(*w)) {
+                    eprintln!("{w}");
+                }
+                said = waiting;
+            }
             let mut out = summary(&started.run)?;
             out["left"] = serde_json::json!(started.left);
             Ok(out)
@@ -2854,7 +2865,7 @@ fn ingest_run_command(v: &knowledge::Vault, cmd: IngestCmd) -> Result<serde_json
             for c in all.iter().filter(|c| c.state == "undecided" && (only.is_empty() || only.contains(&c.path))) {
                 ingest::decide(v, &run, &c.path, ingest::Decision::Approve)?;
             }
-            Ok(serde_json::to_value(ingest::write(v, &run)?)?)
+            Ok(serde_json::to_value(ingest::write(v, &run, &only)?)?)
         }
         IngestCmd::Discard { run } => {
             ingest::discard(v, &run)?;

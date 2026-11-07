@@ -904,12 +904,9 @@ fn ends_about(d: &Path) -> String {
     m["end"].as_str().and_then(|s| DateTime::parse_from_rfc3339(s).ok()).map(|t| t.with_timezone(&Local)).filter(|t| *t > Local::now()).map(|t| format!(", about {}", t.format("%H:%M"))).unwrap_or_default()
 }
 
-/// What a call being recorded or transcribed makes a gated run of `own` wait for, in words, and
-/// whether that call is its own (checked first: never skipped); None: nothing is.
-fn busy_call(own: &Path) -> Option<(String, bool)> {
-    let same = |d: &Path| calls::stamp_of(d) == calls::stamp_of(own);
-    let recording = crate::watch::running_watcher().and_then(|w| w.recording).map(PathBuf::from);
-    let transcribing: Vec<PathBuf> = calls::all_calls()
+/// The calls being transcribed now: their marker held by a process that is alive (any Echo, the CLI's too).
+pub(crate) fn calls_transcribing() -> Vec<PathBuf> {
+    calls::all_calls()
         .into_iter()
         .filter(|d| {
             fs::read_to_string(d.join(crate::transcribe_marker()))
@@ -917,7 +914,15 @@ fn busy_call(own: &Path) -> Option<(String, bool)> {
                 .and_then(|t| t.split_whitespace().next().and_then(|p| p.parse::<u32>().ok()))
                 .is_some_and(crate::app::process_alive)
         })
-        .collect();
+        .collect()
+}
+
+/// What a call being recorded or transcribed makes a gated run of `own` wait for, in words, and
+/// whether that call is its own (checked first: never skipped); None: nothing is.
+fn busy_call(own: &Path) -> Option<(String, bool)> {
+    let same = |d: &Path| calls::stamp_of(d) == calls::stamp_of(own);
+    let recording = crate::watch::running_watcher().and_then(|w| w.recording).map(PathBuf::from);
+    let transcribing = calls_transcribing();
     if recording.as_deref().is_some_and(same) {
         return Some(("waits for the call to end".into(), true));
     }

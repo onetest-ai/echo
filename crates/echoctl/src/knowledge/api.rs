@@ -95,11 +95,15 @@ pub fn route(rest: &str, query: &str) -> Result<Reply> {
     if let Some(key) = what.strip_prefix("health/") {
         return Ok(Reply::Json(health::detail(&v, key, query_param(query, "choice").as_deref().filter(|c| !c.is_empty()))?));
     }
-    // An ingest run as it goes (its events after `from`, K15-06), and its changes for review (K15-07, -08).
+    // An ingest run as it goes (its events after `from`, K15-06), its changes for review (K15-07, -08), and one
+    // change's whole proposed text for *Edit* (named by the change's path, one of the run's own).
     if let Some(run) = what.strip_prefix("ingest/") {
-        return Ok(Reply::Json(match run.strip_suffix("/changes") {
-            Some(run) => ingest::changes_value(&v, run)?,
-            None => ingest::status(&v, run, query_param(query, "from").and_then(|f| f.parse().ok()).unwrap_or(0))?,
+        return Ok(Reply::Json(if let Some(run) = run.strip_suffix("/changes") {
+            ingest::changes_value(&v, run)?
+        } else if let Some(run) = run.strip_suffix("/text") {
+            ingest::proposed(&v, run, &rel_param(query)?)?
+        } else {
+            ingest::status(&v, run, query_param(query, "from").and_then(|f| f.parse().ok()).unwrap_or(0))?
         }));
     }
     Ok(Reply::Json(match what {
@@ -529,7 +533,7 @@ pub fn act(cmd: &str, v: &Value) -> Result<Value> {
             ingest::decide(&vault, s(v, "run"), s(v, "path"), d)?;
             Ok(json!({ "answered": s(v, "path") }))
         }
-        "kn_ingest_apply" => Ok(serde_json::to_value(ingest::write(&vault_of(s(v, "id"))?, s(v, "run"))?)?),
+        "kn_ingest_apply" => Ok(serde_json::to_value(ingest::write(&vault_of(s(v, "id"))?, s(v, "run"), &[])?)?),
         "kn_ingest_discard" => {
             ingest::discard(&vault_of(s(v, "id"))?, s(v, "run"))?;
             Ok(json!({ "discarded": s(v, "run") }))

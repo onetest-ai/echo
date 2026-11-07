@@ -30,19 +30,22 @@ fn today() -> String {
 /// name), and — after links are followed — still inside the vault.
 pub fn inside(v: &Vault, rel: &str) -> Result<PathBuf> {
     let rel = rel.trim();
-    if rel.is_empty() || rel.contains('\\') || rel.contains(':') || rel.contains('\0') {
+    if rel.is_empty() || rel.contains('\\') || rel.contains('\0') {
         bail!("not a path in this vault");
     }
     let p = Path::new(rel);
     if p.is_absolute() || !p.components().all(|c| matches!(c, Component::Normal(_))) {
         bail!("not a path in this vault");
     }
+    if rel.contains(':') {
+        bail!("its name has a “:”, which Windows can't take");
+    }
     let device = |c: &str| {
         let stem = c.split('.').next().unwrap_or("").to_ascii_uppercase();
         matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL") || (stem.len() == 4 && (stem.starts_with("COM") || stem.starts_with("LPT")) && stem.as_bytes()[3].is_ascii_digit())
     };
-    if rel.split('/').any(device) {
-        bail!("not a path in this vault");
+    if let Some(c) = rel.split('/').find(|c| device(c)) {
+        bail!("“{c}” names a device on Windows");
     }
     let root = dunce::canonicalize(&v.root)?;
     let full = super::join(&root, rel);

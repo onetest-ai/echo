@@ -27,7 +27,7 @@ use super::{fm, sources, starter, stream, Vault};
 use crate::{ai, guard, paths};
 
 mod review;
-pub use review::{approve_rest, changes, changes_value, decide, discard, write, Decision};
+pub use review::{approve_rest, changes, changes_value, decide, discard, proposed, write, Decision};
 
 /// At most this many sources in one run; of more, the first ones (K15-01).
 pub const MAX_SOURCES: usize = 20;
@@ -81,6 +81,12 @@ pub struct Run {
     /// Lines of its output that weren't JSON.
     #[serde(default)]
     pub bad_lines: usize,
+    /// Its Claude Code's process (group), once started.
+    #[serde(default)]
+    pub pid: Option<u32>,
+    /// What it waits for before Claude Code starts (X-S2), in a line.
+    #[serde(default)]
+    pub waiting: Option<String>,
 }
 
 /// What *Prepare changes* started: the run, its sources, and how many New ones were left for later (over 20).
@@ -147,33 +153,60 @@ fn release(l: &mut sources::Ledger, id: &str, state: &str, kept: Option<usize>) 
     }
 }
 
+/// Nothing holds `run.lock`: no Echo — this one, another, the CLI — has a run of `v` going.
+fn lock_free(v: &Vault) -> bool {
+    !lock_path(v).exists() || crate::app::FileLock::try_take(&lock_path(v)).ok().flatten().is_some()
+}
+
 /// A run as it is: one the ledger calls running that nothing runs any more (its Echo stopped) has failed.
 fn effective(v: &Vault, mut r: Run) -> Run {
-    if r.state == "running" && !lock(&LIVE).contains_key(&r.id) && crate::app::FileLock::try_take(&lock_path(v)).ok().flatten().is_some() {
+    if r.state == "running" && !lock(&LIVE).contains_key(&r.id) && lock_free(v) {
         r.state = "failed".into();
         r.reason = Some("It stopped when Echo did".into());
+        r.waiting = None;
     }
     r
 }
 
-/// Under `run.lock` (no run is going): runs the ledger still calls running ended with their Echo; failed and stopped
-/// runs' folders go after 30 days; the ledger keeps the last `LISTED` finished runs (and every one still waiting).
+/// Is `pid` still run `id`'s Claude Code: its command line names the run's own settings file, so a pid the system has
+/// given another process since is never ended. Only where `ps` says (Unix); elsewhere Echo can't tell, and ends nothing.
+#[cfg(unix)]
+fn still_the_runs(v: &Vault, id: &str, pid: u32) -> bool {
+    let Ok(dir) = run_dir(v, id) else { return false };
+    let settings = dir.join("settings.json").display().to_string();
+    let out = std::process::Command::new("ps").args(["-ww", "-o", "command=", "-p", &pid.to_string()]).output();
+    out.is_ok_and(|o| o.status.success() && String::from_utf8_lossy(&o.stdout).contains(&settings))
+}
+
+#[cfg(not(unix))]
+fn still_the_runs(_v: &Vault, _id: &str, _pid: u32) -> bool {
+    false
+}
+
+/// Under `run.lock` (no run is going): a run the ledger still calls running ended with its Echo (a quit, a crash, the
+/// CLI stopped) — it failed, its sources are New again, and a Claude Code it left running is ended; failed and stopped
+/// runs' folders go after 30 days (until then they stay listed, for *Run again*); the ledger keeps the last `LISTED`
+/// other finished runs.
 fn tidy(v: &Vault) -> Result<()> {
-    let gone = sources::update_ledger(v, |l| {
+    let (leftover, gone) = sources::update_ledger(v, |l| {
         let mut runs = runs_of(l);
+        let mut leftover = vec![];
         for r in runs.iter_mut().filter(|r| r.state == "running") {
+            leftover.extend(r.pid.map(|pid| (r.id.clone(), pid)));
             r.state = "failed".into();
             r.reason = Some("It stopped when Echo did".into());
             r.ended = Some(now_rfc());
+            r.waiting = None;
             let id = r.id.clone();
             release(l, &id, "new", None);
         }
         let old = |r: &Run| r.ended.as_deref().and_then(|e| chrono::DateTime::parse_from_rfc3339(e).ok()).is_some_and(|e| chrono::Local::now().signed_duration_since(e).num_days() >= KEEP_DAYS);
-        let mut gone: Vec<String> = runs.iter().filter(|r| matches!(r.state.as_str(), "failed" | "stopped") && old(r)).map(|r| r.id.clone()).collect();
+        let again = |r: &Run| matches!(r.state.as_str(), "failed" | "stopped");
+        let mut gone: Vec<String> = runs.iter().filter(|r| again(r) && old(r)).map(|r| r.id.clone()).collect();
         runs.sort_by(|a, b| b.at.cmp(&a.at));
         let mut finished = 0;
         runs.retain(|r| {
-            if matches!(r.state.as_str(), "running" | "review") {
+            if matches!(r.state.as_str(), "running" | "review") || (again(r) && !old(r)) {
                 return true;
             }
             finished += 1;
@@ -183,10 +216,16 @@ fn tidy(v: &Vault) -> Result<()> {
             finished <= LISTED
         });
         l.runs = runs.iter().map(serde_json::to_value).collect::<Result<_, _>>()?;
-        Ok(gone)
+        Ok((leftover, gone))
     })?;
-    for id in gone {
-        let _ = std::fs::remove_dir_all(ingest_dir(v).join(id));
+    for (id, pid) in leftover {
+        if crate::app::process_alive(pid) && still_the_runs(v, &id, pid) {
+            end_group(pid);
+        }
+    }
+    // Only a run's own folder, by a name Echo gives runs (`run_dir` refuses any other).
+    for dir in gone.iter().filter_map(|id| run_dir(v, id).ok()) {
+        let _ = std::fs::remove_dir_all(dir);
     }
     Ok(())
 }
@@ -289,6 +328,9 @@ pub(super) fn copy_vault(v: &Vault, dest: &Path, picked: &[String], base: &Path)
             let Ok(ft) = e.file_type() else { continue };
             if ft.is_symlink() {
                 links += 1;
+            } else if name == ".git" {
+                // git's, whatever it is: a folder, or a worktree's or a submodule's pointer to one.
+                left.push(if ft.is_dir() { format!("{r}/") } else { r });
             } else if ft.is_dir() {
                 if r == folder {
                     continue; // below: only the run's sources
@@ -441,7 +483,8 @@ impl Log {
 struct Live {
     vault: String,
     profile: String,
-    pid: u32,
+    /// Once Claude Code has started (not while the run waits, X-S2).
+    pid: Option<u32>,
     stop: Arc<Mutex<Option<String>>>,
 }
 
@@ -507,6 +550,9 @@ pub fn start(v: &Vault, wanted: &[String]) -> Result<Started> {
         bail!("the vault's folder isn't there: {}", v.root.display());
     }
     let skill = skill(v).ok_or_else(|| anyhow!("This vault has no ingest skill: add the starter's process-inbox, or choose one in Settings → Ingest"))?;
+    let run_lock = take_run_lock(v)?;
+    // Under the lock no run is going: one the ledger still calls running ended with its Echo, and its sources are New.
+    tidy(v)?;
     let queue = sources::queue(v)?;
     let mut picked: Vec<String> = vec![];
     if wanted.is_empty() {
@@ -532,13 +578,6 @@ pub fn start(v: &Vault, wanted: &[String]) -> Result<Started> {
     let left = picked.len().saturating_sub(MAX_SOURCES);
     picked.truncate(MAX_SOURCES);
     let shas: Vec<String> = picked.iter().map(|p| sources::file_sha(&super::join(&v.root, p))).collect::<Result<_>>()?;
-    let run_lock = take_run_lock(v)?;
-    // A run that ended a moment ago may have taken some of them: read again under the lock.
-    let now_new: Vec<String> = sources::queue(v)?.into_iter().filter(|s| s.state == "new").map(|s| s.path).collect();
-    if let Some(taken) = picked.iter().find(|p| !now_new.contains(p)) {
-        bail!("{taken} was just taken by another run");
-    }
-    tidy(v)?;
     let ready = ai::ready(&v.profile)?;
     let p = ready.profile().clone();
     let (run, dir) = new_run(v)?;
@@ -558,7 +597,7 @@ pub fn start(v: &Vault, wanted: &[String]) -> Result<Started> {
         log.push(json!({"type": "notice", "kind": "copy", "text": copied.left_out}));
         Ok(Prepared { args: args(&p, &settings, &plugin), copy, scope, prompt, log })
     })();
-    let Prepared { copy, args, scope, prompt, log } = match made {
+    let prepared = match made {
         Ok(x) => x,
         Err(e) => {
             let _ = std::fs::remove_dir_all(&dir);
@@ -576,36 +615,14 @@ pub fn start(v: &Vault, wanted: &[String]) -> Result<Started> {
         }
         Ok(())
     })?;
-    let spawned = ai::prepare_claude(&p, &args, &copy, true).and_then(|mut cmd| {
-        cmd.envs(scope.iter().map(|(k, x)| (k.as_str(), x.as_str())));
-        cmd.spawn().map_err(|e| anyhow!("couldn't start Claude Code: {e}"))
-    });
-    let mut child = match spawned {
-        Ok(c) => c,
-        Err(e) => {
-            let why = format!("{e:#}");
-            update_run(v, &run, |l, r| {
-                r.state = "failed".into();
-                r.reason = Some(why.clone());
-                r.ended = Some(now_rfc());
-                release(l, &run, "new", None);
-                Ok(())
-            })?;
-            return Err(e);
-        }
-    };
-    // Its prompt, on stdin, then closed (a few KB: the pipe takes it whole).
-    if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(prompt.as_bytes());
-    }
     // Live first, then its lease counted: a sign-in that sees the lease held finds the run to stop.
     let stop = Arc::new(Mutex::new(None));
-    lock(&LIVE).insert(run.clone(), Live { vault: v.id.clone(), profile: p.id.clone(), pid: child.id(), stop: stop.clone() });
+    lock(&LIVE).insert(run.clone(), Live { vault: v.id.clone(), profile: p.id.clone(), pid: None, stop: stop.clone() });
     #[cfg(feature = "tray")]
     let held: Box<dyn Send> = crate::terminal::hold(p.id.clone(), Box::new(ready));
     #[cfg(not(feature = "tray"))]
     let held: Box<dyn Send> = Box::new(ready);
-    watch(v.clone(), run.clone(), dir, copy, child, log, stop, (run_lock, held));
+    launch(Job { v: v.clone(), run: run.clone(), dir, profile: p, prepared, stop, held: (run_lock, held) });
     Ok(Started { run, sources: picked, left })
 }
 
@@ -624,10 +641,107 @@ fn end_group(pid: u32) {
     std::thread::spawn(move || ai::finish_stop_group(pid));
 }
 
-/// The run's output on threads of its own: stdout through the parser into its log, stderr's last line for a crash, its
-/// 20 minutes; then its end — the ledger, the changes found — and its lock and lease (`held`) go.
+/// What a run waits for before its Claude Code starts (X-S2, recording has priority), in a line: a call being recorded
+/// (its live transcription), or one being transcribed (its marker held by a live process); none: nothing.
+fn busy_call() -> Option<String> {
+    if crate::watch::running_watcher().and_then(|w| w.recording).is_some() {
+        return Some("Waiting for the call being recorded to end".into());
+    }
+    (!crate::notes::calls_transcribing().is_empty()).then(|| "Waiting for a call's transcription to finish".into())
+}
+
+/// How often a waiting run looks again.
+const WAIT_TICK: Duration = Duration::from_millis(500);
+
+/// A run made ready, for its thread: the vault, its folder, the profile, what to run, Echo's stop, and its lock and
+/// lease (`held`), which go when it has ended.
+struct Job {
+    v: Vault,
+    run: String,
+    dir: PathBuf,
+    profile: ai::Profile,
+    prepared: Prepared,
+    stop: Arc<Mutex<Option<String>>>,
+    held: (crate::app::FileLock, Box<dyn Send>),
+}
+
+/// The run on a thread of its own: it waits while a call is recorded or transcribed (saying so), starts Claude Code,
+/// reads its stdout through the parser into its log and stderr's last line for a crash, keeps its 20 minutes; then
+/// its end — the ledger, the changes found — and its lock and lease go.
+fn launch(job: Job) {
+    std::thread::spawn(move || {
+        let Job { v, run, dir, profile, prepared: Prepared { copy, args, scope, prompt, mut log }, stop, held } = job;
+        let set_waiting = |w: Option<String>| {
+            let _ = update_run(&v, &run, |_, r| {
+                r.waiting = w;
+                Ok(())
+            });
+        };
+        let mut said: Option<String> = None;
+        while lock(&stop).is_none() {
+            let Some(w) = busy_call() else { break };
+            if said.as_deref() != Some(w.as_str()) {
+                log.push(json!({"type": "notice", "kind": "waiting", "text": w}));
+                set_waiting(Some(w.clone()));
+                said = Some(w);
+            }
+            std::thread::sleep(WAIT_TICK);
+        }
+        if said.is_some() {
+            set_waiting(None);
+        }
+        // Taken out first: a guard in an `if let`'s scrutinee would be held through its `else` too.
+        let stopped = lock(&stop).take();
+        let ended = if let Some(why) = stopped {
+            End { state: "stopped", reason: Some(why), ..End::default() }
+        } else {
+            let spawned = ai::prepare_claude(&profile, &args, &copy, true).and_then(|mut cmd| {
+                cmd.envs(scope.iter().map(|(k, x)| (k.as_str(), x.as_str())));
+                cmd.spawn().map_err(|e| anyhow!("couldn't start Claude Code: {e}"))
+            });
+            match spawned {
+                Ok(child) => watch(&v, &run, &dir, &copy, child, &prompt, &mut log, &stop),
+                Err(e) => End { state: "failed", reason: Some(format!("{e:#}")), ..End::default() },
+            }
+        };
+        finish(&v, &run, &mut log, ended);
+        drop(held);
+        lock(&LIVE).remove(&run);
+        ENDED.notify_all();
+    });
+}
+
+/// How a run ended: its state, why, the changes found, its `result`, lines that weren't JSON.
+#[derive(Default)]
+struct End {
+    state: &'static str,
+    reason: Option<String>,
+    found: Option<(usize, usize)>,
+    result: Option<Value>,
+    bad: usize,
+}
+
+/// A started Claude Code to its end: its pid recorded (here and in the ledger, for a later Echo to end it if this one
+/// goes), its prompt on stdin, its output into the log, its 20 minutes (from now).
 #[allow(clippy::too_many_arguments)]
-fn watch(v: Vault, run: String, dir: PathBuf, copy: PathBuf, mut child: Child, mut log: Log, stop: Arc<Mutex<Option<String>>>, held: (crate::app::FileLock, Box<dyn Send>)) {
+fn watch(v: &Vault, run: &str, dir: &Path, copy: &Path, mut child: Child, prompt: &str, log: &mut Log, stop: &Mutex<Option<String>>) -> End {
+    let started = now();
+    let pid = child.id();
+    if let Some(l) = lock(&LIVE).get_mut(run) {
+        l.pid = Some(pid);
+    }
+    let _ = update_run(v, run, |_, r| {
+        r.pid = Some(pid);
+        Ok(())
+    });
+    // A stop that came while it started.
+    if lock(stop).is_some() {
+        end_group(pid);
+    }
+    // Its prompt, on stdin, then closed (a few KB: the pipe takes it whole).
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(prompt.as_bytes());
+    }
     let (tx, rx) = mpsc::channel::<String>();
     if let Some(out) = child.stdout.take() {
         std::thread::spawn(move || stream::each_line(out, |l| tx.send(l).is_ok()));
@@ -646,87 +760,83 @@ fn watch(v: Vault, run: String, dir: PathBuf, copy: PathBuf, mut child: Child, m
             let _ = err_done.send(());
         });
     }
-    // Its 20 minutes count from here, not from when the thread below first runs.
-    let started = now();
-    std::thread::spawn(move || {
-        let mut parser = stream::Parser::for_copy(&Vault { root: copy.clone(), ..v.clone() });
-        let (mut timed_out, mut result, mut error) = (false, None::<Value>, None::<String>);
-        let mut took = |events: Vec<Value>, log: &mut Log| {
-            for e in events {
-                match e["type"].as_str() {
-                    Some("result") => result = Some(e.clone()),
-                    Some("error") => error = e["text"].as_str().map(str::to_owned),
-                    _ => {}
-                }
-                log.push(e);
+    let mut parser = stream::Parser::for_copy(&Vault { root: copy.to_path_buf(), ..v.clone() });
+    let (mut timed_out, mut result, mut error) = (false, None::<Value>, None::<String>);
+    let mut took = |events: Vec<Value>, log: &mut Log| {
+        for e in events {
+            match e["type"].as_str() {
+                Some("result") => result = Some(e.clone()),
+                Some("error") => error = e["text"].as_str().map(str::to_owned),
+                _ => {}
             }
-        };
-        loop {
-            match rx.recv_timeout(TICK) {
-                Ok(line) => took(parser.feed(&line), &mut log),
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
-                Err(mpsc::RecvTimeoutError::Disconnected) => break,
-            }
-            if !timed_out && now().saturating_duration_since(started) >= TIMEOUT {
-                timed_out = true;
-                end_group(child.id());
-            }
+            log.push(e);
         }
-        took(parser.finish(), &mut log);
-        let code = child.wait().ok().and_then(|s| s.code());
-        // Its last words on stderr (a process it left behind may hold the pipe: not waited for long).
-        let _ = err_ended.recv_timeout(Duration::from_millis(500));
-        let why = lock(&stop).take();
-        let crashed = || error.clone().or_else(|| lock(&tail).clone()).unwrap_or_else(|| format!("Claude Code ended with code {}", code.map_or("none".into(), |c| c.to_string())));
-        let (mut state, mut reason) = match () {
-            _ if timed_out => ("failed", Some("It ran for 20 minutes without finishing".to_string())),
-            _ if why.is_some() => ("stopped", why),
-            _ if code != Some(0) => ("failed", Some(crashed())),
-            _ if error.is_some() => ("failed", error.clone()),
-            _ if result.is_none() => ("failed", Some("Claude Code ended without finishing".to_string())),
-            _ => ("review", None),
-        };
-        let found = if state == "review" {
-            match review::find(&v, &dir) {
-                Ok(n) => Some(n),
-                Err(e) => {
-                    (state, reason) = ("failed", Some(format!("Echo couldn't read the run's copy: {e:#}")));
-                    None
-                }
-            }
-        } else {
-            None
-        };
-        let text = reason.clone().unwrap_or_else(|| match found {
-            Some(1) => "1 change to review".into(),
-            Some(n) => format!("{n} changes to review"),
-            None => String::new(),
-        });
-        log.push(json!({"type": "notice", "kind": "ended", "state": state, "text": text}));
-        let bad = parser.bad_lines();
-        let ended = update_run(&v, &run, |l, r| {
-            r.state = state.into();
-            r.reason = reason.clone();
-            r.ended = Some(now_rfc());
-            r.changes = found;
-            r.bad_lines = bad;
-            if let Some(res) = &result {
-                r.cost = res["cost"].as_f64();
-                r.tokens_in = res["tokens_in"].as_u64();
-                r.tokens_out = res["tokens_out"].as_u64();
-            }
-            if state != "review" {
-                release(l, &run, "new", None);
-            }
-            Ok(())
-        });
-        if let Err(e) = ended {
-            eprintln!("knowledge: the end of ingest run {run} in {}: {e:#}", v.id);
+    };
+    loop {
+        match rx.recv_timeout(TICK) {
+            Ok(line) => took(parser.feed(&line), log),
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
-        drop(held);
-        lock(&LIVE).remove(&run);
-        ENDED.notify_all();
+        if !timed_out && now().saturating_duration_since(started) >= TIMEOUT {
+            timed_out = true;
+            end_group(pid);
+        }
+    }
+    took(parser.finish(), log);
+    let code = child.wait().ok().and_then(|s| s.code());
+    // Its last words on stderr (a process it left behind may hold the pipe: not waited for long).
+    let _ = err_ended.recv_timeout(Duration::from_millis(500));
+    let why = lock(stop).take();
+    let crashed = || error.clone().or_else(|| lock(&tail).clone()).unwrap_or_else(|| format!("Claude Code ended with code {}", code.map_or("none".into(), |c| c.to_string())));
+    let (state, reason) = match () {
+        _ if timed_out => ("failed", Some("It ran for 20 minutes without finishing".to_string())),
+        _ if why.is_some() => ("stopped", why),
+        _ if code != Some(0) => ("failed", Some(crashed())),
+        _ if error.is_some() => ("failed", error.clone()),
+        _ if result.is_none() => ("failed", Some("Claude Code ended without finishing".to_string())),
+        _ => ("review", None),
+    };
+    let mut end = End { state, reason, found: None, result, bad: parser.bad_lines() };
+    if state == "review" {
+        match review::find(v, dir) {
+            Ok(found) => end.found = Some(found),
+            Err(e) => (end.state, end.reason) = ("failed", Some(format!("Echo couldn't read the run's copy: {e:#}"))),
+        }
+    }
+    end
+}
+
+/// A run's end in its log and the ledger: its state, why, the changes found (and how many of them can't be written),
+/// tokens and cost; a run that didn't come to review gives its sources back (New).
+fn finish(v: &Vault, run: &str, log: &mut Log, end: End) {
+    let s = |n: usize| if n == 1 { "" } else { "s" };
+    let text = end.reason.clone().unwrap_or_else(|| match end.found {
+        Some((n, 0)) => format!("{n} change{} to review", s(n)),
+        Some((n, b)) => format!("{n} change{} to review; {b} can't be written", s(n)),
+        None => String::new(),
     });
+    log.push(json!({"type": "notice", "kind": "ended", "state": end.state, "text": text}));
+    let ended = update_run(v, run, |l, r| {
+        r.state = end.state.into();
+        r.reason = end.reason.clone();
+        r.ended = Some(now_rfc());
+        r.changes = end.found.map(|(n, _)| n);
+        r.bad_lines = end.bad;
+        r.waiting = None;
+        if let Some(res) = &end.result {
+            r.cost = res["cost"].as_f64();
+            r.tokens_in = res["tokens_in"].as_u64();
+            r.tokens_out = res["tokens_out"].as_u64();
+        }
+        if end.state != "review" {
+            release(l, run, "new", None);
+        }
+        Ok(())
+    });
+    if let Err(e) = ended {
+        eprintln!("knowledge: the end of ingest run {run} in {}: {e:#}", v.id);
+    }
 }
 
 /// Wait up to `max` for run `run` (one this Echo started) to end; whether it has.
@@ -746,7 +856,10 @@ fn stop_where(which: impl Fn(&str, &Live) -> bool, why: &str) -> usize {
     let mut n = 0;
     for (_, l) in live.iter().filter(|(id, l)| which(id, l)) {
         *lock(&l.stop) = Some(why.to_string());
-        end_group(l.pid);
+        // One still waiting to start sees the stop itself.
+        if let Some(pid) = l.pid {
+            end_group(pid);
+        }
         n += 1;
     }
     n
@@ -769,7 +882,12 @@ pub fn close_profile(profile: &str) -> usize {
 /// Echo is going: every run stops.
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn close_all() {
-    stop_where(|_, _| true, "Stopped when Echo quit");
+    stop_all("Stopped when Echo quit");
+}
+
+/// Every run this Echo started stops, saying `why` (the CLI's Ctrl-C); how many.
+pub fn stop_all(why: &str) -> usize {
+    stop_where(|_, _| true, why)
 }
 
 /// A run as the page follows it (K15-06): its state, sources, time, tokens and cost, and its events after `from`.
@@ -813,6 +931,10 @@ pub fn value(v: &Vault) -> Result<Value> {
 pub fn requeue(v: &Vault, paths: &[String]) -> Result<usize> {
     super::refuse_headless()?;
     sources::update_ledger(v, |l| {
+        let reviewing: Vec<String> = runs_of(l).into_iter().filter(|r| r.state == "review").map(|r| r.id).collect();
+        if let Some(p) = paths.iter().find(|p| l.sources.get(*p).and_then(|e| e.run.as_ref()).is_some_and(|r| reviewing.contains(r))) {
+            bail!("{p}: its run still has changes waiting — write or discard them first");
+        }
         let mut n = 0;
         for p in paths {
             if let Some(e) = l.sources.get_mut(p).filter(|e| e.state == "done" && e.run.is_some()) {

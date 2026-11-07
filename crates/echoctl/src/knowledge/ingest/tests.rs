@@ -146,6 +146,8 @@ fn the_copy_leaves_out_what_a_run_doesnt_need() {
     let (_env, root) = paths::testenv::folders("kn-ingest-copy");
     let t = fixture::twin(&root.join("twin"));
     fixture::write(&t, ".git/config", "[core]\n\tbare = false\n");
+    fixture::write(&t, "knowledge/vendor/.git", "gitdir: ../../.git/modules/vendor\n");
+    fixture::write(&t, "knowledge/vendor/README.md", "# A made-up submodule\n");
     fixture::write(&t, "node_modules/left-pad/index.js", "module.exports = 1;\n");
     fixture::write(&t, ".trash/old.md", "# old\n");
     std::fs::create_dir_all(t.join("knowledge/media")).unwrap();
@@ -162,7 +164,7 @@ fn the_copy_leaves_out_what_a_run_doesnt_need() {
     let v = knowledge::add(&t, AddOpts { name: Some("Twin".into()), ..Default::default() }).unwrap();
     let dest = root.join("run/vault");
     let c = copy_vault(&v, &dest, &strings(&["raw_inbox/a.md", "raw_inbox/deck.pdf"]), &root.join("run/base")).unwrap();
-    for gone in [".git/config", "node_modules/left-pad/index.js", ".trash/old.md", "knowledge/media/talk.mp4", "raw_inbox/b.md", "raw_inbox/c.txt", "raw_inbox/e.csv", "knowledge/linked-out/secret.md"] {
+    for gone in [".git/config", "knowledge/vendor/.git", "node_modules/left-pad/index.js", ".trash/old.md", "knowledge/media/talk.mp4", "raw_inbox/b.md", "raw_inbox/c.txt", "raw_inbox/e.csv", "knowledge/linked-out/secret.md"] {
         assert!(!dest.join(gone).exists(), "{gone} isn't copied");
     }
     for kept in ["knowledge/.obsidian/app.json", ".claude/skills/s/SKILL.md", ".claude/commands/c.md", "AGENTS.md", "processing_log.json", "knowledge/CATALOG.md", "raw_inbox/README.md", "raw_inbox/a.md", "raw_inbox/deck.pdf"] {
@@ -176,7 +178,7 @@ fn the_copy_leaves_out_what_a_run_doesnt_need() {
     }
     assert_eq!(std::fs::read(root.join("run/base/knowledge/CATALOG.md")).unwrap(), std::fs::read(t.join("knowledge/CATALOG.md")).unwrap(), "the index as copied");
     // What was left out, in one line.
-    for said in [".git/", "node_modules/", ".trash/", "knowledge/media/talk.mp4 (30 MB)", "3 other sources in raw_inbox/"] {
+    for said in [".git/", "knowledge/vendor/.git", "node_modules/", ".trash/", "knowledge/media/talk.mp4 (30 MB)", "3 other sources in raw_inbox/"] {
         assert!(c.left_out.contains(said), "{said}: {}", c.left_out);
     }
     #[cfg(unix)]
@@ -384,7 +386,7 @@ fn a_rejected_new_page_takes_its_index_rows_and_log_lines() {
     let back = changes(&v, &run).unwrap();
     assert!(of(&back, "log.md").dropped.is_empty() && of(&back, INDEX).note.is_none());
     decide(&v, &run, NOTE, Decision::Reject).unwrap();
-    let w = write(&v, &run).unwrap();
+    let w = write(&v, &run, &[]).unwrap();
     assert_eq!(w.changed_since, Vec::<String>::new());
     let catalog = read(&v.root, INDEX);
     assert!(catalog.contains(CLIENT_ROW) && !catalog.contains("northwind-sync"), "{catalog}");
@@ -413,7 +415,7 @@ fn approved_changes_are_written_and_committed_alone() {
     let mine = format!("{CLIENT}\n- The owner's own line.\n");
     fixture::write(&v.root, CLIENT_PAGE, &mine);
     fixture::write(&v.root, "knowledge/profile/DIGITAL_PROFILE.md", "# my unfinished edit\n");
-    let w = write(&v, &run).unwrap();
+    let w = write(&v, &run, &[]).unwrap();
     let mut written = w.written.clone();
     written.sort();
     assert_eq!(written, [INDEX, NOTE]);
@@ -457,7 +459,7 @@ fn changed_files_are_not_overwritten() {
     fixture::write(&v.root, NOTE, "# Someone else's note\n");
     assert_eq!(of(&changes(&v, &run).unwrap(), CLIENT_PAGE).state, "changed", "said before writing too");
     assert!(decide(&v, &run, INDEX, Decision::Take).is_err(), "Take the run's is for a changed file only");
-    let w = write(&v, &run).unwrap();
+    let w = write(&v, &run, &[]).unwrap();
     let mut since = w.changed_since.clone();
     since.sort();
     assert_eq!(since, [CLIENT_PAGE, NOTE]);
@@ -470,11 +472,14 @@ fn changed_files_are_not_overwritten() {
     assert!(client.diff.iter().flatten().any(|(k, l)| *k == '-' && l == "- Saved in Obsidian."), "{client:#?}");
     decide(&v, &run, NOTE, Decision::Reject).unwrap();
     decide(&v, &run, CLIENT_PAGE, Decision::Take).unwrap();
-    let w2 = write(&v, &run).unwrap();
+    let w2 = write(&v, &run, &[]).unwrap();
     assert_eq!((w2.written.as_slice(), w2.finished), ([CLIENT_PAGE.to_string()].as_slice(), true));
     assert!(read(&v.root, CLIENT_PAGE).ends_with("- 2026-11-05 — The pilot moves to 18 November.\n"));
     assert_eq!(read(&v.root, NOTE), "# Someone else's note\n");
     assert!(!ingest_dir(&v).join(&run).exists(), "finished: the copy is gone");
+    assert_eq!(status(&v, &run, 0).unwrap()["state"], "done");
+    // Fix round 1, item 10: a done run stays done.
+    assert!(discard(&v, &run).is_err(), "a done run isn't discarded");
     assert_eq!(status(&v, &run, 0).unwrap()["state"], "done");
 }
 
@@ -494,7 +499,7 @@ fn index_additions_rebase_onto_the_current_file() {
     fixture::write(&v.root, "log.md", &log_now);
     decide(&v, &run, INDEX, Decision::Approve).unwrap();
     decide(&v, &run, "log.md", Decision::Approve).unwrap();
-    let w = write(&v, &run).unwrap();
+    let w = write(&v, &run, &[]).unwrap();
     assert!(w.changed_since.is_empty(), "{w:?}");
     let index = read(&v.root, INDEX);
     for (line, n) in [(mine, 1), (CLIENT_ROW, 1), (NOTE_ROW, 1), ("| Who I am |", 1)] {
@@ -538,8 +543,8 @@ fn one_run_at_a_time_and_waiting_runs_dont_block() {
         assert_eq!(status(&v, run, 0).unwrap()["state"], "review");
         approve_rest(&v, run).unwrap();
     }
-    write(&v, &first.run).unwrap();
-    let w = write(&v, &second).unwrap();
+    write(&v, &first.run, &[]).unwrap();
+    let w = write(&v, &second, &[]).unwrap();
     assert_eq!((w.changed_since.len(), w.finished), (0, true));
     let now = read(&v.root, INDEX);
     assert!(now.contains(row_a) && now.contains(row_b), "{now}");
@@ -583,7 +588,7 @@ fn a_run_that_times_out_or_crashes_fails_and_runs_again() {
     assert_eq!((status(&v, &s3.run, 0).unwrap()["state"].as_str(), status(&v, &s3.run, 0).unwrap()["changes"].as_u64()), (Some("review"), Some(0)));
     assert!(again(&v, &s3.run).is_err(), "a run under review isn't run again");
     // Nothing kept: Done — nothing kept; *Prepare again* puts it back (K15-10).
-    let w = write(&v, &s3.run).unwrap();
+    let w = write(&v, &s3.run, &[]).unwrap();
     assert_eq!((w.kept, w.finished), (0, true));
     let src = sources::queue(&v).unwrap().into_iter().find(|x| x.path == SOURCE).unwrap();
     assert_eq!((src.state.as_str(), src.meta["kept"].as_u64()), ("done", Some(0)));
@@ -662,4 +667,324 @@ fn the_starter_skill_is_offered_when_none() {
     assert_eq!(skill(&v2).map(|s| s.name).as_deref(), Some("inbox-zero"));
     assert!(knowledge::set(&v2.id, "ingest.skill", "nope").is_err());
     assert_eq!(knowledge::set(&v2.id, "ingest.skill", "").unwrap().ingest.skill, None);
+}
+
+// ── Fix round 1 ──
+
+/// A run the ledger keeps as `running` whose Echo is gone (quit, crash, the CLI's Ctrl-C): its sources still waiting.
+fn left_running(v: &Vault, id: &str, source: &str, pid: Option<u32>) {
+    sources::update_ledger(v, |l| {
+        l.runs.push(serde_json::to_value(Run { id: id.into(), at: now_rfc(), sources: vec![source.into()], state: "running".into(), profile: "w".into(), pid, ..Default::default() })?);
+        let e = l.sources.entry(source.into()).or_default();
+        e.state = "waiting".into();
+        e.run = Some(id.into());
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn a_run_its_echo_left_running_runs_again() {
+    // Item 1: *Run again* and *Prepare changes* after a run ended with its Echo.
+    let (_env, root) = paths::testenv::folders("kn-ingest-left");
+    let _fake = fake::install(&root);
+    let _clean = clean();
+    let (v, p) = twin(&root, false);
+    script(&p, "ingest.jsonl", &[init(), result()]);
+    fixture::write(&v.root, "raw_inbox/a.md", "# A\n");
+    fixture::write(&v.root, "raw_inbox/b.md", "# B\n");
+    left_running(&v, "2026-11-01_090000", "raw_inbox/a.md", None);
+    left_running(&v, "2026-11-01_100000", "raw_inbox/b.md", None);
+    assert_eq!(status(&v, "2026-11-01_090000", 0).unwrap()["state"], "failed", "shown as failed, with Run again");
+    let prepared = start(&v, &[]);
+    assert!(prepared.is_ok(), "Prepare changes: {prepared:?}");
+    let prepared = prepared.unwrap();
+    let mut seen = prepared.sources.clone();
+    seen.sort();
+    assert_eq!(seen, ["raw_inbox/a.md", "raw_inbox/b.md"], "it sees both runs' sources");
+    assert!(wait(&prepared.run, Duration::from_secs(20)));
+    discard(&v, &prepared.run).unwrap();
+    requeue(&v, &strings(&["raw_inbox/a.md", "raw_inbox/b.md"])).unwrap();
+    left_running(&v, "2026-11-01_110000", "raw_inbox/b.md", None);
+    let again = again(&v, "2026-11-01_110000");
+    assert!(again.is_ok(), "Run again: {again:?}");
+    assert_eq!(again.unwrap().sources, ["raw_inbox/b.md"]);
+}
+
+#[cfg(unix)]
+#[test]
+fn paths_echo_cant_write_are_said_and_the_rest_stays_usable() {
+    // Item 2: a `:` in a name, a Windows device name, a folder that is a link in the vault re-made by the run.
+    let (_env, root) = paths::testenv::folders("kn-ingest-blocked");
+    let _fake = fake::install(&root);
+    let _clean = clean();
+    let (v, p) = twin(&root, false);
+    fixture::write(&v.root, SOURCE, SYNC);
+    fixture::write(&root, "outside/x.md", "# not the vault's\n");
+    std::os::unix::fs::symlink(root.join("outside"), v.root.join("knowledge/linked")).unwrap();
+    script(&p, "ingest.jsonl", &[
+        init(),
+        put(&p, 1, "knowledge/notes/2026-11-05 sync: Northwind.md", "# Sync\n"),
+        put(&p, 2, "knowledge/aux.md", "# Aux\n"),
+        put(&p, 3, "knowledge/linked/x.md", "# Through the link\n"),
+        put(&p, 4, CLIENT_PAGE, &format!("{CLIENT}\n- A line.\n")),
+        result(),
+    ]);
+    let run = ran(&v, &[SOURCE]);
+    let st = status(&v, &run, 0).unwrap();
+    assert_eq!(st["state"], "review", "{st:#}");
+    let end = st["events"].as_array().unwrap().last().unwrap()["text"].as_str().unwrap().to_string();
+    assert!(end.contains("4 changes to review") && end.contains("3 can't be written"), "{end}");
+    let cs = changes(&v, &run);
+    assert!(cs.is_ok(), "the review stays usable: {cs:?}");
+    let cs = cs.unwrap();
+    for (path, why) in [("knowledge/notes/2026-11-05 sync: Northwind.md", "“:”"), ("knowledge/aux.md", "device"), ("knowledge/linked/x.md", "out of the vault")] {
+        let c = of(&cs, path);
+        assert_eq!(c.state, "blocked", "{path}");
+        assert!(c.note.as_deref().is_some_and(|n| n.starts_with("can't be written: ") && n.contains(why)), "{path}: {:?}", c.note);
+        assert!(decide(&v, &run, path, Decision::Approve).is_err(), "{path} can't be approved");
+    }
+    assert_eq!(of(&cs, CLIENT_PAGE).state, "undecided");
+    assert!(changes_value(&v, &run).is_ok());
+    approve_rest(&v, &run).unwrap();
+    let w = write(&v, &run, &[]).unwrap();
+    assert_eq!((w.written.as_slice(), w.finished), ([CLIENT_PAGE.to_string()].as_slice(), true));
+    assert!(!root.join("outside/x.md").exists() || read(&root, "outside/x.md") == "# not the vault's\n");
+    assert!(!v.root.join("knowledge/aux.md").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_run_waits_while_a_call_is_transcribed() {
+    // Item 3, X-S2: recording has priority.
+    let (_env, root) = paths::testenv::folders("kn-ingest-x-s2");
+    let _fake = fake::install(&root);
+    let _clean = clean();
+    let (v, p) = twin(&root, false);
+    fixture::write(&v.root, SOURCE, SYNC);
+    script(&p, "ingest.jsonl", &[init(), result()]);
+    let call = fixture::call("2026-11-07_090000-weekly-sync", "Weekly sync", "w", fixture::MINUTES);
+    std::fs::write(call.join(crate::transcribe_marker()), std::process::id().to_string()).unwrap();
+    let s = start(&v, &[]).unwrap();
+    let t = std::time::Instant::now();
+    while status(&v, &s.run, 0).unwrap()["waiting"].is_null() && t.elapsed() < Duration::from_secs(5) {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let st = status(&v, &s.run, 0).unwrap();
+    assert_eq!((st["state"].as_str(), st["waiting"].as_str()), (Some("running"), Some("Waiting for a call's transcription to finish")), "{st:#}");
+    assert!(st["events"].as_array().unwrap().iter().any(|e| e["kind"] == "waiting"), "said in the run's events");
+    std::thread::sleep(Duration::from_millis(1200));
+    assert!(!fake::file(&p, "ingest.in").exists(), "Claude Code isn't started meanwhile");
+    std::fs::remove_file(call.join(crate::transcribe_marker())).unwrap();
+    assert!(wait(&s.run, Duration::from_secs(20)));
+    let st = status(&v, &s.run, 0).unwrap();
+    assert_eq!((st["state"].as_str(), st["waiting"].is_null()), (Some("review"), true), "{st:#}");
+    assert!(fake::file(&p, "ingest.in").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_leftover_claude_code_is_ended_only_when_it_is_that_runs() {
+    // Item 4: the next start ends a process the ledger's running run left (the CLI's Ctrl-C), never another one.
+    use std::os::unix::process::CommandExt as _;
+    let (_env, root) = paths::testenv::folders("kn-ingest-leftover");
+    let _clean = clean();
+    let t = fixture::twin(&root.join("twin"));
+    let v = knowledge::add(&t, AddOpts { name: Some("Twin".into()), ..Default::default() }).unwrap();
+    let id = "2026-11-01_090000";
+    let settings = run_dir(&v, id).unwrap().join("settings.json");
+    std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    // A stand-in for a Claude Code a gone CLI left: its command line names the settings file (two commands, so the
+    // shell isn't replaced by `sleep` and keeps it).
+    let spawn = |extra: &str| std::process::Command::new("sh").args(["-c", "sleep 60; :", "claude", "--settings", extra]).process_group(0).spawn().unwrap();
+    let mut ours = spawn(&settings.display().to_string());
+    let mut other = spawn("/elsewhere/settings.json");
+    std::thread::sleep(Duration::from_millis(100));
+    left_running(&v, id, "raw_inbox/deck.pdf", Some(ours.id()));
+    left_running(&v, "2026-11-01_100000", "raw_inbox/deck.pdf", Some(other.id()));
+    tidy(&v).unwrap();
+    let t0 = std::time::Instant::now();
+    while ours.try_wait().unwrap().is_none() && t0.elapsed() < Duration::from_secs(5) {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(ours.try_wait().unwrap().is_some(), "the run's own Claude Code is ended");
+    assert!(other.try_wait().unwrap().is_none(), "a process that isn't the run's is left alone");
+    let _ = other.kill();
+    let _ = other.wait();
+    assert_eq!(status(&v, id, 0).unwrap()["state"], "failed");
+    // The CLI's Ctrl-C: the runs this Echo started stop, saying so.
+    assert_eq!(stop_all("Stopped from the command line"), 0);
+}
+
+#[cfg(unix)]
+#[test]
+fn take_the_runs_works_for_a_stale_index_or_log() {
+    // Item 5: an *adds only* change whose table or log is gone can still be taken as the run wrote it.
+    let (_env, root) = paths::testenv::folders("kn-ingest-take");
+    let _fake = fake::install(&root);
+    let _clean = clean();
+    let (v, p) = twin(&root, false);
+    let run = northwind(&v, &p, "ingest.jsonl");
+    let mine = read(&v.root, INDEX).replace("## Notes\n", "## Meetings\n");
+    fixture::write(&v.root, INDEX, &mine);
+    std::fs::remove_file(v.root.join("log.md")).unwrap();
+    decide(&v, &run, INDEX, Decision::Approve).unwrap();
+    decide(&v, &run, "log.md", Decision::Approve).unwrap();
+    let w = write(&v, &run, &[]).unwrap();
+    let mut since = w.changed_since.clone();
+    since.sort();
+    assert_eq!(since, [INDEX, "log.md"]);
+    // The run's own texts, as the fake wrote them into the copy.
+    let (run_index, run_log) = (std::fs::read_to_string(fake::file(&p, "apply.3")).unwrap(), std::fs::read_to_string(fake::file(&p, "apply.4")).unwrap());
+    decide(&v, &run, INDEX, Decision::Take).unwrap();
+    decide(&v, &run, "log.md", Decision::Take).unwrap();
+    let w = write(&v, &run, &[]).unwrap();
+    assert!(w.changed_since.is_empty(), "{w:?}");
+    assert_eq!((read(&v.root, INDEX), read(&v.root, "log.md")), (run_index, run_log));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_file_already_as_the_run_wrote_it_is_written_not_changed() {
+    // Item 6: sameness first (a retry after a write that stopped midway).
+    let (_env, root) = paths::testenv::folders("kn-ingest-same");
+    let _fake = fake::install(&root);
+    let _clean = clean();
+    let (v, p) = twin(&root, false);
+    let run = northwind(&v, &p, "ingest.jsonl");
+    let theirs = format!("{CLIENT}\n- 2026-11-05 — The pilot moves to 18 November.\n");
+    fixture::write(&v.root, CLIENT_PAGE, &theirs);
+    decide(&v, &run, CLIENT_PAGE, Decision::Approve).unwrap();
+    let w = write(&v, &run, &[]).unwrap();
+    assert_eq!((w.written.as_slice(), w.changed_since.len()), ([CLIENT_PAGE.to_string()].as_slice(), 0));
+    let acts = activity::recent(&v, "2000-01-01T00:00:00+00:00");
+    assert!(acts.iter().any(|a| a.path == CLIENT_PAGE && a.by == "ingest" && a.plus == 2), "its activity line: {acts:?}");
+}
+
+#[test]
+fn tidy_keeps_failed_runs_30_days_and_deletes_only_run_folders() {
+    // Item 8.
+    let (_env, root) = paths::testenv::folders("kn-ingest-tidy");
+    let t = fixture::twin(&root.join("twin"));
+    let v = knowledge::add(&t, AddOpts { name: Some("Twin".into()), ..Default::default() }).unwrap();
+    let ago = |days: i64| (chrono::Local::now() - chrono::Duration::days(days)).to_rfc3339();
+    let mut runs: Vec<Run> = (0..12).map(|i| Run { id: format!("2026-11-01_1000{i:02}"), at: ago(1), ended: Some(ago(1)), state: "done".into(), ..Default::default() }).collect();
+    runs.push(Run { id: "2026-10-20_090000".into(), at: ago(5), ended: Some(ago(5)), state: "failed".into(), ..Default::default() });
+    runs.push(Run { id: "2026-09-20_090000".into(), at: ago(40), ended: Some(ago(40)), state: "stopped".into(), ..Default::default() });
+    runs.push(Run { id: "../not-a-run".into(), at: ago(40), ended: Some(ago(40)), state: "failed".into(), ..Default::default() });
+    for d in ["2026-10-20_090000", "2026-09-20_090000", "../not-a-run"] {
+        std::fs::create_dir_all(ingest_dir(&v).join(d)).unwrap();
+    }
+    sources::update_ledger(&v, |l| {
+        l.runs = runs.iter().map(serde_json::to_value).collect::<Result<_, _>>()?;
+        Ok(())
+    })
+    .unwrap();
+    tidy(&v).unwrap();
+    assert!(ingest_dir(&v).join("2026-10-20_090000").is_dir(), "a failed run's folder stays 30 days");
+    assert!(!ingest_dir(&v).join("2026-09-20_090000").exists(), "after 30 days it goes");
+    assert!(super::super::cache_dir(&v.id).join("not-a-run").is_dir(), "a name that isn't a run's is never deleted");
+    let kept: Vec<Run> = runs_of(&sources::ledger(&v).unwrap());
+    assert!(kept.iter().any(|r| r.id == "2026-10-20_090000"), "and it is still listed, for Run again");
+    assert_eq!(kept.iter().filter(|r| r.state == "done").count(), 10);
+}
+
+#[cfg(unix)]
+#[test]
+fn apply_only_writes_the_named_changes() {
+    // Item 9 (K15-12's --only).
+    let (_env, root) = paths::testenv::folders("kn-ingest-only");
+    let _fake = fake::install(&root);
+    let _clean = clean();
+    let (v, p) = twin(&root, false);
+    let run = northwind(&v, &p, "ingest.jsonl");
+    approve_rest(&v, &run).unwrap();
+    let w = write(&v, &run, &strings(&[NOTE])).unwrap();
+    assert_eq!((w.written.as_slice(), w.finished), ([NOTE.to_string()].as_slice(), false));
+    assert_eq!(read(&v.root, CLIENT_PAGE), CLIENT, "not named: not written");
+    let cs = changes(&v, &run).unwrap();
+    assert_eq!((of(&cs, NOTE).state.as_str(), of(&cs, CLIENT_PAGE).state.as_str()), ("written", "approved"));
+    assert!(write(&v, &run, &strings(&["knowledge/nope.md"])).is_err(), "a path the run didn't change");
+}
+
+#[cfg(unix)]
+#[test]
+fn the_proposed_text_is_served_and_requeue_waits_for_the_review() {
+    // Item 11: the text *Edit* opens; *Prepare again* only once the run's changes are written or discarded.
+    let (_env, root) = paths::testenv::folders("kn-ingest-text");
+    let _fake = fake::install(&root);
+    let _clean = clean();
+    let (v, p) = twin(&root, false);
+    let run = northwind(&v, &p, "ingest.jsonl");
+    assert_eq!(proposed(&v, &run, NOTE).unwrap()["text"], NOTE_TEXT);
+    decide(&v, &run, NOTE, Decision::Edit("# My own words\n".into())).unwrap();
+    let t = proposed(&v, &run, NOTE).unwrap();
+    assert_eq!((t["text"].as_str(), t["edited"].as_bool()), (Some("# My own words\n"), Some(true)));
+    assert!(proposed(&v, &run, "knowledge/nope.md").is_err());
+    write(&v, &run, &strings(&[NOTE])).unwrap();
+    let e = requeue(&v, &strings(&[SOURCE]));
+    assert!(e.as_ref().is_err_and(|e| e.to_string().contains("still has changes waiting")), "{e:?}");
+    discard(&v, &run).unwrap();
+    assert_eq!(requeue(&v, &strings(&[SOURCE])).unwrap(), 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_file_dirty_before_the_write_stays_out_of_the_commit() {
+    // Item 12 (X-G2): written, but not committed.
+    let (_env, root) = paths::testenv::folders("kn-ingest-dirty");
+    if git::program().is_none() {
+        return;
+    }
+    let _iso = git::tests::isolated(&root, true);
+    let _fake = fake::install(&root);
+    let _clean = clean();
+    let (v, p) = twin(&root, true);
+    let run = northwind(&v, &p, "ingest.jsonl");
+    let mine = read(&v.root, INDEX).replace("| Who I am — role, expertise, opinions, communication style |", "| Who I am |");
+    fixture::write(&v.root, INDEX, &mine);
+    decide(&v, &run, INDEX, Decision::Approve).unwrap();
+    decide(&v, &run, NOTE, Decision::Approve).unwrap();
+    let w = write(&v, &run, &[]).unwrap();
+    assert!(read(&v.root, INDEX).contains(NOTE_ROW) && read(&v.root, INDEX).contains("| Who I am |"));
+    let shown = git::out(&v.root, &["show", "--name-only", "--format=%s", "HEAD"]).unwrap();
+    assert_eq!(shown.lines().filter(|l| !l.is_empty()).collect::<Vec<_>>(), ["Ingest: 1 source (Northwind · Weekly delivery sync)", NOTE], "{}", w.commit);
+    assert!(git::out(&v.root, &["status", "--porcelain"]).unwrap().contains(" M knowledge/CATALOG.md"));
+    let acts = activity::recent(&v, "2000-01-01T00:00:00+00:00");
+    assert!(acts.iter().any(|a| a.path == INDEX && a.commit.is_none()), "its line names no commit: {acts:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_linked_source_is_refused() {
+    // Item 12: a source that is a link is never a run's.
+    let (_env, root) = paths::testenv::folders("kn-ingest-link");
+    let _fake = fake::install(&root);
+    let _clean = clean();
+    let (v, _p) = twin(&root, false);
+    fixture::write(&root, "elsewhere/secret.md", "# not a source\n");
+    std::os::unix::fs::symlink(root.join("elsewhere/secret.md"), v.root.join("raw_inbox/linked.md")).unwrap();
+    let e = start(&v, &strings(&["raw_inbox/linked.md"])).unwrap_err().to_string();
+    assert!(e.contains("isn't a source"), "{e}");
+    let c = copy_vault(&v, &root.join("run/vault"), &strings(&["raw_inbox/linked.md"]), &root.join("run/base"));
+    assert!(c.is_err_and(|e| e.to_string().contains("isn't a file")));
+}
+
+#[test]
+fn the_runs_command_loads_only_the_users_settings_on_every_profile() {
+    // Item 12, D40: `--setting-sources user` once — Echo's on Claude Code as configured, `ai::prepare_claude`'s on a
+    // managed profile.
+    let (_env, root) = paths::testenv::folders("kn-ingest-sources");
+    let system: ai::Profile = serde_json::from_value(json!({"id": "system", "name": "Claude Code", "kind": "system"})).unwrap();
+    let managed = fake::profile("w", None, &fake::signed_in("pat@example.com"));
+    for p in [system, managed] {
+        let a = args(&p, &root.join("settings.json"), &root.join("plugin"));
+        assert_eq!(a.iter().filter(|x| *x == "--setting-sources").count(), usize::from(!p.kind.managed()), "{:?}", p.kind);
+        let cmd = ai::prepare_claude(&p, &a, &root, true).unwrap();
+        let argv: Vec<String> = cmd.get_args().map(|x| x.to_string_lossy().into_owned()).collect();
+        let at: Vec<usize> = argv.iter().enumerate().filter(|(_, x)| *x == "--setting-sources").map(|(i, _)| i).collect();
+        assert_eq!(at.len(), 1, "{:?}: {argv:?}", p.kind);
+        assert_eq!(argv[at[0] + 1], "user");
+    }
 }
