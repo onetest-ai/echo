@@ -9,8 +9,8 @@
 //! lines are written onto the files as they are then, D42), `plugin/` (the ingest skill as a plugin of the run's own),
 //! `settings.json` (the guard and the run's scope), `prompt.md`, `log.jsonl` (its events) and `review.json` (the
 //! changes found, the user's answers). The folder goes once every change is written or rejected, or the run is
-//! discarded; a failed or stopped run's stays 30 days (K15-11) without its copy, bases and plugin (final review F2). The runs and their sources' states are in the ledger
-//! (`ingest.json`, `sources.rs`).
+//! discarded; a failed or stopped run's stays 30 days (K15-11) without its copy, bases and plugin (final review F2).
+//! The runs and their sources' states are in the ledger (`ingest.json`, `sources.rs`).
 
 use anyhow::{anyhow, bail, Context as _, Result};
 use serde::{Deserialize, Serialize};
@@ -333,9 +333,8 @@ fn copy_files(todo: &[(PathBuf, String, u64)], root: &Path) -> Result<BTreeMap<S
 }
 
 /// The scratch copy of `v` into `dest` (K15-02): the vault's root without `.git/`, `node_modules/`, dot-folders other
-/// than `.claude/`, `.agents/` and `.obsidian/` (and that one without its `plugins/`, F8), files over 20 MB that aren't
-/// Markdown, links (never followed) and the
-/// sources folder — into which only `picked` and its README go. A real copy (`std::fs::copy`, a clone where the system
+/// than `.claude/`, `.agents/` and `.obsidian/` (that one without its `plugins/`, final review F8), files over 20 MB
+/// that aren't Markdown, links (never followed) and the sources folder — into which only `picked` and its README go. A real copy (`std::fs::copy`, a clone where the system
 /// makes one), never a link: the run edits it. The index and the log as copied also go into `base` (D42).
 pub(super) fn copy_vault(v: &Vault, dest: &Path, picked: &[String], base: &Path) -> Result<Copied> {
     let folder = sources::folder(v);

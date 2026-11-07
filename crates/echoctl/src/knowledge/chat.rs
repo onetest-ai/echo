@@ -4,12 +4,13 @@
 //! environment and in its own `--settings` file, D40), and holds the profile's lease while it lives (`ai::ready`,
 //! counted in `terminal::holds_profile`): a sign-in of that profile closes it (`signin.rs`), as it closes the panel's.
 //!
-//! A conversation keeps its events in memory, numbered, across its processes: a mode change ends the process and the
-//! next message starts one with `--resume` (tools and the guard's mode are fixed per process, D25), as does a message
-//! after an idle stop. The page long-polls `read`, as it does a terminal. One process per conversation: one open in
-//! the Claude panel is refused here, and the panel refuses one live here (K12-12); at most `MAX_LIVE` run at once (a
-//! new one is refused while all of them are answering) and one idle for `IDLE` stops (D38). Conversations started here join the vault's list (`terminal::remember`) but never
-//! become the panel's current one (D44). Everything Claude Code prints is others' words: the parser makes it events
+//! A conversation keeps its events in memory, numbered, across its processes (with no process, idle for `IDLE`, it
+//! lets them go and reads them again from its transcript when opened): a mode change ends the process and the next
+//! message starts one with `--resume` (tools and the guard's mode are fixed per process, D25), as does a message after
+//! an idle stop. The page long-polls `read`, as it does a terminal. One process per conversation: one open in the
+//! Claude panel is refused here, and the panel refuses one live here (K12-12); at most `MAX_LIVE` run at once (a new
+//! one is refused while all of them are answering) and one idle for `IDLE` stops (D38). Conversations started here
+//! join the vault's list (`terminal::remember`) but never become the panel's current one (D44). Everything Claude Code prints is others' words: the parser makes it events
 //! (`stream.rs`), text reaches HTML only through the vault-page writer.
 
 use anyhow::{anyhow, bail, Result};
