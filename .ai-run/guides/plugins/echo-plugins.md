@@ -28,6 +28,6 @@
 | When you are | Exemplar | Why this one | Tests |
 |---|---|---|---|
 | adding a host service | `crates/echoctl/src/jshost.rs::service` | sync ops with their `uses` checks in one match | `crates/echoctl/src/jshost.rs::a_host_half_gets_echos_services_and_answers_commands` |
-| adding to the client-half `ctx` | `crates/echoctl/ui/app.js::pluginCtx` | every registration tagged with the plugin id | no covering test |
+| adding to the client-half `ctx` | `crates/echoctl/ui/app/33-plugins-client.js::pluginCtx` | every registration tagged with the plugin id | no covering test |
 | changing install, update or remove | `crates/echoctl/src/plugins.rs::install` | review sheet agreed, tree checked and hashed, registry updated | `crates/echoctl/src/plugins.rs::install_update_and_remove_from_a_local_marketplace` |
 | letting a plugin run Claude | `crates/echoctl/src/claudejob.rs::Spec.from_value` | prompt required, run folder kept inside the store, tools `none|read|folder|skip` | `crates/echoctl/src/claudejob.rs::a_spec_stays_in_the_plugins_store` |

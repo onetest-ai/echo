@@ -26,7 +26,7 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
 | `src/prep.rs` | a meeting's prep: gathered facts + "In short"; Coming up today; the scheduler |
 | `src/teams_transcript.rs` | import an unrecorded meeting from its Teams transcript; background check / scan |
 | `src/minutes.rs` | `render_for_window`, `with_theme`, `EMBED_JS` (the minutes frame) |
-| `ui/index.html`, `ui/app.js`, `ui/app.css` | the page (vanilla JS, compiled in); `ui/vendor/` xterm.js, sigma, graphology |
+| `ui/index.html`, `ui/app/NN-<area>.js`, `ui/css/NN-<area>.css` | the page (vanilla JS, compiled in; the parts joined in name order into one `app.js` and one `app.css` by `build.rs`); `ui/vendor/` xterm.js, sigma, graphology |
 | `ui/*.test.mjs` | node tests over no-DOM blocks: workbench, palette, my-notes, notes-sync, calendar-dates |
 
 ## How it works

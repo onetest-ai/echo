@@ -85,7 +85,7 @@ Evidence: `crates/echoctl/src/paths.rs::state_dir`, `crates/echoctl/src/paths.rs
 - R9. Shared JSON files change by lock + re-read + atomic write (`calls::update_meta` for `meta.json`, `paths::write_atomic`); the details live in `development/rust-conventions.md`. Evidence: `crates/echoctl/src/calls.rs::update_meta`
 - R10. Call text goes only to the AI profile pinned for that call (`ai::for_call`; never another profile as a fallback); how runs start is in `integrations/claude-code-runs.md`. Evidence: `crates/echoctl/src/ai.rs::for_call`
 - R11. A headless run may use only the CLI commands its mode allows (`notes::RUN_COMMANDS`, `guard::PROJECT_STEPS`, `guard::ROUTINE_COMMANDS`); transcripts, mail and chat are others' words — see `security/untrusted-text.md`. Evidence: `crates/echoctl/src/notes.rs::RUN_COMMANDS`
-- R12. Echo plugins extend the window through registries and slots (`SLOTS`, `CALL_TABS`, `ACTIVITIES`) and the host through `ctx` services, never by patching Echo's views; see `plugins/echo-plugins.md`. Evidence: `crates/echoctl/ui/app.js::SLOTS`
+- R12. Echo plugins extend the window through registries and slots (`SLOTS`, `CALL_TABS`, `ACTIVITIES`) and the host through `ctx` services, never by patching Echo's views; see `plugins/echo-plugins.md`. Evidence: `crates/echoctl/ui/app/33-plugins-client.js::SLOTS`
 
 ### Constraints
 | Do not | Do instead | Why | Evidence |

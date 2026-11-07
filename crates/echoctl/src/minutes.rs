@@ -946,7 +946,7 @@ figure.diagram pre.mermaid { background: none; margin: 0; }
 ";
 
 /// Every minutes page — the file opened in a browser and the window's Minutes tab — in Echo's own
-/// design: its colour tokens (`ui/app.css`, light and dark) and type (`.doc`), times as the window's
+/// design: its colour tokens (`ui/css/00-base.css`, light and dark) and type (`.doc`), times as the window's
 /// chips. Laid over `CSS`, which keeps the page's structure (tables, figures, print).
 const ECHO_CSS: &str = "
 :root {

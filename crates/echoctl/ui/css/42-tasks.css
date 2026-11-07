@@ -1,0 +1,44 @@
+/* ── Tasks: across projects, four piles by who has to move; Asks in the right panel ── */
+.tk { padding: 16px 22px 22px; display: flex; flex-direction: column; gap: 14px; min-height: 0; height: 100%; overflow: auto; }
+.tk-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tk-head h2 { margin: 0; font-size: 19px; font-weight: 650; }
+.tk-head .fchip { flex: none; }
+.tk-sub { color: var(--text-3); font-size: 12.5px; }
+.tk-err { margin: 0; }
+.tk-cols { display: grid; grid-template-columns: repeat(4, minmax(200px, 1fr)); gap: 14px; align-items: start; overflow-x: auto; padding-bottom: 4px; }
+.tk-col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.tk-col h3 { margin: 0 0 2px; font-size: 13px; font-weight: 650; }
+.tk-col h3 span { color: var(--text-3); font-weight: 500; margin-left: 3px; }
+.tk-card { display: flex; flex-direction: column; gap: 5px; width: 100%; padding: 9px 11px; text-align: left; font: inherit; color: var(--text); border-radius: 8px; border: 1px solid var(--line); background: var(--bg); cursor: default; box-shadow: 0 1px 2px rgb(0 0 0 / 0.15); }
+.tk-card:hover { border-color: var(--line-strong); }
+.tk-card.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.tk-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tk-t { font-weight: 600; font-size: 13px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.tk-m { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 11.5px; color: var(--text-3); }
+.tk-m { margin-top: 2px; }
+.tk-pj { flex: 0 1 auto; min-width: 0; display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 7px 0 5px; border-radius: 10px; background: var(--line); color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk-m .grow { flex: 1; }
+.tk-pj .pj-ic { flex: none; }
+.tk-who { font-size: 12px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk-quiet { flex: none; color: var(--warn); }
+.tk-due { flex: none; white-space: nowrap; color: var(--text-2); }
+.tk-due.late { color: var(--danger); font-weight: 600; }
+.tk-due.none { color: var(--text-3); }
+.tk-more { align-self: flex-start; border: 0; background: none; color: var(--text-3); font: inherit; font-size: 12px; padding: 2px 4px; cursor: default; }
+.tk-more:hover { color: var(--text); }
+.tk-none { margin: 0; color: var(--text-3); font-size: 12px; padding: 8px 2px; }
+.asks { padding: 14px 16px; display: flex; flex-direction: column; gap: 0; }
+.asks-h { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+.asks-h b { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-2); }
+.asks-h span { font-size: 12px; color: var(--text-3); }
+.ask { padding: 10px 0; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; }
+.ask-h { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
+.ask-h span { color: var(--text-3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ask-i { text-align: left; border: 0; background: none; padding: 1px 0 1px 10px; position: relative; font: inherit; font-size: 12.5px; color: var(--text); cursor: default; line-height: 1.45; }
+.ask-i::before { content: "·"; position: absolute; left: 1px; }
+.ask-i:hover { color: var(--accent-ink); }
+.ask-i span { color: var(--text-3); }
+.ask-i span.late { color: var(--danger); }
+.asks-foot { margin: 12px 0 0; font-size: 12px; color: var(--text-3); line-height: 1.45; }
+@media (max-width: 1100px) { .tk-cols { grid-template-columns: repeat(2, minmax(200px, 1fr)); } }
+

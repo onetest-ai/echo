@@ -1,0 +1,65 @@
+/* The taxonomy as a tree (Topics): fold, name and definition, a size bar, share of the layer, threads. */
+.br-lh .br-fold { margin-right: 2px; }
+.br-tr { display: grid; grid-template-columns: 18px minmax(0, 1fr) 120px 64px minmax(0, 0.55fr); align-items: center; gap: 10px; padding: 6px 12px 6px 6px; border-top: 1px solid var(--line); font-size: 12.5px; }
+.br-tr:first-child { border-top: 0; }
+.br-tr.on { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.br-tr.l2 { padding-left: 28px; }
+.br-tr.l2 .br-bar i { background: color-mix(in srgb, var(--accent) 35%, transparent); }
+.br-tr.none { color: var(--text-3); }
+.br-tr.none .br-bar i { background: var(--line-strong); }
+.br-fold { width: 18px; height: 18px; border: 0; background: none; color: var(--text-2); font: inherit; font-size: 13px; padding: 0; cursor: default; }
+.br-tbar { display: flex; align-items: center; gap: 10px; margin: 0 2px 12px; }
+.br-lh .link-btn { font-size: 12px; margin-left: 10px; }
+.br-fold:hover { color: var(--text); }
+.br-tm { display: flex; flex-direction: column; min-width: 0; border: 0; background: none; padding: 0; font: inherit; color: var(--text); text-align: left; cursor: default; }
+.br-tm:hover .br-tn b, .br-tm:hover .br-tn { color: var(--accent-ink); }
+.br-tn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.br-td { font-size: 11.5px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.br-bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.br-bar i { display: block; height: 100%; background: color-mix(in srgb, var(--accent) 70%, transparent); border-radius: 3px; }
+.br-tr .br-n { text-align: right; font-variant-numeric: tabular-nums; }
+.br-tr .br-n small { color: var(--text-3); }
+.br-flag { margin-left: 6px; font-size: 10.5px; font-weight: 650; color: var(--warn); }
+/* One tree: the client a topic belongs to, the builds per layer, suggested moves. */
+.br-cl { display: inline-block; font-size: 10.5px; font-weight: 600; padding: 0 6px; border-radius: 8px; color: var(--c); background: color-mix(in srgb, var(--c) 14%, transparent); vertical-align: 1px; }
+.br-blds { margin: 0 0 12px; border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; background: var(--bg); }
+.br-blds > summary { font-size: 12px; color: var(--text-2); cursor: default; padding: 2px 0; }
+.br-bld { display: grid; grid-template-columns: 130px minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 12.5px; }
+.br-bld:first-of-type { border-top: 0; }
+.br-bld > .br-cl { justify-self: start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.br-bld-t { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.br-bld-t b { font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
+.br-bld.warn .br-bld-t b { color: var(--warn); }
+.br-bld.todo .br-bld-t b { color: var(--accent-ink); }
+.br-bld.ok .br-bld-t b { color: var(--text-2); font-weight: 500; }
+.br-bld-t .set-sub { line-height: 1.4; }
+.br-bld-a { display: flex; align-items: center; gap: 10px; justify-content: flex-end; }
+.br-bld-a .btn { height: 26px; padding: 0 12px; font-size: 12px; }
+.br-bld-a .link-btn { font-size: 12px; white-space: nowrap; }
+.br-bld.run .br-bld-t b { color: var(--accent-ink); }
+@media (max-width: 1100px) {
+  .br-bld { grid-template-columns: 110px minmax(0, 1fr); }
+  .br-bld-a { grid-column: 2; justify-content: flex-start; flex-wrap: wrap; }
+}
+.br-bld-t .spin { width: 10px; height: 10px; border-radius: 50%; border: 1.6px solid color-mix(in srgb, var(--accent) 30%, transparent); border-top-color: var(--accent); animation: br-spin .8s linear infinite; }
+@keyframes br-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .br-bld-t .spin { animation: none; } }
+.br-mvs { display: flex; flex-direction: column; gap: 6px; margin: 0 0 12px; }
+.br-mv { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); border-radius: 8px; background: var(--accent-soft); font-size: 12.5px; }
+/* The dictionary (Terms). */
+.dict-groups { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
+.dict-groups .fchip { cursor: default; }
+.dict-groups .fchip.on { background: var(--accent-soft); color: var(--text); }
+.dict-list { border: 1px solid var(--line); border-radius: 10px; background: var(--bg); overflow: hidden; }
+.dict-e { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 8px 12px; border: 0; border-top: 1px solid var(--line); background: none; color: var(--text); font: inherit; font-size: 12.5px; text-align: left; cursor: default; }
+.dict-e:first-child { border-top: 0; }
+.dict-e:hover { background: color-mix(in srgb, var(--text) 3%, transparent); }
+.dict-e.on { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.dict-h { display: flex; align-items: baseline; gap: 6px; }
+.dict-aka { font-size: 11.5px; color: var(--text-2); }
+.dict-d { font-size: 11.5px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dict-tps { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.dict-tp { font-size: 10.5px; padding: 0 6px; border-radius: 8px; background: var(--line); color: var(--text-2); }
+.dict-flag { font-size: 10px; color: var(--text-3); border: 1px solid var(--line-strong); border-radius: 6px; padding: 0 4px; }
+.br-def { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+

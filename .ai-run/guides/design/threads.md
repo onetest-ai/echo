@@ -19,7 +19,7 @@ stakeholder-map model in `docs/projects-design.md`. Recall indexing of mail, cha
 | `crates/echoctl/src/guard.rs` | `RUN_MODE=project` scope; `PROJECT_STEPS` |
 | `plugin/skills/project-sync/` | `SKILL.md`, `EXTRACT.md`, `DEPS.md`, `VERIFY.md`, `PEOPLE.md` — the sync's prompts |
 | `crates/echoctl/src/window.rs` | IPC `project {op, …}` → `window::project_op` |
-| `crates/echoctl/ui/app.js` | `ProjectArt`, `PJ_SYMBOLS`, `RECORD_TEXT`, `OrgLayout`, `drawOrgLinks` (tests: `ui/projects.test.mjs`, `ui/org-chart.test.mjs`) |
+| `crates/echoctl/ui/app/` | `ProjectArt` (`04-project-art.js`), `PJ_SYMBOLS` (`40-threads.js`), `RECORD_TEXT` (`41-work.js`), `OrgLayout`, `drawOrgLinks` (`44-org-chart.js`) (tests: `ui/projects.test.mjs`, `ui/org-chart.test.mjs`) |
 
 ## How it works
 

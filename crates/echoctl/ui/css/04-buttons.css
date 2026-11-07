@@ -1,0 +1,38 @@
+/* ── buttons ─────────────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 28px; padding: 0 12px;
+  border-radius: var(--r-control);
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--text);
+  white-space: nowrap;
+  cursor: default;
+  transition: background 120ms ease, transform 80ms ease, border-color 120ms ease;
+}
+.btn:hover { background: color-mix(in srgb, var(--surface) 92%, var(--text)); }
+.btn:active { transform: translateY(1px); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.btn.primary:hover { background: var(--accent-strong); }
+.btn.danger { color: var(--danger); }
+.btn.ghost { border-color: transparent; background: none; color: var(--text-2); }
+.btn.ghost:hover { background: var(--line); color: var(--text); }
+.btn:focus-visible, .row:focus-visible, .tab:focus-visible, input:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 1px;
+}
+
+/* Record ▾: the action, and the call's language on its right (a native select over it). */
+.split { display: flex; min-width: 0; }
+.split .split-main { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.split .split-lang {
+  position: relative; flex: none; gap: 4px; padding: 0 8px;
+  border-top-left-radius: 0; border-bottom-left-radius: 0; border-left-width: 0;
+  box-shadow: inset 1px 0 0 color-mix(in srgb, currentColor 28%, transparent);
+  font-size: 11px; font-weight: 600; letter-spacing: 0.02em;
+}
+/* Any picker label (in a split or alone, as the Live header's): the native select lies over it. */
+label.split-lang { position: relative; }
+label.split-lang select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: default; font-size: 13px; }
+label.split-lang:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+.detail .acts .split .btn { justify-content: center; }
+

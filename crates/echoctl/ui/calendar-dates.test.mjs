@@ -2,13 +2,13 @@
 // clock, across the days the clocks change. Run by scripts/check-mod.sh (`node crates/echoctl/ui/calendar-dates.test.mjs`):
 // the block is taken from app.js as it ships.
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { appSource } from './source.mjs'
 
 process.env.TZ = 'Europe/Berlin' // clocks go back on 25 Oct 2026, forward on 29 Mar 2026
 // A Node without time zone data silently uses UTC, where most of these would pass on the old code.
 assert.equal(new Date(2026, 9, 26) - new Date(2026, 9, 25), 25 * 3600000, 'Europe/Berlin not in effect')
 
-const src = readFileSync(new URL('./app.js', import.meta.url), 'utf8')
+const src = appSource()
 const start = src.indexOf('const ymd = (d) =>')
 const end = src.indexOf('// end of the calendar\'s helpers', start)
 assert.ok(start >= 0 && end > start, "the calendar's helpers not found in app.js")

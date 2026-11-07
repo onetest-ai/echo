@@ -26,8 +26,9 @@ use wry::{WebView, WebViewBuilder};
 use crate::{calls, paths, watch};
 
 const INDEX: &str = include_str!("../ui/index.html");
-const APP_JS: &str = include_str!("../ui/app.js");
-const APP_CSS: &str = include_str!("../ui/app.css");
+// Joined at build time from the parts in `ui/app/` and `ui/css/` (build.rs).
+const APP_JS: &str = include_str!(concat!(env!("OUT_DIR"), "/app.js"));
+const APP_CSS: &str = include_str!(concat!(env!("OUT_DIR"), "/app.css"));
 const OCTOPUS_SVG: &str = include_str!("../assets/octopus.svg");
 /// The onetest logo (violet disc, the full octopus character), 192 px, for the window.
 const LOGO_PNG: &[u8] = include_bytes!("../assets/onetest-logo.png");
