@@ -107,6 +107,12 @@ function knBuildTree(pages, { root = '', filter = 'all', open = new Set(), index
   walk('', 0)
   return rows
 }
+/** What Pages says with no page open: `loading` until the vault's own pages are in (its index isn't known yet), then
+ *  `pick` — or `no-index` when the vault has none (C2). */
+function knPagesEmpty(tree, vault) {
+  if (!tree || tree.vault !== vault) return 'loading'
+  return tree.index ? 'pick' : 'no-index'
+}
 // end of the kn-tree block
 
 // ── kn-graph: which nodes and edges the graph shows ──
@@ -490,6 +496,13 @@ function knChatTake(c, gen, from, r, now) {
   const ended = c.busy && !r.busy
   Object.assign(c, { live: !!r.live, busy: !!r.busy, waiting: !!r.waiting, loaded: true })
   return { events: evs, sent: evs.some((e) => e.type === 'user'), ended }
+}
+/** Where the answer `r` to a message sent from composer `c` goes (I3): the new conversation is opened on `c` itself —
+ *  never on the composer some other tab shows by then — and the address names it only while Ask shows `c` (`tab`, and
+ *  `ask` Ask's composer now). A conversation going on, a refusal or a call on another profile: neither. */
+function knSentWhere(c, r, { tab, ask } = {}) {
+  const open = !!(c && !c.id && r && r.conversation && !r.mismatch)
+  return { open, route: open && tab === 'ask' && ask === c }
 }
 // end of the kn-poll block
 
@@ -1382,7 +1395,11 @@ const Kn = (() => {
     const s = st(), v = vault(), p = s.page
     if (s.edit) return editorView()
     if (s.ver) return versionView()
-    if (!s.path) return `<div class="kn-reader"><div class="kn-none"><p>Pick a page on the left${(s.tree || {}).index ? '' : ' — this vault has no index page'}.</p></div></div>`
+    if (!s.path) {
+      const empty = knPagesEmpty(s.tree, v && v.id)
+      if (empty === 'loading') return '<div class="kn-reader"><div class="skeleton" style="padding:24px"><i></i><i></i><i></i><i></i></div></div>'
+      return `<div class="kn-reader"><div class="kn-none"><p>Pick a page on the left${empty === 'no-index' ? ' — this vault has no index page' : ''}.</p></div></div>`
+    }
     if (!p || p.path !== s.path) return '<div class="kn-reader"><div class="skeleton" style="padding:24px"><i></i><i></i><i></i><i></i></div></div>'
     if (p.error) return `<div class="kn-reader"><div class="kn-none"><p class="error">${esc(p.error)}</p></div></div>`
     const parts = p.path.split('/'), file = parts.pop()
@@ -2951,7 +2968,7 @@ const Kn = (() => {
       if (d.error) g.error = d.error; else Object.assign(g, { data: d, error: null })
     } catch (e) { g.error = String(e.message || e) }
     // git is read on a thread of its own: Home asks again until its part is there (a few times, then the 2 s poll's rev).
-    if (g.data && g.data.whats_new && g.data.whats_new.git === 'pending' && g.polls < 20) {
+    if (g.data && g.data.whats_new && ['reading', 'pending'].includes(g.data.whats_new.git) && g.polls < 20) {
       g.polls++
       setTimeout(() => { if (homeSt() === g && homeShown()) loadHome().then(render) }, 700)
     } else g.polls = 0
@@ -2995,7 +3012,7 @@ const Kn = (() => {
       return r.path ? `<button class="kn-h-chg" data-kn="open" data-path="${esc(r.path)}" title="${esc(r.path)}" id="kn-h-chg${i}">${inner}</button>` : `<div class="kn-h-chg">${inner}</div>`
     }
     const none = rows.length ? '' : `<p class="set-sub kn-h-none">${g.filter === 'new' ? 'No new pages' : g.filter === 'notes' ? 'No notes changed' : 'Nothing changed'} in the last 14 days.</p>`
-    const reading = w.git === 'pending' ? `<div class="set-sub kn-h-git">${SPIN} Reading git…</div>` : ''
+    const reading = w.git === 'reading' ? `<div class="set-sub kn-h-git">${SPIN} Reading git…</div>` : ''
     return `<div class="kn-card"><div class="kn-card-h kn-h-wrapline"><h3>What's new</h3><span class="set-sub">the last 14 days · who changed what</span><span class="grow"></span><div class="kn-h-mini" role="group" aria-label="Show">${f('all', 'All')}${f('new', 'New pages')}${f('notes', 'Notes')}</div><button class="kn-lnk" data-kn="home-recent" id="kn-h-recent">All changes</button></div><div class="kn-h-chgs">${rows.map(row).join('')}${none}${reading}</div></div>`
   }
   /** The Health card (K11-05): the score, its 30 days, the first three that need you, what code can fix. */
@@ -3006,7 +3023,7 @@ const Kn = (() => {
     const delta = tr.delta == null ? '' : `<span class="tag ${tr.delta >= 0 ? 'ok' : 'warn'}">${tr.delta >= 0 ? '+' : '−'}${Math.abs(tr.delta)} in 30 days</span>`
     const lines = c.lines.map((l, i) => `<button class="kn-h-nl" data-kn="hl-pick" data-kn-key="${esc(l.key)}" id="kn-h-nl${i}">${IC.warn}<span><b>${esc(l.title)}</b><span class="set-sub">${esc(l.sub)}</span></span></button>`).join('')
     return `<div class="kn-card"><div class="kn-card-h"><h3>Health</h3>${delta}<span class="grow"></span><button class="kn-lnk" data-kn="tab" data-kn-tab="health" id="kn-h-health">Open Health</button></div>
-      <div class="kn-h-score"><div class="kn-ring kn-h-ring" style="--p:${c.score}%" role="img" aria-label="Score ${c.score} of 100"><span>${c.score}<small>of 100</small></span></div><div class="kn-h-grow">${c.nothing ? '<b>Nothing to fix</b>' : spark}<div class="set-sub">${esc(c.sub)}</div></div></div>
+      <div class="kn-h-score"><div class="kn-ring kn-h-ring" style="--p:${c.score}%" role="img" aria-label="Score ${c.score} of 100"><span>${c.score}<small>of 100</small></span></div><div class="kn-h-grow">${c.nothing ? '<b>Nothing to fix</b>' : ''}${spark}<div class="set-sub">${esc(c.sub)}</div></div></div>
       ${lines ? `<div class="kn-lbl">Needs you · ${nf(c.needs)}</div><div class="kn-h-nlist">${lines}</div>` : ''}${c.fixable ? `<div class="set-sub">${esc(c.fixable)}</div>` : ''}</div>`
   }
   /** Coming in (K11-06): what waits for review, what isn't processed, the run going — else "Nothing waiting." */
@@ -3030,7 +3047,8 @@ const Kn = (() => {
     if (!x) return ''
     const last = git && git.last ? ` · “${esc(git.last.subject)}” · ${esc(knWhen(git.last.at, now))}` : ''
     const branch = (git && git.branch) || (v.git && v.git.branch) || ''
-    const gitLine = (w || {}).git === 'none' ? 'not a git repository' : git ? `${esc(branch || 'detached')}${last}` : `${esc(branch)}${branch ? ' · ' : ''}reading…`
+    const said = { none: 'not a git repository', 'no-git': 'git isn\'t installed', failed: 'git didn\'t answer' }[(w || {}).git]
+    const gitLine = said ? esc(said) : git ? `${esc(branch || 'detached')}${last}` : `${esc(branch)}${branch ? ' · ' : ''}reading…`
     const index = x.index ? `<code>${esc(String(x.index).split('/').pop())}</code>${x.index_bytes != null ? ` · ${esc(kb(x.index_bytes))}` : ''}` : 'none'
     return `<div class="kn-card"><div class="kn-card-h"><h3>${esc(v.name)}</h3><span class="grow"></span><button class="kn-lnk" data-kn="tab" data-kn-tab="settings" id="kn-h-settings">Settings</button></div>
       <div class="kn-h-kv"><span>Folder</span><code title="${esc(v.root)}">${esc(short(v.root))}</code><span>Pages</span><span><code>${esc(x.pages_root ? `${x.pages_root}/` : '(the folder itself)')}</code>${x.obsidian ? ' · Obsidian' : ''}</span><span>Index</span><span>${index}</span><span>Git</span><span>${gitLine}</span><span>AI</span><span>${esc(x.profile_name || x.profile || '')}</span><span>Holds</span><span>${esc(`${many(x.pages, 'page')} · ${many(x.tags, 'tag')} · ${many(x.skills, 'skill')}`)}</span></div></div>`
@@ -3297,8 +3315,7 @@ const Kn = (() => {
   }
   /** Show conversation `id` ('' a new one): a new open (`knChatOpen`), so a loop polling the one before stops; the
    *  composer keeps what is typed in it. */
-  function openChat(id) {
-    const c = chat()
+  function openChat(id, c = chat()) {
     if (c.id === (id || '')) return
     knChatOpen(c, id)
     Object.assign(c, { gone: null, error: null, open: {}, always: {}, local: {}, whyOpen: null, follow: true, top: 0, jump: false, command: null })
@@ -3336,6 +3353,12 @@ const Kn = (() => {
       const q = document.getElementById('kn-chat-q')
       if (q && q.value.trim() === c.pending.text) { q.value = ''; c.draft = ''; fitQ() }
       c.chips = []
+      // A message from Home's box: Ask's own unsent draft comes back to its composer.
+      if (c.keep) {
+        if (!c.draft.trim()) { c.draft = c.keep.draft; if (q) { q.value = c.draft; fitQ() } }
+        c.chips = c.keep.chips
+        c.keep = null
+      }
     }
     if (landed) c.pending = null
     if (got.ended || got.sent) loadChats()
@@ -3661,7 +3684,10 @@ const Kn = (() => {
     const q = document.getElementById('kn-chat-q')
     if (q) c.draft = q.value
     if (!v || !knChatMessage(c.draft, c.chips).text) return
-    // The box's conversation becomes Ask's; the tab is Ask's at once (the route follows), so the send is Ask's own.
+    // The box's conversation becomes Ask's; the tab is Ask's at once (the route follows), so the send is Ask's own. What
+    // was typed in Ask's composer and not sent comes back to it once this message lands (M8).
+    const was = s.chat && s.chat.vault === v.id ? s.chat : null
+    if (was && (was.draft.trim() || was.chips.length)) c.keep = { draft: was.draft, chips: was.chips }
     s.homeChat = null
     s.chat = c
     s.askConv = ''
@@ -3690,11 +3716,13 @@ const Kn = (() => {
       if (st().chat !== c) return
       // A call on another AI profile (X-P3): *Attach anyway* on that call's chip, then it is sent again.
       if (r && r.mismatch) { c.pending = null; const x = c.chips.find((ch) => ch.call && ch.call === r.mismatch.attached) || c.chips.find((ch) => ch.call && !ch.anyway); if (x) x.mismatch = r.mismatch; return }
-      if (!c.id && r && r.conversation) {
-        openChat(r.conversation)
+      // On the composer it was sent from, whichever tab shows now; the address only while Ask shows it (I3).
+      const where = knSentWhere(c, r, { tab: st().tab, ask: st().chat })
+      if (where.open) {
+        openChat(r.conversation, c)
         s.askConv = r.conversation
-        history.replaceState(null, '', `#${knRouteOf({ vault: v.id, tab: 'ask', path: r.conversation })}`)
       }
+      if (where.route) history.replaceState(null, '', `#${knRouteOf({ vault: v.id, tab: 'ask', path: r.conversation })}`)
       c.follow = true
       loadChats()
     } catch (e) { if (st().chat === c) { c.pending = null; c.error = String(e.message || e) } } finally {

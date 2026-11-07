@@ -441,7 +441,8 @@ Routes `#kn/<vault>/<home|pages|graph|ask|ingest|health|settings>[/<path>]`, `#k
 Ask's last part is a conversation id, Ingest's a run's and Health's a finding's key, each kept apart from the page Pages
 has open, and Home names none); `#brain/...` stays Recall. A vault opens on Home — connected, made, or picked in the
 switcher for the first time in the window; picked again, it opens on the tab left there (`tabs`, K10-04). Another vault
-empties the page Pages had open, so its Pages open on its own index. The switcher lists vaults, then
+empties the page Pages had open, so its Pages open on its own index — after a skeleton while its pages load, never
+"this vault has no index page" before they are in (`knPagesEmpty`). The switcher lists vaults, then
 Recall when on, then plugins' Knowledge tabs. Actions are IPC `kn_*`; long ones run as jobs the page polls
 (`/api/kn/jobs`). Rules learned the hard way:
 - **No `confirm()`, `alert()` or `prompt()`**: the webview (wry) shows none and `confirm()` returns false, so the
@@ -542,27 +543,35 @@ gives the skill a run uses and the one Echo finds itself), Settings → Ask swit
 (ruling R48) and never waits for git, Microsoft 365 or a model (K11-10: ~5 ms warm in the dev app). Its parts:
 - **What's new** (K11-04): the last 14 days, newest first. Echo's lines in `activity.jsonl` come first — minutes,
   ingest (with the run's sources, from the ledger), Curate, Health fixes, edits in Echo ("You in Echo"), the starter's
-  "The vault"; a source added isn't a page and is left to Coming in. Then git, read on a thread of its own (`git_now`:
-  `ready` when read for the pages' revision within 20 s, `pending` while a read goes — what it read before is used
-  meanwhile — or `none`): `log --since=14.days -n200 --numstat --summary --no-renames --relative -- .` (commits whose id
-  is one of Echo's lines' are Echo's and left out; the others by their author, with the commit's message) and the
-  changes not committed (`diff --numstat HEAD`, untracked pages by `ls-files --others`) that Echo didn't write — a page
-  is Echo's write when its time is no later than 2 s after Echo's last line for it (or the starter's) — as *Changed
-  outside Echo*, "not committed". Only where git can't answer (no repository, no git) do the index's times stand in:
-  a page changed in the window that no line of Echo's explains is *Changed outside Echo*, with no ±. The page asks
-  again every 0.7 s while git's part is pending (20 times at most), and with the vault's rev as Pages does, and every
-  30 s while Home shows. Rows are the newest 12, and the newest 12 new pages and notes too, so each filter (All · New
+  "The vault"; a source added isn't a page and is left to Coming in. A line names what the same write wrote besides its
+  page (`also`: the index row and log line of a minutes save, a new page's index row, *Add rows*' and a Health fix's log
+  line), and a commit Echo makes after its lines (a Curate turn's end, *Save past minutes*) gets a line of its own
+  (`kind: commit`, shown nowhere) — so Echo's writes and commits are never taken for someone else's. Then git, read on a
+  thread of its own (`git_now`, `whats_new.git`: `ready` — read for the pages as they are, and not read again until they
+  change; `pending` — they changed and git is read again, what it said before used meanwhile; `reading` — nothing read
+  yet, the only time the page says "Reading git…"; `failed` — a repository git didn't answer for; `none` — no `.git`;
+  `no-git`): `log --since=14.days -n200 --numstat --summary --no-renames --relative -- .` (a commit whose id is one of
+  Echo's lines' is Echo's and left out; the others by their author, with the commit's message) and the changes not
+  committed (`diff --numstat HEAD`, untracked pages by `ls-files --others`) that Echo didn't write — a file is Echo's
+  write when its time is no later than 2 s after Echo's last line naming it (or the starter's) — as *Changed outside
+  Echo*, "not committed". Only where git can't answer (`none`, `no-git`, `failed`) do the index's times stand in: a page
+  changed in the window that no line of Echo's explains is *Changed outside Echo*, with no ±. The page asks again every
+  0.7 s while git reads (20 times at most), with the vault's rev as Pages does, and every 30 s while Home shows. Rows are the newest 12, and the newest 12 new pages and notes too, so each filter (All · New
   pages · Notes, `knHomeNews`) has its own; a row opens its page; *All changes* is Pages' Recent.
 - **The Ask box** (K11-01): Ask's own composer — the same functions, keys, `@` page and *Attach* — on a conversation of
   its own (`chat()` is Home's while Home shows, `askChat()` Ask's). Sending makes it Ask's conversation and opens Ask on
-  it, so the message starts a new conversation there. The mode line shows only for Research's warning.
+  it, so the message starts a new conversation there; what was typed in Ask's composer and not sent comes back to it
+  once the message lands. A send's answer opens on the composer it was sent from and names it in the address only while
+  Ask shows that composer (`knSentWhere`): a send from Ask, then Home opened, leaves Home's box as it was. The mode line
+  shows only for Research's warning.
 - **Suggestions** (K11-02, `suggestions`): at most four, in this order, each only when its source is there — the next
   meeting today or tomorrow (from today's agenda and the window's calendar cache, never a new fetch) that a client page
   is about; the newest note (by its `date`, else its name's date); an action-items folder with pages; Health's first
   contradiction. A **client page** is one in a `clients` folder or tagged `client`; a meeting is about it when its title
-  names the page (its title, its file name with spaces, an alias, on word boundaries) or an attendee writes from its
-  `domain`/`domains`/`website`, or from a domain whose first label is the page's file name or its first word
-  (`sam@acme.example` → `clients/acme.md`). A suggestion fills the box with its words and its pages as chips; nothing is
+  names the page (its title, its file name with spaces, an alias, on word boundaries; never a word meetings are named
+  with whatever they are about — "Sync", "Review", "Team"…) or an attendee writes from its `domain`/`domains`/`website`,
+  or from a domain whose first label is the page's file name or its first word (`sam@acme.example` → `clients/acme.md`)
+  — never from the user's own domains (Settings → About me, Echo's Microsoft 365 sign-in) or a mail service's. A suggestion fills the box with its words and its pages as chips; nothing is
   sent until the user sends.
 - **Continue** (K11-03, the window's build only — ruling R49): Ask's list's first three, each with the mode Ask last
   ran it in (`chat/<id>/settings.json`'s scope) and "in the terminal panel" when the panel has it (its own conversation,
@@ -572,7 +581,7 @@ gives the skill a run uses and the one Echo finds itself), Settings → Ask swit
   waiting with their runs' sources (*Review* opens the run when there is one), sources not processed by kind (*Prepare
   changes* opens Ingest on its button), the run going with its step now (`ingest::step_now`, its last steps' active
   one) — "Nothing waiting." only when none of them is. **Most linked** (K11-07): the index with the pages it links to,
-  then four pages most pages link to, hubs left out. **The vault** (K11-08): folder, pages root, index and size, git's
+  then the four pages Health judges (no taxonomy or README) that most pages link to, hubs left out. **The vault** (K11-08): folder, pages root, index and size, git's
   branch and last commit (once git answered), the AI profile, pages · tags (the taxonomy's, else the pages') · skills.
 - **A new vault** (K11-09, `fresh`): made from the starter, only the starter's line in its activity, no sources, every
   page one of the starter's and none changed since — three steps (*Add a source*, *Record a call* with where its
@@ -713,6 +722,8 @@ not the hashing, were the cost; copying on 8 threads won only 15 %, so small fil
   view or Tasks opened since the app started). Tomorrow's meeting is suggested only after one of those fetched it.
 - "In the terminal panel" is the panel's own conversation: one opened there and then continued in Ask still says so
   once Ask's process for it has ended.
+- git is read again only when the pages change: a commit made outside Echo of files already changed (no file changes)
+  shows on Home once a page changes next.
 - Home's What's new in a vault without git takes a page's time for a change: a copy that doesn't keep times makes every
   page look changed outside Echo. In a git vault a clean page's time isn't read (a checkout changes times, not text).
 - Retiring the Obsidian plugin's vault part is a separate change in `onetest-ai/echo-plugins`; until then *Connect

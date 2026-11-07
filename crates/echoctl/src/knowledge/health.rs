@@ -921,9 +921,12 @@ pub fn apply(v: &Vault, fixes: &[Fix]) -> Result<Applied> {
     if activity::commit_id(&out.commit).is_some() {
         out.committed = out.written.iter().zip(&written).filter(|(_, f)| !dirty.contains(f)).map(|(p, _)| p.clone()).collect();
     }
-    // A file the user had changed isn't in the commit, so its line names none.
-    for (path, full, old, new) in &done {
-        activity::changed(v, path, "health", None, Some(old), new, activity::commit_id(&out.commit).filter(|_| !dirty.contains(full)));
+    // A file the user had changed isn't in the commit, so its line names none. The log's lines are the fixes' (the
+    // first one says so).
+    let log_written: Vec<PathBuf> = written.iter().filter(|w| !done.iter().any(|(_, f, ..)| **f == **w)).cloned().collect();
+    for (i, (path, full, old, new)) in done.iter().enumerate() {
+        let also = if i == 0 { &log_written[..] } else { &[] };
+        activity::changed_with(v, path, "health", None, Some(old), new, activity::commit_id(&out.commit).filter(|_| !dirty.contains(full)), also);
     }
     Ok(out)
 }

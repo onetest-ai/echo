@@ -578,7 +578,7 @@ pub fn create(v: &Vault, folder: &str, name: &str, template: Option<&str>, add_r
         }
     }
     let commit = commit_one(v, &written, &dirty, &format!("Add {rel}"));
-    super::activity::changed(v, &rel, "new-page", None, None, &text, super::activity::commit_id(&commit));
+    super::activity::changed_with(v, &rel, "new-page", None, None, &text, super::activity::commit_id(&commit), &written[1..]);
     Ok(rel)
 }
 
@@ -718,7 +718,7 @@ pub fn index_add(v: &Vault, rels: &[String]) -> Result<Value> {
     }
     let commit = if written.is_empty() { "off".into() } else { commit_one(v, &written, &dirty, &format!("Echo: {added} page{} added to the index", if added == 1 { "" } else { "s" })) };
     if added > 0 {
-        super::activity::changed(v, &index, "index-rows", None, Some(&before), &text, super::activity::commit_id(&commit));
+        super::activity::changed_with(v, &index, "index-rows", None, Some(&before), &text, super::activity::commit_id(&commit), &written[1..]);
     }
     Ok(json!({ "added": added, "skipped": skipped, "commit": commit }))
 }

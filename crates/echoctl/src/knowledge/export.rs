@@ -622,6 +622,8 @@ fn save_into(call: &Path, v: &Vault, how: How, commit: bool) -> Result<(Saved, V
             written.push(lpath);
         }
     }
+    // The index row and the log line are this save's too (Home never takes them for someone else's).
+    let also: Vec<PathBuf> = written[1..].to_vec();
     let committable: Vec<PathBuf> = written.into_iter().filter(|p| !dirty_before.contains(p)).collect();
     let commit_label = if !v.git.commit {
         git::Commit::Off.label()
@@ -635,7 +637,7 @@ fn save_into(call: &Path, v: &Vault, how: How, commit: bool) -> Result<(Saved, V
     let entry_out = Entry { vault: v.id.clone(), path: rel.clone(), sha256: hash, at: chrono::Local::now().to_rfc3339(), how: how_label.into(), state: state.into(), index: index.clone(), commit: commit_label.clone(), anyway: anyway || entry.as_ref().is_some_and(|e| e.anyway) };
     let call_id = call.file_name().map(|n| n.to_string_lossy().into_owned());
     // An update whose old text can't be read as text is recorded as a new note (the diff needs both sides).
-    super::activity::changed(v, &rel, "minutes", call_id.as_deref(), was.as_deref(), &text, super::activity::commit_id(&commit_label));
+    super::activity::changed_with(v, &rel, "minutes", call_id.as_deref(), was.as_deref(), &text, super::activity::commit_id(&commit_label), &also);
     update(call, |r| {
         // A new note beside a kept one becomes the call's note here.
         r.saved.retain(|e| e.vault != v.id);
@@ -704,6 +706,10 @@ pub fn save_past(id: &str) -> Result<Value> {
     paths.sort();
     paths.dedup();
     let commit = if v.git.commit && !paths.is_empty() { git::commit_paths(&v.root, &paths, &format!("Echo: minutes of {saved} past calls")).label() } else { git::Commit::Off.label() };
+    // Each save's line says "pending"; the one commit for all comes after them.
+    if let Some(id) = super::activity::commit_id(&commit) {
+        super::activity::committed(&v, "minutes", &id);
+    }
     Ok(json!({ "saved": saved, "skipped": skipped, "commit": commit }))
 }
 

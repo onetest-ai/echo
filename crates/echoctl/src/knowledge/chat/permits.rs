@@ -133,7 +133,7 @@ pub(super) fn record(v: &Vault, conversation: &str, e: &Edit) {
         (Before::Missing, Some(new)) => activity::changed(v, &e.rel, "ask", Some(conversation), None, &new, None),
         (old, _) => {
             let kind = if matches!(old, Before::Missing) { "new" } else { "edit" };
-            let line = activity::Entry { at: chrono::Local::now().to_rfc3339(), path: e.rel.clone(), kind: kind.into(), by: "ask".into(), r#ref: Some(conversation.into()), plus: 0, minus: 0, commit: None };
+            let line = activity::Entry { at: chrono::Local::now().to_rfc3339(), path: e.rel.clone(), kind: kind.into(), by: "ask".into(), r#ref: Some(conversation.into()), plus: 0, minus: 0, commit: None, also: vec![] };
             if let Err(err) = activity::record(v, line) {
                 eprintln!("knowledge: activity of {} in {}: {err:#}", e.rel, v.id);
             }
@@ -163,7 +163,11 @@ pub(super) fn commit(v: &Vault, t: &Turn, told: &BTreeSet<String>) -> (Vec<Value
         let first = t.question.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
         let message = format!("Ask: {}", first.chars().take(60).collect::<String>().trim_end());
         match git::commit_paths(&v.root, &paths, &message) {
-            git::Commit::Done(id) => out.push(json!({"type": "notice", "kind": "committed", "text": format!("Committed {} file{} \u{b7} {id}", paths.len(), if paths.len() == 1 { "" } else { "s" })})),
+            git::Commit::Done(id) => {
+                // The edits' lines were written as they were allowed; the commit comes after them: it is Echo's too.
+                activity::committed(v, "ask", &id);
+                out.push(json!({"type": "notice", "kind": "committed", "text": format!("Committed {} file{} \u{b7} {id}", paths.len(), if paths.len() == 1 { "" } else { "s" })}))
+            }
             git::Commit::Skipped(why) => reasons.push((why.clone(), format!("Not committed: {why}"))),
             git::Commit::Off => {}
         }
@@ -515,6 +519,31 @@ mod tests {
         assert_eq!(commits(&v), "3", "nothing of the user's committed");
     }
 
+    /// K11-T2 with a real Curate turn (fix I1): the turn's commit, made after its edit's line, is Echo's — What's new
+    /// shows the edit once, as Ask (Curate), and never again as the git identity's commit.
+    #[test]
+    fn a_curate_turns_commit_is_echos_in_whats_new() {
+        let (_env, root) = crate::paths::testenv::folders("chat-commit-home");
+        let _iso = git::tests::isolated(&root, true);
+        let _fake = fake::install(&root);
+        let _clean = clean();
+        let p = signed_in();
+        let Some(v) = git_vault(&root, &[]) else { return };
+        let acme = v.root.join("knowledge/clients/acme.md");
+        apply(&p, 1, &acme, ACME_AFTER);
+        let one = ask("req-1", "toolu_1", "Edit", json!({"file_path": acme, "old_string": "# Acme Corp\n", "new_string": "# Acme Corp\n\nPilot on 18 November.\n"}));
+        script(&p, "chat.1.jsonl", &lines(&[init(), one, json!({"_apply": 1}), done("toolu_1", true), end(&[])]));
+        let id = send(&v.id, None, "Add the pilot date to Acme Corp", Mode::Curate, &[]).unwrap();
+        events_until(&v.id, &id, |_, c| c.waiting);
+        permit(&id, "req-1", true, false, None).unwrap();
+        events_until(&v.id, &id, |ev, c| !c.busy && of_type(ev, "notice").iter().any(|n| n["kind"] == "committed"));
+        assert_eq!(git::out(&v.root, &["log", "-1", "--format=%s"]).unwrap(), "Ask: Add the pilot date to Acme Corp");
+        let rows = crate::knowledge::home::whats_new(&v, 14, 12);
+        let acme_rows: Vec<(&str, &str)> = rows.iter().filter(|r| r.path == "knowledge/clients/acme.md").map(|r| (r.by.as_str(), r.detail.as_str())).collect();
+        assert_eq!(acme_rows.iter().map(|(by, _)| *by).collect::<Vec<_>>(), ["ask", "commit"], "the turn's, then the vault's first commit: {acme_rows:?}");
+        assert!(!acme_rows[1].1.contains("Ask:"), "the turn's commit is Echo's, not the user's: {acme_rows:?}");
+    }
+
     #[test]
     fn a_status_git_cant_answer_never_lets_a_turn_commit() {
         let (_env, root) = crate::paths::testenv::folders("chat-commit-unanswered");
@@ -677,10 +706,13 @@ mod tests {
         // Allowed all the same: its line (no texts to count) and its commit.
         permit(&id, "req-1", true, false, None).unwrap();
         let ev = events_until(&v.id, &id, |ev, c| !c.busy && !of_type(ev, "notice").is_empty());
-        let l = all_lines(&v);
-        assert_eq!(l.len(), 1, "{l:?}");
+        let all = all_lines(&v);
+        let (l, named): (Vec<_>, Vec<_>) = all.iter().partition(|e| e.kind != "commit");
+        assert_eq!(l.len(), 1, "{all:?}");
         assert_eq!((l[0].path.as_str(), l[0].by.as_str(), l[0].plus, l[0].minus), ("knowledge/clients/legacy.md", "ask", 0, 0));
         assert_eq!(commits(&v), "2", "{ev:#?}");
+        // The turn's commit, made after the edit's line, has a line of its own: it is Echo's (Home, fix I1).
+        assert_eq!(named.iter().map(|e| e.commit.clone()).collect::<Vec<_>>(), [git::out(&v.root, &["rev-parse", "--short", "HEAD"])]);
         assert_eq!(git::out(&v.root, &["show", "--name-only", "--format=", "HEAD"]).unwrap().trim(), "knowledge/clients/legacy.md");
     }
 }

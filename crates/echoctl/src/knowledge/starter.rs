@@ -143,7 +143,7 @@ pub fn create(name: &str, folder: Option<PathBuf>, git: bool, minutes: &str) -> 
     }
     let vault = super::add(&dir, super::AddOpts { name: Some(name.into()), profile: None, minutes: Some(minutes.into()), commit: Some(git_state == "committed"), template: Some(TEMPLATE.into()) })?;
     // Every new vault is a change Echo made; the commit is named when there was one.
-    let e = super::activity::Entry { at: chrono::Local::now().to_rfc3339(), path: String::new(), kind: "new".into(), by: "starter".into(), r#ref: Some(TEMPLATE.into()), plus: lines_written, minus: 0, commit: first_id };
+    let e = super::activity::Entry { at: chrono::Local::now().to_rfc3339(), path: String::new(), kind: "new".into(), by: "starter".into(), r#ref: Some(TEMPLATE.into()), plus: lines_written, minus: 0, commit: first_id, also: vec![] };
     if let Err(err) = super::activity::record(&vault, e) {
         eprintln!("knowledge: activity of the new vault {}: {err:#}", vault.id);
     }

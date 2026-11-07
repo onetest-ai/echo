@@ -17,7 +17,8 @@ pub struct Entry {
     pub at: String,
     /// The vault-relative path. The starter's line has an empty path: "the whole vault" (Home shows "The vault").
     pub path: String,
-    /// `new` or `edit`.
+    /// `new` or `edit`; `commit` for a line that only names a commit Echo made of changes its lines already name
+    /// ([`committed`]).
     pub kind: String,
     /// Who: `minutes`, `ingest`, `ask`, `health`, `editor`, `new-page`, `index-rows`, `source` or `starter`.
     pub by: String,
@@ -29,6 +30,10 @@ pub struct Entry {
     /// The commit's short id, when one was made.
     #[serde(default)]
     pub commit: Option<String>,
+    /// The other files the same write wrote — an index row, a log line (vault-relative): Echo's too, never a change of
+    /// their own (Home tells them from the user's).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub also: Vec<String>,
 }
 
 fn dir(v: &Vault) -> PathBuf {
@@ -94,13 +99,29 @@ pub fn commit_id(label: &str) -> Option<String> {
 /// record never fails the write the user asked for: it is logged and the caller goes on. A change that changed nothing
 /// leaves no line.
 pub fn changed(v: &Vault, path: &str, by: &str, r#ref: Option<&str>, old: Option<&str>, new: &str, commit: Option<String>) {
+    changed_with(v, path, by, r#ref, old, new, commit, &[]);
+}
+
+/// [`changed`], with the other files the same write wrote (absolute, under the vault's root): an index row, a log line.
+#[allow(clippy::too_many_arguments)]
+pub fn changed_with(v: &Vault, path: &str, by: &str, r#ref: Option<&str>, old: Option<&str>, new: &str, commit: Option<String>, also: &[std::path::PathBuf]) {
     let (plus, minus) = super::diff::counts(&super::diff::lines(old.unwrap_or(""), new));
     if old.is_some() && plus == 0 && minus == 0 {
         return;
     }
-    let e = Entry { at: chrono::Local::now().to_rfc3339(), path: path.into(), kind: if old.is_some() { "edit" } else { "new" }.into(), by: by.into(), r#ref: r#ref.map(str::to_owned), plus, minus, commit };
+    let also = also.iter().filter_map(|p| p.strip_prefix(&v.root).ok()).map(|r| r.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/")).filter(|r| r != path).collect();
+    let e = Entry { at: chrono::Local::now().to_rfc3339(), path: path.into(), kind: if old.is_some() { "edit" } else { "new" }.into(), by: by.into(), r#ref: r#ref.map(str::to_owned), plus, minus, commit, also };
     if let Err(err) = record(v, e) {
         eprintln!("knowledge: activity of {} in {}: {err:#}", path, v.id);
+    }
+}
+
+/// Echo made commit `id` of changes its lines already name, after them (a Curate turn's end, *Save past minutes*): a
+/// line naming the commit, so it is never taken for the user's (`kind: commit`, no change of its own).
+pub fn committed(v: &Vault, by: &str, id: &str) {
+    let e = Entry { at: chrono::Local::now().to_rfc3339(), path: String::new(), kind: "commit".into(), by: by.into(), r#ref: None, plus: 0, minus: 0, commit: Some(id.into()), also: vec![] };
+    if let Err(err) = record(v, e) {
+        eprintln!("knowledge: activity of commit {id} in {}: {err:#}", v.id);
     }
 }
 
@@ -115,7 +136,7 @@ mod tests {
     }
 
     fn entry(n: usize) -> Entry {
-        Entry { at: chrono::Local::now().to_rfc3339(), path: format!("p{n}.md"), kind: "edit".into(), by: "editor".into(), r#ref: None, plus: n, minus: 0, commit: None }
+        Entry { at: chrono::Local::now().to_rfc3339(), path: format!("p{n}.md"), kind: "edit".into(), by: "editor".into(), r#ref: None, plus: n, minus: 0, commit: None, also: vec![] }
     }
 
     #[test]

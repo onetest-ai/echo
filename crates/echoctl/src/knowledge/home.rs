@@ -18,7 +18,8 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{Duration, Instant};
+#[cfg(test)]
+use std::time::Duration;
 
 use super::activity::{self, Entry};
 use super::health::{self, By, Finding, Group};
@@ -33,8 +34,6 @@ pub const ROWS: usize = 12;
 const COMMITS: usize = 200;
 /// A page changed this soon after Echo's line for it is Echo's own write.
 const SLACK_MS: i64 = 2000;
-/// git's answer is used this long before it is read again (in the background).
-const GIT_FRESH: Duration = Duration::from_secs(20);
 /// Conversations under *Continue* (K11-03).
 const CONTINUE: usize = 3;
 
@@ -147,14 +146,23 @@ fn commit_of(chunk: &str, prefix: &str) -> Option<Commit> {
     Some(Commit { id: id.into(), short: short.into(), author: author.into(), at: at.into(), t, subject: subject.into(), files })
 }
 
-/// What git says of the vault in `root` — reads only; `None` when it isn't in a repository git can read.
-pub(super) fn read_git(root: &Path, days: i64) -> Option<GitFacts> {
-    #[cfg(test)]
-    std::thread::sleep(*lock(&DELAY));
-    let prefix = git::out(root, &["rev-parse", "--show-prefix"])?;
+/// The vault's last commits — `git log` of the last `days` days, at most [`COMMITS`] of them (the rest of a long
+/// history isn't read); `prefix` is the vault's folder in the repository (`rev-parse --show-prefix`).
+fn log_of(root: &Path, prefix: &str, days: i64) -> Vec<Commit> {
     let (since, most) = (format!("--since={days}.days"), format!("-n{COMMITS}"));
     let log = git::out(root, &["-c", "core.quotepath=off", "log", &since, &most, "--numstat", "--summary", "--no-renames", "--relative", "--format=%x1e%H%x1f%h%x1f%an%x1f%cI%x1f%s", "--", "."]).unwrap_or_default();
-    let commits = log.split('\u{1e}').filter_map(|c| commit_of(c, &prefix)).collect();
+    log.split('\u{1e}').filter_map(|c| commit_of(c, prefix)).collect()
+}
+
+/// What git says of the vault in `root` — reads only; `None` when git can't read the repository it is in.
+pub(super) fn read_git(root: &Path, days: i64) -> Option<GitFacts> {
+    #[cfg(test)]
+    {
+        std::thread::sleep(*lock(&DELAY));
+        READS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+    let prefix = git::out(root, &["rev-parse", "--show-prefix"])?;
+    let commits = log_of(root, &prefix, days);
     // Against the last commit (a repository without one: every file is git's news).
     let diff = git::out(root, &["-c", "core.quotepath=off", "diff", "--numstat", "--no-renames", "--relative", "HEAD", "--", "."]).unwrap_or_default();
     let mut dirty: Vec<_> = diff.lines().filter_map(numstat).map(|(p, a, d)| (p, a, d, false)).collect();
@@ -171,10 +179,9 @@ pub(super) fn read_git(root: &Path, days: i64) -> Option<GitFacts> {
     Some(GitFacts { commits, dirty, branch, last })
 }
 
-/// What git said of a vault (by its folder and id): for which revision of its pages, when, and whether a read goes.
+/// What git said of a vault (by its folder and id), and for which revision of its pages; whether a read goes.
 struct Held {
     rev: String,
-    at: Instant,
     got: Option<Got>,
     reading: bool,
 }
@@ -182,33 +189,47 @@ struct Held {
 #[derive(Clone)]
 enum Got {
     Repo(Arc<GitFacts>),
-    NotRepo,
+    /// The vault is in a repository git didn't answer for.
+    Failed,
 }
 
 type Reads = HashMap<(PathBuf, String), Held>;
 static GIT: Mutex<Option<Reads>> = Mutex::new(None);
 #[cfg(test)]
 static DELAY: Mutex<Duration> = Mutex::new(Duration::ZERO);
+/// (tests) How many times git was read.
+#[cfg(test)]
+static READS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+#[cfg(test)]
+fn git_reads() -> usize {
+    READS.load(std::sync::atomic::Ordering::SeqCst)
+}
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// A folder git may answer for: git is there, and the folder or one above it has a `.git` (nothing is run to know).
+/// The folder or one above it has a `.git` (nothing is run to know).
 fn in_repo(root: &Path) -> bool {
-    git::program().is_some() && root.ancestors().any(|d| d.join(".git").exists())
+    root.ancestors().any(|d| d.join(".git").exists())
 }
 
-/// What git said of the vault, never waiting for it: `ready` (read for these pages within [`GIT_FRESH`]), `pending` (a
-/// read goes on its own thread; what it read before, if anything, meanwhile) or `none` (no repository).
+/// What git said of the vault, never waiting for it, and where that stands (`whats_new.git`): `ready` — read for the
+/// pages as they are (kept until they change: git isn't read again meanwhile); `pending` — the pages changed and git
+/// is read again, what it said before used meanwhile; `reading` — nothing read yet; `failed` — a repository git didn't
+/// answer for; `none` — no repository; `no-git` — git isn't there.
 fn git_now(v: &Vault, ix: &Index) -> (Option<Arc<GitFacts>>, &'static str) {
+    if git::program().is_none() {
+        return (None, "no-git");
+    }
     if !in_repo(&v.root) {
         return (None, "none");
     }
     let key = (v.root.clone(), v.id.clone());
     let mut all = lock(&GIT);
-    let h = all.get_or_insert_with(HashMap::new).entry(key.clone()).or_insert_with(|| Held { rev: String::new(), at: Instant::now(), got: None, reading: false });
-    let fresh = h.got.is_some() && h.rev == ix.rev && h.at.elapsed() < GIT_FRESH;
+    let h = all.get_or_insert_with(HashMap::new).entry(key.clone()).or_insert_with(|| Held { rev: String::new(), got: None, reading: false });
+    let fresh = h.got.is_some() && h.rev == ix.rev;
     if !fresh && !h.reading {
         h.reading = true;
         let (root, rev) = (v.root.clone(), ix.rev.clone());
@@ -220,19 +241,19 @@ fn git_now(v: &Vault, ix: &Index) -> (Option<Arc<GitFacts>>, &'static str) {
                     if let Some(h) = lock(&GIT).as_mut().and_then(|a| a.get_mut(&self.0)) {
                         h.reading = false;
                         if let Some(g) = self.2.take() {
-                            *h = Held { rev: std::mem::take(&mut self.1), at: Instant::now(), got: Some(g), reading: false };
+                            *h = Held { rev: std::mem::take(&mut self.1), got: Some(g), reading: false };
                         }
                     }
                 }
             }
             let mut done = Done(key, rev, None);
-            done.2 = Some(read_git(&root, DAYS).map_or(Got::NotRepo, |f| Got::Repo(Arc::new(f))));
+            done.2 = Some(read_git(&root, DAYS).map_or(Got::Failed, |f| Got::Repo(Arc::new(f))));
         });
     }
     match &h.got {
-        Some(Got::NotRepo) => (None, "none"),
+        Some(Got::Failed) => (None, "failed"),
         Some(Got::Repo(f)) => (Some(f.clone()), if fresh { "ready" } else { "pending" }),
-        None => (None, "pending"),
+        None => (None, "reading"),
     }
 }
 
@@ -291,21 +312,25 @@ fn rows(v: &Vault, ix: &Index, acts: &[Entry], git: Option<&GitFacts>, mtimes: b
     let page = |rel: &str| scan::page_rel(v, rel).and_then(|p| ix.pages.get(&p));
     let ms = |at: &str| DateTime::parse_from_rfc3339(at).ok().map(|t| t.timestamp_millis());
     let local = |t: i64| DateTime::from_timestamp_millis(t).map(|d| d.with_timezone(&Local).to_rfc3339()).unwrap_or_default();
-    // When Echo last wrote each page; the starter wrote them all.
+    // When Echo last wrote each file — a line's page and what the same write wrote with it (an index row, a log line);
+    // the starter wrote them all. A line that only names a commit wrote nothing.
+    let changes: Vec<&Entry> = acts.iter().filter(|e| e.kind != "commit").collect();
     let (mut wrote, mut whole) = (HashMap::new(), None::<i64>);
-    for e in acts {
+    for e in &changes {
         let Some(t) = ms(&e.at) else { continue };
         if e.path.is_empty() {
             whole = whole.max(Some(t));
-        } else {
-            let w = wrote.entry(e.path.as_str()).or_insert(t);
+            continue;
+        }
+        for p in std::iter::once(&e.path).chain(&e.also) {
+            let w = wrote.entry(p.as_str()).or_insert(t);
             *w = (*w).max(t);
         }
     }
     let echos = |rel: &str, mtime: i64| wrote.get(rel).copied().max(whole).is_some_and(|w| mtime <= w + SLACK_MS);
     let runs = run_sources(v);
     let mut out = vec![];
-    for e in acts {
+    for e in &changes {
         // A source isn't a page: Coming in says what came in.
         let Some(t) = ms(&e.at).filter(|t| *t >= since && e.by != "source") else { continue };
         if e.path.is_empty() {
@@ -319,7 +344,7 @@ fn rows(v: &Vault, ix: &Index, acts: &[Entry], git: Option<&GitFacts>, mtimes: b
         out.push(Row { path: e.path.clone(), title: p.title.clone(), kind: e.kind.clone(), plus: Some(e.plus), minus: Some(e.minus), at: e.at.clone(), by: by.into(), who: who.into(), detail, t });
     }
     if let Some(g) = git {
-        // Echo's own commits are its lines' already.
+        // Echo's own commits are its lines' already (a turn's or a batch's commit has a line of its own).
         let echo: Vec<&str> = acts.iter().filter_map(|e| e.commit.as_deref()).filter(|c| !c.is_empty()).collect();
         for c in g.commits.iter().filter(|c| c.t >= since && !echo.iter().any(|e| c.id.starts_with(e))) {
             for (path, plus, minus, new) in &c.files {
@@ -352,14 +377,14 @@ fn rows(v: &Vault, ix: &Index, acts: &[Entry], git: Option<&GitFacts>, mtimes: b
     out.into_iter().zip(keep).filter_map(|(r, k)| k.then_some(r)).collect()
 }
 
-/// What's new (K11-04): the last `days` days, newest first, at most `max` rows a filter — git read here and now, as the
-/// tests ask it; the window's route reads git in the background instead (`view`).
-#[allow(dead_code)]
+/// (tests) What's new (K11-04): the last `days` days, newest first, at most `max` rows a filter — git read here and
+/// now; the window's route reads git in the background instead (`view`).
+#[cfg(test)]
 pub fn whats_new(v: &Vault, days: i64, max: usize) -> Vec<Row> {
     let Ok(ix) = scan::index(v) else { return vec![] };
     let since = (Local::now() - chrono::Duration::days(days)).timestamp_millis();
     let acts = activity::recent(v, "1970-01-01T00:00:00+00:00");
-    let git = if in_repo(&v.root) { read_git(&v.root, days) } else { None };
+    let git = if git::program().is_some() && in_repo(&v.root) { read_git(&v.root, days) } else { None };
     rows(v, &ix, &acts, git.as_ref(), git.is_none(), since, max)
 }
 
@@ -384,6 +409,22 @@ fn has_phrase(hay: &str, needle: &str) -> bool {
         })
 }
 
+/// Words meetings are named with whatever they are about: a client page named so is never found in a title.
+const COMMON: [&str; 26] = [
+    "sync", "weekly", "daily", "meeting", "call", "review", "team", "standup", "stand-up", "planning", "retro", "demo", "update",
+    "kickoff", "kick-off", "workshop", "catch up", "check-in", "all hands", "client", "clients", "project", "internal", "interview",
+    "sprint", "status",
+];
+/// Mail services anyone writes from: their name says nothing about a client.
+const MAIL_SERVICES: [&str; 13] = ["gmail", "googlemail", "outlook", "hotmail", "live", "msn", "yahoo", "icloud", "proton", "protonmail", "aol", "gmx", "mail"];
+
+/// The user's own mail domains — Settings → About me, Echo's Microsoft 365 sign-in (both read from Echo's files): the
+/// user's colleagues write from them, so they never make a meeting a client's.
+fn own_domains() -> Vec<String> {
+    let me = crate::config::Config::load().ok().and_then(|c| c.me).and_then(|p| p.email);
+    me.into_iter().chain(crate::graph::account()).filter_map(|m| m.rsplit_once('@').map(|(_, d)| d.trim().to_lowercase())).filter(|d| !d.is_empty()).collect()
+}
+
 /// `https://www.acme.example/` → `acme.example`.
 fn bare_domain(d: &str) -> String {
     let d = d.trim().to_lowercase();
@@ -393,13 +434,15 @@ fn bare_domain(d: &str) -> String {
 
 impl Client<'_> {
     /// Is the meeting about this client: its title names it, or someone in it writes from the client's domain (or a
-    /// domain named as the page is: `sam@acme.example` for `clients/acme.md`).
-    fn about(&self, e: &Event) -> bool {
+    /// domain named as the page is: `sam@acme.example` for `clients/acme.md`) — never from one of `own` (the user's)
+    /// or a mail service's.
+    fn about(&self, e: &Event, own: &[String]) -> bool {
         let title = e.title.to_lowercase();
         self.names.iter().any(|n| has_phrase(&title, n))
-            || e.emails.iter().filter_map(|m| m.rsplit_once('@').map(|(_, d)| d.to_lowercase())).any(|d| {
+            || e.emails.iter().filter_map(|m| m.rsplit_once('@').map(|(_, d)| d.to_lowercase())).filter(|d| !own.contains(d)).any(|d| {
                 let label = d.split('.').next().unwrap_or("");
-                self.domains.iter().any(|x| d == *x || d.ends_with(&format!(".{x}"))) || (label.chars().count() >= 3 && (label == self.stem || self.stem.split(['-', '_', ' ']).next() == Some(label)))
+                let named = label.chars().count() >= 3 && !MAIL_SERVICES.contains(&label) && (label == self.stem || self.stem.split(['-', '_', ' ']).next() == Some(label));
+                self.domains.iter().any(|x| d == *x || d.ends_with(&format!(".{x}"))) || named
             })
     }
 }
@@ -413,7 +456,7 @@ fn clients<'a>(ix: &'a Index, in_scope: &impl Fn(&str) -> bool) -> Vec<Client<'a
             let stem = p.path.rsplit('/').next().unwrap_or(&p.path).trim_end_matches(".md").to_lowercase();
             let mut names = vec![p.title.to_lowercase(), stem.replace(['-', '_'], " ")];
             names.extend(fm::get(&p.props, "aliases").map(|a| a.items()).unwrap_or_default().iter().map(|a| a.to_lowercase()));
-            let mut names: Vec<String> = names.into_iter().map(|n| n.trim().to_string()).filter(|n| n.chars().count() >= 3).collect();
+            let mut names: Vec<String> = names.into_iter().map(|n| n.trim().to_string()).filter(|n| n.chars().count() >= 3 && !COMMON.contains(&n.as_str())).collect();
             names.dedup();
             let domains = ["domain", "domains", "website"].iter().filter_map(|k| fm::get(&p.props, k)).flat_map(|x| x.items()).map(|d| bare_domain(&d)).filter(|d| d.contains('.')).collect();
             Client { page: p, names, domains, stem }
@@ -459,7 +502,7 @@ fn day_word(d: NaiveDate, today: NaiveDate) -> String {
     }
 }
 
-fn suggest(v: &Vault, ix: &Index, calendar: &[Event], findings: &[Finding], now: DateTime<Local>) -> Vec<Value> {
+fn suggest(v: &Vault, ix: &Index, calendar: &[Event], findings: &[Finding], now: DateTime<Local>, own: &[String]) -> Vec<Value> {
     let in_scope = checks::in_scope(v);
     let page = |p: &Page| json!({ "path": scan::vault_rel(v, &p.path), "title": p.title });
     let today = now.date_naive();
@@ -468,7 +511,7 @@ fn suggest(v: &Vault, ix: &Index, calendar: &[Event], findings: &[Finding], now:
     let clients = clients(ix, &in_scope);
     let mut soon: Vec<(DateTime<Local>, &Event)> = calendar.iter().map(|e| (e.start.with_timezone(&Local), e)).filter(|(d, e)| *d >= now && (d.date_naive() == today || today.succ_opt() == Some(d.date_naive())) && !e.title.trim().is_empty()).collect();
     soon.sort_by_key(|(d, _)| *d);
-    if let Some((d, e, c)) = soon.iter().find_map(|(d, e)| clients.iter().find(|c| c.about(e)).map(|c| (d, e, c))) {
+    if let Some((d, e, c)) = soon.iter().find_map(|(d, e)| clients.iter().find(|c| c.about(e, own)).map(|c| (d, e, c))) {
         let day = if d.date_naive() == today { "today" } else { "tomorrow" };
         out.push(json!({ "kind": "meeting", "text": format!("Brief me for {} at {}", e.title.trim(), d.format("%H:%M")), "why": format!("{day} · matches {}", c.page.path), "pages": [page(c.page)] }));
     }
@@ -489,9 +532,9 @@ fn suggest(v: &Vault, ix: &Index, calendar: &[Event], findings: &[Finding], now:
 
 /// The Ask box's suggestions (K11-02), at most four, in this order and each only when its source is there: the next
 /// meeting today or tomorrow a client page is about, the newest note, an action-items folder with pages, a
-/// contradiction Health holds. None is invented.
-pub fn suggestions(v: &Vault, calendar: &[Event], findings: &[Finding]) -> Vec<Value> {
-    scan::index(v).map(|ix| suggest(v, &ix, calendar, findings, Local::now())).unwrap_or_default()
+/// contradiction Health holds. None is invented. `ix` is the vault's index the caller has.
+pub fn suggestions(v: &Vault, ix: &Index, calendar: &[Event], findings: &[Finding]) -> Vec<Value> {
+    suggest(v, ix, calendar, findings, Local::now(), &own_domains())
 }
 
 // ── the cards ──
@@ -575,7 +618,8 @@ fn coming_in(v: &Vault, ing: &Result<Value>) -> Value {
     json!({ "waiting": waiting, "runs": review, "new": kinds.iter().map(|(_, n)| n).sum::<usize>(), "kinds": kinds, "running": running, "offer": d["offer"] })
 }
 
-/// Most linked (K11-07): the index with the pages it links to, and the four pages most pages link to (hubs left out).
+/// Most linked (K11-07): the index with the pages it links to, and the four pages Health judges (no taxonomy or README)
+/// that most pages link to, hubs left out.
 fn hubs(v: &Vault, ix: &Index) -> Value {
     let index = v.path("index").and_then(|i| scan::page_rel(v, &i)).filter(|i| ix.pages.contains_key(i));
     let g = links::graph(ix, index.as_deref(), "links");
@@ -588,7 +632,8 @@ fn hubs(v: &Vault, ix: &Index) -> Value {
             listed += 1;
         }
     }
-    let mut top: Vec<(&str, usize)> = into.into_iter().filter(|(p, _)| !hubs.contains(p)).collect();
+    let in_scope = checks::in_scope(v);
+    let mut top: Vec<(&str, usize)> = into.into_iter().filter(|(p, _)| !hubs.contains(p) && in_scope(p)).collect();
     top.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
     let pages: Vec<Value> = top.into_iter().take(4).map(|(p, n)| json!({ "path": scan::vault_rel(v, p), "title": ix.pages.get(p).map(|x| x.title.clone()), "in": n })).collect();
     json!({ "index": index.as_deref().map(|i| json!({ "path": scan::vault_rel(v, i), "links": listed })), "pages": pages })
@@ -628,13 +673,13 @@ pub fn view(v: &Vault) -> Result<Value> {
     let since = (now - chrono::Duration::days(DAYS)).timestamp_millis();
     let acts = activity::recent(v, "1970-01-01T00:00:00+00:00");
     let (git, state) = git_now(v, &ix);
-    let news = rows(v, &ix, &acts, git.as_deref(), state == "none", since, ROWS);
+    let news = rows(v, &ix, &acts, git.as_deref(), matches!(state, "none" | "no-git" | "failed"), since, ROWS);
     let (health, shown) = health_card(v, &ix);
     let ing = ingest::value(v);
     Ok(json!({
         "rev": ix.rev,
         "fresh": fresh(v, &ix, &acts, &ing),
-        "suggestions": suggestions(v, &calendar(), &shown),
+        "suggestions": suggestions(v, &ix, &calendar(), &shown),
         "continue": conversations(v),
         "whats_new": { "rows": news, "git": state, "notes": v.path("notes") },
         "health": health,
@@ -660,7 +705,11 @@ mod tests {
 
     /// Every file under `dir` last changed `days` days ago (a fixture written just now would look changed today).
     fn age(dir: &Path, days: i64) {
-        let when = SystemTime::now() - std::time::Duration::from_secs(days as u64 * 86_400);
+        age_by(dir, days * 86_400);
+    }
+
+    fn age_by(dir: &Path, secs: i64) {
+        let when = SystemTime::now() - std::time::Duration::from_secs(secs as u64);
         fn walk(d: &Path, when: SystemTime) {
             for e in std::fs::read_dir(d).unwrap().flatten() {
                 let p = e.path();
@@ -687,8 +736,21 @@ mod tests {
         fixture::write(&v.root, rel, text);
         set_mtime(&p, at);
         let (plus, minus) = diff::counts(&diff::lines(old.as_deref().unwrap_or(""), text));
-        let e = activity::Entry { at: at.to_rfc3339(), path: rel.into(), kind: if old.is_some() { "edit" } else { "new" }.into(), by: by.into(), r#ref: r#ref.map(str::to_owned), plus, minus, commit: None };
+        let e = activity::Entry { at: at.to_rfc3339(), path: rel.into(), kind: if old.is_some() { "edit" } else { "new" }.into(), by: by.into(), r#ref: r#ref.map(str::to_owned), plus, minus, commit: None, also: vec![] };
         activity::record(v, e).unwrap();
+    }
+
+    /// A vault from the starter as if made `hours` ago: its files' times and its activity lines moved back (else a save
+    /// right after it would be within the slack of the starter's own line).
+    fn made_ago(v: &Vault, hours: i64) {
+        age_by(&v.root, hours * 3600);
+        let f = crate::knowledge::cache_dir(&v.id).join("activity.jsonl");
+        let moved: String = std::fs::read_to_string(&f).unwrap().lines().map(|l| {
+            let mut e: activity::Entry = serde_json::from_str(l).unwrap();
+            e.at = (DateTime::parse_from_rfc3339(&e.at).unwrap() - Duration::hours(hours)).to_rfc3339();
+            serde_json::to_string(&e).unwrap() + "\n"
+        }).collect();
+        std::fs::write(f, moved).unwrap();
     }
 
     /// git in `dir`, as `who` at `at` (author and committer), with the test's config only.
@@ -721,6 +783,11 @@ mod tests {
         }
     }
 
+    /// The suggestions, from the vault's index as it is now.
+    fn sugg(v: &Vault, calendar: &[Event], findings: &[Finding]) -> Vec<Value> {
+        suggestions(v, &scan::index(v).unwrap(), calendar, findings)
+    }
+
     fn texts(s: &[Value]) -> Vec<String> {
         s.iter().map(|x| x["text"].as_str().unwrap_or("").to_string()).collect()
     }
@@ -741,7 +808,7 @@ mod tests {
             ev("Acme Corp · Retro", soon + Duration::hours(2), &[]),
         ];
         let found = [finding("contradiction", "Acme go-live: 12 Dec or 9 Jan", &["knowledge/clients/acme.md", "knowledge/notes/2026-01-02-b.md"])];
-        let s = suggestions(&v, &calendar, &found);
+        let s = sugg(&v, &calendar, &found);
         let kinds: Vec<&str> = s.iter().map(|x| x["kind"].as_str().unwrap()).collect();
         assert_eq!(kinds, ["meeting", "note", "actions", "contradiction"], "{s:?}");
         assert_eq!(texts(&s), [
@@ -758,17 +825,17 @@ mod tests {
 
         // By an attendee's domain: a meeting whose title names no client.
         let by_domain = [ev("Weekly sync", soon, &["sam@acme.example"])];
-        assert_eq!(suggestions(&v, &by_domain, &[])[0]["text"], format!("Brief me for Weekly sync at {}", soon.format("%H:%M")));
+        assert_eq!(sugg(&v, &by_domain, &[])[0]["text"], format!("Brief me for Weekly sync at {}", soon.format("%H:%M")));
         // A meeting past, in three days, or matching no client page: none for it.
         let none = [ev("Acme Corp · Kickoff", Local::now() - Duration::hours(2), &[]), ev("Acme Corp · Planning", Local::now() + Duration::days(3), &[]), ev("Dentist", soon, &["a@smiles.example"])];
-        assert_eq!(suggestions(&v, &none, &[])[0]["kind"], "note", "no meeting suggestion");
+        assert_eq!(sugg(&v, &none, &[])[0]["kind"], "note", "no meeting suggestion");
 
         // A vault with none of them: nothing is invented.
         let bare = root.join("bare");
         fixture::write(&bare, "Hello.md", "# Hello\n");
         let b = crate::knowledge::add(&bare, AddOpts { name: Some("Bare".into()), ..Default::default() }).unwrap();
-        assert_eq!(suggestions(&b, &[], &[]), Vec::<Value>::new());
-        assert_eq!(suggestions(&b, &calendar, &[finding("stale", "An old line", &["Hello.md"])]), Vec::<Value>::new(), "no client page, no contradiction");
+        assert_eq!(sugg(&b, &[], &[]), Vec::<Value>::new());
+        assert_eq!(sugg(&b, &calendar, &[finding("stale", "An old line", &["Hello.md"])]), Vec::<Value>::new(), "no client page, no contradiction");
     }
 
     /// A row as (path, by, who, plus, minus).
@@ -814,6 +881,131 @@ mod tests {
         assert_eq!(rows[1].title, "Pricing");
         assert!(rows[1].detail.contains("pricing draft"), "the commit's message: {}", rows[1].detail);
         assert_eq!(rows[0].detail, "not committed");
+    }
+
+    // K11-T2 with Echo committing (fix I1): a minutes save, *Save past minutes* (one commit for all, made after their
+    // lines) and a page made with its index row are Echo's, never the git identity's own commits.
+    #[test]
+    fn echos_own_commits_never_show_as_the_users() {
+        let (_env, root) = crate::paths::testenv::folders("kn-home-commits");
+        let _iso = git::tests::isolated(&root, true);
+        if git::program().is_none() {
+            return;
+        }
+        let v = crate::knowledge::starter::create("My twin", Some(root.join("my-twin")), true, "auto").unwrap().vault;
+        assert!(v.git.commit, "a vault Echo makes commits");
+        let call = fixture::call("2026-11-05_090012-weekly-delivery-sync", "Weekly delivery sync", "system", fixture::MINUTES);
+        crate::knowledge::export::save(&call, &v.id, crate::knowledge::export::How::Auto).unwrap();
+        fixture::call("2026-11-03_100000-pricing-workshop", "Pricing workshop", "system", fixture::MINUTES);
+        fixture::call("2026-11-04_100000-design-review", "Design review", "system", fixture::MINUTES);
+        assert_eq!(crate::knowledge::export::save_past(&v.id).unwrap()["saved"], 2);
+        crate::knowledge::page::create(&v, "knowledge/topics", "Pricing", None, true).unwrap();
+        assert_eq!(git::out(&v.root, &["status", "--porcelain"]).unwrap(), "", "all committed");
+        let rows = whats_new(&v, 14, 12);
+        assert!(rows.iter().all(|r| r.by != "commit" && r.by != "outside"), "Echo's commits are its lines': {rows:#?}");
+        assert_eq!(rows.iter().filter(|r| r.by == "minutes").count(), 3, "{rows:#?}");
+        assert_eq!(rows.iter().filter(|r| r.by == "you").count(), 1);
+    }
+
+    // Fix I2: what a save writes besides its page — an index row, a log line — is Echo's too.
+    #[test]
+    fn echos_index_and_log_writes_are_never_changed_outside_echo() {
+        let (_env, root) = crate::paths::testenv::folders("kn-home-also");
+        let _iso = git::tests::isolated(&root, true);
+        let call = fixture::call("2026-11-05_090012-weekly-delivery-sync", "Weekly delivery sync", "system", fixture::MINUTES);
+        let outside = |rows: &[Row]| rows.iter().filter(|r| r.by == "outside").map(|r| r.path.clone()).collect::<Vec<_>>();
+        // Without git: the index's time is all there is.
+        let plain = crate::knowledge::starter::create("Plain twin", Some(root.join("plain")), false, "auto").unwrap().vault;
+        made_ago(&plain, 2);
+        crate::knowledge::export::save(&call, &plain.id, crate::knowledge::export::How::Auto).unwrap();
+        crate::knowledge::page::create(&plain, "knowledge/topics", "Pricing", None, true).unwrap();
+        let rows = whats_new(&plain, 14, 12);
+        assert_eq!(outside(&rows), Vec::<String>::new(), "{rows:#?}");
+        assert!(rows.iter().any(|r| r.by == "minutes") && rows.iter().any(|r| r.by == "you"), "{rows:#?}");
+        // In git, commits off (a connected vault's default): the index and the log are written and not committed.
+        if git::program().is_none() {
+            return;
+        }
+        let g = crate::knowledge::starter::create("Git twin", Some(root.join("git")), true, "auto").unwrap().vault;
+        let g = crate::knowledge::set(&g.id, "commit", "false").unwrap();
+        made_ago(&g, 2);
+        crate::knowledge::export::save(&call, &g.id, crate::knowledge::export::How::Auto).unwrap();
+        crate::knowledge::page::create(&g, "knowledge/topics", "Pricing", None, true).unwrap();
+        assert!(git::out(&g.root, &["status", "--porcelain"]).unwrap().contains(" M knowledge/CATALOG.md"), "the index is written, not committed");
+        let rows = whats_new(&g, 14, 12);
+        assert_eq!(outside(&rows), Vec::<String>::new(), "{rows:#?}");
+    }
+
+    // Fix M3: your own domain and common words never make a meeting a client's.
+    #[test]
+    fn suggestions_leave_out_your_own_domain_and_common_words() {
+        let (_env, root) = crate::paths::testenv::folders("kn-home-own");
+        let v = vault(&root);
+        let cfg = crate::config::Config { me: Some(crate::meeting::Person { name: "Pat Example".into(), email: Some("pat@example.com".into()) }), ..Default::default() };
+        cfg.save().unwrap();
+        fixture::write(&v.root, "knowledge/clients/example.md", "---\ntitle: Example Labs\ntags: [client]\n---\n# Example Labs\n");
+        fixture::write(&v.root, "knowledge/clients/sync.md", "---\ntitle: Sync\ntags: [client]\n---\n# Sync\n");
+        let soon = Local::now() + Duration::hours(1);
+        let ev = |title: &str, emails: &[&str]| Event { title: title.into(), start: soon.fixed_offset(), emails: emails.iter().map(|e| e.to_string()).collect() };
+        let kinds = |c: &[Event]| sugg(&v, c, &[]).iter().map(|x| x["kind"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        assert_eq!(kinds(&[ev("Planning", &["alex@example.com", "pat@example.com"])]), ["note"], "your colleagues write from your domain");
+        assert_eq!(kinds(&[ev("Weekly sync", &[])]), ["note"], "a client page named Sync isn't every sync");
+        assert_eq!(kinds(&[ev("Example Labs · Kickoff", &[])]), ["meeting", "note"], "named in the title, it is theirs");
+    }
+
+    // Fixes M2, M5: git is read once per revision of the pages, and said as it answered.
+    #[test]
+    fn git_is_read_once_per_revision_and_said_as_it_answered() {
+        let (_env, root) = crate::paths::testenv::folders("kn-home-gitstate");
+        let _iso = git::tests::isolated(&root, true);
+        let state = |v: &Vault| view(v).unwrap()["whats_new"]["git"].as_str().unwrap().to_string();
+        let until = |v: &Vault, want: &str| {
+            let t = Instant::now();
+            loop {
+                let s = state(v);
+                if s == want {
+                    return;
+                }
+                assert!(t.elapsed() < std::time::Duration::from_secs(10), "{s}, never {want}");
+                std::thread::sleep(std::time::Duration::from_millis(30));
+            }
+        };
+        // No repository: said so at once, nothing read.
+        let plain = vault(&root);
+        assert_eq!(state(&plain), "none");
+        // A repository git can't read: git didn't answer, not "not a repository".
+        let broken = root.join("broken");
+        fixture::write(&broken, "Page.md", "# A page\n");
+        std::fs::write(broken.join(".git"), format!("gitdir: {}\n", root.join("no-such-repository").display())).unwrap();
+        let b = crate::knowledge::add(&broken, AddOpts { name: Some("Broken".into()), ..Default::default() }).unwrap();
+        if git::program().is_none() {
+            return;
+        }
+        assert_eq!(state(&b), "reading");
+        until(&b, "failed");
+        // A repository: read once for the pages as they are; asked again, not read again.
+        let r = root.join("repo");
+        fixture::write(&r, "Page.md", "# A page\n");
+        for args in [&["init", "-q", "-b", "main"][..], &["add", "-A"], &["commit", "-q", "-m", "first"]] {
+            assert!(git::run(&r, args).unwrap().status.success(), "{args:?}");
+        }
+        let g = crate::knowledge::add(&r, AddOpts { name: Some("Repo".into()), ..Default::default() }).unwrap();
+        assert_eq!(state(&g), "reading", "no facts yet: the window says it reads git");
+        until(&g, "ready");
+        let reads = git_reads();
+        for _ in 0..3 {
+            assert_eq!(state(&g), "ready");
+        }
+        assert_eq!(git_reads(), reads, "the same pages: git isn't read again");
+        // A page changed: what git said before is shown while it reads again.
+        fixture::write(&r, "Page.md", "# A page, changed\n");
+        assert_eq!(state(&g), "pending");
+        until(&g, "ready");
+        // No git at all.
+        std::env::set_var("ECHOCTL_NO_GIT", "1");
+        let s = state(&g);
+        std::env::remove_var("ECHOCTL_NO_GIT");
+        assert_eq!(s, "no-git");
     }
 
     // K11-T3
@@ -867,11 +1059,13 @@ mod tests {
         }
         assert!(git::run(&v.root, &["add", "-A", "--", "knowledge/notes"]).unwrap().status.success());
 
+        let prefix = git::out(&v.root, &["rev-parse", "--show-prefix"]).unwrap();
         let t = Instant::now();
-        let facts = read_git(&v.root, 14).expect("a repository");
+        let log = log_of(&v.root, &prefix, 14);
         let took = t.elapsed();
-        assert_eq!(facts.commits.len(), 200, "git log -n 200: the rest isn't read");
-        assert!(took <= std::time::Duration::from_millis(300), "read in {took:?}");
+        assert_eq!(log.len(), 200, "git log -n 200: the rest isn't read");
+        assert!(took <= std::time::Duration::from_millis(300), "the log read in {took:?}");
+        assert_eq!(read_git(&v.root, 14).expect("a repository").commits.len(), 200);
         let rows = whats_new(&v, 14, 12);
         assert_eq!(rows.len(), 12, "the newest 12");
         assert_eq!(rows[0].path, "knowledge/notes/n49.md");
@@ -882,6 +1076,8 @@ mod tests {
     fn home_draws_from_what_echo_holds() {
         let (_env, root) = crate::paths::testenv::folders("kn-home-view");
         let v = vault(&root);
+        // A taxonomy and a folder's README with links in: structure, not pages to start reading from (C1).
+        fixture::write(&v.root, "knowledge/topics/tags-used.md", "---\ntitle: Tags used\n---\nSee [[TAG_TAXONOMY]] and [the notes](../notes/README.md).\n");
         let h = view(&v).unwrap();
         for k in ["rev", "fresh", "suggestions", "continue", "whats_new", "health", "coming_in", "hubs", "vault"] {
             assert!(h.get(k).is_some(), "{k}: {h}");
@@ -891,7 +1087,9 @@ mod tests {
         assert_eq!(h["health"]["code_only"], true);
         assert_eq!(h["hubs"]["index"]["path"], "knowledge/CATALOG.md");
         assert_eq!(h["hubs"]["pages"][0]["path"], "knowledge/clients/acme.md", "the most linked page, the index left out");
-        assert_eq!(h["vault"]["pages"], 7);
+        let hubs: Vec<&str> = h["hubs"]["pages"].as_array().unwrap().iter().map(|p| p["path"].as_str().unwrap()).collect();
+        assert_eq!(hubs, ["knowledge/clients/acme.md", "knowledge/notes/2026-01-01-a.md", "knowledge/notes/2026-01-02-b.md"], "no taxonomy, no README");
+        assert_eq!(h["vault"]["pages"], 8, "the twin's 7 and the page about tags");
         assert_eq!(h["coming_in"]["new"], 1, "the deck in raw_inbox/");
         assert_eq!(h["coming_in"]["kinds"], json!([["file", 1]]));
     }

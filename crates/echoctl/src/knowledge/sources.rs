@@ -494,7 +494,7 @@ fn write_source(v: &Vault, n: New) -> Result<Added> {
         match text {
             Some(t) => super::activity::changed(v, r, "source", n.from.as_deref(), None, t, commit.clone()),
             None => {
-                let e = super::activity::Entry { at: now(), path: r.clone(), kind: "new".into(), by: "source".into(), r#ref: n.from.clone(), plus: 0, minus: 0, commit: commit.clone() };
+                let e = super::activity::Entry { at: now(), path: r.clone(), kind: "new".into(), by: "source".into(), r#ref: n.from.clone(), plus: 0, minus: 0, commit: commit.clone(), also: vec![] };
                 if let Err(err) = super::activity::record(v, e) {
                     eprintln!("knowledge: activity of {r} in {}: {err:#}", v.id);
                 }

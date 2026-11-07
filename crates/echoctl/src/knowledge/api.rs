@@ -760,7 +760,7 @@ mod tests {
         let first = json(&format!("{}/home", v.id), "");
         let took = t.elapsed();
         assert!(took < std::time::Duration::from_millis(300), "the first answer took {took:?}");
-        assert_eq!(first["whats_new"]["git"], "pending", "{}", first["whats_new"]);
+        assert_eq!(first["whats_new"]["git"], "reading", "nothing read yet: {}", first["whats_new"]);
         let commits = |h: &Value| h["whats_new"]["rows"].as_array().unwrap().iter().filter(|r| r["by"] == "commit").count();
         assert_eq!(commits(&first), 0, "git's rows aren't in it yet");
         let t = std::time::Instant::now();

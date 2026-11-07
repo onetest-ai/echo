@@ -15,14 +15,14 @@ const { knParseRoute, knRouteOf } = load(['kn-route'], ['knParseRoute', 'knRoute
 const { knTabCounts, knTabLabel } = load(['kn-tabs'], ['knTabCounts', 'knTabLabel'])
 const { knSwitcherEntries } = load(['kn-switcher'], ['knSwitcherEntries'])
 const { knChipState } = load(['kn-chip'], ['knChipState'])
-const { knBuildTree } = load(['kn-tree'], ['knBuildTree'])
+const { knBuildTree, knPagesEmpty } = load(['kn-tree'], ['knBuildTree', 'knPagesEmpty'])
 const { knFilterGraph, knIsolatedCount, knGraphStart } = load(['kn-graph'], ['knFilterGraph', 'knIsolatedCount', 'knGraphStart'])
 const { knRepel, knForceSim, knLabelPlan, knGraphHits, knShortLabel } = load(['kn-force'], ['knRepel', 'knForceSim', 'knLabelPlan', 'knGraphHits', 'knShortLabel'])
 const { knPlainPrompt } = load(['kn-prompt'], ['knPlainPrompt'])
 const { knKeepDraft, knRestoreDraft, knDropDraft, knEditText } = load(['kn-draft'], ['knKeepDraft', 'knRestoreDraft', 'knDropDraft', 'knEditText'])
 const { knLineDiff } = load(['kn-diff'], ['knLineDiff'])
 const { knChatTurns, knChatReadOutside, knFollow, knAnswerInto, knAnswerMd, knWaitingCard, knChatKey, knSentLanded } = load(['kn-chat'], ['knChatTurns', 'knChatReadOutside', 'knFollow', 'knAnswerInto', 'knAnswerMd', 'knWaitingCard', 'knChatKey', 'knSentLanded'])
-const { knChatOpen, knPollKeep, knChatTake } = load(['kn-poll'], ['knChatOpen', 'knPollKeep', 'knChatTake'])
+const { knChatOpen, knPollKeep, knChatTake, knSentWhere } = load(['kn-poll'], ['knChatOpen', 'knPollKeep', 'knChatTake', 'knSentWhere'])
 const { knToolRows } = load(['kn-tools'], ['knToolRows'])
 const { knMention, knMentionPick, knChatMessage } = load(['kn-mention'], ['knMention', 'knMentionPick', 'knChatMessage'])
 const { knHealthList, knHealthSelect, knHealthTrend, knTrendPath, knFixAll, knFixSummary, knHealthLoad, knHealthState, knLintNotice, knLintState, knVersus, KN_HEALTH_KINDS } = load(['kn-health'], ['knHealthList', 'knHealthSelect', 'knHealthTrend', 'knTrendPath', 'knFixAll', 'knFixSummary', 'knHealthLoad', 'knHealthState', 'knLintNotice', 'knLintState', 'knVersus', 'KN_HEALTH_KINDS'])
@@ -1243,6 +1243,24 @@ test('K11-09 a new vault\'s second step says where its minutes land, from the va
   assert.deepEqual(knHomeRecord({ mode: 'ask' }, paths), { word: 'when you choose', text: 'After a call, its page offers to save its minutes here: a note in notes/ and a row in CATALOG.md.', code: ['notes/', 'CATALOG.md'] })
   assert.deepEqual(knHomeRecord({ mode: 'off' }, paths), { word: 'off', text: 'Minutes aren\'t saved here by themselves. Save one from its call\'s page when you want it.', code: [] })
   assert.equal(knHomeRecord({}, {}).word, 'off')
+})
+
+// ── Home, fix round 1 ──
+test('I3 a send\'s answer opens on the composer it was sent from; the address names it only while Ask shows that one', () => {
+  const ask = { id: '' }
+  assert.deepEqual(knSentWhere(ask, { conversation: 'c1' }, { tab: 'ask', ask }), { open: true, route: true })
+  assert.deepEqual(knSentWhere(ask, { conversation: 'c1' }, { tab: 'home', ask }), { open: true, route: false }, 'Home opened meanwhile: Ask\'s composer gets it all the same, the address stays Home\'s')
+  assert.deepEqual(knSentWhere(ask, { conversation: 'c1' }, { tab: 'ask', ask: { id: '' } }), { open: true, route: false }, 'Ask shows another composer now')
+  assert.deepEqual(knSentWhere({ id: 'c0' }, { conversation: 'c0' }, { tab: 'ask', ask }), { open: false, route: false }, 'a conversation going on: nothing to open')
+  assert.deepEqual(knSentWhere(ask, null, { tab: 'ask', ask }), { open: false, route: false }, 'no answer')
+  assert.deepEqual(knSentWhere(ask, { mismatch: {} }, { tab: 'ask', ask }), { open: false, route: false }, 'a call on another profile: not sent')
+})
+
+test('C2 Pages waits for the vault\'s pages before it says there is no index page', () => {
+  assert.equal(knPagesEmpty(null, 'team-twin'), 'loading')
+  assert.equal(knPagesEmpty({ vault: 'my-twin', index: 'knowledge/CATALOG.md' }, 'team-twin'), 'loading', 'another vault\'s pages')
+  assert.equal(knPagesEmpty({ vault: 'team-twin', index: 'knowledge/CATALOG.md' }, 'team-twin'), 'pick')
+  assert.equal(knPagesEmpty({ vault: 'team-twin', index: null }, 'team-twin'), 'no-index')
 })
 
 let failed = 0
