@@ -107,10 +107,11 @@ function knBuildTree(pages, { root = '', filter = 'all', open = new Set(), index
   walk('', 0)
   return rows
 }
-/** What Pages says with no page open: `loading` until the vault's own pages are in (its index isn't known yet), then
- *  `pick` — or `no-index` when the vault has none (C2). */
-function knPagesEmpty(tree, vault) {
-  if (!tree || tree.vault !== vault) return 'loading'
+/** What Pages says with no page open: `loading` until the vault's own pages are in (its index isn't known yet), or
+ *  `failed` when asking for them failed (`failed`: `{vault, text}`, said with *Try again*), then `pick` — or `no-index`
+ *  when the vault has none (C2). */
+function knPagesEmpty(tree, vault, failed = null) {
+  if (!tree || tree.vault !== vault) return failed && failed.vault === vault ? 'failed' : 'loading'
   return tree.index ? 'pick' : 'no-index'
 }
 // end of the kn-tree block
@@ -1163,7 +1164,13 @@ const Kn = (() => {
   }
   async function loadTree() {
     const s = st(), v = vault()
-    try { const t = await get(`api/kn/${enc(v.id)}/tree`); t.vault = v.id; s.tree = t; if (!s.open.size && t.notes) s.open.add(t.notes) } catch (e) { s.error = String(e.message || e) }
+    // A failure is said where the pages would be, with *Try again* (an answer with `error` is one too).
+    try {
+      const t = await get(`api/kn/${enc(v.id)}/tree`)
+      if (t.error) throw new Error(t.error)
+      t.vault = v.id; s.tree = t; s.treeError = null
+      if (!s.open.size && t.notes) s.open.add(t.notes)
+    } catch (e) { s.error = String(e.message || e); s.treeError = { vault: v.id, text: String(e.message || e) } }
   }
   async function loadPage() {
     const s = st(), v = vault()
@@ -1354,7 +1361,7 @@ const Kn = (() => {
   // ── Pages ──
   function treeView() {
     const s = st(), t = s.tree
-    if (!t) return '<div class="kn-tree"><div class="skeleton" style="padding:14px"><i></i><i></i><i></i></div></div>'
+    if (!t) return knPagesEmpty(t, s.vault, s.treeError) === 'failed' ? '<div class="kn-tree"><p class="kn-tree-none">The pages couldn\'t be listed.</p></div>' : '<div class="kn-tree"><div class="skeleton" style="padding:14px"><i></i><i></i><i></i></div></div>'
     const f = (id, label) => `<button class="${s.filter === id ? 'on' : ''}" data-kn="filter" data-filter="${id}">${label}</button>`
     let list
     if (s.q.trim() && s.hits) {
@@ -1396,8 +1403,9 @@ const Kn = (() => {
     if (s.edit) return editorView()
     if (s.ver) return versionView()
     if (!s.path) {
-      const empty = knPagesEmpty(s.tree, v && v.id)
+      const empty = knPagesEmpty(s.tree, v && v.id, s.treeError)
       if (empty === 'loading') return '<div class="kn-reader"><div class="skeleton" style="padding:24px"><i></i><i></i><i></i><i></i></div></div>'
+      if (empty === 'failed') return `<div class="kn-reader"><div class="kn-none"><p class="error">Echo couldn't list this vault's pages: ${esc(String(s.treeError.text).replace(/\.$/, ''))}.</p><button class="btn sm" data-kn="tree-retry" id="kn-tree-retry">Try again</button></div></div>`
       return `<div class="kn-reader"><div class="kn-none"><p>Pick a page on the left${empty === 'no-index' ? ' — this vault has no index page' : ''}.</p></div></div>`
     }
     if (!p || p.path !== s.path) return '<div class="kn-reader"><div class="skeleton" style="padding:24px"><i></i><i></i><i></i><i></i></div></div>'
@@ -4157,6 +4165,7 @@ const Kn = (() => {
       case 'home-prep': goVault(s.vault, 'ingest', ''); return focusOn('#kn-ing-prep:not([disabled])', '#kn-ing-add')
       case 'newpage': return openNewPage(d.name)
       case 'filter': s.filter = d.filter; s.q = ''; s.hits = null; return render()
+      case 'tree-retry': s.treeError = null; render(); await loadVault(); return render()
       case 'fold': if (s.open.has(d.path)) s.open.delete(d.path); else s.open.add(d.path); return render()
       case 'open': return openPage(d.path)
       case 'open-tab': return openPage(d.path)

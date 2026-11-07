@@ -442,7 +442,7 @@ Ask's last part is a conversation id, Ingest's a run's and Health's a finding's 
 has open, and Home names none); `#brain/...` stays Recall. A vault opens on Home — connected, made, or picked in the
 switcher for the first time in the window; picked again, it opens on the tab left there (`tabs`, K10-04). Another vault
 empties the page Pages had open, so its Pages open on its own index — after a skeleton while its pages load, never
-"this vault has no index page" before they are in (`knPagesEmpty`). The switcher lists vaults, then
+"this vault has no index page" before they are in (`knPagesEmpty`); a list that failed is said there, with *Try again*. The switcher lists vaults, then
 Recall when on, then plugins' Knowledge tabs. Actions are IPC `kn_*`; long ones run as jobs the page polls
 (`/api/kn/jobs`). Rules learned the hard way:
 - **No `confirm()`, `alert()` or `prompt()`**: the webview (wry) shows none and `confirm()` returns false, so the
@@ -547,10 +547,14 @@ gives the skill a run uses and the one Echo finds itself), Settings → Ask swit
   page (`also`: the index row and log line of a minutes save, a new page's index row, *Add rows*' and a Health fix's log
   line), and a commit Echo makes after its lines (a Curate turn's end, *Save past minutes*) gets a line of its own
   (`kind: commit`, shown nowhere) — so Echo's writes and commits are never taken for someone else's. Then git, read on a
-  thread of its own (`git_now`, `whats_new.git`: `ready` — read for the pages as they are, and not read again until they
-  change; `pending` — they changed and git is read again, what it said before used meanwhile; `reading` — nothing read
-  yet, the only time the page says "Reading git…"; `failed` — a repository git didn't answer for; `none` — no `.git`;
-  `no-git`): `log --since=14.days -n200 --numstat --summary --no-renames --relative -- .` (a commit whose id is one of
+  thread of its own (`git_now`, `whats_new.git`: `ready` — read for the pages and git's own files as they are, and not
+  read again until either changes; `pending` — one changed and git is read again, what it said before used meanwhile;
+  `reading` — nothing read yet, the only time the page says "Reading git…"; `failed` — a repository git didn't answer
+  for, asked again after 30 s; `none` — no `.git`; `no-git`). git's own files are stamped by size and time only
+  (`git_stamp`: HEAD, the index, the branch's ref, `packed-refs`; a `.git` file followed to its git folder and its
+  `commondir`), so a commit, checkout, reset or stash made outside Echo is read again though no page changed; Echo's
+  own git calls take no optional locks and never touch the index. A git folder Echo can't find is read again at most
+  every 30 s: `log --since=14.days -n200 --numstat --summary --no-renames --relative -- .` (a commit whose id is one of
   Echo's lines' is Echo's and left out; the others by their author, with the commit's message) and the changes not
   committed (`diff --numstat HEAD`, untracked pages by `ls-files --others`) that Echo didn't write — a file is Echo's
   write when its time is no later than 2 s after Echo's last line naming it (or the starter's) — as *Changed outside
@@ -722,8 +726,6 @@ not the hashing, were the cost; copying on 8 threads won only 15 %, so small fil
   view or Tasks opened since the app started). Tomorrow's meeting is suggested only after one of those fetched it.
 - "In the terminal panel" is the panel's own conversation: one opened there and then continued in Ask still says so
   once Ask's process for it has ended.
-- git is read again only when the pages change: a commit made outside Echo of files already changed (no file changes)
-  shows on Home once a page changes next.
 - Home's What's new in a vault without git takes a page's time for a change: a copy that doesn't keep times makes every
   page look changed outside Echo. In a git vault a clean page's time isn't read (a checkout changes times, not text).
 - Retiring the Obsidian plugin's vault part is a separate change in `onetest-ai/echo-plugins`; until then *Connect

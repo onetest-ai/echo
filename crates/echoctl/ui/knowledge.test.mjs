@@ -1263,6 +1263,14 @@ test('C2 Pages waits for the vault\'s pages before it says there is no index pag
   assert.equal(knPagesEmpty({ vault: 'team-twin', index: null }, 'team-twin'), 'no-index')
 })
 
+test('F2 Pages says when the vault\'s pages couldn\'t be listed — not a skeleton forever', () => {
+  assert.equal(knPagesEmpty(null, 'team-twin', { vault: 'team-twin', text: '500 api/kn/team-twin/tree' }), 'failed')
+  assert.equal(knPagesEmpty({ vault: 'my-twin', index: 'knowledge/CATALOG.md' }, 'team-twin', { vault: 'team-twin', text: 'the folder isn\'t there' }), 'failed', 'another vault\'s pages are no answer')
+  assert.equal(knPagesEmpty(null, 'team-twin', { vault: 'my-twin', text: 'x' }), 'loading', 'another vault\'s failure')
+  assert.equal(knPagesEmpty({ vault: 'team-twin', index: 'knowledge/CATALOG.md' }, 'team-twin', { vault: 'team-twin', text: 'x' }), 'pick', 'listed since')
+  assert.equal(knPagesEmpty(null, 'team-twin', null), 'loading')
+})
+
 let failed = 0
 for (const [name, f] of tests) {
   try { f(); console.log(`ok - ${name}`) } catch (e) { failed++; console.log(`not ok - ${name}\n  ${e.message}`) }

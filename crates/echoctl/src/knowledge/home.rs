@@ -18,8 +18,7 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
-#[cfg(test)]
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use super::activity::{self, Entry};
 use super::health::{self, By, Finding, Group};
@@ -34,6 +33,8 @@ pub const ROWS: usize = 12;
 const COMMITS: usize = 200;
 /// A page changed this soon after Echo's line for it is Echo's own write.
 const SLACK_MS: i64 = 2000;
+/// git that didn't answer, or a repository whose git files Echo can't find, is asked again after this long.
+const RETRY: Duration = Duration::from_secs(30);
 /// Conversations under *Continue* (K11-03).
 const CONTINUE: usize = 3;
 
@@ -179,9 +180,11 @@ pub(super) fn read_git(root: &Path, days: i64) -> Option<GitFacts> {
     Some(GitFacts { commits, dirty, branch, last })
 }
 
-/// What git said of a vault (by its folder and id), and for which revision of its pages; whether a read goes.
+/// What git said of a vault (by its folder and id), for which revision of its pages and of git's own files (`key`),
+/// when; whether a read goes.
 struct Held {
-    rev: String,
+    key: String,
+    at: Instant,
     got: Option<Got>,
     reading: bool,
 }
@@ -197,6 +200,16 @@ type Reads = HashMap<(PathBuf, String), Held>;
 static GIT: Mutex<Option<Reads>> = Mutex::new(None);
 #[cfg(test)]
 static DELAY: Mutex<Duration> = Mutex::new(Duration::ZERO);
+#[cfg(test)]
+static RETRY_TEST: Mutex<Option<Duration>> = Mutex::new(None);
+
+fn retry() -> Duration {
+    #[cfg(test)]
+    if let Some(d) = *lock(&RETRY_TEST) {
+        return d;
+    }
+    RETRY
+}
 /// (tests) How many times git was read.
 #[cfg(test)]
 static READS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -215,10 +228,31 @@ fn in_repo(root: &Path) -> bool {
     root.ancestors().any(|d| d.join(".git").exists())
 }
 
+/// What git's own files say of the repository, by their size and time alone — nothing is run or waited for: HEAD, the
+/// index, the branch's ref and the packed refs. A commit, a checkout, a reset or a stash changes one of them even when
+/// no page changes. A `.git` file (a worktree, a submodule) is followed to its git folder and its common one. `None`
+/// when they can't be found: git is then read again at most every [`RETRY`].
+fn git_stamp(root: &Path) -> Option<String> {
+    let dot = root.ancestors().map(|d| d.join(".git")).find(|g| g.exists())?;
+    let dir = if dot.is_dir() {
+        dot
+    } else {
+        let text = std::fs::read_to_string(&dot).ok()?;
+        let to = PathBuf::from(text.lines().find_map(|l| l.strip_prefix("gitdir:"))?.trim());
+        let dir = if to.is_absolute() { to } else { dot.parent()?.join(to) };
+        dir.is_dir().then_some(dir)?
+    };
+    let common = std::fs::read_to_string(dir.join("commondir")).ok().map(|c| PathBuf::from(c.trim())).map(|c| if c.is_absolute() { c } else { dir.join(c) }).unwrap_or_else(|| dir.clone());
+    let head = std::fs::read_to_string(dir.join("HEAD")).ok()?;
+    let stat = |p: &Path| std::fs::metadata(p).map(|m| format!("{}@{:?}", m.len(), m.modified().ok())).unwrap_or_else(|_| "-".into());
+    let branch = head.trim().strip_prefix("ref:").map(|r| stat(&common.join(r.trim()))).unwrap_or_default();
+    Some([stat(&dir.join("HEAD")), stat(&dir.join("index")), branch, stat(&common.join("packed-refs"))].join("|"))
+}
+
 /// What git said of the vault, never waiting for it, and where that stands (`whats_new.git`): `ready` — read for the
-/// pages as they are (kept until they change: git isn't read again meanwhile); `pending` — the pages changed and git
-/// is read again, what it said before used meanwhile; `reading` — nothing read yet; `failed` — a repository git didn't
-/// answer for; `none` — no repository; `no-git` — git isn't there.
+/// pages and git's own files as they are ([`git_stamp`]; not read again until either changes); `pending` — one changed
+/// and git is read again, what it said before used meanwhile; `reading` — nothing read yet; `failed` — a repository git
+/// didn't answer for (asked again after [`RETRY`]); `none` — no repository; `no-git` — git isn't there.
 fn git_now(v: &Vault, ix: &Index) -> (Option<Arc<GitFacts>>, &'static str) {
     if git::program().is_none() {
         return (None, "no-git");
@@ -226,13 +260,21 @@ fn git_now(v: &Vault, ix: &Index) -> (Option<Arc<GitFacts>>, &'static str) {
     if !in_repo(&v.root) {
         return (None, "none");
     }
+    let stamp = git_stamp(&v.root);
+    let now = format!("{}\n{}", ix.rev, stamp.as_deref().unwrap_or("?"));
     let key = (v.root.clone(), v.id.clone());
     let mut all = lock(&GIT);
-    let h = all.get_or_insert_with(HashMap::new).entry(key.clone()).or_insert_with(|| Held { rev: String::new(), got: None, reading: false });
-    let fresh = h.got.is_some() && h.rev == ix.rev;
+    let h = all.get_or_insert_with(HashMap::new).entry(key.clone()).or_insert_with(|| Held { key: String::new(), at: Instant::now(), got: None, reading: false });
+    let young = h.at.elapsed() < retry();
+    let fresh = h.key == now
+        && match &h.got {
+            None => false,
+            Some(Got::Failed) => young,
+            Some(Got::Repo(_)) => stamp.is_some() || young,
+        };
     if !fresh && !h.reading {
         h.reading = true;
-        let (root, rev) = (v.root.clone(), ix.rev.clone());
+        let root = v.root.clone();
         std::thread::spawn(move || {
             // Its end is kept even when the read panics: the next ask starts another.
             struct Done((PathBuf, String), String, Option<Got>);
@@ -241,12 +283,12 @@ fn git_now(v: &Vault, ix: &Index) -> (Option<Arc<GitFacts>>, &'static str) {
                     if let Some(h) = lock(&GIT).as_mut().and_then(|a| a.get_mut(&self.0)) {
                         h.reading = false;
                         if let Some(g) = self.2.take() {
-                            *h = Held { rev: std::mem::take(&mut self.1), got: Some(g), reading: false };
+                            *h = Held { key: std::mem::take(&mut self.1), at: Instant::now(), got: Some(g), reading: false };
                         }
                     }
                 }
             }
-            let mut done = Done(key, rev, None);
+            let mut done = Done(key, now, None);
             done.2 = Some(read_git(&root, DAYS).map_or(Got::Failed, |f| Got::Repo(Arc::new(f))));
         });
     }
@@ -266,6 +308,23 @@ pub(crate) fn delay_git(by: Duration) -> DelayGuard {
 
 #[cfg(test)]
 pub(crate) struct DelayGuard;
+
+/// (tests) Until the guard drops, git that didn't answer is asked again after `by`.
+#[cfg(test)]
+pub(crate) fn retry_git_after(by: Duration) -> RetryGuard {
+    *lock(&RETRY_TEST) = Some(by);
+    RetryGuard
+}
+
+#[cfg(test)]
+pub(crate) struct RetryGuard;
+
+#[cfg(test)]
+impl Drop for RetryGuard {
+    fn drop(&mut self) {
+        *lock(&RETRY_TEST) = None;
+    }
+}
 
 #[cfg(test)]
 impl Drop for DelayGuard {
@@ -1006,6 +1065,78 @@ mod tests {
         let s = state(&g);
         std::env::remove_var("ECHOCTL_NO_GIT");
         assert_eq!(s, "no-git");
+    }
+
+    /// `view`'s What's new until git's part is `ready` (it reads on its own thread).
+    fn ready(v: &Vault) -> Value {
+        let t = Instant::now();
+        loop {
+            let h = view(v).unwrap();
+            if h["whats_new"]["git"] == "ready" {
+                return h;
+            }
+            assert!(t.elapsed() < std::time::Duration::from_secs(10), "git never answered: {}", h["whats_new"]["git"]);
+            std::thread::sleep(std::time::Duration::from_millis(30));
+        }
+    }
+
+    // Fix round 2, F1: a commit made outside Echo with no page changing is read again (git's own files say so).
+    #[test]
+    fn a_commit_made_outside_echo_is_read_again() {
+        let (_env, root) = crate::paths::testenv::folders("kn-home-stamp");
+        let _iso = git::tests::isolated(&root, true);
+        if git::program().is_none() {
+            return;
+        }
+        let v = vault(&root);
+        age(&v.root, 30);
+        assert!(git::run(&v.root, &["init", "-q", "-b", "main"]).unwrap().status.success());
+        git_as(&v.root, ("Test User", "test@example.com"), Local::now() - Duration::days(30), &["add", "-A"]);
+        git_as(&v.root, ("Test User", "test@example.com"), Local::now() - Duration::days(30), &["commit", "-q", "-m", "first"]);
+        let edited = crate::knowledge::join(&v.root, "knowledge/notes/2026-01-02-b.md");
+        std::fs::write(&edited, "---\ntitle: Second sync\ntags: [meeting]\n---\n# Second sync, edited in Obsidian\n").unwrap();
+        set_mtime(&edited, Local::now() - Duration::minutes(10));
+        let row = |h: &Value| h["whats_new"]["rows"].as_array().unwrap().iter().find(|r| r["path"] == "knowledge/notes/2026-01-02-b.md").map(|r| (r["by"].as_str().unwrap().to_string(), r["detail"].as_str().unwrap().to_string()));
+        let h = ready(&v);
+        assert_eq!(row(&h), Some(("outside".to_string(), "not committed".to_string())));
+        assert_eq!(h["vault"]["git"]["last"]["subject"], "first");
+        // Committed from a terminal: no page changes, git's own files do.
+        let pages = scan::rev(&v);
+        git_as(&v.root, ("Test User", "test@example.com"), Local::now(), &["commit", "-q", "-am", "my Obsidian edit"]);
+        assert_eq!(scan::rev(&v), pages, "the pages are as they were");
+        assert_eq!(view(&v).unwrap()["whats_new"]["git"], "pending", "read again, what git said before shown meanwhile");
+        let h = ready(&v);
+        let (by, detail) = row(&h).unwrap();
+        assert_eq!(by, "commit", "{detail}");
+        assert!(detail.contains("my Obsidian edit"), "{detail}");
+        assert_eq!(h["vault"]["git"]["last"]["subject"], "my Obsidian edit");
+    }
+
+    // Fix round 2, F1: git that didn't answer is asked again after a short while, not only when a page changes.
+    #[test]
+    fn a_failed_read_of_git_is_tried_again_after_a_while() {
+        let (_env, root) = crate::paths::testenv::folders("kn-home-retry");
+        let _iso = git::tests::isolated(&root, true);
+        if git::program().is_none() {
+            return;
+        }
+        let _quick = retry_git_after(std::time::Duration::from_millis(400));
+        let broken = root.join("broken");
+        fixture::write(&broken, "Page.md", "# A page\n");
+        std::fs::write(broken.join(".git"), format!("gitdir: {}\n", root.join("no-such-repository").display())).unwrap();
+        let b = crate::knowledge::add(&broken, AddOpts { name: Some("Broken".into()), ..Default::default() }).unwrap();
+        let state = |v: &Vault| view(v).unwrap()["whats_new"]["git"].as_str().unwrap().to_string();
+        let t = Instant::now();
+        while state(&b) != "failed" {
+            assert!(t.elapsed() < std::time::Duration::from_secs(10));
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let reads = git_reads();
+        assert_eq!(state(&b), "failed");
+        assert_eq!(git_reads(), reads, "asked again at once: not read again");
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        assert_eq!(state(&b), "failed", "what git said last, while it is asked again");
+        crate::paths::testenv::eventually("read again after the short while", || git_reads() > reads);
     }
 
     // K11-T3
