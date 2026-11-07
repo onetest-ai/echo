@@ -75,6 +75,15 @@ They are hermetic. `<dir>/env` puts these in front of the app, and `serve.sh` so
 - `CLAUDE_CONFIG_DIR` is `<dir>/claude-config`. It holds an old Echo plugin record (the stale-plugin Inbox item).
 - `ECHOCTL_NOTES_NO_SHELL=1` starts Claude Code directly, not through the login shell.
 
+### Real Claude Code runs on a local model (`--ai local`)
+
+`--ai local` (standard and hostile) makes the AI profile "Qwen · this computer" (Ollama at `http://localhost:11434`,
+model `qwen3.8:27b-mlx`; `qwen3.8:27b` on Windows) the default, so calls and threads without a profile of their own
+run on it. The fake `claude` then passes a run to the real Claude Code when, and only when, the profile routes it to
+a loopback address (`ANTHROPIC_BASE_URL` on localhost); every other run is refused as before, so no Claude account
+is used. Needs Claude Code on `PATH` and Ollama running with that model. A minutes run takes about 5–7 minutes:
+cases that need one say `ai: local` and run one model job each, no more.
+
 Automatic minutes are on and several calls are due. **Serve these sets with `window --serve` only, never the Echo
 app**: the app would start minutes runs (against the fake, so they fail).
 

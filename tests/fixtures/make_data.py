@@ -25,6 +25,7 @@ import argparse
 import json
 import os
 import random
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timedelta
@@ -516,11 +517,25 @@ esac
 """
 
 
+# With `--ai local`: a run routed to a model server on this computer (the `local` AI profile sets
+# ANTHROPIC_BASE_URL to a loopback address) goes to the real Claude Code; every other run is still refused, so no
+# Claude account is ever used.
+LOCAL_PASS = """case "$ANTHROPIC_BASE_URL" in http://localhost:*|http://127.0.0.1:*|http://\\[::1\\]:*) exec {real} "$@";; esac
+"""
+
+
 def setup_env(d):
     """The standard sets run hermetic: a fake `claude` first on PATH, the built-in plugin marketplace a local folder,
     Claude Code's own config folder inside the run. Written to <dir>/env (serve.sh sources it) and used here."""
     b = d.base
-    d.write(f"{b}/bin/claude", FAKE_CLAUDE)
+    fake = FAKE_CLAUDE
+    if AI == "local":
+        real = shutil.which("claude")
+        if not real:
+            sys.exit("--ai local needs Claude Code (`claude`) on PATH")
+        lines = fake.split("\n")
+        fake = "\n".join(lines[:4] + [LOCAL_PASS.format(real=sh(real)).rstrip("\n")] + lines[4:])
+    d.write(f"{b}/bin/claude", fake)
     os.chmod(f"{b}/bin/claude", 0o755)
     builtin = f"{b}/markets/built-in"
     d.write_json(f"{builtin}/echo-marketplace.json", {"name": "Echo plugins (test)", "featured": ["meeting-timer"], "plugins": [
@@ -639,8 +654,9 @@ def build_ai(d, H):
     q("ai", "add-claude", "work", "--email", "sam@initech.example")
     q("ai", "add-claude", "other", "--email", "sam@initech.example")
     q("ai", "add-claude", "out")
-    q("ai", "add-local", "ollama", "--model", "qwen3:8b", "--name", "Qwen · this computer")
-    q("ai", "default", "work")
+    q("ai", "add-local", "ollama", "--model", LOCAL_MODEL, "--name", "Qwen · this computer")
+    # `--ai local`: the local model is the default, so calls and threads without a profile of their own run on it.
+    q("ai", "default", "ollama" if AI == "local" else "work")
     q("ai", "live", "on")
     ai_file = f"{d.config}/ai.json"
     ai = json.load(open(ai_file))
@@ -651,7 +667,8 @@ def build_ai(d, H):
             p["name"] = H.text("Live-notes answers and Yolo / Claude run outcomes; AI profile names and accounts", "Qwen", kind="html", one_line=True, where="config/ai.json profiles[ollama].name")
     d.write_json(ai_file, ai, ascii=False)
     for k, v in {"ai.kind=system": "built in", "ai.kind=local (loopback)": "profile ollama", "ai.kind=claude": "profiles work, other, out",
-                 "ai.default=is default": "profile work", "ai.default=not": "profile ollama", "ai.signin=signed in": "profile work (fake claude)",
+                 "ai.default=is default": "profile ollama" if AI == "local" else "profile work",
+                 "ai.default=not": "profile work" if AI == "local" else "profile ollama", "ai.signin=signed in": "profile work (fake claude)",
                  "ai.signin=signed out": "profile out", "ai.signin=other account": "profile other", "ai.count=several": "5 profiles",
                  "ai.file=readable": "config/ai.json", "live.enabled=on": "ai.json live_notes"}.items():
         d.axis(k, v)
@@ -2128,6 +2145,9 @@ def build_standard(d, hostile=False):
 
 
 NOW = None
+AI = "fake"
+# The only local model the tests use (Ollama; on Windows the plain `qwen3.8:27b`).
+LOCAL_MODEL = "qwen3.8:27b" if sys.platform == "win32" else "qwen3.8:27b-mlx"
 
 
 def main():
@@ -2136,8 +2156,12 @@ def main():
     ap.add_argument("--set", choices=["small", "standard", "hostile"], default="small")
     ap.add_argument("--now", help="build as if it were this local time (ISO, e.g. 2026-11-06T12:00): for checks that "
                     "don't depend on Today matching the real clock, at hours the real now can't be built")
+    ap.add_argument("--ai", choices=["fake", "local"], default="fake",
+                    help="standard/hostile: fake (every Claude Code run is refused) or local (runs on the local model profile, "
+                    "the default then, go to the real Claude Code against Ollama; all others are still refused)")
     a = ap.parse_args()
-    global NOW
+    global NOW, AI
+    AI = a.ai
     if a.now:
         NOW = datetime.fromisoformat(a.now).astimezone()
     base = os.path.abspath(a.dir)
@@ -2162,6 +2186,7 @@ def main():
         build_small(d)
     else:
         build_standard(d, hostile=a.set == "hostile")
+    d.manifest["ai"] = AI
     d.write_json(os.path.join(base, "manifest.json"), d.manifest, ascii=False)
     print(f"test data ({a.set}) in {base} (. {base}/env)")
 
