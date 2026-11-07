@@ -499,6 +499,19 @@ fn dots(p: &str) -> String {
     s + tail
 }
 
+/// Text as Markdown shows it, never as markup: `\`, `<`, `[`, `]` and `!` escaped, so no HTML, link or image can
+/// come of a page's (or anyone's) words.
+pub fn md_text(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if matches!(c, '\\' | '<' | '[' | ']' | '!') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
 /// The Markdown being written.
 struct Out<'a> {
     base: &'a str,
@@ -524,7 +537,7 @@ impl Out<'_> {
                     self.line.push(' ');
                 }
             } else {
-                self.line.push(c);
+                self.line.push_str(&md_text(c.encode_utf8(&mut [0; 4])));
             }
         }
     }
@@ -560,20 +573,21 @@ impl Out<'_> {
 
     fn flush(&mut self) {
         let raw = std::mem::take(&mut self.line);
-        let lines: Vec<String> = raw.split('\n').map(str::trim).filter(|l| !l.is_empty()).map(str::to_owned).collect();
+        // A line of text that starts as a heading or a quote would read as one.
+        let lines: Vec<String> = raw.split('\n').map(str::trim).filter(|l| !l.is_empty()).map(|l| if l.starts_with(['#', '>']) { format!("\\{l}") } else { l.to_owned() }).collect();
         self.write(&lines);
     }
 
-    /// An element's text on one line, its https links and code kept (headings, cells, link text).
+    /// An element's text on one line (as Markdown text), its https links and code kept (headings, cells, link text).
     fn inline(&self, e: &El, in_link: bool) -> String {
         let mut s = String::new();
         for k in &e.kids {
             match k {
-                Node::Text(t) => s.push_str(t),
+                Node::Text(t) => s.push_str(&md_text(t)),
                 Node::El(k) if dropped(k) || k.name == "img" => {}
                 Node::El(k) if k.name == "br" => s.push(' '),
                 Node::El(k) if k.name == "a" && !in_link => s.push_str(&self.link(k)),
-                Node::El(k) if k.name == "code" => s.push_str(&code_span(&collapse(&self.inline(k, true)))),
+                Node::El(k) if k.name == "code" => s.push_str(&code_of(k)),
                 Node::El(k) => {
                     let block = is_block(&k.name) || matches!(k.name.as_str(), "td" | "th");
                     if block {
@@ -593,7 +607,7 @@ impl Out<'_> {
     fn link(&self, a: &El) -> String {
         let text = collapse(&self.inline(a, true));
         match a.attr("href").and_then(|h| https_link(self.base, h)) {
-            Some(url) if !text.is_empty() => format!("[{}]({url})", text.replace('[', "\\[").replace(']', "\\]")),
+            Some(url) if !text.is_empty() => format!("[{text}]({url})"),
             _ => text,
         }
     }
@@ -613,10 +627,7 @@ impl Out<'_> {
                 let l = self.link(e);
                 self.line.push_str(&l);
             }
-            "code" => {
-                let c = code_span(&collapse(&self.inline(e, true)));
-                self.line.push_str(&c);
-            }
+            "code" => self.line.push_str(&code_of(e)),
             "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
                 self.flush();
                 let text = collapse(&self.inline(e, false));
@@ -639,7 +650,7 @@ impl Out<'_> {
                     match k {
                         Node::El(li) if li.name == "li" => {
                             let marker = if e.name == "ol" { format!("{n}. ") } else { "- ".to_string() };
-                            n += 1;
+                            n = n.saturating_add(1);
                             self.item(li, marker);
                         }
                         other => self.walk(other),
@@ -709,6 +720,13 @@ impl Out<'_> {
             }
         }
     }
+}
+
+/// Inline code: its text as written, on one line, in backticks.
+fn code_of(e: &El) -> String {
+    let mut s = String::new();
+    raw_text(e, &mut s);
+    code_span(&collapse(&s))
 }
 
 fn code_span(text: &str) -> String {
@@ -802,8 +820,9 @@ fn get(url: &str, r: &Rules) -> Result<(Vec<u8>, String, String)> {
 }
 
 fn curl(url: &str, body: &std::path::Path, r: &Rules) -> Result<(Vec<u8>, String, String)> {
+    // `globoff`: brackets and braces are the address's own, never curl's ranges or lists of addresses.
     let mut config = format!(
-        "url = {}\nlocation\nmax-redirs = 5\nproto = \"={}\"\nproto-redir = \"=https\"\nmax-filesize = {MAX_BYTES}\nmax-time = {}\noutput = {}\nwrite-out = \"%{{http_code}}\\n%{{content_type}}\\n%{{url_effective}}\"\n",
+        "url = {}\ngloboff\nlocation\nmax-redirs = 5\nproto = \"={}\"\nproto-redir = \"=https\"\nmax-filesize = {MAX_BYTES}\nmax-time = {}\noutput = {}\nwrite-out = \"%{{http_code}}\\n%{{content_type}}\\n%{{url_effective}}\"\n",
         quote(url),
         r.scheme,
         r.secs,
@@ -989,7 +1008,7 @@ mod tests {
         assert_eq!(title, "Отчёт о пилоте — Север");
         assert!(text.contains("сократилось на треть."), "{text}");
         assert!(text.contains("Team notes—in English too: the rollout’s second wave starts in December & covers 12 stores 🚀."), "{text}");
-        assert!(text.contains("Quotes stay as written: “fix forward, no rollback” … © Northwind <internal>."), "{text}");
+        assert!(text.contains("Quotes stay as written: “fix forward, no rollback” … © Northwind \\<internal>."), "{text}");
     }
 
     #[test]
@@ -1025,29 +1044,60 @@ mod tests {
         assert!(text.contains("Deeply nested text"), "{text}");
     }
 
+    #[test]
+    fn page_text_is_never_markup() {
+        // A page's words can't become HTML, a link or an image in the Markdown (Obsidian would load a remote image).
+        let filler = "Filler text so that the page counts as readable for the extractor. ".repeat(4);
+        let html = format!(
+            "<html><body><article><h1>Release notes</h1><p>{filler}</p>\
+             <p>Literal [x](javascript:alert(1)) and ![](http://tracker.example/p.png) stay text, as does &lt;img src=http://tracker.example/q.png&gt;.</p>\
+             <p># not a heading</p><p>&gt; not a quote</p><p>Wow!<a href=\"https://contoso.example/pic.png\">pic</a> and a back\\slash.</p>\
+             <h2>Tags &lt;i&gt; and [brackets]</h2><table><tr><td>&lt;td&gt; [c]</td><td><code>a&lt;b</code></td></tr></table></article></body></html>"
+        );
+        let (_, text) = main_text(&html, "https://contoso.example/").unwrap();
+        assert!(text.contains("Literal \\[x\\](javascript:alert(1)) and \\!\\[\\](http://tracker.example/p.png) stay text, as does \\<img src=http://tracker.example/q.png>."), "{text}");
+        assert!(text.contains("\n\\# not a heading\n") && text.contains("\n\\> not a quote\n"), "{text}");
+        assert!(text.contains("Wow\\![pic](https://contoso.example/pic.png) and a back\\\\slash."), "the link stays, never an image: {text}");
+        assert!(text.contains("## Tags \\<i> and \\[brackets\\]"), "{text}");
+        assert!(text.contains("| \\<td> \\[c\\] | `a<b` |"), "code is code, cells are text: {text}");
+        assert_eq!(md_text("<b>[x]!\\"), "\\<b>\\[x\\]\\!\\\\");
+    }
+
+    #[test]
+    fn a_huge_list_start_does_not_overflow() {
+        let filler = "Filler text so that the page counts as readable for the extractor. ".repeat(4);
+        let html = format!("<main><p>{filler}</p><ol start=\"18446744073709551615\"><li>First</li><li>Second</li></ol></main>");
+        let (_, text) = main_text(&html, "https://contoso.example/").unwrap();
+        assert!(text.contains("18446744073709551615. First\n18446744073709551615. Second"), "{text}");
+    }
+
     // ── the fetch (K14-T5): a local server, plain http for the first request only ──
 
     use std::io::Read as _;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
-    /// A made-up site on 127.0.0.1: its address and how many requests it has had.
-    fn serve() -> (String, Arc<AtomicUsize>) {
+    /// The request targets a server has had.
+    type Seen = Arc<std::sync::Mutex<Vec<String>>>;
+
+    /// A made-up site on 127.0.0.1: its address, how many connections it has had, and what was asked.
+    fn serve() -> (String, Arc<AtomicUsize>, Seen) {
         let l = std::net::TcpListener::bind("127.0.0.1:0").expect("a local port");
         let base = format!("http://127.0.0.1:{}", l.local_addr().unwrap().port());
         let hits = Arc::new(AtomicUsize::new(0));
-        let (b, h) = (base.clone(), hits.clone());
+        let seen: Seen = Arc::default();
+        let (b, h, w) = (base.clone(), hits.clone(), seen.clone());
         std::thread::spawn(move || {
             for s in l.incoming().flatten() {
                 h.fetch_add(1, Ordering::SeqCst);
-                let b = b.clone();
-                std::thread::spawn(move || answer(s, &b));
+                let (b, w) = (b.clone(), w.clone());
+                std::thread::spawn(move || answer(s, &b, &w));
             }
         });
-        (base, hits)
+        (base, hits, seen)
     }
 
-    fn answer(mut s: std::net::TcpStream, base: &str) {
+    fn answer(mut s: std::net::TcpStream, base: &str, seen: &Seen) {
         let mut req = vec![];
         let mut buf = [0u8; 1024];
         while !req.windows(4).any(|w| w == b"\r\n\r\n") {
@@ -1057,7 +1107,9 @@ mod tests {
             }
         }
         let req = String::from_utf8_lossy(&req);
-        let path = req.split_whitespace().nth(1).unwrap_or("/").to_string();
+        let target = req.split_whitespace().nth(1).unwrap_or("/").to_string();
+        seen.lock().unwrap().push(target.clone());
+        let path = target.split('?').next().unwrap_or("/").to_string();
         let reply = |s: &mut std::net::TcpStream, status: &str, kind: &str, body: &[u8]| {
             let head = format!("HTTP/1.1 {status}\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
             let _ = s.write_all(head.as_bytes());
@@ -1083,9 +1135,41 @@ mod tests {
     /// The fetch's own rules, but a first request over plain http to the test's server (redirects stay https-only).
     const LOCAL: Rules = Rules { scheme: "http", secs: 5, local: true };
 
+    /// `%XX` as its byte (curl may encode what it sends).
+    fn unescape(s: &str) -> String {
+        let b = s.as_bytes();
+        let (mut out, mut i) = (vec![], 0);
+        while i < b.len() {
+            if b[i] == b'%' {
+                if let Some(x) = s.get(i + 1..i + 3).and_then(|h| u8::from_str_radix(h, 16).ok()) {
+                    out.push(x);
+                    i += 3;
+                    continue;
+                }
+            }
+            out.push(b[i]);
+            i += 1;
+        }
+        String::from_utf8_lossy(&out).into_owned()
+    }
+
+    #[test]
+    fn an_address_is_fetched_as_typed() {
+        // Brackets and braces are the address's own: one request, never a range or a list of addresses.
+        let (base, _, seen) = serve();
+        for q in ["/page?filter[status]=open", "/page?x={a,b}", "/page?ids=[1-500]"] {
+            let before = seen.lock().unwrap().len();
+            let (title, _) = fetch_with(&format!("{base}{q}"), &LOCAL).unwrap_or_else(|e| panic!("{q}: {e:#}"));
+            assert_eq!(title, "How Northwind Retail moved its pilot", "{q}");
+            let asked: Vec<String> = seen.lock().unwrap()[before..].to_vec();
+            assert_eq!(asked.len(), 1, "one request for {q}: {asked:?}");
+            assert_eq!(unescape(&asked[0]), q);
+        }
+    }
+
     #[test]
     fn fetch_rules_refuse_with_their_reasons() {
-        let (base, hits) = serve();
+        let (base, hits, _) = serve();
         // A good page and a Markdown file come through.
         let (title, text) = fetch_with(&format!("{base}/page"), &LOCAL).unwrap_or_else(|e| panic!("{e:#}"));
         assert_eq!(title, "How Northwind Retail moved its pilot");

@@ -448,6 +448,34 @@ pub fn reread(id: &str) -> Result<Vault> {
     })
 }
 
+/// A call's text asked to go to a vault read by another AI profile than the call's, without the user's *anyway*
+/// (X-P3): attaching it in Ask, or adding it as a source.
+#[derive(Debug)]
+pub struct Mismatch {
+    /// The call's folder (Ask names the call that needs *Attach anyway* by it).
+    #[cfg_attr(not(feature = "tray"), allow(dead_code))]
+    pub dir: PathBuf,
+    /// The profiles' ids: the call's, the vault's.
+    pub call: String,
+    pub vault: String,
+    /// Their names, as the user knows them.
+    pub call_name: String,
+    pub vault_name: String,
+}
+
+impl std::fmt::Display for Mismatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "this call's text goes only to the {} profile; this vault is read by the {} profile", self.call_name, self.vault_name)
+    }
+}
+
+impl std::error::Error for Mismatch {}
+
+/// A profile's name as the user knows it (its id when it can't be found).
+pub fn profile_name(id: &str) -> String {
+    crate::ai::Settings::load().ok().and_then(|s| s.get(id).ok()).map(|p| p.name).unwrap_or_else(|| id.to_string())
+}
+
 /// Echo added a source to `rel` in a vault that had no sources folder: it is the vault's sources now, as detection
 /// would find (so its Markdown is never taken for pages).
 pub(super) fn found_sources(id: &str, rel: &str) -> Result<()> {

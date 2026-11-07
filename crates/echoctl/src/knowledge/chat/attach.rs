@@ -3,9 +3,9 @@
 //! anyway*; then it goes, and a notice of the conversation records it.
 
 use anyhow::{anyhow, bail, Result};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use crate::knowledge::{export, Vault};
+use crate::knowledge::{export, profile_name, Vault};
 
 /// A call's minutes as a message carries them.
 pub struct Attached {
@@ -20,34 +20,11 @@ pub struct Attached {
 }
 
 /// A call attached to a conversation on another profile than the call's, without *Attach anyway* (X-P3).
-#[derive(Debug)]
-pub struct Mismatch {
-    /// The call's folder.
-    pub dir: PathBuf,
-    /// The profiles' ids: the call's, the vault's.
-    pub call: String,
-    pub vault: String,
-    /// Their names, as the user knows them.
-    pub call_name: String,
-    pub vault_name: String,
-}
-
-impl std::fmt::Display for Mismatch {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "this call's text goes only to the {} profile; this vault is read by the {} profile", self.call_name, self.vault_name)
-    }
-}
-
-impl std::error::Error for Mismatch {}
+pub use crate::knowledge::Mismatch;
 
 /// `s` on one line: whitespace and control characters each run made one space (a title can't break the frame).
 fn one_line(s: &str) -> String {
     s.split(|c: char| c.is_whitespace() || c.is_control()).filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ")
-}
-
-/// A profile's name as the user knows it (its id when it can't be found).
-fn profile_name(id: &str) -> String {
-    crate::ai::Settings::load().ok().and_then(|s| s.get(id).ok()).map(|p| p.name).unwrap_or_else(|| id.to_string())
 }
 
 /// The minutes of call `call` (a folder of Echo's, never one the page named) for a message in a conversation of `v`:

@@ -2763,10 +2763,12 @@ fn deliver_command(cmd: DeliverCmd) -> Result<()> {
 
 #[derive(Subcommand)]
 enum IngestCmd {
-    /// Add sources: files (copied as they are, up to 50 MB each), or one of --call, --mail, --teams, --url (JSON)
+    /// Add sources, each as it came: a file (copied, up to 50 MB), an https page (its main text), `call:<stamp>` (a
+    /// call's or memo's minutes), or the flags' --call, --mail, --teams, --url (JSON). Nothing is processed by adding
     Add {
-        files: Vec<std::path::PathBuf>,
-        /// A call's or memo's minutes (its folder, or `latest`)
+        /// Files, https addresses and `call:<stamp>`s
+        items: Vec<String>,
+        /// A call's or memo's minutes (its folder, its stamp, or `latest`)
         #[arg(long)]
         call: Option<String>,
         /// With the call's transcript
@@ -2794,38 +2796,75 @@ enum IngestCmd {
     },
 }
 
+/// One thing `ingest add` was given.
+enum IngestItem {
+    File(std::path::PathBuf),
+    Web(String),
+    Call(String),
+    Mail(String),
+    Teams(String),
+}
+
+/// A call named on the command line: its folder (or a path, or `latest`), else its stamp.
+fn ingest_call(name: &str) -> Result<std::path::PathBuf> {
+    calls::resolve_call(name).or_else(|e| calls::by_stamp(&calls::stamp_of(std::path::Path::new(name))).ok_or(e))
+}
+
 fn ingest_command(vault: &str, cmd: IngestCmd) -> Result<serde_json::Value> {
     use knowledge::sources;
     knowledge::refuse_headless()?;
-    let v = knowledge::get(vault)?;
-    let IngestCmd::Add { files, call, transcript, chat, anyway, mail, teams, since, until, url } = cmd;
-    let kinds = [!files.is_empty(), call.is_some(), mail.is_some(), teams.is_some(), url.is_some()].iter().filter(|k| **k).count();
-    if kinds != 1 {
-        anyhow::bail!("add files, or one of --call, --mail, --teams, --url");
-    }
-    let day = |d: Option<String>, default: chrono::NaiveDate| -> Result<chrono::NaiveDate> {
-        d.map(|d| chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").map_err(|_| anyhow::anyhow!("{d}: a day as YYYY-MM-DD"))).unwrap_or(Ok(default))
-    };
-    Ok(if !files.is_empty() {
-        let (mut added, mut refused) = (vec![], vec![]);
-        for (name, r) in sources::add_files(&v, &files) {
-            match r {
-                Ok(a) => added.push(serde_json::to_value(a)?),
-                Err(e) => refused.push(serde_json::json!({ "name": name, "why": format!("{e:#}") })),
+    let IngestCmd::Add { items, call, transcript, chat, anyway, mail, teams, since, until, url } = cmd;
+    // A positional is a page when it is a web address, a call when it says so, else a file.
+    let mut todo: Vec<IngestItem> = items
+        .into_iter()
+        .map(|a| {
+            let lower = a.to_ascii_lowercase();
+            if lower.starts_with("https://") || lower.starts_with("http://") {
+                IngestItem::Web(a)
+            } else if let Some(c) = a.strip_prefix("call:") {
+                IngestItem::Call(c.to_string())
+            } else {
+                IngestItem::File(a.into())
             }
+        })
+        .collect();
+    todo.extend(call.map(IngestItem::Call));
+    todo.extend(mail.map(IngestItem::Mail));
+    todo.extend(teams.map(IngestItem::Teams));
+    todo.extend(url.map(IngestItem::Web));
+    if todo.is_empty() {
+        anyhow::bail!("add files, https pages or call:<stamp>, or one of --call, --mail, --teams, --url");
+    }
+    if (transcript || chat || anyway) && !todo.iter().any(|i| matches!(i, IngestItem::Call(_))) {
+        anyhow::bail!("--transcript, --chat and --anyway go with a call (call:<stamp> or --call)");
+    }
+    if (since.is_some() || until.is_some()) && !todo.iter().any(|i| matches!(i, IngestItem::Teams(_))) {
+        anyhow::bail!("--since and --until go with a Teams chat (--teams)");
+    }
+    let day = |d: &Option<String>, default: chrono::NaiveDate| -> Result<chrono::NaiveDate> {
+        d.as_deref().map(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").map_err(|_| anyhow::anyhow!("{d}: a day as YYYY-MM-DD"))).unwrap_or(Ok(default))
+    };
+    let until = day(&until, chrono::Local::now().date_naive())?;
+    let since = day(&since, sources::last_week(until))?;
+    let v = knowledge::get(vault)?;
+    let (mut added, mut refused) = (vec![], vec![]);
+    for item in todo {
+        let (name, r) = match item {
+            IngestItem::File(f) => sources::add_files(&v, &[f]).remove(0),
+            IngestItem::Web(u) => (u.clone(), sources::add_web(&v, &u)),
+            IngestItem::Call(c) => (format!("call:{c}"), ingest_call(&c).and_then(|d| sources::add_call(&v, &d, sources::Include { transcript, chat }, anyway))),
+            IngestItem::Mail(m) => (m.clone(), sources::add_mail(&v, &m)),
+            IngestItem::Teams(t) => (t.clone(), sources::add_chat(&v, &t, since, until)),
+        };
+        match r {
+            Ok(a) => added.push(serde_json::to_value(a)?),
+            Err(e) => refused.push((name, format!("{e:#}"))),
         }
-        serde_json::json!({ "added": added, "refused": refused })
-    } else if let Some(c) = call {
-        serde_json::to_value(sources::add_call(&v, &calls::resolve_call(&c)?, sources::Include { transcript, chat }, anyway)?)?
-    } else if let Some(m) = mail {
-        serde_json::to_value(sources::add_mail(&v, &m)?)?
-    } else if let Some(t) = teams {
-        let until = day(until, chrono::Local::now().date_naive())?;
-        let since = day(since, until - chrono::Duration::days(7))?;
-        serde_json::to_value(sources::add_chat(&v, &t, since, until)?)?
-    } else {
-        serde_json::to_value(sources::add_web(&v, url.as_deref().unwrap_or(""))?)?
-    })
+    }
+    if added.is_empty() {
+        anyhow::bail!("{}", refused.iter().map(|(n, why)| format!("{n}: {why}")).collect::<Vec<_>>().join("; "));
+    }
+    Ok(serde_json::json!({ "added": added, "refused": refused.into_iter().map(|(name, why)| serde_json::json!({ "name": name, "why": why })).collect::<Vec<_>>() }))
 }
 
 fn knowledge_command(cmd: KnowledgeCmd) -> Result<()> {
@@ -3132,4 +3171,53 @@ fn ledger_command(id: &str, cmd: LedgerCmd) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod ingest_cli {
+    use super::*;
+    use crate::knowledge::fixture;
+
+    /// `echoctl knowledge ingest <vault> add <args…>`, parsed as the shell would hand it over.
+    fn add(vault: &str, args: &[&str]) -> Result<serde_json::Value> {
+        let mut all = vec!["echoctl", "knowledge", "ingest", vault, "add"];
+        all.extend_from_slice(args);
+        match Cli::try_parse_from(all)?.cmd {
+            Cmd::Knowledge { cmd: KnowledgeCmd::Ingest { vault, cmd } } => ingest_command(&vault, cmd),
+            _ => unreachable!("an ingest command"),
+        }
+    }
+
+    #[test]
+    fn add_takes_files_https_pages_and_calls_as_written() {
+        // K15-12: `add <file|https-url|call:<stamp>>`, the flags kept.
+        let (_env, root) = crate::paths::testenv::folders("kn-cli-ingest");
+        let t = fixture::twin(&root.join("twin"));
+        let v = knowledge::add(&t, knowledge::AddOpts { name: Some("Twin".into()), ..Default::default() }).unwrap();
+        fixture::call("2026-11-05_090012-weekly-sync", "Weekly delivery sync", "system", fixture::MINUTES);
+        let brief = root.join("brief.txt");
+        std::fs::write(&brief, "made up").unwrap();
+        let brief = brief.to_str().unwrap();
+        let r = add(&v.id, &[brief, "call:2026-11-05_090012"]).unwrap();
+        let paths: Vec<&str> = r["added"].as_array().unwrap().iter().map(|a| a["path"].as_str().unwrap()).collect();
+        assert_eq!(paths.len(), 2, "{r}");
+        assert_eq!(paths[0], "raw_inbox/brief.txt");
+        assert!(paths[1].starts_with("raw_inbox/echo/") && paths[1].ends_with("-weekly-delivery-sync.md"), "{r}");
+        // An https address is a web page: here refused by its own check, before anything is fetched. http is refused.
+        let e = add(&v.id, &["https://contoso.example/a b"]).unwrap_err().to_string();
+        assert!(e.contains("isn't a web address"), "{e}");
+        let e = add(&v.id, &["http://contoso.example/notes"]).unwrap_err().to_string();
+        assert!(e.contains("only https"), "{e}");
+        // The flags still work, each with its kind.
+        let r = add(&v.id, &["--call", "2026-11-05_090012-weekly-sync", "--transcript"]).unwrap();
+        assert_eq!(r["added"].as_array().unwrap().len(), 1, "{r}");
+        // A flag without its kind is refused, saying why; nothing is added.
+        for args in [vec![brief, "--transcript"], vec![brief, "--anyway"], vec![brief, "--chat"], vec![brief, "--since", "2026-11-01"], vec!["--until", "2026-11-07", "https://contoso.example/x"]] {
+            let e = add(&v.id, &args).unwrap_err().to_string();
+            assert!(e.contains("go with"), "{args:?}: {e}");
+        }
+        assert!(add(&v.id, &[]).is_err(), "nothing named");
+        let q = knowledge::sources::queue(&v).unwrap();
+        assert_eq!(q.iter().filter(|s| s.path.starts_with("raw_inbox/brief")).count(), 1, "the refused adds wrote nothing");
+    }
 }

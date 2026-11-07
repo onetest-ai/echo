@@ -11,7 +11,8 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use super::{export, git, page, Vault};
+use super::extract::md_text;
+use super::{export, git, page, profile_name, Mismatch, Vault};
 
 /// The largest file Echo copies in.
 pub const MAX_FILE: u64 = 50 << 20;
@@ -105,25 +106,6 @@ pub struct Include {
     pub chat: bool,
 }
 
-/// A call on another AI profile than the vault's, added without *Add anyway* (X-P3).
-#[derive(Debug)]
-pub struct Mismatch {
-    /// The profiles' ids: the call's, the vault's.
-    pub call: String,
-    pub vault: String,
-    /// Their names, as the user knows them.
-    pub call_name: String,
-    pub vault_name: String,
-}
-
-impl std::fmt::Display for Mismatch {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "this call's text goes only to the {} profile; this vault is read by the {} profile", self.call_name, self.vault_name)
-    }
-}
-
-impl std::error::Error for Mismatch {}
-
 /// A Teams chat, as its source names it.
 pub struct Chat {
     pub id: String,
@@ -138,11 +120,6 @@ fn now() -> String {
 /// `s` on one line: each run of whitespace and control characters made one space.
 fn one_line(s: &str) -> String {
     s.split(|c: char| c.is_whitespace() || c.is_control()).filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ")
-}
-
-/// A profile's name as the user knows it (its id when it can't be found).
-fn profile_name(id: &str) -> String {
-    crate::ai::Settings::load().ok().and_then(|s| s.get(id).ok()).map(|p| p.name).unwrap_or_else(|| id.to_string())
 }
 
 fn file_sha(p: &Path) -> Result<String> {
@@ -294,14 +271,15 @@ pub fn queue(v: &Vault) -> Result<Vec<Source>> {
     Ok(out.into_iter().map(|(_, s)| s).collect())
 }
 
-/// The first open's question (K14-09) while the vault has no ledger yet: how many files are there that `log.md`
-/// doesn't call processed.
+/// The first open's question (K14-09) until it is answered (ruling R40: an add or a skip before the answer doesn't take
+/// it away): how many files are there that the ledger doesn't know and `log.md` doesn't call processed.
 pub fn offer(v: &Vault) -> Result<Option<usize>> {
-    if ledger_file(v).exists() {
+    let l = ledger(v)?;
+    if l.baseline.is_some() {
         return Ok(None);
     }
     let done = processed(v);
-    let n = files(v).iter().filter(|p| !done.contains(*p)).count();
+    let n = files(v).iter().filter(|p| !done.contains(*p) && !l.sources.contains_key(*p)).count();
     Ok((n > 0).then_some(n))
 }
 
@@ -380,8 +358,26 @@ pub fn value(v: &Vault) -> Result<Value> {
 
 // ── adding ──
 
+/// The most a source's name may be, in bytes and in UTF-16 units: macOS and Windows allow 255, and Echo's temporary
+/// file beside it adds its own suffix.
+const NAME_MAX: usize = 200;
+
+/// `stem`, cut at a character so that it, `ext` and a ` (999)` fit [`NAME_MAX`] on both systems.
+fn fit(stem: &str, ext: &str) -> String {
+    let room = NAME_MAX - " (999)".len() - ext.len();
+    let (mut out, mut units) = (String::new(), 0);
+    for c in stem.chars() {
+        if out.len() + c.len_utf8() > room || units + c.len_utf16() > room {
+            break;
+        }
+        out.push(c);
+        units += c.len_utf16();
+    }
+    out
+}
+
 /// A file name safe on macOS and Windows: no `\ / : * ? " < > |` or control characters, no dot or space at either
-/// end, not a Windows device name, its stem at most 120 characters.
+/// end, not a Windows device name, short enough for both ([`fit`]).
 fn safe_name(name: &str) -> String {
     let s: String = name.chars().map(|c| if "\\/:*?\"<>|".contains(c) || c.is_control() { '-' } else { c }).collect();
     let s = s.trim_matches(|c: char| c.is_whitespace() || c == '.');
@@ -389,7 +385,7 @@ fn safe_name(name: &str) -> String {
         Some(i) if i > 0 && s.len() - i <= 12 => (&s[..i], &s[i..]),
         _ => (s, ""),
     };
-    let stem: String = stem.chars().take(120).collect();
+    let stem = fit(stem, ext);
     let stem = stem.trim_end_matches(|c: char| c.is_whitespace() || c == '.');
     let stem = if stem.is_empty() { "file" } else { stem };
     let first = stem.split('.').next().unwrap_or("").to_ascii_uppercase();
@@ -400,11 +396,13 @@ fn safe_name(name: &str) -> String {
 /// `<date>-<slug>.md`, the slug of `title` (letters and digits of any script, lowercased, at most 60), else `fallback`.
 fn dated_name(date: &str, title: &str, fallback: &str) -> String {
     let slug = crate::recorder::slugify(title);
-    format!("{date}-{}.md", if slug.is_empty() { fallback } else { &slug })
+    let stem = fit(&format!("{date}-{}", if slug.is_empty() { fallback } else { &slug }), ".md");
+    format!("{}.md", stem.trim_end_matches('-'))
 }
 
-/// `dir/name`, else `name (2)`, `name (3)`… — the first not there (the folder's own README is always taken).
-fn free_name(v: &Vault, dir: &str, name: &str) -> Result<String> {
+/// `dir/name`, else `name (2)`, `name (3)`… — the first not there and not `taken` (the paths the ledger or `log.md`
+/// already name: a new file there would take an old one's state). The folder's own README is always taken.
+fn free_name(v: &Vault, dir: &str, name: &str, taken: &HashSet<String>) -> Result<String> {
     let (stem, ext) = match name.rfind('.') {
         Some(i) if i > 0 => (&name[..i], &name[i..]),
         _ => (name, ""),
@@ -414,7 +412,8 @@ fn free_name(v: &Vault, dir: &str, name: &str) -> Result<String> {
         let candidate = if n == 1 { name.to_string() } else { format!("{stem} ({n}){ext}") };
         let rel = format!("{dir}/{candidate}");
         let full = page::inside(v, &rel)?;
-        if !(top && candidate.eq_ignore_ascii_case("README.md")) && std::fs::symlink_metadata(&full).is_err() {
+        let readme = top && candidate.eq_ignore_ascii_case("README.md");
+        if !readme && !taken.contains(&rel) && std::fs::symlink_metadata(&full).is_err() {
             return Ok(rel);
         }
     }
@@ -439,20 +438,6 @@ struct New<'a> {
     body: Body<'a>,
 }
 
-/// `src` byte for byte at `to`, through a hidden file beside it (a reader never sees half a file).
-fn copy_in(src: &Path, to: &Path) -> Result<()> {
-    let name = to.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let tmp = to.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
-    if let Err(e) = std::fs::copy(src, &tmp) {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(anyhow!("copying {}: {e}", src.display()));
-    }
-    std::fs::rename(&tmp, to).inspect_err(|_| {
-        let _ = std::fs::remove_file(&tmp);
-    })?;
-    Ok(())
-}
-
 /// Write one new source (and the README when Echo makes the folder), record it as New in the ledger and in the
 /// activity log, and commit just those files when the vault commits (`Add source: <title>`, X-G1…G5).
 fn write_source(v: &Vault, n: New) -> Result<Added> {
@@ -467,7 +452,8 @@ fn write_source(v: &Vault, n: New) -> Result<Added> {
     let base = folder(v);
     let there = folder_there(v);
     let dir = if n.sub.is_empty() { base.clone() } else { format!("{base}/{}", n.sub) };
-    let rel = free_name(v, &dir, &n.name)?;
+    let taken: HashSet<String> = ledger(v)?.sources.into_keys().chain(processed(v)).collect();
+    let rel = free_name(v, &dir, &n.name, &taken)?;
     let full = page::inside(v, &rel)?;
     let readme_rel = format!("{base}/README.md");
     let readme_full = if there { None } else { Some(page::inside(v, &readme_rel)?) };
@@ -478,16 +464,16 @@ fn write_source(v: &Vault, n: New) -> Result<Added> {
     std::fs::create_dir_all(full.parent().ok_or_else(|| anyhow!("{rel} has no folder"))?)?;
     let mut written: Vec<(String, PathBuf, Option<String>)> = vec![];
     if let Some(r) = readme_full.filter(|r| !r.exists()) {
-        crate::paths::write_atomic(&r, readme().as_bytes())?;
+        put_new(&r, |f| std::io::Write::write_all(f, readme().as_bytes()))?;
         written.push((readme_rel, r, Some(readme().to_string())));
     }
     let text = match &n.body {
         Body::Text(t) => {
-            crate::paths::write_atomic(&full, t.as_bytes())?;
+            put_new(&full, |f| std::io::Write::write_all(f, t.as_bytes()))?;
             Some(t.clone())
         }
         Body::File(src) => {
-            copy_in(src, &full)?;
+            put_new(&full, |f| std::fs::File::open(src).and_then(|mut s| std::io::copy(&mut s, f)).map(|_| ())).with_context(|| format!("copying {}", src.display()))?;
             None
         }
     };
@@ -548,7 +534,7 @@ pub fn add_call(v: &Vault, call: &Path, include: Include, anyway: bool) -> Resul
     let profile = f.profile.clone().ok_or_else(|| anyhow!("this call's AI profile can't be read"))?;
     let across = profile != v.profile;
     if across && !anyway {
-        return Err(Mismatch { call_name: profile_name(&profile), vault_name: profile_name(&v.profile), call: profile, vault: v.profile.clone() }.into());
+        return Err(Mismatch { dir: call.to_path_buf(), call_name: profile_name(&profile), vault_name: profile_name(&v.profile), call: profile, vault: v.profile.clone() }.into());
     }
     let memo = crate::memo::is_memo(call);
     let title = Some(one_line(&f.title)).filter(|t| !t.is_empty()).unwrap_or_else(|| "Call".into());
@@ -564,7 +550,7 @@ pub fn add_call(v: &Vault, call: &Path, include: Include, anyway: bool) -> Resul
         fm.push(format!("note: {}", export::yaml(&n)));
     }
     fm.push("origin: echo".into());
-    let mut text = format!("---\n{}\n---\n\n# {title} — minutes\n\n{}\n", fm.join("\n"), f.notes.trim_end());
+    let mut text = format!("---\n{}\n---\n\n# {} — minutes\n\n{}\n", fm.join("\n"), md_text(&title), f.notes.trim_end());
     if include.transcript {
         if let Ok(t) = std::fs::read_to_string(call.join("transcript.md")) {
             text.push_str(&format!("\n## Transcript\n\n{}\n", t.trim()));
@@ -594,7 +580,7 @@ pub fn add_mail(v: &Vault, id: &str) -> Result<Added> {
     super::refuse_headless()?;
     let picked = crate::graph::message(id)?;
     let conv = picked["conversation"].as_str().ok_or_else(|| anyhow!("that mail has no thread"))?;
-    let messages = crate::graph::conversation(conv)?;
+    let messages = crate::graph::conversation_with_files(conv)?;
     add_thread(v, &picked, &messages)
 }
 
@@ -626,18 +612,20 @@ pub(crate) fn add_thread(v: &Vault, picked: &Value, messages: &[Value]) -> Resul
         fm.push(format!("source: {}", export::yaml(&u)));
     }
     fm.push("origin: echo".into());
-    let mut text = format!("---\n{}\n---\n\n# {title}\n", fm.join("\n"));
+    let mut text = format!("---\n{}\n---\n\n# {}\n", fm.join("\n"), md_text(&title));
     for m in messages {
         let who = Some(name_of(&m["from"])).filter(|n| !n.is_empty()).unwrap_or_else(|| "Someone".into());
-        text.push_str(&format!("\n### {who} · {}\n\n", local_time(m["at"].as_str().unwrap_or(""))));
+        text.push_str(&format!("\n### {} · {}\n\n", md_text(&who), local_time(m["at"].as_str().unwrap_or(""))));
         let body = m["text"].as_str().unwrap_or("").trim();
         if !body.is_empty() {
             text.push_str(body);
             text.push('\n');
         }
-        let files: Vec<String> = m["files"].as_array().into_iter().flatten().filter_map(|f| f.as_str()).map(one_line).filter(|f| !f.is_empty()).collect();
+        let files: Vec<String> = m["files"].as_array().into_iter().flatten().filter_map(|f| f.as_str()).map(|f| md_text(&one_line(f))).filter(|f| !f.is_empty()).collect();
         if !files.is_empty() {
             text.push_str(&format!("\nAttachments: {}\n", files.join(", ")));
+        } else if let Some(e) = m["files_error"].as_str() {
+            text.push_str(&format!("\nAttachments: Echo couldn't list them ({})\n", md_text(&one_line(e))));
         }
     }
     let from = picked["id"].as_str().map(str::to_owned);
@@ -689,17 +677,17 @@ pub(crate) fn add_chat_messages(v: &Vault, chat: &Chat, since: NaiveDate, until:
         fm.push(format!("source: {}", export::yaml(&u)));
     }
     fm.push("origin: echo".into());
-    let mut text = format!("---\n{}\n---\n\n# {title}\n", fm.join("\n"));
+    let mut text = format!("---\n{}\n---\n\n# {}\n", fm.join("\n"), md_text(&title));
     for m in messages {
         let name = Some(who(m)).filter(|n| !n.is_empty()).unwrap_or_else(|| "Someone".into());
-        text.push_str(&format!("\n### {name} · {}\n\n", local_time(m["createdDateTime"].as_str().unwrap_or(""))));
+        text.push_str(&format!("\n### {} · {}\n\n", md_text(&name), local_time(m["createdDateTime"].as_str().unwrap_or(""))));
         let content = m["body"]["content"].as_str().unwrap_or("");
         let body = if m["body"]["contentType"].as_str().is_some_and(|t| t.eq_ignore_ascii_case("text")) { content.trim().to_string() } else { crate::graph::html_to_text(content) };
         if !body.is_empty() {
             text.push_str(&body);
             text.push('\n');
         }
-        let files: Vec<String> = m["attachments"].as_array().into_iter().flatten().filter_map(|a| a["name"].as_str()).map(one_line).filter(|f| !f.is_empty()).collect();
+        let files: Vec<String> = m["attachments"].as_array().into_iter().flatten().filter_map(|a| a["name"].as_str()).map(|f| md_text(&one_line(f))).filter(|f| !f.is_empty()).collect();
         if !files.is_empty() {
             text.push_str(&format!("\nAttachments: {}\n", files.join(", ")));
         }
@@ -713,11 +701,57 @@ pub fn add_web(v: &Vault, url: &str) -> Result<Added> {
     super::refuse_headless()?;
     let url = url.trim();
     let (title, md) = super::extract::fetch(url)?;
-    let title = Some(one_line(&title)).filter(|t| !t.is_empty()).unwrap_or_else(|| url.to_string());
+    add_page(v, url, &title, &md)
+}
+
+/// A fetched page's title and Markdown as its source.
+pub(crate) fn add_page(v: &Vault, url: &str, title: &str, md: &str) -> Result<Added> {
+    let title = Some(one_line(title)).filter(|t| !t.is_empty()).unwrap_or_else(|| url.to_string());
     let date = Local::now().format("%Y-%m-%d").to_string();
     let fm = [format!("title: {}", export::yaml(&title)), format!("date: {date}"), "kind: web".into(), format!("url: {}", export::yaml(url)), format!("fetched: {}", now()), "origin: echo".into()];
-    let text = format!("---\n{}\n---\n\n# {title}\n\n{}\n", fm.join("\n"), md.trim());
+    let text = format!("---\n{}\n---\n\n# {}\n\n{}\n", fm.join("\n"), md_text(&title), md.trim());
     write_source(v, New { sub: "web", name: dated_name(&date, &title, "page"), title, by: "web", from: Some(url.to_string()), anyway: false, body: Body::Text(text) })
+}
+
+/// The first of the 7 days that end with `until` (a chat's days by default, K14-05).
+pub fn last_week(until: NaiveDate) -> NaiveDate {
+    until - chrono::Duration::days(6)
+}
+
+/// A new file at `to`, never over anything there: written whole into a hidden file of its own beside it (made with
+/// `create_new`, so a link planted at that name is never followed), then linked into place, which never replaces a
+/// file. Where the disk has no links, the file is made at `to` with `create_new` and the bytes copied in.
+fn put_new(to: &Path, fill: impl FnOnce(&mut std::fs::File) -> std::io::Result<()>) -> Result<()> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static N: AtomicU64 = AtomicU64::new(0);
+    let name = to.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let mut tries = 0;
+    let (tmp, mut f) = loop {
+        let tmp = to.with_file_name(format!(".{name}.{}.{}.tmp", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp) {
+            Ok(f) => break (tmp, f),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && tries < 1000 => tries += 1,
+            Err(e) => return Err(anyhow!("{}: {e}", tmp.display())),
+        }
+    };
+    let filled = fill(&mut f);
+    drop(f);
+    let placed = filled.map_err(anyhow::Error::from).and_then(|_| match std::fs::hard_link(&tmp, to) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err(anyhow!("{name} appeared while Echo was adding it — add it again")),
+        Err(_) => {
+            let mut out = std::fs::OpenOptions::new().write(true).create_new(true).open(to).map_err(|e| anyhow!("{name}: {e}"))?;
+            let copied = std::fs::File::open(&tmp).and_then(|mut src| std::io::copy(&mut src, &mut out));
+            if let Err(e) = copied {
+                drop(out);
+                let _ = std::fs::remove_file(to);
+                return Err(e.into());
+            }
+            Ok(())
+        }
+    });
+    let _ = std::fs::remove_file(&tmp);
+    placed
 }
 
 // ── what the sheet lists ──
@@ -755,6 +789,11 @@ pub fn calls(v: &Vault, q: &str, limit: usize) -> Vec<Value> {
     out
 }
 
+/// A search hit the sheet can add: a mail, or a chat's message — not a channel's post, which carries a chat id too.
+pub(crate) fn addable(h: &Value) -> bool {
+    h["kind"] == "mail" || (h["kind"] == "chats" && h["chat"].is_string() && h["channel"].is_null())
+}
+
 /// Mail and chats matching `q` in the last 90 days, from Echo's Microsoft 365 sign-in; without one, only that.
 pub fn m365_search(q: &str) -> Result<Value> {
     if crate::graph::account().is_none() {
@@ -765,7 +804,7 @@ pub fn m365_search(q: &str) -> Result<Value> {
     }
     let r = crate::m365::search(q, &["mail".to_string(), "chats".to_string()], 25, None, Some(90))?;
     // A chat's messages, not a channel's posts: a chat is what can be added.
-    let results: Vec<Value> = r["results"].as_array().into_iter().flatten().filter(|h| h["kind"] == "mail" || h["chat"].is_string()).cloned().collect();
+    let results: Vec<Value> = r["results"].as_array().into_iter().flatten().filter(|h| addable(h)).cloned().collect();
     Ok(json!({ "signed_in": true, "results": results, "errors": r["errors"] }))
 }
 

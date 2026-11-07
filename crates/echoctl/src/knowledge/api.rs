@@ -331,7 +331,7 @@ fn source_add(vault: &Vault, v: &Value) -> Result<Value> {
             let include = sources::Include { transcript: v["transcript"].as_bool().unwrap_or(false), chat: v["chat"].as_bool().unwrap_or(false) };
             match sources::add_call(vault, &call_named(s(v, "call"))?, include, v["anyway"].as_bool().unwrap_or(false)) {
                 Ok(a) => Ok(serde_json::to_value(a)?),
-                Err(e) => match e.downcast_ref::<sources::Mismatch>() {
+                Err(e) => match e.downcast_ref::<super::Mismatch>() {
                     Some(m) => Ok(json!({ "mismatch": { "call": m.call, "vault": m.vault, "call_name": m.call_name, "vault_name": m.vault_name } })),
                     None => Err(e),
                 },
@@ -340,7 +340,7 @@ fn source_add(vault: &Vault, v: &Value) -> Result<Value> {
         "mail" if !s(v, "message").is_empty() => Ok(serde_json::to_value(sources::add_mail(vault, s(v, "message"))?)?),
         "chat" if !s(v, "chat").is_empty() => {
             let until = day(v, "until", chrono::Local::now().date_naive())?;
-            let since = day(v, "since", until - chrono::Duration::days(7))?;
+            let since = day(v, "since", sources::last_week(until))?;
             Ok(serde_json::to_value(sources::add_chat(vault, s(v, "chat"), since, until)?)?)
         }
         "web" => Ok(serde_json::to_value(sources::add_web(vault, s(v, "url"))?)?),

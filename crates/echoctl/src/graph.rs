@@ -487,24 +487,46 @@ pub fn message(id: &str) -> Result<Value> {
     Ok(mail_item(&m))
 }
 
-/// Every message of one conversation (oldest first), with its attachments' names (`files`; never their contents).
+/// Every message of one conversation (oldest first).
 pub fn conversation(id: &str) -> Result<Vec<Value>> {
     let token = access_token()?;
-    let v = graph_get_text(&token, &format!(
-        "{GRAPH}/me/messages?$filter={}&$top=50&$select=id,conversationId,internetMessageId,subject,from,toRecipients,ccRecipients,receivedDateTime,body,webLink,internetMessageHeaders,hasAttachments",
-        urlencode(&format!("conversationId eq '{}'", id.replace('\'', "''")))
-    ))?;
-    let mut raw: Vec<Value> = v["value"].as_array().cloned().unwrap_or_default();
-    for m in raw.iter_mut().filter(|m| m["hasAttachments"] == true) {
-        if let Some(mid) = m["id"].as_str() {
-            if let Ok(a) = graph_get(&token, &format!("{GRAPH}/me/messages/{}/attachments?$select=name", urlencode(mid))) {
-                m["attachments"] = a["value"].clone();
-            }
-        }
-    }
-    let mut out: Vec<Value> = raw.iter().map(mail_item).collect();
+    let mut out: Vec<Value> = conversation_raw(&token, id, "")?.iter().map(mail_item).collect();
     out.sort_by(|a, b| a["at"].as_str().cmp(&b["at"].as_str()));
     Ok(out)
+}
+
+/// The same, each message with its attachments' names (`files`; inline images left out, the contents never read):
+/// one more request per message that has attachments. A lookup that fails is said (`files_error`), not left out.
+pub fn conversation_with_files(id: &str) -> Result<Vec<Value>> {
+    let token = access_token()?;
+    let mut out = vec![];
+    for m in conversation_raw(&token, id, ",hasAttachments")? {
+        let mut item = mail_item(&m);
+        item["files"] = json!([]);
+        if let (true, Some(mid)) = (m["hasAttachments"] == true, m["id"].as_str()) {
+            match graph_get(&token, &format!("{GRAPH}/me/messages/{}/attachments?$select=name,isInline", urlencode(mid))) {
+                Ok(a) => item["files"] = json!(attachment_names(&a["value"])),
+                Err(e) => item["files_error"] = json!(format!("{e:#}")),
+            }
+        }
+        out.push(item);
+    }
+    out.sort_by(|a, b| a["at"].as_str().cmp(&b["at"].as_str()));
+    Ok(out)
+}
+
+/// A conversation's messages as Graph gives them, `extra` fields selected besides Echo's usual ones.
+fn conversation_raw(token: &str, id: &str, extra: &str) -> Result<Vec<Value>> {
+    let v = graph_get_text(token, &format!(
+        "{GRAPH}/me/messages?$filter={}&$top=50&$select=id,conversationId,internetMessageId,subject,from,toRecipients,ccRecipients,receivedDateTime,body,webLink,internetMessageHeaders{extra}",
+        urlencode(&format!("conversationId eq '{}'", id.replace('\'', "''")))
+    ))?;
+    Ok(v["value"].as_array().cloned().unwrap_or_default())
+}
+
+/// The names of a message's attachments as Graph lists them, inline ones (a signature's image) left out.
+pub(crate) fn attachment_names(list: &Value) -> Vec<String> {
+    list.as_array().into_iter().flatten().filter(|a| a["isInline"] != true).filter_map(|a| a["name"].as_str().map(str::to_owned)).collect()
 }
 
 #[cfg_attr(not(feature = "brain"), allow(dead_code))]
@@ -561,7 +583,7 @@ pub fn person_email(name: &str, id: &str) -> Result<Option<String>> {
     }))
 }
 
-/// One message as Echo reads it: who, when, its new part as text, its attachments' names (when Graph gave them).
+/// One message as Echo reads it: who, when, its new part as text.
 pub(crate) fn mail_item(m: &Value) -> Value {
     let who = |r: &Value| -> Value { json!({"name": r["emailAddress"]["name"], "email": r["emailAddress"]["address"]}) };
     // The new part of a reply: up to the quoted mail ("From: …", "-----Original Message-----", "On … wrote:"). Echo asks
@@ -582,8 +604,7 @@ pub(crate) fn mail_item(m: &Value) -> Value {
     let invite = m["@odata.type"].as_str().is_some_and(|t| t.contains("eventMessage"));
     json!({"id": m["id"], "internet_id": m["internetMessageId"], "conversation": m["conversationId"], "subject": m["subject"], "from": who(&m["from"]), "invite": invite, "auth": mail_auth(m),
            "to": m["toRecipients"].as_array().into_iter().flatten().chain(m["ccRecipients"].as_array().into_iter().flatten()).map(who).collect::<Vec<_>>(),
-           "at": m["receivedDateTime"], "text": text.trim(), "url": m["webLink"],
-           "files": m["attachments"].as_array().into_iter().flatten().filter_map(|a| a["name"].as_str()).collect::<Vec<_>>()})
+           "at": m["receivedDateTime"], "text": text.trim(), "url": m["webLink"]})
 }
 
 pub fn calendar_view(from: DateTime<Utc>, to: DateTime<Utc>) -> Result<Vec<Value>> {

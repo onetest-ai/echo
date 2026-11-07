@@ -110,8 +110,15 @@ fn graph_mail(id: &str, subject: &str, from: (&str, &str), to: &[(&str, &str)], 
     json!({
         "id": id, "conversationId": "conv-1", "subject": subject, "from": who(from), "toRecipients": to.iter().map(|x| who(*x)).collect::<Vec<_>>(),
         "ccRecipients": [], "receivedDateTime": at, "body": {"contentType": "html", "content": html}, "webLink": format!("https://outlook.example/owa/?ItemID={id}"),
-        "hasAttachments": !files.is_empty(), "attachments": files.iter().map(|f| json!({"name": f})).collect::<Vec<_>>(),
+        "hasAttachments": !files.is_empty(), "attachments": files.iter().map(|f| json!({"name": f, "isInline": f.starts_with("image0")})).collect::<Vec<_>>(),
     })
+}
+
+/// A mail as `graph::conversation_with_files` gives it: Echo's item with its attachments' names.
+fn item(raw: &serde_json::Value) -> serde_json::Value {
+    let mut m = crate::graph::mail_item(raw);
+    m["files"] = json!(crate::graph::attachment_names(&raw["attachments"]));
+    m
 }
 
 #[test]
@@ -121,11 +128,13 @@ fn a_mail_thread_becomes_a_source() {
     let v = twin(&root);
     let (lena, omar, priya) = (("Lena Hartmann", "lena@northwind.example"), ("Omar Reyes", "omar@contoso.example"), ("Priya Nair", "priya@northwind.example"));
     let raw = [
-        graph_mail("m1", "Northwind Retail — pilot plan", lena, &[omar], "2026-11-03T09:15:00Z", "<html><body><p>Hi Omar,</p><p>Attached is the <b>pilot plan</b> &amp; its timeline.</p><div>Lena</div></body></html>", &["pilot-plan.pdf"]),
+        graph_mail("m1", "Northwind Retail — pilot plan", lena, &[omar], "2026-11-03T09:15:00Z", "<html><body><p>Hi Omar,</p><p>Attached is the <b>pilot plan</b> &amp; its timeline.</p><div>Lena</div></body></html>", &["pilot-plan.pdf", "image001.png"]),
         graph_mail("m2", "RE: Northwind Retail — pilot plan", omar, &[lena], "2026-11-03T14:40:00Z", "<div><p>Thanks Lena, looks good.</p><p>Who owns the data migration?</p></div><div>On Mon, Lena Hartmann wrote:</div><blockquote><p>Hi Omar,</p></blockquote>", &[]),
         graph_mail("m3", "RE: Northwind Retail — pilot plan", lena, &[omar, priya], "2026-11-04T08:05:00Z", "<p>Priya Nair will own it.<br>Kickoff is on 18 November.</p>", &["kickoff.ics", "budget.xlsx"]),
     ];
-    let items: Vec<serde_json::Value> = raw.iter().map(crate::graph::mail_item).collect();
+    let mut items: Vec<serde_json::Value> = raw.iter().map(item).collect();
+    // A lookup that failed is said, not left out.
+    items[1]["files_error"] = json!("Graph: ErrorAccessDenied");
     let a = add_thread(&v, &items[0], &items).unwrap();
     let date = local("2026-11-04T08:05:00Z", "%Y-%m-%d");
     assert_eq!(a.path, format!("raw_inbox/mail/{date}-northwind-retail-pilot-plan.md"));
@@ -139,7 +148,8 @@ fn a_mail_thread_becomes_a_source() {
     assert_eq!(prop("origin"), "echo");
     assert_eq!(body.matches("\n### ").count(), 3, "{body}");
     assert!(body.contains(&format!("### Lena Hartmann · {}\n\nHi Omar,\nAttached is the pilot plan & its timeline.\nLena\n\nAttachments: pilot-plan.pdf\n", local("2026-11-03T09:15:00Z", "%Y-%m-%d %H:%M"))), "{body}");
-    assert!(body.contains(&format!("### Omar Reyes · {}\n\nThanks Lena, looks good.\nWho owns the data migration?\n", local("2026-11-03T14:40:00Z", "%Y-%m-%d %H:%M"))), "{body}");
+    assert!(body.contains(&format!("### Omar Reyes · {}\n\nThanks Lena, looks good.\nWho owns the data migration?\n\nAttachments: Echo couldn't list them (Graph: ErrorAccessDenied)\n", local("2026-11-03T14:40:00Z", "%Y-%m-%d %H:%M"))), "{body}");
+    assert!(!body.contains("image001.png"), "an inline image (a signature's) is no attachment: {body}");
     assert!(!body.contains("wrote:"), "the quoted mail is left out: {body}");
     assert!(body.contains("Priya Nair will own it.\nKickoff is on 18 November.\n\nAttachments: kickoff.ics, budget.xlsx"), "{body}");
     assert!(!body.contains('<') && !body.contains("&amp;"), "text without tags: {body}");
@@ -195,7 +205,7 @@ fn odd_titles_make_safe_source_names() {
     let date = local(at, "%Y-%m-%d");
     let mut names = vec![];
     for (i, s) in subjects.iter().enumerate() {
-        let m = crate::graph::mail_item(&graph_mail(&format!("m{i}"), s, ("Lena Hartmann", "lena@northwind.example"), &[], at, "<p>Made-up text.</p>", &[]));
+        let m = item(&graph_mail(&format!("m{i}"), s, ("Lena Hartmann", "lena@northwind.example"), &[], at, "<p>Made-up text.</p>", &[]));
         let a = add_thread(&v, &m, std::slice::from_ref(&m)).unwrap_or_else(|e| panic!("{s:?}: {e:#}"));
         let name = a.path.rsplit('/').next().unwrap().to_string();
         assert!(a.path.starts_with("raw_inbox/mail/") && safe_everywhere(&name), "{s:?} → {name:?}");
@@ -205,7 +215,7 @@ fn odd_titles_make_safe_source_names() {
         let title = fm::get(&props, "title").map(|p| p.text()).unwrap_or_default();
         let one = s.split_whitespace().collect::<Vec<_>>().join(" ");
         assert_eq!(title, if one.is_empty() { "(no subject)".to_string() } else { one.clone() }, "{s:?}");
-        assert!(text.contains(&format!("\n# {title}\n")), "{text}");
+        assert!(text.contains(&format!("\n# {}\n", crate::knowledge::extract::md_text(&title))), "{text}");
         names.push(name);
     }
     assert_eq!(names[0], format!("{date}-встреча-по-проекту-север.md"));
@@ -362,4 +372,143 @@ fn a_source_is_committed_alone() {
     assert_eq!((b.path.as_str(), b.committed.as_str()), ("raw_inbox/Aurora RFP (2).pdf", "off"));
     assert!(v.root.join("raw_inbox/Aurora RFP (2).pdf").is_file());
     assert_eq!(git::out(&v.root, &["rev-parse", "HEAD"]).unwrap(), head);
+}
+
+#[test]
+fn long_names_fit_both_systems() {
+    // Fix round 1, item 4: a name near the 255-byte limit, in scripts of 2, 3 and 4 bytes a character.
+    let (_env, root) = crate::paths::testenv::folders("kn-src-long");
+    let v = twin(&root);
+    let picked = root.join("picked");
+    std::fs::create_dir_all(&picked).unwrap();
+    let names = [format!("{}.pdf", "会议记录".repeat(20)), format!("{}.pdf", "🚀".repeat(61)), format!("{}.txt", "Протокол".repeat(15) + "Про")];
+    for n in &names {
+        assert!(n.len() <= 255, "the test's own file can be made: {}", n.len());
+        std::fs::write(picked.join(n), n.as_bytes()).unwrap();
+    }
+    let files: Vec<std::path::PathBuf> = names.iter().flat_map(|n| [picked.join(n), picked.join(n)]).collect();
+    let fits = |p: &str| {
+        let name = p.rsplit('/').next().unwrap();
+        name.len() <= 200 && name.encode_utf16().count() <= 200 && safe_everywhere(name)
+    };
+    for (i, (_, r)) in add_files(&v, &files).into_iter().enumerate() {
+        let a = r.unwrap_or_else(|e| panic!("{}: {e:#}", names[i / 2]));
+        assert!(fits(&a.path), "{} → {}", names[i / 2], a.path);
+        assert_eq!(std::fs::read(knowledge::join(&v.root, &a.path)).unwrap(), names[i / 2].as_bytes());
+        let stem: String = names[i / 2].chars().take(5).collect();
+        assert!(a.path.contains(&stem) && (i % 2 == 0 || a.path.contains(" (2)")), "{}", a.path);
+    }
+    // A title in a script of 4-byte letters makes a dated name that fits too.
+    let subject = "𠀀𠀁𠀂𠀃".repeat(20);
+    let m = item(&graph_mail("m-long", &subject, ("Lena Hartmann", "lena@northwind.example"), &[], "2026-11-04T08:05:00Z", "<p>Made-up text.</p>", &[]));
+    for _ in 0..2 {
+        let a = add_thread(&v, &m, std::slice::from_ref(&m)).unwrap();
+        assert!(fits(&a.path), "{}", a.path);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_link_at_a_temporary_name_is_never_followed() {
+    // Fix round 1, item 5: the copy never writes through a link planted where its temporary file goes.
+    let (_env, root) = crate::paths::testenv::folders("kn-src-link");
+    let v = twin(&root);
+    let outside = root.join("outside.txt");
+    std::fs::write(&outside, "keep").unwrap();
+    let inbox = v.root.join("raw_inbox");
+    let pid = std::process::id();
+    std::os::unix::fs::symlink(&outside, inbox.join(format!(".a.pdf.{pid}.tmp"))).unwrap();
+    for n in 0..200 {
+        std::os::unix::fs::symlink(&outside, inbox.join(format!(".a.pdf.{pid}.{n}.tmp"))).unwrap();
+    }
+    let picked = root.join("a.pdf");
+    std::fs::write(&picked, b"%PDF made up").unwrap();
+    let r = add_files(&v, std::slice::from_ref(&picked)).remove(0).1;
+    assert_eq!(std::fs::read_to_string(&outside).unwrap(), "keep", "nothing written through the link");
+    let a = r.unwrap();
+    let full = knowledge::join(&v.root, &a.path);
+    assert!(!std::fs::symlink_metadata(&full).unwrap().file_type().is_symlink(), "the source is a file of its own");
+    assert_eq!(std::fs::read(&full).unwrap(), b"%PDF made up");
+}
+
+#[test]
+fn a_new_source_never_writes_over_a_file() {
+    // Fix round 1, item 5: a file that appeared at the chosen name after it was chosen stays as it is.
+    let (_env, root) = crate::paths::testenv::folders("kn-src-put");
+    std::fs::write(root.join("x.md"), "theirs").unwrap();
+    assert!(put_new(&root.join("x.md"), |f| std::io::Write::write_all(f, b"mine")).is_err());
+    assert_eq!(std::fs::read_to_string(root.join("x.md")).unwrap(), "theirs");
+    put_new(&root.join("y.md"), |f| std::io::Write::write_all(f, b"mine")).unwrap();
+    assert_eq!(std::fs::read_to_string(root.join("y.md")).unwrap(), "mine");
+    let left: Vec<String> = std::fs::read_dir(&root).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.ends_with(".tmp")).collect();
+    assert!(left.is_empty(), "no temporary file left: {left:?}");
+}
+
+#[test]
+fn a_name_the_ledger_or_the_log_knows_is_taken() {
+    // Fix round 1, item 6: a new a.pdf where log.md once processed another isn't Done at once.
+    let (_env, root) = crate::paths::testenv::folders("kn-src-reused");
+    let t = fixture::twin(&root.join("twin"));
+    fixture::write(&t, "log.md", "# Log\n\n- 2026-11-01 · processed · raw_inbox/a.pdf → knowledge/topics/a.md\n");
+    let v = connect(&t);
+    update_ledger(&v, |l| {
+        l.sources.insert("raw_inbox/b.pdf".into(), Entry { state: "done".into(), by: "file".into(), ..Default::default() });
+        Ok(())
+    })
+    .unwrap();
+    let picked = root.join("picked");
+    std::fs::create_dir_all(&picked).unwrap();
+    std::fs::write(picked.join("a.pdf"), b"new a").unwrap();
+    std::fs::write(picked.join("b.pdf"), b"new b").unwrap();
+    let paths = added(&add_files(&v, &[picked.join("a.pdf"), picked.join("b.pdf")]));
+    assert_eq!(paths, ["raw_inbox/a (2).pdf", "raw_inbox/b (2).pdf"]);
+    let q = queue(&v).unwrap();
+    assert!(q.iter().filter(|s| paths.contains(&s.path)).all(|s| s.state == "new"), "{q:?}");
+}
+
+#[test]
+fn the_first_open_question_waits_for_its_answer() {
+    // Ruling R40: an add or a skip before the answer doesn't take the question away.
+    let (_env, root) = crate::paths::testenv::folders("kn-src-offer");
+    let t = fixture::twin(&root.join("twin"));
+    fixture::write(&t, "raw_inbox/notes.txt", "made up");
+    fixture::write(&t, "raw_inbox/brief.txt", "made up");
+    fixture::write(&t, "log.md", "# Log\n\n- 2026-01-07 · processed · raw_inbox/deck.pdf → knowledge/topics/deck.md\n");
+    let v = connect(&t);
+    assert_eq!(value(&v).unwrap()["offer"], json!({"count": 2, "folder": "raw_inbox"}));
+    let page = add_page(&v, "https://contoso.example/notes", "Store opening notes", "The new store opens on 4 December.").unwrap();
+    assert!(page.path.starts_with("raw_inbox/web/"));
+    assert_eq!(value(&v).unwrap()["offer"], json!({"count": 2, "folder": "raw_inbox"}), "an add first: the question stands");
+    skip(&v, "raw_inbox/notes.txt", None).unwrap();
+    assert_eq!(value(&v).unwrap()["offer"]["count"], 1, "a skipped file is answered");
+    assert_eq!(baseline(&v, true).unwrap(), 1);
+    assert!(value(&v).unwrap()["offer"].is_null(), "answered: gone");
+    let s = queue(&v).unwrap();
+    assert_eq!(s.iter().find(|x| x.path == page.path).unwrap().state, "new", "what was added stays New");
+    // *Treat them as new*, after a skip: gone too.
+    let t2 = fixture::twin(&root.join("second"));
+    let v2 = knowledge::add(&t2, AddOpts { name: Some("Second".into()), ..Default::default() }).unwrap();
+    skip(&v2, "raw_inbox/deck.pdf", None).unwrap();
+    fixture::write(&t2, "raw_inbox/later.txt", "made up");
+    assert_eq!(value(&v2).unwrap()["offer"]["count"], 1);
+    baseline(&v2, false).unwrap();
+    assert!(value(&v2).unwrap()["offer"].is_null());
+}
+
+#[test]
+fn a_chat_defaults_to_the_last_seven_days() {
+    // Fix round 1, item 7: seven days, today included.
+    let d = |m: u32, day: u32| chrono::NaiveDate::from_ymd_opt(2026, m, day).unwrap();
+    assert_eq!(last_week(d(11, 7)), d(11, 1));
+    assert_eq!(last_week(d(3, 2)), d(2, 24));
+}
+
+#[test]
+fn only_chats_and_mail_can_be_added() {
+    // Fix round 1, item 11: a channel's post carries a chat id too, and isn't a chat.
+    assert!(addable(&json!({"kind": "mail", "id": "m1"})));
+    assert!(addable(&json!({"kind": "chats", "chat": "19:a@thread.v2", "channel": null})));
+    assert!(!addable(&json!({"kind": "chats", "chat": "19:general@thread.tacv2", "team": "t1", "channel": "19:general@thread.tacv2"})));
+    assert!(!addable(&json!({"kind": "chats", "chat": null})));
+    assert!(!addable(&json!({"kind": "files", "id": "f1"})));
 }

@@ -189,33 +189,42 @@ The sources folder is the vault's `sources` (detected or set), else `raw_inbox`,
 starter's `raw_inbox/README.md`; Echo then records it as the vault's detected sources, so its Markdown is never taken
 for pages. Echo's own adds go under `echo/`, `mail/`, `teams/` and `web/`; files go in as they are named. An add writes
 only its source (and that README), under `sources.lock` (a free name is chosen and taken together: a taken name gets
-` (2)`, ` (3)`…; the folder's README is always taken), asks git first (X-G2, `git::dirty` fails safe), commits just
+` (2)`, ` (3)`…; the folder's README, and a path the ledger or `log.md` already names, count as taken, so a new file
+never inherits an old one's state). Each file is written whole into a hidden file made with `create_new` (a link planted
+at its name is never followed) and linked into place, which never replaces a file. It asks git first (X-G2, `git::dirty` fails safe), commits just
 those files when the vault commits (`Add source: <title>`), records the source as `new` in the ledger and a line in
 `activity.jsonl` (`by: source`). Nothing is processed by adding, and Echo never edits or deletes a source (D29).
 - **Files** are picked in the system's dialog (`app::choose_files`, several; `ECHOCTL_PICK_FILES` in debug builds):
   `kn_pick_files` answers a number and the files' names and sizes, never a path; `kn_source_add` takes the number back.
-  Each is copied byte for byte through a hidden file beside it; over 50 MB is refused with its size. A picked name is
-  made safe on both systems (`\ / : * ? " < > |` and control characters become `-`, no dot or space at either end, a
-  Windows device name gets `_` in front).
+  Each is copied byte for byte; over 50 MB is refused with its size. A picked name is made safe on both systems
+  (`\ / : * ? " < > |` and control characters become `-`, no dot or space at either end, a Windows device name gets
+  `_` in front) and short enough for both: at most 200 bytes and 200 UTF-16 units with room for ` (N)` (dated names
+  too: a slug of 4-byte letters would pass 255 bytes).
 - **A call or memo** is named as the window names calls (its folder or stamp, never a path) and becomes §5.5's file:
   `title`, `date`, `kind: call|memo`, `participants`, `duration`, `source: echo://call/<stamp>`, `note:` when the call
   has a note in this vault, `origin: echo`; then `# <title> — minutes` and `notes.md` as written; `## Transcript` and
   `## Chat` only when ticked. A call on another profile than the vault's is refused naming both profiles
   (`sources::Mismatch`, answered as `{mismatch: {call, vault, call_name, vault_name}}`) unless *Add anyway*, which the
   ledger keeps (`anyway`, X-P3).
-- **Mail** is the thread of the picked message (`graph::message`, `graph::conversation`, which now also lists each
-  message's attachments' names; Graph is asked for bodies as text, and `graph::mail_item` makes an HTML one text);
+- **Mail** is the thread of the picked message (`graph::message`, `graph::conversation_with_files`: each message's
+  attachments' names, inline images left out, a failed lookup said in the source — other callers of
+  `graph::conversation` make no such requests; Graph is asked for bodies as text, and `graph::mail_item` makes an HTML
+  one text);
   **Teams** is a chat's messages over local days, default the last 7 (`graph::chat_messages`, each body through
   `graph::html_to_text`). Both: `people`, `source` (the message's or chat's web link), one `### <name> · <date time>`
   section per message, `Attachments: …` named, never downloaded. Not signed in: `m365?q=` says `signed_in: false`.
 - **A web page** (`extract::fetch`): an https address only, checked before anything is asked; `curl -q` (the user's
-  `.curlrc` can't add cookies or credentials) with `proto =https`, `proto-redir =https`, `max-redirs 5`,
+  `.curlrc` can't add cookies or credentials) with `globoff` (the address's `[…]` and `{…}` are its own, one request),
+  `proto =https`, `proto-redir =https`, `max-redirs 5`,
   `max-filesize` 5 MB, `max-time` 20 s; only `text/html`, `text/plain`, `text/markdown`; each refusal says why (curl's
   exit code read as words). The extractor parses the page into a tree (implied end tags for `p`, `li`, cells, rows;
   raw text for scripts and styles; depth capped at 400) and keeps the largest `<article>`, else `<main>`, else `<body>`,
   without scripts, styles, nav, header, footer, aside, forms (and noscript, template, svg, iframes, buttons); headings,
   paragraphs, lists, code (a fence longer than any backticks inside), tables (`|` escaped) and https links (relative
-  ones resolved against the page; `javascript:`, `mailto:`, `data:` and http become text). The title is the main
+  ones resolved against the page; `javascript:`, `mailto:`, `data:` and http become text). Every bit of the page's text
+  is escaped as Markdown (`extract::md_text`: `\ < [ ] !`, and a line's leading `#` or `>`), so its words never become
+  HTML, a link or an image (Obsidian would load a remote one); the titles and names Echo writes as headings in any
+  source are escaped the same way. The title is the main
   part's first `h1` (not repeated below), else `<title>`. Under 200 characters of text: "Nothing readable here — save
   it as a PDF and add the file."
 
@@ -225,9 +234,12 @@ never taken for empty. A source's state: `skipped` or `done` from the ledger, el
 `· processed · <path>` (the starter's format), else the ledger's `waiting`, else `new`. The **queue** is every file
 of the sources folder (its `README.md`, dot-files, dot-folders and links left out), newest first (when Echo learned of
 it, else its time), each with its kind (by its folder), title (a Markdown source's own) and the ledger's note, run,
-kept and anyway. **First open**: while there is no ledger, the files `log.md` doesn't call processed are counted
-(`offer`); *Mark them done* / *Treat them as new* (`kn_baseline`) records them as `done` / `new` (`by: baseline`) and
+kept and anyway. **First open**: until it is answered (ruling R40: an add or a skip first doesn't take it away), the
+files the ledger doesn't know and `log.md` doesn't call processed are counted (`offer`); *Mark them done* / *Treat them as new* (`kn_baseline`) records them as `done` / `new` (`by: baseline`) and
 the question isn't asked again. *Skip* (`kn_source_skip`) takes only a file of the sources folder, with its note.
+The CLI's `echoctl knowledge ingest <vault> add <file|https-url|call:<stamp>>…` (K15-12) takes the same adds, with
+`--call`, `--mail`, `--teams`, `--url`; a flag without its kind (`--transcript` with no call, `--since` with no chat)
+is refused.
 
 ### Graph
 Built in the window from `/api/kn/<id>/graph` and drawn live on a canvas by `graphCanvas` in `knowledge.js`, the
@@ -436,6 +448,8 @@ identical); checks found 5 pages not in the index and 10 broken links, all real.
 
 ## Known gaps
 
+- A mail's or chat message's own text is kept as it came (only Echo's headings and names are escaped): HTML or an
+  image link someone wrote in a message stays live in a Markdown viewer such as Obsidian; Echo's window shows it as text.
 - A web page is read as UTF-8 (its `charset` isn't looked at): a page in another encoding shows replacement
   characters. Only the local test server's fetch is tested; no real site is fetched in tests.
 - Sources aren't pages: `page::read` refuses them, so *Open* (K14-10, read-only in Pages) comes with the Ingest view.
