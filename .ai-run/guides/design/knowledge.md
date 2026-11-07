@@ -367,14 +367,17 @@ its copy, which its review reads.
   `/<vault id>:<skill>` in the prompt and the guard's `_SKILLS`): it lives and goes with the run, so the app clearing
   `vault-plugins/` at its start never takes one a run — the CLI's too — reads. The plugin is Echo's copy of the skill
   through `defang::skill_files` (final review F1), the vault's own files untouched: in every Markdown file the
-  frontmatter keys `hooks`, `allowed-tools` and `permissionMode` are dropped (in any case, `-`/`_` aside, quoted or
+  frontmatter keys `hooks`, `allowed-tools` and `permissionMode` are dropped with the lines under them — indented
+  ones, and a list at the key's own column, PyYAML's layout (final review X3) — (in any case, `-`/`_` aside, quoted or
   not; the frontmatter is read from a first `---` line to the next line that is exactly `---`, else to the end, and one
-  Echo can't read safely — a merge key, a flow mapping, an indented or escaped key — loses its opening line, so it is
-  text to every reader), every run of `!` before a backtick goes, and after a fence's opening (`` !`cmd` ``,
+  Echo can't read safely — a merge key, a flow mapping, an indented or escaped key, a list after a key with a value —
+  loses its opening line, so it is text to every reader), every run of `!` before a backtick goes, and after a fence's opening (`` !`cmd` ``,
   `` !!`cmd` ``, ```` ```!! ````), again until none is left, a run counted once (final review X1: the words stay,
   nothing runs), and a `hooks/` folder or `hooks.json` in the skill's folder stays out. The run's first line says
   it beside the copy's: "Not in the copy: .git/. Left out of the skill: its hooks; its allowed tools; 2 commands it
-  would run first". The lease is held until the process has
+  would run first". The skill is named in the prompt and `_SKILLS` as Echo's copy gives it to Claude Code
+  (`ingest::copy_name`: the copy's frontmatter `name`, else its folder — a command's file name), never by a name the
+  copy no longer carries (final review X3). The lease is held until the process has
   exited (`terminal::hold` in the app, so a sign-in stops it, "Stopped for a sign-in"); 20 minutes, then it is stopped
   ("It ran for 20 minutes without finishing"); *Stop* ends its group (a run still waiting just doesn't start), and so do
   the CLI's Ctrl-C and TERM ("Stopped from the command line"). Its stdout goes through `Parser::for_copy` (tool

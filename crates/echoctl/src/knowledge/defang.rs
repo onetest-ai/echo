@@ -71,34 +71,35 @@ fn widening(key: &str, out: &mut LeftOut) -> bool {
     true
 }
 
-/// A top-level key of a frontmatter line: plain (`key: …`, `key:`), or quoted without escapes (`"key": …`,
-/// `'key': …`). None: a line that isn't one Echo reads safely (a flow mapping, a sequence, a complex key, an anchor, a
-/// tag, a merge key `<<`, a quoted key with an escape).
-fn key_of(line: &str) -> Option<String> {
+/// A top-level key of a frontmatter line and what follows its colon: plain (`key: …`, `key:`), or quoted without
+/// escapes (`"key": …`, `'key': …`). None: a line that isn't one Echo reads safely (a flow mapping, a sequence, a
+/// complex key, an anchor, a tag, a merge key `<<`, a quoted key with an escape).
+fn key_of(line: &str) -> Option<(String, &str)> {
     let first = line.chars().next()?;
-    let key = match first {
+    let (key, value) = match first {
         '"' | '\'' => {
             let inner = &line[1..];
             let end = inner.find(first)?;
             let (key, rest) = (&inner[..end], &inner[end + 1..]);
-            if key.contains('\\') || rest.starts_with(first) || !rest.trim_start().starts_with(':') {
+            if key.contains('\\') || rest.starts_with(first) {
                 return None;
             }
-            key.to_string()
+            (key.to_string(), rest.trim_start().strip_prefix(':')?)
         }
         c if "{}[]?-&*!%|>@`,#:".contains(c) => return None,
         _ => {
             let b = line.as_bytes();
             let at = (0..b.len()).find(|&i| b[i] == b':' && b.get(i + 1).is_none_or(|n| *n == b' ' || *n == b'\t'))?;
-            line[..at].trim_end().to_string()
+            (line[..at].trim_end().to_string(), &line[at + 1..])
         }
     };
-    (!key.is_empty() && key != "<<").then_some(key)
+    (!key.is_empty() && key != "<<").then_some((key, value))
 }
 
 /// `text` without the frontmatter keys that widen a run (`widening`). The frontmatter is taken as widely as any reader
 /// could: from a first line that is `---` (spaces aside, a BOM before it) to the next line that is exactly `---` — or
-/// to the end. One Echo can't read safely (`key_of`, or a line indented before any key) loses its opening line instead,
+/// to the end. A dropped key takes the lines under it: indented ones, and a list at its own column. One Echo can't read
+/// safely (`key_of`, a line indented before any key, a list after a key with a value) loses its opening line instead,
 /// so that no reader takes it for frontmatter; its words stay as text.
 fn frontmatter(text: &str, out: &mut LeftOut) -> String {
     let (bom, rest) = match text.strip_prefix('\u{feff}') {
@@ -109,8 +110,10 @@ fn frontmatter(text: &str, out: &mut LeftOut) -> String {
     let Some(open) = lines.next().filter(|l| l.trim() == "---") else { return text.to_string() };
     let mut kept = format!("{bom}{open}");
     let mut found = LeftOut::default();
-    // None before the first key; then whether the entry going on is dropped.
+    // None before the first key; then whether the entry going on is dropped, and whether its key's line holds no value
+    // (a list may follow at the key's column).
     let mut dropping: Option<bool> = None;
+    let mut open_key = false;
     let mut closed = false;
     for line in lines.by_ref() {
         let bare = line.trim_end_matches(['\r', '\n']);
@@ -126,11 +129,19 @@ fn frontmatter(text: &str, out: &mut LeftOut) -> String {
                 Some(d) => !d,
                 None => return unread(bom, open, rest, out),
             }
+        } else if bare == "-" || bare.starts_with("- ") {
+            // A list at its key's column (PyYAML's layout): it goes with its key (final review X3).
+            match dropping {
+                Some(true) => false,
+                Some(false) if open_key => true,
+                _ => return unread(bom, open, rest, out),
+            }
         } else {
             match key_of(bare) {
-                Some(k) => {
+                Some((k, value)) => {
                     let d = widening(&k, &mut found);
                     dropping = Some(d);
+                    open_key = value.trim().is_empty() || value.trim_start().starts_with('#');
                     !d
                 }
                 None => return unread(bom, open, rest, out),
@@ -278,6 +289,17 @@ mod tests {
         // Nothing to leave out: as it was.
         assert_eq!(said("---\nname: z\n---\n# Z\n"), ("---\nname: z\n---\n# Z\n".to_string(), None));
         assert_eq!(said("# No frontmatter\nhooks: words\n"), ("# No frontmatter\nhooks: words\n".to_string(), None));
+    }
+
+    #[test]
+    fn a_list_at_the_keys_column_goes_with_its_key() {
+        // Final review X3: PyYAML writes a key's list at the key's own column.
+        let (t, s) = said("---\nname: inbox-steps\ndescription: Process the inbox\nallowed-tools:\n- Read\n- Bash(*)\nhooks:\n- matcher: \"*\"\n  hooks: []\ntags:\n- skill\n---\nBody\n");
+        assert_eq!(t, "---\nname: inbox-steps\ndescription: Process the inbox\ntags:\n- skill\n---\nBody\n");
+        assert_eq!(s.as_deref(), Some("its hooks; its allowed tools"));
+        // A list after a key that has its value already is no YAML Echo reads: as text.
+        let odd = "---\nname: x\n- a\n---\nBody\n";
+        assert_eq!(said(odd).0, format!("\n{}", &odd[4..]));
     }
 
     #[test]

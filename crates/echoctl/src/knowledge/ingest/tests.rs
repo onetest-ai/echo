@@ -341,7 +341,7 @@ fn the_runs_scope_lets_the_guard_allow_only_the_copy() {
     copy_vault(&v, &dir.join("vault"), &strings(&["raw_inbox/deck.pdf"]), &dir.join("base")).unwrap();
     let copy = dunce::canonicalize(dir.join("vault")).unwrap();
     let skill = skill(&v).unwrap();
-    let vars = scope(&copy, &sources::folder(&v), &run_name(&v, &skill));
+    let vars = scope(&copy, &sources::folder(&v), &run_name(&v, &skill.name));
     let s = guard::Scope::from_vars(|k| vars.iter().find(|(n, _)| n == k).map(|(_, x)| x.into())).unwrap();
     let d = |tool: &str, input: Value| s.decide(&json!({"hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": input}));
     let path = |p: &Path| p.display().to_string();
@@ -1107,6 +1107,30 @@ fn a_vault_skill_brings_no_hooks_tools_or_commands_into_a_run() {
     // The vault's own files: byte for byte as they were.
     assert_eq!(fixture::snapshot(&v.root), before);
     assert_eq!(bytes(".claude/skills/process-inbox/SKILL.md"), skill_before);
+}
+
+#[cfg(unix)]
+#[test]
+fn the_run_names_its_skill_as_echos_copy_registers_it() {
+    // Final review X3: a frontmatter Echo can't read goes as text in its copy, so Claude Code names the skill by its
+    // folder — and so must the run's prompt and the guard's scope, not by the vault's frontmatter `name`.
+    let (_env, root) = paths::testenv::folders("kn-ingest-skill-name");
+    let _fake = fake::install(&root);
+    let _clean = clean();
+    let (v, p) = twin(&root, false);
+    std::fs::remove_dir_all(v.root.join(".claude/skills/process-inbox")).unwrap();
+    fixture::write(&v.root, ".claude/skills/inbox-steps/SKILL.md", "---\nname: process-inbox\ndescription: Process the inbox\n<<: *base\n---\n# Steps\n");
+    fixture::write(&v.root, SOURCE, SYNC);
+    assert_eq!(skill(&v).map(|s| s.name).as_deref(), Some("process-inbox"), "the vault names it so");
+    script(&p, "ingest.jsonl", &[init(), result()]);
+    let run = ran(&v, &[SOURCE]);
+    let dir = ingest_dir(&v).join(&run);
+    assert!(!read(&dir, "plugin/skills/inbox-steps/SKILL.md").starts_with("---"), "Echo's copy has no frontmatter");
+    let sent = std::fs::read_to_string(fake::file(&p, "ingest.in")).unwrap();
+    assert!(sent.starts_with("Run the /my-twin:inbox-steps skill"), "{sent}");
+    assert!(std::fs::read_to_string(fake::file(&p, "ingest.env")).unwrap().lines().any(|l| l == "ECHOCTL_RUN_SKILLS=my-twin:inbox-steps"));
+    let settings: Value = serde_json::from_slice(&std::fs::read(dir.join("settings.json")).unwrap()).unwrap();
+    assert_eq!(settings["env"]["ECHOCTL_RUN_SKILLS"], "my-twin:inbox-steps");
 }
 
 /// Claude Code's folder for a working folder `cwd` under a profile's `projects/` (design note V10, fact 5: the path,

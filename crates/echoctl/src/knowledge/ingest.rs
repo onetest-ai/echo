@@ -276,18 +276,37 @@ pub fn skill(v: &Vault) -> Option<Skill> {
     (found.len() == 1).then(|| found[0].clone())
 }
 
-/// The skill as the run's Claude Code names it: under the run's plugin, `<vault id>:<skill>`.
-fn run_name(v: &Vault, s: &Skill) -> String {
-    format!("{}:{}", v.id, s.name)
+/// The skill as the run's Claude Code names it: under the run's plugin, `<vault id>:<name>` — `name` as Echo's copy
+/// gives it to Claude Code (`plugin`).
+fn run_name(v: &Vault, name: &str) -> String {
+    format!("{}:{}", v.id, name)
+}
+
+/// The name Claude Code registers a skill of the plugin by, read from Echo's copy of its file (`text`; a skill's
+/// `SKILL.md`, a command's file), as `detect::skills` reads the vault's: its frontmatter's `name`, else `fallback` (the
+/// skill's folder, the command's file name without `.md`). A copy whose frontmatter went as text (`defang`) has none.
+fn copy_name(text: &str, fallback: &str) -> String {
+    let props = fm::split(text).0.map(fm::parse).unwrap_or_default();
+    fm::get(&props, "name").map(|p| p.text()).filter(|n| !n.trim().is_empty()).unwrap_or_else(|| fallback.to_string())
 }
 
 /// The ingest skill as a plugin of the run's own, in its folder: `--setting-sources user` loads no project skill (D40),
 /// and this way only that skill is there — without the hooks, allowed tools, permission mode and `` !`cmd` `` commands
 /// its files could bring into a run Echo doesn't watch (`defang`, final review F1). It lives and goes with the run, so
 /// the app's clearing of the generated vault plugins at its start (`terminal::prune_vault_plugins`) never takes one a
-/// run — the CLI's too — still reads. Its folder, and what was left out of the skill.
-fn plugin(v: &Vault, copy: &Path, s: &Skill, to: &Path) -> Result<(PathBuf, defang::LeftOut)> {
+/// run — the CLI's too — still reads. Its folder, what was left out of the skill, and the name Claude Code registers
+/// the skill by in it (`copy_name`: never one the copy no longer carries, final review X3).
+fn plugin(v: &Vault, copy: &Path, s: &Skill, to: &Path) -> Result<(PathBuf, defang::LeftOut, String)> {
     let (files, left) = defang::skill_files(copy, s, u64::MAX)?;
+    let src = super::join(copy, &s.path);
+    let (main, fallback) = if s.kind == "command" {
+        let file = src.file_name().unwrap_or_default().to_string_lossy().into_owned();
+        (format!("commands/{file}"), file.strip_suffix(".md").unwrap_or(&file).to_string())
+    } else {
+        let folder = src.parent().and_then(Path::file_name).unwrap_or_default().to_string_lossy().into_owned();
+        (format!("skills/{folder}/{}", src.file_name().unwrap_or_default().to_string_lossy()), folder)
+    };
+    let name = files.iter().find(|(rel, _)| *rel == main).map(|(_, b)| copy_name(&String::from_utf8_lossy(b), &fallback)).unwrap_or(fallback);
     for (rel, bytes) in files {
         let dst = super::join(to, &rel);
         std::fs::create_dir_all(dst.parent().expect("a parent"))?;
@@ -296,7 +315,7 @@ fn plugin(v: &Vault, copy: &Path, s: &Skill, to: &Path) -> Result<(PathBuf, defa
     let manifest = json!({"name": v.id, "version": "1.0.0", "description": format!("The ingest skill of the knowledge vault {}", v.name)});
     std::fs::create_dir_all(to.join(".claude-plugin"))?;
     std::fs::write(to.join(".claude-plugin").join("plugin.json"), serde_json::to_vec_pretty(&manifest)?)?;
-    Ok((to.to_path_buf(), left))
+    Ok((to.to_path_buf(), left, name))
 }
 
 // ── the copy ──
@@ -639,8 +658,8 @@ pub fn start(v: &Vault, wanted: &[String]) -> Result<Started> {
         let copy = dunce::canonicalize(dir.join("vault"))?;
         paths::write_atomic(&dir.join("bases.json"), &serde_json::to_vec(&json!({ "files": copied.files }))?)?;
         std::fs::create_dir_all(copy.join(NOTES))?;
-        let (plugin, stripped) = plugin(v, &copy, &skill, &dir.join("plugin"))?;
-        let name = run_name(v, &skill);
+        let (plugin, stripped, registered) = plugin(v, &copy, &skill, &dir.join("plugin"))?;
+        let name = run_name(v, &registered);
         let prompt = prompt(&copy, &name, &picked);
         paths::write_atomic(&dir.join("prompt.md"), prompt.as_bytes())?;
         let scope = scope(&copy, &sources::folder(v), &name);
