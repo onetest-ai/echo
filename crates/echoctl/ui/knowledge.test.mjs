@@ -535,6 +535,27 @@ test('the poll: A → B → A within 25 s polls A once; a chunk is merged once',
   assert.deepEqual(c.events.map((e) => e.type), ['notice'])
 })
 
+test('the poll: a conversation whose events Echo let go polls on, and opened again shows them once (final review F5)', () => {
+  const c = { busy: false }
+  const g1 = knChatOpen(c, 'A')
+  assert.ok(knChatTake(c, g1, 0, chunk(A, 3, { live: false }), 1000))
+  // Echo let its events go: the page still showing them asks from 3, and nothing comes.
+  const got = knChatTake(c, g1, 3, chunk([], 3, { live: false }), 2000)
+  assert.deepEqual(got.events, [])
+  assert.deepEqual(c.events.map((e) => e.n), [0, 1, 2], 'what it shows stays, once')
+  // Opened again: read again from the transcript, numbered after the ones let go.
+  const g2 = knChatOpen(c, 'A')
+  assert.ok(knChatTake(c, g2, 0, chunk(A.map((e) => ({ ...e, n: e.n + 3 })), 6, { live: false }), 3000))
+  assert.deepEqual(c.events.map((e) => e.n), [3, 4, 5])
+  assert.equal(c.next, 6)
+  assert.equal(knChatTurns(c.events).length, 1, 'one turn, not two')
+  // The poll goes on from there; a message follows.
+  assert.deepEqual(knChatTake(c, g2, 6, chunk([], 6), 4000).events, [])
+  assert.ok(knChatTake(c, g2, 6, chunk(A2.map((e) => ({ ...e, n: e.n + 3 })), 9), 5000))
+  assert.deepEqual(c.events.map((e) => e.n), [3, 4, 5, 6, 7, 8])
+  assert.deepEqual(knChatTurns(c.events).map((t) => t.user.text), ['What did Lena Hartmann decide?', 'And the gateway?'])
+})
+
 test('the poll: a new message starts the blocks\' names afresh (a cut answer keeps its text)', () => {
   const c = { busy: false }
   const g = knChatOpen(c, 'A')
