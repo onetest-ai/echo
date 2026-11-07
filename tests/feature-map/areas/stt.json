@@ -1,0 +1,61 @@
+{
+ "prefix": "STT",
+ "name": "Transcription",
+ "order": 210,
+ "status": "stable",
+ "notes": "Engines, languages, speakers, servers",
+ "features": [
+  {
+   "id": "F-STT-01",
+   "feature": "A call is transcribed on the computer as it goes, the transcript ready seconds after it ends; a failure falls back to a full pass, and a failed one shows Failed with `transcribe.error`",
+   "priority": "critical",
+   "check": "person",
+   "axes": [
+    "call.status"
+   ]
+  },
+  {
+   "id": "F-STT-02",
+   "feature": "Each sentence keeps the language it was spoken in, only among the allowed languages (Ukrainian and Russian apart); a language pinned for a call applies to it alone",
+   "priority": "high",
+   "check": "person",
+   "axes": [
+    "set.languages"
+   ]
+  },
+  {
+   "id": "F-STT-03",
+   "feature": "Silence gives no made-up text; on speakers the others aren't duplicated as Me",
+   "priority": "high",
+   "check": "person",
+   "axes": [
+    "set.audio"
+   ]
+  },
+  {
+   "id": "F-STT-04",
+   "feature": "Remote voices become Speaker N or the names Teams lights; one other person names the whole remote track",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "call.transcript"
+   ]
+  },
+  {
+   "id": "F-STT-05",
+   "feature": "A transcription server (another Echo or OpenAI-compatible) takes the utterances; when it is down this computer's model takes over",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "set.server"
+   ]
+  },
+  {
+   "id": "F-STT-06",
+   "feature": "A long call transcribes and the computer stays usable",
+   "priority": "medium",
+   "check": "person",
+   "axes": []
+  }
+ ]
+}

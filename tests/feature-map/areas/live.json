@@ -1,0 +1,56 @@
+{
+ "prefix": "LIVE",
+ "name": "Live notes",
+ "order": 190,
+ "status": "stable",
+ "notes": "Live notes during and after a call",
+ "features": [
+  {
+   "id": "F-LIVE-01",
+   "feature": "During a call with live notes on, the Transcript tab shows the live transcript with Now, Decisions, Action items and Open questions beside it, each with a time jump; the first after about 90 s",
+   "priority": "high",
+   "check": "person",
+   "axes": [
+    "live.enabled",
+    "live.state"
+   ]
+  },
+  {
+   "id": "F-LIVE-02",
+   "feature": "The live header shows the call's model, the state (waiting, updating, updated N ago, failed, busy, signing in, paused, ended), Pause / Resume, usage, and what to do about a sign-in or settings problem",
+   "priority": "medium",
+   "check": "person",
+   "axes": [
+    "live.state",
+    "ai.signin"
+   ]
+  },
+  {
+   "id": "F-LIVE-03",
+   "feature": "After the call the live notes stay beside the final transcript (searchable) and go into `transcript.md` as a \"Live notes\" draft",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "live.content"
+   ]
+  },
+  {
+   "id": "F-LIVE-04",
+   "feature": "With live notes off a recording call says how to turn them on, and nothing is sent to a model",
+   "priority": "medium",
+   "check": "person",
+   "axes": [
+    "live.enabled"
+   ]
+  },
+  {
+   "id": "F-LIVE-05",
+   "feature": "\"Last time\" (still to do, highlights) shows during a recurring call; Ask Claude about this call opens the Claude panel",
+   "priority": "low",
+   "check": "agent",
+   "axes": [
+    "live.content"
+   ]
+  }
+ ]
+}

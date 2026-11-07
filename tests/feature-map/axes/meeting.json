@@ -1,0 +1,55 @@
+{
+ "entity": "meeting (calendar event)",
+ "axes": [
+  {
+   "axis": "meeting.response",
+   "values": "accepted / organizer / none (all shown in Your day) / tentativelyAccepted / notResponded (not in Your day) / declined",
+   "where": "`calendar.rs` `accepted()`, `declined`"
+  },
+  {
+   "axis": "meeting.timing",
+   "values": "past / live / to come; today / another day of the range",
+   "where": "app.js `eventState`"
+  },
+  {
+   "axis": "meeting.flags",
+   "values": "online (join link) or not; cancelled; declined; no_notetakers; all-day",
+   "where": "`calendar.rs` event fields"
+  },
+  {
+   "axis": "meeting.recorded",
+   "values": "not recorded / recorded call / call imported from its Teams transcript",
+   "where": "`window.rs` `/api/calendar` `recorded`"
+  },
+  {
+   "axis": "meeting.transcript",
+   "values": "known (true) / none (false) / unknown; import busy / error",
+   "where": "`teams_transcript::known`, `IMPORTS`"
+  },
+  {
+   "axis": "meeting.scheduled",
+   "values": "not scheduled / scheduled (with languages)",
+   "where": "`.echo/scheduled.json`, `schedule.rs`"
+  },
+  {
+   "axis": "meeting.action",
+   "values": "open-notes / import / scheduled / join / record / none (derived)",
+   "where": "app.js `EVENT_ACTIONS`"
+  },
+  {
+   "axis": "meeting.type_by",
+   "values": "guess / invite / you",
+   "where": "app.js `eventTypeChip`; `.echo/meeting-types-of.json`"
+  },
+  {
+   "axis": "meeting.threads",
+   "values": "none / by rule (series, people, chat, subject) / pinned to the event",
+   "where": "app.js `eventProjects`; `project op event_member`"
+  },
+  {
+   "axis": "meeting.prep",
+   "values": "none / writing / ready",
+   "where": "`window.rs` event `prep`; app.js `eventPrep`"
+  }
+ ]
+}

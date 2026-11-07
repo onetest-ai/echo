@@ -1,0 +1,45 @@
+---
+id: TC-010
+title: Not this on a found thread drops the item; an emptied client group disappears
+priority: medium
+type: functional
+requirements: [F-INBOX-04, F-INBOX-07]
+module: inbox
+run: agent
+platform: any
+data: standard
+tags: [inbox, found, decision]
+---
+
+# TC-010: Not this on a found thread drops the item; an emptied client group disappears
+
+**Module:** Inbox | **Priority:** Medium | **Type:** Functional
+
+## Preconditions
+- Standard data set built right before the run: `tests/fixtures/serve.sh up <dir> <port> --set standard` (`data: standard`); the window is served at `{{base_url}}`; every `echoctl` command runs after `. <dir>/env`
+- Wait 10 seconds after the server starts: the sign-in check of the AI profiles settles in the background, and only then the blocking item "Sign in to Claude · out" is in the Inbox (the very first answer lists 24 open items and none blocking)
+
+## Test Data
+
+| Field | Value |
+|---|---|
+| Item | New thread? “Duff calls” (group Duff, the only item of the group) |
+
+## Steps
+
+| # | Action | Expected Result |
+|---|---|---|
+| 1 | Navigate to `{{base_url}}/#today`, wait for "Your day" and click "Inbox" | The right panel opens on the tab "Inbox"; the chips "Open", "Blocking" and "Done" are shown |
+| 2 | Read the header "Duff" | The group "Duff" with 1 item "New thread? “Duff calls”" with the buttons "Create", "Not this", "Open" |
+| 3 | Click "Not this" | Within 5 seconds the item is gone and the header "Duff" with it; the chip reads "Open 24" |
+| 4 | Click the chip "Done" | "Done 3" holds "New thread? “Duff calls”" |
+| 5 | Run `echoctl project found` | No entry for `domain:duff.example`; the list still has Northwind, Umbrella lead notes 1, Initrode and Design guild |
+
+## Expected Final State
+The Duff group is gone.
+
+## Teardown
+- Click "Inbox" to close the panel
+
+## Notes
+- Writes the rejection (`found_reject`); no network.

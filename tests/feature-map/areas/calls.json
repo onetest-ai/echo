@@ -1,0 +1,180 @@
+{
+ "prefix": "CALLS",
+ "name": "Calls",
+ "order": 10,
+ "status": "stable",
+ "notes": "List, search, the call view, its tabs and menu, delete and restore, chat, screens",
+ "features": [
+  {
+   "id": "F-CALLS-01",
+   "feature": "The Calls list groups calls by day (Today, Yesterday, weekday within a week, date, date with year, Undated), newest first; each row shows time, length, the first two people (+N) and thread icons",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "call.day",
+    "call.people",
+    "call.threads"
+   ]
+  },
+  {
+   "id": "F-CALLS-02",
+   "feature": "Each row's icon shows the call's state (recording, transcribing, minutes, transcript only, failed, audio only); a memo shows a mic and \"Memo\", an imported call \"Teams transcript\"",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "call.status",
+    "call.kind"
+   ]
+  },
+  {
+   "id": "F-CALLS-03",
+   "feature": "Search filters the list by title and by person; no match says \"Nothing matches\"",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "call.people"
+   ]
+  },
+  {
+   "id": "F-CALLS-04",
+   "feature": "The list loads 60 calls at a time, shows \"N of total\" and loads more near its end; with no calls it says \"No calls yet\", with none picked \"Pick a call\"",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "call.list_size"
+   ]
+  },
+  {
+   "id": "F-CALLS-05",
+   "feature": "A call's header shows title, weekday date and time, length, the kind-of-meeting chip, up to 6 people (\"and N more\"), \"Memo\" or \"from Teams transcript\"",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "call.kind",
+    "call.people",
+    "call.type_by"
+   ]
+  },
+  {
+   "id": "F-CALLS-06",
+   "feature": "A call opens on the tab picked last (kept from call to call; Minutes at first, and Minutes when the kept tab doesn't exist for the call); while it records or is transcribed it opens on Transcript and moves to Minutes once they are written, unless the user picked a tab",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "call.status",
+    "call.run"
+   ]
+  },
+  {
+   "id": "F-CALLS-07",
+   "feature": "The call's tabs follow what it holds: Prep (with a prep), Minutes, Transcript, Chat (with its count), Screens (with its count); while recording Transcript comes first with a red dot",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "call.status",
+    "call.extras"
+   ]
+  },
+  {
+   "id": "F-CALLS-08",
+   "feature": "The kind-of-meeting chip shows a guess dashed and its source in the hint; choosing another type keeps it as the user's (\"You set this\")",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "call.type_by"
+   ]
+  },
+  {
+   "id": "F-CALLS-09",
+   "feature": "Thread chips show each thread the call is in (hint: why); \"+ Thread\" adds or takes it out of any open thread; a suggestion bar \"Part of X? Add / Not this\" offers a likely thread",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "call.threads"
+   ]
+  },
+  {
+   "id": "F-CALLS-10",
+   "feature": "A memo's threads (found from what was said) show as chips with their time spans; × takes the memo out of that thread for good",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "call.kind",
+    "call.threads"
+   ]
+  },
+  {
+   "id": "F-CALLS-11",
+   "feature": "\"Call actions\" lists Show folder, Open minutes in browser, Show minutes in Finder, Write minutes again, Write again with (other templates), Edit templates…, Ask Claude about this call, plugin items, Delete…; the minutes items only when it has minutes; Escape closes it",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "call.status",
+    "call.run",
+    "template.kind"
+   ]
+  },
+  {
+   "id": "F-CALLS-12",
+   "feature": "Delete… asks first (\"goes to the trash … for 30 days\"); Keep cancels; Delete removes it from the list and moves its folder to `.echo/trash`",
+   "priority": "critical",
+   "check": "agent",
+   "axes": [
+    "call.kind"
+   ]
+  },
+  {
+   "id": "F-CALLS-13",
+   "feature": "A deleted call comes back with `echoctl restore` (no window control) and shows in the list again",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "call.kind"
+   ]
+  },
+  {
+   "id": "F-CALLS-14",
+   "feature": "The Chat tab shows the meeting chat: sender, time from the call's start or \"before the call\", attached file names",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "call.extras"
+   ]
+  },
+  {
+   "id": "F-CALLS-15",
+   "feature": "The Screens tab shows the shared-screen frames with their times; a click opens one large",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "call.extras"
+   ]
+  },
+  {
+   "id": "F-CALLS-16",
+   "feature": "A call that can't be read (e.g. a stale folder name) shows \"This call can't be opened\" with the error",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-CALLS-17",
+   "feature": "Show folder, Open minutes in browser and Show minutes in Finder open the call's own files",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "call.status"
+   ]
+  },
+  {
+   "id": "F-CALLS-18",
+   "feature": "The open call refreshes by itself within a few seconds when its files change (a recording ends, minutes are written) without reloading the minutes",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "call.status",
+    "call.run"
+   ]
+  }
+ ]
+}

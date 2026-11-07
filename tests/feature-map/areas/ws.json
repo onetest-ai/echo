@@ -1,0 +1,75 @@
+{
+ "prefix": "WS",
+ "name": "Window shell",
+ "order": 250,
+ "status": "stable",
+ "notes": "Activity bar, panels, palette, layout, status bar",
+ "features": [
+  {
+   "id": "F-WS-01",
+   "feature": "The activity bar shows Today, Calls, Calendar, Threads, Tasks (Knowledge only with Recall on or a plugin tab), Inbox and Settings; icons only until \"Expand the sidebar\" (⌘\\), remembered",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "set.recall"
+   ]
+  },
+  {
+   "id": "F-WS-02",
+   "feature": "⌘1…9 open the activities and ⌘, Settings; an activity opens where the user left it",
+   "priority": "low",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-WS-03",
+   "feature": "The actions palette (⌘K, status bar Actions) lists actions on the open call, event or Today, Echo's own, Go to (activities, Settings sections), threads and calls; typing ranks them; unavailable ones are greyed with why; Enter runs, Esc closes",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "app.record"
+   ]
+  },
+  {
+   "id": "F-WS-04",
+   "feature": "The right and bottom panels show their views as tabs; a view moves to the other panel, the panel closes and resizes; the right panel starts closed at every window open and keeps its last tab",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "set.layout"
+   ]
+  },
+  {
+   "id": "F-WS-05",
+   "feature": "Under 900 px the calls list folds behind \"Calls ▾\" and the right panel opens over the page; under 600 px high the bottom panel folds",
+   "priority": "low",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-WS-06",
+   "feature": "Messages for a moment float as toasts with OK",
+   "priority": "low",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-WS-07",
+   "feature": "The status bar shows the next automatic minutes, the default AI profile, Live notes on, Actions and Claude",
+   "priority": "low",
+   "check": "agent",
+   "axes": [
+    "call.auto",
+    "ai.default",
+    "live.enabled"
+   ]
+  },
+  {
+   "id": "F-WS-08",
+   "feature": "An `echo://` link opens its place in the window (a call at a moment, a thread, a client, a person, a task, a prep)",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  }
+ ]
+}

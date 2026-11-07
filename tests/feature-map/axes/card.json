@@ -1,0 +1,40 @@
+{
+ "entity": "card (Tasks pile card) and view (Work tab view)",
+ "axes": [
+  {
+   "axis": "card.pile",
+   "values": "mine / owed / waiting (task or a wait card) / nobody / others",
+   "where": "`tasks.rs`; app.js `TASK_PILES`"
+  },
+  {
+   "axis": "card.count",
+   "values": "≤ 6 / > 6 a pile",
+   "where": "app.js `TASK_SHOWN`"
+  },
+  {
+   "axis": "card.also_in",
+   "values": "none / raised in another thread too",
+   "where": "app.js `taskCard`"
+  },
+  {
+   "axis": "view.layout",
+   "values": "board / tree; views count 1 / several",
+   "where": "app.js `wv`, `DEFAULT_VIEWS`"
+  },
+  {
+   "axis": "view.filters",
+   "values": "kind; owner anyone / nobody / a name; open only",
+   "where": "app.js `projectWork`"
+  },
+  {
+   "axis": "view.group",
+   "values": "none / story / owner; fields chosen",
+   "where": "app.js `boardChips`, `CARD_FIELDS`"
+  },
+  {
+   "axis": "view.columns",
+   "values": "default five / custom added, renamed, hidden, with a limit (under / over)",
+   "where": "app.js `workBoard`, `DEFAULT_COLUMNS`"
+  }
+ ]
+}

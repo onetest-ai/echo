@@ -1,0 +1,40 @@
+---
+id: TC-006
+title: Minutes run in the chosen folder
+priority: low
+type: functional
+requirements: [F-SET-12]
+module: claude
+run: agent
+platform: macos
+tags: [minutes, settings, test-call]
+ai: local
+external_id: TC-CLA-005
+---
+
+# TC-006: Minutes run in the chosen folder
+
+**Module:** Claude Code | **Priority:** Low | **Type:** Functional
+
+## Preconditions
+- Test data built by `tests/fixtures/make_data.py <dir> --ai local` (`ai: local`): the small set, hermetic, with the AI profile "Qwen" (Ollama here, or the faster server of `tests/fixtures/ai.local.json`) the default, so a minutes run is a real Claude Code run on it and every other run is refused (`tests/fixtures/README.md`, "Real Claude Code runs on a local model"); Claude Code on `PATH`; `target/debug/echoctl` is the debug build from this checkout
+- Every Bash call starts with the prelude: `. <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; CONV="$D/conv"; APP="$PWD/tests/tools/testcall/build/TestCall.app/Contents/MacOS/testcall"; export D CONV APP ECHOCTL_CALL_APP_BUNDLE=ai.onetest.echo.testcall`
+- The speech model linked into the test config (`ln -s "$HOME/Library/Application Support/echo/models" "$ECHOCTL_CONFIG_DIR/models"`, `target/debug/echoctl model use large-v3-turbo-q5_0`, `config --languages en`); TestCall, BlackHole 2ch and ffmpeg as in `recording/TC-014`
+- The window served on the data with clicks reaching it: `ECHOCTL_TEST_OPEN_LOG_ONLY=1 ECHOCTL_SERVE_IPC=1 target/debug/echoctl window --serve <port>` after the prelude (no Echo app needed: the served window starts the run itself); the page loaded from `{{base_url}}/` first
+- Folder A: `mkdir -p "$D/folder-a/.claude"; echo '{"env": {"ECHO_TEST_FOLDER": "A"}}' > "$D/folder-a/.claude/settings.json"`
+- Two transcribed calls without minutes (in S-19 those of `claude/TC-004`)
+
+## Steps
+
+| # | Action | Expected Result |
+|---|--------|----------------|
+| 1 | `. <dir>/env; target/debug/echoctl config --notes-in "$D/folder-a"` | `notes_in` is folder A (the menu's "Echo runs Claude Code for minutes in" → "Choose a folder…") |
+| 2 | Write minutes for the first call (window → Minutes → "Write now") and, when done, read its `claude.log` | Its header's `folder:` line names folder A |
+| 3 | `target/debug/echoctl config --notes-in any`, then write minutes for the second call | `notes_in` null; that run's `folder:` line names the data folder (`$ECHOCTL_HOME`) |
+
+## Expected Final State
+Echo runs Claude Code in the folder chosen, else in the data folder; never in a user's session.
+
+## Notes
+- With the built-in profile ("Claude Code (as configured)") the folder's `.claude/settings.json` applies too (`ai::system_folder`): that run needs a signed-in Claude account, so it stays a person's check (put a gateway URL in the `env`, see it used). The local profile, run here, loads no project settings.
+- Run on 2026-11-07 (S-19): PASS — folder A, then the data folder.

@@ -5,9 +5,13 @@
 
 const $ = (sel, root = document) => root.querySelector(sel)
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
-// The window's IPC; in a browser against `echoctl window --serve` (dev, ECHOCTL_SERVE_IPC=1) the same message is posted.
+// The window's IPC; in a browser against `echoctl window --serve` (dev, ECHOCTL_SERVE_IPC=1) the same message is posted,
+// and the app's answer — the script the window would run (`Handled.reply`, e.g. a save's `window.echo.saved(…)`), and
+// the reload it asks for (`Handled.refresh`) — runs here too, as in the webview.
 const send = (msg) => window.ipc ? window.ipc.postMessage(JSON.stringify(msg))
-  : location.protocol === 'http:' && location.hostname === '127.0.0.1' ? fetch('ipc', { method: 'POST', body: JSON.stringify(msg) }).catch(() => {}) : undefined
+  : location.protocol === 'http:' && location.hostname === '127.0.0.1'
+    ? fetch('ipc', { method: 'POST', body: JSON.stringify(msg) }).then((r) => r.ok ? r.json() : null).then((a) => { if (a && a.reply) (0, eval)(a.reply); if (a && a.refresh && window.echo) window.echo.refresh() }).catch(() => {})
+    : undefined
 const get = async (path) => {
   const r = await fetch(path)
   if (!r.ok) throw new Error(`${r.status} ${path}`)

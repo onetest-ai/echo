@@ -1,0 +1,51 @@
+{
+ "prefix": "TODAY",
+ "name": "Today",
+ "order": 290,
+ "status": "rework",
+ "notes": "Top-level features only",
+ "features": [
+  {
+   "id": "F-TODAY-01",
+   "feature": "Today greets by the time of day and About me's first name, with the date, the meetings, the tasks on the user and how many are late",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TODAY-02",
+   "feature": "Your day lists today's accepted meetings and calls in time order with the line \"now\"; each shows its threads and minutes state (New minutes with what they hold, Minutes, Writing, Minutes at HH:MM, Minutes failed + Try again), Show prep / Prepare, Record when it starts / Don't record, Import Teams transcript",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TODAY-03",
+   "feature": "My work · this week lists the tasks due by the week's end or late (late first) with whose they are, a date icon and the thread; a card opens its details; its icons close it (asking first) or open the Claude dialog",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TODAY-04",
+   "feature": "Needs you now lists what waits on the user from Teams and mail in the last 24 h (burning first), with Reply in Teams / Read and reply, I'll do it (a task in a thread), Won't do",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TODAY-05",
+   "feature": "Cards sent to Today by routines or plugins show until Got it",
+   "priority": "low",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TODAY-06",
+   "feature": "A day with nothing says \"A quiet day\"; ⌘K on Today acts on its items",
+   "priority": "low",
+   "check": "agent",
+   "axes": []
+  }
+ ]
+}

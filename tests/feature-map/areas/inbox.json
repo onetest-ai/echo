@@ -1,0 +1,85 @@
+{
+ "prefix": "INBOX",
+ "name": "Inbox",
+ "order": 110,
+ "status": "stable",
+ "notes": "Needs you (right panel)",
+ "features": [
+  {
+   "id": "F-INBOX-01",
+   "feature": "Inbox (activity bar, ⇧⌘I) opens or closes the right panel on its tab; its badge counts open items, in warn colour when one blocks work",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "inbox.count",
+    "inbox.urgent"
+   ]
+  },
+  {
+   "id": "F-INBOX-02",
+   "feature": "Open, Blocking and Done chips; empty Open says \"Nothing needs you\", empty Done \"Nothing decided this week yet.\"",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "inbox.filter"
+   ]
+  },
+  {
+   "id": "F-INBOX-03",
+   "feature": "Items are grouped by client, then \"Everything else\"; blocking first; more than 5 of a kind fold into \"N more like these\"",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "inbox.group",
+    "inbox.urgent",
+    "inbox.count"
+   ]
+  },
+  {
+   "id": "F-INBOX-04",
+   "feature": "Each kind carries its own actions: minutes failed (Write again, Show log), minutes waiting (Write now), a people suggestion (Yes, No, Change…), work to review, Found for you (Create, Not this), a Teams transcript (Import, Not this)",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "inbox.kind",
+    "inbox.action"
+   ]
+  },
+  {
+   "id": "F-INBOX-05",
+   "feature": "Sign-in, sender (Trust, Ignore, Read anyway, Keep out), permission, older Echo plugin, Echo update and plugin update items come from the real machine and accounts",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "inbox.kind"
+   ]
+  },
+  {
+   "id": "F-INBOX-06",
+   "feature": "A clicked decision shows Working… until its item goes; a failure gives the buttons back with why; Open goes to the item's place",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "inbox.busy"
+   ]
+  },
+  {
+   "id": "F-INBOX-07",
+   "feature": "An item that is gone moves to Done for 7 days, only when its source could be read",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "inbox.kind"
+   ]
+  },
+  {
+   "id": "F-INBOX-08",
+   "feature": "`echoctl attention` lists the same open and done items as JSON",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "inbox.kind"
+   ]
+  }
+ ]
+}
