@@ -344,7 +344,7 @@ its copy, which its review reads.
   reads the vault again).
 - **The copy** `<run>/vault/` (K15-02): the root without `.git` (a folder, or a worktree's or submodule's pointer
   file), `node_modules/`, dot-folders but `.claude/`,
-  `.agents/`, `.obsidian/`, files over 20 MB that aren't Markdown, links (never followed) and the sources folder, into
+  `.agents/`, `.obsidian/` (that one without `plugins/`, where Obsidian's plugins keep their API tokens: final review F8), files over 20 MB that aren't Markdown, links (never followed) and the sources folder, into
   which only the run's sources and its README go. Each file is copied for real (never a link: the run edits it): one
   up to 1 MB is read once, hashed and written — opening files is what a copy of many pages costs —, a bigger one
   `std::fs::copy` (a clone on APFS) and hashed from the copy. `bases.json` has every copied file's sha256; `base/`
@@ -859,6 +859,13 @@ not the hashing, were the cost; copying on 8 threads won only 15 %, so small fil
   it), and folders it may key by session elsewhere in the profile's folder (`file-history/`, `todos/`), are not
   looked at; a run whose Echo died (its session id is in no file) leaves its session's files. The release gate
   (TC-KN-011…014) looks.
+- `.obsidian/plugins/` (Obsidian's plugins' settings, with their API tokens) is out of every vault run's reach (final
+  review F8, untrusted-text R1a): the guard refuses a path there, a Glob that would list one of its files, and a Grep
+  that would search it unless its `glob` ends with `!.obsidian` — in an Obsidian vault with plugins, a model's first
+  plain Grep over the vault is refused and the refusal says how to search (a turn more). The guard looks for those
+  folders on disk for each Grep and Glob (folders only, not through links, not in `.git` or `node_modules`, at most
+  50 000). That ripgrep never enters a folder a last `!<name>` glob names is its documented rule (a later glob wins),
+  unmeasured with the real CLI.
 - A run's deleted files aren't changes: only created and modified ones are reviewed.
 - An AI check can't read its own findings.json (the guard allows one Write there and no Read), so it writes it once.
 - A CLI `knowledge lint` killed outright leaves its Claude Code running until the next check's start ends it (as an

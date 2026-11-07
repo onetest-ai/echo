@@ -631,6 +631,9 @@ impl VaultScope {
                 if let Some(g) = glob {
                     self.glob(tool == "Glob", g, &p, results.as_deref())?;
                 }
+                if !results.is_some_and(|r| p.starts_with(r)) {
+                    self.around_plugins(tool == "Glob", glob, !input["type"].is_null(), &p)?;
+                }
                 Ok(Decision::Allow)
             }
             "Edit" | "Write" => self.write(call, input),
@@ -723,6 +726,47 @@ impl VaultScope {
         let rel = if self.windows { self.plain_rel(p)? } else { self.rel(p)? };
         if rel.components().any(|c| lower(c) == ".git") {
             return Err(format!("{} is git's folder, not the vault's", p.display()));
+        }
+        if in_plugins(rel) {
+            return Err(format!("{} is in .obsidian/plugins/, where Obsidian's plugins keep their settings and tokens: not read", p.display()));
+        }
+        Ok(())
+    }
+
+    /// A search from `from` — Glob's `pattern` (`whole`), Grep's `glob` (`g`; `typed`: it has a `type`) — that would list
+    /// or read a file in a folder of Obsidian's plugins under it (`plugin_folders`; final review F8). Glob: when its
+    /// pattern takes one of their files (`takes`). Grep: unless its globs end with `!<the .obsidian folder's name>` (or
+    /// `!<the plugins folder's>`), a folder below `from` — ripgrep then never enters it —, or take none of their files;
+    /// no glob, or a `type` (Echo doesn't read ripgrep's types), takes them all.
+    fn around_plugins(&self, whole: bool, g: Option<&str>, typed: bool, from: &Path) -> Result<(), String> {
+        let found = plugin_folders(from)?;
+        if found.is_empty() {
+            return Ok(());
+        }
+        let all = match g {
+            Some(g) => readings(g, whole)?,
+            None => vec![],
+        };
+        let last = all.iter().rposition(|r| !r.starts_with('!'));
+        let pruning: Vec<&str> = all[last.map_or(0, |i| i + 1)..].iter().filter_map(|r| r.strip_prefix('!')).collect();
+        let positive: Vec<&String> = all.iter().filter(|r| !r.starts_with('!')).collect();
+        for dir in found {
+            let obsidian = dir.parent().unwrap_or(&dir).to_path_buf();
+            let named = |d: &Path| d != from && d.starts_with(from) && d.file_name().is_some_and(|n| pruning.contains(&n.to_string_lossy().as_ref()));
+            if !whole && (named(&obsidian) || named(&dir)) {
+                continue;
+            }
+            let files = files_under(&dir)?;
+            let everything = !whole && (typed || positive.is_empty());
+            if (everything && !files.is_empty()) || files.iter().any(|f| positive.iter().any(|r| takes(r, from, f))) {
+                let at = dir.strip_prefix(&self.root).unwrap_or(&dir).display().to_string();
+                let name = obsidian.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                return Err(if whole {
+                    format!("the pattern would list files in {at}/, where Obsidian's plugins keep their settings and tokens: look in a folder of pages, or for a kind of file they don't hold")
+                } else {
+                    format!("the search would read {at}/, where Obsidian's plugins keep their settings and tokens: search a folder of pages (`path`), or end `glob` with !{name}")
+                });
+            }
         }
         Ok(())
     }
@@ -1036,6 +1080,133 @@ fn fold(s: &str) -> String {
 fn under(rel: &Path, folder: &Path) -> bool {
     let mut r = rel.components();
     folder.components().all(|f| r.next().is_some_and(|c| lower(c) == lower(f)))
+}
+
+/// At most this many folders are looked at for Obsidian's plugins (`plugin_folders`), and this many files in them.
+const DIRS_MAX: usize = 50_000;
+const FILES_MAX: usize = 20_000;
+
+/// Is `rel` (inside the root) in a folder of Obsidian's plugins, `.obsidian/plugins/` (in any case, at any depth), or
+/// that folder itself: their settings, with their API tokens (`data.json`). The ingest copy leaves them out too.
+pub(crate) fn in_plugins(rel: &Path) -> bool {
+    let names: Vec<String> = rel.components().map(lower).collect();
+    names.windows(2).any(|w| w[0] == ".obsidian" && w[1] == "plugins")
+}
+
+/// The folders of Obsidian's plugins (`plugins` in a `.obsidian`, in any case) under `from`, as they are on disk: never
+/// through a link, nor in git's folder or `node_modules`. Refused when there are more than `DIRS_MAX` folders to look at.
+fn plugin_folders(from: &Path) -> Result<Vec<PathBuf>, String> {
+    let (mut found, mut stack, mut seen) = (vec![], vec![from.to_path_buf()], 0usize);
+    while let Some(d) = stack.pop() {
+        let Ok(rd) = std::fs::read_dir(&d) else { continue };
+        let obsidian = d.file_name().is_some_and(|n| fold(&n.to_string_lossy()) == ".obsidian");
+        for e in rd.flatten() {
+            if !e.file_type().is_ok_and(|t| t.is_dir()) {
+                continue;
+            }
+            seen += 1;
+            if seen > DIRS_MAX {
+                return Err(format!("{} holds too many folders for Echo to tell where Obsidian's plugins are: search a folder of pages", from.display()));
+            }
+            let name = e.file_name().to_string_lossy().into_owned();
+            if obsidian && fold(&name) == "plugins" {
+                found.push(e.path());
+            } else if fold(&name) != ".git" && name != "node_modules" {
+                stack.push(e.path());
+            }
+        }
+    }
+    Ok(found)
+}
+
+/// The files under `dir`, never through a link; refused past `FILES_MAX`.
+fn files_under(dir: &Path) -> Result<Vec<PathBuf>, String> {
+    let (mut out, mut stack) = (vec![], vec![dir.to_path_buf()]);
+    while let Some(d) = stack.pop() {
+        for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+            match e.file_type() {
+                Ok(t) if t.is_dir() => stack.push(e.path()),
+                Ok(t) if t.is_file() => out.push(e.path()),
+                _ => {}
+            }
+            if out.len() > FILES_MAX {
+                return Err(format!("{} holds too many files for Echo to check: search a folder of pages", dir.display()));
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Could glob `reading` (a reading of the safe subset, `readings`) of a search from `from` take `file`? As ripgrep may
+/// read it, wherever it anchors a glob: a relative one taking the file's path from `from` or any end of it (a name
+/// alone takes a file of that name at any depth); an absolute one, what follows its fixed part from there.
+fn takes(reading: &str, from: &Path, file: &Path) -> bool {
+    let r = reading.trim_end_matches('/');
+    let (base, pattern) = if r.starts_with('/') || Path::new(r).is_absolute() {
+        let fixed = match r.find('*') {
+            Some(w) => &r[..r[..w].rfind('/').map_or(0, |s| s + 1)],
+            None => r,
+        };
+        match vault_path(Some(fixed), from) {
+            Ok(b) => (b, &r[fixed.len()..]),
+            Err(_) => return true,
+        }
+    } else {
+        (from.to_path_buf(), r)
+    };
+    let Ok(rel) = file.strip_prefix(&base) else { return false };
+    let names: Vec<String> = rel.components().map(lower).collect();
+    let segs = parse_glob(pattern.trim_matches('/'));
+    (0..names.len()).any(|k| whole_match(&segs, &names[k..]))
+}
+
+/// Do the segments `segs` take all of `names` (folded): `**` any number of whole names, a name one?
+fn whole_match(segs: &[Seg], names: &[String]) -> bool {
+    let mut at = vec![false; names.len() + 1];
+    at[0] = true;
+    for s in segs {
+        let mut next = vec![false; names.len() + 1];
+        match s {
+            Seg::Any => {
+                if let Some(first) = at.iter().position(|&a| a) {
+                    next[first..].fill(true);
+                }
+            }
+            Seg::Name(toks) => {
+                for j in 0..names.len() {
+                    next[j + 1] = at[j] && name_match(toks, &names[j]);
+                }
+            }
+        }
+        at = next;
+    }
+    at[names.len()]
+}
+
+/// Does a segment's name (`toks`: characters and `*`) take `name`, each character as a file system that ignores case
+/// folds it?
+fn name_match(toks: &[Tok], name: &str) -> bool {
+    let chars: Vec<String> = name.chars().map(|c| fold(&c.to_string())).collect();
+    let mut at = vec![false; chars.len() + 1];
+    at[0] = true;
+    for t in toks {
+        let mut next = vec![false; chars.len() + 1];
+        match t {
+            Tok::Star => {
+                if let Some(first) = at.iter().position(|&a| a) {
+                    next[first..].fill(true);
+                }
+            }
+            Tok::Char(c) => {
+                let c = fold(&c.to_string());
+                for j in 0..chars.len() {
+                    next[j + 1] = at[j] && chars[j] == c;
+                }
+            }
+        }
+        at = next;
+    }
+    at[chars.len()]
 }
 
 /// The vault's tools' own files, which no run in it writes: Claude Code's MCP servers (`.mcp.json`), other agents'
@@ -1701,6 +1872,63 @@ mod tests {
             std::os::unix::fs::symlink(v.join("a/b/c"), v.join("deep")).unwrap();
             let s = chat_scope(&v, "ask");
             assert!(denied(s.decide(&tool("Read", json!({"file_path": format!("{}/deep/../../x.md", p(&v))})))));
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn obsidians_plugins_are_never_read_or_searched() {
+        // Final review F8: Obsidian's plugins keep their API tokens in `.obsidian/plugins/*/data.json`.
+        let (root, v) = vault_fixture("plugins");
+        let copy = copy_fixture(&root);
+        for base in [&v, &copy] {
+            for f in [".obsidian/plugins/sync/data.json", ".obsidian/plugins/sync/main.js", "knowledge/.obsidian/plugins/tasks/data.json"] {
+                put(base, f);
+            }
+        }
+        let run = root.join("lint-run");
+        fs::create_dir_all(&run).unwrap();
+        for (name, s, base) in [("ask", chat_scope(&v, "ask"), &v), ("ingest", ingest_scope(&copy), &copy), ("lint", lint_scope(&v, &run), &v)] {
+            let d = |t: &str, input: Value| s.decide(&tool(t, input));
+            for (t, input) in [
+                ("Read", json!({"file_path": p(&base.join(".obsidian/plugins/sync/data.json"))})),
+                ("Read", json!({"file_path": ".OBSIDIAN/Plugins/sync/data.json"})),
+                ("Read", json!({"file_path": "knowledge/.obsidian/plugins/tasks/data.json"})),
+                ("Grep", json!({"pattern": "token", "path": ".obsidian/plugins"})),
+                ("Grep", json!({"pattern": "token", "path": ".obsidian/plugins/sync/data.json"})),
+                ("Glob", json!({"pattern": "*", "path": ".obsidian/plugins/sync"})),
+                ("Glob", json!({"pattern": ".obsidian/plugins/*/data.json"})),
+                ("Grep", json!({"pattern": "token", "glob": ".obsidian/plugins/**/*.json"})),
+                // Over the vault, a search would read inside them, a Glob list them.
+                ("Grep", json!({"pattern": "token"})),
+                ("Grep", json!({"pattern": "token", "path": ".obsidian"})),
+                ("Grep", json!({"pattern": "token", "path": "knowledge"})),
+                ("Grep", json!({"pattern": "token", "glob": "*.json"})),
+                ("Grep", json!({"pattern": "token", "glob": "!.git *.js"})),
+                ("Grep", json!({"pattern": "token", "type": "json"})),
+                ("Grep", json!({"pattern": "token", "glob": "!.obsidian *.json"})),
+                ("Glob", json!({"pattern": "**/*.json"})),
+                ("Glob", json!({"pattern": "**/data.json"})),
+                ("Glob", json!({"pattern": "*/plugins/**", "path": ".obsidian"})),
+                // A name without a folder is any file of that name below: the plugins' too.
+                ("Glob", json!({"pattern": "*.json", "path": ".obsidian"})),
+            ] {
+                assert!(denied(d(t, input.clone())), "{name}: {t} {input}");
+            }
+            for (t, input) in [
+                ("Read", json!({"file_path": ".obsidian/app.json"})),
+                ("Grep", json!({"pattern": "token", "glob": "*.json !.obsidian"})),
+                ("Grep", json!({"pattern": "token", "glob": "!.obsidian"})),
+                ("Grep", json!({"pattern": "token", "type": "json", "glob": "!.obsidian"})),
+                ("Grep", json!({"pattern": "Acme", "glob": "*.md"})),
+                ("Grep", json!({"pattern": "Acme", "glob": "**/*.md"})),
+                ("Grep", json!({"pattern": "Acme", "path": "knowledge/clients"})),
+                ("Glob", json!({"pattern": "**/*.md"})),
+                ("Glob", json!({"pattern": "knowledge/clients/*.md"})),
+                ("Glob", json!({"pattern": "app.json", "path": ".obsidian"})),
+            ] {
+                assert_eq!(d(t, input.clone()), Decision::Allow, "{name}: {t} {input}");
+            }
         }
         let _ = fs::remove_dir_all(&root);
     }

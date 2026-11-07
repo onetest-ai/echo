@@ -150,6 +150,8 @@ fn the_copy_leaves_out_what_a_run_doesnt_need() {
     fixture::write(&t, "knowledge/vendor/README.md", "# A made-up submodule\n");
     fixture::write(&t, "node_modules/left-pad/index.js", "module.exports = 1;\n");
     fixture::write(&t, ".trash/old.md", "# old\n");
+    // Final review F8: Obsidian's plugins keep their API tokens here.
+    fixture::write(&t, "knowledge/.obsidian/plugins/sync/data.json", "{\"token\": \"made-up-token\"}");
     std::fs::create_dir_all(t.join("knowledge/media")).unwrap();
     std::fs::File::create(t.join("knowledge/media/talk.mp4")).unwrap().set_len(30 << 20).unwrap();
     fixture::write(&t, "raw_inbox/README.md", "# raw_inbox\n");
@@ -164,7 +166,7 @@ fn the_copy_leaves_out_what_a_run_doesnt_need() {
     let v = knowledge::add(&t, AddOpts { name: Some("Twin".into()), ..Default::default() }).unwrap();
     let dest = root.join("run/vault");
     let c = copy_vault(&v, &dest, &strings(&["raw_inbox/a.md", "raw_inbox/deck.pdf"]), &root.join("run/base")).unwrap();
-    for gone in [".git/config", "knowledge/vendor/.git", "node_modules/left-pad/index.js", ".trash/old.md", "knowledge/media/talk.mp4", "raw_inbox/b.md", "raw_inbox/c.txt", "raw_inbox/e.csv", "knowledge/linked-out/secret.md"] {
+    for gone in ["knowledge/.obsidian/plugins", ".git/config", "knowledge/vendor/.git", "node_modules/left-pad/index.js", ".trash/old.md", "knowledge/media/talk.mp4", "raw_inbox/b.md", "raw_inbox/c.txt", "raw_inbox/e.csv", "knowledge/linked-out/secret.md"] {
         assert!(!dest.join(gone).exists(), "{gone} isn't copied");
     }
     for kept in ["knowledge/.obsidian/app.json", ".claude/skills/s/SKILL.md", ".claude/commands/c.md", "AGENTS.md", "processing_log.json", "knowledge/CATALOG.md", "raw_inbox/README.md", "raw_inbox/a.md", "raw_inbox/deck.pdf"] {
@@ -178,7 +180,7 @@ fn the_copy_leaves_out_what_a_run_doesnt_need() {
     }
     assert_eq!(std::fs::read(root.join("run/base/knowledge/CATALOG.md")).unwrap(), std::fs::read(t.join("knowledge/CATALOG.md")).unwrap(), "the index as copied");
     // What was left out, in one line.
-    for said in [".git/", "knowledge/vendor/.git", "node_modules/", ".trash/", "knowledge/media/talk.mp4 (30 MB)", "3 other sources in raw_inbox/"] {
+    for said in ["knowledge/.obsidian/plugins/", ".git/", "knowledge/vendor/.git", "node_modules/", ".trash/", "knowledge/media/talk.mp4 (30 MB)", "3 other sources in raw_inbox/"] {
         assert!(c.left_out.contains(said), "{said}: {}", c.left_out);
     }
     #[cfg(unix)]

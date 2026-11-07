@@ -333,7 +333,8 @@ fn copy_files(todo: &[(PathBuf, String, u64)], root: &Path) -> Result<BTreeMap<S
 }
 
 /// The scratch copy of `v` into `dest` (K15-02): the vault's root without `.git/`, `node_modules/`, dot-folders other
-/// than `.claude/`, `.agents/` and `.obsidian/`, files over 20 MB that aren't Markdown, links (never followed) and the
+/// than `.claude/`, `.agents/` and `.obsidian/` (and that one without its `plugins/`, F8), files over 20 MB that aren't
+/// Markdown, links (never followed) and the
 /// sources folder — into which only `picked` and its README go. A real copy (`std::fs::copy`, a clone where the system
 /// makes one), never a link: the run edits it. The index and the log as copied also go into `base` (D42).
 pub(super) fn copy_vault(v: &Vault, dest: &Path, picked: &[String], base: &Path) -> Result<Copied> {
@@ -355,7 +356,8 @@ pub(super) fn copy_vault(v: &Vault, dest: &Path, picked: &[String], base: &Path)
                 if r == folder {
                     continue; // below: only the run's sources
                 }
-                if name == "node_modules" || (name.starts_with('.') && !DOT_KEPT.contains(&name.as_str())) {
+                // Obsidian's plugins keep their API tokens in their folder (final review F8): never in a copy.
+                if name == "node_modules" || (name.starts_with('.') && !DOT_KEPT.contains(&name.as_str())) || guard::in_plugins(Path::new(&r)) {
                     left.push(format!("{r}/"));
                     continue;
                 }
