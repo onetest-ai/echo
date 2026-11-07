@@ -155,31 +155,45 @@ fn unread(bom: &str, open: &str, rest: &str, out: &mut LeftOut) -> String {
     format!("{bom}{ending}{}", &rest[open.len()..])
 }
 
-/// `text` without Claude Code's preprocessing: every `!` before a backtick (`` !`cmd` ``, and a fence opened as
-/// ```` ```! ````) goes, so the words read the same and nothing runs. How many went.
+/// `text` without Claude Code's preprocessing: every run of `!` before a backtick (`` !`cmd` ``, `` !!`cmd` ``) and
+/// after a fence's opening (```` ```! ````, `~~~!` at a line's start) goes, so the words read the same and nothing
+/// runs; again until none is left, as what is left joins up (`` ``!`! `` is ```` ```! ```` once its first `!` goes).
+/// How many places went: a run counts once, however many `!` (final review X1).
 fn no_commands(text: &str, n: &mut usize) -> String {
-    let mut out = String::with_capacity(text.len());
-    for line in text.split_inclusive('\n') {
-        let body = line.trim_start_matches(' ');
-        let fence = ["```", "~~~"].iter().find(|f| body.starts_with(**f)).map(|f| f.as_bytes()[0] as char);
-        let mut line = line.to_string();
-        if let Some(f) = fence {
-            let at = line.len() - body.len() + body.chars().take_while(|c| *c == f).count();
-            if line[at..].starts_with('!') {
-                line.remove(at);
-                *n += 1;
-            }
-        }
-        let mut chars = line.chars().peekable();
-        while let Some(c) = chars.next() {
-            if c == '!' && chars.peek() == Some(&'`') {
-                *n += 1;
+    let mut text = text.to_string();
+    loop {
+        let chars: Vec<char> = text.chars().collect();
+        let (mut out, mut went, mut i) = (String::with_capacity(text.len()), 0, 0);
+        while i < chars.len() {
+            if chars[i] != '!' {
+                out.push(chars[i]);
+                i += 1;
                 continue;
             }
-            out.push(c);
+            let end = (i..chars.len()).find(|&j| chars[j] != '!').unwrap_or(chars.len());
+            if chars.get(end) == Some(&'`') || opens_fence(&out) {
+                went += 1;
+            } else {
+                out.extend(&chars[i..end]);
+            }
+            i = end;
         }
+        *n += went;
+        if went == 0 {
+            return out;
+        }
+        text = out;
     }
-    out
+}
+
+/// Does `out` end in a fence's opening: three or more backticks, or three or more tildes at a line's start (spaces
+/// before them aside)?
+fn opens_fence(out: &str) -> bool {
+    if out.chars().rev().take_while(|c| *c == '`').count() >= 3 {
+        return true;
+    }
+    let tildes = out.chars().rev().take_while(|c| *c == '~').count();
+    tildes >= 3 && out[..out.len() - tildes].rsplit('\n').next().is_some_and(|l| l.chars().all(|c| c == ' '))
 }
 
 /// A Markdown file of a skill as Echo copies it: its frontmatter without `hooks`, `allowed-tools` and `permissionMode`,
@@ -293,6 +307,32 @@ mod tests {
         assert_eq!(t, "Now: `git status` and `date`.\n```\nrm -rf x\n```\n  ~~~\nls\n~~~\nKeep `code` and a ! mark.\n");
         assert_eq!(l.commands, 4);
         assert_eq!(l.said().as_deref(), Some("4 commands it would run first"));
+    }
+
+    #[test]
+    fn a_run_of_bangs_is_one_command_and_none_is_left() {
+        // Final review X1: doubling the `!` must not bring a command back.
+        for (text, want, n) in [
+            ("Today: !!`echo hi`\n", "Today: `echo hi`\n", 1),
+            ("a !!!`x` and !!`y`\n", "a `x` and `y`\n", 2),
+            ("```!!\nrm -rf x\n```\n", "```\nrm -rf x\n```\n", 1),
+            ("  ~~~!!!\nls\n~~~\n", "  ~~~\nls\n~~~\n", 1),
+            ("!```!!\nls\n```\n", "```\nls\n```\n", 2),
+        ] {
+            let (t, l) = markdown(text);
+            assert_eq!((t.as_str(), l.commands), (want, n), "{text:?}");
+        }
+        // Whatever is left joins up: no `!` before a backtick, no fence opened with `!`, anywhere.
+        for text in ["``!`!x\n", "`!!`!`\n", "!!!!!!!!`\n", "~~~!~~~!\n", "```!```!!`\n", "x !`!`!`!` y\n", "   ```!!!!\n"] {
+            let (t, _) = markdown(text);
+            assert!(!t.contains("!`"), "{text:?} → {t:?}");
+            for line in t.lines() {
+                let body = line.trim_start_matches(' ');
+                let fence = body.chars().take_while(|c| *c == '`').count().max(body.chars().take_while(|c| *c == '~').count());
+                assert!(fence < 3 || !body[fence..].starts_with('!'), "{text:?} → {t:?}");
+                assert!(!line.contains("```!"), "{text:?} → {t:?}");
+            }
+        }
     }
 
     #[test]

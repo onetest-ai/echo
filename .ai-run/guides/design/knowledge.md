@@ -370,8 +370,9 @@ its copy, which its review reads.
   frontmatter keys `hooks`, `allowed-tools` and `permissionMode` are dropped (in any case, `-`/`_` aside, quoted or
   not; the frontmatter is read from a first `---` line to the next line that is exactly `---`, else to the end, and one
   Echo can't read safely — a merge key, a flow mapping, an indented or escaped key — loses its opening line, so it is
-  text to every reader), every `!` before a backtick goes (`` !`cmd` `` and a fence opened ```` ```! ````: the words
-  stay, nothing runs), and a `hooks/` folder or `hooks.json` in the skill's folder stays out. The run's first line says
+  text to every reader), every run of `!` before a backtick goes, and after a fence's opening (`` !`cmd` ``,
+  `` !!`cmd` ``, ```` ```!! ````), again until none is left, a run counted once (final review X1: the words stay,
+  nothing runs), and a `hooks/` folder or `hooks.json` in the skill's folder stays out. The run's first line says
   it beside the copy's: "Not in the copy: .git/. Left out of the skill: its hooks; its allowed tools; 2 commands it
   would run first". The lease is held until the process has
   exited (`terminal::hold` in the app, so a sign-in stops it, "Stopped for a sign-in"); 20 minutes, then it is stopped
@@ -460,7 +461,7 @@ vault's own skills and `CLAUDE.md` load by themselves. On a managed profile Echo
 into a plugin under `<config>/minutes-run/vault-plugins/ <id>` and points the session at the vault's rules with
 `--append-system-prompt` — never by adding the `project` setting source (D8). That plugin is Echo's copy through
 `defang::skill_files` (final review F1): each Markdown file loses its frontmatter's `hooks`, `allowed-tools` and
-`permissionMode` and the `!` of its `` !`cmd` `` preprocessing, and the skill's `hooks/` folder and `hooks.json` stay out.
+`permissionMode` and every run of `!` of its `` !`cmd` `` preprocessing, and the skill's `hooks/` folder and `hooks.json` stay out.
 A conversation has no place where it notes its setup, so what was left out is said only here. The Echo-folder session gets `--add-dir`
 for the vaults on its profile. *Continue in Terminal* (`cd <vault> && claude --resume <id>`, quoted for the shell) is
 offered on *Claude Code (as configured)* only: a managed profile's routing can't be written out as a line to copy

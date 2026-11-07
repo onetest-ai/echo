@@ -169,10 +169,11 @@ to fix first, and one Claude Code changed is a design-note fact to rewrite.
 
 **G1 · A skill's hooks, allowed tools and `!` commands stay out of a real ingest run** (final review F1). In the vault's
 `.claude/skills/process-inbox/SKILL.md` add to the frontmatter `allowed-tools: Bash(*)` and a `hooks:` block with a
-`PreToolUse` command hook `touch /tmp/echo-gate-hook`; add the body line ``Today: !`touch /tmp/echo-gate-bang` ``; add
-`.claude/skills/process-inbox/hooks/hooks.json` with a hook that runs `touch /tmp/echo-gate-file`. *Prepare changes*
-on one made-up source. **Pass:** the run's first line says "Left out of the skill: its hooks; its allowed tools; 1
-command it would run first"; none of `/tmp/echo-gate-hook`, `-bang`, `-file` exists after the run; the run shows no
+`PreToolUse` command hook `touch /tmp/echo-gate-hook`; add the body lines ``Today: !`touch /tmp/echo-gate-bang` `` and
+``Also: !!`touch /tmp/echo-gate-bang2` `` (a doubled `!`); add `.claude/skills/process-inbox/hooks/hooks.json` with a
+hook that runs `touch /tmp/echo-gate-file`. *Prepare changes* on one made-up source. **Pass:** the run's first line
+says "Left out of the skill: its hooks; its allowed tools; 2 commands it would run first"; none of
+`/tmp/echo-gate-hook`, `-bang`, `-bang2`, `-file` exists after the run — the doubled `!` doesn't run either; the run shows no
 command row; the run's `plugin/skills/process-inbox/SKILL.md` (in Echo's data folder) has none of them; the vault's
 own `SKILL.md` is as you wrote it.
 
