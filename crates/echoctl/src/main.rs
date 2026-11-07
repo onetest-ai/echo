@@ -1125,6 +1125,12 @@ enum KnowledgeCmd {
         #[arg(long)]
         anyway: bool,
     },
+    /// Ingest: the vault's sources — add one to its sources folder exactly as it came (nothing is processed by adding)
+    Ingest {
+        vault: String,
+        #[command(subcommand)]
+        cmd: IngestCmd,
+    },
     /// The twin skill: add it to a vault that has none, or (--global) install it for all your Claude Code sessions
     Twin {
         vault: String,
@@ -2755,6 +2761,73 @@ fn deliver_command(cmd: DeliverCmd) -> Result<()> {
     Ok(())
 }
 
+#[derive(Subcommand)]
+enum IngestCmd {
+    /// Add sources: files (copied as they are, up to 50 MB each), or one of --call, --mail, --teams, --url (JSON)
+    Add {
+        files: Vec<std::path::PathBuf>,
+        /// A call's or memo's minutes (its folder, or `latest`)
+        #[arg(long)]
+        call: Option<String>,
+        /// With the call's transcript
+        #[arg(long)]
+        transcript: bool,
+        /// With the call's meeting chat
+        #[arg(long)]
+        chat: bool,
+        /// Add the call even though the vault is read by another AI profile than the call's
+        #[arg(long)]
+        anyway: bool,
+        /// A mail thread, by one of its messages' Microsoft 365 id (Echo's sign-in)
+        #[arg(long)]
+        mail: Option<String>,
+        /// A Teams chat, by its id (Echo's sign-in), from --since to --until (YYYY-MM-DD; default the last 7 days)
+        #[arg(long)]
+        teams: Option<String>,
+        #[arg(long)]
+        since: Option<String>,
+        #[arg(long)]
+        until: Option<String>,
+        /// A web page, by its https address: its main text as Markdown
+        #[arg(long)]
+        url: Option<String>,
+    },
+}
+
+fn ingest_command(vault: &str, cmd: IngestCmd) -> Result<serde_json::Value> {
+    use knowledge::sources;
+    knowledge::refuse_headless()?;
+    let v = knowledge::get(vault)?;
+    let IngestCmd::Add { files, call, transcript, chat, anyway, mail, teams, since, until, url } = cmd;
+    let kinds = [!files.is_empty(), call.is_some(), mail.is_some(), teams.is_some(), url.is_some()].iter().filter(|k| **k).count();
+    if kinds != 1 {
+        anyhow::bail!("add files, or one of --call, --mail, --teams, --url");
+    }
+    let day = |d: Option<String>, default: chrono::NaiveDate| -> Result<chrono::NaiveDate> {
+        d.map(|d| chrono::NaiveDate::parse_from_str(&d, "%Y-%m-%d").map_err(|_| anyhow::anyhow!("{d}: a day as YYYY-MM-DD"))).unwrap_or(Ok(default))
+    };
+    Ok(if !files.is_empty() {
+        let (mut added, mut refused) = (vec![], vec![]);
+        for (name, r) in sources::add_files(&v, &files) {
+            match r {
+                Ok(a) => added.push(serde_json::to_value(a)?),
+                Err(e) => refused.push(serde_json::json!({ "name": name, "why": format!("{e:#}") })),
+            }
+        }
+        serde_json::json!({ "added": added, "refused": refused })
+    } else if let Some(c) = call {
+        serde_json::to_value(sources::add_call(&v, &calls::resolve_call(&c)?, sources::Include { transcript, chat }, anyway)?)?
+    } else if let Some(m) = mail {
+        serde_json::to_value(sources::add_mail(&v, &m)?)?
+    } else if let Some(t) = teams {
+        let until = day(until, chrono::Local::now().date_naive())?;
+        let since = day(since, until - chrono::Duration::days(7))?;
+        serde_json::to_value(sources::add_chat(&v, &t, since, until)?)?
+    } else {
+        serde_json::to_value(sources::add_web(&v, url.as_deref().unwrap_or(""))?)?
+    })
+}
+
 fn knowledge_command(cmd: KnowledgeCmd) -> Result<()> {
     use knowledge as kn;
     let v = match cmd {
@@ -2795,6 +2868,7 @@ fn knowledge_command(cmd: KnowledgeCmd) -> Result<()> {
                 None => serde_json::to_value(kn::export::save_by_rules(&dir))?,
             }
         }
+        KnowledgeCmd::Ingest { vault, cmd } => ingest_command(&vault, cmd)?,
         KnowledgeCmd::New { name, folder, no_git, minutes } => kn::starter::created_value(&kn::starter::create(&name, folder, !no_git, &minutes)?),
         KnowledgeCmd::Twin { vault, global, remove, name } => {
             let v = kn::get(&vault)?;

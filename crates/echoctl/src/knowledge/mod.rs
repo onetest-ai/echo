@@ -13,12 +13,14 @@ pub mod detect;
 pub mod diff;
 pub mod evidence;
 pub mod export;
+pub mod extract;
 pub mod fm;
 pub mod git;
 pub mod health;
 pub mod links;
 pub mod page;
 pub mod scan;
+pub mod sources;
 pub mod starter;
 pub mod stream;
 #[cfg(feature = "tray")]
@@ -443,6 +445,17 @@ pub fn reread(id: &str) -> Result<Vault> {
         let v = r.vaults.iter_mut().find(|v| v.id == id).ok_or_else(|| anyhow!("no vault “{id}”"))?;
         v.detected = detected;
         Ok(v.clone())
+    })
+}
+
+/// Echo added a source to `rel` in a vault that had no sources folder: it is the vault's sources now, as detection
+/// would find (so its Markdown is never taken for pages).
+pub(super) fn found_sources(id: &str, rel: &str) -> Result<()> {
+    update(|r| {
+        if let Some(v) = r.vaults.iter_mut().find(|v| v.id == id).filter(|v| v.path("sources").is_none()) {
+            v.detected.sources = Some(rel.to_string());
+        }
+        Ok(())
     })
 }
 

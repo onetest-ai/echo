@@ -32,6 +32,8 @@ is `recall.md`. The window rules are `.ai-run/guides/window/window-ui.md`; untru
 | `chat.rs` (`tray`) | Ask's conversations: a Claude Code process per conversation (`send`, `read`, `permit`, `stop`, `close_profile`, `live`, `sweep`) |
 | `chat/permits.rs` | A permission card's diff (`card`), an allowed edit's activity line (`record`), a turn's commit (`commit`) |
 | `chat/attach.rs` | A call's minutes attached to a message (`attach_call`: the profile check, the framing) |
+| `sources.rs` | Ingest's sources (spec-2 K14): the ledger (`ingest.json`: `ledger`, `baseline`, `skip`), the queue (`queue`, `offer`, `value`), adds (`add_files`, `add_call`, `add_mail` / `add_thread`, `add_chat` / `add_chat_messages`, `add_web`), the sheet's lists (`calls`, `m365_search`) |
+| `extract.rs` | A web page's main text as Markdown by Echo's own HTML reader (`main_text`), and its fetch with `curl` (`fetch`) |
 | `ui/knowledge.js`, `ui/knowledge.css` | The window's Knowledge: pure blocks tested by `ui/knowledge.test.mjs`, then the `Kn` module |
 
 Hooks elsewhere: `notes.rs::notify_outcome` and `watch.rs::notify_notes_ready` call `export::minutes_written` (both
@@ -181,6 +183,51 @@ clean before (X-G2, `git::dirty` fails safe — `log.md` included), named in `co
 the page a row is for, today's date — so the page sends back both the `base` and the `sha` of the text it was shown
 (ruling R37): `kn_fix` / `kn_fix_all` take `{key, choice?, base, sha}`, compute each fix again and write it only when
 both match.
+
+### Ingest's sources (`sources.rs`, `extract.rs`)
+The sources folder is the vault's `sources` (detected or set), else `raw_inbox`, made by the first add with the
+starter's `raw_inbox/README.md`; Echo then records it as the vault's detected sources, so its Markdown is never taken
+for pages. Echo's own adds go under `echo/`, `mail/`, `teams/` and `web/`; files go in as they are named. An add writes
+only its source (and that README), under `sources.lock` (a free name is chosen and taken together: a taken name gets
+` (2)`, ` (3)`…; the folder's README is always taken), asks git first (X-G2, `git::dirty` fails safe), commits just
+those files when the vault commits (`Add source: <title>`), records the source as `new` in the ledger and a line in
+`activity.jsonl` (`by: source`). Nothing is processed by adding, and Echo never edits or deletes a source (D29).
+- **Files** are picked in the system's dialog (`app::choose_files`, several; `ECHOCTL_PICK_FILES` in debug builds):
+  `kn_pick_files` answers a number and the files' names and sizes, never a path; `kn_source_add` takes the number back.
+  Each is copied byte for byte through a hidden file beside it; over 50 MB is refused with its size. A picked name is
+  made safe on both systems (`\ / : * ? " < > |` and control characters become `-`, no dot or space at either end, a
+  Windows device name gets `_` in front).
+- **A call or memo** is named as the window names calls (its folder or stamp, never a path) and becomes §5.5's file:
+  `title`, `date`, `kind: call|memo`, `participants`, `duration`, `source: echo://call/<stamp>`, `note:` when the call
+  has a note in this vault, `origin: echo`; then `# <title> — minutes` and `notes.md` as written; `## Transcript` and
+  `## Chat` only when ticked. A call on another profile than the vault's is refused naming both profiles
+  (`sources::Mismatch`, answered as `{mismatch: {call, vault, call_name, vault_name}}`) unless *Add anyway*, which the
+  ledger keeps (`anyway`, X-P3).
+- **Mail** is the thread of the picked message (`graph::message`, `graph::conversation`, which now also lists each
+  message's attachments' names; Graph is asked for bodies as text, and `graph::mail_item` makes an HTML one text);
+  **Teams** is a chat's messages over local days, default the last 7 (`graph::chat_messages`, each body through
+  `graph::html_to_text`). Both: `people`, `source` (the message's or chat's web link), one `### <name> · <date time>`
+  section per message, `Attachments: …` named, never downloaded. Not signed in: `m365?q=` says `signed_in: false`.
+- **A web page** (`extract::fetch`): an https address only, checked before anything is asked; `curl -q` (the user's
+  `.curlrc` can't add cookies or credentials) with `proto =https`, `proto-redir =https`, `max-redirs 5`,
+  `max-filesize` 5 MB, `max-time` 20 s; only `text/html`, `text/plain`, `text/markdown`; each refusal says why (curl's
+  exit code read as words). The extractor parses the page into a tree (implied end tags for `p`, `li`, cells, rows;
+  raw text for scripts and styles; depth capped at 400) and keeps the largest `<article>`, else `<main>`, else `<body>`,
+  without scripts, styles, nav, header, footer, aside, forms (and noscript, template, svg, iframes, buttons); headings,
+  paragraphs, lists, code (a fence longer than any backticks inside), tables (`|` escaped) and https links (relative
+  ones resolved against the page; `javascript:`, `mailto:`, `data:` and http become text). The title is the main
+  part's first `h1` (not repeated below), else `<title>`. Under 200 characters of text: "Nothing readable here — save
+  it as a PDF and add the file."
+
+The **ledger** `<cache>/ingest.json` (`{baseline, sources: {path: {sha256, added, by, state, run, kept, note,
+anyway}}, runs}`) changes under `ingest.lock`, re-read first, written atomically; one that can't be read is an error,
+never taken for empty. A source's state: `skipped` or `done` from the ledger, else `done` when `log.md` has
+`· processed · <path>` (the starter's format), else the ledger's `waiting`, else `new`. The **queue** is every file
+of the sources folder (its `README.md`, dot-files, dot-folders and links left out), newest first (when Echo learned of
+it, else its time), each with its kind (by its folder), title (a Markdown source's own) and the ledger's note, run,
+kept and anyway. **First open**: while there is no ledger, the files `log.md` doesn't call processed are counted
+(`offer`); *Mark them done* / *Treat them as new* (`kn_baseline`) records them as `done` / `new` (`by: baseline`) and
+the question isn't asked again. *Skip* (`kn_source_skip`) takes only a file of the sources folder, with its note.
 
 ### Graph
 Built in the window from `/api/kn/<id>/graph` and drawn live on a canvas by `graphCanvas` in `knowledge.js`, the
@@ -367,6 +414,9 @@ them all at start, when none can be in use.
 | `<home>/.echo/knowledge/<id>/index.json` | Echo's index of the vault | `scan::index` |
 | `<home>/.echo/knowledge/<id>/save.lock` | One save at a time into the vault | `export` |
 | `<home>/.echo/knowledge/<id>/health.json` (+ `health.lock`) | Score history (90 days), ignored findings' keys, the last AI check (`ai`, written by `lint`) | `health` (lock + re-read + `write_atomic`) |
+| `<home>/.echo/knowledge/<id>/ingest.json` (+ `ingest.lock`) | Ingest's ledger: the baseline, each source's state, runs | `sources` (lock + re-read + `write_atomic`) |
+| `<home>/.echo/knowledge/<id>/sources.lock` | One add at a time into the vault's sources folder | `sources` |
+| `<sources>/…` in the vault | Sources the user added (Echo's under `echo/`, `mail/`, `teams/`, `web/`); never edited or deleted | `sources` |
 | `<call>/knowledge.json` (+ `.knowledge.lock`) | Where the call's minutes were saved, and the call's choice | `export` (never a Claude run) |
 | `<config>/minutes-run/vault-plugins/<id>-<hash>/` | The vault's skills as a plugin, for managed profiles, one folder per content | `terminal::vault_plugin` (removed at app start) |
 | `<home>/.echo/knowledge/<id>/chat/<conversation>/settings.json` | A conversation's guard hook and scope `env` (rewritten at each of its starts) | `chat::start` |
@@ -386,6 +436,9 @@ identical); checks found 5 pages not in the index and 10 broken links, all real.
 
 ## Known gaps
 
+- A web page is read as UTF-8 (its `charset` isn't looked at): a page in another encoding shows replacement
+  characters. Only the local test server's fetch is tested; no real site is fetched in tests.
+- Sources aren't pages: `page::read` refuses them, so *Open* (K14-10, read-only in Pages) comes with the Ingest view.
 - Rename, move and delete of pages are left to Obsidian and Finder (D14).
 - Minutes are routed through a vault's own skill only later (D3); today the note is Echo's minutes as written.
 - The rail (links, outline, history) is hidden under 1100 px wide; so is Ask's (*Continue elsewhere* moves to the

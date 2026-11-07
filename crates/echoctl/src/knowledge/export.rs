@@ -131,7 +131,7 @@ fn load(call: &Path) -> Record {
 }
 
 /// The lock at `path`, waited for up to `secs`; `busy` says what is busy when it isn't free by then.
-fn hold(path: &Path, secs: u64, busy: &str) -> Result<crate::app::FileLock> {
+pub(super) fn hold(path: &Path, secs: u64, busy: &str) -> Result<crate::app::FileLock> {
     let t = std::time::Instant::now();
     loop {
         if let Some(l) = crate::app::FileLock::try_take(path)? {
@@ -197,13 +197,13 @@ fn quoted(s: &str) -> String {
 pub(super) struct Facts {
     pub(super) title: String,
     pub(super) date: String,
-    minutes: i64,
+    pub(super) minutes: i64,
     meeting: String,
-    participants: Vec<String>,
+    pub(super) participants: Vec<String>,
     client: Option<String>,
     threads: Vec<String>,
     link: String,
-    stamp: String,
+    pub(super) stamp: String,
     pub(super) profile: Option<String>,
     pub(super) notes: String,
 }
@@ -368,7 +368,7 @@ fn note_text(v: &Vault, f: &Facts, transcript: Option<&str>, chat: Option<&str>)
     text
 }
 
-fn chat_text(call: &Path) -> Option<String> {
+pub(super) fn chat_text(call: &Path) -> Option<String> {
     let v = crate::calls::read_json(&call.join("chat.json"));
     let lines: Vec<String> = v.as_array()?.iter().filter_map(|m| {
         let text = m["text"].as_str()?.trim();
@@ -474,6 +474,11 @@ pub fn minutes_written(call: &Path) -> Vec<String> {
         });
     }
     names
+}
+
+/// The note this call has in vault `v` (vault-relative), while it is there.
+pub(super) fn note_in(call: &Path, v: &Vault) -> Option<String> {
+    load(call).saved.into_iter().find(|e| e.vault == v.id).map(|e| e.path).filter(|p| super::join(&v.root, p).is_file())
 }
 
 /// Vaults the call was saved to by hand whose note is now older than the minutes (offered: Update).

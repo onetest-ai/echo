@@ -1191,6 +1191,52 @@ pub fn choose_folder(prompt: &str) -> Option<PathBuf> {
     }
 }
 
+/// A native picker for several files (Knowledge's sources); none when cancelled.
+pub fn choose_files(prompt: &str) -> Vec<PathBuf> {
+    // Development builds and tests: the files given (the OS's path-list separator between them), with no dialog.
+    #[cfg(debug_assertions)]
+    if let Some(list) = std::env::var_os("ECHOCTL_PICK_FILES") {
+        let _ = prompt;
+        return std::env::split_paths(&list).filter(|p| p.is_file()).collect();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let lines = [
+            format!("set picked to choose file with prompt {} default location (path to home folder) with multiple selections allowed", applescript_str(prompt)),
+            "set out to \"\"".to_string(),
+            "repeat with f in picked".to_string(),
+            "set out to out & POSIX path of (contents of f) & linefeed".to_string(),
+            "end repeat".to_string(),
+            "return out".to_string(),
+        ];
+        let mut c = Command::new("osascript");
+        for l in &lines {
+            c.args(["-e", l]);
+        }
+        let Ok(out) = c.output() else { return vec![] };
+        if !out.status.success() {
+            return vec![];
+        }
+        return String::from_utf8_lossy(&out.stdout).lines().map(PathBuf::from).filter(|p| p.is_file()).collect();
+    }
+    #[cfg(windows)]
+    {
+        let script = format!(
+            "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Add-Type -AssemblyName System.Windows.Forms; \
+             $d = New-Object System.Windows.Forms.OpenFileDialog; $d.Title = '{}'; $d.Multiselect = $true; \
+             if ($d.ShowDialog() -eq 'OK') {{ $d.FileNames }}",
+            prompt.replace('\'', "''")
+        );
+        let Ok(out) = Command::new("powershell").no_window().args(["-NoProfile", "-STA", "-Command", &script]).output() else { return vec![] };
+        return String::from_utf8_lossy(&out.stdout).lines().map(|l| PathBuf::from(l.trim())).filter(|p| p.is_file()).collect();
+    }
+    #[allow(unreachable_code)]
+    {
+        let _ = prompt;
+        vec![]
+    }
+}
+
 /// A one-line text prompt; the text, or None if cancelled / empty.
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn ask_text(message: &str, default: &str, ok: &str) -> Option<String> {

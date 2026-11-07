@@ -22,7 +22,7 @@ use crate::graph::{self, Body};
 pub const KINDS: [(&str, &str); 3] = [("mail", "message"), ("chats", "chatMessage"), ("files", "driveItem")];
 
 /// A path segment or query value, percent-encoded. A segment of only dots is encoded too: curl would resolve `..`.
-fn enc(s: &str) -> String {
+pub(crate) fn enc(s: &str) -> String {
     if !s.is_empty() && s.bytes().all(|b| b == b'.') {
         return "%2E".repeat(s.len());
     }

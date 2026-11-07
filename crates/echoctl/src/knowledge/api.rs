@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use std::path::Path;
 use std::sync::Mutex;
 
-use super::{checks, export, health, links, page, scan, starter, Vault};
+use super::{checks, export, health, links, page, scan, sources, starter, Vault};
 
 fn query_param(q: &str, key: &str) -> Option<String> {
     q.split('&').find_map(|kv| {
@@ -192,6 +192,10 @@ pub fn route(rest: &str, query: &str) -> Result<Reply> {
             })
         }
         "preview" => export::preview(&crate::calls::resolve_call(&query_param(query, "call").unwrap_or_default())?, &v.id, query_param(query, "stem").as_deref().filter(|s| !s.is_empty()))?,
+        // Ingest's sources (K14): the queue and the first open's question; the calls and mail or chats to add.
+        "ingest" => sources::value(&v)?,
+        "calls" => json!({ "calls": sources::calls(&v, &query_param(query, "q").unwrap_or_default(), 40) }),
+        "m365" => sources::m365_search(&query_param(query, "q").unwrap_or_default())?,
         _ => bail!("no such route"),
     }))
 }
@@ -254,6 +258,94 @@ pub fn picked() -> Value {
     let index_bytes = detected.as_ref().and_then(|d| d.index.as_ref()).and_then(|i| std::fs::metadata(super::join(&path, i)).ok()).map(|m| m.len());
     let refused = super::refuse_add(&path).err().map(|e| format!("{e:#}"));
     json!({ "seq": seq, "busy": busy, "path": path, "name": path.file_name().map(|n| n.to_string_lossy().into_owned()), "empty": empty, "detected": detected, "git": git, "index_bytes": index_bytes, "refused": refused })
+}
+
+// ── files picked in the system's dialog (sources): the page gets a number and their names, never a path ──
+
+struct Files {
+    seq: u64,
+    files: Vec<PathBuf>,
+    busy: bool,
+}
+
+static FILES: Mutex<Files> = Mutex::new(Files { seq: 0, files: Vec::new(), busy: false });
+
+/// The system's dialog for several files (an action's job thread waits on it): their names and sizes, under a number
+/// `kn_source_add` takes back. Cancelled: no number.
+fn pick_files() -> Result<Value> {
+    {
+        let mut p = FILES.lock().unwrap_or_else(|e| e.into_inner());
+        if p.busy {
+            bail!("the file dialog is open already");
+        }
+        p.busy = true;
+    }
+    let picked = crate::app::choose_files("Files to add to the vault's sources — copied as they are");
+    let mut p = FILES.lock().unwrap_or_else(|e| e.into_inner());
+    p.busy = false;
+    if picked.is_empty() {
+        return Ok(json!({ "seq": null, "files": [] }));
+    }
+    p.seq += 1;
+    p.files = picked;
+    let files: Vec<Value> = p.files.iter().map(|f| {
+        let size = std::fs::metadata(f).map(|m| m.len()).unwrap_or(0);
+        json!({ "name": f.file_name().map(|n| n.to_string_lossy().into_owned()), "size": size, "too_big": size > sources::MAX_FILE })
+    }).collect();
+    Ok(json!({ "seq": p.seq, "files": files }))
+}
+
+fn picked_files(seq: u64) -> Result<Vec<PathBuf>> {
+    let p = FILES.lock().unwrap_or_else(|e| e.into_inner());
+    if p.seq == 0 || p.seq != seq {
+        bail!("choose the files again");
+    }
+    Ok(p.files.clone())
+}
+
+/// A day the page sent (`YYYY-MM-DD`), else `default`.
+fn day(v: &Value, key: &str, default: chrono::NaiveDate) -> Result<chrono::NaiveDate> {
+    match v[key].as_str().filter(|d| !d.is_empty()) {
+        Some(d) => chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").map_err(|_| anyhow!("{key}: a day as YYYY-MM-DD")),
+        None => Ok(default),
+    }
+}
+
+/// Add a source (K14-03…06): files picked in Echo's dialog, a call or memo named as the window names it, a mail
+/// thread or a Teams chat by Microsoft 365's ids, a web page by its https address. A call on another profile is
+/// answered with both profiles for *Add anyway*, as `kn_save_minutes` does.
+fn source_add(vault: &Vault, v: &Value) -> Result<Value> {
+    match s(v, "kind") {
+        "files" => {
+            let picked = picked_files(v["pick"].as_u64().unwrap_or(0))?;
+            let (mut added, mut refused) = (vec![], vec![]);
+            for (name, r) in sources::add_files(vault, &picked) {
+                match r {
+                    Ok(a) => added.push(serde_json::to_value(a)?),
+                    Err(e) => refused.push(json!({ "name": name, "why": format!("{e:#}") })),
+                }
+            }
+            Ok(json!({ "added": added, "refused": refused }))
+        }
+        "call" => {
+            let include = sources::Include { transcript: v["transcript"].as_bool().unwrap_or(false), chat: v["chat"].as_bool().unwrap_or(false) };
+            match sources::add_call(vault, &call_named(s(v, "call"))?, include, v["anyway"].as_bool().unwrap_or(false)) {
+                Ok(a) => Ok(serde_json::to_value(a)?),
+                Err(e) => match e.downcast_ref::<sources::Mismatch>() {
+                    Some(m) => Ok(json!({ "mismatch": { "call": m.call, "vault": m.vault, "call_name": m.call_name, "vault_name": m.vault_name } })),
+                    None => Err(e),
+                },
+            }
+        }
+        "mail" if !s(v, "message").is_empty() => Ok(serde_json::to_value(sources::add_mail(vault, s(v, "message"))?)?),
+        "chat" if !s(v, "chat").is_empty() => {
+            let until = day(v, "until", chrono::Local::now().date_naive())?;
+            let since = day(v, "since", until - chrono::Duration::days(7))?;
+            Ok(serde_json::to_value(sources::add_chat(vault, s(v, "chat"), since, until)?)?)
+        }
+        "web" => Ok(serde_json::to_value(sources::add_web(vault, s(v, "url"))?)?),
+        _ => bail!("add files, a call, a mail, a chat or a web page"),
+    }
 }
 
 // ── jobs: an action the page waits on, run on a thread of its own ──
@@ -385,6 +477,15 @@ pub fn act(cmd: &str, v: &Value) -> Result<Value> {
         }
         "kn_past" => Ok(if v["apply"].as_bool().unwrap_or(false) { export::save_past(s(v, "id"))? } else { export::past(s(v, "id"))? }),
         "kn_import_plugin" => Ok(json!({ "connected": super::import_plugin_vaults()? })),
+        // Ingest's sources (K14): files picked in Echo's dialog, a source added, one skipped with a note, the first
+        // open's answer. Nothing is processed by any of them.
+        "kn_pick_files" => pick_files(),
+        "kn_source_add" => source_add(&vault_of(s(v, "id"))?, v),
+        "kn_source_skip" => {
+            sources::skip(&vault_of(s(v, "id"))?, s(v, "path"), v["note"].as_str())?;
+            Ok(json!({ "skipped": s(v, "path") }))
+        }
+        "kn_baseline" => Ok(json!({ "marked": sources::baseline(&vault_of(s(v, "id"))?, v["done"].as_bool().unwrap_or(false))? })),
         // Health (K16-03, -04, -07): fixes named by their findings' keys, each written only as the page showed it
         // (`base`, `sha`) — the page never sends a path or a text. *Fix all* never applies a guessed page (R36).
         "kn_fix" => fix_findings(&vault_of(s(v, "id"))?, std::slice::from_ref(v), false),
@@ -464,7 +565,6 @@ fn fix_findings(vault: &Vault, items: &[Value], all: bool) -> Result<Value> {
 
 /// A call the page names as the window does everywhere — its folder's name, or its stamp when it was retitled since —:
 /// only a folder of Echo's calls, never a path (untrusted-text R4).
-#[cfg(feature = "tray")]
 fn call_named(name: &str) -> Result<PathBuf> {
     let mut parts = std::path::Path::new(name).components();
     let plain = matches!((parts.next(), parts.next()), (Some(std::path::Component::Normal(_)), None));
@@ -693,6 +793,61 @@ mod tests {
         assert_eq!((r["written"].clone(), r["skipped"][0]["key"].clone()), (json!([]), json!(guess)));
         let r = act("kn_fix", &json!({"id": v.id, "key": guess, "base": g["fix"]["base"], "sha": g["fix"]["sha"]})).unwrap();
         assert_eq!(r["written"], json!(["knowledge/topics/retro.md"]), "on its own, as shown");
+    }
+
+    #[test]
+    fn ingest_routes_and_actions() {
+        let (_env, root) = crate::paths::testenv::folders("kn-api-ingest");
+        let v = vault(&root);
+        // Files are picked in Rust: the page gets a number and the files' names, never a path.
+        let picked = root.join("picked");
+        std::fs::create_dir_all(&picked).unwrap();
+        std::fs::write(picked.join("Aurora RFP.pdf"), b"%PDF made up").unwrap();
+        std::fs::File::create(picked.join("huge.mov")).unwrap().set_len(60 << 20).unwrap();
+        std::env::set_var("ECHOCTL_PICK_FILES", std::env::join_paths([picked.join("Aurora RFP.pdf"), picked.join("huge.mov")]).unwrap());
+        let p = act("kn_pick_files", &json!({}));
+        std::env::remove_var("ECHOCTL_PICK_FILES");
+        let p = p.unwrap();
+        assert_eq!(p["files"], json!([{"name": "Aurora RFP.pdf", "size": 12, "too_big": false}, {"name": "huge.mov", "size": 60u64 << 20, "too_big": true}]));
+        assert!(!p.to_string().contains("picked"), "no path reaches the page: {p}");
+        let seq = p["seq"].as_u64().unwrap();
+        let r = act("kn_source_add", &json!({"id": v.id, "kind": "files", "pick": seq})).unwrap();
+        assert_eq!(r["added"][0]["path"], "raw_inbox/Aurora RFP.pdf", "{r}");
+        assert!(r["refused"][0]["name"] == "huge.mov" && r["refused"][0]["why"].as_str().is_some_and(|w| w.contains("50 MB")), "{r}");
+        assert!(act("kn_source_add", &json!({"id": v.id, "kind": "files", "pick": seq + 5})).is_err(), "only the files picked");
+        assert!(act("kn_source_add", &json!({"id": v.id, "kind": "files", "path": "/etc/hosts"})).is_err(), "a path from the page is never a file to add");
+        // The queue; skip with a note, only for a source.
+        let q = json(&format!("{}/ingest", v.id), "");
+        assert_eq!(q["folder"], "raw_inbox");
+        assert!(q["sources"].as_array().unwrap().iter().any(|s| s["path"] == "raw_inbox/Aurora RFP.pdf" && s["state"] == "new" && s["kind"] == "file"), "{q}");
+        act("kn_source_skip", &json!({"id": v.id, "path": "raw_inbox/deck.pdf", "note": "An old deck"})).unwrap();
+        let q = json(&format!("{}/ingest", v.id), "");
+        let deck = q["sources"].as_array().unwrap().iter().find(|s| s["path"] == "raw_inbox/deck.pdf").cloned().unwrap();
+        assert_eq!((deck["state"].clone(), deck["meta"]["note"].clone()), (json!("skipped"), json!("An old deck")));
+        assert!(act("kn_source_skip", &json!({"id": v.id, "path": "../../etc/passwd"})).is_err());
+        assert_eq!(act("kn_baseline", &json!({"id": v.id, "done": true})).unwrap()["marked"], 0, "every source is known already");
+        // Calls: newest first, each with its profile and whether it is the vault's.
+        fixture::call("2026-11-05_090012-weekly-sync", "Weekly delivery sync", "system", fixture::MINUTES);
+        fixture::call("2026-11-06_100000-pricing", "Pricing review", "elsewhere", "# Pricing review\n\n- Per seat.\n");
+        let c = json(&format!("{}/calls", v.id), "q=");
+        let names: Vec<&str> = c["calls"].as_array().unwrap().iter().map(|x| x["name"].as_str().unwrap()).collect();
+        assert_eq!(names, ["2026-11-06_100000-pricing", "2026-11-05_090012-weekly-sync"]);
+        assert_eq!((c["calls"][0]["profile"].clone(), c["calls"][0]["profile_ok"].clone(), c["calls"][1]["profile_ok"].clone()), (json!("elsewhere"), json!(false), json!(true)));
+        assert_eq!(c["calls"][1]["people"], json!(["Alex Doe", "Dana Reyes", "Sam Hale"]));
+        assert_eq!(json(&format!("{}/calls", v.id), "q=weekly+sync")["calls"].as_array().unwrap().len(), 1);
+        // A call named as the window names it; another profile's needs *Add anyway*.
+        let add_call = |anyway: bool| act("kn_source_add", &json!({"id": v.id, "kind": "call", "call": "2026-11-06_100000-pricing", "anyway": anyway})).unwrap();
+        assert_eq!(add_call(false)["mismatch"], json!({"call": "elsewhere", "vault": "system", "call_name": "elsewhere", "vault_name": "Claude Code (as configured)"}));
+        assert!(add_call(true)["path"].as_str().is_some_and(|p| p.starts_with("raw_inbox/echo/")));
+        for bad in ["../x", "", "2026-01-01_000000-nothing", &crate::paths::calls_dir().join("2026-11-05_090012-weekly-sync").display().to_string()] {
+            assert!(act("kn_source_add", &json!({"id": v.id, "kind": "call", "call": bad})).is_err(), "{bad}");
+        }
+        // A web page: https only, refused before anything is fetched.
+        let e = act("kn_source_add", &json!({"id": v.id, "kind": "web", "url": "http://contoso.example/notes"})).unwrap_err().to_string();
+        assert!(e.contains("only https"), "{e}");
+        assert!(act("kn_source_add", &json!({"id": v.id, "kind": "shell"})).is_err());
+        // Microsoft 365 without Echo's sign-in: said so, nothing asked.
+        assert_eq!(json(&format!("{}/m365", v.id), "q=pilot")["signed_in"], false);
     }
 
     #[test]

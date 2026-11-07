@@ -487,14 +487,22 @@ pub fn message(id: &str) -> Result<Value> {
     Ok(mail_item(&m))
 }
 
-/// Every message of one conversation (oldest first).
+/// Every message of one conversation (oldest first), with its attachments' names (`files`; never their contents).
 pub fn conversation(id: &str) -> Result<Vec<Value>> {
     let token = access_token()?;
     let v = graph_get_text(&token, &format!(
-        "{GRAPH}/me/messages?$filter={}&$top=50&$select=id,conversationId,internetMessageId,subject,from,toRecipients,ccRecipients,receivedDateTime,body,webLink,internetMessageHeaders",
+        "{GRAPH}/me/messages?$filter={}&$top=50&$select=id,conversationId,internetMessageId,subject,from,toRecipients,ccRecipients,receivedDateTime,body,webLink,internetMessageHeaders,hasAttachments",
         urlencode(&format!("conversationId eq '{}'", id.replace('\'', "''")))
     ))?;
-    let mut out: Vec<Value> = v["value"].as_array().into_iter().flatten().map(mail_item).collect();
+    let mut raw: Vec<Value> = v["value"].as_array().cloned().unwrap_or_default();
+    for m in raw.iter_mut().filter(|m| m["hasAttachments"] == true) {
+        if let Some(mid) = m["id"].as_str() {
+            if let Ok(a) = graph_get(&token, &format!("{GRAPH}/me/messages/{}/attachments?$select=name", urlencode(mid))) {
+                m["attachments"] = a["value"].clone();
+            }
+        }
+    }
+    let mut out: Vec<Value> = raw.iter().map(mail_item).collect();
     out.sort_by(|a, b| a["at"].as_str().cmp(&b["at"].as_str()));
     Ok(out)
 }
@@ -553,10 +561,14 @@ pub fn person_email(name: &str, id: &str) -> Result<Option<String>> {
     }))
 }
 
-fn mail_item(m: &Value) -> Value {
+/// One message as Echo reads it: who, when, its new part as text, its attachments' names (when Graph gave them).
+pub(crate) fn mail_item(m: &Value) -> Value {
     let who = |r: &Value| -> Value { json!({"name": r["emailAddress"]["name"], "email": r["emailAddress"]["address"]}) };
-    // The new part of a reply: up to the quoted mail ("From: …", "-----Original Message-----", "On … wrote:").
-    let body = m["body"]["content"].as_str().unwrap_or("");
+    // The new part of a reply: up to the quoted mail ("From: …", "-----Original Message-----", "On … wrote:"). Echo asks
+    // for bodies as text; one that comes as HTML anyway is made text first.
+    let content = m["body"]["content"].as_str().unwrap_or("");
+    let html = m["body"]["contentType"].as_str().is_some_and(|t| t.eq_ignore_ascii_case("html"));
+    let body = if html { html_to_text(content) } else { content.to_string() };
     let mut text = String::new();
     for l in body.lines() {
         let t = l.trim();
@@ -570,7 +582,8 @@ fn mail_item(m: &Value) -> Value {
     let invite = m["@odata.type"].as_str().is_some_and(|t| t.contains("eventMessage"));
     json!({"id": m["id"], "internet_id": m["internetMessageId"], "conversation": m["conversationId"], "subject": m["subject"], "from": who(&m["from"]), "invite": invite, "auth": mail_auth(m),
            "to": m["toRecipients"].as_array().into_iter().flatten().chain(m["ccRecipients"].as_array().into_iter().flatten()).map(who).collect::<Vec<_>>(),
-           "at": m["receivedDateTime"], "text": text.trim(), "url": m["webLink"]})
+           "at": m["receivedDateTime"], "text": text.trim(), "url": m["webLink"],
+           "files": m["attachments"].as_array().into_iter().flatten().filter_map(|a| a["name"].as_str()).collect::<Vec<_>>()})
 }
 
 pub fn calendar_view(from: DateTime<Utc>, to: DateTime<Utc>) -> Result<Vec<Value>> {
