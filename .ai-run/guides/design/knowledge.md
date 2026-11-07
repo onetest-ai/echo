@@ -545,17 +545,18 @@ inbox* · *Add and prepare changes* (a run starts by itself when none is going; 
 inside `export::save_by_rules`, on the thread `minutes_written` already starts (so it never holds the notification), and
 only after the minutes rule's own automatic save into that vault — never after a manual save or a *Save anyway*.
 `new_call_rule` re-reads the vault, re-checks that the call's profile is the vault's (else nothing), skips a call that is
-already a source (`sources::call_source` finds `source: echo://call/<stamp>` in `<sources>/echo/`: minutes written again
-add nothing and start nothing), adds it with `sources::add_call` (no *anyway*), and with *prepare* calls
-`ingest::start` on that one source only when `ingest::going` is false; a run that began meanwhile leaves the source New like any
-other. A failure is not silent: it is kept on the call (`knowledge.json` `rule_failed`: `add` or `prepare`, why) and
+already a source (`sources::is_source`: the ledger's `calls` set, written by `add_call` and kept when the file is deleted, else a
+file in `<sources>/echo/` naming `source: echo://call/<stamp>`: minutes written again add nothing and start nothing, a deleted source isn't put back), adds it with `sources::add_call` (no *anyway*), and with *prepare* calls
+`ingest::start` on that one source only when `ingest::going` is false, after every vault's save (a run's copy can be slow); only the run-lock
+refusal (`ingest::is_busy`) is a lost race that leaves the source New like any other, any other error is a failure. *Save again* of the minutes rule
+(`kn_save_minutes` with no vault, ruling R54) retries the rule's own save, so the new-calls rule applies there; "never after a manual save" means a save into a vault the user picks. A failure is not silent: it is kept on the call (`knowledge.json` `rule_failed`: `add` or `prepare`, why) and
 `attention.rs` shows it as "Not added to <vault>'s inbox: <call>" / "Changes not prepared in <vault>: <call>" →
-`kn/<vault>/ingest`, until the call is a source (add) or its source is no longer New (prepare); it is quiet after the 14
+`kn/<vault>/ingest`, until the call is a source (add) or its source is no longer New (prepare), or the rule is turned Off; it is quiet after the 14
 days minutes failures last. Needs you also gets, per vault (`ingest::waiting`): one item "6 changes from 2 sources wait in
 <vault>" (`to_answer` summed over the runs under review, the distinct sources of those runs) → `kn/<vault>/ingest`, and one
 per failed run (`effective`, so one an Echo quit left running counts) with its reason in a line → `kn/<vault>/ingest/<run>`.
-A stopped run is no item; a failed run's item goes when a newer run takes any of its sources (*Run again*), when it is
-discarded, or when its folder expires.
+A stopped run is no item; a failed run's item goes when newer runs (not stopped ones) have taken every one of its sources (*Run again*)
+or when it is discarded; when its folder expires, or its vault is gone or not there, the items leave quietly (`quiet`), not as Done.
 
 **The Home tab** (spec-2 K11; `home.rs`, `knowledge.js` block `kn-home`): `/home` answers from what Echo already holds
 (ruling R48) and never waits for git, Microsoft 365 or a model (K11-10: ~5 ms warm in the dev app). Its parts:

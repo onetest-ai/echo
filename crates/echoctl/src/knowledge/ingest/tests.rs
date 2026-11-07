@@ -1132,3 +1132,46 @@ fn a_failed_run_is_an_item_until_it_runs_again_or_goes() {
     review::discard(&v, "20261107-0900").unwrap();
     assert!(items_of(&v).is_empty());
 }
+
+#[test]
+fn a_failed_run_stays_until_all_its_sources_are_taken_and_a_stopped_run_takes_none() {
+    // Fix round 1, M1.
+    let (_env, root) = paths::testenv::folders("kn-ingest-needs-you-partial");
+    let _fake = fake::install(&root);
+    let _clean = clean();
+    let (v, _p) = twin(&root, false);
+    kept_run(&v, "20261106-0951", "2026-11-06T09:51:00+02:00", "failed", &["raw_inbox/echo/a.md", "raw_inbox/echo/b.md"], Some("It failed"));
+    kept_run(&v, "20261106-1000", "2026-11-06T10:00:00+02:00", "stopped", &["raw_inbox/echo/a.md", "raw_inbox/echo/b.md"], None);
+    assert_eq!(items_of(&v).len(), 1, "a newer stopped run hides nothing");
+    kept_run(&v, "20261106-1100", "2026-11-06T11:00:00+02:00", "review", &["raw_inbox/echo/a.md"], None);
+    assert_eq!(items_of(&v).len(), 1, "one source is still without a run");
+    kept_run(&v, "20261106-1200", "2026-11-06T12:00:00+02:00", "review", &["raw_inbox/echo/b.md"], None);
+    assert!(items_of(&v).is_empty(), "every source has a newer run");
+}
+
+#[test]
+fn items_that_leave_for_another_reason_than_an_answer_leave_quietly() {
+    // Fix round 1, I1: an expired run's item, and a vault that is gone.
+    let (_env, root) = paths::testenv::folders("kn-ingest-needs-you-quiet");
+    let _fake = fake::install(&root);
+    let _clean = clean();
+    let (v, _p) = twin(&root, false);
+    kept_run(&v, "20261106-0951", "2026-11-06T09:51:00+02:00", "failed", &[SOURCE], Some("It failed"));
+    let run_key = format!("knowledge-run:{}:20261106-0951", v.id);
+    let open = |keys: &[&str]| {
+        let items: Vec<Value> = keys.iter().map(|k| json!({"key": k, "kind": "knowledge-ingest", "title": "x", "group": "echo"})).collect();
+        std::fs::create_dir_all(paths::state_dir()).unwrap();
+        std::fs::write(paths::state_dir().join("attention.json"), json!({"open": items, "done": []}).to_string()).unwrap();
+    };
+    let gone_run = format!("knowledge-run:{}:20250101-0000", v.id);
+    let ingest_key = format!("knowledge-ingest:{}", v.id);
+    open(&[&run_key, &gone_run, &ingest_key, "knowledge-run:no-such-vault:r1", "knowledge-ingest:no-such-vault"]);
+    let c = crate::attention::collect();
+    assert!(c.quiet.contains(&gone_run), "an expired run's item");
+    assert!(c.quiet.contains("knowledge-run:no-such-vault:r1") && c.quiet.contains("knowledge-ingest:no-such-vault"));
+    assert!(!c.quiet.contains(&run_key), "a failed run still there is not quiet");
+    // The vault's folder gone: all of its items.
+    std::fs::remove_dir_all(&v.root).unwrap();
+    let c = crate::attention::collect();
+    assert!(c.quiet.contains(&run_key) && c.quiet.contains(&ingest_key));
+}

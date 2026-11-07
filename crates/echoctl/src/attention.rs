@@ -50,7 +50,7 @@ pub struct Collected {
     pub items: Vec<Value>,
     keep: BTreeSet<String>,
     keep_kinds: BTreeSet<&'static str>,
-    quiet: BTreeSet<String>,
+    pub(crate) quiet: BTreeSet<String>,
     quiet_kinds: BTreeSet<&'static str>,
 }
 
@@ -181,6 +181,28 @@ pub fn collect() -> Collected {
                         Some(format!("kn/{}/ingest/{}", v.id, r.id)),
                     ));
                 }
+            }
+        }
+    }
+    // Items that leave for no answer — a vault gone or not there, a failed run whose folder expired — leave quietly.
+    if let Ok(vaults) = crate::knowledge::list() {
+        let mut runs: BTreeMap<String, Option<Vec<String>>> = BTreeMap::new();
+        for v in vaults.iter().filter(|v| crate::knowledge::available(v)) {
+            runs.insert(v.id.clone(), crate::knowledge::ingest::waiting(v).ok().map(|w| w.known));
+        }
+        for k in read(&file())["open"].as_array().into_iter().flatten().filter_map(|i| i["key"].as_str()) {
+            let gone = if let Some(id) = k.strip_prefix("knowledge-ingest:") {
+                !runs.contains_key(id)
+            } else if let Some((id, run)) = k.strip_prefix("knowledge-run:").and_then(|r| r.split_once(':')) {
+                match runs.get(id) {
+                    None => true,
+                    Some(known) => known.as_ref().is_some_and(|known| !known.iter().any(|r| r == run)),
+                }
+            } else {
+                false
+            };
+            if gone {
+                c.quiet.insert(k.to_string());
             }
         }
     }

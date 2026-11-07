@@ -527,7 +527,15 @@ fn now() -> Instant {
 /// `run.lock`, tried for 300 ms: one released a moment ago can still look held while another thread here starts a
 /// process (as `ai::lease`).
 fn take_run_lock(v: &Vault) -> Result<crate::app::FileLock> {
-    take_lock(&lock_path(v), "A run is going")
+    take_lock(&lock_path(v), RUN_GOING)
+}
+
+/// What is said when a run's lock stays held.
+const RUN_GOING: &str = "A run is going";
+
+/// Is `e` *Prepare changes* refused because a run is going (and nothing else)?
+pub fn is_busy(e: &anyhow::Error) -> bool {
+    e.to_string() == RUN_GOING
 }
 
 /// The lock file at `path`, tried for 300 ms (`busy`: what is said when it stays held).
@@ -1138,6 +1146,8 @@ pub struct Waiting {
     pub sources: usize,
     /// Runs that failed (one a quit left running too), kept for *Run again*.
     pub failed: Vec<Run>,
+    /// Every run the ledger keeps (an item of one it no longer keeps has expired).
+    pub known: Vec<String>,
 }
 
 /// The vault's runs as Needs you reads them: the changes waiting for an answer (and their sources), and the failed runs.
@@ -1162,8 +1172,13 @@ pub fn waiting(v: &Vault) -> Result<Waiting> {
     sources.dedup();
     w.sources = sources.len();
     // A run run again (or one that took its sources since) is answered: the newer run speaks for them.
+    // A stopped run took nothing; it was the user's doing.
     let later = runs_of(&sources::ledger(v)?);
-    w.failed.retain(|f| !later.iter().any(|r| r.id != f.id && r.at > f.at && r.sources.iter().any(|s| f.sources.contains(s))));
+    w.known = later.iter().map(|r| r.id.clone()).collect();
+    w.failed.retain(|f| {
+        let taken = |s: &String| later.iter().any(|r| r.id != f.id && r.at > f.at && r.state != "stopped" && r.sources.contains(s));
+        !f.sources.iter().all(taken)
+    });
     Ok(w)
 }
 

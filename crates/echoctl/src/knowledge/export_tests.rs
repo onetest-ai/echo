@@ -661,3 +661,79 @@ fn a_rule_that_cant_start_a_run_is_kept_for_needs_you_until_the_source_is_dealt_
     super::sources::skip(&v, "raw_inbox/echo/2026-11-05-weekly-delivery-sync.md", None).unwrap();
     assert!(rule_failure(&call).is_none());
 }
+
+#[test]
+fn a_deleted_source_is_not_added_again_and_no_run_is_spent_on_it() {
+    // Fix round 1, I2: the ledger remembers the call; deleting the file doesn't make it new again.
+    let (_env, root) = crate::paths::testenv::folders("kn-rule-deleted");
+    let _fake = crate::ai::fake::install(&root);
+    let _clean = Clean::new();
+    let (v, p) = rule_vault(&root, "add");
+    play(&p, &[INIT, HANG]);
+    let call = fixture::call(CALL, "Weekly delivery sync", "w", fixture::MINUTES);
+    save_by_rules(&call);
+    assert_eq!(echo_sources(&v).len(), 1);
+    std::fs::remove_file(v.root.join("raw_inbox/echo").join(&echo_sources(&v)[0])).unwrap();
+    super::set(&v.id, "ingest.calls", "prepare").unwrap();
+    std::fs::write(call.join("notes.md"), fixture::MINUTES.replace("18 November", "25 November")).unwrap();
+    save_by_rules(&call);
+    assert!(echo_sources(&v).is_empty(), "not put back");
+    assert!(runs(&v).is_empty(), "no run spent on it");
+}
+
+#[test]
+fn only_the_run_lock_refusal_is_a_lost_race() {
+    // Fix round 1, M2.
+    let (_env, root) = crate::paths::testenv::folders("kn-rule-busy-kind");
+    let _fake = crate::ai::fake::install(&root);
+    let _clean = Clean::new();
+    let (v, p) = rule_vault(&root, "prepare");
+    play(&p, &[INIT, HANG]);
+    let call = fixture::call(CALL, "Weekly delivery sync", "w", fixture::MINUTES);
+    save_by_rules(&call);
+    let e = super::ingest::start(&v, &[]).unwrap_err();
+    assert!(super::ingest::is_busy(&e), "{e:#}");
+    assert!(!super::ingest::is_busy(&anyhow::anyhow!("Claude · Work is signed out")));
+}
+
+#[test]
+fn turning_the_rule_off_ends_its_failure() {
+    // Fix round 1, M4.
+    let (_env, root) = crate::paths::testenv::folders("kn-rule-off-ends");
+    let _fake = crate::ai::fake::install(&root);
+    let _clean = Clean::new();
+    let (v, _p) = rule_vault(&root, "prepare");
+    crate::ai::fake::profile("w", None, crate::ai::fake::SIGNED_OUT);
+    let call = fixture::call(CALL, "Weekly delivery sync", "w", fixture::MINUTES);
+    save_by_rules(&call);
+    assert!(rule_failure(&call).is_some());
+    super::set(&v.id, "ingest.calls", "off").unwrap();
+    assert!(rule_failure(&call).is_none());
+}
+
+#[test]
+fn two_calls_finishing_at_once_start_one_run() {
+    // Fix round 1, M7.
+    let (_env, root) = crate::paths::testenv::folders("kn-rule-race");
+    let _fake = crate::ai::fake::install(&root);
+    let _clean = Clean::new();
+    let (v, p) = rule_vault(&root, "prepare");
+    play(&p, &[INIT, HANG]);
+    let a = fixture::call(CALL, "Weekly delivery sync", "w", fixture::MINUTES);
+    let b = fixture::call(SECOND, "Pricing review", "w", fixture::MINUTES);
+    let gate = std::sync::Arc::new(std::sync::Barrier::new(2));
+    let hs: Vec<_> = [a.clone(), b.clone()].into_iter().map(|c| {
+        let g = gate.clone();
+        std::thread::spawn(move || {
+            g.wait();
+            save_by_rules(&c);
+        })
+    }).collect();
+    for h in hs {
+        h.join().unwrap();
+    }
+    assert_eq!(echo_sources(&v).len(), 2);
+    assert_eq!(runs(&v).len(), 1, "one running run per vault");
+    assert_eq!(super::sources::queue(&v).unwrap().iter().filter(|s| s.state == "new").count(), 1);
+    assert!(rule_failure(&a).is_none() && rule_failure(&b).is_none());
+}

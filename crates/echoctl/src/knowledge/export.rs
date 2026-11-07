@@ -459,6 +459,7 @@ pub fn choose(call: &Path, choice: Option<&str>) -> Result<()> {
 pub fn save_by_rules(call: &Path) -> Vec<Saved> {
     let rec = load(call);
     let mut out = vec![];
+    let mut saved = vec![];
     for v in by_rule(call) {
         // A note saved by hand isn't updated by itself (D17); a note the user deleted isn't put back.
         if let Some(e) = rec.saved.iter().find(|e| e.vault == v.id) {
@@ -468,11 +469,15 @@ pub fn save_by_rules(call: &Path) -> Vec<Saved> {
         }
         match save(call, &v.id, How::Auto) {
             Ok(s) => {
-                new_call_rule(call, &v.id);
+                saved.push(v.id.clone());
                 out.push(s)
             }
             Err(e) => eprintln!("knowledge: minutes of {} → {}: {e:#}", call.display(), v.id),
         }
+    }
+    // The new-calls rule after every vault's save (a run's copy can be slow).
+    for id in saved {
+        new_call_rule(call, &id);
     }
     out
 }
@@ -486,7 +491,7 @@ pub(super) fn new_call_rule(call: &Path, vault: &str) {
     if v.ingest.calls == "off" || crate::ai::call_profile_id(call).ok().as_deref() != Some(v.profile.as_str()) {
         return;
     }
-    if super::sources::call_source(&v, call).is_some() {
+    if super::sources::is_source(&v, call) {
         return;
     }
     let path = match super::sources::add_call(&v, call, super::sources::Include::default(), false) {
@@ -500,7 +505,7 @@ pub(super) fn new_call_rule(call: &Path, vault: &str) {
     };
     match tried {
         // A run that began between the look and the start leaves the source New, as for any other.
-        Err(e) if !super::ingest::going(&v) => rule_failed(call, &v, "prepare", &e),
+        Err(e) if !super::ingest::is_busy(&e) => rule_failed(call, &v, "prepare", &e),
         _ => {
             let _ = update(call, |r| r.rule_failed.retain(|f| f.vault != v.id));
         }
@@ -520,7 +525,7 @@ fn rule_failed(call: &Path, v: &Vault, step: &str, e: &anyhow::Error) {
 /// `prepare`, why). An `add` stands until the call is a source; a `prepare` until its source is no longer New.
 pub fn rule_failure(call: &Path) -> Option<(String, String, String, String)> {
     load(call).rule_failed.into_iter().find_map(|f| {
-        let v = super::get(&f.vault).ok()?;
+        let v = super::get(&f.vault).ok().filter(|v| v.ingest.calls != "off")?;
         let standing = match (f.step.as_str(), super::sources::call_source(&v, call)) {
             ("add", source) => source.is_none(),
             (_, Some(path)) => super::sources::ledger(&v).ok()?.sources.get(&path).is_some_and(|e| e.state == "new"),

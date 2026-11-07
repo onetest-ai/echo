@@ -29,6 +29,9 @@ pub struct Ledger {
     pub sources: BTreeMap<String, Entry>,
     #[serde(default)]
     pub runs: Vec<Value>,
+    /// The calls added as sources, by stamp (K14-11): kept when the file is deleted, so the rule adds a call once.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub calls: std::collections::BTreeSet<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -563,7 +566,18 @@ pub fn add_call(v: &Vault, call: &Path, include: Include, anyway: bool) -> Resul
     }
     let name = dated_name(&f.date, &title, if memo { "memo" } else { "call" });
     let from = call.file_name().map(|n| n.to_string_lossy().into_owned());
-    write_source(v, New { sub: "echo", name, title, by: "call", from, anyway: across, body: Body::Text(text) })
+    let added = write_source(v, New { sub: "echo", name, title, by: "call", from, anyway: across, body: Body::Text(text) })?;
+    update_ledger(v, |l| {
+        l.calls.insert(f.stamp.clone());
+        Ok(())
+    })?;
+    Ok(added)
+}
+
+/// Is this call a source of the vault already (K14-11): the ledger remembers it, even once its file is deleted; a source
+/// added before the ledger did is found by its file.
+pub fn is_source(v: &Vault, call: &Path) -> bool {
+    ledger(v).is_ok_and(|l| l.calls.contains(&crate::calls::stamp_of(call))) || call_source(v, call).is_some()
 }
 
 /// The source this call already is in the vault (K14-11: a call is added once), vault-relative: the file in `echo/`
