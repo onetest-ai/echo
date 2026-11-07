@@ -9,7 +9,7 @@
 //! lines are written onto the files as they are then, D42), `plugin/` (the ingest skill as a plugin of the run's own),
 //! `settings.json` (the guard and the run's scope), `prompt.md`, `log.jsonl` (its events) and `review.json` (the
 //! changes found, the user's answers). The folder goes once every change is written or rejected, or the run is
-//! discarded; a failed or stopped run's stays 30 days (K15-11). The runs and their sources' states are in the ledger
+//! discarded; a failed or stopped run's stays 30 days (K15-11) without its copy, bases and plugin (final review F2). The runs and their sources' states are in the ledger
 //! (`ingest.json`, `sources.rs`).
 
 use anyhow::{anyhow, bail, Context as _, Result};
@@ -37,7 +37,7 @@ const BIG: u64 = 20 << 20;
 const SMALL: u64 = 1 << 20;
 /// A run going this long is stopped (K15-04).
 const TIMEOUT: Duration = Duration::from_secs(20 * 60);
-/// A failed or stopped run's folder is kept this long, for *Run again* (K15-11).
+/// A failed or stopped run's folder (its log, not its copy) is kept this long, listed for *Run again* (K15-11).
 const KEEP_DAYS: i64 = 30;
 /// Finished runs the ledger keeps (Ingest lists them, K15-11).
 const LISTED: usize = 10;
@@ -197,12 +197,20 @@ pub(super) fn still_running(_pid: u32, _settings: &Path) -> bool {
     false
 }
 
+/// A failed or stopped run's copy, its bases and its plugin: nothing reads them again (*Run again* copies afresh), and
+/// each holds a whole vault. Its log, prompt and settings stay (final review F2).
+fn drop_copy(dir: &Path) {
+    for sub in ["vault", "base", "plugin"] {
+        let _ = std::fs::remove_dir_all(dir.join(sub));
+    }
+}
+
 /// Under `run.lock` (no run is going): a run the ledger still calls running ended with its Echo (a quit, a crash, the
 /// CLI stopped) — it failed, its sources are New again, and a Claude Code it left running is ended; failed and stopped
-/// runs' folders go after 30 days (until then they stay listed, for *Run again*); the ledger keeps the last `LISTED`
-/// other finished runs.
+/// runs keep their log, not their copy (an earlier build's too), and their folders go after 30 days (until then they
+/// stay listed, for *Run again*); the ledger keeps the last `LISTED` other finished runs.
 fn tidy(v: &Vault) -> Result<()> {
-    let (leftover, gone) = sources::update_ledger(v, |l| {
+    let (leftover, gone, ended) = sources::update_ledger(v, |l| {
         let mut runs = runs_of(l);
         let mut leftover = vec![];
         for r in runs.iter_mut().filter(|r| r.state == "running") {
@@ -230,7 +238,8 @@ fn tidy(v: &Vault) -> Result<()> {
             finished <= LISTED
         });
         l.runs = runs.iter().map(serde_json::to_value).collect::<Result<_, _>>()?;
-        Ok((leftover, gone))
+        let ended: Vec<String> = runs.iter().filter(|r| again(r)).map(|r| r.id.clone()).collect();
+        Ok((leftover, gone, ended))
     })?;
     for (id, pid) in leftover {
         if crate::app::process_alive(pid) && still_the_runs(v, &id, pid) {
@@ -240,6 +249,9 @@ fn tidy(v: &Vault) -> Result<()> {
     // Only a run's own folder, by a name Echo gives runs (`run_dir` refuses any other).
     for dir in gone.iter().filter_map(|id| run_dir(v, id).ok()) {
         let _ = std::fs::remove_dir_all(dir);
+    }
+    for dir in ended.iter().filter_map(|id| run_dir(v, id).ok()) {
+        drop_copy(&dir);
     }
     Ok(())
 }
@@ -1003,6 +1015,12 @@ fn finish(v: &Vault, run: &str, log: &mut Log, end: End) {
     });
     if let Err(e) = ended {
         eprintln!("knowledge: the end of ingest run {run} in {}: {e:#}", v.id);
+    }
+    // A run under review needs its copy; one that failed or was stopped doesn't (final review F2).
+    if end.state != "review" {
+        if let Ok(dir) = run_dir(v, run) {
+            drop_copy(&dir);
+        }
     }
 }
 

@@ -571,7 +571,14 @@ fn a_run_that_times_out_or_crashes_fails_and_runs_again() {
     let st = status(&v, &s.run, 0).unwrap();
     assert_eq!(st["state"], "failed");
     assert!(st["reason"].as_str().unwrap().contains("20 minutes"), "{st:#}");
-    assert!(ingest_dir(&v).join(&s.run).join("vault").is_dir() && ingest_dir(&v).join(&s.run).join("log.jsonl").is_file(), "its folder is kept");
+    // Final review F2: its log and files are kept, its copy goes — *Run again* copies afresh.
+    let dir = ingest_dir(&v).join(&s.run);
+    for kept in ["log.jsonl", "prompt.md", "settings.json"] {
+        assert!(dir.join(kept).is_file(), "{kept} is kept");
+    }
+    for gone in ["vault", "base", "plugin"] {
+        assert!(!dir.join(gone).exists(), "{gone}/ goes with a failed run");
+    }
     assert_eq!(sources::queue(&v).unwrap().into_iter().find(|x| x.path == SOURCE).unwrap().state, "new");
     // A Claude Code that exits 1: failed, saying why.
     script(&p, "ingest.2.jsonl", &[init(), json!({"_exit": 1})]);
@@ -612,6 +619,9 @@ fn stop_ends_a_run_and_discard_drops_one() {
     stop(&v, &s.run).unwrap();
     assert!(wait(&s.run, Duration::from_secs(15)));
     assert_eq!((status(&v, &s.run, 0).unwrap()["state"].as_str(), status(&v, &s.run, 0).unwrap()["reason"].as_str()), (Some("stopped"), Some("Stopped")));
+    // Final review F2: a stopped run keeps its log, not its copy.
+    let dir = ingest_dir(&v).join(&s.run);
+    assert!(dir.join("log.jsonl").is_file() && !dir.join("vault").exists() && !dir.join("base").exists() && !dir.join("plugin").exists());
     let run = northwind(&v, &p, "ingest.2.jsonl");
     discard(&v, &run).unwrap();
     assert!(!ingest_dir(&v).join(&run).exists());
@@ -873,8 +883,15 @@ fn tidy_keeps_failed_runs_30_days_and_deletes_only_run_folders() {
     runs.push(Run { id: "2026-10-20_090000".into(), at: ago(5), ended: Some(ago(5)), state: "failed".into(), ..Default::default() });
     runs.push(Run { id: "2026-09-20_090000".into(), at: ago(40), ended: Some(ago(40)), state: "stopped".into(), ..Default::default() });
     runs.push(Run { id: "../not-a-run".into(), at: ago(40), ended: Some(ago(40)), state: "failed".into(), ..Default::default() });
+    runs.push(Run { id: "2026-10-21_090000".into(), at: ago(4), state: "review".into(), ..Default::default() });
     for d in ["2026-10-20_090000", "2026-09-20_090000", "../not-a-run"] {
         std::fs::create_dir_all(ingest_dir(&v).join(d)).unwrap();
+    }
+    // An earlier build kept a failed run's copy; a run under review needs its own.
+    for d in ["2026-10-20_090000", "2026-10-21_090000"] {
+        for f in ["vault/knowledge/a.md", "base/knowledge/CATALOG.md", "plugin/.claude-plugin/plugin.json", "log.jsonl"] {
+            fixture::write(&ingest_dir(&v).join(d), f, "x");
+        }
     }
     sources::update_ledger(&v, |l| {
         l.runs = runs.iter().map(serde_json::to_value).collect::<Result<_, _>>()?;
@@ -883,6 +900,11 @@ fn tidy_keeps_failed_runs_30_days_and_deletes_only_run_folders() {
     .unwrap();
     tidy(&v).unwrap();
     assert!(ingest_dir(&v).join("2026-10-20_090000").is_dir(), "a failed run's folder stays 30 days");
+    // Final review F2: with its log, not its copy; a run under review keeps its copy.
+    let failed = ingest_dir(&v).join("2026-10-20_090000");
+    assert!(failed.join("log.jsonl").is_file() && !failed.join("vault").exists() && !failed.join("base").exists() && !failed.join("plugin").exists());
+    let review = ingest_dir(&v).join("2026-10-21_090000");
+    assert!(review.join("vault/knowledge/a.md").is_file() && review.join("base").is_dir() && review.join("plugin").is_dir());
     assert!(!ingest_dir(&v).join("2026-09-20_090000").exists(), "after 30 days it goes");
     assert!(super::super::cache_dir(&v.id).join("not-a-run").is_dir(), "a name that isn't a run's is never deleted");
     let kept: Vec<Run> = runs_of(&sources::ledger(&v).unwrap());

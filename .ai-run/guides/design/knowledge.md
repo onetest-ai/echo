@@ -331,9 +331,12 @@ lease). Runs waiting for review hold nothing, so several wait at once (D42). The
 after it is tidied (`tidy`): a run the ledger still calls running ended with its Echo (a quit, a crash, a CLI stopped)
 — it failed ("It stopped when Echo did"), its sources are New again (so *Run again* and *Prepare changes* see them),
 and the Claude Code it left is ended when its pid's command line still names that run's `settings.json` (`ps`; on
-Windows Echo can't tell and ends nothing); failed and stopped runs stay listed with their folders for 30 days (for
-*Run again*), then go; the ledger keeps the last 10 other finished runs; only folders named as Echo names runs are
-ever removed.
+Windows Echo can't tell and ends nothing); failed and stopped runs stay listed for 30 days (for *Run again*), then go;
+the ledger keeps the last 10 other finished runs; only folders named as Echo names runs are ever removed. K15-11 as
+built (final review F2): the log is kept for 30 days; the copy is dropped, since *Run again* copies afresh — a run
+that ends failed or stopped loses its `vault/`, `base/` and `plugin/` at once (its `log.jsonl`, `prompt.md`,
+`settings.json` and `bases.json` stay), and `tidy` drops those an earlier build kept; a run that ends in review keeps
+its copy, which its review reads.
 - **The skill** (K15-03): Settings → Ingest's `ingest.skill` (checked: a skill of the vault), else `process-inbox`,
   else the one skill whose name or description says "inbox" or "ingest" — read from the vault now (`detect::skills`),
   so one added since it was connected counts. None: the view offers the starter's `process-inbox` (its text in the
@@ -768,7 +771,7 @@ What the code does, which is the spec's wording except where a row says otherwis
 | `<home>/.echo/knowledge/<id>/ingest.json` (+ `ingest.lock`) | Ingest's ledger: the baseline, each source's state, runs | `sources` (lock + re-read + `write_atomic`) |
 | `<home>/.echo/knowledge/<id>/sources.lock` | One add at a time into the vault's sources folder | `sources` |
 | `<home>/.echo/knowledge/<id>/ingest/run.lock` | One running ingest run per vault, the app's or the CLI's, held for its life | `ingest` |
-| `<home>/.echo/knowledge/<id>/ingest/<run>/` | `vault/` (the copy; the run writes only here), `bases.json`, `base/` (as copied: the index, the log, each file the run modified), `plugin/`, `settings.json`, `prompt.md`, `log.jsonl`, `review.json` (+ `review.lock`); gone when every change is written or rejected, or the run discarded; a failed or stopped run's kept 30 days | `ingest` |
+| `<home>/.echo/knowledge/<id>/ingest/<run>/` | `vault/` (the copy; the run writes only here), `bases.json`, `base/` (as copied: the index, the log, each file the run modified), `plugin/`, `settings.json`, `prompt.md`, `log.jsonl`, `review.json` (+ `review.lock`); gone when every change is written or rejected, or the run discarded; a failed or stopped run keeps its log and files 30 days, never its `vault/`, `base/` or `plugin/` | `ingest` |
 | `<sources>/…` in the vault | Sources the user added (Echo's under `echo/`, `mail/`, `teams/`, `web/`); never edited or deleted | `sources` |
 | `<call>/knowledge.json` (+ `.knowledge.lock`) | Where the call's minutes were saved, and the call's choice | `export` (never a Claude run) |
 | `<config>/minutes-run/vault-plugins/<id>-<hash>/` | The vault's skills as a plugin, for managed profiles, one folder per content | `terminal::vault_plugin` (removed at app start) |
