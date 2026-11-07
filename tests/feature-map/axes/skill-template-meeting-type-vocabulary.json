@@ -1,0 +1,50 @@
+{
+ "entity": "skill, template, meeting type, vocabulary",
+ "axes": [
+  {
+   "axis": "skill.kind",
+   "values": "builtin / customized / yours",
+   "where": "app.js `SK_TAG`; `skills.rs`"
+  },
+  {
+   "axis": "skill.on",
+   "values": "on / off",
+   "where": "`skill_on`"
+  },
+  {
+   "axis": "skill.problems",
+   "values": "none / some (name, description, size…)",
+   "where": "`skills.rs` checks"
+  },
+  {
+   "axis": "skill.fit",
+   "values": "no skills / a clear best fit / a tie / no fit",
+   "where": "app.js `rankSkills`"
+  },
+  {
+   "axis": "template.kind",
+   "values": "builtin / edited / yours; memo",
+   "where": "app.js `templatesSettings` `TAG`"
+  },
+  {
+   "axis": "template.use",
+   "values": "default / matched by title words / chosen for a call / memo",
+   "where": "`calls::template_of`"
+  },
+  {
+   "axis": "mtype.kind",
+   "values": "builtin / edited / yours",
+   "where": "app.js `typesList`"
+  },
+  {
+   "axis": "vocab.list",
+   "values": "no always terms / some",
+   "where": "`config.json` `vocabulary`"
+  },
+  {
+   "axis": "vocab.scope",
+   "values": "learned with meetings / people / only invites; calls count; > 6 learned (filter)",
+   "where": "app.js `vocabularyPanel`"
+  }
+ ]
+}

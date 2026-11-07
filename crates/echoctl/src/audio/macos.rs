@@ -192,7 +192,8 @@ pub fn app_input_device(app: TargetApp) -> Option<(String, String)> {
         .into_iter()
         .filter(|p| p.running_input)
         .flat_map(|p| process_input_devices(p.object_id))
-        .find(|(uid, name)| !is_virtual_device(uid, name))
+        // The test call app (debug builds) speaks through a virtual device on purpose: take it as the mic.
+        .find(|(uid, name)| !is_virtual_device(uid, name) || crate::apps::test_call_app().is_some())
 }
 
 pub fn print_audio_processes() -> Result<()> {

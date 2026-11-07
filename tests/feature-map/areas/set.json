@@ -1,0 +1,172 @@
+{
+ "prefix": "SET",
+ "name": "Settings",
+ "order": 130,
+ "status": "stable",
+ "notes": "Every section but Plugins, Templates and Knowledge",
+ "features": [
+  {
+   "id": "F-SET-01",
+   "feature": "Settings lists General, Recording, Transcription, AI & minutes, Templates, Calendar & chat, Knowledge, About me, Sends to you, Plugins, Layout, Health, then plugins' own sections; `#settings` opens General; each section opens without an error, and one that fails says so in its place",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "set.config"
+   ]
+  },
+  {
+   "id": "F-SET-02",
+   "feature": "Search settings filters the section names",
+   "priority": "low",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-SET-03",
+   "feature": "Plain values save at once with the value shown (never a toggle of a stale one); \"Saved as you change it\"",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-SET-04",
+   "feature": "General → Appearance System / Light / Dark switches the window (graphs, terminals and the minutes frame too), per computer",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "set.theme"
+   ]
+  },
+  {
+   "id": "F-SET-05",
+   "feature": "General → data folder Change…, Start at login, Hide from the Dock (macOS), Command line Install…, Claude Code plugin Connect, the version with Check for updates / Update to X",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "set.general",
+    "set.claude_code"
+   ]
+  },
+  {
+   "id": "F-SET-06",
+   "feature": "Recording → Calendar meetings and Other Teams calls each Ask or Manual, saved to `config.json`",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "set.when_record"
+   ]
+  },
+  {
+   "id": "F-SET-07",
+   "feature": "Recording → Languages adds and removes languages (detection picks only among them); New recordings English or Detect",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "set.languages",
+    "set.record_lang"
+   ]
+  },
+  {
+   "id": "F-SET-08",
+   "feature": "Recording → Follow Teams' mute, Names from the Teams window, Meeting chat and Shared screens (with Grant… when not permitted) switches",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "set.capture"
+   ]
+  },
+  {
+   "id": "F-SET-09",
+   "feature": "Transcription → speech models with In use, Recommended, Not in this build; Download (size), Use, Remove, a progress bar, \"Another download is running\"",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "set.models"
+   ]
+  },
+  {
+   "id": "F-SET-10",
+   "feature": "Transcription → server: Echo server…, OpenAI-compatible (address, model, key; Connect checks it), Disconnect; Transcribe for other computers shows its address and key",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "set.server"
+   ]
+  },
+  {
+   "id": "F-SET-11",
+   "feature": "Transcription → Echo cancellation on speakers and Keep audio files switches",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "set.audio"
+   ]
+  },
+  {
+   "id": "F-SET-12",
+   "feature": "AI & minutes → Minutes switches (automatic, keep threads' work current, live notes, minutes page), Minutes model Change…, where Claude Code runs (Choose… / Use the data folder), Claude in the window without permission prompts (with its warning)",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "set.minutes",
+    "set.window_claude"
+   ]
+  },
+  {
+   "id": "F-SET-13",
+   "feature": "Calendar & chat → Not connected with Sign in…, or Signed in as X with Sync now and Sign out; Meeting chat; App registration Change…",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "m365.signin"
+   ]
+  },
+  {
+   "id": "F-SET-14",
+   "feature": "About me → name and email; Your profile in Markdown (Edit, Save, Cancel, ⌘S) with who reads which part",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "set.me"
+   ]
+  },
+  {
+   "id": "F-SET-15",
+   "feature": "Sends to you → Teams and Mail (sign in first) and the ways plugins add, each with Send a test or Set up…",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "deliver.way",
+    "m365.signin"
+   ]
+  },
+  {
+   "id": "F-SET-16",
+   "feature": "Layout → each panel view Right or Bottom; Reset puts every view back",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "set.layout"
+   ]
+  },
+  {
+   "id": "F-SET-17",
+   "feature": "Health → Claude Code (runs, found in a terminal, Echo's plugin; Get, Connect, Add to PATH), an older Echo plugin (Update), each permission with Open settings, Ask for permissions, Check again; Settings shows a ⚠ count",
+   "priority": "high",
+   "check": "person",
+   "axes": [
+    "set.claude_code",
+    "set.health"
+   ]
+  },
+  {
+   "id": "F-SET-18",
+   "feature": "An unreadable `config.json` says so instead of the sections",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "set.config"
+   ]
+  }
+ ]
+}

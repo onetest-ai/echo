@@ -1,0 +1,63 @@
+{
+ "prefix": "TR",
+ "name": "Transcript",
+ "order": 30,
+ "status": "stable",
+ "notes": "The Transcript tab, find, speakers",
+ "features": [
+  {
+   "id": "F-TR-01",
+   "feature": "The transcript shows turns in time order: one speaker's lines joined while < 8 s apart and ≤ 60 s long, each with its time, speaker (Me / Remote / Speaker N / a name) and language chip",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "call.transcript"
+   ]
+  },
+  {
+   "id": "F-TR-02",
+   "feature": "Find in transcript highlights every turn that contains the words",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "call.transcript"
+   ]
+  },
+  {
+   "id": "F-TR-03",
+   "feature": "Each detected remote speaker has a colour of its own; `echoctl speakers <call> N=Name` names them in the transcript (no window control)",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "call.transcript"
+   ]
+  },
+  {
+   "id": "F-TR-04",
+   "feature": "With no transcript the tab says \"Listening…\" (recording), \"Transcribing on this computer…\" or \"No transcript for this call.\"",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "call.status"
+   ]
+  },
+  {
+   "id": "F-TR-05",
+   "feature": "Selecting words and Comment, or right-clicking a turn or a minutes line → Add note, adds a note at that moment with the words quoted",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "call.notes"
+   ]
+  },
+  {
+   "id": "F-TR-06",
+   "feature": "A call made from a Teams transcript shows its turns with names from the transcript and \"Me\" as About me's name",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "call.kind"
+   ]
+  }
+ ]
+}

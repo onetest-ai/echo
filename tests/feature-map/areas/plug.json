@@ -1,0 +1,106 @@
+{
+ "prefix": "PLUG",
+ "name": "Plugins",
+ "order": 140,
+ "status": "stable",
+ "notes": "Settings → Plugins, marketplaces, plugin runtime",
+ "features": [
+  {
+   "id": "F-PLUG-01",
+   "feature": "Settings → Plugins has tabs Installed (count), Discover, Marketplaces (count), opening on Discover when nothing is installed; Installed with none says \"No plugins yet…\"",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "plugin.installed"
+   ]
+  },
+  {
+   "id": "F-PLUG-02",
+   "feature": "Discover shows category chips and search, Featured then All plugins; each card names its marketplace and version with Install, Installed ✓, \"Installed from another marketplace\", \"Needs a newer Echo\" or \"Can't be read\"",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "plugin.offer",
+    "market.kind"
+   ]
+  },
+  {
+   "id": "F-PLUG-03",
+   "feature": "Install opens a sheet first: name, version, marketplace, commit, \"It will be able to\" in Echo's words, a warning when Echo's own marketplace didn't list it (Cancel the default), why it can't when blocked; Cancel or the backdrop closes it",
+   "priority": "critical",
+   "check": "agent",
+   "axes": [
+    "plugin.uses",
+    "market.kind"
+   ]
+  },
+  {
+   "id": "F-PLUG-04",
+   "feature": "Installing adds the plugin enabled and its window part (buttons in its slots, panels, Settings section, ⌘K entries) loads; switching it off takes all of it out, on brings it back",
+   "priority": "high",
+   "check": "person",
+   "axes": [
+    "plugin.enabled"
+   ]
+  },
+  {
+   "id": "F-PLUG-05",
+   "feature": "An installed plugin's detail shows where it came from, the enable switch, Open its settings, Update to X or why not, Remove… (keep data / delete it), its own settings (switch, text, folder, secret with Forget) and what it can do",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "plugin.enabled",
+    "plugin.update",
+    "plugin.setting"
+   ]
+  },
+  {
+   "id": "F-PLUG-06",
+   "feature": "An update that asks for more shows the new lines on a sheet and waits for a yes",
+   "priority": "high",
+   "check": "person",
+   "axes": [
+    "plugin.update",
+    "plugin.uses"
+   ]
+  },
+  {
+   "id": "F-PLUG-07",
+   "feature": "Marketplaces lists the built-in one (not removable) and added ones with how many plugins and when read, Read again, ⋯ hide / show its plugins, Remove; Add a marketplace (owner/repo, git address or folder, optional name)",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "market.kind",
+    "market.state"
+   ]
+  },
+  {
+   "id": "F-PLUG-08",
+   "feature": "A plugin hears only the Echo events it named (meeting soon, call start / end, recording start / stop, transcript ready, minutes written, thread synced, sources changed), with ids and titles, never the words",
+   "priority": "high",
+   "check": "person",
+   "axes": [
+    "plugin.uses"
+   ]
+  },
+  {
+   "id": "F-PLUG-09",
+   "feature": "A plugin's Claude runs use only the user's AI profiles; its session skills reach only Echo's own sessions",
+   "priority": "high",
+   "check": "person",
+   "axes": [
+    "plugin.uses",
+    "ai.kind"
+   ]
+  },
+  {
+   "id": "F-PLUG-10",
+   "feature": "`echoctl plugin list` gives installed, offered and marketplaces as JSON",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "plugin.installed"
+   ]
+  }
+ ]
+}

@@ -1,0 +1,40 @@
+---
+id: TC-016
+title: A local model profile added from the CLI shows in AI & minutes and adds the picker
+priority: high
+type: functional
+requirements: [F-AI-01, F-AI-02, F-AI-07]
+module: settings
+run: agent
+platform: any
+tags: [ai, profiles]
+---
+
+# TC-016: A local model profile added from the CLI shows in AI & minutes and adds the picker
+
+**Module:** Settings | **Priority:** High | **Type:** Functional
+
+## Preconditions
+- Test data built by `tests/fixtures/make-data.sh`, window served at `{{base_url}}` (`tests/fixtures/serve.sh up`)
+- `{{base_url}}/` was loaded just before the first window step (its cookie lets clicks reach the app; a second Echo server on 127.0.0.1 replaces the cookie, so load `{{base_url}}/` again if a click has no effect)
+- CLI steps run in Bash after `. <dir>/env` (`<dir>` is the run's data folder)
+
+**Changes:** `<config dir>/ai.json` (the AI profiles)
+
+## Steps
+
+| # | Action | Expected Result |
+|---|--------|----------------|
+| 1 | In Bash run `echoctl ai add-local local-llama --model llama3.2 --url http://localhost:11434 --name "Local Llama"` | Prints `added Local Llama (local-llama)` |
+| 2 | Navigate to `{{base_url}}/#settings/ai`; read the card "Profiles" | Two rows: "Claude Code (as configured)" still "Default for new calls", and "Local Llama" with the tag "Model · this computer", the text "minutes: llama3.2" and "live notes: llama3.2", and a button "Make default" |
+| 3 | Read the selects in the top bar | "Language of the call" and "Model for live notes and minutes" |
+| 4 | In Bash run `echoctl ai status` | Two profiles; `local-llama` has kind `local`, `"default": false` |
+
+## Expected Final State
+Two profiles are listed and the model picker shows.
+
+## Teardown
+- `echoctl ai remove local-llama` (prints `removed local-llama`).
+
+## Notes
+- No model server is needed: the profile is only added, never used.

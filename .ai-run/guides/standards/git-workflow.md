@@ -34,7 +34,8 @@ Examples: `Memos: record yourself, no call; …` · `Echo X.Y.Z` (a release). Th
 
 ### Rules
 - R1. Merge into `main` by merge commit. Evidence: recorded user decision
-- R2. A release is a commit `Echo X.Y.Z` on `main` plus a published GitHub release; publishing triggers `.github/workflows/windows-release.yml`, the only CI, which builds and uploads the Windows MSI and zip (nothing builds on push or pull request).
+- R1a. Before a branch is pushed, its PR opened or merged, the functional map is up to date: a change in behaviour adds, changes or removes its features in `tests/feature-map/areas/<area>.json`, `python3 tests/tools/feature-map.py check` passes, and the PR body carries the `Map:` line that `python3 tests/tools/feature-map.py changes main` prints (or `Map: no behaviour change — <why>`). `changes` exits 1 when app code (`crates/`, `plugin/`) changed with no map change: then update the map, or say in the PR why the behaviour doesn't change. Evidence: `tests/tools/feature-map.py::changes`
+- R2. A release is a commit `Echo X.Y.Z` on `main` plus a published GitHub release, made after every `critical` functional case passed on that commit (`tests/cases/`, quality-gates.md, functional); publishing triggers `.github/workflows/windows-release.yml`, the only CI, which builds and uploads the Windows MSI and zip (nothing builds on push or pull request).
 
 ## Anti-Patterns
 

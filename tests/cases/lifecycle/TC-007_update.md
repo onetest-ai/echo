@@ -1,0 +1,34 @@
+---
+id: TC-007
+title: An update is offered and installed, keeping everything
+priority: high
+type: functional
+requirements: [F-LIFE-07]
+module: lifecycle
+run: person
+platform: macos
+tags: [update]
+external_id: TC-UPD-001
+---
+
+# TC-007: An update is offered and installed, keeping everything
+
+**Module:** Lifecycle | **Priority:** High | **Type:** Functional
+
+## Preconditions
+- Echo installed and running
+- A newer release on GitHub
+
+## Steps
+
+| # | Action | Expected Result |
+|---|--------|----------------|
+| 1 | Start Echo (it checks at start, then every 6 hours) | "Update available" and a menu item |
+| 2 | Menu → "Update to <version>…" → "Update" | Echo downloads, quits, replaces itself and starts on the new version (`echoctl --version`) |
+| 3 | Check the data folder, models, permissions, calendar sign-in | All kept |
+
+## Expected Final State
+Updating is one click and loses nothing.
+
+## Notes
+- Stays person-run: updates come from GitHub Releases (the URL is fixed) and replace an installed Echo.app; on a dev Mac that is the user's own.

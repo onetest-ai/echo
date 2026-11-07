@@ -1,0 +1,186 @@
+{
+ "prefix": "MIN",
+ "name": "Minutes",
+ "order": 20,
+ "status": "stable",
+ "notes": "Minutes tab states, writing, countdown, time chips, What moved",
+ "features": [
+  {
+   "id": "F-MIN-01",
+   "feature": "The Minutes tab shows the minutes in a sandboxed frame with their sections (summary, decisions, action items, open questions), without the header block the call's own header already shows",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "call.status",
+    "template.kind"
+   ]
+  },
+  {
+   "id": "F-MIN-02",
+   "feature": "The AI notice above the minutes names who wrote them, the model and the template (\"Written by AI (… · sonnet · Default template)\") (?)",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "call.run",
+    "template.kind"
+   ],
+   "review": true
+  },
+  {
+   "id": "F-MIN-03",
+   "feature": "A time chip in the minutes opens the Transcript at that moment and highlights the turn spoken then",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "call.transcript"
+   ]
+  },
+  {
+   "id": "F-MIN-04",
+   "feature": "What moved beside the minutes lists, per thread, what the call changed (new task, done, due, blocked, waiting…), the user's open tasks first with who does each, the words, speaker and a time chip; changes the verifier called wrong are hidden; marks \"weak · to review\", \"to check\", \"kept yours\"",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "node.history",
+    "node.mode",
+    "call.threads"
+   ]
+  },
+  {
+   "id": "F-MIN-05",
+   "feature": "What moved for a thread that hasn't read the call says why (reading now, hasn't read, reads after HH:MM, nothing to read) and offers Sync now",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "thread.sync",
+    "call.threads"
+   ]
+  },
+  {
+   "id": "F-MIN-06",
+   "feature": "A transcribed call without minutes says \"No minutes yet\" with Write minutes, the model that will write them, and a copyable `/echo:process-call <folder>`",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "call.run",
+    "call.auto",
+    "ai.count"
+   ]
+  },
+  {
+   "id": "F-MIN-07",
+   "feature": "Automatic minutes still ahead show \"Minutes in N min (HH:MM)\" with a countdown ring, Write now and Not yet ▾ (15 minutes more / only when I say); a moved time says why (you said not yet / you edited your notes)",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "call.auto"
+   ]
+  },
+  {
+   "id": "F-MIN-08",
+   "feature": "Minutes held by Not yet say \"Minutes when you say\" with \"Write them automatically again\"; a call too thin says \"No minutes written automatically\" and still offers Write minutes",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "call.auto"
+   ]
+  },
+  {
+   "id": "F-MIN-09",
+   "feature": "A minutes run's state shows: waiting its turn (Write now when it may start), Writing minutes… with the model and Show log, didn't finish (Try again, Show log), needs sign-in (Sign in… / Ready to try again), skipped (why) — over existing minutes as a bar, else as the box",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "call.run",
+    "ai.signin"
+   ]
+  },
+  {
+   "id": "F-MIN-10",
+   "feature": "During recording or transcription the Minutes tab says \"Minutes come after the call\" and why (Claude Code missing, plugin missing, automatic minutes can't start, 15 minutes after the call)",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "call.status",
+    "call.auto",
+    "set.claude_code"
+   ]
+  },
+  {
+   "id": "F-MIN-11",
+   "feature": "A call held by a Claude Code session says so (process, since when) and Write minutes takes it over (?)",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "call.auto"
+   ],
+   "review": true
+  },
+  {
+   "id": "F-MIN-12",
+   "feature": "The model picker for these minutes shows when there are several AI profiles; a call whose profile is gone or unreadable says so and asks to pick one",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "call.profile",
+    "ai.count"
+   ]
+  },
+  {
+   "id": "F-MIN-13",
+   "feature": "Write minutes (and Write minutes again) runs Claude Code headless on the call's profile; the minutes and action items appear and a \"Minutes ready\" notification comes",
+   "priority": "critical",
+   "check": "agent",
+   "axes": [
+    "call.run",
+    "ai.signin"
+   ]
+  },
+  {
+   "id": "F-MIN-14",
+   "feature": "Automatic minutes are written 15 minutes after the call or the last note, only for calls ended after the switch was turned on; off writes nothing until asked",
+   "priority": "critical",
+   "check": "agent",
+   "axes": [
+    "call.auto",
+    "set.minutes"
+   ]
+  },
+  {
+   "id": "F-MIN-15",
+   "feature": "Write again with another template rewrites the minutes in it and later runs keep it; the items are disabled while minutes are being written",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "call.run",
+    "template.kind"
+   ]
+  },
+  {
+   "id": "F-MIN-16",
+   "feature": "With Claude Code not installed or Echo's plugin not connected, the Minutes tab says what to do instead of offering Write minutes",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "set.claude_code"
+   ]
+  },
+  {
+   "id": "F-MIN-17",
+   "feature": "A memo gets minutes at once with the memo template, in parts by thread; the opt-in minutes page file is written beside the notes",
+   "priority": "low",
+   "check": "agent",
+   "axes": [
+    "call.kind",
+    "set.minutes"
+   ]
+  },
+  {
+   "id": "F-MIN-18",
+   "feature": "Calls whose automatic minutes were missed while Echo was quit get them within a minute of the next start, by Echo and not by a session",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  }
+ ]
+}

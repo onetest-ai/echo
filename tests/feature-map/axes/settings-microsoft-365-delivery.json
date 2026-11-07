@@ -1,0 +1,100 @@
+{
+ "entity": "settings, Microsoft 365, delivery",
+ "axes": [
+  {
+   "axis": "set.when_record",
+   "values": "scheduled ask / manual × unscheduled ask / manual",
+   "where": "`config.json`; app.js `SETTINGS_BODY.recording`"
+  },
+  {
+   "axis": "set.languages",
+   "values": "none (any) / one / several",
+   "where": "`config.json` `languages`"
+  },
+  {
+   "axis": "set.record_lang",
+   "values": "English / Detect / another (Record ▾)",
+   "where": "app.js `recordLang`"
+  },
+  {
+   "axis": "set.capture",
+   "values": "follow_app_mute, capture_ui, capture_chat, capture_frames each on / off; frames permitted or not",
+   "where": "`config.json`"
+  },
+  {
+   "axis": "set.models",
+   "values": "downloaded / active / recommended / not runnable / downloading",
+   "where": "`/api/settings` `models`"
+  },
+  {
+   "axis": "set.server",
+   "values": "none / Echo server / OpenAI-compatible; serving on / off; connecting busy / error",
+   "where": "`/api/settings` `server`"
+  },
+  {
+   "axis": "set.audio",
+   "values": "echo_cancel on / off; keep_audio on / off",
+   "where": "`config.json`"
+  },
+  {
+   "axis": "set.minutes",
+   "values": "auto_minutes, project_sync, live_notes, minutes_page on / off; notes_in set / data folder",
+   "where": "`config.json`, `ai.json`"
+  },
+  {
+   "axis": "set.window_claude",
+   "values": "folder_skip_permissions on / off",
+   "where": "`config.json`"
+  },
+  {
+   "axis": "set.me",
+   "values": "name, email set / empty; profile empty / Markdown",
+   "where": "`config.json` `me`, `me.md`"
+  },
+  {
+   "axis": "set.theme",
+   "values": "system / light / dark",
+   "where": "app.js `Theme` (`echo.theme`)"
+  },
+  {
+   "axis": "set.general",
+   "values": "autostart on / off; hide_dock_icon on / off; CLI installed or not; update available or not",
+   "where": "`/api/settings`"
+  },
+  {
+   "axis": "set.claude_code",
+   "values": "checking / not installed / doesn't start / no terminal path / no plugin / ready",
+   "where": "app.js `claudeRows`, `claudeProblems`"
+  },
+  {
+   "axis": "set.health",
+   "values": "each permission granted / denied / unknown; stale plugins",
+   "where": "`/api/settings` `health`"
+  },
+  {
+   "axis": "set.config",
+   "values": "readable / unreadable `config.json`",
+   "where": "`config_error`"
+  },
+  {
+   "axis": "set.recall",
+   "values": "Recall on / off",
+   "where": "`/api/state` `brain`"
+  },
+  {
+   "axis": "set.layout",
+   "values": "each panel view right / bottom; panel open / closed; bar open / folded",
+   "where": "`window-layout.json`; app.js `Layout`"
+  },
+  {
+   "axis": "m365.signin",
+   "values": "signed in / not",
+   "where": "`/api/calendar` `signed_in`; `/api/settings` `calendar`"
+  },
+  {
+   "axis": "deliver.way",
+   "values": "Teams / mail / a plugin's way, each ready / not",
+   "where": "`/api/deliver`"
+  }
+ ]
+}

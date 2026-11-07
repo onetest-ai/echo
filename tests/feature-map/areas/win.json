@@ -1,0 +1,51 @@
+{
+ "prefix": "WIN",
+ "name": "Windows",
+ "order": 280,
+ "status": "stable",
+ "notes": "The Windows build",
+ "features": [
+  {
+   "id": "F-WIN-01",
+   "feature": "The Windows build and per-user MSI are produced; install and first run work",
+   "priority": "high",
+   "check": "person",
+   "axes": []
+  },
+  {
+   "id": "F-WIN-02",
+   "feature": "A Teams call is recorded (Teams' output device as the other side) and transcribed",
+   "priority": "critical",
+   "check": "person",
+   "axes": []
+  },
+  {
+   "id": "F-WIN-03",
+   "feature": "The window works on Windows (native title bar; Ctrl+K / Ctrl+Shift+P, Ctrl+Shift+U for the Inbox)",
+   "priority": "medium",
+   "check": "person",
+   "axes": []
+  },
+  {
+   "id": "F-WIN-04",
+   "feature": "Start at sign-in, quit and `echoctl` on the user PATH",
+   "priority": "medium",
+   "check": "person",
+   "axes": []
+  },
+  {
+   "id": "F-WIN-05",
+   "feature": "Updates install from the release MSI only with a matching digest",
+   "priority": "high",
+   "check": "person",
+   "axes": []
+  },
+  {
+   "id": "F-WIN-06",
+   "feature": "Mute sync, Teams UI text, notifications, the tray icon and shared-screen frames work on Windows",
+   "priority": "medium",
+   "check": "person",
+   "axes": []
+  }
+ ]
+}

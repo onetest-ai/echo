@@ -1,0 +1,135 @@
+{
+ "prefix": "TASK",
+ "name": "Tasks",
+ "order": 100,
+ "status": "stable",
+ "notes": "Tasks piles, filters, Asks, the Claude dialog, closing",
+ "features": [
+  {
+   "id": "F-TASK-01",
+   "feature": "Tasks shows every open thread's open tasks in piles I owe, Owed to me, Waiting for others, Nobody named, with counts, and a folded \"Others · N\"",
+   "priority": "critical",
+   "check": "agent",
+   "axes": [
+    "card.pile"
+   ]
+  },
+  {
+   "id": "F-TASK-02",
+   "feature": "A task goes to its pile by owner (me → I owe, a blocked one stays marked), handed over by me (Owed to me), what mine waits on (Waiting, a card per person), no owner (Nobody named), else Others; a pair linked across threads shows once",
+   "priority": "critical",
+   "check": "agent",
+   "axes": [
+    "node.owner",
+    "node.delegated",
+    "node.wait",
+    "node.state",
+    "node.xthread"
+   ]
+  },
+  {
+   "id": "F-TASK-03",
+   "feature": "Order: Due (overdue, then date, then quiet longest), Quiet longest, Thread",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "node.due",
+    "node.quiet"
+   ]
+  },
+  {
+   "id": "F-TASK-04",
+   "feature": "The Thread filter (with counts) and the Who does it filter (Anyone, Claude can do, By hand) narrow every pile",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "node.mode"
+   ]
+  },
+  {
+   "id": "F-TASK-05",
+   "feature": "A pile shows 6 cards then \"+ N\" / Show fewer",
+   "priority": "low",
+   "check": "agent",
+   "axes": [
+    "card.count"
+   ]
+  },
+  {
+   "id": "F-TASK-06",
+   "feature": "A card shows its title, who (story, blocked by, owner · client, stops T00x), mode icon, thread, also in another thread, due (late in red) or \"no date\", \"quiet N d\"",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "card.pile",
+    "node.due",
+    "node.quiet",
+    "node.mode",
+    "card.also_in"
+   ]
+  },
+  {
+   "id": "F-TASK-07",
+   "feature": "A card opens the task's Details on the right while Tasks stays",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TASK-08",
+   "feature": "Asks (right panel) lists, by person, what they owe late, due within 3 days or quiet 5 days and what my work waits on them for, with their next meeting this week",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "node.due",
+    "node.quiet",
+    "node.wait"
+   ]
+  },
+  {
+   "id": "F-TASK-09",
+   "feature": "With no open thread Tasks offers Open Threads; with no task it says \"No open tasks\"",
+   "priority": "low",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TASK-10",
+   "feature": "Send to Claude opens the Claude dialog: the task and its thread, one skill field (Just the task, or skills ranked by fit with \"fits best\", chosen at once when clearly first; × back to Just the task), a note, Work on it, Yolo (from Today only), Cancel",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "skill.on",
+    "skill.fit",
+    "node.mode"
+   ]
+  },
+  {
+   "id": "F-TASK-11",
+   "feature": "Work on it types one line (the task's link, the skill, the note) into the Claude panel's session on the thread's AI profile; another profile running or Claude asking something gives a notice instead",
+   "priority": "high",
+   "check": "person",
+   "axes": [
+    "thread.ai"
+   ]
+  },
+  {
+   "id": "F-TASK-12",
+   "feature": "Yolo has Claude Code do the task on its own in the background on the thread's profile; the outcome shows above My work; the run may change only its own task",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "thread.ai"
+   ]
+  },
+  {
+   "id": "F-TASK-13",
+   "feature": "Closing a task from Today asks first with an optional comment; the task is done and the comment is in its history",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "node.state"
+   ]
+  }
+ ]
+}

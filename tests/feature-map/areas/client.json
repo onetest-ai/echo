@@ -1,0 +1,89 @@
+{
+ "prefix": "CLIENT",
+ "name": "Clients and organisations",
+ "order": 90,
+ "status": "stable",
+ "notes": "Client page, organisations",
+ "features": [
+  {
+   "id": "F-CLIENT-01",
+   "feature": "A client opens from the Threads list or Thread actions → Open <client>, on tabs Overview, Calls, Tasks (open count), People, Profile",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "org.threads"
+   ]
+  },
+  {
+   "id": "F-CLIENT-02",
+   "feature": "Overview shows About <client> (Edit) and a card per thread: stage, calls, last call, stories done, open tasks per pile and late, the last decisions, risks (no response first), open questions",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "org.about",
+    "org.threads",
+    "node.kind",
+    "card.pile"
+   ]
+  },
+  {
+   "id": "F-CLIENT-03",
+   "feature": "Calls lists every call of the client's threads, newest first, with its threads and \"no minutes yet\"",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "call.threads",
+    "call.status"
+   ]
+  },
+  {
+   "id": "F-CLIENT-04",
+   "feature": "Tasks shows the Tasks piles for the client's threads, Others folded",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "card.pile"
+   ]
+  },
+  {
+   "id": "F-CLIENT-05",
+   "feature": "Profile edits name, other names, mail domains, Your own company, logo, and makes a thread for the client",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "org.internal",
+    "org.domains",
+    "org.logo"
+   ]
+  },
+  {
+   "id": "F-CLIENT-06",
+   "feature": "A client without threads can be removed after a confirmation; one with threads says to move or delete them first; a removed client's link says \"This client is gone\"",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "org.threads"
+   ]
+  },
+  {
+   "id": "F-CLIENT-07",
+   "feature": "The user's company shows as \"<name> · your company\"; its people count as colleagues, never as a client's people",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "org.internal",
+    "person.side"
+   ]
+  },
+  {
+   "id": "F-CLIENT-08",
+   "feature": "Organisations that aren't clients (partners, vendors) are kept with `echoctl org add/set/remove`; an account with threads can't be removed",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "org.account",
+    "org.threads"
+   ]
+  }
+ ]
+}

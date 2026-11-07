@@ -39,3 +39,11 @@ Run order is fastest-to-slowest.
 **Pass**: exit 0 and the last line `tsc: clean`, or `skip tsc: …` when no type declarations exist
 **Fail**: non-zero exit from any step
 **Skip if**: the tsc step only skips itself when no Claude Code type declarations are found
+
+### functional
+
+**Run**: the manual-qa team on the scenarios in `tests/scenarios/` that hold the touched areas' cases (`claude --agent test-run-lead`, "run tests/scenarios/S-01… S-03"; once per machine `tests/install.sh`); `run: person` cases by a person
+**Side effects**: builds a made-up data folder under the OS temp dir, serves the window on a localhost port for the run, writes `tests/reports/` (git-ignored)
+**Pass**: every stage (case) of every scenario run is PASS, and `python3 tests/tools/feature-map.py check` reports 0 problems (a `run: person` case is listed, not run, unless a person ran it)
+**Fail**: any FAIL or BLOCKED
+**When**: mandatory — before a change is called done or its PR opened, the areas it touches; before a release, every `critical` case — `.ai-run/guides/testing/testing.md` R4

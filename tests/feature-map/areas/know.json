@@ -1,0 +1,51 @@
+{
+ "prefix": "KNOW",
+ "name": "Knowledge",
+ "order": 300,
+ "status": "rework",
+ "notes": "Recall (the Brain) and plugin knowledge tabs; top-level features only",
+ "features": [
+  {
+   "id": "F-KNOW-01",
+   "feature": "Knowledge shows in the activity bar only with Recall on or a plugin's tab; otherwise `#brain` opens Calls",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-KNOW-02",
+   "feature": "Settings → Knowledge → Use Recall turns the index on or off; its card shows what it holds, the last sync, Sync now, Keep it current, the embedding server, model, key and the page reader",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-KNOW-03",
+   "feature": "Recall's Sources, Dictionary and People tabs browse what was indexed, by client or thread",
+   "priority": "medium",
+   "check": "person",
+   "axes": []
+  },
+  {
+   "id": "F-KNOW-04",
+   "feature": "Who may speak into Recall through mail and channels is decided per client (Trust, Ignore, Read anyway, Keep out)",
+   "priority": "high",
+   "check": "person",
+   "axes": []
+  },
+  {
+   "id": "F-KNOW-05",
+   "feature": "Claude sessions get Recall as a read-only MCP server scoped to their AI profile",
+   "priority": "high",
+   "check": "person",
+   "axes": []
+  },
+  {
+   "id": "F-KNOW-06",
+   "feature": "Plugins add tabs and settings rows to Knowledge (e.g. Obsidian vaults)",
+   "priority": "low",
+   "check": "person",
+   "axes": []
+  }
+ ]
+}
