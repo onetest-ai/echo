@@ -130,7 +130,7 @@
    "id": "F-MIN-13",
    "feature": "Write minutes (and Write minutes again) runs Claude Code headless on the call's profile; the minutes and action items appear and a \"Minutes ready\" notification comes",
    "priority": "critical",
-   "check": "person",
+   "check": "agent",
    "axes": [
     "call.run",
     "ai.signin"
@@ -140,7 +140,7 @@
    "id": "F-MIN-14",
    "feature": "Automatic minutes are written 15 minutes after the call or the last note, only for calls ended after the switch was turned on; off writes nothing until asked",
    "priority": "critical",
-   "check": "person",
+   "check": "agent",
    "axes": [
     "call.auto",
     "set.minutes"
@@ -179,7 +179,7 @@
    "id": "F-MIN-18",
    "feature": "Calls whose automatic minutes were missed while Echo was quit get them within a minute of the next start, by Echo and not by a session",
    "priority": "medium",
-   "check": "person",
+   "check": "agent",
    "axes": []
   }
  ]

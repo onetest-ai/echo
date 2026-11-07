@@ -28,7 +28,7 @@
    "id": "F-REC-03",
    "feature": "Nothing records without an arm and a call; Ask mode shows Echo's own \"Record?\" dialog per call, Manual only records when asked",
    "priority": "critical",
-   "check": "person",
+   "check": "agent",
    "axes": [
     "set.when_record"
    ]
@@ -46,7 +46,7 @@
    "id": "F-REC-05",
    "feature": "While recording the pill shows a clock and the title (opens the call); Stop asks \"Stop recording?\" (Stop / Keep recording); Stop ends the recording, not the call, and doesn't record it again",
    "priority": "high",
-   "check": "person",
+   "check": "agent",
    "axes": [
     "app.record"
    ]
@@ -71,7 +71,7 @@
    "id": "F-REC-08",
    "feature": "A short drop and rejoin stays one recording; the call's end stops it after 10 s; a confirmed other call back to back starts a new one",
    "priority": "high",
-   "check": "person",
+   "check": "agent",
    "axes": []
   },
   {

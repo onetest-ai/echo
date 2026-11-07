@@ -26,3 +26,6 @@ external_id: TC-UPD-003
 
 ## Expected Final State
 No false update offers.
+
+## Notes
+- Stays person-run: the check's result is shown only by the tray and a notification (`app::check_updates`, `update::AVAILABLE` in the app process); the served window can't show it. (2026-11-07: v0.8.2 is both the build and the latest release.)

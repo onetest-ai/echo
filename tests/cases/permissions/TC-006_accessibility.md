@@ -27,3 +27,6 @@ external_id: TC-PERM-006
 
 ## Expected Final State
 Accessibility adds features without being required for recording.
+
+## Notes
+- Stays person-run: Accessibility is switched in System Settings, and mute sync and speaker names read Teams' own window.

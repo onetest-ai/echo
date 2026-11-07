@@ -26,3 +26,6 @@ external_id: TC-UPD-002
 
 ## Expected Final State
 An update never interrupts a recording.
+
+## Notes
+- Stays person-run: it needs a newer release offered and an Update click while recording; the offer lives only in the app process (tray, notification) and a mistaken Update would replace the installed Echo.

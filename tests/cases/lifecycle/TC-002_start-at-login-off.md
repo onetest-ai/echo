@@ -27,3 +27,6 @@ external_id: TC-LIFE-002
 
 ## Expected Final State
 The setting is honoured both ways.
+
+## Notes
+- Stays person-run: it logs the user out and in, and "Start at login" writes `~/Library/LaunchAgents/ai.onetest.echo.plist`, the user's own Echo's LaunchAgent on a Mac where Echo is installed.

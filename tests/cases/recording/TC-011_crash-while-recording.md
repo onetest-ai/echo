@@ -47,6 +47,7 @@ The unfinished recording was closed as "recovered", its audio repaired and trans
 - Nothing to undo: the call lives in the run's own data folder
 
 ## Notes
+- Run on 2026-11-07 (S-18): PASS — `stop_reason` "recovered", last segment at 12.5 s.
 - Repair here goes through `transcribe` (`watch::close_unfinished`, called from `transcribe.rs`). The repair when the app starts again (event `recording_recovered`, `watch.rs`) is not covered by an agent case yet; it needs the second app instance.
 - The original step 3, a failed transcription showing its error instead of retrying forever, needs a way to make a transcription fail and is not covered here.
 - `meta.json` of a recovered call keeps `tracks` empty: the tracks are written into it only when a recording closes normally (`recorder.rs`, `finish`).

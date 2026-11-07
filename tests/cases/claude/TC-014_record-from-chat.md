@@ -29,3 +29,6 @@ external_id: TC-CLA-014
 
 ## Expected Final State
 A session arms, pins the language and stops a recording in plain words.
+
+## Notes
+- Stays person-run: a session understanding "record my next call in Ukrainian" is the user's Claude Code session. What it runs is `echoctl arm --languages uk` / `echoctl stop`: `cli/TC-004` and `transcription/TC-004` run those with the test call.

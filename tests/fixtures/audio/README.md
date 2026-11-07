@@ -14,4 +14,5 @@ language and text, committed so nothing needs a key or the network to build a ca
 
 Adding a conversation: add it to `conversations.json`, run `render`, commit the new clips. Ukrainian lines carry at
 least one Ukrainian-only letter (і ї є ґ), or the voice reads them with Russian vowels. Keep calls short (under a
-minute): the clips are committed.
+minute): the clips are committed. `minutes-call` (213 s) is the one exception: it reuses acme-sync's and two-remotes'
+turns three times over (no new clips) so a call passes the minutes gate (3 minutes, 1,500 characters).

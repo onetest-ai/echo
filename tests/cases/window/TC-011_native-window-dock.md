@@ -28,3 +28,6 @@ external_id: TC-WIN-001
 
 ## Expected Final State
 The window opens and closes without quitting Echo, and a recent call opens selected.
+
+## Notes
+- Stays person-run: the native window and the tray's "Open Echo…" are driven through System Events, which can't keep the dev app apart from the user's own Echo (both `echoctl`; see `recording/TC-019`).

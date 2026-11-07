@@ -45,4 +45,5 @@ A capture ended by Ctrl-C has `stop_reason` "user", both tracks closed, and a tr
 - Nothing to undo: the call lives in the run's own data folder
 
 ## Notes
+- Run on 2026-11-07 (S-18): PASS (`capture` exits 134 after saving; see `recording/TC-014`).
 - This is the capture command's version of Stop. The app's Stop (`echoctl stop`, the pill's "Stop recording?") is `recording/TC-015`; the pill's confirmation is person-run in `recording/TC-005`.

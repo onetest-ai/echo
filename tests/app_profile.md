@@ -2,7 +2,7 @@
 app_name: Echo
 base_url: http://127.0.0.1:47930
 auth_type: none
-last_updated: 2026-11-06
+last_updated: 2026-11-07
 ---
 
 # Echo — app profile for functional tests
@@ -26,7 +26,8 @@ agent tests it. This file is given to every manual-qa role; where it differs fro
 4. **Steps are the window (Playwright MCP) or the CLI (Bash).** The runner may use Bash only for `echoctl` with the
    run's env, reading files in the run's data folder, and `tests/fixtures/*`. No other scripts, no edits to the repo.
    One exception: a case that says it records with the test call may also run TestCall, `afplay`, `nohup`, `kill`,
-   `sleep`, `ls`, `grep`, `cat` and `find` on the run's own folders (see "Recording with the test call" below).
+   `sleep`, `ls`, `grep`, `cat`, `find`, `pgrep -P <the run's app pid>` and `scripts/fetch-nemo-speech.sh` into the run's
+   config, and click Echo's own dialog through System Events by that dialog's pid (see "Recording with the test call").
    Another: the clean-install runs use the commands their cases name ("Clean-install runs" below).
 5. **`run: person` cases are for a person** (a real call, Teams, macOS permissions, an install, the tray, Windows,
    Claude Code runs that need a signed-in account). The lead lists them in the report as `skipped (person)` and never
@@ -266,9 +267,39 @@ tap on TestCall). The known conversations (`tests/fixtures/audio/README.md`: `ac
   (never `app start`, which may open the installed app), and stop it with `echoctl app quit`. The single-instance lock
   is `<config dir>/app.lock` (`app.rs`, `try_lock`), so the user's own Echo does not refuse it; if "Echo is already
   running" appears in `$D/app.out`, the case is BLOCKED. Such cases are tagged `second-instance`, set
-  `config --unscheduled manual` (no native "Record?" dialog) and `ai live off` (no Claude Code run).
+  `config --unscheduled manual --scheduled manual` (no native "Record?" dialog) and `ai live off` (no live notes; the
+  app's other Claude Code jobs are kept off a real account by the data's `--ai fake|local`, below).
 - The first seconds of a watcher-recorded call can be clipped (the watcher needs a moment to see the call): watcher
   cases assert on words from the middle and end of a call, not on a whole-call score.
+- **The app runs Claude Code by itself** (preps for the day's meetings, meeting types, who does a task) about a minute
+  after it starts. On plain `small` data that goes to the built-in profile — the user's own Claude account. So every
+  case that starts the app builds its data with `make_data.py <dir> --ai fake` (the fake `claude` refuses every run) or
+  `--ai local` (runs go to the local model only), and sets `--scheduled manual` too: `small`'s agenda has a meeting about
+  an hour after the build, and "ask" (the default) opens a real "Record?" dialog a minute before it.
+- **Events accumulate** in `.echo/events.jsonl` across the stages of a scenario: a case notes the count before it
+  (`cat "$ECHOCTL_HOME/.echo/events.jsonl" 2>/dev/null | wc -l > "$D/ev.start"`) and counts only its own
+  (`tail -n +$(( $(cat "$D/ev.start") + 1 )) "$ECHOCTL_HOME/.echo/events.jsonl" | grep …`). The same for `.wav`
+  files: earlier stages keep audio on purpose (`--keep-audio`), so a "no audio" check uses `find … -newer <a file of
+  this case>`.
+- **After the hang-up the mic reopens on the Mac's microphone** for the seconds left of a `capture --seconds N` or the
+  watcher's 10 s grace ("Teams released its mic; using the default input"): whatever is said in the room then lands in
+  the transcript as Me. Keep `--seconds` close to the call, and keep the room quiet; a stray line after the call's end
+  is that defect, not the case's.
+- **`capture` exits 134** after it has saved the call (a ggml-metal assertion at process exit, 2026-11-07): the folder
+  and tracks are fine; keep its stdout (the folder) apart from its stderr (the backtrace).
+- **Echo's "Record?" dialog** (ask mode, `app::ask`) is an `osascript` child of the run's app: find it with
+  `pgrep -P "$(cat "$D/app.pid")" osascript` and click it with `osascript -e 'tell application "System Events" to tell
+  (first process whose unix id is <its pid>) to click button "Record" of window 1'` — always by that pid.
+- **No tray, no native window.** With the user's own Echo running, System Events can't keep the two `echoctl`
+  menu-bar items apart (asked for the dev app's menu by its pid, it returned the installed Echo's), so a click could
+  reach the user's Echo: cases run the app with `--no-tray` and use `echoctl` and the served window instead.
+- **One TestCall call at a time** on a Mac (port 7792, BlackHole). Every running dev app sees every TestCall call (as
+  `call_started`, unarmed: nothing recorded): runs that share the Mac never arm at the same time.
+- **Speakers** (`recording/TC-018`) need NVIDIA's NeMo-Speech runtime, which a debug build doesn't carry:
+  `TMPDIR="$D" scripts/fetch-nemo-speech.sh "$ECHOCTL_CONFIG_DIR/nemo-speech"` once per run.
+- **Minutes on a call of the test call** need at least 3 minutes and 1,500 characters (`calls::gate`): the
+  `minutes-call` conversation (213 s). Automatic minutes come 15 minutes after the call (`notes::AUTO_DELAY`, no
+  setting): those cases wait it out, beside other stages.
 
 ## Clean-install runs
 
@@ -310,8 +341,8 @@ clean-install runs, below, on a Mac where Echo has never been):
 - Microsoft 365: sign-in, calendar sync, mail, Teams, meeting chat (Settings → Calendar & chat "Sign in…", "Sends to you").
 - Claude Code runs: Write minutes / Write minutes again, Prepare, Send to Claude, Yolo, Ask Claude about this call,
   "Sync now" (What moved, thread work), "Claude" panel in the footer, "Claude can" work, "Claude about this thread".
-- The tray, "Memo", Teams itself and permissions prompts ("Record next call" and recording a call run with the test
-  call: see "Recording with the test call"): Health's
+- The tray and the native window while the user's own Echo runs (see "Recording with the test call": No tray), "Memo",
+  Teams itself and permissions prompts ("Record next call" and recording a call run with the test call): Health's
   "Ask for permissions".
 - Plugin marketplaces over the network, installs, updates, "Check for updates", speech model downloads, "Read again".
 - Anything that reads the real machine (Settings → General "Installed ✓", Health): see Fragile areas.

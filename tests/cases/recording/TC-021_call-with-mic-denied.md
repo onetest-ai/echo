@@ -29,4 +29,5 @@ external_id: TC-REC-021
 One missing track doesn't lose the other.
 
 ## Notes
+- Stays person-run: Microphone is denied in System Settings (by the user, S-16). With it denied, a TestCall call would do for the call itself.
 - Moved from permissions/TC-004 step 2.

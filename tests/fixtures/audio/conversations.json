@@ -65,6 +65,49 @@
     {"who": "dana", "voice": "dana", "lang": "en", "gap": 1.0, "text": "Quick one: is the call at three still on?"},
     {"who": "me", "voice": "me", "lang": "en", "gap": 0.7, "text": "Yes, three o'clock, same link."}
    ]
+  },
+  {
+   "id": "minutes-call",
+   "title": "Acme and Globex catch-up",
+   "what": "Over three minutes and 1,500 characters, long enough for automatic minutes: acme-sync and two-remotes three times over (the same clips).",
+   "turns": [
+    {"who": "me", "voice": "me", "lang": "en", "gap": 2.0, "text": "Morning Dana, let's go through the single sign-on rollout."},
+    {"who": "dana", "voice": "dana", "lang": "en", "gap": 0.8, "text": "Sure. We still need the SSO checklist from you, ideally by the end of today."},
+    {"who": "me", "voice": "me", "lang": "en", "gap": 0.7, "text": "I'll send the checklist this afternoon, before four o'clock."},
+    {"who": "dana", "voice": "dana", "lang": "en", "gap": 0.8, "text": "Great. And the pilot, do we start with the Berlin office or with Madrid?"},
+    {"who": "me", "voice": "me", "lang": "en", "gap": 0.7, "text": "Let's agree on Berlin first. Madrid follows two weeks later."},
+    {"who": "dana", "voice": "dana", "lang": "en", "gap": 0.8, "text": "Agreed, Berlin first. I'll book the training room for Thursday."},
+    {"who": "dana", "voice": "dana", "lang": "en", "gap": 2.0, "text": "Hi everyone, Omar is joining us from the security team today."},
+    {"who": "omar", "voice": "omar", "lang": "en", "gap": 0.8, "text": "Hello. I have three questions about data retention, it's a short list."},
+    {"who": "me", "voice": "me", "lang": "en", "gap": 0.7, "text": "Go ahead, Omar. We keep transcripts for ninety days by default."},
+    {"who": "omar", "voice": "omar", "lang": "en", "gap": 0.8, "text": "Ninety days works. Can the audio be deleted right after transcription?"},
+    {"who": "me", "voice": "me", "lang": "en", "gap": 0.7, "text": "Yes, the audio is deleted as soon as the transcript is written."},
+    {"who": "dana", "voice": "dana", "lang": "en", "gap": 0.8, "text": "Then I'll send the pilot plan to both of you by Friday."},
+    {"who": "me", "voice": "me", "lang": "en", "gap": 2.0, "text": "Morning Dana, let's go through the single sign-on rollout."},
+    {"who": "dana", "voice": "dana", "lang": "en", "gap": 0.8, "text": "Sure. We still need the SSO checklist from you, ideally by the end of today."},
+    {"who": "me", "voice": "me", "lang": "en", "gap": 0.7, "text": "I'll send the checklist this afternoon, before four o'clock."},
+    {"who": "dana", "voice": "dana", "lang": "en", "gap": 0.8, "text": "Great. And the pilot, do we start with the Berlin office or with Madrid?"},
+    {"who": "me", "voice": "me", "lang": "en", "gap": 0.7, "text": "Let's agree on Berlin first. Madrid follows two weeks later."},
+    {"who": "dana", "voice": "dana", "lang": "en", "gap": 0.8, "text": "Agreed, Berlin first. I'll book the training room for Thursday."},
+    {"who": "dana", "voice": "dana", "lang": "en", "gap": 2.0, "text": "Hi everyone, Omar is joining us from the security team today."},
+    {"who": "omar", "voice": "omar", "lang": "en", "gap": 0.8, "text": "Hello. I have three questions about data retention, it's a short list."},
+    {"who": "me", "voice": "me", "lang": "en", "gap": 0.7, "text": "Go ahead, Omar. We keep transcripts for ninety days by default."},
+    {"who": "omar", "voice": "omar", "lang": "en", "gap": 0.8, "text": "Ninety days works. Can the audio be deleted right after transcription?"},
+    {"who": "me", "voice": "me", "lang": "en", "gap": 0.7, "text": "Yes, the audio is deleted as soon as the transcript is written."},
+    {"who": "dana", "voice": "dana", "lang": "en", "gap": 0.8, "text": "Then I'll send the pilot plan to both of you by Friday."},
+    {"who": "me", "voice": "me", "lang": "en", "gap": 2.0, "text": "Morning Dana, let's go through the single sign-on rollout."},
+    {"who": "dana", "voice": "dana", "lang": "en", "gap": 0.8, "text": "Sure. We still need the SSO checklist from you, ideally by the end of today."},
+    {"who": "me", "voice": "me", "lang": "en", "gap": 0.7, "text": "I'll send the checklist this afternoon, before four o'clock."},
+    {"who": "dana", "voice": "dana", "lang": "en", "gap": 0.8, "text": "Great. And the pilot, do we start with the Berlin office or with Madrid?"},
+    {"who": "me", "voice": "me", "lang": "en", "gap": 0.7, "text": "Let's agree on Berlin first. Madrid follows two weeks later."},
+    {"who": "dana", "voice": "dana", "lang": "en", "gap": 0.8, "text": "Agreed, Berlin first. I'll book the training room for Thursday."},
+    {"who": "dana", "voice": "dana", "lang": "en", "gap": 2.0, "text": "Hi everyone, Omar is joining us from the security team today."},
+    {"who": "omar", "voice": "omar", "lang": "en", "gap": 0.8, "text": "Hello. I have three questions about data retention, it's a short list."},
+    {"who": "me", "voice": "me", "lang": "en", "gap": 0.7, "text": "Go ahead, Omar. We keep transcripts for ninety days by default."},
+    {"who": "omar", "voice": "omar", "lang": "en", "gap": 0.8, "text": "Ninety days works. Can the audio be deleted right after transcription?"},
+    {"who": "me", "voice": "me", "lang": "en", "gap": 0.7, "text": "Yes, the audio is deleted as soon as the transcript is written."},
+    {"who": "dana", "voice": "dana", "lang": "en", "gap": 0.8, "text": "Then I'll send the pilot plan to both of you by Friday."}
+   ]
   }
  ]
 }

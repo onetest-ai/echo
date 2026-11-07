@@ -89,7 +89,7 @@
    "id": "F-NOTES-10",
    "feature": "While recording, a note is timed from its first key; Time inserts the call's time; Flag marks the moment; notes from the tray or `echoctl note` join them",
    "priority": "high",
-   "check": "person",
+   "check": "agent",
    "axes": [
     "call.status"
    ]

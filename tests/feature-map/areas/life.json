@@ -32,14 +32,14 @@
    "id": "F-LIFE-04",
    "feature": "Only one Echo runs at a time",
    "priority": "high",
-   "check": "person",
+   "check": "agent",
    "axes": []
   },
   {
    "id": "F-LIFE-05",
    "feature": "Changing the data folder restarts Echo on the new one and leaves the old one alone",
    "priority": "high",
-   "check": "person",
+   "check": "agent",
    "axes": []
   },
   {

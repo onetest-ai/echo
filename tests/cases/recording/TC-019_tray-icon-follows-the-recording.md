@@ -31,4 +31,5 @@ tags: [recording, tray]
 The tray icon shows idle, armed and recording at the right moments.
 
 ## Notes
+- Stays person-run (tried 2026-11-07): with the user's own Echo running, System Events can't keep the two `echoctl` menu-bar items apart — opening the dev app's item by its pid returned the installed Echo's menu (its real recent calls). A click there could quit or arm the user's Echo, so no agent drives a tray on a Mac where Echo runs. On a Mac without Echo installed it could become an agent case.
 - Split from `recording/TC-001`, whose recording path an agent now runs; only the icon and menu wording need a person.

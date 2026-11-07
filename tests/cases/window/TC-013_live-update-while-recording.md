@@ -34,15 +34,16 @@ external_id: TC-WIN-007
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Navigate to `{{base_url}}/#calls`, click the row `[data-call$="initech-planning"]`, open its Transcript tab | The two turns of Initech planning are shown; the tab Transcript is selected |
+| 1 | Navigate to `{{base_url}}/#calls`, click the row `[role=option][data-call$="initech-planning"]`, open its Transcript tab | The two turns of Initech planning are shown; the tab Transcript is selected |
 | 2 | Run the prelude, then `python3 tests/fixtures/audio/make_audio.py build very-short "$CONV"` | It prints the folder, the length and the turns of very-short; `$CONV` holds `mic.wav`, `remote.wav` and `expected.json` |
-| 3 | Run the prelude, then `nohup bash -c '"$APP" serve --port 7792 --play "$CONV/remote.wav" --quiet & "$APP" dial 127.0.0.1:7792 --me "$CONV/mic.wav" --me-device "BlackHole 2ch" & sleep 2; target/debug/echoctl capture --seconds 16 --title "WIN-013 live update" > "$D/win013.out" 2>&1; wait' > /dev/null 2>&1 &` | Returns at once; the call and the capture run in the background |
-| 4 | Without reloading, wait up to 15 s (`browser_wait_for` the text "WIN-013 live update") | A new row `[data-call$="win-013-live-update"]` appears in the Calls list without a reload |
-| 5 | Wait until `cat "$D/win013.out"` ends with a folder path (about 20 s after step 3), then run the prelude and `target/debug/echoctl transcribe "$(tail -1 "$D/win013.out")"`, and click the new row | "done in …"; the new call opens, and within 15 s its Transcript tab shows "Quick one: is the call at three still on?" without a reload |
+| 3 | Run the prelude, then `nohup bash -c '"$APP" serve --port 7792 --play "$CONV/remote.wav" --quiet & "$APP" dial 127.0.0.1:7792 --me "$CONV/mic.wav" --me-device "BlackHole 2ch" & sleep 2; target/debug/echoctl capture --seconds 12 --title "WIN-013 live update" > "$D/win013.out" 2> "$D/win013.err"; wait' > /dev/null 2>&1 &` | Returns at once; the call and the capture run in the background |
+| 4 | Without reloading, wait up to 15 s (`browser_wait_for` the text "WIN-013 live update") | A new row `[role=option][data-call$="win-013-live-update"]` appears in the Calls list without a reload |
+| 5 | Wait until `cat "$D/win013.out"` prints a folder path (about 15 s after step 3), then run the prelude and `target/debug/echoctl transcribe "$(cat "$D/win013.out")"`, and click the new row | "done in …"; the new call opens, and within 15 s its Transcript tab shows the line "is the call at three still on" (Whisper's punctuation may differ: "Quick one. Is …") and Me's answer, without a reload |
 | 6 | Look at the Initech planning row and, after clicking it, its tab | The row is still in the list; it opens on Transcript as before (the refresh did not reset the tab you had chosen) |
 
 ## Expected Final State
 A call recorded and transcribed behind the window's back shows up and fills in by itself; what was open stays as it was.
 
 ## Notes
+- Run on 2026-11-07 (S-17): PASS. `capture` prints the folder on stdout and aborts at exit with 134 (see `recording/TC-014`), so its backtrace goes to stderr: keep the two apart. 12 s keeps the capture close to the 9 s call (after the hang-up the mic falls back to the room).
 - Original step 2 (scroll position and selected text of the other call) is not scripted: Initech planning has two turns, nothing to scroll. The tab check stands in for it.

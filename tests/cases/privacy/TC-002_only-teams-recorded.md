@@ -47,4 +47,5 @@ Audio that is not the call app's never reaches the Remote track, and the call ap
 - Nothing to undo: the call lives in the run's own data folder
 
 ## Notes
+- Run on 2026-11-07 (S-18): PASS — WER 0.0, 0 lines of the other conversation. `afplay` plays out loud in the room, and after TestCall hangs up (about 38 s) the mic reopens on the Mac's microphone until the capture ends (42 s): the other conversation's last line ends at about 38 s, so keep the timing as it is.
 - TestCall plays through its own process; the app's audio tap follows it, so `afplay` is outside it. On headphones or speakers makes no difference here: the user's mic is BlackHole, not an acoustic microphone. The faint pickup by a real microphone on speakers remains a person's check.

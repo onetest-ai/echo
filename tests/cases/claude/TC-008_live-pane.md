@@ -28,3 +28,6 @@ external_id: TC-CLA-007
 
 ## Expected Final State
 A session shows the call live while it records.
+
+## Notes
+- Stays person-run: the pane is a band in an interactive Claude Code session (the status-line mod) and live notes need a signed-in model; nothing an agent can look at from outside the session.

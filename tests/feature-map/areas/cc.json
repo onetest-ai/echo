@@ -25,7 +25,7 @@
    "id": "F-CC-03",
    "feature": "One run per call: a session's claim holds while its process works; an explicit Write minutes takes over a session's fresh claim, automatic minutes yield",
    "priority": "high",
-   "check": "person",
+   "check": "agent",
    "axes": [
     "call.run",
     "call.auto"

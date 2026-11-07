@@ -27,3 +27,6 @@ external_id: TC-PRIV-007
 
 ## Expected Final State
 Nothing goes out on the user's behalf without their yes to that item.
+
+## Notes
+- Stays person-run: follow-ups are offered in a signed-in session after minutes; Echo's own runs send nothing (`claude/TC-003` step 8, `claude/TC-013`, `hostile/TC-018`).

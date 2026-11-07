@@ -7,7 +7,7 @@ differ only in their times. Standard library Python, and `target/debug/echoctl` 
 points elsewhere).
 
 ```bash
-tests/fixtures/make_data.py <empty dir> [--set small|standard|hostile]     # default small
+tests/fixtures/make_data.py <empty dir> [--set small|standard|hostile] [--ai fake|local]   # default small
 tests/fixtures/make-data.sh <empty dir>                                    # the same as --set small
 tests/fixtures/serve.sh up <empty dir> <port> [--set small|standard|hostile]
 tests/fixtures/serve.sh down <dir>
@@ -73,6 +73,8 @@ They are hermetic. `<dir>/env` puts these in front of the app, and `serve.sh` so
   minutes, Prepare or Send to Claude fails at once instead of reaching a real account.
 - `<dir>/bin/open` catches mail drafts: a `mailto:` link (`echoctl compose`, a Yolo run's draft) is appended to
   `<dir>/mail-drafts.log` instead of opening the user's real mail app; anything else goes to the system's `open`.
+  Every call is logged to `<dir>/open.log`; with `ECHOCTL_TEST_OPEN_LOG_ONLY=1` in the app's or server's environment
+  nothing is opened at all (no browser tab or Finder window on the tester's screen, no restart of an installed Echo).
 - `ECHOCTL_PLUGIN_MARKET` makes the built-in marketplace a local folder, `<dir>/markets/built-in` (no network).
 - `CLAUDE_CONFIG_DIR` is `<dir>/claude-config`. It holds an old Echo plugin record (the stale-plugin Inbox item).
 - `ECHOCTL_NOTES_NO_SHELL=1` starts Claude Code directly, not through the login shell.
@@ -96,6 +98,14 @@ cases that need one say `ai: local` and run one model job each, no more.
 
 Automatic minutes are on and several calls are due. **Serve these sets with `window --serve` only, never the Echo
 app**: the app would start minutes runs (against the fake, so they fail).
+
+### `small` for the Echo app (`--ai fake` / `--ai local`)
+
+Plain `small` (no `--ai`) is what the window cases expect, and has no fake `claude`: fine for `window --serve`, but the
+Echo app run on it starts Claude Code by itself (preps, meeting types, who does a task) on the built-in profile — the
+user's own account. Cases that start the app (`echoctl app run`: the recording, minutes and lifecycle cases) build
+`small` with `--ai fake` (the hermetic env of the standard sets: every run refused) or `--ai local` (also the profile
+"Qwen", the default, so minutes runs go to the local model). Nothing else in `small` changes.
 
 ## The manifest
 

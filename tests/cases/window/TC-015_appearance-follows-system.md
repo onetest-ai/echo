@@ -5,8 +5,8 @@ priority: low
 type: functional
 requirements: [F-SET-04]
 module: window
-run: person
-platform: macos
+run: agent
+platform: any
 tags: [appearance]
 external_id: TC-WIN-010
 ---
@@ -16,14 +16,20 @@ external_id: TC-WIN-010
 **Module:** Window | **Priority:** Low | **Type:** Functional
 
 ## Preconditions
-- Echo window open; Settings → Appearance set to follow the system
+- The window served on test data (`tests/fixtures/serve.sh up`), the page loaded from `{{base_url}}/`; Settings → General → Appearance on "System" (the default)
+- The system's appearance is emulated in the browser (`browser_emulate_media` / `page.emulateMedia({colorScheme})`): never System Settings
 
 ## Steps
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Switch macOS to Dark | The window turns dark; all text stays readable |
-| 2 | Switch back to Light | The window turns light |
+| 1 | Emulate `colorScheme: light`, open `{{base_url}}/#settings/general` | Appearance's "System" (`[data-theme-set=""]`) is pressed; `document.documentElement.dataset.theme` is unset; the body is light (`rgb(246, 246, 248)`), text dark |
+| 2 | Emulate `colorScheme: dark` (no reload) | Within a second the body turns dark (`rgb(20, 20, 24)`), headings light (`rgb(236, 236, 241)`); all text readable (screenshot) |
+| 3 | Emulate `colorScheme: light` again | Back to light |
 
 ## Expected Final State
-The window follows the system appearance both ways.
+With "System", the window follows the system appearance both ways, live.
+
+## Notes
+- The native window is a WebKit view that hands the page the system's `prefers-color-scheme` (`app.css`, `@media (prefers-color-scheme: dark)`; `app.js` redraws graphs on its change). That the webview passes a real macOS switch through stays a person's look once.
+- Run on 2026-11-07 (S-21, served window): PASS.

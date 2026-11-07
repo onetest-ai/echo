@@ -29,4 +29,5 @@ external_id: TC-REC-020
 A call recorded without system audio says so.
 
 ## Notes
+- Stays person-run: System Audio Recording is denied in System Settings (by the user, S-16). With it denied, a TestCall call would do for the call itself.
 - Moved from permissions/TC-003 step 3.

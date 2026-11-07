@@ -525,9 +525,12 @@ LOCAL_PASS = """case "$ANTHROPIC_BASE_URL" in http://localhost:*|http://127.0.0.
 
 
 # `open` for the test data: a mail draft (`echoctl compose` opens a mailto: link) is written to <dir>/mail-drafts.log
-# instead of the user's real mail app; anything else goes to the system's open.
+# instead of the user's real mail app; anything else goes to the system's open. Every call is logged to <dir>/open.log;
+# with ECHOCTL_TEST_OPEN_LOG_ONLY=1 in the app's (or server's) environment, nothing more: no Finder or browser window.
 FAKE_OPEN = """#!/bin/sh
+printf '%s\\n' "$*" >> "$(dirname "$0")/../open.log"
 for a in "$@"; do case "$a" in mailto:*) printf '%s\\n' "$a" >> "$(dirname "$0")/../mail-drafts.log"; echo "test data: mail draft logged"; exit 0;; esac; done
+[ -n "$ECHOCTL_TEST_OPEN_LOG_ONLY" ] && exit 0
 exec /usr/bin/open "$@"
 """
 
@@ -2202,15 +2205,16 @@ def main():
     ap.add_argument("--set", choices=["small", "standard", "hostile"], default="small")
     ap.add_argument("--now", help="build as if it were this local time (ISO, e.g. 2026-11-06T12:00): for checks that "
                     "don't depend on Today matching the real clock, at hours the real now can't be built")
-    ap.add_argument("--ai", choices=["fake", "local"], default="fake",
-                    help="standard/hostile: fake (every Claude Code run is refused) or local (runs on the local model profile, "
-                    "the default then, go to the real Claude Code against Ollama; all others are still refused)")
+    ap.add_argument("--ai", choices=["fake", "local"],
+                    help="fake (every Claude Code run is refused; the default for standard/hostile) or local (runs on the local model "
+                    "profile, the default then, go to the real Claude Code against Ollama; all others are still refused). small: only "
+                    "when given, for the Echo app run on it (its schedulers start Claude Code), else the plain small set")
     ap.add_argument("--ai-url", help="with --ai local: the model server's address when it isn't this computer, e.g. "
                     "http://192.0.2.10:11434 (a faster machine on the network; only that exact address is let through)")
     ap.add_argument("--ai-model", help="with --ai local: the model on that server (default qwen3.8:27b-mlx here, qwen3.8:27b on Windows)")
     a = ap.parse_args()
     global NOW, AI, AI_URL, AI_MODEL
-    AI, AI_URL, AI_MODEL = a.ai, (a.ai_url or "").rstrip("/") or None, a.ai_model
+    AI, AI_URL, AI_MODEL = a.ai or "fake", (a.ai_url or "").rstrip("/") or None, a.ai_model
     if AI == "local" and not AI_URL:
         AI_URL, AI_MODEL = model_server(AI_MODEL)
     if (AI_URL or AI_MODEL) and AI != "local":
@@ -2236,7 +2240,13 @@ def main():
         f.write(f"export ECHOCTL_HOME={sh(d.home)} ECHOCTL_CONFIG_DIR={sh(d.config)}\n"
                 "unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_CHILD_SESSION AI_AGENT\n")
     if a.set == "small":
+        if a.ai:
+            setup_env(d)  # hermetic, as the standard sets: the app run on it starts no run on a real account
         build_small(d)
+        if a.ai == "local":
+            d.q("ai", "add-local", "ollama", "--model", AI_MODEL or LOCAL_MODEL, *(["--url", AI_URL] if AI_URL else []),
+                "--name", "Qwen · this computer" if not AI_URL else "Qwen · test server")
+            d.q("ai", "default", "ollama")
     else:
         build_standard(d, hostile=a.set == "hostile")
     d.manifest["ai"] = AI

@@ -45,6 +45,10 @@ into a scenario (`app_profile.md` → "Scenarios").
 | [S-11](scenarios/S-11_set-echo-up-your-way.md) | 36 | Set Echo up your way: appearance, recording, languages, About me, a template, a meeting type, the vocabulary |
 | [S-12](scenarios/S-12_skills-and-ai-profiles-and-plugins.md) | 30 | Skills and AI: skills on and off, AI profiles and the default, plugins and marketplaces |
 | [S-13](scenarios/S-13_find-your-way-around.md) | 18 | Find your way around: the activity bar, panels, layout, the actions palette, the status bar and shortcuts |
+| [S-17](scenarios/S-17_a-recorded-call-end-to-end.md) | 12 | A recorded call end to end with the test call: two tracks, record the next call, notes while recording, the window updating, no audio kept, a pinned language, a very short call, notes in the minutes, minutes written by themselves 15 minutes after (and later after a note), the minutes in the browser and Finder (`small --ai local`; 1 person stage: the tray) |
+| [S-18](scenarios/S-18_recording-off-the-happy-path.md) | 23 | Recording off the happy path with the test call: mid-call, cancel, expiry, stop from the terminal and the pill, Ctrl-C, a crash, silence, two voices, opt-in only, only the call app, a drop and rejoin, Echo's "Record?" dialog (`small --ai fake`; 9 person stages: devices, speakers, mute, sleep, an hour-long call, permissions denied, shared screens) |
+| [S-19](scenarios/S-19_claude-code-and-the-minutes.md) | 12 | Claude Code and the minutes on the local model: write now and for a short call, a session's claim, the minutes folder, a wrong model, doctor, automatic minutes off, catch-up after a quit (`small --ai local`; 5 person stages: a signed-in session) |
+| [S-21](scenarios/S-21_living-with-echo.md) | 12 | Living with Echo: one instance, quit and back, another data folder, the window following the system's appearance (`small --ai fake`; 8 person stages: login, `app start`, the native window, updates, offline, the network) |
 | [S-23](scenarios/S-23_a-busy-day-of-calls-and-minutes-in-every-state.md) | 27 | A busy day of calls and minutes in every state: icons, countdown and Not yet, memo and Teams import, chat, screens, live notes, what moved, failed and waiting runs, the prep tab, delete and restore (`standard` data) |
 | [S-24](scenarios/S-24_the-calendar-preps-and-the-inbox-on-a-busy-day.md) | 33 | The calendar, preps and the Inbox on a busy day: block and card states, responses, series, preps with every section, the Inbox's badge, groups, folds, buttons and decisions (`standard` data) |
 | [S-25](scenarios/S-25_who-owes-what-on-a-full-board.md) | 21 | Who owes what on a full board: Tasks, piles, filters, badges, the board and its columns (`standard` data) |
@@ -53,23 +57,23 @@ into a scenario (`app_profile.md` → "Scenarios").
 | [S-28](scenarios/S-28_echo-from-the-terminal.md) | 11 | Echo from the terminal: help, threads and candidates against the window, `read` and `echo://` links in the window, `m365` without `--yes`, series and settings, clients and organisations, a thread made and changed, the work's edits, one call's commands (`standard` data) |
 | [S-29](scenarios/S-29_notes-transcripts-settings-and-today-off-the-happy-path.md) | 10 | Notes, transcripts, settings and Today off the happy path: a Teams import, empty transcripts, to-dos, edits, comments, notes not lost, unreadable and changed files, a broken config, Today's cards and ⌘K (`standard` data) |
 | [S-30](scenarios/S-30_minutes-and-the-work-on-a-local-model.md) | 8 | Minutes and the work on a local model: no Claude Code or no plugin, a template by title, write again with another, a memo, a prep, Yolo, a thread's sync that keeps your fields, a call's profile (`standard` data, `--ai local`: real Claude Code runs) |
-| [S-31](scenarios/S-31_a-real-minutes-run-on-others-words.md) | 1 | A real minutes run on others' words: only its call's folder changes, nothing runs in the page (`hostile` data, `--ai local`) |
+| [S-31](scenarios/S-31_a-real-minutes-run-on-others-words.md) | 3 | A real minutes run on others' words: only its call's folder changes, nothing runs in the page, orders in the transcript and settings that allow everything change nothing (`hostile` data, `--ai local`) |
 
 ## Areas
 
 | Area | Agent | Person | What |
 |---|---|---|---|
 | `cases/today` | 6 | 0 | Today: Your day, My work |
-| `cases/window` | 19 | 3 | Calls, minutes, transcript, notes, delete, calendar views |
+| `cases/window` | 21 | 1 | Calls, minutes, transcript, notes, delete, calendar views |
 | `cases/calendar` | 1 | 10 | Scheduling, Microsoft 365 calendar, meeting chat |
-| `cases/cli` | 13 | 3 | `echoctl` commands |
-| `cases/claude` | 2 | 15 | Claude Code plugin and minutes runs |
+| `cases/cli` | 15 | 1 | `echoctl` commands |
+| `cases/claude` | 13 | 4 | Claude Code plugin and minutes runs |
 | `cases/privacy` | 3 | 4 | Opt-in, local data, what goes online |
 | `cases/transcription` | 5 | 1 | Transcript quality and languages |
 | `cases/install` | 0 | 7 | DMG, first run, data folder, models |
 | `cases/permissions` | 0 | 7 | macOS permissions and Health |
-| `cases/recording` | 11 | 8 | Arming, recording, stopping, interruptions |
-| `cases/lifecycle` | 0 | 9 | Login, quit, single instance, updates, notifications |
+| `cases/recording` | 14 | 8 | Arming, recording, stopping, interruptions |
+| `cases/lifecycle` | 5 | 4 | Login, quit, single instance, updates, notifications |
 | `cases/windows` | 0 | 9 | The Windows build |
 
 ## Person-run cases

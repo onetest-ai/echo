@@ -50,4 +50,5 @@ A language pinned for one call applies to that call only; the workspace language
 - Run the prelude, then `target/debug/echoctl config --languages en`
 
 ## Notes
+- Run on 2026-11-07 (S-17): PASS but for `capture`'s exit code (134 after saving, see `recording/TC-014`): 8 segments all `uk`; the next call `en`; workspace languages untouched.
 - The pin is `capture --languages`; the record menu's "Only Ukrainian" and `echoctl arm --languages uk` write the same `languages` into `meta.json`.

@@ -37,7 +37,7 @@ external_id: TC-PRIV-003, TC-TRN-002
 | 1 | Run the prelude, then `python3 tests/fixtures/audio/make_audio.py build very-short "$CONV"` | It prints the folder, the length and the turns of very-short; `$CONV` holds `mic.wav`, `remote.wav` and `expected.json` |
 | 2 | Run the prelude, then `"$APP" serve --port 7792 --play "$CONV/remote.wav" --quiet & "$APP" dial 127.0.0.1:7792 --me "$CONV/mic.wav" --me-device "BlackHole 2ch" & sleep 2; target/debug/echoctl capture --seconds 16 --title "REC-P003 no audio" 2> "$D/capture.err" & CAP=$!; sleep 8; ls "$ECHOCTL_HOME"/calls/*-rec-p003-no-audio; wait` | While the call records, the folder lists `mic.wav` and `remote.wav` (audio exists while recording) |
 | 3 | Run the prelude, then `CALL="$(ls -d "$ECHOCTL_HOME"/calls/*-rec-p003-no-audio)"; target/debug/echoctl transcribe "$CALL"; ls "$CALL"` | "done in …"; the folder lists `meta.json`, `segments.json` and `transcript.md`, and no `.wav` |
-| 4 | Run the prelude, then `find "$ECHOCTL_HOME" "$ECHOCTL_CONFIG_DIR" -name '*.wav'` | Nothing is printed (audio exists only while a call records or transcribes) |
+| 4 | Run the prelude, then `find "$ECHOCTL_HOME" "$ECHOCTL_CONFIG_DIR" -name '*.wav' -newer "$CONV/expected.json"` | Nothing is printed (audio exists only while a call records or transcribes; `-newer` leaves out the audio earlier stages of a scenario kept on purpose with `--keep-audio`) |
 
 ## Expected Final State
 Once transcribed, only text stays: not one `.wav` under the data folder or the config folder.
@@ -46,4 +46,5 @@ Once transcribed, only text stays: not one `.wav` under the data folder or the c
 - Nothing to undo: the call lives in the run's own data folder
 
 ## Notes
+- Run on 2026-11-07 (S-17): PASS; a plain `find` there also listed stage 1's `rec-014` tracks, kept with `--keep-audio` on purpose, hence `-newer`.
 - `transcribe --keep-audio`, used by the other recording cases to inspect tracks, keeps the files on purpose; this case never uses it.

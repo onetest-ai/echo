@@ -29,3 +29,6 @@ external_id: TC-UPD-001
 
 ## Expected Final State
 Updating is one click and loses nothing.
+
+## Notes
+- Stays person-run: updates come from GitHub Releases (the URL is fixed) and replace an installed Echo.app; on a dev Mac that is the user's own.

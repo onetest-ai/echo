@@ -34,7 +34,7 @@ tags: [recording, test-call, silence]
 |---|--------|----------------|
 | 1 | Run the prelude, then `python3 tests/fixtures/audio/make_audio.py build long-silence "$CONV"` | It prints the folder, the length and the turns of long-silence; `$CONV` holds `mic.wav`, `remote.wav` and `expected.json` |
 | 2 | Run the prelude, then `"$APP" serve --port 7792 --play "$CONV/remote.wav" --quiet & "$APP" dial 127.0.0.1:7792 --me "$CONV/mic.wav" --me-device "BlackHole 2ch" & sleep 2; target/debug/echoctl capture --seconds 42 --title "REC-017 silence" 2> "$D/capture.err"; wait` | Exit code 0; the last line printed is the call folder `…-rec-017-silence` |
-| 3 | Read `meta.json` in that folder | Both tracks (`mic.wav`, `remote.wav`) have `frames` ÷ `sample_rate` within 1.0 s of each other, and neither has an event of kind `restarting` or `write_failed` |
+| 3 | Read `meta.json` in that folder | Both tracks (`mic.wav`, `remote.wav`) have `frames` ÷ `sample_rate` within 1.0 s of each other; no event of kind `write_failed`, and no `restarting` before the call's end (one on `mic.wav` at about 38–40 s, "Teams released its mic; using the default input", is TestCall hanging up) |
 | 4 | Run the prelude, then `CALL="$(ls -d "$ECHOCTL_HOME"/calls/*-rec-017-silence)"; cp "$CONV/expected.json" "$CALL/"; target/debug/echoctl transcribe "$CALL" --keep-audio` | "done in …"; `transcript.md` and `segments.json` exist |
 | 5 | Run the prelude, then `CALL="$(ls -d "$ECHOCTL_HOME"/calls/*-rec-017-silence)"; python3 tests/fixtures/audio/make_audio.py score "$CALL"` | Exit code 0; `"pass": true`; `transcribed_in_silence` is an empty list (nothing between 6 s and 26 s); the three turns have the right speakers (Me, Remote, Me) |
 
@@ -43,3 +43,6 @@ The silent stretch is in the tracks as silence, the transcript has nothing there
 
 ## Teardown
 - Nothing to undo: the call lives in the run's own data folder
+
+## Notes
+- Run on 2026-11-07 (S-18): PASS — WER 0.0, nothing in the silence, the only `restarting` at 40.0 s (TestCall's hang-up).

@@ -28,3 +28,6 @@ external_id: TC-CLI-004
 
 ## Expected Final State
 With the app quit, status says so and `app start` starts it.
+
+## Notes
+- Stays person-run: `echoctl app start` opens the installed Echo.app through LaunchServices when there is one (`app::spawn_app`): on a dev Mac that is the user's own Echo. `echoctl app quit` and a clean restart are `lifecycle/TC-003` (agent).

@@ -29,3 +29,6 @@ external_id: TC-CLA-010
 
 ## Expected Final State
 A signed-out Claude Code is explained and recovered from without losing the call.
+
+## Notes
+- Stays person-run: it signs a real Claude Code account out and in. The "needs you to sign in" state on test data is in the window cases of S-23 (a run waiting for a sign-in).

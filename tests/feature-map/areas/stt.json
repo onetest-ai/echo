@@ -45,7 +45,7 @@
    "id": "F-STT-05",
    "feature": "A transcription server (another Echo or OpenAI-compatible) takes the utterances; when it is down this computer's model takes over",
    "priority": "medium",
-   "check": "person",
+   "check": "agent",
    "axes": [
     "set.server"
    ]

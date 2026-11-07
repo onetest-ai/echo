@@ -30,4 +30,5 @@ external_id: TC-REC-022
 Snapshots are kept sparse.
 
 ## Notes
+- Stays person-run: full Screen Recording is granted in System Settings and someone shares slides in a Teams meeting; TestCall has no screen share.
 - Moved from permissions/TC-007 steps 2–3.

@@ -19,6 +19,7 @@ tags: [recording, test-call, speakers]
 - This Mac has the test call app (`tests/tools/testcall/build.sh` built `tests/tools/testcall/build/TestCall.app`), BlackHole 2ch and ffmpeg; Microphone and System Audio Recording are granted to the process running the steps and to TestCall; nothing else on this Mac plays audio or uses BlackHole
 - Every Bash call starts with the prelude (a fresh shell each time; the steps below call it "the prelude"): `. <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; CONV="$D/conv"; APP="$PWD/tests/tools/testcall/build/TestCall.app/Contents/MacOS/testcall"; export D CONV APP ECHOCTL_CALL_APP_BUNDLE=ai.onetest.echo.testcall`
 - The speech model is linked into the test config: `ln -s "$HOME/Library/Application Support/echo/models" "$ECHOCTL_CONFIG_DIR/models"`, then `target/debug/echoctl model use large-v3-turbo-q5_0` and `target/debug/echoctl config --languages en`
+- The speaker model needs NVIDIA's NeMo-Speech runtime, which a debug build does not carry: `TMPDIR="$D" scripts/fetch-nemo-speech.sh "$ECHOCTL_CONFIG_DIR/nemo-speech"` once per run (into the run's config, `.ai-run/guides/development/dev-workflow.md` R5); without it `speakers` says "this call has no detected speakers"
 - Both ends of the call run on this Mac: `serve` and `dial` on `127.0.0.1`, as in the steps
 
 ## Test Data
@@ -46,4 +47,5 @@ One remote track, two voices: both are Remote, and the transcript tells them apa
 - Nothing to undo: the call lives in the run's own data folder
 
 ## Notes
+- Run on 2026-11-07 (S-18): PASS with the runtime fetched (transcription 19 s, the speaker model 15 s): Speaker 1 = Dana's lines, Speaker 2 = Omar's; WER 0.029. Without it: steps 1–4 pass, 5–6 fail with "no detected speakers".
 - If the detector merges the two voices into one speaker, step 5 fails: that is what this case checks (F-STT-04).

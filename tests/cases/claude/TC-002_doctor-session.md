@@ -28,3 +28,6 @@ external_id: TC-CLA-002
 
 ## Expected Final State
 doctor is quiet when all is well and guides, without acting, when a permission is missing.
+
+## Notes
+- Stays person-run: it needs a signed-in Claude Code session with the plugin and a permission switched off in System Settings. `echoctl doctor` from the app is `cli/TC-005` (agent).
