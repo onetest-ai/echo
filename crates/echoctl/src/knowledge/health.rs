@@ -859,12 +859,15 @@ pub struct Applied {
 
 /// Write fixes: each file only if it is still the text its fixes were computed on (several fixes of one file go in
 /// together), through `write_atomic`, and slice 1's `log.md` line when rows went into the index; then one commit of
-/// the written files that had no changes of the user's (when the vault commits) and an activity line per page.
+/// the written files that had no changes of the user's (when the vault commits) and an activity line per page. Under
+/// the vault's save lock, as a minutes save and an ingest write are (final review F3): else one of them could read the
+/// index or the log before the other's write, and a row or a line would be lost.
 pub fn apply(v: &Vault, fixes: &[Fix]) -> Result<Applied> {
     super::refuse_headless()?;
     if !super::available(v) {
         bail!("the vault's folder isn't there: {}", v.root.display());
     }
+    let _save = super::export::vault_lock(v)?;
     let mut files: Vec<(&str, Vec<&Fix>)> = vec![];
     for f in fixes {
         match files.iter_mut().find(|(p, _)| *p == f.path) {

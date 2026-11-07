@@ -397,6 +397,50 @@ fn an_index_row_fix_writes_slice_1s_log_line_in_the_same_commit() {
     assert_eq!(files.lines().collect::<Vec<_>>(), ["knowledge/CATALOG.md", "log.md"], "one commit with both");
 }
 
+#[test]
+fn a_fix_waits_for_a_save_into_the_vault_and_both_land() {
+    // Final review F3: a minutes save holds the vault's save lock from reading the index and the log to writing them;
+    // a fix that wrote meanwhile would lose a row or a line to it.
+    let (_env, root) = crate::paths::testenv::folders("kn-health-save-lock");
+    let t = fixture::twin(&root.join("twin"));
+    fixture::write(&t, "log.md", "# Log\n\n- 2026-01-01 · created · the vault\n");
+    let v = knowledge::add(&t, AddOpts { name: Some("Twin".into()), ..Default::default() }).unwrap();
+    let key = "not_in_index:knowledge/notes/2026-01-03-c.md";
+    let row = fix(&v, key, None).unwrap();
+    let (index, log) = (t.join("knowledge/CATALOG.md"), t.join("log.md"));
+    let read = |p: &Path| std::fs::read_to_string(p).unwrap();
+    let held = knowledge::export::vault_lock(&v).unwrap();
+    let (cat, lines) = (read(&index), read(&log));
+    let go = std::sync::Arc::new(std::sync::Barrier::new(2));
+    let applying = {
+        let (v, go) = (v.clone(), go.clone());
+        std::thread::spawn(move || {
+            go.wait();
+            apply(&v, &[row])
+        })
+    };
+    go.wait();
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    // The save writes its row and its line, from what it read before, and lets go.
+    let saved = "| [2026-01-04-d.md](notes/2026-01-04-d.md) | fourth | 2026-01-04 |";
+    crate::paths::write_atomic(&index, catalog::insert_row(&cat, "Notes", saved, "2026-01-04").unwrap().unwrap().as_bytes()).unwrap();
+    crate::paths::write_atomic(&log, format!("{lines}- 2026-01-04 · added · knowledge/notes/2026-01-04-d.md\n").as_bytes()).unwrap();
+    drop(held);
+    let a = apply_done(applying);
+    assert_eq!((a.written.len(), a.changed_since.as_slice()), (0, ["knowledge/CATALOG.md".to_string()].as_slice()), "the fix waited, and found the index changed since: {a:?}");
+    assert!(read(&index).contains(saved) && read(&log).contains("2026-01-04 · added"), "the save's row and line are there");
+    // Computed again, it lands beside them.
+    let b = apply(&v, &[fix(&v, key, None).unwrap()]).unwrap();
+    assert_eq!(b.written, ["knowledge/CATALOG.md", "log.md"]);
+    let (i, l) = (read(&index), read(&log));
+    assert!(i.contains(saved) && i.contains("(notes/2026-01-03-c.md)"), "{i}");
+    assert!(l.contains("2026-01-04 · added") && l.contains("1 page added to the index by Echo"), "{l}");
+}
+
+fn apply_done(t: std::thread::JoinHandle<anyhow::Result<Applied>>) -> Applied {
+    t.join().unwrap().unwrap()
+}
+
 /// The twin with dead index rows: a wikilink on a table row, a link both on a row and in prose, two on one row.
 fn dead_rows(root: &Path) -> Vault {
     let t = fixture::twin(&root.join("twin"));

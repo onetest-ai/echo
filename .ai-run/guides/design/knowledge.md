@@ -193,8 +193,8 @@ replaced by a tag the taxonomy allows that the user picks, in `tags` (dropped wh
 index: slice 1's row (`catalog::insert`) and its `log.md` line (`page::log_rows`, as `index_add` writes it), in the same
 commit. Each fix is a list of operations that find their place in the text they are given, so *Fix all* applies several
 to one file in one write; one with nothing left to do there (another fix removed its row) is `skipped`, with why.
-`apply` writes each file only if its sha256 is still the fixes' `base` (else `changed_since`, left as it is), by
-`write_atomic`, then one commit of the written files that were clean before (X-G2, `git::dirty` fails safe — `log.md`
+`apply` takes the vault's `save.lock` (as a minutes save and an ingest write do: final review F3), then writes each
+file only if its sha256 is still the fixes' `base` (else `changed_since`, left as it is), by `write_atomic`, then one commit of the written files that were clean before (X-G2, `git::dirty` fails safe — `log.md`
 included), named in `committed`, and one activity line per page (`by: health`, the commit id only for a file in the
 commit). A fix depends on more than its file — the whole index (the closest page), the page a row is for, today's date —
 so the page sends back both the `base` and the `sha` of the text it was shown (ruling R37): `kn_fix` / `kn_fix_all` take
@@ -782,6 +782,16 @@ What the code does, which is the spec's wording except where a row says otherwis
 | Window local storage `echo.kn.*` | Last vault, unsaved drafts | the page (per viewer) |
 
 The spec's `<id>/state.json` was not needed: what it would hold is per viewer and lives in local storage.
+
+**Lock order** (per vault, checked in the final review's F3; a holder only ever takes a lock to its right):
+`ingest/run.lock` · `lint/run.lock` (a run's whole life; its thread takes only `ingest.lock`, `review.lock`,
+`health.lock`) → `save.lock` (`export::save`, `save_past`, `review::write`, `health::apply`) or `sources.lock`
+(`sources::write_source`) → `review.lock` → `ingest.lock`; `activity.lock`, `health.lock`, `vaults.lock` and a call's
+`.knowledge.lock` are leaves. `save.lock` and `sources.lock` are never held together (the new-calls rule adds its source
+after the minutes save has let go, then starts the run), nor is either taken under a `run.lock`; `review.lock`'s and
+`ingest.lock`'s changes are closures that take no other lock. `health::apply` takes `save.lock` first, before git is
+asked and before any file is read: the index and `log.md` are the files a minutes save and an ingest write change
+under it (`save.lock` → git → `activity.lock`).
 
 ## Measured
 
