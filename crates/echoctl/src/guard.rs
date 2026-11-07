@@ -739,10 +739,6 @@ impl VaultScope {
     /// `!<the plugins folder's>`), a folder below `from` — ripgrep then never enters it —, or take none of their files;
     /// no glob, or a `type` (Echo doesn't read ripgrep's types), takes them all.
     fn around_plugins(&self, whole: bool, g: Option<&str>, typed: bool, from: &Path) -> Result<(), String> {
-        let found = plugin_folders(from)?;
-        if found.is_empty() {
-            return Ok(());
-        }
         let all = match g {
             Some(g) => readings(g, whole)?,
             None => vec![],
@@ -750,6 +746,19 @@ impl VaultScope {
         let last = all.iter().rposition(|r| !r.starts_with('!'));
         let pruning: Vec<&str> = all[last.map_or(0, |i| i + 1)..].iter().filter_map(|r| r.strip_prefix('!')).collect();
         let positive: Vec<&String> = all.iter().filter(|r| !r.starts_with('!')).collect();
+        // Where it looks: `from`, and where an absolute glob starts (Glob may search from there).
+        let mut roots = vec![from.to_path_buf()];
+        for (base, _) in positive.iter().filter_map(|r| absolute(r, from)) {
+            if !roots.iter().any(|x| base.starts_with(x)) {
+                roots.push(base);
+            }
+        }
+        let mut found = vec![];
+        for r in &roots {
+            found.extend(plugin_folders(r)?);
+        }
+        found.sort();
+        found.dedup();
         for dir in found {
             let obsidian = dir.parent().unwrap_or(&dir).to_path_buf();
             let named = |d: &Path| d != from && d.starts_with(from) && d.file_name().is_some_and(|n| pruning.contains(&n.to_string_lossy().as_ref()));
@@ -1142,14 +1151,10 @@ fn files_under(dir: &Path) -> Result<Vec<PathBuf>, String> {
 /// alone takes a file of that name at any depth); an absolute one, what follows its fixed part from there.
 fn takes(reading: &str, from: &Path, file: &Path) -> bool {
     let r = reading.trim_end_matches('/');
-    let (base, pattern) = if r.starts_with('/') || Path::new(r).is_absolute() {
-        let fixed = match r.find('*') {
-            Some(w) => &r[..r[..w].rfind('/').map_or(0, |s| s + 1)],
-            None => r,
-        };
-        match vault_path(Some(fixed), from) {
-            Ok(b) => (b, &r[fixed.len()..]),
-            Err(_) => return true,
+    let (base, pattern) = if is_absolute(r) {
+        match absolute(r, from) {
+            Some(x) => x,
+            None => return true,
         }
     } else {
         (from.to_path_buf(), r)
@@ -1158,6 +1163,24 @@ fn takes(reading: &str, from: &Path, file: &Path) -> bool {
     let names: Vec<String> = rel.components().map(lower).collect();
     let segs = parse_glob(pattern.trim_matches('/'));
     (0..names.len()).any(|k| whole_match(&segs, &names[k..]))
+}
+
+fn is_absolute(g: &str) -> bool {
+    g.starts_with('/') || Path::new(g).is_absolute()
+}
+
+/// An absolute glob's start — its fixed part, up to the last folder before its first `*`, resolved — and the rest of
+/// it. None: a relative glob, or one whose start can't be resolved.
+fn absolute<'a>(g: &'a str, from: &Path) -> Option<(PathBuf, &'a str)> {
+    let g = g.trim_end_matches('/');
+    if !is_absolute(g) {
+        return None;
+    }
+    let fixed = match g.find('*') {
+        Some(w) => &g[..g[..w].rfind('/').map_or(0, |s| s + 1)],
+        None => g,
+    };
+    vault_path(Some(fixed), from).ok().map(|b| (b, &g[fixed.len()..]))
 }
 
 /// Do the segments `segs` take all of `names` (folded): `**` any number of whole names, a name one?
@@ -1912,6 +1935,8 @@ mod tests {
                 ("Glob", json!({"pattern": "*/plugins/**", "path": ".obsidian"})),
                 // A name without a folder is any file of that name below: the plugins' too.
                 ("Glob", json!({"pattern": "*.json", "path": ".obsidian"})),
+                // An absolute pattern looks where it starts, whatever the path.
+                ("Glob", json!({"pattern": format!("{}/.obsidian/**/*.json", p(base)), "path": "knowledge/clients"})),
             ] {
                 assert!(denied(d(t, input.clone())), "{name}: {t} {input}");
             }
