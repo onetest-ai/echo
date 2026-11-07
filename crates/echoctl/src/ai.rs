@@ -1779,16 +1779,18 @@ pub mod fake {
             r#"#!/bin/sh
 d="$CLAUDE_CONFIG_DIR"
 [ -f "$d/stubborn" ] && trap '' TERM
-if [ "$ECHOCTL_RUN_MODE" = ingest ]; then
-  # A headless ingest run in its copy: the prompt on stdin, then ingest.<n>.jsonl (else ingest.jsonl) played.
+if [ "$ECHOCTL_RUN_MODE" = ingest ] || [ "$ECHOCTL_RUN_MODE" = lint ]; then
+  # A headless ingest run in its copy, or an AI check in the vault: the prompt on stdin, then <mode>.<n>.jsonl (else
+  # <mode>.jsonl) played. {"_findings":K} puts findings.K.json in the AI check's folder as its findings.json.
   [ -n "$d" ] || exit 9
-  printf '%s\n' "$@" > "$d/ingest.argv"
-  pwd > "$d/ingest.cwd"
-  for k in MODE DIR SKILLS SOURCES VAULT; do eval "printf '%s=%s\n' ECHOCTL_RUN_$k \"\$ECHOCTL_RUN_$k\""; done > "$d/ingest.env"
-  cat > "$d/ingest.in"
+  m=$ECHOCTL_RUN_MODE
+  printf '%s\n' "$@" > "$d/$m.argv"
+  pwd > "$d/$m.cwd"
+  for k in MODE DIR SKILLS SOURCES VAULT; do eval "printf '%s=%s\n' ECHOCTL_RUN_$k \"\$ECHOCTL_RUN_$k\""; done > "$d/$m.env"
+  cat > "$d/$m.in"
   echo $$ >> "$d/pids"
-  n=$(( $(cat "$d/ingest.n" 2>/dev/null || echo 0) + 1 )); echo $n > "$d/ingest.n"
-  s="$d/ingest.$n.jsonl"; [ -f "$s" ] || s="$d/ingest.jsonl"
+  n=$(( $(cat "$d/$m.n" 2>/dev/null || echo 0) + 1 )); echo $n > "$d/$m.n"
+  s="$d/$m.$n.jsonl"; [ -f "$s" ] || s="$d/$m.jsonl"
   [ -f "$s" ] || exit 0
   while IFS= read -r out <&3; do
     case "$out" in
@@ -1796,6 +1798,7 @@ if [ "$ECHOCTL_RUN_MODE" = ingest ]; then
     '{"_exit":'*) k=${out#'{"_exit":'}; k=${k%'}'}; echo "fake claude failed: no credits left" >&2; exit "$k" ;;
     '{"_wait":'*) k=${out#'{"_wait":'}; k=${k%'}'}; while [ ! -f "$d/go.$k" ]; do sleep 0.05; done ;;
     '{"_apply":'*) k=${out#'{"_apply":'}; k=${k%'}'}; t=$(cat "$d/apply.$k.to"); mkdir -p "$(dirname "$t")"; cp "$d/apply.$k" "$t" ;;
+    '{"_findings":'*) k=${out#'{"_findings":'}; k=${k%'}'}; cp "$d/findings.$k.json" "$ECHOCTL_RUN_DIR/findings.json" ;;
     *) printf '%s\n' "$out" ;;
     esac
   done 3< "$s"

@@ -25,7 +25,7 @@ const { knChatTurns, knChatReadOutside, knFollow, knAnswerInto, knAnswerMd, knWa
 const { knChatOpen, knPollKeep, knChatTake } = load(['kn-poll'], ['knChatOpen', 'knPollKeep', 'knChatTake'])
 const { knToolRows } = load(['kn-tools'], ['knToolRows'])
 const { knMention, knMentionPick, knChatMessage } = load(['kn-mention'], ['knMention', 'knMentionPick', 'knChatMessage'])
-const { knHealthList, knHealthSelect, knHealthTrend, knTrendPath, knFixAll, knFixSummary, knHealthLoad, knHealthState } = load(['kn-health'], ['knHealthList', 'knHealthSelect', 'knHealthTrend', 'knTrendPath', 'knFixAll', 'knFixSummary', 'knHealthLoad', 'knHealthState'])
+const { knHealthList, knHealthSelect, knHealthTrend, knTrendPath, knFixAll, knFixSummary, knHealthLoad, knHealthState, knLintNotice, knLintState, knVersus, KN_HEALTH_KINDS } = load(['kn-health'], ['knHealthList', 'knHealthSelect', 'knHealthTrend', 'knTrendPath', 'knFixAll', 'knFixSummary', 'knHealthLoad', 'knHealthState', 'knLintNotice', 'knLintState', 'knVersus', 'KN_HEALTH_KINDS'])
 const { knIngestQueue, knIngestWaiting, knRunLine, knRunView, knIngestReview, knWriteSummary, knAddState, knAddArgs, knFirstOpen, knSourceState, knTakesDrops, knDropNote } = load(['kn-ingest'], ['knIngestQueue', 'knIngestWaiting', 'knRunLine', 'knRunView', 'knIngestReview', 'knWriteSummary', 'knAddState', 'knAddArgs', 'knFirstOpen', 'knSourceState', 'knTakesDrops', 'knDropNote'])
 const { knRunOpen, knRunMayLoad, knRunTake } = load(['kn-ingest-poll'], ['knRunOpen', 'knRunMayLoad', 'knRunTake'])
 
@@ -704,6 +704,65 @@ test('what a fix did, in Echo\'s words: what was written, what wasn\'t and why',
   assert.equal(r.wait, true, 'something wasn\'t done: said until OK')
   assert.equal(knFixSummary({ written: [], changed_since: [], skipped: [{ key: 'gone:x', why: 'that finding isn\'t there any more' }], commit: 'off' }).text, 'Not fixed: a finding — that finding isn\'t there any more.')
   assert.deepEqual(knFixSummary({ written: [], changed_since: [], skipped: [], commit: 'off' }), { text: 'Nothing was changed.', wait: true })
+})
+
+// ── AI checks (K16-05…07) ──
+const AIQ = (path, line, date, text) => ({ path, line, date, text })
+const CLIENT_P = 'knowledge/clients/northwind-retail.md', NOTE_P = 'knowledge/notes/2026-11-05-northwind-weekly-delivery-sync.md'
+const AI_FINDINGS = [
+  F(`contradiction:${CLIENT_P},${NOTE_P}:#1a2b3c4d`, 'needs', 'ai', 'Northwind go-live: 12 Dec or 9 Jan', { pages: [[CLIENT_P, 18], [NOTE_P, 22]], fixable: true }),
+  F('possible_duplicate:knowledge/topics/pricing.md,knowledge/topics/per-stream-pricing.md:#5e6f7a8b', 'needs', 'ai', 'Two pricing pages', { pages: [['knowledge/topics/pricing.md', 3], ['knowledge/topics/per-stream-pricing.md', 7]] }),
+  F('stale:knowledge/topics/ai-strategy.md:#9c0d1e2f', 'tidy', 'ai', 'The factory guild meets weekly', { line: 44 }),
+  F('stale:knowledge/topics/delivery.md:#3a4b5c6d', 'tidy', 'ai', 'Releases go out on Fridays', { line: 9 }),
+  F('missing_summary:knowledge/clients/helios.md:#7e8f9a0b', 'tidy', 'ai', 'Helios has no summary', { line: 1, fixable: true }),
+]
+
+test('K16-07 AI findings: grouped with the code ones, by kind, under the AI filter only theirs', () => {
+  const all = [...AI_FINDINGS, ...FINDINGS]
+  const ai = knHealthList(all, { filter: 'ai' })
+  assert.deepEqual(ai.groups.map((g) => [g.id, g.kinds.map((k) => [k.kind, k.n, k.by])]), [['needs', [['contradiction', 1, 'ai'], ['possible_duplicate', 1, 'ai']]], ['tidy', [['stale', 2, 'ai'], ['missing_summary', 1, 'ai']]]])
+  const [contra] = ai.groups[0].kinds, [stale] = ai.groups[1].kinds
+  assert.deepEqual([contra.name, contra.meta], ['Two pages disagree', 'Northwind go-live: 12 Dec or 9 Jan'], 'an AI kind\'s line names the finding, never "fixable by code"')
+  assert.deepEqual([stale.name, stale.meta], ['Statements a newer page replaced', 'The factory guild meets weekly · 1 more'])
+  assert.deepEqual(knHealthList(all).groups[0].kinds.map((k) => k.kind), ['contradiction', 'possible_duplicate', 'unknown_tag', 'duplicate_title'], 'All: the AI kinds first in their group, as Health lists them')
+  assert.deepEqual(knHealthList(all, { filter: 'code' }).groups.flatMap((g) => g.kinds).filter((k) => k.by === 'ai'), [], 'By code: none of them')
+  assert.deepEqual(knHealthList(all, { filter: 'needs' }).groups.flatMap((g) => g.kinds.map((k) => k.kind)), ['contradiction', 'possible_duplicate', 'unknown_tag', 'duplicate_title'])
+  assert.equal(knHealthList(all).needs, 5, 'Needs you counts AI findings too (the tab\'s number)')
+  for (const k of ['contradiction', 'possible_duplicate', 'stale', 'link_to_add', 'missing_summary']) {
+    const [name, head, fixAll] = KN_HEALTH_KINDS[k]
+    assert.ok(name && head(1) && head(3) !== head(1), k)
+    assert.equal(fixAll, undefined, `${k}: AI fixes are never in Fix all`)
+  }
+  assert.equal(KN_HEALTH_KINDS.contradiction[1](2), '2 contradictions between pages')
+})
+
+test('K16-06 what an AI check kept and dropped, in Echo\'s words', () => {
+  assert.equal(knLintNotice({ kept: 6, dropped: 2 }), 'Kept 6 findings · 2 dropped: their quotes aren\'t in the pages.')
+  assert.equal(knLintNotice({ kept: 1, dropped: 1 }), 'Kept 1 finding · 1 dropped: its quotes aren\'t in the pages.')
+  assert.equal(knLintNotice({ kept: 3, dropped: 0 }), 'Kept 3 findings.')
+  assert.equal(knLintNotice({ kept: 0, dropped: 4 }), 'Kept no finding · 4 dropped: their quotes aren\'t in the pages.')
+  assert.equal(knLintNotice({ kept: 0, dropped: 0 }), 'Found nothing to fix.')
+  assert.equal(knLintNotice(null), '')
+})
+
+test('K16-07 a contradiction\'s two quotes side by side: the older first, then the newer', () => {
+  const older = AIQ(CLIENT_P, 18, '2026-10-02', 'Phase 2 go-live: 12 December, before the holiday freeze')
+  const newer = AIQ(NOTE_P, 22, '2026-11-05', 'Phase 2 go-live moves to 9 January')
+  assert.deepEqual(knVersus([newer, older]).map((q) => [q.path, q.side]), [[CLIENT_P, 'Older'], [NOTE_P, 'Newer']], 'as the check gave them, newer first: turned')
+  assert.deepEqual(knVersus([older, newer]).map((q) => [q.path, q.side]), [[CLIENT_P, 'Older'], [NOTE_P, 'Newer']])
+  assert.deepEqual(knVersus([newer, { ...older, date: '2026-11-05' }]).map((q) => [q.path, q.side]), [[NOTE_P, null], [CLIENT_P, null]], 'the same day: as given, no side named')
+  assert.deepEqual(knVersus([newer, { ...older, date: null }]).map((q) => q.side), [null, null], 'a date unknown: as given')
+  assert.equal(knVersus([older]), null, 'not two quotes: no side by side')
+  assert.equal(knVersus([older, newer, older]), null)
+})
+
+test('K16-05 the AI row: a check going, the last one\'s failure said until the next check, else the last that ended', () => {
+  const ai = { at: '2026-11-07T10:00:00+01:00', run: '2026-11-07_095500', cost: 0.31, kept: 1, dropped: 2 }
+  assert.deepEqual(knLintState({ running: '2026-11-07_120000', last: { id: '2026-11-07_120000', state: 'running', waiting: 'Waiting for a call\'s transcription to finish' } }, ai), { state: 'running', run: '2026-11-07_120000', waiting: 'Waiting for a call\'s transcription to finish', reason: null })
+  assert.deepEqual(knLintState({ running: null, last: { id: '2026-11-07_120000', state: 'failed', reason: 'It wrote no findings' } }, ai), { state: 'failed', run: null, waiting: null, reason: 'It wrote no findings' })
+  assert.equal(knLintState({ running: null, last: { id: '2026-11-07_120000', state: 'stopped', reason: 'Stopped for a sign-in' } }, ai).state, 'stopped')
+  assert.equal(knLintState({ running: null, last: { id: ai.run, state: 'done' } }, ai).state, 'idle')
+  assert.equal(knLintState(null, null).state, 'idle', 'never run')
 })
 
 // ── Health, fix round 1 ──

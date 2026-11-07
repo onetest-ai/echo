@@ -1,10 +1,10 @@
-//! Health (spec K16, §5.7): what the code checks found, as findings whose keys stay the same across scans; the score;
-//! fixes shown as diffs before anything is written, each written only over the text it was computed on (X-T8); the
-//! findings the user ignored; one score point a day. Code checks run when Health, Home or the CLI asks, from Echo's
-//! index, cached per revision; nothing here starts a model.
+//! Health (spec K16, §5.7): what the code checks found, as findings whose keys stay the same across scans, and the last
+//! AI check's findings that still hold (`lint`); the score; fixes shown as diffs before anything is written, each
+//! written only over the text it was computed on (X-T8); the findings the user ignored; one score point a day. Code
+//! checks run when Health, Home or the CLI asks, from Echo's index, cached per revision; nothing here starts a model.
 //!
-//! `<cache>/health.json` — `{history: [{day, score, categories}], ignored: [key], ai: {at, run, cost}}` — is changed
-//! under `<cache>/health.lock`, re-read first, written atomically.
+//! `<cache>/health.json` — `{history: [{day, score, categories}], ignored: [key], ai: {at, run, cost, kept, dropped}}`
+//! — is changed under `<cache>/health.lock`, re-read first, written atomically.
 
 #![cfg_attr(not(feature = "tray"), allow(dead_code))] // most of it serves the window's routes and actions (`tray`)
 
@@ -50,6 +50,8 @@ pub(super) enum Subject {
     Link(RawLink),
     /// A tag or a property's key.
     Word(String),
+    /// What an AI check found: its quotes, its note, its fix (`lint`).
+    Ai(Box<super::lint::Ai>),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -87,8 +89,20 @@ const CODE: [(&str, Group, &str); 10] = [
     ("oversized_index", Group::Should, "Agents read the index first; past 150 KB or 1,500 rows it costs more than it helps."),
 ];
 
-/// The AI checks' kinds (spec K16-05; found by `lint`).
-pub const AI_KINDS: [&str; 5] = ["contradiction", "possible_duplicate", "stale", "link_to_add", "missing_summary"];
+/// The AI checks' kinds (spec K16-05; found by `lint`): the group, the title a finding gets when the check gave it none,
+/// and what a finding of the kind means.
+pub(super) const AI_KINDS: [(&str, Group, &str, &str); 5] = [
+    ("contradiction", Group::Needs, "Two pages disagree", "Two pages state different facts about the same thing."),
+    ("possible_duplicate", Group::Needs, "Two pages may be one", "Two pages seem to be about the same thing, so a fact can land on either."),
+    ("stale", Group::Tidy, "A statement a newer page replaced", "A newer page says otherwise, and this statement wasn't updated."),
+    ("link_to_add", Group::Tidy, "A link worth adding", "This page has no links, and a page it could link to is there."),
+    ("missing_summary", Group::Tidy, "Without a summary", "Without a summary, the index and agents can't tell what the page is about at a glance."),
+];
+
+/// An AI check's kind: its group, a finding's title when the check gave none, and what it means.
+pub(super) fn ai_kind(kind: &str) -> Option<(Group, &'static str, &'static str)> {
+    AI_KINDS.iter().find(|(k, ..)| *k == kind).map(|(_, g, t, w)| (*g, *t, *w))
+}
 
 /// §5.7: the categories, their weights and the kinds each counts. Isolated pages, links worth adding and missing
 /// summaries count in none.
@@ -122,15 +136,28 @@ fn made(kind: &str, pages: Vec<(String, Option<u32>)>, about: Option<String>, ti
 /// `fix_all`: *Fix all* may apply its fix (it is no guess).
 fn made_sure(kind: &str, pages: Vec<(String, Option<u32>)>, about: Option<String>, title: String, fixable: bool, fix_all: bool, subject: Subject) -> Finding {
     let (group, why) = CODE.iter().find(|(k, ..)| *k == kind).map_or((Group::Tidy, ""), |(_, g, w)| (*g, *w));
+    Finding { key: key_of(kind, &pages, about.as_deref()), kind: kind.into(), group, by: By::Code, pages, title, why: why.into(), fixable, fix_all, subject }
+}
+
+/// A finding's key: `kind:` + its pages, sorted, + what it is about.
+fn key_of(kind: &str, pages: &[(String, Option<u32>)], about: Option<&str>) -> String {
     let mut names: Vec<&str> = pages.iter().map(|(p, _)| p.as_str()).collect();
     names.sort();
     names.dedup();
     let mut key = format!("{kind}:{}", names.join(","));
     if let Some(a) = about {
         key.push(':');
-        key.push_str(&a);
+        key.push_str(a);
     }
-    Finding { key, kind: kind.into(), group, by: By::Code, pages, title, why: why.into(), fixable, fix_all, subject }
+    key
+}
+
+/// An AI check's finding (`lint`): keyed as a code finding is (`about`: a digest of its quotes), the kind's group and
+/// meaning, a fix only when the check gave one — never one *Fix all* applies (D34: AI fixes are one by one).
+pub(super) fn made_ai(kind: &str, pages: Vec<(String, Option<u32>)>, about: &str, title: String, ai: super::lint::Ai) -> Option<Finding> {
+    let (group, _, why) = ai_kind(kind)?;
+    let fixable = ai.fix.is_some();
+    Some(Finding { key: key_of(kind, &pages, Some(about)), kind: kind.into(), group, by: By::Ai, pages, title, why: why.into(), fixable, fix_all: false, subject: Subject::Ai(Box::new(ai)) })
 }
 
 /// A link as its key writes it: `[[…]]` (`![[…]]` for an embed) or `(…)`.
@@ -234,8 +261,18 @@ pub fn findings(v: &Vault, ix: &Index) -> Vec<Finding> {
     (*cached(v, ix)).clone()
 }
 
+/// Every finding now: the last AI check's that still hold (ruling R46), then the code checks'.
+fn all_findings(v: &Vault, ix: &Index, state: &State) -> Vec<Finding> {
+    let mut all = super::lint::listed(v, ix, state.ai.as_ref());
+    all.extend(cached(v, ix).iter().cloned());
+    all
+}
+
 fn finding(v: &Vault, ix: &Index, key: &str) -> Result<Finding> {
-    cached(v, ix).iter().find(|f| f.key == key).cloned().ok_or_else(|| anyhow!("that finding isn't there any more"))
+    if let Some(f) = cached(v, ix).iter().find(|f| f.key == key) {
+        return Ok(f.clone());
+    }
+    super::lint::listed(v, ix, load(v).ai.as_ref()).into_iter().find(|f| f.key == key).ok_or_else(|| anyhow!("that finding isn't there any more"))
 }
 
 /// The pages Health judges (as slice 1's checks: not the index, a taxonomy or a folder's README).
@@ -251,7 +288,7 @@ fn scope_pages(v: &Vault, ix: &Index) -> usize {
 pub fn score(findings: &[Finding], scope_pages: usize, ai_ran: bool) -> Score {
     let (mut categories, mut points, mut weights) = (vec![], 0.0, 0u32);
     for (name, weight, kinds) in CATEGORIES {
-        if !ai_ran && kinds.iter().all(|k| AI_KINDS.contains(k)) {
+        if !ai_ran && kinds.iter().all(|k| ai_kind(k).is_some()) {
             continue;
         }
         let touched: BTreeSet<&str> = findings.iter().filter(|f| kinds.contains(&f.kind.as_str())).flat_map(|f| f.pages.iter().map(|(p, _)| p.as_str())).collect();
@@ -283,6 +320,8 @@ enum Op {
     Retag { from: String, to: String },
     /// A row put in the index: its folder, the page, its description and date (as `catalog::insert` takes them).
     Row(String, String, String, String),
+    /// An AI check's fix: `old`, there exactly once, replaced by `new`.
+    Replace { old: String, new: String },
 }
 
 /// A finding's fix, computed against its file as it is now: the file (vault-relative), that text's sha256 (`base`), the
@@ -652,6 +691,10 @@ fn run(op: &Op, text: &str) -> Result<String> {
             Ok(None) => bail!("the index lists it already"),
             Err(why) => bail!("{why}"),
         },
+        Op::Replace { old, new } => match super::lint::once(text, old) {
+            Some(at) => Ok(format!("{}{new}{}", &text[..at], &text[at + old.len()..])),
+            None => bail!("the text the fix changes isn't on the page just once any more"),
+        },
     }
 }
 
@@ -681,6 +724,9 @@ fn allowed(v: &Vault, tag: &str) -> Result<String> {
 
 /// The file a finding's fix changes (vault-relative).
 fn file_of(v: &Vault, f: &Finding) -> Result<String> {
+    if let Subject::Ai(a) = &f.subject {
+        return a.fix.as_ref().map(|x| x.path.clone()).ok_or_else(|| anyhow!("The AI check gave no fix for this"));
+    }
     if f.kind == "not_in_index" {
         return v.path("index").ok_or_else(|| anyhow!("the vault has no index"));
     }
@@ -694,6 +740,14 @@ fn plan(v: &Vault, ix: &Index, f: &Finding, choice: Option<&str>, path: &str, te
         Subject::Link(l) => Ok(l.clone()),
         _ => Err(anyhow!("Echo has no fix for this")),
     };
+    // An AI check's fix, as it gave it (its text there once, checked again when it is applied).
+    if let Subject::Ai(a) = &f.subject {
+        let x = a.fix.as_ref().ok_or_else(|| anyhow!("The AI check gave no fix for this"))?;
+        return match choice {
+            None | Some("ai") => Ok(("ai".into(), vec![Op::Replace { old: x.old.clone(), new: x.new.clone() }], false)),
+            Some(c) => bail!("“{c}” isn't a fix for this"),
+        };
+    }
     // An index row is pointed only at the same name (R36); a broken link may be pointed at a near one, flagged.
     let guesses = f.kind == "broken";
     let near = |l: &RawLink| closest(ix, scan::page_rel(v, path).as_deref(), l, guesses).map(|n| (Op::Relink { link: l.clone(), to: relinked(v, ix, path, l, &n.to) }, n.guess));
@@ -767,6 +821,7 @@ fn choices_of(v: &Vault, ix: &Index, f: &Finding) -> Vec<Choice> {
             }
             out
         }
+        _ if matches!(f.subject, Subject::Ai(_)) && f.fixable => vec![c("ai", "The change the AI check suggests".into())],
         "no_props" => vec![c("props", "Add a title, a date and tags".into())],
         "not_in_index" => vec![c("row", "Add its row to the index".into())],
         "unknown_tag" => {
@@ -883,13 +938,17 @@ pub struct Point {
     pub categories: Vec<(String, f64, u32)>,
 }
 
-/// The last AI check (written by `lint`).
+/// The last AI check that ended (written by `lint`): when, its run, its cost, the findings kept and dropped.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AiRun {
     pub at: String,
     pub run: String,
     #[serde(default)]
     pub cost: Option<f64>,
+    #[serde(default)]
+    pub kept: Option<usize>,
+    #[serde(default)]
+    pub dropped: Option<usize>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -942,6 +1001,11 @@ fn update<T>(v: &Vault, f: impl FnOnce(&mut State) -> T) -> Result<T> {
     Ok(out)
 }
 
+/// An AI check ended: it is the last one, whose findings Health shows (K16-06).
+pub(super) fn checked_by_ai(v: &Vault, ai: AiRun) -> Result<()> {
+    update(v, |s| s.ai = Some(ai))
+}
+
 /// Ignore finding `key` (`on`), or list it again; the keys ignored now.
 pub fn ignore(v: &Vault, key: &str, on: bool) -> Result<Vec<String>> {
     super::refuse_headless()?;
@@ -980,7 +1044,7 @@ fn note_on(v: &Vault, day: NaiveDate, score: &Score) -> Result<()> {
 /// (spec K16-09: when the checks are first computed on a day, and whenever the score changes).
 fn scored(v: &Vault, ix: &Index) -> (Vec<Finding>, Vec<Finding>, Score, State) {
     let state = load(v);
-    let (ignored, shown): (Vec<Finding>, Vec<Finding>) = cached(v, ix).iter().cloned().partition(|f| state.ignored.contains(&f.key));
+    let (ignored, shown): (Vec<Finding>, Vec<Finding>) = all_findings(v, ix, &state).into_iter().partition(|f| state.ignored.contains(&f.key));
     let s = score(&shown, scope_pages(v, ix), state.ai.is_some());
     if let Err(e) = note_on(v, chrono::Local::now().date_naive(), &s) {
         eprintln!("knowledge: the health score of {}: {e:#}", v.id);
@@ -991,11 +1055,11 @@ fn scored(v: &Vault, ix: &Index) -> (Vec<Finding>, Vec<Finding>, Score, State) {
 // ── what the window and the CLI ask ──
 
 /// Health as the window shows it: the score, the findings (and the ignored ones apart), the history, the last AI
-/// check. `fixes_of`: a kind whose findings *Fix all* fixes, with their fixes (its sheet).
+/// check and the one going (`lint`). `fixes_of`: a kind whose findings *Fix all* fixes, with their fixes (its sheet).
 pub fn view(v: &Vault, fixes_of: Option<&str>) -> Result<Value> {
     let ix = scan::index(v)?;
     let (shown, ignored, s, state) = scored(v, &ix);
-    let mut j = json!({ "score": s, "findings": shown, "ignored": ignored, "history": state.history, "ai": state.ai, "pages": scope_pages(v, &ix) });
+    let mut j = json!({ "score": s, "findings": shown, "ignored": ignored, "history": state.history, "ai": state.ai, "lint": super::lint::summary(v), "pages": scope_pages(v, &ix) });
     if let Some(kind) = fixes_of {
         let fixes: Vec<Value> = shown.iter().filter(|f| f.kind == kind && f.fix_all).map(|f| fix(v, &f.key, None).map_or_else(|e| json!({ "key": f.key, "error": format!("{e:#}") }), |x| x.value())).collect();
         j["fixes"] = json!(fixes);
@@ -1019,6 +1083,10 @@ pub fn detail(v: &Vault, key: &str, choice: Option<&str>) -> Result<Value> {
         Err(e) => json!({ "choice": choice, "error": format!("{e:#}") }),
     };
     let mut j = json!({ "finding": f, "ignored": load(v).ignored.iter().any(|k| k == key), "choices": choices_of(v, &ix, &f), "fix": shown });
+    // An AI check's: the quotes Echo found on its pages (with their lines and dates) and the check's note.
+    if let Subject::Ai(a) = &f.subject {
+        j["ai"] = json!({ "quotes": a.quotes, "note": a.note });
+    }
     if let (Subject::Link(l), "broken") = (&f.subject, f.kind.as_str()) {
         j["new_page"] = json!({ "folder": dir_of(&f.pages[0].0), "name": link_name(l) });
     }

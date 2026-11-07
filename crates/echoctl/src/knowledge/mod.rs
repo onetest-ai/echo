@@ -19,6 +19,7 @@ pub mod git;
 pub mod health;
 pub mod ingest;
 pub mod links;
+pub mod lint;
 pub mod page;
 pub mod scan;
 pub mod sources;

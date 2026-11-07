@@ -466,19 +466,20 @@ fn run(p: &Profile, generation: u64) {
     finish(p, generation, outcome);
 }
 
-/// The window's Claude sessions, Ask's conversations and ingest runs on a profile hold its lease while they run:
-/// closed for a sign-in (sessions and conversations resume by id; a run can run again).
+/// The window's Claude sessions, Ask's conversations, ingest runs and AI checks on a profile hold its lease while they
+/// run: closed for a sign-in (sessions and conversations resume by id; a run or a check can run again).
 #[cfg(feature = "tray")]
 fn close_sessions(profile: &str) {
     crate::terminal::close_profile(profile);
     crate::knowledge::chat::close_profile(profile);
     crate::knowledge::ingest::close_profile(profile);
+    crate::knowledge::lint::close_profile(profile);
 }
 
 #[cfg(not(feature = "tray"))]
 fn close_sessions(_profile: &str) {}
 
-/// Is a Claude session in the window, an Ask conversation or an ingest run (still) what holds the profile.
+/// Is a Claude session in the window, an Ask conversation, an ingest run or an AI check (still) what holds the profile.
 #[cfg(feature = "tray")]
 fn session_holds(profile: &str) -> bool {
     crate::terminal::holds_profile(profile)
@@ -860,8 +861,8 @@ mod tests {
         until("threads ended", idle);
     }
 
-    /// Ask's conversations on the profile hold its lease: a sign-in closes them (they resume). Ingest runs and AI checks
-    /// join this test when they exist (plan 2, Tasks 12 and 14).
+    /// Ask's conversations, ingest runs and AI checks on the profile hold its lease: a sign-in closes them (conversations
+    /// resume; a run or a check can run again).
     #[cfg(feature = "tray")]
     #[test]
     fn sign_in_closes_chats_runs_and_checks() {
@@ -887,11 +888,21 @@ mod tests {
         let run = ingest::start(&v, &[]).unwrap().run;
         until("the run's Claude Code started", || fake::file(&p, "ingest.in").exists());
         assert!(ingest::live().contains(&run));
+        // And an AI check on it (an ingest run may go meanwhile).
+        use crate::knowledge::lint;
+        lint::reset();
+        fs::write(fake::file(&p, "lint.jsonl"), "{\"_hang\":true}\n").unwrap();
+        let check = lint::start(&v).unwrap();
+        until("the check's Claude Code started", || fake::file(&p, "lint.in").exists());
+        assert!(lint::live().contains(&check));
         start("w");
         until("signed in", || json(&p)["just"] == true);
         assert!(!chat::live().contains(&id), "the sign-in closed it");
         assert!(ingest::wait(&run, Duration::from_secs(10)), "and stopped the run");
         let st = ingest::status(&v, &run, 0).unwrap();
+        assert_eq!((st["state"].as_str(), st["reason"].as_str()), (Some("stopped"), Some("Stopped for a sign-in")));
+        assert!(lint::wait(&check, Duration::from_secs(10)), "and stopped the AI check");
+        let st = lint::status(&v, &check, 0).unwrap();
         assert_eq!((st["state"].as_str(), st["reason"].as_str()), (Some("stopped"), Some("Stopped for a sign-in")));
         chat::send(&v.id, Some(&id), "And the pricing?", chat::Mode::Ask, &[]).unwrap();
         chat::turn_events(&v.id, &id);
@@ -899,6 +910,7 @@ mod tests {
         assert!(argv.contains(&format!("--resume\n{id}\n")), "resumable: {argv}");
         chat::reset();
         ingest::reset();
+        lint::reset();
         until("threads ended", idle);
     }
 

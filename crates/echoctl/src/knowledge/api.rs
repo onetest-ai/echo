@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use std::path::Path;
 use std::sync::Mutex;
 
-use super::{checks, export, health, ingest, links, page, scan, sources, starter, Vault};
+use super::{checks, export, health, ingest, links, lint, page, scan, sources, starter, Vault};
 
 fn query_param(q: &str, key: &str) -> Option<String> {
     q.split('&').find_map(|kv| {
@@ -94,6 +94,10 @@ pub fn route(rest: &str, query: &str) -> Result<Reply> {
     // diff (K16-07).
     if let Some(key) = what.strip_prefix("health/") {
         return Ok(Reply::Json(health::detail(&v, key, query_param(query, "choice").as_deref().filter(|c| !c.is_empty()))?));
+    }
+    // An AI check as it goes (its events after `from`, K16-05): named by its id, as Echo names them.
+    if let Some(run) = what.strip_prefix("lint/") {
+        return Ok(Reply::Json(lint::status(&v, run, query_param(query, "from").and_then(|f| f.parse().ok()).unwrap_or(0))?));
     }
     // An ingest run as it goes (its events after `from`, K15-06), its changes for review (K15-07, -08), and one
     // change's whole proposed text for *Edit* (named by the change's path, one of the run's own).
@@ -607,6 +611,12 @@ pub fn act(cmd: &str, v: &Value) -> Result<Value> {
         "kn_fix" => fix_findings(&vault_of(s(v, "id"))?, std::slice::from_ref(v), false),
         "kn_fix_all" => fix_findings(&vault_of(s(v, "id"))?, v["items"].as_array().map(Vec::as_slice).unwrap_or(&[]), true),
         "kn_ignore" => Ok(json!({ "ignored": health::ignore(&vault_of(s(v, "id"))?, s(v, "key"), v["on"].as_bool().unwrap_or(true))? })),
+        // AI checks (K16-05): *Run AI checks* and its *Stop*; the page names a check by its id.
+        "kn_lint" => Ok(json!({ "run": lint::start(&vault_of(s(v, "id"))?)? })),
+        "kn_lint_stop" => {
+            lint::stop(&vault_of(s(v, "id"))?, s(v, "run"))?;
+            Ok(json!({ "stopped": s(v, "run") }))
+        }
         // Ask (spec K12-07…K12-10, K12-12): a message (a new conversation when none is named) about pages and calls — a
         // call on another profile answered with both profiles, for *Attach anyway* —, a permission answered, Stop, and a
         // conversation taken to the terminal panel.
@@ -972,6 +982,34 @@ mod tests {
         assert!(act("kn_source_add", &json!({"id": v.id, "kind": "shell"})).is_err());
         // Microsoft 365 without Echo's sign-in: said so, nothing asked.
         assert_eq!(json(&format!("{}/m365", v.id), "q=pilot")["signed_in"], false);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lint_routes_and_actions() {
+        // K16-05 in the window: Run AI checks, its state as it goes, Stop; Health says which check goes.
+        use crate::ai::fake;
+        let (_env, root) = crate::paths::testenv::folders("kn-api-lint");
+        let _fake = fake::install(&root);
+        lint::reset();
+        let p = fake::profile("w", None, &fake::signed_in("pat@example.com"));
+        let v = vault(&root);
+        let v = knowledge::set(&v.id, "profile", "w").unwrap();
+        std::fs::write(fake::file(&p, "lint.jsonl"), "{\"_hang\":true}\n").unwrap();
+        let run = act("kn_lint", &json!({"id": v.id})).unwrap()["run"].as_str().unwrap().to_string();
+        let st = json(&format!("{}/lint/{run}", v.id), "from=0");
+        assert_eq!((st["state"].as_str(), st["events"][0]["kind"].as_str(), st["pages"].as_u64()), (Some("running"), Some("scope"), Some(4)), "{st}");
+        assert_eq!(json(&format!("{}/lint/{run}", v.id), &format!("from={}", st["next"]))["events"], json!([]), "from a number on");
+        assert_eq!(json(&format!("{}/health", v.id), "")["lint"]["running"], run.as_str());
+        assert!(act("kn_lint", &json!({"id": v.id})).unwrap_err().to_string().contains("is going"));
+        for bad in ["../ingest", "..", "x/y"] {
+            assert!(route(&format!("{}/lint/{bad}", v.id), "").is_err(), "{bad}");
+        }
+        assert!(act("kn_lint_stop", &json!({"id": v.id, "run": "2026-01-01_000000"})).is_err());
+        assert_eq!(act("kn_lint_stop", &json!({"id": v.id, "run": run})).unwrap()["stopped"], run.as_str());
+        assert!(lint::wait(&run, std::time::Duration::from_secs(15)));
+        assert_eq!(json(&format!("{}/lint/{run}", v.id), "")["state"], "stopped");
+        lint::reset();
     }
 
     #[test]

@@ -554,7 +554,8 @@ function knChatMessage(text, chips) {
 // end of the kn-mention block
 
 // ── kn-health: Health's findings by group and kind under a filter, the finding shown, the 30-day trend with its gaps,
-// Fix all's items and what a fix did (spec K16). The page names a finding only by its key ──
+// Fix all's items, what a fix did, and the AI checks — what one kept, a contradiction's sides, the row's state (spec
+// K16). The page names a finding only by its key ──
 const KN_HEALTH_GROUPS = [['needs', 'Needs you', 'only you can decide'], ['should', 'Should fix', 'most by code'], ['tidy', 'Tidy', 'when there is time']]
 const knS = (n, one, many) => (n === 1 ? one : many)
 /** A code check's kind: its name in the list, the heading of its findings (n of them) and, where *Fix all* applies, the
@@ -570,6 +571,12 @@ const KN_HEALTH_KINDS = {
   usual_prop: ['Missing a usual property', (n) => `${n} usual ${knS(n, 'property is', 'properties are')} missing`],
   duplicate_title: ['Pages that share a title', (n) => `${n} ${knS(n, 'title is', 'titles are')} on more than one page`],
   oversized_index: ['An oversized index', () => 'The index is too big to read first'],
+  // The AI checks' (K16-05): never a Fix all — an AI fix is made one by one.
+  contradiction: ['Two pages disagree', (n) => (n === 1 ? 'Two pages disagree' : `${n} contradictions between pages`)],
+  possible_duplicate: ['Pages that may be one', (n) => (n === 1 ? 'Two pages may be one' : `${n} pairs of pages may be one`)],
+  stale: ['Statements a newer page replaced', (n) => `${n} ${knS(n, 'statement a newer page replaced', 'statements newer pages replaced')}`],
+  link_to_add: ['Links worth adding', (n) => `${n} ${knS(n, 'page has a link', 'pages have links')} worth adding`],
+  missing_summary: ['Without a summary', (n) => `${n} ${knS(n, 'page has', 'pages have')} no summary`],
 }
 /** The findings under `filter` — `all`, `needs` (Needs you), `code` or `ai` — by group, then by kind in Echo's order:
  *  each kind with its count `n`, its keys, how many have a fix (`fixable`) and how many *Fix all* takes (`fixAll`, never
@@ -675,6 +682,32 @@ function knHealthLoad(h, { vault, tab, picked = false }) {
   const have = !!(h && h.data && h.vault === vault)
   if (tab === 'health') return have && picked ? 'finding' : 'all'
   return have ? null : 'count'
+}
+/** What an AI check kept and dropped (`health.json`'s `ai`), said in a line (K16-06). */
+function knLintNotice(ai) {
+  if (!ai) return ''
+  const kept = ai.kept || 0, dropped = ai.dropped || 0
+  if (!kept && !dropped) return 'Found nothing to fix.'
+  const k = kept === 0 ? 'Kept no finding' : `Kept ${kept} ${knS(kept, 'finding', 'findings')}`
+  return dropped ? `${k} · ${dropped} dropped: ${dropped === 1 ? 'its quotes aren\'t' : 'their quotes aren\'t'} in the pages.` : `${k}.`
+}
+/** A contradiction's two quotes side by side (K16-07): the older page's first, each `side` named — `Older`, `Newer` —
+ *  when both dates are known and differ, else as the check gave them with none named. Null unless there are two. */
+function knVersus(quotes) {
+  if (!Array.isArray(quotes) || quotes.length !== 2) return null
+  const [a, b] = quotes
+  if (!a.date || !b.date || a.date === b.date) return [{ ...a, side: null }, { ...b, side: null }]
+  const [o, n] = a.date < b.date ? [a, b] : [b, a]
+  return [{ ...o, side: 'Older' }, { ...n, side: 'Newer' }]
+}
+/** The AI row of *How Health checks* (K16-01): `running` (the check going: its id, what it waits for), else the last
+ *  check's end when it failed or was stopped (said until the next one ends), else `idle`. `lint` is `/health`'s,
+ *  `ai` the last check that ended. */
+function knLintState(lint, ai) {
+  const l = (lint && lint.last) || null
+  if (lint && lint.running) return { state: 'running', run: lint.running, waiting: (l && l.id === lint.running && l.waiting) || null, reason: null }
+  if (l && (l.state === 'failed' || l.state === 'stopped') && !(ai && ai.run === l.id)) return { state: l.state, run: null, waiting: null, reason: l.reason || null }
+  return { state: 'idle', run: null, waiting: null, reason: null }
 }
 /** Health's state for `vault`: nothing loaded yet. From an `old` one (a settings change) it keeps how the user looks at
  *  it — the filter, *Show ignored* — and is a new object, so a load started for the old one doesn't land in it. */
@@ -1741,10 +1774,10 @@ const Kn = (() => {
     </div></div>`
   }
 
-  // ── Health (spec K16): the score and its trend, how Health checks, the findings by group and kind, the finding shown
-  // with its fix as a diff. Findings are named by key only, and a fix is sent back with the base and sha of the diff
-  // shown (ruling R37). Titles, page names, lines, reasons and diff lines are others' words: esc(). AI checks (Task 14)
-  // aren't here yet: the card says "code checks only" and has no *Run AI checks*. ──
+  // ── Health (spec K16): the score and its trend, how Health checks (*Run AI checks*, the check going with *Stop*), the
+  // findings by group and kind, the finding shown with its fix as a diff — an AI finding with its quotes. Findings are
+  // named by key only, and a fix is sent back with the base and sha of the diff shown (ruling R37). Titles, page names,
+  // lines, quotes, the check's note, reasons and diff lines are others' words: esc(). ──
   function hl() {
     const s = st()
     if (!s.hl || s.hl.vault !== s.vault) s.hl = knHealthState(s.vault)
@@ -1790,15 +1823,35 @@ const Kn = (() => {
     const num = (x) => nf(Math.round(x * 10) / 10)
     const bars = (sc.categories || []).map(([name, pts, w]) => `<span>${esc(name)}</span><div class="kn-hbar" role="img" aria-label="${esc(name)}: ${num(pts)} of ${w}"><i style="width:${Math.max(0, Math.min(100, Math.round((pts / w) * 100)))}%"></i></div><span>${num(pts)}/${w}</span>`).join('')
     const prof = (typeof profileOf === 'function' && profileOf(v.profile)) || {}
-    const lastAi = d.ai ? `last ${esc(whenOf(d.ai.at))}${d.ai.cost != null ? `, ${esc(usd(d.ai.cost))}` : ''}` : 'not run yet'
     return `<div class="kn-hl-top">
       <div class="kn-card"><div class="kn-hl-score"><div class="kn-ring" style="--p:${total}%" role="img" aria-label="Score ${total} of 100"><span>${total}<small>of 100</small></span></div>
         <div class="kn-trend"><b>${esc(head)} ${delta}${sc.code_only ? '<span class="tag">code checks only</span>' : ''}</b>${spark}<div class="set-sub">${esc(since)} · checked ${esc(hm(new Date(h.at)))}</div></div>
         <div class="kn-hbars">${bars}</div></div></div>
       <div class="kn-card"><div class="kn-card-h"><h3>How Health checks</h3></div><div class="kn-hrun">
         <div class="r"><div><b>By code <span class="kn-mtag">no model</span></b><div class="set-sub">after every change Echo sees · checked ${esc(hm(new Date(h.at)))}</div></div><span class="tag ok">always</span></div>
-        <div class="r"><div><b>AI checks <span class="kn-mtag ai">AI</span></b><div class="set-sub">when you ask · ${esc(prof.name || v.profile || 'the vault\'s AI profile')} · ${lastAi}</div></div></div>
+        ${hlAiRow(esc(prof.name || v.profile || 'the vault\'s AI profile'))}
       </div></div></div>`
+  }
+  /** *How Health checks*' AI row (K16-01, -05): *Run AI checks* with the profile and the last check's time and cost; the
+   *  check going with its pages, time and reads (or what it waits for, X-S2) and *Stop*; a failure said until the next
+   *  check ends. `profile`: its name, escaped. */
+  function hlAiRow(profile) {
+    const s = st(), h = hl(), d = h.data, ls = knLintState(d.lint, d.ai)
+    const head = '<b>AI checks <span class="kn-mtag ai">AI</span></b>'
+    if (ls.state === 'running') {
+      const L = h.linting && h.linting.id === ls.run ? h.linting : null
+      const x = (L && L.data) || (d.lint && d.lint.last) || {}, since = Date.parse(x.at)
+      const sub = ls.waiting || x.waiting ? `${esc(String(ls.waiting || x.waiting).replace(/\.$/, ''))}. Recording comes first.`
+        : `Reading ${many(x.pages || 0, 'page')} · <span${isNaN(since) ? '' : ` data-kn-elapsed="${since}"`}>${dur(x.seconds)}</span>${L && L.reads ? ` · ${many(L.reads, 'tool call')}` : ''}`
+      return `<div class="r"><div>${head}<div class="set-sub">${sub}</div></div><span class="kn-lint-go"><span class="kn-spin" aria-hidden="true"></span><span>Checking…</span><button class="btn sm" id="kn-hl-lint-stop" data-kn="hl-lint-stop"${s.busy.lintstop ? ' disabled' : ''}>${s.busy.lintstop ? 'Stopping…' : 'Stop'}</button></span></div>`
+    }
+    const last = d.ai ? `last ${esc(whenOf(d.ai.at))}${d.ai.cost != null ? `, ${esc(usd(d.ai.cost))}` : ''}` : 'not run yet'
+    // A stop of the user's own needs no word; a sign-in's or a quit's, and a failure, are said.
+    const why = String(ls.reason || '').replace(/\.$/, '')
+    const said = ls.state === 'failed' ? `The last AI check failed. ${why ? why[0].toUpperCase() + why.slice(1) : 'It ended without finishing'}.`
+      : ls.state === 'stopped' && /^Stopped ./.test(why) ? `The last AI check was ${why[0].toLowerCase()}${why.slice(1)}.` : ''
+    const warn = said ? `<div class="kn-warn kn-lint-err"${ls.state === 'failed' ? ' role="alert"' : ''}>${IC.warn}<span class="grow">${esc(said)}</span></div>` : ''
+    return `<div class="r"><div>${head}<div class="set-sub">when you ask · ${profile} · ${last}</div></div><button class="btn sm" id="kn-hl-lint" data-kn="hl-lint"${s.busy.lint ? ' disabled' : ''}>${s.busy.lint ? 'Starting…' : 'Run AI checks'}</button></div>${warn}`
   }
   /** The findings by group and kind, with the filters and *Show ignored*. */
   function hlFindings(list, sel) {
@@ -1808,7 +1861,10 @@ const Kn = (() => {
     const groups = list.groups.map((g) => `<div class="kn-fg"><span>${esc(g.label)}</span><span>${esc(g.sub)}</span></div>${g.kinds.map(fi).join('')}`).join('')
     const none = list.groups.length ? '' : `<p class="set-sub kn-fnone">${h.filter === 'ai' && !d.ai ? 'AI checks haven\'t run yet.' : (d.findings || []).length ? 'Nothing under this filter.' : 'Nothing to fix. Echo checks again after every change it sees.'}</p>`
     const ign = (d.ignored || []).length ? `<button class="kn-lnk kn-fign" id="kn-hl-ignored" data-kn="hl-ignored" aria-pressed="${h.showIgnored}">${h.showIgnored ? 'Hide ignored' : `Show ignored (${nf(d.ignored.length)})`}</button>` : ''
-    return `<div class="kn-flist"><div class="top"><span class="set-sub">${many(list.kinds, 'kind')} · ${nf(list.needs)} ${list.needs === 1 ? 'needs' : 'need'} you</span><div class="kn-filters" role="group" aria-label="Show">${f('all', 'All')}${f('needs', 'Needs you')}${f('code', 'By code')}${f('ai', 'AI')}</div></div>${groups}${none}${ign}</div>`
+    // What the last AI check kept and dropped (K16-06), until it is dismissed.
+    const seen = (st().lintSeen || {})[st().vault]
+    const kept = d.ai && seen !== d.ai.run ? `<div class="kn-dropped" id="kn-hl-kept">${IC.info}<span class="grow">AI checks ${esc(whenOf(d.ai.at))}: ${esc(knLintNotice(d.ai))}</span><button class="icon-btn" id="kn-hl-kept-ok" data-kn="hl-lint-ok" aria-label="Dismiss">${IC.close}</button></div>` : ''
+    return `<div class="kn-flist"><div class="top"><span class="set-sub">${many(list.kinds, 'kind')} · ${nf(list.needs)} ${list.needs === 1 ? 'needs' : 'need'} you</span><div class="kn-filters" role="group" aria-label="Show">${f('all', 'All')}${f('needs', 'Needs you')}${f('code', 'By code')}${f('ai', 'AI')}</div></div>${groups}${none}${ign}${kept}</div>`
   }
   /** The kind shown: what it means, *Fix all* where it applies, its findings — the one shown open with its fix. */
   function hlDetail(sel) {
@@ -1818,7 +1874,9 @@ const Kn = (() => {
     if (!keys.includes(sel.key)) keys.push(sel.key)
     const more = k.n > keys.length ? `<div class="set-sub">and ${nf(k.n - keys.length)} more</div>` : ''
     const d = hl().data || {}, by = new Map([...(d.findings || []), ...(d.ignored || [])].map((f) => [f.key, f]))
-    return `<div class="kn-fdet"><div class="kn-fdet-h"><div class="row"><h3>${esc(x ? x[1](k.n) : k.name)}</h3>${k.by === 'ai' ? '<span class="kn-mtag ai">AI</span>' : ''}${k.ignored ? '<span class="kn-mtag">ignored</span>' : k.group === 'needs' ? '<span class="kn-mtag you">needs you</span>' : ''}${fixAll}</div><p>${esc(k.why || '')}</p></div>
+    // An AI kind with one finding is headed by what the check named it.
+    const title = k.by === 'ai' && k.n === 1 && by.get(k.keys[0]) ? by.get(k.keys[0]).title : x ? x[1](k.n) : k.name
+    return `<div class="kn-fdet"><div class="kn-fdet-h"><div class="row"><h3>${esc(title)}</h3>${k.by === 'ai' ? '<span class="kn-mtag ai">AI</span>' : ''}${k.ignored ? '<span class="kn-mtag">ignored</span>' : k.group === 'needs' ? '<span class="kn-mtag you">needs you</span>' : ''}${fixAll}</div><p>${esc(k.why || '')}</p></div>
       <div class="kn-fdet-b">${keys.map((key, i) => (key === sel.key ? hlOpen(by.get(key), i) : hlRow(by.get(key), i))).join('')}${more}</div></div>`
   }
   /** A finding of the kind, not the one shown: a row to open it. */
@@ -1854,12 +1912,25 @@ const Kn = (() => {
     const tax = choices.some((c) => c.choice === 'taxonomy') && ((v.detected || {}).taxonomies || []).find((t) => /TAG/i.test(t))
     const ok = !!(diff && fx.base && fx.sha), busy = s.busy.hlfix
     const note = ok ? (fx.guess ? 'A guess, so Fix all leaves it out. Written only if the page still reads as it does now.' : 'Written only if the page still reads as it does now.') : ''
+    const ai = f.by === 'ai' ? hlAi(f, dt) : ''
     const acts = `<button class="btn ghost sm" id="kn-hl-ask" data-kn="hl-ask" data-kn-key="${esc(f.key)}">${IC.ask} Ask about it</button>`
       + `<button class="btn ghost sm" id="kn-hl-ign" data-kn="hl-ignore" data-kn-key="${esc(f.key)}" data-kn-on="${!dt.ignored}">${dt.ignored ? 'List again' : 'Ignore'}</button>`
       + (choices.some((c) => c.choice === 'create') && dt.new_page ? `<button class="btn sm" id="kn-hl-create" data-kn="hl-create" data-name="${esc(dt.new_page.name)}" data-kn-folder="${esc(dt.new_page.folder)}">Create the page</button>` : '')
       + (tax ? `<button class="btn sm" id="kn-hl-tax" data-kn="open" data-path="${esc(tax)}">Open the taxonomy</button>` : '')
       + (ok ? `<button class="btn primary sm" id="kn-hl-fix" data-kn="hl-fix"${busy ? ' disabled' : ''}>${busy ? 'Fixing…' : 'Fix'}</button>` : '')
-    return `<div ${card}>${head}${pick}${toLine}${diff ? `<div class="kn-fx-d">${pmOf(fx)}</div>${diff}` : ''}${reason}<div class="kn-fx-f"><span class="grow">${note}</span>${acts}</div></div>`
+    return `<div ${card}>${head}${ai}${pick}${toLine}${diff ? `<div class="kn-fx-d">${pmOf(fx)}</div>${diff}` : ''}${reason}<div class="kn-fx-f"><span class="grow">${note}</span>${acts}</div></div>`
+  }
+  /** An AI finding's evidence (K16-07): a contradiction's two quotes side by side, older · newer, with their dates; else
+   *  each page's quote; then the check's note. Quotes and note are the check's words — the quotes found on their pages
+   *  by Echo —: esc(). */
+  function hlAi(f, dt) {
+    const a = dt.ai || {}, qs = a.quotes || [], vs = f.kind === 'contradiction' ? knVersus(qs) : null
+    const day = (x) => (x ? new Date(`${x}T12:00:00`).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' }) : '')
+    const quote = (q) => `<code>${esc(where(q.path, [q.line]))}</code><q>${esc(q.text)}</q>`
+    const quotes = vs ? `<div class="kn-vs">${vs.map((q) => `<div${q.side === 'Newer' ? ' class="newer"' : ''}><span class="lbl"><span>${q.side || ''}</span><span>${esc(day(q.date))}</span></span>${quote(q)}</div>`).join('')}</div>`
+      : qs.map((q) => `<div class="kn-quote">${quote(q)}</div>`).join('')
+    const note = a.note ? `<div class="kn-aibox"><span class="kn-mtag ai">AI</span><span>${esc(a.note)}</span></div>` : ''
+    return `<div class="kn-fx-ai">${quotes}${note}<div class="set-sub">Echo found each quote on its page, word for word${f.fixable ? ', and the text its fix changes there just once' : ''}. Findings whose quotes aren't in the pages are dropped, never shown.</div></div>`
   }
   /** *Fix all* (K16-04): every fix of the kind as Echo found it, ticked; a guess is never one (R36). */
   async function openFixAll(kind) {
@@ -1933,6 +2004,52 @@ const Kn = (() => {
       for (const [p] of pagesOf(f)) if (!c.chips.some((x) => x.page === p)) c.chips.push({ page: p, title: titleOf(p) })
       if (!c.draft.includes(line)) c.draft = c.draft.trim() ? `${line}\n\n${c.draft}` : `${line}\n\n`
     }, false)
+  }
+  /** *Run AI checks* (K16-05): started on the vault's profile, then followed while Health shows it. */
+  async function runLint() {
+    const v = vault()
+    if (!v || st().busy.lint) return
+    try { await run('kn_lint', { id: v.id }, 'lint') } catch (e) { return say(`Not started: ${String(e.message || e).replace(/\.$/, '')}.`) }
+    await loadHealth({ detail: false })
+    render()
+    focusOn('#kn-hl-lint-stop', '#kn-hl-lint')
+  }
+  async function stopLint() {
+    const v = vault(), d = hl().data, id = d && d.lint && d.lint.running
+    if (!id) return
+    try { await run('kn_lint_stop', { id: v.id, run: id }, 'lintstop') } catch (e) { say(String(e.message || e)) }
+  }
+  /** While an AI check goes and Health shows it: its state asked again every 1.5 s — drawn when something came — and,
+   *  once it ends, Health checked again (its findings, the score) and the focus back on *Run AI checks*. */
+  async function pollLint() {
+    const h = hl(), v = vault(), id = h.data && h.data.lint && h.data.lint.running
+    if (!v || !id || (h.linting && h.linting.id === id)) return
+    const L = (h.linting = { id, next: 0, data: null, reads: 0 })
+    const mine = () => hl() === h && h.linting === L && st().vault === v.id && st().tab === 'health' && S.view === 'brain'
+    try {
+      while (mine()) {
+        let x
+        try { x = await get(`api/kn/${enc(v.id)}/lint/${enc(id)}?from=${L.next}`) } catch { x = null }
+        if (!mine()) return
+        if (x && !x.error) {
+          const before = `${L.reads}|${(L.data || {}).waiting || ''}`
+          L.reads += (x.events || []).filter((e) => e.type === 'tool').length
+          if (x.next != null) L.next = x.next
+          L.data = x
+          if (x.state !== 'running') {
+            // Ended: never followed again, even should Health's answer not come.
+            h.linting = null
+            if (h.data && h.data.lint) h.data.lint.running = null
+            await loadHealth()
+            render()
+            if (x.state === 'stopped' && x.reason === 'Stopped') done('Stopped. Nothing was kept.')
+            return focusOn('#kn-hl-lint')
+          }
+          if (`${L.reads}|${x.waiting || ''}` !== before) render()
+        }
+        await sleep(1500)
+      }
+    } finally { if (h.linting === L) h.linting = null }
   }
   async function pickChoice(key, choice) {
     const h = hl()
@@ -2782,6 +2899,7 @@ const Kn = (() => {
     if (s.tab === 'pages' && s.rail === 'links') drawMini()
     if (s.tab === 'ask' && vault()) { syncThread(); fitQ(); pollChat() }
     if (s.tab === 'ingest' && vault()) { pollRun(); tickRunning() }
+    if (s.tab === 'health' && vault()) { pollLint(); tickRunning() }
     if (s.scrollTo) { const el = document.getElementById(s.scrollTo); if (el) el.scrollIntoView({ block: 'start' }); s.scrollTo = null }
     if (s.focus) {
       const el = document.getElementById(s.focus)
@@ -3680,6 +3798,7 @@ const Kn = (() => {
     if (vault() && vault().available !== false) add('Knowledge', 'Add a source…', () => { st().source = 'vault'; openAdd('files') }, { keywords: 'ingest inbox file mail teams chat web page call memo knowledge' })
     if (vault() && vault().available !== false) add('Knowledge', 'Prepare changes', () => { st().source = 'vault'; goVault(vault().id, 'ingest', ''); focusOn('#kn-ing-prep:not([disabled])', '#kn-ing-add') }, { keywords: 'ingest inbox process sources knowledge run' })
     if (vault() && vault().available !== false) add('Knowledge', 'Open Health', () => { st().source = 'vault'; goVault(vault().id, 'health', st().hlKey) }, { keywords: 'checks score broken links fix index tidy knowledge' })
+    if (vault() && vault().available !== false) add('Knowledge', 'Run AI checks', () => { st().source = 'vault'; goVault(vault().id, 'health', st().hlKey); runLint() }, { keywords: 'health lint contradictions duplicates stale summary claude knowledge' })
     if (S.view === 'calls' && S.call && S.call.notes && S.call.knowledge && (S.call.knowledge.vaults || []).length) add('Knowledge', 'Save the minutes to Knowledge…', () => openSave(S.call.name), { keywords: 'vault note export' })
   }
   function openNew() {
@@ -3898,6 +4017,9 @@ const Kn = (() => {
       }
       case 'hl-fixall': return openFixAll(d.knKind)
       case 'hl-fixall-go': return fixAllGo()
+      case 'hl-lint': return runLint()
+      case 'hl-lint-stop': return stopLint()
+      case 'hl-lint-ok': { const ai = (hl().data || {}).ai; if (ai) { s.lintSeen = { ...(s.lintSeen || {}), [s.vault]: ai.run }; render() } return focusOn('#kn-hl-lint', '.kn-fi.on') }
       case 'set-bool': return setVault(d.key, d.val)
       case 'scope-clear': await setVault('clients', ''); return setVault('threads', '')
       case 'rows': return openRows([d.path])

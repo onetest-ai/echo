@@ -155,7 +155,12 @@ fn release(l: &mut sources::Ledger, id: &str, state: &str, kept: Option<usize>) 
 
 /// Nothing holds `run.lock`: no Echo — this one, another, the CLI — has a run of `v` going.
 fn lock_free(v: &Vault) -> bool {
-    !lock_path(v).exists() || crate::app::FileLock::try_take(&lock_path(v)).ok().flatten().is_some()
+    free(&lock_path(v))
+}
+
+/// Nothing holds the lock file at `path` (an ingest run's, an AI check's).
+pub(super) fn free(path: &Path) -> bool {
+    !path.exists() || crate::app::FileLock::try_take(path).ok().flatten().is_some()
 }
 
 /// A run as it is: one the ledger calls running that nothing runs any more (its Echo stopped) has failed.
@@ -170,16 +175,21 @@ fn effective(v: &Vault, mut r: Run) -> Run {
 
 /// Is `pid` still run `id`'s Claude Code: its command line names the run's own settings file, so a pid the system has
 /// given another process since is never ended. Only where `ps` says (Unix); elsewhere Echo can't tell, and ends nothing.
-#[cfg(unix)]
 fn still_the_runs(v: &Vault, id: &str, pid: u32) -> bool {
-    let Ok(dir) = run_dir(v, id) else { return false };
-    let settings = dir.join("settings.json").display().to_string();
+    run_dir(v, id).is_ok_and(|dir| still_running(pid, &dir.join("settings.json")))
+}
+
+/// Is `pid` still the Claude Code that was started with `settings` (a run's own file) — never a process the system
+/// has given that pid since. Only where `ps` says (Unix); elsewhere Echo can't tell, and says no.
+#[cfg(unix)]
+pub(super) fn still_running(pid: u32, settings: &Path) -> bool {
+    let settings = settings.display().to_string();
     let out = std::process::Command::new("ps").args(["-ww", "-o", "command=", "-p", &pid.to_string()]).output();
     out.is_ok_and(|o| o.status.success() && String::from_utf8_lossy(&o.stdout).contains(&settings))
 }
 
 #[cfg(not(unix))]
-fn still_the_runs(_v: &Vault, _id: &str, _pid: u32) -> bool {
+pub(super) fn still_running(_pid: u32, _settings: &Path) -> bool {
     false
 }
 
@@ -404,13 +414,21 @@ pub(super) fn scope(copy: &Path, sources: &str, skill: &str) -> Vec<(String, Str
 /// never Bash or `--dangerously-skip-permissions`; only the user's settings on every profile (D40) — a managed
 /// profile's `--setting-sources user` comes from `ai::prepare_claude`.
 pub fn args(p: &ai::Profile, settings: &Path, plugin: &Path) -> Vec<String> {
+    let mut a = headless_args(p, TOOLS, settings);
+    a.extend(["--plugin-dir".into(), plugin.display().to_string()]);
+    a
+}
+
+/// §5.4's headless command line of an ingest run or an AI check on profile `p`: `tools` all pre-allowed (no prompt can
+/// come), the run's own `settings` (the guard and its scope); never Bash or `--dangerously-skip-permissions`.
+pub(super) fn headless_args(p: &ai::Profile, tools: &str, settings: &Path) -> Vec<String> {
     let mut a: Vec<String> = [
         "-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--no-session-persistence", "--strict-mcp-config",
-        "--permission-mode", "dontAsk", "--permission-prompts", "none", "--tools", TOOLS, "--allowed-tools", TOOLS,
+        "--permission-mode", "dontAsk", "--permission-prompts", "none", "--tools", tools, "--allowed-tools", tools,
     ]
     .map(String::from)
     .to_vec();
-    a.extend(["--settings".into(), settings.display().to_string(), "--plugin-dir".into(), plugin.display().to_string()]);
+    a.extend(["--settings".into(), settings.display().to_string()]);
     if !p.kind.managed() {
         a.extend(["--setting-sources".into(), "user".into()]);
     }
@@ -457,17 +475,17 @@ fn prompt(copy: &Path, skill: &str, picked: &[String]) -> String {
 
 /// A run's events, numbered, appended to its `log.jsonl` (the page reads them from there). A streaming text block's
 /// renders are left out, its finished one kept: the log is the run's record, not its animation.
-struct Log {
+pub(super) struct Log {
     file: Option<std::fs::File>,
     n: u64,
 }
 
 impl Log {
-    fn open(dir: &Path) -> Log {
+    pub(super) fn open(dir: &Path) -> Log {
         Log { file: std::fs::OpenOptions::new().create(true).append(true).open(dir.join("log.jsonl")).ok(), n: 0 }
     }
 
-    fn push(&mut self, mut e: Value) {
+    pub(super) fn push(&mut self, mut e: Value) {
         if matches!(e["type"].as_str(), Some("text" | "thinking")) && e["done"] != true {
             return;
         }
@@ -479,19 +497,23 @@ impl Log {
     }
 }
 
-/// A run this Echo started: the vault and profile it is on, its process, and why Echo stopped it (if it did).
-struct Live {
-    vault: String,
-    profile: String,
+/// A run this Echo started (an ingest run, an AI check): the vault and profile it is on, its process, and why Echo
+/// stopped it (if it did).
+pub(super) struct Live {
+    pub(super) vault: String,
+    pub(super) profile: String,
     /// Once Claude Code has started (not while the run waits, X-S2).
-    pid: Option<u32>,
-    stop: Arc<Mutex<Option<String>>>,
+    pub(super) pid: Option<u32>,
+    pub(super) stop: Arc<Mutex<Option<String>>>,
 }
 
-static LIVE: Mutex<BTreeMap<String, Live>> = Mutex::new(BTreeMap::new());
+/// The runs of one kind this Echo has going, by id.
+pub(super) type Lives = Mutex<BTreeMap<String, Live>>;
+
+static LIVE: Lives = Mutex::new(BTreeMap::new());
 static ENDED: Condvar = Condvar::new();
 
-/// (tests) How far ahead the run's clock is (the 20 minutes).
+/// (tests) How far ahead the runs' clock is (the 20 minutes).
 static SKEW: Mutex<Duration> = Mutex::new(Duration::ZERO);
 
 fn now() -> Instant {
@@ -501,14 +523,19 @@ fn now() -> Instant {
 /// `run.lock`, tried for 300 ms: one released a moment ago can still look held while another thread here starts a
 /// process (as `ai::lease`).
 fn take_run_lock(v: &Vault) -> Result<crate::app::FileLock> {
-    std::fs::create_dir_all(ingest_dir(v))?;
+    take_lock(&lock_path(v), "A run is going")
+}
+
+/// The lock file at `path`, tried for 300 ms (`busy`: what is said when it stays held).
+pub(super) fn take_lock(path: &Path, busy: &str) -> Result<crate::app::FileLock> {
+    std::fs::create_dir_all(path.parent().expect("a lock's folder"))?;
     let t = Instant::now();
     loop {
-        if let Some(l) = crate::app::FileLock::try_take(&lock_path(v))? {
+        if let Some(l) = crate::app::FileLock::try_take(path)? {
             return Ok(l);
         }
         if t.elapsed() > Duration::from_millis(300) {
-            bail!("A run is going");
+            bail!("{busy}");
         }
         std::thread::sleep(Duration::from_millis(30));
     }
@@ -517,13 +544,20 @@ fn take_run_lock(v: &Vault) -> Result<crate::app::FileLock> {
 /// A new run's id and folder: its start time, `-2`… when taken.
 fn new_run(v: &Vault) -> Result<(String, PathBuf)> {
     let taken: Vec<String> = runs_of(&sources::ledger(v)?).into_iter().map(|r| r.id).collect();
+    new_dir(&ingest_dir(v), &taken)
+}
+
+/// A new run's id and its folder in `parent`, made now: its start time, `-2`… when that is taken (in `taken` or on
+/// disk).
+pub(super) fn new_dir(parent: &Path, taken: &[String]) -> Result<(String, PathBuf)> {
+    std::fs::create_dir_all(parent)?;
     let stamp = chrono::Local::now().format("%Y-%m-%d_%H%M%S").to_string();
     for n in 1..100 {
         let id = if n == 1 { stamp.clone() } else { format!("{stamp}-{n}") };
         if taken.contains(&id) {
             continue;
         }
-        let d = ingest_dir(v).join(&id);
+        let d = parent.join(&id);
         match std::fs::create_dir(&d) {
             Ok(()) => return Ok((id, d)),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
@@ -636,7 +670,7 @@ pub fn again(v: &Vault, run: &str) -> Result<Started> {
 }
 
 /// End a run's process group: TERM now, KILL to what is left 3 s later (in the background).
-fn end_group(pid: u32) {
+pub(super) fn end_group(pid: u32) {
     ai::term_group(pid);
     std::thread::spawn(move || ai::finish_stop_group(pid));
 }
@@ -652,6 +686,31 @@ fn busy_call() -> Option<String> {
 
 /// How often a waiting run looks again.
 const WAIT_TICK: Duration = Duration::from_millis(500);
+
+/// Before a run's Claude Code starts (X-S2, recording has priority): wait while a call is recorded or transcribed,
+/// saying so in the log and through `waiting` (given `None` once it may start) — until Echo stops the run.
+pub(super) fn wait_for_calls(stop: &Mutex<Option<String>>, log: &mut Log, waiting: impl Fn(Option<String>)) {
+    let mut said: Option<String> = None;
+    while lock(stop).is_none() {
+        let Some(w) = busy_call() else { break };
+        if said.as_deref() != Some(w.as_str()) {
+            log.push(json!({"type": "notice", "kind": "waiting", "text": w}));
+            waiting(Some(w.clone()));
+            said = Some(w);
+        }
+        std::thread::sleep(WAIT_TICK);
+    }
+    if said.is_some() {
+        waiting(None);
+    }
+}
+
+/// A run's Claude Code started on profile `p` with `args` in `cwd`, the guard's scope in its environment too.
+pub(super) fn spawn(p: &ai::Profile, args: &[String], cwd: &Path, scope: &[(String, String)]) -> Result<Child> {
+    let mut cmd = ai::prepare_claude(p, args, cwd, true)?;
+    cmd.envs(scope.iter().map(|(k, x)| (k.as_str(), x.as_str())));
+    cmd.spawn().map_err(|e| anyhow!("couldn't start Claude Code: {e}"))
+}
 
 /// A run made ready, for its thread: the vault, its folder, the profile, what to run, Echo's stop, and its lock and
 /// lease (`held`), which go when it has ended.
@@ -671,35 +730,18 @@ struct Job {
 fn launch(job: Job) {
     std::thread::spawn(move || {
         let Job { v, run, dir, profile, prepared: Prepared { copy, args, scope, prompt, mut log }, stop, held } = job;
-        let set_waiting = |w: Option<String>| {
+        wait_for_calls(&stop, &mut log, |w| {
             let _ = update_run(&v, &run, |_, r| {
                 r.waiting = w;
                 Ok(())
             });
-        };
-        let mut said: Option<String> = None;
-        while lock(&stop).is_none() {
-            let Some(w) = busy_call() else { break };
-            if said.as_deref() != Some(w.as_str()) {
-                log.push(json!({"type": "notice", "kind": "waiting", "text": w}));
-                set_waiting(Some(w.clone()));
-                said = Some(w);
-            }
-            std::thread::sleep(WAIT_TICK);
-        }
-        if said.is_some() {
-            set_waiting(None);
-        }
+        });
         // Taken out first: a guard in an `if let`'s scrutinee would be held through its `else` too.
         let stopped = lock(&stop).take();
         let ended = if let Some(why) = stopped {
             End { state: "stopped", reason: Some(why), ..End::default() }
         } else {
-            let spawned = ai::prepare_claude(&profile, &args, &copy, true).and_then(|mut cmd| {
-                cmd.envs(scope.iter().map(|(k, x)| (k.as_str(), x.as_str())));
-                cmd.spawn().map_err(|e| anyhow!("couldn't start Claude Code: {e}"))
-            });
-            match spawned {
+            match spawn(&profile, &args, &copy, &scope) {
                 Ok(child) => watch(&v, &run, &dir, &copy, child, &prompt, &mut log, &stop),
                 Err(e) => End { state: "failed", reason: Some(format!("{e:#}")), ..End::default() },
             }
@@ -722,10 +764,9 @@ struct End {
 }
 
 /// A started Claude Code to its end: its pid recorded (here and in the ledger, for a later Echo to end it if this one
-/// goes), its prompt on stdin, its output into the log, its 20 minutes (from now).
+/// goes), then driven to its end (`drive`).
 #[allow(clippy::too_many_arguments)]
 fn watch(v: &Vault, run: &str, dir: &Path, copy: &Path, mut child: Child, prompt: &str, log: &mut Log, stop: &Mutex<Option<String>>) -> End {
-    let started = now();
     let pid = child.id();
     if let Some(l) = lock(&LIVE).get_mut(run) {
         l.pid = Some(pid);
@@ -738,9 +779,65 @@ fn watch(v: &Vault, run: &str, dir: &Path, copy: &Path, mut child: Child, prompt
     if lock(stop).is_some() {
         end_group(pid);
     }
-    // Its prompt, on stdin, then closed (a few KB: the pipe takes it whole).
+    let mut parser = stream::Parser::for_copy(&Vault { root: copy.to_path_buf(), ..v.clone() });
+    let d = drive(&mut child, prompt, &mut parser, log);
+    let (state, reason) = match d.failed(lock(stop).take()) {
+        Some((state, why)) => (state, Some(why)),
+        None => ("review", None),
+    };
+    let mut end = End { state, reason, found: None, result: d.result, bad: d.bad };
+    if state == "review" {
+        match review::find(v, dir) {
+            Ok(found) => end.found = Some(found),
+            Err(e) => (end.state, end.reason) = ("failed", Some(format!("Echo couldn't read the run's copy: {e:#}"))),
+        }
+    }
+    end
+}
+
+/// What came of a run's Claude Code: its `result` event, its error (from the stream), stderr's last line, its exit
+/// code, whether it ran out of time, and how many lines weren't JSON.
+pub(super) struct Driven {
+    timed_out: bool,
+    pub(super) result: Option<Value>,
+    error: Option<String>,
+    tail: Option<String>,
+    code: Option<i32>,
+    pub(super) bad: usize,
+}
+
+impl Driven {
+    /// How the run ended, `why` being Echo's reason when it stopped it: `None` when it finished, else its state
+    /// (`failed` or `stopped`) and why — its result's error, else stderr's last line, else the exit code.
+    pub(super) fn failed(&self, why: Option<String>) -> Option<(&'static str, String)> {
+        let crashed = || self.error.clone().or_else(|| self.tail.clone()).unwrap_or_else(|| format!("Claude Code ended with code {}", self.code.map_or("none".into(), |c| c.to_string())));
+        if self.timed_out {
+            Some(("failed", "It ran for 20 minutes without finishing".to_string()))
+        } else if let Some(why) = why {
+            Some(("stopped", why))
+        } else if self.code != Some(0) {
+            Some(("failed", crashed()))
+        } else if let Some(e) = &self.error {
+            Some(("failed", e.clone()))
+        } else if self.result.is_none() {
+            Some(("failed", "Claude Code ended without finishing".to_string()))
+        } else {
+            None
+        }
+    }
+}
+
+/// A started run's Claude Code to its end: its prompt on stdin (from a thread of its own, so a long one never waits on
+/// a full pipe), its stdout through `parser` into `log`, stderr's last line kept for a crash, its 20 minutes from now
+/// (then its group is ended).
+pub(super) fn drive(child: &mut Child, prompt: &str, parser: &mut stream::Parser, log: &mut Log) -> Driven {
+    let started = now();
+    let pid = child.id();
     if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(prompt.as_bytes());
+        let prompt = prompt.to_string();
+        std::thread::spawn(move || {
+            let _ = stdin.write_all(prompt.as_bytes());
+        });
     }
     let (tx, rx) = mpsc::channel::<String>();
     if let Some(out) = child.stdout.take() {
@@ -760,7 +857,6 @@ fn watch(v: &Vault, run: &str, dir: &Path, copy: &Path, mut child: Child, prompt
             let _ = err_done.send(());
         });
     }
-    let mut parser = stream::Parser::for_copy(&Vault { root: copy.to_path_buf(), ..v.clone() });
     let (mut timed_out, mut result, mut error) = (false, None::<Value>, None::<String>);
     let mut took = |events: Vec<Value>, log: &mut Log| {
         for e in events {
@@ -787,24 +883,8 @@ fn watch(v: &Vault, run: &str, dir: &Path, copy: &Path, mut child: Child, prompt
     let code = child.wait().ok().and_then(|s| s.code());
     // Its last words on stderr (a process it left behind may hold the pipe: not waited for long).
     let _ = err_ended.recv_timeout(Duration::from_millis(500));
-    let why = lock(stop).take();
-    let crashed = || error.clone().or_else(|| lock(&tail).clone()).unwrap_or_else(|| format!("Claude Code ended with code {}", code.map_or("none".into(), |c| c.to_string())));
-    let (state, reason) = match () {
-        _ if timed_out => ("failed", Some("It ran for 20 minutes without finishing".to_string())),
-        _ if why.is_some() => ("stopped", why),
-        _ if code != Some(0) => ("failed", Some(crashed())),
-        _ if error.is_some() => ("failed", error.clone()),
-        _ if result.is_none() => ("failed", Some("Claude Code ended without finishing".to_string())),
-        _ => ("review", None),
-    };
-    let mut end = End { state, reason, found: None, result, bad: parser.bad_lines() };
-    if state == "review" {
-        match review::find(v, dir) {
-            Ok(found) => end.found = Some(found),
-            Err(e) => (end.state, end.reason) = ("failed", Some(format!("Echo couldn't read the run's copy: {e:#}"))),
-        }
-    }
-    end
+    let tail = lock(&tail).clone();
+    Driven { timed_out, result, error, tail, code, bad: parser.bad_lines() }
 }
 
 /// A run's end in its log and the ledger: its state, why, the changes found (and how many of them can't be written),
@@ -841,22 +921,32 @@ fn finish(v: &Vault, run: &str, log: &mut Log, end: End) {
 
 /// Wait up to `max` for run `run` (one this Echo started) to end; whether it has.
 pub fn wait(run: &str, max: Duration) -> bool {
+    wait_in(&LIVE, &ENDED, run, max)
+}
+
+/// Wait up to `max` for run `run` to leave `live` (`ended` is told when one does); whether it has.
+pub(super) fn wait_in(live: &Lives, ended: &Condvar, run: &str, max: Duration) -> bool {
     let t = Instant::now();
-    let mut live = lock(&LIVE);
+    let mut live = lock(live);
     while live.contains_key(run) {
         let Some(left) = max.checked_sub(t.elapsed()) else { return false };
-        live = ENDED.wait_timeout(live, left).unwrap_or_else(|e| e.into_inner()).0;
+        live = ended.wait_timeout(live, left).unwrap_or_else(|e| e.into_inner()).0;
     }
     true
 }
 
 /// Stop the runs `which` picks (by id and what runs), saying `why`; how many.
 fn stop_where(which: impl Fn(&str, &Live) -> bool, why: &str) -> usize {
-    let live = lock(&LIVE);
+    stop_in(&LIVE, which, why)
+}
+
+/// Stop the runs of `live` that `which` picks, saying `why`: their process groups ended; one still waiting to start
+/// sees the stop itself. How many.
+pub(super) fn stop_in(live: &Lives, which: impl Fn(&str, &Live) -> bool, why: &str) -> usize {
+    let live = lock(live);
     let mut n = 0;
     for (_, l) in live.iter().filter(|(id, l)| which(id, l)) {
         *lock(&l.stop) = Some(why.to_string());
-        // One still waiting to start sees the stop itself.
         if let Some(pid) = l.pid {
             end_group(pid);
         }
@@ -894,17 +984,8 @@ pub fn stop_all(why: &str) -> usize {
 pub fn status(v: &Vault, run: &str, from: u64) -> Result<Value> {
     let dir = run_dir(v, run)?;
     let r = effective(v, find_run(v, run)?);
-    let text = std::fs::read(dir.join("log.jsonl")).unwrap_or_default();
-    let events: Vec<Value> = String::from_utf8_lossy(&text)
-        .lines()
-        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-        .filter(|e| e["n"].as_u64().is_some_and(|n| n > from))
-        .take(2000)
-        .collect();
-    let next = events.last().and_then(|e| e["n"].as_u64()).unwrap_or(from);
-    let at = chrono::DateTime::parse_from_rfc3339(&r.at).ok();
-    let end = r.ended.as_deref().and_then(|e| chrono::DateTime::parse_from_rfc3339(e).ok()).map(|e| e.with_timezone(&chrono::Local)).unwrap_or_else(chrono::Local::now);
-    let seconds = at.map(|a| end.signed_duration_since(a).num_seconds().max(0)).unwrap_or(0);
+    let (events, next) = events_after(&dir, from);
+    let seconds = seconds(&r.at, r.ended.as_deref());
     let mut j = serde_json::to_value(&r)?;
     if r.state == "review" {
         j["to_answer"] = json!(review::to_answer(v, run));
@@ -913,6 +994,26 @@ pub fn status(v: &Vault, run: &str, from: u64) -> Result<Value> {
     j["events"] = json!(events);
     j["next"] = json!(next);
     Ok(j)
+}
+
+/// A run's events after number `from` in its folder's `log.jsonl` (at most 2,000), and the number to ask from next.
+pub(super) fn events_after(dir: &Path, from: u64) -> (Vec<Value>, u64) {
+    let text = std::fs::read(dir.join("log.jsonl")).unwrap_or_default();
+    let events: Vec<Value> = String::from_utf8_lossy(&text)
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter(|e| e["n"].as_u64().is_some_and(|n| n > from))
+        .take(2000)
+        .collect();
+    let next = events.last().and_then(|e| e["n"].as_u64()).unwrap_or(from);
+    (events, next)
+}
+
+/// How long a run went, from `at` to `ended` (RFC 3339; none: until now).
+pub(super) fn seconds(at: &str, ended: Option<&str>) -> i64 {
+    let at = chrono::DateTime::parse_from_rfc3339(at).ok();
+    let end = ended.and_then(|e| chrono::DateTime::parse_from_rfc3339(e).ok()).map(|e| e.with_timezone(&chrono::Local)).unwrap_or_else(chrono::Local::now);
+    at.map(|a| end.signed_duration_since(a).num_seconds().max(0)).unwrap_or(0)
 }
 
 /// What the Ingest view shows of a vault (K14, K15): its sources, the ingest skill (none: the starter's to offer, shown

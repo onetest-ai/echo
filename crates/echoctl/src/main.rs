@@ -1108,6 +1108,10 @@ enum KnowledgeCmd {
     /// properties, unknown tags, index rows to missing pages, usual properties missing, duplicate titles, an oversized
     /// index (JSON)
     Check { vault: String },
+    /// AI checks: Claude Code reads the vault's pages (all, or those changed in the last 30 days and the pages they
+    /// link to, up to 300) and Echo keeps the findings whose quotes are on their pages; waits, then prints the check,
+    /// what it kept and dropped, and its cost (JSON). Nothing in the vault changes
+    Lint { vault: String },
     /// Add index rows for pages the index doesn't list (vault-relative paths)
     IndexAdd { vault: String, paths: Vec<String> },
     /// Save a call's minutes into a vault (its note and index row). Without --vault: the vaults whose rules take it
@@ -2875,6 +2879,31 @@ fn ingest_run_command(v: &knowledge::Vault, cmd: IngestCmd) -> Result<serde_json
     }
 }
 
+/// `knowledge lint` (spec K16-11): an AI check started as the window's *Run AI checks* is, under the app's lock, waited
+/// for (what it waits for said as it waits, X-S2); its run, state, what it kept and dropped, and its cost.
+fn lint_command(v: &knowledge::Vault) -> Result<serde_json::Value> {
+    use knowledge::lint;
+    knowledge::refuse_headless()?;
+    // Ctrl-C (or a TERM) stops the check's Claude Code with this CLI, never leaves it running.
+    let _ = ctrlc::set_handler(|| {
+        lint::stop_all("Stopped from the command line");
+    });
+    let run = lint::start(v)?;
+    let mut said: Option<String> = None;
+    while !lint::wait(&run, std::time::Duration::from_secs(2)) {
+        let waiting = lint::status(v, &run, u64::MAX)?["waiting"].as_str().map(str::to_owned);
+        if let Some(w) = waiting.as_deref().filter(|w| said.as_deref() != Some(*w)) {
+            eprintln!("{w}");
+        }
+        said = waiting;
+    }
+    let st = lint::status(v, &run, u64::MAX)?;
+    // The findings it kept, as Health lists them: each by its key, kind, title and pages with their lines.
+    let found = if st["state"] == "done" { lint::kept(v, &run)?.0 } else { vec![] };
+    let found: Vec<serde_json::Value> = found.iter().map(|f| serde_json::json!({ "key": f.key, "kind": f.kind, "title": f.title, "pages": f.pages, "fixable": f.fixable })).collect();
+    Ok(serde_json::json!({ "run": run, "state": st["state"], "reason": st["reason"], "pages": st["pages"], "kept": st["kept"], "dropped": st["dropped"], "cost": st["cost"], "findings": found }))
+}
+
 fn ingest_command(vault: &str, cmd: IngestCmd) -> Result<serde_json::Value> {
     use knowledge::sources;
     knowledge::refuse_headless()?;
@@ -2966,6 +2995,7 @@ fn knowledge_command(cmd: KnowledgeCmd) -> Result<()> {
             p
         }
         KnowledgeCmd::Check { vault } => kn::health::check(&kn::get(&vault)?)?,
+        KnowledgeCmd::Lint { vault } => lint_command(&kn::get(&vault)?)?,
         KnowledgeCmd::IndexAdd { vault, paths } => kn::page::index_add(&kn::get(&vault)?, &paths)?,
         KnowledgeCmd::SaveMinutes { call, vault, new, replace, anyway } => {
             kn::refuse_headless()?;
@@ -3287,5 +3317,38 @@ mod ingest_cli {
         assert!(add(&v.id, &[]).is_err(), "nothing named");
         let q = knowledge::sources::queue(&v).unwrap();
         assert_eq!(q.iter().filter(|s| s.path.starts_with("raw_inbox/brief")).count(), 1, "the refused adds wrote nothing");
+    }
+}
+
+#[cfg(all(test, unix))]
+mod lint_cli {
+    use super::*;
+    use crate::ai::fake;
+    use crate::knowledge::fixture;
+
+    #[test]
+    fn lint_waits_and_prints_what_it_kept() {
+        // K16-11: `echoctl knowledge lint <vault>`, with the fake.
+        let (_env, root) = crate::paths::testenv::folders("kn-cli-lint");
+        let _fake = fake::install(&root);
+        knowledge::lint::reset();
+        let p = fake::profile("w", None, &fake::signed_in("pat@example.com"));
+        let t = fixture::twin(&root.join("twin"));
+        let v = knowledge::add(&t, knowledge::AddOpts { name: Some("Twin".into()), profile: Some("w".into()), ..Default::default() }).unwrap();
+        let found = serde_json::json!({"findings": [
+            {"kind": "missing_summary", "title": "Acme Corp has no summary", "pages": [{"path": "knowledge/clients/acme.md", "quote": "Acme Corp tags client"}]},
+            {"kind": "stale", "title": "Invented", "pages": [{"path": "knowledge/clients/acme.md", "quote": "Acme Corp closed its doors"}]},
+        ]});
+        std::fs::write(fake::file(&p, "findings.1.json"), found.to_string()).unwrap();
+        std::fs::write(fake::file(&p, "lint.jsonl"), "{\"_findings\":1}\n{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"total_cost_usd\":0.12,\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}\n").unwrap();
+        let cmd = match Cli::try_parse_from(["echoctl", "knowledge", "lint", v.id.as_str()]).unwrap().cmd {
+            Cmd::Knowledge { cmd: KnowledgeCmd::Lint { vault } } => vault,
+            _ => unreachable!("a lint command"),
+        };
+        let out = lint_command(&knowledge::get(&cmd).unwrap()).unwrap();
+        assert_eq!((out["state"].as_str(), out["kept"].as_u64(), out["dropped"].as_u64(), out["cost"].as_f64(), out["pages"].as_u64()), (Some("done"), Some(1), Some(1), Some(0.12), Some(4)), "{out}");
+        assert!(out["run"].as_str().is_some_and(|r| !r.is_empty()) && out["reason"].is_null());
+        assert_eq!((out["findings"][0]["kind"].as_str(), out["findings"][0]["title"].as_str(), out["findings"][0]["pages"].clone()), (Some("missing_summary"), Some("Acme Corp has no summary"), serde_json::json!([["knowledge/clients/acme.md", 2]])));
+        knowledge::lint::reset();
     }
 }
