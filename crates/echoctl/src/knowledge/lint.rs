@@ -354,8 +354,8 @@ pub fn start(v: &Vault) -> Result<String> {
     };
     let (stop, held) = ingest::go_live(&LIVE, &run, &v.id, ready, run_lock);
     let Prepared { dir, root, args, scope, prompt, log } = prepared;
-    let going = Going { live: &LIVE, ended: &ENDED, run: run.clone(), profile: p, args, cwd: root, scope, log, stop, held };
-    ingest::run_thread(going, Check { v: v.clone(), run: run.clone(), dir, prompt });
+    let going = Going { live: &LIVE, ended: &ENDED, run: run.clone(), profile: p.clone(), args, cwd: root.clone(), scope, log, stop, held };
+    ingest::run_thread(going, Check { v: v.clone(), run: run.clone(), dir, prompt, profile: p, root });
     Ok(run)
 }
 
@@ -377,6 +377,9 @@ struct Check {
     run: String,
     dir: PathBuf,
     prompt: String,
+    /// Its Claude Code's profile and working folder (the vault's root, canonical).
+    profile: ai::Profile,
+    root: PathBuf,
 }
 
 impl Life for Check {
@@ -398,6 +401,9 @@ impl Life for Check {
     fn watch(&self, mut child: Child, log: &mut Log, stop: &Mutex<Option<String>>) -> End {
         let mut parser = stream::Parser::new(&self.v);
         let d = ingest::drive(&mut child, &self.prompt, &mut parser, log);
+        // What it left of its session in the profile's folder: only its own session's files, never the vault's folder
+        // there, which holds the user's own sessions (final review F6).
+        ingest::forget_session(&self.profile, &self.root, d.session.as_deref(), false);
         let failed = d.failed(lock(stop).take());
         let mut end = End { result: d.result, bad: d.bad, ..End::default() };
         match failed {

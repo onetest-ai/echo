@@ -113,6 +113,34 @@ fn ai_listed(v: &Vault) -> Vec<Value> {
 
 #[cfg(unix)]
 #[test]
+fn a_check_leaves_only_the_users_own_sessions_in_the_vaults_folder() {
+    // Final review F6: an AI check works in the vault itself, whose folder under the profile's `projects/` holds the
+    // user's own sessions there too: only the check's own session's files go, never that folder. Only the fake and its
+    // made-up folder.
+    let (_env, root) = paths::testenv::folders("kn-lint-forget");
+    let _fake = fake::install(&root);
+    let _clean = clean();
+    let (v, p) = vault(&root, false);
+    // Claude Code's name for it (design note V10, fact 5): the path, every character but an ASCII letter or digit as `-`.
+    let name: String = dunce::canonicalize(&v.root).unwrap().to_string_lossy().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
+    let folder = p.config_folder().join("projects").join(name);
+    let theirs = "11111111-2222-4333-8444-555566667777";
+    fixture::write(&folder, &format!("{theirs}.jsonl"), "{\"type\":\"user\"}\n");
+    fixture::write(&folder, &format!("{theirs}/tool-results/toolu_9.txt"), "the user's own");
+    script(&p, "lint.jsonl", &[init(), json!({"_wait": 1}), findings(&p, 1, json!([])), result()]);
+    let run = start(&v).unwrap();
+    playing(&p, 1);
+    fixture::write(&folder, "made-up/tool-results/toolu_1.txt", "Maya Chen's words");
+    fixture::write(&folder, "made-up.jsonl", "{}\n");
+    std::fs::write(fake::file(&p, "go.1"), "").unwrap();
+    assert!(wait(&run, Duration::from_secs(20)));
+    assert_eq!(status(&v, &run, 0).unwrap()["state"], "done");
+    assert!(!folder.join("made-up").exists() && !folder.join("made-up.jsonl").exists(), "the check's own session goes");
+    assert!(folder.join(format!("{theirs}.jsonl")).is_file() && folder.join(theirs).join("tool-results/toolu_9.txt").is_file(), "the user's own are left, and their folder");
+}
+
+#[cfg(unix)]
+#[test]
 fn three_findings_one_kept_two_dropped() {
     // K16-T5, K16-06, K16-07, K16-T2's second half (the score after an AI check)
     let (_env, root) = paths::testenv::folders("kn-lint-kept");

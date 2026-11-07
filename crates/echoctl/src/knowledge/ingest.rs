@@ -673,8 +673,8 @@ pub fn start(v: &Vault, wanted: &[String]) -> Result<Started> {
     })?;
     let (stop, held) = go_live(&LIVE, &run, &v.id, ready, run_lock);
     let Prepared { copy, args, scope, prompt, log } = prepared;
-    let going = Going { live: &LIVE, ended: &ENDED, run: run.clone(), profile: p, args, cwd: copy.clone(), scope, log, stop, held };
-    run_thread(going, IngestRun { v: v.clone(), run: run.clone(), dir, copy, prompt });
+    let going = Going { live: &LIVE, ended: &ENDED, run: run.clone(), profile: p.clone(), args, cwd: copy.clone(), scope, log, stop, held };
+    run_thread(going, IngestRun { v: v.clone(), run: run.clone(), dir, copy, prompt, profile: p });
     Ok(Started { run, sources: picked, left })
 }
 
@@ -827,13 +827,14 @@ pub(super) fn run_thread<L: Life>(going: Going, life: L) {
     });
 }
 
-/// An ingest run's life (`run_thread`): its ledger entry, its copy, its prompt.
+/// An ingest run's life (`run_thread`): its ledger entry, its copy, its prompt, its Claude Code's profile.
 struct IngestRun {
     v: Vault,
     run: String,
     dir: PathBuf,
     copy: PathBuf,
     prompt: String,
+    profile: ai::Profile,
 }
 
 impl Life for IngestRun {
@@ -858,7 +859,7 @@ impl Life for IngestRun {
     }
 
     fn watch(&self, child: Child, log: &mut Log, stop: &Mutex<Option<String>>) -> End {
-        watch(&self.v, &self.dir, &self.copy, child, &self.prompt, log, stop)
+        watch(self, child, log, stop)
     }
 
     fn finish(&self, log: &mut Log, end: End) {
@@ -876,10 +877,13 @@ struct End {
     bad: usize,
 }
 
-/// A started run's Claude Code driven to its end (`drive`), then the changes it made in its copy found.
-fn watch(v: &Vault, dir: &Path, copy: &Path, mut child: Child, prompt: &str, log: &mut Log, stop: &Mutex<Option<String>>) -> End {
+/// A started run's Claude Code driven to its end (`drive`) — what it left of its session in its profile's folder
+/// deleted (`forget_session`: the copy is its own working folder) —, then the changes it made in its copy found.
+fn watch(r: &IngestRun, mut child: Child, log: &mut Log, stop: &Mutex<Option<String>>) -> End {
+    let IngestRun { v, dir, copy, prompt, profile, .. } = r;
     let mut parser = stream::Parser::for_copy(&Vault { root: copy.to_path_buf(), ..v.clone() });
     let d = drive(&mut child, prompt, &mut parser, log);
+    forget_session(profile, copy, d.session.as_deref(), true);
     let (state, reason) = match d.failed(lock(stop).take()) {
         Some((state, why)) => (state, Some(why)),
         None => ("review", None),
@@ -895,10 +899,11 @@ fn watch(v: &Vault, dir: &Path, copy: &Path, mut child: Child, prompt: &str, log
 }
 
 /// What came of a run's Claude Code: its `result` event, its error (from the stream), stderr's last line, its exit
-/// code, whether it ran out of time, and how many lines weren't JSON.
+/// code, whether it ran out of time, how many lines weren't JSON, and its session (its `init` line's id).
 pub(super) struct Driven {
     timed_out: bool,
     pub(super) result: Option<Value>,
+    pub(super) session: Option<String>,
     error: Option<String>,
     tail: Option<String>,
     code: Option<i32>,
@@ -983,7 +988,34 @@ pub(super) fn drive(child: &mut Child, prompt: &str, parser: &mut stream::Parser
     // Its last words on stderr (a process it left behind may hold the pipe: not waited for long).
     let _ = err_ended.recv_timeout(Duration::from_millis(500));
     let tail = lock(&tail).clone();
-    Driven { timed_out, result, error, tail, code, bad: parser.bad_lines() }
+    Driven { timed_out, result, session: parser.session_id().map(str::to_owned), error, tail, code, bad: parser.bad_lines() }
+}
+
+/// Claude Code's name for working folder `cwd` under its folder's `projects/` (design note V10, fact 5): the path with
+/// every character but an ASCII letter or digit as `-` — per UTF-16 unit, as JavaScript's `replace` counts them.
+fn project_name(cwd: &Path) -> String {
+    cwd.to_string_lossy().encode_utf16().map(|u| u8::try_from(u).ok().filter(u8::is_ascii_alphanumeric).map_or('-', char::from)).collect()
+}
+
+/// What a run's Claude Code left of its session in profile `p`'s folder (final review F6, design note V10 fact 5): the
+/// long tool output it saved — the copy's, the vault's and the sources' words — under `projects/<cwd>/<session>/`.
+/// Only what the run's own session id names goes: `<session>/` and `<session>.jsonl`; then the folder of `cwd` itself
+/// when it is the run's own (`own_cwd`: an ingest run's copy) and nothing else is in it. An AI check works in the vault,
+/// whose folder holds the user's own sessions there: only its session's files. A session Echo never learnt (no `init`
+/// line): nothing, said on stderr.
+pub(super) fn forget_session(p: &ai::Profile, cwd: &Path, session: Option<&str>, own_cwd: bool) {
+    let folder = p.claude_dir().join("projects").join(project_name(cwd));
+    let plain = |s: &&str| !s.is_empty() && s.len() <= 100 && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    let Some(s) = session.filter(plain) else {
+        eprintln!("knowledge: a run's Claude Code in {} named no session Echo can use ({session:?}): nothing of it deleted from {}", cwd.display(), folder.display());
+        return;
+    };
+    // Neither is followed if it is a link: a link goes, never what it points to.
+    let _ = std::fs::remove_dir_all(folder.join(s));
+    let _ = std::fs::remove_file(folder.join(format!("{s}.jsonl")));
+    if own_cwd {
+        let _ = std::fs::remove_dir(&folder);
+    }
 }
 
 /// A run's end in its log and the ledger: its state, why, the changes found (and how many of them can't be written),

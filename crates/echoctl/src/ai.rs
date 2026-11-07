@@ -273,6 +273,16 @@ impl Profile {
         paths::config_dir().join("claude").join(&self.id)
     }
 
+    /// The folder this profile's Claude Code works in (its sessions, its saved tool output): a managed profile's own
+    /// (`CLAUDE_CONFIG_DIR`, `config_folder`), else the user's own — `CLAUDE_CONFIG_DIR` where Echo has it, else
+    /// `~/.claude`.
+    pub fn claude_dir(&self) -> PathBuf {
+        if self.kind.managed() {
+            return self.config_folder();
+        }
+        std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from).filter(|p| p.is_absolute()).unwrap_or_else(|| paths::user_home().join(".claude"))
+    }
+
     /// `claude`: may jobs use account `a`? The one recorded (compared by `Account::key`), or any
     /// before one is recorded — the one rule for jobs (`judge`), the window and the tray.
     pub fn expects(&self, a: &Account) -> bool {

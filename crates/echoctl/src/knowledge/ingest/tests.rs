@@ -1078,6 +1078,55 @@ fn a_vault_skill_brings_no_hooks_tools_or_commands_into_a_run() {
     assert_eq!(bytes(".claude/skills/process-inbox/SKILL.md"), skill_before);
 }
 
+/// Claude Code's folder for a working folder `cwd` under a profile's `projects/` (design note V10, fact 5: the path,
+/// every character but an ASCII letter or digit as `-`).
+fn project_of(cwd: &Path) -> String {
+    cwd.to_string_lossy().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
+}
+
+#[cfg(unix)]
+#[test]
+fn a_run_leaves_nothing_of_its_session_in_the_profiles_folder() {
+    // Final review F6: Claude Code keeps a long tool output, the copy's and the sources' words, under the profile's
+    // folder; the run's own session's files go, nothing else. Only the fake and its made-up folder.
+    let (_env, root) = paths::testenv::folders("kn-ingest-forget");
+    let _fake = fake::install(&root);
+    let _clean = clean();
+    let (v, p) = twin(&root, false);
+    fixture::write(&v.root, SOURCE, SYNC);
+    let projects = p.config_folder().join("projects");
+    assert!(projects.starts_with(std::env::temp_dir()) || projects.starts_with(dunce::canonicalize(std::env::temp_dir()).unwrap()), "a made-up folder: {}", projects.display());
+    // The user's own session in the vault, elsewhere in the same folder.
+    let user = projects.join(project_of(&dunce::canonicalize(&v.root).unwrap()));
+    let theirs = "11111111-2222-4333-8444-555566667777";
+    fixture::write(&user, &format!("{theirs}.jsonl"), "{\"type\":\"user\"}\n");
+    fixture::write(&user, &format!("{theirs}/tool-results/toolu_9.txt"), "the user's own");
+    script(&p, "ingest.1.jsonl", &[init(), json!({"_wait": 1}), result()]);
+    let s = start(&v, &[]).unwrap();
+    playing(&p, 1);
+    let copy = dunce::canonicalize(ingest_dir(&v).join(&s.run).join("vault")).unwrap();
+    let ours = projects.join(project_of(&copy));
+    fixture::write(&ours, "made-up/tool-results/toolu_1.txt", "Dana Reyes said the pilot moves");
+    std::fs::write(fake::file(&p, "go.1"), "").unwrap();
+    assert!(wait(&s.run, Duration::from_secs(20)));
+    assert!(!ours.exists(), "the run's session folder goes, and its project folder with it, empty");
+    assert!(user.join(format!("{theirs}.jsonl")).is_file() && user.join(theirs).join("tool-results/toolu_9.txt").is_file(), "the user's own are left");
+    // A run whose session Echo never learnt: nothing deleted.
+    discard(&v, &s.run).unwrap();
+    assert_eq!(requeue(&v, &strings(&[SOURCE])).unwrap(), 1);
+    script(&p, "ingest.2.jsonl", &[json!({"_wait": 2}), result()]);
+    let s2 = start(&v, &[]).unwrap();
+    playing(&p, 2);
+    let copy2 = dunce::canonicalize(ingest_dir(&v).join(&s2.run).join("vault")).unwrap();
+    let left = projects.join(project_of(&copy2)).join("made-up/tool-results/toolu_2.txt");
+    fixture::write(left.parent().unwrap(), "toolu_2.txt", "words");
+    std::fs::write(fake::file(&p, "go.2"), "").unwrap();
+    assert!(wait(&s2.run, Duration::from_secs(20)));
+    assert!(left.is_file(), "not tied to the run's session: left");
+    // Echo's name for a folder is Claude Code's: per UTF-16 unit, as JavaScript counts them.
+    assert_eq!(project_name(Path::new("/Users/pat/Vault é/😀")), "-Users-pat-Vault-----");
+}
+
 /// A kind of run whose end panics (a made-up bug): `run_thread` must let its lock and lease go and leave `live` all the
 /// same. Echo stops it before it starts, so no Claude Code — not even the fake — is started.
 struct Panics;

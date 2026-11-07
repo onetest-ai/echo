@@ -853,6 +853,10 @@ not the hashing, were the cost; copying on 8 threads won only 15 %, so small fil
   hook files) is checked only with the fake and Echo's own reader: unmeasured on the real CLI — the release gate in
   `tests/12-knowledge.md` (TC-KN-011…014) measures it. A command's `@file` references (Claude Code may read the file into
   the prompt with no tool call, which the guard doesn't see) are left as they are: unmeasured.
+- `forget_session` is unmeasured on the real CLI: Claude Code's name for a very long working folder (it may shorten
+  it), and folders it may key by session elsewhere in the profile's folder (`file-history/`, `todos/`), are not
+  looked at; a run whose Echo died (its session id is in no file) leaves its session's files. The release gate
+  (TC-KN-011…014) looks.
 - A run's deleted files aren't changes: only created and modified ones are reviewed.
 - An AI check can't read its own findings.json (the guard allows one Write there and no Read), so it writes it once.
 - A CLI `knowledge lint` killed outright leaves its Claude Code running until the next check's start ends it (as an
@@ -1007,7 +1011,13 @@ input and `$PROBE_SCOPE` and answers *ask* for `Edit`/`Write`/`WebFetch`, and `"
    `tool_result` text the stream carries is the persisted-output text, so a `tool_result` event's `preview` is that 2 KB
    preview and its path points into `~/.claude`, outside the vault: the guard's path rule must allow reading
    `tool-results/` files of the run's own session (or Echo never offers them), and a run that must leave nothing behind
-   must delete that folder itself.
+   must delete that folder itself. Ingest runs and AI checks do (final review F6, `ingest::forget_session`, when their
+   Claude Code has exited): in the profile's folder (`Profile::claude_dir`: a managed profile's `CLAUDE_CONFIG_DIR`, else
+   the user's own `CLAUDE_CONFIG_DIR` or `~/.claude`), under `projects/<the run's cwd, named as above per UTF-16 unit>/`,
+   only what the run's own session id (its `init` line's) names goes — `<session>/` and `<session>.jsonl` —; for an
+   ingest run (its cwd is its copy, its own) that folder too when it is then empty; for an AI check (its cwd is the
+   vault, whose folder holds the user's own sessions there) never the folder. No session id: nothing is deleted, and
+   stderr says so. Checked with the fake and a made-up folder only.
 
 **V11 (transcript → events).** The transcript `.jsonl` named by the hook's `transcript_path`
 (`~/.claude/projects/<slug>/<session id>.jsonl`) holds the same messages as stdout (`user` / `assistant` lines) among
