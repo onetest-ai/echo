@@ -12,11 +12,12 @@ cases:
   - tests/cases/prep/TC-003_no-prep-yet-no-thread.md
   - tests/cases/prep/TC-004_thread-changes-the-prep-line.md
   - tests/cases/prep/TC-005_prep-upcoming-cli.md
+  - tests/cases/today/TC-006_a-day-with-nothing-says-a-quiet-day.md
 ---
 
 # S-10: Inbox and prep on a quiet day
 
-**Story:** Sam opens the Inbox and sees that nothing waits, checks the same in the CLI, then looks at the meetings still to come today: the folded list, a meeting's page, the missing prep, a thread added to a meeting, and the CLI's list of them.
+**Story:** Sam opens the Inbox and sees that nothing waits, checks the same in the CLI, then looks at the meetings still to come today: the folded list, a meeting's page, the missing prep, a thread added to a meeting, and the CLI's list of them. Then the day empties (the meetings cancelled, the calls put away, the task done) and Today says it is a quiet day.
 
 ## Stages
 
@@ -30,8 +31,10 @@ cases:
 | 6 | `prep/TC-003_no-prep-yet-no-thread.md` | — | — |
 | 7 | `prep/TC-004_thread-changes-the-prep-line.md` | — | — |
 | 8 | `prep/TC-005_prep-upcoming-cli.md` | — | — |
+| 9 | `today/TC-006_a-day-with-nothing-says-a-quiet-day.md` | — | — (last: it empties the agenda) |
 
 ## Notes
 - Only what `small` holds: an empty Inbox and meetings with no prep. Open items (badge count, groups, per-kind buttons, Working…, Done rows) and written preps (sections, Write it again, the Prep tab of a recorded call) wait for the `standard` data set, which must hold them (for example a failed minutes run, a pending people suggestion, a written prep).
 - Run before 22:00 local: the prep stages need two meetings still to come today.
 - No stage presses Prepare now or any Inbox button.
+- Stage 9 empties the day with the CLI (agenda cleared, today's calls deleted, the task closed) and restores the calls and the task; the agenda stays empty, so it runs last.

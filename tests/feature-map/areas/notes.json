@@ -32,7 +32,7 @@
   },
   {
    "id": "F-NOTES-04",
-   "feature": "A note edited in place changes text and kind (Enter saves, Esc cancels); emptied it is dropped; × deletes it",
+   "feature": "A note edited in place changes text and kind (Enter saves, Esc cancels); an edit that empties it is dropped and the note kept; × deletes it",
    "priority": "medium",
    "check": "agent",
    "axes": [

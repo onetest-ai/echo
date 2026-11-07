@@ -41,7 +41,7 @@ into a scenario (`app_profile.md` → "Scenarios").
 | [S-07](scenarios/S-07_clients-and-people.md) | 17 | Clients and people: client pages, domains, a thread's people, a person's details |
 | [S-08](scenarios/S-08_who-owes-what.md) | 14 | Who owes what: the piles, the filters, a card, closing a task, Claude's dialog, Asks |
 | [S-09](scenarios/S-09_a-calls-housekeeping.md) | 11 | A call's housekeeping: list, minutes, kind, thread, tabs and the actions menu |
-| [S-10](scenarios/S-10_inbox-and-prep-on-a-quiet-day.md) | 8 | Inbox and prep on a quiet day: nothing waits, meetings still to come |
+| [S-10](scenarios/S-10_inbox-and-prep-on-a-quiet-day.md) | 9 | Inbox and prep on a quiet day: nothing waits, meetings still to come, then a day with nothing ("A quiet day") |
 | [S-11](scenarios/S-11_set-echo-up-your-way.md) | 36 | Set Echo up your way: appearance, recording, languages, About me, a template, a meeting type, the vocabulary |
 | [S-12](scenarios/S-12_skills-and-ai-profiles-and-plugins.md) | 30 | Skills and AI: skills on and off, AI profiles and the default, plugins and marketplaces |
 | [S-13](scenarios/S-13_find-your-way-around.md) | 18 | Find your way around: the activity bar, panels, layout, the actions palette, the status bar and shortcuts |
@@ -50,15 +50,17 @@ into a scenario (`app_profile.md` → "Scenarios").
 | [S-25](scenarios/S-25_who-owes-what-on-a-full-board.md) | 21 | Who owes what on a full board: Tasks, piles, filters, badges, the board and its columns (`standard` data) |
 | [S-26](scenarios/S-26_ten-threads-in-every-stage.md) | 24 | Ten threads in every stage: membership, people and clients (`standard` data) |
 | [S-27](scenarios/S-27_others-words-everywhere.md) | 16 | Others' words everywhere: nothing runs, nothing breaks (the `hostile` data set: markup, script, `javascript:` links, long words, right-to-left, emoji, Markdown in every place) |
+| [S-28](scenarios/S-28_echo-from-the-terminal.md) | 11 | Echo from the terminal: help, threads and candidates against the window, `read` and `echo://` links in the window, `m365` without `--yes`, series and settings, clients and organisations, a thread made and changed, the work's edits, one call's commands (`standard` data) |
+| [S-29](scenarios/S-29_notes-transcripts-settings-and-today-off-the-happy-path.md) | 10 | Notes, transcripts, settings and Today off the happy path: a Teams import, empty transcripts, to-dos, edits, comments, notes not lost, unreadable and changed files, a broken config, Today's cards and ⌘K (`standard` data) |
 
 ## Areas
 
 | Area | Agent | Person | What |
 |---|---|---|---|
-| `cases/today` | 3 | 0 | Today: Your day, My work |
-| `cases/window` | 12 | 3 | Calls, minutes, transcript, notes, delete, calendar views |
+| `cases/today` | 6 | 0 | Today: Your day, My work |
+| `cases/window` | 19 | 3 | Calls, minutes, transcript, notes, delete, calendar views |
 | `cases/calendar` | 1 | 10 | Scheduling, Microsoft 365 calendar, meeting chat |
-| `cases/cli` | 3 | 3 | `echoctl` commands |
+| `cases/cli` | 13 | 3 | `echoctl` commands |
 | `cases/claude` | 0 | 15 | Claude Code plugin and minutes runs |
 | `cases/privacy` | 3 | 4 | Opt-in, local data, what goes online |
 | `cases/transcription` | 5 | 1 | Transcript quality and languages |

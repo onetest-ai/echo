@@ -46,7 +46,7 @@
    "id": "F-M365-05",
    "feature": "`echoctl m365` sends nothing without `--yes`: it answers what would be sent",
    "priority": "critical",
-   "check": "person",
+   "check": "agent",
    "axes": [
     "m365.signin"
    ]

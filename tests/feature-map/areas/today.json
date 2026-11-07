@@ -37,7 +37,7 @@
    "id": "F-TODAY-05",
    "feature": "Cards sent to Today by routines or plugins show until Got it",
    "priority": "low",
-   "check": "person",
+   "check": "agent",
    "axes": []
   },
   {
