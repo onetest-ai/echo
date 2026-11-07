@@ -20,6 +20,7 @@ is `recall.md`. The window rules are `.ai-run/guides/window/window-ui.md`; untru
 | File (`crates/echoctl/src/knowledge/`) | Role |
 |---|---|
 | `mod.rs` | `Vault`, `MinutesRule`, `GitRule`, `AskRule`, `IngestRule` (`ingest.skill`, `ingest.calls`), the registry (`list`, `get`, `add`, `set`, `remove`, `reread`), `Vault::path` (detected unless overridden), refusals, `import_plugin_vaults` |
+| `defang.rs` | A vault's skills and commands as Echo copies them into a plugin of its own (`skill_files`, `markdown`): without frontmatter `hooks`, `allowed-tools` and `permissionMode`, `` !`cmd` `` preprocessing or hook files; what was left out (`LeftOut::said`) |
 | `detect.rs` | What a folder is made of (`detect`), the walk (`walk`, `WALK_MAX` 60 000, no symlinks followed), `skills` |
 | `fm.rs` | Echo's own frontmatter reader (`split`, `parse` → `Prop::{Text, List, Raw}`); no YAML crate |
 | `scan.rs` | Echo's index of a vault (`index`, memory + `index.json`, re-read where size or mtime changed), `rev`, `search` |
@@ -361,7 +362,15 @@ ever removed.
   ledger. With `--setting-sources user` no project
   skill loads, so the skill goes in a plugin of the run's own, `<run>/plugin/` (named by the vault's id: the skill is
   `/<vault id>:<skill>` in the prompt and the guard's `_SKILLS`): it lives and goes with the run, so the app clearing
-  `vault-plugins/` at its start never takes one a run — the CLI's too — reads. The lease is held until the process has
+  `vault-plugins/` at its start never takes one a run — the CLI's too — reads. The plugin is Echo's copy of the skill
+  through `defang::skill_files` (final review F1), the vault's own files untouched: in every Markdown file the
+  frontmatter keys `hooks`, `allowed-tools` and `permissionMode` are dropped (in any case, `-`/`_` aside, quoted or
+  not; the frontmatter is read from a first `---` line to the next line that is exactly `---`, else to the end, and one
+  Echo can't read safely — a merge key, a flow mapping, an indented or escaped key — loses its opening line, so it is
+  text to every reader), every `!` before a backtick goes (`` !`cmd` `` and a fence opened ```` ```! ````: the words
+  stay, nothing runs), and a `hooks/` folder or `hooks.json` in the skill's folder stays out. The run's first line says
+  it beside the copy's: "Not in the copy: .git/. Left out of the skill: its hooks; its allowed tools; 2 commands it
+  would run first". The lease is held until the process has
   exited (`terminal::hold` in the app, so a sign-in stops it, "Stopped for a sign-in"); 20 minutes, then it is stopped
   ("It ran for 20 minutes without finishing"); *Stop* ends its group (a run still waiting just doesn't start), and so do
   the CLI's Ctrl-C and TERM ("Stopped from the command line"). Its stdout goes through `Parser::for_copy` (tool
@@ -444,7 +453,10 @@ Slice 1's Ask, kept (spec-2 §12, D8 superseded by D22 but not removed): the Cla
 session per vault (store key `<profile>:vault:<id>`), resumable in a terminal. On *Claude Code (as configured)* the
 vault's own skills and `CLAUDE.md` load by themselves. On a managed profile Echo copies the vault's skills and commands
 into a plugin under `<config>/minutes-run/vault-plugins/ <id>` and points the session at the vault's rules with
-`--append-system-prompt` — never by adding the `project` setting source (D8). The Echo-folder session gets `--add-dir`
+`--append-system-prompt` — never by adding the `project` setting source (D8). That plugin is Echo's copy through
+`defang::skill_files` (final review F1): each Markdown file loses its frontmatter's `hooks`, `allowed-tools` and
+`permissionMode` and the `!` of its `` !`cmd` `` preprocessing, and the skill's `hooks/` folder and `hooks.json` stay out.
+A conversation has no place where it notes its setup, so what was left out is said only here. The Echo-folder session gets `--add-dir`
 for the vaults on its profile. *Continue in Terminal* (`cd <vault> && claude --resume <id>`, quoted for the shell) is
 offered on *Claude Code (as configured)* only: a managed profile's routing can't be written out as a line to copy
 without its keys. Text Echo types into a session (a path, a skill's name) has its control characters removed.
@@ -818,6 +830,10 @@ not the hashing, were the cost; copying on 8 threads won only 15 %, so small fil
 - A vault skill's supporting files are in `<run>/plugin/skills/<name>/`, outside the copy, and the `ingest` guard
   allows no reads there: a skill that reads its own scripts or references would be refused. Unmeasured until a real
   run (V12).
+- What `defang` leaves out of a vault's skill (frontmatter hooks, `allowed-tools`, `permissionMode`, `` !`cmd` ``,
+  hook files) is checked only with the fake and Echo's own reader: unmeasured on the real CLI — the release gate in
+  `tests/12-knowledge.md` (TC-KN-011…014) measures it. A command's `@file` references (Claude Code may read the file into
+  the prompt with no tool call, which the guard doesn't see) are left as they are: unmeasured.
 - A run's deleted files aren't changes: only created and modified ones are reviewed.
 - An AI check can't read its own findings.json (the guard allows one Write there and no Read), so it writes it once.
 - A CLI `knowledge lint` killed outright leaves its Claude Code running until the next check's start ends it (as an

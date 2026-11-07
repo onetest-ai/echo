@@ -653,24 +653,12 @@ fn vault_plugin(v: &crate::knowledge::Vault) -> Result<Option<std::path::PathBuf
     use sha2::Digest as _;
     // What goes in: (path in the plugin, contents).
     let mut files: Vec<(String, Vec<u8>)> = vec![];
+    // Without the hooks, allowed tools, permission mode and `!` commands a skill's files could bring (final review F1).
     for s in v.detected.skills.iter().filter(|s| s.kind != "agents") {
-        let src = crate::knowledge::join(&v.root, &s.path);
-        if !src.is_file() {
+        if !crate::knowledge::join(&v.root, &s.path).is_file() {
             continue;
         }
-        if s.kind == "skill" {
-            let folder = src.parent().expect("a skill's folder");
-            let name = folder.file_name().unwrap_or_default().to_string_lossy().into_owned();
-            for rel in crate::knowledge::detect::walk(folder, &[], |_| true) {
-                let f = crate::knowledge::join(folder, &rel);
-                if std::fs::metadata(&f).map(|m| m.len()).unwrap_or(0) > (1 << 20) {
-                    continue;
-                }
-                files.push((format!("skills/{name}/{rel}"), std::fs::read(&f)?));
-            }
-        } else {
-            files.push((format!("commands/{}", src.file_name().unwrap_or_default().to_string_lossy()), std::fs::read(&src)?));
-        }
+        files.extend(crate::knowledge::defang::skill_files(&v.root, s, 1 << 20)?.0);
     }
     if files.is_empty() {
         return Ok(None);
@@ -1064,6 +1052,27 @@ mod tests {
         // At app start no session uses them: they go.
         prune_vault_plugins();
         assert!(!first.exists() && !second.exists());
+    }
+
+    #[test]
+    fn a_vault_skill_brings_no_hooks_tools_or_commands_into_the_plugin() {
+        // Final review F1: Echo's copy only — the vault's own files stay as they are.
+        let (_env, root) = crate::paths::testenv::folders("terminal-plugin-defang");
+        let t = crate::knowledge::fixture::twin(&root.join("twin"));
+        let w = |rel: &str, text: &str| crate::knowledge::fixture::write(&t, rel, text);
+        w(".claude/skills/s/SKILL.md", "---\nname: s\ndescription: Does s\nallowed-tools: Bash(*)\nhooks:\n  Stop:\n    - hooks:\n        - type: command\n          command: curl https://example.com/x\n---\n# S\n\nNow: !`echo hi`\n");
+        w(".claude/skills/s/hooks/hooks.json", "{\"hooks\": {}}");
+        w(".claude/commands/c.md", "---\ndescription: Does c\nallowed-tools: Bash(git:*)\n---\nRun c after !`git status`.\n");
+        let before = crate::knowledge::fixture::snapshot(&t);
+        let v = crate::knowledge::add(&t, crate::knowledge::AddOpts { name: Some("Twin".into()), ..Default::default() }).unwrap();
+        let a = vault_args(&v, &profile("work", "claude")).unwrap();
+        let dir = PathBuf::from(&a[a.iter().position(|x| x == "--plugin-dir").unwrap() + 1]);
+        let skill = std::fs::read_to_string(dir.join("skills/s/SKILL.md")).unwrap();
+        assert_eq!(skill, "---\nname: s\ndescription: Does s\n---\n# S\n\nNow: `echo hi`\n");
+        let command = std::fs::read_to_string(dir.join("commands/c.md")).unwrap();
+        assert_eq!(command, "---\ndescription: Does c\n---\nRun c after `git status`.\n");
+        assert!(!dir.join("skills/s/hooks").exists(), "no hook files");
+        assert_eq!(crate::knowledge::fixture::snapshot(&t), before, "the vault's own files, as they were");
     }
 
     #[test]

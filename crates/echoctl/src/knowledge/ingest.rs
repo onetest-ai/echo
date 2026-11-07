@@ -23,7 +23,7 @@ use std::sync::{mpsc, Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use super::detect::{self, Skill};
-use super::{fm, sources, starter, stream, Vault};
+use super::{defang, fm, sources, starter, stream, Vault};
 use crate::{ai, guard, paths};
 
 mod review;
@@ -270,27 +270,21 @@ fn run_name(v: &Vault, s: &Skill) -> String {
 }
 
 /// The ingest skill as a plugin of the run's own, in its folder: `--setting-sources user` loads no project skill (D40),
-/// and this way only that skill is there. It lives and goes with the run, so the app's clearing of the generated
-/// vault plugins at its start (`terminal::prune_vault_plugins`) never takes one a run — the CLI's too — still reads.
-fn plugin(v: &Vault, copy: &Path, s: &Skill, to: &Path) -> Result<PathBuf> {
-    let src = super::join(copy, &s.path);
-    let mut files: Vec<(String, PathBuf)> = vec![];
-    if s.kind == "command" {
-        files.push((format!("commands/{}", src.file_name().unwrap_or_default().to_string_lossy()), src));
-    } else {
-        let folder = src.parent().ok_or_else(|| anyhow!("{}: not a skill's file", s.path))?;
-        let name = folder.file_name().unwrap_or_default().to_string_lossy().into_owned();
-        files.extend(detect::walk(folder, &[], |_| true).into_iter().map(|rel| (format!("skills/{name}/{rel}"), super::join(folder, &rel))));
-    }
-    for (rel, from) in files {
+/// and this way only that skill is there — without the hooks, allowed tools, permission mode and `` !`cmd` `` commands
+/// its files could bring into a run Echo doesn't watch (`defang`, final review F1). It lives and goes with the run, so
+/// the app's clearing of the generated vault plugins at its start (`terminal::prune_vault_plugins`) never takes one a
+/// run — the CLI's too — still reads. Its folder, and what was left out of the skill.
+fn plugin(v: &Vault, copy: &Path, s: &Skill, to: &Path) -> Result<(PathBuf, defang::LeftOut)> {
+    let (files, left) = defang::skill_files(copy, s, u64::MAX)?;
+    for (rel, bytes) in files {
         let dst = super::join(to, &rel);
         std::fs::create_dir_all(dst.parent().expect("a parent"))?;
-        std::fs::copy(&from, &dst).with_context(|| format!("the skill's {rel}"))?;
+        std::fs::write(&dst, bytes).with_context(|| format!("the skill's {rel}"))?;
     }
     let manifest = json!({"name": v.id, "version": "1.0.0", "description": format!("The ingest skill of the knowledge vault {}", v.name)});
     std::fs::create_dir_all(to.join(".claude-plugin"))?;
     std::fs::write(to.join(".claude-plugin").join("plugin.json"), serde_json::to_vec_pretty(&manifest)?)?;
-    Ok(to.to_path_buf())
+    Ok((to.to_path_buf(), left))
 }
 
 // ── the copy ──
@@ -632,7 +626,7 @@ pub fn start(v: &Vault, wanted: &[String]) -> Result<Started> {
         let copy = dunce::canonicalize(dir.join("vault"))?;
         paths::write_atomic(&dir.join("bases.json"), &serde_json::to_vec(&json!({ "files": copied.files }))?)?;
         std::fs::create_dir_all(copy.join(NOTES))?;
-        let plugin = plugin(v, &copy, &skill, &dir.join("plugin"))?;
+        let (plugin, stripped) = plugin(v, &copy, &skill, &dir.join("plugin"))?;
         let name = run_name(v, &skill);
         let prompt = prompt(&copy, &name, &picked);
         paths::write_atomic(&dir.join("prompt.md"), prompt.as_bytes())?;
@@ -640,7 +634,11 @@ pub fn start(v: &Vault, wanted: &[String]) -> Result<Started> {
         let settings = dir.join("settings.json");
         paths::write_atomic(&settings, &serde_json::to_vec_pretty(&guard::settings_for(&scope, &std::env::current_exe()?))?)?;
         let mut log = Log::open(&dir);
-        log.push(json!({"type": "notice", "kind": "copy", "text": copied.left_out}));
+        let first = match stripped.said() {
+            Some(s) => format!("{}. Left out of the skill: {s}", copied.left_out),
+            None => copied.left_out,
+        };
+        log.push(json!({"type": "notice", "kind": "copy", "text": first}));
         Ok(Prepared { args: args(&p, &settings, &plugin), copy, scope, prompt, log })
     })();
     let prepared = match made {

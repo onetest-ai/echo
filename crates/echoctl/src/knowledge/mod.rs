@@ -9,6 +9,7 @@ pub mod activity;
 pub mod api;
 pub mod catalog;
 pub mod checks;
+pub(crate) mod defang;
 pub mod detect;
 pub mod diff;
 pub mod evidence;
