@@ -17,6 +17,7 @@ pub mod extract;
 pub mod fm;
 pub mod git;
 pub mod health;
+pub mod home;
 pub mod ingest;
 pub mod links;
 pub mod lint;

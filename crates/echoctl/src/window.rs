@@ -964,6 +964,16 @@ fn import_transcript(id: &str) -> bool {
 }
 const CALENDAR_TTL: std::time::Duration = std::time::Duration::from_secs(120);
 
+/// The calendar's events from its last fetch, as meetings (none cancelled or declined) — Knowledge's Home suggests from
+/// what Echo holds and never asks Microsoft 365 itself (spec-2 K11-02, ruling R48).
+pub(crate) fn cached_meetings() -> Vec<crate::meeting::MeetingContext> {
+    let raw = CALENDAR_CACHE.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|(_, _, r)| r.clone()).unwrap_or_default();
+    raw.iter()
+        .filter(|e| crate::calendar::view_event(e).is_some_and(|x| x["cancelled"] != true && x["declined"] != true))
+        .filter_map(crate::calendar::to_meeting)
+        .collect()
+}
+
 fn query_param(q: &str, key: &str) -> Option<String> {
     q.split('&').find_map(|kv| kv.split_once('=').filter(|(k, _)| *k == key).map(|(_, v)| urldecode(v)))
 }

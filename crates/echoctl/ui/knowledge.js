@@ -4,8 +4,8 @@
 // Echo's own words is escaped; a page's HTML comes from Echo's safe writer (`minutes::page_html`).
 'use strict'
 
-// ── kn-route: `#kn/<vault>/<tab>/<path>` (a page's path encoded as one part) ──
-const KN_TABS = ['pages', 'graph', 'ask', 'ingest', 'health', 'settings']
+// ── kn-route: `#kn/<vault>/<tab>/<path>` (a page's path encoded as one part); a vault opens on Home (spec-2 K10-01) ──
+const KN_TABS = ['home', 'pages', 'graph', 'ask', 'ingest', 'health', 'settings']
 /** `decodeURIComponent`, or `null` for a broken escape (a `%` that is the name's own). */
 function knDecode(s) {
   try { return decodeURIComponent(s) } catch { return null }
@@ -16,13 +16,13 @@ function knParseRoute(hash) {
   const vault = parts[1] ? knDecode(parts[1]) : ''
   if (vault === null) return null
   if (vault && !/^[\p{L}\p{N}_-]+$/u.test(vault)) return null
-  const tab = parts[2] || 'pages'
+  const tab = parts[2] || 'home'
   if (!KN_TABS.includes(tab)) return null
   const path = parts.length > 3 ? knDecode(parts.slice(3).join('/')) : ''
   if (path === null) return null
   return { vault, tab, path }
 }
-function knRouteOf({ vault, tab = 'pages', path = '' }) {
+function knRouteOf({ vault, tab = 'home', path = '' }) {
   return `kn/${encodeURIComponent(vault)}/${tab}${path ? '/' + encodeURIComponent(path) : ''}`
 }
 // end of the kn-route block
@@ -945,10 +945,73 @@ function knRunTake(g, r, from, d, now) {
 }
 // end of the kn-ingest-poll block
 
+// ── kn-home: Home's cards (spec-2 K11) — the Health card's lines, Coming in's rows, What's new under its filter, the
+// Continue lines, the Ask box's suggestions and a new vault's second step; Echo gives the facts, the view escapes them ──
+const KN_HOME_ROWS = 12
+const KN_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const KN_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+/** When, as Home says it: Today 10:01 · Yesterday 17:20 · Mon 11:05 (this week) · 28 Oct (2025 when not this year's);
+ *  `short` (Continue): 10:01 · yesterday · Mon · 28 Oct. '' for no time. */
+function knWhen(at, now = new Date(), short = false) {
+  const d = at ? new Date(at) : null
+  if (!d || isNaN(d)) return ''
+  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  const days = Math.round((new Date(now.getFullYear(), now.getMonth(), now.getDate()) - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 864e5)
+  if (days === 0) return short ? hm : `Today ${hm}`
+  if (days === 1) return short ? 'yesterday' : `Yesterday ${hm}`
+  if (days > 1 && days < 7) return short ? KN_DAYS[d.getDay()] : `${KN_DAYS[d.getDay()]} ${hm}`
+  return `${d.getDate()} ${KN_MONTHS[d.getMonth()]}${d.getFullYear() === now.getFullYear() ? '' : ` ${d.getFullYear()}`}`
+}
+/** Home's Health card and Coming in (K11-05, -06) from `/home`'s `health` and `coming_in`: the score, "code checks
+ *  only" until an AI check has run, the first three of *Needs you* (each opens its finding), what code can fix by kind;
+ *  the changes waiting with their sources (*Review* opens the run when there is one), the sources not processed by
+ *  kind, the run going with its step — and `nothing` only when none of them is there. */
+function knHomeCards(h = {}, now = new Date()) {
+  const hl = h.health || {}, ci = h.coming_in || {}
+  const kind = (k) => String((KN_HEALTH_KINDS[k] || [k])[0]).toLowerCase()
+  const lines = (hl.top || []).slice(0, 3).map((f) => ({ key: f.key, title: f.title, sub: f.by === 'ai' ? `${kind(f.kind)} · AI` : kind(f.kind) }))
+  const fix = (hl.fixable_kinds || []).map(([k, n]) => `${n} ${kind(k)}`).join(' · ')
+  const health = {
+    score: hl.score == null ? 100 : hl.score, needs: hl.needs || 0, lines, nothing: !hl.needs && !hl.fixable,
+    sub: hl.code_only || !hl.ai ? 'code checks only · AI checks when you ask' : `AI checks ${knWhen(hl.ai, now)}`,
+    fixable: hl.fixable ? `${hl.fixable} fixable by code${fix ? ` — ${fix}` : ''}` : '',
+  }
+  const runs = ci.runs || []
+  const waiting = ci.waiting > 0 ? { n: ci.waiting, sources: runs.map((r) => `${(r.sources || []).join(', ') || 'a run'} (${r.to_answer})`).join(' · '), run: runs.length === 1 ? runs[0].id : '' } : null
+  const fresh = ci.new > 0 ? { n: ci.new, kinds: (ci.kinds || []).filter(([, n]) => n > 0) } : null
+  const running = ci.running ? { run: ci.running.id, step: ci.running.waiting || ci.running.step || 'Starting' } : null
+  return { health, coming: { waiting, fresh, running, nothing: !waiting && !fresh && !running && !ci.error, error: ci.error || '' } }
+}
+/** What's new under its filter (K11-04): All · New pages (`new`) · Notes (`notes`: under the vault's notes folder), the
+ *  newest twelve, in the order Echo gave them. */
+function knHomeNews(rows, filter = 'all', notes = '') {
+  const keep = filter === 'new' ? (r) => r.kind === 'new' && !!r.path : filter === 'notes' ? (r) => !!notes && String(r.path).startsWith(`${notes}/`) : () => true
+  return (rows || []).filter(keep).slice(0, KN_HOME_ROWS)
+}
+/** A Continue line (K11-03): the mode Ask last ran it in, when, and "in the terminal panel" when the panel has it. */
+function knHomeLine(c, now = new Date()) {
+  const mode = { ask: 'Ask', curate: 'Curate', research: 'Research' }[c.mode] || ''
+  return [mode, knWhen(c.at, now, true), c.terminal ? 'in the terminal panel' : ''].filter(Boolean).join(' · ')
+}
+/** The Ask box (K11-01, -02): its placeholder — a new vault knows only its starter pages — and the suggestions Echo
+ *  gave (four at most, none without words). */
+function knHomeAsk(h = {}, name = 'the vault') {
+  return { placeholder: h.fresh ? `Ask ${name} — it knows only its starter pages for now` : `Ask ${name} — @ to mention a page`, suggestions: (h.suggestions || []).filter((x) => x && x.text).slice(0, 4) }
+}
+/** A new vault's *Record a call* (K11-09): where its minutes land, by the vault's minutes rule; `code` the words the
+ *  view sets as code. */
+function knHomeRecord(minutes = {}, paths = {}) {
+  const notes = `${String(paths.notes || 'notes').split('/').pop()}/`, index = String(paths.index || 'the index').split('/').pop()
+  if (minutes.mode === 'auto') return { word: 'automatically', text: `Its minutes are saved here by themselves: a note in ${notes} and a row in ${index}.`, code: [notes, index] }
+  if (minutes.mode === 'ask') return { word: 'when you choose', text: `After a call, its page offers to save its minutes here: a note in ${notes} and a row in ${index}.`, code: [notes, index] }
+  return { word: 'off', text: 'Minutes aren\'t saved here by themselves. Save one from its call\'s page when you want it.', code: [] }
+}
+// end of the kn-home block
+
 /** Knowledge's views and state (`S.kn`). */
 const Kn = (() => {
   const st = () => {
-    if (!S.kn) S.kn = { data: null, vault: '', tab: 'pages', path: '', tree: null, page: null, filter: 'all', q: '', hits: null, open: new Set(), rail: 'links', hist: null, ver: null, edit: null, graph: null, gopt: { hideIndex: true, isolated: true, tags: false, color: 'folder', depth: 0, sel: null, hidden: [] }, gq: '', settings: null, sheet: null, switcher: false, menu: null, busy: {}, error: null, chip: null, lastVault: null, ovr: {}, chat: null, askConv: '', hl: null, hlKey: '', ing: null, ingRun: '' }
+    if (!S.kn) S.kn = { data: null, vault: '', tab: 'home', path: '', tree: null, page: null, filter: 'all', q: '', hits: null, open: new Set(), rail: 'links', hist: null, ver: null, edit: null, graph: null, gopt: { hideIndex: true, isolated: true, tags: false, color: 'folder', depth: 0, sel: null, hidden: [] }, gq: '', settings: null, sheet: null, switcher: false, menu: null, busy: {}, error: null, chip: null, lastVault: null, ovr: {}, chat: null, askConv: '', hl: null, hlKey: '', ing: null, ingRun: '', home: null, homeChat: null, tabs: {} }
     return S.kn
   }
   const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms))
@@ -999,6 +1062,9 @@ const Kn = (() => {
     chat: I('<path d="M4.5 5.5h15v10h-9l-4 3.5v-3.5h-2z"/>'),
     upload: I('<path d="M12 15.5V4.5M7.5 9L12 4.5 16.5 9"/><path d="M4.5 15v3.5a1 1 0 0 0 1 1h13a1 1 0 0 0 1-1V15"/>'),
     memo: I('<rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5"/>'),
+    // Home
+    cal: I('<rect x="4" y="5.5" width="16" height="14" rx="2"/><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4"/>'),
+    tasks: I('<path d="M4.5 7l2 2 3.5-3.5M4.5 15l2 2 3.5-3.5M13 8h6.5M13 16h6.5"/>'),
   }
   const GEM_BIG = I('<path d="M6.5 3.5h11l3.5 5-9 12-9-12z"/><path d="M3 8.5h18M9.5 3.5l-1 5 3.5 12 3.5-12-1-5"/>', 22)
   const vaults = () => ((st().data || {}).vaults || [])
@@ -1071,7 +1137,8 @@ const Kn = (() => {
     // Ingest's number on its tab (changes waiting for review), wherever the vault opens; its tab loads it with its view.
     const gi = ing()
     if (s.tab !== 'ingest' && !gi.data && !gi.loading) { gi.loading = true; loadIngest().then(() => { gi.loading = false; render() }) }
-    if (s.tab === 'pages') {
+    if (s.tab === 'home') await loadHome()
+    else if (s.tab === 'pages') {
       if (!s.tree || s.tree.vault !== v.id) await loadTree()
       if (!s.path) s.path = (s.tree && s.tree.index) || ''
       if (s.path && (!s.page || s.page.path !== s.path || s.page.vault !== v.id)) await loadPage()
@@ -1158,12 +1225,16 @@ const Kn = (() => {
     // Ingest's sources and runs (an add or a run from the command line, a run ending while another tab shows): every 30 s.
     const gi = s.ing && s.ing.vault === v.id && s.ing.data ? s.ing : null
     if (gi && ticks % 15 === 0 && !(gi.run && gi.run.polling)) { const was = JSON.stringify(gi.data); await loadIngest(); if (JSON.stringify(gi.data) !== was) render() }
+    // Home: what came in, git's commits, a conversation — every 30 s while it shows; a change on disk at once (below).
+    const hm0 = s.tab === 'home' && s.home && s.home.vault === v.id && s.home.data ? s.home : null
+    if (hm0 && ticks % 15 === 0) { const was = JSON.stringify(hm0.data); await loadHome(); if (JSON.stringify(hm0.data) !== was) render() }
     let rev
     try { rev = (await get(`api/kn/${enc(v.id)}/rev`)).rev } catch { return }
     const h = s.hl && s.hl.vault === v.id && s.hl.data ? s.hl : null
-    const known = s.tree ? s.tree.rev : s.graph ? s.graph.rev : h ? h.rev : null
+    const known = s.tree ? s.tree.rev : s.graph ? s.graph.rev : h ? h.rev : hm0 ? hm0.data.rev : null
     if (!known || rev === known) return
     await loadTree()
+    if (s.tab === 'home') await loadHome()
     // Health's findings, its number on the tab and the diff shown follow the change.
     if (h) await loadHealth({ detail: s.tab === 'health' })
     if (s.edit) {
@@ -1177,18 +1248,22 @@ const Kn = (() => {
   // ── routing ──
   function routeTo(r) {
     const s = st()
-    if (r.vault !== s.vault) { s.page = null; s.tree = null; s.graph = null; s.settings = null; s.edit = null; s.hits = null; s.q = ''; s.gq = ''; s.gopt.hidden = [] }
+    // Another vault: its Pages open on its own index (Home names no page, so the last vault's would stay otherwise).
+    if (r.vault !== s.vault) { s.page = null; s.tree = null; s.graph = null; s.settings = null; s.edit = null; s.hits = null; s.q = ''; s.gq = ''; s.gopt.hidden = []; s.path = ''; s.ver = null }
     s.vault = r.vault || s.lastVault || (vaults()[0] || {}).id || ''
     s.tab = r.tab
-    // Ask's part of the route is a conversation and Health's a finding's key, not the page Pages keeps open.
+    if (s.vault) s.tabs[s.vault] = r.tab
+    // Ask's part of the route is a conversation and Health's a finding's key, not the page Pages keeps open; Home
+    // names none, so Pages opens on the page last read there (or the index).
     if (r.tab === 'ask') { s.askConv = r.path || ''; openChat(s.askConv) } else if (r.tab === 'health') s.hlKey = r.path || ''
     else if (r.tab === 'ingest') s.ingRun = r.path || ''
+    else if (r.tab === 'home') { /* the page Pages has open stays */ }
     else if (r.path !== undefined && r.path !== s.path) { s.path = r.path; s.ver = null }
     s.source = 'vault'
   }
   /** The route's last part for the tab open now. */
-  const here = () => (st().tab === 'ask' ? st().askConv || '' : st().tab === 'health' ? st().hlKey || '' : st().tab === 'ingest' ? st().ingRun || '' : st().path || '')
-  const goVault = (id, tab = 'pages', path = '') => go(knRouteOf({ vault: id, tab, path }))
+  const here = () => (st().tab === 'home' ? '' : st().tab === 'ask' ? st().askConv || '' : st().tab === 'health' ? st().hlKey || '' : st().tab === 'ingest' ? st().ingRun || '' : st().path || '')
+  const goVault = (id, tab = 'home', path = '') => go(knRouteOf({ vault: id, tab, path }))
   /** Knowledge's own view (a vault, or none yet) rather than Recall's or a plugin's tab. */
   function active() {
     const s = st()
@@ -1202,7 +1277,7 @@ const Kn = (() => {
     const s = st()
     if (s.source === 'recall' && recallOn()) return `brain/${(S.br && S.br.tab) || 'sources'}`
     const id = s.vault || s.lastVault || (() => { try { return localStorage.getItem('echo.kn.vault') } catch { return null } })() || ((s.data && s.data.vaults[0]) || {}).id
-    return id ? knRouteOf({ vault: id, tab: s.tab || 'pages', path: here() }) : 'kn'
+    return id ? knRouteOf({ vault: id, tab: s.tab || 'home', path: here() }) : 'kn'
   }
 
   // ── the header: Knowledge, the switcher, the vault's place, actions ──
@@ -1246,7 +1321,7 @@ const Kn = (() => {
     const gi = s.ing && s.ing.vault === s.vault && s.ing.data
     const n = knTabCounts({ waiting: gi ? knIngestWaiting(gi.runs) : 0, needs: h ? knHealthList(h.findings).needs : 0 })
     const t = (id, label, count, name) => `<button class="tab" role="tab" data-kn="tab" data-kn-tab="${id}" aria-selected="${s.tab === id}"${count ? ` aria-label="${esc(name)}" title="${esc(name)}"` : ''}>${label}${count ? `<span class="kn-cnt" aria-hidden="true">${nf(count)}</span>` : ''}</button>`
-    return `<div class="kn-tabs"><div class="tabs" role="tablist">${t('pages', 'Pages')}${t('graph', 'Graph')}${t('ask', 'Ask')}${t('ingest', 'Ingest', n.ingest, `Ingest, ${n.ingest} to review`)}${t('health', 'Health', n.health, knTabLabel('Health', n.health))}${t('settings', 'Settings')}</div></div>`
+    return `<div class="kn-tabs"><div class="tabs" role="tablist">${t('home', 'Home')}${t('pages', 'Pages')}${t('graph', 'Graph')}${t('ask', 'Ask')}${t('ingest', 'Ingest', n.ingest, `Ingest, ${n.ingest} to review`)}${t('health', 'Health', n.health, knTabLabel('Health', n.health))}${t('settings', 'Settings')}</div></div>`
   }
 
   // ── nothing connected yet ──
@@ -1303,22 +1378,6 @@ const Kn = (() => {
     }
     return `<div class="kn-props">${rows.slice(0, 14).map(([k, v]) => `<span class="kn-pk">${esc(k)}</span>${val([k, v])}`).join('')}</div>`
   }
-  function welcomeCard() {
-    const s = st(), v = vault()
-    if (!v || v.template !== 'twin@1' || !s.page || !s.page.is_index) return ''
-    try { if (localStorage.getItem(`echo.kn.welcome:${v.id}`)) return '' } catch { /* off */ }
-    const profile = 'knowledge/profile/DIGITAL_PROFILE.md'
-    const notes = `<code>${esc(String((v.paths || {}).notes || 'notes').split('/').pop())}/</code>`
-    const mode = (v.minutes || {}).mode
-    const meetings = mode === 'auto' ? `<b>Meetings come in by themselves.</b> <span class="set-sub">Minutes of your calls land in ${notes} and the index.</span>`
-      : mode === 'ask' ? `<b>Keep your meetings.</b> <span class="set-sub">After a call, its page offers to save the minutes into ${notes} and the index.</span>`
-        : `<b>Meetings stay out.</b> <span class="set-sub">Minutes aren't saved here by themselves; save one from its call's page when you want it.</span>`
-    return `<div class="kn-welcome"><div class="kn-welcome-h"><b>Your vault is ready</b><button class="btn ghost sm" data-kn="welcome-done">Dismiss</button></div><div class="kn-steps">
-      <div class="kn-step"><span class="n">1</span><span><b>Tell it who you are.</b> <span class="set-sub">Fill in your profile — everything Claude answers as you starts there.</span></span><button class="btn sm" data-kn="open" data-path="${profile}">Open profile</button></div>
-      <div class="kn-step"><span class="n">2</span><span><b>Add what you know.</b> <span class="set-sub">Drop files into <code>raw_inbox/</code>, then ask Claude <code>/process-inbox</code>.</span></span><button class="btn sm" data-kn="reveal" data-path="raw_inbox">Show folder</button></div>
-      <div class="kn-step"><span class="n">3</span><span><b>Ask it.</b> <span class="set-sub"><code>/twin what did we decide about…</code> — answers name the pages they used.</span></span><button class="btn sm" data-kn="ask">Ask</button></div>
-      <div class="kn-step"><span class="n">4</span><span>${meetings}</span><button class="btn ghost sm" data-kn="tab" data-kn-tab="settings">Change</button></div></div></div>`
-  }
   function readerView() {
     const s = st(), v = vault(), p = s.page
     if (s.edit) return editorView()
@@ -1332,7 +1391,7 @@ const Kn = (() => {
     const editBtn = p.source ? '<button disabled title="Sources are never edited">Edit</button>' : p.editable ? '<button data-kn="edit">Edit</button>' : '<button disabled title="Too large to edit in Echo">Edit</button>'
     const bar = `<div class="kn-bar">${crumbs}<div class="seg" role="group" aria-label="Read or edit"><button aria-pressed="true">Read</button>${editBtn}</div><button class="btn ghost sm" data-kn="obsidian" data-path="${esc(p.path)}" title="Open this page in Obsidian">${IC.ext} Obsidian</button><span class="kn-rel"><button class="icon-btn" data-kn="menu" data-menu="page" aria-haspopup="menu" aria-expanded="${s.menu === 'page'}" aria-label="Page actions">${IC.more}</button>${menu}</span></div>`
     const src = p.source ? `<div class="kn-info kn-src-note">${IC.lock}<span>A source in the vault's inbox, shown as it came. Echo never edits a source.</span><button class="btn ghost sm" data-kn="tab" data-kn-tab="ingest">Open Ingest</button></div>` : ''
-    return `<div class="kn-reader" data-keep-scroll>${bar}<article class="kn-doc selectable">${src}${welcomeCard()}${propsView(p)}${p.html}</article></div>`
+    return `<div class="kn-reader" data-keep-scroll>${bar}<article class="kn-doc selectable">${src}${propsView(p)}${p.html}</article></div>`
   }
   function editorView() {
     const s = st(), e = s.edit
@@ -2876,6 +2935,117 @@ const Kn = (() => {
     return ''
   }
 
+  // ── Home (spec-2 K11): what's new, what waits, how the vault is doing, and Ask in a card — from Echo's caches; git's
+  // part comes after the first draw (K11-10). Every title, path, name and message is others' words: `esc()` ──
+  function homeSt() {
+    const s = st()
+    if (!s.home || s.home.vault !== s.vault) s.home = { vault: s.vault, data: null, error: null, filter: 'all', polls: 0 }
+    return s.home
+  }
+  async function loadHome() {
+    const v = vault(), g = homeSt()
+    if (!v) return
+    try {
+      const d = await get(`api/kn/${enc(v.id)}/home`)
+      if (homeSt() !== g) return
+      if (d.error) g.error = d.error; else Object.assign(g, { data: d, error: null })
+    } catch (e) { g.error = String(e.message || e) }
+    // git is read on a thread of its own: Home asks again until its part is there (a few times, then the 2 s poll's rev).
+    if (g.data && g.data.whats_new && g.data.whats_new.git === 'pending' && g.polls < 20) {
+      g.polls++
+      setTimeout(() => { if (homeSt() === g && homeShown()) loadHome().then(render) }, 700)
+    } else g.polls = 0
+  }
+  const HOME_WHO = { minutes: 'echo', starter: 'echo', ingest: 'ingest', ask: 'ask', health: 'health', outside: 'out' }
+  const HOME_SUG = { meeting: IC.cal, note: IC.file, actions: IC.tasks, contradiction: IC.warn }
+  const HOME_KIND = { echo: 'Echo', mail: 'mail', teams: 'Teams', web: 'web', file: 'files' }
+  /** A path as the vault's pages see it (the pages root left off). */
+  const inPages = (p) => { const r = ((vault() || {}).paths || {}).pages || ''; return r && String(p).startsWith(`${r}/`) ? String(p).slice(r.length + 1) : String(p) }
+  function homeView() {
+    const g = homeSt(), d = g.data
+    if (!d) return `<div class="kn-h-wrap">${g.error ? `<div class="kn-none"><p class="error">${esc(g.error)}</p></div>` : '<div class="skeleton" style="padding:24px"><i></i><i></i><i></i></div>'}</div>`
+    const c = knHomeCards(d, new Date())
+    const left = `${d.fresh ? homeSteps() : ''}${homeAsk(d)}${homeNews(d)}`
+    const right = `${homeHealth(d, c.health)}${homeComing(c.coming)}${d.fresh ? '' : homeHubs(d.hubs)}${homeVault(d.vault, d.whats_new)}`
+    return `<div class="kn-h-wrap" data-keep-scroll><div class="kn-h"><div class="kn-h-col">${left}</div><div class="kn-h-col">${right}</div></div></div>`
+  }
+  /** A new vault's three steps (K11-09; the welcome card that was on its index page). */
+  function homeSteps() {
+    const v = vault(), r = knHomeRecord(v.minutes, v.paths)
+    const record = r.code.reduce((h, x) => h.replace(esc(x), `<code>${esc(x)}</code>`), esc(r.text))
+    return `<div class="kn-h-welcome"><h2>Your twin is ready</h2><p>A folder of Markdown you own${v.git ? ', in git,' : ''} with an index, a schema and two skills. Three things make it yours:</p><div class="kn-h-steps">
+      <div class="kn-h-step"><h3><span class="n">1</span>Add a source</h3><p>Files, a call or memo, a mail thread or a web page. Its <code>process-inbox</code> skill turns them into pages, and you review each change.</p><button class="btn sm primary" data-kn="ing-add" id="kn-h-add1">${IC.tray} Add a source</button></div>
+      <div class="kn-h-step"><h3><span class="n">2</span>Record a call</h3><p>${record}</p><button class="btn sm" data-kn="tab" data-kn-tab="settings" id="kn-h-minutes">Meeting minutes: ${esc(r.word)}</button></div>
+      <div class="kn-h-step"><h3><span class="n">3</span>Ask your twin</h3><p>Ask reads your pages and links the ones it used. Curate edits them, one approved diff at a time.</p><button class="btn sm" data-kn="ask" id="kn-h-ask3">${IC.ask} Ask</button></div></div></div>`
+  }
+  /** The Ask box (K11-01): Ask's own composer — a new conversation — with the suggestions (K11-02) and Continue (K11-03). */
+  function homeAsk(d) {
+    const v = vault(), a = knHomeAsk(d, v.name), now = new Date()
+    const sug = a.suggestions.map((x, i) => `<button class="kn-h-sg" data-kn="home-sug" data-kn-i="${i}" id="kn-h-sg${i}">${HOME_SUG[x.kind] || IC.ask}<span>${esc(x.text)}<small>${esc(x.why || '')}</small></span></button>`).join('')
+    const cont = (d.continue || []).map((c, i) => `<button class="kn-h-cv" data-kn="conv" data-id="${esc(c.id)}" id="kn-h-cv${i}">${c.terminal ? IC.term : IC.chat}<b>${esc(c.title || 'A conversation')}</b><span>${esc(knHomeLine(c, now))}</span></button>`).join('')
+    return `<div class="kn-card kn-h-ask"><div class="kn-card-h"><h3>${IC.ask} Ask ${esc(v.name)}</h3>${d.fresh ? '' : '<span class="set-sub">answers link the pages they used</span>'}</div>${composerHtml()}${sug ? `<div class="kn-h-sugg">${sug}</div>` : ''}${cont ? `<div class="kn-h-cont"><span class="kn-lbl">Continue</span>${cont}</div>` : ''}</div>`
+  }
+  /** What's new (K11-04): who changed what in the last 14 days, a row opening its page. */
+  function homeNews(d) {
+    const g = homeSt(), w = d.whats_new || {}, rows = knHomeNews(w.rows, g.filter, w.notes || ''), now = new Date()
+    const f = (id, label) => `<button class="${g.filter === id ? 'on' : ''}" data-kn="home-f" data-kn-f="${id}" aria-pressed="${g.filter === id}" id="kn-h-f-${id}">${label}</button>`
+    const row = (r, i) => {
+      const pm = r.plus != null || r.minus != null ? pmOf(r) : ''
+      const inner = `<span class="ic${r.kind === 'new' ? ' new' : ''}">${r.kind === 'new' ? IC.plus : IC.edit}</span><span class="tt"><b>${esc(r.title)}</b>${r.path ? `<code>${esc(inPages(r.path))}</code>` : ''}</span><span class="t">${pm}<span>${esc(knWhen(r.at, now))}</span></span><span class="by"><span class="kn-h-who ${HOME_WHO[r.by] || ''}">${esc(r.who)}</span>${r.detail ? `<span>${esc(r.detail)}</span>` : ''}</span>`
+      return r.path ? `<button class="kn-h-chg" data-kn="open" data-path="${esc(r.path)}" title="${esc(r.path)}" id="kn-h-chg${i}">${inner}</button>` : `<div class="kn-h-chg">${inner}</div>`
+    }
+    const none = rows.length ? '' : `<p class="set-sub kn-h-none">${g.filter === 'new' ? 'No new pages' : g.filter === 'notes' ? 'No notes changed' : 'Nothing changed'} in the last 14 days.</p>`
+    const reading = w.git === 'pending' ? `<div class="set-sub kn-h-git">${SPIN} Reading git…</div>` : ''
+    return `<div class="kn-card"><div class="kn-card-h kn-h-wrapline"><h3>What's new</h3><span class="set-sub">the last 14 days · who changed what</span><span class="grow"></span><div class="kn-h-mini" role="group" aria-label="Show">${f('all', 'All')}${f('new', 'New pages')}${f('notes', 'Notes')}</div><button class="kn-lnk" data-kn="home-recent" id="kn-h-recent">All changes</button></div><div class="kn-h-chgs">${rows.map(row).join('')}${none}${reading}</div></div>`
+  }
+  /** The Health card (K11-05): the score, its 30 days, the first three that need you, what code can fix. */
+  function homeHealth(d, c) {
+    const hd = d.health || {}, tr = knHealthTrend(hd.history, isoDay(), 30), p = knTrendPath(tr.points, { w: 200, h: 38 })
+    const dot = ([x, y], r) => `<circle cx="${x}" cy="${y}" r="${r}" fill="var(--accent)"/>`
+    const spark = `<svg class="kn-spark kn-h-spark" viewBox="0 0 200 38" preserveAspectRatio="none" aria-hidden="true"><path d="${p.area}" fill="var(--accent-soft)"/><path d="${p.line}" fill="none" stroke="var(--accent)" stroke-width="1.8" vector-effect="non-scaling-stroke"/>${p.dots.map((x) => dot(x, 2)).join('')}${p.end ? dot(p.end, 3) : ''}</svg>`
+    const delta = tr.delta == null ? '' : `<span class="tag ${tr.delta >= 0 ? 'ok' : 'warn'}">${tr.delta >= 0 ? '+' : '−'}${Math.abs(tr.delta)} in 30 days</span>`
+    const lines = c.lines.map((l, i) => `<button class="kn-h-nl" data-kn="hl-pick" data-kn-key="${esc(l.key)}" id="kn-h-nl${i}">${IC.warn}<span><b>${esc(l.title)}</b><span class="set-sub">${esc(l.sub)}</span></span></button>`).join('')
+    return `<div class="kn-card"><div class="kn-card-h"><h3>Health</h3>${delta}<span class="grow"></span><button class="kn-lnk" data-kn="tab" data-kn-tab="health" id="kn-h-health">Open Health</button></div>
+      <div class="kn-h-score"><div class="kn-ring kn-h-ring" style="--p:${c.score}%" role="img" aria-label="Score ${c.score} of 100"><span>${c.score}<small>of 100</small></span></div><div class="kn-h-grow">${c.nothing ? '<b>Nothing to fix</b>' : spark}<div class="set-sub">${esc(c.sub)}</div></div></div>
+      ${lines ? `<div class="kn-lbl">Needs you · ${nf(c.needs)}</div><div class="kn-h-nlist">${lines}</div>` : ''}${c.fixable ? `<div class="set-sub">${esc(c.fixable)}</div>` : ''}</div>`
+  }
+  /** Coming in (K11-06): what waits for review, what isn't processed, the run going — else "Nothing waiting." */
+  function homeComing(c) {
+    const rows = []
+    if (c.waiting) rows.push(`<div class="kn-h-ci"><span class="big">${nf(c.waiting.n)}</span><div class="kn-h-grow">${c.waiting.n === 1 ? 'change waits' : 'changes wait'} for your review<div class="set-sub">${esc(c.waiting.sources)}</div></div><button class="btn sm primary" id="kn-h-review" ${c.waiting.run ? `data-kn="ing-run" data-kn-run="${esc(c.waiting.run)}"` : 'data-kn="tab" data-kn-tab="ingest"'}>Review</button></div>`)
+    if (c.fresh) rows.push(`<div class="kn-h-ci"><span class="big">${nf(c.fresh.n)}</span><div class="kn-h-grow">${c.fresh.n === 1 ? 'source' : 'sources'} not processed yet<div class="kn-h-chips">${c.fresh.kinds.map(([k, n]) => `<span class="tag${k === 'echo' ? ' acc' : ''}">${esc(HOME_KIND[k] || k)} ${nf(n)}</span>`).join('')}</div></div><button class="btn sm" data-kn="home-prep" id="kn-h-prep">Prepare changes</button></div>`)
+    if (c.running) rows.push(`<div class="kn-h-ci"><span class="kn-spin" aria-hidden="true"></span><div class="kn-h-grow">Preparing changes<div class="set-sub">${esc(c.running.step)}</div></div><button class="btn sm" data-kn="ing-run" data-kn-run="${esc(c.running.run)}" id="kn-h-run">Open</button></div>`)
+    const body = c.error ? `<p class="error">${esc(c.error)}</p>` : c.nothing ? `<div class="set-sub">Nothing waiting.</div><button class="btn sm kn-h-add" data-kn="ing-add" id="kn-h-add">${IC.tray} Add a source</button>` : rows.join('')
+    return `<div class="kn-card"><div class="kn-card-h"><h3>Coming in</h3><span class="grow"></span>${c.nothing ? '' : '<button class="kn-lnk" data-kn="tab" data-kn-tab="ingest" id="kn-h-ingest">Ingest</button>'}</div>${body}</div>`
+  }
+  /** Most linked (K11-07): where to start reading. */
+  function homeHubs(h) {
+    if (!h || (!h.index && !(h.pages || []).length)) return ''
+    const row = (path, sub, i) => `<button class="kn-h-hub" data-kn="open" data-path="${esc(path)}" id="kn-h-hub${i}"><code>${esc(inPages(path))}</code><span>${esc(sub)}</span></button>`
+    return `<div class="kn-card"><div class="kn-card-h"><h3>Most linked</h3><span class="set-sub">where to start reading</span></div><div>${h.index ? row(h.index.path, `the index · ${many(h.index.links, 'link')}`, 'i') : ''}${(h.pages || []).map((p, i) => row(p.path, `${nf(p.in)} in`, i)).join('')}</div></div>`
+  }
+  /** The vault card (K11-08). */
+  function homeVault(x, w) {
+    const v = vault(), git = (x && x.git) || null, now = new Date()
+    if (!x) return ''
+    const last = git && git.last ? ` · “${esc(git.last.subject)}” · ${esc(knWhen(git.last.at, now))}` : ''
+    const branch = (git && git.branch) || (v.git && v.git.branch) || ''
+    const gitLine = (w || {}).git === 'none' ? 'not a git repository' : git ? `${esc(branch || 'detached')}${last}` : `${esc(branch)}${branch ? ' · ' : ''}reading…`
+    const index = x.index ? `<code>${esc(String(x.index).split('/').pop())}</code>${x.index_bytes != null ? ` · ${esc(kb(x.index_bytes))}` : ''}` : 'none'
+    return `<div class="kn-card"><div class="kn-card-h"><h3>${esc(v.name)}</h3><span class="grow"></span><button class="kn-lnk" data-kn="tab" data-kn-tab="settings" id="kn-h-settings">Settings</button></div>
+      <div class="kn-h-kv"><span>Folder</span><code title="${esc(v.root)}">${esc(short(v.root))}</code><span>Pages</span><span><code>${esc(x.pages_root ? `${x.pages_root}/` : '(the folder itself)')}</code>${x.obsidian ? ' · Obsidian' : ''}</span><span>Index</span><span>${index}</span><span>Git</span><span>${gitLine}</span><span>AI</span><span>${esc(x.profile_name || x.profile || '')}</span><span>Holds</span><span>${esc(`${many(x.pages, 'page')} · ${many(x.tags, 'tag')} · ${many(x.skills, 'skill')}`)}</span></div></div>`
+  }
+  /** A suggestion into the box (K11-02): its words, its pages as chips; nothing is sent until the user sends. */
+  function homeSuggest(i) {
+    const g = homeSt(), x = knHomeAsk(g.data || {}, (vault() || {}).name).suggestions[i], c = chat()
+    if (!x) return
+    c.draft = x.text
+    for (const p of x.pages || []) if (p.path && !c.chips.some((ch) => ch.page === p.path)) c.chips.push({ page: p.path, title: p.title || p.path.split('/').pop().replace(/\.md$/i, '') })
+    const q = document.getElementById('kn-chat-q')
+    if (q) { q.value = c.draft; q.focus(); q.setSelectionRange(q.value.length, q.value.length); fitQ() }
+    patchEl('kn-cmp-chips', chipsHtml())
+  }
+
   // ── the view ──
   function view() {
     const s = st(), v = vault()
@@ -2887,13 +3057,13 @@ const Kn = (() => {
       const id = (vaults().find((x) => x.id === (s.lastVault || last)) || vaults()[0]).id
       s.vault = id
       s.source = 'vault'
-      history.replaceState(null, '', `#${knRouteOf({ vault: id, tab: s.tab || 'pages', path: here() })}`)
+      history.replaceState(null, '', `#${knRouteOf({ vault: id, tab: s.tab || 'home', path: here() })}`)
       loadVault().then(render)
       return `<div class="kn">${head()}${tabs()}<div class="kn-body"><div class="skeleton" style="padding:20px"><i></i><i></i><i></i></div></div></div>`
     }
     if (!v) return `<div class="kn">${head()}<div class="kn-tabs kn-tabs-empty"></div><div class="kn-body">${emptyView()}</div></div>`
     if (v.available === false) return `<div class="kn">${head()}<div class="kn-tabs kn-tabs-empty"></div><div class="kn-body">${missingView(v)}</div></div>`
-    const body = s.tab === 'graph' ? graphView() : s.tab === 'settings' ? settingsView() : s.tab === 'ask' ? chatView() : s.tab === 'health' ? healthView() : s.tab === 'ingest' ? ingestView() : pagesView()
+    const body = s.tab === 'home' ? homeView() : s.tab === 'graph' ? graphView() : s.tab === 'settings' ? settingsView() : s.tab === 'ask' ? chatView() : s.tab === 'health' ? healthView() : s.tab === 'ingest' ? ingestView() : pagesView()
     return `<div class="kn">${head()}${tabs()}<div class="kn-body">${body}</div></div>`
   }
   function after() {
@@ -2901,6 +3071,7 @@ const Kn = (() => {
     if (s.tab === 'graph') drawGraph()
     if (s.tab === 'pages' && s.rail === 'links') drawMini()
     if (s.tab === 'ask' && vault()) { syncThread(); fitQ(); pollChat() }
+    if (s.tab === 'home' && vault()) fitQ()
     if (s.tab === 'ingest' && vault()) { pollRun(); tickRunning() }
     if (s.tab === 'health' && vault()) { pollLint(); tickRunning() }
     if (s.scrollTo) { const el = document.getElementById(s.scrollTo); if (el) el.scrollIntoView({ block: 'start' }); s.scrollTo = null }
@@ -2990,7 +3161,7 @@ const Kn = (() => {
       const r = await run('kn_add', { pick: x.picked.seq, name, minutes: x.minutes, commit: !!x.commit, profile: x.profile || '' }, 'connect')
       s.sheet = null
       await refreshAll()
-      goVault(r.vault.id, 'pages')
+      goVault(r.vault.id, 'home')
       done(`${r.vault.name} is connected — nothing in its folder changed.`)
     } catch (err) { x.error = String(err.message || err); render() }
   }
@@ -3002,7 +3173,7 @@ const Kn = (() => {
       const r = await run('kn_new', { name, pick: x.picked ? x.picked.seq : undefined, git: !!x.git, minutes: x.auto ? 'auto' : 'ask' }, 'new')
       s.sheet = null
       await refreshAll()
-      goVault(r.vault.id, 'pages')
+      goVault(r.vault.id, 'home')
       done(r.git === 'committed' ? `${r.vault.name} is ready, in git.` : r.git === 'no identity' ? `${r.vault.name} is ready. git has no name and email set, so the first commit wasn't made.` : `${r.vault.name} is ready.`)
     } catch (err) { x.error = String(err.message || err); render() }
   }
@@ -3104,16 +3275,25 @@ const Kn = (() => {
   const SPIN = '<span class="kn-spin" aria-hidden="true"></span>'
   const researchOn = () => !(vault() && vault().ask && vault().ask.research === false)
   const askShown = () => S.view === 'brain' && st().source === 'vault' && st().tab === 'ask' && !!vault()
+  const homeShown = () => S.view === 'brain' && st().source === 'vault' && st().tab === 'home' && !!vault()
   const kTok = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n || 0))
   const usd = (c) => (c < 0.01 ? '<$0.01' : `$${c.toFixed(2)}`)
   const patchEl = (id, html) => { const el = document.getElementById(id); if (el) patch(el, html) }
   /** The conversations list: as the user left it, else open when the window is wide enough. */
   const listOpen = () => { const o = chat().listOpen; return o === null ? window.innerWidth >= 860 : o }
+  const newChat = (vault) => ({ vault, id: '', events: [], next: 0, live: false, busy: false, waiting: false, renders: {}, loaded: false, gone: null, mode: 'ask', draft: '', chips: [], picker: null, error: null, sending: false, pending: null, open: {}, always: {}, local: {}, whyOpen: null, follow: true, top: 0, jump: false, list: null, listQ: '', listOpen: null, command: null, polling: null, gen: 0 })
   /** Ask's own conversation in the open vault (D44: not the panel's current one) and everything the view keeps of it. */
+  function askChat() {
+    const s = st()
+    if (!s.chat || s.chat.vault !== s.vault) s.chat = newChat(s.vault)
+    return s.chat
+  }
+  /** The conversation the composer shown belongs to: Ask's — or, on Home, the new one its Ask box starts (K11-01). */
   function chat() {
     const s = st()
-    if (!s.chat || s.chat.vault !== s.vault) s.chat = { vault: s.vault, id: '', events: [], next: 0, live: false, busy: false, waiting: false, renders: {}, loaded: false, gone: null, mode: 'ask', draft: '', chips: [], picker: null, error: null, sending: false, pending: null, open: {}, always: {}, local: {}, whyOpen: null, follow: true, top: 0, jump: false, list: null, listQ: '', listOpen: null, command: null, polling: null, gen: 0 }
-    return s.chat
+    if (s.tab !== 'home') return askChat()
+    if (!s.homeChat || s.homeChat.vault !== s.vault) s.homeChat = newChat(s.vault)
+    return s.homeChat
   }
   /** Show conversation `id` ('' a new one): a new open (`knChatOpen`), so a loop polling the one before stops; the
    *  composer keeps what is typed in it. */
@@ -3181,18 +3361,23 @@ const Kn = (() => {
   }
   /** What changed with the stream, drawn where it is — never the whole view (the composer keeps its text and caret). */
   function refreshChat(event = null, before = null) {
+    if (homeShown()) return refreshComposer()
     if (!askShown() || !document.getElementById('kn-thread')) return
     const c = chat()
     patchEl('kn-conv-h', convHead())
     patchEl('kn-crail', railBody())
     patchEl('kn-convs-l', convItems())
+    refreshComposer()
+    syncThread(event, before, c)
+  }
+  /** The composer's parts drawn again where they are (its text and caret stay). */
+  function refreshComposer() {
     patchEl('kn-cmp-chips', chipsHtml())
     patchEl('kn-cmp-note', composerNote())
     patchEl('kn-cmp-f', composerFoot())
     drawPicker()
     const q = document.getElementById('kn-chat-q')
     if (q) q.placeholder = placeholder()
-    syncThread(event, before, c)
   }
   /** The thread, block by block: a block whose HTML changed is replaced alone, new ones appended; it follows the
    *  bottom only while the user is there (K13-10). */
@@ -3306,7 +3491,11 @@ const Kn = (() => {
       <div><h4>Read so far <span>${reads.size}</span></h4>${readList}</div>${allowBox}<div><h4>Cost</h4>${cost}</div>
       <div><h4>Continue elsewhere</h4>${c.command ? `<div class="kn-cmdbox selectable">${esc(c.command)}</div>` : ''}${continueItems(false)}<div class="set-sub kn-cont-sub">${sysProfile() ? 'It stops here first: a conversation runs in one place at a time.' : 'This profile keeps its own settings, so it continues in Echo\'s terminal panel.'}</div></div>`
   }
-  const placeholder = () => { const c = chat(); return firstWaiting(c) ? 'Waiting for your answer above' : c.busy ? 'Claude is answering — Esc stops it' : `Ask ${(vault() || {}).name || 'the vault'} — @ to mention a page` }
+  const placeholder = () => {
+    const c = chat(), name = (vault() || {}).name || 'the vault'
+    if (homeShown()) return knHomeAsk(homeSt().data || {}, name).placeholder
+    return firstWaiting(c) ? 'Waiting for your answer above' : c.busy ? 'Claude is answering — Esc stops it' : `Ask ${name} — @ to mention a page`
+  }
   function composerHtml() {
     const c = chat()
     return `<div class="kn-cmp-wrap"><button class="btn sm kn-jump" id="kn-jump" data-kn="jump"${c.jump ? '' : ' hidden'}>Jump to the latest ↓</button><div class="kn-cmp" id="kn-cmp"><div id="kn-picker" class="kn-picker-slot">${pickerHtml()}</div><div id="kn-cmp-note">${composerNote()}</div><div class="kn-cmp-chips" id="kn-cmp-chips">${chipsHtml()}</div>
@@ -3466,7 +3655,23 @@ const Kn = (() => {
     const t = turnsOf(chat())[i]
     return t ? { md: knAnswerMd(t), question: t.user ? t.user.text : '' } : null
   }
+  /** Home's Ask box sends (K11-01): its message starts a new conversation in Ask, which shows it as it comes. */
+  function homeSend() {
+    const s = st(), c = chat(), v = vault()
+    const q = document.getElementById('kn-chat-q')
+    if (q) c.draft = q.value
+    if (!v || !knChatMessage(c.draft, c.chips).text) return
+    // The box's conversation becomes Ask's; the tab is Ask's at once (the route follows), so the send is Ask's own.
+    s.homeChat = null
+    s.chat = c
+    s.askConv = ''
+    s.tab = 'ask'
+    s.tabs[v.id] = 'ask'
+    goVault(v.id, 'ask', '')
+    return sendChat()
+  }
   async function sendChat() {
+    if (st().tab === 'home') return homeSend()
     const s = st(), c = chat(), v = vault()
     const q = document.getElementById('kn-chat-q')
     if (q) c.draft = q.value
@@ -3554,7 +3759,7 @@ const Kn = (() => {
     const s = st(), v = vault()
     if (!v) return
     s.menu = null
-    const c = chat()
+    const c = askChat()
     if (fill) fill(c)
     s.focus = 'kn-chat-q'
     goVault(v.id, 'ask', current ? c.id : '')
@@ -3853,13 +4058,13 @@ const Kn = (() => {
     const v = vault()
     switch (d.kn) {
       case 'switcher': s.switcher = !s.switcher; return render()
-      case 'vault': s.switcher = false; s.source = 'vault'; return goVault(d.id, s.tab === 'settings' ? 'pages' : s.tab || 'pages')
+      case 'vault': s.switcher = false; s.source = 'vault'; return goVault(d.id, s.tabs[d.id] || 'home')
       case 'recall': s.switcher = false; s.source = 'recall'; return go(`brain/${['sources', 'terms', 'people'].includes((S.br || {}).tab) ? S.br.tab : 'sources'}`)
       case 'plugin': s.switcher = false; s.source = 'plugin'; S.br.tab = d.knTab; return go(`brain/${d.knTab}`)
       case 'connect': return openConnect()
       case 'new': return openNew()
       case 'import': try { const r = await run('kn_import_plugin', {}, 'import'); await refreshAll(); done(`${r.connected} vault${r.connected === 1 ? '' : 's'} connected from the Obsidian plugin.`) } catch (err) { say(String(err.message || err)) } return
-      case 'tab': e.preventDefault(); s.menu = null; return goVault(s.vault, d.knTab, d.knTab === 'pages' ? s.path : d.knTab === 'ask' ? chat().id : d.knTab === 'health' ? s.hlKey : d.knTab === 'ingest' ? s.ingRun : '')
+      case 'tab': e.preventDefault(); s.menu = null; return goVault(s.vault, d.knTab, d.knTab === 'pages' ? s.path : d.knTab === 'ask' ? askChat().id : d.knTab === 'health' ? s.hlKey : d.knTab === 'ingest' ? s.ingRun : '')
       case 'menu': s.menu = s.menu === d.menu ? null : d.menu; return render()
       case 'reveal': s.menu = null; send({ cmd: 'kn_reveal', id: s.vault, path: d.path || '' }); return render()
       case 'obsidian': s.menu = null; send({ cmd: 'kn_obsidian', id: s.vault, path: d.path || '' }); return render()
@@ -3917,6 +4122,11 @@ const Kn = (() => {
         chat().draft = q.value = t.suggestion
         q.focus(); q.setSelectionRange(q.value.length, q.value.length); return fitQ()
       }
+      // Home (K11)
+      case 'home-f': homeSt().filter = d.knF; return render()
+      case 'home-recent': s.filter = 'recent'; s.q = ''; s.hits = null; return goVault(s.vault, 'pages', s.path)
+      case 'home-sug': return homeSuggest(Number(d.knI))
+      case 'home-prep': goVault(s.vault, 'ingest', ''); return focusOn('#kn-ing-prep:not([disabled])', '#kn-ing-add')
       case 'newpage': return openNewPage(d.name)
       case 'filter': s.filter = d.filter; s.q = ''; s.hits = null; return render()
       case 'fold': if (s.open.has(d.path)) s.open.delete(d.path); else s.open.add(d.path); return render()
@@ -4041,7 +4251,6 @@ const Kn = (() => {
       case 'twin-remove': try { await run('kn_twin', { id: v.id, op: 'global_remove' }, 'twin'); await loadSettings(); render(); done('Echo\'s copy is out of ~/.claude/skills.') } catch (err) { say(String(err.message || err)) } return
       case 'remove-ask': s.sheet = { kind: 'remove' }; return render()
       case 'remove-go': try { const name = v.name; await run('kn_remove', { id: v.id }, 'remove'); s.sheet = null; s.vault = ''; s.lastVault = null; try { localStorage.removeItem('echo.kn.vault') } catch { /* off */ } await refreshAll(); go('kn'); done(`${name} is no longer in Echo. Its folder is as it was.`) } catch (err) { say(String(err.message || err)) } return
-      case 'welcome-done': try { localStorage.setItem(`echo.kn.welcome:${v.id}`, '1') } catch { /* off */ } return render()
       case 'settings-open': S.view = 'brain'; return goVault(d.id, 'settings')
       // sheets
       case 'sheet-close': s.sheet = null; return render()
@@ -4178,6 +4387,8 @@ const Kn = (() => {
     if (e.key === 'Escape' && (s.sheet || s.switcher || s.menu || s.chip)) { s.sheet = null; s.switcher = false; s.menu = null; s.chip = null; e.stopPropagation(); return render() }
     // Ask's keys, inside its view (a terminal or another field keeps its own).
     if (s.tab === 'ask' && askShown() && (e.target === document.body || e.target === document.documentElement || (e.target.closest && e.target.closest('.kn-chat'))) && chatKey(e)) return
+    // Home's Ask box: the same composer, the same keys (K11-01).
+    if (s.tab === 'home' && homeShown() && e.target.closest && e.target.closest('.kn-h-ask') && chatKey(e)) return
     if (e.target.id === 'kn-addq' && e.key === 'Enter') { const x = s.sheet; const h = x && x.hits && x.hits[0]; if (h) addToPage(h.path, x.md) }
     if (e.target.id === 'kn-edit' && (e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); return save(false) }
     if (e.target.id === 'kn-find' && e.key === 'Enter') { const h = s.hits && s.hits.hits[0]; if (h) openPage(h.path) }

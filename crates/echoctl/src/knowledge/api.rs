@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use std::path::Path;
 use std::sync::Mutex;
 
-use super::{checks, export, health, ingest, links, lint, page, scan, sources, starter, Vault};
+use super::{checks, export, health, home, ingest, links, lint, page, scan, sources, starter, Vault};
 
 fn query_param(q: &str, key: &str) -> Option<String> {
     q.split('&').find_map(|kv| {
@@ -162,6 +162,8 @@ pub fn route(rest: &str, query: &str) -> Result<Reply> {
         }
         // Health: the score, its findings and history; `fixes=<kind>` adds that kind's fixes (*Fix all*, K16-04).
         "health" => health::view(&v, query_param(query, "fixes").as_deref().filter(|k| !k.is_empty()))?,
+        // Home (spec-2 K11): from what Echo holds; git's part follows on the next asks (`whats_new.git`, K11-10).
+        "home" => home::view(&v)?,
         "rows" => {
             let paths: Vec<String> = query_param(query, "paths").and_then(|p| serde_json::from_str(&p).ok()).unwrap_or_default();
             json!({ "rows": page::index_rows(&v, &paths)? })
@@ -740,6 +742,39 @@ mod tests {
         assert_eq!(shown["text"].as_str().unwrap(), std::fs::read_to_string(&installed).unwrap(), "what is shown is what is written");
         assert_eq!(json(&format!("{}/twin-text", c.vault.id), "")["name"], "team-wiki-twin", "the default name");
         std::env::remove_var("ECHOCTL_CLAUDE_HOME");
+    }
+
+    #[test]
+    fn the_home_routes_first_answer_does_not_wait_for_git() {
+        let (_env, root) = crate::paths::testenv::folders("kn-api-home");
+        let _iso = knowledge::git::tests::isolated(&root, true);
+        if knowledge::git::program().is_none() {
+            return;
+        }
+        let v = vault(&root);
+        for args in [&["init", "-q", "-b", "main"][..], &["add", "-A"], &["commit", "-q", "-m", "Pricing and the pilot"]] {
+            assert!(knowledge::git::run(&v.root, args).unwrap().status.success(), "{args:?}");
+        }
+        let _slow = home::delay_git(std::time::Duration::from_millis(1500));
+        let t = std::time::Instant::now();
+        let first = json(&format!("{}/home", v.id), "");
+        let took = t.elapsed();
+        assert!(took < std::time::Duration::from_millis(300), "the first answer took {took:?}");
+        assert_eq!(first["whats_new"]["git"], "pending", "{}", first["whats_new"]);
+        let commits = |h: &Value| h["whats_new"]["rows"].as_array().unwrap().iter().filter(|r| r["by"] == "commit").count();
+        assert_eq!(commits(&first), 0, "git's rows aren't in it yet");
+        let t = std::time::Instant::now();
+        let ready = loop {
+            let h = json(&format!("{}/home", v.id), "");
+            if h["whats_new"]["git"] == "ready" {
+                break h;
+            }
+            assert!(t.elapsed() < std::time::Duration::from_secs(10), "git's part never came");
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        };
+        assert!(t.elapsed() >= std::time::Duration::from_millis(1000), "it came from the read that waited");
+        assert_eq!(commits(&ready), 7, "the commit's pages, by their author: {}", ready["whats_new"]);
+        assert_eq!(ready["vault"]["git"]["last"]["subject"], "Pricing and the pilot");
     }
 
     #[test]

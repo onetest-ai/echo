@@ -1045,7 +1045,7 @@ fn note_on(v: &Vault, day: NaiveDate, score: &Score) -> Result<()> {
 
 /// The findings shown and those ignored, the score of the shown ones, and `health.json` once today's point is noted
 /// (spec K16-09: when the checks are first computed on a day, and whenever the score changes).
-fn scored(v: &Vault, ix: &Index) -> (Vec<Finding>, Vec<Finding>, Score, State) {
+pub(super) fn scored(v: &Vault, ix: &Index) -> (Vec<Finding>, Vec<Finding>, Score, State) {
     let state = load(v);
     let (ignored, shown): (Vec<Finding>, Vec<Finding>) = all_findings(v, ix, &state).into_iter().partition(|f| state.ignored.contains(&f.key));
     let s = score(&shown, scope_pages(v, ix), state.ai.is_some());

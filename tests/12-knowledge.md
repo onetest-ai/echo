@@ -30,7 +30,8 @@ made-up Teams call. Design: `.ai-run/guides/design/knowledge.md`.
 
 **Expected**
 - `<data folder>/knowledge/test-wiki/` holds the starter's 23 files; `git log` shows one commit; `git status` is
-  clean. The welcome card shows on its index.
+  clean. The vault opens on Home with its three steps (Add a source, Record a call, Ask your twin); its index page
+  has no welcome card (spec-2 K11-09).
 - Without git: the files are there and the message says the first commit wasn't made; nothing else fails.
 
 ---

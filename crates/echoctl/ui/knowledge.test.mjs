@@ -28,6 +28,7 @@ const { knMention, knMentionPick, knChatMessage } = load(['kn-mention'], ['knMen
 const { knHealthList, knHealthSelect, knHealthTrend, knTrendPath, knFixAll, knFixSummary, knHealthLoad, knHealthState, knLintNotice, knLintState, knVersus, KN_HEALTH_KINDS } = load(['kn-health'], ['knHealthList', 'knHealthSelect', 'knHealthTrend', 'knTrendPath', 'knFixAll', 'knFixSummary', 'knHealthLoad', 'knHealthState', 'knLintNotice', 'knLintState', 'knVersus', 'KN_HEALTH_KINDS'])
 const { knIngestQueue, knIngestWaiting, knRunLine, knRunView, knIngestReview, knWriteSummary, knAddState, knAddArgs, knFirstOpen, knSourceState, knTakesDrops, knDropNote } = load(['kn-ingest'], ['knIngestQueue', 'knIngestWaiting', 'knRunLine', 'knRunView', 'knIngestReview', 'knWriteSummary', 'knAddState', 'knAddArgs', 'knFirstOpen', 'knSourceState', 'knTakesDrops', 'knDropNote'])
 const { knRunOpen, knRunMayLoad, knRunTake } = load(['kn-ingest-poll'], ['knRunOpen', 'knRunMayLoad', 'knRunTake'])
+const { knWhen, knHomeCards, knHomeNews, knHomeLine, knHomeAsk, knHomeRecord } = load(['kn-health', 'kn-home'], ['knWhen', 'knHomeCards', 'knHomeNews', 'knHomeLine', 'knHomeAsk', 'knHomeRecord'])
 
 const tests = []
 const test = (name, f) => tests.push([name, f])
@@ -35,8 +36,9 @@ const test = (name, f) => tests.push([name, f])
 test('routes: a vault, its tab, its page; Recall stays #brain', () => {
   assert.deepEqual(knParseRoute('kn/my-twin/pages/knowledge%2Fclients%2Facme.md'), { vault: 'my-twin', tab: 'pages', path: 'knowledge/clients/acme.md' })
   assert.deepEqual(knParseRoute('kn/my-twin/graph'), { vault: 'my-twin', tab: 'graph', path: '' })
-  assert.deepEqual(knParseRoute('kn/my-twin'), { vault: 'my-twin', tab: 'pages', path: '' })
-  assert.deepEqual(knParseRoute('kn'), { vault: '', tab: 'pages', path: '' })
+  // spec-2 K10-01: a vault opens on Home now (slice 1 opened it on Pages) — changed on purpose.
+  assert.deepEqual(knParseRoute('kn/my-twin'), { vault: 'my-twin', tab: 'home', path: '' })
+  assert.deepEqual(knParseRoute('kn'), { vault: '', tab: 'home', path: '' })
   assert.equal(knParseRoute('kn/my-twin/nope'), null)
   assert.equal(knParseRoute('brain/sources'), null)
   assert.equal(knParseRoute('kn/../x/pages'), null)
@@ -343,7 +345,7 @@ test('routes: Ask, a new conversation or one of them', () => {
   const id = '6f2c9e1a-1b2c-4d5e-8f90-123456789abc'
   assert.deepEqual(knParseRoute(`kn/my-twin/ask/${id}`), { vault: 'my-twin', tab: 'ask', path: id })
   assert.equal(knRouteOf({ vault: 'my-twin', tab: 'ask', path: id }), `kn/my-twin/ask/${id}`)
-  assert.equal(knParseRoute('kn/my-twin/home'), null, 'a tab appears only when its view works')
+  assert.deepEqual(knParseRoute('kn/my-twin/home'), { vault: 'my-twin', tab: 'home', path: '' }, 'Home is a tab now that its view works')
 })
 
 const Q = 'What did Lena Hartmann and I settle on Northwind Retail\'s pricing?'
@@ -1111,6 +1113,136 @@ test('M2 a source Done by a write while its run still waits for review is In rev
   assert.equal(knSourceState({ path: 'raw_inbox/c.md', state: 'done', meta: {} }, runs), 'done')
   const q = knIngestQueue([{ path: 'raw_inbox/a.md', kind: 'file', title: 'a', state: 'done', meta: { run: 'r1', kept: 1 } }], runs)
   assert.deepEqual([q.groups[0].rows[0].chip, q.counts.waiting, q.counts.done], [['wait', 'In review'], 1, 0])
+})
+
+// ── Home (spec-2 K10, K11) ──
+test('K10-T1 routes: a vault opens on Home; Ask, Ingest and Health name what they show; slice 1\'s as before', () => {
+  assert.deepEqual(knParseRoute('kn/my-twin'), { vault: 'my-twin', tab: 'home', path: '' })
+  assert.deepEqual(knParseRoute('kn/my-twin/home'), { vault: 'my-twin', tab: 'home', path: '' })
+  assert.deepEqual(knParseRoute('kn/my-twin/ask/6f2c9e1a-1b2c-4d5e-8f90-123456789abc'), { vault: 'my-twin', tab: 'ask', path: '6f2c9e1a-1b2c-4d5e-8f90-123456789abc' })
+  assert.deepEqual(knParseRoute('kn/my-twin/ingest/20261106-0951'), { vault: 'my-twin', tab: 'ingest', path: '20261106-0951' })
+  assert.deepEqual(knParseRoute('kn/my-twin/health/broken%3Aa'), { vault: 'my-twin', tab: 'health', path: 'broken:a' })
+  assert.deepEqual(knParseRoute('kn/my-twin/pages/knowledge%2Fclients%2Facme.md'), { vault: 'my-twin', tab: 'pages', path: 'knowledge/clients/acme.md' })
+  assert.deepEqual(knParseRoute('kn/my-twin/graph'), { vault: 'my-twin', tab: 'graph', path: '' })
+  assert.deepEqual(knParseRoute('kn/my-twin/settings'), { vault: 'my-twin', tab: 'settings', path: '' })
+  assert.equal(knParseRoute('kn/my-twin/nope'), null)
+  assert.equal(knRouteOf({ vault: 'my-twin' }), 'kn/my-twin/home', 'a vault\'s own route is its Home')
+  assert.equal(knRouteOf({ vault: 'my-twin', tab: 'pages' }), 'kn/my-twin/pages')
+})
+
+// Saturday 7 November 2026, 11:00 here.
+const NOW = new Date(2026, 10, 7, 11, 0)
+const DAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const HOME = (o = {}) => ({
+  health: {
+    score: 82, code_only: true, history: [], ai: null, needs: 3,
+    top: [
+      { key: 'contradiction:knowledge/clients/northwind-retail.md,knowledge/notes/2026-11-05-northwind-weekly-delivery-sync.md#1a2b3c4d', title: 'Northwind go-live: 12 Dec or 9 Jan', kind: 'contradiction', by: 'ai', pages: [] },
+      { key: 'unknown_tag:knowledge/media/tokenomics.md:#tokenomics', title: '#tokenomics isn\'t in the taxonomy', kind: 'unknown_tag', by: 'code', pages: [] },
+      { key: 'duplicate_title:knowledge/activities/weekly-sync.md,knowledge/notes/weekly-sync.md', title: '“Weekly sync” is the title of 2 pages', kind: 'duplicate_title', by: 'code', pages: [] },
+    ],
+    fixable: 26, fixable_kinds: [['broken', 12], ['not_in_index', 7], ['no_props', 7]],
+  },
+  coming_in: { waiting: 0, runs: [], new: 0, kinds: [], running: { id: '20261107-1010', step: 'Read the sources', waiting: null, sources: ['pricing-workshop-notes.md'] }, offer: null },
+  ...o,
+})
+
+test('K11-T4 Home\'s cards: code checks only, three Needs you lines, and no "Nothing waiting" while a run goes', () => {
+  const c = knHomeCards(HOME(), NOW)
+  assert.equal(c.health.sub, 'code checks only · AI checks when you ask')
+  assert.deepEqual(c.health.lines.map((l) => [l.title, l.sub]), [
+    ['Northwind go-live: 12 Dec or 9 Jan', 'two pages disagree · AI'],
+    ['#tokenomics isn\'t in the taxonomy', 'tags not in the taxonomy'],
+    ['“Weekly sync” is the title of 2 pages', 'pages that share a title'],
+  ])
+  assert.equal(c.health.lines[0].key, HOME().health.top[0].key, 'a line opens its finding')
+  assert.equal(c.health.fixable, '26 fixable by code — 12 broken links · 7 not in the index · 7 without properties')
+  assert.deepEqual(c.coming.running, { run: '20261107-1010', step: 'Read the sources' })
+  assert.equal(c.coming.nothing, false, 'a run goes: something is coming in')
+  // Once an AI check has run, it is said when.
+  const ai = knHomeCards(HOME({ health: { ...HOME().health, code_only: false, ai: new Date(2026, 10, 7, 9, 20).toISOString() } }), NOW)
+  assert.equal(ai.health.sub, 'AI checks Today 09:20')
+  // A run waiting for X-S2 says what it waits for.
+  const wait = knHomeCards(HOME({ coming_in: { ...HOME().coming_in, running: { id: 'r3', step: null, waiting: 'Waiting for the call being recorded', sources: [] } } }), NOW)
+  assert.equal(wait.coming.running.step, 'Waiting for the call being recorded')
+  // Nothing at all.
+  const idle = knHomeCards(HOME({ coming_in: { waiting: 0, runs: [], new: 0, kinds: [], running: null } }), NOW)
+  assert.deepEqual([idle.coming.nothing, idle.coming.waiting, idle.coming.fresh, idle.coming.running], [true, null, null, null])
+})
+
+test('Coming in: changes waiting with their sources, sources not processed by kind; Review opens the one run waiting', () => {
+  const two = knHomeCards(HOME({ coming_in: { waiting: 6, runs: [{ id: 'r1', to_answer: 5, sources: ['Northwind · Weekly delivery sync'] }, { id: 'r2', to_answer: 1, sources: ['Aurora RFP.pdf'] }], new: 3, kinds: [['echo', 1], ['mail', 1], ['web', 1]], running: null } }), NOW)
+  assert.deepEqual(two.coming.waiting, { n: 6, sources: 'Northwind · Weekly delivery sync (5) · Aurora RFP.pdf (1)', run: '' })
+  assert.deepEqual(two.coming.fresh, { n: 3, kinds: [['echo', 1], ['mail', 1], ['web', 1]] })
+  assert.equal(two.coming.nothing, false)
+  const one = knHomeCards(HOME({ coming_in: { waiting: 2, runs: [{ id: 'r1', to_answer: 2, sources: ['a.md', 'b.pdf'] }], new: 0, kinds: [], running: null } }), NOW)
+  assert.deepEqual(one.coming.waiting, { n: 2, sources: 'a.md, b.pdf (2)', run: 'r1' })
+  assert.equal(one.coming.fresh, null)
+  assert.equal(knHomeCards(HOME({ coming_in: { error: 'ingest.json: unreadable' } }), NOW).coming.error, 'ingest.json: unreadable')
+})
+
+test('the Health card of a tidy vault: nothing to fix, no lines', () => {
+  const c = knHomeCards(HOME({ health: { score: 100, code_only: true, history: [], ai: null, needs: 0, top: [], fixable: 0, fixable_kinds: [] } }), NOW)
+  assert.deepEqual([c.health.score, c.health.nothing, c.health.lines, c.health.fixable], [100, true, [], ''])
+})
+
+test('when, as Home says it: today and yesterday with the time, the weekday this week, else the date', () => {
+  const mon = new Date(2026, 10, 2, 11, 5)
+  assert.equal(knWhen(new Date(2026, 10, 7, 10, 1).toISOString(), NOW), 'Today 10:01')
+  assert.equal(knWhen(new Date(2026, 10, 6, 17, 20).toISOString(), NOW), 'Yesterday 17:20')
+  assert.equal(knWhen(mon.toISOString(), NOW), `${DAY[mon.getDay()]} 11:05`)
+  assert.equal(knWhen(new Date(2026, 9, 28, 9, 0).toISOString(), NOW), '28 Oct')
+  assert.equal(knWhen(new Date(2025, 9, 28, 9, 0).toISOString(), NOW), '28 Oct 2025')
+  assert.equal(knWhen(new Date(2026, 10, 7, 10, 1).toISOString(), NOW, true), '10:01', 'short: the time alone today')
+  assert.equal(knWhen(new Date(2026, 10, 6, 17, 20).toISOString(), NOW, true), 'yesterday')
+  assert.equal(knWhen(mon.toISOString(), NOW, true), DAY[mon.getDay()])
+  assert.equal(knWhen(null, NOW), '')
+  assert.equal(knWhen('not a time', NOW), '')
+})
+
+const NEWS = (path, kind, by, h, o = {}) => ({ path, title: path.split('/').pop(), kind, plus: 1, minus: 0, at: new Date(2026, 10, 7, h, 0).toISOString(), by, who: by, detail: '', ...o })
+test('What\'s new: All · New pages · Notes, twelve at most, in Echo\'s order', () => {
+  const rows = [
+    NEWS('knowledge/activities/platform/delivery-platform.md', 'edit', 'ask', 10),
+    NEWS('knowledge/notes/2026-11-05-northwind-weekly-delivery-sync.md', 'new', 'minutes', 9),
+    NEWS('knowledge/topics/ai-strategy.md', 'edit', 'ingest', 8),
+    NEWS('', 'new', 'starter', 7, { title: 'The vault' }),
+    ...Array.from({ length: 14 }, (_, i) => NEWS(`knowledge/notes/2026-10-${String(10 + i)}-sync.md`, 'edit', 'outside', 6, { plus: null, minus: null })),
+  ]
+  assert.equal(knHomeNews(rows, 'all', 'knowledge/notes').length, 12)
+  assert.deepEqual(knHomeNews(rows, 'all', 'knowledge/notes').slice(0, 3).map((r) => r.by), ['ask', 'minutes', 'ingest'])
+  assert.deepEqual(knHomeNews(rows, 'new', 'knowledge/notes').map((r) => r.path), ['knowledge/notes/2026-11-05-northwind-weekly-delivery-sync.md'], 'new pages: the vault\'s own row is no page')
+  const notes = knHomeNews(rows, 'notes', 'knowledge/notes')
+  assert.equal(notes.length, 12)
+  assert.ok(notes.every((r) => r.path.startsWith('knowledge/notes/')))
+  assert.deepEqual(knHomeNews(rows, 'notes', ''), [], 'a vault without a notes folder has no notes')
+  assert.deepEqual(knHomeNews(null, 'all', ''), [])
+})
+
+test('Continue: the mode Ask ran it in, when, and the terminal panel when it has it', () => {
+  const mon = new Date(2026, 10, 2, 16, 0)
+  assert.equal(knHomeLine({ mode: 'curate', at: new Date(2026, 10, 7, 10, 1).toISOString(), terminal: false }, NOW), 'Curate · 10:01')
+  assert.equal(knHomeLine({ mode: 'research', at: mon.toISOString(), terminal: true }, NOW), `Research · ${DAY[mon.getDay()]} · in the terminal panel`)
+  assert.equal(knHomeLine({ mode: null, at: new Date(2026, 10, 6, 9, 0).toISOString(), terminal: true }, NOW), 'yesterday · in the terminal panel', 'a panel session has no mode of Ask\'s')
+  assert.equal(knHomeLine({ mode: 'ask', at: null }, NOW), 'Ask')
+})
+
+test('the Ask box: at most four suggestions, only those Echo gave; with none, its placeholder alone', () => {
+  const s = (kind, text) => ({ kind, text, why: 'because', pages: [] })
+  const a = knHomeAsk({ fresh: false, suggestions: [s('meeting', 'Brief me for Helios · Sprint review at 14:00'), s('note', 'What did we decide in Helios · Design review prep?'), { kind: 'x', text: '' }, s('actions', 'Which action items are still open?'), s('contradiction', 'Northwind go-live: 12 Dec or 9 Jan — which is right?'), s('more', 'A fifth')] }, 'My twin')
+  assert.deepEqual(a.suggestions.map((x) => x.kind), ['meeting', 'note', 'actions', 'contradiction'], 'one without words is no suggestion; four at most')
+  assert.equal(a.placeholder, 'Ask My twin — @ to mention a page')
+  const none = knHomeAsk({ fresh: true, suggestions: [] }, 'My twin')
+  assert.deepEqual(none, { placeholder: 'Ask My twin — it knows only its starter pages for now', suggestions: [] })
+  assert.deepEqual(knHomeAsk({}, 'Team wiki').suggestions, [])
+})
+
+test('K11-09 a new vault\'s second step says where its minutes land, from the vault\'s minutes rule', () => {
+  const paths = { notes: 'knowledge/notes', index: 'knowledge/CATALOG.md' }
+  assert.deepEqual(knHomeRecord({ mode: 'auto' }, paths), { word: 'automatically', text: 'Its minutes are saved here by themselves: a note in notes/ and a row in CATALOG.md.', code: ['notes/', 'CATALOG.md'] })
+  assert.deepEqual(knHomeRecord({ mode: 'ask' }, paths), { word: 'when you choose', text: 'After a call, its page offers to save its minutes here: a note in notes/ and a row in CATALOG.md.', code: ['notes/', 'CATALOG.md'] })
+  assert.deepEqual(knHomeRecord({ mode: 'off' }, paths), { word: 'off', text: 'Minutes aren\'t saved here by themselves. Save one from its call\'s page when you want it.', code: [] })
+  assert.equal(knHomeRecord({}, {}).word, 'off')
 })
 
 let failed = 0

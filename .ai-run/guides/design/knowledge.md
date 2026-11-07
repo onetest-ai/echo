@@ -22,6 +22,7 @@ is `recall.md`. The window rules are `.ai-run/guides/window/window-ui.md`; untru
 | `links.rs` | Link resolution as Obsidian does it (`Resolver`), `edges`, `backlinks`, `graph` (nodes, edges, hubs) |
 | `checks.rs` | Read-only checks (`run`) and the one rule for which pages the index should list (`in_scope`) |
 | `health.rs` | Health (spec-2 K16): findings with stable keys (`findings`, cached per revision), the last AI check's (`lint::listed`), the score (`score`), fixes as diffs (`fix`) written with a base check (`apply`), `ignore`, `health.json`, the window's `view` / `detail`, the CLI's `check` |
+| `home.rs` | Home (spec-2 K11): the window's `view` from Echo's caches; What's new (`whats_new`, `rows`) from `activity.jsonl`, git read on a thread of its own (`read_git`, `git_now`) and the index's times; the Ask box's `suggestions`; the cards (Health, Coming in, Most linked, the vault); a new vault (`fresh`) |
 | `lint.rs` | AI checks (spec-2 K16-05, -06): the pages read (`pages_in_scope`), the run (`start`, `stop`, `wait`, `status`, `close_profile`, `close_all`), its findings checked (`kept`) and checked again whenever Health is computed (`listed`), `summary` for Health's view |
 | `catalog.rs` | Writing one row into the index's right table (`insert`, `row`, `cell`) |
 | `page.rs` | Reading a page for the window (`read`: safe HTML, outline, backlinks, local graph), `save`, `create`, history, `restore`, index rows, assets, `inside` (path checks) |
@@ -436,8 +437,11 @@ managed profile's routing can't be written out as a line to copy without its key
 path, a skill's name) has its control characters removed.
 
 ### The window
-Routes `#kn/<vault>/<pages|graph|ask|ingest|health|settings>[/<path>]` (Ask's last part is a conversation id, Ingest's a
-run's and Health's a finding's key, each kept apart from the page Pages has open); `#brain/...` stays Recall. The switcher lists vaults, then
+Routes `#kn/<vault>/<home|pages|graph|ask|ingest|health|settings>[/<path>]`, `#kn/<vault>` being Home (spec-2 K10-01;
+Ask's last part is a conversation id, Ingest's a run's and Health's a finding's key, each kept apart from the page Pages
+has open, and Home names none); `#brain/...` stays Recall. A vault opens on Home — connected, made, or picked in the
+switcher for the first time in the window; picked again, it opens on the tab left there (`tabs`, K10-04). Another vault
+empties the page Pages had open, so its Pages open on its own index. The switcher lists vaults, then
 Recall when on, then plugins' Knowledge tabs. Actions are IPC `kn_*`; long ones run as jobs the page polls
 (`/api/kn/jobs`). Rules learned the hard way:
 - **No `confirm()`, `alert()` or `prompt()`**: the webview (wry) shows none and `confirm()` returns false, so the
@@ -533,6 +537,48 @@ refusal said on that call, *Add anyway*), a mail or a chat by Microsoft 365's id
 days; signed out: said, with Settings → Calendar & chat), a web page by its https address (anything else refused before
 it is sent). The page never sends a path. Settings → Ingest picks the ingest skill (`ingest.skill`; the settings route
 gives the skill a run uses and the one Echo finds itself), Settings → Ask switches Research (`ask.research`).
+
+**The Home tab** (spec-2 K11; `home.rs`, `knowledge.js` block `kn-home`): `/home` answers from what Echo already holds
+(ruling R48) and never waits for git, Microsoft 365 or a model (K11-10: ~5 ms warm in the dev app). Its parts:
+- **What's new** (K11-04): the last 14 days, newest first. Echo's lines in `activity.jsonl` come first — minutes,
+  ingest (with the run's sources, from the ledger), Curate, Health fixes, edits in Echo ("You in Echo"), the starter's
+  "The vault"; a source added isn't a page and is left to Coming in. Then git, read on a thread of its own (`git_now`:
+  `ready` when read for the pages' revision within 20 s, `pending` while a read goes — what it read before is used
+  meanwhile — or `none`): `log --since=14.days -n200 --numstat --summary --no-renames --relative -- .` (commits whose id
+  is one of Echo's lines' are Echo's and left out; the others by their author, with the commit's message) and the
+  changes not committed (`diff --numstat HEAD`, untracked pages by `ls-files --others`) that Echo didn't write — a page
+  is Echo's write when its time is no later than 2 s after Echo's last line for it (or the starter's) — as *Changed
+  outside Echo*, "not committed". Only where git can't answer (no repository, no git) do the index's times stand in:
+  a page changed in the window that no line of Echo's explains is *Changed outside Echo*, with no ±. The page asks
+  again every 0.7 s while git's part is pending (20 times at most), and with the vault's rev as Pages does, and every
+  30 s while Home shows. Rows are the newest 12, and the newest 12 new pages and notes too, so each filter (All · New
+  pages · Notes, `knHomeNews`) has its own; a row opens its page; *All changes* is Pages' Recent.
+- **The Ask box** (K11-01): Ask's own composer — the same functions, keys, `@` page and *Attach* — on a conversation of
+  its own (`chat()` is Home's while Home shows, `askChat()` Ask's). Sending makes it Ask's conversation and opens Ask on
+  it, so the message starts a new conversation there. The mode line shows only for Research's warning.
+- **Suggestions** (K11-02, `suggestions`): at most four, in this order, each only when its source is there — the next
+  meeting today or tomorrow (from today's agenda and the window's calendar cache, never a new fetch) that a client page
+  is about; the newest note (by its `date`, else its name's date); an action-items folder with pages; Health's first
+  contradiction. A **client page** is one in a `clients` folder or tagged `client`; a meeting is about it when its title
+  names the page (its title, its file name with spaces, an alias, on word boundaries) or an attendee writes from its
+  `domain`/`domains`/`website`, or from a domain whose first label is the page's file name or its first word
+  (`sam@acme.example` → `clients/acme.md`). A suggestion fills the box with its words and its pages as chips; nothing is
+  sent until the user sends.
+- **Continue** (K11-03, the window's build only — ruling R49): Ask's list's first three, each with the mode Ask last
+  ran it in (`chat/<id>/settings.json`'s scope) and "in the terminal panel" when the panel has it (its own conversation,
+  or open there now) and Ask isn't running it.
+- **Health** (K11-05): the score, its last 30 days (`knHealthTrend`), "code checks only" until an AI check has run, the
+  first three of *Needs you* (each opens its finding), "N fixable by code" by kind. **Coming in** (K11-06): changes
+  waiting with their runs' sources (*Review* opens the run when there is one), sources not processed by kind (*Prepare
+  changes* opens Ingest on its button), the run going with its step now (`ingest::step_now`, its last steps' active
+  one) — "Nothing waiting." only when none of them is. **Most linked** (K11-07): the index with the pages it links to,
+  then four pages most pages link to, hubs left out. **The vault** (K11-08): folder, pages root, index and size, git's
+  branch and last commit (once git answered), the AI profile, pages · tags (the taxonomy's, else the pages') · skills.
+- **A new vault** (K11-09, `fresh`): made from the starter, only the starter's line in its activity, no sources, every
+  page one of the starter's and none changed since — three steps (*Add a source*, *Record a call* with where its
+  minutes land by the vault's rule, *Ask your twin*). Slice 1's welcome card on the index page is gone; the starter's
+  files are as they were.
+- Below 1,000 px Home is one column (K10-07).
 
 ### Ask's conversations (`chat.rs`)
 A conversation is one Claude Code session id throughout (`--session-id` first, `--resume` after: measured to keep the
@@ -630,7 +676,7 @@ them all at start, when none can be in use.
 | `<config>/minutes-run/vault-plugins/<id>-<hash>/` | The vault's skills as a plugin, for managed profiles, one folder per content | `terminal::vault_plugin` (removed at app start) |
 | `<home>/.echo/knowledge/<id>/chat/<conversation>/settings.json` | A conversation's guard hook and scope `env` (rewritten at each of its starts) | `chat::start` |
 | `~/.claude/skills/<name>/SKILL.md` | `/twin` for all sessions, on request | `starter::global_twin` |
-| Window local storage `echo.kn.*` | Last vault, dismissed welcome card, unsaved drafts | the page (per viewer) |
+| Window local storage `echo.kn.*` | Last vault, unsaved drafts | the page (per viewer) |
 
 The spec's `<id>/state.json` was not needed: what it would hold is per viewer and lives in local storage.
 
@@ -662,7 +708,13 @@ not the hashing, were the cost; copying on 8 threads won only 15 %, so small fil
 - Minutes are routed through a vault's own skill only later (D3); today the note is Echo's minutes as written.
 - The rail (links, outline, history) is hidden under 1100 px wide; so is Ask's (*Continue elsewhere* moves to the
   conversation's ⋯).
-- Ask's new conversation shows no suggestions yet: K11-02's list comes with Home.
+- Ask's new conversation shows no suggestions; Home's Ask box has them (K11-02).
+- Home's meetings are the ones Echo holds: today's agenda and, in the window, the calendar's last fetch (the Calendar
+  view or Tasks opened since the app started). Tomorrow's meeting is suggested only after one of those fetched it.
+- "In the terminal panel" is the panel's own conversation: one opened there and then continued in Ask still says so
+  once Ask's process for it has ended.
+- Home's What's new in a vault without git takes a page's time for a change: a copy that doesn't keep times makes every
+  page look changed outside Echo. In a git vault a clean page's time isn't read (a checkout changes times, not text).
 - Retiring the Obsidian plugin's vault part is a separate change in `onetest-ai/echo-plugins`; until then *Connect
   from the Obsidian plugin* imports its vaults.
 - The minutes preview in the dev browser pane is blank (the pane blocks iframes); the app's webview shows it.

@@ -70,7 +70,6 @@ pub fn record(v: &Vault, e: Entry) -> Result<()> {
     Ok(crate::paths::write_atomic(&file(v), text.as_bytes())?)
 }
 
-#[allow(dead_code)] // read by Home's "What's new" (a later task)
 /// Lines at or after `since` (RFC 3339), newest first. A line that doesn't read is skipped.
 pub fn recent(v: &Vault, since: &str) -> Vec<Entry> {
     let since = chrono::DateTime::parse_from_rfc3339(since).ok();

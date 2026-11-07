@@ -1077,6 +1077,14 @@ pub fn status(v: &Vault, run: &str, from: u64) -> Result<Value> {
     Ok(j)
 }
 
+/// What a running run does now (Home's *Coming in*, K11-06): from its last steps, the one under way, else the next.
+pub(super) fn step_now(v: &Vault, run: &str) -> Option<String> {
+    let text = std::fs::read(run_dir(v, run).ok()?.join("log.jsonl")).ok()?;
+    let steps = String::from_utf8_lossy(&text).lines().rev().filter_map(|l| serde_json::from_str::<Value>(l).ok()).find(|e| e["type"] == "todo")?;
+    let items = steps["items"].as_array()?;
+    items.iter().find(|i| i["state"] == "active").or_else(|| items.iter().find(|i| i["state"] != "done")).and_then(|i| i["text"].as_str()).map(str::to_owned)
+}
+
 /// A run's events after number `from` in its folder's `log.jsonl` (at most 2,000), and the number to ask from next.
 pub(super) fn events_after(dir: &Path, from: u64) -> (Vec<Value>, u64) {
     let text = std::fs::read(dir.join("log.jsonl")).unwrap_or_default();
