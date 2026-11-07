@@ -566,6 +566,20 @@ pub fn add_call(v: &Vault, call: &Path, include: Include, anyway: bool) -> Resul
     write_source(v, New { sub: "echo", name, title, by: "call", from, anyway: across, body: Body::Text(text) })
 }
 
+/// The source this call already is in the vault (K14-11: a call is added once), vault-relative: the file in `echo/`
+/// whose front matter names the call.
+pub fn call_source(v: &Vault, call: &Path) -> Option<String> {
+    use std::io::Read as _;
+    let want = format!("source: echo://call/{}", crate::calls::stamp_of(call));
+    let rel = format!("{}/echo", folder(v));
+    let dir = page::inside(v, &rel).ok()?;
+    std::fs::read_dir(dir).ok()?.flatten().filter(|e| e.path().extension().is_some_and(|x| x == "md")).find_map(|e| {
+        let mut head = vec![];
+        std::fs::File::open(e.path()).ok()?.take(2048).read_to_end(&mut head).ok()?;
+        String::from_utf8_lossy(&head).lines().any(|l| l == want).then(|| format!("{rel}/{}", e.file_name().to_string_lossy()))
+    })
+}
+
 /// A local time as a section shows it.
 fn local_time(at: &str) -> String {
     DateTime::parse_from_rfc3339(at).map(|t| t.with_timezone(&Local).format("%Y-%m-%d %H:%M").to_string()).unwrap_or_else(|_| at.to_string())

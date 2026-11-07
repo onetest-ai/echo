@@ -1059,3 +1059,76 @@ fn a_run_whose_thread_panics_still_leaves_and_lets_go() {
     assert!(!crate::terminal::holds_profile("w"));
     assert!(crate::app::FileLock::try_take(&lock_file).unwrap().is_some(), "and its lock");
 }
+
+// ── Needs you (K10-06, K10-T3) ──
+
+/// A run the ledger keeps as `state` with `sources`, and — under review — a `review.json` finding `paths`.
+fn kept_run(v: &Vault, id: &str, at: &str, state: &str, sources: &[&str], reason: Option<&str>) {
+    let r = Run { id: id.into(), at: at.into(), sources: strings(sources), state: state.into(), reason: reason.map(str::to_owned), ended: Some(now_rfc()), ..Default::default() };
+    sources::update_ledger(v, |l| {
+        l.runs.push(serde_json::to_value(&r)?);
+        Ok(())
+    })
+    .unwrap();
+    std::fs::create_dir_all(ingest_dir(v).join(id)).unwrap();
+}
+
+fn found(v: &Vault, run: &str, paths: &[&str], answered: &[&str]) {
+    let found: Vec<Value> = paths.iter().map(|p| json!({"path": p, "new": true})).collect();
+    let answers: serde_json::Map<String, Value> = answered.iter().map(|p| (p.to_string(), json!({"state": "approved"}))).collect();
+    std::fs::write(ingest_dir(v).join(run).join("review.json"), json!({"found": found, "answers": answers}).to_string()).unwrap();
+}
+
+fn items_of(v: &Vault) -> Vec<Value> {
+    crate::attention::collect().items.into_iter().filter(|i| i["key"].as_str().is_some_and(|k| k.contains(v.id.as_str()))).collect()
+}
+
+#[test]
+fn changes_waiting_are_one_item_per_vault_until_they_are_answered() {
+    // K10-T3: a vault whose runs have 6 changes waiting from 2 sources.
+    let (_env, root) = paths::testenv::folders("kn-ingest-needs-you");
+    let _fake = fake::install(&root);
+    let _clean = clean();
+    let (v, _p) = twin(&root, false);
+    assert!(items_of(&v).is_empty());
+    let pages = ["knowledge/notes/a.md", "knowledge/notes/b.md", "knowledge/notes/c.md", "knowledge/notes/d.md", "knowledge/notes/e.md", "knowledge/notes/f.md"];
+    kept_run(&v, "20261106-0951", "2026-11-06T09:51:00+02:00", "review", &["raw_inbox/echo/one.md"], None);
+    found(&v, "20261106-0951", &pages[..4], &[]);
+    kept_run(&v, "20261106-1020", "2026-11-06T10:20:00+02:00", "review", &["raw_inbox/echo/two.md", "raw_inbox/echo/one.md"], None);
+    found(&v, "20261106-1020", &pages[4..], &[]);
+    let got = items_of(&v);
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert_eq!(got[0]["title"], "6 changes from 2 sources wait in My twin");
+    assert_eq!(got[0]["go"], format!("kn/{}/ingest", v.id));
+    // Some answered: the count follows what still waits; only runs with changes waiting give their sources.
+    found(&v, "20261106-0951", &pages[..4], &pages[..4]);
+    found(&v, "20261106-1020", &pages[4..], &pages[5..]);
+    let got = items_of(&v);
+    assert_eq!(got[0]["title"], "1 change from 2 sources waits in My twin", "{got:?}");
+    // All answered: gone.
+    found(&v, "20261106-1020", &pages[4..], &pages[4..]);
+    assert!(items_of(&v).is_empty());
+}
+
+#[test]
+fn a_failed_run_is_an_item_until_it_runs_again_or_goes() {
+    let (_env, root) = paths::testenv::folders("kn-ingest-needs-you-failed");
+    let _fake = fake::install(&root);
+    let _clean = clean();
+    let (v, _p) = twin(&root, false);
+    kept_run(&v, "20261106-0951", "2026-11-06T09:51:00+02:00", "failed", &[SOURCE], Some("The run stopped at its 20 minutes\nand more"));
+    kept_run(&v, "20261106-1000", "2026-11-06T10:00:00+02:00", "stopped", &["raw_inbox/echo/two.md"], Some("Stopped"));
+    let got = items_of(&v);
+    assert_eq!(got.len(), 1, "a run the user stopped is not an item: {got:?}");
+    assert_eq!(got[0]["title"], "An ingest run failed in My twin");
+    assert_eq!(got[0]["why"], "The run stopped at its 20 minutes");
+    assert_eq!(got[0]["go"], format!("kn/{}/ingest/20261106-0951", v.id));
+    // Run again: a newer run takes its sources, and the item goes (a new failure would be its own).
+    kept_run(&v, "20261106-1100", "2026-11-06T11:00:00+02:00", "review", &[SOURCE], None);
+    assert!(items_of(&v).is_empty());
+    // Discarded: gone too.
+    kept_run(&v, "20261107-0900", "2026-11-07T09:00:00+02:00", "failed", &["raw_inbox/echo/three.md"], None);
+    assert_eq!(items_of(&v).len(), 1);
+    review::discard(&v, "20261107-0900").unwrap();
+    assert!(items_of(&v).is_empty());
+}

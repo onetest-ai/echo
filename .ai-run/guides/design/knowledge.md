@@ -26,7 +26,7 @@ is `recall.md`. The window rules are `.ai-run/guides/window/window-ui.md`; untru
 | `lint.rs` | AI checks (spec-2 K16-05, -06): the pages read (`pages_in_scope`), the run (`start`, `stop`, `wait`, `status`, `close_profile`, `close_all`), its findings checked (`kept`) and checked again whenever Health is computed (`listed`), `summary` for Health's view |
 | `catalog.rs` | Writing one row into the index's right table (`insert`, `row`, `cell`) |
 | `page.rs` | Reading a page for the window (`read`: safe HTML, outline, backlinks, local graph), `save`, `create`, history, `restore`, index rows, assets, `inside` (path checks) |
-| `export.rs` | Minutes → a note: the rule (`targets`), `save_by_rules`, `minutes_written`, on demand (`save`, `preview`), the call's record (`<call>/knowledge.json`) |
+| `export.rs` | Minutes → a note: the rule (`targets`), `save_by_rules`, `minutes_written`, the new-calls rule (`new_call_rule`, `rule_failure`), on demand (`save`, `preview`), the call's record (`<call>/knowledge.json`) |
 | `git.rs` | The only git calls (`info`, `init`, `first_commit`, `dirty`, `commit_paths`): literal pathspecs, both pipes drained, 20 s then SIGTERM |
 | `starter.rs` | The twin starter (23 files compiled in), `create`, the `/twin` skill in a vault and for all sessions |
 | `api.rs` | `/api/kn/...` routes, the IPC actions (`kn_*`), the folder picker, background jobs |
@@ -34,14 +34,14 @@ is `recall.md`. The window rules are `.ai-run/guides/window/window-ui.md`; untru
 | `chat.rs` (`tray`) | Ask's conversations: a Claude Code process per conversation (`send`, `read`, `permit`, `stop`, `close_profile`, `live`, `sweep`) |
 | `chat/permits.rs` | A permission card's diff (`card`), an allowed edit's activity line (`record`), a turn's commit (`commit`) |
 | `chat/attach.rs` | A call's minutes attached to a message (`attach_call`: the profile check, the framing) |
-| `sources.rs` | Ingest's sources (spec-2 K14): the ledger (`ingest.json`: `ledger`, `baseline`, `skip`), the queue (`queue`, `offer`, `value`), adds (`add_files`, `add_call`, `add_mail` / `add_thread`, `add_chat` / `add_chat_messages`, `add_web`), the sheet's lists (`calls`, `m365_search`) |
+| `sources.rs` | Ingest's sources (spec-2 K14): the ledger (`ingest.json`: `ledger`, `baseline`, `skip`), the queue (`queue`, `offer`, `value`), adds (`add_files`, `add_call`, `add_mail` / `add_thread`, `add_chat` / `add_chat_messages`, `add_web`), `call_source` (the source a call already is), the sheet's lists (`calls`, `m365_search`) |
 | `extract.rs` | A web page's main text as Markdown by Echo's own HTML reader (`main_text`), and its fetch with `curl` (`fetch`) |
-| `ingest.rs` | Ingest runs (spec-2 K15): the skill (`skill`), the copy (`copy_vault`), the run (`start`, `again`, `stop`, `wait`, `status`, `close_profile`, `close_all`), the Ingest view's `value`, *Prepare again* (`requeue`); and a run's life, shared with AI checks: `Life` (what a kind of run does at each point), `go_live` (made live, its lease counted), `run_thread` (the wait for a call, the start, its pid, the end — its lock, lease and `live` entry let go by a drop guard, a panic too), `gone`, and the pieces under them (`headless_args`, `take_lock`, `new_dir`, `wait_for_calls`, `spawn`, `drive`, `Log`, `wait_in`, `stop_in`, `events_after`) |
+| `ingest.rs` | Ingest runs (spec-2 K15): the skill (`skill`), the copy (`copy_vault`), the run (`start`, `again`, `stop`, `wait`, `status`, `close_profile`, `close_all`), the Ingest view's `value`, *Prepare again* (`requeue`), what Needs you reads (`going`, `waiting`); and a run's life, shared with AI checks: `Life` (what a kind of run does at each point), `go_live` (made live, its lease counted), `run_thread` (the wait for a call, the start, its pid, the end — its lock, lease and `live` entry let go by a drop guard, a panic too), `gone`, and the pieces under them (`headless_args`, `take_lock`, `new_dir`, `wait_for_calls`, `spawn`, `drive`, `Log`, `wait_in`, `stop_in`, `events_after`) |
 | `ingest/review.rs` | A run's changes (`changes`: kinds, diffs, quotes, D28's dropped lines), the answers (`decide`, `approve_rest`), *Write N approved* (`write`), `discard` |
 | `ui/knowledge.js`, `ui/knowledge.css` | The window's Knowledge: pure blocks tested by `ui/knowledge.test.mjs`, then the `Kn` module |
 
 Hooks elsewhere: `notes.rs::notify_outcome` and `watch.rs::notify_notes_ready` call `export::minutes_written` (both
-writers of minutes, D16); `attention.rs` shows a failed save in the Inbox; `terminal.rs` starts the vault's panel
+writers of minutes, D16); `attention.rs` shows a failed save in the Inbox, and Ingest's items (below); `terminal.rs` starts the vault's panel
 sessions (`start_vault`, `vault_args`), counts the leases chats and ingest runs hold (`hold`, `holds_profile`) and stops
 them on quit (`close_all`, AI checks too); `signin.rs` closes a profile's chats, ingest runs and AI checks before a sign-in; `minutes.rs::page_html` is the safe Markdown writer for pages; `links.rs` (the top
 module) lets an `echo://call/` link survive a retitle by its stamp.
@@ -538,6 +538,24 @@ refusal said on that call, *Add anyway*), a mail or a chat by Microsoft 365's id
 days; signed out: said, with Settings → Calendar & chat), a web page by its https address (anything else refused before
 it is sent). The page never sends a path. Settings → Ingest picks the ingest skill (`ingest.skill`; the settings route
 gives the skill a run uses and the one Echo finds itself), Settings → Ask switches Research (`ask.research`).
+
+**New calls' minutes and Needs you** (spec-2 K14-11, K10-06, D37, rulings R52/R53). Settings → Ingest has the vault's
+rule `ingest.calls` as three radios (`knCallsRule`, id `kn-set-ingest-calls-<value>`): *Off* (default) · *Add to the
+inbox* · *Add and prepare changes* (a run starts by itself when none is going; its changes wait for review). It runs
+inside `export::save_by_rules`, on the thread `minutes_written` already starts (so it never holds the notification), and
+only after the minutes rule's own automatic save into that vault — never after a manual save or a *Save anyway*.
+`new_call_rule` re-reads the vault, re-checks that the call's profile is the vault's (else nothing), skips a call that is
+already a source (`sources::call_source` finds `source: echo://call/<stamp>` in `<sources>/echo/`: minutes written again
+add nothing and start nothing), adds it with `sources::add_call` (no *anyway*), and with *prepare* calls
+`ingest::start` on that one source only when `ingest::going` is false; a run that began meanwhile leaves the source New like any
+other. A failure is not silent: it is kept on the call (`knowledge.json` `rule_failed`: `add` or `prepare`, why) and
+`attention.rs` shows it as "Not added to <vault>'s inbox: <call>" / "Changes not prepared in <vault>: <call>" →
+`kn/<vault>/ingest`, until the call is a source (add) or its source is no longer New (prepare); it is quiet after the 14
+days minutes failures last. Needs you also gets, per vault (`ingest::waiting`): one item "6 changes from 2 sources wait in
+<vault>" (`to_answer` summed over the runs under review, the distinct sources of those runs) → `kn/<vault>/ingest`, and one
+per failed run (`effective`, so one an Echo quit left running counts) with its reason in a line → `kn/<vault>/ingest/<run>`.
+A stopped run is no item; a failed run's item goes when a newer run takes any of its sources (*Run again*), when it is
+discarded, or when its folder expires.
 
 **The Home tab** (spec-2 K11; `home.rs`, `knowledge.js` block `kn-home`): `/home` answers from what Echo already holds
 (ruling R48) and never waits for git, Microsoft 365 or a model (K11-10: ~5 ms warm in the dev app). Its parts:

@@ -1124,6 +1124,49 @@ pub fn value(v: &Vault) -> Result<Value> {
     Ok(j)
 }
 
+/// Is a run going in this vault: its lock is held, by this Echo or another (X-S2: one running run per vault).
+pub fn going(v: &Vault) -> bool {
+    !free(&lock_path(v))
+}
+
+/// What Needs you says of a vault's ingest (K10-06).
+#[derive(Debug, Default)]
+pub struct Waiting {
+    /// Changes still waiting for an answer, over the runs under review.
+    pub changes: usize,
+    /// The distinct sources of those runs.
+    pub sources: usize,
+    /// Runs that failed (one a quit left running too), kept for *Run again*.
+    pub failed: Vec<Run>,
+}
+
+/// The vault's runs as Needs you reads them: the changes waiting for an answer (and their sources), and the failed runs.
+/// A stopped run is the user's own doing and isn't one.
+pub fn waiting(v: &Vault) -> Result<Waiting> {
+    let mut w = Waiting::default();
+    let mut sources: Vec<String> = vec![];
+    for r in runs_of(&sources::ledger(v)?).into_iter().map(|r| effective(v, r)) {
+        match r.state.as_str() {
+            "review" => {
+                let n = review::to_answer(v, &r.id);
+                if n > 0 {
+                    w.changes += n;
+                    sources.extend(r.sources);
+                }
+            }
+            "failed" => w.failed.push(r),
+            _ => {}
+        }
+    }
+    sources.sort();
+    sources.dedup();
+    w.sources = sources.len();
+    // A run run again (or one that took its sources since) is answered: the newer run speaks for them.
+    let later = runs_of(&sources::ledger(v)?);
+    w.failed.retain(|f| !later.iter().any(|r| r.id != f.id && r.at > f.at && r.sources.iter().any(|s| f.sources.contains(s))));
+    Ok(w)
+}
+
 /// *Prepare again* (K15-10): sources a run left Done go back to New. How many.
 pub fn requeue(v: &Vault, paths: &[String]) -> Result<usize> {
     super::refuse_headless()?;

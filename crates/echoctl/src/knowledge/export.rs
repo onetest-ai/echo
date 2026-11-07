@@ -115,6 +115,15 @@ struct Failure {
     error: String,
 }
 
+/// The new-calls rule that couldn't add the call (`add`) or start its run (`prepare`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct RuleFailure {
+    vault: String,
+    step: String,
+    at: String,
+    error: String,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct Record {
     /// `none` (don't save this call), a vault id (only there), or nothing (the vaults' rules).
@@ -124,6 +133,9 @@ struct Record {
     saved: Vec<Entry>,
     #[serde(default)]
     failed: Vec<Failure>,
+    /// The new-calls rule's last failure per vault (K14-11).
+    #[serde(default)]
+    rule_failed: Vec<RuleFailure>,
 }
 
 fn load(call: &Path) -> Record {
@@ -455,11 +467,67 @@ pub fn save_by_rules(call: &Path) -> Vec<Saved> {
             }
         }
         match save(call, &v.id, How::Auto) {
-            Ok(s) => out.push(s),
+            Ok(s) => {
+                new_call_rule(call, &v.id);
+                out.push(s)
+            }
             Err(e) => eprintln!("knowledge: minutes of {} → {}: {e:#}", call.display(), v.id),
         }
     }
     out
+}
+
+/// The vault's new-calls rule (K14-11, D37), after the minutes rule's own save into it: `add` makes the call a source of
+/// the vault's inbox, `prepare` also starts a run on that source — when none is going; the run's changes wait for review.
+/// Only for a call of the vault's own profile (X-P2), once per call, and never for a manual save. What it can't do is
+/// kept on the call (`rule_failure`) for Needs you; the minutes are never touched.
+pub(super) fn new_call_rule(call: &Path, vault: &str) {
+    let Ok(v) = super::get(vault) else { return };
+    if v.ingest.calls == "off" || crate::ai::call_profile_id(call).ok().as_deref() != Some(v.profile.as_str()) {
+        return;
+    }
+    if super::sources::call_source(&v, call).is_some() {
+        return;
+    }
+    let path = match super::sources::add_call(&v, call, super::sources::Include::default(), false) {
+        Ok(a) => a.path,
+        Err(e) => return rule_failed(call, &v, "add", &e),
+    };
+    let tried = if v.ingest.calls == "prepare" && !super::ingest::going(&v) {
+        super::ingest::start(&v, std::slice::from_ref(&path)).map(|_| ())
+    } else {
+        Ok(())
+    };
+    match tried {
+        // A run that began between the look and the start leaves the source New, as for any other.
+        Err(e) if !super::ingest::going(&v) => rule_failed(call, &v, "prepare", &e),
+        _ => {
+            let _ = update(call, |r| r.rule_failed.retain(|f| f.vault != v.id));
+        }
+    }
+}
+
+fn rule_failed(call: &Path, v: &Vault, step: &str, e: &anyhow::Error) {
+    eprintln!("knowledge: new-calls rule of {} → {}: {e:#}", call.display(), v.id);
+    let f = RuleFailure { vault: v.id.clone(), step: step.into(), at: chrono::Local::now().to_rfc3339(), error: format!("{e:#}") };
+    let _ = update(call, |r| {
+        r.rule_failed.retain(|x| x.vault != v.id);
+        r.rule_failed.push(f);
+    });
+}
+
+/// The new-calls rule's failure on this call while its cause stands (K14-11): (vault id, vault name, `add` or
+/// `prepare`, why). An `add` stands until the call is a source; a `prepare` until its source is no longer New.
+pub fn rule_failure(call: &Path) -> Option<(String, String, String, String)> {
+    load(call).rule_failed.into_iter().find_map(|f| {
+        let v = super::get(&f.vault).ok()?;
+        let standing = match (f.step.as_str(), super::sources::call_source(&v, call)) {
+            ("add", source) => source.is_none(),
+            (_, Some(path)) => super::sources::ledger(&v).ok()?.sources.get(&path).is_some_and(|e| e.state == "new"),
+            _ => false,
+        };
+        standing.then_some((v.id, v.name, f.step, f.error))
+    })
 }
 
 /// After a call's minutes are written (an Echo run or a session's `/echo:process-call`): the names of the vaults that

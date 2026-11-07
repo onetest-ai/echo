@@ -27,6 +27,19 @@ function knRouteOf({ vault, tab = 'home', path = '' }) {
 }
 // end of the kn-route block
 
+// ── kn-calls-rule: Settings → Ingest, what a new call's minutes do (K14-11, D37) ──
+const KN_CALLS_RULE = [
+  ['off', 'Off', 'The default. Minutes are saved as you set above and nothing else happens.'],
+  ['add', 'Add to the inbox', 'The call joins the inbox as a source. You prepare changes when you want.'],
+  ['prepare', 'Add and prepare changes', 'A run starts by itself, when none is going. Its changes wait for your review; nothing is merged by itself.'],
+]
+/** The three choices with the vault's one checked (a value Echo doesn't know reads as Off). */
+function knCallsRule(value) {
+  const on = KN_CALLS_RULE.some(([k]) => k === value) ? value : 'off'
+  return KN_CALLS_RULE.map(([k, label, sub]) => ({ k, label, sub, on: k === on }))
+}
+// end of the kn-calls-rule block
+
 // ── kn-tabs: which tabs show a number (only where something waits) ──
 /** `{ ingest, health }`: what waits to be ingested and what needs a look; `null` at 0 or when missing, so no badge. */
 function knTabCounts({ waiting, needs } = {}) {
@@ -1834,6 +1847,7 @@ const Kn = (() => {
       </div></section>
       <section class="set-sec" id="vs-ingest"><h3>Ingest</h3><div class="set-card">
         ${row('The ingest skill', ingSkill ? `Runs on a copy of the vault when you prepare changes. In <code>${esc(ingSkill.path)}</code>.` : 'None found: Ingest offers the starter\'s <code>process-inbox</code>.', skillSel)}
+        ${row('New calls\' minutes', 'After a call\'s minutes are saved here by their rule. Only calls on this vault\'s AI profile.', `<div class="kn-radios" id="kn-set-ingest-calls" role="radiogroup" aria-label="New calls\' minutes">${knCallsRule((v.ingest || {}).calls).map((o) => `<label class="kn-radio"><input type="radio" id="kn-set-ingest-calls-${o.k}" name="kn-ingest-calls" value="${o.k}" data-kn-set="ingest.calls"${o.on ? ' checked' : ''}><span><b>${esc(o.label)}</b><span class="set-sub">${esc(o.sub)}</span></span></label>`).join('')}</div>`)}
         ${row('What a run may do', 'Read and write pages in its copy, with this skill only. No commands, no web. A step of the skill that needs a command is skipped and named in the run\'s report.', '<span class="tag">no commands</span>')}
       </div></section>
       <section class="set-sec" id="vs-ask"><h3>Ask</h3><div class="set-card">

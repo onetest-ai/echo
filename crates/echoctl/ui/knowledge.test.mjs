@@ -13,6 +13,7 @@ const block = (name) => {
 const load = (names, exports) => new Function(`${names.map(block).join('\n')}\nreturn { ${exports.join(', ')} }`)()
 const { knParseRoute, knRouteOf } = load(['kn-route'], ['knParseRoute', 'knRouteOf'])
 const { knTabCounts, knTabLabel } = load(['kn-tabs'], ['knTabCounts', 'knTabLabel'])
+const { knCallsRule } = load(['kn-calls-rule'], ['knCallsRule'])
 const { knSwitcherEntries } = load(['kn-switcher'], ['knSwitcherEntries'])
 const { knChipState } = load(['kn-chip'], ['knChipState'])
 const { knBuildTree, knPagesEmpty } = load(['kn-tree'], ['knBuildTree', 'knPagesEmpty'])
@@ -32,6 +33,17 @@ const { knWhen, knHomeCards, knHomeNews, knHomeLine, knHomeAsk, knHomeRecord } =
 
 const tests = []
 const test = (name, f) => tests.push([name, f])
+
+test('settings: the new-calls rule offers Off, Add to the inbox, Add and prepare changes, one checked', () => {
+  const labels = knCallsRule('add').map((o) => o.label)
+  assert.deepEqual(labels, ['Off', 'Add to the inbox', 'Add and prepare changes'])
+  assert.deepEqual(knCallsRule('prepare').map((o) => o.on), [false, false, true])
+  // The default, and a value Echo doesn't know: Off.
+  assert.deepEqual(knCallsRule(undefined).map((o) => o.k + (o.on ? '*' : '')), ['off*', 'add', 'prepare'])
+  assert.equal(knCallsRule('always').find((o) => o.on).k, 'off')
+  // Prepare says its changes wait for review.
+  assert.match(knCallsRule('off')[2].sub, /wait for your review/)
+})
 
 test('routes: a vault, its tab, its page; Recall stays #brain', () => {
   assert.deepEqual(knParseRoute('kn/my-twin/pages/knowledge%2Fclients%2Facme.md'), { vault: 'my-twin', tab: 'pages', path: 'knowledge/clients/acme.md' })

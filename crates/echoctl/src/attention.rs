@@ -72,6 +72,7 @@ pub fn collect() -> Collected {
         if name.get(..10).is_some_and(|x| x < fresh.as_str()) {
             c.quiet.insert(format!("minutes:{}", crate::calls::stamp_of(&d)));
             c.quiet.insert(format!("minutes-wait:{}", crate::calls::stamp_of(&d)));
+            c.quiet.insert(format!("knowledge-rule:{}", crate::calls::stamp_of(&d)));
             continue;
         }
         let stamp = crate::calls::stamp_of(&d);
@@ -89,6 +90,22 @@ pub fn collect() -> Collected {
             )),
             None => {
                 c.quiet.insert(format!("knowledge:{stamp}"));
+            }
+        }
+        // The vault's new-calls rule that couldn't add the call or start its run: the vault's Ingest, where it is done by hand.
+        match crate::knowledge::export::rule_failure(&d) {
+            Some((vault, vname, step, error)) => out.push(item(
+                format!("knowledge-rule:{stamp}"),
+                "knowledge",
+                "echo",
+                if step == "add" { format!("Not added to {vname}'s inbox: {}", call_title(&d)) } else { format!("Changes not prepared in {vname}: {}", call_title(&d)) },
+                error.lines().next().unwrap_or("").chars().take(200).collect(),
+                false,
+                vec![],
+                Some(format!("kn/{vault}/ingest")),
+            )),
+            None => {
+                c.quiet.insert(format!("knowledge-rule:{stamp}"));
             }
         }
         // The state as the user sees it (`notes::status`): a run whose owner died is failed there.
@@ -126,6 +143,45 @@ pub fn collect() -> Collected {
                 Some(format!("call/{name}/minutes")),
             )),
             _ => {}
+        }
+    }
+    // Knowledge: a vault's changes waiting for review, and its failed ingest runs.
+    match crate::knowledge::list() {
+        Err(_) => {
+            c.keep_kinds.insert("knowledge-ingest");
+        }
+        Ok(vaults) => {
+            for v in vaults.iter().filter(|v| crate::knowledge::available(v)) {
+                let Ok(w) = crate::knowledge::ingest::waiting(v) else {
+                    c.keep.insert(format!("knowledge-ingest:{}", v.id));
+                    continue;
+                };
+                if w.changes > 0 {
+                    let (n, s) = (w.changes, w.sources);
+                    out.push(item(
+                        format!("knowledge-ingest:{}", v.id),
+                        "knowledge-ingest",
+                        "echo",
+                        format!("{n} change{} from {s} source{} {} in {}", if n == 1 { "" } else { "s" }, if s == 1 { "" } else { "s" }, if n == 1 { "waits" } else { "wait" }, v.name),
+                        "Look through them and write the ones you want".into(),
+                        false,
+                        vec![],
+                        Some(format!("kn/{}/ingest", v.id)),
+                    ));
+                }
+                for r in w.failed {
+                    out.push(item(
+                        format!("knowledge-run:{}:{}", v.id, r.id),
+                        "knowledge-ingest",
+                        "echo",
+                        format!("An ingest run failed in {}", v.name),
+                        r.reason.as_deref().unwrap_or("Claude Code didn't finish it").lines().next().unwrap_or("").chars().take(200).collect(),
+                        false,
+                        vec![],
+                        Some(format!("kn/{}/ingest/{}", v.id, r.id)),
+                    ));
+                }
+            }
         }
     }
     let settings = crate::ai::Settings::load();

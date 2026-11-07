@@ -492,3 +492,172 @@ fn minutes_written_saves_in_the_background() {
     let other = fixture::call("2026-11-05_210000-x", "X", "client-x", fixture::MINUTES);
     assert!(minutes_written(&other).is_empty());
 }
+
+// ── the new-calls rule (K14-11, K14-T8): fake runs only ──
+
+/// Stops this test's runs when it ends (declared after the fake and the folders: dropped first).
+struct Clean;
+
+impl Clean {
+    fn new() -> Clean {
+        super::ingest::reset();
+        Clean
+    }
+}
+
+impl Drop for Clean {
+    fn drop(&mut self) {
+        super::ingest::reset();
+    }
+}
+
+const SECOND: &str = "2026-11-06_100000-pricing-review";
+
+/// A vault read by the fake's signed-in profile `w`, saving minutes by itself, with the new-calls rule `calls`.
+fn rule_vault(root: &Path, calls: &str) -> (super::Vault, crate::ai::Profile) {
+    let p = crate::ai::fake::profile("w", None, &crate::ai::fake::signed_in("pat@example.com"));
+    let v = starter(root, "My twin");
+    super::set(&v.id, "profile", "w").unwrap();
+    (super::set(&v.id, "ingest.calls", calls).unwrap(), p)
+}
+
+/// The fake's run plays `lines` (one JSON per line) and stays until stopped when they end in `_hang`.
+fn play(p: &crate::ai::Profile, lines: &[&str]) {
+    std::fs::write(crate::ai::fake::file(p, "ingest.jsonl"), lines.iter().map(|l| format!("{l}\n")).collect::<String>()).unwrap();
+}
+
+const INIT: &str = r#"{"type":"system","subtype":"init","session_id":"made-up","tools":["Read"]}"#;
+const HANG: &str = r#"{"_hang":true}"#;
+const DONE: &str = r#"{"type":"result","subtype":"success","is_error":false,"stop_reason":"end_turn","duration_ms":10,"total_cost_usd":0.01,"usage":{"input_tokens":1,"output_tokens":1}}"#;
+
+fn echo_sources(v: &super::Vault) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(v.root.join("raw_inbox/echo")).map(|d| d.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default();
+    names.sort();
+    names
+}
+
+fn runs(v: &super::Vault) -> Vec<serde_json::Value> {
+    super::sources::ledger(v).unwrap().runs
+}
+
+#[test]
+fn prepare_adds_the_call_and_starts_a_run_on_it() {
+    let (_env, root) = crate::paths::testenv::folders("kn-rule-prepare");
+    let _fake = crate::ai::fake::install(&root);
+    let _clean = Clean::new();
+    let (v, p) = rule_vault(&root, "prepare");
+    play(&p, &[INIT, HANG]);
+    let call = fixture::call(CALL, "Weekly delivery sync", "w", fixture::MINUTES);
+    assert_eq!(save_by_rules(&call).len(), 1);
+    assert_eq!(echo_sources(&v), ["2026-11-05-weekly-delivery-sync.md"]);
+    let source = "raw_inbox/echo/2026-11-05-weekly-delivery-sync.md";
+    let started = runs(&v);
+    assert_eq!(started.len(), 1, "{started:?}");
+    assert_eq!((started[0]["sources"][0].as_str(), started[0]["state"].as_str()), (Some(source), Some("running")));
+    let src = super::sources::queue(&v).unwrap().into_iter().find(|s| s.path == source).unwrap();
+    assert_eq!(src.state, "waiting", "the run holds it");
+    assert!(rule_failure(&call).is_none());
+}
+
+#[test]
+fn a_call_of_another_profile_adds_nothing_and_runs_nothing() {
+    let (_env, root) = crate::paths::testenv::folders("kn-rule-other-profile");
+    let _fake = crate::ai::fake::install(&root);
+    let _clean = Clean::new();
+    let (v, p) = rule_vault(&root, "prepare");
+    play(&p, &[INIT, HANG]);
+    // The rule's own save takes no such call…
+    let call = fixture::call(CALL, "Weekly delivery sync", "client-x", fixture::MINUTES);
+    assert!(save_by_rules(&call).is_empty());
+    // …and the rule re-checks the profile itself, were it asked anyway.
+    new_call_rule(&call, &v.id);
+    assert!(echo_sources(&v).is_empty() && runs(&v).is_empty());
+    assert!(rule_failure(&call).is_none(), "nothing failed: it was not the rule's call");
+    // A save by hand, across profiles after *Save anyway*, runs nothing either (R53).
+    save(&call, &v.id, How::manual().anyway()).unwrap();
+    assert!(echo_sources(&v).is_empty() && runs(&v).is_empty());
+}
+
+#[test]
+fn add_only_adds_and_starts_nothing() {
+    let (_env, root) = crate::paths::testenv::folders("kn-rule-add-off");
+    let _fake = crate::ai::fake::install(&root);
+    let _clean = Clean::new();
+    let (v, p) = rule_vault(&root, "add");
+    play(&p, &[INIT, HANG]);
+    let call = fixture::call(CALL, "Weekly delivery sync", "w", fixture::MINUTES);
+    save_by_rules(&call);
+    assert_eq!(echo_sources(&v).len(), 1);
+    assert!(runs(&v).is_empty(), "add starts nothing");
+    let src = super::sources::queue(&v).unwrap().into_iter().find(|s| s.path.starts_with("raw_inbox/echo/")).unwrap();
+    assert_eq!(src.state, "new");
+}
+
+#[test]
+fn off_saves_the_minutes_and_nothing_else() {
+    let (_env, root) = crate::paths::testenv::folders("kn-rule-off");
+    let _fake = crate::ai::fake::install(&root);
+    let _clean = Clean::new();
+    let (v, p) = rule_vault(&root, "off");
+    play(&p, &[INIT, HANG]);
+    let call = fixture::call(CALL, "Weekly delivery sync", "w", fixture::MINUTES);
+    assert_eq!(save_by_rules(&call).len(), 1);
+    assert!(echo_sources(&v).is_empty() && runs(&v).is_empty());
+    assert!(!v.root.join("raw_inbox/echo").exists());
+}
+
+#[test]
+fn minutes_written_again_add_the_call_and_start_a_run_once() {
+    let (_env, root) = crate::paths::testenv::folders("kn-rule-once");
+    let _fake = crate::ai::fake::install(&root);
+    let _clean = Clean::new();
+    let (v, p) = rule_vault(&root, "prepare");
+    play(&p, &[INIT, DONE]);
+    let call = fixture::call(CALL, "Weekly delivery sync", "w", fixture::MINUTES);
+    save_by_rules(&call);
+    let run = runs(&v)[0]["id"].as_str().unwrap().to_owned();
+    assert!(super::ingest::wait(&run, std::time::Duration::from_secs(20)));
+    // The minutes are rewritten: the note is updated, the source stays one and no second run starts (D17).
+    std::fs::write(call.join("notes.md"), fixture::MINUTES.replace("18 November", "25 November")).unwrap();
+    assert_eq!(save_by_rules(&call)[0].state, "updated");
+    assert_eq!(echo_sources(&v).len(), 1);
+    assert_eq!(runs(&v).len(), 1);
+}
+
+#[test]
+fn prepare_while_a_run_is_going_leaves_the_source_new() {
+    let (_env, root) = crate::paths::testenv::folders("kn-rule-busy");
+    let _fake = crate::ai::fake::install(&root);
+    let _clean = Clean::new();
+    let (v, p) = rule_vault(&root, "prepare");
+    play(&p, &[INIT, HANG]);
+    let first = fixture::call(CALL, "Weekly delivery sync", "w", fixture::MINUTES);
+    let second = fixture::call(SECOND, "Pricing review", "w", fixture::MINUTES);
+    save_by_rules(&first);
+    save_by_rules(&second);
+    assert_eq!(echo_sources(&v).len(), 2);
+    assert_eq!(runs(&v).len(), 1, "one running run per vault");
+    let new: Vec<_> = super::sources::queue(&v).unwrap().into_iter().filter(|s| s.state == "new").collect();
+    assert_eq!(new.len(), 1, "the second call waits as any New source");
+    assert!(rule_failure(&second).is_none(), "a busy vault is not a failure");
+}
+
+#[test]
+fn a_rule_that_cant_start_a_run_is_kept_for_needs_you_until_the_source_is_dealt_with() {
+    let (_env, root) = crate::paths::testenv::folders("kn-rule-fails");
+    let _fake = crate::ai::fake::install(&root);
+    let _clean = Clean::new();
+    let (v, _p) = rule_vault(&root, "prepare");
+    // The vault's profile is signed out: the source is added, the run can't start.
+    std::fs::write(crate::ai::fake::file(&crate::ai::fake::profile("w", None, crate::ai::fake::SIGNED_OUT), "status.json"), crate::ai::fake::SIGNED_OUT).unwrap();
+    let call = fixture::call(CALL, "Weekly delivery sync", "w", fixture::MINUTES);
+    save_by_rules(&call);
+    assert_eq!(echo_sources(&v).len(), 1);
+    assert!(runs(&v).is_empty());
+    let (vault, name, step, why) = rule_failure(&call).expect("the failure is kept");
+    assert_eq!((vault.as_str(), name.as_str(), step.as_str()), (v.id.as_str(), "My twin", "prepare"));
+    assert!(!why.is_empty());
+    // Skipping the source ends its cause.
+    super::sources::skip(&v, "raw_inbox/echo/2026-11-05-weekly-delivery-sync.md", None).unwrap();
+    assert!(rule_failure(&call).is_none());
+}

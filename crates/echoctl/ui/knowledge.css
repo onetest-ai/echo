@@ -272,6 +272,7 @@ button.kn-leg:hover { background: var(--line); color: var(--text); }
 .kn-radio { display: flex; gap: 10px; align-items: flex-start; cursor: default; }
 .kn-radio input { margin-top: 3px; accent-color: var(--accent); }
 .kn-radio .set-sub { display: block; }
+.kn-radios { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; text-align: left; max-width: 360px; }
 .kn-tree-pre { font: 11.5px/1.55 var(--mono); color: var(--text-2); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 6px 0 0; white-space: pre; overflow: auto; max-height: 280px; }
 .kn-tree-pre em { color: var(--text-3); font-style: normal; }
 .kn-rows { display: flex; flex-direction: column; gap: 8px; max-height: 50vh; overflow-y: auto; }
