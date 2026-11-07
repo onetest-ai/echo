@@ -17,6 +17,7 @@ pub mod extract;
 pub mod fm;
 pub mod git;
 pub mod health;
+pub mod ingest;
 pub mod links;
 pub mod page;
 pub mod scan;
@@ -95,6 +96,29 @@ fn yes() -> bool {
     true
 }
 
+/// How a vault ingests (Settings → Ingest, spec D37, K15-03): its ingest skill (none: detected) and what a new call's
+/// minutes do — `off`, `add` (to the inbox) or `prepare` (added, and a run started).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IngestRule {
+    #[serde(default)]
+    pub skill: Option<String>,
+    #[serde(default = "off")]
+    pub calls: String,
+}
+
+impl Default for IngestRule {
+    fn default() -> Self {
+        IngestRule { skill: None, calls: off() }
+    }
+}
+
+fn off() -> String {
+    "off".into()
+}
+
+/// The new-calls rule's values (D37).
+const CALLS: [&str; 3] = ["off", "add", "prepare"];
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Vault {
     pub id: String,
@@ -112,6 +136,8 @@ pub struct Vault {
     pub git: GitRule,
     #[serde(default)]
     pub ask: AskRule,
+    #[serde(default)]
+    pub ingest: IngestRule,
     /// `twin@1` for a vault made from Echo's starter.
     #[serde(default)]
     pub template: Option<String>,
@@ -367,6 +393,7 @@ pub fn add(root: &Path, opts: AddOpts) -> Result<Vault> {
             minutes: MinutesRule { mode: opts.minutes.unwrap_or_else(|| "auto".into()), ..Default::default() },
             git: GitRule { commit: opts.commit.unwrap_or(false) },
             ask: AskRule::default(),
+            ingest: IngestRule::default(),
             template: opts.template,
             added_at: chrono::Local::now().to_rfc3339(),
         };
@@ -376,8 +403,8 @@ pub fn add(root: &Path, opts: AddOpts) -> Result<Vault> {
 }
 
 /// Change one setting of a vault (`name`, `profile`, `minutes`, `scope`, `clients`, `threads`, `tag`, `transcript`,
-/// `chat`, `commit`, `ask.research`, or an override of `pages` / `index` / `notes` / `naming` / `templates` /
-/// `sources`; `""` takes an override back).
+/// `chat`, `commit`, `ask.research`, `ingest.skill` (a skill of the vault; `""`: detected), `ingest.calls`, or an
+/// override of `pages` / `index` / `notes` / `naming` / `templates` / `sources`; `""` takes an override back).
 pub fn set(id: &str, key: &str, value: &str) -> Result<Vault> {
     refuse_headless()?;
     update(|r| {
@@ -408,6 +435,15 @@ pub fn set(id: &str, key: &str, value: &str) -> Result<Vault> {
             "chat" => v.minutes.chat = parse_bool(value)?,
             "commit" => v.git.commit = parse_bool(value)?,
             "ask.research" => v.ask.research = parse_bool(value)?,
+            "ingest.skill" => {
+                let name = value.trim();
+                if !name.is_empty() && !detect::skills(&v.root).iter().any(|s| s.kind != "agents" && s.name == name) {
+                    bail!("this vault has no skill “{name}”");
+                }
+                v.ingest.skill = Some(name.to_string()).filter(|n| !n.is_empty());
+            }
+            "ingest.calls" if CALLS.contains(&value) => v.ingest.calls = value.into(),
+            "ingest.calls" => bail!("ingest.calls: off, add or prepare"),
             k if OVERRIDES.contains(&k) => {
                 if value.trim().is_empty() {
                     v.overrides.remove(k);
@@ -504,6 +540,7 @@ pub fn vault_value(v: &Vault) -> Value {
         "minutes": v.minutes,
         "commit": v.git.commit,
         "ask": v.ask,
+        "ingest": v.ingest,
         "git": git,
         "template": v.template,
         "added_at": v.added_at,
@@ -597,6 +634,11 @@ mod tests {
         assert!(set(&v.id, "colour", "red").is_err());
         assert!(v.ask.research, "Research is offered unless turned off");
         assert!(!set(&v.id, "ask.research", "off").unwrap().ask.research);
+        assert_eq!(v.ingest, IngestRule { skill: None, calls: "off".into() });
+        assert_eq!(set(&v.id, "ingest.calls", "prepare").unwrap().ingest.calls, "prepare");
+        assert!(set(&v.id, "ingest.calls", "always").is_err());
+        assert_eq!(set(&v.id, "ingest.skill", "s").unwrap().ingest.skill.as_deref(), Some("s"));
+        assert!(set(&v.id, "ingest.skill", "nope").is_err(), "a skill the vault has");
     }
 
     #[test]
@@ -606,8 +648,10 @@ mod tests {
         let v = add(&t, opts("Twin")).unwrap();
         let mut j = serde_json::to_value(Registry { vaults: vec![v] }).unwrap();
         j["vaults"][0].as_object_mut().unwrap().remove("ask");
+        j["vaults"][0].as_object_mut().unwrap().remove("ingest");
         std::fs::write(registry_file(), j.to_string()).unwrap();
         assert!(get("twin").unwrap().ask.research);
+        assert_eq!(get("twin").unwrap().ingest, IngestRule::default());
     }
 
     #[test]
@@ -659,7 +703,7 @@ mod cli_shape {
         let t = fixture::twin(&root.join("twin"));
         let v = add(&t, AddOpts { name: Some("Twin".into()), ..Default::default() }).unwrap();
         let j = vault_value(&v);
-        for k in ["id", "name", "root", "available", "profile", "paths", "detected", "overrides", "minutes", "commit", "git", "template", "added_at"] {
+        for k in ["id", "name", "root", "available", "profile", "paths", "detected", "overrides", "minutes", "commit", "ingest", "git", "template", "added_at"] {
             assert!(j.get(k).is_some(), "missing {k}");
         }
         assert_eq!(j["paths"]["index"], "knowledge/CATALOG.md");

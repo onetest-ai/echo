@@ -156,18 +156,33 @@ fn starter_text(path: &str) -> &'static str {
 
 /// Add the starter's `twin` skill to a vault that has none (only `.claude/skills/twin/SKILL.md` is written).
 pub fn add_twin_skill(v: &Vault) -> Result<String> {
+    add_skill(v, "twin")
+}
+
+/// Add the starter's `process-inbox` skill to a vault with no ingest skill (spec K15-03; only
+/// `.claude/skills/process-inbox/SKILL.md` is written). Its text is `inbox_skill_text`, shown first.
+pub fn add_inbox_skill(v: &Vault) -> Result<String> {
+    add_skill(v, "process-inbox")
+}
+
+/// The starter's `process-inbox` skill, as *Add the starter's process-inbox* writes it.
+pub fn inbox_skill_text() -> &'static str {
+    starter_text(".claude/skills/process-inbox/SKILL.md")
+}
+
+fn add_skill(v: &Vault, name: &str) -> Result<String> {
     super::refuse_headless()?;
-    let rel = ".claude/skills/twin/SKILL.md";
-    let p = super::join(&v.root, rel);
+    let rel = format!(".claude/skills/{name}/SKILL.md");
+    let p = super::join(&v.root, &rel);
     if p.exists() {
-        bail!("This vault already has a twin skill");
+        bail!("This vault already has a {name} skill");
     }
     std::fs::create_dir_all(p.parent().expect("a parent"))?;
-    crate::paths::write_atomic(&p, starter_text(rel).as_bytes())?;
+    crate::paths::write_atomic(&p, starter_text(&rel).as_bytes())?;
     if v.git.commit {
-        let _ = super::git::commit_paths(&v.root, &[p], "Echo: add the twin skill");
+        let _ = super::git::commit_paths(&v.root, &[p], &format!("Echo: add the {name} skill"));
     }
-    Ok(rel.to_string())
+    Ok(rel)
 }
 
 /// The name of the vault's skill for all Claude Code sessions: the vault's id when it says "twin", else `<id>-twin`.

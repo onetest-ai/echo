@@ -466,18 +466,19 @@ fn run(p: &Profile, generation: u64) {
     finish(p, generation, outcome);
 }
 
-/// The window's Claude sessions and Ask's conversations on a profile hold its lease while they run: closed for a
-/// sign-in (they resume by id).
+/// The window's Claude sessions, Ask's conversations and ingest runs on a profile hold its lease while they run:
+/// closed for a sign-in (sessions and conversations resume by id; a run can run again).
 #[cfg(feature = "tray")]
 fn close_sessions(profile: &str) {
     crate::terminal::close_profile(profile);
     crate::knowledge::chat::close_profile(profile);
+    crate::knowledge::ingest::close_profile(profile);
 }
 
 #[cfg(not(feature = "tray"))]
 fn close_sessions(_profile: &str) {}
 
-/// Is a Claude session in the window or an Ask conversation (still) what holds the profile.
+/// Is a Claude session in the window, an Ask conversation or an ingest run (still) what holds the profile.
 #[cfg(feature = "tray")]
 fn session_holds(profile: &str) -> bool {
     crate::terminal::holds_profile(profile)
@@ -878,14 +879,26 @@ mod tests {
         let id = chat::send(&v.id, None, "What did Northwind Retail decide?", chat::Mode::Ask, &[]).unwrap();
         chat::turn_events(&v.id, &id);
         assert!(chat::live().contains(&id) && crate::terminal::holds_profile("w"));
+        // An ingest run on the profile holds it too (its source: the fixture's made-up deck).
+        use crate::knowledge::ingest;
+        ingest::reset();
+        crate::knowledge::fixture::write(&t, ".claude/skills/process-inbox/SKILL.md", crate::knowledge::starter::inbox_skill_text());
+        fs::write(fake::file(&p, "ingest.jsonl"), "{\"_hang\":true}\n").unwrap();
+        let run = ingest::start(&v, &[]).unwrap().run;
+        until("the run's Claude Code started", || fake::file(&p, "ingest.in").exists());
+        assert!(ingest::live().contains(&run));
         start("w");
         until("signed in", || json(&p)["just"] == true);
         assert!(!chat::live().contains(&id), "the sign-in closed it");
+        assert!(ingest::wait(&run, Duration::from_secs(10)), "and stopped the run");
+        let st = ingest::status(&v, &run, 0).unwrap();
+        assert_eq!((st["state"].as_str(), st["reason"].as_str()), (Some("stopped"), Some("Stopped for a sign-in")));
         chat::send(&v.id, Some(&id), "And the pricing?", chat::Mode::Ask, &[]).unwrap();
         chat::turn_events(&v.id, &id);
         let argv = fs::read_to_string(fake::file(&p, "argv")).unwrap();
         assert!(argv.contains(&format!("--resume\n{id}\n")), "resumable: {argv}");
         chat::reset();
+        ingest::reset();
         until("threads ended", idle);
     }
 

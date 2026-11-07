@@ -15,7 +15,7 @@ is `recall.md`. The window rules are `.ai-run/guides/window/window-ui.md`; untru
 
 | File (`crates/echoctl/src/knowledge/`) | Role |
 |---|---|
-| `mod.rs` | `Vault`, `MinutesRule`, `GitRule`, the registry (`list`, `get`, `add`, `set`, `remove`, `reread`), `Vault::path` (detected unless overridden), refusals, `import_plugin_vaults` |
+| `mod.rs` | `Vault`, `MinutesRule`, `GitRule`, `AskRule`, `IngestRule` (`ingest.skill`, `ingest.calls`), the registry (`list`, `get`, `add`, `set`, `remove`, `reread`), `Vault::path` (detected unless overridden), refusals, `import_plugin_vaults` |
 | `detect.rs` | What a folder is made of (`detect`), the walk (`walk`, `WALK_MAX` 60 000, no symlinks followed), `skills` |
 | `fm.rs` | Echo's own frontmatter reader (`split`, `parse` → `Prop::{Text, List, Raw}`); no YAML crate |
 | `scan.rs` | Echo's index of a vault (`index`, memory + `index.json`, re-read where size or mtime changed), `rev`, `search` |
@@ -28,18 +28,20 @@ is `recall.md`. The window rules are `.ai-run/guides/window/window-ui.md`; untru
 | `git.rs` | The only git calls (`info`, `init`, `first_commit`, `dirty`, `commit_paths`): literal pathspecs, both pipes drained, 20 s then SIGTERM |
 | `starter.rs` | The twin starter (23 files compiled in), `create`, the `/twin` skill in a vault and for all sessions |
 | `api.rs` | `/api/kn/...` routes, the IPC actions (`kn_*`), the folder picker, background jobs |
-| `stream.rs` | Claude Code's stream-json lines → Echo's events (`Parser`: `feed`, `tick`, `finish`) |
+| `stream.rs` | Claude Code's stream-json lines → Echo's events (`Parser`: `feed`, `tick`, `finish`; `for_copy` for a run's copy), `each_line` (a process's stdout read line by line, capped) |
 | `chat.rs` (`tray`) | Ask's conversations: a Claude Code process per conversation (`send`, `read`, `permit`, `stop`, `close_profile`, `live`, `sweep`) |
 | `chat/permits.rs` | A permission card's diff (`card`), an allowed edit's activity line (`record`), a turn's commit (`commit`) |
 | `chat/attach.rs` | A call's minutes attached to a message (`attach_call`: the profile check, the framing) |
 | `sources.rs` | Ingest's sources (spec-2 K14): the ledger (`ingest.json`: `ledger`, `baseline`, `skip`), the queue (`queue`, `offer`, `value`), adds (`add_files`, `add_call`, `add_mail` / `add_thread`, `add_chat` / `add_chat_messages`, `add_web`), the sheet's lists (`calls`, `m365_search`) |
 | `extract.rs` | A web page's main text as Markdown by Echo's own HTML reader (`main_text`), and its fetch with `curl` (`fetch`) |
+| `ingest.rs` | Ingest runs (spec-2 K15): the skill (`skill`), the copy (`copy_vault`), the run (`start`, `again`, `stop`, `wait`, `status`, `close_profile`, `close_all`), the Ingest view's `value`, *Prepare again* (`requeue`) |
+| `ingest/review.rs` | A run's changes (`changes`: kinds, diffs, quotes, D28's dropped lines), the answers (`decide`, `approve_rest`), *Write N approved* (`write`), `discard` |
 | `ui/knowledge.js`, `ui/knowledge.css` | The window's Knowledge: pure blocks tested by `ui/knowledge.test.mjs`, then the `Kn` module |
 
 Hooks elsewhere: `notes.rs::notify_outcome` and `watch.rs::notify_notes_ready` call `export::minutes_written` (both
 writers of minutes, D16); `attention.rs` shows a failed save in the Inbox; `terminal.rs` starts the vault's panel
-sessions (`start_vault`, `vault_args`), counts the leases chats hold (`hold`, `holds_profile`) and stops them on quit
-(`close_all`); `signin.rs` closes a profile's chats before a sign-in; `minutes.rs::page_html` is the safe Markdown writer for pages; `links.rs` (the top
+sessions (`start_vault`, `vault_args`), counts the leases chats and ingest runs hold (`hold`, `holds_profile`) and stops
+them on quit (`close_all`); `signin.rs` closes a profile's chats and ingest runs before a sign-in; `minutes.rs::page_html` is the safe Markdown writer for pages; `links.rs` (the top
 module) lets an `echo://call/` link survive a retitle by its stamp.
 
 ## How it works
@@ -241,6 +243,73 @@ The CLI's `echoctl knowledge ingest <vault> add <file|https-url|call:<stamp>>…
 `--call`, `--mail`, `--teams`, `--url`; a flag without its kind (`--transcript` with no call, `--since` with no chat)
 is refused.
 
+### Ingest runs (`ingest.rs`, `ingest/review.rs`)
+*Prepare changes* (`kn_ingest_run`, `echoctl knowledge ingest <vault> run [<source>…]`) takes 1–20 **New** sources (none
+named: every New one, the first 20, `left` says how many waited) and refuses while another run of the vault is going:
+`<cache>/ingest/run.lock` is held by the app or the CLI that started a run for its whole life (tried for 300 ms, as a
+lease; the sources are read again under it, so one a run that just ended took is refused). Runs waiting for review
+hold nothing, so several wait at once (D42). Under the lock, a run the ledger still calls running ended with its Echo
+("It stopped when Echo did"), failed and stopped runs' folders go after 30 days, and the ledger keeps the last 10
+finished runs.
+- **The skill** (K15-03): Settings → Ingest's `ingest.skill` (checked: a skill of the vault), else `process-inbox`,
+  else the one skill whose name or description says "inbox" or "ingest" — read from the vault now (`detect::skills`),
+  so one added since it was connected counts. None: the view offers the starter's `process-inbox` (its text in the
+  route's `starter_skill`, shown first; `kn_ingest_skill` writes only `.claude/skills/process-inbox/SKILL.md`, then
+  reads the vault again).
+- **The copy** `<run>/vault/` (K15-02): the root without `.git/`, `node_modules/`, dot-folders but `.claude/`,
+  `.agents/`, `.obsidian/`, files over 20 MB that aren't Markdown, links (never followed) and the sources folder, into
+  which only the run's sources and its README go. Each file is copied for real (never a link: the run edits it): one
+  up to 1 MB is read once, hashed and written — opening files is what a copy of many pages costs —, a bigger one
+  `std::fs::copy` (a clone on APFS) and hashed from the copy. `bases.json` has every copied file's sha256; `base/`
+  keeps the index and `log.md` as copied, so their added lines can be found however the vault's files change. What was
+  left out is the run's first event (`notice`, `kind: copy`): "Not in the copy: .git/, node_modules/, media/talk.mp4
+  (30 MB), 3 other sources in raw_inbox/".
+- **The run** (K15-04, D31, D40): §5.4's headless flags (`-p --output-format stream-json --verbose
+  --include-partial-messages --no-session-persistence --strict-mcp-config --permission-mode dontAsk --permission-prompts
+  none`, `--setting-sources user` on every profile — from `ai::prepare_claude` on a managed one), `--tools` and
+  `--allowed-tools` `Read,Grep,Glob,Write,Edit,Skill`, `--settings <run>/settings.json` (the guard, `onFailure: block`,
+  and the scope in `env`), `--plugin-dir <run>/plugin`, in the copy, on the vault's profile through
+  `ai::prepare_claude`, the scope (`ECHOCTL_RUN_MODE=ingest`, `_DIR` = the copy, `_SOURCES`, `_SKILLS` = the skill) in
+  the process's environment too; §5.6's prompt on stdin (and in `prompt.md`). With `--setting-sources user` no project
+  skill loads, so the skill goes in a plugin of the run's own, `<run>/plugin/` (named by the vault's id: the skill is
+  `/<vault id>:<skill>` in the prompt and the guard's `_SKILLS`): it lives and goes with the run, so the app clearing
+  `vault-plugins/` at its start never takes one a run — the CLI's too — reads. The lease is held until the process has
+  exited (`terminal::hold` in the app, so a sign-in stops it, "Stopped for a sign-in"); 20 minutes, then it is stopped
+  ("It ran for 20 minutes without finishing"); *Stop* ends its group. Its stdout goes through `Parser::for_copy` (tool
+  paths relative to the copy; text links not resolved, so the copy is never scanned into the vault's index cache) into
+  `log.jsonl`, numbered, finished text blocks only; a write of `.echo-ingest/steps.json` is a `todo` event (ruling R6).
+  `ingest/<run>?from=n` reads it with the run's state, time, tokens, cost and lines that weren't JSON. A run that
+  failed or was stopped says why in its `reason` (the result's error, else stderr's last line, else the exit code);
+  its sources are New again and *Run again* (`again`) starts a new run of them.
+- **The changes** (K15-07): when the run ends, each file of the copy outside `.echo-ingest/` whose sha256 isn't its
+  base — never an instruction file, the tools' own files or a source (the guard's rules, again) — is a change,
+  recorded in `review.json`. Kind: `index`, `log`, `taxonomy`, a page `new` or `edit`, else `other`; its diff
+  (`diff::hunks`, 3 lines) from the base, or — when the vault's file changed since and Echo kept no copy of it — from
+  the vault's file now, the change then `changed`. An index or log change whose only removed lines are blank or the
+  index's *Last update* (row insertion sets it anyway) and whose added lines are each a row of a table (an index) is
+  *adds only*. **Quotes** come from the run's `.echo-ingest/changes.json` (read up to 4 MB; its paths only name the
+  changes and sources they are about): a quote counts only from one of the run's own sources Echo reads as text
+  (`evidence::text_source`), found there by `evidence::found`; the others are `invented` (counted, never shown); a
+  quote from a PDF or the like gives "Echo can't check quotes in this kind of file", none found "no quote found".
+- **Review** (K15-08): `kn_change` approves, rejects, edits (the user's text; no longer *adds only*) or takes the
+  run's (only for a `changed` one); `rest: true` approves every unanswered one. A rejected new page's index rows and
+  log lines — added lines naming its path (from the root or the file's folder, spaces encoded or not) or a wikilink to
+  its name — are left out of the index and log changes (D28), each saying "1 line left out: it links to <page>, which
+  you rejected"; approving the page again brings them back. An edited change is the user's text: nothing is dropped
+  from it.
+- **Write** (K15-09, X-T8, X-G2): under the vault's `save.lock`, git asked first; an *adds only* index change puts
+  its rows into their tables in the index as it is now (`catalog::insert_row`: slice 1's date order, a row already
+  there — the same line or its link — skipped, *Last update* today), an *adds only* log change appends its lines (one
+  already there skipped); every other file only if it is still its base (or still not there, for a new one), else
+  "changed in the vault since the run" (`changed`, then *Take the run's* or *Keep the vault's*). One commit of the
+  written files that were clean before, when the vault commits (`Ingest: <N> sources (<first title>)`), an activity
+  line per written file (`by: ingest`, the run as `ref`), and the run's sources Done with how many of its changes were
+  kept. The folder goes once every change is written or rejected (the run `done`); until then the rest waits.
+  *Discard the run* drops the folder and leaves sources still waiting Done — nothing kept (K15-10); *Prepare again*
+  (`kn_ingest_requeue`) makes sources a run left Done New again.
+- **CLI** (K15-12): `… run` waits for the run and prints its state and changes; `… apply <run> [--only <path>…]`
+  approves the unanswered changes (or those) and writes; `… discard <run>`. All refuse inside a run Echo started.
+
 ### Graph
 Built in the window from `/api/kn/<id>/graph` and drawn live on a canvas by `graphCanvas` in `knowledge.js`, the
 mockup's engine (`future/mockups/assets/graph.js`) brought in, not the Brain's sigma `GraphView`. Sigma lays out once
@@ -428,6 +497,8 @@ them all at start, when none can be in use.
 | `<home>/.echo/knowledge/<id>/health.json` (+ `health.lock`) | Score history (90 days), ignored findings' keys, the last AI check (`ai`, written by `lint`) | `health` (lock + re-read + `write_atomic`) |
 | `<home>/.echo/knowledge/<id>/ingest.json` (+ `ingest.lock`) | Ingest's ledger: the baseline, each source's state, runs | `sources` (lock + re-read + `write_atomic`) |
 | `<home>/.echo/knowledge/<id>/sources.lock` | One add at a time into the vault's sources folder | `sources` |
+| `<home>/.echo/knowledge/<id>/ingest/run.lock` | One running ingest run per vault, the app's or the CLI's, held for its life | `ingest` |
+| `<home>/.echo/knowledge/<id>/ingest/<run>/` | `vault/` (the copy; the run writes only here), `bases.json`, `base/` (index, log), `plugin/`, `settings.json`, `prompt.md`, `log.jsonl`, `review.json` (+ `review.lock`); gone when every change is written or rejected, or the run discarded; a failed or stopped run's kept 30 days | `ingest` |
 | `<sources>/…` in the vault | Sources the user added (Echo's under `echo/`, `mail/`, `teams/`, `web/`); never edited or deleted | `sources` |
 | `<call>/knowledge.json` (+ `.knowledge.lock`) | Where the call's minutes were saved, and the call's choice | `export` (never a Claude run) |
 | `<config>/minutes-run/vault-plugins/<id>-<hash>/` | The vault's skills as a plugin, for managed profiles, one folder per content | `terminal::vault_plugin` (removed at app start) |
@@ -445,6 +516,11 @@ cold scan 0.98 s, from the cache 48 ms, edges 4 ms. The graph's layout step (nod
 link and one fill per dot are 4 and 2 times faster than one path of all of them, so each is drawn on its own. A `rev` poll is a stat walk only. The owner's twin (185 pages,
 `CATALOG.md` 101 KB, 93 notes, 13 skills): detection equals a hand probe; connecting it changed no file (`git status`
 identical); checks found 5 pages not in the index and 10 broken links, all real.
+
+**V13** (plan 2, Task 12; `ingest::tests::copy_of_5000_pages_is_fast`, slice 1's generated 5 000 pages): the scratch
+copy with every file's sha256, on this Mac (APFS, an endpoint agent watching file opens) — 0.57–0.63 s in a release
+build, 0.66–0.83 s in a debug one (budget 2 s). `std::fs::copy` then a second read to hash took 1.3–1.7 s: the opens,
+not the hashing, were the cost; copying on 8 threads won only 15 %, so small files are read once instead.
 
 ## Known gaps
 
@@ -466,6 +542,10 @@ identical); checks found 5 pages not in the index and 10 broken links, all real.
 - X-S1's "scans pause during transcription" has nothing to pause: Echo scans a vault only when the window asks
   (a stat walk every 2 s while Knowledge shows, a re-read of changed files on a request).
 - The notification names the vaults before their save runs; a failure then shows on the chip and in the Inbox.
+- Ingest runs don't wait for a call being transcribed yet (X-S2's "recording has priority").
+- A CLI `ingest … run` ended with Ctrl-C leaves its Claude Code running in the copy; the next start calls the run
+  failed ("It stopped when Echo did"). A run the CLI started can't be stopped from the window (another process).
+- A run's deleted files aren't changes: only created and modified ones are reviewed.
 
 ## Chat protocol
 

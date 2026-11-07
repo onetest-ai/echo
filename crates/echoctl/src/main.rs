@@ -1125,7 +1125,8 @@ enum KnowledgeCmd {
         #[arg(long)]
         anyway: bool,
     },
-    /// Ingest: the vault's sources — add one to its sources folder exactly as it came (nothing is processed by adding)
+    /// Ingest: add sources to the vault's sources folder exactly as they came, prepare changes from New ones with the
+    /// vault's ingest skill on a copy of the vault, write the approved ones, or discard a run (JSON)
     Ingest {
         vault: String,
         #[command(subcommand)]
@@ -2794,6 +2795,17 @@ enum IngestCmd {
         #[arg(long)]
         url: Option<String>,
     },
+    /// Prepare changes: the vault's ingest skill run by Claude Code on a copy of the vault, on these New sources
+    /// (vault-relative; default every New one, the first 20); waits for the run and prints its changes (JSON)
+    Run { sources: Vec<String> },
+    /// Write a run's changes into the vault — every change not rejected, or only these paths (JSON)
+    Apply {
+        run: String,
+        #[arg(long)]
+        only: Vec<String>,
+    },
+    /// Drop a run: its copy and its changes (JSON)
+    Discard { run: String },
 }
 
 /// One thing `ingest add` was given.
@@ -2810,10 +2822,55 @@ fn ingest_call(name: &str) -> Result<std::path::PathBuf> {
     calls::resolve_call(name).or_else(|e| calls::by_stamp(&calls::stamp_of(std::path::Path::new(name))).ok_or(e))
 }
 
+/// `ingest run|apply|discard` (spec K15-12): the app's lock, the app's checks.
+fn ingest_run_command(v: &knowledge::Vault, cmd: IngestCmd) -> Result<serde_json::Value> {
+    use knowledge::ingest;
+    let summary = |run: &str| -> Result<serde_json::Value> {
+        let mut st = ingest::status(v, run, u64::MAX)?;
+        if let Some(o) = st.as_object_mut() {
+            o.remove("events");
+            o.remove("next");
+        }
+        let changes = if st["state"] == "review" { ingest::changes(v, run)? } else { vec![] };
+        st["changes"] = serde_json::json!(changes.iter().map(|c| serde_json::json!({ "path": c.path, "kind": c.kind, "plus": c.plus, "minus": c.minus, "adds_only": c.adds_only, "state": c.state, "quotes": c.quotes.len(), "quote_note": c.quote_note })).collect::<Vec<_>>());
+        Ok(st)
+    };
+    match cmd {
+        IngestCmd::Run { sources } => {
+            let started = ingest::start(v, &sources)?;
+            // Its 20 minutes, and a moment for its end.
+            ingest::wait(&started.run, std::time::Duration::from_secs(21 * 60));
+            let mut out = summary(&started.run)?;
+            out["left"] = serde_json::json!(started.left);
+            Ok(out)
+        }
+        IngestCmd::Apply { run, only } => {
+            let all = ingest::changes(v, &run)?;
+            for p in &only {
+                if !all.iter().any(|c| &c.path == p) {
+                    anyhow::bail!("run {run} has no change to {p}");
+                }
+            }
+            for c in all.iter().filter(|c| c.state == "undecided" && (only.is_empty() || only.contains(&c.path))) {
+                ingest::decide(v, &run, &c.path, ingest::Decision::Approve)?;
+            }
+            Ok(serde_json::to_value(ingest::write(v, &run)?)?)
+        }
+        IngestCmd::Discard { run } => {
+            ingest::discard(v, &run)?;
+            Ok(serde_json::json!({ "discarded": run }))
+        }
+        IngestCmd::Add { .. } => unreachable!("an add is ingest_command's"),
+    }
+}
+
 fn ingest_command(vault: &str, cmd: IngestCmd) -> Result<serde_json::Value> {
     use knowledge::sources;
     knowledge::refuse_headless()?;
-    let IngestCmd::Add { items, call, transcript, chat, anyway, mail, teams, since, until, url } = cmd;
+    let (items, call, transcript, chat, anyway, mail, teams, since, until, url) = match cmd {
+        IngestCmd::Add { items, call, transcript, chat, anyway, mail, teams, since, until, url } => (items, call, transcript, chat, anyway, mail, teams, since, until, url),
+        other => return ingest_run_command(&knowledge::get(vault)?, other),
+    };
     // A positional is a page when it is a web address, a call when it says so, else a file.
     let mut todo: Vec<IngestItem> = items
         .into_iter()

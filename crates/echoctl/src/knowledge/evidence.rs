@@ -1,7 +1,5 @@
 //! "Came from" evidence (spec D35, D43): does a quote really stand in the text it is said to come from.
 
-#![allow(dead_code)] // used by ingest and Ask evidence (a later task)
-
 use std::path::Path;
 
 /// Words a quote must have, so that "the" or "yes" can't vouch for anything.

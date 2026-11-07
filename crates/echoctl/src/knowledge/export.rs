@@ -146,7 +146,7 @@ pub(super) fn hold(path: &Path, secs: u64, busy: &str) -> Result<crate::app::Fil
 
 /// One save at a time into a vault — the note, its index row, the log line and the call's record together — across
 /// Echo's window, its CLI and its threads (else two saves read the same index and one row is lost).
-fn vault_lock(v: &Vault) -> Result<crate::app::FileLock> {
+pub(super) fn vault_lock(v: &Vault) -> Result<crate::app::FileLock> {
     let dir = super::cache_dir(&v.id);
     std::fs::create_dir_all(&dir)?;
     hold(&dir.join("save.lock"), 60, &format!("{} is busy saving", v.name))

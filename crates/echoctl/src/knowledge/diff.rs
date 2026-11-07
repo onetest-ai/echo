@@ -60,7 +60,6 @@ pub fn lines(old: &str, new: &str) -> Vec<(char, String)> {
     out
 }
 
-#[cfg_attr(not(feature = "tray"), allow(dead_code))] // shown by permission cards (`tray`) and ingest changes (a later task)
 /// The changes with `context` unchanged lines around each; changes whose contexts touch share a hunk. Nothing changed:
 /// no hunks.
 pub fn hunks(d: &[(char, String)], context: usize) -> Vec<Vec<(char, String)>> {

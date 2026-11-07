@@ -221,7 +221,6 @@ pub fn settings(exe: &Path, calls: &str) -> Value {
 /// A run in a knowledge vault's own settings (`--settings`): the guard on every tool call, and the run's scope in `env`
 /// (`ECHOCTL_RUN_MODE`, `ECHOCTL_RUN_VAULT`…), which outranks the same keys in the vault's own `.claude/settings.json`
 /// (spec D40; measured with Claude Code 2.1.310, design note V10 fact 2).
-#[cfg_attr(not(feature = "tray"), allow(dead_code))] // its caller, Ask's conversation (`knowledge::chat`), is `tray`'s
 pub fn settings_for(scope: &[(String, String)], exe: &Path) -> Value {
     let env: serde_json::Map<String, Value> = scope.iter().map(|(k, v)| (k.clone(), Value::String(v.clone()))).collect();
     json!({
@@ -273,7 +272,7 @@ impl Scope {
         Scope::from_vars(|k| std::env::var_os(k))
     }
 
-    fn from_vars(var: impl Fn(&str) -> Option<std::ffi::OsString>) -> Result<Scope, String> {
+    pub(crate) fn from_vars(var: impl Fn(&str) -> Option<std::ffi::OsString>) -> Result<Scope, String> {
         if let Some(mode) = var(RUN_MODE).and_then(|m| m.into_string().ok()).filter(|m| matches!(m.as_str(), "vault" | "ingest" | "lint")) {
             let v = VaultScope::from_vars(&mode, &var)?;
             return Ok(Scope { call: v.root.clone(), previous: None, clis: vec![], ask: true, project: None, routine: false, extra: vec![], skills: vec![], vault: Some(v) });
@@ -1042,7 +1041,7 @@ fn under(rel: &Path, folder: &Path) -> bool {
 /// The vault's tools' own files, which no run in it writes: Claude Code's MCP servers (`.mcp.json`), other agents'
 /// rules and skills (`.agents/`), git's (`.git/`: its config and hooks run commands) and Obsidian's (`.obsidian/`: its
 /// settings and plugins).
-fn machinery(rel: &Path) -> bool {
+pub(crate) fn machinery(rel: &Path) -> bool {
     rel.components().any(|c| matches!(lower(c).as_str(), ".mcp.json" | ".agents" | ".git" | ".obsidian"))
 }
 

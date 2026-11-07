@@ -267,11 +267,12 @@ pub fn close(id: u64) {
     }
 }
 
-/// Echo is going: every terminal's program is stopped, and every Ask conversation's.
+/// Echo is going: every terminal's program is stopped, and every Ask conversation's and ingest run's.
 pub fn close_all() {
     let ids: Vec<u64> = TERMS.lock().unwrap_or_else(|e| e.into_inner()).keys().copied().collect();
     ids.into_iter().for_each(close);
     crate::knowledge::chat::close_all();
+    crate::knowledge::ingest::close_all();
 }
 
 /// The open terminals with what a Claude session among them hasn't loaded: `{id, key, exited, stale}` —

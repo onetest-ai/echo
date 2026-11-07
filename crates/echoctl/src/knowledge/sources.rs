@@ -122,7 +122,7 @@ fn one_line(s: &str) -> String {
     s.split(|c: char| c.is_whitespace() || c.is_control()).filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ")
 }
 
-fn file_sha(p: &Path) -> Result<String> {
+pub(super) fn file_sha(p: &Path) -> Result<String> {
     use sha2::Digest as _;
     use std::io::Read as _;
     let mut f = std::fs::File::open(p)?;
@@ -154,7 +154,7 @@ pub fn ledger(v: &Vault) -> Result<Ledger> {
 }
 
 /// Change the ledger under its lock, re-read first, so two writers never undo each other.
-fn update_ledger<T>(v: &Vault, f: impl FnOnce(&mut Ledger) -> Result<T>) -> Result<T> {
+pub(super) fn update_ledger<T>(v: &Vault, f: impl FnOnce(&mut Ledger) -> Result<T>) -> Result<T> {
     let dir = super::cache_dir(&v.id);
     std::fs::create_dir_all(&dir)?;
     let _held = export::hold(&dir.join("ingest.lock"), 20, "the ingest ledger is busy")?;
@@ -181,7 +181,7 @@ fn readme() -> &'static str {
 }
 
 /// Every file of the sources folder, vault-relative: its own `README.md`, dot-files, dot-folders and links left out.
-fn files(v: &Vault) -> Vec<String> {
+pub(super) fn files(v: &Vault) -> Vec<String> {
     let rel = folder(v);
     let Ok(dir) = page::inside(v, &rel) else { return vec![] };
     if !dir.is_dir() {

@@ -7,11 +7,12 @@
 //! only from the vault-page writer ([`page::render_fragment`], untrusted-text R3). The parser never panics on a line:
 //! one that isn't JSON is counted and skipped, one it doesn't know is ignored, and every size it keeps is bounded.
 
-// Its callers (Ask's conversations, `chat.rs`) are behind the `tray` feature.
+// Some of it is for Ask's conversations (`chat.rs`), behind the `tray` feature.
 #![cfg_attr(not(feature = "tray"), allow(dead_code))]
 
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
+use std::io::{BufRead as _, BufReader, Read};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -32,6 +33,8 @@ const SUMMARY_MAX: usize = 160;
 const INPUT_STRING_MAX: usize = 4096;
 /// The steps file an ingest run keeps (K12-04).
 const STEPS_FILE: &str = ".echo-ingest/steps.json";
+/// A longer stdout line is dropped (`each_line`).
+const LINE_MAX: usize = 32 << 20;
 
 enum Kind {
     Thinking,
@@ -69,11 +72,20 @@ pub struct Parser {
     steps: Option<String>,
     /// The vault's index for this turn's renders (read at its first render; `Some(None)`: it couldn't be read).
     index: Option<Option<Arc<scan::Index>>>,
+    /// Links in text resolve against the vault's index (not for an ingest run's copy, whose scan would take the vault's
+    /// own index's place in Echo's cache: its links stay text).
+    links: bool,
 }
 
 impl Parser {
     pub fn new(vault: &Vault) -> Parser {
-        Parser { vault: vault.clone(), bad: 0, session: None, blocks: HashMap::new(), next_block: 0, streamed: HashSet::new(), tools: HashMap::new(), steps: None, index: None }
+        Parser { vault: vault.clone(), bad: 0, session: None, blocks: HashMap::new(), next_block: 0, streamed: HashSet::new(), tools: HashMap::new(), steps: None, index: None, links: true }
+    }
+
+    /// For a run in a scratch copy of a vault (`copy`: the vault with the copy as its root): tool paths relative to the
+    /// copy, and text whose links aren't resolved (only https ones are kept).
+    pub fn for_copy(copy: &Vault) -> Parser {
+        Parser { links: false, ..Parser::new(copy) }
     }
 
     /// One stdout line → its events.
@@ -142,7 +154,6 @@ impl Parser {
     }
 
     /// Lines that were not JSON.
-    #[allow(dead_code)] // for ingest runs' status (plan 2, Task 12)
     pub fn bad_lines(&self) -> usize {
         self.bad
     }
@@ -310,7 +321,7 @@ impl Parser {
     /// what the page copies and saves — rebuilding it from the HTML loses nesting).
     fn text_event(&mut self, b: &Block, done: bool) -> Value {
         // The index is read once a turn, not at every render (a scan stats every page).
-        let ix = self.index.get_or_insert_with(|| scan::index(&self.vault).ok()).clone();
+        let ix = if self.links { self.index.get_or_insert_with(|| scan::index(&self.vault).ok()).clone() } else { None };
         let mut e = json!({"type": "text", "block": b.id, "html": page::render_fragment(&self.vault, ix.as_deref(), &b.text), "done": done});
         if done {
             e["md"] = json!(b.text);
@@ -464,6 +475,34 @@ fn cap_strings(v: &Value) -> Value {
         Value::Array(a) => Value::Array(a.iter().map(cap_strings).collect()),
         Value::Object(o) => Value::Object(o.iter().map(|(k, v)| (k.clone(), cap_strings(v))).collect()),
         other => other.clone(),
+    }
+}
+
+/// `r`'s lines to `f` until it says stop or `r` ends (a line longer than `LINE_MAX` is dropped): how Ask, ingest runs
+/// and AI checks read Claude Code's stdout.
+pub fn each_line(r: impl Read, mut f: impl FnMut(String) -> bool) {
+    let mut r = BufReader::new(r);
+    let mut buf = Vec::new();
+    loop {
+        buf.clear();
+        match (&mut r).take(LINE_MAX as u64).read_until(b'\n', &mut buf) {
+            Ok(0) | Err(_) => return,
+            Ok(_) => {}
+        }
+        if buf.len() >= LINE_MAX && !buf.ends_with(b"\n") {
+            loop {
+                buf.clear();
+                match (&mut r).take(1 << 20).read_until(b'\n', &mut buf) {
+                    Ok(0) | Err(_) => return,
+                    Ok(_) if buf.ends_with(b"\n") => break,
+                    Ok(_) => {}
+                }
+            }
+            continue;
+        }
+        if !f(String::from_utf8_lossy(&buf).into_owned()) {
+            return;
+        }
     }
 }
 

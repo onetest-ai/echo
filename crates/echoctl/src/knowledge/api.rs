@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use std::path::Path;
 use std::sync::Mutex;
 
-use super::{checks, export, health, links, page, scan, sources, starter, Vault};
+use super::{checks, export, health, ingest, links, page, scan, sources, starter, Vault};
 
 fn query_param(q: &str, key: &str) -> Option<String> {
     q.split('&').find_map(|kv| {
@@ -94,6 +94,13 @@ pub fn route(rest: &str, query: &str) -> Result<Reply> {
     // diff (K16-07).
     if let Some(key) = what.strip_prefix("health/") {
         return Ok(Reply::Json(health::detail(&v, key, query_param(query, "choice").as_deref().filter(|c| !c.is_empty()))?));
+    }
+    // An ingest run as it goes (its events after `from`, K15-06), and its changes for review (K15-07, -08).
+    if let Some(run) = what.strip_prefix("ingest/") {
+        return Ok(Reply::Json(match run.strip_suffix("/changes") {
+            Some(run) => ingest::changes_value(&v, run)?,
+            None => ingest::status(&v, run, query_param(query, "from").and_then(|f| f.parse().ok()).unwrap_or(0))?,
+        }));
     }
     Ok(Reply::Json(match what {
         "tree" => {
@@ -192,8 +199,9 @@ pub fn route(rest: &str, query: &str) -> Result<Reply> {
             })
         }
         "preview" => export::preview(&crate::calls::resolve_call(&query_param(query, "call").unwrap_or_default())?, &v.id, query_param(query, "stem").as_deref().filter(|s| !s.is_empty()))?,
-        // Ingest's sources (K14): the queue and the first open's question; the calls and mail or chats to add.
-        "ingest" => sources::value(&v)?,
+        // Ingest (K14, K15): the sources, the first open's question, the ingest skill (or the starter's to offer), the
+        // run going and the last runs; the calls and mail or chats to add.
+        "ingest" => ingest::value(&v)?,
         "calls" => json!({ "calls": sources::calls(&v, &query_param(query, "q").unwrap_or_default(), 40) }),
         "m365" => sources::m365_search(&query_param(query, "q").unwrap_or_default())?,
         _ => bail!("no such route"),
@@ -392,6 +400,11 @@ fn s<'a>(v: &'a Value, k: &str) -> &'a str {
     v[k].as_str().unwrap_or("")
 }
 
+/// A list of strings the page sent (anything else in it left out).
+fn strings(v: &Value) -> Vec<String> {
+    v.as_array().into_iter().flatten().filter_map(|x| x.as_str().map(str::to_owned)).collect()
+}
+
 /// Run a `kn_*` action; its answer (or error) for the page.
 pub fn act(cmd: &str, v: &Value) -> Result<Value> {
     super::refuse_headless()?;
@@ -486,6 +499,49 @@ pub fn act(cmd: &str, v: &Value) -> Result<Value> {
             Ok(json!({ "skipped": s(v, "path") }))
         }
         "kn_baseline" => Ok(json!({ "marked": sources::baseline(&vault_of(s(v, "id"))?, v["done"].as_bool().unwrap_or(false))? })),
+        // Ingest runs (K15): *Prepare changes* on sources (none: every New one) or *Run again* of a run; *Stop*; an
+        // answer to a change (or *Approve the rest*); *Write N approved*; *Discard the run*; *Prepare again*; the
+        // starter's process-inbox for a vault without an ingest skill. The page names runs and changes, never a file.
+        "kn_ingest_run" => {
+            let vault = vault_of(s(v, "id"))?;
+            let started = match v["again"].as_str().filter(|r| !r.is_empty()) {
+                Some(run) => ingest::again(&vault, run)?,
+                None => ingest::start(&vault, &strings(&v["sources"]))?,
+            };
+            Ok(serde_json::to_value(started)?)
+        }
+        "kn_ingest_stop" => {
+            ingest::stop(&vault_of(s(v, "id"))?, s(v, "run"))?;
+            Ok(json!({ "stopped": s(v, "run") }))
+        }
+        "kn_change" => {
+            let vault = vault_of(s(v, "id"))?;
+            if v["rest"].as_bool().unwrap_or(false) {
+                return Ok(json!({ "approved": ingest::approve_rest(&vault, s(v, "run"))? }));
+            }
+            let d = match s(v, "decision") {
+                "approve" => ingest::Decision::Approve,
+                "reject" => ingest::Decision::Reject,
+                "edit" => ingest::Decision::Edit(v["text"].as_str().ok_or_else(|| anyhow!("which text?"))?.to_string()),
+                "take" => ingest::Decision::Take,
+                _ => bail!("approve, reject, edit or take"),
+            };
+            ingest::decide(&vault, s(v, "run"), s(v, "path"), d)?;
+            Ok(json!({ "answered": s(v, "path") }))
+        }
+        "kn_ingest_apply" => Ok(serde_json::to_value(ingest::write(&vault_of(s(v, "id"))?, s(v, "run"))?)?),
+        "kn_ingest_discard" => {
+            ingest::discard(&vault_of(s(v, "id"))?, s(v, "run"))?;
+            Ok(json!({ "discarded": s(v, "run") }))
+        }
+        "kn_ingest_requeue" => Ok(json!({ "requeued": ingest::requeue(&vault_of(s(v, "id"))?, &strings(&v["paths"]))? })),
+        "kn_ingest_skill" => {
+            let vault = vault_of(s(v, "id"))?;
+            let added = starter::add_inbox_skill(&vault)?;
+            scan::forget(&vault.id);
+            super::reread(&vault.id)?;
+            Ok(json!({ "added": added }))
+        }
         // Health (K16-03, -04, -07): fixes named by their findings' keys, each written only as the page showed it
         // (`base`, `sha`) — the page never sends a path or a text. *Fix all* never applies a guessed page (R36).
         "kn_fix" => fix_findings(&vault_of(s(v, "id"))?, std::slice::from_ref(v), false),

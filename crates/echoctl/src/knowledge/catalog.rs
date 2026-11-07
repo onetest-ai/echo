@@ -106,15 +106,25 @@ pub fn insert(index: &str, notes_dir: &str, note: &str, desc: &str, date: &str, 
     };
     let cols = columns(lines[t.header]);
     let new_row = row(cols, &encoded, desc, date);
+    let at = place(&lines, t, Some(date));
+    Ok(Some(with_row(index, &lines, at, new_row, today)))
+}
+
+/// Where a row dated `date` goes in `t`: after the last row dated on or before it, else before the first dated one;
+/// at the table's end when no row (or the new one) is dated.
+fn place(lines: &[&str], t: &Table, date: Option<&str>) -> usize {
     let dated: Vec<(usize, &str)> = t.rows.iter().filter_map(|&r| row_date(lines[r]).map(|d| (r, d))).collect();
-    let at = if dated.is_empty() {
-        t.rows.last().map(|r| r + 1).unwrap_or(t.body)
-    } else {
-        match dated.iter().rev().find(|(_, d)| *d <= date) {
+    match date.filter(|_| !dated.is_empty()) {
+        Some(date) => match dated.iter().rev().find(|(_, d)| *d <= date) {
             Some((r, _)) => r + 1,
             None => dated[0].0,
-        }
-    };
+        },
+        None => t.rows.last().map(|r| r + 1).unwrap_or(t.body),
+    }
+}
+
+/// `index` with `new_row` at line `at`, and its *Last update* (in its first 15 lines) made `today`.
+fn with_row(index: &str, lines: &[&str], at: usize, new_row: String, today: &str) -> String {
     let mut out: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
     out.insert(at.min(out.len()), new_row);
     for l in out.iter_mut().take(15) {
@@ -130,7 +140,31 @@ pub fn insert(index: &str, notes_dir: &str, note: &str, desc: &str, date: &str, 
     if index.ends_with('\n') {
         text.push('\n');
     }
-    Ok(Some(text))
+    text
+}
+
+/// The heading of the table whose rows hold line `at` of `text` (0-based) — none when that line isn't a table's row
+/// (a header, a separator, prose).
+pub fn table_of_row(text: &str, at: usize) -> Option<String> {
+    let lines: Vec<&str> = text.lines().collect();
+    tables(&lines).into_iter().find(|t| t.rows.contains(&at)).map(|t| t.heading)
+}
+
+/// Put `row`, a whole table line as an ingest run wrote it, into the table under `heading` of the index as it is now,
+/// in date order (spec D42): slice 1's insertion. `Ok(None)`: the index has it already (the same line, or a row with its
+/// link); `Err(why)`: no such table now.
+pub fn insert_row(index: &str, heading: &str, row: &str, today: &str) -> Result<Option<String>, String> {
+    let row = row.trim();
+    let target = row.split_once("](").and_then(|(_, r)| r.split_once(')')).map(|(t, _)| t).filter(|t| !t.is_empty());
+    let lines: Vec<&str> = index.lines().collect();
+    if lines.iter().any(|l| l.trim() == row) || target.is_some_and(|t| index.contains(&format!("]({t})"))) {
+        return Ok(None);
+    }
+    let words = |s: &str| s.to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ");
+    let ts = tables(&lines);
+    let t = ts.iter().find(|t| words(&t.heading) == words(heading)).ok_or_else(|| format!("no “{heading}” table in the index now"))?;
+    let at = place(&lines, t, row_date(row));
+    Ok(Some(with_row(index, &lines, at, row.to_string(), today)))
 }
 
 #[cfg(test)]
@@ -189,6 +223,21 @@ mod tests {
     fn a_listed_note_is_not_added_twice() {
         let once = ins(CAT, "2026-11-05");
         assert_eq!(insert(&once, "notes", "notes/2026-11-05-x.md", "again", "2026-11-05", "2026-11-05"), Ok(None));
+    }
+
+    #[test]
+    fn a_run_row_goes_into_its_table_as_it_is_now() {
+        let row = "| [2026-11-15-x.md](notes/2026-11-15-x.md) | Weekly sync | 2026-11-15 |";
+        let out = insert_row(CAT, "Notes", row, "2026-11-20").unwrap().unwrap();
+        let lines: Vec<&str> = out.lines().collect();
+        let at = lines.iter().position(|l| *l == row).unwrap();
+        assert!(lines[at - 1].contains("2026-11-01-b.md") && lines[at + 1].contains("2026-12-01-c.md"), "date order: {out}");
+        assert!(out.contains("> Last update: 2026-11-20\n"));
+        assert_eq!(insert_row(&out, "Notes", row, "2026-11-20"), Ok(None), "the same row");
+        assert_eq!(insert_row(&out, "notes", "| [x](notes/2026-11-15-x.md) | other words | 2026-11-15 |", "2026-11-20"), Ok(None), "a row with its link");
+        assert!(insert_row(CAT, "Projects", row, "2026-11-20").unwrap_err().contains("Projects"));
+        assert_eq!(table_of_row(CAT, CAT.lines().position(|l| l.contains("acme.md")).unwrap()).as_deref(), Some("Clients"));
+        assert_eq!(table_of_row(CAT, CAT.lines().position(|l| l.starts_with("|---")).unwrap()), None, "a separator isn't a row");
     }
 
     #[test]

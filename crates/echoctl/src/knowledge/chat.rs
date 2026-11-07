@@ -15,7 +15,7 @@
 use anyhow::{anyhow, bail, Result};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
-use std::io::{BufRead as _, BufReader, Read, Write as _};
+use std::io::Write as _;
 use std::path::Path;
 use std::process::{Child, ChildStdin};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -44,8 +44,6 @@ const CHUNK: usize = 500;
 const TEXT_MAX: usize = 20_000;
 /// No stdout line for this long: what the render throttle held back is shown (`Parser::tick`).
 const TICK: Duration = Duration::from_millis(100);
-/// A longer stdout line is dropped.
-const LINE_MAX: usize = 32 << 20;
 /// Every mode's tools (§5.4). Never Bash, NotebookEdit or an MCP tool (K12-02); print mode has no TodoWrite (R6).
 const READ_TOOLS: [&str; 5] = ["Read", "Grep", "Glob", "Skill", "Agent"];
 
@@ -552,33 +550,6 @@ fn end(st: &mut State) -> bool {
 #[cfg(test)]
 static NO_ESCALATION: AtomicBool = AtomicBool::new(false);
 
-/// `r`'s lines to `f` until it says stop or `r` ends (a line longer than `LINE_MAX` is dropped).
-fn each_line(r: impl Read, mut f: impl FnMut(String) -> bool) {
-    let mut r = BufReader::new(r);
-    let mut buf = Vec::new();
-    loop {
-        buf.clear();
-        match (&mut r).take(LINE_MAX as u64).read_until(b'\n', &mut buf) {
-            Ok(0) | Err(_) => return,
-            Ok(_) => {}
-        }
-        if buf.len() >= LINE_MAX && !buf.ends_with(b"\n") {
-            loop {
-                buf.clear();
-                match (&mut r).take(1 << 20).read_until(b'\n', &mut buf) {
-                    Ok(0) | Err(_) => return,
-                    Ok(_) if buf.ends_with(b"\n") => break,
-                    Ok(_) => {}
-                }
-            }
-            continue;
-        }
-        if !f(String::from_utf8_lossy(&buf).into_owned()) {
-            return;
-        }
-    }
-}
-
 /// A process's last lines on stderr, and whether it has ended.
 #[derive(Default)]
 struct Tail {
@@ -592,14 +563,14 @@ struct Tail {
 fn watch(c: Arc<Conv>, v: Vault, gen: u64, mut child: Child, stopped: Arc<AtomicBool>, held: Box<dyn Send>) {
     let (tx, rx) = mpsc::channel::<String>();
     if let Some(out) = child.stdout.take() {
-        std::thread::spawn(move || each_line(out, |l| tx.send(l).is_ok()));
+        std::thread::spawn(move || stream::each_line(out, |l| tx.send(l).is_ok()));
     }
     let tail: Arc<(Mutex<Tail>, Condvar)> = Arc::default();
     match child.stderr.take() {
         Some(err) => {
             let tail = tail.clone();
             std::thread::spawn(move || {
-                each_line(err, |l| {
+                stream::each_line(err, |l| {
                     let mut t = lock(&tail.0);
                     t.lines.push_back(l);
                     if t.lines.len() > 5 {

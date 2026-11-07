@@ -1779,6 +1779,28 @@ pub mod fake {
             r#"#!/bin/sh
 d="$CLAUDE_CONFIG_DIR"
 [ -f "$d/stubborn" ] && trap '' TERM
+if [ "$ECHOCTL_RUN_MODE" = ingest ]; then
+  # A headless ingest run in its copy: the prompt on stdin, then ingest.<n>.jsonl (else ingest.jsonl) played.
+  [ -n "$d" ] || exit 9
+  printf '%s\n' "$@" > "$d/ingest.argv"
+  pwd > "$d/ingest.cwd"
+  for k in MODE DIR SKILLS SOURCES VAULT; do eval "printf '%s=%s\n' ECHOCTL_RUN_$k \"\$ECHOCTL_RUN_$k\""; done > "$d/ingest.env"
+  cat > "$d/ingest.in"
+  echo $$ >> "$d/pids"
+  n=$(( $(cat "$d/ingest.n" 2>/dev/null || echo 0) + 1 )); echo $n > "$d/ingest.n"
+  s="$d/ingest.$n.jsonl"; [ -f "$s" ] || s="$d/ingest.jsonl"
+  [ -f "$s" ] || exit 0
+  while IFS= read -r out <&3; do
+    case "$out" in
+    '{"_hang":true}') exec sleep 60 ;;
+    '{"_exit":'*) k=${out#'{"_exit":'}; k=${k%'}'}; echo "fake claude failed: no credits left" >&2; exit "$k" ;;
+    '{"_wait":'*) k=${out#'{"_wait":'}; k=${k%'}'}; while [ ! -f "$d/go.$k" ]; do sleep 0.05; done ;;
+    '{"_apply":'*) k=${out#'{"_apply":'}; k=${k%'}'}; t=$(cat "$d/apply.$k.to"); mkdir -p "$(dirname "$t")"; cp "$d/apply.$k" "$t" ;;
+    *) printf '%s\n' "$out" ;;
+    esac
+  done 3< "$s"
+  exit 0
+fi
 case " $* " in
 *" --input-format stream-json "*)
   [ -n "$d" ] || exit 9
