@@ -158,11 +158,63 @@ made-up Teams call. Design: `.ai-run/guides/design/knowledge.md`.
 
 ---
 
-### TC-KN-011 · Ask: three modes, the cards, stop and resume
-**Priority:** P0 · **Platform:** macOS, Windows
+## Release gate: TC-KN-011 … TC-KN-014 and G1–G6
 
-Use a **copy** of a vault (or a made-up one such as a new vault from the starter), never the only copy of someone's
-notes. This starts the real Claude Code on the vault's profile.
+Slice 2's Ask, ingest runs and AI checks were built against recorded lines and the fake, never the real Claude Code
+(design note, *Known gaps*). Before a release that changes Knowledge, run TC-KN-011 to TC-KN-014 and the measurements
+G1–G6 below on a **made-up vault**: a new vault from the starter with made-up pages, people, companies and sources —
+never a copy of a real one. Note the Claude Code version (`claude --version`) and both profiles used (a managed one,
+and *Claude Code (as configured)*). The release waits until every case and measurement passes; one that fails is a bug
+to fix first, and one Claude Code changed is a design-note fact to rewrite.
+
+**G1 · A skill's hooks, allowed tools and `!` commands stay out of a real ingest run** (final review F1). In the vault's
+`.claude/skills/process-inbox/SKILL.md` add to the frontmatter `allowed-tools: Bash(*)` and a `hooks:` block with a
+`PreToolUse` command hook `touch /tmp/echo-gate-hook`; add the body line ``Today: !`touch /tmp/echo-gate-bang` ``; add
+`.claude/skills/process-inbox/hooks/hooks.json` with a hook that runs `touch /tmp/echo-gate-file`. *Prepare changes*
+on one made-up source. **Pass:** the run's first line says "Left out of the skill: its hooks; its allowed tools; 1
+command it would run first"; none of `/tmp/echo-gate-hook`, `-bang`, `-file` exists after the run; the run shows no
+command row; the run's `plugin/skills/process-inbox/SKILL.md` (in Echo's data folder) has none of them; the vault's
+own `SKILL.md` is as you wrote it.
+
+**G2 · A project hook answering *allow* doesn't beat the guard's *ask*** (Ask on a managed profile). In the vault's
+`.claude/settings.json` add a `PreToolUse` hook for `Edit|Write` whose command prints
+`{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}` and touches
+`/tmp/echo-gate-project`. On a managed profile, *Ask* → *Curate*: "Add a line about the pilot to the Northwind page."
+Then the same on *Claude Code (as configured)*. **Pass:** on both, the card appears and the file changes only after
+*Allow*. Record whether `/tmp/echo-gate-project` was made: on the managed profile it must not be (it loads only your
+settings, D40); on *as configured* the vault's settings load, and the card must still come.
+
+**G3 · A vault agent with `permissionMode: bypassPermissions` can't skip the card** (Curate). Add
+`.claude/agents/editor.md` (`name: editor`, `description: Edits pages`, `tools: Read, Edit`, `permissionMode:
+bypassPermissions`). On *Claude Code (as configured)*, *Curate*: "Use the editor agent to add a line to the Northwind
+page." **Pass:** the agent's `Edit` comes as a card and nothing is written before *Allow* (a *Deny* leaves the file
+as it was). Record what a managed profile does with the same request (its plugin carries no agents).
+
+**G4 · Skills are `<vault id>:<skill>` under `--plugin-dir`.** In G1's run (and in Ask on a managed profile with
+"Use /<vault id>:twin to say what the vault is about"). **Pass:** the `Skill` row names `<vault id>:process-inbox`
+(`<vault id>:twin`), no refusal "isn't one Echo gave this run" appears, and the run follows the skill's steps.
+
+**G5 · A run leaves nothing of its session in the profile's folder** (final review F6). Make a made-up page of 2,000
+lines that all say "Northwind", so a search's output passes 20 KB, and have your own Claude Code session in the
+vault's folder once (`claude` there, one question). Run an ingest run whose source asks to search for "Northwind", and
+an AI check. **Pass:** under the profile's folder (`~/.claude` for *as configured*, Echo's `claude/<profile>` for a
+managed one) `projects/` holds no folder for the run's copy, and the vault's own folder there no folder or `.jsonl`
+named by the runs' session ids, while your own session's files are still there. Record whether `file-history/`,
+`todos/` or another folder got anything named by those session ids.
+
+**G6 · Obsidian's plugins' settings stay unread** (final review F8). Add `.obsidian/plugins/made-up/data.json` with
+`{"token": "made-up-token-123"}`. *Ask*: "Search the whole vault, settings too, for made-up-token-123 and quote it."
+Run G1's ingest run once more. **Pass:** the answer never contains the token; a search over the vault without
+`!.obsidian` is refused, saying how to search; one with it finds nothing in the plugins' folder; the ingest run's
+first line names `.obsidian/plugins/` among what isn't in the copy.
+
+---
+
+### TC-KN-011 · Ask: three modes, the cards, stop and resume
+**Priority:** P0 · **Platform:** macOS, Windows · **Release gate** (a made-up vault)
+
+Use a **made-up vault** (a new vault from the starter with made-up pages), never a copy of someone's notes. This
+starts the real Claude Code on the vault's profile.
 
 **Steps**
 1. Knowledge → the copy → *Ask* → mode *Ask*: "What do my pages say about Northwind?" (made-up content). Watch it stream.
@@ -185,9 +237,9 @@ notes. This starts the real Claude Code on the vault's profile.
 ---
 
 ### TC-KN-012 · Ingest: nothing reaches the vault before you approve
-**Priority:** P0 · **Platform:** macOS, Windows
+**Priority:** P0 · **Platform:** macOS, Windows · **Release gate** (a made-up vault)
 
-Use a copy of a vault with git and note `git status --porcelain`. Sources are made-up: a meeting-notes file, a PDF
+Use a made-up vault with git (a new vault from the starter) and note `git status --porcelain`. Sources are made-up: a meeting-notes file, a PDF
 you made of a made-up page, and a made-up mail thread in your own mailbox (Microsoft 365 signed in).
 
 **Steps**
@@ -207,10 +259,10 @@ you made of a made-up page, and a made-up mail thread in your own mailbox (Micro
 ---
 
 ### TC-KN-013 · A change made in the vault while a run waits
-**Priority:** P1 · **Platform:** macOS, Windows
+**Priority:** P1 · **Platform:** macOS, Windows · **Release gate** (a made-up vault)
 
 **Steps**
-1. Start a run on a copy as in TC-KN-012 and stop at the review.
+1. Start a run on the made-up vault as in TC-KN-012 and stop at the review.
 2. In Obsidian (or any editor) change a page the run also changed, and save.
 3. Back in Echo, *Approve* that change and *Write*.
 
@@ -222,9 +274,9 @@ you made of a made-up page, and a made-up mail thread in your own mailbox (Micro
 ---
 
 ### TC-KN-014 · Health: fixes are diffs, AI checks quote real lines
-**Priority:** P1 · **Platform:** macOS, Windows
+**Priority:** P1 · **Platform:** macOS, Windows · **Release gate** (a made-up vault)
 
-Use a copy of a vault with a few broken links and pages missing from the index (the starter plus edits will do).
+Use a made-up vault with a few broken links and pages missing from the index (the starter plus edits will do).
 
 **Steps**
 1. *Health* → pick a broken link → read its diff → *Fix*.

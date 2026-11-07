@@ -877,7 +877,10 @@ not the hashing, were the cost; copying on 8 threads won only 15 %, so small fil
   fake.
 - No real Claude Code Ask, ingest run or AI check was run in building slice 2 (ruling R42): their flags, prompts and the
   guard's modes were checked against recorded lines (`testdata/stream/`) and the fake; the first real runs are the
-  manual cases TC-KN-011…014.
+  release gate in `tests/12-knowledge.md` (final review F9): TC-KN-011…014 on a made-up vault, and G1–G6 — a skill's
+  hooks and `!` commands left out in a real run, a project hook's *allow* against the guard's *ask*, a vault agent's
+  `bypassPermissions` in Curate, `<vault id>:<skill>` under `--plugin-dir`, nothing of a run's session left in the
+  profile's folder, and Obsidian's plugins' settings unread.
 - A web page is fetched by the system's `curl` (as Microsoft Graph calls are): a machine without it can't add a web
   source and the add says so. Ask has no CLI; its limits live in the app (spec-2 §9).
 - Slice 2 was built and run on macOS. For Windows it is cross-checked (`cargo check --target
