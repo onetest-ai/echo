@@ -693,6 +693,35 @@ fn left_running(v: &Vault, id: &str, source: &str, pid: Option<u32>) {
     .unwrap();
 }
 
+#[test]
+fn discarding_a_failed_run_gives_its_sources_back() {
+    // Final review F7: a run shown as failed (its Echo died) gives its sources back as New, as any failed run does;
+    // a run under review discarded leaves them Done — nothing kept (K15-10).
+    let (_env, root) = paths::testenv::folders("kn-ingest-discard-failed");
+    let _clean = clean();
+    let t = fixture::twin(&root.join("twin"));
+    fixture::write(&t, "raw_inbox/a.md", "# A\n");
+    fixture::write(&t, "raw_inbox/b.md", "# B\n");
+    let v = knowledge::add(&t, AddOpts { name: Some("Twin".into()), ..Default::default() }).unwrap();
+    let state = |p: &str| sources::queue(&v).unwrap().into_iter().find(|s| s.path == p).map(|s| (s.state, s.meta["kept"].as_u64()));
+    left_running(&v, "2026-11-01_090000", "raw_inbox/a.md", None);
+    assert_eq!(status(&v, "2026-11-01_090000", 0).unwrap()["state"], "failed");
+    discard(&v, "2026-11-01_090000").unwrap();
+    assert_eq!(state("raw_inbox/a.md"), Some(("new".to_string(), None)), "New again");
+    assert_eq!(status(&v, "2026-11-01_090000", 0).unwrap()["state"], "discarded");
+    // Under review: Done — nothing kept.
+    kept_run(&v, "2026-11-01_100000", &now_rfc(), "review", &["raw_inbox/b.md"], None);
+    sources::update_ledger(&v, |l| {
+        let e = l.sources.entry("raw_inbox/b.md".into()).or_default();
+        e.state = "waiting".into();
+        e.run = Some("2026-11-01_100000".into());
+        Ok(())
+    })
+    .unwrap();
+    discard(&v, "2026-11-01_100000").unwrap();
+    assert_eq!(state("raw_inbox/b.md"), Some(("done".to_string(), Some(0))), "Done — nothing kept");
+}
+
 #[cfg(unix)]
 #[test]
 fn a_run_its_echo_left_running_runs_again() {

@@ -694,7 +694,8 @@ pub fn write(v: &Vault, run: &str, only: &[String]) -> Result<Written> {
 }
 
 /// *Discard the run* (K15-08): its copy and answers go; a run waiting for review leaves its sources Done — nothing
-/// kept (K15-10; *Prepare again* puts them back).
+/// kept (K15-10; *Prepare again* puts them back); a failed or stopped one — one its Echo left running too — gives
+/// them back New, as a failed run does (final review F7).
 pub fn discard(v: &Vault, run: &str) -> Result<()> {
     super::super::refuse_headless()?;
     let dir = run_dir(v, run)?;
@@ -704,10 +705,11 @@ pub fn discard(v: &Vault, run: &str) -> Result<()> {
         "done" => bail!("This run is done: its changes are written"),
         _ => {}
     }
+    let (state, kept) = if r.state == "review" { ("done", Some(0)) } else { ("new", None) };
     let _ = std::fs::remove_dir_all(&dir);
     update_run(v, run, |l, r| {
         r.state = "discarded".into();
-        super::release(l, run, "done", Some(0));
+        super::release(l, run, state, kept);
         Ok(())
     })
 }

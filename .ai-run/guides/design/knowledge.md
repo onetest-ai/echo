@@ -413,7 +413,9 @@ its copy, which its review reads.
   files that were clean before, when the vault commits (`Ingest: <N> sources (<first title>)`), an activity line per
   written file (`by: ingest`, the run as `ref`), and the run's sources Done with how many of its changes were kept. The
   folder goes once every change is written or rejected (the run `done`); until then the rest waits. *Discard the run*
-  drops the folder and leaves sources still waiting Done — nothing kept (K15-10); a done run isn't discarded. *Prepare
+  drops the folder and leaves sources still waiting Done — nothing kept (K15-10, a run under review); a failed or
+  stopped run discarded — one shown as failed because its Echo died, its sources still waiting, too — gives them back
+  New, as a failed run does (final review F7); a done run isn't discarded. *Prepare
   again* (`kn_ingest_requeue`) makes sources a run left Done New again — not while that run still has changes waiting.
 - **CLI** (K15-12): `… run` waits for the run and prints its state and changes; `… apply <run> [--only <path>…]`
   approves the unanswered changes (or those) and writes them (only those, with `--only`); `… discard <run>`. All refuse
