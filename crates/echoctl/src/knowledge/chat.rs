@@ -7,8 +7,8 @@
 //! A conversation keeps its events in memory, numbered, across its processes: a mode change ends the process and the
 //! next message starts one with `--resume` (tools and the guard's mode are fixed per process, D25), as does a message
 //! after an idle stop. The page long-polls `read`, as it does a terminal. One process per conversation: one open in
-//! the Claude panel is refused here, and the panel refuses one live here (K12-12); at most `MAX_LIVE` run at once and
-//! one idle for `IDLE` stops (D38). Conversations started here join the vault's list (`terminal::remember`) but never
+//! the Claude panel is refused here, and the panel refuses one live here (K12-12); at most `MAX_LIVE` run at once (a
+//! new one is refused while all of them are answering) and one idle for `IDLE` stops (D38). Conversations started here join the vault's list (`terminal::remember`) but never
 //! become the panel's current one (D44). Everything Claude Code prints is others' words: the parser makes it events
 //! (`stream.rs`), text reaches HTML only through the vault-page writer.
 
@@ -486,7 +486,7 @@ fn start(c: &Arc<Conv>, v: &Vault, mode: Mode, resume: bool, first: &str) -> Res
     let mut cmd = ai::prepare_claude(&p, &args(v, &p, mode, &session, &settings)?, &v.root, true)?;
     cmd.envs(scope.iter().map(|(k, x)| (k.as_str(), x.as_str())));
     let _one = lock(&STARTING);
-    make_room(&c.id);
+    make_room(&c.id)?;
     let mut child = cmd.spawn().map_err(|e| anyhow!("couldn't start Claude Code: {e}"))?;
     let gen = GEN.fetch_add(1, Ordering::SeqCst);
     let stopped = Arc::new(AtomicBool::new(false));
@@ -506,8 +506,9 @@ fn start(c: &Arc<Conv>, v: &Vault, mode: Mode, resume: bool, first: &str) -> Res
     Ok(())
 }
 
-/// Room for one more process: while `MAX_LIVE` run, the longest idle (one with no turn first) ends.
-fn make_room(except: &str) {
+/// Room for one more process: while `MAX_LIVE` run, the longest idle ends (D38) — never one answering (final review
+/// F4): when that is all there is, the new one is refused and nothing stops.
+fn make_room(except: &str) -> Result<()> {
     let mut live: Vec<(bool, Instant, Arc<Conv>)> = all()
         .into_iter()
         .filter(|c| c.id != except)
@@ -520,10 +521,14 @@ fn make_room(except: &str) {
         .collect();
     live.sort_by_key(|(busy, at, _)| (*busy, *at));
     let over = (live.len() + 1).saturating_sub(MAX_LIVE);
+    if live.iter().take(over).any(|(busy, ..)| *busy) {
+        bail!("{MAX_LIVE} conversations are answering. Wait for one, or stop one.");
+    }
     for (_, _, c) in live.into_iter().take(over) {
         end(&mut lock(&c.state));
         c.changed.notify_all();
     }
+    Ok(())
 }
 
 /// End `st`'s process: Echo stops it (its exit is no crash) and the conversation resumes later. False: none ran.
@@ -1391,6 +1396,29 @@ mod tests {
         send(&v.id, Some(&a), "one again", Mode::Ask, &[]).unwrap();
         turn_events(&v.id, &a);
         assert_eq!(value_of(&argv(&p), "--resume"), Some(a.as_str()));
+    }
+
+    #[test]
+    fn a_fourth_is_refused_while_three_answer() {
+        // Final review F4: idle ones make room (D38); one answering is never stopped mid-answer for another.
+        let (_env, root) = crate::paths::testenv::folders("chat-three-busy");
+        let _fake = fake::install(&root);
+        let _clean = clean();
+        let p = signed_in();
+        let v = vault(&root, "w");
+        script(&p, "chat.jsonl", "{\"_hang\":true}\n");
+        let ids: Vec<String> = ["one", "two", "three"].iter().map(|q| send(&v.id, None, q, Mode::Ask, &[]).unwrap()).collect();
+        let answering = || ids.iter().all(|id| read(&v.id, id, 0, Duration::ZERO).is_some_and(|c| c.live && c.busy));
+        until("three answering", answering);
+        // Long since they were sent: still answering, so none is the one to stop.
+        skew(IDLE);
+        let e = send(&v.id, None, "four", Mode::Ask, &[]).unwrap_err().to_string();
+        assert_eq!(e, "3 conversations are answering. Wait for one, or stop one.");
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(answering(), "none of the three is stopped");
+        assert_eq!(live().len(), 3);
+        assert_eq!(file(&p, "pids").lines().count(), 3, "no fourth process");
+        assert!(list_value(&v).as_array().unwrap().iter().all(|c| ids.iter().any(|id| c["id"] == id.as_str())), "no fourth conversation left behind");
     }
 
     #[test]

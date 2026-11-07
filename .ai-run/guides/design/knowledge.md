@@ -664,7 +664,9 @@ with `{"subtype":"error",…}` (the SDKs' shape) so Claude Code never waits on E
 interrupt, and ends the process if the turn hasn't ended 5 s later (that deadline is armed before the writes, which
 can block). Ending a process sends its group TERM at once (Echo quitting doesn't wait) and KILL 3 s later in the
 background. A mode change ends the process; the next start
-resumes. At most 3 processes (the longest idle ends for a fourth); one idle 10 min with no turn ends (a 30 s sweep).
+resumes. At most 3 processes (the longest idle ends for a fourth; while all three are answering the fourth is refused, "3
+conversations are answering. Wait for one, or stop one." — the page shows it as any refusal and the composer keeps
+the text: final review F4); one idle 10 min with no turn ends (a 30 s sweep).
 The panel and Ask refuse a conversation live in the other (`terminal::live_session`, `chat::live`). One Ask ran
 (its `chat/<id>/` folder is there) resumes in the panel without `--dangerously-skip-permissions`, whatever *no
 permission prompts* says (D41); the panel's own conversations keep the switch. A conversation
@@ -749,7 +751,7 @@ What the code does, which is the spec's wording except where a row says otherwis
 | D35 Echo records each change it makes or approves in `activity.jsonl` | Home can say who changed what even without git |
 | D36 Mail and Teams come from Echo's Microsoft 365 sign-in, by search. A web page comes from an https address the user typed, fetched with `curl` (GET, no cookies, `curl -q`) and saved as Markdown by an extractor of Echo's own. The spec says only "Echo fetches it"; the code needs `curl` on the PATH (as `graph.rs` does) | Echo's existing pieces, no new crate |
 | D37 The new-calls rule per vault: off (default) · add to the inbox · add and prepare changes; *prepare* only when the call's profile is the vault's, and its changes always wait for review | The one automatic start, opt-in; nothing merges by itself |
-| D38 At most 3 live chat processes; one idle for 10 minutes ends (and can be resumed). Each holds the vault's profile lease until it has exited, so a sign-in closes it | One profile's lease, bounded memory |
+| D38 At most 3 live chat processes; one idle for 10 minutes ends (and can be resumed). Each holds the vault's profile lease until it has exited, so a sign-in closes it. A fourth stops the longest idle one, never one answering: when all three are answering it is refused (final review F4) | One profile's lease, bounded memory; an answer is never cut off for another conversation |
 | D39 Checks move from vault Settings to Health; Settings gains *Ingest* (the skill, the new-calls rule) and *Ask* (Research may use the web) | One home per setting |
 | D40 An Ask conversation on *Claude Code (as configured)* loads the vault's own settings as Claude Code does; ingest runs and AI checks load only the user's (`--setting-sources user`) with the vault's skills as a plugin of the run's own. The guard's scope is in the run's `--settings` file's `env` (which outranks a vault's settings) and the process environment | A vault's `.claude/` could otherwise widen the guard or add hooks to unwatched runs |
 | D41 An Ask conversation continued in the terminal panel runs there without `--dangerously-skip-permissions`, whatever *no permission prompts* says; after Research or an attached call the panel says first that the conversation read web pages or others' words | Its context may carry instructions from a page |
