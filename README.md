@@ -147,6 +147,14 @@ ask it. Echo saves each call's minutes there as a note with a row in the vault's
 call's ⋯ → **Save to Knowledge…**). Connecting changes no file; in a folder you connected, Echo writes only what it
 saves and leaves committing to you.
 
+A vault opens on **Home**: what changed lately and who changed it, a box to ask it things, its health and what waits
+for you. **Ask** is Claude Code in the vault, shown in Echo: it reads, and in *Curate* or *Research* mode every edit
+and every web page waits for your yes, with the diff in front of you. **Ingest** turns what you drop in the vault's
+inbox (files, calls, mail, Teams, a web page) into page changes: Claude Code works on a copy and you approve each
+change, with the quotes it came from, before Echo writes it. **Health** checks the vault for broken links, pages
+missing from the index and the like, and offers each fix as a diff. Nothing reaches your notes unseen, and every run
+uses the AI profile you gave the vault.
+
 <details>
 <summary>Install the plugin by hand, or for one project</summary>
 

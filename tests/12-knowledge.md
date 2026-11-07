@@ -155,3 +155,120 @@ made-up Teams call. Design: `.ai-run/guides/design/knowledge.md`.
   rather than being redrawn from scratch.
 - Within a few seconds the new page appears beside the page it links to; the camera stays where it was. Labels never
   overlap; the light and dark themes both read well.
+
+---
+
+### TC-KN-011 · Ask: three modes, the cards, stop and resume
+**Priority:** P0 · **Platform:** macOS, Windows
+
+Use a **copy** of a vault (or a made-up one such as a new vault from the starter), never the only copy of someone's
+notes. This starts the real Claude Code on the vault's profile.
+
+**Steps**
+1. Knowledge → the copy → *Ask* → mode *Ask*: "What do my pages say about Northwind?" (made-up content). Watch it stream.
+2. Switch to *Curate*: "Add a line about the gateway question to the Northwind page." When the card appears, read its
+   diff, press *Deny* once and ask again; this time press *Allow*.
+3. Switch to *Research*: "Read https://example.com and tell me what it says." Answer the card that names the domain.
+4. Ask something long and press *Stop* while it writes.
+5. In a terminal in the vault's folder run `claude --resume` and pick the conversation.
+
+**Expected**
+- The answer streams without jumping; the view follows the bottom only while you are there. Tool rows say what was
+  read or searched; the rail lists the pages used; cost and tokens show at the end.
+- In *Curate* nothing is written before *Allow*; after a *Deny* the file is as it was. A vault that commits gets one
+  commit `Ask: …` with just the edited file; one that doesn't says nothing was committed. The change is in Home's
+  *What's new* as "Ask (Curate)".
+- The *Research* card names the domain; *Ask* and *Curate* offer no web.
+- *Stop* ends the turn, and the conversation can be continued by sending another message.
+- `claude --resume` continues the same conversation with its history.
+
+---
+
+### TC-KN-012 · Ingest: nothing reaches the vault before you approve
+**Priority:** P0 · **Platform:** macOS, Windows
+
+Use a copy of a vault with git and note `git status --porcelain`. Sources are made-up: a meeting-notes file, a PDF
+you made of a made-up page, and a made-up mail thread in your own mailbox (Microsoft 365 signed in).
+
+**Steps**
+1. Knowledge → *Ingest*. If it asks about the files already in the inbox, choose *Mark them done*.
+2. *Add a source* → *Files*: the meeting file and the PDF; → *Mail or Teams*: the thread. Three sources are *New*.
+3. Tick all three → *Prepare changes*. While the run goes, run `git status --porcelain` in the vault.
+4. In the review, check each change's *came from* quotes. Reject the new page that came from one source; approve the
+   rest → *Write N approved*.
+
+**Expected**
+- `git status` is unchanged while the run goes and until *Write*: the run works on a copy.
+- The PDF's cards say "Echo can't check quotes in this kind of file" and show no quote; every quote shown is in its
+  source.
+- The rejected page's index row and log line are left out and the cards say so. After *Write* only the approved files
+  changed (plus yours); the sources are *Done*; no source file was edited.
+
+---
+
+### TC-KN-013 · A change made in the vault while a run waits
+**Priority:** P1 · **Platform:** macOS, Windows
+
+**Steps**
+1. Start a run on a copy as in TC-KN-012 and stop at the review.
+2. In Obsidian (or any editor) change a page the run also changed, and save.
+3. Back in Echo, *Approve* that change and *Write*.
+
+**Expected**
+- The change says it "changed in the vault since the run" and shows what would be overwritten (*Compare*).
+- Nothing is overwritten until you choose *Take the run's*; *Keep the vault's* leaves your text. The other approved
+  changes are written.
+
+---
+
+### TC-KN-014 · Health: fixes are diffs, AI checks quote real lines
+**Priority:** P1 · **Platform:** macOS, Windows
+
+Use a copy of a vault with a few broken links and pages missing from the index (the starter plus edits will do).
+
+**Steps**
+1. *Health* → pick a broken link → read its diff → *Fix*.
+2. Pick *Not in the index* → *Fix all* → untick one → apply.
+3. *Run AI checks* (the vault's profile reads the pages); open a finding.
+4. Look at Home's Health card.
+
+**Expected**
+- Every fix shows its diff before anything is written; a name guessed by edit distance is offered on its own finding
+  and never by *Fix all*. A file you had changed is written but left out of the commit, and the sheet says so.
+- The score rises and Home's card follows. Before the first AI check the card says "code checks only"; after it,
+  Freshness counts.
+- Each AI finding shows quotes that are on their pages (open the page and look); findings whose quotes aren't were
+  dropped and counted ("N dropped: their quotes aren't in the pages").
+
+---
+
+### TC-KN-015 · Home of a vault with history and of a new vault
+**Priority:** P1 · **Platform:** macOS, Windows
+
+**Steps**
+1. Open the Home of a copy of a git vault. Save minutes into it, approve an ingest change and make a commit of your
+   own in a terminal; edit a page in Obsidian.
+2. Open the Home of a vault just made from the starter.
+
+**Expected**
+- *What's new* lists each change once, with the right "who": minutes, Ingest, Curate, Health, "You in Echo", your
+  commit by its author, the Obsidian edit as *Changed outside Echo*; Echo's own commits are not taken for yours.
+- Suggestions come only from real items (a meeting today with a client page, the newest note, a health finding) and
+  fill the box without sending it.
+- The new vault shows three steps (*Add a source*, *Record a call*, *Ask your twin*) and no suggestions or changes.
+
+---
+
+### TC-KN-016 · Web pages, http, and Microsoft 365 signed out
+**Priority:** P1 · **Platform:** macOS, Windows
+
+**Steps**
+1. Ingest → *Add a source* → *A web page* → an https address of a page you control or a public documentation page.
+2. Try an `http://` address, and an address of a page that is a PDF or a very short page.
+3. Sign out of Microsoft 365 (Settings → Calendar & chat), then *Add a source* → *Mail or Teams*.
+
+**Expected**
+- The page is saved under `web/` in the sources folder as Markdown with a title and a source line; a *New* source.
+- The `http://` address is refused before anything is requested, saying why; the PDF or empty page is refused with
+  what to do ("save it as a PDF and add the file").
+- The mail option says Echo isn't signed in and where to sign in; nothing is requested.

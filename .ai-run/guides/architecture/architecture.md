@@ -49,8 +49,19 @@ Evidence: `crates/echoctl/src/watch.rs::run_loop`, `crates/echoctl/src/recorder.
 | ... its minutes | same folder | `notes.md`, `actions.json`, `notes-run.json`, `claude.log` | only a Claude Code run (`notes.md`, actions via `echoctl actions --apply`); `notes-run.json` by `notes.rs` |
 | ... where its minutes were saved | same folder | `knowledge.json` (vault, note, sha256, commit; the call's choice) | `knowledge::export`, never a Claude run |
 | Knowledge vaults | `<home>/.echo/knowledge/` | `vaults.json` (+ `vaults.lock`), `<id>/index.json` (Echo's index of a vault; never in the vault) | the app and `echoctl knowledge` |
+| ... a vault's other state | `<home>/.echo/knowledge/<id>/` | `ingest.json` (the ingest ledger), `health.json` (score history, ignored findings, last AI check), `activity.jsonl` (one line per change Echo made or approved, last 2,000), `*.lock` files; `chat/<conversation>/settings.json` (an Ask process's guard hook and scope) | the app and `echoctl knowledge`; never a Claude run |
+| ... its runs | `<home>/.echo/knowledge/<id>/ingest/<run>/` and `lint/<run>/` | ingest: `vault/` (the scratch copy the run edits), `bases.json`, `base/`, `plugin/`, `settings.json`, `prompt.md`, `log.jsonl`, `review.json`; lint: `settings.json`, `prompt.md`, `log.jsonl`, `run.json`, `findings.json` (the run's only write), `kept.json`; `ingest/run.lock`, `lint/run.lock` hold one run per vault | the app and CLI; a run writes only inside `vault/` (ingest) or `findings.json` (lint) |
+| ... its sources | the vault's sources folder (`raw_inbox/` unless detected otherwise), under `echo/`, `mail/`, `teams/`, `web/` | the files the user added | only when the user adds one; never edited or deleted |
 
 Evidence: `crates/echoctl/src/paths.rs::state_dir`, `crates/echoctl/src/paths.rs::calls_dir`, `crates/echoctl/src/paths.rs::config_dir`
+
+**Where new Knowledge code goes** (`crates/echoctl/src/knowledge/`; the module table is in `design/knowledge.md`): a stream-json
+line → an event in `stream.rs` (shared by Ask, ingest and AI checks); a conversation's process, permission cards and
+commits in `chat.rs` and `chat/` (`chat.rs` is `tray`-only); a source or its adding in `sources.rs` / `extract.rs`; an
+ingest run in `ingest.rs` and its review in `ingest/review.rs`; a check, its fix and the score in `health.rs` (an AI
+check's run in `lint.rs`); Home in `home.rs`; every change Echo makes also calls `activity::record`. Routes and `kn_*`
+IPC go in `api.rs`, the window in `ui/knowledge.js` (pure parts in marked blocks with node tests), and what a run may
+touch in `guard.rs`.
 
 ## Structure and boundaries
 
