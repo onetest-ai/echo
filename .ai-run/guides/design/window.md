@@ -16,7 +16,8 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
 | `src/tray.rs` | tao event loop, tray menu, Dock policy, window commands, the leave (close/quit) handshake |
 | `src/mark.rs` | the octopus tray mark drawn from signed-distance shapes (`assets/octopus.svg` is the same shape) |
 | `src/app.rs` | native dialogs (`yes_no`, `ask_checked`), notifications and their click (`Click`), `quit.asking` / `quit.cancelled` |
-| `src/window.rs` | wry webview, the `echo://` protocol (`reply`, `respond`), `/api/*`, IPC `handle`, settings snapshot/set, layout file, dev modes |
+| `src/window/mod.rs` | wry webview, the `echo://` protocol (`reply`, `respond`), IPC `handle`, dev modes (`serve`, `export`, self-test); both dispatchers ask each area's `route` / `handle` in turn |
+| `src/window/<area>.rs` | an area's pages, `/api/*` routes and IPC commands: `assets`, `call`, `calendar`, `settings` (snapshot/set, layout file), `threads`, `today`, `plugins`, `terminals`, `brain` |
 | `src/links.rs` | `echo://` link parsing, routing (`target`) and text for Claude (`read`) |
 | `src/terminal.rs` | PTY sessions for the Claude panel (portable-pty), output ring, session ids |
 | `src/view.rs` | what the window shows → `<echo_view>` for Claude sessions (`view-hook`), `<echo_howto>` (`howto_block`) |
@@ -503,7 +504,7 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
 
 | Decision | Why | Where |
 |---|---|---|
-| wry on our tao loop, not Tauri | Tauri would own the loop, tray, packaging and updater | `window.rs`, `tray.rs` |
+| wry on our tao loop, not Tauri | Tauri would own the loop, tray, packaging and updater | `window/`, `tray.rs` |
 | Dock icon while the app runs (macOS), Echo.app stays `LSUIElement` | the menu-bar icon can hide behind the notch and Echo looked gone; the CLI must never show one | `tray::apply_dock` |
 | No menu rebuild while it is open (macOS) | AppKit tracks it in another run-loop mode; a replaced menu closes under the pointer | `tray::menu_open` |
 | IPC only from the page itself | WebKit exposes the handler to frames; the minutes frame shows others' text | `window::from_page` |
@@ -519,7 +520,7 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
 | One leave (close/quit/update) at a time, save first | notes typed in the window must not be lost on quit | `tray.rs` `Leaving`, `takes_over` |
 | Inbox Done only when the source was read | an unreadable source must not mark items decided | `attention.rs` |
 | Teams transcripts: VTT only, occurrence ±30 min | `text/plain` is refused; a series shares one online meeting | `teams_transcript::import` |
-| Calendar fetched in the async handler, cached 2 min | Microsoft 365 must never block the UI | `window.rs` `/api/calendar` |
+| Calendar fetched in the async handler, cached 2 min | Microsoft 365 must never block the UI | `window/calendar.rs` `/api/calendar` |
 
 ## Files and state
 

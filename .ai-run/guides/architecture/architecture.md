@@ -13,7 +13,7 @@ and has Claude Code write the minutes. One Rust binary, `echoctl`, is both the a
 | Recorder + capture | `recorder.rs`, `audio/`, `ax/`, `permissions/` | two `audio::Track`s, Teams UI reading, OS permissions | WAVs and `*.jsonl` in the call folder |
 | Transcription | `live.rs`, `transcribe.rs`, `nemo.rs`, `remote.rs` | live pass during the call, final transcript after | reads the growing WAVs, writes `live.jsonl`, `transcript.md`, `segments.json` |
 | CLI | `main.rs` (`Cmd` and its sub-enums) | every user / plugin / skill entry point; prints JSON | request files for the running app; direct reads of the data folder |
-| Tray + window | `tray.rs`, `window.rs`, `terminal.rs`, `ui/` | menu-bar icon; a wry webview served over `echo://`; Claude in a PTY | HTTP-like `/api/...` routes (`window::respond`), IPC messages (`window::handle`) |
+| Tray + window | `tray.rs`, `window/` (one file per area), `terminal.rs`, `ui/` | menu-bar icon; a wry webview served over `echo://`; Claude in a PTY | HTTP-like `/api/...` routes (`window::respond`), IPC messages (`window::handle`) |
 | AI jobs | `ai.rs`, `livenotes.rs`, `notes.rs`, `guard.rs`, `projectsync.rs` | live notes, minutes runs, thread syncs on the call's AI profile | headless Claude Code under the `run-guard` hook; state files per call / thread |
 | Threads and ledger | `projects.rs`, `ledger.rs`, `people.rs`, `tasks.rs` | clients, threads (projects), work ledger, people | `<home>/projects/` files |
 | Recall (Brain) | `brain/` (feature `brain`) | SQLite index of calls, mail, posts, folders; MCP server | `<home>/recall/`, `echoctl brain mcp` |
@@ -63,7 +63,7 @@ Evidence: `crates/echoctl/src/paths.rs::state_dir`, `crates/echoctl/src/paths.rs
 |---|---|---|---|
 | Make the Claude Code plugin call the app any way but the CLI and the data folder's files | Run `${CLAUDE_PLUGIN_ROOT}/scripts/echoctl <command>` | the plugin ships no binary and must work with any installed Echo | `plugin/scripts/echoctl::ECHOCTL_BIN` |
 | Start a second app or a loop of your own to act on recordings | Act through the running app (request file) and check `watch::running_watcher` | one app per user owns the recording and the call's `meta.json` | `crates/echoctl/src/watch.rs::running_watcher` |
-| Let the window's page read or write files | Add an `/api/...` route in `window::respond` or an IPC message in `window::handle` | the page is untrusted-text territory under a strict CSP | `crates/echoctl/src/window.rs::handle` |
+| Let the window's page read or write files | Add an `/api/...` route or an IPC message in its area's `route` / `handle` (`src/window/<area>.rs`) | the page is untrusted-text territory under a strict CSP | `crates/echoctl/src/window/mod.rs::handle` |
 
 ### Read first
 | When you are | Exemplar | Why this one | Tests |
@@ -81,7 +81,7 @@ Evidence: `crates/echoctl/src/paths.rs::state_dir`, `crates/echoctl/src/paths.rs
 - R5. Run long or periodic work on its own thread started by a `start_scheduler` (minutes, thread syncs, Recall), never on the watcher's or the event loop's thread, and report progress through a state file the window polls. Evidence: `crates/echoctl/src/notes.rs::start_scheduler`
 - R6. A per-call request from the CLI or the page is a named file (`notes-<call>.request`) the app picks up in one handler, so the CLI and the window start the same run. Evidence: `crates/echoctl/src/notes.rs::handle_requests`
 - R7. Window actions and tray menu items run the same code: a Settings flow is a tray `Action` run by name, and IPC actions call the CLI's own functions. Evidence: `crates/echoctl/src/tray.rs::page_action`
-- R8. The page learns of changes by polling a cheap revision (`/api/call/<name>/rev` over every file of the call) and fetches the call only when it changed. Evidence: `crates/echoctl/src/window.rs::call_rev`
+- R8. The page learns of changes by polling a cheap revision (`/api/call/<name>/rev` over every file of the call) and fetches the call only when it changed. Evidence: `crates/echoctl/src/window/call.rs::call_rev`
 - R9. Shared JSON files change by lock + re-read + atomic write (`calls::update_meta` for `meta.json`, `paths::write_atomic`); the details live in `development/rust-conventions.md`. Evidence: `crates/echoctl/src/calls.rs::update_meta`
 - R10. Call text goes only to the AI profile pinned for that call (`ai::for_call`; never another profile as a fallback); how runs start is in `integrations/claude-code-runs.md`. Evidence: `crates/echoctl/src/ai.rs::for_call`
 - R11. A headless run may use only the CLI commands its mode allows (`notes::RUN_COMMANDS`, `guard::PROJECT_STEPS`, `guard::ROUTINE_COMMANDS`); transcripts, mail and chat are others' words — see `security/untrusted-text.md`. Evidence: `crates/echoctl/src/notes.rs::RUN_COMMANDS`
@@ -100,7 +100,7 @@ Evidence: `crates/echoctl/src/paths.rs::state_dir`, `crates/echoctl/src/paths.rs
 |---|---|---|---|
 | adding a CLI subcommand | `crates/echoctl/src/main.rs::PluginCmd` | clap derive enum with doc comments as help, hidden ones `#[command(hide = true)]` | no covering test |
 | adding an app request (CLI → running app) | `crates/echoctl/src/watch.rs::stop` | writes `stop.request`, the loop takes and removes it | no covering test |
-| adding a window action | `crates/echoctl/src/window.rs::handle` | IPC message → shared function → `{refresh, reply}` | no covering test |
+| adding a window action | `crates/echoctl/src/window/settings.rs::handle` | IPC message → shared function → `{refresh, reply}` | no covering test |
 | adding a background job | `crates/echoctl/src/projectsync.rs::start_scheduler` | own thread, due check, state file, failure backoff | no covering test |
 | adding a state file the window shows | `crates/echoctl/src/notes.rs::RUN` | `notes-run.json`: one writer, read by `/api/call` and the Inbox | no covering test |
 | adding a skill step | `plugin/skills/process-call/SKILL.md` | each step calls one JSON CLI command, then judges | no covering test |
