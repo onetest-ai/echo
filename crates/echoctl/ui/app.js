@@ -6925,6 +6925,8 @@ window.echo = {
     if ((r.error || r.kept) && !typingNotes()) render()
     else showNotesState()
   },
+  /** Files dropped on the window (Echo kept them as a pick; their names and its number): Ingest's sheet takes them. */
+  knDropped(r) { Kn.dropped(r) },
   /** A message for a moment (an action that couldn't be done). */
   notice(text) {
     S.notice = text

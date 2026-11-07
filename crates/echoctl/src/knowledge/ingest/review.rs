@@ -537,6 +537,8 @@ pub struct Written {
     pub changed_since: Vec<String>,
     /// The commit's id, `off` or `skipped: <why>`.
     pub commit: String,
+    /// The written files the commit took: not those with changes of the user's before (X-G2).
+    pub committed: Vec<String>,
     /// Changes written of the run's so far, of how many.
     pub kept: usize,
     pub of: usize,
@@ -645,6 +647,9 @@ pub fn write(v: &Vault, run: &str, only: &[String]) -> Result<Written> {
     }
     out.commit = if written.is_empty() { git::Commit::Off.label() } else { page::commit_one(v, &written, &dirty, &message(v, &r.sources)) };
     let commit = activity::commit_id(&out.commit);
+    if commit.is_some() {
+        out.committed = done.iter().filter(|(_, full, ..)| !dirty.contains(full)).map(|(p, ..)| p.clone()).collect();
+    }
     // A file the user had changed isn't in the commit, so its line names none.
     for (path, full, old, new) in &done {
         let old = old.as_ref().map(|b| String::from_utf8_lossy(b).into_owned());

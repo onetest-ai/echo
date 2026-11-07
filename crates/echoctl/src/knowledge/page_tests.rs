@@ -415,3 +415,33 @@ fn a_save_git_cant_answer_for_says_why_it_isnt_committed() {
         assert_eq!(commit, "skipped: the vault isn't in a git repository");
     }
 }
+
+#[test]
+fn a_markdown_source_reads_in_pages_but_is_never_written() {
+    let (_env, root) = crate::paths::testenv::folders("kn-pg-source");
+    let v = twin(&root);
+    let rel = "raw_inbox/mail/2026-11-04-phase-2.md";
+    fixture::write(&v.root, rel, "---\ntitle: Phase 2 and the holiday freeze\nkind: mail\n---\n\n# Phase 2 and the holiday freeze\n\n### Maya Chen · 2026-11-04 09:12\n\nNo releases between 15 Dec and 6 Jan. <script>x</script>\n");
+    let p = read(&v, rel).unwrap();
+    assert_eq!(p["title"], "Phase 2 and the holiday freeze");
+    assert_eq!(p["source"], true);
+    assert_eq!(p["editable"], false, "a source is never edited");
+    assert!(p["text"].is_null(), "the editor gets nothing to start from");
+    assert!(p["in_index"].is_null(), "a source is never offered a row in the index");
+    let html = p["html"].as_str().unwrap();
+    assert!(html.contains("No releases") && !html.contains("<script>"), "Echo's safe writer: {html}");
+    // Never written: a save or a preview of it is refused, and the file is as it came.
+    let before = std::fs::read(v.root.join(rel)).unwrap();
+    assert!(save(&v, rel, "changed", p["base"].as_str().unwrap(), None).is_err());
+    assert!(render(&v, rel, "changed").is_err());
+    assert_eq!(std::fs::read(v.root.join(rel)).unwrap(), before);
+    // Only a Markdown file of the sources folder: never its README, a dot-file, another kind of file, or machinery
+    // outside it.
+    fixture::write(&v.root, "raw_inbox/README.md", "# Inbox\n");
+    fixture::write(&v.root, "raw_inbox/.draft.md", "# Draft\n");
+    fixture::write(&v.root, ".claude/notes.md", "# Machinery\n");
+    for no in ["raw_inbox/deck.pdf", "raw_inbox/README.md", "raw_inbox/.draft.md", ".claude/notes.md", "raw_inbox/../AGENTS.md"] {
+        assert!(read(&v, no).is_err(), "{no} isn't shown");
+    }
+    assert_eq!(read(&v, "knowledge/clients/acme.md").unwrap()["source"], false);
+}

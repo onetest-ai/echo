@@ -5,7 +5,7 @@
 'use strict'
 
 // ── kn-route: `#kn/<vault>/<tab>/<path>` (a page's path encoded as one part) ──
-const KN_TABS = ['pages', 'graph', 'ask', 'health', 'settings']
+const KN_TABS = ['pages', 'graph', 'ask', 'ingest', 'health', 'settings']
 /** `decodeURIComponent`, or `null` for a broken escape (a `%` that is the name's own). */
 function knDecode(s) {
   try { return decodeURIComponent(s) } catch { return null }
@@ -683,10 +683,193 @@ function knHealthState(vault, old = null) {
 }
 // end of the kn-health block
 
+// ── kn-ingest: the Ingest tab (spec K14, K15) — the sources by group under a filter, the tab's number, the last runs, a
+// run as it goes (its steps, its tool rows), the review's state from the changes Echo gives (their answers and D28's
+// dropped lines merged in Rust; blocked ones), what the Add a source sheet can add and what it sends — a pick's number,
+// a call's name, Microsoft 365's ids, an https address; never a file path —, the first open's question, what a write did ──
+const KN_INGEST_GROUPS = [['echo', 'From Echo'], ['mail', 'Mail & Teams'], ['web', 'Web'], ['file', 'Files']]
+const KN_CHANGE_KINDS = { new: ['New page', 'ok'], edit: ['Edit', ''], index: ['Index', 'acc'], log: ['Log', 'acc'], taxonomy: ['Taxonomy', 'acc'], other: ['Other', ''] }
+const knUsd = (c) => (c < 0.01 ? '<$0.01' : `$${c.toFixed(2)}`)
+/** A source's state as the queue says it: Echo's `waiting` told apart by its run — `preparing` (it is going),
+ *  `review` (its changes wait), `failed` (it ended with its Echo, until the next start tidies: *Run again*). */
+function knSourceState(src, runs) {
+  if (src.state !== 'waiting') return src.state
+  const r = (runs || []).find((x) => x.id === (src.meta || {}).run)
+  if (!r) return 'waiting'
+  return r.state === 'running' ? 'preparing' : r.state === 'review' ? 'review' : r.state === 'failed' || r.state === 'stopped' ? 'failed' : 'waiting'
+}
+/** A state's chip: `[class, words]`. */
+function knSourceChip(state, meta = {}) {
+  switch (state) {
+    case 'new': return ['new', 'New']
+    case 'preparing': return ['run', 'Preparing']
+    case 'review': return ['wait', 'In review']
+    case 'failed': return ['fail', 'Run stopped']
+    case 'done': return ['done', meta.kept == null ? 'Done' : meta.kept ? `Done · kept ${meta.kept}` : 'Done — nothing kept']
+    case 'skipped': return ['skip', 'Skipped']
+  }
+  return ['wait', 'Waiting']
+}
+/** The queue (K14-08): the sources in Echo's order (newest first) by group — a Teams chat with mail —, each with its
+ *  state, chip and whether *Prepare changes* takes it (New only); `filter` all · new · waiting · done (Skipped is with
+ *  Done). Under All a group's done ones fold into a count (`folded`) unless `showDone[group]`. The counts never change
+ *  with the filter. */
+function knIngestQueue(sources, runs, { filter = 'all', showDone = {} } = {}) {
+  const bucket = (s) => (s === 'new' ? 'new' : s === 'done' || s === 'skipped' ? 'done' : 'waiting')
+  const rows = (sources || []).map((x) => {
+    const state = knSourceState(x, runs), meta = x.meta || {}
+    return { path: x.path, kind: x.kind, title: x.title, state, chip: knSourceChip(state, meta), note: meta.note || '', selectable: state === 'new', meta }
+  })
+  const n = (b) => rows.filter((r) => bucket(r.state) === b).length
+  const counts = { all: rows.length, new: n('new'), waiting: n('waiting'), done: n('done') }
+  const groups = KN_INGEST_GROUPS.map(([id, label]) => {
+    const mine = rows.filter((r) => (r.kind === 'teams' ? 'mail' : r.kind) === id && (filter === 'all' || bucket(r.state) === filter))
+    const fold = filter === 'all' && !showDone[id]
+    const rest = fold ? mine.filter((r) => bucket(r.state) !== 'done') : mine
+    return { id, label, n: mine.length, rows: rest, folded: mine.length - rest.length }
+  }).filter((g) => g.n)
+  return { groups, counts }
+}
+/** Ingest's number on its tab (K10-02): the changes waiting for review across the vault's runs. */
+function knIngestWaiting(runs) {
+  return (runs || []).filter((r) => r.state === 'review').reduce((a, r) => a + Math.max(0, (r.changes || 0) - (r.kept || 0)), 0)
+}
+/** A run in the list of the last ones (K15-11): its sources (one by its title), how it stands, changes kept, cost. */
+function knRunLine(r, titleOf = (p) => String(p).split('/').pop()) {
+  const src = (r.sources || []).length === 1 ? titleOf(r.sources[0]) : `${(r.sources || []).length} sources`
+  const left = Math.max(0, (r.changes || 0) - (r.kept || 0))
+  const state = r.state === 'running' ? (r.waiting ? 'waiting for a call' : 'preparing')
+    : r.state === 'review' ? (left ? `${left} to review` : 'in review')
+      : r.state === 'done' ? `kept ${r.kept || 0} of ${r.changes || 0}`
+        : r.state === 'discarded' ? 'discarded — nothing kept' : r.state
+  const cost = r.cost ? knUsd(r.cost) : ''
+  return { sources: src, state, cost, text: [src, state, cost].filter(Boolean).join(' · ') }
+}
+/** A run's events (K15-06) as the view shows them: what the copy left out, what it waits for before Claude Code starts
+ *  (X-S2; over once Claude Code does something), its steps (the last `todo`), its tool calls each with its result — a
+ *  write of its steps file is "Updated the steps · k of n" —, its words, its `result`, errors and how it ended. */
+function knRunView(events) {
+  const out = { copy: null, waiting: null, steps: [], tools: [], said: [], result: null, ended: null, errors: [] }
+  const calls = new Map(), notes = /(^|\/)\.echo-ingest\/(steps|changes)\.json$/
+  for (const e of events || []) {
+    if (['tool', 'todo', 'text', 'thinking', 'result'].includes(e.type)) out.waiting = null
+    switch (e.type) {
+      case 'notice':
+        if (e.kind === 'copy') out.copy = e.text
+        else if (e.kind === 'waiting') out.waiting = e.text
+        else if (e.kind === 'ended') { out.ended = { state: e.state, text: e.text }; out.waiting = null }
+        break
+      case 'tool': {
+        const m = notes.exec(e.path || e.target || '')
+        const item = { ...e, result: null, ...(m ? { verb: m[2] === 'steps' ? 'Updated the steps' : 'Wrote what it changed', target: '', detail: '', notes: m[2], readonly: false } : {}) }
+        out.tools.push(item)
+        calls.set(e.id, item)
+        break
+      }
+      case 'tool_result': { const c = calls.get(e.id); if (c) c.result = e; break }
+      case 'todo': {
+        out.steps = e.items || []
+        const w = [...out.tools].reverse().find((t) => t.notes === 'steps')
+        if (w) w.detail = `${out.steps.filter((s) => s.state === 'done').length} of ${out.steps.length}`
+        break
+      }
+      case 'text': if (e.done && !e.parent) out.said.push(e); break
+      case 'result': out.result = e; break
+      case 'error': out.errors.push(e.text); break
+    }
+  }
+  return out
+}
+/** The review (K15-08) from the changes Echo gives — their answers merged, D28's lines left out of an index's or a
+ *  log's change (`dropped`, said in `note`): a card each (its kind, whether it takes Approve · Reject · Edit (`open`),
+ *  what was left out, why it is blocked, its quotes and what to say when there are none), the counts, *Approve the
+ *  rest* (with one undecided), *Write N approved* (with one approved) and *Finish the run* (nothing left to decide).
+ *  `pending`: changes whose answer is on its way —
+ *  each answered once, and nothing else is sent meanwhile. */
+function knIngestReview(changes, pending = {}) {
+  const busy = Object.keys(pending || {}).length > 0
+  const cards = (changes || []).map((c, i) => {
+    const [kind, tag] = KN_CHANGE_KINDS[c.kind] || [String(c.kind || 'Other'), '']
+    const quotes = c.quotes || [], inv = c.invented || 0, list = c.kind === 'index' || c.kind === 'log'
+    const fromNote = /can't check/.test(c.quote_note || '') ? 'Echo can\'t check quotes in this kind of file, so none are shown.'
+      : quotes.length ? '' : list ? 'Written by the skill from the changes above — no source words to show.' : 'No quote found in the sources.'
+    return {
+      n: i + 1, path: c.path, kind, tag, adds: !!c.adds_only, plus: c.plus || 0, minus: c.minus || 0, why: c.why || '', hunks: c.diff || [],
+      state: c.state, edited: !!c.edited, busy: !!pending[c.path], open: c.state === 'undecided' && !pending[c.path], changed: c.state === 'changed',
+      left: (c.dropped || []).length && c.state !== 'blocked' ? { note: c.note || '', lines: c.dropped } : null,
+      blocked: c.state === 'blocked' ? c.note || 'can\'t be written' : null,
+      quotes, fromNote, invented: inv ? `${inv} more ${inv === 1 ? 'quote' : 'quotes'} the run gave ${inv === 1 ? 'isn\'t' : 'aren\'t'} in the sources — not shown.` : '',
+    }
+  })
+  const count = (s) => cards.filter((c) => c.state === s).length
+  const counts = { all: cards.length, undecided: count('undecided'), approved: count('approved'), rejected: count('rejected'), written: count('written'), changed: count('changed'), blocked: count('blocked') }
+  // Every change written, rejected or one Echo can't write: a write of none finishes the run (its sources Done).
+  const finish = cards.length > 0 && !busy && !counts.undecided && !counts.approved && !counts.changed
+  return { cards, counts, rest: counts.undecided > 0 && !busy, write: { n: counts.approved, can: counts.approved > 0 && !busy }, finish }
+}
+/** What *Write N approved* did (K15-09: `{written, changed_since, commit, kept, of, finished}`) in Echo's words — `text`,
+ *  and `wait` when something wasn't written (said until OK; else it goes by itself). */
+function knWriteSummary(r, vault) {
+  const written = r.written || [], commit = String(r.commit || ''), out = []
+  const skipped = /^skipped: /.test(commit), ok = commit && commit !== 'off' && !skipped
+  // X-G2: the commit takes only the files without changes of the user's from before.
+  const left = ok && Array.isArray(r.committed) ? written.filter((p) => !r.committed.includes(p)) : []
+  if (written.length) {
+    const c = skipped ? ` Not committed: ${commit.slice(9).replace(/\.$/, '')}.` : ok ? ` Committed (${commit})${left.length ? `, but not ${left.join(', ')}: ${left.length === 1 ? 'it' : 'they'} had changes of yours` : ''}.` : ''
+    out.push(`Wrote ${written.length === 1 ? written[0] : `${written.length} files`} into ${vault}.${c}`)
+  }
+  for (const p of r.changed_since || []) out.push(`${p} changed in the vault since the run, so it wasn't written: compare it below.`)
+  if (r.finished && written.length) out.push(`The run is done: ${r.kept} of its ${r.of} changes kept.`)
+  return { text: out.join(' ') || 'Nothing was written.', wait: !written.length || (r.changed_since || []).length > 0 || skipped || left.length > 0 }
+}
+/** What the Add a source sheet's tab `x.tab` can add now (K14-02…06): `can`, the button's `label`, how many, and a
+ *  `note` (an address Echo won't fetch); Mail or Teams without Echo's Microsoft 365 sign-in says `signin`. A call on
+ *  another profile, once refused (`x.mismatch`, named for that call), is *Add anyway* on that call only (X-P3). */
+function knAddState(x, { m365 = true } = {}) {
+  switch (x.tab) {
+    case 'files': {
+      const n = ((x.pick && x.pick.files) || []).filter((f) => !f.too_big).length
+      return { can: n > 0 && !x.busy, label: n ? `Add ${n} ${n === 1 ? 'file' : 'files'}` : 'Add files', count: n }
+    }
+    case 'call': return { can: !!x.call && !x.busy, label: !x.call ? 'Add a source' : x.mismatch && x.mismatch.name === x.call.name ? 'Add anyway' : 'Add 1 source', count: x.call ? 1 : 0 }
+    case 'mail': return m365 ? { can: !!x.hit && !x.busy, label: x.hit ? 'Add 1 source' : 'Add a source', count: x.hit ? 1 : 0 } : { can: false, signin: true, label: 'Add a source', count: 0 }
+    case 'web': {
+      const u = String(x.url || '').trim(), ok = /^https:\/\/[^\s/?#]+/i.test(u) && !/\s/.test(u)
+      return { can: ok && !x.busy, label: 'Add the page', count: ok ? 1 : 0, note: u && !ok ? 'Only an https address: Echo fetches nothing else.' : '' }
+    }
+  }
+  return { can: false, label: '', count: 0 }
+}
+/** What `kn_source_add` takes for the sheet's tab (besides the vault): the files by their pick's number, a call by its
+ *  name, a mail by its message's id, a chat by its id with its days (`x.days` up to `today`, `YYYY-MM-DD`), a web page by
+ *  the address typed — never a path. */
+function knAddArgs(x, today) {
+  switch (x.tab) {
+    case 'files': return { kind: 'files', pick: x.pick.seq }
+    case 'call': return { kind: 'call', call: x.call.name, transcript: !!(x.include || {}).transcript, chat: !!(x.include || {}).chat, anyway: !!(x.mismatch && x.mismatch.name === x.call.name) }
+    case 'mail': {
+      if (x.hit.kind === 'mail') return { kind: 'mail', message: x.hit.id }
+      const t = Date.parse(`${today}T00:00:00Z`), since = new Date(t - ((x.days || 7) - 1) * 864e5).toISOString().slice(0, 10)
+      return { kind: 'chat', chat: x.hit.chat, since, until: today }
+    }
+    case 'web': return { kind: 'web', url: String(x.url || '').trim() }
+  }
+  return null
+}
+/** The first open's question (K14-09): while Echo's ledger has no answer — an add before it doesn't take it away (ruling
+ *  R40) —, how many files are already in the sources folder; null once answered. */
+function knFirstOpen(v) {
+  const o = v && v.offer
+  if (!o || !o.count) return null
+  const one = o.count === 1, n = Number(o.count).toLocaleString('en-US')
+  return { count: o.count, folder: o.folder, text: `${n} ${one ? 'file is' : 'files are'} already in ${o.folder}/. ${one ? 'Was it' : 'Were they'} processed?` }
+}
+// end of the kn-ingest block
+
 /** Knowledge's views and state (`S.kn`). */
 const Kn = (() => {
   const st = () => {
-    if (!S.kn) S.kn = { data: null, vault: '', tab: 'pages', path: '', tree: null, page: null, filter: 'all', q: '', hits: null, open: new Set(), rail: 'links', hist: null, ver: null, edit: null, graph: null, gopt: { hideIndex: true, isolated: true, tags: false, color: 'folder', depth: 0, sel: null, hidden: [] }, gq: '', settings: null, sheet: null, switcher: false, menu: null, busy: {}, error: null, chip: null, lastVault: null, ovr: {}, chat: null, askConv: '', hl: null, hlKey: '' }
+    if (!S.kn) S.kn = { data: null, vault: '', tab: 'pages', path: '', tree: null, page: null, filter: 'all', q: '', hits: null, open: new Set(), rail: 'links', hist: null, ver: null, edit: null, graph: null, gopt: { hideIndex: true, isolated: true, tags: false, color: 'folder', depth: 0, sel: null, hidden: [] }, gq: '', settings: null, sheet: null, switcher: false, menu: null, busy: {}, error: null, chip: null, lastVault: null, ovr: {}, chat: null, askConv: '', hl: null, hlKey: '', ing: null, ingRun: '' }
     return S.kn
   }
   const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms))
@@ -731,6 +914,12 @@ const Kn = (() => {
     side: I('<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M9.5 4.5v15"/>', 15),
     save: I('<path d="M5 4.5h11l3.5 3.5v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5.5a1 1 0 0 1 1-1z"/><path d="M8 4.5v5h7v-5M8 20v-6h8v6"/>'),
     lock: I('<rect x="5.5" y="10.5" width="13" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/>'),
+    // Ingest
+    tray: I('<path d="M3.5 13.5l2.6-7.2a1.5 1.5 0 0 1 1.4-1h9a1.5 1.5 0 0 1 1.4 1l2.6 7.2V19a1.5 1.5 0 0 1-1.5 1.5h-14A1.5 1.5 0 0 1 3.5 19z"/><path d="M3.5 13.5h5l1.5 2.5h4l1.5-2.5h5"/>'),
+    mail: I('<rect x="3.5" y="5.5" width="17" height="13" rx="2"/><path d="M4 7.5l8 6 8-6"/>'),
+    chat: I('<path d="M4.5 5.5h15v10h-9l-4 3.5v-3.5h-2z"/>'),
+    upload: I('<path d="M12 15.5V4.5M7.5 9L12 4.5 16.5 9"/><path d="M4.5 15v3.5a1 1 0 0 0 1 1h13a1 1 0 0 0 1-1V15"/>'),
+    memo: I('<rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5"/>'),
   }
   const GEM_BIG = I('<path d="M6.5 3.5h11l3.5 5-9 12-9-12z"/><path d="M3 8.5h18M9.5 3.5l-1 5 3.5 12 3.5-12-1-5"/>', 22)
   const vaults = () => ((st().data || {}).vaults || [])
@@ -800,6 +989,9 @@ const Kn = (() => {
     const h = hl(), want = knHealthLoad(h, { vault: v.id, tab: s.tab, picked: h.picked })
     h.picked = false
     if (want === 'count' && !h.loading) { h.loading = true; loadHealth({ detail: false }).then(() => { h.loading = false; render() }) }
+    // Ingest's number on its tab (changes waiting for review), wherever the vault opens; its tab loads it with its view.
+    const gi = ing()
+    if (s.tab !== 'ingest' && !gi.data && !gi.loading) { gi.loading = true; loadIngest().then(() => { gi.loading = false; render() }) }
     if (s.tab === 'pages') {
       if (!s.tree || s.tree.vault !== v.id) await loadTree()
       if (!s.path) s.path = (s.tree && s.tree.index) || ''
@@ -808,6 +1000,7 @@ const Kn = (() => {
     else if (s.tab === 'settings') await loadSettings()
     else if (s.tab === 'ask') { openChat(s.askConv); await loadChats() }
     else if (s.tab === 'health') { if (want === 'finding') await loadFinding(); else await loadHealth() }
+    else if (s.tab === 'ingest') await loadIngestTab()
   }
   async function loadTree() {
     const s = st(), v = vault()
@@ -883,6 +1076,9 @@ const Kn = (() => {
     ticks++
     if (ticks % 15 === 0) { try { s.data = await get('api/kn') } catch { /* app restarting */ } }
     if (!v || v.available === false || S.view !== 'brain' || !s.vault) return
+    // Ingest's sources and runs (an add or a run from the command line, a run ending while another tab shows): every 30 s.
+    const gi = s.ing && s.ing.vault === v.id && s.ing.data ? s.ing : null
+    if (gi && ticks % 15 === 0 && !(gi.run && gi.run.polling)) { const was = JSON.stringify(gi.data); await loadIngest(); if (JSON.stringify(gi.data) !== was) render() }
     let rev
     try { rev = (await get(`api/kn/${enc(v.id)}/rev`)).rev } catch { return }
     const h = s.hl && s.hl.vault === v.id && s.hl.data ? s.hl : null
@@ -907,11 +1103,12 @@ const Kn = (() => {
     s.tab = r.tab
     // Ask's part of the route is a conversation and Health's a finding's key, not the page Pages keeps open.
     if (r.tab === 'ask') { s.askConv = r.path || ''; openChat(s.askConv) } else if (r.tab === 'health') s.hlKey = r.path || ''
+    else if (r.tab === 'ingest') s.ingRun = r.path || ''
     else if (r.path !== undefined && r.path !== s.path) { s.path = r.path; s.ver = null }
     s.source = 'vault'
   }
   /** The route's last part for the tab open now. */
-  const here = () => (st().tab === 'ask' ? st().askConv || '' : st().tab === 'health' ? st().hlKey || '' : st().path || '')
+  const here = () => (st().tab === 'ask' ? st().askConv || '' : st().tab === 'health' ? st().hlKey || '' : st().tab === 'ingest' ? st().ingRun || '' : st().path || '')
   const goVault = (id, tab = 'pages', path = '') => go(knRouteOf({ vault: id, tab, path }))
   /** Knowledge's own view (a vault, or none yet) rather than Recall's or a plugin's tab. */
   function active() {
@@ -961,15 +1158,16 @@ const Kn = (() => {
     const where = v.available === false ? '<span class="kn-meta warn">The folder isn\'t there</span>'
       : `<span class="kn-meta"><code title="${esc(v.root)}">${esc(short(v.root))}</code>${g ? ` · ${IC.git} ${esc(g.branch || 'detached')}` : ''}${v.pages != null ? ` · ${nf(v.pages)} pages` : ''}</span>`
     const menu = s.menu === 'vault' ? `<div class="menu kn-head-menu" role="menu"><button class="menu-item" role="menuitem" data-kn="reveal" data-path="">${/Windows/.test(navigator.userAgent) ? 'Show in Explorer' : 'Show in Finder'}</button><button class="menu-item" role="menuitem" data-kn="obsidian" data-path="${esc((s.tree || {}).index || '')}">Open in Obsidian</button><button class="menu-item" role="menuitem" data-kn="reread">Read the folder again</button><button class="menu-item" role="menuitem" data-kn="ask-panel">Open Ask in the terminal panel</button><div class="menu-sep" role="separator"></div><button class="menu-item" role="menuitem" data-kn="tab" data-kn-tab="settings">Vault settings</button></div>` : ''
-    const acts = v.available === false ? '' : `<button class="btn sm" data-kn="ask" title="A new conversation with Claude Code in this vault">${IC.ask} Ask</button><button class="btn sm" data-kn="newpage">${IC.plus} New page</button><span class="kn-rel"><button class="icon-btn" data-kn="menu" data-menu="vault" aria-haspopup="menu" aria-expanded="${s.menu === 'vault'}" aria-label="More">${IC.more}</button>${menu}</span>`
+    const acts = v.available === false ? '' : `<button class="btn sm" data-kn="ask" title="A new conversation with Claude Code in this vault">${IC.ask} Ask</button><button class="btn sm" data-kn="ing-add">${IC.tray} Add a source</button><button class="btn sm" data-kn="newpage">${IC.plus} New page</button><span class="kn-rel"><button class="icon-btn" data-kn="menu" data-menu="vault" aria-haspopup="menu" aria-expanded="${s.menu === 'vault'}" aria-label="More">${IC.more}</button>${menu}</span>`
     return `<header class="kn-head">${title()}${where}<span class="grow"></span>${acts}</header>`
   }
   function tabs() {
     const s = st()
     const h = s.hl && s.hl.vault === s.vault && s.hl.data
-    const n = knTabCounts({ needs: h ? knHealthList(h.findings).needs : 0 })
-    const t = (id, label, count) => `<button class="tab" role="tab" data-kn="tab" data-kn-tab="${id}" aria-selected="${s.tab === id}"${count ? ` aria-label="${esc(knTabLabel(label, count))}" title="${esc(knTabLabel(label, count))}"` : ''}>${label}${count ? `<span class="kn-cnt" aria-hidden="true">${nf(count)}</span>` : ''}</button>`
-    return `<div class="kn-tabs"><div class="tabs" role="tablist">${t('pages', 'Pages')}${t('graph', 'Graph')}${t('ask', 'Ask')}${t('health', 'Health', n.health)}${t('settings', 'Settings')}</div></div>`
+    const gi = s.ing && s.ing.vault === s.vault && s.ing.data
+    const n = knTabCounts({ waiting: gi ? knIngestWaiting(gi.runs) : 0, needs: h ? knHealthList(h.findings).needs : 0 })
+    const t = (id, label, count, name) => `<button class="tab" role="tab" data-kn="tab" data-kn-tab="${id}" aria-selected="${s.tab === id}"${count ? ` aria-label="${esc(name)}" title="${esc(name)}"` : ''}>${label}${count ? `<span class="kn-cnt" aria-hidden="true">${nf(count)}</span>` : ''}</button>`
+    return `<div class="kn-tabs"><div class="tabs" role="tablist">${t('pages', 'Pages')}${t('graph', 'Graph')}${t('ask', 'Ask')}${t('ingest', 'Ingest', n.ingest, `Ingest, ${n.ingest} to review`)}${t('health', 'Health', n.health, knTabLabel('Health', n.health))}${t('settings', 'Settings')}</div></div>`
   }
 
   // ── nothing connected yet ──
@@ -1050,11 +1248,12 @@ const Kn = (() => {
     if (!p || p.path !== s.path) return '<div class="kn-reader"><div class="skeleton" style="padding:24px"><i></i><i></i><i></i><i></i></div></div>'
     if (p.error) return `<div class="kn-reader"><div class="kn-none"><p class="error">${esc(p.error)}</p></div></div>`
     const parts = p.path.split('/'), file = parts.pop()
-    const crumbs = `<span class="kn-crumbs" title="${esc(p.path)}">${parts.length ? `<b>${esc(parts.slice(-1)[0])}</b> / ` : ''}${esc(file)}${p.is_index ? ' · the index' : ''}</span>`
+    const crumbs = `<span class="kn-crumbs" title="${esc(p.path)}">${parts.length ? `<b>${esc(parts.slice(-1)[0])}</b> / ` : ''}${esc(file)}${p.is_index ? ' · the index' : p.source ? ' · a source, read-only' : ''}</span>`
     const menu = s.menu === 'page' ? `<div class="menu kn-page-menu" role="menu"><button class="menu-item" role="menuitem" data-kn="reveal" data-path="${esc(p.path)}">${/Windows/.test(navigator.userAgent) ? 'Show in Explorer' : 'Show in Finder'}</button><button class="menu-item" role="menuitem" data-kn="copy" data-text="${esc(p.abs || p.path)}">Copy path</button><button class="menu-item" role="menuitem" data-kn="copy" data-text="${esc(`echo://page/${encodeURIComponent(p.vault || st().vault)}/${String(p.path).split('/').map(encodeURIComponent).join('/')}`)}">Copy echo:// link</button><button class="menu-item" role="menuitem" data-kn="ask-about" data-path="${esc(p.path)}">Ask about it</button><button class="menu-item" role="menuitem" data-kn="rail" data-rail="history">History</button></div>` : ''
-    const editBtn = p.editable ? '<button data-kn="edit">Edit</button>' : '<button disabled title="Too large to edit in Echo">Edit</button>'
+    const editBtn = p.source ? '<button disabled title="Sources are never edited">Edit</button>' : p.editable ? '<button data-kn="edit">Edit</button>' : '<button disabled title="Too large to edit in Echo">Edit</button>'
     const bar = `<div class="kn-bar">${crumbs}<div class="seg" role="group" aria-label="Read or edit"><button aria-pressed="true">Read</button>${editBtn}</div><button class="btn ghost sm" data-kn="obsidian" data-path="${esc(p.path)}" title="Open this page in Obsidian">${IC.ext} Obsidian</button><span class="kn-rel"><button class="icon-btn" data-kn="menu" data-menu="page" aria-haspopup="menu" aria-expanded="${s.menu === 'page'}" aria-label="Page actions">${IC.more}</button>${menu}</span></div>`
-    return `<div class="kn-reader" data-keep-scroll>${bar}<article class="kn-doc selectable">${welcomeCard()}${propsView(p)}${p.html}</article></div>`
+    const src = p.source ? `<div class="kn-info kn-src-note">${IC.lock}<span>A source in the vault's inbox, shown as it came. Echo never edits a source.</span><button class="btn ghost sm" data-kn="tab" data-kn-tab="ingest">Ingest</button></div>` : ''
+    return `<div class="kn-reader" data-keep-scroll>${bar}<article class="kn-doc selectable">${src}${welcomeCard()}${propsView(p)}${p.html}</article></div>`
   }
   function editorView() {
     const s = st(), e = s.edit
@@ -1430,7 +1629,7 @@ const Kn = (() => {
     const change = (key, label, value, sub) => editing === key
       ? `<div class="set-row"><div><b>${label}</b><div class="kn-inline"><input class="search" id="kn-ovr" value="${esc(s.ovr.value)}" aria-label="${esc(label)}" spellcheck="false"><button class="btn primary sm" data-kn="ovr-save">Save</button><button class="btn ghost sm" data-kn="ovr-cancel">Cancel</button>${(v.overrides || {})[key] ? '<button class="btn ghost sm" data-kn="ovr-reset">As detected</button>' : ''}</div>${s.ovr.error ? `<div class="error">${esc(s.ovr.error)}</div>` : ''}</div><div></div></div>`
       : row(label, `${value ? `<code>${esc(value)}</code>` : '<span class="set-sub">none found</span>'}${sub ? ` — ${sub}` : ''}${(v.overrides || {})[key] ? ' <span class="tag">changed by you</span>' : ''}`, `<button class="btn ghost sm" data-kn="ovr" data-key="${key}" data-value="${esc(value || '')}">Change</button>`)
-    const nav = [['vs-structure', 'Structure'], ['vs-minutes', 'Meeting minutes'], ['vs-schema', 'Schema & vocabulary'], ['vs-skills', 'Skills'], ['vs-git', 'Git & AI']]
+    const nav = [['vs-structure', 'Structure'], ['vs-minutes', 'Meeting minutes'], ['vs-ingest', 'Ingest'], ['vs-ask', 'Ask'], ['vs-schema', 'Schema & vocabulary'], ['vs-skills', 'Skills'], ['vs-git', 'Git & AI']]
     const m = v.minutes || {}
     const sel = (key, opts, val) => `<select class="set-in" data-kn-set="${key}" aria-label="${esc(key)}">${opts.map(([k, l]) => `<option value="${k}"${k === val ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>`
     const scopeSome = m.scope === 'some'
@@ -1447,6 +1646,10 @@ const Kn = (() => {
       : row('twin <span class="tag acc">Echo starter</span>', 'Find, answer and remember — not in this vault. Adds <code>.claude/skills/twin/SKILL.md</code>; nothing else changes.', `<button class="btn sm" data-kn="twin-add"${s.busy.twin ? ' disabled' : ''}>Add…</button>`)
     const g = v.git
     const profiles = (typeof ai === 'function' ? ai().profiles : []) || []
+    // Settings → Ingest (K15-03): the vault's skill, or the one Echo finds; Ask's Research (D39).
+    const ingSkill = x.ingest_skill, skillChosen = (v.ingest || {}).skill || ''
+    const skillSel = skills.length ? `<select class="set-in" id="kn-set-ingest-skill" data-kn-set="ingest.skill" aria-label="The ingest skill"><option value=""${skillChosen ? '' : ' selected'}>${esc(x.ingest_found ? `Found: ${x.ingest_found}` : 'None found')}</option>${skills.map((k) => `<option value="${esc(k.name)}"${k.name === skillChosen ? ' selected' : ''}>${esc(k.name)}</option>`).join('')}</select>` : '<span class="set-sub">no skills</span>'
+    const research = !(v.ask && v.ask.research === false)
     return `<div class="kn-vset"><nav class="kn-vset-nav">${nav.map(([id, l]) => `<button class="set-nav" data-kn="vs-go" data-to="${id}">${l}</button>`).join('')}<button class="set-nav" data-kn="tab" data-kn-tab="health">Health<span class="kn-nav-r" aria-hidden="true">→</span></button><span class="grow"></span><button class="set-nav danger" data-kn="remove-ask">Remove from Echo…</button></nav>
     <div class="kn-vset-main" data-keep-scroll>
       <section class="set-sec" id="vs-structure"><h3>Structure</h3><div class="set-card">
@@ -1465,6 +1668,14 @@ const Kn = (() => {
         ${row('Also include', 'The transcript and the meeting chat stay in Echo unless you add them.', `<label class="kn-check"><input type="checkbox" data-kn-set="transcript"${m.transcript ? ' checked' : ''}> Transcript</label><label class="kn-check"><input type="checkbox" data-kn-set="chat"${m.chat ? ' checked' : ''}> Chat</label>`)}
         ${row('Preview', 'How a call lands here: the newest call\'s note and its index row. Nothing is written.', '<button class="btn ghost sm" data-kn="sample">Preview…</button>')}
         ${past}
+      </div></section>
+      <section class="set-sec" id="vs-ingest"><h3>Ingest</h3><div class="set-card">
+        ${row('The ingest skill', ingSkill ? `Runs on a copy of the vault when you prepare changes. In <code>${esc(ingSkill.path)}</code>.` : 'None found: Ingest offers the starter\'s <code>process-inbox</code>.', skillSel)}
+        ${row('What a run may do', 'Read and write pages in its copy, with this skill only. No commands, no web. A step of the skill that needs a command is skipped and named in the run\'s report.', '<span class="tag">no commands</span>')}
+      </div></section>
+      <section class="set-sec" id="vs-ask"><h3>Ask</h3><div class="set-card">
+        ${row('Research may use the web', research ? 'Searches and pages it opens may receive words from your pages. Opening a page always asks first.' : 'Off: Ask reads and curates, and has no Research.', `<button class="sw${research ? ' on' : ''}" id="kn-set-research" role="switch" aria-checked="${research}" data-kn="set-bool" data-key="ask.research" data-val="${!research}" aria-label="Research may use the web"></button>`)}
+        ${row('Conversations', 'Claude Code sessions in the vault\'s folder — also in the terminal panel and <code>claude --resume</code>.', '<button class="btn ghost sm" data-kn="tab" data-kn-tab="ask">Open Ask</button>')}
       </div></section>
       <section class="set-sec" id="vs-schema"><h3>Schema & vocabulary</h3><div class="set-card">
         ${(d.schema || []).length ? row(d.schema.map((f) => `<code>${esc(f)}</code>`).join(' · '), 'How agents work in this vault — the rules every skill follows', `<button class="btn ghost sm" data-kn="open-tab" data-path="${esc(d.schema[0])}">Open</button>`) : row('No rules for agents', 'An <code>AGENTS.md</code> or <code>CLAUDE.md</code> at the vault\'s root tells Claude how to work here.', '')}
@@ -1687,6 +1898,608 @@ const Kn = (() => {
     render()
   }
 
+  // ── Ingest (spec K14, K15): the sources in the vault's inbox, the first open's question, a run of the vault's own
+  // skill on a copy (its steps and tool rows), the review change by change, the last runs; the Add a source sheet. The
+  // page names sources by their paths in the queue Echo gave, runs by their ids and changes by their paths — never a file
+  // to pick: files are picked or dropped in Rust. Titles, subjects, paths, quotes, notes, reasons and diff lines are
+  // others' words: esc(); a source's and a run's text come as Echo's own HTML. ──
+  function ing() {
+    const s = st()
+    if (!s.ing || s.ing.vault !== s.vault) s.ing = { vault: s.vault, data: null, error: null, loading: false, filter: 'all', showDone: {}, sel: '', unchecked: new Set(), run: null, review: null, open: {}, src: null, skipping: null }
+    return s.ing
+  }
+  const ingestShown = () => S.view === 'brain' && st().source === 'vault' && st().tab === 'ingest' && !!vault()
+  const dayAt = (at) => {
+    const d = new Date(at)
+    if (isNaN(d)) return ''
+    const t = new Date(), y = new Date(Date.now() - 864e5)
+    const day = d.toDateString() === t.toDateString() ? 'Today' : d.toDateString() === y.toDateString() ? 'Yesterday' : d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })
+    return `${day} ${hm(d)}`
+  }
+  const dur = (s) => { s = Math.max(0, Math.round(Number(s) || 0)); return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s` }
+  const bytes = (b) => (b < 1024 ? `${b} B` : b < 1048576 ? `${Math.round(b / 1024)} KB` : `${(b / 1048576).toFixed(1)} MB`)
+  const SRC_IC = { echo: () => IC.call, mail: () => IC.mail, teams: () => IC.chat, web: () => IC.globe }
+  const srcIcon = (kind) => (SRC_IC[kind] || (() => IC.file))()
+  const KIND_WORD = { echo: 'from Echo', mail: 'mail', teams: 'Teams chat', web: 'web page' }
+  /** The vault's sources, the first open's question, the skill, the runs (`/ingest`); for the tab's number too. */
+  async function loadIngest() {
+    const v = vault(), g = ing()
+    try {
+      const d = await get(`api/kn/${enc(v.id)}/ingest`)
+      if (ing() !== g) return
+      if (d.error) { g.error = d.error; return }
+      Object.assign(g, { data: d, error: null })
+    } catch (e) { g.error = String(e.message || e) }
+  }
+  /** The Ingest tab: the sources, then the run the route names (its review when it waits for one), else the source
+   *  picked — the first New one by default — with its text when it is Markdown. */
+  async function loadIngestTab() {
+    await loadIngest()
+    const g = ing(), id = st().ingRun, d = g.data
+    if (id) return loadRun(id)
+    if (!d) return
+    const all = d.sources || []
+    // By default the first New source, else one whose run stopped (Run again), else the newest.
+    if (!all.some((x) => x.path === g.sel)) g.sel = ((all.find((x) => x.state === 'new') || all.find((x) => knSourceState(x, d.runs) === 'failed') || all[0]) || {}).path || ''
+    await loadSource()
+  }
+  /** The source picked, read as Pages reads it (a Markdown source only, shown read-only: K14-10). */
+  async function loadSource() {
+    const g = ing(), v = vault(), src = ((g.data || {}).sources || []).find((x) => x.path === g.sel)
+    if (!src || !(src.meta || {}).markdown) { g.src = null; return }
+    if (g.src && g.src.path === src.path && g.src.size === src.meta.size && g.src.page) return
+    const want = src.path, mine = (g.src = { path: want, size: src.meta.size, page: null })
+    let p
+    try { p = await get(`api/kn/${enc(v.id)}/page?path=${enc(want)}`) } catch (e) { p = { error: String(e.message || e) } }
+    if (ing() === g && g.src === mine) mine.page = p
+  }
+  /** Run `id` as it goes (K15-06): its state, time and cost, and its events after the ones already here; its changes
+   *  once it waits for review. */
+  async function loadRun(id) {
+    const v = vault(), g = ing()
+    if (!g.run || g.run.id !== id) { g.run = { id, data: null, events: [], next: 0, loaded: false, error: null, polling: false }; g.review = null; g.open = {} }
+    const r = g.run
+    let d
+    try { d = await get(`api/kn/${enc(v.id)}/ingest/${enc(id)}?from=${r.next}`) } catch (e) { d = { error: String(e.message || e) } }
+    if (ing() !== g || g.run !== r) return
+    if (d.error) { r.error = /no run/.test(d.error) ? 'This run isn\'t one of this vault\'s any more.' : d.error; return }
+    const evs = d.events || []
+    // Events that come while the page watches carry when they came (a tool row's time).
+    if (r.loaded) for (const e of evs) e.at = Date.now()
+    r.events.push(...evs)
+    r.next = d.next
+    delete d.events
+    Object.assign(r, { data: d, loaded: true, error: null })
+    // Its row in the list of runs follows it: its state, what it waits for, what it cost.
+    const row = ((g.data || {}).runs || []).find((x) => x.id === id)
+    if (row) Object.assign(row, { state: d.state, waiting: d.waiting, reason: d.reason, changes: d.changes, kept: d.kept, cost: d.cost })
+    if (d.state === 'review') await loadReview(id)
+    else g.review = null
+  }
+  /** While a run goes and Ingest shows it: asked again each second; drawn only when something came. When it ends, the
+   *  sources and runs follow. */
+  async function pollRun() {
+    const g = ing(), r = g.run
+    if (!r || r.polling || !r.data || r.data.state !== 'running') return
+    r.polling = true
+    try {
+      while (ing() === g && g.run === r && ingestShown() && r.data.state === 'running') {
+        await sleep(1000)
+        const before = `${r.next}|${r.data.state}|${r.data.waiting || ''}`
+        await loadRun(r.id)
+        if (ing() !== g || g.run !== r) return
+        if (r.data.state !== 'running') { await loadIngest(); render(); return }
+        if (`${r.next}|${r.data.state}|${r.data.waiting || ''}` !== before) render()
+      }
+    } finally { r.polling = false }
+  }
+  async function loadReview(id) {
+    const v = vault(), g = ing(), old = g.review && g.review.run === id ? g.review : null
+    const keep = { pending: old ? old.pending : {}, cmp: old ? old.cmp : {}, more: old ? old.more : {} }
+    try {
+      const d = await get(`api/kn/${enc(v.id)}/ingest/${enc(id)}/changes`)
+      if (ing() !== g) return
+      if (d.error) throw new Error(d.error)
+      g.review = { run: id, data: d, error: null, ...keep }
+    } catch (e) { if (ing() === g) g.review = { run: id, data: old && old.data, error: String(e.message || e), ...keep } }
+  }
+
+  function ingestView() {
+    const g = ing(), d = g.data
+    if (!d) return `<div class="kn-ing kn-ing-one">${g.error ? `<div class="kn-none"><p class="error">${esc(g.error)}</p><button class="btn sm" id="kn-ing-retry" data-kn="ing-retry">Look again</button></div>` : '<div class="skeleton" style="padding:24px"><i></i><i></i><i></i></div>'}</div>`
+    // The first open's question stands until answered (R40), but never hides a run the route names.
+    const first = !st().ingRun && knFirstOpen(d)
+    if (first) return firstOpenView(first)
+    return `<div class="kn-ing">${ingQueue(d)}<div class="kn-idet" data-keep-scroll>${ingDetail(d)}</div></div>`
+  }
+  /** K14-09: the files already there, done or new — asked until answered (R40), with what the vault keeps itself. */
+  function firstOpenView(first) {
+    const v = vault(), det = v.detected || {}
+    const q = esc(first.text).replace(esc(`${first.folder}/`), `<code>${esc(first.folder)}/</code>`)
+    const ledgers = (det.ledgers || []).map((l) => `<div><code>${esc(l)}</code><span>this vault's own record — shown, never written</span></div>`).join('')
+    const log = det.log ? `<div><code>${esc(det.log)}</code><span>its <code>processed</code> lines count as done either way</span></div>` : '<div><code>log.md</code><span>none here — in a vault with one, its <code>processed</code> lines count as done</span></div>'
+    const busy = st().busy.ingbase
+    return `<div class="kn-ing kn-ing-one" data-keep-scroll><div class="kn-first"><span class="kn-first-ic">${IC.tray}</span><h2>${q}</h2>
+      <p>Echo keeps its own list of what it has processed for this vault, so nothing is processed twice and nothing is skipped without saying so. Files your skills already turned into pages should start as done.</p>
+      <div class="kn-ledgers">${ledgers}${log}</div>
+      <div class="kn-acts"><button class="btn primary" id="kn-first-done" data-kn="ing-baseline" data-kn-done="true"${busy ? ' disabled' : ''}>Mark them done</button><button class="btn" id="kn-first-new" data-kn="ing-baseline" data-kn-done="false"${busy ? ' disabled' : ''}>Treat them as new</button></div>
+      <div class="set-sub">Nothing in the folder changes. New ones can be prepared or skipped one by one.</div></div></div>`
+  }
+  /** The ticked New sources for *Prepare changes*: every New one unless unticked. */
+  function ingChecked(d) {
+    const g = ing()
+    return (d.sources || []).filter((x) => x.state === 'new' && !g.unchecked.has(x.path)).map((x) => x.path)
+  }
+  function srcMeta(r) {
+    const m = r.meta || {}
+    if (r.state === 'skipped' && r.note) return r.note
+    const parts = [KIND_WORD[r.kind] || '', whenOf(m.added || m.modified), m.size != null ? bytes(m.size) : '', m.anyway ? 'another AI profile' : '']
+    return parts.filter(Boolean).join(' · ')
+  }
+  /** The queue (K14-08), the last runs (K15-11) and *Prepare changes* (K15-01, -03). */
+  function ingQueue(d) {
+    const s = st(), g = ing(), v = vault()
+    const q = knIngestQueue(d.sources, d.runs, { filter: g.filter, showDone: g.showDone }), c = q.counts
+    const f = (id, label, n) => `<button class="${g.filter === id ? 'on' : ''}" id="kn-ingf-${id}" data-kn="ing-filter" data-kn-filter="${id}" aria-pressed="${g.filter === id}">${label} ${nf(n)}</button>`
+    const ticked = new Set(ingChecked(d))
+    let i = 0
+    const row = (r) => {
+      const k = i++, on = !s.ingRun && g.sel === r.path
+      const cb = r.selectable ? `<input type="checkbox" class="kn-sr-cb" id="kn-srcc-${k}" data-kn-src-check="${esc(r.path)}"${ticked.has(r.path) ? ' checked' : ''}${d.running ? ' disabled' : ''} aria-label="${esc(`Prepare changes from ${r.title}`)}">` : '<span class="kn-sr-cb" aria-hidden="true"></span>'
+      return `<div class="kn-sr${on ? ' on' : ''}">${cb}<button class="kn-sr-b" id="kn-src-${k}" data-kn="ing-src" data-path="${esc(r.path)}" title="${esc(r.path)}"${on ? ' aria-current="true"' : ''}><span class="k ${esc(r.kind)}">${srcIcon(r.kind)}</span><b>${esc(r.title)}</b><span class="kn-st ${r.chip[0]}">${r.chip[0] === 'run' ? SPIN : ''}${esc(r.chip[1])}</span><span class="m${r.state === 'skipped' || r.state === 'failed' ? ' warn' : ''}">${esc(srcMeta(r))}</span></button></div>`
+    }
+    const groups = q.groups.map((gr) => `<div class="kn-q-g"><span>${esc(gr.label)}</span><span>${nf(gr.n)}</span></div>${gr.rows.map(row).join('')}${gr.folded
+      ? `<button class="kn-q-more" id="kn-qdone-${gr.id}" data-kn="ing-done" data-kn-group="${gr.id}" aria-expanded="false"><span>${nf(gr.folded)} done</span><span>show</span></button>`
+      : g.filter === 'all' && g.showDone[gr.id] ? `<button class="kn-q-more" id="kn-qdone-${gr.id}" data-kn="ing-done" data-kn-group="${gr.id}" aria-expanded="true"><span>Done ones shown</span><span>hide</span></button>` : ''}`).join('')
+    const none = !c.all ? `<div class="kn-q-none"><p>Nothing in <code>${esc(d.folder)}/</code> yet.</p><p class="set-sub">Add files, a call or memo, mail or a Teams chat, or a web page. ${d.create ? esc(`${d.create}.`) : ''}</p></div>`
+      : !q.groups.length ? '<p class="set-sub kn-q-none">Nothing under this filter.</p>' : ''
+    const titleOf = (p) => ((d.sources || []).find((x) => x.path === p) || {}).title || String(p).split('/').pop()
+    const runs = (d.runs || []).slice(0, 10).map((r) => `<button class="kn-q-run${s.ingRun === r.id ? ' on' : ''}" id="kn-runr-${esc(r.id)}" data-kn="ing-run" data-kn-run="${esc(r.id)}"${s.ingRun === r.id ? ' aria-current="true"' : ''}>${r.state === 'running' ? SPIN : r.state === 'failed' || r.state === 'stopped' ? IC.warn : ''}<span>${esc(dayAt(r.at))} · ${esc(knRunLine(r, titleOf).text)}</span></button>`).join('')
+    const runsBox = runs ? `<div class="kn-q-g"><span>Runs</span><span>the last ${nf(Math.min(10, d.runs.length))}</span></div>${runs}` : ''
+    const sel = [...ticked], busy = s.busy.ingprep, max = d.max_sources || 20
+    const going = (d.runs || []).find((r) => r.id === d.running)
+    const foot = !d.skill ? `<div class="kn-q-f"><div class="set-sub">This vault has no ingest skill, so nothing can be prepared yet.</div><div class="row"><span class="grow"></span><button class="btn sm primary" id="kn-ing-skill" data-kn="ing-skill">Add the starter's process-inbox…</button></div></div>`
+      : d.running ? `<div class="kn-q-f"><div class="row"><span class="set-sub grow">${going ? esc(`${many(going.sources.length, 'source')} being prepared`) : 'A run is going'}</span><button class="btn sm" id="kn-ing-prep" disabled>A run is going</button></div></div>`
+        : `<div class="kn-q-f"><div class="row"><span class="set-sub grow">${sel.length ? `<b>${nf(sel.length)} selected</b>${sel.length > max ? ` · ${nf(max)} at a time` : ''}` : 'Nothing selected'}</span><button class="btn sm primary" id="kn-ing-prep" data-kn="ing-prepare"${!sel.length || busy ? ' disabled' : ''}>${busy ? 'Starting…' : 'Prepare changes'}</button></div><div class="set-sub">with <code>${esc(d.skill.name)}</code> on a copy of the vault · ${esc(d.profile_name || profName(v.profile))}</div></div>`
+    return `<div class="kn-q"><div class="kn-q-h"><div class="row"><b>Sources</b><button class="btn sm" id="kn-ing-add" data-kn="ing-add">${IC.plus} Add a source</button></div><div class="kn-filters" role="group" aria-label="Show">${f('all', 'All', c.all)}${f('new', 'New', c.new)}${f('waiting', 'Waiting', c.waiting)}${f('done', 'Done', c.done)}</div></div>
+      <div class="kn-q-list" data-keep-scroll>${groups}${none}${runsBox}</div>${foot}</div>`
+  }
+  function ingDetail(d) {
+    const g = ing(), id = st().ingRun
+    if (id) return runDetail(d, id)
+    const src = (d.sources || []).find((x) => x.path === g.sel)
+    if (src) return sourceDetail(d, src)
+    return `<div class="kn-idet-in"><div class="kn-none"><p>${(d.sources || []).length ? 'Pick a source to see it as it came, or a run to see what it did.' : 'Add a source, then prepare changes: the vault\'s own skill works on a copy, and nothing is written until you approve it.'}</p><button class="btn sm" data-kn="ing-add">${IC.plus} Add a source</button></div></div>`
+  }
+  /** A source (K14-10): as it came, its state and what can be done with it. */
+  function sourceDetail(d, src) {
+    const s = st(), g = ing(), m = src.meta || {}
+    const state = knSourceState(src, d.runs), chip = knSourceChip(state, m)
+    const run = (d.runs || []).find((r) => r.id === m.run)
+    const reveal = `<button class="icon-btn" id="kn-src-reveal" data-kn="reveal" data-path="${esc(src.path)}" title="${/Windows/.test(navigator.userAgent) ? 'Show in Explorer' : 'Show in Finder'}" aria-label="${/Windows/.test(navigator.userAgent) ? 'Show in Explorer' : 'Show in Finder'}">${IC.folder}</button>`
+    const open = m.markdown ? `<button class="btn sm ghost" id="kn-src-open" data-kn="open" data-path="${esc(src.path)}">Open</button>` : ''
+    const off = d.running || !d.skill || s.busy.ingprep ? ' disabled' : ''
+    const acts = state === 'new' ? `<button class="btn sm primary" id="kn-src-prep" data-kn="ing-prepare-one" data-path="${esc(src.path)}"${off}>Prepare changes</button><button class="btn sm" id="kn-src-skip" data-kn="ing-skip" data-path="${esc(src.path)}">Skip</button>`
+      : state === 'failed' && run ? `<button class="btn sm primary" id="kn-src-again" data-kn="ing-again" data-kn-run="${esc(run.id)}"${d.running || s.busy.ingprep ? ' disabled' : ''}>Run again</button>`
+        : (state === 'review' || state === 'preparing') && run ? `<button class="btn sm primary" id="kn-src-run" data-kn="ing-run" data-kn-run="${esc(run.id)}">${state === 'review' ? 'Review the changes' : 'Watch the run'}</button>`
+          : state === 'done' && m.run ? `<button class="btn sm" id="kn-src-requeue" data-kn="ing-requeue" data-path="${esc(src.path)}"${s.busy.ingrq ? ' disabled' : ''}>Prepare again</button>` : ''
+    const skip = g.skipping === src.path ? `<div class="kn-inline kn-skip"><input class="search" id="kn-skip-note" placeholder="Why skip it? (optional)" aria-label="Why skip it (optional)" maxlength="500"><button class="btn sm" id="kn-skip-go" data-kn="ing-skip-go" data-path="${esc(src.path)}">Skip it</button><button class="btn ghost sm" data-kn="ing-skip-x">Cancel</button></div>` : ''
+    const line = state === 'failed' && run ? `<div class="kn-warn">${IC.warn}<span class="grow">${esc(String(run.reason || 'Its run didn\'t finish').replace(/\.$/, ''))}. Run again prepares the same sources.</span></div>`
+      : state === 'review' ? `<div class="kn-info">${IC.info}<span>Its changes wait for your review.</span></div>`
+        : state === 'preparing' ? `<div class="kn-info">${IC.info}<span>Being prepared now, on a copy of the vault.</span></div>`
+          : state === 'done' ? `<div class="kn-info">${IC.check}<span>${m.run && m.kept != null ? (m.kept ? `Done: ${many(m.kept, 'change')} of its run kept.` : 'Done — nothing kept. Prepare again puts it back.') : m.by === 'baseline' ? 'Marked done when Ingest first opened.' : `Done: ${esc(((vault() || {}).detected || {}).log || 'log.md')} says it was processed.`}</span></div>`
+            : state === 'skipped' ? `<div class="kn-info">${IC.info}<span>Skipped${m.note ? `: ${esc(String(m.note).replace(/\.$/, ''))}` : ''}. It counts as done.</span></div>` : ''
+    const anyway = m.anyway ? `<div class="kn-info">${IC.call}<span>Added anyway: this call was recorded on another AI profile than the vault's.</span></div>` : ''
+    const p = g.src && g.src.path === src.path ? g.src.page : null
+    const body = !m.markdown ? `<div class="kn-info">${IC.file}<span>Echo shows Markdown sources here. This one goes to Claude as it is when you prepare changes${/\.(docx?|pptx?|xlsx?)$/i.test(src.path) ? ' — Claude can\'t read Word, PowerPoint or Excel files: add a PDF copy' : ''}.</span></div>`
+      : !p ? '<div class="kn-srcdoc"><div class="skeleton"><i></i><i></i><i></i></div></div>'
+        : p.error ? `<div class="kn-srcdoc"><p class="error">${esc(p.error)}</p></div>` : `<div class="kn-srcdoc kn-doc selectable">${p.html || ''}</div>`
+    const where = [KIND_WORD[src.kind] ? KIND_WORD[src.kind].replace(/^\w/, (x) => x.toUpperCase()) : 'A file', m.size != null ? bytes(m.size) : '', whenOf(m.added || m.modified)].filter(Boolean).join(' · ')
+    return `<div class="kn-idet-in"><div class="kn-idet-h"><span class="k ${esc(src.kind)}">${srcIcon(src.kind)}</span><div><h2>${esc(src.title)}</h2><span class="set-sub">${esc(where)} · <span class="kn-st ${chip[0]}">${esc(chip[1])}</span></span><code class="set-sub">${esc(src.path)}</code></div>
+      <div class="kn-acts2">${acts}${open}${reveal}</div></div>${skip}${line}${anyway}${body}
+      <div class="kn-info">${IC.lock}<span>Sources are never edited. Echo keeps <code>${esc(d.folder)}/</code> as it came, so every page can point back to these words.</span></div></div>`
+  }
+  /** A run (K15-06, -08, -11): going, waiting for review, or ended. */
+  function runDetail(d, id) {
+    const s = st(), g = ing(), r = g.run
+    if (!r || r.id !== id || !r.data) return `<div class="kn-idet-in">${r && r.id === id && r.error ? `<div class="kn-none"><p class="error">${esc(r.error)}</p><button class="btn sm" data-kn="ing-back">Back to the sources</button></div>` : '<div class="skeleton" style="padding:12px 0"><i></i><i></i><i></i></div>'}</div>`
+    const x = r.data, rv = knRunView(r.events), v = vault()
+    if (x.state === 'running') return liveView(d, x, rv)
+    if (x.state === 'review') return reviewView(d, x, rv)
+    const titleOf = (p) => ((d.sources || []).find((y) => y.path === p) || {}).title || String(p).split('/').pop()
+    const list = `<div class="kn-run-src">${(x.sources || []).map((p) => `<div>${IC.file}<span>${esc(titleOf(p))}</span><code>${esc(p)}</code></div>`).join('')}</div>`
+    const stats = [dayAt(x.at), x.seconds != null ? dur(x.seconds) : '', x.tokens_in ? `${kTok(x.tokens_in)} in · ${kTok(x.tokens_out)} out` : '', x.cost ? usd(x.cost) : ''].filter(Boolean).join(' · ')
+    const back = '<button class="btn sm ghost" data-kn="ing-back">Back to the sources</button>'
+    if (x.state === 'failed' || x.state === 'stopped') {
+      const busy = s.busy.ingprep
+      return `<div class="kn-idet-in"><div class="kn-runh">${IC.warn}<div><b>${x.state === 'failed' ? 'The run failed' : 'The run stopped'} · ${many((x.sources || []).length, 'source')}</b><div class="set-sub">${esc(stats)}</div></div></div>
+        <div class="kn-warn" role="alert">${IC.warn}<span class="grow">${esc(String(x.reason || 'It didn\'t finish').replace(/\.$/, ''))}.</span><button class="btn sm primary" id="kn-run-again" data-kn="ing-again" data-kn-run="${esc(x.id)}"${d.running || busy ? ' disabled' : ''}>${busy ? 'Starting…' : 'Run again'}</button></div>
+        ${list}${runToolsHtml(rv, true)}<div class="kn-acts">${back}<button class="btn sm ghost" id="kn-run-discard" data-kn="ing-discard">Discard the run</button></div><div class="set-sub">Its log and copy stay 30 days, for Run again.</div></div>`
+    }
+    const kept = x.state === 'done' ? (x.kept ? `${many(x.kept, 'change')} of ${nf(x.changes || 0)} written into ${esc(v.name)}.` : 'Nothing was kept.') : 'Discarded — nothing was written.'
+    const again = (d.sources || []).filter((y) => (x.sources || []).includes(y.path) && y.state === 'done' && (y.meta || {}).run === x.id).map((y) => y.path)
+    return `<div class="kn-idet-in"><div class="kn-runh">${x.state === 'done' ? IC.check : IC.close}<div><b>${x.state === 'done' ? 'Done' : 'Discarded'} · ${many((x.sources || []).length, 'source')}</b><div class="set-sub">${esc(stats)}</div></div></div>
+      <div class="kn-info">${IC.info}<span>${kept}${again.length ? ' Prepare again makes its sources New.' : ''}</span></div>${list}
+      <div class="kn-acts">${back}${again.length ? `<button class="btn sm" id="kn-run-requeue" data-kn="ing-requeue-run"${s.busy.ingrq ? ' disabled' : ''}>Prepare again</button>` : ''}</div></div>`
+  }
+  /** The run's tool rows, through Ask's renderer (K13-03). */
+  function runToolsHtml(rv, ended) {
+    return rv.tools.length ? toolsHtml({ items: rv.tools }, ended, ing().open, 'ing-tool') : ''
+  }
+  function liveView(d, x, rv) {
+    const s = st(), v = vault(), wait = x.waiting || rv.waiting
+    const since = Date.parse(x.at)
+    const skill = (d.skill && d.skill.name) || 'the ingest skill'
+    const head = `<div class="kn-runh"><span class="kn-spin big" aria-hidden="true"></span><div><b>Preparing changes · ${many((x.sources || []).length, 'source')}</b><div class="set-sub"><span><code>${esc(skill)}</code> on a copy of the vault</span><span>${esc(profName(x.profile || v.profile))}</span><span${isNaN(since) ? '' : ` data-kn-elapsed="${since}"`}>${dur(x.seconds)}</span>${rv.result ? `<span>${kTok(rv.result.tokens_in)} in · ${kTok(rv.result.tokens_out)} out</span>` : ''}</div></div><button class="btn sm" id="kn-run-stop" data-kn="ing-stop"${s.busy.ingstop ? ' disabled' : ''}>${s.busy.ingstop ? 'Stopping…' : 'Stop'}</button></div>`
+    const waitLine = wait ? `<div class="kn-runline wait">${IC.clock}<span>${esc(String(wait).replace(/\.$/, ''))}. Recording comes first: the run starts once it is done.</span></div>` : ''
+    const copy = rv.copy ? `<div class="kn-runline">${IC.folder}<span>Copied the vault. ${esc(rv.copy)}</span></div>` : `<div class="kn-runline">${IC.folder}<span>Copied the vault.</span></div>`
+    const steps = rv.steps.length ? `<div class="kn-steps2" aria-label="Its steps">${rv.steps.map((t) => `<div class="kn-st2 kn-s-${esc(t.state)}"><i>${t.state === 'done' ? IC.check : ''}</i><span>${esc(t.text)}</span>${t.state === 'active' ? '<span class="r">now</span>' : ''}</div>`).join('')}</div>`
+      : `<div class="kn-steps2"><div class="kn-st2 kn-s-${wait ? 'todo' : 'active'}"><i></i><span>${wait ? 'Waiting to start' : `Starting ${esc(skill)}`}</span></div></div>`
+    const errs = rv.errors.map((t) => `<div class="kn-warn" role="alert">${IC.warn}<span class="grow">${esc(t)}</span></div>`).join('')
+    return `<div class="kn-idet-in">${head}${waitLine}${copy}${steps}${runToolsHtml(rv, false)}${errs}
+      <div class="kn-safe">${IC.lock}<span>Nothing is written into ${esc(v.name)} until you approve. The run can read and write only its copy.</span></div></div>`
+  }
+  /** At most this many lines of a change's diff before *Show N more lines*. */
+  const DIFF_SHOWN = 14
+  function foldedHunks(hunks, open) {
+    const total = (hunks || []).reduce((a, h) => a + h.length, 0)
+    if (open || total <= DIFF_SHOWN + 2) return { hunks: hunks || [], more: 0 }
+    const out = []
+    let left = DIFF_SHOWN
+    for (const h of hunks) { if (left <= 0) break; out.push(h.slice(0, left)); left -= h.length }
+    return { hunks: out, more: total - DIFF_SHOWN }
+  }
+  /** One change (K15-08): its file, kind, +/−, why; its diff, what D28 left out, the words it came from; its answer. */
+  function changeCard(c, i) {
+    const rv = ing().review, id = `kn-ch-${i}`, p = esc(c.path)
+    const tags = `<span class="tag${c.tag ? ` ${c.tag}` : ''}">${esc(c.kind)}</span>${c.adds ? '<span class="tag">adds only</span>' : ''}${c.edited ? '<span class="tag acc">your text</span>' : ''}${c.plus || c.minus ? pmOf(c) : ''}${c.why ? `<span class="kn-chg-why">${esc(c.why)}</span>` : ''}`
+    const b = (act, label, cls = 'btn sm ghost', extra = '', as = act) => `<button class="${cls}" id="${id}-${as}" data-kn="ing-ch" data-kn-do="${act}" data-path="${p}"${extra}>${label}</button>`
+    const cmp = !!rv.cmp[c.path]
+    const acts = c.blocked ? '<span class="set-sub">Can\'t be written</span>'
+      : c.busy ? `<span class="set-sub">${SPIN} Saving…</span>`
+        : c.state === 'undecided' ? b('reject', 'Reject') + b('edit', `${IC.edit} Edit`) + b('approve', 'Approve', 'btn sm')
+          : c.state === 'approved' ? `<span class="kn-ok">${IC.check} Approved</span>${b('reject', 'Reject', 'btn sm ghost', '', 'unapprove')}`
+            : c.state === 'rejected' ? `<span class="set-sub">Rejected</span>${b('approve', 'Approve', 'btn sm ghost', '', 'again')}`
+              : c.state === 'written' ? `<span class="kn-ok">${IC.check} Written</span>`
+                : c.changed ? b('compare', cmp ? 'Hide the diff' : 'Compare', 'btn sm ghost', ` aria-expanded="${cmp}"`) + b('reject', 'Keep the vault\'s') + (cmp ? b('take', 'Take the run\'s', 'btn sm primary') : '') : ''
+    const f = foldedHunks(c.hunks, !!rv.more[c.path])
+    const diff = f.hunks.length ? `<div class="kn-diff">${hunkRows(f.hunks)}</div>${f.more ? `<button class="kn-chg-more" id="${id}-more" data-kn="ing-more" data-path="${p}">Show ${many(f.more, 'more line')}</button>` : ''}` : ''
+    let body = ''
+    if (c.blocked) body = `<div class="kn-left-out">${IC.warn}<span>${esc(c.blocked)}. Echo leaves it out of the write.</span></div>${diff}`
+    else if (c.changed) body = `<div class="kn-left-out">${IC.warn}<span>Changed in the vault since the run, so it isn't written. ${cmp ? 'Below is what Take the run\'s writes over the vault\'s file now: − lines are the vault\'s.' : 'Compare shows what Take the run\'s would write over it.'}</span></div>${cmp ? diff : ''}`
+    else if (c.state !== 'rejected') {
+      const left = c.left ? `<div class="kn-left-out">${IC.warn}<div><span>${esc(String(c.left.note).replace(/\.$/, ''))}.</span>${c.left.lines.map((l) => `<code class="kn-left-l">${esc(l)}</code>`).join('')}</div></div>` : ''
+      const quotes = c.quotes.map((q) => `<div class="kn-qt">“${esc(q.text)}”<small>${esc(q.source)}</small></div>`).join('')
+      const from = `<div class="kn-from"><span class="lbl">${c.quotes.length ? IC.check : IC.info}${c.quotes.length ? 'Came from' : 'The words it came from'}</span>${quotes}${c.invented ? `<div class="kn-qt none">${esc(c.invented)}</div>` : ''}${c.fromNote ? `<div class="kn-qt none">${esc(c.fromNote)}</div>` : ''}</div>`
+      body = diff + left + (c.state === 'written' ? '' : from)
+    }
+    const cls = c.state === 'approved' || c.state === 'written' ? ' okd' : c.state === 'rejected' ? ' rej' : c.blocked ? ' blk' : c.changed ? ' chg' : ''
+    return `<div class="kn-chg${cls}" id="${id}"><div class="kn-chg-h"><span class="n">${c.state === 'approved' || c.state === 'written' ? IC.check : c.n}</span><div><code title="${p}">${p}</code><span class="set-sub">${tags}</span></div><div class="kn-acts2">${acts}</div></div>${body}</div>`
+  }
+  function reviewView(d, x, rv) {
+    const s = st(), g = ing(), v = vault(), r = g.review
+    if (!r || r.run !== x.id || (!r.data && !r.error)) return '<div class="kn-idet-in"><div class="skeleton" style="padding:12px 0"><i></i><i></i><i></i></div></div>'
+    if (!r.data) return `<div class="kn-idet-in"><div class="kn-none"><p class="error">${esc(r.error)}</p><button class="btn sm" data-kn="ing-retry">Look again</button></div></div>`
+    const R = knIngestReview(r.data.changes, r.pending), busy = s.busy.ingwrite
+    const ended = x.ended ? new Date(x.ended) : null
+    const skill = (d.skill && d.skill.name) || ''
+    const stats = [ended && !isNaN(ended) ? `Ready at ${hm(ended)}` : '', x.seconds != null ? dur(x.seconds) : '', x.tokens_in ? `${kTok(x.tokens_in)} in · ${kTok(x.tokens_out)} out` : '', x.cost ? usd(x.cost) : ''].filter(Boolean).map(esc).join(' · ') + (skill ? ` · <code>${esc(skill)}</code>` : '')
+    const bar = `<div class="kn-rbar"><div class="grow"><b>${many(R.counts.all, 'change')} from ${many((x.sources || []).length, 'source')}</b><div class="set-sub">${stats}</div></div>
+      <button class="btn sm ghost" id="kn-rv-discard" data-kn="ing-discard">Discard the run</button><button class="btn sm" id="kn-rv-rest" data-kn="ing-rest"${R.rest && !busy && !s.busy.ingrest ? '' : ' disabled'}>${s.busy.ingrest ? 'Approving…' : 'Approve the rest'}</button>${R.finish ? `<button class="btn sm primary" id="kn-rv-write" data-kn="ing-write"${busy ? ' disabled' : ''}>${busy ? 'Finishing…' : 'Finish the run'}</button>` : `<button class="btn sm primary" id="kn-rv-write" data-kn="ing-write"${R.write.can && !busy ? '' : ' disabled'}>${busy ? 'Writing…' : `Write ${nf(R.write.n)} approved`}</button>`}</div>`
+    const said = rv.said[rv.said.length - 1]
+    const report = said && said.html ? `<div class="kn-card kn-run-said"><div class="kn-card-h"><h3>What the run said</h3></div><div class="kn-doc selectable">${said.html}</div></div>` : ''
+    const err = r.error ? `<div class="kn-warn" role="alert">${IC.warn}<span class="grow">${esc(r.error)}</span></div>` : ''
+    return `${bar}<div class="kn-idet-in">${err}${R.cards.map(changeCard).join('') || '<p class="set-sub">The run changed nothing.</p>'}
+      <div class="kn-note-line">${IC.info}<span>${R.finish ? 'Nothing is left to decide. <b>Finish the run</b> marks its sources done with what was kept.' : `Undecided changes stay here for later. <b>Write</b> puts the approved ones into ${esc(v.name)} — each only if its file hasn't changed since the run.`}</span></div>${report}</div>`
+  }
+
+  // ── Ingest's actions ──
+  /** Focus the first undecided change's Approve after one is answered, else Write, else Approve the rest. */
+  const focusNext = () => focusOn('.kn-chg [id$="-approve"]:not([disabled])', '#kn-rv-write:not([disabled])', '#kn-rv-rest', '#kn-rv-discard')
+  async function prepare(paths) {
+    const v = vault(), g = ing()
+    if (!paths.length) return
+    try {
+      const r = await run('kn_ingest_run', { id: v.id, sources: paths }, 'ingprep')
+      g.unchecked = new Set()
+      await loadIngest()
+      goVault(v.id, 'ingest', r.run)
+      if (r.left) say(`Echo prepares ${nf(r.sources.length)} sources at a time: ${nf(r.left)} more wait for the next run.`)
+    } catch (e) { say(`Not started: ${String(e.message || e).replace(/\.$/, '')}.`) }
+  }
+  async function runAgain(id) {
+    const v = vault()
+    try { const r = await run('kn_ingest_run', { id: v.id, again: id }, 'ingprep'); await loadIngest(); goVault(v.id, 'ingest', r.run) } catch (e) { say(`Not started: ${String(e.message || e).replace(/\.$/, '')}.`) }
+  }
+  async function stopRun() {
+    const v = vault(), g = ing(), id = st().ingRun
+    try { await run('kn_ingest_stop', { id: v.id, run: id }, 'ingstop') } catch (e) { return say(String(e.message || e)) }
+    for (let i = 0; i < 20 && g.run && g.run.id === id && g.run.data && g.run.data.state === 'running'; i++) { await sleep(300); await loadRun(id) }
+    await loadIngest()
+    render()
+  }
+  async function decide(path, decision, extra = {}) {
+    const g = ing(), v = vault(), rv = g.review, id = st().ingRun
+    if (!rv || rv.pending[path]) return
+    rv.pending[path] = decision
+    render()
+    try { await run('kn_change', { id: v.id, run: id, path, decision, ...extra }) } catch (e) { say(`Not saved: ${String(e.message || e).replace(/\.$/, '')}.`) }
+    delete rv.pending[path]
+    if (decision === 'take') delete rv.cmp[path]
+    await loadReview(id)
+    render()
+    focusNext()
+  }
+  async function approveRest() {
+    const v = vault(), id = st().ingRun
+    try { await run('kn_change', { id: v.id, run: id, rest: true }, 'ingrest') } catch (e) { say(String(e.message || e)) }
+    await loadReview(id)
+    render()
+    focusOn('#kn-rv-write:not([disabled])', '#kn-rv-discard')
+  }
+  async function writeApproved() {
+    const v = vault(), id = st().ingRun
+    let r
+    try { r = await run('kn_ingest_apply', { id: v.id, run: id }, 'ingwrite') } catch (e) { return say(`Not written: ${String(e.message || e).replace(/\.$/, '')}.`) }
+    const m = r.finished && !(r.written || []).length && !(r.changed_since || []).length ? { text: `The run is done: ${nf(r.kept)} of its ${nf(r.of)} changes kept.`, wait: false } : knWriteSummary(r, v.name)
+    await loadRun(id)
+    await loadIngest()
+    st().tree = null
+    render()
+    if (m.wait) say(m.text); else done(m.text)
+    focusOn('.kn-chg [id$="-compare"]', '.kn-chg [id$="-approve"]', '#kn-rv-write:not([disabled])', '.kn-q-run.on')
+  }
+  function discardRun() {
+    const v = vault(), id = st().ingRun, x = ing().run && ing().run.data
+    const waiting = x && x.state === 'review'
+    askFirst('Discard the run?', waiting ? 'Its changes go and nothing is written. Its sources are Done — nothing kept; Prepare again puts them back.' : 'Its log and copy go; Run again is no longer offered.', 'Discard', async () => {
+      try { await run('kn_ingest_discard', { id: v.id, run: id }, 'ingdiscard') } catch (e) { return say(String(e.message || e)) }
+      await loadIngest()
+      goVault(v.id, 'ingest', '')
+      done(waiting ? 'Discarded. Nothing was written.' : 'Discarded.')
+    }, true)
+  }
+  async function requeue(paths) {
+    const v = vault()
+    try {
+      await run('kn_ingest_requeue', { id: v.id, paths }, 'ingrq')
+      await loadIngest()
+      render()
+      // A source the vault's log.md calls processed stays done whatever Echo's list says (D30).
+      const all = (ing().data || {}).sources || [], isNew = paths.filter((p) => (all.find((x) => x.path === p) || {}).state === 'new').length, kept = paths.length - isNew
+      const log = (v.detected || {}).log || 'log.md'
+      const text = `${isNew ? `${many(isNew, 'source')} ${isNew === 1 ? 'is' : 'are'} New again.` : ''}${kept ? `${isNew ? ' ' : ''}${many(kept, 'source')} ${kept === 1 ? 'stays' : 'stay'} done: ${log} says ${kept === 1 ? 'it was' : 'they were'} processed.` : ''}`
+      if (kept) say(text); else done(text)
+      focusOn('#kn-run-requeue', '#kn-src-requeue', '#kn-src-prep', '#kn-ing-prep:not([disabled])', '.kn-q-run.on', '.kn-sr.on .kn-sr-b')
+    } catch (e) { say(String(e.message || e).replace(/^\w/, (x) => x.toUpperCase())) }
+  }
+  async function skipSource(path) {
+    const v = vault(), g = ing(), note = ((document.getElementById('kn-skip-note') || {}).value || '').trim()
+    try { await run('kn_source_skip', { id: v.id, path, note: note || null }, 'ingskip') } catch (e) { return say(String(e.message || e)) }
+    g.skipping = null
+    await loadIngest()
+    render()
+    done('Skipped. It counts as done.')
+    focusOn('.kn-sr.on .kn-sr-b')
+  }
+  async function baseline(isDone) {
+    const v = vault()
+    try {
+      const r = await run('kn_baseline', { id: v.id, done: isDone }, 'ingbase')
+      await loadIngestTab()
+      render()
+      done(isDone ? `${many(r.marked, 'file')} marked done.` : `${many(r.marked, 'file')} ${r.marked === 1 ? 'is' : 'are'} New.`)
+      focusOn('#kn-ing-prep:not([disabled])', '#kn-ing-add')
+    } catch (e) { say(String(e.message || e)) }
+  }
+  async function addInboxSkill() {
+    const s = st(), v = vault()
+    try {
+      await run('kn_ingest_skill', { id: v.id }, 'ingskill')
+      s.sheet = null
+      try { s.data = await get('api/kn') } catch { /* the app restarting */ }
+      s.settings = null
+      await loadIngest()
+      render()
+      done('process-inbox is in the vault: .claude/skills/process-inbox/SKILL.md.')
+      focusOn('#kn-ing-prep:not([disabled])', '#kn-ing-add')
+    } catch (e) { if (s.sheet) { s.sheet.error = String(e.message || e); render() } else say(String(e.message || e)) }
+  }
+  function skillSheet() {
+    const x = st().sheet, d = ing().data || {}, busy = st().busy.ingskill
+    const body = `<p>The twin starter's skill for an inbox: it turns each source into pages, index rows and log lines. Echo writes only <code>.claude/skills/process-inbox/SKILL.md</code>.</p><pre class="kn-skill-text selectable">${esc(d.starter_skill || '')}</pre>${x.error ? `<p class="error">${esc(x.error)}</p>` : ''}`
+    return sheet('Add the starter\'s process-inbox', body, `<span class="grow"></span><button class="btn ghost" id="kn-skill-cancel" data-kn="sheet-close">Cancel</button><button class="btn primary" id="kn-skill-go" data-kn="ing-skill-go"${busy ? ' disabled' : ''}>${busy ? 'Adding…' : 'Add process-inbox'}</button>`, IC.bolt)
+  }
+  /** *Edit* (K15-08): the change's whole proposed text in an editor; the user's text replaces the run's. */
+  async function openChangeEdit(path) {
+    const s = st(), v = vault(), id = st().ingRun
+    const x = (s.sheet = { kind: 'chedit', run: id, path, text: null, error: null })
+    render()
+    let d
+    try { d = await get(`api/kn/${enc(v.id)}/ingest/${enc(id)}/text?path=${enc(path)}`) } catch (e) { d = { error: String(e.message || e) } }
+    if (st().sheet !== x) return
+    if (d.error) { x.error = d.error; x.text = '' } else x.text = d.text
+    s.focus = 'kn-chedit'
+    render()
+  }
+  function changeEditSheet() {
+    const x = st().sheet, busy = st().busy.ingedit
+    const body = x.text == null ? '<div class="skeleton"><i></i><i></i><i></i></div>'
+      : `<p class="set-sub">The run's text for <code>${esc(x.path)}</code>. Yours replaces it and is written whole — an index's or a log's no longer as added lines.</p><textarea id="kn-chedit" class="kn-chedit" spellcheck="true" aria-label="The change's text">${esc(x.text)}</textarea>${x.error ? `<p class="error">${esc(x.error)}</p>` : ''}`
+    return sheet('Edit the change', body, `<span class="set-sub grow">Nothing is written before Write.</span><button class="btn ghost" id="kn-chedit-cancel" data-kn="sheet-close">Cancel</button><button class="btn primary" id="kn-chedit-go" data-kn="ing-edit-go"${x.text == null || busy ? ' disabled' : ''}>${busy ? 'Saving…' : 'Use my text'}</button>`, IC.edit)
+  }
+  async function editGo() {
+    const s = st(), x = s.sheet, v = vault()
+    const text = (document.getElementById('kn-chedit') || {}).value
+    if (!x || text == null) return
+    try {
+      await run('kn_change', { id: v.id, run: x.run, path: x.path, decision: 'edit', text }, 'ingedit')
+      if (st().sheet === x) s.sheet = null
+      await loadReview(x.run)
+      render()
+      done('Your text replaces the run\'s. It is approved.')
+      focusNext()
+    } catch (e) { if (st().sheet === x) { x.error = String(e.message || e); render() } else say(String(e.message || e)) }
+  }
+
+  // ── the Add a source sheet (K14-02…06, K14-03b) ──
+  function openAdd(tab = 'files', pick = null) {
+    const s = st(), g = ing()
+    s.menu = null
+    s.sheet = { kind: 'source', tab, pick, call: null, include: { transcript: false, chat: false }, mismatch: null, calls: null, q: '', hits: null, hit: null, days: 7, url: '', busy: false, picking: false, error: null, signed: null }
+    s.focus = tab === 'web' ? 'kn-src-url' : tab === 'files' ? (pick ? 'kn-src-go' : 'kn-src-choose') : 'kn-src-q'
+    render()
+    if (tab === 'call') findSourceCalls('')
+    if (!g.data) loadIngest().then(render)
+  }
+  function srcTab(tab) {
+    const s = st(), x = s.sheet
+    if (!x || x.kind !== 'source') return
+    Object.assign(x, { tab, q: '', hits: null, hit: null, error: null })
+    s.focus = tab === 'web' ? 'kn-src-url' : tab === 'files' ? 'kn-src-choose' : 'kn-src-q'
+    render()
+    if (tab === 'call') findSourceCalls('')
+  }
+  function findSourceCalls(q) {
+    const x = st().sheet, v = vault()
+    clearTimeout(Kn._srcTimer)
+    Kn._srcTimer = setTimeout(async () => {
+      let r
+      try { r = await get(`api/kn/${enc(v.id)}/calls?q=${enc(q)}`) } catch { return }
+      if (st().sheet !== x || x.q !== q || x.tab !== 'call') return
+      x.calls = r.calls || []
+      patchEl('kn-src-list', sourceList())
+    }, q ? 150 : 0)
+  }
+  function findMail(q) {
+    const x = st().sheet, v = vault()
+    clearTimeout(Kn._srcTimer)
+    if (!q.trim()) { x.hits = null; return patchEl('kn-src-list', sourceList()) }
+    Kn._srcTimer = setTimeout(async () => {
+      let r
+      try { r = await get(`api/kn/${enc(v.id)}/m365?q=${enc(q)}`) } catch (e) { r = { error: String(e.message || e) } }
+      if (st().sheet !== x || x.q !== q || x.tab !== 'mail') return
+      if (r.signed_in === false && ing().data) { ing().data.m365 = false; return render() }
+      x.hits = r.results || []
+      x.error = r.error || (r.errors ? Object.values(r.errors).join(' · ') : null)
+      patchEl('kn-src-list', sourceList())
+    }, 300)
+  }
+  async function chooseFiles() {
+    const x = st().sheet
+    if (!x || x.picking) return
+    x.picking = true
+    render()
+    try { const p = await run('kn_pick_files', {}); if (st().sheet === x && p && p.seq != null) x.pick = p } catch (e) { if (st().sheet === x) x.error = String(e.message || e) }
+    x.picking = false
+    render()
+    focusOn('#kn-src-go:not([disabled])', '#kn-src-choose')
+  }
+  /** Files dropped on the window (K14-03b; Rust kept them as a pick): the sheet opens with them while Ingest shows, or
+   *  takes them when it is open; elsewhere a drop does nothing. */
+  function dropped(r) {
+    const s = st()
+    if (!r || r.seq == null || !(r.files || []).length) return
+    if (s.sheet && s.sheet.kind === 'source') { Object.assign(s.sheet, { tab: 'files', pick: r, error: null }); render(); return focusOn('#kn-src-go:not([disabled])') }
+    if (s.sheet || !ingestShown()) return
+    openAdd('files', r)
+  }
+  /** The call or memo, mail or chat list — drawn alone while its search field keeps the focus. */
+  function sourceList() {
+    const x = st().sheet, v = vault()
+    if (x.tab === 'call') {
+      if (!x.calls) return '<div class="kn-pk-none">Finding…</div>'
+      if (!x.calls.length) return `<div class="kn-pk-none">${x.q ? `No call or memo with minutes matches “${esc(x.q)}”.` : 'No calls or memos with minutes yet.'}</div>`
+      return `<div class="kn-pick-l" role="radiogroup" aria-label="Calls and memos">${x.calls.slice(0, 40).map((c, i) => {
+        const on = x.call && x.call.name === c.name
+        const people = (c.people || []).length
+        const tags = `${c.note ? `<span class="tag ok">note saved in ${esc(v.name)}</span>` : ''}${c.profile_ok ? '' : `<span class="tag warn">${esc(c.profile_name || c.profile || 'another profile')} — another AI profile</span>`}`
+        return `<button class="kn-pl${on ? ' on' : ''}" role="radio" aria-checked="${!!on}" id="kn-scall-${i}" data-kn="src-call" data-kn-i="${i}"><span class="kn-dot${on ? ' on' : ''}" aria-hidden="true"><i></i></span><span class="k">${c.memo ? IC.memo : IC.call}</span><b>${esc(c.title)}</b><span class="set-sub">${esc(c.date || '')}</span><span class="m">${c.memo ? 'a memo' : people ? `${nf(people)} ${people === 1 ? 'person' : 'people'}` : ''}${c.profile_ok && c.profile_name ? ` · ${esc(c.profile_name)}` : ''} ${tags}</span></button>`
+      }).join('')}</div>`
+    }
+    if (x.tab === 'mail') {
+      if (!x.q.trim()) return '<div class="kn-pk-none">Type to search mail and Teams chats of the last 90 days.</div>'
+      if (!x.hits) return '<div class="kn-pk-none">Searching…</div>'
+      const err = x.error ? `<p class="error">${esc(x.error)}</p>` : ''
+      if (!x.hits.length) return `${err}<div class="kn-pk-none">Nothing matches “${esc(x.q)}”.</div>`
+      return `${err}<div class="kn-pick-l" role="radiogroup" aria-label="Mail and chats">${x.hits.slice(0, 25).map((h, i) => {
+        const on = x.hit && x.hit.id === h.id && x.hit.kind === h.kind, mail = h.kind === 'mail'
+        const from = (h.from && (h.from.name || h.from.email)) || ''
+        const range = on && !mail ? ` · <select class="set-in kn-days" id="kn-src-days" data-kn-src-days aria-label="Which days of the chat">${[7, 14, 30].map((n) => `<option value="${n}"${x.days === n ? ' selected' : ''}>the last ${n} days</option>`).join('')}</select>` : ''
+        return `<div class="kn-pl${on ? ' on' : ''}"><button class="kn-pl-b" role="radio" aria-checked="${!!on}" id="kn-smail-${i}" data-kn="src-hit" data-kn-i="${i}"><span class="kn-dot${on ? ' on' : ''}" aria-hidden="true"><i></i></span><span class="k ${mail ? 'mail' : 'teams'}">${mail ? IC.mail : IC.chat}</span><b>${esc(mail ? h.subject || '(no subject)' : 'Teams chat')}</b><span class="set-sub">${esc(h.at ? whenOf(h.at) : '')}</span></button><span class="m">${esc([from, h.summary].filter(Boolean).join(' · '))}${range}</span></div>`
+      }).join('')}</div>`
+    }
+    return ''
+  }
+  function sourceFoot() {
+    const s = st(), x = s.sheet, d = ing().data || {}
+    const a = knAddState(x, { m365: d.m365 !== false })
+    const folder = d.folder || 'raw_inbox'
+    const what = x.tab === 'web' ? `Into <code>${esc(folder)}/web/</code>` : a.count ? `${many(a.count, x.tab === 'files' ? 'file' : 'source')} · written into this vault only` : ''
+    return `<span class="set-sub grow">${what}</span><button class="btn ghost" id="kn-src-cancel" data-kn="sheet-close">Cancel</button><button class="btn primary" id="kn-src-go" data-kn="src-go"${a.can ? '' : ' disabled'}>${x.busy ? 'Adding…' : esc(a.label)}</button>`
+  }
+  function sourceSheet() {
+    const x = st().sheet, g = ing(), d = g.data || {}, v = vault()
+    const folder = d.folder || 'raw_inbox'
+    const tabs = `<div class="kn-stabs" role="tablist" aria-label="What to add">${[['files', IC.upload, 'Files'], ['call', IC.call, 'A call or memo'], ['mail', IC.mail, 'Mail or Teams'], ['web', IC.globe, 'A web page']].map(([id, ic, l]) => `<button class="tab" role="tab" id="kn-stab-${id}" data-kn="src-tab" data-kn-tab="${id}" aria-selected="${x.tab === id}">${ic}${l}</button>`).join('')}</div>`
+    const create = d.create ? `<div class="kn-note-line">${IC.info}<span>${esc(d.create)}.</span></div>` : ''
+    let body = ''
+    if (x.tab === 'files') {
+      const mac = /Mac/.test(navigator.platform || navigator.userAgent || '')
+      const taken = new Set((d.sources || []).map((y) => y.path))
+      const list = x.pick && (x.pick.files || []).length ? `<div class="kn-pick-l">${x.pick.files.map((f) => `<div class="kn-pl"><span class="kn-ok-ic${f.too_big ? ' warn' : ''}">${f.too_big ? IC.warn : IC.check}</span><span class="k">${IC.file}</span><b>${esc(f.name)}</b><span class="set-sub">${esc(bytes(f.size || 0))}</span><span class="m${f.too_big ? ' warn' : ''}">${f.too_big ? 'Over 50 MB — not added. Keep it elsewhere and add its transcript.' : `→ <code>${esc(folder)}/${esc(f.name)}</code> · ${taken.has(`${folder}/${f.name}`) ? 'that name is taken: it gets a number' : 'copied byte for byte'}`}</span></div>`).join('')}</div>` : ''
+      body = `<div class="kn-drop">${IC.upload}<b>${mac ? 'Drop files on this window' : 'Files from your computer'}</b>${mac ? '<span class="set-sub">or</span>' : ''}<button class="btn sm" id="kn-src-choose" data-kn="src-choose"${x.picking ? ' disabled' : ''}>${x.picking ? 'Choosing…' : 'Choose files…'}</button></div>${list}
+        <div class="kn-note-line">${IC.info}<span>Files go into <code>${esc(folder)}/</code> as they are and are never edited. Claude reads Markdown, text, PDF and images; for Word or PowerPoint, add a PDF copy too.</span></div>${create}`
+    } else if (x.tab === 'call') {
+      const c = x.call, mm = c && x.mismatch && x.mismatch.name === c.name ? x.mismatch : null
+      const inc = (k, label, has) => `<label class="kn-check"><input type="checkbox" data-kn-src-inc="${k}"${x.include[k] && has ? ' checked' : ''}${has ? '' : ' disabled'}> ${label}</label>`
+      body = `<input class="search" id="kn-src-q" placeholder="Find a call or memo" aria-label="Find a call or memo" value="${esc(x.q)}" autocomplete="off" spellcheck="false"><div id="kn-src-list">${sourceList()}</div>
+        ${mm ? `<div class="kn-warn" role="alert">${IC.warn}<span class="grow">This call's text goes only to <b>${esc(mm.call_name)}</b>; ${esc(v.name)} is read by <b>${esc(mm.vault_name)}</b>. Add anyway lets that profile's runs read its minutes.</span></div>` : ''}
+        ${c ? `<div class="kn-field"><span>Include</span><div class="kn-inline"><label class="kn-check"><input type="checkbox" checked disabled> Minutes</label>${inc('transcript', 'Transcript', c.transcript)}${inc('chat', 'Chat', c.chat)}</div></div>
+        <div class="kn-rowpre">${esc(folder)}/echo/ · kind: ${c.memo ? 'memo' : 'call'}${c.note ? ` · note: ${esc(c.note)}` : ''}</div>` : ''}
+        <div class="kn-note-line">${IC.info}<span>The minutes go in as they are${c && c.note ? '. Its note is already in this vault, so the skill is told to add to it, not write another' : ''}. Nothing is processed until you prepare changes.</span></div>${create}`
+    } else if (x.tab === 'mail') {
+      body = d.m365 === false ? `<div class="kn-info">${IC.info}<span>Mail and Teams chats come through Echo's Microsoft 365 sign-in, and Echo isn't signed in. Sign in from <button class="kn-lnk" id="kn-src-m365" data-kn="src-m365">Settings → Calendar &amp; chat</button>.</span></div>`
+        : `<input class="search" id="kn-src-q" placeholder="Search mail and Teams chats" aria-label="Search mail and Teams chats" value="${esc(x.q)}" autocomplete="off" spellcheck="false"><div id="kn-src-list">${sourceList()}</div>
+        <div class="kn-note-line">${IC.info}<span>Read with Echo's Microsoft 365 sign-in. Mail carries no AI profile in Echo; it will be read by this vault's profile, ${esc(d.profile_name || profName(v.profile))}. Attachments are named, not downloaded.</span></div>${create}`
+    } else {
+      const a = knAddState(x)
+      body = `<div class="kn-field"><span>Address</span><input class="search kn-in kn-url" id="kn-src-url" placeholder="https://" aria-label="The page's address" value="${esc(x.url)}" autocomplete="off" spellcheck="false"></div><div id="kn-src-note" class="set-sub kn-indent">${esc(a.note || '')}</div>
+        <div class="kn-note-line">${IC.lock}<span>Only the address is sent — no cookies, nothing from your vault. Echo keeps the page's main text as Markdown: menus, footers and scripts are left out.</span></div>${create}`
+    }
+    const err = x.error && x.tab !== 'mail' ? `<p class="error" role="alert">${esc(x.error)}</p>` : ''
+    return sheet(`Add a source to ${esc(v.name)}`, body + err, `<span class="kn-fa-foot" id="kn-src-f">${sourceFoot()}</span>`, IC.tray, tabs)
+  }
+  async function addGo() {
+    const s = st(), x = s.sheet, v = vault(), g = ing()
+    if (!x || x.kind !== 'source') return
+    const d = g.data || {}
+    if (!knAddState(x, { m365: d.m365 !== false }).can) return
+    const args = knAddArgs(x, isoDay())
+    x.busy = true; x.error = null
+    render()
+    let r
+    try { r = await run('kn_source_add', { id: v.id, ...args }, 'srcadd') } catch (e) {
+      if (st().sheet === x) { x.busy = false; x.error = String(e.message || e); render(); return focusOn('#kn-src-url', '#kn-src-q', '#kn-src-choose') }
+      return say(`Not added: ${e.message || e}`)
+    }
+    x.busy = false
+    // A call on another AI profile: said on that call, with *Add anyway* (X-P3).
+    if (r && r.mismatch) { x.mismatch = { ...r.mismatch, name: x.call.name }; render(); return focusOn('#kn-src-go') }
+    if (st().sheet === x) s.sheet = null
+    const added = (r.added || (r.path ? [r] : [])), refused = r.refused || []
+    const folder = d.folder || 'raw_inbox'
+    const commits = added.map((a) => String(a.committed || '')).filter((c) => /^skipped: /.test(c))
+    const text = [added.length === 1 ? `Added ${added[0].path}.` : added.length ? `Added ${nf(added.length)} files to ${folder}/.` : '',
+      refused.length ? `Not added: ${refused.map((f) => (String(f.why).includes(f.name) ? String(f.why) : `${f.name} — ${f.why}`).replace(/\.$/, '')).join('; ')}.` : '',
+      commits.length ? `Not committed: ${commits[0].slice(9).replace(/\.$/, '')}.` : ''].filter(Boolean).join(' ')
+    if (added.length) { g.sel = added[0].path; if (g.filter !== 'all' && g.filter !== 'new') g.filter = 'all' }
+    await loadIngest()
+    if (s.tab !== 'ingest' || s.ingRun) goVault(v.id, 'ingest', '')
+    else { render(); loadSource().then(render) }
+    if (refused.length || commits.length || !added.length) say(text || 'Nothing was added.'); else done(text)
+  }
+
   // ── sheets: connect, new vault, new page, rows, remove, global twin, save minutes ──
   /** Ask before an action, in the page: the window's webview shows no confirm() dialogs. */
   function askFirst(title, text, yes, run, danger = false) { st().asking = { title, text, yes, run, danger }; render() }
@@ -1863,6 +2676,9 @@ const Kn = (() => {
       case 'sample': return sampleSheet()
       case 'addto': return addToSheet()
       case 'fixall': return fixAllSheet()
+      case 'source': return sourceSheet()
+      case 'chedit': return changeEditSheet()
+      case 'skill': return skillSheet()
     }
     return ''
   }
@@ -1884,7 +2700,7 @@ const Kn = (() => {
     }
     if (!v) return `<div class="kn">${head()}<div class="kn-tabs kn-tabs-empty"></div><div class="kn-body">${emptyView()}</div></div>`
     if (v.available === false) return `<div class="kn">${head()}<div class="kn-tabs kn-tabs-empty"></div><div class="kn-body">${missingView(v)}</div></div>`
-    const body = s.tab === 'graph' ? graphView() : s.tab === 'settings' ? settingsView() : s.tab === 'ask' ? chatView() : s.tab === 'health' ? healthView() : pagesView()
+    const body = s.tab === 'graph' ? graphView() : s.tab === 'settings' ? settingsView() : s.tab === 'ask' ? chatView() : s.tab === 'health' ? healthView() : s.tab === 'ingest' ? ingestView() : pagesView()
     return `<div class="kn">${head()}${tabs()}<div class="kn-body">${body}</div></div>`
   }
   function after() {
@@ -1892,6 +2708,7 @@ const Kn = (() => {
     if (s.tab === 'graph') drawGraph()
     if (s.tab === 'pages' && s.rail === 'links') drawMini()
     if (s.tab === 'ask' && vault()) { syncThread(); fitQ(); pollChat() }
+    if (s.tab === 'ingest' && vault()) { pollRun(); tickRunning() }
     if (s.scrollTo) { const el = document.getElementById(s.scrollTo); if (el) el.scrollIntoView({ block: 'start' }); s.scrollTo = null }
     if (s.focus) {
       const el = document.getElementById(s.focus)
@@ -2206,10 +3023,16 @@ const Kn = (() => {
   /** Seconds on the calls still running, counted here (the events carry no clock). */
   let runTimer = null
   function tickRunning() {
-    const draw = () => { const now = Date.now(); for (const el of document.querySelectorAll('[data-kn-since]')) el.textContent = `${Math.max(0, Math.round((now - Number(el.dataset.knSince)) / 1000))} s` }
+    const draw = () => {
+      const now = Date.now()
+      for (const el of document.querySelectorAll('[data-kn-since]')) el.textContent = `${Math.max(0, Math.round((now - Number(el.dataset.knSince)) / 1000))} s`
+      // An ingest run's time so far.
+      for (const el of document.querySelectorAll('[data-kn-elapsed]')) el.textContent = dur((now - Number(el.dataset.knElapsed)) / 1000)
+    }
+    const any = () => document.querySelector('[data-kn-since], [data-kn-elapsed]')
     draw()
-    if (runTimer || !document.querySelector('[data-kn-since]')) return
-    runTimer = setInterval(() => { if (!document.querySelector('[data-kn-since]')) { clearInterval(runTimer); runTimer = null } else draw() }, 1000)
+    if (runTimer || !any()) return
+    runTimer = setInterval(() => { if (!any()) { clearInterval(runTimer); runTimer = null } else draw() }, 1000)
   }
   function fitQ() { const q = document.getElementById('kn-chat-q'); if (q) { q.style.height = 'auto'; q.style.height = `${Math.min(q.scrollHeight, 220)}px` } }
 
@@ -2388,23 +3211,22 @@ const Kn = (() => {
     }
     return '<div hidden></div>'
   }
-  function toolsHtml(b, ended) {
-    const c = chat()
+  function toolsHtml(b, ended, opened = chat().open, act = 'tool-open') {
     const secs = (ms) => `${(ms / 1000).toFixed(1)} s`
     const where = (w) => (w ? ` ${/^in /.test(w) ? `in <code>${esc(w.slice(3))}</code>` : esc(w)}` : '')
     const pm = (t) => esc(t).replace(/(\+\d+)/, '<span class="a">$1</span>').replace(/(−\d+)/, '<span class="d">$1</span>')
     const detail = (r) => `<div class="kn-tdet">${r.input && Object.keys(r.input).length ? `<div class="kn-tdet-h">Asked</div><pre>${esc(JSON.stringify(r.input, null, 2))}</pre>` : ''}${r.preview ? `<div class="kn-tdet-h">Result</div><pre>${esc(r.preview)}</pre>` : ''}${r.path && /\.md$/i.test(r.path) ? `<button class="btn ghost sm" data-kn="open" data-path="${esc(r.path)}">${IC.file} Open the page</button>` : ''}</div>`
     const one = (r, sub) => {
-      const open = c.open[r.id]
+      const open = opened[r.id]
       const icon = r.running ? SPIN : r.error ? IC.warn : TOOL_IC[r.name] || IC.bolt
       const target = r.target ? ` ${r.code ? `<code>${esc(r.target)}</code>` : esc(r.target)}` : ''
       const time = r.running && r.at ? `<span data-kn-since="${r.at}"></span>` : r.at && r.done ? secs(r.done - r.at) : ''
-      return `<button class="kn-trow${sub ? ' sub' : ''}${r.running ? ' run' : ''}${r.error ? ' err' : ''}" data-kn="tool-open" data-id="${esc(r.id)}" aria-expanded="${!!open}"><span class="ti">${icon}</span><span class="tx"><span class="tv">${esc(r.verb)}</span>${target}${where(r.where)}${r.pm ? ` <span class="kn-pm">${pm(r.pm)}</span>` : ''}${r.note ? ` <span class="td">· ${esc(r.note)}</span>` : ''}</span><span class="tt">${time}</span></button>${open ? detail(r) : ''}`
+      return `<button class="kn-trow${sub ? ' sub' : ''}${r.running ? ' run' : ''}${r.error ? ' err' : ''}" data-kn="${act}" data-id="${esc(r.id)}" aria-expanded="${!!open}"><span class="ti">${icon}</span><span class="tx"><span class="tv">${esc(r.verb)}</span>${target}${where(r.where)}${r.pm ? ` <span class="kn-pm">${pm(r.pm)}</span>` : ''}${r.note ? ` <span class="td">· ${esc(r.note)}</span>` : ''}</span><span class="tt">${time}</span></button>${open ? detail(r) : ''}`
     }
     const rows = knToolRows(b.items, { ended }).map((r) => {
       if (r.kind !== 'fold') return one(r)
-      const open = c.open[`f:${r.id}`]
-      return `<button class="kn-trow fold${r.running ? ' run' : ''}" data-kn="tool-open" data-id="f:${esc(r.id)}" aria-expanded="${!!open}"><span class="ti">${r.running ? SPIN : IC.files}</span><span class="tx"><span class="tv">${esc(r.text)}</span>${r.errors ? ` <span class="td err">· ${r.errors} failed</span>` : ''}</span><span class="tt"><span class="kn-car">${open ? '▾' : '▸'}</span></span></button>${open ? r.rows.map((x) => one(x, true)).join('') : ''}`
+      const open = opened[`f:${r.id}`]
+      return `<button class="kn-trow fold${r.running ? ' run' : ''}" data-kn="${act}" data-id="f:${esc(r.id)}" aria-expanded="${!!open}"><span class="ti">${r.running ? SPIN : IC.files}</span><span class="tx"><span class="tv">${esc(r.text)}</span>${r.errors ? ` <span class="td err">· ${r.errors} failed</span>` : ''}</span><span class="tt"><span class="kn-car">${open ? '▾' : '▸'}</span></span></button>${open ? r.rows.map((x) => one(x, true)).join('') : ''}`
     }).join('')
     return `<div class="kn-tools">${rows}</div>`
   }
@@ -2782,6 +3604,8 @@ const Kn = (() => {
     add('Knowledge', 'Start a new vault…', () => { go(home()); openNew() }, { keywords: 'vault twin knowledge create' })
     if (vault()) add('Knowledge', `Find a page in ${vault().name}…`, () => { goVault(vault().id, 'pages', st().path); st().focus = 'kn-find'; render() }, { keywords: 'open page knowledge search' })
     if (vault() && vault().available !== false) add('Knowledge', `Ask ${vault().name}…`, () => { st().source = 'vault'; askHere(null, false) }, { keywords: 'claude question chat conversation knowledge' })
+    if (vault() && vault().available !== false) add('Knowledge', 'Add a source…', () => { st().source = 'vault'; openAdd('files') }, { keywords: 'ingest inbox file mail teams chat web page call memo knowledge' })
+    if (vault() && vault().available !== false) add('Knowledge', 'Prepare changes', () => { st().source = 'vault'; goVault(vault().id, 'ingest', ''); focusOn('#kn-ing-prep:not([disabled])', '#kn-ing-add') }, { keywords: 'ingest inbox process sources knowledge run' })
     if (vault() && vault().available !== false) add('Knowledge', 'Open Health', () => { st().source = 'vault'; goVault(vault().id, 'health', st().hlKey) }, { keywords: 'checks score broken links fix index tidy knowledge' })
     if (S.view === 'calls' && S.call && S.call.notes && S.call.knowledge && (S.call.knowledge.vaults || []).length) add('Knowledge', 'Save the minutes to Knowledge…', () => openSave(S.call.name), { keywords: 'vault note export' })
   }
@@ -2840,7 +3664,7 @@ const Kn = (() => {
       case 'connect': return openConnect()
       case 'new': return openNew()
       case 'import': try { const r = await run('kn_import_plugin', {}, 'import'); await refreshAll(); done(`${r.connected} vault${r.connected === 1 ? '' : 's'} connected from the Obsidian plugin.`) } catch (err) { say(String(err.message || err)) } return
-      case 'tab': e.preventDefault(); s.menu = null; return goVault(s.vault, d.knTab, d.knTab === 'pages' ? s.path : d.knTab === 'ask' ? chat().id : d.knTab === 'health' ? s.hlKey : '')
+      case 'tab': e.preventDefault(); s.menu = null; return goVault(s.vault, d.knTab, d.knTab === 'pages' ? s.path : d.knTab === 'ask' ? chat().id : d.knTab === 'health' ? s.hlKey : d.knTab === 'ingest' ? s.ingRun : '')
       case 'menu': s.menu = s.menu === d.menu ? null : d.menu; return render()
       case 'reveal': s.menu = null; send({ cmd: 'kn_reveal', id: s.vault, path: d.path || '' }); return render()
       case 'obsidian': s.menu = null; send({ cmd: 'kn_obsidian', id: s.vault, path: d.path || '' }); return render()
@@ -2934,6 +3758,53 @@ const Kn = (() => {
         try { const r = await run('kn_set', { id: v.id, key: s.ovr.key, value: val }); const i = s.data.vaults.findIndex((x) => x.id === v.id); if (i >= 0) s.data.vaults[i] = r.vault; s.ovr = {}; s.tree = null; s.graph = null; hlReset(); await loadSettings(); render() } catch (err) { s.ovr.error = String(err.message || err); render() }
         return
       }
+      // Ingest (K14, K15): the queue, a source, a run, the review, the Add a source sheet
+      case 'ing-retry': await loadIngestTab(); return render()
+      case 'ing-add': return openAdd('files')
+      case 'ing-filter': ing().filter = d.knFilter; return render()
+      case 'ing-done': { const g = ing(); g.showDone[d.knGroup] = !g.showDone[d.knGroup]; render(); return focusOn(`#kn-qdone-${d.knGroup}`, '.kn-sr.on .kn-sr-b') }
+      case 'ing-src': {
+        const g = ing()
+        g.sel = d.path; g.skipping = null
+        if (s.ingRun) return goVault(s.vault, 'ingest', '')
+        render(); await loadSource(); return render()
+      }
+      case 'ing-run': return goVault(s.vault, 'ingest', d.knRun)
+      case 'ing-back': return goVault(s.vault, 'ingest', '')
+      case 'ing-prepare': { const dd = ing().data; return dd ? prepare(ingChecked(dd)) : undefined }
+      case 'ing-prepare-one': return prepare([d.path])
+      case 'ing-again': return runAgain(d.knRun)
+      case 'ing-stop': return stopRun()
+      case 'ing-skip': ing().skipping = d.path; s.focus = 'kn-skip-note'; return render()
+      case 'ing-skip-x': ing().skipping = null; render(); return focusOn('#kn-src-skip')
+      case 'ing-skip-go': return skipSource(d.path)
+      case 'ing-requeue': return requeue([d.path])
+      case 'ing-requeue-run': {
+        const g = ing(), x = g.run && g.run.data, dd = g.data
+        return x && dd ? requeue(dd.sources.filter((y) => (x.sources || []).includes(y.path) && y.state === 'done' && (y.meta || {}).run === x.id).map((y) => y.path)) : undefined
+      }
+      case 'ing-baseline': return baseline(d.knDone === 'true')
+      case 'ing-skill': s.sheet = { kind: 'skill', error: null }; render(); return focusOn('#kn-skill-go')
+      case 'ing-skill-go': return addInboxSkill()
+      case 'ing-tool': { const g = ing(); g.open[d.id] = !g.open[d.id]; return render() }
+      case 'ing-ch': {
+        const rv = ing().review
+        if (d.knDo === 'edit') return openChangeEdit(d.path)
+        // A change made in the vault since the run: its overwrite diff first, then *Take the run's*.
+        if (d.knDo === 'compare') { if (rv) rv.cmp[d.path] = !rv.cmp[d.path]; render(); return focusOn(`#${t.id.replace(/-compare$/, '-take')}`, `#${t.id}`) }
+        return decide(d.path, d.knDo)
+      }
+      case 'ing-more': { const rv = ing().review; if (rv) rv.more[d.path] = true; render(); return focusOn(`#${t.id.replace(/-more$/, '')} .kn-diff`) }
+      case 'ing-rest': return approveRest()
+      case 'ing-write': return writeApproved()
+      case 'ing-discard': return discardRun()
+      case 'ing-edit-go': return editGo()
+      case 'src-tab': return srcTab(d.knTab)
+      case 'src-choose': return chooseFiles()
+      case 'src-call': { const x = s.sheet; if (!x || !x.calls) return; x.call = x.calls[Number(d.knI)] || null; x.include = { transcript: false, chat: false }; return render() }
+      case 'src-hit': { const x = s.sheet; if (!x || !x.hits) return; x.hit = x.hits[Number(d.knI)] || null; x.days = 7; patchEl('kn-src-list', sourceList()); patchEl('kn-src-f', sourceFoot()); return focusOn(`#${t.id}`) }
+      case 'src-go': return addGo()
+      case 'src-m365': s.sheet = null; render(); return go('settings/calendar')
       // Health (K16-01, -04, -07)
       case 'hl-filter': hl().filter = d.knFilter; render(); await loadFinding(); return render()
       case 'hl-pick': hl().picked = true; return goVault(s.vault, 'health', d.knKey)
@@ -3031,6 +3902,25 @@ const Kn = (() => {
     // Ask
     if (t.id === 'kn-chat-q') return onChatInput(t)
     if (t.id === 'kn-chat-find') { chat().listQ = t.value; return patchEl('kn-convs-l', convItems()) }
+    // Ingest's Add a source sheet: a call's, a mail's or a chat's search; a web page's address.
+    if (t.id === 'kn-src-q') {
+      const x = st().sheet
+      if (!x || x.kind !== 'source') return
+      x.q = t.value
+      if (x.tab === 'call') return findSourceCalls(t.value)
+      x.hits = null; x.hit = null
+      patchEl('kn-src-list', sourceList()); patchEl('kn-src-f', sourceFoot())
+      return findMail(t.value)
+    }
+    if (t.id === 'kn-src-url') {
+      const x = st().sheet
+      if (!x || x.kind !== 'source') return
+      x.url = t.value; x.error = null
+      patchEl('kn-src-f', sourceFoot())
+      const n = document.getElementById('kn-src-note')
+      if (n) n.textContent = knAddState(x).note || ''
+      return
+    }
     if (t.id === 'kn-attach-q') { const p = chat().picker; if (p && p.kind === 'calls') { p.query = t.value; p.hits = null; drawPicker(); findCalls(t.value) } return }
     if (t.id === 'kn-addq') {
       const x = st().sheet, v = vault(), q = t.value
@@ -3058,6 +3948,10 @@ const Kn = (() => {
       return setVault(key, [...list].join(','))
     }
     if (t.dataset.knAlways) { chat().always[t.dataset.knAlways] = t.checked; return }
+    // Ingest: a New source ticked for Prepare changes or not; what a call's source includes; a chat's days.
+    if (t.dataset.knSrcCheck !== undefined) { const g = ing(); if (t.checked) g.unchecked.delete(t.dataset.knSrcCheck); else g.unchecked.add(t.dataset.knSrcCheck); return render() }
+    if (t.dataset.knSrcInc && s.sheet && s.sheet.kind === 'source') { s.sheet.include[t.dataset.knSrcInc] = t.checked; return }
+    if (t.dataset.knSrcDays !== undefined && s.sheet && s.sheet.kind === 'source') { s.sheet.days = Number(t.value) || 7; return }
     if (t.dataset.knHlChoice && t.value) return pickChoice(t.dataset.knHlChoice, t.value)
     if (t.dataset.knFixall && s.sheet && s.sheet.kind === 'fixall') {
       const x = s.sheet
@@ -3093,6 +3987,9 @@ const Kn = (() => {
     if (e.target.id === 'kn-name' && e.key === 'Enter' && s.sheet) { if (s.sheet.kind === 'new') newGo(); else if (s.sheet.kind === 'connect' && s.sheet.step === 3) connectGo() }
     if (e.target.id === 'kn-pname' && e.key === 'Enter') newPageGo()
     if (e.target.id === 'kn-ovr' && e.key === 'Enter') { const b = document.querySelector('[data-kn="ovr-save"]'); if (b) b.click() }
+    if (e.target.id === 'kn-src-url' && e.key === 'Enter' && !e.isComposing) { e.preventDefault(); return addGo() }
+    if (e.target.id === 'kn-skip-note' && e.key === 'Enter' && !e.isComposing) { e.preventDefault(); const b = document.getElementById('kn-skip-go'); return b ? skipSource(b.dataset.path) : undefined }
+    if (e.target.id === 'kn-chedit' && (e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); return editGo() }
   }, true)
   // Ask's thread: follow the bottom only while the user is there (scroll events don't bubble).
   document.addEventListener('scroll', (e) => { if (e.target && e.target.id === 'kn-thread') onThreadScroll(e.target) }, true)
@@ -3101,7 +3998,7 @@ const Kn = (() => {
 
   return {
     view, after, tick, load, route: routeTo, active, home, title, overlay, callChip, callMenuItems, countdownLine,
-    settingsVaults, paletteActions, askView, askLabel, feedQueued,
+    settingsVaults, paletteActions, askView, askLabel, feedQueued, dropped,
     vaultId: () => (st().source === 'vault' || active()) ? st().vault : '',
     setSource: (src) => { st().source = src },
     editing: () => !!(S.kn && S.kn.edit),

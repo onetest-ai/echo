@@ -951,6 +951,7 @@ fn a_file_dirty_before_the_write_stays_out_of_the_commit() {
     let shown = git::out(&v.root, &["show", "--name-only", "--format=%s", "HEAD"]).unwrap();
     assert_eq!(shown.lines().filter(|l| !l.is_empty()).collect::<Vec<_>>(), ["Ingest: 1 source (Northwind · Weekly delivery sync)", NOTE], "{}", w.commit);
     assert!(git::out(&v.root, &["status", "--porcelain"]).unwrap().contains(" M knowledge/CATALOG.md"));
+    assert_eq!(w.committed, [NOTE], "the answer names what the commit took, so the page can say what it left out");
     let acts = activity::recent(&v, "2000-01-01T00:00:00+00:00");
     assert!(acts.iter().any(|a| a.path == INDEX && a.commit.is_none()), "its line names no commit: {acts:?}");
 }

@@ -72,6 +72,12 @@ fn editable(v: &Vault, rel: &str) -> bool {
     d.schema.iter().chain(&d.taxonomies).chain(d.log.iter()).chain(v.path("index").iter()).any(|p| p == rel) || d.skills.iter().any(|s| s.path == rel)
 }
 
+/// A Markdown file of the vault's sources folder (spec K14-10): shown in Pages read-only, as machinery — never edited or
+/// written (D29), so only `read` takes one.
+fn source(v: &Vault, rel: &str) -> bool {
+    rel.to_ascii_lowercase().ends_with(".md") && super::sources::files(v).iter().any(|f| f == rel)
+}
+
 fn checked(v: &Vault, rel: &str) -> Result<PathBuf> {
     if !super::available(v) {
         bail!("the vault's folder isn't there: {}", v.root.display());
@@ -369,7 +375,8 @@ pub(super) fn plain_line(line: &str) -> String {
 
 /// A page as the window shows it.
 pub fn read(v: &Vault, rel: &str) -> Result<Value> {
-    let full = checked(v, rel)?;
+    let is_source = source(v, rel);
+    let full = if is_source { inside(v, rel)? } else { checked(v, rel)? };
     let bytes = std::fs::read(&full).map_err(|e| anyhow!("{rel}: {e}"))?;
     let size = bytes.len() as u64;
     let text = String::from_utf8_lossy(&bytes[..bytes.len().min(scan::READ_MAX as usize)]).into_owned();
@@ -426,10 +433,11 @@ pub fn read(v: &Vault, rel: &str) -> Result<Value> {
         "links": out,
         "local": { "nodes": nodes, "edges": edges },
         "base": sha(&bytes),
-        "text": if size <= EDIT_MAX { Value::String(String::from_utf8_lossy(&bytes).into_owned()) } else { Value::Null },
-        "editable": size <= EDIT_MAX && std::str::from_utf8(&bytes).is_ok(),
-        // The index lists pages; it isn't one of them.
-        "in_index": in_index,
+        "text": if size <= EDIT_MAX && !is_source { Value::String(String::from_utf8_lossy(&bytes).into_owned()) } else { Value::Null },
+        "editable": !is_source && size <= EDIT_MAX && std::str::from_utf8(&bytes).is_ok(),
+        "source": is_source,
+        // The index lists pages; it isn't one of them, nor is a source.
+        "in_index": if is_source { None } else { in_index },
         "is_index": v.path("index").as_deref() == Some(rel),
         "git": git::info(&v.root).is_some(),
         "mtime": mtime,

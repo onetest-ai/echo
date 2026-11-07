@@ -200,6 +200,9 @@ pub fn route(rest: &str, query: &str) -> Result<Reply> {
                     f
                 }).unwrap_or_default(),
                 "in_home": dunce::canonicalize(&v.root).ok().zip(dunce::canonicalize(crate::paths::home()).ok()).is_some_and(|(r, h)| r.starts_with(h)),
+                // Settings → Ingest (K15-03): the skill a run uses now, and the one Echo finds when none is chosen.
+                "ingest_skill": ingest::skill(&v).map(|s| json!({ "name": s.name, "path": s.path })),
+                "ingest_found": ingest::skill(&Vault { ingest: Default::default(), ..v.clone() }).map(|s| s.name),
             })
         }
         "preview" => export::preview(&crate::calls::resolve_call(&query_param(query, "call").unwrap_or_default())?, &v.id, query_param(query, "stem").as_deref().filter(|s| !s.is_empty()))?,
@@ -278,9 +281,42 @@ struct Files {
     seq: u64,
     files: Vec<PathBuf>,
     busy: bool,
+    /// Dropped on the window rather than picked in the dialog.
+    dropped: bool,
 }
 
-static FILES: Mutex<Files> = Mutex::new(Files { seq: 0, files: Vec::new(), busy: false });
+static FILES: Mutex<Files> = Mutex::new(Files { seq: 0, files: Vec::new(), busy: false, dropped: false });
+
+/// The files picked last as the page sees them: their number, names and sizes.
+fn listed(p: &Files) -> Value {
+    let files: Vec<Value> = p.files.iter().map(|f| {
+        let size = std::fs::metadata(f).map(|m| m.len()).unwrap_or(0);
+        json!({ "name": f.file_name().map(|n| n.to_string_lossy().into_owned()), "size": size, "too_big": size > sources::MAX_FILE })
+    }).collect();
+    json!({ "seq": p.seq, "files": files })
+}
+
+/// Files dropped on the window (K14-03b): their paths come from the webview's own drop, never from the page, and are
+/// kept as the dialog's are — the page gets a number and their names. Folders and anything else that isn't a file are
+/// left out; with nothing to add (or the dialog open), nothing is kept.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn dropped(paths: &[PathBuf]) -> Option<Value> {
+    let files: Vec<PathBuf> = paths.iter().filter(|p| p.is_file()).cloned().collect();
+    let mut p = FILES.lock().unwrap_or_else(|e| e.into_inner());
+    if files.is_empty() || p.busy {
+        return None;
+    }
+    p.seq += 1;
+    p.files = files;
+    p.dropped = true;
+    Some(listed(&p))
+}
+
+/// The files dropped last, for the page (`kn_dropped`); null when the last pick was the dialog's.
+pub fn drop_value() -> Value {
+    let p = FILES.lock().unwrap_or_else(|e| e.into_inner());
+    if p.dropped { listed(&p) } else { Value::Null }
+}
 
 /// The system's dialog for several files (an action's job thread waits on it): their names and sizes, under a number
 /// `kn_source_add` takes back. Cancelled: no number.
@@ -300,11 +336,8 @@ fn pick_files() -> Result<Value> {
     }
     p.seq += 1;
     p.files = picked;
-    let files: Vec<Value> = p.files.iter().map(|f| {
-        let size = std::fs::metadata(f).map(|m| m.len()).unwrap_or(0);
-        json!({ "name": f.file_name().map(|n| n.to_string_lossy().into_owned()), "size": size, "too_big": size > sources::MAX_FILE })
-    }).collect();
-    Ok(json!({ "seq": p.seq, "files": files }))
+    p.dropped = false;
+    Ok(listed(&p))
 }
 
 fn picked_files(seq: u64) -> Result<Vec<PathBuf>> {
@@ -708,6 +741,14 @@ mod tests {
         assert_eq!(json(&format!("{}/history", v.id), "path=knowledge%2Fclients%2Facme.md")["no_history"], true);
         let settings = json(&format!("{}/settings", v.id), "");
         assert_eq!(settings["skills"].as_array().unwrap().len(), 2);
+        assert!(settings["ingest_skill"].is_null() && settings["ingest_found"].is_null(), "no ingest skill here: {settings}");
+        fixture::write(&v.root, ".claude/skills/process-inbox/SKILL.md", "---\nname: process-inbox\ndescription: Turn the inbox into pages\n---\n# Process\n");
+        let found = json(&format!("{}/settings", v.id), "");
+        assert_eq!((found["ingest_skill"]["name"].clone(), found["ingest_found"].clone()), (json!("process-inbox"), json!("process-inbox")));
+        knowledge::set(&v.id, "ingest.skill", "s").unwrap();
+        let chosen = json(&format!("{}/settings", v.id), "");
+        assert_eq!((chosen["ingest_skill"]["name"].clone(), chosen["ingest_found"].clone()), (json!("s"), json!("process-inbox")), "the one chosen runs; Echo's own find is said beside it");
+        knowledge::set(&v.id, "ingest.skill", "").unwrap();
         assert!(settings.get("global_twin").is_some());
     }
 
@@ -908,6 +949,32 @@ mod tests {
         assert!(act("kn_source_add", &json!({"id": v.id, "kind": "shell"})).is_err());
         // Microsoft 365 without Echo's sign-in: said so, nothing asked.
         assert_eq!(json(&format!("{}/m365", v.id), "q=pilot")["signed_in"], false);
+    }
+
+    #[test]
+    fn dropped_files_are_a_pick_the_page_names_by_its_number() {
+        let (_env, root) = crate::paths::testenv::folders("kn-api-drop");
+        let v = vault(&root);
+        let d = root.join("on-the-desk");
+        std::fs::create_dir_all(d.join("a folder")).unwrap();
+        std::fs::write(d.join("Aurora RFP.pdf"), b"%PDF made up").unwrap();
+        std::fs::write(d.join("pricing-workshop-notes.md"), "# Pricing workshop\n").unwrap();
+        // The paths are Rust's (the webview's own drop, K14-03b): the page gets a number and the files' names and sizes.
+        let shown = dropped(&[d.join("Aurora RFP.pdf"), d.join("a folder"), d.join("pricing-workshop-notes.md")]).unwrap();
+        assert_eq!(shown["files"], json!([{"name": "Aurora RFP.pdf", "size": 12, "too_big": false}, {"name": "pricing-workshop-notes.md", "size": 19, "too_big": false}]), "a folder isn't a file to add");
+        assert!(!shown.to_string().contains("on-the-desk"), "no path reaches the page: {shown}");
+        assert_eq!(drop_value(), shown, "the page asks for the drop and gets the same");
+        let r = act("kn_source_add", &json!({"id": v.id, "kind": "files", "pick": shown["seq"]})).unwrap();
+        let added: Vec<&str> = r["added"].as_array().unwrap().iter().map(|a| a["path"].as_str().unwrap()).collect();
+        assert_eq!(added, ["raw_inbox/Aurora RFP.pdf", "raw_inbox/pricing-workshop-notes.md"], "{r}");
+        assert!(dropped(&[d.join("a folder")]).is_none(), "nothing to add: nothing kept");
+        assert_eq!(drop_value(), shown, "the drop before stays");
+        // The dialog's pick is no drop.
+        std::env::set_var("ECHOCTL_PICK_FILES", d.join("Aurora RFP.pdf"));
+        let p = act("kn_pick_files", &json!({}));
+        std::env::remove_var("ECHOCTL_PICK_FILES");
+        assert!(p.unwrap()["seq"].as_u64() > shown["seq"].as_u64());
+        assert!(drop_value().is_null());
     }
 
     #[test]

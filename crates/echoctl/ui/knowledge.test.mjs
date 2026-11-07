@@ -1,5 +1,5 @@
 // Knowledge in the window (knowledge.js): routes, the switcher, a call's Knowledge chip, the tree, the graph's filters,
-// unsaved edits, Ask (turns, tool rows, @ mentions, following the bottom) and Health (findings, the trend, fixes) — the blocks as they ship. Run by scripts/check-mod.sh (`node crates/echoctl/ui/knowledge.test.mjs`).
+// unsaved edits, Ask (turns, tool rows, @ mentions, following the bottom), Health (findings, the trend, fixes) and Ingest (the queue, a run, the review, the Add a source sheet) — the blocks as they ship. Run by scripts/check-mod.sh (`node crates/echoctl/ui/knowledge.test.mjs`).
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
@@ -26,6 +26,7 @@ const { knChatOpen, knPollKeep, knChatTake } = load(['kn-poll'], ['knChatOpen', 
 const { knToolRows } = load(['kn-tools'], ['knToolRows'])
 const { knMention, knMentionPick, knChatMessage } = load(['kn-mention'], ['knMention', 'knMentionPick', 'knChatMessage'])
 const { knHealthList, knHealthSelect, knHealthTrend, knTrendPath, knFixAll, knFixSummary, knHealthLoad, knHealthState } = load(['kn-health'], ['knHealthList', 'knHealthSelect', 'knHealthTrend', 'knTrendPath', 'knFixAll', 'knFixSummary', 'knHealthLoad', 'knHealthState'])
+const { knIngestQueue, knIngestWaiting, knRunLine, knRunView, knIngestReview, knWriteSummary, knAddState, knAddArgs, knFirstOpen } = load(['kn-ingest'], ['knIngestQueue', 'knIngestWaiting', 'knRunLine', 'knRunView', 'knIngestReview', 'knWriteSummary', 'knAddState', 'knAddArgs', 'knFirstOpen'])
 
 const tests = []
 const test = (name, f) => tests.push([name, f])
@@ -341,7 +342,7 @@ test('routes: Ask, a new conversation or one of them', () => {
   const id = '6f2c9e1a-1b2c-4d5e-8f90-123456789abc'
   assert.deepEqual(knParseRoute(`kn/my-twin/ask/${id}`), { vault: 'my-twin', tab: 'ask', path: id })
   assert.equal(knRouteOf({ vault: 'my-twin', tab: 'ask', path: id }), `kn/my-twin/ask/${id}`)
-  assert.equal(knParseRoute('kn/my-twin/ingest'), null, 'a tab appears only when its view works')
+  assert.equal(knParseRoute('kn/my-twin/home'), null, 'a tab appears only when its view works')
 })
 
 const Q = 'What did Lena Hartmann and I settle on Northwind Retail\'s pricing?'
@@ -740,6 +741,255 @@ test('a tab with a number says it in its name: "Health, 3 need you"', () => {
   assert.equal(knTabLabel('Health', 3), 'Health, 3 need you')
   assert.equal(knTabLabel('Health', 1), 'Health, 1 needs you')
   assert.equal(knTabLabel('Health', null), 'Health')
+})
+
+// ── Ingest (spec K14, K15) ──
+test('routes: Ingest, and a run named by its id', () => {
+  assert.deepEqual(knParseRoute('kn/my-twin/ingest'), { vault: 'my-twin', tab: 'ingest', path: '' })
+  assert.deepEqual(knParseRoute('kn/my-twin/ingest/2026-11-06_111700'), { vault: 'my-twin', tab: 'ingest', path: '2026-11-06_111700' })
+  assert.equal(knRouteOf({ vault: 'my-twin', tab: 'ingest', path: '2026-11-06_111700-2' }), 'kn/my-twin/ingest/2026-11-06_111700-2')
+  assert.equal(knParseRoute(knRouteOf({ vault: 'my-twin', tab: 'ingest', path: '2026-11-06_111700-2' })).path, '2026-11-06_111700-2')
+})
+
+// Made-up changes, as `/api/kn/<vault>/ingest/<run>/changes` gives them (Rust has merged the answers and D28's drops).
+const CH = (path, kind, state, o = {}) => ({ path, kind, adds_only: !!o.adds, plus: o.plus ?? 1, minus: o.minus ?? 0, diff: o.diff || [[['+', `a line of ${path}`]]], why: o.why ?? null, quotes: o.quotes || [], invented: o.invented || 0, quote_note: o.qnote ?? null, dropped: o.dropped || [], note: o.note ?? null, state, edited: !!o.edited })
+const TOPIC = 'knowledge/topics/per-stream-pricing.md'
+const ROW = '| [per-stream-pricing.md](topics/per-stream-pricing.md) | Per-stream pricing | 2026-11-06 |'
+const CHANGES = [
+  CH('knowledge/clients/northwind-retail.md', 'edit', 'approved', { plus: 4, minus: 1, why: 'the go-live moves to 9 January', quotes: [{ source: 'raw_inbox/mail/2026-11-04-phase-2-and-the-holiday-freeze.md', text: 'I\'d like to move go-live to 9 January' }] }),
+  CH('knowledge/notes/2026-11-06-pricing-thoughts.md', 'new', 'undecided', { plus: 31, quotes: [{ source: 'raw_inbox/echo/2026-11-06-memo-pricing-thoughts.md', text: 'count streams the same way at every client' }], invented: 1 }),
+  CH(TOPIC, 'new', 'rejected', { plus: 22, qnote: 'Echo can\'t check quotes in this kind of file' }),
+  CH('knowledge/CATALOG.md', 'index', 'undecided', { adds: true, qnote: 'no quote found', dropped: [ROW], note: `1 line left out: it links to ${TOPIC}, which you rejected` }),
+  CH('log.md', 'log', 'undecided', { adds: true, plus: 2, qnote: 'no quote found', dropped: [`- 2026-11-06 · added · ${TOPIC}`, `- 2026-11-06 · processed · raw_inbox/web/2026-11-06-per-stream-pricing.md → ${TOPIC}`], note: `2 lines left out: they link to ${TOPIC}, which you rejected` }),
+  CH('knowledge/aux.md', 'other', 'blocked', { note: 'can\'t be written: “aux.md” names a device on Windows' }),
+]
+
+test('K15-T8 the review: counts from the changes and their answers, Approve the rest only with one undecided, Write N only with one approved', () => {
+  const r = knIngestReview(CHANGES)
+  assert.deepEqual(r.counts, { all: 6, undecided: 3, approved: 1, rejected: 1, written: 0, changed: 0, blocked: 1 })
+  assert.equal(r.rest, true, 'three changes are undecided')
+  assert.deepEqual(r.write, { n: 1, can: true })
+  assert.deepEqual(r.cards.map((c) => [c.n, c.kind, c.tag, c.state]), [[1, 'Edit', '', 'approved'], [2, 'New page', 'ok', 'undecided'], [3, 'New page', 'ok', 'rejected'], [4, 'Index', 'acc', 'undecided'], [5, 'Log', 'acc', 'undecided'], [6, 'Other', '', 'blocked']])
+  assert.deepEqual(r.cards.map((c) => c.open), [false, true, false, true, true, false], 'only an undecided change takes Approve · Reject · Edit')
+  const all = knIngestReview(CHANGES.map((c) => ({ ...c, state: c.state === 'undecided' ? 'rejected' : c.state })))
+  assert.equal(all.rest, false, 'nothing undecided: no Approve the rest')
+  assert.deepEqual(all.write, { n: 1, can: true })
+  const none = knIngestReview(CHANGES.map((c) => ({ ...c, state: c.state === 'approved' ? 'rejected' : c.state })))
+  assert.deepEqual(none.write, { n: 0, can: false }, 'nothing approved: no Write')
+  assert.deepEqual(knIngestReview([]).write, { n: 0, can: false })
+})
+
+test('K15-T8 D28: a rejected new page\'s index row and log lines are left out of those changes, each saying so', () => {
+  const r = knIngestReview(CHANGES)
+  assert.deepEqual(r.cards[3].left, { note: `1 line left out: it links to ${TOPIC}, which you rejected`, lines: [ROW] })
+  assert.equal(r.cards[4].left.lines.length, 2)
+  assert.match(r.cards[4].left.note, /^2 lines left out/)
+  assert.equal(r.cards[0].left, null, 'a change with nothing left out says nothing')
+  assert.equal(r.cards[3].adds, true, 'adds only')
+})
+
+test('K15-T8 a blocked change says why and takes no answer; Approve the rest leaves it out', () => {
+  const r = knIngestReview(CHANGES)
+  assert.equal(r.cards[5].blocked, 'can\'t be written: “aux.md” names a device on Windows')
+  assert.equal(r.cards[5].left, null, 'its note is why it is blocked, not D28')
+  const only = knIngestReview([CHANGES[5], CHANGES[0]])
+  assert.equal(only.rest, false, 'a blocked change is never one of the rest')
+  assert.equal(r.cards[0].blocked, null)
+})
+
+test('K15-T8 the quotes: found ones shown, invented ones counted, a PDF\'s change says Echo can\'t check it', () => {
+  const r = knIngestReview(CHANGES)
+  assert.equal(r.cards[1].quotes.length, 1)
+  assert.equal(r.cards[1].invented, '1 more quote the run gave isn\'t in the sources — not shown.')
+  assert.equal(knIngestReview([CH('a.md', 'new', 'undecided', { invented: 2, qnote: 'no quote found' })]).cards[0].invented, '2 more quotes the run gave aren\'t in the sources — not shown.')
+  assert.equal(r.cards[2].fromNote, 'Echo can\'t check quotes in this kind of file, so none are shown.')
+  assert.equal(r.cards[3].fromNote, 'Written by the skill from the changes above — no source words to show.')
+  assert.equal(knIngestReview([CH('knowledge/x.md', 'edit', 'undecided', { qnote: 'no quote found' })]).cards[0].fromNote, 'No quote found in the sources.')
+  assert.equal(r.cards[0].fromNote, '', 'quotes shown: nothing more to say')
+})
+
+test('K15-T8 an answer on its way: that change waits, and so do Approve the rest and Write', () => {
+  const r = knIngestReview(CHANGES, { 'knowledge/notes/2026-11-06-pricing-thoughts.md': 'approve' })
+  assert.equal(r.cards[1].busy, true)
+  assert.equal(r.cards[1].open, false, 'answered once')
+  assert.equal(r.rest, false)
+  assert.deepEqual(r.write, { n: 1, can: false })
+})
+
+test('nothing left to decide (written, rejected, can\'t be written): Finish the run instead of Write', () => {
+  const left = [CH('knowledge/a.md', 'new', 'written'), CH('log.md', 'log', 'rejected'), CH('knowledge/aux.md', 'other', 'blocked', { note: 'can\'t be written: x' })]
+  assert.deepEqual([knIngestReview(left).finish, knIngestReview(left).write], [true, { n: 0, can: false }])
+  assert.equal(knIngestReview(CHANGES).finish, false, 'something is undecided or approved')
+  assert.equal(knIngestReview([...left, CH('knowledge/b.md', 'edit', 'changed')]).finish, false, 'a change made in the vault since the run waits for an answer')
+  assert.equal(knIngestReview(left, { 'log.md': 'approve' }).finish, false, 'an answer on its way')
+  assert.equal(knIngestReview([]).finish, false)
+})
+
+test('a change made in the vault since the run waits for Compare, then Take the run\'s; written ones are done', () => {
+  const r = knIngestReview([CH('knowledge/clients/helios.md', 'edit', 'changed'), CH('knowledge/notes/a.md', 'new', 'written')])
+  assert.deepEqual(r.counts, { all: 2, undecided: 0, approved: 0, rejected: 0, written: 1, changed: 1, blocked: 0 })
+  assert.deepEqual([r.cards[0].open, r.cards[0].changed, r.cards[1].open], [false, true, false])
+  assert.equal(r.rest, false)
+})
+
+// Made-up sources, as `/api/kn/<vault>/ingest` gives them (newest first), and its runs.
+const SRC = (path, kind, title, state, meta = {}) => ({ path, kind, title, state, meta: { size: 1200, markdown: /\.md$/.test(path), ...meta } })
+const RUNS = [
+  { id: 'r3', at: '2026-11-06T11:17:00+01:00', sources: ['raw_inbox/echo/2026-11-06-memo-pricing-thoughts.md', 'raw_inbox/mail/2026-11-04-phase-2.md', 'raw_inbox/web/2026-11-06-per-stream-pricing.md'], state: 'running' },
+  { id: 'r2', at: '2026-11-06T08:06:00+01:00', sources: ['raw_inbox/Aurora RFP.pdf'], state: 'review', changes: 1, kept: 0, cost: 0.05 },
+  { id: 'r1', at: '2026-11-05T17:12:00+01:00', sources: ['raw_inbox/pricing-workshop-notes.md'], state: 'done', changes: 3, kept: 3, cost: 0.07 },
+  { id: 'r0', at: '2026-11-05T10:03:00+01:00', sources: ['raw_inbox/teams/2026-11-05-northwind-delivery.md'], state: 'failed', reason: 'It stopped when Echo did' },
+]
+const SOURCES = [
+  SRC('raw_inbox/echo/2026-11-06-memo-pricing-thoughts.md', 'echo', 'Memo · Pricing thoughts', 'waiting', { run: 'r3' }),
+  SRC('raw_inbox/web/2026-11-06-per-stream-pricing.md', 'web', 'Per-stream pricing for AI delivery', 'waiting', { run: 'r3' }),
+  SRC('raw_inbox/Aurora RFP.pdf', 'file', 'Aurora RFP.pdf', 'waiting', { run: 'r2' }),
+  SRC('raw_inbox/teams/2026-11-05-northwind-delivery.md', 'teams', 'Northwind delivery', 'waiting', { run: 'r0' }),
+  SRC('raw_inbox/mail/2026-11-04-phase-2.md', 'mail', 'Phase 2 and the holiday freeze', 'waiting', { run: 'r3' }),
+  SRC('raw_inbox/echo/2026-11-05-northwind-sync.md', 'echo', 'Northwind · Weekly delivery sync', 'new'),
+  SRC('raw_inbox/tokenomics-draft.docx', 'file', 'tokenomics-draft.docx', 'skipped', { note: 'A Word file Claude can\'t read' }),
+  SRC('raw_inbox/pricing-workshop-notes.md', 'file', 'Pricing workshop notes', 'done', { run: 'r1', kept: 3 }),
+  SRC('raw_inbox/old-notes.md', 'file', 'Old notes', 'done', { kept: 0, run: 'r9' }),
+  SRC('raw_inbox/2025-plan.md', 'file', '2025 plan', 'done'),
+]
+
+test('K14-08 the queue: grouped From Echo · Mail & Teams · Web · Files, newest first, each with its state', () => {
+  const q = knIngestQueue(SOURCES, RUNS)
+  assert.deepEqual(q.groups.map((g) => [g.id, g.label, g.n]), [['echo', 'From Echo', 2], ['mail', 'Mail & Teams', 2], ['web', 'Web', 1], ['file', 'Files', 5]])
+  assert.deepEqual(q.groups[0].rows.map((r) => r.title), ['Memo · Pricing thoughts', 'Northwind · Weekly delivery sync'], 'in the order Echo gives: newest first')
+  assert.deepEqual(q.groups[1].rows.map((r) => r.kind), ['teams', 'mail'], 'a Teams chat is with mail')
+  const open = knIngestQueue(SOURCES, RUNS, { showDone: { echo: true, mail: true, web: true, file: true } })
+  const by = new Map(open.groups.flatMap((g) => g.rows).map((r) => [r.path, r]))
+  assert.deepEqual(by.get('raw_inbox/echo/2026-11-06-memo-pricing-thoughts.md').chip, ['run', 'Preparing'], 'its run is going')
+  assert.deepEqual(by.get('raw_inbox/Aurora RFP.pdf').chip, ['wait', 'In review'])
+  assert.deepEqual(by.get('raw_inbox/teams/2026-11-05-northwind-delivery.md').chip, ['fail', 'Run stopped'], 'its run ended with its Echo: Run again, not Prepare changes')
+  assert.equal(by.get('raw_inbox/teams/2026-11-05-northwind-delivery.md').state, 'failed')
+  assert.deepEqual(by.get('raw_inbox/echo/2026-11-05-northwind-sync.md').chip, ['new', 'New'])
+  assert.deepEqual(by.get('raw_inbox/tokenomics-draft.docx').chip, ['skip', 'Skipped'])
+  assert.equal(by.get('raw_inbox/tokenomics-draft.docx').note, 'A Word file Claude can\'t read')
+  assert.deepEqual([...by.values()].filter((r) => r.selectable).map((r) => r.path), ['raw_inbox/echo/2026-11-05-northwind-sync.md'], 'only a New source is picked for Prepare changes')
+  assert.deepEqual(q.counts, { all: 10, new: 1, waiting: 5, done: 4 })
+})
+
+test('K14-08 the queue\'s filters, and done sources folded under All until shown', () => {
+  const all = knIngestQueue(SOURCES, RUNS)
+  const files = all.groups.find((g) => g.id === 'file')
+  assert.deepEqual([files.rows.map((r) => r.path), files.folded], [['raw_inbox/Aurora RFP.pdf'], 4], 'Done and Skipped fold into one line')
+  const open = knIngestQueue(SOURCES, RUNS, { showDone: { file: true } }).groups.find((g) => g.id === 'file')
+  assert.deepEqual([open.rows.length, open.folded], [5, 0])
+  const done = knIngestQueue(SOURCES, RUNS, { filter: 'done' })
+  assert.deepEqual(done.groups.map((g) => [g.id, g.rows.length, g.folded]), [['file', 4, 0]], 'Done shows them all, Skipped too')
+  const chips = done.groups[0].rows.map((r) => r.chip[1])
+  assert.deepEqual(chips, ['Skipped', 'Done · kept 3', 'Done — nothing kept', 'Done'])
+  assert.deepEqual(knIngestQueue(SOURCES, RUNS, { filter: 'new' }).groups.map((g) => [g.id, g.rows.length]), [['echo', 1]])
+  assert.deepEqual(knIngestQueue(SOURCES, RUNS, { filter: 'waiting' }).groups.map((g) => [g.id, g.rows.length]), [['echo', 1], ['mail', 2], ['web', 1], ['file', 1]])
+  assert.deepEqual(knIngestQueue(SOURCES, RUNS, { filter: 'waiting' }).counts, all.counts, 'the counts never change with the filter')
+  assert.deepEqual(knIngestQueue([], []), { groups: [], counts: { all: 0, new: 0, waiting: 0, done: 0 } })
+})
+
+test('K10-02 Ingest\'s number: the changes waiting for review across the vault\'s runs', () => {
+  assert.equal(knIngestWaiting(RUNS), 1)
+  assert.equal(knIngestWaiting([...RUNS, { id: 'r4', state: 'review', changes: 5, kept: 0 }, { id: 'r5', state: 'review', changes: 4, kept: 4 }]), 6)
+  assert.equal(knIngestWaiting([]), 0)
+  assert.equal(knIngestWaiting(undefined), 0)
+})
+
+test('K15-11 the last runs: when, sources, changes kept, cost', () => {
+  const t = (p) => (SOURCES.find((s) => s.path === p) || { title: p }).title
+  assert.equal(knRunLine(RUNS[0], t).text, '3 sources · preparing')
+  assert.equal(knRunLine(RUNS[1], t).text, 'Aurora RFP.pdf · 1 to review · $0.05')
+  assert.equal(knRunLine(RUNS[2], t).text, 'Pricing workshop notes · kept 3 of 3 · $0.07')
+  assert.equal(knRunLine(RUNS[3], t).text, 'Northwind delivery · failed')
+  assert.equal(knRunLine({ ...RUNS[0], waiting: 'Waiting for a call\'s transcription to finish' }, t).text, '3 sources · waiting for a call')
+  assert.equal(knRunLine({ id: 'x', sources: ['a.md', 'b.md'], state: 'discarded' }).text, '2 sources · discarded — nothing kept')
+  assert.equal(knRunLine({ id: 'x', sources: ['raw_inbox/a.md'], state: 'stopped', cost: 0.004 }).text, 'a.md · stopped · <$0.01')
+})
+
+// A made-up run's events, as `/api/kn/<vault>/ingest/<run>?from=` gives them.
+const STEPS = (s) => JSON.stringify(s.map(([text, state]) => ({ text, state })))
+const RUN_EVENTS = [
+  { n: 1, type: 'notice', kind: 'copy', text: 'Not in the copy: .git/, media/talk.mp4 (30 MB), 42 other sources in raw_inbox/' },
+  { n: 2, type: 'notice', kind: 'waiting', text: 'Waiting for a call\'s transcription to finish' },
+  { n: 3, type: 'tool', id: 't1', name: 'Skill', verb: 'Used skill', target: 'process-inbox', detail: '', readonly: true },
+  { n: 4, type: 'tool_result', id: 't1', ok: true, summary: '' },
+  { n: 5, type: 'tool', id: 't2', name: 'Write', verb: 'Wrote', target: '.echo-ingest/steps.json', detail: '', path: '.echo-ingest/steps.json', readonly: false, input: { file_path: '.echo-ingest/steps.json', content: STEPS([['Find what is new', 'done'], ['Read the memo', 'active'], ['Index rows and log lines', 'todo']]) } },
+  { n: 6, type: 'todo', items: [{ text: 'Find what is new', state: 'done' }, { text: 'Read the memo', state: 'active' }, { text: 'Index rows and log lines', state: 'todo' }] },
+  { n: 7, type: 'tool_result', id: 't2', ok: true, summary: '' },
+  { n: 8, type: 'tool', id: 't3', name: 'Read', verb: 'Read', target: 'raw_inbox/echo/2026-11-06-memo-pricing-thoughts.md', detail: '', path: 'raw_inbox/echo/2026-11-06-memo-pricing-thoughts.md', readonly: true },
+]
+
+test('K15-06 a run as it goes: the copy\'s line, the steps as they tick, its tool rows, the wait for a call', () => {
+  const w = knRunView(RUN_EVENTS.slice(0, 2))
+  assert.equal(w.copy, 'Not in the copy: .git/, media/talk.mp4 (30 MB), 42 other sources in raw_inbox/')
+  assert.equal(w.waiting, 'Waiting for a call\'s transcription to finish', 'X-S2: recording has priority, said')
+  const r = knRunView(RUN_EVENTS)
+  assert.equal(r.waiting, null, 'Claude Code started: the wait is over')
+  assert.deepEqual(r.steps.map((s) => s.state), ['done', 'active', 'todo'])
+  assert.deepEqual(r.tools.map((t) => [t.verb, t.target, t.detail]), [['Used skill', 'process-inbox', ''], ['Updated the steps', '', '1 of 3'], ['Read', 'raw_inbox/echo/2026-11-06-memo-pricing-thoughts.md', '']])
+  assert.equal(r.tools[1].result.ok, true, 'each row with its result')
+  assert.equal(r.tools[2].result, null, 'still reading')
+  assert.equal(r.ended, null)
+  const end = knRunView([...RUN_EVENTS, { n: 9, type: 'result', tokens_in: 41200, tokens_out: 3400, cost: 0.18, seconds: 160 }, { n: 10, type: 'notice', kind: 'ended', state: 'review', text: '5 changes to review' }])
+  assert.deepEqual(end.ended, { state: 'review', text: '5 changes to review' })
+  assert.equal(end.result.cost, 0.18)
+  const failed = knRunView([{ n: 1, type: 'error', text: 'No credits left' }, { n: 2, type: 'notice', kind: 'ended', state: 'failed', text: 'No credits left' }])
+  assert.deepEqual([failed.errors, failed.ended.state], [['No credits left'], 'failed'])
+})
+
+test('K14-02 the Add a source sheet: what each kind can add, and what it sends — never a file path', () => {
+  const big = { name: 'workshop-recording.mp4', size: 212 << 20, too_big: true }
+  const files = { tab: 'files', pick: { seq: 3, files: [{ name: 'Aurora RFP.pdf', size: 2200000 }, { name: 'pricing-workshop-notes.md', size: 14000 }, big] } }
+  assert.deepEqual(knAddState(files), { can: true, label: 'Add 2 files', count: 2 })
+  assert.deepEqual(knAddArgs(files), { kind: 'files', pick: 3 }, 'files by the number of their pick')
+  assert.deepEqual(knAddState({ tab: 'files', pick: { seq: 4, files: [big] } }), { can: false, label: 'Add files', count: 0 })
+  assert.deepEqual(knAddState({ tab: 'files', pick: null }), { can: false, label: 'Add files', count: 0 })
+  assert.equal(knAddState({ ...files, busy: true }).can, false, 'once')
+  const call = { tab: 'call', call: { name: '2026-11-05-090000-northwind-weekly-sync', title: 'Northwind · Weekly delivery sync' }, include: { transcript: true, chat: false } }
+  assert.deepEqual(knAddState(call), { can: true, label: 'Add 1 source', count: 1 })
+  assert.deepEqual(knAddArgs(call), { kind: 'call', call: '2026-11-05-090000-northwind-weekly-sync', transcript: true, chat: false, anyway: false })
+  const other = { ...call, mismatch: { name: call.call.name, call: 'system', vault: 'work', call_name: 'Claude Code (as configured)', vault_name: 'Claude · Work' } }
+  assert.equal(knAddState(other).label, 'Add anyway', 'on that call only')
+  assert.equal(knAddArgs(other).anyway, true)
+  const moved = { ...other, call: { name: '2026-11-04-140000-helios-design-review' } }
+  assert.deepEqual([knAddState(moved).label, knAddArgs(moved).anyway], ['Add 1 source', false], 'another call picked: no anyway')
+  assert.deepEqual(knAddState({ tab: 'call', call: null }), { can: false, label: 'Add a source', count: 0 })
+  assert.deepEqual(knAddState({ tab: 'mail', hit: null }, { m365: false }), { can: false, signin: true, label: 'Add a source', count: 0 })
+  const mail = { tab: 'mail', hit: { kind: 'mail', id: 'AAMkMadeUp1', subject: 'Phase 2 and the holiday freeze' } }
+  assert.deepEqual([knAddState(mail).can, knAddArgs(mail)], [true, { kind: 'mail', message: 'AAMkMadeUp1' }])
+  const chat = { tab: 'mail', hit: { kind: 'chats', id: 'm1', chat: '19:made-up@thread.v2' }, days: 7 }
+  assert.deepEqual(knAddArgs(chat, '2026-11-07'), { kind: 'chat', chat: '19:made-up@thread.v2', since: '2026-11-01', until: '2026-11-07' }, 'the last 7 days')
+  assert.deepEqual(knAddArgs({ ...chat, days: 30 }, '2026-03-01'), { kind: 'chat', chat: '19:made-up@thread.v2', since: '2026-01-31', until: '2026-03-01' })
+  assert.deepEqual(knAddState({ tab: 'web', url: 'http://example.com/a' }), { can: false, label: 'Add the page', count: 0, note: 'Only an https address: Echo fetches nothing else.' })
+  assert.deepEqual(knAddState({ tab: 'web', url: '' }), { can: false, label: 'Add the page', count: 0, note: '' })
+  const web = { tab: 'web', url: '  https://www.example.com/reports/pricing  ' }
+  assert.deepEqual([knAddState(web).can, knAddArgs(web)], [true, { kind: 'web', url: 'https://www.example.com/reports/pricing' }])
+  for (const x of [files, call, other, mail, chat, web]) {
+    const a = knAddArgs(x, '2026-11-07')
+    assert.ok(!Object.keys(a).some((k) => /path|file|dir/.test(k)) && !Object.values(a).some((v) => typeof v === 'string' && /^(\/|~|[A-Za-z]:\\)/.test(v)), `no path in what is sent: ${JSON.stringify(a)}`)
+  }
+})
+
+test('K14-09 the first open\'s question stands until it is answered, even after an add (R40)', () => {
+  assert.deepEqual(knFirstOpen({ offer: { count: 41, folder: 'raw_inbox' }, sources: [] }), { count: 41, folder: 'raw_inbox', text: '41 files are already in raw_inbox/. Were they processed?' })
+  const added = { offer: { count: 41, folder: 'raw_inbox' }, sources: [SRC('raw_inbox/echo/2026-11-05-northwind-sync.md', 'echo', 'Northwind · Weekly delivery sync', 'new')] }
+  assert.equal(knFirstOpen(added).count, 41, 'an add first doesn\'t take it away')
+  assert.equal(knFirstOpen({ offer: { count: 1, folder: 'inbox' } }).text, '1 file is already in inbox/. Was it processed?')
+  assert.equal(knFirstOpen({ offer: { count: 1204, folder: 'raw_inbox' } }).text, '1,204 files are already in raw_inbox/. Were they processed?')
+  assert.equal(knFirstOpen({ offer: null, sources: [] }), null, 'answered: never asked again')
+  assert.equal(knFirstOpen(null), null)
+})
+
+test('K15-09 what Write did, in Echo\'s words: written, changed in the vault since the run, the commit', () => {
+  assert.deepEqual(knWriteSummary({ written: ['knowledge/clients/a.md', 'knowledge/CATALOG.md', 'log.md', 'knowledge/notes/b.md'], changed_since: [], commit: '3f9c2d1', kept: 4, of: 5, finished: true }, 'My twin'),
+    { text: 'Wrote 4 files into My twin. Committed (3f9c2d1). The run is done: 4 of its 5 changes kept.', wait: false })
+  assert.deepEqual(knWriteSummary({ written: ['log.md'], changed_since: [], commit: 'off', kept: 1, of: 3, finished: false }, 'My twin'), { text: 'Wrote log.md into My twin.', wait: false })
+  const stale = knWriteSummary({ written: ['log.md'], changed_since: ['knowledge/clients/a.md'], commit: 'skipped: the file had changes of yours that weren\'t committed', kept: 1, of: 2, finished: false }, 'My twin')
+  assert.equal(stale.text, 'Wrote log.md into My twin. Not committed: the file had changes of yours that weren\'t committed. knowledge/clients/a.md changed in the vault since the run, so it wasn\'t written: compare it below.')
+  assert.equal(stale.wait, true, 'something wasn\'t written: said until OK')
+  assert.deepEqual(knWriteSummary({ written: [], changed_since: [], commit: 'off', kept: 0, of: 1, finished: false }, 'My twin'), { text: 'Nothing was written.', wait: true })
+  // X-G2: a file with changes of yours before the write is written, not committed — said, and waits for OK.
+  const left = knWriteSummary({ written: ['knowledge/topics/a.md', 'log.md'], committed: ['log.md'], changed_since: [], commit: '9a37fc7', kept: 2, of: 3, finished: false }, 'My twin')
+  assert.deepEqual(left, { text: 'Wrote 2 files into My twin. Committed (9a37fc7), but not knowledge/topics/a.md: it had changes of yours.', wait: true })
 })
 
 let failed = 0
