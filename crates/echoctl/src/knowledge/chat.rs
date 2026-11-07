@@ -207,8 +207,11 @@ struct State {
     /// Claude Code has the conversation (a process of it began its session, or it is from the vault's list): the next
     /// start resumes it.
     started: bool,
-    /// Its past was looked up in Claude Code's transcript (once, K12-11): the events it gave come first.
+    /// It holds the conversation from its beginning: its past was read from Claude Code's transcript (K12-11) — the
+    /// events it gave come first —, or nothing came before what it holds. Its events let go (`sweep`), it doesn't.
     history: bool,
+    /// A page opened it from before what it holds while a turn went: it is read again once the turn is over.
+    due: bool,
     last_active: Instant,
     /// When it was last used, for the list.
     active_at: Option<String>,
@@ -296,6 +299,7 @@ impl Conv {
             told: BTreeSet::new(),
             started,
             history: false,
+            due: false,
             last_active: now(),
             active_at: None,
             renders: HashMap::new(),
@@ -789,25 +793,45 @@ fn exited(c: &Conv, v: &Vault, gen: u64, stopped: bool, code: Option<i32>, words
     committed(c, v, &t);
 }
 
-/// A conversation Echo holds no process or events of shows what Claude Code's transcript has (K12-11), numbered as live
-/// events are, so a message sent later follows them without renumbering. Once; a transcript that can't be read is said
-/// in a notice. One whose events were let go (`sweep`) reads it again only for a page that asks `from` before them —
-/// one opening it —, numbered after them: a page still showing them (and a message, `from` None) goes on without
-/// seeing any twice.
+/// A conversation Echo holds no events of shows what Claude Code's transcript has (K12-11), numbered as live events
+/// are, so a message sent later follows them without renumbering; a transcript that can't be read is said in a notice.
+/// One that doesn't hold its beginning any more (its events let go, `sweep`; maybe a message since) is read again from
+/// its transcript, whole, when a page asks `from` before what it holds — one opening it (final review X2) —: in place
+/// of what it holds, numbered after every number it gave, so a page that kept polling is answered from elsewhere than
+/// it asked and takes the conversation whole again (`knChatTake`), never twice. A page still showing it (its `from`
+/// inside), or a message (`from` None), goes on as it is. While a turn goes it waits for the turn's end (`due`). Read,
+/// it counts as used: the sweep leaves it for the page that opened it.
 fn open_history(c: &Conv, v: &Vault, from: Option<u64>) {
-    let wanted = |st: &State| st.started && !st.history && st.proc.is_none() && st.events.is_empty() && (st.start == 0 || from.is_some_and(|f| f < st.start));
-    if !wanted(&lock(&c.state)) {
-        return;
+    {
+        let mut st = lock(&c.state);
+        if !st.started || st.history || !(st.end() == 0 || st.due || from.is_some_and(|f| f < st.start)) {
+            return;
+        }
+        if st.busy || !st.pending.is_empty() {
+            st.due = true;
+            return;
+        }
     }
     let past = transcript::events(&terminal::claude_folder_of(&c.profile), &c.id, v);
     let mut st = lock(&c.state);
-    if !wanted(&st) {
+    // Read by another meanwhile, or a turn began.
+    if st.history || st.busy || !st.pending.is_empty() {
         return;
     }
     st.history = true;
+    st.due = false;
+    st.last_active = now();
     match past {
-        Some(events) => events.into_iter().for_each(|e| st.push(e)),
-        None => st.push(json!({"type": "notice", "kind": "history", "text": "Its history can't be shown here; continuing works."})),
+        Some(events) => {
+            if st.end() > 0 {
+                st.start = st.end() + 1;
+            }
+            st.events = VecDeque::new();
+            st.renders.clear();
+            events.into_iter().for_each(|e| st.push(e));
+        }
+        None if st.events.is_empty() => st.push(json!({"type": "notice", "kind": "history", "text": "Its history can't be shown here; continuing works."})),
+        None => {}
     }
     c.changed.notify_all();
 }
@@ -820,6 +844,10 @@ pub fn read(vault: &str, conversation: &str, from: u64, wait: Duration) -> Optio
     open_history(&c, &v, Some(from));
     let deadline = Instant::now() + wait;
     let mut st = lock(&c.state);
+    // A page opening it uses it (final review X2).
+    if from == 0 || from < st.start {
+        st.last_active = now();
+    }
     let seen = st.flags();
     while st.end() == from && st.flags() == seen {
         let left = deadline.saturating_duration_since(Instant::now());
@@ -1663,27 +1691,163 @@ mod tests {
         // A page still showing it polls on: nothing new, nothing twice.
         let c = read(&v.id, ID, 5, Duration::from_millis(50)).unwrap();
         assert!(c.events.is_empty() && c.next == 5, "{:#?}", c.events);
-        // Opened again: the same events from its transcript, numbered after the ones let go.
+        // Opened again: the same events from its transcript, numbered after every number it gave (5 was its end).
         let again = read(&v.id, ID, 0, Duration::from_millis(50)).unwrap();
         let words = |ev: &[Value]| ev.iter().map(|e| e.as_object().unwrap().iter().filter(|(k, _)| *k != "n").map(|(k, x)| (k.clone(), x.clone())).collect::<Vec<_>>()).collect::<Vec<_>>();
         assert_eq!(words(&again.events), words(&first.events));
-        assert_eq!(again.events.iter().map(|e| e["n"].as_u64().unwrap()).collect::<Vec<_>>(), [5, 6, 7, 8, 9]);
-        assert_eq!(again.next, 10);
-        assert!(read(&v.id, ID, 10, Duration::from_millis(50)).unwrap().events.is_empty(), "and the poll goes on from there");
+        assert_eq!(again.events.iter().map(|e| e["n"].as_u64().unwrap()).collect::<Vec<_>>(), [6, 7, 8, 9, 10]);
+        assert_eq!(again.next, 11);
+        assert!(read(&v.id, ID, 11, Duration::from_millis(50)).unwrap().events.is_empty(), "and the poll goes on from there");
         // Let go again while a page shows it: a message from that page follows what it shows, its past not read twice.
         skew(IDLE);
         sweep();
         assert_eq!(held(), Some(0));
         script(&p, "chat.jsonl", &turn("Fixed."));
         send(&v.id, Some(ID), "Yes, fix it", Mode::Ask, &[]).unwrap();
-        let ev = events_until(&v.id, ID, |ev, c| !c.busy && of_type(ev, "result").len() == 1);
-        assert_eq!((ev[0]["type"].as_str(), ev[0]["n"].as_u64()), (Some("user"), Some(10)), "{ev:#?}");
-        assert!(ev.iter().all(|e| e["n"].as_u64().unwrap() >= 10));
+        let (ev, _) = poll_from(&v, 11);
+        assert_eq!((ev[0]["type"].as_str(), ev[0]["n"].as_u64()), (Some("user"), Some(11)), "{ev:#?}");
+        assert!(ev.iter().all(|e| e["n"].as_u64().unwrap() >= 11));
         // A conversation going on keeps its events.
         skew(IDLE);
         sweep();
         until("its idle process ended", || !live().contains(&ID.to_string()));
         assert!(held().unwrap() > 0, "its process has only just ended");
+    }
+
+    /// The page's poll from `from` until the turn has ended: its events and where it is then.
+    fn poll_from(v: &Vault, mut from: u64) -> (Vec<Value>, u64) {
+        let (mut all, t) = (vec![], Instant::now());
+        loop {
+            let c = read(&v.id, ID, from, Duration::from_millis(200)).expect("the conversation");
+            from = c.next;
+            all.extend(c.events.iter().cloned());
+            if !c.busy && all.iter().any(|e| e["type"] == "result") {
+                return (all, from);
+            }
+            assert!(t.elapsed() < Duration::from_secs(10), "timed out: {all:#?}");
+        }
+    }
+
+    /// The user's words and the finished answers' text in `ev`, in order: what a reader sees of the conversation.
+    fn said(ev: &[Value]) -> Vec<String> {
+        ev.iter()
+            .filter_map(|e| match e["type"].as_str() {
+                Some("user") => e["text"].as_str().map(|t| format!("you: {}", t.chars().take(30).collect::<String>())),
+                Some("text") if e["done"] == true => e["md"].as_str().map(|t| format!("claude: {}", t.chars().take(30).collect::<String>())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_conversation_continued_after_a_let_go_opens_whole_again() {
+        // Final review X2: opened from before what Echo holds, it is read again from its transcript — the earlier
+        // turns and the new one, each once — and a page that kept polling takes it whole once more, not twice.
+        let (_env, root) = crate::paths::testenv::folders("chat-reopen-whole");
+        let _fake = fake::install(&root);
+        let _clean = clean();
+        let p = signed_in();
+        let v = vault(&root, "w");
+        past(&p, &v, &include_str!("testdata/transcript/ask-session.jsonl").replace("/VAULT", &v.root.to_string_lossy()));
+        let first = read(&v.id, ID, 0, Duration::from_millis(50)).unwrap();
+        let before = said(&first.events);
+        assert_eq!(before.len(), 2, "{before:?}");
+        skew(IDLE);
+        sweep();
+        // The page still showing it sends a follow-up and polls on from where it was.
+        script(&p, "chat.jsonl", &turn("Fixed, with its date and tags."));
+        send(&v.id, Some(ID), "Yes, fix it", Mode::Ask, &[]).unwrap();
+        let (shown, at) = poll_from(&v, first.next);
+        assert_eq!(said(&shown), ["you: Yes, fix it", "claude: Fixed, with its date and tags."]);
+        // Claude Code wrote the turn into its transcript (the fake doesn't: done here, as it would be).
+        let file = p.config_folder().join(format!("projects/-made-up/{ID}.jsonl"));
+        let turn_lines = [
+            json!({"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "text", "text": "Yes, fix it"}]}}),
+            json!({"type": "assistant", "isSidechain": false, "message": {"id": "msg_follow", "type": "message", "role": "assistant", "content": [{"type": "text", "text": "Fixed, with its date and tags."}], "stop_reason": "end_turn"}}),
+        ];
+        let mut t = std::fs::read_to_string(&file).unwrap();
+        turn_lines.iter().for_each(|l| t.push_str(&format!("{l}\n")));
+        std::fs::write(&file, t).unwrap();
+        // Opened again (another conversation and back, a reload): the whole of it, each message once.
+        let again = read(&v.id, ID, 0, Duration::from_millis(50)).unwrap();
+        let whole = [before.clone(), said(&shown)].concat();
+        assert_eq!(said(&again.events), whole);
+        // The page that kept polling: its next answer doesn't follow on from where it was (so it takes it whole), and
+        // it is the whole conversation, each message once; then nothing more.
+        let kept = read(&v.id, ID, at, Duration::from_millis(50)).unwrap();
+        assert_ne!(kept.events.first().and_then(|e| e["n"].as_u64()), Some(at), "it can't pass for what follows");
+        assert_eq!(said(&kept.events), whole);
+        assert!(read(&v.id, ID, kept.next, Duration::from_millis(50)).unwrap().events.is_empty());
+    }
+
+    #[test]
+    fn opened_while_a_turn_goes_it_is_read_whole_when_the_turn_ends() {
+        // Final review X2: a page opening it mid-turn after a let-go gets the whole conversation once the turn is over.
+        let (_env, root) = crate::paths::testenv::folders("chat-reopen-busy");
+        let _fake = fake::install(&root);
+        let _clean = clean();
+        let p = signed_in();
+        let v = vault(&root, "w");
+        let history = include_str!("testdata/transcript/ask-session.jsonl").replace("/VAULT", &v.root.to_string_lossy());
+        past(&p, &v, &history);
+        let first = read(&v.id, ID, 0, Duration::from_millis(50)).unwrap();
+        skew(IDLE);
+        sweep();
+        // Its turn writes the transcript (as Claude Code does), then waits on a card.
+        let follow = [
+            json!({"type": "user", "isSidechain": false, "message": {"role": "user", "content": [{"type": "text", "text": "Yes, fix it"}]}}),
+            json!({"type": "assistant", "isSidechain": false, "message": {"id": "msg_follow", "type": "message", "role": "assistant", "content": [{"type": "text", "text": "Fixed."}], "stop_reason": "end_turn"}}),
+        ];
+        let file = p.config_folder().join(format!("projects/-made-up/{ID}.jsonl"));
+        std::fs::write(fake::file(&p, "apply.1"), format!("{history}{}", follow.iter().map(|l| format!("{l}\n")).collect::<String>())).unwrap();
+        std::fs::write(fake::file(&p, "apply.1.to"), file.display().to_string()).unwrap();
+        let asks = json!({"type": "control_request", "request_id": "req-1", "request": {"subtype": "can_use_tool", "tool_name": "Edit", "input": {"file_path": format!("{}/knowledge/clients/acme.md", v.root.display()), "old_string": "# Acme Corp\n", "new_string": "# Acme Corp\n\nFixed.\n"}}});
+        let played = turn("Fixed.");
+        let (init, rest) = played.split_once('\n').unwrap();
+        script(&p, "chat.jsonl", &format!("{init}\n{{\"_apply\":1}}\n{asks}\n{rest}"));
+        send(&v.id, Some(ID), "Yes, fix it", Mode::Ask, &[]).unwrap();
+        until("the card", || read(&v.id, ID, first.next, Duration::ZERO).is_some_and(|c| c.waiting));
+        // Opened meanwhile: what it holds; the transcript isn't read while the turn goes.
+        let opened = read(&v.id, ID, 0, Duration::from_millis(50)).unwrap();
+        assert_eq!(said(&opened.events), ["you: Yes, fix it"]);
+        permit(ID, "req-1", false, false, None).unwrap();
+        // That page polls on: once the turn is over, the whole conversation, each message once.
+        let (mut from, mut seen, t) = (opened.next, vec![], Instant::now());
+        loop {
+            let c = read(&v.id, ID, from, Duration::from_millis(200)).unwrap();
+            if c.events.first().and_then(|e| e["n"].as_u64()).is_some_and(|n| n != from) {
+                seen.clear(); // answered from elsewhere than asked: the page takes it whole again
+            }
+            from = c.next;
+            seen.extend(c.events.iter().cloned());
+            if !c.busy && said(&seen).len() == 4 {
+                break;
+            }
+            assert!(t.elapsed() < Duration::from_secs(10), "{seen:#?}");
+        }
+        assert_eq!(said(&seen)[2..], ["you: Yes, fix it".to_string(), "claude: Fixed.".to_string()]);
+        assert_eq!(said(&seen)[..2], said(&first.events)[..]);
+    }
+
+    #[test]
+    fn a_sweep_right_after_opening_drops_nothing() {
+        // Final review X2: opening counts as use.
+        let (_env, root) = crate::paths::testenv::folders("chat-open-use");
+        let _fake = fake::install(&root);
+        let _clean = clean();
+        let p = signed_in();
+        let v = vault(&root, "w");
+        past(&p, &v, &include_str!("testdata/transcript/ask-session.jsonl").replace("/VAULT", &v.root.to_string_lossy()));
+        let first = read(&v.id, ID, 0, Duration::from_millis(50)).unwrap();
+        skew(IDLE);
+        sweep();
+        let held = || lock(&CHATS).get(ID).map(|c| lock(&c.state).events.len());
+        assert_eq!(held(), Some(0));
+        // Opened again, and a sweep comes at once: what was just read stays for the page.
+        let again = read(&v.id, ID, 0, Duration::from_millis(50)).unwrap();
+        sweep();
+        assert_eq!(held(), Some(first.events.len()), "nothing let go right after it was opened");
+        assert_eq!(said(&read(&v.id, ID, 0, Duration::from_millis(50)).unwrap().events), said(&again.events));
     }
 
     #[test]

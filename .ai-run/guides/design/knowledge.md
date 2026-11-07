@@ -671,9 +671,16 @@ resumes. At most 3 processes (the longest idle ends for a fourth; while all thre
 conversations are answering. Wait for one, or stop one." — the page shows it as any refusal and the composer keeps
 the text: final review F4); one idle 10 min with no turn ends (a 30 s sweep). The same sweep lets go of the events of
 a conversation with no process, idle 10 min, that Claude Code has a session of (final review F5): only its numbering
-stays (`start` moves to where its events ended), and its transcript is read again when a page opens it — asks `from`
-before that number —, numbered on from there; a page still showing it, polling from that number or sending a message,
-sees nothing twice.
+stays (`start` moves to where its events ended). A page still showing it polls on from there, and a message from it
+follows what it shows. When a page opens it — asks `from` before what Echo holds, even after a message since —, it is
+read again from its transcript, whole (final review X2): in place of what Echo holds, numbered after every number it
+gave (`start` = the end + 1), so no page can take the re-read for what follows its own; a page that kept polling is
+answered from elsewhere than it asked, and the page rebuilds its list whenever an answer doesn't start where it is
+(`knChatTake`: then it holds the whole conversation, each message once). A page opening it while a turn goes gets what
+Echo holds, and the re-read comes with its first poll after the turn (`due`). Opening it counts as use (the sweep's
+clock), so what was just read stays for the page. What only the live stream had (a turn's `result` row, notices,
+answered cards) is not in a re-read, as for any history; that a finished turn is in the transcript by its `result` is
+unmeasured.
 The panel and Ask refuse a conversation live in the other (`terminal::live_session`, `chat::live`). One Ask ran
 (its `chat/<id>/` folder is there) resumes in the panel without `--dangerously-skip-permissions`, whatever *no
 permission prompts* says (D41); the panel's own conversations keep the switch. A conversation
@@ -1042,7 +1049,7 @@ summaries match live ones), makes the user's own text a `user` event (Echo's "pa
 framing cut off; hook, command and meta text skipped) and skips sidechain lines. Its blocks are named `h1…` so a live
 process's `b1…` can't meet them. `chat::read` and `chat::send` open it once for a resumable conversation with no process
 and no events, pushing the events into the ring (numbered like live ones, so a later message follows them; after its
-events were let go, only `read` from before them reads it again); a transcript
+events were let go, a `read` from before what Echo holds reads it again, whole, in place of what it holds); a transcript
 that isn't one (no JSON line with a `type`) or is missing gives a `notice` (`kind: history`): "Its history can't be
 shown here; continuing works." Permissions and todos aren't in transcripts.
 

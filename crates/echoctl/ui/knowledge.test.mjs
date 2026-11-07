@@ -556,6 +556,19 @@ test('the poll: a conversation whose events Echo let go polls on, and opened aga
   assert.deepEqual(knChatTurns(c.events).map((t) => t.user.text), ['What did Lena Hartmann decide?', 'And the gateway?'])
 })
 
+test('the poll: a page that kept polling while Echo read the conversation again takes it whole, once (final review X2)', () => {
+  const c = { busy: false }
+  const g = knChatOpen(c, 'A')
+  assert.ok(knChatTake(c, g, 0, chunk(A, 3), 1000))
+  assert.ok(knChatTake(c, g, 3, chunk(A2, 6), 2000))
+  // Echo read it again from its transcript, numbered after every number it gave: asked from 6, it answers from 7.
+  const whole = [...A, ...A2].filter((e) => e.type !== 'result').map((e, i) => ({ ...e, n: 7 + i }))
+  assert.ok(knChatTake(c, g, 6, chunk(whole, 11), 3000))
+  assert.deepEqual(knChatTurns(c.events).map((t) => t.user.text), ['What did Lena Hartmann decide?', 'And the gateway?'], 'each message once')
+  assert.deepEqual(c.events.map((e) => e.n), [7, 8, 9, 10], 'no gap, nothing from before')
+  assert.equal(c.next, 11)
+})
+
 test('the poll: a new message starts the blocks\' names afresh (a cut answer keeps its text)', () => {
   const c = { busy: false }
   const g = knChatOpen(c, 'A')

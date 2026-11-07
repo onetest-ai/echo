@@ -494,8 +494,9 @@ function knPollKeep(c, gen) { return c.gen === gen }
 function knChatTake(c, gen, from, r, now) {
   if (c.gen !== gen || from !== c.next) return null
   const evs = r.events || []
-  // Echo started again: asked past its end, it answers from its first event.
-  if (evs.length && evs[0].n < c.next) { c.events = []; c.renders = {} }
+  // Not from where the view is: Echo started again (asked past its end, it answers from its first event), or it holds
+  // the conversation anew (read again from its transcript, numbered after all it gave) — the list is rebuilt from it.
+  if (evs.length && evs[0].n !== c.next) { c.events = []; c.renders = {} }
   for (const e of evs) {
     if (c.loaded) e.at = now
     if (e.type === 'user') c.renders = {}
