@@ -150,7 +150,7 @@
    "id": "F-MIN-15",
    "feature": "Write again with another template rewrites the minutes in it and later runs keep it; the items are disabled while minutes are being written",
    "priority": "medium",
-   "check": "person",
+   "check": "agent",
    "axes": [
     "call.run",
     "template.kind"
@@ -160,7 +160,7 @@
    "id": "F-MIN-16",
    "feature": "With Claude Code not installed or Echo's plugin not connected, the Minutes tab says what to do instead of offering Write minutes",
    "priority": "high",
-   "check": "person",
+   "check": "agent",
    "axes": [
     "set.claude_code"
    ]

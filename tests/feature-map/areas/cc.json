@@ -9,7 +9,7 @@
    "id": "F-CC-01",
    "feature": "A minutes run can read only its call's folder (and the previous minutes of the meeting), write only `notes.md` and its actions file, and run only Echo's run commands, whatever the user's settings allow",
    "priority": "critical",
-   "check": "person",
+   "check": "agent",
    "axes": []
   },
   {
@@ -35,7 +35,7 @@
    "id": "F-CC-04",
    "feature": "A thread's sync runs may only read its ledger and write their own run files; a Yolo run may change only its own task",
    "priority": "high",
-   "check": "person",
+   "check": "agent",
    "axes": []
   },
   {

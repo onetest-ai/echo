@@ -53,7 +53,7 @@
    "id": "F-TPL-06",
    "feature": "A call's minutes follow the template whose words are in its title, else Default (a template chosen for the call wins)",
    "priority": "high",
-   "check": "person",
+   "check": "agent",
    "axes": [
     "template.use"
    ]

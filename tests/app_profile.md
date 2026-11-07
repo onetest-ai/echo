@@ -34,7 +34,10 @@ agent tests it. This file is given to every manual-qa role; where it differs fro
    System Settings, a logout) lists those moments in `user_steps:`, and its steps say "**The user does:** …".
 6. **A PASS needs evidence**: a Playwright snapshot for a window step, the command's output for a CLI step.
 7. **Agent runs execute scenarios, not single cases** (see "Scenarios" below): one runner per scenario, fresh data
-   per scenario, and **the browser stays open** from one runner to the next — never close the page or the browser.
+   per scenario, and **the browser stays open** from one runner to the next — never close the browser while a run goes on.
+   **Clean up after yourself:** when a scenario (or a one-off check) is done, close its tab and stop its server
+   (`serve.sh down <dir>`); at the end of a run only one blank tab is left and no test server runs (the user's own
+   ports never touched).
 
 ## Starting the app under test
 

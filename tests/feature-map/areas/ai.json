@@ -28,7 +28,7 @@
    "id": "F-AI-03",
    "feature": "A call keeps the profile it was recorded with; changing the default later never moves it",
    "priority": "critical",
-   "check": "person",
+   "check": "agent",
    "axes": [
     "call.profile"
    ]

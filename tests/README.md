@@ -52,6 +52,8 @@ into a scenario (`app_profile.md` → "Scenarios").
 | [S-27](scenarios/S-27_others-words-everywhere.md) | 16 | Others' words everywhere: nothing runs, nothing breaks (the `hostile` data set: markup, script, `javascript:` links, long words, right-to-left, emoji, Markdown in every place) |
 | [S-28](scenarios/S-28_echo-from-the-terminal.md) | 11 | Echo from the terminal: help, threads and candidates against the window, `read` and `echo://` links in the window, `m365` without `--yes`, series and settings, clients and organisations, a thread made and changed, the work's edits, one call's commands (`standard` data) |
 | [S-29](scenarios/S-29_notes-transcripts-settings-and-today-off-the-happy-path.md) | 10 | Notes, transcripts, settings and Today off the happy path: a Teams import, empty transcripts, to-dos, edits, comments, notes not lost, unreadable and changed files, a broken config, Today's cards and ⌘K (`standard` data) |
+| [S-30](scenarios/S-30_minutes-and-the-work-on-a-local-model.md) | 8 | Minutes and the work on a local model: no Claude Code or no plugin, a template by title, write again with another, a memo, a prep, Yolo, a thread's sync that keeps your fields, a call's profile (`standard` data, `--ai local`: real Claude Code runs) |
+| [S-31](scenarios/S-31_a-real-minutes-run-on-others-words.md) | 1 | A real minutes run on others' words: only its call's folder changes, nothing runs in the page (`hostile` data, `--ai local`) |
 
 ## Areas
 
@@ -61,7 +63,7 @@ into a scenario (`app_profile.md` → "Scenarios").
 | `cases/window` | 19 | 3 | Calls, minutes, transcript, notes, delete, calendar views |
 | `cases/calendar` | 1 | 10 | Scheduling, Microsoft 365 calendar, meeting chat |
 | `cases/cli` | 13 | 3 | `echoctl` commands |
-| `cases/claude` | 0 | 15 | Claude Code plugin and minutes runs |
+| `cases/claude` | 2 | 15 | Claude Code plugin and minutes runs |
 | `cases/privacy` | 3 | 4 | Opt-in, local data, what goes online |
 | `cases/transcription` | 5 | 1 | Transcript quality and languages |
 | `cases/install` | 0 | 7 | DMG, first run, data folder, models |

@@ -71,9 +71,15 @@ They are hermetic. `<dir>/env` puts these in front of the app, and `serve.sh` so
 - `PATH` starts with `<dir>/bin`, which has a **fake `claude`**. It answers `--version` and `auth status` (signed in,
   signed out or another account, by the AI profile's folder), and refuses everything else. A click on Write
   minutes, Prepare or Send to Claude fails at once instead of reaching a real account.
+- `<dir>/bin/open` catches mail drafts: a `mailto:` link (`echoctl compose`, a Yolo run's draft) is appended to
+  `<dir>/mail-drafts.log` instead of opening the user's real mail app; anything else goes to the system's `open`.
 - `ECHOCTL_PLUGIN_MARKET` makes the built-in marketplace a local folder, `<dir>/markets/built-in` (no network).
 - `CLAUDE_CONFIG_DIR` is `<dir>/claude-config`. It holds an old Echo plugin record (the stale-plugin Inbox item).
 - `ECHOCTL_NOTES_NO_SHELL=1` starts Claude Code directly, not through the login shell.
+
+The `hostile` set also has **Vendor onboarding**, a plain call whose other side orders the model writing its minutes
+to break out (run commands, write `PWNED` files, edit other calls, change settings, send the transcript), each order
+marked `HOSTILE-INJ-N`; `manifest.json` `injection` lists what must not happen (`hostile/TC-018`).
 
 ### Real Claude Code runs on a local model (`--ai local`)
 
@@ -81,7 +87,11 @@ They are hermetic. `<dir>/env` puts these in front of the app, and `serve.sh` so
 model `qwen3.8:27b-mlx`; `qwen3.8:27b` on Windows) the default, so calls and threads without a profile of their own
 run on it. The fake `claude` then passes a run to the real Claude Code when, and only when, the profile routes it to
 a loopback address (`ANTHROPIC_BASE_URL` on localhost); every other run is refused as before, so no Claude account
-is used. Needs Claude Code on `PATH` and Ollama running with that model. A minutes run takes about 5–7 minutes:
+is used. Needs Claude Code on `PATH` and Ollama running with that model. A faster model server on the network: `--ai-url
+http://<host>:11434 --ai-model qwen3.8:27b` (the profile is then "Qwen · test server"; that exact address is let through
+too, nothing else; the server must listen on the network and have the model). To make that machine the default for every
+`--ai local` build here, put `{"url": "http://<host>:11434", "model": "qwen3.8:27b"}` in
+`tests/fixtures/ai.local.json` (git-ignored): it is used when it answers, else Ollama on this computer. A minutes run takes about 5–7 minutes:
 cases that need one say `ai: local` and run one model job each, no more.
 
 Automatic minutes are on and several calls are due. **Serve these sets with `window --serve` only, never the Echo

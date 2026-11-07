@@ -38,3 +38,4 @@ docs/superpowers/qa-tasks/*/**/*.local.*
 /.playwright-mcp/
 __pycache__/
 /tests/tools/testcall/build/
+/tests/fixtures/ai.local.json
