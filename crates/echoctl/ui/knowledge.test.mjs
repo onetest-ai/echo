@@ -742,6 +742,8 @@ test('K16-06 what an AI check kept and dropped, in Echo\'s words', () => {
   assert.equal(knLintNotice({ kept: 3, dropped: 0 }), 'Kept 3 findings.')
   assert.equal(knLintNotice({ kept: 0, dropped: 4 }), 'Kept no finding · 4 dropped: their quotes aren\'t in the pages.')
   assert.equal(knLintNotice({ kept: 0, dropped: 0 }), 'Found nothing to fix.')
+  assert.equal(knLintNotice({ kept: 200, dropped: 3, left: 40 }), 'Kept 200 findings · 3 dropped: their quotes aren\'t in the pages · 40 more not read: Echo keeps 200 a check.', 'over the cap: said, not kept')
+  assert.equal(knLintNotice({ kept: 200, dropped: 0, left: 1 }), 'Kept 200 findings · 1 more not read: Echo keeps 200 a check.')
   assert.equal(knLintNotice(null), '')
 })
 
@@ -758,8 +760,9 @@ test('K16-07 a contradiction\'s two quotes side by side: the older first, then t
 
 test('K16-05 the AI row: a check going, the last one\'s failure said until the next check, else the last that ended', () => {
   const ai = { at: '2026-11-07T10:00:00+01:00', run: '2026-11-07_095500', cost: 0.31, kept: 1, dropped: 2 }
-  assert.deepEqual(knLintState({ running: '2026-11-07_120000', last: { id: '2026-11-07_120000', state: 'running', waiting: 'Waiting for a call\'s transcription to finish' } }, ai), { state: 'running', run: '2026-11-07_120000', waiting: 'Waiting for a call\'s transcription to finish', reason: null })
-  assert.deepEqual(knLintState({ running: null, last: { id: '2026-11-07_120000', state: 'failed', reason: 'It wrote no findings' } }, ai), { state: 'failed', run: null, waiting: null, reason: 'It wrote no findings' })
+  assert.deepEqual(knLintState({ running: '2026-11-07_120000', last: { id: '2026-11-07_120000', state: 'running', waiting: 'Waiting for a call\'s transcription to finish' } }, ai), { state: 'running', run: '2026-11-07_120000', waiting: 'Waiting for a call\'s transcription to finish', reason: null, cost: null })
+  assert.deepEqual(knLintState({ running: null, last: { id: '2026-11-07_120000', state: 'failed', reason: 'It wrote no findings', cost: 0.04 } }, ai), { state: 'failed', run: null, waiting: null, reason: 'It wrote no findings', cost: 0.04 }, 'what the failed check cost, said with it (K16-01) — the last check that ended stays `ai`')
+  assert.equal(knLintState({ running: null, last: { id: '2026-11-07_120000', state: 'stopped', reason: 'Stopped for a sign-in' } }, ai).cost, null, 'no result, no cost')
   assert.equal(knLintState({ running: null, last: { id: '2026-11-07_120000', state: 'stopped', reason: 'Stopped for a sign-in' } }, ai).state, 'stopped')
   assert.equal(knLintState({ running: null, last: { id: ai.run, state: 'done' } }, ai).state, 'idle')
   assert.equal(knLintState(null, null).state, 'idle', 'never run')

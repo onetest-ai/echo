@@ -949,6 +949,9 @@ pub struct AiRun {
     pub kept: Option<usize>,
     #[serde(default)]
     pub dropped: Option<usize>,
+    /// Findings past the most Echo keeps a check, not read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub left: Option<usize>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

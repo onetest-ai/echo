@@ -2880,7 +2880,8 @@ fn ingest_run_command(v: &knowledge::Vault, cmd: IngestCmd) -> Result<serde_json
 }
 
 /// `knowledge lint` (spec K16-11): an AI check started as the window's *Run AI checks* is, under the app's lock, waited
-/// for (what it waits for said as it waits, X-S2); its run, state, what it kept and dropped, and its cost.
+/// for (what it waits for said as it waits, X-S2); its run, state, what it kept and dropped (and how many past the most
+/// Echo keeps it didn't read), and its cost.
 fn lint_command(v: &knowledge::Vault) -> Result<serde_json::Value> {
     use knowledge::lint;
     knowledge::refuse_headless()?;
@@ -2901,7 +2902,7 @@ fn lint_command(v: &knowledge::Vault) -> Result<serde_json::Value> {
     // The findings it kept, as Health lists them: each by its key, kind, title and pages with their lines.
     let found = if st["state"] == "done" { lint::kept(v, &run)?.0 } else { vec![] };
     let found: Vec<serde_json::Value> = found.iter().map(|f| serde_json::json!({ "key": f.key, "kind": f.kind, "title": f.title, "pages": f.pages, "fixable": f.fixable })).collect();
-    Ok(serde_json::json!({ "run": run, "state": st["state"], "reason": st["reason"], "pages": st["pages"], "kept": st["kept"], "dropped": st["dropped"], "cost": st["cost"], "findings": found }))
+    Ok(serde_json::json!({ "run": run, "state": st["state"], "reason": st["reason"], "pages": st["pages"], "kept": st["kept"], "dropped": st["dropped"], "left": st["left"], "cost": st["cost"], "findings": found }))
 }
 
 fn ingest_command(vault: &str, cmd: IngestCmd) -> Result<serde_json::Value> {
@@ -3350,5 +3351,18 @@ mod lint_cli {
         assert!(out["run"].as_str().is_some_and(|r| !r.is_empty()) && out["reason"].is_null());
         assert_eq!((out["findings"][0]["kind"].as_str(), out["findings"][0]["title"].as_str(), out["findings"][0]["pages"].clone()), (Some("missing_summary"), Some("Acme Corp has no summary"), serde_json::json!([["knowledge/clients/acme.md", 2]])));
         knowledge::lint::reset();
+    }
+
+    #[test]
+    fn lint_refuses_inside_a_run_echo_started() {
+        // untrusted-text R2: a run Echo started can't start another Claude Code from the CLI.
+        let (_env, root) = crate::paths::testenv::folders("kn-cli-lint-headless");
+        let t = fixture::twin(&root.join("twin"));
+        let v = knowledge::add(&t, knowledge::AddOpts { name: Some("Twin".into()), ..Default::default() }).unwrap();
+        std::env::set_var(crate::notes::HEADLESS, "1");
+        let r = lint_command(&v);
+        std::env::remove_var(crate::notes::HEADLESS);
+        assert!(r.unwrap_err().to_string().contains("Echo's own runs"));
+        assert!(!knowledge::cache_dir(&v.id).join("lint").exists(), "nothing started");
     }
 }

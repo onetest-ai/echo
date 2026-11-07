@@ -1014,3 +1014,48 @@ fn the_runs_command_loads_only_the_users_settings_on_every_profile() {
         assert_eq!(argv[at[0] + 1], "user");
     }
 }
+
+/// A kind of run whose end panics (a made-up bug): `run_thread` must let its lock and lease go and leave `live` all the
+/// same. Echo stops it before it starts, so no Claude Code — not even the fake — is started.
+struct Panics;
+
+impl Life for Panics {
+    type End = ();
+
+    fn waiting(&self, _: Option<String>) {}
+
+    fn started(&self, _: u32) {}
+
+    fn early(&self, _: &'static str, _: String) {}
+
+    fn watch(&self, _: Child, _: &mut Log, _: &Mutex<Option<String>>) {}
+
+    fn finish(&self, _: &mut Log, _: ()) {
+        panic!("a made-up bug at a run's end");
+    }
+}
+
+#[test]
+fn a_run_whose_thread_panics_still_leaves_and_lets_go() {
+    // Review I2: a run's id never stays in `live` (Stop, a sign-in, the CLI's wait would see it going for ever), and
+    // its lock and lease go.
+    static T_LIVE: Lives = Mutex::new(BTreeMap::new());
+    static T_ENDED: Condvar = Condvar::new();
+    let (_env, root) = paths::testenv::folders("kn-ingest-panic");
+    let _fake = fake::install(&root);
+    let p = fake::profile("w", None, &fake::signed_in("pat@example.com"));
+    let lock_file = root.join("made-up.lock");
+    let run_lock = crate::app::FileLock::try_take(&lock_file).unwrap().unwrap();
+    let (stop, held) = go_live(&T_LIVE, "made-up-run", "twin", ai::ready("w").unwrap(), run_lock);
+    assert!(ai::sign_in_lease(&p).unwrap().is_none(), "the lease is held: a sign-in waits");
+    #[cfg(feature = "tray")]
+    assert!(crate::terminal::holds_profile("w"), "and counted, for a sign-in to stop it");
+    *lock(&stop) = Some("Stopped".into());
+    let going = Going { live: &T_LIVE, ended: &T_ENDED, run: "made-up-run".into(), profile: p.clone(), args: vec![], cwd: root.clone(), scope: vec![], log: Log::open(&root), stop, held };
+    run_thread(going, Panics);
+    assert!(wait_in(&T_LIVE, &T_ENDED, "made-up-run", Duration::from_secs(10)), "it left `live`");
+    paths::testenv::eventually("the lease is released", || ai::sign_in_lease(&p).unwrap().is_some());
+    #[cfg(feature = "tray")]
+    assert!(!crate::terminal::holds_profile("w"));
+    assert!(crate::app::FileLock::try_take(&lock_file).unwrap().is_some(), "and its lock");
+}

@@ -312,6 +312,10 @@ fn a_finding_naming_a_path_outside_the_vault_is_dropped() {
     fixture::write(&root, "outside.md", "# Outside\n\nPhase 2 go-live moves to 9 January.\n");
     fixture::write(&v.root, "raw_inbox/memo.md", "# A source\n\nPhase 2 go-live moves to 9 January.\n");
     std::os::unix::fs::symlink(root.join("outside.md"), v.root.join("knowledge/notes/linked.md")).unwrap();
+    // Pages Health doesn't judge (K8-05): a folder's README and the index — never a finding's page or a fix's target.
+    fixture::write(&v.root, "knowledge/notes/README.md", "# Notes\n\nPhase 2 go-live moves to 9 January.\n");
+    let index = v.path("index").unwrap();
+    fixture::write(&v.root, &index, &format!("{}\nPhase 2 go-live moves to 9 January.\n", read(&v.root, &index)));
     let quote = "Phase 2 go-live moves to 9 January";
     let one = |path: String| json!({"kind": "stale", "title": "Go-live", "pages": [{"path": NOTE, "quote": quote}, {"path": path, "quote": quote}]});
     let outside = root.join("outside.md").display().to_string();
@@ -319,6 +323,10 @@ fn a_finding_naming_a_path_outside_the_vault_is_dropped() {
         one("../outside.md".into()), one(outside), one(format!("knowledge/../../{}", "outside.md")), one("raw_inbox/memo.md".into()),
         one("knowledge/notes/gone.md".into()), one("knowledge/notes/linked.md".into()), one("knowledge\\notes\\x.md".into()),
         {"kind": "stale", "pages": [{"path": NOTE, "quote": quote}], "fix": {"path": "../outside.md", "old": "Phase 2", "new": "Phase 3"}},
+        one("knowledge/notes/README.md".into()), one(index.clone()),
+        {"kind": "missing_summary", "pages": [{"path": NOTE, "quote": quote}], "fix": {"path": index, "old": "Phase 2 go-live moves to 9 January.", "new": "x"}},
+        // A fix on a page of the vault that isn't one of the finding's.
+        {"kind": "stale", "pages": [{"path": NOTE, "quote": quote}], "fix": {"path": CLIENT, "old": OLD_LINE, "new": NEW_LINE}},
         {"kind": "made_up_kind", "pages": [{"path": NOTE, "quote": quote}]},
         {"kind": "stale", "pages": []},
         "not a finding",
@@ -327,7 +335,7 @@ fn a_finding_naming_a_path_outside_the_vault_is_dropped() {
     script(&p, "lint.jsonl", &[init(), findings(&p, 1, bad), result()]);
     let run = ran(&v);
     let (kept, dropped) = kept(&v, &run).unwrap();
-    assert_eq!(dropped, 11);
+    assert_eq!(dropped, 15);
     assert_eq!(kept.iter().map(|f| f.pages.clone()).collect::<Vec<_>>(), [vec![(NOTE.to_string(), Some(11))]], "a `./` path names a page all the same");
     assert_eq!(read(&root, "outside.md"), "# Outside\n\nPhase 2 go-live moves to 9 January.\n");
 }
@@ -346,11 +354,8 @@ fn one_check_at_a_time_it_stops_and_times_out() {
     assert_eq!(live(), std::slice::from_ref(&first));
     assert_eq!(health::view(&v, None).unwrap()["lint"]["running"], first.as_str());
     assert!(start(&v).unwrap_err().to_string().contains("An AI check of this vault is going"));
-    {
-        // Another Echo — the CLI — holding the lock refuses this one's too.
-        let _cli = crate::app::FileLock::try_take(&knowledge::cache_dir(&v.id).join("lint").join("run.lock")).unwrap();
-        assert!(_cli.is_none(), "held by the check going");
-    }
+    let lock = knowledge::cache_dir(&v.id).join("lint").join("run.lock");
+    assert!(crate::app::FileLock::try_take(&lock).unwrap().is_none(), "held for the check's life");
     // An ingest run alongside: allowed.
     fixture::write(&v.root, "raw_inbox/a.md", "# A made-up source\n");
     script(&p, "ingest.jsonl", &[init(), result()]);
@@ -363,6 +368,11 @@ fn one_check_at_a_time_it_stops_and_times_out() {
     assert!(health::load(&v).ai.is_none(), "a check that didn't end isn't the last AI check");
     assert!(stop(&v, &first).is_err(), "no longer going");
     crate::paths::testenv::eventually("the lease is released", || ai::lease(&p).is_ok());
+    {
+        // Another Echo — the CLI — holding the lock refuses this one's start.
+        let _cli = crate::app::FileLock::try_take(&lock).unwrap().expect("free once the check ended");
+        assert!(start(&v).unwrap_err().to_string().contains("An AI check of this vault is going"));
+    }
     // Its 20 minutes.
     script(&p, "lint.2.jsonl", &[init(), json!({"_hang": true})]);
     let second = start(&v).unwrap();
@@ -376,8 +386,131 @@ fn one_check_at_a_time_it_stops_and_times_out() {
     script(&p, "lint.3.jsonl", &[init(), result()]);
     let third = ran(&v);
     let st = status(&v, &third, 0).unwrap();
-    assert_eq!((st["state"].as_str(), st["reason"].as_str()), (Some("failed"), Some("It wrote no findings")));
-    assert_eq!(health::view(&v, None).unwrap()["score"]["code_only"], true, "still code checks only");
+    assert_eq!((st["state"].as_str(), st["reason"].as_str(), st["cost"].as_f64()), (Some("failed"), Some("It wrote no findings"), Some(0.31)));
+    let h = health::view(&v, None).unwrap();
+    assert_eq!((h["lint"]["last"]["state"].as_str(), h["lint"]["last"]["cost"].as_f64()), (Some("failed"), Some(0.31)), "what it cost, for the card");
+    assert!(h["ai"].is_null() && h["score"]["code_only"] == true, "still code checks only");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_findings_file_echo_cant_read_fails_the_check() {
+    // K16-06: findings.json not JSON, over 4 MB, or not the shape asked for — the check failed, saying which.
+    let (_env, root) = paths::testenv::folders("kn-lint-unread");
+    let _fake = fake::install(&root);
+    let _clean = clean();
+    let (v, p) = vault(&root, false);
+    std::fs::write(fake::file(&p, "findings.1.json"), "Here are my findings: none.").unwrap();
+    std::fs::write(fake::file(&p, "findings.2.json"), format!("{{\"findings\": [], \"pad\": \"{}\"}}", "x".repeat(5 << 20))).unwrap();
+    std::fs::write(fake::file(&p, "findings.3.json"), "{\"found\": []}").unwrap();
+    for (n, why) in [(1, "Its findings file isn't JSON"), (2, "Its findings file isn't one Echo reads (a file up to 4 MB)"), (3, "Its findings file isn't in the shape Echo asked for")] {
+        script(&p, &format!("lint.{n}.jsonl"), &[init(), json!({"_findings": n}), result()]);
+        let run = ran(&v);
+        let st = status(&v, &run, 0).unwrap();
+        assert_eq!((st["state"].as_str(), st["reason"].as_str()), (Some("failed"), Some(why)), "{n}");
+    }
+    assert!(health::load(&v).ai.is_none());
+}
+
+#[cfg(unix)]
+#[test]
+fn at_most_200_findings_are_kept_a_check() {
+    // M1: a findings file of thousands is never checked again on every view; the rest are said, not kept.
+    let (_env, root) = paths::testenv::folders("kn-lint-cap");
+    let _fake = fake::install(&root);
+    let _clean = clean();
+    let (v, p) = vault(&root, false);
+    let facts: String = (0..205).map(|n| format!("Made-up fact number {n} stands here.\n")).collect();
+    fixture::write(&v.root, TOPIC, &format!("{TOPIC_TEXT}\n{facts}"));
+    let many: Vec<Value> = (0..205).map(|n| json!({"kind": "stale", "pages": [{"path": TOPIC, "quote": format!("Made-up fact number {n} stands")}]})).collect();
+    script(&p, "lint.jsonl", &[init(), findings(&p, 1, json!(many)), result()]);
+    let run = ran(&v);
+    let st = status(&v, &run, 0).unwrap();
+    assert_eq!((st["kept"].as_u64(), st["dropped"].as_u64(), st["left"].as_u64()), (Some(200), Some(0), Some(5)), "{st:#}");
+    assert_eq!(st["events"].as_array().unwrap().last().unwrap()["text"], "Kept 200 findings · 5 more not read: Echo keeps 200 a check");
+    assert_eq!(health::load(&v).ai.unwrap().left, Some(5));
+    assert_eq!(ai_listed(&v).len(), 200);
+}
+
+#[cfg(unix)]
+#[test]
+fn an_ignored_ai_finding_stays_ignored_after_another_check() {
+    // K16-T7 for AI kinds: ignore one; a later check finds it again (the same key): not listed, not counted, under
+    // Show ignored.
+    let (_env, root) = paths::testenv::folders("kn-lint-ignore");
+    let _fake = fake::install(&root);
+    let _clean = clean();
+    let (v, p) = vault(&root, false);
+    script(&p, "lint.1.jsonl", &[init(), findings(&p, 1, json!([contradiction()])), result()]);
+    script(&p, "lint.2.jsonl", &[init(), findings(&p, 2, json!([contradiction()])), result()]);
+    ran(&v);
+    let key = ai_listed(&v)[0]["key"].as_str().unwrap().to_string();
+    let consistency = |h: &Value| h["score"]["categories"][3][1].as_f64().unwrap();
+    assert!(consistency(&health::view(&v, None).unwrap()) < 25.0);
+    health::ignore(&v, &key, true).unwrap();
+    let second = ran(&v);
+    let h = health::view(&v, None).unwrap();
+    assert_eq!(h["ai"]["run"], second.as_str(), "the second check is the last");
+    assert!(ai_listed(&v).is_empty(), "not listed");
+    assert_eq!(consistency(&h), 25.0, "not counted");
+    assert_eq!(h["ignored"].as_array().unwrap().iter().map(|f| f["key"].as_str().unwrap()).collect::<Vec<_>>(), [key.as_str()], "under Show ignored");
+}
+
+#[cfg(unix)]
+#[test]
+fn the_quote_shown_is_the_pages_own_text() {
+    // M3: `found` reads "+5%" and "-5%" alike; the detail shows what the page says, never the check's sign.
+    let (_env, root) = paths::testenv::folders("kn-lint-shown");
+    let _fake = fake::install(&root);
+    let _clean = clean();
+    let (v, p) = vault(&root, false);
+    fixture::write(&v.root, TOPIC, &format!("{TOPIC_TEXT}\nMargins fall by -5% in Q3, says the made-up forecast.\nThe made-up board meets\non Fridays.\n"));
+    let f = |quote: &str| json!({"kind": "stale", "pages": [{"path": TOPIC, "quote": quote}]});
+    script(&p, "lint.jsonl", &[init(), findings(&p, 1, json!([f("Margins fall by +5% in Q3"), f("A price per active stream"), f("The made-up board meets on Fridays")])), result()]);
+    ran(&v);
+    let shown = |q: &str| {
+        let f = ai_listed(&v).into_iter().find(|x| health::detail(&v, x["key"].as_str().unwrap(), None).unwrap()["ai"]["quotes"][0]["text"].as_str().unwrap().contains(q)).unwrap();
+        health::detail(&v, f["key"].as_str().unwrap(), None).unwrap()["ai"]["quotes"][0]["text"].as_str().unwrap().to_string()
+    };
+    assert_eq!(shown("Margins"), "Margins fall by -5% in Q3, says the made-up forecast.", "the page's line, its sign as written");
+    assert_eq!(shown("price"), "A price per active stream", "a quote that is the page's text word for word is shown as it is");
+    assert_eq!(shown("board"), "The made-up board meets on Fridays.", "across a line break: the page's lines");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_leftover_claude_code_of_a_check_is_ended_only_when_it_is_that_checks() {
+    // The next start ends a process a check's `run.json` left (a CLI killed), never another one.
+    use std::os::unix::process::CommandExt as _;
+    let (_env, root) = paths::testenv::folders("kn-lint-leftover");
+    let _clean = clean();
+    let t = fixture::twin(&root.join("twin"));
+    let v = knowledge::add(&t, AddOpts { name: Some("Twin".into()), ..Default::default() }).unwrap();
+    let spawn = |extra: &str| std::process::Command::new("sh").args(["-c", "sleep 60; :", "claude", "--settings", extra]).process_group(0).spawn().unwrap();
+    let left = |id: &str, pid: u32| {
+        let dir = run_dir(&v, id).unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        write_run(&dir, &Run { id: id.into(), at: now_rfc(), state: "running".into(), profile: "w".into(), pid: Some(pid), ..Default::default() }).unwrap();
+        dir.join("settings.json")
+    };
+    let settings = run_dir(&v, "2026-11-01_090000").unwrap().join("settings.json");
+    let mut ours = spawn(&settings.display().to_string());
+    let mut other = spawn("/elsewhere/settings.json");
+    std::thread::sleep(Duration::from_millis(100));
+    left("2026-11-01_090000", ours.id());
+    left("2026-11-01_100000", other.id());
+    tidy(&v);
+    let t0 = std::time::Instant::now();
+    while ours.try_wait().unwrap().is_none() && t0.elapsed() < Duration::from_secs(5) {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(ours.try_wait().unwrap().is_some(), "the check's own Claude Code is ended");
+    assert!(other.try_wait().unwrap().is_none(), "a process that isn't the check's is left alone");
+    let _ = other.kill();
+    let _ = other.wait();
+    let st = status(&v, "2026-11-01_090000", 0).unwrap();
+    assert_eq!((st["state"].as_str(), st["reason"].as_str()), (Some("failed"), Some("It stopped when Echo did")));
+    assert!(read_run(&run_dir(&v, "2026-11-01_090000").unwrap()).unwrap().ended.is_some(), "marked so under the lock");
 }
 
 #[test]

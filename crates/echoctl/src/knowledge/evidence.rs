@@ -15,15 +15,16 @@ pub fn found(text: &str, quote: &str) -> bool {
     format!(" {} ", crate::ledger::norm(text)).contains(&format!(" {q} "))
 }
 
-/// The line (1-based) where `quote` starts in `text`, found as `found` finds it; of several places, the one nearest line
-/// `near` (else the first). None when it isn't there.
-pub fn line_of(text: &str, quote: &str, near: Option<usize>) -> Option<usize> {
-    if !found(text, quote) {
+/// The lines (1-based, first and last) `quote` spans in `text` when it is there as `found` finds it — of several
+/// places, the one starting nearest line `near` (else the first). None when it isn't there. The text is normalised once,
+/// line by line: `norm` makes any break between words one space, a line's end too, so this is `found`'s rule.
+pub fn lines_of(text: &str, quote: &str, near: Option<usize>) -> Option<(usize, usize)> {
+    let q = crate::ledger::norm(quote);
+    if q.split(' ').filter(|w| !w.is_empty()).count() < MIN_WORDS {
         return None;
     }
-    let q = format!(" {} ", crate::ledger::norm(quote));
-    // The text normalised line by line, the space before each line's first word noted: `norm` makes any break between
-    // words one space, a line's end too, so this is `found`'s text.
+    let q = format!(" {q} ");
+    // The space before each line's first word, and its line.
     let (mut all, mut starts) = (String::from(" "), vec![]);
     for (i, l) in text.lines().enumerate() {
         let n = crate::ledger::norm(l);
@@ -33,16 +34,18 @@ pub fn line_of(text: &str, quote: &str, near: Option<usize>) -> Option<usize> {
             all.push(' ');
         }
     }
-    let mut lines = vec![];
+    let line_at = |at: usize| starts.iter().rev().find(|(s, _)| *s <= at).map(|(_, l)| *l);
+    let mut found = vec![];
     let mut from = 0;
     while let Some(i) = all[from..].find(&q) {
         let at = from + i;
-        lines.extend(starts.iter().rev().find(|(s, _)| *s <= at).map(|(_, l)| *l));
+        // Its first word follows the space at `at`; its last word's last byte is the one before the closing space.
+        found.extend(line_at(at).zip(line_at(at + q.len() - 2)));
         from = at + 1;
     }
     match near {
-        Some(n) => lines.into_iter().min_by_key(|l| l.abs_diff(n)),
-        None => lines.first().copied(),
+        Some(n) => found.into_iter().min_by_key(|(l, _)| l.abs_diff(n)),
+        None => found.first().copied(),
     }
 }
 
@@ -82,14 +85,19 @@ mod tests {
     }
 
     #[test]
-    fn a_quote_is_on_the_line_it_starts_on() {
+    fn a_quote_is_on_the_lines_it_spans() {
         let text = "---\ntitle: Northwind Retail\n---\n\n## Roadmap\n- Phase 2 go-live: **12 December**,\n  before the holiday freeze.\n\nThe go-live moves later.\n\nThe go-live moves later.\n";
-        assert_eq!(line_of(text, "Phase 2 go-live: 12 December, before the holiday freeze", None), Some(6), "across a line break and Markdown");
-        assert_eq!(line_of(text, "the go-live moves later", None), Some(9), "of several: the first");
-        assert_eq!(line_of(text, "the go-live moves later", Some(12)), Some(11), "of several: the one nearest the line given");
-        assert_eq!(line_of(text, "title Northwind Retail", None), Some(2), "properties' lines count");
-        assert_eq!(line_of(text, "Phase 3 go-live", None), None);
-        assert_eq!(line_of(text, "Roadmap", None), None, "fewer than three words, as `found`");
+        assert_eq!(lines_of(text, "Phase 2 go-live: 12 December, before the holiday freeze", None), Some((6, 7)), "across a line break and Markdown");
+        assert_eq!(lines_of(text, "Phase 2 go-live: 12 December", None), Some((6, 6)));
+        assert_eq!(lines_of(text, "the go-live moves later", None), Some((9, 9)), "of several: the first");
+        assert_eq!(lines_of(text, "the go-live moves later", Some(12)), Some((11, 11)), "of several: the one nearest the line given");
+        assert_eq!(lines_of(text, "title Northwind Retail", None), Some((2, 2)), "properties' lines count");
+        assert_eq!(lines_of(text, "Phase 3 go-live", None), None);
+        assert_eq!(lines_of(text, "Roadmap", None), None, "fewer than three words, as `found`");
+        assert_eq!(lines_of("Ціна зросла на п'ять відсотків.\nДалі без змін.", "відсотків далі без", None), Some((1, 2)), "a last word of wide characters");
+        for (t, q) in [(text, "before the holiday freeze"), (text, "go live moves"), ("first line ends here\nsecond line starts", "ends here second line")] {
+            assert_eq!(lines_of(t, q, None).is_some(), found(t, q), "{q}: as `found`");
+        }
     }
 
     #[test]

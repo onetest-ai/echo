@@ -19,11 +19,11 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Child;
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::sync::{Condvar, Mutex, MutexGuard};
 use std::time::Duration;
 
 use super::health::{self, Finding};
-use super::ingest::{self, Live, Lives, Log};
+use super::ingest::{self, Going, Life, Lives, Log};
 use super::links::Resolver;
 use super::scan::{self, Index};
 use super::{checks, evidence, fm, page, stream, Vault};
@@ -39,6 +39,8 @@ const TOOLS: &str = "Read,Grep,Glob,Write";
 const FINDINGS_MAX: u64 = 4 << 20;
 /// Folders of checks kept (and the last one's that ended).
 const KEPT_RUNS: usize = 10;
+/// Findings kept a check; the rest aren't read (each kept one is checked again whenever Health is computed, R46).
+const KEPT_MAX: usize = 200;
 /// What a finding may say: pages, a quote's and a fix's characters, its title's, its note's.
 const PAGES_MAX: usize = 8;
 const QUOTE_MAX: usize = 2000;
@@ -71,6 +73,9 @@ pub struct Run {
     pub kept: Option<usize>,
     #[serde(default)]
     pub dropped: Option<usize>,
+    /// Findings past the most Echo keeps a check, not read.
+    #[serde(default)]
+    pub left: Option<usize>,
     #[serde(default)]
     pub cost: Option<f64>,
     #[serde(default)]
@@ -191,9 +196,9 @@ static ENDED: Condvar = Condvar::new();
 
 /// A check as it is: one `run.json` calls running that nothing runs any more (its Echo stopped) has failed.
 fn effective(v: &Vault, mut r: Run) -> Run {
-    if r.state == "running" && !lock(&LIVE).contains_key(&r.id) && ingest::free(&lock_path(v)) {
+    if r.state == "running" && ingest::gone(&LIVE, &r.id, &lock_path(v)) {
         r.state = "failed".into();
-        r.reason = Some("It stopped when Echo did".into());
+        r.reason = Some(ingest::GONE.into());
         r.waiting = None;
     }
     r
@@ -225,7 +230,7 @@ fn tidy(v: &Vault) {
             }
             let _ = update_run(&dir, |r| {
                 r.state = "failed".into();
-                r.reason = Some("It stopped when Echo did".into());
+                r.reason = Some(ingest::GONE.into());
                 r.ended = Some(now_rfc());
                 r.waiting = None;
             });
@@ -287,9 +292,9 @@ fn prompt(findings: &Path, pages: &[String]) -> String {
     p.push_str(&format!("When you are done, write {} once, and write nothing else:\n", findings.display()));
     p.push_str("{\"findings\": [{\"kind\", \"title\", \"note\", \"pages\": [{\"path\", \"line\", \"quote\"}], \"fix\": {\"path\", \"old\", \"new\"}}]}\n");
     p.push_str("- kind: one of the five above. title: a short line. note: one sentence on why.\n");
-    p.push_str("- pages: each page it is about, its path as listed above, a line, and a quote of at least three words copied exactly from that page.\n");
+    p.push_str(&format!("- pages: each page it is about, at most {PAGES_MAX}: its path as listed above, a line, and a quote of at least three words copied exactly from that page.\n"));
     p.push_str("- fix, only when one change to one of those pages resolves it: old, text copied exactly from that page that occurs there once; new, what replaces it.\n");
-    p.push_str("When you find nothing, write {\"findings\": []}.\n");
+    p.push_str(&format!("Write at most {KEPT_MAX} findings, the ones that matter most first. When you find nothing, write {{\"findings\": []}}.\n"));
     p
 }
 
@@ -308,17 +313,6 @@ struct Prepared {
     scope: Vec<(String, String)>,
     prompt: String,
     log: Log,
-}
-
-/// A check made ready, for its thread: the vault, its id, the profile, what to run, Echo's stop, and its lock and lease
-/// (`held`), which go when it has ended.
-struct Job {
-    v: Vault,
-    run: String,
-    profile: ai::Profile,
-    prepared: Prepared,
-    stop: Arc<Mutex<Option<String>>>,
-    held: (crate::app::FileLock, Box<dyn Send>),
 }
 
 /// *Run AI checks* (K16-05): a check of the vault's pages in scope on the vault's profile — refused while another check
@@ -358,92 +352,86 @@ pub fn start(v: &Vault) -> Result<String> {
             return Err(e);
         }
     };
-    // Live first, then its lease counted: a sign-in that sees the lease held finds the check to stop.
-    let stop = Arc::new(Mutex::new(None));
-    lock(&LIVE).insert(run.clone(), Live { vault: v.id.clone(), profile: p.id.clone(), pid: None, stop: stop.clone() });
-    #[cfg(feature = "tray")]
-    let held: Box<dyn Send> = crate::terminal::hold(p.id.clone(), Box::new(ready));
-    #[cfg(not(feature = "tray"))]
-    let held: Box<dyn Send> = Box::new(ready);
-    launch(Job { v: v.clone(), run: run.clone(), profile: p, prepared, stop, held: (run_lock, held) });
+    let (stop, held) = ingest::go_live(&LIVE, &run, &v.id, ready, run_lock);
+    let Prepared { dir, root, args, scope, prompt, log } = prepared;
+    let going = Going { live: &LIVE, ended: &ENDED, run: run.clone(), profile: p, args, cwd: root, scope, log, stop, held };
+    ingest::run_thread(going, Check { v: v.clone(), run: run.clone(), dir, prompt });
     Ok(run)
 }
 
-/// How a check ended: its state, why, its findings (kept, as written and as Health's, and how many dropped), its
-/// `result`, lines that weren't JSON.
+/// How a check ended: its state, why, its findings (kept, as written and as Health's; how many dropped; how many past the
+/// most kept, not read), its `result`, lines that weren't JSON.
 #[derive(Default)]
 struct End {
     state: &'static str,
     reason: Option<String>,
-    found: Option<(Vec<(Raw, Finding)>, usize)>,
+    found: Option<Sorted>,
     result: Option<Value>,
     bad: usize,
 }
 
-/// The check on a thread of its own: it waits while a call is recorded or transcribed (X-S2), starts Claude Code in the
-/// vault, reads it to its end; then its findings are checked and kept — and its lock and lease go.
-fn launch(job: Job) {
-    std::thread::spawn(move || {
-        let Job { v, run, profile, prepared: Prepared { dir, root, args, scope, prompt, mut log }, stop, held } = job;
-        ingest::wait_for_calls(&stop, &mut log, |w| {
-            let _ = update_run(&dir, |r| r.waiting = w);
-        });
-        // Taken out first: a guard in an `if let`'s scrutinee would be held through its `else` too.
-        let stopped = lock(&stop).take();
-        let end = if let Some(why) = stopped {
-            End { state: "stopped", reason: Some(why), ..End::default() }
-        } else {
-            match ingest::spawn(&profile, &args, &root, &scope) {
-                Ok(child) => watch(&v, &run, &dir, child, &prompt, &mut log, &stop),
-                Err(e) => End { state: "failed", reason: Some(format!("{e:#}")), ..End::default() },
-            }
-        };
-        finish(&v, &run, &dir, &mut log, end);
-        drop(held);
-        lock(&LIVE).remove(&run);
-        ENDED.notify_all();
-    });
+/// An AI check's life on its thread (`ingest::run_thread`: the wait for a call, Claude Code started in the vault, its
+/// pid kept, the lock and lease let go): its `run.json`, its prompt, its findings checked at its end.
+struct Check {
+    v: Vault,
+    run: String,
+    dir: PathBuf,
+    prompt: String,
 }
 
-/// A started check's Claude Code to its end: its pid recorded (for a later Echo to end it if this one goes), driven
-/// to its end (`ingest::drive`: the prompt, the log, the 20 minutes); then its findings, checked (K16-06).
-fn watch(v: &Vault, run: &str, dir: &Path, mut child: Child, prompt: &str, log: &mut Log, stop: &Mutex<Option<String>>) -> End {
-    let pid = child.id();
-    if let Some(l) = lock(&LIVE).get_mut(run) {
-        l.pid = Some(pid);
+impl Life for Check {
+    type End = End;
+
+    fn waiting(&self, w: Option<String>) {
+        let _ = update_run(&self.dir, |r| r.waiting = w);
     }
-    let _ = update_run(dir, |r| r.pid = Some(pid));
-    // A stop that came while it started.
-    if lock(stop).is_some() {
-        ingest::end_group(pid);
+
+    fn started(&self, pid: u32) {
+        let _ = update_run(&self.dir, |r| r.pid = Some(pid));
     }
-    let mut parser = stream::Parser::new(v);
-    let d = ingest::drive(&mut child, prompt, &mut parser, log);
-    let failed = d.failed(lock(stop).take());
-    let mut end = End { result: d.result, bad: d.bad, ..End::default() };
-    match failed {
-        Some((state, why)) => (end.state, end.reason) = (state, Some(why)),
-        None => match scan::index(v).and_then(|ix| sorted(v, &ix, dir)) {
-            Ok(found) => (end.state, end.found) = ("done", Some(found)),
-            Err(e) => (end.state, end.reason) = ("failed", Some(format!("{e:#}"))),
-        },
+
+    fn early(&self, state: &'static str, why: String) -> End {
+        End { state, reason: Some(why), ..End::default() }
     }
-    end
+
+    /// Driven to its end (`ingest::drive`: the prompt, the log, the 20 minutes); then its findings, checked (K16-06).
+    fn watch(&self, mut child: Child, log: &mut Log, stop: &Mutex<Option<String>>) -> End {
+        let mut parser = stream::Parser::new(&self.v);
+        let d = ingest::drive(&mut child, &self.prompt, &mut parser, log);
+        let failed = d.failed(lock(stop).take());
+        let mut end = End { result: d.result, bad: d.bad, ..End::default() };
+        match failed {
+            Some((state, why)) => (end.state, end.reason) = (state, Some(why)),
+            None => match scan::index(&self.v).and_then(|ix| sorted(&self.v, &ix, &self.dir)) {
+                Ok(found) => (end.state, end.found) = ("done", Some(found)),
+                Err(e) => (end.state, end.reason) = ("failed", Some(format!("{e:#}"))),
+            },
+        }
+        end
+    }
+
+    fn finish(&self, log: &mut Log, end: End) {
+        finish(&self.v, &self.run, &self.dir, log, end)
+    }
 }
 
-/// What came of a check, in a line: how many findings were kept, and how many dropped.
-fn kept_line(kept: usize, dropped: usize) -> String {
-    let kept = match kept {
+/// What came of a check, in a line: how many findings were kept, how many dropped, and how many past the most kept.
+fn kept_line(kept: usize, dropped: usize, left: usize) -> String {
+    let mut s = match kept {
         0 if dropped == 0 => return "Found nothing to fix".into(),
         0 => "Kept no finding".to_string(),
         1 => "Kept 1 finding".to_string(),
         n => format!("Kept {n} findings"),
     };
     match dropped {
-        0 => kept,
-        1 => format!("{kept} · 1 dropped: its quotes aren't in the pages"),
-        n => format!("{kept} · {n} dropped: their quotes aren't in the pages"),
+        0 => {}
+        1 => s.push_str(" · 1 dropped: its quotes aren't in the pages"),
+        n => s.push_str(&format!(" · {n} dropped: their quotes aren't in the pages")),
     }
+    if left > 0 {
+        s.push_str(&format!(" · {left} more not read: Echo keeps {KEPT_MAX} a check"));
+    }
+    s
 }
 
 /// A check's end: its kept findings into `kept.json` and the check into `health.json` as the last one (when it was
@@ -451,24 +439,26 @@ fn kept_line(kept: usize, dropped: usize) -> String {
 fn finish(v: &Vault, run: &str, dir: &Path, log: &mut Log, mut end: End) {
     let ended = now_rfc();
     let cost = end.result.as_ref().and_then(|r| r["cost"].as_f64());
-    if let Some((found, dropped)) = &end.found {
-        let raws: Vec<&Raw> = found.iter().map(|(r, _)| r).collect();
-        let kept = serde_json::to_vec_pretty(&json!({ "findings": raws, "dropped": dropped })).map_err(anyhow::Error::from).and_then(|b| Ok(paths::write_atomic(&dir.join("kept.json"), &b)?));
-        let noted = kept.and_then(|_| health::checked_by_ai(v, health::AiRun { at: ended.clone(), run: run.to_string(), cost, kept: Some(found.len()), dropped: Some(*dropped) }));
+    if let Some(s) = &end.found {
+        let raws: Vec<&Raw> = s.kept.iter().map(|(r, _)| r).collect();
+        let kept = serde_json::to_vec_pretty(&json!({ "findings": raws, "dropped": s.dropped, "left": s.left })).map_err(anyhow::Error::from).and_then(|b| Ok(paths::write_atomic(&dir.join("kept.json"), &b)?));
+        let left = Some(s.left).filter(|n| *n > 0);
+        let noted = kept.and_then(|_| health::checked_by_ai(v, health::AiRun { at: ended.clone(), run: run.to_string(), cost, kept: Some(s.kept.len()), dropped: Some(s.dropped), left }));
         if let Err(e) = noted {
             (end.state, end.reason) = ("failed", Some(format!("Echo couldn't keep its findings: {e:#}")));
             end.found = None;
         }
     }
-    let counts = end.found.as_ref().map(|(f, d)| (f.len(), *d));
-    let text = end.reason.clone().or_else(|| counts.map(|(k, d)| kept_line(k, d))).unwrap_or_default();
+    let counts = end.found.as_ref().map(|s| (s.kept.len(), s.dropped, s.left));
+    let text = end.reason.clone().or_else(|| counts.map(|(k, d, l)| kept_line(k, d, l))).unwrap_or_default();
     log.push(json!({"type": "notice", "kind": "ended", "state": end.state, "text": text}));
     let saved = update_run(dir, |r| {
         r.state = end.state.into();
         r.reason = end.reason.clone();
         r.ended = Some(ended.clone());
-        r.kept = counts.map(|(k, _)| k);
-        r.dropped = counts.map(|(_, d)| d);
+        r.kept = counts.map(|(k, ..)| k);
+        r.dropped = counts.map(|(_, d, _)| d);
+        r.left = counts.map(|(.., l)| l).filter(|l| *l > 0);
         r.bad_lines = end.bad;
         r.waiting = None;
         if let Some(res) = &end.result {
@@ -491,15 +481,30 @@ pub(super) fn once(text: &str, old: &str) -> Option<usize> {
     text[next..].find(old).is_none().then_some(at)
 }
 
-/// A page path from the run (untrusted-text R4): relative with plain parts (a leading `./` aside), inside the vault
-/// once links are followed, and a page in Echo's index — never a file elsewhere, a non-page or a page that isn't there.
-fn page_of(v: &Vault, ix: &Index, raw: &str) -> Option<String> {
-    let mut p = raw.trim();
-    while let Some(rest) = p.strip_prefix("./") {
-        p = rest;
+/// Which pages a finding may name: the vault, its index, and the pages Health judges (`checks::in_scope`).
+struct Pages<'a> {
+    v: &'a Vault,
+    ix: &'a Index,
+    judged: Box<dyn Fn(&str) -> bool + 'a>,
+}
+
+impl<'a> Pages<'a> {
+    fn new(v: &'a Vault, ix: &'a Index) -> Pages<'a> {
+        Pages { v, ix, judged: Box::new(checks::in_scope(v)) }
     }
-    page::inside(v, p).ok()?;
-    ix.pages.contains_key(&scan::page_rel(v, p)?).then(|| p.to_string())
+
+    /// A page path from the run (untrusted-text R4): relative with plain parts (a leading `./` aside), inside the vault
+    /// once links are followed, a page in Echo's index and one Health judges (K8-05: not a README, the index or a
+    /// taxonomy) — never a file elsewhere, a non-page, a page that isn't there or one Health leaves out.
+    fn of(&self, raw: &str) -> Option<String> {
+        let mut p = raw.trim();
+        while let Some(rest) = p.strip_prefix("./") {
+            p = rest;
+        }
+        page::inside(self.v, p).ok()?;
+        let rel = scan::page_rel(self.v, p)?;
+        (self.ix.pages.contains_key(&rel) && (self.judged)(&rel)).then(|| p.to_string())
+    }
 }
 
 /// A page's text now (UTF-8, up to what Echo's index reads).
@@ -519,6 +524,17 @@ fn date_of(v: &Vault, ix: &Index, path: &str) -> Option<String> {
         .or_else(|| chrono::DateTime::from_timestamp_millis(p.mtime).map(|t| t.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string()))
 }
 
+/// A quote as the detail shows it (M3: `found` reads "+5%" and "-5%" alike): the check's words when they are the page's
+/// own, character for character; else the page's own lines `first` to `last`, where Echo found it.
+fn shown(text: &str, quote: &str, first: usize, last: usize) -> String {
+    let q = quote.trim();
+    if !q.is_empty() && text.contains(q) {
+        return one_line(q, QUOTE_MAX);
+    }
+    let lines: Vec<&str> = text.lines().skip(first - 1).take(last + 1 - first).map(str::trim).collect();
+    one_line(&lines.join(" "), QUOTE_MAX)
+}
+
 /// The run's words on one line, at most `max` characters.
 fn one_line(s: &str, max: usize) -> String {
     let s: String = s.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
@@ -528,7 +544,8 @@ fn one_line(s: &str, max: usize) -> String {
 /// A finding of the run checked against the vault as it is now (K16-06, X-T9): a kind of the AI checks; each of its
 /// pages a page of the vault with its quote on it (`evidence::found`, at the line Echo finds it on); its fix, if any,
 /// on one of those pages, its `old` there exactly once. Anything else: none.
-fn checked(v: &Vault, ix: &Index, raw: &Raw) -> Option<Finding> {
+fn checked(pages: &Pages, raw: &Raw) -> Option<Finding> {
+    let (v, ix) = (pages.v, pages.ix);
     let kind = raw.kind.trim();
     let (_, default_title, _) = health::ai_kind(kind)?;
     if raw.pages.is_empty() || raw.pages.len() > PAGES_MAX {
@@ -537,22 +554,23 @@ fn checked(v: &Vault, ix: &Index, raw: &Raw) -> Option<Finding> {
     let mut texts: BTreeMap<String, String> = BTreeMap::new();
     let mut quotes = vec![];
     for p in &raw.pages {
-        let path = page_of(v, ix, &p.path)?;
+        let path = pages.of(&p.path)?;
         if !texts.contains_key(&path) {
             texts.insert(path.clone(), page_text(v, &path)?);
         }
         let text = &texts[&path];
-        if p.quote.chars().count() > QUOTE_MAX || !evidence::found(text, &p.quote) {
+        if p.quote.chars().count() > QUOTE_MAX {
             return None;
         }
+        // On the page as `evidence::found` finds it, and where.
         let near = p.line.as_ref().and_then(Value::as_u64).map(|n| n as usize);
-        let line = evidence::line_of(text, &p.quote, near)?;
-        quotes.push(Quoted { path: path.clone(), line: line as u32, text: one_line(&p.quote, QUOTE_MAX), date: date_of(v, ix, &path) });
+        let (first, last) = evidence::lines_of(text, &p.quote, near)?;
+        quotes.push(Quoted { path: path.clone(), line: first as u32, text: shown(text, &p.quote, first, last), date: date_of(v, ix, &path) });
     }
     let fix = match &raw.fix {
         None => None,
         Some(x) => {
-            let path = page_of(v, ix, &x.path)?;
+            let path = pages.of(&x.path)?;
             let text = texts.get(&path)?;
             if x.old == x.new || x.old.chars().count() > FIX_MAX || x.new.chars().count() > FIX_MAX {
                 return None;
@@ -565,15 +583,24 @@ fn checked(v: &Vault, ix: &Index, raw: &Raw) -> Option<Finding> {
     let note = raw.note.as_deref().map(|n| one_line(n, NOTE_MAX)).filter(|n| !n.is_empty());
     let pages = quotes.iter().map(|q| (q.path.clone(), Some(q.line))).collect();
     // What it is about, for its key: its quotes as `found` reads them, so the same finding keeps its key across checks.
-    let mut said: Vec<String> = quotes.iter().map(|q| crate::ledger::norm(&q.text)).collect();
+    let mut said: Vec<String> = raw.pages.iter().map(|p| crate::ledger::norm(&p.quote)).collect();
     said.sort();
     let about = format!("#{}", &page::sha(said.join("\n").as_bytes())[..8]);
     health::made_ai(kind, pages, &about, title, Ai { quotes, note, fix })
 }
 
-/// A check's findings.json read and each finding checked: those kept (as the run wrote them, and as Health's) and how
-/// many were dropped. A file that isn't there, is too big or isn't the shape asked for: the check failed.
-fn sorted(v: &Vault, ix: &Index, dir: &Path) -> Result<(Vec<(Raw, Finding)>, usize)> {
+/// A check's findings sorted out: those kept (as the run wrote them, and as Health's), how many were dropped, and how
+/// many past the most Echo keeps weren't read.
+#[derive(Default)]
+struct Sorted {
+    kept: Vec<(Raw, Finding)>,
+    dropped: usize,
+    left: usize,
+}
+
+/// A check's findings.json read and its findings checked, the first 200 kept (`Sorted`). A file that isn't there, is
+/// too big or isn't the shape asked for: the check failed.
+fn sorted(v: &Vault, ix: &Index, dir: &Path) -> Result<Sorted> {
     let path = dir.join("findings.json");
     let meta = match std::fs::symlink_metadata(&path) {
         Ok(m) => m,
@@ -585,26 +612,31 @@ fn sorted(v: &Vault, ix: &Index, dir: &Path) -> Result<(Vec<(Raw, Finding)>, usi
     }
     let j: Value = serde_json::from_slice(&std::fs::read(&path)?).map_err(|_| anyhow!("Its findings file isn't JSON"))?;
     let items = j["findings"].as_array().ok_or_else(|| anyhow!("Its findings file isn't in the shape Echo asked for"))?;
-    let (mut kept, mut dropped): (Vec<(Raw, Finding)>, usize) = (vec![], 0);
-    for x in items {
-        match serde_json::from_value::<Raw>(x.clone()).ok().and_then(|r| checked(v, ix, &r).map(|f| (r, f))) {
+    let pages = Pages::new(v, ix);
+    let mut s = Sorted::default();
+    for (i, x) in items.iter().enumerate() {
+        if s.kept.len() == KEPT_MAX {
+            s.left = items.len() - i;
+            break;
+        }
+        match serde_json::from_value::<Raw>(x.clone()).ok().and_then(|r| checked(&pages, &r).map(|f| (r, f))) {
             // The same finding twice: once.
             Some((r, f)) => {
-                if !kept.iter().any(|(_, k)| k.key == f.key) {
-                    kept.push((r, f));
+                if !s.kept.iter().any(|(_, k)| k.key == f.key) {
+                    s.kept.push((r, f));
                 }
             }
-            None => dropped += 1,
+            None => s.dropped += 1,
         }
     }
-    Ok((kept, dropped))
+    Ok(s)
 }
 
 /// Check `run`'s findings.json against the vault as it is now (K16-06): the findings kept — each quote on its page, each
-/// fix's text there once — and how many were dropped.
+/// fix's text there once; the first 200 — and how many were dropped.
 pub fn kept(v: &Vault, run: &str) -> Result<(Vec<Finding>, usize)> {
-    let (found, dropped) = sorted(v, &*scan::index(v)?, &run_dir(v, run)?)?;
-    Ok((found.into_iter().map(|(_, f)| f).collect(), dropped))
+    let s = sorted(v, &*scan::index(v)?, &run_dir(v, run)?)?;
+    Ok((s.kept.into_iter().map(|(_, f)| f).collect(), s.dropped))
 }
 
 /// The last check's kept findings that still hold (ruling R46): each checked again against its pages as they are now —
@@ -613,8 +645,9 @@ pub fn kept(v: &Vault, run: &str) -> Result<(Vec<Finding>, usize)> {
 pub(super) fn listed(v: &Vault, ix: &Index, last: Option<&health::AiRun>) -> Vec<Finding> {
     let Some(dir) = last.and_then(|a| run_dir(v, &a.run).ok()) else { return vec![] };
     let raws: Vec<Raw> = std::fs::read(dir.join("kept.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).and_then(|j| serde_json::from_value(j["findings"].clone()).ok()).unwrap_or_default();
+    let pages = Pages::new(v, ix);
     let mut out: Vec<Finding> = vec![];
-    for f in raws.iter().filter_map(|r| checked(v, ix, r)) {
+    for f in raws.iter().take(KEPT_MAX).filter_map(|r| checked(&pages, r)) {
         if !out.iter().any(|x| x.key == f.key) {
             out.push(f);
         }

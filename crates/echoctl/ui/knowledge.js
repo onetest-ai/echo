@@ -683,13 +683,15 @@ function knHealthLoad(h, { vault, tab, picked = false }) {
   if (tab === 'health') return have && picked ? 'finding' : 'all'
   return have ? null : 'count'
 }
-/** What an AI check kept and dropped (`health.json`'s `ai`), said in a line (K16-06). */
+/** What an AI check kept and dropped (`health.json`'s `ai`), and how many past the most Echo keeps it didn't read
+ *  (`left`), said in a line (K16-06). */
 function knLintNotice(ai) {
   if (!ai) return ''
-  const kept = ai.kept || 0, dropped = ai.dropped || 0
-  if (!kept && !dropped) return 'Found nothing to fix.'
+  const kept = ai.kept || 0, dropped = ai.dropped || 0, left = ai.left || 0
+  if (!kept && !dropped && !left) return 'Found nothing to fix.'
   const k = kept === 0 ? 'Kept no finding' : `Kept ${kept} ${knS(kept, 'finding', 'findings')}`
-  return dropped ? `${k} · ${dropped} dropped: ${dropped === 1 ? 'its quotes aren\'t' : 'their quotes aren\'t'} in the pages.` : `${k}.`
+  const d = dropped ? ` · ${dropped} dropped: ${dropped === 1 ? 'its quotes aren\'t' : 'their quotes aren\'t'} in the pages` : ''
+  return `${k}${d}${left ? ` · ${left} more not read: Echo keeps ${kept} a check` : ''}.`
 }
 /** A contradiction's two quotes side by side (K16-07): the older page's first, each `side` named — `Older`, `Newer` —
  *  when both dates are known and differ, else as the check gave them with none named. Null unless there are two. */
@@ -701,13 +703,13 @@ function knVersus(quotes) {
   return [{ ...o, side: 'Older' }, { ...n, side: 'Newer' }]
 }
 /** The AI row of *How Health checks* (K16-01): `running` (the check going: its id, what it waits for), else the last
- *  check's end when it failed or was stopped (said until the next one ends), else `idle`. `lint` is `/health`'s,
- *  `ai` the last check that ended. */
+ *  check's end when it failed or was stopped (said until the next one ends) with what it cost — it is never the last AI
+ *  check, which only a check that ended is —, else `idle`. `lint` is `/health`'s, `ai` the last check that ended. */
 function knLintState(lint, ai) {
   const l = (lint && lint.last) || null
-  if (lint && lint.running) return { state: 'running', run: lint.running, waiting: (l && l.id === lint.running && l.waiting) || null, reason: null }
-  if (l && (l.state === 'failed' || l.state === 'stopped') && !(ai && ai.run === l.id)) return { state: l.state, run: null, waiting: null, reason: l.reason || null }
-  return { state: 'idle', run: null, waiting: null, reason: null }
+  if (lint && lint.running) return { state: 'running', run: lint.running, waiting: (l && l.id === lint.running && l.waiting) || null, reason: null, cost: null }
+  if (l && (l.state === 'failed' || l.state === 'stopped') && !(ai && ai.run === l.id)) return { state: l.state, run: null, waiting: null, reason: l.reason || null, cost: l.cost ?? null }
+  return { state: 'idle', run: null, waiting: null, reason: null, cost: null }
 }
 /** Health's state for `vault`: nothing loaded yet. From an `old` one (a settings change) it keeps how the user looks at
  *  it — the filter, *Show ignored* — and is a new object, so a load started for the old one doesn't land in it. */
@@ -1848,8 +1850,9 @@ const Kn = (() => {
     const last = d.ai ? `last ${esc(whenOf(d.ai.at))}${d.ai.cost != null ? `, ${esc(usd(d.ai.cost))}` : ''}` : 'not run yet'
     // A stop of the user's own needs no word; a sign-in's or a quit's, and a failure, are said.
     const why = String(ls.reason || '').replace(/\.$/, '')
-    const said = ls.state === 'failed' ? `The last AI check failed. ${why ? why[0].toUpperCase() + why.slice(1) : 'It ended without finishing'}.`
-      : ls.state === 'stopped' && /^Stopped ./.test(why) ? `The last AI check was ${why[0].toLowerCase()}${why.slice(1)}.` : ''
+    const cost = ls.cost != null ? ` It cost ${usd(ls.cost)}.` : ''
+    const said = ls.state === 'failed' ? `The last AI check failed. ${why ? why[0].toUpperCase() + why.slice(1) : 'It ended without finishing'}.${cost}`
+      : ls.state === 'stopped' && /^Stopped ./.test(why) ? `The last AI check was ${why[0].toLowerCase()}${why.slice(1)}.${cost}` : ''
     const warn = said ? `<div class="kn-warn kn-lint-err"${ls.state === 'failed' ? ' role="alert"' : ''}>${IC.warn}<span class="grow">${esc(said)}</span></div>` : ''
     return `<div class="r"><div>${head}<div class="set-sub">when you ask · ${profile} · ${last}</div></div><button class="btn sm" id="kn-hl-lint" data-kn="hl-lint"${s.busy.lint ? ' disabled' : ''}>${s.busy.lint ? 'Starting…' : 'Run AI checks'}</button></div>${warn}`
   }
@@ -1921,8 +1924,8 @@ const Kn = (() => {
     return `<div ${card}>${head}${ai}${pick}${toLine}${diff ? `<div class="kn-fx-d">${pmOf(fx)}</div>${diff}` : ''}${reason}<div class="kn-fx-f"><span class="grow">${note}</span>${acts}</div></div>`
   }
   /** An AI finding's evidence (K16-07): a contradiction's two quotes side by side, older · newer, with their dates; else
-   *  each page's quote; then the check's note. Quotes and note are the check's words — the quotes found on their pages
-   *  by Echo —: esc(). */
+   *  each page's quote; then the check's note. A quote is the page's own text where Echo found it, the note the check's
+   *  words: esc(). */
   function hlAi(f, dt) {
     const a = dt.ai || {}, qs = a.quotes || [], vs = f.kind === 'contradiction' ? knVersus(qs) : null
     const day = (x) => (x ? new Date(`${x}T12:00:00`).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' }) : '')
@@ -1930,7 +1933,7 @@ const Kn = (() => {
     const quotes = vs ? `<div class="kn-vs">${vs.map((q) => `<div${q.side === 'Newer' ? ' class="newer"' : ''}><span class="lbl"><span>${q.side || ''}</span><span>${esc(day(q.date))}</span></span>${quote(q)}</div>`).join('')}</div>`
       : qs.map((q) => `<div class="kn-quote">${quote(q)}</div>`).join('')
     const note = a.note ? `<div class="kn-aibox"><span class="kn-mtag ai">AI</span><span>${esc(a.note)}</span></div>` : ''
-    return `<div class="kn-fx-ai">${quotes}${note}<div class="set-sub">Echo found each quote on its page, word for word${f.fixable ? ', and the text its fix changes there just once' : ''}. Findings whose quotes aren't in the pages are dropped, never shown.</div></div>`
+    return `<div class="kn-fx-ai">${quotes}${note}<div class="set-sub">Echo found each quote on its page, word for word, and shows it as the page has it${f.fixable ? '; the text its fix changes is there just once' : ''}. Findings whose quotes aren't in the pages are dropped, never shown.</div></div>`
   }
   /** *Fix all* (K16-04): every fix of the kind as Echo found it, ticked; a guess is never one (R36). */
   async function openFixAll(kind) {

@@ -153,11 +153,6 @@ fn release(l: &mut sources::Ledger, id: &str, state: &str, kept: Option<usize>) 
     }
 }
 
-/// Nothing holds `run.lock`: no Echo — this one, another, the CLI — has a run of `v` going.
-fn lock_free(v: &Vault) -> bool {
-    free(&lock_path(v))
-}
-
 /// Nothing holds the lock file at `path` (an ingest run's, an AI check's).
 pub(super) fn free(path: &Path) -> bool {
     !path.exists() || crate::app::FileLock::try_take(path).ok().flatten().is_some()
@@ -165,12 +160,21 @@ pub(super) fn free(path: &Path) -> bool {
 
 /// A run as it is: one the ledger calls running that nothing runs any more (its Echo stopped) has failed.
 fn effective(v: &Vault, mut r: Run) -> Run {
-    if r.state == "running" && !lock(&LIVE).contains_key(&r.id) && lock_free(v) {
+    if r.state == "running" && gone(&LIVE, &r.id, &lock_path(v)) {
         r.state = "failed".into();
-        r.reason = Some("It stopped when Echo did".into());
+        r.reason = Some(GONE.into());
         r.waiting = None;
     }
     r
+}
+
+/// Why a run its record still calls running failed: its Echo stopped (a quit, a crash, a CLI ended).
+pub(super) const GONE: &str = "It stopped when Echo did";
+
+/// A run its record calls running that nothing runs any more: not one of `live`, and no Echo — this one, another, the
+/// CLI — holds its kind's lock (`lock`, held for a run's whole life).
+pub(super) fn gone(live: &Lives, id: &str, lock_file: &Path) -> bool {
+    !lock(live).contains_key(id) && free(lock_file)
 }
 
 /// Is `pid` still run `id`'s Claude Code: its command line names the run's own settings file, so a pid the system has
@@ -204,7 +208,7 @@ fn tidy(v: &Vault) -> Result<()> {
         for r in runs.iter_mut().filter(|r| r.state == "running") {
             leftover.extend(r.pid.map(|pid| (r.id.clone(), pid)));
             r.state = "failed".into();
-            r.reason = Some("It stopped when Echo did".into());
+            r.reason = Some(GONE.into());
             r.ended = Some(now_rfc());
             r.waiting = None;
             let id = r.id.clone();
@@ -649,14 +653,10 @@ pub fn start(v: &Vault, wanted: &[String]) -> Result<Started> {
         }
         Ok(())
     })?;
-    // Live first, then its lease counted: a sign-in that sees the lease held finds the run to stop.
-    let stop = Arc::new(Mutex::new(None));
-    lock(&LIVE).insert(run.clone(), Live { vault: v.id.clone(), profile: p.id.clone(), pid: None, stop: stop.clone() });
-    #[cfg(feature = "tray")]
-    let held: Box<dyn Send> = crate::terminal::hold(p.id.clone(), Box::new(ready));
-    #[cfg(not(feature = "tray"))]
-    let held: Box<dyn Send> = Box::new(ready);
-    launch(Job { v: v.clone(), run: run.clone(), dir, profile: p, prepared, stop, held: (run_lock, held) });
+    let (stop, held) = go_live(&LIVE, &run, &v.id, ready, run_lock);
+    let Prepared { copy, args, scope, prompt, log } = prepared;
+    let going = Going { live: &LIVE, ended: &ENDED, run: run.clone(), profile: p, args, cwd: copy.clone(), scope, log, stop, held };
+    run_thread(going, IngestRun { v: v.clone(), run: run.clone(), dir, copy, prompt });
     Ok(Started { run, sources: picked, left })
 }
 
@@ -712,45 +712,140 @@ pub(super) fn spawn(p: &ai::Profile, args: &[String], cwd: &Path, scope: &[(Stri
     cmd.spawn().map_err(|e| anyhow!("couldn't start Claude Code: {e}"))
 }
 
-/// A run made ready, for its thread: the vault, its folder, the profile, what to run, Echo's stop, and its lock and
-/// lease (`held`), which go when it has ended.
-struct Job {
+// ── a run's life on its thread, the same for ingest runs and AI checks (`lint`) ──
+
+/// What one kind of run does at each point of its life on its thread (`run_thread`): an ingest run, an AI check.
+pub(super) trait Life: Send + 'static {
+    /// How a run of the kind ended.
+    type End;
+    /// What it waits for before its Claude Code starts (X-S2), recorded; `None` once it may start.
+    fn waiting(&self, w: Option<String>);
+    /// Its Claude Code started as `pid`: recorded for a later Echo to end it if this one goes.
+    fn started(&self, pid: u32);
+    /// It ended before its Claude Code ran: `stopped` by Echo while it waited, or `failed` to start, saying why.
+    fn early(&self, state: &'static str, why: String) -> Self::End;
+    /// Its Claude Code to its end (`drive`), `stop` holding Echo's reason when Echo stopped it; what came of it.
+    fn watch(&self, child: Child, log: &mut Log, stop: &Mutex<Option<String>>) -> Self::End;
+    /// Its end in its record.
+    fn finish(&self, log: &mut Log, end: Self::End);
+}
+
+/// A run made ready to go on its thread: where it is kept while it goes (`live`, with `ended` told when it leaves), its
+/// id, its Claude Code's profile, command line, folder and scope, its log, Echo's stop, and what it holds until it has
+/// ended (`held`: its lock and its profile's lease, from `go_live`).
+pub(super) struct Going {
+    pub(super) live: &'static Lives,
+    pub(super) ended: &'static Condvar,
+    pub(super) run: String,
+    pub(super) profile: ai::Profile,
+    pub(super) args: Vec<String>,
+    pub(super) cwd: PathBuf,
+    pub(super) scope: Vec<(String, String)>,
+    pub(super) log: Log,
+    pub(super) stop: Arc<Mutex<Option<String>>>,
+    pub(super) held: Box<dyn Send>,
+}
+
+/// Run `run` of vault `vault` made live in `live` — first, so a sign-in that sees the lease held finds the run to stop
+/// — and its profile's lease counted (`terminal::hold` in the app). Echo's stop for it, and what its thread holds until
+/// it has ended: `run_lock`, then the lease.
+pub(super) fn go_live(live: &Lives, run: &str, vault: &str, ready: ai::Ready, run_lock: crate::app::FileLock) -> (Arc<Mutex<Option<String>>>, Box<dyn Send>) {
+    let profile = ready.profile().id.clone();
+    let stop = Arc::new(Mutex::new(None));
+    lock(live).insert(run.to_string(), Live { vault: vault.to_string(), profile: profile.clone(), pid: None, stop: stop.clone() });
+    #[cfg(feature = "tray")]
+    let lease: Box<dyn Send> = crate::terminal::hold(profile, Box::new(ready));
+    #[cfg(not(feature = "tray"))]
+    let lease: Box<dyn Send> = Box::new(ready);
+    (stop, Box::new((run_lock, lease)))
+}
+
+/// A run leaving: its lock and lease go, then it leaves `live` and `ended` is told — when its thread ends, a panic too.
+struct Leave {
+    live: &'static Lives,
+    ended: &'static Condvar,
+    run: String,
+    held: Option<Box<dyn Send>>,
+}
+
+impl Drop for Leave {
+    fn drop(&mut self) {
+        drop(self.held.take());
+        lock(self.live).remove(&self.run);
+        self.ended.notify_all();
+    }
+}
+
+/// The run on a thread of its own: it waits while a call is recorded or transcribed (saying so), starts Claude Code
+/// unless Echo stopped it meanwhile — its pid kept, a stop that came while it started heard —, follows it to its end
+/// (`life.watch`), and ends it (`life.finish`); then its lock and lease go and it leaves `live`, whatever happened.
+pub(super) fn run_thread<L: Life>(going: Going, life: L) {
+    std::thread::spawn(move || {
+        let Going { live, ended, run, profile, args, cwd, scope, mut log, stop, held } = going;
+        let _leave = Leave { live, ended, run: run.clone(), held: Some(held) };
+        wait_for_calls(&stop, &mut log, |w| life.waiting(w));
+        // Taken out first: a guard in an `if let`'s scrutinee would be held through its `else` too.
+        let stopped = lock(&stop).take();
+        let end = if let Some(why) = stopped {
+            life.early("stopped", why)
+        } else {
+            match spawn(&profile, &args, &cwd, &scope) {
+                Ok(child) => {
+                    let pid = child.id();
+                    if let Some(l) = lock(live).get_mut(&run) {
+                        l.pid = Some(pid);
+                    }
+                    life.started(pid);
+                    // A stop that came while it started.
+                    if lock(&stop).is_some() {
+                        end_group(pid);
+                    }
+                    life.watch(child, &mut log, &stop)
+                }
+                Err(e) => life.early("failed", format!("{e:#}")),
+            }
+        };
+        life.finish(&mut log, end);
+    });
+}
+
+/// An ingest run's life (`run_thread`): its ledger entry, its copy, its prompt.
+struct IngestRun {
     v: Vault,
     run: String,
     dir: PathBuf,
-    profile: ai::Profile,
-    prepared: Prepared,
-    stop: Arc<Mutex<Option<String>>>,
-    held: (crate::app::FileLock, Box<dyn Send>),
+    copy: PathBuf,
+    prompt: String,
 }
 
-/// The run on a thread of its own: it waits while a call is recorded or transcribed (saying so), starts Claude Code,
-/// reads its stdout through the parser into its log and stderr's last line for a crash, keeps its 20 minutes; then
-/// its end — the ledger, the changes found — and its lock and lease go.
-fn launch(job: Job) {
-    std::thread::spawn(move || {
-        let Job { v, run, dir, profile, prepared: Prepared { copy, args, scope, prompt, mut log }, stop, held } = job;
-        wait_for_calls(&stop, &mut log, |w| {
-            let _ = update_run(&v, &run, |_, r| {
-                r.waiting = w;
-                Ok(())
-            });
+impl Life for IngestRun {
+    type End = End;
+
+    fn waiting(&self, w: Option<String>) {
+        let _ = update_run(&self.v, &self.run, |_, r| {
+            r.waiting = w;
+            Ok(())
         });
-        // Taken out first: a guard in an `if let`'s scrutinee would be held through its `else` too.
-        let stopped = lock(&stop).take();
-        let ended = if let Some(why) = stopped {
-            End { state: "stopped", reason: Some(why), ..End::default() }
-        } else {
-            match spawn(&profile, &args, &copy, &scope) {
-                Ok(child) => watch(&v, &run, &dir, &copy, child, &prompt, &mut log, &stop),
-                Err(e) => End { state: "failed", reason: Some(format!("{e:#}")), ..End::default() },
-            }
-        };
-        finish(&v, &run, &mut log, ended);
-        drop(held);
-        lock(&LIVE).remove(&run);
-        ENDED.notify_all();
-    });
+    }
+
+    fn started(&self, pid: u32) {
+        let _ = update_run(&self.v, &self.run, |_, r| {
+            r.pid = Some(pid);
+            Ok(())
+        });
+    }
+
+    fn early(&self, state: &'static str, why: String) -> End {
+        End { state, reason: Some(why), ..End::default() }
+    }
+
+    fn watch(&self, child: Child, log: &mut Log, stop: &Mutex<Option<String>>) -> End {
+        watch(&self.v, &self.dir, &self.copy, child, &self.prompt, log, stop)
+    }
+
+    fn finish(&self, log: &mut Log, end: End) {
+        finish(&self.v, &self.run, log, end)
+    }
 }
 
 /// How a run ended: its state, why, the changes found, its `result`, lines that weren't JSON.
@@ -763,22 +858,8 @@ struct End {
     bad: usize,
 }
 
-/// A started Claude Code to its end: its pid recorded (here and in the ledger, for a later Echo to end it if this one
-/// goes), then driven to its end (`drive`).
-#[allow(clippy::too_many_arguments)]
-fn watch(v: &Vault, run: &str, dir: &Path, copy: &Path, mut child: Child, prompt: &str, log: &mut Log, stop: &Mutex<Option<String>>) -> End {
-    let pid = child.id();
-    if let Some(l) = lock(&LIVE).get_mut(run) {
-        l.pid = Some(pid);
-    }
-    let _ = update_run(v, run, |_, r| {
-        r.pid = Some(pid);
-        Ok(())
-    });
-    // A stop that came while it started.
-    if lock(stop).is_some() {
-        end_group(pid);
-    }
+/// A started run's Claude Code driven to its end (`drive`), then the changes it made in its copy found.
+fn watch(v: &Vault, dir: &Path, copy: &Path, mut child: Child, prompt: &str, log: &mut Log, stop: &Mutex<Option<String>>) -> End {
     let mut parser = stream::Parser::for_copy(&Vault { root: copy.to_path_buf(), ..v.clone() });
     let d = drive(&mut child, prompt, &mut parser, log);
     let (state, reason) = match d.failed(lock(stop).take()) {
