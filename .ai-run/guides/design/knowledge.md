@@ -666,7 +666,11 @@ can block). Ending a process sends its group TERM at once (Echo quitting doesn't
 background. A mode change ends the process; the next start
 resumes. At most 3 processes (the longest idle ends for a fourth; while all three are answering the fourth is refused, "3
 conversations are answering. Wait for one, or stop one." — the page shows it as any refusal and the composer keeps
-the text: final review F4); one idle 10 min with no turn ends (a 30 s sweep).
+the text: final review F4); one idle 10 min with no turn ends (a 30 s sweep). The same sweep lets go of the events of
+a conversation with no process, idle 10 min, that Claude Code has a session of (final review F5): only its numbering
+stays (`start` moves to where its events ended), and its transcript is read again when a page opens it — asks `from`
+before that number —, numbered on from there; a page still showing it, polling from that number or sending a message,
+sees nothing twice.
 The panel and Ask refuse a conversation live in the other (`terminal::live_session`, `chat::live`). One Ask ran
 (its `chat/<id>/` folder is there) resumes in the panel without `--dangerously-skip-permissions`, whatever *no
 permission prompts* says (D41); the panel's own conversations keep the switch. A conversation
@@ -1014,7 +1018,8 @@ to §5.3. `knowledge/transcript.rs` is that reader: it feeds those lines through
 summaries match live ones), makes the user's own text a `user` event (Echo's "pages this is about" and attached-minutes
 framing cut off; hook, command and meta text skipped) and skips sidechain lines. Its blocks are named `h1…` so a live
 process's `b1…` can't meet them. `chat::read` and `chat::send` open it once for a resumable conversation with no process
-and no events, pushing the events into the ring (numbered like live ones, so a later message follows them); a transcript
+and no events, pushing the events into the ring (numbered like live ones, so a later message follows them; after its
+events were let go, only `read` from before them reads it again); a transcript
 that isn't one (no JSON line with a `type`) or is missing gives a `notice` (`kind: history`): "Its history can't be
 shown here; continuing works." Permissions and todos aren't in transcripts.
 

@@ -421,7 +421,7 @@ pub fn send(vault: &str, conversation: Option<&str>, text: &str, mode: Mode, con
     if lock(&c.state).busy {
         bail!("Wait for this answer, or stop it");
     }
-    open_history(&c, &v);
+    open_history(&c, &v, None);
     if let Err(e) = running(&c, &v, mode, text) {
         let Some(s) = e.downcast_ref::<ai::SignInNeeded>() else {
             if conversation.is_none() {
@@ -790,17 +790,17 @@ fn exited(c: &Conv, v: &Vault, gen: u64, stopped: bool, code: Option<i32>, words
 
 /// A conversation Echo holds no process or events of shows what Claude Code's transcript has (K12-11), numbered as live
 /// events are, so a message sent later follows them without renumbering. Once; a transcript that can't be read is said
-/// in a notice.
-fn open_history(c: &Conv, v: &Vault) {
-    {
-        let st = lock(&c.state);
-        if !st.started || st.history || st.proc.is_some() || st.end() > 0 {
-            return;
-        }
+/// in a notice. One whose events were let go (`sweep`) reads it again only for a page that asks `from` before them —
+/// one opening it —, numbered after them: a page still showing them (and a message, `from` None) goes on without
+/// seeing any twice.
+fn open_history(c: &Conv, v: &Vault, from: Option<u64>) {
+    let wanted = |st: &State| st.started && !st.history && st.proc.is_none() && st.events.is_empty() && (st.start == 0 || from.is_some_and(|f| f < st.start));
+    if !wanted(&lock(&c.state)) {
+        return;
     }
     let past = transcript::events(&terminal::claude_folder_of(&c.profile), &c.id, v);
     let mut st = lock(&c.state);
-    if !st.started || st.history || st.proc.is_some() || st.end() > 0 {
+    if !wanted(&st) {
         return;
     }
     st.history = true;
@@ -816,7 +816,7 @@ fn open_history(c: &Conv, v: &Vault) {
 pub fn read(vault: &str, conversation: &str, from: u64, wait: Duration) -> Option<ChatChunk> {
     let v = super::get(vault).ok()?;
     let c = conv_of(&v, conversation)?;
-    open_history(&c, &v);
+    open_history(&c, &v, Some(from));
     let deadline = Instant::now() + wait;
     let mut st = lock(&c.state);
     let seen = st.flags();
@@ -928,13 +928,23 @@ pub fn live() -> Vec<String> {
     all().into_iter().filter(|c| lock(&c.state).proc.is_some()).map(|c| c.id.clone()).collect()
 }
 
-/// End the processes idle for `IDLE` with no turn going (they resume with the next message).
+/// End the processes idle for `IDLE` with no turn going (they resume with the next message); and let go of the events
+/// of conversations with no process, idle as long (final review F5): their transcript has them, read again when the
+/// conversation is opened again (`open_history`), numbered on from where they were.
 pub fn sweep() {
     let t = now();
     for c in all() {
+        // One being sent to is in use.
+        let Ok(_one) = c.sending.try_lock() else { continue };
         let mut st = lock(&c.state);
-        if !st.busy && st.running().is_some() && t.saturating_duration_since(st.last_active) >= IDLE && end(&mut st) {
+        let idle = !st.busy && t.saturating_duration_since(st.last_active) >= IDLE;
+        if idle && st.running().is_some() && end(&mut st) {
             c.changed.notify_all();
+        } else if idle && st.proc.is_none() && st.started && !st.events.is_empty() {
+            st.start = st.end();
+            st.events = VecDeque::new();
+            st.renders.clear();
+            st.history = false;
         }
     }
 }
@@ -1631,6 +1641,48 @@ mod tests {
         assert_eq!(live[5]["n"], 5);
         assert!(live.iter().skip(5).all(|e| e["n"].as_u64().unwrap() >= 5));
         assert_eq!(value_of(&argv(&p), "--resume"), Some(ID));
+    }
+
+    #[test]
+    fn an_idle_conversation_lets_its_events_go_and_reads_them_again() {
+        // Final review F5: a conversation opened from the list doesn't keep its events for the app's life.
+        let (_env, root) = crate::paths::testenv::folders("chat-let-go");
+        let _fake = fake::install(&root);
+        let _clean = clean();
+        let p = signed_in();
+        let v = vault(&root, "w");
+        past(&p, &v, &include_str!("testdata/transcript/ask-session.jsonl").replace("/VAULT", &v.root.to_string_lossy()));
+        let first = read(&v.id, ID, 0, Duration::from_millis(50)).unwrap();
+        assert_eq!((first.events.len(), first.next), (5, 5));
+        let held = || lock(&CHATS).get(ID).map(|c| lock(&c.state).events.len());
+        // Ten minutes idle with no process: its events go from memory.
+        skew(IDLE);
+        sweep();
+        assert_eq!(held(), Some(0), "its events are let go");
+        // A page still showing it polls on: nothing new, nothing twice.
+        let c = read(&v.id, ID, 5, Duration::from_millis(50)).unwrap();
+        assert!(c.events.is_empty() && c.next == 5, "{:#?}", c.events);
+        // Opened again: the same events from its transcript, numbered after the ones let go.
+        let again = read(&v.id, ID, 0, Duration::from_millis(50)).unwrap();
+        let words = |ev: &[Value]| ev.iter().map(|e| e.as_object().unwrap().iter().filter(|(k, _)| *k != "n").map(|(k, x)| (k.clone(), x.clone())).collect::<Vec<_>>()).collect::<Vec<_>>();
+        assert_eq!(words(&again.events), words(&first.events));
+        assert_eq!(again.events.iter().map(|e| e["n"].as_u64().unwrap()).collect::<Vec<_>>(), [5, 6, 7, 8, 9]);
+        assert_eq!(again.next, 10);
+        assert!(read(&v.id, ID, 10, Duration::from_millis(50)).unwrap().events.is_empty(), "and the poll goes on from there");
+        // Let go again while a page shows it: a message from that page follows what it shows, its past not read twice.
+        skew(IDLE);
+        sweep();
+        assert_eq!(held(), Some(0));
+        script(&p, "chat.jsonl", &turn("Fixed."));
+        send(&v.id, Some(ID), "Yes, fix it", Mode::Ask, &[]).unwrap();
+        let ev = events_until(&v.id, ID, |ev, c| !c.busy && of_type(ev, "result").len() == 1);
+        assert_eq!((ev[0]["type"].as_str(), ev[0]["n"].as_u64()), (Some("user"), Some(10)), "{ev:#?}");
+        assert!(ev.iter().all(|e| e["n"].as_u64().unwrap() >= 10));
+        // A conversation going on keeps its events.
+        skew(IDLE);
+        sweep();
+        until("its idle process ended", || !live().contains(&ID.to_string()));
+        assert!(held().unwrap() > 0, "its process has only just ended");
     }
 
     #[test]
