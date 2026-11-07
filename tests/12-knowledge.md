@@ -158,11 +158,11 @@ made-up Teams call. Design: `.ai-run/guides/design/knowledge.md`.
 
 ---
 
-## Release gate: TC-KN-011 … TC-KN-014 and G1–G6
+## Release gate: TC-KN-011 … TC-KN-014 and G1–G7
 
 Slice 2's Ask, ingest runs and AI checks were built against recorded lines and the fake, never the real Claude Code
 (design note, *Known gaps*). Before a release that changes Knowledge, run TC-KN-011 to TC-KN-014 and the measurements
-G1–G6 below on a **made-up vault**: a new vault from the starter with made-up pages, people, companies and sources —
+G1–G7 below on a **made-up vault**: a new vault from the starter with made-up pages, people, companies and sources —
 never a copy of a real one. Note the Claude Code version (`claude --version`) and both profiles used (a managed one,
 and *Claude Code (as configured)*). The release waits until every case and measurement passes; one that fails is a bug
 to fix first, and one Claude Code changed is a design-note fact to rewrite.
@@ -209,6 +209,15 @@ Run G1's ingest run once more. **Pass:** the answer never contains the token; a 
 `!.obsidian` is refused, saying how to search; one with it finds nothing in the plugins' folder; the ingest run's
 first line names `.obsidian/plugins/` among what isn't in the copy.
 
+**G7 · A plugin command's `@file` reference** (final review X4; Echo leaves `@file` as it is). Make a made-up file
+outside the vault, `/tmp/echo-gate-outside.md`, holding "made-up-outside-words-77". Add `.claude/commands/peek.md` to
+the vault with the body `Summarise @/tmp/echo-gate-outside.md and @knowledge/CATALOG.md.` On a managed profile (its
+plugin carries the vault's commands): *Ask*: "Run /<vault id>:peek." — then a new conversation: "Is there a command of
+this vault that would help? Use it." (does the model invoke it on its own?). Watch the tool rows: is there a `Read`
+of either file, and does the answer quote "made-up-outside-words-77"? **Pass:** what happened — the `@` references
+expanded under `--plugin-dir` in print mode or not, with or without a tool call the guard saw, and whether the model
+invoked the command itself — is written down in the design note's *Known gaps* (replacing "unmeasured").
+
 ---
 
 ### TC-KN-011 · Ask: three modes, the cards, stop and resume
@@ -218,7 +227,7 @@ Use a **made-up vault** (a new vault from the starter with made-up pages), never
 starts the real Claude Code on the vault's profile.
 
 **Steps**
-1. Knowledge → the copy → *Ask* → mode *Ask*: "What do my pages say about Northwind?" (made-up content). Watch it stream.
+1. Knowledge → the made-up vault → *Ask* → mode *Ask*: "What do my pages say about Northwind?" (made-up content). Watch it stream.
 2. Switch to *Curate*: "Add a line about the gateway question to the Northwind page." When the card appears, read its
    diff, press *Deny* once and ask again; this time press *Allow*.
 3. Switch to *Research*: "Read https://example.com and tell me what it says." Answer the card that names the domain.

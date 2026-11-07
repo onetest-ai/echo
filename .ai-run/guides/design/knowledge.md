@@ -865,7 +865,9 @@ not the hashing, were the cost; copying on 8 threads won only 15 %, so small fil
 - What `defang` leaves out of a vault's skill (frontmatter hooks, `allowed-tools`, `permissionMode`, `` !`cmd` ``,
   hook files) is checked only with the fake and Echo's own reader: unmeasured on the real CLI — the release gate in
   `tests/12-knowledge.md` (TC-KN-011…014) measures it. A command's `@file` references (Claude Code may read the file into
-  the prompt with no tool call, which the guard doesn't see) are left as they are: unmeasured.
+  the prompt with no tool call, which the guard doesn't see) are left as they are: unmeasured — the release gate's G7
+  measures whether they expand under `--plugin-dir` in print mode and whether the model invokes such a command itself
+  in Ask, and what it finds is written here.
 - `forget_session` is unmeasured on the real CLI: Claude Code's name for a very long working folder (it may shorten
   it), and folders it may key by session elsewhere in the profile's folder (`file-history/`, `todos/`), are not
   looked at; a run whose Echo died (its session id is in no file) leaves its session's files. The release gate
@@ -888,10 +890,10 @@ not the hashing, were the cost; copying on 8 threads won only 15 %, so small fil
   fake.
 - No real Claude Code Ask, ingest run or AI check was run in building slice 2 (ruling R42): their flags, prompts and the
   guard's modes were checked against recorded lines (`testdata/stream/`) and the fake; the first real runs are the
-  release gate in `tests/12-knowledge.md` (final review F9): TC-KN-011…014 on a made-up vault, and G1–G6 — a skill's
+  release gate in `tests/12-knowledge.md` (final review F9): TC-KN-011…014 on a made-up vault, and G1–G7 — a skill's
   hooks and `!` commands left out in a real run, a project hook's *allow* against the guard's *ask*, a vault agent's
   `bypassPermissions` in Curate, `<vault id>:<skill>` under `--plugin-dir`, nothing of a run's session left in the
-  profile's folder, and Obsidian's plugins' settings unread.
+  profile's folder, Obsidian's plugins' settings unread, and a plugin command's `@file` references.
 - A web page is fetched by the system's `curl` (as Microsoft Graph calls are): a machine without it can't add a web
   source and the add says so. Ask has no CLI; its limits live in the app (spec-2 §9).
 - Slice 2 was built and run on macOS. For Windows it is cross-checked (`cargo check --target
