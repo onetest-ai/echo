@@ -281,11 +281,27 @@ struct Files {
     seq: u64,
     files: Vec<PathBuf>,
     busy: bool,
-    /// Dropped on the window rather than picked in the dialog.
-    dropped: bool,
+    /// The last drop on the window as the page sees it (null once the dialog picked since).
+    drop: Value,
 }
 
-static FILES: Mutex<Files> = Mutex::new(Files { seq: 0, files: Vec::new(), busy: false, dropped: false });
+static FILES: Mutex<Files> = Mutex::new(Files { seq: 0, files: Vec::new(), busy: false, drop: Value::Null });
+
+/// Whether the page takes files dropped on the window now: Ingest shown or its Add a source sheet open, as the page says
+/// (`kn_drops`: on or off, nothing else). Off, a drop is the webview's own — a logo dropped on a tile (fix round 1, I2).
+static DROPS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The page takes dropped files now, or not.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn take_drops(on: bool) {
+    DROPS.store(on, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Does the page take dropped files now.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn drops_wanted() -> bool {
+    DROPS.load(std::sync::atomic::Ordering::SeqCst)
+}
 
 /// The files picked last as the page sees them: their number, names and sizes.
 fn listed(p: &Files) -> Value {
@@ -298,24 +314,31 @@ fn listed(p: &Files) -> Value {
 
 /// Files dropped on the window (K14-03b): their paths come from the webview's own drop, never from the page, and are
 /// kept as the dialog's are — the page gets a number and their names. Folders and anything else that isn't a file are
-/// left out; with nothing to add (or the dialog open), nothing is kept.
+/// left out and counted (`left_out`, said by the page); with only those, nothing is picked (`seq` null). With the
+/// dialog open, nothing is kept (None).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn dropped(paths: &[PathBuf]) -> Option<Value> {
     let files: Vec<PathBuf> = paths.iter().filter(|p| p.is_file()).cloned().collect();
+    let left_out = paths.len() - files.len();
     let mut p = FILES.lock().unwrap_or_else(|e| e.into_inner());
-    if files.is_empty() || p.busy {
+    if paths.is_empty() || p.busy {
         return None;
     }
-    p.seq += 1;
-    p.files = files;
-    p.dropped = true;
-    Some(listed(&p))
+    p.drop = if files.is_empty() {
+        json!({ "seq": null, "files": [], "left_out": left_out })
+    } else {
+        p.seq += 1;
+        p.files = files;
+        let mut shown = listed(&p);
+        shown["left_out"] = json!(left_out);
+        shown
+    };
+    Some(p.drop.clone())
 }
 
-/// The files dropped last, for the page (`kn_dropped`); null when the last pick was the dialog's.
+/// The last drop, for the page (`kn_dropped`); null when the dialog picked since.
 pub fn drop_value() -> Value {
-    let p = FILES.lock().unwrap_or_else(|e| e.into_inner());
-    if p.dropped { listed(&p) } else { Value::Null }
+    FILES.lock().unwrap_or_else(|e| e.into_inner()).drop.clone()
 }
 
 /// The system's dialog for several files (an action's job thread waits on it): their names and sizes, under a number
@@ -336,7 +359,7 @@ fn pick_files() -> Result<Value> {
     }
     p.seq += 1;
     p.files = picked;
-    p.dropped = false;
+    p.drop = Value::Null;
     Ok(listed(&p))
 }
 
@@ -967,8 +990,10 @@ mod tests {
         let r = act("kn_source_add", &json!({"id": v.id, "kind": "files", "pick": shown["seq"]})).unwrap();
         let added: Vec<&str> = r["added"].as_array().unwrap().iter().map(|a| a["path"].as_str().unwrap()).collect();
         assert_eq!(added, ["raw_inbox/Aurora RFP.pdf", "raw_inbox/pricing-workshop-notes.md"], "{r}");
-        assert!(dropped(&[d.join("a folder")]).is_none(), "nothing to add: nothing kept");
-        assert_eq!(drop_value(), shown, "the drop before stays");
+        assert_eq!(shown["left_out"], 1, "the folder is said (fix round 1, M4)");
+        let folders = dropped(&[d.join("a folder")]).unwrap();
+        assert_eq!(folders, json!({"seq": null, "files": [], "left_out": 1}), "only folders: said, nothing picked");
+        assert_eq!(drop_value(), folders);
         // The dialog's pick is no drop.
         std::env::set_var("ECHOCTL_PICK_FILES", d.join("Aurora RFP.pdf"));
         let p = act("kn_pick_files", &json!({}));

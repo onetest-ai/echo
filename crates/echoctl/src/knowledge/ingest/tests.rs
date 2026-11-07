@@ -956,6 +956,31 @@ fn a_file_dirty_before_the_write_stays_out_of_the_commit() {
     assert!(acts.iter().any(|a| a.path == INDEX && a.commit.is_none()), "its line names no commit: {acts:?}");
 }
 
+#[test]
+fn the_number_counts_changes_still_waiting_for_an_answer() {
+    // K10-02, fix round 1 (I3): undecided changes and those changed in the vault since the run — never answered ones.
+    let (_env, root) = paths::testenv::folders("kn-ingest-to-answer");
+    let _fake = fake::install(&root);
+    let _clean = clean();
+    let (v, p) = twin(&root, false);
+    let run = northwind(&v, &p, "ingest.jsonl");
+    let n = |v: &Vault| value(v).unwrap()["runs"].as_array().unwrap().iter().find(|r| r["id"] == run.as_str()).unwrap()["to_answer"].clone();
+    assert_eq!(n(&v), 4);
+    assert_eq!(status(&v, &run, 0).unwrap()["to_answer"], 4);
+    decide(&v, &run, NOTE, Decision::Reject).unwrap();
+    decide(&v, &run, CLIENT_PAGE, Decision::Approve).unwrap();
+    assert_eq!(n(&v), 2, "rejected and approved ones wait for no review");
+    // The client page changes in the vault before the write: it waits for an answer again (Take the run's, or not).
+    fixture::write(&v.root, CLIENT_PAGE, "# Northwind Retail\n\nEdited meanwhile.\n");
+    let w = write(&v, &run, &[]).unwrap();
+    assert_eq!(w.changed_since, [CLIENT_PAGE]);
+    assert_eq!(n(&v), 3, "the index and log undecided, the client page changed in the vault");
+    decide(&v, &run, CLIENT_PAGE, Decision::Reject).unwrap();
+    approve_rest(&v, &run).unwrap();
+    assert_eq!(n(&v), 0, "all answered: write or finish");
+    assert!(status(&v, &run, 0).unwrap()["to_answer"] == 0);
+}
+
 #[cfg(unix)]
 #[test]
 fn a_linked_source_is_refused() {

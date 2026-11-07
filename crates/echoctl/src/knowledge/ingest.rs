@@ -906,6 +906,9 @@ pub fn status(v: &Vault, run: &str, from: u64) -> Result<Value> {
     let end = r.ended.as_deref().and_then(|e| chrono::DateTime::parse_from_rfc3339(e).ok()).map(|e| e.with_timezone(&chrono::Local)).unwrap_or_else(chrono::Local::now);
     let seconds = at.map(|a| end.signed_duration_since(a).num_seconds().max(0)).unwrap_or(0);
     let mut j = serde_json::to_value(&r)?;
+    if r.state == "review" {
+        j["to_answer"] = json!(review::to_answer(v, run));
+    }
     j["seconds"] = json!(seconds);
     j["events"] = json!(events);
     j["next"] = json!(next);
@@ -913,7 +916,7 @@ pub fn status(v: &Vault, run: &str, from: u64) -> Result<Value> {
 }
 
 /// What the Ingest view shows of a vault (K14, K15): its sources, the ingest skill (none: the starter's to offer, shown
-/// first), the run going, and the last runs — when, sources, changes kept, cost.
+/// first), the run going, and the last runs — when, sources, changes kept, cost, and those waiting for an answer.
 pub fn value(v: &Vault) -> Result<Value> {
     let mut j = sources::value(v)?;
     let mut runs: Vec<Run> = runs_of(&sources::ledger(v)?).into_iter().map(|r| effective(v, r)).collect();
@@ -923,6 +926,10 @@ pub fn value(v: &Vault) -> Result<Value> {
     j["starter_skill"] = json!(s.is_none().then(starter::inbox_skill_text));
     j["running"] = json!(runs.iter().find(|r| r.state == "running").map(|r| r.id.clone()));
     j["runs"] = serde_json::to_value(&runs)?;
+    // Each run waiting for review: how many of its changes still wait for an answer (Ingest's number, K10-02).
+    for (i, r) in runs.iter().enumerate().filter(|(_, r)| r.state == "review") {
+        j["runs"][i]["to_answer"] = json!(review::to_answer(v, &r.id));
+    }
     j["max_sources"] = json!(MAX_SOURCES);
     Ok(j)
 }

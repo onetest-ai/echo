@@ -198,8 +198,9 @@ those files when the vault commits (`Add source: <title>`), records the source a
 `activity.jsonl` (`by: source`). Nothing is processed by adding, and Echo never edits or deletes a source (D29).
 - **Files** are picked in the system's dialog (`app::choose_files`, several; `ECHOCTL_PICK_FILES` in debug builds):
   `kn_pick_files` answers a number and the files' names and sizes, never a path; `kn_source_add` takes the number back.
-  Files dropped on the window (macOS, K14-03b) become the same kind of pick in Rust (`api::dropped`, from wry's native
-  drop: folders left out), and the page is told by Echo's own `kn_dropped`.
+  Files dropped on the window (macOS, K14-03b, while the page says it takes them) become the same kind of pick in Rust
+  (`api::dropped`, from wry's native drop: folders left out and counted, `left_out`, said), and the page is told by
+  Echo's own `kn_dropped`.
   Each is copied byte for byte; over 50 MB is refused with its size. A picked name is made safe on both systems
   (`\ / : * ? " < > |` and control characters become `-`, no dot or space at either end, a Windows device name gets
   `_` in front) and short enough for both: at most 200 bytes and 200 UTF-16 units with room for ` (N)` (dated names
@@ -431,7 +432,8 @@ days of `history`, a day without a point a gap (`knHealthTrend`, `knTrendPath`).
 "code checks only", Freshness is left out and there is no *Run AI checks* yet (it comes with the AI checks, K16-05).
 
 **The Ingest tab** (spec K14, K15-06, -08, -10, -11; `knowledge.js` block `kn-ingest`): `/ingest` is asked when a vault
-opens (the tab's number: the review runs' changes not written, `knIngestWaiting`), whenever the tab is entered, every
+opens (the tab's number, `knIngestWaiting`: each review run's `to_answer`, which Rust counts from `review.json` — changes
+not answered yet or changed in the vault since the run, never one Echo can't write), whenever the tab is entered, every
 30 s while Knowledge shows, and when a run ends. Until the first open is answered (R40, even after an add) the tab is
 its question — *Mark them done* · *Treat them as new* (`kn_baseline`), with the vault's own ledgers and `log.md` named —
 unless the route names a run. Else the queue on the left (`knIngestQueue`: From Echo · Mail & Teams · Web · Files in
@@ -445,7 +447,9 @@ came, a Markdown one through `page::read` (Echo's writer; *Open* shows it in Pag
 Markdown file of the sources folder, never its README or a dot-file, and answers `source: true`, `editable: false`, no
 `text`, no index row; `save` and `render` still refuse it), with *Prepare changes* · *Skip* (an optional note) · *Show in
 Finder* · *Prepare again* — or the run the route names (`ingest/<run>`). A running run is asked again each second
-(`?from=` its next event; drawn only when something came; its row in the list follows it): X-S2's wait, the copy's
+(`?from=` its next event; drawn only when something came; its row in the list follows it; `kn-ingest-poll`: only the
+route opens a run, a poll or *Stop*'s wait works on the run it started for and stops when another is shown, one load of
+a run at a time, each answer merged once): X-S2's wait, the copy's
 line, its steps (the last `todo`), its tool rows through Ask's renderer (`knRunView`; a write of its steps file is
 "Updated the steps · k of n"), its time (counted in the page), *Stop*. A failed or stopped run says why with *Run
 again* and *Discard*. A run in review (`/changes`; `knIngestReview`) is a card per change: kind, *adds only*, +/−, why,
@@ -459,8 +463,9 @@ the rest*, *Write N approved* (`knWriteSummary`: what was written and committed 
 before is named as left out of the commit (`Written.committed`) —, what changed in the vault since the run, the run
 done), and *Finish the run* when nothing is left to decide (a write of none: the run is done, its sources Done with what
 was kept). The header's *Add a source* and ⌘K open the sheet over any tab (Files · A call or memo · Mail or Teams · A
-web page; `knAddState`, `knAddArgs`): files picked in Echo's dialog or dropped on the window (macOS: wry's native drop
-handler keeps them as the pick in Rust — `api::dropped`, the page told by Echo's own `kn_dropped`, answered with the
+web page; `knAddState`, `knAddArgs`): files picked in Echo's dialog or dropped on the window (macOS, only while the page takes them — Ingest shown or the
+sheet open, `kn_drops` on or off into an `AtomicBool`; any other file drag stays the webview's, as a logo tile's: wry's
+native drop handler keeps them as the pick in Rust — `api::dropped`, the page told by Echo's own `kn_dropped`, answered with the
 files' names and sizes; the sheet opens with them while Ingest shows), a call by its name (on another profile: the
 refusal said on that call, *Add anyway*), a mail or a chat by Microsoft 365's ids (a chat with its last 7, 14 or 30
 days; signed out: said, with Settings → Calendar & chat), a web page by its https address (anything else refused before
@@ -589,8 +594,6 @@ not the hashing, were the cost; copying on 8 threads won only 15 %, so small fil
   own drag and drop, which the page's boards use, so files are picked in the dialog there.
 - *Prepare again* makes a source New in Echo's list, but a source the vault's `log.md` calls processed stays Done (D30):
   after a write whose log change named it, it can't be prepared again from the window (the page says so).
-- Ingest's number on its tab is the review runs' changes less those written; rejected ones still count until the run
-  is finished.
 - Rename, move and delete of pages are left to Obsidian and Finder (D14).
 - Minutes are routed through a vault's own skill only later (D3); today the note is Echo's minutes as written.
 - The rail (links, outline, history) is hidden under 1100 px wide; so is Ask's (*Continue elsewhere* moves to the

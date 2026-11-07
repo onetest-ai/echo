@@ -453,6 +453,13 @@ pub fn changes_value(v: &Vault, run: &str) -> Result<Value> {
     }))
 }
 
+/// How many of a run's changes still wait for an answer (K10-02, Ingest's number): not answered yet, or changed in the
+/// vault since the run (*Take the run's* or *Keep the vault's*) — never one Echo can't write. From `review.json`.
+pub(super) fn to_answer(v: &Vault, run: &str) -> usize {
+    let Some(r) = run_dir(v, run).ok().and_then(|d| read_review(&d).ok()) else { return 0 };
+    r.found.iter().filter(|f| page::inside(v, &f.path).is_ok() && r.answers.get(&f.path).is_none_or(|a| a.state == "changed")).count()
+}
+
 /// A change's whole proposed text, for *Edit* (K15-08): the run's (with D28's lines left out), or the user's edit.
 pub fn proposed(v: &Vault, run: &str, path: &str) -> Result<Value> {
     let c = changes(v, run)?.into_iter().find(|c| c.path == path).ok_or_else(|| anyhow!("this run has no change to {path}"))?;

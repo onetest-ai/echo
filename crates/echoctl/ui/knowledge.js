@@ -691,10 +691,13 @@ const KN_INGEST_GROUPS = [['echo', 'From Echo'], ['mail', 'Mail & Teams'], ['web
 const KN_CHANGE_KINDS = { new: ['New page', 'ok'], edit: ['Edit', ''], index: ['Index', 'acc'], log: ['Log', 'acc'], taxonomy: ['Taxonomy', 'acc'], other: ['Other', ''] }
 const knUsd = (c) => (c < 0.01 ? '<$0.01' : `$${c.toFixed(2)}`)
 /** A source's state as the queue says it: Echo's `waiting` told apart by its run — `preparing` (it is going),
- *  `review` (its changes wait), `failed` (it ended with its Echo, until the next start tidies: *Run again*). */
+ *  `review` (its changes wait; also a source a write marked Done while its run still waits), `failed` (it ended with
+ *  its Echo, until the next start tidies: *Run again*). */
 function knSourceState(src, runs) {
-  if (src.state !== 'waiting') return src.state
   const r = (runs || []).find((x) => x.id === (src.meta || {}).run)
+  // A write marks the run's sources Done while some of its changes still wait (fix round 1, M2): In review till then.
+  if (src.state === 'done' && r && r.state === 'review') return 'review'
+  if (src.state !== 'waiting') return src.state
   if (!r) return 'waiting'
   return r.state === 'running' ? 'preparing' : r.state === 'review' ? 'review' : r.state === 'failed' || r.state === 'stopped' ? 'failed' : 'waiting'
 }
@@ -730,17 +733,18 @@ function knIngestQueue(sources, runs, { filter = 'all', showDone = {} } = {}) {
   }).filter((g) => g.n)
   return { groups, counts }
 }
-/** Ingest's number on its tab (K10-02): the changes waiting for review across the vault's runs. */
+/** Ingest's number on its tab (K10-02): the changes still waiting for an answer across the vault's runs (`to_answer`:
+ *  Echo counts the undecided ones and those changed in the vault since the run). */
 function knIngestWaiting(runs) {
-  return (runs || []).filter((r) => r.state === 'review').reduce((a, r) => a + Math.max(0, (r.changes || 0) - (r.kept || 0)), 0)
+  return (runs || []).filter((r) => r.state === 'review').reduce((a, r) => a + (r.to_answer || 0), 0)
 }
 /** A run in the list of the last ones (K15-11): its sources (one by its title), how it stands, changes kept, cost. */
 function knRunLine(r, titleOf = (p) => String(p).split('/').pop()) {
   const src = (r.sources || []).length === 1 ? titleOf(r.sources[0]) : `${(r.sources || []).length} sources`
-  const left = Math.max(0, (r.changes || 0) - (r.kept || 0))
+  const left = r.to_answer || 0
   const state = r.state === 'running' ? (r.waiting ? 'waiting for a call' : 'preparing')
-    : r.state === 'review' ? (left ? `${left} to review` : 'in review')
-      : r.state === 'done' ? `kept ${r.kept || 0} of ${r.changes || 0}`
+    : r.state === 'review' ? (left ? `${left} to review` : r.changes === 0 ? 'nothing changed — finish' : 'all answered — write or finish')
+      : r.state === 'done' ? (r.changes === 0 ? 'nothing changed' : `kept ${r.kept || 0} of ${r.changes || 0}`)
         : r.state === 'discarded' ? 'discarded — nothing kept' : r.state
   const cost = r.cost ? knUsd(r.cost) : ''
   return { sources: src, state, cost, text: [src, state, cost].filter(Boolean).join(' · ') }
@@ -804,7 +808,7 @@ function knIngestReview(changes, pending = {}) {
   const count = (s) => cards.filter((c) => c.state === s).length
   const counts = { all: cards.length, undecided: count('undecided'), approved: count('approved'), rejected: count('rejected'), written: count('written'), changed: count('changed'), blocked: count('blocked') }
   // Every change written, rejected or one Echo can't write: a write of none finishes the run (its sources Done).
-  const finish = cards.length > 0 && !busy && !counts.undecided && !counts.approved && !counts.changed
+  const finish = !busy && !counts.undecided && !counts.approved && !counts.changed
   return { cards, counts, rest: counts.undecided > 0 && !busy, write: { n: counts.approved, can: counts.approved > 0 && !busy }, finish }
 }
 /** What *Write N approved* did (K15-09: `{written, changed_since, commit, kept, of, finished}`) in Echo's words — `text`,
@@ -864,7 +868,47 @@ function knFirstOpen(v) {
   const one = o.count === 1, n = Number(o.count).toLocaleString('en-US')
   return { count: o.count, folder: o.folder, text: `${n} ${one ? 'file is' : 'files are'} already in ${o.folder}/. ${one ? 'Was it' : 'Were they'} processed?` }
 }
+/** Does the page take files dropped on the window now (K14-03b): while Ingest shows a vault, or the Add a source sheet
+ *  is open. Echo is told on and off (never a path); otherwise a drop is the webview's own, as before (a logo tile's). */
+function knTakesDrops({ view, active, tab, vault, sheet }) {
+  return sheet === 'source' || (view === 'brain' && !!active && tab === 'ingest' && !!vault)
+}
+/** What a drop left out (`left_out`: folders, which aren't added), in Echo's words; '' when nothing was. */
+function knDropNote(r) {
+  const n = (r && r.left_out) || 0
+  if (!n) return ''
+  return (r.files || []).length ? `${n} ${n === 1 ? 'folder' : 'folders'} left out: folders aren't added.` : 'Folders aren\'t added: drop the files in them.'
+}
 // end of the kn-ingest block
+
+// ── kn-ingest-poll: the run Ingest shows, loaded as it goes — a poll works on the run it was started for and never
+// takes the view from one opened since; one load of a run at a time, each answer merged once (as kn-poll for Ask) ──
+/** Open run `id`: the one open when it is `id` (its events kept), else a new one — its review and open rows afresh. Only
+ *  the route opens a run. */
+function knRunOpen(g, id) {
+  if (g.run && g.run.id === id) return g.run
+  g.run = { id, data: null, events: [], next: 0, loaded: false, error: null, polling: false, loading: false }
+  g.review = null
+  g.open = {}
+  return g.run
+}
+/** May a load of run `r` start: it is still the run shown, and none of its loads is on its way. */
+function knRunMayLoad(g, r) { return !!r && g.run === r && !r.loading }
+/** The answer to a load of `r` asked from event `from`: merged into the run shown, once — null when stale (another run
+ *  shown since, or the run moved on from `from`). Events that come while it is watched carry `now`. */
+function knRunTake(g, r, from, d, now) {
+  if (g.run !== r || r.next !== from) return null
+  if (d.error) { r.error = d.error; return r }
+  const evs = d.events || []
+  if (r.loaded) for (const e of evs) e.at = now
+  r.events.push(...evs)
+  if (d.next != null) r.next = d.next
+  const data = { ...d }
+  delete data.events
+  Object.assign(r, { data, loaded: true, error: null })
+  return r
+}
+// end of the kn-ingest-poll block
 
 /** Knowledge's views and state (`S.kn`). */
 const Kn = (() => {
@@ -1252,7 +1296,7 @@ const Kn = (() => {
     const menu = s.menu === 'page' ? `<div class="menu kn-page-menu" role="menu"><button class="menu-item" role="menuitem" data-kn="reveal" data-path="${esc(p.path)}">${/Windows/.test(navigator.userAgent) ? 'Show in Explorer' : 'Show in Finder'}</button><button class="menu-item" role="menuitem" data-kn="copy" data-text="${esc(p.abs || p.path)}">Copy path</button><button class="menu-item" role="menuitem" data-kn="copy" data-text="${esc(`echo://page/${encodeURIComponent(p.vault || st().vault)}/${String(p.path).split('/').map(encodeURIComponent).join('/')}`)}">Copy echo:// link</button><button class="menu-item" role="menuitem" data-kn="ask-about" data-path="${esc(p.path)}">Ask about it</button><button class="menu-item" role="menuitem" data-kn="rail" data-rail="history">History</button></div>` : ''
     const editBtn = p.source ? '<button disabled title="Sources are never edited">Edit</button>' : p.editable ? '<button data-kn="edit">Edit</button>' : '<button disabled title="Too large to edit in Echo">Edit</button>'
     const bar = `<div class="kn-bar">${crumbs}<div class="seg" role="group" aria-label="Read or edit"><button aria-pressed="true">Read</button>${editBtn}</div><button class="btn ghost sm" data-kn="obsidian" data-path="${esc(p.path)}" title="Open this page in Obsidian">${IC.ext} Obsidian</button><span class="kn-rel"><button class="icon-btn" data-kn="menu" data-menu="page" aria-haspopup="menu" aria-expanded="${s.menu === 'page'}" aria-label="Page actions">${IC.more}</button>${menu}</span></div>`
-    const src = p.source ? `<div class="kn-info kn-src-note">${IC.lock}<span>A source in the vault's inbox, shown as it came. Echo never edits a source.</span><button class="btn ghost sm" data-kn="tab" data-kn-tab="ingest">Ingest</button></div>` : ''
+    const src = p.source ? `<div class="kn-info kn-src-note">${IC.lock}<span>A source in the vault's inbox, shown as it came. Echo never edits a source.</span><button class="btn ghost sm" data-kn="tab" data-kn-tab="ingest">Open Ingest</button></div>` : ''
     return `<div class="kn-reader" data-keep-scroll>${bar}<article class="kn-doc selectable">${src}${welcomeCard()}${propsView(p)}${p.html}</article></div>`
   }
   function editorView() {
@@ -1955,26 +1999,29 @@ const Kn = (() => {
   }
   /** Run `id` as it goes (K15-06): its state, time and cost, and its events after the ones already here; its changes
    *  once it waits for review. */
+  /** Open run `id` (the route's) and load it. */
   async function loadRun(id) {
-    const v = vault(), g = ing()
-    if (!g.run || g.run.id !== id) { g.run = { id, data: null, events: [], next: 0, loaded: false, error: null, polling: false }; g.review = null; g.open = {} }
-    const r = g.run
+    const g = ing()
+    return fetchRun(g, knRunOpen(g, id))
+  }
+  /** Run `r`'s state and its events after those here (`?from=`) — only while it is the run shown, one load at a time
+   *  (`kn-ingest-poll`); its review once it waits for one. Never opens another run. */
+  async function fetchRun(g, r) {
+    const v = vault()
+    if (!knRunMayLoad(g, r)) return false
+    r.loading = true
+    const from = r.next
     let d
-    try { d = await get(`api/kn/${enc(v.id)}/ingest/${enc(id)}?from=${r.next}`) } catch (e) { d = { error: String(e.message || e) } }
-    if (ing() !== g || g.run !== r) return
-    if (d.error) { r.error = /no run/.test(d.error) ? 'This run isn\'t one of this vault\'s any more.' : d.error; return }
-    const evs = d.events || []
-    // Events that come while the page watches carry when they came (a tool row's time).
-    if (r.loaded) for (const e of evs) e.at = Date.now()
-    r.events.push(...evs)
-    r.next = d.next
-    delete d.events
-    Object.assign(r, { data: d, loaded: true, error: null })
+    try { d = await get(`api/kn/${enc(v.id)}/ingest/${enc(r.id)}?from=${from}`) } catch (e) { d = { error: String(e.message || e) } }
+    r.loading = false
+    if (ing() !== g || !knRunTake(g, r, from, d, Date.now())) return false
+    if (d.error) { r.error = /no run/.test(d.error) ? 'This run isn\'t one of this vault\'s any more.' : d.error; return true }
     // Its row in the list of runs follows it: its state, what it waits for, what it cost.
-    const row = ((g.data || {}).runs || []).find((x) => x.id === id)
-    if (row) Object.assign(row, { state: d.state, waiting: d.waiting, reason: d.reason, changes: d.changes, kept: d.kept, cost: d.cost })
-    if (d.state === 'review') await loadReview(id)
-    else g.review = null
+    const x = r.data, row = ((g.data || {}).runs || []).find((y) => y.id === r.id)
+    if (row) Object.assign(row, { state: x.state, waiting: x.waiting, reason: x.reason, changes: x.changes, kept: x.kept, cost: x.cost, to_answer: x.to_answer })
+    if (x.state === 'review') await loadReview(r.id)
+    else if (g.run === r) g.review = null
+    return true
   }
   /** While a run goes and Ingest shows it: asked again each second; drawn only when something came. When it ends, the
    *  sources and runs follow. */
@@ -1982,11 +2029,14 @@ const Kn = (() => {
     const g = ing(), r = g.run
     if (!r || r.polling || !r.data || r.data.state !== 'running') return
     r.polling = true
+    // Still the run shown, going, with Ingest on screen — asked again after each wait (another run may be open since).
+    const mine = () => ing() === g && g.run === r && ingestShown() && r.data.state === 'running'
     try {
-      while (ing() === g && g.run === r && ingestShown() && r.data.state === 'running') {
+      while (mine()) {
         await sleep(1000)
+        if (!mine()) return
         const before = `${r.next}|${r.data.state}|${r.data.waiting || ''}`
-        await loadRun(r.id)
+        await fetchRun(g, r)
         if (ing() !== g || g.run !== r) return
         if (r.data.state !== 'running') { await loadIngest(); render(); return }
         if (`${r.next}|${r.data.state}|${r.data.waiting || ''}` !== before) render()
@@ -1998,10 +2048,11 @@ const Kn = (() => {
     const keep = { pending: old ? old.pending : {}, cmp: old ? old.cmp : {}, more: old ? old.more : {} }
     try {
       const d = await get(`api/kn/${enc(v.id)}/ingest/${enc(id)}/changes`)
-      if (ing() !== g) return
+      // Only into the run shown (another may be open since).
+      if (ing() !== g || !g.run || g.run.id !== id) return
       if (d.error) throw new Error(d.error)
       g.review = { run: id, data: d, error: null, ...keep }
-    } catch (e) { if (ing() === g) g.review = { run: id, data: old && old.data, error: String(e.message || e), ...keep } }
+    } catch (e) { if (ing() === g && g.run && g.run.id === id) g.review = { run: id, data: old && old.data, error: String(e.message || e), ...keep } }
   }
 
   function ingestView() {
@@ -2163,7 +2214,7 @@ const Kn = (() => {
               : c.state === 'written' ? `<span class="kn-ok">${IC.check} Written</span>`
                 : c.changed ? b('compare', cmp ? 'Hide the diff' : 'Compare', 'btn sm ghost', ` aria-expanded="${cmp}"`) + b('reject', 'Keep the vault\'s') + (cmp ? b('take', 'Take the run\'s', 'btn sm primary') : '') : ''
     const f = foldedHunks(c.hunks, !!rv.more[c.path])
-    const diff = f.hunks.length ? `<div class="kn-diff">${hunkRows(f.hunks)}</div>${f.more ? `<button class="kn-chg-more" id="${id}-more" data-kn="ing-more" data-path="${p}">Show ${many(f.more, 'more line')}</button>` : ''}` : ''
+    const diff = f.hunks.length ? `<div class="kn-diff" id="${id}-diff" tabindex="-1" aria-label="${esc(`The change to ${c.path}`)}">${hunkRows(f.hunks)}</div>${f.more ? `<button class="kn-chg-more" id="${id}-more" data-kn="ing-more" data-path="${p}">Show ${many(f.more, 'more line')}</button>` : ''}` : ''
     let body = ''
     if (c.blocked) body = `<div class="kn-left-out">${IC.warn}<span>${esc(c.blocked)}. Echo leaves it out of the write.</span></div>${diff}`
     else if (c.changed) body = `<div class="kn-left-out">${IC.warn}<span>Changed in the vault since the run, so it isn't written. ${cmp ? 'Below is what Take the run\'s writes over the vault\'s file now: − lines are the vault\'s.' : 'Compare shows what Take the run\'s would write over it.'}</span></div>${cmp ? diff : ''}`
@@ -2213,8 +2264,14 @@ const Kn = (() => {
   }
   async function stopRun() {
     const v = vault(), g = ing(), id = st().ingRun
+    const r = g.run && g.run.id === id ? g.run : null
     try { await run('kn_ingest_stop', { id: v.id, run: id }, 'ingstop') } catch (e) { return say(String(e.message || e)) }
-    for (let i = 0; i < 20 && g.run && g.run.id === id && g.run.data && g.run.data.state === 'running'; i++) { await sleep(300); await loadRun(id) }
+    // Until it says it stopped — on the run shown only, never a second load beside the poll's.
+    for (let i = 0; i < 20 && r && ing() === g && g.run === r && r.data && r.data.state === 'running'; i++) {
+      await sleep(300)
+      if (ing() !== g || g.run !== r) break
+      await fetchRun(g, r)
+    }
     await loadIngest()
     render()
   }
@@ -2227,6 +2284,7 @@ const Kn = (() => {
     delete rv.pending[path]
     if (decision === 'take') delete rv.cmp[path]
     await loadReview(id)
+    await loadIngest()
     render()
     focusNext()
   }
@@ -2234,6 +2292,7 @@ const Kn = (() => {
     const v = vault(), id = st().ingRun
     try { await run('kn_change', { id: v.id, run: id, rest: true }, 'ingrest') } catch (e) { say(String(e.message || e)) }
     await loadReview(id)
+    await loadIngest()
     render()
     focusOn('#kn-rv-write:not([disabled])', '#kn-rv-discard')
   }
@@ -2241,7 +2300,7 @@ const Kn = (() => {
     const v = vault(), id = st().ingRun
     let r
     try { r = await run('kn_ingest_apply', { id: v.id, run: id }, 'ingwrite') } catch (e) { return say(`Not written: ${String(e.message || e).replace(/\.$/, '')}.`) }
-    const m = r.finished && !(r.written || []).length && !(r.changed_since || []).length ? { text: `The run is done: ${nf(r.kept)} of its ${nf(r.of)} changes kept.`, wait: false } : knWriteSummary(r, v.name)
+    const m = r.finished && !(r.written || []).length && !(r.changed_since || []).length ? { text: r.of ? `The run is done: ${nf(r.kept)} of its ${nf(r.of)} changes kept.` : 'The run is done: it changed nothing.', wait: false } : knWriteSummary(r, v.name)
     await loadRun(id)
     await loadIngest()
     st().tree = null
@@ -2336,6 +2395,7 @@ const Kn = (() => {
       await run('kn_change', { id: v.id, run: x.run, path: x.path, decision: 'edit', text }, 'ingedit')
       if (st().sheet === x) s.sheet = null
       await loadReview(x.run)
+      await loadIngest()
       render()
       done('Your text replaces the run\'s. It is approved.')
       focusNext()
@@ -2399,10 +2459,23 @@ const Kn = (() => {
    *  takes them when it is open; elsewhere a drop does nothing. */
   function dropped(r) {
     const s = st()
-    if (!r || r.seq == null || !(r.files || []).length) return
-    if (s.sheet && s.sheet.kind === 'source') { Object.assign(s.sheet, { tab: 'files', pick: r, error: null }); render(); return focusOn('#kn-src-go:not([disabled])') }
-    if (s.sheet || !ingestShown()) return
+    if (!r) return
+    const open = s.sheet && s.sheet.kind === 'source'
+    if (!open && (s.sheet || !ingestShown())) return
+    // Only folders: said, nothing picked.
+    if (r.seq == null || !(r.files || []).length) return say(knDropNote(r) || 'Nothing to add: drop files.')
+    if (open) { Object.assign(s.sheet, { tab: 'files', pick: r, error: null }); render(); return focusOn('#kn-src-go:not([disabled])') }
     openAdd('files', r)
+  }
+  /** Tell Echo whether the page takes files dropped on the window now (on or off, nothing else): Ingest shown or the
+   *  Add a source sheet open. Otherwise a drop is the webview's, as a logo tile's is (fix round 1, I2). */
+  let dropsSaid = null
+  function syncDrops() {
+    const s = st()
+    const on = knTakesDrops({ view: S.view, active: active(), tab: s.tab, vault: !!vault(), sheet: s.sheet && s.sheet.kind })
+    if (on === dropsSaid) return
+    dropsSaid = on
+    send({ cmd: 'kn_drops', on })
   }
   /** The call or memo, mail or chat list — drawn alone while its search field keeps the focus. */
   function sourceList() {
@@ -2448,7 +2521,7 @@ const Kn = (() => {
       const mac = /Mac/.test(navigator.platform || navigator.userAgent || '')
       const taken = new Set((d.sources || []).map((y) => y.path))
       const list = x.pick && (x.pick.files || []).length ? `<div class="kn-pick-l">${x.pick.files.map((f) => `<div class="kn-pl"><span class="kn-ok-ic${f.too_big ? ' warn' : ''}">${f.too_big ? IC.warn : IC.check}</span><span class="k">${IC.file}</span><b>${esc(f.name)}</b><span class="set-sub">${esc(bytes(f.size || 0))}</span><span class="m${f.too_big ? ' warn' : ''}">${f.too_big ? 'Over 50 MB — not added. Keep it elsewhere and add its transcript.' : `→ <code>${esc(folder)}/${esc(f.name)}</code> · ${taken.has(`${folder}/${f.name}`) ? 'that name is taken: it gets a number' : 'copied byte for byte'}`}</span></div>`).join('')}</div>` : ''
-      body = `<div class="kn-drop">${IC.upload}<b>${mac ? 'Drop files on this window' : 'Files from your computer'}</b>${mac ? '<span class="set-sub">or</span>' : ''}<button class="btn sm" id="kn-src-choose" data-kn="src-choose"${x.picking ? ' disabled' : ''}>${x.picking ? 'Choosing…' : 'Choose files…'}</button></div>${list}
+      body = `<div class="kn-drop">${IC.upload}<b>${mac ? 'Drop files on this window' : 'Files from your computer'}</b>${mac ? '<span class="set-sub">or</span>' : ''}<button class="btn sm" id="kn-src-choose" data-kn="src-choose"${x.picking ? ' disabled' : ''}>${x.picking ? 'Choosing…' : 'Choose files…'}</button></div>${list}${knDropNote(x.pick) ? `<div class="kn-note-line warn">${IC.warn}<span>${esc(knDropNote(x.pick))}</span></div>` : ''}
         <div class="kn-note-line">${IC.info}<span>Files go into <code>${esc(folder)}/</code> as they are and are never edited. Claude reads Markdown, text, PDF and images; for Word or PowerPoint, add a PDF copy too.</span></div>${create}`
     } else if (x.tab === 'call') {
       const c = x.call, mm = c && x.mismatch && x.mismatch.name === c.name ? x.mismatch : null
@@ -2456,7 +2529,7 @@ const Kn = (() => {
       body = `<input class="search" id="kn-src-q" placeholder="Find a call or memo" aria-label="Find a call or memo" value="${esc(x.q)}" autocomplete="off" spellcheck="false"><div id="kn-src-list">${sourceList()}</div>
         ${mm ? `<div class="kn-warn" role="alert">${IC.warn}<span class="grow">This call's text goes only to <b>${esc(mm.call_name)}</b>; ${esc(v.name)} is read by <b>${esc(mm.vault_name)}</b>. Add anyway lets that profile's runs read its minutes.</span></div>` : ''}
         ${c ? `<div class="kn-field"><span>Include</span><div class="kn-inline"><label class="kn-check"><input type="checkbox" checked disabled> Minutes</label>${inc('transcript', 'Transcript', c.transcript)}${inc('chat', 'Chat', c.chat)}</div></div>
-        <div class="kn-rowpre">${esc(folder)}/echo/ · kind: ${c.memo ? 'memo' : 'call'}${c.note ? ` · note: ${esc(c.note)}` : ''}</div>` : ''}
+        <div class="kn-src-pre">${esc(folder)}/echo/ · kind: ${c.memo ? 'memo' : 'call'}${c.note ? ` · note: ${esc(c.note)}` : ''}</div>` : ''}
         <div class="kn-note-line">${IC.info}<span>The minutes go in as they are${c && c.note ? '. Its note is already in this vault, so the skill is told to add to it, not write another' : ''}. Nothing is processed until you prepare changes.</span></div>${create}`
     } else if (x.tab === 'mail') {
       body = d.m365 === false ? `<div class="kn-info">${IC.info}<span>Mail and Teams chats come through Echo's Microsoft 365 sign-in, and Echo isn't signed in. Sign in from <button class="kn-lnk" id="kn-src-m365" data-kn="src-m365">Settings → Calendar &amp; chat</button>.</span></div>`
@@ -3794,7 +3867,7 @@ const Kn = (() => {
         if (d.knDo === 'compare') { if (rv) rv.cmp[d.path] = !rv.cmp[d.path]; render(); return focusOn(`#${t.id.replace(/-compare$/, '-take')}`, `#${t.id}`) }
         return decide(d.path, d.knDo)
       }
-      case 'ing-more': { const rv = ing().review; if (rv) rv.more[d.path] = true; render(); return focusOn(`#${t.id.replace(/-more$/, '')} .kn-diff`) }
+      case 'ing-more': { const rv = ing().review; if (rv) rv.more[d.path] = true; render(); return focusOn(`#${t.id.replace(/-more$/, '-diff')}`) }
       case 'ing-rest': return approveRest()
       case 'ing-write': return writeApproved()
       case 'ing-discard': return discardRun()
@@ -3998,7 +4071,7 @@ const Kn = (() => {
 
   return {
     view, after, tick, load, route: routeTo, active, home, title, overlay, callChip, callMenuItems, countdownLine,
-    settingsVaults, paletteActions, askView, askLabel, feedQueued, dropped,
+    settingsVaults, paletteActions, askView, askLabel, feedQueued, dropped, syncDrops,
     vaultId: () => (st().source === 'vault' || active()) ? st().vault : '',
     setSource: (src) => { st().source = src },
     editing: () => !!(S.kn && S.kn.edit),

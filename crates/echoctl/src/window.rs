@@ -158,14 +158,15 @@ pub fn open<T: 'static>(
             }
             ours
         });
-    // Files dropped on the window (K14-03b, macOS): kept as a pick in Rust, the page told and shown their names. On
-    // Windows wry's handler would replace WebView2's own drag and drop, which the page's boards use: files are picked
-    // in the dialog there.
+    // Files dropped on the window (K14-03b, macOS) while the page takes them (Ingest shown or its sheet open): kept as a
+    // pick in Rust, the page told and shown their names; any other drop is the webview's (a logo tile's). On Windows
+    // wry's handler would replace WebView2's own drag and drop, which the page's boards use: files are picked in the
+    // dialog there.
     #[cfg(target_os = "macos")]
     let builder = {
         let files = std::cell::Cell::new(false);
         builder.with_drag_drop_handler(move |e| {
-            let (ours, paths) = drag(e, &files);
+            let (ours, paths) = drag(e, &files, crate::knowledge::api::drops_wanted());
             if !paths.is_empty() && crate::knowledge::api::dropped(&paths).is_some() {
                 (*to_app)(json!({ "cmd": "kn_dropped" }).to_string());
             }
@@ -178,19 +179,19 @@ pub fn open<T: 'static>(
     Ok(EchoWindow { window, webview })
 }
 
-/// A drag over the window: one carrying files is Echo's from its start to its end (`files` says whether the drag going
-/// on does), its files given on the drop; any other — a card dragged inside the page — is the webview's own. Whether
-/// Echo takes the event, and the files dropped.
+/// A drag over the window: one carrying files while the page takes them (`wanted`) is Echo's from its start to its end
+/// (`files` says whether the drag going on is), its files given on the drop; any other — files dropped elsewhere (a
+/// logo tile), a card dragged inside the page — is the webview's own. Whether Echo takes the event, and the files.
 #[cfg(target_os = "macos")]
-fn drag(e: wry::DragDropEvent, files: &std::cell::Cell<bool>) -> (bool, Vec<PathBuf>) {
+fn drag(e: wry::DragDropEvent, files: &std::cell::Cell<bool>, wanted: bool) -> (bool, Vec<PathBuf>) {
     match e {
         wry::DragDropEvent::Enter { paths, .. } => {
-            files.set(!paths.is_empty());
+            files.set(wanted && !paths.is_empty());
             (files.get(), vec![])
         }
         wry::DragDropEvent::Over { .. } => (files.get(), vec![]),
         wry::DragDropEvent::Drop { paths, .. } => {
-            let ours = files.replace(false) || !paths.is_empty();
+            let ours = files.replace(false) || (wanted && !paths.is_empty());
             (ours, if ours { paths } else { vec![] })
         }
         wry::DragDropEvent::Leave => (files.replace(false), vec![]),
@@ -2029,6 +2030,11 @@ pub fn handle(msg: &str) -> Handled {
             }
             false.into()
         }
+        // Whether the page takes files dropped on the window now (Ingest shown or its sheet open): on or off only.
+        "kn_drops" => {
+            crate::knowledge::api::take_drops(v["on"] == true);
+            false.into()
+        }
         // Files were dropped on the window (Echo's own word, from the drop: never their paths): the page opens Ingest's
         // sheet with them.
         "kn_dropped" => Handled { refresh: false, reply: Some(format!("window.echo && window.echo.knDropped && window.echo.knDropped({})", crate::knowledge::api::drop_value())) },
@@ -2872,24 +2878,37 @@ mod tests {
         assert!(!js.contains(&root.display().to_string()), "no path: {js}");
     }
 
-    /// A drag of files is Echo's from its start to its drop; a drag inside the page (a card on a board) stays the
-    /// webview's own.
-    #[cfg(target_os = "macos")]
+    /// A drag of files is Echo's from its start to its drop only while the page takes them (Ingest shown, or its Add a
+    /// source sheet open: `kn_drops`, on or off); otherwise — a logo dropped on a tile — and a drag inside the page (a
+    /// card on a board) stay the webview's own.
     #[test]
-    fn a_drag_of_files_is_echos_and_one_inside_the_page_the_webviews() {
-        use wry::DragDropEvent::*;
-        let files = std::cell::Cell::new(false);
-        let f = vec![PathBuf::from("/made/up/Aurora RFP.pdf")];
-        assert_eq!(drag(Enter { paths: f.clone(), position: (1, 1) }, &files), (true, vec![]));
-        assert_eq!(drag(Over { position: (2, 2) }, &files), (true, vec![]));
-        assert_eq!(drag(Drop { paths: f.clone(), position: (2, 2) }, &files), (true, f.clone()));
-        assert!(!files.get(), "over once dropped");
-        assert_eq!(drag(Enter { paths: vec![], position: (1, 1) }, &files), (false, vec![]));
-        assert_eq!(drag(Over { position: (2, 2) }, &files), (false, vec![]));
-        assert_eq!(drag(Drop { paths: vec![], position: (2, 2) }, &files), (false, vec![]));
-        assert_eq!(drag(Enter { paths: f.clone(), position: (1, 1) }, &files), (true, vec![]));
-        assert_eq!(drag(Leave, &files), (true, vec![]));
-        assert!(!files.get(), "over once it left");
+    fn files_dropped_go_to_ingest_only_while_the_page_takes_them() {
+        let _ = handle(r#"{"cmd":"kn_drops","on":true}"#);
+        assert!(crate::knowledge::api::drops_wanted());
+        let _ = handle(r#"{"cmd":"kn_drops","on":false,"path":"/made/up"}"#);
+        assert!(!crate::knowledge::api::drops_wanted(), "on or off, nothing else");
+        #[cfg(target_os = "macos")]
+        {
+            use wry::DragDropEvent::*;
+            let files = std::cell::Cell::new(false);
+            let f = vec![PathBuf::from("/made/up/logo.png")];
+            let wanted = crate::knowledge::api::drops_wanted();
+            assert_eq!(drag(Enter { paths: f.clone(), position: (1, 1) }, &files, wanted), (false, vec![]), "off: the webview's (a logo tile takes it)");
+            assert_eq!(drag(Over { position: (2, 2) }, &files, wanted), (false, vec![]));
+            assert_eq!(drag(Drop { paths: f.clone(), position: (2, 2) }, &files, wanted), (false, vec![]));
+            let _ = handle(r#"{"cmd":"kn_drops","on":true}"#);
+            let wanted = crate::knowledge::api::drops_wanted();
+            assert_eq!(drag(Enter { paths: f.clone(), position: (1, 1) }, &files, wanted), (true, vec![]), "on: Echo's");
+            assert_eq!(drag(Over { position: (2, 2) }, &files, wanted), (true, vec![]));
+            assert_eq!(drag(Drop { paths: f.clone(), position: (2, 2) }, &files, wanted), (true, f.clone()));
+            assert!(!files.get(), "over once dropped");
+            assert_eq!(drag(Enter { paths: vec![], position: (1, 1) }, &files, wanted), (false, vec![]), "a drag inside the page");
+            assert_eq!(drag(Drop { paths: vec![], position: (2, 2) }, &files, wanted), (false, vec![]));
+            assert_eq!(drag(Enter { paths: f.clone(), position: (1, 1) }, &files, wanted), (true, vec![]));
+            assert_eq!(drag(Leave, &files, wanted), (true, vec![]));
+            assert!(!files.get(), "over once it left");
+            let _ = handle(r#"{"cmd":"kn_drops","on":false}"#);
+        }
     }
 
     #[test]

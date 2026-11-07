@@ -26,7 +26,8 @@ const { knChatOpen, knPollKeep, knChatTake } = load(['kn-poll'], ['knChatOpen', 
 const { knToolRows } = load(['kn-tools'], ['knToolRows'])
 const { knMention, knMentionPick, knChatMessage } = load(['kn-mention'], ['knMention', 'knMentionPick', 'knChatMessage'])
 const { knHealthList, knHealthSelect, knHealthTrend, knTrendPath, knFixAll, knFixSummary, knHealthLoad, knHealthState } = load(['kn-health'], ['knHealthList', 'knHealthSelect', 'knHealthTrend', 'knTrendPath', 'knFixAll', 'knFixSummary', 'knHealthLoad', 'knHealthState'])
-const { knIngestQueue, knIngestWaiting, knRunLine, knRunView, knIngestReview, knWriteSummary, knAddState, knAddArgs, knFirstOpen } = load(['kn-ingest'], ['knIngestQueue', 'knIngestWaiting', 'knRunLine', 'knRunView', 'knIngestReview', 'knWriteSummary', 'knAddState', 'knAddArgs', 'knFirstOpen'])
+const { knIngestQueue, knIngestWaiting, knRunLine, knRunView, knIngestReview, knWriteSummary, knAddState, knAddArgs, knFirstOpen, knSourceState, knTakesDrops, knDropNote } = load(['kn-ingest'], ['knIngestQueue', 'knIngestWaiting', 'knRunLine', 'knRunView', 'knIngestReview', 'knWriteSummary', 'knAddState', 'knAddArgs', 'knFirstOpen', 'knSourceState', 'knTakesDrops', 'knDropNote'])
+const { knRunOpen, knRunMayLoad, knRunTake } = load(['kn-ingest-poll'], ['knRunOpen', 'knRunMayLoad', 'knRunTake'])
 
 const tests = []
 const test = (name, f) => tests.push([name, f])
@@ -822,7 +823,7 @@ test('nothing left to decide (written, rejected, can\'t be written): Finish the 
   assert.equal(knIngestReview(CHANGES).finish, false, 'something is undecided or approved')
   assert.equal(knIngestReview([...left, CH('knowledge/b.md', 'edit', 'changed')]).finish, false, 'a change made in the vault since the run waits for an answer')
   assert.equal(knIngestReview(left, { 'log.md': 'approve' }).finish, false, 'an answer on its way')
-  assert.equal(knIngestReview([]).finish, false)
+  assert.equal(knIngestReview([]).finish, true, 'fix round 1, M1: a run that changed nothing is finished too')
 })
 
 test('a change made in the vault since the run waits for Compare, then Take the run\'s; written ones are done', () => {
@@ -836,7 +837,7 @@ test('a change made in the vault since the run waits for Compare, then Take the 
 const SRC = (path, kind, title, state, meta = {}) => ({ path, kind, title, state, meta: { size: 1200, markdown: /\.md$/.test(path), ...meta } })
 const RUNS = [
   { id: 'r3', at: '2026-11-06T11:17:00+01:00', sources: ['raw_inbox/echo/2026-11-06-memo-pricing-thoughts.md', 'raw_inbox/mail/2026-11-04-phase-2.md', 'raw_inbox/web/2026-11-06-per-stream-pricing.md'], state: 'running' },
-  { id: 'r2', at: '2026-11-06T08:06:00+01:00', sources: ['raw_inbox/Aurora RFP.pdf'], state: 'review', changes: 1, kept: 0, cost: 0.05 },
+  { id: 'r2', at: '2026-11-06T08:06:00+01:00', sources: ['raw_inbox/Aurora RFP.pdf'], state: 'review', changes: 1, kept: 0, to_answer: 1, cost: 0.05 },
   { id: 'r1', at: '2026-11-05T17:12:00+01:00', sources: ['raw_inbox/pricing-workshop-notes.md'], state: 'done', changes: 3, kept: 3, cost: 0.07 },
   { id: 'r0', at: '2026-11-05T10:03:00+01:00', sources: ['raw_inbox/teams/2026-11-05-northwind-delivery.md'], state: 'failed', reason: 'It stopped when Echo did' },
 ]
@@ -889,7 +890,10 @@ test('K14-08 the queue\'s filters, and done sources folded under All until shown
 
 test('K10-02 Ingest\'s number: the changes waiting for review across the vault\'s runs', () => {
   assert.equal(knIngestWaiting(RUNS), 1)
-  assert.equal(knIngestWaiting([...RUNS, { id: 'r4', state: 'review', changes: 5, kept: 0 }, { id: 'r5', state: 'review', changes: 4, kept: 4 }]), 6)
+  assert.equal(knIngestWaiting([...RUNS, { id: 'r4', state: 'review', changes: 5, kept: 0, to_answer: 5 }, { id: 'r5', state: 'review', changes: 4, kept: 4, to_answer: 0 }]), 6)
+  // Fix round 1, I3: answered changes (rejected, approved and not written yet) wait for no review.
+  assert.equal(knIngestWaiting([{ id: 'r6', state: 'review', changes: 5, kept: 0, to_answer: 0 }]), 0, 'all 5 rejected: nothing waits')
+  assert.equal(knIngestWaiting([{ id: 'r7', state: 'review', changes: 5, kept: 1, to_answer: 2 }]), 2, 'what Echo counted: undecided and changed in the vault')
   assert.equal(knIngestWaiting([]), 0)
   assert.equal(knIngestWaiting(undefined), 0)
 })
@@ -903,6 +907,10 @@ test('K15-11 the last runs: when, sources, changes kept, cost', () => {
   assert.equal(knRunLine({ ...RUNS[0], waiting: 'Waiting for a call\'s transcription to finish' }, t).text, '3 sources · waiting for a call')
   assert.equal(knRunLine({ id: 'x', sources: ['a.md', 'b.md'], state: 'discarded' }).text, '2 sources · discarded — nothing kept')
   assert.equal(knRunLine({ id: 'x', sources: ['raw_inbox/a.md'], state: 'stopped', cost: 0.004 }).text, 'a.md · stopped · <$0.01')
+  assert.equal(knRunLine({ id: 'x', sources: ['raw_inbox/a.md'], state: 'review', changes: 5, kept: 0, to_answer: 0 }).text, 'a.md · all answered — write or finish', 'fix round 1, I3')
+  assert.equal(knRunLine({ id: 'x', sources: ['raw_inbox/a.md'], state: 'review', changes: 5, kept: 2, to_answer: 1 }).text, 'a.md · 1 to review')
+  assert.equal(knRunLine({ id: 'x', sources: ['raw_inbox/a.md'], state: 'review', changes: 0, kept: 0, to_answer: 0 }).text, 'a.md · nothing changed — finish', 'fix round 1, M1')
+  assert.equal(knRunLine({ id: 'x', sources: ['raw_inbox/a.md'], state: 'done', changes: 0, kept: 0 }).text, 'a.md · nothing changed')
 })
 
 // A made-up run's events, as `/api/kn/<vault>/ingest/<run>?from=` gives them.
@@ -990,6 +998,57 @@ test('K15-09 what Write did, in Echo\'s words: written, changed in the vault sin
   // X-G2: a file with changes of yours before the write is written, not committed — said, and waits for OK.
   const left = knWriteSummary({ written: ['knowledge/topics/a.md', 'log.md'], committed: ['log.md'], changed_since: [], commit: '9a37fc7', kept: 2, of: 3, finished: false }, 'My twin')
   assert.deepEqual(left, { text: 'Wrote 2 files into My twin. Committed (9a37fc7), but not knowledge/topics/a.md: it had changes of yours.', wait: true })
+})
+
+// ── Ingest, fix round 1 ──
+test('I1 a run\'s poll never takes the view from the run opened since; one load of a run at a time; an answer merged once', () => {
+  const g = { run: null, review: null, open: {} }
+  const a = knRunOpen(g, 'A')
+  a.data = { state: 'running' }
+  assert.equal(knRunOpen(g, 'A'), a, 'the same run stays open, its events kept')
+  assert.equal(knRunMayLoad(g, a), true)
+  a.loading = true
+  assert.equal(knRunMayLoad(g, a), false, 'a load of A is on its way: no second one from the same point (Stop\'s loop and the poll)')
+  a.loading = false
+  g.review = { run: 'A' }; g.open = { t1: true }
+  const b = knRunOpen(g, 'B')
+  assert.deepEqual([g.run === b, g.review, g.open], [true, null, {}], 'B opens afresh')
+  assert.equal(knRunMayLoad(g, a), false, 'A\'s poll waking after the switch may not load')
+  assert.equal(knRunTake(g, a, 0, { events: [{ n: 1, type: 'todo', items: [] }], next: 1, state: 'running' }, 5), null, 'an answer for A lands nowhere')
+  assert.equal(g.run, b, 'B stays the run shown')
+  const got = knRunTake(g, b, 0, { events: [{ n: 1, type: 'notice', kind: 'copy', text: 'Not in the copy: .git/' }], next: 1, state: 'review' }, 5)
+  assert.deepEqual([got === b, b.next, b.events.length, b.data.state, 'events' in b.data, b.loaded], [true, 1, 1, 'review', false, true])
+  assert.equal(knRunTake(g, b, 0, { events: [{ n: 1, type: 'notice' }], next: 1, state: 'review' }, 6), null, 'asked from the same point twice: merged once')
+  assert.equal(b.events.length, 1)
+  knRunTake(g, b, 1, { events: [{ n: 2, type: 'todo', items: [] }], next: 2, state: 'review' }, 7)
+  assert.deepEqual([b.events[1].at, b.events[0].at], [7, undefined], 'what comes while it is watched carries when it came')
+})
+
+test('I2 the page takes dropped files only while Ingest shows or the Add a source sheet is open', () => {
+  const on = { view: 'brain', active: true, tab: 'ingest', vault: true, sheet: null }
+  assert.equal(knTakesDrops(on), true)
+  assert.equal(knTakesDrops({ ...on, tab: 'pages' }), false, 'another tab of the vault')
+  assert.equal(knTakesDrops({ ...on, view: 'projects' }), false, 'the threads, whose logo tiles take dropped images')
+  assert.equal(knTakesDrops({ ...on, active: false }), false, 'Recall or a plugin\'s tab')
+  assert.equal(knTakesDrops({ ...on, vault: false }), false)
+  assert.equal(knTakesDrops({ ...on, view: 'calls', tab: 'pages', sheet: 'source' }), true, 'the sheet open, wherever')
+  assert.equal(knTakesDrops({ ...on, tab: 'pages', sheet: 'newpage' }), false, 'another sheet')
+})
+
+test('M4 folders dropped are said, never swallowed', () => {
+  assert.equal(knDropNote({ seq: null, files: [], left_out: 2 }), 'Folders aren\'t added: drop the files in them.')
+  assert.equal(knDropNote({ seq: 4, files: [{ name: 'a.md' }], left_out: 1 }), '1 folder left out: folders aren\'t added.')
+  assert.equal(knDropNote({ seq: 4, files: [{ name: 'a.md' }], left_out: 3 }), '3 folders left out: folders aren\'t added.')
+  assert.equal(knDropNote({ seq: 4, files: [{ name: 'a.md' }] }), '')
+})
+
+test('M2 a source Done by a write while its run still waits for review is In review (Prepare again would be refused)', () => {
+  const runs = [{ id: 'r1', state: 'review' }, { id: 'r0', state: 'done' }]
+  assert.equal(knSourceState({ path: 'raw_inbox/a.md', state: 'done', meta: { run: 'r1', kept: 1 } }, runs), 'review')
+  assert.equal(knSourceState({ path: 'raw_inbox/b.md', state: 'done', meta: { run: 'r0', kept: 1 } }, runs), 'done')
+  assert.equal(knSourceState({ path: 'raw_inbox/c.md', state: 'done', meta: {} }, runs), 'done')
+  const q = knIngestQueue([{ path: 'raw_inbox/a.md', kind: 'file', title: 'a', state: 'done', meta: { run: 'r1', kept: 1 } }], runs)
+  assert.deepEqual([q.groups[0].rows[0].chip, q.counts.waiting, q.counts.done], [['wait', 'In review'], 1, 0])
 })
 
 let failed = 0

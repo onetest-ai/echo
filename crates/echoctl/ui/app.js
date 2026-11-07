@@ -6194,6 +6194,8 @@ function render() {
   patch($('#r-right'), panel('right', eff))
   patch($('#r-bottom'), panel('bottom', eff))
   patch($('#r-over'), `<div class="toasts" role="status" aria-live="polite">${toasts()}</div>` + (S.lightbox ? `<div class="lightbox" data-close="1"><img src="${esc(S.lightbox)}" alt="Shared screen"></div>` : '') + Kn.overlay())
+  // Files dropped on the window go to Knowledge's Ingest only while it takes them (on or off, told to Echo).
+  Kn.syncDrops()
   // The primary area in the activity's layout; switching layouts starts it afresh.
   const primary = $('#r-primary')
   const layout = (ACTIVITIES.find((a) => a.id === S.view) || ACTIVITIES[0]).layout
