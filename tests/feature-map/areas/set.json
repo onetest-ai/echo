@@ -88,7 +88,7 @@
    "id": "F-SET-10",
    "feature": "Transcription → server: Echo server…, OpenAI-compatible (address, model, key; Connect checks it), Disconnect; Transcribe for other computers shows its address and key",
    "priority": "medium",
-   "check": "person",
+   "check": "agent",
    "axes": [
     "set.server"
    ]
