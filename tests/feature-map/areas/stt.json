@@ -36,7 +36,7 @@
    "id": "F-STT-04",
    "feature": "Remote voices become Speaker N or the names Teams lights; one other person names the whole remote track",
    "priority": "high",
-   "check": "person",
+   "check": "agent",
    "axes": [
     "call.transcript"
    ]

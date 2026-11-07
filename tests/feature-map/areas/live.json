@@ -47,7 +47,7 @@
    "id": "F-LIVE-05",
    "feature": "\"Last time\" (still to do, highlights) shows during a recurring call; Ask Claude about this call opens the Claude panel",
    "priority": "low",
-   "check": "person",
+   "check": "agent",
    "axes": [
     "live.content"
    ]

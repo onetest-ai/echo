@@ -49,7 +49,7 @@
    "id": "F-INBOX-05",
    "feature": "Sign-in, sender (Trust, Ignore, Read anyway, Keep out), permission, older Echo plugin, Echo update and plugin update items come from the real machine and accounts",
    "priority": "high",
-   "check": "person",
+   "check": "agent",
    "axes": [
     "inbox.kind"
    ]

@@ -170,7 +170,7 @@
    "id": "F-CALLS-18",
    "feature": "The open call refreshes by itself within a few seconds when its files change (a recording ends, minutes are written) without reloading the minutes",
    "priority": "high",
-   "check": "person",
+   "check": "agent",
    "axes": [
     "call.status",
     "call.run"

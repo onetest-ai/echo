@@ -139,7 +139,7 @@
    "id": "F-CAL-15",
    "feature": "Import Teams transcript on an ended, unrecorded Teams meeting makes a call from its transcript and chat (Importing…, its error, a notification); refused when Teams has none or a call exists",
    "priority": "high",
-   "check": "person",
+   "check": "agent",
    "axes": [
     "meeting.transcript",
     "meeting.recorded"

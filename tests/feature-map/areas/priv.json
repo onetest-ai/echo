@@ -9,7 +9,7 @@
    "id": "F-PRIV-01",
    "feature": "Nothing is recorded unless the user opts in for that call; a meeting series records only when set to",
    "priority": "critical",
-   "check": "person",
+   "check": "agent",
    "axes": [
     "series.record",
     "set.when_record"
@@ -19,14 +19,14 @@
    "id": "F-PRIV-02",
    "feature": "Only Teams' audio is recorded as the other side (macOS)",
    "priority": "critical",
-   "check": "person",
+   "check": "agent",
    "axes": []
   },
   {
    "id": "F-PRIV-03",
    "feature": "No audio is kept once a call is transcribed, unless Keep audio files is on",
    "priority": "critical",
-   "check": "person",
+   "check": "agent",
    "axes": [
     "set.audio"
    ]

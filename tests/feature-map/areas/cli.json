@@ -97,7 +97,7 @@
    "id": "F-CLI-11",
    "feature": "`doctor`, `up`, `model`, `app`, `home`, `arm`, `stop`, `join`, `memo`, `calendar` drive the real machine",
    "priority": "high",
-   "check": "person",
+   "check": "agent",
    "axes": []
   }
  ]

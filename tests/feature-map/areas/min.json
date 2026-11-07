@@ -169,7 +169,7 @@
    "id": "F-MIN-17",
    "feature": "A memo gets minutes at once with the memo template, in parts by thread; the opt-in minutes page file is written beside the notes",
    "priority": "low",
-   "check": "person",
+   "check": "agent",
    "axes": [
     "call.kind",
     "set.minutes"

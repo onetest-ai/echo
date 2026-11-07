@@ -47,7 +47,7 @@
    "id": "F-PLUG-05",
    "feature": "An installed plugin's detail shows where it came from, the enable switch, Open its settings, Update to X or why not, Remove… (keep data / delete it), its own settings (switch, text, folder, secret with Forget) and what it can do",
    "priority": "high",
-   "check": "person",
+   "check": "agent",
    "axes": [
     "plugin.enabled",
     "plugin.update",

@@ -51,7 +51,7 @@
    "id": "F-CC-06",
    "feature": "Connect Claude Code installs Echo's plugin where Echo's sessions run; older installs show in Health and the Inbox with Update it",
    "priority": "high",
-   "check": "person",
+   "check": "agent",
    "axes": [
     "set.claude_code"
    ]

@@ -41,7 +41,7 @@
    "id": "F-SET-05",
    "feature": "General → data folder Change…, Start at login, Hide from the Dock (macOS), Command line Install…, Claude Code plugin Connect, the version with Check for updates / Update to X",
    "priority": "high",
-   "check": "person",
+   "check": "agent",
    "axes": [
     "set.general",
     "set.claude_code"

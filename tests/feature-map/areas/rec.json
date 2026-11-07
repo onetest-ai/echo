@@ -64,7 +64,7 @@
    "id": "F-REC-07",
    "feature": "A call is two tracks, the mic and Teams' audio; a recording's folder is never reused",
    "priority": "critical",
-   "check": "person",
+   "check": "agent",
    "axes": []
   },
   {
@@ -119,7 +119,7 @@
    "id": "F-REC-14",
    "feature": "At first launch macOS asks for Microphone and System Audio Recording up front, and every prompt names Echo",
    "priority": "critical",
-   "check": "person",
+   "check": "agent",
    "axes": []
   },
   {

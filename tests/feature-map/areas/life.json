@@ -9,7 +9,7 @@
    "id": "F-LIFE-01",
    "feature": "The DMG installs on a fresh Mac; first run chooses the data folder (or the default) and downloads a speech model (now or later; an interrupted download fails cleanly; the model in use can't be removed)",
    "priority": "critical",
-   "check": "person",
+   "check": "agent",
    "axes": []
   },
   {
@@ -46,7 +46,7 @@
    "id": "F-LIFE-06",
    "feature": "Notifications come from Echo and open its window; \"Update available\" asks to install",
    "priority": "medium",
-   "check": "person",
+   "check": "agent",
    "axes": []
   },
   {
