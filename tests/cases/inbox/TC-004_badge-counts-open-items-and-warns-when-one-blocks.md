@@ -17,7 +17,7 @@ tags: [inbox, badge]
 
 ## Preconditions
 - Standard data set built right before the run: `tests/fixtures/serve.sh up <dir> <port> --set standard` (`data: standard`); the window is served at `{{base_url}}`; every `echoctl` command runs after `. <dir>/env`
-- Wait 10 seconds after the server starts: the sign-in check of the AI profiles settles in the background, and only then the blocking item "Sign in to Claude · out" is in the Inbox (the very first answer lists 24 open items and none blocking)
+- Load `{{base_url}}/` once and wait 30 seconds before step 1: the sign-in check of the AI profiles starts with the first request and settles in the background, and only then the blocking item "Sign in to Claude · out" is in the Inbox (before it, the answer lists 24 open items and none blocking; the badge then updates by itself)
 
 ## Test Data
 
