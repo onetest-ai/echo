@@ -198,7 +198,7 @@ document.addEventListener('click', (e) => {
   setTimeout(() => loadSettings().then(render), 8000)
 })
 /** Inbox (`attention.rs`): what waits for the user's decision, from everywhere, in one list — the
- *  activity bar's entry above Settings shows or hides it. Each item is decided here with the same
+ *  Inbox icon at the top bar's right end shows or hides it. Each item is decided here with the same
  *  message its own place sends, or opens that place; decided anywhere, it moves to Done this week. */
 const NY = { data: null, at: 0, filter: 'open', busy: new Map(), last: null, loading: null, failed: 0, seq: 0, more: new Set() }
 /** How long a decision shows as working with no word from the app: a quick one is gone by then. */

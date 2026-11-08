@@ -22,11 +22,6 @@ const profileOf = (id) => ai().profiles.find((p) => p.id === id)
 const profileName = (id) => { const p = profileOf(id); return p ? p.name : (id || '') }
 /** Where a profile's requests go, in words. */
 const profileWhere = (p) => !p ? '' : p.kind === 'local' ? (p.host ? `at ${p.host}` : 'on this computer') : p.kind === 'claude' ? `with your Claude account${p.account ? ` (${p.account})` : ''}` : 'as Claude Code is set up'
-/** The profile shown for the next recording: the one picked here, else the default. */
-function recordProfile() { const p = S.recordProfile; return p && profileOf(p) ? p : ai().default }
-/** What a recording is sent with: only a profile picked here (else the app pins its default when
- *  the recording starts, and a broken AI setting never stops it). */
-function pickedProfile() { const p = S.recordProfile; S.recordProfile = null; return p && profileOf(p) ? p : undefined }
 /** A profile in a menu: a Claude one with the account its folder is signed in to ("— not signed
  *  in"; the recorded one until checked). */
 function profileLabel(p) {
@@ -68,15 +63,8 @@ function signinNote(p) {
 /** A fold's chevron: right when closed, down when open (drawn, not a text glyph — "▸" was too faint to see). */
 const CHEV = (open) => `<svg class="chev${open ? ' open' : ''}" viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M3.5 1.5L7 5l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`
 const CARET = '<svg viewBox="0 0 10 6" width="8" height="5" aria-hidden="true"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>'
-/** A compact native select over a label (as the language picker): `data-<attr>`. */
-function profilePick(attr, cur, cls = 'btn', title = 'Model for this call') {
-  if (ai().profiles.length < 2) return ''
-  const short = profileName(cur)
-  return `<label class="${cls} split-lang pick" title="${esc(title)}: ${esc(profileLabel(profileOf(cur)) || short)}"><span>${esc(short.length > 14 ? short.slice(0, 13) + '…' : short)}</span>${CARET}<select ${attr} aria-label="${esc(title)}">${profileOptions(cur)}</select></label>`
-}
 
-/** A record button with the language picker on its right (a native select over the caret), and
- *  the AI profile picker when there is more than one. */
+/** A record button with the language picker on its right (a native select over the caret). */
 /** A memo's mark: a microphone (the list, the pill, the header). */
 const MIC = (size = 13) => `<svg class="mic" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>`
 
@@ -87,7 +75,7 @@ function recordButton(attrs, label, primary = true, memo = false) {
   const options = opts.map((c) => `<option value="${esc(c)}"${c === cur ? ' selected' : ''}>${esc(langName(c))}</option>`).join('')
     + `<option value=""${cur === '' ? ' selected' : ''}>${esc(auto)}</option>`
   const title = cur ? `Transcribed as ${langName(cur)}` : 'Echo detects the language'
-  return `<span class="split"><button class="${cls} split-main" ${attrs}>${esc(label)}</button><label class="${cls} split-lang" title="${esc(title)}"><span>${cur ? esc(cur.toUpperCase()) : 'Auto'}</span>${CARET}<select data-reclang aria-label="Language of the call">${options}</select></label>${profilePick('data-recprofile', recordProfile(), cls, 'Model for live notes and minutes')}</span>${memo ? `<button class="pmemo" data-cmd="record-memo" title="Record a memo — just you, starts now; its threads are found from what you say" aria-label="Record a memo">${MIC(12)}Memo</button>` : ''}`
+  return `<span class="split"><button class="${cls} split-main" ${attrs}>${esc(label)}</button><label class="${cls} split-lang" title="${esc(title)}"><span>${cur ? esc(cur.toUpperCase()) : 'Auto'}</span>${CARET}<select data-reclang aria-label="Language of the call">${options}</select></label></span>${memo ? `<button class="pmemo" data-cmd="record-memo" title="Record a memo — just you, starts now; its threads are found from what you say" aria-label="Record a memo">${MIC(12)}Memo</button>` : ''}`
 }
 
 // ── views ──────────────────────────────────────────────────────────────────────────────────
@@ -112,8 +100,8 @@ function tickClocks() {
   }
 }
 
-/** Record / Stop at the top centre of the window, in every state; the sign-in a recording's
- *  profile needs, under it. */
+/** Record / Stop at the top centre of the window, in every state; the sign-in the default
+ *  profile (the one a recording pins) needs, under it. */
 function pill() {
   const st = S.state || {}
   if (st.recording) {
@@ -142,7 +130,7 @@ function pill() {
   // A call being transcribed doesn't take the pill: Record stays one click away.
   const tr = (S.calls || []).find((c) => c.status === 'transcribing')
   const chip = tr ? `<button class="pchip" data-call="${esc(tr.name)}" title="${esc(tr.title)}">Writing the transcript…</button>` : ''
-  const sign = signinNote(profileOf(recordProfile()))
+  const sign = signinNote(profileOf(ai().default))
   return main + chip + (sign ? `<div class="pill-note">${sign}</div>` : '')
 }
 
@@ -157,7 +145,6 @@ function barButton() {
   return `<button class="icon-btn bar-flip" data-cmd="bar-flip" aria-expanded="${open}" aria-label="${what}" title="${what} (${esc(BAR_KEY)})">${BAR_ICON(open)}</button>`
 }
 function actbar() {
-  const eff = Layout.effective(window.innerWidth, window.innerHeight, panelViews(), S.overlay, S.barOver)
   const btn = (a, i) => {
     const found = a.id === 'projects' && S.pj.data ? S.pj.data.found_count || 0 : 0
     const badge = a.id === 'settings' && settingsWarnings() ? `<span class="act-badge" aria-label="${settingsWarnings()} to fix">${settingsWarnings()}</span>`
@@ -167,11 +154,27 @@ function actbar() {
   }
   const acts = shownActivities()
   const top = acts.filter((a) => !a.bottom), bottom = acts.filter((a) => a.bottom)
-  // Inbox: not an activity — it shows or hides its panel over whatever is open.
+  return `<nav class="acts" aria-label="Activities">${top.map(btn).join('')}<span class="acts-grow"></span>${bottom.map((a) => btn(a, acts.indexOf(a))).join('')}</nav>`
+}
+
+/** The top bar's right end: the account chip, then the Inbox. */
+function topEnd() { return `<div class="top-end">${accountChip()}${inboxButton()}</div>` }
+/** Inbox: not an activity — it shows or hides its panel over whatever is open. */
+function inboxButton() {
+  const eff = Layout.effective(window.innerWidth, window.innerHeight, panelViews(), S.overlay, S.barOver)
   const n = nyOpen().length, urgent = nyOpen().some((i) => i.urgent)
   const shown = Layout.AREAS.some((a) => eff[a].shown && eff[a].active === 'needs')
-  const needs = `<button class="act${shown ? ' pressed' : ''}" data-panel-flip="needs" aria-pressed="${shown}" aria-label="Inbox" data-hint="Inbox" data-key="${esc(NY_HINT)}">${NY_ENTRY}<span class="act-label">Inbox</span>${n ? `<span class="act-badge${urgent ? '' : ' new'}" aria-label="${n} open">${n}</span>` : ''}</button>`
-  return `<nav class="acts" aria-label="Activities">${top.map(btn).join('')}<span class="acts-grow"></span>${needs}${bottom.map((a) => btn(a, acts.indexOf(a))).join('')}</nav>`
+  return `<button class="icon-btn tb-inbox${shown ? ' on' : ''}" data-panel-flip="needs" aria-pressed="${shown}" aria-label="Inbox" data-hint="Inbox" data-key="${esc(NY_HINT)}">${NY_ENTRY}${n ? `<span class="act-badge${urgent ? '' : ' new'}" aria-label="${n} open">${n}</span>` : ''}</button>`
+}
+/** The account Echo works in: the default AI profile. With several, a native select over the
+ *  label (as the language picker) makes another the default, as Settings' Make default does;
+ *  with one, a click opens AI & minutes. */
+function accountChip() {
+  const a = ai(), p = profileOf(a.default)
+  if (!p) return ''
+  const title = `AI: ${profileLabel(p)} — ${profileWhere(p)}`
+  if (a.profiles.length < 2) return `<button class="acct" data-setsec="ai" title="${esc(title)}" aria-label="AI profile: ${esc(p.name)}"><span>${esc(p.name)}</span></button>`
+  return `<label class="acct" title="${esc(title)}"><span>${esc(p.name)}</span>${CARET}<select data-ai-default aria-label="AI profile">${profileOptions(p.id)}</select></label>`
 }
 
 function statusbar() {

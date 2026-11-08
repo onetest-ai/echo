@@ -22,13 +22,13 @@ tags: [inbox, panel]
 
 | Field | Value |
 |-------|-------|
-| Button | Inbox (`[data-panel-flip="needs"]`, at the bottom of the activity bar) |
+| Button | Inbox (`[data-panel-flip="needs"]`, at the right end of the top bar) |
 
 ## Steps
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Navigate to `{{base_url}}/#today` and wait for "Your day" | The activity bar shows the button "Inbox" with no number badge on it (no element labelled "… open") |
+| 1 | Navigate to `{{base_url}}/#today` and wait for "Your day" | The top bar shows the button "Inbox" at its right end, on the line of the Record pill, with no number badge on it (no element labelled "… open"); the navigation "Activities" has no "Inbox" |
 | 2 | Click "Inbox" | The right panel (`[aria-label="Right panel"]`) opens on the tab "Inbox"; the button is pressed (`aria-pressed="true"`); the URL stays `#today` |
 | 3 | Navigate to `{{base_url}}/#calls` | The panel is still open on "Inbox" (it follows the user from view to view) |
 | 4 | Click "Inbox" again | The panel closes; the button is not pressed |

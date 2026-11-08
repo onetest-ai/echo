@@ -24,9 +24,9 @@ tags: [shell, panels]
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | Navigate to `{{base_url}}/#today`; look for "Close the panel" | None: the right panel is closed |
-| 2 | Click the activity button "Inbox" | The right panel opens with the tab "Inbox" selected and the text "Nothing needs you"; buttons "Move to the bottom panel" and "Close the panel" show |
+| 2 | Click the button "Inbox" at the right end of the top bar | The right panel opens with the tab "Inbox" selected and the text "Nothing needs you"; buttons "Move to the bottom panel" and "Close the panel" show |
 | 3 | Click the tab "Vocabulary" in the panel | The panel shows "Names and terms the transcription should hear right." |
-| 4 | Click the tab "Inbox", then the activity button "Inbox" again | The right panel closes |
+| 4 | Click the tab "Inbox", then the top bar's button "Inbox" again | The right panel closes |
 
 ## Expected Final State
 The right panel opened on Inbox and closed.

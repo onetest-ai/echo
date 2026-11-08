@@ -36,7 +36,7 @@ Not asked, on purpose: Rita Gomez (the wait card of Acme renewal T003), because 
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Navigate to `{{base_url}}/#tasks`, wait for "I owe", click the activity "Inbox" to open the right panel and its tab "Asks" (`[data-panel-show="asks"]`) | The panel shows "Asks · by person" and "next time you meet" |
+| 1 | Navigate to `{{base_url}}/#tasks`, wait for "I owe", click the top bar's "Inbox" to open the right panel and its tab "Asks" (`[data-panel-show="asks"]`) | The panel shows "Asks · by person" and "next time you meet" |
 | 2 | Read the person blocks | Two blocks, in this order: "Alex Chen" and "Zoe Martin"; each has a line on the right with a day and a meeting name, or "no meeting this week" (not asserted); the empty text "Nothing to chase" is not shown |
 | 3 | Read the buttons of each block | The 7 buttons of the table: 5 under Alex Chen, 2 under Zoe Martin, in that order, each reading the title, " — " and its reason; no reason is red (nothing is late) |
 | 4 | Select "Acme renewal · 11" in `[aria-label="Thread"]` | The panel keeps "Alex Chen" with "Test the password reset" and "Unblock: send the revised timeline (2)" only; "Zoe Martin" is gone |

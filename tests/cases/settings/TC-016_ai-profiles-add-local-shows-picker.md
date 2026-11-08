@@ -1,16 +1,16 @@
 ---
 id: TC-016
-title: A local model profile added from the CLI shows in AI & minutes and adds the picker
+title: A local model profile added from the CLI shows in AI & minutes and turns the account chip into a picker
 priority: high
 type: functional
-requirements: [F-AI-01, F-AI-02, F-AI-07]
+requirements: [F-AI-01, F-AI-02, F-AI-07, F-AI-09]
 module: settings
 run: agent
 platform: any
 tags: [ai, profiles]
 ---
 
-# TC-016: A local model profile added from the CLI shows in AI & minutes and adds the picker
+# TC-016: A local model profile added from the CLI shows in AI & minutes and turns the account chip into a picker
 
 **Module:** Settings | **Priority:** High | **Type:** Functional
 
@@ -27,11 +27,11 @@ tags: [ai, profiles]
 |---|--------|----------------|
 | 1 | In Bash run `echoctl ai add-local local-llama --model llama3.2 --url http://localhost:11434 --name "Local Llama"` | Prints `added Local Llama (local-llama)` |
 | 2 | Navigate to `{{base_url}}/#settings/ai`; read the card "Profiles" | Two rows: "Claude Code (as configured)" still "Default for new calls", and "Local Llama" with the tag "Model · this computer", the text "minutes: llama3.2" and "live notes: llama3.2", and a button "Make default" |
-| 3 | Read the selects in the top bar | "Language of the call" and "Model for live notes and minutes" |
+| 3 | Read the selects in the top bar (`#r-top select`) | "Language of the call" in the Record pill and "AI profile" in the account chip at the right end (options "Claude Code (as configured)", selected, and "Local Llama"); the Record pill holds no profile picker |
 | 4 | In Bash run `echoctl ai status` | Two profiles; `local-llama` has kind `local`, `"default": false` |
 
 ## Expected Final State
-Two profiles are listed and the model picker shows.
+Two profiles are listed and the account chip picks between them.
 
 ## Teardown
 - `echoctl ai remove local-llama` (prints `removed local-llama`).

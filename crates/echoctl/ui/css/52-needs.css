@@ -1,5 +1,4 @@
 /* Needs you (attention.rs): the list of what waits for a decision */
-.act.pressed { color: var(--text); background: var(--line); box-shadow: inset 0 0 0 1px var(--line-strong); }
 .ny { padding: 8px 12px 14px; display: flex; flex-direction: column; gap: 6px; }
 .ny-head { display: flex; align-items: center; gap: 6px; padding-bottom: 2px; }
 .ny-head .fchip { height: 22px; padding: 0 9px; border-radius: 11px; border: 0; background: var(--line); color: var(--text-2); font: inherit; font-size: 11.5px; cursor: pointer; }

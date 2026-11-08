@@ -24,13 +24,13 @@ tags: [inbox, badge]
 | Field | Value |
 |---|---|
 | Open items | 25 (1 blocking: Sign in to Claude · out) |
-| Button | `[data-panel-flip="needs"]` with `.act-badge`, `aria-label="25 open"` |
+| Button | `[data-panel-flip="needs"]` at the right end of the top bar, with `.act-badge`, `aria-label="25 open"` |
 
 ## Steps
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Navigate to `{{base_url}}/#today` and wait for "Your day" | The button "Inbox" carries a badge reading 25 with `aria-label="25 open"` |
+| 1 | Navigate to `{{base_url}}/#today` and wait for "Your day" | The button "Inbox" at the right end of the top bar carries a badge reading 25 with `aria-label="25 open"`; the badge sits on the button and inside the window (its box within `#r-top`) |
 | 2 | Read the badge's class | `act-badge` without `new` (the warn colour is used because an item blocks; a non-blocking badge has `new`) |
 | 3 | Click "Inbox" | The panel opens on "Inbox"; the button is pressed; the badge still reads 25 |
 | 4 | Click "Inbox" again | The panel closes; the badge is still there |

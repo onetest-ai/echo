@@ -1,16 +1,16 @@
 ---
 id: TC-015
-title: AI & minutes with only the built-in profile: default, no profile picker
+title: AI & minutes with only the built-in profile: default, no profile picker anywhere
 priority: high
 type: functional
-requirements: [F-AI-01, F-AI-02, F-AI-07]
+requirements: [F-AI-01, F-AI-02, F-AI-07, F-AI-09]
 module: settings
 run: agent
 platform: any
 tags: [ai, profiles]
 ---
 
-# TC-015: AI & minutes with only the built-in profile: default, no profile picker
+# TC-015: AI & minutes with only the built-in profile: default, no profile picker anywhere
 
 **Module:** Settings | **Priority:** High | **Type:** Functional
 
@@ -26,7 +26,7 @@ tags: [ai, profiles]
 | 1 | Navigate to `{{base_url}}/#settings/ai`; read the card "Profiles" | One row "Claude Code (as configured)" with the tags "Default for new calls" and "Built in", and the text "minutes: sonnet" and "live notes: haiku" |
 | 2 | Look for a "Make default" button | None shows |
 | 3 | Read the status bar | It starts with "AI: Claude Code (as configured)" |
-| 4 | Read the selects in the top bar | Only "Language of the call"; there is no "Model for live notes and minutes" |
+| 4 | Read the selects in the top bar (`#r-top select`) | Only "Language of the call"; there is no "AI profile" select: the account chip "Claude Code (as configured)" at the right end is a plain button with no caret |
 | 5 | In Bash run `echoctl ai status` | JSON with one profile: id `system`, name "Claude Code (as configured)", `"default": true` |
 
 ## Expected Final State

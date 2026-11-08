@@ -34,7 +34,6 @@ const S = {
   lightbox: null,
   error: null,
   liveDraft: '', // the question being typed in the Live tab (kept across refreshes)
-  recordProfile: null, // the AI profile picked for the next recording (null = the default)
   notesProfile: null, // {call, id}: the AI profile picked for Write minutes
   prepOpen: {}, // call → the "Last time" card's open state, once the user toggled it
   autoTab: null, // the call whose tab was last chosen for the user (Live while it records)

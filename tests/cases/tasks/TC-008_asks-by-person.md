@@ -30,7 +30,7 @@ tags: [tasks, asks]
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | Navigate to `{{base_url}}/#tasks` and wait for the text "I owe" | "Owed to me 1" |
-| 2 | Click the activity button "Inbox" to open the right panel, then its tab "Asks" | The panel shows "Asks · by person" |
+| 2 | Click the top bar's button "Inbox" to open the right panel, then its tab "Asks" | The panel shows "Asks · by person" |
 | 3 | Read the panel | A person block "Omar Haddad" with the text "no meeting this week" and one button "Answer the security questionnaire — was due …" (the date two days ago); the empty text "Nothing to chase" is gone |
 | 4 | Select "Globex pilot · 1" in the "Thread" filter | The panel no longer lists "Omar Haddad" (his task is in Acme rollout) and shows "Nothing to chase" |
 | 5 | Select "All threads" and click the Asks button "Answer the security questionnaire — was due …" | The tab "Details" opens with the title "Answer the security questionnaire" and the path "Acme rollout › SSO for the Berlin pilot" |

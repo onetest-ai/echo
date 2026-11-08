@@ -86,9 +86,11 @@ echo $! > "$dir/pid"                                              # the pid, for
 
 ## The window
 
-Left activity bar (icons, top to bottom): Today, Calls, Calendar, Threads, Tasks; Inbox and Settings at the bottom.
-The bar is icon-only until "Expand the sidebar" (`data-cmd="bar-flip"`) is pressed. **Inbox is not a view**: it is a
-tab of the right-hand panel (button `data-panel-flip="needs"`), there is no `#inbox` route. Viewport used: 1201x868.
+Left activity bar (icons, top to bottom): Today, Calls, Calendar, Threads, Tasks; Settings at the bottom.
+The bar is icon-only until "Expand the sidebar" (`data-cmd="bar-flip"`) is pressed. The top bar (`#r-top`) holds, left
+to right: that switch, the Record pill (Record, the call's language, Memo) and, at its right end, the account chip
+(`.acct`: the default AI profile) and the Inbox icon. **Inbox is not a view**: it is a tab of the right-hand panel
+(button `data-panel-flip="needs"`, in the top bar), there is no `#inbox` route. Viewport used: 1201x868.
 Routes (`{{base_url}}/#…`; load `{{base_url}}/` first, then a route can be opened by `browser_navigate` to
 `{{base_url}}/#…` — it changes the hash without reloading):
 
@@ -200,9 +202,10 @@ All verified on the test data in a live session. Roles and names first, then the
 
 | Element | Selector | Page | Notes |
 |---|---|---|---|
-| Activity buttons | `nav[aria-label="Activities"] [data-go="today"\|"calls"\|"calendar"\|"projects"\|"tasks"\|"settings"]` | all | Inbox is `[data-panel-flip="needs"]`; role `button` named "Today", "Calls", … . Scope to the nav: on Today a second `[data-go="tasks"]` (the "Tasks" link in My work) makes the bare selector ambiguous |
+| Activity buttons | `nav[aria-label="Activities"] [data-go="today"\|"calls"\|"calendar"\|"projects"\|"tasks"\|"settings"]` | all | Inbox is `[data-panel-flip="needs"]` in the top bar, not in this nav; role `button` named "Today", "Calls", … . Scope to the nav: on Today a second `[data-go="tasks"]` (the "Tasks" link in My work) makes the bare selector ambiguous |
 | Expand/fold sidebar | `[data-cmd="bar-flip"]` | all | label switches "Expand the sidebar" / "Fold the sidebar" |
-| Record controls | `[data-cmd="record"]`, `[data-cmd="record-memo"]`, `select[aria-label="Language of the call"]` | top bar | do not press Record on test data |
+| Record controls | `[data-cmd="record"]`, `[data-cmd="record-memo"]`, `select[aria-label="Language of the call"]` | top bar | do not press Record on test data; the pill holds no profile picker |
+| Account chip | `#r-top .acct`: with two or more profiles a label over `select[aria-label="AI profile"]` (choosing one makes it the default, as Make default); with one a button named "AI profile: <name>" that opens `#settings/ai` | top bar, left of Inbox | a native select: `browser_select_option` |
 | Actions palette | `[data-pal-open]`, input `[aria-label="Action"]`, dialog `.pal`, list `#pal-list` | all | |
 | Right panel | `[aria-label="Right panel"]`; tabs `[data-panel-show="needs"\|"vocabulary"\|"work-item"\|"asks"]`; `[aria-label="Close the panel"]`, `[aria-label="Move to the bottom panel"]` | all | the My notes tab is `[data-panel-show]` too |
 | Call row | `[data-call="<folder>"]` (role `option`, in `[role=listbox][aria-label="Calls"]`) | #calls | Today's "Open the call" / "New minutes" use `[data-call]` and `[data-call-tab="minutes"]` |

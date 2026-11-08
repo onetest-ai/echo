@@ -25,7 +25,7 @@ tags: [shell, activity-bar]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Navigate to `{{base_url}}/#today`; click "Expand the sidebar" | The button now reads "Fold the sidebar"; the names Today, Calls, Calendar, Threads, Tasks, Inbox, Settings are drawn beside the icons |
+| 1 | Navigate to `{{base_url}}/#today`; click "Expand the sidebar" | The button now reads "Fold the sidebar"; the names Today, Calls, Calendar, Threads, Tasks, Settings are drawn beside the icons |
 | 2 | Wait 1 s, run `. <dir>/env && cat "$ECHOCTL_CONFIG_DIR/window-layout.json"` | The file has `"bar": {"open": true}` |
 | 3 | Reload `{{base_url}}/#today` | The button still reads "Fold the sidebar" and the names are drawn |
 | 4 | Click "Fold the sidebar" | The button reads "Expand the sidebar"; the names are gone |

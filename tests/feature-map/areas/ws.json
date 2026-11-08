@@ -7,7 +7,7 @@
  "features": [
   {
    "id": "F-WS-01",
-   "feature": "The activity bar shows Today, Calls, Calendar, Threads, Tasks (Knowledge only with Recall on or a plugin tab), Inbox and Settings; icons only until \"Expand the sidebar\" (⌘\\), remembered",
+   "feature": "The activity bar shows Today, Calls, Calendar, Threads, Tasks (Knowledge only with Recall on or a plugin tab) and Settings; icons only until \"Expand the sidebar\" (⌘\\), remembered",
    "priority": "medium",
    "check": "agent",
    "axes": [
@@ -70,6 +70,16 @@
    "priority": "medium",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-WS-09",
+   "feature": "The top bar holds the sidebar switch, the Record pill (record and the call's language) and, at its right end, the account chip and the Inbox, on one line and overlapping nowhere from the narrowest window up; on macOS the strip drags the window but its controls click",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "app.record",
+    "ai.count"
+   ]
   }
  ]
 }
