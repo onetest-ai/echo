@@ -45,6 +45,6 @@ Both calls show the fake's message; nothing is running.
 - The run state stays failed; cases that read the first messages (`TC-023`, `TC-025`) run before this one or on fresh data
 
 ## Notes
-- Step 5 fails until #121 is fixed: the open Inbox keeps the old "Claude Code exited with an error (exit 1)" after
-  Try again, until a full reload. The expectation is the right behaviour; leave it.
+- Step 5 is the check for #121 (the Inbox kept the old "Claude Code exited with an error (exit 1)" after Try again,
+  until a full reload).
 - Verified against the code and a served window: `write_notes` starts a run, the fake exits at once and the run ends `failed` with that message.

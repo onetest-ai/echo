@@ -606,6 +606,8 @@ fn save(dir: &Path, r: &Run) {
     if fs::write(&tmp, serde_json::to_vec_pretty(r).unwrap_or_default()).is_ok() {
         let _ = fs::rename(tmp, dir.join(RUN));
     }
+    // The Inbox lists failed and waiting runs: it reads the new state at its next request (#121).
+    crate::attention::stale();
 }
 
 /// The plugin this app ships: inside the bundle, next to the binary (Windows zip), or the
@@ -1745,6 +1747,18 @@ mod tests {
             request_auto(&dir.display().to_string()).unwrap();
             assert!(!dir.join(calls::CLAIMED).exists() && !dir.join(RUN).exists(), "the app writes them, or nobody automatically");
         }
+    }
+
+    #[test]
+    fn a_run_state_saved_makes_the_inbox_read_it_again() {
+        // #121: the Inbox kept a failed run's old message for 20 s after Try again ended with a new one.
+        let dir = std::env::temp_dir().join(format!("echo-run-stale-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        crate::attention::cache_for_test(serde_json::json!({"open": []}));
+        save(&dir, &Run { state: "failed".into(), message: Some("new reason".into()), ..Default::default() });
+        assert!(!crate::attention::cached(), "the Inbox's cached list is dropped");
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

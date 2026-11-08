@@ -39,7 +39,6 @@ tags: [inbox, badge]
 The panel is closed and the badge shows 25 in warn colour.
 
 ## Notes
-- Step 1 fails until #115 is fixed: after a full load on Today the badge shows only once the panel is opened or the
-  view changes. The expectation is the right behaviour; leave it.
+- Step 1 is the check for #115 (no badge after a full load on Today until the panel opened or the view changed).
 - Creates or changes nothing.
 - The neutral badge (open items, none blocking) needs a data set without the signed-out profile.

@@ -113,7 +113,6 @@ cases:
 - Stages 1 to 8 stay on the Day view: each opens its own cards, and a card is closed only where a step checks it (stages 6 and 7).
 - Stages 15 to 17 change the calendar's own files (a series rule, a meeting's type, a pinned thread); stage 15 leaves Globex weekly on Record (no later stage reads it), stage 17 takes its own pin out again.
 - Inbox stages 18 to 25 read first (badge, chips, groups, folds, buttons, Done rows, the CLI, Open): none of them takes a decision, so Done still holds the data's two rows. The panel opens once (stage 19) and stays open across views until the end. The decisions come last (26 to 33), one item each.
-- Stage 18's step 1 fails until #115 is fixed (no badge after a full load on Today until the panel opens).
 - The decision stages read the Inbox's counts at their start and expect one less Open and one more Done (stage 28 has already taken one item when 29 and 30 run). Stage 29 starts with a full load: the "5 more like these" that stage 21 opened stays open until a reload, and stage 29 reads the fold.
 - Stage 26 (Inbox) presses Import without Microsoft 365: it fails with a message, and its Open lands on the meeting's card, where stage 27 (calendar) presses the card's own Import and reads the same message.
 - `prep/TC-013` (Prepare now with the fake Claude Code) is not a stage: it is expected to expose a defect (see its Notes) and runs alone.

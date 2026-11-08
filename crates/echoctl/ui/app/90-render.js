@@ -230,9 +230,11 @@ function placeDetail() {
   card.style.top = `${top}px`
 }
 
+// ── fingerprint: what the screen depends on ──────────────────────────────────────────────────
 /** What the screen depends on: re-render only when it changes (keeps selection and scroll). */
-// (the minute too: the pill's "meeting soon" comes and goes with the clock)
-const fingerprint = () => JSON.stringify([S.state, S.calls, S.call, S.agenda, S.cal.data, S.cal.selected, S.settings, S.pj.data, S.pj.detail, S.pj.foundData, S.pj.work, S.pj.series, S.up, S.upPrep, S.today, Math.floor(Date.now() / 60000)])
+// (the Inbox too: its badge and open panel; the minute too: the pill's "meeting soon" comes and goes with the clock)
+const fingerprint = () => JSON.stringify([S.state, S.calls, S.call, S.agenda, S.cal.data, S.cal.selected, S.settings, S.pj.data, S.pj.detail, S.pj.foundData, S.pj.work, S.pj.series, S.up, S.upPrep, S.today, NY.data, Math.floor(Date.now() / 60000)])
+// end of the fingerprint block
 
 // A thread's meeting series (Profile → Meetings): open one; set a field.
 function seriesSet(el, field, value) {
@@ -331,6 +333,8 @@ document.addEventListener('click', (e) => {
     const id = t.dataset.panelFlip, known = panelViews(), a = Layout.area(id, known)
     const eff = Layout.effective(window.innerWidth, window.innerHeight, known, S.overlay)
     const open = a && eff[a].shown && eff[a].active === id
+    // The Inbox opened: read again (a run may have ended since the last poll, #121).
+    if (id === 'needs' && !open) loadAttention().then(render)
     if (eff.narrow && a === 'right') { S.overlay = !open; if (!open) Layout.show(id, known); return render() }
     if (open) Layout.toggle(a); else Layout.show(id, known)
     return layoutChanged()
