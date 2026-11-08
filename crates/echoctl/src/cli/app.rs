@@ -463,7 +463,7 @@ pub fn server(cmd: Option<ServerCmd>) -> Result<()> {
     match cmd.unwrap_or(ServerCmd::Status) {
         ServerCmd::Status => remote::print_status(),
         ServerCmd::Use { url, key, openai: true, model } => {
-            let c = remote::connect_openai(&url, &key, model.as_deref())?;
+            let c = remote::connect_openai(&url, &key, model.as_deref(), "name one with --model")?;
             println!(
                 "transcribing on {url} with {} (OpenAI-compatible; test answer in {:.1}s; word timestamps: {})",
                 c.model,

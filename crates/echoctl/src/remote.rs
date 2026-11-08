@@ -396,17 +396,14 @@ pub struct OpenAiCheck {
 }
 
 /// Connect to an OpenAI-compatible server: its models listed (the one asked for, else the first
-/// that looks like speech-to-text), a test transcription of a short tone, then kept.
-pub fn connect_openai(url: &str, key: &str, model: Option<&str>) -> Result<OpenAiCheck> {
+/// that looks like speech-to-text), a test transcription of a short tone, then kept. `name_it`: how the
+/// user names a model where they asked (the CLI's `--model`, the window's model field).
+pub fn connect_openai(url: &str, key: &str, model: Option<&str>, name_it: &str) -> Result<OpenAiCheck> {
     let mut c = Client::new(url, key)?;
     let models = c.openai_models()?;
     let model = match model.map(str::trim).filter(|m| !m.is_empty()) {
         Some(m) => m.to_string(),
-        None => models
-            .iter()
-            .find(|m| ["whisper", "parakeet", "canary", "stt", "asr", "transcri"].iter().any(|k| m.to_lowercase().contains(k)))
-            .cloned()
-            .ok_or_else(|| anyhow!("the server lists no speech-to-text model ({}); name one with --model", models.join(", ")))?,
+        None => stt_model(&models, name_it)?,
     };
     c.openai = Some(model.clone());
     // A second of a quiet tone: enough to show the answer's shape (segments, words).
@@ -418,6 +415,15 @@ pub fn connect_openai(url: &str, key: &str, model: Option<&str>) -> Result<OpenA
     let s = ClientSettings { url: c.url.clone(), key: c.key.clone(), name: Some(host), api: Some("openai".into()), model: Some(model.clone()), words: Some(words) };
     write_private(CLIENT_FILE, &serde_json::to_vec_pretty(&s)?)?;
     Ok(OpenAiCheck { model, models, words, seconds: t.elapsed().as_secs_f64() })
+}
+
+/// The first of a server's models that looks like speech-to-text, or why there is none.
+fn stt_model(models: &[String], name_it: &str) -> Result<String> {
+    models
+        .iter()
+        .find(|m| ["whisper", "parakeet", "canary", "stt", "asr", "transcri"].iter().any(|k| m.to_lowercase().contains(k)))
+        .cloned()
+        .ok_or_else(|| anyhow!("the server lists no speech-to-text model ({}); {name_it}", models.join(", ")))
 }
 
 /// The server in use, for the window: its address, kind, model, what it gives.
@@ -787,6 +793,15 @@ mod tests {
         assert_eq!(lang_of(&serde_json::json!("uk")), whisper_rs::get_lang_id("uk"));
         let w = wav16k(&[0.0, 0.5]);
         assert_eq!((&w[..4], w.len()), (&b"RIFF"[..], 48));
+    }
+
+    #[test]
+    fn no_speech_model_says_how_to_name_one_where_the_user_asked() {
+        let models = vec!["llama3".to_string(), "qwen3".to_string()];
+        let e = stt_model(&models, "type one in the model field").unwrap_err().to_string();
+        assert_eq!(e, "the server lists no speech-to-text model (llama3, qwen3); type one in the model field");
+        let both = vec!["llama3".to_string(), "Whisper-1".to_string()];
+        assert_eq!(stt_model(&both, "x").unwrap(), "Whisper-1");
     }
 
     #[test]
