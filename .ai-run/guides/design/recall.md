@@ -208,6 +208,9 @@ attached.
 - Learned vocabulary lives here (`Term.learned`). A minutes run's `vocab add` calls `taxonomy::learn`: the term goes
   to the call's client's layer (else shared), pinned to its threads, merged by name or variant. The old
   `config.learned` list moved once (`vocab::migrate_learned`, a copy in `.echo/learned-before-taxonomy.json`).
+  Older still, a config with no `learned` key at all is from before learned terms: `vocab::migrate` scopes its
+  `vocabulary` once. Every save writes `learned` (`[]` when empty), so a saved config's every-call terms are never
+  taken for that old list (#106: a new folder's first always-on term was moved to learned on the next load).
   `vocab::learned_all` reads both. Transcription reads this even with Recall off.
 - Plugins add terms through `taxonomy::dictionary_add` (merge or new, never rename or remove).
 

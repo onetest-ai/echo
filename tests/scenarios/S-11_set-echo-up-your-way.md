@@ -96,7 +96,7 @@ cases:
 | 27 | `templates/TC-016_reset-meeting-type-brings-echos-back.md` | 26 | On stage 26's view (Client's editor, tag "Edited", "How to tell it" holding `A client or prospect takes part: status, workshop, demo.`): skip step 1, check its expected result on one snapshot; go on with step 2 |
 | 28 | `templates/TC-017_cli-templates-lists-what-the-window-shows.md` | — | — |
 | 29 | `vocabulary/TC-001_vocabulary-opens-from-the-book-button.md` | — | — |
-| 30 | `vocabulary/TC-003_add-an-every-call-term.md` | — | On stage 29's view (Calls, panel closed): in step 1 skip the reload, click the book button "Vocabulary". Its teardown as written (both chips removed: a term left in Every call is moved to the learned list by a later `echoctl vocab` command, run 2026-11-08) |
+| 30 | `vocabulary/TC-003_add-an-every-call-term.md` | — | On stage 29's view (Calls, panel closed): in step 1 skip the reload, click the book button "Vocabulary". Its teardown as written (both chips removed: stage 31 starts from "None yet.") |
 | 31 | `vocabulary/TC-004_remove-an-every-call-term.md` | 30 | On stage 30's view (the panel open): in step 1 skip the reload and the book button; add "Kubernetes" |
 | 32 | `vocabulary/TC-005_the-same-term-twice-is-one-chip.md` | — | On stage 31's view (the panel open): in step 1 skip the reload and the book button, type `Okta SSO` and press Enter |
 | 33 | `vocabulary/TC-006_learned-terms-show-their-meetings-and-people.md` | — | Skip its teardown: keep both learned terms, and the panel open on them, for stage 34 |
@@ -108,4 +108,4 @@ cases:
 - The stages share state instead of undoing it: a switch, a language choice, the name and the profile stay as their stage set them when no later stage reads them (stages 4, 5, 8–11), and an edit stays for the next stage that would make it again (stages 15→16, 22→23, 26→27, 30→31, 33→34). Teardowns that a later stage's first check needs are kept: the template Resets (stages 17–21, so each starts from Echo's Status sync and stage 28 reads it built in), the vocabulary removals before a CLI step, and the two choices kept in the browser (stages 3 and 7).
 - Each section is opened once for the stages on it: Recording (4–9), About me (10–11), Templates (12–27), the Vocabulary panel (29–32).
 - The sections stage and the About me stages never assert the General and Health values (they read the real machine); no screenshot of those two sections is kept.
-- The vocabulary stages use the CLI only after Every call is empty again (stage 32's teardown): a term left in Every call would be moved to the learned list by the first `echoctl vocab` command (see the report).
+- Stage 30's step 5 runs `echoctl vocab list` with two terms in Every call: they stay there (#106).

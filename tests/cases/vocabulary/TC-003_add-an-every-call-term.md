@@ -29,13 +29,11 @@ tags: [vocabulary]
 | 2 | Type `Kubernetes` in "Add a term" and click "Add" | A chip "Kubernetes" with a × shows under "Every call"; the box is empty |
 | 3 | Type `Berlin pilot` and press Enter | A second chip "Berlin pilot" shows |
 | 4 | Wait 1 s, run `. <dir>/env && grep -n '"vocabulary"' "$ECHOCTL_HOME/.echo/config.json" -A4` | The list holds `"Kubernetes"` and `"Berlin pilot"` |
-| 5 | Reload the page and open the Vocabulary panel again | Both chips are still there |
+| 5 | In Bash run `echoctl vocab list`, then step 4's `grep` again | Prints `always (2): Kubernetes, Berlin pilot` and `learned (0):`, no `moved … learned terms` line; `config.json` still holds both under `"vocabulary"` (#106: a CLI load moved them to the learned terms) |
+| 6 | Reload the page and open the Vocabulary panel again | Both chips are still there under "Every call"; "Learned from calls" has no "Kubernetes" or "Berlin pilot" row |
 
 ## Expected Final State
 Two terms are in Every call and in `config.json`.
 
 ## Teardown
 - Click the × of each chip in the panel ("Remove Kubernetes", "Remove Berlin pilot").
-
-## Notes
-- Do not run `echoctl vocab …` while a term is in Every call on this fresh data: the CLI would first move it into the learned list (see the report).

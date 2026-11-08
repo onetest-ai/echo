@@ -39,8 +39,10 @@ pub struct Config {
     #[serde(default)]
     pub vocabulary: Vec<String>,
     /// Terms learned from calls, each with the subjects and people it came up with; used only
-    /// in calls like those. None = not yet migrated from the old one-list `vocabulary`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// in calls like those. None = a config from before learned terms (no `learned` key), whose
+    /// one-list `vocabulary` `vocab::migrate` scopes once. Always written, `[]` for None: a config
+    /// this build saved is never taken for an old one, or its every-call terms would be moved (#106).
+    #[serde(default, serialize_with = "learned_always")]
     pub learned: Option<Vec<crate::vocab::Learned>>,
     /// Calls not on the agenda: "ask" (prompt when the call starts) or "manual" (never prompt;
     /// the user says "record" → `echoctl arm`). Default: ask.
@@ -155,6 +157,10 @@ impl Config {
     pub fn notes_model_label(&self) -> String {
         self.notes_model.clone().filter(|m| !m.trim().is_empty()).unwrap_or_else(|| DEFAULT_NOTES_MODEL.into())
     }
+}
+
+fn learned_always<S: serde::Serializer>(l: &Option<Vec<crate::vocab::Learned>>, s: S) -> Result<S::Ok, S::Error> {
+    l.as_deref().unwrap_or(&[]).serialize(s)
 }
 
 fn path() -> PathBuf {
