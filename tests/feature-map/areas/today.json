@@ -60,6 +60,13 @@
    "priority": "high",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-TODAY-09",
+   "feature": "An agenda from an earlier day (a failed calendar sync keeps the last one) is not listed in Your day as today's: its meetings are left out and the day says the calendar couldn't be read today",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
   }
  ]
 }

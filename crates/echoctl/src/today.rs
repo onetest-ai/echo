@@ -152,8 +152,9 @@ fn time(s: Option<&str>) -> Option<DateTime<Utc>> {
 }
 
 /// Today's meetings and calls in time order: a meeting of the calendar with its prep and whether it is set to be
-/// recorded or was (its call); a call of today with no meeting on its own.
-fn day() -> Vec<Value> {
+/// recorded or was (its call); a call of today with no meeting on its own. And whether the agenda is older than today
+/// (a failed sync keeps the last one, #131): its meetings are left out.
+fn day() -> (Vec<Value>, bool) {
     let today = Local::now().format("%Y-%m-%d").to_string();
     let calls_today: Vec<(PathBuf, Value, Option<MeetingContext>)> = calls::all_calls()
         .into_iter()
@@ -169,7 +170,13 @@ fn day() -> Vec<Value> {
     let offers = crate::teams_transcript::offers();
     let mut used = vec![false; calls_today.len()];
     let mut out: Vec<Value> = vec![];
+    let mut stale = false;
+    let day_of = |t: Option<&str>| time(t).map(|t| t.with_timezone(&Local).format("%Y-%m-%d").to_string());
     for m in crate::watch::agenda() {
+        if day_of(m.start.as_deref()).as_ref() != Some(&today) {
+            stale |= day_of(m.end.as_deref().or(m.start.as_deref())).is_some_and(|d| d < today);
+            continue;
+        }
         let Some(event) = m.id.clone().filter(|i| !i.is_empty()) else { continue };
         let hit = calls_today.iter().position(|(_, _, cm)| cm.as_ref().and_then(|c| c.id.as_deref()) == Some(event.as_str()));
         // Only the meetings the user accepted (or organises) — unless they recorded it, or set it to record.
@@ -202,7 +209,7 @@ fn day() -> Vec<Value> {
         }));
     }
     out.sort_by_key(|v| time(v["start"].as_str()));
-    out
+    (out, stale)
 }
 
 /// Your work, from Tasks' piles — only what is due by the end of this week or late (the rest stays in Tasks): what you
@@ -472,7 +479,8 @@ pub fn ask_drop(id: &str) -> Result<()> {
 
 /// `/api/today`: the day, the work and the cards (`tasks`: the Tasks view, made by the window with its calendar).
 pub fn view(tasks: &Value) -> Value {
-    json!({"date": Local::now().to_rfc3339(), "day": day(), "work": work(tasks), "cards": cards(), "asks": load_asks(), "needs": crate::needs::view(),
+    let (day, calendar_stale) = day();
+    json!({"date": Local::now().to_rfc3339(), "day": day, "calendar_stale": calendar_stale, "work": work(tasks), "cards": cards(), "asks": load_asks(), "needs": crate::needs::view(),
            "me": crate::config::Config::load().ok().and_then(|c| c.me).map(|p| p.name)})
 }
 
@@ -586,5 +594,23 @@ mod tests {
         assert_eq!(titles, vec!["Late", "Today"], "this week's and late ones, late first");
         assert_eq!(w["mine"]["items"][0]["link"], "echo://task/p/T1");
         assert_eq!(w["owed"]["items"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn your_day_lists_only_todays_meetings_and_says_when_the_calendar_is_older() {
+        let (_env, _home) = paths::testenv::folders("today-stale-agenda");
+        let noon = Local::now().date_naive().and_hms_opt(12, 0, 0).unwrap().and_local_timezone(Local).unwrap();
+        let meeting = |id: &str, start: DateTime<Local>| -> MeetingContext {
+            serde_json::from_value(json!({"id": id, "subject": id, "start": start.to_rfc3339(), "end": (start + chrono::Duration::minutes(30)).to_rfc3339(), "response": "accepted"})).unwrap()
+        };
+        // A failed sync keeps yesterday's agenda (#131): its meetings aren't today's.
+        crate::watch::write_agenda(&[meeting("Yesterday's sync", noon - chrono::Duration::days(1))]).unwrap();
+        let (d, stale) = day();
+        assert!(d.is_empty(), "yesterday's meeting isn't listed as today's: {d:?}");
+        assert!(stale, "the day says the calendar is older than today");
+        crate::watch::write_agenda(&[meeting("Today's review", noon)]).unwrap();
+        let (d, stale) = day();
+        assert_eq!(d.iter().map(|m| m["subject"].as_str().unwrap()).collect::<Vec<_>>(), ["Today's review"]);
+        assert!(!stale);
     }
 }

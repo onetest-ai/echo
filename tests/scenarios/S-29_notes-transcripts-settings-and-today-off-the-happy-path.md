@@ -14,6 +14,7 @@ cases:
   - tests/cases/settings/TC-025_unreadable-config-says-so-instead-of-the-sections.md
   - tests/cases/today/TC-004_a-card-sent-to-today-shows-until-got-it.md
   - tests/cases/today/TC-005_actions-on-a-busy-today-act-on-its-items.md
+  - tests/cases/today/TC-012_an-agenda-from-another-day-isnt-listed-and-the-day-says-so.md
 ---
 
 # S-29: Notes, transcripts, settings and Today off the happy path
@@ -55,6 +56,7 @@ Done once, before stage 1, timed as the stage `prelude`.
 | 8 | `settings/TC-025_unreadable-config-says-so-instead-of-the-sections.md` | — | — |
 | 9 | `today/TC-004_a-card-sent-to-today-shows-until-got-it.md` | — | Steps 1–2 in one shell call (each command preceded by `echo "== step N"`, followed by `echo "exit $?"`; each step checked on its own part). Skip nothing else: Today stays on screen for stage 10 |
 | 10 | `today/TC-005_actions-on-a-busy-today-act-on-its-items.md` | — | On stage 9's view (Your day, no card): in step 1 skip the navigation, check "Your day" on one snapshot, press `ControlOrMeta+k` |
+| 11 | `today/TC-012_an-agenda-from-another-day-isnt-listed-and-the-day-says-so.md` | — | After stage 10 (it changes the agenda; its step 5 puts it back). Steps 1 and 5's shell parts in one shell call each |
 
 ## Notes
 - Stages 3–7 change the notes of their calls (each on its own calls; stage 5 adds a note to today's Acme weekly sync after stage 4 edited it, and expects only its own line). Stage 8 breaks `config.json` and restores it: its teardown must run.
