@@ -32,9 +32,9 @@ platform: any
 
 ## Checks (run exactly as written)
 
-- **Guard** (`browser_run_code_unsafe`): `async (page) => { globalThis.__dlg ??= []; globalThis.__perr ??= []; if (!globalThis.__hostileOn) { globalThis.__hostileOn = true; page.on('dialog', async (d) => { globalThis.__dlg.push(d.type() + ': ' + d.message()); await d.dismiss() }); page.on('pageerror', (e) => globalThis.__perr.push(String(e))) } globalThis.__dlg.length = 0; globalThis.__perr.length = 0; return 'armed' }`
+- **Guard** (`browser_run_code_unsafe`): `async (page) => { page.__dlg ??= []; page.__perr ??= []; if (!page.__hostileOn) { page.__hostileOn = true; page.on('dialog', async (d) => { page.__dlg.push(d.type() + ': ' + d.message()); await d.dismiss().catch(() => {}) }); page.on('pageerror', (e) => page.__perr.push(String(e))) } page.__dlg.length = 0; page.__perr.length = 0; return 'armed' }`
 - **Check A** (`browser_evaluate`, run after every view below): `() => ({ handlers: document.querySelectorAll('[onerror],[onload],[onclick],[onmouseover],[onfocus],[onmouseenter]').length, inlineScripts: document.querySelectorAll('script:not([src])').length, badUrls: [...document.querySelectorAll('[href],[src],[action],[formaction]')].filter((e) => /^\s*(javascript|vbscript):/i.test(e.getAttribute('href') || e.getAttribute('src') || e.getAttribute('action') || e.getAttribute('formaction') || '')).length, brokenImgs: document.querySelectorAll('img[src="x"]').length, scrollWidth: document.documentElement.scrollWidth, innerWidth: window.innerWidth })`. Expected: `handlers` 0, `inlineScripts` 0, `badUrls` 0, `brokenImgs` 0 and `scrollWidth` <= `innerWidth`
-- **Check D** (`browser_run_code_unsafe`): `async () => ({ dialogs: globalThis.__dlg, pageErrors: globalThis.__perr })`. Expected: `dialogs` and `pageErrors` both `[]`
+- **Check D** (`browser_run_code_unsafe`): `async (page) => ({ dialogs: page.__dlg, pageErrors: page.__perr })`. Expected: `dialogs` and `pageErrors` both `[]`
 - The literal text of a piece: the piece's visible text contains the characters, for example `<img src=x onerror=alert(1)>` (a truncated copy with its marker "…" also counts; a broken image or an empty element does not)
 
 ## Steps
@@ -42,12 +42,12 @@ platform: any
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | Navigate to `{{base_url}}/` and wait for the text "Your day". Run `browser_run_code_unsafe` with the guard code (see Checks): it records every dialog and page error from now on | It returns `armed` |
-| 2 | Navigate to `{{base_url}}/#calls`, wait for the text "Hostile call HOSTILE-61", click the row `[data-call*="HOSTILE-61"]` | The URL hash starts with `#call/2026-11-05_090000-`; the header shows a title containing "HOSTILE-61" |
-| 3 | Click `role=tab[name="Transcript"]` | The Transcript tab shows the turns with the live notes beside them ("Live notes" part) |
-| 4 | Run `browser_evaluate` with `() => { const t = document.querySelector('main').innerText; return [100, 101, 102, 103, 104].map((n) => t.includes('HOSTILE-' + n)) }` | All five `true` (an answer may be under "Questions"/"Answers" in the live part) |
-| 5 | Run `browser_evaluate` with `() => [...document.querySelectorAll('main')].some((e) => e.innerText.includes('<img src=x onerror=alert(1)>'))` | Returns `true`: markup of the live notes shows as text |
+| 2 | Navigate to `{{base_url}}/#calls`, wait for the text "Hostile call HOSTILE-61", click the row `[data-call*="HOSTILE-61"]` | The URL hash starts with `#call/<the build date − 1>_090000-` (the hostile call is yesterday at 09:00); the header shows a title containing "HOSTILE-61" |
+| 3 | Click `role=tab[name="Transcript"]`, then open My notes (`[data-panel-flip="notes"]`) unless it is open | The Transcript tab shows the turns alone; My notes (`#r-right`) shows the live notes: "Now" in `section[aria-label="Live notes"]` and ✦ rows among the user's notes, answers under "Asked about this call" |
+| 4 | Run `browser_evaluate` with `() => { const t = document.querySelector('#r-right').innerText; return [100, 101, 102, 103, 104].map((n) => t.includes('HOSTILE-' + n)) }` | All five `true` (the answer is under "Asked about this call") |
+| 5 | Run `browser_evaluate` with `() => document.querySelector('#r-right').innerText.includes('<img src=x onerror=alert(1)>')` | Returns `true`: markup of the live notes shows as text |
 | 6 | Run check A (`browser_evaluate`) | `handlers` 0, `inlineScripts` 0, `badUrls` 0, `brokenImgs` 0 and `scrollWidth` <= `innerWidth` |
-| 7 | Run `browser_evaluate` with `() => { const m = document.querySelector('main').getBoundingClientRect(); return [...document.querySelectorAll('main *')].filter((e) => e.children.length === 0 && /HOSTILE-103/.test(e.textContent)).map((e) => e.getBoundingClientRect().right <= m.right + 1) }` | Every entry `true`: the 10 000-character action stays in the column |
+| 7 | Run `browser_evaluate` with `() => { const m = document.querySelector('#r-right').getBoundingClientRect(); return [...document.querySelectorAll('#r-right *')].filter((e) => e.children.length === 0 && /HOSTILE-103/.test(e.textContent)).map((e) => e.getBoundingClientRect().right <= m.right + 1) }` | Every entry `true`: the 10 000-character action stays in the panel |
 | 8 | Click `role=tab[name="Minutes"]` | The Minutes tab shows the frame; above or beside it the status line of the last run reads "The last update didn't finish: HOSTILE-114 …" or the "Couldn't write the minutes" box with the message |
 | 9 | Run `browser_evaluate` with `() => document.querySelector('main').innerText.includes('HOSTILE-114')` | Returns `true` |
 | 10 | Run check A (`browser_evaluate`) | `handlers` 0, `inlineScripts` 0, `badUrls` 0, `brokenImgs` 0 and `scrollWidth` <= `innerWidth` |

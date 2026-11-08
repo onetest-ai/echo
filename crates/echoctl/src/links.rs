@@ -238,7 +238,7 @@ fn call_line(d: &std::path::Path) -> String {
 fn recent_calls(thread: &str, keep: &dyn Fn(&std::path::Path) -> bool, n: usize) -> Vec<std::path::PathBuf> {
     let Ok(p) = crate::projects::load(thread) else { return vec![] };
     let mut calls: Vec<std::path::PathBuf> = crate::projects::calls_of(&p).unwrap_or_default().into_iter().map(|(d, _)| d).filter(|d| d.join("notes.md").is_file()).collect();
-    calls.sort();
+    calls.sort_by(|a, b| crate::calls::order_key(a).cmp(&crate::calls::order_key(b)));
     calls.into_iter().rev().filter(|d| keep(d)).take(n).collect()
 }
 

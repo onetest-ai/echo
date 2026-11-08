@@ -19,7 +19,7 @@ the code is `jshost.rs`). Obsidian's plan: `docs/obsidian-design.md`.
 | `crates/echoctl/src/grants.rs` | What a plugin may reach beyond its store: picked folders, session skills / reads, `<echo_view>` hints |
 | `crates/echoctl/src/share.rs` | Echo's data for plugins (`ctx.echo.read`, `ctx.echo.dictionary.add`) and the events it sends |
 | `crates/echoctl/src/deliver.rs` | Sending to the user: Teams, mail, and plugins' ways |
-| `crates/echoctl/ui/app.js` (`loadPluginClients`, `pluginCtx`, `unloadPlugin`, `SLOTS`) | Client half: imported from `/plugin/<id>/<file>` (`window::plugin_file`), its contributions registered and torn down by plugin id |
+| `crates/echoctl/ui/app/33-plugins-client.js` (`loadPluginClients`, `pluginCtx`, `unloadPlugin`, `SLOTS`) | Client half: imported from `/plugin/<id>/<file>` (`window::plugin_file`), its contributions registered and torn down by plugin id |
 
 ## How it works
 
@@ -108,7 +108,7 @@ the code is `jshost.rs`). Obsidian's plan: `docs/obsidian-design.md`.
 | Every plugin Claude run goes through the user's AI profiles | Strict profile routing: never a plugin's own key or account | `claudejob.rs` |
 | Delivery only to the user (and routine-set addresses) | Nothing leaves by default; a model never picks a recipient | `deliver.rs` |
 | Channel env stripped of `CLAUDE*` / `ANTHROPIC*` | A plugin must not reroute the session's model or account | `jshost::channels` |
-| Everything registered under the plugin id and removed on unload | Else an update doubles every listener | `app.js::unloadPlugin`, `grants::drop_plugin` |
+| Everything registered under the plugin id and removed on unload | Else an update doubles every listener | `ui/app/33-plugins-client.js::unloadPlugin`, `grants::drop_plugin` |
 | Obsidian vaults never enter the Brain | Vault and Brain stay apart (the user's call) | the `obsidian` package |
 
 ## Files and state

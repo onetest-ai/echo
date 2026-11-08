@@ -27,9 +27,9 @@ external_id: TC-LIFE-005
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | `target/debug/echoctl home set "$D/home"`; `target/debug/echoctl home`; `(cd "$D/home" && find calls -type f \| sort \| xargs shasum) > "$D/old-home.sha"` | "data folder: …/home"; `home_source` "chosen" |
-| 2 | Start the dev app (as above), `sleep 5`, `target/debug/echoctl status` | `watcher.pid` set |
-| 3 | `: > "$D/open.log"; target/debug/echoctl home set "$D/home2"; sleep 5; ps -p "$(cat "$D/app.pid")"; cat "$D/open.log"` | "Echo stopped (was pid …)", "data folder: …/home2"; the app quit to restart. On a Mac with Echo installed the restart is `open -n --env ECHOCTL_WAIT_FOR_LOCK=1 -g /Applications/Echo.app` (in `open.log`, not run), so the command ends "Error: Echo did not start"; start the dev app again by hand (as above) |
-| 4 | `target/debug/echoctl home`; arm and run a call: `target/debug/echoctl arm --title "LIFE-005 new folder"`, the very-short TestCall call (`recording/TC-003` step 5), `sleep 20; ls "$D/home2/calls"` | `home` is …/home2; one folder ending `-life-005-new-folder` in `home2/calls` |
+| 2 | Start the dev app (as above), `python3 tests/fixtures/wait.py 30 app`, `target/debug/echoctl status` | `watcher.pid` set |
+| 3 | `: > "$D/open.log"; target/debug/echoctl home set "$D/home2"; python3 tests/fixtures/wait.py 15 sh "! ps -p $(cat "$D/app.pid") > /dev/null"; ps -p "$(cat "$D/app.pid")"; cat "$D/open.log"` | "Echo stopped (was pid …)", "data folder: …/home2"; the app quit to restart. On a Mac with Echo installed the restart is `open -n --env ECHOCTL_WAIT_FOR_LOCK=1 -g /Applications/Echo.app` (in `open.log`, not run), so the command ends "Error: Echo did not start"; start the dev app again by hand (as above) |
+| 4 | `target/debug/echoctl home`; arm and run a call: `target/debug/echoctl arm --title "LIFE-005 new folder"`, the very-short TestCall call (`recording/TC-003` step 5), `python3 tests/fixtures/wait.py 40 file "$D/home2/calls/*-life-005-new-folder/meta.json"; ls "$D/home2/calls"` | `home` is …/home2; one folder ending `-life-005-new-folder` in `home2/calls` |
 | 5 | `(cd "$D/home" && find calls -type f \| sort \| xargs shasum) \| diff - "$D/old-home.sha"` | No difference: the old folder's calls are untouched |
 | 6 | `target/debug/echoctl app quit` | "Echo stopped" |
 

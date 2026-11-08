@@ -17,5 +17,5 @@
 | When you are | Exemplar | Why this one | Tests |
 |---|---|---|---|
 | adding a test that needs Claude Code | `crates/echoctl/src/ai.rs::fake.install` | scripted fake with status, login and `-p` replies | exemplar is a test |
-| adding a window node test | `crates/echoctl/ui/palette.test.mjs::Palette` | slices one marked block of `app.js`, plain `node:assert` | exemplar is a test |
+| adding a window node test | `crates/echoctl/ui/palette.test.mjs::Palette` | slices one marked block of the joined script (`ui/source.mjs::appSource`), plain `node:assert` | exemplar is a test |
 | writing a functional case | `tests/cases/today/TC-003_task-card-opens-details.md` | window steps on the made-up data, literal values, one behaviour | exemplar is a test |

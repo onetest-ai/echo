@@ -30,9 +30,9 @@ tags: [calls, minutes, what-moved]
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Navigate to `{{base_url}}/#calls` and wait for "Acme weekly sync" and click the row Acme weekly sync | Beside the minutes the aside `[aria-label="What moved"]` (or the section "What moved") has the thread "Acme rollout" with "6 changes" |
+| 1 | Navigate to `{{base_url}}/#calls` and wait for "Acme weekly sync" and click the row Acme weekly sync, then open What moved with the header button `[data-panel-flip="moved"]` (beside My notes; skip the click if the right panel already shows What moved) | The view "What moved" in the right panel (`#r-right .mv`) has the thread "Acme rollout" with "6 changes"; the header button and the panel tab both carry the count 6 |
 | 2 | Read the six rows | Each row has a label ("Criterion met", "Done", "Held", "Now waits", "Answered" and one for T005), the item id and title, the words said in quotes with the speaker, and a time chip |
-| 3 | Look for "Run the data migration dry run" in the aside | It is not there |
+| 3 | Look for "Run the data migration dry run" in the What moved view | It is not there |
 | 4 | Read the mark of the row "Answer the security questionnaire" | "weak · to review" |
 | 5 | Read the mark of the row "Hold the help desk training session" | "to check" |
 | 6 | Read the row "Send the SSO checklist" | Label "Done" and no mark |

@@ -7,11 +7,17 @@ differ only in their times. Standard library Python, and `target/debug/echoctl` 
 points elsewhere).
 
 ```bash
-tests/fixtures/make_data.py <empty dir> [--set small|standard|hostile] [--ai fake|local]   # default small
+tests/fixtures/make_data.py <empty dir> [--set small|standard|hostile] [--ai fake|local] [--clock real|fast]   # default small
 tests/fixtures/make-data.sh <empty dir>                                    # the same as --set small
-tests/fixtures/serve.sh up <empty dir> <port> [--set small|standard|hostile]
+tests/fixtures/serve.sh up <empty dir> <port> [--set small|standard|hostile] [--ai …] [--clock fast]
 tests/fixtures/serve.sh down <dir>
+tests/fixtures/recordings.py prepare | list | path | copy <name> [--title T] | finish <folder> <name>
+tests/fixtures/wait.py <seconds> <condition>
 ```
+
+`recordings.py` records and transcribes the known conversations once per build and copies them into a run's data
+(`tests/app_profile.md` → "Recorded calls"); `wait.py` waits for the run's app state, an event or a file, with a
+timeout, instead of a fixed `sleep`.
 
 Build between 06:00 and 22:00: today's calls lie hours before now and its meetings hours after, so near midnight
 the generator refuses (it would pin several calls to one stamp). For checks that don't need Today to match the real
@@ -51,10 +57,14 @@ a busy day.
   axes pairwise across five threads; umbrella-proposal's are quiet (its last call is five days old).
 - **Calls**: today, yesterday, this week, older, last year, undated, and one in the trash; every status but
   recording; minutes runs done, failed, skipped, waiting for a sign-in; automatic minutes now, at a time (moved by
-  the user's notes), held, gated, before the switch; memos, an import from a Teams transcript; chat, frames, the
+  the user's notes), held, gated, before the switch (switched on at the midnight 9 days back, so every call of 10 or
+  more days ago is before it at any hour of the build); memos, an import from a Teams transcript; chat, frames, the
   user's notes of every kind (and an unreadable one), kept live notes, named, numbered and multi-language speakers.
 - **Today's agenda**: every response and timing, recorded and imported meetings, Teams transcripts known or not,
-  scheduled meetings, preps ready (with every section, with none, with more than ten people) and in error.
+  scheduled meetings, preps ready (with every section, with none, with more than ten people) and in error. The
+  live meetings all run from 10 minutes before the build to 20 after it, and every meeting to come starts 37 minutes
+  after it: the same layout at any hour from 06:00 to 22:00. Tasks due "this week" are due tomorrow (on a Sunday
+  that is next week for Today's "My work · this week", listed in `skipped`).
 - **Inbox**: sign-in (blocking), failed minutes, people suggestions (more than five), work to review, Found for
   you (an existing client, a new client from a domain, a known organisation, a series), senders to trust and
   unverified, a Teams transcript to import, a stale Claude Code plugin, a plugin update, a plugin's own item, and
@@ -99,13 +109,24 @@ cases that need one say `ai: local` and run one model job each, no more.
 Automatic minutes are on and several calls are due. **Serve these sets with `window --serve` only, never the Echo
 app**: the app would start minutes runs (against the fake, so they fail).
 
+### The test clock (`--clock fast`)
+
+`<dir>/env` then exports `ECHOCTL_TEST_AUTO_MINUTES_DELAY_S=90`: a **debug** build writes automatic minutes 90 s after
+a call or the user's last note instead of 15 minutes (`notes::auto_delay`); a release build never reads it. The app,
+`window --serve` (`serve.sh` sources the env) and the CLI all get it, so the window's "Minutes in N min (HH:MM)" and
+the app's scheduler agree. `manifest.json` → `clock`. For the recording and minutes scenarios (S-17, S-19).
+
 ### `small` for the Echo app (`--ai fake` / `--ai local`)
 
 Plain `small` (no `--ai`) is what the window cases expect, and has no fake `claude`: fine for `window --serve`, but the
 Echo app run on it starts Claude Code by itself (preps, meeting types, who does a task) on the built-in profile — the
 user's own account. Cases that start the app (`echoctl app run`: the recording, minutes and lifecycle cases) build
 `small` with `--ai fake` (the hermetic env of the standard sets: every run refused) or `--ai local` (also the profile
-"Qwen", the default, so minutes runs go to the local model). Nothing else in `small` changes.
+"Qwen", the default, so minutes runs go to the local model). With either, the app's own thread sync is off
+(`project_sync` false in `config.json`: on a local model its two runs per thread queued in front of the minutes for
+10 minutes and more; the window's Sync now still syncs), and with `--ai local` the fake `claude` lets only **minutes**
+runs through (the app sets `ECHOCTL_RUN_CALL` and no `ECHOCTL_RUN_MODE` for them): the app's preps, meeting types and
+task modes are refused at once instead of taking the one model server. Nothing else in `small` changes.
 
 ## The manifest
 
@@ -113,7 +134,7 @@ user's own account. Cases that start the app (`echoctl app run`: the recording, 
 
 | Key | What |
 |---|---|
-| `calls` | `[{folder, title, key, started_at, status, run, auto, kind, threads, type_by, in_threads}]`. Folder names carry the build's time, so find a call by `key` or title. `threads` is what the window shows (one, several, a suggestion, none), read back from `echoctl project of` |
+| `calls` | `[{folder, title, key, started_at, status, run, auto, kind, threads, type_by, in_threads}]`. Folder names carry the build's time, so find a call by `key` or title. `small`: `{folder, title, status, threads, evidence}`, `evidence` the folder's stamp, the evidence id a thread's sync gives what it takes from that call `threads` is what the window shows (one, several, a suggestion, none), read back from `echoctl project of` |
 | `threads`, `clients` | ids, names, clients, stages; organisations that aren't clients have `account: false` |
 | `items` | `[{thread, id, kind, title, state, …axis values}]`. Ids are per thread (`T001` in more than one thread): pair `id` with `thread` |
 | `people`, `agenda`, `preps`, `plugins` | who is placed where; today's meetings with their axis values; the prep files by event; the plugins and marketplaces |

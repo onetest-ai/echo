@@ -1,9 +1,9 @@
 // How a project is drawn and its stages (app.js, ProjectArt). Run by scripts/check-mod.sh
 // (`node crates/echoctl/ui/projects.test.mjs`): the block is taken from app.js as it ships.
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { appSource } from './source.mjs'
 
-const src = readFileSync(new URL('./app.js', import.meta.url), 'utf8')
+const src = appSource()
 const start = src.indexOf('// ── projects: how a project is drawn')
 const end = src.indexOf('// end of the projects block', start)
 assert.ok(start >= 0 && end > start, 'the projects block not found in app.js')

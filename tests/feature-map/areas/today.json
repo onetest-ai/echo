@@ -28,7 +28,7 @@
   },
   {
    "id": "F-TODAY-04",
-   "feature": "Needs you now lists what waits on the user from Teams and mail in the last 24 h (burning first), with Reply in Teams / Read and reply, I'll do it (a task in a thread), Won't do",
+   "feature": "Needs you now lists what waits on the user from Teams and mail in the last 24 h (burning first), with Reply (Teams' logo or an envelope), I'll do it (a task in a thread) and Won't do (a dialog that needs a comment: why, or who it's for; Cancel keeps the item) — I'll do it and Won't do as icons, each action named in its label and tooltip",
    "priority": "high",
    "check": "agent",
    "axes": []
@@ -44,6 +44,20 @@
    "id": "F-TODAY-06",
    "feature": "A day with nothing says \"A quiet day\"; ⌘K on Today acts on its items",
    "priority": "low",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TODAY-07",
+   "feature": "Won't do runs Claude in the background with no tools (the item's thread's AI profile or the default), the item's words as data and the comment as the only instructions; Today → Asks shows \"Won't do · for X: why\", working, or why it failed; no message unless the comment asks for one",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
+  },
+  {
+   "id": "F-TODAY-08",
+   "feature": "A Won't do whose comment asks for a reply or a forward gets a draft in Asks, back by the item's own Teams chat or mail, with Send, Edit and Drop: nothing goes out before Send (through Microsoft 365, as Read and reply); Drop leaves nothing",
+   "priority": "high",
    "check": "agent",
    "axes": []
   }

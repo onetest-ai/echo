@@ -21,13 +21,34 @@ pub const USER_NOTES: &str = "my-notes.md";
 /// In a trashed call: when it was deleted (its mtime ages the trash entry).
 const DELETED_AT: &str = ".deleted_at";
 
-/// All recorded calls, oldest first.
+/// All recorded calls, oldest first: folders without a date stamp in their name (an imported or hand-made one,
+/// `old-dictation`) first, then the dated ones by their stamp. Every caller — `latest`, the window's list and its
+/// newest call — sees the same order (#147).
 pub fn all_calls() -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = fs::read_dir(paths::calls_dir())
         .map(|rd| rd.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.join("meta.json").exists()).collect())
         .unwrap_or_default();
-    dirs.sort();
+    dirs.sort_by_cached_key(|d| { let (dated, n) = order_key(d); (dated, n.to_owned()) });
     dirs
+}
+
+/// A call's place in `all_calls()`: undated folders before dated ones, each by name (a dated name sorts by its
+/// stamp, the local wall clock it was recorded at). The window's paging cursor compares by the same key.
+pub fn order_key(dir: &Path) -> (bool, &std::ffi::OsStr) {
+    let name = dir.file_name().unwrap_or_default();
+    (has_stamp(&name.to_string_lossy()), name)
+}
+
+/// Whether a folder name starts with a `YYYY-MM-DD_HHMMSS` stamp (by its shape, as `stamp_of` and the page's
+/// `callStamp` judge it).
+pub fn has_stamp(name: &str) -> bool {
+    let b = name.as_bytes();
+    b.len() >= 17
+        && b[..17].iter().enumerate().all(|(i, c)| match i {
+            4 | 7 => *c == b'-',
+            10 => *c == b'_',
+            _ => c.is_ascii_digit(),
+        })
 }
 
 /// Resolve `latest`, a path, or a folder name under calls/ to a call directory. Inside a minutes
@@ -39,6 +60,7 @@ pub fn resolve_call(arg: &str) -> Result<PathBuf> {
     }
     Ok(dir)
 }
+
 
 fn find_call(arg: &str) -> Result<PathBuf> {
     if arg == "latest" {
@@ -84,14 +106,7 @@ pub fn lock_meta(dir: &Path) -> Result<crate::app::FileLock> {
 /// a stamp is its own key (its whole name).
 pub fn stamp_of(dir: &Path) -> String {
     let name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let b = name.as_bytes();
-    let stamp = b.len() >= 17
-        && b[..17].iter().enumerate().all(|(i, c)| match i {
-            4 | 7 => *c == b'-',
-            10 => *c == b'_',
-            _ => c.is_ascii_digit(),
-        });
-    if stamp { name[..17].to_string() } else { name }
+    if has_stamp(&name) { name[..17].to_string() } else { name }
 }
 
 /// The call folder with this stamp now (it may have been renamed since it was last seen). None
@@ -100,7 +115,8 @@ pub fn by_stamp(stamp: &str) -> Option<PathBuf> {
     if stamp.is_empty() {
         return None;
     }
-    let mut found = all_calls().into_iter().filter(|d| stamp_of(d) == stamp);
+    // By name only (a folder's name starts with its stamp): no sort of the whole folder for one lookup.
+    let mut found = fs::read_dir(paths::calls_dir()).ok()?.flatten().map(|e| e.path()).filter(|d| stamp_of(d) == stamp && d.join("meta.json").exists());
     let first = found.next()?;
     found.next().is_none().then_some(first)
 }
@@ -307,7 +323,7 @@ pub fn previous_with_notes(subject: &str, before: Option<&Path>) -> Option<PathB
         .rev()
         // Earlier by folder name (it starts with the call's time): the same whatever spelling of
         // the data folder each path came with.
-        .filter(|d| before.is_none_or(|b| d.file_name() < b.file_name()))
+        .filter(|d| before.is_none_or(|b| order_key(d) < order_key(b)))
         .find(|d| d.join("notes.md").exists() && previous_subject(d).is_some_and(|s| s.trim().to_lowercase() == want))
 }
 
@@ -2452,6 +2468,33 @@ mod tests {
         let d = root.join("home/calls/2026-10-25_090000-atlas-planning");
         retitle(&d, "Atlas review", false).unwrap();
         assert!(root.join("home/calls/2026-10-25_090000-atlas-review").exists() && !d.exists());
+    }
+
+    #[test]
+    fn latest_is_the_newest_dated_call_not_the_last_folder_name() {
+        let (_env, _root) = crate::paths::testenv::folders("calls-latest");
+        let make = |name: &str, meta: Value| {
+            let d = paths::calls_dir().join(name);
+            fs::create_dir_all(&d).unwrap();
+            fs::write(d.join("meta.json"), meta.to_string()).unwrap();
+        };
+        make("2026-10-20_100000-older", json!({"title": "Older", "started_at": "2026-10-20T10:00:00+02:00"}));
+        make("2026-10-22_090000-newest", json!({"title": "Newest", "started_at": "2026-10-22T09:00:00+02:00"}));
+        // #147: no stamp in its name and no start: it sorts after every dated name, but it is the oldest.
+        make("old-dictation", json!({"title": "Old dictation"}));
+        // A stamp in its name and no start in meta.json: the stamp counts.
+        make("2026-10-21_120000-stamp-only", json!({"title": "Stamp only"}));
+        assert_eq!(resolve_call("latest").unwrap().file_name().unwrap(), "2026-10-22_090000-newest");
+        // The list is in the same order: the undated folder first (oldest), the newest dated last.
+        let names: Vec<_> = all_calls().iter().map(|d| d.file_name().unwrap().to_string_lossy().into_owned()).collect();
+        assert_eq!(names, ["old-dictation", "2026-10-20_100000-older", "2026-10-21_120000-stamp-only", "2026-10-22_090000-newest"]);
+        // Only undated folders: one of them is still `latest`.
+        for d in fs::read_dir(paths::calls_dir()).unwrap().flatten() {
+            if d.file_name() != "old-dictation" {
+                fs::remove_dir_all(d.path()).unwrap();
+            }
+        }
+        assert_eq!(resolve_call("latest").unwrap().file_name().unwrap(), "old-dictation");
     }
 
     /// Inside a run, every command's call goes through `resolve_call`: checked in a child process

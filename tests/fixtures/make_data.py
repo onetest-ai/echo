@@ -92,6 +92,12 @@ def iso(t):
     return t.isoformat(timespec="seconds")
 
 
+def auto_since(now):
+    """When automatic minutes were switched on: midnight 9 days back, so every call of 10 or more days ago ended
+    before it and every later one after it, at any hour of the build."""
+    return (now - timedelta(days=9)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+
 def pairwise(axes, have=(), valid=lambda row: True):
     """Greedy all-pairs: rows (dicts axis → value) so that every pair of values of two axes that some valid row can
     hold appears in at least one row. `have`: rows there already (their pairs count as covered). Exhaustive over the
@@ -299,6 +305,10 @@ def build_small(d):
     m["calls"] = [{"folder": acme, "title": "Acme weekly sync", "status": "notes", "threads": ["acme-rollout"]},
                   {"folder": plan, "title": "Initech planning", "status": "transcript", "threads": []},
                   {"folder": globex, "title": "Globex pilot kickoff", "status": "notes", "threads": ["globex-pilot"]}]
+    # Each folder's stamp is the evidence id a thread's sync gives what it takes from that call; it follows the build
+    # date (yesterday's kickoff is <build date − 1>_140000), so a case reads it here rather than writing a date.
+    for c in m["calls"]:
+        c["evidence"] = c["folder"][:17]
     m["items"] = [{"thread": "acme-rollout", "id": epic, "kind": "epic", "title": "Acme rollout", "state": "open"},
                   {"thread": "acme-rollout", "id": story, "kind": "story", "title": "SSO for the Berlin pilot", "state": "open"},
                   {"thread": "acme-rollout", "id": t1, "kind": "task", "title": "Send Acme the SSO checklist", "state": "open", "owner": "Sam Rivera", "due": today},
@@ -325,7 +335,7 @@ def transcript_md(title, start, folder, segs):
 
 
 def write_call(d, c):
-    """One call folder from a spec (a dict): the files the window reads, in the shapes `window.rs`, `calls.rs`,
+    """One call folder from a spec (a dict): the files the window reads, in the shapes `window/`, `calls.rs`,
     `notes.rs`, `livenotes.rs` and `teams_transcript.rs` parse. Returns the folder name."""
     start = c.get("start")
     title = c["title"]
@@ -508,6 +518,11 @@ FAKE_CLAUDE = """#!/bin/sh
 # refuses everything else, so a click on Write minutes, Prepare or Send to Claude fails at once instead of
 # reaching a real account.
 case "$1" in --version) echo "2.0.0 (Claude Code, test fake)"; exit 0;; esac
+# Today's Won't do: a run whose prompt holds a phrase of <dir>/fake-answers.tsv (the comment a case types) gets that
+# line's canned answer, as Claude Code's last stream line; every other run is refused below.
+if [ -f "$(dirname "$0")/../fake-answers.tsv" ]; then
+  while IFS='	' read -r phrase line; do case "$*" in *"$phrase"*) printf '%s\n' "$line"; exit 0;; esac; done < "$(dirname "$0")/../fake-answers.tsv"
+fi
 case "$1 $2" in "auth status") ;; *) echo "test data: Claude Code is a fake here" >&2; exit 1;; esac
 case "$(basename "$CLAUDE_CONFIG_DIR")" in
   out)   echo '{"loggedIn": false, "authMethod": "none"}';;
@@ -521,6 +536,11 @@ esac
 # ANTHROPIC_BASE_URL to a loopback address) goes to the real Claude Code; every other run is still refused, so no
 # Claude account is ever used.
 LOCAL_PASS = """case "$ANTHROPIC_BASE_URL" in http://localhost:*|http://127.0.0.1:*|http://\\[::1\\]:*|{url}) exec {real} "$@";; esac
+"""
+# small with `--ai local` (the recording and minutes scenarios, which run the Echo app): only a minutes run (the app
+# sets ECHOCTL_RUN_CALL and no ECHOCTL_RUN_MODE) reaches the model; the app's own preps, meeting types, task modes and
+# thread syncs are refused at once, so they never queue in front of the minutes on the one model server.
+MINUTES_ONLY = """case "${ECHOCTL_RUN_MODE}:${ECHOCTL_RUN_CALL:+call}" in :call) PASS;; esac
 """
 
 
@@ -547,7 +567,10 @@ def setup_env(d):
         lines = fake.split("\n")
         # Also the one model server named with --ai-url (a faster machine on the network), exactly that address.
         url = sh(AI_URL) if AI_URL else "http://localhost:*"
-        fake = "\n".join(lines[:4] + [LOCAL_PASS.format(real=sh(real), url=url).rstrip("\n")] + lines[4:])
+        local = LOCAL_PASS.format(real=sh(real), url=url).rstrip("\n")
+        if d.set == "small":
+            local = MINUTES_ONLY.replace("PASS", local).rstrip("\n")
+        fake = "\n".join(lines[:4] + [local] + lines[4:])
     d.write(f"{b}/bin/claude", fake)
     d.write(f"{b}/bin/open", FAKE_OPEN)
     os.chmod(f"{b}/bin/open", 0o755)
@@ -571,9 +594,10 @@ def build_settings(d, H):
         "--capture-frames", "true", "--minutes-page", "true", "--keep-audio", "false")
     cfg_file = d.state("config.json")
     cfg = json.load(open(cfg_file))
-    # Automatic minutes on since 10 days ago: calls that ended before are "before", later ones wait their 15 minutes.
-    # Never run the real app on this data (it would start them); `window --serve` doesn't.
-    cfg.update({"auto_minutes": True, "auto_minutes_since": iso(d.now - timedelta(days=10)), "follow_app_mute": False, "capture_ui": True,
+    # Automatic minutes on since the midnight that started the 9th day back (auto_since): calls that ended before are
+    # "before", later ones wait their 15 minutes. A midnight, not now − 10 days, so a call 10 days ago is "before"
+    # whatever the hour of the build. Never run the real app on this data (it would start them); `window --serve` doesn't.
+    cfg.update({"auto_minutes": True, "auto_minutes_since": iso(auto_since(d.now)), "follow_app_mute": False, "capture_ui": True,
                 "capture_chat": True, "echo_cancel": False, "project_sync": True, "folder_skip_permissions": False, "hide_dock_icon": False,
                 # `vocabulary` always with `learned` (without it the next load moves the always-on terms into learned).
                 "vocabulary": ["SAML", "Initech", "Berlin pilot"],
@@ -922,7 +946,7 @@ def build_calls(d, H):
     C = []
 
     def call(key, start, minutes, title, people, lines, g1, g2, **kw):
-        if start and start < now - timedelta(days=10) and g1[0] in ("notes", "transcript") and g1[2] in ("tried", "now"):
+        if start and start + timedelta(minutes=minutes) < auto_since(now) and g1[0] in ("notes", "transcript") and g1[2] in ("tried", "now"):
             g1 = (g1[0], g1[1], "before")  # ended before automatic minutes were on: that is what the window says
         c = dict(key=key, start=start, minutes=minutes, title=title, people=people, segments=talk(lines) if lines else [], g1=g1, g2=g2, status=g1[0])
         c.update(kw)
@@ -1269,7 +1293,7 @@ def build_threads(d, H):
         q("project", "source", hid, "--chat", "19:hostile@thread.v2", "--name", H.text(place, "", kind="html", one_line=True, where=f"projects/{hid} source name"))
         q("org", "set", "acme", "--aliases", "ACME Corp,Acme GmbH," + H.text(place, "", kind="emoji", one_line=True, where="clients.json acme aliases").replace(",", " "))
         q("project", "person", hid, H.text("People: names, titles, roles, groups, \"who they are\", facts, addresses; organisation names and domains", "Person", kind="html", one_line=True,
-                                            where=f"projects/{hid} people"), "--email", "hostile@umbrella.example", "--role", H.text("People: names, titles, roles", "", kind="rtl", one_line=True, where=f"projects/{hid} people role"))
+                                            where=f"projects/{hid} people"), "--email", "hostile-thread@umbrella.example", "--role", H.text("People: names, titles, roles", "", kind="rtl", one_line=True, where=f"projects/{hid} people role"))
     d.manifest["threads"] = [{"id": t, "name": n, "client": c, "stage": s} for t, n, c, s in THREADS]
 
 
@@ -1494,9 +1518,12 @@ STATES = ["open", "in_progress", "blocked", "done", "cancelled", "merged", "dele
 
 def pairwise_items(d, H):
     today = d.now.date()
-    week_end = today + timedelta(days=(6 - today.weekday()))
+    # "week" is always tomorrow, whatever the weekday (the cases check "tomorrow"): within the coming 7 days for Tasks and
+    # the board; on a Sunday it is next week for Today's "My work · this week" (`today.rs` week_end), noted as skipped.
     dues = {"late": (today - timedelta(days=3)).isoformat(), "today": today.isoformat(),
-            "week": (today + timedelta(days=1) if today < week_end else today).isoformat(), "later": (today + timedelta(days=20)).isoformat(), "none": None}
+            "week": (today + timedelta(days=1)).isoformat(), "later": (today + timedelta(days=20)).isoformat(), "none": None}
+    if today.weekday() == 6:
+        d.skip("node.due=later this week (Today's calendar week)", "built on a Sunday: the tasks due tomorrow fall in next week")
     g1 = {"owner": ["me", "colleague", "client", "nobody"], "delegated": ["me", "another", "none"], "wait": ["none", "waiting_for", "waits_item", "holds_up"],
           "state": STATES, "due": list(dues), "mode": ["none", "claude", "manual"]}
     rows1, need1 = pairwise(g1, valid=lambda r: r["mode"] == "none" or r["owner"] == "me")
@@ -1678,9 +1705,15 @@ def build_people(d, H):
     globex = [place("Kim Park", "kim@globex.example", "supporter", 3, 3, "sponsor", "you", None, True),
               place("Alex Chen", "alex@initech.example", None, 1, 3),
               place("Lena Vogel", "lena@initech.example")]
+    # Acme's other threads: the renewal's people and the hackathon's one, placed without levels (the client's People
+    # tab lists every thread a person is in: people/TC-013).
+    renewal = [place(x["name"], x["email"]) for x in acme if x["name"] in ("Dana Lee", "Omar Haddad", "Rita Gomez", "Ivan Petrov", "Yuki Tanaka", "Alex Chen")]
+    hackathon = [place("Yuki Tanaka", "yuki@acme.example")]
     patch_profile(d, "acme-rollout", lambda p: p.update({"people": acme}))
     patch_profile(d, "globex-pilot", lambda p: p.update({"people": globex}))
-    for tid, ppl in (("acme-rollout", acme), ("globex-pilot", globex)):
+    patch_profile(d, "acme-renewal", lambda p: p.update({"people": renewal}))
+    patch_profile(d, "acme-hackathon", lambda p: p.update({"people": hackathon}))
+    for tid, ppl in (("acme-rollout", acme), ("globex-pilot", globex), ("acme-renewal", renewal), ("acme-hackathon", hackathon)):
         for x in ppl:
             rows.append({"in_thread": "placed", "levels": levels(x.get("influence"), x.get("interest")), "side": "yours" if x["email"].endswith("initech.example") else "other"})
     rows += [{"in_thread": "seen only", "levels": "none", "side": "other"},   # Jo Weber in acme-rollout's calls
@@ -1785,6 +1818,10 @@ def build_agenda(d, H):
 
     def at(hours):
         return max(day0, min(now + timedelta(hours=hours), now.replace(hour=23, minute=50)))
+    # Every meeting still to come starts at one time, 37 minutes after the build: side by side in lanes in the Day view
+    # (calendar/TC-016), and inside today at any hour the data may be built (06:00–22:00). Spread out over the next
+    # hours, they would stack only when a late build pinned them to 23:50, and stagger otherwise.
+    soon = (now + timedelta(minutes=37)).replace(second=0, microsecond=0)
     g1 = {"timing": ["past", "live", "to come"], "link": ["online", "no join link"], "recorded": ["no", "call", "imported"],
           "transcript": ["known", "none", "unknown"], "scheduled": ["no", "yes"]}
 
@@ -1807,7 +1844,7 @@ def build_agenda(d, H):
     people_pool = [[p["dana"], p["omar"]], [p["kim"]], [p["zoe"], p["raj"]], [p["alex"], p["priya"], p["tom"]], [p["kai"]], [p["mia"]]]
     events, sched, tt, extra = [], [], {}, 0
     past_n = sum(1 for r in rows if r["timing"] == "past")
-    k_past = k_come = 0
+    k_past = 0
     for i, r in enumerate(rows):
         ev = {"id": f"ev-m{i + 1:02d}", "subject": MEETING_TITLES[i % len(MEETING_TITLES)], "organizer": ME, "attendees": people_pool[i % len(people_pool)], "source": "test"}
         if r["response"] == "organizer":
@@ -1842,8 +1879,7 @@ def build_agenda(d, H):
         elif r["timing"] == "live":
             start, end = now - timedelta(minutes=10), now + timedelta(minutes=20)
         else:
-            k_come += 1
-            start = at(0.5 + 0.4 * k_come)
+            start = soon
             end = start + timedelta(minutes=25)
         ev["start"], ev["end"] = iso(start), iso(end)
         if r["link"] == "online":
@@ -1856,11 +1892,11 @@ def build_agenda(d, H):
         r["event"] = ev["id"]
         events.append(ev)
     # Threads of meetings: a series (acme weekly), people (Globex), subject (renewal), one pinned to acme-rollout.
-    events.append({"id": "ev-renewal-call", "subject": "Acme renewal follow-up", "start": iso(at(3)), "end": iso(at(3.5)), "organizer": p["rita"],
+    events.append({"id": "ev-renewal-call", "subject": "Acme renewal follow-up", "start": iso(soon), "end": iso(soon + timedelta(minutes=30)), "organizer": p["rita"],
                    "attendees": [p["rita"]], "join_url": "https://teams.example/ev-renewal-call", "source": "test", "response": "accepted"})
-    events.append({"id": "ev-globex-weekly", "subject": "Globex weekly", "series_id": "S-GLOBEX-WEEKLY", "start": iso(at(4)), "end": iso(at(4.5)), "organizer": p["kim"],
+    events.append({"id": "ev-globex-weekly", "subject": "Globex weekly", "series_id": "S-GLOBEX-WEEKLY", "start": iso(soon), "end": iso(soon + timedelta(minutes=30)), "organizer": p["kim"],
                    "attendees": [p["kim"], p["noor"]], "join_url": "https://teams.example/l/meetup-join/19%3aglobex-pilot%40thread.v2/0", "source": "test", "response": "accepted"})
-    events.append({"id": "ev-pinned", "subject": "Steering prep", "start": iso(at(5)), "end": iso(at(5.5)), "organizer": ME,
+    events.append({"id": "ev-pinned", "subject": "Steering prep", "start": iso(soon), "end": iso(soon + timedelta(minutes=30)), "organizer": ME,
                    "attendees": [p["alex"]], "join_url": "https://teams.example/ev-pinned", "source": "test", "response": "organizer"})
     patch_profile(d, "acme-rollout", lambda pr: pr.update({"events": pr.get("events", []) + ["ev-pinned"]}))
     if H:
@@ -2121,6 +2157,30 @@ def build_hostile_calls(d, H):
          "at": iso(now - timedelta(hours=1)), "line": T(hp, "", kind="html", one_line=True, where=".echo/needs.json line"), "thread": "acme-rollout", "chat": "19:x@thread.v2", "quote": "x"}]}, ascii=False)
 
 
+def build_needs(d):
+    """Today → Needs you now (Microsoft 365 isn't signed in: the items come from `.echo/needs.json`): a Teams 1:1, a
+    mail and an @mention, each in a thread. Won't do's run answers from `<dir>/fake-answers.tsv` by the comment typed."""
+    now = d.now
+    d.write_json(d.state("needs.json"), {"items": [
+        {"id": "teams:19:dana-lee@unq.gbl.spaces", "kind": "tagged", "source": "teams", "from": "Dana Lee", "where": "Chat with Dana Lee",
+         "at": iso(now - timedelta(hours=1)), "line": "Can you send me the renewal price list for Acme?", "chat": "19:dana-lee@unq.gbl.spaces", "thread": "acme-rollout"},
+        {"id": "mail:globex-redlines", "kind": "tagged", "source": "mail", "from": "Kim Park", "where": "Mail to you",
+         "at": iso(now - timedelta(hours=3)), "line": "Contract redlines for the Globex pilot", "message": "AAMk-test-globex-redlines", "thread": "globex-pilot"},
+        {"id": "teams:19:initech-hiring@thread.v2:m1", "kind": "tagged", "source": "teams", "from": "Lena Vogel", "where": "@you in Initech hiring",
+         "at": iso(now - timedelta(hours=5)), "line": "Can you review the support hours draft by Friday?", "chat": "19:initech-hiring@thread.v2", "thread": "initech-hiring"}]})
+    answers = [
+        ("presales owns this deal", {"for": "the presales team", "why": "presales owns this deal", "draft": None}),
+        ("tell her to ask Priya", {"for": "Priya Nair", "why": "Priya owns the Acme renewal pricing",
+                                   "draft": {"channel": "teams", "text": "Hi Dana, Priya Nair owns the renewal pricing now: please ask her for the price list."}}),
+        ("reply that legal reviews the redlines", {"for": "the legal team", "why": "legal reviews contract redlines",
+                                                   "draft": {"channel": "mail", "text": "Hi Kim, our legal team reviews the redlines: please send them to legal directly."}}),
+    ]
+    lines = [f"{phrase}\t{json.dumps({'type': 'result', 'is_error': False, 'result': json.dumps(a)})}" for phrase, a in answers]
+    d.write(f"{d.base}/fake-answers.tsv", "\n".join(lines) + "\n")
+    d.manifest["needs"] = {"items": 3, "wont_answers": [p for p, _ in answers],
+                           "note": "Won't do's comment picks the fake's canned answer by these phrases; any other comment's run is refused"}
+
+
 # ── the standard and hostile sets ─────────────────────────────────────────────────────────────
 def build_standard(d, hostile=False):
     H = Hostile(d) if hostile else None
@@ -2143,6 +2203,7 @@ def build_standard(d, hostile=False):
         build_hostile_calls(d, H)
         build_injection_call(d)
     else:
+        build_needs(d)
         d.skip("hostile text", "the hostile set (--set hostile)")
     for k, v in {"thread.stage=" + s: t for t, _, _, s in THREADS}.items():
         d.axis(k, v)
@@ -2195,6 +2256,10 @@ NOW = None
 AI = "fake"
 AI_URL = None
 AI_MODEL = None
+# `--clock fast`: automatic minutes this many seconds after a call or the last note (a debug build; 15 minutes in a
+# release). More than the 30 s after the call's end a note needs to count as "moved by notes" (claude/TC-010), with
+# room for a runner to type one.
+FAST_AUTO_DELAY_S = 90
 # The only local model the tests use (Ollama; on Windows the plain `qwen3.8:27b`).
 LOCAL_MODEL = "qwen3.8:27b" if sys.platform == "win32" else "qwen3.8:27b-mlx"
 
@@ -2212,6 +2277,9 @@ def main():
     ap.add_argument("--ai-url", help="with --ai local: the model server's address when it isn't this computer, e.g. "
                     "http://192.0.2.10:11434 (a faster machine on the network; only that exact address is let through)")
     ap.add_argument("--ai-model", help="with --ai local: the model on that server (default qwen3.8:27b-mlx here, qwen3.8:27b on Windows)")
+    ap.add_argument("--clock", choices=["real", "fast"], default="real",
+                    help="fast: the debug build's test clock in <dir>/env (ECHOCTL_TEST_AUTO_MINUTES_DELAY_S=90: automatic "
+                    "minutes 90 s after the call or the last note instead of 15 minutes), for the recording and minutes scenarios")
     a = ap.parse_args()
     global NOW, AI, AI_URL, AI_MODEL
     AI, AI_URL, AI_MODEL = a.ai or "fake", (a.ai_url or "").rstrip("/") or None, a.ai_model
@@ -2243,6 +2311,13 @@ def main():
         if a.ai:
             setup_env(d)  # hermetic, as the standard sets: the app run on it starts no run on a real account
         build_small(d)
+        if a.ai:
+            # The Echo app runs on this data: no thread sync of its own (two model runs per thread, queued in front of
+            # the minutes on a local model; refused at once on the fake). The window's Sync now still syncs.
+            cfg_file = d.state("config.json")
+            cfg = json.load(open(cfg_file))
+            cfg["project_sync"] = False
+            d.write_json(cfg_file, cfg)
         if a.ai == "local":
             d.q("ai", "add-local", "ollama", "--model", AI_MODEL or LOCAL_MODEL, *(["--url", AI_URL] if AI_URL else []),
                 "--name", "Qwen · this computer" if not AI_URL else "Qwen · test server")
@@ -2250,6 +2325,10 @@ def main():
     else:
         build_standard(d, hostile=a.set == "hostile")
     d.manifest["ai"] = AI
+    if a.clock == "fast":
+        with open(os.path.join(base, "env"), "a") as f:
+            f.write(f"export ECHOCTL_TEST_AUTO_MINUTES_DELAY_S={FAST_AUTO_DELAY_S}\n")
+    d.manifest["clock"] = {"auto_minutes_delay_s": FAST_AUTO_DELAY_S if a.clock == "fast" else 900}
     d.write_json(os.path.join(base, "manifest.json"), d.manifest, ascii=False)
     print(f"test data ({a.set}) in {base} (. {base}/env)")
 

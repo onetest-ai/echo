@@ -17,7 +17,7 @@ tags: [cli, calls]
 
 ## Preconditions
 - Standard data set built right before the run: `tests/fixtures/serve.sh up <dir> <port> --set standard` (`data: standard`); the window is served at `{{base_url}}` and `{{base_url}}/` was loaded first (the cookie); every `echoctl` command runs as `target/debug/echoctl …` after `. <dir>/env`
-- `C=2026-11-06_140000-globex-pilot-kickoff` (a fixed folder name: yesterday's call at 14:00)
+- `C=$(ls "$ECHOCTL_HOME/calls" | grep -- '-globex-pilot-kickoff$')` (yesterday's call at 14:00; each call's folder name starts with its date, which follows the day the data is built: look it up, never type a date)
 - Reload the page fully (`{{base_url}}/`) after a CLI change before reading the window
 
 ## Test Data
@@ -32,18 +32,18 @@ tags: [cli, calls]
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Run `target/debug/echoctl context $C` | Exit code 0; JSON with `dir` ending `/calls/2026-11-06_140000-globex-pilot-kickoff`, `duration_min` 45.0, `dominant_language` "en", `external` `["Kim Park <kim@globex.example>","Ben Okafor <ben@globex-labs.example>"]`, `colleagues` [], `meeting_type.type` "client" |
+| 1 | Run `target/debug/echoctl context $C` | Exit code 0; JSON with `dir` ending `/calls/$C`, `duration_min` 45.0, `dominant_language` "en", `external` `["Kim Park <kim@globex.example>","Ben Okafor <ben@globex-labs.example>"]`, `colleagues` [], `meeting_type.type` "client" |
 | 2 | Run `target/debug/echoctl context "$ECHOCTL_HOME/calls/$C"` (the path) | The same JSON as step 1 |
 | 3 | Run `target/debug/echoctl actions $C` | A JSON array of one item: `id` "glob0001", `task` "Draft the Globex pilot plan", `owner` "Me", `status` "open" |
 | 4 | Run `target/debug/echoctl action $C glob0001 done`, then `target/debug/echoctl actions $C` | The first prints `done`; the list now has `status` "done" |
 | 5 | Run `target/debug/echoctl action $C glob0001 todo` | Prints `todo`; `actions` shows `status` "todo" |
 | 6 | Run `target/debug/echoctl type $C partner` | `{"by":"you","label":"Partner","type":"partner"}` |
 | 7 | Run `target/debug/echoctl type $C bogus` | Exit code 1; "Error: a meeting type is one of: client, partner, one-on-one, internal, industry, other, steering" |
-| 8 | Reload, click the row Globex pilot kickoff (`[data-call="2026-11-06_140000-globex-pilot-kickoff"]`) | The call's header shows the kind chip "Partner ▾" |
-| 9 | Run `target/debug/echoctl title $C "Globex pilot kickoff (signed)"` | Prints the new folder path ending `/calls/2026-11-06_140000-globex-pilot-kickoff-signed`; `ls "$ECHOCTL_HOME/calls" \| grep 2026-11-06_140000` lists only that name |
-| 10 | Reload `{{base_url}}/#calls`, find the row of yesterday 14:00 | It reads "Globex pilot kickoff (signed)"; opened, its header shows that title, "Partner ▾" and the thread chip "Globex pilot" |
-| 11 | Run `target/debug/echoctl html 2026-11-06_140000-globex-pilot-kickoff-signed` | Prints the path of `Globex pilot kickoff (signed)-minutes.html` inside that folder; the file exists |
-| 12 | Run `target/debug/echoctl title 2026-11-06_140000-globex-pilot-kickoff-signed "Globex pilot kickoff"` and `target/debug/echoctl type $C client` | The folder is `2026-11-06_140000-globex-pilot-kickoff` again; the kind is `client` |
+| 8 | Reload, click the row Globex pilot kickoff (`[data-call="$C"]`) | The call's header shows the kind chip "Partner ▾" |
+| 9 | Run `target/debug/echoctl title $C "Globex pilot kickoff (signed)"` | Prints the new folder path ending `/calls/${C}-signed`; `ls "$ECHOCTL_HOME/calls" \| grep -- '-globex-pilot-kickoff'` lists only that name |
+| 10 | Reload `{{base_url}}/#calls`, find the row `[role=option][data-call="${C}-signed"]` (yesterday 14:00) | It reads "Globex pilot kickoff (signed)"; opened, its header shows that title, "Partner ▾" and the thread chip "Globex pilot" |
+| 11 | Run `target/debug/echoctl html ${C}-signed` | Prints the path of `Globex pilot kickoff (signed)-minutes.html` inside that folder; the file exists |
+| 12 | Run `target/debug/echoctl title ${C}-signed "Globex pilot kickoff"` and `target/debug/echoctl type $C client` | The folder is `$C` again; the kind is `client` |
 | 13 | Run `target/debug/echoctl context` (no call: "latest") and read `dir` | `dir` is the newest call: the last name of `ls "$ECHOCTL_HOME/calls" \| grep '^20' \| tail -1` (today's newest recording) |
 
 ## Expected Final State
@@ -54,6 +54,6 @@ The call has its title, folder and kind back; its action item is to do (`todo`);
 
 ## Notes
 - The test data writes the action's status as "open"; the app's own words are `todo` and `done` (`calls.rs`, `set_action_status`), so after step 5 it reads `todo`.
-- Step 13 is expected to FAIL today: "latest" is the last folder name in sort order, so the undated call `old-dictation` (no stamp in its name) wins over every dated call. Reported as a suspected bug.
+- Step 13: "latest" is the last call in the app's one order (`calls::all_calls`: folders with no date stamp oldest, then the dated ones by their stamp), so the undated call `old-dictation` never wins over a dated one (#147); the window's list and the tray use the same order.
 - A call's folder may be given by name or by path; an old name stops working after `title` renames it (by its stamp it is still found by threads and links).
 - `note` and `delete`/`restore` are in `TC-012`.

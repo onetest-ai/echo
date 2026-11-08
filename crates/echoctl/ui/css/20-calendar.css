@@ -1,0 +1,91 @@
+/* ── calendar ────────────────────────────────────────────────────────── */
+.cal { display: grid; grid-template-rows: auto auto 1fr; min-height: 0; height: 100%; background: var(--surface); position: relative; }
+.cal-head { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; padding: 16px 20px 12px; border-bottom: 1px solid var(--line); }
+.cal-head h1 { margin: 0; font-size: 18px; font-weight: 650; letter-spacing: -0.015em; min-width: 0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: var(--r-control); overflow: hidden; }
+.seg button { border: 0; background: none; height: 26px; padding: 0 12px; color: var(--text-2); cursor: default; }
+.seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
+.cal-note { grid-column: 1 / -1; padding: 8px 20px; color: var(--text-2); font-size: 12.5px; border-bottom: 1px solid var(--line); background: var(--bg); }
+
+.days { display: grid; border-bottom: 1px solid var(--line); padding-left: 56px; }
+.days div { padding: 8px 8px 6px; font-size: 12px; color: var(--text-3); border-left: 1px solid var(--line); }
+.days div b { display: block; font-size: 15px; color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.days div.today b { color: var(--accent-ink); }
+.allday { display: grid; padding-left: 56px; border-bottom: 1px solid var(--line); min-height: 0; }
+.allday div { border-left: 1px solid var(--line); padding: 3px 4px; display: flex; flex-direction: column; gap: 2px; }
+.allday span { font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--line); color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.grid-wrap { overflow-y: auto; min-height: 0; position: relative; }
+.grid { display: grid; position: relative; }
+.hours { position: relative; }
+.hours span { position: absolute; right: 8px; transform: translateY(-50%); font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.col { position: relative; border-left: 1px solid var(--line); }
+.col.today { background: color-mix(in srgb, var(--accent) 3%, transparent); }
+.hourline { position: absolute; left: 0; right: 0; border-top: 1px solid var(--line); }
+.now { position: absolute; left: -1px; right: 0; height: 0; border-top: 2px solid var(--recording); z-index: 2; }
+.now::before { content: ""; position: absolute; left: -4px; top: -5px; width: 8px; height: 8px; border-radius: 50%; background: var(--recording); }
+
+.ev {
+  position: absolute; z-index: 1;
+  border-radius: 6px; padding: 3px 7px; overflow: hidden; gap: 0;
+  border: 1px solid var(--line-strong); border-left-width: 3px;
+  background: var(--surface); color: var(--text);
+  font-size: 11.5px; line-height: 1.3; text-align: left; cursor: default;
+}
+.ev b { display: block; flex-shrink: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A tag stays as tall as the time beside it: a short meeting keeps its title. */
+.ev .tag { padding: 0 5px; line-height: inherit; }
+.ev small { color: var(--text-3); font-size: 10.5px; }
+.ev:hover { border-color: var(--accent); }
+.ev[aria-selected="true"] { outline: 2px solid var(--accent); outline-offset: 0; }
+.ev.online { border-left-color: var(--accent); }
+.ev.recorded { background: color-mix(in srgb, var(--me) 12%, var(--surface)); border-color: color-mix(in srgb, var(--me) 40%, transparent); border-left-color: var(--me); }
+/* Will be recorded: orange, as recorded is green (Echo's recording colour). */
+.ev.scheduled { background: color-mix(in srgb, var(--recording) 12%, var(--surface)); border-color: color-mix(in srgb, var(--recording) 40%, transparent); border-left-color: var(--recording); }
+.ev.past:not(.recorded):not(.transcript) { opacity: 0.55; }
+/* Not recorded, but Teams has its transcript: one to import (blue — green is recorded, orange will be). */
+.ev.transcript { background: color-mix(in srgb, var(--spk3) 12%, var(--surface)); border-color: color-mix(in srgb, var(--spk3) 45%, transparent); border-style: dashed; border-left: 3px solid var(--spk3); }
+.ev .tag.tr { color: var(--spk3); }
+.ev.declined, .ev.cancelled { opacity: 0.45; }
+.ev.declined b, .ev.cancelled b { text-decoration: line-through; }
+.ev.call { background: color-mix(in srgb, var(--me) 12%, var(--surface)); border-left-color: var(--me); border-style: solid; }
+.tag { font-size: 10px; font-weight: 700; letter-spacing: 0.01em; }
+.tag.rec { color: var(--me); }
+.tag.will { color: color-mix(in srgb, var(--recording) 75%, var(--text)); }
+.tag.no { color: var(--text-3); }
+
+.detail {
+  position: fixed; right: 14px; top: 64px; width: min(400px, calc(100vw - 24px)); max-height: calc(100vh - 88px); z-index: 5;
+  border: 1px solid var(--line-strong); border-radius: var(--r-panel); box-shadow: var(--shadow);
+  padding: 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; background: var(--surface);
+}
+.detail h2 { margin: 0; font-size: 16px; font-weight: 650; line-height: 1.3; letter-spacing: -0.01em; }
+.detail .when { color: var(--text-2); font-size: 12.5px; }
+.detail dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font-size: 12.5px; }
+.detail dt { color: var(--text-3); }
+.detail dd { margin: 0; color: var(--text); overflow-wrap: anywhere; }
+.detail .acts { display: flex; flex-direction: column; gap: 6px; }
+.detail .acts .btn { justify-content: center; }
+.detail .why { color: var(--text-3); font-size: 12px; }
+.detail ul { margin: 0; padding-left: 16px; color: var(--text-2); font-size: 12.5px; }
+.detail .close { align-self: flex-end; margin: -6px -6px 0 0; }
+
+/* Write minutes: buttons under the empty state, the run in progress */
+.notes-actions { display: flex; gap: 8px; justify-content: center; margin-top: 14px; }
+/* the countdown to automatic minutes (#42) */
+.mn-ring { width: 84px; height: 84px; margin: 0 auto 12px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  background: conic-gradient(var(--accent) 0 var(--left), var(--line) var(--left) 100%); }
+.mn-ring span { width: 70px; height: 70px; border-radius: 50%; background: var(--surface); display: flex; align-items: baseline; justify-content: center; gap: 2px; padding-top: 22px; box-sizing: border-box; }
+.mn-ring b { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.mn-ring small { font-size: 10px; color: var(--text-3); font-weight: 600; }
+.mn-moved { color: var(--text); }
+.mn-later { position: relative; }
+.mn-later .menu { top: 32px; left: 0; right: auto; }
+.mn-clock { display: inline-flex; align-items: center; margin-right: 6px; height: 18px; padding: 0 7px; border-radius: 9px; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 600; vertical-align: 1px; }
+.sb-minutes { color: var(--accent); }
+.empty p.alt, p.alt { color: var(--text-3); font-size: 12.5px; }
+p.alt { text-align: center; margin-top: 4px; }
+.empty .logo.busy { animation: echo-pulse 1.6s ease-in-out infinite; }
+@keyframes echo-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .55; transform: scale(.94); } }
+@media (prefers-reduced-motion: reduce) { .empty .logo.busy { animation: none; } }
+

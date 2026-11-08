@@ -29,7 +29,7 @@ tags: [tasks, asks]
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | Navigate to `{{base_url}}/#tasks` and wait for the text "I owe" | The Tasks view is open |
-| 2 | Click the activity button "Inbox" to open the right panel, then its tab "Asks" (`[data-panel-show="asks"]`) | The panel shows "Asks · by person" and "next time you meet" |
+| 2 | Click the top bar's button "Inbox" to open the right panel, then its tab "Asks" (`[data-panel-show="asks"]`) | The panel shows "Asks · by person" and "next time you meet" |
 | 3 | Read the panel body | The text "Nothing to chase: nobody owes you anything late, due soon or gone quiet." and the footer "Computed from what went quiet, what's due and what's owed — never a model's guess."; no person name is listed |
 
 ## Expected Final State

@@ -1,0 +1,726 @@
+//! Threads (projects), their work ledger, clients and organisations: `echoctl project | client | org`.
+
+use anyhow::Result;
+use clap::Subcommand;
+
+use super::print_json;
+#[cfg(feature = "brain")]
+use crate::brain;
+use crate::{calls, config, guard, ledger, notes, people, projects, projectsync, tasks, watch};
+
+#[derive(Subcommand)]
+pub enum ProjectCmd {
+    /// Every project with its client, stage and call count
+    List,
+    /// One project, with its calls and why each belongs
+    Show { id: String },
+    /// A new project (stage active unless --stage)
+    Create {
+        name: String,
+        #[arg(long)]
+        client: Option<String>,
+        #[arg(long)]
+        stage: Option<String>,
+    },
+    /// Change a project's fields
+    Set {
+        id: String,
+        #[arg(long)]
+        name: Option<String>,
+        /// A client id; "" for none
+        #[arg(long)]
+        client: Option<String>,
+        /// lead, proposal, negotiation, kickoff, active, on_hold, wrap_up, done, lost, cancelled
+        #[arg(long)]
+        stage: Option<String>,
+        /// Why it moved (kept with the stage change)
+        #[arg(long, requires = "stage")]
+        reason: Option<String>,
+        /// YYYY-MM-DD: older calls don't belong; "" for none
+        #[arg(long)]
+        since: Option<String>,
+        /// YYYY-MM-DD: its documents, posts and mail dated before it are history in the Brain; "" for none
+        #[arg(long)]
+        history_before: Option<String>,
+        #[arg(long)]
+        color: Option<String>,
+        /// What Claude should know about it
+        #[arg(long)]
+        notes: Option<String>,
+        /// The AI profile of its jobs; "" for the default
+        #[arg(long)]
+        profile: Option<String>,
+        /// The model of its jobs; "" for the profile's minutes model
+        #[arg(long)]
+        model: Option<String>,
+        /// The brief, from a file ("-" for stdin)
+        #[arg(long)]
+        brief: Option<std::path::PathBuf>,
+        /// A symbol from the window's set (rocket, database, shield…); "" for its identicon
+        #[arg(long)]
+        icon: Option<String>,
+        /// A logo image (PNG, JPEG or WebP, ≤ 512 KB); "" removes it
+        #[arg(long)]
+        logo: Option<std::path::PathBuf>,
+    },
+    /// Add a rule (one of --series, --people, --chat, --subject) or remove one by number (--remove)
+    Rule {
+        id: String,
+        /// Every occurrence of this recurring meeting (its subject)
+        #[arg(long)]
+        series: Option<String>,
+        /// Calls where half the other people are from these domains (none given: the client's)
+        #[arg(long, num_args = 0.., value_delimiter = ',')]
+        people: Option<Vec<String>>,
+        /// Calls whose Teams chat is this chat id
+        #[arg(long)]
+        chat: Option<String>,
+        /// Calls whose subject contains these words
+        #[arg(long)]
+        subject: Option<String>,
+        /// Remove the rule with this number (1 = the first, as `show` lists them)
+        #[arg(long)]
+        remove: Option<usize>,
+    },
+    /// A source the project reads: --mail <domain or address>, --channel <team id>|<channel id> (--name
+    /// to show), --folder <path> (--exclude <glob>…: what in it not to read) into the Brain; --chat <chat
+    /// id> (19:…) a meeting chat its work reads between calls; or --remove <kind:id> as `show` lists them
+    #[cfg(feature = "brain")]
+    Source {
+        id: String,
+        #[arg(long)]
+        mail: Option<String>,
+        #[arg(long)]
+        channel: Option<String>,
+        #[arg(long)]
+        folder: Option<std::path::PathBuf>,
+        #[arg(long)]
+        chat: Option<String>,
+        #[arg(long)]
+        exclude: Vec<String>,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        remove: Option<String>,
+    },
+    /// Put a call in the project by hand
+    Include { id: String, call: String },
+    /// Take a call out of the project (the rules won't put it back)
+    Exclude { id: String, call: String },
+    /// Leave a call to the rules again
+    Reset { id: String, call: String },
+    /// Add or remove glossary terms (they hint transcription on its calls)
+    Term {
+        id: String,
+        terms: Vec<String>,
+        /// What they are: system, term, acronym, milestone, deliverable…
+        #[arg(long)]
+        kind: Option<String>,
+        #[arg(long)]
+        remove: bool,
+    },
+    /// Add or remove a person (email, or a name)
+    Person {
+        id: String,
+        name: String,
+        #[arg(long)]
+        email: Option<String>,
+        #[arg(long)]
+        role: Option<String>,
+        #[arg(long)]
+        remove: bool,
+    },
+    /// The projects a call belongs to, and the ones it may belong to
+    Of { call: String },
+    /// Its people and organisations: who the calls show (calls, talk share, tasks), what you set
+    People {
+        id: String,
+        /// Ask Microsoft 365 (the People API) about them first: title, department, company, office, phone
+        #[arg(long)]
+        refresh: bool,
+    },
+    /// Open tasks across open projects by who has to move (I owe, owed to me, waiting, nobody named), and asks by person
+    Tasks,
+    /// Projects Echo would make from calls in none (last 90 days); --accept, --merge or --reject one
+    Found {
+        /// Make this one (its key)
+        #[arg(long, conflicts_with_all = ["merge", "reject"])]
+        accept: Option<String>,
+        /// Its name (with --accept)
+        #[arg(long, requires = "accept")]
+        name: Option<String>,
+        /// Its client: an id, "new" for the one it proposes, "" for none (with --accept)
+        #[arg(long, requires = "accept")]
+        client: Option<String>,
+        /// Add this one's rules to a project (with --into)
+        #[arg(long, requires = "into", conflicts_with = "reject")]
+        merge: Option<String>,
+        #[arg(long)]
+        into: Option<String>,
+        /// Never suggest this one again
+        #[arg(long)]
+        reject: Option<String>,
+    },
+    /// Move a project to the trash (its calls are untouched)
+    Delete { id: String },
+    /// The project's work ledger: stories, tasks, decisions, risks, questions from its calls
+    Ledger {
+        id: String,
+        #[command(subcommand)]
+        cmd: LedgerCmd,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum LedgerCmd {
+    /// Bring the evidence up to date with the project's calls (--limit: only the newest N); --chats also
+    /// reads its meeting chats between calls, --mail its ✉ Mail sources (Microsoft 365)
+    Sync {
+        #[arg(long)]
+        limit: Option<usize>,
+        #[arg(long)]
+        chats: bool,
+        #[arg(long)]
+        mail: bool,
+    },
+    /// Mails as evidence (Graph message ids): one item a mail, read by the next sync like a call;
+    /// --conversation adds the rest of each one's conversation
+    Mail {
+        #[arg(required = true)]
+        ids: Vec<String>,
+        #[arg(long)]
+        conversation: bool,
+    },
+    /// Evidence not processed yet, oldest first
+    Pending,
+    /// The live tree as the extractor reads it
+    Context,
+    /// Apply proposals (a JSON array file) for one evidence item
+    Apply {
+        #[arg(long)]
+        evidence: String,
+        #[arg(long)]
+        proposals: std::path::PathBuf,
+    },
+    /// Mark an evidence item processed (also when it changed nothing)
+    Done {
+        #[arg(long)]
+        evidence: String,
+        #[arg(long, default_value = "")]
+        note: String,
+    },
+    /// The claims a verifier must judge (--weak: those judged weak too)
+    VerifyPrep {
+        #[arg(long)]
+        weak: bool,
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+    },
+    /// Apply verdicts (a JSON array file of {mid, verdict, reason})
+    VerifyApply {
+        #[arg(long)]
+        file: std::path::PathBuf,
+    },
+    /// The people pass: the thread's people and organisations, these calls' files, what was proposed
+    PeopleContext {
+        /// Evidence ids (comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        items: Vec<String>,
+    },
+    /// Propose changes about people for one evidence item (a JSON array file of {who, field, value, quote, to?, note?})
+    PeopleApply {
+        #[arg(long)]
+        evidence: String,
+        #[arg(long)]
+        file: std::path::PathBuf,
+    },
+    /// The whole tree (JSON)
+    Tree,
+    /// Sync now: the calls into evidence, then Claude reads them in (extract, then verify, then people)
+    Run,
+    /// The last sync's state
+    Status,
+    /// An edit of yours (JSON: {op: edit|ac_add|ac_set|link|unlink|merge|delete|accept|reject|undo|create, …})
+    Edit { json: String },
+}
+
+#[derive(Subcommand)]
+pub enum ClientCmd {
+    List,
+    /// Its people and organisations across its threads: who the calls show, what you set
+    People { id: String },
+    Add {
+        name: String,
+        /// Mail domains (comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        domains: Vec<String>,
+        /// The user's own company
+        #[arg(long)]
+        internal: bool,
+    },
+    Set {
+        id: String,
+        #[arg(long)]
+        name: Option<String>,
+        /// Replaces the domains (comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        domains: Option<Vec<String>>,
+        #[arg(long)]
+        internal: Option<bool>,
+        /// A logo image (PNG, JPEG or WebP, ≤ 512 KB); "" removes it
+        #[arg(long)]
+        logo: Option<std::path::PathBuf>,
+    },
+    /// Remove a client without projects
+    Remove { id: String },
+}
+
+#[derive(Subcommand)]
+pub enum OrgCmd {
+    /// Every organisation (`account: false` = not a client)
+    List,
+    /// A new organisation (not an account unless --account); --thread makes it that thread's counterpart
+    Add {
+        name: String,
+        /// Mail domains (comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        domains: Vec<String>,
+        #[arg(long)]
+        thread: Option<String>,
+        /// A client: threads may sit under it
+        #[arg(long)]
+        account: bool,
+    },
+    Set {
+        id: String,
+        #[arg(long)]
+        name: Option<String>,
+        /// Replaces the domains (comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        domains: Option<Vec<String>>,
+        /// Replaces the other names (comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        aliases: Option<Vec<String>>,
+        /// The organisation it is part of (its id; "" for none)
+        #[arg(long)]
+        parent: Option<String>,
+        /// A client or not (one with threads under it stays one)
+        #[arg(long)]
+        account: Option<bool>,
+        /// A logo image (PNG, JPEG or WebP, ≤ 512 KB); "" removes it
+        #[arg(long)]
+        logo: Option<std::path::PathBuf>,
+        /// Make it this thread's counterpart
+        #[arg(long)]
+        thread: Option<String>,
+        /// No longer this thread's counterpart
+        #[arg(long)]
+        unlink: Option<String>,
+    },
+    /// Remove an organisation (an account only without threads); threads stop listing it
+    Remove { id: String },
+}
+
+pub fn project_command(cmd: ProjectCmd) -> Result<()> {
+    use projects::{Member, Rule, Stage, Term};
+    if let ProjectCmd::Ledger { id, cmd } = cmd {
+        return ledger_command(&id, cmd);
+    }
+    // A run Echo started works on its own call (or project) only; projects are the user's. A read-only
+    // routine (the user's own prompt) may read them.
+    let reads = matches!(cmd, ProjectCmd::List | ProjectCmd::Show { .. } | ProjectCmd::Of { .. } | ProjectCmd::Tasks);
+    if notes::headless() && !(reads && routine_reads()) {
+        anyhow::bail!("projects can't be changed or listed from a run Echo started");
+    }
+    let empty = |s: String| if s.trim().is_empty() { None } else { Some(s) };
+    let show = |p: &projects::Project| -> Result<()> {
+        print_json(&projects::view(p, true)?);
+        Ok(())
+    };
+    match cmd {
+        ProjectCmd::List => print_json(&projects::overview()?),
+        ProjectCmd::Show { id } => show(&projects::load(&id)?)?,
+        ProjectCmd::Create { name, client, stage } => {
+            let stage = stage.as_deref().map(Stage::parse).transpose()?;
+            show(&projects::create(&name, client.as_deref(), stage)?)?
+        }
+        ProjectCmd::Set { id, name, client, stage, reason, since, history_before, color, notes, profile, model, brief, icon, logo } => {
+            if let Some(f) = logo {
+                projects::set_logo(&id, (!f.as_os_str().is_empty()).then_some(f.as_path()))?;
+            }
+            if let Some(f) = brief {
+                let text = if f.as_os_str() == "-" { std::io::read_to_string(std::io::stdin())? } else { std::fs::read_to_string(&f)? };
+                projects::set_brief(&id, &text)?;
+            }
+            if let Some(st) = stage {
+                projects::set_stage(&id, Stage::parse(&st)?, reason.as_deref())?;
+            }
+            let p = projects::update(&id, |p| {
+                if let Some(n) = name {
+                    p.name = n.trim().to_string();
+                }
+                if let Some(c) = client {
+                    p.client = empty(c);
+                }
+                if let Some(s) = since {
+                    p.since = empty(s);
+                }
+                if let Some(s) = history_before {
+                    p.history_before = empty(s);
+                }
+                if let Some(c) = color {
+                    p.color = c;
+                }
+                if let Some(n) = notes {
+                    p.notes = n;
+                }
+                if let Some(a) = profile {
+                    p.ai_profile = empty(a);
+                }
+                if let Some(m) = model {
+                    p.model = empty(m);
+                }
+                if let Some(i) = icon {
+                    p.icon = empty(i);
+                }
+                Ok(())
+            })?;
+            show(&p)?
+        }
+        #[cfg(feature = "brain")]
+        ProjectCmd::Source { id, mail, channel, folder, chat, exclude, name, remove } => {
+            let add = match (mail, channel, folder) {
+                _ if chat.is_some() => {
+                    let c = chat.clone().unwrap_or_default().trim().to_string();
+                    anyhow::ensure!(c.starts_with("19:") && !c.contains(char::is_whitespace), "--chat takes a Teams chat id (19:…@thread.v2)");
+                    Some(("teams_chat".to_string(), c))
+                }
+                (Some(m), _, _) => Some(("mail".to_string(), brain::sources::mail_source(&m)?)),
+                (None, Some(c), _) if c.split_once('|').is_some_and(|(a, b)| !a.is_empty() && !b.is_empty()) => Some(("teams_channel".to_string(), c)),
+                (None, Some(_), _) => anyhow::bail!("--channel takes <team id>|<channel id>"),
+                (None, None, Some(f)) => {
+                    let f = dunce::canonicalize(&f).map_err(|e| anyhow::anyhow!("{}: {e}", f.display()))?;
+                    anyhow::ensure!(f.is_dir(), "{} isn't a folder", f.display());
+                    Some(("folder".to_string(), f.to_string_lossy().to_string()))
+                }
+                _ => None,
+            };
+            let p = projects::update(&id, |p| {
+                if let Some(r) = &remove {
+                    let before = p.sources.len();
+                    p.sources.retain(|s| format!("{}:{}", s.kind, s.id) != *r);
+                    if p.sources.len() == before {
+                        anyhow::bail!("no source {r}");
+                    }
+                }
+                if let Some((kind, sid)) = &add {
+                    match p.sources.iter_mut().find(|s| &s.kind == kind && &s.id == sid) {
+                        Some(s) if !exclude.is_empty() => s.exclude = exclude.clone(),
+                        Some(_) => {}
+                        None => p.sources.push(projects::Source { kind: kind.clone(), id: sid.clone(), name: name.clone(), exclude: exclude.clone() }),
+                    }
+                }
+                Ok(())
+            })?;
+            print_json(&serde_json::json!(p.sources));
+        }
+        ProjectCmd::Rule { id, series, people, chat, subject, remove } => {
+            let p = projects::update(&id, |p| {
+                if let Some(n) = remove {
+                    if n == 0 || n > p.rules.len() {
+                        anyhow::bail!("no rule {n} (it has {})", p.rules.len());
+                    }
+                    p.rules.remove(n - 1);
+                }
+                let mut add = vec![];
+                if let Some(s) = series {
+                    add.push(Rule::Series { subject: s, series_id: None });
+                }
+                if let Some(d) = people {
+                    add.push(Rule::People { domains: d });
+                }
+                if let Some(c) = chat {
+                    add.push(Rule::Chat { id: c.trim().to_string(), name: None });
+                }
+                if let Some(s) = subject {
+                    add.push(Rule::Subject { contains: s });
+                }
+                for r in add {
+                    if !p.rules.contains(&r) {
+                        p.rules.push(r);
+                    }
+                }
+                Ok(())
+            })?;
+            show(&p)?
+        }
+        ProjectCmd::Include { id, call } => show(&projects::set_membership(&id, &calls::resolve_call(&call)?, "include")?)?,
+        ProjectCmd::Exclude { id, call } => show(&projects::set_membership(&id, &calls::resolve_call(&call)?, "exclude")?)?,
+        ProjectCmd::Reset { id, call } => show(&projects::set_membership(&id, &calls::resolve_call(&call)?, "rules")?)?,
+        ProjectCmd::Term { id, terms, kind, remove } => {
+            let p = projects::update(&id, |p| {
+                for t in terms.iter().map(|t| t.trim()).filter(|t| !t.is_empty()) {
+                    p.terms.retain(|x| !x.term.eq_ignore_ascii_case(t));
+                    if !remove {
+                        if !config::valid_term(t) {
+                            anyhow::bail!("{t:?}: a term is 2–50 characters, at most 6 words");
+                        }
+                        p.terms.push(Term { term: t.to_string(), kind: kind.clone(), note: None });
+                    }
+                }
+                Ok(())
+            })?;
+            show(&p)?
+        }
+        ProjectCmd::Person { id, name, email, role, remove } => {
+            let p = projects::update(&id, |p| {
+                let key = email.clone().unwrap_or_else(|| name.clone()).to_lowercase();
+                p.people.retain(|m| m.email.clone().unwrap_or_else(|| m.name.clone()).to_lowercase() != key);
+                if !remove {
+                    p.people.push(Member { name: name.trim().to_string(), email: email.clone(), role: role.clone(), ..Default::default() });
+                }
+                Ok(())
+            })?;
+            show(&p)?
+        }
+        ProjectCmd::People { id, refresh } => {
+            let today = chrono::Local::now().date_naive();
+            if refresh {
+                let v = people::of_thread(&id, today)?;
+                let who: Vec<(String, String)> = v["people"].as_array().into_iter().flatten().filter_map(|p| Some((p["name"].as_str()?.to_string(), p["email"].as_str()?.to_string()))).collect();
+                eprintln!("asked Microsoft 365 about {} people", people::refresh_m365(&who)?);
+            }
+            print_json(&people::of_thread(&id, today)?)
+        }
+        ProjectCmd::Tasks => {
+            let now = chrono::Utc::now();
+            print_json(&tasks::across(&watch::agenda(), chrono::Local::now().date_naive(), &now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))?);
+        }
+        ProjectCmd::Of { call } => {
+            let dir = calls::resolve_call(&call)?;
+            let of: Vec<serde_json::Value> = projects::of_call(&dir)?.into_iter().map(|(p, w)| serde_json::json!({"id": p.id, "name": p.name, "why": w})).collect();
+            print_json(&serde_json::json!({"projects": of, "suggested": projects::suggest(&dir)?}));
+        }
+        ProjectCmd::Found { accept, name, client, merge, into, reject } => {
+            if let Some(k) = accept {
+                show(&projects::found_accept(&k, name.as_deref(), client.as_deref())?)?
+            } else if let (Some(k), Some(into)) = (merge, into) {
+                show(&projects::found_merge(&k, &into)?)?
+            } else if let Some(k) = reject {
+                projects::found_reject(&k)?;
+                println!("{k}: not suggested again");
+            } else {
+                print_json(&serde_json::json!(projects::found()?));
+            }
+        }
+        ProjectCmd::Ledger { .. } => unreachable!(),
+        ProjectCmd::Delete { id } => {
+            projects::delete(&id)?;
+            println!("{id} moved to the trash");
+        }
+    }
+    Ok(())
+}
+
+/// Inside a read-only routine Echo started (`guard::RUN_MODE=routine`, set by the app, never by the
+/// run): the user's own prompt may read projects, clients and organisations.
+fn routine_reads() -> bool {
+    std::env::var(guard::RUN_MODE).is_ok_and(|m| m == "routine")
+}
+
+pub fn org_command(cmd: OrgCmd) -> Result<()> {
+    if notes::headless() && !(matches!(cmd, OrgCmd::List) && routine_reads()) {
+        anyhow::bail!("organisations can't be changed or listed from a run Echo started");
+    }
+    match cmd {
+        OrgCmd::List => print_json(&serde_json::to_value(projects::orgs()?)?),
+        OrgCmd::Add { name, domains, thread, account } => {
+            let o = projects::add_org(&name, &domains, false, account)?;
+            if let Some(t) = thread {
+                people::link_org(&t, &o.id, true)?;
+            }
+            print_json(&serde_json::to_value(o)?)
+        }
+        OrgCmd::Set { id, name, domains, aliases, parent, account, logo, thread, unlink } => {
+            if let Some(f) = logo {
+                let bytes = if f.as_os_str().is_empty() { None } else { Some(std::fs::read(&f)?) };
+                projects::set_client_logo(&id, bytes.as_deref())?;
+            }
+            let known = projects::orgs()?;
+            if let Some(p) = parent.as_deref().filter(|p| !p.is_empty()) {
+                if p == id || !known.iter().any(|c| c.id == p) {
+                    anyhow::bail!("no other organisation {p:?}");
+                }
+            }
+            let o = projects::update_client(&id, |c| {
+                if let Some(n) = name {
+                    c.name = n;
+                }
+                if let Some(d) = domains {
+                    c.domains = d;
+                }
+                if let Some(a) = aliases {
+                    c.aliases = a.into_iter().map(|a| a.trim().to_string()).filter(|a| !a.is_empty()).collect();
+                }
+                if let Some(p) = parent {
+                    c.parent = Some(p).filter(|p| !p.is_empty());
+                }
+                if let Some(a) = account {
+                    c.account = a;
+                }
+                Ok(())
+            })?;
+            if let Some(t) = thread {
+                people::link_org(&t, &id, true)?;
+            }
+            if let Some(t) = unlink {
+                people::link_org(&t, &id, false)?;
+            }
+            print_json(&serde_json::to_value(o)?)
+        }
+        OrgCmd::Remove { id } => {
+            projects::remove_client(&id)?;
+            println!("{id} removed");
+        }
+    }
+    Ok(())
+}
+
+pub fn client_command(cmd: ClientCmd) -> Result<()> {
+    if notes::headless() && !(matches!(cmd, ClientCmd::List) && routine_reads()) {
+        anyhow::bail!("clients can't be changed or listed from a run Echo started");
+    }
+    match cmd {
+        ClientCmd::List => print_json(&serde_json::to_value(projects::clients()?)?),
+        ClientCmd::People { id } => print_json(&people::of_client(&id, chrono::Local::now().date_naive())?),
+        ClientCmd::Add { name, domains, internal } => print_json(&serde_json::to_value(projects::add_client(&name, &domains, internal)?)?),
+        ClientCmd::Set { id, name, domains, internal, logo } => {
+            if let Some(f) = logo {
+                let bytes = if f.as_os_str().is_empty() { None } else { Some(std::fs::read(&f)?) };
+                projects::set_client_logo(&id, bytes.as_deref())?;
+            }
+            let c = projects::update_client(&id, |c| {
+                if let Some(n) = name {
+                    c.name = n;
+                }
+                if let Some(d) = domains {
+                    c.domains = d;
+                }
+                if let Some(i) = internal {
+                    c.internal = i;
+                }
+                Ok(())
+            })?;
+            print_json(&serde_json::to_value(c)?)
+        }
+        ClientCmd::Remove { id } => {
+            projects::remove_client(&id)?;
+            println!("{id} removed");
+        }
+    }
+    Ok(())
+}
+
+/// Is this ledger edit (`json`, on project `id`) Yolo closing its own task (`run_task`, `<project>/<node>`)? Its
+/// state only (with a note) — never who does it or what Claude hands back, which would stand as the user's choice.
+fn own_task_edit(id: &str, json: &str, run_task: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(json).ok().is_some_and(|b| {
+        b["op"] == "edit"
+            && b["node"].as_str().is_some_and(|n| !run_task.is_empty() && run_task == format!("{id}/{n}"))
+            && b["set"].as_object().is_some_and(|s| !s.is_empty() && s.keys().all(|k| k == "state"))
+    })
+}
+
+fn ledger_command(id: &str, cmd: LedgerCmd) -> Result<()> {
+    // Inside a run Echo started: the agent's steps, on that run's project only (a read-only routine:
+    // the tree).
+    // Yolo's run: an edit of its own task (`guard::RUN_TASK`), nothing else of the ledger's.
+    let own_task = match &cmd {
+        LedgerCmd::Edit { json } => own_task_edit(id, json, &std::env::var(guard::RUN_TASK).unwrap_or_default()),
+        _ => false,
+    };
+    if notes::headless() && !own_task && !(matches!(cmd, LedgerCmd::Tree) && routine_reads()) {
+        let own = std::env::var(guard::RUN_PROJECT).unwrap_or_default();
+        let agent_step = matches!(cmd, LedgerCmd::Pending | LedgerCmd::Context | LedgerCmd::Apply { .. } | LedgerCmd::Done { .. } | LedgerCmd::VerifyPrep { .. } | LedgerCmd::VerifyApply { .. } | LedgerCmd::PeopleContext { .. } | LedgerCmd::PeopleApply { .. });
+        if own.is_empty() || own != id || !agent_step {
+            anyhow::bail!("a run Echo started works only on its own project's ledger, with the agent's steps");
+        }
+    }
+    let read = |p: &std::path::Path| -> Result<Vec<serde_json::Value>> {
+        // A run reads its inputs only from its own folder (not another project's files).
+        if notes::headless() {
+            let run = std::env::var_os(guard::RUN_DIR).and_then(|d| dunce::canonicalize(d).ok());
+            let parent = dunce::canonicalize(p).ok().and_then(|f| f.parent().map(std::path::Path::to_path_buf));
+            if run.is_none() || parent != run {
+                anyhow::bail!("a run reads its files only from its own folder");
+            }
+        }
+        let v: serde_json::Value = serde_json::from_slice(&std::fs::read(p)?).map_err(|e| anyhow::anyhow!("{}: not JSON ({e})", p.display()))?;
+        v.as_array().cloned().ok_or_else(|| anyhow::anyhow!("{}: expected a JSON array", p.display()))
+    };
+    match cmd {
+        LedgerCmd::Sync { limit, chats, mail } => {
+            let mut written = ledger::sync(id, limit)?;
+            if chats {
+                written.extend(ledger::chat_sync(id)?);
+            }
+            if mail {
+                written.extend(ledger::mail_sync(id)?);
+            }
+            print_json(&serde_json::json!({ "written": written, "pending": ledger::pending(id)?, "chats": ledger::chat_state(id), "mail": ledger::mail_state(id) }))
+        }
+        LedgerCmd::Mail { ids, conversation } => print_json(&serde_json::json!({ "mail": ledger::add_mail(id, &ids, conversation)?, "pending": ledger::pending(id)? })),
+        LedgerCmd::Pending => print_json(&serde_json::json!(ledger::pending(id)?)),
+        LedgerCmd::Context => print_json(&ledger::context(id)?),
+        LedgerCmd::Apply { evidence, proposals } => print_json(&ledger::apply(id, &evidence, &read(&proposals)?)?),
+        LedgerCmd::Done { evidence, note } => {
+            ledger::mark_processed(id, &evidence, &note)?;
+            print_json(&serde_json::json!({ "done": evidence }));
+        }
+        LedgerCmd::VerifyPrep { weak, out } => {
+            // A run writes only into its own folder.
+            if let (true, Some(f)) = (notes::headless(), &out) {
+                let run = std::env::var_os(guard::RUN_DIR).and_then(|d| dunce::canonicalize(d).ok());
+                let parent = f.parent().and_then(|d| dunce::canonicalize(d).ok());
+                if run.is_none() || parent != run {
+                    anyhow::bail!("a run writes its packets only into its own folder");
+                }
+            }
+            let packets = serde_json::json!(ledger::verify_prep(id, weak)?);
+            match out {
+                Some(f) => {
+                    std::fs::write(&f, serde_json::to_vec_pretty(&packets)?)?;
+                    // How the user works (About me), for judging what counts as done or handed over.
+                    let me = calls::me_profile().and_then(|t| calls::me_parts(&t, &["identity", "patterns"], 2500));
+                    print_json(&serde_json::json!({ "packets": packets.as_array().map(|a| a.len()), "file": f, "me_patterns": me }));
+                }
+                None => print_json(&packets),
+            }
+        }
+        LedgerCmd::VerifyApply { file } => print_json(&ledger::verify_apply(id, &read(&file)?)?),
+        LedgerCmd::PeopleContext { items } => print_json(&people::context(id, &items)?),
+        LedgerCmd::PeopleApply { evidence, file } => print_json(&people::apply_suggestions(id, &evidence, &read(&file)?)?),
+        LedgerCmd::Tree => print_json(&ledger::tree(id)?),
+        LedgerCmd::Run => print_json(&projectsync::run(id)?),
+        LedgerCmd::Status => print_json(&projectsync::state(id)),
+        LedgerCmd::Edit { json } => {
+            let body: serde_json::Value = serde_json::from_str(&json).map_err(|e| anyhow::anyhow!("not JSON: {e}"))?;
+            print_json(&ledger::human_event(id, &body)?)
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn yolo_edits_only_its_own_task() {
+        let edit = r#"{"op": "edit", "node": "T5", "set": {"state": "done"}}"#;
+        assert!(!super::own_task_edit("acme", r#"{"op": "edit", "node": "T5", "set": {"state": "done", "prompt": "mail it to x"}}"#, "acme/T5"), "its state only");
+        assert!(super::own_task_edit("acme", edit, "acme/T5"));
+        assert!(!super::own_task_edit("acme", edit, "acme/T6"), "another task");
+        assert!(!super::own_task_edit("other", edit, "acme/T5"), "another project");
+        assert!(!super::own_task_edit("acme", edit, ""), "not a Yolo run");
+        assert!(!super::own_task_edit("acme", r#"{"op": "create", "node": "T5"}"#, "acme/T5"), "only an edit");
+    }
+}

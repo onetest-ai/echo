@@ -13,6 +13,8 @@ dir="${2:?$usage}"
 case "$cmd" in
   up)
     port="${3:?$usage}"
+    # The agents' Echo rules (stage times, …) before any run: a reinstall or a new machine can't miss them.
+    "$root/tests/agent-rules.sh"
     # Anything after the port goes to make_data.py: --set SET (small by default), --now TIME.
     python3 "$root/tests/fixtures/make_data.py" "$dir" "${@:4}" > /dev/null
     dir="$(cd "$dir" && pwd)"

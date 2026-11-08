@@ -2,7 +2,7 @@
 app_name: Echo
 base_url: http://127.0.0.1:47930
 auth_type: none
-last_updated: 2026-11-07
+last_updated: 2026-11-08
 ---
 
 # Echo — app profile for functional tests
@@ -25,9 +25,11 @@ agent tests it. This file is given to every manual-qa role; where it differs fro
    `ECHOCTL_CONFIG_DIR` and unsets Claude Code's session variables). A command without it would touch the real data.
 4. **Steps are the window (Playwright MCP) or the CLI (Bash).** The runner may use Bash only for `echoctl` with the
    run's env, reading files in the run's data folder, and `tests/fixtures/*`. No other scripts, no edits to the repo.
-   One exception: a case that says it records with the test call may also run TestCall, `afplay`, `nohup`, `kill`,
-   `sleep`, `ls`, `grep`, `cat`, `find`, `pgrep -P <the run's app pid>` and `scripts/fetch-nemo-speech.sh` into the run's
-   config, and click Echo's own dialog through System Events by that dialog's pid (see "Recording with the test call").
+   `tests/fixtures/*` includes `recordings.py` (copies of the calls recorded once per build) and `wait.py` (wait for
+   the app's state or a file, with a timeout). One exception: a case that says it records with the test call may also
+   run TestCall, `afplay`, `nohup`, `kill`, `sleep`, `ls`, `grep`, `cat`, `find`, `date`, `printf`, `pgrep -P <the run's
+   app pid>` and `scripts/fetch-nemo-speech.sh` into the run's config, and click Echo's own dialog through System Events
+   by that dialog's pid (see "Recording with the test call").
    Another: the clean-install runs use the commands their cases name ("Clean-install runs" below).
 5. **`run: person` cases are for a person** (a real call, Teams, macOS permissions, an install, the tray, Windows,
    Claude Code runs that need a signed-in account). The lead lists them in the report as `skipped (person)` and never
@@ -86,17 +88,19 @@ echo $! > "$dir/pid"                                              # the pid, for
 
 ## The window
 
-Left activity bar (icons, top to bottom): Today, Calls, Calendar, Threads, Tasks; Inbox and Settings at the bottom.
-The bar is icon-only until "Expand the sidebar" (`data-cmd="bar-flip"`) is pressed. **Inbox is not a view**: it is a
-tab of the right-hand panel (button `data-panel-flip="needs"`), there is no `#inbox` route. Viewport used: 1201x868.
+Left activity bar (icons, top to bottom): Today, Calls, Calendar, Threads, Tasks; Settings at the bottom.
+The bar is icon-only until "Expand the sidebar" (`data-cmd="bar-flip"`) is pressed. The top bar (`#r-top`) holds, left
+to right: that switch, the Record pill (Record, the call's language, Memo) and, at its right end, the account chip
+(`.acct`: the default AI profile) and the Inbox icon. **Inbox is not a view**: it is a tab of the right-hand panel
+(button `data-panel-flip="needs"`, in the top bar), there is no `#inbox` route. Viewport used: 1201x868.
 Routes (`{{base_url}}/#…`; load `{{base_url}}/` first, then a route can be opened by `browser_navigate` to
 `{{base_url}}/#…` — it changes the hash without reloading):
 
 | Route | View |
 |---|---|
 | `#today` (or `#`) | Today: hello, **Your day** (meetings and calls in time order, the line "now"), **My work · this week**, Coming up today |
-| `#calls` · `#call/<folder>` · `#call/<folder>/<tab>` | Calls list + a call: tabs `minutes`, `transcript` (a call opens on the tab last used, `minutes` at first, kept from call to call; `doc()` falls back to `minutes` only when the kept tab does not exist for the call). `#calls` alone opens the newest call on `minutes` (app.js sets `S.selected` to the first call); "Pick a call" shows only when no call is picked, e.g. an empty list |
-| `#calendar` · `#calendar/day` · `#calendar/week` | Calendar (`#calendar` lands on `#calendar/week`) |
+| `#calls` · `#call/<folder>` · `#call/<folder>/<tab>` | Calls list + a call: tabs `minutes`, `transcript` (a call opens on the tab last used, `minutes` at first, kept from call to call; `doc()` falls back to `minutes` only when the kept tab does not exist for the call). `#calls` alone depends on how it is reached: a **full page load** of `{{base_url}}/#calls` (goto from another page, or a reload) opens the newest call and rewrites the URL to `#call/<folder>/minutes` (the start-up code sets `S.selected` to the first call), and so does the activity bar's Calls button `[data-go="calls"]`; a **hash change** to `#calls` from another view (`browser_navigate` after the page is loaded, `location.hash`) picks no call and shows "Pick a call". A case that needs a call open clicks its row `[data-call="<folder>"]` |
+| `#calendar` · `#calendar/day` · `#calendar/week` | Calendar. A full load of `#calendar` shows the Week view ("Week" pressed) and keeps the URL at `#calendar`; clicking "Week" or "Day" sets `#calendar/week` or `#calendar/day`. A hash change from `#calendar/day` to `#calendar` stays on Day |
 | `#projects` · `#projects/<id>` · `#project/<id>/<tab>` | Threads (UI name; `projects` in the CLI). The app itself writes `#project/<id>/<tab>` (singular), tabs `brief`, `work`, `calls`, `people`, `profile`; the plural form is also accepted. `#projects` (Threads button) opens the last thread on its `work` tab |
 | `#client/<id>` · `#client/<id>/<tab>` | A client, tabs `overview`, `calls`, `tasks`, `people`, `profile` (opened from a thread's "Thread actions" → "Open Acme") |
 | `#tasks` | Tasks: piles I owe, owed to me, waiting, nobody, plus a folded "Others" pile |
@@ -105,6 +109,13 @@ Routes (`{{base_url}}/#…`; load `{{base_url}}/` first, then a route can be ope
 Not routes: the Details drawer, My notes, Vocabulary, Asks and Inbox are panels on the right (or bottom); the
 actions palette (`Actions ⌘K`, `[data-pal-open]`) is a dialog. A "Knowledge" activity (`#brain`) exists only while
 Recall is on; it is off on test data.
+
+Live notes are in **My notes** (`[data-panel-flip="notes"]`; the right panel `aside#r-right`, outside `main`), not in the
+Transcript tab, which is the transcript alone at full width: a box `section[aria-label="Live notes"]` above the list (Now
+`.nl-now`, the status line `.nl-status`, the ⋯ menu `[data-live-menu]` → `.nl-menu` with the call's model
+`[data-callprofile]`, Pause / Resume while recording, Ask Claude about this call), then one list `#nt-list` where the
+live notes' items (`.nt-entry.nt-livei`, marked ✦, read-only) sit among the user's notes by time, and the answers
+under "Asked about this call". A call with no live notes kept (or live notes off) has no box and no ✦ rows.
 
 Selectors: prefer roles and visible text (`getByRole('button', {name: 'Prepare'})`, headings such as "Your day").
 Elements the app acts on carry `data-*` attributes (`data-call`, `data-go`, `data-prep-write`, `data-schedule`,
@@ -131,12 +142,13 @@ Elements the app acts on carry `data-*` attributes (`data-call`, `data-go`, `dat
   `evaluate` cannot read it and `browser_wait_for text` does not see its text — it times out). The accessibility
   snapshot does list its content (refs `f1eN`); to act inside use `iframe#minutes-frame >> internal:control=enter-frame >> .ts >> nth=0`
   (time chips are `.ts`), or `page.frameLocator('#minutes-frame')` in `browser_run_code_unsafe`.
-- **Narrow viewport squeezes the minutes.** At 1201 px wide, with the sidebar expanded and a right panel open
-  (My notes, Details) the minutes frame is 1 px wide (153 px with the sidebar folded): its chips are covered by the
-  "What moved" aside and a click fails with "intercepts pointer events". Close the panel (`[aria-label="Close the panel"]`)
-  and keep the sidebar folded before acting in the minutes.
+- **A right panel narrows the minutes.** The minutes frame takes the whole Minutes tab (What moved is a right panel
+  view, not a column beside it): at 1201 px with the calls list and a right panel open it is about 380 px wide, with the
+  panel closed about 700 px. Close the panel (`[aria-label="Close the panel"]`) when a step needs the minutes wide.
 - Menus: "Call actions" and "Thread actions" open on click (no hover needed) and close on Escape. Native
   `<select>`s (Thread, Who does it, Order, Group by, Layout, Kind, Owner; task Status once its button is clicked) need `browser_select_option`, not clicks.
+- **`browser_run_code_unsafe` keeps no globals between calls**: each call runs in a fresh context, so `globalThis.x` set in one call is gone in the next. Keep state across calls on the `page` object (`page.__dlg`), which is the same page from call to call; the hostile cases' guard and check D do so.
+- **The served window sends no Content-Security-Policy header**: `window --serve` forwards only the Content-Type of `respond`'s answer (`window/mod.rs`, the serve loop), so the window's own CSP and the minutes page's header policy apply only in the native webview. The minutes page also carries its policy in a `<meta http-equiv="Content-Security-Policy">` tag, which the browser enforces in both; read the policy there.
 - **Reload after a CLI change.** A hash-only Navigate does not refetch data after an `echoctl` step that changed it: reload the page fully (`location.reload()` or reload `{{base_url}}/`), then navigate.
 - Transcript "Find" highlights (class `hit` on `.turn`) a moment after the text is entered; read the DOM after a short wait.
 - A right panel keeps its last tab: after opening a task it shows Details, and clicking Inbox flips it back.
@@ -198,9 +210,10 @@ All verified on the test data in a live session. Roles and names first, then the
 
 | Element | Selector | Page | Notes |
 |---|---|---|---|
-| Activity buttons | `nav[aria-label="Activities"] [data-go="today"\|"calls"\|"calendar"\|"projects"\|"tasks"\|"settings"]` | all | Inbox is `[data-panel-flip="needs"]`; role `button` named "Today", "Calls", … . Scope to the nav: on Today a second `[data-go="tasks"]` (the "Tasks" link in My work) makes the bare selector ambiguous |
+| Activity buttons | `nav[aria-label="Activities"] [data-go="today"\|"calls"\|"calendar"\|"projects"\|"tasks"\|"settings"]` | all | Inbox is `[data-panel-flip="needs"]` in the top bar, not in this nav; role `button` named "Today", "Calls", … . Scope to the nav: on Today a second `[data-go="tasks"]` (the "Tasks" link in My work) makes the bare selector ambiguous |
 | Expand/fold sidebar | `[data-cmd="bar-flip"]` | all | label switches "Expand the sidebar" / "Fold the sidebar" |
-| Record controls | `[data-cmd="record"]`, `[data-cmd="record-memo"]`, `select[aria-label="Language of the call"]` | top bar | do not press Record on test data |
+| Record controls | `[data-cmd="record"]`, `[data-cmd="record-memo"]`, `select[aria-label="Language of the call"]` | top bar | do not press Record on test data; the pill holds no profile picker |
+| Account chip | `#r-top .acct`: with two or more profiles a label over `select[aria-label="AI profile"]` (choosing one makes it the default, as Make default); with one a button named "AI profile: <name>" that opens `#settings/ai` | top bar, left of Inbox | a native select: `browser_select_option` |
 | Actions palette | `[data-pal-open]`, input `[aria-label="Action"]`, dialog `.pal`, list `#pal-list` | all | |
 | Right panel | `[aria-label="Right panel"]`; tabs `[data-panel-show="needs"\|"vocabulary"\|"work-item"\|"asks"]`; `[aria-label="Close the panel"]`, `[aria-label="Move to the bottom panel"]` | all | the My notes tab is `[data-panel-show]` too |
 | Call row | `[data-call="<folder>"]` (role `option`, in `[role=listbox][aria-label="Calls"]`) | #calls | Today's "Open the call" / "New minutes" use `[data-call]` and `[data-call-tab="minutes"]` |
@@ -210,7 +223,7 @@ All verified on the test data in a live session. Roles and names first, then the
 | My notes toggle | `[aria-label="My notes"]` (a toggle, `aria-pressed`) | #call | panel box `[aria-label="New note"]` (Enter adds), buttons Note / ? Question / ! Decision / ☐ To-do |
 | Minutes frame | `iframe#minutes-frame` → `.ts` time chips | #call/minutes | see Fragile areas |
 | Transcript | `[aria-label="Find in transcript"]` / `#find`; turns `.turn[data-t]` (`me`/`remote`), match = class `hit`; speaker `.who` ("Me" + a `.lang` chip "en") | #call/transcript | the visible name reads "Meen": Me + the language chip |
-| What moved | `[aria-label="What moved"]`; "Sync now" `[data-cc-sync="<thread>"]` | #call | starts Claude Code: do not press |
+| What moved | a right panel view: the call header's button `[data-panel-flip="moved"]` (beside My notes, with the count of changes; only for a call in a thread), its panel tab `[data-panel-show="moved"]` (the same count), the view `#r-right .mv`; "Sync now" `[data-cc-sync="<thread>"]` | #call | the minutes take the whole tab; Sync now starts Claude Code: do not press |
 | Kind of meeting | `select[aria-label="Kind of meeting"]` | #call, calendar card | |
 | Calendar | `role=button[name="Day"]`, `"Week"`, `"Earlier"`, `"Today"`, `"Later"`; cards `role=button[name=/Globex design review/]` | #calendar | the side card stays open when Day/Week is switched |
 | Today cards | `[data-tk="open"][data-node="T001"]`, `[data-schedule="ev-globex-review"]`, `[data-prep-write="<hash>"]`, `[data-today-close="T001"]`, `[data-claude-task="T001"]` | #today | `data-schedule` ids: `ev-globex-review`, `ev-acme-demo`; Prepare/Close/Claude start Claude Code or write: not pressed |
@@ -220,7 +233,7 @@ All verified on the test data in a live session. Roles and names first, then the
 | Work views | `role=button[name="Board"]`, `"Tree"`, `"+ New view"`; selects `[aria-label="Layout"]`, `"Kind"`, `"Owner"`, `"Group by"`; `role=button[name="Open only"]`, `"Fields ▾"` | #project/work | a board card is `[data-pj="node"][data-node="T001"]` (also `data-drag`) |
 | Client tabs | `[data-pj="ctab"][data-tab-id="overview"\|"calls"\|"tasks"\|"people"\|"profile"]` | #client | `[data-pj="brief-edit"]` edits About |
 | Tasks filters | `[aria-label="Thread"]` (option "Globex pilot · 1" or value `globex-pilot`), `select[aria-label="Who does it"]` (bare `[aria-label="Who does it"]` also matches the button group in Details), `[aria-label="Order"]` | #tasks | |
-| Task card | `[data-tk="open"][data-project="<thread>"][data-node="<id>"]`; "Others" `[data-tk="more"][data-pile="others"]` | #tasks | |
+| Task card | `[data-tk="open"][data-project="<thread>"][data-node="<id>"]`; "Others" `[data-tk="more"][data-pile="others"]` (on a client's Tasks tab `[data-pile="client-others"]`) | #tasks, #client/<id>/tasks | |
 | Task status | click the Status button (`[data-pj="edit-field"][data-field="state"]`), then `[aria-label="Right panel"] select[data-ledger-set="state"]` (options to do, in progress, blocked, done, cancelled) | Details | verified: change shows in History ("you set state · undo") and `echoctl project tasks` shows `in_progress` |
 | Task mode | `[data-mode-set="claude"\|"manual"]` | Details | |
 | Settings nav | `[data-setsec="general"\|"recording"\|…\|"health"]`; search `[aria-label="Search settings"]` | #settings | switches `[data-set="<key>"]` with `role=switch` (`autostart`, `hide_dock_icon`, …) |
@@ -245,6 +258,45 @@ Call actions menu, thread chip), Today's task details (only TC-003). `windows` a
 | plugins | tests/cases/plugins/ | Medium | (1) Installed tab says "No plugins yet"; (2) Discover shows the category chips and Featured cards each with "Install" (not pressed); (3) category chip "Chat" leaves Telegram only; (4) "Search plugins" "sched" leaves Scheduler; (5) Marketplaces tab shows the built-in "onetest" with "Read again" and the Add form (not submitted); installs, updates and a marketplace add stay manual |
 | palette | tests/cases/window/ (extend) | Low | (1) Actions opens the dialog with TODAY, MY WORK, ECHO, GO TO groups; (2) typing "Globex pilot" lists the thread and its call, Enter opens `#project/globex-pilot/brief`; (3) "Settings: Plugins" opens that section; (4) Esc closes and focus returns |
 
+## Recorded calls (record once, use everywhere)
+
+Recording and transcribing a call is a **prerequisite** of most recording, minutes, window and privacy cases, not what
+they test. So it is done **once per build**, before the run, and every scenario copies the result:
+
+```bash
+tests/fixtures/recordings.py prepare     # ~4 min, once per build: outside any sandbox (inside one the audio is silent)
+tests/fixtures/recordings.py list        # what it holds, each recording's score
+. <dir>/env; tests/fixtures/recordings.py copy minutes-call --title "CLA-004 write now"   # prints the copy's folder
+```
+
+- `prepare` plays each known conversation through TestCall (both ends on this Mac, the user's line into BlackHole),
+  records it with `echoctl capture` (stopped 3.5 s after the conversation, before TestCall hangs up: after it the mic
+  falls back to the room, #140), transcribes it once with the build's model and keeps the call folders with what the
+  commands printed (`capture.out`, `capture.err`, `capture.exit`, `during.ls`, `after.ls`, `transcribe.out`,
+  `score.json`, the tracks) in `target/test-recordings/<key>/<name>/` (git-ignored), `<key>` the last commit that
+  changed the app (`crates/`, `Cargo.*`; `-dirty` with uncommitted changes there): a commit that only changes tests
+  keeps it. Recordings: `acme-sync`, `very-short`, `long-silence`, `two-remotes` (transcribed with NVIDIA's NeMo
+  runtime: speakers), `mixed-languages-pinned` (`capture --languages uk`, workspace `en,uk,ru`), `mixed-languages` (the
+  same tracks, no pin), `minutes-call` (213 s, built from the clips: the minutes cases need a long call, not a
+  capture). Seven transcriptions in all.
+- `copy <name> [--title T]` puts a copy into `$ECHOCTL_HOME/calls` with a fresh stamp, ending now (so automatic
+  minutes and Today treat it as a call that just ended); `--keep-time` keeps the recorded times; `--untranscribed`
+  copies `meta.json` only, and `finish <folder> <name>` then adds the transcript as a transcription would.
+- **Which cases still record:** only those whose subject is capturing — the watcher's arm, start, stop, ask mode,
+  drop and rejoin, a crash, Ctrl-C, only the call app's audio, notes while recording, a call appearing while it
+  records. **Which still transcribe:** the transcription server and the fallback (one short clip per engine), the
+  repair of a crashed recording, and what the app transcribes by itself after a watcher recording (no case scores it).
+  Words, speakers and languages are scored once, in S-14, on the prepared transcripts.
+- **The test clock.** Data built with `--clock fast` (`make_data.py`, `serve.sh up … --clock fast`) has
+  `ECHOCTL_TEST_AUTO_MINUTES_DELAY_S=90` in `<dir>/env`: the debug build writes automatic minutes 90 s after the call
+  or the last note instead of 15 minutes (`notes::auto_delay`; a release build never reads it). Every process of the
+  run (the app, `window --serve`, the CLI) sources the env, so they agree on the time. Cases still check the rule —
+  not before the delay, at it, moved by a later note — in seconds.
+- **Waits are for conditions.** `tests/fixtures/wait.py <seconds> <condition>` (`app`, `armed`, `recording [suffix]`,
+  `not-recording`, `in-call`, `event <name> [n]`, `file <glob>`, `sh <command>` …) checks every second and fails the
+  step with the last state on its timeout. A fixed `sleep` stays only where it is the call's timeline (arm 16 s in,
+  stop 20 s in) or a check that something does **not** happen.
+
 ## Recording with the test call
 
 Recording cases (`tests/cases/recording/`, some of `privacy/`, `transcription/`, `window/`, `cli/`) run with TestCall
@@ -258,12 +310,12 @@ tap on TestCall). The known conversations (`tests/fixtures/audio/README.md`: `ac
 - **Needs on the Mac:** TestCall built (`tests/tools/testcall/build.sh`), BlackHole 2ch, ffmpeg, the speech model linked
   into the run's config (see `transcription/TC-001`). Both ends of the call run on this Mac (`serve` and `dial` on `127.0.0.1`). Port 7792; TestCall serves one call and exits when the connection drops, so it cannot
   rejoin and cannot switch devices.
-- **Prelude** (each Bash call is a fresh shell): `. <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; CONV="$D/conv"; APP="$PWD/tests/tools/testcall/build/TestCall.app/Contents/MacOS/testcall"; export D CONV APP ECHOCTL_CALL_APP_BUNDLE=ai.onetest.echo.testcall`
+- **Prelude** (each Bash call is a fresh shell): `. <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; CONV="$D/conv"; APP="$PWD/tests/tools/testcall/build/TestCall.app/Contents/MacOS/testcall"; W=tests/fixtures/wait.py; export D CONV APP ECHOCTL_CALL_APP_BUNDLE=ai.onetest.echo.testcall`
 - **A call, recorded by `echoctl capture`** (no app running): `"$APP" serve --port 7792 --play "$CONV/remote.wav" --quiet & "$APP" dial 127.0.0.1:7792 --me "$CONV/mic.wav" --me-device "BlackHole 2ch" & sleep 2; target/debug/echoctl capture --seconds 42 --title "<title>"; wait`.
   The last line `capture` prints is the call folder. Then `cp "$CONV/expected.json" <call folder>/`,
   `target/debug/echoctl transcribe <call folder> [--keep-audio]`, `make_audio.py score <call folder>`.
 - **The watcher** (arm, record when the call starts, stop, ask mode) runs only inside `echoctl app`. Cases that need it
-  start a second app instance on the run's own data folder and config: `nohup target/debug/echoctl app run --no-tray --background > "$D/app.out" 2>&1 & echo $! > "$D/app.pid"`
+  start a second app instance on the run's own data folder and config: `nohup target/debug/echoctl app run --no-tray --background > "$D/app.out" 2>&1 & echo $! > "$D/app.pid"; $W 30 app`
   (never `app start`, which may open the installed app), and stop it with `echoctl app quit`. The single-instance lock
   is `<config dir>/app.lock` (`app.rs`, `try_lock`), so the user's own Echo does not refuse it; if "Echo is already
   running" appears in `$D/app.out`, the case is BLOCKED. Such cases are tagged `second-instance`, set
@@ -273,8 +325,11 @@ tap on TestCall). The known conversations (`tests/fixtures/audio/README.md`: `ac
   cases assert on words from the middle and end of a call, not on a whole-call score.
 - **The app runs Claude Code by itself** (preps for the day's meetings, meeting types, who does a task) about a minute
   after it starts. On plain `small` data that goes to the built-in profile — the user's own Claude account. So every
-  case that starts the app builds its data with `make_data.py <dir> --ai fake` (the fake `claude` refuses every run) or
-  `--ai local` (runs go to the local model only), and sets `--scheduled manual` too: `small`'s agenda has a meeting about
+  case that starts the app builds its data with `make_data.py <dir> --ai fake` (the fake `claude` refuses every run;
+  the default for the recording scenarios) or `--ai local` (only S-19 on small data: only **minutes** runs reach the
+  local model, the app's preps, meeting types and task modes are refused at once). Both turn the app's own thread
+  sync off (`project_sync` false): two model runs per thread that queued in front of the minutes. And they set
+  `--scheduled manual` too: `small`'s agenda has a meeting about
   an hour after the build, and "ask" (the default) opens a real "Record?" dialog a minute before it.
 - **Events accumulate** in `.echo/events.jsonl` across the stages of a scenario: a case notes the count before it
   (`cat "$ECHOCTL_HOME/.echo/events.jsonl" 2>/dev/null | wc -l > "$D/ev.start"`) and counts only its own
@@ -297,9 +352,9 @@ tap on TestCall). The known conversations (`tests/fixtures/audio/README.md`: `ac
   `call_started`, unarmed: nothing recorded): runs that share the Mac never arm at the same time.
 - **Speakers** (`recording/TC-018`) need NVIDIA's NeMo-Speech runtime, which a debug build doesn't carry:
   `TMPDIR="$D" scripts/fetch-nemo-speech.sh "$ECHOCTL_CONFIG_DIR/nemo-speech"` once per run.
-- **Minutes on a call of the test call** need at least 3 minutes and 1,500 characters (`calls::gate`): the
-  `minutes-call` conversation (213 s). Automatic minutes come 15 minutes after the call (`notes::AUTO_DELAY`, no
-  setting): those cases wait it out, beside other stages.
+- **Minutes on a call** need at least 3 minutes and 1,500 characters (`calls::gate`): a copy of the prepared
+  `minutes-call` (213 s). Automatic minutes come 15 minutes after the call (`notes::AUTO_DELAY`); on `--clock fast`
+  data the debug build makes it 90 s ("Recorded calls" above).
 
 ## Clean-install runs
 
@@ -374,14 +429,16 @@ scenarios: far fewer runners than cases, and the cases meet each other the way a
    case (each step's expected result checked by snapshot or command output; the case's teardown at its end).
 3. A failed step fails **that stage**: record actual vs expected, a screenshot, the console; then go on with the next
    stage, unless it lists the failed stage under "Depends on" — then it is BLOCKED (with the reason).
-4. End with one JSON block for the scenario: `{"scenario_id", "title", "result" (PASS only if every stage passed;
+4. **Time every stage.** Before a stage's first step run `python3 -c 'import time;print(int(time.time()*1000))'` (milliseconds; macOS's `date` has no `%N`) and again after its teardown; the difference is the stage's `duration_ms`, waits and glue included. Never estimate it.
+5. End with one JSON block for the scenario: `{"scenario_id", "title", "result" (PASS only if every stage passed;
    FAIL if any failed; BLOCKED if none could run), "stages": [{"stage", "case" (area/TC-NNN), "title", "priority",
-   "result", "steps_total", "steps_completed", "failure_step", "failure_reason", "screenshot"}], "console_errors",
-   "duration_seconds", "notes"}`. Screenshots: `tests/reports/screenshots/<S-NN>-<stage>-<area>-<TC-NNN>.png`.
+   "result", "steps_total", "steps_completed", "failure_step", "failure_reason", "screenshot", "duration_ms",
+   "started_at"}], "console_errors", "duration_ms", "duration_seconds", "notes"}` (the scenario's `duration_ms` from
+   its first stage's start to its last stage's end; `started_at` ISO local time). Screenshots: `tests/reports/screenshots/<S-NN>-<stage>-<area>-<TC-NNN>.png`.
 
-**Leading a run (the lead):** run the scenarios, then the standalone cases (those in no scenario), each on fresh data as a one-stage scenario. Per scenario, `tests/fixtures/serve.sh up <new dir> <port>`, dispatch one runner with
+**Leading a run (the lead):** for recording scenarios (S-14, S-17, S-18, S-19, S-21), run `tests/fixtures/recordings.py prepare` once first (it says the cache is there when it is) and give its time to the reporter as a stage of its own ("prepare"). Run the scenarios, then the standalone cases (those in no scenario), each on fresh data as a one-stage scenario. Per scenario, `tests/fixtures/serve.sh up <new dir> <port>`, dispatch one runner with
 the scenario path, base_url and env file, then `serve.sh down`. Scenarios with `data: standard` each get fresh data
-(they may change it). The report counts stages (cases) as well as scenarios. `run: person` cases are listed as
+(they may change it). The report counts stages (cases) as well as scenarios, and gives each stage's and each scenario's time (`duration_ms`) and the five slowest stages. `run: person` cases are listed as
 skipped (person).
 
 **Writing one:** order the stages so that a stage that changes data comes after the stages that read what it

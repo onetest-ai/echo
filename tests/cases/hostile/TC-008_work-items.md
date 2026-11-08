@@ -36,9 +36,9 @@ platform: any
 
 ## Checks (run exactly as written)
 
-- **Guard** (`browser_run_code_unsafe`): `async (page) => { globalThis.__dlg ??= []; globalThis.__perr ??= []; if (!globalThis.__hostileOn) { globalThis.__hostileOn = true; page.on('dialog', async (d) => { globalThis.__dlg.push(d.type() + ': ' + d.message()); await d.dismiss() }); page.on('pageerror', (e) => globalThis.__perr.push(String(e))) } globalThis.__dlg.length = 0; globalThis.__perr.length = 0; return 'armed' }`
+- **Guard** (`browser_run_code_unsafe`): `async (page) => { page.__dlg ??= []; page.__perr ??= []; if (!page.__hostileOn) { page.__hostileOn = true; page.on('dialog', async (d) => { page.__dlg.push(d.type() + ': ' + d.message()); await d.dismiss().catch(() => {}) }); page.on('pageerror', (e) => page.__perr.push(String(e))) } page.__dlg.length = 0; page.__perr.length = 0; return 'armed' }`
 - **Check A** (`browser_evaluate`, run after every view below): `() => ({ handlers: document.querySelectorAll('[onerror],[onload],[onclick],[onmouseover],[onfocus],[onmouseenter]').length, inlineScripts: document.querySelectorAll('script:not([src])').length, badUrls: [...document.querySelectorAll('[href],[src],[action],[formaction]')].filter((e) => /^\s*(javascript|vbscript):/i.test(e.getAttribute('href') || e.getAttribute('src') || e.getAttribute('action') || e.getAttribute('formaction') || '')).length, brokenImgs: document.querySelectorAll('img[src="x"]').length, scrollWidth: document.documentElement.scrollWidth, innerWidth: window.innerWidth })`. Expected: `handlers` 0, `inlineScripts` 0, `badUrls` 0, `brokenImgs` 0 and `scrollWidth` <= `innerWidth`
-- **Check D** (`browser_run_code_unsafe`): `async () => ({ dialogs: globalThis.__dlg, pageErrors: globalThis.__perr })`. Expected: `dialogs` and `pageErrors` both `[]`
+- **Check D** (`browser_run_code_unsafe`): `async (page) => ({ dialogs: page.__dlg, pageErrors: page.__perr })`. Expected: `dialogs` and `pageErrors` both `[]`
 - The literal text of a piece: the piece's visible text contains the characters, for example `<img src=x onerror=alert(1)>` (a truncated copy with its marker "…" also counts; a broken image or an empty element does not)
 
 ## Steps
@@ -59,7 +59,7 @@ platform: any
 | 12 | Run `browser_evaluate` with `() => document.querySelector('[aria-label="Right panel"]').innerText.includes('<script>alert(1)</script>')` | Returns `true`: the description's script tag is shown as text |
 | 13 | Click the card `[data-pj="node"][data-node="T027"]` | Details shows the 10 000-character title; the panel passes check A |
 | 14 | Run check A (`browser_evaluate`) | `handlers` 0, `inlineScripts` 0, `badUrls` 0, `brokenImgs` 0 and `scrollWidth` <= `innerWidth` |
-| 15 | Navigate to `{{base_url}}/#tasks` and wait for the text "I owe" | The piles show; the card of T026 (HOSTILE-31) is in a pile with the markup as text |
+| 15 | Navigate to `{{base_url}}/#tasks` and wait for the text "I owe"; open every folded pile: click each `[data-tk="more"]` whose text starts with "+ " (a pile shows six cards, the rest behind "+ N") | The piles show; the card of T026 (HOSTILE-31) is in a pile with the markup as text |
 | 16 | Run `browser_evaluate` with `() => ({ cards: [...document.querySelectorAll('[data-tk="open"]')].filter((c) => /HOSTILE-3[1-8]/.test(c.innerText)).length, overflow: [...document.querySelectorAll('[data-tk="open"]')].filter((c) => c.scrollWidth > c.clientWidth + 1).length })` | `cards` >= 1 and `overflow` 0: no card is wider than itself |
 | 17 | Run check A (`browser_evaluate`) | `handlers` 0, `inlineScripts` 0, `badUrls` 0, `brokenImgs` 0 and `scrollWidth` <= `innerWidth` |
 | 18 | Click the folded pile `[data-tk="more"][data-pile="others"]` if it shows, then run check A | Cards of other people (T027, owner HOSTILE-38) show the owner as text; check A holds |

@@ -36,7 +36,7 @@ fn call_title(dir: &std::path::Path) -> String {
 /// Calls of the last `days` days, newest first.
 fn recent_calls(days: i64) -> Vec<std::path::PathBuf> {
     let since = (chrono::Local::now() - chrono::Duration::days(days)).format("%Y-%m-%d").to_string();
-    let mut v: Vec<_> = crate::calls::all_calls().into_iter().filter(|d| d.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.get(..10).is_some_and(|x| x >= since.as_str()))).collect();
+    let mut v: Vec<_> = crate::calls::all_calls().into_iter().filter(|d| d.file_name().and_then(|n| n.to_str()).is_some_and(|n| crate::calls::has_stamp(n) && n[..10] >= *since.as_str())).collect();
     v.reverse();
     v
 }

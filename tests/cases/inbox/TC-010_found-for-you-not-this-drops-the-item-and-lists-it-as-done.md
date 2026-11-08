@@ -29,10 +29,10 @@ tags: [inbox, found, decision]
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Navigate to `{{base_url}}/#today`, wait for "Your day" and click "Inbox" | The right panel opens on the tab "Inbox"; the chips "Open", "Blocking" and "Done" are shown |
+| 1 | Navigate to `{{base_url}}/#today`, wait for "Your day" and click "Inbox"; note the numbers on the chips "Open" (N) and "Done" (D) | The right panel opens on the tab "Inbox"; the chips "Open", "Blocking" and "Done" are shown (on fresh data N = 25, D = 2; earlier decisions in a scenario lower N and raise D) |
 | 2 | Read the header "Duff" | The group "Duff" with 1 item "New thread? “Duff calls”" with the buttons "Create", "Not this", "Open" |
-| 3 | Click "Not this" | Within 5 seconds the item is gone and the header "Duff" with it; the chip reads "Open 24" |
-| 4 | Click the chip "Done" | "Done 3" holds "New thread? “Duff calls”" |
+| 3 | Click "Not this" | Within 5 seconds the item is gone and the header "Duff" with it; the chip reads "Open N−1" |
+| 4 | Click the chip "Done" | "Done D+1" holds "New thread? “Duff calls”" |
 | 5 | Run `echoctl project found` | No entry for `domain:duff.example`; the list still has Northwind, Umbrella lead notes 1, Initrode and Design guild |
 
 ## Expected Final State

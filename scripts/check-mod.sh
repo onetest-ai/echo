@@ -7,7 +7,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 claude plugin validate plugin
 claude plugin test plugin
-# The Echo window's notes saving (crates/echoctl/ui/app.js, NotesSync), as it ships.
+# The Echo window's notes saving (NotesSync, crates/echoctl/ui/app/02-notes-sync.js), as it ships.
+node crates/echoctl/ui/app-parses.test.mjs
 node crates/echoctl/ui/notes-sync.test.mjs
 # The calendar's days and hours across the days the clocks change.
 node crates/echoctl/ui/calendar-dates.test.mjs
@@ -23,6 +24,10 @@ node crates/echoctl/ui/projects.test.mjs
 node crates/echoctl/ui/org-chart.test.mjs
 # How Send to Claude ranks the skills for a task (rankSkills).
 node crates/echoctl/ui/skill-fit.test.mjs
+# History's words for the user's own ledger edits (humanHistory).
+node crates/echoctl/ui/human-history.test.mjs
+# My notes' timeline with live notes among the user's own (LiveTimeline).
+node crates/echoctl/ui/live-timeline.test.mjs
 types="plugin/.claude-plugin/types/claude-code/index.d.ts"
 if [[ ! -f "$types" ]]; then
   types=$(ls -t /private/tmp/claude-*/bundled-skills/*/*/plugin-authoring/types/claude-code.d.ts 2>/dev/null | head -1 || true)

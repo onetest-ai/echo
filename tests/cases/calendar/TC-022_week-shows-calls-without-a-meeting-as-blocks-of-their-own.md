@@ -24,13 +24,13 @@ tags: [calendar, week, calls]
 | Field | Value |
 |---|---|
 | Yesterday's calls without a meeting | Umbrella lead notes 1 (08:30), Acme security review (11:00), Globex pilot kickoff (14:00), Guest call 7 (14:30), Vendor call with Vandelay (16:00) |
-| Today's calls without a meeting | Recording (18:12-type), Memo (21:12-type), Quick check-in (22:42-type) |
+| Today's calls without a meeting | Recording (5 h before the build), Memo (2 h before), Quick check-in (30 min before) |
 
 ## Steps
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Navigate to `{{base_url}}/#calendar` and wait for "Week" | The URL becomes `#calendar/week`; the title reads "D Mon to D Mon YYYY" over 7 days (yesterday to five days ahead); "Week" is pressed; the banner says "Showing today's meetings only." |
+| 1 | Navigate to `{{base_url}}/#calendar` and wait for "Week" | The week is shown (the URL stays `#calendar`, as any view keeps the route it was loaded on; clicking "Week" would set `#calendar/week`); the title reads "D Mon to D Mon YYYY" over 7 days (yesterday to five days ahead); "Week" is pressed; the banner says "Showing today's meetings only." |
 | 2 | Read the blocks of yesterday's column | Five call blocks (`.ev.call`): the titles above, each with its start time |
 | 3 | Read the call blocks of today's column | "Recording", "Memo" and "Quick check-in" are blocks (`.ev.call`); the meetings that have a call (Acme weekly sync…) are `.ev.recorded`, not doubled as call blocks |
 | 4 | Click the block "Globex pilot kickoff" of yesterday | The URL becomes `#call/<folder>` and the call opens in Calls |

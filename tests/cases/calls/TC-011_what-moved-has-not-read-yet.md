@@ -29,10 +29,10 @@ tags: [minutes, what-moved]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Navigate to `{{base_url}}/#calls` and click "Acme weekly sync" | The call opens on Minutes; close any right panel (`[aria-label="Close the panel"]`) |
-| 2 | Read the aside `[aria-label="What moved"]` | The heading "What moved"; the thread "Acme rollout"; the text "reads this call within a few minutes" |
+| 1 | Navigate to `{{base_url}}/#calls` and click "Acme weekly sync", then open What moved with the header button `[data-panel-flip="moved"]` (beside My notes; skip the click if the right panel already shows What moved) | The call opens on Minutes, the minutes at the tab's full width; the right panel (`#r-right`) shows the view "What moved" |
+| 2 | Read the What moved view (`#r-right .mv`) | The panel title "What moved"; the thread "Acme rollout"; the text "reads this call within a few minutes"; no count on the tab or the button (the thread hasn't read the call) |
 | 3 | Look for the button "Sync now" (`[data-cc-sync="acme-rollout"]`) | It is there; do not press it (it starts Claude Code) |
-| 4 | Open "Initech planning" | No "What moved" aside (the call is in no thread) |
+| 4 | Open "Initech planning" | No What moved button in the header and no What moved tab in the panel (the call is in no thread) |
 
 ## Expected Final State
 The aside of Acme weekly sync names Acme rollout and offers Sync now; Initech planning has none.

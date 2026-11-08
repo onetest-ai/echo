@@ -1,0 +1,54 @@
+/* ── My notes: a timeline of moments (notesTimeline) ─────────────────── */
+.notes-tl { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.nt-bar { display: flex; align-items: center; gap: 6px; padding: 6px 8px 4px 14px; flex: none; }
+.nt-bar .saved-state { flex: 1; font-size: 11.5px; color: var(--text-3); }
+.notes-tl > .notice { margin: 0 10px 6px; }
+.nt-list { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 6px 10px; display: flex; flex-direction: column; gap: 1px; }
+.nt-head { font-size: 11px; font-weight: 650; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.05em; padding: 10px 10px 2px; }
+.nt-entry { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 8px; padding: 7px 8px 7px 10px; border-radius: 8px; font-size: 13px; line-height: 1.5; }
+.nt-entry:hover { background: var(--line); }
+.nt-icon { font-weight: 700; text-align: center; color: var(--text-3); line-height: 1.5; }
+.nt-check { border: 0; background: none; padding: 0; font: inherit; font-size: 14px; color: var(--accent-ink); cursor: default; }
+.nt-entry.k-question .nt-icon { color: var(--spk3); }
+.nt-entry.k-decision .nt-icon { color: var(--me); }
+.nt-entry.k-flag .nt-icon { color: var(--warn); }
+.nt-entry.done .nt-text { text-decoration: line-through; color: var(--text-3); }
+.nt-body { min-width: 0; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
+.nt-body .at { font-family: var(--mono); font-size: 11px; color: var(--accent-ink); background: var(--accent-soft); padding: 0 5px; border-radius: 4px; cursor: pointer; text-decoration: none; }
+.nt-body blockquote { margin: 3px 0 0; padding-left: 8px; border-left: 2px solid var(--line-strong); color: var(--text-2); font-size: 12px; }
+.nt-x { visibility: hidden; border: 0; background: none; color: var(--text-3); font-size: 15px; line-height: 1; padding: 0; cursor: default; align-self: start; }
+.nt-entry:hover .nt-x, .nt-x:focus-visible { visibility: visible; }
+.nt-tools { display: flex; gap: 2px; align-self: start; }
+.nt-text { cursor: text; }
+.nt-entry.editing { background: var(--accent-soft); }
+.nt-entry.editing textarea { width: 100%; margin: 4px 0 6px; resize: vertical; border-radius: 6px; border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent); background: var(--bg); color: var(--text); padding: 6px 8px; font: inherit; font-size: 13px; }
+.nt-entry.editing .nt-kinds { margin: 6px 0; }
+.nt-edit-acts { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-3); }
+.nt-edit-acts .grow { flex: 1; }
+.nt-x:hover { color: var(--danger); }
+.nt-compose { flex: none; border-top: 1px solid var(--line); padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 8px; background: var(--sidebar); }
+.nt-kinds { display: flex; gap: 5px; flex-wrap: wrap; }
+.nt-kind { height: 22px; padding: 0 9px; border-radius: 11px; border: 1px solid var(--line-strong); background: none; color: var(--text-2); font-size: 11.5px; cursor: default; }
+.nt-kind.on { background: var(--accent-soft); border-color: transparent; color: var(--accent-ink); font-weight: 600; }
+.nt-row { display: flex; gap: 6px; }
+.nt-row .search { flex: 1; min-width: 0; height: 32px; border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.nt-flag { height: 32px; color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); background: color-mix(in srgb, var(--warn) 8%, transparent); }
+.nt-hint { font-size: 11px; color: var(--text-3); }
+/* the transcript's margin: a dot per note at that moment */
+.nt-marks { display: inline-flex; gap: 2px; margin-right: 5px; vertical-align: 1px; }
+.nt-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); }
+.nt-dot.k-question { background: var(--spk3); }
+.nt-dot.k-decision { background: var(--me); }
+.nt-dot.k-todo { background: var(--accent); }
+.nt-dot.k-flag { background: var(--warn); }
+/* comment on selected words */
+.sel-pop { position: fixed; z-index: 20; }
+.sel-pop.open { width: 360px; background: var(--surface); border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: var(--r-panel); box-shadow: var(--shadow); padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.sel-quote { font-size: 12px; color: var(--text-2); }
+.sel-quote .at { font-family: var(--mono); font-size: 11px; color: var(--accent-ink); background: var(--accent-soft); padding: 0 5px; border-radius: 4px; }
+.sel-pop textarea { resize: none; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--bg); color: var(--text); padding: 7px 10px; font: inherit; }
+.sel-acts { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-3); }
+.sel-acts .grow { flex: 1; }
+/* right-click: Add note (transcript turns, minutes lines) */
+.ctx-menu { min-width: 180px; padding: 5px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--r-panel); box-shadow: var(--shadow); display: flex; flex-direction: column; }
+

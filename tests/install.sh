@@ -36,6 +36,9 @@ for a in "${agents[@]}"; do
   fi
 done
 
+# Echo's own rules on top of the agents (times per stage, …): tests/agent-rules.sh, also run by serve.sh up.
+"$root/tests/agent-rules.sh"
+
 # The run-metrics hooks write next to the run reports: tests/reports/metrics (not a reports/ folder at the root).
 for f in .claude/hooks/manual-qa/*.mjs; do
   perl -pi -e "s{join\(PROJECT_DIR, 'reports'}{join(PROJECT_DIR, 'tests', 'reports'}g" "$f"

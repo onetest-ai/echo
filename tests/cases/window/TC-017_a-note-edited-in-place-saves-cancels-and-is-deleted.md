@@ -37,7 +37,7 @@ tags: [notes, edit]
 | 2 | Replace the text with `Dana says the checklist went out on Tuesday`, click "? Question" in the editor, press Enter; wait 2 s | The note reads "? 00:12 Dana says the checklist went out on Tuesday" (icon "?", class `k-question`); the state "Saved"; `my-notes.md` has `- [00:12] ? Dana says the checklist went out on Tuesday` and no "Monday" |
 | 3 | Click "Pilot starts in Berlin only", replace the text with `Pilot starts in Munich`, press Escape; wait 1 s | The editor closes; the note still reads "! 00:45 Pilot starts in Berlin only"; the file still has `- [00:45] ! Pilot starts in Berlin only` |
 | 4 | Click "a note without a time", clear the text, click "Save"; wait 2 s | The editor closes; the note still reads "a note without a time" (an emptied edit is dropped; the note is not deleted); the file still has `- a note without a time` |
-| 5 | Hover "Does legal need the old contract too" and click its × ("Delete this note"); wait 2 s | The note is gone from the list (6 notes left); the state "Saved"; the file has no "Does legal need the old contract too" |
+| 5 | Hover "Does legal need the old contract too" and click its × ("Delete this note"); wait 2 s | The note is gone from the list (6 notes of yours left, the 3 live ✦ rows unchanged); the state "Saved"; the file has no "Does legal need the old contract too" |
 | 6 | Reload the page, open the call and My notes again | The list is as after step 5 |
 
 ## Expected Final State

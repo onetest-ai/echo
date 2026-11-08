@@ -7,7 +7,7 @@ requirements: [F-STT-04]
 module: recording
 run: agent
 platform: macos
-tags: [recording, test-call, speakers]
+tags: [recording, test-call, speakers, recordings]
 ---
 
 # TC-018: Two voices on the remote track stay Remote and are told apart
@@ -15,37 +15,20 @@ tags: [recording, test-call, speakers]
 **Module:** Recording | **Priority:** Medium | **Type:** Functional
 
 ## Preconditions
-- Test data built by `tests/fixtures/make-data.sh <dir>`; `target/debug/echoctl` is the debug build from this checkout (`cargo build`)
-- This Mac has the test call app (`tests/tools/testcall/build.sh` built `tests/tools/testcall/build/TestCall.app`), BlackHole 2ch and ffmpeg; Microphone and System Audio Recording are granted to the process running the steps and to TestCall; nothing else on this Mac plays audio or uses BlackHole
-- Every Bash call starts with the prelude (a fresh shell each time; the steps below call it "the prelude"): `. <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; CONV="$D/conv"; APP="$PWD/tests/tools/testcall/build/TestCall.app/Contents/MacOS/testcall"; export D CONV APP ECHOCTL_CALL_APP_BUNDLE=ai.onetest.echo.testcall`
-- The speech model is linked into the test config: `ln -s "$HOME/Library/Application Support/echo/models" "$ECHOCTL_CONFIG_DIR/models"`, then `target/debug/echoctl model use large-v3-turbo-q5_0` and `target/debug/echoctl config --languages en`
-- The speaker model needs NVIDIA's NeMo-Speech runtime, which a debug build does not carry: `TMPDIR="$D" scripts/fetch-nemo-speech.sh "$ECHOCTL_CONFIG_DIR/nemo-speech"` once per run (into the run's config, `.ai-run/guides/development/dev-workflow.md` R5); without it `speakers` says "this call has no detected speakers"
-- Both ends of the call run on this Mac: `serve` and `dial` on `127.0.0.1`, as in the steps
-
-## Test Data
-
-| Field | Value |
-|-------|-------|
-| Conversation | two-remotes: Dana and Omar on the remote side (one track), the user on the mic (34 s) |
-| Title | REC-018 two voices |
+- The recordings of this build are prepared (`tests/fixtures/recordings.py prepare`: `app_profile.md` → "Recorded calls"): `two-remotes` (Dana and Omar on the remote side, one track; the user on the mic; 34 s) was played through TestCall, captured and transcribed once with NVIDIA's NeMo-Speech runtime in the config (`prepare` fetches it into `target/test-recordings/nemo-speech`), so speaker detection ran. This case reads that result; it records and transcribes nothing
+- Every command after `. <dir>/env` on test data built by `tests/fixtures/make-data.sh <dir>`
 
 ## Steps
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Run the prelude, then `python3 tests/fixtures/audio/make_audio.py build two-remotes "$CONV"` | It prints the folder, the length and the turns of two-remotes; `$CONV` holds `mic.wav`, `remote.wav` and `expected.json` |
-| 2 | Run the prelude, then `"$APP" serve --port 7792 --play "$CONV/remote.wav" --quiet & "$APP" dial 127.0.0.1:7792 --me "$CONV/mic.wav" --me-device "BlackHole 2ch" & sleep 2; target/debug/echoctl capture --seconds 40 --title "REC-018 two voices" 2> "$D/capture.err"; wait` | Exit code 0; the last line printed is the call folder `…-rec-018-two-voices` |
-| 3 | Run the prelude, then `CALL="$(ls -d "$ECHOCTL_HOME"/calls/*-rec-018-two-voices)"; cp "$CONV/expected.json" "$CALL/"; target/debug/echoctl transcribe "$CALL" --keep-audio` | "done in …"; `transcript.md` and `segments.json` exist |
-| 4 | Run the prelude, then `CALL="$(ls -d "$ECHOCTL_HOME"/calls/*-rec-018-two-voices)"; python3 tests/fixtures/audio/make_audio.py score "$CALL"` | Exit code 0; `"pass": true`; every remote turn has `speaker_ok` true (all of Dana's and Omar's lines are `remote`, none is Me) |
-| 5 | Run the prelude, then `CALL="$(ls -d "$ECHOCTL_HOME"/calls/*-rec-018-two-voices)"; target/debug/echoctl speakers "$CALL"` | It lists two remote speakers (Speaker 1 and Speaker 2); the first lines of one are Dana's ("Hi everyone, Omar is joining us…"), of the other Omar's ("Hello. I have three questions…") |
-| 6 | Read `"$CALL/transcript.md"` | The remote lines of the two voices carry two different speaker labels; the user's lines are Me |
+| 1 | `CALL="$(python3 tests/fixtures/recordings.py copy two-remotes --title "REC-018 two voices")"; python3 -c "import json,sys;[print(round(s['start'],1),s['speaker'],s['text']) for s in json.load(open(sys.argv[1]+'/segments.json'))]" "$CALL"` | Every line of Dana's and Omar's is on the remote side (not `me`); the user's lines are `me` |
+| 2 | `target/debug/echoctl speakers "$CALL"` | It lists two remote speakers (Speaker 1 and Speaker 2); the first lines of one are Dana's ("Hi everyone, Omar is joining us…"), of the other Omar's ("Hello. I have three questions…") |
+| 3 | Read `"$CALL/transcript.md"` | The remote lines of the two voices carry two different speaker labels; the user's lines are Me |
 
 ## Expected Final State
-One remote track, two voices: both are Remote, and the transcript tells them apart as two speakers.
-
-## Teardown
-- Nothing to undo: the call lives in the run's own data folder
+One remote track, two voices: both are Remote, and the transcript tells them apart as two speakers. (The words of this recording are scored in `transcription/TC-003`.)
 
 ## Notes
-- Run on 2026-11-07 (S-18): PASS with the runtime fetched (transcription 19 s, the speaker model 15 s): Speaker 1 = Dana's lines, Speaker 2 = Omar's; WER 0.029. Without it: steps 1–4 pass, 5–6 fail with "no detected speakers".
-- If the detector merges the two voices into one speaker, step 5 fails: that is what this case checks (F-STT-04).
+- Run on 2026-11-07 (S-18, its own capture then): PASS with the runtime fetched: Speaker 1 = Dana's lines, Speaker 2 = Omar's; WER 0.029. Without it: "no detected speakers".
+- If the detector merges the two voices into one speaker, step 2 fails: that is what this case checks (F-STT-04).

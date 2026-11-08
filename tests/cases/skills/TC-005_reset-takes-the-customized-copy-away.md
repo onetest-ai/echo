@@ -26,9 +26,10 @@ tags: [skills]
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | Navigate to `{{base_url}}/#settings/templates` and click the tab "Skills 1", click the row "Follow up mail" and click "Customize" | The tag is "Customized" |
-| 2 | Click "Reset" | The row's tag is "Built in" again; the editor shows only "Customize" |
-| 3 | Run `ls "$ECHOCTL_HOME/.echo/skills"` in Bash (`. <dir>/env` first) | Prints nothing (no `follow-up-mail` folder) |
-| 4 | Run `ls "$ECHOCTL_HOME/.echo/trash/skills"` | One folder named `follow-up-mail-<digits>` |
+| 2 | Run `ls "$ECHOCTL_HOME/.echo/trash/skills" 2>/dev/null \| grep -c '^follow-up-mail-'` in Bash (`. <dir>/env` first) and keep the number as N | A number: 0 on fresh data, more when an earlier stage already reset this skill (in S-12, skills/TC-004's teardown trashes one) |
+| 3 | Click "Reset" | The row's tag is "Built in" again; the editor shows only "Customize" |
+| 4 | Run `ls "$ECHOCTL_HOME/.echo/skills"` | Prints nothing (no `follow-up-mail` folder) |
+| 5 | Run `ls "$ECHOCTL_HOME/.echo/trash/skills" \| grep '^follow-up-mail-'` | N + 1 folders named `follow-up-mail-<digits>`: the Reset added one |
 
 ## Expected Final State
 The skill is Echo's own again; the copy sits in `.echo/trash/skills`.

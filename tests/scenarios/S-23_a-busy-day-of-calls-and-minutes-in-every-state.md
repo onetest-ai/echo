@@ -13,7 +13,7 @@ cases:
   - tests/cases/calls/TC-016_chat-and-screens-tabs-follow-what-the-call-holds.md
   - tests/cases/calls/TC-017_chat-tab-lists-messages.md
   - tests/cases/calls/TC-018_screens-tab-opens-a-frame-large.md
-  - tests/cases/calls/TC-019_kept-live-notes-sit-beside-the-transcript.md
+  - tests/cases/calls/TC-019_kept-live-notes-are-in-my-notes-not-the-transcript-tab.md
   - tests/cases/calls/TC-020_what-moved-lists-changes-and-marks.md
   - tests/cases/calls/TC-021_what-moved-says-why-a-thread-has-not-read-the-call.md
   - tests/cases/calls/TC-022_minutes-frame-shows-the-sections-each-call-holds.md
@@ -31,6 +31,8 @@ cases:
   - tests/cases/calls/TC-024_try-again-fails-at-once-and-says-why.md
   - tests/cases/calls/TC-035_delete-asks-first-and-moves-the-folder-to-the-trash.md
   - tests/cases/calls/TC-036_restore-brings-a-deleted-call-back.md
+  - tests/cases/window/TC-023_my-notes-holds-the-live-notes-in-one-timeline.md
+  - tests/cases/calls/TC-039_what-moved-is-a-right-panel-view-and-the-minutes-take-the-whole-tab.md
 ---
 
 # S-23: A busy day of calls and minutes in every state
@@ -50,7 +52,7 @@ cases:
 | 7 | `calls/TC-016_chat-and-screens-tabs-follow-what-the-call-holds.md` | — | — |
 | 8 | `calls/TC-017_chat-tab-lists-messages.md` | — | — |
 | 9 | `calls/TC-018_screens-tab-opens-a-frame-large.md` | — | — |
-| 10 | `calls/TC-019_kept-live-notes-sit-beside-the-transcript.md` | — | — |
+| 10 | `calls/TC-019_kept-live-notes-are-in-my-notes-not-the-transcript-tab.md` | — | — |
 | 11 | `calls/TC-020_what-moved-lists-changes-and-marks.md` | — | — |
 | 12 | `calls/TC-021_what-moved-says-why-a-thread-has-not-read-the-call.md` | — | — |
 | 13 | `calls/TC-022_minutes-frame-shows-the-sections-each-call-holds.md` | — | — |
@@ -68,11 +70,16 @@ cases:
 | 25 | `calls/TC-024_try-again-fails-at-once-and-says-why.md` | — | — |
 | 26 | `calls/TC-035_delete-asks-first-and-moves-the-folder-to-the-trash.md` | — | — |
 | 27 | `calls/TC-036_restore-brings-a-deleted-call-back.md` | — | — |
+| 28 | `window/TC-023_my-notes-holds-the-live-notes-in-one-timeline.md` | — | — |
+| 29 | `calls/TC-039_what-moved-is-a-right-panel-view-and-the-minutes-take-the-whole-tab.md` | — | — |
 
 ## Notes
 - Data: `standard` (`tests/fixtures/serve.sh up <dir> <port> --set standard`), built right before the run.
 - Time-sensitive stages come first: automatic minutes come 15 minutes after the build (stages 2 to 5 read the countdown and Not yet; stages 4 and 5 put it back). Finish those within 15 minutes of the build.
 - Stages that change data come last, after the stages that read what they change: the memo's thread × (stage 24) after the memo's headers and what moved (stages 6 and 12); Try again (stage 25) after the stages that read the first failure messages (14 and 15); Delete and restore last.
+- Stage 20 (`calls/TC-033`) starts with a full reload: the window opens a call being transcribed on Transcript once per
+  load, and stage 7 has opened Quick check-in before. Stage 25's step 5 fails until #121 is fixed.
 - Stage 22 and 23 are the `prep` cases about calls (Prep tab first, a prep with only an error).
+- Stage 28 (My notes with the live notes) only reads Acme weekly sync, Initech planning and Quick check-in, which the stages before it leave as built; it opens My notes and leaves it open. Stage 29 (What moved in the right panel) only reads Acme weekly sync, the Memo and Initech planning; stage 24's teardown puts the Memo back in both of its threads.
 - No stage presses Write minutes, Write now, Sync now or Sign in…; Try again runs the data's fake Claude Code, which fails at once.
 - Not in the data (`tests/fixtures/README.md` → Skipped): a call being recorded, a minutes run queued or running, Today's minutes states being reworked, a call held by a Claude Code session (`held_by`), a missing or unreadable pinned AI profile.

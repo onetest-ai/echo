@@ -1,6 +1,6 @@
 ---
 id: TC-001
-title: The activity bar lists Today, Calls, Calendar, Threads, Tasks, Inbox and Settings
+title: The activity bar lists Today, Calls, Calendar, Threads, Tasks and Settings
 priority: medium
 type: functional
 requirements: [F-WS-01]
@@ -10,7 +10,7 @@ platform: any
 tags: [shell, activity-bar]
 ---
 
-# TC-001: The activity bar lists Today, Calls, Calendar, Threads, Tasks, Inbox and Settings
+# TC-001: The activity bar lists Today, Calls, Calendar, Threads, Tasks and Settings
 
 **Module:** Window shell | **Priority:** Medium | **Type:** Functional
 
@@ -24,12 +24,12 @@ tags: [shell, activity-bar]
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | Navigate to `{{base_url}}/#today` and wait for the text "Your day" | The navigation "Activities" shows |
-| 2 | Read the buttons of the navigation "Activities" from top to bottom | Today, Calls, Calendar, Threads, Tasks, then (at the bottom) Inbox and Settings |
+| 2 | Read the buttons of the navigation "Activities" from top to bottom | Today, Calls, Calendar, Threads, Tasks, then (at the bottom) Settings; no "Inbox" (it is in the top bar) |
 | 3 | Look for a button "Knowledge" | None (Recall is off on test data) |
 | 4 | Read the button "Expand the sidebar" in the title strip | It shows; the buttons carry icons and the names are not drawn beside them |
 
 ## Expected Final State
-The bar is folded to icons with the seven buttons.
+The bar is folded to icons with the six buttons.
 
 ## Notes
 - First paint can show an extra "Knowledge" button for a moment: wait for the text first, then read.

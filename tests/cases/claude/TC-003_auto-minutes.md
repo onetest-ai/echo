@@ -1,57 +1,52 @@
 ---
 id: TC-003
-title: Minutes are written automatically 15 minutes after a call
+title: Minutes are started automatically at the delay after a call, not before
 priority: critical
 type: functional
 requirements: [F-MIN-14, F-MIN-07]
 module: claude
 run: agent
 platform: macos
-tags: [minutes, auto, second-instance, test-call]
-ai: local
+tags: [minutes, auto, second-instance, recordings, test-clock]
 external_id: TC-CLA-003
 ---
 
-# TC-003: Minutes are written automatically 15 minutes after a call
+# TC-003: Minutes are started automatically at the delay after a call, not before
 
-**Module:** Claude Code | **Priority:** Critical | **Type:** Functional
+**Module:** Claude | **Priority:** Critical | **Type:** Functional
 
 ## Preconditions
-- Test data built by `tests/fixtures/make_data.py <dir> --ai local` (`ai: local`): the small set, hermetic, with the AI profile "Qwen" (a local model server: Ollama here, or the faster one of `tests/fixtures/ai.local.json`) the default, so a minutes run is a real Claude Code run on it and every other run is refused (`tests/fixtures/README.md`, "Real Claude Code runs on a local model"); Claude Code on `PATH`; `target/debug/echoctl` is the debug build from this checkout (`cargo build`)
-- This Mac has the test call app (`tests/tools/testcall/build.sh` built `tests/tools/testcall/build/TestCall.app`), BlackHole 2ch and ffmpeg; Microphone and System Audio Recording are granted to the process running the steps and to TestCall; nothing else on this Mac plays audio or uses BlackHole
-- Every Bash call starts with the prelude (a fresh shell each time; the steps below call it "the prelude"): `. <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; CONV="$D/conv"; APP="$PWD/tests/tools/testcall/build/TestCall.app/Contents/MacOS/testcall"; export D CONV APP ECHOCTL_CALL_APP_BUNDLE=ai.onetest.echo.testcall`
-- The speech model is linked into the test config: `ln -s "$HOME/Library/Application Support/echo/models" "$ECHOCTL_CONFIG_DIR/models"`, then `target/debug/echoctl model use large-v3-turbo-q5_0` and `target/debug/echoctl config --languages en`
-- Both ends of the call run on this Mac: `serve` and `dial` on `127.0.0.1`, as in the steps
-- **Needs a second app instance.** Echo's watcher (arm, record when the call starts, stop) runs only inside `echoctl app run`. The user's own Echo holds `app.lock` in its own config folder; this run's `ECHOCTL_CONFIG_DIR` has another one (`app.rs`, `try_lock`), so a second instance on the test data folder is not refused by the lock. If step 2 still finds "Echo is already running" in `$D/app.out`, the case is BLOCKED, not failed
-- The window is served on the same test data at `{{base_url}}` with clicks reaching the app (`ECHOCTL_SERVE_IPC=1`, `tests/fixtures/serve.sh up` or the scenario's server), the browser open on it; the page is loaded from `{{base_url}}/` first
+- Test data built by `tests/fixtures/make_data.py <dir> --ai fake --clock fast` (or `serve.sh up <dir> <port> --ai fake --clock fast`): the small set, hermetic (every Claude Code run is refused at once by the fake `claude`), and `<dir>/env` sets the debug build's test clock `ECHOCTL_TEST_AUTO_MINUTES_DELAY_S=90`: automatic minutes come **90 s** after the call or the last note instead of 15 minutes (`notes::auto_delay`; a release build always waits 15 minutes). Every process — the app, the served window, the CLI — runs after `. <dir>/env`, so all of them use the same delay
+- The recordings of this build are prepared (`tests/fixtures/recordings.py prepare`: `app_profile.md` → "Recorded calls"); `minutes-call` (213 s, a decision and action items) is long enough for automatic minutes
+- The prelude of the recording cases (`recording/TC-001`), with `W=tests/fixtures/wait.py`
+- **Needs a second app instance** (`recording/TC-001`'s Preconditions); the window served on the same data with clicks reaching the app (`ECHOCTL_SERVE_IPC=1`), the page loaded from `{{base_url}}/` first
 
 ## Test Data
 
 | Field | Value |
 |-------|-------|
-| Conversation | minutes-call (213 s; a decision and action items with owners and dates) |
-| Arm title | MIN-A catch-up (the call of `claude/TC-009` when both run in S-17) |
+| Call | a copy of `minutes-call`, ending when it is copied, title "MIN-A catch-up" |
+| Delay | 90 s (`--clock fast`) |
 
 ## Steps
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Run the prelude | — |
-| 2 | Run the prelude, then `target/debug/echoctl config --unscheduled manual --scheduled manual --auto-minutes true`, `target/debug/echoctl ai live off`, `nohup target/debug/echoctl app run --no-tray --background > "$D/app.out" 2>&1 & echo $! > "$D/app.pid"`, `sleep 6`, `target/debug/echoctl status` | `auto_minutes` true (switched on now: calls that ended before stay without automatic minutes); `status` prints `watcher` with a `pid`; no "already running" in `$D/app.out` |
-| 3 | Run the prelude, then `python3 tests/fixtures/audio/make_audio.py build minutes-call "$D/mc"`, `target/debug/echoctl arm --title "MIN-A catch-up"`, `sleep 2`, `CONV="$D/mc" nohup bash -c '"$APP" serve --port 7792 --play "$CONV/remote.wav" --quiet & "$APP" dial 127.0.0.1:7792 --me "$CONV/mic.wav" --me-device "BlackHole 2ch" & wait' > /dev/null 2>&1 &`, `sleep 10`, `target/debug/echoctl status` | minutes-call is 213 s (36 turns); `watcher.recording` is a folder ending `-min-a-catch-up` |
-| 4 | Run the prelude, then `until [ -f "$(ls -d "$ECHOCTL_HOME"/calls/*-min-a-catch-up)/transcript.md" ]; do sleep 5; done; grep -o '"ended_at": *"[^"]*"' "$(ls -d "$ECHOCTL_HOME"/calls/*-min-a-catch-up)/meta.json"` | The transcript is there within about 5 s of the call's end; `ended_at` is set (call it E) |
-| 5 | In the window: `{{base_url}}/`, then `#calls`, click the row `[role=option][data-call$="min-a-catch-up"]`, open its Minutes tab | "Minutes in 15 min (HH:MM)" with HH:MM = E + 15 minutes, the line "Echo writes them 15 minutes after the call or your last note…", the profile ("Qwen · …"), "Write now" (`[data-cmd="write-notes"]`) and "Not yet ▾"; nothing is pressed |
-| 6 | Wait until E + 15 minutes without touching the call (`until [ -f "$(ls -d "$ECHOCTL_HOME"/calls/*-min-a-catch-up)/notes-run.json" ]; do sleep 5; done`), then read that `notes-run.json` | `"auto": true`, `started_at` within 30 s after E + 15 minutes (the scheduler ticks every 15 s), never before |
-| 7 | Wait until its `state` is "done" (a few minutes on the model server); `ls` the call's folder; read `notes.md` | `notes.md` and `actions.json` are there; Summary, Decisions and Action items with time chips (`[mm:ss]`), the action items with owners and dates said in the call (Me — the SSO checklist today before 4; Dana — the training room on Thursday; Omar — the pilot plan by Friday) |
-| 8 | Read the call's `claude.log` (the window's "Show log") | Its first line: "Echo starts Claude Code to write the minutes (automatically)", with the model, the folder and "guard: every tool call is checked…"; the commands it ran are `echoctl context`, `type`, `actions` (and `title`) on this call, the reads and writes in its folder only; no `m365`, `compose`, `deliver` or other send; it ends "Minutes written." |
+| 1 | Run the prelude, then `echo $ECHOCTL_TEST_AUTO_MINUTES_DELAY_S`; `target/debug/echoctl config --unscheduled manual --scheduled manual --auto-minutes true`, `target/debug/echoctl ai live off`, `cat "$ECHOCTL_HOME/.echo/events.jsonl" 2>/dev/null | wc -l > "$D/ev.start"`, `nohup target/debug/echoctl app run --no-tray --background > "$D/app.out" 2>&1 & echo $! > "$D/app.pid"`, `$W 30 app` | `90`; `auto_minutes` true (switched on now: calls that ended before stay without automatic minutes); "waited … for app"; no "already running" in `$D/app.out` |
+| 2 | Run the prelude, then `CALL="$(python3 tests/fixtures/recordings.py copy minutes-call --title "MIN-A catch-up")"; echo "$CALL" > "$D/min-a"; grep -o '"ended_at": *"[^"]*"' "$CALL/meta.json"` | A call that ended just now, with its transcript; `ended_at` is set (call it E) |
+| 3 | In the window: `{{base_url}}/`, then `#calls`, click the row `[role=option][data-call$="min-a-catch-up"]`, open its Minutes tab | "Minutes in 2 min (HH:MM)" (or "1 min") with HH:MM = E + 90 s rounded to the minute, the line "Echo writes them 15 minutes after the call or your last note…" (the text keeps the release delay), the profile, "Write now" (`[data-cmd="write-notes"]`) and "Not yet ▾"; nothing is pressed |
+| 4 | Run the prelude, then `sleep 45; ls "$(cat "$D/min-a")"` (half the delay: a check that nothing came early, not a wait for a condition) | No `notes-run.json` yet: nothing starts before the time |
+| 5 | Run the prelude, then `$W 120 file "$(cat "$D/min-a")/notes-run.json"; cat "$(cat "$D/min-a")/notes-run.json"` | Within about a minute more: `"auto": true`, `started_at` no earlier than E + 90 s and within 30 s after it (the scheduler ticks every 15 s) |
+| 6 | Run the prelude, then `$W 60 sh 'grep -q -e "\"state\": *\"failed\"" -e "\"state\": *\"done\"" "$(cat "$D/min-a")/notes-run.json"'; cat "$(cat "$D/min-a")/notes-run.json"; head -3 "$(cat "$D/min-a")/claude.log"` | The run ended (on the fake, "failed": no model here); `claude.log`'s first line says "Echo starts Claude Code to write the minutes (automatically)"; the Minutes tab then says why it didn't finish, with "Try again" |
 
 ## Expected Final State
-With no one asking, the minutes were written once, at the time Echo named, from the call alone, and nothing was sent.
+With no one asking, the minutes run started once, at the time Echo named (the call's end plus the delay), never before.
 
 ## Teardown
 - Run the prelude, then `target/debug/echoctl app quit`
 
 ## Notes
-- The 15 minutes are `notes::AUTO_DELAY`; no setting shortens them: the case waits them out (run it beside other stages).
-- The "Transcript ready" and "Minutes ready" notifications are not checked here (macOS shows them to the user; a check needs a look at the screen: `lifecycle/TC-006`).
-- Run on 2026-11-07 (S-17, the network model server): PASS — call ended 12:35:21, the tab said "Minutes in 15 min (12:50 PM)", the run started 12:50:26 (`auto: true`) and wrote the minutes in 116 s; no send.
+- The delay is `notes::AUTO_DELAY` (15 minutes) in a release build. The debug build's `ECHOCTL_TEST_AUTO_MINUTES_DELAY_S` changes only how long; the rule (the call's end or the last note, plus the delay; checked every 15 s) is the same code. A person can still check the real 15 minutes once a release.
+- What a real automatic run writes and runs (the minutes' parts with owners and dates, the log's commands, nothing sent) is checked on the local model in `claude/TC-007` (S-19), whose run is automatic too. Before 2026-11-08 this case waited the real 15 minutes and ran the local model itself.
+- The "Transcript ready" and "Minutes ready" notifications are not checked here (macOS shows them to the user: `lifecycle/TC-006`).
+- Run on 2026-11-07 (S-17, the network model server, real clock): PASS — call ended 12:35:21, the tab said "Minutes in 15 min (12:50 PM)", the run started 12:50:26 (`auto: true`).

@@ -35,7 +35,7 @@ tags: [prep, calls, response]
 | 3 | Click the row "Coming up today" | `aria-expanded` is true; 11 rows with `data-up` appear above the calls |
 | 4 | Count the rows by title | "Vendor demo" 2, "Initech architecture board" 2, "Globex office hours" 1, "Initech team lunch" 1, "Globex sponsor update" 1, "Acme help desk sync" 1, "Acme renewal follow-up" 1, "Globex weekly" 1, "Steering prep" 1 (total 11) |
 | 5 | Look for "Acme budget check", "Partner planning", "Initech town hall" and "Acme training dry run" | None of them is listed |
-| 6 | Read the row "Initech architecture board" that starts latest (the 23:50-type one) | Its meta spans hold the time, "25 min" and "Alex Chen, Priya Nair +1"; no thread icon |
+| 6 | Read the row "Initech architecture board" that starts latest (the one to come) | Its meta spans hold the time, "25 min" and "Alex Chen, Priya Nair +1"; no thread icon |
 | 7 | Read the row "Globex office hours" | Its meta holds the time, "30 min", "Kim Park", and a thread icon (Globex pilot) |
 | 8 | Read the `title` of every row | "Prep ready" for "Globex sponsor update" only; "No prep yet" for the other ten |
 

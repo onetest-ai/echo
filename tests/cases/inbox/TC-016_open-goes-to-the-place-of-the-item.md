@@ -28,7 +28,7 @@ tags: [inbox, navigation]
 | Is Rita Gomez a champion? | Change… | `#project/acme-rollout/people` |
 | Teams transcript: Acme design review | Open | `#calendar/day` |
 | Sign in to Claude · out | Open | `#settings/ai` |
-| Crm Sync 1.1.0 is available | Open → | `#settings/plugins/crm-sync` |
+| Crm Sync 1.1.0 is available | Open → | Settings → Plugins, Crm Sync selected (`#settings/plugins`) |
 
 ## Steps
 
@@ -40,7 +40,7 @@ tags: [inbox, navigation]
 | 4 | Click "Change…" on "Is Rita Gomez a champion?" | The URL is `#project/acme-rollout/people` |
 | 5 | Click "Open" on "Teams transcript: Acme design review" | The URL is `#calendar/day` |
 | 6 | Click "Open" on "Sign in to Claude · out" | The URL is `#settings/ai` |
-| 7 | Click "Open →" on "Crm Sync 1.1.0 is available" | The URL is `#settings/plugins/crm-sync` |
+| 7 | Click "Open →" on "Crm Sync 1.1.0 is available" | Settings → Plugins opens on the tab "Installed" with Crm Sync's row selected (`.pl-row.on[data-pl-sel="crm-sync"]`) and its details on the right; the URL is `#settings/plugins` (the window goes to `#settings/plugins/crm-sync`, selects the plugin and takes its id out of the URL) |
 
 ## Expected Final State
 The window is on the plugin's page.
@@ -50,4 +50,4 @@ The window is on the plugin's page.
 
 ## Notes
 - Creates or changes nothing.
-- Only the URL is asserted for Settings pages: they read the real machine (app_profile.md, Fragile areas).
+- Only the URL is asserted for Settings pages, and for Plugins which plugin is selected: they read the real machine (app_profile.md, Fragile areas).

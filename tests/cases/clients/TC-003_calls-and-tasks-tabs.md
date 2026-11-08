@@ -29,14 +29,14 @@ tags: [clients, calls, tasks]
 |---|--------|----------------|
 | 1 | Navigate to `{{base_url}}/#client/acme/calls` | One row: "Acme weekly sync" with today's time, no "no minutes yet", and the chip "Acme rollout"; no row "Initech planning" |
 | 2 | Click the tab "Tasks" | Piles "I owe" 1 (card "Send Acme the SSO checklist"), "Owed to me" 0, "Waiting for others" 0, "Nobody named" 0; a folded line "Others · 1" |
-| 3 | Click "Others · 1" | The card "Answer the security questionnaire" with "Omar Haddad" |
+| 3 | Click "Others · 1" (`[data-tk="more"][data-pile="client-others"]`: on a client's Tasks tab the fold is `client-others`, on `#tasks` it is `others`) | The card "Answer the security questionnaire" with "Omar Haddad" |
 | 4 | Click the card "Send Acme the SSO checklist" | The right panel shows Details of T001 of Acme rollout |
 
 ## Expected Final State
 The Tasks tab shows the piles of Acme; Details of T001 is open.
 
 ## Teardown
-- Click "Others · 1" again to fold it
+- Click "Others · 1" (`[data-pile="client-others"]`) again to fold it
 
 ## Changes
 - Nothing: read only.

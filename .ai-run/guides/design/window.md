@@ -16,7 +16,8 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
 | `src/tray.rs` | tao event loop, tray menu, Dock policy, window commands, the leave (close/quit) handshake |
 | `src/mark.rs` | the octopus tray mark drawn from signed-distance shapes (`assets/octopus.svg` is the same shape) |
 | `src/app.rs` | native dialogs (`yes_no`, `ask_checked`), notifications and their click (`Click`), `quit.asking` / `quit.cancelled` |
-| `src/window.rs` | wry webview, the `echo://` protocol (`reply`, `respond`), `/api/*`, IPC `handle`, settings snapshot/set, layout file, dev modes |
+| `src/window/mod.rs` | wry webview, the `echo://` protocol (`reply`, `respond`), IPC `handle`, dev modes (`serve`, `export`, self-test); both dispatchers ask each area's `route` / `handle` in turn |
+| `src/window/<area>.rs` | an area's pages, `/api/*` routes and IPC commands: `assets`, `call`, `calendar`, `settings` (snapshot/set, layout file), `threads`, `today`, `plugins`, `terminals`, `brain` |
 | `src/links.rs` | `echo://` link parsing, routing (`target`) and text for Claude (`read`) |
 | `src/terminal.rs` | PTY sessions for the Claude panel (portable-pty), output ring, session ids |
 | `src/view.rs` | what the window shows → `<echo_view>` for Claude sessions (`view-hook`), `<echo_howto>` (`howto_block`) |
@@ -26,7 +27,7 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
 | `src/prep.rs` | a meeting's prep: gathered facts + "In short"; Coming up today; the scheduler |
 | `src/teams_transcript.rs` | import an unrecorded meeting from its Teams transcript; background check / scan |
 | `src/minutes.rs` | `render_for_window`, `with_theme`, `EMBED_JS` (the minutes frame) |
-| `ui/index.html`, `ui/app.js`, `ui/app.css` | the page (vanilla JS, compiled in); `ui/vendor/` xterm.js, sigma, graphology |
+| `ui/index.html`, `ui/app/NN-<area>.js`, `ui/css/NN-<area>.css` | the page (vanilla JS, compiled in; the parts joined in name order into one `app.js` and one `app.css` by `build.rs`); `ui/vendor/` xterm.js, sigma, graphology |
 | `ui/*.test.mjs` | node tests over no-DOM blocks: workbench, palette, my-notes, notes-sync, calendar-dates |
 
 ## How it works
@@ -176,8 +177,11 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
 - A task's read (`echoctl read echo://task/…`, where Work on it and Yolo start) says who does it and gives the context:
   the thread's last 3 calls with minutes, and the last 3 of the meeting series it was raised in (the invite's subject,
   as "Since last time" goes) that the thread's don't already list — links only; Claude opens what it needs.
-- What moved (`callChanges`): what a call changed in its threads, beside the minutes as the live notes are beside the
-  transcript (its own scroll; under 1000 px it is hidden), the user's own open tasks first with who does each. It was
+- What moved (`callChanges`, panel view `moved` in `17-minutes.js`): what a call changed in its threads, a view of the
+  right panel — a button in the call's header beside My notes and a panel tab, both with the count of changes once a
+  thread has read the call (`movedCount`; panel views may carry a `badge`); the view exists only for a call in a thread,
+  as Also discussed only with the Brain. The minutes take the whole Minutes tab (Nov 2026: beside them they were
+  squeezed to a few words a line). The user's own open tasks first with who does each. It was
   above the Actions tab's items; action items are everything said, the user's tasks are what is theirs to do. The
   Actions tab is gone (Nov 2026): the minutes list the action items with their moments, What moved has the tasks;
   `actions.json` stays (the minutes, Today's counts, thread sync and `echoctl actions` use it).
@@ -244,9 +248,17 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
 - Text is selectable everywhere but the window's chrome (buttons, bars, tabs, panel heads).
 
 ### Workbench layout
-- Fixed areas: a 40 px top strip with the **Record pill** at its centre (idle Record ▾ with language + profile;
-  armed + Cancel; meeting soon + Record it; recording: clock, title, Stop that asks first), the activity bar, the
-  primary view, right and bottom panels, a status bar.
+- Fixed areas: a 40 px top strip with the **Record pill** at its centre (idle Record ▾ with the call's language, and
+  Memo; armed + Cancel; meeting soon + Record it; recording: clock, title, Stop that asks first; the default profile's
+  sign-in note under it), the activity bar, the primary view, right and bottom panels, a status bar.
+- The strip's right end (`topEnd`): the **account chip** (`accountChip`: the default AI profile by name, tooltip
+  `profileLabel` + `profileWhere`; with two or more profiles a native select over the label sets the default exactly as
+  Settings' Make default, `settings_set default_profile`, nothing signs in by itself, the pill's note offers it; with
+  one a plain chip that opens `#settings/ai`; none: not shown) and the **Inbox** icon (`inboxButton`, below). The
+  pill sits between two equal growing spacers, so it stays centred; the right end never shrinks below its content and
+  the pill gives way first, down to the window's 760 px minimum. The account isn't chosen per recording any more
+  (#107): Record, Arm, Join, Record it and Memo send no profile, so the app pins its default when the recording starts.
+  On macOS the strip drags the window except over buttons, selects and labels (`onTitleBar`).
 - The activity bar is folded to icons by default (48 px; each icon's name and keys in an instant hint beside it) or
   open with names and counts (200 px): ⌘\\ / Ctrl+\\, the switch in the title strip after the traffic lights
   (`barButton`), ⌘K; `Layout`'s `bar`, saved with the layout. Below 900 px it opens over the page and closes on a click
@@ -255,7 +267,9 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   (Calls `list-detail`, Calendar `single`, Settings `single` at the foot; ⌘/Ctrl+1…9, ⌘/Ctrl+,), `PANEL_VIEWS`,
   `CALL_TABS`, `EVENT_ACTIONS`. Echo's own views are entries like a plugin's.
 - Call tabs: Minutes / Transcript / Chat / Screens / Actions. One Transcript tab: live (first, with a recording
-  dot) while the call records, final afterwards, its live notes beside it either way (`#call/x/live`).
+  dot) while the call records, final afterwards — the transcript alone at full width either way (`#call/x/live`
+  reads as `transcript`); while recording with live notes it is `section#live-transcript`, kept at its end. The
+  live notes are in My notes (below).
 - `Layout` keeps panel placement and open panels in `<config dir>/window-layout.json` (`/api/layout`, IPC
   `save_layout`, ≤ 16 KB). The right panel starts closed at every window open (`Layout.started()`).
 - Responsive: below 900 px wide the calls list folds behind "Calls ▾" and the right panel overlays the page; below
@@ -278,7 +292,8 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   marketplace again in the background; it opens `#settings/plugins/<id>` — Installed tab, that plugin picked —
   where its sheet shows before anything changes; one that asks for more says so; it moves to Done only once the
   plugin has that version — an offer taken back leaves quietly). Each item carries the IPC message its own place sends, or the hash to go to.
-- Entry above Settings in the activity bar (count; warn colour when something blocks work); toggles the panel
+- Entry: an icon at the right end of the top strip, after the account chip (count badge; warn colour when something
+  blocks work; its name and keys in a hint under it on hover); toggles the panel
   (⇧⌘I; Ctrl+Shift+U on Windows, where Ctrl+Shift+I is WebView2's DevTools).
 - A clicked decision keeps its item "working" until it is gone: a background job's (`busy` by item key) while it
   runs — its end, a panic too (`OnEnd`), marks the cache stale (`attention::stale`) — any other up to 15 s. A
@@ -351,6 +366,16 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   acknowledged save in flight per call. IPC `save_my_notes {text, base}` → `calls::save_my_notes` under
   `.meta.lock`: base unchanged → text; appended since (tray) → text + tail; otherwise the other version is kept as
   `my-notes.<HHMMSS>.md`. An unchanged text is never written: its mtime is the minutes' clock.
+- Live notes (`18-live.js`, `LiveTimeline` block, `ui/live-timeline.test.mjs`) share the timeline: a box above the list
+  (`liveBox`: Now, one muted status line — profile · state · updates · tokens · cost · not covered — a sign-in or
+  settings problem with its button, "Last time"; its ⋯ menu holds the call's model, Pause / Resume while recording
+  and Ask Claude about this call), the draft's decisions / action items / open questions as ✦ rows (! / ☐ with the
+  owner / ?) merged by time, and answers under "Asked about this call" at the end. The merge never moves the user's
+  notes (their file's order stands): a live item goes before the first of theirs that is later (the same second:
+  theirs first), live items with no time go last — the draft has no per-item time of writing, it is rewritten
+  whole at each update. Live rows are read-only (the next update rewrites them); their chips jump like the user's.
+  No box and no ✦ rows when the call kept none and isn't recording (live notes off, or on with none written).
+  Why the panel: one place for everything said about the moment, and the transcript keeps its width.
 
 ### Minutes frame
 - `/minutes/<call>?v=<revision>` (`minutes::render_for_window`, rendered fresh) in
@@ -432,7 +457,21 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   `m365::mail_reply_text`, IPC `needs_reply`; Open in Outlook beside it), I'll do it (a dialog: the task's words and its
   thread — the task is theirs, due today, under Follow-ups → From Teams and mail in that thread, made once; IPC
   `needs_decide`; the thread preselected when Echo finds it — the one whose Teams chat it is, else one with the sender among
-  its people by address, then by name — else Choose a thread…, and nothing is made until one is chosen), Won't do.
+  its people by address, then by name — else Choose a thread…, and nothing is made until one is chosen), Won't do (a
+  dialog that needs a comment — why, or who it's for; the button waits for it, Cancel or Escape keep the item).
+- Won't do confirmed (IPC `needs_wont`, `today::wont_do`): the item is decided `wont` with the comment as its `note`, and
+  Claude Code reads it in the background — `claudejob` with **no tools** (the quarantine rule: others' words reach no
+  session with tools, so it can't send, post or mail), on the item's thread's AI profile or the default. Its prompt holds
+  the item as data (one line each, no control characters, `<`/`>` made harmless) and the comment as the only
+  instructions: note who it's for and why; a draft only when the comment asks for a reply or a forward, and a draft
+  even when it says to send. It answers JSON `{for, why, draft: null | {channel, text}}`; a draft whose channel isn't
+  the item's own (`teams` for a chat, `mail` for a mail) or is missing is refused (`parse_wont`), and the address is
+  always the item's chat or mail, kept by Echo, never the model's. The outcome is an id'd line of
+  `<home>/.echo/task-asks.json` (`kind: wont`), shown in Today → **Asks** under Needs you now: "Won't do · for X: why",
+  "Claude is noting who it's for…" while it runs, or why it failed. A draft has Send (IPC `wont_send`: the text as the
+  user left it, through `m365::chat_send_text` or `mail_reply_text`, as their words like Read and reply — then "Sent in
+  Teams / by mail"), Edit (a box in place) and Drop (IPC `ask_drop`: the line is gone; × does the same on a line
+  without a draft). Nothing is sent without that click.
   A 1:1 chat is labelled by the person ("Chat with Dana Kowal"). An item leaves when answered (the next read no longer finds it) or decided
   (`<home>/.echo/needs.json`, decisions kept two days). No snooze, no fold, no notifications: only in Today.
 - ⌘K on Today acts on it (target "Today"): Needs you now's items (Reply in Teams / Read and reply, I'll do it, Won't do),
@@ -503,7 +542,7 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
 
 | Decision | Why | Where |
 |---|---|---|
-| wry on our tao loop, not Tauri | Tauri would own the loop, tray, packaging and updater | `window.rs`, `tray.rs` |
+| wry on our tao loop, not Tauri | Tauri would own the loop, tray, packaging and updater | `window/`, `tray.rs` |
 | Dock icon while the app runs (macOS), Echo.app stays `LSUIElement` | the menu-bar icon can hide behind the notch and Echo looked gone; the CLI must never show one | `tray::apply_dock` |
 | No menu rebuild while it is open (macOS) | AppKit tracks it in another run-loop mode; a replaced menu closes under the pointer | `tray::menu_open` |
 | IPC only from the page itself | WebKit exposes the handler to frames; the minutes frame shows others' text | `window::from_page` |
@@ -519,7 +558,7 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
 | One leave (close/quit/update) at a time, save first | notes typed in the window must not be lost on quit | `tray.rs` `Leaving`, `takes_over` |
 | Inbox Done only when the source was read | an unreadable source must not mark items decided | `attention.rs` |
 | Teams transcripts: VTT only, occurrence ±30 min | `text/plain` is refused; a series shares one online meeting | `teams_transcript::import` |
-| Calendar fetched in the async handler, cached 2 min | Microsoft 365 must never block the UI | `window.rs` `/api/calendar` |
+| Calendar fetched in the async handler, cached 2 min | Microsoft 365 must never block the UI | `window/calendar.rs` `/api/calendar` |
 
 ## Files and state
 

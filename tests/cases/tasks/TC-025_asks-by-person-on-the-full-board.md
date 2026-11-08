@@ -22,8 +22,8 @@ tags: [tasks, asks, waiting, quiet, due]
 
 | Person | Thread | Id | Button text | Reason after the dash |
 |---|---|---|---|---|
-| Alex Chen | Acme renewal | T011 | Test the password reset | due today |
-| Alex Chen | Globex pilot | T005 | Book the training slots | due tomorrow |
+| Alex Chen | Acme renewal | T011 | Test the password reset | due <the build date, e.g. "Sun, Nov 8"> |
+| Alex Chen | Globex pilot | T005 | Book the training slots | due <the day after, e.g. "Mon, Nov 9"> |
 | Alex Chen | Initech hiring | T013 | Unblock: agree the support hours (2) | waiting |
 | Alex Chen | Acme renewal | T018 | Unblock: send the revised timeline (2) | waiting |
 | Alex Chen | Globex pilot | T002 | Unblock: collect the user list | waiting |
@@ -36,7 +36,7 @@ Not asked, on purpose: Rita Gomez (the wait card of Acme renewal T003), because 
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Navigate to `{{base_url}}/#tasks`, wait for "I owe", click the activity "Inbox" to open the right panel and its tab "Asks" (`[data-panel-show="asks"]`) | The panel shows "Asks · by person" and "next time you meet" |
+| 1 | Navigate to `{{base_url}}/#tasks`, wait for "I owe", click the top bar's "Inbox" to open the right panel and its tab "Asks" (`[data-panel-show="asks"]`) | The panel shows "Asks · by person" and "next time you meet" |
 | 2 | Read the person blocks | Two blocks, in this order: "Alex Chen" and "Zoe Martin"; each has a line on the right with a day and a meeting name, or "no meeting this week" (not asserted); the empty text "Nothing to chase" is not shown |
 | 3 | Read the buttons of each block | The 7 buttons of the table: 5 under Alex Chen, 2 under Zoe Martin, in that order, each reading the title, " — " and its reason; no reason is red (nothing is late) |
 | 4 | Select "Acme renewal · 11" in `[aria-label="Thread"]` | The panel keeps "Alex Chen" with "Test the password reset" and "Unblock: send the revised timeline (2)" only; "Zoe Martin" is gone |
@@ -52,3 +52,4 @@ The Details drawer shows Umbrella proposal T010; the Thread filter is on All thr
 ## Notes
 - Extends `TC-008` (one late task) with the three reasons that exist on the data: due within 3 days, quiet 5 days, waiting. No task of the data is late, so "was due" does not occur.
 - Per-person order follows the most urgent ask first (late, then the nearest date, then the quietest).
+- The reason of a dated task is `due <Day, Mon D>` (`fmtDay`), the date itself, not "today" / "tomorrow": the case once said the words, which the window never showed (2026-11-08 run).
