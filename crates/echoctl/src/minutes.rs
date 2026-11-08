@@ -752,7 +752,7 @@ fn no_tags(src: &str) -> String {
         let tag = after.starts_with(|n: char| n.is_ascii_alphabetic() || matches!(n, '/' | '!' | '?'));
         if c == '<' && tag && !br && !annotation(i) {
             out.push_str("#lt;");
-            close = after.find(|n: char| matches!(n, '>' | '[' | ']' | '(' | ')' | '{' | '}' | '"' | '|' | '<' | '\n'))
+            close = after.find(['>', '[', ']', '(', ')', '{', '}', '"', '|', '<', '\n'])
                 .filter(|&k| after.as_bytes()[k] == b'>' && !matches!(after.as_bytes()[k.saturating_sub(1)], b'-' | b'=' | b'.'))
                 .map(|k| i + 1 + k);
         } else {
