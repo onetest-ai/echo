@@ -16,6 +16,7 @@ to the code (`cargo test`, `scripts/check-mod.sh`).
 | `fixtures/recordings.py prepare` / `copy <name>` | The known conversations recorded through TestCall and transcribed **once per build**; copies for each scenario |
 | `fixtures/wait.py <seconds> <condition>` | Wait for the run's app state, an event or a file, with a timeout (no fixed `sleep`) |
 | `install.sh` | Installs the manual-qa agent team (arozumenko/sdlc-skills) on this machine, pointed at this folder |
+| `agent-rules.sh` | Echo's own rules on top of the installed agents (times per stage, …); run by `install.sh` and by `fixtures/serve.sh up`, so no run starts without them |
 | `reports/` | Run reports and screenshots (git-ignored) |
 
 ## Running

@@ -36,10 +36,8 @@ for a in "${agents[@]}"; do
   fi
 done
 
-# Times per stage (tests/app_profile.md → Scenarios): the runner measures each stage's duration_ms, the reporter
-# prints it per stage and the five slowest. Kept as rules, so a reinstall of the bundle keeps them.
-grep -q "duration_ms per stage" .claude/agents/test-runner/RULES.md || printf '\n%s\n' "- **Echo, duration_ms per stage:** read \`python3 -c 'import time;print(int(time.time()*1000))'\` before a stage's first step and after its teardown; put the difference in the stage's \`duration_ms\` (and the scenario's, first start to last end). Measured, never estimated." >> .claude/agents/test-runner/RULES.md
-grep -q "duration_ms per stage" .claude/agents/test-reporter/RULES.md || printf '\n%s\n' "- **Echo, duration_ms per stage:** the Results table has a Time column (each stage's \`duration_ms\`), and a section \"Time per Stage\" after it gives each scenario's time and the slowest 5 stages (stage, status, time, share of the run). A missing time is —." >> .claude/agents/test-reporter/RULES.md
+# Echo's own rules on top of the agents (times per stage, …): tests/agent-rules.sh, also run by serve.sh up.
+"$root/tests/agent-rules.sh"
 
 # The run-metrics hooks write next to the run reports: tests/reports/metrics (not a reports/ folder at the root).
 for f in .claude/hooks/manual-qa/*.mjs; do
