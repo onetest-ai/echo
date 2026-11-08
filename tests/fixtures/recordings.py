@@ -49,9 +49,9 @@ MODEL = "large-v3-turbo-q5_0"
 # tracks of another recording again with other settings.
 RECORDINGS = [
     {"name": "acme-sync", "conv": "acme-sync", "how": "capture", "languages": "en",
-     "for": "two tracks, words, speakers and order (recording/TC-014, transcription/TC-001), no audio kept (privacy/TC-003)"},
+     "for": "words, speakers and order (transcription/TC-001), a capture's own record (recording/TC-014 step 4), no audio kept after `transcribe` (privacy/TC-003)"},
     {"name": "very-short", "conv": "very-short", "how": "capture", "languages": "en",
-     "for": "a call too short for automatic minutes (recording/TC-013, claude/TC-004), the window filling in (window/TC-013)"},
+     "for": "a call too short for automatic minutes (recording/TC-013, claude/TC-004), the transcription server (transcription/TC-007)"},
     {"name": "long-silence", "conv": "long-silence", "how": "capture", "languages": "en",
      "for": "silence in a recorded call (recording/TC-017, transcription/TC-005)"},
     {"name": "two-remotes", "conv": "two-remotes", "how": "capture", "languages": "en", "speakers": True,

@@ -15,7 +15,7 @@ tags: [recording, tray]
 **Module:** Recording | **Priority:** Medium | **Type:** Functional
 
 ## Preconditions
-- Echo running as an app with its tray icon, permissions granted; the dev build with `ECHOCTL_CALL_APP_BUNDLE=ai.onetest.echo.testcall` and TestCall on this Mac, or a Teams test call
+- Echo running as an app with its tray icon: the dev build on file-fed test data (`make_data.py <dir> --ai fake`, `. <dir>/env`, `echoctl app run` without `--no-tray`; calls from `tests/fixtures/call.py`: `app_profile.md` → "Recording with file-fed calls"), or an installed Echo and a Teams test call
 - Not in a call, not armed
 
 ## Steps
@@ -23,7 +23,7 @@ tags: [recording, tray]
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | Menu → "Record next call" | The icon turns armed; the menu shows the armed status and an item reading "Cancel" |
-| 2 | Start the test call (or a Teams call) | When it connects the icon turns recording; the menu offers "Stop recording" |
+| 2 | Start a call (`tests/fixtures/call.py start acme-sync`, or a Teams call) | When it connects the icon turns recording; the menu offers "Stop recording" |
 | 3 | Menu → "Stop recording" | The icon goes idle |
 | 4 | Menu → "Record next call", then "Cancel" | The icon goes armed, then idle |
 

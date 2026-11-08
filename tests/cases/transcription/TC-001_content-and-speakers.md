@@ -16,7 +16,7 @@ external_id: TC-TRN-001
 **Module:** Transcription | **Priority:** Critical | **Type:** Functional
 
 ## Preconditions
-- The recordings of this build are prepared (`tests/fixtures/recordings.py prepare`, once per run: `app_profile.md` → "Recorded calls"): the `acme-sync` call was played through TestCall, captured as two tracks and transcribed once by the build under test; this case scores that transcript and transcribes nothing
+- The recordings of this build are prepared (`tests/fixtures/recordings.py prepare`, once per run: `app_profile.md` → "Recorded calls"): the `acme-sync` call was fed from files to `echoctl capture`, captured as two tracks and transcribed once by the build under test; this case scores that transcript and transcribes nothing
 - Test data built by `tests/fixtures/make-data.sh <dir>`; every command after `. <dir>/env`
 
 ## Test Data
@@ -38,4 +38,4 @@ The six turns of the Acme call, as captured and transcribed by the build, come o
 
 ## Notes
 - This is the one check of the words of a captured call. The recording cases check capturing (tracks, start, stop) and do not score words again.
-- Before 2026-11-08 this case built the call from the clips (no capture) and transcribed it itself; the prepared recording is the same conversation through the real capture path (`recording/TC-014`), transcribed once per build.
+- Before 2026-11-08 this case built the call from the clips (no capture) and transcribed it itself; the prepared recording is the same conversation through the real capture path (`echoctl capture` from files; `recording/TC-014` step 4), transcribed once per build.

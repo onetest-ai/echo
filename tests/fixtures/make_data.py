@@ -583,7 +583,10 @@ def setup_env(d):
     # Claude Code's record of its plugins: an Echo plugin older than this build (Inbox → health, stale plugin).
     d.write_json(f"{b}/claude-config/plugins/installed_plugins.json", {"plugins": {"echo@echo": [{"scope": "user", "version": "0.0.1"}]}})
     extra = {"PATH": f"{b}/bin:" + os.environ.get("PATH", ""), "ECHOCTL_PLUGIN_MARKET": builtin, "CLAUDE_CONFIG_DIR": f"{b}/claude-config",
-             "ECHOCTL_NOTES_NO_SHELL": "1"}
+             "ECHOCTL_NOTES_NO_SHELL": "1",
+             # `open` only logs: a run never brings up a browser, a Finder window or the installed Echo (`echoctl up`,
+             # the restart after a data-folder change).
+             "ECHOCTL_TEST_OPEN_LOG_ONLY": "1"}
     d.env.update(extra)
     with open(f"{b}/env", "a") as f:
         f.write(f"export PATH={sh(b + '/bin')}:\"$PATH\" " + " ".join(f"{k}={sh(v)}" for k, v in extra.items() if k != "PATH") + "\n")

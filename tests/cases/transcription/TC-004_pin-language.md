@@ -7,7 +7,7 @@ requirements: [F-STT-02]
 module: transcription
 run: agent
 platform: macos
-tags: [transcription, languages, test-call, recordings]
+tags: [transcription, languages, recordings]
 external_id: TC-TRN-005
 ---
 
@@ -16,7 +16,7 @@ external_id: TC-TRN-005
 **Module:** Transcription | **Priority:** Medium | **Type:** Functional
 
 ## Preconditions
-- The recordings of this build are prepared (`tests/fixtures/recordings.py prepare`: `app_profile.md` → "Recorded calls"). With the workspace languages `en,uk,ru` it captured `mixed-languages` (Ukrainian, Russian and English lines, 31 s) through TestCall with `echoctl capture --languages uk` (`mixed-languages-pinned`), printed the config after it (`config.after.json`), and transcribed it; then it transcribed the same tracks once more as a call with no pin of its own (`mixed-languages`, the "next call")
+- The recordings of this build are prepared (`tests/fixtures/recordings.py prepare`: `app_profile.md` → "Recorded calls"). With the workspace languages `en,uk,ru` it captured `mixed-languages` (Ukrainian, Russian and English lines, 31 s), fed from files, with `echoctl capture --languages uk` (`mixed-languages-pinned`), printed the config after it (`config.after.json`), and transcribed it; then it transcribed the same tracks once more as a call with no pin of its own (`mixed-languages`, the "next call")
 - Every command after `. <dir>/env` on test data built by `tests/fixtures/make-data.sh <dir>`; `P="$(python3 tests/fixtures/recordings.py path)"`
 
 ## Steps
@@ -34,4 +34,5 @@ A language pinned for one call applies to that call only; the workspace language
 ## Notes
 - The pin is `capture --languages`; the record menu's "Only Ukrainian" and `echoctl arm --languages uk` write the same `languages` into `meta.json`.
 - Before 2026-11-08 the case captured two calls and transcribed both itself (and the next call was `very-short`, English only, which showed less); now the capture and both transcriptions are made once per build.
+- Run 2026-11-08 evening (S-17, file-fed `prepare`): PASS — 8 segments all `uk`; workspace languages untouched; the next call 6 `uk`, 1 `ru`, 1 `en`.
 - Run on 2026-11-07 (S-17): PASS but for `capture`'s exit code (#141): 8 segments all `uk`; the next call `en`; workspace languages untouched.

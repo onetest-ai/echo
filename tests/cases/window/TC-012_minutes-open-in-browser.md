@@ -34,4 +34,5 @@ Each menu item hands macOS the call's own file or folder; the minutes page is wr
 
 ## Notes
 - `open <file>` shows it in the default browser, `open -R` selects it in Finder: macOS's part. A person can look once that the tab and the window appear (drop `ECHOCTL_TEST_OPEN_LOG_ONLY`).
+- Run 2026-11-08 evening (S-17, CLI part: the three commands sent to the served window's `/ipc` as the menu sends them — `open_minutes`, `reveal_minutes`, `reveal`): the three lines in `open.log`, the page written at the first; the menu itself not run.
 - Run on 2026-11-07 (S-17): PASS — the three lines in `open.log`, the page (8.9 KB) written at the first click.
