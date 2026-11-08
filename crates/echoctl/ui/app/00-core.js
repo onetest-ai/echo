@@ -36,6 +36,7 @@ const S = {
   liveDraft: '', // the question being typed in the Live tab (kept across refreshes)
   notesProfile: null, // {call, id}: the AI profile picked for Write minutes
   prepOpen: {}, // call → the "Last time" card's open state, once the user toggled it
+  liveMenu: false, // My notes' live notes menu (⋯ at Now) is open
   autoTab: null, // the call whose tab was last chosen for the user (Live while it records)
   notice: null, // a message for a moment (an action that couldn't be done)
   closing: false, // the window is saving the user's notes before it closes (`prepareClose`)

@@ -42,7 +42,7 @@ const NOTE_LOOK = {
 function notesTimeline(c) {
   const v = NotesSync.view(c.name)
   const blocks = NoteDoc.parse(v.draft)
-  const items = blocks.map((b, i) => {
+  const rows = blocks.map((b, i) => {
     if (!b.note) {
       const raw = b.raw.trim()
       if (!raw) return ''
@@ -64,8 +64,14 @@ function notesTimeline(c) {
     }
     const text = b.text ? esc(b.text) : (b.kind === 'flag' ? '<span class="muted">Flagged moment</span>' : '')
     return `<div class="nt-entry k-${b.kind}${b.done ? ' done' : ''}">${mark}<div class="nt-body"><div>${at}<span class="nt-text" data-note-edit="${i}" title="Click to edit">${text}</span></div>${quote}</div><span class="nt-tools"><button class="nt-x" data-note-edit="${i}" title="Edit" aria-label="Edit this note">✎</button><button class="nt-x" data-note-del="${i}" title="Delete" aria-label="Delete this note">×</button></span></div>`
-  }).join('')
-  const empty = blocks.some((b) => b.note || b.raw.trim()) ? '' : `<p class="panel-empty">${c.status === 'recording' ? 'Notes you add here are tied to the moment of the call. Start with ? for a question, ! for a decision, [] for a to-do.' : 'Add notes about this call. Select words in the transcript to comment on what was said.'}</p>`
+  })
+  // The call's live notes (✦) among the user's own, by time: theirs never move (`LiveTimeline.merge`).
+  const liveItems = LiveTimeline.items((c.live || {}).notes)
+  const items = liveItems.length
+    ? LiveTimeline.merge(blocks.map((b, i) => ({ i, t: b.note && b.t != null ? b.t : null })), liveItems).map((e) => e.live ? liveItemHtml(e.live) : rows[e.mine.i]).join('')
+    : rows.join('')
+  const answers = hasLive(c) ? liveAnswersHtml(c) : ''
+  const empty = liveItems.length || answers || blocks.some((b) => b.note || b.raw.trim()) ? '' : `<p class="panel-empty">${c.status === 'recording' ? 'Notes you add here are tied to the moment of the call. Start with ? for a question, ! for a decision, [] for a to-do.' : 'Add notes about this call. Select words in the transcript to comment on what was said.'}</p>`
   const live = c.status === 'recording'
   const kinds = ['note', 'question', 'decision', 'todo'].map((k) => `<button class="nt-kind${S.noteKind === k ? ' on' : ''}" data-note-kind="${k}">${k === 'note' ? 'Note' : `${NOTE_LOOK[k][0]} ${NOTE_LOOK[k][1]}`}</button>`).join('')
   const at = S.noteAt != null ? S.noteAt : callNow(c)
@@ -75,7 +81,8 @@ function notesTimeline(c) {
   return `<div class="notes-tl" data-notes-call="${esc(c.name)}">
     <div class="nt-bar"><span class="saved-state" id="notes-state">${esc(notesState(v, pendingNote(c.name)))}</span><button class="icon-btn" data-cmd="notes-raw" title="Edit as text (my-notes.md)" aria-label="Edit as text">${ICON('<path d="M8 7l-5 5 5 5M16 7l5 5-5 5"/>')}</button></div>
     ${kept}${err}
-    <div class="nt-list" id="nt-list">${items}${empty}</div>
+    ${liveBox(c)}
+    <div class="nt-list" id="nt-list">${items}${answers}${empty}</div>
     <div class="nt-compose">
       <div class="nt-kinds">${kinds}</div>
       <div class="nt-row"><input id="note-input" class="search" autocomplete="off" maxlength="1000" placeholder="${esc(ph)}" value="${esc(S.noteDraft)}" aria-label="New note"${S.closing ? ' readonly' : ''}>${live ? `<button class="btn nt-flag" data-cmd="note-flag" title="Flag this moment — the minutes look here">⚑ Flag</button>` : ''}</div>

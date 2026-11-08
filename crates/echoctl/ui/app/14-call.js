@@ -48,7 +48,11 @@ function callMenu(c) {
   const a = Layout.area('notes', panelViews())
   const on = !!(a && eff[a].shown && eff[a].active === 'notes')
   const notes = `<button class="icon-btn${on ? ' on' : ''}" data-panel-flip="notes" aria-pressed="${on}" title="My notes" aria-label="My notes">${ICON('<path d="M5 4h10l4 4v12H5z"/><path d="M15 4v4h4M8 12h8M8 16h6"/>')}</button>`
-  return notes + `<button class="icon-btn" data-cmd="call-menu" aria-haspopup="menu" aria-expanded="${S.menuOpen}" aria-label="Call actions" title="Call actions">${ICON('<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>')}</button>${S.menuOpen ? `<div class="menu" role="menu">${items}</div>` : ''}`
+  // What moved, beside it: only for a call that is in a thread; its count once a thread has read it.
+  const ma = (c.changes || []).length && Layout.area('moved', panelViews())
+  const mOn = !!(ma && eff[ma].shown && eff[ma].active === 'moved'), mn = movedCount(c)
+  const moved = ma ? `<button class="icon-btn${mOn ? ' on' : ''}${mn ? ' has-n' : ''}" data-panel-flip="moved" aria-pressed="${mOn}" title="What moved" aria-label="What moved${mn ? ` · ${mn} change${mn === 1 ? '' : 's'}` : ''}">${MOVED_ICON}${mn ? `<span class="mv-n">${mn}</span>` : ''}</button>` : ''
+  return notes + moved + `<button class="icon-btn" data-cmd="call-menu" aria-haspopup="menu" aria-expanded="${S.menuOpen}" aria-label="Call actions" title="Call actions">${ICON('<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>')}</button>${S.menuOpen ? `<div class="menu" role="menu">${items}</div>` : ''}`
 }
 
 /** A message for a moment (an action that couldn't be done), and why the window didn't close: under
@@ -101,8 +105,8 @@ function turnsHtml(segs, q, jump, marks = []) {
 function tabBody(c, segs, chat, frames) {
   if (S.tab === 'prep') return prepView(c.prep, false)
   if (S.tab === 'transcript') {
-    // Live notes kept (or being kept): the transcript with them beside it, as during the call.
-    if (hasLive(c)) return liveTab(c, segs)
+    // A recording with live notes: the live transcript at full width, kept at its end (the notes are in My notes).
+    if (hasLive(c) && c.status === 'recording') return liveTranscript(segs)
     if (!segs.length) return c.status === 'recording'
       ? `<p style="color:var(--text-3)">Listening. The live transcript appears here as people speak.</p>`
       : `<p style="color:var(--text-3)">${c.status === 'transcribing' ? 'Transcribing on this computer. This takes about a quarter of the call length.' : 'No transcript for this call.'}</p>`
@@ -169,12 +173,15 @@ function modeRows(project, n, val) {
   if (m.mode === 'claude') rows.push(['Claude hands back', val('prompt', m.prompt, 'not said', `<textarea class="wp-in" data-ledger-set="prompt" rows="3" maxlength="600" aria-label="What Claude hands back" autofocus>${esc(m.prompt || '')}</textarea>`)])
   return rows
 }
-/** What the call changed in its threads, beside the minutes: each thread's changes, the user's own open tasks first
- *  with who does each (`modeIcon`; a click opens the task's details). */
+/** What the call changed in its threads (the What moved panel view): each thread's changes, the user's own open
+ *  tasks first with who does each (`modeIcon`; a click opens the task's details). */
+const movedRows = (g) => g.changes.filter((x) => x.verdict !== 'wrong')
+/** How many changes the call made in its threads that have read it (the What moved tab's count). */
+const movedCount = (c) => ((c && c.changes) || []).reduce((n, g) => n + (g.read ? movedRows(g).length : 0), 0)
 function callChanges(c) {
   const blocks = (c.changes || []).map((g) => {
     const p = projById(g.project) || { id: g.project, name: g.project }
-    const rows = g.changes.filter((x) => x.verdict !== 'wrong')
+    const rows = movedRows(g)
       .sort((a, b) => (b.node.mine && !TASK_DONE.has(b.node.state) ? 1 : 0) - (a.node.mine && !TASK_DONE.has(a.node.state) ? 1 : 0))
     const head = `<div class="cc-th">${projIcon(p, 14)}<b>${esc(p.name)}</b>`
     if (!g.read) {
@@ -204,7 +211,7 @@ function callChanges(c) {
         ${mark}${ts != null ? `<button class="btn ghost" data-at="${ts}">${clock(ts)}</button>` : '<span></span>'}</div>`
     }).join('')}</div>`
   })
-  return blocks.length ? `<section class="cc"><div class="cc-h">What moved</div>${blocks.join('')}</section>` : ''
+  return blocks.length ? `<section class="cc">${blocks.join('')}</section>` : ''
 }
 const hms = (s) => String(s).split(':').reduce((a, x) => a * 60 + Number(x), 0)
 

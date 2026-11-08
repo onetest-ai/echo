@@ -402,14 +402,19 @@ function callProjects(c) {
     const x = c.memo ? `<button class="pj-x" data-pj="member" data-id="${esc(p.id)}" data-call-name="${esc(c.name)}" data-how="exclude" title="Not this — never put here again" aria-label="Not ${esc(p.name)}">×</button>` : ''
     return `<span class="pj-chip memo-pj"><button class="link-btn" data-pj="goto" data-id="${esc(p.id)}" title="${esc(c.memo && span ? 'Found from what you said' : (WHY[p.why] || p.why))}">${projIcon(p, 14)}${esc(p.name)}</button>${span ? `<span class="set-sub">${esc(span)}</span>` : ''}${x}</span>`
   }).join('')
-  const sug = (c.suggested || [])[0]
-  const bar = sug ? `<div class="pj-sug">${projIcon(sug, 16)}<span class="grow">Part of <b>${esc(sug.name)}</b>? <span class="set-sub">${esc(sug.why)}</span></span><button class="btn primary" data-pj="member" data-id="${esc(sug.id)}" data-call-name="${esc(c.name)}" data-how="include">Add</button><button class="btn ghost" data-pj="member" data-id="${esc(sug.id)}" data-call-name="${esc(c.name)}" data-how="exclude">Not this</button></div>` : ''
   const all = (S.pj.data && S.pj.data.projects) || []
   const mine = new Set((c.projects || []).map((p) => p.id))
   const picker = S.pj.picker ? `<div class="menu pj-menu" role="menu">${all.filter((p) => p.group !== 'closed').map((p) => `<button class="menu-item" role="menuitemcheckbox" aria-checked="${mine.has(p.id)}" data-pj="member" data-id="${esc(p.id)}" data-call-name="${esc(c.name)}" data-how="${mine.has(p.id) ? 'exclude' : 'include'}">${mine.has(p.id) ? '✓ ' : ''}${projIcon(p, 14)} ${esc(p.name)}</button>`).join('') || '<div class="menu-item set-sub">No threads yet</div>'}<div class="menu-sep" role="separator"></div><button class="menu-item" role="menuitem" data-pj="from-call" data-call-name="${esc(c.name)}">New thread from this call…</button></div>` : ''
   if (c.projects_error) return `<div class="pj-chips"><span class="set-sub">Projects: ${esc(c.projects_error)}</span></div>`
-  return `<div class="pj-chips">${chips}<span class="pj-add-wrap"><button class="pj-chip add" data-pj="picker" aria-haspopup="menu" aria-expanded="${S.pj.picker}">+ Thread</button>${picker}</span></div>${bar}`
+  return `<div class="pj-chips">${chips}<span class="pj-add-wrap"><button class="pj-chip add" data-pj="picker" aria-haspopup="menu" aria-expanded="${S.pj.picker}">+ Thread</button>${picker}</span></div>`
 }
+/** A thread the call may belong to, asked under the call's header (the header's full width, buttons included). */
+function callSuggestion(c) {
+  const sug = (c.suggested || [])[0]
+  const bar = sug ? `<div class="pj-sug">${projIcon(sug, 16)}<span class="grow">Part of <b>${esc(sug.name)}</b>? <span class="set-sub">${esc(sug.why)}</span></span><button class="btn primary" data-pj="member" data-id="${esc(sug.id)}" data-call-name="${esc(c.name)}" data-how="include">Add</button><button class="btn ghost" data-pj="member" data-id="${esc(sug.id)}" data-call-name="${esc(c.name)}" data-how="exclude">Not this</button></div>` : ''
+  return bar
+}
+
 
 function projectSend(op, extra = {}) {
   send({ cmd: 'project', op, id: S.pj.sel, ...extra })

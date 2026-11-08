@@ -95,8 +95,6 @@ function render() {
   // The live transcript follows the call while it is scrolled to the end.
   const lt = $('#live-transcript')
   const ltStick = !lt || lt.scrollTop + lt.clientHeight >= lt.scrollHeight - 40, ltTop = lt ? lt.scrollTop : 0
-  // The live notes keep where they were scrolled to (an update re-renders them).
-  const ls = $('.live-scroll'), lsTop = ls ? ls.scrollTop : 0
   const termFocus = focusedTerm()
   const app = $('#app')
   // The workbench: fixed areas, each replaced only when its HTML changed (`patch`).
@@ -187,12 +185,10 @@ function render() {
         if (pane.dataset.mode !== 'frame') {
           pane.dataset.mode = 'frame'
           pane.classList.add('framed')
-          patch(pane, '<div id="minutes-bar"></div><div class="minutes-split"><div class="minutes-slot" id="minutes-slot"></div><aside class="minutes-side" id="minutes-side" aria-label="What moved"></aside></div>')
+          patch(pane, '<div id="minutes-bar"></div><div class="minutes-split"><div class="minutes-slot" id="minutes-slot"></div></div>')
         }
         patch($('#minutes-bar'), d.bar)
         patch($('#minutes-slot'), d.frame)
-        patch($('#minutes-side'), d.side || '')
-        $('#minutes-side').hidden = !d.side
       } else {
         if (pane.dataset.mode === 'frame') { pane.dataset.mode = ''; pane.classList.remove('framed') }
         patch(pane, d.pane)
@@ -211,8 +207,6 @@ function render() {
   }
   const lt2 = $('#live-transcript')
   if (lt2 && !jumped) lt2.scrollTop = ltStick ? lt2.scrollHeight : ltTop
-  const ls2 = $('.live-scroll')
-  if (ls2) ls2.scrollTop = lsTop
   if (entering) { const p = $('.pane') || $('.grid-wrap'); if (p) { p.classList.remove('enter'); void p.offsetWidth; p.classList.add('enter') } }
   placeDetail()
   pushNotes(false)

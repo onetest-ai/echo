@@ -6,7 +6,7 @@ function minutesTab(c) {
   // The first minutes being written: their box until they are done (the file appears mid-run).
   if (!c.notes || (busy && !run.had_minutes)) return minutesHint(c, 'No minutes yet', 'The transcript is ready.')
   const frame = `<iframe id="minutes-frame" sandbox="allow-scripts" referrerpolicy="no-referrer" title="Minutes" src="minutes/${encodeURIComponent(c.name)}?v=${encodeURIComponent(c.minutes_rev || '')}${Theme.chosen() ? `&theme=${Theme.chosen()}` : ''}"></iframe>`
-  return { bar: minutesBar(c), frame, side: callChanges(c) }
+  return { bar: minutesBar(c), frame }
 }
 
 /** Above the page: an update going on or one that didn't finish, notes changed since, and the file. */
@@ -131,3 +131,14 @@ function minutesHint(c, heading, lead) {
     `${pick}<button class="btn primary" data-cmd="write-notes">${label}</button>${later}${log}`) + session
 }
 
+// ── What moved: a view of the right panel (was beside the minutes; the minutes now take the tab's width) ──
+const MOVED_ICON = ICON('<path d="M4 7h11M11 3l4 4-4 4"/><path d="M20 17H9M13 13l-4 4 4 4"/>')
+function movedPanel() {
+  if (!S.selected) return '<p class="panel-empty">Open a call to see what it changed in its threads.</p>'
+  const c = S.call
+  if (!c || c.error) return '<div class="skeleton" style="padding:12px"><i></i><i></i></div>'
+  return `<div class="mv">${callChanges(c)}</div>`
+}
+// Shown for a call that is in a thread (each thread says what it changed, or why it hasn't read the call yet);
+// the tab carries the count of changes. A call in no thread has no such view, as Also discussed without the Brain.
+PANEL_VIEWS.push({ id: 'moved', label: 'What moved', icon: MOVED_ICON, area: 'right', when: () => S.view === 'calls' && !!S.selected && !!(S.call && (S.call.changes || []).length), badge: () => movedCount(S.call) || '', render: movedPanel })

@@ -177,8 +177,11 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
 - A task's read (`echoctl read echo://task/…`, where Work on it and Yolo start) says who does it and gives the context:
   the thread's last 3 calls with minutes, and the last 3 of the meeting series it was raised in (the invite's subject,
   as "Since last time" goes) that the thread's don't already list — links only; Claude opens what it needs.
-- What moved (`callChanges`): what a call changed in its threads, beside the minutes as the live notes are beside the
-  transcript (its own scroll; under 1000 px it is hidden), the user's own open tasks first with who does each. It was
+- What moved (`callChanges`, panel view `moved` in `17-minutes.js`): what a call changed in its threads, a view of the
+  right panel — a button in the call's header beside My notes and a panel tab, both with the count of changes once a
+  thread has read the call (`movedCount`; panel views may carry a `badge`); the view exists only for a call in a thread,
+  as Also discussed only with the Brain. The minutes take the whole Minutes tab (Nov 2026: beside them they were
+  squeezed to a few words a line). The user's own open tasks first with who does each. It was
   above the Actions tab's items; action items are everything said, the user's tasks are what is theirs to do. The
   Actions tab is gone (Nov 2026): the minutes list the action items with their moments, What moved has the tasks;
   `actions.json` stays (the minutes, Today's counts, thread sync and `echoctl actions` use it).
@@ -264,7 +267,9 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   (Calls `list-detail`, Calendar `single`, Settings `single` at the foot; ⌘/Ctrl+1…9, ⌘/Ctrl+,), `PANEL_VIEWS`,
   `CALL_TABS`, `EVENT_ACTIONS`. Echo's own views are entries like a plugin's.
 - Call tabs: Minutes / Transcript / Chat / Screens / Actions. One Transcript tab: live (first, with a recording
-  dot) while the call records, final afterwards, its live notes beside it either way (`#call/x/live`).
+  dot) while the call records, final afterwards — the transcript alone at full width either way (`#call/x/live`
+  reads as `transcript`); while recording with live notes it is `section#live-transcript`, kept at its end. The
+  live notes are in My notes (below).
 - `Layout` keeps panel placement and open panels in `<config dir>/window-layout.json` (`/api/layout`, IPC
   `save_layout`, ≤ 16 KB). The right panel starts closed at every window open (`Layout.started()`).
 - Responsive: below 900 px wide the calls list folds behind "Calls ▾" and the right panel overlays the page; below
@@ -361,6 +366,16 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   acknowledged save in flight per call. IPC `save_my_notes {text, base}` → `calls::save_my_notes` under
   `.meta.lock`: base unchanged → text; appended since (tray) → text + tail; otherwise the other version is kept as
   `my-notes.<HHMMSS>.md`. An unchanged text is never written: its mtime is the minutes' clock.
+- Live notes (`18-live.js`, `LiveTimeline` block, `ui/live-timeline.test.mjs`) share the timeline: a box above the list
+  (`liveBox`: Now, one muted status line — profile · state · updates · tokens · cost · not covered — a sign-in or
+  settings problem with its button, "Last time"; its ⋯ menu holds the call's model, Pause / Resume while recording
+  and Ask Claude about this call), the draft's decisions / action items / open questions as ✦ rows (! / ☐ with the
+  owner / ?) merged by time, and answers under "Asked about this call" at the end. The merge never moves the user's
+  notes (their file's order stands): a live item goes before the first of theirs that is later (the same second:
+  theirs first), live items with no time go last — the draft has no per-item time of writing, it is rewritten
+  whole at each update. Live rows are read-only (the next update rewrites them); their chips jump like the user's.
+  No box and no ✦ rows when the call kept none and isn't recording (live notes off, or on with none written).
+  Why the panel: one place for everything said about the moment, and the transcript keeps its width.
 
 ### Minutes frame
 - `/minutes/<call>?v=<revision>` (`minutes::render_for_window`, rendered fresh) in

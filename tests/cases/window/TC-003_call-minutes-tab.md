@@ -32,7 +32,7 @@ external_id: TC-WIN-003
 | 2 | Read the call's header | Title "Acme weekly sync", today's date and time, "30 min", the people, the thread chip "Acme rollout" |
 | 3 | Read the minutes | A notice that AI wrote them from an automatic transcript, then the sections Summary, Decisions, Action items, Open questions |
 | 4 | Read Action items | "Me — send Acme the SSO checklist today" and "Omar Haddad — answer the security questionnaire by Friday", each with a time chip |
-| 5 | Read the panel beside the minutes | "What moved" lists the thread "Acme rollout" |
+| 5 | Click the header button What moved (`[data-panel-flip="moved"]`; skip it if the right panel already shows What moved) | The minutes fill the tab (no column beside them); the right panel shows "What moved" with the thread "Acme rollout" |
 
 ## Expected Final State
-The call shows its minutes with all four sections, the AI notice, its thread, and What moved beside them.
+The call shows its minutes with all four sections, the AI notice, its thread, and What moved in the right panel.

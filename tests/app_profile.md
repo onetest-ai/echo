@@ -108,6 +108,13 @@ Not routes: the Details drawer, My notes, Vocabulary, Asks and Inbox are panels 
 actions palette (`Actions ⌘K`, `[data-pal-open]`) is a dialog. A "Knowledge" activity (`#brain`) exists only while
 Recall is on; it is off on test data.
 
+Live notes are in **My notes** (`[data-panel-flip="notes"]`; the right panel `aside#r-right`, outside `main`), not in the
+Transcript tab, which is the transcript alone at full width: a box `section[aria-label="Live notes"]` above the list (Now
+`.nl-now`, the status line `.nl-status`, the ⋯ menu `[data-live-menu]` → `.nl-menu` with the call's model
+`[data-callprofile]`, Pause / Resume while recording, Ask Claude about this call), then one list `#nt-list` where the
+live notes' items (`.nt-entry.nt-livei`, marked ✦, read-only) sit among the user's notes by time, and the answers
+under "Asked about this call". A call with no live notes kept (or live notes off) has no box and no ✦ rows.
+
 Selectors: prefer roles and visible text (`getByRole('button', {name: 'Prepare'})`, headings such as "Your day").
 Elements the app acts on carry `data-*` attributes (`data-call`, `data-go`, `data-prep-write`, `data-schedule`,
 `data-tk`, `data-pj`); use them when text repeats. Thread ids are the name's slug (`acme-rollout`). Task ids
@@ -133,10 +140,9 @@ Elements the app acts on carry `data-*` attributes (`data-call`, `data-go`, `dat
   `evaluate` cannot read it and `browser_wait_for text` does not see its text — it times out). The accessibility
   snapshot does list its content (refs `f1eN`); to act inside use `iframe#minutes-frame >> internal:control=enter-frame >> .ts >> nth=0`
   (time chips are `.ts`), or `page.frameLocator('#minutes-frame')` in `browser_run_code_unsafe`.
-- **Narrow viewport squeezes the minutes.** At 1201 px wide, with the sidebar expanded and a right panel open
-  (My notes, Details) the minutes frame is 1 px wide (153 px with the sidebar folded): its chips are covered by the
-  "What moved" aside and a click fails with "intercepts pointer events". Close the panel (`[aria-label="Close the panel"]`)
-  and keep the sidebar folded before acting in the minutes.
+- **A right panel narrows the minutes.** The minutes frame takes the whole Minutes tab (What moved is a right panel
+  view, not a column beside it): at 1201 px with the calls list and a right panel open it is about 380 px wide, with the
+  panel closed about 700 px. Close the panel (`[aria-label="Close the panel"]`) when a step needs the minutes wide.
 - Menus: "Call actions" and "Thread actions" open on click (no hover needed) and close on Escape. Native
   `<select>`s (Thread, Who does it, Order, Group by, Layout, Kind, Owner; task Status once its button is clicked) need `browser_select_option`, not clicks.
 - **`browser_run_code_unsafe` keeps no globals between calls**: each call runs in a fresh context, so `globalThis.x` set in one call is gone in the next. Keep state across calls on the `page` object (`page.__dlg`), which is the same page from call to call; the hostile cases' guard and check D do so.
@@ -215,7 +221,7 @@ All verified on the test data in a live session. Roles and names first, then the
 | My notes toggle | `[aria-label="My notes"]` (a toggle, `aria-pressed`) | #call | panel box `[aria-label="New note"]` (Enter adds), buttons Note / ? Question / ! Decision / ☐ To-do |
 | Minutes frame | `iframe#minutes-frame` → `.ts` time chips | #call/minutes | see Fragile areas |
 | Transcript | `[aria-label="Find in transcript"]` / `#find`; turns `.turn[data-t]` (`me`/`remote`), match = class `hit`; speaker `.who` ("Me" + a `.lang` chip "en") | #call/transcript | the visible name reads "Meen": Me + the language chip |
-| What moved | `[aria-label="What moved"]`; "Sync now" `[data-cc-sync="<thread>"]` | #call | starts Claude Code: do not press |
+| What moved | a right panel view: the call header's button `[data-panel-flip="moved"]` (beside My notes, with the count of changes; only for a call in a thread), its panel tab `[data-panel-show="moved"]` (the same count), the view `#r-right .mv`; "Sync now" `[data-cc-sync="<thread>"]` | #call | the minutes take the whole tab; Sync now starts Claude Code: do not press |
 | Kind of meeting | `select[aria-label="Kind of meeting"]` | #call, calendar card | |
 | Calendar | `role=button[name="Day"]`, `"Week"`, `"Earlier"`, `"Today"`, `"Later"`; cards `role=button[name=/Globex design review/]` | #calendar | the side card stays open when Day/Week is switched |
 | Today cards | `[data-tk="open"][data-node="T001"]`, `[data-schedule="ev-globex-review"]`, `[data-prep-write="<hash>"]`, `[data-today-close="T001"]`, `[data-claude-task="T001"]` | #today | `data-schedule` ids: `ev-globex-review`, `ev-acme-demo`; Prepare/Close/Claude start Claude Code or write: not pressed |
