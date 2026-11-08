@@ -316,6 +316,11 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
 - Appearance (System / Light / Dark) is per computer in the webview (`echo.theme`, `:root[data-theme]`); graphs and
   terminals redraw; the minutes frame is served with its dark rules on or off (`minutes::with_theme`, `?theme=`).
 - About me's `me.md` is shown through `minutes::markdown_html` and edited in place (`settings_set me_profile`).
+- General and Health show the computer, not the data folder, and say so in their first line (#104): Start at login,
+  the command line, permissions and the speech engine are the machine's; Claude Code follows the PATH and
+  `CLAUDE_CONFIG_DIR` Echo runs with (a test data folder's `env` sets both); models and the Microsoft 365 sign-in
+  follow `ECHOCTL_CONFIG_DIR`. The snapshot shows Claude Code's paths with the home folder as `~`
+  (`settings::home_as_tilde`); the data folder is shown whole (it is the one path the user acts on).
 - Search settings (`SettingsSearch`, #103) keeps a section by its name or by its settings' own labels — the rows'
   titles and the cards' heads of the section as drawn now, not descriptions or badges; the page shows the first one
   kept when the open one isn't, its matching rows picked out (`.set-row.hit`), and "Nothing matches" when nothing

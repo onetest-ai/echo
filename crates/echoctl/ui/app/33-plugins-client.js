@@ -170,7 +170,7 @@ const SETTINGS_BODY = {
   plugins: pluginsSettings,
   general(st) {
     const upd = st.update ? actBtn('update', `Update to ${st.update}…`, '', true) : actBtn('check_updates', 'Check for updates')
-    return `<h2>General</h2>` + setCard('', [
+    return `<h2>General</h2><p class="set-lead">Start at login, the command line and Claude Code are this computer’s, whichever data folder Echo uses.</p>` + setCard('', [
       setRow('Data folder', `<code>${esc(st.home)}</code> — calls, transcripts and minutes live here.`, actBtn('change_home', 'Change…')),
       setRow('Appearance', 'Light or dark for Echo’s window on this computer — or as your system is set.', `<div class="seg" role="group" aria-label="Appearance">${[['', 'System'], ['light', 'Light'], ['dark', 'Dark']].map(([v, l]) => `<button data-theme-set="${v}" aria-pressed="${Theme.chosen() === v}">${l}</button>`).join('')}</div>`),
       setRow('Start at login', 'Echo runs in the menu bar from when you log in.', sw('autostart', st.autostart, 'Start at login')),
@@ -289,7 +289,7 @@ const SETTINGS_BODY = {
     })
     const stale = st.stale_plugins || []
     const plugin = setCard('Claude Code', claudeRows(st.claude_code || { checking: true }).concat(stale.length ? [setRow('<span class="warn">✗</span> An older Echo plugin', `${stale.map((s) => `${esc(s.version)} (${esc(s.scope)}${s.project ? ', ' + esc(String(s.project).split(/[\\/]/).pop()) : ''})`).join(', ')} — an older one can hold calls back from Write minutes. Restart Claude Code after updating.`, '<button class="btn" data-cmd-ipc="update_plugins">Update it</button>')] : []))
-    return `<h2>Health</h2><p class="set-lead">What Echo needs from this computer.</p>` + plugin + setCard('Permissions', rows) +
+    return `<h2>Health</h2><p class="set-lead">What Echo needs from this computer — the same whichever data folder it uses.</p>` + plugin + setCard('Permissions', rows) +
       setCard('', [setRow('Ask again', 'macOS asks for each permission Echo is missing.', actBtn('ask_permissions', 'Ask for permissions') + actBtn('recheck', 'Check again'))])
   },
 }

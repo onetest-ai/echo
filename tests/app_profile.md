@@ -156,9 +156,12 @@ Elements the app acts on carry `data-*` attributes (`data-call`, `data-go`, `dat
 - **Reload after a CLI change.** A hash-only Navigate does not refetch data after an `echoctl` step that changed it: reload the page fully (`location.reload()` or reload `{{base_url}}/`), then navigate.
 - Transcript "Find" highlights (class `hit` on `.turn`) a moment after the text is entered; read the DOM after a short wait.
 - A right panel keeps its last tab: after opening a task it shows Details, and clicking Inbox flips it back.
-- Settings → General and Health read the **real machine**, not the test data: "Command line", "Claude Code plugin"
-  show Installed, Health shows the real Claude Code path, version and macOS permission state, "Echo plugin" lists real
-  Claude Code sessions. A case must not assert them, and a screenshot of Health shows a real home path: do not keep it.
+- Settings → General and Health show **this computer**, whichever data folder (both say so in their first line):
+  Start at login, "Command line", the "In a terminal" row and the macOS permissions are the machine's — a case must
+  not assert them. Claude Code (its path, version, "Echo plugin", an older plugin) follows the PATH and
+  `CLAUDE_CONFIG_DIR` the server runs with: on the `standard` set (and `small --ai`) that is the run's fake and its
+  own config folder (`settings/TC-028`); on plain `small` it is the account's. Paths under the home folder show as
+  `~/…` (#104).
 - Settings → Plugins → Discover lists the built-in marketplace (`onetest-ai/echo-plugins`, "3 plugins · read today");
   its content comes from a read of that repository (network or cache), so assert only the tabs, not the plugin list.
 - Known issues seen on the test data (2026-11-06; verify before relying on them):

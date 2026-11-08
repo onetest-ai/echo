@@ -167,6 +167,16 @@
    "axes": [
     "set.config"
    ]
+  },
+  {
+   "id": "F-SET-19",
+   "feature": "General and Health say that what they show of the computer (Start at login, the command line, Claude Code, permissions) is this computer's, whichever data folder; Claude Code follows the PATH and CLAUDE_CONFIG_DIR Echo runs with, and its paths show the home folder as `~`",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "set.claude_code",
+    "set.health"
+   ]
   }
  ]
 }

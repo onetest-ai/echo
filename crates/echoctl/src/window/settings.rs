@@ -79,7 +79,19 @@ pub(super) fn settings_snapshot() -> Value {
                                  "pending": crate::brain::files::folder::pending() });
         v["brain"] = b;
     }
+    home_as_tilde(&mut v, &paths::user_home());
     v
+}
+
+/// Claude Code's paths with the user's home folder as `~` (#104): Health says where it is without the account's home
+/// path, which a screenshot of a test run (or of a bug report) would otherwise carry.
+fn home_as_tilde(v: &mut Value, home: &Path) {
+    for at in ["/claude_code/path", "/claude_code/terminal/found", "/claude_code/terminal/dir"] {
+        let Some(x) = v.pointer_mut(at) else { continue };
+        if let Some(rest) = x.as_str().and_then(|s| Path::new(s).strip_prefix(home).ok()) {
+            *x = json!(Path::new("~").join(rest).display().to_string());
+        }
+    }
 }
 
 /// The last OpenAI-compatible transcription server connection: `{busy}`, `{ok, …}` or `{error}`.
@@ -334,4 +346,37 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
         }
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn claude_codes_paths_show_the_home_folder_as_a_tilde() {
+        let home = Path::new("/Users/someone");
+        let mut v = json!({ "claude_code": { "path": "/Users/someone/.local/bin/claude", "version": "2.1",
+                            "terminal": { "ok": true, "found": "/Users/someone/.local/bin/claude", "dir": "/Users/someone/.local/bin" } } });
+        home_as_tilde(&mut v, home);
+        assert_eq!(v["claude_code"]["path"], "~/.local/bin/claude");
+        assert_eq!(v["claude_code"]["terminal"]["found"], "~/.local/bin/claude");
+        assert_eq!(v["claude_code"]["terminal"]["dir"], "~/.local/bin");
+        assert_eq!(v["claude_code"]["version"], "2.1");
+    }
+
+    #[test]
+    fn paths_outside_the_home_folder_and_missing_ones_stay() {
+        let home = Path::new("/Users/someone");
+        let mut v = json!({ "claude_code": { "path": "/opt/homebrew/bin/claude", "terminal": { "ok": null, "why": "no answer" } } });
+        home_as_tilde(&mut v, home);
+        assert_eq!(v["claude_code"]["path"], "/opt/homebrew/bin/claude");
+        assert!(v["claude_code"]["terminal"].get("found").is_none());
+        // A folder whose name only starts like the home folder's is not in it.
+        let mut w = json!({ "claude_code": { "path": "/Users/someone-else/bin/claude" } });
+        home_as_tilde(&mut w, home);
+        assert_eq!(w["claude_code"]["path"], "/Users/someone-else/bin/claude");
+        let mut c = json!({ "claude_code": { "checking": true } });
+        home_as_tilde(&mut c, home);
+        assert_eq!(c, json!({ "claude_code": { "checking": true } }));
+    }
 }
