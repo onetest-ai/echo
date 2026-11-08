@@ -126,33 +126,69 @@ function calendarView() {
     ? `<p style="position:absolute;top:40%;left:0;right:0;text-align:center;color:var(--text-3);pointer-events:none">${days === 1 ? 'Nothing on the calendar this day.' : 'Nothing on the calendar these days.'}</p>` : ''
   const grid = `<div class="grid-wrap" id="calgrid" data-hour="${HOUR}"><div class="grid" style="grid-template-columns: 56px repeat(${days}, minmax(0, 1fr))"><div class="hours" style="height:${(h1 - h0) * HOUR}px">${hourLabels}</div>${colHtml}</div>${empty}</div>`
   const sel = S.cal.selected && (d.events || []).find((e) => e.id === S.cal.selected)
-  return `<div class="cal">${head}${note}<div style="display:grid;grid-template-rows:auto auto 1fr;min-height:0">${dayHead}${alldayRow}${grid}</div>${sel ? eventDetail(sel, now) : ''}</div>`
+  return `<div class="cal">${head}${note}<div style="display:grid;grid-template-rows:auto auto 1fr;min-height:0">${dayHead}${alldayRow}${grid}</div>${sel ? eventDetail(sel, now) : ''}${eventMenu(d, now)}</div>`
 }
 
+/** A calendar event's card: its head (title, × close, when and how far off, its kind and threads as chips), one action
+ *  strip (the main button for its state, its prep beside it, a line saying what happens), then People, the series rule
+ *  and Last time under small headings — each only when there is something to show. */
 function eventDetail(e, now) {
   const st = eventState(e, now)
-  const when = `${st.s.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })}, ${hm(st.s)} to ${hm(st.en)}`
+  const kind = eventAction(e, st)
   const ACTS = {
     'open-notes': () => `<button class="btn primary" data-call="${esc(e.recorded.name)}">Open notes</button>`,
-    scheduled: () => `<button class="btn" data-unschedule="${esc(e.id)}">Don't record</button><p class="why">Echo arms itself a minute before it starts${e.scheduled_languages ? `, transcribed as ${esc(e.scheduled_languages.map(langName).join(', '))}` : ''}.</p>`,
-    join: () => `${recordButton(`data-join="${esc(e.id)}"`, 'Join and record')}<button class="btn" data-schedule="${esc(e.id)}">Record it</button>`,
+    scheduled: () => `<button class="btn" data-unschedule="${esc(e.id)}">Don't record</button>`,
+    join: () => `${recordButton(`data-join="${esc(e.id)}"`, 'Join & record')}<button class="btn" data-schedule="${esc(e.id)}" title="Record without joining — you're in it already">Record</button>`,
     record: () => recordButton(`data-schedule="${esc(e.id)}"`, st.live ? 'Record it' : 'Record when it starts'),
     import: () => e.import && e.import.busy ? '<button class="btn" disabled>Importing the Teams transcript…</button>'
       : `<button class="btn primary" data-cal-import="${esc(e.id)}">Import Teams transcript</button>`,
   }
-  const kind = eventAction(e, st)
-  const acts = kind ? ACTS[kind]() : ''
-  const why = e.recorded ? '' : e.import && e.import.error ? e.import.error : kind === 'import' ? (e.transcript ? 'Not recorded, but Teams transcribed it' : e.transcript === false ? 'Not recorded, and Teams has no transcript of it (yet)' : 'Not recorded. If Teams transcribed it') + ' — Echo makes a call of its transcript and chat; minutes, threads and the Brain follow.' : e.no_notetakers ? 'The organizer asked for no notetakers.' : e.declined ? 'You declined this meeting.' : e.cancelled ? 'This meeting was cancelled.' : !e.online ? 'Not a Teams meeting.' : st.past ? 'This meeting is over and was not recorded.' : ''
-  return `<aside class="detail">
-    <button class="btn ghost close" data-calclose="1" aria-label="Close">Close</button>
-    <h2 class="selectable">${esc(e.subject)}</h2><div class="when">${esc(when)}${eventTypeChip(e)}</div>
-    <dl>${e.organizer ? `<dt>Organizer</dt><dd>${esc(e.organizer)}</dd>` : ''}${e.people ? `<dt>People</dt><dd>${e.people}</dd>` : ''}${e.location ? `<dt>Where</dt><dd>${esc(e.location)}</dd>` : ''}${e.recorded ? `<dt>${e.recorded.imported ? 'Call' : 'Recording'}</dt><dd>${e.recorded.imported ? 'from the Teams transcript' : STATUS[e.recorded.status] || esc(e.recorded.status)}${e.recorded.minutes ? `, ${e.recorded.minutes} min` : ''}</dd>` : ''}</dl>
-    ${acts || slotItems('calendar.event', { kind: 'event', event: e }) ? `<div class="acts">${acts}${slotItems('calendar.event', { kind: 'event', event: e })}</div>` : ''}${why ? `<p class="why">${esc(why)}</p>` : ''}
-    ${eventProjects(e)}
-    ${eventPrep(e, st)}
-    ${seriesEditor(e)}
-    ${e.recap && e.recap.length ? `<div><b style="font-size:12px">Last time</b><ul>${e.recap.map((r) => `<li>${esc(r)}</li>`).join('')}</ul></div>` : ''}
+  const prep = eventPrep(e, st)
+  const slots = slotItems('calendar.event', { kind: 'event', event: e })
+  const acts = `${kind ? ACTS[kind]() : ''}${prep.btn}${slots}`
+  // One line: what happens, or why nothing can.
+  const rec = e.recorded
+  const line = rec ? `${rec.imported ? 'A call made of its Teams transcript' : STATUS[rec.status] || esc(rec.status)}${rec.minutes ? `, ${rec.minutes} min` : ''}`
+    : e.import && e.import.error ? esc(e.import.error)
+    : kind === 'import' ? `${e.transcript ? 'Not recorded, but Teams transcribed it' : e.transcript === false ? 'Not recorded, and Teams has no transcript of it (yet)' : 'Not recorded. If Teams transcribed it'}: Echo makes a call of its transcript and chat; minutes, threads and the Brain follow.`
+    : kind === 'scheduled' ? `Echo starts recording a minute before it begins${e.scheduled_languages ? `, transcribed as ${esc(e.scheduled_languages.map(langName).join(', '))}` : ''}.`
+    : kind === 'join' ? 'Joins it in Teams and records both sides.'
+    : kind === 'record' ? (st.live ? 'Records it now, both sides.' : 'Echo starts recording a minute before it begins.')
+    : e.no_notetakers ? 'The organizer asked for no notetakers: Echo won\'t record it.' : e.declined ? 'You declined this meeting.' : e.cancelled ? 'This meeting was cancelled.'
+    : !e.online ? 'Not a Teams meeting: nothing to record.' : st.past ? 'This meeting is over and was not recorded.' : ''
+  const lines = [line, prep.line].filter(Boolean).join(' ')
+  const main = acts || lines ? `<div class="ec-main">${acts ? `<div class="ec-acts">${acts}</div>` : ''}${lines ? `<p class="why">${lines}</p>` : ''}</div>` : ''
+  // Who's coming: the organizer first, then three names and how many more.
+  const others = (e.names || []).filter((n) => n !== e.organizer)
+  const people = e.organizer || others.length ? `<section class="ec-sec"><div class="ec-cap">People</div>
+      ${e.organizer ? `<div class="ec-org"><span class="ec-av" aria-hidden="true">${esc([...e.organizer][0] || '')}</span><b>${esc(e.organizer)}</b><span class="set-sub">organizer</span></div>` : ''}
+      ${others.length ? `<div class="ec-names" title="${esc(others.join(', '))}">${esc(others.slice(0, 3).join(', '))}${others.length > 3 ? ` <span class="set-sub">+${others.length - 3} more</span>` : ''}</div>` : !e.names && e.people ? `<div class="ec-names set-sub">${e.people} invited</div>` : ''}</section>` : ''
+  const series = seriesEditor(e)
+  const recap = e.recap && e.recap.length ? `<section class="ec-sec"><div class="ec-cap">Last time</div><ul>${e.recap.map((r) => `<li>${esc(r)}</li>`).join('')}</ul></section>` : ''
+  const where = e.location ? `<span class="ec-where">${esc(e.location)}</span>` : ''
+  const chips = `${eventTypeChip(e)}${eventProjects(e)}`
+  return `<aside class="detail" aria-labelledby="ec-h">
+    <div class="ec-head"><div class="ec-title"><h2 id="ec-h" class="selectable">${esc(e.subject)}</h2><button class="icon-btn ec-x" data-calclose="1" aria-label="Close" title="Close">${ICON('<path d="M6 6l12 12M18 6L6 18"/>')}</button></div>
+      <div class="when">${esc(evDay(st.s, now))} · ${esc(hm(st.s))}–${esc(hm(st.en))}${evRel(e, st, now)}${where}</div>
+      ${chips.trim() ? `<div class="ec-chips">${chips}</div>` : ''}</div>
+    ${main}${people}${series ? `<section class="ec-sec">${series}</section>` : ''}${recap}
   </aside>`
+}
+/** A day as the card says it: Today, Tomorrow, Yesterday, else its weekday and date. */
+function evDay(d, now) {
+  const a = new Date(d), b = new Date(now); a.setHours(0, 0, 0, 0); b.setHours(0, 0, 0, 0)
+  const n = Math.round((a - b) / 864e5)
+  return n === 0 ? 'Today' : n === 1 ? 'Tomorrow' : n === -1 ? 'Yesterday' : d.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })
+}
+/** How far off it is, coloured by state: in 12 min / now · 8 min left / recorded / over. */
+function evRel(e, st, now) {
+  const span = (cls, t) => ` <span class="ec-rel ${cls}">· ${esc(t)}</span>`
+  if (e.recorded) return span('done', 'recorded')
+  if (e.cancelled) return span('muted', 'cancelled')
+  if (st.live) return span('live', `now · ${Math.max(1, Math.round((st.en - now) / 60000))} min left`)
+  if (st.past) return span('muted', 'over')
+  const m = Math.round((st.s - now) / 60000)
+  return span('soon', m < 60 ? `in ${Math.max(1, m)} min` : m < 24 * 60 ? `in ${Math.round(m / 60)} h` : `in ${Math.round(m / 1440)} day${Math.round(m / 1440) === 1 ? '' : 's'}`)
 }
 
 /** A calendar event's projects on its card: chips (× on one added by hand to this event), and
@@ -170,3 +206,57 @@ function eventProjects(e) {
   return `<div class="pj-chips ev-pj">${chips}${e.recorded ? '' : `<span class="pj-add-wrap"><button class="pj-chip add" data-pj="ev-picker" data-event="${esc(e.id)}" aria-haspopup="menu" aria-expanded="${S.pj.evPicker === e.id}">+ Thread</button>${picker}</span>`}</div>`
 }
 
+
+/** Right-click a meeting in the calendar: what its card offers, in a menu at the pointer — its main action, its prep,
+ *  a thread, the series rule, its Teams link, and the card itself. Each item is the card's own button (same handlers). */
+function eventMenu(d, now) {
+  const m = S.cal.ctx
+  const e = m && ((d && d.events) || []).find((x) => x.id === m.id)
+  if (!e) return ''
+  const st = eventState(e, now), kind = eventAction(e, st)
+  const item = (attrs, label, extra = '') => `<button class="menu-item" role="menuitem" ${attrs}${extra}>${esc(label)}</button>`
+  const sep = '<div class="menu-sep" role="separator"></div>'
+  const main = {
+    'open-notes': () => item(`data-call="${esc(e.recorded.name)}"`, 'Open notes'),
+    scheduled: () => item(`data-unschedule="${esc(e.id)}"`, "Don't record"),
+    join: () => item(`data-join="${esc(e.id)}"`, 'Join & record') + item(`data-schedule="${esc(e.id)}"`, 'Record (without joining)'),
+    record: () => item(`data-schedule="${esc(e.id)}"`, st.live ? 'Record it' : 'Record when it starts'),
+    import: () => item(`data-cal-import="${esc(e.id)}"`, 'Import Teams transcript', e.import && e.import.busy ? ' disabled' : ''),
+  }
+  const p = e.prep
+  const prep = !p || p.writing ? '' : p.ready ? item(`data-ev-prep="${esc(p.id)}"`, 'Show prep') + (st.past ? '' : item(`data-prep-write="${esc(p.id)}" data-prep-open="1"`, 'Prepare again'))
+    : st.past ? '' : item(`data-prep-write="${esc(p.id)}" data-prep-open="1"`, 'Prepare')
+  const thread = e.recorded ? '' : item(`data-ev-ctx="thread" data-id="${esc(e.id)}"`, 'Add to a thread…')
+  const x = e.series
+  const rec = x && x.key && x.rule && x.rule.record === 'always'
+  const series = x && x.key ? `<div data-series-key="${esc(x.key)}" data-series-subject="${esc(e.subject || '')}" style="display:contents">${item(`data-series-set="record" data-val="${esc(JSON.stringify(rec ? null : 'always'))}"`, rec ? "Stop recording every meeting of this series" : 'Record every meeting of this series')}</div>` : ''
+  const link = e.join_url ? item(`data-copy="${esc(e.join_url)}"`, 'Copy the Teams link') : ''
+  const groups = [(kind ? main[kind]() : '') + prep, thread + series, link, item(`data-ev-ctx="open" data-id="${esc(e.id)}"`, 'Show details')].filter(Boolean)
+  // At the pointer, kept inside the window (its size is about known: 240 px wide, 32 px an item).
+  const n = (groups.join('').match(/menu-item/g) || []).length
+  const x0 = Math.min(m.x, window.innerWidth - 252), y0 = Math.min(m.y, window.innerHeight - (n * 32 + groups.length * 9 + 40))
+  return `<div class="menu ev-ctx" role="menu" aria-label="${esc(e.subject)}" style="left:${Math.max(8, x0)}px;top:${Math.max(8, y0)}px"><div class="menu-label">${esc(e.subject)}</div>${groups.join(sep)}</div>`
+}
+document.addEventListener('contextmenu', (ev) => {
+  const b = ev.target.closest && ev.target.closest('.cal .ev[data-ev]')
+  if (!b || !b.dataset.ev) return
+  ev.preventDefault()
+  S.cal.ctx = { id: b.dataset.ev, x: ev.clientX, y: ev.clientY }
+  render()
+  const first = document.querySelector('.ev-ctx .menu-item:not([disabled])')
+  if (first) first.focus()
+})
+// Any click closes the menu (the item's own handler still sees its button); Escape too.
+document.addEventListener('click', (ev) => {
+  if (!S.cal.ctx) return
+  const c = ev.target.closest && ev.target.closest('[data-ev-ctx]')
+  if (c) {
+    S.cal.selected = c.dataset.id
+    if (c.dataset.evCtx === 'thread') S.pj.evPicker = c.dataset.id
+  }
+  S.cal.ctx = null
+  render()
+})
+document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && S.cal.ctx) { S.cal.ctx = null; render() } })
+// The user scrolling (a wheel, not the grid's own scroll a render restores) or resizing the window closes it too.
+for (const t of ['wheel', 'resize']) window.addEventListener(t, () => { if (S.cal.ctx) { S.cal.ctx = null; render() } }, { passive: true })

@@ -20,7 +20,7 @@ const get = async (path) => {
 
 const S = {
   view: 'calls', // calls | calendar
-  cal: { mode: 'week', offset: 0, data: null, selected: null, loading: false },
+  cal: { mode: 'week', offset: 0, data: null, selected: null, loading: false, ctx: null },
   calls: null,
   agenda: null,
   state: null,

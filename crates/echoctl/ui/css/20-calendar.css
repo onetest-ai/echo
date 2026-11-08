@@ -54,21 +54,45 @@
 .tag.will { color: color-mix(in srgb, var(--recording) 75%, var(--text)); }
 .tag.no { color: var(--text-3); }
 
+/* A meeting's card: head (title, ×, when, chips), one action strip, then People / series / Last time sections */
 .detail {
-  position: fixed; right: 14px; top: 64px; width: min(400px, calc(100vw - 24px)); max-height: calc(100vh - 88px); z-index: 5;
+  position: fixed; right: 14px; top: 64px; width: min(380px, calc(100vw - 24px)); max-height: calc(100vh - 88px); z-index: 5;
   border: 1px solid var(--line-strong); border-radius: var(--r-panel); box-shadow: var(--shadow);
-  padding: 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; background: var(--surface);
+  overflow-y: auto; display: flex; flex-direction: column; background: var(--surface);
 }
-.detail h2 { margin: 0; font-size: 16px; font-weight: 650; line-height: 1.3; letter-spacing: -0.01em; }
-.detail .when { color: var(--text-2); font-size: 12.5px; }
-.detail dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font-size: 12.5px; }
-.detail dt { color: var(--text-3); }
-.detail dd { margin: 0; color: var(--text); overflow-wrap: anywhere; }
-.detail .acts { display: flex; flex-direction: column; gap: 6px; }
-.detail .acts .btn { justify-content: center; }
-.detail .why { color: var(--text-3); font-size: 12px; }
+.detail .ec-head { padding: 14px 14px 12px 18px; display: flex; flex-direction: column; gap: 6px; }
+.detail .ec-title { display: flex; align-items: flex-start; gap: 8px; }
+.detail h2 { margin: 0; flex: 1; min-width: 0; font-size: 16px; font-weight: 650; line-height: 1.3; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.detail .ec-x { flex: none; margin: -4px -2px 0 0; color: var(--text-3); }
+.detail .ec-x:hover { color: var(--text); }
+.detail .when { color: var(--text-2); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.detail .ec-rel { font-weight: 600; }
+.detail .ec-rel.soon { color: var(--accent-ink); }
+.detail .ec-rel.live { color: var(--recording); }
+.detail .ec-rel.done { color: var(--me); }
+.detail .ec-rel.muted { color: var(--text-3); font-weight: 500; }
+.detail .ec-where { display: block; color: var(--text-3); overflow-wrap: anywhere; }
+.detail .ec-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.detail .ec-chips .pj-chips { display: contents; }
+.detail .ec-main { padding: 12px 18px 14px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; background: color-mix(in srgb, var(--accent) 4%, var(--surface)); }
+/* Its buttons: pills on one line (Record and Prepare side by side) */
+.detail .ec-acts { display: flex; flex-wrap: nowrap; gap: 8px; align-items: center; }
+.detail .ec-acts > .btn, .detail .ec-acts .split .btn { height: 30px; font-size: 13px; white-space: nowrap; flex: none; }
+.detail .ec-acts > .btn { border-radius: 999px; padding: 0 14px; }
+.detail .ec-acts .split { flex: none; }
+.detail .ec-acts .split > .btn:first-child { border-radius: 999px 0 0 999px; padding: 0 12px 0 14px; }
+.detail .ec-acts .split > :last-child { border-radius: 0 999px 999px 0; padding: 0 10px 0 8px; flex-direction: row; }
+.detail .why { margin: 0; color: var(--text-2); font-size: 12px; }
+.detail .why .link-btn { font-size: 12px; }
+.detail .ec-sec { padding: 12px 18px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
+.detail .ec-cap { font-size: 11px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); }
+.detail .ec-org { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.detail .ec-av { width: 22px; height: 22px; flex: none; border-radius: 50%; background: var(--accent-soft); color: var(--accent-ink); font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+.detail .ec-names { font-size: 12.5px; padding-left: 30px; overflow-wrap: anywhere; }
 .detail ul { margin: 0; padding-left: 16px; color: var(--text-2); font-size: 12.5px; }
-.detail .close { align-self: flex-end; margin: -6px -6px 0 0; }
+/* Right-click on a meeting: its menu at the pointer */
+.menu.ev-ctx { position: fixed; top: auto; right: auto; min-width: 240px; max-width: 320px; z-index: 30; }
+.menu.ev-ctx .menu-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Write minutes: buttons under the empty state, the run in progress */
 .notes-actions { display: flex; gap: 8px; justify-content: center; margin-top: 14px; }

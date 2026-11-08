@@ -353,15 +353,15 @@ function seriesBlock(p) {
 }
 
 /** Any meeting in the calendar: Prepare it (a thread's meetings get one each morning by themselves); once written,
- *  Show prep (Calls → Coming up today, or the recorded call's Prep tab) and Prepare again. */
+ *  Show prep (Calls → Coming up today, or the recorded call's Prep tab) and Prepare again. The card's action strip
+ *  takes the button (`btn`) beside its main one and the words (`line`) into its line. */
 function eventPrep(e, st) {
   const p = e.prep
-  if (!p) return ''
-  if (p.writing) return '<div class="ev-prep"><span class="set-sub">Writing the prep…</span></div>'
-  const again = st.past ? '' : `<button class="link-btn" data-prep-write="${esc(p.id)}" data-prep-open="1">Prepare again</button>`
-  if (p.ready) return `<div class="ev-prep"><button class="btn" data-ev-prep="${esc(p.id)}">Show prep</button>${again}</div>`
-  if (st.past) return ''
-  return `<div class="ev-prep"><button class="btn" data-prep-write="${esc(p.id)}" data-prep-open="1">Prepare</button><span class="set-sub">last time, what is open, what is new, who is coming</span></div>`
+  if (!p) return { btn: '', line: '' }
+  if (p.writing) return { btn: '', line: 'Writing the prep…' }
+  if (p.ready) return { btn: `<button class="btn" data-ev-prep="${esc(p.id)}">Show prep</button>`, line: st.past ? '' : `<button class="link-btn" data-prep-write="${esc(p.id)}" data-prep-open="1">Prepare again</button>` }
+  if (st.past) return { btn: '', line: '' }
+  return { btn: `<button class="btn" data-prep-write="${esc(p.id)}" data-prep-open="1">Prepare</button>`, line: 'Prepare writes last time, what is open, what is new and who is coming.' }
 }
 
 /** A recurring meeting in the calendar: record every meeting of its series or not (the default), and in which
@@ -375,7 +375,7 @@ function seriesEditor(e) {
   const btn = (on, v, l) => `<button data-series-set="record" data-val="${esc(JSON.stringify(v))}" aria-pressed="${on}">${esc(l)}</button>`
   const opts = [['', 'Any language'], ...LANG_LIST.map((l) => [l, langName(l)])], cur = (r.languages || [])[0] || ''
   const lang = `<label class="fchip">${esc((opts.find(([v]) => v === cur) || opts[0])[1])} ▾<select data-series-field="languages" aria-label="Language">${opts.map(([v, l]) => `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`
-  return `<div class="se-cal"><b style="font-size:12px">Every meeting of this series</b>
+  return `<div class="se-cal"><div class="ec-cap">Every meeting of this series</div>
     <div class="se-line" data-series-key="${esc(x.key)}" data-series-subject="${esc(e.subject || '')}"><div class="seg" role="group" aria-label="Record every meeting">${btn(rec, 'always', 'Record')}${btn(!rec, null, "Don't record")}</div>${lang}</div></div>`
 }
 

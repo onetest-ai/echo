@@ -21,22 +21,22 @@ tags: [calendar, card]
 
 ## Test Data
 
-| Meeting (id) | Line | Value |
+| Meeting (id) | Recorded as | The card's line |
 |---|---|---|
 | Acme weekly sync (`ev-acme-sync`) | Recording | Minutes, 30 min |
 | Initech planning (`ev-initech-plan`) | Recording | Transcript, 25 min |
 | Umbrella intro call (`ev-umbrella-intro`) | Recording | Failed, 20 min |
-| Globex steering (`ev-globex-steering`) | Call | from the Teams transcript, 45 min |
+| Globex steering (`ev-globex-steering`) | Call from Teams | A call made of its Teams transcript, 45 min |
 
 ## Steps
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Navigate to `{{base_url}}/#calendar/day` and wait for "Day", click the block `[data-ev="ev-acme-sync"]` (Acme weekly sync) | The card shows the title, "HH:MM to HH:MM", a kind chip "Client" (title "From its invite — change it for every meeting of the series"), Organizer "Zoe Martin", People 6, and Recording "Minutes, 30 min" |
-| 2 | Click the block `[data-ev="ev-initech-plan"]` (Initech planning) | Recording "Transcript, 25 min" |
-| 3 | Click the block `[data-ev="ev-umbrella-intro"]` (Umbrella intro call) | Recording "Failed, 20 min" |
-| 4 | Click the block `[data-ev="ev-globex-steering"]` (Globex steering) | The label is "Call" and the value "from the Teams transcript, 45 min" |
-| 5 | Click "Close" | The card is gone |
+| 1 | Navigate to `{{base_url}}/#calendar/day` and wait for "Day", click the block `[data-ev="ev-acme-sync"]` (Acme weekly sync) | The card shows the title, "Today · HH:MM–HH:MM · recorded", a kind chip "Client" (title "From its invite — change it for every meeting of the series"), "Open notes" with the line "Minutes, 30 min"; under PEOPLE "Zoe Martin" with "organizer", then "Dana Lee, Omar Haddad, Rita Gomez +3 more" |
+| 2 | Click the block `[data-ev="ev-initech-plan"]` (Initech planning) | The line under "Open notes" reads "Transcript, 25 min" |
+| 3 | Click the block `[data-ev="ev-umbrella-intro"]` (Umbrella intro call) | The line reads "Failed, 20 min" |
+| 4 | Click the block `[data-ev="ev-globex-steering"]` (Globex steering) | The line reads "A call made of its Teams transcript, 45 min" |
+| 5 | Click "Close" (the × beside the title) | The card is gone |
 
 ## Expected Final State
 No card is open.

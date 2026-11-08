@@ -38,7 +38,7 @@ tags: [calendar, response]
 | 1 | Navigate to `{{base_url}}/#calendar/day` and wait for "Day" | The day is shown |
 | 2 | Look for the six blocks `[data-ev="ev-m07"]`, `ev-m28`, `ev-m31`, `ev-m14`, `ev-m33`, `ev-m18` | All six are drawn, each in its own lane at the same time |
 | 3 | Read the classes of the six blocks | All six have `ev online`; none has `declined`, `cancelled`, `past` or a tag |
-| 4 | Click each block in turn and read its card | Every card has the buttons "Join and record" and "Record it"; none says "You declined this meeting." |
+| 4 | Click each block in turn and read its card | Every card has the buttons "Join & record" and "Record"; none says "You declined this meeting." |
 | 5 | Read the kind chip of the card of Initech town hall | A kind chip is shown (guessed), like the others |
 
 ## Expected Final State
