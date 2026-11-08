@@ -12,7 +12,7 @@ use chrono::{DateTime, Local};
 use serde::Serialize;
 
 use crate::apps::TargetApp;
-use crate::audio::{self, mic::MicSource, Track, TrackInfo};
+use crate::audio::{self, Track, TrackInfo};
 use crate::meeting::MeetingContext;
 use crate::paths;
 
@@ -112,7 +112,7 @@ impl Recording {
         // Both tracks share t0, so their timelines line up sample-for-sample.
         let t0 = Instant::now();
         let remote = Some(Track::start("remote", &dir.join("remote.wav"), audio::app_source(app), t0)?);
-        let mic = Track::start("mic", &dir.join("mic.wav"), Box::new(MicSource { app: Some(app) }), t0)?;
+        let mic = Track::start("mic", &dir.join("mic.wav"), audio::mic_source(Some(app)), t0)?;
         // Transcribes the tracks as they are written (reads the WAVs, so it starts after them).
         #[cfg(feature = "transcribe")]
         let live = crate::live::start(&dir, meeting, languages);
@@ -156,7 +156,7 @@ impl Recording {
         paths::write_atomic(&dir.join("meta.json"), &serde_json::to_vec_pretty(&meta)?)?;
         let t0 = Instant::now();
         // The default input, not the call app's: there is no call.
-        let mic = Track::start("mic", &dir.join("mic.wav"), Box::new(MicSource { app: None }), t0)?;
+        let mic = Track::start("mic", &dir.join("mic.wav"), audio::mic_source(None), t0)?;
         #[cfg(feature = "transcribe")]
         let live = crate::live::start(&dir, None, languages);
         #[cfg(not(feature = "transcribe"))]

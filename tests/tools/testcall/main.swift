@@ -5,13 +5,16 @@
 // call detection, the app's audio tap, the mic track, the call ending — with known words and no Teams account.
 //
 //   testcall serve --port 7766 [--play remote.wav] [--quiet]            wait for one call, send the wav, play what comes
-//   testcall dial <host>:7766 [--me mic.wav --me-device "BlackHole 2ch"] [--play x.wav] [--quiet]
+//   testcall dial <host>:7766 [--me mic.wav --me-device "BlackHole 2ch"] [--play x.wav] [--quiet | --speaker-device NAME]
 //
 // --play: what this side says (a wav; 16 kHz mono after conversion), streamed in real time.
 // --me / --me-device: what the user says, played (by an ffmpeg child, not this app) into a virtual device (BlackHole) whose input this app opens as its
 //   microphone and sends — so Echo records it as "Me" from the device the call app uses. Without --me-device the app
 //   opens no microphone (the serving side needs none).
 // --quiet: don't play what comes in (the other side's speakers).
+// --speaker-device NAME: play what comes in on that output device (a virtual one such as "BlackHole 16ch"), so the call
+//   is silent in the room while Echo still taps this app's audio. If the device isn't there the call doesn't start:
+//   it never falls back to the speakers. Never the --me-device: the user's line and the other side would mix.
 // Both sides start together: the server answers HELLO with START <unix ms> 1.5 s ahead; each plays from then. The call
 // ends when both have nothing more to send (BYE each way) or the connection drops.
 //
@@ -37,7 +40,7 @@ func opt(_ name: String) -> String? {
 }
 let quiet = args.contains("--quiet")
 guard let mode = args.first, ["serve", "dial"].contains(mode) else {
-    die("usage: testcall serve --port P [--play x.wav] [--quiet] | dial host:P [--me mic.wav --me-device NAME] [--play x.wav] [--quiet]")
+    die("usage: testcall serve --port P [--play x.wav] [--quiet | --speaker-device NAME] | dial host:P [--me mic.wav --me-device NAME] [--play x.wav] [--quiet | --speaker-device NAME]")
 }
 
 // ── audio helpers ────────────────────────────────────────────────────────────────────────────────────────────
@@ -134,7 +137,16 @@ let queue = DispatchQueue(label: "testcall")
 var conn: NWConnection!
 var startAt: Date?
 var sentBye = false, gotBye = false
-let speaker = quiet ? nil : Player(device: nil)
+/// Where what comes in is played: nowhere (--quiet), the named device (--speaker-device), or the default output.
+func speakerDevice() -> AudioDeviceID? {
+    guard let name = opt("--speaker-device") else { return nil }
+    if name == opt("--me-device") { die("--speaker-device \(name) is the --me-device: the two tracks would mix") }
+    guard let dev = device(named: name) else {
+        die("no audio device named \(name): install BlackHole 16ch (`brew install blackhole-16ch`) for silent test calls")
+    }
+    return dev
+}
+let speaker = quiet ? nil : Player(device: speakerDevice())
 let say: [Float] = opt("--play").map(load) ?? []
 let meSay: [Float] = opt("--me").map(load) ?? []
 var mic: Mic?

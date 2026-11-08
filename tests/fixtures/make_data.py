@@ -2306,7 +2306,12 @@ def main():
     os.makedirs(d.config)
     with open(os.path.join(base, "env"), "w") as f:
         f.write(f"export ECHOCTL_HOME={sh(d.home)} ECHOCTL_CONFIG_DIR={sh(d.config)}\n"
-                "unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_CHILD_SESSION AI_AGENT\n")
+                "unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_CHILD_SESSION AI_AGENT\n"
+                # A debug build on test data records no device: the call is fed from files (tests/fixtures/call.py,
+                # crates/echoctl/src/audio/testfeed.rs), and the call app is TestCall's id, so a real Teams is never read.
+                f"export ECHOCTL_TEST_ME_WAV={sh(os.path.join(base, 'feed', 'mic.wav'))} "
+                f"ECHOCTL_TEST_REMOTE_WAV={sh(os.path.join(base, 'feed', 'remote.wav'))} "
+                f"ECHOCTL_TEST_CALL_FILE={sh(os.path.join(base, 'in-call'))} ECHOCTL_CALL_APP_BUNDLE=ai.onetest.echo.testcall\n")
     if a.set == "small":
         if a.ai:
             setup_env(d)  # hermetic, as the standard sets: the app run on it starts no run on a real account
