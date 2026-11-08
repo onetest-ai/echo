@@ -41,5 +41,4 @@ tags: [prep, fake-claude, known-issue]
 The prep exists and its page says why it has no summary.
 
 ## Notes
-- Known issue to check at run time: `upcomingDoc` in app.js treats any `error` key of `/api/prep/<id>` as "no prep yet", so the page may still say "No prep yet" with "Prepare now" although the prep file exists (the row's title says "Prep ready"). Per `prep.rs` a failed summary keeps the facts and a note: the page should show them. Write this case as the expected behaviour; a FAIL here is a defect, not a data problem.
 - Creates a prep file (a fact-only one); the run's data is disposable.

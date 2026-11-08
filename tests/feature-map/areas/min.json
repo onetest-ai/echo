@@ -197,6 +197,15 @@
    "priority": "high",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-MIN-21",
+   "feature": "A call with no transcript (transcription failed, or audio only) says so on the Minutes tab — \"No transcript, so no minutes\", the failure's reason and, after a failure only, a copyable `echoctl transcribe <folder>` — and offers no Write minutes",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "call.status"
+   ]
   }
  ]
 }

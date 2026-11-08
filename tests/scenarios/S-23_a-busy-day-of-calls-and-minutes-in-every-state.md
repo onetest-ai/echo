@@ -18,7 +18,7 @@ cases:
   - tests/cases/calls/TC-030_held-and-thin-calls-say-why-no-minutes-come-by-themselves.md
   - tests/cases/calls/TC-032_a-transcribed-call-echo-leaves-alone-offers-write-minutes-with-model-and-command.md
   - tests/cases/calls/TC-031_minutes-due-now-say-starting-the-minutes.md
-  - tests/cases/calls/TC-034_a-call-without-a-transcript-offers-write-minutes-and-says-no-transcript.md
+  - tests/cases/calls/TC-034_a-call-without-a-transcript-says-why-and-offers-no-write-minutes.md
   - tests/cases/calls/TC-014_header-of-a-memo-and-of-a-teams-import.md
   - tests/cases/calls/TC-016_chat-and-screens-tabs-follow-what-the-call-holds.md
   - tests/cases/calls/TC-033_minutes-come-after-the-call-while-it-is-transcribed.md
@@ -72,7 +72,7 @@ cases:
 | 12 | `calls/TC-030_held-and-thin-calls-say-why-no-minutes-come-by-themselves.md` | — | The same as stage 10 |
 | 13 | `calls/TC-032_a-transcribed-call-echo-leaves-alone-offers-write-minutes-with-model-and-command.md` | — | The same as stage 10 |
 | 14 | `calls/TC-031_minutes-due-now-say-starting-the-minutes.md` | — | The same as stage 10 |
-| 15 | `calls/TC-034_a-call-without-a-transcript-offers-write-minutes-and-says-no-transcript.md` | — | The same as stage 10 |
+| 15 | `calls/TC-034_a-call-without-a-transcript-says-why-and-offers-no-write-minutes.md` | — | The same as stage 10 |
 | 16 | `calls/TC-014_header-of-a-memo-and-of-a-teams-import.md` | — | Skip step 1 (the list is shown) |
 | 17 | `calls/TC-016_chat-and-screens-tabs-follow-what-the-call-holds.md` | — | On stage 16's view: in step 1 skip the navigation and the click (Acme weekly sync is open; the open tab is Minutes) |
 | 18 | `calls/TC-033_minutes-come-after-the-call-while-it-is-transcribed.md` | — | On stage 17's view: in step 1 skip the full load, the navigation and the click (Quick check-in was opened for the first time since the page load, from Minutes); check step 1's expected result |

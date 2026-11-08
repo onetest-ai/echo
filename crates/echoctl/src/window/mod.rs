@@ -803,6 +803,20 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_transcription_gives_its_first_line_as_the_reason() {
+        let (_env, root) = crate::paths::testenv::folders("window-transcribe-error");
+        let d = root.join("home/calls/2026-10-23_090000-x");
+        fs::create_dir_all(&d).unwrap();
+        fs::write(d.join("meta.json"), "{}").unwrap();
+        assert_eq!(call_detail(&d)["transcribe_error"], Value::Null);
+        fs::write(d.join("transcribe.error"), format!("\n  the model could not be loaded: {}  \nstack line 1\n", "x".repeat(400))).unwrap();
+        let e = call_detail(&d)["transcribe_error"].as_str().unwrap().to_owned();
+        assert!(e.starts_with("the model could not be loaded: x"));
+        assert_eq!(e.chars().count(), 300);
+        assert_eq!(call_detail(&d)["status"], "failed");
+    }
+
+    #[test]
     fn the_export_has_each_calls_minutes_page_where_its_frame_looks() {
         let (_env, root) = crate::paths::testenv::folders("window-export");
         let with = root.join("home/calls/2026-10-23_090000-with minutes");

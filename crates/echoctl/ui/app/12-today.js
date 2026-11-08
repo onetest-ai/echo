@@ -306,7 +306,8 @@ function todayCloseDialog() {
  *  Minutes come once it is recorded. */
 function upcomingDoc() {
   const u = ((S.up && S.up.meetings) || []).find((x) => x.id === S.upSel)
-  const p = S.upPrep && !S.upPrep.error ? S.upPrep : null
+  // A prep written with an error (no summary) is still a prep: its facts and the error show (prepView).
+  const p = S.upPrep && !S.upPrep.none ? S.upPrep : null
   const title = (u && u.subject) || (p && p.subject) || 'A meeting'
   const start = (u && u.start) || (p && p.start), end = (u && u.end) || (p && p.end)
   const when = start ? `${new Date(start).toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })}, ${hm(new Date(start))}` : ''

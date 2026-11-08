@@ -29,7 +29,7 @@ function paletteItems(target) {
   const st = S.state || {}
   if (target && target.kind === 'call') {
     const c = target.c, busy = c.notes_run && (c.notes_run.state === 'queued' || c.notes_run.state === 'running')
-    const transcribed = !['recording', 'transcribing'].includes(c.status)
+    const transcribed = !['recording', 'transcribing', 'failed', 'audio'].includes(c.status)
     for (const [id, label] of callTabs({ recording: c.status === 'recording', chat: (c.chat || []).length, frames: (c.frames || []).length })) {
       add('This call', `Open ${label}`, () => press({ tab: id }), { keywords: 'tab show' })
     }
@@ -55,7 +55,7 @@ function paletteItems(target) {
     if (!p.writing && !eventState(target.e, new Date()).past) add('This event', p.ready ? 'Prepare it again' : 'Prepare for this meeting', () => press({ prepWrite: p.id, prepOpen: '1' }), { keywords: 'prep brief before meeting' })
   }
   if (target && target.kind === 'upcoming') {
-    const p = S.upPrep && S.upPrep.prep
+    const p = S.upPrep && !S.upPrep.none
     add('This meeting', p ? 'Write the prep again' : 'Prepare this meeting', () => press({ prepWrite: target.id }), { keywords: 'prep brief before', disabled: S.upPrep && S.upPrep.writing ? 'the prep is being written' : null })
   }
   if (target && target.kind === 'today') {

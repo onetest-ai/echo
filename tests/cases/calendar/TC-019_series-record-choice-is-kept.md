@@ -30,8 +30,8 @@ tags: [calendar, series]
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Navigate to `{{base_url}}/#calendar/day` and wait for "Day", click the block `[data-ev="ev-globex-weekly"]` (Globex weekly, to come 37 minutes after the build) | "Don't record" is pressed in "Every meeting of this series" |
-| 2 | Click "Record" | "Record" is pressed (`aria-pressed="true"`), "Don't record" is not |
+| 1 | Navigate to `{{base_url}}/#calendar/day` and wait for "Day", click the block `[data-ev="ev-globex-weekly"]` (Globex weekly, to come 37 minutes after the build) | "Ask" is pressed in "Every meeting of this series" (its rule is ask) |
+| 2 | Click "Record" | "Record" is pressed (`aria-pressed="true"`), "Ask" and "Don't record" are not |
 | 3 | Run `echoctl series list` | `id:S-GLOBEX-WEEKLY` has `"record": "always"` |
 | 4 | Reload `{{base_url}}/#calendar/day`, click the same block again | "Record" is still pressed |
 
