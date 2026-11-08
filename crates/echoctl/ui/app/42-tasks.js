@@ -370,13 +370,13 @@ function seriesEditor(e) {
   const x = e.series
   if (!x || !x.key) return ''
   const r = x.rule || {}
-  // Not recorded unless set: Don't record is the default (no rule).
-  const rec = r.record === 'always'
+  // Not recorded unless set: Don't record is the default (no rule, or never); Ask offers "Record?" at each.
+  const rec = r.record === 'always' ? 'always' : r.record === 'ask' ? 'ask' : null
   const btn = (on, v, l) => `<button data-series-set="record" data-val="${esc(JSON.stringify(v))}" aria-pressed="${on}">${esc(l)}</button>`
   const opts = [['', 'Any language'], ...LANG_LIST.map((l) => [l, langName(l)])], cur = (r.languages || [])[0] || ''
   const lang = `<label class="fchip">${esc((opts.find(([v]) => v === cur) || opts[0])[1])} ▾<select data-series-field="languages" aria-label="Language">${opts.map(([v, l]) => `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`
   return `<div class="se-cal"><div class="ec-cap">Every meeting of this series</div>
-    <div class="se-line" data-series-key="${esc(x.key)}" data-series-subject="${esc(e.subject || '')}"><div class="seg" role="group" aria-label="Record every meeting">${btn(rec, 'always', 'Record')}${btn(!rec, null, "Don't record")}</div>${lang}</div></div>`
+    <div class="se-line" data-series-key="${esc(x.key)}" data-series-subject="${esc(e.subject || '')}"><div class="seg" role="group" aria-label="Record every meeting">${btn(rec === 'always', 'always', 'Record')}${btn(rec === 'ask', 'ask', 'Ask')}${btn(!rec, null, "Don't record")}</div>${lang}</div></div>`
 }
 
 /** A client's page (`#client/<id>`): its names, domains, whether it is the user's own company, its logo and projects. */

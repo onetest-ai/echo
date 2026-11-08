@@ -118,7 +118,7 @@
   },
   {
    "id": "F-CAL-13",
-   "feature": "A recurring meeting's card sets \"Every meeting of this series\": Record / Don't record (the default) and its language; Record puts each occurrence in Record when it starts once",
+   "feature": "A recurring meeting's card sets \"Every meeting of this series\": Record / Ask / Don't record (the default), the rule's own state shown and a pressed choice changing nothing, and its language; Record puts each occurrence in Record when it starts once",
    "priority": "high",
    "check": "agent",
    "axes": [

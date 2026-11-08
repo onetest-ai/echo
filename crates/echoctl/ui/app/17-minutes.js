@@ -74,6 +74,14 @@ function minutesHint(c, heading, lead) {
       : 'Write them once the call is transcribed.'
     return box('Minutes come after the call', `<p>${esc(when)}</p>`, '')
   }
+  // No transcript to write them from: say why, and how to transcribe it (not Write minutes).
+  if (!c.notes && (c.status === 'failed' || c.status === 'audio')) {
+    const again = `echoctl transcribe ${c.name}`
+    const why = c.status === 'failed'
+      ? `<p>Transcribing this call failed${c.transcribe_error ? `: ${esc(c.transcribe_error)}` : '.'}</p>`
+      : '<p>This recording isn\'t transcribed yet.</p>'
+    return box('No transcript, so no minutes', `${why}<p class="alt">Transcribe it in a terminal: <code>${esc(again)}</code> <button class="btn ghost" data-copy="${esc(again)}">Copy</button></p>`, log)
+  }
   if (!run && auto.due === 'now') return box('Starting the minutes…', '<p>Echo is starting them now.</p>', '', true)
   // A Claude Code session holds the call (#43): who, since when — and Write minutes takes it over.
   if (!(run && ['queued', 'running'].includes(run.state)) && auto.due === 'tried' && auto.held_by) {

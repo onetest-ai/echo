@@ -248,6 +248,8 @@ document.addEventListener('click', (e) => {
   const t = e.target.closest && e.target.closest('[data-series-set],[data-series-unlink]')
   if (!t) return
   if (t.dataset.seriesUnlink) return send({ cmd: 'project', op: 'series_unlink', id: S.pj.sel, key: t.dataset.seriesUnlink })
+  // The choice already made: nothing to change (Don't record would erase a rule it only stands for).
+  if (t.getAttribute('aria-pressed') === 'true') return
   let v
   try { v = JSON.parse(t.dataset.val) } catch { return }
   seriesSet(t, t.dataset.seriesSet, v)

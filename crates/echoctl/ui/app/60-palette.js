@@ -29,7 +29,7 @@ function paletteItems(target) {
   const st = S.state || {}
   if (target && target.kind === 'call') {
     const c = target.c, busy = c.notes_run && (c.notes_run.state === 'queued' || c.notes_run.state === 'running')
-    const transcribed = !['recording', 'transcribing'].includes(c.status)
+    const transcribed = !['recording', 'transcribing', 'failed', 'audio'].includes(c.status)
     for (const [id, label] of callTabs({ recording: c.status === 'recording', chat: (c.chat || []).length, frames: (c.frames || []).length })) {
       add('This call', `Open ${label}`, () => press({ tab: id }), { keywords: 'tab show' })
     }

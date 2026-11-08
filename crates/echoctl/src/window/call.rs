@@ -125,6 +125,9 @@ pub(super) fn call_detail(dir: &Path) -> Value {
         .map(|f| json!({ "t": f["t"], "url": format!("{}file/{}/{}", base_url(), urlencode(&name), f["file"].as_str().unwrap_or("")) }))
         .collect();
     v["notes"] = json!(fs::read_to_string(dir.join("notes.md")).ok());
+    // Why the transcript failed, for the Minutes tab (its first line: the file may carry a trace).
+    v["transcribe_error"] = json!(fs::read_to_string(dir.join("transcribe.error")).ok()
+        .map(|e| e.lines().find(|l| !l.trim().is_empty()).unwrap_or("").trim().chars().take(300).collect::<String>()));
     // The user's notes; one that can't be read is said, never shown as empty (the editor would start
     // from nothing).
     match fs::read_to_string(dir.join(calls::USER_NOTES)) {
