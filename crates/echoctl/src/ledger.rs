@@ -1939,7 +1939,10 @@ pub fn apply(project: &str, evid: &str, proposals: &[Value]) -> Result<Value> {
             } else if pr["description"].as_str().is_some_and(|t| t.chars().count() > MAX_AGENT_DESC) {
                 Some(format!("description: at most {MAX_AGENT_DESC} characters"))
             } else if (k == "question" || k == "risk") && pr["description"].as_str().is_some_and(|t| !t.trim().is_empty()) {
-                Some(format!("a {k}'s {} is checked by the verifier: create it without one, then op 'answer' on its ref", if k == "question" { "answer" } else { "response" }))
+                Some(format!(
+                    "a {k}'s {what} (its `description`) is checked by the verifier: create the {k} without `description`, then op 'answer' on its ref with the {what} as `text`",
+                    what = if k == "question" { "answer" } else { "response" }
+                ))
             } else if let Some(f) = ["likelihood", "impact"].into_iter().find(|f| !pr[*f].is_null() && (k != "risk" || level_of(&pr[*f]).is_none())) {
                 Some(format!("{f} is for a risk: one of {LEVELS:?}"))
             } else if k == "task" && !TASK_TYPES.contains(&ty) {
@@ -3079,6 +3082,9 @@ mod tests {
             json!({"op": "create", "kind": "risk", "parent": "E01", "title": "SAML late", "description": "Watch it.", "quote": "I can have the SAML config ready by Friday"}),
         ]).unwrap();
         assert_eq!(r["rejected"].as_array().unwrap().len(), 3, "{r}");
+        // The refusal names the field to drop and where the response goes, or the model keeps retrying it (#137).
+        let why = r["rejected"][2]["why"].as_str().unwrap();
+        assert!(why.contains("without `description`") && why.contains("op 'answer'") && why.contains("`text`"), "{why}");
         mark_processed(&id, ev, "").unwrap();
         let t = fold(&l).unwrap();
         let (q, d, k) = (&t.nodes["Q001"], &t.nodes["D001"], &t.nodes["R001"]);
