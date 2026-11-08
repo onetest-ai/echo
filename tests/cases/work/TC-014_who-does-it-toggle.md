@@ -28,7 +28,7 @@ tags: [work, details, mode]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Navigate to `{{base_url}}/#project/acme-rollout/work` and click the card T001 | The row "Who does it" with two buttons "Claude can" and "By hand" (`data-mode-set`) |
+| 1 | Navigate to `{{base_url}}/#project/acme-rollout/work` and click the card T001 | The row "Who does it" with two icon buttons, named "Claude can" and "By hand" by their `aria-label` and tooltip (`data-mode-set`), no text inside them; the switch stays on one line |
 | 2 | Click "By hand". Wait up to 3 s after an action for the window to redraw before reading. | The button "By hand" is the selected one |
 | 3 | Run `echoctl project tasks` | T001 of `acme-rollout` has a `mode` object whose `mode` is `manual` |
 | 4 | Navigate to `{{base_url}}/#tasks`, choose "Who does it" `By hand` | The pile "I owe" shows the card "Send Acme the SSO checklist"; choosing `Claude can do` leaves "I owe" at 0 ("Nothing here") |
