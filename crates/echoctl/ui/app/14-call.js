@@ -77,6 +77,19 @@ function confirmBox(c) {
  *  marks the turn to scroll to. */
 /** A turn's longest stretch, in seconds, before the same speaker's next line starts a new one. */
 const TURN_MAX = 60
+// ── transcript jump
+/** The turn a moment of the call opens on. Moments are whole seconds (minutes chips, notes, links):
+ *  the first turn starting in that second, else the turn under way then, or the next one when the
+ *  moment falls in the silence after it. */
+function jumpTurn(turns, t) {
+  const at = turns.findIndex((x) => x.start >= t && x.start < t + 1)
+  if (at >= 0) return at
+  let i = -1
+  for (let k = 0; k < turns.length; k++) if (turns[k].start < t) i = k
+  if (i < 0) return 0
+  return turns[i].end < t && i + 1 < turns.length ? i + 1 : i
+}
+// end of the transcript jump block
 function turnsHtml(segs, q, jump, marks = []) {
   // One speaker's lines join a turn while they follow each other (< 8 s apart), each line its own
   // paragraph; a turn runs at most TURN_MAX seconds, then the next starts with its own time — during a
@@ -87,17 +100,17 @@ function turnsHtml(segs, q, jump, marks = []) {
     if (last && last.who === speaker(s) && s.start - last.end < 8 && s.start - last.start < TURN_MAX) { last.text += ' ' + s.text; last.parts.push(s.text); last.end = s.end }
     else turns.push({ who: speaker(s), me: speaker(s) === 'Me', spk: s.speaker_id, start: s.start, end: s.end, lang: s.lang, text: s.text, parts: [s.text] })
   }
-  const jumpIdx = jump == null ? -1 : Math.max(0, turns.findIndex((t) => t.end >= jump - 2))
+  const jumpIdx = jump == null ? -1 : jumpTurn(turns, jump)
   return `<div class="transcript">${turns.map((t, i) => {
     const hit = (q && t.text.toLowerCase().includes(q)) || i === jumpIdx
     // Detected remote speakers each get a color of their own (speakers.rs numbers them).
     const spk = !t.me && t.spk ? ` spk${((t.spk - 1) % 6) + 1}` : ''
     // My notes at this turn's moment: a dot each in the margin (the note's text on hover).
-    const next = turns[i + 1] ? turns[i + 1].start : Infinity
-    const mine = marks.filter((m) => m.t >= t.start - 1 && m.t < next - 1)
+    // On the turn its time opens, as a click on it would.
+    const mine = marks.filter((m) => jumpTurn(turns, m.t) === i)
     const dots = mine.length ? `<span class="nt-marks">${mine.map((m) => `<span class="nt-dot k-${m.kind}" title="${esc((NOTE_LOOK[m.kind] || NOTE_LOOK.note)[1] + (m.text ? ': ' + m.text : ''))}"></span>`).join('')}</span>` : ''
     return `<div class="turn ${t.me ? 'me' : 'remote'}${spk}${hit ? ' hit' : ''}" data-t="${t.start}" ${i === jumpIdx ? 'id="jump"' : ''}>
-      <time>${dots}${clock(t.start)}</time>
+      <time>${dots}${clock(Math.floor(t.start))}</time>
       <div><div class="who">${esc(t.who)}${t.lang ? `<span class="lang">${esc(t.lang)}</span>` : ''}</div>${t.parts.map((x) => `<p>${esc(x)}</p>`).join('')}</div></div>`
   }).join('')}</div>`
 }

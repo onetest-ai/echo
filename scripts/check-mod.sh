@@ -28,6 +28,8 @@ node crates/echoctl/ui/skill-fit.test.mjs
 node crates/echoctl/ui/human-history.test.mjs
 # My notes' timeline with live notes among the user's own (LiveTimeline).
 node crates/echoctl/ui/live-timeline.test.mjs
+# Which transcript turn a moment (a minutes chip, a note's time) opens on (jumpTurn).
+node crates/echoctl/ui/transcript-jump.test.mjs
 types="plugin/.claude-plugin/types/claude-code/index.d.ts"
 if [[ ! -f "$types" ]]; then
   types=$(ls -t /private/tmp/claude-*/bundled-skills/*/*/plugin-authoring/types/claude-code.d.ts 2>/dev/null | head -1 || true)

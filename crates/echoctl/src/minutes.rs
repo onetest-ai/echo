@@ -848,13 +848,16 @@ const EMBED_JS: &str = "(function () {
     var block = el && el.closest('li, p, td, figure, blockquote, h1, h2, h3, h4');
     if (!block) return;
     e.preventDefault();
-    var ts = block.querySelector('.ts');
+    var ts = block.querySelector(':scope > .ts');
     var sel = String(window.getSelection ? window.getSelection() : '').replace(/\\s+/g, ' ').trim();
     var top = block;
     while (top.parentElement && top.parentElement.tagName !== 'MAIN') top = top.parentElement;
     var h = top;
     while (h && !/^H[1-3]$/.test(h.tagName)) h = h.previousElementSibling;
-    post({ echo: 'note', t: ts ? secs(ts) : null, quote: (sel || block.textContent.replace(/\\s+/g, ' ').trim()).slice(0, 300),
+    // The line's own words: not its time chip, the user's notes shown under it, nor its sub-items.
+    var own = block.cloneNode(true), extra = own.querySelectorAll('.ts, .mynote, :scope > ul, :scope > ol');
+    for (var k = 0; k < extra.length; k++) extra[k].remove();
+    post({ echo: 'note', t: ts ? secs(ts) : null, quote: (sel || own.textContent.replace(/\\s+/g, ' ').trim()).slice(0, 300),
       section: h ? h.textContent.trim().slice(0, 80) : '', x: e.clientX, y: e.clientY });
   }, true);
   // The user's own notes (from the window, never in the page itself): each under the line with its
