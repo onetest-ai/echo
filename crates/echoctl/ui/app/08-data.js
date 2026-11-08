@@ -170,7 +170,9 @@ function route() {
   // A menu of the page it leaves doesn't follow to the next one.
   S.liveMenu = false
   // An echo:// link the window was opened at (the system, `echoctl app open --link`): routed where it points.
-  if (h.startsWith('link=')) { history.replaceState(null, '', '#'); S.view = 'calls'; setTimeout(() => window.echo.openLink(h.slice(5))); return }
+  // The page opened at a link goes where the link points, or, for one Echo can't open, nowhere: no call is opened
+  // for it at start-up (#168).
+  if (h.startsWith('link=')) { history.replaceState(null, '', '#'); S.view = 'calls'; S.fromLink = true; setTimeout(() => window.echo.openLink(h.slice(5))); return }
   // A plugin's activity (`ctx.activities.add`): `#<plugin>:<id>` and anything after a slash is its own.
   const pa = ACTIVITIES.find((a) => a.plugin && (h === a.id || h.startsWith(a.id + '/')))
   if (pa) { S.view = pa.id; S.plRoute = h.slice(pa.id.length + 1); S.plRoutes = { ...(S.plRoutes || {}), [pa.id]: S.plRoute }; return }
