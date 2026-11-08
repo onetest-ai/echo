@@ -24,18 +24,18 @@ tags: [inbox, people, decision]
 | Field | Value |
 |---|---|
 | Item | Is Rita Gomez a champion? (Acme · people, first of ten) |
-| Counts before | Open 25, Done 2, Acme 15, people 10 |
-| Counts after | Open 24, Done 3, Acme 14, people 9 ("4 more like these") |
+| Counts before | on fresh data Open 25, Done 2, Acme 15, people 10; read them in step 1 (earlier decisions in a scenario lower Open and Acme and raise Done) |
+| Counts after | one less Open and Acme, one more Done; people 9 ("4 more like these") |
 
 ## Steps
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Navigate to `{{base_url}}/#today`, wait for "Your day" and click "Inbox" | The right panel opens on the tab "Inbox"; the chips "Open", "Blocking" and "Done" are shown |
+| 1 | Navigate to `{{base_url}}/#today`, wait for "Your day" and click "Inbox"; note the numbers on the chips "Open" (N) and "Done" (D) and on the header "Acme" (A) | The right panel opens on the tab "Inbox"; the chips "Open", "Blocking" and "Done" are shown (on fresh data N = 25, D = 2, A = 15) |
 | 2 | Click "No" on "Is Rita Gomez a champion?" | The item shows "Working…" or is already gone |
-| 3 | Wait up to 5 seconds | "Is Rita Gomez a champion?" is no longer under Acme; the chip reads "Open 24"; the Acme header 14; the fold button under the people reads "4 more like these" |
-| 4 | Click the chip "Done" | "Done 3"; the first row is "Is Rita Gomez a champion?" (struck through) with "today" |
-| 5 | Run `echoctl attention` | `open` has 24 items (no key for that question); `done` has 3 entries and the first title is "Is Rita Gomez a champion?" |
+| 3 | Wait up to 5 seconds | "Is Rita Gomez a champion?" is no longer under Acme; the chip reads "Open N−1"; the Acme header A−1; the fold button under the people reads "4 more like these" |
+| 4 | Click the chip "Done" | "Done D+1"; the first row is "Is Rita Gomez a champion?" (struck through) with "today" |
+| 5 | Run `echoctl attention` | `open` has N−1 items (no key for that question); `done` has D+1 entries and the first title is "Is Rita Gomez a champion?" |
 
 ## Expected Final State
 The question is decided and listed under Done.

@@ -86,6 +86,9 @@ cases:
 - Stages 1 to 14 read the clock: the meetings "live" at the build end 20 minutes after it and the ones "to come" start 37 minutes after it. Run these stages within 15 minutes of the build; if more than 20 minutes have passed, rebuild the data and start again from stage 1.
 - Stages 15 to 17 change the calendar's own files (a series rule, a meeting's type, a pinned thread) and put back what they can.
 - Inbox stages 18 to 25 read first (badge, chips, groups, folds, buttons, Open, Done rows, the CLI): none of them takes a decision, so Done still holds the data's two rows. The decisions come last (26 to 33), one item each.
+- Stage 18's step 1 fails until #115 is fixed (no badge after a full load on Today until the panel opens).
+- The decision stages read the Inbox's counts at their start and expect one less Open and one more Done (stage 28 has
+  already taken one item when 29 and 30 run).
 - Stage 26 (calendar) presses Import on a meeting card without Microsoft 365: it fails with a message and the Inbox stage 27 reads the same message after its own click.
 - `prep/TC-013` (Prepare now with the fake Claude Code) is not a stage: it is expected to expose a defect (see its Notes) and runs alone.
 - Nothing here starts Claude Code except `inbox/TC-014` (Write again), which runs the data's fake and fails at once; no stage needs Microsoft 365.
