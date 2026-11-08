@@ -23,6 +23,8 @@ node crates/echoctl/ui/projects.test.mjs
 node crates/echoctl/ui/org-chart.test.mjs
 # How Send to Claude ranks the skills for a task (rankSkills).
 node crates/echoctl/ui/skill-fit.test.mjs
+# History's words for the user's own ledger edits (humanHistory).
+node crates/echoctl/ui/human-history.test.mjs
 # My notes' timeline with live notes among the user's own (LiveTimeline).
 node crates/echoctl/ui/live-timeline.test.mjs
 types="plugin/.claude-plugin/types/claude-code/index.d.ts"
