@@ -2027,11 +2027,7 @@ pub fn run(app: TargetApp, stop: Arc<AtomicBool>) -> ! {
                 #[cfg(target_os = "macos")]
                 {
                     set_app_icon(); // once AppKit has finished launching: earlier it would put its own back
-                    // Held by the loop, never read: the menu bar lasts as long as its `Menu` does. Put in place
-                    // rather than assigned, which rustc flags as a value never read.
-                    if let Some(m) = app_menu() {
-                        _app_menu.replace(m);
-                    }
+                    if let Some(m) = app_menu() { _app_menu.replace(m); } // held by the loop: the menu bar lasts as long as its `Menu` (`=` reads as never read)
                 }
                 match Ui::new(proxy.clone()) {
                     Ok(u) => ui = Some(u),
