@@ -19,7 +19,7 @@
 - R3. Use `ctx.every(seconds, fn)` for periodic work (10 s minimum); never rely on timers in `echoctl plugin call` or `echoctl deliver`. Evidence: `jshost::no_timers`
 - R4. Name each event in `uses.events.on` and subscribe with `ctx.on(event, fn)`; read a call's words with `ctx.echo.read('source', id)`, never from a payload; events are not replayed. Evidence: `plugins::EVENTS`
 - R5. Keep a plugin's own state with `ctx.store.read/write/list/remove/path`, by relative path only. Evidence: `plugins::data_dir`
-- R6. Check `status` in the `{status, body}` that `ctx.http.fetch(url, {method, headers, body})` resolves; it rejects only when the host can't be reached. Evidence: `jshost::http_code`
+- R6. Check `status` in the `{status, body}` that `ctx.http.fetch(url, {method, headers, body})` resolves; it rejects only when the host can't be reached. Evidence: `jshost::fetch`
 - R7. Run Claude with `await ctx.claude.run({prompt, title, profile, model, tools, dir, timeout})` only with `claude` in `uses`; `tools: "skip"` needs `"claude": {"skip": true}`. Evidence: `claudejob::Tools::parse`, `plugins::may_run_claude`
 - R8. Provide a delivery kind with `ctx.deliver.provide(kind, {label, send(msg)})` only for a kind in `uses.deliver_provider.kinds` (never `teams` or `mail`), and call `ctx.deliver.ready(kind, true)` once it can send. Evidence: `jshost::provider_ready`, `plugins::may_send`
 - R9. Call `ctx.echo.read(kind, arg)` only for kinds in `uses.echo.read`, and `ctx.echo.dictionary.add(...)` only under `uses.echo.write: ["dictionary"]`. Evidence: `share::dictionary_add`

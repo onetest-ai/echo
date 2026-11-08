@@ -15,6 +15,7 @@
 - R8. During a sign-in, `ai::for_call` fails at once with `SigningIn`, never waits, and live jobs are deferred until it ends. Evidence: `ai::SigningIn`, `livenotes::defer`
 - R9. Admit a minutes run only through `notes::admit`, and re-check an automatic run as due right before Claude Code starts. Evidence: `notes::admit`, `notes::auto_due`
 - R10. After a run, the app applies only that run's own `actions.new-<run>.json`, never the generic `actions.new.json`, and applying keeps each item's current status. Evidence: `notes::finish_actions`, `calls::apply_actions`
+- R11. A `claude` profile signed in to another account than the one recorded runs no job until the user accepts it. Evidence: `ai::accept_account`
 
 ### Constraints
 | Do not | Do instead | Evidence |

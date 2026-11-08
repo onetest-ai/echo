@@ -16,7 +16,14 @@
 - R9. `echoctl read echo://call/…` in Yolo's run gives only a call of its task's thread pinned to the profile the run started on (`guard::RUN_PROFILE`); without it, no call. Evidence: `links::thread_call`
 - R10. Rename a run's call folder only at the run's end, and never use a `title_from_run` title to find previous minutes. Evidence: `calls::rename_to_title`, `calls::previous_subject`
 - R11. Initialise mermaid on a minutes page only with `securityLevel: 'strict'`. Evidence: `minutes::MERMAID_INIT`
-- R12. A minutes run changes nothing outside its call except learned vocabulary for its meeting and pruned frames moved to the trash, which the app purges after the run. Evidence: `calls::purge_trash`
+- R12. A minutes run changes nothing outside its call except learned vocabulary for its meeting and pruned frames moved to the trash; the app, not the run, clears trash entries older than 30 days. Evidence: `calls::purge_trash`
+- R13. Refuse to start a run on a Claude Code older than `guard::MIN_CLAUDE`. Evidence: `guard::MIN_CLAUDE`
+- R14. Inside a run, the CLI reaches only the run's own call. Evidence: `guard::own_call`
+- R15. The minutes render in an `<iframe sandbox="allow-scripts">`, and the window and the minutes page are served with the strict CSP of `window::reply` (`'self'`/`echo:` and hashed scripts only). Evidence: `window::reply`
+- R16. `echoctl window --serve` answers only on 127.0.0.1, and its `POST /ipc` (with `ECHOCTL_SERVE_IPC=1`) only with that run's SameSite=Strict cookie and its own Origin. Evidence: `window::serve`
+- R17. Secrets (`ai.json`, `plugins/secrets/<id>.json`) are written 0600; a profile's values reach Claude Code only as `ECHOCTL_P_<name>` variables, never in a script's text. Evidence: `ai::PASS`
+- R18. An update is installed only verified: on Windows against the release's digest, on macOS with Echo's team signature; never while a call records or before the window's notes are saved. Evidence: `update::commit`
+- R19. `<echo_view>` goes only to Echo's own terminals (`ECHOCTL_TERMINAL`), never to runs, plugins or other sessions. Evidence: `view::SESSION_VAR`
 
 ### Constraints
 | Do not | Do instead | Evidence |

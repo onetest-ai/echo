@@ -269,7 +269,7 @@ LOCAL=1 scripts/package-macos.sh # no Apple developer account: an ad-hoc signed 
 scripts/package-windows.ps1      # .msi installer + .zip for Windows
 ```
 Checks: `cargo clippy`, `cargo test`, `cargo check --target x86_64-pc-windows-msvc
---no-default-features`, `scripts/check-mod.sh`. Design notes per area: `.ai-run/guides/design/README.md`.
+--no-default-features`, `scripts/check-mod.sh`. Rules per area: `.ai-run/guides/` (index in `AGENTS.md`).
 
 Windows 10 2004+: double-click `echo-<version>-windows-x64.msi` (per user, no administrator
 rights: Start menu, PATH, start at login; upgrades quit and restart Echo; uninstall from

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Source files stay under 1,500 lines (architecture.md, size limits): Rust counted up to its `#[cfg(test)] mod tests`,
+# Source files stay under 1,500 lines (architecture.md, Structure and boundaries R9): Rust counted up to its `#[cfg(test)] mod tests`,
 # the window's parts (ui/app/*.js, ui/css/*.css) whole; vendored and generated files aren't looked at. A file
 # over the limit today is listed in scripts/size-ceilings.txt with its size then: it may shrink, never grow.
 set -euo pipefail
@@ -29,9 +29,9 @@ bad, smaller = [], []
 for p in sorted(files):
     n, c = size(p), ceil.get(p)
     if c is None and n > LIMIT:
-        bad.append(f"{p}: {n} lines, over {LIMIT}: split it first, in a move-only commit (architecture.md, size limits)")
+        bad.append(f"{p}: {n} lines, over {LIMIT}: split it first, in a move-only commit (architecture.md, Structure and boundaries R9)")
     elif c is not None and n > c:
-        bad.append(f"{p}: {n} lines, over its ceiling {c}: split it, or move code out, before it grows (architecture.md, size limits)")
+        bad.append(f"{p}: {n} lines, over its ceiling {c}: split it, or move code out, before it grows (architecture.md, Structure and boundaries R9)")
     elif c is not None and n < c:
         smaller.append(f"{p}: {n} lines, ceiling {c}: lower it in scripts/size-ceilings.txt" + (" (or drop it: under the limit)" if n <= LIMIT else ""))
 for p in ceil:

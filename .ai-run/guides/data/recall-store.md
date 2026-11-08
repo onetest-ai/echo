@@ -13,3 +13,5 @@
 - R6. The MCP server is read-only, and its tools (`mcp__echo__…`) are allowed only in a call session's ask mode, never in a minutes run. Evidence: `guard::BRAIN_TOOLS`
 - R7. Keep chunk ids stable across syncs. Evidence: `brain::chunk::chunk_id`
 - R8. Every saved config writes `learned` (`[]` when empty); only a config without the key is migrated by `vocab::migrate`. Evidence: `config::learned_always`
+- R9. A closed thread's sources are archived, never dropped from the store. Evidence: `brain::store::archived_of`
+- R10. A sync that changes the store snapshots it first. Evidence: `brain::store::snapshot`
