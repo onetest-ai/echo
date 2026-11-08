@@ -208,7 +208,7 @@ function chatSources(p) {
   const cs = p.chat_state || {}
   const chips = (p.sources || []).filter((x) => x.kind === 'teams_chat').map((x) => {
     const s = cs[x.id] || {}
-    const info = s.error ? `Couldn't read it: ${s.error}` : s.read_at ? `Read ${relDay(s.read_at.slice(0, 10))} · ${s.days || 0} day${s.days === 1 ? '' : 's'} of messages between calls go into the work` : 'Read into the work between calls — at the next sync'
+    const info = s.error ? `Couldn't read it: ${s.error}` : s.read_at ? `Read ${relDay(s.read_at)} · ${s.days || 0} day${s.days === 1 ? '' : 's'} of messages between calls go into the work` : 'Read into the work between calls — at the next sync'
     return tok(`💬 ${esc(x.name || 'Meeting chat')}${s.error ? ' <span class="src-err">⚠</span>' : ''}`, { op: 'source-remove', kind: 'teams_chat', source: x.id }, info)
   }).join('')
   const offer = (p.chat_suggestions || []).map((c) => `<button class="tok add" data-pj="source-add" data-kind="teams_chat" data-source="${esc(c.id)}" data-name="${esc(c.name)}" title="The chat of ${c.calls} of its call${c.calls === 1 ? '' : 's'}: what is said there between calls goes into the work">+ 💬 ${esc(c.name)} chat</button>`).join('')
@@ -230,10 +230,10 @@ function threadSources(p, cl) {
         + (S.pj.adding === `exclude:${x.id}` ? `<span class="tok-in"><input id="pj-add-exclude" data-add="exclude" data-root="${esc(x.id)}" value="${esc((x.exclude || []).join(', '))}" placeholder="Don't read — e.g. Archive/, *draft*" aria-label="What not to read" autofocus></span>` : `<button class="tok add" data-pj="adding" data-what="exclude:${esc(x.id)}" title="Folders or names in it not to read">Don't read…</button>`)
     }
     const s = st[`${x.kind}:${x.id}`] || {}
-    let info = s.error ? `Couldn't read it: ${s.error}` : s.read_at ? `Read ${relDay(s.read_at.slice(0, 10))} · ${s.found || 0} new` : 'Not read yet'
+    let info = s.error ? `Couldn't read it: ${s.error}` : s.read_at ? `Read ${relDay(s.read_at)} · ${s.found || 0} new` : 'Not read yet'
     // Mail also goes into the work (`ledger::mail_sync`): trusted senders' mails, one item each.
     const w = x.kind === 'mail' ? (p.mail_state || {})[x.id] : null
-    if (w) info += w.error ? `\nInto the work: couldn't read it — ${w.error}` : w.read_at ? `\nInto the work: read ${relDay(w.read_at.slice(0, 10))} · ${w.found || 0} from trusted senders` : ''
+    if (w) info += w.error ? `\nInto the work: couldn't read it — ${w.error}` : w.read_at ? `\nInto the work: read ${relDay(w.read_at)} · ${w.found || 0} from trusted senders` : ''
     return tok(`${icon[x.kind] || '·'} ${esc(sourceLabel(x))}${s.error || (w && w.error) ? ' <span class="src-err">⚠</span>' : ''}`, { op: 'source-remove', kind: x.kind, source: x.id }, info)
   }
   const have = new Set((p.sources || []).map((x) => `${x.kind}:${x.id}`))

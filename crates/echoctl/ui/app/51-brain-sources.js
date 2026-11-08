@@ -160,7 +160,7 @@ function brainNumbers() {
     const famStat = (name) => { const u = units.filter((x) => x.family === name); const k = (s) => u.filter((x) => x.status === s).length; return u.length ? `${k('ok')} ok${k('partial') ? ` · ${k('partial')} partial` : ''}${k('zero') + k('error') ? ` · <span class="error">${k('zero') + k('error')} empty</span>` : ''}` : '' }
     const rounds = ((cfg._echo || {}).rounds || []), lastRound = (cfg._echo || {}).kept || rounds[rounds.length - 1]
     const state = job ? `<span class="set-sub">${job.op === 'propose' ? 'Claude is reading the workbooks and proposing families — a few minutes…' : job.op === 'accept' ? 'Accepting and building…' : 'Building…'}</span>`
-      : st === 'accepted' ? `<span class="tk-pj">accepted</span><span class="set-sub">${c.built_at ? `built ${esc(relDay(String(c.built_at).slice(0, 10)))} · ${c.audit ? c.audit.facts : 0} facts` : 'not built yet'}</span>`
+      : st === 'accepted' ? `<span class="tk-pj">accepted</span><span class="set-sub">${c.built_at ? `built ${esc(relDay(c.built_at))} · ${c.audit ? c.audit.facts : 0} facts` : 'not built yet'}</span>`
       : st === 'proposed' ? `<span class="tk-pj br-prop">proposed</span><span class="set-sub">${lastRound ? `loads ${lastRound.ok} of ${lastRound.units} sheets fully · ${lastRound.facts} facts — review, then accept` : 'review, then accept'}</span>` : `<span class="set-sub">${c.workbooks} workbook${c.workbooks === 1 ? '' : 's'} · no families yet</span>`
     const acts = job ? '' : [
       `<button class="btn${st ? '' : ' primary'}" data-num="propose" data-client="${esc(c.client)}">${st ? 'Propose again' : 'Propose families'}</button>`,

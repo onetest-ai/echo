@@ -339,7 +339,7 @@ function insightsBlock(kind, id, name) {
   const d = insights.data
   if (!d || d.error) return ''
   const list = d.insights || []
-  const when = d.at ? `checked ${esc(relDay(String(d.at).slice(0, 10)))}` : 'not run yet'
+  const when = d.at ? `checked ${esc(relDay(d.at))}` : 'not run yet'
   const btn = d.running ? '<span class="set-sub">Reading…</span>' : `<button class="link-btn" data-insights-run="${esc(kind)}" data-id="${esc(id)}">${list.length ? 'Refresh' : 'Find insights'}</button>`
   const card = (x) => {
     const [label, cls] = INSIGHT_KIND[x.kind] || [x.kind, 'mute']

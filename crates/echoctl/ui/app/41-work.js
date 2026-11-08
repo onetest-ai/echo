@@ -31,7 +31,17 @@ function workToReview(w) {
   return out
 }
 const fmtDay = (d) => d ? new Date(d + 'T12:00').toLocaleDateString([], { weekday: d && (new Date(d + 'T12:00') - Date.now()) / 864e5 < 7 && (new Date(d + 'T12:00') - Date.now()) > -864e5 ? 'short' : undefined, day: 'numeric', month: 'short' }) : ''
-const relDay = (d) => { if (!d) return ''; const t = new Date(); if (d === ymd(t)) return 'today'; t.setDate(t.getDate() - 1); if (d === ymd(t)) return 'yesterday'; return fmtDay(d) }
+/** A day as today / yesterday / its date, by the local calendar. `d`: a date (YYYY-MM-DD) or a whole timestamp
+ *  (taken to its local day — never cut to 10 characters, which is the UTC day). */
+const relDay = (d, now = new Date()) => {
+  if (!d) return ''
+  const at = String(d).length > 10 ? new Date(d) : null
+  const day = at && !isNaN(at) ? ymd(at) : String(d).slice(0, 10)
+  const t = new Date(now)
+  if (day === ymd(t)) return 'today'
+  t.setDate(t.getDate() - 1)
+  return day === ymd(t) ? 'yesterday' : fmtDay(day)
+}
 /** A work item's status as the tree and the board show it: its word and its colour. */
 function workStatus(n) {
   if (n.kind === 'question') return n.description || n.state === 'done' ? ['answered', 'done'] : CLOSED_STATES.includes(n.state) ? [STATE_LABEL[n.state] || n.state, n.state] : ['open', 'open']
@@ -54,7 +64,8 @@ function workOwners(all, V, me) {
   const mine = me.names || []
   const isMe = V.owner === '@me' || mine.includes(V.owner)
   const owners = [...new Set(all.map((n) => n.internal_owner || n.client_owner).filter((o) => o && !mine.includes(o)))].sort()
-  return [...(mine.length ? [['@me', me.name ? `Me (${me.name})` : 'Me', isMe]] : []), ...owners.map((o) => [o, o, V.owner === o])]
+  // A view saved on '@me' keeps its option even when no item here is the user's any more (its chip stays "Me").
+  return [...(mine.length || V.owner === '@me' ? [['@me', me.name ? `Me (${me.name})` : 'Me', isMe]] : []), ...owners.map((o) => [o, o, V.owner === o])]
 }
 /** What the Work bar's filters keep: `pass` in the tree, `board` on the board. Done follows the Owner and
  *  Kind filters there too; only Open only leaves it alone (#113). */

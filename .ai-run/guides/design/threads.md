@@ -89,7 +89,8 @@ Story (criteria) › Task (action / session / dependency, owners, due, client-ow
 - Spoken dates are resolved against the evidence item's day (`ledger::resolve_due`).
 - `verify_apply` gates status changes, criteria met, links and waits (only `supports` applies).
 - The Work tab (the window's `work-status` block, tested by `ui/work-status.test.mjs`): the tree and the board give an
-  item one status — done, then blocked (the user's own word), then waiting for someone, in progress, to do. A done card
+  task one status — done, then blocked (the user's own word), then waiting for someone, in progress, to do (questions
+  and risks keep their own words in the tree: answered / open, handled / no response). A done card
   shows no waiting chip (a user's edit to done keeps `waiting_for` in the ledger; only a call's "done" clears it).
   Late is judged by the local date. The Owner filter lists the user once, "Me (name)", covering every owner here that
   `tasks::Me` takes for them (`tasks::my_names`, sent as the work route's `me`). Owner and Kind narrow every board

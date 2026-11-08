@@ -45,10 +45,11 @@ test('late and today are judged by the local date, not the UTC one (#123)', () =
   assert.equal(cardLate({ due: '2026-11-05', state: 'open' }, evening), true)
   assert.equal(cardLate({ due: '2026-11-05', state: 'done' }, evening), false)
   assert.equal(cardLate({ state: 'open' }, evening), false)
-  const day = new Function(`${ymd[0]}\nreturn ymd`)()
-  const y = new Date(); y.setDate(y.getDate() - 1)
-  assert.equal(relDay(day(new Date())), 'today')
-  assert.equal(relDay(day(y)), 'yesterday')
+  assert.equal(relDay('2026-11-06', evening), 'today')
+  assert.equal(relDay('2026-11-05', evening), 'yesterday')
+  // A timestamp counts on its local day, not the UTC day its first 10 characters name.
+  assert.equal(relDay('2026-11-07T06:30:00Z', evening), 'today', 'built a minute ago is today, not tomorrow')
+  assert.equal(relDay(new Date(2026, 10, 6, 0, 30).toISOString(), evening), 'today')
 })
 
 const all = [
@@ -81,6 +82,11 @@ test('the user\'s option keeps every item they own, whichever name (#114)', () =
   }
   assert.deepEqual(ids(workFilter(V({ owner: 'Omar Haddad', open: false }), me).pass), ['T002', 'T005'])
   assert.deepEqual(ids(workFilter(V({ owner: '-', open: false }), me).pass), ['T011'])
+})
+
+test('a view saved on "@me" keeps its option when nothing here is the user\'s any more', () => {
+  const opts = workOwners([{ id: 'T002', kind: 'task', state: 'open', internal_owner: 'Omar Haddad' }], { owner: '@me' }, { name: 'Sam Rivera', names: [] })
+  assert.deepEqual(opts[0], ['@me', 'Me (Sam Rivera)', true])
 })
 
 test('Done on the board follows the Owner and Kind filters; only Open only leaves it alone (#113)', () => {
