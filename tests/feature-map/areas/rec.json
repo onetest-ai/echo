@@ -142,6 +142,13 @@
    "priority": "high",
    "check": "person",
    "axes": []
+  },
+  {
+   "id": "F-REC-18",
+   "feature": "A recording that starts before the call app holds a mic records silence on the mic track until the app holds one Echo can open; if the app reports none for 10 s (a virtual mic, a listen-only join) it takes the default input and says so in the log",
+   "priority": "high",
+   "check": "person",
+   "axes": []
   }
  ]
 }

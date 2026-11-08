@@ -487,7 +487,7 @@ pub fn mic_source(app: Option<TargetApp>) -> Box<dyn Source> {
     if let Some(s) = testfeed::me() {
         return s;
     }
-    Box::new(mic::MicSource { app, released: Default::default() })
+    Box::new(mic::MicSource::new(app))
 }
 
 /// Is the app in a call right now (holding the mic)? None = this platform can't tell yet.
