@@ -95,14 +95,16 @@ fn call_dir(name: &str) -> Result<PathBuf> {
     }
 }
 
-/// Yolo's run reads a call of its task's thread, and only one pinned to the profile it runs on (the thread's, else
-/// the default): a call's text goes to no other profile.
+/// Yolo's run reads a call of its task's thread, and only one pinned to the profile it was started on
+/// (`guard::RUN_PROFILE`, resolved at launch — not the thread's now, which the user may have changed since): a call's
+/// text goes to no other profile. Without that variable, none.
 fn thread_call(dir: PathBuf, thread: &str, name: &str) -> Result<PathBuf> {
     let p = crate::projects::load(thread)?;
     if !crate::projects::of_call(&dir)?.iter().any(|(t, _)| t.id == p.id) {
         bail!("Yolo reads only the calls of its task's thread ({}), not {name:?}", p.name);
     }
-    let run = p.ai_profile.clone().filter(|id| !id.is_empty()).unwrap_or_else(crate::ai::default_id);
+    let run = std::env::var(crate::guard::RUN_PROFILE).ok().filter(|id| !id.is_empty());
+    let Some(run) = run else { bail!("this run names no AI profile, so it reads no call") };
     if crate::ai::call_profile_id(&dir)? != run {
         bail!("{name:?} is pinned to another AI profile than this run's: its text isn't sent here");
     }
@@ -520,21 +522,36 @@ mod tests {
         struct Out;
         impl Drop for Out {
             fn drop(&mut self) {
-                for k in [crate::notes::HEADLESS, crate::guard::RUN_TASK, crate::guard::RUN_CALL] {
+                for k in [crate::notes::HEADLESS, crate::guard::RUN_TASK, crate::guard::RUN_PROFILE, crate::guard::RUN_CALL] {
                     std::env::remove_var(k);
                 }
             }
         }
         let _out = Out;
         std::env::set_var(crate::notes::HEADLESS, "1");
-        // Yolo on a task of the thread: its thread's calls on the thread's profile (#136).
+        // Yolo on a task of the thread: its thread's calls on the profile it was started on (#136).
         std::env::set_var(crate::guard::RUN_TASK, format!("{pilot}/T005"));
+        std::env::set_var(crate::guard::RUN_PROFILE, crate::ai::default_id());
         assert!(read("echo://call/2026-10-24_100000-acme-weekly").unwrap().contains("Acme weekly"));
         let e = read("echo://call/2026-10-26_100000-globex-sync").unwrap_err().to_string();
         assert!(e.contains("only the calls of its task's thread") && !e.contains("no call"), "{e}");
         let e = read("echo://call/2026-10-25_100000-acme-legal").unwrap_err().to_string();
-        assert!(e.contains("another AI profile"), "strict routing: {e}");
+        assert!(e.contains("another AI profile"), "a call pinned to another profile: {e}");
         assert!(read("echo://call/2026-10-27_100000-nope").unwrap_err().to_string().contains("no call"), "a call that isn't there");
+        // The thread re-pinned to "other" while the run goes on: the run is still on the profile it started on, so the
+        // call pinned to "other" stays refused and the default's still passes.
+        crate::projects::update(&pilot, |p| {
+            p.ai_profile = Some("other".into());
+            Ok(())
+        })
+        .unwrap();
+        let e = read("echo://call/2026-10-25_100000-acme-legal").unwrap_err().to_string();
+        assert!(e.contains("another AI profile"), "re-pinned mid-run: {e}");
+        assert!(read("echo://call/2026-10-24_100000-acme-weekly").is_ok(), "re-pinned mid-run");
+        // A Yolo run that names no profile reads no call.
+        std::env::remove_var(crate::guard::RUN_PROFILE);
+        let e = read("echo://call/2026-10-24_100000-acme-weekly").unwrap_err().to_string();
+        assert!(e.contains("names no AI profile"), "{e}");
         // A minutes run: its own call only, and the refusal says so.
         std::env::remove_var(crate::guard::RUN_TASK);
         std::env::set_var(crate::guard::RUN_CALL, &weekly);

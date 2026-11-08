@@ -231,7 +231,8 @@ fn read_link(acc: &super::access::Access, link: &str) -> Result<Value> {
     let threads = acc.people_threads();
     let ok = match &l {
         Link::Call { name, .. } => {
-            let dir = crate::calls::resolve_call(name).map_err(|_| anyhow::anyhow!("no call {name:?}"))?;
+            // Found without the run's check: `links::read` below applies it, as for `echoctl read` (#136).
+            let dir = crate::calls::find_call(name).map_err(|_| anyhow::anyhow!("no call {name:?}"))?;
             acc.sources(&store::open(&super::store_path())?)?.contains(&format!("call/{}", crate::calls::stamp_of(&dir)))
         }
         Link::Mail(src) => acc.sources(&store::open(&super::store_path())?)?.contains(src),

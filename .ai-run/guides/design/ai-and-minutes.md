@@ -184,8 +184,12 @@ Write now and Not yet ▾; the calls list shows ⏱ for calls ended in the last 
   checked, for the log).
 - Inside a run (`ECHOCTL_HEADLESS=1`) the CLI works only on the run's call (`calls::resolve_call` →
   `guard::own_call`, canonical path). One read-only exception: `echoctl read echo://call/…` in Yolo's run
-  (`guard::RUN_TASK`, no run call) gives a call of its task's thread pinned to the profile it runs on
-  (`links::call_dir`, #136); every refusal there says why, only a missing call says "no call". `notes::refused_in_run` refuses `vocab add --always`, `transcribe --keep-audio` /
+  (`guard::RUN_TASK`, no run call) gives a call of its task's thread pinned to the profile the run was started on
+  (`guard::RUN_PROFILE`, set by `claudejob::run` at launch; without it no call), `links::call_dir`, #136. This is a
+  check `read` applies so its answer doesn't hand the run another profile's call — not a limit on Yolo, which runs with
+  skipped permissions and could read the call's files itself; what Yolo may do is the user's choice in the app. The
+  Brain's MCP `read_link` goes through the same check (it finds the call with `calls::find_call`, then `links::read`).
+  Every refusal there says why, only a missing call says "no call". `notes::refused_in_run` refuses `vocab add --always`, `transcribe --keep-audio` /
   `--model`; the mod does nothing and `pending` / `claim` refuse.
 - `title` inside a run sets the title, marks `title_from_run`, and leaves the folder rename to the run's end
   (`calls::rename_to_title`); a terminal `echoctl title` on a call with a run waits too (`notes::run_active`).

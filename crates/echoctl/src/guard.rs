@@ -51,6 +51,9 @@ pub const RUN_SKILLS: &str = "ECHOCTL_RUN_SKILLS";
 pub const RUN_READ: &str = "ECHOCTL_RUN_READ";
 /// Yolo's run (`claudejob`): the one task it may edit, `<project>/<node>` (`echoctl project ledger <project> edit`).
 pub const RUN_TASK: &str = "ECHOCTL_RUN_TASK";
+/// Yolo's run: the AI profile it was started on (resolved at launch), so `echoctl read` sends it only that profile's
+/// calls even if the thread is re-pinned while it runs.
+pub const RUN_PROFILE: &str = "ECHOCTL_RUN_PROFILE";
 /// The Echo commands a read-only routine may run (`*` = any one word: an id).
 pub const ROUTINE_COMMANDS: [&str; 13] = [
     "context", "attention", "prep", "previous", "status", "calendar events", "project list", "project show", "project of",
