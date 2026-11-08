@@ -409,24 +409,25 @@ pub fn use_model(name: &str) -> Result<()> {
     Ok(())
 }
 
-/// The turbo model also serves live transcription and language detection, whatever the
-/// active model is.
+/// Turbo q5_0 also detects the language when the active model isn't turbo (large-v3, small).
 pub const HELPER_MODEL: &str = "large-v3-turbo-q5_0";
 
-/// Why a downloaded model is needed even when it isn't the active one.
-pub fn helper_role(name: &str) -> Option<&'static str> {
-    (name == HELPER_MODEL).then_some("it also powers the live transcript and language detection")
+/// Why a downloaded model is used even when it isn't the active one: the helper detects the language while the
+/// active model is a Whisper model other than turbo (large-v3, small), whose own detection is less decisive.
+pub fn helper_role(name: &str, active: Option<&str>) -> Option<&'static str> {
+    let needed = active.and_then(|a| find(a).ok()).is_some_and(|m| m.engine == Engine::Whisper && !m.name.starts_with("large-v3-turbo"));
+    (name == HELPER_MODEL && needed).then_some("it detects the language for the active model")
 }
 
-/// `echoctl model remove`: delete a downloaded model (not the active one; the helper model
-/// only with `force`).
+/// `echoctl model remove`: delete a downloaded model (not the active one; the helper only with `force` while the
+/// active model uses it).
 pub fn remove(name: &str, force: bool) -> Result<()> {
     let m = find(name)?;
     let cfg = Config::load()?;
     if cfg.model.as_deref() == Some(m.name) {
         bail!("{} is the active model — switch with `echoctl model use <other>` first", m.name);
     }
-    if let (Some(role), false) = (helper_role(m.name), force) {
+    if let (Some(role), false) = (helper_role(m.name, cfg.model.as_deref()), force) {
         bail!("{} is still used: {role}. Remove it anyway with --force", m.name);
     }
     let mut removed = false;
@@ -467,4 +468,50 @@ pub fn active_model_path() -> Result<PathBuf> {
         bail!("model {name} is configured but missing — run `echoctl model download {name}`");
     }
     Ok(p)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_helper_is_used_only_beside_a_whisper_model_other_than_turbo() {
+        for active in ["large-v3-q5_0", "small-q8_0"] {
+            assert!(helper_role(HELPER_MODEL, Some(active)).is_some(), "{active}");
+        }
+        for active in ["large-v3-turbo-q8_0", "large-v3-turbo-q5_0", "nemotron-3.5-0.6b"] {
+            assert_eq!(helper_role(HELPER_MODEL, Some(active)), None, "{active}");
+        }
+        assert_eq!(helper_role(HELPER_MODEL, None), None);
+        assert_eq!(helper_role("large-v3-turbo-q8_0", Some("large-v3-q5_0")), None);
+    }
+
+    #[test]
+    fn the_helper_is_kept_from_removal_only_while_the_model_in_use_needs_it() {
+        let (_env, _) = crate::paths::testenv::folders("models-remove-helper");
+        let helper = || paths::models_dir().join(find(HELPER_MODEL).unwrap().file);
+        let put = || {
+            fs::create_dir_all(paths::models_dir()).unwrap();
+            fs::write(helper(), b"x").unwrap();
+        };
+        let in_use = |m: Option<&str>| Config { model: m.map(str::to_owned), ..Default::default() }.save().unwrap();
+        for active in ["large-v3-q5_0", "small-q8_0"] {
+            in_use(Some(active));
+            put();
+            assert!(remove(HELPER_MODEL, false).is_err(), "{active}");
+            assert!(helper().exists(), "{active}");
+            remove(HELPER_MODEL, true).unwrap();
+            assert!(!helper().exists(), "{active}: --force removes it");
+        }
+        for active in [Some("large-v3-turbo-q8_0"), Some("nemotron-3.5-0.6b"), None] {
+            in_use(active);
+            put();
+            remove(HELPER_MODEL, false).unwrap();
+            assert!(!helper().exists(), "{active:?}");
+        }
+        in_use(Some(HELPER_MODEL));
+        put();
+        assert!(remove(HELPER_MODEL, true).is_err(), "the model in use, even with --force");
+        assert!(helper().exists());
+    }
 }

@@ -1120,7 +1120,7 @@ impl Ui {
             if m.name == model.recommended {
                 let _ = sub.append(&MenuItem::new("Recommended for this computer", false, None));
             }
-            if let (Some(role), false) = (models::helper_role(m.name), active) {
+            if let (Some(role), false, true) = (models::helper_role(m.name, model.active_model.as_deref()), active, downloaded) {
                 let _ = sub.append(&MenuItem::new(format!("Also used: {role}"), false, None));
             }
             let _ = sub.append(&sep());
@@ -1457,7 +1457,7 @@ impl Ui {
             Action::RemoveModel(name) => {
                 std::thread::spawn(move || {
                     let size = models::find(name).map(|m| m.size_mb).unwrap_or(0);
-                    let warning = models::helper_role(name).map(|r| format!("\n\nNote: {r} — without it they fall back to the slower active model.")).unwrap_or_default();
+                    let warning = models::helper_role(name, Config::load().ok().and_then(|c| c.model).as_deref()).map(|r| format!("\n\nNote: {r} — without it the model detects it itself, less reliably.")).unwrap_or_default();
                     let msg = format!("Remove the speech model {name}?\n\nFrees {size} MB. You can download it again later.{warning}");
                     if app::ask(&msg, &["Cancel", "Remove"], "Remove").as_deref() == Some("Remove") {
                         if let Err(e) = models::remove(name, true) {
