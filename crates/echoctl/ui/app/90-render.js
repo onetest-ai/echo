@@ -624,7 +624,7 @@ function setSetting(key, val) {
 
 // macOS, and Windows with Echo's own title bar: the top strip is the window's title bar (`window/mod.rs`): dragging
 // it moves the window, a double click zooms (maximises) it — anywhere but on its controls.
-const onTitleBar = (e) => (MAC || ownBar()) && e.button === 0 && e.target.closest && e.target.closest('#r-top') && !e.target.closest('button,select,label,a,input,.pill-note')
+const onTitleBar = (e) => (MAC || ownBar()) && e.button === 0 && e.target.closest && e.target.closest('#r-top') && !e.target.closest('button,select,label,a,input,.pill-note,[data-resize-top]')
 document.addEventListener('mousedown', (e) => {
   // Windows, Echo's own title bar: the strip's top pixels resize the window (WebView2 covers the window's own border).
   const edge = e.button === 0 && e.target.closest && e.target.closest('[data-resize-top]')

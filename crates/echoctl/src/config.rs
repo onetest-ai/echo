@@ -75,9 +75,9 @@ pub struct Config {
     #[serde(default)]
     pub hide_dock_icon: bool,
     /// Windows: no system title bar — Echo's strip is the top of the window, with its own minimise, maximise and close
-    /// (#76). Off by default until it holds up.
+    /// (#76). Default on (unset = on); off only when the user turned it off.
     #[serde(default)]
-    pub own_title_bar: bool,
+    pub own_title_bar: Option<bool>,
     /// Calls that ended before this are never written automatically (set when the switch is first
     /// on, and again on each off → on), so turning it on doesn't send a backlog of calls to a model.
     #[serde(default, skip_serializing_if = "Option::is_none")]

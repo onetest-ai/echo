@@ -168,9 +168,9 @@ function captionButtons() {
   const edges = max ? '' : '<div class="rz-top" data-resize-top="n"></div><div class="rz-top nw" data-resize-top="nw"></div><div class="rz-top ne" data-resize-top="ne"></div>'
   const svg = (d) => `<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1">${d}</svg>`
   return edges + `<div class="caption" role="group" aria-label="Window">`
-    + `<button class="cap" data-cmd="win-min" aria-label="Minimize" title="Minimize">${svg('<path d="M0 5.5h10"/>')}</button>`
-    + `<button class="cap" data-cmd="win-max" aria-label="${max ? 'Restore' : 'Maximize'}" title="${max ? 'Restore' : 'Maximize'}">${svg(max ? '<rect x="0.5" y="2.5" width="7" height="7"/><path d="M2.5 2.5v-2h7v7h-2"/>' : '<rect x="0.5" y="0.5" width="9" height="9"/>')}</button>`
-    + `<button class="cap cap-close" data-cmd="win-close" aria-label="Close" title="Close">${svg('<path d="M0.5 0.5l9 9M9.5 0.5l-9 9"/>')}</button></div>`
+    + `<button class="win-cap" data-cmd="win-min" aria-label="Minimize" title="Minimize">${svg('<path d="M0 5.5h10"/>')}</button>`
+    + `<button class="win-cap" data-cmd="win-max" aria-label="${max ? 'Restore' : 'Maximize'}" title="${max ? 'Restore' : 'Maximize'}">${svg(max ? '<rect x="0.5" y="2.5" width="7" height="7"/><path d="M2.5 2.5v-2h7v7h-2"/>' : '<rect x="0.5" y="0.5" width="9" height="9"/>')}</button>`
+    + `<button class="win-cap win-close" data-cmd="win-close" aria-label="Close" title="Close">${svg('<path d="M0.5 0.5l9 9M9.5 0.5l-9 9"/>')}</button></div>`
 }
 /** The top bar's right end: the account chip, then the Inbox. */
 function topEnd() { return `<div class="top-end">${accountChip()}${inboxButton()}</div>` }

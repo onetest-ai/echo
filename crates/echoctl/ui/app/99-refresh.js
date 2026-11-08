@@ -76,6 +76,12 @@ window.echo = {
   openCall(name) { go(`call/${name}/minutes`) },
   /** Windows, Echo's own title bar: the window was maximised or restored. */
   maximized(on) { if (S.maximized !== on) { S.maximized = on; render() } },
+  /** Windows: Echo's own title bar as saved (after a load, or a switch whose save failed: the switch goes back). */
+  ownTitleBar(on) {
+    if (S.state) S.state.own_title_bar = on
+    if (S.settings) S.settings.own_title_bar = on
+    render()
+  },
   /** An echo:// link (a call at a moment, a thread, a client, a person, a mail): where Echo keeps it, or its mail in Outlook. */
   async openLink(link) {
     let t
@@ -240,6 +246,7 @@ window.echo = {
   if (S.selected) await loadCall(S.selected)
   if (S.view === 'calendar') await loadCalendar()
   render()
+  if (!MAC) send({ cmd: 'window_sync' }) // Windows: the title bar and the maximised state (`EchoWindow::tell_page`)
   setInterval(tick, 2000)
   setInterval(tickClocks, 1000)
 })()

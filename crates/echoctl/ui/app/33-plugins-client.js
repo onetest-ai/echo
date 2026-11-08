@@ -164,6 +164,12 @@ document.addEventListener('click', (e) => {
   setTimeout(poll, 500)
 })
 
+// ── own title bar row: Settings → Layout's "Echo's own title bar" (#76, on by default) — on Windows only, by the
+// app's platform (`state.platform`), not the browser's: absent on macOS, Linux and in `--serve`, so search can't find it.
+const ownTitleBarCard = (st, state) => (state || {}).platform !== 'windows' ? '' : setCard('Window', [setRow("Echo's own title bar",
+  (st || {}).own_title_bar ? "No Windows title bar: Echo's top strip moves the window and holds minimize, maximize and close." : "Windows draws its title bar above Echo's top strip.",
+  sw('own_title_bar', (st || {}).own_title_bar, "Echo's own title bar"))])
+// end of the own-title-bar block
 const SETTINGS_BODY = {
   templates: () => templatesSettings(),
   brain: (st) => knowledgeSettings() + brainSettings(st),
@@ -278,9 +284,7 @@ const SETTINGS_BODY = {
       const area = Layout.area(v.id, known)
       return setRow(`${v.icon || ''} ${esc(v.label)}`, '', `<div class="seg" role="group">${['right', 'bottom'].map((a) => `<button data-layout-move="${v.id}" data-to="${a}" aria-pressed="${area === a}">${a === 'right' ? 'Right' : 'Bottom'}</button>`).join('')}</div>`)
     })
-    // Windows: Echo's strip as the window's title bar (#76); macOS always has it, under the traffic lights.
-    const own = (st || {}).own_title_bar
-    const bar = MAC ? '' : setCard('Window', [setRow("Echo's own title bar", own ? "No Windows title bar: Echo's top strip moves the window and holds minimize, maximize and close." : "Windows draws its title bar above Echo's top strip.", sw('own_title_bar', own, "Echo's own title bar"))])
+    const bar = ownTitleBarCard(st, S.state)
     return `<h2>Layout</h2><p class="set-lead">Where each view opens. Also from a panel's own move button; drag a panel's edge to resize it.</p>` + bar + setCard('Panel views', rows) +
       setCard('', [setRow('Reset the layout', 'Every view back to its own place and size.', '<button class="btn" data-layout-reset>Reset</button>')])
   },

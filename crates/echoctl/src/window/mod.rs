@@ -53,6 +53,11 @@ pub fn base_url() -> &'static str {
 pub struct EchoWindow {
     pub window: Window,
     pub webview: WebView,
+    /// Windows: Echo's own title bar is on, and the maximised state the page was last told (`report_maximized`).
+    #[cfg(windows)]
+    own: std::cell::Cell<bool>,
+    #[cfg(windows)]
+    told_maximized: std::cell::Cell<Option<bool>>,
 }
 
 impl EchoWindow {
@@ -78,6 +83,11 @@ impl EchoWindow {
             Some(WindowCmd::Zoom) => self.window.set_maximized(!self.window.is_maximized()),
             Some(WindowCmd::Minimize) => self.window.set_minimized(true),
             Some(WindowCmd::ResizeTop(d)) => drop(self.window.drag_resize_window(d)),
+            // The page (re)loaded: it learns the title bar and the maximised state afresh.
+            #[cfg(windows)]
+            Some(WindowCmd::Sync) => self.tell_page(),
+            #[cfg(not(windows))]
+            Some(WindowCmd::Sync) => {}
             None => {}
         }
     }
@@ -87,22 +97,39 @@ impl EchoWindow {
     #[cfg(windows)]
     pub fn follow_settings(&self, msg: &str) {
         if let Some(on) = own_title_bar_set(msg) {
+            self.own.set(on);
             self.window.set_decorations(!on);
-            self.report_maximized();
+            self.tell_page();
         }
     }
 
-    /// Windows: tell the page whether the window is maximised (its maximise / restore button).
+    /// Windows: the page's view of the title bar, as saved (a save that failed puts its switch back), and the
+    /// maximised state afresh.
+    #[cfg(windows)]
+    fn tell_page(&self) {
+        let js = format!("window.echo && window.echo.ownTitleBar && window.echo.ownTitleBar({})", self.own.get());
+        let _ = self.webview.evaluate_script(&js);
+        self.told_maximized.set(None);
+        self.report_maximized();
+    }
+
+    /// Windows, Echo's own title bar: tell the page when the window was maximised or restored (its maximise /
+    /// restore button) — on a change only, as resizes come many a second while dragging an edge.
     #[cfg(windows)]
     pub fn report_maximized(&self) {
-        let js = format!("window.echo && window.echo.maximized && window.echo.maximized({})", self.window.is_maximized());
-        let _ = self.webview.evaluate_script(&js);
+        let max = self.window.is_maximized();
+        if !self.own.get() || self.told_maximized.get() == Some(max) {
+            return;
+        }
+        self.told_maximized.set(Some(max));
+        let _ = self.webview.evaluate_script(&format!("window.echo && window.echo.maximized && window.echo.maximized({max})"));
     }
 }
 
-/// Settings → Layout → "Echo's own title bar" (Windows; macOS always draws its own under the traffic lights).
+/// Settings → Layout → "Echo's own title bar" (Windows; macOS always draws its own under the traffic lights): on
+/// unless the user turned it off — a config without it, or none to read, counts as on.
 fn own_title_bar() -> bool {
-    cfg!(windows) && crate::config::Config::load().is_ok_and(|c| c.own_title_bar)
+    cfg!(windows) && crate::config::Config::load().map_or(true, |c| c.own_title_bar.unwrap_or(true))
 }
 
 /// One size of `packaging/windows/echo.ico` (its entries are PNGs), as a window icon.
@@ -141,10 +168,11 @@ pub fn open<T: 'static>(
     // Windows: Echo's icon (the one in echoctl.exe) on the title bar and the taskbar button
     // (macOS takes the bundle's).
     #[cfg(windows)]
+    let own = own_title_bar();
+    #[cfg(windows)]
     let builder = {
         use tao::platform::windows::WindowBuilderExtWindows;
-        // Settings → Layout → "Echo's own title bar": no system frame, its shadow kept (`set_own_title_bar`).
-        let own = own_title_bar();
+        // Settings → Layout → "Echo's own title bar": no system frame, its shadow kept (`follow_settings` switches it).
         builder
             .with_window_icon(exe_icon(32))
             .with_taskbar_icon(exe_icon(256))
@@ -182,7 +210,14 @@ pub fn open<T: 'static>(
         .with_url(url)
         .with_devtools(cfg!(debug_assertions))
         .build(&window)?;
-    Ok(EchoWindow { window, webview })
+    Ok(EchoWindow {
+        window,
+        webview,
+        #[cfg(windows)]
+        own: std::cell::Cell::new(own),
+        #[cfg(windows)]
+        told_maximized: std::cell::Cell::new(None),
+    })
 }
 
 /// Is a message from the window's own page — `base` with the path `/` or `/index.html` — rather
@@ -430,6 +465,8 @@ pub enum WindowCmd {
     Minimize,
     /// Windows, Echo's own title bar: resize from the top edge (the page covers the window's own border there).
     ResizeTop(tao::window::ResizeDirection),
+    /// The page loaded: tell it the title bar and maximised state.
+    Sync,
 }
 
 pub fn window_cmd(msg: &str) -> Option<WindowCmd> {
@@ -438,6 +475,7 @@ pub fn window_cmd(msg: &str) -> Option<WindowCmd> {
         "window_drag" => Some(WindowCmd::Drag),
         "window_zoom" => Some(WindowCmd::Zoom),
         "window_min" => Some(WindowCmd::Minimize),
+        "window_sync" => Some(WindowCmd::Sync),
         "window_resize_top" => Some(WindowCmd::ResizeTop(match v["edge"].as_str()? {
             "nw" => tao::window::ResizeDirection::NorthWest,
             "ne" => tao::window::ResizeDirection::NorthEast,
