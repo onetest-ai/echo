@@ -242,8 +242,10 @@ pub fn finish_run_result(mut child: std::process::Child, log: &mut fs::File, tim
     let pid = child.id();
     let err = child.stderr.take().map(|e| std::thread::spawn(move || BufReader::new(e).lines().map_while(Result::ok).collect::<Vec<_>>().join("\n")));
     let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    // Set when the time limit stopped it: then that is why it ended, not what Claude Code printed.
+    let timed_out = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     {
-        let done = done.clone();
+        let (done, timed_out) = (done.clone(), timed_out.clone());
         std::thread::spawn(move || {
             let t = Instant::now();
             while t.elapsed() < timeout {
@@ -252,6 +254,7 @@ pub fn finish_run_result(mut child: std::process::Child, log: &mut fs::File, tim
                 }
                 std::thread::sleep(Duration::from_secs(1));
             }
+            timed_out.store(true, std::sync::atomic::Ordering::SeqCst);
             crate::ai::stop_group(pid);
         });
     }
@@ -289,6 +292,11 @@ pub fn finish_run_result(mut child: std::process::Child, log: &mut fs::File, tim
     }
     if notes::quitting() {
         bail!("{quit}");
+    }
+    if result.is_none() && timed_out.load(std::sync::atomic::Ordering::SeqCst) {
+        let s = timeout.as_secs();
+        let limit = if s >= 60 && s.is_multiple_of(60) { format!("{} min", s / 60) } else { format!("{s} s") };
+        bail!("stopped after {limit} without finishing (its time limit); its steps are in the run's log");
     }
     let r = result.ok_or_else(|| anyhow!("Claude Code ended without a result{}", err.lines().find(|l| !l.trim().is_empty()).map(|l| format!(": {l}")).unwrap_or_default()))?;
     let text = r["result"].as_str().unwrap_or("").trim().to_string();
@@ -360,4 +368,24 @@ pub fn start(id: &str) -> bool {
         }
     });
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_run_past_its_time_limit_says_it_ran_out_of_time_not_its_first_stderr_line() {
+        let (_env, root) = crate::paths::testenv::folders("run-time-limit");
+        let _fake = crate::ai::fake::install(&root);
+        let p = crate::ai::fake::profile("slow", None, &crate::ai::fake::signed_in("pat@example.com"));
+        fs::write(crate::ai::fake::file(&p, "p.hang"), "[claude-code:unrecognized_model] {\"model\":\"qwen3.8:27b\"}\n").unwrap();
+        let child = crate::ai::prepare_claude(&p, &["-p".into(), "x".into()], &root, false).unwrap().spawn().unwrap();
+        let mut log = fs::File::create(root.join("log.txt")).unwrap();
+        let e = finish_run_result(child, &mut log, Duration::from_secs(1), "sync a thread", "quit").unwrap_err().to_string();
+        assert!(e.contains("stopped after 1 s without finishing"), "{e}");
+        assert!(!e.contains("unrecognized_model"), "the warning stays in the log: {e}");
+        assert!(fs::read_to_string(root.join("log.txt")).unwrap().contains("unrecognized_model"));
+    }
 }
