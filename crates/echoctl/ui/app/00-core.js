@@ -37,6 +37,7 @@ const S = {
   notesProfile: null, // {call, id}: the AI profile picked for Write minutes
   prepOpen: {}, // call → the "Last time" card's open state, once the user toggled it
   liveMenu: false, // My notes' live notes menu (⋯ at Now) is open
+  fromLink: false, // the page was opened at an echo:// link (`#link=`): start-up opens no call for it
   missing: null, // the call asked for that isn't there (404): not polled, and Calls goes to the list
   autoTab: null, // the call whose tab was last chosen for the user (Live while it records)
   notice: null, // a message for a moment (an action that couldn't be done)
