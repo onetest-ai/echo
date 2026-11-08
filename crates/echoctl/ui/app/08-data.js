@@ -88,13 +88,6 @@ async function loadPeople() {
   if (!url) { S.pj.people = null; return }
   try { const d = await get(url); d.url = url; S.pj.people = d } catch { /* app restarting */ }
 }
-/** The Brain as one thread sees it: its topics and terms (shared layer + its client's), for its
- *  Profile and Brief. */
-async function loadThreadBrain() {
-  const id = S.pj.sel
-  if (!id) return
-  try { const d = await get(`api/brain?thread=${encodeURIComponent(id)}`); d.thread = id; if (S.pj.sel === id) S.pj.tbrain = d; noteEditErrors(d) } catch { /* no Brain in this build */ }
-}
 async function loadFound() {
   try { S.pj.foundData = await get('api/found') } catch { /* app restarting */ }
 }
@@ -111,7 +104,6 @@ async function loadProject() {
   if (!id) { S.pj.detail = null; return }
   try { const d = await get('api/project/' + encodeURIComponent(id)); if (S.pj.sel === id) S.pj.detail = d } catch { /* app restarting */ }
   if (S.pj.tab === 'people') await loadPeople()
-  if ((S.pj.tab === 'profile' || S.pj.tab === 'brief') && (!S.pj.tbrain || S.pj.tbrain.thread !== S.pj.sel)) await loadThreadBrain()
   if (S.pj.tab === 'profile') {
     try { const d = await get('api/project/' + encodeURIComponent(id) + '/series'); if (S.pj.sel === id) S.pj.series = { id, ...d } } catch { /* app restarting */ }
   }

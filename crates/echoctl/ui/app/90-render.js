@@ -133,14 +133,14 @@ function render() {
   if (pact) {
     let html = ''
     try { html = pact.render() } catch (e) { html = `<p class="error">${esc(pact.label)}: ${esc(String((e && e.message) || e))}</p>` }
-    patch(primary, `<main class="main plug-act">${noticesBar()}${html}</main>`)
+    patch(primary, `<main class="main plug-act">${html}</main>`)
     try { if (pact.after) pact.after(primary) } catch (e) { console.error(e) }
   } else if (S.view === 'settings') {
-    patch(primary, `<main class="main">${noticesBar()}${settingsView()}</main>`)
+    patch(primary, `<main class="main">${settingsView()}</main>`)
     // The template just chosen or made, in view in a long list.
     if (TPL.scrollTo) { TPL.scrollTo = false; const r = $('.tp-row.on'); if (r) r.scrollIntoView({ block: 'nearest' }) }
   } else if (S.view === 'brain') {
-    patch(primary, `<main class="main">${noticesBar()}${brainView()}</main>`)
+    patch(primary, `<main class="main">${brainView()}</main>`)
     // A plugin's Knowledge tab draws after the page is in (its graph).
     const kt = knowledgeTabs().find((x) => x.tab === S.br.tab)
     const box = kt && primary.querySelector(`[data-ktab="${CSS.escape(kt.tab)}"]`)
@@ -149,19 +149,19 @@ function render() {
     drawPeople()
   } else if (S.view === 'today') {
     const rows = $('.td-rows'), keep = rows ? rows.scrollTop : null
-    patch(primary, `<main class="main">${noticesBar()}${todayView()}</main>`)
+    patch(primary, `<main class="main">${todayView()}</main>`)
     // Your day opens on now: the line at the top with what comes next under it (one row of the past above it);
     // drawn again, it stays where it was scrolled.
     const r = $('.td-rows'), now = r && r.querySelector('.td-now')
     if (r && r !== rows) r.scrollTop = keep != null ? keep : now ? Math.max(0, now.getBoundingClientRect().top - r.getBoundingClientRect().top - 64) : 0
   } else if (S.view === 'tasks') {
-    patch(primary, `<main class="main">${noticesBar()}${tasksView()}</main>`)
+    patch(primary, `<main class="main">${tasksView()}</main>`)
   } else if (S.view === 'projects') {
-    patch(primary, `<main class="main">${noticesBar()}${projectsView()}</main>`)
+    patch(primary, `<main class="main">${projectsView()}</main>`)
     drawOrgLinks()
   } else if (S.view === 'calendar') {
     const grid = $('#calgrid'), keep = grid ? grid.scrollTop : null
-    patch(primary, `<main class="main">${noticesBar()}${calendarView()}</main>`)
+    patch(primary, `<main class="main">${calendarView()}</main>`)
     const g = $('#calgrid')
     // First open: around now, or 08:00 on a week without today.
     if (g && g !== grid) g.scrollTop = keep != null ? keep : Math.max(0, ($('.now') ? $('.now').offsetTop - 120 : 8 * Number(g.dataset.hour)))
@@ -174,7 +174,7 @@ function render() {
     const d = doc(), main = $('#r-main')
     if (d.plain !== undefined) {
       main.dataset.mode = 'plain'
-      patch(main, noticesBar() + d.plain)
+      patch(main, d.plain)
     } else {
       if (main.dataset.mode !== 'doc') {
         main.dataset.mode = 'doc'
@@ -270,7 +270,7 @@ document.addEventListener('click', (e) => {
   if (S.laterOpen && !(e.target.closest && e.target.closest('[data-cmd^="later-"]'))) { S.laterOpen = false; render() }
   // The sidebar open over a narrow page closes on a click beside it.
   if (S.barOver && !(e.target.closest && e.target.closest('.actbar'))) { S.barOver = false; render() }
-  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-theme-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-go],[data-conv-keep],[data-br-pclosed],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-up],[data-up-fold],[data-today-seen],[data-today-done],[data-today-retry],[data-today-import],[data-today-close],[data-today-keep],[data-needs-open],[data-needs-wont],[data-needs-wont-ok],[data-wont-send],[data-wont-edit],[data-wont-drop],[data-needs-todo],[data-needs-todo-ok],[data-needs-read],[data-needs-send],[data-needs-outlook],[data-needs-off],[data-today-askoff],[data-prep-write],[data-ev-prep],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
+  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-theme-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-go],[data-conv-keep],[data-br-pclosed],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-up],[data-up-fold],[data-today-seen],[data-today-done],[data-today-retry],[data-today-import],[data-today-close],[data-today-keep],[data-needs-open],[data-needs-wont],[data-needs-wont-ok],[data-wont-send],[data-wont-edit],[data-wont-drop],[data-needs-todo],[data-needs-todo-ok],[data-needs-read],[data-needs-send],[data-needs-outlook],[data-needs-off],[data-today-askoff],[data-prep-write],[data-ev-prep],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
   if (!t) { if (menuWas) render(); return }
   // Sign-ins (`signin.rs`): shown at once (starting / stopping / checking) until the next poll
   // brings the app's state.
@@ -471,7 +471,6 @@ document.addEventListener('click', (e) => {
   if (t.dataset.copy) { send({ cmd: 'copy', text: t.dataset.copy }); t.textContent = 'Copied'; return }
   if (t.dataset.arm !== undefined) return send({ cmd: 'arm_meeting', id: t.dataset.arm, languages: recordLang() })
   if (t.dataset.join !== undefined) return send({ cmd: 'join_meeting', id: t.dataset.join, languages: recordLang() })
-  if (t.dataset.ask) { send({ cmd: 'live_ask', call: S.selected, kind: t.dataset.ask }); return liveBusy() }
   switch (t.dataset.cmd) {
     case 'record': return send({ cmd: 'record', languages: recordLang() })
     case 'record-memo': return send({ cmd: 'record_memo', languages: recordLang() })

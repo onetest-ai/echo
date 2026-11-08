@@ -276,7 +276,6 @@ fn yolo_prompt(project: &str, node: &str, skill: &str, words: &str) -> String {
 /// user's choice), with the skill chosen and the user's words. In the background: the outcome lands in
 /// `<home>/.echo/task-asks.json` by `id`, which the page reads (`/api/today` `asks`).
 #[cfg(feature = "js")]
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn yolo_task(id: &str, project: &str, node: &str, skill: &str, words: &str) -> Result<()> {
     let tree = crate::ledger::tree(project)?;
     let n = tree["nodes"].get(node).cloned().ok_or_else(|| anyhow::anyhow!("no such task"))?;
@@ -398,7 +397,6 @@ fn parse_wont(answer: &str, item: &Value) -> Result<Value> {
 /// or the default. The outcome lands in `task-asks.json` by `id` (Today's Asks), with a draft to Send, Edit or Drop
 /// when the comment asked for one. Nothing is sent here.
 #[cfg(feature = "js")]
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn wont_do(id: &str, item_id: &str, comment: &str) -> Result<()> {
     if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
         anyhow::bail!("a bad run id");

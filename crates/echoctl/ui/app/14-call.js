@@ -55,18 +55,13 @@ function callMenu(c) {
   return notes + moved + `<button class="icon-btn" data-cmd="call-menu" aria-haspopup="menu" aria-expanded="${S.menuOpen}" aria-label="Call actions" title="Call actions">${ICON('<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>')}</button>${S.menuOpen ? `<div class="menu" role="menu">${items}</div>` : ''}`
 }
 
-/** A message for a moment (an action that couldn't be done), and why the window didn't close: under
- *  a call's tabs, or above whatever else the window shows (`noticesBar`). */
 /** Messages for a moment float over the window (`toasts`, drawn once in #r-over): nothing in the
- *  page moves when one comes or goes. These stay as empty slots for the places that drew them. */
-function notices() { return '' }
+ *  page moves when one comes or goes. */
 function toasts() {
   const n = S.notice ? `<div class="toast"><span class="grow">${esc(S.notice)}</span><button class="btn ghost" data-cmd="notice-ok">OK</button></div>` : ''
   const c = S.closeError ? `<div class="toast error"><span class="grow">Your notes couldn't be saved: ${esc(S.closeError)}</span><button class="btn" data-cmd="close-retry">Try again</button><button class="btn ghost danger" data-cmd="close-now">Close without saving</button></div>` : ''
   return n + c
 }
-
-function noticesBar() { return '' }
 
 function confirmBox(c) {
   return `<div class="confirm"><span>Delete "${esc(c.title)}"? It goes to the trash in the data folder for 30 days.</span>

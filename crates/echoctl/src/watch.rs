@@ -54,9 +54,9 @@ const ARM_EXPIRES: Duration = Duration::from_secs(15 * 60);
 const HEARTBEAT_STALE: chrono::Duration = chrono::Duration::seconds(5);
 const EVENTS_MAX_BYTES: u64 = 5_000_000;
 /// Mute button unreadable this long → record the mic again; this long → look for Teams anew.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
 const MUTE_BLIND_UNMUTE: Duration = Duration::from_secs(5);
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
 const MUTE_BLIND_RESET: Duration = Duration::from_secs(10);
 /// How often the meeting chat is read during a recording.
 const CHAT_POLL: Duration = Duration::from_secs(30);
@@ -65,7 +65,7 @@ const CHAT_MARGIN: chrono::Duration = chrono::Duration::minutes(2);
 /// How long to look for an ad-hoc call's chat after the recording starts.
 const CHAT_FIND_FOR: Duration = Duration::from_secs(5 * 60);
 /// How often the call app's window text is read during a recording.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
 /// Twice a second: who is lit in Teams' tiles changes at the pace of a conversation
 /// (`speaking.jsonl`), and the UI already lags the audio by ~0.5 s.
 const UI_POLL: Duration = Duration::from_millis(500);

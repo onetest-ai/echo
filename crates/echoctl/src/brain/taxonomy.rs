@@ -266,6 +266,7 @@ pub fn learn(items: &[Learn], by: &str) -> Result<Vec<String>> {
 /// A plugin's names for one thing (`share::dictionary_add`): merged into the term any of them already is — the
 /// client's layer first, then the practice's, then any — its other names added as synonyms or spellings; else a new
 /// term in `client`'s layer (or the practice's). Nothing is renamed or removed. One new version when anything changed.
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
 pub fn dictionary_add(name: &str, synonyms: &[String], spellings: &[String], kind: Option<&str>, client: Option<&str>, by: &str) -> Result<Value> {
     let _lock = write_lock()?;
     let mut t = current().unwrap_or_default();

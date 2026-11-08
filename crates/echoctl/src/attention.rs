@@ -450,12 +450,10 @@ fn fold(rec: &mut Value, got: &Collected, now: chrono::DateTime<chrono::Utc>) ->
     open
 }
 
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 static CACHE: Mutex<Option<(Instant, Value)>> = Mutex::new(None);
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 static COLLECTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// Moved by `stale`: a collection that saw it move while it ran is answered but not cached.
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 fn shape(open: Vec<Value>, rec: &Value) -> Value {
@@ -468,7 +466,6 @@ fn shape(open: Vec<Value>, rec: &Value) -> Value {
 
 /// Collect again at the next request: a job an item started has ended (the item may be gone now).
 /// A collection running meanwhile may have read the old state: it isn't kept (`GENERATION`).
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn stale() {
     GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     if let Ok(mut c) = CACHE.lock() {

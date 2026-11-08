@@ -568,6 +568,7 @@ pub fn start_folder(key: &str, profile: Option<&str>, pick: Option<&str>, cols: 
         args.push("--dangerously-skip-permissions".into());
     }
     // Channels plugins asked for (Telegram…): the session listens to them while it is open.
+    #[cfg_attr(not(feature = "js"), allow(unused_mut))] // only the plugins' channels (`js`) add to it
     let mut extra_env: Vec<(&str, String)> = vec![];
     #[cfg(feature = "js")]
     let channels = crate::jshost::channels();

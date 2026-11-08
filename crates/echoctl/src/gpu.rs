@@ -43,7 +43,6 @@ fn cached() -> Option<Checked> {
 }
 
 /// What whisper.cpp runs on, for the Health menu. Never runs the check itself.
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn status() -> String {
     if let Some(v) = Config::load().ok().and_then(|c| c.use_gpu) {
         return format!("{} (set in config: use_gpu)", if v { "GPU" } else { "CPU" });

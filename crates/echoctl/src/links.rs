@@ -374,7 +374,6 @@ pub fn target(link: &str) -> Result<Value> {
 }
 
 /// Where a mail link opens outside Echo: its message in Outlook or Teams, when Echo knows it.
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 #[cfg(feature = "brain")]
 pub fn mail_url(src: &str) -> Option<String> {
     let c = crate::brain::store::open(&crate::brain::store_path()).ok()?;

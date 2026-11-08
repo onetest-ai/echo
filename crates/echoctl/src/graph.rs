@@ -382,7 +382,6 @@ pub fn person(email: &str) -> Result<Option<Value>> {
 // ── Teams channels and mail: thread sources for the Brain (read only; nothing is kept but its index) ──
 
 /// GET with the body asked as text (mail) besides the usual headers.
-#[cfg_attr(not(feature = "brain"), allow(dead_code))]
 fn graph_get_text(token: &str, url: &str) -> Result<Value> {
     let v = curl(&format!(
         "url = {}\nheader = {}\nheader = \"Prefer: outlook.timezone=\\\"UTC\\\", outlook.body-content-type=\\\"text\\\"\"\n",
@@ -396,7 +395,6 @@ fn graph_get_text(token: &str, url: &str) -> Result<Value> {
 }
 
 /// The teams the user is in: `[{id, name}]`.
-#[cfg_attr(not(feature = "brain"), allow(dead_code))]
 pub fn teams() -> Result<Vec<Value>> {
     let token = access_token()?;
     let v = graph_get(&token, &format!("{GRAPH}/me/joinedTeams?$select=id,displayName"))?;
@@ -404,7 +402,6 @@ pub fn teams() -> Result<Vec<Value>> {
 }
 
 /// A team's channels: `[{id, name}]`.
-#[cfg_attr(not(feature = "brain"), allow(dead_code))]
 pub fn channels(team: &str) -> Result<Vec<Value>> {
     let token = access_token()?;
     let v = graph_get(&token, &format!("{GRAPH}/teams/{}/channels?$select=id,displayName,membershipType", urlencode(team)))?;
@@ -413,7 +410,6 @@ pub fn channels(team: &str) -> Result<Vec<Value>> {
 
 /// A channel's messages (with their replies) created or changed since `since`, newest pages first,
 /// at most `cap` root messages: `[{id, at, from, text, url, replies: [{at, from, text}]}]`.
-#[cfg_attr(not(feature = "brain"), allow(dead_code))]
 pub fn channel_messages(team: &str, channel: &str, since: DateTime<Utc>, cap: usize) -> Result<Vec<Value>> {
     let token = access_token()?;
     let mut url = Some(format!("{GRAPH}/teams/{}/channels/{}/messages?$top=50&$expand=replies", urlencode(team), urlencode(channel)));
@@ -499,7 +495,6 @@ pub fn conversation(id: &str) -> Result<Vec<Value>> {
     Ok(out)
 }
 
-#[cfg_attr(not(feature = "brain"), allow(dead_code))]
 /// How a mail's sender was authenticated, from Exchange's headers: `internal` (sent inside the
 /// organisation: `X-MS-Exchange-Organization-AuthAs: Internal`), `pass` (Exchange's own verdict — the
 /// topmost `Authentication-Results`, which it prepends; any lower one could be the sender's — says

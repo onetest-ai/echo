@@ -743,7 +743,7 @@ fn parse_body(body: &[u8]) -> Result<(Request, Vec<f32>)> {
     if !pcm.len().is_multiple_of(2) {
         return Err(bad("odd number of sample bytes"));
     }
-    Ok((req, pcm.chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / i16::MAX as f32).collect()))
+    Ok((req, pcm.as_chunks::<2>().0.iter().map(|&b| i16::from_le_bytes(b) as f32 / i16::MAX as f32).collect()))
 }
 
 fn decode_request(body: &[u8]) -> Result<Answer> {

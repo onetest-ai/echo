@@ -191,7 +191,7 @@ impl TrackReader {
         let mut bytes = Vec::with_capacity(room * 2);
         f.take(room as u64 * 2).read_to_end(&mut bytes)?;
         let n = bytes.len() / 2;
-        self.audio.extend(bytes.chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / i16::MAX as f32));
+        self.audio.extend(bytes.as_chunks::<2>().0.iter().map(|&b| i16::from_le_bytes(b) as f32 / i16::MAX as f32));
         self.read += n as u64;
         self.caught_up = n < room;
         Ok(())

@@ -64,7 +64,6 @@ fn guess_of(x: &Value, skills: &[String]) -> Option<Value> {
 }
 
 /// `classify` on a thread of its own, unless a pass is still going.
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn classify_in_background() {
     use std::sync::atomic::{AtomicBool, Ordering};
     static RUNNING: AtomicBool = AtomicBool::new(false);
@@ -91,7 +90,6 @@ pub fn classify_in_background() {
 /// Guess the mode of the user's open tasks that have none (each tried once a day): a call per thread, on its
 /// AI profile (a task's words go only there), at most 8 tasks a call. How many were guessed. Guesses for what is no
 /// longer one of the user's open tasks go.
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn classify() -> Result<usize> {
     let today = chrono::Local::now().date_naive();
     let now = chrono::Utc::now().to_rfc3339();

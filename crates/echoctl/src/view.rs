@@ -283,7 +283,6 @@ fn session_access() -> Option<crate::brain::access::Access> {
 
 /// Whether a starting session gets a block of `kind`: at its start and after a compaction or /clear always,
 /// on a resume only when the block changed since this session got it. (the record changed, tell it)
-#[cfg_attr(not(feature = "brain"), allow(dead_code))]
 fn block_due(sent: &mut Value, kind: &str, session: &str, source: &str, text: &str, now: chrono::DateTime<chrono::Utc>) -> (bool, bool) {
     use sha2::{Digest, Sha256};
     let hash: String = Sha256::digest(text.as_bytes()).iter().take(8).map(|b| format!("{b:02x}")).collect();

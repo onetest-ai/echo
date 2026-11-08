@@ -2652,7 +2652,6 @@ pub fn open_tasks_of_call(dir: &std::path::Path) -> Vec<Value> {
 /// evidence is this call, by node, in the order said — new nodes, status changes, dates, links,
 /// waits, criteria met — with the words, the verifier's mark, and the node as it is now. Mentions
 /// are left out (they change nothing). `read`: the sync has read the call; `queued`: it will.
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn call_changes(project: &str, stamp: &str) -> Result<Value> {
     let l = Ledger::of(project)?;
     let t = fold(&l)?;
@@ -2678,7 +2677,6 @@ pub fn call_changes(project: &str, stamp: &str) -> Result<Value> {
     Ok(json!({"read": read, "queued": queued, "changes": out}))
 }
 
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 fn words(s: &str) -> BTreeSet<String> {
     norm(s).split_whitespace().filter(|w| w.len() > 2).map(str::to_owned).collect()
 }

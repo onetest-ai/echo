@@ -856,7 +856,6 @@ pub struct TypeBook {
     cfg: Config,
 }
 
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn type_book() -> TypeBook {
     TypeBook { all: meeting_types(), kept: event_types(), cfg: Config::load().unwrap_or_default() }
 }

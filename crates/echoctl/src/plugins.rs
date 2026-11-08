@@ -1240,7 +1240,6 @@ pub fn remove(id: &str, keep_data: bool) -> Result<()> {
 }
 
 /// Installed and switched on (what the host halves and the window load).
-#[cfg_attr(not(feature = "js"), allow(dead_code))]
 pub fn enabled() -> Vec<Installed> {
     Registry::load().map(|r| r.installed.into_values().filter(|p| p.enabled).collect()).unwrap_or_default()
 }
@@ -1286,8 +1285,8 @@ pub fn settings_view(id: &str) -> Result<Vec<Value>> {
         .collect())
 }
 
-/// A setting's value (secrets included), for the capabilities.
-#[allow(dead_code)] // read by the capabilities from phase 2 on
+/// A setting's value (secrets included), for the capabilities (`jshost`: only with `js`).
+#[cfg_attr(not(feature = "js"), allow(dead_code))]
 pub fn setting(id: &str, key: &str) -> Option<Value> {
     read_map(&secrets_file(id)).remove(key).or_else(|| read_map(&data_dir(id).join("settings.json")).remove(key))
 }

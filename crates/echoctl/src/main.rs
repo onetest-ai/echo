@@ -547,7 +547,6 @@ enum Cmd {
 }
 
 /// Name of the "transcription in progress" marker (a no-op name when built without whisper).
-#[allow(dead_code)]
 fn transcribe_marker() -> &'static str {
     #[cfg(feature = "transcribe")]
     return transcribe::IN_PROGRESS;

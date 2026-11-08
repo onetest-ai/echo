@@ -492,7 +492,6 @@ pub(crate) fn json_answer(text: &str) -> Option<serde_json::Value> {
 
 /// One prompt, one answer, no tools (the Brain's taxonomy jobs): on `model` (else the profile's
 /// minutes model) — a local profile answers through its own server.
-#[cfg_attr(not(feature = "brain"), allow(dead_code))]
 pub(crate) fn complete_text(p: &Profile, system: &str, user: &str, max_tokens: u32) -> Result<String> {
     match p.kind {
         Kind::Local => complete_local(p, system, user, max_tokens, true, &|| crate::notes::quitting()),
@@ -1179,8 +1178,7 @@ fn next_job(s: &mut Shared, now: Instant) -> Option<Job> {
     }
     let mut pick = None;
     for (stamp, c) in s.calls.iter_mut() {
-        if c.asks.front().is_some_and(|a| a.not_before.is_none_or(|(t, _)| t <= now)) {
-            let a = c.asks.pop_front().expect("just seen");
+        if let Some(a) = c.asks.pop_front_if(|a| a.not_before.is_none_or(|(t, _)| t <= now)) {
             c.asking = Some(a.clone());
             pick = Some(Job::Ask { stamp: stamp.clone(), generation: c.profile_gen, ask: a });
             break;

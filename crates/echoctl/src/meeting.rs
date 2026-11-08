@@ -116,7 +116,6 @@ impl MeetingContext {
     }
 
     /// Everyone on the invite, organizer first, de-duplicated.
-    #[cfg_attr(not(feature = "transcribe"), allow(dead_code))]
     pub fn people(&self) -> Vec<&str> {
         let mut out: Vec<&str> = vec![];
         for p in self.organizer.iter().chain(self.attendees.iter()) {
