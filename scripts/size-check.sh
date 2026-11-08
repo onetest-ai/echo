@@ -4,22 +4,27 @@
 # over the limit today is listed in scripts/size-ceilings.txt with its size then: it may shrink, never grow.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-python3 - <<'PY'
+PY=python3; command -v python3 >/dev/null && python3 -c "" 2>/dev/null || PY=python  # Git Bash on Windows
+"$PY" - <<'PY'
 import glob, sys
+from pathlib import Path
 LIMIT = 1500
 ceil = {}
-for l in open("scripts/size-ceilings.txt", encoding="utf-8"):
-    l = l.split("#", 1)[0].split()
-    if l:
-        ceil[l[0]] = int(l[1])
+for k, l in enumerate(open("scripts/size-ceilings.txt", encoding="utf-8"), 1):
+    f = l.split("#", 1)[0].split()
+    if not f:
+        continue
+    if len(f) != 2 or not f[1].isdigit():
+        sys.exit(f"size-check: scripts/size-ceilings.txt line {k}: expected `<path> <lines>`, got {l.strip()!r}")
+    ceil[f[0]] = int(f[1])
 def size(p):
-    lines = open(p, encoding="utf-8").read().split("\n")
+    lines = open(p, encoding="utf-8").read().splitlines()
     if p.endswith(".rs"):
         for i, l in enumerate(lines[:-1]):
             if l.strip() == "#[cfg(test)]" and lines[i + 1].startswith("mod tests"):
                 return i
     return len(lines)
-files = glob.glob("crates/echoctl/src/**/*.rs", recursive=True) + glob.glob("crates/echoctl/ui/app/*.js") + glob.glob("crates/echoctl/ui/css/*.css")
+files = [Path(p).as_posix() for p in glob.glob("crates/echoctl/src/**/*.rs", recursive=True) + glob.glob("crates/echoctl/ui/app/*.js") + glob.glob("crates/echoctl/ui/css/*.css")]
 bad, smaller = [], []
 for p in sorted(files):
     n, c = size(p), ceil.get(p)
