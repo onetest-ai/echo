@@ -32,5 +32,6 @@ tags: [recording, devices, privacy, test-call, live-check]
 The mic track holds the call app's mic only; the room before the call isn't recorded, and a call app that never reports a mic still gets its "Me" track after 10 s.
 
 ## Notes
-- #201. Run 2026-11-08 on the dev Mac (steps 1–2): peaks 0 for 0–10 s, the "me" line at 11–15 s, 0 after; the log as above.
+- #201. Run 2026-11-08 on the dev Mac (steps 1–2): the dial at about 4.5 s, TestCall connected and started playing 1.5 s later; very-short's first "me" line starts about 5 s into its audio, so it is due at about 11 s. Peaks: 0 for 0–10 s (the room before the call: gated, not merely quiet — the Mac's mic was open on the default and zeroed), the line at 11–15 s, 0 after the hang-up; the log as above.
+- After a fallback the track follows the default input, not an app's mic: a hang-up later doesn't release it, so the room after that call is recorded until the recording stops (the watcher's 10 s grace). Only in the fallback case.
 - Step 3 records the room after 10 s, as decided (a virtual mic or a listen-only join must not leave "Me" empty for the whole call). Say so to anyone in the room.
