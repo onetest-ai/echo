@@ -10,9 +10,8 @@
 - R3. Change a thread (project) through `projects::update` (projects lock, load, `check`, write) and a client through `projects::update_client`. Evidence: `projects::update`
 - R4. A Microsoft 365 command that sends, replies, posts or uploads returns `{sent: false, would}` without `--yes` and calls `m365::not_in_run` before it sends (refused when `ECHOCTL_HEADLESS` is set). Evidence: `m365::mail_send`
 - R5. A call's threads are computed from rules, pins and exclusions, never stored in the call; a suggestion never assigns a call to a thread. Evidence: `projects::calls_of`, `projects::suggest`
-- R6. Colleagues never count toward a thread's `people` rules; a client is an organisation marked `account`. Evidence: `projects::CallFacts`, `projects::clients`
-- R7. Closing a question or risk goes through op `answer`, verified, never a `description` edit; a near-duplicate is `suggest_merge`, never merged automatically. Evidence: `ledger::apply`
-- R8. The verify step runs in a fresh process, apart from the extractor. Evidence: `projectsync::run`
-- R9. Mail and chat reach a thread's sync only from the user, colleagues and trusted, authenticated senders. Evidence: `ledger::mail_sync`, `ledger::chat_sync`
-- R10. Nothing about a person changes without the user: suggestions need the quote check and the user's yes; a field or role the user set is never overwritten (by Microsoft 365 or a proposal), it becomes a question. Evidence: `people::decide`, `people::refresh_m365`
-- R11. A link between two threads is written in both ledgers and unlinks from both. Evidence: `ledger::link_threads`
+- R6. Closing a question or risk goes through op `answer`, verified, never a `description` edit; a near-duplicate is `suggest_merge`, never merged automatically. Evidence: `ledger::apply`
+- R7. The verify step runs in a fresh process, apart from the extractor. Evidence: `projectsync::run`
+- R8. Mail and chat reach a thread's sync only from the user, colleagues and trusted, authenticated senders. Evidence: `ledger::mail_sync`, `ledger::chat_sync`
+- R9. Nothing about a person changes without the user: suggestions need the quote check and the user's yes; a field or role the user set is never overwritten (by Microsoft 365 or a proposal), it becomes a question. Evidence: `people::decide`, `people::refresh_m365`
+- R10. A link between two threads is written in both ledgers and unlinks from both. Evidence: `ledger::link_threads`
