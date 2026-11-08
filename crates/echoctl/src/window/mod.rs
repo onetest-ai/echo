@@ -295,12 +295,7 @@ fn call_dir(name: &str) -> Option<PathBuf> {
         return None;
     }
     let dir = paths::calls_dir().join(name);
-    if dir.join("meta.json").exists() {
-        return Some(dir);
-    }
-    // A name the page still holds after the notes run renamed the folder (only that rename: a deleted call whose
-    // stamp another call shares stays gone).
-    calls::renamed(name)
+    dir.join("meta.json").exists().then_some(dir)
 }
 
 /// `/file/<call>/frames/<image>` → the file, if it really is a frame inside that call.
@@ -683,18 +678,6 @@ mod tests {
             match page["next"].as_str() { Some(n) => before = n.to_string(), None => break }
         }
         assert_eq!(seen, ["2026-10-22_100000-c", "2026-10-21_100000-b", "2026-10-20_100000-a", "old-dictation", "imported-standup"]);
-    }
-
-    #[test]
-    fn a_renamed_call_is_found_by_its_stamp() {
-        let (_env, _root) = crate::paths::testenv::folders("window-call-renamed");
-        let d = crate::paths::calls_dir().join("2026-10-22_100000-acme-review");
-        fs::create_dir_all(&d).unwrap();
-        fs::write(d.join("meta.json"), json!({"title": "Acme review"}).to_string()).unwrap();
-        fs::write(d.join("meta.json"), json!({"title": "Acme review", "renamed_from": ["2026-10-22_100000-untitled"]}).to_string()).unwrap();
-        assert_eq!(call_dir("2026-10-22_100000-untitled"), Some(d.clone()), "the old name finds the renamed folder");
-        assert_eq!(call_dir("2026-10-22_100000-standup-2"), None, "a deleted call sharing the stamp stays gone");
-        assert_eq!(call_dir("old-dictation"), None, "an undated name is only itself");
     }
 
     #[test]

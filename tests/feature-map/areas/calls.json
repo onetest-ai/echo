@@ -7,7 +7,7 @@
  "features": [
   {
    "id": "F-CALLS-01",
-   "feature": "The Calls list groups calls by day (Today, Yesterday, weekday within a week, date, date with year, Undated), newest first; each row shows time, length, the first two people (+N) and thread icons",
+   "feature": "The Calls list groups calls by day (Today, Yesterday, weekday within a week, date, date with year, Undated), newest first, in the app's one order of calls (undated calls are the oldest: last in the list, never `latest` or the tray's newest); each row shows time, length, the first two people (+N) and thread icons",
    "priority": "high",
    "check": "agent",
    "axes": [

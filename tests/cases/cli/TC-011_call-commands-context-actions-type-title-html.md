@@ -54,6 +54,6 @@ The call has its title, folder and kind back; its action item is to do (`todo`);
 
 ## Notes
 - The test data writes the action's status as "open"; the app's own words are `todo` and `done` (`calls.rs`, `set_action_status`), so after step 5 it reads `todo`.
-- Step 13: "latest" is the newest call by when it was recorded (meta.json's `started_at`, else the folder's stamp), so the undated call `old-dictation` never wins over a dated one (#147).
+- Step 13: "latest" is the last call in the app's one order (`calls::all_calls`: folders with no date stamp oldest, then the dated ones by their stamp), so the undated call `old-dictation` never wins over a dated one (#147); the window's list and the tray use the same order.
 - A call's folder may be given by name or by path; an old name stops working after `title` renames it (by its stamp it is still found by threads and links).
 - `note` and `delete`/`restore` are in `TC-012`.

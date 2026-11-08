@@ -28,7 +28,7 @@ tags: [calls, error]
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | Load `{{base_url}}/`, wait for "Your day", then navigate to `{{base_url}}/#call/2026-01-01_000000-no-such-call/minutes` | The main area shows the heading "This call can't be opened" and an error text (for example "Error: 404") |
-| 2 | Run `browser_run_code_unsafe` with `async (page) => { const n = []; const h = (r) => { if (r.status() === 404 && r.url().includes('no-such-call')) n.push(r.url()) }; page.on('response', h); await page.waitForTimeout(8000); page.off('response', h); return n.length }` | `0`: the missing call is not asked for again while the error shows (it was asked for once in step 1) |
+| 2 | Run `browser_run_code_unsafe` with `async (page) => { const n = []; const h = (r) => { if (r.status() === 404 && r.url().includes('no-such-call')) n.push(r.url()) }; page.on('response', h); await page.waitForTimeout(8000); page.off('response', h); return n.length }` | At most `2` (one retry: its `/rev` and the call, which the window makes about every 30 s so a restored call comes back); never one every tick (2 s), which would give 8 |
 | 3 | Click "Calls" in the activity bar (`[data-go="calls"]`) | The error page goes: the newest call opens on Minutes and the URL is `#call/<its folder>/minutes`, not the missing call |
 | 4 | Click "Acme weekly sync" | The call opens normally on Minutes |
 

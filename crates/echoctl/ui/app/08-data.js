@@ -143,9 +143,6 @@ async function loadCall(name, retried = false) {
     // Another call was chosen while this answer came (it is not shown, nor its notes edited as that
     // one), or a newer fetch was started: only the newest answer counts.
     if (S.selected !== name || mine !== callSeq) return
-    // Renamed meanwhile (the notes run retitles the folder): the app answers with the call under its stamp.
-    // (The URL follows in `doc()`, the one place that writes it for a call.)
-    if (c.name && c.name !== name) S.selected = c.name
     S.call = c; S.movedShown = !!(c.changes || []).length
     // Its minutes are read now (Today's "new" goes): once per call and minutes a session.
     if (c.notes && S.seenMinutes !== `${c.name}:${(c.notes_run && c.notes_run.finished_at) || ''}`) { S.seenMinutes = `${c.name}:${(c.notes_run && c.notes_run.finished_at) || ''}`; send({ cmd: 'minutes_seen', call: c.name }) }
@@ -155,12 +152,15 @@ async function loadCall(name, retried = false) {
   } catch (e) {
     if (S.selected !== name || mine !== callSeq) return
     S.call = { error: String(e) }
-    // No such call (the app follows a renamed folder by its stamp itself): not polled again, and Calls leaves its
+    // No such call: not polled every tick, and Calls leaves its
     // error page (#150) — unless a fresh list has it, being written a moment ago (a new recording): asked once more.
     if (/^404 /.test(e.message || '')) {
       // The list is asked once, at the first 404 (a later half-minute retry doesn't reload it).
       if (!retried) await loadCalls()
       if (S.selected !== name || mine !== callSeq) return
+      // Retitled meanwhile (the notes run renames the folder): the same call keeps its stamp (dated names only).
+      const stamp = callStamp(name), moved = stamp && (S.calls || []).find((c) => c.name !== name && callStamp(c.name) === stamp)
+      if (moved) { S.selected = moved.name; return loadCall(moved.name) }
       if (!retried && (S.calls || []).some((c) => c.name === name)) return loadCall(name, true)
       // Missing: dropped from the loaded list (a stale entry would keep it polled), asked for now and then only
       // (`tick`) and as soon as a fresh list has it again — see `callGone`.
