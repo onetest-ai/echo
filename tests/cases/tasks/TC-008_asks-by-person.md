@@ -17,6 +17,7 @@ tags: [tasks, asks]
 ## Preconditions
 - Test data built by `tests/fixtures/make-data.sh`, window served at `{{base_url}}`
 - Omar's task is handed over by Sam and late: `echoctl project ledger acme-rollout edit '{"op":"edit","node":"T002","set":{"delegated_by":"Me","due":"<the date two days ago, YYYY-MM-DD>"}}'`. Every `echoctl` command runs after `. <dir>/env` (the run's env file)
+- In S-08 it already is: stage 7 (tasks/TC-007) handed it over and kept it (its Teardown skipped). On its own: run the edit above
 
 ## Test Data
 

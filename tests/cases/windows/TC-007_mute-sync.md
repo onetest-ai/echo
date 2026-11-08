@@ -17,6 +17,7 @@ external_id: TC-WINOS-007
 
 ## Preconditions
 - Windows 10 2004+ or 11, Teams (new) installed; the build is unsigned (updates are checked by SHA-256)
+- **The call (shared in S-22):** in S-22, `windows/TC-003`'s call: step 1 runs during it and its ~20 s mute is step 2's. On its own: a Teams call of its own
 
 ## Steps
 

@@ -18,7 +18,7 @@ external_id: TC-CLA-015
 ## Preconditions
 - Test data built by `tests/fixtures/make_data.py <dir> --ai fake --clock fast` (`claude/TC-003`'s Preconditions: the fake `claude`, automatic minutes **90 s** after the call or the last note in this debug build)
 - The recordings of this build are prepared (`tests/fixtures/recordings.py prepare`); the prelude of the recording cases with `W=tests/fixtures/wait.py`
-- The dev app running on the data with automatic minutes on (`claude/TC-003` step 1; in S-17 it is still running from that stage), the window served with clicks reaching the app, the page loaded from `{{base_url}}/` first
+- The dev app running on the data with automatic minutes on (`claude/TC-003` step 1; in S-17 it is the scenario's app, started in its prelude, still running after that stage), the window served with clicks reaching the app, the page loaded from `{{base_url}}/` first
 
 ## Test Data
 
@@ -41,9 +41,10 @@ external_id: TC-CLA-015
 Editing notes after the call postponed the automatic minutes by the delay from the note.
 
 ## Teardown
-- Run the prelude, then `target/debug/echoctl app quit`
+- Run the prelude, then `target/debug/echoctl app quit` (in S-17 the last stage that needs the app: this quits the scenario's app); `target/debug/echoctl status`: `watcher` is `null`
 
 ## Notes
 - Any note more than 30 s after the call's end moves the time (`notes::auto_state`, "moved by notes"); a note within 30 s also sets the time to note + the delay, but the tab doesn't call it moved.
 - That the note then is **in** the minutes is what a model writes: `claude/TC-009` (S-19, the local model) has a note made after its call too. Before 2026-11-08 this case waited the real 15 minutes after a 213 s recording and ran the local model.
+- Run 2026-11-08 evening (S-17, CLI part; the note saved through the served window's `save_my_notes` instead of typing it): PASS — call ended 19:31:12 (due 19:32:42), note at 19:31:47 moved it to 19:33:17 (`moved.by` "notes"), the run started 19:33:30 (`auto: true`).
 - Run on 2026-11-07 (S-17, real clock): PASS — call ended 12:39:26, note at 12:41:34, the tab moved from 12:54 to 12:56 PM with "Moved: you edited your notes at 12:41 PM"; the run started 12:56:43 and kept the note.

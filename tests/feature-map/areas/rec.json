@@ -135,6 +135,13 @@
    "priority": "medium",
    "check": "person",
    "axes": []
+  },
+  {
+   "id": "F-REC-17",
+   "feature": "After the call app hangs up, the mic track doesn't fall back to another microphone (the room isn't recorded in the grace or a longer capture)",
+   "priority": "high",
+   "check": "person",
+   "axes": []
   }
  ]
 }

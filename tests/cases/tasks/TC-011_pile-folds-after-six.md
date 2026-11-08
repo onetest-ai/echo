@@ -17,6 +17,7 @@ tags: [tasks, piles]
 ## Preconditions
 - Test data built by `tests/fixtures/make-data.sh`, window served at `{{base_url}}`
 - Run `echoctl project tasks` and count `piles.mine`; create tasks on Acme rollout until "I owe" holds exactly 7, each: `echoctl project ledger acme-rollout edit '{"op":"create","kind":"task","parent":"S001","title":"Fold test <n>","internal_owner":"Sam Rivera"}'` (n = 1, 2, …; note every printed id). Every `echoctl` command runs after `. <dir>/env` (the run's env file)
+- In S-08 "Write the follow-up mail to Acme" (T003, from stage 10, tasks/TC-010) is still open and counts in `piles.mine`; cancel it in the Teardown with the tasks created here
 
 ## Test Data
 

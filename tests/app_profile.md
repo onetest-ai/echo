@@ -25,11 +25,11 @@ agent tests it. This file is given to every manual-qa role; where it differs fro
    `ECHOCTL_CONFIG_DIR` and unsets Claude Code's session variables). A command without it would touch the real data.
 4. **Steps are the window (Playwright MCP) or the CLI (Bash).** The runner may use Bash only for `echoctl` with the
    run's env, reading files in the run's data folder, and `tests/fixtures/*`. No other scripts, no edits to the repo.
-   `tests/fixtures/*` includes `recordings.py` (copies of the calls recorded once per build) and `wait.py` (wait for
-   the app's state or a file, with a timeout). One exception: a case that says it records with the test call may also
-   run TestCall, `afplay`, `nohup`, `kill`, `sleep`, `ls`, `grep`, `cat`, `find`, `date`, `printf`, `pgrep -P <the run's
-   app pid>` and `scripts/fetch-nemo-speech.sh` into the run's config, and click Echo's own dialog through System Events
-   by that dialog's pid (see "Recording with the test call").
+   `tests/fixtures/*` includes `recordings.py` (copies of the calls recorded once per build), `call.py` (a file-fed
+   call) and `wait.py` (wait for the app's state or a file, with a timeout). One exception: a case that records a call
+   may also run `nohup`, `kill`, `sleep`, `ls`, `grep`, `cat`, `find`, `date`, `printf`, `pgrep -P <the run's app pid>`
+   and `scripts/fetch-nemo-speech.sh` into the run's config, and click Echo's own dialog through System Events by that
+   dialog's pid (see "Recording with file-fed calls"); the live check's cases also TestCall and `afplay`.
    Another: the clean-install runs use the commands their cases name ("Clean-install runs" below).
 5. **`run: person` cases are for a person** (a real call, Teams, macOS permissions, an install, the tray, Windows,
    Claude Code runs that need a signed-in account). The lead lists them in the report as `skipped (person)` and never
@@ -149,6 +149,10 @@ Elements the app acts on carry `data-*` attributes (`data-call`, `data-go`, `dat
   `<select>`s (Thread, Who does it, Order, Group by, Layout, Kind, Owner; task Status once its button is clicked) need `browser_select_option`, not clicks.
 - **`browser_run_code_unsafe` keeps no globals between calls**: each call runs in a fresh context, so `globalThis.x` set in one call is gone in the next. Keep state across calls on the `page` object (`page.__dlg`), which is the same page from call to call; the hostile cases' guard and check D do so.
 - **The served window sends no Content-Security-Policy header**: `window --serve` forwards only the Content-Type of `respond`'s answer (`window/mod.rs`, the serve loop), so the window's own CSP and the minutes page's header policy apply only in the native webview. The minutes page also carries its policy in a `<meta http-equiv="Content-Security-Policy">` tag, which the browser enforces in both; read the policy there.
+- **Settings remembers its section within a page load:** `#settings` (or ⌘,) by a hash change reopens the last
+  section shown; only a full load lands on General. Likewise a thread's People view doesn't pick up `people-apply`
+  written by the CLI until it is navigated to again.
+- A marketplace's "⋯" is a button named "More"; its menu is `.pl-pop` (no `role=menu`).
 - **Reload after a CLI change.** A hash-only Navigate does not refetch data after an `echoctl` step that changed it: reload the page fully (`location.reload()` or reload `{{base_url}}/`), then navigate.
 - Transcript "Find" highlights (class `hit` on `.turn`) a moment after the text is entered; read the DOM after a short wait.
 - A right panel keeps its last tab: after opening a task it shows Details, and clicking Inbox flips it back.
@@ -244,7 +248,7 @@ All verified on the test data in a live session. Roles and names first, then the
 Areas that have **no `run: agent` case yet** (from `tests/README.md` → Areas): Tasks, Threads (brief/work/calls/people/profile),
 clients, Inbox and right panels, Settings (all sections), Plugins, the actions palette, Calls extras (What moved,
 Call actions menu, thread chip), Today's task details (only TC-003). `windows` and the rest of `claude`, `install`, `permissions`, `lifecycle` stay person-run (their S-15/S-16 cases are agent runs with user steps) (`recording`, and part of `privacy`,
-`transcription`, `window` and `cli`, now run with the test call). Proposed, all on the test data, `platform: any`:
+`transcription`, `window` and `cli`, now run with file-fed calls). Proposed, all on the test data, `platform: any`:
 
 | Suite | Folder | Priority | Description |
 |---|---|---|---|
@@ -264,65 +268,85 @@ Recording and transcribing a call is a **prerequisite** of most recording, minut
 they test. So it is done **once per build**, before the run, and every scenario copies the result:
 
 ```bash
-tests/fixtures/recordings.py prepare     # ~4 min, once per build: outside any sandbox (inside one the audio is silent)
+tests/fixtures/recordings.py prepare     # ~1.5 min, once per build: no device, no sound (file-fed captures, side by side)
 tests/fixtures/recordings.py list        # what it holds, each recording's score
 . <dir>/env; tests/fixtures/recordings.py copy minutes-call --title "CLA-004 write now"   # prints the copy's folder
 ```
 
-- `prepare` plays each known conversation through TestCall (both ends on this Mac, the user's line into BlackHole),
-  records it with `echoctl capture` (stopped 3.5 s after the conversation, before TestCall hangs up: after it the mic
-  falls back to the room, #140), transcribes it once with the build's model and keeps the call folders with what the
-  commands printed (`capture.out`, `capture.err`, `capture.exit`, `during.ls`, `after.ls`, `transcribe.out`,
-  `score.json`, the tracks) in `target/test-recordings/<key>/<name>/` (git-ignored), `<key>` the last commit that
-  changed the app (`crates/`, `Cargo.*`; `-dirty` with uncommitted changes there): a commit that only changes tests
-  keeps it. Recordings: `acme-sync`, `very-short`, `long-silence`, `two-remotes` (transcribed with NVIDIA's NeMo
-  runtime: speakers), `mixed-languages-pinned` (`capture --languages uk`, workspace `en,uk,ru`), `mixed-languages` (the
-  same tracks, no pin), `minutes-call` (213 s, built from the clips: the minutes cases need a long call, not a
-  capture). Seven transcriptions in all.
+- `prepare` feeds each known conversation to `echoctl capture` from files (the debug build's test sources, below),
+  transcribes it once with the build's model and keeps the call folders with what the commands printed
+  (`capture.out`, `capture.err`, `capture.exit`, `during.ls`, `after.ls`, `transcribe.out`, `score.json`, the tracks)
+  in `target/test-recordings/<key>/<name>/` (git-ignored), `<key>` the last commit that changed the app (`crates/`,
+  `Cargo.*`; `-dirty` with uncommitted changes there): a commit that only changes tests keeps it. Recordings:
+  `acme-sync`, `very-short`, `long-silence`, `two-remotes` (transcribed with NVIDIA's NeMo runtime: speakers),
+  `mixed-languages-pinned` (`capture --languages uk`, workspace `en,uk,ru`), `mixed-languages` (the same tracks, no
+  pin), `minutes-call` (213 s, built from the clips: the minutes cases need a long call, not a capture). Seven
+  transcriptions in all.
 - `copy <name> [--title T]` puts a copy into `$ECHOCTL_HOME/calls` with a fresh stamp, ending now (so automatic
   minutes and Today treat it as a call that just ended); `--keep-time` keeps the recorded times; `--untranscribed`
   copies `meta.json` only, and `finish <folder> <name>` then adds the transcript as a transcription would.
-- **Which cases still record:** only those whose subject is capturing — the watcher's arm, start, stop, ask mode,
-  drop and rejoin, a crash, Ctrl-C, only the call app's audio, notes while recording, a call appearing while it
-  records. **Which still transcribe:** the transcription server and the fallback (one short clip per engine), the
-  repair of a crashed recording, and what the app transcribes by itself after a watcher recording (no case scores it).
-  Words, speakers and languages are scored once, in S-14, on the prepared transcripts.
+- **Which cases still record a call:** only those whose subject is capturing (the watcher's arm, start, stop, ask
+  mode, drop and rejoin, a crash, Ctrl-C, notes while recording, a call appearing while it records), and each
+  scenario records **as few calls as the conditions that truly differ** — one main call that the checks before,
+  during and after it share ("Recording with file-fed calls" below). **Which still transcribe:** the transcription
+  server and the fallback (one short clip per engine), the repair of a crashed recording, and what the app transcribes
+  by itself after a watcher recording. Words, speakers and languages are scored once, in S-14, on the prepared
+  transcripts.
 - **The test clock.** Data built with `--clock fast` (`make_data.py`, `serve.sh up … --clock fast`) has
   `ECHOCTL_TEST_AUTO_MINUTES_DELAY_S=90` in `<dir>/env`: the debug build writes automatic minutes 90 s after the call
   or the last note instead of 15 minutes (`notes::auto_delay`; a release build never reads it). Every process of the
   run (the app, `window --serve`, the CLI) sources the env, so they agree on the time. Cases still check the rule —
   not before the delay, at it, moved by a later note — in seconds.
+  The other side of it: a copy made on such data is **due 90 s after it is made** (or after its last note); past that,
+  with no app running, its Minutes tab shows "Starting the minutes…" and no Write now button. A case that presses Write
+  now does it within those 90 s (S-19).
 - **Waits are for conditions.** `tests/fixtures/wait.py <seconds> <condition>` (`app`, `armed`, `recording [suffix]`,
   `not-recording`, `in-call`, `event <name> [n]`, `file <glob>`, `sh <command>` …) checks every second and fails the
   step with the last state on its timeout. A fixed `sleep` stays only where it is the call's timeline (arm 16 s in,
   stop 20 s in) or a check that something does **not** happen.
 
-## Recording with the test call
+## Recording with file-fed calls
 
-Recording cases (`tests/cases/recording/`, some of `privacy/`, `transcription/`, `window/`, `cli/`) run with TestCall
-instead of Teams: a debug build with `ECHOCTL_CALL_APP_BUNDLE=ai.onetest.echo.testcall` treats TestCall as the call app
-(`crates/echoctl/src/apps.rs`, `test_call_app`). The user's lines are played by ffmpeg into BlackHole 2ch, which
-TestCall holds as its microphone (the mic track); the other side's lines are what TestCall plays (the remote track, the
-tap on TestCall). The known conversations (`tests/fixtures/audio/README.md`: `acme-sync` 36 s, `very-short` 9 s,
-`long-silence` 36 s, `two-remotes` 34 s, `mixed-languages` 31 s) are built with `make_audio.py build` and scored with
-`make_audio.py score`.
+**Test runs never open a microphone or play a sound.** A debug build on test data records a call fed from files
+(`crates/echoctl/src/audio/testfeed.rs`; `<dir>/env` from `make_data.py` sets all of it):
 
-- **Needs on the Mac:** TestCall built (`tests/tools/testcall/build.sh`), BlackHole 2ch, ffmpeg, the speech model linked
-  into the run's config (see `transcription/TC-001`). Both ends of the call run on this Mac (`serve` and `dial` on `127.0.0.1`). Port 7792; TestCall serves one call and exits when the connection drops, so it cannot
-  rejoin and cannot switch devices.
-- **Prelude** (each Bash call is a fresh shell): `. <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; CONV="$D/conv"; APP="$PWD/tests/tools/testcall/build/TestCall.app/Contents/MacOS/testcall"; W=tests/fixtures/wait.py; export D CONV APP ECHOCTL_CALL_APP_BUNDLE=ai.onetest.echo.testcall`
-- **A call, recorded by `echoctl capture`** (no app running): `"$APP" serve --port 7792 --play "$CONV/remote.wav" --quiet & "$APP" dial 127.0.0.1:7792 --me "$CONV/mic.wav" --me-device "BlackHole 2ch" & sleep 2; target/debug/echoctl capture --seconds 42 --title "<title>"; wait`.
-  The last line `capture` prints is the call folder. Then `cp "$CONV/expected.json" <call folder>/`,
-  `target/debug/echoctl transcribe <call folder> [--keep-audio]`, `make_audio.py score <call folder>`.
+| Variable | Stands for |
+|---|---|
+| `ECHOCTL_TEST_ME_WAV=<dir>/feed/mic.wav` | the microphone (the mic track) |
+| `ECHOCTL_TEST_REMOTE_WAV=<dir>/feed/remote.wav` | the call app's audio tap (the remote track) |
+| `ECHOCTL_TEST_CALL_FILE=<dir>/in-call` | the call app being in a call: Echo's watcher sees a call while the file exists; the call started at its modification time |
+| `ECHOCTL_CALL_APP_BUNDLE=ai.onetest.echo.testcall` | the call app's id (TestCall's): a real Teams on the Mac is never read (mute, window title) |
+
+Everything after the sources is Echo's real path: the watcher, the arm, the two tracks and their alignment, live
+notes, the stop, the files written, the transcription. The wavs are read against the call's clock: a recording that
+starts mid-call gets only what follows, as from a device; after a file's end its track gets silence. A release build
+reads none of it.
+
+- **A call:** `tests/fixtures/call.py start <conversation> [--for S | --hold]` (after `. <dir>/env`) puts the
+  conversation's tracks (`tests/fixtures/audio/README.md`: `acme-sync` 36 s, `very-short` 9 s, `long-silence` 36 s,
+  `two-remotes` 34 s, `mixed-languages` 31 s; built once per run into `<dir>/conv/<name>`) at the feed paths and starts
+  the call; it hangs up by itself 1 s after the conversation (as TestCall did), after `--for S` seconds, or with
+  `--hold` only at `call.py end`. `call.py status` says whether a call is on. A call is as long as the case needs,
+  whatever the conversation: hold it, end it, start it again (a drop and rejoin). A new call file reopens the sources
+  on the new conversation and its clock, so `call.py end; call.py start <another>` back to back (inside the watcher's
+  2 s debounce) plays another conversation into the **same** call: one call can carry several stages.
+- **Needs on the Mac:** the debug build and, for the cases that transcribe, the speech model linked into the run's
+  config (`ln -s "$HOME/Library/Application Support/echo/models" "$ECHOCTL_CONFIG_DIR/models"`, `echoctl model use
+  large-v3-turbo-q5_0`). No TestCall, BlackHole, ffmpeg or permission: several runs can record on one Mac at once,
+  each in its own data folder.
+- **Prelude** (each Bash call is a fresh shell): `. <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; C=tests/fixtures/call.py; W=tests/fixtures/wait.py; export D`
+- **A call recorded by `echoctl capture`** (no app running): `$C start acme-sync; target/debug/echoctl capture
+  --seconds 38 --title "<title>"`. The last line `capture` prints is the call folder. `capture` reads the feeds
+  whether or not a call is on; with one on, it starts at the call's clock.
 - **The watcher** (arm, record when the call starts, stop, ask mode) runs only inside `echoctl app`. Cases that need it
   start a second app instance on the run's own data folder and config: `nohup target/debug/echoctl app run --no-tray --background > "$D/app.out" 2>&1 & echo $! > "$D/app.pid"; $W 30 app`
   (never `app start`, which may open the installed app), and stop it with `echoctl app quit`. The single-instance lock
   is `<config dir>/app.lock` (`app.rs`, `try_lock`), so the user's own Echo does not refuse it; if "Echo is already
   running" appears in `$D/app.out`, the case is BLOCKED. Such cases are tagged `second-instance`, set
   `config --unscheduled manual --scheduled manual` (no native "Record?" dialog) and `ai live off` (no live notes; the
-  app's other Claude Code jobs are kept off a real account by the data's `--ai fake|local`, below).
-- The first seconds of a watcher-recorded call can be clipped (the watcher needs a moment to see the call): watcher
-  cases assert on words from the middle and end of a call, not on a whole-call score.
+  app's other Claude Code jobs are kept off a real account by the data's `--ai fake|local`, below). **One app per
+  scenario:** the prelude starts it and the last stage that needs it quits it; stages in between don't restart it.
+- A watcher-recorded call starts within a second of the call file (the watcher's tick): its first words are there.
 - **The app runs Claude Code by itself** (preps for the day's meetings, meeting types, who does a task) about a minute
   after it starts. On plain `small` data that goes to the built-in profile — the user's own Claude account. So every
   case that starts the app builds its data with `make_data.py <dir> --ai fake` (the fake `claude` refuses every run;
@@ -336,10 +360,6 @@ tap on TestCall). The known conversations (`tests/fixtures/audio/README.md`: `ac
   (`tail -n +$(( $(cat "$D/ev.start") + 1 )) "$ECHOCTL_HOME/.echo/events.jsonl" | grep …`). The same for `.wav`
   files: earlier stages keep audio on purpose (`--keep-audio`), so a "no audio" check uses `find … -newer <a file of
   this case>`.
-- **After the hang-up the mic reopens on the Mac's microphone** for the seconds left of a `capture --seconds N` or the
-  watcher's 10 s grace ("Teams released its mic; using the default input"): whatever is said in the room then lands in
-  the transcript as Me. Keep `--seconds` close to the call, and keep the room quiet; a stray line after the call's end
-  is that defect, not the case's.
 - **`capture` exits 134** after it has saved the call (a ggml-metal assertion at process exit, 2026-11-07): the folder
   and tracks are fine; keep its stdout (the folder) apart from its stderr (the backtrace).
 - **Echo's "Record?" dialog** (ask mode, `app::ask`) is an `osascript` child of the run's app: find it with
@@ -348,13 +368,31 @@ tap on TestCall). The known conversations (`tests/fixtures/audio/README.md`: `ac
 - **No tray, no native window.** With the user's own Echo running, System Events can't keep the two `echoctl`
   menu-bar items apart (asked for the dev app's menu by its pid, it returned the installed Echo's), so a click could
   reach the user's Echo: cases run the app with `--no-tray` and use `echoctl` and the served window instead.
-- **One TestCall call at a time** on a Mac (port 7792, BlackHole). Every running dev app sees every TestCall call (as
-  `call_started`, unarmed: nothing recorded): runs that share the Mac never arm at the same time.
 - **Speakers** (`recording/TC-018`) need NVIDIA's NeMo-Speech runtime, which a debug build doesn't carry:
   `TMPDIR="$D" scripts/fetch-nemo-speech.sh "$ECHOCTL_CONFIG_DIR/nemo-speech"` once per run.
 - **Minutes on a call** need at least 3 minutes and 1,500 characters (`calls::gate`): a copy of the prepared
   `minutes-call` (213 s). Automatic minutes come 15 minutes after the call (`notes::AUTO_DELAY`); on `--clock fast`
   data the debug build makes it 90 s ("Recorded calls" above).
+
+## The live check (real devices, a person, rarely)
+
+What file-fed calls can't show is the devices: the real tap of another app's audio, the real microphone device, and
+how the mic track follows them (#140: after the hang-up the mic reopened on the Mac's own microphone for the watcher's
+grace). Those cases (`privacy/TC-002`, `recording/TC-023`) are `run: person`, run before a release, with TestCall
+(`tests/tools/testcall`, a two-party call: `serve` and `dial` on `127.0.0.1`, port 7792) as the call app:
+
+- **Needs on the Mac:** TestCall built (`tests/tools/testcall/build.sh`), BlackHole 2ch (TestCall's microphone: the
+  user's lines are played into it by ffmpeg), **BlackHole 16ch** (`brew install blackhole-16ch`: where TestCall plays
+  the other side, so the call is silent in the room), ffmpeg, Microphone and System Audio Recording granted.
+- **The env without the file sources:** `. <dir>/env; unset ECHOCTL_TEST_ME_WAV ECHOCTL_TEST_REMOTE_WAV ECHOCTL_TEST_CALL_FILE`
+  (`ECHOCTL_CALL_APP_BUNDLE` stays: TestCall is the call app).
+- **A call:** `"$APP" serve --port 7792 --play "$CONV/remote.wav" --quiet & "$APP" dial 127.0.0.1:7792 --me "$CONV/mic.wav" --me-device "BlackHole 2ch" --speaker-device "BlackHole 16ch" &`
+  (`APP=tests/tools/testcall/build/TestCall.app/Contents/MacOS/testcall`). `--speaker-device` refuses to start the
+  call when the device isn't there ("install BlackHole 16ch …"): it never falls back to the speakers, and never takes
+  the `--me-device` (the two tracks would mix). Echo's tap is per process, so it records TestCall's audio whatever
+  device TestCall plays it on.
+- One TestCall call at a time on a Mac (port 7792, BlackHole); every running dev app without the file sources sees it.
+
 
 ## Clean-install runs
 
@@ -396,8 +434,8 @@ clean-install runs, below, on a Mac where Echo has never been):
 - Microsoft 365: sign-in, calendar sync, mail, Teams, meeting chat (Settings → Calendar & chat "Sign in…", "Sends to you").
 - Claude Code runs: Write minutes / Write minutes again, Prepare, Send to Claude, Yolo, Ask Claude about this call,
   "Sync now" (What moved, thread work), "Claude" panel in the footer, "Claude can" work, "Claude about this thread".
-- The tray and the native window while the user's own Echo runs (see "Recording with the test call": No tray), "Memo",
-  Teams itself and permissions prompts ("Record next call" and recording a call run with the test call): Health's
+- The tray and the native window while the user's own Echo runs (see "Recording with file-fed calls": No tray), "Memo",
+  Teams itself and permissions prompts ("Record next call" and recording a call run with file-fed calls): Health's
   "Ask for permissions".
 - Plugin marketplaces over the network, installs, updates, "Check for updates", speech model downloads, "Read again".
 - Anything that reads the real machine (Settings → General "Installed ✓", Health): see Fragile areas.
@@ -424,7 +462,9 @@ cases in one run (`tests/scenarios/S-NN_<slug>.md`): its frontmatter lists the c
 scenarios: far fewer runners than cases, and the cases meet each other the way a user meets them.
 
 **Running one (the runner):**
-1. Load `{{base_url}}/` first (the cookie), in the browser already open — don't open a new one, don't close it.
+1. Load `{{base_url}}/` first (the cookie), in the browser already open — don't open a new one, don't close it. Then
+   clear what an earlier run left in this origin's browser storage (ports are reused, the browser is never closed):
+   `localStorage.clear()` and load `{{base_url}}/` again.
 2. For each stage in order: do its "Before it" glue, read the stage's case file, and run its steps exactly as a single
    case (each step's expected result checked by snapshot or command output; the case's teardown at its end).
 3. A failed step fails **that stage**: record actual vs expected, a screenshot, the console; then go on with the next
@@ -445,3 +485,21 @@ skipped (person).
 changes, and give a stage "Depends on" only when it cannot run without the earlier one. A case may be a stage of
 one or more scenarios, or stand alone: put it into a scenario when it belongs to a user's journey (that is cheaper to
 run and closer to how the app is used), and leave it alone when it doesn't fit one.
+
+**The point of a scenario is to reuse assets, not to repeat actions.** Expensive actions — a live TestCall call, a
+transcription, a real-model run, a data build, a long setup (a state reached by many clicks or navigations, a guard
+armed, a thread built step by step) — happen **once** per scenario, and every check that can use one hangs off it. A
+case stays one behaviour and can still run on its own; the reuse lives in the scenario:
+
+- **`## Assets`** (every scenario): a table `| Asset | Made by | Used by stages |` — the data build (always one), each
+  live call, transcription, model run and long setup. Nothing expensive happens that this table doesn't list.
+- **`## Prelude`** (when there is a shared setup): steps the runner does once, before stage 1 — load `{{base_url}}/`,
+  arm a guard, open a view, write a state with the CLI. The runner times it as a stage of its own, `prelude`.
+- **"Before it" may continue an earlier stage:** `On stage N's view: skip steps 1–2` — the runner does not repeat steps
+  that only reach a state the scenario already holds (a navigation, a tab, a panel, a copy), takes one snapshot to see
+  that the state is there, and goes on from the next step. `Skip its teardown` / `keep for stage N` lets a state stay
+  for the next stage instead of being undone and made again. A step that **checks** something is never skipped.
+- **Prepared assets**: a case that assumes a shared asset says so in its Preconditions: what it is, and where it comes
+  from in its scenario and on its own ("In S-17: the main call (stage 2). On its own: `recordings.py copy acme-sync`").
+- **Data that a case would click its way to** comes from `make_data.py` (or one `echoctl` command in the prelude),
+  not from a stage that builds it again.

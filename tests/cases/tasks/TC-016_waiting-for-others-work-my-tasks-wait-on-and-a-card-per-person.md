@@ -17,6 +17,7 @@ tags: [tasks, piles, waiting, pairwise]
 ## Preconditions
 - `data: standard`: the standard data set, built and served by `tests/fixtures/serve.sh up <dir> <port> --set standard`; the window is at `{{base_url}}` and `{{base_url}}/` is loaded first (the cookie); every `echoctl` command runs after `. <dir>/env`. Times in the data are relative to the run's start, so build it right before the run
 - No task or setting has been changed since the data was built
+- "Others · 24" is folded (on its own). In S-25 `TC-018` (the stage before) has opened it: the scenario skips the click in step 3, since a second click would fold it
 
 ## Test Data
 

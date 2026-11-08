@@ -20,6 +20,7 @@ tags: [transcript, notes, minutes]
 - My notes is open in the right panel; keep the sidebar folded (app_profile → Fragile areas: the minutes frame is narrow)
 - The popover is `#sel-pop`: "Comment" (after a selection), or a menu "Add note at mm:ss…" (after a right-click); then a quote, a box "Your note" (`#sel-note`), "Goes to My notes at mm:ss[ · on “<section>”]", "Cancel" and "Add note"
 - Turns are `.transcript .turn` (`data-t` = seconds); the minutes are in `iframe#minutes-frame` (act inside with `page.frameLocator('#minutes-frame')`)
+- **In S-29** My notes has been open since `window/TC-016` step 1, and the Calls list is already on screen, left by the stage before, so step 1's navigation is skipped and step 1 starts at its click. On its own: open a call, press `[aria-label="My notes"]`, then run step 1
 
 ## Test Data
 

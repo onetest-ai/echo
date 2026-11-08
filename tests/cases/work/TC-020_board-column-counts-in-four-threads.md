@@ -68,11 +68,11 @@ A To do card to look at: Initech hiring T010 "Prepare the handover pack" (open, 
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | For each thread of the table navigate to `{{base_url}}/#project/<thread id>/work` (acme-renewal, globex-pilot, initech-hiring, umbrella-proposal), click the view "Board" and read the five headers | Headers "To do", "In progress", "Waiting", "Blocked", "Done" with the counts of the thread's row |
-| 2 | For each row of the second table find the cards of the column | The listed cards, and no others, are under that header (Initech hiring has no card in Waiting or Blocked); Initech hiring T010 is in "To do" |
-| 3 | In Acme renewal read the card T003 "Send the revised timeline" (in progress, waiting for Rita Gomez) | It is in "Waiting", not in "In progress" |
-| 4 | In Umbrella proposal read T015 "Check the licence count (2)" (done, a session) | It is in "Done" |
-| 5 | Look for the cards of the third table in their threads | None is on any board: cancelled, merged and deleted tasks are not cards |
+| 1 | Navigate to `{{base_url}}/#project/acme-renewal/work`, click the view "Board" if it is not the active one, and read the five headers | "To do", "In progress", "Waiting", "Blocked", "Done" with the counts of Acme renewal's row of the first table |
+| 2 | Read the cards of the columns other than To do, and look for Acme renewal's cards of the third table | The cards of Acme renewal's rows of the second table, and no others, are under those headers; T003 "Send the revised timeline" (in progress, waiting for Rita Gomez) is in "Waiting", not in "In progress"; none of the third table's cards is on the board (cancelled, merged and deleted tasks are not cards) |
+| 3 | Navigate to `{{base_url}}/#project/globex-pilot/work`, click "Board" if it is not active, and read the five headers | The counts of Globex pilot's row |
+| 4 | Navigate to `{{base_url}}/#project/initech-hiring/work`, click "Board" if it is not active, and read the headers, the cards of the columns other than To do and the cards of the third table | The counts of Initech hiring's row; the cards of its rows of the second table and no others (no card in Waiting or Blocked); Initech hiring T010 is in "To do"; none of its third-table cards is on the board |
+| 5 | Navigate to `{{base_url}}/#project/umbrella-proposal/work`, click "Board" if it is not active, and read the headers, the cards of the columns other than To do and the cards of the third table | The counts of Umbrella proposal's row; the cards of its rows of the second table and no others; T015 "Check the licence count (2)" (done, a session) is in "Done"; none of its third-table cards is on the board |
 
 ## Expected Final State
 Each board matches its row.

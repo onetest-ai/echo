@@ -81,13 +81,11 @@ tags: [threads, calls, membership, pairwise]
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | For each thread of the tables navigate to `{{base_url}}/#project/<thread id>/calls` | The tab "Calls" carries the count of the thread (6, 2, 8, 5, 3, 3) |
-| 2 | Read the rows from the top | The rows are those of the thread's table, newest first; each row's second line has the day and time, " · " and the reason of its row, and " · no minutes yet" where the table says so |
-| 3 | Read the button of every row | "Unpin" on a row "added by hand", "Take out" on every other row |
-| 4 | Search the six tabs for the reason "its Teams chat" | It is on no row: the chat rules of Globex pilot and Umbrella proposal match no call of the data |
+| 1 | Navigate to `{{base_url}}/#project/acme-rollout/calls`; read the count on the tab "Calls", the rows from the top and the button of every row, and look for the reason "its Teams chat" | The tab carries the count of the thread's table (6); the rows are those of the table, newest first; each row's second line has the day and time, " · " and the reason of its row, and " · no minutes yet" where the table says so; "Unpin" on a row "added by hand", "Take out" on every other row; no row says "its Teams chat" |
+| 2 | Do step 1 for each other thread of the tables, one visit each: `acme-renewal`, `globex-pilot`, `umbrella-proposal`, `initech-hiring`, `internal-tooling` | The same for each thread's table (counts 2, 8, 5, 3, 3); "its Teams chat" is on no row of the six tabs: the chat rules of Globex pilot and Umbrella proposal match no call of the data |
 
 ## Expected Final State
-The four Calls tabs show the rows of the tables.
+The six Calls tabs show the rows of the tables.
 
 ## Teardown
 - None: the case only reads

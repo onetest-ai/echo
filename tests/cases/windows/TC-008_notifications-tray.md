@@ -17,6 +17,7 @@ external_id: TC-WINOS-008
 
 ## Preconditions
 - Windows 10 2004+ or 11, Teams (new) installed; the build is unsigned (updates are checked by SHA-256)
+- **The recording (shared in S-22):** in S-22, step 1's recording is `windows/TC-003`'s call. On its own: any recording
 
 ## Steps
 

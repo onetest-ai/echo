@@ -18,6 +18,7 @@ tags: [plugins, install]
 - Test data built by `tests/fixtures/make-data.sh`, window served at `{{base_url}}` (`tests/fixtures/serve.sh up`)
 - `{{base_url}}/` was loaded just before the first window step (its cookie lets clicks reach the app; a second Echo server on 127.0.0.1 replaces the cookie, so load `{{base_url}}/` again if a click has no effect)
 - CLI steps run in Bash after `. <dir>/env` (`<dir>` is the run's data folder)
+- **Shared asset:** the marketplace `acme-local` from the folder `$M` below. In S-12: the prelude writes the folder and stage 22 (plugins/TC-010) adds it in the window, so the lines below and step 1 are skipped there. On its own: the lines below and step 1.
 - A made-up local marketplace and plugin exist (the only files this case writes, in the run's own scratch folder): run in Bash after `. <dir>/env`
 - `M="$(dirname "$ECHOCTL_HOME")/market"; mkdir -p "$M/plugins/acme-notes"`
 - `echo '{"name":"acme-local","featured":["acme-notes"],"plugins":[{"id":"acme-notes","source":"./plugins/acme-notes","categories":["automation"]}]}' > "$M/echo-marketplace.json"`

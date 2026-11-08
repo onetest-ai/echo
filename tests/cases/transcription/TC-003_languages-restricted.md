@@ -30,7 +30,7 @@ external_id: TC-TRN-004
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | `grep -m1 "(languages:" "$(python3 tests/fixtures/recordings.py path)/two-remotes/transcribe.out"` | "transcribing … (languages: en)": English was the only language allowed |
-| 2 | `CALL="$(python3 tests/fixtures/recordings.py copy two-remotes --title "TRN-003 en only")"; python3 tests/fixtures/audio/make_audio.py score "$CALL"` | Exit code 0 and `"pass": true`, or a FAIL whose only fault is a `transcribed_in_silence` line after 36 s (#140, the mic after the hang-up); top-level `wer` at most 0.15 |
+| 2 | `CALL="$(python3 tests/fixtures/recordings.py copy two-remotes --title "TRN-003 en only")"; python3 tests/fixtures/audio/make_audio.py score "$CALL"` | Exit code 0 and `"pass": true`; top-level `wer` at most 0.15 |
 | 3 | `python3 -c "import json,sys;print({s['lang'] for s in json.load(open(sys.argv[1]+'/segments.json'))})" "$CALL"` | `{'en'}` |
 
 ## Expected Final State

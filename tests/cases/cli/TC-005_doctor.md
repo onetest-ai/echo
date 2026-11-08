@@ -16,8 +16,9 @@ external_id: TC-CLI-003
 **Module:** CLI | **Priority:** Low | **Type:** Functional
 
 ## Preconditions
-- Test data built by `tests/fixtures/make_data.py <dir> --ai fake` (or `--ai local`); the dev app running on it (`echoctl app run --no-tray --background` after `. <dir>/env`, as in `recording/TC-001` step 2) and the window served on it at `{{base_url}}`
-- The speech model linked into the test config, as in `recording/TC-014`
+- Test data built by `tests/fixtures/make_data.py <dir> --ai fake` (or `--ai local`); the window served on it at `{{base_url}}`
+- **The dev app running on it (shared in S-19):** in S-19, `claude/TC-015`'s (started by its step 2, its teardown skipped). On its own: `nohup target/debug/echoctl app run --no-tray --background > "$D/app.out" 2>&1 & echo $! > "$D/app.pid"` after `. <dir>/env`, then `target/debug/echoctl app quit` at the end
+- The speech model linked into the test config (`ln -s "$HOME/Library/Application Support/echo/models" "$ECHOCTL_CONFIG_DIR/models"`, `target/debug/echoctl model use large-v3-turbo-q5_0`; in S-19 the prelude's)
 
 ## Steps
 

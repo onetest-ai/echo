@@ -13,7 +13,8 @@ to the code (`cargo test`, `scripts/check-mod.sh`).
 | `app_profile.md` | Echo for the test agents: rules, starting the app on test data, the data, routes, fragile areas |
 | `fixtures/make-data.sh <dir>` | Builds a made-up data folder (Acme, Globex, Initech; calls, threads, tasks, today's agenda) |
 | `fixtures/serve.sh up <dir> <port>` / `down <dir>` | Fresh data plus the window served on it, for one scenario |
-| `fixtures/recordings.py prepare` / `copy <name>` | The known conversations recorded through TestCall and transcribed **once per build**; copies for each scenario |
+| `fixtures/recordings.py prepare` / `copy <name>` | The known conversations captured (file-fed) and transcribed **once per build**; copies for each scenario |
+| `fixtures/call.py start <conv>` / `end` | A call fed from files for the run's app: no device opened, no sound played |
 | `fixtures/wait.py <seconds> <condition>` | Wait for the run's app state, an event or a file, with a timeout (no fixed `sleep`) |
 | `install.sh` | Installs the manual-qa agent team (arozumenko/sdlc-skills) on this machine, pointed at this folder |
 | `agent-rules.sh` | Echo's own rules on top of the installed agents (times per stage, …); run by `install.sh` and by `fixtures/serve.sh up`, so no run starts without them |
@@ -23,14 +24,18 @@ to the code (`cargo test`, `scripts/check-mod.sh`).
 
 1. Once per machine: `tests/install.sh`, then restart Claude Code in the repo (it loads the agents and Playwright MCP).
 2. `cargo build`; for the recording scenarios (S-14, S-17, S-18, S-19, S-21) also `tests/fixtures/recordings.py prepare`
-   once (about 4 minutes, outside any sandbox: it records with TestCall and transcribes; kept until the app changes).
+   once (about 1.5 minutes: file-fed captures, no device and no sound, then the transcriptions; kept until the app
+   changes). Recording tests open no microphone and play nothing (`app_profile.md` → "Recording with file-fed calls");
+   the few device checks are the live check, by a person.
 3. Start Claude Code with the lead as the active agent (`claude --agent test-run-lead`) and give it scenarios, e.g.
    "run tests/scenarios". Per scenario it serves the window on fresh data, one runner goes through its stages (the
    browser stays open between scenarios), and the report goes to `tests/reports/RUN-<date>-NNN.md`, counting
    scenarios and their stages, each stage's time and the five slowest; `run: person` cases are listed for a person.
 
 Writing cases: `test-author` (or by hand) following `app_profile.md` → "Writing a case"; then put each agent case
-into a scenario (`app_profile.md` → "Scenarios").
+into a scenario (`app_profile.md` → "Scenarios"). A scenario reuses assets: one data build, one call or model run per
+condition, each view and state reached once, every check that can use them hung off them (its `## Assets` and
+`## Prelude`).
 
 ## Scenarios
 
@@ -47,13 +52,13 @@ into a scenario (`app_profile.md` → "Scenarios").
 | [S-09](scenarios/S-09_a-calls-housekeeping.md) | 11 | A call's housekeeping: list, minutes, kind, thread, tabs and the actions menu |
 | [S-10](scenarios/S-10_inbox-and-prep-on-a-quiet-day.md) | 9 | Inbox and prep on a quiet day: nothing waits, meetings still to come, then a day with nothing ("A quiet day") |
 | [S-11](scenarios/S-11_set-echo-up-your-way.md) | 36 | Set Echo up your way: appearance, recording, languages, About me, a template, a meeting type, the vocabulary |
-| [S-12](scenarios/S-12_skills-and-ai-profiles-and-plugins.md) | 30 | Skills and AI: skills on and off, AI profiles and the default, plugins and marketplaces |
-| [S-13](scenarios/S-13_find-your-way-around.md) | 18 | Find your way around: the activity bar, panels, layout, the actions palette, the status bar and shortcuts |
-| [S-17](scenarios/S-17_a-recorded-call-end-to-end.md) | 11 | A recorded call end to end with the test call: two tracks, record the next call, notes while recording, no audio kept, the window updating, a pinned language, a very short call, minutes started by themselves at the delay (and later after a note), the minutes in the browser and Finder (`small --ai fake --clock fast`, the prepared recordings; 1 person stage: the tray) |
-| [S-18](scenarios/S-18_recording-off-the-happy-path.md) | 23 | Recording off the happy path with the test call: mid-call, cancel, expiry, stop from the terminal and the pill, Ctrl-C, a crash, silence, two voices, opt-in only, only the call app, a drop and rejoin, Echo's "Record?" dialog (`small --ai fake`; 9 person stages: devices, speakers, mute, sleep, an hour-long call, permissions denied, shared screens) |
+| [S-12](scenarios/S-12_skills-and-ai-profiles-and-plugins.md) | 31 | Skills and AI: skills on and off, AI profiles and the default, plugins and marketplaces |
+| [S-13](scenarios/S-13_find-your-way-around.md) | 19 | Find your way around: the activity bar, panels, layout, the actions palette, the status bar and shortcuts |
+| [S-17](scenarios/S-17_a-recorded-call-end-to-end.md) | 11 | A recorded call end to end on one file-fed call: armed, the window updating and notes while it records, two tracks, the stop at hang-up, no audio kept, a pinned language, a very short call, minutes started by themselves at the delay (and later after a note), the minutes in the browser and Finder (`small --ai fake --clock fast`, the prepared recordings; 1 person stage: the tray) |
+| [S-18](scenarios/S-18_recording-off-the-happy-path.md) | 24 | Recording off the happy path on one app and a main call: cancel, expiry, opt-in only, Ctrl-C and a crash beside it, mid-call, stop from the terminal and the pill, Echo's "Record?" dialog, a drop and rejoin, silence, two voices (`small --ai fake`; 11 person stages: the live check of the tap and the mic after hang-up, devices, speakers, mute, sleep, an hour-long call, permissions denied, shared screens) |
 | [S-19](scenarios/S-19_claude-code-and-the-minutes.md) | 13 | Claude Code and the minutes on the local model: write now and for a short call, your notes in them, a session's claim, the minutes folder, a wrong model, doctor, automatic minutes off, catch-up after a quit with what an automatic run writes (`small --ai local --clock fast`, the prepared recordings; 5 person stages: a signed-in session) |
 | [S-21](scenarios/S-21_living-with-echo.md) | 12 | Living with Echo: one instance, quit and back, another data folder, the window following the system's appearance (`small --ai fake`; 8 person stages: login, `app start`, the native window, updates, offline, the network) |
-| [S-23](scenarios/S-23_a-busy-day-of-calls-and-minutes-in-every-state.md) | 27 | A busy day of calls and minutes in every state: icons, countdown and Not yet, memo and Teams import, chat, screens, live notes, what moved, failed and waiting runs, the prep tab, delete and restore (`standard` data) |
+| [S-23](scenarios/S-23_a-busy-day-of-calls-and-minutes-in-every-state.md) | 29 | A busy day of calls and minutes in every state: icons, countdown and Not yet, memo and Teams import, chat, screens, live notes, what moved, failed and waiting runs, the prep tab, delete and restore (`standard` data) |
 | [S-24](scenarios/S-24_the-calendar-preps-and-the-inbox-on-a-busy-day.md) | 33 | The calendar, preps and the Inbox on a busy day: block and card states, responses, series, preps with every section, the Inbox's badge, groups, folds, buttons and decisions (`standard` data) |
 | [S-25](scenarios/S-25_who-owes-what-on-a-full-board.md) | 21 | Who owes what on a full board: Tasks, piles, filters, badges, the board and its columns (`standard` data) |
 | [S-26](scenarios/S-26_ten-threads-in-every-stage.md) | 24 | Ten threads in every stage: membership, people and clients (`standard` data) |
@@ -72,11 +77,11 @@ into a scenario (`app_profile.md` → "Scenarios").
 | `cases/calendar` | 1 | 10 | Scheduling, Microsoft 365 calendar, meeting chat |
 | `cases/cli` | 15 | 1 | `echoctl` commands |
 | `cases/claude` | 13 | 4 | Claude Code plugin and minutes runs |
-| `cases/privacy` | 3 | 4 | Opt-in, local data, what goes online |
+| `cases/privacy` | 2 | 5 | Opt-in, local data, what goes online |
 | `cases/transcription` | 5 | 1 | Transcript quality and languages |
 | `cases/install` | 0 | 7 | DMG, first run, data folder, models |
 | `cases/permissions` | 0 | 7 | macOS permissions and Health |
-| `cases/recording` | 14 | 8 | Arming, recording, stopping, interruptions |
+| `cases/recording` | 14 | 9 | Arming, recording, stopping, interruptions |
 | `cases/lifecycle` | 5 | 4 | Login, quit, single instance, updates, notifications |
 | `cases/windows` | 0 | 9 | The Windows build |
 

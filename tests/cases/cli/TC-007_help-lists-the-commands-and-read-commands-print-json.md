@@ -17,6 +17,7 @@ tags: [cli, help]
 
 ## Preconditions
 - Standard data set built right before the run: `tests/fixtures/serve.sh up <dir> <port> --set standard` (`data: standard`); every `echoctl` command runs as `target/debug/echoctl …` after `. <dir>/env`
+- **In S-28** `echoctl project list` was run once on the data as built, in the scenario's prelude, into `<dir>/project-list.json` (it also feeds `cli/TC-008` step 1): step 6 reads that file instead of running it again. On its own, step 6 runs it
 
 ## Test Data
 

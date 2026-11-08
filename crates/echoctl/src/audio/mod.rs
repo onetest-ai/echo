@@ -10,6 +10,8 @@
 pub mod mic;
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(debug_assertions)]
+mod testfeed;
 #[cfg(windows)]
 pub(crate) mod windows;
 
@@ -467,6 +469,10 @@ pub fn downmix(interleaved: &[f32], channels: usize) -> Vec<f32> {
 
 /// Source for the target app's audio output (the remote participants).
 pub fn app_source(app: TargetApp) -> Box<dyn Source> {
+    #[cfg(debug_assertions)]
+    if let Some(s) = testfeed::remote() {
+        return s;
+    }
     #[cfg(target_os = "macos")]
     return Box::new(macos::AppTapSource::new(app));
     #[cfg(windows)]
@@ -475,8 +481,21 @@ pub fn app_source(app: TargetApp) -> Box<dyn Source> {
     unimplemented!("app capture is only supported on macOS and Windows ({app:?})")
 }
 
+/// Source for the user's microphone: the mic the call app uses (`app`), or the default input (a memo: None).
+pub fn mic_source(app: Option<TargetApp>) -> Box<dyn Source> {
+    #[cfg(debug_assertions)]
+    if let Some(s) = testfeed::me() {
+        return s;
+    }
+    Box::new(mic::MicSource { app })
+}
+
 /// Is the app in a call right now (holding the mic)? None = this platform can't tell yet.
 pub fn app_in_call(app: TargetApp) -> Option<bool> {
+    #[cfg(debug_assertions)]
+    if let Some(on) = testfeed::in_call() {
+        return Some(on);
+    }
     #[cfg(target_os = "macos")]
     return Some(macos::app_processes(app).map(|ps| ps.iter().any(|p| p.running_input)).unwrap_or(false));
     #[cfg(windows)]

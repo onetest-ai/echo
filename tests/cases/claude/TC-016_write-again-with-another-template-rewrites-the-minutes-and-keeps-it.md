@@ -21,6 +21,7 @@ tags: [claude, minutes, templates, local-model]
 - Claude Code on `PATH` and the data's model server answering (`--ai local`: `tests/fixtures/README.md`, "Real Claude Code runs on a local model"). `<profile>` and `<model>` below are the default AI profile's `name` and `notes_model` in `target/debug/echoctl ai status` (for example "Qwen · this computer" and `qwen3.8:27b-mlx`); the fake `claude` passes only runs routed to that profile, so no Claude account is used
 - **One model run** (started in step 2), about 1–2 minutes on the network test server, 8–10 on a Mac running the model itself. Assert files, states, template names and headings, never the model's wording; no retry unless the run failed for an infrastructure reason (then BLOCKED)
 - `<call>` below is the folder ending in `-acme-renewal-negotiation` (`ls $ECHOCTL_HOME/calls | grep acme-renewal-negotiation`). The minutes frame is `iframe#minutes-frame`: read it from the snapshot (its text isn't seen by `browser_wait_for`)
+- **In S-30** `<profile>`, `<model>` and `<call>` are read once, in the scenario's prelude (`echoctl ai status` and one `ls` of the calls), and every stage uses them. On its own, read them as above; in S-30 the Calls list is also already on screen, so step 1 starts at its click
 
 ## Test Data
 

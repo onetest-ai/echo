@@ -18,6 +18,7 @@ tags: [settings, layout]
 - Test data built by `tests/fixtures/make-data.sh`, window served at `{{base_url}}` (`tests/fixtures/serve.sh up`)
 - `{{base_url}}/` was loaded just before the first window step (its cookie lets clicks reach the app; a second Echo server on 127.0.0.1 replaces the cookie, so load `{{base_url}}/` again if a click has no effect)
 - CLI steps run in Bash after `. <dir>/env` (`<dir>` is the run's data folder)
+- **Shared asset:** Vocabulary in the bottom panel ("Bottom" pressed in its row), Settings → Layout open. In S-13: left by stage 8 (settings/TC-023, its teardown skipped), so step 1 is skipped there. On its own: step 1 makes it.
 
 **Changes:** `<config dir>/window-layout.json`
 

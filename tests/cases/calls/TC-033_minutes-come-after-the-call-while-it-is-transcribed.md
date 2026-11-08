@@ -40,6 +40,8 @@ Quick check-in shows that minutes come after the call.
 - The window picks Transcript for a call being transcribed once per page load (`S.autoTab`); after that the call opens
   on the tab last used, so a stage that opened Quick check-in earlier in the scenario would leave it on Minutes. The
   full load in step 1 makes the case independent of the stages before it.
+  In S-23 the stage before it (`TC-016`, step 5) has just opened Quick check-in for the first time since the page load,
+  from the Minutes tab: the scenario skips the full load and checks step 1's result on that view.
 - Steps 1 and 2 check #148: the window once left the URL at `#call/<folder>/minutes` while it showed Transcript, so
   the click on Minutes asked for the URL it already had and nothing changed.
 - Creates or changes nothing. The other reasons (Claude Code missing, plugin missing, "can't start") depend on the machine: in the data `claude` is the fake and both are present.

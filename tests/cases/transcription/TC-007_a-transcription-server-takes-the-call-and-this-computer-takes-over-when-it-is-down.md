@@ -18,7 +18,7 @@ data: small
 ## Preconditions
 - Small data set built right before the run (`tests/fixtures/make_data.py <dir> --set small`); every command runs as `target/debug/echoctl …` after `. <dir>/env`
 - **A transcription server:** another Echo with `echoctl server share on` (a second computer on the network, or a second dev app on this one with its own `ECHOCTL_CONFIG_DIR`/`ECHOCTL_HOME`), with a speech model; its URL and API key from `share on`. Whoever runs it turns sharing off when step 5 asks
-- A speech model in the run's own config (`transcription/TC-001`: linked from an installed Echo's models or downloaded), active
+- A speech model in the run's own config (`recording/TC-001` step 1: linked from an installed Echo's models, or downloaded), active
 - The known conversations are built (`tests/fixtures/audio/make_audio.py`, no network needed). This case transcribes on purpose (the path is what it checks: one short clip per engine); the words of a call are scored once, in `transcription/TC-001`
 
 ## Test Data

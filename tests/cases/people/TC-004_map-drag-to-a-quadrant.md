@@ -17,7 +17,9 @@ tags: [people, map]
 ## Preconditions
 - Test data built by `tests/fixtures/make-data.sh`; window served at `{{base_url}}` and `{{base_url}}/` loaded first (the cookie); `. <dir>/env` sourced for every `echoctl` command
 - Create the scratch thread with the Acme call: `echoctl project create "People lab"` (id `people-lab`), then `echoctl project include people-lab <folder of Acme weekly sync>` (the entry of `$ECHOCTL_HOME/calls` ending `-acme-weekly-sync`). People are placed per thread, so the case never touches Acme rollout
-- Put Dana Lee in the thread: `+ Person` with `Dana Lee <dana@acme.example>` (or "Add" in the List)
+- In S-07: `people-lab` is the scenario's shared thread, made by stage 10's precondition (people/TC-001) and kept; skip making it. On its own: make it as above
+- Put Dana Lee in the thread: `+ Person` with `Dana Lee <dana@acme.example>` (or "Add" in the List). In S-07 she is in it since stage 11 (people/TC-003)
+- The people view is Map: click "Map" in the view switch if another is pressed (the choice is kept in the browser for every thread)
 
 ## Test Data
 

@@ -18,6 +18,7 @@ tags: [today, palette]
 ## Preconditions
 - Standard data set built right before the run (and the run before 21:00 local: the meetings below must still be to come): `tests/fixtures/serve.sh up <dir> <port> --set standard` (`data: standard`); the window is served at `{{base_url}}` and `{{base_url}}/` was loaded first (the cookie)
 - The palette: `[data-pal-open]` or `ControlOrMeta+k`; input `[aria-label="Action"]`; list `#pal-list`; dialog `.pal`
+- **In S-29** Your day is already on screen, left by `today/TC-004` (the stage before), so step 1's navigation is skipped. On its own, step 1 navigates
 
 ## Test Data
 

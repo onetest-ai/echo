@@ -12,19 +12,24 @@ tests/fixtures/make-data.sh <empty dir>                                    # the
 tests/fixtures/serve.sh up <empty dir> <port> [--set small|standard|hostile] [--ai …] [--clock fast]
 tests/fixtures/serve.sh down <dir>
 tests/fixtures/recordings.py prepare | list | path | copy <name> [--title T] | finish <folder> <name>
+tests/fixtures/call.py start <conversation> [--for S | --hold] | end | status
 tests/fixtures/wait.py <seconds> <condition>
 ```
 
 `recordings.py` records and transcribes the known conversations once per build and copies them into a run's data
-(`tests/app_profile.md` → "Recorded calls"); `wait.py` waits for the run's app state, an event or a file, with a
-timeout, instead of a fixed `sleep`.
+(`tests/app_profile.md` → "Recorded calls"); `call.py` starts a call fed from files (no device, no sound: "Recording
+with file-fed calls"); `wait.py` waits for the run's app state, an event or a file, with a timeout, instead of a fixed
+`sleep`.
 
 Build between 06:00 and 22:00: today's calls lie hours before now and its meetings hours after, so near midnight
 the generator refuses (it would pin several calls to one stamp). For checks that don't need Today to match the real
 clock, `--now 2026-11-06T12:00` builds as of that time (`serve.sh up <dir> <port> --set standard --now …`).
 
 `<dir>/home` is the data folder (`ECHOCTL_HOME`), `<dir>/config` the settings (`ECHOCTL_CONFIG_DIR`), `<dir>/env`
-sets them for a shell (`. <dir>/env`), and `<dir>/manifest.json` says what the set holds.
+sets them for a shell (`. <dir>/env`), and `<dir>/manifest.json` says what the set holds. Every set's env also
+points a debug build's audio at files (`ECHOCTL_TEST_ME_WAV`, `ECHOCTL_TEST_REMOTE_WAV` under `<dir>/feed/`,
+`ECHOCTL_TEST_CALL_FILE=<dir>/in-call`, `ECHOCTL_CALL_APP_BUNDLE` TestCall's id): an app run on test data never opens
+a microphone or reads a real Teams, and `call.py` makes its calls.
 
 ## The sets
 
@@ -82,9 +87,10 @@ They are hermetic. `<dir>/env` puts these in front of the app, and `serve.sh` so
   signed out or another account, by the AI profile's folder), and refuses everything else. A click on Write
   minutes, Prepare or Send to Claude fails at once instead of reaching a real account.
 - `<dir>/bin/open` catches mail drafts: a `mailto:` link (`echoctl compose`, a Yolo run's draft) is appended to
-  `<dir>/mail-drafts.log` instead of opening the user's real mail app; anything else goes to the system's `open`.
-  Every call is logged to `<dir>/open.log`; with `ECHOCTL_TEST_OPEN_LOG_ONLY=1` in the app's or server's environment
-  nothing is opened at all (no browser tab or Finder window on the tester's screen, no restart of an installed Echo).
+  `<dir>/mail-drafts.log` instead of opening the user's real mail app. Every call is logged to `<dir>/open.log`, and
+  `<dir>/env` sets `ECHOCTL_TEST_OPEN_LOG_ONLY=1`, so nothing is opened at all: no browser tab or Finder window on the
+  tester's screen, and never the installed Echo (`echoctl up`, the restart after a data-folder change). A case checks
+  `open.log`.
 - `ECHOCTL_PLUGIN_MARKET` makes the built-in marketplace a local folder, `<dir>/markets/built-in` (no network).
 - `CLAUDE_CONFIG_DIR` is `<dir>/claude-config`. It holds an old Echo plugin record (the stale-plugin Inbox item).
 - `ECHOCTL_NOTES_NO_SHELL=1` starts Claude Code directly, not through the login shell.

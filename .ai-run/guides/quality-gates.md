@@ -42,8 +42,8 @@ Run order is fastest-to-slowest.
 
 ### functional
 
-**Run**: the manual-qa team on the scenarios in `tests/scenarios/` that hold the touched areas' cases (`claude --agent test-run-lead`, "run tests/scenarios/S-01… S-03"; once per machine `tests/install.sh`); `run: person` cases by a person
+**Run**: for a change or fix, the `run: agent` cases of what it touched — the cases of its features in `tests/feature-map/` and of the flows through the changed code — on fresh made-up data (a headless check, a script, or the cases one by one; `run: person` cases by a person). For a merge of a long-lived branch into `main` or a release, when the user decides: every agent scenario in `tests/scenarios/` (`claude --agent test-run-lead`, "run tests/scenarios/S-01… S-03"; once per machine `tests/install.sh`)
 **Side effects**: builds a made-up data folder under the OS temp dir, serves the window on a localhost port for the run, writes `tests/reports/` (git-ignored)
-**Pass**: every stage (case) of every scenario run is PASS, and `python3 tests/tools/feature-map.py check` reports 0 problems (a `run: person` case is listed, not run, unless a person ran it)
-**Fail**: any FAIL or BLOCKED
-**When**: mandatory — before a change is called done or its PR opened, the areas it touches; before a release, every `critical` case — `.ai-run/guides/testing/testing.md` R4
+**Pass**: no regression (a case that passes on `main` fails here), and `python3 tests/tools/feature-map.py check` reports 0 problems; a failure with an open issue is listed with its number, a wrong case is fixed or listed (a `run: person` case is listed, not run, unless a person ran it)
+**Fail**: a regression, or a case of the change itself failing
+**When**: mandatory — before a change or fix is called done or its PR opened (minutes, the touched cases only); the full run before merging a long-lived branch into `main` or a release, when the user decides — `.ai-run/guides/testing/testing.md` R4

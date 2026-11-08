@@ -25,7 +25,7 @@ user_steps:
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | **The user does:** `tccutil reset All ai.onetest.echo`, quit and reopen Echo; at the System Audio Recording prompt click "Don't Allow" when the run asks | — |
+| 1 | **The user does:** `tccutil reset All ai.onetest.echo`, quit and reopen Echo; at the System Audio Recording prompt click "Don't Allow" when the run asks (in S-16 at the Microphone prompt too: `permissions/TC-004`'s state) | — |
 | 2 | `$E doctor --json`; the user reads Echo's own window → Settings → Health | Health ⚠ with system audio missing; "Ask for permissions…" / "Re-check permissions" say where to enable it |
 
 ## Expected Final State

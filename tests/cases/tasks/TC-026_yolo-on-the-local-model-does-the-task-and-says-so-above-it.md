@@ -23,6 +23,7 @@ tags: [tasks, today, yolo, local-model, claude-code]
 - **One model run** (step 3): about 4–7 minutes on the network test server; on a slow model it can reach Yolo's 20-minute limit (then the outcome is a failure: see Notes). Assert the outcome's place and state, the log and the files, never the model's wording or what it chose to do
 - **Don't reload the page between steps 3 and 5**: the outcome bar belongs to the page that started Yolo (after a reload it is only in `<home>/.echo/task-asks.json`)
 - Besides `echoctl`, this case may run `cd`, `find`, `shasum`, `sort`, `diff`, `grep`, `cat`, `ls` and `git status --short` (in this checkout) — read-only, plus two list files written into `<dir>`. List: `cd <dir> && find . -type f ! -name serve.log -print0 | sort -z | xargs -0 shasum | sort -k2 > <dir>/<name>.txt`
+- **In S-30** `<profile>` and `<model>` are read once, in the scenario's prelude (`echoctl ai status` and one `ls` of the calls), and every stage uses them. On its own, read them as above
 
 ## Test Data
 

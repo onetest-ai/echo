@@ -17,6 +17,7 @@ tags: [clients, about, logo, pairwise]
 ## Preconditions
 - `data: standard`: the standard data set, built and served by `tests/fixtures/serve.sh up <dir> <port> --set standard`; the window is at `{{base_url}}` and `{{base_url}}/` is loaded first (the cookie); every `echoctl` command runs after `. <dir>/env`. Times in the data are relative to the run's start, so build it right before the run
 - No client has been edited and no logo changed since the data was built
+- In S-26 the fold "Closed · 3" of the Threads list is open from `threads/TC-018` (stage 1) when step 6 reads it; on its own, click "Closed · 3" open in step 6
 
 ## Test Data
 

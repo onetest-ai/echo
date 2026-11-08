@@ -9,8 +9,9 @@
     tests/fixtures/recordings.py finish <folder> <name>
                                                        give a copy made with --untranscribed its transcript
 
-Recording and transcribing is a prerequisite, not what most cases test: `prepare` plays each conversation of
-tests/fixtures/audio through TestCall, records it with `echoctl capture` (two tracks, the real capture path), and
+Recording and transcribing is a prerequisite, not what most cases test: `prepare` feeds each conversation of
+tests/fixtures/audio to `echoctl capture` from files (the debug build's test sources, crates/echoctl/src/audio/testfeed.rs:
+no device opened, no sound played; the captures run side by side), records it (two tracks, the real capture path), and
 transcribes it with the build's speech model, once. The call folders (meta.json, segments.json, transcript.md,
 expected.json; the audio deleted as Echo deletes it) and what the commands printed are kept in
 target/test-recordings/<key>/ (git-ignored), <key> the last commit that changed the app (crates/, Cargo.*), "-dirty"
@@ -21,11 +22,9 @@ capture and no transcription of its own, unless capturing is what the case check
 just ended (automatic minutes, Today); --keep-time keeps the recorded times. --untranscribed copies meta.json only (a
 call just recorded, not transcribed yet); `finish` then adds its transcript, as the transcription would.
 
-Needs, for `prepare` (run it outside any sandbox: inside one the audio is silent): the debug build (`cargo build`),
-TestCall (tests/tools/testcall/build.sh), BlackHole 2ch, ffmpeg, the speech model in
-~/Library/Application Support/echo/models (linked, never changed), and the network once for NVIDIA's NeMo-Speech
-runtime (speakers). It plays nothing out loud: the user's lines go into BlackHole, the other side's into TestCall.
-Standard library only.
+Needs, for `prepare`: the debug build (`cargo build`), the speech model in ~/Library/Application Support/echo/models
+(linked, never changed), and the network once for NVIDIA's NeMo-Speech runtime (speakers). No TestCall, BlackHole or
+ffmpeg: it opens no device and plays nothing. Standard library only.
 """
 import json
 import os
@@ -40,22 +39,19 @@ from datetime import datetime, timedelta
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 BIN = os.environ.get("ECHOCTL_BIN") or os.path.join(ROOT, "target", "debug", "echoctl")
-TESTCALL = os.path.join(ROOT, "tests", "tools", "testcall", "build", "TestCall.app", "Contents", "MacOS", "testcall")
 MAKE_AUDIO = os.path.join(ROOT, "tests", "fixtures", "audio", "make_audio.py")
 MODELS = os.path.expanduser("~/Library/Application Support/echo/models")
 MODEL = "large-v3-turbo-q5_0"
-PORT = "7792"
 
-# What `prepare` makes. name → (conversation, how): "capture" records it through TestCall until just before TestCall
-# hangs up (the call's length + 3.5 s: after the hang-up the mic falls back to the room, #140, and a word said there
-# would land in every copy); "build" writes the tracks straight
+# What `prepare` makes. name → (conversation, how): "capture" records it with `echoctl capture` fed from the
+# conversation's files for the call's length + 3.5 s; "build" writes the tracks straight
 # from the clips (no capture: the minutes cases need a long call, not a recording); "retranscribe" transcribes the
 # tracks of another recording again with other settings.
 RECORDINGS = [
     {"name": "acme-sync", "conv": "acme-sync", "how": "capture", "languages": "en",
-     "for": "two tracks, words, speakers and order (recording/TC-014, transcription/TC-001), no audio kept (privacy/TC-003)"},
+     "for": "words, speakers and order (transcription/TC-001), a capture's own record (recording/TC-014 step 4), no audio kept after `transcribe` (privacy/TC-003)"},
     {"name": "very-short", "conv": "very-short", "how": "capture", "languages": "en",
-     "for": "a call too short for automatic minutes (recording/TC-013, claude/TC-004), the window filling in (window/TC-013)"},
+     "for": "a call too short for automatic minutes (recording/TC-013, claude/TC-004), the transcription server (transcription/TC-007)"},
     {"name": "long-silence", "conv": "long-silence", "how": "capture", "languages": "en",
      "for": "silence in a recorded call (recording/TC-017, transcription/TC-005)"},
     {"name": "two-remotes", "conv": "two-remotes", "how": "capture", "languages": "en", "speakers": True,
@@ -113,7 +109,7 @@ def prepare(force):
     if ready() and not force:
         print(c)
         return
-    for need, what in ((BIN, "cargo build"), (TESTCALL, "tests/tools/testcall/build.sh"), (os.path.join(MODELS, f"ggml-{MODEL}.bin"), "the speech model")):
+    for need, what in ((BIN, "cargo build"), (os.path.join(MODELS, f"ggml-{MODEL}.bin"), "the speech model")):
         if not os.path.exists(need):
             die(f"missing {need} ({what})")
     shutil.rmtree(c, ignore_errors=True)
@@ -124,12 +120,13 @@ def prepare(force):
     os.makedirs(config)
     os.symlink(MODELS, os.path.join(config, "models"))
     env = dict(os.environ, ECHOCTL_HOME=home, ECHOCTL_CONFIG_DIR=config, ECHOCTL_CALL_APP_BUNDLE="ai.onetest.echo.testcall")
-    for k in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_CHILD_SESSION", "AI_AGENT", "ECHOCTL_TEST_AUTO_MINUTES_DELAY_S"):
+    for k in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_CHILD_SESSION", "AI_AGENT", "ECHOCTL_TEST_AUTO_MINUTES_DELAY_S",
+              "ECHOCTL_TEST_CALL_FILE", "ECHOCTL_TEST_ME_WAV", "ECHOCTL_TEST_REMOTE_WAV"):
         env.pop(k, None)
     log = open(os.path.join(c, "prepare.log"), "w")
 
-    def echoctl(*args, out=None):
-        r = subprocess.run([BIN, *args], env=env, cwd=ROOT, capture_output=True, text=True)
+    def echoctl(*args, out=None, env_=None):
+        r = subprocess.run([BIN, *args], env=env_ or env, cwd=ROOT, capture_output=True, text=True)
         log.write(f"$ echoctl {' '.join(args)}  → {r.returncode}\n{r.stdout}{r.stderr}\n")
         log.flush()
         if out:
@@ -145,22 +142,40 @@ def prepare(force):
         json.dump(manifest, open(os.path.join(c, "manifest.json"), "w"), indent=2, ensure_ascii=False)
 
     nemo = None
+    # Every capture at once, each with its own config (its languages): fed from files, they share no device.
+    running = {}
     for r in RECORDINGS:
-        name, out = r["name"], os.path.join(c, r["name"])
-        os.makedirs(out)
-        echoctl("config", "--languages", r["languages"])
         conv = os.path.join(c, "conv", r["conv"])
         if not os.path.isdir(conv):
             subprocess.run([sys.executable, MAKE_AUDIO, "build", r["conv"], conv], check=True, capture_output=True)
+        if r["how"] == "capture":
+            out = os.path.join(c, r["name"])
+            os.makedirs(out)
+            cfg = os.path.join(work, "config-" + r["name"])
+            os.makedirs(cfg)
+            os.symlink(MODELS, os.path.join(cfg, "models"))
+            renv = dict(env, ECHOCTL_CONFIG_DIR=cfg)
+            echoctl("config", "--languages", r["languages"], env_=renv)
+            r["seconds"] = int(json.load(open(os.path.join(conv, "expected.json")))["duration"] + 3.5)
+            running[r["name"]] = (capture(r, conv, out, renv), renv, time.monotonic())
+    time.sleep(8)
+    for r in RECORDINGS:
+        if r["name"] in running:
+            during(r, os.path.join(c, r["name"]), home)
+    for r in RECORDINGS:
+        name, out = r["name"], os.path.join(c, r["name"])
+        os.makedirs(out, exist_ok=True)
+        echoctl("config", "--languages", r["languages"])
+        conv = os.path.join(c, "conv", r["conv"])
         entry = {"conversation": r["conv"], "how": r["how"], "for": r["for"], "languages": r["languages"]}
         t0 = time.monotonic()
         if r["how"] == "capture":
-            r["seconds"] = int(json.load(open(os.path.join(conv, "expected.json")))["duration"] + 3.5)
-            call = capture(r, conv, out, env, log)
+            started, renv, t0 = running[name]
+            call = finish_capture(r, out, started, log)
             entry.update(seconds=r["seconds"], capture_exit=open(os.path.join(out, "capture.exit")).read().strip())
             if r.get("pin"):
                 entry["pin"] = r["pin"]
-                echoctl("config", out=os.path.join(out, "config.after.json"))
+                echoctl("config", out=os.path.join(out, "config.after.json"), env_=renv)
         elif r["how"] == "build":
             call = os.path.join(home, "calls", datetime.now().strftime("%Y-%m-%d_%H%M%S") + "-" + name)
             subprocess.run([sys.executable, MAKE_AUDIO, "build", r["conv"], call], check=True, capture_output=True)
@@ -184,8 +199,7 @@ def prepare(force):
         if r["how"] == "capture":
             loud = max(peak(os.path.join(call, f)) for f in ("mic.wav", "remote.wav"))
             if loud < 64:
-                die(f"{name}: the tracks are silent (peak {loud}): run prepare outside the sandbox, and check that this "
-                    "terminal may record audio")
+                die(f"{name}: the tracks are silent (peak {loud}): see {out}/capture.err (the test sources are a debug build's)")
         shutil.copy(os.path.join(conv, "expected.json"), call)
         if r.get("speakers"):
             nemo = nemo or fetch_nemo(c, log)
@@ -219,27 +233,25 @@ def prepare(force):
     print(c)
 
 
-def capture(r, conv, out, env, log):
-    """One TestCall call recorded by `echoctl capture`: both ends on this Mac, the user's line into BlackHole."""
-    serve = subprocess.Popen([TESTCALL, "serve", "--port", PORT, "--play", os.path.join(conv, "remote.wav"), "--quiet"],
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    dial = subprocess.Popen([TESTCALL, "dial", f"127.0.0.1:{PORT}", "--me", os.path.join(conv, "mic.wav"), "--me-device", "BlackHole 2ch"],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    time.sleep(2)
+def capture(r, conv, out, env):
+    """Start one `echoctl capture` fed from the conversation's files (no device, no sound); `finish_capture` waits."""
+    env = dict(env, ECHOCTL_TEST_ME_WAV=os.path.join(conv, "mic.wav"), ECHOCTL_TEST_REMOTE_WAV=os.path.join(conv, "remote.wav"))
     args = [BIN, "capture", "--seconds", str(r["seconds"]), "--title", r["name"]] + (["--languages", r["pin"]] if r.get("pin") else [])
-    with open(os.path.join(out, "capture.out"), "w") as so, open(os.path.join(out, "capture.err"), "w") as se:
-        cap = subprocess.Popen(args, env=env, cwd=ROOT, stdout=so, stderr=se)
-        time.sleep(8)
-        # While it records: the tracks are there (privacy/TC-003 reads this).
-        calls = os.path.join(env["ECHOCTL_HOME"], "calls")
-        rec = [d for d in os.listdir(calls) if d.endswith("-" + r["name"])]
-        open(os.path.join(out, "during.ls"), "w").write("".join("\n".join(sorted(os.listdir(os.path.join(calls, d)))) + "\n" for d in rec))
-        code = cap.wait()
-    for p in (serve, dial):
-        try:
-            p.wait(timeout=30)
-        except subprocess.TimeoutExpired:
-            p.terminate()
+    so, se = open(os.path.join(out, "capture.out"), "w"), open(os.path.join(out, "capture.err"), "w")
+    return subprocess.Popen(args, env=env, cwd=ROOT, stdout=so, stderr=se), args, env["ECHOCTL_HOME"]
+
+
+def during(r, out, home):
+    """While it records: the files of its call folder (privacy/TC-003 reads this)."""
+    calls = os.path.join(home, "calls")
+    rec = [d for d in os.listdir(calls) if d.endswith("-" + r["name"])]
+    open(os.path.join(out, "during.ls"), "w").write("".join("\n".join(sorted(os.listdir(os.path.join(calls, d)))) + "\n" for d in rec))
+
+
+def finish_capture(r, out, started, log):
+    """Wait for a capture `capture` started; keep what it printed and the files while it recorded."""
+    cap, args, _ = started
+    code = cap.wait()
     open(os.path.join(out, "capture.exit"), "w").write(f"{code}\n")
     log.write(f"$ {' '.join(args)}  → {code} (134 after saving is #141)\n")
     lines = [ln.strip() for ln in open(os.path.join(out, "capture.out")) if ln.strip()]

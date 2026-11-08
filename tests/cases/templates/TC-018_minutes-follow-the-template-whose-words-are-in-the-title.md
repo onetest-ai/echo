@@ -21,6 +21,7 @@ tags: [templates, minutes, local-model, claude-code]
 - Claude Code on `PATH` and the data's model server answering (`--ai local`: `tests/fixtures/README.md`, "Real Claude Code runs on a local model"). `<profile>` and `<model>` below are the default AI profile's `name` and `notes_model` in `target/debug/echoctl ai status` (for example "Qwen · this computer" and `qwen3.8:27b-mlx`); the fake `claude` passes only runs routed to that profile, so no Claude account is used
 - **One model run** (step 3), about 2 minutes on the network test server, 10 on a Mac running the model itself. Model text differs from run to run: assert only files, states, template names and section headings, never wording. Don't retry a failed run unless it failed for an infrastructure reason (Ollama down, model missing): then the case is BLOCKED
 - Find a folder by its slug: `ls $ECHOCTL_HOME/calls | grep <slug>`; `<standup>` below is the folder ending in `-globex-standup`
+- **In S-30** `<profile>`, `<model>` and the call folders are read once, in the scenario's prelude (`echoctl ai status` and one `ls` of the calls), and every stage uses them. On its own, read them as above; in S-30 the Calls list is also already on screen, so step 2 starts at its click
 
 ## Test Data
 

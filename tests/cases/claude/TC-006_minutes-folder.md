@@ -7,7 +7,7 @@ requirements: [F-SET-12]
 module: claude
 run: agent
 platform: macos
-tags: [minutes, settings, test-call]
+tags: [minutes, settings, recordings]
 ai: local
 external_id: TC-CLA-005
 ---
@@ -18,11 +18,10 @@ external_id: TC-CLA-005
 
 ## Preconditions
 - Test data built by `tests/fixtures/make_data.py <dir> --ai local` (`ai: local`): the small set, hermetic, with the AI profile "Qwen" (Ollama here, or the faster server of `tests/fixtures/ai.local.json`) the default, so a minutes run is a real Claude Code run on it and every other run is refused (`tests/fixtures/README.md`, "Real Claude Code runs on a local model"); Claude Code on `PATH`; `target/debug/echoctl` is the debug build from this checkout
-- Every Bash call starts with the prelude: `. <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; CONV="$D/conv"; APP="$PWD/tests/tools/testcall/build/TestCall.app/Contents/MacOS/testcall"; export D CONV APP ECHOCTL_CALL_APP_BUNDLE=ai.onetest.echo.testcall`
-- The speech model linked into the test config (`ln -s "$HOME/Library/Application Support/echo/models" "$ECHOCTL_CONFIG_DIR/models"`, `target/debug/echoctl model use large-v3-turbo-q5_0`, `config --languages en`); TestCall, BlackHole 2ch and ffmpeg as in `recording/TC-014`
+- Every Bash call starts with the prelude: `. <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; W=tests/fixtures/wait.py; export D` (the env sets the file-fed call sources and the call app's id: nothing here records)
 - The window served on the data with clicks reaching it: `ECHOCTL_TEST_OPEN_LOG_ONLY=1 ECHOCTL_SERVE_IPC=1 target/debug/echoctl window --serve <port>` after the prelude (no Echo app needed: the served window starts the run itself); the page loaded from `{{base_url}}/` first
 - Folder A: `mkdir -p "$D/folder-a/.claude"; echo '{"env": {"ECHO_TEST_FOLDER": "A"}}' > "$D/folder-a/.claude/settings.json"`
-- Two transcribed calls without minutes (in S-19 those of `claude/TC-004`)
+- **Two transcribed calls without minutes, and their runs (shared in S-19).** In S-19: `claude/TC-004`'s long and short calls; its runs (steps 4 and 7: runs A and B) are this case's, with steps 1 and 3's `config` done just before them, so here only the logs are read. On its own: two copies (`recordings.py copy minutes-call`, `copy very-short`) and the Write minutes of steps 2–3
 
 ## Steps
 
