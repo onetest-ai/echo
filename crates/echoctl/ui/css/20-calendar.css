@@ -95,7 +95,9 @@
 .menu.ev-ctx .menu-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Write minutes: buttons under the empty state, the run in progress */
-.notes-actions { display: flex; gap: 8px; justify-content: center; margin-top: 14px; }
+/* The row wraps and its buttons keep their label: a long Model picker goes on a line of its own (#117). */
+.notes-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 14px; }
+.notes-actions > .btn { flex-shrink: 0; }
 /* the countdown to automatic minutes (#42) */
 .mn-ring { width: 84px; height: 84px; margin: 0 auto 12px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
   background: conic-gradient(var(--accent) 0 var(--left), var(--line) var(--left) 100%); }
