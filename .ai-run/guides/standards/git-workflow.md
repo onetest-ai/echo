@@ -1,6 +1,8 @@
 # Git Workflow
 
-**Project**: Echo · **Stack**: Rust (+ vanilla JavaScript window UI, TypeScript status-line mod), tao + wry + tray-icon, clap, rquickjs · **Scope**: branch names, commit subjects, merge policy and their recovery steps; exact gate commands live in `.ai-run/guides/quality-gates.md`, the MR adapter in `.ai-run/guides/project.md`
+**Project**: Echo · **Stack**: Rust (+ vanilla JavaScript window UI, TypeScript status-line mod), tao + wry + tray-icon, clap, rquickjs · **Scope**: branch names, commit subjects, merge policy and their recovery steps; exact gate commands live in `.ai-run/guides/quality-gates.md`
+
+Repository: `onetest-ai/echo` on GitHub; issues and pull requests through the `gh` CLI (`gh issue view|create|comment`, `gh pr create --base main`, `gh pr view|merge`). No ticket keys: an issue is `#N`.
 
 ## Branch Naming Convention
 
