@@ -389,4 +389,27 @@ mod tests {
         assert!(!e.contains("unrecognized_model"), "the warning stays in the log: {e}");
         assert!(fs::read_to_string(root.join("log.txt")).unwrap().contains("unrecognized_model"));
     }
+
+    /// #215: routines' and plugins' runs (`claudejob::run`) finish here, so a Claude Code older than
+    /// `guard::MIN_CLAUDE` is stopped for them too — even when it goes on to answer.
+    #[cfg(unix)]
+    #[test]
+    fn a_run_finished_here_on_a_claude_code_too_old_for_the_guard_is_stopped() {
+        let (_env, root) = crate::paths::testenv::folders("run-too-old");
+        let _fake = crate::ai::fake::install(&root);
+        let p = crate::ai::fake::profile("old", None, &crate::ai::fake::signed_in("pat@example.com"));
+        let run = |version: &str| {
+            let init = serde_json::json!({"type": "system", "subtype": "init", "claude_code_version": version});
+            let result = serde_json::json!({"type": "result", "result": "the answer", "is_error": false});
+            fs::write(crate::ai::fake::file(&p, "p.reply"), format!("{init}\n{result}\n")).unwrap();
+            let child = crate::ai::prepare_claude(&p, &["-p".into(), "x".into()], &root, false).unwrap().spawn().unwrap();
+            let mut log = fs::File::create(root.join("log.txt")).unwrap();
+            finish_run_result(child, &mut log, Duration::from_secs(30), "run a plugin's job", "quit").map(|(text, _)| text)
+        };
+        let e = run("2.1.200").unwrap_err().to_string();
+        assert!(e.contains("too old to run a plugin's job"), "{e}");
+        let [x, y, z] = guard::MIN_CLAUDE;
+        assert_eq!(run(&format!("{x}.{y}.{z}")).unwrap(), "the answer");
+        assert!(run("").unwrap_err().to_string().contains("too old"), "an unknown version is stopped too");
+    }
 }
