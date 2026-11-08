@@ -709,6 +709,12 @@ pub fn view(threads: &[&Project], today: chrono::NaiveDate) -> Result<Value> {
                 let own = s.also.remove(i);
                 s.also.extend(s.email.replace(own));
             }
+            // Addresses the user merged in that no call shows (a person added by hand).
+            for e in entry.into_iter().flat_map(|p| &p.emails) {
+                if s.email.as_ref() != Some(e) && !s.also.contains(e) {
+                    s.also.push(e.clone());
+                }
+            }
             let colleague = s.email.as_deref().is_some_and(|e| book.address(e)) || entry.is_some_and(|p| p.emails.iter().any(|e| book.address(e)));
             let dom = domain(s.email.as_deref());
             let org = f("org").and_then(|o| clients.iter().find(|c| c.id == o)).or_else(|| org_of(&clients, dom.as_deref())).filter(|c| !colleague || c.internal || f("org").is_some());
@@ -1807,6 +1813,35 @@ mod tests {
         let v = of_thread(&p.id, today).unwrap();
         assert_eq!(v["people"].as_array().unwrap().len(), 2);
         assert!(v["people"].as_array().unwrap().iter().all(|x| x["maybe_same"].as_array().unwrap().is_empty()));
+    }
+
+    #[test]
+    fn a_hand_added_address_merged_in_shows_and_splits_off() {
+        let (_env, root) = crate::paths::testenv::folders("people-merge-hand");
+        let a = call(&root, "2026-10-01_100000-a", "2026-10-01T10:00:00+00:00",
+            json!({"attendees": [{"name": "Dana Lee", "email": "dana@acme.example"}]}), json!([]));
+        let p = projects::create("People lab", None, None).unwrap();
+        projects::update(&p.id, |x| { x.pins = vec![calls::stamp_of(&a)]; Ok(()) }).unwrap();
+        place(&p.id, "Dana Lee", Some("dana@acme.example"), &json!({})).unwrap();
+        place(&p.id, "Dana L", Some("dlee@acme.example"), &json!({})).unwrap();
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 10, 30).unwrap();
+        let v = of_thread(&p.id, today).unwrap();
+        let key = |n: &str| v["people"].as_array().unwrap().iter().find(|x| x["name"] == n).unwrap()["key"].as_str().unwrap().to_string();
+        let (lee, l) = (key("Dana Lee"), key("Dana L"));
+        // As the window merges: Dana L (seen in no call) into Dana Lee.
+        merge(&l, "Dana L", &["dlee@acme.example".to_string()], &lee, "Dana Lee", Some("dana@acme.example")).unwrap();
+        let v = of_thread(&p.id, today).unwrap();
+        let people = v["people"].as_array().unwrap();
+        assert_eq!(people.len(), 1, "{people:?}");
+        let addrs: Vec<&str> = people[0]["addresses"].as_array().unwrap().iter().map(|a| a["email"].as_str().unwrap()).collect();
+        assert_eq!(addrs, ["dana@acme.example", "dlee@acme.example"], "the merged address shows, second (\"Not the same\" beside it)");
+        assert!(people[0]["also"].as_array().unwrap().iter().any(|e| e == "dlee@acme.example"), "and goes along if she is merged again");
+        // "Not the same" on it: two people again.
+        split(&lee, "Dana Lee", "dlee@acme.example").unwrap();
+        let v = of_thread(&p.id, today).unwrap();
+        let mut names: Vec<&str> = v["people"].as_array().unwrap().iter().map(|x| x["name"].as_str().unwrap()).collect();
+        names.sort();
+        assert_eq!(names, ["Dana L", "Dana Lee"]);
     }
 
     #[test]
