@@ -1743,6 +1743,7 @@ pub fn summary() -> Value {
 /// `fail`, `hang` (its pid in `login.pid`, then it sleeps); `-p` reads its prompt and prints
 /// `p.reply` (with `p.hang` there: prints that to stderr, then sleeps, a run that never ends). Installing it forgets this process's observations and cached checks.
 #[cfg(test)]
+#[cfg_attr(not(unix), allow(dead_code))] // the fake is a shell script: only Unix tests use it
 pub mod fake {
     use super::*;
 

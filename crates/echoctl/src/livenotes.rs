@@ -1019,7 +1019,7 @@ fn wake(id: &str, failed: bool) {
 }
 
 /// (tests) A recording call whose last summary failed for want of `id`'s sign-in.
-#[cfg(test)]
+#[cfg(all(test, unix))] // only Unix tests use it
 pub fn test_call_needing(dir: &Path, id: &str) {
     let stamp = track(dir);
     with(|s| {

@@ -372,6 +372,7 @@ pub fn start(id: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)] // every test here runs a Unix shell fake
     use super::*;
 
     #[cfg(unix)]
