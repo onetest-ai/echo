@@ -23,7 +23,7 @@ cases:
 
 | Asset | Made by | Used by stages |
 |---|---|---|
-| The `small` data build (before 22:00) | the lead (`serve.sh up`) | 1–9 |
+| The `small` data build (by 23:30) | the lead (`serve.sh up`) | 1–9 |
 | The Inbox panel open on `#today` | stage 1, step 3 | 2 |
 | `#today` with the panel closed | stage 2's Teardown | 3 |
 | Coming up today unfolded in the Calls list | stage 4, step 3 | 5, 6, 7, 8 |
@@ -49,6 +49,6 @@ cases:
 ## Notes
 - Only what `small` holds: an empty Inbox and meetings with no prep. Open items (badge count, groups, per-kind buttons, Working…, Done rows) and written preps (sections, Write it again, the Prep tab of a recorded call) wait for the `standard` data set, which must hold them (for example a failed minutes run, a pending people suggestion, a written prep).
 - The Inbox panel is opened once for stages 1 and 2 (stage 1 opens it, stage 2 reads it and closes it); stage 3 opens and closes it as its own check and ends on `#calls`, where the prep stages go on. Coming up today is unfolded once (stage 4) and folded once (stage 8's Teardown); stages 5 and 6 read the same meeting. If a view a stage continues from isn't there (an earlier stage failed), run the skipped steps as written.
-- Run before 22:00 local: the prep stages need two meetings still to come today.
+- Build by 23:30 local: the prep stages need two meetings still to come today (after 22:00 they come sooner).
 - No stage presses Prepare now or any Inbox button.
 - Stage 9 empties the day with the CLI (agenda cleared, today's calls deleted, the task closed) and restores the calls and the task; the agenda stays empty, so it runs last.

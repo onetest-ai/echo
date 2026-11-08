@@ -92,6 +92,24 @@ def iso(t):
     return t.isoformat(timespec="seconds")
 
 
+# The data's future, hours after now: today's meetings to come reach 2.6 h ahead. After 22:00 that runs past
+# midnight, so the time ahead is squeezed into what is left of the day (order and spacing kept, closer together);
+# before 22:00 the scale is 1 and nothing moves.
+AHEAD_H = 2.6
+
+
+def ahead_scale(now):
+    left = (now.replace(hour=23, minute=50, second=0, microsecond=0) - now).total_seconds() / 3600
+    return max(0.0, min(1.0, left / AHEAD_H))
+
+
+def day_clock(now):
+    """at(hours): now + hours inside today — the past as it is (from 00:05), the future squeezed by ahead_scale."""
+    day0 = now.replace(hour=0, minute=5, second=0, microsecond=0)
+    scale = ahead_scale(now)
+    return lambda hours: max(day0, now + timedelta(hours=hours * (scale if hours > 0 else 1)))
+
+
 def auto_since(now):
     """When automatic minutes were switched on: midnight 9 days back, so every call of 10 or more days ago ended
     before it and every later one after it, at any hour of the build."""
@@ -190,10 +208,8 @@ def build_small(d):
     q("project", "create", "Globex pilot", "--client", "globex")
 
     home, now = d.home, d.now
-    day0 = now.replace(hour=0, minute=5, second=0, microsecond=0)
 
-    def at(hours):  # now + hours, kept inside today
-        return max(day0, min(now + timedelta(hours=hours), now.replace(hour=23, minute=50)))
+    at = day_clock(now)  # now + hours, inside today
 
     me = {"name": "Sam Rivera", "email": "sam@initech.example"}
     dana = {"name": "Dana Lee", "email": "dana@acme.example"}
@@ -921,10 +937,8 @@ def build_calls(d, H):
     """About 35 calls over three weeks and today, an undated one, one from last year, a deleted one, and 40
     all-hands calls of last spring (so the list pages past 60). Each call's states are listed in the manifest."""
     now = d.now
-    day0 = now.replace(hour=0, minute=5, second=0, microsecond=0)
 
-    def at(hours):  # now + hours, kept inside today
-        return max(day0, min(now + timedelta(hours=hours), now.replace(hour=23, minute=50)))
+    at = day_clock(now)  # now + hours, inside today
 
     def day(n, h, m=0):  # n days ago at h:m
         return (now - timedelta(days=n)).replace(hour=h, minute=m, second=0, microsecond=0)
@@ -1817,14 +1831,12 @@ def build_agenda(d, H):
     """Today's agenda covering the meeting axes pairwise: timing × link × recorded × Teams transcript × scheduled,
     and response × timing × prep × recorded. Recorded meetings are today's calls (by their meeting id)."""
     now = d.now
-    day0 = now.replace(hour=0, minute=5, second=0, microsecond=0)
 
-    def at(hours):
-        return max(day0, min(now + timedelta(hours=hours), now.replace(hour=23, minute=50)))
+    at = day_clock(now)
     # Every meeting still to come starts at one time, 37 minutes after the build: side by side in lanes in the Day view
-    # (calendar/TC-016), and inside today at any hour the data may be built (06:00–22:00). Spread out over the next
+    # (calendar/TC-016), and inside today at any hour the data may be built (06:00–23:30; after 22:00 sooner, ahead_scale). Spread out over the next
     # hours, they would stack only when a late build pinned them to 23:50, and stagger otherwise.
-    soon = (now + timedelta(minutes=37)).replace(second=0, microsecond=0)
+    soon = (now + timedelta(minutes=37 * ahead_scale(now))).replace(second=0, microsecond=0)
     g1 = {"timing": ["past", "live", "to come"], "link": ["online", "no join link"], "recorded": ["no", "call", "imported"],
           "transcript": ["known", "none", "unknown"], "scheduled": ["no", "yes"]}
 
@@ -2299,10 +2311,11 @@ def main():
     if os.path.exists(os.path.join(base, "home")) or os.path.exists(os.path.join(base, "config")):
         sys.exit(f"{base} already holds test data: give an empty folder")
     d = Data(base, a.set)
-    # Today holds calls hours ago and meetings hours ahead, relative to now. Close to midnight there is no room:
-    # past calls would be pinned to 00:05 together (one stamp, evidence items that collide) or meetings to 23:50.
-    if not 6 <= d.now.hour < 22:
-        sys.exit(f"it is {d.now:%H:%M}: build test data between 06:00 and 22:00 (today needs hours before and after now)")
+    # Today holds calls hours ago and meetings hours ahead, relative to now.
+    # After 22:00 the meetings to come are squeezed into the rest of the day (ahead_scale); after 23:30 there is too
+    # little of it, and before 06:00 too little of the day behind (calls 6 hours ago would be yesterday's).
+    if not (6 <= d.now.hour and (d.now.hour, d.now.minute) <= (23, 30)):
+        sys.exit(f"it is {d.now:%H:%M}: build test data between 06:00 and 23:30 (today needs hours before now and some after), or pass an earlier --now")
     if not os.access(d.bin, os.X_OK):
         sys.exit(f"no {d.bin}: run cargo build first")
     os.makedirs(d.home)
