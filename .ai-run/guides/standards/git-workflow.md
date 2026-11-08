@@ -1,53 +1,12 @@
 # Git Workflow
 
-**Project**: Echo · **Stack**: Rust (+ vanilla JavaScript window UI, TypeScript status-line mod), tao + wry + tray-icon, clap, rquickjs · **Scope**: branch names, commit subjects, merge policy and their recovery steps; exact gate commands live in `.ai-run/guides/quality-gates.md`
+**Project**: Echo · **Stack**: Rust (+ vanilla JavaScript window UI, TypeScript status-line mod), tao + wry + tray-icon, clap, rquickjs · **Scope**: repository, branches, commits, merges, releases
 
-Repository: `onetest-ai/echo` on GitHub; issues and pull requests through the `gh` CLI (`gh issue view|create|comment`, `gh pr create --base main`, `gh pr view|merge`). No ticket keys: an issue is `#N`.
-
-## Branch Naming Convention
-
-- base branch: main
-- pattern: `<type>/<kebab-case-description>`
-
-| Type | Use for | Example |
-|---|---|---|
-| `feat/` | new features | `feat/memo-threads` |
-| `fix/` | bug fixes | `fix/plugin-settings` |
-| `refactor/` | restructuring without behaviour change | `refactor/brain-store` |
-| `chore/` | maintenance, dependencies, releases prep | `chore/update-deps` |
-| `ci/` | CI and packaging scripts | `ci/windows-release` |
-| `docs/` | documentation and guides | `docs/ai-guides` |
-
-### Rules
-- R1. Branch from `main` as `<type>/<kebab-case-description>` with a type from the table above, and merge back to `main` through a GitHub pull request with a merge commit. Older branches (`brain-rework`, `plugins`) predate this pattern; don't rename them. No ticket prefix: the tracker is GitHub Issues, so reference an issue in the PR body (`Closes #N`).
-
-## Commit Message Format
-
-```
-Area: Plain sentence saying what changed
-```
-
-Examples: `Memos: record yourself, no call; …` · `Echo X.Y.Z` (a release). The `Area:` prefix is optional.
-
-### Rules
-- R1. Commit subjects are a plain sentence saying what changed ("Memos: record yourself, no call; …"), with an optional `Area:` prefix; no ticket key and no conventional-commit type (convention from `git log`, no hook enforces it).
-
-## Merge Strategy
-
-### Rules
-- R1. Merge into `main` by merge commit. Evidence: recorded user decision
-- R1a. Before a branch is pushed, its PR opened or merged, the functional map is up to date: a change in behaviour adds, changes or removes its features in `tests/feature-map/areas/<area>.json`, `python3 tests/tools/feature-map.py check` passes, and the PR body carries the `Map:` line that `python3 tests/tools/feature-map.py changes main` prints (or `Map: no behaviour change — <why>`). `changes` exits 1 when app code (`crates/`, `plugin/`) changed with no map change: then update the map, or say in the PR why the behaviour doesn't change. Evidence: `tests/tools/feature-map.py::changes`
-- R2. A release is a commit `Echo X.Y.Z` on `main` plus a published GitHub release, made after every `critical` functional case passed on that commit (`tests/cases/`, quality-gates.md, functional); publishing triggers `.github/workflows/windows-release.yml`, the only CI, which builds and uploads the Windows MSI and zip (nothing builds on push or pull request).
-
-## Anti-Patterns
-
-| Do not | Do instead |
-|---|---|
-| Force-push a shared branch with `--force` | `git push --force-with-lease` after a rebase, and only on your own branch |
-
-## Troubleshooting
-
-| Issue | Fix |
-|---|---|
-| Branch was cut from the wrong base | `git rebase --onto main <old-base> <branch>`, then `git push --force-with-lease` |
-| Rebase conflicts on `main` | resolve file by file, `git add`, `git rebase --continue`; `git rebase --abort` to restart; never resolve by taking one side wholesale |
+## Rules
+- R1. The repository is `onetest-ai/echo` on GitHub; issues and pull requests go through `gh`. An issue is `#N`, no ticket keys. Evidence: `gh repo view`
+- R2. Branch from `main` as `<type>/<kebab-case-description>`, type one of `feat`, `fix`, `refactor`, `chore`, `ci`, `docs`. Evidence: `git branch -r`
+- R3. A commit subject is a plain sentence saying what changed, with an optional `Area:` prefix (`Memos: record yourself, no call`); a release commit is `Echo X.Y.Z`. No ticket key, no conventional-commit type. Evidence: `git log`
+- R4. A PR references its issue (`Closes #N`), carries the reasoning and the alternatives weighed, and the `Map:` line that `python3 tests/tools/feature-map.py changes main` prints (or `Map: no behaviour change — <why>`); `python3 tests/tools/feature-map.py check` passes before push. Evidence: `tests/tools/feature-map.py::changes`
+- R5. Merge into `main` with a merge commit, after its review. Evidence: `gh pr merge --merge`
+- R6. Rewrite pushed history only on your own branch, with `git push --force-with-lease`; resolve rebase conflicts file by file, never by taking one side wholesale. Evidence: `git push --force-with-lease`
+- R7. A release is an `Echo X.Y.Z` commit on `main` plus a published GitHub release, after every `critical` functional case passed on that commit; publishing runs `.github/workflows/windows-release.yml` (the Windows MSI and zip). Evidence: `.github/workflows/windows-release.yml`
