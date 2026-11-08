@@ -1,0 +1,109 @@
+/* ── workbench: title strip (Record), activity bar, primary view, right / bottom panels, status ── */
+.wb {
+  display: grid; height: 100vh;
+  --act-w: 48px;
+  grid-template-columns: var(--act-w) minmax(0, 1fr) 0;
+  grid-template-rows: 40px minmax(0, 1fr) 0 24px;
+  grid-template-areas: "top top top" "act main right" "act bottom right" "status status status";
+}
+.wb.bar-open { --act-w: 200px; }
+.wb.has-right { grid-template-columns: var(--act-w) minmax(0, 1fr) var(--right-w, 320px); }
+.wb.has-bottom { grid-template-rows: 40px minmax(0, 1fr) var(--bottom-h, 220px) 24px; }
+.wb.has-bottom.bottom-folded { grid-template-rows: 40px minmax(0, 1fr) 34px 24px; }
+/* Narrow: the right panel opens over the page. */
+.wb.right-over { grid-template-columns: var(--act-w) minmax(0, 1fr) 0; }
+.wb.right-over .panel.right { position: fixed; top: 40px; right: 0; bottom: 24px; width: min(var(--right-w, 320px), 86vw); z-index: 6; box-shadow: var(--shadow); }
+
+.topbar {
+  grid-area: top; position: relative; display: flex; align-items: center; justify-content: center;
+  background: var(--sidebar); border-bottom: 1px solid var(--line); padding: 0 12px 0 40px; min-width: 0;
+}
+.wb.mac .topbar { padding-left: 112px; } /* the traffic lights and the sidebar's switch */
+.pill-slot { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
+.pill-note { position: absolute; top: 38px; left: 50%; transform: translateX(-50%); z-index: 7; background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--r-panel); padding: 8px 10px; box-shadow: var(--shadow); max-width: min(520px, 90vw); }
+.pill {
+  display: flex; align-items: center; gap: 9px; height: 26px; min-width: 0;
+  border-radius: 13px; padding: 0 3px 0 11px; white-space: nowrap;
+  border: 1px solid var(--line-strong); background: var(--surface); box-shadow: var(--shadow);
+}
+.pill .ptitle { min-width: 0; overflow: hidden; text-overflow: ellipsis; max-width: 280px; font-size: 12.5px; }
+.pill .ptitle.link { border: 0; background: none; padding: 0; color: inherit; cursor: default; }
+.pill .ptitle.link:hover { text-decoration: underline; }
+.pill .clock { font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+.pbtn {
+  display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 9px; border-radius: 10px;
+  border: 1px solid transparent; background: var(--accent); color: #fff; font-size: 12px; font-weight: 650; cursor: default;
+}
+.pbtn.ghost { background: none; border-color: var(--line-strong); color: var(--text); font-weight: 500; }
+.pill.idle { padding: 0; border: 0; background: none; box-shadow: none; }
+/* The Record pill: in the top bar, and the same pill on a calendar event's card */
+.pill.idle .split .btn, .detail .acts .split .btn { height: 24px; font-size: 12px; flex-direction: row; white-space: nowrap; }
+.pill.idle .split > .btn:first-child, .detail .acts .split > .btn:first-child { border-radius: 12px 0 0 12px; padding-left: 12px; }
+.pill.idle .split > :last-child, .detail .acts .split > :last-child { border-top-right-radius: 12px; border-bottom-right-radius: 12px; }
+.detail .acts .split { align-self: flex-start; flex: none; }
+.detail .acts .split .split-main { flex: none; padding-right: 12px; }
+.pill.rec { border-color: color-mix(in srgb, var(--recording) 55%, transparent); background: color-mix(in srgb, var(--recording) 12%, var(--surface)); }
+.pill.rec .clock { color: var(--recording); }
+.pill.rec .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--recording); box-shadow: 0 0 0 3px color-mix(in srgb, var(--recording) 28%, transparent); flex: none; }
+.pbtn.stop { background: var(--recording); color: #fff; }
+.pill.armed { border-color: color-mix(in srgb, var(--me) 55%, transparent); background: color-mix(in srgb, var(--me) 10%, var(--surface)); }
+.pill.armed .ring { width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--me); box-sizing: border-box; flex: none; }
+.pill.soon { border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+.pill.soon .clock { color: var(--accent-ink); }
+.pchip { height: 24px; padding: 0 10px; border-radius: 12px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--text-2); font-size: 12px; cursor: default; }
+@media (prefers-reduced-motion: no-preference) {
+  .pill.rec .dot { animation: rec-pulse 1.6s ease-in-out infinite; }
+}
+@keyframes rec-pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--recording) 10%, transparent); } }
+
+.actbar { grid-area: act; background: var(--sidebar); border-right: 1px solid var(--line); min-height: 0; position: relative; z-index: 4; }
+/* Folded (the default): icons only, each one's name and keys in a hint beside it. */
+.acts { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 0; }
+.act {
+  width: 36px; height: 36px; flex: none; padding: 0; border: 0; border-radius: 8px; background: none;
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  color: var(--text-2); font-size: 13px; cursor: default;
+}
+.act svg { width: 18px; height: 18px; flex: none; }
+.act-label { display: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.act:hover { background: var(--line); color: var(--text); }
+.act[aria-current="page"] { background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
+/* Its switch sits in the title strip, after the traffic lights on macOS. */
+.bar-flip { position: absolute; left: 8px; top: 7px; color: var(--text-3); }
+.wb.mac .bar-flip { left: 78px; }
+.wb:not(.bar-open):not(.bar-over) .act:hover::after {
+  content: attr(data-hint) "\2002" attr(data-key); position: absolute; left: calc(100% + 8px); top: 50%; transform: translateY(-50%);
+  padding: 3px 9px; border-radius: var(--r-control); background: var(--surface); border: 1px solid var(--line-strong);
+  box-shadow: var(--shadow); color: var(--text); font-size: 12px; font-weight: 400; white-space: nowrap; pointer-events: none; z-index: 20;
+}
+/* Open: names and counts in a row; in a narrow window over the page. */
+.wb.bar-open .acts, .wb.bar-over .acts { align-items: stretch; padding: 8px; }
+.wb.bar-open .act, .wb.bar-over .act { width: 100%; height: 32px; justify-content: flex-start; padding: 0 10px; }
+.wb.bar-open .act-label, .wb.bar-over .act-label { display: block; }
+.wb.bar-over .actbar { width: 200px; box-shadow: var(--shadow); }
+.act:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.primary { grid-area: main; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.primary > .main { flex: 1; }
+.list-detail { display: grid; grid-template-columns: 300px minmax(0, 1fr); min-height: 0; flex: 1; position: relative; }
+.btn.list-toggle { display: none; } /* .btn comes later in this file */
+
+.panel { min-width: 0; min-height: 0; display: none; flex-direction: column; background: var(--surface); }
+.wb.has-right .panel.right { display: flex; grid-area: right; border-left: 1px solid var(--line); }
+.wb.has-bottom .panel.bottom { display: flex; grid-area: bottom; border-top: 1px solid var(--line); }
+.panel-head { display: flex; align-items: center; gap: 2px; padding: 0 4px 0 8px; height: 34px; border-bottom: 1px solid var(--line); flex: none; }
+.panel-head .tabs { flex: none; display: flex; overflow: hidden; }
+.panel-title { flex: 1; min-width: 0; padding-left: 8px; font-size: 12px; font-weight: 600; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.panel-head .tab { padding: 6px 10px 7px; }
+.panel-body { flex: 1; min-height: 0; overflow: auto; }
+.wb.bottom-folded .panel.bottom .panel-body { display: none; }
+.icon-btn { width: 26px; height: 26px; border: 0; border-radius: 6px; background: none; color: var(--text-2); display: inline-flex; align-items: center; justify-content: center; cursor: default; }
+.icon-btn svg { width: 16px; height: 16px; }
+.icon-btn:hover { background: var(--line); color: var(--text); }
+
+.statusbar {
+  grid-area: status; display: flex; align-items: center; gap: 14px; padding: 0 12px;
+  background: var(--sidebar); border-top: 1px solid var(--line); color: var(--text-3); font-size: 11.5px; white-space: nowrap; overflow: hidden;
+}
+.statusbar .grow { flex: 1; }
+

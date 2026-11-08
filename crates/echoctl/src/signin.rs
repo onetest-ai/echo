@@ -37,7 +37,7 @@ const DEADLINE: Duration = Duration::from_secs(600);
 /// A background check of a profile at most this often (unless asked for).
 const REFRESH_EVERY: Duration = Duration::from_secs(30);
 
-/// A Claude profile's sign-in as the window (`ai::summary` → `p.signin`, ui/app.js `signinNote`)
+/// A Claude profile's sign-in as the window (`ai::summary` → `p.signin`, ui/app/10-shell.js `signinNote`)
 /// and the tray show it. `account` is an `Account::key` (`Use <account>` sends it back to `accept`),
 /// with the plan (`label`) only right after a sign-in.
 #[derive(Serialize, Clone, Debug, PartialEq)]

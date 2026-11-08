@@ -1,0 +1,16 @@
+/* A meeting's prep (Calls → Coming up today, a call's Prep tab): what to read before it, who's coming beside. */
+.pr { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 28px; padding: 4px 0 24px; }
+.pr-main { display: flex; flex-direction: column; gap: 18px; max-width: 680px; }
+.pr-sec h3 { margin: 0 0 6px; font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-3); }
+.pr-sec h3 a { text-transform: none; letter-spacing: 0; font-weight: 500; }
+.pr-sec ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 5px; }
+.pr-short { margin: 0; font-size: 14.5px; line-height: 1.55; }
+.pr-side { display: flex; flex-direction: column; gap: 14px; }
+.pr-who { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 3px 0; font-size: 12.5px; }
+.pr-n, .pr-who .chip { white-space: nowrap; flex: none; }
+.pr-foot { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; padding-top: 10px; border-top: 1px solid var(--line); }
+.warn-chip { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
+.si.up { color: var(--accent-ink); }
+@media (max-width: 1100px) { .pr { grid-template-columns: minmax(0, 1fr); } }
+.ev-prep { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+

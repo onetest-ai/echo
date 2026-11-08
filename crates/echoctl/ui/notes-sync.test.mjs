@@ -1,9 +1,9 @@
 // NotesSync (app.js): how the Echo window saves the user's notes. Run by scripts/check-mod.sh
 // (`node crates/echoctl/ui/notes-sync.test.mjs`): the block is taken from app.js as it ships.
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { appSource } from './source.mjs'
 
-const src = readFileSync(new URL('./app.js', import.meta.url), 'utf8')
+const src = appSource()
 const start = src.indexOf('const NotesSync = (() => {')
 const end = src.indexOf('\n})()\n', start)
 assert.ok(start >= 0 && end > start, 'NotesSync not found in app.js')

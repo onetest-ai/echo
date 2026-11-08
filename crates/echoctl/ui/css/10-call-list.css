@@ -1,0 +1,62 @@
+/* ── call list ───────────────────────────────────────────────────────── */
+.list { border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; background: var(--surface); }
+.list-head { padding: 14px 14px 10px; display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid var(--line); }
+.list-head h1 { margin: 0; font-size: 18px; font-weight: 650; letter-spacing: -0.015em; }
+.list-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.voc { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; }
+.voc .search { width: 100%; box-sizing: border-box; }
+.voc .grow { flex: 1; }
+.voc .set-sub { margin: 0; }
+.voc-h { margin: 10px 0 0; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-2); display: flex; gap: 6px; align-items: baseline; }
+.voc .vocab-add { display: flex; gap: 6px; }
+.voc .vocab-add .search { flex: 1; min-width: 0; }
+.voc-row { padding: 7px 0; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 2px; }
+.voc-t { display: flex; align-items: center; gap: 8px; }
+.voc-t b { font-weight: 600; overflow-wrap: anywhere; }
+.search {
+  height: 30px; width: 100%;
+  border: 1px solid var(--line-strong); border-radius: var(--r-control);
+  background: var(--bg); color: var(--text);
+  padding: 0 10px; font: inherit;
+}
+.search::placeholder { color: var(--text-3); }
+.rows { overflow-y: auto; padding: 6px 8px 16px; flex: 1; }
+.group { font-size: 11.5px; font-weight: 600; color: var(--text-3); padding: 12px 8px 4px; }
+/* Coming up today, folded: a head like a call's row, its count in a pill, a chevron that turns when open. */
+.up-fold { grid-template-columns: 16px minmax(0, 1fr) 16px; margin: 6px 0 2px; cursor: pointer; }
+.up-fold .t { display: flex; align-items: center; gap: 6px; }
+.up-n { font-size: 11px; font-weight: 600; line-height: 16px; padding: 0 6px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-ink); }
+.up-chev { grid-column: 3; grid-row: 1 / span 2; align-self: center; display: inline-flex; color: var(--text-3); transition: transform 0.15s; }
+.up-chev svg { width: 14px; height: 14px; }
+.up-fold[aria-expanded="true"] .up-chev { transform: rotate(90deg); }
+.up-fold:hover .up-chev { color: var(--text); }
+.row {
+  display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 2px 9px;
+  width: 100%; border: 0; background: none; text-align: left;
+  padding: 9px 10px; border-radius: var(--r-control);
+  cursor: default;
+}
+.row:hover { background: var(--line); }
+.row[aria-selected="true"] { background: var(--accent-soft); }
+.row .t { grid-column: 2; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row[aria-selected="true"] .t { color: var(--accent-ink); }
+.row .m { grid-column: 2; color: var(--text-3); font-size: 12px; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; gap: 10px; }
+.row .m span { flex: none; }
+.row .m span:last-child { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.si { grid-column: 1; grid-row: 1; align-self: center; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; color: var(--text-3); }
+.si.notes { color: var(--me); }
+.si.transcribing { color: var(--warn); }
+.si.failed { color: var(--danger); }
+.si .rec-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--recording); box-shadow: 0 0 0 3px color-mix(in srgb, var(--recording) 25%, transparent); }
+@media (prefers-reduced-motion: no-preference) { .si .rec-dot { animation: rec-pulse 1.6s ease-in-out infinite; } }
+
+.badge {
+  font-size: 11px; font-weight: 600;
+  padding: 2px 7px; border-radius: 999px;
+  color: var(--text-3); background: var(--line);
+}
+.badge.notes { color: var(--me); background: color-mix(in srgb, var(--me) 13%, transparent); }
+.badge.recording { color: var(--recording); background: color-mix(in srgb, var(--recording) 14%, transparent); }
+.badge.transcribing { color: var(--warn); background: color-mix(in srgb, var(--warn) 13%, transparent); }
+.badge.failed { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); }
+

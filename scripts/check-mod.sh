@@ -7,7 +7,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 claude plugin validate plugin
 claude plugin test plugin
-# The Echo window's notes saving (crates/echoctl/ui/app.js, NotesSync), as it ships.
+# The Echo window's notes saving (NotesSync, crates/echoctl/ui/app/02-notes-sync.js), as it ships.
 node crates/echoctl/ui/notes-sync.test.mjs
 # The calendar's days and hours across the days the clocks change.
 node crates/echoctl/ui/calendar-dates.test.mjs

@@ -1,0 +1,75 @@
+/* Today: cards delivered to Echo, your day, your work. */
+/* One scroll per card, as Templates: the head and Needs you now stay, Your day and My work scroll inside; the page
+   itself scrolls only when the window is too short for the cards' least height. */
+.td { padding: 18px 24px 24px; display: flex; flex-direction: column; gap: 16px; min-height: 0; flex: 1 1 auto; overflow-y: auto; }
+.td-head { display: flex; align-items: baseline; gap: 12px; }
+.td-head h1 { margin: 0; font-size: 20px; font-weight: 650; }
+.td-card { border: 1px solid var(--line); border-radius: var(--r-panel); background: var(--surface); padding: 12px 16px; display: flex; flex-direction: column; gap: 6px; }
+.td-card-h { display: flex; align-items: center; gap: 10px; }
+.td-md { font-size: 13px; line-height: 1.55; }
+.td-md > :first-child { margin-top: 0; } .td-md > :last-child { margin-bottom: 0; }
+.td-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 16px; align-items: start; flex: 1 1 auto; min-height: 280px; }
+.td-sec { border: 1px solid var(--line); border-radius: var(--r-panel); background: var(--surface); padding: 12px 16px; }
+.td-grid > .td-sec { display: flex; flex-direction: column; min-height: 0; max-height: 100%; }
+.td-rows, .td-tasks { min-height: 0; overflow-y: auto; }
+.td-sec h2 { margin: 0 0 8px; font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-3); display: flex; align-items: center; gap: 8px; }
+.td-sec h2 .link-btn { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 500; }
+.td-row { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
+.td-row:first-of-type { border-top: 0; }
+.td-row.past .td-t, .td-row.past .td-s { opacity: 0.6; }
+.td-t { font-size: 12px; color: var(--text-2); padding-top: 2px; white-space: nowrap; }
+.td-card-h [data-today-seen] { margin-left: auto; }
+.td-b { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.td-s { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.td-a { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.td-a:empty { display: none; }
+.td-now { display: flex; align-items: center; gap: 8px; color: var(--recording); font-size: 11px; font-family: var(--mono); }
+.td-now::after { content: ""; flex: 1; height: 1px; background: var(--recording); }
+.td-tasks { display: flex; flex-direction: column; gap: 6px; }
+.td-task { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px 10px; align-items: start; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.td-task:hover { border-color: var(--line-strong); background: var(--surface); }
+.td-task { cursor: pointer; }
+.td-task.on { border-color: var(--accent); background: var(--surface); }
+.td-task:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.td-task-t { font-size: 13px; line-height: 1.4; }
+.td-task-t .td-due { display: inline-flex; vertical-align: -3px; margin-right: 6px; padding: 0; }
+.td-task-m { grid-column: 1 / -1; display: flex; align-items: center; gap: 5px; font: 11.5px var(--mono); color: var(--text-3); }
+.td-icos { margin-left: auto; display: flex; gap: 2px; }
+.td-ico { width: 28px; height: 28px; color: var(--text-3); }
+.td-ico svg { width: 18px; height: 18px; }
+.td-task:hover .td-ico { color: var(--text-2); }
+.td-ico:hover { color: var(--accent-ink); }
+.td-task:hover .td-close { color: var(--accent-ink); }
+.td-askbar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; margin-bottom: 8px; border-radius: 8px; background: var(--accent-soft); font-size: 12.5px; }
+.td-askbar.failed { background: color-mix(in srgb, var(--warn) 14%, transparent); }
+.td-modal { position: fixed; inset: 0; z-index: 30; background: rgb(0 0 0 / 0.35); display: flex; align-items: center; justify-content: center; }
+.td-dialog { width: min(440px, calc(100vw - 32px)); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--r-panel); box-shadow: var(--shadow); padding: 18px; display: flex; flex-direction: column; gap: 8px; }
+.td-dialog h3 { margin: 0; font-size: 15px; font-weight: 650; }
+.td-dialog p { margin: 0; color: var(--text-2); }
+.td-dialog textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--line-strong); border-radius: var(--r-control); background: var(--bg); color: var(--text); font: inherit; padding: 8px; resize: vertical; }
+.td-dialog-a { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.td-due { display: inline-flex; color: var(--text-3); padding-top: 1px; }
+.td-due svg { width: 16px; height: 16px; }
+.td-due.today { color: var(--accent-ink); }
+.td-due.late { color: var(--warn); }
+/* The list scrolls inside its card: the page stays put. */
+.td-tasks { padding-right: 2px; }
+/* Narrow: the cards one above the other, and the page scrolls (each card still at most a screen's worth). */
+@media (max-width: 1000px) {
+  .td-grid { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; flex: none; }
+  .td-grid > .td-sec { max-height: 80vh; }
+}
+
+/* Today → Needs you now: a row an item — a dot (burning: warn), where and the line, who and when, its actions. */
+.nd .td-card-h { margin-bottom: 4px; }
+.nd-row { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 4px 10px; align-items: start; padding: 8px 0; border-top: 1px solid var(--line); }
+.nd-row:first-of-type { border-top: 0; }
+.nd-dot { width: 8px; height: 8px; border-radius: 4px; background: var(--accent); margin-top: 6px; }
+.nd-dot.hot { background: var(--warn); }
+.nd-b { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.nd-a { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.td-dialog.wide { width: min(640px, calc(100vw - 32px)); }
+.td-dialog select { width: 100%; height: 30px; padding: 0 8px; border-radius: var(--r-control); border: 1px solid var(--line-strong); background: var(--surface); color: var(--text); font: inherit; font-size: 13px; }
+.nd-mail { max-height: 280px; overflow-y: auto; white-space: pre-wrap; font-size: 12.5px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r-control); background: var(--bg); }
+@media (max-width: 900px) { .nd-row { grid-template-columns: 10px minmax(0, 1fr); } .nd-a { grid-column: 2; justify-content: flex-start; } }
+

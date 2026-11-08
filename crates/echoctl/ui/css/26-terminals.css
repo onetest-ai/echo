@@ -1,0 +1,38 @@
+/* ── terminals in a panel (xterm.js) ─────────────────────────────────── */
+.term-wrap { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.term-slot { flex: 1; min-height: 0; padding: 4px 0 0 8px; background: var(--surface); }
+.term-slot .term, .term-slot .xterm { height: 100%; }
+.term-bar { display: flex; align-items: center; gap: 8px; padding: 6px 12px; font-size: 12px; color: var(--text-2); border-bottom: 1px solid var(--line); flex: none; }
+.term-bar .grow { flex: 1; }
+/* a Claude panel's conversations (#44) */
+.btn.sm { height: 24px; padding: 0 9px; font-size: 12px; }
+.term-stale { display: flex; align-items: center; gap: 10px; padding: 6px 12px; font-size: 12.5px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--warn, #f0a24a) 10%, transparent); flex: none; }
+.term-stale .grow { flex: 1; }
+.term-ask { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.term-stale .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn, #f0a24a); }
+.term-empty { padding: 18px 16px; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; color: var(--text-2); font-size: 12.5px; }
+.term-empty p { margin: 0; }
+.panel-body:has(.term-wrap) { overflow: hidden; }
+.sb-btn { border: 0; background: none; color: var(--text-2); font: inherit; font-size: 11.5px; padding: 0 4px; height: 20px; border-radius: 4px; cursor: default; }
+.sb-btn:hover { background: var(--line); color: var(--text); }
+.term-banner { flex: none; padding: 6px 12px; font-size: 11.5px; color: var(--text-2); background: color-mix(in srgb, var(--warn) 8%, transparent); border-bottom: 1px solid color-mix(in srgb, var(--warn) 25%, transparent); }
+.term-banner b { color: var(--warn); font-weight: 600; }
+.panel-body:has(.term-banner), .panel-body:has(.term-stale) { display: flex; flex-direction: column; }
+.panel-body:has(.term-banner) > .term-wrap, .panel-body:has(.term-stale) > .term-wrap { flex: 1; min-height: 0; height: auto; }
+.term-empty .hint { color: var(--text-3); font-size: 12px; }
+.term-profile { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.term-profile select { height: 26px; border-radius: 6px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--text); font: inherit; }
+.panel-head .tab.icon-tab { display: inline-flex; align-items: center; justify-content: center; width: 34px; padding: 6px 0 7px; }
+.panel-head .tab.icon-tab svg { width: 17px; height: 17px; }
+/* panel edges: drag to resize */
+.panel { position: relative; }
+.panel-resize { position: absolute; z-index: 3; }
+.panel-resize.right { left: -3px; top: 0; bottom: 0; width: 6px; cursor: col-resize; }
+.panel-resize.bottom { top: -3px; left: 0; right: 0; height: 6px; cursor: row-resize; }
+.panel-resize:hover { background: color-mix(in srgb, var(--accent) 40%, transparent); }
+body.resizing-x, body.resizing-x * { cursor: col-resize !important; user-select: none; }
+body.resizing-y, body.resizing-y * { cursor: row-resize !important; user-select: none; }
+body.resizing-x iframe, body.resizing-y iframe { pointer-events: none; }
+.term-acts { display: flex; gap: 8px; flex-wrap: wrap; }
+.term-error { color: var(--danger); font-family: var(--mono); font-size: 11.5px; white-space: pre-wrap; margin: 0; max-width: 100%; overflow-wrap: anywhere; }
+

@@ -24,7 +24,7 @@ tags: [shell, links]
 
 | Link | Opens |
 |---|---|
-| `echo://call/$A?t=43` | `#call/$A/transcript`, the turn at 0:43 marked |
+| `echo://call/$A?t=43` | `#call/$A/transcript`, scrolled so the turn at 0:43 is in the middle |
 | `echo://thread/acme-rollout` | `#project/acme-rollout/brief` |
 | `echo://client/acme` | `#client/acme/overview` |
 | `echo://person/dana@acme.example` | `#project/acme-rollout/people` with Dana Lee's panel |
@@ -37,7 +37,7 @@ tags: [shell, links]
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Navigate to `{{base_url}}/#link=echo%3A%2F%2Fcall%2F<A>%3Ft%3D43`; read `.turn.hit` at once and every 250 ms for 3 s (`browser_run_code_unsafe`: the mark is taken away a few seconds after the jump, on a later redraw) | The hash becomes `#call/<A>/transcript`; the heading is "Acme weekly sync"; exactly one turn has the class `hit` and `id="jump"`: the one whose `data-t` starts with `43.` (Dana Lee at 0:43) |
+| 1 | Navigate to `{{base_url}}/#link=echo%3A%2F%2Fcall%2F<A>%3Ft%3D43`, wait 2 s, then run `browser_evaluate` with `() => { const p = document.querySelector('#pane'); const mid = p.getBoundingClientRect().top + p.clientHeight / 2; const c = [...document.querySelectorAll('.turn')].map((e) => { const r = e.getBoundingClientRect(); return { t: e.dataset.t, d: Math.abs((r.top + r.bottom) / 2 - mid) } }).sort((a, b) => a.d - b.d)[0]; return { hash: location.hash, h: document.querySelector('main h1, main h2').innerText, scrollTop: p.scrollTop, centered: c.t } }` | `hash` is `#call/<A>/transcript`; `h` is "Acme weekly sync"; `scrollTop` is above 0 and `centered` starts with `43.` (Dana Lee at 0:43): the transcript scrolled that turn to the middle of the pane |
 | 2 | Navigate to `{{base_url}}/#link=echo%3A%2F%2Fthread%2Facme-rollout` | The hash becomes `#project/acme-rollout/brief`; the thread "Acme rollout" is open on its Brief tab ("Rolling out single sign-on and the data migration for Acme, Berlin first.") |
 | 3 | Navigate to `{{base_url}}/#link=echo%3A%2F%2Fclient%2Facme` | The hash becomes `#client/acme/overview`; the client Acme's Overview: its About ("A manufacturer of everything, 4,000 people across Europe.") and under THREADS "Acme renewal" (Negotiation) and "Acme rollout" (Active) |
 | 4 | Navigate to `{{base_url}}/#link=echo%3A%2F%2Fperson%2Fdana%40acme.example` | The hash becomes `#project/acme-rollout/people`; the right panel shows "Person" with "Dana Lee", "Delivery manager · Acme" and `dana@acme.example · Acme` |
@@ -51,4 +51,5 @@ Each link opened its place; nothing changed.
 
 ## Notes
 - The native window opens `echo://` URLs the system gives it by loading the page at `#link=…` (`window.rs`, the `Some(c) if c.starts_with("echo://")` branch); the served window takes the same route, so this case covers the routing. The system handing the URL to Echo (the registered scheme, a click in another app) needs the installed app: person-run.
+- Step 1 checks where the jump leaves the transcript, not the mark: the turn gets `class="turn hit" id="jump"` for one render only (`app.js` `render()`: `#jump` is scrolled into view with `block: 'center'`, then `S.jump` is cleared and the next redraw, a few ms later, drops the mark). The lasting effect is the pane's scroll: the 0:43 turn is the one nearest the pane's middle, and `scrollTop` is above 0 (it is 0 when the call opens without a moment).
 - A link inside the minutes or a Brain view goes through the same `openLink` (`window.echo.openLink`).
