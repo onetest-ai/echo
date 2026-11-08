@@ -7,7 +7,7 @@
  "features": [
   {
    "id": "F-CLIENT-01",
-   "feature": "A client opens from the Threads list or Thread actions → Open <client>, on tabs Overview, Calls, Tasks (open count), People, Profile",
+   "feature": "A client opens from the Threads list or Thread actions → Open <client>, on tabs Overview, Calls, Tasks, People (each with its count, none when zero), Profile",
    "priority": "high",
    "check": "agent",
    "axes": [

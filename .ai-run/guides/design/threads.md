@@ -204,7 +204,8 @@ Every open thread's open tasks in piles:
 
 ### Client page (`tasks::client`)
 Overview (the user's `projects/clients/<id>.md` + a card per thread: stage, calls, stories done, open tasks by pile,
-last 3 decisions, open risks — without a response first — and questions), Calls, Tasks, Profile.
+last 3 decisions, open risks — without a response first — and questions), Calls, Tasks, People, Profile. Calls, Tasks and
+People show their count, none when it is zero (`clientTabs`, `client-tabs.test.mjs`).
 
 ## Decisions
 

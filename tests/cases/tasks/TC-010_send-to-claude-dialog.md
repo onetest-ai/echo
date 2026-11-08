@@ -1,6 +1,6 @@
 ---
 id: TC-010
-title: Send to Claude opens the dialog with the task and a skill, and Cancel closes it
+title: Send to Claude opens the dialog with the task and a skill; Escape, Cancel and leaving the view close it
 priority: high
 type: functional
 requirements: [F-TASK-10]
@@ -10,7 +10,7 @@ platform: any
 tags: [tasks, claude]
 ---
 
-# TC-010: Send to Claude opens the dialog with the task and a skill, and Cancel closes it
+# TC-010: Send to Claude opens the dialog with the task and a skill; Escape, Cancel and leaving the view close it
 
 **Module:** Tasks | **Priority:** High | **Type:** Functional
 
@@ -34,11 +34,12 @@ tags: [tasks, claude]
 | 3 | Read the skill field | A skill is already chosen: its description starts "Use when a task is to write a follow-up mail"; a cross with the label "No skill — just the task" |
 | 4 | Click the cross | The field is now an input with the placeholder "Just the task — or type to find a skill (1)" |
 | 5 | Click the input | A list opens with the skill and the mark "fits best" |
-| 6 | Press Escape twice | The list folds, then the dialog closes; nothing was sent (the panel "Claude" at the bottom is not opened) |
+| 6 | Press Escape, read the dialog, then press Escape again | After the first: the dialog is still open, the list folded (no "fits best"); after the second: no dialog; nothing was sent (the panel "Claude" at the bottom is not opened) (#108) |
 | 7 | Click "Send to Claude" again and click "Cancel" | The dialog closes |
+| 8 | Click "Send to Claude" again, then navigate to `{{base_url}}/#today` | Today shows with no dialog (no `role=dialog`) over it (#108) |
 
 ## Expected Final State
-The dialog was opened and cancelled twice; no Claude session was started and the Details are still open.
+The dialog was opened three times and closed by Escape, Cancel and leaving the view; no Claude session was started.
 
 ## Teardown
 - `echoctl project ledger acme-rollout edit '{"op":"edit","node":"T003","set":{"state":"cancelled"}}'` takes the task out of the piles

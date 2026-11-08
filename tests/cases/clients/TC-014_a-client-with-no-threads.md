@@ -33,7 +33,7 @@ tags: [clients, empty, threads, found]
 | 1 | Navigate to `{{base_url}}/#projects` and read the group "Duff" | The name "Duff" has no thread row and no fold arrow |
 | 2 | Click the name "Duff" | The route is `#client/duff/overview`; the head says "Duff", the tag "client" and "0 threads · duff.example" |
 | 3 | Read the Overview | The block "About Duff" says "Nothing yet — who they are, what you do for them, who matters."; the section "Threads" says "No threads for this client yet — add one on Profile." |
-| 4 | Click the tab "Calls" | "No calls in this client's threads yet." (the tab has no number) |
+| 4 | Click the tab "Calls" | "No calls in this client's threads yet." (the tab has no number, as Tasks has none: #173) |
 | 5 | Click the tab "Tasks" | Four piles with 0 and "Nothing here"; no button "Others" |
 | 6 | Click the tab "People" | The text "Nobody in this client's threads yet" and "People join as its calls come in, or add someone with + Person."; there is no "+ Person" button on a client page |
 | 7 | Click the tab "Profile" | The row "Threads" holds the token "+ New thread"; the row below has the button "Remove this client…" (not pressed) |

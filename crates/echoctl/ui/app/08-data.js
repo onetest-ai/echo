@@ -177,6 +177,8 @@ function hashText() { try { return decodeURIComponent(location.hash) } catch { r
 function route() {
   const h = hashText().slice(1)
   // A menu of the page it leaves doesn't follow to the next one (nor takes the next Escape).
+  // Nor does the Send to Claude dialog: left open it covered the next view and took its clicks (#108).
+  S.claudeSend = null
   S.liveMenu = false; S.pj.menu = false; S.pj.picker = false; S.pj.evPicker = null; S.pj.fieldsMenu = false; S.pj.colMenu = null; S.pj.viewMenu = false
   // An echo:// link the window was opened at (the system, `echoctl app open --link`): routed where it points.
   // The page opened at a link goes where the link points, or, for one Echo can't open, nowhere: no call is opened
