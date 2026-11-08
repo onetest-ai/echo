@@ -31,5 +31,5 @@ external_id: TC-WIN-010
 With "System", the window follows the system appearance both ways, live.
 
 ## Notes
-- The native window is a WebKit view that hands the page the system's `prefers-color-scheme` (`app.css`, `@media (prefers-color-scheme: dark)`; `app.js` redraws graphs on its change). That the webview passes a real macOS switch through stays a person's look once.
+- The native window is a WebKit view that hands the page the system's `prefers-color-scheme` (`app.css`, `@media (prefers-color-scheme: dark)`; `ui/app/*.js` redraws graphs on its change). That the webview passes a real macOS switch through stays a person's look once.
 - Run on 2026-11-07 (S-21, served window): PASS.

@@ -30,7 +30,7 @@ platform: any
 | HOSTILE-45 | office, 10 000 characters |
 | HOSTILE-46 | a fact (markup) |
 | HOSTILE-47 | the fact's quote (Markdown) |
-| HOSTILE-29 | person in the hostile thread (markup name) with address hostile@umbrella.example |
+| HOSTILE-29 | person in the hostile thread (markup name) with address hostile-thread@umbrella.example (its own: HOSTILE-41 has hostile@umbrella.example) |
 | HOSTILE-30 | their role (right-to-left) |
 | HOSTILE-04 | organisation name (markup), not a client; set with `echoctl org add` |
 
@@ -54,7 +54,7 @@ platform: any
 | 7 | Click the row of `HOSTILE-41` | The person's panel opens (right panel or inline) with the name as text, "who they are" with HOSTILE-43, the group HOSTILE-44, the office HOSTILE-45, a fact with HOSTILE-46 and its quote HOSTILE-47 |
 | 8 | Run `browser_evaluate` with `() => { const t = document.body.innerText; return { facts: t.includes('HOSTILE-46') && t.includes('HOSTILE-47'), lit: t.includes('<script>alert(1)</script>'), badLinks: [...document.querySelectorAll('a[href]')].filter((a) => /^\s*javascript:/i.test(a.getAttribute('href'))).length, imgs: document.querySelectorAll('main img[src^="http"]').length } }` | `facts` and `lit` are `true`; `badLinks` 0; `imgs` 0 (the `![img](https://evil.example/i.png)` of the quote loaded nothing) |
 | 9 | Run check A (`browser_evaluate`) | `handlers` 0, `inlineScripts` 0, `badUrls` 0, `brokenImgs` 0 and `scrollWidth` <= `innerWidth` |
-| 10 | Click `[data-pp="view"][data-v="map"]`, then `[data-pp="view"][data-v="org"]` | Both views draw without an error text; person cards in them show `HOSTILE-41` as text (a name may be cut with "…") |
+| 10 | Click `[data-pp="view"][data-v="map"]`, then `[data-pp="view"][data-v="org"]` | Both views draw without an error text (they draw the thread's members; HOSTILE-41 is "Seen in calls", not a member, so it isn't in them — its name is checked in the list, step 3) |
 | 11 | Run check A (`browser_evaluate`) | `handlers` 0, `inlineScripts` 0, `badUrls` 0, `brokenImgs` 0 and `scrollWidth` <= `innerWidth` |
 | 12 | Navigate to `{{base_url}}/#project/thread-hostile-21-img-src-x-onerror-alert-1-script-alert-1-s/people`, `[data-pp="view"][data-v="list"]` | The thread's list has a person "Person HOSTILE-29 <img src=x onerror=alert(1)>…" with the role text starting HOSTILE-30 (right-to-left) |
 | 13 | Run `browser_evaluate` with `() => { const r = [...document.querySelectorAll('main *')].find((e) => e.children.length === 0 && e.textContent.includes('HOSTILE-30')); return { found: !!r, dir: r ? getComputedStyle(r.closest('main')).direction : null } }` | `found` is `true` and `dir` is `ltr` |

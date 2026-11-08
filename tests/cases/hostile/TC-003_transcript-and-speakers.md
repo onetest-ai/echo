@@ -47,7 +47,7 @@ platform: any
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | Navigate to `{{base_url}}/` and wait for the text "Your day". Run `browser_run_code_unsafe` with the guard code (see Checks): it records every dialog and page error from now on | It returns `armed` |
-| 2 | Navigate to `{{base_url}}/#calls`, wait for the text "Hostile call HOSTILE-61", click the row `[data-call*="HOSTILE-61"]` | The URL hash starts with `#call/2026-11-05_090000-`; the header shows a title containing "HOSTILE-61" |
+| 2 | Navigate to `{{base_url}}/#calls`, wait for the text "Hostile call HOSTILE-61", click the row `[data-call*="HOSTILE-61"]` | The URL hash starts with `#call/<the build date − 1>_090000-`; the header shows a title containing "HOSTILE-61" |
 | 3 | Click `role=tab[name="Transcript"]` | The URL hash ends with `/transcript`; turns `.turn[data-t]` are listed |
 | 4 | Run `browser_evaluate` with `() => [...document.querySelectorAll('.turn')].map((t) => (t.querySelector('.who') \|\| {}).innerText + ' \| ' + t.innerText.slice(0, 40))` | Six turns; the speaker names contain, in order, `HOSTILE-62`, `HOSTILE-64`, `HOSTILE-66`, `HOSTILE-68`, `HOSTILE-70`; texts begin `HOSTILE-63`, `HOSTILE-65`, `HOSTILE-67`, `HOSTILE-69`, `HOSTILE-71`, `HOSTILE-72` |
 | 5 | Run `browser_evaluate` with `() => [...document.querySelectorAll('.turn')].some((e) => e.innerText.includes('<img src=x onerror=alert(1)>'))` | Returns `true`: turn 1 (and the speaker name HOSTILE-62) show `<img src=x onerror=alert(1)>` as text |

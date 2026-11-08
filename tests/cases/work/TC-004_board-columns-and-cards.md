@@ -47,4 +47,4 @@ The board shows both cards with their due chips; T002's is overdue.
 - Sets and clears the due date of T002 (its history keeps both).
 
 ## Notes
-- Step 7 fails until the bug is filed and fixed: the board's own menus (Fields, a column's menu, the view menu) close only on a click outside them (`app.js`, the click handler that resets `S.pj.fieldsMenu`); the Escape handler closes the call menu and others but not these. Step 8 closes it so the stages after it start clean.
+- Step 7 fails until #152: the board's own menus (Fields, a column's menu, the view menu) close only on a click outside them (`ui/app/*.js`, the click handler that resets `S.pj.fieldsMenu`); the Escape handler closes the call menu and others but not these. Step 8 closes it so the stages after it start clean.

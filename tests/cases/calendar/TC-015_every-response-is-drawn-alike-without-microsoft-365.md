@@ -48,5 +48,5 @@ The six cards are alike; the answer to the invite shows nowhere in the calendar.
 - Click "Close" on the card
 
 ## Notes
-- Documents the window as it is: without Microsoft 365 the calendar is built from the agenda file and `window.rs` `calendar()` sets `declined: false` for every agenda meeting, so the response is not read here. Today and Coming up today do read it (`prep/TC-006`). If the calendar starts to grey declined meetings, update this case.
+- Documents the window as it is: without Microsoft 365 the calendar is built from the agenda file and `window/mod.rs` `calendar()` sets `declined: false` for every agenda meeting, so the response is not read here. Today and Coming up today do read it (`prep/TC-006`). If the calendar starts to grey declined meetings, update this case.
 - Creates or changes nothing; no button is pressed.

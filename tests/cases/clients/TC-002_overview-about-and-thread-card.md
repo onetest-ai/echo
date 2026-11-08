@@ -45,4 +45,4 @@ Acme has the About text; the thread card is as read.
 - Changes the About text of Acme.
 
 ## Notes
-- The About editor saves on the platform's own modifier: ⌘ on a Mac, Ctrl elsewhere (`app.js`, the `pj-brief` keydown: `MAC ? e.metaKey : e.ctrlKey`), like the other editors. On a Mac `Control+S` does nothing; that is intended, not a failure.
+- The About editor saves on the platform's own modifier: ⌘ on a Mac, Ctrl elsewhere (`ui/app/*.js`, the `pj-brief` keydown: `MAC ? e.metaKey : e.ctrlKey`), like the other editors. On a Mac `Control+S` does nothing; that is intended, not a failure.

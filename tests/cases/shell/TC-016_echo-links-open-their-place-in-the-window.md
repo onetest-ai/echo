@@ -17,7 +17,7 @@ tags: [shell, links]
 
 ## Preconditions
 - Standard data set built right before the run: `tests/fixtures/serve.sh up <dir> <port> --set standard` (`data: standard`); the window is served at `{{base_url}}` and `{{base_url}}/` was loaded first (the cookie); every `echoctl` command runs after `. <dir>/env`
-- A link is opened the way the app opens one the system hands it (`window.rs`: the page is loaded at `#link=<the link, URL-encoded>`): navigate to `{{base_url}}/#link=` + `encodeURIComponent(link)`. Each step is a fresh navigation (`browser_navigate`, a full load)
+- A link is opened the way the app opens one the system hands it (`window/mod.rs`: the page is loaded at `#link=<the link, URL-encoded>`): navigate to `{{base_url}}/#link=` + `encodeURIComponent(link)`. Each step is a fresh navigation (`browser_navigate`, a full load)
 - `A=$(ls "$ECHOCTL_HOME/calls" | grep -- '-acme-weekly-sync$' | tail -1)` (today's Acme weekly sync)
 
 ## Test Data
@@ -50,6 +50,6 @@ tags: [shell, links]
 Each link opened its place; nothing changed.
 
 ## Notes
-- The native window opens `echo://` URLs the system gives it by loading the page at `#link=…` (`window.rs`, the `Some(c) if c.starts_with("echo://")` branch); the served window takes the same route, so this case covers the routing. The system handing the URL to Echo (the registered scheme, a click in another app) needs the installed app: person-run.
-- Step 1 checks where the jump leaves the transcript, not the mark: the turn gets `class="turn hit" id="jump"` for one render only (`app.js` `render()`: `#jump` is scrolled into view with `block: 'center'`, then `S.jump` is cleared and the next redraw, a few ms later, drops the mark). The lasting effect is the pane's scroll: the 0:43 turn is the one nearest the pane's middle, and `scrollTop` is above 0 (it is 0 when the call opens without a moment).
+- The native window opens `echo://` URLs the system gives it by loading the page at `#link=…` (`window/mod.rs`, the `Some(c) if c.starts_with("echo://")` branch); the served window takes the same route, so this case covers the routing. The system handing the URL to Echo (the registered scheme, a click in another app) needs the installed app: person-run.
+- Step 1 checks where the jump leaves the transcript, not the mark: the turn gets `class="turn hit" id="jump"` for one render only (`ui/app/*.js` `render()`: `#jump` is scrolled into view with `block: 'center'`, then `S.jump` is cleared and the next redraw, a few ms later, drops the mark). The lasting effect is the pane's scroll: the 0:43 turn is the one nearest the pane's middle, and `scrollTop` is above 0 (it is 0 when the call opens without a moment).
 - A link inside the minutes or a Brain view goes through the same `openLink` (`window.echo.openLink`).

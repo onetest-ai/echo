@@ -1280,7 +1280,7 @@ def build_threads(d, H):
         q("project", "source", hid, "--chat", "19:hostile@thread.v2", "--name", H.text(place, "", kind="html", one_line=True, where=f"projects/{hid} source name"))
         q("org", "set", "acme", "--aliases", "ACME Corp,Acme GmbH," + H.text(place, "", kind="emoji", one_line=True, where="clients.json acme aliases").replace(",", " "))
         q("project", "person", hid, H.text("People: names, titles, roles, groups, \"who they are\", facts, addresses; organisation names and domains", "Person", kind="html", one_line=True,
-                                            where=f"projects/{hid} people"), "--email", "hostile@umbrella.example", "--role", H.text("People: names, titles, roles", "", kind="rtl", one_line=True, where=f"projects/{hid} people role"))
+                                            where=f"projects/{hid} people"), "--email", "hostile-thread@umbrella.example", "--role", H.text("People: names, titles, roles", "", kind="rtl", one_line=True, where=f"projects/{hid} people role"))
     d.manifest["threads"] = [{"id": t, "name": n, "client": c, "stage": s} for t, n, c, s in THREADS]
 
 
