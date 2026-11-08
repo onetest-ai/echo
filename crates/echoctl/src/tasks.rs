@@ -54,6 +54,18 @@ impl Me {
     }
 }
 
+/// The names the user goes by among a ledger's owners ("Me", their name…), sorted: the Work tab's
+/// Owner filter shows them as one entry.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn my_names(me: &Me, nodes: &Value) -> Vec<String> {
+    let mut v: Vec<String> = nodes.as_object().into_iter().flat_map(|m| m.values())
+        .flat_map(|n| [&n["internal_owner"], &n["client_owner"]])
+        .filter_map(|o| o.as_str()).filter(|o| me.is(o)).map(str::to_owned).collect();
+    v.sort();
+    v.dedup();
+    v
+}
+
 fn open(state: &str) -> bool {
     matches!(state, "open" | "in_progress" | "blocked")
 }
@@ -367,6 +379,18 @@ mod tests {
         assert!(me.is("Me") && me.is("alex") && me.is("Alex Morgan") && me.is("alex@example.com"));
         assert!(!me.is("Dana Kowal") && !me.is(""));
         assert!(Me::of(None).is("me"));
+    }
+
+    #[test]
+    fn my_names_are_the_owners_of_a_ledger_that_are_me() {
+        // #114: the Work tab's Owner filter lists the user once, whatever name an item was recorded under.
+        let me = Me::of(Some(&Person { name: "Alex Morgan".into(), email: None }));
+        let nodes = json!({
+            "T001": {"internal_owner": "Me"}, "T002": {"internal_owner": "Alex Morgan"}, "T003": {"client_owner": "Dana Kowal"},
+            "T004": {"internal_owner": "Alex Morgan"}, "T005": {}
+        });
+        assert_eq!(my_names(&me, &nodes), vec!["Alex Morgan".to_string(), "Me".to_string()]);
+        assert!(my_names(&me, &json!({})).is_empty());
     }
 
     #[test]

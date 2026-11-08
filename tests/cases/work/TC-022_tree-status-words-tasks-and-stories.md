@@ -31,7 +31,7 @@ tags: [work, tree, status, pairwise]
 | Umbrella proposal | umbrella-proposal | T006 | task | - | cancelled | - | cancelled | cancelled |
 | Umbrella proposal | umbrella-proposal | S002 | story | - | in_progress | Zoe Martin | waiting | waiting |
 | Umbrella proposal | umbrella-proposal | S003 | story | - | merged | - | not shown | - |
-| Globex pilot | globex-pilot | T004 | task | - | blocked | Kim Park | waiting | waiting |
+| Globex pilot | globex-pilot | T004 | task | - | blocked | Kim Park | blocked | blocked |
 | Globex pilot | globex-pilot | T005 | task | - | open | Kim Park | waiting | waiting |
 | Globex pilot | globex-pilot | T008 | task | - | done | Kim Park | done | done |
 | Globex pilot | globex-pilot | S002 | story | - | cancelled | - | cancelled | cancelled |
@@ -67,7 +67,7 @@ Workstreams (epics) with nothing under them:
 | 1 | Navigate to `{{base_url}}/#project/acme-rollout/work`, click the view "Tree" if it is not the active one, and turn "Open only" off if it is on | The tree lists closed items too |
 | 2 | For each Acme rollout row of the first table find the tree row of the item and read its tag (`.wk-k`) and its status (`.wk-st`); then look for the thread's workstream headers of the second table | The tag is the Type tag of the row (none for "-") and the status is "● " + the Word with the class of the last column; a decision row has no status; a row whose Word is "not shown" does not exist; none of the second table's headers is shown (a workstream with nothing under it has no header) and the tree has the header "General · workstream" |
 | 3 | Do steps 1 and 2 in `acme-renewal` | The same for Acme renewal's rows and headers |
-| 4 | Do steps 1 and 2 in `globex-pilot`, and read T004 "Check the firewall rules" (state blocked, waiting for Kim Park) | The same for Globex pilot's rows and headers; T004 reads "● waiting" (amber), whereas the board puts the same card in "Blocked" (`TC-018`) |
+| 4 | Do steps 1 and 2 in `globex-pilot`, and read T004 "Check the firewall rules" (state blocked, waiting for Kim Park) | The same for Globex pilot's rows and headers; T004 reads "● blocked" (red), as the board puts the same card in "Blocked" (`TC-018`) |
 | 5 | Do steps 1 and 2 in `initech-hiring` (it has no row in the second table) | The same for Initech hiring's rows |
 | 6 | Do steps 1 and 2 in `umbrella-proposal`, and read T010 "Check the licence count" (blocked, holds up S001, no person waited for) | The same for Umbrella proposal's rows and headers; T010 reads "● blocked" (red) and carries the tag "holds up 1" |
 
@@ -81,5 +81,4 @@ Every item of the table shows the word of its row.
 - Turns "Open only" off and on again in five threads (a saved view setting).
 
 ## Notes
-- A task or story that is waiting for a person reads "waiting" whatever its open state, blocked included (`workStatus`); a done session reads "held"; waiting for an item changes no word.
-- The tree and the board disagree on a blocked task that waits for a person: this case records the tree's word and `TC-018` the board's column. Verify at run time whether one should follow the other.
+- A task or story that is waiting for a person reads "waiting" when it is to do or in progress; a blocked one reads "blocked" (the user's own word wins, as on the board: #125) (`workStatus`); a done session reads "held"; waiting for an item changes no word.

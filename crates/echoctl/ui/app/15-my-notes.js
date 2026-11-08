@@ -285,7 +285,7 @@ function needsPanel() {
     }
     return keys.map((g) => `<div class="ny-grp"><span class="cap">${esc(groupName(g))}</span><span class="set-sub">${by.get(g).length}</span></div>${capped(g, by.get(g))}`).join('')
   }
-  const doneRow = (x) => `<div class="ny-done"><span class="ok">✓</span><s>${esc(x.title || x.key)}</s><span class="grow"></span><span class="set-sub">${esc(relDay(String(x.at || '').slice(0, 10)))}</span></div>`
+  const doneRow = (x) => `<div class="ny-done"><span class="ok">✓</span><s>${esc(x.title || x.key)}</s><span class="grow"></span><span class="set-sub">${esc(relDay(x.at))}</span></div>`
   let body
   if (NY.filter === 'done') body = done.length ? done.map(doneRow).join('') : '<p class="panel-empty">Nothing decided this week yet.</p>'
   else if (NY.filter === 'blocking') body = urgent.map(row).join('') || '<p class="panel-empty">Nothing blocks work.</p>'

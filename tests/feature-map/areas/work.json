@@ -16,7 +16,7 @@
   },
   {
    "id": "F-WORK-02",
-   "feature": "The bar filters by layout, kind (with counts), owner (Anyone, Nobody named, each name) and Open only; on a board Group by (none, story, owner) and Fields ▾",
+   "feature": "The bar filters by layout, kind (with counts), owner (Anyone, Nobody named, the user once as \"Me (name)\" whichever name their items carry, each other name) and Open only (Owner and Kind narrow every board column, Done included; Open only leaves Done alone); on a board Group by (none, story, owner) and Fields ▾",
    "priority": "high",
    "check": "agent",
    "axes": [
@@ -39,7 +39,7 @@
   },
   {
    "id": "F-WORK-04",
-   "feature": "The board's columns (To do, In progress, Waiting, Blocked, Done) hold tasks and questions; a card shows id, story, owner avatar (client-owed marked), title, kind, due (late in red), waiting on, holds up, last call",
+   "feature": "The board's columns (To do, In progress, Waiting, Blocked, Done) hold tasks and questions; a card shows id, story, owner avatar (client-owed marked), title, kind, due (late in red, by the local date), waiting on (not once done), holds up, last call",
    "priority": "high",
    "check": "agent",
    "axes": [
@@ -71,7 +71,7 @@
   },
   {
    "id": "F-WORK-07",
-   "feature": "The tree shows workstreams › stories (criteria m / n, due) › tasks and questions, decisions and risks at the story's level, with statuses (to do, answered, handled, no response, held, waiting…)",
+   "feature": "The tree shows workstreams › stories (criteria m / n, due) › tasks and questions, decisions and risks at the story's level, with statuses (to do, answered, handled, no response, held, waiting…; blocked wins over waiting, as on the board)",
    "priority": "high",
    "check": "agent",
    "axes": [
