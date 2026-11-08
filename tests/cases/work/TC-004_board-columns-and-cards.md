@@ -35,7 +35,7 @@ tags: [work, board]
 | 5 | Uncheck "Due date" | Neither card shows a due chip |
 | 6 | Check "Due date" again | The due chips are back |
 | 7 | Press Escape | The Fields menu (`.bd-menu`) closes, as "Call actions" and "Thread actions" close on Escape |
-| 8 | If the menu is still open, click an empty part of the board header | The menu closes |
+| 8 | Open a column's menu (`[data-pj="col-menu"]`, the first) and press Escape; then the view menu (`[data-pj="view-menu"]`) and press Escape | Each menu (`.menu`) opens and closes on Escape |
 
 ## Expected Final State
 The board shows both cards with their due chips; T002's is overdue.
@@ -47,4 +47,4 @@ The board shows both cards with their due chips; T002's is overdue.
 - Sets and clears the due date of T002 (its history keeps both).
 
 ## Notes
-- Step 7 fails until #152: the board's own menus (Fields, a column's menu, the view menu) close only on a click outside them (`ui/app/*.js`, the click handler that resets `S.pj.fieldsMenu`); the Escape handler closes the call menu and others but not these. Step 8 closes it so the stages after it start clean.
+- Step 7 checks #152: the board's own menus (Fields, a column's ⋯, the view menu) once closed only on a click outside them.
