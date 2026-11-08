@@ -1170,7 +1170,7 @@ pub fn ask_checked(message: &str, buttons: &[&str], default: &str) -> Result<Opt
             .output()
             .context("couldn't run PowerShell")?;
         let stdout = String::from_utf8_lossy(&out.stdout);
-        return match stdout.lines().map(str::trim).filter(|l| !l.is_empty()).next_back() {
+        return match stdout.lines().map(str::trim).rfind(|l| !l.is_empty()) {
             Some("6") => Ok(Some(yes.to_string())),
             Some("7") | Some("-1") => Ok(None),
             _ => bail!("the popup gave no answer: {}", String::from_utf8_lossy(&out.stderr).trim()),
