@@ -232,7 +232,8 @@ function workBoard(w, pass) {
   const header = `<div class="bd-grid bd-heads" style="${grid}">${cols.map(head).join('')}<div class="bd-col-h add"><button class="tok add" data-pj="col-add">+ Column</button>${hiddenCols.length ? `<button class="link-btn" data-pj="col-unhide">${hiddenCols.length} hidden</button>` : ''}</div></div>`
   const laneHtml = (l) => `${l.title ? `<div class="bd-lane-h">${l.title}<span class="bd-meta">${l.rows.length}</span></div>` : ''}<div class="bd-grid" style="${grid}">${cols.map((c) => `<div class="bd-col" data-drop="${c.state === 'waiting' ? '' : esc(c.id)}">${l.rows.filter(([, x]) => x.id === c.id).map(([n]) => card(n)).join('') || '<div class="bd-empty"></div>'}</div>`).join('')}<div></div></div>`
   if (!placed.length) return `<div class="wk-empty"><b>Nothing here</b><p>No tasks match the filters.</p></div>`
-  return `<div class="bd${b.group !== 'none' ? ' grouped' : ''}">${header}${lanes.map(laneHtml).join('')}</div>`
+  // data-keep-scroll: a redraw (opening a column's menu) keeps where the board was scrolled sideways (#109).
+  return `<div class="bd${b.group !== 'none' ? ' grouped' : ''}" data-keep-scroll>${header}${lanes.map(laneHtml).join('')}</div>`
 }
 // Drag a card to another column: its state, as the user set it (pinned, undoable).
 document.addEventListener('dragstart', (e) => {
