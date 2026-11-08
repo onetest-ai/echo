@@ -24,7 +24,7 @@ cases:
 
 **Environment:** this Mac: the dev build run as a second app beside the user's own Echo, on its own test data and config (never `~/echo`); the window served on the data for stage 4.
 
-**Data:** `small`, hermetic: `tests/fixtures/make_data.py <dir> --ai fake`; the speech model linked into its config and TestCall for stage 3's call.
+**Data:** `small`, hermetic: `tests/fixtures/make_data.py <dir> --ai fake` (no thread sync of the app's own: `project_sync` off on small `--ai` data); the speech model linked into its config and TestCall for stage 3's call. The waits for the app are waits for its state (`tests/fixtures/wait.py`).
 
 **Story:** Over days of use: a second start refused, quitting and coming back without first-run questions, moving the data folder, the window following the system's light and dark; then what needs an installed Echo, a login or the network: start at login, `app start`, the native window and its Dock icon, updates, offline, the network it talks to.
 

@@ -190,6 +190,13 @@
    "axes": [
     "call.status"
    ]
+  },
+  {
+   "id": "F-MIN-20",
+   "feature": "The user's own notes, taken during the call (with its time) and after it, are part of the minutes, in their structure (an action item, a decision), not pasted as a list",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
   }
  ]
 }
