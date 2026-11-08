@@ -75,8 +75,8 @@
 .detail .ec-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .detail .ec-chips .pj-chips { display: contents; }
 .detail .ec-main { padding: 12px 18px 14px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; background: color-mix(in srgb, var(--accent) 4%, var(--surface)); }
-/* Its buttons: pills on one line (Record and Prepare side by side) */
-.detail .ec-acts { display: flex; flex-wrap: nowrap; gap: 8px; align-items: center; }
+/* Its buttons: pills on one line (Record and Prepare side by side); a second line only when they don't fit */
+.detail .ec-acts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .detail .ec-acts > .btn, .detail .ec-acts .split .btn { height: 30px; font-size: 13px; white-space: nowrap; flex: none; }
 .detail .ec-acts > .btn { border-radius: 999px; padding: 0 14px; }
 .detail .ec-acts .split { flex: none; }

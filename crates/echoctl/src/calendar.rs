@@ -65,11 +65,16 @@ pub fn view_event(ev: &Value) -> Option<Value> {
     let start = graph_time(ev.get("start")?)?;
     let end = ev.get("end").and_then(graph_time).unwrap_or(start + Duration::minutes(30));
     let people = ev.get("attendees").and_then(Value::as_array).map(|a| {
-        a.iter().filter(|x| x.get("type").and_then(Value::as_str) != Some("resource")).count()
+        a.iter()
+            .filter(|x| x.get("type").and_then(Value::as_str) != Some("resource"))
+            .filter(|x| x.pointer("/status/response").and_then(Value::as_str) != Some("declined"))
+            .count()
     });
-    // Who's coming, for the card (rooms left out): their names as the invite has them, else the address.
+    // Who's coming, for the card (rooms and those who declined left out): their names as the invite has them, else
+    // the address.
     let names: Vec<String> = ev.get("attendees").and_then(Value::as_array).into_iter().flatten()
         .filter(|x| x.get("type").and_then(Value::as_str) != Some("resource"))
+        .filter(|x| x.pointer("/status/response").and_then(Value::as_str) != Some("declined"))
         .filter_map(|x| x.pointer("/emailAddress/name").or_else(|| x.pointer("/emailAddress/address")).and_then(Value::as_str))
         .map(str::trim).filter(|n| !n.is_empty()).take(50).map(str::to_owned).collect();
     Some(json!({
@@ -294,14 +299,15 @@ mod tests {
     }
 
     #[test]
-    fn the_card_gets_who_is_coming_by_name_rooms_left_out() {
+    fn the_card_gets_who_is_coming_by_name_rooms_and_declined_left_out() {
         let ev = json!({"id": "e1", "subject": "Design review", "start": {"dateTime": "2026-11-08T15:00:00.0000000", "timeZone": "UTC"},
             "attendees": [{"type": "required", "emailAddress": {"name": "Kim Park", "address": "kim@globex.example"}},
                           {"type": "optional", "emailAddress": {"address": "noor@globex.example"}},
+                          {"type": "required", "status": {"response": "declined"}, "emailAddress": {"name": "Raj Mehta", "address": "raj@umbrella.example"}},
                           {"type": "resource", "emailAddress": {"name": "Room 4", "address": "room4@globex.example"}}]});
         let v = view_event(&ev).unwrap();
-        assert_eq!(v["people"], 2);
-        assert_eq!(v["names"], json!(["Kim Park", "noor@globex.example"]));
+        assert_eq!(v["names"], json!(["Kim Park", "noor@globex.example"]), "rooms and who declined left out");
+        assert_eq!(v["people"], 2, "and the count with them");
     }
 
     #[test]

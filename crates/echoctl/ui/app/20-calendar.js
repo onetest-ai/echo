@@ -159,10 +159,14 @@ function eventDetail(e, now) {
   const lines = [line, prep.line].filter(Boolean).join(' ')
   const main = acts || lines ? `<div class="ec-main">${acts ? `<div class="ec-acts">${acts}</div>` : ''}${lines ? `<p class="why">${lines}</p>` : ''}</div>` : ''
   // Who's coming: the organizer first, then three names and how many more.
-  const others = (e.names || []).filter((n) => n !== e.organizer)
-  const people = e.organizer || others.length ? `<section class="ec-sec"><div class="ec-cap">People</div>
+  // The names come at most 50: how many more is counted from the invite's own number.
+  const names = e.names || [], others = names.filter((n) => n !== e.organizer)
+  const total = Math.max(others.length, (e.people || 0) - (names.includes(e.organizer) ? 1 : 0)), more = total - Math.min(3, others.length)
+  const invited = others.length ? `<div class="ec-names" title="${esc(others.join(', '))}">${esc(others.slice(0, 3).join(', '))}${more > 0 ? ` <span class="set-sub">+${more} more</span>` : ''}</div>`
+    : total > 0 ? `<div class="ec-names set-sub">${total} invited</div>` : ''
+  const people = e.organizer || invited ? `<section class="ec-sec"><div class="ec-cap">People</div>
       ${e.organizer ? `<div class="ec-org"><span class="ec-av" aria-hidden="true">${esc([...e.organizer][0] || '')}</span><b>${esc(e.organizer)}</b><span class="set-sub">organizer</span></div>` : ''}
-      ${others.length ? `<div class="ec-names" title="${esc(others.join(', '))}">${esc(others.slice(0, 3).join(', '))}${others.length > 3 ? ` <span class="set-sub">+${others.length - 3} more</span>` : ''}</div>` : !e.names && e.people ? `<div class="ec-names set-sub">${e.people} invited</div>` : ''}</section>` : ''
+      ${invited}</section>` : ''
   const series = seriesEditor(e)
   const recap = e.recap && e.recap.length ? `<section class="ec-sec"><div class="ec-cap">Last time</div><ul>${e.recap.map((r) => `<li>${esc(r)}</li>`).join('')}</ul></section>` : ''
   const where = e.location ? `<span class="ec-where">${esc(e.location)}</span>` : ''
@@ -249,14 +253,33 @@ document.addEventListener('contextmenu', (ev) => {
 // Any click closes the menu (the item's own handler still sees its button); Escape too.
 document.addEventListener('click', (ev) => {
   if (!S.cal.ctx) return
-  const c = ev.target.closest && ev.target.closest('[data-ev-ctx]')
+  const inMenu = ev.target.closest && ev.target.closest('.ev-ctx')
+  const c = inMenu && ev.target.closest('[data-ev-ctx]')
   if (c) {
     S.cal.selected = c.dataset.id
     if (c.dataset.evCtx === 'thread') S.pj.evPicker = c.dataset.id
   }
+  // The copy button is redrawn away: the notice says it was copied.
+  if (inMenu && ev.target.closest('[data-copy]')) S.notice = 'The Teams link is copied.'
+  closeEventMenu(!inMenu)
+})
+/** The menu goes; its meeting's block gets the focus back (unless something else was clicked). */
+function closeEventMenu(refocus) {
+  const id = S.cal.ctx && S.cal.ctx.id
   S.cal.ctx = null
   render()
+  if (refocus && id) { const b = document.querySelector(`.cal .ev[data-ev="${CSS.escape(id)}"]`); if (b) b.focus() }
+}
+// Keys in the menu: arrows, Home and End move between its items; Escape closes it.
+document.addEventListener('keydown', (ev) => {
+  if (!S.cal.ctx) return
+  if (ev.key === 'Escape') { ev.preventDefault(); ev.stopImmediatePropagation(); return closeEventMenu(true) }
+  const items = [...document.querySelectorAll('.ev-ctx .menu-item:not([disabled])')]
+  if (!items.length || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(ev.key)) return
+  ev.preventDefault()
+  const i = items.indexOf(document.activeElement)
+  const n = ev.key === 'Home' ? 0 : ev.key === 'End' ? items.length - 1 : ev.key === 'ArrowDown' ? (i + 1) % items.length : (i - 1 + items.length) % items.length
+  items[n].focus()
 })
-document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && S.cal.ctx) { S.cal.ctx = null; render() } })
 // The user scrolling (a wheel, not the grid's own scroll a render restores) or resizing the window closes it too.
-for (const t of ['wheel', 'resize']) window.addEventListener(t, () => { if (S.cal.ctx) { S.cal.ctx = null; render() } }, { passive: true })
+for (const t of ['wheel', 'resize']) window.addEventListener(t, () => { if (S.cal.ctx) closeEventMenu(false) }, { passive: true })
