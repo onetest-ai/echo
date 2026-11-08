@@ -37,11 +37,15 @@ cases:
   - tests/cases/inbox/TC-011_found-for-you-create-makes-the-thread.md
   - tests/cases/inbox/TC-014_write-again-on-failed-minutes-fails-at-once-and-keeps-the-item.md
   - tests/cases/inbox/TC-015_ignore-on-a-sender-takes-the-item-out.md
+  - tests/cases/today/TC-007_wont-do-asks-for-a-comment-and-cancel-keeps-the-item.md
+  - tests/cases/today/TC-008_wont-do-without-a-request-notes-who-its-for-and-drafts-nothing.md
+  - tests/cases/today/TC-009_wont-do-asking-for-a-reply-drafts-it-and-sends-nothing-before-send.md
+  - tests/cases/today/TC-010_drop-leaves-nothing-of-a-wont-do-draft.md
 ---
 
 # S-24: The calendar, preps and the Inbox on a busy day
 
-**Story:** Sam looks at a day of 37 meetings: the blocks and cards of every state, the six answers to an invite, overlapping meetings, a recorded meeting's card, a recurring meeting's rule and the week; then Coming up today with its preps (every section, more than ten people, the Prep tab of recorded calls), the series, kind and thread choices on the cards; then the Inbox with 25 items: the badge, chips, groups, folds and buttons, where Open goes, the Done list and the CLI; and finally the decisions that work without a network or Claude Code.
+**Story:** Sam looks at a day of 37 meetings: the blocks and cards of every state, the six answers to an invite, overlapping meetings, a recorded meeting's card, a recurring meeting's rule and the week; then Coming up today with its preps (every section, more than ten people, the Prep tab of recorded calls), the series, kind and thread choices on the cards; then the Inbox with 25 items: the badge, chips, groups, folds and buttons, where Open goes, the Done list and the CLI; then the decisions that work without a network or Claude Code; and last, Won't do on Today's Needs you now: the comment it needs, Claude's note of who it's for, a draft that waits for Send, and Drop.
 
 ## Stages
 
@@ -75,13 +79,18 @@ cases:
 | 26 | `calendar/TC-014_import-teams-transcript-fails-cleanly-without-microsoft-365.md` | — | — |
 | 27 | `inbox/TC-012_import-teams-transcript-without-microsoft-365-fails-and-says-why.md` | — | — |
 | 28 | `inbox/TC-013_not-this-on-a-teams-transcript-drops-the-item.md` | — | — |
-| 29 | `inbox/TC-009_answering-no-to-a-people-question-takes-it-out-and-lists-it-as-done.md` | — | — |
+| 29 | `inbox/TC-009_answering-no-to-a-people-question-takes-it-out-and-lists-it-as-done.md` | — | Reload `{{base_url}}/#today` (stage 21 unfolded the people questions; a reload folds them again) |
 | 30 | `inbox/TC-010_found-for-you-not-this-drops-the-item-and-lists-it-as-done.md` | — | — |
 | 31 | `inbox/TC-011_found-for-you-create-makes-the-thread.md` | — | — |
 | 32 | `inbox/TC-014_write-again-on-failed-minutes-fails-at-once-and-keeps-the-item.md` | — | — |
 | 33 | `inbox/TC-015_ignore-on-a-sender-takes-the-item-out.md` | — | — |
+| 34 | `today/TC-007_wont-do-asks-for-a-comment-and-cancel-keeps-the-item.md` | — | — |
+| 35 | `today/TC-008_wont-do-without-a-request-notes-who-its-for-and-drafts-nothing.md` | — | — |
+| 36 | `today/TC-009_wont-do-asking-for-a-reply-drafts-it-and-sends-nothing-before-send.md` | — | — |
+| 37 | `today/TC-010_drop-leaves-nothing-of-a-wont-do-draft.md` | — | — |
 
 ## Notes
+- Stages 34–37 are Today → Needs you now's Won't do: each decides one of the data's three items (none comes back), so they run once per data set, in this order.
 - Data: `standard`, built right before the run.
 - Stages 1 to 14 read the clock: the meetings "live" at the build end 20 minutes after it and the ones "to come" start 37 minutes after it. Run these stages within 15 minutes of the build; if more than 20 minutes have passed, rebuild the data and start again from stage 1.
 - Stages 15 to 17 change the calendar's own files (a series rule, a meeting's type, a pinned thread) and put back what they can.

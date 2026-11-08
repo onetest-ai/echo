@@ -518,6 +518,11 @@ FAKE_CLAUDE = """#!/bin/sh
 # refuses everything else, so a click on Write minutes, Prepare or Send to Claude fails at once instead of
 # reaching a real account.
 case "$1" in --version) echo "2.0.0 (Claude Code, test fake)"; exit 0;; esac
+# Today's Won't do: a run whose prompt holds a phrase of <dir>/fake-answers.tsv (the comment a case types) gets that
+# line's canned answer, as Claude Code's last stream line; every other run is refused below.
+if [ -f "$(dirname "$0")/../fake-answers.tsv" ]; then
+  while IFS='	' read -r phrase line; do case "$*" in *"$phrase"*) printf '%s\n' "$line"; exit 0;; esac; done < "$(dirname "$0")/../fake-answers.tsv"
+fi
 case "$1 $2" in "auth status") ;; *) echo "test data: Claude Code is a fake here" >&2; exit 1;; esac
 case "$(basename "$CLAUDE_CONFIG_DIR")" in
   out)   echo '{"loggedIn": false, "authMethod": "none"}';;
@@ -2152,6 +2157,30 @@ def build_hostile_calls(d, H):
          "at": iso(now - timedelta(hours=1)), "line": T(hp, "", kind="html", one_line=True, where=".echo/needs.json line"), "thread": "acme-rollout", "chat": "19:x@thread.v2", "quote": "x"}]}, ascii=False)
 
 
+def build_needs(d):
+    """Today → Needs you now (Microsoft 365 isn't signed in: the items come from `.echo/needs.json`): a Teams 1:1, a
+    mail and an @mention, each in a thread. Won't do's run answers from `<dir>/fake-answers.tsv` by the comment typed."""
+    now = d.now
+    d.write_json(d.state("needs.json"), {"items": [
+        {"id": "teams:19:dana-lee@unq.gbl.spaces", "kind": "tagged", "source": "teams", "from": "Dana Lee", "where": "Chat with Dana Lee",
+         "at": iso(now - timedelta(hours=1)), "line": "Can you send me the renewal price list for Acme?", "chat": "19:dana-lee@unq.gbl.spaces", "thread": "acme-rollout"},
+        {"id": "mail:globex-redlines", "kind": "tagged", "source": "mail", "from": "Kim Park", "where": "Mail to you",
+         "at": iso(now - timedelta(hours=3)), "line": "Contract redlines for the Globex pilot", "message": "AAMk-test-globex-redlines", "thread": "globex-pilot"},
+        {"id": "teams:19:initech-hiring@thread.v2:m1", "kind": "tagged", "source": "teams", "from": "Lena Vogel", "where": "@you in Initech hiring",
+         "at": iso(now - timedelta(hours=5)), "line": "Can you review the support hours draft by Friday?", "chat": "19:initech-hiring@thread.v2", "thread": "initech-hiring"}]})
+    answers = [
+        ("presales owns this deal", {"for": "the presales team", "why": "presales owns this deal", "draft": None}),
+        ("tell her to ask Priya", {"for": "Priya Nair", "why": "Priya owns the Acme renewal pricing",
+                                   "draft": {"channel": "teams", "text": "Hi Dana, Priya Nair owns the renewal pricing now: please ask her for the price list."}}),
+        ("reply that legal reviews the redlines", {"for": "the legal team", "why": "legal reviews contract redlines",
+                                                   "draft": {"channel": "mail", "text": "Hi Kim, our legal team reviews the redlines: please send them to legal directly."}}),
+    ]
+    lines = [f"{phrase}\t{json.dumps({'type': 'result', 'is_error': False, 'result': json.dumps(a)})}" for phrase, a in answers]
+    d.write(f"{d.base}/fake-answers.tsv", "\n".join(lines) + "\n")
+    d.manifest["needs"] = {"items": 3, "wont_answers": [p for p, _ in answers],
+                           "note": "Won't do's comment picks the fake's canned answer by these phrases; any other comment's run is refused"}
+
+
 # ── the standard and hostile sets ─────────────────────────────────────────────────────────────
 def build_standard(d, hostile=False):
     H = Hostile(d) if hostile else None
@@ -2174,6 +2203,7 @@ def build_standard(d, hostile=False):
         build_hostile_calls(d, H)
         build_injection_call(d)
     else:
+        build_needs(d)
         d.skip("hostile text", "the hostile set (--set hostile)")
     for k, v in {"thread.stage=" + s: t for t, _, _, s in THREADS}.items():
         d.axis(k, v)

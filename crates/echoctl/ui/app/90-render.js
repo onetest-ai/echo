@@ -264,7 +264,7 @@ document.addEventListener('click', (e) => {
   if (S.laterOpen && !(e.target.closest && e.target.closest('[data-cmd^="later-"]'))) { S.laterOpen = false; render() }
   // The sidebar open over a narrow page closes on a click beside it.
   if (S.barOver && !(e.target.closest && e.target.closest('.actbar'))) { S.barOver = false; render() }
-  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-theme-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-go],[data-conv-keep],[data-br-pclosed],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-up],[data-up-fold],[data-today-seen],[data-today-done],[data-today-retry],[data-today-import],[data-today-close],[data-today-keep],[data-needs-open],[data-needs-wont],[data-needs-todo],[data-needs-todo-ok],[data-needs-read],[data-needs-send],[data-needs-outlook],[data-needs-off],[data-today-askoff],[data-prep-write],[data-ev-prep],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
+  const t = e.target.closest('[data-me-edit],[data-me-save],[data-me-cancel],[data-setsec],[data-set],[data-act],[data-lang-del],[data-vocab-del],[data-reclang-set],[data-theme-set],[data-layout-move],[data-layout-reset],[data-term-output],[data-term-start],[data-conv],[data-conv-go],[data-conv-keep],[data-br-pclosed],[data-note-edit],[data-edit-kind],[data-note-kind],[data-note-done],[data-note-del],[data-panel-flip],[data-panel-show],[data-panel-move],[data-panel-toggle],[data-go],[data-call],[data-up],[data-up-fold],[data-today-seen],[data-today-done],[data-today-retry],[data-today-import],[data-today-close],[data-today-keep],[data-needs-open],[data-needs-wont],[data-needs-wont-ok],[data-wont-send],[data-wont-edit],[data-wont-drop],[data-needs-todo],[data-needs-todo-ok],[data-needs-read],[data-needs-send],[data-needs-outlook],[data-needs-off],[data-today-askoff],[data-prep-write],[data-ev-prep],[data-minutes-of],[data-tab],[data-cmd],[data-at],[data-frame],[data-close],[data-copy],[data-arm],[data-join],[data-ev],[data-calmode],[data-calnav],[data-calclose],[data-cal-import],[data-schedule],[data-unschedule],[data-ask],[data-signin],[data-signin-cancel],[data-signin-accept],[data-signin-check],a[data-ext]')
   if (!t) { if (menuWas) render(); return }
   // Sign-ins (`signin.rs`): shown at once (starting / stopping / checking) until the next poll
   // brings the app's state.
@@ -370,7 +370,33 @@ document.addEventListener('click', (e) => {
     const u = t.dataset.needsOpen || `msteams:/l/chat/${encodeURIComponent(t.dataset.chat)}/0`
     return send({ cmd: 'open_url', url: u })
   }
-  if (t.dataset.needsWont) { send({ cmd: 'needs_decide', id: t.dataset.needsWont, how: 'wont' }); if (S.today && S.today.needs) S.today.needs.items = S.today.needs.items.filter((x) => x.id !== t.dataset.needsWont); return render() }
+  // Won't do: a dialog asks why, or who it's for (needed); confirmed, Claude notes it in the background (Asks).
+  if (t.dataset.needsWont) { S.needsDlg = { kind: 'wont', id: t.dataset.needsWont, note: '' }; render(); const n = $('#nd-note'); if (n) n.focus(); return }
+  if (t.dataset.needsWontOk) {
+    const id = t.dataset.needsWontOk, note = ((S.needsDlg && S.needsDlg.note) || '').trim()
+    if (!note) { const n = $('#nd-note'); if (n) n.focus(); return }
+    S.needsDlg = null
+    if (S.today && S.today.needs) S.today.needs.items = S.today.needs.items.filter((x) => x.id !== id)
+    todayWont(id, note)
+    return render()
+  }
+  if (t.dataset.wontEdit) { const a = ((S.today && S.today.asks) || []).find((x) => x.id === t.dataset.wontEdit); S.wontEdit = { id: t.dataset.wontEdit, text: (a && a.draft && a.draft.text) || '' }; render(); const n = $('#wd-text'); if (n) n.focus(); return }
+  if (t.dataset.wontSend) {
+    const id = t.dataset.wontSend, a = ((S.today && S.today.asks) || []).find((x) => x.id === id)
+    const text = (S.wontEdit && S.wontEdit.id === id ? S.wontEdit.text : (a && a.draft && a.draft.text) || '').trim()
+    if (!text) { const n = $('#wd-text'); if (n) n.focus(); return }
+    // The box stays as typed until it is sent (a failed send keeps the user's words); a sent line has no box.
+    send({ cmd: 'wont_send', ask: id, text })
+    setTimeout(() => loadToday().then(render), 800)
+    return render()
+  }
+  if (t.dataset.wontDrop) {
+    const id = t.dataset.wontDrop
+    send({ cmd: 'ask_drop', ask: id })
+    if (S.wontEdit && S.wontEdit.id === id) S.wontEdit = null
+    if (S.today && S.today.asks) S.today.asks = S.today.asks.filter((x) => x.id !== id)
+    return render()
+  }
   if (t.dataset.needsTodo) { S.needsDlg = { kind: 'todo', id: t.dataset.needsTodo }; return render() }
   if (t.dataset.needsTodoOk) {
     const id = t.dataset.needsTodoOk, thread = ($('#nd-thread') || {}).value, title = ($('#nd-title') || {}).value

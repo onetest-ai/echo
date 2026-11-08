@@ -77,7 +77,7 @@ function todayView() {
   const cards2 = tasks.map(([t, kind, who]) => card(t, kind, who))
   const work = cards2.length || S.todayAskId ? `<section class="td-sec"><h2>My work · this week <button class="link-btn" data-go="tasks">Tasks</button></h2>${todayAskBar()}<div class="td-tasks">${cards2.join('')}</div></section>` : ''
   const empty = !cards && !day && !work ? '<div class="empty"><div><h3>A quiet day</h3><p>No meetings today and nothing on you in Tasks.</p></div></div>' : ''
-  return `<div class="td">${head}${needsView(d.needs)}${cards}<div class="td-grid">${day}${work}</div>${empty}</div>${todayCloseDialog()}${needsDialog()}`
+  return `<div class="td">${head}${needsView(d.needs)}${wontView(d.asks)}${cards}<div class="td-grid">${day}${work}</div>${empty}</div>${todayCloseDialog()}${needsDialog()}`
 }
 
 /** Today → Needs you now: tagged in the last day, or burning where you watch (`needs.rs`) — hot first. Reply in Teams
@@ -109,6 +109,15 @@ function needsDialog() {
       <label for="nd-thread" class="set-sub">In which thread</label>${pick}
       <div class="td-dialog-a"><button class="btn ghost" data-needs-off="1">Cancel</button><button class="btn primary" data-needs-todo-ok="${esc(c.id)}">Add to Tasks</button></div></div></div>`
   }
+  if (c.kind === 'wont') {
+    // Won't do: a comment is required — why, or who it's for; Claude reads it (a reply only when it asks for one).
+    const note = c.note || ''
+    return `<div class="td-modal" data-needs-off="1"><div class="td-dialog" role="dialog" aria-modal="true" aria-labelledby="nd-dlg">
+      <h3 id="nd-dlg">Won't do</h3><p><b>${esc(item.where || '')}</b> — ${esc(item.line || '')}</p>
+      <label for="nd-note" class="set-sub">Why, or who it's for — needed</label><textarea id="nd-note" rows="3" placeholder="That's presales' deal — or: tell her to ask Omar">${esc(note)}</textarea>
+      <p class="set-sub">Claude notes who it's for. It drafts a reply only when you ask for one here, and sends nothing: you do, from Today.</p>
+      <div class="td-dialog-a"><button class="btn ghost" data-needs-off="1">Cancel</button><button class="btn primary" data-needs-wont-ok="${esc(c.id)}"${note.trim() ? '' : ' disabled title="Write why, or who it\'s for"'}>Won't do</button></div></div></div>`
+  }
   const m = c.mail
   const body = !m ? '<p class="set-sub">Reading the mail…</p>' : m.error ? `<p class="warn">${esc(m.error)}</p>` : `<p><b>${esc(m.subject || '')}</b><br><span class="set-sub">${esc((m.from && (m.from.name || m.from.email)) || '')}</span></p><div class="nd-mail">${esc(m.text || '')}</div>`
   return `<div class="td-modal" data-needs-off="1"><div class="td-dialog wide" role="dialog" aria-modal="true" aria-labelledby="nd-dlg">
@@ -116,6 +125,47 @@ function needsDialog() {
     <label for="nd-reply" class="set-sub">Your answer — sent when you click Reply</label><textarea id="nd-reply" rows="4"></textarea>
     <div class="td-dialog-a">${m && m.url ? `<button class="link-btn" data-ext href="${esc(m.url)}" data-needs-outlook="${esc(m.url)}">Open in Outlook</button><span class="grow"></span>` : ''}<button class="btn ghost" data-needs-off="1">Cancel</button><button class="btn" data-needs-send="${esc(c.id)}" data-all="1">Reply all</button><button class="btn primary" data-needs-send="${esc(c.id)}">Reply</button></div></div></div>`
 }
+
+/** Today → Asks: what Claude made of each Won't do (`today.rs` `wont_do`) — who it's for and why, or a draft to Send
+ *  (after Edit, or as it is), or Drop; nothing goes out before Send. Its words are a model's and others': escaped. */
+function wontView(asks) {
+  const list = (asks || []).filter((a) => a.kind === 'wont')
+  if (!list.length) return ''
+  const by = (ch) => ch === 'mail' ? 'by mail' : 'in Teams'
+  const rows = list.map((a) => {
+    const id = esc(a.id), drop = `<button class="icon-btn" data-wont-drop="${id}" aria-label="Drop" title="Drop">×</button>`
+    if (a.state === 'working') return `<div class="wd-row"><div class="wd-b"><b>Won't do</b> <span class="set-sub">· ${esc(a.title || '')} — Claude is noting who it's for…</span></div></div>`
+    if (a.state === 'failed') return `<div class="wd-row failed"><div class="wd-b"><b>Won't do</b> <span class="set-sub">· ${esc(a.title || '')}</span><div class="warn">${esc(a.say || '')}</div></div>${drop}</div>`
+    const line = `<div><b>Won't do · ${a.for ? `for ${esc(a.for)}` : esc(a.title || '')}</b>${a.why ? `<span class="set-sub">: ${esc(a.why)}</span>` : ''}</div><div class="mono set-sub">${esc(a.title || '')}${a.from ? ` · ${esc(a.from)}` : ''}</div>`
+    const d = a.draft
+    if (!d) return `<div class="wd-row"><div class="wd-b">${line}</div>${drop}</div>`
+    if (a.state === 'sent') return `<div class="wd-row"><div class="wd-b">${line}<div class="set-sub">Sent ${by(d.channel)}</div></div>${drop}</div>`
+    const editing = S.wontEdit && S.wontEdit.id === a.id
+    const text = editing ? `<textarea id="wd-text" class="wd-text" rows="4" aria-label="The draft">${esc(S.wontEdit.text)}</textarea>` : `<div class="wd-draft">${esc(d.text)}</div>`
+    return `<div class="wd-row"><div class="wd-b">${line}<div class="set-sub">A draft ${by(d.channel)} — nothing is sent until you press Send</div>${text}
+      <div class="wd-a"><button class="btn primary" data-wont-send="${id}">Send</button>${editing ? '' : `<button class="btn" data-wont-edit="${id}">Edit</button>`}<button class="btn ghost" data-wont-drop="${id}">Drop</button></div></div></div>`
+  }).join('')
+  return `<section class="wd" aria-labelledby="wd-h"><div class="wd-h"><b id="wd-h">Asks</b><span class="set-sub">what you handed off</span></div>${rows}</section>`
+}
+/** Won't do confirmed: the item, the comment and a run id go to Echo (IPC `needs_wont`); Today reads the outcome until
+ *  Claude is done with it. */
+function todayWont(id, note) {
+  const ask = `wont-${Date.now()}`
+  send({ cmd: 'needs_wont', ask, id, note })
+  let n = 0
+  const poll = () => loadToday().then(() => { render(); const a = ((S.today && S.today.asks) || []).find((x) => x.id === ask); if ((!a || a.state === 'working') && ++n < 60) setTimeout(poll, 5000) })
+  setTimeout(poll, 800)
+}
+// The Won't do comment and a draft being edited: kept as typed (a refresh of Today doesn't lose them); the button
+// waits for a comment.
+document.addEventListener('input', (e) => {
+  if (e.target.id === 'nd-note' && S.needsDlg && S.needsDlg.kind === 'wont') {
+    S.needsDlg.note = e.target.value
+    const b = document.querySelector('[data-needs-wont-ok]')
+    if (b) { b.disabled = !e.target.value.trim(); b.title = b.disabled ? "Write why, or who it's for" : '' }
+  }
+  if (e.target.id === 'wd-text' && S.wontEdit) S.wontEdit.text = e.target.value
+})
 
 /** Today → the Claude dialog's Yolo: the task, its skill and the user's words go to Echo (IPC `task_yolo`), which has
  *  Claude Code do it on its own in the background (the thread's profile); Today reads the outcome (`asks`) until it is

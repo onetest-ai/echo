@@ -73,3 +73,12 @@
 .nd-mail { max-height: 280px; overflow-y: auto; white-space: pre-wrap; font-size: 12.5px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r-control); background: var(--bg); }
 @media (max-width: 900px) { .nd-row { grid-template-columns: 10px minmax(0, 1fr); } .nd-a { grid-column: 2; justify-content: flex-start; } }
 
+/* Today → Asks: Won't do's lines (who it's for, why) and a draft to Send, Edit or Drop */
+.wd { border: 1px solid var(--line); border-radius: var(--r-panel); background: var(--surface); padding: 12px 16px; display: flex; flex-direction: column; gap: 6px; }
+.wd-h { display: flex; align-items: baseline; gap: 10px; margin-bottom: 2px; flex-wrap: wrap; }
+.wd-row { display: flex; align-items: flex-start; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); }
+.wd-b { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; overflow-wrap: anywhere; }
+.wd-draft { white-space: pre-wrap; padding: 8px 10px; border-radius: var(--r-control); background: var(--bg); border: 1px solid var(--line); font-size: 13px; }
+.wd-text { width: 100%; box-sizing: border-box; border: 1px solid var(--line-strong); border-radius: var(--r-control); background: var(--bg); color: var(--text); font: inherit; font-size: 13px; padding: 8px; resize: vertical; }
+.wd-a { display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
+.wd-row.failed .warn { font-size: 12.5px; }

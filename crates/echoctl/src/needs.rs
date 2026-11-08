@@ -7,7 +7,8 @@
 //!   words of urgency — confirmed by a model with no tools on the thread's AI profile, which gives one line and a quote
 //!   checked word for word against the messages (the quarantine rule: others' words reach no session with tools).
 //!
-//! The user decides: I'll do it (a task of theirs in a thread) or Won't do (gone). `<home>/.echo/needs.json`.
+//! The user decides: I'll do it (a task of theirs in a thread) or Won't do (gone, with the user's comment; Claude notes
+//! who it's for in the background — `today::wont_do`). `<home>/.echo/needs.json`.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -337,9 +338,10 @@ pub fn view() -> Value {
     json!({"items": items, "checked_at": st["checked_at"], "errors": st["errors"], "signed_in": graph::account().is_some()})
 }
 
-/// The user's decision on an item: `todo` (a task of theirs in `thread`, made here) or `wont` (just gone).
+/// The user's decision on an item: `todo` (a task of theirs in `thread`, made here) or `wont` (gone; Won't do's
+/// comment kept as its `note`). Gives the task made and the item as it was.
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
-pub fn decide(id: &str, how: &str, thread: Option<&str>, title: Option<&str>) -> Result<Value> {
+pub fn decide(id: &str, how: &str, thread: Option<&str>, title: Option<&str>, note: Option<&str>) -> Result<Value> {
     let mut st = load();
     let item = st["items"].as_array().into_iter().flatten().find(|x| x["id"].as_str() == Some(id)).cloned().ok_or_else(|| anyhow!("that item is gone"))?;
     let mut made = Value::Null;
@@ -354,13 +356,17 @@ pub fn decide(id: &str, how: &str, thread: Option<&str>, title: Option<&str>) ->
         anyhow::bail!("decide: todo or wont");
     }
     let mut d = st["decided"].as_object().cloned().unwrap_or_default();
-    d.insert(id.to_string(), json!({"how": how, "at": Utc::now().to_rfc3339()}));
+    let mut dv = json!({"how": how, "at": Utc::now().to_rfc3339()});
+    if let Some(n) = note.map(str::trim).filter(|n| !n.is_empty()) {
+        dv["note"] = json!(n.chars().take(1000).collect::<String>());
+    }
+    d.insert(id.to_string(), dv);
     // Decisions of the last two days are kept (an item lives a day).
     let cut = Utc::now() - Duration::hours(48);
     d.retain(|_, v| at(&v["at"]).is_none_or(|t| t >= cut));
     st["decided"] = Value::Object(d);
     save(&st)?;
-    Ok(json!({"made": made}))
+    Ok(json!({"made": made, "item": item}))
 }
 
 const EPIC: &str = "Follow-ups";
@@ -446,8 +452,10 @@ mod tests {
         let ids: Vec<&str> = v["items"].as_array().unwrap().iter().map(|x| x["id"].as_str().unwrap()).collect();
         assert_eq!(ids, vec!["hot:x", "mail:c1"], "hot first; older than a day gone");
         assert_eq!(v["items"][0]["app_url"], "msteams:/l/message/1");
-        decide("mail:c1", "wont", None, None).unwrap();
+        let d = decide("mail:c1", "wont", None, None, Some(" for presales: their deal ")).unwrap();
+        assert_eq!(d["item"]["line"], "Pilot user list", "the item as it was, for Won't do's run");
         assert_eq!(view()["items"].as_array().unwrap().len(), 1);
+        assert_eq!(load()["decided"]["mail:c1"]["note"], "for presales: their deal", "Won't do's comment is kept");
     }
 
     #[test]
@@ -458,8 +466,9 @@ mod tests {
         save(&json!({"items": [
             {"id": "teams:a", "kind": "tagged", "at": now, "line": "Can you send the pilot list?", "from": "Dana Kowal", "where": "Teams chat"},
             {"id": "teams:b", "kind": "tagged", "at": now, "line": "And the budget?", "from": "Dana Kowal", "where": "Teams chat"}]})).unwrap();
-        decide("teams:a", "todo", Some(&p.id), Some("Send Dana the pilot list")).unwrap();
-        decide("teams:b", "todo", Some(&p.id), None).unwrap();
+        decide("teams:a", "todo", Some(&p.id), Some("Send Dana the pilot list"), None).unwrap();
+        decide("teams:b", "todo", Some(&p.id), None, None).unwrap();
+        assert!(load()["decided"]["teams:b"].get("note").is_none());
         let t = crate::ledger::fold(&crate::ledger::Ledger::of(&p.id).unwrap()).unwrap();
         let stories: Vec<_> = t.nodes.values().filter(|n| n.title == STORY).collect();
         assert_eq!(stories.len(), 1, "one story, made once");
