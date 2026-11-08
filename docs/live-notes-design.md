@@ -80,6 +80,11 @@ The Live tab is the default tab while a call records or is transcribed:
   waiting for another call's notes to finish · ended. When the shown draft came from another
   profile than the selected one: "draft by Qwen; next update by Claude · personal". A pause button
   stops further updates for this call.
+> **Since 2026-11 (feat/live-notes-in-panel):** the two columns are gone. The Transcript tab is the transcript
+> alone at full width; Now, the status line, the items and the answers are in the My notes panel, merged by time
+> with the user's own notes (`.ai-run/guides/design/window.md` → My notes). The header's controls are in Now's ⋯
+> menu. What follows is the first design, kept for its reasoning.
+
 - **Left:** the live transcript (the existing transcript view over `live.jsonl`).
 - **Right, top to bottom:** the prep card (collapsible), Now, Decisions / Action items / Open
   questions (each bullet with a `[mm:ss]` jump), the buttons, the ask box, answers newest first.

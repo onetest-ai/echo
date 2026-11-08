@@ -23,7 +23,7 @@ tags: [transcript, empty-state]
 
 | Call (today) | Status | Transcript tab |
 |---|---|---|
-| Quick check-in (`-quick-check-in`) | transcribing; kept live notes | the live layout: "The call ended", "Transcribing on this computer." beside "No live notes for this call." |
+| Quick check-in (`-quick-check-in`) | transcribing; live notes on, none written | "Transcribing on this computer. This takes about a quarter of the call length." |
 | Recording (`-recording`) | audio only, not transcribed | "No transcript for this call." |
 | Umbrella intro call (`-umbrella-intro-call`) | transcription failed | "No transcript for this call." |
 
@@ -31,7 +31,7 @@ tags: [transcript, empty-state]
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Navigate to `{{base_url}}/#calls`, click the row `[data-call$="-quick-check-in"]`, then the tab "Transcript" | The Transcript tab is selected; the live layout's transcript column (`section#live-transcript`) reads "Transcribing on this computer."; the pane also reads "The call ended" and, beside it, "No live notes for this call."; no "Find in transcript" box |
+| 1 | Navigate to `{{base_url}}/#calls`, click the row `[data-call$="-quick-check-in"]`, then the tab "Transcript" | The Transcript tab is selected; the pane reads "Transcribing on this computer. This takes about a quarter of the call length."; no "Find in transcript" box; no live column in the pane (its live notes, none yet, would be in My notes) |
 | 2 | Click the row `[data-call$="-recording"]` (title "Recording"), tab "Transcript" | The pane reads "No transcript for this call."; no "Find in transcript" box |
 | 3 | Click the row `[data-call$="-umbrella-intro-call"]`, tab "Transcript" | "No transcript for this call." |
 | 4 | Click the row `[data-call$="-initech-planning"]`, tab "Transcript" | No empty text: the "Find in transcript" box and the turns (first "0:05" Me) |
@@ -40,5 +40,5 @@ tags: [transcript, empty-state]
 Nothing changed.
 
 ## Notes
-- The third text, while a call records ("Listening. The live transcript appears here as people speak." — "Listening. The transcript appears here as people speak." with live notes), needs a recording: covered with the test call (`window/TC-013`, person/test-call run).
-- The feature's wording ("Transcribing on this computer…") is a paraphrase: the window says "Transcribing on this computer." in the live layout and "Transcribing on this computer. This takes about a quarter of the call length." without live notes (no such call in the data).
+- The third text, while a call records ("Listening. The live transcript appears here as people speak." — "Listening. The transcript appears here as people speak." with live notes on, in the full-width live transcript), needs a recording: covered with the test call (`window/TC-013`, person/test-call run).
+- The feature's wording ("Transcribing on this computer…") is a paraphrase: the window says "Transcribing on this computer. This takes about a quarter of the call length." with live notes or without (live notes are in My notes, not beside the transcript).

@@ -264,7 +264,9 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   (Calls `list-detail`, Calendar `single`, Settings `single` at the foot; ⌘/Ctrl+1…9, ⌘/Ctrl+,), `PANEL_VIEWS`,
   `CALL_TABS`, `EVENT_ACTIONS`. Echo's own views are entries like a plugin's.
 - Call tabs: Minutes / Transcript / Chat / Screens / Actions. One Transcript tab: live (first, with a recording
-  dot) while the call records, final afterwards, its live notes beside it either way (`#call/x/live`).
+  dot) while the call records, final afterwards — the transcript alone at full width either way (`#call/x/live`
+  reads as `transcript`); while recording with live notes it is `section#live-transcript`, kept at its end. The
+  live notes are in My notes (below).
 - `Layout` keeps panel placement and open panels in `<config dir>/window-layout.json` (`/api/layout`, IPC
   `save_layout`, ≤ 16 KB). The right panel starts closed at every window open (`Layout.started()`).
 - Responsive: below 900 px wide the calls list folds behind "Calls ▾" and the right panel overlays the page; below
@@ -361,6 +363,16 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   acknowledged save in flight per call. IPC `save_my_notes {text, base}` → `calls::save_my_notes` under
   `.meta.lock`: base unchanged → text; appended since (tray) → text + tail; otherwise the other version is kept as
   `my-notes.<HHMMSS>.md`. An unchanged text is never written: its mtime is the minutes' clock.
+- Live notes (`18-live.js`, `LiveTimeline` block, `ui/live-timeline.test.mjs`) share the timeline: a box above the list
+  (`liveBox`: Now, one muted status line — profile · state · updates · tokens · cost · not covered — a sign-in or
+  settings problem with its button, "Last time"; its ⋯ menu holds the call's model, Pause / Resume while recording
+  and Ask Claude about this call), the draft's decisions / action items / open questions as ✦ rows (! / ☐ with the
+  owner / ?) merged by time, and answers under "Asked about this call" at the end. The merge never moves the user's
+  notes (their file's order stands): a live item goes before the first of theirs that is later (the same second:
+  theirs first), live items with no time go last — the draft has no per-item time of writing, it is rewritten
+  whole at each update. Live rows are read-only (the next update rewrites them); their chips jump like the user's.
+  No box and no ✦ rows when the call kept none and isn't recording (live notes off, or on with none written).
+  Why the panel: one place for everything said about the moment, and the transcript keeps its width.
 
 ### Minutes frame
 - `/minutes/<call>?v=<revision>` (`minutes::render_for_window`, rendered fresh) in

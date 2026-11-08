@@ -7,7 +7,7 @@
  "features": [
   {
    "id": "F-LIVE-01",
-   "feature": "During a call with live notes on, the Transcript tab shows the live transcript with Now, Decisions, Action items and Open questions beside it, each with a time jump; the first after about 90 s",
+   "feature": "During a call with live notes on, the Transcript tab is the live transcript alone at full width, kept at its end; Now, Decisions, Action items and Open questions go into My notes, each with a time jump; the first after about 90 s",
    "priority": "high",
    "check": "person",
    "axes": [
@@ -17,7 +17,7 @@
   },
   {
    "id": "F-LIVE-02",
-   "feature": "The live header shows the call's model, the state (waiting, updating, updated N ago, failed, busy, signing in, paused, ended), Pause / Resume, usage, and what to do about a sign-in or settings problem",
+   "feature": "My notes' live box shows the call's model, the state (waiting, updating, updated N ago, failed, busy, signing in, paused, ended) and usage in one muted line under Now, and what to do about a sign-in or settings problem; its ⋯ menu holds the model for the call, Pause / Resume and Ask Claude about this call",
    "priority": "medium",
    "check": "person",
    "axes": [
@@ -27,7 +27,7 @@
   },
   {
    "id": "F-LIVE-03",
-   "feature": "After the call the live notes stay beside the final transcript (searchable) and go into `transcript.md` as a \"Live notes\" draft",
+   "feature": "After the call the live notes stay in My notes beside the final transcript (searchable, full width) and go into `transcript.md` as a \"Live notes\" draft",
    "priority": "medium",
    "check": "agent",
    "axes": [
@@ -45,8 +45,17 @@
   },
   {
    "id": "F-LIVE-05",
-   "feature": "\"Last time\" (still to do, highlights) shows during a recurring call; Ask Claude about this call opens the Claude panel",
+   "feature": "\"Last time\" (still to do, highlights) shows in My notes' live box during a recurring call; Ask Claude about this call (its ⋯ menu) opens the Claude panel",
    "priority": "low",
+   "check": "agent",
+   "axes": [
+    "live.content"
+   ]
+  },
+  {
+   "id": "F-LIVE-06",
+   "feature": "My notes is one timeline: Now pinned on top, then the user's notes (•, their kinds) and the live notes' items (✦, as ! decision, ☐ to-do with its owner, ? question) in time order — the user's never moved, a live item with no time last; live items are read-only and their chips jump to the transcript; answers follow under \"Asked about this call\"; with live notes off or none kept the panel is as without them",
+   "priority": "high",
    "check": "agent",
    "axes": [
     "live.content"

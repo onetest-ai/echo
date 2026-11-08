@@ -1,44 +1,50 @@
-/* ── live tab: live notes, questions, last time ───────────────────────────── */
-.pane > .live { max-width: none; }
-.live { display: flex; flex-direction: column; gap: 10px; }
-.live-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; }
-.live-head .grow { flex: 1; }
-.live-head .live-model { font-weight: 600; font-size: 12px; }
-.live-head label.live-model { border-radius: var(--r-control); border-left-width: 1px; box-shadow: none; height: 26px; }
-.live-head .hint { color: var(--text-3); }
+/* ── live notes: the live transcript, and Now, the status and ✦ items in My notes ─────── */
+/* While recording with live notes the Transcript tab is the transcript alone, at full width, kept at its end. */
+.live-transcript { max-height: calc(100vh - 240px); overflow-y: auto; padding-right: 6px; }
+/* Now, pinned above My notes' list (not `.now`: that is the calendar's time line). */
+.nt-live { flex: none; margin: 0 10px 6px; padding: 7px 10px 8px; border-radius: var(--r-control); background: var(--accent-soft); display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.nl-head { display: flex; align-items: center; gap: 6px; min-height: 22px; }
+.nl-head .grow { flex: 1; }
+.nl-cap { color: var(--accent-ink); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
+.nl-menu-wrap { position: relative; }
+.nl-menu-wrap .icon-btn { width: 22px; height: 22px; }
+.nl-menu { top: 26px; min-width: 240px; }
+.nl-model { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 2px 10px 6px; }
+.nl-model label.live-model { border-radius: var(--r-control); border-left-width: 1px; box-shadow: none; height: 26px; max-width: 100%; }
+.nl-model .hint { color: var(--text-3); font-size: 11.5px; white-space: normal; }
+.nl-now { margin: 0; font-size: 13px; line-height: 1.45; color: var(--text); overflow-wrap: anywhere; }
+.nl-now.nl-why { color: var(--text-2); font-size: 12px; }
+.nl-status { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 5px; font-size: 11px; color: var(--text-3); }
+.nl-status .live-model { font-weight: 600; color: var(--text-2); }
+.nl-status .live-usage { font-size: 11px; }
+.nt-live .signin, .nt-live .prep { background: var(--surface); }
+/* A live item among the user's notes: ✦ in the icon column, its kind as theirs show, read-only. */
+.nt-entry.nt-livei .nt-icon.nl-mark { color: var(--accent-ink); font-weight: 400; }
+.nt-livei .nl-kind { font-weight: 700; color: var(--text-3); }
+.nt-livei.k-question .nl-kind { color: var(--spk3); }
+.nt-livei.k-decision .nl-kind { color: var(--me); }
+.nt-livei.k-todo .nl-kind { color: var(--accent-ink); }
+.nt-livei .nt-text { cursor: text; }
+.nl-answers { display: flex; flex-direction: column; gap: 8px; padding: 2px 4px 6px; }
 .live-state { color: var(--text-2); }
 .live-state.updating { color: var(--accent-ink); }
 .live-state.failed { color: var(--danger); }
 .live-state.busy, .live-state.paused { color: var(--warn); }
 .live-usage { color: var(--text-3); font-size: 11.5px; }
 .live-error { margin: 0; font-size: 12px; color: var(--danger); }
-.live-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 400px); gap: 24px; align-items: start; }
-.live-transcript { max-height: calc(100vh - 294px); overflow-y: auto; padding-right: 6px; }
-/* The live notes scroll on their own, beside the transcript: Now stays at the top, Ask Claude at the bottom. */
-.live-side { display: flex; flex-direction: column; gap: 12px; min-width: 0; max-height: calc(100vh - 294px); }
-.live-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-right: 6px; display: flex; flex-direction: column; gap: 14px; }
-.live-side .live-ask { flex: none; }
-.live-notes { font-size: 13px; line-height: 1.55; }
-.live-notes h3 { font-size: 11px; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-3); margin: 12px 0 4px; }
-.live-notes ul { margin: 0; padding-left: 18px; }
-/* Not `.now`: that is the calendar's time line (absolute, across its column). */
-.live-now { flex: none; margin: 0; padding: 8px 10px; border-radius: var(--r-control); background: var(--accent-soft); }
-.live-now b { color: var(--accent-ink); margin-right: 6px; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
-.live-notes .owner, .prep .owner { font-weight: 600; color: var(--text-2); }
-.live-notes .owner.me { color: var(--me); }
+.nt-livei .owner, .prep .owner { font-weight: 600; color: var(--text-2); }
+.nt-livei .owner.me { color: var(--me); }
 .muted { color: var(--text-3); }
-.live-ask { display: flex; flex-direction: column; gap: 8px; }
 .live-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
 .ask-row { display: flex; gap: 8px; }
 .ask-row .search { flex: 1; }
 .btn[disabled] { opacity: 0.5; pointer-events: none; }
-.live-answers { display: flex; flex-direction: column; gap: 10px; }
 .answer { font-size: 13px; line-height: 1.55; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-panel); }
 .answer.pending { border-style: dashed; }
 .answer p { margin: 6px 0 0; }
 .answer-head { display: flex; gap: 6px; flex-wrap: wrap; align-items: baseline; }
 .answer-head .muted { margin-left: auto; font-size: 11px; }
-.answer .at, .live-notes .at { font-family: var(--mono); font-size: 11px; color: var(--accent-ink); cursor: pointer; text-decoration: none; }
+.answer .at { font-family: var(--mono); font-size: 11px; color: var(--accent-ink); cursor: pointer; text-decoration: none; }
 .prep { font-size: 13px; border: 1px solid var(--line); border-radius: var(--r-panel); padding: 8px 12px; }
 .prep summary { cursor: default; font-weight: 600; font-size: 12px; color: var(--text-2); }
 .prep h3 { font-size: 11px; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-3); margin: 10px 0 4px; }
@@ -58,9 +64,4 @@
 .signin.ok .signin-text { color: var(--accent-ink); }
 .pill-note .signin { margin: 0; }
 .empty .signin { margin: 10px auto 0; max-width: 440px; }
-@media (max-width: 1100px) {
-  .live-grid { grid-template-columns: minmax(0, 1fr); }
-  .live-transcript { max-height: 40vh; }
-  .live-side, .live-scroll { max-height: none; overflow: visible; }
-}
-
+.nl-dot { color: var(--text-3); }

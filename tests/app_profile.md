@@ -108,6 +108,13 @@ Not routes: the Details drawer, My notes, Vocabulary, Asks and Inbox are panels 
 actions palette (`Actions ⌘K`, `[data-pal-open]`) is a dialog. A "Knowledge" activity (`#brain`) exists only while
 Recall is on; it is off on test data.
 
+Live notes are in **My notes** (`[data-panel-flip="notes"]`; the right panel `aside#r-right`, outside `main`), not in the
+Transcript tab, which is the transcript alone at full width: a box `section[aria-label="Live notes"]` above the list (Now
+`.nl-now`, the status line `.nl-status`, the ⋯ menu `[data-live-menu]` → `.nl-menu` with the call's model
+`[data-callprofile]`, Pause / Resume while recording, Ask Claude about this call), then one list `#nt-list` where the
+live notes' items (`.nt-entry.nt-livei`, marked ✦, read-only) sit among the user's notes by time, and the answers
+under "Asked about this call". A call with no live notes kept (or live notes off) has no box and no ✦ rows.
+
 Selectors: prefer roles and visible text (`getByRole('button', {name: 'Prepare'})`, headings such as "Your day").
 Elements the app acts on carry `data-*` attributes (`data-call`, `data-go`, `data-prep-write`, `data-schedule`,
 `data-tk`, `data-pj`); use them when text repeats. Thread ids are the name's slug (`acme-rollout`). Task ids

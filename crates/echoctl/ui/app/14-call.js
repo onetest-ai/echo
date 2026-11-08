@@ -101,8 +101,8 @@ function turnsHtml(segs, q, jump, marks = []) {
 function tabBody(c, segs, chat, frames) {
   if (S.tab === 'prep') return prepView(c.prep, false)
   if (S.tab === 'transcript') {
-    // Live notes kept (or being kept): the transcript with them beside it, as during the call.
-    if (hasLive(c)) return liveTab(c, segs)
+    // A recording with live notes: the live transcript at full width, kept at its end (the notes are in My notes).
+    if (hasLive(c) && c.status === 'recording') return liveTranscript(segs)
     if (!segs.length) return c.status === 'recording'
       ? `<p style="color:var(--text-3)">Listening. The live transcript appears here as people speak.</p>`
       : `<p style="color:var(--text-3)">${c.status === 'transcribing' ? 'Transcribing on this computer. This takes about a quarter of the call length.' : 'No transcript for this call.'}</p>`
