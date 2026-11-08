@@ -208,6 +208,11 @@ impl MicStream {
         let app = app_dev.as_ref().map(|(uid, _)| (Some(uid) == self.device_id.as_ref(), listed_input(uid).is_some()));
         let name = app_dev.as_ref().map(|(_, n)| n.as_str()).unwrap_or("");
         let who = self.app.map(|a| format!("{a:?}")).unwrap_or_default();
+        // The device open is the app's mic (taken back after a reopen onto it, or reported late): from now on this
+        // stream follows the app, so its next release is silence too, never the default.
+        if matches!(app, Some((true, _))) {
+            self.from_app = true;
+        }
         match step(app, self.from_app, released, missing_long) {
             Step::Keep => None,
             Step::FollowApp => {
@@ -299,6 +304,11 @@ mod tests {
         assert_eq!(step(Some((false, false)), false, true, false), Step::Keep, "a mic Echo can't open: still silent");
         assert_eq!(step(Some((false, false)), true, false, false), Step::Release, "following, the app moved to a mic Echo can't open");
         assert_eq!(step(Some((true, true)), true, true, false), Step::Resume, "the same device again");
+        // Released, reopened onto the default, the app takes that very device: the stream now follows the app
+        // (device_change marks it), so the next release is silence again, not the default (#140).
+        assert_eq!(step(Some((true, true)), true, true, false), Step::Resume);
+        assert_eq!(step(None, true, false, true), Step::Release, "released again: silence");
+        assert_eq!(step(None, false, false, true), Step::Default, "what an unmarked stream would do — the bug");
         assert_eq!(step(Some((false, true)), false, true, false), Step::FollowApp, "a device Echo can open");
         assert_eq!(step(Some((false, true)), true, false, false), Step::FollowApp, "the app switched mic");
         // Never followed an app (it holds no mic yet): the default input, as before.

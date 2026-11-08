@@ -38,6 +38,8 @@ const TICK: Duration = Duration::from_millis(1000);
 /// whisper.cpp threads during a call: keeping up is all it needs (Metal does the work on
 /// macOS), and the call itself needs the machine too.
 const THREADS: usize = 4;
+/// How long `Live::abandon` waits for the worker to let go of its model.
+const ABANDON_WAIT: Duration = Duration::from_secs(30);
 
 /// The worker's thread: every segment of the call and the model's name.
 type Worker = JoinHandle<Result<(Vec<Segment>, String)>>;
@@ -68,12 +70,18 @@ impl Live {
 impl Live {
     /// Give up and wait until the worker has let go of its model: a process about to exit must not leave a
     /// whisper context alive (ggml's Metal device asserts at exit while one is, #141).
-    /// With a transcription server there is no local model to free: the worker is left to give up by itself, so
-    /// an exit never waits on a request in flight.
+    /// Waited for at most `ABANDON_WAIT`: a local decode ends within it (the worker checks `quit` between
+    /// utterances), a request to a transcription server may not — and holds no local model unless the server
+    /// failed over to one mid-call, which the wait then covers as well.
     pub fn abandon(mut self) {
         self.quit.store(true, Ordering::SeqCst);
         self.close();
-        if let Some(h) = self.handle.take().filter(|_| crate::remote::Client::configured().is_none()) {
+        let Some(h) = self.handle.take() else { return };
+        let until = std::time::Instant::now() + ABANDON_WAIT;
+        while !h.is_finished() && std::time::Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        if h.is_finished() {
             let _ = h.join();
         }
     }
@@ -388,7 +396,6 @@ mod tests {
 
     #[test]
     fn an_abandoned_worker_on_a_local_model_is_waited_for_until_it_lets_go() {
-        let (_env, _root) = crate::paths::testenv::folders("live-abandon"); // no transcription server set
         let (done, quit, gone) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
         let (q, g) = (quit.clone(), gone.clone());
         let handle = std::thread::spawn(move || {
