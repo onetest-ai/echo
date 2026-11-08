@@ -73,6 +73,9 @@ cases:
 - Data: `standard` (`tests/fixtures/serve.sh up <dir> <port> --set standard`), built right before the run.
 - Time-sensitive stages come first: automatic minutes come 15 minutes after the build (stages 2 to 5 read the countdown and Not yet; stages 4 and 5 put it back). Finish those within 15 minutes of the build.
 - Stages that change data come last, after the stages that read what they change: the memo's thread × (stage 24) after the memo's headers and what moved (stages 6 and 12); Try again (stage 25) after the stages that read the first failure messages (14 and 15); Delete and restore last.
+- Stage 20 (`calls/TC-033`) starts with a full reload: the window opens a call being transcribed on Transcript once per
+  load, and stage 7 has opened Quick check-in before. Its step 2 fails while the URL lags the tab after that choice (the
+  hash reads `/minutes` while Transcript is shown; no case asserts the hash, see the case's Notes). Stage 25's step 5 fails until #121 is fixed.
 - Stage 22 and 23 are the `prep` cases about calls (Prep tab first, a prep with only an error).
 - No stage presses Write minutes, Write now, Sync now or Sign in…; Try again runs the data's fake Claude Code, which fails at once.
 - Not in the data (`tests/fixtures/README.md` → Skipped): a call being recorded, a minutes run queued or running, Today's minutes states being reworked, a call held by a Claude Code session (`held_by`), a missing or unreadable pinned AI profile.

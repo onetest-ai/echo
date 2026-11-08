@@ -46,4 +46,4 @@ S001's criterion is met and the risk is rated high / medium.
 - Ticks a criterion; creates then deletes a risk.
 
 ## Notes
-- Step 2's History wording fails until the bug is filed and fixed: a human ledger op other than `edit` and `create` is shown as `you: <op>` (`app.js` History line, the `` `you: ${h.op}` `` fallback), so ticking a criterion reads "you: ac_set". The Status change is intended.
+- Step 2's History wording fails until #153: a human ledger op other than `edit` and `create` is shown as `you: <op>` (`ui/app/*.js` History line, the `` `you: ${h.op}` `` fallback), so ticking a criterion reads "you: ac_set". The Status change is intended.

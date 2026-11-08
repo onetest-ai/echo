@@ -18,13 +18,13 @@ tags: [calendar, card, action]
 ## Preconditions
 - Standard data set built right before the run: `tests/fixtures/serve.sh up <dir> <port> --set standard` (`data: standard`); the window is served at `{{base_url}}`; every `echoctl` command runs after `. <dir>/env`
 - A meeting's block in the Day view is `[data-ev="<id>"]`; clicking it opens its card (`aside.detail`) on the right. The data's calendar is the agenda file (not signed in to Microsoft 365), so all meetings are today
-- Built less than 15 minutes ago: meetings "live" at the build (23:02-type blocks, started 10 minutes before it) end 20 minutes after it and then read as past; "to come" ones start 37 minutes after it
+- Built less than 15 minutes ago: meetings "live" at the build (started 10 minutes before it) end 20 minutes after it and then read as past; "to come" ones start 37 minutes after it
 
 ## Test Data
 
 | Meeting (id) | State | Action(s) on the card | Line under it |
 |---|---|---|---|
-| Acme weekly sync (`ev-acme-sync`) | recorded | Open notes | none |
+| Acme weekly sync (`ev-acme-sync`) | recorded, of a series | Open notes; under "Every meeting of this series": Record (pressed), Don't record | none |
 | Globex steering (`ev-globex-steering`) | recorded (imported) | Open notes | none |
 | Acme design review (`ev-m01`) | past, not recorded, Teams link | Import Teams transcript | Not recorded. If Teams transcribed it — Echo makes a call of its transcript and chat; minutes, threads and the Brain follow. |
 | Globex office hours (`ev-m02`) | live, scheduled, no link | Don't record | Echo arms itself a minute before it starts, transcribed as Ukrainian. |
@@ -37,14 +37,14 @@ tags: [calendar, card, action]
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Navigate to `{{base_url}}/#calendar/day` and wait for "Day", click the block `[data-ev="ev-acme-sync"]` (Acme weekly sync) | The card has the primary button "Open notes" and no other action button |
+| 1 | Navigate to `{{base_url}}/#calendar/day` and wait for "Day", click the block `[data-ev="ev-acme-sync"]` (Acme weekly sync) | The card has the primary button "Open notes" and no other action for this meeting; below it the series block "Every meeting of this series" with "Record" (pressed: the series rule is always) and "Don't record" (the series rule itself is `calendar/TC-018`) |
 | 2 | Click the block `[data-ev="ev-globex-steering"]` (Globex steering) | "Open notes" only |
 | 3 | Click the block `[data-ev="ev-m01"]` (Acme design review) | The primary button "Import Teams transcript" and the line "Not recorded. If Teams transcribed it — Echo makes a call of its transcript and chat; minutes, threads and the Brain follow."; no Record button (do not press the import here: `TC-014`) |
 | 4 | Click the block `[data-ev="ev-m02"]` (Globex office hours) | The button "Don't record" and the line "Echo arms itself a minute before it starts, transcribed as Ukrainian."; no Record button |
 | 5 | Click the block `[data-ev="ev-m04"]` (Initech architecture board) | The button "Don't record" and a line starting "Echo arms itself a minute before it starts" |
 | 6 | Click the block `[data-ev="ev-m07"]` (Vendor demo) | Two buttons: "Join and record" and "Record it" (do not press them) |
 | 7 | Click the block `[data-ev="ev-m08"]` (Initech team lunch) | One button "Record when it starts" |
-| 8 | Click the block `[data-ev="ev-m29"]` (Acme help desk sync at the 23:50-type time) | One button "Record when it starts" (no "Join and record": it has a link but is not live) |
+| 8 | Click the block `[data-ev="ev-m29"]` (Acme help desk sync, to come 37 minutes after the build) | One button "Record when it starts" (no "Join and record": it has a link but is not live) |
 
 ## Expected Final State
 Every card showed the one action of its state; no recording was started.

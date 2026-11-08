@@ -33,7 +33,7 @@ tags: [calls, live-notes, transcript]
 | 1 | Navigate to `{{base_url}}/#calls` and wait for "Acme weekly sync" and click the row Acme weekly sync, then the tab "Transcript" | A region `aria-label="Live notes"` is beside the transcript region (`aria-label="Transcript"`); the state line says "The call ended" |
 | 2 | Read the live notes | "Now" "Berlin pilot go-ahead"; headings Decisions, Action items, Open questions with "The pilot goes ahead in Berlin", "Rita Gomez" "Finish the dry run", "Who replaces Yuki?"; "Not covered: 10:00–11:00" |
 | 3 | Read the answers under the notes | The question "What did Omar say about the questionnaire?" with the answer "It is on hold until legal reviews the data processing terms."; the button "Ask Claude about this call" is there (do not press it) |
-| 4 | Read the transcript region | Five turns of named speakers; the `#find` box is in the live header |
+| 4 | Read the transcript region | 17 turns of named speakers (Me, Dana Lee, Omar Haddad, Rita Gomez), the first "Morning everyone, let's go through the SSO rollout for the Berlin office.", the last "Good, then the pilot goes ahead in Berlin and we review the numbers in two weeks."; the `#find` box is in the live header |
 | 5 | Click the row Initech planning | The Transcript tab shows its turns and the Find box, with no region "Live notes" |
 
 ## Expected Final State

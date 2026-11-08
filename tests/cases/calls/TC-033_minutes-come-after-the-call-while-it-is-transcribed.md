@@ -29,7 +29,7 @@ tags: [calls, minutes, status]
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Navigate to `{{base_url}}/#calls` and wait for "Acme weekly sync" and click the row Quick check-in | The tab "Transcript" is selected (`aria-selected="true"`) |
+| 1 | Load `{{base_url}}/` fully (a reload, not a hash change), then navigate to `{{base_url}}/#calls`, wait for "Acme weekly sync" and click the row Quick check-in | The tab "Transcript" is selected (`aria-selected="true"`) |
 | 2 | Click the tab "Minutes" | A box with the heading "Minutes come after the call" and the text "Echo writes them 15 minutes after the call. Add your own notes in the Notes tab meanwhile: the minutes are written around them." |
 | 3 | Look for buttons in the box | No "Write minutes" |
 
@@ -37,4 +37,10 @@ tags: [calls, minutes, status]
 Quick check-in shows that minutes come after the call.
 
 ## Notes
+- The window picks Transcript for a call being transcribed once per page load (`S.autoTab`); after that the call opens
+  on the tab last used, so a stage that opened Quick check-in earlier in the scenario would leave it on Minutes. The
+  full load in step 1 makes the case independent of the stages before it.
+- Step 2 fails until #148: on that first open the URL already reads
+  `#call/<folder>/minutes` though Transcript is shown, so the click on Minutes asks for the same URL and nothing
+  changes; Minutes opens only after Transcript has been clicked once. The expectation is the right behaviour; leave it.
 - Creates or changes nothing. The other reasons (Claude Code missing, plugin missing, "can't start") depend on the machine: in the data `claude` is the fake and both are present.
