@@ -2445,6 +2445,9 @@ fn human_event_here(project: &str, body: &Value) -> Result<Value> {
                               "decided_by": body["decided_by"], "likelihood": body["likelihood"], "impact": body["impact"]}});
     } else if ["undo", "accept", "reject"].contains(&op) {
         let target = body["target"].as_str().ok_or_else(|| anyhow!("target mid required"))?;
+        if !evs.iter().any(|x| x["mid"] == target) {
+            bail!("unknown event {target}");
+        }
         e["target"] = json!(target);
     } else {
         let node = body["node"].as_str().filter(|x| n.contains_key(*x)).ok_or_else(|| anyhow!("unknown node {}", body["node"]))?;
@@ -2870,6 +2873,13 @@ mod tests {
         assert!(human_event(&id, &json!({"op": "edit", "node": "T001", "set": {"due": "soon"}})).is_err());
         assert!(human_event(&id, &json!({"op": "edit", "node": "T001", "set": {"state": "finished"}})).is_err());
         assert!(human_event(&id, &json!({"op": "edit", "node": "T999", "set": {"title": "x"}})).is_err());
+        // An undo, accept or reject of an event that isn't there is refused, and nothing is written (#127).
+        let before = l.events().unwrap().len();
+        for op in ["undo", "accept", "reject"] {
+            let err = human_event(&id, &json!({"op": op, "target": "0000000000"})).unwrap_err();
+            assert!(err.to_string().contains("unknown event 0000000000"), "{op}: {err}");
+        }
+        assert_eq!(l.events().unwrap().len(), before);
         // Who does it: the user's choice on the task, pinned; Echo's guess never overwrites it.
         human_event(&id, &json!({"op": "edit", "node": "T001", "set": {"mode": "claude", "prompt": "Draft the SAML runbook.", "skill": "follow-up-mail"}})).unwrap();
         let n = fold(&Ledger::of(&id).unwrap()).unwrap().nodes["T001"].clone();

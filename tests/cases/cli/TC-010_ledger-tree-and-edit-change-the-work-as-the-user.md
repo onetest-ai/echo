@@ -45,11 +45,10 @@ tags: [cli, work, ledger]
 | 9 | Run `$E edit '{"op":"undo","target":"<the merge's mid>"}'` | T026 `state` "open" again, `merged_into` null |
 | 10 | Run `$E edit '{"op":"delete","node":"T026"}'` | T026 `state` "deleted"; reload `{{base_url}}/#project/acme-rollout/work` → Tree: "Book the dry-run window with Rita" is not shown |
 | 11 | Run `$E edit '{"op":"frobnicate"}'` and `$E edit '{"op":"edit","node":"T999","set":{"title":"x"}}'` | Exit code 1 each: "Error: bad op \"frobnicate\"" and "Error: unknown node \"T999\""; nothing is written |
-| 12 | Run `$E edit '{"op":"undo","target":"0000000000"}'` (a mid no event has) | Exit code 1 with an error naming the unknown target; nothing is written |
+| 12 | Run `$E edit '{"op":"undo","target":"0000000000"}'` (a mid no event has), then the same with `"op":"accept"` and `"op":"reject"`; count the lines of `$ECHOCTL_HOME/projects/acme-rollout/ledger/events.jsonl` before and after | Exit code 1 each: "Error: unknown event 0000000000"; the line count is unchanged |
 
 ## Expected Final State
 S002 has its first criterion met; T006 sits under Data migration; T004's merge was rejected; T026 was made, linked, merged, unmerged and deleted. Every change shows in the tree and the window as the user's.
 
 ## Notes
-- Step 12 is expected to FAIL today: `accept`, `reject` and `undo` take any `target` without checking it (exit 0, an event is appended that changes nothing). Reported as a suspected bug; no stage depends on it.
 - The window's own edits go through the same `edit` ops (`work/` cases); this case checks the CLI path a Claude Code session uses.
