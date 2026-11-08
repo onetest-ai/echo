@@ -132,7 +132,8 @@ pub(super) fn calendar(q: &str) -> Value {
         let ev: Vec<Value> = agenda.into_iter().map(|m| json!({
             "id": m.id, "subject": m.subject, "start": m.start, "end": m.end, "all_day": false, "online": true,
             "join_url": m.join_url, "declined": false, "cancelled": false, "no_notetakers": false,
-            "organizer": m.organizer.map(|o| o.name), "people": m.attendees.len(),
+            "people": m.attendees.len(), "names": m.attendees.iter().map(|a| a.name.clone()).filter(|n| !n.trim().is_empty()).take(50).collect::<Vec<_>>(),
+            "organizer": m.organizer.map(|o| o.name),
         })).collect();
         (ev, "agenda", None)
     };

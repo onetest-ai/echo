@@ -36,12 +36,10 @@
 }
 .pbtn.ghost { background: none; border-color: var(--line-strong); color: var(--text); font-weight: 500; }
 .pill.idle { padding: 0; border: 0; background: none; box-shadow: none; }
-/* The Record pill: in the top bar, and the same pill on a calendar event's card */
-.pill.idle .split .btn, .detail .acts .split .btn { height: 24px; font-size: 12px; flex-direction: row; white-space: nowrap; }
-.pill.idle .split > .btn:first-child, .detail .acts .split > .btn:first-child { border-radius: 12px 0 0 12px; padding-left: 12px; }
-.pill.idle .split > :last-child, .detail .acts .split > :last-child { border-top-right-radius: 12px; border-bottom-right-radius: 12px; }
-.detail .acts .split { align-self: flex-start; flex: none; }
-.detail .acts .split .split-main { flex: none; padding-right: 12px; }
+/* The Record pill in the top bar (a calendar event's card has its own, 20-calendar.css) */
+.pill.idle .split .btn { height: 24px; font-size: 12px; flex-direction: row; white-space: nowrap; }
+.pill.idle .split > .btn:first-child { border-radius: 12px 0 0 12px; padding-left: 12px; }
+.pill.idle .split > :last-child { border-top-right-radius: 12px; border-bottom-right-radius: 12px; }
 .pill.rec { border-color: color-mix(in srgb, var(--recording) 55%, transparent); background: color-mix(in srgb, var(--recording) 12%, var(--surface)); }
 .pill.rec .clock { color: var(--recording); }
 .pill.rec .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--recording); box-shadow: 0 0 0 3px color-mix(in srgb, var(--recording) 28%, transparent); flex: none; }

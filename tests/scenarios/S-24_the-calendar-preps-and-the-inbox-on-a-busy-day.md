@@ -41,6 +41,7 @@ cases:
   - tests/cases/today/TC-008_wont-do-without-a-request-notes-who-its-for-and-drafts-nothing.md
   - tests/cases/today/TC-009_wont-do-asking-for-a-reply-drafts-it-and-sends-nothing-before-send.md
   - tests/cases/today/TC-010_drop-leaves-nothing-of-a-wont-do-draft.md
+  - tests/cases/calendar/TC-024_right-click-a-meeting-opens-its-menu.md
 ---
 
 # S-24: The calendar, preps and the Inbox on a busy day
@@ -88,6 +89,7 @@ cases:
 | 35 | `today/TC-008_wont-do-without-a-request-notes-who-its-for-and-drafts-nothing.md` | — | — |
 | 36 | `today/TC-009_wont-do-asking-for-a-reply-drafts-it-and-sends-nothing-before-send.md` | — | — |
 | 37 | `today/TC-010_drop-leaves-nothing-of-a-wont-do-draft.md` | — | — |
+| 38 | `calendar/TC-024_right-click-a-meeting-opens-its-menu.md` | — | — |
 
 ## Notes
 - Stages 34–37 are Today → Needs you now's Won't do: each decides one of the data's three items (none comes back), so they run once per data set, in this order.

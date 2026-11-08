@@ -67,6 +67,11 @@ pub fn view_event(ev: &Value) -> Option<Value> {
     let people = ev.get("attendees").and_then(Value::as_array).map(|a| {
         a.iter().filter(|x| x.get("type").and_then(Value::as_str) != Some("resource")).count()
     });
+    // Who's coming, for the card (rooms left out): their names as the invite has them, else the address.
+    let names: Vec<String> = ev.get("attendees").and_then(Value::as_array).into_iter().flatten()
+        .filter(|x| x.get("type").and_then(Value::as_str) != Some("resource"))
+        .filter_map(|x| x.pointer("/emailAddress/name").or_else(|| x.pointer("/emailAddress/address")).and_then(Value::as_str))
+        .map(str::trim).filter(|n| !n.is_empty()).take(50).map(str::to_owned).collect();
     Some(json!({
         "id": ev.get("id"),
         "subject": if subject.is_empty() { "(no subject)".to_string() } else { subject.clone() },
@@ -80,6 +85,7 @@ pub fn view_event(ev: &Value) -> Option<Value> {
         "no_notetakers": format!("{subject} {body}").to_lowercase().contains("no_notetakers"),
         "organizer": ev.pointer("/organizer/emailAddress/name"),
         "people": people,
+        "names": names,
         "location": ev.pointer("/location/displayName"),
     }))
 }
@@ -285,6 +291,17 @@ mod tests {
         assert!(with("accepted").accepted() && with("organizer").accepted() && with("none").accepted(), "none: no answer asked");
         assert!(!with("tentativelyAccepted").accepted() && !with("notResponded").accepted());
         assert!(to_meeting(&ev("Sync", at, true)).unwrap().accepted(), "a source that doesn't say: kept");
+    }
+
+    #[test]
+    fn the_card_gets_who_is_coming_by_name_rooms_left_out() {
+        let ev = json!({"id": "e1", "subject": "Design review", "start": {"dateTime": "2026-11-08T15:00:00.0000000", "timeZone": "UTC"},
+            "attendees": [{"type": "required", "emailAddress": {"name": "Kim Park", "address": "kim@globex.example"}},
+                          {"type": "optional", "emailAddress": {"address": "noor@globex.example"}},
+                          {"type": "resource", "emailAddress": {"name": "Room 4", "address": "room4@globex.example"}}]});
+        let v = view_event(&ev).unwrap();
+        assert_eq!(v["people"], 2);
+        assert_eq!(v["names"], json!(["Kim Park", "noor@globex.example"]));
     }
 
     #[test]

@@ -26,7 +26,7 @@ tags: [prep, calendar, card]
 |---|---|---|---|
 | Globex sponsor update (`ev-m20`) | ready | to come | Show prep + Prepare again |
 | Umbrella security Q&A (`ev-m11`) | ready | past | Show prep only |
-| Initech team lunch (`ev-m08`) | none | to come | Prepare + "last time, what is open, what is new, who is coming" |
+| Initech team lunch (`ev-m08`) | none | to come | Prepare + "Prepare writes last time, what is open, what is new and who is coming." |
 | Acme design review (`ev-m01`) | none | past | no prep line |
 
 ## Steps
@@ -35,7 +35,7 @@ tags: [prep, calendar, card]
 |---|---|---|
 | 1 | Navigate to `{{base_url}}/#calendar/day`, wait for "Day" and click `[data-ev="ev-m20"]` | The card has a button "Show prep" and a link-style button "Prepare again" |
 | 2 | Click `[data-ev="ev-m11"]` | The card has "Show prep" and no "Prepare again" |
-| 3 | Click `[data-ev="ev-m08"]` | The card has a button "Prepare" and the grey text "last time, what is open, what is new, who is coming"; no "Show prep" |
+| 3 | Click `[data-ev="ev-m08"]` | The card has a button "Prepare" beside its main one (on one line) and its line ends "Prepare writes last time, what is open, what is new and who is coming."; no "Show prep" |
 | 4 | Click `[data-ev="ev-m01"]` | The card has no prep line at all |
 | 5 | Click `[data-ev="ev-m11"]`, then "Show prep" | The URL becomes `#upcoming/<prep id>`; the title is "Umbrella security Q&A"; the prep is shown with "In short"; the people line in the header reads six names and "and 6 more"; no "Write it again" (the meeting is over) |
 

@@ -411,7 +411,20 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   one is never undone); its language fills an arm where nobody chose one (`fill`, in `watch::arm`). A one-off meeting
   is asked about as before; a choice on the Record button wins. A thread's Profile → Meetings lists its series read
   only; × = not this thread's (`Project.not_series`). `echoctl series list [--thread] | set <key> <json>`.
-- The event card is 400 px wide (`min(400px, 100vw − 24px)`).
+- **The event card** (`eventDetail`, 380 px: `min(380px, 100vw − 24px)`), placed beside its block (`placeDetail`):
+  - its head: the title with × (Close), "Today · HH:MM–HH:MM" with how far off it is (in N min / in N h / in N days,
+    "now · N min left" in red, "recorded" in green, "over", "cancelled"), and one row of chips — its kind and its threads
+    with + Thread;
+  - one action strip (lightly tinted): the main button for its state (`EVENT_ACTIONS`: Open notes, Import Teams
+    transcript, Don't record, Join & record + Record — without joining —, Record when it starts / Record it) with its
+    prep beside it (Prepare / Show prep), all pills on one line; under them one line saying what happens (or what the call
+    was recorded as, or why nothing can be done), Prepare again as a link in it;
+  - then, under small headings and only when there is something to show: People (the organizer first, then three names
+    and +N more; the names come with the event, `names`, rooms left out), Every meeting of this series, Last time.
+- **Right-click a meeting**: a menu at the pointer (`eventMenu`, `S.cal.ctx`) with what its card offers — its main
+  action, its prep, Add to a thread… (opens the card with + Thread open), the series rule (Record every meeting / Stop
+  recording every meeting), Copy the Teams link, Show details. Each item is the card's own button and handler; Escape, a
+  click, a wheel or a resize close it.
 
 ### Today (`today.rs`, `#today`, `/api/today`; the first activity, the window opens on it)
 - Cards delivered to Echo itself: `deliver` kind `today` ("Echo's Today page" on an install sheet; always ready;
