@@ -35,11 +35,13 @@ cases:
 
 **Environment:** this Mac: Echo's debug build with `ECHOCTL_CALL_APP_BUNDLE=ai.onetest.echo.testcall`, TestCall (both ends on this Mac: serve and dial on 127.0.0.1), BlackHole 2ch and ffmpeg; the watcher stages start a second app instance on the run's own data folder and config (never `~/echo`, never `app start`), with `--scheduled manual` so no "Record?" dialog opens. How the run drives the test call: app_profile.md → "Recording with the test call".
 
-**Data:** `small`, hermetic: `tests/fixtures/make_data.py <dir> --ai fake` (the app's own Claude Code jobs are refused, never sent to an account), the speech model linked into its config; for stage 9 the NeMo-Speech runtime fetched into its config (the case's Preconditions); for stage 5 the window served on it with clicks reaching the app.
+**Data:** `small`, hermetic: `tests/fixtures/make_data.py <dir> --ai fake` (the app's own Claude Code jobs are refused, never sent to an account), the speech model linked into its config; for stage 5 the window served on it with clicks reaching the app.
+
+**Before the run (once, not per scenario):** `tests/fixtures/recordings.py prepare` (app_profile.md → "Recorded calls"): stages 8 and 9 read its `long-silence` and `two-remotes` (with the speaker runtime) instead of capturing and transcribing their own.
 
 **Story:** Everything that can happen to a recording: starting it mid-call, cancelling, an arm that expires, stopping from the terminal and from the window's pill, Ctrl-C, a crash, silence, two voices, nothing recorded without opting in, only the call app recorded, the terminal driving it, a drop and rejoin, Echo's own "Record?" dialog; then what only a person can do: switching devices, speakers, Accessibility and mute, the lid closed, an hour-long call, permissions denied, shared screens.
 
-**Length:** about 20 minutes for stages 1–14 (one TestCall call each, 9–75 s, plus the waits for transcripts).
+**Length:** about 15 minutes for stages 1–14: twelve TestCall calls (9–75 s), each wait for the app a wait for its state (`tests/fixtures/wait.py`), not fixed seconds.
 
 ## Stages
 
@@ -53,7 +55,7 @@ cases:
 | 6 | `recording/TC-016_capture-stopped-by-hand.md` | — | — |
 | 7 | `recording/TC-011_crash-while-recording.md` | — | — |
 | 8 | `recording/TC-017_silence-in-a-recorded-call.md` | — | — |
-| 9 | `recording/TC-018_two-remote-voices.md` | — | Fetch the NeMo-Speech runtime into the run's config (its Preconditions) |
+| 9 | `recording/TC-018_two-remote-voices.md` | — | — |
 | 10 | `privacy/TC-001_no-recording-without-opt-in.md` | — | — |
 | 11 | `privacy/TC-002_only-teams-recorded.md` | — | `afplay` plays out loud: say so to the user first |
 | 12 | `cli/TC-004_arm-stop-terminal.md` | — | — |
@@ -70,6 +72,6 @@ cases:
 | 23 | `recording/TC-022_shared-screen-snapshots.md` | — | **person** — "Save snapshots of shared screens" on (permissions/TC-007, S-16) |
 
 ## Notes
-- Each stage is its own call. The watcher stages may keep one app running from stage to stage (each notes the events before it in `$D/ev.start` and counts only its own); stage 14 sets `--unscheduled ask` and back.
+- Each live stage is its own call; stages 8–9 copy prepared calls. No stage scores words: transcription quality is S-14's. The app still transcribes each call its watcher records (that is the app); the cases look only at what the recording covers. The watcher stages may keep one app running from stage to stage (each notes the events before it in `$D/ev.start` and counts only its own); stage 14 sets `--unscheduled ask` and back.
 - **person** stages are skipped by an agent run (the lead lists them as skipped (person)): each case's Notes say why.
 - Run 2026-11-07 on the dev Mac: stages 1–14 PASS (stage 9 after fetching the NeMo runtime; without it its steps 5–6 fail).

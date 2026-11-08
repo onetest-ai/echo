@@ -7,11 +7,17 @@ differ only in their times. Standard library Python, and `target/debug/echoctl` 
 points elsewhere).
 
 ```bash
-tests/fixtures/make_data.py <empty dir> [--set small|standard|hostile] [--ai fake|local]   # default small
+tests/fixtures/make_data.py <empty dir> [--set small|standard|hostile] [--ai fake|local] [--clock real|fast]   # default small
 tests/fixtures/make-data.sh <empty dir>                                    # the same as --set small
-tests/fixtures/serve.sh up <empty dir> <port> [--set small|standard|hostile]
+tests/fixtures/serve.sh up <empty dir> <port> [--set small|standard|hostile] [--ai …] [--clock fast]
 tests/fixtures/serve.sh down <dir>
+tests/fixtures/recordings.py prepare | list | path | copy <name> [--title T] | finish <folder> <name>
+tests/fixtures/wait.py <seconds> <condition>
 ```
+
+`recordings.py` records and transcribes the known conversations once per build and copies them into a run's data
+(`tests/app_profile.md` → "Recorded calls"); `wait.py` waits for the run's app state, an event or a file, with a
+timeout, instead of a fixed `sleep`.
 
 Build between 06:00 and 22:00: today's calls lie hours before now and its meetings hours after, so near midnight
 the generator refuses (it would pin several calls to one stamp). For checks that don't need Today to match the real
@@ -103,13 +109,24 @@ cases that need one say `ai: local` and run one model job each, no more.
 Automatic minutes are on and several calls are due. **Serve these sets with `window --serve` only, never the Echo
 app**: the app would start minutes runs (against the fake, so they fail).
 
+### The test clock (`--clock fast`)
+
+`<dir>/env` then exports `ECHOCTL_TEST_AUTO_MINUTES_DELAY_S=90`: a **debug** build writes automatic minutes 90 s after
+a call or the user's last note instead of 15 minutes (`notes::auto_delay`); a release build never reads it. The app,
+`window --serve` (`serve.sh` sources the env) and the CLI all get it, so the window's "Minutes in N min (HH:MM)" and
+the app's scheduler agree. `manifest.json` → `clock`. For the recording and minutes scenarios (S-17, S-19).
+
 ### `small` for the Echo app (`--ai fake` / `--ai local`)
 
 Plain `small` (no `--ai`) is what the window cases expect, and has no fake `claude`: fine for `window --serve`, but the
 Echo app run on it starts Claude Code by itself (preps, meeting types, who does a task) on the built-in profile — the
 user's own account. Cases that start the app (`echoctl app run`: the recording, minutes and lifecycle cases) build
 `small` with `--ai fake` (the hermetic env of the standard sets: every run refused) or `--ai local` (also the profile
-"Qwen", the default, so minutes runs go to the local model). Nothing else in `small` changes.
+"Qwen", the default, so minutes runs go to the local model). With either, the app's own thread sync is off
+(`project_sync` false in `config.json`: on a local model its two runs per thread queued in front of the minutes for
+10 minutes and more; the window's Sync now still syncs), and with `--ai local` the fake `claude` lets only **minutes**
+runs through (the app sets `ECHOCTL_RUN_CALL` and no `ECHOCTL_RUN_MODE` for them): the app's preps, meeting types and
+task modes are refused at once instead of taking the one model server. Nothing else in `small` changes.
 
 ## The manifest
 

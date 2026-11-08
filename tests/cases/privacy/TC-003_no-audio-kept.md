@@ -7,7 +7,7 @@ requirements: [F-PRIV-03]
 module: privacy
 run: agent
 platform: macos
-tags: [privacy, audio, test-call]
+tags: [privacy, audio, test-call, recordings]
 external_id: TC-PRIV-003, TC-TRN-002
 ---
 
@@ -16,35 +16,25 @@ external_id: TC-PRIV-003, TC-TRN-002
 **Module:** Privacy | **Priority:** Critical | **Type:** Functional
 
 ## Preconditions
-- Test data built by `tests/fixtures/make-data.sh <dir>`; `target/debug/echoctl` is the debug build from this checkout (`cargo build`)
-- This Mac has the test call app (`tests/tools/testcall/build.sh` built `tests/tools/testcall/build/TestCall.app`), BlackHole 2ch and ffmpeg; Microphone and System Audio Recording are granted to the process running the steps and to TestCall; nothing else on this Mac plays audio or uses BlackHole
-- Every Bash call starts with the prelude (a fresh shell each time; the steps below call it "the prelude"): `. <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; CONV="$D/conv"; APP="$PWD/tests/tools/testcall/build/TestCall.app/Contents/MacOS/testcall"; export D CONV APP ECHOCTL_CALL_APP_BUNDLE=ai.onetest.echo.testcall`
-- The speech model is linked into the test config: `ln -s "$HOME/Library/Application Support/echo/models" "$ECHOCTL_CONFIG_DIR/models"`, then `target/debug/echoctl model use large-v3-turbo-q5_0` and `target/debug/echoctl config --languages en`
-- Both ends of the call run on this Mac: `serve` and `dial` on `127.0.0.1`, as in the steps
+- The recordings of this build are prepared (`tests/fixtures/recordings.py prepare`: `app_profile.md` → "Recorded calls"). For `acme-sync` it listed the call's folder while `echoctl capture` recorded (`during.ls`) and after `echoctl transcribe` with the default settings (`keep_audio` off, no `--keep-audio`: `after.ls`)
+- In S-17, stage 2 (`recording/TC-001`) recorded a call through the app's watcher, which transcribed it itself; standalone, run `recording/TC-001` first
+- Every command after `. <dir>/env` on the run's data (`make_data.py <dir> --ai fake`); `P="$(python3 tests/fixtures/recordings.py path)/acme-sync"`
 - `keep_audio` is off (the default of the test data): `target/debug/echoctl config` prints `"keep_audio": false`
-
-## Test Data
-
-| Field | Value |
-|-------|-------|
-| Conversation | very-short (9 s) |
-| Title | REC-P003 no audio |
 
 ## Steps
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Run the prelude, then `python3 tests/fixtures/audio/make_audio.py build very-short "$CONV"` | It prints the folder, the length and the turns of very-short; `$CONV` holds `mic.wav`, `remote.wav` and `expected.json` |
-| 2 | Run the prelude, then `"$APP" serve --port 7792 --play "$CONV/remote.wav" --quiet & "$APP" dial 127.0.0.1:7792 --me "$CONV/mic.wav" --me-device "BlackHole 2ch" & sleep 2; target/debug/echoctl capture --seconds 16 --title "REC-P003 no audio" 2> "$D/capture.err" & CAP=$!; sleep 8; ls "$ECHOCTL_HOME"/calls/*-rec-p003-no-audio; wait` | While the call records, the folder lists `mic.wav` and `remote.wav` (audio exists while recording) |
-| 3 | Run the prelude, then `CALL="$(ls -d "$ECHOCTL_HOME"/calls/*-rec-p003-no-audio)"; target/debug/echoctl transcribe "$CALL"; ls "$CALL"` | "done in …"; the folder lists `meta.json`, `segments.json` and `transcript.md`, and no `.wav` |
-| 4 | Run the prelude, then `find "$ECHOCTL_HOME" "$ECHOCTL_CONFIG_DIR" -name '*.wav' -newer "$CONV/expected.json"` | Nothing is printed (audio exists only while a call records or transcribes; `-newer` leaves out the audio earlier stages of a scenario kept on purpose with `--keep-audio`) |
+| 1 | `cat "$P/during.ls"` | While the call recorded, the folder held `mic.wav` and `remote.wav` (audio exists while recording) |
+| 2 | `cat "$P/after.ls"; grep -o '"audio": *"[^"]*"' "$P/call"/*/meta.json` | After the transcription: `meta.json`, `segments.json`, `transcript.md` (and `live.jsonl`, `expected.json`), no `.wav`; `meta.json` says the audio was deleted after transcription |
+| 3 | `ls "$ECHOCTL_HOME"/calls/*-rec-001-next-call; find "$ECHOCTL_HOME" "$ECHOCTL_CONFIG_DIR" -name '*.wav'` | The call the app recorded and transcribed by itself has `transcript.md` and no `.wav`; `find` prints nothing: not one `.wav` under the data folder or the config folder |
 
 ## Expected Final State
-Once transcribed, only text stays: not one `.wav` under the data folder or the config folder.
+Once transcribed, only text stays: by `echoctl transcribe` and by the app after a call, not one `.wav` under the data folder or the config folder.
 
 ## Teardown
-- Nothing to undo: the call lives in the run's own data folder
+- Nothing to undo
 
 ## Notes
-- Run on 2026-11-07 (S-17): PASS; a plain `find` there also listed stage 1's `rec-014` tracks, kept with `--keep-audio` on purpose, hence `-newer`.
-- `transcribe --keep-audio`, used by the other recording cases to inspect tracks, keeps the files on purpose; this case never uses it.
+- Before 2026-11-08 this case recorded and transcribed a call of its own; the prepared recording is that same capture and transcription, made once per build.
+- `transcribe --keep-audio` keeps the files on purpose; no case of S-17 uses it now, so the `find` needs no `-newer`.

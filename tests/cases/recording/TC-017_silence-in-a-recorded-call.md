@@ -1,48 +1,33 @@
 ---
 id: TC-017
-title: Twenty seconds of silence in a recorded call give no text and no restart
+title: Twenty seconds of silence in a recorded call give no restart and no text
 priority: medium
 type: functional
 requirements: [F-STT-03, F-REC-07]
 module: recording
 run: agent
 platform: macos
-tags: [recording, test-call, silence]
+tags: [recording, test-call, silence, recordings]
 ---
 
-# TC-017: Twenty seconds of silence in a recorded call give no text and no restart
+# TC-017: Twenty seconds of silence in a recorded call give no restart and no text
 
 **Module:** Recording | **Priority:** Medium | **Type:** Functional
 
 ## Preconditions
-- Test data built by `tests/fixtures/make-data.sh <dir>`; `target/debug/echoctl` is the debug build from this checkout (`cargo build`)
-- This Mac has the test call app (`tests/tools/testcall/build.sh` built `tests/tools/testcall/build/TestCall.app`), BlackHole 2ch and ffmpeg; Microphone and System Audio Recording are granted to the process running the steps and to TestCall; nothing else on this Mac plays audio or uses BlackHole
-- Every Bash call starts with the prelude (a fresh shell each time; the steps below call it "the prelude"): `. <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; CONV="$D/conv"; APP="$PWD/tests/tools/testcall/build/TestCall.app/Contents/MacOS/testcall"; export D CONV APP ECHOCTL_CALL_APP_BUNDLE=ai.onetest.echo.testcall`
-- The speech model is linked into the test config: `ln -s "$HOME/Library/Application Support/echo/models" "$ECHOCTL_CONFIG_DIR/models"`, then `target/debug/echoctl model use large-v3-turbo-q5_0` and `target/debug/echoctl config --languages en`
-- Both ends of the call run on this Mac: `serve` and `dial` on `127.0.0.1`, as in the steps
-
-## Test Data
-
-| Field | Value |
-|-------|-------|
-| Conversation | long-silence: Me, 20 s of nobody speaking, Dana, Me (36 s) |
-| Title | REC-017 silence |
+- The recordings of this build are prepared (`tests/fixtures/recordings.py prepare`: `app_profile.md` → "Recorded calls"): `long-silence` (Me, 20 s of nobody speaking, Dana, Me; 36 s) was played through TestCall, captured with `echoctl capture --seconds 39` and transcribed once. This case reads that capture; it records and transcribes nothing
+- Every command after `. <dir>/env` on test data built by `tests/fixtures/make-data.sh <dir>`, and `P="$(python3 tests/fixtures/recordings.py path)/long-silence"`
 
 ## Steps
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Run the prelude, then `python3 tests/fixtures/audio/make_audio.py build long-silence "$CONV"` | It prints the folder, the length and the turns of long-silence; `$CONV` holds `mic.wav`, `remote.wav` and `expected.json` |
-| 2 | Run the prelude, then `"$APP" serve --port 7792 --play "$CONV/remote.wav" --quiet & "$APP" dial 127.0.0.1:7792 --me "$CONV/mic.wav" --me-device "BlackHole 2ch" & sleep 2; target/debug/echoctl capture --seconds 42 --title "REC-017 silence" 2> "$D/capture.err"; wait` | Exit code 0; the last line printed is the call folder `…-rec-017-silence` |
-| 3 | Read `meta.json` in that folder | Both tracks (`mic.wav`, `remote.wav`) have `frames` ÷ `sample_rate` within 1.0 s of each other; no event of kind `write_failed`, and no `restarting` before the call's end (one on `mic.wav` at about 38–40 s, "Teams released its mic; using the default input", is TestCall hanging up) |
-| 4 | Run the prelude, then `CALL="$(ls -d "$ECHOCTL_HOME"/calls/*-rec-017-silence)"; cp "$CONV/expected.json" "$CALL/"; target/debug/echoctl transcribe "$CALL" --keep-audio` | "done in …"; `transcript.md` and `segments.json` exist |
-| 5 | Run the prelude, then `CALL="$(ls -d "$ECHOCTL_HOME"/calls/*-rec-017-silence)"; python3 tests/fixtures/audio/make_audio.py score "$CALL"` | Exit code 0; `"pass": true`; `transcribed_in_silence` is an empty list (nothing between 6 s and 26 s); the three turns have the right speakers (Me, Remote, Me) |
+| 1 | `grep -E "restarting|(mic|remote)\.wav" "$P/capture.err"` | Both tracks' lines (`mic.wav`, `remote.wav`) with `0 restart(s)`: no `restarting` line, so nothing reopened during the 20 s of silence |
+| 2 | Read `"$P/meta.json"` | Both tracks have `frames` ÷ `sample_rate` within 1.0 s of each other; no event of kind `write_failed` |
+| 3 | `CALL="$(python3 tests/fixtures/recordings.py copy long-silence --title "REC-017 silence")"; python3 -c "import json,sys;[print(round(s['start'],1),s['speaker'],s['text']) for s in json.load(open(sys.argv[1]+'/segments.json'))]" "$CALL"` | Three or more segments; none starts between 6 s and 25 s (the silence: Dana's line starts at about 26 s, its first segment may start a few tenths earlier); the speakers are Me, Remote, Me in that order |
 
 ## Expected Final State
-The silent stretch is in the tracks as silence, the transcript has nothing there, and the words around it are right.
-
-## Teardown
-- Nothing to undo: the call lives in the run's own data folder
+The silent stretch is in the tracks as silence, with no restart of a source, and the transcript has nothing there. (The score of the same recording, words and silence, is `transcription/TC-005`.)
 
 ## Notes
-- Run on 2026-11-07 (S-18): PASS — WER 0.0, nothing in the silence, the only `restarting` at 40.0 s (TestCall's hang-up).
+- Run on 2026-11-07 (S-18, its own capture then): PASS — WER 0.0, nothing in the silence, the only `restarting` at 40.0 s (TestCall's hang-up). `prepare` ends the capture before the hang-up, so there is none now.

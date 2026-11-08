@@ -7,7 +7,7 @@ requirements: [F-STT-02, F-SET-07]
 module: transcription
 run: agent
 platform: macos
-tags: [transcription, languages]
+tags: [transcription, languages, recordings]
 external_id: TC-TRN-004
 ---
 
@@ -16,25 +16,22 @@ external_id: TC-TRN-004
 **Module:** Transcription | **Priority:** High | **Type:** Functional
 
 ## Preconditions
-- Test data built by `tests/fixtures/make-data.sh <dir>`; the shell has run `. <dir>/env`
-- A models folder holding the model: linked from an installed Echo's `~/Library/Application Support/echo/models` (`ln -s "$HOME/Library/Application Support/echo/models" "$ECHOCTL_CONFIG_DIR/models"`), or downloaded into the test config with `target/debug/echoctl model download large-v3-turbo-q5_0`; then `target/debug/echoctl model use large-v3-turbo-q5_0`
-- The clips are in `tests/fixtures/audio/clips/` (no network needed)
+- The recordings of this build are prepared (`tests/fixtures/recordings.py prepare`: `app_profile.md` → "Recorded calls"): `two-remotes` was captured and transcribed once with the workspace languages set to English only (`config --languages en`, in its `transcribe.out`)
+- Test data built by `tests/fixtures/make-data.sh <dir>`; every command after `. <dir>/env`
 
 ## Test Data
 
 | Field | Value |
 |-------|-------|
-| Conversation | two-remotes: 6 turns, Me + Dana + Omar on one remote track |
+| Recording | `two-remotes`: 6 turns, Me + Dana + Omar on one remote track, title "TRN-003 en only" |
 
 ## Steps
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Run `target/debug/echoctl config --languages en` | Exit code 0 |
-| 2 | Run `python3 tests/fixtures/audio/make_audio.py build two-remotes "$ECHOCTL_HOME/calls/2026-11-06_110000-globex-pilot-kickoff"` | It prints the call folder, its length and its turns |
-| 3 | Run `target/debug/echoctl transcribe 2026-11-06_110000-globex-pilot-kickoff` | "done in …"; the folder has `transcript.md` and `segments.json`, and no `.wav` files |
-| 4 | Run `python3 tests/fixtures/audio/make_audio.py score "$ECHOCTL_HOME/calls/2026-11-06_110000-globex-pilot-kickoff"` | Exit code 0; `"pass": true` (the 15% word-error limit is on the whole call: the score's top-level `wer` is at most `0.15`, not each turn's `wer`) |
-| 5 | Run `python3 -c "import json,os;print({s['lang'] for s in json.load(open(os.environ['ECHOCTL_HOME']+'/calls/2026-11-06_110000-globex-pilot-kickoff/segments.json'))})"` | `{'en'}` |
+| 1 | `grep -m1 "(languages:" "$(python3 tests/fixtures/recordings.py path)/two-remotes/transcribe.out"` | "transcribing … (languages: en)": English was the only language allowed |
+| 2 | `CALL="$(python3 tests/fixtures/recordings.py copy two-remotes --title "TRN-003 en only")"; python3 tests/fixtures/audio/make_audio.py score "$CALL"` | Exit code 0 and `"pass": true`, or a FAIL whose only fault is a `transcribed_in_silence` line after 36 s (#140, the mic after the hang-up); top-level `wer` at most 0.15 |
+| 3 | `python3 -c "import json,sys;print({s['lang'] for s in json.load(open(sys.argv[1]+'/segments.json'))})" "$CALL"` | `{'en'}` |
 
 ## Expected Final State
 With English as the only language, every segment of a two-voice remote call is English, with at most 15% word errors over the whole call.

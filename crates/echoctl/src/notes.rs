@@ -104,6 +104,27 @@ pub enum Intent {
 /// How long after the call (or after the user's last note) the app writes the minutes.
 pub const AUTO_DELAY: Duration = Duration::from_secs(15 * 60);
 
+/// The env variable a debug build reads to shorten `AUTO_DELAY` for functional tests (seconds).
+#[cfg(debug_assertions)]
+const TEST_AUTO_DELAY: &str = "ECHOCTL_TEST_AUTO_MINUTES_DELAY_S";
+
+/// `AUTO_DELAY`, or — functional tests only, in a debug build — the seconds `ECHOCTL_TEST_AUTO_MINUTES_DELAY_S`
+/// gives (`tests/fixtures/make_data.py --clock fast`), so a case waits seconds instead of 15 minutes. A release
+/// build never reads it.
+pub fn auto_delay() -> Duration {
+    #[cfg(debug_assertions)]
+    if let Some(d) = test_delay(std::env::var(TEST_AUTO_DELAY).ok().as_deref()) {
+        return d;
+    }
+    AUTO_DELAY
+}
+
+/// The test delay a value of `ECHOCTL_TEST_AUTO_MINUTES_DELAY_S` gives: whole seconds, else none.
+#[cfg(debug_assertions)]
+fn test_delay(v: Option<&str>) -> Option<Duration> {
+    v.and_then(|v| v.trim().parse::<u64>().ok()).map(Duration::from_secs)
+}
+
 /// Inside a run Echo started (the mod and the CLI stay out of the way there).
 pub fn headless() -> bool {
     std::env::var_os(HEADLESS).is_some()
@@ -344,7 +365,7 @@ pub fn auto_due(dir: &Path, cfg: &Config, now: DateTime<Local>, own: Option<&Run
     }
     let last = noted.map_or(ended.with_timezone(&Local), |n| n.max(ended.with_timezone(&Local)));
     // A memo has no call notes to wait for: its minutes (and its threads) come as soon as it is transcribed.
-    let delay = if crate::memo::is_memo(dir) { chrono::Duration::zero() } else { chrono::Duration::from_std(AUTO_DELAY).unwrap_or_default() };
+    let delay = if crate::memo::is_memo(dir) { chrono::Duration::zero() } else { chrono::Duration::from_std(auto_delay()).unwrap_or_default() };
     let mut at = last + delay;
     match later(dir) {
         Some(None) => return Due::Not(NotDue::Held),
@@ -373,7 +394,7 @@ pub fn auto_state(dir: &Path) -> Value {
             // What moved it past 15 minutes after the call: the user's Not yet, or their notes.
             // Said only when that is what set the time: the Not yet, or the notes' last edit (+ 15 minutes) past the end.
             let noted = fs::metadata(dir.join(calls::USER_NOTES)).and_then(|m| m.modified()).ok().map(DateTime::<Local>::from);
-            let delay = chrono::Duration::from_std(AUTO_DELAY).unwrap_or_default();
+            let delay = chrono::Duration::from_std(auto_delay()).unwrap_or_default();
             let moved = if matches!(later(dir), Some(Some(u)) if u == t) {
                 json!({"by": "later"})
             } else if let Some(n) = noted.filter(|n| *n + delay == t && ended_at(dir).is_some_and(|e| *n > e + chrono::Duration::seconds(30))) {
@@ -2052,6 +2073,22 @@ mod tests {
         let cfg = Config { auto_minutes_since: Some(chrono::Utc::now() - since), ..Default::default() };
         cfg.save().unwrap();
         cfg
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn a_debug_build_takes_the_test_delay_in_seconds_and_nothing_else() {
+        assert_eq!(test_delay(Some("90")), Some(Duration::from_secs(90)));
+        assert_eq!(test_delay(Some(" 5 ")), Some(Duration::from_secs(5)));
+        // Unset or not whole seconds: the real 15 minutes.
+        assert_eq!(test_delay(None), None);
+        assert_eq!(test_delay(Some("")), None);
+        assert_eq!(test_delay(Some("1.5")), None);
+        assert_eq!(test_delay(Some("-3")), None);
+        // The tests never set the variable: auto_due here runs on the real delay.
+        if std::env::var_os(TEST_AUTO_DELAY).is_none() {
+            assert_eq!(auto_delay(), AUTO_DELAY);
+        }
     }
 
     #[test]
