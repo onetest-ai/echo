@@ -80,9 +80,33 @@ fn clock(s: u64) -> String {
     if s >= 3600 { format!("{:02}:{:02}:{:02}", s / 3600, s % 3600 / 60, s % 60) } else { format!("{:02}:{:02}", s / 60, s % 60) }
 }
 
-/// The call folder a link names (as `calls::resolve_call` finds it: a renamed folder by its stamp).
+/// The call folder a link names (as `calls::resolve_call` finds it). Inside a run Echo started, only a call the run
+/// may read, and a refusal says why (not that the call doesn't exist, #136): Yolo (`guard::RUN_TASK`) a call of its
+/// task's thread; any other run its own call (`guard::own_call`: none without one).
 fn call_dir(name: &str) -> Result<PathBuf> {
-    crate::calls::resolve_call(name).map_err(|_| anyhow!("no call {name:?}"))
+    let dir = crate::calls::find_call(name).map_err(|_| anyhow!("no call {name:?}"))?;
+    if !crate::notes::headless() {
+        return Ok(dir);
+    }
+    let task = std::env::var(crate::guard::RUN_TASK).unwrap_or_default();
+    match task.split_once('/') {
+        Some((thread, _)) if std::env::var_os(crate::guard::RUN_CALL).is_none() => thread_call(dir, thread, name),
+        _ => crate::guard::own_call(&dir, std::env::var_os(crate::guard::RUN_CALL).as_deref()).map_err(|_| anyhow!("a run Echo started reads only its own call, not {name:?}")),
+    }
+}
+
+/// Yolo's run reads a call of its task's thread, and only one pinned to the profile it runs on (the thread's, else
+/// the default): a call's text goes to no other profile.
+fn thread_call(dir: PathBuf, thread: &str, name: &str) -> Result<PathBuf> {
+    let p = crate::projects::load(thread)?;
+    if !crate::projects::of_call(&dir)?.iter().any(|(t, _)| t.id == p.id) {
+        bail!("Yolo reads only the calls of its task's thread ({}), not {name:?}", p.name);
+    }
+    let run = p.ai_profile.clone().filter(|id| !id.is_empty()).unwrap_or_else(crate::ai::default_id);
+    if crate::ai::call_profile_id(&dir)? != run {
+        bail!("{name:?} is pinned to another AI profile than this run's: its text isn't sent here");
+    }
+    Ok(dir)
 }
 
 /// `echoctl read <link>`: what Echo holds behind a link, as text for Claude — a call's minutes (and its turns around
@@ -473,5 +497,53 @@ mod tests {
         assert!(t.contains("Aurora weekly") && t.contains("[12:05] Lena Varga: Then SSO has to land first.") && !t.contains("Later talk"), "{t}");
         assert!(t.contains("SSO lands first"), "the minutes too: {t}");
         assert!(read("echo://call/2026-10-28_110000-nope").is_err());
+    }
+
+    #[test]
+    fn a_run_reads_the_calls_it_may_and_a_refusal_says_why() {
+        let (_env, _root) = crate::paths::testenv::folders("links-read-in-run");
+        let call = |name: &str, meta: serde_json::Value| {
+            let d = crate::paths::calls_dir().join(name);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join("meta.json"), meta.to_string()).unwrap();
+            std::fs::write(d.join("notes.md"), format!("# {name}\n")).unwrap();
+            d
+        };
+        let pilot = crate::projects::create("Acme pilot", None, None).unwrap().id;
+        let weekly = call("2026-10-24_100000-acme-weekly", serde_json::json!({"title": "Acme weekly"}));
+        let pinned = call("2026-10-25_100000-acme-legal", serde_json::json!({"title": "Acme legal", "ai_profile": "other"}));
+        call("2026-10-26_100000-globex-sync", serde_json::json!({"title": "Globex sync"}));
+        for d in [&weekly, &pinned] {
+            crate::projects::set_membership(&pilot, d, "include").unwrap();
+        }
+        // Inside a run, as Echo starts one — and out again even when an assert fails (the variables are the process's).
+        struct Out;
+        impl Drop for Out {
+            fn drop(&mut self) {
+                for k in [crate::notes::HEADLESS, crate::guard::RUN_TASK, crate::guard::RUN_CALL] {
+                    std::env::remove_var(k);
+                }
+            }
+        }
+        let _out = Out;
+        std::env::set_var(crate::notes::HEADLESS, "1");
+        // Yolo on a task of the thread: its thread's calls on the thread's profile (#136).
+        std::env::set_var(crate::guard::RUN_TASK, format!("{pilot}/T005"));
+        assert!(read("echo://call/2026-10-24_100000-acme-weekly").unwrap().contains("Acme weekly"));
+        let e = read("echo://call/2026-10-26_100000-globex-sync").unwrap_err().to_string();
+        assert!(e.contains("only the calls of its task's thread") && !e.contains("no call"), "{e}");
+        let e = read("echo://call/2026-10-25_100000-acme-legal").unwrap_err().to_string();
+        assert!(e.contains("another AI profile"), "strict routing: {e}");
+        assert!(read("echo://call/2026-10-27_100000-nope").unwrap_err().to_string().contains("no call"), "a call that isn't there");
+        // A minutes run: its own call only, and the refusal says so.
+        std::env::remove_var(crate::guard::RUN_TASK);
+        std::env::set_var(crate::guard::RUN_CALL, &weekly);
+        assert!(read("echo://call/2026-10-24_100000-acme-weekly").is_ok());
+        let e = read("echo://call/2026-10-26_100000-globex-sync").unwrap_err().to_string();
+        assert!(e.contains("reads only its own call") && !e.contains("no call"), "{e}");
+        // Any other run (no call, no task): none.
+        std::env::remove_var(crate::guard::RUN_CALL);
+        let e = read("echo://call/2026-10-24_100000-acme-weekly").unwrap_err().to_string();
+        assert!(!e.contains("no call"), "{e}");
     }
 }

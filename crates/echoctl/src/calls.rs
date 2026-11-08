@@ -62,7 +62,8 @@ pub fn resolve_call(arg: &str) -> Result<PathBuf> {
 }
 
 
-fn find_call(arg: &str) -> Result<PathBuf> {
+/// `resolve_call` without the run's check: the caller makes its own (`links::call_dir`).
+pub(crate) fn find_call(arg: &str) -> Result<PathBuf> {
     if arg == "latest" {
         return all_calls().pop().ok_or_else(|| anyhow!("no recorded calls in {}", paths::calls_dir().display()));
     }

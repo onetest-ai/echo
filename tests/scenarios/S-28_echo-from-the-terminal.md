@@ -15,6 +15,7 @@ cases:
   - tests/cases/cli/TC-010_ledger-tree-and-edit-change-the-work-as-the-user.md
   - tests/cases/cli/TC-011_call-commands-context-actions-type-title-html.md
   - tests/cases/cli/TC-012_delete-restore-and-note-from-the-cli.md
+  - tests/cases/cli/TC-017_read-inside-a-run-reads-the-calls-it-may-and-says-why-not.md
 ---
 
 # S-28: Echo from the terminal: help, threads, links, sends, series and settings, clients, thread changes, the work and one call
@@ -57,6 +58,7 @@ Done once, before stage 1, timed as the stage `prelude`.
 | 9 | `cli/TC-010_ledger-tree-and-edit-change-the-work-as-the-user.md` | — | Step 1 alone (it gives the two `mid`s); then steps 2–6 in one call, each edit followed by `$E tree` piped through `python3 -c` that prints only the nodes the step names; step 8 alone (it gives the merge's `mid`); step 9 alone; step 10's edit, then its reload; steps 11–12 in one call |
 | 10 | `cli/TC-011_call-commands-context-actions-type-title-html.md` | — | Batches: steps 1–7; step 9 alone (before the window reads the new name); steps 11–13 |
 | 11 | `cli/TC-012_delete-restore-and-note-from-the-cli.md` | — | Batches: steps 2–3; steps 5–6; steps 8–9 |
+| 12 | `cli/TC-017_read-inside-a-run-reads-the-calls-it-may-and-says-why-not.md` | — | Steps 1–5 in one call (read only; the calls it reads, Globex pilot scoping and the older Acme weekly sync, are ones stages 6–11 leave as built) |
 
 ## Notes
 - The read stages (1–5) come before the ones that change data; each changing stage restores what it changed, except stage 9 (the work of Acme rollout: a criterion met, a move accepted, a merge rejected, a task made and deleted).

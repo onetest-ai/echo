@@ -183,7 +183,9 @@ Write now and Not yet ▾; the calls list shows ⏱ for calls ended in the last 
   asked with a 15 s limit, Echo's own, `~/.claude`) — refuses the run (`ai::hooks_conflict` returns the folders it
   checked, for the log).
 - Inside a run (`ECHOCTL_HEADLESS=1`) the CLI works only on the run's call (`calls::resolve_call` →
-  `guard::own_call`, canonical path); `notes::refused_in_run` refuses `vocab add --always`, `transcribe --keep-audio` /
+  `guard::own_call`, canonical path). One read-only exception: `echoctl read echo://call/…` in Yolo's run
+  (`guard::RUN_TASK`, no run call) gives a call of its task's thread pinned to the profile it runs on
+  (`links::call_dir`, #136); every refusal there says why, only a missing call says "no call". `notes::refused_in_run` refuses `vocab add --always`, `transcribe --keep-audio` /
   `--model`; the mod does nothing and `pending` / `claim` refuse.
 - `title` inside a run sets the title, marks `title_from_run`, and leaves the folder rename to the run's end
   (`calls::rename_to_title`); a terminal `echoctl title` on a call with a run waits too (`notes::run_active`).
