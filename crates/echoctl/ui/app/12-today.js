@@ -80,6 +80,10 @@ function todayView() {
   return `<div class="td">${head}${needsView(d.needs)}${cards}<div class="td-grid">${day}${work}</div>${empty}</div>${todayCloseDialog()}${needsDialog()}`
 }
 
+// Needs you now's actions: reply (an arrow back), I'll do it (a box ticked), Won't do (a circle struck through).
+const ND_REPLY = '<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 6 6v4"/>'
+const ND_TAKE = '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/>'
+const ND_WONT = '<circle cx="12" cy="12" r="8"/><path d="M6.5 17.5l11-11"/>'
 /** Today → Needs you now: tagged in the last day, or burning where you watch (`needs.rs`) — hot first. Reply in Teams
  *  (the app) or Read and reply (a mail, here); I'll do it (a task, in a thread) or Won't do. Empty: not drawn. */
 function needsView(n) {
@@ -87,11 +91,13 @@ function needsView(n) {
   if (!items.length) return ''
   const ago = (t) => { const m = Math.round((Date.now() - new Date(t)) / 60000); return m < 60 ? `${Math.max(m, 1)} min` : `${Math.round(m / 60)} h` }
   const rows = items.map((x) => {
-    const reply = x.source === 'mail' ? `<button class="btn" data-needs-read="${esc(x.id)}">Read and reply</button>`
-      : x.app_url || x.chat ? `<button class="btn" data-needs-open="${esc(x.app_url || '')}" data-chat="${esc(x.chat || '')}">Reply in Teams</button>` : ''
+    // Icons, named in their label and tooltip: the row keeps its width for what was said.
+    const act = (attrs, label, mark, cls = '') => `<button class="icon-btn nd-act${cls}" ${attrs} aria-label="${label}" title="${label}">${ICON(mark)}</button>`
+    const reply = x.source === 'mail' ? act(`data-needs-read="${esc(x.id)}"`, 'Read and reply', ND_REPLY)
+      : x.app_url || x.chat ? act(`data-needs-open="${esc(x.app_url || '')}" data-chat="${esc(x.chat || '')}"`, 'Reply in Teams', ND_REPLY) : ''
     return `<div class="nd-row"><span class="nd-dot ${x.kind === 'hot' ? 'hot' : ''}" aria-label="${x.kind === 'hot' ? 'Burning' : 'For you'}"></span>
       <div class="nd-b"><div><b>${esc(x.where || '')}</b> <span class="set-sub">— ${esc(x.line || '')}</span></div><div class="mono set-sub">${esc(x.from || '')} · ${esc(ago(x.at))} ago${x.quote ? ` · “${esc(x.quote)}”` : ''}</div></div>
-      <div class="nd-a">${reply}<button class="btn primary" data-needs-todo="${esc(x.id)}">I'll do it</button><button class="btn ghost" data-needs-wont="${esc(x.id)}">Won't do</button></div></div>`
+      <div class="nd-a">${reply}${act(`data-needs-todo="${esc(x.id)}"`, "I'll do it", ND_TAKE, ' take')}${act(`data-needs-wont="${esc(x.id)}"`, "Won't do", ND_WONT)}</div></div>`
   }).join('')
   return `<section class="td-card nd" aria-labelledby="nd-h"><div class="td-card-h"><b id="nd-h">Needs you now</b><span class="set-sub">the last 24 h · where you watch · goes away when you answer</span></div>${rows}</section>`
 }
