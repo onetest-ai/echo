@@ -129,7 +129,9 @@ async function loadLayout() {
   for (const a of Layout.AREAS) if (now[a].open && !before[a].open && now[a].active) Layout.show(now[a].active, PANEL_VIEWS)
 }
 let callSeq = 0
-async function loadCall(name) {
+/** A call folder's `YYYY-MM-DD_HHMMSS` stamp, or '' when its name has none. */
+const callStamp = (name) => /^\d{4}-\d\d-\d\d_\d{6}/.test(name) ? name.slice(0, 17) : ''
+async function loadCall(name, retried = false) {
   const mine = ++callSeq, epoch = NotesSync.epoch(name)
   try {
     const c = await get('api/call/' + encodeURIComponent(name))
@@ -144,9 +146,10 @@ async function loadCall(name) {
     syncEditor()
   } catch (e) {
     if (S.selected !== name || mine !== callSeq) return
-    // Retitled meanwhile (the notes run renames the folder): the same call keeps its stamp.
-    const stamp = name.slice(0, 17)
-    const moved = (S.calls || []).find((c) => c.name !== name && c.name.slice(0, 17) === stamp)
+    // Retitled meanwhile (the notes run renames the folder): the same call keeps its stamp — a dated name only
+    // (`calls::stamp_of`: an undated folder is its own name, never another's rename).
+    const stamp = callStamp(name)
+    const moved = stamp && (S.calls || []).find((c) => c.name !== name && callStamp(c.name) === stamp)
     if (moved && S.selected === name) { S.selected = moved.name; history.replaceState(null, '', `#call/${moved.name}/${S.tab}`); return loadCall(moved.name) }
     S.call = { error: String(e) }
     // No such call: not polled again, and Calls leaves its error page (#150) — once a fresh list confirms it (a
@@ -154,8 +157,10 @@ async function loadCall(name) {
     if (/^404 /.test(e.message || '')) {
       await loadCalls()
       if (S.selected !== name || mine !== callSeq) return
-      const now = (S.calls || []).find((c) => c.name.slice(0, 17) === stamp)
+      const now = (S.calls || []).find((c) => c.name === name || (stamp && callStamp(c.name) === stamp))
       if (now && now.name !== name) { S.selected = now.name; history.replaceState(null, '', `#call/${now.name}/${S.tab}`); return loadCall(now.name) }
+      // Listed under its own name: it was being written (a new recording's meta.json); asked for once more.
+      if (now && !retried) return loadCall(name, true)
       S.missing = name
     }
   }
@@ -166,6 +171,8 @@ async function loadCall(name) {
 function hashText() { try { return decodeURIComponent(location.hash) } catch { return location.hash } }
 function route() {
   const h = hashText().slice(1)
+  // A menu of the page it leaves doesn't follow to the next one.
+  S.liveMenu = false
   // An echo:// link the window was opened at (the system, `echoctl app open --link`): routed where it points.
   if (h.startsWith('link=')) { history.replaceState(null, '', '#'); S.view = 'calls'; setTimeout(() => window.echo.openLink(h.slice(5))); return }
   // A plugin's activity (`ctx.activities.add`): `#<plugin>:<id>` and anything after a slash is its own.
@@ -214,7 +221,8 @@ function route() {
   if (h === 'calls' && S.selected && S.missing === S.selected) {
     const next = (S.calls || []).find((c) => c.name !== S.missing)
     commitPendingNotes(); S.selected = next ? next.name : null; S.call = null; S.confirmDelete = false; S.find = ''
-    if (S.selected) { history.replaceState(null, '', `#call/${S.selected}/minutes`); S.tab = 'minutes'; loadCall(S.selected).then(render) }
+    // The hashchange handler loads it (S.call is null), once.
+    if (S.selected) { history.replaceState(null, '', `#call/${S.selected}/minutes`); S.tab = 'minutes' }
   }
   const m = h.match(/^call\/([^/]+)(?:\/(\w+))?$/)
   if (m) {

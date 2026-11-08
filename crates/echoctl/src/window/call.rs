@@ -395,9 +395,11 @@ pub(super) fn act(v: &Value) -> bool {
             }
             false
         }
-        "record" => watch::arm(None, None, languages(v), profile(v)).is_ok(),
+        // Recordings from the window use the default AI profile (the account chip sets it); the app pins it at the
+        // start. A profile per recording is the CLI's (`echoctl arm --profile`).
+        "record" => watch::arm(None, None, languages(v), None).is_ok(),
         // A memo: the user alone, now (the Record button's language and profile, as a call's).
-        "record_memo" => match watch::memo_start(languages(v), profile(v)) {
+        "record_memo" => match watch::memo_start(languages(v), None) {
             Ok(()) => true,
             Err(e) => {
                 crate::app::notify("Memo not started", &format!("{e:#}"));
@@ -415,7 +417,6 @@ pub(super) fn act(v: &Value) -> bool {
                 .or_else(|| watch::agenda().into_iter().find(|m| m.id.as_deref() == Some(id)));
             meeting.is_some_and(|mut m| {
                 m.languages = languages(v).unwrap_or_default();
-                m.ai_profile = profile(v);
                 crate::schedule::add(m).is_ok()
             })
         }
@@ -431,7 +432,6 @@ pub(super) fn act(v: &Value) -> bool {
             let id = v["id"].as_str().unwrap_or("");
             let Some(mut m) = watch::agenda().into_iter().find(|m| m.id.as_deref() == Some(id)) else { return false };
             m.languages = languages(v).unwrap_or_default();
-            m.ai_profile = profile(v);
             if v["cmd"] == "join_meeting" { watch::join(m).is_ok() } else { watch::arm(m.subject.clone(), Some(m), None, None).is_ok() }
         }
         // A Brain section's file (a thread folder's), opened in its own app: only a file the registry

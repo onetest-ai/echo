@@ -21,13 +21,20 @@ pub const USER_NOTES: &str = "my-notes.md";
 /// In a trashed call: when it was deleted (its mtime ages the trash entry).
 const DELETED_AT: &str = ".deleted_at";
 
-/// All recorded calls, oldest first.
+/// All recorded calls, oldest first: folders without a date stamp in their name (an imported or hand-made one,
+/// `old-dictation`) first, then the dated ones by their stamp. Every caller — `latest`, the window's list and its
+/// newest call — sees the same order (#147).
 pub fn all_calls() -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = fs::read_dir(paths::calls_dir())
         .map(|rd| rd.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.join("meta.json").exists()).collect())
         .unwrap_or_default();
-    dirs.sort();
+    dirs.sort_by_cached_key(|d| (is_dated(d), d.clone()));
     dirs
+}
+
+/// Whether a call folder's name starts with its `YYYY-MM-DD_HHMMSS` stamp.
+fn is_dated(dir: &Path) -> bool {
+    chrono::NaiveDateTime::parse_from_str(&stamp_of(dir), "%Y-%m-%d_%H%M%S").is_ok()
 }
 
 /// Resolve `latest`, a path, or a folder name under calls/ to a call directory. Inside a minutes
@@ -40,25 +47,10 @@ pub fn resolve_call(arg: &str) -> Result<PathBuf> {
     Ok(dir)
 }
 
-/// The newest call by when it was recorded (`recorded_at`), not by folder name: a folder with no date
-/// (an imported or hand-made one, `old-dictation`) sorts after every dated name but is the oldest here.
-fn latest_call() -> Option<PathBuf> {
-    all_calls().into_iter().map(|d| (recorded_at(&d), d)).max().map(|(_, d)| d)
-}
-
-/// When a call was recorded: its meta.json `started_at`, else the stamp its folder name starts with
-/// (this computer's local time); None when it has neither.
-fn recorded_at(dir: &Path) -> Option<DateTime<FixedOffset>> {
-    if let Some(t) = read_json(&dir.join("meta.json"))["started_at"].as_str().and_then(|v| DateTime::parse_from_rfc3339(v).ok()) {
-        return Some(t);
-    }
-    let stamp = chrono::NaiveDateTime::parse_from_str(&stamp_of(dir), "%Y-%m-%d_%H%M%S").ok()?;
-    stamp.and_local_timezone(Local).earliest().map(|t| t.fixed_offset())
-}
 
 fn find_call(arg: &str) -> Result<PathBuf> {
     if arg == "latest" {
-        return latest_call().ok_or_else(|| anyhow!("no recorded calls in {}", paths::calls_dir().display()));
+        return all_calls().pop().ok_or_else(|| anyhow!("no recorded calls in {}", paths::calls_dir().display()));
     }
     for p in [PathBuf::from(arg), paths::calls_dir().join(arg)] {
         if p.join("meta.json").exists() {
@@ -2485,9 +2477,9 @@ mod tests {
         // A stamp in its name and no start in meta.json: the stamp counts.
         make("2026-10-21_120000-stamp-only", json!({"title": "Stamp only"}));
         assert_eq!(resolve_call("latest").unwrap().file_name().unwrap(), "2026-10-22_090000-newest");
-        // A later start in meta.json wins over the name (a folder named by its own stamp).
-        make("2026-10-19_080000-moved", json!({"title": "Started later", "started_at": "2026-10-23T08:00:00+02:00"}));
-        assert_eq!(resolve_call("latest").unwrap().file_name().unwrap(), "2026-10-19_080000-moved");
+        // The list is in the same order: the undated folder first (oldest), the newest dated last.
+        let names: Vec<_> = all_calls().iter().map(|d| d.file_name().unwrap().to_string_lossy().into_owned()).collect();
+        assert_eq!(names, ["old-dictation", "2026-10-20_100000-older", "2026-10-21_120000-stamp-only", "2026-10-22_090000-newest"]);
         // Only undated folders: one of them is still `latest`.
         for d in fs::read_dir(paths::calls_dir()).unwrap().flatten() {
             if d.file_name() != "old-dictation" {
