@@ -20,6 +20,7 @@ tags: [calls, minutes, ai-profiles, fake-claude]
 - Standard data set built with `--ai local` right before the run: `tests/fixtures/serve.sh up <dir> <port> --set standard --ai local` (`data: standard`, `ai: local`); the window is served at `{{base_url}}`; every `echoctl` command runs as `target/debug/echoctl …` after `. <dir>/env`
 - The default AI profile is the local one (`ollama`). `<profile>` and `<model>` below are its `name` and `notes_model` in `target/debug/echoctl ai status`, and `<where>` is "on this computer" for a model on this Mac or "at <host>" for one on the network (for example "<profile>", `qwen3.8:27b-mlx`, "on this computer"). A recorded call is pinned to a profile when its recording starts (`meta.json` → `ai_profile`); on this data only Vendor call with Vandelay is (to `out`). Choosing another profile in the Minutes tab's Model select and pressing Write minutes / Try again pins it too: this case pins one call that way to `work`, whose run the fake `claude` refuses at once — no model run
 - The line under a Minutes box, "Claude Code writes them with …", and the Model select (`select[data-notesprofile]`, "Model for these minutes") name the call's profile
+- **In S-30** `<profile>`, `<model>` and `<where>` are read once, in the scenario's prelude (`echoctl ai status` and one `ls` of the calls), and every stage uses them. On its own, read them as above
 
 ## Test Data
 

@@ -19,6 +19,7 @@ tags: [notes, edit]
 - Standard data set built right before the run: `tests/fixtures/serve.sh up <dir> <port> --set standard` (`data: standard`); the window is served at `{{base_url}}` and `{{base_url}}/` was loaded first (the cookie); file reads run after `. <dir>/env`
 - Today's Acme weekly sync is open with My notes shown (as in `TC-016`); `A=$(ls "$ECHOCTL_HOME/calls" | grep -- '-acme-weekly-sync$' | tail -1)`
 - A note's text opens its editor on click: a textarea `#note-edit` ("Edit this note"), kind buttons Note / ? Question / ! Decision / ☐ To-do / ⚑ Flagged, the hint "Enter to save · Esc to cancel", buttons "Cancel" and "Save". Hovering a note shows ✎ ("Edit this note") and × ("Delete this note")
+- **In S-29** the call and My notes are left open by `window/TC-016` (the stage before). On its own: run `TC-016` step 1 first
 
 ## Test Data
 

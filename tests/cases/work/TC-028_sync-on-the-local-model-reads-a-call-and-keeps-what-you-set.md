@@ -22,6 +22,7 @@ tags: [work, ledger, sync, local-model, claude-code, long]
 - **One sync = three model runs in a row** (extract, verify, people) — about 5 minutes on the network test server, about 45 minutes on a Mac running the model itself. `project ledger <id> run` has no `--limit`: step 2 leaves one evidence item so the run reads only that one (the people pass still reads every call it hasn't read yet). Assert states, node ids and kinds, pinned fields and files; never the model's wording or which items it proposes. No retry unless it failed for an infrastructure reason (then BLOCKED)
 - `$L` stands for `target/debug/echoctl project ledger acme-rollout` (write it out in full). A node from the tree: `$L tree` → `nodes.<id>` (`due`, `internal_owner`, `pinned`, `history`)
 - The user's own edits pin a field (`pinned`); the extractor is told never to change a pinned field, and a proposal that still tries is recorded in the item's history, not applied (the window marks it "kept yours", as in `calls/TC-020`)
+- **In S-30** `<profile>` and `<model>` are read once, in the scenario's prelude (`echoctl ai status` and one `ls` of the calls), and every stage uses them. On its own, read them as above
 
 ## Test Data
 

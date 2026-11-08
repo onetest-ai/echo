@@ -18,6 +18,7 @@ tags: [cli, threads, found]
 ## Preconditions
 - Standard data set built right before the run: `tests/fixtures/serve.sh up <dir> <port> --set standard` (`data: standard`); the window is served at `{{base_url}}` and `{{base_url}}/` was loaded first (the cookie); every `echoctl` command runs as `target/debug/echoctl …` after `. <dir>/env`
 - Today's Acme weekly sync and Initech planning carry the run's time in their folder names: `A=$(ls "$ECHOCTL_HOME/calls" | grep -- '-acme-weekly-sync$' | tail -1)` and `I=$(ls "$ECHOCTL_HOME/calls" | grep -- '-initech-planning$')`
+- **In S-28** step 1's output comes from the scenario's prelude (`<dir>/project-list.json`, `echoctl project list` on the data as built; `cli/TC-007` step 6 reads it too), and the read commands of steps 3, 5, 6, 8 and 10 run in one shell call before step 2 (nothing changes the data during the case). On its own, each step runs its command
 
 ## Test Data
 

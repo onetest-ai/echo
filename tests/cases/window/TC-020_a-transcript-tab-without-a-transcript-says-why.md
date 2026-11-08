@@ -18,6 +18,7 @@ tags: [transcript, empty-state]
 ## Preconditions
 - Standard data set built right before the run: `tests/fixtures/serve.sh up <dir> <port> --set standard` (`data: standard`); the window is served at `{{base_url}}` and `{{base_url}}/` was loaded first (the cookie)
 - A call's row is `[data-call$="-<slug>"]`; the tabs are `role=tab` "Minutes" / "Transcript"
+- **In S-29** the Calls list is already on screen, left by the stage before, so step 1's navigation is skipped and step 1 starts at its click. On its own, step 1 navigates
 
 ## Test Data
 

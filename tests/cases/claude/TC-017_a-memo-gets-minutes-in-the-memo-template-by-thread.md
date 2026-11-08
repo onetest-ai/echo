@@ -22,6 +22,7 @@ tags: [claude, minutes, memo, local-model]
 - **One model run** (step 2), about 4 minutes. Assert files, states, headings and the window, never the model's wording; no retry unless it failed for an infrastructure reason (then BLOCKED)
 - Today's memo is the folder `<stamp>-memo` (`ls $ECHOCTL_HOME/calls | grep -- '-memo$' | tail -1`; `<stamp>` is its `YYYY-MM-DD_HHMMSS` part). Its transcript is one line about Acme rollout and Globex pilot; it is in both threads (`memo-threads.json`) and has made-up minutes. **The run gives the memo a title and renames its folder**: after it, find the call by `<stamp>` (`ls -d $ECHOCTL_HOME/calls/<stamp>-*`)
 - The data's settings have the minutes page on (`config --minutes-page true`)
+- **In S-30** `<profile>`, `<model>` and the memo's `<stamp>` are read once, in the scenario's prelude (`echoctl ai status` and one `ls` of the calls), and every stage uses them. On its own, read them as above; in S-30 the Calls list is also already on screen, so step 1 starts at its click
 
 ## Test Data
 

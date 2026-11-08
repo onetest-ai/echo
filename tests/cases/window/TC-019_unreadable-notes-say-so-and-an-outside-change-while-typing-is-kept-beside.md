@@ -19,6 +19,7 @@ tags: [notes, files, data-loss]
 - Standard data set built right before the run: `tests/fixtures/serve.sh up <dir> <port> --set standard` (`data: standard`); the window is served at `{{base_url}}` and `{{base_url}}/` was loaded first (the cookie); shell steps run after `. <dir>/env`
 - My notes is open in the right panel
 - **This case writes one file in the run's data folder** (step 4, "another editor"): the one exception to the runner's read-only Bash, on the run's own data only
+- **In S-29** My notes has been open since `window/TC-016` step 1. On its own: open a call, press `[aria-label="My notes"]`, then run step 1
 
 ## Test Data
 

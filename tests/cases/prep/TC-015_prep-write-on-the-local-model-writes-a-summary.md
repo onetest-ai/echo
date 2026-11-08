@@ -21,6 +21,7 @@ tags: [prep, cli, local-model]
 - The data's model server answering (`--ai local`). `<profile>` and `<model>` below are the default AI profile's `name` and `notes_model` in `target/debug/echoctl ai status`. Acme renewal has no AI profile of its own, so its meetings' preps are written on the default; a local profile's summary is one short request to the model server (no Claude Code). No Claude account is used
 - **One model job** (step 2): seconds when the model is loaded, about a minute when the server has to load the model. Assert files, fields and the window, never the summary's wording
 - The meeting's prep id is stable for the data: Acme renewal follow-up = `99067d7f0917f050` (check it in step 1)
+- **In S-30** `<profile>` and `<model>` are read once, in the scenario's prelude (`echoctl ai status` and one `ls` of the calls), and every stage uses them. On its own, read them as above
 
 ## Test Data
 

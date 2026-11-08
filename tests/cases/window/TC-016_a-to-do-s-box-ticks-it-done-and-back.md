@@ -19,6 +19,7 @@ tags: [notes]
 - Standard data set built right before the run: `tests/fixtures/serve.sh up <dir> <port> --set standard` (`data: standard`); the window is served at `{{base_url}}` and `{{base_url}}/` was loaded first (the cookie); file reads run after `. <dir>/env`
 - Today's Acme weekly sync holds notes of every kind; its folder: `A=$(ls "$ECHOCTL_HOME/calls" | grep -- '-acme-weekly-sync$' | tail -1)`
 - The My notes panel is `[aria-label="Right panel"]`; a to-do's box is a `role=checkbox` named "Mark done" (open) or "Mark to do" (done)
+- **In S-29** the Calls list is already on screen, left by the stage before, so step 1's navigation is skipped and step 1 starts at its click; the My notes panel step 1 opens stays open for `window/TC-017`, `TC-021`, `TC-018` and `TC-019`. On its own, step 1 navigates
 
 ## Test Data
 
