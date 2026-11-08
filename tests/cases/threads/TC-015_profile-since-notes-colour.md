@@ -31,7 +31,7 @@ tags: [threads, profile]
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | Navigate to `{{base_url}}/#project/globex-pilot/profile` | Since reads "From its first call"; Notes for Claude reads "What the minutes and Claude should know — what people call things, what to leave out"; the AI row reads "The default · Claude Code (as configured)"; no History row (Recall is off) |
-| 2 | Click "From its first call", set the date `2026-11-01` in the input named "Since" | Since reads "1 Nov 2026" (locale format with the day, month and year); `echoctl project show globex-pilot` has `"since": "2026-11-01"` |
+| 2 | Click "From its first call", set the date `2026-11-01` in the input named "Since" | Since reads "Nov 1, 2026" — the browser's locale with day, short month and year (`toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })`: "Nov 1, 2026" in en-US, the Playwright browser's locale; "1 Nov 2026" in en-GB); `echoctl project show globex-pilot` has `"since": "2026-11-01"` |
 | 3 | Click the Notes text, type `Call the pilot "GP".` and leave the field | The Notes row shows `Call the pilot "GP".`; `echoctl project show globex-pilot` has `"notes"` with that text |
 | 4 | Click the fourth colour swatch (`[data-pj="color"][data-color="#f0a24a"]`). Wait up to 3 s after an action for the window to redraw before reading. | That swatch is selected (class `on`); `echoctl project show globex-pilot` has `"color": "#f0a24a"` |
 | 5 | Read the AI row | A select "AI profile" with the options "The default (Claude Code (as configured))" and "Claude Code (as configured)"; a button "model: the profile's minutes model" |

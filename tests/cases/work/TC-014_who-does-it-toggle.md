@@ -38,7 +38,7 @@ T001 is set to By hand.
 
 ## Teardown
 - Choose "Who does it" `Anyone` on Tasks
-- On T001 click the pressed button again or `Claude can`, then check `echoctl project tasks`
+- `echoctl project ledger acme-rollout edit '{"op":"edit","node":"T001","set":{"mode":null}}'`, then `echoctl project tasks`: T001 of `acme-rollout` has `"mode": {"by": "you", "mode": null}` (no one chosen). The window cannot undo the choice: "Claude can" and "By hand" each set their own mode, and clicking the pressed one again sets it again
 
 ## Changes
 - Sets the mode of T001.
