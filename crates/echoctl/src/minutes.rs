@@ -723,7 +723,47 @@ fn diagram_source(src: &str) -> String {
         }
         out.push(l);
     }
-    out.join("\n")
+    no_tags(&out.join("\n"))
+}
+
+/// A diagram's text with no markup: mermaid measures a label through `innerHTML` even with HTML labels
+/// off, so a `<tag` in it would become an element (#112). Every `<` that opens a tag (a letter, `/`, `!` or
+/// `?` after it) is mermaid's entity `#lt;`, whatever comes before it; the `>` that closes that same token
+/// (no bracket, quote, pipe or line break between) is `#gt;`. Kept as they are: line breaks (`<br>`,
+/// `<br/>`, `<br />`), a class annotation `<<word>>` (one word: no attributes), arrows (`<-->`, `<|--`) and a bare `<` (`1 < 2`).
+fn no_tags(src: &str) -> String {
+    let b = src.as_bytes();
+    let mut out = String::with_capacity(src.len());
+    let mut close: Option<usize> = None;
+    let annotation = |i: usize| {
+        // `<<word>>`: i is either `<` of the pair.
+        let start = if b.get(i + 1) == Some(&b'<') { i + 2 } else if i > 0 && b[i - 1] == b'<' { i + 1 } else { return false };
+        let n = b[start..].iter().take_while(|c| c.is_ascii_alphanumeric() || **c == b'_').count();
+        n > 0 && b[start + n..].starts_with(b">>")
+    };
+    for (i, c) in src.char_indices() {
+        if close == Some(i) {
+            out.push_str("#gt;");
+            close = None;
+            continue;
+        }
+        if c != '<' {
+            out.push(c);
+            continue;
+        }
+        let after = &src[i + 1..]; // `<` is one byte
+        let br = ["br>", "br/>", "br />"].iter().any(|t| after.get(..t.len()).is_some_and(|a| a.eq_ignore_ascii_case(t)));
+        let tag = after.starts_with(|n: char| n.is_ascii_alphabetic() || matches!(n, '/' | '!' | '?'));
+        if tag && !br && !annotation(i) {
+            out.push_str("#lt;");
+            close = after.find(['>', '[', ']', '(', ')', '{', '}', '"', '|', '<', '\n'])
+                .filter(|&k| after.as_bytes()[k] == b'>' && !matches!(after.as_bytes()[k.saturating_sub(1)], b'-' | b'=' | b'.'))
+                .map(|k| i + 1 + k);
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// `[mm:ss]` / `[h:mm:ss]` anchors in (already escaped) text as timestamps.
@@ -1070,6 +1110,29 @@ mod tests {
     }
 
     #[test]
+    fn a_diagram_label_carries_no_markup_but_line_breaks_and_arrows_stay() {
+        let t = |a: &str, want: &str| assert_eq!(no_tags(a), want, "{a}");
+        // Tags, whatever precedes their `<`.
+        t("A[\"x <img src=x onerror=alert(1)> <script>alert(1)</script>\"]-->B", "A[\"x #lt;img src=x onerror=alert(1)> #lt;script#gt;alert(1)#lt;/script#gt;\"]-->B");
+        t("A[\"<<img src=x onerror=alert(1)>\"]-->B", "A[\"<#lt;img src=x onerror=alert(1)>\"]-->B");
+        t("A[a<<script>] --> B[<<<img src=x>]", "A[a<#lt;script#gt;] --> B[<<#lt;img src=x#gt;]");
+        t("A[<a href='javascript:x'>o</a> <!-- c]", "A[#lt;a href='javascript:x'#gt;o#lt;/a#gt; #lt;!-- c]");
+        // Only the exact line breaks stay.
+        t("C[a<br>b<br/>c<BR />d] <--> D", "C[a<br>b<br/>c<BR />d] <--> D");
+        t("C[<br/onmouseover=alert(1)>]", "C[#lt;br/onmouseover=alert(1)>]");
+        // Arrows, annotations, comparisons, generics, and a node shape after an escaped `<` on its line.
+        t("E <|-- F\n  G[<<interface>>]\n  class H{<<abstract>>}\n  I[1 < 2]", "E <|-- F\n  G[<<interface>>]\n  class H{<<abstract>>}\n  I[1 < 2]");
+        t("J[List<String>]", "J[List#lt;String#gt;]");
+        // Text beyond ASCII next to an escaped tag, and an annotation-like pair with attributes.
+        t("graph TD; A[café — Q3 → <b>plan</b> 🚀]-->B[Привіт]", "graph TD; A[café — Q3 → #lt;b#gt;plan#lt;/b#gt; 🚀]-->B[Привіт]");
+        t("A[<<svg onload>>] --> B[<<img src x>>]", "A[<#lt;svg onload#gt;>] --> B[<#lt;img src x#gt;>]");
+        t("A[a<br>b] <--> B(x <y) --> C>flag]", "A[a<br>b] <--> B(x #lt;y) --> C>flag]");
+        t("graph LR; A(#x <b)-->B; C(<i) ==> D", "graph LR; A(#x #lt;b)-->B; C(#lt;i) ==> D");
+        let html = render("# T\n\n```mermaid\ngraph TD; A[\"<img src=x onerror=alert(1)>\"]-->B\n```\n", "T", None, &load, &[]);
+        assert!(html.contains("A[&quot;#lt;img src=x onerror=alert(1)&gt;&quot;]--&gt;B"));
+    }
+
+    #[test]
     fn diagrams_bring_mermaid_and_old_notes_still_render() {
         let html = render("# T\n\nA line.\n\n```mermaid\nflowchart TD\n  A[a<br>b] --> B\n```\n", "T", None, &load, &[]);
         assert!(html.contains("<pre class=\"mermaid\">flowchart TD\n  A[a&lt;br&gt;b] --&gt; B</pre>"));
@@ -1098,10 +1161,10 @@ mod tests {
     #[test]
     fn a_diagram_cant_change_the_pages_settings() {
         let src = "---\nconfig:\n  flowchart:\n    htmlLabels: true\n---\n%%{init: {\"flowchart\": {\"htmlLabels\": true}}}%%\nflowchart TD\n  %%{init:\n    {\"x\": 1}}%%\n  %% a comment stays\n  A[\"<form action='http://x.example/'></form>\"]\n";
-        assert_eq!(diagram_source(src), "flowchart TD\n  %% a comment stays\n  A[\"<form action='http://x.example/'></form>\"]");
+        assert_eq!(diagram_source(src), "flowchart TD\n  %% a comment stays\n  A[\"#lt;form action='http://x.example/'#gt;#lt;/form#gt;\"]");
         let html = render(&format!("# T\n\n```mermaid\n{src}```\n"), "T", None, &load, &[]);
         assert!(!html.contains("htmlLabels: true") && !html.contains("&quot;htmlLabels&quot;"));
-        assert!(html.contains("A[&quot;&lt;form action=&#39;http://x.example/&#39;&gt;&lt;/form&gt;&quot;]"));
+        assert!(html.contains("A[&quot;#lt;form action=&#39;http://x.example/&#39;#gt;#lt;/form#gt;&quot;]"));
     }
 
     #[test]
