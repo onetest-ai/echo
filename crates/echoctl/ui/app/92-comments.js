@@ -185,6 +185,8 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); e.target.blur() }
     return
   }
+  // The live notes' ⋯ menu first: its Escape closes it alone, not the panel or the note's draft.
+  if (e.key === 'Escape' && S.liveMenu) { e.preventDefault(); S.liveMenu = false; return render() }
   if (e.target.id === 'note-input') {
     if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); return addNote() }
     if (e.key === 'Escape') { S.noteDraft = ''; S.noteAt = null; S.noteDraftCall = null; e.target.value = ''; showNotesState(); return }

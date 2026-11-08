@@ -33,7 +33,7 @@ fn join_parts(dir: &str, ext: &str) -> Vec<u8> {
     let mut parts: Vec<_> = std::fs::read_dir(dir)
         .unwrap_or_else(|e| panic!("reading {dir}: {e}"))
         .map(|e| e.expect("a directory entry").path())
-        .filter(|p| p.extension().is_some_and(|x| x == ext))
+        .filter(|p| p.is_file() && p.extension().is_some_and(|x| x == ext))
         .collect();
     parts.sort();
     assert!(!parts.is_empty(), "no .{ext} parts in {dir}");
@@ -43,7 +43,7 @@ fn join_parts(dir: &str, ext: &str) -> Vec<u8> {
         let b = name.as_bytes();
         let stem = &name[..name.len() - ext.len() - 1];
         assert!(
-            b.len() > 3 && b[0].is_ascii_digit() && b[1].is_ascii_digit() && b[2] == b'-' && stem[3..].bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-'),
+            stem.len() > 3 && b[0].is_ascii_digit() && b[1].is_ascii_digit() && b[2] == b'-' && stem[3..].bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-'),
             "{}: a part's name is NN-<area>.{ext} (lowercase, digits, dashes)",
             p.display()
         );

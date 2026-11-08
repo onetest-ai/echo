@@ -149,14 +149,23 @@ async function loadCall(name) {
     const moved = (S.calls || []).find((c) => c.name !== name && c.name.slice(0, 17) === stamp)
     if (moved && S.selected === name) { S.selected = moved.name; history.replaceState(null, '', `#call/${moved.name}/${S.tab}`); return loadCall(moved.name) }
     S.call = { error: String(e) }
-    // No such call: not polled again, and Calls leaves its error page (#150).
-    if (/^404 /.test(e.message || '')) S.missing = name
+    // No such call: not polled again, and Calls leaves its error page (#150) — once a fresh list confirms it (a
+    // folder the notes run renamed a moment ago is under another name with the same stamp: open that one).
+    if (/^404 /.test(e.message || '')) {
+      await loadCalls()
+      if (S.selected !== name || mine !== callSeq) return
+      const now = (S.calls || []).find((c) => c.name.slice(0, 17) === stamp)
+      if (now && now.name !== name) { S.selected = now.name; history.replaceState(null, '', `#call/${now.name}/${S.tab}`); return loadCall(now.name) }
+      S.missing = name
+    }
   }
 }
 
 // ── routing: #calls, #call/<name>/<tab>, #today ────────────────────────────────────────────
+/** The hash as text: decoded, or as it is when it holds a broken %-sequence (an old or hand-typed link). */
+function hashText() { try { return decodeURIComponent(location.hash) } catch { return location.hash } }
 function route() {
-  const h = decodeURIComponent(location.hash.slice(1))
+  const h = hashText().slice(1)
   // An echo:// link the window was opened at (the system, `echoctl app open --link`): routed where it points.
   if (h.startsWith('link=')) { history.replaceState(null, '', '#'); S.view = 'calls'; setTimeout(() => window.echo.openLink(h.slice(5))); return }
   // A plugin's activity (`ctx.activities.add`): `#<plugin>:<id>` and anything after a slash is its own.
@@ -203,7 +212,8 @@ function route() {
   S.upSel = null
   // Calls after a call that isn't there: the newest call, as a fresh load opens (#150).
   if (h === 'calls' && S.selected && S.missing === S.selected) {
-    S.selected = (S.calls || []).length ? S.calls[0].name : null; S.call = null
+    const next = (S.calls || []).find((c) => c.name !== S.missing)
+    commitPendingNotes(); S.selected = next ? next.name : null; S.call = null; S.confirmDelete = false; S.find = ''
     if (S.selected) { history.replaceState(null, '', `#call/${S.selected}/minutes`); S.tab = 'minutes'; loadCall(S.selected).then(render) }
   }
   const m = h.match(/^call\/([^/]+)(?:\/(\w+))?$/)

@@ -15,7 +15,6 @@ pub(super) static BRAIN_INSIGHTS: std::sync::Mutex<std::collections::BTreeSet<St
 pub(super) static BRAIN_EDITS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 pub(super) static BRAIN_EDIT_ERROR: std::sync::Mutex<(u64, String)> = std::sync::Mutex::new((0, String::new()));
 
-/// A change to a project or a client from the page (`{cmd: "project", op, …}`).
 /// Start a Brain sync in the background unless one runs (its outcome: `BRAIN_LAST`).
 pub(super) fn brain_sync_now() {
     if !BRAIN_SYNC.swap(true, std::sync::atomic::Ordering::SeqCst) {
@@ -55,7 +54,6 @@ pub(super) fn open_in_app(path: &Path) {
 /// The echo:// requests of this area (`respond` asks each area in turn).
 pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'static, [u8]>>> {
     Some(match path {
-        // Pickers for a thread's sources: the user's teams, a team's channels (Microsoft 365).
         // The numbers lane: per client its families (proposed / accepted), catalog, last build.
         "/api/brain/numbers" => json_reply({
             let mut v = crate::brain::numbers::overview().unwrap_or_else(|e| json!({ "error": format!("{e:#}") }));
@@ -173,7 +171,6 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
 /// The page's commands of this area (`handle` asks each area in turn).
 pub(super) fn handle(v: &Value) -> Option<Handled> {
     Some(match v["cmd"].as_str().unwrap_or("") {
-        // Settings: one plain value, as the page shows it now.
         // The taxonomy: the user's review (accept, rename, merge, move, remove, add, set).
         // The user's edit of topics or terms, off the window's thread: on a large Brain a new version re-reads the
         // mentions it changed (seconds). `topic_jobs` shows it running; its error comes back once (`edit_error`).

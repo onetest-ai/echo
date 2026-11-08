@@ -52,10 +52,10 @@ const HUMAN_OPS: [&str; 13] = ["edit", "ac_add", "ac_set", "link", "unlink", "me
 const XREF_KINDS: [&str; 3] = ["same", "depends_on", "blocks"];
 const HUMAN_STATES: [&str; 5] = ["open", "in_progress", "blocked", "done", "cancelled"];
 const MAX_AC: usize = 6;
-const HIST_KEYS: [&str; 33] = [
+const HIST_KEYS: [&str; 34] = [
     "mid", "type", "op", "effect", "evidence", "date", "ts", "speaker", "quote", "note", "due_text", "due", "by", "kind", "set", "text", "met", "ac",
     "ac_text", "depends_on", "into", "title", "ac_add", "who", "what", "source", "thread", "target", "master", "internal_owner", "client_owner",
-    "delegated_by", "at",
+    "delegated_by", "at", "drop",
 ];
 /// The workstream every project starts with.
 const FIRST_EPIC: &str = "General";

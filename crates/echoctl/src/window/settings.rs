@@ -262,6 +262,7 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
             });
             true.into()
         }
+        // Settings: one plain value, as the page shows it now.
         "settings_set" => match settings_set(v["key"].as_str().unwrap_or(""), &v["value"]) {
             Ok(()) => true.into(),
             Err(e) => notice(&format!("{e:#}")),

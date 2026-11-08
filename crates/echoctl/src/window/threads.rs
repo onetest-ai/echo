@@ -70,6 +70,7 @@ pub(super) fn projects_overview() -> Value {
     }
 }
 
+/// A change to a project or a client from the page (`{cmd: "project", op, …}`).
 pub(super) fn project_op(v: &Value) -> anyhow::Result<Option<String>> {
     use crate::projects::{self as pj, Member, Rule, Stage, Term};
     let s = |k: &str| v[k].as_str().map(str::to_owned);
@@ -358,14 +359,15 @@ pub(super) fn project_op(v: &Value) -> anyhow::Result<Option<String>> {
 }
 
 
-/// The echo:// requests of this area (`respond` asks each area in turn).
 /// The client id in `/api/client/<id><suffix>`, if there is one (`/api/client/people` has none: 404, not a panic).
 fn client_id<'a>(path: &'a str, suffix: &str) -> Option<&'a str> {
     path.strip_prefix("/api/client/")?.strip_suffix(suffix).filter(|id| !id.is_empty())
 }
 
+/// The echo:// requests of this area (`respond` asks each area in turn).
 pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'static, [u8]>>> {
     Some(match path {
+        // Pickers for a thread's sources: the user's teams, a team's channels (Microsoft 365).
         "/api/m365/teams" => json_reply(crate::graph::teams().map(Value::from).unwrap_or_else(|e| json!({ "error": format!("{e:#}") }))),
         "/api/m365/channels" => {
             let team = query_param(req.uri().query().unwrap_or(""), "team").unwrap_or_default();

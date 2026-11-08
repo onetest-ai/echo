@@ -43,7 +43,7 @@ pub fn resolve_call(arg: &str) -> Result<PathBuf> {
 /// The newest call by when it was recorded (`recorded_at`), not by folder name: a folder with no date
 /// (an imported or hand-made one, `old-dictation`) sorts after every dated name but is the oldest here.
 fn latest_call() -> Option<PathBuf> {
-    all_calls().into_iter().max_by(|a, b| recorded_at(a).cmp(&recorded_at(b)).then_with(|| a.cmp(b)))
+    all_calls().into_iter().map(|d| (recorded_at(&d), d)).max().map(|(_, d)| d)
 }
 
 /// When a call was recorded: its meta.json `started_at`, else the stamp its folder name starts with

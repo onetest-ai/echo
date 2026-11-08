@@ -354,7 +354,7 @@ function doc() {
   // A tab the window chose itself (above) is written into the URL too, or a click on the tab the URL still names
   // would ask for the URL it already has and change nothing (#148).
   const own = `#call/${c.name}/${S.tab}`
-  if (S.selected === c.name && decodeURIComponent(location.hash) !== own) history.replaceState(null, '', own)
+  if (S.selected === c.name && hashText() !== own) history.replaceState(null, '', own)
   const people = c.people && c.people.length ? `<span class="people" title="${esc(c.people.join(', '))}">${esc(c.people.slice(0, 6).join(', '))}${c.people.length > 6 ? ` and ${c.people.length - 6} more` : ''}</span>` : ''
   const head = `${listToggle()}<div class="head-row">
         <div style="min-width:0">

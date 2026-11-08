@@ -144,9 +144,6 @@ document.addEventListener('click', (e) => {
   S.liveMenu = false
   setTimeout(render, 0)
 })
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && S.liveMenu) { S.liveMenu = false; render() }
-})
 
 function prepCard(c) {
   const p = (c.live || {}).prep
