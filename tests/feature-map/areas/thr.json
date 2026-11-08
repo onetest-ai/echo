@@ -73,7 +73,7 @@
   },
   {
    "id": "F-THR-08",
-   "feature": "A thread's header shows icon, name, client tag, stage tag, call count, since, last call; tabs Brief, Work (open count), Calls (count), People (count), Profile",
+   "feature": "A thread's header shows icon, name, client tag, stage tag, call count, since, last call; tabs Brief, Work (open count, on every tab before Work is opened), Calls (count), People (count), Profile",
    "priority": "high",
    "check": "agent",
    "axes": [

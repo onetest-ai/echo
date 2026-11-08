@@ -209,6 +209,7 @@ function render() {
   if (lt2 && !jumped) lt2.scrollTop = ltStick ? lt2.scrollHeight : ltTop
   if (entering) { const p = $('.pane') || $('.grid-wrap'); if (p) { p.classList.remove('enter'); void p.offsetWidth; p.classList.add('enter') } }
   placeDetail()
+  placeColMenu()
   pushNotes(false)
   attachTerms(termFocus)
   const g = $('#calgrid')

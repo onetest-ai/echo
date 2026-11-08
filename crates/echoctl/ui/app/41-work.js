@@ -451,6 +451,30 @@ function ledgerEdit(body, project = S.pj.sel) {
   }, 300)
 }
 
+// ── column menu: where a board column's menu goes (no DOM: `column-menu.test.mjs`) ─────────────
+/** A column's menu is placed against the window, not in the board: the board scrolls sideways, so its box
+ *  clips what hangs out of it, and on a short board that was most of the menu (#109). Under its ⋯ button,
+ *  right edges lined up; above it when there is no room below; kept inside the window. `b` the button's
+ *  box, `m` the menu's size, `win` the window's. */
+function colMenuSpot(b, m, win, pad = 8) {
+  const below = b.bottom + 4
+  const top = below + m.height <= win.height - pad ? below : Math.max(pad, Math.min(b.top - 4 - m.height, win.height - pad - m.height))
+  const left = Math.max(pad, Math.min(b.right - m.width, win.width - pad - m.width))
+  return { top, left }
+}
+// end of the column menu block
+/** The open column menu (fixed, `.bd-col-h .bd-menu`) where `colMenuSpot` says: after each render, and
+ *  when the board or the pane scrolls or the window is resized. */
+function placeColMenu() {
+  const m = document.querySelector('.bd-col-h .bd-menu'), btn = m && m.parentElement.querySelector('.bd-more')
+  if (!btn) return
+  const at = colMenuSpot(btn.getBoundingClientRect(), { width: m.offsetWidth, height: m.offsetHeight }, { width: window.innerWidth, height: window.innerHeight })
+  m.style.top = `${at.top}px`
+  m.style.left = `${at.left}px`
+}
+document.addEventListener('scroll', placeColMenu, { capture: true, passive: true })
+window.addEventListener('resize', placeColMenu)
+
 // ── human history: what the user did to an item, in words (History in its details) ─────────────
 /** One of the user's own ledger edits as History says it: every op in words, none shown raw (#153). `word`: what
  *  the item's description is called (its answer, the decision…), for an edit of it. No DOM: `ui/human-history.test.mjs`. */

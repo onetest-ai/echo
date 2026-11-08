@@ -62,7 +62,7 @@
   },
   {
    "id": "F-WORK-06",
-   "feature": "A column's menu renames, recolours, sets its state and limit (over the limit shows), moves, hides or deletes it (not the last of its state); + Column adds one; \"N hidden\" shows them again",
+   "feature": "A column's menu renames, recolours, sets its state and limit (over the limit shows), moves, hides or deletes it (not the last of its state); + Column adds one; \"N hidden\" shows them again; the whole menu shows over the board, however short the board",
    "priority": "low",
    "check": "agent",
    "axes": [

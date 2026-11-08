@@ -95,6 +95,10 @@ Story (criteria) › Task (action / session / dependency, owners, due, client-ow
   Late is judged by the local date. The Owner filter lists the user once, "Me (name)", covering every owner here that
   `tasks::Me` takes for them (`tasks::my_names`, sent as the work route's `me`). Owner and Kind narrow every board
   column, Done included; Open only leaves Done alone.
+- The window reads the tree (`/api/project/<id>/work`) with the thread on every tab (`loadProject`), not only on Work:
+  the tab row's Work count is the open stories and tasks in it (#110).
+- The Board scrolls sideways in its own box, which clips what hangs out of it; a column's menu is therefore `fixed`,
+  placed against its ⋯ button by `colMenuSpot` after each render and on scroll (#109).
 
 ### Evidence items
 | Kind | Id | Content | Trust |
