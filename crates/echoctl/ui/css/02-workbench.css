@@ -50,6 +50,27 @@
 .pill.armed .ring { width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--me); box-sizing: border-box; flex: none; }
 .pill.soon { border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
 .pill.soon .clock { color: var(--accent-ink); }
+/* The strip's right end: the account chip and the Inbox. Both sides grow alike, so the pill stays
+   centred; the right end never shrinks below its content, the pill gives way first. */
+.top-grow { flex: 1 1 0; min-width: 0; }
+.top-end { flex: 1 1 0; min-width: max-content; display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding-left: 8px; }
+.acct {
+  position: relative; display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 10px; box-sizing: border-box;
+  border-radius: 12px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--text-2);
+  font: inherit; font-size: 12px; white-space: nowrap; cursor: default;
+}
+.acct span { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+.acct:hover { color: var(--text); background: color-mix(in srgb, var(--surface) 92%, var(--text)); }
+.acct select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: default; font-size: 13px; }
+.acct:focus-visible, .acct:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tb-inbox { position: relative; }
+.tb-inbox svg { width: 18px; height: 18px; }
+.wb .topbar .tb-inbox .act-badge { position: absolute; top: -3px; right: -4px; margin: 0; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; font-size: 9.5px; line-height: 14px; }
+.tb-inbox:hover::after {
+  content: attr(data-hint) "\2002" attr(data-key); position: absolute; right: 0; top: calc(100% + 6px);
+  padding: 3px 9px; border-radius: var(--r-control); background: var(--surface); border: 1px solid var(--line-strong);
+  box-shadow: var(--shadow); color: var(--text); font-size: 12px; font-weight: 400; white-space: nowrap; pointer-events: none; z-index: 20;
+}
 .pchip { height: 24px; padding: 0 10px; border-radius: 12px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--text-2); font-size: 12px; cursor: default; }
 @media (prefers-reduced-motion: no-preference) {
   .pill.rec .dot { animation: rec-pulse 1.6s ease-in-out infinite; }

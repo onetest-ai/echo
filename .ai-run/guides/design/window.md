@@ -245,9 +245,17 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
 - Text is selectable everywhere but the window's chrome (buttons, bars, tabs, panel heads).
 
 ### Workbench layout
-- Fixed areas: a 40 px top strip with the **Record pill** at its centre (idle Record ▾ with language + profile;
-  armed + Cancel; meeting soon + Record it; recording: clock, title, Stop that asks first), the activity bar, the
-  primary view, right and bottom panels, a status bar.
+- Fixed areas: a 40 px top strip with the **Record pill** at its centre (idle Record ▾ with the call's language, and
+  Memo; armed + Cancel; meeting soon + Record it; recording: clock, title, Stop that asks first; the default profile's
+  sign-in note under it), the activity bar, the primary view, right and bottom panels, a status bar.
+- The strip's right end (`topEnd`): the **account chip** (`accountChip`: the default AI profile by name, tooltip
+  `profileLabel` + `profileWhere`; with two or more profiles a native select over the label sets the default exactly as
+  Settings' Make default, `settings_set default_profile`, nothing signs in by itself, the pill's note offers it; with
+  one a plain chip that opens `#settings/ai`; none: not shown) and the **Inbox** icon (`inboxButton`, below). The
+  pill sits between two equal growing spacers, so it stays centred; the right end never shrinks below its content and
+  the pill gives way first, down to the window's 760 px minimum. The account isn't chosen per recording any more
+  (#107): Record, Arm, Join, Record it and Memo send no profile, so the app pins its default when the recording starts.
+  On macOS the strip drags the window except over buttons, selects and labels (`onTitleBar`).
 - The activity bar is folded to icons by default (48 px; each icon's name and keys in an instant hint beside it) or
   open with names and counts (200 px): ⌘\\ / Ctrl+\\, the switch in the title strip after the traffic lights
   (`barButton`), ⌘K; `Layout`'s `bar`, saved with the layout. Below 900 px it opens over the page and closes on a click
@@ -279,7 +287,8 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   marketplace again in the background; it opens `#settings/plugins/<id>` — Installed tab, that plugin picked —
   where its sheet shows before anything changes; one that asks for more says so; it moves to Done only once the
   plugin has that version — an offer taken back leaves quietly). Each item carries the IPC message its own place sends, or the hash to go to.
-- Entry above Settings in the activity bar (count; warn colour when something blocks work); toggles the panel
+- Entry: an icon at the right end of the top strip, after the account chip (count badge; warn colour when something
+  blocks work; its name and keys in a hint under it on hover); toggles the panel
   (⇧⌘I; Ctrl+Shift+U on Windows, where Ctrl+Shift+I is WebView2's DevTools).
 - A clicked decision keeps its item "working" until it is gone: a background job's (`busy` by item key) while it
   runs — its end, a panic too (`OnEnd`), marks the cache stale (`attention::stale`) — any other up to 15 s. A

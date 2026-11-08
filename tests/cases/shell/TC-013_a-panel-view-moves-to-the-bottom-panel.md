@@ -25,7 +25,7 @@ tags: [shell, panels, layout]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Navigate to `{{base_url}}/#today` and click the activity button "Inbox" | The right panel shows the tab "Inbox" |
+| 1 | Navigate to `{{base_url}}/#today` and click the top bar's button "Inbox" | The right panel shows the tab "Inbox" |
 | 2 | Click "Move to the bottom panel" | The bottom panel opens with a tab "Inbox" selected; the button now reads "Move to the right panel" |
 | 3 | Wait 1 s, run `. <dir>/env && cat "$ECHOCTL_CONFIG_DIR/window-layout.json"` | `"views"` has `"needs": {"area": "bottom"}` |
 | 4 | Click "Move to the right panel" | The right panel holds the tab "Inbox" again |

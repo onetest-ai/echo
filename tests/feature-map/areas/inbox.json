@@ -7,7 +7,7 @@
  "features": [
   {
    "id": "F-INBOX-01",
-   "feature": "Inbox (activity bar, ⇧⌘I) opens or closes the right panel on its tab; its badge counts open items, in warn colour when one blocks work",
+   "feature": "Inbox (an icon at the top bar's right end, ⇧⌘I) opens or closes the right panel on its tab; its badge counts open items, in warn colour when one blocks work",
    "priority": "high",
    "check": "agent",
    "axes": [

@@ -4,7 +4,7 @@ title: Inbox and prep on a quiet day
 run: agent
 data: small
 cases:
-  - tests/cases/inbox/TC-001_panel-opens-from-activity-bar.md
+  - tests/cases/inbox/TC-001_panel-opens-from-the-top-bar.md
   - tests/cases/inbox/TC-002_empty-open-and-done.md
   - tests/cases/inbox/TC-003_attention-cli-json.md
   - tests/cases/prep/TC-001_coming-up-today-fold.md
@@ -23,7 +23,7 @@ cases:
 
 | # | Case | Depends on | Before it |
 |---|------|------------|-----------|
-| 1 | `inbox/TC-001_panel-opens-from-activity-bar.md` | — | Load `{{base_url}}/` (the cookie) |
+| 1 | `inbox/TC-001_panel-opens-from-the-top-bar.md` | — | Load `{{base_url}}/` (the cookie) |
 | 2 | `inbox/TC-002_empty-open-and-done.md` | — | — |
 | 3 | `inbox/TC-003_attention-cli-json.md` | — | — |
 | 4 | `prep/TC-001_coming-up-today-fold.md` | — | — |

@@ -115,7 +115,7 @@ function render() {
   wb.classList.toggle('bottom-folded', eff.bottom.folded)
   wb.style.setProperty('--right-w', `${eff.right.size}px`)
   wb.style.setProperty('--bottom-h', `${eff.bottom.size}px`)
-  patch($('#r-top'), `${barButton()}<div class="pill-slot">${pill()}</div>`)
+  patch($('#r-top'), `${barButton()}<span class="top-grow"></span><div class="pill-slot">${pill()}</div>${topEnd()}`)
   patch($('#r-act'), actbar())
   patch($('#r-status'), statusbar())
   patch($('#r-right'), panel('right', eff))
@@ -365,7 +365,7 @@ document.addEventListener('click', (e) => {
   if (t.dataset.calmode) { S.cal.mode = t.dataset.calmode; S.cal.offset = 0; S.cal.data = null; go(`calendar/${S.cal.mode}`); return loadCalendar().then(render) }
   if (t.dataset.calnav !== undefined) { const n = Number(t.dataset.calnav); S.cal.offset = n === 0 ? 0 : S.cal.offset + n; S.cal.data = null; render(); return loadCalendar().then(render) }
   if (t.dataset.calImport) { send({ cmd: 'calendar_import', id: t.dataset.calImport }); const e = (S.cal.data.events || []).find((x) => x.id === t.dataset.calImport); if (e) e.import = { busy: true }; return render() }
-  if (t.dataset.schedule) { send({ cmd: 'schedule', id: t.dataset.schedule, languages: recordLang(), profile: pickedProfile() }); const e = ((S.cal.data && S.cal.data.events) || []).find((x) => x.id === t.dataset.schedule); if (e) e.scheduled = true; if (S.view === 'today') setTimeout(() => loadToday().then(render), 400); return render() }
+  if (t.dataset.schedule) { send({ cmd: 'schedule', id: t.dataset.schedule, languages: recordLang() }); const e = ((S.cal.data && S.cal.data.events) || []).find((x) => x.id === t.dataset.schedule); if (e) e.scheduled = true; if (S.view === 'today') setTimeout(() => loadToday().then(render), 400); return render() }
   if (t.dataset.unschedule) { send({ cmd: 'unschedule', id: t.dataset.unschedule }); const e = ((S.cal.data && S.cal.data.events) || []).find((x) => x.id === t.dataset.unschedule); if (e) e.scheduled = false; if (S.view === 'today') setTimeout(() => loadToday().then(render), 400); return render() }
   if (t.dataset.call) { S.listOpen = false; return go(`call/${t.dataset.call}/${t.dataset.callTab || S.tab}`) }
   if (t.dataset.upFold !== undefined) { S.upOpen = !S.upOpen; return render() }
@@ -453,12 +453,12 @@ document.addEventListener('click', (e) => {
   if (t.dataset.frame) { S.lightbox = t.dataset.frame; return render() }
   if (t.dataset.close) { S.lightbox = null; return render() }
   if (t.dataset.copy) { send({ cmd: 'copy', text: t.dataset.copy }); t.textContent = 'Copied'; return }
-  if (t.dataset.arm !== undefined) return send({ cmd: 'arm_meeting', id: t.dataset.arm, languages: recordLang(), profile: pickedProfile() })
-  if (t.dataset.join !== undefined) return send({ cmd: 'join_meeting', id: t.dataset.join, languages: recordLang(), profile: pickedProfile() })
+  if (t.dataset.arm !== undefined) return send({ cmd: 'arm_meeting', id: t.dataset.arm, languages: recordLang() })
+  if (t.dataset.join !== undefined) return send({ cmd: 'join_meeting', id: t.dataset.join, languages: recordLang() })
   if (t.dataset.ask) { send({ cmd: 'live_ask', call: S.selected, kind: t.dataset.ask }); return liveBusy() }
   switch (t.dataset.cmd) {
-    case 'record': return send({ cmd: 'record', languages: recordLang(), profile: pickedProfile() })
-    case 'record-memo': return send({ cmd: 'record_memo', languages: recordLang(), profile: pickedProfile() })
+    case 'record': return send({ cmd: 'record', languages: recordLang() })
+    case 'record-memo': return send({ cmd: 'record_memo', languages: recordLang() })
     case 'stop': S.stopAsk = false; render(); return send({ cmd: 'stop' })
     // A memo stops at once (nothing else is recorded); a call asks first.
     case 'stop-ask': if ((S.state || {}).recording_memo) { S.stopAsk = false; render(); return send({ cmd: 'stop' }) } S.stopAsk = true; return render()

@@ -25,9 +25,9 @@ tags: [shell, panels]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Navigate to `{{base_url}}/#today` and click the activity button "Inbox", then the tab "Vocabulary" | The right panel is open on "Vocabulary" |
+| 1 | Navigate to `{{base_url}}/#today` and click the top bar's button "Inbox", then the tab "Vocabulary" | The right panel is open on "Vocabulary" |
 | 2 | Wait 1 s and reload `{{base_url}}/#today` | No "Close the panel" button: the panel is closed |
-| 3 | Click the activity button "Inbox" | The panel opens on the tab "Inbox" (selected) with "Nothing needs you"; "Vocabulary" is not the selected tab: the button shows Inbox, not the last tab |
+| 3 | Click the top bar's button "Inbox" | The panel opens on the tab "Inbox" (selected) with "Nothing needs you"; "Vocabulary" is not the selected tab: the button shows Inbox, not the last tab |
 | 4 | Run `. <dir>/env && cat "$ECHOCTL_CONFIG_DIR/window-layout.json"` | `"right"` has `"active": "needs"` (Inbox replaced Vocabulary as the panel's active view) |
 
 ## Expected Final State
