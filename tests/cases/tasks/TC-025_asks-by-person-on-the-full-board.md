@@ -22,8 +22,8 @@ tags: [tasks, asks, waiting, quiet, due]
 
 | Person | Thread | Id | Button text | Reason after the dash |
 |---|---|---|---|---|
-| Alex Chen | Acme renewal | T011 | Test the password reset | due today |
-| Alex Chen | Globex pilot | T005 | Book the training slots | due tomorrow |
+| Alex Chen | Acme renewal | T011 | Test the password reset | due <the build date, e.g. "Sun, Nov 8"> |
+| Alex Chen | Globex pilot | T005 | Book the training slots | due <the day after, e.g. "Mon, Nov 9"> |
 | Alex Chen | Initech hiring | T013 | Unblock: agree the support hours (2) | waiting |
 | Alex Chen | Acme renewal | T018 | Unblock: send the revised timeline (2) | waiting |
 | Alex Chen | Globex pilot | T002 | Unblock: collect the user list | waiting |
@@ -52,3 +52,4 @@ The Details drawer shows Umbrella proposal T010; the Thread filter is on All thr
 ## Notes
 - Extends `TC-008` (one late task) with the three reasons that exist on the data: due within 3 days, quiet 5 days, waiting. No task of the data is late, so "was due" does not occur.
 - Per-person order follows the most urgent ask first (late, then the nearest date, then the quietest).
+- The reason of a dated task is `due <Day, Mon D>` (`fmtDay`), the date itself, not "today" / "tomorrow": the case once said the words, which the window never showed (2026-11-08 run).
