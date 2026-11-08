@@ -71,12 +71,12 @@ def load():
     cases = {}
     for p in sorted((TESTS / "cases").glob("*/TC-*.md")):
         fm = frontmatter(p)
-        cases[str(p.relative_to(TESTS.parent))] = {"area": p.parent.name, "id": fm.get("id", ""), "title": fm.get("title", ""),
+        cases[p.relative_to(TESTS.parent).as_posix()] = {"area": p.parent.name, "id": fm.get("id", ""), "title": fm.get("title", ""),
                                                    "run": fm.get("run", ""), "requirements": fm.get("requirements", []) or []}
     scenarios = {}
     for p in sorted((TESTS / "scenarios").glob("S-*.md")):
         fm = frontmatter(p)
-        scenarios[str(p.relative_to(TESTS.parent))] = {"id": fm.get("id", ""), "title": fm.get("title", ""), "cases": fm.get("cases", []) or []}
+        scenarios[p.relative_to(TESTS.parent).as_posix()] = {"id": fm.get("id", ""), "title": fm.get("title", ""), "cases": fm.get("cases", []) or []}
     return doc, cases, scenarios
 
 
@@ -309,7 +309,7 @@ def changes(base):
     """The map's features on BASE vs the working tree, and whether app code changed without the map."""
     import subprocess
     root = TESTS.parent
-    git = lambda *a: subprocess.run(["git", *a], cwd=root, capture_output=True, text=True, check=True).stdout
+    git = lambda *a: subprocess.run(["git", *a], cwd=root, capture_output=True, text=True, encoding="utf-8", check=True).stdout
     merge_base = git("merge-base", base, "HEAD").strip()
     old = {}
     for name in git("ls-tree", "--name-only", f"{merge_base}:tests/feature-map/areas").split() if git("ls-tree", merge_base, "tests/feature-map/areas") else []:
