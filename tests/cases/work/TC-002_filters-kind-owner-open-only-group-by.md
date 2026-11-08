@@ -31,7 +31,7 @@ tags: [work, filters]
 |---|--------|----------------|
 | 1 | Navigate to `{{base_url}}/#project/acme-rollout/work` | The bar shows the selects "Layout", "Kind", "Owner", the button "Open only" (on) and "Group by", "Fields ▾" |
 | 2 | Read the options of "Kind" | "All kinds · 4", "Stories · 1", "Tasks · 2", "Decisions · 1", "Risks · 0", "Questions · 0" |
-| 3 | Read the options of "Owner" | "Anyone", "Nobody named", "Omar Haddad", "Sam Rivera" |
+| 3 | Read the options of "Owner" | "Anyone", "Nobody named", "Me (Sam Rivera)", "Omar Haddad": the user (Sam Rivera in About me) is one option, first among the names |
 | 4 | Choose Owner `Omar Haddad` | The board has one card, "Answer the security questionnaire" (T002); the column "To do" shows 1 |
 | 5 | Choose Owner `Anyone`, then "Group by" `Story` | A lane titled "S001" with "SSO for the Berlin pilot" and the progress "0/1" holds both cards |
 | 6 | Choose "Group by" `Owner` | Lanes "Omar Haddad" (1) and "Sam Rivera" (1) |

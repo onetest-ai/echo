@@ -1,4 +1,6 @@
 // ── the Work tab: the project's ledger (`ledger.rs`) ────────────────────────────────────────
+// ── work-status: what the tree and the board say of an item, and what the filters keep (no DOM;
+//    work-status.test.mjs runs it, with `ymd` from the calendar's helpers)
 const CLOSED_STATES = ['done', 'cancelled', 'merged', 'deleted']
 const STATE_LABEL = { open: 'to do', in_progress: 'in progress', blocked: 'blocked', done: 'done', cancelled: 'cancelled', merged: 'merged', deleted: 'deleted' }
 const KIND_LABEL = { session: 'session', dependency: 'dependency', decision: 'decision', risk: 'risk', question: 'question' }
@@ -29,15 +31,46 @@ function workToReview(w) {
   return out
 }
 const fmtDay = (d) => d ? new Date(d + 'T12:00').toLocaleDateString([], { weekday: d && (new Date(d + 'T12:00') - Date.now()) / 864e5 < 7 && (new Date(d + 'T12:00') - Date.now()) > -864e5 ? 'short' : undefined, day: 'numeric', month: 'short' }) : ''
-const relDay = (d) => { if (!d) return ''; const t = new Date(); const iso = (x) => x.toISOString().slice(0, 10); if (d === iso(t)) return 'today'; t.setDate(t.getDate() - 1); if (d === iso(t)) return 'yesterday'; return fmtDay(d) }
+const relDay = (d) => { if (!d) return ''; const t = new Date(); if (d === ymd(t)) return 'today'; t.setDate(t.getDate() - 1); if (d === ymd(t)) return 'yesterday'; return fmtDay(d) }
 /** A work item's status as the tree and the board show it: its word and its colour. */
 function workStatus(n) {
   if (n.kind === 'question') return n.description || n.state === 'done' ? ['answered', 'done'] : CLOSED_STATES.includes(n.state) ? [STATE_LABEL[n.state] || n.state, n.state] : ['open', 'open']
   if (n.kind === 'risk') return CLOSED_STATES.includes(n.state) ? [STATE_LABEL[n.state] || n.state, n.state] : n.description ? ['handled', 'done'] : ['no response', 'waiting']
   if (n.state === 'done' && n.kind === 'task' && n.type === 'session') return ['held', 'done']
-  if (n.waiting_for && !CLOSED_STATES.includes(n.state)) return ['waiting', 'waiting']
+  // Blocked is the user's own word: it wins over waiting for someone, as on the board (`cardCategory`).
+  if (n.waiting_for && n.state !== 'blocked' && !CLOSED_STATES.includes(n.state)) return ['waiting', 'waiting']
   return [STATE_LABEL[n.state] || n.state, n.state]
 }
+/** A card's category on the board: the column state it goes in. */
+function cardCategory(n) {
+  if (n.state === 'done') return 'done'
+  if (n.state === 'blocked') return 'blocked'
+  if (n.waiting_for) return 'waiting'
+  return n.state === 'in_progress' ? 'in_progress' : 'open'
+}
+/** The Work bar's Owner options (value, label, chosen) for the items `all` and the view `V`. The user
+ *  (`w.me`: their name, and the owners here that are them — "Me", their name) is one option, '@me', first. */
+function workOwners(all, V, me) {
+  const mine = me.names || []
+  const isMe = V.owner === '@me' || mine.includes(V.owner)
+  const owners = [...new Set(all.map((n) => n.internal_owner || n.client_owner).filter((o) => o && !mine.includes(o)))].sort()
+  return [...(mine.length ? [['@me', me.name ? `Me (${me.name})` : 'Me', isMe]] : []), ...owners.map((o) => [o, o, V.owner === o])]
+}
+/** What the Work bar's filters keep: `pass` in the tree, `board` on the board. Done follows the Owner and
+ *  Kind filters there too; only Open only leaves it alone (#113). */
+function workFilter(V, me) {
+  const mine = me.names || []
+  const isMe = V.owner === '@me' || mine.includes(V.owner)
+  const owner = (n) => n.internal_owner || n.client_owner
+  const match = (n) => (!V.kind || n.kind === V.kind)
+    && (!V.owner || (V.owner === '-' ? !owner(n) && n.kind === 'task' : isMe ? mine.includes(owner(n)) : owner(n) === V.owner))
+  const open = (n) => !V.open || !CLOSED_STATES.includes(n.state)
+  return { pass: (n) => open(n) && match(n), board: (n) => match(n) && (open(n) || n.state === 'done') }
+}
+/** A board card's due is late (by the local date), and it shows whom it waits on (not once done). */
+const cardLate = (n, now = new Date()) => !!n.due && n.due < ymd(now) && n.state !== 'done'
+const cardWaits = (n) => !!n.waiting_for && n.state !== 'done'
+// end of the work-status block
 /** Where a record came from: its day and the call ("today · weekly 12:05"). */
 function workOrigin(w, n) {
   const h = (n.history || []).find((x) => x.op === 'create')
@@ -124,13 +157,7 @@ function saveBoard(b) {
   send({ cmd: 'project', op: 'board', id: S.pj.sel, board: b })
   render()
 }
-/** A card's category, and the visible column it sits in (the one the user put it in, if it still fits). */
-function cardCategory(n) {
-  if (n.state === 'done') return 'done'
-  if (n.state === 'blocked') return 'blocked'
-  if (n.waiting_for) return 'waiting'
-  return n.state === 'in_progress' ? 'in_progress' : 'open'
-}
+/** The visible column a card sits in (the one the user put it in, if it still fits). */
 function cardColumn(n, cols) {
   const cat = cardCategory(n)
   const own = cols.find((c) => c.id === n.column && c.state === cat)
@@ -141,20 +168,19 @@ function workBoard(w, pass) {
   const b = { ...boardOf(), ...(() => { const v = wv(); return { group: v.group, fields: v.fields, hide: v.hidden } })() }
   const cols = b.columns.filter((c) => !c.hidden && !b.hide.includes(c.id))
   const show = new Set(b.fields)
-  const today = new Date().toISOString().slice(0, 10)
-  const items = Object.values(N).filter((n) => (n.kind === 'task' || n.kind === 'question') && n.state !== 'merged' && n.state !== 'deleted' && n.state !== 'cancelled' && (pass(n) || n.state === 'done'))
+  const items = Object.values(N).filter((n) => (n.kind === 'task' || n.kind === 'question') && n.state !== 'merged' && n.state !== 'deleted' && n.state !== 'cancelled' && pass(n))
   const placed = items.map((n) => [n, cardColumn(n, cols)]).filter(([, c]) => c)
   const card = (n) => {
     const story = N[n.parent] && N[n.parent].kind === 'story' ? N[n.parent] : null
     const kind = n.kind === 'question' ? 'question' : n.type !== 'action' ? n.type : ''
     const owner = n.internal_owner || n.client_owner
-    const late = n.due && n.due < today && n.state !== 'done'
+    const late = cardLate(n)
     const last = (n.history || []).filter((h) => h.evidence).pop()
     const item = last && (w.evidence || {})[last.evidence]
     const chips = [
       show.has('kind') && kind ? `<span class="wk-k ${esc(kind)}">${esc(kind)}</span>` : '',
       show.has('due') && n.due ? `<span class="bd-chip${late ? ' late' : ''}" title="${late ? 'Overdue' : 'Due'}">${ICON('<rect x="4" y="5" width="16" height="15" rx="2.5"/><path d="M4 10h16M9 3v4M15 3v4"/>')}${esc(fmtDay(n.due))}</span>` : '',
-      show.has('waiting') && n.waiting_for ? `<span class="bd-chip warn" title="${esc(n.waiting_for.what || '')}">⏳ ${esc(n.waiting_for.who || 'someone')}</span>` : '',
+      show.has('waiting') && cardWaits(n) ? `<span class="bd-chip warn" title="${esc(n.waiting_for.what || '')}">⏳ ${esc(n.waiting_for.who || 'someone')}</span>` : '',
       show.has('holds_up') && (n.blocks || []).length && n.state !== 'done' ? `<span class="bd-chip" title="Holds up: ${esc(n.blocks.map((x) => (N[x] || {}).title || x).join('; '))}">holds up ${n.blocks.length}</span>` : '',
       show.has('source') && item ? `<span class="bd-chip" title="${esc(item.title || '')}">▮ ${esc(relDay(item.date))}</span>` : '',
     ].filter(Boolean).join('')
@@ -248,22 +274,21 @@ function projectWork(p) {
   const syncText = sync.state === 'running' ? `${esc((sync.message || 'reading calls').replace(/^reading/, 'Reading'))}…`
     : sync.state === 'failed' ? `<span class="error" title="${esc(sync.message || '')}">Sync failed</span>`
     : [sync.at ? `Synced ${esc(hm(new Date(sync.finished_at || sync.at)))}` : 'Not synced yet', w.pending ? `${w.pending} call${w.pending === 1 ? '' : 's'} to read` : '', review.length ? `<span class="wk-warn">${review.length} to review</span>` : ''].filter(Boolean).join(' · ')
-  const owners = [...new Set(all.map((n) => n.internal_owner || n.client_owner).filter(Boolean))].sort()
   const counts = Object.fromEntries(KIND_FILTERS.map(([k]) => [k, all.filter((n) => !k || n.kind === k).length]))
   const V = wv()
+  const owners = workOwners(all, V, w.me || {})
   const layoutChip = `<label class="fchip">${V.layout === 'tree' ? 'Tree' : 'Board'} ▾<select data-view-layout aria-label="Layout"><option value="board"${V.layout === 'board' ? ' selected' : ''}>Board</option><option value="tree"${V.layout === 'tree' ? ' selected' : ''}>Tree</option></select></label>`
   const kindChip = `<label class="fchip${V.kind ? ' on' : ''}">${esc((KIND_FILTERS.find(([k]) => k === V.kind) || KIND_FILTERS[0])[1])} ▾<select data-pj-filter="kind" aria-label="Kind">${KIND_FILTERS.map(([k, l]) => `<option value="${k}"${V.kind === k ? ' selected' : ''}>${esc(l)} · ${counts[k]}</option>`).join('')}</select></label>`
-  const ownerChip = `<label class="fchip${V.owner ? ' on' : ''}">${esc(V.owner === '-' ? 'Nobody named' : V.owner || 'Owner')} ▾<select data-pj-filter="owner" aria-label="Owner"><option value="">Anyone</option><option value="-"${V.owner === '-' ? ' selected' : ''}>Nobody named</option>${owners.map((o) => `<option${V.owner === o ? ' selected' : ''}>${esc(o)}</option>`).join('')}</select></label>`
+  const ownerChip = `<label class="fchip${V.owner ? ' on' : ''}">${esc(V.owner === '-' ? 'Nobody named' : (owners.find(([, , on]) => on) || [])[1] || V.owner || 'Owner')} ▾<select data-pj-filter="owner" aria-label="Owner"><option value="">Anyone</option><option value="-"${V.owner === '-' ? ' selected' : ''}>Nobody named</option>${owners.map(([v, l, on]) => `<option value="${esc(v)}"${on ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`
   const head = `${viewTabs()}<div class="wk-bar">${layoutChip}${kindChip}${ownerChip}<button class="fchip${V.open ? ' on' : ''}" data-pj="open-only">Open only</button>${V.layout === 'board' ? boardChips() : ''}<span class="grow"></span><span class="wk-sync">${syncText}</span><button class="link-btn" data-pj="sync"${sync.state === 'running' ? ' disabled' : ''}>Sync now</button></div>`
-  const pass = (n) => (!V.open || !CLOSED_STATES.includes(n.state)) && (!V.kind || n.kind === V.kind)
-    && (!V.owner || (V.owner === '-' ? !(n.internal_owner || n.client_owner) && n.kind === 'task' : (n.internal_owner || n.client_owner) === V.owner))
+  const { pass, board } = workFilter(V, w.me || {})
   if (!all.length) {
     return `${head}<div class="wk-empty"><b>No work yet</b><p>${w.pending ? `Sync reads this thread's calls — ${w.pending} so far — into stories, tasks, decisions, risks and questions, each with the words it came from.` : 'Once this thread has calls, Sync reads them into stories, tasks, decisions, risks and questions.'} It uses the thread's AI profile.</p><button class="btn primary" data-pj="sync">Sync now</button></div>`
   }
   const reviewList = review.length ? `<div class="wk-review">${review.map((r) => r.s
     ? `<div class="wk-rv"><span class="wk-warn">To review</span><span class="grow">${esc(r.s.op === 'suggest_merge' ? 'Same work as' : 'Belongs under')} <b>${esc((N[r.s.to] || {}).title || r.s.to)}</b>? <span class="set-sub">${esc(r.n.title)} — ${r.s.quote ? `“${esc(r.s.quote)}”` : esc(r.s.note || '')}</span></span><button class="btn primary" data-pj="ledger" data-body='${esc(JSON.stringify({ op: 'accept', target: r.s.mid }))}'>Yes</button><button class="btn ghost" data-pj="ledger" data-body='${esc(JSON.stringify({ op: 'reject', target: r.s.mid }))}'>No</button></div>`
     : `<div class="wk-rv"><span class="wk-warn">To review</span><span class="grow">Is <b>${esc(r.n.title)}</b> done? <span class="set-sub">“${esc(r.weak.quote || '')}”</span></span><button class="btn primary" data-pj="ledger" data-body='${esc(JSON.stringify({ op: 'edit', node: r.n.id, set: { state: 'done' } }))}'>Done</button><button class="btn ghost" data-pj="node" data-node="${esc(r.n.id)}">Look</button></div>`).join('')}</div>` : ''
-  if (V.layout === 'board') return `${head}${reviewList}${workBoard(w, pass)}`
+  if (V.layout === 'board') return `${head}${reviewList}${workBoard(w, board)}`
   const rows = []
   const walk = (id, level) => {
     const n = N[id]

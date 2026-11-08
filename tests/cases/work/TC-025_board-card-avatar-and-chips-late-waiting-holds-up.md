@@ -46,5 +46,5 @@ Each card of the table shows what its row says.
 - None: the case only reads
 
 ## Notes
-- The board decides "late" with the UTC date (`new Date().toISOString()`), Tasks with the local date: between local midnight and the UTC offset a task due today is late on Tasks and not on the board, or the other way round. Run the case at midday.
+- The board decides "late" by the local date, as Tasks does (#123): a task due today is never late, whatever the hour and the time zone.
 - Extends `TC-004` (two cards) to client-owed, nobody-named, waiting and holds-up cards.

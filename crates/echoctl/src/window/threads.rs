@@ -413,6 +413,10 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
                 return Some(json_reply(match crate::ledger::tree(id) {
                     Ok(mut t) => {
                         t["sync"] = crate::projectsync::state(id);
+                        // The user, once in the Owner filter: their name and the owners here that are them.
+                        let p = crate::config::Config::load().ok().and_then(|c| c.me);
+                        let names = crate::tasks::my_names(&crate::tasks::Me::of(p.as_ref()), &t["nodes"]);
+                        t["me"] = json!({ "name": p.map(|p| p.name), "names": names });
                         t
                     }
                     Err(e) => json!({ "error": format!("{e:#}") }),

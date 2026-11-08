@@ -34,6 +34,8 @@ node crates/echoctl/ui/transcript-jump.test.mjs
 node crates/echoctl/ui/minutes-needs.test.mjs
 # What the poll redraws for: the Inbox's list too (fingerprint, #115, #121).
 node crates/echoctl/ui/fingerprint.test.mjs
+# The Work tab's statuses, late dates, waiting chips and filters (the work-status block).
+node crates/echoctl/ui/work-status.test.mjs
 types="plugin/.claude-plugin/types/claude-code/index.d.ts"
 if [[ ! -f "$types" ]]; then
   types=$(ls -t /private/tmp/claude-*/bundled-skills/*/*/plugin-authoring/types/claude-code.d.ts 2>/dev/null | head -1 || true)

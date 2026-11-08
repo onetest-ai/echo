@@ -44,4 +44,4 @@ No filter is set on the board.
 - Sets and clears two filters of the view "Board" (a saved view setting).
 
 ## Notes
-- Per the feature description every filter narrows the board. The code (`workBoard`) keeps `pass(n) || n.state === 'done'`, so done cards of other owners and kinds may stay in Done: this case is expected to FAIL at steps 2 and 3 until that is decided. Verify at run time.
+- Every filter narrows the board, Done included (#113); only "Open only" leaves Done alone: done cards stay in Done with it on (`TC-020`).

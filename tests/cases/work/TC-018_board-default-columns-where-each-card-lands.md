@@ -44,7 +44,7 @@ Not on the board (closed in the ledger): T003 deleted, T011 cancelled, T013 merg
 | 1 | Navigate to `{{base_url}}/#project/globex-pilot/work`, click the view "Board" if it is not the active one, wait for "Not synced" or "Sync failed" in the bar | The column headers are in this order with these counts: "To do" 6, "In progress" 1, "Waiting" 1, "Blocked" 3, "Done" 1, then "+ Column"; no "hidden" link |
 | 2 | For each row of the table find the card `[data-pj="node"][data-node=<Id>]` and read the column header above it | Each card is in the column of its row; the question Q001 shows the kind chip "question" and no owner avatar |
 | 3 | Look at T004 "Check the firewall rules" (state blocked, waiting for Kim Park) and T005 "Book the training slots" (open, waiting for Kim Park) | T004 is in "Blocked" and T005 in "Waiting": a blocked task stays in Blocked even when it waits for a person |
-| 4 | Look at T008 "Collect feedback from Berlin" (done, waiting for Kim Park) | It is in "Done" |
+| 4 | Look at T008 "Collect feedback from Berlin" (done, waiting for Kim Park) and its chips `.bd-chip` | It is in "Done" and has no waiting chip "⏳ Kim Park": nobody is waited on for finished work |
 | 5 | Look for the cards T003, T011, T013, D001 and R001 | None is on the board |
 
 ## Expected Final State
@@ -54,5 +54,5 @@ Globex pilot shows the board of the table.
 - None: the case only reads
 
 ## Notes
-- Order of precedence in `cardCategory`: done, blocked, waiting for someone, in progress, to do. The Tree reads the same blocked-and-waiting task as "waiting" (`TC-022`).
+- Order of precedence in `cardCategory`: done, blocked, waiting for someone, in progress, to do. The Tree reads the same blocked-and-waiting task as "blocked" too (`TC-022`, #125).
 - Covers node.kind (task, question) by state by wait on the board.
