@@ -59,8 +59,10 @@ trivial task, use judgment.
 ## What the guides are
 
 The guides hold rules: how Echo must work and how we work on it. Not the reasons behind a decision once made, and not a
-record of what was built: what Echo does is the functional map (`tests/feature-map/`), how it is built is the code, and why it changed
-is git (commit messages and PR descriptions). A guide changes only when a rule changes, in its own `Rules:` PR the user approves, never as a side effect of a feature or a refactor. Cite evidence
+record of what was built: what Echo does is the functional map (`tests/feature-map/`), how it is built is the code. Why something was decided
+is answered in GitHub: the issue and its PR carry the reasoning and the alternatives weighed, so a "why X, not Y"
+question is researched in closed issues and PRs (`gh issue list --state closed --search …`, `gh pr view`), never
+written into a guide or a code comment. A guide changes only when a rule changes, in its own `Rules:` PR the user approves, never as a side effect of a feature or a refactor. Cite evidence
 by symbol (`ledger::apply`), not by file path, so moving code doesn't touch the guides.
 
 ## Task Classifier
