@@ -457,14 +457,7 @@ impl Whisper {
             }
         };
         let lang = lang_id.or(prev).and_then(whisper_rs::get_lang_str).unwrap_or("auto").to_string();
-        let segs = match prompt {
-            Some(hint) if dur >= GUARD_MIN_S => {
-                let hinted = self.decode(&mut st.state, chunk, &lang, Some(hint))?;
-                let plain = self.decode(&mut st.state, chunk, &lang, None)?;
-                choose_hinted(hinted, plain, hint)
-            }
-            _ => self.decode(&mut st.state, chunk, &lang, None)?,
-        };
+        let segs = decode_with_hint(dur, prompt, |hint| self.decode(&mut st.state, chunk, &lang, hint))?;
         Ok((lang_id, lang, segs))
     }
 
@@ -739,6 +732,41 @@ fn boost_is_heard(boosted: &str, plain: &str, phrases: &[String]) -> bool {
     })
 }
 
+/// Decode with the hint too? Only when the plain decode holds something that sounds like one of
+/// its terms and isn't already spelled as it.
+fn hint_needed(plain: &str, terms: &[String]) -> bool {
+    let words: Vec<&str> = plain.split_whitespace().collect();
+    terms.iter().any(|t| {
+        let term: Vec<&str> = t.split_whitespace().collect();
+        // The plain words around the places the term is spelled as it is, each stretch on its own (a
+        // misheard second mention still asks for the hint).
+        let mut stretches: Vec<Vec<String>> = vec![vec![]];
+        let mut i = 0;
+        while i < words.len() {
+            if !term.is_empty() && words.len() - i >= term.len() && term.iter().zip(&words[i..]).all(|(t, w)| spelled_as(w, t)) {
+                stretches.push(vec![]);
+                i += term.len();
+                continue;
+            }
+            let w = latin(words[i]);
+            if !w.is_empty() {
+                stretches.last_mut().expect("never empty").push(w);
+            }
+            i += 1;
+        }
+        stretches.iter().any(|s| sounds_heard(t, s))
+    })
+}
+
+/// Is `word` the term's word `term` exactly as spelled — case, script and the term's own symbols — with
+/// only the sentence's punctuation around it? "Kubernetes," and "println!," are; "kubernetes",
+/// "кубернетес", "println" for "println!" and "C" for "C++" aren't.
+fn spelled_as(word: &str, term: &str) -> bool {
+    [word, word.trim_start_matches(|c| "\"'([{«“‘¿¡".contains(c))]
+        .iter()
+        .any(|w| w.strip_prefix(term).is_some_and(|rest| rest.chars().all(|c| ".,;:!?…\"')]}»”’".contains(c))))
+}
+
 /// Ukrainian or Russian, from letters only one of them has (і ї є ґ / ы э ё ъ). Nemotron's own
 /// detection tags Ukrainian speech `ru-RU, uk-UA` and writes its first words in Russian; the
 /// letters it wrote still give the language away.
@@ -944,6 +972,29 @@ pub(crate) fn choose_hinted(hinted: Decoded, plain: Decoded, hint: &str) -> Deco
     } else {
         plain
     }
+}
+
+/// One utterance's decode (`decode` with or without the hint): plain, and from `GUARD_MIN_S` on through
+/// `with_hint`.
+fn decode_with_hint(dur: f64, prompt: Option<&str>, mut decode: impl FnMut(Option<&str>) -> Result<Decoded>) -> Result<Decoded> {
+    match prompt {
+        Some(hint) if dur >= GUARD_MIN_S => {
+            let plain = decode(None)?;
+            with_hint(plain, hint, || decode(Some(hint)))
+        }
+        _ => decode(None),
+    }
+}
+
+/// The plain decode, or `choose_hinted` over it and the hinted one — which `hinted` decodes only when
+/// a term may have been heard (`hint_needed`). Whisper (here or on an Echo server) and the OpenAI path.
+pub(crate) fn with_hint(plain: Decoded, hint: &str, hinted: impl FnOnce() -> Result<Decoded>) -> Result<Decoded> {
+    let text = plain.iter().map(|p| p.text.as_str()).collect::<Vec<_>>().join(" ");
+    let terms: Vec<String> = hint.split(", ").map(str::to_owned).collect();
+    if !hint_needed(&text, &terms) {
+        return Ok(plain);
+    }
+    Ok(choose_hinted(hinted()?, plain, hint))
 }
 
 /// The hint made Whisper "hear" its own terms: most of the hinted text is hint words the plain
@@ -1368,6 +1419,76 @@ mod tests {
         assert!(!hint_is_sane("", "We talked about the migration plan for a while"));
         assert!(!hint_is_sane(&"Pat O, Miro, IPAM, ".repeat(10), "yes"));
         assert!(hint_is_sane("Okay.", "Okay."));
+    }
+
+    #[test]
+    fn hinted_decode_only_when_a_term_may_have_been_heard() {
+        let terms: Vec<String> = ["ServiceNow", "Kubernetes", "Олена", "2026"].map(String::from).to_vec();
+        assert!(!hint_needed("We moved it to ServiceNow", &terms), "already written as the term");
+        assert!(hint_needed("We moved it to service now", &terms));
+        assert!(hint_needed("the kubernetis cluster", &terms));
+        assert!(hint_needed("Мы перенесли всё в сервис нау", &terms));
+        assert!(hint_needed("поговори с Оленой", &terms));
+        assert!(hint_needed("the 2025 budget", &terms));
+        assert!(!hint_needed("the 2026 budget", &terms));
+        assert!(hint_needed("a servicenowadays thing", &terms)); // a term inside a longer word
+        let tf = ["Terraform".to_string()];
+        assert!(!hint_needed("the Terraform modules", &tf), "already written as the term");
+        assert!(hint_needed("the Terraform modules and the terra form state", &tf), "written once, misheard once");
+        let one = ["ServiceNow".to_string()];
+        assert!(!hint_needed("We will meet at ten.", &one));
+        assert!(!hint_needed("", &one));
+        assert!(!hint_needed("We moved it to service now", &[]));
+    }
+
+    #[test]
+    fn written_terms_skip_the_hint_only_when_spelled_as_the_term() {
+        let k = ["Kubernetes".to_string()];
+        assert!(hint_needed("на кубернетес", &k), "a Cyrillic spelling is a correction to make");
+        assert!(hint_needed("the kubernetes cluster", &k), "so is another case");
+        assert!(!hint_needed("the Kubernetes, cluster", &k), "punctuation around it doesn't count");
+        let iva = ["IVA Studio".to_string()];
+        assert!(!hint_needed("we opened IVA Studio today", &iva), "a multi-word term written as it");
+        assert!(hint_needed("we opened IVA Studio and then eva studio", &iva), "written once, misheard once");
+        assert!(hint_needed("we opened eva studio", &iva));
+        let cpp = ["C++".to_string()];
+        assert!(hint_needed("We should use C for this module.", &cpp), "a term's own symbols count");
+        assert!(!hint_needed("We should use C++.", &cpp));
+        assert!(!hint_needed("We ship it on .NET, as planned", &[".NET".to_string()]));
+        let mac = ["println!".to_string()];
+        assert!(hint_needed("Use println for logs.", &mac), "the term's own '!' counts");
+        assert!(!hint_needed("Use println!, then return.", &mac), "sentence punctuation after it doesn't");
+        assert!(!hint_needed("(println!)", &mac), "nor brackets around it");
+    }
+
+    #[test]
+    fn the_hinted_decode_runs_only_when_needed_and_is_kept_only_through_the_guards() {
+        let d = |t: &str| vec![Piece::new(0.0, 1.0, t.to_string(), vec![])];
+        let hint = "ServiceNow, Kubernetes";
+        let kept = with_hint(d("We will meet at ten."), hint, || panic!("no term heard: no second decode")).unwrap();
+        assert_eq!(kept[0].text, "We will meet at ten.");
+        let fixed = with_hint(d("We moved it to service now."), hint, || Ok(d("We moved it to ServiceNow."))).unwrap();
+        assert_eq!(fixed[0].text, "We moved it to ServiceNow.");
+        let runaway = with_hint(d("We moved it to service now."), hint, || Ok(d(&"ServiceNow, Kubernetes, ".repeat(20)))).unwrap();
+        assert_eq!(runaway[0].text, "We moved it to service now.", "a guard failed: the plain decode is kept");
+    }
+
+    #[test]
+    fn local_whisper_decodes_plain_first_and_with_the_hint_only_when_needed() {
+        let run = |plain: &'static str, dur: f64| {
+            let mut calls: Vec<Option<String>> = vec![];
+            let segs = decode_with_hint(dur, Some("ServiceNow, Kubernetes"), |hint| {
+                calls.push(hint.map(str::to_owned));
+                let text = if hint.is_some() { "We moved it to ServiceNow." } else { plain };
+                Ok(vec![Piece::new(0.0, 1.0, text.to_string(), vec![])])
+            })
+            .unwrap();
+            (calls, segs[0].text.clone())
+        };
+        let hint = Some("ServiceNow, Kubernetes".to_string());
+        assert_eq!(run("We moved it to service now.", 3.0), (vec![None, hint], "We moved it to ServiceNow.".to_string()));
+        assert_eq!(run("We will meet at ten.", 3.0), (vec![None], "We will meet at ten.".to_string()));
+        assert_eq!(run("Yes.", 0.5), (vec![None], "Yes.".to_string()), "under GUARD_MIN_S: plain only");
     }
 
     #[test]

@@ -32,7 +32,7 @@
   },
   {
    "id": "F-VOC-04",
-   "feature": "Transcription hints a call with the always terms, its threads' glossaries and the learned terms of its meeting or people only",
+   "feature": "Transcription hints a call with the always terms, its threads' glossaries and the learned terms of its meeting or people only; with Whisper (on this computer or an Echo transcription server) and on an OpenAI-compatible server, an utterance of 1 s or more is decoded again with the hint only when its plain decode holds something that sounds like a term not already spelled as it",
    "priority": "high",
    "check": "person",
    "axes": [

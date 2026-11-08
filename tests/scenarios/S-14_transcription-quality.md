@@ -11,6 +11,7 @@ cases:
   - tests/cases/transcription/TC-007_a-transcription-server-takes-the-call-and-this-computer-takes-over-when-it-is-down.md
   - tests/cases/settings/TC-026_transcription-server-section-connect-check-connected-and-shared.md
   - tests/cases/transcription/TC-008_turbo-q8-detects-its-own-language.md
+  - tests/cases/transcription/TC-009_a-vocabulary-term-nobody-says-costs-no-second-decode.md
 ---
 
 # S-14: Transcription quality on known conversations: words, speakers, languages, silence
@@ -24,7 +25,7 @@ the transcription server and this computer taking over, on one short clip per en
 **Before the run (once, not per scenario):** `tests/fixtures/recordings.py prepare` (app_profile.md → "Recorded
 calls"; about 1.5 min, silent, no device or permission). Stages 1–4 copy its calls and transcribe nothing.
 
-**Data:** `small`: `tests/fixtures/make_data.py <dir>` (stages 1–5 and 7, CLI); stage 6 serves the window (`serve.sh up`).
+**Data:** `small`: `tests/fixtures/make_data.py <dir>` (stages 1–5, 7 and 8, CLI); stage 6 serves the window (`serve.sh up`).
 
 ## Assets
 
@@ -35,6 +36,7 @@ calls"; about 1.5 min, silent, no device or permission). Stages 1–4 copy its c
 | A transcription server on a second computer (`echoctl server share on` on its own test data): `{{stt_server_url}}`, `{{stt_server_key}}` | the second computer's owner | 5, 6 |
 | Two transcriptions of `very-short` (9 s): one on the server, one on this computer when it is down | stage 5 | 5 |
 | A transcription of `mixed-languages` (31 s) on turbo q8_0 | stage 7 | 7 |
+| Two transcriptions of `acme-sync` (36 s), with a vocabulary and without | stage 8 | 8 |
 
 ## Stages
 
@@ -47,11 +49,12 @@ calls"; about 1.5 min, silent, no device or permission). Stages 1–4 copy its c
 | 5 | `transcription/TC-007_a-transcription-server-takes-the-call-and-this-computer-takes-over-when-it-is-down.md` | — | A second computer shares its model (`echoctl server share on` on its own test data): `{{stt_server_url}}`, `{{stt_server_key}}`; without one, BLOCKED |
 | 6 | `settings/TC-026_transcription-server-section-connect-check-connected-and-shared.md` | — | The same second computer; the window served on small data (`serve.sh up`) |
 | 7 | `transcription/TC-008_turbo-q8-detects-its-own-language.md` | — | Both turbo models in the run's config (linked, as stage 5) |
+| 8 | `transcription/TC-009_a-vocabulary-term-nobody-says-costs-no-second-decode.md` | — | The speech model in the run's config (linked, as stage 5) |
 
 ## Notes
 - CLI only but stage 6 (a served window). Stages 1–4 each copy their own prepared call, so they don't depend on each other. No live call: `prepare` captured the conversations from files, side by side, before the run.
-- Transcriptions in this scenario: three (stage 5: the server and the fallback, 9 s each; stage 7: `mixed-languages` on
-  q8_0, 31 s). Before 2026-11-08: six (each stage built its call from the clips and transcribed it, the same
-  conversations S-17 and S-18 then captured and transcribed again).
+- Transcriptions in this scenario: five (stage 5: the server and the fallback, 9 s each; stage 7: `mixed-languages` on
+  q8_0, 31 s; stage 8: `acme-sync` with a vocabulary and without, 36 s each). Before 2026-11-08: six (each stage built
+  its call from the clips and transcribed it, the same conversations S-17 and S-18 then captured and transcribed again).
 - Stage 5 needs the speech model in the run's config (`~/Library/Application Support/echo/models`, linked: `recording/TC-001` step 1).
 - Run 2026-11-08 evening (stages 1–4, on `prepare` of build 84b1bec, file-fed): PASS — `acme-sync` WER 0.0, every turn's speaker and language right; `two-remotes` `(languages: en)`, WER 0.029, only `en`; `mixed-languages` `(languages: uk, ru, en)`, WER 0.111, all five turns `lang_ok`; `long-silence` WER 0.0, nothing in the silence. 0.14–0.21 s per stage. Stages 5–6 not run (no second computer).
