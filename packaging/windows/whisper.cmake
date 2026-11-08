@@ -14,3 +14,5 @@ set(GGML_F16C ON CACHE BOOL "" FORCE)
 #   Release only: CMake's compiler check builds in Debug, where /O2 clashes with /RTC1.
 add_compile_options("$<$<AND:$<CONFIG:Release>,$<COMPILE_LANGUAGE:C,CXX>>:/O2>")
 add_compile_definitions("$<$<CONFIG:Release>:NDEBUG>")
+# - The static C runtime in every configuration, a debug build's too (whisper-crt.cmake).
+set(CMAKE_PROJECT_INCLUDE "${CMAKE_CURRENT_LIST_DIR}/whisper-crt.cmake")
