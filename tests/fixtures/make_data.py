@@ -532,6 +532,11 @@ esac
 # Claude account is ever used.
 LOCAL_PASS = """case "$ANTHROPIC_BASE_URL" in http://localhost:*|http://127.0.0.1:*|http://\\[::1\\]:*|{url}) exec {real} "$@";; esac
 """
+# small with `--ai local` (the recording and minutes scenarios, which run the Echo app): only a minutes run (the app
+# sets ECHOCTL_RUN_CALL and no ECHOCTL_RUN_MODE) reaches the model; the app's own preps, meeting types, task modes and
+# thread syncs are refused at once, so they never queue in front of the minutes on the one model server.
+MINUTES_ONLY = """case "${ECHOCTL_RUN_MODE}:${ECHOCTL_RUN_CALL:+call}" in :call) PASS;; esac
+"""
 
 
 # `open` for the test data: a mail draft (`echoctl compose` opens a mailto: link) is written to <dir>/mail-drafts.log
@@ -557,7 +562,10 @@ def setup_env(d):
         lines = fake.split("\n")
         # Also the one model server named with --ai-url (a faster machine on the network), exactly that address.
         url = sh(AI_URL) if AI_URL else "http://localhost:*"
-        fake = "\n".join(lines[:4] + [LOCAL_PASS.format(real=sh(real), url=url).rstrip("\n")] + lines[4:])
+        local = LOCAL_PASS.format(real=sh(real), url=url).rstrip("\n")
+        if d.set == "small":
+            local = MINUTES_ONLY.replace("PASS", local).rstrip("\n")
+        fake = "\n".join(lines[:4] + [local] + lines[4:])
     d.write(f"{b}/bin/claude", fake)
     d.write(f"{b}/bin/open", FAKE_OPEN)
     os.chmod(f"{b}/bin/open", 0o755)
@@ -2218,6 +2226,10 @@ NOW = None
 AI = "fake"
 AI_URL = None
 AI_MODEL = None
+# `--clock fast`: automatic minutes this many seconds after a call or the last note (a debug build; 15 minutes in a
+# release). More than the 30 s after the call's end a note needs to count as "moved by notes" (claude/TC-010), with
+# room for a runner to type one.
+FAST_AUTO_DELAY_S = 90
 # The only local model the tests use (Ollama; on Windows the plain `qwen3.8:27b`).
 LOCAL_MODEL = "qwen3.8:27b" if sys.platform == "win32" else "qwen3.8:27b-mlx"
 
@@ -2235,6 +2247,9 @@ def main():
     ap.add_argument("--ai-url", help="with --ai local: the model server's address when it isn't this computer, e.g. "
                     "http://192.0.2.10:11434 (a faster machine on the network; only that exact address is let through)")
     ap.add_argument("--ai-model", help="with --ai local: the model on that server (default qwen3.8:27b-mlx here, qwen3.8:27b on Windows)")
+    ap.add_argument("--clock", choices=["real", "fast"], default="real",
+                    help="fast: the debug build's test clock in <dir>/env (ECHOCTL_TEST_AUTO_MINUTES_DELAY_S=90: automatic "
+                    "minutes 90 s after the call or the last note instead of 15 minutes), for the recording and minutes scenarios")
     a = ap.parse_args()
     global NOW, AI, AI_URL, AI_MODEL
     AI, AI_URL, AI_MODEL = a.ai or "fake", (a.ai_url or "").rstrip("/") or None, a.ai_model
@@ -2266,6 +2281,13 @@ def main():
         if a.ai:
             setup_env(d)  # hermetic, as the standard sets: the app run on it starts no run on a real account
         build_small(d)
+        if a.ai:
+            # The Echo app runs on this data: no thread sync of its own (two model runs per thread, queued in front of
+            # the minutes on a local model; refused at once on the fake). The window's Sync now still syncs.
+            cfg_file = d.state("config.json")
+            cfg = json.load(open(cfg_file))
+            cfg["project_sync"] = False
+            d.write_json(cfg_file, cfg)
         if a.ai == "local":
             d.q("ai", "add-local", "ollama", "--model", AI_MODEL or LOCAL_MODEL, *(["--url", AI_URL] if AI_URL else []),
                 "--name", "Qwen · this computer" if not AI_URL else "Qwen · test server")
@@ -2273,6 +2295,10 @@ def main():
     else:
         build_standard(d, hostile=a.set == "hostile")
     d.manifest["ai"] = AI
+    if a.clock == "fast":
+        with open(os.path.join(base, "env"), "a") as f:
+            f.write(f"export ECHOCTL_TEST_AUTO_MINUTES_DELAY_S={FAST_AUTO_DELAY_S}\n")
+    d.manifest["clock"] = {"auto_minutes_delay_s": FAST_AUTO_DELAY_S if a.clock == "fast" else 900}
     d.write_json(os.path.join(base, "manifest.json"), d.manifest, ascii=False)
     print(f"test data ({a.set}) in {base} (. {base}/env)")
 
