@@ -48,7 +48,7 @@
 - R8. An `Engine` variant drops sentences that `is_hallucination` or `is_word_list` flags before they become a `Piece`. Evidence: `transcribe::Nemo::utterance`
 - R9. The transcription server protocol (`/v1/hello`, `/v1/utterance`) grows only by optional fields. Evidence: `remote::Answer`
 - R10. `remote::Refused` is returned only for a final answer (a wrong key, a bad request); any other server error falls back to this computer's model. Evidence: `transcribe::Transcriber::utterance`
-- R11. Never pick a call's language by comparing decode log-probabilities across languages. Evidence: `transcribe::build_prompt`
+- R11. Never pick a call's language by comparing decode log-probabilities across languages. Evidence: `transcribe::choose_language`
 - R12. The vocabulary hint is a bare list of terms from `build_prompt`, never a sentence. Evidence: `transcribe::build_prompt`
 - R13. The hinted-decode guard (`GUARD_MIN_S`) applies to the live and the final pass alike. Evidence: `transcribe::GUARD_MIN_S`
 - R14. A Teams speaking-ring class confirmed in recorded trees goes in `KNOWN_MARKERS`; with two or more others, a class is taken only when it lights one tile at a time (`MIN_EXCLUSIVE`), never on fit alone. Evidence: `speaking::calibrate`

@@ -17,9 +17,9 @@
 - R10. Rename a run's call folder only at the run's end, and never use a `title_from_run` title to find previous minutes. Evidence: `calls::rename_to_title`, `calls::previous_subject`
 - R11. Initialise mermaid on a minutes page only with `securityLevel: 'strict'`. Evidence: `minutes::MERMAID_INIT`
 - R12. A minutes run changes nothing outside its call except learned vocabulary for its meeting and pruned frames moved to the trash; the app, not the run, clears trash entries older than 30 days. Evidence: `calls::purge_trash`
-- R13. Refuse to start a run on a Claude Code older than `guard::MIN_CLAUDE`. Evidence: `guard::MIN_CLAUDE`
-- R14. Inside a run, the CLI reaches only the run's own call. Evidence: `guard::own_call`
-- R15. The minutes render in an `<iframe sandbox="allow-scripts">`, and the window and the minutes page are served with the strict CSP of `window::reply` (`'self'`/`echo:` and hashed scripts only). Evidence: `window::reply`
+- R13. A run on a Claude Code older than `guard::MIN_CLAUDE` is stopped before it does anything. Evidence: `guard::new_enough`
+- R14. Inside a minutes run, the CLI reaches only the run's own call. Evidence: `guard::own_call`
+- R15. The minutes render in an `<iframe sandbox="allow-scripts">`; the window is served with `window::reply`'s CSP (`'self'`/`echo:`), and the minutes page with its own hashed CSP through `window::page_reply`. Evidence: `minutes::render`, `window::page_reply`
 - R16. `echoctl window --serve` answers only on 127.0.0.1, and its `POST /ipc` (with `ECHOCTL_SERVE_IPC=1`) only with that run's SameSite=Strict cookie and its own Origin. Evidence: `window::serve`
 - R17. Secrets (`ai.json`, `plugins/secrets/<id>.json`) are written 0600; a profile's values reach Claude Code only as `ECHOCTL_P_<name>` variables, never in a script's text. Evidence: `ai::PASS`
 - R18. An update is installed only verified: on Windows against the release's digest, on macOS with Echo's team signature; never while a call records or before the window's notes are saved. Evidence: `update::commit`
