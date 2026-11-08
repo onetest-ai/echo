@@ -249,7 +249,6 @@ pub struct Place {
     pub interest: Option<u8>,
 }
 
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub const STANCES: [&str; 5] = ["champion", "supporter", "neutral", "sceptic", "blocker"];
 
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
@@ -288,7 +287,6 @@ pub struct Relation {
     pub note: Option<String>,
 }
 
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub const RELATIONS: [&str; 6] = ["partner", "vendor", "delivers_for", "integrates_for", "customer", "competitor"];
 
 /// A glossary entry: hints transcription on the project's calls.
@@ -602,14 +600,12 @@ fn lock() -> Result<crate::app::FileLock> {
 }
 
 /// Run `f` under the projects' lock (another file of theirs, as `people.json`).
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub(crate) fn with_lock<T>(f: impl FnOnce() -> Result<T>) -> Result<T> {
     let _l = lock()?;
     f()
 }
 
 /// A client's logo version for the page (0: none).
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub(crate) fn client_logo_v(id: &str) -> u64 {
     logo_v(client_logo_stem(id))
 }
@@ -1008,7 +1004,6 @@ pub fn of_meeting(m: &MeetingContext) -> Vec<Project> {
 
 /// The projects a calendar event belongs to (its rules, or added by hand), as chips — `pinned`:
 /// added by hand to this very event.
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn for_event(m: &MeetingContext) -> Vec<Value> {
     let Ok(clients) = orgs() else { return vec![] };
     let f = CallFacts::of_meeting(m, me().as_ref());

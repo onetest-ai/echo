@@ -117,7 +117,7 @@ document.addEventListener('change', (e) => {
 /** Projects Echo would make from calls in none (`projects::found`): accept, merge, reject. */
 function foundView(data) {
   const fd = S.pj.foundData
-  const head = `<header class="pj-head"><div class="pj-title"><div style="min-width:0"><h2>Found for you</h2><div class="facts"><span>From your calls of the last 90 days that are in no thread — a recurring meeting, one organisation's calls, one Teams chat. Mail joins later.</span></div></div></div>${notices()}</header>`
+  const head = `<header class="pj-head"><div class="pj-title"><div style="min-width:0"><h2>Found for you</h2><div class="facts"><span>From your calls of the last 90 days that are in no thread — a recurring meeting, one organisation's calls, one Teams chat. Mail joins later.</span></div></div></div></header>`
   if (!fd) return `${head}<div class="pane pj-pane"><div class="skeleton">${'<i></i>'.repeat(6)}</div></div>`
   const clients = data.clients || [], projects = (data.projects || []).filter((p) => p.group !== 'closed')
   const cards = (fd.found || []).map((c) => {
@@ -165,11 +165,6 @@ function projectCalls(p) {
   const out = p.exclusions && p.exclusions.length ? `<p class="set-foot">${p.exclusions.length} call${p.exclusions.length === 1 ? '' : 's'} taken out by hand.</p>` : ''
   return `<section class="set-sec"><div class="set-card">${rows || '<div class="set-row"><div class="set-sub">No calls match yet. Add a rule on Profile — a meeting series, the client\'s people, a Teams chat — or open a call and add it from its header.</div></div>'}</div>${out}</section>`
 }
-
-const RULE_TEXT = (r, clientName) => r.kind === 'series' ? `Meeting series “${esc(r.subject)}”`
-  : r.kind === 'people' ? (r.domains && r.domains.length ? `People from ${esc(r.domains.join(', '))}` : `${esc(clientName || "The client")}'s people`)
-  : r.kind === 'chat' ? `Calls from the Teams chat ${esc(r.name || r.id)}` : `Subject contains “${esc(r.contains)}”`
-const RULE_SUB = { series: 'Every occurrence, by its calendar series or its subject.', people: "At least half of a call's outside people — your colleagues don't count.", chat: "A meeting's chat, or the chat a call was started from.", subject: 'Whole words, any case.' }
 
 /** A token (× removes it) and the dashed "+ Add" that opens an inline box in its place. */
 const tok = (html, remove, title = '') => `<span class="tok"${title ? ` title="${esc(title)}"` : ''}>${html}${remove ? `<button data-pj="${remove.op}" ${Object.entries(remove).filter(([k]) => k !== 'op').map(([k, v]) => `data-${k}="${esc(v)}"`).join(' ')} aria-label="Remove">×</button>` : ''}</span>`
@@ -409,7 +404,7 @@ function clientView(data) {
   const tabs = clientTabs(cd && cd.calls, openTasks, peopleCount())
   const tab = tabs.some(([t]) => t === S.pj.ctab) ? S.pj.ctab : 'overview'
   const head = `<header class="pj-head"><div class="pj-title">${clientIcon(c, 34) || `<span class="pj-ic pf-cic" style="--pj:#8a8a95;width:34px;height:34px">${esc(c.name.slice(0, 1).toUpperCase())}</span>`}<div style="min-width:0"><div class="pj-name"><h2>${esc(c.name)}</h2><span class="tag">${c.internal ? 'your company' : 'client'}</span></div><div class="facts"><span>${ps.length} thread${ps.length === 1 ? '' : 's'}${c.domains.length ? ` · ${esc(c.domains.join(', '))}` : ''}</span></div></div><span class="grow"></span><button class="btn" data-claude-about title="Claude, with the Brain, about ${esc(c.name)}">Claude about ${esc(c.name)}</button></div>
-    <div class="tabs" role="tablist">${tabs.map(([t, label]) => `<button class="tab" role="tab" data-pj="ctab" data-tab-id="${t}" aria-selected="${tab === t}">${label}</button>`).join('')}</div>${notices()}</header>`
+    <div class="tabs" role="tablist">${tabs.map(([t, label]) => `<button class="tab" role="tab" data-pj="ctab" data-tab-id="${t}" aria-selected="${tab === t}">${label}</button>`).join('')}</div></header>`
   if (tab !== 'profile') {
     if (!cd) return `${head}<div class="pane pj-pane"><div class="skeleton">${'<i></i>'.repeat(6)}</div></div>`
     if (cd.error) return `${head}<div class="pane pj-pane"><p class="error">${esc(cd.error)}</p></div>`

@@ -301,25 +301,6 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
   render()
 })
 
-/** A thread's topics and terms from the Brain (null when there is no taxonomy yet: the old glossary
- *  shows instead). Topics with their sections here; terms pinned here first, then by mentions. */
-function threadBrain(p) {
-  if (!brainOn()) return null
-  const d = S.pj.tbrain
-  if (!d || d.thread !== p.id || !d.taxonomy || !d.taxonomy.exists) return null
-  const tx = d.taxonomy
-  const topics = (tx.topics || []).filter((x) => x.sections).sort((a, b) => b.sections - a.sections).slice(0, 10)
-  const seen = new Set()
-  const terms = (tx.terms || []).filter((x) => x.sections || (x.pinned || []).includes(p.id))
-    .sort((a, b) => ((b.pinned || []).includes(p.id) - (a.pinned || []).includes(p.id)) || ((b.layer !== 'shared') - (a.layer !== 'shared')) || (b.sections - a.sections))
-    .filter((x) => { const k = x.name.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true }).slice(0, 30)
-  const more = tx.terms_more || 0
-  const topicRow = RECALL_EXTRAS ? `<div class="tt-topics">${topics.map((x) => `<span class="chipt" title="${esc(x.description || '')}">${esc(x.label)} · ${x.sections}</span>`).join('') || '<span class="set-sub">No topics tagged here yet.</span>'}</div>` : ''
-  return `${topicRow}
-    <div class="tt-terms">${terms.map((x) => `<span class="tok" title="${esc([x.kind, x.description].filter(Boolean).join(' — '))}">${esc(x.name)}<small>${esc(x.kind)}${(x.pinned || []).includes(p.id) ? ' · pinned' : ''}</small></span>`).join('')}${addTok('bterm', 'A term for this thread — a system, an acronym, a name')}</div>
-    <div class="pf-sub">From your dictionary — ${esc(p.client_name || 'your practice')}'s terms and yours. Transcription spells these right on this thread's calls${more > 0 ? ` · ${more} more in <a href="#brain/terms">Recall → Dictionary</a>` : ''}.</div>`
-}
-
 /** Insights of a client or a thread (`brain/insights.rs`): what no single call shows, each citing two
  *  sources or more; to re-check when a cited source changed; Refresh runs one now (otherwise the app
  *  redoes a scope at most daily, after its calls changed). */
@@ -606,11 +587,6 @@ document.addEventListener('keydown', (e) => {
     if (what === 'term' && v) projectSend('term_add', { term: v })
     if (what === 'mail' && v) { projectSend('source_add', { kind: 'mail', source: v }); setTimeout(() => loadSourceState(true), 1500) }
     if (what === 'exclude') { projectSend('source_exclude', { source: el.dataset.root, exclude: v.split(',').map((g) => g.trim()).filter(Boolean) }); setTimeout(() => loadSourceState(true), 1500) }
-    // A term for this thread in the Brain (its client's layer, pinned to it): the taxonomy supersedes the glossary.
-    if (what === 'bterm' && v && S.pj.sel) {
-      const p = S.pj.detail || {}
-      brainEdit({ op: 'add', term: true, name: v, layer: p.client || 'shared', threads: [S.pj.sel] }, loadThreadBrain, () => S.pj.tbrain)
-    }
     if (what === 'rule') {
       const kind = ($('#pj-add-kind') || {}).value || 'series'
       if (!v && kind !== 'people') return render()

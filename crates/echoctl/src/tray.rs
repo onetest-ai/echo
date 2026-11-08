@@ -1797,6 +1797,7 @@ fn thaw(win: &Option<crate::window::EchoWindow>) {
 }
 
 /// Settings → General → "Hide from the Dock when the window is closed".
+#[cfg(target_os = "macos")]
 fn dock_hidden() -> bool {
     Config::load().is_ok_and(|c| c.hide_dock_icon)
 }
@@ -2026,7 +2027,7 @@ pub fn run(app: TargetApp, stop: Arc<AtomicBool>) -> ! {
                 #[cfg(target_os = "macos")]
                 {
                     set_app_icon(); // once AppKit has finished launching: earlier it would put its own back
-                    _app_menu = app_menu();
+                    if let Some(m) = app_menu() { _app_menu.replace(m); } // held by the loop: the menu bar lasts as long as its `Menu` (`=` reads as never read)
                 }
                 match Ui::new(proxy.clone()) {
                     Ok(u) => ui = Some(u),

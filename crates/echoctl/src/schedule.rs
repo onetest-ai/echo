@@ -38,12 +38,10 @@ fn time(s: &Option<String>) -> Option<DateTime<Utc>> {
 
 /// Same occurrence: event id and start (a recurring series reuses ids across occurrences
 /// in some calendars).
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 fn same(a: &MeetingContext, b: &MeetingContext) -> bool {
     a.id.is_some() && a.id == b.id && a.start == b.start
 }
 
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn add(m: MeetingContext) -> Result<()> {
     let mut list = load();
     if !list.iter().any(|x| same(x, &m)) {

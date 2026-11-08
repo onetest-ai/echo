@@ -392,7 +392,6 @@ pub fn spawn_app(restart: bool) -> Result<()> {
 }
 
 /// Show a folder in Finder / Explorer.
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn reveal(dir: &Path) {
     #[cfg(target_os = "macos")]
     let _ = Command::new("open").arg(dir).status();
@@ -507,7 +506,6 @@ pub fn quit() -> Result<()> {
 }
 
 /// `echoctl app open [--call <name>]`: a request for the tray loop to open the Echo window.
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 static OPEN_WINDOW: std::sync::Mutex<Option<Option<String>>> = std::sync::Mutex::new(None);
 
 /// Taken by the tray loop on each tick.
@@ -1172,7 +1170,7 @@ pub fn ask_checked(message: &str, buttons: &[&str], default: &str) -> Result<Opt
             .output()
             .context("couldn't run PowerShell")?;
         let stdout = String::from_utf8_lossy(&out.stdout);
-        return match stdout.lines().map(str::trim).filter(|l| !l.is_empty()).last() {
+        return match stdout.lines().map(str::trim).rfind(|l| !l.is_empty()) {
             Some("6") => Ok(Some(yes.to_string())),
             Some("7") | Some("-1") => Ok(None),
             _ => bail!("the popup gave no answer: {}", String::from_utf8_lossy(&out.stderr).trim()),

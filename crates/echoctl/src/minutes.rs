@@ -445,7 +445,6 @@ struct Body {
 
 /// Markdown as safe HTML for the Echo window (Settings → About me): the minutes' own writer — raw
 /// HTML shown as text, https links only, no images.
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn markdown_html(md: &str) -> String {
     let load = |_: &str| None;
     let mut images = Images { load: &load, frames: &[], embedded: vec![], left: 0 };

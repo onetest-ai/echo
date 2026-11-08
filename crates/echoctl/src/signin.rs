@@ -314,7 +314,6 @@ pub fn applied(call: &str, id: &str) {
 
 /// The check for choice `request` of `purpose` (`choose`): signed out and still the latest choice
 /// → the sign-in starts.
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn ensure_request(id: &str, purpose: &str, request: u64) {
     if with(|s| s.shutdown) {
         return;

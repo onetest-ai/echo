@@ -949,7 +949,8 @@ fn about_for(x: &Value, threads: &BTreeMap<String, String>) -> Value {
 }
 
 /// `find_people`: the people of these threads whose name, address, organisation, title, group or role
-/// has every word of the query; the most seen first.
+/// has every word of the query; the most seen first. Only the Brain's MCP server asks (`brain` feature).
+#[cfg_attr(not(feature = "brain"), allow(dead_code))]
 pub fn find(threads: &[String], query: &str, limit: usize) -> Result<Value> {
     let (people, names) = of_threads(threads)?;
     let words: Vec<String> = fold(&query.to_lowercase()).split_whitespace().map(str::to_owned).collect();
@@ -1316,7 +1317,7 @@ pub fn apply_suggestions(project: &str, evid: &str, proposals: &[Value]) -> Resu
                     Ok(None) => return Some("quote not verbatim in this evidence item (one contiguous span, 3 words or more)".into()),
                     Err(e) => return Some(format!("{e:#}")),
                 };
-                let org = pr["org"].as_str().filter(|o| !o.trim().is_empty()).and_then(&org_named);
+                let org = pr["org"].as_str().filter(|o| !o.trim().is_empty()).and_then(org_named);
                 let role = pr["role"].as_str().map(str::trim).filter(|r| !r.is_empty()).map(|r| r.chars().take(80).collect::<String>());
                 let key = key_of(&name, None);
                 if let Some(x) = all.iter_mut().find(|x| x["field"] == "person" && x["target_key"] == key.as_str()) {

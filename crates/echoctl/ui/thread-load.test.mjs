@@ -12,7 +12,7 @@ assert.ok(start >= 0 && end > start, 'the thread load block not found in app.js'
 /** loadProject on one of a thread's tabs: the state it leaves and the paths it asked for. */
 async function open(tab, work = null) {
   const asked = []
-  const S = { pj: { sel: 'acme-rollout', tab, work, detail: null, tbrain: { thread: 'acme-rollout' } } }
+  const S = { pj: { sel: 'acme-rollout', tab, work, detail: null } }
   const get = async (url) => {
     asked.push(url)
     if (url === 'api/project/acme-rollout') return { id: 'acme-rollout', call_count: 1 }
@@ -20,8 +20,8 @@ async function open(tab, work = null) {
     return {}
   }
   const noop = async () => {}
-  const { loadProject } = new Function('S', 'get', 'loadFound', 'loadPeople', 'loadThreadBrain',
-    `${src.slice(start, end)}\nreturn { loadProject }`)(S, get, noop, noop, noop)
+  const { loadProject } = new Function('S', 'get', 'loadFound', 'loadPeople',
+    `${src.slice(start, end)}\nreturn { loadProject }`)(S, get, noop, noop)
   await loadProject()
   return { S, asked }
 }

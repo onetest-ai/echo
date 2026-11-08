@@ -344,7 +344,6 @@ pub enum ProfileChange {
 
 /// Choose another profile for a call. While it records, the recording owns `meta.json`: the
 /// change goes to the watcher (`ai-profile.request`); afterwards it is written here.
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn set_call_profile(dir: &Path, id: &str) -> Result<ProfileChange> {
     Settings::load()?.get(id)?;
     let name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -378,7 +377,6 @@ pub fn ready(id: &str) -> Result<Ready> {
 }
 
 /// The default profile's id (`system` when none is set or the settings can't be read).
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn default_id() -> String {
     Settings::load().map(|s| s.default_id()).unwrap_or_else(|_| SYSTEM.into())
 }
