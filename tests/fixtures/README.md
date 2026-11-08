@@ -21,8 +21,11 @@ tests/fixtures/wait.py <seconds> <condition>
 with file-fed calls"); `wait.py` waits for the run's app state, an event or a file, with a timeout, instead of a fixed
 `sleep`.
 
-Build between 06:00 and 22:00: today's calls lie hours before now and its meetings hours after, so near midnight
-the generator refuses (it would pin several calls to one stamp). For checks that don't need Today to match the real
+Build between 06:00 and 22:50: today's calls lie hours before now and its meetings up to 3 h after. Meeting times
+that would fall after 23:20 (starts and ends) are squeezed into 23:20–23:50 (`day_clock`: same order, closer
+together; built before about 20:20 nothing moves). The meetings "to come" always start 37 minutes after the build and the live ones end 20 minutes
+after it, so the cases' timings hold; after 22:50 those would end tomorrow, and before 06:00 the calls of the last
+6 hours would be yesterday's, so the generator refuses. For checks that don't need Today to match the real
 clock, `--now 2026-11-06T12:00` builds as of that time (`serve.sh up <dir> <port> --set standard --now …`).
 
 `<dir>/home` is the data folder (`ECHOCTL_HOME`), `<dir>/config` the settings (`ECHOCTL_CONFIG_DIR`), `<dir>/env`
@@ -68,7 +71,7 @@ a busy day.
 - **Today's agenda**: every response and timing, recorded and imported meetings, Teams transcripts known or not,
   scheduled meetings, preps ready (with every section, with none, with more than ten people) and in error. The
   live meetings all run from 10 minutes before the build to 20 after it, and every meeting to come starts 37 minutes
-  after it: the same layout at any hour from 06:00 to 22:00. Tasks due "this week" are due tomorrow (on a Sunday
+  after it: the same layout at any hour from 06:00 to 22:50. Tasks due "this week" are due tomorrow (on a Sunday
   that is next week for Today's "My work · this week", listed in `skipped`).
 - **Inbox**: sign-in (blocking), failed minutes, people suggestions (more than five), work to review, Found for
   you (an existing client, a new client from a domain, a known organisation, a series), senders to trust and

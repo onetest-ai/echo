@@ -16,7 +16,7 @@ tags: [prep, cli]
 
 ## Preconditions
 - Test data built by `tests/fixtures/make-data.sh`, window served at `{{base_url}}`
-- Run before 22:00 local: the data puts the two meetings 1 h and 2.5 h ahead but keeps them inside today (never later than 23:50). Every `echoctl` command runs after `. <dir>/env` (the run's env file)
+- The data puts the meetings to come 1 h, 1.5 h and 2.5 h ahead; built after about 20:20 the later ones are closer, squeezed before 23:50 (tests/fixtures/README.md). Every `echoctl` command runs after `. <dir>/env` (the run's env file)
 
 ## Test Data
 
