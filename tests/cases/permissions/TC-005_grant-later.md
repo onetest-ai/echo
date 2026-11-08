@@ -25,7 +25,7 @@ user_steps:
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | **The user does:** enable Echo under Privacy & Security → Screen & System Audio Recording when the run asks | — |
-| 2 | **The user does:** Echo's own window → Settings → Health → "Re-check permissions"; the run: `$E doctor --json` | Health ✓ without reinstalling (or Echo says to restart, if macOS needs it) |
+| 2 | **The user does:** Echo's own window → Settings → Health → "Re-check permissions"; the run: `$E doctor --json` | System Audio Recording granted in Health and in doctor without reinstalling (or Echo says to restart, if macOS needs it): Health ✓ when nothing else is missing (in S-16 the microphone stays denied for `permissions/TC-004`, so Health ⚠ names only the microphone) |
 
 ## Expected Final State
 Fixing a permission needs no reinstall.

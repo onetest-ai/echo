@@ -7,7 +7,7 @@ requirements: [F-MIN-13, F-MIN-08]
 module: claude
 run: agent
 platform: macos
-tags: [minutes, test-call]
+tags: [minutes, recordings]
 ai: local
 external_id: TC-CLA-009
 ---
@@ -18,7 +18,7 @@ external_id: TC-CLA-009
 
 ## Preconditions
 - Test data built by `tests/fixtures/make_data.py <dir> --ai local` (`ai: local`): the small set, hermetic, with the AI profile "Qwen" (Ollama here, or the faster server of `tests/fixtures/ai.local.json`) the default, so a minutes run is a real Claude Code run on it and every other run is refused (`tests/fixtures/README.md`, "Real Claude Code runs on a local model"); Claude Code on `PATH`; `target/debug/echoctl` is the debug build from this checkout
-- Every Bash call starts with the prelude: `. <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; CONV="$D/conv"; APP="$PWD/tests/tools/testcall/build/TestCall.app/Contents/MacOS/testcall"; export D CONV APP ECHOCTL_CALL_APP_BUNDLE=ai.onetest.echo.testcall`
+- Every Bash call starts with the prelude: `. <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; W=tests/fixtures/wait.py; export D` (the env sets the file-fed call sources and the call app's id: nothing here records)
 - The recordings of this build are prepared (`tests/fixtures/recordings.py prepare`: `app_profile.md` → "Recorded calls"): the calls come from there, nothing is recorded or transcribed here
 - The window served on the data with clicks reaching it: `ECHOCTL_TEST_OPEN_LOG_ONLY=1 ECHOCTL_SERVE_IPC=1 target/debug/echoctl window --serve <port>` after the prelude (no Echo app needed: the served window starts the run itself); the page loaded from `{{base_url}}/` first
 - `target/debug/echoctl config --auto-minutes true --unscheduled manual --scheduled manual` (no Echo app running: nothing writes on its own)
@@ -47,4 +47,6 @@ Minutes can be written at once from the window, also for a call the gate skipped
 
 ## Notes
 - The "Minutes ready" notification is not checked (macOS shows it to the user).
+- In S-19 its two runs are the scenario's runs A and B, and other stages hang off them: the user's notes go into the long call right after step 1 (`claude/TC-009`), a session is refused while step 4 writes and its claim on the short call is taken over by step 7 (`claude/TC-005`), the two runs are in folder A and in the data folder (`claude/TC-006`), and step 7's log names the model (`claude/TC-012`). With that claim, step 6's tab reads as written here (the claim comes after it) and step 7's "Write minutes" sits under "A Claude Code session is writing the minutes".
+- With `--clock fast` the long call is due 90 s after step 1 (or after notes added to it): click step 4's Write now within them. Past that time, with no app running, the tab shows "Starting the minutes…" without the button.
 - Run on 2026-11-07 (S-19, the network model server): PASS — the 4-minute call's minutes in 59 s ($0.32 as Claude Code counts it), retitled "SSO rollout — Berlin pilot, checklist, data retention"; the short call's in 44 s.

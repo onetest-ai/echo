@@ -20,6 +20,7 @@ user_steps:
 
 ## Preconditions
 - Echo installed and running; `E=/Applications/Echo.app/Contents/MacOS/echoctl`
+- **Microphone denied, System Audio Recording granted (shared in S-16):** in S-16 from `permissions/TC-003`'s reset (both prompts denied) and `permissions/TC-005` (system audio granted later), so step 1 is skipped. On its own: step 1
 
 ## Steps
 

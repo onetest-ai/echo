@@ -293,6 +293,9 @@ tests/fixtures/recordings.py list        # what it holds, each recording's score
   or the last note instead of 15 minutes (`notes::auto_delay`; a release build never reads it). Every process of the
   run (the app, `window --serve`, the CLI) sources the env, so they agree on the time. Cases still check the rule —
   not before the delay, at it, moved by a later note — in seconds.
+  The other side of it: a copy made on such data is **due 90 s after it is made** (or after its last note); past that,
+  with no app running, its Minutes tab shows "Starting the minutes…" and no Write now button. A case that presses Write
+  now does it within those 90 s (S-19).
 - **Waits are for conditions.** `tests/fixtures/wait.py <seconds> <condition>` (`app`, `armed`, `recording [suffix]`,
   `not-recording`, `in-call`, `event <name> [n]`, `file <glob>`, `sh <command>` …) checks every second and fails the
   step with the last state on its timeout. A fixed `sleep` stays only where it is the call's timeline (arm 16 s in,

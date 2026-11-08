@@ -16,7 +16,7 @@ external_id: TC-INST-007
 **Module:** Install | **Priority:** Low | **Type:** Functional
 
 ## Preconditions
-- Echo installed and running; two models downloaded, one in use (download a second one in Settings → Transcription first); `E=/Applications/Echo.app/Contents/MacOS/echoctl`
+- Echo installed and running; two models downloaded, one in use (in S-16: `install/TC-005`'s, in use, and `install/TC-006`'s; on its own: download a second one in Settings → Transcription first); `E=/Applications/Echo.app/Contents/MacOS/echoctl`
 
 ## Steps
 

@@ -17,7 +17,7 @@ external_id: TC-CHAT-001
 
 ## Preconditions
 - A Microsoft 365 account whose organisation allows Echo's sign-in app (or its own app ID, TC-003)
-- A scheduled Teams meeting set to record
+- A scheduled Teams meeting set to record (in S-20: `calendar/TC-005`'s meeting, steps 1–3 around its call; on its own: one of its own)
 
 ## Steps
 

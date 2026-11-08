@@ -17,6 +17,7 @@ external_id: TC-WINOS-009
 
 ## Preconditions
 - Windows 10 2004+ or 11, Teams (new) installed; the build is unsigned (updates are checked by SHA-256)
+- **The call (shared in S-22):** in S-22, step 2's call is `windows/TC-003`'s (snapshots switched on before it, slides shared during it). On its own: a call of its own
 
 ## Steps
 
