@@ -296,7 +296,7 @@ pub fn choose(purpose: &str, id: &str) -> u64 {
 /// A profile was chosen in a menu: sign it in if — and only if — it is plainly signed out (the
 /// window registers the choice with `choose` on its own thread, in the order they came, then calls
 /// `ensure_request`).
-#[cfg(test)]
+#[cfg(all(test, unix))] // only Unix tests use it
 pub fn ensure(id: &str, purpose: &str) {
     let request = choose(purpose, id);
     ensure_request(id, purpose, request);
