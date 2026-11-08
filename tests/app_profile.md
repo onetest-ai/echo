@@ -323,7 +323,9 @@ reads none of it.
   `two-remotes` 34 s, `mixed-languages` 31 s; built once per run into `<dir>/conv/<name>`) at the feed paths and starts
   the call; it hangs up by itself 1 s after the conversation (as TestCall did), after `--for S` seconds, or with
   `--hold` only at `call.py end`. `call.py status` says whether a call is on. A call is as long as the case needs,
-  whatever the conversation: hold it, end it, start it again (a drop and rejoin).
+  whatever the conversation: hold it, end it, start it again (a drop and rejoin). A new call file reopens the sources
+  on the new conversation and its clock, so `call.py end; call.py start <another>` back to back (inside the watcher's
+  2 s debounce) plays another conversation into the **same** call: one call can carry several stages.
 - **Needs on the Mac:** the debug build and, for the cases that transcribe, the speech model linked into the run's
   config (`ln -s "$HOME/Library/Application Support/echo/models" "$ECHOCTL_CONFIG_DIR/models"`, `echoctl model use
   large-v3-turbo-q5_0`). No TestCall, BlackHole, ffmpeg or permission: several runs can record on one Mac at once,

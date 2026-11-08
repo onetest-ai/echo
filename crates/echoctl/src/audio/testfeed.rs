@@ -8,7 +8,8 @@
 //! Everything after the source is the real code: the tracks, their writers and alignment, live transcription and
 //! notes, the watcher's start and stop, the files written. The wavs are read when a recording opens its tracks, in
 //! real time against the call's clock: a recording that starts mid-call gets only what follows, as from a device.
-//! After the file's end the source sends nothing (the writer pads the track to the stop, as for an idle tap).
+//! After the file's end the source sends nothing (the writer pads the track to the stop, as for an idle tap). A call
+//! that starts again (a drop and rejoin: the call file made anew) reopens the sources on the new files and clock.
 //! A release build never reads any of this.
 
 use std::path::{Path, PathBuf};
@@ -81,10 +82,11 @@ impl FileSource {
 impl Source for FileSource {
     fn open(&mut self, epoch: u32, tx: Sender<Chunk>) -> Result<Box<dyn LiveStream>> {
         let (samples, rate) = read_wav(&self.path)?;
-        let start = call_started().unwrap_or(*self.first_open.get_or_insert_with(SystemTime::now));
+        let call = call_started();
+        let start = call.unwrap_or(*self.first_open.get_or_insert_with(SystemTime::now));
         let stop = Arc::new(AtomicBool::new(false));
         feed(samples, rate, start, epoch, tx, stop.clone());
-        Ok(Box::new(FileStream { label: format!("test audio {} @ {rate} Hz", self.path.display()), stop }))
+        Ok(Box::new(FileStream { label: format!("test audio {} @ {rate} Hz", self.path.display()), stop, call }))
     }
 }
 
@@ -113,6 +115,8 @@ fn feed(samples: Vec<f32>, rate: u32, start: SystemTime, epoch: u32, tx: Sender<
 struct FileStream {
     label: String,
     stop: Arc<AtomicBool>,
+    /// The call this stream plays against (the call file's time when it opened).
+    call: Option<SystemTime>,
 }
 
 impl LiveStream for FileStream {
@@ -121,6 +125,9 @@ impl LiveStream for FileStream {
     }
 
     fn health(&mut self) -> Health {
+        if rejoined(self.call, call_started()) {
+            return Health::Reopen("the test call started again".into());
+        }
         Health::Ok
     }
 }
@@ -129,6 +136,11 @@ impl Drop for FileStream {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::SeqCst);
     }
+}
+
+/// A new call since the stream opened: the call file is there again with another start. Not a hang-up (no file).
+fn rejoined(opened: Option<SystemTime>, now: Option<SystemTime>) -> bool {
+    now.is_some() && now != opened
 }
 
 #[cfg(test)]
@@ -186,6 +198,17 @@ mod tests {
         let got = collect(rx);
         assert!((1900..=2000).contains(&(4000 - got.len())), "skipped {}", 4000 - got.len());
         assert_eq!(*got.last().unwrap(), 3999.0 / 32768.0);
+    }
+
+    #[test]
+    fn only_a_call_started_again_reopens_the_source() {
+        let t = SystemTime::now();
+        let later = t + Duration::from_secs(40);
+        assert!(rejoined(Some(t), Some(later)), "a rejoin: the call file made anew");
+        assert!(rejoined(None, Some(t)), "a call starting after a capture opened without one");
+        assert!(!rejoined(Some(t), Some(t)), "the same call");
+        assert!(!rejoined(Some(t), None), "a hang-up: the file is gone");
+        assert!(!rejoined(None, None), "no call file at all (`echoctl capture`)");
     }
 
     #[test]

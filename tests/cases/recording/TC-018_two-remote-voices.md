@@ -7,7 +7,7 @@ requirements: [F-STT-04]
 module: recording
 run: agent
 platform: macos
-tags: [recording, test-call, speakers, recordings]
+tags: [recording, file-fed, speakers, recordings]
 ---
 
 # TC-018: Two voices on the remote track stay Remote and are told apart
@@ -15,7 +15,7 @@ tags: [recording, test-call, speakers, recordings]
 **Module:** Recording | **Priority:** Medium | **Type:** Functional
 
 ## Preconditions
-- The recordings of this build are prepared (`tests/fixtures/recordings.py prepare`: `app_profile.md` → "Recorded calls"): `two-remotes` (Dana and Omar on the remote side, one track; the user on the mic; 34 s) was played through TestCall, captured and transcribed once with NVIDIA's NeMo-Speech runtime in the config (`prepare` fetches it into `target/test-recordings/nemo-speech`), so speaker detection ran. This case reads that result; it records and transcribes nothing
+- The recordings of this build are prepared (`tests/fixtures/recordings.py prepare`: `app_profile.md` → "Recorded calls"): `two-remotes` (Dana and Omar on the remote side, one track; the user on the mic; 34 s) was fed from files to `echoctl capture` (app_profile.md → "Recording with file-fed calls") and transcribed once with NVIDIA's NeMo-Speech runtime in the config (`prepare` fetches it into `target/test-recordings/nemo-speech`), so speaker detection ran. This case reads that result; it records and transcribes nothing
 - Every command after `. <dir>/env` on test data built by `tests/fixtures/make-data.sh <dir>`
 
 ## Steps

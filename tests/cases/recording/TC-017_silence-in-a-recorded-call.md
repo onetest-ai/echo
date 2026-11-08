@@ -7,7 +7,7 @@ requirements: [F-STT-03, F-REC-07]
 module: recording
 run: agent
 platform: macos
-tags: [recording, test-call, silence, recordings]
+tags: [recording, file-fed, silence, recordings]
 ---
 
 # TC-017: Twenty seconds of silence in a recorded call give no restart and no text
@@ -15,7 +15,7 @@ tags: [recording, test-call, silence, recordings]
 **Module:** Recording | **Priority:** Medium | **Type:** Functional
 
 ## Preconditions
-- The recordings of this build are prepared (`tests/fixtures/recordings.py prepare`: `app_profile.md` → "Recorded calls"): `long-silence` (Me, 20 s of nobody speaking, Dana, Me; 36 s) was played through TestCall, captured with `echoctl capture --seconds 39` and transcribed once. This case reads that capture; it records and transcribes nothing
+- The recordings of this build are prepared (`tests/fixtures/recordings.py prepare`: `app_profile.md` → "Recorded calls"): `long-silence` (Me, 20 s of nobody speaking, Dana, Me; 36 s) was fed from files to `echoctl capture --seconds 39` (no device: app_profile.md → "Recording with file-fed calls") and transcribed once. This case reads that capture; it records and transcribes nothing
 - Every command after `. <dir>/env` on test data built by `tests/fixtures/make-data.sh <dir>`, and `P="$(python3 tests/fixtures/recordings.py path)/long-silence"`
 
 ## Steps
@@ -31,3 +31,4 @@ The silent stretch is in the tracks as silence, with no restart of a source, and
 
 ## Notes
 - Run on 2026-11-07 (S-18, its own capture then): PASS — WER 0.0, nothing in the silence, the only `restarting` at 40.0 s (TestCall's hang-up). `prepare` ends the capture before the hang-up, so there is none now.
+- 2026-11-08: the prepared capture is fed from files: its sources never restart, so step 1 shows the recorder kept both tracks through the silence (padded, aligned), not how a real tap behaves in one; a real device's silence is the live check's (`privacy/TC-002`, `recording/TC-023`).

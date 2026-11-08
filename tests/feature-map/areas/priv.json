@@ -19,7 +19,7 @@
    "id": "F-PRIV-02",
    "feature": "Only Teams' audio is recorded as the other side (macOS)",
    "priority": "critical",
-   "check": "agent",
+   "check": "person",
    "axes": []
   },
   {
