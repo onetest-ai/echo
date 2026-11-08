@@ -51,10 +51,14 @@ a busy day.
   axes pairwise across five threads; umbrella-proposal's are quiet (its last call is five days old).
 - **Calls**: today, yesterday, this week, older, last year, undated, and one in the trash; every status but
   recording; minutes runs done, failed, skipped, waiting for a sign-in; automatic minutes now, at a time (moved by
-  the user's notes), held, gated, before the switch; memos, an import from a Teams transcript; chat, frames, the
+  the user's notes), held, gated, before the switch (switched on at the midnight 9 days back, so every call of 10 or
+  more days ago is before it at any hour of the build); memos, an import from a Teams transcript; chat, frames, the
   user's notes of every kind (and an unreadable one), kept live notes, named, numbered and multi-language speakers.
 - **Today's agenda**: every response and timing, recorded and imported meetings, Teams transcripts known or not,
-  scheduled meetings, preps ready (with every section, with none, with more than ten people) and in error.
+  scheduled meetings, preps ready (with every section, with none, with more than ten people) and in error. The
+  live meetings all run from 10 minutes before the build to 20 after it, and every meeting to come starts 37 minutes
+  after it: the same layout at any hour from 06:00 to 22:00. Tasks due "this week" are due tomorrow (on a Sunday
+  that is next week for Today's "My work · this week", listed in `skipped`).
 - **Inbox**: sign-in (blocking), failed minutes, people suggestions (more than five), work to review, Found for
   you (an existing client, a new client from a domain, a known organisation, a series), senders to trust and
   unverified, a Teams transcript to import, a stale Claude Code plugin, a plugin update, a plugin's own item, and
@@ -113,7 +117,7 @@ user's own account. Cases that start the app (`echoctl app run`: the recording, 
 
 | Key | What |
 |---|---|
-| `calls` | `[{folder, title, key, started_at, status, run, auto, kind, threads, type_by, in_threads}]`. Folder names carry the build's time, so find a call by `key` or title. `threads` is what the window shows (one, several, a suggestion, none), read back from `echoctl project of` |
+| `calls` | `[{folder, title, key, started_at, status, run, auto, kind, threads, type_by, in_threads}]`. Folder names carry the build's time, so find a call by `key` or title. `small`: `{folder, title, status, threads, evidence}`, `evidence` the folder's stamp, the evidence id a thread's sync gives what it takes from that call `threads` is what the window shows (one, several, a suggestion, none), read back from `echoctl project of` |
 | `threads`, `clients` | ids, names, clients, stages; organisations that aren't clients have `account: false` |
 | `items` | `[{thread, id, kind, title, state, …axis values}]`. Ids are per thread (`T001` in more than one thread): pair `id` with `thread` |
 | `people`, `agenda`, `preps`, `plugins` | who is placed where; today's meetings with their axis values; the prep files by event; the plugins and marketplaces |

@@ -24,7 +24,7 @@ tags: [calendar, series]
 | Meeting (id) | Series rule | Shown on the card |
 |---|---|---|
 | Acme weekly sync (`ev-acme-sync`) | always, English | Record pressed, language "English ▾" |
-| Globex weekly (`ev-globex-weekly`, 23:50-type) | ask (CLI only), any language | Don't record pressed, language "Any language ▾" |
+| Globex weekly (`ev-globex-weekly`, to come) | ask (CLI only), any language | Don't record pressed, language "Any language ▾" |
 | Acme design review (`ev-m01`) | not in a series | no "Every meeting of this series" |
 
 ## Steps
@@ -32,7 +32,7 @@ tags: [calendar, series]
 | # | Action | Expected Result |
 |---|---|---|
 | 1 | Navigate to `{{base_url}}/#calendar/day` and wait for "Day", click the block `[data-ev="ev-acme-sync"]` (Acme weekly sync) | In the card the heading "Every meeting of this series" with a group "Record every meeting": "Record" has `aria-pressed="true"`, "Don't record" `false`; the language chip reads "English ▾" |
-| 2 | Click the block `[data-ev="ev-globex-weekly"]` (Globex weekly at the 23:50-type time) | The heading "Every meeting of this series"; "Don't record" is pressed, "Record" not; the chip reads "Any language ▾" |
+| 2 | Click the block `[data-ev="ev-globex-weekly"]` (Globex weekly, to come 37 minutes after the build) | The heading "Every meeting of this series"; "Don't record" is pressed, "Record" not; the chip reads "Any language ▾" |
 | 3 | Click the block `[data-ev="ev-m01"]` (Acme design review) | No "Every meeting of this series" in its card |
 | 4 | Run `echoctl series list` | JSON with the keys `id:S-ACME-WEEKLY` (record always, languages en), `id:S-GLOBEX-WEEKLY` (record ask), `id:S-INITECH-ALLHANDS` (record never) and `subject:umbrella pricing call` (record ask, languages uk) |
 

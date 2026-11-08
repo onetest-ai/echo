@@ -18,7 +18,7 @@ tags: [calendar, card, import]
 ## Preconditions
 - Standard data set built right before the run: `tests/fixtures/serve.sh up <dir> <port> --set standard` (`data: standard`); the window is served at `{{base_url}}`; every `echoctl` command runs after `. <dir>/env`
 - A meeting's block in the Day view is `[data-ev="<id>"]`; clicking it opens its card (`aside.detail`) on the right. The data's calendar is the agenda file (not signed in to Microsoft 365), so all meetings are today
-- Built less than 15 minutes ago: meetings "live" at the build (23:02-type blocks, started 10 minutes before it) end 20 minutes after it and then read as past; "to come" ones start 37 minutes after it
+- Built less than 15 minutes ago: meetings "live" at the build (started 10 minutes before it) end 20 minutes after it and then read as past; "to come" ones start 37 minutes after it
 
 ## Test Data
 

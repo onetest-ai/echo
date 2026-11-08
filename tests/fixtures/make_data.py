@@ -92,6 +92,12 @@ def iso(t):
     return t.isoformat(timespec="seconds")
 
 
+def auto_since(now):
+    """When automatic minutes were switched on: midnight 9 days back, so every call of 10 or more days ago ended
+    before it and every later one after it, at any hour of the build."""
+    return (now - timedelta(days=9)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+
 def pairwise(axes, have=(), valid=lambda row: True):
     """Greedy all-pairs: rows (dicts axis → value) so that every pair of values of two axes that some valid row can
     hold appears in at least one row. `have`: rows there already (their pairs count as covered). Exhaustive over the
@@ -299,6 +305,10 @@ def build_small(d):
     m["calls"] = [{"folder": acme, "title": "Acme weekly sync", "status": "notes", "threads": ["acme-rollout"]},
                   {"folder": plan, "title": "Initech planning", "status": "transcript", "threads": []},
                   {"folder": globex, "title": "Globex pilot kickoff", "status": "notes", "threads": ["globex-pilot"]}]
+    # Each folder's stamp is the evidence id a thread's sync gives what it takes from that call; it follows the build
+    # date (yesterday's kickoff is <build date − 1>_140000), so a case reads it here rather than writing a date.
+    for c in m["calls"]:
+        c["evidence"] = c["folder"][:17]
     m["items"] = [{"thread": "acme-rollout", "id": epic, "kind": "epic", "title": "Acme rollout", "state": "open"},
                   {"thread": "acme-rollout", "id": story, "kind": "story", "title": "SSO for the Berlin pilot", "state": "open"},
                   {"thread": "acme-rollout", "id": t1, "kind": "task", "title": "Send Acme the SSO checklist", "state": "open", "owner": "Sam Rivera", "due": today},
@@ -571,9 +581,10 @@ def build_settings(d, H):
         "--capture-frames", "true", "--minutes-page", "true", "--keep-audio", "false")
     cfg_file = d.state("config.json")
     cfg = json.load(open(cfg_file))
-    # Automatic minutes on since 10 days ago: calls that ended before are "before", later ones wait their 15 minutes.
-    # Never run the real app on this data (it would start them); `window --serve` doesn't.
-    cfg.update({"auto_minutes": True, "auto_minutes_since": iso(d.now - timedelta(days=10)), "follow_app_mute": False, "capture_ui": True,
+    # Automatic minutes on since the midnight that started the 9th day back (auto_since): calls that ended before are
+    # "before", later ones wait their 15 minutes. A midnight, not now − 10 days, so a call 10 days ago is "before"
+    # whatever the hour of the build. Never run the real app on this data (it would start them); `window --serve` doesn't.
+    cfg.update({"auto_minutes": True, "auto_minutes_since": iso(auto_since(d.now)), "follow_app_mute": False, "capture_ui": True,
                 "capture_chat": True, "echo_cancel": False, "project_sync": True, "folder_skip_permissions": False, "hide_dock_icon": False,
                 # `vocabulary` always with `learned` (without it the next load moves the always-on terms into learned).
                 "vocabulary": ["SAML", "Initech", "Berlin pilot"],
@@ -922,7 +933,7 @@ def build_calls(d, H):
     C = []
 
     def call(key, start, minutes, title, people, lines, g1, g2, **kw):
-        if start and start < now - timedelta(days=10) and g1[0] in ("notes", "transcript") and g1[2] in ("tried", "now"):
+        if start and start + timedelta(minutes=minutes) < auto_since(now) and g1[0] in ("notes", "transcript") and g1[2] in ("tried", "now"):
             g1 = (g1[0], g1[1], "before")  # ended before automatic minutes were on: that is what the window says
         c = dict(key=key, start=start, minutes=minutes, title=title, people=people, segments=talk(lines) if lines else [], g1=g1, g2=g2, status=g1[0])
         c.update(kw)
@@ -1494,9 +1505,12 @@ STATES = ["open", "in_progress", "blocked", "done", "cancelled", "merged", "dele
 
 def pairwise_items(d, H):
     today = d.now.date()
-    week_end = today + timedelta(days=(6 - today.weekday()))
+    # "week" is always tomorrow, whatever the weekday (the cases check "tomorrow"): within the coming 7 days for Tasks and
+    # the board; on a Sunday it is next week for Today's "My work · this week" (`today.rs` week_end), noted as skipped.
     dues = {"late": (today - timedelta(days=3)).isoformat(), "today": today.isoformat(),
-            "week": (today + timedelta(days=1) if today < week_end else today).isoformat(), "later": (today + timedelta(days=20)).isoformat(), "none": None}
+            "week": (today + timedelta(days=1)).isoformat(), "later": (today + timedelta(days=20)).isoformat(), "none": None}
+    if today.weekday() == 6:
+        d.skip("node.due=later this week (Today's calendar week)", "built on a Sunday: the tasks due tomorrow fall in next week")
     g1 = {"owner": ["me", "colleague", "client", "nobody"], "delegated": ["me", "another", "none"], "wait": ["none", "waiting_for", "waits_item", "holds_up"],
           "state": STATES, "due": list(dues), "mode": ["none", "claude", "manual"]}
     rows1, need1 = pairwise(g1, valid=lambda r: r["mode"] == "none" or r["owner"] == "me")
@@ -1678,9 +1692,15 @@ def build_people(d, H):
     globex = [place("Kim Park", "kim@globex.example", "supporter", 3, 3, "sponsor", "you", None, True),
               place("Alex Chen", "alex@initech.example", None, 1, 3),
               place("Lena Vogel", "lena@initech.example")]
+    # Acme's other threads: the renewal's people and the hackathon's one, placed without levels (the client's People
+    # tab lists every thread a person is in: people/TC-013).
+    renewal = [place(x["name"], x["email"]) for x in acme if x["name"] in ("Dana Lee", "Omar Haddad", "Rita Gomez", "Ivan Petrov", "Yuki Tanaka", "Alex Chen")]
+    hackathon = [place("Yuki Tanaka", "yuki@acme.example")]
     patch_profile(d, "acme-rollout", lambda p: p.update({"people": acme}))
     patch_profile(d, "globex-pilot", lambda p: p.update({"people": globex}))
-    for tid, ppl in (("acme-rollout", acme), ("globex-pilot", globex)):
+    patch_profile(d, "acme-renewal", lambda p: p.update({"people": renewal}))
+    patch_profile(d, "acme-hackathon", lambda p: p.update({"people": hackathon}))
+    for tid, ppl in (("acme-rollout", acme), ("globex-pilot", globex), ("acme-renewal", renewal), ("acme-hackathon", hackathon)):
         for x in ppl:
             rows.append({"in_thread": "placed", "levels": levels(x.get("influence"), x.get("interest")), "side": "yours" if x["email"].endswith("initech.example") else "other"})
     rows += [{"in_thread": "seen only", "levels": "none", "side": "other"},   # Jo Weber in acme-rollout's calls
@@ -1785,6 +1805,10 @@ def build_agenda(d, H):
 
     def at(hours):
         return max(day0, min(now + timedelta(hours=hours), now.replace(hour=23, minute=50)))
+    # Every meeting still to come starts at one time, 37 minutes after the build: side by side in lanes in the Day view
+    # (calendar/TC-016), and inside today at any hour the data may be built (06:00–22:00). Spread out over the next
+    # hours, they would stack only when a late build pinned them to 23:50, and stagger otherwise.
+    soon = (now + timedelta(minutes=37)).replace(second=0, microsecond=0)
     g1 = {"timing": ["past", "live", "to come"], "link": ["online", "no join link"], "recorded": ["no", "call", "imported"],
           "transcript": ["known", "none", "unknown"], "scheduled": ["no", "yes"]}
 
@@ -1807,7 +1831,7 @@ def build_agenda(d, H):
     people_pool = [[p["dana"], p["omar"]], [p["kim"]], [p["zoe"], p["raj"]], [p["alex"], p["priya"], p["tom"]], [p["kai"]], [p["mia"]]]
     events, sched, tt, extra = [], [], {}, 0
     past_n = sum(1 for r in rows if r["timing"] == "past")
-    k_past = k_come = 0
+    k_past = 0
     for i, r in enumerate(rows):
         ev = {"id": f"ev-m{i + 1:02d}", "subject": MEETING_TITLES[i % len(MEETING_TITLES)], "organizer": ME, "attendees": people_pool[i % len(people_pool)], "source": "test"}
         if r["response"] == "organizer":
@@ -1842,8 +1866,7 @@ def build_agenda(d, H):
         elif r["timing"] == "live":
             start, end = now - timedelta(minutes=10), now + timedelta(minutes=20)
         else:
-            k_come += 1
-            start = at(0.5 + 0.4 * k_come)
+            start = soon
             end = start + timedelta(minutes=25)
         ev["start"], ev["end"] = iso(start), iso(end)
         if r["link"] == "online":
@@ -1856,11 +1879,11 @@ def build_agenda(d, H):
         r["event"] = ev["id"]
         events.append(ev)
     # Threads of meetings: a series (acme weekly), people (Globex), subject (renewal), one pinned to acme-rollout.
-    events.append({"id": "ev-renewal-call", "subject": "Acme renewal follow-up", "start": iso(at(3)), "end": iso(at(3.5)), "organizer": p["rita"],
+    events.append({"id": "ev-renewal-call", "subject": "Acme renewal follow-up", "start": iso(soon), "end": iso(soon + timedelta(minutes=30)), "organizer": p["rita"],
                    "attendees": [p["rita"]], "join_url": "https://teams.example/ev-renewal-call", "source": "test", "response": "accepted"})
-    events.append({"id": "ev-globex-weekly", "subject": "Globex weekly", "series_id": "S-GLOBEX-WEEKLY", "start": iso(at(4)), "end": iso(at(4.5)), "organizer": p["kim"],
+    events.append({"id": "ev-globex-weekly", "subject": "Globex weekly", "series_id": "S-GLOBEX-WEEKLY", "start": iso(soon), "end": iso(soon + timedelta(minutes=30)), "organizer": p["kim"],
                    "attendees": [p["kim"], p["noor"]], "join_url": "https://teams.example/l/meetup-join/19%3aglobex-pilot%40thread.v2/0", "source": "test", "response": "accepted"})
-    events.append({"id": "ev-pinned", "subject": "Steering prep", "start": iso(at(5)), "end": iso(at(5.5)), "organizer": ME,
+    events.append({"id": "ev-pinned", "subject": "Steering prep", "start": iso(soon), "end": iso(soon + timedelta(minutes=30)), "organizer": ME,
                    "attendees": [p["alex"]], "join_url": "https://teams.example/ev-pinned", "source": "test", "response": "organizer"})
     patch_profile(d, "acme-rollout", lambda pr: pr.update({"events": pr.get("events", []) + ["ev-pinned"]}))
     if H:
