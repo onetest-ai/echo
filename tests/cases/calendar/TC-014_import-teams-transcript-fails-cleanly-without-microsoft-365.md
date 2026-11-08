@@ -43,4 +43,5 @@ The card says why the import did not happen; no call was made.
 - Click "Close" on the card
 
 ## Notes
+- In S-24 `inbox/TC-012` runs just before and leaves this card open with the message already on it (the server keeps the import's error): step 1 reads the open card, and the message must still show after this case's own click.
 - Nothing is created: the import fails before it writes. The same message shows on the Inbox item "Teams transcript: Acme design review" (`inbox/TC-012`). In the data a call "Acme design review" already exists (imported, 20:12-type time) and is not this meeting's: the meeting is at 22:28-type time.

@@ -41,9 +41,10 @@ Colours by class: `done` green, `open` grey, `waiting` amber, `blocked` red, `in
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | For each thread id of the table navigate to `{{base_url}}/#project/<thread id>/work`, click the view "Tree", and turn "Open only" off if it is on (it is a button, `on` when pressed) | The tree lists closed items too (done ones in grey) |
-| 2 | For each row of the table find the row `.wk-row` of the item (`[data-pj="node"][data-node=<Id>]` in the tree) and read its status `.wk-st` | The status reads "● " and the Word of the row, with the class of the last column |
-| 3 | Look at the rows of the decisions of the same threads (Acme rollout D001 and D002) | A decision row has no status |
+| 1 | Navigate to `{{base_url}}/#project/umbrella-proposal/work`, click the view "Tree" if it is not the active one, and turn "Open only" off if it is on (it is a button, `on` when pressed) | The tree lists closed items too (done ones in grey) |
+| 2 | For each Umbrella proposal row of the table find the row `.wk-row` of the item (`[data-pj="node"][data-node=<Id>]` in the tree) and read its status `.wk-st` | The status reads "● " and the Word of the row, with the class of the last column |
+| 3 | Do steps 1 and 2 in `globex-pilot`, then `initech-hiring`, then `acme-renewal`, then `acme-rollout` (each thread once, Acme rollout last) | The same for each thread's rows of the table |
+| 4 | In Acme rollout (still open) look at the rows of the decisions D001 and D002 | A decision row has no status |
 
 ## Expected Final State
 Every question and risk of the table shows the word of its row.

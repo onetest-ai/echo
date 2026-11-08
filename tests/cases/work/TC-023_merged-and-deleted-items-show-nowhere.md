@@ -17,6 +17,7 @@ tags: [work, tree, state, filters]
 ## Preconditions
 - `data: standard`: the standard data set, built and served by `tests/fixtures/serve.sh up <dir> <port> --set standard`; the window is at `{{base_url}}` and `{{base_url}}/` is loaded first (the cookie); every `echoctl` command runs after `. <dir>/env`. Times in the data are relative to the run's start, so build it right before the run
 - Acme rollout has no filter set
+- "Open only" is on in Acme rollout's Tree (on its own). In S-25 `TC-021` (the stage before) leaves Acme rollout's Tree open with "Open only" off: the scenario skips step 1, since its click would turn it back on
 
 ## Test Data
 

@@ -37,9 +37,8 @@ tags: [threads, profile, rules, membership, pairwise]
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | For each thread of the table navigate to `{{base_url}}/#project/<thread id>/profile` and read the row "Calls" | The tokens are the Rule tokens of the row, in that order, each with a "×", then "+ Add"; a thread with none has only "+ Add" |
-| 2 | Read the line under the tokens | It is the last column of the row |
-| 3 | Compare with `echoctl project show <thread id>` | `rules`, `call_count`, the number of `pins` and of `exclusions` agree with the tokens and the line |
+| 1 | Navigate to `{{base_url}}/#project/acme-rollout/profile`; read the row "Calls" (its tokens and the line under them) and run `echoctl project show acme-rollout` | The tokens are the Rule tokens of the thread's row, in that order, each with a "×", then "+ Add" (a thread with none has only "+ Add"); the line under them is the last column of the row; the CLI's `rules`, `call_count`, the number of `pins` and of `exclusions` agree with the tokens and the line |
+| 2 | Do step 1 for each other thread of the table, one visit each (any order) | The same for each row |
 
 ## Expected Final State
 Nothing changed.

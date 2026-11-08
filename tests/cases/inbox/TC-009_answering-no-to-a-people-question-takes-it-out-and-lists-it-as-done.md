@@ -18,6 +18,7 @@ tags: [inbox, people, decision]
 ## Preconditions
 - Standard data set built right before the run: `tests/fixtures/serve.sh up <dir> <port> --set standard` (`data: standard`); the window is served at `{{base_url}}`; every `echoctl` command runs after `. <dir>/env`
 - Wait 10 seconds after the server starts: the sign-in check of the AI profiles settles in the background, and only then the blocking item "Sign in to Claude · out" is in the Inbox (the very first answer lists 24 open items and none blocking)
+- The people questions of Acme are folded: "5 more like these" has not been pressed since the page loaded (the fold stays open until a full load). In S-24 `inbox/TC-007` opens it earlier: the scenario reloads the page before this case
 
 ## Test Data
 

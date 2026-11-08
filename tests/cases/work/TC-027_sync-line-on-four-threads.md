@@ -32,10 +32,10 @@ tags: [work, sync, review]
 | # | Action | Expected Result |
 |---|---|---|
 | 1 | Navigate to `{{base_url}}/#project/acme-rollout/work` and read the text at the right of the bar (`.wk-sync`) | It reads "Synced " and a time (HH:MM), then "3 calls to read" and "3 to review" (the last in amber); the button "Sync now" is enabled (not pressed) |
-| 2 | Navigate to `{{base_url}}/#project/globex-pilot/work` and read `.wk-sync` | It reads "Sync failed" in red, with no count of calls to read although 5 wait; hovering it gives "Claude Code exited with an error (exit 1)" |
-| 3 | Navigate to `{{base_url}}/#project/umbrella-proposal/work` and read `.wk-sync` | It reads "Not synced yet" |
-| 4 | Navigate to `{{base_url}}/#project/acme-renewal/work` and read `.wk-sync` | It reads "Not synced yet" |
-| 5 | In Acme rollout read the list above the board ("To review") | Three lines: "Same work as … ?" for T004 with Yes and No, "Belongs under … ?" for T006 with Yes and No, "Is Answer the security questionnaire done?" with Done and Look; none is pressed |
+| 2 | In Acme rollout read the list above the board ("To review") | Three lines: "Same work as … ?" for T004 with Yes and No, "Belongs under … ?" for T006 with Yes and No, "Is Answer the security questionnaire done?" with Done and Look; none is pressed |
+| 3 | Navigate to `{{base_url}}/#project/acme-renewal/work` and read `.wk-sync` | It reads "Not synced yet" |
+| 4 | Navigate to `{{base_url}}/#project/umbrella-proposal/work` and read `.wk-sync` | It reads "Not synced yet" |
+| 5 | Navigate to `{{base_url}}/#project/globex-pilot/work` and read `.wk-sync` | It reads "Sync failed" in red, with no count of calls to read although 5 wait; hovering it gives "Claude Code exited with an error (exit 1)" |
 
 ## Expected Final State
 The four threads show their lines; nothing was pressed.
