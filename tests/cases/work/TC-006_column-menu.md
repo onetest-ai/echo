@@ -31,7 +31,7 @@ tags: [work, board, columns]
 | 1 | Navigate to `{{base_url}}/#project/globex-pilot/work` | Five columns; "To do" shows 1 (the card T001) |
 | 2 | Click "+ Column" | A sixth column "New column" appears and its menu opens with the input "Column name", colours, "Cards in it are" select, "Limit" input, "Move left", "Hide", "Delete column" |
 | 3 | Set the name to `Review`, the select "Cards in it are" to `to do`, the "Limit" to `1` (Enter after each) | The header reads "Review" with "0 / 1" |
-| 4 | Open the menu of "Done" and click "Hide" | The Done column is gone; a button "1 hidden" is shown |
+| 4 | Open the menu of "Done". With `browser_evaluate` run `() => { const m = document.querySelector('.bd-col-h .bd-menu'); const on = (t) => { const e = [...m.querySelectorAll('.menu-item')].find((x) => x.textContent.trim() === t); const r = e.getBoundingClientRect(); return document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) === e }; return { hide: on('Hide'), del: on('Delete column') } }`, then click "Hide" | The evaluate returns `hide` and `del` true (the whole menu shows over the short board, #109); after the click the Done column is gone and a button "1 hidden" is shown |
 | 5 | Click "1 hidden" | The column "Done" is back |
 | 6 | Open the menu of "Review" and click "Delete column" | "Review" is gone; five columns remain |
 | 7 | Open the menu of "Done" and click "Delete column" | The notice "Keep a column for “Done” — its cards need somewhere to go." is shown and the column stays |
@@ -44,3 +44,6 @@ Globex pilot has the five default columns.
 
 ## Changes
 - Adds and removes a column in `globex-pilot`'s board settings.
+
+## Notes
+- Globex pilot's board has one card, so it is short (about 140 px at 900 px window height): before #109 its column menus were cut off by the board's own box, and "Hide" and "Delete column" could not be clicked. Step 4 checks the items are the topmost element at their centres. Uses `evaluate` only to read geometry.

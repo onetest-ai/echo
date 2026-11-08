@@ -5,10 +5,11 @@ let lastPrint = ''
  *  a frame's page where nothing changed). */
 function patch(el, html) {
   if (!el || el._html === html) return
-  // A region drawn again keeps where its scrolled lists were (the calls list loading its next page).
-  const kept = [...el.querySelectorAll('.rows, [data-keep-scroll]')].map((x) => x.scrollTop)
+  // A region drawn again keeps where its scrolled lists were (the calls list loading its next page), down and across
+  // (the work board scrolled sideways to a column).
+  const kept = [...el.querySelectorAll('.rows, [data-keep-scroll]')].map((x) => [x.scrollTop, x.scrollLeft])
   el.innerHTML = html; el._html = html
-  if (kept.some((t) => t > 0)) [...el.querySelectorAll('.rows, [data-keep-scroll]')].forEach((x, i) => { if (kept[i]) x.scrollTop = kept[i] })
+  if (kept.some(([t, l]) => t > 0 || l > 0)) [...el.querySelectorAll('.rows, [data-keep-scroll]')].forEach((x, i) => { if (kept[i]) { if (kept[i][0]) x.scrollTop = kept[i][0]; if (kept[i][1]) x.scrollLeft = kept[i][1] } })
 }
 
 // ── what the user sees, for Echo's Claude terminals (`view.rs`: a UserPromptSubmit hook adds it to
@@ -209,6 +210,7 @@ function render() {
   if (lt2 && !jumped) lt2.scrollTop = ltStick ? lt2.scrollHeight : ltTop
   if (entering) { const p = $('.pane') || $('.grid-wrap'); if (p) { p.classList.remove('enter'); void p.offsetWidth; p.classList.add('enter') } }
   placeDetail()
+  placeColMenu()
   pushNotes(false)
   attachTerms(termFocus)
   const g = $('#calgrid')

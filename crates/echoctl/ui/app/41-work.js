@@ -232,7 +232,8 @@ function workBoard(w, pass) {
   const header = `<div class="bd-grid bd-heads" style="${grid}">${cols.map(head).join('')}<div class="bd-col-h add"><button class="tok add" data-pj="col-add">+ Column</button>${hiddenCols.length ? `<button class="link-btn" data-pj="col-unhide">${hiddenCols.length} hidden</button>` : ''}</div></div>`
   const laneHtml = (l) => `${l.title ? `<div class="bd-lane-h">${l.title}<span class="bd-meta">${l.rows.length}</span></div>` : ''}<div class="bd-grid" style="${grid}">${cols.map((c) => `<div class="bd-col" data-drop="${c.state === 'waiting' ? '' : esc(c.id)}">${l.rows.filter(([, x]) => x.id === c.id).map(([n]) => card(n)).join('') || '<div class="bd-empty"></div>'}</div>`).join('')}<div></div></div>`
   if (!placed.length) return `<div class="wk-empty"><b>Nothing here</b><p>No tasks match the filters.</p></div>`
-  return `<div class="bd${b.group !== 'none' ? ' grouped' : ''}">${header}${lanes.map(laneHtml).join('')}</div>`
+  // data-keep-scroll: a redraw (opening a column's menu) keeps where the board was scrolled sideways (#109).
+  return `<div class="bd${b.group !== 'none' ? ' grouped' : ''}" data-keep-scroll>${header}${lanes.map(laneHtml).join('')}</div>`
 }
 // Drag a card to another column: its state, as the user set it (pinned, undoable).
 document.addEventListener('dragstart', (e) => {
@@ -450,6 +451,36 @@ function ledgerEdit(body, project = S.pj.sel) {
     render()
   }, 300)
 }
+
+// ── column menu: where a board column's menu goes (no DOM: `column-menu.test.mjs`) ─────────────
+/** A column's menu is placed against the window, not in the board: the board scrolls sideways, so its box
+ *  clips what hangs out of it, and on a short board that was most of the menu (#109). Under its ⋯ button,
+ *  right edges lined up; above it when there is no room below; kept inside the window. `b` the button's
+ *  box, `m` the menu's size, `win` the window's. */
+function colMenuSpot(b, m, win, pad = 8) {
+  const below = b.bottom + 4
+  const top = below + m.height <= win.height - pad ? below : Math.max(pad, Math.min(b.top - 4 - m.height, win.height - pad - m.height))
+  const left = Math.max(pad, Math.min(b.right - m.width, win.width - pad - m.width))
+  return { top, left }
+}
+// end of the column menu block
+/** The open column menu (fixed, `.bd-col-h .bd-menu`) where `colMenuSpot` says: after each render, and
+ *  when the board or the pane scrolls or the window is resized; hidden while its ⋯ is out of the board's view. */
+function placeColMenu() {
+  const m = document.querySelector('.bd-col-h .bd-menu'), btn = m && m.parentElement.querySelector('.bd-more')
+  if (!btn) return
+  // Its ⋯ out of the board's view (or the window's): the menu hides rather than float away from its column, and shows
+  // again with it (no redraw: a redraw while the board is being scrolled to the column would close it at once).
+  const b = btn.getBoundingClientRect(), board = btn.closest('.bd'), v = board ? board.getBoundingClientRect() : { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight }
+  const cx = (b.left + b.right) / 2, cy = (b.top + b.bottom) / 2
+  const out = cx < Math.max(0, v.left) || cx > Math.min(window.innerWidth, v.right) || cy < Math.max(0, v.top) || cy > Math.min(window.innerHeight, v.bottom)
+  m.style.visibility = out ? 'hidden' : ''
+  const at = colMenuSpot(b, { width: m.offsetWidth, height: m.offsetHeight }, { width: window.innerWidth, height: window.innerHeight })
+  m.style.top = `${at.top}px`
+  m.style.left = `${at.left}px`
+}
+document.addEventListener('scroll', placeColMenu, { capture: true, passive: true })
+window.addEventListener('resize', placeColMenu)
 
 // ── human history: what the user did to an item, in words (History in its details) ─────────────
 /** One of the user's own ledger edits as History says it: every op in words, none shown raw (#153). `word`: what

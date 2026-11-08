@@ -98,6 +98,7 @@ async function loadThreadBrain() {
 async function loadFound() {
   try { S.pj.foundData = await get('api/found') } catch { /* app restarting */ }
 }
+// ── thread load: what opening a thread asks the app for (no DOM: `thread-load.test.mjs`) ─────────
 async function loadProject() {
   if (S.pj.found) return loadFound()
   if (S.pj.client) {
@@ -114,10 +115,13 @@ async function loadProject() {
   if (S.pj.tab === 'profile') {
     try { const d = await get('api/project/' + encodeURIComponent(id) + '/series'); if (S.pj.sel === id) S.pj.series = { id, ...d } } catch { /* app restarting */ }
   }
-  if (S.pj.tab === 'work') {
+  // Its work tree with the thread, on any tab: the tab row counts its open work, as it counts its calls (#110). On
+  // the Work tab it is read again on every refresh; elsewhere once (the tree is costly to build on a big ledger).
+  if (S.pj.tab === 'work' || !S.pj.work) {
     try { const w = await get('api/project/' + encodeURIComponent(id) + '/work'); if (S.pj.sel === id) S.pj.work = w } catch { /* app restarting */ }
   }
 }
+// end of the thread load block
 async function loadAgenda() {
   try { S.agenda = await get('api/agenda') } catch { S.agenda = [] }
 }

@@ -43,4 +43,4 @@ Acme rollout's header and tabs are as read, and the Thread actions menu is close
 - Nothing: read only.
 
 ## Notes
-- Step 3 fails until #110: on a full load of the Brief the Work tab shows no count; it appears once the Work tab has been opened (the count needs the work tree, which the Brief doesn't load). The expectation stands.
+- Step 3 reads the Work count on the Brief, before the Work tab has been opened: the work tree comes with the thread on every tab, as the call count does (#110).
