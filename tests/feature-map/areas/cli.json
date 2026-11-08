@@ -50,7 +50,7 @@
   },
   {
    "id": "F-CLI-06",
-   "feature": "`project ledger <id> tree` and `edit` (edit, ac_set, link, merge, delete, accept, reject, undo, create) read and change the work as the user",
+   "feature": "`project ledger <id> tree` and `edit` (edit, ac_set, link, merge, delete, accept, reject, undo, create) read and change the work as the user; an unknown node or event is refused and nothing is written",
    "priority": "high",
    "check": "agent",
    "axes": [
