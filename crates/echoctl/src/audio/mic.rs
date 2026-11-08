@@ -33,7 +33,22 @@ pub struct MicSource {
     /// the app holds a mic Echo can open again — never the room on another input (#140). On the source, not the
     /// stream, so a reopen meanwhile (a device error, a stall, a rate change) stays silent.
     pub released: Arc<AtomicBool>,
+    /// The app has held a mic Echo opened at least once (or the fallback came): until then the track is silent too —
+    /// a recording that starts before the app takes its mic doesn't record the room (#201).
+    pub settled: Arc<AtomicBool>,
+    pub started: Instant,
 }
+
+impl MicSource {
+    /// A call's mic (`app`): silent until the app holds a mic Echo can open. A memo's (None): the default input.
+    pub fn new(app: Option<TargetApp>) -> Self {
+        MicSource { app, released: Arc::new(AtomicBool::new(app.is_some())), settled: Arc::new(AtomicBool::new(app.is_none())), started: Instant::now() }
+    }
+}
+
+/// A call app that never reports a mic of its own (a virtual mic it uses, a listen-only join): after this long the
+/// track takes the default input after all, rather than leave "Me" empty for the whole call.
+const APP_MIC_FALLBACK: Duration = Duration::from_secs(10);
 
 /// What the mic track does at a device check, from what the call app reports.
 #[derive(Debug, PartialEq)]
@@ -46,14 +61,18 @@ enum Step {
     Release,
     /// Released, and the app took the very device open again: record it again.
     Resume,
-    /// Not following an app (it never held a mic): follow the default input.
+    /// Not following an app: follow the default input.
     Default,
+    /// The app reported no mic Echo can open since the recording began: take the default input after all.
+    Fallback,
 }
 
 /// `app`: the app's mic, if it reports one — (is it the device open now, can Echo open it). `following`: the open
-/// device is the app's. `missing_long`: the app has reported no mic for longer than the grace.
-fn step(app: Option<(bool, bool)>, following: bool, released: bool, missing_long: bool) -> Step {
+/// device is the app's. `released`: silent now. `missing_long`: the app has reported no mic for longer than the grace.
+/// `waiting_long`: the app has held no mic Echo opened since the recording began, for longer than the fallback.
+fn step(app: Option<(bool, bool)>, following: bool, released: bool, missing_long: bool, waiting_long: bool) -> Step {
     match app {
+        Some((false, false)) | None if released && waiting_long => Step::Fallback,
         Some((true, _)) if released => Step::Resume,
         Some((true, _)) => Step::Keep,
         Some((false, true)) => Step::FollowApp,
@@ -122,8 +141,10 @@ struct MicStream {
     seen: (u64, Instant),
     last_device_check: Instant,
     app_device_missing_since: Option<Instant>,
-    /// `MicSource::released`, shared.
+    /// `MicSource::released`, `settled` and `started`, shared.
     released: Arc<AtomicBool>,
+    settled: Arc<AtomicBool>,
+    started: Instant,
     /// The app's mic when cpal doesn't list it (we stay on the default meanwhile).
     unmatched_app_mic: Option<String>,
 }
@@ -141,6 +162,10 @@ impl Source for MicSource {
 
         let lost = Arc::new(AtomicBool::new(false));
         let callbacks = Arc::new(AtomicU64::new(0));
+        if from_app {
+            self.released.store(false, Ordering::SeqCst);
+            self.settled.store(true, Ordering::SeqCst);
+        }
         let released = self.released.clone();
         let (l, c, r) = (lost.clone(), callbacks.clone(), released.clone());
         let err = move |e: cpal::Error| {
@@ -191,6 +216,8 @@ impl Source for MicSource {
             last_device_check: Instant::now(),
             app_device_missing_since: None,
             released,
+            settled: self.settled.clone(),
+            started: self.started,
             unmatched_app_mic: None,
         }))
     }
@@ -213,10 +240,12 @@ impl MicStream {
         if matches!(app, Some((true, _))) {
             self.from_app = true;
         }
-        match step(app, self.from_app, released, missing_long) {
+        let waiting_long = !self.settled.load(Ordering::SeqCst) && self.started.elapsed() >= APP_MIC_FALLBACK;
+        match step(app, self.from_app, released, missing_long, waiting_long) {
             Step::Keep => None,
             Step::FollowApp => {
                 self.released.store(false, Ordering::SeqCst);
+                self.settled.store(true, Ordering::SeqCst);
                 Some(if self.from_app || released { format!("{who} switched mic to \"{name}\"") } else { format!("following {who}'s mic \"{name}\"") })
             }
             Step::Release => {
@@ -224,8 +253,15 @@ impl MicStream {
                 eprintln!("  {who} released its mic: the mic track records silence until it takes one again");
                 None
             }
+            Step::Fallback => {
+                self.released.store(false, Ordering::SeqCst);
+                self.settled.store(true, Ordering::SeqCst);
+                eprintln!("  {who} holds no mic Echo can open after {} s: recording the default input \"{}\"", APP_MIC_FALLBACK.as_secs(), self.device);
+                None
+            }
             Step::Resume => {
                 self.released.store(false, Ordering::SeqCst);
+                self.settled.store(true, Ordering::SeqCst);
                 eprintln!("  {who} took its mic again: recording it");
                 None
             }
@@ -251,7 +287,9 @@ impl MicStream {
 
 impl LiveStream for MicStream {
     fn label(&self) -> String {
-        let via = if self.from_app { " (the mic the call app uses)" } else { " (system default)" };
+        let via = if self.from_app { " (the mic the call app uses)" }
+            else if self.released.load(Ordering::SeqCst) { " (system default, silent until the call app holds a mic)" }
+            else { " (system default)" };
         format!("microphone \"{}\" @ {} Hz{via}", self.device, self.rate)
     }
 
@@ -297,24 +335,29 @@ mod tests {
     #[test]
     fn after_the_app_lets_go_of_its_mic_the_track_stays_silent_until_it_takes_one_echo_can_open() {
         // (app's mic: (open now, listed)), following, released, missing for longer than the grace
-        assert_eq!(step(None, true, false, false), Step::Keep, "a blip shorter than the grace");
-        assert_eq!(step(None, true, false, true), Step::Release, "released after the grace");
+        assert_eq!(step(None, true, false, false, false), Step::Keep, "a blip shorter than the grace");
+        assert_eq!(step(None, true, false, true, false), Step::Release, "released after the grace");
         // A reopen while released (device error, stall, rate change) lands on the default input, not followed:
-        assert_eq!(step(None, false, true, true), Step::Keep, "still silent, never the default (#140)");
-        assert_eq!(step(Some((false, false)), false, true, false), Step::Keep, "a mic Echo can't open: still silent");
-        assert_eq!(step(Some((false, false)), true, false, false), Step::Release, "following, the app moved to a mic Echo can't open");
-        assert_eq!(step(Some((true, true)), true, true, false), Step::Resume, "the same device again");
+        assert_eq!(step(None, false, true, true, false), Step::Keep, "still silent, never the default (#140)");
+        assert_eq!(step(Some((false, false)), false, true, false, false), Step::Keep, "a mic Echo can't open: still silent");
+        assert_eq!(step(Some((false, false)), true, false, false, false), Step::Release, "following, the app moved to a mic Echo can't open");
+        assert_eq!(step(Some((true, true)), true, true, false, false), Step::Resume, "the same device again");
         // Released, reopened onto the default, the app takes that very device: the stream now follows the app
         // (device_change marks it), so the next release is silence again, not the default (#140).
-        assert_eq!(step(Some((true, true)), true, true, false), Step::Resume);
-        assert_eq!(step(None, true, false, true), Step::Release, "released again: silence");
-        assert_eq!(step(None, false, false, true), Step::Default, "what an unmarked stream would do — the bug");
-        assert_eq!(step(Some((false, true)), false, true, false), Step::FollowApp, "a device Echo can open");
-        assert_eq!(step(Some((false, true)), true, false, false), Step::FollowApp, "the app switched mic");
-        // Never followed an app (it holds no mic yet): the default input, as before.
-        assert_eq!(step(None, false, false, true), Step::Default);
-        assert_eq!(step(Some((false, false)), false, false, false), Step::Default);
-        assert_eq!(step(Some((true, true)), true, false, false), Step::Keep);
+        assert_eq!(step(None, true, false, true, false), Step::Release, "released again: silence");
+        assert_eq!(step(None, false, false, true, false), Step::Default, "what an unmarked stream would do — the bug");
+        assert_eq!(step(Some((false, true)), false, true, false, false), Step::FollowApp, "a device Echo can open");
+        assert_eq!(step(Some((false, true)), true, false, false, false), Step::FollowApp, "the app switched mic");
+        // Settled on the default (after the fallback, or a memo): follow the default input.
+        assert_eq!(step(None, false, false, true, false), Step::Default);
+        assert_eq!(step(Some((false, false)), false, false, false, false), Step::Default);
+        assert_eq!(step(Some((true, true)), true, false, false, false), Step::Keep);
+        // Before the app holds a mic (#201): silent, then the default input after the fallback, never before.
+        assert_eq!(step(None, false, true, false, false), Step::Keep, "waiting: silent");
+        assert_eq!(step(Some((false, false)), false, true, false, false), Step::Keep, "a mic Echo can't open yet: silent");
+        assert_eq!(step(Some((false, true)), false, true, false, false), Step::FollowApp, "the app's mic: follow it");
+        assert_eq!(step(None, false, true, true, true), Step::Fallback, "no mic of its own after the fallback");
+        assert_eq!(step(Some((false, false)), false, true, false, true), Step::Fallback);
     }
 
     #[test]
