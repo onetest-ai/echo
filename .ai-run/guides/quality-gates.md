@@ -36,7 +36,7 @@ Run order is fastest-to-slowest.
 
 **Run**: `scripts/check-mod.sh`
 **Side effects**: npx may download typescript@5.6.3; leaves a temp folder with a tsconfig.json
-**Pass**: exit 0 and the last line `tsc: clean`, or `skip tsc: …` when no type declarations exist
+**Pass**: exit 0 and the last line `tsc: clean`, or `skip tsc: …` when no type declarations exist; its first step, `scripts/size-check.sh`, prints `size-check: ok` (no source file over 1,500 lines but those at their ceiling in `scripts/size-ceilings.txt`, architecture.md R13)
 **Fail**: non-zero exit from any step
 **Skip if**: the tsc step only skips itself when no Claude Code type declarations are found
 
