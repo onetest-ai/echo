@@ -38,6 +38,8 @@ const TICK: Duration = Duration::from_millis(1000);
 /// whisper.cpp threads during a call: keeping up is all it needs (Metal does the work on
 /// macOS), and the call itself needs the machine too.
 const THREADS: usize = 4;
+/// How long `Live::abandon` waits for the worker to let go of its model.
+const ABANDON_WAIT: Duration = Duration::from_secs(30);
 
 /// The worker's thread: every segment of the call and the model's name.
 type Worker = JoinHandle<Result<(Vec<Segment>, String)>>;
@@ -62,6 +64,28 @@ impl Live {
         self.close();
         let handle = self.handle.take().expect("joined once");
         handle.join().map_err(|_| anyhow!("the transcription worker panicked"))?
+    }
+}
+
+impl Live {
+    /// Give up and wait until the worker has let go of its model: a process about to exit must not leave a
+    /// whisper context alive (ggml's Metal device asserts at exit while one is, #141).
+    /// Waited for at most `ABANDON_WAIT`: a local decode ends within it (the worker checks `quit` between
+    /// utterances), a request to a transcription server may not — and holds no local model unless the server
+    /// failed over to one mid-call, which the wait then covers as well. Past the cap the worker is left running
+    /// (detached): a local model still loaded then can still trip ggml's Metal assert at exit (#141), a rare case
+    /// traded for an exit that never waits more than the cap.
+    pub fn abandon(mut self) {
+        self.quit.store(true, Ordering::SeqCst);
+        self.close();
+        let Some(h) = self.handle.take() else { return };
+        let until = std::time::Instant::now() + ABANDON_WAIT;
+        while !h.is_finished() && std::time::Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        if h.is_finished() {
+            let _ = h.join();
+        }
     }
 }
 
@@ -206,6 +230,10 @@ fn run(dir: &Path, cfg: &Config, prompt: Option<String>, remote_name: Option<Str
         if !behind {
             std::thread::sleep(TICK);
         }
+    }
+    // Given up while the last pass ran (`abandon` after `close`): no echo cancellation, no second decode.
+    if quit.load(Ordering::SeqCst) {
+        bail!("given up: nobody waits for this transcript");
     }
     // On speakers the mic re-records the others: cancel that echo and decode the mic again
     // (headphones — no echo found — keep what was decoded during the call).
@@ -366,6 +394,23 @@ mod tests {
         })) };
         assert_eq!(live.join().unwrap().1, "m");
         assert!(!q.load(Ordering::SeqCst), "a joined worker isn't told to give up");
+    }
+
+    #[test]
+    fn an_abandoned_worker_on_a_local_model_is_waited_for_until_it_lets_go() {
+        let (done, quit, gone) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
+        let (q, g) = (quit.clone(), gone.clone());
+        let handle = std::thread::spawn(move || {
+            while !q.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            std::thread::sleep(Duration::from_millis(50)); // still freeing its model
+            g.store(true, Ordering::SeqCst);
+            Ok((vec![], String::new()))
+        });
+        Live { done: done.clone(), quit: quit.clone(), handle: Some(handle) }.abandon();
+        assert!(quit.load(Ordering::SeqCst) && done.load(Ordering::SeqCst));
+        assert!(gone.load(Ordering::SeqCst), "abandon returns only after the worker ended (#141)");
     }
 
     #[test]
