@@ -5,14 +5,14 @@
 ## Recording
 
 ### Rules
-- R1. Write, cancel, expire or take an arm only while holding `watch::arm_lock` (`armed.lock`), and start a recording only after `take_arm(id)` returned true: it removes `armed.json` only while it still holds that id; an arm replaced or cancelled since the tick read it never starts, and one written during the recording (the next meeting's) is left alone. Evidence: `watch::take_arm`
-- R2. Keep an arm single-use: `run_loop` takes it before `Recording::start`, a start that fails leaves it used up (one error and one notification, no retry each tick), an arm older than `ARM_EXPIRES` is taken as `arm_expired`, and a scheduled meeting is removed with `schedule::remove_id` once its recording starts; stopping it never re-arms it. Evidence: `watch::run_loop`
-- R3. A user Stop while the call goes on ends only the recording: `run_loop` puts the pending arm's id in `held_arm` (not startable while it names it) and sets `stopped_in_call` (no scheduled meeting is armed); keep both reset where `run_loop` resets them, on call end, sleep and a next-call split, and keep a memo out of this path. Evidence: `watch::run_loop`
-- R4. Keep one recording at a time: `memo.request` is refused while anything records; a memo (`Recording::start_memo`, `kind: memo`) has only the mic track on the default input (`MicSource { app: None }`), only `stop.request` ends it (the call-ended stop skips `r.memo`), and a Teams call starting during it emits `call_during_memo` and is not recorded. Evidence: `recorder::Recording::start_memo`
-- R5. End a recording only through `Recording::finish`: it halts every track before finishing any (they end at the same instant), finishes both even when one failed (repairing that WAV's header), closes the live worker without joining it and writes the end under `calls::lock_meta`; `watch::finish` transcribes what was saved even when it returns an error. Evidence: `recorder::Recording::finish`
+- R1. Write, cancel, expire or take an arm only under `watch::arm_lock`, and start a recording only after `take_arm(id)` returned true. Evidence: `watch::take_arm`
+- R2. An arm is single-use: taken before `Recording::start`, used up even when the start fails, expired after `ARM_EXPIRES`; a scheduled meeting leaves the schedule once its recording starts, and stopping never re-arms it. Evidence: `watch::run_loop`
+- R3. A user Stop during a call ends only the recording: the call's pending arm is held (`held_arm`) and no scheduled meeting is armed (`stopped_in_call`) until the call ends; a memo never takes this path. Evidence: `watch::run_loop`
+- R4. One recording at a time: a memo is refused while anything records, records only the default mic, ends only on `stop.request`, and a call during it is not recorded (`call_during_memo`). Evidence: `recorder::Recording::start_memo`
+- R5. A recording ends only through `Recording::finish` (every track halted before any is finished, each finished even when another failed, the end written under `calls::lock_meta`); what was saved is transcribed even when it returns an error. Evidence: `recorder::Recording::finish`
 - R6. Never reuse a call folder. Evidence: `recorder::call_dir`
 - R7. Pruned frames move to `.echo/trash/<call>.frames/` with their index lines, never deleted. Evidence: `calls::prune_frames`
-- R8. Pin a memo to threads only through `memo::set_threads`: unknown, closed and excluded threads dropped, only automatic pins taken back (never the user's), all under the threads' lock. Evidence: `memo::set_threads`
+- R8. A memo's threads change only through `memo::set_threads`, under the threads' lock; the user's pins are never taken back. Evidence: `memo::set_threads`
 
 ### Constraints
 | Do not | Do instead | Evidence |
@@ -27,8 +27,8 @@
 ## Capture tracks
 
 ### Rules
-- R1. Give every track of a recording the recording's one `t0` (`Recording::start` passes the same `Instant` to each `Track::start`): `write_track` places each chunk on that timeline, pads gaps over `GAP_TOLERANCE` with zeros and pads to the stop time; `mic.wav` and `remote.wav` stay sample-aligned however often a source reopens. Evidence: `audio::write_track`
-- R2. A capture `Source::open` sends mono `Chunk`s tagged with its `epoch` and native `rate` (the writer resamples to `TRACK_RATE` itself), and its `LiveStream::health` returns `Health::Reopen` for a planned change (device, rate, the app's processes: reopened at once, outside the backoff) and `Health::Restart` for a failure (backed off 1 s doubling to 30 s); `Track::poll` turns more than 3 reopens in 30 s into a restart. Evidence: `audio::Track::poll`
+- R1. Every track of a recording shares its one `t0`; `write_track` keeps `mic.wav` and `remote.wav` sample-aligned across reopens (gaps padded with zeros). Evidence: `audio::write_track`
+- R2. A capture source sends mono `Chunk`s with its `epoch` and native `rate`; its health returns `Health::Reopen` for a planned change and `Health::Restart` for a failure. Evidence: `audio::Track::poll`
 
 ### Read first
 | When you are | Exemplar | Tests |
@@ -38,16 +38,16 @@
 ## Transcription
 
 ### Rules
-- R1. Delete `mic.wav` / `remote.wav` only in `transcribe::write_transcript`, after `segments.json` and `transcript.md` are written and only when neither its `keep_audio` argument nor `config.keep_audio` is set, then note it in `meta.json` through `calls::update_meta`; a `--model` comparison run and `live-replay` pass `keep_audio = true`. Evidence: `transcribe::write_transcript`
-- R2. Hold `transcribe::take_marker` (`.transcribing`, created exclusively with this pid; a dead pid's marker is taken over, a live one fails with "already being transcribed") for as long as you write a call's transcript, as `transcribe` and `watch::finish_transcript` do; `watch::transcribe_now` treats that failure as another process's work, not a failed transcription. Evidence: `transcribe::take_marker`
-- R3. A transcription failure writes `<call>/transcribe.error` and is not retried: `watch::recover` skips a call with it or with `transcript.md`, waits for a marker whose pid is alive before transcribing, removes stale markers, closes unfinished recordings of the last 7 days with `close_unfinished` (headers repaired, `stop_reason: recovered`) and skips recordings this app run started. Evidence: `watch::recover`
-- R4. Change how utterances are decoded in `transcribe::Transcriber` / `Engine`, not in `live.rs`: the live worker builds its transcriber with `final_transcriber` (same model, language list and hint guard as `echoctl transcribe`) and reads the growing WAVs as its queue; `live::start` returns `None` with no model and no server, and the call is then transcribed after it ends. Evidence: `live::run`
-- R5. Add a speech engine as a `transcribe::Engine` variant (with its `EngineState`) implementing `utterance(prev, allowed, prompt, chunk)` → (language id, code, `Decoded`), a `models::Engine` variant, `CATALOG` entries naming it and its arm in `models::runnable`; `Engine::load` picks it by `models::engine_of`, and the transcription server decodes through the same `Engine`. Evidence: `transcribe::Engine`
-- R6. Load a runtime-only speech library as `nemo.rs` does: `libloading` at first use from `candidates()` (`ECHOCTL_NEMO_DIR`, the app's own copy, `<config dir>/nemo-speech`), with `available()` false when it is missing, never a link-time dependency. Evidence: `nemo::load_api`
-- R7. Keep a vocabulary-hinted decode only through `choose_hinted` against a plain decode of the same utterance (`hint_is_sane` length band, `hint_adds_terms` under half, `boost_is_heard`), as `Whisper::utterance` and `Client::openai_utterance` do from `GUARD_MIN_S`; Nemotron's boosted decode goes through `boost_is_heard`. A new hinted path decodes plain too and uses these checks. Evidence: `transcribe::choose_hinted`
-- R8. In an `Engine` variant, drop each decoded sentence that `is_hallucination` or `is_word_list` flags before it becomes a `Piece`, as `Whisper::decode` (with `is_silence` on top) and `Nemo::utterance` do. The OpenAI-compatible path (`remote::pieces`) applies only the no-speech rule. Evidence: `transcribe::Nemo::utterance`
-- R9. Extend the transcription server protocol (`/v1/hello`, `/v1/utterance`) only with optional fields, as `Answer.words` is `#[serde(default)]`. Evidence: `remote::Answer`
-- R10. Return `remote::Refused` only for a final answer (`Client::check`: 401/403 a wrong key; 400/404/405/413 a bad request): `Transcriber::utterance` stops on it, while any other server error makes this computer decode for `SERVER_RETRY` and, with no local model, wait for the server up to `SERVER_WAIT`. Evidence: `transcribe::Transcriber::utterance`
+- R1. Audio (`mic.wav`, `remote.wav`) is deleted only in `transcribe::write_transcript`, after the transcript is written and unless audio is kept (`keep_audio`), and noted through `calls::update_meta`. Evidence: `transcribe::write_transcript`
+- R2. Writing a call's transcript holds `transcribe::take_marker` for the whole time. Evidence: `transcribe::take_marker`
+- R3. A transcription failure writes `<call>/transcribe.error` and is never retried by itself; recovery (`watch::recover`) skips such calls and calls with a transcript. Evidence: `watch::recover`
+- R4. Decoding changes go in `transcribe::Transcriber` / `Engine`, never in `live.rs`: the live worker uses `final_transcriber`. Evidence: `live::run`
+- R5. A speech engine is a `transcribe::Engine` variant (with its `EngineState`) plus a `models::Engine` variant, `CATALOG` entries and its arm in `models::runnable`; the transcription server decodes through the same `Engine`. Evidence: `transcribe::Engine`
+- R6. A runtime-only speech library loads with `libloading` at first use (as `nemo.rs`), `available()` false when missing; never a link-time dependency. Evidence: `nemo::load_api`
+- R7. A vocabulary-hinted decode is kept only through `choose_hinted` against a plain decode of the same utterance; a new hinted path decodes plain too and uses the same checks. Evidence: `transcribe::choose_hinted`
+- R8. An `Engine` variant drops sentences that `is_hallucination` or `is_word_list` flags before they become a `Piece`. Evidence: `transcribe::Nemo::utterance`
+- R9. The transcription server protocol (`/v1/hello`, `/v1/utterance`) grows only by optional fields. Evidence: `remote::Answer`
+- R10. `remote::Refused` is returned only for a final answer (a wrong key, a bad request); any other server error falls back to this computer's model. Evidence: `transcribe::Transcriber::utterance`
 
 ### Constraints
 | Do not | Do instead | Evidence |
@@ -63,10 +63,10 @@
 ## Live notes
 
 ### Rules
-- R1. Advance the live notes' `cursor` only when a summary is saved (`run_summary` writes `cursor: all.len()` with the notes); `livenotes::lines` reads only complete lines of `live.jsonl` and keeps a complete line that doesn't parse as an empty one. Evidence: `livenotes::lines`
-- R2. Turn a model's live-notes reply into a draft only through `parse_notes`: a reply with none of `now`, `decisions`, `actions`, `questions` is refused, items are clipped to `MAX_ITEMS` × `MAX_ITEM_CHARS` and times kept within the call. Evidence: `livenotes::parse_notes`
-- R3. Run a short model job through `complete_claude_with`: `--tools ""`, `--strict-mcp-config`, `--no-session-persistence`, `--settings` the `lean_settings` file (`claudeMdExcludes: ["**"]`), `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, and `ai::wait_output_with`, which stops the child's group with `ai::stop_child` on the deadline or a cancel. Evidence: `livenotes::complete_claude_with`
-- R4. Re-check `summary_current(stamp, generation)` and `enabled()` after the model answers and before saving, as `run_summary` does: a summary started before a pause, a profile change or live notes being turned off is dropped. Evidence: `livenotes::run_summary`
+- R1. The live notes' `cursor` advances only when a summary is saved; `livenotes::lines` reads only complete lines of `live.jsonl`. Evidence: `livenotes::lines`
+- R2. A model's live-notes reply becomes a draft only through `parse_notes`. Evidence: `livenotes::parse_notes`
+- R3. A short model job runs through `complete_claude_with` (no tools, no MCP, no session persistence, no memory) with a deadline that stops the child's group. Evidence: `livenotes::complete_claude_with`
+- R4. A summary is re-checked as current (`summary_current`, `enabled()`) after the model answers and before it is saved. Evidence: `livenotes::run_summary`
 
 ### Read first
 | When you are | Exemplar | Tests |

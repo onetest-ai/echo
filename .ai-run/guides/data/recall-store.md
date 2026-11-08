@@ -9,7 +9,7 @@
 - R2. Serve Recall data to a session or job through a `brain::access::Access` for its profile and scope; sources of other profiles answer "not found". Evidence: `brain::access::Access`
 - R3. Recall stays off until the user turns it on, after an update too; while off nothing is read, indexed or tagged. Evidence: `brain::enabled`
 - R4. Index mail and channel posts only as the quarantine reader's facts, each quote checked word for word against its message; never their text. Evidence: `brain::digest::check`
-- R5. Read a message only from the user, a colleague (Exchange `AuthAs: Internal`, or a Teams author by directory id, never by name) or a sender trusted for every client of its threads; trusted outside mail also needs DMARC or compauth passing for the From domain; an author not looked up yet defers the document. Evidence: `brain::senders::Senders::mail`, `graph::mail_auth`
+- R5. Read a message only from the user, a colleague (Exchange `AuthAs: Internal`, a Teams author by directory id) or a sender trusted for all its threads' clients, outside mail passing DMARC or compauth; defer an author not yet looked up. Evidence: `brain::senders::Senders::mail`, `graph::mail_auth`
 - R6. The MCP server is read-only, and its tools (`mcp__echo__…`) are allowed only in a call session's ask mode, never in a minutes run. Evidence: `guard::BRAIN_TOOLS`
 - R7. Keep chunk ids stable across syncs. Evidence: `brain::chunk::chunk_id`
 - R8. Every saved config writes `learned` (`[]` when empty); only a config without the key is migrated by `vocab::migrate`. Evidence: `config::learned_always`

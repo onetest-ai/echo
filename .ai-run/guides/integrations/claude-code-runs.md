@@ -5,7 +5,7 @@
 ## Starting Claude Code
 
 ### Rules
-- R1. Start Claude Code on call text, for a sign-in check or a sign-in through `ai::claude_command` (or `ai::prepare_claude`), which applies the profile's routing and policy checks; a bare `app::claude_bin()` is used only for `--version` and plugin-management commands (`terminal::claude_new_enough`, `app::update_plugins`, `claude_setup`). Evidence: `ai::claude_command`
+- R1. Start Claude Code through `ai::claude_command` (or `ai::prepare_claude`); a bare `app::claude_bin()` only for `--version` and plugin-management commands. Evidence: `ai::claude_command`
 - R2. Pick a call's AI profile with `ai::for_call` / `ai::call_profile_id`: an unreadable `meta.json` or a missing profile is an error, never a fallback to another profile. Evidence: `ai::call_profile_id`
 - R3. When a routing environment-variable family changes, change both `ai::routing_var` (the process environment) and `ai::UNSET_ROUTING` (the login-shell `sed` filter). Evidence: `ai::UNSET_ROUTING`
 - R4. Hold the profile's lease (`ai::lease`, kept by the `Ready` that `ai::ready` returns) for the whole job. Evidence: `ai::ready`

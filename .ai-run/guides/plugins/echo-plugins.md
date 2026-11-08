@@ -5,11 +5,11 @@
 ## Plugin host
 
 ### Rules
-- R1. Add a capability plugins may ask for as a `Capability` in `plugins::CAPABILITIES` with its own `describe` function: the permission sheet's words are written in Echo, never taken from the plugin; keep `ready: false` until the host implements it (an install then says it needs a newer Echo). Evidence: `plugins::CAPABILITIES`
+- R1. Add a capability plugins may ask for as a `Capability` in `plugins::CAPABILITIES` with its own `describe` writing the sheet's words in Echo, never the plugin's; keep `ready: false` until the host implements it. Evidence: `plugins::CAPABILITIES`
 - R2. Add a host-half service in three places: the `ctx` object in `jshost::PRELUDE`, then an arm in `jshost::service` (returns at once) or `jshost::service_async` (spawns a process, waits on the network or a dialog). Evidence: `jshost::PRELUDE`
-- R3. A host service that reaches Echo data, granted folders, sessions or the network checks the manifest first with `jshost::uses` / `jshost::uses_flag` (as `fs.*`, `sessions.*`, `view.hints`, `echo.read`) or the capability's own list (`network.hosts` in `jshost::fetch`, `channel.plugin`, `deliver_provider.kinds`). Evidence: `jshost::uses_flag`
+- R3. A host service that reaches Echo data, granted folders, sessions or the network checks the manifest first with `jshost::uses` / `jshost::uses_flag` or the capability's own list (`network.hosts`, `channel.plugin`, `deliver_provider.kinds`). Evidence: `jshost::uses_flag`
 - R4. Resolve a plugin's own files with `plugins::inside_plugin` / `inside_plugin_dir`, its store with `jshost::store_path`, and granted folders with `grants::resolve`; each refuses absolute paths and `..`. Evidence: `plugins::inside_plugin`
-- R5. Validate a manifest only in `plugins::read_manifest` (id a–z 0–9 `-`, name 1–60 chars, semver version, summary ≤ 240, setting types `string|bool|folder|secret`, `main`/`client` a `.js`/`.mjs` inside the package, `uses` through `describe`); a new manifest field gets its check there. Evidence: `plugins::read_manifest`
+- R5. Validate a manifest only in `plugins::read_manifest`; a new manifest field gets its check there. Evidence: `plugins::read_manifest`
 - R6. A host half's command or tick that runs JavaScript for over 5 s is interrupted (`jshost::SLICE`); move bulk file reads to the async services (`ctx.fs.readMany`, `ctx.fs.walk`), which run off the slice. Evidence: `jshost::SLICE`
 - R7. Add a client-half slot by listing it in `SLOTS` in `app.js` and drawing it with `slotItems`; register everything a plugin adds under its id so `unloadPlugin` takes it out. Evidence: `unloadPlugin` (window script)
 - R8. A new `ctx.echo.read` kind goes in `plugins::ECHO_READS` (the sheet's words) and the `echo.read` arm of `jshost::service`, its data from `share.rs`; an unknown kind is named on the sheet and granted nothing. Evidence: `plugins::ECHO_READS`
