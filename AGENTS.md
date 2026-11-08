@@ -58,10 +58,9 @@ trivial task, use judgment.
 
 ## What the guides are
 
-The guides hold rules: how Echo must work and how we work on it, each with its reason. They are not a record of what
-was built: what Echo does is the functional map (`tests/feature-map/`), how it is built is the code, and why it changed
-is git (commit messages and PR descriptions). A guide changes only when a rule changes — a new constraint, a reversed
-decision — in its own `Rules:` PR the user approves, never as a side effect of a feature or a refactor. Cite evidence
+The guides hold rules: how Echo must work and how we work on it. Not the reasons behind a decision once made, and not a
+record of what was built: what Echo does is the functional map (`tests/feature-map/`), how it is built is the code, and why it changed
+is git (commit messages and PR descriptions). A guide changes only when a rule changes, in its own `Rules:` PR the user approves, never as a side effect of a feature or a refactor. Cite evidence
 by symbol (`ledger::apply`), not by file path, so moving code doesn't touch the guides.
 
 ## Task Classifier
