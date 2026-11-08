@@ -17,6 +17,7 @@ tags: [people, views]
 ## Preconditions
 - Test data built by `tests/fixtures/make-data.sh`; window served at `{{base_url}}` and `{{base_url}}/` loaded first (the cookie); `. <dir>/env` sourced for every `echoctl` command
 - Create the scratch thread with the Acme call: `echoctl project create "People lab"` (id `people-lab`), then `echoctl project include people-lab <folder of Acme weekly sync>` (the entry of `$ECHOCTL_HOME/calls` ending `-acme-weekly-sync`). People are placed per thread, so the case never touches Acme rollout
+- In S-07 this precondition makes the scenario's shared thread: the stages after it use `people-lab`, so there the `project delete` of this case's Teardown is skipped
 
 ## Test Data
 

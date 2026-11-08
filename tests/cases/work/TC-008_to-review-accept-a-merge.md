@@ -16,7 +16,7 @@ tags: [work, review, suggestions]
 
 ## Preconditions
 - Test data built by `tests/fixtures/make-data.sh`; window served at `{{base_url}}` and `{{base_url}}/` loaded first (the cookie); `. <dir>/env` sourced for every `echoctl` command
-- `echoctl project ledger acme-rollout sync`
+- `echoctl project ledger acme-rollout sync` (in S-06 stage 15, work/TC-003, ran it: use the id it printed under `pending`, also `evidence` of Acme weekly sync in `manifest.json` → `calls`)
 - Add a near-duplicate through the agent path: `echoctl project ledger acme-rollout apply --evidence <id from sync's pending list, 2026-MM-DD_HHMMSS> --proposals /dev/stdin` with the standard input `[{"op":"create","kind":"task","parent":"S001","type":"action","title":"Send Acme the SSO checklist today","internal_owner":"Sam Rivera","quote":"I'll send the SSO checklist this afternoon."}]` → `by_op` has `suggest_merge: 1`
 
 ## Test Data

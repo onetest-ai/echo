@@ -17,6 +17,8 @@ tags: [people, suggestions]
 ## Preconditions
 - Test data built by `tests/fixtures/make-data.sh`; window served at `{{base_url}}` and `{{base_url}}/` loaded first (the cookie); `. <dir>/env` sourced for every `echoctl` command
 - Create the scratch thread with the Acme call: `echoctl project create "People lab"` (id `people-lab`), then `echoctl project include people-lab <folder of Acme weekly sync>` (the entry of `$ECHOCTL_HOME/calls` ending `-acme-weekly-sync`). People are placed per thread, so the case never touches Acme rollout
+- In S-07: `people-lab` is the scenario's shared thread, made by stage 10's precondition (people/TC-001) and kept (Dana Lee in it and placed, not yet a champion: a suggestion of a value the person already has is dropped); skip making it. On its own: make it as above
+- The people view is Map (click "Map" in the view switch if another is pressed)
 - `echoctl project ledger people-lab sync`
 - Propose three changes: `echoctl project ledger people-lab people-apply --evidence <id from sync's pending list> --file /dev/stdin` with the standard input `[{"who":"Dana Lee","field":"stance","value":"champion","quote":"We need the SSO checklist from you by the end of today."},{"who":"Omar Haddad","field":"influence","value":3,"quote":"Omar will answer the security questionnaire by Friday."},{"who":"Omar Haddad","field":"title","value":"Security lead","quote":"Omar will answer the security questionnaire by Friday."}]` → `added: 3`
 

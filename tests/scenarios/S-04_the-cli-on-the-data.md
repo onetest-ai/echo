@@ -12,6 +12,12 @@ cases:
 
 **Story:** Sam, in a terminal, asks Echo who owes what and what the app is doing.
 
+## Assets
+
+| Asset | Made by | Used by stages |
+|---|---|---|
+| The `small` data build (no app run on it) | the lead | 1–2 |
+
 ## Stages
 
 | # | Case | Depends on | Before it |
@@ -20,4 +26,4 @@ cases:
 | 2 | `cli/TC-002_status-without-app.md` | — | — |
 
 ## Notes
-- CLI only: no browser needed.
+- CLI only: no browser needed, no prelude. Two read-only commands on one build: nothing to share or skip.

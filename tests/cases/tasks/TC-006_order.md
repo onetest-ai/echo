@@ -17,6 +17,7 @@ tags: [tasks, order]
 ## Preconditions
 - Test data built by `tests/fixtures/make-data.sh`, window served at `{{base_url}}`
 - Globex pilot's T001 is overdue: `echoctl project ledger globex-pilot edit '{"op":"edit","node":"T001","set":{"due":"<the date two days ago, YYYY-MM-DD>"}}'`. Every `echoctl` command runs after `. <dir>/env` (the run's env file)
+- In S-08 it is already overdue: stage 5 (tasks/TC-005) set it and kept it (its Teardown skipped). On its own: run the edit above
 
 ## Test Data
 

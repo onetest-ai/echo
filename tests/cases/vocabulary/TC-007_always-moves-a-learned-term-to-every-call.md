@@ -18,6 +18,7 @@ tags: [vocabulary, learned]
 - Test data built by `tests/fixtures/make-data.sh`, window served at `{{base_url}}` (`tests/fixtures/serve.sh up`)
 - `{{base_url}}/` was loaded just before the first window step (its cookie lets clicks reach the app; a second Echo server on 127.0.0.1 replaces the cookie, so load `{{base_url}}/` again if a click has no effect)
 - CLI steps run in Bash after `. <dir>/env` (`<dir>` is the run's data folder)
+- **Shared asset:** the learned terms "Berlin pilot" and "Okta SSO" (from Acme weekly sync), the Vocabulary panel open on them. In S-11: made by stage 33 (vocabulary/TC-006, its teardown skipped), so step 1 and step 2's reload and book button are skipped there. On its own: steps 1–2 make it.
 
 **Changes:** `<data>/.echo/config.json` key `vocabulary`
 

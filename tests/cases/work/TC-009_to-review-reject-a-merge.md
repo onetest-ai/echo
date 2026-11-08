@@ -16,7 +16,7 @@ tags: [work, review, suggestions]
 
 ## Preconditions
 - Test data built by `tests/fixtures/make-data.sh`; window served at `{{base_url}}` and `{{base_url}}/` loaded first (the cookie); `. <dir>/env` sourced for every `echoctl` command
-- `echoctl project ledger acme-rollout sync` (if not run yet)
+- `echoctl project ledger acme-rollout sync` (if not run yet: in S-06 stage 15, work/TC-003, ran it; the evidence id is the one it printed under `pending`, also `evidence` of Acme weekly sync in `manifest.json` → `calls`)
 - `echoctl project ledger acme-rollout apply --evidence <the call's evidence id> --proposals /dev/stdin` with the standard input `[{"op":"create","kind":"task","parent":"S001","type":"action","title":"Answer the security questionnaire by Friday","internal_owner":"Omar Haddad","quote":"Omar will answer the security questionnaire by Friday."}]`
 
 ## Test Data

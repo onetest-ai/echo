@@ -17,6 +17,7 @@ tags: [work, tree]
 ## Preconditions
 - Test data built by `tests/fixtures/make-data.sh`; window served at `{{base_url}}` and `{{base_url}}/` loaded first (the cookie); `. <dir>/env` sourced for every `echoctl` command
 - Create three records under S001 of Acme rollout: `echoctl project ledger acme-rollout edit '{"op":"create","kind":"question","parent":"S001","title":"Who signs off the pilot?"}'` (note the ids each create prints), the same with `"kind":"decision","title":"Pilot starts in Berlin"` and `"kind":"risk","title":"SSO vendor delay"`
+- In S-06 the decision and the risk are already there: the decision from stage 9 (work/TC-002) and the risk from stage 10 (work/TC-013), with the ids they printed; create only the question. On its own: create all three
 
 ## Test Data
 

@@ -18,6 +18,7 @@ tags: [vocabulary]
 - Test data built by `tests/fixtures/make-data.sh`, window served at `{{base_url}}` (`tests/fixtures/serve.sh up`)
 - `{{base_url}}/` was loaded just before the first window step (its cookie lets clicks reach the app; a second Echo server on 127.0.0.1 replaces the cookie, so load `{{base_url}}/` again if a click has no effect)
 - CLI steps run in Bash after `. <dir>/env` (`<dir>` is the run's data folder)
+- **Shared asset:** the Every call term "Kubernetes", the Vocabulary panel open. In S-11: left by stage 30 (vocabulary/TC-003, whose teardown removes only "Berlin pilot"), so step 1 is skipped there. On its own: step 1 makes it.
 
 **Changes:** `<data>/.echo/config.json` key `vocabulary`
 

@@ -17,6 +17,7 @@ tags: [tasks, empty]
 ## Preconditions
 - Test data built by `tests/fixtures/make-data.sh`, window served at `{{base_url}}`
 - Run `echoctl project tasks`; for every task in every pile mark it done: `echoctl project ledger <project> edit '{"op":"edit","node":"<id>","set":{"state":"done"}}'` (note each project and id). `echoctl project tasks` then lists no task. Every `echoctl` command runs after `. <dir>/env` (the run's env file)
+- In S-08 Acme rollout's T001 is already done (stage 12, tasks/TC-012, kept it closed): note it with the others, so the Teardown reopens it too
 
 ## Test Data
 
