@@ -233,7 +233,7 @@ pub fn run(spec: &Spec) -> Result<(String, String, Value)> {
         let mut c = crate::ai::prepare_claude(profile, &a, &cwd, false)?;
         c.env("ECHOCTL_BIN", &exe);
         if let Some(t) = &spec.task {
-            c.env(guard::RUN_TASK, t);
+            c.env(guard::RUN_TASK, t).env(guard::RUN_PROFILE, &profile.id);
         }
         if spec.tools == Tools::Read {
             c.env(guard::RUN_MODE, "routine").env(guard::RUN_HOME, &home).env(guard::RUN_CLIS, clis.join("\n"));
