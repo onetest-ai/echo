@@ -18,12 +18,18 @@ const cases = [
   ['a chip at 00:13 opens the turn starting at 0:13.2', 13, 1],
   ['a moment inside a turn opens that turn', 31, 3],
   ['a moment in the silence after a turn opens the next turn', 36, 4],
-  ['a note saved at a turn\'s start rounded up opens that turn', Math.ceil(50.666), 5],
+  ['a note saved at a turn\'s start (whole seconds, rounded down) opens that turn', Math.floor(50.666), 5],
   ['a moment before the first turn opens the first', 1, 0],
   ['a moment after the last turn opens the last', 99, 5],
 ]
+// A short turn followed closely by another, and two tracks starting in the same second.
+const short = [{ start: 50.1, end: 50.9 }, { start: 51.4, end: 55 }]
+cases.push(['a note on a short turn (saved at its start, rounded down) opens that turn, not the next', Math.floor(50.1), 0, short])
+const overlap = [{ start: 40.2, end: 48 }, { start: 40.7, end: 44 }]
+cases.push(['two turns starting in the same second: the first of them', 40, 0, overlap])
+cases.push(['a moment after both began: the later of them', 45, 1, overlap])
 let failed = 0
-for (const [name, t, want] of cases) {
-  try { assert.equal(jumpTurn(turns, t), want); console.log(`ok - ${name}`) } catch (e) { failed++; console.log(`not ok - ${name}\n  ${e.message}`) }
+for (const [name, t, want, ts = turns] of cases) {
+  try { assert.equal(jumpTurn(ts, t), want); console.log(`ok - ${name}`) } catch (e) { failed++; console.log(`not ok - ${name}\n  ${e.message}`) }
 }
 if (failed) process.exit(1)

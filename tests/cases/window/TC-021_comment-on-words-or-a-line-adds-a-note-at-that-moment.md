@@ -27,7 +27,7 @@ tags: [transcript, notes, minutes]
 | Where | Line | Note |
 |---|---|---|
 | Initech planning, transcript, 2nd turn (0:20, Remote) | "Sounds good. On our side the main concern is the SSO cutover for the Berlin office and the support hand-over." | `? Who runs the cutover weekend` |
-| Initech planning, transcript, 4th turn (`data-t` 50.67, shown 0:51) | right-click | `Send them the answers first` |
+| Initech planning, transcript, 4th turn (`data-t` 50.67, shown 0:50) | right-click | `Send them the answers first` |
 | Acme weekly sync (today), minutes, Summary line "The questionnaire waits for legal" `00:31` | right-click | `[] Ask legal for a date` |
 
 ## Steps
@@ -38,8 +38,8 @@ tags: [transcript, notes, minutes]
 | 2 | Triple-click the text of the 2nd turn (`.transcript .turn >> nth=1 >> p`) to select it | A popover with one button "Comment" |
 | 3 | Click "Comment" | The popover shows "00:20 “Sounds good. On our side the main concern is the SSO cutover for the Berlin office and the support hand-over.”", the box "Your note" and "Goes to My notes at 00:20" |
 | 4 | Type `? Who runs the cutover weekend`, click "Add note"; wait 2 s | My notes lists "? 00:20 Who runs the cutover weekend" with the quote under it; the 2nd turn shows a note dot; `my-notes.md` has `- [00:20] ? Who runs the cutover weekend` and the line `  > "Sounds good. On our side the main concern is the SSO cutover for the Berlin office and the support hand-over."` |
-| 5 | Right-click the text of the 4th turn | A menu with one item "Add note at 00:51…" (no "Copy": nothing is selected) |
-| 6 | Click it, type `Send them the answers first`, press Enter; wait 2 s | My notes lists "• 00:51 Send them the answers first" (no quote); `my-notes.md` has `- [00:51] Send them the answers first` |
+| 5 | Right-click the text of the 4th turn | A menu with one item "Add note at 00:50…" (no "Copy": nothing is selected) |
+| 6 | Click it, type `Send them the answers first`, press Enter; wait 2 s | My notes lists "• 00:50 Send them the answers first" (no quote); `my-notes.md` has `- [00:50] Send them the answers first` |
 | 7 | Click the first row `[data-call$="-acme-weekly-sync"]`, tab "Minutes"; right-click the Summary line "The questionnaire waits for legal" in the minutes frame | A menu "Add note at 00:31…" |
 | 8 | Click it | The quote reads exactly "00:31 “The questionnaire waits for legal”" and "Goes to My notes at 00:31 · on “Summary”" |
 | 9 | Type `[] Ask legal for a date`, click "Add note"; wait 2 s | My notes lists a to-do "☐ 00:31 Ask legal for a date" with the quote “The questionnaire waits for legal”; `my-notes.md` has `- [ ] [00:31] Ask legal for a date` and `  > "The questionnaire waits for legal"` |
@@ -48,5 +48,5 @@ tags: [transcript, notes, minutes]
 Initech planning has two notes and Acme weekly sync one more, each at its moment, the selected or right-clicked words quoted.
 
 ## Notes
-- Step 6: a turn's note is saved at its start rounded up, the time the menu shows, so it stays inside the turn (#128).
-- Steps 8–9: the quote is the line's own words, without its time chip or the user's notes shown under it (#129).
+- Steps 5–6: times are whole seconds rounded down everywhere — the turn's own time, the menu, the saved note, minutes chips — so they agree and the note stays on its turn (#128).
+- Steps 8–9: the quote is the line's own words, without its time chip, the user's notes shown under it, or its sub-items (#129).

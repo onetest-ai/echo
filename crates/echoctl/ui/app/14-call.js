@@ -78,11 +78,14 @@ function confirmBox(c) {
 /** A turn's longest stretch, in seconds, before the same speaker's next line starts a new one. */
 const TURN_MAX = 60
 // ── transcript jump
-/** The turn a moment of the call opens on: the last turn starting by the end of that second (a minutes
- *  chip is whole seconds), or the next one when the moment falls in the silence after it. */
+/** The turn a moment of the call opens on. Moments are whole seconds (minutes chips, notes, links):
+ *  the first turn starting in that second, else the turn under way then, or the next one when the
+ *  moment falls in the silence after it. */
 function jumpTurn(turns, t) {
+  const at = turns.findIndex((x) => x.start >= t && x.start < t + 1)
+  if (at >= 0) return at
   let i = -1
-  for (let k = 0; k < turns.length; k++) if (turns[k].start < t + 1) i = k
+  for (let k = 0; k < turns.length; k++) if (turns[k].start < t) i = k
   if (i < 0) return 0
   return turns[i].end < t && i + 1 < turns.length ? i + 1 : i
 }
@@ -107,7 +110,7 @@ function turnsHtml(segs, q, jump, marks = []) {
     const mine = marks.filter((m) => m.t >= t.start - 1 && m.t < next - 1)
     const dots = mine.length ? `<span class="nt-marks">${mine.map((m) => `<span class="nt-dot k-${m.kind}" title="${esc((NOTE_LOOK[m.kind] || NOTE_LOOK.note)[1] + (m.text ? ': ' + m.text : ''))}"></span>`).join('')}</span>` : ''
     return `<div class="turn ${t.me ? 'me' : 'remote'}${spk}${hit ? ' hit' : ''}" data-t="${t.start}" ${i === jumpIdx ? 'id="jump"' : ''}>
-      <time>${dots}${clock(t.start)}</time>
+      <time>${dots}${clock(Math.floor(t.start))}</time>
       <div><div class="who">${esc(t.who)}${t.lang ? `<span class="lang">${esc(t.lang)}</span>` : ''}</div>${t.parts.map((x) => `<p>${esc(x)}</p>`).join('')}</div></div>`
   }).join('')}</div>`
 }
