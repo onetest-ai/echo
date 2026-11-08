@@ -36,7 +36,7 @@ tags: [prep, calls, tabs]
 | 1 | Navigate to `{{base_url}}/#calls` and wait for "Acme weekly sync" and click the row Umbrella intro call | The tabs read Prep, Minutes, Transcript, in this order |
 | 2 | Click the tab "Prep" | The URL ends `/prep`; the prep is shown |
 | 3 | Click the rows Globex retro, Globex standup and Acme go-live check in turn | Each shows Prep first, then Minutes, Transcript |
-| 4 | Click the row Acme weekly sync | The tabs read Minutes, Transcript, Chat, Screens; no Prep; the page is on Minutes (the open tab "Prep" does not exist for it) |
+| 4 | Click the row Acme weekly sync | The tabs read Minutes, Transcript, Chat, Screens; no Prep; the page is on Minutes (the open tab "Prep" does not exist for it) and the URL ends with `/minutes`, not `/prep` (#148) |
 
 ## Expected Final State
 Acme weekly sync is open on Minutes.
