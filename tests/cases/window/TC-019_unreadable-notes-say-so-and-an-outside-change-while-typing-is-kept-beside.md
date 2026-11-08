@@ -44,7 +44,7 @@ tags: [notes, files, data-loss]
 The unreadable notes were reported, not overwritten; the user's notes and the note typed meanwhile won over the outside change, which was kept beside them under the name the notice gave.
 
 ## Notes
-- Expected to FAIL today (steps 5–7): the note box's text isn't counted as unsaved notes, so the window's 2-second re-read takes the outside version while the box is being typed in; on Enter the note is added to that version, the list silently loses "Kim asks for the pilot dates", and no copy or notice is made. Only when Enter comes within about a second of the outside write (before the re-read) does the copy and its notice appear (seen once by hand). Reported as a suspected bug.
+- Steps 4–6 guard #130: while a note is typed in the box, the window's 2-second re-read leaves the notes as shown, so Enter adds the note to them and the save keeps the outside version beside (before the fix the re-read took the outside version and the earlier notes were lost without a copy). Also covered by `notes-sync.test.mjs` ("an outside change while a note is being typed waits…").
 - The copy and its notice are also covered by `calls.rs` (`save_my_notes`) and `notes-sync.test.mjs` ("a copy kept of an outside edit is reported once").
 - An outside change that only appends (the tray's "Add a note…") is merged instead, with no copy: not this case.
 - `call.notes=conflict kept` is not built into the data (README, Skipped): this case makes it.

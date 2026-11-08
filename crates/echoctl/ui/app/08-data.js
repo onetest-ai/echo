@@ -147,7 +147,8 @@ async function loadCall(name, retried = false) {
     // Its minutes are read now (Today's "new" goes): once per call and minutes a session.
     if (c.notes && S.seenMinutes !== `${c.name}:${(c.notes_run && c.notes_run.finished_at) || ''}`) { S.seenMinutes = `${c.name}:${(c.notes_run && c.notes_run.finished_at) || ''}`; send({ cmd: 'minutes_seen', call: c.name }) }
     // A file that can't be read isn't "empty": the editor stays away from it (`notesTab` says why).
-    if (c.my_notes_error == null) NotesSync.seen(S.call.name, S.call.my_notes || '', epoch)
+    // A note typed in the box or edited in place keeps the notes it was typed on (#130).
+    if (c.my_notes_error == null) NotesSync.seen(S.call.name, S.call.my_notes || '', epoch, pendingNote(S.call.name))
     syncEditor()
   } catch (e) {
     if (S.selected !== name || mine !== callSeq) return

@@ -160,6 +160,23 @@ test('a fetch that began before a save was answered never rolls the editor back'
   assert.equal(N.view(CALL).draft, 'a b- tray\n')
 })
 
+test('an outside change while a note is being typed waits: the note goes on the notes shown, the other version is kept beside (#130)', () => {
+  const { N, sent } = make()
+  N.seen(CALL, '- [00:20] Kim\n')
+  // The box holds a note (`typing`): the 2 s re-read sees another editor's version and leaves the notes as shown.
+  N.seen(CALL, '- Rewritten\n', N.epoch(CALL), true)
+  assert.equal(N.view(CALL).draft, '- [00:20] Kim\n')
+  // Enter adds the note to them; the save's base is what was shown, so the app keeps the other version beside.
+  N.edit(CALL, '- [00:20] Kim\n- Ask Kim\n')
+  N.save(CALL)
+  assert.deepEqual(sent[0], { cmd: 'save_my_notes', call: CALL, id: 1, text: '- [00:20] Kim\n- Ask Kim\n', base: '- [00:20] Kim\n' })
+  N.saved({ call: CALL, id: 1, stored: '- [00:20] Kim\n- Ask Kim\n', kept: 'my-notes.101500.md' })
+  assert.equal(N.view(CALL).kept, 'my-notes.101500.md')
+  // With nothing typed, the file's version is taken again.
+  N.seen(CALL, '- Rewritten again\n', N.epoch(CALL))
+  assert.equal(N.view(CALL).draft, '- Rewritten again\n')
+})
+
 let failed = 0
 for (const [name, f] of tests) {
   try { await f(); console.log(`ok   ${name}`) } catch (e) { failed++; console.log(`FAIL ${name}\n     ${e.message}`) }

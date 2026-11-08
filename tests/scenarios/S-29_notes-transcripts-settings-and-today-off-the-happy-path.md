@@ -61,5 +61,4 @@ Done once, before stage 1, timed as the stage `prelude`.
 - My notes is opened once (stage 3) and stays open while stages 3–7 change calls; a stage that finds it closed opens it (`[aria-label="My notes"]`) before its first step and says so in its notes.
 - The call folders are dated by the build: the prelude lists them once; TC-018's and TC-019's Test Data name folders with the dates of the day they were written (reported: those names are stale on any other day), so the runner uses the prelude's folder of the same slug.
 - Stage 5 is expected to FAIL (steps 6, 8–9) until the suspected bugs it checks are fixed: a right-clicked turn's note saved a second earlier than the menu says, and a minutes line's quote holding its time chip and the notes shown under it.
-- Stage 7 is expected to FAIL (steps 5–7): a note typed in the box while the file is changed outside is added to the outside version, with no copy and no notice.
 - Not covered here: the window closing with a note typed (native window), "Listening…" while a call records (the test call), the Teams transcript import itself (Microsoft 365), the quiet day (`today/TC-006`, in S-10 on the `small` set).
