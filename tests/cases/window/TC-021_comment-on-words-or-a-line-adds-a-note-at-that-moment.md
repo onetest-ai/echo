@@ -48,7 +48,5 @@ tags: [transcript, notes, minutes]
 Initech planning has two notes and Acme weekly sync one more, each at its moment, the selected or right-clicked words quoted.
 
 ## Notes
-- Expected to FAIL today:
-  - step 6: the menu says 00:51 (the turn starts at 50.67 s, the label rounds) but the note is saved at `[00:50]` (`Math.floor`);
-  - steps 8–9: the quote of a minutes line is the line's whole `textContent`, with its time chip and any of the user's own notes the frame shows under the line: here "The questionnaire waits for legal 00:31" in this scenario (after `TC-017` deleted the 00:31 question); a line with a note of the user's under it also quotes that note (seen: "SSO for the Berlin pilot is on track 00:13? Your question 00:12 Dana says the checklist went out on Tuesday"). Not the line's words alone.
-  Both reported as suspected bugs.
+- Step 6: a turn's note is saved at its start rounded up, the time the menu shows, so it stays inside the turn (#128).
+- Steps 8–9: the quote is the line's own words, without its time chip or the user's notes shown under it (#129).

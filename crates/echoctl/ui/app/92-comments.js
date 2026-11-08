@@ -48,7 +48,7 @@ document.addEventListener('mouseup', (e) => {
     const quote = sel.toString().replace(/\s+/g, ' ').trim()
     if (!turn || !quote) return
     const r = sel.getRangeAt(0).getBoundingClientRect()
-    S.selNote = { t: Number(turn.dataset.t) || 0, quote: quote.slice(0, 300), x: Math.max(8, r.left), y: r.bottom + 6, open: false }
+    S.selNote = { t: Math.ceil(Number(turn.dataset.t) || 0), quote: quote.slice(0, 300), x: Math.max(8, r.left), y: r.bottom + 6, open: false }
     showSelPop()
   })
 })
@@ -63,7 +63,7 @@ document.addEventListener('contextmenu', (e) => {
   const sel = window.getSelection && window.getSelection()
   const inside = sel && !sel.isCollapsed && turn.contains(sel.anchorNode)
   const quote = inside ? sel.toString().replace(/\s+/g, ' ').trim().slice(0, 300) : ''
-  S.selNote = { t: Number(turn.dataset.t) || 0, quote, x: e.clientX, y: e.clientY, open: false, menu: true, sel: !!quote }
+  S.selNote = { t: Math.ceil(Number(turn.dataset.t) || 0), quote, x: e.clientX, y: e.clientY, open: false, menu: true, sel: !!quote }
   showSelPop()
 })
 document.addEventListener('click', (e) => {
