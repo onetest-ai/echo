@@ -1,6 +1,6 @@
 ---
 id: TC-002
-title: Search settings keeps the sections whose name has the words typed
+title: Search settings finds sections by their names and by their settings' own labels
 priority: low
 type: functional
 requirements: [F-SET-02]
@@ -10,7 +10,7 @@ platform: any
 tags: [settings, search]
 ---
 
-# TC-002: Search settings keeps the sections whose name has the words typed
+# TC-002: Search settings finds sections by their names and by their settings' own labels
 
 **Module:** Settings | **Priority:** Low | **Type:** Functional
 
@@ -24,13 +24,15 @@ tags: [settings, search]
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | Navigate to `{{base_url}}/#settings/general` | The left list shows 12 sections |
-| 2 | Type `rec` in "Search settings" | The left list shows only "Recording" |
-| 3 | Clear "Search settings" | The left list shows all 12 sections again |
-| 4 | Type `zzz` in "Search settings" | The left list shows no section |
-| 5 | Clear "Search settings" | The left list shows all 12 sections again |
+| 2 | Type `keep audio` in "Search settings" | The left list shows only "Transcription"; the page shows Transcription, its row "Keep audio files" picked out (`.set-row.hit`) and no other row picked out |
+| 3 | Clear "Search settings" | The left list shows all 12 sections again; the page shows General, no row picked out |
+| 4 | Type `calendar` in "Search settings" | The left list shows "Recording" and "Calendar & chat", in that order; the page shows Recording with "Calendar meetings" picked out |
+| 5 | Clear "Search settings", then type `zzz` | The left list shows no section and the line `Nothing matches “zzz”.` |
+| 6 | Clear "Search settings" | The left list shows all 12 sections again and no "Nothing matches" line |
 
 ## Expected Final State
-The search box filters section names only and leaves nothing behind once cleared.
+The search finds a section by its name or by the label of a setting in it, picks those settings out, says so when nothing matches, and leaves nothing behind once cleared.
 
 ## Notes
-- Known issue (app_profile.md): the search covers section names only, so "dock" finds nothing; this case does not search for a setting.
+- #103: the search used to cover section names only ("Dock" found nothing) and showed no message when nothing matched.
+- A label is a row's title or a card's head, not its description. Templates, Plugins and Sends to you are found by their names only (their lists load when drawn); plugins' own sections by their names.

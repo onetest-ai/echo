@@ -16,7 +16,7 @@
   },
   {
    "id": "F-SET-02",
-   "feature": "Search settings filters the section names",
+   "feature": "Search settings finds sections by their names and by their settings' own labels (rows' titles, cards' heads), shows the first one found with those settings picked out, and says \"Nothing matches\" when nothing does",
    "priority": "low",
    "check": "agent",
    "axes": []
@@ -166,6 +166,16 @@
    "check": "agent",
    "axes": [
     "set.config"
+   ]
+  },
+  {
+   "id": "F-SET-19",
+   "feature": "General and Health say that what they show of the computer (Start at login, the command line, Claude Code, permissions) is this computer's, whichever data folder; Claude Code follows the PATH and CLAUDE_CONFIG_DIR Echo runs with, and its paths show the home folder as `~`",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "set.claude_code",
+    "set.health"
    ]
   }
  ]

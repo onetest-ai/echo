@@ -40,6 +40,8 @@ node crates/echoctl/ui/minutes-needs.test.mjs
 node crates/echoctl/ui/fingerprint.test.mjs
 # The Work tab's statuses, late dates, waiting chips and filters (the work-status block).
 node crates/echoctl/ui/work-status.test.mjs
+# Settings search: sections by their names and their settings' own labels (SettingsSearch).
+node crates/echoctl/ui/settings-search.test.mjs
 types="plugin/.claude-plugin/types/claude-code/index.d.ts"
 if [[ ! -f "$types" ]]; then
   types=$(ls -t /private/tmp/claude-*/bundled-skills/*/*/plugin-authoring/types/claude-code.d.ts 2>/dev/null | head -1 || true)

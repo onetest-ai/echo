@@ -15,11 +15,12 @@ cases:
   - tests/cases/today/TC-004_a-card-sent-to-today-shows-until-got-it.md
   - tests/cases/today/TC-005_actions-on-a-busy-today-act-on-its-items.md
   - tests/cases/today/TC-012_a-failed-calendar-sync-today-says-the-calendar-couldnt-be-read.md
+  - tests/cases/settings/TC-028_general-and-health-say-what-is-this-computers.md
 ---
 
 # S-29: Notes, transcripts, settings and Today off the happy path
 
-**Story:** Sam goes back over a busy day. He opens a meeting made from its Teams transcript and two calls whose transcripts aren't there, ticks and edits his notes on the Acme sync, comments on what was said and on a line of the minutes, starts a note and jumps to another call before adding it, then presses Write minutes with a note still in the box. A notes file that can't be read, and one another editor changed while he typed, tell him what happened. A broken settings file says so instead of the settings. On Today a routine's morning brief waits until he says Got it, and ⌘K acts on the day's preps and tasks.
+**Story:** Sam goes back over a busy day. He opens a meeting made from its Teams transcript and two calls whose transcripts aren't there, ticks and edits his notes on the Acme sync, comments on what was said and on a line of the minutes, starts a note and jumps to another call before adding it, then presses Write minutes with a note still in the box. A notes file that can't be read, and one another editor changed while he typed, tell him what happened. A broken settings file says so instead of the settings. On Today a routine's morning brief waits until he says Got it, and ⌘K acts on the day's preps and tasks. Last, Settings tells him which of what it shows is this computer's, with no home path on Health.
 
 **Data:** `standard` (`tests/fixtures/serve.sh up <dir> <port> --set standard`). Fresh data per run, built right before it and before 21:00 local (stage 10 needs meetings still to come).
 
@@ -57,6 +58,7 @@ Done once, before stage 1, timed as the stage `prelude`.
 | 9 | `today/TC-004_a-card-sent-to-today-shows-until-got-it.md` | — | Steps 1–2 in one shell call (each command preceded by `echo "== step N"`, followed by `echo "exit $?"`; each step checked on its own part). Skip nothing else: Today stays on screen for stage 10 |
 | 10 | `today/TC-005_actions-on-a-busy-today-act-on-its-items.md` | — | On stage 9's view (Your day, no card): in step 1 skip the navigation, check "Your day" on one snapshot, press `ControlOrMeta+k` |
 | 11 | `today/TC-012_a-failed-calendar-sync-today-says-the-calendar-couldnt-be-read.md` | — | After stage 10 (it changes the agenda; its step 5 puts it back). Steps 1 and 5's shell parts in one shell call each |
+| 12 | `settings/TC-028_general-and-health-say-what-is-this-computers.md` | — | Close the palette (Escape) first, if open |
 
 ## Notes
 - Stages 3–7 change the notes of their calls (each on its own calls; stage 5 adds a note to today's Acme weekly sync after stage 4 edited it, and expects only its own line). Stage 8 breaks `config.json` and restores it: its teardown must run.
