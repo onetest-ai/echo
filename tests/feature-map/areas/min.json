@@ -118,7 +118,7 @@
   },
   {
    "id": "F-MIN-12",
-   "feature": "The model picker for these minutes shows when there are several AI profiles; a call whose profile is gone or unreadable says so and asks to pick one",
+   "feature": "The model picker for these minutes shows when there are several AI profiles, and never squeezes Write minutes (a long profile name puts the button on the next line); a call whose profile is gone or unreadable says so and asks to pick one",
    "priority": "medium",
    "check": "agent",
    "axes": [
@@ -158,7 +158,7 @@
   },
   {
    "id": "F-MIN-16",
-   "feature": "With Claude Code not installed or Echo's plugin not connected, the Minutes tab says what to do instead of offering Write minutes",
+   "feature": "With Claude Code not installed or Echo's plugin not connected, the Minutes tab says what to do instead of offering Write minutes: install it from claude.com/claude-code, or Settings → General → Claude Code plugin → Connect with an Open Settings button that goes there",
    "priority": "high",
    "check": "agent",
    "axes": [
@@ -184,7 +184,7 @@
   },
   {
    "id": "F-MIN-19",
-   "feature": "The Minutes tab is the minutes alone at the tab's full width; What moved is a right panel view: a button in the call's header beside My notes and a panel tab, both with the count of changes once a thread has read the call, shown only for a call in a thread; its time chips jump to the transcript and its items open their details",
+   "feature": "The Minutes tab is the minutes alone at the tab's full width, a right panel open or not; What moved is a right panel view: a button in the call's header beside My notes and a panel tab, both with the count of changes once a thread has read the call, shown only for a call in a thread; its time chips jump to the transcript and its items open their details",
    "priority": "medium",
    "check": "agent",
    "axes": [

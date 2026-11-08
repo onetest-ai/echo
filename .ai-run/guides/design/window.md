@@ -185,6 +185,10 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   above the Actions tab's items; action items are everything said, the user's tasks are what is theirs to do. The
   Actions tab is gone (Nov 2026): the minutes list the action items with their moments, What moved has the tasks;
   `actions.json` stays (the minutes, Today's counts, thread sync and `echoctl actions` use it).
+- No minutes yet (`minutesHint`): without Claude Code or Echo's plugin (`minutesNeeds`, `ui/minutes-needs.test.mjs`)
+  it says install it from claude.com/claude-code, or Settings → General → Claude Code plugin → Connect with an Open
+  Settings button that goes there (Nov 2026: it pointed at the tray menu, #139). Its button row wraps and its buttons
+  don't shrink: a Model picker as wide as a profile name with its account never squeezes Write minutes (#117).
 - Not yet: action modes from the minutes (claude: the skill and prompt ready on the action; manual: how to do it).
 
 ### Settings → Templates (`templatesSettings`, `/api/templates`, `calls::templates_view`)

@@ -34,7 +34,8 @@ tags: [calls, minutes, auto, profile]
 | 2 | Read the model line | "Claude Code writes them with Claude · work (sonnet), with your Claude account." |
 | 3 | Open the select "Model for these minutes" | Five options: "Claude Code (as configured)", "Claude · work — sam@initech.example · initech" (selected), "Claude · other — sam.rivera@globex.example · globex", "Claude · out — not signed in", "Qwen · this computer"; close it without choosing |
 | 4 | Read the buttons | "Write minutes" (primary; do not press it); "Or in a Claude Code session:" `/echo:process-call <folder>` with a Copy button |
-| 5 | Click the row Design guild | The same heading "No minutes yet", the same model line and the "Write minutes" button |
+| 5 | Run `browser_evaluate` with `() => { const b = [...document.querySelectorAll('.notes-actions .btn')].find((x) => x.textContent.trim() === 'Write minutes'); const r = b.getBoundingClientRect(), s = document.querySelector('[data-notesprofile]').getBoundingClientRect(); return { label: b.innerText.trim(), width: Math.round(r.width), cut: b.scrollWidth > b.clientWidth + 1, overlap: r.left < s.right && r.right > s.left && r.top < s.bottom && r.bottom > s.top } }` | `label` "Write minutes"; `width` at least 80; `cut` `false`; `overlap` `false`: the long Model picker never squeezes the button (#117: it was 26 px and read "mi"); the button may sit on the line under the picker |
+| 6 | Click the row Design guild | The same heading "No minutes yet", the same model line and the "Write minutes" button |
 
 ## Expected Final State
 Design guild offers Write minutes; nothing was started.
