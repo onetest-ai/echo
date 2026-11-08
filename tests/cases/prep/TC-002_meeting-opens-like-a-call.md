@@ -16,7 +16,7 @@ tags: [prep, calls]
 
 ## Preconditions
 - Test data built by `tests/fixtures/make-data.sh`, window served at `{{base_url}}`
-- The data puts the two meetings 1 h and 2.5 h ahead; built after 22:00 they are closer, squeezed into the time left before 23:50 (tests/fixtures/README.md).
+- The data puts the two meetings 1 h and 2.5 h ahead; built after about 20:45 the later one is closer, squeezed before 23:50 (tests/fixtures/README.md).
 
 ## Test Data
 

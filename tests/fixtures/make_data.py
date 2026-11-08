@@ -92,22 +92,24 @@ def iso(t):
     return t.isoformat(timespec="seconds")
 
 
-# The data's future, hours after now: today's meetings to come reach 2.6 h ahead. After 22:00 that runs past
-# midnight, so the time ahead is squeezed into what is left of the day (order and spacing kept, closer together);
-# before 22:00 the scale is 1 and nothing moves.
+# The data's future, hours after now: today's meetings reach 2.6 h ahead. What would land after 23:20 is squeezed into
+# 23:20–23:50 (same order, closer together) rather than pinned to one time or pushed past midnight; earlier times are
+# exact. Building before about 20:45 nothing moves. The meetings "to come" stay exactly 37 minutes after the build.
 AHEAD_H = 2.6
 
 
-def ahead_scale(now):
-    left = (now.replace(hour=23, minute=50, second=0, microsecond=0) - now).total_seconds() / 3600
-    return max(0.0, min(1.0, left / AHEAD_H))
-
-
 def day_clock(now):
-    """at(hours): now + hours inside today — the past as it is (from 00:05), the future squeezed by ahead_scale."""
+    """at(hours): now + hours inside today — the past as it is (from 00:05), the late future squeezed before 23:50."""
     day0 = now.replace(hour=0, minute=5, second=0, microsecond=0)
-    scale = ahead_scale(now)
-    return lambda hours: max(day0, now + timedelta(hours=hours * (scale if hours > 0 else 1)))
+    soft, end = now.replace(hour=23, minute=20, second=0, microsecond=0), now.replace(hour=23, minute=50, second=0, microsecond=0)
+    over = now + timedelta(hours=AHEAD_H) - soft  # how far the furthest meeting would run past 23:20
+
+    def at(hours):
+        t = now + timedelta(hours=hours)
+        if hours > 0 and t > soft and over > timedelta(0):
+            t = soft + (t - soft) * ((end - soft) / over)
+        return max(day0, t)
+    return at
 
 
 def auto_since(now):
@@ -1834,9 +1836,8 @@ def build_agenda(d, H):
 
     at = day_clock(now)
     # Every meeting still to come starts at one time, 37 minutes after the build: side by side in lanes in the Day view
-    # (calendar/TC-016), and inside today at any hour the data may be built (06:00–23:30; after 22:00 sooner, ahead_scale). Spread out over the next
-    # hours, they would stack only when a late build pinned them to 23:50, and stagger otherwise.
-    soon = (now + timedelta(minutes=37 * ahead_scale(now))).replace(second=0, microsecond=0)
+    # (calendar/TC-016), and inside today at any hour the data may be built (06:00–22:50: they end by 23:57).
+    soon = (now + timedelta(minutes=37)).replace(second=0, microsecond=0)
     g1 = {"timing": ["past", "live", "to come"], "link": ["online", "no join link"], "recorded": ["no", "call", "imported"],
           "transcript": ["known", "none", "unknown"], "scheduled": ["no", "yes"]}
 
@@ -2312,10 +2313,12 @@ def main():
         sys.exit(f"{base} already holds test data: give an empty folder")
     d = Data(base, a.set)
     # Today holds calls hours ago and meetings hours ahead, relative to now.
-    # After 22:00 the meetings to come are squeezed into the rest of the day (ahead_scale); after 23:30 there is too
-    # little of it, and before 06:00 too little of the day behind (calls 6 hours ago would be yesterday's).
-    if not (6 <= d.now.hour and (d.now.hour, d.now.minute) <= (23, 30)):
-        sys.exit(f"it is {d.now:%H:%M}: build test data between 06:00 and 23:30 (today needs hours before now and some after), or pass an earlier --now")
+    # The meetings to come start 37 minutes after the build and run 30: after 22:50 they would end tomorrow. Before
+    # 06:00 there is too little of the day behind (calls 6 hours ago would be yesterday's).
+    late = (d.now.hour, d.now.minute) > (22, 50)
+    if d.now.hour < 6 or late:
+        sys.exit(f"it is {d.now:%H:%M}: build test data between 06:00 and 22:50 (today needs hours before now and some after)"
+                 + (", or pass an earlier --now" if late else ", or pass a later --now"))
     if not os.access(d.bin, os.X_OK):
         sys.exit(f"no {d.bin}: run cargo build first")
     os.makedirs(d.home)
