@@ -316,6 +316,11 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
 - Appearance (System / Light / Dark) is per computer in the webview (`echo.theme`, `:root[data-theme]`); graphs and
   terminals redraw; the minutes frame is served with its dark rules on or off (`minutes::with_theme`, `?theme=`).
 - About me's `me.md` is shown through `minutes::markdown_html` and edited in place (`settings_set me_profile`).
+- Search settings (`SettingsSearch`, #103) keeps a section by its name or by its settings' own labels — the rows'
+  titles and the cards' heads of the section as drawn now, not descriptions or badges; the page shows the first one
+  kept when the open one isn't, its matching rows picked out (`.set-row.hit`), and "Nothing matches" when nothing
+  does. Templates, Plugins and Sends to you are searched by name only (drawing them loads their lists), plugins'
+  own sections too.
 - Vocabulary is a panel view (book icon beside Calls' heading; `#settings/vocabulary` opens it).
 
 ### Claude in the window (`terminal.rs`)

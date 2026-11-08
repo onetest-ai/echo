@@ -16,7 +16,7 @@
   },
   {
    "id": "F-SET-02",
-   "feature": "Search settings filters the section names",
+   "feature": "Search settings finds sections by their names and by their settings' own labels (rows' titles, cards' heads), shows the first one found with those settings picked out, and says \"Nothing matches\" when nothing does",
    "priority": "low",
    "check": "agent",
    "axes": []
