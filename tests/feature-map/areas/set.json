@@ -86,7 +86,7 @@
   },
   {
    "id": "F-SET-10",
-   "feature": "Transcription → server: Echo server…, OpenAI-compatible (address, model, key; Connect checks it), Disconnect; Transcribe for other computers shows its address and key",
+   "feature": "Transcription → server: Echo server…, OpenAI-compatible (address, model, key; Connect checks it and says what's wrong in the form's words: no speech-to-text model → type one in the model field), Disconnect; Transcribe for other computers shows its address and key",
    "priority": "medium",
    "check": "agent",
    "axes": [

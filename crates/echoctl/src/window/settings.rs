@@ -252,7 +252,7 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
                 *s = json!({ "busy": true });
             }
             std::thread::spawn(move || {
-                let r = crate::remote::connect_openai(&url, &key, (!model.trim().is_empty()).then_some(model.as_str()));
+                let r = crate::remote::connect_openai(&url, &key, (!model.trim().is_empty()).then_some(model.as_str()), "type one in the model field");
                 if let Ok(mut s) = SERVER_CONNECT.lock() {
                     *s = match r {
                         Ok(c) => json!({ "ok": true, "model": c.model, "words": c.words, "seconds": c.seconds }),
