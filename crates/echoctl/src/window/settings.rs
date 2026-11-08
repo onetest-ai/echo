@@ -1,6 +1,8 @@
 //! Settings: the page's snapshot and its writes, skills, meeting types, templates, the window's layout.
 
 use super::*;
+#[cfg(feature = "brain")]
+use super::brain::{BRAIN_LAST, BRAIN_SYNC};
 
 /// What Settings shows: each setting's value and what is installed, signed in or granted. Flows
 /// with a dialog run as the tray's own actions (`settings_action`); plain values save here
@@ -228,8 +230,7 @@ pub(super) fn save_layout(layout: &Value) -> anyhow::Result<()> {
 
 
 /// The echo:// requests of this area (`respond` asks each area in turn).
-pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'static, [u8]>>> {
-    let _ = req;
+pub(super) fn route(path: &str, _req: &Request<Vec<u8>>) -> Option<Response<Cow<'static, [u8]>>> {
     Some(match path {
         "/api/layout" => json_reply(load_layout()),
         "/api/settings" => json_reply(settings_snapshot()),

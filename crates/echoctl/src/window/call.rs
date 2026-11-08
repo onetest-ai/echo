@@ -1,6 +1,9 @@
 //! Calls: the list, a call, its minutes and files, and what the page does to a call (`act`).
 
 use super::*;
+use super::calendar::{import_transcript, RAW_EVENTS};
+#[cfg(feature = "brain")]
+use super::brain::{brain_sync_now, open_in_app};
 
 pub(super) fn minutes(meta: &Value) -> Option<i64> {
     let t = |k: &str| meta[k].as_str().and_then(|v| chrono::DateTime::parse_from_rfc3339(v).ok());
@@ -484,7 +487,6 @@ pub(super) fn open_file(path: &Path) {
 
 /// The echo:// requests of this area (`respond` asks each area in turn).
 pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'static, [u8]>>> {
-    let _ = req;
     Some(match path {
         // The calls list, a page at a time, newest first: `?limit=&before=<name>&q=` → {calls, next, total}.
         "/api/calls" => json_reply(calls_page(req.uri().query().unwrap_or(""))),

@@ -1,6 +1,10 @@
 //! The calendar (Microsoft 365 events with what Echo knows of each) and the Inbox's busy state.
 
 use super::*;
+use super::call::{minutes, status};
+use super::plugins::{refresh_markets_for_inbox, PLUGINS_UPDATING};
+#[cfg(feature = "brain")]
+use super::brain::BRAIN_INSIGHTS;
 
 /// Raw Graph events by id from the last calendar fetch (to schedule one by id), and a short
 /// cache so the page's refreshes don't hit Microsoft 365 each time.
@@ -39,16 +43,6 @@ pub(super) fn attention_busy() -> (Value, Value) {
         busy.insert("plugin:stale".into(), "Updating…".into());
     }
     (Value::Object(busy), Value::Object(failed))
-}
-
-/// Runs its closure when dropped: a background job's end, a panic too (no marker left behind).
-pub(super) struct OnEnd<F: FnOnce()>(pub(super) Option<F>);
-impl<F: FnOnce()> Drop for OnEnd<F> {
-    fn drop(&mut self) {
-        if let Some(f) = self.0.take() {
-            f()
-        }
-    }
 }
 
 /// Make a call of a meeting from its Teams transcript, in the background (`teams_transcript::import`);
@@ -92,10 +86,6 @@ pub(super) fn import_transcript(id: &str) -> bool {
     true
 }
 pub(super) const CALENDAR_TTL: std::time::Duration = std::time::Duration::from_secs(120);
-
-pub(super) fn query_param(q: &str, key: &str) -> Option<String> {
-    q.split('&').find_map(|kv| kv.split_once('=').filter(|(k, _)| *k == key).map(|(_, v)| urldecode(v)))
-}
 
 pub(super) fn rfc(v: &Value) -> Option<chrono::DateTime<chrono::Utc>> {
     v.as_str().and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok()).map(|d| d.with_timezone(&chrono::Utc))
@@ -253,7 +243,6 @@ pub(super) fn calendar(q: &str) -> Value {
 
 /// The echo:// requests of this area (`respond` asks each area in turn).
 pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'static, [u8]>>> {
-    let _ = req;
     Some(match path {
         "/api/attention" => {
             // Marketplaces fetched again in the background now and then: a plugin's update reaches the Inbox without

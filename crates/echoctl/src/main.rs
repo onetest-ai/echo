@@ -149,59 +149,7 @@ enum Cmd {
         cmd: Option<cli::app::ClaudeCmd>,
     },
     /// Show or change settings (<home>/.echo/config.json)
-    Config {
-        /// Languages spoken in calls, comma-separated ISO codes (e.g. en,uk,ru); "any" clears
-        #[arg(long, value_delimiter = ',')]
-        languages: Option<Vec<String>>,
-        /// Glossary for transcription, comma-separated (e.g. "Miro,ServiceNow,IPAM"); "" clears
-        #[arg(long, value_delimiter = ',')]
-        vocabulary: Option<Vec<String>>,
-        /// Calls not on the calendar: "ask" (prompt when they start) or "manual" (only when
-        /// you say record)
-        #[arg(long, value_parser = ["ask", "manual"])]
-        unscheduled: Option<String>,
-        /// Keep call audio after transcription (default false: text only)
-        #[arg(long)]
-        keep_audio: Option<bool>,
-        /// Also write the minutes page (<title>-minutes.html) when notes are written
-        #[arg(long)]
-        minutes_page: Option<bool>,
-        /// Write a call's minutes by itself, 15 minutes after the call (or after your last note)
-        #[arg(long)]
-        auto_minutes: Option<bool>,
-        /// Calendar meetings: "ask" (prompt ~1 min before) or "manual" (only when you record)
-        #[arg(long, value_parser = ["ask", "manual"])]
-        scheduled: Option<String>,
-        /// Your name, used in notes ("Me")
-        #[arg(long)]
-        me_name: Option<String>,
-        /// Your email, used to tell colleagues from external attendees
-        #[arg(long)]
-        me_email: Option<String>,
-        /// The folder Echo runs Claude Code in for minutes (with the built-in AI profile its
-        /// .claude/settings.json applies), and the only one `claim --for` accepts; "any" clears
-        #[arg(long)]
-        notes_in: Option<String>,
-        /// Save snapshots of shared screens during calls (macOS; needs Screen Recording)
-        #[arg(long)]
-        capture_frames: Option<bool>,
-        /// Record the call app's window text during calls (for speaker names)
-        #[arg(long)]
-        capture_ui: Option<bool>,
-        /// Microsoft 365 app (client) id for the calendar sign-in; "default" = CodeMie
-        #[arg(long)]
-        graph_client_id: Option<String>,
-        /// Entra tenant for the sign-in: common | organizations | <tenant id>
-        #[arg(long)]
-        graph_tenant: Option<String>,
-        /// Model Claude Code uses when Echo writes notes: sonnet | opus | haiku | <model id> |
-        /// default (Claude Code's own setting)
-        #[arg(long)]
-        notes_model: Option<String>,
-        /// Model for live notes and quick questions during a call: haiku | <model id>
-        #[arg(long)]
-        live_model: Option<String>,
-    },
+    Config(cli::app::ConfigArgs),
     /// Write minutes and action items for a call with Claude Code (headless, the same
     /// process-call skill a session runs); the running app does it unless --wait
     Notes {
@@ -639,7 +587,7 @@ fn main() -> Result<()> {
         }
         Cmd::Doctor { json, request, probe, open } => permissions::doctor(json, request, probe, open.as_deref()),
         Cmd::Model { cmd } => cli::app::model(cmd),
-        cmd @ Cmd::Config { .. } => cli::app::config(cmd),
+        Cmd::Config(args) => cli::app::config(args),
         Cmd::RunGuard => std::process::exit(guard::command()),
         Cmd::ViewHook => std::process::exit(view::hook()),
         #[cfg(feature = "transcribe")]

@@ -4,7 +4,6 @@
 use anyhow::Result;
 use clap::Subcommand;
 
-use crate::Cmd;
 #[cfg(feature = "transcribe")]
 use crate::remote;
 use crate::{ai, app, apps, calendar, claude_setup, config, links, models, paths, permissions, update, watch};
@@ -250,10 +249,64 @@ pub fn home(cmd: Option<HomeCmd>) -> Result<()> {
     Ok(())
 }
 
-pub fn config(cmd: Cmd) -> Result<()> {
-    let Cmd::Config { languages, vocabulary, unscheduled, keep_audio, minutes_page, auto_minutes, scheduled, me_name, me_email, notes_in, capture_frames, capture_ui, graph_client_id, graph_tenant, notes_model, live_model } = cmd else {
-        unreachable!("only `echoctl config` comes here")
-    };
+/// `echoctl config`'s flags.
+#[derive(clap::Args)]
+pub struct ConfigArgs {
+    /// Languages spoken in calls, comma-separated ISO codes (e.g. en,uk,ru); "any" clears
+    #[arg(long, value_delimiter = ',')]
+    pub languages: Option<Vec<String>>,
+    /// Glossary for transcription, comma-separated (e.g. "Miro,ServiceNow,IPAM"); "" clears
+    #[arg(long, value_delimiter = ',')]
+    pub vocabulary: Option<Vec<String>>,
+    /// Calls not on the calendar: "ask" (prompt when they start) or "manual" (only when
+    /// you say record)
+    #[arg(long, value_parser = ["ask", "manual"])]
+    pub unscheduled: Option<String>,
+    /// Keep call audio after transcription (default false: text only)
+    #[arg(long)]
+    pub keep_audio: Option<bool>,
+    /// Also write the minutes page (<title>-minutes.html) when notes are written
+    #[arg(long)]
+    pub minutes_page: Option<bool>,
+    /// Write a call's minutes by itself, 15 minutes after the call (or after your last note)
+    #[arg(long)]
+    pub auto_minutes: Option<bool>,
+    /// Calendar meetings: "ask" (prompt ~1 min before) or "manual" (only when you record)
+    #[arg(long, value_parser = ["ask", "manual"])]
+    pub scheduled: Option<String>,
+    /// Your name, used in notes ("Me")
+    #[arg(long)]
+    pub me_name: Option<String>,
+    /// Your email, used to tell colleagues from external attendees
+    #[arg(long)]
+    pub me_email: Option<String>,
+    /// The folder Echo runs Claude Code in for minutes (with the built-in AI profile its
+    /// .claude/settings.json applies), and the only one `claim --for` accepts; "any" clears
+    #[arg(long)]
+    pub notes_in: Option<String>,
+    /// Save snapshots of shared screens during calls (macOS; needs Screen Recording)
+    #[arg(long)]
+    pub capture_frames: Option<bool>,
+    /// Record the call app's window text during calls (for speaker names)
+    #[arg(long)]
+    pub capture_ui: Option<bool>,
+    /// Microsoft 365 app (client) id for the calendar sign-in; "default" = CodeMie
+    #[arg(long)]
+    pub graph_client_id: Option<String>,
+    /// Entra tenant for the sign-in: common | organizations | <tenant id>
+    #[arg(long)]
+    pub graph_tenant: Option<String>,
+    /// Model Claude Code uses when Echo writes notes: sonnet | opus | haiku | <model id> |
+    /// default (Claude Code's own setting)
+    #[arg(long)]
+    pub notes_model: Option<String>,
+    /// Model for live notes and quick questions during a call: haiku | <model id>
+    #[arg(long)]
+    pub live_model: Option<String>,
+}
+
+pub fn config(args: ConfigArgs) -> Result<()> {
+    let ConfigArgs { languages, vocabulary, unscheduled, keep_audio, minutes_page, auto_minutes, scheduled, me_name, me_email, notes_in, capture_frames, capture_ui, graph_client_id, graph_tenant, notes_model, live_model } = args;
     let mut cfg = config::Config::load()?;
     if let Some(m) = live_model {
         cfg.live_model = Some(m.trim().to_string()).filter(|m| !m.is_empty() && m != config::DEFAULT_LIVE_MODEL && m != "default");

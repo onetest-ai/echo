@@ -88,7 +88,6 @@ pub(super) fn refresh_plugin_markets() {
 
 /// The echo:// requests of this area (`respond` asks each area in turn).
 pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'static, [u8]>>> {
-    let _ = req;
     Some(match path {
         // Settings → Plugins; marketplaces not read for 30 min, or by another Echo version, are fetched again in the background.
         "/api/plugins" => {

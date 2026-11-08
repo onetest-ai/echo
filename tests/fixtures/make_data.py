@@ -325,7 +325,7 @@ def transcript_md(title, start, folder, segs):
 
 
 def write_call(d, c):
-    """One call folder from a spec (a dict): the files the window reads, in the shapes `window.rs`, `calls.rs`,
+    """One call folder from a spec (a dict): the files the window reads, in the shapes `window/`, `calls.rs`,
     `notes.rs`, `livenotes.rs` and `teams_transcript.rs` parse. Returns the folder name."""
     start = c.get("start")
     title = c["title"]

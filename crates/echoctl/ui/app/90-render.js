@@ -584,7 +584,7 @@ document.addEventListener('dblclick', (e) => {
   if (h) { Layout.resize(h.dataset.resize, null); layoutChanged() }
 })
 
-// macOS: the top strip is the window's title bar (transparent, `window.rs`): dragging it moves the
+// macOS: the top strip is the window's title bar (transparent, `window/mod.rs`): dragging it moves the
 // window, a double click zooms it — anywhere but on its controls.
 const onTitleBar = (e) => MAC && e.button === 0 && e.target.closest && e.target.closest('#r-top') && !e.target.closest('button,select,label,a,input,.pill-note')
 document.addEventListener('mousedown', (e) => { if (onTitleBar(e) && e.detail === 1) { e.preventDefault(); send({ cmd: 'window_drag' }) } })

@@ -1,6 +1,9 @@
 //! Threads, clients, people and tasks: their pages and the thread operations (`project_op`).
 
 use super::*;
+use super::calendar::{CALENDAR_CACHE, RAW_EVENTS};
+#[cfg(feature = "brain")]
+use super::brain::brain_sync_now;
 
 /// The Tasks activity: the piles and asks, with the next 7 days of the calendar for "next time you
 /// meet" (the calendar's own 2-minute cache; without a sign-in, today's agenda).
@@ -39,7 +42,7 @@ pub(super) fn client_view(id: &str) -> Value {
 pub(super) fn upcoming(today: chrono::NaiveDate) -> Vec<crate::meeting::MeetingContext> {
     let mut meetings = watch::agenda();
     if crate::graph::account().is_some() {
-        let _ = calendar(&format!("start={today}&days=7"));
+        let _ = super::calendar::calendar(&format!("start={today}&days=7"));
         let key = format!("{today}/7");
         if let Some((_, _, raw)) = CALENDAR_CACHE.lock().unwrap_or_else(|e| e.into_inner()).as_ref().filter(|(k, _, _)| *k == key) {
             meetings = raw.iter().filter_map(crate::calendar::to_meeting).collect();
@@ -357,7 +360,6 @@ pub(super) fn project_op(v: &Value) -> anyhow::Result<Option<String>> {
 
 /// The echo:// requests of this area (`respond` asks each area in turn).
 pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'static, [u8]>>> {
-    let _ = req;
     Some(match path {
         "/api/m365/teams" => json_reply(crate::graph::teams().map(Value::from).unwrap_or_else(|e| json!({ "error": format!("{e:#}") }))),
         "/api/m365/channels" => {

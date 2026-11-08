@@ -36,10 +36,7 @@ mod terminals;
 #[cfg(feature = "brain")]
 mod brain;
 
-#[allow(unused_imports)]
-use self::{assets::*, calendar::*, call::*, plugins::*, settings::*, terminals::*, threads::*};
-#[cfg(feature = "brain")]
-use self::brain::*;
+use self::call::act;
 pub use self::settings::settings_action;
 pub(crate) use self::terminals::copy_to_clipboard;
 
@@ -174,6 +171,21 @@ fn urlencode(s: &str) -> String {
         .collect()
 }
 
+// Shared by the areas: a query's parameter, a job's end marker.
+fn query_param(q: &str, key: &str) -> Option<String> {
+    q.split('&').find_map(|kv| kv.split_once('=').filter(|(k, _)| *k == key).map(|(_, v)| urldecode(v)))
+}
+
+/// Runs its closure when dropped: a background job's end, a panic too (no marker left behind).
+struct OnEnd<F: FnOnce()>(pub(super) Option<F>);
+impl<F: FnOnce()> Drop for OnEnd<F> {
+    fn drop(&mut self) {
+        if let Some(f) = self.0.take() {
+            f()
+        }
+    }
+}
+
 fn urldecode(s: &str) -> String {
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());
@@ -221,6 +233,9 @@ fn json_reply(v: Value) -> Response<Cow<'static, [u8]>> {
 
 fn respond(req: &Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
     let path = urldecode(req.uri().path());
+    // The areas in turn, the first answer wins. Some match a whole prefix (threads `/api/client/` and
+    // `/api/project/`, call `/api/call/`, `/minutes/` and `/file/`, plugins `/plugin/`): a new path under one goes in
+    // that area, or a later area never sees it.
     if let Some(r) = assets::route(&path, req) {
         return r;
     }
@@ -644,6 +659,8 @@ pub fn selftest() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::call::{call_detail, call_rev, calls_page};
+    use super::terminals::{paste_bytes, shell_allowed};
 
     #[test]
     fn the_calls_list_comes_a_page_at_a_time_and_searches_in_the_app() {

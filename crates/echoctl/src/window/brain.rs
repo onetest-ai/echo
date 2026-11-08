@@ -3,27 +3,20 @@
 use super::*;
 
 /// The numbers lane's jobs running now (client → op), and the last error per client (`<client>:error`).
-#[cfg(feature = "brain")]
 pub(super) static NUMBERS_BUSY: std::sync::LazyLock<std::sync::Mutex<std::collections::BTreeMap<String, Value>>> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::BTreeMap::new()));
 
 /// Settings → Brain's Sync now: one at a time, in the background; its report for the page.
-#[cfg(feature = "brain")]
 pub(super) static BRAIN_SYNC: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-#[cfg(feature = "brain")]
 pub(super) static BRAIN_LAST: std::sync::Mutex<Value> = std::sync::Mutex::new(Value::Null);
 /// Scopes whose insights are being refreshed from the window.
-#[cfg(feature = "brain")]
 pub(super) static BRAIN_INSIGHTS: std::sync::Mutex<std::collections::BTreeSet<String>> = std::sync::Mutex::new(std::collections::BTreeSet::new());
 /// Taxonomy edits running now, and the last one's error with its number (the page that made an edit shows an error
 /// numbered after the one it saw when it asked).
-#[cfg(feature = "brain")]
 pub(super) static BRAIN_EDITS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-#[cfg(feature = "brain")]
 pub(super) static BRAIN_EDIT_ERROR: std::sync::Mutex<(u64, String)> = std::sync::Mutex::new((0, String::new()));
 
 /// A change to a project or a client from the page (`{cmd: "project", op, …}`).
 /// Start a Brain sync in the background unless one runs (its outcome: `BRAIN_LAST`).
-#[cfg(feature = "brain")]
 pub(super) fn brain_sync_now() {
     if !BRAIN_SYNC.swap(true, std::sync::atomic::Ordering::SeqCst) {
         std::thread::spawn(|| {
@@ -48,7 +41,6 @@ pub(super) fn brain_sync_now() {
 }
 
 /// A document in the app the system opens it with (a deck in PowerPoint or Keynote, a PDF in Preview).
-#[cfg(feature = "brain")]
 pub(super) fn open_in_app(path: &Path) {
     if !path.is_file() {
         return;
@@ -62,24 +54,19 @@ pub(super) fn open_in_app(path: &Path) {
 
 /// The echo:// requests of this area (`respond` asks each area in turn).
 pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'static, [u8]>>> {
-    let _ = req;
     Some(match path {
         // Pickers for a thread's sources: the user's teams, a team's channels (Microsoft 365).
         // The numbers lane: per client its families (proposed / accepted), catalog, last build.
-        #[cfg(feature = "brain")]
         "/api/brain/numbers" => json_reply({
             let mut v = crate::brain::numbers::overview().unwrap_or_else(|e| json!({ "error": format!("{e:#}") }));
             v["busy"] = NUMBERS_BUSY.lock().map(|b| json!(*b)).unwrap_or(Value::Null);
             v
         }),
         // The thread folders' files: what was read, how, and why the others weren't.
-        #[cfg(feature = "brain")]
         "/api/brain/files" => json_reply(crate::brain::files::folder::status().unwrap_or_else(|e| json!({ "error": format!("{e:#}") }))),
         // How each thread source was last read (`brain/sources.json`).
-        #[cfg(feature = "brain")]
         "/api/brain/sources" => json_reply(json!({ "state": crate::brain::sources::state(), "senders": crate::brain::senders::view(), "signed_in": crate::graph::account().is_some(), "syncing": BRAIN_SYNC.load(std::sync::atomic::Ordering::SeqCst) })),
         // The Brain: its overview, graph and a call's "Also discussed" (?client= / ?thread= scope them).
-        #[cfg(feature = "brain")]
         "/api/brain" => {
             let q = req.uri().query().unwrap_or("");
             let (client, thread) = (query_param(q, "client"), query_param(q, "thread"));
@@ -98,7 +85,6 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
         }
         // The Brain a piece at a time (`brain::browse`): sources grouped and paged, a folder's files, the
         // dictionary by group and letter, the graph drawn as it is opened (topics; a topic's or a client's sources).
-        #[cfg(feature = "brain")]
         p if p.starts_with("/api/brain/browse/") => {
             use crate::brain::browse;
             let q = req.uri().query().unwrap_or("");
@@ -126,7 +112,6 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
         }
         // The Brain searched from its graphs (words and meaning, as Claude's search_knowledge): the hits'
         // sources light up. Off the main thread, as every echo:// request: the embedder may take a moment.
-        #[cfg(feature = "brain")]
         "/api/brain/search" => {
             let q = req.uri().query().unwrap_or("");
             let (text, client, thread) = (query_param(q, "q").unwrap_or_default(), query_param(q, "client"), query_param(q, "thread"));
@@ -139,7 +124,6 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
                     .unwrap_or_else(|e| json!({ "error": format!("{e:#}") }))
             })
         }
-        #[cfg(feature = "brain")]
         "/api/brain/insights" => {
             let q = req.uri().query().unwrap_or("");
             let (client, thread) = (query_param(q, "client"), query_param(q, "thread"));
@@ -155,7 +139,6 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
             })
         }
         // A work item's mentions elsewhere in its thread: POST-less, the item rides in the query.
-        #[cfg(feature = "brain")]
         "/api/brain/mentions" => {
             crate::brain::advert::count("window", "mentioned_also_in");
             let q = req.uri().query().unwrap_or("");
@@ -166,7 +149,6 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
                 .unwrap_or_default();
             json_reply(crate::brain::views::mentions(&thread, &title, &quotes).unwrap_or_else(|e| json!({ "error": format!("{e:#}") })))
         }
-        #[cfg(feature = "brain")]
         "/api/brain/node" => {
             let q = req.uri().query().unwrap_or("");
             let (client, thread) = (query_param(q, "client"), query_param(q, "thread"));
@@ -174,14 +156,12 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
             json_reply(crate::brain::views::node(&query_param(q, "id").unwrap_or_default(), scope).unwrap_or_else(|e| json!({ "error": format!("{e:#}") })))
         }
         // One source for the graph's details panel.
-        #[cfg(feature = "brain")]
         "/api/brain/doc" => {
             let q = req.uri().query().unwrap_or("");
             let (client, thread) = (query_param(q, "client"), query_param(q, "thread"));
             let scope = client.as_deref().map(|c| ("client", c)).or(thread.as_deref().map(|t| ("thread", t)));
             json_reply(crate::brain::views::doc(&query_param(q, "source").unwrap_or_default(), scope).unwrap_or_else(|e| json!({ "error": format!("{e:#}") })))
         }
-        #[cfg(feature = "brain")]
         p if p.starts_with("/api/brain/also/") => json_reply({
             crate::brain::advert::count("window", "also_discussed");
             crate::brain::views::also(&urldecode(&p["/api/brain/also/".len()..])).unwrap_or_else(|e| json!({ "error": format!("{e:#}") }))
@@ -195,7 +175,6 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
     Some(match v["cmd"].as_str().unwrap_or("") {
         // Settings: one plain value, as the page shows it now.
         // The taxonomy: the user's review (accept, rename, merge, move, remove, add, set).
-        #[cfg(feature = "brain")]
         // The user's edit of topics or terms, off the window's thread: on a large Brain a new version re-reads the
         // mentions it changed (seconds). `topic_jobs` shows it running; its error comes back once (`edit_error`).
         "brain_taxonomy" => {
@@ -213,7 +192,6 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
             true.into()
         }
         // Refresh a scope's insights now (in the background; one run per scope at a time).
-        #[cfg(feature = "brain")]
         "brain_insights" => {
             let (kind, id) = (v["kind"].as_str().unwrap_or("").to_string(), v["id"].as_str().unwrap_or("").to_string());
             let k = format!("{kind}:{id}");
@@ -230,7 +208,6 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
             true.into()
         }
         // A layer's topics rebuilt from its calls (Claude, in the background; provisional as any build).
-        #[cfg(feature = "brain")]
         "brain_rebuild_topics" => {
             let layer = v["layer"].as_str().unwrap_or("").to_string();
             let k = format!("taxonomy:{layer}");
@@ -252,7 +229,6 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
             true.into()
         }
         // A topic too broad, split into subtopics (Claude, in the background; #31).
-        #[cfg(feature = "brain")]
         "brain_split_topic" => {
             let (layer, label) = (v["layer"].as_str().unwrap_or("").to_string(), v["label"].as_str().unwrap_or("").to_string());
             // Tracked under the layer whose drift asked for it (a client's catch-all is often a practice topic).
@@ -278,7 +254,6 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
             true.into()
         }
         // A layer's sections tagged again with its topics as they are now (Claude, in the background).
-        #[cfg(feature = "brain")]
         "brain_retag_topics" => {
             let layer = v["layer"].as_str().unwrap_or("").to_string();
             let k = format!("retag:{layer}");
@@ -296,7 +271,6 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
             true.into()
         }
         // A suggested topic move (up to the practice, down to a client), done or turned down.
-        #[cfg(feature = "brain")]
         "brain_topic_move" => match (v["key"].as_str(), v["do"].as_str()) {
             (Some(k), Some("apply")) => match crate::brain::taxonomy::apply_move(k) {
                 Ok(said) => notice(&said),
@@ -305,15 +279,12 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
             (Some(k), Some("dismiss")) => crate::brain::taxonomy::dismiss_move(k).is_ok().into(),
             _ => false.into(),
         },
-        #[cfg(feature = "brain")]
         "brain_topics_snooze" => v["layer"].as_str().is_some_and(|l| crate::brain::taxonomy::snooze(l).is_ok()).into(),
-        #[cfg(feature = "brain")]
         "brain_sync" => {
             brain_sync_now();
             true.into()
         }
         // A sender of mail or posts trusted, ignored or forgotten for a client: read again at the next sync.
-        #[cfg(feature = "brain")]
         "brain_sender" => {
             let (client, key, decision) = (v["client"].as_str().unwrap_or(""), v["key"].as_str().unwrap_or(""), v["decision"].as_str().unwrap_or(""));
             match crate::brain::senders::decide(client, key, decision) {
@@ -328,7 +299,6 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
             }
         }
         // The numbers lane: Claude proposes a client's families (minutes), the user accepts them, a build.
-        #[cfg(feature = "brain")]
         "brain_numbers" => {
             let (op, client) = (v["op"].as_str().unwrap_or("").to_string(), v["client"].as_str().unwrap_or("").to_string());
             if client.is_empty() || NUMBERS_BUSY.lock().map(|b| b.contains_key(&client)).unwrap_or(true) {

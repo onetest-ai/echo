@@ -33,8 +33,7 @@ pub(super) fn index_html() -> String {
 
 
 /// The echo:// requests of this area (`respond` asks each area in turn).
-pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'static, [u8]>>> {
-    let _ = req;
+pub(super) fn route(path: &str, _req: &Request<Vec<u8>>) -> Option<Response<Cow<'static, [u8]>>> {
     Some(match path {
         "/" | "/index.html" => reply(200, "text/html; charset=utf-8", index_html().into_bytes()),
         "/assets/app.js" => reply(200, "text/javascript; charset=utf-8", APP_JS.as_bytes().to_vec()),

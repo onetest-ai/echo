@@ -69,7 +69,6 @@ pub(super) fn paste_bytes(text: String, bracketed: bool) -> Vec<u8> {
 
 /// The echo:// requests of this area (`respond` asks each area in turn).
 pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'static, [u8]>>> {
-    let _ = req;
     Some(match path {
         "/api/sessions" => json_reply(json!(crate::terminal::saved_sessions())),
         "/api/ptys" => json_reply(crate::terminal::list_value()),
