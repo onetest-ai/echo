@@ -41,7 +41,3 @@ The call is transcribed by q8_0 alone, each sentence in the language it was spok
 
 ## Teardown
 - `echoctl model use large-v3-turbo-q5_0` (the run's own config)
-
-## Notes
-- Before 2026-11-08 a downloaded q5_0 was loaded beside q8_0 as the language detector, and step 3 printed "language detection: large-v3-turbo-q5_0": a second turbo on the GPU, about 640 MB more peak memory.
-- Run 2026-11-08 (branch `feat/whisper-flash-attention`, debug build): PASS — "flash attention: on", no detector line, `wer` 0.056, all five turns `lang_ok`, done in 6 s.

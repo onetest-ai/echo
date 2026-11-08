@@ -34,6 +34,7 @@ calls"; about 1.5 min, silent, no device or permission). Stages 1–4 copy its c
 | Prepared recordings of this build (`acme-sync`, `two-remotes`, `mixed-languages`, `long-silence`: their transcripts and `transcribe.out`) — no live call in this scenario | the lead (`recordings.py prepare`, once per build) | 1, 2, 3, 4 |
 | A transcription server on a second computer (`echoctl server share on` on its own test data): `{{stt_server_url}}`, `{{stt_server_key}}` | the second computer's owner | 5, 6 |
 | Two transcriptions of `very-short` (9 s): one on the server, one on this computer when it is down | stage 5 | 5 |
+| A transcription of `mixed-languages` (31 s) on turbo q8_0 | stage 7 | 7 |
 
 ## Stages
 
@@ -53,5 +54,4 @@ calls"; about 1.5 min, silent, no device or permission). Stages 1–4 copy its c
   q8_0, 31 s). Before 2026-11-08: six (each stage built its call from the clips and transcribed it, the same
   conversations S-17 and S-18 then captured and transcribed again).
 - Stage 5 needs the speech model in the run's config (`~/Library/Application Support/echo/models`, linked: `recording/TC-001` step 1).
-- Run 2026-11-08 night (stages 1–4 and 7, on `prepare` of branch `feat/whisper-flash-attention`: flash attention on, file-fed): PASS — `acme-sync` WER 0.0, `two-remotes` WER 0.029, `mixed-languages` WER 0.074, `long-silence` WER 0.0, every turn's speaker and language right, nothing in the silence; stage 7 as in TC-008's note. Stages 5–6 not run (no second computer).
 - Run 2026-11-08 evening (stages 1–4, on `prepare` of build 84b1bec, file-fed): PASS — `acme-sync` WER 0.0, every turn's speaker and language right; `two-remotes` `(languages: en)`, WER 0.029, only `en`; `mixed-languages` `(languages: uk, ru, en)`, WER 0.111, all five turns `lang_ok`; `long-silence` WER 0.0, nothing in the silence. 0.14–0.21 s per stage. Stages 5–6 not run (no second computer).

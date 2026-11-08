@@ -381,16 +381,14 @@ pub(crate) struct WhisperStates {
     det_state: Option<WhisperState>,
 }
 
-/// Flash attention on the Mac's GPU (Apple Silicon): less GPU time per decode; whisper-rs turns it
-/// off by default. Only DTW conflicts with it, and Echo doesn't use DTW. Intel Macs' Metal lacks
-/// what it needs.
+/// Flash attention on the Mac's GPU, Apple Silicon only. It can't be combined with DTW, which Echo
+/// doesn't use.
 fn context_params(use_gpu: bool) -> WhisperContextParameters<'static> {
     let flash_attn = use_gpu && cfg!(all(target_os = "macos", target_arch = "aarch64"));
     WhisperContextParameters { use_gpu, flash_attn, ..Default::default() }
 }
 
-/// Turbo detects languages decisively itself (a second copy of it would only take GPU memory);
-/// other Whisper models get turbo as a separate detector.
+/// Turbo detects its own language; other Whisper models get turbo q5_0 as a separate detector.
 fn needs_detector(model_path: &Path) -> bool {
     !model_path.file_name().and_then(|f| f.to_str()).is_some_and(|f| f.contains("large-v3-turbo"))
 }

@@ -413,7 +413,7 @@ pub fn use_model(name: &str) -> Result<()> {
 pub const HELPER_MODEL: &str = "large-v3-turbo-q5_0";
 
 /// Why a downloaded model is used even when it isn't the active one: the helper detects the language while the
-/// active model is a Whisper model other than turbo (large-v3, small), whose own detection is less decisive.
+/// active model is a Whisper model other than turbo (large-v3, small).
 pub fn helper_role(name: &str, active: Option<&str>) -> Option<&'static str> {
     let needed = active.and_then(|a| find(a).ok()).is_some_and(|m| m.engine == Engine::Whisper && !m.name.starts_with("large-v3-turbo"));
     (name == HELPER_MODEL && needed).then_some("it detects the language for the active model")
