@@ -48,5 +48,5 @@ The hostile call has new minutes written by the local model in its hostile templ
 
 ## Notes
 - Verified 2026-11-07 on the network test server: 3 min 12 s (192 s); one `✗` ("only the Echo CLI runs here, not ls"); the diff exactly as in step 5; no dialog, no page error; the frame checks all 0.
-- Learned vocabulary is the one change a run makes outside its call by design (`.ai-run/guides/design/ai-and-minutes.md`, The guard). The first `vocab add` on a data folder also moves the old learned list into the Brain's taxonomy (`home/recall/taxonomy/`), which shows here.
+- Learned vocabulary is the one change a run makes outside its call by design (`.ai-run/guides/security/untrusted-text.md` R12). The first `vocab add` on a data folder also moves the old learned list into the Brain's taxonomy (`home/recall/taxonomy/`), which shows here.
 - Orders in the transcript (run commands, write files, send things) are `hostile/TC-018`, on the generator's injection call.
