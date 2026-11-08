@@ -15,6 +15,7 @@ cases:
   - tests/cases/hostile/TC-009_people-and-organisations.md
   - tests/cases/hostile/TC-010_threads-and-clients.md
   - tests/cases/hostile/TC-011_inbox-found-for-you-and-needs-you.md
+  - tests/cases/today/TC-011_needs-you-now-actions-are-icons-named-in-their-labels.md
   - tests/cases/hostile/TC-012_plugins-and-marketplaces.md
   - tests/cases/hostile/TC-013_skills-templates-and-meeting-types.md
   - tests/cases/hostile/TC-014_vocabulary.md
@@ -48,6 +49,7 @@ cases:
 | 14 | `hostile/TC-014_vocabulary.md` | — | — |
 | 15 | `hostile/TC-015_live-notes-and-run-outcomes.md` | — | — |
 | 16 | `hostile/TC-016_ai-profiles.md` | — | — |
+| 17 | `today/TC-011_needs-you-now-actions-are-icons-named-in-their-labels.md` | — | — |
 
 ## Notes
 - Every stage arms the dialog recorder itself (its step 1) and ends with check D; a dialog in any stage fails that stage. A stage never depends on another: all of them only read.
