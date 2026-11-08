@@ -21,7 +21,7 @@
 .wb.mac .topbar { padding-left: 112px; } /* the traffic lights and the sidebar's switch */
 /* Windows, Echo's own title bar (#76): minimise, maximise, close at the right edge, as Windows 11 draws them. */
 .wb.own .topbar { padding-right: 0; }
-.caption { display: flex; align-self: stretch; margin-left: 8px; }
+.win-caption { display: flex; align-self: stretch; margin-left: 8px; }
 .win-cap { width: 46px; border: 0; background: none; color: var(--text); display: flex; align-items: center; justify-content: center; border-radius: 0; }
 .win-cap:hover { background: color-mix(in srgb, var(--text) 9%, transparent); }
 .win-cap:active { background: color-mix(in srgb, var(--text) 14%, transparent); }
