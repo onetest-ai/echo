@@ -244,7 +244,8 @@ const NY_ICON = {
   update: ICON('<path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19.5h14"/>'),
 }
 NY_ICON['plugin-update'] = NY_ICON.update
-const NY_ENTRY = ICON('<path d="M4 13l3-8h10l3 8v6H4z"/><path d="M4 13h5l1 2h4l1-2h5"/>')
+// The Inbox's mark: a bell (the top bar's button and the panel tab).
+const NY_ENTRY = ICON('<path d="M6 9a6 6 0 0 1 12 0c0 6 2.5 8 2.5 8h-17S6 15 6 9z"/><path d="M10.2 20.5a2 2 0 0 0 3.6 0"/>')
 function needsPanel() {
   const d = NY.data
   if (!d) {
