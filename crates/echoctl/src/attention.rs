@@ -476,6 +476,19 @@ pub fn stale() {
     }
 }
 
+/// Whether an answer is kept for the next request (tests).
+#[cfg(test)]
+pub(crate) fn cached() -> bool {
+    CACHE.lock().is_ok_and(|c| c.is_some())
+}
+
+#[cfg(test)]
+pub(crate) fn cache_for_test(v: Value) {
+    if let Ok(mut c) = CACHE.lock() {
+        *c = Some((Instant::now(), v));
+    }
+}
+
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 /// The list for the window: open items (blocking first), Done this week (newest first), and the
 /// groups' names. Collected at most every 20 s unless `fresh`, one collection at a time (a request

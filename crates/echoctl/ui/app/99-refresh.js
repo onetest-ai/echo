@@ -228,7 +228,7 @@ window.echo = {
 ;(async () => {
   route()
   render()
-  await Promise.all([loadState(), loadCalls(), loadAgenda(), loadLayout(), loadTerms(), loadSettings(), loadProjects()])
+  await Promise.all([loadState(), loadCalls(), loadAgenda(), loadLayout(), loadTerms(), loadSettings(), loadProjects(), loadAttention()])
   await loadPluginClients()
   if (S.view === 'projects') await loadProject()
   if (S.view === 'tasks') await loadTasks()

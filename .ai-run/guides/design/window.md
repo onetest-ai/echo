@@ -304,7 +304,8 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   failed job gives the buttons back with why (`failed`).
 - An item gone moves to Done for 7 days (`<home>/.echo/attention.json`) — only when its source was read; an
   unreadable source keeps its items open. Collected at most every 20 s, one at a time (`?fresh=1` after an
-  action). `echoctl attention` only reads (a terminal sees neither sign-in nor update checks).
+  action); a minutes run's state written by the app marks the cache stale too (`notes::save`). The window reads
+  it at load, every 20 s and when the panel opens; a changed list redraws the badge and the panel (`fingerprint`). `echoctl attention` only reads (a terminal sees neither sign-in nor update checks).
 
 ### Settings (`#settings/<section>`; `#settings/plugins/<id>` picks that plugin)
 - Sections: General (incl. Appearance), Recording, Transcription, AI & minutes, Calendar & chat, About me, Layout,
