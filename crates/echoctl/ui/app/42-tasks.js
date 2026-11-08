@@ -379,6 +379,14 @@ function seriesEditor(e) {
     <div class="se-line" data-series-key="${esc(x.key)}" data-series-subject="${esc(e.subject || '')}"><div class="seg" role="group" aria-label="Record every meeting">${btn(rec === 'always', 'always', 'Record')}${btn(rec === 'ask', 'ask', 'Ask')}${btn(!rec, null, "Don't record")}</div>${lang}</div></div>`
 }
 
+// ── client tabs: a client page's tabs, each with its count (no DOM: `client-tabs.test.mjs`) ─────────────
+/** `calls`: the client's calls (null until loaded); `tasks`: its open tasks; `people`: its people. A zero shows
+ *  no number, on every tab alike (#173). */
+function clientTabs(calls, tasks, people) {
+  const n = (k) => k ? `<span class="n">${k}</span>` : ''
+  return [['overview', 'Overview'], ['calls', `Calls${n(calls && calls.length)}`], ['tasks', `Tasks${n(tasks)}`], ['people', `People${n(people)}`], ['profile', 'Profile']]
+}
+// end of the client tabs block
 /** A client's page (`#client/<id>`): its names, domains, whether it is the user's own company, its logo and projects. */
 function clientView(data) {
   const c = (data.clients || []).find((x) => x.id === S.pj.client)
@@ -398,7 +406,7 @@ function clientView(data) {
     : ps.length ? `<span class="pf-sub">A client with threads stays: move or delete them first.</span>` : `<button class="btn ghost danger" data-pj="delete-ask">Remove this client…</button>`
   const cd = S.pj.cdata && S.pj.cdata.client && S.pj.cdata.client.id === c.id ? S.pj.cdata : null
   const openTasks = cd && cd.work ? TASK_PILES.reduce((n, [k]) => n + ((cd.work.piles || {})[k] || []).length, 0) : 0
-  const tabs = [['overview', 'Overview'], ['calls', `Calls${cd && cd.calls ? `<span class="n">${cd.calls.length}</span>` : ''}`], ['tasks', `Tasks${openTasks ? `<span class="n">${openTasks}</span>` : ''}`], ['people', `People${peopleCount() ? `<span class="n">${peopleCount()}</span>` : ''}`], ['profile', 'Profile']]
+  const tabs = clientTabs(cd && cd.calls, openTasks, peopleCount())
   const tab = tabs.some(([t]) => t === S.pj.ctab) ? S.pj.ctab : 'overview'
   const head = `<header class="pj-head"><div class="pj-title">${clientIcon(c, 34) || `<span class="pj-ic pf-cic" style="--pj:#8a8a95;width:34px;height:34px">${esc(c.name.slice(0, 1).toUpperCase())}</span>`}<div style="min-width:0"><div class="pj-name"><h2>${esc(c.name)}</h2><span class="tag">${c.internal ? 'your company' : 'client'}</span></div><div class="facts"><span>${ps.length} thread${ps.length === 1 ? '' : 's'}${c.domains.length ? ` · ${esc(c.domains.join(', '))}` : ''}</span></div></div><span class="grow"></span><button class="btn" data-claude-about title="Claude, with the Brain, about ${esc(c.name)}">Claude about ${esc(c.name)}</button></div>
     <div class="tabs" role="tablist">${tabs.map(([t, label]) => `<button class="tab" role="tab" data-pj="ctab" data-tab-id="${t}" aria-selected="${tab === t}">${label}</button>`).join('')}</div>${notices()}</header>`

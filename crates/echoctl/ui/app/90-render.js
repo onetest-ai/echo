@@ -80,7 +80,7 @@ function render() {
       const opening = !h._html
       h.innerHTML = html; h._html = html
       const back = keep && h.querySelector('#' + keep.id)
-      if (back) { back.focus(); try { back.setSelectionRange(keep.s, keep.e) } catch { /* not a text field */ } }
+      if (back) { ScKeys.restoring = true; try { back.focus() } finally { ScKeys.restoring = false } try { back.setSelectionRange(keep.s, keep.e) } catch { /* not a text field */ } }
       else if (html && opening) { const w = h.querySelector('#sc-q') || h.querySelector('#sc-words'); if (w) w.focus() }
     }
   }

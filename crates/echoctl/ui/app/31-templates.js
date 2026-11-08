@@ -131,10 +131,24 @@ function templateEditor() {
     <button class="tp-add" data-tpl-add>${ICON('<path d="M12 5v14M5 12h14"/>')}Add a section</button></div><div class="tp-ef">${foot}</div></div>`
 }
 
+// ── send to claude keys: what Escape and a focus on the skill field do to the dialog (no DOM: `send-claude.test.mjs`) ──
+const ScKeys = {
+  /** Escape: an open skill list folds; with it folded, the dialog closes (null). */
+  escape: (c) => c.open ? Object.assign(c, { open: false }) : null,
+  /** Whether a focus on the folded skill field opens its list: one the user moved there, not the redraw giving the
+   *  replaced field its focus back (`restored`) — after Escape folded the list, that reopened it at once (#108). */
+  opens: (c, restored) => !c.open && !restored,
+  /** True while the redraw puts the focus back (`render`). */
+  restoring: false,
+}
+// end of the send to claude keys block
+
 // Send to Claude: open the dialog, choose a skill, send.
 document.addEventListener('click', (e) => {
   // A click anywhere else in the dialog folds its suggestions away.
   if (S.claudeSend && S.claudeSend.open && !e.target.closest('.sc-pick')) { S.claudeSend.open = false; render() }
+  // A click on the skill field with its list folded (after Escape the field keeps its focus, so no focusin comes): it opens.
+  if (S.claudeSend && !S.claudeSend.open && e.target.id === 'sc-q') { S.claudeSend.open = true; return render() }
   const t = e.target.closest('[data-claude-task],[data-sc-send],[data-sc-yolo],[data-sc-off],[data-sc-skill],[data-mode-set]')
   if (!t) return
   // Who does it: the user's choice, kept on the task (pinned: Echo's guess never overwrites it).
@@ -181,7 +195,7 @@ document.addEventListener('input', (e) => {
   if (S.claudeSend && e.target.id === 'sc-words') S.claudeSend.words = e.target.value
 })
 document.addEventListener('focusin', (e) => {
-  if (S.claudeSend && e.target.id === 'sc-q' && !S.claudeSend.open) { S.claudeSend.open = true; render() }
+  if (S.claudeSend && e.target.id === 'sc-q' && ScKeys.opens(S.claudeSend, ScKeys.restoring)) { S.claudeSend.open = true; render() }
 })
 document.addEventListener('keydown', (e) => {
   if (!S.claudeSend) return
@@ -193,8 +207,8 @@ document.addEventListener('keydown', (e) => {
     S.claudeSend.open = false; render(); const n = $('#sc-words'); if (n) n.focus()
     return
   }
-  if (e.key === 'Escape' && S.claudeSend.open) { S.claudeSend.open = false; return render() }
-  if (e.key === 'Escape') { S.claudeSend = null; render() }
+  // The dialog's Escape is its own: no other view's handler (`92-comments.js`, later) takes the same press.
+  if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); S.claudeSend = ScKeys.escape(S.claudeSend); render() }
   else if (e.key === 'Enter' && !e.shiftKey && e.target.id === 'sc-words') { e.preventDefault(); const b = document.querySelector('.sc-foot .btn.primary'); if (b) b.click() }
 })
 

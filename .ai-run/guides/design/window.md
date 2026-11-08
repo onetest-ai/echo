@@ -149,7 +149,7 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   one — its suggestions ranked by fit (the task's title and thread's words, stemmed, in a skill's name and description;
   then how often the user chose it, kept in the window; common words like "send" or "next" count for nothing; any
   alphabet — `rankSkills`, `skill-fit.test.mjs`), the best marked "fits best" and chosen at once when it clearly leads
-  (decided once the skills are loaded); the field keeps the caret while it redraws (the cross takes it back to Just the task); a two-line note; Work on it. Later the minutes' choice for an action
+  (decided once the skills are loaded); the field keeps the caret while it redraws (the cross takes it back to Just the task; a focus the redraw gives it back doesn't open its list — `ScKeys`, `send-claude.test.mjs`); a two-line note; Work on it. Escape folds the list, then closes the dialog (the press is the dialog's alone); leaving the view closes it (`route`), as it does a menu. Later the minutes' choice for an action
   goes first.
 - One Claude icon on My work's cards (✦; ⌘K "Claude: <task>"), one dialog, two actions on the same skill and words:
   Work on it (the panel, above; the main button) and Yolo — Claude Code does it on its own in the background

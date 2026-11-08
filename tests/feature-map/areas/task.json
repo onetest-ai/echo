@@ -95,7 +95,7 @@
   },
   {
    "id": "F-TASK-10",
-   "feature": "Send to Claude opens the Claude dialog: the task and its thread, one skill field (Just the task, or skills ranked by fit with \"fits best\", chosen at once when clearly first; × back to Just the task), a note, Work on it, Yolo (from Today only), Cancel",
+   "feature": "Send to Claude opens the Claude dialog: the task and its thread, one skill field (Just the task, or skills ranked by fit with \"fits best\", chosen at once when clearly first; × back to Just the task), a note, Work on it, Yolo (from Today only), Cancel; Escape folds the skill list, then closes the dialog; leaving the view closes it",
    "priority": "high",
    "check": "agent",
    "axes": [
