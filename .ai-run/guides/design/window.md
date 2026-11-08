@@ -457,7 +457,21 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
   `m365::mail_reply_text`, IPC `needs_reply`; Open in Outlook beside it), I'll do it (a dialog: the task's words and its
   thread — the task is theirs, due today, under Follow-ups → From Teams and mail in that thread, made once; IPC
   `needs_decide`; the thread preselected when Echo finds it — the one whose Teams chat it is, else one with the sender among
-  its people by address, then by name — else Choose a thread…, and nothing is made until one is chosen), Won't do.
+  its people by address, then by name — else Choose a thread…, and nothing is made until one is chosen), Won't do (a
+  dialog that needs a comment — why, or who it's for; the button waits for it, Cancel or Escape keep the item).
+- Won't do confirmed (IPC `needs_wont`, `today::wont_do`): the item is decided `wont` with the comment as its `note`, and
+  Claude Code reads it in the background — `claudejob` with **no tools** (the quarantine rule: others' words reach no
+  session with tools, so it can't send, post or mail), on the item's thread's AI profile or the default. Its prompt holds
+  the item as data (one line each, no control characters, `<`/`>` made harmless) and the comment as the only
+  instructions: note who it's for and why; a draft only when the comment asks for a reply or a forward, and a draft
+  even when it says to send. It answers JSON `{for, why, draft: null | {channel, text}}`; a draft whose channel isn't
+  the item's own (`teams` for a chat, `mail` for a mail) or is missing is refused (`parse_wont`), and the address is
+  always the item's chat or mail, kept by Echo, never the model's. The outcome is an id'd line of
+  `<home>/.echo/task-asks.json` (`kind: wont`), shown in Today → **Asks** under Needs you now: "Won't do · for X: why",
+  "Claude is noting who it's for…" while it runs, or why it failed. A draft has Send (IPC `wont_send`: the text as the
+  user left it, through `m365::chat_send_text` or `mail_reply_text`, as their words like Read and reply — then "Sent in
+  Teams / by mail"), Edit (a box in place) and Drop (IPC `ask_drop`: the line is gone; × does the same on a line
+  without a draft). Nothing is sent without that click.
   A 1:1 chat is labelled by the person ("Chat with Dana Kowal"). An item leaves when answered (the next read no longer finds it) or decided
   (`<home>/.echo/needs.json`, decisions kept two days). No snooze, no fold, no notifications: only in Today.
 - ⌘K on Today acts on it (target "Today"): Needs you now's items (Reply in Teams / Read and reply, I'll do it, Won't do),

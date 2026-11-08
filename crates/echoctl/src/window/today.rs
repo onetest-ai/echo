@@ -38,14 +38,29 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
 pub(super) fn handle(v: &Value) -> Option<Handled> {
     Some(match v["cmd"].as_str().unwrap_or("") {
         // Today → Needs you now: I'll do it (a task, in a thread) or Won't do; Refresh reads Teams and mail again.
-        "needs_decide" => match crate::needs::decide(v["id"].as_str().unwrap_or(""), v["how"].as_str().unwrap_or(""), v["thread"].as_str(), v["title"].as_str()) {
+        "needs_decide" => match crate::needs::decide(v["id"].as_str().unwrap_or(""), v["how"].as_str().unwrap_or(""), v["thread"].as_str(), v["title"].as_str(), None) {
             Ok(_) => true.into(),
+            Err(e) => notice(&format!("{e:#}")),
+        },
+        // Won't do, with the user's comment (required): decided, then Claude notes who it's for in the background.
+        #[cfg(feature = "js")]
+        "needs_wont" => match crate::today::wont_do(v["ask"].as_str().unwrap_or(""), v["id"].as_str().unwrap_or(""), v["note"].as_str().unwrap_or("")) {
+            Ok(()) => true.into(),
+            Err(e) => notice(&format!("{e:#}")),
+        },
+        // A Won't do line's draft: sent by the user's click (its text as they left it), or dropped.
+        "wont_send" => match crate::today::wont_send(v["ask"].as_str().unwrap_or(""), v["text"].as_str().unwrap_or("")) {
+            Ok(()) => notice("Sent"),
+            Err(e) => notice(&format!("{e:#}")),
+        },
+        "ask_drop" => match crate::today::ask_drop(v["ask"].as_str().unwrap_or("")) {
+            Ok(()) => true.into(),
             Err(e) => notice(&format!("{e:#}")),
         },
         // Read and reply (a mail of Needs you now): the user's words, sent by their click.
         "needs_reply" => match crate::m365::mail_reply_text(v["message"].as_str().unwrap_or(""), v["all"] == true, v["text"].as_str().unwrap_or(""), None, true) {
             Ok(_) => {
-                let _ = crate::needs::decide(v["id"].as_str().unwrap_or(""), "wont", None, None);
+                let _ = crate::needs::decide(v["id"].as_str().unwrap_or(""), "wont", None, None, None);
                 notice("Sent")
             }
             Err(e) => notice(&format!("{e:#}")),

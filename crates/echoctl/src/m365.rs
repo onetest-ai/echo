@@ -297,6 +297,17 @@ pub fn chat_send(chat: Option<&str>, to: Option<&str>, file: &Path, ai: Option<&
     Ok(json!({"sent": true, "chat": id, "id": v["id"], "url": v["webUrl"]}))
 }
 
+/// A message the user sent by a click in the window (Won't do's draft): `md` into the chat `chat`, at once.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn chat_send_text(chat: &str, md: &str, ai: Option<&str>) -> Result<Value> {
+    anyhow::ensure!(!md.trim().is_empty(), "the message is empty");
+    anyhow::ensure!(!chat.trim().is_empty(), "no Teams chat to send it to");
+    not_in_run()?;
+    let html = with_notice(crate::minutes::markdown_html(md), ai);
+    let v = graph::request("POST", &format!("/chats/{}/messages", enc(chat)), Body::Json(&json!({"body": {"contentType": "html", "content": html}})), None, &[])?;
+    Ok(json!({"sent": true, "chat": chat, "id": v["id"], "url": v["webUrl"]}))
+}
+
 /// The user's teams, or (`team`) a team's channels.
 pub fn teams(team: Option<&str>) -> Result<Value> {
     Ok(json!(match team {
