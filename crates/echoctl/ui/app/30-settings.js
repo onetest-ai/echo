@@ -84,10 +84,10 @@ function settingsView() {
   const own = Plugins.sections.find((x) => x.id === S.setSection)
   let sec = own ? own.id : SETTINGS_SECTIONS.some(([id]) => id === S.setSection) ? S.setSection : 'general'
   const q = (S.setQuery || '').trim().toLowerCase()
-  // Searched: each section by its name and its settings' labels, as drawn now (Templates, Plugins and Sends to you
-  // load their lists when drawn: by name only).
+  // Searched: each section by its name and its settings' labels, as drawn now. By name only: Templates, Plugins and
+  // Sends to you (drawing loads their lists), Knowledge (it draws plugins' panels) and Health (it re-checks Claude Code).
   const drawn = (id) => {
-    if (!q || !st || st.config_error || ['templates', 'plugins', 'deliver'].includes(id)) return ''
+    if (!q || !st || st.config_error || ['templates', 'plugins', 'deliver', 'brain', 'health'].includes(id)) return ''
     try { return SETTINGS_BODY[id](st) } catch { return '' }
   }
   const found = SettingsSearch.match(SETTINGS_SECTIONS.map(([id, label]) => ({ id, label, html: drawn(id) })), q)

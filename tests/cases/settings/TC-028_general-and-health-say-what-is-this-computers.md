@@ -32,7 +32,7 @@ tags: [settings, health, privacy]
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | In Bash: `echo "$ECHOCTL_HOME"; echo "$(dirname "$ECHOCTL_HOME")/bin/claude"; echo "$HOME"` | Three lines: the data folder, the fake's path, the account's home folder (keep them for the next steps) |
-| 2 | Navigate to `{{base_url}}/#settings/general` | Under the heading "General" the line "Start at login, the command line and Claude Code are this computer’s, whichever data folder Echo uses."; the row "Data folder" shows the data folder of step 1 |
+| 2 | Navigate to `{{base_url}}/#settings/general` | Under the heading "General" the line "Start at login and the command line are this computer’s, whichever data folder Echo uses; Claude Code is the one Echo’s PATH finds."; the row "Data folder" shows the data folder of step 1 |
 | 3 | Navigate to `{{base_url}}/#settings/health`; wait until the "Claude Code" card no longer says "Checking…" (up to 20 s; the page reads again by itself) | Under the heading "Health" the line "What Echo needs from this computer — the same whichever data folder it uses." |
 | 4 | Read the "Claude Code" card | Its first row "✓ Claude Code" reads `2.0.0 (Claude Code, test fake) · ` and the fake's path of step 1 (written `~/…` instead when that path is inside the home folder); the row "✓ Echo plugin" reads "Claude Code lists it (every session)."; the row "✗ An older Echo plugin" names `0.0.1 (user)` |
 | 5 | Read the text of the whole Health page (`document.querySelector('.set-main').innerText`) | It does not contain the home folder of step 1 followed by `/` (a path under the home folder shows as `~/…`) |

@@ -86,6 +86,10 @@ pub(super) fn settings_snapshot() -> Value {
 /// Claude Code's paths with the user's home folder as `~` (#104): Health says where it is without the account's home
 /// path, which a screenshot of a test run (or of a bug report) would otherwise carry.
 fn home_as_tilde(v: &mut Value, home: &Path) {
+    // A home that is the root (or nothing) would turn every path into ~/…: leave them as they are.
+    if home.parent().is_none() {
+        return;
+    }
     for at in ["/claude_code/path", "/claude_code/terminal/found", "/claude_code/terminal/dir"] {
         let Some(x) = v.pointer_mut(at) else { continue };
         if let Some(rest) = x.as_str().and_then(|s| Path::new(s).strip_prefix(home).ok()) {
@@ -378,5 +382,9 @@ mod tests {
         let mut c = json!({ "claude_code": { "checking": true } });
         home_as_tilde(&mut c, home);
         assert_eq!(c, json!({ "claude_code": { "checking": true } }));
+        // A home that is the root would make every path ~/…: nothing changes.
+        let mut r = json!({ "claude_code": { "path": "/opt/homebrew/bin/claude" } });
+        home_as_tilde(&mut r, Path::new("/"));
+        assert_eq!(r["claude_code"]["path"], "/opt/homebrew/bin/claude");
     }
 }
