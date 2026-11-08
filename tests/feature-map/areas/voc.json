@@ -14,7 +14,7 @@
   },
   {
    "id": "F-VOC-02",
-   "feature": "\"Every call\" terms are added (≤ 50 chars) and removed (×) and saved",
+   "feature": "\"Every call\" terms are added (≤ 50 chars) and removed (×) and saved, and stay every-call terms when the CLI or the app loads the settings again",
    "priority": "high",
    "check": "agent",
    "axes": [

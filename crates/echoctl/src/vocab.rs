@@ -450,6 +450,22 @@ mod tests {
     }
 
     #[test]
+    fn every_call_terms_stay_every_call_across_loads() {
+        let (_env, _root) = crate::paths::testenv::folders("vocab-always");
+        // A new data folder: the first term is added for every call, then the config is loaded again.
+        let mut cfg = Config::load().unwrap();
+        add(&mut cfg, &["Kubernetes".into()], None, true).unwrap();
+        cfg.save().unwrap();
+        let again = Config::load().unwrap();
+        assert_eq!((again.vocabulary, again.learned), (vec!["Kubernetes".to_string()], Some(vec![])));
+        // A config from before learned terms (no `learned` key) is still scoped, once.
+        fs::write(paths::state_dir().join("config.json"), r#"{"vocabulary": ["Contoso"]}"#).unwrap();
+        let old = Config::load().unwrap();
+        assert!(old.vocabulary.is_empty());
+        assert_eq!(old.learned.unwrap().iter().map(|l| l.term.as_str()).collect::<Vec<_>>(), ["Contoso"]);
+    }
+
+    #[test]
     fn subjects_match_without_numbers_or_punctuation() {
         assert_eq!(norm_subject("Weekly Sync #12 (EMEA)"), "weekly sync emea");
     }

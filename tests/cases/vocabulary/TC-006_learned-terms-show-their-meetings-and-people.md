@@ -35,6 +35,3 @@ Two learned terms with their scope; Every call is empty.
 
 ## Teardown
 - `echoctl vocab remove "Berlin pilot" "Okta SSO"`.
-
-## Notes
-- The first `echoctl vocab` command may print `moved N learned terms into the Brain's taxonomy` on stderr; that is expected.
