@@ -99,8 +99,8 @@ Story (criteria) › Task (action / session / dependency, owners, due, client-ow
   the tab row's Work count is the open stories and tasks in it (#110). Off the Work tab it is read once per thread (the
   tree is costly to build on a big ledger); the Work tab reads it again on every refresh.
 - The Board scrolls sideways in its own box, which clips what hangs out of it; a column's menu is therefore `fixed`,
-  placed against its ⋯ button by `colMenuSpot` after each render and on scroll, and closed once the button leaves the
-  board's view (#109).
+  placed against its ⋯ button by `colMenuSpot` after each render and on scroll, and hidden while the button is out of
+  the board's view (#109).
 
 ### Evidence items
 | Kind | Id | Content | Trust |

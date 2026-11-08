@@ -464,17 +464,16 @@ function colMenuSpot(b, m, win, pad = 8) {
 }
 // end of the column menu block
 /** The open column menu (fixed, `.bd-col-h .bd-menu`) where `colMenuSpot` says: after each render, and
- *  when the board or the pane scrolls or the window is resized; closed once its ⋯ leaves the board's view. */
+ *  when the board or the pane scrolls or the window is resized; hidden while its ⋯ is out of the board's view. */
 function placeColMenu() {
   const m = document.querySelector('.bd-col-h .bd-menu'), btn = m && m.parentElement.querySelector('.bd-more')
   if (!btn) return
-  // Its ⋯ scrolled out of the board's view (or the window's): the menu closes rather than float away from its column.
+  // Its ⋯ out of the board's view (or the window's): the menu hides rather than float away from its column, and shows
+  // again with it (no redraw: a redraw while the board is being scrolled to the column would close it at once).
   const b = btn.getBoundingClientRect(), board = btn.closest('.bd'), v = board ? board.getBoundingClientRect() : { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight }
   const cx = (b.left + b.right) / 2, cy = (b.top + b.bottom) / 2
-  if (cx < Math.max(0, v.left) || cx > Math.min(window.innerWidth, v.right) || cy < Math.max(0, v.top) || cy > Math.min(window.innerHeight, v.bottom)) {
-    S.pj.colMenu = null
-    return render()
-  }
+  const out = cx < Math.max(0, v.left) || cx > Math.min(window.innerWidth, v.right) || cy < Math.max(0, v.top) || cy > Math.min(window.innerHeight, v.bottom)
+  m.style.visibility = out ? 'hidden' : ''
   const at = colMenuSpot(b, { width: m.offsetWidth, height: m.offsetHeight }, { width: window.innerWidth, height: window.innerHeight })
   m.style.top = `${at.top}px`
   m.style.left = `${at.left}px`
