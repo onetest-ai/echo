@@ -24,11 +24,48 @@ const STALL_AFTER: Duration = Duration::from_secs(2);
 /// timeline stays intact), so nothing said off-mic is transcribed.
 pub static MUTED: AtomicBool = AtomicBool::new(false);
 const DEVICE_CHECK_EVERY: Duration = Duration::from_secs(1);
-/// The app briefly shows no input device while switching; don't fall back to default on a blip.
+/// The app briefly shows no input device while switching: only a release longer than this counts.
 const APP_DEVICE_GRACE: Duration = Duration::from_secs(2);
 
 pub struct MicSource {
     pub app: Option<TargetApp>,
+    /// The call app let go of its mic (the call ended, or it muted by closing it): the track records silence until
+    /// the app holds a mic Echo can open again — never the room on another input (#140). On the source, not the
+    /// stream, so a reopen meanwhile (a device error, a stall, a rate change) stays silent.
+    pub released: Arc<AtomicBool>,
+}
+
+/// What the mic track does at a device check, from what the call app reports.
+#[derive(Debug, PartialEq)]
+enum Step {
+    /// Nothing changes.
+    Keep,
+    /// Reopen on the app's mic (it switched, or Echo can open it now).
+    FollowApp,
+    /// The app let go of its mic: from now on silence.
+    Release,
+    /// Released, and the app took the very device open again: record it again.
+    Resume,
+    /// Not following an app (it never held a mic): follow the default input.
+    Default,
+}
+
+/// `app`: the app's mic, if it reports one — (is it the device open now, can Echo open it). `following`: the open
+/// device is the app's. `missing_long`: the app has reported no mic for longer than the grace.
+fn step(app: Option<(bool, bool)>, following: bool, released: bool, missing_long: bool) -> Step {
+    match app {
+        Some((true, _)) if released => Step::Resume,
+        Some((true, _)) => Step::Keep,
+        Some((false, true)) => Step::FollowApp,
+        // A mic Echo can't open: silence rather than the default, once the app was followed.
+        Some((false, false)) if released => Step::Keep,
+        Some((false, false)) if following => Step::Release,
+        Some((false, false)) => Step::Default,
+        None if released => Step::Keep,
+        None if following && missing_long => Step::Release,
+        None if following => Step::Keep,
+        None => Step::Default,
+    }
 }
 
 fn device_name(d: &Device) -> String {
@@ -85,6 +122,8 @@ struct MicStream {
     seen: (u64, Instant),
     last_device_check: Instant,
     app_device_missing_since: Option<Instant>,
+    /// `MicSource::released`, shared.
+    released: Arc<AtomicBool>,
     /// The app's mic when cpal doesn't list it (we stay on the default meanwhile).
     unmatched_app_mic: Option<String>,
 }
@@ -102,7 +141,8 @@ impl Source for MicSource {
 
         let lost = Arc::new(AtomicBool::new(false));
         let callbacks = Arc::new(AtomicU64::new(0));
-        let (l, c) = (lost.clone(), callbacks.clone());
+        let released = self.released.clone();
+        let (l, c, r) = (lost.clone(), callbacks.clone(), released.clone());
         let err = move |e: cpal::Error| {
             // An overrun is a glitch (samples dropped; the writer pads the gap) and the stream
             // goes on — WASAPI flags one whenever a packet is late. A dead device shows up as a
@@ -115,7 +155,7 @@ impl Source for MicSource {
         };
         let send = move |samples: Vec<f32>| {
             c.fetch_add(1, Ordering::Relaxed);
-            let samples = if MUTED.load(Ordering::Relaxed) { vec![0.0; samples.len()] } else { samples };
+            let samples = if MUTED.load(Ordering::Relaxed) || r.load(Ordering::Relaxed) { vec![0.0; samples.len()] } else { samples };
             let _ = tx.send(Chunk { epoch, rate, samples });
         };
         let stream = match format {
@@ -150,6 +190,7 @@ impl Source for MicSource {
             seen: (0, Instant::now()),
             last_device_check: Instant::now(),
             app_device_missing_since: None,
+            released,
             unmatched_app_mic: None,
         }))
     }
@@ -159,33 +200,40 @@ impl MicStream {
     /// Has the device we *should* use changed? Returns a restart reason.
     fn device_change(&mut self) -> Option<String> {
         let app_dev = self.app.and_then(app_input_device);
-        match (&app_dev, self.from_app) {
-            // Following the app, and it switched to another mic.
-            (Some((uid, name)), true) if Some(uid) != self.device_id.as_ref() => {
-                Some(format!("{:?} switched mic to \"{name}\"", self.app.unwrap()))
+        let released = self.released.load(Ordering::SeqCst);
+        if app_dev.is_some() {
+            self.app_device_missing_since = None;
+        }
+        let missing_long = app_dev.is_none() && self.app_device_missing_since.get_or_insert_with(Instant::now).elapsed() >= APP_DEVICE_GRACE;
+        let app = app_dev.as_ref().map(|(uid, _)| (Some(uid) == self.device_id.as_ref(), listed_input(uid).is_some()));
+        let name = app_dev.as_ref().map(|(_, n)| n.as_str()).unwrap_or("");
+        let who = self.app.map(|a| format!("{a:?}")).unwrap_or_default();
+        match step(app, self.from_app, released, missing_long) {
+            Step::Keep => None,
+            Step::FollowApp => {
+                self.released.store(false, Ordering::SeqCst);
+                Some(if self.from_app || released { format!("{who} switched mic to \"{name}\"") } else { format!("following {who}'s mic \"{name}\"") })
             }
-            // Using the default, but the app now has a mic of its own — one we can open.
-            (Some((uid, name)), false) if Some(uid) != self.device_id.as_ref() => {
-                let was = self.unmatched_app_mic.clone();
-                if follow_app_mic(uid, self.device_id.as_deref(), || listed_input(uid).is_some(), &mut self.unmatched_app_mic) {
-                    return Some(format!("following {:?}'s mic \"{name}\"", self.app.unwrap()));
-                }
-                if self.unmatched_app_mic != was {
-                    eprintln!("  {:?}'s mic \"{name}\" isn't in the input list; staying on \"{}\"", self.app.unwrap(), self.device);
+            Step::Release => {
+                self.released.store(true, Ordering::SeqCst);
+                eprintln!("  {who} released its mic: the mic track records silence until it takes one again");
+                None
+            }
+            Step::Resume => {
+                self.released.store(false, Ordering::SeqCst);
+                eprintln!("  {who} took its mic again: recording it");
+                None
+            }
+            Step::Default => {
+                if let Some((uid, name)) = &app_dev {
+                    let was = self.unmatched_app_mic.clone();
+                    follow_app_mic(uid, self.device_id.as_deref(), || false, &mut self.unmatched_app_mic);
+                    if self.unmatched_app_mic != was {
+                        eprintln!("  {who}'s mic \"{name}\" isn't in the input list; staying on \"{}\"", self.device);
+                    }
                 }
                 self.default_change()
             }
-            (Some(_), _) => {
-                self.app_device_missing_since = None;
-                None
-            }
-            // Was following the app, which no longer reports a mic: fall back after a grace.
-            (None, true) => {
-                let since = *self.app_device_missing_since.get_or_insert_with(Instant::now);
-                (since.elapsed() >= APP_DEVICE_GRACE)
-                    .then(|| format!("{:?} released its mic; using the default input", self.app.unwrap()))
-            }
-            (None, false) => self.default_change(),
         }
     }
 
@@ -240,6 +288,24 @@ impl LiveStream for MicStream {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn after_the_app_lets_go_of_its_mic_the_track_stays_silent_until_it_takes_one_echo_can_open() {
+        // (app's mic: (open now, listed)), following, released, missing for longer than the grace
+        assert_eq!(step(None, true, false, false), Step::Keep, "a blip shorter than the grace");
+        assert_eq!(step(None, true, false, true), Step::Release, "released after the grace");
+        // A reopen while released (device error, stall, rate change) lands on the default input, not followed:
+        assert_eq!(step(None, false, true, true), Step::Keep, "still silent, never the default (#140)");
+        assert_eq!(step(Some((false, false)), false, true, false), Step::Keep, "a mic Echo can't open: still silent");
+        assert_eq!(step(Some((false, false)), true, false, false), Step::Release, "following, the app moved to a mic Echo can't open");
+        assert_eq!(step(Some((true, true)), true, true, false), Step::Resume, "the same device again");
+        assert_eq!(step(Some((false, true)), false, true, false), Step::FollowApp, "a device Echo can open");
+        assert_eq!(step(Some((false, true)), true, false, false), Step::FollowApp, "the app switched mic");
+        // Never followed an app (it holds no mic yet): the default input, as before.
+        assert_eq!(step(None, false, false, true), Step::Default);
+        assert_eq!(step(Some((false, false)), false, false, false), Step::Default);
+        assert_eq!(step(Some((true, true)), true, false, false), Step::Keep);
+    }
 
     #[test]
     fn an_unlisted_app_mic_is_not_followed_until_it_appears() {

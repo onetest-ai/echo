@@ -49,5 +49,5 @@ Once the call app hangs up, nothing more reaches the mic track: the room is not 
 - Run the prelude, then `target/debug/echoctl app quit`; if it does not stop within 30 s, `kill $(cat "$D/app.pid")`
 
 ## Notes
-- **Fails today: #140.** 2026-11-07 (S-18, `privacy/TC-002`'s run): after TestCall hung up, the mic track reopened on the Mac's own microphone until the capture ended; the watcher's 10 s grace does the same. The steps expect the right behaviour; the case passes when #140 is fixed.
+- Was #140: after the hang-up the mic track reopened on the Mac's own microphone. Now, once the call app releases its mic (2 s grace), the track records silence and the log says "<app> released its mic: the mic track records silence until it takes one again". Checked 2026-11-08 with TestCall (`--quiet`, no BlackHole 16ch): no reopen after the hang-up.
 - A person runs it: real devices, sound in the room, and the microphone's permission. File-fed calls (the agent runs) can't show it: `privacy/TC-002` is the other live-check case.

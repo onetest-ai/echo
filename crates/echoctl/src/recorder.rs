@@ -264,8 +264,15 @@ pub fn capture(
         let _ = rec.poll();
     }
 
-    // `capture` leaves transcription to `echoctl transcribe` (the worker ends with the process).
-    let (dir, tracks, _live) = rec.finish(if stop.load(Ordering::SeqCst) { "user" } else { "duration" })?;
+    // `capture` leaves transcription to `echoctl transcribe`: the worker gives up, and is waited for so its model
+    // is freed before the process exits (#141).
+    let (dir, tracks, live) = rec.finish(if stop.load(Ordering::SeqCst) { "user" } else { "duration" })?;
+    #[cfg(feature = "transcribe")]
+    if let Some(l) = live {
+        l.abandon();
+    }
+    #[cfg(not(feature = "transcribe"))]
+    let _ = live;
     for t in &tracks {
         let restarts = t.events.iter().filter(|e| e.kind == "restarting").count();
         eprintln!(

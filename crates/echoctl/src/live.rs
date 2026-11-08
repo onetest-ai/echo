@@ -65,6 +65,20 @@ impl Live {
     }
 }
 
+impl Live {
+    /// Give up and wait until the worker has let go of its model: a process about to exit must not leave a
+    /// whisper context alive (ggml's Metal device asserts at exit while one is, #141).
+    /// With a transcription server there is no local model to free: the worker is left to give up by itself, so
+    /// an exit never waits on a request in flight.
+    pub fn abandon(mut self) {
+        self.quit.store(true, Ordering::SeqCst);
+        self.close();
+        if let Some(h) = self.handle.take().filter(|_| crate::remote::Client::configured().is_none()) {
+            let _ = h.join();
+        }
+    }
+}
+
 impl Drop for Live {
     fn drop(&mut self) {
         // Joined: done already. Not joined: abandoned.
@@ -206,6 +220,10 @@ fn run(dir: &Path, cfg: &Config, prompt: Option<String>, remote_name: Option<Str
         if !behind {
             std::thread::sleep(TICK);
         }
+    }
+    // Given up while the last pass ran (`abandon` after `close`): no echo cancellation, no second decode.
+    if quit.load(Ordering::SeqCst) {
+        bail!("given up: nobody waits for this transcript");
     }
     // On speakers the mic re-records the others: cancel that echo and decode the mic again
     // (headphones — no echo found — keep what was decoded during the call).
@@ -366,6 +384,24 @@ mod tests {
         })) };
         assert_eq!(live.join().unwrap().1, "m");
         assert!(!q.load(Ordering::SeqCst), "a joined worker isn't told to give up");
+    }
+
+    #[test]
+    fn an_abandoned_worker_on_a_local_model_is_waited_for_until_it_lets_go() {
+        let (_env, _root) = crate::paths::testenv::folders("live-abandon"); // no transcription server set
+        let (done, quit, gone) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
+        let (q, g) = (quit.clone(), gone.clone());
+        let handle = std::thread::spawn(move || {
+            while !q.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            std::thread::sleep(Duration::from_millis(50)); // still freeing its model
+            g.store(true, Ordering::SeqCst);
+            Ok((vec![], String::new()))
+        });
+        Live { done: done.clone(), quit: quit.clone(), handle: Some(handle) }.abandon();
+        assert!(quit.load(Ordering::SeqCst) && done.load(Ordering::SeqCst));
+        assert!(gone.load(Ordering::SeqCst), "abandon returns only after the worker ended (#141)");
     }
 
     #[test]
