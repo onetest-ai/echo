@@ -43,7 +43,7 @@ Evidence: `crates/echoctl/src/watch.rs::run_loop`, `crates/echoctl/src/recorder.
 |---|---|---|---|
 | Config dir (fixed per OS) | `paths::config_dir` | `home.json` (the chosen data folder), `models/`, `app.lock`, `app-path`, `ai.json`, `graph.json`, `claude/<profile>/`, `window-layout.json`, `plugins.json`, `plugins/` | app and CLI; secrets 0600 |
 | Data folder (home) | `paths::home` (`ECHOCTL_HOME` → `home.json` → config dir) | `calls/`, `.echo/`, `projects/`, `recall/` | app and CLI |
-| State dir | `paths::state_dir` = `<home>/.echo` | `config.json`, `armed.json`, `*.request`, `quit.asking`, `health.json`, `events.jsonl`, `watch.json`, `agenda.json`, `scheduled.json`, `app.log` | CLI writes requests; the watcher takes them and writes state |
+| State dir | `paths::state_dir` = `<home>/.echo` | `config.json`, `armed.json`, `*.request`, `quit.asking`, `health.json`, `events.jsonl`, `watch.json`, `agenda.json`, `calendar-failed.json` (the last failed sync, until a good one), `scheduled.json`, `app.log` | CLI writes requests; the watcher takes them and writes state |
 | A call folder | `paths::calls_dir` + `<ts>-<slug>` (`calls::stamp_of` keeps its identity across retitles) | `meta.json`, `meeting.json`, `mic.wav` / `remote.wav` (until transcribed), `live.jsonl`, `live-notes.json`, `transcript.md`, `segments.json`, `my-notes.md`, `chat.json`, `frames/` | recorder and transcription |
 | ... its minutes | same folder | `notes.md`, `actions.json`, `notes-run.json`, `claude.log` | only a Claude Code run (`notes.md`, actions via `echoctl actions --apply`); `notes-run.json` by `notes.rs` |
 
