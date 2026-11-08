@@ -730,7 +730,7 @@ fn diagram_source(src: &str) -> String {
 /// off, so a `<tag` in it would become an element (#112). Every `<` that opens a tag (a letter, `/`, `!` or
 /// `?` after it) is mermaid's entity `#lt;`, whatever comes before it; the `>` that closes that same token
 /// (no bracket, quote, pipe or line break between) is `#gt;`. Kept as they are: line breaks (`<br>`,
-/// `<br/>`, `<br />`), a class annotation `<<word>>`, arrows (`<-->`, `<|--`) and a bare `<` (`1 < 2`).
+/// `<br/>`, `<br />`), a class annotation `<<word>>` (one word: no attributes), arrows (`<-->`, `<|--`) and a bare `<` (`1 < 2`).
 fn no_tags(src: &str) -> String {
     let b = src.as_bytes();
     let mut out = String::with_capacity(src.len());
@@ -738,7 +738,7 @@ fn no_tags(src: &str) -> String {
     let annotation = |i: usize| {
         // `<<word>>`: i is either `<` of the pair.
         let start = if b.get(i + 1) == Some(&b'<') { i + 2 } else if i > 0 && b[i - 1] == b'<' { i + 1 } else { return false };
-        let n = b[start..].iter().take_while(|c| c.is_ascii_alphanumeric() || **c == b'_' || **c == b' ').count();
+        let n = b[start..].iter().take_while(|c| c.is_ascii_alphanumeric() || **c == b'_').count();
         n > 0 && b[start + n..].starts_with(b">>")
     };
     for (i, c) in src.char_indices() {
@@ -747,10 +747,14 @@ fn no_tags(src: &str) -> String {
             close = None;
             continue;
         }
-        let after = &src[i + 1..];
+        if c != '<' {
+            out.push(c);
+            continue;
+        }
+        let after = &src[i + 1..]; // `<` is one byte
         let br = ["br>", "br/>", "br />"].iter().any(|t| after.get(..t.len()).is_some_and(|a| a.eq_ignore_ascii_case(t)));
         let tag = after.starts_with(|n: char| n.is_ascii_alphabetic() || matches!(n, '/' | '!' | '?'));
-        if c == '<' && tag && !br && !annotation(i) {
+        if tag && !br && !annotation(i) {
             out.push_str("#lt;");
             close = after.find(['>', '[', ']', '(', ')', '{', '}', '"', '|', '<', '\n'])
                 .filter(|&k| after.as_bytes()[k] == b'>' && !matches!(after.as_bytes()[k.saturating_sub(1)], b'-' | b'=' | b'.'))
@@ -1116,6 +1120,9 @@ mod tests {
         // Arrows, annotations, comparisons, generics, and a node shape after an escaped `<` on its line.
         t("E <|-- F\n  G[<<interface>>]\n  class H{<<abstract>>}\n  I[1 < 2]", "E <|-- F\n  G[<<interface>>]\n  class H{<<abstract>>}\n  I[1 < 2]");
         t("J[List<String>]", "J[List#lt;String#gt;]");
+        // Text beyond ASCII next to an escaped tag, and an annotation-like pair with attributes.
+        t("graph TD; A[café — Q3 → <b>plan</b> 🚀]-->B[Привіт]", "graph TD; A[café — Q3 → #lt;b#gt;plan#lt;/b#gt; 🚀]-->B[Привіт]");
+        t("A[<<svg onload>>] --> B[<<img src x>>]", "A[<#lt;svg onload#gt;>] --> B[<#lt;img src x#gt;>]");
         t("A[a<br>b] <--> B(x <y) --> C>flag]", "A[a<br>b] <--> B(x #lt;y) --> C>flag]");
         t("graph LR; A(#x <b)-->B; C(<i) ==> D", "graph LR; A(#x #lt;b)-->B; C(#lt;i) ==> D");
         let html = render("# T\n\n```mermaid\ngraph TD; A[\"<img src=x onerror=alert(1)>\"]-->B\n```\n", "T", None, &load, &[]);
