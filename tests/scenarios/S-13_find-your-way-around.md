@@ -56,7 +56,7 @@ cases:
 | 9 | `settings/TC-024_layout-reset-puts-views-back.md` | 8 | On stage 8's view (`#settings/layout`, "Bottom" pressed in the row "Vocabulary"): skip step 1, check its expected result on one snapshot; go on with step 2 |
 | 10 | `shell/TC-010_palette-greys-out-what-cannot-run-and-says-why.md` | — | — |
 | 11 | `shell/TC-006_palette-on-an-open-call-lists-its-actions.md` | — | On stage 10's view (Initech planning open, the calls list beside it): in step 1 skip the navigation, click the row "Acme weekly sync" |
-| 12 | `shell/TC-005_settings-shortcut-and-return-to-where-you-were.md` | 11 | On stage 11's view (Acme weekly sync open, picked by a click): skip step 1, check its expected result (the hash) on one snapshot; go on with step 2 |
+| 12 | `shell/TC-005_settings-shortcut-and-return-to-where-you-were.md` | 11 | On stage 11's view (Acme weekly sync open, picked by a click): reload the page once (a full load of the same `#call/…` URL keeps the call open; without it Settings would reopen on the Layout section stages 8–9 left, not General); skip step 1, check its expected result (the hash) on one snapshot; go on with step 2 |
 | 13 | `shell/TC-007_palette-on-today-lists-the-days-actions.md` | — | — |
 | 14 | `shell/TC-009_status-bar-actions-button-opens-the-palette.md` | — | On stage 13's view (`#today`, the palette closed): in step 1 skip the navigation, click "Actions" in the status bar |
 | 15 | `shell/TC-014_status-bar-shows-the-profile-and-the-entries.md` | — | On stage 14's view (`#today`): skip step 1's navigation, check its expected result on one snapshot |

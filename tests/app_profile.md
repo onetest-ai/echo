@@ -149,6 +149,10 @@ Elements the app acts on carry `data-*` attributes (`data-call`, `data-go`, `dat
   `<select>`s (Thread, Who does it, Order, Group by, Layout, Kind, Owner; task Status once its button is clicked) need `browser_select_option`, not clicks.
 - **`browser_run_code_unsafe` keeps no globals between calls**: each call runs in a fresh context, so `globalThis.x` set in one call is gone in the next. Keep state across calls on the `page` object (`page.__dlg`), which is the same page from call to call; the hostile cases' guard and check D do so.
 - **The served window sends no Content-Security-Policy header**: `window --serve` forwards only the Content-Type of `respond`'s answer (`window/mod.rs`, the serve loop), so the window's own CSP and the minutes page's header policy apply only in the native webview. The minutes page also carries its policy in a `<meta http-equiv="Content-Security-Policy">` tag, which the browser enforces in both; read the policy there.
+- **Settings remembers its section within a page load:** `#settings` (or ⌘,) by a hash change reopens the last
+  section shown; only a full load lands on General. Likewise a thread's People view doesn't pick up `people-apply`
+  written by the CLI until it is navigated to again.
+- A marketplace's "⋯" is a button named "More"; its menu is `.pl-pop` (no `role=menu`).
 - **Reload after a CLI change.** A hash-only Navigate does not refetch data after an `echoctl` step that changed it: reload the page fully (`location.reload()` or reload `{{base_url}}/`), then navigate.
 - Transcript "Find" highlights (class `hit` on `.turn`) a moment after the text is entered; read the DOM after a short wait.
 - A right panel keeps its last tab: after opening a task it shows Details, and clicking Inbox flips it back.
@@ -458,7 +462,9 @@ cases in one run (`tests/scenarios/S-NN_<slug>.md`): its frontmatter lists the c
 scenarios: far fewer runners than cases, and the cases meet each other the way a user meets them.
 
 **Running one (the runner):**
-1. Load `{{base_url}}/` first (the cookie), in the browser already open — don't open a new one, don't close it.
+1. Load `{{base_url}}/` first (the cookie), in the browser already open — don't open a new one, don't close it. Then
+   clear what an earlier run left in this origin's browser storage (ports are reused, the browser is never closed):
+   `localStorage.clear()` and load `{{base_url}}/` again.
 2. For each stage in order: do its "Before it" glue, read the stage's case file, and run its steps exactly as a single
    case (each step's expected result checked by snapshot or command output; the case's teardown at its end).
 3. A failed step fails **that stage**: record actual vs expected, a screenshot, the console; then go on with the next

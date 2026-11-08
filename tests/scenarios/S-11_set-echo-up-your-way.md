@@ -60,7 +60,7 @@ cases:
 | Tab "Meeting types 6" open | stage 24 (step 1) | 24–27 |
 | The meeting type Client Edited | stage 26 (step 2) | 26–27 (stage 27's Reset is stage 26's teardown) |
 | Calls view with the Vocabulary panel | stage 29 (step 1) | 29–32 |
-| The Every call term "Kubernetes" | stage 30 (step 2) | 30–31 (stage 31 removes it: stage 30's teardown for that chip) |
+| The Vocabulary panel open | stage 30 (step 1) | 30–32 |
 | Two learned terms (Berlin pilot, Okta SSO) and the panel showing them | stage 33 (steps 1–2) | 33–34 |
 
 ## Stages
@@ -96,8 +96,8 @@ cases:
 | 27 | `templates/TC-016_reset-meeting-type-brings-echos-back.md` | 26 | On stage 26's view (Client's editor, tag "Edited", "How to tell it" holding `A client or prospect takes part: status, workshop, demo.`): skip step 1, check its expected result on one snapshot; go on with step 2 |
 | 28 | `templates/TC-017_cli-templates-lists-what-the-window-shows.md` | — | — |
 | 29 | `vocabulary/TC-001_vocabulary-opens-from-the-book-button.md` | — | — |
-| 30 | `vocabulary/TC-003_add-an-every-call-term.md` | — | On stage 29's view (Calls, panel closed): in step 1 skip the reload, click the book button "Vocabulary". In its teardown remove only "Berlin pilot": keep "Kubernetes" for stage 31 |
-| 31 | `vocabulary/TC-004_remove-an-every-call-term.md` | 30 | On stage 30's view (the panel open, one chip "Kubernetes"): skip step 1, check its expected result on one snapshot; go on with step 2 |
+| 30 | `vocabulary/TC-003_add-an-every-call-term.md` | — | On stage 29's view (Calls, panel closed): in step 1 skip the reload, click the book button "Vocabulary". Its teardown as written (both chips removed: a term left in Every call is moved to the learned list by a later `echoctl vocab` command, run 2026-11-08) |
+| 31 | `vocabulary/TC-004_remove-an-every-call-term.md` | 30 | On stage 30's view (the panel open): in step 1 skip the reload and the book button; add "Kubernetes" |
 | 32 | `vocabulary/TC-005_the-same-term-twice-is-one-chip.md` | — | On stage 31's view (the panel open): in step 1 skip the reload and the book button, type `Okta SSO` and press Enter |
 | 33 | `vocabulary/TC-006_learned-terms-show-their-meetings-and-people.md` | — | Skip its teardown: keep both learned terms, and the panel open on them, for stage 34 |
 | 34 | `vocabulary/TC-007_always-moves-a-learned-term-to-every-call.md` | 33 | On stage 33's view (the panel open, "Learned from calls" `2`): skip step 1 (stage 33's step 1 ran the same command and checked its output); in step 2 skip the reload and the book button, click "Always" in the row "Okta SSO" |
