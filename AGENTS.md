@@ -39,7 +39,6 @@ trivial task, use judgment.
 <!-- ai-run-init:guide-imports start -->
 | Category | Guide Path | Purpose |
 |---|---|---|
-| Project | .ai-run/guides/project.md | Project identity, tracker and source control |
 | Quality | .ai-run/guides/quality-gates.md | Quality gates and how to run them |
 | Architecture | .ai-run/guides/architecture/architecture.md | where code goes: paths, control files, CLI vs skill, feature gates, per-OS files |
 | Capture | .ai-run/guides/capture/capture-and-transcription.md | recording state machine, capture tracks, transcription engines and guards, live notes |
@@ -57,11 +56,14 @@ trivial task, use judgment.
 | Window | .ai-run/guides/window/window-ui.md | the webview UI: escaping, IPC actions, compiled-in assets, testable app.js blocks |
 <!-- ai-run-init:guide-imports end -->
 
-## Design Notes
+## What the guides are
 
-Background per area — how it works, decisions and why, files on disk, known gaps — is in `.ai-run/guides/design/`
-(index: `.ai-run/guides/design/README.md`). Load the rules guide first; open the area's design note before changing
-how that area works. Update the note in the same change when you alter it.
+The guides hold rules: how Echo must work and how we work on it. Not the reasons behind a decision once made, and not a
+record of what was built: what Echo does is the functional map (`tests/feature-map/`), how it is built is the code. Why something was decided
+is answered in GitHub: the issue and its PR carry the reasoning and the alternatives weighed, so a "why X, not Y"
+question is researched in closed issues and PRs (`gh issue list --state closed --search …`, `gh pr view`), never
+written into a guide or a code comment. A guide changes only when a rule changes, in its own `Rules:` PR the user approves, never as a side effect of a feature or a refactor. Cite evidence
+by symbol (`ledger::apply`), not by file path, so moving code doesn't touch the guides.
 
 ## Task Classifier
 

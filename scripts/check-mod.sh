@@ -5,7 +5,7 @@
 # (plugin/.claude-plugin/types) if present, else the one the plugin-authoring skill wrote.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-# Source files under 1,500 lines, today's large ones at their ceilings (architecture.md R13).
+# Source files under 1,500 lines, today's large ones at their ceilings (architecture.md, Structure and boundaries R9).
 scripts/size-check.sh
 claude plugin validate plugin
 claude plugin test plugin

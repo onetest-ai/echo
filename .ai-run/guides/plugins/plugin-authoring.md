@@ -2,68 +2,59 @@
 
 **Project**: Echo · **Stack**: Rust (+ vanilla JavaScript window UI, TypeScript status-line mod), tao + wry + tray-icon, clap, rquickjs · **Scope**: writing, testing, publishing and updating a third-party Echo plugin: manifest, host and client halves, marketplace
 
-**Design**: `.ai-run/guides/design/plugins.md` — how it works and why; the rules here win.
-
 ## Manifest
 
 ### Rules
-- R1. Ship a plugin as one folder with `echo-plugin.json` at its root: `id` (1–40 characters, a–z 0–9 `-`, not starting with `-`; it names folders), `name` (1–60 characters), `version` (`X.Y.Z`, optional `-pre` of letters, digits and dots), optional `summary` (≤ 240 characters), `echo` (`>=X.Y.Z` or a bare version: an older Echo lists it as "Needs Echo X.Y.Z or later" and refuses to install), `uses`, `settings`, `main`, `client`. Evidence: `crates/echoctl/src/plugins.rs::valid_id`
-- R2. Point `main` (host half) and `client` (client half) at `.js` or `.mjs` files by a relative path inside the plugin folder; any other file it ships (skills, templates, prompts) is read back at run time with `ctx.package.read(path)` / `ctx.package.list(dir)`, which answer `null` / refuse for a path outside the installed folder. Evidence: `crates/echoctl/src/jshost.rs::package_file`
-- R3. Declare each setting as `{key, label, type, default?, help?}`: `key` plain and unique (a–z, 0–9, `-`, `_`), `type` one of `string` (the default), `bool`, `folder` (saving checks it is an existing folder), `secret`. Read any of them with `ctx.settings.get(key)` (a secret included); the window sees a secret only as set or not, and saving an empty secret forgets it. Evidence: `crates/echoctl/src/plugins.rs::set_setting`
-- R4. Name in `uses` only capabilities Echo knows, each with its own shape: `claude` as `{}` (or `{skip: true}` to run with permission checks skipped), `schedule` as `{}`, `deliver: {to: ["teams" | "mail" | "today" | <a kind a plugin adds>]}` (`today`: a card on Echo's Today page, one per source, replaced by its next), `deliver_provider: {kinds: [<new plain names>]}`, `network: {hosts: ["api.example.com"]}`, `channel: {plugin: "<name>@claude-plugins-official"}`, `sessions: {skills?, read?, hints?: true}`, `folders: {what: "<≤ 60 characters>"}` (read-only: `write: true` is refused), `echo: {read: [...], write: ["dictionary"]}`. An unknown key makes the manifest invalid ("may need a newer Echo"); `brain_source` and `export` are known but not implemented, so such a plugin is listed and not installable. Evidence: `crates/echoctl/src/plugins.rs::describe_folders`
-- R5. Expect the user to agree to every line of the permission sheet: it opens with "Runs its own code in Echo / in the Echo window, with your rights" when the plugin has `main` / `client`, then one line per `uses` entry in Echo's words. An update whose sheet has a line the user hasn't agreed to is refused (`echoctl plugin update` says "run again with --yes to agree"; the window shows the new lines). Evidence: `crates/echoctl/src/plugins.rs::sheet`
+- R1. Ship a plugin as one folder with `echo-plugin.json` at its root: `id` (1–40 chars, a–z 0–9 `-`, no leading `-`), `name` (≤ 60), `version` (`X.Y.Z[-pre]`), `echo` (`>=X.Y.Z`), optional `summary` (≤ 240), `uses`, `settings`, `main`, `client`. Evidence: `plugins::valid_id`
+- R2. Point `main` and `client` at a `.js`/`.mjs` inside the plugin folder; read any other file it ships with `ctx.package.read(path)` / `ctx.package.list(dir)`. Evidence: `jshost::package_file`
+- R3. Declare each setting as `{key, label, type, default?, help?}`: `key` unique (a–z 0–9 `-` `_`), `type` `string` (default), `bool`, `folder` or `secret`; read it with `ctx.settings.get(key)`. Evidence: `plugins::set_setting`
+- R4. Name in `uses` only capabilities Echo knows, in their shapes (`claude`, `schedule`, `deliver.to`, `deliver_provider.kinds`, `network.hosts`, `channel.plugin`, `sessions`, `folders.what` read-only, `echo.read`/`write`); never `brain_source` or `export`. Evidence: `plugins::describe_folders`
+- R5. Ask only for what the user can agree to line by line on the permission sheet; an update adding a line needs their agreement again (`echoctl plugin update --yes`). Evidence: `plugins::sheet`
 
 ## Host half
 
 ### Rules
-- R1. Export `apply(ctx)` from the host half and register its commands, timers, event handlers and delivery ways inside it: Echo evaluates the module, calls `apply` once per load (at app start and after an install, update or switch made in the app), and a module without `apply` fails to load (`plugins: <id>: … exports no apply(ctx)` on Echo's stderr). Evidence: `crates/echoctl/src/jshost.rs::load`
-- R2. Write a command as `ctx.command(name, fn)`: `fn` gets the JSON arguments, may be `async`, and its JSON answer (`undefined` → `null`) goes to the caller; a thrown `Error` reaches the caller as its message. The window's `ctx.call` and Inbox buttons stop waiting after 30 s (the work may go on), `echoctl plugin call` after an hour. Evidence: `crates/echoctl/src/jshost.rs::CALL_TIMEOUT`
-- R3. Use `ctx.every(seconds, fn)` for periodic work: intervals under 10 s are raised to 10 s, the first run comes at the host's next one-second tick, and timers run only inside the app (`echoctl plugin call` and `echoctl deliver` load host halves with `jshost::no_timers`); a timer's error is logged as `timer: …`, never thrown to anyone. Evidence: `crates/echoctl/src/jshost.rs::no_timers`
-- R4. Hear Echo's events by naming them in `uses.events.on` (the install sheet says "Knows when …") and subscribing with `ctx.on(event, fn)`, which returns a promise refused for an event not named (the handler is dropped). Events and payloads (ids and titles, never a call's words — read those with `ctx.echo.read('source', id)`): `meeting_soon` `{id, subject, start}`, `call_started` `{app}`, `call_ended` `{app, recording, next_call}` (`next_call`: Teams went straight on to another call), `recording_started` `{call, title, memo}`, `recording_stopped` `{call, duration_s, reason}`, `transcribed` `{call, ok}`, `minutes_written` `{id, link, call, title}`, `thread_synced` `{thread, processed, left}`, `sources_changed` `{changed, removed}` (`call` is the call's folder name). A plugin whose `echo.read` has `source`/`sources` hears `minutes_written` and `sources_changed` without naming them, as before; one with no such read and no `events` no longer hears them (the sheet never said so). Events reach only host halves loaded in the app, as they happen (no replay). Evidence: `crates/echoctl/src/plugins.rs::EVENTS`
-- R5. Keep a plugin's own state with `ctx.store.read/write/list/remove/path` under `<home>/.echo/plugins/<id>/` (per data folder), by relative path only (absolute and `..` refused); `read` of a missing file gives `null`, `write` creates folders and is atomic. Removing the plugin deletes that folder and its secrets unless data is kept (`echoctl plugin remove` keeps them unless `--delete-data`). Evidence: `crates/echoctl/src/plugins.rs::data_dir`
-- R6. Check `status` in the answer of `ctx.http.fetch(url, {method, headers, body})`: it resolves `{status, body}` for any HTTP status (curl runs without `-f`) and rejects only when the host can't be reached; methods are GET, POST, PUT, PATCH, DELETE, an object `body` is sent as JSON text, and answers are capped at 10 MB and 60 s. Evidence: `crates/echoctl/src/jshost.rs::http_code`
-- R7. Run Claude with `await ctx.claude.run({prompt, title, profile, model, tools, dir, timeout})` → `{answer, model, usage}`: `prompt` is required, `tools` is `read` (the default: Echo's data folder read-only), `none`, `folder` (the user's Claude Code settings, `dontAsk`) or `skip` (`--dangerously-skip-permissions`), `dir` a folder inside the plugin's store (default `runs/<timestamp>`), `timeout` in minutes 1–60 (default 20). Only with `claude` in `uses` (else refused); `skip` only with `"claude": {"skip": true}` — the install sheet then says permission checks may be skipped. Evidence: `crates/echoctl/src/claudejob.rs::Tools.parse`, `crates/echoctl/src/plugins.rs::may_run_claude`
-- R8. Add a way Echo sends to the user with `ctx.deliver.provide(kind, {label, send(msg)})` for a kind named in `uses.deliver_provider.kinds` (never `teams` or `mail`); `send` gets `{title, markdown, about, ai}`. Call `ctx.deliver.ready(kind, true)` once it can send (with a reason when not): until then Echo refuses to send through it ("isn't ready"). `ctx.deliver.send(kind, msg)` sends only by a kind in `uses.deliver.to` or one the plugin provides itself (else refused). Evidence: `crates/echoctl/src/jshost.rs::provider_ready`, `crates/echoctl/src/plugins.rs::may_send`
-- R9. Read Echo's data with `ctx.echo.read(kind, arg)` only for kinds listed in `uses.echo.read`: `clients`, `threads` (open ones), `people`, `dictionary`, `sources` (`{kind, thread, since, limit}`) and `source` (`call:<folder>` | `mail:<Recall source>`) — asking for either of the last two grants both. Add names with `ctx.echo.dictionary.add({name, synonyms, spellings, kind, client})` under `uses.echo.write: ["dictionary"]`; it merges into an existing term and never renames or removes one. Evidence: `crates/echoctl/src/share.rs::dictionary_add`
-- R10. Read calls through `ctx.echo.read('sources', {kind: 'call'})` and `ctx.echo.read('source', 'call:<folder>')`; the `calls` kind on the install sheet is not served by the host. Evidence: `crates/echoctl/src/plugins.rs::ECHO_READS`
-- R11. Get a folder from the user with `await ctx.system.pickFolder(prompt)` (needs `uses.folders`; the system picker, titled with the plugin's name; the granted path or `null`), then read it with `ctx.fs.list/read` (sync) or `ctx.fs.readMany/walk` (async, off the 5 s slice), always as `(root, relative path)`: `fs.read` returns up to 1 MB by default and 4 MB at most, `walk` lists `{path, size, mtime}` (≤ 20,000 by default, 100,000 at most, `ext` filter, dot entries only with `hidden`) and follows no links. In a debug build `ECHOCTL_PICK_FOLDER=<dir>` answers the picker. Evidence: `crates/echoctl/src/app.rs::choose_folder`
-- R12. Set what the plugin gives Echo's Claude sessions from `apply` on every load: `ctx.sessions.skills([...])`, `ctx.sessions.read([...])` and `ctx.view.hints([{client | thread, text}])` each replace the whole set (`[]` takes it away), and every load or unload drops what the previous version set (`grants::drop_plugin`). Evidence: `crates/echoctl/src/grants.rs::drop_plugin`
-- R13. Ask the user for a decision with `ctx.inbox.set(key, {title, why, urgent, go, actions: [{label, command, args, primary}]})` (key ≤ 80 characters; title shown up to 120 characters, why up to 200): each action is a button that runs that host-half command with `args`; clear the item with `ctx.inbox.clear(key)` once it is settled. Evidence: `crates/echoctl/src/attention.rs::inbox_items`
-- R14. Bundle the host half into one file: `jshost::load` declares `main` as a single module and no module loader is set on the QuickJS runtime, so its `import`s of other files don't resolve; the client half is imported by the window from `/plugin/<id>/<file>`, which serves any file of the plugin, so it may import its own modules. Evidence: `crates/echoctl/src/window/plugins.rs::plugin_file`
-- R15. Keep large data in the store, not in JavaScript memory: every enabled host half runs in one QuickJS runtime with a 64 MB memory limit (`set_memory_limit`), and one plugin's JavaScript running over 5 s is interrupted. Evidence: `crates/echoctl/src/jshost.rs::set_memory_limit`
-- R16. Read what a host half logs with `ctx.log(...)` (and its load, timer and handler errors) on Echo's stderr as `plugin <id>: [info] …`: in a terminal running `echoctl app run`, or in `<home>/.echo/app.log` for an app started in the background on macOS (Windows drops that output). Evidence: `crates/echoctl/src/app.rs::detach_output`
+- R1. Export `apply(ctx)` from the host half and register its commands, timers, event handlers and delivery ways inside it. Evidence: `jshost::load`
+- R2. Write a command as `ctx.command(name, fn)`: `fn` takes JSON arguments, may be `async`, returns JSON and throws an `Error` to fail; keep a window-called command under 30 s. Evidence: `jshost::CALL_TIMEOUT`
+- R3. Use `ctx.every(seconds, fn)` for periodic work (10 s minimum); never rely on timers in `echoctl plugin call` or `echoctl deliver`. Evidence: `jshost::no_timers`
+- R4. Name each event in `uses.events.on` and subscribe with `ctx.on(event, fn)`; read a call's words with `ctx.echo.read('source', id)`, never from a payload; events are not replayed. Evidence: `plugins::EVENTS`
+- R5. Keep a plugin's own state with `ctx.store.read/write/list/remove/path`, by relative path only. Evidence: `plugins::data_dir`
+- R6. Check `status` in the `{status, body}` that `ctx.http.fetch(url, {method, headers, body})` resolves; it rejects only when the host can't be reached. Evidence: `jshost::fetch`
+- R7. Run Claude with `await ctx.claude.run({prompt, title, profile, model, tools, dir, timeout})` only with `claude` in `uses`; `tools: "skip"` needs `"claude": {"skip": true}`. Evidence: `claudejob::Tools::parse`, `plugins::may_run_claude`
+- R8. Provide a delivery kind with `ctx.deliver.provide(kind, {label, send(msg)})` only for a kind in `uses.deliver_provider.kinds` (never `teams` or `mail`), and call `ctx.deliver.ready(kind, true)` once it can send. Evidence: `jshost::provider_ready`, `plugins::may_send`
+- R9. Call `ctx.echo.read(kind, arg)` only for kinds in `uses.echo.read`, and `ctx.echo.dictionary.add(...)` only under `uses.echo.write: ["dictionary"]`. Evidence: `share::dictionary_add`
+- R10. Get a folder with `await ctx.system.pickFolder(prompt)` (needs `uses.folders`) and read it as `(root, relative path)`, bulk reads through `ctx.fs.readMany/walk`; in a debug build answer the picker with `ECHOCTL_PICK_FOLDER=<dir>`. Evidence: `app::choose_folder`
+- R11. Set `ctx.sessions.skills`, `ctx.sessions.read` and `ctx.view.hints` from `apply` on every load, each as the whole set (`[]` removes it). Evidence: `grants::drop_plugin`
+- R12. Ask the user for a decision with `ctx.inbox.set(key, {title, why, urgent, go, actions: [{label, command, args, primary}]})` (key ≤ 80 chars), and `ctx.inbox.clear(key)` once it is settled. Evidence: `attention::inbox_items`
+- R13. Bundle the host half into one file with no `import` of other files; the client half may import its own modules. Evidence: `window::plugins::plugin_file`
+- R14. Keep large data in the store, not in JavaScript memory (64 MB shared by all host halves). Evidence: `jshost::set_memory_limit`
 
 ### Constraints
-| Do not | Do instead | Why | Evidence |
-|---|---|---|---|
-| Write `settings.json` or `inbox.json` with `ctx.store.write` | Use `ctx.settings.set` and `ctx.inbox.set` / `clear` | Echo keeps the plugin's settings and Inbox items in the same store folder | `crates/echoctl/src/jshost.rs::inbox_file` |
+| Do not | Do instead | Evidence |
+|---|---|---|
+| Write `settings.json` or `inbox.json` with `ctx.store.write` | Use `ctx.settings.set` and `ctx.inbox.set` / `clear` | `jshost::inbox_file` |
 
 ### Read first
-| When you are | Exemplar | Why this one | Tests |
-|---|---|---|---|
-| writing a first host half | `crates/echoctl/src/jshost.rs::a_host_half_gets_echos_services_and_answers_commands` | a local marketplace, install, then commands, store, async and errors end to end | exemplar is a test |
-| using folders, sessions or `echo.read` | `crates/echoctl/src/jshost.rs::a_plugin_gives_echos_sessions_its_skill_and_the_folders_it_was_given` | a picked folder, skills, hints and a refused read in one plugin | exemplar is a test |
+| When you are | Exemplar | Tests |
+|---|---|---|
+| writing a first host half | `jshost::a_host_half_gets_echos_services_and_answers_commands` | exemplar is a test |
+| using folders, sessions or `echo.read` | `jshost::a_plugin_gives_echos_sessions_its_skill_and_the_folders_it_was_given` | exemplar is a test |
 
 ## Client half
 
 ### Rules
-- R1. Export `apply(ctx)` from the client half too and add to the window only through `ctx`: `ctx.call(command, args)` (its host half), `ctx.slots.add(slot, {label, icon, when(target), run(target)})` for `call.menu`, `calendar.event`, `task.actions`, `knowledge.tab`, `knowledge.settings` (any other name throws), `ctx.panels.add` + `ctx.showPanel`, `ctx.activities.add({id, label, icon, render, after})` (routed at `#<plugin>:<id>/<its route>`, read from `ctx.where().route`), `ctx.settings.add` (its card in Settings → Plugins) / `ctx.settings.section` (`#settings/<plugin>:<id>`), `ctx.palette.add`, `ctx.listen`, `ctx.ui.style`, `ctx.ui.*` (Echo's helpers and `graph` / `newGraph`), `ctx.go`, `ctx.render`. Evidence: `crates/echoctl/ui/app/33-plugins-client.js::loadPluginClients`
-- R2. Escape every text you put in HTML with `ctx.ui.esc` and render Markdown with `ctx.markdown` (host half; Echo's safe writer): the client half runs inside Echo's own page with its rights, and a slot's `when(target)` that throws only hides its item. Evidence: `crates/echoctl/ui/app/33-plugins-client.js::slotItems`
+- R1. Export `apply(ctx)` from the client half and add to the window only through `ctx` (`call`, `slots.add` on a known slot, `panels`, `activities`, `settings`, `palette`, `listen`, `ui`, `go`, `render`). Evidence: `loadPluginClients` (window script)
+- R2. Escape every text you put in HTML with `ctx.ui.esc` and render Markdown with `ctx.markdown`. Evidence: `slotItems` (window script)
 
 ## Publishing
 
 ### Rules
-- R1. Host a marketplace as a folder or git repository with `echo-marketplace.json` at its root: `{name, featured: [ids], plugins: [{id, source, categories}]}`, `source` either `"./plugins/<id>"` (a folder inside the marketplace) or `{"github": "owner/repo", "ref": "…", "path": "…"}`. Each entry's manifest `id` must equal its `id`; a bad entry is listed with its error and can't be installed; at most 200 entries are read, an invalid or repeated id is skipped. Evidence: `crates/echoctl/src/plugins.rs::CatalogEntry`
-- R2. Give users one of three marketplace sources: `owner/repo[@ref]` (GitHub: public through `curl`, a private repository through their own `gh` sign-in), a git address `https://…`, `ssh://…` or `git@…` with `#ref` (cloned `--depth 1`, links off), or a local folder (starting `/`, `.` or `~`, read where it is); a ref is a plain branch, tag or commit (no `..`, no leading `-`). Evidence: `crates/echoctl/src/plugins.rs::parse_source`
-- R3. Bump `version` for every change you publish: an installed plugin is offered an update only when its marketplace's manifest has a newer version (`update::newer`), and the window reloads a client half only when its version changes (it imports `client` with `?v=<version>`). Evidence: `crates/echoctl/src/plugins.rs::update_for`
-- R4. Restart the app after `echoctl plugin install | update | enable | disable` from a terminal: the running app reloads host halves only at start and after a change made in Settings → Plugins (`plugins::reload` from `page_op`); `echoctl plugin call` loads the installed files in its own process, without timers, so it sees a reinstall at once. Evidence: `crates/echoctl/src/plugins.rs::page_op`
-
-### Constraints
-| Do not | Do instead | Why | Evidence |
-|---|---|---|---|
-| Republish changed files under the same `version` | Bump `version` and refresh the marketplace | `update_for` offers only a newer version | `crates/echoctl/src/plugins.rs::update_for` |
+- R1. Host a marketplace as a folder or git repository with `echo-marketplace.json` at its root (`{name, featured, plugins: [{id, source, categories}]}`), each entry's manifest `id` equal to its `id`. Evidence: `plugins::CatalogEntry`
+- R2. Give users a marketplace source as `owner/repo[@ref]`, a git address (`https://`, `ssh://`, `git@`, `#ref`) or a local folder; a ref is a plain branch, tag or commit. Evidence: `plugins::parse_source`
+- R3. Bump `version` for every change you publish. Evidence: `plugins::update_for`
+- R4. Restart the app after `echoctl plugin install | update | enable | disable` from a terminal. Evidence: `plugins::page_op`
 
 ### Read first
-| When you are | Exemplar | Why this one | Tests |
-|---|---|---|---|
-| publishing an update | `crates/echoctl/src/plugins.rs::install_update_and_remove_from_a_local_marketplace` | a version that asks for more waits for agreement; settings and secrets | exemplar is a test |
+| When you are | Exemplar | Tests |
+|---|---|---|
+| publishing an update | `plugins::install_update_and_remove_from_a_local_marketplace` | exemplar is a test |
