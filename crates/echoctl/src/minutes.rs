@@ -723,7 +723,39 @@ fn diagram_source(src: &str) -> String {
         }
         out.push(l);
     }
-    out.join("\n")
+    no_tags(&out.join("\n"))
+}
+
+/// A diagram's text with no markup: mermaid measures a label through `innerHTML` even with HTML labels
+/// off, so a `<tag` in it would become an element (#112). Each `<` that opens a tag is mermaid's entity
+/// `#lt;`, and the `>` closing it `#gt;` (both drawn as text); line breaks (`<br>`, `<br/>`) and arrows
+/// (`<-`, `<|`, `<<`, `-->`) stay.
+fn no_tags(src: &str) -> String {
+    let mut out = String::with_capacity(src.len());
+    let (mut prev, mut open) = ('\0', false);
+    let mut rest = src;
+    while let Some(c) = rest.chars().next() {
+        let after = &rest[c.len_utf8()..];
+        let br = after.get(..2).is_some_and(|b| b.eq_ignore_ascii_case("br"))
+            && matches!(after[2..].trim_start().chars().next(), Some('>') | Some('/'));
+        let tag = after.starts_with(|n: char| n.is_ascii_alphabetic() || matches!(n, '/' | '!' | '?'));
+        if c == '<' && prev != '<' && tag && !br {
+            out.push_str("#lt;");
+            open = true;
+        } else if c == '>' && open && !matches!(prev, '-' | '=' | '.') {
+            out.push_str("#gt;");
+            open = false;
+        } else {
+            // A label ends at its quote, bracket or line: a `>` after it is an arrow's (as is `->`, `=>`, `.->`).
+            if matches!(c, '"' | ']' | '\n') {
+                open = false;
+            }
+            out.push(c);
+        }
+        prev = c;
+        rest = after;
+    }
+    out
 }
 
 /// `[mm:ss]` / `[h:mm:ss]` anchors in (already escaped) text as timestamps.
@@ -1067,6 +1099,15 @@ mod tests {
     }
 
     #[test]
+    fn a_diagram_label_carries_no_markup_but_line_breaks_and_arrows_stay() {
+        let src = "graph TD; A[\"x <img src=x onerror=alert(1)> <script>alert(1)</script> <a href='javascript:x'>o</a> <!-- c\"]-->B\n  C[a<br>b<br/>c<BR />d] <--> D\n  E <|-- F\n  G[<<interface>>]\n  H[1 < 2]";
+        assert_eq!(no_tags(src), "graph TD; A[\"x #lt;img src=x onerror=alert(1)#gt; #lt;script#gt;alert(1)#lt;/script#gt; #lt;a href='javascript:x'#gt;o#lt;/a#gt; #lt;!-- c\"]-->B\n  C[a<br>b<br/>c<BR />d] <--> D\n  E <|-- F\n  G[<<interface>>]\n  H[1 < 2]");
+        assert_eq!(no_tags("graph LR; A(#x <b)-->B; C(<i) ==> D"), "graph LR; A(#x #lt;b)-->B; C(#lt;i) ==> D");
+        let html = render("# T\n\n```mermaid\ngraph TD; A[\"<img src=x onerror=alert(1)>\"]-->B\n```\n", "T", None, &load, &[]);
+        assert!(html.contains("A[&quot;#lt;img src=x onerror=alert(1)#gt;&quot;]--&gt;B"));
+    }
+
+    #[test]
     fn diagrams_bring_mermaid_and_old_notes_still_render() {
         let html = render("# T\n\nA line.\n\n```mermaid\nflowchart TD\n  A[a<br>b] --> B\n```\n", "T", None, &load, &[]);
         assert!(html.contains("<pre class=\"mermaid\">flowchart TD\n  A[a&lt;br&gt;b] --&gt; B</pre>"));
@@ -1095,10 +1136,10 @@ mod tests {
     #[test]
     fn a_diagram_cant_change_the_pages_settings() {
         let src = "---\nconfig:\n  flowchart:\n    htmlLabels: true\n---\n%%{init: {\"flowchart\": {\"htmlLabels\": true}}}%%\nflowchart TD\n  %%{init:\n    {\"x\": 1}}%%\n  %% a comment stays\n  A[\"<form action='http://x.example/'></form>\"]\n";
-        assert_eq!(diagram_source(src), "flowchart TD\n  %% a comment stays\n  A[\"<form action='http://x.example/'></form>\"]");
+        assert_eq!(diagram_source(src), "flowchart TD\n  %% a comment stays\n  A[\"#lt;form action='http://x.example/'#gt;#lt;/form#gt;\"]");
         let html = render(&format!("# T\n\n```mermaid\n{src}```\n"), "T", None, &load, &[]);
         assert!(!html.contains("htmlLabels: true") && !html.contains("&quot;htmlLabels&quot;"));
-        assert!(html.contains("A[&quot;&lt;form action=&#39;http://x.example/&#39;&gt;&lt;/form&gt;&quot;]"));
+        assert!(html.contains("A[&quot;#lt;form action=&#39;http://x.example/&#39;#gt;#lt;/form#gt;&quot;]"));
     }
 
     #[test]
