@@ -140,7 +140,8 @@ Story (criteria) › Task (action / session / dependency, owners, due, client-ow
 - Identity: the same cleaned full name merges by itself (other address in `also`); a shared first + last name is only
   suggested (`maybe_same`); the user merges (`people::merge`) or splits (`people::split` → `not_same`, never merged
   again). A person's addresses are the calls' and the directory's (an address merged in that no call shows is listed
-  too, so its "Not the same" can undo the merge). The user is left out.
+  too, so its "Not the same" can undo the merge; a merge records the names and addresses it brought in, and splitting
+  such an address takes those names away again). The user is left out.
 - The user sets: the directory `people.json` (each field with source and history), placements in a thread (`Member`:
   role, stance, influence / interest 1–3, `governance`, `group`, `works_for`), organisations as stakeholders
   (`OrgPlace`), an organisation's parent, typed relations (`RELATIONS`) and groups.
