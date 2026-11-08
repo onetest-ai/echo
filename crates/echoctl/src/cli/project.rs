@@ -631,6 +631,18 @@ fn own_task_edit(id: &str, json: &str, run_task: &str) -> bool {
     })
 }
 
+/// Why a run Echo started can't take this ledger step. Yolo's (`run_task`, `<project>/<node>`) is told the one edit it
+/// may make, so its model doesn't take the refusal for a passing one and try again (#137).
+fn run_refusal(run_task: &str) -> String {
+    match run_task.split_once('/') {
+        Some((project, node)) => format!(
+            "Yolo may change only its own task's state: `echoctl project ledger {project} edit '{{\"op\":\"edit\",\"node\":\"{node}\",\"set\":{{\"state\":\"done\"}}}}'` \
+             (or in_progress, blocked, cancelled) — not its description, owners or any other item; trying again won't change that, say the rest in your answer"
+        ),
+        None => "a run Echo started works only on its own project's ledger, with the agent's steps".into(),
+    }
+}
+
 fn ledger_command(id: &str, cmd: LedgerCmd) -> Result<()> {
     // Inside a run Echo started: the agent's steps, on that run's project only (a read-only routine:
     // the tree).
@@ -643,7 +655,7 @@ fn ledger_command(id: &str, cmd: LedgerCmd) -> Result<()> {
         let own = std::env::var(guard::RUN_PROJECT).unwrap_or_default();
         let agent_step = matches!(cmd, LedgerCmd::Pending | LedgerCmd::Context | LedgerCmd::Apply { .. } | LedgerCmd::Done { .. } | LedgerCmd::VerifyPrep { .. } | LedgerCmd::VerifyApply { .. } | LedgerCmd::PeopleContext { .. } | LedgerCmd::PeopleApply { .. });
         if own.is_empty() || own != id || !agent_step {
-            anyhow::bail!("a run Echo started works only on its own project's ledger, with the agent's steps");
+            anyhow::bail!("{}", run_refusal(&std::env::var(guard::RUN_TASK).unwrap_or_default()));
         }
     }
     let read = |p: &std::path::Path| -> Result<Vec<serde_json::Value>> {
@@ -722,5 +734,15 @@ mod tests {
         assert!(!super::own_task_edit("other", edit, "acme/T5"), "another project");
         assert!(!super::own_task_edit("acme", edit, ""), "not a Yolo run");
         assert!(!super::own_task_edit("acme", r#"{"op": "create", "node": "T5"}"#, "acme/T5"), "only an edit");
+    }
+
+    #[test]
+    fn a_refused_yolo_edit_says_what_yolo_may_change() {
+        let why = super::run_refusal("acme/T5");
+        assert!(why.contains("only its own task's state") && why.contains(r#"{"op":"edit","node":"T5","set":{"state":"done"}}"#), "{why}");
+        assert!(why.contains("ledger acme edit") && why.contains("not its description"), "{why}");
+        let edit = r#"{"op":"edit","node":"T5","set":{"state":"done"}}"#;
+        assert!(super::own_task_edit("acme", edit, "acme/T5"), "the edit it names is one Yolo may make");
+        assert_eq!(super::run_refusal(""), "a run Echo started works only on its own project's ledger, with the agent's steps", "a sync run's");
     }
 }
