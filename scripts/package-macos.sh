@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Build Echo.app for beta testers: release build → bundle (Info.plist, icon) → Developer ID
 # signature with the hardened runtime → notarization → stapled .app inside a signed .dmg.
-# The .dmg itself is not notarized: the stapled app inside is what Gatekeeper checks, and the
-# container rides along.
+# The .dmg is notarized and stapled too, so Gatekeeper accepts the download itself (offline,
+# MDM, stricter macOS), not only the app inside it.
 #
 #   scripts/package-macos.sh              # host architecture
 #   UNIVERSAL=1 scripts/package-macos.sh  # arm64 + x86_64 (rustup target add x86_64-apple-darwin)
@@ -168,5 +168,10 @@ rm -f "$DMG"
 hdiutil create -volname "Echo $VERSION" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
 rm -rf "$STAGE"
 codesign --force --timestamp --sign "$SIGN_ID" "$DMG"
-[[ "${NOTARIZE:-1}" == 1 ]] && { spctl -a -vv -t exec "$APP" || true; }
+if [[ "${NOTARIZE:-1}" == 1 ]]; then
+  notarize "$DMG"
+  xcrun stapler staple "$DMG"
+  spctl -a -vv -t exec "$APP" || true
+  spctl -a -vv -t open --context context:primary-signature "$DMG"
+fi
 echo "$DMG"
