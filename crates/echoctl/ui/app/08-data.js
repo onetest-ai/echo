@@ -136,7 +136,7 @@ async function loadCall(name) {
     // Another call was chosen while this answer came (it is not shown, nor its notes edited as that
     // one), or a newer fetch was started: only the newest answer counts.
     if (S.selected !== name || mine !== callSeq) return
-    S.call = c
+    S.call = c; S.missing = null
     // Its minutes are read now (Today's "new" goes): once per call and minutes a session.
     if (c.notes && S.seenMinutes !== `${c.name}:${(c.notes_run && c.notes_run.finished_at) || ''}`) { S.seenMinutes = `${c.name}:${(c.notes_run && c.notes_run.finished_at) || ''}`; send({ cmd: 'minutes_seen', call: c.name }) }
     // A file that can't be read isn't "empty": the editor stays away from it (`notesTab` says why).
@@ -149,6 +149,8 @@ async function loadCall(name) {
     const moved = (S.calls || []).find((c) => c.name !== name && c.name.slice(0, 17) === stamp)
     if (moved && S.selected === name) { S.selected = moved.name; history.replaceState(null, '', `#call/${moved.name}/${S.tab}`); return loadCall(moved.name) }
     S.call = { error: String(e) }
+    // No such call: not polled again, and Calls leaves its error page (#150).
+    if (/^404 /.test(e.message || '')) S.missing = name
   }
 }
 
@@ -199,6 +201,11 @@ function route() {
     return
   }
   S.upSel = null
+  // Calls after a call that isn't there: the newest call, as a fresh load opens (#150).
+  if (h === 'calls' && S.selected && S.missing === S.selected) {
+    S.selected = (S.calls || []).length ? S.calls[0].name : null; S.call = null
+    if (S.selected) { history.replaceState(null, '', `#call/${S.selected}/minutes`); S.tab = 'minutes'; loadCall(S.selected).then(render) }
+  }
   const m = h.match(/^call\/([^/]+)(?:\/(\w+))?$/)
   if (m) {
     // Another call: a note typed or edited on this one goes into its notes first.
@@ -210,5 +217,5 @@ const go = (hash) => { if (location.hash.slice(1) !== hash) location.hash = hash
 /** An activity, where the user left it (the open call and tab; the calendar's day or week). */
 const goActivity = (id) => go(ACTIVITIES.some((a) => a.id === id && a.plugin) ? ((S.plRoutes || {})[id] ? `${id}/${S.plRoutes[id]}` : id) : id === 'calendar' ? `calendar/${S.cal.mode}` : id === 'settings' ? `settings/${S.setSection}`
   : id === 'tasks' ? 'tasks' : id === 'today' ? 'today' : id === 'brain' ? `brain/${S.br.tab}`
-  : id === 'projects' ? (S.pj.found ? 'found' : S.pj.client ? `client/${S.pj.client}/${S.pj.ctab || 'overview'}` : S.pj.sel ? `project/${S.pj.sel}/${S.pj.tab}` : 'projects') : (S.selected ? `call/${S.selected}/${S.tab}` : 'calls'))
+  : id === 'projects' ? (S.pj.found ? 'found' : S.pj.client ? `client/${S.pj.client}/${S.pj.ctab || 'overview'}` : S.pj.sel ? `project/${S.pj.sel}/${S.pj.tab}` : 'projects') : (S.selected && S.missing !== S.selected ? `call/${S.selected}/${S.tab}` : 'calls'))
 

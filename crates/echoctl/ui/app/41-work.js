@@ -340,7 +340,7 @@ function workPanel() {
   const hist = (n.history || []).slice().reverse().map((h) => {
     const what = h.by === 'human' && (h.op === 'xref' || h.op === 'unxref') ? `${h.op === 'xref' ? 'you linked it to' : 'you unlinked'} ${(projById(h.thread) || {}).name || h.thread} · ${h.target}${h.op === 'xref' ? (h.kind === 'same' ? (h.master === 'here' ? ' (the same work, done here)' : ' (the same work, done there)') : h.kind === 'depends_on' ? ' (waits on it)' : ' (it waits on this)') : ''}`
       : h.from ? `${h.effect || h.op} · heard in ${(projById(h.from.thread) || {}).name || h.from.thread}`
-      : h.by === 'human' ? (h.op === 'edit' ? `you set ${Object.keys(h.set || {}).map((k) => k === 'description' && rt ? rt.word : k.replace('_', ' ')).join(', ')}` : h.op === 'create' ? 'you created it' : `you: ${h.op}`)
+      : h.by === 'human' ? humanHistory(h, rt && rt.word)
       : h.op === 'answer' ? `${n.kind === 'risk' ? 'response' : 'answered'}: ${h.text || ''}`
       : h.op === 'create' ? `created${h.due_text ? ' · due ' + h.due_text : ''}` : h.effect ? `${h.effect === 'due' ? 'due ' + (h.due_text || '') : h.effect}${h.effect === 'done' || h.effect === 'held' ? '?' : ''}`
       : h.op === 'waiting' ? `waiting · ${h.who || '?'}` : h.op === 'link' ? `waits for ${h.depends_on}` : h.op === 'ac_met' ? `criterion ${h.ac} met` : h.op
@@ -415,3 +415,22 @@ function ledgerEdit(body, project = S.pj.sel) {
   }, 300)
 }
 
+// ── human history: what the user did to an item, in words (History in its details) ─────────────
+/** One of the user's own ledger edits as History says it: every op in words, none shown raw (#153). `word`: what
+ *  the item's description is called (its answer, the decision…), for an edit of it. No DOM: `ui/human-history.test.mjs`. */
+function humanHistory(h, word) {
+  const crit = (h.ac != null ? ` ${h.ac}` : '') + (h.ac_text ? ` (${h.ac_text})` : '')
+  switch (h.op) {
+    case 'edit': return `you set ${Object.keys(h.set || {}).map((k) => k === 'description' && word ? word : k.replace('_', ' ')).join(', ')}`
+    case 'create': return 'you created it'
+    case 'ac_add': return `you added a criterion${h.text ? `: ${h.text}` : ''}`
+    case 'ac_set': return h.met === true ? `you ticked criterion${crit}` : h.met === false ? `you unticked criterion${crit}`
+      : h.text ? `you reworded criterion${crit}: ${h.text}` : `you dropped criterion${crit}`
+    case 'link': return `you made it wait for ${h.depends_on || 'another item'}`
+    case 'unlink': return `you took away its wait for ${h.depends_on || 'another item'}`
+    case 'merge': return `you merged it into ${h.into || 'another item'}`
+    case 'delete': return 'you deleted it'
+    default: return 'you changed it'
+  }
+}
+// end of the human history block

@@ -351,6 +351,10 @@ function doc() {
   if (S.autoTab !== c.name && (c.status === 'recording' || c.status === 'transcribing')) { S.autoTab = c.name; S.tab = 'transcript' }
   if (S.autoTab === c.name && S.tab === 'transcript' && c.notes && c.notes_run && c.notes_run.state === 'done') { S.autoTab = 'done:' + c.name; S.tab = 'minutes' }
   if (!tabs.some((t) => t[0] === S.tab)) S.tab = 'minutes'
+  // A tab the window chose itself (above) is written into the URL too, or a click on the tab the URL still names
+  // would ask for the URL it already has and change nothing (#148).
+  const own = `#call/${c.name}/${S.tab}`
+  if (S.selected === c.name && decodeURIComponent(location.hash) !== own) history.replaceState(null, '', own)
   const people = c.people && c.people.length ? `<span class="people" title="${esc(c.people.join(', '))}">${esc(c.people.slice(0, 6).join(', '))}${c.people.length > 6 ? ` and ${c.people.length - 6} more` : ''}</span>` : ''
   const head = `${listToggle()}<div class="head-row">
         <div style="min-width:0">

@@ -40,9 +40,25 @@ pub fn resolve_call(arg: &str) -> Result<PathBuf> {
     Ok(dir)
 }
 
+/// The newest call by when it was recorded (`recorded_at`), not by folder name: a folder with no date
+/// (an imported or hand-made one, `old-dictation`) sorts after every dated name but is the oldest here.
+fn latest_call() -> Option<PathBuf> {
+    all_calls().into_iter().max_by(|a, b| recorded_at(a).cmp(&recorded_at(b)).then_with(|| a.cmp(b)))
+}
+
+/// When a call was recorded: its meta.json `started_at`, else the stamp its folder name starts with
+/// (this computer's local time); None when it has neither.
+fn recorded_at(dir: &Path) -> Option<DateTime<FixedOffset>> {
+    if let Some(t) = read_json(&dir.join("meta.json"))["started_at"].as_str().and_then(|v| DateTime::parse_from_rfc3339(v).ok()) {
+        return Some(t);
+    }
+    let stamp = chrono::NaiveDateTime::parse_from_str(&stamp_of(dir), "%Y-%m-%d_%H%M%S").ok()?;
+    stamp.and_local_timezone(Local).earliest().map(|t| t.fixed_offset())
+}
+
 fn find_call(arg: &str) -> Result<PathBuf> {
     if arg == "latest" {
-        return all_calls().pop().ok_or_else(|| anyhow!("no recorded calls in {}", paths::calls_dir().display()));
+        return latest_call().ok_or_else(|| anyhow!("no recorded calls in {}", paths::calls_dir().display()));
     }
     for p in [PathBuf::from(arg), paths::calls_dir().join(arg)] {
         if p.join("meta.json").exists() {
@@ -2452,6 +2468,33 @@ mod tests {
         let d = root.join("home/calls/2026-10-25_090000-atlas-planning");
         retitle(&d, "Atlas review", false).unwrap();
         assert!(root.join("home/calls/2026-10-25_090000-atlas-review").exists() && !d.exists());
+    }
+
+    #[test]
+    fn latest_is_the_newest_recording_not_the_last_folder_name() {
+        let (_env, _root) = crate::paths::testenv::folders("calls-latest");
+        let make = |name: &str, meta: Value| {
+            let d = paths::calls_dir().join(name);
+            fs::create_dir_all(&d).unwrap();
+            fs::write(d.join("meta.json"), meta.to_string()).unwrap();
+        };
+        make("2026-10-20_100000-older", json!({"title": "Older", "started_at": "2026-10-20T10:00:00+02:00"}));
+        make("2026-10-22_090000-newest", json!({"title": "Newest", "started_at": "2026-10-22T09:00:00+02:00"}));
+        // #147: no stamp in its name and no start: it sorts after every dated name, but it is the oldest.
+        make("old-dictation", json!({"title": "Old dictation"}));
+        // A stamp in its name and no start in meta.json: the stamp counts.
+        make("2026-10-21_120000-stamp-only", json!({"title": "Stamp only"}));
+        assert_eq!(resolve_call("latest").unwrap().file_name().unwrap(), "2026-10-22_090000-newest");
+        // A later start in meta.json wins over the name (a folder named by its own stamp).
+        make("2026-10-19_080000-moved", json!({"title": "Started later", "started_at": "2026-10-23T08:00:00+02:00"}));
+        assert_eq!(resolve_call("latest").unwrap().file_name().unwrap(), "2026-10-19_080000-moved");
+        // Only undated folders: one of them is still `latest`.
+        for d in fs::read_dir(paths::calls_dir()).unwrap().flatten() {
+            if d.file_name() != "old-dictation" {
+                fs::remove_dir_all(d.path()).unwrap();
+            }
+        }
+        assert_eq!(resolve_call("latest").unwrap().file_name().unwrap(), "old-dictation");
     }
 
     /// Inside a run, every command's call goes through `resolve_call`: checked in a child process
