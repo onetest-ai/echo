@@ -93,7 +93,9 @@ fn home_as_tilde(v: &mut Value, home: &Path) {
     for at in ["/claude_code/path", "/claude_code/terminal/found", "/claude_code/terminal/dir"] {
         let Some(x) = v.pointer_mut(at) else { continue };
         if let Some(rest) = x.as_str().and_then(|s| Path::new(s).strip_prefix(home).ok()) {
-            *x = json!(Path::new("~").join(rest).display().to_string());
+            // `~/a/b` on every system (a join would write `~\a\b` on Windows); the home folder itself is `~`.
+            let parts: Vec<String> = rest.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+            *x = json!(if parts.is_empty() { "~".to_string() } else { format!("~/{}", parts.join("/")) });
         }
     }
 }
@@ -366,6 +368,13 @@ mod tests {
         assert_eq!(v["claude_code"]["terminal"]["found"], "~/.local/bin/claude");
         assert_eq!(v["claude_code"]["terminal"]["dir"], "~/.local/bin");
         assert_eq!(v["claude_code"]["version"], "2.1");
+    }
+
+    #[test]
+    fn the_home_folder_itself_is_a_tilde() {
+        let mut v = json!({ "claude_code": { "terminal": { "dir": "/Users/someone" } } });
+        home_as_tilde(&mut v, Path::new("/Users/someone"));
+        assert_eq!(v["claude_code"]["terminal"]["dir"], "~");
     }
 
     #[test]
