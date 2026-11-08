@@ -41,7 +41,7 @@ tags: [calls, memo, threads]
 The memo is in Acme rollout only.
 
 ## Teardown
-- Run `echoctl project reset globex-pilot <the memo's folder>` (clears the exclusion the × made), then reload `{{base_url}}/#calls`
+- Run `echoctl project reset globex-pilot <the memo's folder>` (clears the exclusion the × made) and `echoctl project include globex-pilot <the memo's folder>` (pins it back: the × took the pin away), then `echoctl project of <the memo's folder>` lists acme-rollout and globex-pilot again; reload `{{base_url}}/#calls`
 
 ## Notes
 - Changes thread membership only (no Claude Code). The pairwise call.kind × call.threads group also puts a memo with several / one / none / a suggested thread in the data: `Memo 4` (none), `Memo 9` (one, Internal tooling), `Umbrella lead notes 1` (suggestion).

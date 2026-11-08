@@ -80,6 +80,6 @@ cases:
 - Stage 20 (`calls/TC-033`) starts with a full reload: the window opens a call being transcribed on Transcript once per
   load, and stage 7 has opened Quick check-in before. Stage 25's step 5 fails until #121 is fixed.
 - Stage 22 and 23 are the `prep` cases about calls (Prep tab first, a prep with only an error).
-- Stage 28 (My notes with the live notes) only reads Acme weekly sync, Initech planning and Quick check-in, which the stages before it leave as built; it opens My notes and leaves it open. Stage 29 (What moved in the right panel) only reads Acme weekly sync, the Memo and Initech planning; after stage 24 the Memo is in Acme rollout only, which stage 29 allows.
+- Stage 28 (My notes with the live notes) only reads Acme weekly sync, Initech planning and Quick check-in, which the stages before it leave as built; it opens My notes and leaves it open. Stage 29 (What moved in the right panel) only reads Acme weekly sync, the Memo and Initech planning; stage 24's teardown puts the Memo back in both of its threads.
 - No stage presses Write minutes, Write now, Sync now or Sign in…; Try again runs the data's fake Claude Code, which fails at once.
 - Not in the data (`tests/fixtures/README.md` → Skipped): a call being recorded, a minutes run queued or running, Today's minutes states being reworked, a call held by a Claude Code session (`held_by`), a missing or unreadable pinned AI profile.
