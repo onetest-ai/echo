@@ -60,7 +60,8 @@ pub(super) fn calls_page(q: &str) -> Value {
     }
     let total = dirs.len();
     let start = match &before {
-        Some(b) => dirs.iter().position(|d| d.file_name().is_some_and(|n| n.to_string_lossy().as_ref() < b.as_str())).unwrap_or(dirs.len()),
+        // The first call after the cursor in the list's own order (newest first: `calls::order_key`, reversed).
+        Some(b) => { let cur = calls::order_key(Path::new(b.as_str())); dirs.iter().position(|d| calls::order_key(d) < cur).unwrap_or(dirs.len()) }
         None => 0,
     };
     let page: Vec<&PathBuf> = dirs.iter().skip(start).take(limit).collect();
@@ -398,7 +399,7 @@ pub(super) fn act(v: &Value) -> bool {
         // Recordings from the window use the default AI profile (the account chip sets it); the app pins it at the
         // start. A profile per recording is the CLI's (`echoctl arm --ai`).
         "record" => watch::arm(None, None, languages(v), None).is_ok(),
-        // A memo: the user alone, now (the Record button's language and profile, as a call's).
+        // A memo: the user alone, now (the Record button's language, as a call's; the default AI profile).
         "record_memo" => match watch::memo_start(languages(v), None) {
             Ok(()) => true,
             Err(e) => {

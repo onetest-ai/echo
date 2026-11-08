@@ -28,13 +28,27 @@ pub fn all_calls() -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = fs::read_dir(paths::calls_dir())
         .map(|rd| rd.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.join("meta.json").exists()).collect())
         .unwrap_or_default();
-    dirs.sort_by_cached_key(|d| (is_dated(d), d.clone()));
+    dirs.sort_by(|a, b| order_key(a).cmp(&order_key(b)));
     dirs
 }
 
-/// Whether a call folder's name starts with its `YYYY-MM-DD_HHMMSS` stamp.
-fn is_dated(dir: &Path) -> bool {
-    chrono::NaiveDateTime::parse_from_str(&stamp_of(dir), "%Y-%m-%d_%H%M%S").is_ok()
+/// A call's place in `all_calls()`: undated folders before dated ones, each by name (a dated name sorts by its
+/// stamp, the local wall clock it was recorded at). The window's paging cursor compares by the same key.
+pub fn order_key(dir: &Path) -> (bool, &std::ffi::OsStr) {
+    let name = dir.file_name().unwrap_or_default();
+    (has_stamp(&name.to_string_lossy()), name)
+}
+
+/// Whether a folder name starts with a `YYYY-MM-DD_HHMMSS` stamp (by its shape, as `stamp_of` and the page's
+/// `callStamp` judge it).
+pub fn has_stamp(name: &str) -> bool {
+    let b = name.as_bytes();
+    b.len() >= 17
+        && b[..17].iter().enumerate().all(|(i, c)| match i {
+            4 | 7 => *c == b'-',
+            10 => *c == b'_',
+            _ => c.is_ascii_digit(),
+        })
 }
 
 /// Resolve `latest`, a path, or a folder name under calls/ to a call directory. Inside a minutes
@@ -92,14 +106,7 @@ pub fn lock_meta(dir: &Path) -> Result<crate::app::FileLock> {
 /// a stamp is its own key (its whole name).
 pub fn stamp_of(dir: &Path) -> String {
     let name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let b = name.as_bytes();
-    let stamp = b.len() >= 17
-        && b[..17].iter().enumerate().all(|(i, c)| match i {
-            4 | 7 => *c == b'-',
-            10 => *c == b'_',
-            _ => c.is_ascii_digit(),
-        });
-    if stamp { name[..17].to_string() } else { name }
+    if has_stamp(&name) { name[..17].to_string() } else { name }
 }
 
 /// The call folder with this stamp now (it may have been renamed since it was last seen). None
@@ -2463,7 +2470,7 @@ mod tests {
     }
 
     #[test]
-    fn latest_is_the_newest_recording_not_the_last_folder_name() {
+    fn latest_is_the_newest_dated_call_not_the_last_folder_name() {
         let (_env, _root) = crate::paths::testenv::folders("calls-latest");
         let make = |name: &str, meta: Value| {
             let d = paths::calls_dir().join(name);

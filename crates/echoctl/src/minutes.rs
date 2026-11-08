@@ -907,7 +907,7 @@ const CSS: &str = "
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--fg);
   font: 15px/1.6 -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; }
-main { max-width: 980px; margin: 0 auto; padding: 40px 20px 80px; overflow-wrap: anywhere; }
+main { max-width: 980px; margin: 0 auto; padding: 40px 20px 80px; overflow-wrap: break-word; }
 h1 { font-size: 28px; line-height: 1.25; margin: 0 0 18px; }
 h2 { font-size: 20px; margin: 44px 0 14px; padding-bottom: 6px; border-bottom: 2px solid var(--accent); }
 h3 { font-size: 17px; margin: 32px 0 8px; color: var(--accent); }

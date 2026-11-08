@@ -31,6 +31,10 @@ async function loadState() {
  *  again and puts it on top of what is loaded (new calls, changed statuses) — never every loaded call; scrolling to the
  *  end loads the next page; a search asks the app. `S.callsGen` drops an answer a newer search or reset made stale. */
 const CALLS_PAGE = 60
+/** A call folder's `YYYY-MM-DD_HHMMSS` stamp, or '' when its name has none (`calls::has_stamp`). */
+const callStamp = (name) => /^\d{4}-\d\d-\d\d_\d{6}/.test(name) ? name.slice(0, 17) : ''
+/** A call's place in the list, as the app orders it (`calls::order_key`): undated folders oldest, then by name. */
+const callOrder = (name) => (callStamp(name) ? '1' : '0') + name
 const callsQuery = () => S.query.trim() ? `&q=${encodeURIComponent(S.query.trim())}` : ''
 async function loadCalls(reset) {
   const gen = S.callsGen = (S.callsGen || 0) + (reset ? 1 : 0)
@@ -40,7 +44,7 @@ async function loadCalls(reset) {
     const have = reset ? [] : (S.calls || [])
     const last = r.calls.length ? r.calls[r.calls.length - 1].name : null
     // What is loaded beyond the first page stays (older calls; a call gone from the top is dropped with it).
-    const rest = last && r.next ? have.filter((c) => c.name < last) : []
+    const rest = last && r.next ? have.filter((c) => callOrder(c.name) < callOrder(last)) : []
     S.calls = [...r.calls, ...rest]
     S.callsNext = rest.length ? S.callsNext : r.next
     S.callsTotal = r.total; S.error = null
@@ -129,8 +133,6 @@ async function loadLayout() {
   for (const a of Layout.AREAS) if (now[a].open && !before[a].open && now[a].active) Layout.show(now[a].active, PANEL_VIEWS)
 }
 let callSeq = 0
-/** A call folder's `YYYY-MM-DD_HHMMSS` stamp, or '' when its name has none. */
-const callStamp = (name) => /^\d{4}-\d\d-\d\d_\d{6}/.test(name) ? name.slice(0, 17) : ''
 async function loadCall(name, retried = false) {
   const mine = ++callSeq, epoch = NotesSync.epoch(name)
   try {
@@ -138,6 +140,8 @@ async function loadCall(name, retried = false) {
     // Another call was chosen while this answer came (it is not shown, nor its notes edited as that
     // one), or a newer fetch was started: only the newest answer counts.
     if (S.selected !== name || mine !== callSeq) return
+    // Renamed meanwhile (the notes run retitles the folder): the app answers with the call under its stamp.
+    if (c.name && c.name !== name) { S.selected = c.name; history.replaceState(null, '', `#call/${c.name}/${S.tab}`) }
     S.call = c; S.missing = null
     // Its minutes are read now (Today's "new" goes): once per call and minutes a session.
     if (c.notes && S.seenMinutes !== `${c.name}:${(c.notes_run && c.notes_run.finished_at) || ''}`) { S.seenMinutes = `${c.name}:${(c.notes_run && c.notes_run.finished_at) || ''}`; send({ cmd: 'minutes_seen', call: c.name }) }
@@ -146,21 +150,13 @@ async function loadCall(name, retried = false) {
     syncEditor()
   } catch (e) {
     if (S.selected !== name || mine !== callSeq) return
-    // Retitled meanwhile (the notes run renames the folder): the same call keeps its stamp — a dated name only
-    // (`calls::stamp_of`: an undated folder is its own name, never another's rename).
-    const stamp = callStamp(name)
-    const moved = stamp && (S.calls || []).find((c) => c.name !== name && callStamp(c.name) === stamp)
-    if (moved && S.selected === name) { S.selected = moved.name; history.replaceState(null, '', `#call/${moved.name}/${S.tab}`); return loadCall(moved.name) }
     S.call = { error: String(e) }
-    // No such call: not polled again, and Calls leaves its error page (#150) — once a fresh list confirms it (a
-    // folder the notes run renamed a moment ago is under another name with the same stamp: open that one).
+    // No such call (the app follows a renamed folder by its stamp itself): not polled again, and Calls leaves its
+    // error page (#150) — unless a fresh list has it, being written a moment ago (a new recording): asked once more.
     if (/^404 /.test(e.message || '')) {
       await loadCalls()
       if (S.selected !== name || mine !== callSeq) return
-      const now = (S.calls || []).find((c) => c.name === name || (stamp && callStamp(c.name) === stamp))
-      if (now && now.name !== name) { S.selected = now.name; history.replaceState(null, '', `#call/${now.name}/${S.tab}`); return loadCall(now.name) }
-      // Listed under its own name: it was being written (a new recording's meta.json); asked for once more.
-      if (now && !retried) return loadCall(name, true)
+      if (!retried && (S.calls || []).some((c) => c.name === name)) return loadCall(name, true)
       S.missing = name
     }
   }
