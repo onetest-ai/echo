@@ -19,7 +19,7 @@ user_steps:
 
 ## Preconditions
 - Echo installed and running; `E=/Applications/Echo.app/Contents/MacOS/echoctl`
-- "Start Echo at login" on: **the user does:** tick it in Echo's own window → Settings → General (it is off after a fresh install) ( `$E app` shows `"autostart": true` and `~/Library/LaunchAgents/ai.onetest.echo.plist` exists)
+- "Start Echo at login" on: the first run turned it on (#133); `$E app` shows `"autostart": true` and `~/Library/LaunchAgents/ai.onetest.echo.plist` exists (if not, that is a FAIL of this case)
 
 ## Steps
 

@@ -14,7 +14,7 @@
   },
   {
    "id": "F-LIFE-02",
-   "feature": "Echo starts at login when set to, and doesn't when not",
+   "feature": "Echo starts at login when set to, and doesn't when not; an installed app's first run turns it on (a dev build's doesn't)",
    "priority": "high",
    "check": "person",
    "axes": [
@@ -66,6 +66,13 @@
    "axes": [
     "set.general"
    ]
+  },
+  {
+   "id": "F-LIFE-09",
+   "feature": "An Echo macOS runs translocated (a quarantined app not moved by Finder) never records its temporary path: app-path, the echoctl link and the login item point at the copy in Applications, or Echo asks to be moved there",
+   "priority": "high",
+   "check": "person",
+   "axes": []
   }
  ]
 }

@@ -42,10 +42,16 @@ pub fn bundle_path() -> Option<PathBuf> {
     bundle.extension().is_some_and(|e| e == "app").then(|| bundle.to_path_buf())
 }
 
-/// An installed app: the bundle we run from, else /Applications or ~/Applications (macOS);
-/// on Windows the binary itself is the app.
+/// A path macOS made up for a quarantined app it runs where it lies (App Translocation): a read-only
+/// copy under `…/AppTranslocation/<uuid>/`, gone once the app quits — never a place to point at (#132).
+pub fn translocated(p: &Path) -> bool {
+    p.components().any(|c| c.as_os_str() == "AppTranslocation")
+}
+
+/// An installed app: the bundle we run from (unless translocated), else /Applications or ~/Applications
+/// (macOS); on Windows the binary itself is the app.
 pub fn installed_app() -> Option<PathBuf> {
-    if let Some(b) = bundle_path() {
+    if let Some(b) = bundle_path().filter(|b| !translocated(b)) {
         return Some(b);
     }
     #[cfg(target_os = "macos")]
@@ -118,9 +124,34 @@ pub fn run(app: TargetApp, tray: bool, background: bool) -> Result<()> {
 /// `<config dir>/app-path` holds this executable's path, rewritten at each start.
 pub const APP_PATH_FILE: &str = "app-path";
 
+#[cfg(target_os = "macos")]
+const MOVE_TO_APPLICATIONS: &str = "macOS runs Echo from a temporary copy: drag Echo.app into Applications in Finder and open it from there, or the command line and Claude Code can't find it.";
+
+/// Nothing may point at a translocated Echo with no copy in Applications (the link, the login item): it is gone
+/// once the app quits (#132).
+fn refuse_translocated() -> Result<()> {
+    #[cfg(target_os = "macos")]
+    if bundle_path().is_some_and(|b| translocated(&b)) && installed_app().is_none() {
+        bail!("Move Echo to Applications first: {MOVE_TO_APPLICATIONS}");
+    }
+    Ok(())
+}
+
 fn record_app_path() {
     let Ok(exe) = std::env::current_exe() else { return };
     let exe = dunce::canonicalize(&exe).unwrap_or(exe);
+    // Translocated: the user is told to move it, every time (the copy running may be newer than one in
+    // Applications); meanwhile the copy in Applications, if there is one, else nothing.
+    #[cfg(target_os = "macos")]
+    let exe = if translocated(&exe) {
+        notify("Move Echo to Applications", MOVE_TO_APPLICATIONS);
+        match installed_app() {
+            Some(b) => b.join("Contents/MacOS/echoctl"),
+            None => return,
+        }
+    } else {
+        exe
+    };
     let dir = paths::config_dir();
     let _ = fs::create_dir_all(&dir);
     if fs::read_to_string(dir.join(APP_PATH_FILE)).ok().as_deref() != Some(&*exe.to_string_lossy()) {
@@ -325,8 +356,9 @@ impl NoWindow for Command {
 /// (a restart after a data-folder change, or `app start` right after `app quit`); on macOS it
 /// is a new instance (`open -n`), since plain `open` would just activate the quitting one.
 pub fn spawn_app(restart: bool) -> Result<()> {
+    // The bundle only when this binary is an app's: a dev build starts itself, with its own folders (#142).
     #[cfg(target_os = "macos")]
-    if let Some(bundle) = installed_app() {
+    if let Some(bundle) = bundle_path().and_then(|_| installed_app()) {
         let mut open = Command::new("open");
         if restart {
             open.args(["-n", "--env", &format!("{WAIT_FOR_LOCK}=1")]);
@@ -627,6 +659,16 @@ fn first_run() {
             download_model_in_background(rec);
         }
     }
+    // Start at login, on by default (docs/install.md) — for an installed app only, not a dev build (#133).
+    #[cfg(target_os = "macos")]
+    let installed = bundle_path().is_some() && installed_app().is_some();
+    #[cfg(not(target_os = "macos"))]
+    let installed = crate::update::can_install();
+    if installed && !autostart_enabled() {
+        if let Err(e) = set_autostart(true) {
+            eprintln!("start at login: {e:#}");
+        }
+    }
     // macOS shows the microphone / system audio / accessibility prompts for the app now,
     // rather than in the middle of the first call.
     #[cfg(target_os = "macos")]
@@ -731,6 +773,7 @@ pub fn set_autostart(on: bool) -> Result<()> {
             let _ = fs::remove_file(&plist);
             return Ok(());
         }
+        refuse_translocated()?;
         let args: Vec<String> = match installed_app() {
             Some(b) => vec!["/usr/bin/open".into(), "-g".into(), b.display().to_string()],
             None => vec![std::env::current_exe()?.display().to_string(), "app".into(), "run".into(), "--background".into()],
@@ -989,6 +1032,7 @@ pub fn connect_claude(scope: &str, project: Option<&Path>) -> Result<()> {
 
 /// The binary the command-line tool should point at: the installed app's, else this one.
 fn app_binary() -> Result<PathBuf> {
+    refuse_translocated()?;
     #[cfg(target_os = "macos")]
     if let Some(b) = installed_app() {
         return Ok(b.join("Contents/MacOS/echoctl"));
@@ -1502,6 +1546,15 @@ pub mod notifications {
 
 #[cfg(test)]
 mod tests {
+    use super::translocated;
+
+    #[test]
+    fn a_translocated_app_is_recognised_and_a_real_one_is_not() {
+        assert!(translocated(std::path::Path::new("/private/var/folders/x1/abc/T/AppTranslocation/0F3A-11/d/Echo.app/Contents/MacOS/echoctl")));
+        assert!(!translocated(std::path::Path::new("/Applications/Echo.app/Contents/MacOS/echoctl")));
+        assert!(!translocated(std::path::Path::new("/Users/sam/AppTranslocationNotes/Echo.app")));
+    }
+
     use super::FileLock;
 
     #[test]

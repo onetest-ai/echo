@@ -102,7 +102,7 @@ the user PATH (`app::add_to_user_path`).
 - The skill: search → open the best hits → search again in other words → answer with links.
 
 ### Packaging (where the plugin ships)
-- `scripts/package-macos.sh`: Developer ID, hardened runtime, notarized app, signed dmg; the plugin is bundled under
+- `scripts/package-macos.sh`: Developer ID, hardened runtime, notarized app, signed, notarized and stapled dmg; the plugin is bundled under
   `Contents/Resources/plugin`. `LOCAL=1`: ad-hoc signature, no notarization or dmg, `disable-library-validation`
   (an ad-hoc signature has no Team ID, and the hardened runtime would refuse the NeMo-Speech libraries).
 - `scripts/package-windows.ps1`: per-user MSI (`packaging/windows/echo.wxs`, WiX 5) → `%LOCALAPPDATA%\Programs\echo`
