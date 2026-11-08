@@ -187,6 +187,8 @@ pub fn sync(quiet: bool) -> Result<()> {
     let cfg = Config::load().unwrap_or_default();
     let cmd = cfg.calendar_command.clone().filter(|c| !c.is_empty()).or_else(default_command);
     let Some(cmd) = cmd else {
+        // No calendar any more (signed out, the skill removed): nothing can be "unread today".
+        let _ = std::fs::remove_file(failed_file());
         if !quiet {
             println!("{}", json!({ "synced": false, "reason": "no calendar command (msgraph skill not installed)" }));
         }
