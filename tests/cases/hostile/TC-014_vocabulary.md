@@ -39,7 +39,7 @@ platform: any
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | Navigate to `{{base_url}}/` and wait for the text "Your day". Run `browser_run_code_unsafe` with the guard code (see Checks): it records every dialog and page error from now on | It returns `armed` |
-| 2 | Navigate to `{{base_url}}/#calls` and click the book button (Vocabulary, `[data-panel-show="vocabulary"]`, or the button named "Vocabulary") | The right panel shows the Vocabulary tab with "Every call" and "Learned from calls" |
+| 2 | Start from the default layout: navigate to `{{base_url}}/#settings/layout` and click Reset (`[data-layout-reset]`, "Every view back to its own place and size": an earlier stage or run may have moved Vocabulary to the bottom panel). Then navigate to `{{base_url}}/#calls` and click the book button (Vocabulary, `[data-panel-show="vocabulary"]`, or the button named "Vocabulary") | The right panel shows the Vocabulary tab with "Every call" and "Learned from calls" |
 | 3 | Run `browser_evaluate` with `() => { const t = document.querySelector('[aria-label="Right panel"]').innerText; return t.includes('HOSTILE-01') && t.includes('Привіт') }` | Returns `true`: the "every call" term chip shows its emoji and Cyrillic text |
 | 4 | Run check A (`browser_evaluate`) | `handlers` 0, `inlineScripts` 0, `badUrls` 0, `brokenImgs` 0 and `scrollWidth` <= `innerWidth` |
 | 5 | Run `browser_evaluate` with `() => { const t = document.querySelector('[aria-label="Right panel"]').innerText; return t.includes('HOSTILE-02') && t.includes('<img src=x onerror=alert(1)>') }` | Returns `true`: the learned term shows the markup as text |

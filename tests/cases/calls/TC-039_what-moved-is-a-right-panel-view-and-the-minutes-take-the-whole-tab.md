@@ -25,7 +25,7 @@ tags: [calls, what-moved, minutes, panel]
 | Call | Threads | What moved |
 |---|---|---|
 | Acme weekly sync (today) | Acme rollout (has read it) | 6 changes |
-| Memo | Acme rollout, Globex pilot (neither has read it; in S-23, stage 24 leaves it in Acme rollout only) | a line per thread with Sync now, no count |
+| Memo | Acme rollout, Globex pilot (neither has read it) | a line per thread with Sync now, no count |
 | Initech planning | none | no view |
 
 ## Steps
@@ -39,7 +39,7 @@ tags: [calls, what-moved, minutes, panel]
 | 5 | Click that card's time chip (`#r-right .cc-row [data-at]`, the first) | The URL hash ends with `/transcript`: the transcript opens at that moment |
 | 6 | Click the card's item `T001` "Send the SSO checklist" (`#r-right .cc-node`, the one with T001) | The right panel shows "Details" with "T001" and "Send the SSO checklist" |
 | 7 | Click the panel tab `[data-panel-show="moved"]` | What moved is shown again, with its six cards |
-| 8 | Click the row Memo (in the list, `[role=option][data-call$="-memo"]`) | The panel still shows What moved, now with a line per thread the memo is in (Acme rollout "hasn't read this call yet"; Globex pilot, while the memo is still in it, "reads this call within a few minutes"), each with Sync now (not pressed); no count on the tab or the header button |
+| 8 | Click the row Memo (in the list, `[role=option][data-call$="-memo"]`) | The panel still shows What moved, now with two thread lines: Acme rollout "hasn't read this call yet" and Globex pilot "reads this call within a few minutes", each with Sync now (not pressed); no count on the tab or the header button |
 | 9 | Click the row Initech planning | No What moved button in the header and no What moved tab in the panel (the call is in no thread); the panel shows another view |
 
 ## Expected Final State

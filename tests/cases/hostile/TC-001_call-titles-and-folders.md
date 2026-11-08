@@ -23,9 +23,9 @@ platform: any
 
 | Piece | Where it lives |
 |---|---|
-| HOSTILE-61 | call title AND folder name `2026-11-05_090000-<img src=x onerror=alert(1)>-HOSTILE-61-שלום-Привіт` (the `data-call` attribute carries the folder) |
-| HOSTILE-115 | call `2026-11-04_080000-hostile-title-long`: 10 000-character word after the marker |
-| HOSTILE-116 | call `2026-11-02_080000-hostile-title-rtl`: right-to-left, an override character, combining marks |
+| HOSTILE-61 | call title AND folder name `<the build date − 1>_090000-<img src=x onerror=alert(1)>-HOSTILE-61-שלום-Привіт` (the `data-call` attribute carries the folder) |
+| HOSTILE-115 | call `<date>_080000-hostile-title-long`: 10 000-character word after the marker |
+| HOSTILE-116 | call `<date>_080000-hostile-title-rtl`: right-to-left, an override character, combining marks |
 | HOSTILE-117 | two calls `…-hostile-found-3` and `…-hostile-found-5`, title "Found HOSTILE-117 <img …>" |
 
 ## Checks (run exactly as written)
@@ -47,7 +47,7 @@ platform: any
 | 6 | Run `browser_evaluate` with `() => { const r = document.querySelector('[data-call*="hostile-title-rtl"]'); return { dir: getComputedStyle(r).direction, fits: r.scrollWidth <= r.clientWidth + 1, text: r.innerText.includes('HOSTILE-116') } }` | `dir` is `ltr`, `fits` is `true`, `text` is `true`: the right-to-left title does not flip or widen its row |
 | 7 | Fill `[aria-label="Search calls"]` with `HOSTILE-117` | Exactly two rows remain, both with the text "Found HOSTILE-117" followed by `<img src=x onerror=alert(1)>` |
 | 8 | Run check A (`browser_evaluate`) | `handlers` 0, `inlineScripts` 0, `badUrls` 0, `brokenImgs` 0 and `scrollWidth` <= `innerWidth` |
-| 9 | Clear the search box, then click the row `[data-call*="HOSTILE-61"]` | The URL hash starts with `#call/2026-11-05_090000-`; `main` shows a header with the title |
+| 9 | Clear the search box, then click the row `[data-call*="HOSTILE-61"]` | The URL hash starts with `#call/<the build date − 1>_090000-` (the hostile call is yesterday at 09:00) and its folder contains `HOSTILE-61`; `main` shows a header with the title |
 | 10 | Run `browser_evaluate` with `() => [...document.querySelectorAll('main')].some((e) => e.innerText.includes('<img src=x onerror=alert(1)>'))` | Returns `true`: the header shows `<img src=x onerror=alert(1)>` as text |
 | 11 | Run check A (`browser_evaluate`) | `handlers` 0, `inlineScripts` 0, `badUrls` 0, `brokenImgs` 0 and `scrollWidth` <= `innerWidth` |
 | 12 | Click `[data-pal-open]`, fill `[aria-label="Action"]` with `HOSTILE-61` | The dialog `.pal` lists the call in its Calls group; its row text contains `<img src=x onerror=alert(1)>` |
@@ -66,5 +66,5 @@ The three views and the palette showed the calls' titles as text; none ran code;
 - Navigate to `{{base_url}}/#today`. Nothing was changed, so no data needs undoing
 
 ## Notes
-- Today does not list these calls (they are dated 2026-11-01 to 2026-11-05); Today's meetings are in TC-002.
+- Today does not list these calls (they are dated before today: the data places them on the days before the build); Today's meetings are in TC-002.
 - The folder name is in `data-call` and in the URL hash; a hash with `<` and `>` must not break the route (the call opens).
