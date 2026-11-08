@@ -179,9 +179,7 @@ pub fn sync(quiet: bool) -> Result<()> {
         return match crate::graph::calendar_view(from, to) {
             Ok(events) => store(&events, quiet),
             Err(e) => {
-                if !quiet {
-                    println!("{}", json!({ "synced": false, "reason": format!("{e:#}") }));
-                }
+                failed(format!("{e:#}"), quiet);
                 Ok(())
             }
         };
@@ -202,20 +200,41 @@ pub fn sync(quiet: bool) -> Result<()> {
             Err(_) => vec![],
         },
         Ok(o) => {
-            if !quiet {
-                let why = String::from_utf8_lossy(&o.stderr).lines().last().unwrap_or("").to_string();
-                println!("{}", json!({ "synced": false, "reason": format!("calendar command failed: {why}") }));
-            }
+            let why = String::from_utf8_lossy(&o.stderr).lines().last().unwrap_or("").to_string();
+            failed(format!("calendar command failed: {why}"), quiet);
             return Ok(());
         }
         Err(e) => {
-            if !quiet {
-                println!("{}", json!({ "synced": false, "reason": e.to_string() }));
-            }
+            failed(e.to_string(), quiet);
             return Ok(());
         }
     };
     store(&events, quiet)
+}
+
+/// The last failed sync (`at`, `reason`), removed by a good one: a failed sync keeps the last agenda (#131).
+fn failed_file() -> PathBuf {
+    crate::paths::state_dir().join("calendar-failed.json")
+}
+
+fn failed(reason: String, quiet: bool) {
+    let _ = std::fs::create_dir_all(crate::paths::state_dir());
+    let _ = crate::paths::write_atomic(&failed_file(), json!({"at": Local::now().to_rfc3339(), "reason": reason}).to_string().as_bytes());
+    if !quiet {
+        println!("{}", json!({ "synced": false, "reason": reason }));
+    }
+}
+
+/// Whether today's calendar couldn't be read: a sync failed today and none has written the agenda today. Before the
+/// day's first sync, or with no calendar at all, nothing is said.
+pub fn unread_today() -> bool {
+    let today = Local::now().date_naive();
+    let failed_today = std::fs::read(failed_file()).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .and_then(|v| v["at"].as_str().and_then(|t| DateTime::parse_from_rfc3339(t).ok()))
+        .is_some_and(|t| t.with_timezone(&Local).date_naive() == today);
+    let synced_today = std::fs::metadata(crate::paths::state_dir().join("agenda.json")).and_then(|m| m.modified())
+        .is_ok_and(|t| DateTime::<Local>::from(t).date_naive() == today);
+    failed_today && !synced_today
 }
 
 /// Filter + convert Graph-shaped events into the agenda.
@@ -225,6 +244,7 @@ fn store(events: &[Value], quiet: bool) -> Result<()> {
     meetings.sort_by(|a, b| a.start.cmp(&b.start));
     let n = meetings.len();
     watch::write_agenda(&meetings)?;
+    let _ = std::fs::remove_file(failed_file());
     // Meetings of a series set to record always: "Record when it starts", each once.
     if let Err(e) = crate::series::schedule_always(&meetings) {
         eprintln!("series: {e:#}");
@@ -308,6 +328,28 @@ mod tests {
         let v = view_event(&ev).unwrap();
         assert_eq!(v["names"], json!(["Kim Park", "noor@globex.example"]), "rooms and who declined left out");
         assert_eq!(v["people"], 2, "and the count with them");
+    }
+
+    #[test]
+    fn the_calendar_is_unread_today_only_after_a_failed_sync_with_no_good_one_today() {
+        let (_env, _home) = crate::paths::testenv::folders("calendar-unread");
+        let yesterday = std::time::SystemTime::now() - std::time::Duration::from_secs(36 * 3600);
+        // The last good sync, last night: every meeting had ended, so it wrote an empty agenda (#131).
+        watch::write_agenda(&[]).unwrap();
+        std::fs::File::options().write(true).open(crate::paths::state_dir().join("agenda.json")).unwrap().set_modified(yesterday).unwrap();
+        assert!(!unread_today(), "no sync tried yet today (just after midnight): nothing to say");
+        // Today's sync fails (an expired sign-in): the empty agenda isn't today's.
+        failed("sign-in expired".into(), true);
+        assert!(unread_today(), "a failed sync today and no good one: the calendar couldn't be read");
+        // A failure from an earlier day says nothing of today.
+        crate::paths::write_atomic(&failed_file(), json!({"at": (Local::now() - Duration::days(2)).to_rfc3339()}).to_string().as_bytes()).unwrap();
+        assert!(!unread_today());
+        // A good sync today, then a passing failure: the agenda is today's.
+        failed("offline".into(), true);
+        store(&[], true).unwrap();
+        assert!(!unread_today(), "a good sync clears it");
+        failed("offline".into(), true);
+        assert!(!unread_today(), "the agenda was read today");
     }
 
     #[test]

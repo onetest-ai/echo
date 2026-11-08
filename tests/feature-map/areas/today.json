@@ -63,7 +63,7 @@
   },
   {
    "id": "F-TODAY-09",
-   "feature": "An agenda from an earlier day (a failed calendar sync keeps the last one) is not listed in Your day as today's: its meetings are left out and the day says the calendar couldn't be read today",
+   "feature": "After a failed calendar sync (it keeps the last agenda) Your day lists no meeting of an earlier day as today's, and once a sync has failed today with no good one today it says the calendar couldn't be read today (not before the day's first sync)",
    "priority": "medium",
    "check": "agent",
    "axes": []

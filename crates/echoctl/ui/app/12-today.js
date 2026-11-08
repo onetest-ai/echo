@@ -42,8 +42,8 @@ function todayView() {
     if (x.kind === 'meeting' && !past && !x.call) acts.push(x.scheduled ? `<button class="btn ghost" data-unschedule="${esc(x.event)}">Don't record</button>` : `<button class="btn ghost" data-schedule="${esc(x.event)}">Record when it starts</button>`)
     return `${line}<div class="td-row${past ? ' past' : ''}"><span class="td-t mono">${st ? esc(hm(st)) : ''}</span><div class="td-b"><div class="td-s"><b>${esc(x.subject || 'A call')}</b>${chips}</div><div class="td-a">${acts.join('')}</div></div></div>`
   }).join('') + (!nowDrawn && (d.day || []).length ? `<div class="td-now"><span>${esc(hm(now))}</span></div>` : '')
-  // A failed sync keeps an older agenda: its meetings aren't listed (the server leaves them out), and the day says so.
-  const stale = d.calendar_stale ? '<p class="set-sub td-stale"><span class="warn">The calendar couldn’t be read today: its meetings aren’t listed.</span></p>' : ''
+  // A sync failed today and none has read the calendar today (the server says): today's meetings may be missing.
+  const stale = d.calendar_stale ? '<p class="set-sub td-stale"><span class="warn">The calendar couldn’t be read today: today’s meetings may be missing.</span></p>' : ''
   const day = (d.day || []).length || stale ? `<section class="td-sec"><h2>Your day</h2>${stale}<div class="td-rows">${rows}</div></section>` : ''
   // My work: a card a task due this week or late — what you owe, what is owed to you, what you wait for.
   const all = (S.pj.data && S.pj.data.projects) || []
