@@ -28,6 +28,7 @@ cases.push(['a note on a short turn (saved at its start, rounded down) opens tha
 const overlap = [{ start: 40.2, end: 48 }, { start: 40.7, end: 44 }]
 cases.push(['two turns starting in the same second: the first of them', 40, 0, overlap])
 cases.push(['a moment after both began: the later of them', 45, 1, overlap])
+cases.push(['a note at a turn starting at 49.5 (saved at 49) stays on it, not on the next at 50.0', 49, 0, [{ start: 49.5, end: 49.9 }, { start: 50, end: 52 }]])
 let failed = 0
 for (const [name, t, want, ts = turns] of cases) {
   try { assert.equal(jumpTurn(ts, t), want); console.log(`ok - ${name}`) } catch (e) { failed++; console.log(`not ok - ${name}\n  ${e.message}`) }

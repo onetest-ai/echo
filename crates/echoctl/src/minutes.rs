@@ -848,7 +848,7 @@ const EMBED_JS: &str = "(function () {
     var block = el && el.closest('li, p, td, figure, blockquote, h1, h2, h3, h4');
     if (!block) return;
     e.preventDefault();
-    var ts = block.querySelector('.ts');
+    var ts = block.querySelector(':scope > .ts');
     var sel = String(window.getSelection ? window.getSelection() : '').replace(/\\s+/g, ' ').trim();
     var top = block;
     while (top.parentElement && top.parentElement.tagName !== 'MAIN') top = top.parentElement;

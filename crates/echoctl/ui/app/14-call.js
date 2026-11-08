@@ -106,8 +106,8 @@ function turnsHtml(segs, q, jump, marks = []) {
     // Detected remote speakers each get a color of their own (speakers.rs numbers them).
     const spk = !t.me && t.spk ? ` spk${((t.spk - 1) % 6) + 1}` : ''
     // My notes at this turn's moment: a dot each in the margin (the note's text on hover).
-    const next = turns[i + 1] ? turns[i + 1].start : Infinity
-    const mine = marks.filter((m) => m.t >= t.start - 1 && m.t < next - 1)
+    // On the turn its time opens, as a click on it would.
+    const mine = marks.filter((m) => jumpTurn(turns, m.t) === i)
     const dots = mine.length ? `<span class="nt-marks">${mine.map((m) => `<span class="nt-dot k-${m.kind}" title="${esc((NOTE_LOOK[m.kind] || NOTE_LOOK.note)[1] + (m.text ? ': ' + m.text : ''))}"></span>`).join('')}</span>` : ''
     return `<div class="turn ${t.me ? 'me' : 'remote'}${spk}${hit ? ' hit' : ''}" data-t="${t.start}" ${i === jumpIdx ? 'id="jump"' : ''}>
       <time>${dots}${clock(Math.floor(t.start))}</time>
