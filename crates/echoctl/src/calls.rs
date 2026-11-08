@@ -116,8 +116,7 @@ pub fn by_stamp(stamp: &str) -> Option<PathBuf> {
         return None;
     }
     // By name only (a folder's name starts with its stamp): no sort of the whole folder for one lookup.
-    let mut found = fs::read_dir(paths::calls_dir()).ok()?.flatten().map(|e| e.path())
-        .filter(|d| d.file_name().is_some_and(|n| n.to_string_lossy().starts_with(stamp)) && stamp_of(d) == stamp && d.join("meta.json").exists());
+    let mut found = fs::read_dir(paths::calls_dir()).ok()?.flatten().map(|e| e.path()).filter(|d| stamp_of(d) == stamp && d.join("meta.json").exists());
     let first = found.next()?;
     found.next().is_none().then_some(first)
 }
@@ -1505,7 +1504,26 @@ pub fn rename_to_title(dir: &Path) -> Result<PathBuf> {
         return Ok(dir.to_path_buf());
     }
     fs::rename(dir, &new_dir).with_context(|| format!("renaming {}", dir.display()))?;
+    // The names it had: a page or link still holding one finds the call (`renamed`), and only this one.
+    update_meta(&new_dir, |meta| {
+        let mut was: Vec<Value> = meta["renamed_from"].as_array().cloned().unwrap_or_default();
+        was.push(json!(name));
+        meta["renamed_from"] = json!(was);
+        Ok(())
+    })?;
     Ok(new_dir)
+}
+
+/// The call a folder name now belongs to after a rename (`rename_to_title` keeps the names it had in meta.json's
+/// `renamed_from`): None for a name no call had, or one that was deleted.
+pub fn renamed(name: &str) -> Option<PathBuf> {
+    if !has_stamp(name) {
+        return None;
+    }
+    fs::read_dir(paths::calls_dir()).ok()?.flatten().map(|e| e.path()).find(|d| {
+        d.file_name().is_some_and(|n| n.to_string_lossy().starts_with(&name[..17]))
+            && read_json(&d.join("meta.json"))["renamed_from"].as_array().is_some_and(|a| a.iter().any(|n| n.as_str() == Some(name)))
+    })
 }
 
 /// `echoctl note <text>`: append the user's own note to the call being recorded, stamped

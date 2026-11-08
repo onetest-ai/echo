@@ -566,8 +566,6 @@ document.addEventListener('dblclick', (e) => {
   if (h) { Layout.resize(h.dataset.resize, null); layoutChanged() }
 })
 
-// macOS: the top strip is the window's title bar (transparent, `window/mod.rs`): dragging it moves the
-// window, a double click zooms it — anywhere but on its controls.
 /** One plain setting, as Settings' controls and the top bar's account chip set it: shown at once (the next snapshot
  *  confirms it), then saved by the app. */
 function setSetting(key, val) {
@@ -586,6 +584,8 @@ function setSetting(key, val) {
   return render()
 }
 
+// macOS: the top strip is the window's title bar (transparent, `window/mod.rs`): dragging it moves the
+// window, a double click zooms it — anywhere but on its controls.
 const onTitleBar = (e) => MAC && e.button === 0 && e.target.closest && e.target.closest('#r-top') && !e.target.closest('button,select,label,a,input,.pill-note')
 document.addEventListener('mousedown', (e) => { if (onTitleBar(e) && e.detail === 1) { e.preventDefault(); send({ cmd: 'window_drag' }) } })
 document.addEventListener('dblclick', (e) => { if (onTitleBar(e)) send({ cmd: 'window_zoom' }) })

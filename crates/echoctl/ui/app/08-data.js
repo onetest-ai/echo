@@ -133,9 +133,9 @@ async function loadLayout() {
   for (const a of Layout.AREAS) if (now[a].open && !before[a].open && now[a].active) Layout.show(now[a].active, PANEL_VIEWS)
 }
 let callSeq = 0
-/** The selected call answered 404 and the list doesn't have it (an old link, a deleted call): it is not polled
- *  (#150), and Calls leaves its error page. Once the list has it again (restored, or written since), it loads. */
-const callGone = () => !!(S.selected && S.call && S.call.missing && !(S.calls || []).some((c) => c.name === S.selected))
+/** The selected call answered 404 (an old link, a deleted call): not polled every tick (#150), and Calls leaves its
+ *  error page. `tick` asks for it about every half minute, so a restored one loads again. */
+const callGone = () => !!(S.selected && S.call && S.call.missing)
 async function loadCall(name, retried = false) {
   const mine = ++callSeq, epoch = NotesSync.epoch(name)
   try {
@@ -144,8 +144,9 @@ async function loadCall(name, retried = false) {
     // one), or a newer fetch was started: only the newest answer counts.
     if (S.selected !== name || mine !== callSeq) return
     // Renamed meanwhile (the notes run retitles the folder): the app answers with the call under its stamp.
-    if (c.name && c.name !== name) { S.selected = c.name; if (S.view === 'calls') history.replaceState(null, '', `#call/${c.name}/${S.tab}`) }
-    S.call = c
+    // (The URL follows in `doc()`, the one place that writes it for a call.)
+    if (c.name && c.name !== name) S.selected = c.name
+    S.call = c; S.movedShown = !!(c.changes || []).length
     // Its minutes are read now (Today's "new" goes): once per call and minutes a session.
     if (c.notes && S.seenMinutes !== `${c.name}:${(c.notes_run && c.notes_run.finished_at) || ''}`) { S.seenMinutes = `${c.name}:${(c.notes_run && c.notes_run.finished_at) || ''}`; send({ cmd: 'minutes_seen', call: c.name }) }
     // A file that can't be read isn't "empty": the editor stays away from it (`notesTab` says why).
@@ -160,7 +161,7 @@ async function loadCall(name, retried = false) {
       await loadCalls()
       if (S.selected !== name || mine !== callSeq) return
       if (!retried && (S.calls || []).some((c) => c.name === name)) return loadCall(name, true)
-      // Missing: not polled until the list has it again (restored, or written since) — see `callGone`.
+      // Missing: asked for now and then only (`tick`), so a restored call comes back — see `callGone`.
       S.call.missing = true
     }
   }
@@ -171,8 +172,8 @@ async function loadCall(name, retried = false) {
 function hashText() { try { return decodeURIComponent(location.hash) } catch { return location.hash } }
 function route() {
   const h = hashText().slice(1)
-  // A menu of the page it leaves doesn't follow to the next one.
-  S.liveMenu = false
+  // A menu of the page it leaves doesn't follow to the next one (nor takes the next Escape).
+  S.liveMenu = false; S.pj.menu = false; S.pj.picker = false; S.pj.evPicker = null; S.pj.fieldsMenu = false; S.pj.colMenu = null; S.pj.viewMenu = false
   // An echo:// link the window was opened at (the system, `echoctl app open --link`): routed where it points.
   // The page opened at a link goes where the link points, or, for one Echo can't open, nowhere: no call is opened
   // for it at start-up (#168).

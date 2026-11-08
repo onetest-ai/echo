@@ -141,5 +141,5 @@ function movedPanel() {
 }
 // Shown for a call that is in a thread (each thread says what it changed, or why it hasn't read the call yet);
 // the tab carries the count of changes. A call in no thread has no such view, as Also discussed without the Brain.
-// Kept while the next call loads (no S.call yet): no flicker on a call switch.
-PANEL_VIEWS.push({ id: 'moved', label: 'What moved', icon: MOVED_ICON, area: 'right', when: () => S.view === 'calls' && !!S.selected && (!S.call || !!(S.call.changes || []).length), badge: () => movedCount(S.call) || '', render: movedPanel })
+// While the next call loads (no S.call yet) it stays as the last call had it: no flicker on a call switch.
+PANEL_VIEWS.push({ id: 'moved', label: 'What moved', icon: MOVED_ICON, area: 'right', when: () => S.view === 'calls' && !!S.selected && (S.call ? !!(S.call.changes || []).length : !!S.movedShown), badge: () => movedCount(S.call) || '', render: movedPanel })
