@@ -49,6 +49,6 @@ cases:
 ## Notes
 - Only what `small` holds: an empty Inbox and meetings with no prep. Open items (badge count, groups, per-kind buttons, Working…, Done rows) and written preps (sections, Write it again, the Prep tab of a recorded call) wait for the `standard` data set, which must hold them (for example a failed minutes run, a pending people suggestion, a written prep).
 - The Inbox panel is opened once for stages 1 and 2 (stage 1 opens it, stage 2 reads it and closes it); stage 3 opens and closes it as its own check and ends on `#calls`, where the prep stages go on. Coming up today is unfolded once (stage 4) and folded once (stage 8's Teardown); stages 5 and 6 read the same meeting. If a view a stage continues from isn't there (an earlier stage failed), run the skipped steps as written.
-- Build by 22:50 local: the prep stages need two meetings still to come today (after about 20:45 the later one comes sooner).
+- Build by 22:50 local: the prep stages need two meetings still to come today (after about 20:20 the later ones come sooner).
 - No stage presses Prepare now or any Inbox button.
 - Stage 9 empties the day with the CLI (agenda cleared, today's calls deleted, the task closed) and restores the calls and the task; the agenda stays empty, so it runs last.

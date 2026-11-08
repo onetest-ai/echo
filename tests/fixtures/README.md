@@ -21,9 +21,9 @@ tests/fixtures/wait.py <seconds> <condition>
 with file-fed calls"); `wait.py` waits for the run's app state, an event or a file, with a timeout, instead of a fixed
 `sleep`.
 
-Build between 06:00 and 22:50: today's calls lie hours before now and its meetings up to 2.6 h after. Meetings that
-would start after 23:20 are squeezed into 23:20–23:50 (`day_clock`: same order, closer together; built before about
-20:45 nothing moves). The meetings "to come" always start 37 minutes after the build and the live ones end 20 minutes
+Build between 06:00 and 22:50: today's calls lie hours before now and its meetings up to 3 h after. Meeting times
+that would fall after 23:20 (starts and ends) are squeezed into 23:20–23:50 (`day_clock`: same order, closer
+together; built before about 20:20 nothing moves). The meetings "to come" always start 37 minutes after the build and the live ones end 20 minutes
 after it, so the cases' timings hold; after 22:50 those would end tomorrow, and before 06:00 the calls of the last
 6 hours would be yesterday's, so the generator refuses. For checks that don't need Today to match the real
 clock, `--now 2026-11-06T12:00` builds as of that time (`serve.sh up <dir> <port> --set standard --now …`).

@@ -92,10 +92,10 @@ def iso(t):
     return t.isoformat(timespec="seconds")
 
 
-# The data's future, hours after now: today's meetings reach 2.6 h ahead. What would land after 23:20 is squeezed into
+# The data's future, hours after now: today's meetings reach 3 h ahead (the small set's Acme demo ends then). What would land after 23:20 is squeezed into
 # 23:20–23:50 (same order, closer together) rather than pinned to one time or pushed past midnight; earlier times are
-# exact. Building before about 20:45 nothing moves. The meetings "to come" stay exactly 37 minutes after the build.
-AHEAD_H = 2.6
+# exact. Building before about 20:20 nothing moves. The meetings "to come" stay exactly 37 minutes after the build.
+AHEAD_H = 3.0
 
 
 def day_clock(now):
@@ -286,15 +286,15 @@ def build_small(d):
 - [ ] Me — draft the Globex pilot plan [00:13]
 """, actions=[{"id": "glob0001", "owner": "Me", "task": "Draft the Globex pilot plan", "due": None, "quote": "I'll draft the pilot plan and share it next week.", "confidence": "high", "status": "open"}])
 
-    def meeting(event, subject, start, minutes, people, response="accepted"):
-        return {"id": event, "subject": subject, "start": iso(start), "end": iso(start + timedelta(minutes=minutes)), "organizer": me,
+    def meeting(event, subject, hours, minutes, people, response="accepted"):  # starts at(hours); a late end is squeezed too
+        return {"id": event, "subject": subject, "start": iso(at(hours)), "end": iso(at(hours + minutes / 60)), "organizer": me,
                 "attendees": people, "join_url": f"https://teams.example/{event}", "source": "test", "response": response}
     agenda = [
-        meeting("ev-acme-sync", "Acme weekly sync", at(-3), 30, [dana, omar]),
-        meeting("ev-initech-plan", "Initech planning", at(-1.5), 20, [lee]),
-        meeting("ev-globex-review", "Globex design review", at(1), 30, [kim]),
-        meeting("ev-webinar", "Industry webinar", at(1.5), 60, [kim], response="notResponded"),
-        meeting("ev-acme-demo", "Acme demo", at(2.5), 30, [dana]),
+        meeting("ev-acme-sync", "Acme weekly sync", -3, 30, [dana, omar]),
+        meeting("ev-initech-plan", "Initech planning", -1.5, 20, [lee]),
+        meeting("ev-globex-review", "Globex design review", 1, 30, [kim]),
+        meeting("ev-webinar", "Industry webinar", 1.5, 60, [kim], response="notResponded"),
+        meeting("ev-acme-demo", "Acme demo", 2.5, 30, [dana]),
     ]
     agenda_file = os.path.join(home, "agenda.json")
     json.dump(agenda, open(agenda_file, "w"), indent=2)
