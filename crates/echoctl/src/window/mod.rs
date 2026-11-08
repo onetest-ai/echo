@@ -477,9 +477,10 @@ pub fn window_cmd(msg: &str) -> Option<WindowCmd> {
         "window_min" => Some(WindowCmd::Minimize),
         "window_sync" => Some(WindowCmd::Sync),
         "window_resize_top" => Some(WindowCmd::ResizeTop(match v["edge"].as_str()? {
+            "n" => tao::window::ResizeDirection::North,
             "nw" => tao::window::ResizeDirection::NorthWest,
             "ne" => tao::window::ResizeDirection::NorthEast,
-            _ => tao::window::ResizeDirection::North,
+            _ => return None,
         })),
         _ => None,
     }
@@ -940,8 +941,9 @@ mod tests {
         assert!(matches!(window_cmd(r#"{"cmd":"window_resize_top","edge":"n"}"#), Some(WindowCmd::ResizeTop(D::North))));
         assert!(matches!(window_cmd(r#"{"cmd":"window_resize_top","edge":"nw"}"#), Some(WindowCmd::ResizeTop(D::NorthWest))));
         assert!(matches!(window_cmd(r#"{"cmd":"window_resize_top","edge":"ne"}"#), Some(WindowCmd::ResizeTop(D::NorthEast))));
-        // No edge: not a resize (the page always names one).
+        // No edge, or one the page never sends: not a resize.
         assert!(window_cmd(r#"{"cmd":"window_resize_top"}"#).is_none());
+        assert!(window_cmd(r#"{"cmd":"window_resize_top","edge":"sw"}"#).is_none());
         // Closing isn't a window command: it goes the save-first way (`closing` → `close_request`).
         assert!(window_cmd(r#"{"cmd":"close_request"}"#).is_none());
         assert!(matches!(closing(r#"{"cmd":"close_request"}"#), Some(Closing::Request)));
