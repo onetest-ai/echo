@@ -205,6 +205,8 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && S.lightbox) { S.lightbox = null; return render() }
   if (e.key === 'Escape' && S.todayClose) { S.todayClose = null; return render() }
   if (e.key === 'Escape' && S.needsDlg) { S.needsDlg = null; return render() }
+  // The work board's own menus (Fields, a column's ⋯, the view's): Escape closes them as it closes the call's (#152).
+  if (e.key === 'Escape' && (S.pj.fieldsMenu || S.pj.colMenu || S.pj.viewMenu)) { S.pj.fieldsMenu = false; S.pj.colMenu = null; S.pj.viewMenu = false; return render() }
   if (e.key === 'Escape' && (S.stopAsk || S.listOpen || S.menuOpen || S.laterOpen || S.convAsk || S.overlay || S.barOver)) { S.barOver = false; S.convAsk = null; S.stopAsk = false; S.listOpen = false; S.menuOpen = false; S.laterOpen = false; S.overlay = false; return render() }
   if ((MAC ? e.metaKey : e.ctrlKey) && e.key === ',') { e.preventDefault(); return goActivity('settings') }
   if ((MAC ? e.metaKey : e.ctrlKey) && e.key === '`') { e.preventDefault(); return claudePanel() }
