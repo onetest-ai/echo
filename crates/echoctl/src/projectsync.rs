@@ -394,7 +394,7 @@ mod tests {
     /// `guard::MIN_CLAUDE` is stopped for them too — even when it goes on to answer.
     #[cfg(unix)]
     #[test]
-    fn a_plugin_run_on_a_claude_code_too_old_for_the_guard_is_stopped() {
+    fn a_run_finished_here_on_a_claude_code_too_old_for_the_guard_is_stopped() {
         let (_env, root) = crate::paths::testenv::folders("run-too-old");
         let _fake = crate::ai::fake::install(&root);
         let p = crate::ai::fake::profile("old", None, &crate::ai::fake::signed_in("pat@example.com"));
