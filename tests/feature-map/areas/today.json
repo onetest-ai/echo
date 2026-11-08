@@ -28,7 +28,7 @@
   },
   {
    "id": "F-TODAY-04",
-   "feature": "Needs you now lists what waits on the user from Teams and mail in the last 24 h (burning first), with Reply in Teams / Read and reply, I'll do it (a task in a thread), Won't do (a dialog that needs a comment: why, or who it's for; Cancel keeps the item)",
+   "feature": "Needs you now lists what waits on the user from Teams and mail in the last 24 h (burning first), with Reply (Teams' logo or an envelope), I'll do it (a task in a thread) and Won't do (a dialog that needs a comment: why, or who it's for; Cancel keeps the item) — I'll do it and Won't do as icons, each action named in its label and tooltip",
    "priority": "high",
    "check": "agent",
    "axes": []
