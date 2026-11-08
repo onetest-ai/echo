@@ -24,7 +24,7 @@ tags: [calendar, card, action]
 
 | Meeting (id) | State | Action(s) on the card (a Prepare or Show prep may sit beside them) | Line under them (`.why`; a prep adds its sentence: …) |
 |---|---|---|---|
-| Acme weekly sync (`ev-acme-sync`) | recorded, of a series | Open notes; under "Every meeting of this series": Record (pressed), Don't record | Minutes, 30 min |
+| Acme weekly sync (`ev-acme-sync`) | recorded, of a series | Open notes; under "Every meeting of this series": Record (pressed), Ask, Don't record | Minutes, 30 min |
 | Globex steering (`ev-globex-steering`) | recorded (imported) | Open notes | A call made of its Teams transcript, 45 min |
 | Acme design review (`ev-m01`) | past, not recorded, Teams link | Import Teams transcript | Not recorded. If Teams transcribed it: Echo makes a call of its transcript and chat; minutes, threads and the Brain follow. |
 | Globex office hours (`ev-m02`) | live, scheduled, no link | Don't record | Echo starts recording a minute before it begins, transcribed as Ukrainian. |

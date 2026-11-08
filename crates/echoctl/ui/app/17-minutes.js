@@ -74,13 +74,14 @@ function minutesHint(c, heading, lead) {
       : 'Write them once the call is transcribed.'
     return box('Minutes come after the call', `<p>${esc(when)}</p>`, '')
   }
-  // No transcript to write them from: say why, and how to transcribe it (not Write minutes).
+  // No transcript to write them from: say why (not Write minutes). Transcribing again is offered only
+  // after a failure — an audio-only call may be queued, and a second run would race the app's.
   if (!c.notes && (c.status === 'failed' || c.status === 'audio')) {
     const again = `echoctl transcribe ${c.name}`
-    const why = c.status === 'failed'
-      ? `<p>Transcribing this call failed${c.transcribe_error ? `: ${esc(c.transcribe_error)}` : '.'}</p>`
-      : '<p>This recording isn\'t transcribed yet.</p>'
-    return box('No transcript, so no minutes', `${why}<p class="alt">Transcribe it in a terminal: <code>${esc(again)}</code> <button class="btn ghost" data-copy="${esc(again)}">Copy</button></p>`, log)
+    const body = c.status === 'failed'
+      ? `<p>Transcribing this call failed${c.transcribe_error ? `: ${esc(c.transcribe_error)}` : '.'}</p><p class="alt">Transcribe it again in a terminal: <code>${esc(again)}</code> <button class="btn ghost" data-copy="${esc(again)}">Copy</button></p>`
+      : '<p>This recording isn\'t transcribed yet. Echo transcribes it on this computer; the minutes can be written after that.</p>'
+    return box('No transcript, so no minutes', body, log)
   }
   if (!run && auto.due === 'now') return box('Starting the minutes…', '<p>Echo is starting them now.</p>', '', true)
   // A Claude Code session holds the call (#43): who, since when — and Write minutes takes it over.

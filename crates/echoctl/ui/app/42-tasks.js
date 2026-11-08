@@ -364,8 +364,8 @@ function eventPrep(e, st) {
   return { btn: `<button class="btn" data-prep-write="${esc(p.id)}" data-prep-open="1">Prepare</button>`, line: 'Prepare writes last time, what is open, what is new and who is coming.' }
 }
 
-/** A recurring meeting in the calendar: record every meeting of its series or not (the default), and in which
- *  language — that's all. A choice on the Record button for one meeting still wins. */
+/** A recurring meeting in the calendar: record every meeting of its series, ask at each ("Record?"), or not (the
+ *  default), and in which language — that's all. A choice on the Record button for one meeting still wins. */
 function seriesEditor(e) {
   const x = e.series
   if (!x || !x.key) return ''
