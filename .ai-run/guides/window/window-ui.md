@@ -29,12 +29,12 @@
 - R22. One scroll per card, never the page: the view's head stays put, each card scrolls inside with a least height and is never squeezed. Evidence: `ui/css/`
 
 ### Constraints
-| Do not | Do instead | Why | Evidence |
-|---|---|---|---|
-| Rename or remove a block marker such as `// end of the workbench block` | Keep the markers and move code inside them | the node tests slice the joined script (`ui/source.mjs::appSource`) by these exact strings and fail otherwise | `workbench.test.mjs::ACTIVITIES` |
+| Do not | Do instead | Evidence |
+|---|---|---|
+| Rename or remove a block marker such as `// end of the workbench block` | Keep the markers and move code inside them | `workbench.test.mjs::ACTIVITIES` |
 
 ### Read first
-| When you are | Exemplar | Why this one | Tests |
-|---|---|---|---|
-| adding a page action | `window::settings::handle` | an area's `cmd` arms, feature-gated arms, background threads | `window::only_the_windows_own_page_reaches_its_actions` |
-| adding tested window logic | `Palette` (window script) | self-contained IIFE inside its markers | `palette.test.mjs::Palette` |
+| When you are | Exemplar | Tests |
+|---|---|---|
+| adding a page action | `window::settings::handle` | `window::only_the_windows_own_page_reaches_its_actions` |
+| adding tested window logic | `Palette` (window script) | `palette.test.mjs::Palette` |

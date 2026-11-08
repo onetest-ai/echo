@@ -41,9 +41,9 @@ Examples: `Memos: record yourself, no call; …` · `Echo X.Y.Z` (a release). Th
 
 ## Anti-Patterns
 
-| Do not | Do instead | Why |
-|---|---|---|
-| Force-push a shared branch with `--force` | `git push --force-with-lease` after a rebase, and only on your own branch | a teammate's commits survive |
+| Do not | Do instead |
+|---|---|
+| Force-push a shared branch with `--force` | `git push --force-with-lease` after a rebase, and only on your own branch |
 
 ## Troubleshooting
 

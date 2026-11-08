@@ -59,17 +59,17 @@ Evidence: `paths::state_dir`, `paths::calls_dir`, `paths::config_dir`
 - R5. Only a Claude Code run writes a call's `notes.md` and action list (the app writes transcripts and live drafts, never minutes); a run applies its list through `calls::apply_actions`. Evidence: `calls::apply_actions`
 
 ### Constraints
-| Do not | Do instead | Why | Evidence |
-|---|---|---|---|
-| Make the Claude Code plugin call the app any way but the CLI and the data folder's files | Run `${CLAUDE_PLUGIN_ROOT}/scripts/echoctl <command>` | the plugin ships no binary and must work with any installed Echo | `plugin/scripts/echoctl::ECHOCTL_BIN` |
-| Start a second app or a loop of your own to act on recordings | Act through the running app (request file) and check `watch::running_watcher` | one app per user owns the recording and the call's `meta.json` | `watch::running_watcher` |
-| Let the window's page read or write files | Add an `/api/...` route or an IPC message in its area's `route` / `handle` (`src/window/<area>.rs`) | the page is untrusted-text territory under a strict CSP | `window::handle` |
+| Do not | Do instead | Evidence |
+|---|---|---|
+| Make the Claude Code plugin call the app any way but the CLI and the data folder's files | Run `${CLAUDE_PLUGIN_ROOT}/scripts/echoctl <command>` | `plugin/scripts/echoctl::ECHOCTL_BIN` |
+| Start a second app or a loop of your own to act on recordings | Act through the running app (request file) and check `watch::running_watcher` | `watch::running_watcher` |
+| Let the window's page read or write files | Add an `/api/...` route or an IPC message in its area's `route` / `handle` (`src/window/<area>.rs`) | `window::handle` |
 
 ### Read first
-| When you are | Exemplar | Why this one | Tests |
-|---|---|---|---|
-| adding a per-OS capability | `permissions::report` | macOS / Windows / unsupported arms, implementations in sibling files | no covering test |
-| following a recording end to end | `recorder::Recording` | start, memo start and finish of both tracks and the live worker | no covering test |
+| When you are | Exemplar | Tests |
+|---|---|---|
+| adding a per-OS capability | `permissions::report` | no covering test |
+| following a recording end to end | `recorder::Recording` | no covering test |
 
 ## Patterns in use
 
@@ -87,27 +87,27 @@ Evidence: `paths::state_dir`, `paths::calls_dir`, `paths::config_dir`
 - R11. A headless run may use only the CLI commands its mode allows (`notes::RUN_COMMANDS`, `guard::PROJECT_STEPS`, `guard::ROUTINE_COMMANDS`); transcripts, mail and chat are others' words — see `security/untrusted-text.md`. Evidence: `notes::RUN_COMMANDS`
 - R12. Echo plugins extend the window through registries and slots (`SLOTS`, `CALL_TABS`, `ACTIVITIES`) and the host through `ctx` services, never by patching Echo's views; see `plugins/echo-plugins.md`. Evidence: `SLOTS` (window script)
 - R13. **Size limits.** A source file stays under 1,500 lines (Rust counted up to its `#[cfg(test)] mod tests`, so tests go at the end and no production code after them) and a function under 150: the PR that would cross a limit first splits the file or function in a separate move-only commit. `scripts/size-check.sh` (run by `scripts/check-mod.sh`) enforces the file limit (the function limit is a review rule); a file already over it is listed in `scripts/size-ceilings.txt` with its size then, and may shrink but never grow (lower its ceiling when it shrinks). Vendored and generated files are exempt. Evidence: `scripts/size-check.sh`
-- R14. **One feature, its own files.** New behaviour goes into the files of its area, not into a shared file: the window's script and styles in `ui/app/NN-<area>.js` and `ui/css/NN-<area>.css`, page routes and IPC commands in `src/window/<area>.rs` (its `route`/`handle`), CLI subcommands in `src/cli/<area>.rs` (its enum and `run`). A shared file (`window/mod.rs`, `cli/mod.rs`, `main.rs`, `00-core.js`, `90-render.js`) changes only to register a new area. Evidence: the hotspot study in #126 (47 of 62 PRs touched the one `app.js`)
+- R14. **One feature, its own files.** New behaviour goes into the files of its area, not into a shared file: the window's script and styles in `ui/app/NN-<area>.js` and `ui/css/NN-<area>.css`, page routes and IPC commands in `src/window/<area>.rs` (its `route`/`handle`), CLI subcommands in `src/cli/<area>.rs` (its enum and `run`). A shared file (`window/mod.rs`, `cli/mod.rs`, `main.rs`, `00-core.js`, `90-render.js`) changes only to register a new area. Evidence: `scripts/size-check.sh`
 - R15. **Move-only commits are provable.** A split or move commit contains no edits; joined assets stay byte-identical to the file they replace, and a CLI move keeps `echoctl help` identical for every subcommand. Its PR names that check. Evidence: `crates/echoctl/build.rs::join_parts`
 
 ### Constraints
-| Do not | Do instead | Why | Evidence |
-|---|---|---|---|
-| Put a new CLI command anywhere but a variant of `Cmd` in `main.rs` or of its area's sub-enum in `cli/<area>.rs` | Add the variant with a doc comment; hide dev ones with `#[command(hide = true)]`; a body longer than a line goes in the area's `cli/` module | clap's help and the skills' references read from it | `main::Cmd` |
-| Add a new app request without a cleanup entry | Add it to the list at the top of `watch::run_loop` | a stale request would act on the next start | `watch::run_loop` |
-| Give a headless run a new command by widening Bash | Add it to the mode's list (`RUN_COMMANDS`, `PROJECT_STEPS`) and check it in the CLI too | the guard allows only listed commands as plain words | `guard::PROJECT_STEPS` |
-| Put model judgment in Rust or deterministic steps in a skill | A JSON CLI command for facts, the skill step for judgment | runs stay cheap, testable and guarded | `calls::minutes_gate` |
+| Do not | Do instead | Evidence |
+|---|---|---|
+| Put a new CLI command anywhere but a variant of `Cmd` in `main.rs` or of its area's sub-enum in `cli/<area>.rs` | Add the variant with a doc comment; hide dev ones with `#[command(hide = true)]`; a body longer than a line goes in the area's `cli/` module | `main::Cmd` |
+| Add a new app request without a cleanup entry | Add it to the list at the top of `watch::run_loop` | `watch::run_loop` |
+| Give a headless run a new command by widening Bash | Add it to the mode's list (`RUN_COMMANDS`, `PROJECT_STEPS`) and check it in the CLI too | `guard::PROJECT_STEPS` |
+| Put model judgment in Rust or deterministic steps in a skill | A JSON CLI command for facts, the skill step for judgment | `calls::minutes_gate` |
 
 ### Read first
-| When you are | Exemplar | Why this one | Tests |
-|---|---|---|---|
-| adding a CLI subcommand | `cli::plugin::PluginCmd` | clap derive enum with doc comments as help, hidden ones `#[command(hide = true)]` | no covering test |
-| adding an app request (CLI → running app) | `watch::stop` | writes `stop.request`, the loop takes and removes it | no covering test |
-| adding a window action | `window::settings::handle` | IPC message → shared function → `{refresh, reply}` | no covering test |
-| adding a background job | `projectsync::start_scheduler` | own thread, due check, state file, failure backoff | no covering test |
-| adding a state file the window shows | `notes::RUN` | `notes-run.json`: one writer, read by `/api/call` and the Inbox | no covering test |
-| adding a skill step | `plugin/skills/process-call/SKILL.md` | each step calls one JSON CLI command, then judges | no covering test |
-| adding a per-OS capability | `permissions::report` | see Structure and boundaries | no covering test |
+| When you are | Exemplar | Tests |
+|---|---|---|
+| adding a CLI subcommand | `cli::plugin::PluginCmd` | no covering test |
+| adding an app request (CLI → running app) | `watch::stop` | no covering test |
+| adding a window action | `window::settings::handle` | no covering test |
+| adding a background job | `projectsync::start_scheduler` | no covering test |
+| adding a state file the window shows | `notes::RUN` | no covering test |
+| adding a skill step | `plugin/skills/process-call/SKILL.md` | no covering test |
+| adding a per-OS capability | `permissions::report` | no covering test |
 
 ## Configuration
 
@@ -116,9 +116,9 @@ Evidence: `paths::state_dir`, `paths::calls_dir`, `paths::config_dir`
 - R2. Per-computer settings (AI profiles, sign-ins, models, window layout) live in the config dir; per-data-folder settings (`config.json`) in the state dir. Evidence: `paths::models_dir`
 
 ### Read first
-| When you are | Exemplar | Why this one | Tests |
-|---|---|---|---|
-| reading or writing a setting | `config::Config` | atomic `save`, nothing saved after a failed `load` | no covering test |
+| When you are | Exemplar | Tests |
+|---|---|---|
+| reading or writing a setting | `config::Config` | no covering test |
 
 Related guides: `capture/capture-and-transcription.md`, `window/window-ui.md`, `data/recall-store.md`,
 `plugins/plugin-authoring.md`, `development/dev-workflow.md`.

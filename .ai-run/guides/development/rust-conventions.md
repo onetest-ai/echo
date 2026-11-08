@@ -13,7 +13,7 @@
 - R6. Release by bumping the version in `Cargo.toml` `[workspace.package]`, `Cargo.lock` and `plugin/.claude-plugin/plugin.json` together in one `Echo X.Y.Z` commit (the release commits 23f9d33 and be64ae3 touch exactly these). Evidence: `Cargo.toml::version`
 
 ### Read first
-| When you are | Exemplar | Why this one | Tests |
-|---|---|---|---|
-| changing a call's metadata | `calls::update_meta` | lock, re-read, atomic write in one helper | no covering test |
-| adding a JSON settings or registry file | `plugins::Registry.update` | lock + re-read + `write_atomic`, `NotFound` loads the default | `plugins::install_update_and_remove_from_a_local_marketplace` |
+| When you are | Exemplar | Tests |
+|---|---|---|
+| changing a call's metadata | `calls::update_meta` | no covering test |
+| adding a JSON settings or registry file | `plugins::Registry.update` | `plugins::install_update_and_remove_from_a_local_marketplace` |
