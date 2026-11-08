@@ -28,7 +28,7 @@ tags: [calls, minutes, claude-code, second-server]
 |---|---|---|---|
 | `{{base_url}}` (the scenario's) | `serve.sh` | `claude: true`, `plugin: true` | "Write minutes" (or "Starting the minutes…" while it is due): either way not the texts below |
 | `http://127.0.0.1:<p2>` | `HOME=<dir>/nohome PATH=/usr/bin:/bin` | `claude: false`, `plugin: true` | "Install it from claude.com/claude-code, then come back here." |
-| `http://127.0.0.1:<p3>` | a copy of the build in `<dir>/app/x/y/echoctl` (no `plugin/` near it; the data's Claude Code plugin record has no install path) | `claude: true`, `plugin: false` | "Connect Claude Code first: menu → Claude Code → Connect Claude Code." |
+| `http://127.0.0.1:<p3>` | a copy of the build in `<dir>/app/x/y/echoctl` (no `plugin/` near it; the data's Claude Code plugin record has no install path) | `claude: true`, `plugin: false` | "Connect Claude Code first: Settings → General → Claude Code plugin → Connect." and an "Open Settings" button |
 
 ## Steps
 
@@ -37,8 +37,9 @@ tags: [calls, minutes, claude-code, second-server]
 | 1 | Run `. <dir>/env; mkdir -p <dir>/nohome; HOME=<dir>/nohome PATH=/usr/bin:/bin ECHOCTL_SERVE_IPC=1 nohup target/debug/echoctl window --serve <p2> > <dir>/serve-2.log 2>&1 & echo $! > <dir>/pid-2`, wait 2 seconds, then `curl -s -c <dir>/ck2 http://127.0.0.1:<p2>/ > /dev/null; curl -s -b <dir>/ck2 http://127.0.0.1:<p2>/api/state` | The JSON's `notes` is `{"claude": false, "model": "sonnet", "plugin": true}` |
 | 2 | Navigate to `http://127.0.0.1:<p2>/`, wait for "Your day", go to `#calls`, click the row `[data-call$="initech-planning"]`, tab "Minutes" | The box reads "No minutes yet", "The transcript is ready." and "Minutes and action items are written by Claude Code. Install it from claude.com/claude-code, then come back here."; the link goes to `https://claude.com/claude-code`; there is no "Write minutes" button, no Model select and no `/echo:process-call` line |
 | 3 | Run `kill $(cat <dir>/pid-2)`; then `mkdir -p <dir>/app/x/y && cp target/debug/echoctl <dir>/app/x/y/echoctl && . <dir>/env && ECHOCTL_SERVE_IPC=1 nohup <dir>/app/x/y/echoctl window --serve <p3> > <dir>/serve-3.log 2>&1 & echo $! > <dir>/pid-3`, wait 3 seconds, and read `/api/state` of `<p3>` as in step 1 | `notes` is `{"claude": true, "model": "sonnet", "plugin": false}` |
-| 4 | Navigate to `http://127.0.0.1:<p3>/`, wait for "Your day", open Initech planning's Minutes tab as in step 2 | The box reads "No minutes yet", "The transcript is ready." and "Connect Claude Code first: menu → Claude Code → Connect Claude Code."; no "Write minutes" button, no Model select |
-| 5 | Run `kill $(cat <dir>/pid-3)`; navigate back to `{{base_url}}/`, wait for "Your day", open Initech planning's Minutes tab | Neither text of steps 2 and 4 is shown (the scenario's own server finds Claude Code and the plugin) |
+| 4 | Navigate to `http://127.0.0.1:<p3>/`, wait for "Your day", open Initech planning's Minutes tab as in step 2 | The box reads "No minutes yet", "The transcript is ready." and "Connect Claude Code first: Settings → General → Claude Code plugin → Connect."; the text says nothing of "menu →" (the tray); the box's one button is "Open Settings" (primary); no "Write minutes" button, no Model select |
+| 5 | Click "Open Settings" | The URL hash is `#settings/general`; Settings shows the section "General" (its nav button `[data-setsec="general"]` is the selected one) with the row "Claude Code plugin" (its control is not pressed: Connect, "Checking…" or "Installed ✓", as Settings' own check of Claude Code finds it) |
+| 6 | Run `kill $(cat <dir>/pid-3)`; navigate back to `{{base_url}}/`, wait for "Your day", open Initech planning's Minutes tab | Neither text of steps 2 and 4 is shown and there is no "Open Settings" button (the scenario's own server finds Claude Code and the plugin) |
 
 ## Expected Final State
 Both extra servers are stopped; the scenario's server is untouched; no file of the data folder changed.
@@ -48,5 +49,5 @@ Both extra servers are stopped; the scenario's server is untouched; no file of t
 
 ## Notes
 - Verified 2026-11-07 on served windows: both texts exactly as above.
-- The plugin text points at "menu → Claude Code → Connect Claude Code" (the tray menu); in the window the same action is Settings → General "Claude Code plugin" → Connect. Not a failure; worth a look.
+- The plugin text points at the window's own Settings → General "Claude Code plugin" → Connect, and "Open Settings" goes there (#139; it pointed at the tray menu before). Connect itself is not pressed here (claude/TC-001 connects it).
 - Initech planning is due for automatic minutes on this data, so the scenario's own server may show "Starting the minutes…" (`window --serve` never starts them): step 5 checks only that the two texts are gone.

@@ -38,6 +38,18 @@ const minutesLeft = (at) => Math.max(1, Math.ceil((at - Date.now()) / 60000))
 /** A call's automatic minutes still ahead (the list's and the status bar's clock). */
 const minutesAhead = (c) => c.minutes_at && new Date(c.minutes_at) > Date.now() ? new Date(c.minutes_at) : null
 
+// ── minutes needs: what to do first when Claude Code or Echo's plugin is missing (no DOM) ──
+/** Where the window connects Echo's plugin to Claude Code (Settings → General, `claudePluginCtl`). */
+const CONNECT_WHERE = 'Settings → General → Claude Code plugin → Connect'
+/** The Minutes tab's line and button when Claude Code isn't installed or Echo's plugin isn't
+ *  connected (`notes` of /api/state), as [text, buttons]; null when both are there. */
+function minutesNeeds(n) {
+  if (!n.claude) return ['<p>Minutes and action items are written by Claude Code. Install it from <a href="https://claude.com/claude-code" data-ext="1">claude.com/claude-code</a>, then come back here.</p>', '']
+  if (!n.plugin) return [`<p>Connect Claude Code first: ${CONNECT_WHERE}.</p>`, '<button class="btn primary" data-setsec="general">Open Settings</button>']
+  return null
+}
+// end of the minutes needs block
+
 function minutesHint(c, heading, lead) {
   const n = (S.state && S.state.notes) || {}
   const run = c.notes_run
@@ -56,7 +68,7 @@ function minutesHint(c, heading, lead) {
     // Promised only when they are due; whether Claude Code is there only once the state says so.
     const known = !!(S.state && S.state.notes)
     const when = known && !n.claude ? "Minutes are written by Claude Code, which isn't installed on this computer: install it from claude.com/claude-code to get them."
-      : known && !n.plugin ? "Echo's plugin for Claude Code wasn't found: menu → Claude Code → Connect Claude Code, then write them once the call is transcribed."
+      : known && !n.plugin ? `Echo's plugin for Claude Code wasn't found: ${CONNECT_WHERE}, then write them once the call is transcribed.`
       : auto.due === 'error' ? `Automatic minutes can't start${auto.reason ? `: ${auto.reason.replace(/^(the )?automatic minutes (can't|couldn't) start: /i, '')}` : ''}. Write them once the call is transcribed.`
       : auto.due === 'not_ready' && !ai().error ? 'Echo writes them 15 minutes after the call. Add your own notes in the Notes tab meanwhile: the minutes are written around them.'
       : 'Write them once the call is transcribed.'
@@ -102,12 +114,8 @@ function minutesHint(c, heading, lead) {
   else if (auto.due === 'gate') [heading, lead] = ['No minutes written automatically', `The call is too thin for them (${auto.reason || 'too short'}). Write them anyway if you want them.`]
   else if (auto.due === 'error') [heading, lead] = ["Automatic minutes can't start", (auto.reason || "Echo's settings can't be read").replace(/^(the )?automatic minutes (can't|couldn't) start: /i, '')]
   const session = `<p class="alt">Or in a Claude Code session: <code>${esc(cmd)}</code> <button class="btn ghost" data-copy="${esc(cmd)}">Copy</button></p>`
-  if (!n.claude) {
-    return box(heading, `<p>${esc(lead)}</p><p>Minutes and action items are written by Claude Code. Install it from <a href="https://claude.com/claude-code" data-ext="1">claude.com/claude-code</a>, then come back here.</p>`, log)
-  }
-  if (!n.plugin) {
-    return box(heading, `<p>${esc(lead)}</p><p>Connect Claude Code first: menu → Claude Code → Connect Claude Code.</p>`, log)
-  }
+  const needs = minutesNeeds(n)
+  if (needs) return box(heading, `<p>${esc(lead)}</p>${needs[0]}`, needs[1] + log)
   // The call's own profile; none when it can't be read (the run would fail: say why, not the default).
   const live = c.live || {}, picked = S.notesProfile && S.notesProfile.call === c.name
   const pid = picked ? S.notesProfile.id : (live.profile || (live.profile_error ? '' : ai().default))
