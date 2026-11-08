@@ -127,7 +127,7 @@ fn parse_digest(d: &str) -> Option<String> {
 /// Only offer what can be installed: on macOS that needs an Echo.app to swap; on Windows, Echo
 /// running from the MSI's folder (a copy elsewhere would end up next to a second install). A
 /// development build updates with git.
-fn can_install() -> bool {
+pub(crate) fn can_install() -> bool {
     #[cfg(target_os = "macos")]
     return crate::app::installed_app().is_some();
     #[cfg(windows)]

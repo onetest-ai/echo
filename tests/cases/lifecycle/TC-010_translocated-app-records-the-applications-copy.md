@@ -32,4 +32,4 @@ tags: [lifecycle, install, cli]
 Everything that points at Echo points at `/Applications/Echo.app`; nothing at the temporary copy.
 
 ## Notes
-- With no copy in Applications (Echo opened straight from the DMG), Echo writes no `app-path` and shows "Move Echo to Applications" (#132).
+- Every translocated start shows "Move Echo to Applications" (step 2). With no copy in Applications (Echo opened straight from the DMG), Echo writes no `app-path`, and Install… and Start at login refuse with "Move Echo to Applications first" (#132).
