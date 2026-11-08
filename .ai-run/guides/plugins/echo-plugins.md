@@ -13,11 +13,10 @@
 - R6. A host half's command or tick that runs JavaScript for over 5 s is interrupted (`jshost::SLICE`); move bulk file reads to the async services (`ctx.fs.readMany`, `ctx.fs.walk`), which run off the slice. Evidence: `jshost::SLICE`
 - R7. Add a client-half slot by listing it in `SLOTS` in `app.js` and drawing it with `slotItems`; register everything a plugin adds under its id so `unloadPlugin` takes it out. Evidence: `unloadPlugin` (window script)
 - R8. A new `ctx.echo.read` kind goes in `plugins::ECHO_READS` (the sheet's words) and the `echo.read` arm of `jshost::service`, its data from `share.rs`; an unknown kind is named on the sheet and granted nothing. Evidence: `plugins::ECHO_READS`
-- R9. Develop a plugin against a local marketplace folder (`echoctl plugin marketplace add <folder>`, read in place) or point the built-in one elsewhere with `ECHOCTL_PLUGIN_MARKET`; drive the host half with `echoctl plugin call <id> <command> [json]`. Evidence: `plugins::built_in_source`
-- R10. A plugin's Claude runs only through `claudejob::run` on one of the user's AI profiles, with the Brain narrowed to it; never a plugin's own key or account. Evidence: `claudejob::run`
-- R11. A plugin's session skills go only to Echo's sessions and `claudejob` runs, never to the user's own Claude Code. Evidence: `grants::set_session_skills`
-- R12. Never let a channel's env set a `CLAUDE*` or `ANTHROPIC*` key. Evidence: `jshost::service`
-- R13. Deliver only to the user and the addresses the user set on a routine, never to an address a model picked; anything a model wrote carries `ai_notice`. Evidence: `deliver::send`
+- R9. A plugin's Claude runs only through `claudejob::run` on one of the user's AI profiles, with the Brain narrowed to it; never a plugin's own key or account. Evidence: `claudejob::run`
+- R10. A plugin's session skills go only to Echo's sessions and `claudejob` runs, never to the user's own Claude Code. Evidence: `grants::set_session_skills`
+- R11. Never let a channel's env set a `CLAUDE*` or `ANTHROPIC*` key. Evidence: `jshost::service`
+- R12. Deliver only to the user and the addresses the user set on a routine, never to an address a model picked; anything a model wrote carries `ai_notice`. Evidence: `deliver::send`
 
 ### Constraints
 | Do not | Do instead | Evidence |

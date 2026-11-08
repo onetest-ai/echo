@@ -9,13 +9,12 @@
 - R2. Pick a call's AI profile with `ai::for_call` / `ai::call_profile_id`: an unreadable `meta.json` or a missing profile is an error, never a fallback to another profile. Evidence: `ai::call_profile_id`
 - R3. When a routing environment-variable family changes, change both `ai::routing_var` (the process environment) and `ai::UNSET_ROUTING` (the login-shell `sed` filter). Evidence: `ai::UNSET_ROUTING`
 - R4. Hold the profile's lease (`ai::lease`, kept by the `Ready` that `ai::ready` returns) for the whole job. Evidence: `ai::ready`
-- R5. Pin a call's AI profile into `meta.json` at recording start, and never check the profile to start a recording (only a typed `arm --ai` is checked). Evidence: `ai::pin`
+- R5. Pin a call's AI profile into `meta.json` at recording start. Evidence: `ai::pin`
 - R6. Run `local` / `claude` jobs with `--setting-sources user` (never on `claude auth …`), and refuse them when admin policy could route. Evidence: `ai::policy_conflict`
 - R7. Start Claude Code children in their own session, never only a process group; only `echoctl ai login`'s child stays in the terminal's foreground. Evidence: `ai::detach`
 - R8. During a sign-in, `ai::for_call` fails at once with `SigningIn`, never waits, and live jobs are deferred until it ends. Evidence: `ai::SigningIn`, `livenotes::defer`
-- R9. Admit a minutes run only through `notes::admit`: an automatic run is re-checked as due right before Claude Code starts and withdrawn when it isn't; an explicit Write minutes overrides a session's fresh claim, an automatic one yields. Evidence: `notes::auto_due`
+- R9. Admit a minutes run only through `notes::admit`, and re-check an automatic run as due right before Claude Code starts. Evidence: `notes::admit`, `notes::auto_due`
 - R10. After a run, the app applies only that run's own `actions.new-<run>.json`, never the generic `actions.new.json`, and applying keeps each item's current status. Evidence: `notes::finish_actions`, `calls::apply_actions`
-- R11. Swap in an update only after the window's notes are saved and Echo is stopping, never while a call records; on Windows the release's digest is required. Evidence: `update::commit`, `update::verify_digest`
 
 ### Constraints
 | Do not | Do instead | Evidence |

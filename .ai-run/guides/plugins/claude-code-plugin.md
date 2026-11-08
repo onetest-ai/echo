@@ -11,9 +11,8 @@
 - R4. Keep the status-line mod's parsing and time helpers pure in `plugin/hooks/view.ts` (no `$`) and test them in `view.test.ts`; `register.tsx` only wires them to the engine. Evidence: `plugin/hooks/view.ts::parseLines`
 - R5. In a skill, call the CLI as `${CLAUDE_PLUGIN_ROOT}/scripts/echoctl` with plain words (no `$`, backticks, pipes or redirects). Evidence: `notes::RUN_COMMANDS`
 - R6. The status-line mod never calls a model or asks for minutes, and does nothing inside a run Echo started (`ECHOCTL_HEADLESS`). Evidence: `plugin/hooks/register.tsx::ECHOCTL_HEADLESS`
-- R7. The mod tails `.echo/events.jsonl` from its end and never replays it. Evidence: `plugin/hooks/register.tsx::eventsOffset`
-- R8. Keep `process-call` one `SKILL.md`. Evidence: `guard::own_call`
-- R9. Pass the plugin shipped with the app with `--plugin-dir` to runs and sessions on `claude` / `local` profiles. Evidence: `notes::plugin_dir`
+- R7. Keep `process-call` one `SKILL.md`. Evidence: `guard::own_call`
+- R8. Pass the plugin shipped with the app with `--plugin-dir` to runs and sessions on `claude` / `local` profiles. Evidence: `notes::plugin_dir`
 
 ### Read first
 | When you are | Exemplar | Tests |
