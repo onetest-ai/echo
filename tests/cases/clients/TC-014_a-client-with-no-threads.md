@@ -37,7 +37,7 @@ tags: [clients, empty, threads, found]
 | 5 | Click the tab "Tasks" | Four piles with 0 and "Nothing here"; no button "Others" |
 | 6 | Click the tab "People" | The text "Nobody in this client's threads yet" and "People join as its calls come in, or add someone with + Person."; there is no "+ Person" button on a client page |
 | 7 | Click the tab "Profile" | The row "Threads" holds the token "+ New thread"; the row below has the button "Remove this client…" (not pressed) |
-| 8 | Navigate to `{{base_url}}/#found` | A card "Duff calls" with the Client select on "Duff" and 2 calls: the client's calls are candidates for a thread |
+| 8 | Navigate to `{{base_url}}/#found` | A card headed "2 calls mostly with people from duff.example" with the Client select on "Duff" and the calls Duff follow-up and Duff discovery: the client's calls are candidates for a thread |
 
 ## Expected Final State
 Nothing changed.
