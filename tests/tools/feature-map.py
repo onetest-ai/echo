@@ -71,12 +71,12 @@ def load():
     cases = {}
     for p in sorted((TESTS / "cases").glob("*/TC-*.md")):
         fm = frontmatter(p)
-        cases[str(p.relative_to(TESTS.parent))] = {"area": p.parent.name, "id": fm.get("id", ""), "title": fm.get("title", ""),
+        cases[p.relative_to(TESTS.parent).as_posix()] = {"area": p.parent.name, "id": fm.get("id", ""), "title": fm.get("title", ""),
                                                    "run": fm.get("run", ""), "requirements": fm.get("requirements", []) or []}
     scenarios = {}
     for p in sorted((TESTS / "scenarios").glob("S-*.md")):
         fm = frontmatter(p)
-        scenarios[str(p.relative_to(TESTS.parent))] = {"id": fm.get("id", ""), "title": fm.get("title", ""), "cases": fm.get("cases", []) or []}
+        scenarios[p.relative_to(TESTS.parent).as_posix()] = {"id": fm.get("id", ""), "title": fm.get("title", ""), "cases": fm.get("cases", []) or []}
     return doc, cases, scenarios
 
 
