@@ -255,7 +255,7 @@ function upcomingDoc() {
   // A call's header, before the call: its day and time, length, people, thread chips (+ Thread, as in the calendar).
   const mins = start && end ? Math.round((new Date(end) - new Date(start)) / 60000) : 0
   const names = (u && u.names) || (p && p.people ? p.people.map((x) => x.name) : [])
-  const people = names.length ? `<span class="people">${esc(names.slice(0, 6).join(', '))}${names.length > 6 ? ` and ${names.length - 6} more` : ''}</span>` : ''
+  const people = names.length ? `<span class="people" title="${esc(names.join(', '))}">${esc(names.slice(0, 6).join(', '))}${names.length > 6 ? ` and ${names.length - 6} more` : ''}</span>` : ''
   const ev = u ? { id: u.event, subject: u.subject, projects: u.projects || [] } : null
   const head = `${listToggle()}<div class="head-row"><div style="min-width:0"><h2 class="selectable">${esc(title)}</h2>
       <div class="facts">${when ? `<span>${esc(when)}</span>` : ''}${mins ? `<span>${mins} min</span>` : ''}${people}</div>${ev ? eventProjects(ev) : ''}</div>
