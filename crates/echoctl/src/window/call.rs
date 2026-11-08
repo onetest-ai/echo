@@ -396,7 +396,7 @@ pub(super) fn act(v: &Value) -> bool {
             false
         }
         // Recordings from the window use the default AI profile (the account chip sets it); the app pins it at the
-        // start. A profile per recording is the CLI's (`echoctl arm --profile`).
+        // start. A profile per recording is the CLI's (`echoctl arm --ai`).
         "record" => watch::arm(None, None, languages(v), None).is_ok(),
         // A memo: the user alone, now (the Record button's language and profile, as a call's).
         "record_memo" => match watch::memo_start(languages(v), None) {
