@@ -1501,34 +1501,37 @@ pub fn rename_to_title(dir: &Path) -> Result<PathBuf> {
         return Ok(dir.to_path_buf());
     };
     let name = dir.file_name().unwrap().to_string_lossy().into_owned();
-    let stamp = stamp_of(dir); // "YYYY-MM-DD_HHMMSS", or an undated folder's whole name
+    let stamp = name.get(..17).unwrap_or(&name); // "YYYY-MM-DD_HHMMSS"
     let slug = crate::recorder::slugify(&title);
     let new_dir = dir.with_file_name(if slug.is_empty() { stamp.to_string() } else { format!("{stamp}-{slug}") });
     let recording = crate::watch::running_watcher().and_then(|w| w.recording).is_some_and(|r| Path::new(&r) == dir);
     if new_dir == dir || recording {
         return Ok(dir.to_path_buf());
     }
-    // The names it had, kept before the move: a page or link still holding one finds this call (`renamed`), with no
-    // moment where the old name answers nothing.
-    update_meta(dir, |meta| {
+    fs::rename(dir, &new_dir).with_context(|| format!("renaming {}", dir.display()))?;
+    // The names it had: a page or link still holding one finds this call (`renamed`). Kept once the move is done (a
+    // failed move records nothing); not keeping it never undoes the rename.
+    if let Err(e) = update_meta(&new_dir, |meta| {
         let mut was: Vec<Value> = meta["renamed_from"].as_array().cloned().unwrap_or_default();
-        if !was.iter().any(|n| n.as_str() == Some(name.as_str())) {
-            was.push(json!(name));
-        }
+        was.push(json!(name));
         meta["renamed_from"] = json!(was);
         Ok(())
-    })?;
-    fs::rename(dir, &new_dir).with_context(|| format!("renaming {}", dir.display()))?;
+    }) {
+        eprintln!("the old name of {} wasn't kept: {e:#}", new_dir.display());
+    }
     Ok(new_dir)
 }
 
 /// The call a folder name now belongs to after a rename (`rename_to_title` keeps the names it had in meta.json's
 /// `renamed_from`): None for a name no call had, or one that was deleted.
 pub fn renamed(name: &str) -> Option<PathBuf> {
-    // A dated name keeps its stamp across a rename: only folders with it are read. An undated one: any folder.
-    let stamp = has_stamp(name).then(|| &name[..17]);
+    // Dated names only: a rename keeps the stamp, so only the folders with it are read (an undated name could have
+    // been several calls' over time).
+    if !has_stamp(name) {
+        return None;
+    }
     fs::read_dir(paths::calls_dir()).ok()?.flatten().map(|e| e.path()).find(|d| {
-        stamp.is_none_or(|s| d.file_name().is_some_and(|n| n.to_string_lossy().starts_with(s)))
+        d.file_name().is_some_and(|n| n.to_string_lossy().starts_with(&name[..17]))
             && read_json(&d.join("meta.json"))["renamed_from"].as_array().is_some_and(|a| a.iter().any(|n| n.as_str() == Some(name)))
     })
 }

@@ -343,7 +343,7 @@ function workPanel() {
       : h.by === 'human' ? humanHistory(h, rt && rt.word, (id) => (N[id] && N[id].title) || '')
       : h.op === 'answer' ? `${n.kind === 'risk' ? 'response' : 'answered'}: ${h.text || ''}`
       : h.op === 'create' ? `created${h.due_text ? ' · due ' + h.due_text : ''}` : h.effect ? `${h.effect === 'due' ? 'due ' + (h.due_text || '') : h.effect}${h.effect === 'done' || h.effect === 'held' ? '?' : ''}`
-      : h.op === 'waiting' ? `waiting · ${h.who || '?'}` : h.op === 'link' ? `waits for ${h.depends_on}` : h.op === 'ac_met' ? `criterion ${h.ac} met` : h.op
+      : h.op === 'waiting' ? `waiting · ${h.who || '?'}` : h.op === 'link' ? `waits for ${(N[h.depends_on] && N[h.depends_on].title) || 'another item'}` : h.op === 'ac_met' ? `criterion ${h.ac} met` : h.op
     const mark = h.by === 'human' ? (h.mid && h.op !== 'create' ? `<button class="link-btn" data-pj="ledger" data-body='${esc(JSON.stringify({ op: 'undo', target: h.mid }))}'>undo</button>` : '')
       : h.applied === false && h.verdict === 'supports' ? '<span class="wk-v weak">kept yours</span>'
       : h.verdict === 'supports' || (h.op === 'create') ? '<span class="wk-v supports">verified</span>'

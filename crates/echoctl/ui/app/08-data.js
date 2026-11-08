@@ -165,7 +165,7 @@ async function loadCall(name, retried = false) {
       // Missing: dropped from the loaded list (a stale entry would keep it polled), asked for now and then only
       // (`tick`) and as soon as a fresh list has it again — see `callGone`.
       S.call.missing = true; S.movedShown = false
-      S.calls = (S.calls || []).filter((c) => c.name !== name)
+      if ((S.calls || []).some((c) => c.name === name)) { S.calls = S.calls.filter((c) => c.name !== name); S.callsTotal = Math.max(0, (S.callsTotal || 1) - 1) }
     }
   }
 }
