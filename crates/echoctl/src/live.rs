@@ -72,7 +72,9 @@ impl Live {
     /// whisper context alive (ggml's Metal device asserts at exit while one is, #141).
     /// Waited for at most `ABANDON_WAIT`: a local decode ends within it (the worker checks `quit` between
     /// utterances), a request to a transcription server may not — and holds no local model unless the server
-    /// failed over to one mid-call, which the wait then covers as well.
+    /// failed over to one mid-call, which the wait then covers as well. Past the cap the worker is left running
+    /// (detached): a local model still loaded then can still trip ggml's Metal assert at exit (#141), a rare case
+    /// traded for an exit that never waits more than the cap.
     pub fn abandon(mut self) {
         self.quit.store(true, Ordering::SeqCst);
         self.close();
