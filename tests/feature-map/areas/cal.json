@@ -62,7 +62,7 @@
   },
   {
    "id": "F-CAL-07",
-   "feature": "A meeting's card: its title with × (Close), when and how far off (Today · HH:MM–HH:MM · in N min / now · N min left / recorded / over), its kind and thread chips; one action strip (the main button and its prep side by side as pills, a line saying what happens or what it was recorded as); People (the organizer, then up to three names and +N more), the series rule and Last time under small headings; it stays open across Day / Week",
+   "feature": "A meeting's card: its title with × (Close), when and how far off (Today · HH:MM–HH:MM · in N min / now · N min left / recorded / over), its kind and thread chips; one action strip (the main button and its prep side by side as pills, a line saying what happens or what it was recorded as); People (the organizer, then up to three names and +N more of all invited, or \"N invited\" without names; who declined left out), the series rule and Last time under small headings; it stays open across Day / Week",
    "priority": "high",
    "check": "agent",
    "axes": [
@@ -147,7 +147,7 @@
   },
   {
    "id": "F-CAL-16",
-   "feature": "Right-click on a meeting opens a menu at the pointer with what its card offers: its main action, its prep, Add to a thread…, the series rule, Copy the Teams link, Show details; Escape, a click elsewhere, a wheel or a resize close it",
+   "feature": "Right-click on a meeting opens a menu at the pointer with what its card offers: its main action, its prep, Add to a thread…, the series rule, Copy the Teams link, Show details; arrow keys, Home and End move in it; Escape, a click elsewhere, a wheel or a resize close it, and the focus goes back to the meeting",
    "priority": "medium",
    "check": "agent",
    "axes": []

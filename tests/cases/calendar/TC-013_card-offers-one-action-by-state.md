@@ -42,7 +42,7 @@ tags: [calendar, card, action]
 | 3 | Click the block `[data-ev="ev-m01"]` (Acme design review) | The primary button "Import Teams transcript" and the line (`.why`) "Not recorded. If Teams transcribed it: Echo makes a call of its transcript and chat; minutes, threads and the Brain follow."; no Record button (do not press the import here: `TC-014`) |
 | 4 | Click the block `[data-ev="ev-m02"]` (Globex office hours) | The button "Don't record" and a line (`.why`) starting "Echo starts recording a minute before it begins, transcribed as Ukrainian." (a "Prepare" beside the button adds its own sentence after it); no Record button |
 | 5 | Click the block `[data-ev="ev-m04"]` (Initech architecture board) | The button "Don't record" and a line starting "Echo starts recording a minute before it begins" |
-| 6 | Click the block `[data-ev="ev-m07"]` (Vendor demo) | Two buttons: "Join & record" (with its language) and "Record" (title "Record without joining — you're in it already"; do not press them) |
+| 6 | Click the block `[data-ev="ev-m07"]` (Vendor demo) | Two buttons: "Join & record" (with its language) and "Record" (title "Record without joining — you're in it already"; do not press them); run `browser_evaluate` with `() => { const a = document.querySelector('.detail .ec-acts'); return a.scrollWidth <= a.clientWidth }`: `true` — the strip fits the card (its pills wrap to a second line rather than spill) |
 | 7 | Click the block `[data-ev="ev-m08"]` (Initech team lunch) | One button "Record when it starts" |
 | 8 | Click the block `[data-ev="ev-m29"]` (Acme help desk sync, to come 37 minutes after the build) | One button "Record when it starts" (no "Join & record": it has a link but is not live) |
 
