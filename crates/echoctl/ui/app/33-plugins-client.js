@@ -52,7 +52,7 @@ function pluginCtx(id) {
         const at = ACTIVITIES.findIndex((x) => x.bottom)
         ACTIVITIES.splice(at < 0 ? ACTIVITIES.length : at, 0, { layout: 'single', ...a, id: `${id}:${a.id}`, plugin: id })
         // Only a hash of this activity is routed again (no other route's side effects re-run).
-        const h = decodeURIComponent(location.hash.slice(1)), aid = `${id}:${a.id}`
+        const h = hashText().slice(1), aid = `${id}:${a.id}`
         if (h === aid || h.startsWith(aid + '/')) route()
         render()
       },

@@ -28,7 +28,7 @@ pub fn all_calls() -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = fs::read_dir(paths::calls_dir())
         .map(|rd| rd.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.join("meta.json").exists()).collect())
         .unwrap_or_default();
-    dirs.sort_by(|a, b| order_key(a).cmp(&order_key(b)));
+    dirs.sort_by_cached_key(|d| { let (dated, n) = order_key(d); (dated, n.to_owned()) });
     dirs
 }
 
@@ -115,7 +115,9 @@ pub fn by_stamp(stamp: &str) -> Option<PathBuf> {
     if stamp.is_empty() {
         return None;
     }
-    let mut found = all_calls().into_iter().filter(|d| stamp_of(d) == stamp);
+    // By name only (a folder's name starts with its stamp): no sort of the whole folder for one lookup.
+    let mut found = fs::read_dir(paths::calls_dir()).ok()?.flatten().map(|e| e.path())
+        .filter(|d| d.file_name().is_some_and(|n| n.to_string_lossy().starts_with(stamp)) && stamp_of(d) == stamp && d.join("meta.json").exists());
     let first = found.next()?;
     found.next().is_none().then_some(first)
 }
@@ -322,7 +324,7 @@ pub fn previous_with_notes(subject: &str, before: Option<&Path>) -> Option<PathB
         .rev()
         // Earlier by folder name (it starts with the call's time): the same whatever spelling of
         // the data folder each path came with.
-        .filter(|d| before.is_none_or(|b| d.file_name() < b.file_name()))
+        .filter(|d| before.is_none_or(|b| order_key(d) < order_key(b)))
         .find(|d| d.join("notes.md").exists() && previous_subject(d).is_some_and(|s| s.trim().to_lowercase() == want))
 }
 

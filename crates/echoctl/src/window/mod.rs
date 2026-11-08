@@ -404,7 +404,7 @@ pub fn window_cmd(msg: &str) -> Option<WindowCmd> {
 /// A call named by the page: by its folder name, else by its stamp (retitled since).
 fn call_named(v: &Value) -> Option<PathBuf> {
     let name = v["call"].as_str()?;
-    call_dir(name).or_else(|| calls::by_stamp(&calls::stamp_of(Path::new(name))))
+    call_dir(name) // follows a renamed folder by its stamp itself
 }
 
 /// A notice for the page (an action that couldn't be done).

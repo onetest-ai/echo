@@ -682,10 +682,8 @@ fn load_model(health: &[(String, String, Option<String>)]) -> Model {
     upcoming.sort_by_key(watch::meeting_start);
     upcoming.truncate(UPCOMING_MAX);
 
-    let mut dirs: Vec<PathBuf> = std::fs::read_dir(paths::calls_dir())
-        .map(|rd| rd.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.join("meta.json").exists()).collect())
-        .unwrap_or_default();
-    dirs.sort();
+    // The calls in the app's one order (`calls::all_calls`: undated folders oldest), newest first below.
+    let dirs: Vec<PathBuf> = crate::calls::all_calls();
     let recording_dir = watch::running_watcher().and_then(|w| w.recording).map(PathBuf::from);
     let recent = dirs
         .iter()

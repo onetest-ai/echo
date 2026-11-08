@@ -17,7 +17,7 @@ async function tick() {
   // The selected call is fetched again whenever anything it shows changed (`/rev`: its files,
   // the live notes' and the minutes run's state, when the minutes come), whatever its status.
   // A call that isn't there (an old link, a deleted call) is asked for once, not every tick (#150).
-  if (S.selected && S.missing !== S.selected) {
+  if (S.selected && !callGone()) {
     let rev = null
     try { rev = (await get('api/call/' + encodeURIComponent(S.selected) + '/rev')).rev } catch { /* retitled: loadCall finds it */ }
     if (changed || !S.call || rev !== S.call.rev) await loadCall(S.selected)

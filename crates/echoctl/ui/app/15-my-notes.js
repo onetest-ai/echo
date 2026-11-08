@@ -300,7 +300,7 @@ document.addEventListener('click', (e) => {
   if (t.dataset.nyFilter) { NY.filter = t.dataset.nyFilter; return render() }
   if (t.dataset.nyMore) { NY.more.add(t.dataset.nyMore); return render() }
   // The same place again (another plugin picked meanwhile): read the hash again, not just redraw.
-  if (t.dataset.nyGo) { if (decodeURIComponent(location.hash.slice(1)) === t.dataset.nyGo) { route(); return render() } return go(t.dataset.nyGo) }
+  if (t.dataset.nyGo) { if (hashText().slice(1) === t.dataset.nyGo) { route(); return render() } return go(t.dataset.nyGo) }
   const i = nyOpen().find((x) => x.key === t.dataset.nyAct)
   const a = i && (i.actions || [])[Number(t.dataset.k)]
   if (!a) return

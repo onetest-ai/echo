@@ -281,19 +281,7 @@ document.addEventListener('click', (e) => {
   if (t.dataset.setsec) return go(`settings/${t.dataset.setsec}`)
   if (t.dataset.set) {
     let val; try { val = JSON.parse(t.dataset.val) } catch { val = t.dataset.val }
-    if (S.settings && t.dataset.set.startsWith('learned_')) {
-      S.settings.learned = (S.settings.learned || []).filter((x) => x.term !== val)
-      if (t.dataset.set === 'learned_always') S.settings.vocabulary = [...(S.settings.vocabulary || []), val]
-    } else if (S.settings) S.settings[t.dataset.set] = val // shown at once; the next snapshot confirms it
-    if (t.dataset.set === 'live_notes' && S.state && S.state.ai) S.state.ai.live_notes = val
-    if (t.dataset.set === 'default_profile' && S.state && S.state.ai) S.state.ai.default = val
-    if (t.dataset.set === 'brain_enabled') {
-      if (S.state) S.state.brain = !!val
-      if (S.settings && S.settings.brain) S.settings.brain.enabled = !!val
-      setTimeout(() => loadSettings().then(render), 400)
-    }
-    send({ cmd: 'settings_set', key: t.dataset.set, value: val })
-    return render()
+    return setSetting(t.dataset.set, val)
   }
   if (t.dataset.act) { send({ cmd: 'settings_action', action: t.dataset.act, arg: t.dataset.arg || '' }); setTimeout(() => loadSettings().then(render), 1500); return }
   if (t.dataset.langDel) { const l = (S.settings.languages || []).filter((x) => x !== t.dataset.langDel); S.settings.languages = l; send({ cmd: 'settings_set', key: 'languages', value: l }); return render() }
@@ -580,6 +568,24 @@ document.addEventListener('dblclick', (e) => {
 
 // macOS: the top strip is the window's title bar (transparent, `window/mod.rs`): dragging it moves the
 // window, a double click zooms it — anywhere but on its controls.
+/** One plain setting, as Settings' controls and the top bar's account chip set it: shown at once (the next snapshot
+ *  confirms it), then saved by the app. */
+function setSetting(key, val) {
+  if (S.settings && key.startsWith('learned_')) {
+    S.settings.learned = (S.settings.learned || []).filter((x) => x.term !== val)
+    if (key === 'learned_always') S.settings.vocabulary = [...(S.settings.vocabulary || []), val]
+  } else if (S.settings) S.settings[key] = val
+  if (key === 'live_notes' && S.state && S.state.ai) S.state.ai.live_notes = val
+  if (key === 'default_profile' && S.state && S.state.ai) S.state.ai.default = val
+  if (key === 'brain_enabled') {
+    if (S.state) S.state.brain = !!val
+    if (S.settings && S.settings.brain) S.settings.brain.enabled = !!val
+    setTimeout(() => loadSettings().then(render), 400)
+  }
+  send({ cmd: 'settings_set', key, value: val })
+  return render()
+}
+
 const onTitleBar = (e) => MAC && e.button === 0 && e.target.closest && e.target.closest('#r-top') && !e.target.closest('button,select,label,a,input,.pill-note')
 document.addEventListener('mousedown', (e) => { if (onTitleBar(e) && e.detail === 1) { e.preventDefault(); send({ cmd: 'window_drag' }) } })
 document.addEventListener('dblclick', (e) => { if (onTitleBar(e)) send({ cmd: 'window_zoom' }) })
