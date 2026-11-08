@@ -10,9 +10,9 @@ const end = src.indexOf('// end of the thread load block', start)
 assert.ok(start >= 0 && end > start, 'the thread load block not found in app.js')
 
 /** loadProject on one of a thread's tabs: the state it leaves and the paths it asked for. */
-async function open(tab) {
+async function open(tab, work = null) {
   const asked = []
-  const S = { pj: { sel: 'acme-rollout', tab, work: null, detail: null, tbrain: { thread: 'acme-rollout' } } }
+  const S = { pj: { sel: 'acme-rollout', tab, work, detail: null, tbrain: { thread: 'acme-rollout' } } }
   const get = async (url) => {
     asked.push(url)
     if (url === 'api/project/acme-rollout') return { id: 'acme-rollout', call_count: 1 }
@@ -37,6 +37,17 @@ test('the work tree comes with the thread on every tab (#110)', async () => {
     assert.ok(asked.includes('api/project/acme-rollout/work'), `${tab}: asked ${asked.join(', ')}`)
     assert.ok(S.pj.work && S.pj.work.nodes.T001, tab)
   }
+})
+
+test('once the tree is there, only the Work tab reads it again (it is costly on a big ledger)', async () => {
+  const had = { nodes: {} }
+  for (const tab of ['brief', 'calls', 'people', 'profile']) {
+    const { S, asked } = await open(tab, had)
+    assert.ok(!asked.includes('api/project/acme-rollout/work'), `${tab}: asked ${asked.join(', ')}`)
+    assert.equal(S.pj.work, had, tab)
+  }
+  const { asked } = await open('work', had)
+  assert.ok(asked.includes('api/project/acme-rollout/work'), 'the Work tab reads it again')
 })
 
 let failed = 0
