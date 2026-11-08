@@ -48,6 +48,8 @@ node crates/echoctl/ui/fingerprint.test.mjs
 node crates/echoctl/ui/work-status.test.mjs
 # Settings search: sections by their names and their settings' own labels (SettingsSearch).
 node crates/echoctl/ui/settings-search.test.mjs
+# Settings → Layout's "Echo's own title bar": a Windows-only row, absent (and unsearchable) elsewhere (#76).
+node crates/echoctl/ui/own-title-bar.test.mjs
 types="plugin/.claude-plugin/types/claude-code/index.d.ts"
 if [[ ! -f "$types" ]]; then
   types=$(ls -t /private/tmp/claude-*/bundled-skills/*/*/plugin-authoring/types/claude-code.d.ts 2>/dev/null | head -1 || true)

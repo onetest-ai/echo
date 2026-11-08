@@ -2,7 +2,7 @@
 # Lower a ceiling when its file shrinks; drop the line once the file is under 1,500.
 crates/echoctl/src/ledger.rs 2709
 crates/echoctl/src/brain/taxonomy.rs 2251
-crates/echoctl/src/tray.rs 2085
+crates/echoctl/src/tray.rs 2082
 crates/echoctl/src/calls.rs 1886
 crates/echoctl/src/ai.rs 1831
 crates/echoctl/src/notes.rs 1682

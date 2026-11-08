@@ -40,6 +40,7 @@ const S = {
   fromLink: false, // the page was opened at an echo:// link (`#link=`): start-up opens no call for it
   autoTab: null, // the call whose tab was last chosen for the user (Live while it records)
   notice: null, // a message for a moment (an action that couldn't be done)
+  maximized: false, // Windows, Echo's own title bar: the window is maximised (its button shows restore)
   closing: false, // the window is saving the user's notes before it closes (`prepareClose`)
   closeError: null, // why they couldn't be saved (the window stays open)
   renderOnBlur: false, // a render held back while the user types their notes

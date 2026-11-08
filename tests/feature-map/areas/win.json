@@ -21,7 +21,7 @@
   },
   {
    "id": "F-WIN-03",
-   "feature": "The window works on Windows (native title bar; Ctrl+K / Ctrl+Shift+P, Ctrl+Shift+U for the Inbox)",
+   "feature": "The window works on Windows (Echo's own title bar by default, the native one when turned off; Ctrl+K / Ctrl+Shift+P, Ctrl+Shift+U for the Inbox)",
    "priority": "medium",
    "check": "person",
    "axes": []
@@ -43,6 +43,13 @@
   {
    "id": "F-WIN-06",
    "feature": "Mute sync, Teams UI text, notifications, the tray icon and shared-screen frames work on Windows",
+   "priority": "medium",
+   "check": "person",
+   "axes": []
+  },
+  {
+   "id": "F-WIN-07",
+   "feature": "Echo's own title bar (on by default, off in Settings → Layout; Windows only): no system frame, the strip moves, maximises and resizes the window and holds minimise, maximise and close; on or off at once",
    "priority": "medium",
    "check": "person",
    "axes": []
