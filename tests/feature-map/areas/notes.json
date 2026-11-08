@@ -78,7 +78,7 @@
   },
   {
    "id": "F-NOTES-09",
-   "feature": "An unreadable `my-notes.md` says so with Show folder; a file changed outside while typing keeps the other version as `my-notes.<HHMMSS>.md` and says where",
+   "feature": "An unreadable `my-notes.md` says so with Show folder; a file changed outside while a note is typed (in the box, in place or as text) keeps the user's notes with the note and the other version as `my-notes.<HHMMSS>.md` and says where",
    "priority": "high",
    "check": "agent",
    "axes": [
