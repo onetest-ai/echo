@@ -685,6 +685,18 @@ mod tests {
     }
 
     #[test]
+    fn a_client_route_without_an_id_is_a_404_not_a_panic() {
+        let (_env, _root) = crate::paths::testenv::folders("window-client-no-id");
+        let get = |path: &str| respond(&Request::builder().uri(format!("echo://localhost{path}")).body(Vec::new()).expect("request")).status().as_u16();
+        // #146: these cut `[12..11]` out of the path and panicked the request's thread.
+        for path in ["/api/client/people", "/api/client/logo", "/api/client//people", "/api/client//logo"] {
+            assert_eq!(get(path), 404, "{path}");
+        }
+        assert_eq!(get("/api/client/acme/logo"), 404, "an id with no logo: still 404");
+        assert_eq!(get("/api/client/acme/people"), 200, "an id: the people view");
+    }
+
+    #[test]
     fn a_paste_types_as_xterm_would() {
         assert_eq!(paste_bytes("a\r\nb\nc".into(), false), b"a\rb\rc");
         assert_eq!(paste_bytes("a\nb".into(), true), b"\x1b[200~a\rb\x1b[201~");

@@ -359,6 +359,11 @@ pub(super) fn project_op(v: &Value) -> anyhow::Result<Option<String>> {
 
 
 /// The echo:// requests of this area (`respond` asks each area in turn).
+/// The client id in `/api/client/<id><suffix>`, if there is one (`/api/client/people` has none: 404, not a panic).
+fn client_id<'a>(path: &'a str, suffix: &str) -> Option<&'a str> {
+    path.strip_prefix("/api/client/")?.strip_suffix(suffix).filter(|id| !id.is_empty())
+}
+
 pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'static, [u8]>>> {
     Some(match path {
         "/api/m365/teams" => json_reply(crate::graph::teams().map(Value::from).unwrap_or_else(|e| json!({ "error": format!("{e:#}") }))),
@@ -376,16 +381,17 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
         }
         // Everyone across the threads (the Brain's People): who, where, what was said about them.
         "/api/brain/people" => json_reply(crate::people::everyone(chrono::Local::now().date_naive()).unwrap_or_else(|e| json!({ "error": format!("{e:#}") }))),
-        p if p.starts_with("/api/client/") && p.ends_with("/people") => {
-            json_reply(people_view(crate::people::of_client(&p["/api/client/".len()..p.len() - "/people".len()], chrono::Local::now().date_naive())))
-        }
+        p if p.starts_with("/api/client/") && p.ends_with("/people") => match client_id(p, "/people") {
+            Some(id) => json_reply(people_view(crate::people::of_client(id, chrono::Local::now().date_naive()))),
+            None => reply(404, "text/plain", b"no such client".to_vec()),
+        },
         p if p.starts_with("/api/client/") && !p.ends_with("/logo") => json_reply(client_view(&p["/api/client/".len()..])),
         "/api/found" => json_reply(match crate::projects::found() {
             Ok(f) => json!({ "found": f }),
             Err(e) => json!({ "found": [], "error": format!("{e:#}") }),
         }),
         p if p.starts_with("/api/client/") && p.ends_with("/logo") => {
-            match crate::projects::client_logo(&p["/api/client/".len()..p.len() - "/logo".len()]).and_then(|(f, mime)| Some((fs::read(f).ok()?, mime))) {
+            match client_id(p, "/logo").and_then(crate::projects::client_logo).and_then(|(f, mime)| Some((fs::read(f).ok()?, mime))) {
                 Some((bytes, mime)) => reply(200, mime, bytes),
                 None => reply(404, "text/plain", b"no logo".to_vec()),
             }
