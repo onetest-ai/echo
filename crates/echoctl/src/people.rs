@@ -109,15 +109,18 @@ pub fn merge(key: &str, key_name: &str, key_emails: &[String], into: &str, into_
         if key.contains('@') {
             add.push(key.to_string());
         }
-        for e in add {
-            p.not_same.retain(|x| x != &e);
-            if !p.emails.contains(&e) {
-                p.emails.push(e);
+        for e in &add {
+            p.not_same.retain(|x| x != e);
+            if !p.emails.contains(e) {
+                p.emails.push(e.clone());
             }
         }
+        // The names that came with it: a split of its address takes them away again.
+        let mut came: Vec<String> = vec![];
         for n in [key_name.to_string()].into_iter().chain(old.iter().flat_map(|o| o.aliases.clone())) {
             if !n.is_empty() && n != p.name && !p.aliases.contains(&n) {
-                p.aliases.push(n);
+                p.aliases.push(n.clone());
+                came.push(n);
             }
         }
         if let Some(o) = old {
@@ -129,7 +132,7 @@ pub fn merge(key: &str, key_name: &str, key_emails: &[String], into: &str, into_
             }
             p.history.extend(o.history);
         }
-        p.history.push(json!({"field": "merged", "from": key, "to": into, "source": "you", "at": chrono::Utc::now().to_rfc3339()}));
+        p.history.push(json!({"field": "merged", "from": key, "to": into, "emails": add, "aliases": came, "source": "you", "at": chrono::Utc::now().to_rfc3339()}));
         projects::write_json(&file(), &all)
     })
 }
@@ -148,6 +151,14 @@ pub fn split(key: &str, name: &str, email: &str) -> Result<()> {
         };
         let p = &mut all[i];
         p.emails.retain(|e| e != &email);
+        // The names a merge brought in with this address go with it: a "Dana L" left behind would still count her
+        // speech and chat as this person's.
+        let gone: Vec<String> = p.history.iter()
+            .filter(|h| h["field"] == "merged" && h["emails"].as_array().is_some_and(|a| a.iter().any(|e| e.as_str() == Some(email.as_str()))))
+            .flat_map(|h| h["aliases"].as_array().cloned().unwrap_or_default())
+            .filter_map(|n| n.as_str().map(str::to_owned))
+            .collect();
+        p.aliases.retain(|a| !gone.contains(a));
         if !p.not_same.contains(&email) {
             p.not_same.push(email.clone());
         }
@@ -708,6 +719,12 @@ pub fn view(threads: &[&Project], today: chrono::NaiveDate) -> Result<Value> {
             if let Some(i) = s.also.iter().position(|e| book.address(e)).filter(|_| !s.email.as_deref().is_some_and(|e| book.address(e))) {
                 let own = s.also.remove(i);
                 s.also.extend(s.email.replace(own));
+            }
+            // Addresses the user merged in that no call shows (a person added by hand).
+            for e in entry.into_iter().flat_map(|p| &p.emails) {
+                if s.email.as_ref() != Some(e) && !s.also.contains(e) {
+                    s.also.push(e.clone());
+                }
             }
             let colleague = s.email.as_deref().is_some_and(|e| book.address(e)) || entry.is_some_and(|p| p.emails.iter().any(|e| book.address(e)));
             let dom = domain(s.email.as_deref());
@@ -1807,6 +1824,37 @@ mod tests {
         let v = of_thread(&p.id, today).unwrap();
         assert_eq!(v["people"].as_array().unwrap().len(), 2);
         assert!(v["people"].as_array().unwrap().iter().all(|x| x["maybe_same"].as_array().unwrap().is_empty()));
+    }
+
+    #[test]
+    fn a_hand_added_address_merged_in_shows_and_splits_off() {
+        let (_env, root) = crate::paths::testenv::folders("people-merge-hand");
+        let a = call(&root, "2026-10-01_100000-a", "2026-10-01T10:00:00+00:00",
+            json!({"attendees": [{"name": "Dana Lee", "email": "dana@acme.example"}]}), json!([]));
+        let p = projects::create("People lab", None, None).unwrap();
+        projects::update(&p.id, |x| { x.pins = vec![calls::stamp_of(&a)]; Ok(()) }).unwrap();
+        place(&p.id, "Dana Lee", Some("dana@acme.example"), &json!({})).unwrap();
+        place(&p.id, "Dana L", Some("dlee@acme.example"), &json!({})).unwrap();
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 10, 30).unwrap();
+        let v = of_thread(&p.id, today).unwrap();
+        let key = |n: &str| v["people"].as_array().unwrap().iter().find(|x| x["name"] == n).unwrap()["key"].as_str().unwrap().to_string();
+        let (lee, l) = (key("Dana Lee"), key("Dana L"));
+        // As the window merges: Dana L (seen in no call) into Dana Lee.
+        merge(&l, "Dana L", &["dlee@acme.example".to_string()], &lee, "Dana Lee", Some("dana@acme.example")).unwrap();
+        let v = of_thread(&p.id, today).unwrap();
+        let people = v["people"].as_array().unwrap();
+        assert_eq!(people.len(), 1, "{people:?}");
+        let addrs: Vec<&str> = people[0]["addresses"].as_array().unwrap().iter().map(|a| a["email"].as_str().unwrap()).collect();
+        assert_eq!(addrs, ["dana@acme.example", "dlee@acme.example"], "the merged address shows, second (\"Not the same\" beside it)");
+        assert!(people[0]["also"].as_array().unwrap().iter().any(|e| e == "dlee@acme.example"), "and goes along if she is merged again");
+        // "Not the same" on it: two people again.
+        split(&lee, "Dana Lee", "dlee@acme.example").unwrap();
+        let v = of_thread(&p.id, today).unwrap();
+        let mut names: Vec<&str> = v["people"].as_array().unwrap().iter().map(|x| x["name"].as_str().unwrap()).collect();
+        names.sort();
+        assert_eq!(names, ["Dana L", "Dana Lee"]);
+        let lee_entry = directory().unwrap().into_iter().find(|p| p.id == lee).unwrap();
+        assert!(!lee_entry.aliases.iter().any(|a| a == "Dana L"), "the name that came with the address went with it: {:?}", lee_entry.aliases);
     }
 
     #[test]

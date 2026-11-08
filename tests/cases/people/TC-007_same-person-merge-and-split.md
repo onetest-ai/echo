@@ -42,5 +42,8 @@ Dana Lee and Dana L are two people again.
 ## Teardown
 - `echoctl project delete people-lab`
 
+## Notes
+- Step 3 checks #122: an address merged in that no call shows (Dana L was added by hand) was once missing from the panel, so there was no "Not the same" to undo the merge; the panel lists every address the person has, the merged ones after the first.
+
 ## Changes
 - Merges and splits two people of `people-lab`.
