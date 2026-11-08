@@ -272,13 +272,16 @@ const SETTINGS_BODY = {
       setRow('Email', 'Tells your colleagues from external people.', `<input class="search set-input" id="me-email" value="${esc(me.email || '')}" placeholder="you@company.com" aria-label="Your email">`),
     ]) + meProfileCard(st.me_profile)
   },
-  layout() {
+  layout(st) {
     const known = PANEL_VIEWS
     const rows = known.filter((v) => v.id !== 'shell').map((v) => {
       const area = Layout.area(v.id, known)
       return setRow(`${v.icon || ''} ${esc(v.label)}`, '', `<div class="seg" role="group">${['right', 'bottom'].map((a) => `<button data-layout-move="${v.id}" data-to="${a}" aria-pressed="${area === a}">${a === 'right' ? 'Right' : 'Bottom'}</button>`).join('')}</div>`)
     })
-    return `<h2>Layout</h2><p class="set-lead">Where each view opens. Also from a panel's own move button; drag a panel's edge to resize it.</p>` + setCard('Panel views', rows) +
+    // Windows: Echo's strip as the window's title bar (#76); macOS always has it, under the traffic lights.
+    const own = (st || {}).own_title_bar
+    const bar = MAC ? '' : setCard('Window', [setRow("Echo's own title bar", own ? "No Windows title bar: Echo's top strip moves the window and holds minimize, maximize and close." : "Windows draws its title bar above Echo's top strip.", sw('own_title_bar', own, "Echo's own title bar"))])
+    return `<h2>Layout</h2><p class="set-lead">Where each view opens. Also from a panel's own move button; drag a panel's edge to resize it.</p>` + bar + setCard('Panel views', rows) +
       setCard('', [setRow('Reset the layout', 'Every view back to its own place and size.', '<button class="btn" data-layout-reset>Reset</button>')])
   },
   health(st) {

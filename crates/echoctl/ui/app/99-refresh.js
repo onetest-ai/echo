@@ -74,6 +74,8 @@ window.echo = {
     else render()
   },
   openCall(name) { go(`call/${name}/minutes`) },
+  /** Windows, Echo's own title bar: the window was maximised or restored. */
+  maximized(on) { if (S.maximized !== on) { S.maximized = on; render() } },
   /** An echo:// link (a call at a moment, a thread, a client, a person, a mail): where Echo keeps it, or its mail in Outlook. */
   async openLink(link) {
     let t

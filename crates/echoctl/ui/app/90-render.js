@@ -106,6 +106,7 @@ function render() {
   }
   const wb = $('#wb')
   const eff = Layout.effective(window.innerWidth, window.innerHeight, panelViews(), S.overlay, S.barOver)
+  wb.classList.toggle('own', ownBar())
   wb.classList.toggle('bar-open', eff.bar.open && !eff.bar.over)
   wb.classList.toggle('bar-over', eff.bar.over)
   wb.classList.toggle('has-right', eff.right.shown)
@@ -114,7 +115,7 @@ function render() {
   wb.classList.toggle('bottom-folded', eff.bottom.folded)
   wb.style.setProperty('--right-w', `${eff.right.size}px`)
   wb.style.setProperty('--bottom-h', `${eff.bottom.size}px`)
-  patch($('#r-top'), `${barButton()}<span class="top-grow"></span><div class="pill-slot">${pill()}</div>${topEnd()}`)
+  patch($('#r-top'), `${barButton()}<span class="top-grow"></span><div class="pill-slot">${pill()}</div>${topEnd()}${captionButtons()}`)
   patch($('#r-act'), actbar())
   patch($('#r-status'), statusbar())
   patch($('#r-right'), panel('right', eff))
@@ -486,6 +487,9 @@ document.addEventListener('click', (e) => {
     case 'later-clear': return send({ cmd: 'minutes_later', call: S.selected, minutes: 0 })
     case 'claude-panel': return claudePanel()
     case 'bar-flip': return flipBar()
+    case 'win-min': return send({ cmd: 'window_min' })
+    case 'win-max': return send({ cmd: 'window_zoom' })
+    case 'win-close': return send({ cmd: 'close_request' })
     case 'ask-claude': return askClaudeAboutCall()
     case 'notes-raw': S.notesRaw = true; return render()
     case 'notes-timeline': S.notesRaw = false; return render()
@@ -608,6 +612,7 @@ function setSetting(key, val) {
   } else if (S.settings) S.settings[key] = val
   if (key === 'live_notes' && S.state && S.state.ai) S.state.ai.live_notes = val
   if (key === 'default_profile' && S.state && S.state.ai) S.state.ai.default = val
+  if (key === 'own_title_bar' && S.state) S.state.own_title_bar = !!val
   if (key === 'brain_enabled') {
     if (S.state) S.state.brain = !!val
     if (S.settings && S.settings.brain) S.settings.brain.enabled = !!val
@@ -617,10 +622,15 @@ function setSetting(key, val) {
   return render()
 }
 
-// macOS: the top strip is the window's title bar (transparent, `window/mod.rs`): dragging it moves the
-// window, a double click zooms it — anywhere but on its controls.
-const onTitleBar = (e) => MAC && e.button === 0 && e.target.closest && e.target.closest('#r-top') && !e.target.closest('button,select,label,a,input,.pill-note')
-document.addEventListener('mousedown', (e) => { if (onTitleBar(e) && e.detail === 1) { e.preventDefault(); send({ cmd: 'window_drag' }) } })
+// macOS, and Windows with Echo's own title bar: the top strip is the window's title bar (`window/mod.rs`): dragging
+// it moves the window, a double click zooms (maximises) it — anywhere but on its controls.
+const onTitleBar = (e) => (MAC || ownBar()) && e.button === 0 && e.target.closest && e.target.closest('#r-top') && !e.target.closest('button,select,label,a,input,.pill-note')
+document.addEventListener('mousedown', (e) => {
+  // Windows, Echo's own title bar: the strip's top pixels resize the window (WebView2 covers the window's own border).
+  const edge = e.button === 0 && e.target.closest && e.target.closest('[data-resize-top]')
+  if (edge) { e.preventDefault(); return send({ cmd: 'window_resize_top', edge: edge.dataset.resizeTop }) }
+  if (onTitleBar(e) && e.detail === 1) { e.preventDefault(); send({ cmd: 'window_drag' }) }
+})
 document.addEventListener('dblclick', (e) => { if (onTitleBar(e)) send({ cmd: 'window_zoom' }) })
 
 // The Time button keeps the editor focused (and its caret where it was).

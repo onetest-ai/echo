@@ -157,6 +157,21 @@ function actbar() {
   return `<nav class="acts" aria-label="Activities">${top.map(btn).join('')}<span class="acts-grow"></span>${bottom.map((a) => btn(a, acts.indexOf(a))).join('')}</nav>`
 }
 
+/** Windows with Settings → Layout → "Echo's own title bar": no system frame, the strip is the window's title bar (#76). */
+const ownBar = () => !MAC && !!(S.state && S.state.own_title_bar)
+/** Minimise, maximise / restore and close at the strip's right end, 46 × 40 as Windows 11's; close goes the way
+ *  Alt+F4 does (`close_request`: the page saves its notes first). */
+function captionButtons() {
+  if (!ownBar()) return ''
+  const max = S.maximized // the app says so as the window resizes (`window.echo.maximized`): restore then
+  // The top edge resizes, its ends diagonally — not while maximised.
+  const edges = max ? '' : '<div class="rz-top" data-resize-top="n"></div><div class="rz-top nw" data-resize-top="nw"></div><div class="rz-top ne" data-resize-top="ne"></div>'
+  const svg = (d) => `<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1">${d}</svg>`
+  return edges + `<div class="caption" role="group" aria-label="Window">`
+    + `<button class="cap" data-cmd="win-min" aria-label="Minimize" title="Minimize">${svg('<path d="M0 5.5h10"/>')}</button>`
+    + `<button class="cap" data-cmd="win-max" aria-label="${max ? 'Restore' : 'Maximize'}" title="${max ? 'Restore' : 'Maximize'}">${svg(max ? '<rect x="0.5" y="2.5" width="7" height="7"/><path d="M2.5 2.5v-2h7v7h-2"/>' : '<rect x="0.5" y="0.5" width="9" height="9"/>')}</button>`
+    + `<button class="cap cap-close" data-cmd="win-close" aria-label="Close" title="Close">${svg('<path d="M0.5 0.5l9 9M9.5 0.5l-9 9"/>')}</button></div>`
+}
 /** The top bar's right end: the account chip, then the Inbox. */
 function topEnd() { return `<div class="top-end">${accountChip()}${inboxButton()}</div>` }
 /** Inbox: not an activity — it shows or hides its panel over whatever is open. */

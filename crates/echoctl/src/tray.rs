@@ -1949,6 +1949,8 @@ pub fn run(app: TargetApp, stop: Arc<AtomicBool>) -> ! {
                 let step = leaving.start(Then::CloseWindow, win.is_some());
                 act(step, &mut leaving, &mut win, &stop_for_ui, &mut ui, &proxy);
             }
+            #[cfg(windows)] // Echo's own title bar: the maximise button shows restore while the window is maximised.
+            Event::WindowEvent { window_id, event: WindowEvent::Resized(_), .. } => win.iter().filter(|w| w.window.id() == window_id).for_each(|w| w.report_maximized()),
             Event::UserEvent(UiEvent::Leave(then)) => {
                 let step = leaving.start(then, win.is_some());
                 act(step, &mut leaving, &mut win, &stop_for_ui, &mut ui, &proxy);
@@ -1994,17 +1996,12 @@ pub fn run(app: TargetApp, stop: Arc<AtomicBool>) -> ! {
                         w.refresh();
                     }
                 }
-                // The page's own title bar (macOS): drag or zoom the window.
-                None if crate::window::window_cmd(&msg).is_some() => {
-                    if let (Some(cmd), Some(w)) = (crate::window::window_cmd(&msg), &win) {
-                        match cmd {
-                            crate::window::WindowCmd::Drag => drop(w.window.drag_window()),
-                            crate::window::WindowCmd::Zoom => w.window.set_maximized(!w.window.is_maximized()),
-                        }
-                    }
-                }
+                // The page's own title bar (macOS; Windows with Echo's own title bar): drag, zoom, minimise, resize.
+                None if crate::window::window_cmd(&msg).is_some() => win.iter().for_each(|w| w.page_cmd(&msg)),
                 None => {
                     let done = crate::window::handle(&msg);
+                    #[cfg(windows)] // Settings → Layout → "Echo's own title bar": the window follows at once.
+                    win.iter().for_each(|w| w.follow_settings(&msg));
                     if let (Some(js), Some(w)) = (&done.reply, &win) {
                         let _ = w.webview.evaluate_script(js);
                     }

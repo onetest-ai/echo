@@ -19,6 +19,16 @@
   background: var(--sidebar); border-bottom: 1px solid var(--line); padding: 0 12px 0 40px; min-width: 0;
 }
 .wb.mac .topbar { padding-left: 112px; } /* the traffic lights and the sidebar's switch */
+/* Windows, Echo's own title bar (#76): minimise, maximise, close at the right edge, as Windows 11 draws them. */
+.wb.own .topbar { padding-right: 0; }
+.caption { display: flex; align-self: stretch; margin-left: 8px; }
+.cap { width: 46px; border: 0; background: none; color: var(--text); display: flex; align-items: center; justify-content: center; border-radius: 0; }
+.cap:hover { background: color-mix(in srgb, var(--text) 9%, transparent); }
+.cap:active { background: color-mix(in srgb, var(--text) 14%, transparent); }
+.cap-close:hover, .cap-close:active { background: #c42b1c; color: #fff; }
+.rz-top { position: absolute; top: 0; left: 8px; right: 8px; height: 4px; cursor: ns-resize; z-index: 8; }
+.rz-top.nw, .rz-top.ne { left: 0; right: auto; width: 8px; cursor: nwse-resize; }
+.rz-top.ne { left: auto; right: 0; cursor: nesw-resize; }
 .pill-slot { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
 .pill-note { position: absolute; top: 38px; left: 50%; transform: translateX(-50%); z-index: 7; background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--r-panel); padding: 8px 10px; box-shadow: var(--shadow); max-width: min(520px, 90vw); }
 .pill {
