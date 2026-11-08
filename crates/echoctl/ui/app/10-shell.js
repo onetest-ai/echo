@@ -355,7 +355,7 @@ function doc() {
   // would ask for the URL it already has and change nothing (#148).
   const own = `#call/${c.name}/${S.tab}`
   if (S.selected === c.name && decodeURIComponent(location.hash) !== own) history.replaceState(null, '', own)
-  const people = c.people && c.people.length ? `<span class="people">${esc(c.people.slice(0, 6).join(', '))}${c.people.length > 6 ? ` and ${c.people.length - 6} more` : ''}</span>` : ''
+  const people = c.people && c.people.length ? `<span class="people" title="${esc(c.people.join(', '))}">${esc(c.people.slice(0, 6).join(', '))}${c.people.length > 6 ? ` and ${c.people.length - 6} more` : ''}</span>` : ''
   const head = `${listToggle()}<div class="head-row">
         <div style="min-width:0">
           <h2 class="selectable">${esc(c.title)}</h2>
