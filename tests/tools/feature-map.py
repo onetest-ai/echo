@@ -309,7 +309,7 @@ def changes(base):
     """The map's features on BASE vs the working tree, and whether app code changed without the map."""
     import subprocess
     root = TESTS.parent
-    git = lambda *a: subprocess.run(["git", *a], cwd=root, capture_output=True, text=True, check=True).stdout
+    git = lambda *a: subprocess.run(["git", *a], cwd=root, capture_output=True, text=True, encoding="utf-8", check=True).stdout
     merge_base = git("merge-base", base, "HEAD").strip()
     old = {}
     for name in git("ls-tree", "--name-only", f"{merge_base}:tests/feature-map/areas").split() if git("ls-tree", merge_base, "tests/feature-map/areas") else []:
