@@ -34,7 +34,7 @@ tags: [tasks, claude]
 | 3 | Read the skill field | A skill is already chosen: its description starts "Use when a task is to write a follow-up mail"; a cross with the label "No skill — just the task" |
 | 4 | Click the cross | The field is now an input with the placeholder "Just the task — or type to find a skill (1)" |
 | 5 | Click the input | A list opens with the skill and the mark "fits best" |
-| 6 | Press Escape, read the dialog, then press Escape again | After the first: the dialog is still open, the list folded (no "fits best"); after the second: no dialog; nothing was sent (the panel "Claude" at the bottom is not opened) (#108) |
+| 6 | Press Escape, read the dialog, click the skill field, press Escape, then press Escape again | After the first Escape: the dialog is still open, the list folded (no "fits best"); the click opens the list again; the next Escape folds it, and the last one closes the dialog: no dialog; nothing was sent (the panel "Claude" at the bottom is not opened) (#108) |
 | 7 | Click "Send to Claude" again and click "Cancel" | The dialog closes |
 | 8 | Click "Send to Claude" again, then navigate to `{{base_url}}/#today` | Today shows with no dialog (no `role=dialog`) over it (#108) |
 

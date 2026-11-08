@@ -11,6 +11,8 @@ const { ScKeys } = new Function(`${src.slice(start, end)}\nreturn { ScKeys }`)()
 
 // The window as it runs: Escape changes the state, the redraw then gives the replaced skill field its focus back
 // (a focus Echo moved: `restored`), and the field's focus handler sees it (#108).
+// This models the redraw: that render() marks its own focus restore (ScKeys.restoring, 90-render.js) is checked
+// in the window by tasks/TC-010 step 6, not here.
 let c = { title: 'Write the follow-up mail', skill: '', open: false }
 const focusField = (restored) => { if (ScKeys.opens(c, restored)) c.open = true }
 const escape = () => { c = ScKeys.escape(c); if (c) focusField(true) }

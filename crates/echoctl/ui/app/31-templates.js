@@ -147,6 +147,8 @@ const ScKeys = {
 document.addEventListener('click', (e) => {
   // A click anywhere else in the dialog folds its suggestions away.
   if (S.claudeSend && S.claudeSend.open && !e.target.closest('.sc-pick')) { S.claudeSend.open = false; render() }
+  // A click on the skill field with its list folded (after Escape the field keeps its focus, so no focusin comes): it opens.
+  if (S.claudeSend && !S.claudeSend.open && e.target.id === 'sc-q') { S.claudeSend.open = true; return render() }
   const t = e.target.closest('[data-claude-task],[data-sc-send],[data-sc-yolo],[data-sc-off],[data-sc-skill],[data-mode-set]')
   if (!t) return
   // Who does it: the user's choice, kept on the task (pinned: Echo's guess never overwrites it).

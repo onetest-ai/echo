@@ -379,15 +379,15 @@ function seriesEditor(e) {
     <div class="se-line" data-series-key="${esc(x.key)}" data-series-subject="${esc(e.subject || '')}"><div class="seg" role="group" aria-label="Record every meeting">${btn(rec === 'always', 'always', 'Record')}${btn(rec === 'ask', 'ask', 'Ask')}${btn(!rec, null, "Don't record")}</div>${lang}</div></div>`
 }
 
-/** A client's page (`#client/<id>`): its names, domains, whether it is the user's own company, its logo and projects. */
 // ── client tabs: a client page's tabs, each with its count (no DOM: `client-tabs.test.mjs`) ─────────────
 /** `calls`: the client's calls (null until loaded); `tasks`: its open tasks; `people`: its people. A zero shows
  *  no number, on every tab alike (#173). */
 function clientTabs(calls, tasks, people) {
   const n = (k) => k ? `<span class="n">${k}</span>` : ''
-  return [['overview', 'Overview'], ['calls', `Calls${n(calls && calls.length)}`],['tasks', `Tasks${n(tasks)}`], ['people', `People${n(people)}`], ['profile', 'Profile']]
+  return [['overview', 'Overview'], ['calls', `Calls${n(calls && calls.length)}`], ['tasks', `Tasks${n(tasks)}`], ['people', `People${n(people)}`], ['profile', 'Profile']]
 }
 // end of the client tabs block
+/** A client's page (`#client/<id>`): its names, domains, whether it is the user's own company, its logo and projects. */
 function clientView(data) {
   const c = (data.clients || []).find((x) => x.id === S.pj.client)
   if (!c) return `<div class="empty"><div><h3>This client is gone</h3><p><a href="#projects">Back to the threads</a></p></div></div>`
