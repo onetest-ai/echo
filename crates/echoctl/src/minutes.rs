@@ -727,33 +727,37 @@ fn diagram_source(src: &str) -> String {
 }
 
 /// A diagram's text with no markup: mermaid measures a label through `innerHTML` even with HTML labels
-/// off, so a `<tag` in it would become an element (#112). Each `<` that opens a tag is mermaid's entity
-/// `#lt;`, and the `>` closing it `#gt;` (both drawn as text); line breaks (`<br>`, `<br/>`) and arrows
-/// (`<-`, `<|`, `<<`, `-->`) stay.
+/// off, so a `<tag` in it would become an element (#112). Every `<` that opens a tag (a letter, `/`, `!` or
+/// `?` after it) is mermaid's entity `#lt;`, whatever comes before it; the `>` that closes that same token
+/// (no bracket, quote, pipe or line break between) is `#gt;`. Kept as they are: line breaks (`<br>`,
+/// `<br/>`, `<br />`), a class annotation `<<word>>`, arrows (`<-->`, `<|--`) and a bare `<` (`1 < 2`).
 fn no_tags(src: &str) -> String {
+    let b = src.as_bytes();
     let mut out = String::with_capacity(src.len());
-    let (mut prev, mut open) = ('\0', false);
-    let mut rest = src;
-    while let Some(c) = rest.chars().next() {
-        let after = &rest[c.len_utf8()..];
-        let br = after.get(..2).is_some_and(|b| b.eq_ignore_ascii_case("br"))
-            && matches!(after[2..].trim_start().chars().next(), Some('>') | Some('/'));
-        let tag = after.starts_with(|n: char| n.is_ascii_alphabetic() || matches!(n, '/' | '!' | '?'));
-        if c == '<' && prev != '<' && tag && !br {
-            out.push_str("#lt;");
-            open = true;
-        } else if c == '>' && open && !matches!(prev, '-' | '=' | '.') {
+    let mut close: Option<usize> = None;
+    let annotation = |i: usize| {
+        // `<<word>>`: i is either `<` of the pair.
+        let start = if b.get(i + 1) == Some(&b'<') { i + 2 } else if i > 0 && b[i - 1] == b'<' { i + 1 } else { return false };
+        let n = b[start..].iter().take_while(|c| c.is_ascii_alphanumeric() || **c == b'_' || **c == b' ').count();
+        n > 0 && b[start + n..].starts_with(b">>")
+    };
+    for (i, c) in src.char_indices() {
+        if close == Some(i) {
             out.push_str("#gt;");
-            open = false;
+            close = None;
+            continue;
+        }
+        let after = &src[i + 1..];
+        let br = ["br>", "br/>", "br />"].iter().any(|t| after.get(..t.len()).is_some_and(|a| a.eq_ignore_ascii_case(t)));
+        let tag = after.starts_with(|n: char| n.is_ascii_alphabetic() || matches!(n, '/' | '!' | '?'));
+        if c == '<' && tag && !br && !annotation(i) {
+            out.push_str("#lt;");
+            close = after.find(|n: char| matches!(n, '>' | '[' | ']' | '(' | ')' | '{' | '}' | '"' | '|' | '<' | '\n'))
+                .filter(|&k| after.as_bytes()[k] == b'>' && !matches!(after.as_bytes()[k.saturating_sub(1)], b'-' | b'=' | b'.'))
+                .map(|k| i + 1 + k);
         } else {
-            // A label ends at its quote, bracket or line: a `>` after it is an arrow's (as is `->`, `=>`, `.->`).
-            if matches!(c, '"' | ']' | '\n') {
-                open = false;
-            }
             out.push(c);
         }
-        prev = c;
-        rest = after;
     }
     out
 }
@@ -1100,11 +1104,22 @@ mod tests {
 
     #[test]
     fn a_diagram_label_carries_no_markup_but_line_breaks_and_arrows_stay() {
-        let src = "graph TD; A[\"x <img src=x onerror=alert(1)> <script>alert(1)</script> <a href='javascript:x'>o</a> <!-- c\"]-->B\n  C[a<br>b<br/>c<BR />d] <--> D\n  E <|-- F\n  G[<<interface>>]\n  H[1 < 2]";
-        assert_eq!(no_tags(src), "graph TD; A[\"x #lt;img src=x onerror=alert(1)#gt; #lt;script#gt;alert(1)#lt;/script#gt; #lt;a href='javascript:x'#gt;o#lt;/a#gt; #lt;!-- c\"]-->B\n  C[a<br>b<br/>c<BR />d] <--> D\n  E <|-- F\n  G[<<interface>>]\n  H[1 < 2]");
-        assert_eq!(no_tags("graph LR; A(#x <b)-->B; C(<i) ==> D"), "graph LR; A(#x #lt;b)-->B; C(#lt;i) ==> D");
+        let t = |a: &str, want: &str| assert_eq!(no_tags(a), want, "{a}");
+        // Tags, whatever precedes their `<`.
+        t("A[\"x <img src=x onerror=alert(1)> <script>alert(1)</script>\"]-->B", "A[\"x #lt;img src=x onerror=alert(1)> #lt;script#gt;alert(1)#lt;/script#gt;\"]-->B");
+        t("A[\"<<img src=x onerror=alert(1)>\"]-->B", "A[\"<#lt;img src=x onerror=alert(1)>\"]-->B");
+        t("A[a<<script>] --> B[<<<img src=x>]", "A[a<#lt;script#gt;] --> B[<<#lt;img src=x#gt;]");
+        t("A[<a href='javascript:x'>o</a> <!-- c]", "A[#lt;a href='javascript:x'#gt;o#lt;/a#gt; #lt;!-- c]");
+        // Only the exact line breaks stay.
+        t("C[a<br>b<br/>c<BR />d] <--> D", "C[a<br>b<br/>c<BR />d] <--> D");
+        t("C[<br/onmouseover=alert(1)>]", "C[#lt;br/onmouseover=alert(1)>]");
+        // Arrows, annotations, comparisons, generics, and a node shape after an escaped `<` on its line.
+        t("E <|-- F\n  G[<<interface>>]\n  class H{<<abstract>>}\n  I[1 < 2]", "E <|-- F\n  G[<<interface>>]\n  class H{<<abstract>>}\n  I[1 < 2]");
+        t("J[List<String>]", "J[List#lt;String#gt;]");
+        t("A[a<br>b] <--> B(x <y) --> C>flag]", "A[a<br>b] <--> B(x #lt;y) --> C>flag]");
+        t("graph LR; A(#x <b)-->B; C(<i) ==> D", "graph LR; A(#x #lt;b)-->B; C(#lt;i) ==> D");
         let html = render("# T\n\n```mermaid\ngraph TD; A[\"<img src=x onerror=alert(1)>\"]-->B\n```\n", "T", None, &load, &[]);
-        assert!(html.contains("A[&quot;#lt;img src=x onerror=alert(1)#gt;&quot;]--&gt;B"));
+        assert!(html.contains("A[&quot;#lt;img src=x onerror=alert(1)&gt;&quot;]--&gt;B"));
     }
 
     #[test]
