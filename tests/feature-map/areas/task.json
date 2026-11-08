@@ -115,7 +115,7 @@
   },
   {
    "id": "F-TASK-12",
-   "feature": "Yolo has Claude Code do the task on its own in the background on the thread's profile; the outcome shows above My work; the run may change only its own task",
+   "feature": "Yolo has Claude Code do the task on its own in the background on the thread's profile; the outcome shows above My work (a run stopped by its 20-minute limit says so); the run may change only its own task",
    "priority": "high",
    "check": "agent",
    "axes": [

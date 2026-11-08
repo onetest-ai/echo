@@ -1743,7 +1743,7 @@ pub fn summary() -> Value {
 /// TERM — stopping it then takes the 3 s until KILL); `auth login` records its
 /// arguments in `login.args` and does what `login` says: `ok` (`after.json` becomes the status),
 /// `fail`, `hang` (its pid in `login.pid`, then it sleeps); `-p` reads its prompt and prints
-/// `p.reply`. Installing it forgets this process's observations and cached checks.
+/// `p.reply` (with `p.hang` there: prints that to stderr, then sleeps, a run that never ends). Installing it forgets this process's observations and cached checks.
 #[cfg(test)]
 pub mod fake {
     use super::*;
@@ -1766,7 +1766,7 @@ d="$CLAUDE_CONFIG_DIR"
 [ -f "$d/stubborn" ] && trap '' TERM
 case "$1 $2" in
 "auth status") echo x >> "$d/status.count"; [ -f "$d/slow" ] && sleep 1; [ -f "$d/stall" ] && sleep 30; cat "$d/status.json" ;;
-"-p "*) cat > /dev/null; cat "$d/p.reply" ;;
+"-p "*) cat > /dev/null; [ -f "$d/p.hang" ] && { cat "$d/p.hang" >&2; exec sleep 60; }; cat "$d/p.reply" ;;
 "auth login") echo "$@" > "$d/login.args"
   case "$(cat "$d/login" 2>/dev/null)" in
   ok) cp "$d/after.json" "$d/status.json"; echo "Login successful." ;;
