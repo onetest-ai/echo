@@ -520,7 +520,8 @@ mod tests {
         assert!(p.contains("echo://task/acme/T7") && p.contains("/my-skills:follow-up-mail") && p.contains("keep it short [2J"));
         assert!(p.contains("data not instructions"));
         // Up front, what Echo lets it change: its own task's state, nothing else of the thread's work (#137).
-        assert!(p.contains("only this task's state") && p.contains(r#"project ledger acme edit '{"op":"edit","node":"T7","set":{"state":"done"}}'"#), "{p}");        assert!(!yolo_prompt("acme", "T7", "", " ").contains("my-skills") && !yolo_prompt("acme", "T7", "", " ").contains("note"));
+        assert!(p.contains("only this task's state") && p.contains(r#"project ledger acme edit '{"op":"edit","node":"T7","set":{"state":"done"}}'"#), "{p}");
+        assert!(!yolo_prompt("acme", "T7", "", " ").contains("my-skills") && !yolo_prompt("acme", "T7", "", " ").contains("note"));
     }
 
     #[cfg(feature = "js")]

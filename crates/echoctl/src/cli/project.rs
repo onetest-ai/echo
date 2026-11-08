@@ -631,14 +631,25 @@ fn own_task_edit(id: &str, json: &str, run_task: &str) -> bool {
     })
 }
 
-/// Why a run Echo started can't take this ledger step. Yolo's (`run_task`, `<project>/<node>`) is told the one edit it
-/// may make, so its model doesn't take the refusal for a passing one and try again (#137).
-fn run_refusal(run_task: &str) -> String {
+/// Why a run Echo started can't take this ledger step (`edit`: the step was an edit). Yolo's (`run_task`,
+/// `<project>/<node>`) is told the one edit it may make, so its model doesn't take the refusal for a passing one and
+/// try again (#137); asked for anything else of the ledger, also where it reads its task.
+fn run_refusal(run_task: &str, edit: bool) -> String {
     match run_task.split_once('/') {
-        Some((project, node)) => format!(
-            "Yolo may change only its own task's state: `echoctl project ledger {project} edit '{{\"op\":\"edit\",\"node\":\"{node}\",\"set\":{{\"state\":\"done\"}}}}'` \
-             (or in_progress, blocked, cancelled) — not its description, owners or any other item; trying again won't change that, say the rest in your answer"
-        ),
+        Some((project, node)) => {
+            let may = format!(
+                "`echoctl project ledger {project} edit '{{\"op\":\"edit\",\"node\":\"{node}\",\"set\":{{\"state\":\"done\"}}}}'` \
+                 (or in_progress, blocked, cancelled)"
+            );
+            if edit {
+                format!(
+                    "Yolo may change only its own task's state: {may} — not its description, owners or any other item; \
+                     trying again won't change that, say the rest in your answer"
+                )
+            } else {
+                format!("Yolo reads its task with `echoctl read echo://task/{project}/{node}`; of the ledger it may only edit that task's state: {may}")
+            }
+        }
         None => "a run Echo started works only on its own project's ledger, with the agent's steps".into(),
     }
 }
@@ -655,7 +666,7 @@ fn ledger_command(id: &str, cmd: LedgerCmd) -> Result<()> {
         let own = std::env::var(guard::RUN_PROJECT).unwrap_or_default();
         let agent_step = matches!(cmd, LedgerCmd::Pending | LedgerCmd::Context | LedgerCmd::Apply { .. } | LedgerCmd::Done { .. } | LedgerCmd::VerifyPrep { .. } | LedgerCmd::VerifyApply { .. } | LedgerCmd::PeopleContext { .. } | LedgerCmd::PeopleApply { .. });
         if own.is_empty() || own != id || !agent_step {
-            anyhow::bail!("{}", run_refusal(&std::env::var(guard::RUN_TASK).unwrap_or_default()));
+            anyhow::bail!("{}", run_refusal(&std::env::var(guard::RUN_TASK).unwrap_or_default(), matches!(cmd, LedgerCmd::Edit { .. })));
         }
     }
     let read = |p: &std::path::Path| -> Result<Vec<serde_json::Value>> {
@@ -738,11 +749,25 @@ mod tests {
 
     #[test]
     fn a_refused_yolo_edit_says_what_yolo_may_change() {
-        let why = super::run_refusal("acme/T5");
+        let why = super::run_refusal("acme/T5", true);
         assert!(why.contains("only its own task's state") && why.contains(r#"{"op":"edit","node":"T5","set":{"state":"done"}}"#), "{why}");
         assert!(why.contains("ledger acme edit") && why.contains("not its description"), "{why}");
         let edit = r#"{"op":"edit","node":"T5","set":{"state":"done"}}"#;
         assert!(super::own_task_edit("acme", edit, "acme/T5"), "the edit it names is one Yolo may make");
-        assert_eq!(super::run_refusal(""), "a run Echo started works only on its own project's ledger, with the agent's steps", "a sync run's");
+        assert_eq!(super::run_refusal("", true), "a run Echo started works only on its own project's ledger, with the agent's steps", "a sync run's");
+    }
+
+    #[test]
+    fn a_refused_yolo_read_of_the_ledger_points_to_its_task_not_the_edit_rule() {
+        let (_env, _) = crate::paths::testenv::folders("yolo-ledger-refusal");
+        std::env::set_var(crate::notes::HEADLESS, "1");
+        std::env::set_var(super::guard::RUN_TASK, "globex-pilot/T005");
+        let tree = super::ledger_command("globex-pilot", super::LedgerCmd::Tree).unwrap_err().to_string();
+        let edit = r#"{"op":"edit","node":"T005","set":{"title":"x"}}"#.to_string();
+        let edit = super::ledger_command("globex-pilot", super::LedgerCmd::Edit { json: edit }).unwrap_err().to_string();
+        std::env::remove_var(crate::notes::HEADLESS);
+        std::env::remove_var(super::guard::RUN_TASK);
+        assert!(tree.contains("echoctl read echo://task/globex-pilot/T005") && !tree.contains("not its description"), "{tree}");
+        assert!(edit.contains("only its own task's state") && edit.contains("not its description"), "{edit}");
     }
 }
