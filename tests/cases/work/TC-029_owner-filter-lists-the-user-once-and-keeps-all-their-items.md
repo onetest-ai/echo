@@ -26,6 +26,8 @@ tags: [work, board, filters, owner]
 | T010 | Sam Rivera | open |
 | T016 | Sam Rivera | open |
 | T023 | Sam Rivera | open |
+| T009, T022 | Sam Rivera | done |
+| T019 | Sam Rivera | cancelled (on the tree with Open only off; on no board column) |
 
 ## Steps
 
@@ -33,8 +35,8 @@ tags: [work, board, filters, owner]
 |---|---|---|
 | 1 | Navigate to `{{base_url}}/#project/acme-rollout/work`, click the view "Board" | The board is shown |
 | 2 | Read the options of `[aria-label="Owner"]` | "Anyone", "Nobody named", "Me (Sam Rivera)", then the other owners by name; neither "Me" nor "Sam Rivera" is an option of its own |
-| 3 | Select "Me (Sam Rivera)" in Owner | The chip reads "Me (Sam Rivera) ▾"; the board holds T010, T016 and T023 in the open columns and T001 in "Done"; every task card's avatar is "SR" (Sam Rivera) or "M" (Me) |
-| 4 | Click the view "Tree", turn "Open only" off if it is on, and select "Me (Sam Rivera)" in Owner (filters are the view's own) | The tree shows T001, T010, T016 and T023, with the stories above them; every task row's owner reads "Sam Rivera" or "Me" |
+| 3 | Select "Me (Sam Rivera)" in Owner | The chip reads "Me (Sam Rivera) ▾"; the board holds T010, T016 and T023 in the open columns and T001, T009 and T022 in "Done"; every task card's avatar is "SR" (Sam Rivera) or "M" (Me) |
+| 4 | Click the view "Tree" if it is not the active one (clicking the active view opens its name box: Escape closes it), turn "Open only" off if it is on, and select "Me (Sam Rivera)" in Owner (filters are the view's own) | The tree shows T001, T009, T010, T016, T019, T022 and T023, with the stories above them; every task row's owner reads "Sam Rivera" or "Me" |
 
 ## Expected Final State
 No filter is set on Acme rollout.
