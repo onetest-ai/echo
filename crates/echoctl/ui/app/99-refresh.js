@@ -20,7 +20,7 @@ async function tick() {
   if (S.selected && (!callGone() || ticks % 15 === 0)) {
     let rev = null
     try { rev = (await get('api/call/' + encodeURIComponent(S.selected) + '/rev')).rev } catch { /* retitled: loadCall finds it */ }
-    if (changed || !S.call || rev !== S.call.rev) await loadCall(S.selected)
+    if (changed || !S.call || rev !== S.call.rev) await loadCall(S.selected, callGone()) // a gone call's retry: no list reload
   }
   // Typing a question doesn't hold back the live notes (its text and caret survive a render); a
   // text selection, an open menu or a focused search field does (until it ends). The user's notes

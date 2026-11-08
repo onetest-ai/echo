@@ -135,7 +135,7 @@ async function loadLayout() {
 let callSeq = 0
 /** The selected call answered 404 (an old link, a deleted call): not polled every tick (#150), and Calls leaves its
  *  error page. `tick` asks for it about every half minute, so a restored one loads again. */
-const callGone = () => !!(S.selected && S.call && S.call.missing)
+const callGone = () => !!(S.selected && S.call && S.call.missing && !(S.calls || []).some((c) => c.name === S.selected))
 async function loadCall(name, retried = false) {
   const mine = ++callSeq, epoch = NotesSync.epoch(name)
   try {
@@ -158,11 +158,14 @@ async function loadCall(name, retried = false) {
     // No such call (the app follows a renamed folder by its stamp itself): not polled again, and Calls leaves its
     // error page (#150) — unless a fresh list has it, being written a moment ago (a new recording): asked once more.
     if (/^404 /.test(e.message || '')) {
-      await loadCalls()
+      // The list is asked once, at the first 404 (a later half-minute retry doesn't reload it).
+      if (!retried) await loadCalls()
       if (S.selected !== name || mine !== callSeq) return
       if (!retried && (S.calls || []).some((c) => c.name === name)) return loadCall(name, true)
-      // Missing: asked for now and then only (`tick`), so a restored call comes back — see `callGone`.
-      S.call.missing = true
+      // Missing: dropped from the loaded list (a stale entry would keep it polled), asked for now and then only
+      // (`tick`) and as soon as a fresh list has it again — see `callGone`.
+      S.call.missing = true; S.movedShown = false
+      S.calls = (S.calls || []).filter((c) => c.name !== name)
     }
   }
 }

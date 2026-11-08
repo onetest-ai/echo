@@ -71,6 +71,11 @@ fn find_call(arg: &str) -> Result<PathBuf> {
             return Ok(p);
         }
     }
+    // A name a call had before it was retitled (a link, a page, a note written before): that call, for the CLI,
+    // links and the window alike.
+    if let Some(d) = renamed(arg) {
+        return Ok(d);
+    }
     bail!("{arg} is not a call folder (expected meta.json inside)")
 }
 
@@ -1496,32 +1501,34 @@ pub fn rename_to_title(dir: &Path) -> Result<PathBuf> {
         return Ok(dir.to_path_buf());
     };
     let name = dir.file_name().unwrap().to_string_lossy().into_owned();
-    let stamp = name.get(..17).unwrap_or(&name); // "YYYY-MM-DD_HHMMSS"
+    let stamp = stamp_of(dir); // "YYYY-MM-DD_HHMMSS", or an undated folder's whole name
     let slug = crate::recorder::slugify(&title);
     let new_dir = dir.with_file_name(if slug.is_empty() { stamp.to_string() } else { format!("{stamp}-{slug}") });
     let recording = crate::watch::running_watcher().and_then(|w| w.recording).is_some_and(|r| Path::new(&r) == dir);
     if new_dir == dir || recording {
         return Ok(dir.to_path_buf());
     }
-    fs::rename(dir, &new_dir).with_context(|| format!("renaming {}", dir.display()))?;
-    // The names it had: a page or link still holding one finds the call (`renamed`), and only this one.
-    update_meta(&new_dir, |meta| {
+    // The names it had, kept before the move: a page or link still holding one finds this call (`renamed`), with no
+    // moment where the old name answers nothing.
+    update_meta(dir, |meta| {
         let mut was: Vec<Value> = meta["renamed_from"].as_array().cloned().unwrap_or_default();
-        was.push(json!(name));
+        if !was.iter().any(|n| n.as_str() == Some(name.as_str())) {
+            was.push(json!(name));
+        }
         meta["renamed_from"] = json!(was);
         Ok(())
     })?;
+    fs::rename(dir, &new_dir).with_context(|| format!("renaming {}", dir.display()))?;
     Ok(new_dir)
 }
 
 /// The call a folder name now belongs to after a rename (`rename_to_title` keeps the names it had in meta.json's
 /// `renamed_from`): None for a name no call had, or one that was deleted.
 pub fn renamed(name: &str) -> Option<PathBuf> {
-    if !has_stamp(name) {
-        return None;
-    }
+    // A dated name keeps its stamp across a rename: only folders with it are read. An undated one: any folder.
+    let stamp = has_stamp(name).then(|| &name[..17]);
     fs::read_dir(paths::calls_dir()).ok()?.flatten().map(|e| e.path()).find(|d| {
-        d.file_name().is_some_and(|n| n.to_string_lossy().starts_with(&name[..17]))
+        stamp.is_none_or(|s| d.file_name().is_some_and(|n| n.to_string_lossy().starts_with(s)))
             && read_json(&d.join("meta.json"))["renamed_from"].as_array().is_some_and(|a| a.iter().any(|n| n.as_str() == Some(name)))
     })
 }
@@ -2487,6 +2494,19 @@ mod tests {
         let d = root.join("home/calls/2026-10-25_090000-atlas-planning");
         retitle(&d, "Atlas review", false).unwrap();
         assert!(root.join("home/calls/2026-10-25_090000-atlas-review").exists() && !d.exists());
+    }
+
+    #[test]
+    fn a_retitled_call_is_found_by_the_names_it_had() {
+        let (_env, _root) = crate::paths::testenv::folders("calls-renamed");
+        let old = paths::calls_dir().join("2026-10-22_100000-untitled");
+        fs::create_dir_all(&old).unwrap();
+        fs::write(old.join("meta.json"), json!({"title": "Acme review", "ended_at": "2026-10-22T10:30:00+02:00"}).to_string()).unwrap();
+        let new = rename_to_title(&old).unwrap();
+        assert_eq!(new.file_name().unwrap(), "2026-10-22_100000-acme-review");
+        assert_eq!(resolve_call("2026-10-22_100000-untitled").unwrap(), new, "the old name (a link, a page) finds it");
+        // Another call with the same stamp, deleted: its name finds nothing (not the call that shares its stamp).
+        assert!(resolve_call("2026-10-22_100000-untitled-2").is_err());
     }
 
     #[test]
