@@ -31,7 +31,7 @@ tags: [calls, minutes, what-moved]
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Navigate to `{{base_url}}/#calls` and wait for "Acme weekly sync" and click the row Memo | The aside "What moved" has two thread lines |
+| 1 | Navigate to `{{base_url}}/#calls` and wait for "Acme weekly sync" and click the row Memo, then open What moved with the header button `[data-panel-flip="moved"]` (skip the click if the right panel already shows What moved) | The What moved view in the right panel (`#r-right .mv`) has two thread lines; no count on its tab or button (neither thread has read the memo) |
 | 2 | Read the line of Acme rollout | "hasn't read this call yet" and a button "Sync now" (`data-cc-sync="acme-rollout"`) |
 | 3 | Read the line of Globex pilot | "reads this call within a few minutes" and a button "Sync now" (`data-cc-sync="globex-pilot"`) |
 | 4 | Click the row Globex pilot kickoff | One thread line: Globex pilot "hasn't read this call yet" with "Sync now" (do not press it: it starts Claude Code) |

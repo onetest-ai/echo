@@ -32,6 +32,7 @@ cases:
   - tests/cases/calls/TC-035_delete-asks-first-and-moves-the-folder-to-the-trash.md
   - tests/cases/calls/TC-036_restore-brings-a-deleted-call-back.md
   - tests/cases/window/TC-023_my-notes-holds-the-live-notes-in-one-timeline.md
+  - tests/cases/calls/TC-039_what-moved-is-a-right-panel-view-and-the-minutes-take-the-whole-tab.md
 ---
 
 # S-23: A busy day of calls and minutes in every state
@@ -70,6 +71,7 @@ cases:
 | 26 | `calls/TC-035_delete-asks-first-and-moves-the-folder-to-the-trash.md` | — | — |
 | 27 | `calls/TC-036_restore-brings-a-deleted-call-back.md` | — | — |
 | 28 | `window/TC-023_my-notes-holds-the-live-notes-in-one-timeline.md` | — | — |
+| 29 | `calls/TC-039_what-moved-is-a-right-panel-view-and-the-minutes-take-the-whole-tab.md` | — | — |
 
 ## Notes
 - Data: `standard` (`tests/fixtures/serve.sh up <dir> <port> --set standard`), built right before the run.
@@ -79,6 +81,6 @@ cases:
   load, and stage 7 has opened Quick check-in before. Its step 2 fails while the URL lags the tab after that choice (the
   hash reads `/minutes` while Transcript is shown; no case asserts the hash, see the case's Notes). Stage 25's step 5 fails until #121 is fixed.
 - Stage 22 and 23 are the `prep` cases about calls (Prep tab first, a prep with only an error).
-- Stage 28 (My notes with the live notes) only reads Acme weekly sync, Initech planning and Quick check-in, which the stages before it leave as built; it opens My notes and leaves it open.
+- Stage 28 (My notes with the live notes) only reads Acme weekly sync, Initech planning and Quick check-in, which the stages before it leave as built; it opens My notes and leaves it open. Stage 29 (What moved in the right panel) only reads Acme weekly sync, the Memo and Initech planning; after stage 24 the Memo is in Acme rollout only, which stage 29 allows.
 - No stage presses Write minutes, Write now, Sync now or Sign in…; Try again runs the data's fake Claude Code, which fails at once.
 - Not in the data (`tests/fixtures/README.md` → Skipped): a call being recorded, a minutes run queued or running, Today's minutes states being reworked, a call held by a Claude Code session (`held_by`), a missing or unreadable pinned AI profile.

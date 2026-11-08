@@ -37,7 +37,7 @@
   },
   {
    "id": "F-MIN-04",
-   "feature": "What moved beside the minutes lists, per thread, what the call changed (new task, done, due, blocked, waiting…), the user's open tasks first with who does each, the words, speaker and a time chip; changes the verifier called wrong are hidden; marks \"weak · to review\", \"to check\", \"kept yours\"",
+   "feature": "What moved (a right panel view) lists, per thread, what the call changed (new task, done, due, blocked, waiting…), the user's open tasks first with who does each, the words, speaker and a time chip; changes the verifier called wrong are hidden; marks \"weak · to review\", \"to check\", \"kept yours\"",
    "priority": "high",
    "check": "agent",
    "axes": [
@@ -181,6 +181,15 @@
    "priority": "medium",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-MIN-19",
+   "feature": "The Minutes tab is the minutes alone at the tab's full width; What moved is a right panel view: a button in the call's header beside My notes and a panel tab, both with the count of changes once a thread has read the call, shown only for a call in a thread; its time chips jump to the transcript and its items open their details",
+   "priority": "medium",
+   "check": "agent",
+   "axes": [
+    "call.status"
+   ]
   }
  ]
 }

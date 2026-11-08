@@ -63,6 +63,9 @@ img.pj-ic { background: #fff; }
 .pj-menu .menu-item { display: flex; align-items: center; gap: 6px; width: 100%; }
 .pj-sug { display: flex; align-items: center; gap: 10px; margin-top: 8px; padding: 7px 10px; border-radius: 8px; background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); font-size: 12.5px; }
 .pj-sug .btn { height: 24px; }
+/* A narrow header (the right panel open): the buttons go under the words. */
+.pj-sug { flex-wrap: wrap; }
+.pj-sug > .grow.grow { min-width: 150px; }
 
 .pj-found { padding: 7px 8px; }
 .pj-found .pj-spark { width: 20px; text-align: center; color: var(--accent-ink); font-size: 14px; }

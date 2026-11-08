@@ -199,7 +199,7 @@ function panel(area, eff) {
   const other = area === 'right' ? 'bottom' : 'right'
   const v = PANEL_VIEWS.find((x) => x.id === p.active)
   // Each view by its icon (its name as the tooltip); one without an icon by its name.
-  const tabs = p.views.map((id) => { const x = PANEL_VIEWS.find((y) => y.id === id); return `<button class="tab${x.icon ? ' icon-tab' : ''}" role="tab" data-panel-show="${esc(id)}" aria-selected="${id === p.active}" title="${esc(x.label)}" aria-label="${esc(x.label)}">${x.icon || esc(x.label)}</button>` }).join('')
+  const tabs = p.views.map((id) => { const x = PANEL_VIEWS.find((y) => y.id === id); return `<button class="tab${x.icon ? ' icon-tab' : ''}" role="tab" data-panel-show="${esc(id)}" aria-selected="${id === p.active}" title="${esc(x.label)}" aria-label="${esc(x.label)}">${x.icon || esc(x.label)}${x.badge && x.badge() ? `<span class="tab-n">${esc(String(x.badge()))}</span>` : ''}</button>` }).join('')
   const moveIcon = other === 'right'
     ? ICON('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>')
     : ICON('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 14h18"/>')
@@ -360,10 +360,11 @@ function doc() {
         </div>
         <div class="doc-actions">${callMenu(c)}</div>
       </div>
+      ${callSuggestion(c)}
       <div class="tabs" role="tablist">${tabs.map(([id, label, n, rec]) => `<button class="tab" role="tab" data-tab="${id}" aria-selected="${S.tab === id}">${rec ? '<span class="tab-rec" aria-label="Recording"></span>' : ''}${label}${n !== '' ? `<span class="n">${n}</span>` : ''}</button>`).join('')}</div>${notices()}`
   const body = tabBody(c, segs, chat, frames)
   const confirm = S.confirmDelete ? confirmBox(c) : ''
-  return typeof body === 'string' ? { head, pane: confirm + body } : { head, bar: confirm + body.bar, frame: body.frame, side: body.side }
+  return typeof body === 'string' ? { head, pane: confirm + body } : { head, bar: confirm + body.bar, frame: body.frame }
 }
 
 /** Today (the first activity; the window opens on it): cards delivered to Echo (a routine's morning brief — Got it

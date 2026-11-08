@@ -18,8 +18,8 @@ const ACTIVITIES = [
   { id: 'settings', label: 'Settings', layout: 'single', bottom: true, icon: ICON('<circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/>') },
 ]
 /** A call's tabs, in order. `x` = what the call has: `{recording, chat, frames}` (counts). One Transcript tab: live
- *  while the call records (with its live notes beside it), the final transcript after — and the live notes stay
- *  beside it. No Actions tab: the minutes list the action items, What moved beside them the user's tasks. */
+ *  while the call records, the final transcript after — the transcript alone either way (the live notes are in My
+ *  notes). No Actions tab: the minutes list the action items, What moved (a right panel view) the user's tasks. */
 const CALL_TABS = [
   { id: 'prep', label: 'Prep', when: (x) => !!x.prep },
   { id: 'minutes', label: 'Minutes' },

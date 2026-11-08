@@ -24,6 +24,9 @@
 .term-profile select { height: 26px; border-radius: 6px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--text); font: inherit; }
 .panel-head .tab.icon-tab { display: inline-flex; align-items: center; justify-content: center; width: 34px; padding: 6px 0 7px; }
 .panel-head .tab.icon-tab svg { width: 17px; height: 17px; }
+/* A view's count on its tab (What moved: the call's changes). */
+.panel-head .tab .tab-n { margin-left: 3px; font-size: 10.5px; font-weight: 600; color: var(--accent-ink); }
+.panel-head .tab.icon-tab:has(.tab-n) { width: auto; padding-left: 8px; padding-right: 8px; }
 /* panel edges: drag to resize */
 .panel { position: relative; }
 .panel-resize { position: absolute; z-index: 3; }

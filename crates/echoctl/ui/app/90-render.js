@@ -185,12 +185,10 @@ function render() {
         if (pane.dataset.mode !== 'frame') {
           pane.dataset.mode = 'frame'
           pane.classList.add('framed')
-          patch(pane, '<div id="minutes-bar"></div><div class="minutes-split"><div class="minutes-slot" id="minutes-slot"></div><aside class="minutes-side" id="minutes-side" aria-label="What moved"></aside></div>')
+          patch(pane, '<div id="minutes-bar"></div><div class="minutes-split"><div class="minutes-slot" id="minutes-slot"></div></div>')
         }
         patch($('#minutes-bar'), d.bar)
         patch($('#minutes-slot'), d.frame)
-        patch($('#minutes-side'), d.side || '')
-        $('#minutes-side').hidden = !d.side
       } else {
         if (pane.dataset.mode === 'frame') { pane.dataset.mode = ''; pane.classList.remove('framed') }
         patch(pane, d.pane)

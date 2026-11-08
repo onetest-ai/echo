@@ -177,8 +177,11 @@ the Threads, People, Work and Tasks views (`.ai-run/guides/design/threads.md`).
 - A task's read (`echoctl read echo://task/…`, where Work on it and Yolo start) says who does it and gives the context:
   the thread's last 3 calls with minutes, and the last 3 of the meeting series it was raised in (the invite's subject,
   as "Since last time" goes) that the thread's don't already list — links only; Claude opens what it needs.
-- What moved (`callChanges`): what a call changed in its threads, beside the minutes as the live notes are beside the
-  transcript (its own scroll; under 1000 px it is hidden), the user's own open tasks first with who does each. It was
+- What moved (`callChanges`, panel view `moved` in `17-minutes.js`): what a call changed in its threads, a view of the
+  right panel — a button in the call's header beside My notes and a panel tab, both with the count of changes once a
+  thread has read the call (`movedCount`; panel views may carry a `badge`); the view exists only for a call in a thread,
+  as Also discussed only with the Brain. The minutes take the whole Minutes tab (Nov 2026: beside them they were
+  squeezed to a few words a line). The user's own open tasks first with who does each. It was
   above the Actions tab's items; action items are everything said, the user's tasks are what is theirs to do. The
   Actions tab is gone (Nov 2026): the minutes list the action items with their moments, What moved has the tasks;
   `actions.json` stays (the minutes, Today's counts, thread sync and `echoctl actions` use it).
