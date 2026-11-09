@@ -371,7 +371,7 @@ pub fn download(name: &str) -> Result<()> {
         if !status.success() {
             bail!(
                 "download {} (re-run the same command to resume)",
-                if status.code() == Some(28) { "stalled: no data for a minute" } else { "failed" }
+                if status.code() == Some(28) { "stalled: no connection, or no data for a minute" } else { "failed" }
             );
         }
         eprintln!("verifying checksum…");
