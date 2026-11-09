@@ -732,7 +732,7 @@ impl Transcriber {
             return;
         }
         let active = crate::config::Config::load().ok().and_then(|c| c.model);
-        let Some(m) = models::for_language(code, active.as_deref()) else { return };
+        let Some(m) = models::for_call(code, active.as_deref()) else { return };
         if *self.model.lock().unwrap_or_else(|e| e.into_inner()) == m.name {
             return;
         }

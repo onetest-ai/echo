@@ -25,7 +25,7 @@ tags: [settings, languages]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Run `. <dir>/env && target/debug/echoctl config --languages en,uk`; navigate to `{{base_url}}/#settings/recording`; read the "Languages you record in" and "Default language" rows | Two chips, "English" and "Ukrainian"; the text says Echo never guesses a call's language; "Default language" shows "English"; the top bar select "Language of the call" shows "EN" and offers English and Ukrainian only (no "Detect") |
+| 1 | Run `. <dir>/env && target/debug/echoctl config --languages en,uk`; navigate to `{{base_url}}/#settings/recording` and reload the page (a change made by the CLI shows after a reload); read the "Languages you record in" and "Default language" rows | Two chips, "English" and "Ukrainian"; the text says Echo never guesses a call's language; "Default language" shows "English"; the top bar select "Language of the call" shows "EN" and offers English and Ukrainian only (no "Detect") |
 | 2 | Choose "Ukrainian" in the "Default language" select | "Default language" shows "Ukrainian"; the chips read "Ukrainian", "English" |
 | 3 | Wait 1 s, run `. <dir>/env && grep -n '"languages"' "$ECHOCTL_HOME/.echo/config.json" -A3` | `"uk"` first, then `"en"`: the default is kept for the calls Echo starts by itself too |
 | 4 | Reload `{{base_url}}/`; read the top bar select "Language of the call" | It shows "UK" |

@@ -447,6 +447,12 @@ pub fn for_language(lang: &str, active: Option<&str>) -> Option<&'static Model> 
     ["large-v3-turbo-q8_0", "large-v3-turbo-q5_0", "large-v3-q5_0", "small-q8_0"].iter().find_map(ready)
 }
 
+/// The model a call in `lang` is transcribed with: `for_language`'s, else the active one (`active`, when downloaded).
+#[cfg_attr(not(feature = "transcribe"), allow(dead_code))]
+pub fn for_call(lang: &str, active: Option<&str>) -> Option<&'static Model> {
+    for_language(lang, active).or_else(|| active.and_then(|a| find(a).ok()).filter(|m| model_path(m).exists()))
+}
+
 /// Which calls a downloaded model other than the active one transcribes (`for_language`), for the model lists.
 #[cfg_attr(not(any(feature = "transcribe", feature = "tray")), allow(dead_code))]
 pub fn used_for(name: &str, active: Option<&str>) -> Option<&'static str> {
@@ -583,6 +589,9 @@ mod tests {
             assert_eq!(pick("en", "large-v3-turbo-q5_0"), None, "no NeMo-Speech runtime in this build");
         }
         assert_eq!(used_for("large-v3-turbo-q5_0", Some("large-v3-turbo-q5_0")), None, "the active one");
+        let call = |lang: &str, active: &str| for_call(lang, Some(active)).map(|m| m.name);
+        assert_eq!(call("ru", "large-v3-turbo-q5_0"), Some("large-v3-turbo-q5_0"), "nothing better: the active one, by name");
+        assert_eq!(call("ru", "large-v3-q5_0"), None, "the active one isn't downloaded");
     }
 
     #[test]
