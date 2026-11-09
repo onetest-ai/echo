@@ -313,10 +313,14 @@ pub static PROGRESS: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::
 
 /// Run curl. In a real terminal show curl's own progress bar; otherwise (Claude Code's `!`,
 /// pipes) print a line every 10% so logs and the conversation stay readable.
+/// A download that stalls (under 1 KB/s for a minute, or no connection in 30 s) ends: the `.part` stays for a resume,
+/// and the one-at-a-time download slot is free again instead of held until Echo restarts.
+const STALL: [&str; 6] = ["--connect-timeout", "30", "--speed-limit", "1024", "--speed-time", if cfg!(test) { "2" } else { "60" }];
+
 fn curl_with_progress(part: &PathBuf, url: &str, expected_bytes: u64) -> Result<std::process::ExitStatus> {
     use std::io::IsTerminal;
     let mut cmd = Command::new("curl").no_window();
-    cmd.args(["-fL", "-C", "-", "-o"]).arg(part).arg(url);
+    cmd.args(STALL).args(["-fL", "-C", "-", "-o"]).arg(part).arg(url);
     if std::io::stderr().is_terminal() {
         return cmd.arg("--progress-bar").status().context("running curl");
     }
@@ -365,7 +369,10 @@ pub fn download(name: &str) -> Result<()> {
         eprintln!("downloading {} ({} MB) → {}", m.name, m.size_mb, dest.display());
         let status = curl_with_progress(&part, &url, m.size_mb as u64 * 1_000_000)?;
         if !status.success() {
-            bail!("download failed (re-run the same command to resume)");
+            bail!(
+                "download {} (re-run the same command to resume)",
+                if status.code() == Some(28) { "stalled: no data for a minute" } else { "failed" }
+            );
         }
         eprintln!("verifying checksum…");
         let got = sha256_file(&part)?;
@@ -511,6 +518,29 @@ mod tests {
         fs::create_dir_all(paths::models_dir()).unwrap();
         fs::write(model_path(find(HELPER_MODEL).unwrap()), b"x").unwrap();
         assert_eq!(note("large-v3-q5_0"), None, "the helper is downloaded");
+    }
+
+    #[test]
+    fn a_download_that_stops_sending_ends_and_keeps_its_part() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/model.bin", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            let (mut c, _) = listener.accept().unwrap();
+            let _ = c.read(&mut [0u8; 4096]);
+            let _ = c.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1000000\r\n\r\n");
+            let _ = c.write_all(&[7u8; 100]);
+            std::thread::sleep(std::time::Duration::from_secs(30)); // a stalled connection
+        });
+        let dir = std::env::temp_dir().join(format!("echo-stall-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let part = dir.join("model.bin.part");
+        let t = std::time::Instant::now();
+        let status = curl_with_progress(&part, &url, 1_000_000).unwrap();
+        assert_eq!(status.code(), Some(28), "curl's 'too slow'");
+        assert!(t.elapsed() < std::time::Duration::from_secs(20), "it ended, not hung");
+        assert_eq!(fs::metadata(&part).unwrap().len(), 100, "what arrived stays for a resume");
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
