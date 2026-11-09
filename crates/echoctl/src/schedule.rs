@@ -73,6 +73,22 @@ pub fn due(now: DateTime<Utc>) -> Option<MeetingContext> {
     live.into_iter().find(|m| m.recordable().is_ok() && time(&m.start).is_some_and(|s| now >= s - Duration::seconds(LEAD)))
 }
 
+/// A recording that couldn't start: a meeting set to "Record when it starts" leaves the schedule
+/// too, or the watcher would arm it again the next second and fail (and notify) again until it
+/// ends. Returns the notification's text.
+pub(crate) fn start_failed(meeting: Option<&MeetingContext>, e: &anyhow::Error) -> String {
+    let scheduled = meeting
+        .and_then(|m| m.id.as_deref())
+        .filter(|id| load().iter().any(|s| s.id.as_deref() == Some(*id)))
+        .is_some_and(|id| remove_id(id).is_ok());
+    if scheduled {
+        let name = meeting.and_then(|m| m.subject.as_deref()).unwrap_or("this meeting");
+        format!("{e:#} — “{name}” is no longer set to record when it starts; click Record to try again")
+    } else {
+        format!("{e:#} — click Record to try again")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -114,5 +130,27 @@ mod tests {
         assert!(due(now).is_none());
         assert!(is_scheduled("later"));
         let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn a_failed_start_unschedules_its_meeting_and_says_so() {
+        let (_env, _root) = crate::paths::testenv::folders("watch-start-failed");
+        let start = Utc::now() - chrono::Duration::seconds(30);
+        let m = MeetingContext {
+            id: Some("ev1".into()),
+            subject: Some("Weekly".into()),
+            start: Some(start.to_rfc3339()),
+            end: Some((start + chrono::Duration::minutes(30)).to_rfc3339()),
+            ..Default::default()
+        };
+        add(m.clone()).unwrap();
+        assert!(due(Utc::now()).is_some());
+        let e = anyhow::anyhow!("creating calls: read-only");
+        let text = start_failed(Some(&m), &e);
+        assert!(text.contains("“Weekly” is no longer set to record"), "{text}");
+        assert!(due(Utc::now()).is_none(), "not armed again the next second");
+        // A meeting that wasn't scheduled (or none) just says to try again.
+        assert_eq!(start_failed(Some(&m), &e), "creating calls: read-only — click Record to try again");
+        assert_eq!(start_failed(None, &e), "creating calls: read-only — click Record to try again");
     }
 }
