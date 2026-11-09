@@ -98,8 +98,13 @@ impl MeetingApp {
         let sub_of = |base: &str| host.strip_suffix(base).and_then(|h| h.strip_suffix('.')).is_some_and(|s| !s.is_empty() && !s.split('.').any(str::is_empty));
         // The path's first segment after `prefix`, when it starts so.
         let first = |prefix: &str| path.strip_prefix(prefix).map(|r| r.split(['/', '?', '#']).next().unwrap_or(""));
+        // Teams turns the link into an `msteams:` deep link: only a meeting's own (`meetup-join/19:meeting_…`,
+        // `/meet/<digits>`), never one with a dot segment that would walk to another of its pages (a pre-filled chat).
+        let dots = path.split(['/', '?', '#']).any(|seg| matches!(seg.to_ascii_lowercase().replace("%2e", ".").as_str(), "." | ".."));
         let teams = TEAMS_HOSTS.contains(&host.as_str())
-            && (first("/l/meetup-join/").is_some_and(|s| !s.is_empty()) || first("/meet/").is_some_and(|s| !s.is_empty()));
+            && !dots
+            && (first("/l/meetup-join/").is_some_and(|s| ["19%3ameeting_", "19:meeting_"].iter().any(|p| s.len() > p.len() && s.to_ascii_lowercase().starts_with(p)))
+                || first("/meet/").is_some_and(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())));
         let zoom_id = first("/j/").is_some_and(|id| (9..=12).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_digit()));
         let zoom_room = first("/my/").is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_alphanumeric() || b".-_".contains(&b)));
         let zoom = (host == "zoom.us" && zoom_id) || (sub_of("zoom.us") && (zoom_id || zoom_room));
@@ -201,6 +206,12 @@ mod tests {
             "evilmeet.google.com/abc-defg-hij",
             "https://teams.microsoft.com.evil.example/l/meetup-join/19%3a1",
             "https://teams.microsoft.com/",
+            // #253 review: a dot segment walks Teams' deep link to a pre-filled chat; only a meeting's own link.
+            "https://teams.microsoft.com/l/meetup-join/x/../../chat/0/0?users=a@evil.example&message=hi",
+            "https://teams.microsoft.com/l/meetup-join/19%3ameeting_x/%2e%2e/%2E%2E/chat/0/0?users=a@evil.example",
+            "https://teams.microsoft.com/l/meetup-join/x/0",
+            "https://teams.microsoft.com/l/chat/0/0?users=a@evil.example",
+            "https://teams.live.com/meet/abc",
             "javascript:alert(1)//https://zoom.us/j/",
         ] {
             assert_eq!(find_join_link(text), None, "{text}");
@@ -210,7 +221,7 @@ mod tests {
 
     #[test]
     fn the_app_follows_the_links_host() {
-        assert_eq!(MeetingApp::from_url("https://teams.microsoft.com/l/meetup-join/19%3a1"), Some(MeetingApp::Teams));
+        assert_eq!(MeetingApp::from_url("https://teams.microsoft.com/l/meetup-join/19%3ameeting_1%40thread.v2/0"), Some(MeetingApp::Teams));
         assert_eq!(MeetingApp::from_url("HTTPS://Umbrella.Zoom.US/j/81234567890"), Some(MeetingApp::Zoom));
         assert_eq!(MeetingApp::from_url("https://meet.google.com/abc-defg-hij?authuser=0"), Some(MeetingApp::Meet));
         assert_eq!(MeetingApp::from_url("https://teams.example/ev-m01"), None, "the test data's links: no app known");

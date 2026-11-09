@@ -187,7 +187,7 @@ mod tests {
         assert_eq!(e, "“Umbrella check-in” is a Zoom meeting: recording isn't available for Zoom meetings yet");
         assert!(with(Some("https://meet.google.com/abc-defg-hij")).recordable().unwrap_err().to_string().contains("recording isn't available for Google Meet meetings yet"));
         assert_eq!(zoom.teams_join_url(), None, "no Teams features on it");
-        for ok in [Some("https://teams.microsoft.com/l/meetup-join/19%3a1"), Some("https://teams.example/ev-1"), None] {
+        for ok in [Some("https://teams.microsoft.com/l/meetup-join/19%3ameeting_1%40thread.v2/0"), Some("https://teams.example/ev-1"), None] {
             assert!(with(ok).recordable().is_ok(), "{ok:?}: Teams, or no app known, as before");
             assert_eq!(with(ok).teams_join_url(), ok);
         }

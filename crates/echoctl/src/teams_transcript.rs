@@ -415,6 +415,6 @@ mod tests {
         let zoom = ev("Join Zoom Meeting https://umbrella.zoom.us/j/81234567890");
         assert_eq!(known(&zoom, &Default::default()), (None, false), "nothing to ask Teams");
         assert!(import(&zoom).unwrap_err().to_string().contains("isn't a Teams meeting"));
-        assert_eq!(known(&ev("https://teams.microsoft.com/l/meetup-join/19%3a1"), &Default::default()), (None, true), "a Teams one is asked about");
+        assert_eq!(known(&ev("https://teams.microsoft.com/l/meetup-join/19%3ameeting_1%40thread.v2/0"), &Default::default()), (None, true), "a Teams one is asked about");
     }
 }

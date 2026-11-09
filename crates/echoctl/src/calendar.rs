@@ -72,7 +72,18 @@ fn join_link(ev: &Value) -> Option<String> {
     if let Some(url) = ev.pointer("/onlineMeeting/joinUrl").and_then(Value::as_str) {
         return Some(url.to_owned());
     }
-    ["/location/displayName", "/bodyPreview", "/body/content"].iter().filter_map(|p| ev.pointer(p).and_then(Value::as_str)).find_map(crate::apps::find_join_link)
+    let text = |p: &str| ev.pointer(p).and_then(Value::as_str);
+    [text("/location/displayName"), text("/bodyPreview").map(whole_words), text("/body/content")].into_iter().flatten().find_map(crate::apps::find_join_link)
+}
+
+/// Graph cuts `bodyPreview` at 255 characters: a long one ends where it was cut, maybe inside a link (a Zoom id short
+/// of its digits). Its last word is left out then.
+fn whole_words(preview: &str) -> &str {
+    const CUT_AT: usize = 250;
+    if preview.chars().count() < CUT_AT {
+        return preview;
+    }
+    preview.trim_end().rsplit_once(char::is_whitespace).map_or("", |(head, _)| head)
 }
 
 /// One calendar event for the calendar view: times, flags and what the user can do with it.
@@ -169,6 +180,12 @@ pub fn to_meeting(ev: &Value) -> Option<MeetingContext> {
         languages: vec![],
         ai_profile: None,
     })
+}
+
+/// The agenda offers a meeting to record now (from `before` its start until `after` it): one Echo can record, not a
+/// Zoom or Google Meet one (that has no "Record?" of its own, so a Teams call then is asked about as any call).
+pub fn offered_now(agenda: &[MeetingContext], now: DateTime<Utc>, before: Duration, after: Duration) -> bool {
+    agenda.iter().filter(|m| m.recordable().is_ok()).filter_map(watch::meeting_start).any(|st| now >= st - before && now <= st + after)
 }
 
 /// The start of `day` here, in UTC: local midnight (the earlier one when the clock goes back over
@@ -380,6 +397,49 @@ mod tests {
         lunch["bodyPreview"] = json!("At https://zoom.us.lunch.example/j/81234567890 or https://acme.example/menu");
         assert!(convert(&lunch, now).is_none());
         assert_eq!(view_event(&lunch).unwrap()["app"], Value::Null);
+    }
+
+    /// #253 review: a preview cut at its length limit may end inside a link; that link isn't taken.
+    #[test]
+    fn a_link_cut_off_at_the_end_of_the_preview_is_not_taken() {
+        let soon = Utc::now() + Duration::minutes(1);
+        let mut zoom = ev("Umbrella pricing call", soon, false);
+        let pad = "Agenda: pricing tiers, the pilot's numbers and what the board asked for. ".repeat(3);
+        zoom["bodyPreview"] = json!(format!("{pad}Join Zoom Meeting https://umbrella.zoom.us/j/8123456789"));
+        assert!(zoom["bodyPreview"].as_str().unwrap().chars().count() >= 250);
+        assert_eq!(view_event(&zoom).unwrap()["join_url"], Value::Null, "cut to 10 digits: not a link to join");
+        // The whole link before the cut: taken.
+        zoom["bodyPreview"] = json!(format!("Join Zoom Meeting https://umbrella.zoom.us/j/81234567890 {pad}Meeting ID: 812"));
+        assert_eq!(view_event(&zoom).unwrap()["join_url"], "https://umbrella.zoom.us/j/81234567890");
+        // A short preview isn't cut: its last word is whole.
+        zoom["bodyPreview"] = json!("Join Zoom Meeting https://umbrella.zoom.us/j/81234567890");
+        assert_eq!(view_event(&zoom).unwrap()["join_url"], "https://umbrella.zoom.us/j/81234567890");
+    }
+
+    /// #253 review: an invite from outside with its Teams link only in the text (no `onlineMeeting` of the user's
+    /// own) is a Teams meeting now: kept, recordable, with Join & record; before #228 it was dropped.
+    #[test]
+    fn an_outside_teams_invite_with_its_link_only_in_the_text_is_kept() {
+        let now = Local::now().with_timezone(&Utc);
+        let mut ext = ev("Globex supplier call", now + Duration::minutes(1), false);
+        let link = "https://teams.microsoft.com/l/meetup-join/19%3ameeting_Zm9v%40thread.v2/0?context=%7b%22Tid%22%3a%22t%22%7d";
+        ext["bodyPreview"] = json!(format!("Microsoft Teams meeting\r\nJoin on your computer: {link}"));
+        let m = convert(&ext, now).expect("kept");
+        assert_eq!(m.join_url.as_deref(), Some(link));
+        assert!(m.recordable().is_ok() && m.teams_join_url() == Some(link));
+        assert_eq!(view_event(&ext).unwrap()["app"], "teams");
+    }
+
+    /// #253 review: a Teams call starting around a Zoom meeting's start is still asked about ("Record?"): the agenda
+    /// doesn't offer the Zoom meeting.
+    #[test]
+    fn only_a_meeting_echo_can_record_is_offered_by_the_agenda() {
+        let now = Utc::now();
+        let at = |url: &str| MeetingContext { start: Some(now.to_rfc3339()), join_url: Some(url.into()), ..Default::default() };
+        let (before, after) = (Duration::seconds(58), Duration::minutes(4));
+        assert!(!offered_now(&[at("https://zoom.us/j/81234567890")], now, before, after));
+        assert!(offered_now(&[at("https://zoom.us/j/81234567890"), at("https://teams.example/ev-1")], now, before, after));
+        assert!(!offered_now(&[at("https://teams.example/ev-1")], now + Duration::minutes(5), before, after), "past the window");
     }
 
     /// A Teams call recorded during a Zoom or Google Meet meeting isn't that meeting.

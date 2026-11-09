@@ -244,7 +244,8 @@ function eventMenu(d, now) {
   const thread = e.recorded ? '' : item(`data-ev-ctx="thread" data-id="${esc(e.id)}"`, 'Add to a thread…')
   const x = e.series
   const rec = x && x.key && x.rule && x.rule.record === 'always'
-  const series = x && x.key ? `<div data-series-key="${esc(x.key)}" data-series-subject="${esc(e.subject || '')}" style="display:contents">${item(`data-series-set="record" data-val="${esc(JSON.stringify(rec ? null : 'always'))}"`, rec ? "Stop recording every meeting of this series" : 'Record every meeting of this series')}</div>` : ''
+  // A Zoom or Google Meet meeting: Echo can't record its series either (#228).
+  const series = x && x.key && !otherApp(e) ? `<div data-series-key="${esc(x.key)}" data-series-subject="${esc(e.subject || '')}" style="display:contents">${item(`data-series-set="record" data-val="${esc(JSON.stringify(rec ? null : 'always'))}"`, rec ? "Stop recording every meeting of this series" : 'Record every meeting of this series')}</div>` : ''
   const link = e.join_url ? item(`data-copy="${esc(e.join_url)}"`, `Copy the ${otherApp(e) ? meetingApp(e).name : 'Teams'} link`) : ''
   const groups = [(kind ? main[kind]() : '') + prep, thread + series, link, item(`data-ev-ctx="open" data-id="${esc(e.id)}"`, 'Show details')].filter(Boolean)
   // At the pointer, kept inside the window (its size is about known: 240 px wide, 32 px an item).

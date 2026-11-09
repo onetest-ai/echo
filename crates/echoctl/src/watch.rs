@@ -464,7 +464,7 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
                             }
                         }
                         // Else asked as any call — unless the agenda offers its meeting (it does now that nothing records).
-                        let offered_by_agenda = agenda.iter().any(|m| parse_time(&m.start).is_some_and(|st| now >= st - OFFER_BEFORE && now <= st + OFFER_UNTIL_AFTER_START));
+                        let offered_by_agenda = crate::calendar::offered_now(&agenda, now, OFFER_BEFORE, OFFER_UNTIL_AFTER_START);
                         let ask = armed.is_none() && !offered_by_agenda && crate::config::Config::load().map(|c| c.ask_unscheduled()).unwrap_or(true);
                         emit("call_started", json!({ "app": app, "armed": armed.is_some(), "ask": ask }));
                         if ask {
