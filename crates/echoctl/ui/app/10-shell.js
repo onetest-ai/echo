@@ -61,10 +61,10 @@ function signinNote(p) {
 const CHEV = (open) => `<svg class="chev${open ? ' open' : ''}" viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M3.5 1.5L7 5l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`
 const CARET = '<svg viewBox="0 0 10 6" width="8" height="5" aria-hidden="true"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>'
 
-/** A record button with the language picker on its right (a native select over the caret). */
 /** A memo's mark: a microphone (the list, the pill, the header). */
 const MIC = (size = 13) => `<svg class="mic" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>`
 
+/** A record button with the language picker on its right (a native select over the caret). */
 function recordButton(attrs, label, primary = true, memo = false) {
   const { opts, cur } = langChoices()
   const cls = primary ? 'btn primary' : 'btn'

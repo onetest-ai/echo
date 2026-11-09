@@ -210,7 +210,8 @@ pub fn hardware() -> Hardware {
 
 /// Recommendation + one-line reason, shown by first run and the doctor skill.
 pub fn recommend(hw: &Hardware) -> (&'static str, String) {
-    if find(PARAKEET).is_ok_and(runnable) {
+    let english = Config::load().is_ok_and(|c| crate::call_language::default_language(&c) == "en");
+    if english && find(PARAKEET).is_ok_and(runnable) {
         return (PARAKEET, "light on the computer, the most accurate on English calls here".into());
     }
     let ram = hw.ram_gb.unwrap_or(8);

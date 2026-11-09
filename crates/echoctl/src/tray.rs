@@ -873,6 +873,7 @@ enum Action {
     ChangeHome,
     ToggleAutostart,
     DownloadModel(&'static str),
+    SwitchModel(&'static str),
     Quit,
 }
 
@@ -1378,6 +1379,7 @@ impl Ui {
             "use_model" => Action::UseModel(model()?),
             "remove_model" => Action::RemoveModel(model()?),
             "download_model" => Action::DownloadModel(model()?),
+            "switch_model" => Action::SwitchModel(model()?),
             "edit_profile" => Action::EditProfile,
             "notes_model" => Action::NotesModel,
             "sign_in" => Action::SignIn(arg.to_string()),
@@ -1454,18 +1456,7 @@ impl Ui {
                 }
             }
             Action::UseModel(name) => drop(models::use_model(name)),
-            Action::RemoveModel(name) => {
-                std::thread::spawn(move || {
-                    let size = models::find(name).map(|m| m.size_mb).unwrap_or(0);
-                    let warning = models::used_for(name, Config::load().ok().and_then(|c| c.model).as_deref()).map(|r| format!("\n\nNote: it transcribes {r} — without it they go to the active model.")).unwrap_or_default();
-                    let msg = format!("Remove the speech model {name}?\n\nFrees {size} MB. You can download it again later.{warning}");
-                    if app::ask(&msg, &["Cancel", "Remove"], "Remove").as_deref() == Some("Remove") {
-                        if let Err(e) = models::remove(name) {
-                            app::notify("Could not remove the model", &format!("{e:#}"));
-                        }
-                    }
-                });
-            }
+            Action::RemoveModel(name) => app::remove_model_asking(name),
             Action::NotesAnywhere => {
                 let Ok(mut cfg) = Config::load() else { return };
                 cfg.notes_in = None;
@@ -1657,6 +1648,7 @@ impl Ui {
                 return;
             }
             Action::DownloadModel(name) => models::download_in_background(name),
+            Action::SwitchModel(name) => models::switch_in_background(name),
             Action::ToggleAutostart => drop(app::set_autostart(!app::autostart_enabled())),
             Action::ChangeHome => {
                 // The picker blocks: run it off the event loop, then restart on the new folder once

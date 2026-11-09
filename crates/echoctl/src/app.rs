@@ -673,6 +673,22 @@ fn first_run() {
     std::thread::spawn(|| write_health(None, true, false));
 }
 
+/// Remove a speech model after the user's yes (what it frees, and which calls it transcribes besides the active one).
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn remove_model_asking(name: &'static str) {
+    std::thread::spawn(move || {
+        let size = models::find(name).map(|m| m.size_mb).unwrap_or(0);
+        let model = crate::config::Config::load().ok().and_then(|c| c.model);
+        let warning = models::used_for(name, model.as_deref()).map(|r| format!("\n\nNote: it transcribes {r} — without it they go to the active model.")).unwrap_or_default();
+        let msg = format!("Remove the speech model {name}?\n\nFrees {size} MB. You can download it again later.{warning}");
+        if ask(&msg, &["Cancel", "Remove"], "Remove").as_deref() == Some("Remove") {
+            if let Err(e) = models::remove(name) {
+                notify("Could not remove the model", &format!("{e:#}"));
+            }
+        }
+    });
+}
+
 // ── offers (config "ask") ──────────────────────────────────────────────────────────────────
 
 static ASKING: AtomicBool = AtomicBool::new(false);

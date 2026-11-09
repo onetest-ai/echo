@@ -292,7 +292,7 @@ document.addEventListener('click', (e) => {
     let val; try { val = JSON.parse(t.dataset.val) } catch { val = t.dataset.val }
     return setSetting(t.dataset.set, val)
   }
-  if (t.dataset.announce) { const a = S.state.announcement; S.state.announcement = null; send({ cmd: 'announcement', id: a.id, action: t.dataset.announce }); return render() }
+  if (t.dataset.announce !== undefined) { const a = S.state.announcement; S.state.announcement = null; send({ cmd: 'announcement', id: a.id }); if (t.dataset.announce) send({ cmd: 'settings_action', action: t.dataset.announce, arg: t.dataset.arg || '' }); return render() }
   if (t.dataset.act) { send({ cmd: 'settings_action', action: t.dataset.act, arg: t.dataset.arg || '' }); setTimeout(() => loadSettings().then(render), 1500); return }
   if (t.dataset.langDel) { const l = (S.settings.languages || []).filter((x) => x !== t.dataset.langDel); S.settings.languages = l; send({ cmd: 'settings_set', key: 'languages', value: l }); return render() }
   if (t.dataset.vocabDel) { const v = (S.settings.vocabulary || []).filter((x) => x !== t.dataset.vocabDel); S.settings.vocabulary = v; send({ cmd: 'settings_set', key: 'vocabulary', value: v }); return render() }

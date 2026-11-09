@@ -1,8 +1,8 @@
 //! Transcription while a call is recorded — the call's only pass. A worker reads `mic.wav` and
 //! `remote.wav` as the track writers grow them (the WAVs on disk are the queue: nothing is
 //! dropped when decoding falls behind, the text just arrives later) and decodes each finished
-//! utterance with the final pass's transcriber (the configured model, turbo for language ID
-//! beside a model other than turbo until the call's one language is decided, the vocabulary-hint guard). Every line goes to
+//! utterance with the final pass's transcriber (the call's language and its model, the vocabulary-hint guard; a
+//! language changed by hand during the call swaps the model and redoes the whole call at its end). Every line goes to
 //! `<call>/live.jsonl` (`speaker`, `start`, `end`, `lang`, `text`), which the Echo mod draws in
 //! its pane; when the call ends the worker
 //! decodes what is left and hands back all segments, and the watcher writes the transcript —
@@ -386,21 +386,30 @@ fn run(dir: &Path, cfg: &Config, prompt: Option<String>, remote_name: Option<Str
     if let Some((w, e)) = watch.as_ref().and_then(|w| Some((w, w.found?))) {
         eprintln!("  echo: {} ms, gain {:.2}, r {:.2}; skipped {:.1} s of the mic", e.delay_ms(), e.gain, e.r, w.skipped as f64 / RATE as f64);
     }
+    // A change by hand after the last look: taken now, and the call redone below.
+    if let Some(l) = crate::call_language::meta_language(dir).filter(|l| *l != tr.language()) {
+        tr.set_language(l);
+        relanguaged = true;
+    }
     let (mic, remote) = (dir.join("mic.wav"), dir.join("remote.wav"));
-    if relanguaged && mic.exists() && remote.exists() {
+    // Its language changed during it: every track again, whole, in the new language (a memo has the mic only).
+    if relanguaged {
         eprintln!("  the call's language was changed during it: transcribing all of it again");
-        segs.retain(|s| s.speaker != "remote");
-        let mut theirs = tr.track("remote", &load_16k(&remote)?)?;
-        if let Some(n) = remote_name.as_deref() {
-            theirs.iter_mut().for_each(|s| s.name = Some(n.to_string()));
+        if remote.exists() {
+            segs.retain(|s| s.speaker != "remote");
+            let mut theirs = tr.track("remote", &load_16k(&remote)?)?;
+            if let Some(n) = remote_name.as_deref() {
+                theirs.iter_mut().for_each(|s| s.name = Some(n.to_string()));
+            }
+            segs.extend(theirs);
         }
-        segs.extend(theirs);
-        if !redo_at_stop(watch.as_ref()) {
+        if mic.exists() {
             segs.retain(|s| s.speaker != "me");
             segs.extend(tr.track("me", &load_16k(&mic)?)?);
         }
     }
-    if (redo_at_stop(watch.as_ref()) || relanguaged && watch.is_some()) && mic.exists() && remote.exists() {
+    let echo_found = watch.as_ref().is_some_and(|w| w.found.is_some());
+    if (redo_at_stop(watch.as_ref()) || relanguaged && echo_found) && mic.exists() && remote.exists() {
         match crate::aec::cancel(&load_16k(&mic)?, &load_16k(&remote)?) {
             Ok(Some((clean, delay))) => {
                 eprintln!("  echo cancellation: on (speaker → mic delay ≈ {delay} ms) — decoding the mic again");

@@ -283,7 +283,7 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
             true.into()
         }
         // A release's one-time banner, answered with one of its buttons (`announce::answer`).
-        "announcement" => match crate::announce::answer(v["id"].as_str().unwrap_or(""), v["action"].as_str().unwrap_or("")) {
+        "announcement" => match crate::announce::answer(v["id"].as_str().unwrap_or("")) {
             Ok(()) => true.into(),
             Err(e) => notice(&format!("{e:#}")),
         },

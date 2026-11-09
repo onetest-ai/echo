@@ -1,11 +1,8 @@
-//! On-device transcription of a recorded call with whisper.cpp.
+//! On-device transcription of a recorded call: whisper.cpp, or NVIDIA's models through NeMo-Speech (`nemo.rs`).
 //!
 //! Each track is transcribed separately, which gives speaker attribution for free ("Me" =
-//! mic, "Remote" = the app). Tracks are cut into utterances at pauses. A call has one language
-//! (`CallLanguage`): set for it, the only one allowed, or detected once from its first
-//! utterances, only among the workspace's `languages` — Whisper's default (any of 99) mislabels
-//! Ukrainian as Russian. Detection is a second encoder run, so it stops once the language is
-//! decided.
+//! mic, "Remote" = the app). Tracks are cut into utterances at pauses. A call has one language, chosen when it
+//! starts (`call_language`), never detected; its model is the downloaded one best at it (`models::for_call`).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -1129,7 +1126,7 @@ pub(crate) fn final_transcriber(cfg: &Config, model_override: Option<&str>, prom
         generation: AtomicU64::new(0),
     };
     if let (None, Some(server)) = (model_override, crate::remote::Client::configured()) {
-        let fallback = models::active_model_path().ok().filter(|p| p.exists());
+        let fallback = models::for_call(code, cfg.model.as_deref()).map(models::model_path).filter(|p| p.exists());
         let name = match server.hello() {
             Ok(h) => format!("{} on {}", h.model, h.name),
             Err(e) => {
