@@ -1214,7 +1214,7 @@ pub fn transcribe(call: &str, model_override: Option<&str>, keep_audio: bool) ->
     let meeting = MeetingContext::load(&dir)?;
     let t = Instant::now();
     eprintln!("transcribing {}", dir.display());
-    let (tr, model_name) = final_transcriber(&cfg, model_override, build_prompt(&cfg, meeting.as_ref()), final_threads(), Some(&dir))?;
+    let (tr, _) = final_transcriber(&cfg, model_override, build_prompt(&cfg, meeting.as_ref()), final_threads(), Some(&dir))?;
 
     let mut segs = vec![];
     let mut mic_audio = None;
@@ -1250,7 +1250,7 @@ pub fn transcribe(call: &str, model_override: Option<&str>, keep_audio: bool) ->
     }
     let suffix = model_override.map(|m| format!(".{m}")).unwrap_or_default();
     // A comparison run (--model) must leave the audio for the real transcript.
-    let md_path = write_transcript(&dir, &cfg, &model_name, segs, &suffix, keep_audio || model_override.is_some())?;
+    let md_path = write_transcript(&dir, &cfg, &tr.model_name(), segs, &suffix, keep_audio || model_override.is_some())?;
     eprintln!("done in {:.0}s", t.elapsed().as_secs_f64());
     println!("{}", md_path.display());
     Ok(())
