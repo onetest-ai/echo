@@ -73,7 +73,7 @@
   },
   {
    "id": "F-AI-08",
-   "feature": "A minutes model Claude Code can't use fails with what's wrong and where to change it (the menu and `echoctl ai set`)",
+   "feature": "A minutes model Claude Code can't use fails with what's wrong and where to change it (the menu and `echoctl ai set`); a run the model answered in that fails later says its own error, never \"can't use the model\"",
    "priority": "medium",
    "check": "agent",
    "axes": []

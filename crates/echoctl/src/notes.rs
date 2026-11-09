@@ -1216,6 +1216,7 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
     }
 
     let mut result: Option<Value> = None;
+    let mut answered = false;
     let mut seen = String::new(); // non-JSON output, for the sign-in check
     let mut stopped: Option<String> = None; // stopped by Echo before it began: why
     if let Some(out) = child.stdout.take() {
@@ -1240,6 +1241,7 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
                     for l in crate::run_log::describe(&ev) {
                         let _ = writeln!(log, "{}  {l}", stamp());
                     }
+                    answered |= model_answered(&ev);
                     if ev["type"] == "result" {
                         result = Some(ev);
                     }
@@ -1289,6 +1291,7 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
         wrote_notes,
         wrote_actions,
         is_error,
+        answered,
         result_text: &result_text,
         err_text: &err_text,
         seen: &seen,
@@ -1424,6 +1427,8 @@ struct Ended<'a> {
     /// The action items applied by this run (`.actions-generation` names its id).
     wrote_actions: bool,
     is_error: bool,
+    /// The model answered at least one turn: whatever failed after, Claude Code could use it.
+    answered: bool,
     result_text: &'a str,
     err_text: &'a str,
     /// Its output that isn't stream JSON.
@@ -1471,7 +1476,7 @@ fn conclude(r: &mut Run, profile: &crate::ai::Profile, e: &Ended, label: &str, n
         }))
     } else if e.timed_out { // before the model check: a local model's harmless "unrecognized_model" line (#220)
         ("failed", Some(format!("stopped after {} minutes without finishing", TIMEOUT.as_secs() / 60)))
-    } else if model_rejected(e.is_error, &all) {
+    } else if !e.answered && model_rejected(e.is_error, &all) {
         ("failed", Some(if profile.kind == Kind::System {
             format!(
                 "Claude Code can't use the model \"{notes_model_label}\". Change it under menu → AI for calls → Minutes model (while {} is the profile new calls use), or `echoctl ai set {} --notes-model <name>` (\"default\" uses Claude Code's own setting).",
@@ -1491,7 +1496,7 @@ fn conclude(r: &mut Run, profile: &crate::ai::Profile, e: &Ended, label: &str, n
     } else {
         ("failed", Some(
             first_line(e.result_text)
-                .or_else(|| first_line(e.err_text))
+                .or_else(|| first_line(&without_model_warning(e.err_text)))
                 .or_else(|| first_line(e.seen))
                 .unwrap_or_else(|| format!("Claude Code exited with {}", e.exit.map_or("a signal".into(), |c| c.to_string()))),
         ))
@@ -1506,6 +1511,17 @@ pub(crate) fn needs_login(text: &str) -> bool {
     ["not logged in", "please run /login", "invalid api key", "oauth token has expired", "authentication_error", "credit balance is too low"]
         .iter()
         .any(|p| t.contains(p))
+}
+
+/// A turn the model wrote: not the made-up one (`<synthetic>`, with an `error`) Claude Code reports a refused model in.
+fn model_answered(ev: &Value) -> bool {
+    ev["type"] == "assistant" && ev.get("error").is_none() && ev["message"]["model"] != "<synthetic>"
+}
+
+/// Stderr without Claude Code's `unrecognized_model` line: it prints that for every model it doesn't know, one that
+/// works included, so it never says why a run failed.
+fn without_model_warning(text: &str) -> String {
+    text.lines().filter(|l| !l.contains("unrecognized_model")).collect::<Vec<_>>().join("\n")
 }
 
 /// Claude Code refused the notes model. Only when the run failed: it warns `unrecognized_model`
@@ -1951,7 +1967,7 @@ mod tests {
         use crate::ai::Kind;
         let (_env, _root) = crate::paths::testenv::folders("notes-conclude");
         let profile = |kind| crate::ai::Profile { id: "judged".into(), name: "J".into(), kind, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false };
-        let ended = |wrote_notes, is_error, result_text| Ended { wrote_notes, wrote_actions: wrote_notes, is_error, result_text, err_text: "", seen: "", timed_out: false, refused: &[], exit: Some(1), actions_error: None, stopped: None };
+        let ended = |wrote_notes, is_error, result_text| Ended { wrote_notes, wrote_actions: wrote_notes, is_error, answered: false, result_text, err_text: "", seen: "", timed_out: false, refused: &[], exit: Some(1), actions_error: None, stopped: None };
         let judge = |kind, e: &Ended| {
             let mut r = Run::default();
             conclude(&mut r, &profile(kind), e, "J · m", "sonnet");
@@ -1980,6 +1996,33 @@ mod tests {
         assert_eq!(state, "failed");
         assert!(message.contains("token") && !message.contains("/login"), "{message}");
         assert_eq!(judge(Kind::System, &ended(false, true, "")).1, "Claude Code exited with 1");
+    }
+
+    #[test]
+    fn a_run_the_model_answered_in_says_its_own_error_not_the_model() {
+        use crate::ai::Kind;
+        let (_env, _root) = crate::paths::testenv::folders("notes-answered");
+        let warn = "[claude-code:unrecognized_model] {\"model\":\"test-model:8b\"}";
+        let p = crate::ai::Profile { id: "l".into(), name: "L".into(), kind: Kind::Local, base_url: None, token: None, live_model: None, notes_model: None, account: None, email: None, sso: false };
+        let judge = |answered, result_text| {
+            let e = Ended { wrote_notes: false, wrote_actions: false, is_error: true, answered, result_text, err_text: warn, seen: "", timed_out: false, refused: &[], exit: Some(1), actions_error: None, stopped: None };
+            let mut r = Run::default();
+            conclude(&mut r, &p, &e, "L · test-model:8b", "sonnet");
+            (r.state, r.message.unwrap_or_default())
+        };
+        // The server failed after the model's first turn: its error, not "can't use the model".
+        assert_eq!(judge(true, "API Error: 500 test server stopped answering"), ("failed".into(), "API Error: 500 test server stopped answering".into()));
+        // A broken stream, no result at all: the exit, never the warning line.
+        assert_eq!(judge(true, ""), ("failed".into(), "Claude Code exited with 1".into()));
+        // A refused model: Claude Code's own made-up turn isn't an answer (the shape 2.1.319 prints).
+        let refused = serde_json::json!({"type": "assistant", "error": "model_not_found", "message": {"model": "<synthetic>",
+            "content": [{"type": "text", "text": "There's an issue with the selected model (no-such-model)."}]}});
+        assert!(!model_answered(&refused));
+        assert!(model_answered(&serde_json::json!({"type": "assistant", "message": {"model": "test-model:8b", "content": []}})));
+        // A model that never answered is still one Claude Code can't use.
+        let (state, message) = judge(false, "");
+        assert_eq!(state, "failed");
+        assert!(message.contains("can't use the model"), "{message}");
     }
 
     #[test]
@@ -2329,6 +2372,7 @@ mod tests {
             wrote_notes: false,
             wrote_actions: false,
             is_error: true,
+            answered: false,
             result_text: "",
             err_text: "",
             seen: "",
