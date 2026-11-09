@@ -217,8 +217,7 @@ pub fn remove(id: &str) -> Result<()> {
 /// Where a skill taken away goes in the trash `bin`: `<id>-<time>`, or `<id>-<time>-2`, `-3`… when that is taken (one
 /// made again and taken away again within the same millisecond).
 fn trash_path(bin: &Path, id: &str, now: chrono::DateTime<chrono::Utc>) -> PathBuf {
-    let base = format!("{id}-{}", now.format("%Y%m%d%H%M%S%3f"));
-    (1..).map(|n| bin.join(if n == 1 { base.clone() } else { format!("{base}-{n}") })).find(|p| !p.exists()).unwrap_or_else(|| bin.join(base))
+    paths::unused(bin, &format!("{id}-{}", now.format("%Y%m%d%H%M%S%3f")), "")
 }
 
 /// Switch a skill on or off: off, it stays out of the Claude panel's session.
