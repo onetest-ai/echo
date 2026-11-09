@@ -38,6 +38,7 @@ external_id: TC-LIFE-005
 The data folder moved without losing or mixing calls.
 
 ## Notes
+- `home set` restarts the app with another pid: `$D/app.pid` names the old one afterwards; a teardown stops the app with `echoctl app quit` (or `pgrep -f "echoctl app run"`), not that file.
 - The tray's Settings → "Change data folder…" and `echoctl home choose` open a native folder dialog; `home set` is the same change (`paths::set_home`).
 - Run 2026-11-08 evening (S-21, the call fed from files): PASS — the folder and its transcript in `home2/calls` 24 s after the call started; the old folder's 16 files unchanged; the restart logged `-n --env ECHOCTL_WAIT_FOR_LOCK=1 -g /Applications/Echo.app` (#142). The wait is for `transcript.md`, not `meta.json`: the app is quit right after, and must not be quit mid-recording.
 - Run on 2026-11-07 (S-21): PASS on these steps — but a dev build's restart went to the installed Echo.app (step 3), #142, a defect for dev builds: with the user's Echo installed it would start a second copy of it.

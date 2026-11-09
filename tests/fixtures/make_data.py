@@ -573,7 +573,7 @@ exec /usr/bin/open "$@"
 """
 
 
-def setup_env(d):
+def setup_env(d, stale_plugin=True):
     """The standard sets run hermetic: a fake `claude` first on PATH, the built-in plugin marketplace a local folder,
     Claude Code's own config folder inside the run. Written to <dir>/env (serve.sh sources it) and used here."""
     b = d.base
@@ -598,8 +598,10 @@ def setup_env(d):
         {"id": "meeting-timer", "source": "./plugins/meeting-timer", "categories": ["automation"]}]})
     d.write_json(f"{builtin}/plugins/meeting-timer/echo-plugin.json", {"id": "meeting-timer", "name": "Meeting timer", "version": "1.0.0",
                                                                        "summary": "Shows how long the call has run."})
-    # Claude Code's record of its plugins: an Echo plugin older than this build (Inbox → health, stale plugin).
-    d.write_json(f"{b}/claude-config/plugins/installed_plugins.json", {"plugins": {"echo@echo": [{"scope": "user", "version": "0.0.1"}]}})
+    # Claude Code's record of its plugins: an Echo plugin older than this build (Inbox → health, stale plugin), or, on
+    # the plain small set (an empty Inbox), this build's own.
+    current = json.load(open(os.path.join(ROOT, "plugin", ".claude-plugin", "plugin.json")))["version"]
+    d.write_json(f"{b}/claude-config/plugins/installed_plugins.json", {"plugins": {"echo@echo": [{"scope": "user", "version": "0.0.1" if stale_plugin else current}]}})
     extra = {"PATH": f"{b}/bin:" + os.environ.get("PATH", ""), "ECHOCTL_PLUGIN_MARKET": builtin, "CLAUDE_CONFIG_DIR": f"{b}/claude-config",
              "ECHOCTL_NOTES_NO_SHELL": "1",
              # `open` only logs: a run never brings up a browser, a Finder window or the installed Echo (`echoctl up`,
@@ -2373,8 +2375,9 @@ def main():
                 f"ECHOCTL_TEST_REMOTE_WAV={sh(os.path.join(base, 'feed', 'remote.wav'))} "
                 f"ECHOCTL_TEST_CALL_FILE={sh(os.path.join(base, 'in-call'))} ECHOCTL_CALL_APP_BUNDLE=ai.onetest.echo.testcall\n")
     if a.set == "small":
-        if a.ai:
-            setup_env(d)  # hermetic, as the standard sets: the app run on it starts no run on a real account
+        # Always hermetic: the fake `claude` and its own CLAUDE_CONFIG_DIR, so nothing reaches the machine's real Claude Code
+        # (the window's version, sign-in and plugin checks included). Plain small keeps an empty Inbox (no stale plugin).
+        setup_env(d, stale_plugin=bool(a.ai))
         build_small(d)
         if a.ai:
             # The Echo app runs on this data: no thread sync of its own (two model runs per thread, queued in front of
