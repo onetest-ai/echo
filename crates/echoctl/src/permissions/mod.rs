@@ -102,9 +102,11 @@ pub fn doctor(json: bool, request: bool, probe: bool, open: Option<&str>) -> Res
             None => anyhow::bail!("no settings page for '{id}'"),
         }
     }
+    let ai = crate::ollama::report();
     if json {
         let mut out = r.clone();
         out["checked_by"] = serde_json::json!(if from_app { "app" } else { "this process" });
+        out["ai"] = serde_json::json!(ai);
         println!("{}", serde_json::to_string_pretty(&out)?);
         return Ok(());
     }
@@ -135,6 +137,21 @@ pub fn doctor(json: bool, request: bool, probe: bool, open: Option<&str>) -> Res
             println!("    how: {}", s(&c["how"]));
             if !c["settings_url"].is_null() {
                 println!("    run: echoctl doctor --open {}", s(&c["id"]));
+            }
+        }
+    }
+    if !ai.is_empty() {
+        println!();
+        println!("AI profiles (local models, loaded to check their context)");
+        for p in &ai {
+            let ctx = p["context"].as_object().into_iter().flatten().map(|(m, n)| format!("{m}: {} tokens of context", crate::ollama::thousands(n.as_u64().unwrap_or(0))));
+            let ctx: Vec<String> = ctx.collect();
+            let warnings: Vec<&str> = p["warnings"].as_array().into_iter().flatten().filter_map(|w| w.as_str()).collect();
+            let mark = if !warnings.is_empty() { "⚠" } else if ctx.is_empty() { "–" } else { "✓" }; // not `?`: that one is "fix it" below
+            let what = if ctx.is_empty() { "context unknown (not an Ollama server, or not answering)".to_string() } else { ctx.join(", ") };
+            println!("{mark} {} — {what}", s(&p["name"]));
+            for w in warnings {
+                println!("    {w}");
             }
         }
     }

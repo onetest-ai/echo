@@ -1705,11 +1705,12 @@ pub fn status(id: Option<&str>) -> Result<()> {
             _ => (None, None, check(&p, None).err().map(|e| format!("{e:#}"))),
         };
         let conflict = (p.kind != Kind::System).then(|| policy_conflict(&p)).flatten();
+        let (context, warnings) = crate::ollama::check(&p, false); // `local`: read only, never loaded here (`doctor` loads)
         out.push(json!({
             "id": p.id, "name": p.name, "kind": p.kind, "default": s.default_id() == p.id,
             "live_model": p.live_model(), "notes_model": p.notes_model(), "base_url": p.base_url,
             "signed_in": signed_in, "account": account, "expected_account": p.account,
-            "problem": problem.or(conflict),
+            "problem": problem.or(conflict), "context": context, "warnings": warnings,
         }));
     }
     println!("{}", serde_json::to_string_pretty(&json!({ "live_notes": s.live_notes, "profiles": out }))?);
