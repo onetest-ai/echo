@@ -2,7 +2,7 @@
 //! `remote.wav` as the track writers grow them (the WAVs on disk are the queue: nothing is
 //! dropped when decoding falls behind, the text just arrives later) and decodes each finished
 //! utterance with the final pass's transcriber (the configured model, turbo for language ID
-//! beside a model other than turbo, the vocabulary-hint guard). Every line goes to
+//! beside a model other than turbo until the call's one language is decided, the vocabulary-hint guard). Every line goes to
 //! `<call>/live.jsonl` (`speaker`, `start`, `end`, `lang`, `text`), which the Echo mod draws in
 //! its pane; when the call ends the worker
 //! decodes what is left and hands back all segments, and the watcher writes the transcript —
@@ -200,7 +200,7 @@ impl TrackReader {
 }
 
 fn run(dir: &Path, cfg: &Config, prompt: Option<String>, remote_name: Option<String>, done: &AtomicBool, quit: &AtomicBool) -> Result<(Vec<Segment>, String)> {
-    let (tr, model) = final_transcriber(cfg, None, prompt, THREADS)?;
+    let (tr, model) = final_transcriber(cfg, None, prompt, THREADS, Some(dir))?;
     let out = dir.join(FILE);
     let mut tracks = [
         TrackReader::new(dir.join("mic.wav"), "me", tr.track_state()?),
@@ -232,6 +232,7 @@ fn run(dir: &Path, cfg: &Config, prompt: Option<String>, remote_name: Option<Str
             std::thread::sleep(TICK);
         }
     }
+    tr.settle();
     // Given up while the last pass ran (`abandon` after `close`): no echo cancellation, no second decode.
     if quit.load(Ordering::SeqCst) {
         bail!("given up: nobody waits for this transcript");

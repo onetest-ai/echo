@@ -1,6 +1,6 @@
 ---
 id: TC-008
-title: With turbo q8_0 in use, a call in three languages is transcribed by that model alone, each sentence in its own language
+title: With turbo q8_0 in use and three languages allowed, a call in Ukrainian is transcribed by that model alone, in Ukrainian
 priority: medium
 type: functional
 module: transcription
@@ -24,20 +24,20 @@ data: small
 
 | Call | Built from |
 |---|---|
-| `<day>_140000-mixed-languages-q8` | `mixed-languages` (31 s, 5 turns: Ukrainian, Russian, English) |
+| `<day>_140000-ukrainian-call-q8` | `ukrainian-call` (3 turns, Ukrainian only), the call's languages en, uk, ru |
 
 ## Steps
 
 | # | Action | Expected Result |
 |---|---|---|
 | 1 | `echoctl model use large-v3-turbo-q8_0` | "active model: large-v3-turbo-q8_0" |
-| 2 | `make_audio.py build mixed-languages $ECHOCTL_HOME/calls/<day>_140000-mixed-languages-q8` | It prints the folder, "5 turns" |
-| 3 | `echoctl transcribe <that folder>` | Exit 0, "flash attention: on" (Apple Silicon), "model: large-v3-turbo-q8_0", "done in …s"; **no** line "language detection: large-v3-turbo-q5_0" (turbo detects its own language; no second turbo is loaded) |
-| 4 | `make_audio.py score <that folder>` | `pass` true, `wer` ≤ 0.15, every turn `lang_ok` (uk, ru, uk, uk, en), `transcribed_in_silence` [] |
+| 2 | `make_audio.py build ukrainian-call $ECHOCTL_HOME/calls/<day>_140000-ukrainian-call-q8 --languages en,uk,ru` | It prints the folder, "3 turns" |
+| 3 | `echoctl transcribe <that folder>` | Exit 0, "flash attention: on" (Apple Silicon), "model: large-v3-turbo-q8_0", "done in …s"; **no** line "language detection: large-v3-turbo-q5_0" (turbo detects its own language; no second turbo is loaded); one line "language: uk (from … s of speech in … utterances)" |
+| 4 | `make_audio.py score <that folder>` | `pass` true, `wer` ≤ 0.15, every turn `lang_ok` (uk), `transcribed_in_silence` [] |
 | 5 | `head -6 <that folder>/transcript.md` | The header reads "**Model:** large-v3-turbo-q8_0" |
 
 ## Expected Final State
-The call is transcribed by q8_0 alone, each sentence in the language it was spoken in.
+The call is transcribed by q8_0 alone, in the one language it is in, detected by q8_0 itself.
 
 ## Teardown
 - `echoctl model use large-v3-turbo-q5_0` (the run's own config)

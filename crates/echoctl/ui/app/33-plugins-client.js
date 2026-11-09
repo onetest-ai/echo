@@ -198,7 +198,7 @@ const SETTINGS_BODY = {
         setRow('Other Teams calls', 'Calls not on your calendar.', seg('unscheduled', st.unscheduled, [['ask', 'Ask'], ['manual', 'Manual']])),
       ]) +
       setCard('Languages', [
-        setRow('Languages your calls are in', `Detection picks only among these — it keeps Ukrainian and Russian apart.<div class="chips">${chips}${add}</div>`, ''),
+        setRow('Languages a call may be in', `Each call is in one of these: Echo detects which from its first sentences and keeps it for the whole call (Ukrainian and Russian apart).<div class="chips">${chips}${add}</div>`, ''),
         setRow('New recordings', "The Record button's language unless you pick another.", `<div class="seg" role="group"><button data-reclang-set="en" aria-pressed="${cur === 'en'}">English</button><button data-reclang-set="" aria-pressed="${cur === ''}">Detect</button></div>`),
       ]) +
       setCard('During a call', [

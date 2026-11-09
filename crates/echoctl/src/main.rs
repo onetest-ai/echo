@@ -11,6 +11,8 @@ mod audio;
 mod ax;
 mod calendar;
 mod calls;
+#[cfg(feature = "transcribe")]
+mod call_language;
 mod config;
 mod deliver;
 mod m365;

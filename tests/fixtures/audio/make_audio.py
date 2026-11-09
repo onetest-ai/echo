@@ -2,8 +2,10 @@
 """Made-up calls with known words, as Echo records them: `mic.wav` (the user) and `remote.wav` (everyone else).
 
   make_audio.py render [--secrets FILE]       synthesise every turn of conversations.json not yet in clips/
-  make_audio.py build <id> <call dir>         a call folder from the clips: mic.wav, remote.wav (16 kHz mono), meta.json,
-                                              meeting.json and expected.json (each turn's who, text, lang, start, end)
+  make_audio.py build <id> <call dir> [--languages en,uk,ru]
+                                              a call folder from the clips: mic.wav, remote.wav (16 kHz mono), meta.json
+                                              (its `languages`: the given ones, else the turns'), meeting.json and
+                                              expected.json (each turn's who, text, lang, start, end)
   make_audio.py score <call dir> [--max-wer 0.15]
                                               the transcript (segments.json) against expected.json: word error rate
                                               per turn and overall, each segment's speaker and language, and nothing
@@ -100,7 +102,7 @@ def write_wav(path: Path, samples: array):
         w.writeframes(samples.tobytes())
 
 
-def build(cid: str, out: Path):
+def build(cid: str, out: Path, languages: list = None):
     conv = next((c for c in CONV["conversations"] if c["id"] == cid), None) or sys.exit(f"no conversation {cid}")
     mic, remote, turns, t = array("h"), array("h"), [], 0.0
     for turn in conv["turns"]:
@@ -124,7 +126,7 @@ def build(cid: str, out: Path):
     write_wav(out / "mic.wav", mic)
     write_wav(out / "remote.wav", remote)
     begun = datetime.now().astimezone() - timedelta(seconds=n / RATE + 60)
-    meta = {"app": "teams", "platform": "macos", "title": conv["title"], "languages": sorted({x["lang"] for x in turns}),
+    meta = {"app": "teams", "platform": "macos", "title": conv["title"], "languages": languages or sorted({x["lang"] for x in turns}),
             "started_at": begun.isoformat(timespec="seconds"), "ended_at": (begun + timedelta(seconds=n / RATE)).isoformat(timespec="seconds"),
             "stop_reason": "call_ended", "tracks": [{"file": "remote.wav", "sample_rate": RATE, "frames": n, "padded_frames": 0, "events": []},
                                                     {"file": "mic.wav", "sample_rate": RATE, "frames": n, "padded_frames": 0, "events": []}]}
@@ -188,7 +190,7 @@ def main(argv):
     if cmd == "render":
         render(argv)
     elif cmd == "build" and len(argv) > 3:
-        build(argv[2], Path(argv[3]))
+        build(argv[2], Path(argv[3]), argv[argv.index("--languages") + 1].split(",") if "--languages" in argv else None)
     elif cmd == "score" and len(argv) > 2:
         sys.exit(score(Path(argv[2]), float(argv[argv.index("--max-wer") + 1]) if "--max-wer" in argv else 0.15))
     elif cmd == "list":

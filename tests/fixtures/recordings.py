@@ -22,9 +22,10 @@ capture and no transcription of its own, unless capturing is what the case check
 just ended (automatic minutes, Today); --keep-time keeps the recorded times. --untranscribed copies meta.json only (a
 call just recorded, not transcribed yet); `finish` then adds its transcript, as the transcription would.
 
-Needs, for `prepare`: the debug build (`cargo build`), the speech model in ~/Library/Application Support/echo/models
-(linked, never changed), and the network once for NVIDIA's NeMo-Speech runtime (speakers). No TestCall, BlackHole or
-ffmpeg: it opens no device and plays nothing. Standard library only.
+Needs, for `prepare`: the debug build (`cargo build`; another with ECHOCTL_BIN), the speech model in
+~/Library/Application Support/echo/models or the folder ECHOCTL_TEST_MODELS names (linked, never changed), and the
+network once for NVIDIA's NeMo-Speech runtime (speakers). No TestCall, BlackHole or ffmpeg: it opens no device and
+plays nothing. Standard library only.
 """
 import json
 import os
@@ -40,7 +41,7 @@ from datetime import datetime, timedelta
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 BIN = os.environ.get("ECHOCTL_BIN") or os.path.join(ROOT, "target", "debug", "echoctl")
 MAKE_AUDIO = os.path.join(ROOT, "tests", "fixtures", "audio", "make_audio.py")
-MODELS = os.path.expanduser("~/Library/Application Support/echo/models")
+MODELS = os.environ.get("ECHOCTL_TEST_MODELS") or os.path.expanduser("~/Library/Application Support/echo/models")
 MODEL = "large-v3-turbo-q5_0"
 
 # What `prepare` makes. name → (conversation, how): "capture" records it with `echoctl capture` fed from the
@@ -59,7 +60,11 @@ RECORDINGS = [
     {"name": "mixed-languages-pinned", "conv": "mixed-languages", "how": "capture", "languages": "en,uk,ru",
      "pin": "uk", "for": "a language pinned for one call (transcription/TC-004)"},
     {"name": "mixed-languages", "conv": "mixed-languages", "how": "retranscribe", "from": "mixed-languages-pinned",
-     "languages": "uk,ru,en", "for": "each sentence in its own language, the workspace languages (transcription/TC-002, TC-004)"},
+     "languages": "uk,ru,en", "for": "the next call after a pinned one: the workspace languages, its one language detected (transcription/TC-004)"},
+    {"name": "ukrainian-call", "conv": "ukrainian-call", "how": "capture", "languages": "en,uk,ru",
+     "for": "a call in Ukrainian comes out in Ukrainian among en, uk and ru (transcription/TC-002)"},
+    {"name": "russian-call", "conv": "russian-call", "how": "capture", "languages": "en,uk,ru",
+     "for": "a call in Russian comes out in Russian among en, uk and ru (transcription/TC-002)"},
     {"name": "minutes-call", "conv": "minutes-call", "how": "build", "languages": "en",
      "for": "a call long enough for minutes (claude/TC-003, TC-004, TC-007, TC-009, TC-010, TC-015)"},
 ]
@@ -187,6 +192,7 @@ def prepare(force):
                 shutil.copy(os.path.join(src, "tracks", f), call)
             meta = json.load(open(os.path.join(src, "meta.json")))
             meta.pop("languages", None)
+            meta.pop("language", None)  # one a capture's transcription decided
             meta["title"] = name
             json.dump(meta, open(os.path.join(call, "meta.json"), "w"), indent=2)
         entry["record_s"] = round(time.monotonic() - t0, 1)

@@ -1,6 +1,6 @@
 // ── language of the next recording (Record ▾) ──────────────────────────────────────────────
 // Per viewer, remembered in this webview; English unless chosen otherwise. '' = auto: Echo
-// detects among the configured languages (Settings → Languages).
+// detects the call's one language among the configured ones (Settings → Languages).
 const LANG_KEY = 'echo.recordLanguage'
 function recordLang() {
   try { const v = localStorage.getItem(LANG_KEY); if (v !== null) return v } catch { /* storage off */ }
@@ -74,7 +74,7 @@ function recordButton(attrs, label, primary = true, memo = false) {
   const auto = configured.length > 1 ? `Detect (${configured.map((c) => c.toUpperCase()).join(', ')})` : 'Detect the language'
   const options = opts.map((c) => `<option value="${esc(c)}"${c === cur ? ' selected' : ''}>${esc(langName(c))}</option>`).join('')
     + `<option value=""${cur === '' ? ' selected' : ''}>${esc(auto)}</option>`
-  const title = cur ? `Transcribed as ${langName(cur)}` : 'Echo detects the language'
+  const title = cur ? `Transcribed as ${langName(cur)}` : 'Echo detects the call’s language from its first sentences'
   return `<span class="split"><button class="${cls} split-main" ${attrs}>${esc(label)}</button><label class="${cls} split-lang" title="${esc(title)}"><span>${cur ? esc(cur.toUpperCase()) : 'Auto'}</span>${CARET}<select data-reclang aria-label="Language of the call">${options}</select></label></span>${memo ? `<button class="pmemo" data-cmd="record-memo" title="Record a memo — just you, starts now; its threads are found from what you say" aria-label="Record a memo">${MIC(12)}Memo</button>` : ''}`
 }
 

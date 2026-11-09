@@ -196,9 +196,9 @@ claude plugin install echo@onetest --scope user      # or: project (shared) / lo
 **Teams didn't get recorded.** Menu → **Health** shows what's missing, usually a permission.
 Permissions belong to Echo in System Settings → Privacy & Security.
 
-**Can I use another language?** Yes. Echo detects the language for each sentence. Menu →
-Settings → Languages limits it to the ones you speak, which avoids mix-ups between similar
-languages.
+**Can I use another language?** Yes. A call is in one language: Echo detects it from the first
+sentences and keeps it for the whole call. Menu → Settings → Languages limits it to the ones you
+speak, which avoids mix-ups between similar languages.
 
 **Transcription is slow on my laptop.** Without a graphics card, Whisper takes a long time.
 Two ways out:

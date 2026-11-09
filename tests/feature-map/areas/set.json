@@ -58,7 +58,7 @@
   },
   {
    "id": "F-SET-07",
-   "feature": "Recording → Languages adds and removes languages (detection picks only among them); New recordings English or Detect",
+   "feature": "Recording → Languages adds and removes the languages a call may be in (each call is in one of them, detected once); New recordings English or Detect",
    "priority": "high",
    "check": "agent",
    "axes": [
