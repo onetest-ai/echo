@@ -28,6 +28,10 @@ struct Meta {
     /// Languages pinned for this call (overrides the workspace list); absent = workspace list
     #[serde(skip_serializing_if = "Option::is_none")]
     languages: Option<Vec<String>>,
+    /// The call's one language, once the live transcription decided it (written straight to the file under the
+    /// call's lock, `transcribe::Transcriber`; kept from there): a retranscription doesn't detect it again
+    #[serde(skip_serializing_if = "Option::is_none")]
+    language: Option<String>,
     /// The AI profile this call's live notes and minutes use (`ai.rs`), pinned at the start
     #[serde(skip_serializing_if = "Option::is_none")]
     ai_profile: Option<String>,
@@ -101,6 +105,7 @@ impl Recording {
             ended_at: None,
             stop_reason: None,
             languages: languages.clone(),
+            language: None,
             ai_profile,
             kind: None,
             tracks: vec![],
@@ -149,6 +154,7 @@ impl Recording {
             ended_at: None,
             stop_reason: None,
             languages: languages.clone(),
+            language: None,
             ai_profile,
             kind: Some("memo"),
             tracks: vec![],
@@ -171,6 +177,7 @@ impl Recording {
     /// (and rewrites it whole then), so the change goes through here.
     pub fn set_ai_profile(&mut self, id: &str) -> Result<()> {
         let _lock = crate::calls::lock_meta(&self.dir)?;
+        keep_language(&self.dir, &mut self.meta);
         let before = self.meta.ai_profile.replace(id.to_string());
         if let Err(e) = paths::write_atomic(&self.dir.join("meta.json"), &serde_json::to_vec_pretty(&self.meta)?) {
             self.meta.ai_profile = before; // memory and disk say the same
@@ -238,8 +245,18 @@ fn write_final_meta(dir: &std::path::Path, meta: &mut Meta) -> Result<()> {
     if let Some(id) = on_disk.as_ref().and_then(|m| m["ai_profile"].as_str()).filter(|s| !s.is_empty()) {
         meta.ai_profile = Some(id.to_string());
     }
+    keep_language(dir, meta);
     paths::write_atomic(&dir.join("meta.json"), &serde_json::to_vec_pretty(meta)?)?;
     Ok(())
+}
+
+/// The call's language the live transcription wrote to the file meanwhile, into the recording's copy (under the
+/// call's lock).
+fn keep_language(dir: &std::path::Path, meta: &mut Meta) {
+    let on_disk = fs::read(dir.join("meta.json")).ok().and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok());
+    if let Some(l) = on_disk.as_ref().and_then(|m| m["language"].as_str()).filter(|s| !s.is_empty()) {
+        meta.language = Some(l.to_string());
+    }
 }
 
 /// `echoctl capture`: record until Ctrl-C or `--seconds`.
@@ -284,4 +301,40 @@ pub fn capture(
     }
     println!("{}", dir.display());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_final_meta_keeps_the_language_the_live_transcription_wrote() {
+        let (_env, _) = paths::testenv::folders("recorder-final-meta-language");
+        let dir = paths::calls_dir().join("2026-11-09_140000-x");
+        fs::create_dir_all(&dir).unwrap();
+        let mut meta = Meta {
+            title: Some("x".into()),
+            app: TargetApp::Teams,
+            platform: "macos",
+            started_at: Local::now(),
+            ended_at: None,
+            stop_reason: None,
+            languages: Some(vec!["en".into(), "uk".into()]),
+            language: None,
+            ai_profile: None,
+            kind: None,
+            tracks: vec![],
+        };
+        fs::write(dir.join("meta.json"), serde_json::to_vec(&meta).unwrap()).unwrap();
+        // The live worker decides the call's language mid-call (`calls::update_meta`).
+        crate::calls::update_meta(&dir, |m| {
+            m["language"] = serde_json::json!("uk");
+            Ok(())
+        })
+        .unwrap();
+        meta.stop_reason = Some("call_ended".into());
+        write_final_meta(&dir, &mut meta).unwrap();
+        let on_disk: serde_json::Value = serde_json::from_slice(&fs::read(dir.join("meta.json")).unwrap()).unwrap();
+        assert_eq!((on_disk["language"].as_str(), on_disk["stop_reason"].as_str()), (Some("uk"), Some("call_ended")));
+    }
 }
