@@ -43,4 +43,4 @@ Nothing changed: the case only reads.
 ## Notes
 - #104: General and Health showed the real machine with no word that they do (Claude Code's path under the real home folder, the real plugin installs). Kept as the computer's, by design: Start at login, the command line, the macOS permissions, the speech engine. Claude Code follows the run's PATH and `CLAUDE_CONFIG_DIR`, which a test data folder sets; its paths show the home folder as `~`.
 - The "In a terminal" row asks the account's own login shell, so it is the computer's: not asserted beyond step 5.
-- Step 4's ✓ on "Claude Code" needs the fake to answer `--version` (it does); on the small set without `--ai` the PATH is the account's and this case does not apply.
+- Step 4's ✓ on "Claude Code" needs the fake to answer `--version` (it does); every set has the fake (plain `small` too, since the 0.8.4 regression).

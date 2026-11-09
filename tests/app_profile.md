@@ -159,15 +159,12 @@ Elements the app acts on carry `data-*` attributes (`data-call`, `data-go`, `dat
 - Settings → General and Health show **this computer**, whichever data folder (both say so in their first line):
   Start at login, "Command line", the "In a terminal" row and the macOS permissions are the machine's — a case must
   not assert them. Claude Code (its path, version, "Echo plugin", an older plugin) follows the PATH and
-  `CLAUDE_CONFIG_DIR` the server runs with: on the `standard` set (and `small --ai`) that is the run's fake and its
-  own config folder (`settings/TC-028`); on plain `small` it is the account's. Paths under the home folder show as
+  `CLAUDE_CONFIG_DIR` the server runs with: on every set it is the run's fake `claude` and its own config folder
+  (`settings/TC-028`; plain `small` records this build's plugin, `--ai` and the standard sets an older one). Paths under the home folder show as
   `~/…` (#104).
-- Settings → Plugins → Discover lists the built-in marketplace (`onetest-ai/echo-plugins`, "3 plugins · read today");
+- Settings → Plugins → Discover lists the built-in marketplace — on plain `small` the real one (`onetest-ai/echo-plugins`, "3 plugins · read today"), on `--ai` and the standard sets the data's local folder;
   its content comes from a read of that repository (network or cache), so assert only the tabs, not the plugin list.
 - Known issues seen on the test data (2026-11-06; verify before relying on them):
-  - `#call/<folder>/minutes`: the time chip `00:37` (first Summary line) highlights the turn at 0:29, not 0:37 —
-    the jump picks the first turn whose end is within 2 s of the chip (`end >= t - 2`) and the 0:29 turn ends at 0:35.
-    `window/TC-004` expects the 0:37 turn, so it fails on this data. The same off-by-one hits chip `00:13` (turn 0:05).
   - Every page load logs one console error: `favicon.ico` answers 404. It is the only console message in a whole session.
   - One thing, three names: Settings nav "Knowledge", its page "Recall", a thread's Profile "turn it on in Settings → Brain".
   - Task filter "Who does it" → "Claude can do" or "By hand" shows every pile empty on test data: no task has a mode
@@ -349,7 +346,7 @@ reads none of it.
   scenario:** the prelude starts it and the last stage that needs it quits it; stages in between don't restart it.
 - A watcher-recorded call starts within a second of the call file (the watcher's tick): its first words are there.
 - **The app runs Claude Code by itself** (preps for the day's meetings, meeting types, who does a task) about a minute
-  after it starts. On plain `small` data that goes to the built-in profile — the user's own Claude account. So every
+  after it starts. On plain `small` the fake `claude` refuses them, but plain `small` keeps the app's own thread sync on; so every
   case that starts the app builds its data with `make_data.py <dir> --ai fake` (the fake `claude` refuses every run;
   the default for the recording scenarios) or `--ai local` (only S-19 on small data: only **minutes** runs reach the
   local model, the app's preps, meeting types and task modes are refused at once). Both turn the app's own thread

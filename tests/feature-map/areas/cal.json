@@ -91,7 +91,7 @@
   },
   {
    "id": "F-CAL-10",
-   "feature": "A scheduled meeting starts recording a minute before it begins and records when joined; it leaves the list once its recording starts, its arm is cancelled, its start fails or it ends",
+   "feature": "A scheduled meeting arms itself a minute before it starts and records when joined; it leaves the list once its recording starts, its arm is cancelled, its start fails or it ends",
    "priority": "critical",
    "check": "person",
    "axes": [
