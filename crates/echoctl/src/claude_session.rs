@@ -1,17 +1,9 @@
-//! Claude Code for Echo's short model jobs (live notes, questions, the Brain's text and page jobs): a lean run with no
-//! tools, our system prompt and the text on stdin. For a call's live-notes summaries, one conversation is kept open
-//! for the whole recording: a single process answers turn after turn over stream-json. Measured (M4 Max): starting
-//! Claude Code costs about 4.7 s of CPU and 400 MB; a turn in a kept process about 0.3 s, its history read from the
-//! prompt cache (#239).
+//! Claude Code for Echo's short model jobs (live questions, the Brain's text and page jobs): a lean run with no tools,
+//! our system prompt and the text on stdin, its result envelope checked (`reply`) before the model's text is used.
 
-use std::collections::HashMap;
 use std::fs;
-use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
-use std::process::{Child, ChildStdin};
-use std::sync::mpsc::{Receiver, RecvTimeoutError};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
 use serde_json::{json, Value};
@@ -55,7 +47,7 @@ fn args(model: &str, system: &str, stream: bool) -> Result<Vec<String>> {
 
 /// Claude Code for `p` with `args`, where a job of its kind runs: `system` where the minutes run (the data folder or
 /// `notes_in`: its `.claude/settings.json` is part of "as configured"), the others in Echo's state folder.
-fn command(p: &Profile, args: &[String]) -> Result<std::process::Command> {
+pub(crate) fn command(p: &Profile, args: &[String]) -> Result<std::process::Command> {
     let cwd = if p.kind.managed() { paths::state_dir() } else { ai::system_folder()? };
     fs::create_dir_all(&cwd)?;
     let mut cmd = ai::prepare_claude(p, args, &cwd, true)?;
@@ -64,7 +56,7 @@ fn command(p: &Profile, args: &[String]) -> Result<std::process::Command> {
 }
 
 /// The model's text from a run's result envelope, or why there is none: not signed in, an error, cut off, empty.
-fn reply(p: &Profile, result: Option<&Value>, out: &str, err: &str, wrote: Option<String>, whole: bool) -> Result<String> {
+pub(crate) fn reply(p: &Profile, result: Option<&Value>, out: &str, err: &str, wrote: Option<String>, whole: bool) -> Result<String> {
     let text = result.and_then(|v| v["result"].as_str()).unwrap_or("").to_string();
     let is_error = result.is_none_or(|v| v["is_error"].as_bool().unwrap_or(false));
     if is_error {
@@ -104,125 +96,4 @@ pub(crate) fn complete_claude_with(p: &Profile, model: &str, system: &str, user:
         set_usage(v, None);
     }
     reply(p, result.as_ref(), &out, &err, wrote.err().map(|e| format!("couldn't send the prompt: {e}")), whole)
-}
-
-// ── a call's live-notes conversation ───────────────────────────────────────────────────────────
-
-/// After this many turns a conversation starts afresh (its history only grows).
-const MAX_TURNS: u32 = 30;
-
-/// One Claude Code process, kept for a call's summaries. Stopped (with its process group) when dropped.
-struct Session {
-    child: Child,
-    stdin: ChildStdin,
-    lines: Receiver<String>,
-    err: Arc<Mutex<String>>,
-    /// Profile and model it runs on: another one starts another conversation.
-    key: String,
-    /// How far into the live transcript its last answer went.
-    cursor: usize,
-    turns: u32,
-    /// Claude Code reports the cost of the whole conversation so far: what was already counted.
-    cost: f64,
-}
-
-impl Drop for Session {
-    fn drop(&mut self) {
-        ai::stop_child(&mut self.child);
-    }
-}
-
-static SESSIONS: Mutex<Option<HashMap<String, Session>>> = Mutex::new(None);
-
-fn sessions<T>(f: impl FnOnce(&mut HashMap<String, Session>) -> T) -> T {
-    f(SESSIONS.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashMap::new))
-}
-
-/// End a call's conversation (`Some(stamp)`), or every one (`None`): the recording ended, the profile changed, Echo quits.
-pub(crate) fn forget(stamp: Option<&str>) {
-    let gone: Vec<Session> = sessions(|m| match stamp {
-        Some(s) => m.remove(s).into_iter().collect(),
-        None => m.drain().map(|(_, v)| v).collect(),
-    });
-    drop(gone); // stopped outside the lock
-}
-
-impl Session {
-    fn start(p: &Profile, system: &str, key: String) -> Result<Session> {
-        let mut child = command(p, &args(&p.live_model(), system, true)?)?.spawn()?;
-        let stdin = child.stdin.take().ok_or_else(|| anyhow!("{}: no stdin", p.name))?;
-        let (tx, lines) = std::sync::mpsc::channel();
-        if let Some(out) = child.stdout.take() {
-            std::thread::spawn(move || {
-                for line in BufReader::new(out).lines().map_while(Result::ok) {
-                    if tx.send(line).is_err() {
-                        break;
-                    }
-                }
-            });
-        }
-        let err = Arc::new(Mutex::new(String::new()));
-        if let Some(mut e) = child.stderr.take() {
-            let err = err.clone();
-            std::thread::spawn(move || {
-                let mut b = String::new();
-                let _ = e.read_to_string(&mut b);
-                err.lock().unwrap_or_else(|e| e.into_inner()).push_str(&b);
-            });
-        }
-        Ok(Session { child, stdin, lines, err, key, cursor: 0, turns: 0, cost: 0.0 })
-    }
-
-    /// One turn: `user` in, the model's text out (checked as a one-off run's), within `deadline`.
-    fn ask(&mut self, p: &Profile, user: &str, deadline: Duration, cancelled: &dyn Fn() -> bool) -> Result<String> {
-        let msg = json!({"type": "user", "message": {"role": "user", "content": user}});
-        let wrote = writeln!(self.stdin, "{msg}").and_then(|_| self.stdin.flush()).err().map(|e| format!("couldn't send the prompt: {e}"));
-        let t = Instant::now();
-        let mut out = String::new();
-        let result = loop {
-            if wrote.is_some() || cancelled() {
-                break None;
-            }
-            if t.elapsed() > deadline {
-                bail!("{}: no answer within {} s", p.name, deadline.as_secs());
-            }
-            match self.lines.recv_timeout(Duration::from_millis(100)) {
-                Ok(line) => match serde_json::from_str::<Value>(line.trim()) {
-                    Ok(v) if v["type"] == "result" => break Some(v),
-                    _ => out.push_str(&line),
-                },
-                Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => break None, // Claude Code ended
-            }
-        };
-        if cancelled() {
-            bail!("stopped");
-        }
-        if let Some(v) = &result {
-            let total = v["total_cost_usd"].as_f64().unwrap_or(self.cost);
-            set_usage(v, Some((total - self.cost).max(0.0)));
-            self.cost = total;
-        }
-        let err = self.err.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        reply(p, result.as_ref(), &out, &err, wrote, true)
-    }
-}
-
-/// A live-notes summary of call `stamp` on `p` (Claude Code). The call's kept conversation gets only `new` (the
-/// transcript lines since its last answer) when that answer went up to `span.0`; otherwise a new conversation starts
-/// with `full`. It then covers up to `span.1`. A failure ends the conversation: the next summary starts a new one.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn summary(stamp: &str, p: &Profile, system: &str, full: &str, new: &str, span: (usize, usize), deadline: Duration, cancelled: &dyn Fn() -> bool) -> Result<String> {
-    let key = format!("{}|{}", p.id, p.live_model());
-    let kept = sessions(|m| m.remove(stamp)).filter(|s| s.key == key && s.cursor == span.0 && s.turns < MAX_TURNS);
-    let (mut s, user) = match kept {
-        Some(s) => (s, format!("{new}\nUpdate the notes with these lines; answer as before.")),
-        None => (Session::start(p, system, key)?, full.to_string()),
-    };
-    let text = s.ask(p, &user, deadline, cancelled)?;
-    s.cursor = span.1;
-    s.turns += 1;
-    let replaced = sessions(|m| m.insert(stamp.to_string(), s));
-    drop(replaced);
-    Ok(text)
 }

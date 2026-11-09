@@ -34,6 +34,9 @@ use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::ai::{self, Kind, Profile};
+
+mod agent;
+pub use agent::serve as serve_agent;
 use crate::{calls, paths};
 
 pub const NOTES: &str = "live-notes.json";
@@ -702,7 +705,7 @@ fn with<R>(f: impl FnOnce(&mut Shared) -> R) -> R {
 #[cfg(test)]
 pub fn forget_all() {
     with(|s| *s = Shared::default());
-    crate::claude_session::forget(None);
+    agent::finish(None);
 }
 
 /// Note a call's folder and return its stamp (every entry point does this).
@@ -812,7 +815,9 @@ pub fn recording_started(dir: &Path) {
         let c = s.calls.entry(stamp.clone()).or_default();
         c.recording = true;
         c.paused = false;
-        c.next_summary = Some(Instant::now() + SUMMARY_EVERY);
+        // At once: with Claude Code the call's notes session starts now (#239); a model server's first summary waits
+        // for enough words (`run_summary` reschedules it).
+        c.next_summary = Some(Instant::now());
     });
     match enabled() {
         Ok(true) => {
@@ -842,7 +847,7 @@ pub fn recording_started(dir: &Path) {
 /// The recording of `dir` ended: no more summaries (one running may finish; questions still work).
 pub fn recording_stopped(dir: &Path) {
     let stamp = track(dir);
-    crate::claude_session::forget(Some(&stamp));
+    agent::finish(Some(&stamp));
     let had = with(|s| s.calls.get_mut(&stamp).map(|c| std::mem::replace(&mut c.recording, false)).unwrap_or(false));
     if had && enabled().unwrap_or(false) {
         set_state(&stamp, "ended", None);
@@ -879,7 +884,7 @@ pub fn pause(dir: &Path, paused: bool) {
 /// again, both with the new profile.
 pub fn profile_changed(dir: &Path) {
     let stamp = track(dir);
-    crate::claude_session::forget(Some(&stamp));
+    agent::finish(Some(&stamp));
     with(|s| {
         let c = s.calls.entry(stamp.clone()).or_default();
         c.summary_gen += 1;
@@ -1026,7 +1031,7 @@ pub fn report(dir: &Path, why: &str) {
 
 /// Stop everything (the app is quitting): the running job's child is stopped (waits up to 5 s).
 pub fn shutdown() {
-    crate::claude_session::forget(None);
+    agent::finish(None);
     with(|s| {
         s.shutdown = true;
         if let Some(r) = s.running.as_mut() {
@@ -1251,12 +1256,15 @@ fn run_summary(stamp: &str, generation: u64) {
         Ok(false) => return,
         Err(e) => return set_state_if(stamp, generation, "failed", Some(format!("the AI settings can't be read: {e:#}"))),
     }
+    // Claude Code keeps the notes itself, in a session of its own for the recording (#239): started below, reported.
+    let recording = with(|s| s.calls.get(stamp).is_some_and(|c| c.recording));
+    let agent = recording && ai::call_profile_id(&dir).and_then(|id| ai::Settings::load()?.get(&id)).is_ok_and(|p| p.kind != Kind::Local);
     let all = lines(&dir);
     let prev = read_notes(&dir);
     let cursor = prev.as_ref().map_or(0, |n| n.cursor).min(all.len());
     let new: Vec<&Line> = all[cursor..].iter().collect();
     let new_chars: usize = new.iter().map(|l| l.text.chars().count()).sum();
-    if new_chars < MIN_NEW_CHARS {
+    if new_chars < MIN_NEW_CHARS && !agent {
         return retry_summary_in(stamp, 10); // not enough said yet
     }
     if ai::call_profile_id(&dir).and_then(|id| ai::Settings::load()?.get(&id)).is_ok_and(|p| held_here(&p, with(|s| s.calls.get(stamp).is_some_and(|c| c.recording)))) {
@@ -1279,6 +1287,15 @@ fn run_summary(stamp: &str, generation: u64) {
     if !summary_current(stamp, generation) || cancelled() || !still_on() {
         return; // paused, profile changed, turned off or quitting meanwhile: nothing was sent
     }
+    if agent {
+        return match agent::ensure(stamp, &dir, p) {
+            Ok(()) => set_state_if(stamp, generation, if read_notes(&dir).is_some() { "updated" } else { "waiting" }, None),
+            Err(e) => match classify(&e) {
+                Hold::SignIn { profile, why } => summary_needs_sign_in(stamp, generation, profile, why),
+                _ => set_state_if(stamp, generation, "failed", Some(format!("{e:#}"))),
+            },
+        };
+    }
     // Its header from the call where it is now: it may have been retitled during the check.
     let dir = call_dir(stamp).unwrap_or(dir);
     set_state_if(stamp, generation, "updating", None);
@@ -1288,18 +1305,13 @@ fn run_summary(stamp: &str, generation: u64) {
     if let Some(n) = &prev {
         user.push_str(&format!("Previous notes (covering the call up to {}):\n{}\n\n", clock(n.covered_until), notes_for_prompt(n)));
     }
-    let mut new = match gap {
+    user.push_str(&match gap {
         Some([a, b]) => format!("New transcript lines (the part from {} to {} was skipped):\n", clock(a), clock(b)),
         None => "New transcript lines:\n".to_string(),
-    };
-    new.push_str(&format_lines(&lines_in));
-    user.push_str(&new);
+    });
+    user.push_str(&format_lines(&lines_in));
     let _ = take_usage();
-    // Claude Code: one conversation for the call's summaries, so it isn't started again every time (#239).
-    let reply = match p.kind {
-        Kind::Local => complete(p, SUMMARY_SYSTEM, &user, 1200, true, &cancelled),
-        _ => crate::claude_session::summary(stamp, p, SUMMARY_SYSTEM, &user, &new, (cursor, all.len()), CLAUDE_DEADLINE, &cancelled),
-    };
+    let reply = complete(p, SUMMARY_SYSTEM, &user, 1200, true, &cancelled);
     count_usage(stamp);
     if !summary_current(stamp, generation) || !enabled().unwrap_or(false) {
         return; // stale, or live notes were turned off: its result is dropped
@@ -1996,50 +2008,6 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn a_calls_summaries_go_through_one_claude_code_and_only_the_new_lines_are_sent() {
-        let (_env, root) = crate::paths::testenv::folders("live-session");
-        let _fake = ai::fake::install(&root);
-        let p = ai::fake::profile("w", None, &ai::fake::signed_in("pat@example.com"));
-        let notes = r#"{\"now\":\"Pilot\",\"decisions\":[{\"text\":\"Lisbon first\",\"t\":\"00:10\"}]}"#;
-        std::fs::write(ai::fake::file(&p, "p.reply"), format!(r#"{{"type":"result","is_error":false,"result":"{notes}","total_cost_usd":0.01}}"#)).unwrap();
-        let d = root.join("home/calls/2026-10-23_170000-sync");
-        std::fs::create_dir_all(&d).unwrap();
-        std::fs::write(d.join("meta.json"), r#"{"title":"Sync","ai_profile":"w"}"#).unwrap();
-        let line = |i: usize| format!("{{\"speaker\":\"remote\",\"start\":{},\"end\":{},\"text\":\"We agreed the pilot starts in Lisbon and the budget is fixed, item {i}.\"}}\n", i * 10, i * 10 + 5);
-        let mut talk: String = (0..12).map(line).collect();
-        std::fs::write(d.join(LIVE_FILE), &talk).unwrap();
-        let stamp = track(&d);
-        let run = || {
-            let generation = with(|s| {
-                let c = s.calls.entry(stamp.clone()).or_default();
-                c.recording = true;
-                c.summary_gen
-            });
-            with(|s| s.running = Some(Running { stamp: stamp.clone(), kind: JobKind::Summary, cancelled: false }));
-            run_summary(&stamp, generation);
-            with(|s| s.running = None);
-            with(|s| s.calls.get(&stamp).map(|c| c.state.clone()).unwrap())
-        };
-        assert_eq!(run(), "updated");
-        talk.extend((12..24).map(line));
-        std::fs::write(d.join(LIVE_FILE), &talk).unwrap();
-        assert_eq!(run(), "updated");
-        let starts = || std::fs::read_to_string(ai::fake::file(&p, "p.starts")).unwrap_or_default().lines().count();
-        let turns = std::fs::read_to_string(ai::fake::file(&p, "p.turns")).unwrap();
-        let turns: Vec<&str> = turns.lines().collect();
-        assert_eq!((starts(), turns.len()), (1, 2), "one Claude Code, two turns");
-        assert!(turns[0].contains("Previous notes") || turns[0].contains("Sync"), "the first turn has the call's header");
-        assert!(!turns[1].contains("Previous notes") && turns[1].contains("item 23") && !turns[1].contains("item 3."), "the second: only the new lines");
-        // The recording ends: the conversation goes; the next summary starts a new one.
-        recording_stopped(&d);
-        talk.extend((24..36).map(line));
-        std::fs::write(d.join(LIVE_FILE), &talk).unwrap();
-        run();
-        assert_eq!(starts(), 2);
-        crate::claude_session::forget(None);
-    }
-
-    #[test]
     fn a_model_that_says_not_signed_in_marks_the_call_until_a_sign_in() {
         let (_env, root) = crate::paths::testenv::folders("live-not-logged-in");
         let _fake = ai::fake::install(&root);
@@ -2056,11 +2024,13 @@ mod tests {
             c.recording = true;
             c.summary_gen
         });
-        with(|s| s.running = Some(Running { stamp: stamp.clone(), kind: JobKind::Summary, cancelled: false }));
-        run_summary(&stamp, generation);
-        with(|s| s.running = None);
-        let (state, needs) = with(|s| s.calls.get(&stamp).map(|c| (c.state.clone(), c.needs_sign_in.clone())).unwrap());
-        assert_eq!((state.as_str(), needs.as_deref()), ("failed", Some("w")));
+        // The session starts, Claude Code says it isn't signed in, and the next look reports it (#239).
+        crate::paths::testenv::eventually("the session's sign-in error is reported", || {
+            with(|s| s.running = Some(Running { stamp: stamp.clone(), kind: JobKind::Summary, cancelled: false }));
+            run_summary(&stamp, generation);
+            with(|s| s.running = None);
+            with(|s| s.calls.get(&stamp).is_some_and(|c| c.state == "failed" && c.needs_sign_in.as_deref() == Some("w")))
+        });
         assert!(ai::observation("w").unwrap().stale, "the 'signed in' seen before no longer counts");
         signed_in("w");
         let (state, needs) = with(|s| s.calls.get(&stamp).map(|c| (c.state.clone(), c.needs_sign_in.clone())).unwrap());

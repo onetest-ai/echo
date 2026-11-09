@@ -458,6 +458,16 @@ enum Cmd {
         #[arg(long, default_value_t = 20)]
         seconds: u64,
     },
+    /// (internal) The tools of a call's live-notes session, over MCP on stdin/stdout (`livenotes::agent`)
+    #[command(hide = true)]
+    LiveMcp {
+        #[arg(long)]
+        call: std::path::PathBuf,
+        #[arg(long)]
+        profile: String,
+        #[arg(long)]
+        model: String,
+    },
     /// (dev) Capture the Teams call window once, as the frame recorder would, to a PNG/JPEG
     #[cfg(any(target_os = "macos", windows))]
     #[command(hide = true)]
@@ -645,6 +655,7 @@ fn main() -> Result<()> {
         Cmd::Restore { name } => calls::restore(&name),
         #[cfg(feature = "transcribe")]
         Cmd::LiveReplay { wav, out } => live::replay(&wav, &out),
+        Cmd::LiveMcp { call, profile, model } => livenotes::serve_agent(&call, &profile, &model),
         #[cfg(any(target_os = "macos", windows))]
         Cmd::AxDump { seconds } => ax::dump(seconds),
         #[cfg(any(target_os = "macos", windows))]
