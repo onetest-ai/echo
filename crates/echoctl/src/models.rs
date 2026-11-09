@@ -1,6 +1,6 @@
 //! Speech model catalog, hardware-based recommendation and verified downloads.
 //!
-//! Only multilingual models are offered (calls mix languages). Each model names its engine:
+//! Only multilingual models are offered (calls are in several languages, each call in one). Each model names its engine:
 //! whisper.cpp, or NVIDIA Nemotron through NeMo-Speech.cpp (`nemo.rs`) — choosing a model is
 //! choosing the engine. Files come from Hugging Face; the expected SHA-256 is read from the
 //! Hub's API at download time and checked after the download.

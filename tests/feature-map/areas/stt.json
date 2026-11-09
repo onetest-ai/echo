@@ -16,7 +16,7 @@
   },
   {
    "id": "F-STT-02",
-   "feature": "A call has one language: pinned for it, the only one allowed, or detected once from its first sentences among the allowed ones (Ukrainian and Russian apart), then kept for the whole call and in its meta.json for a retranscription; a language pinned for a call applies to it alone",
+   "feature": "A call has one language: pinned for it, the only one allowed, or detected once from its first sentences among the allowed ones (Ukrainian and Russian apart), then kept for the whole call and in its meta.json for a retranscription (re-decided when the allowed ones no longer include it); the first utterances, decoded before the decision, keep the language they were decoded in; a language pinned for a call applies to it alone",
    "priority": "high",
    "check": "person",
    "axes": [

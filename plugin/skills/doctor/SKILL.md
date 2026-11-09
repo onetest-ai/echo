@@ -28,7 +28,9 @@ permission for the user (open the page and explain), and never download a model 
    with its `reason` and `size_mb`, plus one larger and one smaller; on a yes,
    `echoctl model download <name>`.
 5. **Languages**, if the transcript came out in the wrong language: `echoctl config --languages
-   en,uk` (detection is limited to this list).
+   en,uk` (a call is in one of these, detected once from its first sentences). To fix a call
+   already transcribed, `echoctl transcribe <call>` while its audio is kept: a call whose saved
+   language (`language` in its `meta.json`) isn't in the new list has it decided again.
 6. **Minutes** missing or failed for a call: `<call>/notes-run.json` (`state`, `message`) and the
    end of `<call>/claude.log` say why; `echoctl attention` lists minutes that failed or wait, and
    what they wait for. `echoctl notes <call>` writes them now.
