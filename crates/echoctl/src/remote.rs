@@ -226,31 +226,13 @@ impl Client {
         serde_json::from_str(&text).with_context(|| format!("unexpected answer from the server: {}", text.chars().take(200).collect::<String>()))
     }
 
-    /// Decode one utterance on an OpenAI-compatible server: the language pinned when the call has one;
-    /// else the server's detection, asked again pinned (the track's last language, else the call's
-    /// first) when it falls outside the call's list. The hint is checked against a plain decode.
+    /// Decode one utterance on an OpenAI-compatible server (`openai_decode`, one request per `decode`).
     fn openai_utterance(&self, model: &str, chunk: &[f32], prev: Option<i32>, allowed: &[i32], prompt: Option<&str>) -> Result<(Option<i32>, String, Decoded)> {
-        let code = |id: i32| whisper_rs::get_lang_str(id).map(str::to_owned);
-        let pinned: Option<String> = if allowed.len() == 1 { code(allowed[0]) } else { None };
         let decode = |lang: Option<&str>, hint: Option<&str>| -> Result<(Option<i32>, Decoded)> {
             let v = self.openai_request(model, chunk, lang, hint)?;
             Ok((lang_of(&v["language"]), pieces(&v)))
         };
-        let (mut lang_id, mut segs) = decode(pinned.as_deref(), prompt)?;
-        if pinned.is_none() && !allowed.is_empty() && lang_id.is_some_and(|l| !allowed.contains(&l)) {
-            let fix = prev.filter(|p| allowed.contains(p)).unwrap_or(allowed[0]);
-            if let Some(c) = code(fix) {
-                (_, segs) = decode(Some(&c), prompt)?;
-                lang_id = Some(fix);
-            }
-        }
-        let lang = lang_id.and_then(whisper_rs::get_lang_str).unwrap_or("auto").to_string();
-        if let Some(hint) = prompt.filter(|_| chunk.len() as f64 / 16000.0 >= crate::transcribe::GUARD_MIN_S) {
-            let lang_arg = lang_id.and_then(whisper_rs::get_lang_str).map(str::to_owned);
-            let (_, plain) = decode(lang_arg.as_deref(), None)?;
-            segs = crate::transcribe::choose_hinted(segs, plain, hint);
-        }
-        Ok((lang_id, lang, segs))
+        openai_decode(decode, chunk.len() as f64 / 16000.0, prev, allowed, prompt)
     }
 
     /// Decode one utterance on the server (see `Engine::utterance`).
@@ -317,6 +299,38 @@ fn wav16k(chunk: &[f32]) -> Vec<u8> {
         w.extend(((s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16).to_le_bytes());
     }
     w
+}
+
+/// One utterance on an OpenAI-compatible server, `decode` being one request (language, hint): the
+/// language pinned when the call has one; else the server's detection, asked again pinned (the
+/// track's last language, else the call's first) when it falls outside the call's list. From
+/// `GUARD_MIN_S` on, the utterance is decoded plain and asked again with the hint only when a term may
+/// have been heard (`transcribe::with_hint`); a shorter one is decoded with the hint, unchecked.
+fn openai_decode(
+    mut decode: impl FnMut(Option<&str>, Option<&str>) -> Result<(Option<i32>, Decoded)>,
+    dur: f64,
+    prev: Option<i32>,
+    allowed: &[i32],
+    prompt: Option<&str>,
+) -> Result<(Option<i32>, String, Decoded)> {
+    let code = |id: i32| whisper_rs::get_lang_str(id).map(str::to_owned);
+    let pinned: Option<String> = if allowed.len() == 1 { code(allowed[0]) } else { None };
+    let checked = prompt.filter(|_| dur >= crate::transcribe::GUARD_MIN_S);
+    let first = if checked.is_some() { None } else { prompt };
+    let (mut lang_id, mut segs) = decode(pinned.as_deref(), first)?;
+    if pinned.is_none() && !allowed.is_empty() && lang_id.is_some_and(|l| !allowed.contains(&l)) {
+        let fix = prev.filter(|p| allowed.contains(p)).unwrap_or(allowed[0]);
+        if let Some(c) = code(fix) {
+            (_, segs) = decode(Some(&c), first)?;
+            lang_id = Some(fix);
+        }
+    }
+    let lang = lang_id.and_then(whisper_rs::get_lang_str).unwrap_or("auto").to_string();
+    if let Some(hint) = checked {
+        let lang_arg = pinned.or_else(|| lang_id.and_then(whisper_rs::get_lang_str).map(str::to_owned));
+        segs = crate::transcribe::with_hint(segs, hint, || Ok(decode(lang_arg.as_deref(), Some(hint))?.1))?;
+    }
+    Ok((lang_id, lang, segs))
 }
 
 /// A language as servers name it ("en", "english", "English") → whisper's id.
@@ -777,6 +791,64 @@ fn decode_request(body: &[u8]) -> Result<Answer> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Each request's (language, hint).
+    type Requests = Vec<(Option<String>, Option<String>)>;
+
+    /// The requests `openai_decode` makes for an utterance whose plain answer is `plain` (a hinted
+    /// request answers "We moved it to ServiceNow."; every answer names `heard` as its language), and
+    /// the text it keeps.
+    fn openai_requests(plain: &str, dur: f64, allowed: &[i32], heard: Option<&str>, prev: Option<i32>) -> (Requests, String, String) {
+        let heard = heard.and_then(whisper_rs::get_lang_id);
+        let mut calls = vec![];
+        let (_, lang, segs) = openai_decode(
+            |lang, hint| {
+                calls.push((lang.map(str::to_owned), hint.map(str::to_owned)));
+                let text = if hint.is_some() { "We moved it to ServiceNow." } else { plain };
+                Ok((heard, vec![Piece::new(0.0, 1.0, text.to_string(), vec![])]))
+            },
+            dur,
+            prev,
+            allowed,
+            Some("ServiceNow, Kubernetes"),
+        )
+        .unwrap();
+        (calls, segs[0].text.clone(), lang)
+    }
+
+    #[test]
+    fn a_hinted_request_only_when_a_term_may_have_been_heard() {
+        let hint = || Some("ServiceNow, Kubernetes".to_string());
+        let (calls, text, _) = openai_requests("We will meet at ten.", 3.0, &[], Some("en"), None);
+        assert_eq!(calls, vec![(None, None)], "no term heard: one plain request");
+        assert_eq!(text, "We will meet at ten.");
+        let (calls, text, _) = openai_requests("We moved it to service now.", 3.0, &[], Some("en"), None);
+        assert_eq!(calls, vec![(None, None), (Some("en".into()), hint())], "plain, then hinted in the language heard");
+        assert_eq!(text, "We moved it to ServiceNow.");
+        let uk = whisper_rs::get_lang_id("uk").unwrap();
+        let (calls, _, _) = openai_requests("We will meet at ten.", 3.0, &[uk], Some("uk"), None);
+        assert_eq!(calls, vec![(Some("uk".into()), None)], "a pinned language: still one plain request");
+        let (calls, _, _) = openai_requests("We moved it to service now.", 3.0, &[uk], None, None);
+        assert_eq!(calls, vec![(Some("uk".into()), None), (Some("uk".into()), hint())], "the pin holds when the server names no language");
+        let (calls, _, _) = openai_requests("Yes.", 0.5, &[], Some("en"), None);
+        assert_eq!(calls, vec![(None, hint())], "a short utterance: one hinted request, as before");
+    }
+
+    #[test]
+    fn a_language_outside_the_list_is_asked_again_plain_and_the_hint_follows_only_when_needed() {
+        let hint = || Some("ServiceNow, Kubernetes".to_string());
+        let (en, uk) = (whisper_rs::get_lang_id("en").unwrap(), whisper_rs::get_lang_id("uk").unwrap());
+        let (calls, _, lang) = openai_requests("We moved it to service now.", 3.0, &[en, uk], Some("pl"), None);
+        assert_eq!(calls, vec![(None, None), (Some("en".into()), None), (Some("en".into()), hint())]);
+        assert_eq!(lang, "en");
+        let (calls, _, _) = openai_requests("We will meet at ten.", 3.0, &[en, uk], Some("pl"), None);
+        assert_eq!(calls, vec![(None, None), (Some("en".into()), None)], "no term heard: no hinted request");
+        let (calls, _, lang) = openai_requests("We moved it to service now.", 3.0, &[en, uk], Some("pl"), Some(uk));
+        assert_eq!(calls, vec![(None, None), (Some("uk".into()), None), (Some("uk".into()), hint())], "the track's last language");
+        assert_eq!(lang, "uk");
+        let (calls, _, _) = openai_requests("Yes.", 0.5, &[en, uk], Some("pl"), None);
+        assert_eq!(calls, vec![(None, hint()), (Some("en".into()), hint())], "a short utterance keeps the hint on the re-ask");
+    }
 
     #[test]
     fn openai_answers_become_sentences() {
