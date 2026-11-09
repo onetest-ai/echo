@@ -68,7 +68,7 @@
   },
   {
    "id": "F-SET-08",
-   "feature": "Recording → Follow Teams' mute, Read the Teams window (off: no names, mute sync or call name read from Teams' window; it says what it costs Teams), Meeting chat and Shared screens (with Grant… when not permitted; they read the window too, apart from that switch) switches",
+   "feature": "Recording → Follow Teams' mute (off and greyed while Read the Teams window is off), Read the Teams window (off: no names, mute sync or call name read from Teams' window, from the next call; back-to-back calls may become one recording; it says what it costs Teams), Meeting chat and Shared screens (with Grant… when not permitted; snapshots read the window too, apart from that switch) switches",
    "priority": "medium",
    "check": "agent",
    "axes": [

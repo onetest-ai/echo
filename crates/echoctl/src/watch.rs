@@ -1712,6 +1712,17 @@ mod tests {
     }
 
     #[test]
+    fn with_the_teams_window_off_nothing_reads_it_during_a_call() {
+        let (_env, root) = crate::paths::testenv::folders("watch-no-window");
+        let mut c = crate::config::Config::load().unwrap();
+        c.capture_ui = Some(false);
+        c.follow_app_mute = Some(true);
+        c.save().unwrap();
+        assert!(start_ui_capture(&root, Instant::now()).is_none(), "no names read");
+        assert!(start_mute_sync().is_none(), "no mute sync, even with Follow Teams' mute on");
+    }
+
+    #[test]
     fn a_failed_start_unschedules_its_meeting_and_says_so() {
         let (_env, _root) = crate::paths::testenv::folders("watch-start-failed");
         let start = Utc::now() - chrono::Duration::seconds(30);

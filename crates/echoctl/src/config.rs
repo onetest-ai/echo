@@ -239,10 +239,12 @@ pub fn reads_call_window() -> bool {
     !fed_from_files() && Config::load().map(|c| c.capture_ui.unwrap_or(true)).unwrap_or(true)
 }
 
-/// A call fed from files (debug builds' test feed, `ECHOCTL_TEST_CALL_FILE`) has no window: the real call app on this
-/// computer is never read or captured for it (test data must never hold the user's own screens and names).
+/// A test call (debug builds: fed from files, `ECHOCTL_TEST_CALL_FILE`, or the TestCall app, `ECHOCTL_CALL_APP_BUNDLE`):
+/// the real Teams on this computer is never read or captured for it (test data must never hold the user's own screens
+/// and names).
 pub fn fed_from_files() -> bool {
-    cfg!(debug_assertions) && std::env::var_os("ECHOCTL_TEST_CALL_FILE").is_some()
+    let fed = std::env::var("ECHOCTL_TEST_CALL_FILE").is_ok_and(|v| !v.is_empty()) || crate::apps::test_call_app().is_some();
+    cfg!(debug_assertions) && fed
 }
 
 #[cfg(test)]
@@ -259,10 +261,11 @@ mod tests {
         assert!(!reads_call_window(), "the user turned it off");
         c.capture_ui = Some(true);
         c.save().unwrap();
-        std::env::set_var("ECHOCTL_TEST_CALL_FILE", "/tmp/in-call");
+        std::env::set_var("ECHOCTL_TEST_CALL_FILE", _root.join("in-call"));
         let fed = (reads_call_window(), fed_from_files());
         std::env::remove_var("ECHOCTL_TEST_CALL_FILE");
-        assert_eq!(fed, (false, true), "a test call never reads the real Teams window, nor captures its screens");
+        let debug = cfg!(debug_assertions);
+        assert_eq!(fed, (!debug, debug), "a test call never reads the real Teams window, nor captures its screens");
     }
 
     #[test]
