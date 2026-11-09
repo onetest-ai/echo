@@ -272,7 +272,7 @@ pub fn finish_run_result(mut child: std::process::Child, log: &mut fs::File, tim
                 stopped = Some(format!("Claude Code is too old to {what} — update it to {x}.{y}.{z} or later"));
                 crate::ai::stop_group(pid);
             }
-            for l in notes::describe(&ev) {
+            for l in crate::run_log::describe(&ev) {
                 let _ = writeln!(log, "{}  {l}", Local::now().format("%H:%M:%S"));
             }
             if ev["type"] == "result" {
