@@ -100,7 +100,9 @@ impl MeetingApp {
         let first = |prefix: &str| path.strip_prefix(prefix).map(|r| r.split(['/', '?', '#']).next().unwrap_or(""));
         // Teams turns the link into an `msteams:` deep link: only a meeting's own (`meetup-join/19:meeting_…`,
         // `/meet/<digits>`), never one with a dot segment that would walk to another of its pages (a pre-filled chat).
-        let dots = path.split(['/', '?', '#']).any(|seg| matches!(seg.to_ascii_lowercase().replace("%2e", ".").as_str(), "." | ".."));
+        let dots = path.split(['/', '?', '#']).any(|seg| matches!(seg.to_ascii_lowercase().replace("%2e", ".").as_str(), "." | ".."))
+            // …nor an encoded slash, backslash or percent in the path (`%2f..%2f`, `%252e`), whatever Teams decodes.
+            || ["%2f", "%5c", "%25"].iter().any(|e| path.split(['?', '#']).next().unwrap_or("").to_ascii_lowercase().contains(e));
         let teams = TEAMS_HOSTS.contains(&host.as_str())
             && !dots
             && (first("/l/meetup-join/").is_some_and(|s| ["19%3ameeting_", "19:meeting_"].iter().any(|p| s.len() > p.len() && s.to_ascii_lowercase().starts_with(p)))
@@ -212,6 +214,9 @@ mod tests {
             "https://teams.microsoft.com/l/meetup-join/x/0",
             "https://teams.microsoft.com/l/chat/0/0?users=a@evil.example",
             "https://teams.live.com/meet/abc",
+            "https://teams.microsoft.com/l/meetup-join/19%3ameeting_x%2f..%2f..%2fchat/0/0?users=a@evil.example",
+            "https://teams.microsoft.com/l/meetup-join/19%3ameeting_x%5c..%5cchat/0",
+            "https://teams.microsoft.com/l/meetup-join/19%3ameeting_x/%252e%252e/chat/0",
             "javascript:alert(1)//https://zoom.us/j/",
         ] {
             assert_eq!(find_join_link(text), None, "{text}");

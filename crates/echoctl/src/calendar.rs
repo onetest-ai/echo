@@ -80,7 +80,8 @@ fn join_link(ev: &Value) -> Option<String> {
 /// of its digits). Its last word is left out then.
 fn whole_words(preview: &str) -> &str {
     const CUT_AT: usize = 250;
-    if preview.chars().count() < CUT_AT {
+    // Counted as Graph does, in UTF-16 units (an emoji is two).
+    if preview.encode_utf16().count() < CUT_AT {
         return preview;
     }
     preview.trim_end().rsplit_once(char::is_whitespace).map_or("", |(head, _)| head)
@@ -411,6 +412,9 @@ mod tests {
         // The whole link before the cut: taken.
         zoom["bodyPreview"] = json!(format!("Join Zoom Meeting https://umbrella.zoom.us/j/81234567890 {pad}Meeting ID: 812"));
         assert_eq!(view_event(&zoom).unwrap()["join_url"], "https://umbrella.zoom.us/j/81234567890");
+        // Emoji count twice: 125 of them make a preview Graph has cut.
+        zoom["bodyPreview"] = json!(format!("{} https://umbrella.zoom.us/j/8123456789", "🙂".repeat(125)));
+        assert_eq!(view_event(&zoom).unwrap()["join_url"], Value::Null, "cut, counted in UTF-16");
         // A short preview isn't cut: its last word is whole.
         zoom["bodyPreview"] = json!("Join Zoom Meeting https://umbrella.zoom.us/j/81234567890");
         assert_eq!(view_event(&zoom).unwrap()["join_url"], "https://umbrella.zoom.us/j/81234567890");
