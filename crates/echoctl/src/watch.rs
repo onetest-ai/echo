@@ -52,6 +52,8 @@ const REJOIN_NAME_WINDOW: Duration = Duration::from_secs(30);
 const ARM_EXPIRES: Duration = Duration::from_secs(15 * 60);
 /// A watcher whose heartbeat is older than this is considered dead.
 const HEARTBEAT_STALE: chrono::Duration = chrono::Duration::seconds(5);
+/// How late a recording watcher's heartbeat may be for Stop to still reach it.
+const STOP_LATE: chrono::Duration = chrono::Duration::minutes(10);
 const EVENTS_MAX_BYTES: u64 = 5_000_000;
 /// Mute button unreadable this long → record the mic again; this long → look for Teams anew.
 #[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
@@ -160,6 +162,15 @@ fn new_arm_id() -> String {
 pub fn running_watcher() -> Option<WatchState> {
     let s: WatchState = read_json("watch.json")?;
     (Utc::now() - s.heartbeat < HEARTBEAT_STALE).then_some(s)
+}
+
+/// The watcher that names a recording, and whether its heartbeat is fresh; a late one while its process lives
+/// (blocked on a device, it reads `stop.request` once free).
+fn recording_watcher() -> Option<(WatchState, bool)> {
+    let s: WatchState = read_json("watch.json").filter(|s: &WatchState| s.recording.is_some())?;
+    let age = Utc::now() - s.heartbeat;
+    let fresh = age < HEARTBEAT_STALE;
+    (fresh || (age < STOP_LATE && crate::app::process_alive(s.pid))).then_some((s, fresh))
 }
 
 fn emit(event: &str, mut data: serde_json::Value) {
@@ -1439,12 +1450,13 @@ pub fn memo_start(languages: Option<Vec<String>>, ai_profile: Option<String>) ->
 /// `echoctl stop`: end the current recording, or cancel the pending arm when nothing records.
 /// A recording's Stop leaves an arm made during it (the next meeting's) as it is.
 pub fn stop() -> Result<()> {
-    match running_watcher() {
-        Some(w) if w.recording.is_some() => {
+    match recording_watcher() {
+        Some((w, fresh)) => {
             fs::write(file("stop.request"), b"")?;
-            println!("stopping {}", w.recording.unwrap());
+            let busy = if fresh { "" } else { " (Echo is busy for the moment; it stops as soon as it is free)" };
+            println!("stopping {}{busy}", w.recording.unwrap_or_default());
         }
-        _ => {
+        None => {
             let _lock = arm_lock()?;
             // Cancelling a scheduled meeting's arm cancels the schedule too.
             if let Some(id) = read_json::<Armed>("armed.json").and_then(|a| a.meeting).and_then(|m| m.id) {
@@ -1457,24 +1469,10 @@ pub fn stop() -> Result<()> {
     Ok(())
 }
 
-/// Turn a Teams https join link into the `msteams:` scheme so it opens the desktop app
-/// directly instead of a browser tab.
-pub fn desktop_join_url(url: &str) -> String {
-    const HOSTS: &[&str] = &["teams.microsoft.com", "teams.live.com", "teams.cloud.microsoft"];
-    for h in HOSTS {
-        if let Some(rest) = url.strip_prefix(&format!("https://{h}")) {
-            if rest.starts_with('/') {
-                return format!("msteams:{rest}");
-            }
-        }
-    }
-    url.to_string()
-}
-
 /// `echoctl join`: open the meeting in the desktop app and arm recording for it.
 pub fn join(meeting: MeetingContext) -> Result<()> {
     let Some(url) = meeting.join_url.clone() else { bail!("meeting has no join_url") };
-    let url = desktop_join_url(&url);
+    let url = crate::apps::desktop_join_url(&url);
     #[cfg(target_os = "macos")]
     std::process::Command::new("open").arg(&url).status()?;
     #[cfg(windows)]
@@ -1682,6 +1680,35 @@ mod tests {
     }
 
     #[test]
+    fn stop_reaches_a_recording_watcher_whose_heartbeat_is_late() {
+        let (_env, root) = crate::paths::testenv::folders("watch-stop-late");
+        fs::create_dir_all(root.join("home/.echo")).unwrap();
+        let m = MeetingContext { id: Some("next".into()), subject: Some("Next".into()), ..Default::default() };
+        crate::schedule::add(m.clone()).unwrap();
+        arm(m.subject.clone(), Some(m), None, None).unwrap();
+        let state = |pid: u32, late: i64| {
+            let (heartbeat, recording) = (Utc::now() - chrono::Duration::seconds(late), Some("/calls/x".into()));
+            let w = WatchState { pid, heartbeat, app: TargetApp::Teams, in_call: Some(true), armed: true, recording, memo: false };
+            fs::write(file("watch.json"), serde_json::to_vec(&w).unwrap()).unwrap();
+        };
+        // Blocked on a device for 30 s: the request is left for it, and the next meeting stays armed.
+        state(std::process::id(), 30);
+        stop().unwrap();
+        assert!(file("stop.request").exists());
+        assert!(read_json::<Armed>("armed.json").is_some(), "the next meeting's arm is kept");
+        assert!(crate::schedule::is_scheduled("next"));
+        fs::remove_file(file("stop.request")).unwrap();
+        // A watcher that is gone, or silent far too long: nothing records, so Stop disarms as before.
+        for (pid, late) in [(u32::MAX - 1, 30), (std::process::id(), 3600)] {
+            state(pid, late);
+            assert!(recording_watcher().is_none(), "pid {pid}, {late} s late");
+        }
+        stop().unwrap();
+        assert!(!file("stop.request").exists());
+        assert!(read_json::<Armed>("armed.json").is_none());
+    }
+
+    #[test]
     fn a_failed_start_unschedules_its_meeting_and_says_so() {
         let (_env, _root) = crate::paths::testenv::folders("watch-start-failed");
         let start = Utc::now() - chrono::Duration::seconds(30);
@@ -1720,15 +1747,6 @@ mod tests {
         assert_eq!(left_from(&marks[..1]), None);
     }
 
-    #[test]
-    fn teams_links_open_in_desktop_app() {
-        assert_eq!(
-            desktop_join_url("https://teams.microsoft.com/l/meetup-join/19%3ameeting_x%40thread.v2/0?context=%7b%7d"),
-            "msteams:/l/meetup-join/19%3ameeting_x%40thread.v2/0?context=%7b%7d"
-        );
-        assert_eq!(desktop_join_url("https://teams.live.com/meet/123"), "msteams:/meet/123");
-        assert_eq!(desktop_join_url("https://zoom.us/j/1"), "https://zoom.us/j/1");
-    }
 
     #[test]
     fn graph_style_times_parse() {

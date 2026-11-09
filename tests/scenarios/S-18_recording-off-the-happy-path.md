@@ -31,6 +31,7 @@ cases:
   - tests/cases/recording/TC-020_call-with-system-audio-denied.md
   - tests/cases/recording/TC-021_call-with-mic-denied.md
   - tests/cases/recording/TC-022_shared-screen-snapshots.md
+  - tests/cases/recording/TC-025_stop-while-echo-is-busy.md
 ---
 
 # S-18: Recording off the happy path
@@ -112,6 +113,7 @@ prelude" in every case below).
 | 22 | `recording/TC-020_call-with-system-audio-denied.md` | — | **person** — System Audio Recording denied for Echo (permissions/TC-003, S-16) |
 | 23 | `recording/TC-021_call-with-mic-denied.md` | — | **person** — Microphone denied for Echo (permissions/TC-004, S-16) |
 | 24 | `recording/TC-022_shared-screen-snapshots.md` | — | **person** — "Save snapshots of shared screens" on (permissions/TC-007, S-16) |
+| 25 | `recording/TC-025_stop-while-echo-is-busy.md` | — | After stage 11's teardown quit the prelude's app: step 1 starts its own (it freezes it with `kill -STOP`) |
 
 ## Notes
 - **Why five calls, not one.** A stop by hand ends the recording and the rest of that call is never recorded again

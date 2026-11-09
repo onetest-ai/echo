@@ -48,3 +48,32 @@ pub fn test_call_app() -> Option<&'static [&'static str]> {
     #[cfg(not(debug_assertions))]
     None
 }
+
+/// Turn a Teams https join link into the `msteams:` scheme so it opens the desktop app
+/// directly instead of a browser tab.
+pub fn desktop_join_url(url: &str) -> String {
+    const HOSTS: &[&str] = &["teams.microsoft.com", "teams.live.com", "teams.cloud.microsoft"];
+    for h in HOSTS {
+        if let Some(rest) = url.strip_prefix(&format!("https://{h}")) {
+            if rest.starts_with('/') {
+                return format!("msteams:{rest}");
+            }
+        }
+    }
+    url.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn teams_links_open_in_desktop_app() {
+        assert_eq!(
+            desktop_join_url("https://teams.microsoft.com/l/meetup-join/19%3ameeting_x%40thread.v2/0?context=%7b%7d"),
+            "msteams:/l/meetup-join/19%3ameeting_x%40thread.v2/0?context=%7b%7d"
+        );
+        assert_eq!(desktop_join_url("https://teams.live.com/meet/123"), "msteams:/meet/123");
+        assert_eq!(desktop_join_url("https://zoom.us/j/1"), "https://zoom.us/j/1");
+    }
+}

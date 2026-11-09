@@ -44,7 +44,7 @@
   },
   {
    "id": "F-REC-05",
-   "feature": "While recording the pill shows a clock and the title (opens the call); Stop asks \"Stop recording?\" (Stop / Keep recording); Stop ends the recording, not the call, and doesn't record it again",
+   "feature": "While recording the pill shows a clock and the title (opens the call); Stop asks \"Stop recording?\" (Stop / Keep recording); Stop ends the recording, not the call, and doesn't record it again; a Stop while Echo is busy for a moment (a device that hangs) is kept and ends the recording once it is free, never disarming the next meeting",
    "priority": "high",
    "check": "agent",
    "axes": [
