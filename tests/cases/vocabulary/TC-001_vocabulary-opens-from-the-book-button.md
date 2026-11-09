@@ -23,7 +23,7 @@ tags: [vocabulary, panel]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Reload `{{base_url}}/#calls` (a fresh load) and click the book button "Vocabulary" beside the list title | The right panel opens with the tab "Vocabulary" selected |
+| 1 | Reload `{{base_url}}/#calls` (a fresh load) and click the book button "Vocabulary" beside the list title | The load opens the newest call and rewrites the URL to `#call/<its folder>/minutes`; after the click the right panel opens with the tab "Vocabulary" selected |
 | 2 | Read the panel | "Names and terms the transcription should hear right."; the heading "Every call" with "None yet."; a box "Add a term" and a button "Add"; the heading "Learned from calls" with the count `0` and "None yet — the minutes add the names they had to fix." |
 | 3 | Click "Close the panel" | The right panel closes |
 

@@ -30,11 +30,12 @@ tags: [calls, threads]
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | Navigate to `{{base_url}}/#calls` and click "Initech planning" | The header has no thread chip, only the button "+ Thread" |
-| 2 | Click "+ Thread" | A menu lists "Acme rollout" and "Globex pilot" (both without a tick) and "New thread from this call…"; do not choose the last |
+| 2 | Click "+ Thread" | A menu lists the threads as `menuitemcheckbox` items "Acme rollout" and "Globex pilot" (both `aria-checked="false"`, no "✓"), then the item "New thread from this call…"; do not choose the last |
 | 3 | Choose "Globex pilot" | A chip "Globex pilot" appears in the header |
 | 4 | Run `echoctl project show globex-pilot` | Its calls include "Initech planning" with why `pinned` |
-| 5 | Click "+ Thread" and choose "✓ Globex pilot" | The chip is gone |
-| 6 | Run `echoctl project show globex-pilot` again | "Initech planning" is no longer in its calls; `exclusions` lists the call's stamp (the window's pick takes it out by hand) |
+| 5 | Click "+ Thread" | The item now reads "✓ Globex pilot" (`aria-checked="true"`); "Acme rollout" has no tick |
+| 6 | Choose "✓ Globex pilot" | The chip is gone |
+| 7 | Run `echoctl project show globex-pilot` again | "Initech planning" is no longer in its calls; `exclusions` lists the call's stamp (the window's pick takes it out by hand) |
 
 ## Expected Final State
 Initech planning is in no thread again.

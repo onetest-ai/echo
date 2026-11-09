@@ -69,7 +69,7 @@ cases:
 | # | Case | Depends on | Before it |
 |---|------|------------|-----------|
 | 1 | `settings/TC-001_every-section-opens.md` | — | — |
-| 2 | `settings/TC-002_search-settings-filters-names.md` | — | On stage 1's view (Settings, 12 sections in the left list): skip step 1's navigation, check its expected result on one snapshot |
+| 2 | `settings/TC-002_search-settings-filters-names.md` | — | On stage 1's view (Settings open on Health, 12 sections in the left list): instead of step 1's navigation click "General" in the left list, `.set-nav [data-setsec="general"]`: clearing the search returns to the section shown before it, which step 3 expects to be General ("Search settings" is the search box's aria-label, not text to wait for); check step 1's expected result on one snapshot |
 | 3 | `settings/TC-003_appearance-dark-light-system.md` | — | — |
 | 4 | `settings/TC-004_recording-calendar-meetings-manual.md` | — | Skip its teardown (Calendar meetings stays Manual: no later stage reads it) |
 | 5 | `settings/TC-005_recording-other-calls-manual.md` | — | On stage 4's view (`#settings/recording`): skip step 1's navigation, read the row. Skip its teardown |

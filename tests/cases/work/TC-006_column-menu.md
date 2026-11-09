@@ -30,7 +30,7 @@ tags: [work, board, columns]
 |---|--------|----------------|
 | 1 | Navigate to `{{base_url}}/#project/globex-pilot/work` | Five columns; "To do" shows 1 (the card T001) |
 | 2 | Click "+ Column" | A sixth column "New column" appears and its menu opens with the input "Column name", colours, "Cards in it are" select, "Limit" input, "Move left", "Hide", "Delete column" |
-| 3 | Set the name to `Review`, the select "Cards in it are" to `to do`, the "Limit" to `1` (Enter after each) | The header reads "Review" with "0 / 1" |
+| 3 | Set the name to `Review` and press Enter (Enter in the name or the limit closes the menu); open the menu again ("Column options" on "Review"), set the select "Cards in it are" (`[data-col-state]`) to `to do` with `browser_select_option` (the menu stays open), type `1` in "Limit" and press Enter | The header reads "Review" with "0 / 1"; the menu is closed |
 | 4 | Open the menu of "Done". With `browser_evaluate` run `() => { const m = document.querySelector('.bd-col-h .bd-menu'); const on = (t) => { const e = [...m.querySelectorAll('.menu-item')].find((x) => x.textContent.trim() === t); const r = e.getBoundingClientRect(); return document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) === e }; return { hide: on('Hide'), del: on('Delete column') } }`, then click "Hide" | The evaluate returns `hide` and `del` true (the whole menu shows over the short board, #109); after the click the Done column is gone and a button "1 hidden" is shown |
 | 5 | Click "1 hidden" | The column "Done" is back |
 | 6 | Open the menu of "Review" and click "Delete column" | "Review" is gone; five columns remain |
