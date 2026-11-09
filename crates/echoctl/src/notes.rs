@@ -1469,6 +1469,8 @@ fn conclude(r: &mut Run, profile: &crate::ai::Profile, e: &Ended, label: &str, n
         } else {
             "Claude Code isn't signed in. Open Terminal, run claude, type /login, then click Try again.".into()
         }))
+    } else if e.timed_out { // before the model check: a local model's harmless "unrecognized_model" line (#220)
+        ("failed", Some(format!("stopped after {} minutes without finishing", TIMEOUT.as_secs() / 60)))
     } else if model_rejected(e.is_error, &all) {
         ("failed", Some(if profile.kind == Kind::System {
             format!(
@@ -1481,8 +1483,6 @@ fn conclude(r: &mut Run, profile: &crate::ai::Profile, e: &Ended, label: &str, n
                 profile.name, profile.id
             )
         }))
-    } else if e.timed_out {
-        ("failed", Some(format!("stopped after {} minutes without finishing", TIMEOUT.as_secs() / 60)))
     } else if !e.refused.is_empty() {
         ("failed", Some(format!("Claude Code was refused a tool it needed ({}); see the log", e.refused.join(", "))))
     } else if !e.is_error {
@@ -2015,6 +2015,11 @@ mod tests {
             (r.state, r.message.unwrap_or_default())
         };
         assert_eq!(judge(Kind::System, &ended(true, false, "")).0, "done");
+        // Out of time on a local model, whose stderr carries Claude Code's harmless "unrecognized_model": the time
+        // limit, not the model (#220).
+        let slow = Ended { timed_out: true, err_text: "[claude-code:unrecognized_model] {\"model\":\"qwen\"}", ..ended(true, true, "") };
+        let (state, message) = judge(Kind::Local, &Ended { wrote_actions: false, ..slow });
+        assert_eq!((state.as_str(), message.as_str()), ("failed", "stopped after 20 minutes without finishing"));
         // Fresh minutes without this run's action items (an action ticked meanwhile doesn't count).
         let (state, message) = judge(Kind::System, &Ended { wrote_actions: false, ..ended(true, false, "") });
         assert_eq!(state, "failed");
