@@ -16,5 +16,8 @@ Adding a conversation: add it to `conversations.json`, run `render`, commit the 
 least one Ukrainian-only letter (і ї є ґ), or the voice reads them with Russian vowels. Keep calls short (under a
 minute): the clips are committed. `minutes-call` (213 s) is the one exception: it reuses acme-sync's and two-remotes'
 turns three times over (no new clips) so a call passes the minutes gate (3 minutes, 1,500 characters).
+`speakers-echo` (126 s) reuses acme-sync's and two-remotes' turns twice: its `echo` (`{"gain": 0.35, "delay_ms": 40}`)
+makes `build` add the remote track to the mic that much quieter and later, as laptop speakers do, and four of the
+user's lines have a `gap` below 0, starting before the other side's line ends (talking over them).
 `ukrainian-call` and `russian-call` reuse `mixed-languages`' Ukrainian and Russian lines (no new clips): a call has one
 language, and each must come out in its own with en, uk and ru allowed.

@@ -8,9 +8,13 @@
 //! decodes what is left and hands back all segments, and the watcher writes the transcript —
 //! seconds after the call instead of a second pass over the whole recording.
 //!
-//! One step still needs the whole call: whether the user was on speakers (the mic re-recording
-//! the others). If so, the mic track is echo-cancelled and decoded again at the end; on
-//! headphones nothing is redone.
+//! On speakers the mic re-records the others. Once they have talked for a while (`FIND_AFTER`), the worker looks for
+//! that echo in what is recorded so far; found by two looks in a row, it holds for the call, and the stretches of the
+//! mic it explains along their whole length aren't transcribed (`aec::Echo::keep`): the user's own words, a short "yes"
+//! inside the echo or talking over the others, still are. Until it is found every utterance is transcribed, as on
+//! headphones. Found and skipped during the call, and the call's last minutes show no other echo (`TAIL`), nothing is
+//! redone at the end; otherwise, if the whole call shows an echo, the mic track is echo-cancelled and decoded again at
+//! the end, as before.
 
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -23,6 +27,7 @@ use std::time::Duration;
 use anyhow::{anyhow, bail, Result};
 use serde_json::json;
 
+use crate::aec;
 use crate::config::Config;
 use crate::meeting::MeetingContext;
 use crate::models;
@@ -39,6 +44,14 @@ const TICK: Duration = Duration::from_millis(1000);
 /// whisper.cpp threads during a call: keeping up is all it needs (Metal does the work on
 /// macOS), and the call itself needs the machine too.
 const THREADS: usize = 4;
+/// The other side has talked this long before the echo is looked for during the call: 15 s of its loud frames (`aec`'s
+/// talking ones), about 30 s of it talking. It is looked for again after every `FIND_EVERY` more of the call (15 s)
+/// until it is found.
+const FIND_AFTER: usize = 15_000 / 30;
+const FIND_EVERY: usize = 15_000 / 30;
+/// At the end, the echo found is checked against the call's last 3 minutes: a changed one (the volume, another device)
+/// wasn't skipped since, and the mic is decoded again.
+const TAIL: usize = 180_000 / 30;
 /// How long `Live::abandon` waits for the worker to let go of its model.
 const ABANDON_WAIT: Duration = Duration::from_secs(30);
 
@@ -166,6 +179,23 @@ fn data_offset(f: &mut File) -> Result<Option<u64>> {
     Ok(None)
 }
 
+/// Up to `max` samples of a track's WAV (as the writer has it so far) from sample `from`; `data_at` found once.
+fn read_samples(path: &Path, data_at: &mut Option<u64>, from: u64, max: usize) -> Result<Vec<f32>> {
+    let mut f = match File::open(path) {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
+        Err(e) => return Err(e.into()),
+    };
+    if data_at.is_none() {
+        *data_at = data_offset(&mut f)?;
+    }
+    let Some(at) = *data_at else { return Ok(vec![]) };
+    f.seek(SeekFrom::Start(at + from * 2))?;
+    let mut bytes = Vec::with_capacity(max * 2);
+    f.take(max as u64 * 2).read_to_end(&mut bytes)?;
+    Ok(bytes.as_chunks::<2>().0.iter().map(|&b| i16::from_le_bytes(b) as f32 / i16::MAX as f32).collect())
+}
+
 impl TrackReader {
     fn new(path: PathBuf, speaker: &'static str, state: TrackState) -> Self {
         TrackReader { path, speaker, data_at: None, read: 0, base: 0, audio: vec![], caught_up: false, state }
@@ -179,24 +209,126 @@ impl TrackReader {
             self.caught_up = false;
             return Ok(());
         }
-        let mut f = match File::open(&self.path) {
-            Ok(f) => f,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(e) => return Err(e.into()),
-        };
-        if self.data_at.is_none() {
-            self.data_at = data_offset(&mut f)?;
-        }
-        let Some(at) = self.data_at else { return Ok(()) };
-        f.seek(SeekFrom::Start(at + self.read * 2))?;
-        let mut bytes = Vec::with_capacity(room * 2);
-        f.take(room as u64 * 2).read_to_end(&mut bytes)?;
-        let n = bytes.len() / 2;
-        self.audio.extend(bytes.as_chunks::<2>().0.iter().map(|&b| i16::from_le_bytes(b) as f32 / i16::MAX as f32));
+        let samples = read_samples(&self.path, &mut self.data_at, self.read, room)?;
+        let n = samples.len();
+        self.audio.extend(samples);
         self.read += n as u64;
         self.caught_up = n < room;
         Ok(())
     }
+}
+
+/// A track's loudness (`aec::envelope`, whole frames) from the start of the call, read from its WAV apart from the
+/// decoder's buffer: it reaches what is on disk however far behind the decoding is.
+struct Loudness {
+    path: PathBuf,
+    data_at: Option<u64>,
+    read: u64,
+    env: Vec<f32>,
+}
+
+impl Loudness {
+    fn new(path: PathBuf) -> Self {
+        Loudness { path, data_at: None, read: 0, env: vec![] }
+    }
+
+    fn fill(&mut self) -> Result<()> {
+        const CHUNK: usize = aec::ENV * 1000;
+        loop {
+            let s = read_samples(&self.path, &mut self.data_at, self.read, CHUNK)?;
+            let whole = s.len() / aec::ENV * aec::ENV;
+            self.env.extend(aec::envelope(&s[..whole]));
+            self.read += whole as u64;
+            if s.len() < CHUNK {
+                return Ok(());
+            }
+        }
+    }
+}
+
+/// The speakers' echo on the mic, looked for during the call (module doc) and, once found, what of the mic it explains.
+struct EchoWatch {
+    mic: Loudness,
+    remote: Loudness,
+    found: Option<aec::Echo>,
+    /// What the last look found, not yet confirmed: the echo is found when two looks in a row agree (`Echo::same_as`).
+    candidate: Option<aec::Echo>,
+    /// Envelope frames there were at the last look.
+    looked: usize,
+    /// Mic samples not transcribed.
+    skipped: u64,
+}
+
+impl EchoWatch {
+    fn new(dir: &Path) -> Self {
+        EchoWatch { mic: Loudness::new(dir.join("mic.wav")), remote: Loudness::new(dir.join("remote.wav")), found: None, candidate: None, looked: 0, skipped: 0 }
+    }
+
+    /// Read what the tracks have added; not found yet, look for the echo every `FIND_EVERY`.
+    fn update(&mut self) -> Result<()> {
+        self.mic.fill()?;
+        self.remote.fill()?;
+        self.look();
+        Ok(())
+    }
+
+    fn look(&mut self) {
+        let n = self.mic.env.len().min(self.remote.env.len());
+        if self.found.is_none() && n >= self.looked + FIND_EVERY {
+            self.looked = n;
+            let look = aec::find(&self.mic.env[..n], &self.remote.env[..n], FIND_AFTER);
+            match (self.candidate, look) {
+                (Some(c), Some(e)) if e.same_as(&c) => self.found = Some(e),
+                _ => self.candidate = look,
+            }
+            if let Some(e) = &self.found {
+                eprintln!("  echo found {:.0} s into the call: {} ms, gain {:.2}, r {:.2} — the mic's stretches it explains aren't transcribed",
+                    n as f64 * aec::ENV as f64 / RATE as f64, e.delay_ms(), e.gain, e.r);
+            }
+        }
+    }
+
+    /// The parts of the mic's samples `start..end` (on the call's timeline) to transcribe: all of them until the echo
+    /// is found.
+    fn keep(&mut self, start: u64, end: u64) -> Vec<(u64, u64)> {
+        let Some(echo) = self.found else { return vec![(start, end)] };
+        let f = aec::ENV as u64;
+        let (from, to) = ((start / f) as usize, end.div_ceil(f) as usize);
+        let parts: Vec<(u64, u64)> = echo
+            .keep(&self.mic.env, &self.remote.env, from, to)
+            .into_iter()
+            .map(|(a, b)| (if a == from { start } else { a as u64 * f }, if b == to { end } else { b as u64 * f }))
+            .collect();
+        self.skipped += (end - start) - parts.iter().map(|(a, b)| b - a).sum::<u64>();
+        parts
+    }
+
+    /// The call's echo was dealt with while it was transcribed: found, some of the mic skipped, and the call's last
+    /// `TAIL` shows no other echo.
+    fn handled(&self) -> bool {
+        let Some(e) = self.found.filter(|_| self.skipped > 0) else { return false };
+        let n = self.mic.env.len().min(self.remote.env.len());
+        let from = n.saturating_sub(TAIL);
+        match aec::find(&self.mic.env[from..n], &self.remote.env[from..n], 0) {
+            Some(last) if !last.same_as(&e) => {
+                eprintln!("  echo changed during the call: {} ms, gain {:.2} at the end — decoding the mic again", last.delay_ms(), last.gain);
+                false
+            }
+            _ => true,
+        }
+    }
+}
+
+/// The mic is echo-cancelled and decoded again at the end: echo cancellation on, and the echo not dealt with during
+/// the call (`EchoWatch::handled`).
+fn redo_at_stop(watch: Option<&EchoWatch>) -> bool {
+    watch.is_some_and(|w| !w.handled())
+}
+
+/// Where in the buffer (which starts at sample `base` of the call) each part of an utterance is, and its time in
+/// the call (s).
+fn slices(base: u64, parts: &[(u64, u64)]) -> Vec<(f64, std::ops::Range<usize>)> {
+    parts.iter().map(|&(a, b)| (a as f64 / RATE as f64, (a - base) as usize..(b - base) as usize)).collect()
 }
 
 fn run(dir: &Path, cfg: &Config, prompt: Option<String>, remote_name: Option<String>, done: &AtomicBool, quit: &AtomicBool) -> Result<(Vec<Segment>, String)> {
@@ -207,6 +339,7 @@ fn run(dir: &Path, cfg: &Config, prompt: Option<String>, remote_name: Option<Str
         TrackReader::new(dir.join("remote.wav"), "remote", tr.track_state()?),
     ];
     let mut segs = vec![];
+    let mut watch = cfg.echo_cancel.unwrap_or(true).then(|| EchoWatch::new(dir));
     loop {
         // Read before draining: once `done` is seen, what is on disk is the whole track.
         let last = done.load(Ordering::SeqCst);
@@ -218,7 +351,15 @@ fn run(dir: &Path, cfg: &Config, prompt: Option<String>, remote_name: Option<Str
                     bail!("given up: nobody waits for this transcript");
                 }
                 t.fill()?;
-                drain(&tr, t, name, last && t.caught_up, &out, &mut segs)?;
+                // The mic's utterances are judged against the echo with both tracks read at least as far as this one.
+                let echo = match watch.as_mut() {
+                    Some(w) if t.speaker == "me" => {
+                        w.update()?;
+                        Some(w)
+                    }
+                    _ => None,
+                };
+                drain(&tr, t, name, last && t.caught_up, &out, &mut segs, echo)?;
                 if !last || t.caught_up {
                     break;
                 }
@@ -237,10 +378,13 @@ fn run(dir: &Path, cfg: &Config, prompt: Option<String>, remote_name: Option<Str
     if quit.load(Ordering::SeqCst) {
         bail!("given up: nobody waits for this transcript");
     }
-    // On speakers the mic re-records the others: cancel that echo and decode the mic again
-    // (headphones — no echo found — keep what was decoded during the call).
+    // On speakers the mic re-records the others. Skipped during the call: done. Otherwise cancel that echo and decode
+    // the mic again (headphones — no echo found — keep what was decoded during the call).
+    if let Some((w, e)) = watch.as_ref().and_then(|w| Some((w, w.found?))) {
+        eprintln!("  echo: {} ms, gain {:.2}, r {:.2}; skipped {:.1} s of the mic", e.delay_ms(), e.gain, e.r, w.skipped as f64 / RATE as f64);
+    }
     let (mic, remote) = (dir.join("mic.wav"), dir.join("remote.wav"));
-    if cfg.echo_cancel.unwrap_or(true) && mic.exists() && remote.exists() {
+    if redo_at_stop(watch.as_ref()) && mic.exists() && remote.exists() {
         match crate::aec::cancel(&load_16k(&mic)?, &load_16k(&remote)?) {
             Ok(Some((clean, delay))) => {
                 eprintln!("  echo cancellation: on (speaker → mic delay ≈ {delay} ms) — decoding the mic again");
@@ -256,7 +400,8 @@ fn run(dir: &Path, cfg: &Config, prompt: Option<String>, remote_name: Option<Str
 
 /// Decode the finished utterances at the front of the buffer, drop the audio they used, and
 /// append their lines to `live.jsonl`. `flush`: the buffer's end is the end of the track.
-fn drain(tr: &Transcriber, t: &mut TrackReader, name: Option<&str>, flush: bool, out: &Path, segs: &mut Vec<Segment>) -> Result<()> {
+/// `echo`: the mic's; the parts of an utterance it explains aren't decoded.
+fn drain(tr: &Transcriber, t: &mut TrackReader, name: Option<&str>, flush: bool, out: &Path, segs: &mut Vec<Segment>, mut echo: Option<&mut EchoWatch>) -> Result<()> {
     let spans = utterances(&t.audio);
     let mut consumed = 0;
     for &(s, e) in &spans {
@@ -264,13 +409,16 @@ fn drain(tr: &Transcriber, t: &mut TrackReader, name: Option<&str>, flush: bool,
         if !finished {
             break;
         }
-        let (lang, decoded) = tr.utterance(&mut t.state, &t.audio[s..e])?;
-        let offset = (t.base + s as u64) as f64 / RATE as f64;
-        let mut f = OpenOptions::new().create(true).append(true).open(out)?;
-        for p in decoded {
-            let seg = Segment::from_piece(t.speaker, offset, &lang, p, name);
-            writeln!(f, "{}", json!(seg))?;
-            segs.push(seg);
+        let (start, end) = (t.base + s as u64, t.base + e as u64);
+        let parts = echo.as_deref_mut().map_or_else(|| vec![(start, end)], |w| w.keep(start, end));
+        for (offset, part) in slices(t.base, &parts) {
+            let (lang, decoded) = tr.utterance(&mut t.state, &t.audio[part])?;
+            let mut f = OpenOptions::new().create(true).append(true).open(out)?;
+            for p in decoded {
+                let seg = Segment::from_piece(t.speaker, offset, &lang, p, name);
+                writeln!(f, "{}", json!(seg))?;
+                segs.push(seg);
+            }
         }
         consumed = e;
     }
@@ -435,6 +583,156 @@ mod tests {
         assert_eq!(i16::from_le_bytes([bytes[2 * 999], bytes[2 * 999 + 1]]), 999);
         drop(w);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The first run of at least `min` frames where `talks` and not `quiet`, after frame `after`: its samples, with a
+    /// quarter second around it (as the VAD pads an utterance).
+    fn turn(talks: &[f32], quiet: &[f32], after: usize, min: usize) -> (u64, u64) {
+        let (mut k, f) = (after, aec::ENV as u64);
+        loop {
+            let run = (k..talks.len()).take_while(|&i| talks[i] > 0.0 && quiet[i] == 0.0).count();
+            if run >= min {
+                return (k as u64 * f - RATE as u64 / 4, (k + run) as u64 * f + RATE as u64 / 4);
+            }
+            k += run + 1;
+        }
+    }
+
+    #[test]
+    fn the_echo_is_skipped_only_once_found_and_then_not_redone_at_the_end() {
+        use crate::aec::signals::{turn_taking, with_echo};
+        let dir = std::env::temp_dir().join(format!("echo-live-echo-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // Laptop speakers: the mic hears the other side 0.35× 40 ms late.
+        let n = RATE * 150;
+        let (user, remote) = turn_taking(7, n);
+        let mic = with_echo(&user, &remote, 0.35, 640);
+        let spec = hound::WavSpec { channels: 1, sample_rate: RATE as u32, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
+        let (mut wm, mut wr) = (hound::WavWriter::create(dir.join("mic.wav"), spec).unwrap(), hound::WavWriter::create(dir.join("remote.wav"), spec).unwrap());
+        let mut write = |a: usize, b: usize| {
+            for i in a..b {
+                wm.write_sample((mic[i] * i16::MAX as f32) as i16).unwrap();
+                wr.write_sample((remote[i] * i16::MAX as f32) as i16).unwrap();
+            }
+            wm.flush().unwrap();
+            wr.flush().unwrap();
+        };
+        let (eu, er) = (aec::envelope(&user), aec::envelope(&remote));
+        let (early_echo, late_echo, late_user) = (turn(&er, &eu, 100, 33), turn(&er, &eu, 4000, 33), turn(&eu, &er, 4000, 33));
+
+        // 25 s in, the other side has talked under 15 s: no decision yet (though the echo already shows), and every
+        // utterance is transcribed.
+        write(0, RATE * 25);
+        let mut w = EchoWatch::new(&dir);
+        w.update().unwrap();
+        assert!(w.found.is_none() && aec::find(&w.mic.env, &w.remote.env, 0).is_some());
+        assert_eq!(w.keep(early_echo.0, early_echo.1), vec![early_echo], "nothing skipped before the echo is found");
+        assert!(!w.handled(), "not found: the end decides on the whole call, as before");
+
+        // Then every 15 s: one look that finds it is only a candidate, the next that agrees finds it.
+        let mut at = RATE * 25;
+        while at < n {
+            let next = (at + RATE * 15).min(n);
+            write(at, next);
+            let had = w.candidate.is_some();
+            w.update().unwrap();
+            assert!(w.found.is_none() || had, "found on a single look at {} s", next / RATE);
+            at = next;
+        }
+        // The whole call: found, and the echo of a turn of the other side isn't transcribed; the user's own turn is.
+        let e = w.found.expect("the echo is found during the call");
+        assert!((30..=60).contains(&e.delay_ms()), "{e:?}");
+        assert_eq!(w.keep(late_user.0, late_user.1), vec![late_user]);
+        assert!(!w.handled(), "found, but nothing skipped yet: the end still cancels the echo and decodes again");
+        assert_eq!(w.keep(late_echo.0, late_echo.1), vec![]);
+        assert_eq!(w.skipped, late_echo.1 - late_echo.0);
+        assert!(w.handled(), "found and skipped: nothing is decoded again at the end");
+        assert!(!redo_at_stop(Some(&w)) && !redo_at_stop(None));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_echo_that_changed_since_it_was_found_is_cancelled_again_at_the_end() {
+        use crate::aec::signals::{turn_taking, with_echo};
+        let dir = std::env::temp_dir().join(format!("echo-live-echo-change-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // 0.35× for the first 2 minutes, then the volume turned up: 0.7× for the last 4.
+        let n = RATE * 360;
+        let (user, remote) = turn_taking(11, n);
+        let (before, after) = (with_echo(&user, &remote, 0.35, 640), with_echo(&user, &remote, 0.7, 640));
+        let mic: Vec<f32> = (0..n).map(|i| if i < RATE * 120 { before[i] } else { after[i] }).collect();
+        let spec = hound::WavSpec { channels: 1, sample_rate: RATE as u32, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
+        let (mut wm, mut wr) = (hound::WavWriter::create(dir.join("mic.wav"), spec).unwrap(), hound::WavWriter::create(dir.join("remote.wav"), spec).unwrap());
+        let mut w = EchoWatch::new(&dir);
+        for step in (0..n).step_by(RATE * 15) {
+            for i in step..(step + RATE * 15).min(n) {
+                wm.write_sample((mic[i] * i16::MAX as f32) as i16).unwrap();
+                wr.write_sample((remote[i] * i16::MAX as f32) as i16).unwrap();
+            }
+            wm.flush().unwrap();
+            wr.flush().unwrap();
+            w.update().unwrap();
+            if step + RATE * 15 == RATE * 120 {
+                // Before the change: found at 0.35×, and an echo turn skipped.
+                let e = w.found.expect("found in the first 2 minutes");
+                assert!((0.3..0.4).contains(&e.gain), "{e:?}");
+                let (eu, er) = (aec::envelope(&user), aec::envelope(&remote));
+                let echo_turn = turn(&er, &eu, 1000, 33);
+                assert_eq!(w.keep(echo_turn.0, echo_turn.1), vec![]);
+                assert!(w.handled());
+            }
+        }
+        assert!(!w.handled() && redo_at_stop(Some(&w)), "the echo at the end isn't the one found: the mic is decoded again");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn headphones_never_get_an_echo_during_the_call() {
+        // 30 five-minute calls on headphones with a room's noise, the user now and then talking over the other side:
+        // looked at every 15 s, never an echo.
+        use crate::aec::signals::{talk_over, turn_taking, with_noise};
+        for seed in 1..=30u32 {
+            let n = RATE * 300;
+            let (mut user, remote) = turn_taking(seed, n);
+            talk_over(&mut user, &remote, seed + 100);
+            let (em, er) = (aec::envelope(&with_noise(&user, seed)), aec::envelope(&remote));
+            let mut w = EchoWatch::new(Path::new("/nonexistent"));
+            for k in (FIND_EVERY..=em.len()).step_by(FIND_EVERY) {
+                w.mic.env = em[..k].to_vec();
+                w.remote.env = er[..k].to_vec();
+                w.look();
+            }
+            assert_eq!(w.found, None, "seed {seed}: {:?}", w.candidate);
+        }
+    }
+
+    #[test]
+    fn one_look_alone_finds_no_echo() {
+        // A look that sees an echo by chance (#250 review: r 0.38 on headphones) is only a candidate: the next look
+        // (`FIND_EVERY` later) must see the same echo.
+        use crate::aec::signals::{turn_taking, with_echo};
+        let (user, remote) = turn_taking(5, RATE * 120);
+        let (echoed, eu, er) = (aec::envelope(&with_echo(&user, &remote, 0.35, 640)), aec::envelope(&user), aec::envelope(&remote));
+        let mut w = EchoWatch::new(Path::new("/nonexistent"));
+        let mut look = |mic: &[f32], k: usize| {
+            (w.mic.env, w.remote.env) = (mic[..k].to_vec(), er[..k].to_vec());
+            w.look();
+            (w.found, w.candidate)
+        };
+        assert!(matches!(look(&echoed, 2000), (None, Some(_))), "one look: a candidate");
+        assert_eq!(look(&eu, 2500), (None, None), "the next sees no echo: nothing found, the candidate dropped");
+        assert!(matches!(look(&echoed, 3000), (None, Some(_))));
+        assert!(matches!(look(&echoed, 3500), (Some(_), _)), "two looks in a row that agree: found");
+    }
+
+    #[test]
+    fn the_parts_of_an_utterance_are_decoded_from_their_own_place_and_time() {
+        // A buffer starting 10 s into the call; an utterance's two parts kept around a skipped stretch.
+        let base = RATE as u64 * 10;
+        let parts = [(base + 8000, base + 16_000), (base + 40_000, base + 48_000)];
+        assert_eq!(slices(base, &parts), vec![(10.5, 8000..16_000), (12.5, 40_000..48_000)]);
     }
 
     #[test]

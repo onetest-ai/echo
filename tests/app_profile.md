@@ -325,8 +325,8 @@ reads none of it.
 
 - **A call:** `tests/fixtures/call.py start <conversation> [--for S | --hold]` (after `. <dir>/env`) puts the
   conversation's tracks (`tests/fixtures/audio/README.md`: `acme-sync` 36 s, `very-short` 9 s, `long-silence` 36 s,
-  `two-remotes` 34 s, `mixed-languages` 31 s; built once per run into `<dir>/conv/<name>`) at the feed paths and starts
-  the call; it hangs up by itself 1 s after the conversation (as TestCall did), after `--for S` seconds, or with
+  `two-remotes` 34 s, `mixed-languages` 31 s, `speakers-echo` 126 s with a made-up speakers echo; built once per run
+  into `<dir>/conv/<name>`) at the feed paths and starts the call; it hangs up by itself 1 s after the conversation (as TestCall did), after `--for S` seconds, or with
   `--hold` only at `call.py end`. `call.py status` says whether a call is on. A call is as long as the case needs,
   whatever the conversation: hold it, end it, start it again (a drop and rejoin). A new call file reopens the sources
   on the new conversation and its clock, so `call.py end; call.py start <another>` back to back (inside the watcher's
