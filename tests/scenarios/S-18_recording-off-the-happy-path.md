@@ -32,6 +32,7 @@ cases:
   - tests/cases/recording/TC-021_call-with-mic-denied.md
   - tests/cases/recording/TC-022_shared-screen-snapshots.md
   - tests/cases/recording/TC-025_stop-while-echo-is-busy.md
+  - tests/cases/transcription/TC-010_on-speakers-the-echo-is-skipped-and-the-users-words-kept.md
 ---
 
 # S-18: Recording off the happy path
@@ -114,6 +115,7 @@ prelude" in every case below).
 | 23 | `recording/TC-021_call-with-mic-denied.md` | — | **person** — Microphone denied for Echo (permissions/TC-004, S-16) |
 | 24 | `recording/TC-022_shared-screen-snapshots.md` | — | **person** — "Save snapshots of shared screens" on (permissions/TC-007, S-16) |
 | 25 | `recording/TC-025_stop-while-echo-is-busy.md` | — | After stage 11's teardown quit the prelude's app: step 1 starts its own (it freezes it with `kill -STOP`) |
+| 26 | `transcription/TC-010_on-speakers-the-echo-is-skipped-and-the-users-words-kept.md` | — | After stage 25's teardown quit its app: step 1 starts its own. A 126 s call on laptop speakers (a made-up echo), about 2.5 minutes |
 
 ## Notes
 - **Why five calls, not one.** A stop by hand ends the recording and the rest of that call is never recorded again
@@ -128,8 +130,9 @@ prelude" in every case below).
   `privacy/TC-001` (stage 3: one call after both arms); the arm's message and the stop's output from
   `recording/TC-015` to `cli/TC-004` (stage 7, the same recording); `privacy/TC-002` became the live check (`run:
   person`: file sources replace the tap it is about); `recording/TC-023` (#140) is new, person.
-- No stage scores words: transcription quality is S-14's. The app transcribes each call its watcher records (that is
-  the app); the stages look only at what the recording covers.
+- No stage scores words but 26: transcription quality is S-14's. The app transcribes each call its watcher records (that
+  is the app); the stages look only at what the recording covers. Stage 26 scores the call on speakers because what it
+  checks happens only in the app's live transcription (the echo skipped during the call, #238).
 - **person** stages are skipped by an agent run (the lead lists them as skipped (person)): each case's Notes say why.
 - Run 2026-11-08 on the dev Mac (this plan, CLI parts, fresh `small --ai fake` data, one app): prelude 1.1 s, stages
   1–13: 6.0, 5.0, 7.4, 27.5, 24.7, 53.3, 25.9, 20.2, 42.3, 17.8, 97.8, 0.2, 0.1 s (388 s from the prelude's start to
