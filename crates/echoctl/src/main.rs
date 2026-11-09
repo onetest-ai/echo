@@ -24,6 +24,7 @@ mod graph;
 mod grants;
 mod guard;
 mod ledger;
+mod kept_minutes;
 mod livenotes;
 mod links;
 #[cfg(feature = "transcribe")]

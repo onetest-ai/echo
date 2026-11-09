@@ -128,7 +128,7 @@
   },
   {
    "id": "F-MIN-13",
-   "feature": "Write minutes (and Write minutes again) runs Claude Code headless on the call's profile; the minutes and action items appear and a \"Minutes ready\" notification comes",
+   "feature": "Write minutes (and Write minutes again) runs Claude Code headless on the call's profile; the minutes and action items appear and a \"Minutes ready\" notification comes; a run again that doesn't finish puts the previous minutes back (its own in the trash) and says \"The previous minutes are kept\"",
    "priority": "critical",
    "check": "agent",
    "axes": [

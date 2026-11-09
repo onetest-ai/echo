@@ -15,6 +15,7 @@ cases:
   - tests/cases/calls/TC-005_thread-chip-opens-the-thread.md
   - tests/cases/calls/TC-006_tab-stays-from-call-to-call.md
   - tests/cases/calls/TC-008_call-that-cannot-be-opened.md
+  - tests/cases/claude/TC-018_a-run-again-that-fails-keeps-the-previous-minutes.md
 ---
 
 # S-09: A call's housekeeping: list, minutes, kind, thread, tabs and the actions menu
@@ -49,6 +50,7 @@ cases:
 | 9 | `calls/TC-005_thread-chip-opens-the-thread.md` | — | On stage 8's view (Acme weekly sync open after its Teardown): skip step 1; check its result on the snapshot |
 | 10 | `calls/TC-006_tab-stays-from-call-to-call.md` | — | — |
 | 11 | `calls/TC-008_call-that-cannot-be-opened.md` | — | — |
+| 12 | `claude/TC-018_a-run-again-that-fails-keeps-the-previous-minutes.md` | — | CLI only; its own fake `claude` for the stage (its teardown puts the data's back) |
 
 ## Notes
 - The calls are opened in an order that lets each stage go on from the call the stage before left open: the list (1–2), Globex pilot kickoff (3), Acme weekly sync (4–5), Initech planning (5–7), Acme weekly sync (8–9). Each stage skips only the navigation or the click that reaches it; if that call isn't open (an earlier stage failed), run the skipped steps as written.
