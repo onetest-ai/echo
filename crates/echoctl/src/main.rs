@@ -58,6 +58,7 @@ mod recorder;
 mod nemo;
 #[cfg(feature = "transcribe")]
 mod remote;
+mod run_log;
 mod cli;
 mod claude_setup;
 #[cfg(feature = "js")]
