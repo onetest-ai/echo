@@ -46,6 +46,9 @@ pub fn check(p: &Profile, load: bool) -> Check {
                 Ok(_) => {
                     ps = get_ps(p).unwrap_or(ps);
                     n = in_ps(&ps, &m);
+                    if n.is_none() {
+                        c.problems.push(format!("{} loaded {m} but doesn't list it as loaded, so its context couldn't be read", server(p)));
+                    }
                 }
                 Err(why) => c.problems.push(format!("{} has no model {m}, or couldn't load it: {why}", server(p))),
             }
@@ -99,7 +102,8 @@ fn lines(r: &Value) -> Vec<String> {
     ctx.extend(r["unreported"].as_array().into_iter().flatten().map(|m| format!("{}: context not reported by this Ollama (a newer one shows it)", s(m))));
     let notes: Vec<String> = ["warnings", "problems"].iter().flat_map(|k| r[k].as_array().into_iter().flatten().map(s)).collect();
     // not `?` for unknown: doctor's last line asks to fix the ✗/? items
-    let mark = if !notes.is_empty() { "⚠" } else if ctx.is_empty() { "–" } else { "✓" };
+    let known = r["context"].as_object().is_some_and(|c| !c.is_empty()) && r["unreported"].as_array().is_none_or(|u| u.is_empty());
+    let mark = if !notes.is_empty() { "⚠" } else if !known { "–" } else { "✓" };
     let what = match (ctx.is_empty(), notes.is_empty()) {
         (false, _) => ctx.join(", "),
         (true, true) => "context unknown (not an Ollama server, or not answering)".into(),
@@ -337,9 +341,39 @@ mod tests {
         let c = check(&local(&url), true);
         assert_eq!((c.unreported, c.warnings.len(), c.problems.len(), c.context.len()), (vec!["small-model".to_string()], 0, 0, 0));
         assert_eq!(*hits.lock().unwrap(), 1, "listed: no load sent");
-        assert_eq!(lines(&report(&local(&url))), ["✓ Q — small-model: context not reported by this Ollama (a newer one shows it)"], "not \"not an Ollama server\"");
+        assert_eq!(lines(&report(&local(&url))), ["– Q — small-model: context not reported by this Ollama (a newer one shows it)"], "unknown, not ✓, and not \"not an Ollama server\"");
         let none = json!({ "name": "Other", "context": {}, "warnings": [], "problems": [], "unreported": [] });
         assert_eq!(lines(&none), ["– Other — context unknown (not an Ollama server, or not answering)"]);
+    }
+
+    #[test]
+    fn a_load_that_succeeds_but_isnt_listed_is_a_problem_not_a_missing_server() {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://127.0.0.1:{}", l.local_addr().unwrap().port());
+        std::thread::spawn(move || {
+            for s in l.incoming().flatten() {
+                let mut r = BufReader::new(s.try_clone().unwrap());
+                let (mut first, mut len) = (String::new(), 0);
+                r.read_line(&mut first).unwrap();
+                loop {
+                    let mut h = String::new();
+                    r.read_line(&mut h).unwrap();
+                    if h.trim().is_empty() {
+                        break;
+                    }
+                    if let Some(v) = h.to_ascii_lowercase().strip_prefix("content-length:") {
+                        len = v.trim().parse().unwrap_or(0);
+                    }
+                }
+                r.read_exact(&mut vec![0; len]).unwrap();
+                let b = if first.starts_with("GET") { json!({ "models": [] }) } else { json!({ "done": true }) }.to_string();
+                let _ = (&s).write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{b}", b.len()).as_bytes());
+            }
+        });
+        let r = report(&local(&url));
+        assert_eq!(r["problems"].as_array().unwrap().len(), 1, "{r}");
+        assert!(r["problems"][0].as_str().unwrap().contains("loaded small-model but doesn't list it"), "{r}");
+        assert_eq!(lines(&r)[0], "⚠ Q — context unknown", "Ollama answered: not \"not an Ollama server\"");
     }
 
     #[test]

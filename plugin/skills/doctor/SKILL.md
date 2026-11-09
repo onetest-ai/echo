@@ -38,8 +38,10 @@ permission for the user (open the page and explain), and never download a model 
    A local AI profile (a model on Ollama): `echoctl doctor --json` → `ai`; tell the user each of
    its `warnings` (the server gives the model too little context: long calls' minutes miss parts;
    `OLLAMA_CONTEXT_LENGTH` is set on that server, not in Echo) and `problems` (the model isn't
-   there or couldn't load). This loads each local model for up to 2 minutes each: run it once,
-   with a Bash timeout of 5 minutes or more.
+   there or couldn't load); for each model in `unreported` (this Ollama doesn't show the context),
+   suggest updating Ollama, or setting `OLLAMA_CONTEXT_LENGTH` on that server to be safe. This
+   loads each local model for up to 2 minutes: run it once, with a Bash timeout of 2 minutes per
+   local model (minutes and live-notes models count separately) plus one.
 7. Only if the user asks:
    - calendar: `echoctl calendar login` (read-only Microsoft 365; another org needs its own app
      registration → `echoctl config --graph-client-id <id>`);

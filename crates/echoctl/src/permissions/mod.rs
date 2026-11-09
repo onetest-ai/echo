@@ -107,7 +107,9 @@ pub fn doctor(json: bool, request: bool, probe: bool, open: Option<&str>, no_ai:
     if json {
         let mut out = r.clone();
         out["checked_by"] = serde_json::json!(if from_app { "app" } else { "this process" });
-        out["ai"] = local.iter().map(crate::ollama::report).collect();
+        if !(no_ai || request || probe || open.is_some()) {
+            out["ai"] = local.iter().map(crate::ollama::report).collect(); // absent when skipped, not `[]`
+        }
         println!("{}", serde_json::to_string_pretty(&out)?);
         return Ok(());
     }
