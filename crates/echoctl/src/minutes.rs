@@ -810,7 +810,24 @@ fn esc(s: &str) -> String {
 /// Draws the page's ```mermaid blocks. `strict`, no HTML labels (and a diagram may not change that:
 /// `secure`, plus `diagram_source`) — but a diagram's `click … href` still links, so PAGE_JS lets
 /// links and windows go to https: only, and the CSP lets no form submit.
-const MERMAID_INIT: &str = "mermaid.initialize({startOnLoad: true, securityLevel: 'strict', secure: ['secure', 'securityLevel', 'startOnLoad', 'maxTextSize', 'suppressErrorRendering', 'maxEdges', 'htmlLabels', 'flowchart'], theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default', htmlLabels: false, flowchart: {htmlLabels: false}})";
+const MERMAID_INIT: &str = "mermaid.initialize({startOnLoad: false, suppressErrorRendering: true, securityLevel: 'strict', secure: ['secure', 'securityLevel', 'startOnLoad', 'maxTextSize', 'suppressErrorRendering', 'maxEdges', 'htmlLabels', 'flowchart'], theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default', htmlLabels: false, flowchart: {htmlLabels: false}});
+(function () {
+  var pres = [].slice.call(document.querySelectorAll('pre.mermaid'));
+  var srcs = pres.map(function (p) { return p.textContent; });
+  mermaid.run({ nodes: pres, suppressErrors: true }).then(function () {
+    pres.forEach(function (p, i) {
+      if (p.querySelector('svg')) return;
+      mermaid.parse(srcs[i]).then(function () {}, function (e) {
+        var msg = String((e && e.message) || e).split('\\n').slice(0, 4).join('\\n');
+        var note = document.createElement('div'); note.className = 'diagram-err';
+        note.textContent = 'This diagram couldn\\u2019t be drawn: ' + msg.split('\\n')[0].replace(/:\\s*$/, '');
+        var code = document.createElement('code'); code.textContent = srcs[i];
+        p.textContent = ''; p.className = 'diagram-src'; p.appendChild(note); p.appendChild(code);
+        document.dispatchEvent(new CustomEvent('echo-diagram', { detail: { index: i, error: msg } }));
+      });
+    });
+  });
+})();";
 
 /// The page's own behaviour: links and windows only to https: (the notes' links already are; a
 /// diagram's could be file: or an app's scheme) — clicks and window.open refused, and any other
@@ -856,6 +873,8 @@ const PAGE_JS: &str = "(function () {
 const EMBED_JS: &str = "(function () {
   document.documentElement.className += ' embedded';
   var post = function (m) { try { window.parent.postMessage(m, '*'); } catch (e) {} };
+  // A diagram mermaid couldn't parse (MERMAID_INIT): the window has it repaired (`diagrams::repair`).
+  document.addEventListener('echo-diagram', function (e) { post({ echo: 'diagram', index: e.detail.index, error: e.detail.error }); });
   var XLINK = 'http://www.w3.org/1999/xlink';
   document.addEventListener('click', function (e) {
     var el = e.target && e.target.closest ? e.target : null;
@@ -979,6 +998,8 @@ figure img { display: block; width: 100%; height: auto; cursor: zoom-in; }
 figcaption { background: var(--soft); color: var(--fg); font-size: 13px; padding: 8px 12px; border-top: 1px solid var(--line); }
 figure.diagram { background: var(--bg); padding: 14px; text-align: center; }
 figure.diagram pre.mermaid { background: none; margin: 0; }
+figure.diagram pre.diagram-src { text-align: left; margin: 0; white-space: pre-wrap; font-size: 12px; }
+figure.diagram .diagram-err { font-family: inherit; color: var(--muted, #888); margin-bottom: 6px; white-space: normal; }
 .figref { font-size: 12px; color: var(--muted); }
 #lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.88); display: none; align-items: center;
   justify-content: center; z-index: 10; cursor: zoom-out; padding: 16px; }

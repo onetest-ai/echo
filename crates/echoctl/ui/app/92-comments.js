@@ -94,6 +94,8 @@ window.addEventListener('message', (e) => {
   }
   else if (d.echo === 'open' && typeof d.url === 'string' && /^https:\/\//i.test(d.url)) send({ cmd: 'open_url', url: d.url })
   else if (d.echo === 'link' && typeof d.link === 'string' && /^echo:\/\//i.test(d.link)) window.echo.openLink(d.link)
+  // A diagram mermaid couldn't parse: the app has the call's profile repair that block (`diagrams::repair`, once).
+  else if (d.echo === 'diagram' && Number.isInteger(d.index) && d.index >= 0 && typeof d.error === 'string') send({ cmd: 'repair_diagram', call: S.selected, index: d.index, error: d.error.slice(0, 600) })
   // Words selected in the minutes: what "this" means to Claude (`viewState`).
   else if (d.echo === 'sel' && typeof d.text === 'string') { frameSel = d.text.slice(0, 400); reportView() }
 })

@@ -327,6 +327,18 @@ pub(super) fn act(v: &Value) -> bool {
             crate::notes::start_in_background(d);
             true
         }
+        // A minutes diagram mermaid couldn't parse: repaired on the call's own profile, off the UI thread; the page
+        // draws it again when `notes.md` changes.
+        "repair_diagram" => {
+            let (Some(d), Some(index)) = (call, v["index"].as_u64()) else { return false };
+            let error = v["error"].as_str().unwrap_or("").to_string();
+            std::thread::spawn(move || {
+                if let Err(e) = crate::diagrams::repair(&d, index as usize, &error) {
+                    eprintln!("{}: diagram {} not repaired: {e:#}", d.display(), index + 1);
+                }
+            });
+            true
+        }
         // The call's language, changed by hand (`call_language::change`): after the call, transcribed again here.
         "set_language" => {
             let (Some(d), Some(code)) = (call, v["language"].as_str().filter(|c| !c.is_empty())) else { return false };

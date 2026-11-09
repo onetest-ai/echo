@@ -21,6 +21,7 @@ cases:
   - tests/cases/claude/TC-011_signed-out.md
   - tests/cases/claude/TC-014_record-from-chat.md
   - tests/cases/privacy/TC-007_no-send-without-yes.md
+  - tests/cases/claude/TC-021_a-broken-diagram-in-the-minutes-is-repaired-on-the-calls-profile.md
 ---
 
 # S-19: Claude Code and the minutes
@@ -81,6 +82,7 @@ Done once, before stage 1, timed as the stage `prelude`. Every Bash call starts 
 | 11 | `claude/TC-011_signed-out.md` | — | **person** |
 | 12 | `claude/TC-014_record-from-chat.md` | — | **person** |
 | 13 | `privacy/TC-007_no-send-without-yes.md` | — | **person** |
+| 14 | `claude/TC-021_a-broken-diagram-in-the-minutes-is-repaired-on-the-calls-profile.md` | — | Its own served window on fake-AI data (its preconditions) |
 
 ## Notes
 - **Four model runs, one per condition that truly differs:** Write now on a call due for automatic minutes (A), Write minutes on a call the gate skipped and a session held (B), Write minutes on a call that ended while automatic minutes were off (C), and the automatic catch-up after a quit (D). Every check that can read a run reads one of those: the user's notes (stage 2) are in run A's call, the session's claim (stage 3) is refused during run A and taken over by run B, the two folders (stage 4) are runs A and B, the model (stage 5) is run B's. Stage 5's wrong model fails before any model time. Before 2026-11-08 the scenario started six runs: stage 2 wrote its own call's minutes and stage 3 its own (Initech planning).

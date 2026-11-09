@@ -34,6 +34,8 @@ mod links;
 #[cfg(feature = "transcribe")]
 mod live;
 mod meeting;
+#[cfg(feature = "tray")]
+mod diagrams;
 mod minutes;
 mod notes;
 mod ollama;

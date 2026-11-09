@@ -206,6 +206,13 @@
    "axes": [
     "call.status"
    ]
+  },
+  {
+   "id": "F-MIN-22",
+   "feature": "A minutes diagram mermaid can't parse is repaired on the call's own AI profile (that diagram and its error only, once) and drawn; one that still fails shows its source with \"This diagram couldn't be drawn: <error>\", never mermaid's \"Syntax error\" bomb",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
   }
  ]
 }
