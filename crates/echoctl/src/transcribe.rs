@@ -1458,6 +1458,7 @@ mod tests {
         assert!(!flash_attention(true, false), "a GPU elsewhere (Windows, an Intel Mac)");
         assert!(!flash_attention(false, false));
         assert!(!context_params(false).flash_attn);
+        assert_eq!(context_params(true).flash_attn, cfg!(all(target_os = "macos", target_arch = "aarch64")));
         assert!(context_params(true).use_gpu);
     }
 

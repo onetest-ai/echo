@@ -406,14 +406,21 @@ pub fn use_model(name: &str) -> Result<()> {
     cfg.model = Some(m.name.to_string());
     cfg.save()?;
     println!("active model: {}", m.name);
-    let helper = find(HELPER_MODEL)?;
-    if needs_helper(m) && !model_path(helper).exists() {
-        eprintln!(
-            "{} detects the language itself, less reliably — `echoctl model download {}` adds the helper that detects it",
-            m.name, helper.name
-        );
+    if let Some(note) = missing_helper_note(m) {
+        eprintln!("{note}");
     }
     Ok(())
+}
+
+/// For a model the helper detects the language for, while the helper isn't downloaded.
+fn missing_helper_note(m: &Model) -> Option<String> {
+    let helper = find(HELPER_MODEL).ok()?;
+    (needs_helper(m) && !model_path(helper).exists()).then(|| {
+        format!(
+            "{} detects the language itself, less reliably — `echoctl model download {}` adds the helper that detects it",
+            m.name, helper.name
+        )
+    })
 }
 
 /// Turbo q5_0 also detects the language when the active model isn't turbo (large-v3, small).
@@ -490,6 +497,21 @@ pub fn active_model_path() -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn model_use_notes_a_missing_helper_only_for_a_model_that_needs_it() {
+        let (_env, _) = crate::paths::testenv::folders("models-helper-note");
+        let note = |n: &str| missing_helper_note(find(n).unwrap());
+        for n in ["large-v3-q5_0", "small-q8_0"] {
+            assert!(note(n).is_some_and(|t| t.contains(HELPER_MODEL)), "{n}");
+        }
+        for n in ["large-v3-turbo-q8_0", HELPER_MODEL, "nemotron-3.5-0.6b"] {
+            assert_eq!(note(n), None, "{n}");
+        }
+        fs::create_dir_all(paths::models_dir()).unwrap();
+        fs::write(model_path(find(HELPER_MODEL).unwrap()), b"x").unwrap();
+        assert_eq!(note("large-v3-q5_0"), None, "the helper is downloaded");
+    }
 
     #[test]
     fn the_helper_is_used_only_beside_a_whisper_model_other_than_turbo() {
