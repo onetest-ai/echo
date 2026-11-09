@@ -17,7 +17,7 @@
   },
   {
    "id": "F-LIVE-02",
-   "feature": "My notes' live box shows the call's model, the state (waiting, updating, updated N ago, failed, busy, signing in, paused, ended) and usage in one muted line under Now, and what to do about a sign-in or settings problem; its ⋯ menu holds the model for the call, Pause / Resume and Ask Claude about this call",
+   "feature": "My notes' live box shows the call's model, the state (waiting, updating, updated N ago, failed, busy, signing in, paused, local, ended) and usage in one muted line under Now, and what to do about a sign-in or settings problem; its ⋯ menu holds the model for the call, Pause / Resume and Ask Claude about this call",
    "priority": "medium",
    "check": "person",
    "axes": [
@@ -63,7 +63,7 @@
   },
   {
    "id": "F-LIVE-07",
-   "feature": "While a call records, live notes don't run on a profile whose model is on this computer (it would take the GPU from the call); the box says why, and Settings names such a default profile. Claude and model servers on other computers still summarise",
+   "feature": "While a call records, live notes don't run on a profile whose model is on this computer (it would take the GPU from the call): `live show` says `local` from the start, nothing is sent, and Settings → AI says so next to \"Live notes during calls\" when the default profile is such a one. Claude and model servers on other computers still summarise",
    "priority": "high",
    "check": "agent",
    "axes": [

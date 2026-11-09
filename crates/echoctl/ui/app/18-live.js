@@ -15,7 +15,7 @@ const LIVE_STATE = {
   busy: 'Waiting for the model to finish another job',
   signing_in: 'Waiting for the sign-in',
   paused: 'Paused',
-  local: 'Off during the call',
+  local: 'Off: the model is on this computer',
   ended: 'The call ended',
 }
 
@@ -94,7 +94,7 @@ function liveBox(c) {
     : st.state === 'signing_in' ? 'No live notes until the sign-in is done.'
     : st.state === 'failed' ? 'No live notes yet: the last update failed.'
     : st.state === 'busy' ? 'No live notes yet: the model is finishing another job.'
-    : st.state === 'local' ? "No live notes during the call: this call's model runs on this computer and would slow the call down. Pick Claude or a model server on another computer for live notes."
+    : st.state === 'local' ? "No live notes: this recording's model runs on this computer, where it would slow your call down. Pick Claude or a model server on another computer for live notes."
     : 'The first live notes appear after about 90 seconds of conversation.'
   const now = n && n.now ? `<p class="nl-now">${esc(n.now)}</p>` : why ? `<p class="nl-now nl-why">${esc(why)}</p>` : ''
   const model = ai().profiles.length > 1
