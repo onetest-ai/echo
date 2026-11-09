@@ -82,9 +82,10 @@
 }
 .pchip { height: 24px; padding: 0 10px; border-radius: 12px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--text-2); font-size: 12px; cursor: default; }
 @media (prefers-reduced-motion: no-preference) {
-  .pill.rec .dot { animation: rec-pulse 1.6s ease-in-out infinite; }
+  .pill.rec .dot { animation: rec-pulse 1.6s ease-in-out infinite; will-change: opacity; }
 }
-@keyframes rec-pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--recording) 10%, transparent); } }
+/* Opacity only: the compositor runs it, so the window isn't repainted 60 times a second while a call records. */
+@keyframes rec-pulse { 50% { opacity: 0.45; } }
 
 .actbar { grid-area: act; background: var(--sidebar); border-right: 1px solid var(--line); min-height: 0; position: relative; z-index: 4; }
 /* Folded (the default): icons only, each one's name and keys in a hint beside it. */

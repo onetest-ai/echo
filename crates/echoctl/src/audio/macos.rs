@@ -127,7 +127,7 @@ unsafe fn get_string(obj: AudioObjectID, selector: AudioObjectPropertySelector) 
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AudioProcess {
     pub object_id: AudioObjectID,
     pub pid: i32,
@@ -154,11 +154,61 @@ pub fn audio_processes() -> Result<Vec<AudioProcess>> {
     }
 }
 
+/// Each process object's pid and bundle id, which don't change while it is listed: asked once, not on every check.
+static IDENTITY: std::sync::Mutex<Option<std::collections::HashMap<AudioObjectID, (i32, String)>>> = std::sync::Mutex::new(None);
+
+/// The last answer of `app_processes`, shared by its callers for `FRESH`.
+static LAST: std::sync::Mutex<Option<(Instant, TargetApp, Vec<AudioProcess>)>> = std::sync::Mutex::new(None);
+/// How old an answer may be. Call detection, the tap and the mic each ask several times a second; each request is
+/// work in coreaudiod, on the audio path the call app uses too (measured: ~0.55% of coreaudiod's CPU per check a second).
+const FRESH: Duration = Duration::from_millis(750);
+
+/// The app's audio processes: one answer every `FRESH` at most, for all callers. A check lists the process objects
+/// (one request) and asks whether they run input or output only of the app's own, not of every process on the Mac.
 pub fn app_processes(app: TargetApp) -> Result<Vec<AudioProcess>> {
+    shared(&LAST, app, Instant::now(), query_app_processes)
+}
+
+/// `last`'s answer for `app` while it is younger than `FRESH`, else a new one from `query`, kept for the next caller.
+fn shared<T: Clone>(last: &std::sync::Mutex<Option<(Instant, TargetApp, T)>>, app: TargetApp, now: Instant, query: impl FnOnce(TargetApp) -> Result<T>) -> Result<T> {
+    let mut last = last.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((at, a, v)) = last.as_ref() {
+        if *a == app && now.saturating_duration_since(*at) < FRESH {
+            return Ok(v.clone());
+        }
+    }
+    let v = query(app)?;
+    *last = Some((now, app, v.clone()));
+    Ok(v)
+}
+
+fn query_app_processes(app: TargetApp) -> Result<Vec<AudioProcess>> {
     let prefixes = app.mac_bundle_prefixes();
-    Ok(audio_processes()?
+    let ids: Vec<AudioObjectID> = unsafe { get_vec(kAudioObjectSystemObject as AudioObjectID, kAudioHardwarePropertyProcessObjectList)? };
+    let mut known = IDENTITY.lock().unwrap_or_else(|e| e.into_inner());
+    let known = known.get_or_insert_with(Default::default);
+    known.retain(|id, _| ids.contains(id));
+    Ok(ids
         .into_iter()
-        .filter(|p| prefixes.iter().any(|pre| p.bundle_id.starts_with(pre)))
+        .filter_map(|id| {
+            let (pid, bundle_id) = match known.get(&id) {
+                Some(k) => k.clone(),
+                None => {
+                    let read = unsafe { (get::<i32>(id, kAudioProcessPropertyPID).ok(), get_string(id, kAudioProcessPropertyBundleID).ok()) };
+                    let k = (read.0.unwrap_or(-1), read.1.clone().unwrap_or_default());
+                    // Only what was read: an object asked while it is being created is asked again next time.
+                    if let (Some(_), Some(b)) = &read { if !b.is_empty() { known.insert(id, k.clone()); } }
+                    k
+                }
+            };
+            prefixes.iter().any(|pre| bundle_id.starts_with(pre)).then(|| AudioProcess {
+                object_id: id,
+                pid,
+                bundle_id,
+                running_input: unsafe { get::<u32>(id, kAudioProcessPropertyIsRunningInput) }.unwrap_or(0) != 0,
+                running_output: unsafe { get::<u32>(id, kAudioProcessPropertyIsRunningOutput) }.unwrap_or(0) != 0,
+            })
+        })
         .collect())
 }
 
@@ -480,5 +530,26 @@ impl Drop for TapStream {
                 drop(Box::from_raw(self.ctx));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+
+    #[test]
+    fn callers_share_one_answer_about_the_app_for_a_moment() {
+        let last = std::sync::Mutex::new(None);
+        let asked = Cell::new(0);
+        let query = |_: TargetApp| { asked.set(asked.get() + 1); Ok(asked.get()) };
+        let t0 = Instant::now();
+        assert_eq!(shared(&last, TargetApp::Teams, t0, query).unwrap(), 1);
+        // Call detection, the tap and the mic asking within the moment: coreaudiod is asked once.
+        for ms in [100, 400, 700] {
+            assert_eq!(shared(&last, TargetApp::Teams, t0 + Duration::from_millis(ms), query).unwrap(), 1);
+        }
+        assert_eq!(shared(&last, TargetApp::Teams, t0 + FRESH, query).unwrap(), 2, "asked again once it is older");
+        assert_eq!(asked.get(), 2);
     }
 }
