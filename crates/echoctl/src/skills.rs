@@ -206,12 +206,19 @@ pub fn remove(id: &str) -> Result<()> {
     anyhow::ensure!(s["kind"] != "builtin", "{id} is Echo's own: nothing to take away");
     let bin = paths::state_dir().join("trash").join("skills");
     fs::create_dir_all(&bin)?;
-    fs::rename(dir().join(id), bin.join(format!("{id}-{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"))))?;
+    fs::rename(dir().join(id), trash_path(&bin, id, chrono::Utc::now()))?;
     // A new skill of the same name later starts on.
     crate::calls::update_state(&off_file(), |offs: &mut Vec<String>| {
         offs.retain(|o| o != id);
         Ok(())
     })
+}
+
+/// Where a skill taken away goes in the trash `bin`: `<id>-<time>`, or `<id>-<time>-2`, `-3`… when that is taken (one
+/// made again and taken away again within the same millisecond).
+fn trash_path(bin: &Path, id: &str, now: chrono::DateTime<chrono::Utc>) -> PathBuf {
+    let base = format!("{id}-{}", now.format("%Y%m%d%H%M%S%3f"));
+    (1..).map(|n| bin.join(if n == 1 { base.clone() } else { format!("{base}-{n}") })).find(|p| !p.exists()).unwrap_or_else(|| bin.join(base))
 }
 
 /// Switch a skill on or off: off, it stays out of the Claude panel's session.
@@ -332,6 +339,22 @@ fn build_plugin(root: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_skill_taken_away_twice_in_the_same_millisecond_keeps_both_in_the_trash() {
+        // Made again and taken away again at once (#251's third flaky test): the second move must not hit the first's
+        // name, a folder already there.
+        let bin = std::env::temp_dir().join(format!("echo-skills-trash-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&bin);
+        fs::create_dir_all(&bin).unwrap();
+        let now = chrono::Utc::now();
+        let first = trash_path(&bin, "status-report", now);
+        fs::create_dir_all(first.join("scripts")).unwrap();
+        let second = trash_path(&bin, "status-report", now);
+        assert_ne!(first, second);
+        assert!(!second.exists() && second.file_name().unwrap().to_string_lossy().starts_with("status-report-"));
+        let _ = fs::remove_dir_all(&bin);
+    }
     use super::*;
 
     #[test]
