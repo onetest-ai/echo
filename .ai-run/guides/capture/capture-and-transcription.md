@@ -70,7 +70,8 @@
 ### Rules
 - R1. The live notes' `cursor` advances only when a summary is saved; `livenotes::lines` reads only complete lines of `live.jsonl`. Evidence: `livenotes::lines`
 - R2. A model's live-notes reply becomes a draft only through `parse_notes`. Evidence: `livenotes::parse_notes`
-- R3. A short model job runs through `complete_claude_with` (no tools, no MCP, no session persistence, no memory) with a deadline that stops the child's group. Evidence: `livenotes::complete_claude_with`
+- R3. A short model job runs through `complete_claude_with` (no tools, no MCP, no session persistence, no memory) with a deadline that stops the child's group. Evidence: `claude_session::complete_claude_with`
+- R5. Live notes on a Claude profile run in one Claude Code session per recording, allowed only the two tools of the call-bound server (`wait_for_new_lines`, `update_live_notes`); the session's text is never read, and it is stopped once the recording ends. Evidence: `livenotes::agent::ensure`
 - R4. A summary is re-checked as current (`summary_current`, `enabled()`) after the model answers and before it is saved. Evidence: `livenotes::run_summary`
 
 ### Read first
