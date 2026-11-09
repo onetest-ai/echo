@@ -605,7 +605,7 @@ mod tests {
         assert_eq!(w.keep(late_echo.0, late_echo.1), vec![]);
         assert_eq!(w.skipped, late_echo.1 - late_echo.0);
         assert!(w.handled(), "found and skipped: nothing is decoded again at the end");
-        let _ =std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
