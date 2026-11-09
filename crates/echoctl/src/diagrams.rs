@@ -7,7 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{bail, Result};
 use sha2::{Digest, Sha256};
 
 const SYSTEM: &str = "You fix one Mermaid diagram that Mermaid can't parse. You get its source and Mermaid's parse \
@@ -29,25 +29,15 @@ fn first_try(dir: &Path, src: &str) -> bool {
     g.get_or_insert_with(HashSet::new).insert((dir.to_path_buf(), hash(src)))
 }
 
-/// The `index`-th ```mermaid block of `md` (0-based, in the order the page draws them): its lines' range (inside the
-/// fences) and its source.
-fn block(md: &str, index: usize) -> Option<(usize, usize, String)> {
-    let lines: Vec<&str> = md.lines().collect();
-    let mut n = 0;
-    let mut i = 0;
-    while i < lines.len() {
-        if lines[i].trim_start().strip_prefix("```").is_some_and(|l| l.trim() == "mermaid") {
-            let start = i + 1;
-            let end = (start..lines.len()).find(|&k| lines[k].trim() == "```")?;
-            if n == index {
-                return Some((start, end, lines[start..end].join("\n")));
-            }
-            n += 1;
-            i = end;
-        }
-        i += 1;
-    }
-    None
+/// One write at a time: two repairs of one call's minutes never drop each other's.
+static WRITING: Mutex<()> = Mutex::new(());
+
+/// The `index`-th diagram of `md`, numbered as the page draws them (`minutes::mermaid_blocks`): its source's byte
+/// range and text. None: no such diagram, or one that isn't one piece of the file (inside a quote).
+fn block(md: &str, index: usize) -> Option<(std::ops::Range<usize>, String)> {
+    let b = crate::minutes::mermaid_blocks(md).into_iter().nth(index).filter(|b| b.whole)?;
+    let src = md[b.range.clone()].to_string();
+    Some((b.range, src))
 }
 
 /// The model's answer as a diagram's source: a fence it added anyway taken off; no directive or front matter.
@@ -65,30 +55,28 @@ fn answer_source(answer: &str) -> Result<String> {
 /// nothing done (tried already, a minutes run is writing them, the block is gone or changed).
 pub fn repair(dir: &Path, index: usize, error: &str) -> Result<bool> {
     let path = dir.join("notes.md");
-    let Some((_, _, src)) = block(&fs::read_to_string(&path)?, index) else { return Ok(false) };
-    if crate::notes::status(dir).is_some_and(|r| crate::notes::pending(&r)) || !first_try(dir, &src) {
+    let run_on = || crate::notes::status(dir).is_some_and(|r| crate::notes::pending(&r));
+    let Some((_, src)) = block(&fs::read_to_string(&path)?, index) else { return Ok(false) };
+    if run_on() || !first_try(dir, &src) {
         return Ok(false);
     }
     let error: String = error.chars().take(600).collect();
     let ready = crate::ai::for_call(dir)?;
-    let user = format!("Mermaid's error:\n{error}\n\nThe diagram:\n{src}");
+    let user = format!("Mermaid's error:\n{error}\n\nThe diagram:\n{}", src.trim_end());
     let fixed = answer_source(&crate::livenotes::complete_text(ready.profile(), SYSTEM, &user, 2000)?)?;
     first_try(dir, &fixed); // a repair that fails again isn't repaired again
-    // The minutes as they are now: the block replaced only if it is still the one that failed.
+    // The minutes as they are now: the block replaced only if it is still the one that failed, and no run writes them.
+    let _one = WRITING.lock().unwrap_or_else(|e| e.into_inner());
     let md = fs::read_to_string(&path)?;
-    let (start, end, now) = block(&md, index).ok_or_else(|| anyhow!("the diagram is gone"))?;
-    if now != src {
-        return Ok(false);
+    match block(&md, index) {
+        Some((range, now)) if now == src && !run_on() => {
+            let out = format!("{}{fixed}\n{}", &md[..range.start], &md[range.end..]);
+            crate::paths::write_atomic(&path, out.as_bytes())?;
+            eprintln!("{}: diagram {} repaired", dir.display(), index + 1);
+            Ok(true)
+        }
+        _ => Ok(false),
     }
-    let mut lines: Vec<&str> = md.lines().collect();
-    lines.splice(start..end, fixed.lines());
-    let mut out = lines.join("\n");
-    if md.ends_with('\n') {
-        out.push('\n');
-    }
-    crate::paths::write_atomic(&path, out.as_bytes())?;
-    eprintln!("{}: diagram {} repaired", dir.display(), index + 1);
-    Ok(true)
 }
 
 #[cfg(test)]
@@ -99,10 +87,18 @@ mod tests {
 
     #[test]
     fn blocks_are_found_in_the_order_the_page_draws_them() {
-        assert_eq!(block(MD, 0).unwrap().2, "flowchart TD\n  A[Budget (Q3)] --> B");
-        assert_eq!(block(MD, 1).unwrap().2, "sequenceDiagram\n  A->>B: Hi");
+        assert_eq!(block(MD, 0).unwrap().1, "flowchart TD\n  A[Budget (Q3)] --> B\n");
+        assert_eq!(block(MD, 1).unwrap().1, "sequenceDiagram\n  A->>B: Hi\n");
         assert!(block(MD, 2).is_none());
         assert!(block("```python\nx\n```\n", 0).is_none());
+        // As the page counts them: any case, attributes, ~~~ and longer fences; none inside another block.
+        let odd = "```Mermaid\nA\n```\n\n~~~mermaid {t}\nB\n~~~\n\n````markdown\n```mermaid\nnot one\n```\n````\n\n````mermaid\nC\n````\n";
+        let srcs: Vec<String> = (0..4).filter_map(|i| block(odd, i).map(|b| b.1)).collect();
+        assert_eq!(srcs, ["A\n", "B\n", "C\n"]);
+        // In a quote its lines carry `>`: counted (the page draws it) but never rewritten.
+        let quoted = "> ```mermaid\n> flowchart TD\n>   A --> B\n> ```\n\n```mermaid\nD\n```\n";
+        assert!(block(quoted, 0).is_none());
+        assert_eq!(block(quoted, 1).unwrap().1, "D\n");
     }
 
     #[test]
