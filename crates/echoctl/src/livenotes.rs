@@ -847,8 +847,8 @@ pub fn recording_started(dir: &Path) {
 /// The recording of `dir` ended: no more summaries (one running may finish; questions still work).
 pub fn recording_stopped(dir: &Path) {
     let stamp = track(dir);
-    agent::finish(&stamp);
     let had = with(|s| s.calls.get_mut(&stamp).map(|c| std::mem::replace(&mut c.recording, false)).unwrap_or(false));
+    agent::finish(&stamp); // after: a session starting meanwhile sees the recording over and stops
     if had && enabled().unwrap_or(false) {
         set_state(&stamp, "ended", None);
     }
@@ -1090,12 +1090,12 @@ enum Job {
 
 fn worker() {
     loop {
-        if !enabled().unwrap_or(true) {
-            agent::stop(None); // live notes off: no call's text goes on to a model
-        }
         let job = {
             let mut g = SHARED.lock().unwrap_or_else(|e| e.into_inner());
             loop {
+                if !enabled().unwrap_or(true) {
+                    agent::stop(None); // live notes off: no call's text goes on to a model (checked every 2 s)
+                }
                 let s = g.get_or_insert_with(Shared::default);
                 if s.shutdown {
                     return;
