@@ -156,6 +156,9 @@ impl Echo {
     /// tail); those are kept with `PAD` around them. A stretch between them is dropped only when it is the echo
     /// (`is_echo`); a short or silent one is kept. When the envelopes don't reach `to` yet: all of it (in doubt,
     /// transcribe).
+    ///
+    /// Loudness can't tell apart a sound the echo hides: words 6 dB or more below the echo, or very short sounds (under
+    /// about 150 ms) at its level, can be dropped with it.
     pub fn keep(&self, em: &[f32], er: &[f32], from: usize, to: usize) -> Vec<(usize, usize)> {
         if from >= to || to > em.len() || er.len() + self.lag <= to {
             return vec![(from, to)];
