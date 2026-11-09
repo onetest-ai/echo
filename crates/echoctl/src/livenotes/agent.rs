@@ -64,10 +64,14 @@ struct Served {
     at: Option<Instant>,
 }
 
-/// The call's recording is over (its `meta.json` has its end).
+/// The call's recording is over (its `meta.json` has its end), or the app that started the session is gone.
 fn ended(dir: &Path) -> bool {
-    fs::read(dir.join("meta.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).is_some_and(|m| !m["ended_at"].is_null())
+    let app_gone = APP.get().is_some_and(|pid| !crate::app::process_alive(*pid));
+    app_gone || fs::read(dir.join("meta.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).is_some_and(|m| !m["ended_at"].is_null())
 }
+
+/// The app's pid (`--app`): when it is gone, the call counts as ended (nothing keeps looping after a crash).
+static APP: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
 
 /// `wait_for_new_lines`: the lines past the cursor once there are enough (or some, and the summary interval passed),
 /// the call ended, or `WAIT_MAX` ran out (`lines` empty).
@@ -140,7 +144,10 @@ fn answer(dir: &Path, s: &mut Served, req: &Value, who: (&str, &str)) -> Option<
 
 /// `echoctl live-mcp --call <dir>`: serve the call's two tools on stdin/stdout until stdin closes. The notes go on
 /// from where the call's saved ones stopped.
-pub fn serve(dir: &Path, profile: &str, model: &str) -> Result<()> {
+pub fn serve(dir: &Path, profile: &str, model: &str, app: Option<u32>) -> Result<()> {
+    if let Some(pid) = app {
+        let _ = APP.set(pid);
+    }
     let prev = read_notes(dir);
     let mut s = Served { cursor: prev.as_ref().map_or(0, |n| n.cursor), covered_until: prev.as_ref().map_or(0.0, |n| n.covered_until), gaps: prev.map(|n| n.gaps).unwrap_or_default(), at: None };
     let mut out = std::io::stdout();
@@ -160,10 +167,15 @@ pub fn serve(dir: &Path, profile: &str, model: &str) -> Result<()> {
 
 // ── the session (the app) ───────────────────────────────────────────────────────────────────────
 
-/// A call's live-notes session: Claude Code with the call's tools, its stdin held open (closing it ends the run).
+/// A call's live-notes session: Claude Code with the call's tools, its stdin held open (closing it ends the run). It
+/// holds its profile's lease (and the local model's lock) for as long as it runs, as any job does for its own length.
 struct Session {
     child: Child,
     _stdin: ChildStdin,
+    dir: PathBuf,
+    profile: String,
+    _ready: ai::Ready,
+    _lock: Option<crate::app::FileLock>,
     /// How Claude Code ended, when it did: Ok, or why not (`signed_out`: it isn't signed in).
     ended: Arc<Mutex<Option<Result<(), Failed>>>>,
 }
@@ -181,10 +193,21 @@ struct Failed {
     why: String,
 }
 
-static SESSIONS: Mutex<Option<HashMap<String, Session>>> = Mutex::new(None);
+/// A call's session restarts after another failure (an overloaded API, a network blip) at most this many times, each
+/// no sooner than the summary interval; one that isn't signed in waits for a sign-in (`clear`).
+const RETRIES: u32 = 3;
 
-fn sessions<T>(f: impl FnOnce(&mut HashMap<String, Session>) -> T) -> T {
-    f(SESSIONS.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashMap::new))
+#[derive(Default)]
+struct Calls {
+    running: HashMap<String, Session>,
+    /// Per call: failures so far, and when the last one was seen.
+    failures: HashMap<String, (u32, Instant)>,
+}
+
+static SESSIONS: Mutex<Option<Calls>> = Mutex::new(None);
+
+fn calls<T>(f: impl FnOnce(&mut Calls) -> T) -> T {
+    f(SESSIONS.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Calls::default))
 }
 
 /// Claude Code's arguments: the call's two tools and nothing else.
@@ -203,31 +226,49 @@ fn args(p: &Profile, config: &Path) -> Result<Vec<String>> {
     ])
 }
 
-/// The MCP server's config for the session: this binary's `live-mcp` on the call's folder.
+/// The MCP server's config for the session: this binary's `live-mcp` on the call's folder, told the app's pid (it
+/// says the call ended once the app is gone, so a crash leaves nothing looping).
 fn config(stamp: &str, dir: &Path, p: &Profile) -> Result<PathBuf> {
     let exe = std::env::current_exe()?;
     let folder = paths::config_dir().join("minutes-run");
     fs::create_dir_all(&folder)?;
     let f = folder.join(format!("live-{stamp}.json"));
-    let server = json!({"command": exe, "args": ["live-mcp", "--call", dir, "--profile", p.id, "--model", p.live_model()]});
-    fs::write(&f, serde_json::to_vec_pretty(&json!({"mcpServers": {SERVER: server}}))?)?;
+    let server = json!({"command": exe, "args": ["live-mcp", "--call", dir, "--profile", p.id, "--model", p.live_model(), "--app", std::process::id().to_string()]});
+    paths::write_atomic(&f, &serde_json::to_vec_pretty(&json!({"mcpServers": {SERVER: server}}))?)?;
     Ok(f)
 }
 
-/// The call's session runs (it is started when it isn't). `Err` when it ended on an error (a sign-in, Claude Code
-/// failing): the caller says so and doesn't start it again until something changes.
-pub(super) fn ensure(stamp: &str, dir: &Path, p: &Profile) -> Result<()> {
-    let state = sessions(|m| m.get(stamp).map(|s| s.ended.lock().unwrap_or_else(|e| e.into_inner()).clone()));
-    match state {
+/// The call's session is running (the scheduler then needs no profile check: it holds the lease).
+pub(super) fn running(stamp: &str) -> bool {
+    calls(|c| c.running.get(stamp).is_some_and(|s| s.ended.lock().unwrap_or_else(|e| e.into_inner()).is_none()))
+}
+
+/// The call's session runs: started when it isn't, while `still` holds (the recording goes on, live notes on), with
+/// the profile's `ready` lease and `lock` kept for its life. `Err` when it ended on an error it can't restart from
+/// yet: not signed in (until `clear`), or `RETRIES` used up.
+pub(super) fn ensure(stamp: &str, dir: &Path, ready: ai::Ready, lock: Option<crate::app::FileLock>, still: impl Fn() -> bool) -> Result<()> {
+    let p = ready.profile().clone();
+    let ended = calls(|c| c.running.get(stamp).map(|s| s.ended.lock().unwrap_or_else(|e| e.into_inner()).clone()));
+    match ended {
         Some(None) => return Ok(()),
-        Some(Some(Err(f))) if f.signed_out => {
-            ai::auth_failed(p); // a check since then doesn't make it signed in: Claude Code said it isn't
-            return Err(anyhow::Error::new(ai::SignInNeeded::signed_out(p)));
+        Some(Some(Err(f))) => {
+            let (n, at) = calls(|c| *c.failures.entry(stamp.to_string()).or_insert((0, Instant::now())));
+            if f.signed_out {
+                ai::auth_failed(&p); // a check since then doesn't make it signed in: Claude Code said it isn't
+                return Err(anyhow::Error::new(ai::SignInNeeded::signed_out(&p)));
+            }
+            if n >= RETRIES || at.elapsed() < SUMMARY_EVERY {
+                return Err(anyhow!("{}", f.why));
+            }
         }
-        Some(Some(Err(f))) => return Err(anyhow!("{}", f.why)),
         Some(Some(Ok(()))) | None => {}
     }
-    let mut child = crate::claude_session::command(p, &args(p, &config(stamp, dir, p)?)?)?.spawn()?;
+    let mut cmd = crate::claude_session::command(&p, &args(&p, &config(stamp, dir, &p)?)?)?;
+    cmd.env("MCP_TOOL_TIMEOUT", (WAIT_MAX.as_millis() + 60_000).to_string()); // the wait answers within WAIT_MAX
+    if !still() {
+        return Ok(()); // stopped meanwhile (the profile check can take seconds)
+    }
+    let mut child = cmd.spawn()?;
     let mut stdin = child.stdin.take().ok_or_else(|| anyhow!("no stdin"))?;
     let mut first = format!("{}Keep this call's live notes until wait_for_new_lines says it ended.", call_header(dir));
     if let Some(n) = read_notes(dir) {
@@ -263,36 +304,76 @@ pub(super) fn ensure(stamp: &str, dir: &Path, p: &Profile) -> Result<()> {
         std::thread::sleep(Duration::from_millis(200)); // its last words on stderr
         let err = err_text.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let how = match &result {
-            Some(v) if !v["is_error"].as_bool().unwrap_or(false) => Ok(()),
+            Some(v) if !v["is_error"].as_bool().unwrap_or(false) => {
+                ai::job_worked(&p2.id);
+                Ok(())
+            }
             r => match crate::claude_session::reply(&p2, r.as_ref(), "", &err, None, false) {
                 Err(e) => Err(Failed { signed_out: e.downcast_ref::<ai::SignInNeeded>().is_some(), why: format!("{e:#}") }),
                 Ok(_) => Ok(()),
             },
         };
+        if how.is_err() {
+            calls(|c| {
+                let f = c.failures.entry(stamp2.clone()).or_insert((0, Instant::now()));
+                *f = (f.0 + 1, Instant::now());
+            });
+        }
         *done.lock().unwrap_or_else(|e| e.into_inner()) = Some(how);
     });
-    let old = sessions(|m| m.insert(stamp.to_string(), Session { child, _stdin: stdin, ended }));
+    let session = Session { child, _stdin: stdin, dir: dir.to_path_buf(), profile: p.id.clone(), _ready: ready, _lock: lock, ended };
+    let old = calls(|c| c.running.insert(stamp.to_string(), session));
     drop(old);
+    if !still() {
+        stop(Some(stamp)); // the recording ended while it started
+    }
     Ok(())
 }
 
-/// The recording ended: the session gets `LAST_UPDATE` to make its last update (its wait says the call ended), then is
-/// stopped. `None`: every session, at once (Echo quits).
-pub(super) fn finish(stamp: Option<&str>) {
-    let gone: Vec<Session> = sessions(|m| match stamp {
-        Some(s) => m.remove(s).into_iter().collect(),
-        None => m.drain().map(|(_, v)| v).collect(),
+/// Stop a call's session at once (`None`: every one): paused, live notes off, the profile changed or is being signed
+/// in, Echo quits. Call text stops going to the model there and then.
+pub(super) fn stop(stamp: Option<&str>) {
+    let gone: Vec<Session> = calls(|c| match stamp {
+        Some(s) => c.running.remove(s).into_iter().collect(),
+        None => c.running.drain().map(|(_, v)| v).collect(),
     });
-    if stamp.is_none() {
-        return drop(gone);
-    }
+    drop(gone);
+}
+
+/// Stop the sessions of the calls on profile `id` (a sign-in of it is starting).
+pub(super) fn stop_profile(id: &str) {
+    let gone: Vec<Session> = calls(|c| {
+        let keys: Vec<String> = c.running.iter().filter(|(_, s)| s.profile == id).map(|(k, _)| k.clone()).collect();
+        keys.into_iter().filter_map(|k| c.running.remove(&k)).collect()
+    });
+    drop(gone);
+}
+
+/// A call's failures are forgotten (signed in again): its next look starts a new session.
+pub(super) fn clear(stamp: &str) {
+    let gone = calls(|c| {
+        c.failures.remove(stamp);
+        c.running.remove(stamp).filter(|s| s.ended.lock().unwrap_or_else(|e| e.into_inner()).is_some())
+    });
+    drop(gone);
+}
+
+/// The recording ended: the session gets `LAST_UPDATE` to make its last update (its wait says the call ended), then is
+/// stopped, and its notes go into the transcript.
+pub(super) fn finish(stamp: &str) {
+    let gone = calls(|c| {
+        c.failures.remove(stamp);
+        c.running.remove(stamp)
+    });
+    let Some(mut s) = gone else { return };
     std::thread::spawn(move || {
         let t = Instant::now();
-        let mut gone = gone;
-        while t.elapsed() < LAST_UPDATE && gone.iter_mut().any(|s| matches!(s.child.try_wait(), Ok(None))) {
+        while t.elapsed() < LAST_UPDATE && matches!(s.child.try_wait(), Ok(None)) {
             std::thread::sleep(Duration::from_millis(500));
         }
-        drop(gone);
+        let dir = s.dir.clone();
+        drop(s);
+        super::refresh_transcript(&dir);
     });
 }
 
@@ -341,6 +422,79 @@ mod tests {
         let last = wait(&d, &mut s, Duration::from_secs(5));
         assert!(last["lines"].as_str().unwrap().contains("item 13") && last["ended"] == true, "{last}");
         assert_eq!(wait(&d, &mut s, Duration::from_secs(5)), json!({"lines": "", "ended": true}), "then only that it ended");
+    }
+
+    /// A recording call on the fake Claude profile `w`, its summary job run once (it starts the session).
+    fn recording_call(root: &Path, name: &str) -> (PathBuf, String, Profile) {
+        let p = ai::fake::profile("w", None, &ai::fake::signed_in("pat@example.com"));
+        let d = root.join(format!("home/calls/2026-10-23_120000-{name}"));
+        fs::create_dir_all(&d).unwrap();
+        fs::write(d.join("meta.json"), r#"{"title":"Sync","ai_profile":"w"}"#).unwrap();
+        let stamp = super::super::track(&d);
+        super::super::with(|s| s.calls.entry(stamp.clone()).or_default().recording = true);
+        (d, stamp, p)
+    }
+
+    fn tick(stamp: &str) {
+        let generation = super::super::with(|s| s.calls.get(stamp).map_or(0, |c| c.summary_gen));
+        super::super::run_summary(stamp, generation);
+    }
+
+    fn pid(stamp: &str) -> Option<u32> {
+        calls(|c| c.running.get(stamp).map(|s| s.child.id()))
+    }
+
+    #[test]
+    fn pause_a_profile_change_and_a_sign_in_stop_the_session_at_once() {
+        let (_env, root) = crate::paths::testenv::folders("live-agent-stop");
+        let _fake = ai::fake::install(&root);
+        let (d, stamp, p) = recording_call(&root, "a");
+        fs::write(ai::fake::file(&p, "p.hang"), "").unwrap(); // a session that runs (no answer)
+        tick(&stamp);
+        let first = pid(&stamp).expect("the session started");
+        assert!(running(&stamp) && crate::app::process_alive(first));
+        tick(&stamp);
+        assert_eq!(pid(&stamp), Some(first), "one session a call, not one a tick");
+        super::super::pause(&d, true);
+        assert!(!running(&stamp), "paused: stopped");
+        crate::paths::testenv::eventually("its Claude Code ended", || !crate::app::process_alive(first));
+        super::super::pause(&d, false);
+        tick(&stamp);
+        let second = pid(&stamp).unwrap();
+        super::super::profile_changed(&d);
+        assert!(pid(&stamp).is_none() && !running(&stamp), "the profile changed: stopped");
+        crate::paths::testenv::eventually("ended", || !crate::app::process_alive(second));
+        tick(&stamp);
+        assert!(running(&stamp));
+        super::super::defer("w", 1);
+        assert!(!running(&stamp), "a sign-in of its profile starts: stopped");
+        super::super::release("w", 1);
+        stop(None);
+    }
+
+    #[test]
+    fn after_a_sign_in_the_session_starts_again_and_the_recording_end_lets_it_finish() {
+        let (_env, root) = crate::paths::testenv::folders("live-agent-again");
+        let _fake = ai::fake::install(&root);
+        let (d, stamp, p) = recording_call(&root, "b");
+        let reply = ai::fake::file(&p, "p.reply");
+        fs::write(&reply, r#"{"type":"result","is_error":true,"result":"Not logged in · Please run /login"}"#).unwrap();
+        crate::paths::testenv::eventually("not signed in, said", || {
+            tick(&stamp);
+            super::super::with(|s| s.calls.get(&stamp).is_some_and(|c| c.needs_sign_in.as_deref() == Some("w")))
+        });
+        tick(&stamp);
+        assert!(!running(&stamp), "not restarted while it isn't signed in");
+        // Signed in: the next look starts a new session.
+        fs::write(ai::fake::file(&p, "p.hang"), "").unwrap();
+        super::super::signed_in("w");
+        tick(&stamp);
+        let s = pid(&stamp).expect("started again");
+        assert!(running(&stamp));
+        // The recording ends: the session is left its last update, then stopped (here it never answers: stopped).
+        super::super::recording_stopped(&d);
+        assert!(!running(&stamp));
+        assert!(crate::app::process_alive(s), "not at once: its last update");
     }
 
     #[test]

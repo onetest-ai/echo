@@ -705,7 +705,7 @@ fn with<R>(f: impl FnOnce(&mut Shared) -> R) -> R {
 #[cfg(test)]
 pub fn forget_all() {
     with(|s| *s = Shared::default());
-    agent::finish(None);
+    agent::stop(None);
 }
 
 /// Note a call's folder and return its stamp (every entry point does this).
@@ -847,7 +847,7 @@ pub fn recording_started(dir: &Path) {
 /// The recording of `dir` ended: no more summaries (one running may finish; questions still work).
 pub fn recording_stopped(dir: &Path) {
     let stamp = track(dir);
-    agent::finish(Some(&stamp));
+    agent::finish(&stamp);
     let had = with(|s| s.calls.get_mut(&stamp).map(|c| std::mem::replace(&mut c.recording, false)).unwrap_or(false));
     if had && enabled().unwrap_or(false) {
         set_state(&stamp, "ended", None);
@@ -876,6 +876,9 @@ pub fn pause(dir: &Path, paused: bool) {
         c.recording
     });
     stop_running(&stamp, &[JobKind::Summary]);
+    if paused {
+        agent::stop(Some(&stamp)); // nothing more goes to the model while paused
+    }
     set_state(&stamp, if paused { "paused" } else if recording { "waiting" } else { "ended" }, None);
     WAKE.notify_all();
 }
@@ -884,7 +887,7 @@ pub fn pause(dir: &Path, paused: bool) {
 /// again, both with the new profile.
 pub fn profile_changed(dir: &Path) {
     let stamp = track(dir);
-    agent::finish(Some(&stamp));
+    agent::stop(Some(&stamp)); // the call's text goes only to its own profile
     with(|s| {
         let c = s.calls.entry(stamp.clone()).or_default();
         c.summary_gen += 1;
@@ -905,6 +908,7 @@ pub fn profile_changed(dir: &Path) {
 /// keep `needs_sign_in`: a sign-in that works resumes them).
 pub fn defer(id: &str, generation: u64) {
     with(|s| s.deferred.insert(id.to_string(), generation));
+    agent::stop_profile(id);
     let on = enabled().unwrap_or(false);
     for dir in calls_on(id) {
         let stamp = track(&dir);
@@ -949,6 +953,7 @@ fn wake(id: &str, failed: bool) {
     let on = enabled().unwrap_or(false);
     for dir in waiting.into_iter().filter(|d| ai::call_profile_id(d).ok().as_deref() == Some(id)) {
         let stamp = track(&dir);
+        agent::clear(&stamp);
         let state = with(|s| {
             let c = s.calls.entry(stamp.clone()).or_default();
             if failed {
@@ -1031,7 +1036,7 @@ pub fn report(dir: &Path, why: &str) {
 
 /// Stop everything (the app is quitting): the running job's child is stopped (waits up to 5 s).
 pub fn shutdown() {
-    agent::finish(None);
+    agent::stop(None);
     with(|s| {
         s.shutdown = true;
         if let Some(r) = s.running.as_mut() {
@@ -1085,6 +1090,9 @@ enum Job {
 
 fn worker() {
     loop {
+        if !enabled().unwrap_or(true) {
+            agent::stop(None); // live notes off: no call's text goes on to a model
+        }
         let job = {
             let mut g = SHARED.lock().unwrap_or_else(|e| e.into_inner());
             loop {
@@ -1264,13 +1272,16 @@ fn run_summary(stamp: &str, generation: u64) {
     let cursor = prev.as_ref().map_or(0, |n| n.cursor).min(all.len());
     let new: Vec<&Line> = all[cursor..].iter().collect();
     let new_chars: usize = new.iter().map(|l| l.text.chars().count()).sum();
+    if agent && agent::running(stamp) {
+        return set_state_if(stamp, generation, if prev.is_some() { "updated" } else { "waiting" }, None);
+    }
     if new_chars < MIN_NEW_CHARS && !agent {
         return retry_summary_in(stamp, 10); // not enough said yet
     }
     if ai::call_profile_id(&dir).and_then(|id| ai::Settings::load()?.get(&id)).is_ok_and(|p| held_here(&p, with(|s| s.calls.get(stamp).is_some_and(|c| c.recording)))) {
         return set_state_if(stamp, generation, "local", None);
     }
-    let (ready, _lock) = match take_profile(&dir) {
+    let (ready, lock) = match take_profile(&dir) {
         Ok(x) => x,
         Err(Hold::Busy) => {
             set_state_if(stamp, generation, "busy", None);
@@ -1288,7 +1299,8 @@ fn run_summary(stamp: &str, generation: u64) {
         return; // paused, profile changed, turned off or quitting meanwhile: nothing was sent
     }
     if agent {
-        return match agent::ensure(stamp, &dir, p) {
+        let still = || with(|s| s.calls.get(stamp).is_some_and(|c| c.recording && !c.paused && c.summary_gen == generation)) && still_on();
+        return match agent::ensure(stamp, &dir, ready, lock, still) {
             Ok(()) => set_state_if(stamp, generation, if read_notes(&dir).is_some() { "updated" } else { "waiting" }, None),
             Err(e) => match classify(&e) {
                 Hold::SignIn { profile, why } => summary_needs_sign_in(stamp, generation, profile, why),

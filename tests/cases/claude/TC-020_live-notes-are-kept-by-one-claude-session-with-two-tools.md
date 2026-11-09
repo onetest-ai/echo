@@ -32,8 +32,8 @@ tags: [live, claude-code, performance, file-fed]
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | Run the prelude, then `target/debug/echoctl ai default system`, `target/debug/echoctl ai live on`, `target/debug/echoctl config --languages en --unscheduled manual --scheduled manual --auto-minutes false`; start the app (`nohup target/debug/echoctl app run --no-tray --background > "$D/app.out" 2>&1 &`), `$W 30 app`, `target/debug/echoctl arm --title AGENT-020`, `$C start minutes-call` | The call records |
-| 2 | Every 2 s for 4 minutes: count the processes `pgrep -f "input-format stream-json"` and `pgrep -f "live-mcp --call"` (distinct pids), and note each change of `live-notes.json`'s `updated_at` | **1** Claude Code process and **1** `live-mcp` server for the whole call; the notes are updated 2 or more times (about every 90 s) |
-| 3 | After the call ended (+4 min): read `live-notes.json` and `live-usage.json` of the call; `pgrep -f "input-format stream-json"`, `pgrep -f "live-mcp --call"` | The notes cover most of the call (`covered_until` over 180 s of 213), with decisions; usage shows `cache_read_tokens` above zero; no Claude Code and no `live-mcp` left running |
+| 2 | `S=$(basename $(ls -d $ECHOCTL_HOME/calls/*-agent-020))`; every 2 s for 4 minutes: count the distinct pids of `pgrep -f "minutes-run/live-${S:0:17}"` (this call's Claude Code: its MCP config is named after the call's stamp) and `pgrep -f "live-mcp --call .*$S"`, and note each change of `live-notes.json`'s `updated_at` (only this call's: the user's own Echo may run sessions of its own) | **1** Claude Code process and **1** `live-mcp` server for the whole call; the notes are updated 2 or more times (about every 90 s) |
+| 3 | After the call ended (+4 min): read `live-notes.json` and `live-usage.json` of the call; `pgrep -f "minutes-run/live-${S:0:17}"`, `pgrep -f "live-mcp --call .*$S"` | The notes cover most of the call (`covered_until` over 180 s of 213), with decisions; usage shows `cache_read_tokens` above zero; no Claude Code and no `live-mcp` left running |
 
 ## Expected Final State
 The call's live notes came from one Claude Code session's tool calls; nothing of it runs after the call.
@@ -42,5 +42,5 @@ The call's live notes came from one Claude Code session's tool calls; nothing of
 - Run the prelude, then `target/debug/echoctl app quit`; if it does not stop within 30 s, `kill` its pid
 
 ## Notes
-- Measured 2026-11-09 (M4 Max): 1 process, 3 updates at +49/+139/+229 s, covering 211 of 213 s; cache read 11,868 tokens against 5,323 written; $0.002. Before (#239): a Claude Code start for every summary, each about 4.7 s of CPU and 400 MB.
+- Measured 2026-11-09 (M4 Max): 1 process, updates at about +48/+140/+230 s and a last one after the call, covering 211 of 213 s; cache read 11,868–29,813 tokens; about $0.002; the notes in `transcript.md` after the call; nothing left running. Before (#239): a Claude Code start for every summary, each about 4.7 s of CPU and 400 MB.
 - A model server (Ollama) profile isn't affected: its summaries are HTTP requests, no Claude Code.
