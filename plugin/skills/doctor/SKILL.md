@@ -34,6 +34,10 @@ permission for the user (open the page and explain), and never download a model 
    Minutes need Claude Code: `echoctl claude` → its `check`. No `path` or an `error`: Claude Code
    isn't installed or doesn't start (https://claude.com/claude-code). `terminal.ok` false:
    `echoctl claude path`. `plugin_installed` false: `echoctl claude connect`.
+   A local AI profile (a model on Ollama): `echoctl doctor --json` → `ai`; tell the user each of
+   its `warnings` (the server gives the model too little context: long calls' minutes miss parts;
+   `OLLAMA_CONTEXT_LENGTH` is set on that server, not in Echo) and `problems` (the model isn't
+   there or couldn't load). This loads each local model for up to 2 minutes: run it once.
 7. Only if the user asks:
    - calendar: `echoctl calendar login` (read-only Microsoft 365; another org needs its own app
      registration → `echoctl config --graph-client-id <id>`);

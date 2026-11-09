@@ -32,6 +32,7 @@ mod live;
 mod meeting;
 mod minutes;
 mod notes;
+mod ollama;
 mod models;
 mod paths;
 mod plugins;

@@ -714,7 +714,9 @@ def build_ai(d, H):
     q("ai", "add-claude", "work", "--email", "sam@initech.example")
     q("ai", "add-claude", "other", "--email", "sam@initech.example")
     q("ai", "add-claude", "out")
-    q("ai", "add-local", "ollama", "--model", AI_MODEL or LOCAL_MODEL, *(["--url", AI_URL] if AI_URL else []),
+    # Without `--ai local` its address is one nothing listens on (still this computer): no job and no
+    # `echoctl doctor` (which loads a local profile's model to check its context) reaches a real model server.
+    q("ai", "add-local", "ollama", "--model", AI_MODEL or LOCAL_MODEL, "--url", AI_URL or (NO_SERVER if AI != "local" else "http://localhost:11434"),
       "--name", "Qwen · this computer" if not AI_URL else "Qwen · test server")
     # `--ai local`: the local model is the default, so calls and threads without a profile of their own run on it.
     q("ai", "default", "ollama" if AI == "local" else "work")
@@ -2271,6 +2273,7 @@ def build_standard(d, hostile=False):
 NOW = None
 AI = "fake"
 AI_URL = None
+NO_SERVER = "http://127.0.0.1:9"  # the discard port: nothing answers there
 AI_MODEL = None
 # `--clock fast`: automatic minutes this many seconds after a call or the last note (a debug build; 15 minutes in a
 # release). More than the 30 s after the call's end a note needs to count as "moved by notes" (claude/TC-010), with

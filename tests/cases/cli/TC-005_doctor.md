@@ -32,6 +32,7 @@ external_id: TC-CLI-003
 doctor answers from the running app, matching Health; `up` names the speech model.
 
 ## Notes
+- `doctor --json` also has `ai` (#224): with `--ai fake` it is empty (small data has no local AI profile); with `--ai local`, doctor first loads the data's model to read its context, which can take a few seconds.
 - The permissions are the terminal's that started the dev app (`responsible_app`, e.g. the terminal's bundle id): on a real install they are Echo's own (S-15/S-16).
 - The tray's Health submenu is not compared: the run's terminal can't tell the dev app's menu-bar item from the installed Echo's through System Events (`recording/TC-019`).
 - Run on 2026-11-07 (S-17's app): PASS — `checked_by: app`, all four granted, Health the same; `up` names the model.
