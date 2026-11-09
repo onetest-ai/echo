@@ -2351,6 +2351,12 @@ def main():
             d.q("ai", "default", "ollama")
     else:
         build_standard(d, hostile=a.set == "hostile")
+    # Never the user's real calendar (#242): the sync would run the msgraph skill from the real ~/.claude. An empty
+    # calendar_command turns the calendar off; the agenda stays the one built here.
+    cfg_file = d.state("config.json")
+    cfg = json.load(open(cfg_file)) if os.path.exists(cfg_file) else {}
+    cfg["calendar_command"] = []
+    d.write_json(cfg_file, cfg)
     d.manifest["ai"] = AI
     if a.clock == "fast":
         with open(os.path.join(base, "env"), "a") as f:
