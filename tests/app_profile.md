@@ -281,8 +281,8 @@ tests/fixtures/recordings.py list        # what it holds, each recording's score
   `Cargo.*`; `-dirty` with uncommitted changes there): a commit that only changes tests keeps it. Recordings:
   `acme-sync`, `very-short`, `long-silence`, `two-remotes` (transcribed with NVIDIA's NeMo runtime: speakers),
   `mixed-languages-pinned` (`capture --languages uk`, workspace `en,uk,ru`), `mixed-languages` (the same tracks, no
-  pin), `minutes-call` (213 s, built from the clips: the minutes cases need a long call, not a capture). Seven
-  transcriptions in all.
+  pin), `ukrainian-call` and `russian-call` (workspace `en,uk,ru`: a call's one language detected), `minutes-call`
+  (213 s, built from the clips: the minutes cases need a long call, not a capture). Nine transcriptions in all.
 - `copy <name> [--title T]` puts a copy into `$ECHOCTL_HOME/calls` with a fresh stamp, ending now (so automatic
   minutes and Today treat it as a call that just ended); `--keep-time` keeps the recorded times; `--untranscribed`
   copies `meta.json` only, and `finish <folder> <name>` then adds the transcript as a transcription would.

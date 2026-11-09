@@ -28,9 +28,10 @@ impl Default for Config {
 pub struct Config {
     /// Active transcription model (a catalog name, e.g. "large-v3-turbo-q5_0")
     pub model: Option<String>,
-    /// Languages spoken in this workspace's calls (ISO codes, e.g. ["en", "uk", "ru"]).
-    /// Language detection runs per utterance and may only pick from this list, which stops
-    /// Whisper confusing close languages (uk/ru) or drifting to unrelated ones. Empty = any;
+    /// Languages this workspace's calls may be in (ISO codes, e.g. ["en", "uk", "ru"]). A call is
+    /// in one of them, detected once from its first utterances (`transcribe::CallLanguage`); only
+    /// this list is considered, which stops Whisper confusing close languages (uk/ru) or drifting
+    /// to unrelated ones. One language: no detection at all. Empty = any;
     /// a new data folder (no setting yet) starts with `DEFAULT_LANGUAGES`.
     #[serde(default = "default_languages")]
     pub languages: Vec<String>,

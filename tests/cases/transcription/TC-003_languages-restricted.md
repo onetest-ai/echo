@@ -32,6 +32,7 @@ external_id: TC-TRN-004
 | 1 | `grep -m1 "(languages:" "$(python3 tests/fixtures/recordings.py path)/two-remotes/transcribe.out"` | "transcribing … (languages: en)": English was the only language allowed |
 | 2 | `CALL="$(python3 tests/fixtures/recordings.py copy two-remotes --title "TRN-003 en only")"; python3 tests/fixtures/audio/make_audio.py score "$CALL"` | Exit code 0 and `"pass": true`; top-level `wer` at most 0.15 |
 | 3 | `python3 -c "import json,sys;print({s['lang'] for s in json.load(open(sys.argv[1]+'/segments.json'))})" "$CALL"` | `{'en'}` |
+| 4 | `grep -c "  language:" "$(python3 tests/fixtures/recordings.py path)/two-remotes/transcribe.out"` | 0: with one language allowed nothing is detected (no "language: … (from … utterances)" line) |
 
 ## Expected Final State
-With English as the only language, every segment of a two-voice remote call is English, with at most 15% word errors over the whole call.
+With English as the only language, every segment of a two-voice remote call is English, with no language detection, at most 15% word errors over the whole call.

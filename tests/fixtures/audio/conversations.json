@@ -38,13 +38,32 @@
   {
    "id": "mixed-languages",
    "title": "Initech planning",
-   "what": "Ukrainian, Russian and English in one call; each line must stay in its own language.",
+   "what": "Ukrainian, Russian and English in one call: a call has one language, so this one is for a language pinned for a call (each line then in it).",
    "turns": [
     {"who": "me", "voice": "me_uk", "lang": "uk", "gap": 1.0, "text": "Привіт, Олено. Давай швидко пройдемося по плану на наступний тиждень."},
     {"who": "olena", "voice": "olena_ru", "lang": "ru", "gap": 0.8, "text": "Привет. У меня два вопроса: бюджет на обучение и сроки по пилоту."},
     {"who": "me", "voice": "me_uk", "lang": "uk", "gap": 0.7, "text": "Бюджет вже погоджений. Пілот стартує в понеділок, їй-богу без затримок."},
     {"who": "olena", "voice": "olena_uk", "lang": "uk", "gap": 0.8, "text": "Чудово, тоді я підготую звіт і надішлю його до середи."},
     {"who": "me", "voice": "me", "lang": "en", "gap": 0.7, "text": "And please copy Dana on that report, she asked for it."}
+   ]
+  },
+  {
+   "id": "ukrainian-call",
+   "title": "Initech budget check",
+   "what": "A call in Ukrainian only (mixed-languages' Ukrainian lines, the same clips): with en, uk and ru allowed it must come out in Ukrainian.",
+   "turns": [
+    {"who": "me", "voice": "me_uk", "lang": "uk", "gap": 1.0, "text": "Привіт, Олено. Давай швидко пройдемося по плану на наступний тиждень."},
+    {"who": "olena", "voice": "olena_uk", "lang": "uk", "gap": 0.8, "text": "Чудово, тоді я підготую звіт і надішлю його до середи."},
+    {"who": "me", "voice": "me_uk", "lang": "uk", "gap": 0.7, "text": "Бюджет вже погоджений. Пілот стартує в понеділок, їй-богу без затримок."}
+   ]
+  },
+  {
+   "id": "russian-call",
+   "title": "Initech questions",
+   "what": "A call in Russian only (mixed-languages' Russian line, said twice: the same clip): with en, uk and ru allowed it must come out in Russian.",
+   "turns": [
+    {"who": "olena", "voice": "olena_ru", "lang": "ru", "gap": 1.0, "text": "Привет. У меня два вопроса: бюджет на обучение и сроки по пилоту."},
+    {"who": "olena", "voice": "olena_ru", "lang": "ru", "gap": 1.5, "text": "Привет. У меня два вопроса: бюджет на обучение и сроки по пилоту."}
    ]
   },
   {

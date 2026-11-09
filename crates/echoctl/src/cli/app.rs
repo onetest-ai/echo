@@ -252,7 +252,7 @@ pub fn home(cmd: Option<HomeCmd>) -> Result<()> {
 /// `echoctl config`'s flags.
 #[derive(clap::Args)]
 pub struct ConfigArgs {
-    /// Languages spoken in calls, comma-separated ISO codes (e.g. en,uk,ru); "any" clears
+    /// Languages a call may be in (each call is in one, detected once), comma-separated ISO codes (e.g. en,uk,ru); "any" clears
     #[arg(long, value_delimiter = ',')]
     pub languages: Option<Vec<String>>,
     /// Glossary for transcription, comma-separated (e.g. "Miro,ServiceNow,IPAM"); "" clears
