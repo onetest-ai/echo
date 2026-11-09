@@ -3,13 +3,15 @@
   display: grid; height: 100vh;
   --act-w: 48px;
   grid-template-columns: var(--act-w) minmax(0, 1fr) 0;
-  grid-template-rows: 40px minmax(0, 1fr) 0 24px;
-  grid-template-areas: "top top top" "act main right" "act bottom right" "status status status";
+  grid-template-rows: 40px auto minmax(0, 1fr) 0 24px;
+  grid-template-areas: "top top top" "ann ann ann" "act main right" "act bottom right" "status status status";
 }
 .wb.bar-open { --act-w: 200px; }
 .wb.has-right { grid-template-columns: var(--act-w) minmax(0, 1fr) var(--right-w, 320px); }
-.wb.has-bottom { grid-template-rows: 40px minmax(0, 1fr) var(--bottom-h, 220px) 24px; }
-.wb.has-bottom.bottom-folded { grid-template-rows: 40px minmax(0, 1fr) 34px 24px; }
+.wb.has-bottom { grid-template-rows: 40px auto minmax(0, 1fr) var(--bottom-h, 220px) 24px; }
+.wb.has-bottom.bottom-folded { grid-template-rows: 40px auto minmax(0, 1fr) 34px 24px; }
+/* A release's announcement (`announcement()`): its own row under the top bar, empty (no height) without one. */
+#r-ann { grid-area: ann; min-width: 0; }
 /* Narrow: the right panel opens over the page. */
 .wb.right-over { grid-template-columns: var(--act-w) minmax(0, 1fr) 0; }
 .wb.right-over .panel.right { position: fixed; top: 40px; right: 0; bottom: 24px; width: min(var(--right-w, 320px), 86vw); z-index: 6; box-shadow: var(--shadow); }

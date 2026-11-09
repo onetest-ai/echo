@@ -1217,6 +1217,7 @@ pub fn transcribe(call: &str, model_override: Option<&str>, keep_audio: bool) ->
     let (tr, model_name) = final_transcriber(&cfg, model_override, build_prompt(&cfg, meeting.as_ref()), final_threads(), Some(&dir))?;
 
     let mut segs = vec![];
+    let mut mic_audio = None;
     let remote = dir.join("remote.wav").exists().then(|| load_16k(&dir.join("remote.wav"))).transpose()?;
     if dir.join("mic.wav").exists() {
         let mut mic = load_16k(&dir.join("mic.wav"))?;
@@ -1231,10 +1232,21 @@ pub fn transcribe(call: &str, model_override: Option<&str>, keep_audio: bool) ->
                 Err(e) => eprintln!("  echo cancellation skipped: {e:#}"),
             }
         }
-        segs.extend(tr.track("me", &mic)?);
+        mic_audio = Some(mic);
     }
-    if let Some(r) = &remote {
-        segs.extend(tr.track("remote", r)?);
+    // Its language changed by hand while this pass ran: the tracks again, in it (once; a comparison run keeps its own).
+    for _ in 0..2 {
+        segs.clear();
+        if let Some(mic) = &mic_audio {
+            segs.extend(tr.track("me", mic)?);
+        }
+        if let Some(r) = &remote {
+            segs.extend(tr.track("remote", r)?);
+        }
+        match call_language::meta_language(&dir).filter(|l| model_override.is_none() && *l != tr.language()) {
+            Some(l) => tr.set_language(l),
+            None => break,
+        }
     }
     let suffix = model_override.map(|m| format!(".{m}")).unwrap_or_default();
     // A comparison run (--model) must leave the audio for the real transcript.

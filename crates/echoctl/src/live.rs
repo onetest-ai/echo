@@ -65,6 +65,8 @@ pub struct Live {
     done: Arc<AtomicBool>,
     quit: Arc<AtomicBool>,
     handle: Option<Worker>,
+    /// The call's folder (its language, checked at `join`).
+    dir: PathBuf,
 }
 
 impl Live {
@@ -77,7 +79,10 @@ impl Live {
     pub fn join(mut self) -> Result<(Vec<Segment>, String)> {
         self.close();
         let handle = self.handle.take().expect("joined once");
-        handle.join().map_err(|_| anyhow!("the transcription worker panicked"))?
+        let (segs, model) = handle.join().map_err(|_| anyhow!("the transcription worker panicked"))??;
+        // Its language changed by hand after the worker's last look: an error, and the call is transcribed again.
+        crate::call_language::check_segments(&self.dir, &segs)?;
+        Ok((segs, model))
     }
 }
 
@@ -129,15 +134,15 @@ pub fn start(dir: &Path, meeting: Option<&MeetingContext>) -> Option<Live> {
     let prompt = build_prompt(&cfg, meeting);
     let remote_name = meeting.and_then(|m| m.sole_other(cfg.me.as_ref()));
     let (done, quit) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
-    let (d, q, dir) = (done.clone(), quit.clone(), dir.to_path_buf());
+    let (d, q, call) = (done.clone(), quit.clone(), dir.to_path_buf());
     let handle = std::thread::spawn(move || {
-        let r = run(&dir, &cfg, prompt, remote_name, &d, &q);
+        let r = run(&call, &cfg, prompt, remote_name, &d, &q);
         if let Err(e) = &r {
             eprintln!("transcription during the call stopped: {e:#}");
         }
         r
     });
-    Some(Live { done, quit, handle: Some(handle) })
+    Some(Live { done, quit, handle: Some(handle), dir: dir.to_path_buf() })
 }
 
 /// One track's WAV, read as it grows.
@@ -555,7 +560,7 @@ mod tests {
             Ok((vec![], String::new()))
         });
         let quit = Arc::new(AtomicBool::new(false));
-        drop(Live { done: done.clone(), quit: quit.clone(), handle: Some(handle) });
+        drop(Live { done: done.clone(), quit: quit.clone(), handle: Some(handle), dir: PathBuf::new() });
         assert!(done.load(Ordering::SeqCst) && quit.load(Ordering::SeqCst), "a worker nobody joins gives up");
         // And `join` still works (it takes the handle; its drop then only sets the flag again).
         let d = Arc::new(AtomicBool::new(false));
@@ -566,7 +571,7 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(5));
             }
             Ok((vec![], "m".into()))
-        })) };
+        })), dir: PathBuf::new() };
         assert_eq!(live.join().unwrap().1, "m");
         assert!(!q.load(Ordering::SeqCst), "a joined worker isn't told to give up");
     }
@@ -583,7 +588,7 @@ mod tests {
             g.store(true, Ordering::SeqCst);
             Ok((vec![], String::new()))
         });
-        Live { done: done.clone(), quit: quit.clone(), handle: Some(handle) }.abandon();
+        Live { done: done.clone(), quit: quit.clone(), handle: Some(handle), dir: PathBuf::new() }.abandon();
         assert!(quit.load(Ordering::SeqCst) && done.load(Ordering::SeqCst));
         assert!(gone.load(Ordering::SeqCst), "abandon returns only after the worker ended (#141)");
     }

@@ -140,7 +140,7 @@ pub fn language(code: &str, call: &str) -> Result<()> {
         }
         crate::call_language::Changed::TranscribeAgain(l) => {
             println!("{name}: {l}; transcribing it again");
-            // Being transcribed right now (the call just ended): that pass sees the change and starts over in it.
+            // Being transcribed right now: that pass sees the change before writing and decodes the call again in it.
             #[cfg(feature = "transcribe")]
             return match transcribe::transcribe(&dir.to_string_lossy(), None, false) {
                 Err(e) if format!("{e:#}").contains("already being transcribed") => {

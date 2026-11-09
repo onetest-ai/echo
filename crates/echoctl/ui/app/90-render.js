@@ -100,7 +100,7 @@ function render() {
   const app = $('#app')
   // The workbench: fixed areas, each replaced only when its HTML changed (`patch`).
   if (!$('#r-top')) {
-    app.innerHTML = `<div class="wb${MAC ? ' mac' : ''}" id="wb"><header class="topbar" id="r-top"></header><div class="actbar" id="r-act"></div>
+    app.innerHTML = `<div class="wb${MAC ? ' mac' : ''}" id="wb"><header class="topbar" id="r-top"></header><div id="r-ann"></div><div class="actbar" id="r-act"></div>
       <div class="primary" id="r-primary"></div><aside class="panel right" id="r-right" aria-label="Right panel"></aside>
       <section class="panel bottom" id="r-bottom" aria-label="Bottom panel"></section><footer class="statusbar" id="r-status"></footer></div><div id="r-over"></div>`
   }
@@ -120,6 +120,7 @@ function render() {
   patch($('#r-status'), statusbar())
   patch($('#r-right'), panel('right', eff))
   patch($('#r-bottom'), panel('bottom', eff))
+  patch($('#r-ann'), announcement())
   patch($('#r-over'), `<div class="toasts" role="status" aria-live="polite">${toasts()}</div>` + (S.lightbox ? `<div class="lightbox" data-close="1"><img src="${esc(S.lightbox)}" alt="Shared screen"></div>` : ''))
   // The primary area in the activity's layout; switching layouts starts it afresh.
   const primary = $('#r-primary')

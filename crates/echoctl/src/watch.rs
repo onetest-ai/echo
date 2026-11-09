@@ -1300,11 +1300,6 @@ fn finish_transcript(dir: PathBuf, live: crate::recorder::Live) {
         let written = (|| -> Result<PathBuf> {
             let _marker = crate::transcribe::take_marker(&dir)?;
             let (segs, model) = live.join()?;
-            // Its language changed by hand after the live pass's last look: the whole call again, from the audio.
-            let lang = fs::read(dir.join("meta.json")).ok().and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok()).and_then(|m| m["language"].as_str().map(str::to_owned));
-            if let Some(l) = lang.filter(|l| segs.iter().any(|s| s.lang != *l)) {
-                anyhow::bail!("its language was changed to {l} as it ended");
-            }
             let cfg = crate::config::Config::load()?;
             crate::transcribe::write_transcript(&dir, &cfg, &model, segs, "", false)
         })();

@@ -45,6 +45,17 @@ pub(crate) fn meta_language(dir: &Path) -> Option<i32> {
     whisper_rs::get_lang_id(meta["language"].as_str()?)
 }
 
+/// A call's segments are all in its language: else (changed by hand after the live pass's last look) an error, and the
+/// call is transcribed again from its audio (`watch::finish_transcript`).
+#[cfg(feature = "transcribe")]
+pub(crate) fn check_segments(dir: &Path, segs: &[crate::transcribe::Segment]) -> Result<()> {
+    let lang = meta_language(dir).and_then(whisper_rs::get_lang_str);
+    match lang.filter(|l| segs.iter().any(|s| s.lang != *l)) {
+        Some(l) => Err(anyhow!("its language was changed to {l} as it ended")),
+        None => Ok(()),
+    }
+}
+
 /// What changing a call's language does (`change`).
 #[derive(Debug, PartialEq)]
 pub enum Changed {
@@ -119,6 +130,18 @@ mod tests {
         fs::remove_file(dir.join("remote.wav")).unwrap();
         assert!(change(&dir, "uk").is_err(), "ended, the audio gone");
         assert_eq!(meta_language(&dir), Some(id("en")), "a refused change leaves the language");
+    }
+
+    #[test]
+    fn a_transcript_in_another_language_than_the_calls_is_refused() {
+        let (_env, _) = crate::paths::testenv::folders("call-language-check");
+        let dir = crate::paths::home().join("calls/2026-11-09_100000-x");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("meta.json"), r#"{"language": "uk"}"#).unwrap();
+        let seg = |l: &str| crate::transcribe::Segment::from_piece("me", 0.0, l, crate::transcribe::Piece::new(0.0, 1.0, "x".into(), vec![]), None);
+        assert!(check_segments(&dir, &[seg("uk"), seg("uk")]).is_ok());
+        assert!(check_segments(&dir, &[seg("uk"), seg("en")]).is_err(), "changed to uk as it ended: done again");
+        assert!(check_segments(&dir, &[]).is_ok(), "nothing said");
     }
 
     #[test]

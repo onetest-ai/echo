@@ -2077,6 +2077,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_announcements_switch_is_the_trays_own_action() {
+        let a = Ui::page_action("switch_model", crate::models::PARAKEET);
+        assert!(matches!(a, Some(Action::SwitchModel(n)) if n == crate::models::PARAKEET));
+        assert!(Ui::page_action("switch_model", "no-such-model").is_none());
+    }
+
+    #[test]
     fn leaving_waits_for_the_notes_in_the_window() {
         assert!(matches!(after_handshake(Then::Quit, Some(true)), Next::Go(Then::Quit)));
         assert!(matches!(after_handshake(Then::CloseWindow, Some(false)), Next::Stay), "the page says why, with its own buttons");

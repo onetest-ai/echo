@@ -56,7 +56,7 @@
   },
   {
    "id": "F-WIN-08",
-   "feature": "A release's announcement floats over the window for the users it applies to (Whisper in use: \"Whisper is deprecated\", Switch to Parakeet v3 / Not now) until answered; an answer is kept and it never comes back",
+   "feature": "A release's announcement shows as a strip across the window under the top bar for the users it applies to (Whisper in use: \"Whisper is deprecated\", Switch to Parakeet v3 / Not now) until answered; an answer is kept and it never comes back",
    "priority": "medium",
    "check": "agent",
    "axes": [
