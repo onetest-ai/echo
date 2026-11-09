@@ -1,9 +1,9 @@
 //! Audio capture.
 //!
 //! A *Source* knows how to open a live capture (a mic stream, a process tap). A *Track*
-//! supervises one source: it polls the live stream's health and rebuilds it whenever the
+//! supervises one source on a thread of its own: it polls the live stream's health and rebuilds it whenever the
 //! device, sample rate or app processes change, so the user can switch headphones or mics
-//! mid-call. Every incarnation streams mono `Chunk`s to the track's writer thread, which
+//! mid-call; a device that hangs holds up only that thread. Every incarnation streams mono `Chunk`s to the track's writer thread, which
 //! resamples to a fixed rate and pads gaps with silence against a shared wall clock — so all
 //! tracks of a call stay aligned no matter how often a source is rebuilt.
 
@@ -16,8 +16,8 @@ mod testfeed;
 pub(crate) mod windows;
 
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -56,7 +56,7 @@ pub trait LiveStream {
     fn health(&mut self) -> Health;
 }
 
-pub trait Source {
+pub trait Source: Send {
     fn open(&mut self, epoch: u32, tx: Sender<Chunk>) -> Result<Box<dyn LiveStream>>;
 }
 
@@ -95,20 +95,48 @@ struct Signal {
     last_chunk_ms: AtomicU64,
     last_sound_ms: AtomicU64,
     failed: Mutex<Option<String>>,
+    /// The track ended without its device (it hung): the writer stops now, not when the device lets go.
+    halted: AtomicBool,
+    /// The track was told to stop: a supervisor back from a hang opens nothing more.
+    stopping: AtomicBool,
 }
 
+/// How often a track's supervisor looks at its stream.
+const SUPERVISE_EVERY: Duration = Duration::from_millis(250);
+/// How long a track's end waits for its device to let go: one that hangs never holds up the stop.
+const LET_GO_WITHIN: Duration = Duration::from_secs(1);
+
+/// One track of a recording: its writer, and its source supervised on a thread of its own (`Supervisor`), so the
+/// caller (the watcher's loop) never waits on a device.
 pub struct Track {
+    name: &'static str,
+    file: String,
+    tx: Option<Sender<Chunk>>,
+    writer: Option<WriterHandle>,
+    signal: Arc<Signal>,
+    events: Arc<Mutex<Vec<TrackEvent>>>,
+    t0: Instant,
+    /// Dropped to halt the supervisor.
+    halt: Option<Sender<()>>,
+    /// When it was halted: every track of a recording waits for its device from the same moment.
+    halted_at: Option<Instant>,
+    /// The writer's error, sent once by the supervisor.
+    failed: Receiver<String>,
+    /// Sent when the supervisor has let go of the device.
+    done: Receiver<()>,
+}
+
+/// What supervises one source: opens it, watches its health, rebuilds it.
+struct Supervisor {
     name: &'static str,
     source: Box<dyn Source>,
     live: Option<Box<dyn LiveStream>>,
     epoch: u32,
-    tx: Option<Sender<Chunk>>,
-    writer: Option<WriterHandle>,
-    file: String,
+    tx: Sender<Chunk>,
     t0: Instant,
     next_retry: Instant,
     last_error: Option<String>,
-    events: Vec<TrackEvent>,
+    events: Arc<Mutex<Vec<TrackEvent>>>,
     restarts: u32,
     silent_restarts: u32,
     opened_at: Instant,
@@ -132,42 +160,115 @@ impl Track {
     pub fn start(name: &'static str, path: &Path, source: Box<dyn Source>, t0: Instant) -> Result<Self> {
         let signal = Arc::new(Signal::default());
         let (tx, writer) = spawn_writer(path, t0, signal.clone())?;
-        let mut t = Track {
+        let events = Arc::new(Mutex::new(vec![]));
+        let (halt, halted) = mpsc::channel::<()>();
+        let (failed_tx, failed) = mpsc::channel();
+        let (done_tx, done) = mpsc::channel();
+        let (sup_tx, sup_signal, sup_events) = (tx.clone(), signal.clone(), events.clone());
+        // Made on its thread: the streams it opens stay there (a device's stream isn't always `Send`).
+        std::thread::Builder::new().name(format!("track-{name}")).spawn(move || {
+            let mut sup = Supervisor::new(name, source, sup_tx, t0, sup_signal, sup_events);
+            sup.try_open();
+            // Until halted (the sender dropped): no message is ever sent.
+            while let Err(RecvTimeoutError::Timeout) = halted.recv_timeout(SUPERVISE_EVERY) {
+                if let Some(e) = sup.poll() {
+                    let _ = failed_tx.send(e);
+                }
+            }
+            sup.live = None;
+            drop(sup);
+            let _ = done_tx.send(());
+        })?;
+        let file = path.file_name().unwrap().to_string_lossy().into_owned();
+        Ok(Track { name, file, tx: Some(tx), writer: Some(writer), signal, events, t0, halt: Some(halt), halted_at: None, failed, done })
+    }
+
+    /// The writer's error, the first time it is seen (the rest of this track is lost: the user should know now).
+    /// Never waits: the supervisor does the device work.
+    pub fn poll(&mut self) -> Option<String> {
+        self.failed.try_recv().ok()
+    }
+
+    /// Stop capturing (call on every track first, so all tracks end at the same instant).
+    pub fn halt(&mut self) {
+        self.signal.stopping.store(true, Ordering::SeqCst);
+        self.halt = None;
+        self.halted_at.get_or_insert_with(Instant::now);
+    }
+
+    /// Close the track. Its info (events included) comes back even when the writer failed, with
+    /// the error beside it. A device that doesn't let go within `LET_GO_WITHIN` is left to its supervisor: the
+    /// file ends now.
+    pub fn finish(mut self) -> (TrackInfo, Option<anyhow::Error>) {
+        self.halt();
+        let waited = self.halted_at.map(|t| t.elapsed()).unwrap_or_default();
+        if self.done.recv_timeout(LET_GO_WITHIN.saturating_sub(waited)).is_err() {
+            let at = self.t0.elapsed().as_secs_f64();
+            let detail = format!("the device didn't let go within {} s: the track ends without it", LET_GO_WITHIN.as_secs());
+            eprintln!("  [{at:7.1}s] {}: hung — {detail}", self.name);
+            self.events.lock().unwrap_or_else(|p| p.into_inner()).push(TrackEvent { at, kind: "hung", detail });
+            self.signal.halted.store(true, Ordering::SeqCst);
+        }
+        drop(self.tx.take());
+        let written = self
+            .writer
+            .take()
+            .expect("writer")
+            .join()
+            .map_err(|_| anyhow::anyhow!("{} writer thread panicked", self.name))
+            .and_then(|r| r);
+        // A failure the supervisor didn't see before it stopped.
+        let failure = self.signal.failed.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        let mut events = std::mem::take(&mut *self.events.lock().unwrap_or_else(|p| p.into_inner()));
+        if let Some(e) = failure.filter(|_| !events.iter().any(|e| e.kind == "write_failed")) {
+            events.push(TrackEvent { at: self.t0.elapsed().as_secs_f64(), kind: "write_failed", detail: e });
+        }
+        let ((frames, padded), err) = match written {
+            Ok(n) => (n, None),
+            Err(e) => ((0, 0), Some(e.context(format!("writing {}", self.file)))),
+        };
+        let info = TrackInfo { file: self.file.clone(), sample_rate: TRACK_RATE, frames, padded_frames: padded, events };
+        (info, err)
+    }
+}
+
+impl Supervisor {
+    fn new(name: &'static str, source: Box<dyn Source>, tx: Sender<Chunk>, t0: Instant, signal: Arc<Signal>, events: Arc<Mutex<Vec<TrackEvent>>>) -> Self {
+        Supervisor {
             name,
             source,
             live: None,
             epoch: 0,
-            tx: Some(tx),
-            writer: Some(writer),
-            file: path.file_name().unwrap().to_string_lossy().into_owned(),
+            tx,
             t0,
             next_retry: Instant::now(),
             reopens: Vec::new(),
             last_error: None,
-            events: vec![],
+            events,
             restarts: 0,
             silent_restarts: 0,
             opened_at: Instant::now(),
             signal,
             watch_silence: name == "remote",
             write_failed: false,
-        };
-        t.try_open();
-        Ok(t)
+        }
     }
 
     fn event(&mut self, kind: &'static str, detail: String) {
         let at = self.t0.elapsed().as_secs_f64();
         eprintln!("  [{at:7.1}s] {}: {kind} — {detail}", self.name);
-        self.events.push(TrackEvent { at, kind, detail });
+        self.events.lock().unwrap_or_else(|p| p.into_inner()).push(TrackEvent { at, kind, detail });
     }
 
     fn try_open(&mut self) {
+        if self.signal.stopping.load(Ordering::SeqCst) {
+            return;
+        }
         self.epoch += 1;
-        let tx = self.tx.clone().expect("track finished");
-        match self.source.open(self.epoch, tx) {
+        match self.source.open(self.epoch, self.tx.clone()) {
             Ok(live) => {
-                let kind = if self.events.iter().any(|e| e.kind == "capturing") { "reopened" } else { "capturing" };
+                let opened_before = self.events.lock().unwrap_or_else(|p| p.into_inner()).iter().any(|e| e.kind == "capturing");
+                let kind = if opened_before { "reopened" } else { "capturing" };
                 self.event(kind, live.label());
                 self.live = Some(live);
                 self.last_error = None;
@@ -198,7 +299,7 @@ impl Track {
 
     /// Supervise: restart unhealthy streams, retry missing ones. Returns the writer's error the
     /// first time it is seen.
-    pub fn poll(&mut self) -> Option<String> {
+    fn poll(&mut self) -> Option<String> {
         let failed = self.write_failure();
         if self.live.is_some() && self.opened_at.elapsed() >= STABLE_RESETS {
             self.restarts = 0;
@@ -259,38 +360,6 @@ impl Track {
         }
         Some(Health::Ok)
     }
-
-    /// Stop capturing (call on every track first, so all tracks end at the same instant).
-    pub fn halt(&mut self) {
-        self.live = None;
-    }
-
-    /// Close the track. Its info (events included) comes back even when the writer failed, with
-    /// the error beside it.
-    pub fn finish(mut self) -> (TrackInfo, Option<anyhow::Error>) {
-        self.live = None;
-        drop(self.tx.take());
-        let written = self
-            .writer
-            .take()
-            .expect("writer")
-            .join()
-            .map_err(|_| anyhow::anyhow!("{} writer thread panicked", self.name))
-            .and_then(|r| r);
-        let _ = self.write_failure();
-        let ((frames, padded), err) = match written {
-            Ok(n) => (n, None),
-            Err(e) => ((0, 0), Some(e.context(format!("writing {}", self.file)))),
-        };
-        let info = TrackInfo {
-            file: self.file.clone(),
-            sample_rate: TRACK_RATE,
-            frames,
-            padded_frames: padded,
-            events: std::mem::take(&mut self.events),
-        };
-        (info, err)
-    }
 }
 
 /// Writer thread: resample each epoch to TRACK_RATE and keep the file aligned to `t0`.
@@ -332,7 +401,14 @@ fn write_track(
     let mut epoch = 0u32;
     let mut rs = Resampler::new(TRACK_RATE, TRACK_RATE);
     let tolerance = (GAP_TOLERANCE.as_secs_f64() * TRACK_RATE as f64) as u64;
-    for chunk in rx {
+    loop {
+        let chunk = match rx.recv_timeout(SUPERVISE_EVERY) {
+            // The track ended without its device (it hung, maybe still sending): the file ends here.
+            _ if signal.halted.load(Ordering::SeqCst) => break,
+            Ok(c) => c,
+            Err(RecvTimeoutError::Timeout) => continue,
+            Err(RecvTimeoutError::Disconnected) => break,
+        };
         if chunk.epoch != epoch || chunk.rate != rs.from {
             epoch = chunk.epoch;
             rs = Resampler::new(chunk.rate, TRACK_RATE);
@@ -539,6 +615,7 @@ pub fn print_audio_processes() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicBool;
 
     #[test]
     fn resampler_keeps_duration_across_chunks() {
@@ -564,15 +641,89 @@ mod tests {
     #[test]
     fn a_write_failure_is_reported_once_and_kept_in_the_tracks_events() {
         let (_env, root) = crate::paths::testenv::folders("track-write-failed");
-        let mut t = Track::start("remote", &root.join("remote.wav"), Box::new(Never), Instant::now()).unwrap();
-        assert_eq!(t.poll(), None);
-        // What the writer thread sets when a write fails.
-        *t.signal.failed.lock().unwrap() = Some("No space left on device".into());
-        assert_eq!(t.poll().as_deref(), Some("No space left on device"));
-        assert_eq!(t.poll(), None, "once");
-        let (info, err) = t.finish();
+        let t = std::cell::RefCell::new(Track::start("remote", &root.join("remote.wav"), Box::new(Never), Instant::now()).unwrap());
+        assert_eq!(t.borrow_mut().poll(), None);
+        // What the writer thread sets when a write fails; the track's supervisor reports it on its next look.
+        *t.borrow().signal.failed.lock().unwrap() = Some("No space left on device".into());
+        let seen = std::cell::RefCell::new(vec![]);
+        crate::paths::testenv::eventually("the write failure is reported", || {
+            seen.borrow_mut().extend(t.borrow_mut().poll());
+            !seen.borrow().is_empty()
+        });
+        assert_eq!(seen.into_inner(), vec!["No space left on device".to_string()]);
+        std::thread::sleep(SUPERVISE_EVERY * 2); // two more looks
+        assert_eq!(t.borrow_mut().poll(), None, "once");
+        let (info, err) = t.into_inner().finish();
         assert!(err.is_none(), "this writer itself was fine");
         assert_eq!(info.events.iter().filter(|e| e.kind == "write_failed").count(), 1);
+        assert!(!info.events.iter().any(|e| e.kind == "hung"), "a track that lets go isn't hung");
+    }
+
+    /// A device that hangs until `free` is set, as a device listing or an open does while a Bluetooth headset
+    /// reconnects: in its health check (`in_open` false) or in opening (true).
+    struct Hanging {
+        free: Arc<AtomicBool>,
+        in_open: bool,
+    }
+
+    struct HangingStream(Arc<AtomicBool>);
+
+    fn wait_until(free: &AtomicBool) {
+        while !free.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    impl Source for Hanging {
+        fn open(&mut self, _epoch: u32, _tx: Sender<Chunk>) -> Result<Box<dyn LiveStream>> {
+            if self.in_open {
+                wait_until(&self.free);
+            }
+            Ok(Box::new(HangingStream(self.free.clone())))
+        }
+    }
+
+    impl LiveStream for HangingStream {
+        fn label(&self) -> String {
+            "hanging".into()
+        }
+        fn health(&mut self) -> Health {
+            wait_until(&self.0);
+            Health::Ok
+        }
+    }
+
+    /// The device answers again after `secs`: a test that would wait on it ends anyway.
+    fn free_after(secs: u64) -> Arc<AtomicBool> {
+        let free = Arc::new(AtomicBool::new(false));
+        let f = free.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(secs));
+            f.store(true, Ordering::SeqCst);
+        });
+        free
+    }
+
+    #[test]
+    fn a_device_that_hangs_never_holds_up_the_track_or_its_end() {
+        for in_open in [false, true] {
+            let (_env, root) = crate::paths::testenv::folders("track-hangs");
+            let free = free_after(4);
+            let mut t = Track::start("mic", &root.join("mic.wav"), Box::new(Hanging { free: free.clone(), in_open }), Instant::now()).unwrap();
+            std::thread::sleep(Duration::from_millis(600)); // the device work has begun, and hangs
+            let at = Instant::now();
+            for _ in 0..4 {
+                assert_eq!(t.poll(), None);
+            }
+            assert!(at.elapsed() < Duration::from_millis(100), "in_open {in_open}: poll waited on the device for {:?}", at.elapsed());
+            t.halt();
+            let (info, err) = t.finish();
+            assert!(at.elapsed() < Duration::from_millis(2500), "in_open {in_open}: the end waited on the device for {:?}", at.elapsed());
+            assert!(err.is_none(), "{err:?}");
+            assert!(info.events.iter().any(|e| e.kind == "hung"), "in_open {in_open}: {:?}", info.events.iter().map(|e| e.kind).collect::<Vec<_>>());
+            assert!(hound::WavReader::open(root.join("mic.wav")).is_ok(), "the track's file is complete");
+            free.store(true, Ordering::SeqCst);
+        }
     }
 
     #[test]
@@ -609,13 +760,29 @@ mod tests {
     }
 
     #[test]
+    fn a_supervisor_back_from_a_hang_after_the_stop_opens_nothing() {
+        let opens = Arc::new(AtomicU64::new(0));
+        let script = Arc::new(std::sync::Mutex::new(std::collections::VecDeque::from([Health::Restart("came back".into())])));
+        let (tx, _rx) = mpsc::channel();
+        let signal = Arc::new(Signal::default());
+        let mut sup = Supervisor::new("mic", Box::new(FakeSource { opens: opens.clone(), script }), tx, Instant::now(), signal.clone(), Arc::new(Mutex::new(vec![])));
+        sup.try_open();
+        signal.stopping.store(true, Ordering::SeqCst); // the track was halted while the device hung
+        sup.poll(); // the device answers: Restart
+        assert_eq!(opens.load(Ordering::SeqCst), 1, "no device opened after the stop");
+    }
+
+    #[test]
     fn planned_reopens_skip_the_backoff_failures_dont() {
         let dir = std::env::temp_dir().join(format!("echo-track-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let opens = Arc::new(AtomicU64::new(0));
         let script = Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new()));
         let source = FakeSource { opens: opens.clone(), script: script.clone() };
-        let mut track = Track::start("mic", &dir.join("mic.wav"), Box::new(source), Instant::now()).unwrap();
+        let (tx, _rx) = mpsc::channel();
+        let events = Arc::new(Mutex::new(vec![]));
+        let mut track = Supervisor::new("mic", Box::new(source), tx, Instant::now(), Arc::new(Signal::default()), events);
+        track.try_open();
         assert_eq!(opens.load(Ordering::SeqCst), 1);
 
         // Planned: every one reopens on the same poll, and none counts as a failure (up to three
@@ -640,9 +807,6 @@ mod tests {
         assert!(track.live.is_none());
         assert!(track.next_retry > Instant::now() + Duration::from_secs(1));
         assert_eq!(track.restarts, 2);
-
-        let (_, err) = track.finish();
-        assert!(err.is_none(), "{err:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
