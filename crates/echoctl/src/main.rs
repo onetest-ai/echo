@@ -110,6 +110,9 @@ enum Cmd {
         /// Open the settings page for a permission: microphone | system-audio | accessibility
         #[arg(long)]
         open: Option<String>,
+        /// Skip the local AI profiles' context check (it loads each local model, up to 2 min each)
+        #[arg(long)]
+        no_ai: bool,
     },
     /// List processes currently using audio (debug aid for call detection)
     Procs,
@@ -586,7 +589,7 @@ fn main() -> Result<()> {
             cli::print_json(&attention::peek());
             Ok(())
         }
-        Cmd::Doctor { json, request, probe, open } => permissions::doctor(json, request, probe, open.as_deref()),
+        Cmd::Doctor { json, request, probe, open, no_ai } => permissions::doctor(json, request, probe, open.as_deref(), no_ai),
         Cmd::Model { cmd } => cli::app::model(cmd),
         Cmd::Config(args) => cli::app::config(args),
         Cmd::RunGuard => std::process::exit(guard::command()),
