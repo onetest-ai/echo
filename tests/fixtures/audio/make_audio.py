@@ -5,7 +5,10 @@
   make_audio.py build <id> <call dir> [--languages en,uk,ru]
                                               a call folder from the clips: mic.wav, remote.wav (16 kHz mono), meta.json
                                               (its `languages`: the given ones, else the turns'), meeting.json and
-                                              expected.json (each turn's who, text, lang, start, end)
+                                              expected.json (each turn's who, text, lang, start, end); a turn with a
+                                              gap below 0 starts before the one before it ends (talking over it), and
+                                              a conversation's `echo` ({"gain", "delay_ms"}) adds the remote track to
+                                              the mic that much quieter and later, as laptop speakers do
   make_audio.py score <call dir> [--max-wer 0.15]
                                               the transcript (segments.json) against expected.json: word error rate
                                               per turn and overall, each segment's speaker and language, and nothing
@@ -115,13 +118,20 @@ def build(cid: str, out: Path, languages: list = None):
         start = int(t * RATE)
         for track in (mic, remote):
             track.extend([0] * max(0, start - len(track)))
-        (mic if turn["who"] == "me" else remote).extend(s)
+        own = mic if turn["who"] == "me" else remote
+        if len(own) > start:
+            sys.exit(f"{cid}: {turn['text'][:40]!r} starts before {turn['who']}'s track is free (a gap below 0 only over the other track)")
+        own.extend(s)
         end = t + len(s) / RATE
         turns.append({"who": turn["who"], "speaker": "me" if turn["who"] == "me" else "remote", "lang": turn["lang"], "text": turn["text"], "start": round(t, 2), "end": round(end, 2)})
         t = end
     n = max(len(mic), len(remote)) + RATE  # one second of silence after the last word
     for track in (mic, remote):
         track.extend([0] * (n - len(track)))
+    if conv.get("echo"):
+        gain, k = conv["echo"]["gain"], int(conv["echo"]["delay_ms"] * RATE / 1000)
+        for i in range(k, n):
+            mic[i] = max(-32768, min(32767, round(mic[i] + gain * remote[i - k])))
     out.mkdir(parents=True, exist_ok=True)
     write_wav(out / "mic.wav", mic)
     write_wav(out / "remote.wav", remote)
@@ -131,7 +141,8 @@ def build(cid: str, out: Path, languages: list = None):
             "stop_reason": "call_ended", "tracks": [{"file": "remote.wav", "sample_rate": RATE, "frames": n, "padded_frames": 0, "events": []},
                                                     {"file": "mic.wav", "sample_rate": RATE, "frames": n, "padded_frames": 0, "events": []}]}
     (out / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
-    (out / "expected.json").write_text(json.dumps({"id": cid, "what": conv["what"], "duration": round(n / RATE, 2), "turns": turns}, indent=2, ensure_ascii=False), encoding="utf-8")
+    (out / "expected.json").write_text(json.dumps({"id": cid, "what": conv["what"], "duration": round(n / RATE, 2), "turns": turns, **({"echo": conv["echo"]} if conv.get("echo") else {})},
+                                                  indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"{out}: {n / RATE:.1f} s, {len(turns)} turns")
 
 
@@ -162,7 +173,10 @@ def score(call: Path, max_wer: float) -> int:
     stray = []
     for s in segs:
         overlap = [(min(s["end"], t["end"]) - max(s["start"], t["start"]), t) for t in turns]
-        best, t = max(overlap, key=lambda x: x[0]) if overlap else (0, None)
+        # Turns can overlap (the user talking over the other side): a turn of the segment's own speaker that holds at
+        # least half of it first, else the most overlap.
+        half = (s["end"] - s["start"]) / 2
+        best, t = max(overlap, key=lambda x: (x[0] > 0, x[1]["speaker"] == s.get("speaker") and x[0] >= half, x[0])) if overlap else (0, None)
         if t is None or best <= 0:
             stray.append({"start": s["start"], "text": s["text"].strip()})
             continue
