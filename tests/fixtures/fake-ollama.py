@@ -6,7 +6,7 @@
 
 `/api/ps` lists NAME with `context_length` N once it is loaded: by `POST /api/generate` for NAME,
 or from the start with `--loaded`. `--not-ollama`: every path answers 404, as a server with only
-Anthropic's Messages API would. Each request is logged as `METHOD PATH` (to FILE, else stderr).
+Anthropic's Messages API would. Each request is logged as `METHOD PATH` (a POST also its body) (to FILE, else stderr).
 """
 import argparse
 import json
@@ -51,7 +51,7 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         global loaded
         body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
-        log(f"POST {self.path}")
+        log(f"POST {self.path} {body.decode(errors='replace')}")
         if a.not_ollama or self.path != "/api/generate":
             return self.reply(404, {"error": "not found"})
         if json.loads(body or b"{}").get("model") != a.model:

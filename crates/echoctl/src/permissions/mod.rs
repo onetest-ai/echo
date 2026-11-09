@@ -102,11 +102,12 @@ pub fn doctor(json: bool, request: bool, probe: bool, open: Option<&str>) -> Res
             None => anyhow::bail!("no settings page for '{id}'"),
         }
     }
-    let ai = crate::ollama::report();
+    // Local AI profiles' context (#224): their models are loaded to check, so not on the repeated --request / --probe / --open.
+    let local = if request || probe || open.is_some() { vec![] } else { crate::ollama::local_profiles() };
     if json {
         let mut out = r.clone();
         out["checked_by"] = serde_json::json!(if from_app { "app" } else { "this process" });
-        out["ai"] = serde_json::json!(ai);
+        out["ai"] = local.iter().map(crate::ollama::report).collect();
         println!("{}", serde_json::to_string_pretty(&out)?);
         return Ok(());
     }
@@ -140,19 +141,11 @@ pub fn doctor(json: bool, request: bool, probe: bool, open: Option<&str>) -> Res
             }
         }
     }
-    if !ai.is_empty() {
+    if !local.is_empty() {
         println!();
-        println!("AI profiles (local models, loaded to check their context)");
-        for p in &ai {
-            let ctx = p["context"].as_object().into_iter().flatten().map(|(m, n)| format!("{m}: {} tokens of context", crate::ollama::thousands(n.as_u64().unwrap_or(0))));
-            let ctx: Vec<String> = ctx.collect();
-            let warnings: Vec<&str> = p["warnings"].as_array().into_iter().flatten().filter_map(|w| w.as_str()).collect();
-            let mark = if !warnings.is_empty() { "⚠" } else if ctx.is_empty() { "–" } else { "✓" }; // not `?`: that one is "fix it" below
-            let what = if ctx.is_empty() { "context unknown (not an Ollama server, or not answering)".to_string() } else { ctx.join(", ") };
-            println!("{mark} {} — {what}", s(&p["name"]));
-            for w in warnings {
-                println!("    {w}");
-            }
+        println!("AI profiles — loading each local model to check its context (up to 2 min each)…");
+        for p in &local {
+            crate::ollama::print(&crate::ollama::report(p));
         }
     }
     println!();
