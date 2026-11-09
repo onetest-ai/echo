@@ -1765,7 +1765,7 @@ d="$CLAUDE_CONFIG_DIR"
 [ -f "$d/stubborn" ] && trap '' TERM
 case "$1 $2" in
 "auth status") echo x >> "$d/status.count"; [ -f "$d/slow" ] && sleep 1; [ -f "$d/stall" ] && sleep 30; cat "$d/status.json" ;;
-"-p "*) cat > /dev/null; [ -f "$d/p.hang" ] && { cat "$d/p.hang" >&2; exec sleep 60; }; cat "$d/p.reply" ;;
+"-p "*) case "$*" in *stream-json*) echo x >> "$d/p.starts";; *) cat > /dev/null;; esac; [ -f "$d/p.hang" ] && { cat "$d/p.hang" >&2; exec sleep 60; }; case "$*" in *stream-json*) while IFS= read -r l; do printf '%s\n' "$l" >> "$d/p.turns"; cat "$d/p.reply"; echo; done;; *) cat "$d/p.reply";; esac ;;
 "auth login") echo "$@" > "$d/login.args"
   case "$(cat "$d/login" 2>/dev/null)" in
   ok) cp "$d/after.json" "$d/status.json"; echo "Login successful." ;;

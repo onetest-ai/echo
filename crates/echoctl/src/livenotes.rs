@@ -81,6 +81,13 @@ thread_local! {
     static LAST_USAGE: std::cell::RefCell<Option<Usage>> = const { std::cell::RefCell::new(None) };
 }
 
+/// The job that just ran on this thread used this (a Claude Code result envelope; `cost` the job's own).
+pub(crate) fn set_usage(v: &Value, cost: Option<f64>) {
+    let mut u = Usage::of(v);
+    u.cost_usd = cost.unwrap_or(u.cost_usd);
+    LAST_USAGE.with(|l| *l.borrow_mut() = Some(u));
+}
+
 fn take_usage() -> Option<Usage> {
     LAST_USAGE.with(|u| u.borrow_mut().take())
 }
@@ -167,15 +174,6 @@ pub fn read_usage(dir: &Path) -> Option<Usage> {
 /// Settings for every short model job (live notes, questions, the Brain's readers): no CLAUDE.md and no
 /// auto memory — they are about one call or one document, and the data folder's CLAUDE.md (or the
 /// user's own) made each 90-second update ~46K tokens instead of ~2.5K (measured 2026-10-30).
-fn lean_settings() -> Result<PathBuf> {
-    let f = paths::config_dir().join("lean-job-settings.json");
-    let want = br#"{"claudeMdExcludes": ["**"]}"#;
-    if fs::read(&f).ok().as_deref() != Some(&want[..]) {
-        fs::create_dir_all(paths::config_dir())?;
-        paths::write_atomic(&f, want)?;
-    }
-    Ok(f)
-}
 pub const ASKS: &str = "live-asks.jsonl";
 pub const STATE: &str = "live-state.json";
 /// The live transcript (`live.rs` writes it; named here too, for builds without transcription).
@@ -422,7 +420,7 @@ fn notes_for_prompt(n: &Notes) -> String {
     .to_string()
 }
 
-fn clip(s: &str, n: usize) -> String {
+pub(crate) fn clip(s: &str, n: usize) -> String {
     let s = s.split_whitespace().collect::<Vec<_>>().join(" ");
     if s.chars().count() > n { format!("{}…", s.chars().take(n).collect::<String>()) } else { s }
 }
@@ -517,7 +515,7 @@ pub(crate) fn complete_vision(p: &Profile, system: &str, images: &[Vec<u8>], tex
         Kind::Local => complete_local_blocks(p, system, &blocks, max_tokens, &|| crate::notes::quitting()),
         Kind::System | Kind::Claude => {
             let model = p.notes_model().unwrap_or_else(|| "sonnet".into());
-            complete_claude_with(p, &model, system, text, Some(&blocks), true, Duration::from_secs(300), &|| crate::notes::quitting())
+            crate::claude_session::complete_claude_with(p, &model, system, text, Some(&blocks), true, Duration::from_secs(300), &|| crate::notes::quitting())
         }
     }
 }
@@ -550,7 +548,7 @@ fn curl_config(p: &Profile, body: &Value) -> String {
 const CURL_ARGS: [&str; 4] = ["-q", "-sS", "-K", "-"];
 
 /// The last non-empty line of a child's stderr (a login shell's start-up noise comes first).
-fn last_line(s: &str) -> String {
+pub(crate) fn last_line(s: &str) -> String {
     s.lines().map(str::trim).rfind(|l| !l.is_empty()).unwrap_or("").to_string()
 }
 
@@ -617,69 +615,9 @@ fn complete_local_body(p: &Profile, system: &str, content: Value, max_tokens: u3
 /// data folder or `notes_in`: its `.claude/settings.json` is part of "as configured"); the others
 /// in Echo's state folder (they load no project settings anyway).
 fn complete_claude(p: &Profile, model: &str, system: &str, user: &str, whole: bool, deadline: Duration, cancelled: &dyn Fn() -> bool) -> Result<String> {
-    complete_claude_with(p, model, system, user, None, whole, deadline, cancelled)
+    crate::claude_session::complete_claude_with(p, model, system, user, None, whole, deadline, cancelled)
 }
 
-/// As `complete_claude`; with `blocks` (Messages API content: images, text) the prompt goes in as one
-/// stream-json user message instead of plain text.
-#[allow(clippy::too_many_arguments)]
-fn complete_claude_with(p: &Profile, model: &str, system: &str, user: &str, blocks: Option<&Value>, whole: bool, deadline: Duration, cancelled: &dyn Fn() -> bool) -> Result<String> {
-    let mut args: Vec<String> = vec!["-p".into()];
-    if blocks.is_some() {
-        args.extend(["--input-format", "stream-json", "--output-format", "stream-json", "--verbose"].map(String::from));
-    } else {
-        args.extend(["--output-format", "json"].map(String::from));
-    }
-    args.extend([
-        "--system-prompt".into(),
-        system.into(),
-        "--tools".into(),
-        String::new(),
-        "--strict-mcp-config".into(),
-        "--no-session-persistence".into(),
-        "--model".into(),
-        model.to_string(),
-        "--settings".into(),
-        lean_settings()?.display().to_string(),
-    ]);
-    let input = match blocks {
-        Some(b) => format!("{}\n", json!({"type": "user", "message": {"role": "user", "content": b}})),
-        None => user.to_string(),
-    };
-    let cwd = if p.kind.managed() { paths::state_dir() } else { ai::system_folder()? };
-    fs::create_dir_all(&cwd)?;
-    let mut cmd = ai::prepare_claude(p, &args, &cwd, true)?;
-    cmd.env("CLAUDE_CODE_DISABLE_AUTO_MEMORY", "1");
-    let mut child = cmd.spawn()?;
-    let (out, err, _, wrote) = ai::wait_output_with(&mut child, Some(input.into_bytes()), deadline, cancelled)
-        .map_err(|e| anyhow!("{}: {e:#}", p.name))?;
-    let result = out.lines().rev().filter_map(|l| serde_json::from_str::<Value>(l.trim()).ok()).find(|v| v["type"] == "result");
-    let text = result.as_ref().and_then(|v| v["result"].as_str()).unwrap_or("").to_string();
-    if let Some(v) = &result {
-        LAST_USAGE.with(|u| *u.borrow_mut() = Some(Usage::of(v)));
-    }
-    let is_error = result.as_ref().is_none_or(|v| v["is_error"].as_bool().unwrap_or(false));
-    if is_error {
-        let all = format!("{out}\n{err}\n{text}");
-        if crate::notes::needs_login(&all) {
-            if !p.kind.signs_in() {
-                bail!("Claude Code isn't signed in — open Terminal, run claude and type /login");
-            }
-            ai::auth_failed(p);
-            return Err(anyhow::Error::new(ai::SignInNeeded::signed_out(p)));
-        }
-        let why = [text.trim().lines().next().unwrap_or("").to_string(), last_line(&err)].into_iter().find(|l| !l.is_empty());
-        let why = why.or_else(|| wrote.err().map(|e| format!("couldn't send the prompt: {e}")));
-        bail!("{}: {}", p.name, clip(&why.unwrap_or_else(|| "Claude Code failed".into()), 200));
-    }
-    if whole && result.as_ref().is_some_and(|v| v["stop_reason"] == "max_tokens") {
-        bail!("{}'s reply was cut off at the token limit", p.name);
-    }
-    if text.trim().is_empty() {
-        bail!("{} returned no text", p.name);
-    }
-    Ok(text)
-}
 
 // ── the scheduler ───────────────────────────────────────────────────────────────────────────
 
@@ -764,6 +702,7 @@ fn with<R>(f: impl FnOnce(&mut Shared) -> R) -> R {
 #[cfg(test)]
 pub fn forget_all() {
     with(|s| *s = Shared::default());
+    crate::claude_session::forget(None);
 }
 
 /// Note a call's folder and return its stamp (every entry point does this).
@@ -903,6 +842,7 @@ pub fn recording_started(dir: &Path) {
 /// The recording of `dir` ended: no more summaries (one running may finish; questions still work).
 pub fn recording_stopped(dir: &Path) {
     let stamp = track(dir);
+    crate::claude_session::forget(Some(&stamp));
     let had = with(|s| s.calls.get_mut(&stamp).map(|c| std::mem::replace(&mut c.recording, false)).unwrap_or(false));
     if had && enabled().unwrap_or(false) {
         set_state(&stamp, "ended", None);
@@ -939,6 +879,7 @@ pub fn pause(dir: &Path, paused: bool) {
 /// again, both with the new profile.
 pub fn profile_changed(dir: &Path) {
     let stamp = track(dir);
+    crate::claude_session::forget(Some(&stamp));
     with(|s| {
         let c = s.calls.entry(stamp.clone()).or_default();
         c.summary_gen += 1;
@@ -1085,6 +1026,7 @@ pub fn report(dir: &Path, why: &str) {
 
 /// Stop everything (the app is quitting): the running job's child is stopped (waits up to 5 s).
 pub fn shutdown() {
+    crate::claude_session::forget(None);
     with(|s| {
         s.shutdown = true;
         if let Some(r) = s.running.as_mut() {
@@ -1346,13 +1288,18 @@ fn run_summary(stamp: &str, generation: u64) {
     if let Some(n) = &prev {
         user.push_str(&format!("Previous notes (covering the call up to {}):\n{}\n\n", clock(n.covered_until), notes_for_prompt(n)));
     }
-    user.push_str(&match gap {
+    let mut new = match gap {
         Some([a, b]) => format!("New transcript lines (the part from {} to {} was skipped):\n", clock(a), clock(b)),
         None => "New transcript lines:\n".to_string(),
-    });
-    user.push_str(&format_lines(&lines_in));
+    };
+    new.push_str(&format_lines(&lines_in));
+    user.push_str(&new);
     let _ = take_usage();
-    let reply = complete(p, SUMMARY_SYSTEM, &user, 1200, true, &cancelled);
+    // Claude Code: one conversation for the call's summaries, so it isn't started again every time (#239).
+    let reply = match p.kind {
+        Kind::Local => complete(p, SUMMARY_SYSTEM, &user, 1200, true, &cancelled),
+        _ => crate::claude_session::summary(stamp, p, SUMMARY_SYSTEM, &user, &new, (cursor, all.len()), CLAUDE_DEADLINE, &cancelled),
+    };
     count_usage(stamp);
     if !summary_current(stamp, generation) || !enabled().unwrap_or(false) {
         return; // stale, or live notes were turned off: its result is dropped
@@ -2048,6 +1995,50 @@ mod tests {
     }
 
     #[cfg(unix)]
+    #[test]
+    fn a_calls_summaries_go_through_one_claude_code_and_only_the_new_lines_are_sent() {
+        let (_env, root) = crate::paths::testenv::folders("live-session");
+        let _fake = ai::fake::install(&root);
+        let p = ai::fake::profile("w", None, &ai::fake::signed_in("pat@example.com"));
+        let notes = r#"{\"now\":\"Pilot\",\"decisions\":[{\"text\":\"Lisbon first\",\"t\":\"00:10\"}]}"#;
+        std::fs::write(ai::fake::file(&p, "p.reply"), format!(r#"{{"type":"result","is_error":false,"result":"{notes}","total_cost_usd":0.01}}"#)).unwrap();
+        let d = root.join("home/calls/2026-10-23_170000-sync");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("meta.json"), r#"{"title":"Sync","ai_profile":"w"}"#).unwrap();
+        let line = |i: usize| format!("{{\"speaker\":\"remote\",\"start\":{},\"end\":{},\"text\":\"We agreed the pilot starts in Lisbon and the budget is fixed, item {i}.\"}}\n", i * 10, i * 10 + 5);
+        let mut talk: String = (0..12).map(line).collect();
+        std::fs::write(d.join(LIVE_FILE), &talk).unwrap();
+        let stamp = track(&d);
+        let run = || {
+            let generation = with(|s| {
+                let c = s.calls.entry(stamp.clone()).or_default();
+                c.recording = true;
+                c.summary_gen
+            });
+            with(|s| s.running = Some(Running { stamp: stamp.clone(), kind: JobKind::Summary, cancelled: false }));
+            run_summary(&stamp, generation);
+            with(|s| s.running = None);
+            with(|s| s.calls.get(&stamp).map(|c| c.state.clone()).unwrap())
+        };
+        assert_eq!(run(), "updated");
+        talk.extend((12..24).map(line));
+        std::fs::write(d.join(LIVE_FILE), &talk).unwrap();
+        assert_eq!(run(), "updated");
+        let starts = || std::fs::read_to_string(ai::fake::file(&p, "p.starts")).unwrap_or_default().lines().count();
+        let turns = std::fs::read_to_string(ai::fake::file(&p, "p.turns")).unwrap();
+        let turns: Vec<&str> = turns.lines().collect();
+        assert_eq!((starts(), turns.len()), (1, 2), "one Claude Code, two turns");
+        assert!(turns[0].contains("Previous notes") || turns[0].contains("Sync"), "the first turn has the call's header");
+        assert!(!turns[1].contains("Previous notes") && turns[1].contains("item 23") && !turns[1].contains("item 3."), "the second: only the new lines");
+        // The recording ends: the conversation goes; the next summary starts a new one.
+        recording_stopped(&d);
+        talk.extend((24..36).map(line));
+        std::fs::write(d.join(LIVE_FILE), &talk).unwrap();
+        run();
+        assert_eq!(starts(), 2);
+        crate::claude_session::forget(None);
+    }
+
     #[test]
     fn a_model_that_says_not_signed_in_marks_the_call_until_a_sign_in() {
         let (_env, root) = crate::paths::testenv::folders("live-not-logged-in");

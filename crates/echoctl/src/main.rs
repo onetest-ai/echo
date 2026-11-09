@@ -27,6 +27,7 @@ mod grants;
 mod guard;
 mod ledger;
 mod kept_minutes;
+mod claude_session;
 mod livenotes;
 mod links;
 #[cfg(feature = "transcribe")]
