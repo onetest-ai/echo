@@ -132,7 +132,7 @@ function liveAnswersHtml(c) {
 /** The Transcript tab of a call that records with live notes: the live transcript at full width, kept at
  *  its end as people speak (`#live-transcript`); its live notes are in My notes. */
 function liveTranscript(segs) {
-  return `<section class="live-transcript" id="live-transcript" aria-label="Transcript">${segs.length ? turnsHtml(segs, '', null, noteMarks(S.call)) : '<p class="muted">Listening. The transcript appears here as people speak.</p>'}</section>`
+  return `<section class="live-transcript" id="live-transcript" aria-label="Transcript">${segs.length ? turnsHtml(segs, '', null, noteMarks(S.call), 'live') : '<p class="muted">Listening. The transcript appears here as people speak.</p>'}</section>`
 }
 
 // The ⋯ menu at Now: opens and closes on its button, closes on a click outside it or Escape.

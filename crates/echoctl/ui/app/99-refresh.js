@@ -1,6 +1,8 @@
 // ── refresh: cheap local polling (the files change under us during a call) ─────────────────
 let ticks = 0
 async function tick() {
+  // A window nobody sees (minimised, hidden, covered by the call app) fetches and draws nothing: it catches up when shown.
+  if (document.hidden) return
   ticks++
   const before = JSON.stringify(S.state)
   await loadState()
@@ -248,5 +250,6 @@ window.echo = {
   render()
   if (!MAC) send({ cmd: 'window_sync' }) // Windows: the title bar and the maximised state (`EchoWindow::tell_page`)
   setInterval(tick, 2000)
-  setInterval(tickClocks, 1000)
+  setInterval(() => { if (!document.hidden) tickClocks() }, 1000)
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { tickClocks(); tick() } })
 })()

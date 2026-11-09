@@ -131,6 +131,8 @@ fn follow_app_mic(uid: &str, open_id: Option<&str>, listed: impl FnOnce() -> boo
 
 struct MicStream {
     _stream: Stream,
+    /// The device open, asked for its rate each check (no enumeration of every input).
+    dev: Device,
     app: Option<TargetApp>,
     device: String,
     device_id: Option<String>,
@@ -205,6 +207,7 @@ impl Source for MicSource {
         stream.play().context("starting microphone stream")?;
         Ok(Box::new(MicStream {
             _stream: stream,
+            dev: device.clone(),
             app: self.app,
             device: name,
             device_id: id,
@@ -232,7 +235,11 @@ impl MicStream {
             self.app_device_missing_since = None;
         }
         let missing_long = app_dev.is_none() && self.app_device_missing_since.get_or_insert_with(Instant::now).elapsed() >= APP_DEVICE_GRACE;
-        let app = app_dev.as_ref().map(|(uid, _)| (Some(uid) == self.device_id.as_ref(), listed_input(uid).is_some()));
+        // The device open is listed by definition; another one is looked for (an enumeration) only when the app moved.
+        let app = app_dev.as_ref().map(|(uid, _)| {
+            let open = Some(uid) == self.device_id.as_ref();
+            (open, open || listed_input(uid).is_some())
+        });
         let name = app_dev.as_ref().map(|(_, n)| n.as_str()).unwrap_or("");
         let who = self.app.map(|a| format!("{a:?}")).unwrap_or_default();
         // The device open is the app's mic (taken back after a reopen onto it, or reported late): from now on this
@@ -308,12 +315,7 @@ impl LiveStream for MicStream {
             if let Some(reason) = self.device_change() {
                 return Health::Reopen(reason);
             }
-            let host = cpal::default_host();
-            let current = host
-                .input_devices()
-                .ok()
-                .and_then(|mut it| it.find(|d| device_id(d) == self.device_id));
-            if let Some(cfg) = current.and_then(|d| d.default_input_config().ok()) {
+            if let Ok(cfg) = self.dev.default_input_config() {
                 if cfg.sample_rate() != self.rate {
                     return Health::Reopen(format!(
                         "\"{}\" changed rate {} → {} Hz",

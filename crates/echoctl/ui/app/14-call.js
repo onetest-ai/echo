@@ -85,7 +85,12 @@ function jumpTurn(turns, t) {
   return turns[i].end < t && i + 1 < turns.length ? i + 1 : i
 }
 // end of the transcript jump block
-function turnsHtml(segs, q, jump, marks = []) {
+/** Each transcript's turns, by its place (`live`, `tab`): the page holds an empty `.transcript` there, and
+ *  `fillTranscripts` puts in only the turns that are new or changed, so a growing transcript isn't drawn again whole
+ *  every few seconds while a call records. */
+const TRANSCRIPTS = {}
+
+function turnsHtml(segs, q, jump, marks = [], key = 'tab') {
   // One speaker's lines join a turn while they follow each other (< 8 s apart), each line its own
   // paragraph; a turn runs at most TURN_MAX seconds, then the next starts with its own time — during a
   // call every other voice is one "Remote" track, which would otherwise be one block of the whole call.
@@ -96,7 +101,7 @@ function turnsHtml(segs, q, jump, marks = []) {
     else turns.push({ who: speaker(s), me: speaker(s) === 'Me', spk: s.speaker_id, start: s.start, end: s.end, lang: s.lang, text: s.text, parts: [s.text] })
   }
   const jumpIdx = jump == null ? -1 : jumpTurn(turns, jump)
-  return `<div class="transcript">${turns.map((t, i) => {
+  TRANSCRIPTS[key] = turns.map((t, i) => {
     const hit = (q && t.text.toLowerCase().includes(q)) || i === jumpIdx
     // Detected remote speakers each get a color of their own (speakers.rs numbers them).
     const spk = !t.me && t.spk ? ` spk${((t.spk - 1) % 6) + 1}` : ''
@@ -107,7 +112,27 @@ function turnsHtml(segs, q, jump, marks = []) {
     return `<div class="turn ${t.me ? 'me' : 'remote'}${spk}${hit ? ' hit' : ''}" data-t="${t.start}" ${i === jumpIdx ? 'id="jump"' : ''}>
       <time>${dots}${clock(Math.floor(t.start))}</time>
       <div><div class="who">${esc(t.who)}${t.lang ? `<span class="lang">${esc(t.lang)}</span>` : ''}</div>${t.parts.map((x) => `<p>${esc(x)}</p>`).join('')}</div></div>`
-  }).join('')}</div>`
+  })
+  return `<div class="transcript" data-turns="${key}"></div>`
+}
+
+/** Bring every `.transcript[data-turns]` on the page up to its turns: a changed turn is replaced, new ones added at
+ *  the end, gone ones removed; turns that didn't change are left as they are. */
+function fillTranscripts() {
+  for (const box of document.querySelectorAll('.transcript[data-turns]')) {
+    const turns = TRANSCRIPTS[box.dataset.turns] || []
+    turns.forEach((html, i) => {
+      const old = box.children[i]
+      if (old && old._html === html) return
+      const tmp = document.createElement('div')
+      tmp.innerHTML = html
+      const el = tmp.firstElementChild
+      el._html = html
+      if (old) old.replaceWith(el)
+      else box.appendChild(el)
+    })
+    while (box.children.length > turns.length) box.lastElementChild.remove()
+  }
 }
 
 function tabBody(c, segs, chat, frames) {

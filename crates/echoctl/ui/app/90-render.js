@@ -197,6 +197,8 @@ function render() {
       }
     }
   }
+  fillTranscripts()
+  tickClocks()
   // An element that was replaced gets its focus back (one left alone keeps its own selection).
   const again = focus && $('#' + focus)
   if (again && again !== focused) { again.focus(); try { again.setSelectionRange(caret, caret) } catch {} }
