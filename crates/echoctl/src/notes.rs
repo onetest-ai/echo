@@ -23,7 +23,6 @@ use anyhow::{anyhow, bail, Context, Result};
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use sha2::Digest as _;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -1184,6 +1183,7 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
             return fail(&mut r, msg);
         }
     };
+    crate::kept_minutes::keep(dir); // before Claude Code, starting, can write anything
     r.child_pid = Some(child.id()); // `pid` stays this process: the owner of the run
     save(dir, &r);
 
@@ -1279,6 +1279,7 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
     if r.auto && quitting() && !wrote_notes {
         // Echo stopped it on its way out: taken up again at the next start, as if never tried.
         let _ = writeln!(log, "{}  Echo quit before the minutes were written: it starts them again next time.", stamp());
+        crate::kept_minutes::settle(dir, true, &mut None, &run_id, &mut log);
         withdraw(dir);
         return Ok(dir.to_path_buf());
     }
@@ -1298,8 +1299,9 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
         stopped: stopped.as_deref(),
     };
     conclude(&mut r, profile, &ended, &label, &cfg.notes_model_label());
+    crate::kept_minutes::settle(dir, r.state == "done", &mut r.message, &run_id, &mut log);
     if r.state == "done" {
-        let sha256 = fs::read(dir.join("notes.md")).map(|b| hex(&sha2::Sha256::digest(&b))).unwrap_or_default();
+        let sha256 = crate::models::sha256_file(&dir.join("notes.md")).unwrap_or_default();
         r.minutes = Some(Written { model: label.clone(), at: Local::now(), sha256, template: template.clone() });
     }
     let _ = writeln!(log, "{}  {} ({}s)", stamp(), match r.state.as_str() {
@@ -1398,11 +1400,6 @@ fn finish_actions(dir: &Path, run_id: &str, started: std::time::SystemTime, log:
     }
 }
 
-/// Lower-case hex.
-fn hex(b: &[u8]) -> String {
-    b.iter().map(|x| format!("{x:02x}")).collect()
-}
-
 /// Who wrote the minutes `notes.md` holds now (`notes-run.json`'s `minutes`, while the file still
 /// has the hash that run left): an update that replaced them and then failed, a session's rewrite
 /// or a hand edit leaves no model to name.
@@ -1417,8 +1414,7 @@ pub fn minutes_template(dir: &Path) -> Option<String> {
 
 fn written(dir: &Path) -> Option<Written> {
     let w = raw(dir)?.minutes?;
-    let now = fs::read(dir.join("notes.md")).ok()?;
-    (hex(&sha2::Sha256::digest(&now)) == w.sha256).then_some(w)
+    (crate::models::sha256_file(&dir.join("notes.md")).ok()? == w.sha256).then_some(w)
 }
 
 /// How Claude Code left a minutes run.
@@ -2274,7 +2270,7 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("notes.md"), "# Minutes\n").unwrap();
-        let sha256 = hex(&sha2::Sha256::digest(b"# Minutes\n"));
+        let sha256 = crate::models::sha256_file(&dir.join("notes.md")).unwrap();
         let written = Written { model: "Work · sonnet".into(), at: Local::now(), sha256, template: None };
         save(&dir, &Run { state: "done".into(), minutes: Some(written.clone()), ..Default::default() });
         assert_eq!(minutes_model(&dir).as_deref(), Some("Work · sonnet"));

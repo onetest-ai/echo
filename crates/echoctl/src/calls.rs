@@ -1817,7 +1817,7 @@ pub fn previous(subject: &str) -> Result<()> {
 /// Deleted calls wait here this long before being purged.
 const TRASH_DAYS: u64 = 30;
 
-fn trash_dir() -> PathBuf {
+pub(crate) fn trash_dir() -> PathBuf {
     paths::state_dir().join("trash")
 }
 
