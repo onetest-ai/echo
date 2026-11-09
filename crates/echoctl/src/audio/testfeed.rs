@@ -3,7 +3,9 @@
 //! - `ECHOCTL_TEST_ME_WAV=<wav>` replaces the microphone source (the mic track);
 //! - `ECHOCTL_TEST_REMOTE_WAV=<wav>` replaces the call app's audio tap (the remote track);
 //! - `ECHOCTL_TEST_CALL_FILE=<path>` replaces call detection: the call app is in a call while that file exists, and
-//!   the call started at its modification time (`tests/fixtures/call.py`).
+//!   the call started at its modification time (`tests/fixtures/call.py`);
+//! - while `<that path>.stall` exists, every test stream's health check blocks, as a device listing does while a
+//!   Bluetooth headset reconnects.
 //!
 //! Everything after the source is the real code: the tracks, their writers and alignment, live transcription and
 //! notes, the watcher's start and stop, the files written. The wavs are read when a recording opens its tracks, in
@@ -125,6 +127,9 @@ impl LiveStream for FileStream {
     }
 
     fn health(&mut self) -> Health {
+        while stalled() {
+            std::thread::sleep(Duration::from_millis(100));
+        }
         if rejoined(self.call, call_started()) {
             return Health::Reopen("the test call started again".into());
         }
@@ -136,6 +141,11 @@ impl Drop for FileStream {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::SeqCst);
     }
+}
+
+/// A device that hangs: `<call file>.stall` is there.
+fn stalled() -> bool {
+    var(CALL).is_some_and(|p| std::path::PathBuf::from(format!("{}.stall", p.display())).exists())
 }
 
 /// A new call since the stream opened: the call file is there again with another start. Not a hang-up (no file).
