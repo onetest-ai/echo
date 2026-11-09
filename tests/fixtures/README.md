@@ -86,9 +86,9 @@ a busy day.
   be read, one needing a newer Echo) and a marketplace that can't be read; skills (customized, yours, off, with
   problems), templates (edited, yours), meeting types (edited, yours), vocabulary (always, learned in every scope).
 
-### What the standard and hostile sets change around the app
+### What the sets change around the app
 
-They are hermetic. `<dir>/env` puts these in front of the app, and `serve.sh` sources it:
+Every set is hermetic. `<dir>/env` puts these in front of the app, and `serve.sh` sources it:
 
 - `PATH` starts with `<dir>/bin`, which has a **fake `claude`**. It answers `--version` and `auth status` (signed in,
   signed out or another account, by the AI profile's folder), and refuses everything else. A click on Write
@@ -98,7 +98,7 @@ They are hermetic. `<dir>/env` puts these in front of the app, and `serve.sh` so
   `<dir>/env` sets `ECHOCTL_TEST_OPEN_LOG_ONLY=1`, so nothing is opened at all: no browser tab or Finder window on the
   tester's screen, and never the installed Echo (`echoctl up`, the restart after a data-folder change). A case checks
   `open.log`.
-- `ECHOCTL_PLUGIN_MARKET` makes the built-in marketplace a local folder, `<dir>/markets/built-in` (no network).
+- `ECHOCTL_PLUGIN_MARKET` makes the built-in marketplace a local folder, `<dir>/markets/built-in` (no network) — except on plain `small`, whose Discover reads the real one (the plugins cases expect `onetest-ai/echo-plugins`).
 - `CLAUDE_CONFIG_DIR` is `<dir>/claude-config`. It holds an old Echo plugin record (the stale-plugin Inbox item).
 - `ECHOCTL_NOTES_NO_SHELL=1` starts Claude Code directly, not through the login shell.
 
@@ -131,9 +131,9 @@ the app's scheduler agree. `manifest.json` → `clock`. For the recording and mi
 
 ### `small` for the Echo app (`--ai fake` / `--ai local`)
 
-Plain `small` (no `--ai`) is what the window cases expect, and has no fake `claude`: fine for `window --serve`, but the
-Echo app run on it starts Claude Code by itself (preps, meeting types, who does a task) on the built-in profile — the
-user's own account. Cases that start the app (`echoctl app run`: the recording, minutes and lifecycle cases) build
+Plain `small` (no `--ai`) is what the window cases expect. It is hermetic too: the fake `claude` and its own
+`CLAUDE_CONFIG_DIR`, so the window's version, sign-in and plugin checks never reach the machine's real Claude Code, with
+this build's Echo plugin recorded (an empty Inbox; `--ai` records an older one, for the stale-plugin health item). Cases that start the app (`echoctl app run`: the recording, minutes and lifecycle cases) build
 `small` with `--ai fake` (the hermetic env of the standard sets: every run refused) or `--ai local` (also the profile
 "Qwen", the default, so minutes runs go to the local model). With either, the app's own thread sync is off
 (`project_sync` false in `config.json`: on a local model its two runs per thread queued in front of the minutes for

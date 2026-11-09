@@ -43,5 +43,4 @@ cases:
 ## Notes
 - One visit to the call serves stages 3 to 6: the call is opened once (stage 3) and each later stage goes on from the view the one before left. Stage 6's reload (its step 3) is a check and stays.
 - If a view a stage continues from isn't there (an earlier stage failed), run the skipped steps as written.
-- Stage 4 fails until #101 is fixed (the chip highlights the turn before the moment); stage 5 doesn't depend on it.
 - Stage 6 adds a note to Acme weekly sync and removes it in its teardown.

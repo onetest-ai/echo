@@ -314,6 +314,9 @@ def copy(name, title, untranscribed, keep_time):
         start, end = now - (end - start), now
         meta["started_at"], meta["ended_at"] = start.isoformat(), end.isoformat()
     meta["title"] = title
+    # The profile the prepare run's config pinned is that run's, not the data's: a copy takes the data's default profile,
+    # as a call recorded there would (`ai_profile` absent → the default).
+    meta.pop("ai_profile", None)
     calls = os.path.join(home, "calls")
     os.makedirs(calls, exist_ok=True)
     stamp = start or now
