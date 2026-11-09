@@ -406,16 +406,33 @@ pub fn use_model(name: &str) -> Result<()> {
     cfg.model = Some(m.name.to_string());
     cfg.save()?;
     println!("active model: {}", m.name);
+    let helper = find(HELPER_MODEL)?;
+    if needs_helper(m) && !model_path(helper).exists() {
+        eprintln!(
+            "{} detects the language itself, less reliably — `echoctl model download {}` adds the helper that detects it",
+            m.name, helper.name
+        );
+    }
     Ok(())
 }
 
 /// Turbo q5_0 also detects the language when the active model isn't turbo (large-v3, small).
 pub const HELPER_MODEL: &str = "large-v3-turbo-q5_0";
 
+/// A Whisper model file that detects its own language: turbo.
+pub fn detects_own_language(file: &str) -> bool {
+    file.contains("large-v3-turbo")
+}
+
+/// The helper detects the language for `m`: a Whisper model other than turbo.
+fn needs_helper(m: &Model) -> bool {
+    m.engine == Engine::Whisper && !detects_own_language(m.file)
+}
+
 /// Why a downloaded model is used even when it isn't the active one: the helper detects the language while the
 /// active model is a Whisper model other than turbo (large-v3, small).
 pub fn helper_role(name: &str, active: Option<&str>) -> Option<&'static str> {
-    let needed = active.and_then(|a| find(a).ok()).is_some_and(|m| m.engine == Engine::Whisper && !m.name.starts_with("large-v3-turbo"));
+    let needed = active.and_then(|a| find(a).ok()).is_some_and(needs_helper);
     (name == HELPER_MODEL && needed).then_some("it detects the language for the active model")
 }
 

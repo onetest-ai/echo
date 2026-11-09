@@ -384,13 +384,17 @@ pub(crate) struct WhisperStates {
 /// Flash attention on the Mac's GPU, Apple Silicon only. It can't be combined with DTW, which Echo
 /// doesn't use.
 fn context_params(use_gpu: bool) -> WhisperContextParameters<'static> {
-    let flash_attn = use_gpu && cfg!(all(target_os = "macos", target_arch = "aarch64"));
+    let flash_attn = flash_attention(use_gpu, cfg!(all(target_os = "macos", target_arch = "aarch64")));
     WhisperContextParameters { use_gpu, flash_attn, ..Default::default() }
+}
+
+fn flash_attention(use_gpu: bool, apple_silicon: bool) -> bool {
+    use_gpu && apple_silicon
 }
 
 /// Turbo detects its own language; other Whisper models get turbo q5_0 as a separate detector.
 fn needs_detector(model_path: &Path) -> bool {
-    !model_path.file_name().and_then(|f| f.to_str()).is_some_and(|f| f.contains("large-v3-turbo"))
+    !model_path.file_name().and_then(|f| f.to_str()).is_some_and(models::detects_own_language)
 }
 
 /// The language-ID model to load beside `model_path`: the helper (turbo q5_0, `models::HELPER_MODEL`) when it is
@@ -1449,8 +1453,11 @@ mod tests {
 
     #[test]
     fn flash_attention_only_on_the_macs_gpu() {
+        assert!(flash_attention(true, true));
+        assert!(!flash_attention(false, true), "the CPU on Apple Silicon");
+        assert!(!flash_attention(true, false), "a GPU elsewhere (Windows, an Intel Mac)");
+        assert!(!flash_attention(false, false));
         assert!(!context_params(false).flash_attn);
-        assert_eq!(context_params(true).flash_attn, cfg!(all(target_os = "macos", target_arch = "aarch64")));
         assert!(context_params(true).use_gpu);
     }
 
@@ -1472,8 +1479,11 @@ mod tests {
 
     #[test]
     fn turbo_detects_languages_itself() {
-        for m in models::CATALOG.iter().filter(|m| m.engine == models::Engine::Whisper) {
-            assert_eq!(needs_detector(Path::new(m.file)), !m.name.starts_with("large-v3-turbo"), "{}", m.name);
+        for f in ["ggml-large-v3-turbo-q5_0.bin", "ggml-large-v3-turbo-q8_0.bin"] {
+            assert!(!needs_detector(Path::new(f)), "{f}");
+        }
+        for f in ["ggml-large-v3-q5_0.bin", "ggml-small-q8_0.bin", "my-own-whisper.bin"] {
+            assert!(needs_detector(Path::new(f)), "{f}");
         }
     }
 
