@@ -149,6 +149,13 @@
    "priority": "high",
    "check": "person",
    "axes": []
+  },
+  {
+   "id": "F-REC-19",
+   "feature": "Quitting Echo while a call's transcript is still being finished ends cleanly (no crash at exit): that transcript is made at the next start",
+   "priority": "medium",
+   "check": "agent",
+   "axes": []
   }
  ]
 }
