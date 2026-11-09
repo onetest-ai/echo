@@ -90,7 +90,7 @@
   },
   {
    "id": "F-AI-10",
-   "feature": "A local profile whose Ollama server gives its minutes or live-notes model less than 64k tokens of context is warned about, with OLLAMA_CONTEXT_LENGTH: `echoctl doctor` loads the model to check, `echoctl ai status` only reads what is loaded; a server without /api/ps is never warned about or sent a load",
+   "feature": "A local profile whose Ollama server gives its minutes or live-notes model less than 64k tokens of context is warned about, with OLLAMA_CONTEXT_LENGTH: `echoctl doctor` loads the model to check (not with `--no-ai`, `--request`, `--probe`, `--open`), `echoctl ai status` only reads what is loaded; an Ollama that doesn't report the context says so; a server without /api/ps is never warned about or sent a load",
    "priority": "high",
    "check": "agent",
    "axes": [

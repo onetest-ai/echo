@@ -21,6 +21,8 @@ pub struct Check {
     pub warnings: Vec<String>,
     /// Ollama answered but a model couldn't be loaded (not pulled, out of memory…)
     pub problems: Vec<String>,
+    /// loaded, but this Ollama's `/api/ps` has no `context_length` (an older version)
+    pub unreported: Vec<String>,
 }
 
 /// The context each of `p`'s models has on its server, a warning for each under `FLOOR`. `load`:
@@ -49,6 +51,10 @@ pub fn check(p: &Profile, load: bool) -> Check {
             }
         }
         let Some(n) = n else { continue };
+        let Some(n) = n else {
+            c.unreported.push(m);
+            continue;
+        };
         c.context.insert(m.clone(), json!(n));
         if n < FLOOR {
             c.warnings.push(format!(
@@ -77,13 +83,20 @@ pub fn local_profiles() -> Vec<Profile> {
 /// `doctor`'s entry for `p`: its models loaded to check (`check` with `load`).
 pub fn report(p: &Profile) -> Value {
     let c = check(p, true);
-    json!({ "id": p.id, "name": p.name, "server": server(p), "context": c.context, "warnings": c.warnings, "problems": c.problems })
+    json!({ "id": p.id, "name": p.name, "server": server(p), "context": c.context, "warnings": c.warnings, "problems": c.problems, "unreported": c.unreported })
 }
 
 /// `doctor`'s lines for one `report`.
 pub fn print(r: &Value) {
+    for l in lines(r) {
+        println!("{l}");
+    }
+}
+
+fn lines(r: &Value) -> Vec<String> {
     let s = |v: &Value| v.as_str().unwrap_or("").to_string();
-    let ctx: Vec<String> = r["context"].as_object().into_iter().flatten().map(|(m, n)| format!("{m}: {} tokens of context", thousands(n.as_u64().unwrap_or(0)))).collect();
+    let mut ctx: Vec<String> = r["context"].as_object().into_iter().flatten().map(|(m, n)| format!("{m}: {} tokens of context", thousands(n.as_u64().unwrap_or(0)))).collect();
+    ctx.extend(r["unreported"].as_array().into_iter().flatten().map(|m| format!("{}: context not reported by this Ollama (a newer one shows it)", s(m))));
     let notes: Vec<String> = ["warnings", "problems"].iter().flat_map(|k| r[k].as_array().into_iter().flatten().map(s)).collect();
     // not `?` for unknown: doctor's last line asks to fix the ✗/? items
     let mark = if !notes.is_empty() { "⚠" } else if ctx.is_empty() { "–" } else { "✓" };
@@ -92,10 +105,9 @@ pub fn print(r: &Value) {
         (true, true) => "context unknown (not an Ollama server, or not answering)".into(),
         (true, false) => "context unknown".into(), // Ollama answered: the lines below say why
     };
-    println!("{mark} {} — {what}", s(&r["name"]));
-    for n in notes {
-        println!("    {n}");
-    }
+    let mut out = vec![format!("{mark} {} — {what}", s(&r["name"]))];
+    out.extend(notes.into_iter().map(|n| format!("    {n}")));
+    out
 }
 
 /// Where the server is, as the user would recognise it.
@@ -139,10 +151,11 @@ fn canonical(name: &str) -> String {
     }
 }
 
-/// A loaded model's context, by its name (`canonical` on both sides).
-fn in_ps(ps: &Value, model: &str) -> Option<u64> {
+/// A loaded model's context, by its name (`canonical` on both sides): `None` when it isn't loaded,
+/// `Some(None)` when it is but this Ollama doesn't report `context_length`.
+fn in_ps(ps: &Value, model: &str) -> Option<Option<u64>> {
     let want = canonical(model);
-    ps["models"].as_array()?.iter().find(|m| [&m["name"], &m["model"]].iter().any(|n| n.as_str().is_some_and(|n| canonical(n) == want)))?["context_length"].as_u64()
+    Some(ps["models"].as_array()?.iter().find(|m| [&m["name"], &m["model"]].iter().any(|n| n.as_str().is_some_and(|n| canonical(n) == want)))?["context_length"].as_u64())
 }
 
 /// One request through curl (as the live notes' requests: the config on stdin, so the token is
@@ -246,7 +259,7 @@ mod tests {
         Profile { id: "q".into(), name: "Q".into(), kind: Kind::Local, base_url: Some(url.into()), token: None, live_model: Some("small-model".into()), notes_model: Some("small-model".into()), account: None, email: None, sso: false }
     }
 
-    fn lines(log: &Arc<Mutex<Vec<String>>>) -> Vec<String> {
+    fn requests(log: &Arc<Mutex<Vec<String>>>) -> Vec<String> {
         log.lock().unwrap().iter().map(|l| l.split(' ').take(2).collect::<Vec<_>>().join(" ")).collect()
     }
 
@@ -266,10 +279,10 @@ mod tests {
     fn a_status_read_never_loads_a_model_and_doctor_does_briefly() {
         let (url, log) = fake(4096, false, true);
         assert_eq!(check(&local(&url), false), Check::default(), "not loaded: unknown, no warning");
-        assert_eq!(lines(&log), ["GET /api/ps"]);
+        assert_eq!(requests(&log), ["GET /api/ps"]);
         let c = check(&local(&url), true);
         assert_eq!((Value::Object(c.context), c.warnings.len()), (json!({ "small-model": 4096 }), 1));
-        assert_eq!(lines(&log), ["GET /api/ps", "GET /api/ps", "POST /api/generate", "GET /api/ps"], "one read, the load, one read after it");
+        assert_eq!(requests(&log), ["GET /api/ps", "GET /api/ps", "POST /api/generate", "GET /api/ps"], "one read, the load, one read after it");
         let load = log.lock().unwrap()[2].clone();
         assert!(load.contains("\"keep_alive\":\"30s\"") && load.contains("\"prompt\":\"\""), "{load}");
     }
@@ -289,7 +302,7 @@ mod tests {
     fn a_server_that_isnt_ollama_gets_one_get_and_no_warning() {
         let (url, log) = fake(4096, false, false);
         assert_eq!(check(&local(&url), true), Check::default());
-        assert_eq!(lines(&log), ["GET /api/ps"], "no load is sent to it");
+        assert_eq!(requests(&log), ["GET /api/ps"], "no load is sent to it");
         let mut down = local("http://127.0.0.1:9");
         assert_eq!(check(&down, true), Check::default(), "not answering: no warning either");
         down.kind = Kind::Claude;
@@ -299,11 +312,34 @@ mod tests {
     #[test]
     fn model_names_match_as_ollama_lists_them() {
         let ps = json!({ "models": [{ "name": "qwen3.8:27b-mlx", "context_length": 8192 }, { "name": "llama3.2:latest", "context_length": 4096 }] });
-        assert_eq!(in_ps(&ps, "Qwen3.8:27B-MLX"), Some(8192));
-        assert_eq!(in_ps(&ps, "library/qwen3.8:27b-mlx"), Some(8192));
-        assert_eq!(in_ps(&ps, "registry.ollama.ai/library/llama3.2"), Some(4096));
-        assert_eq!(in_ps(&ps, "llama3.2"), Some(4096));
+        assert_eq!(in_ps(&ps, "Qwen3.8:27B-MLX"), Some(Some(8192)));
+        assert_eq!(in_ps(&ps, "library/qwen3.8:27b-mlx"), Some(Some(8192)));
+        assert_eq!(in_ps(&ps, "registry.ollama.ai/library/llama3.2"), Some(Some(4096)));
+        assert_eq!(in_ps(&ps, "llama3.2"), Some(Some(4096)));
         assert_eq!(in_ps(&ps, "qwen3.8"), None, "another tag is another model");
+    }
+
+    #[test]
+    fn an_older_ollama_without_context_length_is_said_so_and_not_reloaded() {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://127.0.0.1:{}", l.local_addr().unwrap().port());
+        let hits = Arc::new(Mutex::new(0));
+        let seen = hits.clone();
+        std::thread::spawn(move || {
+            for s in l.incoming().flatten() {
+                let mut first = String::new();
+                BufReader::new(s.try_clone().unwrap()).read_line(&mut first).unwrap();
+                *seen.lock().unwrap() += 1;
+                let b = json!({ "models": [{ "name": "small-model:latest", "model": "small-model:latest" }] }).to_string();
+                let _ = (&s).write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{b}", b.len()).as_bytes());
+            }
+        });
+        let c = check(&local(&url), true);
+        assert_eq!((c.unreported, c.warnings.len(), c.problems.len(), c.context.len()), (vec!["small-model".to_string()], 0, 0, 0));
+        assert_eq!(*hits.lock().unwrap(), 1, "listed: no load sent");
+        assert_eq!(lines(&report(&local(&url))), ["✓ Q — small-model: context not reported by this Ollama (a newer one shows it)"], "not \"not an Ollama server\"");
+        let none = json!({ "name": "Other", "context": {}, "warnings": [], "problems": [], "unreported": [] });
+        assert_eq!(lines(&none), ["– Other — context unknown (not an Ollama server, or not answering)"]);
     }
 
     #[test]

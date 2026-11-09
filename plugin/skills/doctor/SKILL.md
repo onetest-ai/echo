@@ -15,7 +15,8 @@ permission for the user (open the page and explain), and never download a model 
    won't start, show the last lines of `<home>/.echo/app.log`.
 2. **Data folder** (`echoctl app` → `home_source: default`): ask where calls should live
    (default `~/Echo`), then `echoctl home set <path>`.
-3. **Permissions** belong to the app, not the terminal: `echoctl doctor --json`.
+3. **Permissions** belong to the app, not the terminal: `echoctl doctor --json --no-ai` (the AI
+   part loads models: step 6 checks it once).
    - `os_supported` false → say `os_requirement` and stop.
    - Each check not `granted`: explain `why` in a sentence. `not_determined` →
      `echoctl doctor --request` and tell them to click **Allow**; `denied` →
@@ -37,7 +38,8 @@ permission for the user (open the page and explain), and never download a model 
    A local AI profile (a model on Ollama): `echoctl doctor --json` → `ai`; tell the user each of
    its `warnings` (the server gives the model too little context: long calls' minutes miss parts;
    `OLLAMA_CONTEXT_LENGTH` is set on that server, not in Echo) and `problems` (the model isn't
-   there or couldn't load). This loads each local model for up to 2 minutes: run it once.
+   there or couldn't load). This loads each local model for up to 2 minutes each: run it once,
+   with a Bash timeout of 5 minutes or more.
 7. Only if the user asks:
    - calendar: `echoctl calendar login` (read-only Microsoft 365; another org needs its own app
      registration → `echoctl config --graph-client-id <id>`);

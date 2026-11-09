@@ -38,7 +38,7 @@ platform: any
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | Navigate to `{{base_url}}/` and wait for the text "Your day". Run `browser_run_code_unsafe` with the guard code (see Checks): it records every dialog and page error from now on | It returns `armed` |
-| 2 | Navigate to `{{base_url}}/#settings/ai` and wait for the heading "AI & minutes" (not for a profile's name: the account chip's hidden options in the top bar hold the names too) | AI & minutes lists the profiles, among them one named "Qwen HOSTILE-07" with the kind "Model · this computer" (the data adds it without `--url`) |
+| 2 | Navigate to `{{base_url}}/#settings/ai` and wait for the heading "AI & minutes" (not for a profile's name: the account chip's hidden options in the top bar hold the names too) | AI & minutes lists the profiles, among them one named "Qwen HOSTILE-07" with the kind "Model · this computer" (the data gives it a loopback address nothing listens on) |
 | 3 | Run `browser_evaluate` with `() => [...document.querySelectorAll('main')].some((e) => e.innerText.includes('<img src=x onerror=alert(1)>'))` | Returns `true`: the profile name shows `<img src=x onerror=alert(1)>` as text |
 | 4 | Run check A (`browser_evaluate`) | `handlers` 0, `inlineScripts` 0, `badUrls` 0, `brokenImgs` 0 and `scrollWidth` <= `innerWidth` |
 | 5 | Run `browser_evaluate` with `() => { const m = document.querySelector('main').getBoundingClientRect(); return [...document.querySelectorAll('main *')].filter((e) => e.children.length === 0 && /HOSTILE-07/.test(e.textContent)).every((e) => e.getBoundingClientRect().right <= m.right + 1) }` | Returns `true` |
