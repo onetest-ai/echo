@@ -134,6 +134,7 @@ document.addEventListener('change', (e) => {
     S.settings.me = me; send({ cmd: 'settings_set', key: 'me', value: me }); return
   }
   if (e.target.matches('[data-reclang]')) { setRecordLang(e.target.value); render() }
+  if (e.target.matches('[data-call-lang]')) { send({ cmd: 'set_language', call: e.target.dataset.callLang, language: e.target.value }); if (S.state) S.state.recording_language = e.target.value; render() }
   if (e.target.matches('[data-lang-default]')) {
     const l = [e.target.value, ...(S.settings.languages || []).filter((x) => x !== e.target.value)]
     S.settings.languages = l; send({ cmd: 'settings_set', key: 'languages', value: l }); return render()

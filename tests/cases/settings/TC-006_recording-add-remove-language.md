@@ -25,7 +25,7 @@ tags: [settings, languages]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Navigate to `{{base_url}}/#settings/recording`; read "Languages a call may be in" | One chip "English" with a × button; the row says each call is in one of these, detected from its first sentences |
+| 1 | Navigate to `{{base_url}}/#settings/recording`; read "Languages you record in" | One chip "English" with a × button; the row says these are offered when a call starts and Echo never guesses a call's language |
 | 2 | Choose "Ukrainian" in the "Add a language" list | Two chips: "English" and "Ukrainian"; "Ukrainian" is no longer in the "Add a language" list |
 | 3 | Wait 1 s, run `. <dir>/env && grep -n '"languages"' "$ECHOCTL_HOME/.echo/config.json" -A3` | The list holds `"en"` and `"uk"` |
 | 4 | Click × on the "Ukrainian" chip (button "Remove Ukrainian") | One chip "English" remains |

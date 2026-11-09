@@ -23,17 +23,17 @@ external_id: TC-TRN-005
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | `grep -A3 '"languages"' "$P/mixed-languages-pinned/meta.json"` | The capture wrote the pin into the call's `meta.json`: `languages` ["uk"] |
+| 1 | `grep -A3 '"language' "$P/mixed-languages-pinned/meta.json"` | The capture wrote the pin into the call's `meta.json`: `"language": "uk"` (and `languages` ["uk"]) |
 | 2 | `CALL="$(python3 tests/fixtures/recordings.py copy mixed-languages-pinned --title "TRN-004 pinned")"; grep -o '"lang": *"[a-z]*"' "$CALL/segments.json" | sort | uniq -c` | One language value only: `uk`, on every segment (no `en`, no `ru`) |
 | 3 | `grep -A5 '"languages"' "$P/mixed-languages-pinned/config.after.json"` | The workspace `languages` are still ["en", "uk", "ru"] after the pinned call: the pin did not change the setting |
-| 4 | `grep -c '"languages"' "$P"/mixed-languages/call/*/meta.json; grep -m1 "(languages:" "$P/mixed-languages/transcribe.out"; grep "  language:" "$P/mixed-languages/transcribe.out"; grep '"language"' "$P"/mixed-languages/call/*/meta.json` | The count is 0 (no pin in the next call's `meta.json`); "(languages: uk, ru, en)"; "language: uk (from … s of speech in … utterances)" — detected among the workspace languages, not set by the pin — and that `"language": "uk"` written into its `meta.json` |
-| 5 | `CALL="$(python3 tests/fixtures/recordings.py copy mixed-languages --title "TRN-004 next")"; grep -o '"lang": *"[a-z]*"' "$CALL/segments.json" | sort | uniq -c` | One language value on every segment, the one detected in step 4 (a call has one language, #234) |
+| 4 | `grep "  language:" "$P/mixed-languages/transcribe.out"` | "language: uk" with no "(from … utterances)": the next call, with no pin of its own, is in the default language (the workspace's first, `uk,ru,en`), not detected |
+| 5 | `CALL="$(python3 tests/fixtures/recordings.py copy mixed-languages --title "TRN-004 next")"; grep -o '"lang": *"[a-z]*"' "$CALL/segments.json" | sort | uniq -c` | One language value on every segment, `uk` (a call has one language) |
 
 ## Expected Final State
 A language pinned for one call applies to that call only; the workspace languages and the next call are untouched.
 
 ## Notes
-- Since #234 a call has one language: the next call is no longer split into `uk`, `ru` and `en` segments; what shows it isn't pinned is that its language was detected (and written to its `meta.json`), among the workspace languages.
+- Since 2026-11-09 nothing detects a call's language: a call without a pin is in the default language, the workspace's first. The prepared next call's workspace list is `uk,ru,en`, so its default is `uk`.
 - The pin is `capture --languages`; the record menu's "Only Ukrainian" and `echoctl arm --languages uk` write the same `languages` into `meta.json`.
 - Before 2026-11-08 the case captured two calls and transcribed both itself (and the next call was `very-short`, English only, which showed less); now the capture and both transcriptions are made once per build.
 - Run 2026-11-08 evening (S-17, file-fed `prepare`): PASS — 8 segments all `uk`; workspace languages untouched; the next call 6 `uk`, 1 `ru`, 1 `en`.

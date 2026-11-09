@@ -15,9 +15,10 @@ transcribes the call and the notes follow by themselves.
 **Record:**
 1. `echoctl status`. If `watcher` is null the app isn't running: `echoctl app start` (if that
    fails, run the `doctor` skill).
-2. `echoctl arm`, with `--title "<title>"` if the user gave one and `--languages <codes>` if they
-   named the language ("in Ukrainian" → `--languages uk`, "en+uk" → `--languages en,uk`). The
-   app attaches the calendar meeting by itself.
+2. `echoctl arm`, with `--title "<title>"` if the user gave one and `--languages <code>` if they
+   named the language ("in Ukrainian" → `--languages uk`); without one the call is in the default
+   language. A call has one language; "in English and Ukrainian" → ask which. The app attaches the
+   calendar meeting by itself.
 3. One line from the output: a call in progress → "● Recording"; no call yet → "Armed —
    recording starts when your next Teams call begins (15 min)".
 

@@ -58,7 +58,7 @@
   },
   {
    "id": "F-SET-07",
-   "feature": "Recording → Languages adds and removes the languages a call may be in (each call is in one of them, detected once); New recordings English or Detect",
+   "feature": "Recording → Languages adds and removes the languages offered when a call starts, and Default language makes one the first (the Record button's and the calls Echo starts by itself); nothing detects a call's language",
    "priority": "high",
    "check": "agent",
    "axes": [
@@ -77,7 +77,7 @@
   },
   {
    "id": "F-SET-09",
-   "feature": "Transcription → speech models with In use, Recommended, Not in this build; Download (size), Use, Remove (its question notes that turbo q5_0 detects the language for the active model, only while large-v3 or small is in use; `model use` of large-v3 or small says when that helper isn't downloaded), a progress bar (a download that gets no data for a minute ends as \"stalled\" and resumes on the next try), \"Another download is running\"",
+   "feature": "Transcription → speech models with In use, Recommended (Parakeet v3 where this build runs it), Not in this build; the Whisper models marked deprecated; Download (size), Use, Remove (its question says which calls the model transcribes besides the active one: English calls, or calls in other languages), a progress bar (a download that gets no data for a minute ends as \"stalled\" and resumes on the next try), \"Another download is running\"",
    "priority": "high",
    "check": "agent",
    "axes": [

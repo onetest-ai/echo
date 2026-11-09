@@ -99,6 +99,14 @@ function tickClocks() {
 
 /** Record / Stop at the top centre of the window, in every state; the sign-in the default
  *  profile (the one a recording pins) needs, under it. */
+/** The recording call's language, changed here when it's the wrong one: the rest is in the new one, and the whole call
+ *  again at its end. */
+function callLangPicker(name, cur) {
+  if (!cur) return ''
+  const opts = [...new Set([cur, ...langChoices().opts])]
+  return `<label class="pbtn ghost split-lang" title="Transcribed in ${esc(langName(cur))}: pick another if that's wrong — the whole call is transcribed again in it at the end"><span>${esc(cur.toUpperCase())}</span>${CARET}<select data-call-lang="${esc(name)}" aria-label="Language of this call">${opts.map((c) => `<option value="${esc(c)}"${c === cur ? ' selected' : ''}>${esc(langName(c))}</option>`).join('')}</select></label>`
+}
+
 function pill() {
   const st = S.state || {}
   if (st.recording) {
@@ -115,7 +123,7 @@ function pill() {
     const name = String(st.recording).split(/[\\/]/).pop()
     const c = (S.calls || []).find((x) => x.name === name)
     const t0 = since(c && c.started_at)
-    return `<div class="pill rec" role="group" aria-label="Recording"><span class="dot" aria-hidden="true"></span>${t0 ? `<span class="clock" data-since="${t0}"></span>` : ''}<button class="ptitle link" data-call="${esc(name)}" title="Open this call">${esc(titleOf(st.recording))}</button><button class="pbtn stop" data-cmd="stop-ask"><svg viewBox="0 0 10 10" width="9" height="9" aria-hidden="true"><rect width="10" height="10" rx="2" fill="currentColor"/></svg>Stop</button></div>`
+    return `<div class="pill rec" role="group" aria-label="Recording"><span class="dot" aria-hidden="true"></span>${t0 ? `<span class="clock" data-since="${t0}"></span>` : ''}<button class="ptitle link" data-call="${esc(name)}" title="Open this call">${esc(titleOf(st.recording))}</button>${callLangPicker(name, st.recording_language)}<button class="pbtn stop" data-cmd="stop-ask"><svg viewBox="0 0 10 10" width="9" height="9" aria-hidden="true"><rect width="10" height="10" rx="2" fill="currentColor"/></svg>Stop</button></div>`
   }
   if (st.armed) {
     return `<div class="pill armed" role="group" aria-label="Armed"><span class="ring" aria-hidden="true"></span><span class="ptitle">Armed — records the next Teams call</span><button class="pbtn ghost" data-cmd="stop">Cancel</button></div>`

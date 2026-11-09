@@ -23,7 +23,7 @@ external_id: TC-INST-007
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | **The user does:** Echo's own window → Settings → Transcription → the unused model → "Remove (… MB)…" → "Remove" | It is deleted (its file is gone from `~/Library/Application Support/echo/models/`) and leaves the list |
-| 2 | Try the same on the model in use (or, while large-v3 or small is in use, the language-ID helper `large-v3-turbo-q5_0`); also `$E model remove <the one in use>` | Refused, or a clear question first; `$E model list` still has a model in use |
+| 2 | Try the same on the model in use; also `$E model remove <the one in use>` | Refused, or a clear question first; `$E model list` still has a model in use |
 
 ## Expected Final State
 Models can be removed without breaking transcription.

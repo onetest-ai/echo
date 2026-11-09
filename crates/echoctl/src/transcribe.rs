@@ -1213,16 +1213,10 @@ pub fn transcribe(call: &str, model_override: Option<&str>, keep_audio: bool) ->
     }
     crate::watch::close_unfinished(&dir)?;
     let _marker = take_marker(&dir)?;
-    let mut cfg = Config::load()?;
-    // A call can pin its own languages (chosen when it was armed).
-    let call_meta: serde_json::Value = serde_json::from_slice(&fs::read(dir.join("meta.json"))?)?;
-    if let Some(l) = call_meta["languages"].as_array().filter(|a| !a.is_empty()) {
-        cfg.languages = l.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect();
-    }
+    let cfg = Config::load()?;
     let meeting = MeetingContext::load(&dir)?;
     let t = Instant::now();
-    eprintln!("transcribing {} (languages: {})", dir.display(),
-        if cfg.languages.is_empty() { "any".into() } else { cfg.languages.join(", ") });
+    eprintln!("transcribing {}", dir.display());
     let (tr, model_name) = final_transcriber(&cfg, model_override, build_prompt(&cfg, meeting.as_ref()), final_threads(), Some(&dir))?;
 
     let mut segs = vec![];

@@ -27,7 +27,8 @@ tags: [settings, transcription]
 | 2 | Read the row "large-v3-turbo-q5_0" | It has a button "Download (574 MB)" and its text ends "574 MB" |
 | 3 | Read the rows of the card | "large-v3-turbo-q8_0" has "Download (874 MB)", "large-v3-q5_0" has "Download (1081 MB)", "small-q8_0" has "Download (264 MB)" |
 | 4 | Look for the tag "Recommended for this computer" | Exactly one row carries it |
-| 5 | Read the row "nemotron-3.5-0.6b" | It carries the tag "Not in this build" and has no download button |
+| 5 | Read the rows "nemotron-3.5-0.6b" and "parakeet-tdt-0.6b-v3" | Each carries the tag "Not in this build" (a build without the NeMo-Speech runtime) and has no download button; in a release, Parakeet carries "Recommended for this computer" instead |
+| 5a | Read the four Whisper rows' texts (`large-v3-turbo-q5_0`, `large-v3-turbo-q8_0`, `large-v3-q5_0`, `small-q8_0`) | Each starts "Whisper, deprecated" |
 | 6 | Look for a progress bar or the text "Downloading" | None shows |
 
 ## Expected Final State
