@@ -77,7 +77,7 @@
   },
   {
    "id": "F-SET-09",
-   "feature": "Transcription → speech models with In use, Recommended, Not in this build; Download (size), Use, Remove, a progress bar, \"Another download is running\"",
+   "feature": "Transcription → speech models with In use, Recommended, Not in this build; Download (size), Use, Remove (its question notes that turbo q5_0 detects the language for the active model, only while large-v3 or small is in use; `model use` of large-v3 or small says when that helper isn't downloaded), a progress bar, \"Another download is running\"",
    "priority": "high",
    "check": "agent",
    "axes": [

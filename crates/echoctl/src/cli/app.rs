@@ -156,7 +156,7 @@ pub enum ModelCmd {
     /// Delete a downloaded model (not the active one)
     Remove {
         name: String,
-        /// Also remove the live / language-detection helper model
+        /// Remove the language-detection helper (turbo q5_0) even while the active model uses it
         #[arg(long)]
         force: bool,
     },

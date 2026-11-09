@@ -33,8 +33,6 @@ pub(crate) const GUARD_MIN_S: f64 = 1.0;
 const GUARD_MIN_RATIO: f64 = 0.6;
 const GUARD_MAX_RATIO: f64 = 1.8;
 const GUARD_SLACK: f64 = 80.0;
-/// Model used only for language identification, when downloaded.
-const DETECTOR_MODEL: &str = "large-v3-turbo-q5_0";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Segment {
@@ -341,8 +339,8 @@ fn allowed_languages(cfg: &Config) -> Result<Vec<i32>> {
         .collect()
 }
 
-/// whisper.cpp with the model loaded: the transcription model and, when downloaded, turbo for
-/// language ID.
+/// whisper.cpp with the model loaded: the transcription model and, for another model than turbo,
+/// turbo for language ID when downloaded.
 pub(crate) struct Whisper {
     ctx: WhisperContext,
     /// Separate language-ID model (turbo): its detection is far more decisive than large-v3's.
@@ -383,20 +381,46 @@ pub(crate) struct WhisperStates {
     det_state: Option<WhisperState>,
 }
 
+/// Flash attention on the Mac's GPU, Apple Silicon only. It can't be combined with DTW, which Echo
+/// doesn't use.
+fn context_params(use_gpu: bool) -> WhisperContextParameters<'static> {
+    let flash_attn = flash_attention(use_gpu, cfg!(all(target_os = "macos", target_arch = "aarch64")));
+    WhisperContextParameters { use_gpu, flash_attn, ..Default::default() }
+}
+
+fn flash_attention(use_gpu: bool, apple_silicon: bool) -> bool {
+    use_gpu && apple_silicon
+}
+
+/// Turbo detects its own language; other Whisper models get turbo q5_0 as a separate detector.
+fn needs_detector(model_path: &Path) -> bool {
+    !model_path.file_name().and_then(|f| f.to_str()).is_some_and(models::detects_own_language)
+}
+
+/// The language-ID model to load beside `model_path`: the helper (turbo q5_0, `models::HELPER_MODEL`) when it is
+/// downloaded and `model_path` needs it.
+fn detector_path(model_path: &Path) -> Option<PathBuf> {
+    let det = models::model_path(models::find(models::HELPER_MODEL).ok()?);
+    (needs_detector(model_path) && det.exists() && det != model_path).then_some(det)
+}
+
 impl Whisper {
-    /// Load `model_path` (GPU unless it failed its check, `gpu.rs`) and turbo for language ID
-    /// when it is downloaded and different.
+    /// Load `model_path` (GPU unless it failed its check, `gpu.rs`) and, for a model other than
+    /// turbo, turbo for language ID when it is downloaded.
     fn load(model_path: &Path, threads: usize) -> Result<Whisper> {
         whisper_rs::install_logging_hooks(); // routes whisper.cpp's chatter to `log` (unset = silent)
         let use_gpu = crate::gpu::allowed();
-        let cp = WhisperContextParameters { use_gpu, ..Default::default() };
-        let ctx = WhisperContext::new_with_params(model_path, cp).context("loading model")?;
-        let det_path = models::model_path(models::find(DETECTOR_MODEL)?);
-        let detector = if det_path.exists() && det_path != model_path {
-            eprintln!("  language detection: {DETECTOR_MODEL}");
-            Some(WhisperContext::new_with_params(&det_path, WhisperContextParameters { use_gpu, ..Default::default() })?)
-        } else {
-            None
+        let cp = || context_params(use_gpu);
+        let ctx = WhisperContext::new_with_params(model_path, cp()).context("loading model")?;
+        if cp().flash_attn {
+            eprintln!("  flash attention: on");
+        }
+        let detector = match detector_path(model_path) {
+            Some(det) => {
+                eprintln!("  language detection: {}", models::HELPER_MODEL);
+                Some(WhisperContext::new_with_params(&det, cp())?)
+            }
+            None => None,
         };
         Ok(Whisper { ctx, detector, threads })
     }
@@ -1136,7 +1160,7 @@ pub(crate) fn take_marker(dir: &Path) -> Result<InProgress> {
 }
 
 /// The final pass's transcriber: the configured model (or `model_override`), with turbo for
-/// language ID when it is downloaded — or the transcription server when one is set
+/// language ID beside a model other than turbo when it is downloaded — or the transcription server when one is set
 /// (`echoctl server use`; never with `model_override`). Returns it with the model's name.
 pub(crate) fn final_transcriber(cfg: &Config, model_override: Option<&str>, prompt: Option<String>, threads: usize) -> Result<(Transcriber, String)> {
     let allowed = allowed_languages(cfg)?;
@@ -1425,6 +1449,43 @@ mod tests {
         // Nothing added: nothing to check.
         assert!(boost_is_heard("same words", "same words", &vocab));
         assert_eq!(latin("Сервіс Нау"), "servisnau");
+    }
+
+    #[test]
+    fn flash_attention_only_on_the_macs_gpu() {
+        assert!(flash_attention(true, true));
+        assert!(!flash_attention(false, true), "the CPU on Apple Silicon");
+        assert!(!flash_attention(true, false), "a GPU elsewhere (Windows, an Intel Mac)");
+        assert!(!flash_attention(false, false));
+        assert!(!context_params(false).flash_attn);
+        assert_eq!(context_params(true).flash_attn, cfg!(all(target_os = "macos", target_arch = "aarch64")));
+        assert!(context_params(true).use_gpu);
+    }
+
+    #[test]
+    fn turbo_gets_no_second_detector_and_other_models_get_the_helper() {
+        let (_env, _) = crate::paths::testenv::folders("transcribe-detector");
+        let path = |n: &str| crate::paths::models_dir().join(models::find(n).unwrap().file);
+        std::fs::create_dir_all(crate::paths::models_dir()).unwrap();
+        let helper = path(models::HELPER_MODEL);
+        assert_eq!(detector_path(&path("small-q8_0")), None, "the helper isn't downloaded");
+        std::fs::write(&helper, b"x").unwrap();
+        for m in ["small-q8_0", "large-v3-q5_0"] {
+            assert_eq!(detector_path(&path(m)), Some(helper.clone()), "{m}");
+        }
+        for m in ["large-v3-turbo-q8_0", models::HELPER_MODEL] {
+            assert_eq!(detector_path(&path(m)), None, "{m}");
+        }
+    }
+
+    #[test]
+    fn turbo_detects_languages_itself() {
+        for f in ["ggml-large-v3-turbo-q5_0.bin", "ggml-large-v3-turbo-q8_0.bin"] {
+            assert!(!needs_detector(Path::new(f)), "{f}");
+        }
+        for f in ["ggml-large-v3-q5_0.bin", "ggml-small-q8_0.bin", "my-own-whisper.bin"] {
+            assert!(needs_detector(Path::new(f)), "{f}");
+        }
     }
 
     #[test]

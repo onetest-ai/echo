@@ -1,9 +1,10 @@
 //! Transcription while a call is recorded — the call's only pass. A worker reads `mic.wav` and
 //! `remote.wav` as the track writers grow them (the WAVs on disk are the queue: nothing is
 //! dropped when decoding falls behind, the text just arrives later) and decodes each finished
-//! utterance with the final pass's transcriber (the configured model, turbo for language ID,
-//! the vocabulary-hint guard). Every line goes to `<call>/live.jsonl` (`speaker`, `start`,
-//! `end`, `lang`, `text`), which the Echo mod draws in its pane; when the call ends the worker
+//! utterance with the final pass's transcriber (the configured model, turbo for language ID
+//! beside a model other than turbo, the vocabulary-hint guard). Every line goes to
+//! `<call>/live.jsonl` (`speaker`, `start`, `end`, `lang`, `text`), which the Echo mod draws in
+//! its pane; when the call ends the worker
 //! decodes what is left and hands back all segments, and the watcher writes the transcript —
 //! seconds after the call instead of a second pass over the whole recording.
 //!
