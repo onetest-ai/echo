@@ -24,7 +24,7 @@ tags: [claude, minutes, failure, cli]
   ```sh
   #!/bin/sh
   # A minutes run: writes over notes.md, then fails. Anything else: the data's fake.
-  if [ -n "$ECHOCTL_RUN_CALL" ]; then printf '# Half-written minutes\n' > "$ECHOCTL_RUN_CALL/notes.md"; echo "test fake: stopped after writing" >&2; exit 1; fi
+  if [ -n "$ECHOCTL_RUN_CALL" ] && [ -z "$ECHOCTL_RUN_MODE" ]; then printf '# Half-written minutes\n' > "$ECHOCTL_RUN_CALL/notes.md"; echo "test fake: stopped after writing" >&2; exit 1; fi
   exec "$(dirname "$0")/claude.fake" "$@"
   ```
 
@@ -43,10 +43,10 @@ tags: [claude, minutes, failure, cli]
 | 2 | `target/debug/echoctl notes <call> --wait` | Exit 1; it prints "test fake: stopped after writing. The previous minutes are kept." and the log's path |
 | 3 | `shasum -c $D/notes.sha; head -1 <call>/notes.md` | "OK": `notes.md` is byte for byte what it was; "# Acme weekly sync" |
 | 4 | `python3 -c "import json;r=json.load(open('<call>/notes-run.json'));print(r['state'], r['had_minutes'], r['message'])"` | `failed True test fake: stopped after writing. The previous minutes are kept.` |
-| 5 | `cat $ECHOCTL_HOME/.echo/trash/*-acme-weekly-sync.notes-*.md; ls -a <call> | grep -c before-run; tail -2 <call>/claude.log` | "# Half-written minutes" (the run's version, kept in the trash); 0 (no copy left in the call's folder); the log says "The previous minutes are back; the ones this run wrote are in the trash." |
+| 5 | `cat $ECHOCTL_HOME/.echo/trash/*-acme-weekly-sync.notes-*/notes.md; ls -a <call> | grep -c before-run; tail -2 <call>/claude.log` | "# Half-written minutes" (the run's version, kept in the trash); 0 (no copy left in the call's folder); the log says "The previous minutes are back; what this run wrote is in …/trash/…" |
 
 ## Expected Final State
 The call has the minutes it had before the failed run; the failed run's text is in the trash.
 
 ## Teardown
-- `mv "$D/bin/claude.fake" "$D/bin/claude"` (the data's fake back)
+- `mv "$D/bin/claude.fake" "$D/bin/claude"` (the data's fake back). The failed run's state, its trash folder and `$D/notes.sha` stay: no later stage reads them

@@ -1166,7 +1166,6 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
     let _ = writeln!(log, "          guard:  every tool call is checked: this call's folder{}, and Echo's minutes commands on this call only", if previous.is_some() { " and the previous minutes" } else { "" });
     let _ = writeln!(log, "          hooks:  allowed by the Claude Code policy in {}", checked.iter().map(|f| f.display().to_string()).collect::<Vec<_>>().join(", "));
 
-    crate::kept_minutes::keep(dir);
     let intent = if r.auto { Intent::Auto } else { Intent::Explicit };
     let mut child = match admit_child(|| {
         let a = args(dir, &plugin, model.as_deref(), intent, &run_id, previous.as_deref(), &settings.0);
@@ -1184,6 +1183,7 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
             return fail(&mut r, msg);
         }
     };
+    crate::kept_minutes::keep(dir); // before Claude Code, starting, can write anything
     r.child_pid = Some(child.id()); // `pid` stays this process: the owner of the run
     save(dir, &r);
 
@@ -1279,6 +1279,7 @@ fn run_in_place(dir: &Path, place: &mut Option<crate::app::FileLock>, mut r: Run
     if r.auto && quitting() && !wrote_notes {
         // Echo stopped it on its way out: taken up again at the next start, as if never tried.
         let _ = writeln!(log, "{}  Echo quit before the minutes were written: it starts them again next time.", stamp());
+        crate::kept_minutes::settle(dir, true, &mut None, &run_id, &mut log);
         withdraw(dir);
         return Ok(dir.to_path_buf());
     }

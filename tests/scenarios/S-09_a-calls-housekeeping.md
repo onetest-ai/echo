@@ -26,7 +26,7 @@ cases:
 
 | Asset | Made by | Used by stages |
 |---|---|---|
-| The `small` data build | the lead (`serve.sh up`) | 1–11 |
+| The `small` data build | the lead (`serve.sh up`) | 1–12 |
 | The Calls list at `#calls` | stage 1, step 1 | 2–8 |
 | Acme weekly sync open on Minutes | stage 4, step 1 | 5 |
 | Initech planning open | stage 5, step 4 | 6, 7 |
