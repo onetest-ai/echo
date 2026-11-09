@@ -431,7 +431,7 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
         if rec.as_ref().is_some_and(|r| !r.memo) && in_call {
             if last_call_look.elapsed() >= CALL_LOOK_EVERY {
                 last_call_look = Instant::now();
-                looker.start();
+                if crate::config::reads_call_window() { looker.start() }
             }
             if let Some(seen) = looker.take() {
                 let fresh_rejoin = rejoined_at.is_some_and(|t| t.elapsed() < REJOIN_NAME_WINDOW);
@@ -820,7 +820,7 @@ fn finish(r: Recording, reason: &str) {
 fn start_mute_sync() -> Option<Arc<AtomicBool>> {
     use crate::audio::mic::MUTED;
     MUTED.store(false, Ordering::SeqCst);
-    if !crate::config::Config::load().map(|c| c.follow_app_mute.unwrap_or(true)).unwrap_or(true) {
+    if !crate::config::reads_call_window() || !crate::config::Config::load().map(|c| c.follow_app_mute.unwrap_or(true)).unwrap_or(true) {
         return None;
     }
     #[cfg(any(target_os = "macos", windows))]
@@ -876,7 +876,7 @@ fn start_mute_sync() -> Option<Arc<AtomicBool>> {
 /// which names the remote side of a 1:1 call and lists the participants in the notes.
 fn find_call_people(dir: &std::path::Path) {
     #[cfg(any(target_os = "macos", windows))]
-    {
+    if crate::config::reads_call_window() {
         let dir = dir.to_path_buf();
         std::thread::spawn(move || {
             // The call window can take a few seconds to appear.
@@ -920,8 +920,8 @@ fn find_call_people(dir: &std::path::Path) {
 /// Record the call app's window text during the call (Accessibility / UI Automation): the raw material
 /// for naming remote speakers. Config `capture_ui` (default on). Text only, kept in the call.
 fn start_ui_capture(dir: &std::path::Path, t0: Instant) -> Option<Arc<AtomicBool>> {
-    if !crate::config::Config::load().map(|c| c.capture_ui.unwrap_or(true)).unwrap_or(true) {
-        return None;
+    if !crate::config::reads_call_window() {
+        return None; // the user turned "Read the Teams window" off: `capture_ui`
     }
     #[cfg(any(target_os = "macos", windows))]
     {
@@ -989,7 +989,7 @@ fn start_chat_capture(dir: &std::path::Path, started: DateTime<Local>, meeting: 
                     }
                     // When the call began by Teams' timer: without it a meeting left hours ago
                     // can pass for this call. Not readable yet ⇒ look again next time.
-                    if began.is_none() {
+                    if began.is_none() && crate::config::reads_call_window() {
                         began = crate::ax::call_elapsed().map(|e| Utc::now() - chrono::Duration::seconds(e as i64));
                     }
                     if began.is_some() || t0.elapsed() > CHAT_POLL {
@@ -1162,7 +1162,7 @@ fn chat_line(m: &serde_json::Value, started: DateTime<Local>) -> serde_json::Val
 /// Save key frames of the meeting window during the call (shared screens; macOS needs Screen
 /// Recording). Config `capture_frames` (default off).
 fn start_frame_capture(dir: &std::path::Path, t0: Instant) -> Option<Arc<AtomicBool>> {
-    if !crate::config::Config::load().map(|c| c.capture_frames).unwrap_or(false) {
+    if crate::config::fed_from_files() || !crate::config::Config::load().map(|c| c.capture_frames).unwrap_or(false) {
         return None;
     }
     #[cfg(any(target_os = "macos", windows))]
@@ -1728,6 +1728,17 @@ mod tests {
         stop().unwrap();
         assert!(!file("stop.request").exists());
         assert!(read_json::<Armed>("armed.json").is_none());
+    }
+
+    #[test]
+    fn with_the_teams_window_off_nothing_reads_it_during_a_call() {
+        let (_env, root) = crate::paths::testenv::folders("watch-no-window");
+        let mut c = crate::config::Config::load().unwrap();
+        c.capture_ui = Some(false);
+        c.follow_app_mute = Some(true);
+        c.save().unwrap();
+        assert!(start_ui_capture(&root, Instant::now()).is_none(), "no names read");
+        assert!(start_mute_sync().is_none(), "no mute sync, even with Follow Teams' mute on");
     }
 
     #[test]

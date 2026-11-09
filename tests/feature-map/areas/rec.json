@@ -83,7 +83,7 @@
   },
   {
    "id": "F-REC-10",
-   "feature": "Muted in Teams, the mic track records silence",
+   "feature": "Muted in Teams, the mic track records silence (with Follow Teams' mute and Read the Teams window on)",
    "priority": "high",
    "check": "person",
    "axes": [
