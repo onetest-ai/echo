@@ -54,6 +54,12 @@ const K_CF_NUMBER_DOUBLE: isize = 13;
 /// An owned AX element (released on drop).
 pub struct Element(AXUIElementRef);
 
+impl Clone for Element {
+    fn clone(&self) -> Self {
+        Element(unsafe { CFRetain(self.0) })
+    }
+}
+
 impl Drop for Element {
     fn drop(&mut self) {
         unsafe { CFRelease(self.0) }
@@ -381,10 +387,101 @@ impl CallWindow {
 /// One line per text-bearing node: "depth|role|subrole|title|description|value". Diffing these
 /// between polls shows what changes when someone speaks (a tile's label, a "speaking" state).
 /// The same walk returns a light copy of the tree (with class lists) for the participant reader.
+/// A participant's element found by a full read, with its nearest ancestors (classes the speaking ring may draw on):
+/// re-read alone between full reads (`quick_tiles`).
+struct Tile {
+    key: String,
+    ancestors: Vec<Element>,
+    el: Element,
+}
+
+/// The key `participants` gives a node, if it is a roster row or a tile (its subtree aside).
+fn tile_key(node: &super::UiNode) -> Option<String> {
+    if let Some(id) = node.id.strip_prefix(super::ROSTER_ITEM) {
+        return Some(format!("roster:{id}"));
+    }
+    let role = node.role.to_lowercase();
+    let (name, me, _) = super::tile_name(&node.label)?;
+    (role.contains("menuitem") || role.contains("image") && me).then(|| format!("tile:{name}"))
+}
+
+/// Read a node and its subtree as a full read does, keeping each tile with its three nearest ancestors in `tiles`.
+fn ui_lines_with(e: &Element, depth: usize, out: &mut Vec<String>, budget: &mut usize, anc: &mut Vec<Element>, tiles: &mut Vec<Tile>) -> super::UiNode {
+    let Some(mut node) = ui_node(e, depth, out, budget) else { return Default::default() };
+    if let Some(key) = tile_key(&node) {
+        tiles.push(Tile { key, ancestors: anc.iter().rev().take(3).rev().cloned().collect(), el: e.clone() });
+    }
+    if depth < MAX_DEPTH {
+        anc.push(e.clone());
+        for c in e.children("AXChildren") {
+            node.kids.push(ui_lines_with(&c, depth + 1, out, budget, anc, tiles));
+        }
+        anc.pop();
+    }
+    node
+}
+
+/// A tile read alone: its classes and ids down its subtree; role and label on the tile itself. None when it's gone.
+fn quick_node(e: &Element, depth: usize, budget: &mut usize) -> Option<super::UiNode> {
+    let mut node = super::UiNode::default();
+    if depth == 0 {
+        node.role = e.string("AXRole")?;
+        node.label = ["AXTitle", "AXDescription", "AXValue"].iter().find_map(|a| e.string(a)).unwrap_or_default().chars().take(300).collect();
+    }
+    node.id = e.string("AXDOMIdentifier").unwrap_or_default();
+    if let Some(Attr::Json(Value::Array(c))) = e.attr("AXDOMClassList") {
+        node.classes = c.into_iter().filter_map(|v| v.as_str().map(str::to_owned)).collect();
+    }
+    if depth < 8 && *budget > 0 {
+        for c in e.children("AXChildren") {
+            *budget = budget.saturating_sub(1);
+            if let Some(k) = quick_node(&c, depth + 1, budget) {
+                node.kids.push(k);
+            }
+        }
+    }
+    Some(node)
+}
+
+/// The participants of the tiles a full read found, from their elements alone: None as soon as one is gone or the
+/// count changed (then a full read follows).
+fn quick_tiles(tiles: &[Tile]) -> Option<Vec<super::Participant>> {
+    let mut root = super::UiNode::default();
+    let mut budget = 2_000;
+    for tile in tiles {
+        let mut node = quick_node(&tile.el, 0, &mut budget)?;
+        for (i, a) in tile.ancestors.iter().enumerate().rev() {
+            let mut up = super::UiNode { kids: vec![node], ..Default::default() };
+            if let Some(Attr::Json(Value::Array(c))) = a.attr("AXDOMClassList") {
+                up.classes = c.into_iter().filter_map(|v| v.as_str().map(str::to_owned)).collect();
+            }
+            if i + 1 == tile.ancestors.len() {
+                // A roster row without a label of its own is named by its parent's.
+                up.label = ["AXTitle", "AXDescription", "AXValue"].iter().find_map(|x| a.string(x)).unwrap_or_default();
+            }
+            node = up;
+        }
+        root.kids.push(node);
+    }
+    let people = super::participants(&root);
+    (people.len() == tiles.len()).then_some(people)
+}
+
 fn ui_lines(e: &Element, depth: usize, out: &mut Vec<String>, budget: &mut usize) -> super::UiNode {
+    let Some(mut node) = ui_node(e, depth, out, budget) else { return Default::default() };
+    if depth < MAX_DEPTH {
+        for c in e.children("AXChildren") {
+            node.kids.push(ui_lines(&c, depth + 1, out, budget));
+        }
+    }
+    node
+}
+
+/// One node of a full read: its text line (into `out`), label, id, classes, role. None once the budget is spent.
+fn ui_node(e: &Element, depth: usize, out: &mut Vec<String>, budget: &mut usize) -> Option<super::UiNode> {
     let mut node = super::UiNode::default();
     if *budget == 0 {
-        return node;
+        return None;
     }
     *budget -= 1;
     let raw = |a: &str| e.string(a).unwrap_or_default();
@@ -401,12 +498,7 @@ fn ui_lines(e: &Element, depth: usize, out: &mut Vec<String>, budget: &mut usize
     }
     node.dialog = subrole == "AXApplicationDialog";
     node.role = role;
-    if depth < MAX_DEPTH {
-        for c in e.children("AXChildren") {
-            node.kids.push(ui_lines(&c, depth + 1, out, budget));
-        }
-    }
-    node
+    Some(node)
 }
 
 /// Records the text of Teams' call window (not the main window, which shows chats) while a
@@ -422,6 +514,20 @@ pub struct UiRecorder {
     bytes: u64,
     prev: std::collections::BTreeSet<String>,
     trees_done: usize,
+    /// The participants' elements the last full read found, and when it ran and how long it took.
+    tiles: Vec<Tile>,
+    last_full: Option<(Instant, Duration)>,
+    /// (dev, `ax-record --full-only`) every poll a full read, as before #236: to compare.
+    full_only: bool,
+}
+
+/// How often the whole call window is read (for the UI text log, new tiles): at least ten times its own read time.
+const FULL_EVERY: Duration = Duration::from_secs(3);
+
+/// A full read is due: no tiles known yet, or the last full read is `FULL_EVERY` old, or ten times its own time
+/// (a big window is read less often, so Teams never spends more than about a tenth of its time answering).
+fn full_due(has_tiles: bool, last_full: Option<(Instant, Duration)>, now: Instant) -> bool {
+    !has_tiles || last_full.is_none_or(|(at, took)| now.saturating_duration_since(at) >= FULL_EVERY.max(took * 10))
 }
 
 impl UiRecorder {
@@ -429,7 +535,7 @@ impl UiRecorder {
         let window = CallWindow::teams()?;
         let out = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("ui.jsonl")).ok()?;
         let speaking = super::SpeakingLog::open(dir);
-        Some(UiRecorder { window, speaking, dir: dir.to_path_buf(), t0, out, bytes: 0, prev: Default::default(), trees_done: 0 })
+        Some(UiRecorder { window, speaking, dir: dir.to_path_buf(), t0, out, bytes: 0, prev: Default::default(), trees_done: 0, tiles: vec![], last_full: None, full_only: false })
     }
 
     /// Read the call window once and append what changed. Returns false once the log is full.
@@ -439,16 +545,35 @@ impl UiRecorder {
             return false;
         }
         let t = self.t0.elapsed().as_secs_f64();
-        let windows: Vec<&Element> = self.window.window().into_iter().collect();
+        // Between full reads only the tiles are read again (their classes carry the speaking ring): every element
+        // read is answered by Teams itself, on its own CPU, during the call (#236).
+        let full_due = self.full_only || full_due(!self.tiles.is_empty(), self.last_full, Instant::now());
+        if !full_due {
+            if let Some(people) = quick_tiles(&self.tiles) {
+                if let Some(log) = self.speaking.as_mut() {
+                    log.record(t, people);
+                }
+                return true;
+            }
+        }
+        let started = Instant::now();
+        let windows: Vec<Element> = self.window.window().into_iter().cloned().collect();
         let mut lines = vec![];
         let mut budget = MAX_NODES;
-        let mut people = vec![];
+        let (mut people, mut tiles) = (vec![], vec![]);
         for w in &windows {
-            people.extend(super::participants(&ui_lines(w, 0, &mut lines, &mut budget)));
+            people.extend(super::participants(&ui_lines_with(w, 0, &mut lines, &mut budget, &mut vec![], &mut tiles)));
         }
+        // Only the tiles that are participants (not a menu item that looks like one), each once.
+        let keys: std::collections::HashSet<&String> = people.iter().map(|p| &p.key).collect();
+        let mut seen = std::collections::HashSet::new();
+        tiles.retain(|tl| keys.contains(&tl.key) && seen.insert(tl.key.clone()));
+        self.tiles = tiles;
+        self.last_full = Some((Instant::now(), started.elapsed()));
         if let (Some(log), false) = (self.speaking.as_mut(), windows.is_empty()) {
             log.record(t, people);
         }
+        let windows: Vec<&Element> = windows.iter().collect();
         let now: std::collections::BTreeSet<String> = lines.into_iter().collect();
         let add: Vec<&String> = now.difference(&self.prev).collect();
         let del: Vec<&String> = self.prev.difference(&now).collect();
@@ -470,6 +595,25 @@ impl UiRecorder {
         }
         true
     }
+}
+
+/// `echoctl ax-record`: Echo's own call-window reader on Teams' call window for `seconds`, polled as a recording polls
+/// it, into `dir` (ui.jsonl, speaking.jsonl); `full_only` reads the whole window every time, as before #236.
+pub fn record_probe(seconds: u64, dir: &std::path::Path, full_only: bool) -> Result<()> {
+    std::fs::create_dir_all(dir)?;
+    let t0 = Instant::now();
+    let mut r = UiRecorder::teams(dir, t0).ok_or_else(|| anyhow!("Teams not running, or Accessibility not granted"))?;
+    r.full_only = full_only;
+    let (mut polls, mut spent) = (0u32, Duration::ZERO);
+    while t0.elapsed() < Duration::from_secs(seconds) {
+        let started = Instant::now();
+        r.poll();
+        spent += started.elapsed();
+        polls += 1;
+        std::thread::sleep(Duration::from_millis(500).saturating_sub(started.elapsed()));
+    }
+    println!("{polls} polls, {} ms reading in all, {} tiles known", spent.as_millis(), r.tiles.len());
+    Ok(())
 }
 
 /// `echoctl ax-share`: follow the call window and the share as the frame recorder does (one
@@ -507,4 +651,35 @@ pub fn mic_probe(seconds: u64) -> Result<()> {
         std::thread::sleep(Duration::from_millis(400));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn node(role: &str, id: &str, label: &str) -> super::super::UiNode {
+        super::super::UiNode { role: role.into(), id: id.into(), label: label.into(), ..Default::default() }
+    }
+
+    #[test]
+    fn tiles_and_roster_rows_are_known_by_the_key_participants_gives_them() {
+        assert_eq!(tile_key(&node("AXGroup", "calling-roster-item-8:orgid:abc", "")).as_deref(), Some("roster:8:orgid:abc"));
+        assert_eq!(tile_key(&node("AXMenuItem", "", "Daniel Osei, video is on, muted")).as_deref(), Some("tile:Daniel Osei"));
+        assert_eq!(tile_key(&node("AXImage", "", "Myself video, Jane Doe, camera on")).as_deref(), Some("tile:Jane Doe"), "the user's own preview");
+        assert_eq!(tile_key(&node("AXImage", "", "Daniel Osei, video is on")), None, "another's image isn't a tile");
+        assert_eq!(tile_key(&node("AXButton", "", "Daniel Osei")), None);
+    }
+
+    #[test]
+    fn the_whole_window_is_read_every_few_seconds_and_less_often_when_it_is_big() {
+        let t0 = Instant::now();
+        assert!(full_due(false, Some((t0, Duration::from_millis(40))), t0), "no tiles yet");
+        assert!(full_due(true, None, t0), "never read");
+        let small = Some((t0, Duration::from_millis(40)));
+        assert!(!full_due(true, small, t0 + Duration::from_secs(2)), "tiles only in between");
+        assert!(full_due(true, small, t0 + FULL_EVERY));
+        let big = Some((t0, Duration::from_millis(600)));
+        assert!(!full_due(true, big, t0 + Duration::from_secs(5)), "a 600 ms read: not before 6 s");
+        assert!(full_due(true, big, t0 + Duration::from_secs(6)));
+    }
 }

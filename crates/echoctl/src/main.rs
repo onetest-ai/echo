@@ -470,6 +470,17 @@ enum Cmd {
         #[arg(long)]
         app: Option<u32>,
     },
+    /// (dev) Echo's call-window reader on Teams' call window for a while, into a folder (ui.jsonl, speaking.jsonl);
+    /// --full-only reads the whole window every poll, as before #236
+    #[cfg(target_os = "macos")]
+    #[command(hide = true)]
+    AxRecord {
+        dir: std::path::PathBuf,
+        #[arg(long, default_value_t = 60)]
+        seconds: u64,
+        #[arg(long)]
+        full_only: bool,
+    },
     /// (dev) Capture the Teams call window once, as the frame recorder would, to a PNG/JPEG
     #[cfg(any(target_os = "macos", windows))]
     #[command(hide = true)]
@@ -660,6 +671,8 @@ fn main() -> Result<()> {
         Cmd::LiveMcp { call, profile, model, app } => livenotes::serve_agent(&call, &profile, &model, app),
         #[cfg(any(target_os = "macos", windows))]
         Cmd::AxDump { seconds } => ax::dump(seconds),
+        #[cfg(target_os = "macos")]
+        Cmd::AxRecord { dir, seconds, full_only } => ax::record_probe(seconds, &dir, full_only),
         #[cfg(any(target_os = "macos", windows))]
         Cmd::FrameGrab { out } => frames::grab(&out),
         #[cfg(any(target_os = "macos", windows))]
