@@ -7,7 +7,7 @@
  "features": [
   {
    "id": "F-REC-01",
-   "feature": "The Record pill offers Record next call (Record this call while in one), its language and profile, and Memo; \"Writing the transcript…\" shows beside it while a call is transcribed",
+   "feature": "The Record pill offers Record next call (Record this call while in one), its language and profile, and Memo; while a call records, the pill holds its language, changed there when it's wrong; \"Writing the transcript…\" shows beside it while a call is transcribed",
    "priority": "critical",
    "check": "agent",
    "axes": [

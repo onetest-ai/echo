@@ -1,6 +1,6 @@
 ---
 id: TC-002
-title: With English, Ukrainian and Russian allowed, a call in Ukrainian comes out in Ukrainian and a call in Russian in Russian
+title: A call recorded in Ukrainian comes out in Ukrainian and one recorded in Russian in Russian, nothing detected
 priority: high
 type: functional
 requirements: [F-STT-02]
@@ -16,7 +16,7 @@ external_id: TC-TRN-003
 **Module:** Transcription | **Priority:** High | **Type:** Functional
 
 ## Preconditions
-- The recordings of this build are prepared (`tests/fixtures/recordings.py prepare`: `app_profile.md` → "Recorded calls"): `ukrainian-call` and `russian-call` were captured and transcribed once with the workspace languages en, uk, ru and no pin of their own
+- The recordings of this build are prepared (`tests/fixtures/recordings.py prepare`: `app_profile.md` → "Recorded calls"): `ukrainian-call` and `russian-call` were captured and transcribed once with the workspace languages en, uk, ru, each started in its own language (`capture --languages uk` / `ru`, as the Record button's choice)
 - Test data built by `tests/fixtures/make-data.sh <dir>`; every command after `. <dir>/env`; `P="$(python3 tests/fixtures/recordings.py path)"`
 
 ## Test Data
@@ -30,13 +30,14 @@ external_id: TC-TRN-003
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | `grep -m1 "(languages:" "$P/ukrainian-call/transcribe.out"; grep -h "  language:" "$P/ukrainian-call/capture.err" "$P/ukrainian-call/transcribe.out"` | "(languages: en, uk, ru)"; one line "language: uk (from … s of speech in … utterances)" from the pass that decided it (the live pass during the capture, else the transcription) and, when the capture decided it, "language: uk (set for this call)" from the transcription: detected once per call, never per sentence, and not again |
+| 1 | `grep -h "  language:" "$P/ukrainian-call/capture.err" "$P/ukrainian-call/transcribe.out"` | Only "language: uk" lines (the live pass and the transcription): the language it was started in, no "(from … utterances)" — nothing detected it |
 | 2 | `CALL="$(python3 tests/fixtures/recordings.py copy ukrainian-call --title "TRN-002 Ukrainian")"; python3 tests/fixtures/audio/make_audio.py score "$CALL"` | Exit code 0; `"pass": true`; top-level `wer` at most 0.15; every turn `lang_ok` (uk); no turn translated |
 | 3 | `grep '"language"' "$CALL/meta.json"` | `"language": "uk"`: kept for a retranscription |
-| 4 | `grep -h "  language:" "$P/russian-call/capture.err" "$P/russian-call/transcribe.out"; CALL="$(python3 tests/fixtures/recordings.py copy russian-call --title "TRN-002 Russian")"; python3 tests/fixtures/audio/make_audio.py score "$CALL"; grep '"language"' "$CALL/meta.json"` | "language: ru (…)"; exit code 0, `"pass": true`, `wer` at most 0.15, both turns `lang_ok` (ru); `"language": "ru"` |
+| 4 | `grep -h "  language:" "$P/russian-call/capture.err" "$P/russian-call/transcribe.out"; CALL="$(python3 tests/fixtures/recordings.py copy russian-call --title "TRN-002 Russian")"; python3 tests/fixtures/audio/make_audio.py score "$CALL"; grep '"language"' "$CALL/meta.json"` | Only "language: ru" lines; exit code 0, `"pass": true`, `wer` at most 0.15, both turns `lang_ok` (ru); `"language": "ru"` |
 
 ## Expected Final State
-With three languages allowed, each call is transcribed in the one language it is in (Ukrainian and Russian kept apart), detected once from its first sentences and kept in its `meta.json`, at most 15% word errors.
+Each call is transcribed in the language it was started in (Ukrainian and Russian kept apart), kept in its `meta.json`, at most 15% word errors; nothing detects a call's language.
 
 ## Notes
+- Until 2026-11-09 the language was detected once from the first sentences (#234); now it is chosen when the call starts.
 - Before #234 this case was "Each sentence stays in the language it was spoken in" on `mixed-languages`: a call now has one language, detected once (calls in several languages were dropped).

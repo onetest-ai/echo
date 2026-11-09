@@ -327,6 +327,16 @@ pub(super) fn act(v: &Value) -> bool {
             crate::notes::start_in_background(d);
             true
         }
+        // The call's language, changed by hand (`call_language::change`): after the call, transcribed again here.
+        "set_language" => {
+            let (Some(d), Some(code)) = (call, v["language"].as_str().filter(|c| !c.is_empty())) else { return false };
+            match crate::call_language::change(&d, code) {
+                Ok(crate::call_language::Changed::WhileRecording(_)) => {}
+                Ok(crate::call_language::Changed::TranscribeAgain(_)) => crate::watch::transcribe_in_background(d),
+                Err(e) => crate::app::notify("The call's language wasn't changed", &format!("{e:#}")),
+            }
+            true
+        }
         "set_profile" => {
             let (Some(d), Some(id)) = (call, profile(v)) else { return false };
             // From now on an older choice's sign-in check opens nothing.

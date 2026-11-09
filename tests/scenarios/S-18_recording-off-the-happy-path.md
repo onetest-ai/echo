@@ -33,6 +33,7 @@ cases:
   - tests/cases/recording/TC-022_shared-screen-snapshots.md
   - tests/cases/recording/TC-025_stop-while-echo-is-busy.md
   - tests/cases/transcription/TC-010_on-speakers-the-echo-is-skipped-and-the-users-words-kept.md
+  - tests/cases/transcription/TC-012_a-calls-language-changed-during-it.md
 ---
 
 # S-18: Recording off the happy path
@@ -116,6 +117,7 @@ prelude" in every case below).
 | 24 | `recording/TC-022_shared-screen-snapshots.md` | — | **person** — "Save snapshots of shared screens" on (permissions/TC-007, S-16) |
 | 25 | `recording/TC-025_stop-while-echo-is-busy.md` | — | After stage 11's teardown quit the prelude's app: step 1 starts its own (it freezes it with `kill -STOP`) |
 | 26 | `transcription/TC-010_on-speakers-the-echo-is-skipped-and-the-users-words-kept.md` | — | After stage 25's teardown quit its app: step 1 starts its own. A 126 s call on laptop speakers (a made-up echo), about 2.5 minutes |
+| 27 | `transcription/TC-012_a-calls-language-changed-during-it.md` | — | After stage 26's teardown quit its app: step 1 starts its own. A 15 s Ukrainian call recorded as English, its language changed once both sides were transcribed |
 
 ## Notes
 - **Why five calls, not one.** A stop by hand ends the recording and the rest of that call is never recorded again

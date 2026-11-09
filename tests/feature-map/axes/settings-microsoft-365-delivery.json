@@ -8,12 +8,12 @@
   },
   {
    "axis": "set.languages",
-   "values": "none (any) / one / several",
+   "values": "none (English) / one / several (the first the default)",
    "where": "`config.json` `languages`"
   },
   {
    "axis": "set.record_lang",
-   "values": "English / Detect / another (Record ▾)",
+   "values": "the default / another (Record ▾, until the window reloads)",
    "where": "app.js `recordLang`"
   },
   {

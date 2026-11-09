@@ -114,8 +114,6 @@ struct Api {
     word_text: unsafe extern "C" fn(*const AsrResult, usize, usize) -> *const c_char,
     word_start: unsafe extern "C" fn(*const AsrResult, usize, usize) -> i32,
     word_end: unsafe extern "C" fn(*const AsrResult, usize, usize) -> i32,
-    language_count: unsafe extern "C" fn(*const AsrResult, usize) -> usize,
-    language_code: unsafe extern "C" fn(*const AsrResult, usize, usize) -> *const c_char,
     result_destroy: unsafe extern "C" fn(*mut AsrResult),
     last_error: unsafe extern "C" fn() -> *const c_char,
     version: unsafe extern "C" fn() -> *const c_char,
@@ -195,8 +193,6 @@ fn load_api() -> Result<Api> {
             word_text: sym!("nemo_speech_asr_result_word_text"),
             word_start: sym!("nemo_speech_asr_result_word_start_time"),
             word_end: sym!("nemo_speech_asr_result_word_end_time"),
-            language_count: sym!("nemo_speech_asr_result_language_count"),
-            language_code: sym!("nemo_speech_asr_result_language_code"),
             result_destroy: sym!("nemo_speech_asr_result_destroy"),
             last_error: sym!("nemo_speech_asr_last_error"),
             version: sym!("nemo_speech_asr_version"),
@@ -237,8 +233,6 @@ pub struct Word {
 
 /// What one `recognize` call returns.
 pub struct Recognized {
-    /// Locales the model tagged (`uk-UA`, …): asked for, or detected with `auto`.
-    pub languages: Vec<String>,
     pub words: Vec<Word>,
 }
 
@@ -301,15 +295,12 @@ impl Model {
             bail!("Nemotron: {}", last_error(api));
         }
         if res.is_null() {
-            return Ok(Recognized { languages: vec![], words: vec![] });
+            return Ok(Recognized { words: vec![] });
         }
         let text = |p: *const c_char| if p.is_null() { String::new() } else { unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned() };
-        let mut out = Recognized { languages: vec![], words: vec![] };
+        let mut out = Recognized { words: vec![] };
         unsafe {
             if (api.alternatives)(res) > 0 {
-                for i in 0..(api.language_count)(res, 0) {
-                    out.languages.push(text((api.language_code)(res, 0, i)));
-                }
                 for i in 0..(api.word_count)(res, 0) {
                     out.words.push(Word {
                         text: text((api.word_text)(res, 0, i)),
@@ -448,20 +439,14 @@ pub fn locale(code: &str) -> Option<&'static str> {
     })
 }
 
-/// `uk-UA` → `uk`.
-pub fn code(locale: &str) -> &str {
-    let c = locale.split(['-', '_']).next().unwrap_or(locale);
-    if c == "nb" { "no" } else { c }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn locales_round_trip() {
-        for c in ["en", "uk", "ru", "es", "no"] {
-            assert_eq!(code(locale(c).unwrap()), c);
+        for (c, l) in [("en", "en-US"), ("uk", "uk-UA"), ("ru", "ru-RU"), ("no", "nb-NO")] {
+            assert_eq!(locale(c), Some(l));
         }
         assert_eq!(locale("xx"), None);
     }

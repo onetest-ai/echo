@@ -10,7 +10,7 @@ cases:
   - tests/cases/settings/TC-004_recording-calendar-meetings-manual.md
   - tests/cases/settings/TC-005_recording-other-calls-manual.md
   - tests/cases/settings/TC-006_recording-add-remove-language.md
-  - tests/cases/settings/TC-007_recording-new-recordings-detect.md
+  - tests/cases/settings/TC-007_recording-default-language.md
   - tests/cases/settings/TC-008_recording-follow-teams-mute-off.md
   - tests/cases/settings/TC-009_recording-names-from-teams-window-off.md
   - tests/cases/settings/TC-021_about-me-name-saved.md
@@ -40,6 +40,7 @@ cases:
   - tests/cases/vocabulary/TC-007_always-moves-a-learned-term-to-every-call.md
   - tests/cases/vocabulary/TC-008_remove-forgets-a-learned-term.md
   - tests/cases/vocabulary/TC-009_learned-filter-appears-past-six-terms.md
+  - tests/cases/window/TC-025_a-releases-announcement-shows-once.md
 ---
 
 # S-11: Set Echo up your way: appearance, recording, languages, About me, a template, a meeting type, the vocabulary
@@ -73,7 +74,7 @@ cases:
 | 4 | `settings/TC-004_recording-calendar-meetings-manual.md` | — | Skip its teardown (Calendar meetings stays Manual: no later stage reads it) |
 | 5 | `settings/TC-005_recording-other-calls-manual.md` | — | On stage 4's view (`#settings/recording`): skip step 1's navigation, read the row. Skip its teardown |
 | 6 | `settings/TC-006_recording-add-remove-language.md` | — | On stage 5's view: skip step 1's navigation, read the chips |
-| 7 | `settings/TC-007_recording-new-recordings-detect.md` | — | On stage 6's view: skip step 1's navigation, read the row. Keep its teardown (the choice is in the browser, not the data) |
+| 7 | `settings/TC-007_recording-default-language.md` | — | Keep its teardown (it sets the languages back to English) |
 | 8 | `settings/TC-008_recording-follow-teams-mute-off.md` | — | On stage 7's view: skip step 1's navigation, read the switch. Skip its teardown |
 | 9 | `settings/TC-009_recording-names-from-teams-window-off.md` | — | On stage 8's view: skip step 1's navigation, read the switch. Skip its teardown |
 | 10 | `settings/TC-021_about-me-name-saved.md` | — | Skip its teardown (the name stays `Sam Rivera Jr`: no later stage reads it) |
@@ -103,6 +104,7 @@ cases:
 | 34 | `vocabulary/TC-007_always-moves-a-learned-term-to-every-call.md` | 33 | On stage 33's view (the panel open, "Learned from calls" `2`): skip step 1 (stage 33's step 1 ran the same command and checked its output); in step 2 skip the reload and the book button, click "Always" in the row "Okta SSO" |
 | 35 | `vocabulary/TC-008_remove-forgets-a-learned-term.md` | — | — |
 | 36 | `vocabulary/TC-009_learned-filter-appears-past-six-terms.md` | — | — |
+| 37 | `window/TC-025_a-releases-announcement-shows-once.md` | — | The speech models and the NeMo-Speech runtime linked into the run's config (its preconditions); keep its teardown |
 
 ## Notes
 - The stages share state instead of undoing it: a switch, a language choice, the name and the profile stay as their stage set them when no later stage reads them (stages 4, 5, 8–11), and an edit stays for the next stage that would make it again (stages 15→16, 22→23, 26→27, 30→31, 33→34). Teardowns that a later stage's first check needs are kept: the template Resets (stages 17–21, so each starts from Echo's Status sync and stage 28 reads it built in), the vocabulary removals before a CLI step, and the two choices kept in the browser (stages 3 and 7).

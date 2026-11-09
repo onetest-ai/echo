@@ -1,6 +1,6 @@
 //! Recording and transcription: arm, capture, memos, live notes, vocabulary.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Subcommand;
 
 #[cfg(feature = "transcribe")]
@@ -127,6 +127,32 @@ pub fn transcribe(call: String, model: Option<String>, keep_audio: bool) -> Resu
         anyhow::bail!(why);
     }
     transcribe::transcribe(&call, model.as_deref(), keep_audio)
+}
+
+/// `echoctl language`: change a call's language (`call_language::change`); after the call, transcribe it again here.
+pub fn language(code: &str, call: &str) -> Result<()> {
+    let dir = crate::calls::resolve_call(call)?;
+    let name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    match crate::call_language::change(&dir, code).with_context(|| format!("{name}: its language wasn't changed"))? {
+        crate::call_language::Changed::WhileRecording(l) => {
+            println!("{name}: {l} from now on; the whole call is transcribed again in {l} when it ends");
+            Ok(())
+        }
+        crate::call_language::Changed::TranscribeAgain(l) => {
+            println!("{name}: {l}; transcribing it again");
+            // Being transcribed right now: that pass sees the change before writing and decodes the call again in it.
+            #[cfg(feature = "transcribe")]
+            return match transcribe::transcribe(&dir.to_string_lossy(), None, false) {
+                Err(e) if format!("{e:#}").contains("already being transcribed") => {
+                    println!("{name}: being transcribed now; done again in {l}");
+                    Ok(())
+                }
+                r => r.map(|_| ()),
+            };
+            #[cfg(not(feature = "transcribe"))]
+            anyhow::bail!("this build of Echo doesn't transcribe ({l} is saved for the call)");
+        }
+    }
 }
 
 pub fn live(cmd: LiveCmd) -> Result<()> {

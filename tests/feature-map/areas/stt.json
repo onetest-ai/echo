@@ -16,7 +16,7 @@
   },
   {
    "id": "F-STT-02",
-   "feature": "A call has one language: pinned for it, the only one allowed, or detected once from its first sentences among the allowed ones (Ukrainian and Russian apart), then kept for the whole call and in its meta.json for a retranscription (re-decided when the allowed ones no longer include it); the first utterances, decoded before the decision, keep the language they were decoded in; a language pinned for a call applies to it alone",
+   "feature": "A call has one language, chosen when it starts (the Record button's choice, its meeting series', else Settings' default, the first), never detected; kept in its meta.json, and in every line of its transcript",
    "priority": "high",
    "check": "person",
    "axes": [
@@ -65,6 +65,22 @@
    "axes": [
     "set.audio"
    ]
+  },
+  {
+   "id": "F-STT-08",
+   "feature": "The model follows the call's language, from the downloaded ones: English → Parakeet v3, else Nemotron; another language → the Whisper model in use, else turbo; nothing better downloaded → the model in use",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "set.models"
+   ]
+  },
+  {
+   "id": "F-STT-09",
+   "feature": "A call's language is changed by hand (echoctl language, the window): while it records, what is said from then on is in the new language with its model and the whole call is transcribed again at its end; after it, transcribed again when its audio was kept, refused once the audio is gone",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
   }
  ]
 }

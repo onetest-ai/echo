@@ -38,7 +38,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::config::Config;
-use crate::call_language::Ranked;
 use crate::transcribe::{Decoded, Engine, EngineState, Piece};
 use crate::{models, paths};
 
@@ -228,21 +227,17 @@ impl Client {
     }
 
     /// Decode one utterance on an OpenAI-compatible server (`openai_decode`, one request per `decode`).
-    fn openai_utterance(&self, model: &str, chunk: &[f32], allowed: &[i32], prompt: Option<&str>) -> Result<(Option<Ranked>, String, Decoded)> {
-        let decode = |lang: Option<&str>, hint: Option<&str>| -> Result<(Option<i32>, Decoded)> {
-            let v = self.openai_request(model, chunk, lang, hint)?;
-            Ok((lang_of(&v["language"]), pieces(&v)))
-        };
-        openai_decode(decode, chunk.len() as f64 / 16000.0, allowed, prompt)
+    fn openai_utterance(&self, model: &str, chunk: &[f32], lang: i32, prompt: Option<&str>) -> Result<(String, Decoded)> {
+        let decode = |lang: &str, hint: Option<&str>| -> Result<Decoded> { Ok(pieces(&self.openai_request(model, chunk, Some(lang), hint)?)) };
+        openai_decode(decode, chunk.len() as f64 / 16000.0, lang, prompt)
     }
 
-    /// Decode one utterance on the server (see `Engine::utterance`): in the one language allowed, or detected there
-    /// among several and decoded in its own pick (the transcriber asks again in the call's language when they differ).
-    pub fn utterance(&self, chunk: &[f32], allowed: &[i32], prompt: Option<&str>) -> Result<(Option<Ranked>, String, Decoded)> {
+    /// Decode one utterance on the server in `lang`, the call's (see `Engine::utterance`).
+    pub fn utterance(&self, chunk: &[f32], lang: i32, prompt: Option<&str>) -> Result<(String, Decoded)> {
         if let Some(model) = &self.openai {
-            return self.openai_utterance(model, chunk, allowed, prompt);
+            return self.openai_utterance(model, chunk, lang, prompt);
         }
-        let languages: Vec<&str> = allowed.iter().filter_map(|l| whisper_rs::get_lang_str(*l)).collect();
+        let languages: Vec<&str> = whisper_rs::get_lang_str(lang).into_iter().collect();
         let head = serde_json::to_vec(&json!({
             "languages": languages,
             "prompt": prompt,
@@ -263,16 +258,14 @@ impl Client {
         let text = r.body_mut().read_to_string()?;
         Self::check(r.status().as_u16(), &text)?;
         let v: Answer = serde_json::from_str(&text).context("unexpected answer from the server")?;
-        let ranked = answer_ranked(&v, allowed);
         let mut words = v.words.into_iter();
         let segs = v.segs.into_iter().map(|(a, b, t)| Piece::new(a, b, t, words.next().unwrap_or_default())).collect();
-        Ok((ranked, v.lang, segs))
+        Ok((v.lang, segs))
     }
 }
 
-/// The server's answer. `words` (per sentence, its words' times) and `ranked` (its detection: each allowed language
-/// with its probability, best first; empty when none ran) came later: older servers leave them out, older clients
-/// ignore them.
+/// The server's answer. `words` (per sentence, its words' times) came later: older servers leave it out. `lang_id` and
+/// `ranked` were a detection's, from when a call could be in several languages: kept empty for older clients.
 #[derive(Serialize, Deserialize)]
 struct Answer {
     lang_id: Option<String>,
@@ -282,16 +275,6 @@ struct Answer {
     words: Vec<Vec<[f64; 2]>>,
     #[serde(default)]
     ranked: Vec<(String, f32)>,
-}
-
-/// An answer's detection: its `ranked`; from an older server without it, the language it picked
-/// (`lang_id`) with 1, when it detected (several languages allowed).
-fn answer_ranked(a: &Answer, allowed: &[i32]) -> Option<Ranked> {
-    let id = |l: &str| whisper_rs::get_lang_id(l);
-    if !a.ranked.is_empty() {
-        return Some(a.ranked.iter().filter_map(|(l, p)| Some((id(l)?, *p))).collect());
-    }
-    (allowed.len() != 1).then(|| a.lang_id.as_deref().and_then(id).map(|l| (l, 1.0)).into_iter().collect())
 }
 
 /// 16 kHz mono 16-bit PCM as a WAV file.
@@ -316,42 +299,18 @@ fn wav16k(chunk: &[f32]) -> Vec<u8> {
     w
 }
 
-/// One utterance on an OpenAI-compatible server, `decode` being one request (language, hint): the
-/// language pinned when the call has one; else the server's detection (its vote, with 1), asked again
-/// pinned in the call's first language when it falls outside the call's list (no vote). From
-/// `GUARD_MIN_S` on, the utterance is decoded plain and asked again with the hint only when a term may
+/// One utterance on an OpenAI-compatible server in the call's language, `decode` being one request (language, hint).
+/// From `GUARD_MIN_S` on, the utterance is decoded plain and asked again with the hint only when a term may
 /// have been heard (`transcribe::with_hint`); a shorter one is decoded with the hint, unchecked.
-fn openai_decode(
-    mut decode: impl FnMut(Option<&str>, Option<&str>) -> Result<(Option<i32>, Decoded)>,
-    dur: f64,
-    allowed: &[i32],
-    prompt: Option<&str>,
-) -> Result<(Option<Ranked>, String, Decoded)> {
-    let code = |id: i32| whisper_rs::get_lang_str(id).map(str::to_owned);
-    let pinned: Option<String> = if allowed.len() == 1 { code(allowed[0]) } else { None };
+fn openai_decode(mut decode: impl FnMut(&str, Option<&str>) -> Result<Decoded>, dur: f64, lang: i32, prompt: Option<&str>) -> Result<(String, Decoded)> {
+    let lang = whisper_rs::get_lang_str(lang).unwrap_or("en").to_string();
     let checked = prompt.filter(|_| dur >= crate::transcribe::GUARD_MIN_S);
     let first = if checked.is_some() { None } else { prompt };
-    let (mut lang_id, mut segs) = decode(pinned.as_deref(), first)?;
-    let mut ranked = if pinned.is_none() { Some(lang_id.map(|l| (l, 1.0)).into_iter().collect::<Ranked>()) } else { None };
-    if pinned.is_none() && !allowed.is_empty() && lang_id.is_some_and(|l| !allowed.contains(&l)) {
-        if let Some(c) = code(allowed[0]) {
-            (_, segs) = decode(Some(&c), first)?;
-            lang_id = Some(allowed[0]);
-            ranked = Some(vec![]);
-        }
-    }
-    let lang = lang_id.and_then(whisper_rs::get_lang_str).unwrap_or("auto").to_string();
+    let mut segs = decode(&lang, first)?;
     if let Some(hint) = checked {
-        let lang_arg = pinned.or_else(|| lang_id.and_then(whisper_rs::get_lang_str).map(str::to_owned));
-        segs = crate::transcribe::with_hint(segs, hint, || Ok(decode(lang_arg.as_deref(), Some(hint))?.1))?;
+        segs = crate::transcribe::with_hint(segs, hint, || decode(&lang, Some(hint)))?;
     }
-    Ok((ranked, lang, segs))
-}
-
-/// A language as servers name it ("en", "english", "English") → whisper's id.
-fn lang_of(v: &serde_json::Value) -> Option<i32> {
-    let s = v.as_str()?.trim().to_lowercase();
-    whisper_rs::get_lang_id(&s).or_else(|| (0..=whisper_rs::get_lang_max_id()).find(|&i| whisper_rs::get_lang_str_full(i).is_some_and(|f| f.eq_ignore_ascii_case(&s))))
+    Ok((lang, segs))
 }
 
 /// A verbose answer's segments as sentences: Whisper's no-speech rule applied where the segment
@@ -778,7 +737,11 @@ fn parse_body(body: &[u8]) -> Result<(Request, Vec<f32>)> {
 fn decode_request(body: &[u8]) -> Result<Answer> {
     let (req, audio) = parse_body(body)?;
     let lang = |l: &str| whisper_rs::get_lang_id(l).ok_or_else(|| anyhow::Error::new(Refused(format!("unknown language '{l}'"))));
-    let allowed = req.languages.iter().map(|l| lang(l)).collect::<Result<Vec<_>>>()?;
+    // The call's language; an older client may send several (or none): its first, else the server's own.
+    let call = match req.languages.first() {
+        Some(l) => lang(l)?,
+        None => Config::load().map(|c| whisper_rs::get_lang_id(&crate::call_language::default_language(&c)).unwrap_or(0)).unwrap_or(0),
+    };
     let mut g = LOADED.lock().unwrap_or_else(|e| e.into_inner());
     let model = Config::load().ok().and_then(|c| c.model).unwrap_or_default();
     if g.as_ref().is_some_and(|l| l.model != model) {
@@ -790,19 +753,16 @@ fn decode_request(body: &[u8]) -> Result<Answer> {
             bail!("the server has no speech model downloaded");
         }
         eprintln!("transcription server: loading {model}");
-        let engine = Engine::load(&path, crate::transcribe::final_threads(), true)?;
+        let engine = Engine::load(&path, crate::transcribe::final_threads())?;
         let state = engine.state()?;
         *g = Some(Loaded { engine, state, model, used: Instant::now() });
     }
     let l = g.as_mut().expect("just loaded");
     l.used = Instant::now();
-    // The client keeps the call's language: detecting here, the server decodes in its own pick and says what it heard.
-    let (ranked, lang, segs) = l.engine.utterance(&mut l.state, &allowed, req.prompt.as_deref(), &audio, &|r| r.first().map(|x| x.0))?;
+    let (lang, segs) = l.engine.utterance(&mut l.state, call, req.prompt.as_deref(), &audio)?;
     let words = segs.iter().map(|p| p.words.clone()).collect();
     let segs = segs.into_iter().map(|p| (p.start, p.end, p.text)).collect();
-    let code = |l: i32| whisper_rs::get_lang_str(l).map(str::to_owned);
-    let lang_id = ranked.as_ref().and_then(|r| r.first()).and_then(|x| code(x.0));
-    let ranked = ranked.unwrap_or_default().into_iter().filter_map(|(l, p)| Some((code(l)?, p))).collect();
+    let (lang_id, ranked) = (None, vec![]);
     Ok(Answer { lang_id, lang, segs, words, ranked })
 }
 
@@ -811,22 +771,20 @@ mod tests {
     use super::*;
 
     /// Each request's (language, hint).
-    type Requests = Vec<(Option<String>, Option<String>)>;
+    type Requests = Vec<(String, Option<String>)>;
 
-    /// The requests `openai_decode` makes for an utterance whose plain answer is `plain` (a hinted
-    /// request answers "We moved it to ServiceNow."; every answer names `heard` as its language), and
-    /// the text it keeps.
-    fn openai_requests(plain: &str, dur: f64, allowed: &[i32], heard: Option<&str>) -> (Requests, String, String) {
-        let heard = heard.and_then(whisper_rs::get_lang_id);
+    /// The requests `openai_decode` makes for an utterance in `lang` whose plain answer is `plain` (a hinted request
+    /// answers "We moved it to ServiceNow."), and the text it keeps.
+    fn openai_requests(plain: &str, dur: f64, lang: &str) -> (Requests, String, String) {
         let mut calls = vec![];
-        let (_, lang, segs) = openai_decode(
+        let (lang, segs) = openai_decode(
             |lang, hint| {
-                calls.push((lang.map(str::to_owned), hint.map(str::to_owned)));
+                calls.push((lang.to_owned(), hint.map(str::to_owned)));
                 let text = if hint.is_some() { "We moved it to ServiceNow." } else { plain };
-                Ok((heard, vec![Piece::new(0.0, 1.0, text.to_string(), vec![])]))
+                Ok(vec![Piece::new(0.0, 1.0, text.to_string(), vec![])])
             },
             dur,
-            allowed,
+            whisper_rs::get_lang_id(lang).unwrap(),
             Some("ServiceNow, Kubernetes"),
         )
         .unwrap();
@@ -834,49 +792,25 @@ mod tests {
     }
 
     #[test]
-    fn a_hinted_request_only_when_a_term_may_have_been_heard() {
+    fn a_hinted_request_only_when_a_term_may_have_been_heard_always_in_the_calls_language() {
         let hint = || Some("ServiceNow, Kubernetes".to_string());
-        let (calls, text, _) = openai_requests("We will meet at ten.", 3.0, &[], Some("en"));
-        assert_eq!(calls, vec![(None, None)], "no term heard: one plain request");
-        assert_eq!(text, "We will meet at ten.");
-        let (calls, text, _) = openai_requests("We moved it to service now.", 3.0, &[], Some("en"));
-        assert_eq!(calls, vec![(None, None), (Some("en".into()), hint())], "plain, then hinted in the language heard");
+        let (calls, text, lang) = openai_requests("We will meet at ten.", 3.0, "en");
+        assert_eq!((calls, text.as_str(), lang.as_str()), (vec![("en".into(), None)], "We will meet at ten.", "en"), "no term heard: one plain request");
+        let (calls, text, _) = openai_requests("We moved it to service now.", 3.0, "en");
+        assert_eq!(calls, vec![("en".into(), None), ("en".into(), hint())], "plain, then hinted");
         assert_eq!(text, "We moved it to ServiceNow.");
-        let uk = whisper_rs::get_lang_id("uk").unwrap();
-        let (calls, _, _) = openai_requests("We will meet at ten.", 3.0, &[uk], Some("uk"));
-        assert_eq!(calls, vec![(Some("uk".into()), None)], "a pinned language: still one plain request");
-        let (calls, _, _) = openai_requests("We moved it to service now.", 3.0, &[uk], None);
-        assert_eq!(calls, vec![(Some("uk".into()), None), (Some("uk".into()), hint())], "the pin holds when the server names no language");
-        let (calls, _, _) = openai_requests("Yes.", 0.5, &[], Some("en"));
-        assert_eq!(calls, vec![(None, hint())], "a short utterance: one hinted request, as before");
+        let (calls, _, _) = openai_requests("We moved it to service now.", 3.0, "uk");
+        assert_eq!(calls, vec![("uk".into(), None), ("uk".into(), hint())]);
+        let (calls, _, _) = openai_requests("Yes.", 0.5, "en");
+        assert_eq!(calls, vec![("en".into(), hint())], "a short utterance: one hinted request, as before");
     }
 
     #[test]
-    fn a_language_outside_the_list_is_asked_again_plain_and_the_hint_follows_only_when_needed() {
-        let hint = || Some("ServiceNow, Kubernetes".to_string());
-        let (en, uk) = (whisper_rs::get_lang_id("en").unwrap(), whisper_rs::get_lang_id("uk").unwrap());
-        let (calls, _, lang) = openai_requests("We moved it to service now.", 3.0, &[en, uk], Some("pl"));
-        assert_eq!(calls, vec![(None, None), (Some("en".into()), None), (Some("en".into()), hint())]);
-        assert_eq!(lang, "en");
-        let (calls, _, _) = openai_requests("We will meet at ten.", 3.0, &[en, uk], Some("pl"));
-        assert_eq!(calls, vec![(None, None), (Some("en".into()), None)], "no term heard: no hinted request");
-        let (calls, _, _) = openai_requests("Yes.", 0.5, &[en, uk], Some("pl"));
-        assert_eq!(calls, vec![(None, hint()), (Some("en".into()), hint())], "a short utterance keeps the hint on the re-ask");
-    }
-
-    #[test]
-    fn a_detection_comes_back_as_a_vote_from_new_and_old_servers() {
-        let (en, uk) = (whisper_rs::get_lang_id("en").unwrap(), whisper_rs::get_lang_id("uk").unwrap());
-        let new: Answer = serde_json::from_str(r#"{"lang_id":"uk","lang":"uk","segs":[],"ranked":[["uk",0.6],["en",0.3]]}"#).unwrap();
-        assert_eq!(answer_ranked(&new, &[en, uk]), Some(vec![(uk, 0.6), (en, 0.3)]));
-        let old: Answer = serde_json::from_str(r#"{"lang_id":"uk","lang":"uk","segs":[]}"#).unwrap();
-        assert_eq!(answer_ranked(&old, &[en, uk]), Some(vec![(uk, 1.0)]), "an older server: its pick votes with 1");
-        assert_eq!(answer_ranked(&old, &[uk]), None, "one language sent: no detection to count");
-        // OpenAI-compatible: the server's language votes; pinned, or outside the list, it doesn't.
-        let vote = |allowed: &[i32], heard: &str| openai_decode(|_, _| Ok((whisper_rs::get_lang_id(heard), vec![])), 3.0, allowed, None).unwrap().0;
-        assert_eq!(vote(&[en, uk], "uk"), Some(vec![(uk, 1.0)]));
-        assert_eq!(vote(&[uk], "uk"), None);
-        assert_eq!(vote(&[en, uk], "pl"), Some(vec![]));
+    fn an_older_servers_detection_fields_are_read_and_ignored() {
+        let old: Answer = serde_json::from_str(r#"{"lang_id":"uk","lang":"uk","segs":[],"ranked":[["uk",0.6],["en",0.3]]}"#).unwrap();
+        assert_eq!(old.lang, "uk");
+        let oldest: Answer = serde_json::from_str(r#"{"lang_id":null,"lang":"en","segs":[[0.0,1.0,"Hi."]]}"#).unwrap();
+        assert!(oldest.words.is_empty() && oldest.ranked.is_empty());
     }
 
     #[test]
@@ -890,8 +824,6 @@ mod tests {
         assert_eq!(p.len(), 2, "the no-speech segment is dropped");
         assert_eq!(p[1].text, "Budget's fine.");
         assert_eq!(p[1].words, vec![[1.3, 1.8], [1.9, 2.4]]);
-        assert_eq!(lang_of(&v["language"]), whisper_rs::get_lang_id("en"));
-        assert_eq!(lang_of(&serde_json::json!("uk")), whisper_rs::get_lang_id("uk"));
         let w = wav16k(&[0.0, 0.5]);
         assert_eq!((&w[..4], w.len()), (&b"RIFF"[..], 48));
     }

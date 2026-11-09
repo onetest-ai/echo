@@ -27,10 +27,11 @@ permission for the user (open the page and explain), and never download a model 
 4. **Speech model** (none `active` in `echoctl model list --json`): offer the `recommended` one
    with its `reason` and `size_mb`, plus one larger and one smaller; on a yes,
    `echoctl model download <name>`.
-5. **Languages**, if the transcript came out in the wrong language: `echoctl config --languages
-   en,uk` (a call is in one of these, detected once from its first sentences). To fix a call
-   already transcribed, `echoctl transcribe <call>` while its audio is kept: a call whose saved
-   language (`language` in its `meta.json`) isn't in the new list has it decided again.
+5. **Languages**, if the transcript came out in the wrong language: the call was started in
+   another one (Echo never detects it). `echoctl language <code> <call>` changes it: while the call
+   records, the rest and then the whole call are in the new one; after, it is transcribed again
+   while its audio is kept (refused once the audio is gone). The default for new calls is the first
+   of `echoctl config --languages ru,en`.
 6. **Minutes** missing or failed for a call: `<call>/notes-run.json` (`state`, `message`) and the
    end of `<call>/claude.log` say why; `echoctl attention` lists minutes that failed or wait, and
    what they wait for. `echoctl notes <call>` writes them now.

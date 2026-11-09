@@ -398,6 +398,9 @@ fn state() -> Value {
         "version": env!("CARGO_PKG_VERSION"),
         "recording": w.as_ref().and_then(|w| w.recording.clone()),
         "recording_memo": w.as_ref().is_some_and(|w| w.memo),
+        // The recording call's language, which the pill changes (`call_language::change`).
+        "recording_language": w.as_ref().and_then(|w| w.recording.as_ref()).and_then(|d| std::fs::read(std::path::Path::new(d).join("meta.json")).ok())
+            .and_then(|b| serde_json::from_slice::<Value>(&b).ok()).and_then(|m| m["language"].as_str().map(str::to_owned)),
         "armed": w.as_ref().is_some_and(|w| w.armed),
         "in_call": w.as_ref().and_then(|w| w.in_call),
         "home": paths::home(),
@@ -406,6 +409,8 @@ fn state() -> Value {
         "own_title_bar": own_title_bar(),
         "notes": crate::notes::readiness(),
         "languages": crate::config::Config::load().map(|c| c.languages).unwrap_or_default(),
+        // A release's one-time banner, until answered (`announce.rs`).
+        "announcement": crate::announce::current(),
         "ai": crate::ai::summary(),
         // The Brain: built in and switched on (off hides it everywhere in the window).
         "brain": cfg!(feature = "brain") && { #[cfg(feature = "brain")] { crate::brain::enabled() } #[cfg(not(feature = "brain"))] { false } },

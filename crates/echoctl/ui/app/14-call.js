@@ -63,6 +63,14 @@ function toasts() {
   return n + c
 }
 
+/** A release's one-time announcement, until answered (`announce.rs`): a strip across the window under the top bar, its
+ *  buttons the first the main one. */
+function announcement() {
+  const a = S.state && S.state.announcement
+  if (!a) return ''
+  return `<div class="announce" role="status"><span class="grow"><b>${esc(a.title)}</b> ${esc(a.text)}</span>${a.buttons.map((b, i) => `<button class="btn${i ? ' ghost' : ' primary'}" data-announce="${esc(b.action)}" data-arg="${esc(b.arg)}">${esc(b.label)}</button>`).join('')}</div>`
+}
+
 function confirmBox(c) {
   return `<div class="confirm"><span>Delete "${esc(c.title)}"? It goes to the trash in the data folder for 30 days.</span>
     <button class="btn" data-cmd="cancel-delete">Keep</button><button class="btn primary" style="background:var(--danger);border-color:var(--danger)" data-cmd="delete">Delete</button></div>`

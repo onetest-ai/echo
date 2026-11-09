@@ -23,7 +23,7 @@ external_id: TC-INST-004
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | At "Download the speech model now?" read the dialog, then click "Download" (System Events, or **the user does:** click it when the run asks) | The dialog names the suggested model (on Apple Silicon `large-v3-turbo-q5_0`) with its size |
+| 1 | At "Download the speech model now?" read the dialog, then click "Download" (System Events, or **the user does:** click it when the run asks) | The dialog names the suggested model (`parakeet-tdt-0.6b-v3`, 714 MB, in a release that ships NeMo-Speech) with its size |
 | 2 | During the download: `$E model list`; Settings → Transcription in the window (served: app_profile.md → Clean-install runs) | Progress in % |
 | 3 | Wait until it ends | "Speech model ready" (notification: the user confirms, or `$E model list` marks it in use); the file is in `~/Library/Application Support/echo/models/`, nothing under the data folder's `.echo/models` |
 

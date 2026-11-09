@@ -746,7 +746,7 @@ fn load_model(health: &[(String, String, Option<String>)]) -> Model {
         home: paths::home(),
         autostart: app::autostart_enabled(),
         recommended: models::recommend(&models::hardware()).0,
-        downloading: app::downloading(),
+        downloading: models::downloading(),
         notes_in: cfg.notes_in.clone(),
         ai: crate::ai::Settings::load().ok().map(|s| {
             let all = s
@@ -873,6 +873,7 @@ enum Action {
     ChangeHome,
     ToggleAutostart,
     DownloadModel(&'static str),
+    SwitchModel(&'static str),
     Quit,
 }
 
@@ -993,13 +994,13 @@ impl Ui {
         self.actions.clear();
         let menu = Menu::new();
         self.status = MenuItem::new("", false, None);
-        // Record ▸ Auto (workspace languages) / one language pinned for this call
+        // Record ▸ in the default language (Settings' first) / in another one
         self.record = Submenu::new("Record this call", true);
-        let langs = if model.languages.is_empty() { "any language".to_string() } else { model.languages.join(", ") };
-        let auto = self.item(&format!("Auto ({langs})"), true, Some(Action::Record));
-        let _ = self.record.append_items(&[&auto, &PredefinedMenuItem::separator()]);
-        for code in &model.languages {
-            let it = self.item(&format!("Only {}", language_name(code)), true, Some(Action::RecordIn(code.clone())));
+        let default = model.languages.first().cloned().unwrap_or_else(|| "en".into());
+        let first = self.item(&format!("In {}", language_name(&default)), true, Some(Action::Record));
+        let _ = self.record.append_items(&[&first, &PredefinedMenuItem::separator()]);
+        for code in model.languages.iter().skip(1) {
+            let it = self.item(&format!("In {}", language_name(code)), true, Some(Action::RecordIn(code.clone())));
             let _ = self.record.append(&it);
         }
         self.memo = self.item("Record a memo", true, Some(Action::Memo));
@@ -1061,7 +1062,7 @@ impl Ui {
         let frames = self.check("Save snapshots of shared screens", model.capture_frames, Action::ToggleFrames);
         let _ = settings.append(&frames);
         let _ = settings.append_items(&[&keep, &sep()]);
-        let langs = if model.languages.is_empty() { "any".to_string() } else { model.languages.join(", ") };
+        let langs = if model.languages.is_empty() { "en".to_string() } else { model.languages.join(", ") };
         let _ = settings.append_items(&[&sep(), &MenuItem::new(format!("Languages: {langs}"), false, None)]);
         let profile = self.item("Edit my profile (for minutes)…", true, Some(Action::EditProfile));
         let _ = settings.append(&profile);
@@ -1120,8 +1121,8 @@ impl Ui {
             if m.name == model.recommended {
                 let _ = sub.append(&MenuItem::new("Recommended for this computer", false, None));
             }
-            if let (Some(role), false, true) = (models::helper_role(m.name, model.active_model.as_deref()), active, downloaded) {
-                let _ = sub.append(&MenuItem::new(format!("Also used: {role}"), false, None));
+            if let (Some(calls), true) = (models::used_for(m.name, model.active_model.as_deref()), downloaded) {
+                let _ = sub.append(&MenuItem::new(format!("Also used: for {calls}"), false, None));
             }
             let _ = sub.append(&sep());
             if active {
@@ -1378,6 +1379,7 @@ impl Ui {
             "use_model" => Action::UseModel(model()?),
             "remove_model" => Action::RemoveModel(model()?),
             "download_model" => Action::DownloadModel(model()?),
+            "switch_model" => Action::SwitchModel(model()?),
             "edit_profile" => Action::EditProfile,
             "notes_model" => Action::NotesModel,
             "sign_in" => Action::SignIn(arg.to_string()),
@@ -1454,18 +1456,7 @@ impl Ui {
                 }
             }
             Action::UseModel(name) => drop(models::use_model(name)),
-            Action::RemoveModel(name) => {
-                std::thread::spawn(move || {
-                    let size = models::find(name).map(|m| m.size_mb).unwrap_or(0);
-                    let warning = models::helper_role(name, Config::load().ok().and_then(|c| c.model).as_deref()).map(|r| format!("\n\nNote: {r} — without it the model detects it itself, less reliably.")).unwrap_or_default();
-                    let msg = format!("Remove the speech model {name}?\n\nFrees {size} MB. You can download it again later.{warning}");
-                    if app::ask(&msg, &["Cancel", "Remove"], "Remove").as_deref() == Some("Remove") {
-                        if let Err(e) = models::remove(name, true) {
-                            app::notify("Could not remove the model", &format!("{e:#}"));
-                        }
-                    }
-                });
-            }
+            Action::RemoveModel(name) => app::remove_model_asking(name),
             Action::NotesAnywhere => {
                 let Ok(mut cfg) = Config::load() else { return };
                 cfg.notes_in = None;
@@ -1656,7 +1647,8 @@ impl Ui {
                 });
                 return;
             }
-            Action::DownloadModel(name) => app::download_model_in_background(name),
+            Action::DownloadModel(name) => models::download_in_background(name),
+            Action::SwitchModel(name) => models::switch_in_background(name),
             Action::ToggleAutostart => drop(app::set_autostart(!app::autostart_enabled())),
             Action::ChangeHome => {
                 // The picker blocks: run it off the event loop, then restart on the new folder once
@@ -2083,6 +2075,13 @@ pub fn run(app: TargetApp, stop: Arc<AtomicBool>) -> ! {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_announcements_switch_is_the_trays_own_action() {
+        let a = Ui::page_action("switch_model", crate::models::PARAKEET);
+        assert!(matches!(a, Some(Action::SwitchModel(n)) if n == crate::models::PARAKEET));
+        assert!(Ui::page_action("switch_model", "no-such-model").is_none());
+    }
 
     #[test]
     fn leaving_waits_for_the_notes_in_the_window() {

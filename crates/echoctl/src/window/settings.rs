@@ -52,7 +52,7 @@ pub(super) fn settings_snapshot() -> Value {
         // Claude Code really set up: it runs, a terminal finds it, its plugin is in (checked in the background).
         "claude_code": crate::claude_setup::status(false),
         "models": crate::models::list_value().ok(),
-        "downloading": crate::app::downloading().map(|(n, pct)| json!({ "name": n, "pct": pct })),
+        "downloading": crate::models::downloading().map(|(n, pct)| json!({ "name": n, "pct": pct })),
     });
     #[cfg(target_os = "macos")]
     {
@@ -282,6 +282,11 @@ pub(super) fn handle(v: &Value) -> Option<Handled> {
             });
             true.into()
         }
+        // A release's one-time banner, answered with one of its buttons (`announce::answer`).
+        "announcement" => match crate::announce::answer(v["id"].as_str().unwrap_or("")) {
+            Ok(()) => true.into(),
+            Err(e) => notice(&format!("{e:#}")),
+        },
         // Settings: one plain value, as the page shows it now.
         "settings_set" => match settings_set(v["key"].as_str().unwrap_or(""), &v["value"]) {
             Ok(()) => true.into(),

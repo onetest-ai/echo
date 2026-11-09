@@ -154,12 +154,7 @@ pub enum ModelCmd {
     /// Switch the active model
     Use { name: String },
     /// Delete a downloaded model (not the active one)
-    Remove {
-        name: String,
-        /// Remove the language-detection helper (turbo q5_0) even while the active model uses it
-        #[arg(long)]
-        force: bool,
-    },
+    Remove { name: String },
 }
 
 #[cfg(feature = "transcribe")]
@@ -252,7 +247,7 @@ pub fn home(cmd: Option<HomeCmd>) -> Result<()> {
 /// `echoctl config`'s flags.
 #[derive(clap::Args)]
 pub struct ConfigArgs {
-    /// Languages a call may be in (each call is in one, detected once), comma-separated ISO codes (e.g. en,uk,ru); "any" clears
+    /// The languages offered for a call, the first its default (Echo never detects one), comma-separated ISO codes (e.g. en,uk,ru); "any" clears them (English)
     #[arg(long, value_delimiter = ',')]
     pub languages: Option<Vec<String>>,
     /// Glossary for transcription, comma-separated (e.g. "Miro,ServiceNow,IPAM"); "" clears
@@ -454,7 +449,7 @@ pub fn model(cmd: ModelCmd) -> Result<()> {
         ModelCmd::List { json } => models::list(json),
         ModelCmd::Download { name } => models::download(&name),
         ModelCmd::Use { name } => models::use_model(&name),
-        ModelCmd::Remove { name, force } => models::remove(&name, force),
+        ModelCmd::Remove { name } => models::remove(&name),
     }
 }
 

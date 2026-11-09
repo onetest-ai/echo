@@ -1,20 +1,17 @@
 // ── language of the next recording (Record ▾) ──────────────────────────────────────────────
-// Per viewer, remembered in this webview; English unless chosen otherwise. '' = auto: Echo
-// detects the call's one language among the configured ones (Settings → Languages).
-const LANG_KEY = 'echo.recordLanguage'
+// A call's language is chosen, never detected: Settings' first language (the default, as for the calls Echo starts by
+// itself) unless another is picked here, until the window reloads.
 function recordLang() {
-  try { const v = localStorage.getItem(LANG_KEY); if (v !== null) return v } catch { /* storage off */ }
-  return 'en'
+  const configured = (S.state && S.state.languages) || []
+  return S.recLang && configured.includes(S.recLang) ? S.recLang : (configured[0] || 'en')
 }
-function setRecordLang(v) { try { localStorage.setItem(LANG_KEY, v) } catch { /* storage off */ } }
+function setRecordLang(v) { S.recLang = v }
 const LANG_NAMES = (() => { try { return new Intl.DisplayNames(['en'], { type: 'language' }) } catch { return null } })()
 const langName = (c) => { try { return (LANG_NAMES && LANG_NAMES.of(c)) || c.toUpperCase() } catch { return c.toUpperCase() } }
-/** The languages on offer: English, then the configured ones; and the current choice. */
+/** The languages on offer (Settings', the default first) and the current choice. */
 function langChoices() {
   const configured = (S.state && S.state.languages) || []
-  const opts = [...new Set(['en', ...configured])]
-  const cur = recordLang()
-  return { configured, opts, cur: cur === '' || opts.includes(cur) ? cur : 'en' }
+  return { opts: configured.length ? configured : ['en'], cur: recordLang() }
 }
 // ── AI profiles: which model (and account) writes a call's live notes and minutes ──────────
 const ai = () => (S.state && S.state.ai && S.state.ai.profiles) ? S.state.ai : { profiles: [], default: null, live_notes: false, error: S.state && S.state.ai && S.state.ai.error }
@@ -64,18 +61,16 @@ function signinNote(p) {
 const CHEV = (open) => `<svg class="chev${open ? ' open' : ''}" viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M3.5 1.5L7 5l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`
 const CARET = '<svg viewBox="0 0 10 6" width="8" height="5" aria-hidden="true"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>'
 
-/** A record button with the language picker on its right (a native select over the caret). */
 /** A memo's mark: a microphone (the list, the pill, the header). */
 const MIC = (size = 13) => `<svg class="mic" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>`
 
+/** A record button with the language picker on its right (a native select over the caret). */
 function recordButton(attrs, label, primary = true, memo = false) {
-  const { configured, opts, cur } = langChoices()
+  const { opts, cur } = langChoices()
   const cls = primary ? 'btn primary' : 'btn'
-  const auto = configured.length > 1 ? `Detect (${configured.map((c) => c.toUpperCase()).join(', ')})` : 'Detect the language'
   const options = opts.map((c) => `<option value="${esc(c)}"${c === cur ? ' selected' : ''}>${esc(langName(c))}</option>`).join('')
-    + `<option value=""${cur === '' ? ' selected' : ''}>${esc(auto)}</option>`
-  const title = cur ? `Transcribed as ${langName(cur)}` : 'Echo detects the call’s language from its first sentences'
-  return `<span class="split"><button class="${cls} split-main" ${attrs}>${esc(label)}</button><label class="${cls} split-lang" title="${esc(title)}"><span>${cur ? esc(cur.toUpperCase()) : 'Auto'}</span>${CARET}<select data-reclang aria-label="Language of the call">${options}</select></label></span>${memo ? `<button class="pmemo" data-cmd="record-memo" title="Record a memo — just you, starts now; its threads are found from what you say" aria-label="Record a memo">${MIC(12)}Memo</button>` : ''}`
+  const title = `Transcribed in ${langName(cur)}: pick the call's language here`
+  return `<span class="split"><button class="${cls} split-main" ${attrs}>${esc(label)}</button><label class="${cls} split-lang" title="${esc(title)}"><span>${esc(cur.toUpperCase())}</span>${CARET}<select data-reclang aria-label="Language of the call">${options}</select></label></span>${memo ? `<button class="pmemo" data-cmd="record-memo" title="Record a memo — just you, starts now; its threads are found from what you say" aria-label="Record a memo">${MIC(12)}Memo</button>` : ''}`
 }
 
 // ── views ──────────────────────────────────────────────────────────────────────────────────
@@ -104,6 +99,14 @@ function tickClocks() {
 
 /** Record / Stop at the top centre of the window, in every state; the sign-in the default
  *  profile (the one a recording pins) needs, under it. */
+/** The recording call's language, changed here when it's the wrong one: the rest is in the new one, and the whole call
+ *  again at its end. */
+function callLangPicker(name, cur) {
+  if (!cur) return ''
+  const opts = [...new Set([cur, ...langChoices().opts])]
+  return `<label class="pbtn ghost split-lang" title="Transcribed in ${esc(langName(cur))}: pick another if that's wrong — the whole call is transcribed again in it at the end"><span>${esc(cur.toUpperCase())}</span>${CARET}<select data-call-lang="${esc(name)}" aria-label="Language of this call">${opts.map((c) => `<option value="${esc(c)}"${c === cur ? ' selected' : ''}>${esc(langName(c))}</option>`).join('')}</select></label>`
+}
+
 function pill() {
   const st = S.state || {}
   if (st.recording) {
@@ -120,7 +123,7 @@ function pill() {
     const name = String(st.recording).split(/[\\/]/).pop()
     const c = (S.calls || []).find((x) => x.name === name)
     const t0 = since(c && c.started_at)
-    return `<div class="pill rec" role="group" aria-label="Recording"><span class="dot" aria-hidden="true"></span>${t0 ? `<span class="clock" data-since="${t0}"></span>` : ''}<button class="ptitle link" data-call="${esc(name)}" title="Open this call">${esc(titleOf(st.recording))}</button><button class="pbtn stop" data-cmd="stop-ask"><svg viewBox="0 0 10 10" width="9" height="9" aria-hidden="true"><rect width="10" height="10" rx="2" fill="currentColor"/></svg>Stop</button></div>`
+    return `<div class="pill rec" role="group" aria-label="Recording"><span class="dot" aria-hidden="true"></span>${t0 ? `<span class="clock" data-since="${t0}"></span>` : ''}<button class="ptitle link" data-call="${esc(name)}" title="Open this call">${esc(titleOf(st.recording))}</button>${callLangPicker(name, st.recording_language)}<button class="pbtn stop" data-cmd="stop-ask"><svg viewBox="0 0 10 10" width="9" height="9" aria-hidden="true"><rect width="10" height="10" rx="2" fill="currentColor"/></svg>Stop</button></div>`
   }
   if (st.armed) {
     return `<div class="pill armed" role="group" aria-label="Armed"><span class="ring" aria-hidden="true"></span><span class="ptitle">Armed — records the next Teams call</span><button class="pbtn ghost" data-cmd="stop">Cancel</button></div>`
