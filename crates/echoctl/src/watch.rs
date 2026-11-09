@@ -170,7 +170,7 @@ fn recording_watcher() -> Option<(WatchState, bool)> {
     let s: WatchState = read_json("watch.json").filter(|s: &WatchState| s.recording.is_some())?;
     let age = Utc::now() - s.heartbeat;
     let fresh = age < HEARTBEAT_STALE;
-    (fresh || (age < STOP_LATE && crate::app::process_alive(s.pid))).then_some((s, fresh))
+    (fresh || (age < STOP_LATE && (s.pid == std::process::id() || crate::app::process_alive(s.pid)))).then_some((s, fresh))
 }
 
 fn emit(event: &str, mut data: serde_json::Value) {
@@ -578,7 +578,8 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
             candidate = None;
             call_ended_at = None;
         }
-        if user_stop {
+        // Taken, or left for a recording that ended meanwhile: never for the next one.
+        if user_stop || rec.is_none() {
             let _ = fs::remove_file(file("stop.request"));
         }
 
@@ -1699,7 +1700,9 @@ mod tests {
         assert!(crate::schedule::is_scheduled("next"));
         fs::remove_file(file("stop.request")).unwrap();
         // A watcher that is gone, or silent far too long: nothing records, so Stop disarms as before.
-        for (pid, late) in [(u32::MAX - 1, 30), (std::process::id(), 3600)] {
+        let mut gone = std::process::Command::new(if cfg!(windows) { "cmd" } else { "true" }).args(if cfg!(windows) { &["/c", "exit"][..] } else { &[][..] }).spawn().unwrap();
+        gone.wait().unwrap();
+        for (pid, late) in [(gone.id(), 30), (std::process::id(), 3600)] {
             state(pid, late);
             assert!(recording_watcher().is_none(), "pid {pid}, {late} s late");
         }
@@ -1746,7 +1749,6 @@ mod tests {
         assert_eq!(left_from(&marks), Some(at("13:10:34")));
         assert_eq!(left_from(&marks[..1]), None);
     }
-
 
     #[test]
     fn graph_style_times_parse() {
