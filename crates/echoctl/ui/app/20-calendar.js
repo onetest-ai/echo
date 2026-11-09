@@ -117,7 +117,7 @@ function calendarView() {
       const { ev: e, st } = x
       const cls = ['ev', e.online ? 'online' : '', e.recorded ? 'recorded' : '', e.scheduled ? 'scheduled' : '', st.past ? 'past' : '', !e.recorded && e.transcript ? 'transcript' : '', e.declined ? 'declined' : '', e.cancelled ? 'cancelled' : ''].filter(Boolean).join(' ')
       // Green already says recorded: only what the colour doesn't.
-      const tag = e.recorded ? '' : e.transcript ? '<span class="tag tr" title="Teams has its transcript: click, then Import">Transcript</span>' : e.scheduled ? '<span class="tag will">Will record</span>' : e.no_notetakers ? '<span class="tag no">No notetakers</span>' : ''
+      const tag = [appTag(e), e.recorded ? '' : e.transcript ? '<span class="tag tr" title="Teams has its transcript: click, then Import">Transcript</span>' : e.scheduled ? '<span class="tag will">Will record</span>' : e.no_notetakers ? '<span class="tag no">No notetakers</span>' : ''].filter(Boolean).join(' ')
       return `<button class="${cls}" style="${style}" data-ev="${esc(e.id || '')}" aria-selected="${S.cal.selected === e.id}"><b>${esc(e.subject)}</b><small>${esc(hm(st.s))}${tag ? ' ' + tag : ''}</small></button>`
     }).join('')
     return `<div class="col${sameDay(day, now) ? ' today' : ''}" style="height:${(h1 - h0) * HOUR}px">${lines}${nowLine}${items}</div>`
@@ -137,6 +137,7 @@ function eventDetail(e, now) {
   const kind = eventAction(e, st)
   const ACTS = {
     'open-notes': () => `<button class="btn primary" data-call="${esc(e.recorded.name)}">Open notes</button>`,
+    'other-app': () => '',
     scheduled: () => `<button class="btn" data-unschedule="${esc(e.id)}">Don't record</button>`,
     join: () => `${recordButton(`data-join="${esc(e.id)}"`, 'Join & record')}<button class="btn" data-schedule="${esc(e.id)}" title="Record without joining — you're in it already">Record</button>`,
     record: () => recordButton(`data-schedule="${esc(e.id)}"`, st.live ? 'Record it' : 'Record when it starts'),
@@ -151,6 +152,7 @@ function eventDetail(e, now) {
   const line = rec ? `${rec.imported ? 'A call made of its Teams transcript' : STATUS[rec.status] || esc(rec.status)}${rec.minutes ? `, ${rec.minutes} min` : ''}`
     : e.import && e.import.error ? esc(e.import.error)
     : kind === 'import' ? `${e.transcript ? 'Not recorded, but Teams transcribed it' : e.transcript === false ? 'Not recorded, and Teams has no transcript of it (yet)' : 'Not recorded. If Teams transcribed it'}: Echo makes a call of its transcript and chat; minutes, threads and the Brain follow.`
+    : kind === 'other-app' ? notYet(e)
     : kind === 'scheduled' ? `Echo starts recording a minute before it begins${e.scheduled_languages ? `, transcribed as ${esc(e.scheduled_languages.map(langName).join(', '))}` : ''}.`
     : kind === 'join' ? 'Joins it in Teams and records both sides.'
     : kind === 'record' ? (st.live ? 'Records it now, both sides.' : 'Echo starts recording a minute before it begins.')
@@ -170,13 +172,21 @@ function eventDetail(e, now) {
   const series = seriesEditor(e)
   const recap = e.recap && e.recap.length ? `<section class="ec-sec"><div class="ec-cap">Last time</div><ul>${e.recap.map((r) => `<li>${esc(r)}</li>`).join('')}</ul></section>` : ''
   const where = e.location ? `<span class="ec-where">${esc(e.location)}</span>` : ''
-  const chips = `${eventTypeChip(e)}${eventProjects(e)}`
+  const chips = `${appTag(e)}${eventTypeChip(e)}${eventProjects(e)}`
   return `<aside class="detail" aria-labelledby="ec-h">
     <div class="ec-head"><div class="ec-title"><h2 id="ec-h" class="selectable">${esc(e.subject)}</h2><button class="icon-btn ec-x" data-calclose="1" aria-label="Close" title="Close">${ICON('<path d="M6 6l12 12M18 6L6 18"/>')}</button></div>
       <div class="when">${esc(evDay(st.s, now))} · ${esc(hm(st.s))}–${esc(hm(st.en))}${evRel(e, st, now)}${where}</div>
       ${chips.trim() ? `<div class="ec-chips">${chips}</div>` : ''}</div>
     ${main}${people}${series ? `<section class="ec-sec">${series}</section>` : ''}${recap}
   </aside>`
+}
+/** The app of a meeting Echo can't record yet (Zoom, Google Meet), as a small label; nothing for Teams. */
+function appTag(e) {
+  return otherApp(e) ? `<span class="tag app">${esc(meetingApp(e).name)}</span>` : ''
+}
+/** Why a Zoom or Google Meet meeting has no Record (#228). */
+function notYet(e) {
+  return `Recording isn't available for ${esc(meetingApp(e).name)} meetings yet.`
 }
 /** A day as the card says it: Today, Tomorrow, Yesterday, else its weekday and date. */
 function evDay(d, now) {
@@ -222,6 +232,7 @@ function eventMenu(d, now) {
   const sep = '<div class="menu-sep" role="separator"></div>'
   const main = {
     'open-notes': () => item(`data-call="${esc(e.recorded.name)}"`, 'Open notes'),
+    'other-app': () => '',
     scheduled: () => item(`data-unschedule="${esc(e.id)}"`, "Don't record"),
     join: () => item(`data-join="${esc(e.id)}"`, 'Join & record') + item(`data-schedule="${esc(e.id)}"`, 'Record (without joining)'),
     record: () => item(`data-schedule="${esc(e.id)}"`, st.live ? 'Record it' : 'Record when it starts'),
@@ -234,7 +245,7 @@ function eventMenu(d, now) {
   const x = e.series
   const rec = x && x.key && x.rule && x.rule.record === 'always'
   const series = x && x.key ? `<div data-series-key="${esc(x.key)}" data-series-subject="${esc(e.subject || '')}" style="display:contents">${item(`data-series-set="record" data-val="${esc(JSON.stringify(rec ? null : 'always'))}"`, rec ? "Stop recording every meeting of this series" : 'Record every meeting of this series')}</div>` : ''
-  const link = e.join_url ? item(`data-copy="${esc(e.join_url)}"`, 'Copy the Teams link') : ''
+  const link = e.join_url ? item(`data-copy="${esc(e.join_url)}"`, `Copy the ${otherApp(e) ? meetingApp(e).name : 'Teams'} link`) : ''
   const groups = [(kind ? main[kind]() : '') + prep, thread + series, link, item(`data-ev-ctx="open" data-id="${esc(e.id)}"`, 'Show details')].filter(Boolean)
   // At the pointer, kept inside the window (its size is about known: 240 px wide, 32 px an item).
   const n = (groups.join('').match(/menu-item/g) || []).length

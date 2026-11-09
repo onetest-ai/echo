@@ -35,11 +35,20 @@ const callTabs = (x) => {
   const i = tabs.findIndex((t) => t[0] === 'transcript')
   return [[...tabs[i], true], ...tabs.filter((_, j) => j !== i)]
 }
+/** The app a calendar meeting is in, from the event's `app`: `{name, other}` (`other`: one Echo can't record yet,
+ *  Zoom or Google Meet, #228), or null when no app is known. */
+const meetingApp = (e) => {
+  const name = { teams: 'Teams', zoom: 'Zoom', meet: 'Google Meet' }[e && e.app]
+  return typeof name === 'string' ? { name, other: e.app !== 'teams' } : null
+}
+const otherApp = (e) => { const a = meetingApp(e); return !!a && a.other }
 /** What a calendar event's card offers, first match wins: `e` the event, `st` its timing
  *  (`{past, live, recordable}`). The card draws each kind (`eventDetail`). */
 const EVENT_ACTIONS = [
   { kind: 'open-notes', when: (e) => !!e.recorded },
-  { kind: 'import', when: (e, st) => st.past && !!e.join_url && !e.cancelled && !e.declined },
+  // Echo records Teams calls only: a Zoom or Google Meet meeting says so instead of offering Record.
+  { kind: 'other-app', when: (e, st) => st.recordable && otherApp(e) },
+  { kind: 'import', when: (e, st) => st.past && !!e.join_url && !otherApp(e) && !e.cancelled && !e.declined },
   { kind: 'scheduled', when: (e, st) => st.recordable && !!e.scheduled },
   { kind: 'join', when: (e, st) => st.recordable && st.live && !!e.join_url },
   { kind: 'record', when: (e, st) => st.recordable },

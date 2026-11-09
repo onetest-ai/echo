@@ -8,7 +8,7 @@ const src = appSource()
 const start = src.indexOf('// ── workbench: what the window is made of')
 const end = src.indexOf('// end of the workbench block', start)
 assert.ok(start >= 0 && end > start, 'the workbench block not found in app.js')
-const { ACTIVITIES, callTabs, eventAction, Layout } = new Function(`${src.slice(start, end)}\nreturn { ACTIVITIES, callTabs, eventAction, Layout }`)()
+const { ACTIVITIES, callTabs, eventAction, meetingApp, Layout } = new Function(`${src.slice(start, end)}\nreturn { ACTIVITIES, callTabs, eventAction, meetingApp, Layout }`)()
 
 const tests = []
 const test = (name, f) => tests.push([name, f])
@@ -40,6 +40,19 @@ test('a calendar event offers what the card offered before', () => {
   assert.equal(eventAction({ join_url: 'https://teams' }, st()), 'record')
   assert.equal(eventAction({}, st({ live: true })), 'record')
   assert.equal(eventAction({}, st({ recordable: false })), null)
+})
+
+test('a Zoom or Google Meet meeting offers no Record, Join or Teams transcript: recording isn\'t available for it yet (#228)', () => {
+  const st = (o) => ({ past: false, live: false, recordable: true, ...o })
+  const zoom = { app: 'zoom', join_url: 'https://zoom.us/j/81234567890' }
+  assert.equal(eventAction(zoom, st()), 'other-app')
+  assert.equal(eventAction(zoom, st({ live: true })), 'other-app')
+  assert.equal(eventAction({ ...zoom, scheduled: true }, st()), 'other-app')
+  assert.equal(eventAction({ app: 'meet', join_url: 'https://meet.google.com/abc-defg-hij' }, st({ past: true, recordable: false })), null, 'over: no Teams transcript to import')
+  assert.equal(eventAction({ ...zoom, recorded: { name: 'x' } }, st()), 'open-notes')
+  assert.equal(eventAction({ app: 'teams', join_url: 'https://teams' }, st({ past: true, recordable: false })), 'import')
+  assert.deepEqual([meetingApp({ app: 'zoom' }), meetingApp({ app: 'meet' }), meetingApp({ app: 'teams' }), meetingApp({ app: null }), meetingApp({ app: 'toString' })],
+    [{ name: 'Zoom', other: true }, { name: 'Google Meet', other: true }, { name: 'Teams', other: false }, null, null])
 })
 
 test('no layout saved: views in their own areas, both panels closed', () => {
