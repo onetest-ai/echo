@@ -897,7 +897,7 @@ pub fn delete(id: &str) -> Result<()> {
     load(id)?;
     let trash = paths::state_dir().join("trash");
     fs::create_dir_all(&trash)?;
-    let to = trash.join(format!("project-{id}-{}", Utc::now().format("%Y%m%d%H%M%S")));
+    let to = paths::unused(&trash, &format!("project-{id}-{}", Utc::now().format("%Y%m%d%H%M%S")), "");
     fs::rename(dir().join(id), &to).with_context(|| format!("moving the project to {}", to.display()))?;
     Ok(())
 }
@@ -1442,6 +1442,24 @@ pub fn terms_for_meeting(m: &MeetingContext) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+
+    /// A project deleted again within the same second as one before it goes to the trash beside it, not onto it.
+    #[test]
+    fn a_project_deleted_twice_in_a_second_keeps_both_in_the_trash() {
+        let (_env, _root) = paths::testenv::folders("projects-trash");
+        let p = create("Acme pilot", None, None).unwrap();
+        let trash = paths::state_dir().join("trash");
+        let now = Utc::now();
+        let taken: Vec<PathBuf> = (-2..=5).map(|s| trash.join(format!("project-{}-{}", p.id, (now + chrono::Duration::seconds(s)).format("%Y%m%d%H%M%S")))).collect();
+        for t in &taken {
+            fs::create_dir_all(t).unwrap();
+            fs::write(t.join("brief.md"), "deleted before").unwrap();
+        }
+        delete(&p.id).unwrap();
+        assert!(!dir().join(&p.id).exists(), "gone from the projects");
+        assert!(taken.iter().all(|t| fs::read_to_string(t.join("brief.md")).unwrap() == "deleted before"));
+        assert_eq!(fs::read_dir(&trash).unwrap().filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().starts_with("project-")).count(), taken.len() + 1);
+    }
     use super::*;
 
     fn person(name: &str, email: &str) -> Person {

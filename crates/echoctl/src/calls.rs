@@ -558,7 +558,7 @@ pub fn template_remove(id: &str) -> Result<()> {
     let stem = f.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
     let bin = trash_dir().join("templates");
     fs::create_dir_all(&bin)?;
-    fs::rename(&f, bin.join(format!("{stem}-{}.md", chrono::Utc::now().format("%Y%m%d%H%M%S"))))?;
+    fs::rename(&f, paths::unused(&bin, &format!("{stem}-{}", chrono::Utc::now().format("%Y%m%d%H%M%S")), ".md"))?;
     TEMPLATES_GEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     Ok(())
 }
@@ -1886,6 +1886,25 @@ fn purge_trash_in(trash: &Path) {
 
 #[cfg(test)]
 mod tests {
+
+    /// The trashed copy of a template never writes over one trashed before within the same second (a file renamed
+    /// onto another replaces it): every name of the seconds around now is taken already, and all stay.
+    #[test]
+    fn a_template_taken_away_never_writes_over_one_in_the_trash() {
+        let (_env, _root) = paths::testenv::folders("templates-trash");
+        fs::create_dir_all(templates_dir()).unwrap();
+        fs::write(templates_dir().join("ours.md"), "---\nname: ours\nmatch: [x]\n---\n## A\nb\n").unwrap();
+        let bin = trash_dir().join("templates");
+        fs::create_dir_all(&bin).unwrap();
+        let now = chrono::Utc::now();
+        let taken: Vec<PathBuf> = (-2..=5).map(|s| bin.join(format!("ours-{}.md", (now + chrono::Duration::seconds(s)).format("%Y%m%d%H%M%S")))).collect();
+        for t in &taken {
+            fs::write(t, "trashed before").unwrap();
+        }
+        template_remove("ours").unwrap();
+        assert!(taken.iter().all(|t| fs::read_to_string(t).unwrap() == "trashed before"), "none written over");
+        assert_eq!(fs::read_dir(&bin).unwrap().count(), taken.len() + 1, "the new one beside them");
+    }
     use super::*;
 
     #[test]
