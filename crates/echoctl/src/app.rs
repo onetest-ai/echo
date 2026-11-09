@@ -654,7 +654,7 @@ fn first_run() {
             "Download",
         );
         if yes.as_deref() == Some("Download") {
-            download_model_in_background(rec);
+            models::download_in_background(rec);
         }
     }
     // Start at login, on by default (docs/install.md) — for an installed app only, not a dev build (#133).
@@ -671,35 +671,6 @@ fn first_run() {
     // rather than in the middle of the first call.
     #[cfg(target_os = "macos")]
     std::thread::spawn(|| write_health(None, true, false));
-}
-
-static DOWNLOADING: std::sync::Mutex<Option<&'static str>> = std::sync::Mutex::new(None);
-
-/// The model the app is downloading, with its progress in percent.
-#[cfg_attr(not(feature = "tray"), allow(dead_code))]
-pub fn downloading() -> Option<(&'static str, u8)> {
-    let name = (*DOWNLOADING.lock().unwrap())?;
-    Some((name, models::PROGRESS.load(Ordering::Relaxed)))
-}
-
-/// Download a model off the UI thread (one at a time); notifies when done.
-pub fn download_model_in_background(name: &'static str) {
-    {
-        let mut d = DOWNLOADING.lock().unwrap();
-        if d.is_some() {
-            return;
-        }
-        *d = Some(name);
-    }
-    models::PROGRESS.store(0, Ordering::Relaxed);
-    std::thread::spawn(move || {
-        let r = models::download(name);
-        *DOWNLOADING.lock().unwrap() = None;
-        match r {
-            Ok(()) => notify("Speech model ready", &format!("{name} is downloaded.")),
-            Err(e) => notify("Model download failed", &format!("{e:#}")),
-        }
-    });
 }
 
 // ── offers (config "ask") ──────────────────────────────────────────────────────────────────

@@ -406,6 +406,8 @@ fn state() -> Value {
         "own_title_bar": own_title_bar(),
         "notes": crate::notes::readiness(),
         "languages": crate::config::Config::load().map(|c| c.languages).unwrap_or_default(),
+        // A release's one-time banner, until answered (`announce.rs`).
+        "announcement": crate::announce::current(),
         "ai": crate::ai::summary(),
         // The Brain: built in and switched on (off hides it everywhere in the window).
         "brain": cfg!(feature = "brain") && { #[cfg(feature = "brain")] { crate::brain::enabled() } #[cfg(not(feature = "brain"))] { false } },

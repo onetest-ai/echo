@@ -1,20 +1,17 @@
 // ── language of the next recording (Record ▾) ──────────────────────────────────────────────
-// Per viewer, remembered in this webview; English unless chosen otherwise. '' = auto: Echo
-// detects the call's one language among the configured ones (Settings → Languages).
-const LANG_KEY = 'echo.recordLanguage'
+// A call's language is chosen, never detected: Settings' first language (the default, as for the calls Echo starts by
+// itself) unless another is picked here, until the window reloads.
 function recordLang() {
-  try { const v = localStorage.getItem(LANG_KEY); if (v !== null) return v } catch { /* storage off */ }
-  return 'en'
+  const configured = (S.state && S.state.languages) || []
+  return S.recLang && configured.includes(S.recLang) ? S.recLang : (configured[0] || 'en')
 }
-function setRecordLang(v) { try { localStorage.setItem(LANG_KEY, v) } catch { /* storage off */ } }
+function setRecordLang(v) { S.recLang = v }
 const LANG_NAMES = (() => { try { return new Intl.DisplayNames(['en'], { type: 'language' }) } catch { return null } })()
 const langName = (c) => { try { return (LANG_NAMES && LANG_NAMES.of(c)) || c.toUpperCase() } catch { return c.toUpperCase() } }
-/** The languages on offer: English, then the configured ones; and the current choice. */
+/** The languages on offer (Settings', the default first) and the current choice. */
 function langChoices() {
   const configured = (S.state && S.state.languages) || []
-  const opts = [...new Set(['en', ...configured])]
-  const cur = recordLang()
-  return { configured, opts, cur: cur === '' || opts.includes(cur) ? cur : 'en' }
+  return { opts: configured.length ? configured : ['en'], cur: recordLang() }
 }
 // ── AI profiles: which model (and account) writes a call's live notes and minutes ──────────
 const ai = () => (S.state && S.state.ai && S.state.ai.profiles) ? S.state.ai : { profiles: [], default: null, live_notes: false, error: S.state && S.state.ai && S.state.ai.error }
@@ -69,13 +66,11 @@ const CARET = '<svg viewBox="0 0 10 6" width="8" height="5" aria-hidden="true"><
 const MIC = (size = 13) => `<svg class="mic" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>`
 
 function recordButton(attrs, label, primary = true, memo = false) {
-  const { configured, opts, cur } = langChoices()
+  const { opts, cur } = langChoices()
   const cls = primary ? 'btn primary' : 'btn'
-  const auto = configured.length > 1 ? `Detect (${configured.map((c) => c.toUpperCase()).join(', ')})` : 'Detect the language'
   const options = opts.map((c) => `<option value="${esc(c)}"${c === cur ? ' selected' : ''}>${esc(langName(c))}</option>`).join('')
-    + `<option value=""${cur === '' ? ' selected' : ''}>${esc(auto)}</option>`
-  const title = cur ? `Transcribed as ${langName(cur)}` : 'Echo detects the call’s language from its first sentences'
-  return `<span class="split"><button class="${cls} split-main" ${attrs}>${esc(label)}</button><label class="${cls} split-lang" title="${esc(title)}"><span>${cur ? esc(cur.toUpperCase()) : 'Auto'}</span>${CARET}<select data-reclang aria-label="Language of the call">${options}</select></label></span>${memo ? `<button class="pmemo" data-cmd="record-memo" title="Record a memo — just you, starts now; its threads are found from what you say" aria-label="Record a memo">${MIC(12)}Memo</button>` : ''}`
+  const title = `Transcribed in ${langName(cur)}: pick the call's language here`
+  return `<span class="split"><button class="${cls} split-main" ${attrs}>${esc(label)}</button><label class="${cls} split-lang" title="${esc(title)}"><span>${esc(cur.toUpperCase())}</span>${CARET}<select data-reclang aria-label="Language of the call">${options}</select></label></span>${memo ? `<button class="pmemo" data-cmd="record-memo" title="Record a memo — just you, starts now; its threads are found from what you say" aria-label="Record a memo">${MIC(12)}Memo</button>` : ''}`
 }
 
 // ── views ──────────────────────────────────────────────────────────────────────────────────

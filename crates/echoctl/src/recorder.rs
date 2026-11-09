@@ -25,11 +25,11 @@ struct Meta {
     ended_at: Option<DateTime<Local>>,
     /// Why the recording stopped (user, call ended, …)
     stop_reason: Option<String>,
-    /// Languages pinned for this call (overrides the workspace list); absent = workspace list
+    /// The call's language as a list, for older readers of `meta.json`: `[language]`
     #[serde(skip_serializing_if = "Option::is_none")]
     languages: Option<Vec<String>>,
-    /// The call's one language, once the live transcription decided it (written straight to the file under the
-    /// call's lock, `transcribe::Transcriber`; kept from there): a retranscription doesn't detect it again
+    /// The call's one language, chosen when it starts (`call_language::for_new_call`); changed by hand straight in
+    /// the file (`call_language::set`, under the call's lock) and kept from there
     #[serde(skip_serializing_if = "Option::is_none")]
     language: Option<String>,
     /// The AI profile this call's live notes and minutes use (`ai.rs`), pinned at the start
@@ -97,6 +97,7 @@ impl Recording {
         let title = title.map(str::to_owned).or_else(|| meeting.and_then(|m| m.subject.clone()));
         let dir = call_dir(&started_at, title.as_deref());
         fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+        let language = crate::call_language::for_new_call(languages.as_deref(), &crate::config::Config::load().unwrap_or_default());
         let meta = Meta {
             title: title.clone(),
             app,
@@ -104,8 +105,8 @@ impl Recording {
             started_at,
             ended_at: None,
             stop_reason: None,
-            languages: languages.clone(),
-            language: None,
+            languages: Some(vec![language.clone()]),
+            language: Some(language),
             ai_profile,
             kind: None,
             tracks: vec![],
@@ -120,12 +121,9 @@ impl Recording {
         let mic = Track::start("mic", &dir.join("mic.wav"), audio::mic_source(Some(app)), t0)?;
         // Transcribes the tracks as they are written (reads the WAVs, so it starts after them).
         #[cfg(feature = "transcribe")]
-        let live = crate::live::start(&dir, meeting, languages);
+        let live = crate::live::start(&dir, meeting);
         #[cfg(not(feature = "transcribe"))]
-        let live = {
-            let _ = languages;
-            None
-        };
+        let live = None;
         Ok(Recording {
             live,
             dir,
@@ -146,6 +144,7 @@ impl Recording {
         let title = Some("Memo".to_string());
         let dir = call_dir(&started_at, title.as_deref());
         fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+        let language = crate::call_language::for_new_call(languages.as_deref(), &crate::config::Config::load().unwrap_or_default());
         let meta = Meta {
             title: title.clone(),
             app,
@@ -153,8 +152,8 @@ impl Recording {
             started_at,
             ended_at: None,
             stop_reason: None,
-            languages: languages.clone(),
-            language: None,
+            languages: Some(vec![language.clone()]),
+            language: Some(language),
             ai_profile,
             kind: Some("memo"),
             tracks: vec![],
@@ -164,12 +163,9 @@ impl Recording {
         // The default input, not the call app's: there is no call.
         let mic = Track::start("mic", &dir.join("mic.wav"), audio::mic_source(None), t0)?;
         #[cfg(feature = "transcribe")]
-        let live = crate::live::start(&dir, None, languages);
+        let live = crate::live::start(&dir, None);
         #[cfg(not(feature = "transcribe"))]
-        let live = {
-            let _ = languages;
-            None
-        };
+        let live = None;
         Ok(Recording { live, dir, t0, title, started_at, meta, remote: None, mic, memo: true })
     }
 
@@ -250,12 +246,13 @@ fn write_final_meta(dir: &std::path::Path, meta: &mut Meta) -> Result<()> {
     Ok(())
 }
 
-/// The call's language the live transcription wrote to the file meanwhile, into the recording's copy (under the
+/// The call's language as changed by hand meanwhile (`call_language::set`), into the recording's copy (under the
 /// call's lock).
 fn keep_language(dir: &std::path::Path, meta: &mut Meta) {
     let on_disk = fs::read(dir.join("meta.json")).ok().and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok());
     if let Some(l) = on_disk.as_ref().and_then(|m| m["language"].as_str()).filter(|s| !s.is_empty()) {
         meta.language = Some(l.to_string());
+        meta.languages = Some(vec![l.to_string()]);
     }
 }
 

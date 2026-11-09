@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::paths;
 
 /// Call languages a new data folder starts with (the team's: English, Ukrainian, Russian,
-/// Spanish). `echoctl config --languages any` clears them.
+/// Spanish), English its calls' default. `echoctl config --languages any` clears them (English only).
 pub const DEFAULT_LANGUAGES: &[&str] = &["en", "uk", "ru", "es"];
 
 fn default_languages() -> Vec<String> {
@@ -28,13 +28,14 @@ impl Default for Config {
 pub struct Config {
     /// Active transcription model (a catalog name, e.g. "large-v3-turbo-q5_0")
     pub model: Option<String>,
-    /// Languages this workspace's calls may be in (ISO codes, e.g. ["en", "uk", "ru"]). A call is
-    /// in one of them, detected once from its first utterances (`transcribe::CallLanguage`); only
-    /// this list is considered, which stops Whisper confusing close languages (uk/ru) or drifting
-    /// to unrelated ones. One language: no detection at all. Empty = any;
-    /// a new data folder (no setting yet) starts with `DEFAULT_LANGUAGES`.
+    /// The languages offered when a call's language is chosen (ISO codes, e.g. ["en", "uk", "ru"]); the first is a
+    /// new call's when nothing chose one (`call_language::default_language`). Nothing detects a call's language. A new
+    /// data folder (no setting yet) starts with `DEFAULT_LANGUAGES`.
     #[serde(default = "default_languages")]
     pub languages: Vec<String>,
+    /// Announcements already answered (`announce::LIST`, by id): never shown again.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub announcements_seen: Vec<String>,
     /// Terms for every call (names, products, acronyms the user wants always): `echoctl vocab
     /// add --always`. Learned terms live in `learned`, each tied to its meetings (`vocab.rs`).
     #[serde(default)]

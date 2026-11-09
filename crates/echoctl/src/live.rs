@@ -121,11 +121,8 @@ fn can_transcribe() -> bool {
 
 /// Start the worker for a call. None when no model is downloaded and no server is set (the call is then transcribed
 /// after it ends, as before).
-pub fn start(dir: &Path, meeting: Option<&MeetingContext>, languages: Option<Vec<String>>) -> Option<Live> {
-    let mut cfg = Config::load().ok()?;
-    if let Some(l) = languages.filter(|l| !l.is_empty()) {
-        cfg.languages = l; // pinned for this call
-    }
+pub fn start(dir: &Path, meeting: Option<&MeetingContext>) -> Option<Live> {
+    let cfg = Config::load().ok()?;
     if !can_transcribe() {
         return None;
     }
@@ -340,7 +337,14 @@ fn run(dir: &Path, cfg: &Config, prompt: Option<String>, remote_name: Option<Str
     ];
     let mut segs = vec![];
     let mut watch = cfg.echo_cancel.unwrap_or(true).then(|| EchoWatch::new(dir));
+    // The call's language changed by hand during it (`call_language::set`): the rest in it, the whole call again at
+    // the end.
+    let mut relanguaged = false;
     loop {
+        if let Some(l) = crate::call_language::meta_language(dir).filter(|l| *l != tr.language()) {
+            tr.set_language(l);
+            relanguaged = true;
+        }
         // Read before draining: once `done` is seen, what is on disk is the whole track.
         let last = done.load(Ordering::SeqCst);
         let mut behind = false;
@@ -373,7 +377,6 @@ fn run(dir: &Path, cfg: &Config, prompt: Option<String>, remote_name: Option<Str
             std::thread::sleep(TICK);
         }
     }
-    tr.settle();
     // Given up while the last pass ran (`abandon` after `close`): no echo cancellation, no second decode.
     if quit.load(Ordering::SeqCst) {
         bail!("given up: nobody waits for this transcript");
@@ -384,7 +387,20 @@ fn run(dir: &Path, cfg: &Config, prompt: Option<String>, remote_name: Option<Str
         eprintln!("  echo: {} ms, gain {:.2}, r {:.2}; skipped {:.1} s of the mic", e.delay_ms(), e.gain, e.r, w.skipped as f64 / RATE as f64);
     }
     let (mic, remote) = (dir.join("mic.wav"), dir.join("remote.wav"));
-    if redo_at_stop(watch.as_ref()) && mic.exists() && remote.exists() {
+    if relanguaged && mic.exists() && remote.exists() {
+        eprintln!("  the call's language was changed during it: transcribing all of it again");
+        segs.retain(|s| s.speaker != "remote");
+        let mut theirs = tr.track("remote", &load_16k(&remote)?)?;
+        if let Some(n) = remote_name.as_deref() {
+            theirs.iter_mut().for_each(|s| s.name = Some(n.to_string()));
+        }
+        segs.extend(theirs);
+        if !redo_at_stop(watch.as_ref()) {
+            segs.retain(|s| s.speaker != "me");
+            segs.extend(tr.track("me", &load_16k(&mic)?)?);
+        }
+    }
+    if (redo_at_stop(watch.as_ref()) || relanguaged && watch.is_some()) && mic.exists() && remote.exists() {
         match crate::aec::cancel(&load_16k(&mic)?, &load_16k(&remote)?) {
             Ok(Some((clean, delay))) => {
                 eprintln!("  echo cancellation: on (speaker → mic delay ≈ {delay} ms) — decoding the mic again");
@@ -395,7 +411,7 @@ fn run(dir: &Path, cfg: &Config, prompt: Option<String>, remote_name: Option<Str
             Err(e) => eprintln!("  echo cancellation skipped: {e:#}"),
         }
     }
-    Ok((segs, model))
+    Ok((segs, if relanguaged { tr.model_name() } else { model }))
 }
 
 /// Decode the finished utterances at the front of the buffer, drop the audio they used, and
@@ -496,7 +512,7 @@ pub fn replay(wav: &Path, out_dir: &Path) -> Result<()> {
     let spec = hound::WavSpec { channels: 1, sample_rate: RATE as u32, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
     let mut w = hound::WavWriter::create(out_dir.join("remote.wav"), spec)?;
     let t = std::time::Instant::now();
-    let live = start(out_dir, None, None).ok_or_else(|| anyhow!("no transcription model downloaded"))?;
+    let live = start(out_dir, None).ok_or_else(|| anyhow!("no transcription model downloaded"))?;
     for c in audio.chunks(RATE / 10) {
         for s in c {
             w.write_sample((s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16)?;

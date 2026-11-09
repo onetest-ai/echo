@@ -190,7 +190,6 @@ const SETTINGS_BODY = {
     const langs = st.languages || []
     const chips = langs.map((l) => `<span class="chip">${esc(langName(l))}<button data-lang-del="${esc(l)}" aria-label="Remove ${esc(langName(l))}">×</button></span>`).join('')
     const add = `<label class="btn split-lang pick">+ Add<select data-lang-add aria-label="Add a language"><option value=""></option>${LANG_LIST.filter((l) => !langs.includes(l)).map((l) => `<option value="${l}">${esc(langName(l))}</option>`).join('')}</select></label>`
-    const cur = recordLang()
     const frames = st.capture_frames && st.frames_permitted === false ? ` <a href="#" data-act="ask_permissions">Grant…</a>` : ''
     return `<h2>Recording</h2><p class="set-lead">Echo records only the calls you choose, and keeps only text.</p>` +
       setCard('When to record', [
@@ -198,8 +197,8 @@ const SETTINGS_BODY = {
         setRow('Other Teams calls', 'Calls not on your calendar.', seg('unscheduled', st.unscheduled, [['ask', 'Ask'], ['manual', 'Manual']])),
       ]) +
       setCard('Languages', [
-        setRow('Languages a call may be in', `Each call is in one of these: Echo detects which from its first sentences and keeps it for the whole call (Ukrainian and Russian apart).<div class="chips">${chips}${add}</div>`, ''),
-        setRow('New recordings', "The Record button's language unless you pick another.", `<div class="seg" role="group"><button data-reclang-set="en" aria-pressed="${cur === 'en'}">English</button><button data-reclang-set="" aria-pressed="${cur === ''}">Detect</button></div>`),
+        setRow('Languages you record in', `The ones offered when a call starts. Echo never guesses a call's language: it is transcribed in the one chosen, and the model best at it is used.<div class="chips">${chips}${add}</div>`, ''),
+        setRow('Default language', 'For calls you start without picking one, and for those Echo records by itself.', langs.length > 1 ? `<label class="btn split-lang pick">${esc(langName(langs[0]))}${CARET}<select data-lang-default aria-label="Default language">${langs.map((l, i) => `<option value="${esc(l)}"${i ? '' : ' selected'}>${esc(langName(l))}</option>`).join('')}</select></label>` : `<span class="set-sub">${esc(langName(langs[0] || 'en'))}</span>`),
       ]) +
       setCard('During a call', [
         setRow("Follow Teams' mute", st.capture_ui === false ? "Off with Read the Teams window: Echo can't see Teams' mute button, so your track records while you're muted in Teams." : "Your track records silence while you're muted in Teams (it needs Read the Teams window).", st.capture_ui === false ? '<button class="sw" role="switch" aria-checked="false" aria-label="Follow Teams\' mute" disabled></button>' : sw('follow_app_mute', st.follow_app_mute, "Follow Teams' mute")),

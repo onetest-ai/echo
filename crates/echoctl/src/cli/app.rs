@@ -154,12 +154,7 @@ pub enum ModelCmd {
     /// Switch the active model
     Use { name: String },
     /// Delete a downloaded model (not the active one)
-    Remove {
-        name: String,
-        /// Remove the language-detection helper (turbo q5_0) even while the active model uses it
-        #[arg(long)]
-        force: bool,
-    },
+    Remove { name: String },
 }
 
 #[cfg(feature = "transcribe")]
@@ -454,7 +449,7 @@ pub fn model(cmd: ModelCmd) -> Result<()> {
         ModelCmd::List { json } => models::list(json),
         ModelCmd::Download { name } => models::download(&name),
         ModelCmd::Use { name } => models::use_model(&name),
-        ModelCmd::Remove { name, force } => models::remove(&name, force),
+        ModelCmd::Remove { name } => models::remove(&name),
     }
 }
 

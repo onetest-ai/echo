@@ -1324,7 +1324,7 @@ fn finish_transcript(_dir: PathBuf, live: crate::recorder::Live) {
 /// Transcription needs no Claude turn, so the watcher runs it right away as a child process
 /// (`echoctl transcribe`), then emits `transcribed`; the minutes follow from the app's scheduler
 /// (`notes::auto_due`) or when asked for.
-fn transcribe_in_background(dir: PathBuf) {
+pub(crate) fn transcribe_in_background(dir: PathBuf) {
     std::thread::spawn(move || transcribe_now(&dir));
 }
 

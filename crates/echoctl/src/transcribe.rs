@@ -9,15 +9,16 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperState};
 
 use crate::audio::{downmix, Resampler};
-use crate::call_language::{fixed_language, meta_language, with_language, CallLanguage, Pick, Ranked};
+use crate::call_language;
 use crate::config::Config;
 use crate::meeting::MeetingContext;
 use crate::models;
@@ -253,43 +254,6 @@ pub(crate) fn final_threads() -> usize {
     if cfg!(target_os = "macos") { n.min(8) } else { (n / 2).clamp(4, 16) }
 }
 
-/// Allowed languages ranked by detection probability, for audio already in `state`'s mel.
-fn rank_languages(state: &mut WhisperState, allowed: &[i32], threads: usize) -> Result<Vec<(i32, f32)>> {
-    let (best_any, probs) = state.lang_detect(0, threads)?;
-    if std::env::var_os("ECHOCTL_DEBUG").is_some() {
-        let mut top: Vec<(i32, f32)> = probs.iter().enumerate().map(|(i, p)| (i as i32, *p)).collect();
-        top.sort_by(|a, b| b.1.total_cmp(&a.1));
-        let fmt: Vec<String> = top[..4.min(top.len())]
-            .iter()
-            .map(|(i, p)| format!("{}={:.2}", whisper_rs::get_lang_str(*i).unwrap_or("?"), p))
-            .collect();
-        eprintln!("\n  debug: lang probs {}", fmt.join(" "));
-    }
-    if allowed.is_empty() {
-        return Ok(vec![(best_any, probs.get(best_any as usize).copied().unwrap_or(0.0))]);
-    }
-    let mut ranked: Vec<(i32, f32)> = allowed
-        .iter()
-        .filter(|id| (**id as usize) < probs.len())
-        .map(|id| (*id, probs[*id as usize]))
-        .collect();
-    ranked.sort_by(|a, b| b.1.total_cmp(&a.1));
-    Ok(ranked)
-}
-
-/// An utterance's language: the one allowed, with no detection (the second encoder run it would cost is what #234
-/// saves), else `detect`'s ranking and the language `pick` gives for it. Returns the detection (None: none ran).
-fn detect_language(allowed: &[i32], pick: &Pick<'_>, detect: impl FnOnce() -> Result<Ranked>) -> Result<(Option<Ranked>, Option<i32>)> {
-    Ok(match allowed {
-        [only] => (None, Some(*only)),
-        _ => {
-            let ranked = detect()?;
-            let id = pick(&ranked);
-            (Some(ranked), id)
-        }
-    })
-}
-
 /// Whisper hint: a language-neutral, comma-separated term list (people, products, acronyms).
 /// A sentence-style English prompt would bias Ukrainian/Russian utterances toward English
 /// (i.e. translation), so only bare terms are passed. Capped: long prompts invite Whisper to
@@ -324,21 +288,9 @@ pub(crate) fn build_prompt(cfg: &Config, meeting: Option<&MeetingContext>) -> Op
     (!prompt.is_empty()).then_some(prompt)
 }
 
-fn allowed_languages(cfg: &Config) -> Result<Vec<i32>> {
-    cfg.languages
-        .iter()
-        .map(|l| whisper_rs::get_lang_id(l).ok_or_else(|| anyhow!("unknown language code '{l}' in config")))
-        .collect()
-}
-
-/// whisper.cpp with the model loaded: the transcription model and, for another model than turbo,
-/// turbo for language ID when downloaded.
+/// whisper.cpp with the model loaded.
 pub(crate) struct Whisper {
     ctx: WhisperContext,
-    /// Separate language-ID model (turbo): its detection is far more decisive than large-v3's. One state, shared by
-    /// the tracks (detection runs on the first few utterances only); both let go once the call's language is fixed
-    /// (`drop_detector`).
-    detector: Mutex<Option<(WhisperContext, WhisperState)>>,
     threads: usize,
 }
 
@@ -385,80 +337,29 @@ fn flash_attention(use_gpu: bool, apple_silicon: bool) -> bool {
     use_gpu && apple_silicon
 }
 
-/// Turbo detects its own language; other Whisper models get turbo q5_0 as a separate detector.
-fn needs_detector(model_path: &Path) -> bool {
-    !model_path.file_name().and_then(|f| f.to_str()).is_some_and(models::detects_own_language)
-}
-
-/// The language-ID model to load beside `model_path`: the helper (turbo q5_0, `models::HELPER_MODEL`) when it is
-/// downloaded and `model_path` needs it.
-fn detector_path(model_path: &Path) -> Option<PathBuf> {
-    let det = models::model_path(models::find(models::HELPER_MODEL).ok()?);
-    (needs_detector(model_path) && det.exists() && det != model_path).then_some(det)
-}
-
 impl Whisper {
-    /// Load `model_path` (GPU unless it failed its check, `gpu.rs`) and, for a model other than
-    /// turbo, turbo for language ID when it is downloaded and `detect` (the language isn't fixed yet).
-    fn load(model_path: &Path, threads: usize, detect: bool) -> Result<Whisper> {
+    /// Load `model_path` (GPU unless it failed its check, `gpu.rs`).
+    fn load(model_path: &Path, threads: usize) -> Result<Whisper> {
         whisper_rs::install_logging_hooks(); // routes whisper.cpp's chatter to `log` (unset = silent)
-        let use_gpu = crate::gpu::allowed();
-        let cp = || context_params(use_gpu);
-        let ctx = WhisperContext::new_with_params(model_path, cp()).context("loading model")?;
-        if cp().flash_attn {
+        let cp = context_params(crate::gpu::allowed());
+        let flash = cp.flash_attn;
+        let ctx = WhisperContext::new_with_params(model_path, cp).context("loading model")?;
+        if flash {
             eprintln!("  flash attention: on");
         }
-        let detector = match detector_path(model_path).filter(|_| detect) {
-            Some(det) => {
-                eprintln!("  language detection: {}", models::HELPER_MODEL);
-                let ctx = WhisperContext::new_with_params(&det, cp())?;
-                let state = ctx.create_state()?;
-                Some((ctx, state))
-            }
-            None => None,
-        };
-        Ok(Whisper { ctx, detector: Mutex::new(detector), threads })
-    }
-
-    fn detector(&self) -> std::sync::MutexGuard<'_, Option<(WhisperContext, WhisperState)>> {
-        self.detector.lock().unwrap_or_else(|e| e.into_inner())
+        Ok(Whisper { ctx, threads })
     }
 
     fn state(&self) -> Result<WhisperStates> {
         Ok(WhisperStates { state: self.ctx.create_state()? })
     }
 
-    /// Decode one utterance: in the language when `allowed` is one (no detection), else detected
-    /// among `allowed` (any when empty) and decoded in the language `pick` gives for it. Returns the
-    /// detection (None: none ran), the language's code, and the sentences.
-    fn utterance(
-        &self,
-        st: &mut WhisperStates,
-        allowed: &[i32],
-        prompt: Option<&str>,
-        chunk: &[f32],
-        pick: &Pick<'_>,
-    ) -> Result<(Option<Ranked>, String, Decoded)> {
+    /// Decode one utterance in `lang`. Returns the language's code and the sentences.
+    fn utterance(&self, st: &mut WhisperStates, lang: i32, prompt: Option<&str>, chunk: &[f32]) -> Result<(String, Decoded)> {
         let dur = chunk.len() as f64 / RATE as f64;
-        let (ranked, lang_id) = detect_language(allowed, pick, || {
-            let mut det = self.detector();
-            let s = match det.as_mut() {
-                Some((_, s)) => s,
-                None => &mut st.state,
-            };
-            s.pcm_to_mel(chunk, self.threads)?;
-            rank_languages(s, allowed, self.threads)
-        })?;
-        let lang = lang_id.and_then(whisper_rs::get_lang_str).unwrap_or("auto").to_string();
+        let lang = whisper_rs::get_lang_str(lang).unwrap_or("en").to_string();
         let segs = decode_with_hint(dur, prompt, |hint| self.decode(&mut st.state, chunk, &lang, hint))?;
-        Ok((ranked, lang, segs))
-    }
-
-    /// Let go of the language-ID helper (the call's language is fixed): its model and its state, at once.
-    fn drop_detector(&self) {
-        if self.detector().take().is_some() {
-            eprintln!("  language detection: {} unloaded", models::HELPER_MODEL);
-        }
+        Ok((lang, segs))
     }
 
     fn decode(&self, state: &mut WhisperState, chunk: &[f32], lang: &str, hint: Option<&str>) -> Result<Decoded> {
@@ -530,10 +431,9 @@ pub(crate) enum EngineState {
 
 impl Engine {
     /// Load `model_path` with the engine its catalog entry names.
-    /// `detect`: the language may still need detecting (else no language-ID helper is loaded).
-    pub(crate) fn load(model_path: &Path, threads: usize, detect: bool) -> Result<Engine> {
+    pub(crate) fn load(model_path: &Path, threads: usize) -> Result<Engine> {
         Ok(match models::engine_of(model_path) {
-            models::Engine::Whisper => Engine::Whisper(Whisper::load(model_path, threads, detect)?),
+            models::Engine::Whisper => Engine::Whisper(Whisper::load(model_path, threads)?),
             models::Engine::Nemo => Engine::Nemo(Nemo::load(model_path)?),
         })
     }
@@ -545,39 +445,20 @@ impl Engine {
         })
     }
 
-    /// Decode one utterance: in the language when `allowed` is one (no detection), else detected
-    /// among `allowed` (any when empty) and decoded in the language `pick` gives for the detection.
-    /// Returns the detection (None: none ran), the language's code, and the sentences.
-    pub(crate) fn utterance(
-        &self,
-        st: &mut EngineState,
-        allowed: &[i32],
-        prompt: Option<&str>,
-        chunk: &[f32],
-        pick: &Pick<'_>,
-    ) -> Result<(Option<Ranked>, String, Decoded)> {
+    /// Decode one utterance in `lang` (the call's). Returns the language's code and the sentences.
+    pub(crate) fn utterance(&self, st: &mut EngineState, lang: i32, prompt: Option<&str>, chunk: &[f32]) -> Result<(String, Decoded)> {
         match (self, st) {
-            (Engine::Whisper(w), EngineState::Whisper(s)) => w.utterance(s, allowed, prompt, chunk, pick),
-            (Engine::Nemo(n), _) => n.utterance(allowed, prompt, chunk, pick),
+            (Engine::Whisper(w), EngineState::Whisper(s)) => w.utterance(s, lang, prompt, chunk),
+            (Engine::Nemo(n), _) => n.utterance(lang, prompt, chunk),
             (Engine::Whisper(w), st) => {
                 *st = EngineState::Whisper(w.state()?);
-                self.utterance(st, allowed, prompt, chunk, pick)
+                self.utterance(st, lang, prompt, chunk)
             }
         }
     }
 
-    /// The call's language is fixed: no more detection, so the language-ID helper goes.
-    pub(crate) fn drop_detector(&self) {
-        if let Engine::Whisper(w) = self {
-            w.drop_detector();
-        }
-    }
 }
 
-/// Nemotron hears the language from this much of an utterance (a decode in `auto` mode); the
-/// utterance is then decoded with that language pinned. `auto` alone mixes Russian into
-/// Ukrainian ("Так я сгоден", tested 2026-10-13); pinned, it doesn't.
-const NEMO_DETECT_S: f64 = 4.0;
 /// Word times against the audio, measured on a two-speaker recording with reference turns
 /// (2026-10-13): Whisper's token times run ~0.3–0.5 s early, Nemotron's streaming decoder
 /// emits words ~0.4–0.5 s late. Corrected in the word times only, which serve speaker
@@ -607,46 +488,13 @@ impl Nemo {
         Ok(Nemo { model: crate::nemo::Model::load(model_path, gpu)? })
     }
 
-    /// As `Engine::utterance`. Nemotron's detection (its `auto` pass) names languages without
-    /// probabilities: the one it heard among `allowed` votes with 1.
-    fn utterance(
-        &self,
-        allowed: &[i32],
-        prompt: Option<&str>,
-        chunk: &[f32],
-        pick: &Pick<'_>,
-    ) -> Result<(Option<Ranked>, String, Decoded)> {
+    /// As `Engine::utterance`: the language pinned (its `auto` mode mixes Russian into Ukrainian, tested 2026-10-13).
+    fn utterance(&self, lang: i32, prompt: Option<&str>, chunk: &[f32]) -> Result<(String, Decoded)> {
         let dur = chunk.len() as f64 / RATE as f64;
         let phrases: Vec<String> = prompt.map(|p| p.split(", ").map(str::to_owned).collect()).unwrap_or_default();
-        let codes: Vec<&str> = allowed.iter().filter_map(|l| whisper_rs::get_lang_str(*l)).collect();
-        let (mut detected, mut ranked) = (None, None);
-        let lang: Option<&str> = match codes.as_slice() {
-            [only] => Some(only),
-            _ => {
-                let n = chunk.len().min((NEMO_DETECT_S * RATE as f64) as usize);
-                let r = self.model.recognize(&chunk[..n], None, &[], NEMO_BOOST)?;
-                let heard: Vec<&str> = r.languages.iter().map(|l| crate::nemo::code(l)).collect();
-                let ok = |c: &&str| codes.is_empty() || codes.contains(c);
-                let text: String = r.words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(" ");
-                let own = match (heard.iter().copied().find(ok), cyrillic_hint(&text)) {
-                    (Some("uk" | "ru"), Some(c)) if ok(&c) => Some(c),
-                    (p, _) => p,
-                };
-                let vote: Ranked = own.and_then(whisper_rs::get_lang_id).map(|id| (id, 1.0)).into_iter().collect();
-                let chosen = pick(&vote).or_else(|| codes.first().and_then(|c| whisper_rs::get_lang_id(c)));
-                ranked = Some(vote);
-                let chosen = chosen.and_then(whisper_rs::get_lang_str);
-                if n == chunk.len() && heard.len() == 1 && chosen == heard.first().copied() {
-                    detected = Some(r); // the whole utterance, in one language: no second pass
-                }
-                chosen
-            }
-        };
+        let lang = whisper_rs::get_lang_str(lang);
         let locale = lang.and_then(crate::nemo::locale);
-        let plain = match detected {
-            Some(r) => r,
-            None => self.model.recognize(chunk, locale, &[], NEMO_BOOST)?,
-        };
+        let plain = self.model.recognize(chunk, locale, &[], NEMO_BOOST)?;
         // The vocabulary boost, kept only when every term it adds sounds like what the plain
         // decode heard there: boosting alone put "Flow Studio" and "ServiceNow" into a call that
         // never mentioned them, dozens of times (2026-10-13).
@@ -658,7 +506,7 @@ impl Nemo {
             if boost_is_heard(&text(&boosted), &text(&plain), &phrases) { boosted } else { plain }
         };
         if std::env::var_os("ECHOCTL_DEBUG").is_some() {
-            eprintln!("  debug: nemotron {dur:.1}s {lang:?} heard {:?}, {} words: {}", r.languages, r.words.len(),
+            eprintln!("  debug: nemotron {dur:.1}s {lang:?}, {} words: {}", r.words.len(),
                 r.words.iter().take(12).map(|w| format!("{}@{:.1}", w.text, w.start)).collect::<Vec<_>>().join(" "));
         }
         let segs = nemo_sentences(&r.words)
@@ -666,7 +514,7 @@ impl Nemo {
             .map(|p| Piece::new(p.start, p.end, clean_text(&p.text), shift(p.words, NEMO_WORD_LAG)))
             .filter(|p| !p.text.is_empty() && !is_hallucination(&p.text) && !is_word_list(&p.text))
             .collect();
-        Ok((ranked, lang.unwrap_or("auto").to_string(), segs))
+        Ok((lang.unwrap_or("auto").to_string(), segs))
     }
 }
 
@@ -778,21 +626,6 @@ fn spelled_as(word: &str, term: &str) -> bool {
         .any(|w| w.strip_prefix(term).is_some_and(|rest| rest.chars().all(|c| ".,;:!?…\"')]}»”’".contains(c))))
 }
 
-/// Ukrainian or Russian, from letters only one of them has (і ї є ґ / ы э ё ъ). Nemotron's own
-/// detection tags Ukrainian speech `ru-RU, uk-UA` and writes its first words in Russian; the
-/// letters it wrote still give the language away.
-fn cyrillic_hint(text: &str) -> Option<&'static str> {
-    let count = |set: &str| text.chars().flat_map(char::to_lowercase).filter(|c| set.contains(*c)).count();
-    let (uk, ru) = (count("іїєґ"), count("ыэёъ"));
-    if uk > ru * 2 && uk >= 1 {
-        Some("uk")
-    } else if ru > uk * 2 && ru >= 1 {
-        Some("ru")
-    } else {
-        None
-    }
-}
-
 fn shift(words: Vec<[f64; 2]>, by: f64) -> Vec<[f64; 2]> {
     words.into_iter().map(|[a, b]| [(a + by).max(0.0), (b + by).max(0.0)]).collect()
 }
@@ -825,7 +658,9 @@ fn nemo_sentences(words: &[crate::nemo::Word]) -> Vec<Piece> {
 /// Where utterances are decoded: this computer, or a transcription server on the local network
 /// (`remote.rs`) with this computer as the fallback while it can't be reached.
 enum Backend {
-    Local(Engine),
+    /// This computer's model: another one once the call's language changes to one another model is better at
+    /// (`Transcriber::set_language`).
+    Local(RwLock<Arc<Engine>>),
     Remote {
         server: crate::remote::Client,
         /// This computer's model, loaded the first time the server can't be reached.
@@ -837,6 +672,10 @@ enum Backend {
     },
 }
 
+fn read(e: &RwLock<Arc<Engine>>) -> std::sync::RwLockReadGuard<'_, Arc<Engine>> {
+    e.read().unwrap_or_else(|e| e.into_inner())
+}
+
 /// A server that failed is tried again after this.
 const SERVER_RETRY: Duration = Duration::from_secs(60);
 /// No local model to fall back on: how long to keep waiting for the server.
@@ -844,86 +683,85 @@ const SERVER_WAIT: Duration = Duration::from_secs(15 * 60);
 
 pub(crate) struct Transcriber {
     backend: Backend,
-    allowed: Vec<i32>,
     prompt: Option<String>,
-    /// The call's one language, shared by both tracks.
-    language: Mutex<CallLanguage>,
-    /// The call's folder: the language goes into its `meta.json` once decided.
-    call: Option<PathBuf>,
+    /// The call's one language, shared by both tracks; changed only by hand (`set_language`).
+    language: Mutex<i32>,
+    /// The model `Backend::Local` runs, and whether it follows the call's language (`models::for_language`; not for a
+    /// `--model` comparison run).
+    model: Mutex<String>,
+    follows_language: bool,
+    threads: usize,
+    /// Bumped by each model swap: a track's decoding state from another model is made again.
+    generation: AtomicU64,
 }
 
 /// Per-track decoding state, reused across utterances.
 pub(crate) struct TrackState {
-    /// Created when this computer decodes (always, or the first time the server fails).
+    /// Created when this computer decodes (always, or the first time the server fails), for the model of
+    /// `generation`.
     local: Option<EngineState>,
+    generation: u64,
 }
 
 impl Transcriber {
     pub(crate) fn track_state(&self) -> Result<TrackState> {
         let local = match &self.backend {
-            Backend::Local(e) => Some(e.state()?),
+            Backend::Local(e) => Some(read(e).state()?),
             Backend::Remote { .. } => None,
         };
-        Ok(TrackState { local })
+        Ok(TrackState { local, generation: self.generation.load(Ordering::SeqCst) })
     }
 
-    fn fixed(&self) -> Option<i32> {
-        self.language.lock().unwrap_or_else(|e| e.into_inner()).fixed
+    pub(crate) fn language(&self) -> i32 {
+        *self.language.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Decode one utterance in the call's language (`with_language`). Returns the language code and
-    /// (start, end, text) relative to the chunk.
-    pub(crate) fn utterance(&self, ts: &mut TrackState, chunk: &[f32]) -> Result<(String, Decoded)> {
-        let dur = chunk.len() as f64 / RATE as f64;
-        let (lang, segs, decided) = with_language(&self.language, &self.allowed, dur, |allowed, pick| self.decode(ts, chunk, allowed, pick))?;
-        if let Some(l) = decided {
-            self.decided(l);
+    /// The model the call is transcribed with now.
+    pub(crate) fn model_name(&self) -> String {
+        self.model.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// The call's language was changed by hand: what is decoded from now on is in `l`, with the downloaded model best
+    /// at it when that is another one (`models::for_language`). A model that fails to load leaves the current one.
+    pub(crate) fn set_language(&self, l: i32) {
+        *self.language.lock().unwrap_or_else(|e| e.into_inner()) = l;
+        let code = whisper_rs::get_lang_str(l).unwrap_or("en");
+        eprintln!("  language: {code} (changed during the call)");
+        let Backend::Local(engine) = &self.backend else { return };
+        if !self.follows_language {
+            return;
         }
-        Ok((lang, segs))
-    }
-
-    /// The call ended before its language was decided: decide it on the votes there are.
-    pub(crate) fn settle(&self) {
-        let decided = self.language.lock().unwrap_or_else(|e| e.into_inner()).settle();
-        if let Some(l) = decided {
-            self.decided(l);
+        let active = crate::config::Config::load().ok().and_then(|c| c.model);
+        let Some(m) = models::for_language(code, active.as_deref()) else { return };
+        if *self.model.lock().unwrap_or_else(|e| e.into_inner()) == m.name {
+            return;
         }
-    }
-
-    /// The language was just decided: say so, let go of the language-ID helper, and keep it in the call's `meta.json`
-    /// (a retranscription then never detects).
-    fn decided(&self, l: i32) {
-        let code = whisper_rs::get_lang_str(l).unwrap_or("auto");
-        let (votes, speech) = {
-            let c = self.language.lock().unwrap_or_else(|e| e.into_inner());
-            (c.votes, c.speech_s)
-        };
-        eprintln!("  language: {code} (from {speech:.1} s of speech in {votes} utterances)");
-        match &self.backend {
-            Backend::Local(e) => e.drop_detector(),
-            Backend::Remote { local, .. } => local.get().into_iter().flatten().for_each(Engine::drop_detector),
-        }
-        if let Some(dir) = self.call.as_ref().filter(|d| d.join("meta.json").exists()) {
-            let r = crate::calls::update_meta(dir, |m| {
-                m["language"] = serde_json::json!(code);
-                Ok(())
-            });
-            if let Err(e) = r {
-                eprintln!("  the call's language wasn't saved: {e:#}");
+        match Engine::load(&models::model_path(m), self.threads) {
+            Ok(e) => {
+                *engine.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(e);
+                *self.model.lock().unwrap_or_else(|e| e.into_inner()) = m.name.to_string();
+                self.generation.fetch_add(1, Ordering::SeqCst);
+                eprintln!("  model: {} (for {code})", m.name);
             }
+            Err(e) => eprintln!("  model {} for {code} didn't load, kept the current one: {e:#}", m.name),
         }
     }
 
-    /// One utterance on this computer or the server (`Engine::utterance`).
-    fn decode(&self, ts: &mut TrackState, chunk: &[f32], allowed: &[i32], pick: &Pick<'_>) -> Result<(Option<Ranked>, String, Decoded)> {
+    /// Decode one utterance in the call's language. Returns the language code and (start, end, text) relative to
+    /// the chunk.
+    pub(crate) fn utterance(&self, ts: &mut TrackState, chunk: &[f32]) -> Result<(String, Decoded)> {
+        let lang = self.language();
         Ok(match &self.backend {
-            Backend::Local(e) => self.local(e, ts, chunk, allowed, pick)?,
+            Backend::Local(e) => {
+                let e = read(e).clone();
+                self.local(&e, ts, chunk, lang)?
+            }
             Backend::Remote { server, fallback, local, threads, down_until } => {
                 let waiting = Instant::now();
                 loop {
                     let down = down_until.lock().unwrap_or_else(|e| e.into_inner()).is_some_and(|t| Instant::now() < t);
                     if !down {
-                        match server.utterance(chunk, allowed, self.prompt.as_deref()) {
+                        match server.utterance(chunk, lang, self.prompt.as_deref()) {
                             Ok(r) => break r,
                             Err(e) if e.downcast_ref::<crate::remote::Refused>().is_some() => return Err(e),
                             Err(e) => {
@@ -934,10 +772,10 @@ impl Transcriber {
                     }
                     let engine = local.get_or_init(|| {
                         let path = fallback.as_ref()?;
-                        Engine::load(path, *threads, self.fixed().is_none()).map_err(|e| eprintln!("  this computer's model: {e:#}")).ok()
+                        Engine::load(path, *threads).map_err(|e| eprintln!("  this computer's model: {e:#}")).ok()
                     });
                     if let Some(e) = engine {
-                        break self.local(e, ts, chunk, allowed, pick)?;
+                        break self.local(e, ts, chunk, lang)?;
                     }
                     // No model here: the WAVs keep the audio, so wait for the server.
                     if waiting.elapsed() < Duration::from_secs(1) {
@@ -953,12 +791,14 @@ impl Transcriber {
         })
     }
 
-    fn local(&self, e: &Engine, ts: &mut TrackState, chunk: &[f32], allowed: &[i32], pick: &Pick<'_>) -> Result<(Option<Ranked>, String, Decoded)> {
-        if ts.local.is_none() {
+    fn local(&self, e: &Engine, ts: &mut TrackState, chunk: &[f32], lang: i32) -> Result<(String, Decoded)> {
+        let generation = self.generation.load(Ordering::SeqCst);
+        if ts.local.is_none() || ts.generation != generation {
             ts.local = Some(e.state()?);
+            ts.generation = generation;
         }
         let st = ts.local.as_mut().expect("just set");
-        e.utterance(st, allowed, self.prompt.as_deref(), chunk, pick)
+        e.utterance(st, lang, self.prompt.as_deref(), chunk)
     }
 
     pub(crate) fn track(&self, speaker: &str, audio: &[f32]) -> Result<Vec<Segment>> {
@@ -1268,24 +1108,26 @@ pub(crate) fn take_marker(dir: &Path) -> Result<InProgress> {
     bail!("could not mark {} as being transcribed", dir.display())
 }
 
-/// The final pass's transcriber: the configured model (or `model_override`), with turbo for
-/// language ID beside a model other than turbo when it is downloaded — or the transcription server when one is set
-/// (`echoctl server use`; never with `model_override`). Returns it with the model's name.
-/// `call`: the call's folder. Its language is fixed from the start (no detection, no helper loaded) when its
-/// `meta.json` has one or one language is allowed; otherwise it is decided from the first utterances and written there.
+/// The transcriber of a call (live and after): in the call's language (`call_language::of_call`), with the downloaded
+/// model best at it (`models::for_language`, else the configured one), or `model_override` (a comparison run), or the
+/// transcription server when one is set (`echoctl server use`; never with `model_override`). Returns it with the
+/// model's name.
 pub(crate) fn final_transcriber(cfg: &Config, model_override: Option<&str>, prompt: Option<String>, threads: usize, call: Option<&Path>) -> Result<(Transcriber, String)> {
-    let allowed = allowed_languages(cfg)?;
     if let Some(p) = &prompt {
         eprintln!("  vocabulary hint: {p}");
     }
-    let set = call.and_then(meta_language);
-    let fixed = fixed_language(set, &allowed);
-    if let Some(note) = set_language_note(set, fixed) {
-        eprintln!("  language: {note}");
-    }
-    let call = language_kept_in(call, model_override);
-    let language = Mutex::new(CallLanguage::new(fixed, &allowed));
-    let transcriber = |backend| Transcriber { backend, allowed, prompt, language, call };
+    let lang = call_language::of_call(call, cfg);
+    let code = whisper_rs::get_lang_str(lang).unwrap_or("en");
+    eprintln!("  language: {code}");
+    let transcriber = |backend, model: &str| Transcriber {
+        backend,
+        prompt,
+        language: Mutex::new(lang),
+        model: Mutex::new(model.to_string()),
+        follows_language: model_override.is_none(),
+        threads,
+        generation: AtomicU64::new(0),
+    };
     if let (None, Some(server)) = (model_override, crate::remote::Client::configured()) {
         let fallback = models::active_model_path().ok().filter(|p| p.exists());
         let name = match server.hello() {
@@ -1300,37 +1142,22 @@ pub(crate) fn final_transcriber(cfg: &Config, model_override: Option<&str>, prom
         };
         eprintln!("  model: {name}");
         let backend = Backend::Remote { server, fallback, local: OnceLock::new(), threads, down_until: Mutex::new(None) };
-        return Ok((transcriber(backend), name));
+        return Ok((transcriber(backend, &name), name));
     }
-    let (model_name, model_path) = match model_override {
-        Some(name) => {
-            let m = models::find(name)?;
-            (m.name.to_string(), models::model_path(m))
-        }
+    let chosen = match model_override {
+        Some(name) => Some(models::find(name)?),
+        None => models::for_language(code, cfg.model.as_deref()),
+    };
+    let (model_name, model_path) = match chosen {
+        Some(m) => (m.name.to_string(), models::model_path(m)),
         None => (cfg.model.clone().unwrap_or_default(), models::active_model_path()?),
     };
     if !model_path.exists() {
         bail!("model {model_name} is not downloaded — run `echoctl model download {model_name}`");
     }
     eprintln!("  model: {model_name}");
-    let engine = Engine::load(&model_path, threads, fixed.is_none())?;
-    Ok((transcriber(Backend::Local(engine)), model_name))
-}
-
-/// What the log says of the language set in a call's `meta.json` (`set`), given the call's language at the start.
-fn set_language_note(set: Option<i32>, fixed: Option<i32>) -> Option<String> {
-    let code = |l: i32| whisper_rs::get_lang_str(l).unwrap_or("?");
-    let set = set?;
-    Some(match fixed {
-        Some(l) if l == set => format!("{} (set for this call)", code(set)),
-        Some(l) => format!("{} was set for this call but only {} is allowed: transcribed in {}", code(set), code(l), code(l)),
-        None => format!("{} was set for this call but isn't among the allowed ones: decided again", code(set)),
-    })
-}
-
-/// Where the decided language is written: the call's folder, never by a comparison run (`--model`).
-fn language_kept_in(call: Option<&Path>, model_override: Option<&str>) -> Option<PathBuf> {
-    call.filter(|_| model_override.is_none()).map(Path::to_path_buf)
+    let engine = Engine::load(&model_path, threads)?;
+    Ok((transcriber(Backend::Local(RwLock::new(Arc::new(engine))), &model_name), model_name))
 }
 
 /// Order the segments, drop the mic's echo of the remote side, name the remote speaker when the
@@ -1418,7 +1245,6 @@ pub fn transcribe(call: &str, model_override: Option<&str>, keep_audio: bool) ->
     if let Some(r) = &remote {
         segs.extend(tr.track("remote", r)?);
     }
-    tr.settle();
     let suffix = model_override.map(|m| format!(".{m}")).unwrap_or_default();
     // A comparison run (--model) must leave the audio for the real transcript.
     let md_path = write_transcript(&dir, &cfg, &model_name, segs, &suffix, keep_audio || model_override.is_some())?;
@@ -1447,62 +1273,6 @@ mod tests {
     fn vad_splits_long_speech() {
         let a: Vec<f32> = (0..RATE * 60).map(|i| 0.3 * (i as f32 * 0.05).sin()).collect();
         assert!(utterances(&a).iter().all(|(s, e)| (e - s) as f64 / RATE as f64 <= MAX_UTTERANCE_S + 0.5));
-    }
-
-    #[test]
-    fn whisper_runs_no_detection_when_one_language_is_allowed() {
-        let id = |c| whisper_rs::get_lang_id(c).unwrap();
-        let (en, uk) = (id("en"), id("uk"));
-        let runs = std::cell::Cell::new(0);
-        let detect = || {
-            runs.set(runs.get() + 1);
-            Ok(vec![(uk, 0.8), (en, 0.2)])
-        };
-        let pick = |r: &[(i32, f32)]| r.first().map(|x| x.0);
-        assert_eq!(detect_language(&[en], &pick, detect).unwrap(), (None, Some(en)));
-        assert_eq!(runs.get(), 0, "one language allowed: no detection");
-        assert_eq!(detect_language(&[en, uk], &pick, detect).unwrap(), (Some(vec![(uk, 0.8), (en, 0.2)]), Some(uk)));
-        assert_eq!(runs.get(), 1);
-        detect_language(&[], &pick, detect).unwrap();
-        assert_eq!(runs.get(), 2, "any language: detected");
-    }
-
-    #[test]
-    fn the_log_says_what_became_of_a_language_set_for_the_call() {
-        let id = |c| whisper_rs::get_lang_id(c).unwrap();
-        let (en, uk, ru) = (id("en"), id("uk"), id("ru"));
-        assert_eq!(set_language_note(None, Some(en)), None);
-        assert_eq!(set_language_note(Some(uk), Some(uk)).unwrap(), "uk (set for this call)");
-        assert_eq!(set_language_note(Some(ru), None).unwrap(), "ru was set for this call but isn't among the allowed ones: decided again");
-        assert_eq!(set_language_note(Some(ru), Some(en)).unwrap(), "ru was set for this call but only en is allowed: transcribed in en");
-    }
-
-    #[test]
-    fn a_comparison_run_never_writes_the_calls_language() {
-        let dir = Path::new("/calls/2026-11-09_100000-x");
-        assert_eq!(language_kept_in(Some(dir), None), Some(dir.to_path_buf()));
-        assert_eq!(language_kept_in(Some(dir), Some("large-v3-q5_0")), None, "a --model run");
-        assert_eq!(language_kept_in(None, None), None);
-    }
-
-    #[test]
-    fn the_decided_language_is_kept_in_meta_json_for_a_retranscription() {
-        let (_env, _) = crate::paths::testenv::folders("transcribe-meta-language-written");
-        let dir = crate::paths::home().join("calls/2026-11-09_110000-x");
-        fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("meta.json"), r#"{"title": "x"}"#).unwrap();
-        let id = |c| whisper_rs::get_lang_id(c).unwrap();
-        let (en, uk, ru) = (id("en"), id("uk"), id("ru"));
-        let mut votes = CallLanguage::new(None, &[]);
-        votes.vote(&[(uk, 0.7), (ru, 0.3)], 4.0, true);
-        // A server's transcriber: nothing loaded here, and no request is made.
-        let server = crate::remote::Client::new("http://127.0.0.1:9", "key").unwrap();
-        let backend = Backend::Remote { server, fallback: None, local: OnceLock::new(), threads: 1, down_until: Mutex::new(None) };
-        let tr = Transcriber { backend, allowed: vec![en, uk, ru], prompt: None, language: Mutex::new(votes), call: Some(dir.clone()) };
-        tr.settle();
-        let meta: serde_json::Value = serde_json::from_slice(&fs::read(dir.join("meta.json")).unwrap()).unwrap();
-        assert_eq!((meta["language"].as_str(), meta["title"].as_str()), (Some("uk"), Some("x")));
-        assert_eq!(fixed_language(meta_language(&dir), &tr.allowed), Some(uk), "the next pass starts with it fixed");
     }
 
     #[test]
@@ -1712,41 +1482,6 @@ mod tests {
         assert!(!context_params(false).flash_attn);
         assert_eq!(context_params(true).flash_attn, cfg!(all(target_os = "macos", target_arch = "aarch64")));
         assert!(context_params(true).use_gpu);
-    }
-
-    #[test]
-    fn turbo_gets_no_second_detector_and_other_models_get_the_helper() {
-        let (_env, _) = crate::paths::testenv::folders("transcribe-detector");
-        let path = |n: &str| crate::paths::models_dir().join(models::find(n).unwrap().file);
-        std::fs::create_dir_all(crate::paths::models_dir()).unwrap();
-        let helper = path(models::HELPER_MODEL);
-        assert_eq!(detector_path(&path("small-q8_0")), None, "the helper isn't downloaded");
-        std::fs::write(&helper, b"x").unwrap();
-        for m in ["small-q8_0", "large-v3-q5_0"] {
-            assert_eq!(detector_path(&path(m)), Some(helper.clone()), "{m}");
-        }
-        for m in ["large-v3-turbo-q8_0", models::HELPER_MODEL] {
-            assert_eq!(detector_path(&path(m)), None, "{m}");
-        }
-    }
-
-    #[test]
-    fn turbo_detects_languages_itself() {
-        for f in ["ggml-large-v3-turbo-q5_0.bin", "ggml-large-v3-turbo-q8_0.bin"] {
-            assert!(!needs_detector(Path::new(f)), "{f}");
-        }
-        for f in ["ggml-large-v3-q5_0.bin", "ggml-small-q8_0.bin", "my-own-whisper.bin"] {
-            assert!(needs_detector(Path::new(f)), "{f}");
-        }
-    }
-
-    #[test]
-    fn ukrainian_and_russian_told_apart_by_letters() {
-        assert_eq!(cyrillic_hint("Так я сгоден. Давайте перенесимо зустріч на четвер."), Some("uk"));
-        assert_eq!(cyrillic_hint("Первый этап нужно закончить. Есть вопросы?"), Some("ru"));
-        assert_eq!(cyrillic_hint("Добрый день, коллеги"), Some("ru"));
-        assert_eq!(cyrillic_hint("Так, добре"), None);
-        assert_eq!(cyrillic_hint("Good morning"), None);
     }
 
     #[test]

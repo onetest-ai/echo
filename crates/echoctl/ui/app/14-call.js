@@ -60,7 +60,10 @@ function callMenu(c) {
 function toasts() {
   const n = S.notice ? `<div class="toast"><span class="grow">${esc(S.notice)}</span><button class="btn ghost" data-cmd="notice-ok">OK</button></div>` : ''
   const c = S.closeError ? `<div class="toast error"><span class="grow">Your notes couldn't be saved: ${esc(S.closeError)}</span><button class="btn" data-cmd="close-retry">Try again</button><button class="btn ghost danger" data-cmd="close-now">Close without saving</button></div>` : ''
-  return n + c
+  // A release's one-time banner, until answered (`announce.rs`): its buttons, the first the main one.
+  const a = S.state && S.state.announcement
+  const w = a ? `<div class="toast"><span class="grow"><b>${esc(a.title)}</b> ${esc(a.text)}</span>${a.buttons.map((b, i) => `<button class="btn${i ? ' ghost' : ' primary'}" data-announce="${esc(b.action)}">${esc(b.label)}</button>`).join('')}</div>` : ''
+  return n + c + w
 }
 
 function confirmBox(c) {

@@ -11,7 +11,8 @@ mod audio;
 mod ax;
 mod calendar;
 mod calls;
-#[cfg(feature = "transcribe")]
+#[cfg(feature = "tray")]
+mod announce;
 mod call_language;
 mod config;
 mod deliver;
@@ -362,6 +363,15 @@ enum Cmd {
         #[arg(long)]
         keep_audio: bool,
     },
+    /// Change a call's language (Echo never detects it): while it records, what is said from then on is in it and the
+    /// whole call is transcribed again at its end; after, it is transcribed again when its audio was kept
+    Language {
+        /// Language code: en, ru, uk, es, …
+        code: String,
+        /// Call folder (path or name under calls/), or "latest"
+        #[arg(default_value = "latest")]
+        call: String,
+    },
     /// Remote speakers a call's speaker detection found (id, time, first lines); with N=Name
     /// pairs, name them in the transcript (N= clears a name)
     #[cfg(feature = "transcribe")]
@@ -626,6 +636,7 @@ fn main() -> Result<()> {
         Cmd::Server { cmd } => cli::app::server(cmd),
         #[cfg(feature = "transcribe")]
         Cmd::Transcribe { call, model, keep_audio } => cli::capture::transcribe(call, model, keep_audio),
+        Cmd::Language { code, call } => cli::capture::language(&code, &call),
         #[cfg(feature = "transcribe")]
         Cmd::Speakers { call, names, relabel } => speakers::command(&call, &names, relabel),
         Cmd::Vocab { cmd } => cli::capture::vocab(cmd),

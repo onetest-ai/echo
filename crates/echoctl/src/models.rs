@@ -69,7 +69,7 @@ pub const CATALOG: &[Model] = &[
         name: "large-v3-turbo-q5_0",
         file: "ggml-large-v3-turbo-q5_0.bin",
         size_mb: 574,
-        summary: "best speed/accuracy balance; near large-v3 quality, multilingual",
+        summary: "Whisper, deprecated (heavy on the computer): still the one for calls not in English until a lighter model replaces it",
         engine: Engine::Whisper,
         repo: WHISPER_REPO,
         role: Role::Transcribe,
@@ -78,7 +78,7 @@ pub const CATALOG: &[Model] = &[
         name: "large-v3-turbo-q8_0",
         file: "ggml-large-v3-turbo-q8_0.bin",
         size_mb: 874,
-        summary: "slightly more accurate than q5_0, same speed class",
+        summary: "Whisper, deprecated (heavy on the computer): slightly more accurate than turbo q5_0",
         engine: Engine::Whisper,
         repo: WHISPER_REPO,
         role: Role::Transcribe,
@@ -87,7 +87,7 @@ pub const CATALOG: &[Model] = &[
         name: "large-v3-q5_0",
         file: "ggml-large-v3-q5_0.bin",
         size_mb: 1081,
-        summary: "most accurate (accents, noisy calls); several times slower than turbo",
+        summary: "Whisper, deprecated (heavy on the computer): several times slower than turbo",
         engine: Engine::Whisper,
         repo: WHISPER_REPO,
         role: Role::Transcribe,
@@ -96,7 +96,7 @@ pub const CATALOG: &[Model] = &[
         name: "small-q8_0",
         file: "ggml-small-q8_0.bin",
         size_mb: 264,
-        summary: "fast on weak hardware; noticeably more errors",
+        summary: "Whisper, deprecated: lighter than turbo, noticeably more errors",
         engine: Engine::Whisper,
         repo: WHISPER_REPO,
         role: Role::Transcribe,
@@ -108,6 +108,15 @@ pub const CATALOG: &[Model] = &[
         summary: "NVIDIA Nemotron: fast on a CPU, 40 languages (en, es, ru, uk among the best)",
         engine: Engine::Nemo,
         repo: "nvidia/nemotron-3.5-asr-streaming-0.6b",
+        role: Role::Transcribe,
+    },
+    Model {
+        name: "parakeet-tdt-0.6b-v3",
+        file: "parakeet-tdt-0.6b-v3.q8_0.gguf",
+        size_mb: 714,
+        summary: "NVIDIA Parakeet v3: the best for English calls here, fast on a CPU; 25 European languages",
+        engine: Engine::Nemo,
+        repo: "nvidia/parakeet-tdt-0.6b-v3",
         role: Role::Transcribe,
     },
     Model {
@@ -201,6 +210,9 @@ pub fn hardware() -> Hardware {
 
 /// Recommendation + one-line reason, shown by first run and the doctor skill.
 pub fn recommend(hw: &Hardware) -> (&'static str, String) {
+    if find(PARAKEET).is_ok_and(runnable) {
+        return (PARAKEET, "light on the computer, the most accurate on English calls here".into());
+    }
     let ram = hw.ram_gb.unwrap_or(8);
     if ram < 8 {
         return ("small-q8_0", format!("only {ram} GB RAM"));
@@ -413,53 +425,49 @@ pub fn use_model(name: &str) -> Result<()> {
     cfg.model = Some(m.name.to_string());
     cfg.save()?;
     println!("active model: {}", m.name);
-    if let Some(note) = missing_helper_note(m) {
-        eprintln!("{note}");
-    }
     Ok(())
 }
 
-/// For a model the helper detects the language for, while the helper isn't downloaded.
-fn missing_helper_note(m: &Model) -> Option<String> {
-    let helper = find(HELPER_MODEL).ok()?;
-    (needs_helper(m) && !model_path(helper).exists()).then(|| {
-        format!(
-            "{} detects the language itself, less reliably — `echoctl model download {}` adds the helper that detects it",
-            m.name, helper.name
-        )
-    })
+/// The model that replaces Whisper (deprecated): Parakeet v3.
+pub const PARAKEET: &str = "parakeet-tdt-0.6b-v3";
+
+/// The downloaded model a call in `lang` is transcribed with, measured on Echo's test calls (2026-11-09): English →
+/// Parakeet v3, else Nemotron (about 15× less GPU than Whisper turbo and as accurate or better, noise included); another
+/// language → the active model when it is Whisper, else Whisper turbo (Nemotron and Parakeet make twice turbo's errors
+/// on noisy Russian). None: nothing better downloaded, the active model.
+#[cfg_attr(not(feature = "transcribe"), allow(dead_code))]
+pub fn for_language(lang: &str, active: Option<&str>) -> Option<&'static Model> {
+    let ready = |n: &&str| find(n).ok().filter(|m| model_path(m).exists() && runnable(m));
+    if lang == "en" {
+        return [PARAKEET, "nemotron-3.5-0.6b"].iter().find_map(ready);
+    }
+    if active.and_then(|a| find(a).ok()).is_some_and(|m| m.engine == Engine::Whisper) {
+        return None;
+    }
+    ["large-v3-turbo-q8_0", "large-v3-turbo-q5_0", "large-v3-q5_0", "small-q8_0"].iter().find_map(ready)
 }
 
-/// Turbo q5_0 also detects the language when the active model isn't turbo (large-v3, small).
-pub const HELPER_MODEL: &str = "large-v3-turbo-q5_0";
-
-/// A Whisper model file that detects its own language: turbo.
-pub fn detects_own_language(file: &str) -> bool {
-    file.contains("large-v3-turbo")
+/// Which calls a downloaded model other than the active one transcribes (`for_language`), for the model lists.
+#[cfg_attr(not(any(feature = "transcribe", feature = "tray")), allow(dead_code))]
+pub fn used_for(name: &str, active: Option<&str>) -> Option<&'static str> {
+    if active == Some(name) {
+        return None;
+    }
+    if for_language("en", active).is_some_and(|m| m.name == name) {
+        Some("English calls")
+    } else if for_language("ru", active).is_some_and(|m| m.name == name) {
+        Some("calls in other languages than English")
+    } else {
+        None
+    }
 }
 
-/// The helper detects the language for `m`: a Whisper model other than turbo.
-fn needs_helper(m: &Model) -> bool {
-    m.engine == Engine::Whisper && !detects_own_language(m.file)
-}
-
-/// Why a downloaded model is used even when it isn't the active one: the helper detects the language while the
-/// active model is a Whisper model other than turbo (large-v3, small).
-pub fn helper_role(name: &str, active: Option<&str>) -> Option<&'static str> {
-    let needed = active.and_then(|a| find(a).ok()).is_some_and(needs_helper);
-    (name == HELPER_MODEL && needed).then_some("it detects the language for the active model")
-}
-
-/// `echoctl model remove`: delete a downloaded model (not the active one; the helper only with `force` while the
-/// active model uses it).
-pub fn remove(name: &str, force: bool) -> Result<()> {
+/// `echoctl model remove`: delete a downloaded model (not the active one).
+pub fn remove(name: &str) -> Result<()> {
     let m = find(name)?;
     let cfg = Config::load()?;
     if cfg.model.as_deref() == Some(m.name) {
         bail!("{} is the active model — switch with `echoctl model use <other>` first", m.name);
-    }
-    if let (Some(role), false) = (helper_role(m.name, cfg.model.as_deref()), force) {
-        bail!("{} is still used: {role}. Remove it anyway with --force", m.name);
     }
     let mut removed = false;
     for dir in [paths::models_dir(), paths::legacy_models_dir()] {
@@ -486,6 +494,52 @@ pub fn adopt_downloaded() {
     }
 }
 
+static DOWNLOADING: std::sync::Mutex<Option<&'static str>> = std::sync::Mutex::new(None);
+
+/// The model the app is downloading, with its progress in percent.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn downloading() -> Option<(&'static str, u8)> {
+    let name = (*DOWNLOADING.lock().unwrap_or_else(|e| e.into_inner()))?;
+    Some((name, PROGRESS.load(std::sync::atomic::Ordering::Relaxed)))
+}
+
+/// Download a model off the UI thread (one at a time); notifies when done.
+pub fn download_in_background(name: &'static str) {
+    download_then(name, move || crate::app::notify("Speech model ready", &format!("{name} is downloaded.")));
+}
+
+/// Make `name` the active model, downloaded first (off the UI thread) when it isn't on disk yet.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn switch_in_background(name: &'static str) {
+    let use_it = move || match use_model(name) {
+        Ok(()) => crate::app::notify("Speech model switched", &format!("Calls are transcribed with {name} from now on.")),
+        Err(e) => crate::app::notify("Couldn't switch the speech model", &format!("{e:#}")),
+    };
+    match find(name) {
+        Ok(m) if model_path(m).exists() => use_it(),
+        _ => download_then(name, use_it),
+    }
+}
+
+fn download_then(name: &'static str, then: impl FnOnce() + Send + 'static) {
+    {
+        let mut d = DOWNLOADING.lock().unwrap_or_else(|e| e.into_inner());
+        if d.is_some() {
+            return;
+        }
+        *d = Some(name);
+    }
+    PROGRESS.store(0, std::sync::atomic::Ordering::Relaxed);
+    std::thread::spawn(move || {
+        let r = download(name);
+        *DOWNLOADING.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        match r {
+            Ok(()) => then(),
+            Err(e) => crate::app::notify("Model download failed", &format!("{e:#}")),
+        }
+    });
+}
+
 /// The active model's file, or a message that sends the user to setup.
 #[cfg_attr(not(feature = "transcribe"), allow(dead_code))]
 pub fn active_model_path() -> Result<PathBuf> {
@@ -506,18 +560,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn model_use_notes_a_missing_helper_only_for_a_model_that_needs_it() {
-        let (_env, _) = crate::paths::testenv::folders("models-helper-note");
-        let note = |n: &str| missing_helper_note(find(n).unwrap());
-        for n in ["large-v3-q5_0", "small-q8_0"] {
-            assert!(note(n).is_some_and(|t| t.contains(HELPER_MODEL)), "{n}");
-        }
-        for n in ["large-v3-turbo-q8_0", HELPER_MODEL, "nemotron-3.5-0.6b"] {
-            assert_eq!(note(n), None, "{n}");
-        }
+    fn a_call_gets_the_downloaded_model_best_at_its_language() {
+        let (_env, _) = crate::paths::testenv::folders("models-for-language");
         fs::create_dir_all(paths::models_dir()).unwrap();
-        fs::write(model_path(find(HELPER_MODEL).unwrap()), b"x").unwrap();
-        assert_eq!(note("large-v3-q5_0"), None, "the helper is downloaded");
+        let put = |n: &str| fs::write(model_path(find(n).unwrap()), b"x").unwrap();
+        let pick = |lang: &str, active: &str| for_language(lang, Some(active)).map(|m| m.name);
+        assert_eq!(pick("en", "large-v3-turbo-q5_0"), None, "nothing better downloaded: the active model");
+        assert_eq!(pick("ru", "nemotron-3.5-0.6b"), None);
+        put("large-v3-turbo-q5_0");
+        assert_eq!(pick("ru", "nemotron-3.5-0.6b"), Some("large-v3-turbo-q5_0"), "Russian: Whisper over a CPU model");
+        assert_eq!(pick("ru", "large-v3-q5_0"), None, "Russian on a chosen Whisper model: kept");
+        put("large-v3-turbo-q8_0");
+        assert_eq!(pick("uk", "nemotron-3.5-0.6b"), Some("large-v3-turbo-q8_0"));
+        if runnable(find("nemotron-3.5-0.6b").unwrap()) {
+            put("nemotron-3.5-0.6b");
+            assert_eq!(pick("en", "large-v3-turbo-q5_0"), Some("nemotron-3.5-0.6b"), "English: a CPU model over Whisper");
+            put("parakeet-tdt-0.6b-v3");
+            assert_eq!(pick("en", "nemotron-3.5-0.6b"), Some("parakeet-tdt-0.6b-v3"), "English: Parakeet first");
+            assert_eq!(used_for("parakeet-tdt-0.6b-v3", Some("large-v3-turbo-q5_0")), Some("English calls"));
+            assert_eq!(used_for("large-v3-turbo-q8_0", Some("parakeet-tdt-0.6b-v3")), Some("calls in other languages than English"));
+        } else {
+            assert_eq!(pick("en", "large-v3-turbo-q5_0"), None, "no NeMo-Speech runtime in this build");
+        }
+        assert_eq!(used_for("large-v3-turbo-q5_0", Some("large-v3-turbo-q5_0")), None, "the active one");
     }
 
     #[test]
@@ -543,44 +608,4 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    #[test]
-    fn the_helper_is_used_only_beside_a_whisper_model_other_than_turbo() {
-        for active in ["large-v3-q5_0", "small-q8_0"] {
-            assert!(helper_role(HELPER_MODEL, Some(active)).is_some(), "{active}");
-        }
-        for active in ["large-v3-turbo-q8_0", "large-v3-turbo-q5_0", "nemotron-3.5-0.6b"] {
-            assert_eq!(helper_role(HELPER_MODEL, Some(active)), None, "{active}");
-        }
-        assert_eq!(helper_role(HELPER_MODEL, None), None);
-        assert_eq!(helper_role("large-v3-turbo-q8_0", Some("large-v3-q5_0")), None);
-    }
-
-    #[test]
-    fn the_helper_is_kept_from_removal_only_while_the_model_in_use_needs_it() {
-        let (_env, _) = crate::paths::testenv::folders("models-remove-helper");
-        let helper = || paths::models_dir().join(find(HELPER_MODEL).unwrap().file);
-        let put = || {
-            fs::create_dir_all(paths::models_dir()).unwrap();
-            fs::write(helper(), b"x").unwrap();
-        };
-        let in_use = |m: Option<&str>| Config { model: m.map(str::to_owned), ..Default::default() }.save().unwrap();
-        for active in ["large-v3-q5_0", "small-q8_0"] {
-            in_use(Some(active));
-            put();
-            assert!(remove(HELPER_MODEL, false).is_err(), "{active}");
-            assert!(helper().exists(), "{active}");
-            remove(HELPER_MODEL, true).unwrap();
-            assert!(!helper().exists(), "{active}: --force removes it");
-        }
-        for active in [Some("large-v3-turbo-q8_0"), Some("nemotron-3.5-0.6b"), None] {
-            in_use(active);
-            put();
-            remove(HELPER_MODEL, false).unwrap();
-            assert!(!helper().exists(), "{active:?}");
-        }
-        in_use(Some(HELPER_MODEL));
-        put();
-        assert!(remove(HELPER_MODEL, true).is_err(), "the model in use, even with --force");
-        assert!(helper().exists());
-    }
 }

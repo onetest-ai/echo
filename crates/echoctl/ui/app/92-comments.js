@@ -134,6 +134,10 @@ document.addEventListener('change', (e) => {
     S.settings.me = me; send({ cmd: 'settings_set', key: 'me', value: me }); return
   }
   if (e.target.matches('[data-reclang]')) { setRecordLang(e.target.value); render() }
+  if (e.target.matches('[data-lang-default]')) {
+    const l = [e.target.value, ...(S.settings.languages || []).filter((x) => x !== e.target.value)]
+    S.settings.languages = l; send({ cmd: 'settings_set', key: 'languages', value: l }); return render()
+  }
   // The account chip: makes the chosen profile the default, as Settings' Make default does (a
   // signed-out one then shows its sign-in under the Record pill, nothing starts by itself).
   if (e.target.matches('[data-ai-default]')) setSetting('default_profile', e.target.value)
