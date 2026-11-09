@@ -113,17 +113,18 @@ pub fn render_for_window(dir: &Path) -> Result<(String, String)> {
 /// diagrams follow. Anything else: as the system says.
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn with_theme(html: String, theme: Option<&str>) -> String {
-    let (media, js) = match theme {
-        Some("dark") => ("@media all", "true"),
-        Some("light") => ("@media not all", "false"),
+    // The diagrams read it from `<html data-theme>`: a script is never rewritten after its CSP hash was taken.
+    let (media, attr) = match theme {
+        Some("dark") => ("@media all", "<html data-theme=\"dark\" "),
+        Some("light") => ("@media not all", "<html data-theme=\"default\" "),
         _ => return html,
     };
-    html.replace("@media (prefers-color-scheme: dark)", media).replace("matchMedia('(prefers-color-scheme: dark)').matches", js)
+    html.replacen("<html ", attr, 1).replace("@media (prefers-color-scheme: dark)", media)
 }
 
 /// Bumped when the page's rendering changes, so an open Minutes tab shows the new one.
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
-const RENDER_VERSION: u32 = 8;
+const RENDER_VERSION: u32 = 9;
 
 /// A short hash of exactly what the page is rendered from: the minutes and the kept frames (size
 /// and time), the title, the model it names, the renderer. The Minutes tab reloads its frame only
@@ -453,12 +454,55 @@ pub fn markdown_html(md: &str) -> String {
     body(&lines.join("\n"), &mut images).html
 }
 
-/// The notes' Markdown as HTML. Raw HTML in it is shown as text.
-fn body(md: &str, images: &mut Images) -> Body {
+/// How the notes' Markdown is read, for the page and for finding its diagrams (`mermaid_blocks`).
+fn md_options() -> Options {
     let mut opts = Options::empty();
     opts.insert(Options::ENABLE_TABLES);
     opts.insert(Options::ENABLE_STRIKETHROUGH);
     opts.insert(Options::ENABLE_TASKLISTS);
+    opts
+}
+
+/// A ```mermaid block of the notes, numbered as the page draws them (`body`'s rule: the fence's first word,
+/// any case): where its source is, and whether that source is one piece of the file (not so inside a quote, whose
+/// lines carry `>`), so it can be replaced there.
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub(crate) struct MermaidBlock {
+    pub range: std::ops::Range<usize>,
+    pub whole: bool,
+}
+
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub(crate) fn mermaid_blocks(md: &str) -> Vec<MermaidBlock> {
+    let mut out = vec![];
+    let mut cur: Option<(Option<std::ops::Range<usize>>, String)> = None;
+    for (ev, r) in Parser::new_ext(md, md_options()).into_offset_iter() {
+        match ev {
+            Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(l))) if l.split_whitespace().next().unwrap_or("").eq_ignore_ascii_case("mermaid") => {
+                cur = Some((None, String::new()));
+            }
+            Event::Text(t) => {
+                if let Some((range, text)) = cur.as_mut() {
+                    *range = Some(range.as_ref().map_or(r.clone(), |a| a.start..r.end));
+                    text.push_str(&t);
+                }
+            }
+            Event::End(TagEnd::CodeBlock) => {
+                if let Some((range, text)) = cur.take() {
+                    let range = range.unwrap_or(r.start..r.start);
+                    let whole = md.get(range.clone()) == Some(text.as_str());
+                    out.push(MermaidBlock { range, whole });
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// The notes' Markdown as HTML. Raw HTML in it is shown as text.
+fn body(md: &str, images: &mut Images) -> Body {
+    let opts = md_options();
     let mut b = Body { html: String::new(), mermaid: false };
     let out = &mut b.html;
     let mut text = String::new(); // a run of text, written once complete (so `[mm:ss]` is whole)
@@ -810,7 +854,24 @@ fn esc(s: &str) -> String {
 /// Draws the page's ```mermaid blocks. `strict`, no HTML labels (and a diagram may not change that:
 /// `secure`, plus `diagram_source`) — but a diagram's `click … href` still links, so PAGE_JS lets
 /// links and windows go to https: only, and the CSP lets no form submit.
-const MERMAID_INIT: &str = "mermaid.initialize({startOnLoad: true, securityLevel: 'strict', secure: ['secure', 'securityLevel', 'startOnLoad', 'maxTextSize', 'suppressErrorRendering', 'maxEdges', 'htmlLabels', 'flowchart'], theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default', htmlLabels: false, flowchart: {htmlLabels: false}})";
+const MERMAID_INIT: &str = "mermaid.initialize({startOnLoad: false, suppressErrorRendering: true, securityLevel: 'strict', secure: ['secure', 'securityLevel', 'startOnLoad', 'maxTextSize', 'suppressErrorRendering', 'maxEdges', 'htmlLabels', 'flowchart'], theme: document.documentElement.getAttribute('data-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default'), htmlLabels: false, flowchart: {htmlLabels: false}});
+(function () {
+  var pres = [].slice.call(document.querySelectorAll('pre.mermaid'));
+  var srcs = pres.map(function (p) { return p.textContent; });
+  mermaid.run({ nodes: pres, suppressErrors: true }).then(function () {
+    pres.forEach(function (p, i) {
+      if (p.querySelector('svg')) return;
+      mermaid.parse(srcs[i]).then(function () {}, function (e) {
+        var msg = String((e && e.message) || e).split('\\n').slice(0, 4).join('\\n');
+        var note = document.createElement('div'); note.className = 'diagram-err';
+        note.textContent = 'This diagram couldn\\u2019t be drawn: ' + msg.split('\\n')[0].replace(/:\\s*$/, '');
+        var code = document.createElement('code'); code.textContent = srcs[i];
+        p.textContent = ''; p.className = 'diagram-src'; p.appendChild(note); p.appendChild(code);
+        document.dispatchEvent(new CustomEvent('echo-diagram', { detail: { index: i, error: msg } }));
+      });
+    });
+  });
+})();";
 
 /// The page's own behaviour: links and windows only to https: (the notes' links already are; a
 /// diagram's could be file: or an app's scheme) — clicks and window.open refused, and any other
@@ -856,6 +917,8 @@ const PAGE_JS: &str = "(function () {
 const EMBED_JS: &str = "(function () {
   document.documentElement.className += ' embedded';
   var post = function (m) { try { window.parent.postMessage(m, '*'); } catch (e) {} };
+  // A diagram mermaid couldn't parse (MERMAID_INIT): the window has it repaired (`diagrams::repair`).
+  document.addEventListener('echo-diagram', function (e) { post({ echo: 'diagram', index: e.detail.index, error: e.detail.error }); });
   var XLINK = 'http://www.w3.org/1999/xlink';
   document.addEventListener('click', function (e) {
     var el = e.target && e.target.closest ? e.target : null;
@@ -979,6 +1042,8 @@ figure img { display: block; width: 100%; height: auto; cursor: zoom-in; }
 figcaption { background: var(--soft); color: var(--fg); font-size: 13px; padding: 8px 12px; border-top: 1px solid var(--line); }
 figure.diagram { background: var(--bg); padding: 14px; text-align: center; }
 figure.diagram pre.mermaid { background: none; margin: 0; }
+figure.diagram pre.diagram-src { text-align: left; margin: 0; white-space: pre-wrap; font-size: 12px; }
+figure.diagram .diagram-err { font-family: inherit; color: var(--muted, #888); margin-bottom: 6px; white-space: normal; }
 .figref { font-size: 12px; color: var(--muted); }
 #lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.88); display: none; align-items: center;
   justify-content: center; z-index: 10; cursor: zoom-out; padding: 16px; }
@@ -1222,6 +1287,20 @@ mod tests {
         assert!(html.contains("<figcaption>Options<span class=\"ts\">01:08</span></figcaption>"));
         assert!(html.contains("Again: <span class=\"figref\">[Options<span class=\"ts\">01:08</span>]</span>"));
         assert!(!html.contains("<h2>Screens</h2>"));
+    }
+
+    #[test]
+    fn a_chosen_theme_keeps_every_script_within_the_pages_policy() {
+        let html = render("# T\n\n```mermaid\nflowchart TD\n  A --> B\n```\n", "T", None, &load, &[]);
+        let csp = html.split("Content-Security-Policy\" content=\"").nth(1).unwrap().split('"').next().unwrap().to_string();
+        for (theme, mermaid) in [("dark", "dark"), ("light", "default")] {
+            let themed = with_theme(html.clone(), Some(theme));
+            assert!(themed.contains(&format!("<html data-theme=\"{mermaid}\" lang=")), "{theme}");
+            for body in themed.split("<script>").skip(1).map(|s| s.split("</script>").next().unwrap()) {
+                assert!(csp.contains(&format!("'sha256-{}'", B64.encode(Sha256::digest(body.as_bytes())))), "{theme}: a script the policy blocks");
+            }
+        }
+        assert_eq!(with_theme(html.clone(), None), html);
     }
 
     #[test]
