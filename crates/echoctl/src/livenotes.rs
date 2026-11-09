@@ -722,7 +722,7 @@ struct CallState {
     /// When the next summary is due (None: not before something sets it).
     next_summary: Option<Instant>,
     /// waiting · updating · updated · failed · busy (the local model is taken) · signing_in (its
-    /// profile is being signed in) · paused · ended
+    /// profile is being signed in) · paused · local (its model is on this computer: none while recording) · ended
     state: String,
     error: Option<String>,
     /// The profile (id) a job failed for — not signed in, or to another account: the window offers
@@ -883,13 +883,15 @@ pub fn recording_started(dir: &Path) {
             std::thread::spawn(move || {
                 // Said only while the call still has the profile that was checked.
                 let current = |c: &CallState| c.profile_gen == generation;
-                if let Err(e) = ai::for_call(&dir) {
-                    match classify(&e) {
+                match ai::for_call(&dir) {
+                    Ok(r) if held_here(r.profile(), true) => set_state_where(&stamp, current, "local", None, None),
+                    Ok(_) => false,
+                    Err(e) => match classify(&e) {
                         Hold::SigningIn => set_state_where(&stamp, current, "signing_in", None, None),
                         Hold::SignIn { profile, why } => set_state_where(&stamp, current, "failed", Some(why), Some(Some(profile))),
                         Hold::Busy | Hold::Fail(_) => set_state_where(&stamp, current, "failed", Some(format!("{e:#}")), None),
-                    };
-                }
+                    },
+                };
             });
         }
         Ok(false) => {}
@@ -1024,9 +1026,7 @@ pub fn test_call_needing(dir: &Path, id: &str) {
     let stamp = track(dir);
     with(|s| {
         let c = s.calls.entry(stamp).or_default();
-        c.recording = true;
-        c.state = "failed".into();
-        c.needs_sign_in = Some(id.into());
+        (c.recording, c.state, c.needs_sign_in) = (true, "failed".into(), Some(id.into()));
     });
 }
 
@@ -1297,6 +1297,11 @@ fn take_profile(dir: &Path) -> Result<(ai::Ready, Option<crate::app::FileLock>),
     }
 }
 
+/// No summaries while recording on a model on this computer, the call's GPU (#237). Look `p` up without a lease.
+fn held_here(p: &Profile, recording: bool) -> bool {
+    recording && p.on_this_computer()
+}
+
 fn run_summary(stamp: &str, generation: u64) {
     let Some(dir) = call_dir(stamp) else { return };
     match enabled() {
@@ -1311,6 +1316,9 @@ fn run_summary(stamp: &str, generation: u64) {
     let new_chars: usize = new.iter().map(|l| l.text.chars().count()).sum();
     if new_chars < MIN_NEW_CHARS {
         return retry_summary_in(stamp, 10); // not enough said yet
+    }
+    if ai::call_profile_id(&dir).and_then(|id| ai::Settings::load()?.get(&id)).is_ok_and(|p| held_here(&p, with(|s| s.calls.get(stamp).is_some_and(|c| c.recording)))) {
+        return set_state_if(stamp, generation, "local", None);
     }
     let (ready, _lock) = match take_profile(&dir) {
         Ok(x) => x,
@@ -1576,21 +1584,6 @@ pub fn test_once(dir: &Path, ask: Option<(AskKind, String)>) -> Result<()> {
 }
 
 // ── requests from the CLI and the terminal pane ─────────────────────────────────────────────
-
-/// `echoctl live ask|pause|resume <call>`: a request file the running app picks up.
-pub fn request(call: &str, cmd: &str, kind: Option<AskKind>, text: &str) -> Result<()> {
-    let dir = calls::resolve_call(call)?;
-    if crate::watch::running_watcher().is_none() {
-        bail!("Echo isn't running — start it with `echoctl app start`");
-    }
-    let name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let req = json!({ "call": name, "cmd": cmd, "kind": kind, "text": text });
-    fs::create_dir_all(paths::state_dir())?;
-    let path = paths::state_dir().join(format!("live-{}-{}.request", calls::stamp_of(&dir), Local::now().timestamp_millis()));
-    paths::write_atomic(&path, req.to_string().as_bytes())?;
-    println!("sent to Echo");
-    Ok(())
-}
 
 /// Requests left by `echoctl live …` (the app, every second). A question that can't be asked is
 /// recorded as an answer with the reason.
@@ -1859,6 +1852,17 @@ mod tests {
     }
 
     #[test]
+    fn no_summaries_while_recording_on_a_model_on_this_computer() {
+        let here = local("http://127.0.0.1:11434");
+        let elsewhere = local("http://192.168.1.20:11434");
+        assert!(held_here(&here, true));
+        assert!(!held_here(&here, false), "after the recording");
+        assert!(!held_here(&elsewhere, true), "a server on another computer");
+        let claude = Profile { kind: Kind::Claude, base_url: None, ..here.clone() };
+        assert!(!held_here(&claude, true));
+    }
+
+    #[test]
     fn a_summary_runs_end_to_end_and_failures_keep_the_draft() {
         let (_env, root) = crate::paths::testenv::folders("live-summary");
         let d = root.join("home/calls/2026-10-23_120000-sync");
@@ -1869,11 +1873,14 @@ mod tests {
         let settings = |url: &str| {
             ai::Settings { default: None, live_notes: true, profiles: vec![local(url)] }.save().unwrap();
         };
+        // The test server is on this computer: while recording nothing is sent (#237); the summaries below run as
+        // they would after the call's last minute, or on a server elsewhere (`held_here`).
+        let recording = std::cell::Cell::new(true);
         let run = || {
             let stamp = track(&d);
             let generation = with(|s| {
                 let c = s.calls.entry(stamp.clone()).or_default();
-                c.recording = true;
+                c.recording = recording.get();
                 c.summary_gen
             });
             with(|s| s.running = Some(Running { stamp: stamp.clone(), kind: JobKind::Summary, cancelled: false }));
@@ -1881,8 +1888,13 @@ mod tests {
             with(|s| s.running = None);
             with(|s| s.calls.get(&stamp).map(|c| (c.state.clone(), c.error.clone())).unwrap())
         };
-        settings(&serve(Some(http("200 OK", "", r#"{"content":[{"type":"text","text":"{\"now\":\"Pilot\",\"decisions\":[{\"text\":\"Lisbon first\",\"t\":\"00:10\"}]}"}]}"#))));
-        assert_eq!(run().0, "updated");
+        let reply = r#"{"content":[{"type":"text","text":"{\"now\":\"Pilot\",\"decisions\":[{\"text\":\"Lisbon first\",\"t\":\"00:10\"}]}"}]}"#;
+        settings(&serve(Some(http("200 OK", "", reply))));
+        assert_eq!(run().0, "local");
+        assert!(read_notes(&d).is_none(), "no summary on this computer while recording");
+        recording.set(false);
+        settings(&serve(Some(http("200 OK", "", reply))));
+        assert_eq!(run().0, "ended");
         let n = read_notes(&d).unwrap();
         assert_eq!((n.cursor, n.decisions.len()), (12, 1));
         // More talk, a model that fails: the draft and its cursor stay.

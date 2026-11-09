@@ -131,13 +131,13 @@ pub fn transcribe(call: String, model: Option<String>, keep_audio: bool) -> Resu
 
 pub fn live(cmd: LiveCmd) -> Result<()> {
     match cmd {
-        LiveCmd::Ask { call, kind, text } => livenotes::request(&call, "ask", livenotes::AskKind::parse(&kind), &text.join(" ")),
+        LiveCmd::Ask { call, kind, text } => live_request(&call, "ask", livenotes::AskKind::parse(&kind), &text.join(" ")),
         LiveCmd::Test { call, ask, text } => {
             let dir = calls::resolve_call(&call)?;
             livenotes::test_once(&dir, ask.as_deref().and_then(livenotes::AskKind::parse).map(|k| (k, text.join(" "))))
         }
-        LiveCmd::Pause { call } => livenotes::request(&call, "pause", None, ""),
-        LiveCmd::Resume { call } => livenotes::request(&call, "resume", None, ""),
+        LiveCmd::Pause { call } => live_request(&call, "pause", None, ""),
+        LiveCmd::Resume { call } => live_request(&call, "resume", None, ""),
         LiveCmd::Show { call } => {
             let dir = calls::resolve_call(&call)?;
             let state: serde_json::Value = std::fs::read(dir.join(livenotes::STATE)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
@@ -180,5 +180,20 @@ pub fn vocab(cmd: VocabCmd) -> Result<()> {
         }
         VocabCmd::List => print!("{}", vocab::list(&cfg)),
     }
+    Ok(())
+}
+
+/// `echoctl live ask|pause|resume <call>`: a request file the running app picks up.
+fn live_request(call: &str, cmd: &str, kind: Option<livenotes::AskKind>, text: &str) -> Result<()> {
+    let dir = calls::resolve_call(call)?;
+    if crate::watch::running_watcher().is_none() {
+        anyhow::bail!("Echo isn't running — start it with `echoctl app start`");
+    }
+    let name = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let req = serde_json::json!({ "call": name, "cmd": cmd, "kind": kind, "text": text });
+    std::fs::create_dir_all(crate::paths::state_dir())?;
+    let path = crate::paths::state_dir().join(format!("live-{}-{}.request", calls::stamp_of(&dir), chrono::Local::now().timestamp_millis()));
+    crate::paths::write_atomic(&path, req.to_string().as_bytes())?;
+    println!("sent to Echo");
     Ok(())
 }
