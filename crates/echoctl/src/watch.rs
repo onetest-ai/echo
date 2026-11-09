@@ -607,6 +607,8 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
         stop_flag(&mut chat_alive);
         finish(r, "watch_stopped");
     }
+    #[cfg(feature = "transcribe")]
+    crate::live::shutdown(); // no model loaded at exit (#141)
     crate::livenotes::shutdown();
     crate::signin::shutdown();
     crate::notes::shutdown();
@@ -1279,6 +1281,7 @@ fn transcribed(dir: &std::path::Path, ok: bool, detail: &str) {
 /// write the transcript. Any failure falls back to the full pass (`echoctl transcribe`).
 #[cfg(feature = "transcribe")]
 fn finish_transcript(dir: PathBuf, live: crate::recorder::Live) {
+    let busy = crate::live::busy(); // writing the transcript loads the speakers' model: the quit waits for it
     std::thread::spawn(move || {
         let t = Instant::now();
         let written = (|| -> Result<PathBuf> {
@@ -1292,7 +1295,9 @@ fn finish_transcript(dir: PathBuf, live: crate::recorder::Live) {
                 eprintln!("transcript of {} written {:.0}s after the call", dir.display(), t.elapsed().as_secs_f64());
                 transcribed(&dir, true, "");
             }
+            Err(_) if crate::live::quitting() => {} // the next start transcribes it (`recover`)
             Err(e) => {
+                drop(busy); // the full pass holds its model in a child process, never in this one
                 eprintln!("transcription during the call failed ({e:#}); transcribing the recording again");
                 transcribe_now(&dir);
             }

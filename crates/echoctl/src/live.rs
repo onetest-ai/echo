@@ -20,7 +20,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -75,7 +75,8 @@ impl Live {
         self.done.store(true, Ordering::SeqCst);
     }
 
-    /// Wait for the worker: every segment of the call and the model's name.
+    /// Wait for the worker: every segment of the call and the model's name. When the app quits meanwhile, the
+    /// worker gives up (`shutdown`): an error, and the call is transcribed at the next start.
     pub fn join(mut self) -> Result<(Vec<Segment>, String)> {
         self.close();
         let handle = self.handle.take().expect("joined once");
@@ -108,6 +109,74 @@ impl Live {
     }
 }
 
+/// The workers alive, each known from its start until its thread ends (its model freed): when the app quits they are
+/// told to give up and waited for, so no model is loaded at exit (#141).
+#[derive(Default)]
+struct Finishing {
+    quit: Mutex<Vec<Arc<AtomicBool>>>,
+    quitting: AtomicBool,
+}
+
+static FINISHING: Finishing = Finishing { quit: Mutex::new(Vec::new()), quitting: AtomicBool::new(false) };
+
+/// A worker known to `Finishing` until this drops, at the end of its thread.
+struct Known<'a>(&'a Finishing, Arc<AtomicBool>);
+
+impl Drop for Known<'_> {
+    fn drop(&mut self) {
+        self.0.lock().retain(|q| !Arc::ptr_eq(q, &self.1));
+    }
+}
+
+impl Finishing {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<Arc<AtomicBool>>> {
+        self.quit.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// A worker starts: known until the returned guard drops; told to give up at once when the app is quitting.
+    fn enter(&self, quit: &Arc<AtomicBool>) -> Known<'_> {
+        self.lock().push(quit.clone());
+        if self.quitting() {
+            quit.store(true, Ordering::SeqCst);
+        }
+        Known(self, quit.clone())
+    }
+
+    fn quitting(&self) -> bool {
+        self.quitting.load(Ordering::SeqCst)
+    }
+
+    fn shutdown(&self, within: Duration) {
+        self.quitting.store(true, Ordering::SeqCst);
+        for q in self.lock().iter() {
+            q.store(true, Ordering::SeqCst);
+        }
+        let until = std::time::Instant::now() + within;
+        while !self.lock().is_empty() && std::time::Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+}
+
+/// Work after a worker that still loads a model (the transcript's speakers): held while it runs, the quit waits for it
+/// too (made before its thread starts, so a quit right after the worker ended still finds it).
+pub struct Busy(#[allow(dead_code)] Known<'static>);
+
+pub fn busy() -> Busy {
+    Busy(FINISHING.enter(&Arc::new(AtomicBool::new(false))))
+}
+
+/// The app is quitting: every transcript being finished gives up, and is waited for (at most `ABANDON_WAIT`) until
+/// its worker let go of its model.
+pub fn shutdown() {
+    FINISHING.shutdown(ABANDON_WAIT);
+}
+
+/// The app is quitting (`shutdown`): a transcript given up isn't made again now.
+pub fn quitting() -> bool {
+    FINISHING.quitting()
+}
+
 impl Drop for Live {
     fn drop(&mut self) {
         // Joined: done already. Not joined: abandoned.
@@ -135,7 +204,9 @@ pub fn start(dir: &Path, meeting: Option<&MeetingContext>) -> Option<Live> {
     let remote_name = meeting.and_then(|m| m.sole_other(cfg.me.as_ref()));
     let (done, quit) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
     let (d, q, call) = (done.clone(), quit.clone(), dir.to_path_buf());
+    let known = FINISHING.enter(&quit);
     let handle = std::thread::spawn(move || {
+        let _known = known; // dropped last: after `run` freed the model
         let r = run(&call, &cfg, prompt, remote_name, &d, &q);
         if let Err(e) = &r {
             eprintln!("transcription during the call stopped: {e:#}");
@@ -591,6 +662,33 @@ mod tests {
         Live { done: done.clone(), quit: quit.clone(), handle: Some(handle), dir: PathBuf::new() }.abandon();
         assert!(quit.load(Ordering::SeqCst) && done.load(Ordering::SeqCst));
         assert!(gone.load(Ordering::SeqCst), "abandon returns only after the worker ended (#141)");
+    }
+
+    #[test]
+    fn every_worker_gives_up_and_lets_go_of_its_model_before_the_app_quits() {
+        let finishing = Finishing::default();
+        let (quit, gone) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
+        let (q, g) = (quit.clone(), gone.clone());
+        std::thread::scope(|s| {
+            // Known from its start, before anyone joins it: a quit right after the stop still waits for it.
+            let known = finishing.enter(&quit);
+            s.spawn(move || {
+                let _known = known;
+                while !q.load(Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(5)); // decoding what is left of the call
+                }
+                std::thread::sleep(Duration::from_millis(50)); // freeing its model
+                g.store(true, Ordering::SeqCst);
+            });
+            finishing.shutdown(Duration::from_secs(5));
+            assert!(gone.load(Ordering::SeqCst), "the quit waits until the worker let go of its model (#141)");
+        });
+        assert!(finishing.quitting(), "a transcript given up isn't made again now");
+        // A worker that starts after the quit gives up at once.
+        let late = Arc::new(AtomicBool::new(false));
+        drop(finishing.enter(&late));
+        assert!(late.load(Ordering::SeqCst));
+        assert!(finishing.lock().is_empty());
     }
 
     #[test]
