@@ -1297,7 +1297,7 @@ fn take_profile(dir: &Path) -> Result<(ai::Ready, Option<crate::app::FileLock>),
     }
 }
 
-/// No summaries while recording on a model on this computer: it would take the GPU from the call (#237).
+/// No summaries while recording on a model on this computer, the call's GPU (#237). Look `p` up without a lease.
 fn held_here(p: &Profile, recording: bool) -> bool {
     recording && p.on_this_computer()
 }
@@ -1317,7 +1317,7 @@ fn run_summary(stamp: &str, generation: u64) {
     if new_chars < MIN_NEW_CHARS {
         return retry_summary_in(stamp, 10); // not enough said yet
     }
-    if ai::for_call(&dir).is_ok_and(|r| held_here(r.profile(), with(|s| s.calls.get(stamp).is_some_and(|c| c.recording)))) {
+    if ai::call_profile_id(&dir).and_then(|id| ai::Settings::load()?.get(&id)).is_ok_and(|p| held_here(&p, with(|s| s.calls.get(stamp).is_some_and(|c| c.recording)))) {
         return set_state_if(stamp, generation, "local", None);
     }
     let (ready, _lock) = match take_profile(&dir) {
