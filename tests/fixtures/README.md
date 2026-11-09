@@ -98,7 +98,7 @@ Every set is hermetic. `<dir>/env` puts these in front of the app, and `serve.sh
   `<dir>/env` sets `ECHOCTL_TEST_OPEN_LOG_ONLY=1`, so nothing is opened at all: no browser tab or Finder window on the
   tester's screen, and never the installed Echo (`echoctl up`, the restart after a data-folder change). A case checks
   `open.log`.
-- `ECHOCTL_PLUGIN_MARKET` makes the built-in marketplace a local folder, `<dir>/markets/built-in` (no network).
+- `ECHOCTL_PLUGIN_MARKET` makes the built-in marketplace a local folder, `<dir>/markets/built-in` (no network) — except on plain `small`, whose Discover reads the real one (the plugins cases expect `onetest-ai/echo-plugins`).
 - `CLAUDE_CONFIG_DIR` is `<dir>/claude-config`. It holds an old Echo plugin record (the stale-plugin Inbox item).
 - `ECHOCTL_NOTES_NO_SHELL=1` starts Claude Code directly, not through the login shell.
 
