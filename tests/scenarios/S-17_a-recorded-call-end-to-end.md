@@ -21,6 +21,7 @@ cases:
   - tests/cases/recording/TC-019_tray-icon-follows-the-recording.md
   - tests/cases/claude/TC-019_live-notes-skip-a-model-on-this-computer-while-recording.md
   - tests/cases/window/TC-024_a-recording-window-draws-only-what-changed.md
+  - tests/cases/claude/TC-020_live-notes-are-kept-by-one-claude-session-with-two-tools.md
 ---
 
 # S-17: A recorded call end to end: record, take notes, transcript, automatic minutes, the files
@@ -77,6 +78,7 @@ Record P1–P5's results under the stages whose case steps they are (window/TC-0
 | 11 | `recording/TC-019_tray-icon-follows-the-recording.md` | — | **person** — skipped by an agent run (the tray can't be driven while the user's Echo runs) |
 | 12 | `claude/TC-019_live-notes-skip-a-model-on-this-computer-while-recording.md` | — | Its own app instance and AI profile, after stage 10 (its app quit first) |
 | 13 | `window/TC-024_a-recording-window-draws-only-what-changed.md` | — | Its own app instance (stage 12's quit first) |
+| 14 | `claude/TC-020_live-notes-are-kept-by-one-claude-session-with-two-tools.md` | — | Its own app instance; needs Claude Code signed in (else BLOCKED) |
 
 ## Notes
 - **One live call, one transcription, one app.** The main call is armed and started in the prelude and held (`--hold`) while the window takes notes on it; stage 1 hangs it up no earlier than 37 s in (the whole conversation recorded, however long the window steps took). Everything before (armed), during (the notes' time, both tracks written, the row Recording) and after it (the stop at the hang-up, the events, `stop_reason`, the transcript, two aligned closed tracks, no audio left, the window filling in) hangs off that call. Stages 6–9 copy prepared calls on the same app; nothing else records or transcribes. Transcription quality is scored once, in S-14.

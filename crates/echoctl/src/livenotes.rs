@@ -34,6 +34,9 @@ use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::ai::{self, Kind, Profile};
+
+mod agent;
+pub use agent::serve as serve_agent;
 use crate::{calls, paths};
 
 pub const NOTES: &str = "live-notes.json";
@@ -79,6 +82,13 @@ impl Usage {
 thread_local! {
     /// The last job's usage on this thread (`take_usage` after `complete`).
     static LAST_USAGE: std::cell::RefCell<Option<Usage>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The job that just ran on this thread used this (a Claude Code result envelope; `cost` the job's own).
+pub(crate) fn set_usage(v: &Value, cost: Option<f64>) {
+    let mut u = Usage::of(v);
+    u.cost_usd = cost.unwrap_or(u.cost_usd);
+    LAST_USAGE.with(|l| *l.borrow_mut() = Some(u));
 }
 
 fn take_usage() -> Option<Usage> {
@@ -167,15 +177,6 @@ pub fn read_usage(dir: &Path) -> Option<Usage> {
 /// Settings for every short model job (live notes, questions, the Brain's readers): no CLAUDE.md and no
 /// auto memory — they are about one call or one document, and the data folder's CLAUDE.md (or the
 /// user's own) made each 90-second update ~46K tokens instead of ~2.5K (measured 2026-10-30).
-fn lean_settings() -> Result<PathBuf> {
-    let f = paths::config_dir().join("lean-job-settings.json");
-    let want = br#"{"claudeMdExcludes": ["**"]}"#;
-    if fs::read(&f).ok().as_deref() != Some(&want[..]) {
-        fs::create_dir_all(paths::config_dir())?;
-        paths::write_atomic(&f, want)?;
-    }
-    Ok(f)
-}
 pub const ASKS: &str = "live-asks.jsonl";
 pub const STATE: &str = "live-state.json";
 /// The live transcript (`live.rs` writes it; named here too, for builds without transcription).
@@ -422,7 +423,7 @@ fn notes_for_prompt(n: &Notes) -> String {
     .to_string()
 }
 
-fn clip(s: &str, n: usize) -> String {
+pub(crate) fn clip(s: &str, n: usize) -> String {
     let s = s.split_whitespace().collect::<Vec<_>>().join(" ");
     if s.chars().count() > n { format!("{}…", s.chars().take(n).collect::<String>()) } else { s }
 }
@@ -517,7 +518,7 @@ pub(crate) fn complete_vision(p: &Profile, system: &str, images: &[Vec<u8>], tex
         Kind::Local => complete_local_blocks(p, system, &blocks, max_tokens, &|| crate::notes::quitting()),
         Kind::System | Kind::Claude => {
             let model = p.notes_model().unwrap_or_else(|| "sonnet".into());
-            complete_claude_with(p, &model, system, text, Some(&blocks), true, Duration::from_secs(300), &|| crate::notes::quitting())
+            crate::claude_session::complete_claude_with(p, &model, system, text, Some(&blocks), true, Duration::from_secs(300), &|| crate::notes::quitting())
         }
     }
 }
@@ -550,7 +551,7 @@ fn curl_config(p: &Profile, body: &Value) -> String {
 const CURL_ARGS: [&str; 4] = ["-q", "-sS", "-K", "-"];
 
 /// The last non-empty line of a child's stderr (a login shell's start-up noise comes first).
-fn last_line(s: &str) -> String {
+pub(crate) fn last_line(s: &str) -> String {
     s.lines().map(str::trim).rfind(|l| !l.is_empty()).unwrap_or("").to_string()
 }
 
@@ -617,69 +618,9 @@ fn complete_local_body(p: &Profile, system: &str, content: Value, max_tokens: u3
 /// data folder or `notes_in`: its `.claude/settings.json` is part of "as configured"); the others
 /// in Echo's state folder (they load no project settings anyway).
 fn complete_claude(p: &Profile, model: &str, system: &str, user: &str, whole: bool, deadline: Duration, cancelled: &dyn Fn() -> bool) -> Result<String> {
-    complete_claude_with(p, model, system, user, None, whole, deadline, cancelled)
+    crate::claude_session::complete_claude_with(p, model, system, user, None, whole, deadline, cancelled)
 }
 
-/// As `complete_claude`; with `blocks` (Messages API content: images, text) the prompt goes in as one
-/// stream-json user message instead of plain text.
-#[allow(clippy::too_many_arguments)]
-fn complete_claude_with(p: &Profile, model: &str, system: &str, user: &str, blocks: Option<&Value>, whole: bool, deadline: Duration, cancelled: &dyn Fn() -> bool) -> Result<String> {
-    let mut args: Vec<String> = vec!["-p".into()];
-    if blocks.is_some() {
-        args.extend(["--input-format", "stream-json", "--output-format", "stream-json", "--verbose"].map(String::from));
-    } else {
-        args.extend(["--output-format", "json"].map(String::from));
-    }
-    args.extend([
-        "--system-prompt".into(),
-        system.into(),
-        "--tools".into(),
-        String::new(),
-        "--strict-mcp-config".into(),
-        "--no-session-persistence".into(),
-        "--model".into(),
-        model.to_string(),
-        "--settings".into(),
-        lean_settings()?.display().to_string(),
-    ]);
-    let input = match blocks {
-        Some(b) => format!("{}\n", json!({"type": "user", "message": {"role": "user", "content": b}})),
-        None => user.to_string(),
-    };
-    let cwd = if p.kind.managed() { paths::state_dir() } else { ai::system_folder()? };
-    fs::create_dir_all(&cwd)?;
-    let mut cmd = ai::prepare_claude(p, &args, &cwd, true)?;
-    cmd.env("CLAUDE_CODE_DISABLE_AUTO_MEMORY", "1");
-    let mut child = cmd.spawn()?;
-    let (out, err, _, wrote) = ai::wait_output_with(&mut child, Some(input.into_bytes()), deadline, cancelled)
-        .map_err(|e| anyhow!("{}: {e:#}", p.name))?;
-    let result = out.lines().rev().filter_map(|l| serde_json::from_str::<Value>(l.trim()).ok()).find(|v| v["type"] == "result");
-    let text = result.as_ref().and_then(|v| v["result"].as_str()).unwrap_or("").to_string();
-    if let Some(v) = &result {
-        LAST_USAGE.with(|u| *u.borrow_mut() = Some(Usage::of(v)));
-    }
-    let is_error = result.as_ref().is_none_or(|v| v["is_error"].as_bool().unwrap_or(false));
-    if is_error {
-        let all = format!("{out}\n{err}\n{text}");
-        if crate::notes::needs_login(&all) {
-            if !p.kind.signs_in() {
-                bail!("Claude Code isn't signed in — open Terminal, run claude and type /login");
-            }
-            ai::auth_failed(p);
-            return Err(anyhow::Error::new(ai::SignInNeeded::signed_out(p)));
-        }
-        let why = [text.trim().lines().next().unwrap_or("").to_string(), last_line(&err)].into_iter().find(|l| !l.is_empty());
-        let why = why.or_else(|| wrote.err().map(|e| format!("couldn't send the prompt: {e}")));
-        bail!("{}: {}", p.name, clip(&why.unwrap_or_else(|| "Claude Code failed".into()), 200));
-    }
-    if whole && result.as_ref().is_some_and(|v| v["stop_reason"] == "max_tokens") {
-        bail!("{}'s reply was cut off at the token limit", p.name);
-    }
-    if text.trim().is_empty() {
-        bail!("{} returned no text", p.name);
-    }
-    Ok(text)
-}
 
 // ── the scheduler ───────────────────────────────────────────────────────────────────────────
 
@@ -764,6 +705,7 @@ fn with<R>(f: impl FnOnce(&mut Shared) -> R) -> R {
 #[cfg(test)]
 pub fn forget_all() {
     with(|s| *s = Shared::default());
+    agent::stop(None);
 }
 
 /// Note a call's folder and return its stamp (every entry point does this).
@@ -873,7 +815,9 @@ pub fn recording_started(dir: &Path) {
         let c = s.calls.entry(stamp.clone()).or_default();
         c.recording = true;
         c.paused = false;
-        c.next_summary = Some(Instant::now() + SUMMARY_EVERY);
+        // At once: with Claude Code the call's notes session starts now (#239); a model server's first summary waits
+        // for enough words (`run_summary` reschedules it).
+        c.next_summary = Some(Instant::now());
     });
     match enabled() {
         Ok(true) => {
@@ -904,6 +848,7 @@ pub fn recording_started(dir: &Path) {
 pub fn recording_stopped(dir: &Path) {
     let stamp = track(dir);
     let had = with(|s| s.calls.get_mut(&stamp).map(|c| std::mem::replace(&mut c.recording, false)).unwrap_or(false));
+    agent::finish(&stamp); // after: a session starting meanwhile sees the recording over and stops
     if had && enabled().unwrap_or(false) {
         set_state(&stamp, "ended", None);
     }
@@ -931,6 +876,9 @@ pub fn pause(dir: &Path, paused: bool) {
         c.recording
     });
     stop_running(&stamp, &[JobKind::Summary]);
+    if paused {
+        agent::stop(Some(&stamp)); // nothing more goes to the model while paused
+    }
     set_state(&stamp, if paused { "paused" } else if recording { "waiting" } else { "ended" }, None);
     WAKE.notify_all();
 }
@@ -939,6 +887,7 @@ pub fn pause(dir: &Path, paused: bool) {
 /// again, both with the new profile.
 pub fn profile_changed(dir: &Path) {
     let stamp = track(dir);
+    agent::stop(Some(&stamp)); // the call's text goes only to its own profile
     with(|s| {
         let c = s.calls.entry(stamp.clone()).or_default();
         c.summary_gen += 1;
@@ -959,6 +908,7 @@ pub fn profile_changed(dir: &Path) {
 /// keep `needs_sign_in`: a sign-in that works resumes them).
 pub fn defer(id: &str, generation: u64) {
     with(|s| s.deferred.insert(id.to_string(), generation));
+    agent::stop_profile(id);
     let on = enabled().unwrap_or(false);
     for dir in calls_on(id) {
         let stamp = track(&dir);
@@ -1003,6 +953,7 @@ fn wake(id: &str, failed: bool) {
     let on = enabled().unwrap_or(false);
     for dir in waiting.into_iter().filter(|d| ai::call_profile_id(d).ok().as_deref() == Some(id)) {
         let stamp = track(&dir);
+        agent::clear(&stamp);
         let state = with(|s| {
             let c = s.calls.entry(stamp.clone()).or_default();
             if failed {
@@ -1085,6 +1036,7 @@ pub fn report(dir: &Path, why: &str) {
 
 /// Stop everything (the app is quitting): the running job's child is stopped (waits up to 5 s).
 pub fn shutdown() {
+    agent::stop(None);
     with(|s| {
         s.shutdown = true;
         if let Some(r) = s.running.as_mut() {
@@ -1141,6 +1093,9 @@ fn worker() {
         let job = {
             let mut g = SHARED.lock().unwrap_or_else(|e| e.into_inner());
             loop {
+                if !enabled().unwrap_or(true) {
+                    agent::stop(None); // live notes off: no call's text goes on to a model (checked every 2 s)
+                }
                 let s = g.get_or_insert_with(Shared::default);
                 if s.shutdown {
                     return;
@@ -1309,18 +1264,24 @@ fn run_summary(stamp: &str, generation: u64) {
         Ok(false) => return,
         Err(e) => return set_state_if(stamp, generation, "failed", Some(format!("the AI settings can't be read: {e:#}"))),
     }
+    // Claude Code keeps the notes itself, in a session of its own for the recording (#239): started below, reported.
+    let recording = with(|s| s.calls.get(stamp).is_some_and(|c| c.recording));
+    let agent = recording && ai::call_profile_id(&dir).and_then(|id| ai::Settings::load()?.get(&id)).is_ok_and(|p| p.kind != Kind::Local);
     let all = lines(&dir);
     let prev = read_notes(&dir);
     let cursor = prev.as_ref().map_or(0, |n| n.cursor).min(all.len());
     let new: Vec<&Line> = all[cursor..].iter().collect();
     let new_chars: usize = new.iter().map(|l| l.text.chars().count()).sum();
-    if new_chars < MIN_NEW_CHARS {
+    if agent && agent::running(stamp) {
+        return set_state_if(stamp, generation, if prev.is_some() { "updated" } else { "waiting" }, None);
+    }
+    if new_chars < MIN_NEW_CHARS && !agent {
         return retry_summary_in(stamp, 10); // not enough said yet
     }
     if ai::call_profile_id(&dir).and_then(|id| ai::Settings::load()?.get(&id)).is_ok_and(|p| held_here(&p, with(|s| s.calls.get(stamp).is_some_and(|c| c.recording)))) {
         return set_state_if(stamp, generation, "local", None);
     }
-    let (ready, _lock) = match take_profile(&dir) {
+    let (ready, lock) = match take_profile(&dir) {
         Ok(x) => x,
         Err(Hold::Busy) => {
             set_state_if(stamp, generation, "busy", None);
@@ -1336,6 +1297,16 @@ fn run_summary(stamp: &str, generation: u64) {
     let p = ready.profile();
     if !summary_current(stamp, generation) || cancelled() || !still_on() {
         return; // paused, profile changed, turned off or quitting meanwhile: nothing was sent
+    }
+    if agent {
+        let still = || with(|s| s.calls.get(stamp).is_some_and(|c| c.recording && !c.paused && c.summary_gen == generation)) && still_on();
+        return match agent::ensure(stamp, &dir, ready, lock, still) {
+            Ok(()) => set_state_if(stamp, generation, if read_notes(&dir).is_some() { "updated" } else { "waiting" }, None),
+            Err(e) => match classify(&e) {
+                Hold::SignIn { profile, why } => summary_needs_sign_in(stamp, generation, profile, why),
+                _ => set_state_if(stamp, generation, "failed", Some(format!("{e:#}"))),
+            },
+        };
     }
     // Its header from the call where it is now: it may have been retitled during the check.
     let dir = call_dir(stamp).unwrap_or(dir);
@@ -2065,11 +2036,13 @@ mod tests {
             c.recording = true;
             c.summary_gen
         });
-        with(|s| s.running = Some(Running { stamp: stamp.clone(), kind: JobKind::Summary, cancelled: false }));
-        run_summary(&stamp, generation);
-        with(|s| s.running = None);
-        let (state, needs) = with(|s| s.calls.get(&stamp).map(|c| (c.state.clone(), c.needs_sign_in.clone())).unwrap());
-        assert_eq!((state.as_str(), needs.as_deref()), ("failed", Some("w")));
+        // The session starts, Claude Code says it isn't signed in, and the next look reports it (#239).
+        crate::paths::testenv::eventually("the session's sign-in error is reported", || {
+            with(|s| s.running = Some(Running { stamp: stamp.clone(), kind: JobKind::Summary, cancelled: false }));
+            run_summary(&stamp, generation);
+            with(|s| s.running = None);
+            with(|s| s.calls.get(&stamp).is_some_and(|c| c.state == "failed" && c.needs_sign_in.as_deref() == Some("w")))
+        });
         assert!(ai::observation("w").unwrap().stale, "the 'signed in' seen before no longer counts");
         signed_in("w");
         let (state, needs) = with(|s| s.calls.get(&stamp).map(|c| (c.state.clone(), c.needs_sign_in.clone())).unwrap());
