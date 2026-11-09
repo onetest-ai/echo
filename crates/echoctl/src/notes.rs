@@ -2234,6 +2234,21 @@ mod tests {
         assert_eq!(status(&abandoned).unwrap().state, "failed", "shown as a run that stopped");
     }
 
+    /// `admit` right after an earlier admission let go of the call's place: while another test thread starts a
+    /// process, its child holds a copy of the place's descriptor until it execs (macOS), so "already writing" is
+    /// waited out (`testenv::eventually`), any other answer returned (#251).
+    fn admit_freed(d: &Path, intent: Intent) -> Option<(crate::app::FileLock, Run)> {
+        let got = std::cell::RefCell::new(None);
+        crate::paths::testenv::eventually("the call's place is free", || match admit(d, intent) {
+            Err(e) if e.to_string() == "Echo is already writing the minutes for this call" => false,
+            r => {
+                *got.borrow_mut() = Some(r.unwrap());
+                true
+            }
+        });
+        got.into_inner().unwrap()
+    }
+
     #[test]
     fn an_automatic_run_starts_only_while_the_call_is_still_due() {
         let (_env, root) = crate::paths::testenv::folders("notes-auto-admit");
@@ -2242,14 +2257,14 @@ mod tests {
         let d = closed_call(&root, "2026-10-23_090000-a", chrono::Duration::minutes(20));
         // A note saved between the scheduler's look and the admission: not admitted, nothing written.
         fs::write(d.join(calls::USER_NOTES), "just now").unwrap();
-        assert!(admit(&d, Intent::Auto).unwrap().is_none());
+        assert!(admit_freed(&d, Intent::Auto).is_none());
         assert!(!d.join(RUN).exists() && !d.join(calls::CLAIMED).exists());
         fs::File::options().write(true).open(d.join(calls::USER_NOTES)).unwrap().set_modified((Local::now() - chrono::Duration::minutes(16)).into()).unwrap();
         // Due: admitted once, the second look finds it tried.
-        let (place, r) = admit(&d, Intent::Auto).unwrap().unwrap();
+        let (place, r) = admit_freed(&d, Intent::Auto).unwrap();
         assert!(r.auto && r.run_id.is_some() && !r.had_minutes && status(&d).unwrap().state == "queued");
         drop(place);
-        assert!(admit(&d, Intent::Auto).unwrap().is_none(), "ticked twice: admitted once");
+        assert!(admit_freed(&d, Intent::Auto).is_none(), "ticked twice: admitted once");
         // Right before Claude Code would start: still due for this run (its own record is no "tried")…
         let cfg = Config::load().unwrap();
         assert_eq!(auto_due(&d, &cfg, Local::now(), Some(&r)), Due::Now);
@@ -2265,7 +2280,7 @@ mod tests {
         assert!(!d.join(RUN).exists() && !d.join(calls::CLAIMED).exists());
         // Explicit runs ignore all of that; an update says the call had minutes (the window keeps them).
         fs::write(d.join("notes.md"), "# m").unwrap();
-        let (_place, r) = admit(&d, Intent::Explicit).unwrap().unwrap();
+        let (_place, r) = admit_freed(&d, Intent::Explicit).unwrap();
         assert!(r.had_minutes && !r.auto);
     }
 

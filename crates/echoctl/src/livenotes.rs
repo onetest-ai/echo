@@ -2232,7 +2232,8 @@ mod tests {
         assert!(a.is_some());
         assert!(crate::app::FileLock::try_take(&p).unwrap().is_none(), "the live worker and the minutes thread share one process");
         drop(a);
-        assert!(crate::app::FileLock::try_take(&p).unwrap().is_some());
+        // Free once dropped: once any child another test thread is starting has exec'd (#251).
+        crate::paths::testenv::eventually("free once dropped", || crate::app::FileLock::try_take(&p).unwrap().is_some());
         let _ = std::fs::remove_file(&p);
     }
 
