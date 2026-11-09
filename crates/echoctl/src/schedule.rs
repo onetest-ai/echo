@@ -42,7 +42,9 @@ fn same(a: &MeetingContext, b: &MeetingContext) -> bool {
     a.id.is_some() && a.id == b.id && a.start == b.start
 }
 
+/// Refused for a meeting Echo can't record yet (Zoom, Google Meet).
 pub fn add(m: MeetingContext) -> Result<()> {
+    m.recordable()?;
     let mut list = load();
     if !list.iter().any(|x| same(x, &m)) {
         list.push(m);
@@ -68,7 +70,7 @@ pub fn due(now: DateTime<Utc>) -> Option<MeetingContext> {
     if live.len() != list.len() {
         let _ = save(&live);
     }
-    live.into_iter().find(|m| time(&m.start).is_some_and(|s| now >= s - Duration::seconds(LEAD)))
+    live.into_iter().find(|m| m.recordable().is_ok() && time(&m.start).is_some_and(|s| now >= s - Duration::seconds(LEAD)))
 }
 
 #[cfg(test)]
@@ -83,6 +85,20 @@ mod tests {
             end: Some((start + Duration::minutes(mins)).to_rfc3339()),
             ..Default::default()
         }
+    }
+
+    /// #228: a Zoom or Google Meet meeting can't be set to record when it starts, and one in the list (written by
+    /// hand, or before #228) is never armed.
+    #[test]
+    fn a_zoom_or_google_meet_meeting_is_never_scheduled() {
+        let (_env, home) = crate::paths::testenv::folders("sched-other-app");
+        let now = Utc::now();
+        let zoom = MeetingContext { join_url: Some("https://zoom.us/j/81234567890".into()), ..meeting("zoom", now + Duration::seconds(30), 30) };
+        assert!(add(zoom.clone()).unwrap_err().to_string().contains("recording isn't available for Zoom meetings yet"));
+        assert!(!is_scheduled("zoom"));
+        save(&[zoom]).unwrap();
+        assert!(due(now).is_none(), "skipped by the scheduler");
+        let _ = fs::remove_dir_all(&home);
     }
 
     #[test]

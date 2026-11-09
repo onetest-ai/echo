@@ -358,7 +358,7 @@ pub fn run_loop(app: TargetApp, stop: Arc<AtomicBool>, on_state: impl Fn(UiState
             let Some(start) = parse_time(&m.start) else { continue };
             // No join link (some calendar sources omit it) still gets an offer: arming then
             // records the call when the user joins from Teams/Outlook themselves.
-            if now < start - OFFER_BEFORE || now > start + OFFER_UNTIL_AFTER_START {
+            if now < start - OFFER_BEFORE || now > start + OFFER_UNTIL_AFTER_START || m.recordable().is_err() {
                 continue;
             }
             let key = format!("{}@{}", m.id.clone().unwrap_or_default(), start);
@@ -1411,8 +1411,8 @@ fn recover(app_started: DateTime<Utc>) {
 
 /// `echoctl arm`: opt in to recording the current/next call.
 pub fn arm(title: Option<String>, meeting: Option<MeetingContext>, languages: Option<Vec<String>>, ai_profile: Option<String>) -> Result<()> {
-    // Its series' language, where nobody chose one.
-    let meeting = meeting.map(|mut m| {
+    // Only a meeting Echo can record (not a Zoom or Google Meet one, yet); its series' language, where nobody chose one.
+    let meeting = meeting.map(|m| m.recordable().cloned()).transpose()?.map(|mut m| {
         crate::series::fill(&mut m);
         m
     });
@@ -1472,7 +1472,7 @@ pub fn stop() -> Result<()> {
 
 /// `echoctl join`: open the meeting in the desktop app and arm recording for it.
 pub fn join(meeting: MeetingContext) -> Result<()> {
-    let Some(url) = meeting.join_url.clone() else { bail!("meeting has no join_url") };
+    let Some(url) = meeting.recordable()?.join_url.clone() else { bail!("meeting has no join_url") };
     let url = crate::apps::desktop_join_url(&url);
     #[cfg(target_os = "macos")]
     std::process::Command::new("open").arg(&url).status()?;
@@ -1650,6 +1650,25 @@ mod tests {
         assert_eq!(pinned_profile(&a, Some(&meeting)), "chosen");
         a.ai_profile = None;
         assert_eq!(pinned_profile(&a, None), crate::ai::SYSTEM);
+    }
+
+    /// #228: Echo records Teams calls only. A Zoom or Google Meet meeting isn't armed or joined: the CLI and the window
+    /// get why, and nothing is left armed or opened.
+    #[test]
+    fn a_zoom_or_google_meet_meeting_is_not_armed_or_joined() {
+        let (_env, root) = crate::paths::testenv::folders("watch-arm-other-app");
+        fs::create_dir_all(root.join("home/.echo")).unwrap();
+        let zoom = MeetingContext { subject: Some("Umbrella check-in".into()), join_url: Some("https://umbrella.zoom.us/j/81234567890".into()), ..Default::default() };
+        let e = arm(zoom.subject.clone(), Some(zoom.clone()), None, None).unwrap_err();
+        assert_eq!(e.to_string(), "“Umbrella check-in” is a Zoom meeting: recording isn't available for Zoom meetings yet");
+        assert!(read_json::<Armed>("armed.json").is_none(), "nothing armed");
+        let meet = MeetingContext { join_url: Some("https://meet.google.com/abc-defg-hij".into()), ..zoom.clone() };
+        assert!(join(meet).unwrap_err().to_string().contains("recording isn't available for Google Meet meetings yet"), "refused before the link is opened");
+        assert!(read_json::<Armed>("armed.json").is_none());
+        // A Teams meeting, or one with no app known (the test data's links), arms as before.
+        let teams = MeetingContext { join_url: Some("https://teams.example/ev-1".into()), ..zoom };
+        arm(None, Some(teams), None, None).unwrap();
+        assert!(read_json::<Armed>("armed.json").is_some());
     }
 
     #[test]

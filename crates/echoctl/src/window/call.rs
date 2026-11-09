@@ -250,7 +250,7 @@ pub(super) fn agenda() -> Value {
         .filter(|m| m.end.as_deref().and_then(|e| chrono::DateTime::parse_from_rfc3339(e).ok()).is_none_or(|e| e.with_timezone(&chrono::Utc) > now))
         .map(|m| {
             let recap = m.subject.as_deref().map(calls::recap).unwrap_or_default();
-            json!({ "id": m.id, "subject": m.subject, "start": m.start, "end": m.end, "join_url": m.join_url,
+            json!({ "id": m.id, "subject": m.subject, "start": m.start, "end": m.end, "join_url": m.join_url, "app": m.app().map(|a| a.key()),
                     "attendees": m.attendees.len(), "recap": recap })
         })
         .collect();

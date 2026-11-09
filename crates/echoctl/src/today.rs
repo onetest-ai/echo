@@ -188,9 +188,9 @@ fn day() -> Vec<Value> {
         let minutes = hit.map(|i| minutes(&calls_today[i].0));
         // A Teams meeting over and not recorded: its transcript may be imported (known: true / false / unknown).
         let ended = time(m.end.as_deref()).is_some_and(|e| e + chrono::Duration::minutes(10) <= Utc::now());
-        let transcript = (hit.is_none() && ended && m.join_url.is_some()).then(|| offers.get(&event).map(|o| o["transcript"].clone()).unwrap_or(Value::Null));
+        let transcript = (hit.is_none() && ended && m.teams_join_url().is_some()).then(|| offers.get(&event).map(|o| o["transcript"].clone()).unwrap_or(Value::Null));
         out.push(json!({
-            "kind": "meeting", "subject": m.subject, "start": m.start, "end": m.end, "event": event, "minutes": minutes,
+            "kind": "meeting", "subject": m.subject, "start": m.start, "end": m.end, "event": event, "minutes": minutes, "app": m.app().map(|a| a.key()),
             "importable": transcript.is_some(), "transcript": transcript,
             "people": m.attendees.len() + m.organizer.iter().count(),
             "threads": crate::projects::for_event(&m),
