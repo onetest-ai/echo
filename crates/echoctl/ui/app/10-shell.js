@@ -82,12 +82,13 @@ function recordButton(attrs, label, primary = true, memo = false) {
 const MAC = /Mac/.test(navigator.platform || navigator.userAgent)
 const MOD = MAC ? '⌘' : 'Ctrl+'
 
-/** A calendar meeting about to start (3 min before … 4 min after), not recorded or armed yet. */
+/** A calendar meeting about to start (3 min before … 4 min after), not recorded or armed yet; not a Zoom or Google Meet
+ *  one (Echo can't record it yet). */
 function meetingSoon() {
   const now = Date.now()
   return (S.agenda || []).find((m) => {
     const s = new Date(m.start).getTime()
-    return m.id && m.join_url && now >= s - 3 * 60000 && now <= s + 4 * 60000
+    return m.id && m.join_url && !otherApp(m) && now >= s - 3 * 60000 && now <= s + 4 * 60000
   }) || null
 }
 

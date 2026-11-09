@@ -191,7 +191,7 @@ pub fn import(ev: &Value) -> Result<PathBuf> {
     if let Some(d) = call_of_event(&meeting) {
         bail!("“{title}” is already a call in Echo: {}", d.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default());
     }
-    let Some(join) = meeting.join_url.clone() else { bail!("“{title}” isn't a Teams meeting (no join link)") };
+    let Some(join) = meeting.teams_join_url().map(str::to_owned) else { bail!("“{title}” isn't a Teams meeting (no Teams join link)") };
     let start = crate::watch::meeting_start(&meeting).context("the event's start")?;
     if start > Utc::now() {
         bail!("“{title}” hasn't happened yet");
@@ -287,7 +287,7 @@ fn importable(ev: &Value, now: DateTime<Utc>, calls: bool) -> Option<(String, Me
         return None;
     }
     let (id, meeting) = (ev["id"].as_str()?.to_string(), crate::calendar::to_meeting(ev)?);
-    meeting.join_url.as_ref()?;
+    meeting.teams_join_url()?;
     let end = end_of(&meeting)?;
     (end + Duration::minutes(10) <= now && !(calls && call_of_event(&meeting).is_some())).then_some((id, meeting, end))
 }
@@ -403,5 +403,18 @@ mod tests {
         let m = MeetingContext { subject: Some("Aurora weekly".into()), ..Default::default() };
         let md = markdown(std::path::Path::new("/x/2026-11-02_160000-aurora"), "Aurora weekly", &t0.with_timezone(&Local), &m, &s);
         assert!(md.contains("Teams transcript (imported; no audio)") && md.contains("**Me** [00:00:35]\nYes & the SSO date first."), "{md}");
+    }
+
+    /// #228: a Zoom or Google Meet meeting is in the calendar now; Teams has no transcript of it to offer or import.
+    #[test]
+    fn a_zoom_or_google_meet_meeting_offers_no_teams_transcript() {
+        let (_env, _home) = crate::paths::testenv::folders("tt-other-app");
+        let ended = (Utc::now() - Duration::hours(2)).format("%Y-%m-%dT%H:%M:%S").to_string();
+        let ev = |preview: &str| json!({"id": "ev-1", "subject": "Umbrella check-in", "bodyPreview": preview,
+            "start": {"dateTime": ended, "timeZone": "UTC"}, "end": {"dateTime": ended, "timeZone": "UTC"}});
+        let zoom = ev("Join Zoom Meeting https://umbrella.zoom.us/j/81234567890");
+        assert_eq!(known(&zoom, &Default::default()), (None, false), "nothing to ask Teams");
+        assert!(import(&zoom).unwrap_err().to_string().contains("isn't a Teams meeting"));
+        assert_eq!(known(&ev("https://teams.microsoft.com/l/meetup-join/19%3ameeting_1%40thread.v2/0"), &Default::default()), (None, true), "a Teams one is asked about");
     }
 }

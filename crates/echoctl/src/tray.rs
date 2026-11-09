@@ -674,7 +674,7 @@ fn load_model(health: &[(String, String, Option<String>)]) -> Model {
     let mut upcoming: Vec<MeetingContext> = watch::agenda()
         .into_iter()
         .filter(|m| {
-            watch::meeting_start(m).is_some_and(|s| {
+            m.recordable().is_ok() && watch::meeting_start(m).is_some_and(|s| {
                 s + chrono::Duration::minutes(4) > now && s.with_timezone(&Local).date_naive() == today
             })
         })

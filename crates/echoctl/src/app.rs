@@ -713,7 +713,7 @@ pub fn offer_meeting(m: MeetingContext) {
     }
     std::thread::spawn(move || {
         let subject = m.subject.clone().unwrap_or_else(|| "A meeting".into());
-        let buttons: &[&str] = if m.join_url.is_some() { &["Not now", "Record", "Join & record"] } else { &["Not now", "Record"] };
+        let buttons: &[&str] = if m.teams_join_url().is_some() { &["Not now", "Record", "Join & record"] } else { &["Not now", "Record"] };
         let last = crate::calls::recap(&subject);
         let recap = if last.is_empty() { String::new() } else { format!("\n\nLast time:\n• {}", last.join("\n• ")) };
         let answer = ask(&format!("{subject} is starting.{recap}\n\nRecord and transcribe it?"), buttons, "Record");

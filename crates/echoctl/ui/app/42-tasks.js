@@ -364,6 +364,8 @@ function eventPrep(e, st) {
 function seriesEditor(e) {
   const x = e.series
   if (!x || !x.key) return ''
+  // A Zoom or Google Meet meeting: no choice to make yet (#228).
+  if (otherApp(e)) return `<div class="se-cal"><div class="ec-cap">Every meeting of this series</div><div class="set-sub">${notYet(e)}</div></div>`
   const r = x.rule || {}
   // Not recorded unless set: Don't record is the default (no rule, or never); Ask offers "Record?" at each.
   const rec = r.record === 'always' ? 'always' : r.record === 'ask' ? 'ask' : null

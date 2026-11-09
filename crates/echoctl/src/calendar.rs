@@ -65,6 +65,28 @@ fn person(v: &Value) -> Option<Person> {
     (!name.is_empty() || email.is_some()).then_some(Person { name, email })
 }
 
+/// The event's join link: Graph's own (a Teams online meeting), else the first link of a known meeting app in its
+/// location, preview or body (#228: a Zoom or Google Meet invite has its link only there). `body` comes only in the
+/// msgraph skill's JSON.
+fn join_link(ev: &Value) -> Option<String> {
+    if let Some(url) = ev.pointer("/onlineMeeting/joinUrl").and_then(Value::as_str) {
+        return Some(url.to_owned());
+    }
+    let text = |p: &str| ev.pointer(p).and_then(Value::as_str);
+    [text("/location/displayName"), text("/bodyPreview").map(whole_words), text("/body/content")].into_iter().flatten().find_map(crate::apps::find_join_link)
+}
+
+/// Graph cuts `bodyPreview` at 255 characters: a long one ends where it was cut, maybe inside a link (a Zoom id short
+/// of its digits). Its last word is left out then.
+fn whole_words(preview: &str) -> &str {
+    const CUT_AT: usize = 250;
+    // Counted as Graph does, in UTF-16 units (an emoji is two).
+    if preview.encode_utf16().count() < CUT_AT {
+        return preview;
+    }
+    preview.trim_end().rsplit_once(char::is_whitespace).map_or("", |(head, _)| head)
+}
+
 /// One calendar event for the calendar view: times, flags and what the user can do with it.
 #[cfg_attr(not(feature = "tray"), allow(dead_code))]
 pub fn view_event(ev: &Value) -> Option<Value> {
@@ -85,14 +107,16 @@ pub fn view_event(ev: &Value) -> Option<Value> {
         .filter(|x| x.pointer("/status/response").and_then(Value::as_str) != Some("declined"))
         .filter_map(|x| x.pointer("/emailAddress/name").or_else(|| x.pointer("/emailAddress/address")).and_then(Value::as_str))
         .map(str::trim).filter(|n| !n.is_empty()).take(50).map(str::to_owned).collect();
+    let join_url = join_link(ev);
     Some(json!({
         "id": ev.get("id"),
         "subject": if subject.is_empty() { "(no subject)".to_string() } else { subject.clone() },
         "start": start.to_rfc3339(),
         "end": end.to_rfc3339(),
         "all_day": ev.get("isAllDay").and_then(Value::as_bool).unwrap_or(false),
-        "online": ev.get("isOnlineMeeting").and_then(Value::as_bool).unwrap_or(false) || ev.pointer("/onlineMeeting/joinUrl").is_some(),
-        "join_url": ev.pointer("/onlineMeeting/joinUrl"),
+        "online": ev.get("isOnlineMeeting").and_then(Value::as_bool).unwrap_or(false) || join_url.is_some(),
+        "app": join_url.as_deref().and_then(crate::apps::MeetingApp::from_url).map(|a| a.key()),
+        "join_url": join_url,
         "declined": ev.pointer("/responseStatus/response").and_then(Value::as_str) == Some("declined"),
         "cancelled": ev.get("isCancelled").and_then(Value::as_bool).unwrap_or(false) || subject.starts_with("Canceled:"),
         "no_notetakers": format!("{subject} {body}").to_lowercase().contains("no_notetakers"),
@@ -109,8 +133,7 @@ pub fn convert(ev: &Value, now: DateTime<Utc>) -> Option<MeetingContext> {
     let body = ev.pointer("/bodyPreview").and_then(Value::as_str).unwrap_or("");
     let start = graph_time(ev.get("start")?)?;
     let end = ev.get("end").and_then(graph_time);
-    let online = ev.get("isOnlineMeeting").and_then(Value::as_bool).unwrap_or(false)
-        || ev.pointer("/onlineMeeting/joinUrl").is_some();
+    let online = ev.get("isOnlineMeeting").and_then(Value::as_bool).unwrap_or(false) || join_link(ev).is_some();
     let declined = ev.pointer("/responseStatus/response").and_then(Value::as_str) == Some("declined");
     let all_day = ev.get("isAllDay").and_then(Value::as_bool).unwrap_or(false);
     let cancelled = ev.get("isCancelled").and_then(Value::as_bool).unwrap_or(false) || subject.starts_with("Canceled:");
@@ -151,13 +174,19 @@ pub fn to_meeting(ev: &Value) -> Option<MeetingContext> {
         end: end.map(|e| e.to_rfc3339()),
         organizer: ev.get("organizer").and_then(person),
         attendees,
-        join_url: ev.pointer("/onlineMeeting/joinUrl").and_then(Value::as_str).map(str::to_owned),
+        join_url: join_link(ev),
         response: ev.pointer("/responseStatus/response").and_then(Value::as_str).map(str::to_owned),
         vocabulary: vec![],
         source: Some("calendar".into()),
         languages: vec![],
         ai_profile: None,
     })
+}
+
+/// The agenda offers a meeting to record now (from `before` its start until `after` it): one Echo can record, not a
+/// Zoom or Google Meet one (that has no "Record?" of its own, so a Teams call then is asked about as any call).
+pub fn offered_now(agenda: &[MeetingContext], now: DateTime<Utc>, before: Duration, after: Duration) -> bool {
+    agenda.iter().filter(|m| m.recordable().is_ok()).filter_map(watch::meeting_start).any(|st| now >= st - before && now <= st + after)
 }
 
 /// The start of `day` here, in UTC: local midnight (the earlier one when the clock goes back over
@@ -271,6 +300,8 @@ fn store(events: &[Value], quiet: bool) -> Result<()> {
 pub fn meeting_now(now: DateTime<Utc>) -> Option<MeetingContext> {
     let mut hits: Vec<(i64, MeetingContext)> = watch::agenda()
         .into_iter()
+        // A Zoom or Google Meet meeting: not the Teams call being recorded.
+        .filter(|m| m.recordable().is_ok())
         .filter_map(|m| {
             let start = watch::meeting_start(&m)?;
             let end = m.end.as_ref().and_then(|e| DateTime::parse_from_rfc3339(e).ok()).map(|e| e.with_timezone(&Utc))
@@ -329,6 +360,102 @@ mod tests {
         assert!(convert(&ev("Over", now - Duration::minutes(40), true), now).is_none());
         let m = convert(&ev("Daily sync", soon, true), now).unwrap();
         assert_eq!(m.organizer.unwrap().name, "Daniel");
+    }
+
+    /// #228: a Zoom or Google Meet invite in Outlook isn't an online meeting in Graph's terms; its link is only in its
+    /// text. It is kept, with that link and its app.
+    #[test]
+    fn a_zoom_or_google_meet_invite_is_kept_with_the_link_from_its_text() {
+        let now = Local::now().with_timezone(&Utc);
+        let soon = now + Duration::minutes(1);
+        let mut zoom = ev("Umbrella pricing call", soon, false);
+        zoom["bodyPreview"] = json!("Kim Park is inviting you to a scheduled Zoom meeting.\r\nJoin Zoom Meeting\r\nhttps://umbrella.zoom.us/j/81234567890?pwd=Xyz1, Meeting ID: 812 3456 7890");
+        let m = convert(&zoom, now).expect("a Zoom invite is kept");
+        assert_eq!(m.join_url.as_deref(), Some("https://umbrella.zoom.us/j/81234567890?pwd=Xyz1"));
+        let v = view_event(&zoom).unwrap();
+        assert_eq!((v["online"].clone(), v["app"].clone(), v["join_url"].clone()), (json!(true), json!("zoom"), json!("https://umbrella.zoom.us/j/81234567890?pwd=Xyz1")));
+
+        let mut meet = ev("Globex design sync", soon, false);
+        meet["location"] = json!({"displayName": "meet.google.com/abc-defg-hij"});
+        meet["bodyPreview"] = json!("Agenda: the design. Another link: https://zoom.us/j/81234567890");
+        assert_eq!(convert(&meet, now).unwrap().join_url.as_deref(), Some("https://meet.google.com/abc-defg-hij"), "the location first");
+        assert_eq!(view_event(&meet).unwrap()["app"], "meet");
+
+        // The msgraph skill's JSON may carry the whole body (HTML).
+        let mut body = ev("Acme demo", soon, false);
+        body["body"] = json!({"contentType": "html", "content": "<p>Join: <a href=\"https://meet.google.com/abc-defg-hij\">Google Meet</a></p>"});
+        assert_eq!(to_meeting(&body).unwrap().join_url.as_deref(), Some("https://meet.google.com/abc-defg-hij"));
+
+        // Graph's own link wins; a Teams meeting is as it was.
+        let mut teams = ev("Daily sync", soon, true);
+        teams["onlineMeeting"] = json!({"joinUrl": "https://teams.microsoft.com/l/meetup-join/19%3ameeting_1%40thread.v2/0"});
+        teams["bodyPreview"] = json!("https://zoom.us/j/81234567890");
+        assert_eq!(convert(&teams, now).unwrap().join_url.as_deref(), Some("https://teams.microsoft.com/l/meetup-join/19%3ameeting_1%40thread.v2/0"));
+        assert_eq!(view_event(&teams).unwrap()["app"], "teams");
+
+        // No known app's link, or a look-alike: still not a meeting to offer.
+        let mut lunch = ev("Lunch", soon, false);
+        lunch["bodyPreview"] = json!("At https://zoom.us.lunch.example/j/81234567890 or https://acme.example/menu");
+        assert!(convert(&lunch, now).is_none());
+        assert_eq!(view_event(&lunch).unwrap()["app"], Value::Null);
+    }
+
+    /// #253 review: a preview cut at its length limit may end inside a link; that link isn't taken.
+    #[test]
+    fn a_link_cut_off_at_the_end_of_the_preview_is_not_taken() {
+        let soon = Utc::now() + Duration::minutes(1);
+        let mut zoom = ev("Umbrella pricing call", soon, false);
+        let pad = "Agenda: pricing tiers, the pilot's numbers and what the board asked for. ".repeat(3);
+        zoom["bodyPreview"] = json!(format!("{pad}Join Zoom Meeting https://umbrella.zoom.us/j/8123456789"));
+        assert!(zoom["bodyPreview"].as_str().unwrap().chars().count() >= 250);
+        assert_eq!(view_event(&zoom).unwrap()["join_url"], Value::Null, "cut to 10 digits: not a link to join");
+        // The whole link before the cut: taken.
+        zoom["bodyPreview"] = json!(format!("Join Zoom Meeting https://umbrella.zoom.us/j/81234567890 {pad}Meeting ID: 812"));
+        assert_eq!(view_event(&zoom).unwrap()["join_url"], "https://umbrella.zoom.us/j/81234567890");
+        // Emoji count twice: 125 of them make a preview Graph has cut.
+        zoom["bodyPreview"] = json!(format!("{} https://umbrella.zoom.us/j/8123456789", "🙂".repeat(125)));
+        assert_eq!(view_event(&zoom).unwrap()["join_url"], Value::Null, "cut, counted in UTF-16");
+        // A short preview isn't cut: its last word is whole.
+        zoom["bodyPreview"] = json!("Join Zoom Meeting https://umbrella.zoom.us/j/81234567890");
+        assert_eq!(view_event(&zoom).unwrap()["join_url"], "https://umbrella.zoom.us/j/81234567890");
+    }
+
+    /// #253 review: an invite from outside with its Teams link only in the text (no `onlineMeeting` of the user's
+    /// own) is a Teams meeting now: kept, recordable, with Join & record; before #228 it was dropped.
+    #[test]
+    fn an_outside_teams_invite_with_its_link_only_in_the_text_is_kept() {
+        let now = Local::now().with_timezone(&Utc);
+        let mut ext = ev("Globex supplier call", now + Duration::minutes(1), false);
+        let link = "https://teams.microsoft.com/l/meetup-join/19%3ameeting_Zm9v%40thread.v2/0?context=%7b%22Tid%22%3a%22t%22%7d";
+        ext["bodyPreview"] = json!(format!("Microsoft Teams meeting\r\nJoin on your computer: {link}"));
+        let m = convert(&ext, now).expect("kept");
+        assert_eq!(m.join_url.as_deref(), Some(link));
+        assert!(m.recordable().is_ok() && m.teams_join_url() == Some(link));
+        assert_eq!(view_event(&ext).unwrap()["app"], "teams");
+    }
+
+    /// #253 review: a Teams call starting around a Zoom meeting's start is still asked about ("Record?"): the agenda
+    /// doesn't offer the Zoom meeting.
+    #[test]
+    fn only_a_meeting_echo_can_record_is_offered_by_the_agenda() {
+        let now = Utc::now();
+        let at = |url: &str| MeetingContext { start: Some(now.to_rfc3339()), join_url: Some(url.into()), ..Default::default() };
+        let (before, after) = (Duration::seconds(58), Duration::minutes(4));
+        assert!(!offered_now(&[at("https://zoom.us/j/81234567890")], now, before, after));
+        assert!(offered_now(&[at("https://zoom.us/j/81234567890"), at("https://teams.example/ev-1")], now, before, after));
+        assert!(!offered_now(&[at("https://teams.example/ev-1")], now + Duration::minutes(5), before, after), "past the window");
+    }
+
+    /// A Teams call recorded during a Zoom or Google Meet meeting isn't that meeting.
+    #[test]
+    fn a_call_is_never_matched_to_a_zoom_or_google_meet_meeting() {
+        let (_env, _home) = crate::paths::testenv::folders("calendar-now-other-app");
+        let now = Utc::now();
+        let at = |id: &str, url: &str| MeetingContext { id: Some(id.into()), start: Some(now.to_rfc3339()), end: Some((now + Duration::minutes(30)).to_rfc3339()), join_url: Some(url.into()), ..Default::default() };
+        watch::write_agenda(&[at("zoom", "https://zoom.us/j/81234567890")]).unwrap();
+        assert!(meeting_now(now).is_none());
+        watch::write_agenda(&[at("zoom", "https://zoom.us/j/81234567890"), at("teams", "https://teams.example/ev-1")]).unwrap();
+        assert_eq!(meeting_now(now).and_then(|m| m.id).as_deref(), Some("teams"));
     }
 
     #[test]

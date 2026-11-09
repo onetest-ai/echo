@@ -143,7 +143,8 @@ pub fn schedule_always(agenda: &[MeetingContext]) -> Result<usize> {
         let always = keys_of(m).iter().find_map(|k| all.get(k)).and_then(|r| r.record) == Some(Record::Always);
         let ended = m.end.as_deref().and_then(|e| chrono::DateTime::parse_from_rfc3339(e).ok()).is_some_and(|e| e < chrono::Utc::now());
         let occ = format!("{id}@{start}");
-        if !always || ended || done.contains(&occ) {
+        // A Zoom or Google Meet meeting: Echo can't record it yet.
+        if !always || ended || done.contains(&occ) || m.recordable().is_err() {
             continue;
         }
         let mut m = m.clone();
@@ -256,6 +257,19 @@ mod tests {
         assert_eq!(rule_for(&m).and_then(|r| r.record), Some(Record::Never), "its subject's rule still applies");
         assert!(set("nope", None, &json!({})).is_err());
         assert!(set("id:S1", None, &json!({"record": "sometimes"})).is_err());
+    }
+
+    /// #228: a series set to record always skips its Zoom or Google Meet meetings (Echo can't record them yet).
+    #[test]
+    fn always_skips_a_zoom_or_google_meet_meeting() {
+        let (_env, _) = paths::testenv::folders("series-always-other-app");
+        let now = chrono::Utc::now();
+        let mut zoom = meeting("e1", Some("S1"), "Umbrella weekly", now + chrono::Duration::hours(1));
+        zoom.join_url = Some("https://umbrella.zoom.us/j/81234567890".into());
+        let teams = meeting("e2", Some("S1"), "Umbrella weekly", now + chrono::Duration::hours(2));
+        set("id:S1", None, &json!({"record": "always"})).unwrap();
+        assert_eq!(schedule_always(&[zoom, teams]).unwrap(), 1, "the Teams one only, and no error");
+        assert_eq!(crate::schedule::load().iter().filter_map(|m| m.id.as_deref()).collect::<Vec<_>>(), vec!["e2"]);
     }
 
     #[test]

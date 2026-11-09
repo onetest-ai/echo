@@ -53,6 +53,7 @@
 .tag.rec { color: var(--me); }
 .tag.will { color: color-mix(in srgb, var(--recording) 75%, var(--text)); }
 .tag.no { color: var(--text-3); }
+.tag.app { color: var(--text-2); }
 
 /* A meeting's card: head (title, ×, when, chips), one action strip, then People / series / Last time sections */
 .detail {

@@ -28,7 +28,7 @@ import random
 import shutil
 import subprocess
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -1929,6 +1929,7 @@ def build_agenda(d, H):
         tt["ev-hostile-md"] = {"transcript": True, "checked": iso(now), "dismissed": False, "subject": H.text("Inbox item titles and reasons; Found for you names and reasons", "",
                                kind="html", one_line=True, where=".echo/teams-transcripts.json subject"), "start": iso(at(-2.2)), "end": iso(at(-1.9)),
                                "threads": [{"id": "acme-rollout", "name": "Acme rollout", "client": "acme"}]}
+    events += other_app_invites(d, at)
     f = f"{d.base}/agenda.json"
     d.write_json(f, events, ascii=False)
     d.q("agenda", "set", f)
@@ -1973,6 +1974,43 @@ def build_agenda(d, H):
     d.skip("meeting.prep=writing", "only while a prep is being written (in memory)")
     d.skip("meeting.threads=by rule (chat)", "an agenda event carries no Teams chat id")
     d.skip("meeting.action", "derived in the window from the other meeting axes")
+
+
+# #228: a Zoom and a Google Meet invite as Microsoft 365 has them (not online meetings in Graph's terms: the link only in
+# the invite's text, Meet's bare as Google writes it), each made into an agenda meeting by Echo's own calendar sync.
+OTHER_APP_INVITES = [
+    ("ev-zoom-pricing", "Umbrella pricing review", 1.75, "zoe", "zoom", "https://zoom.us/j/85550100123?pwd=TestOnly",
+     "Zoe Martin is inviting you to a scheduled Zoom meeting.\r\n\r\nJoin Zoom Meeting\r\nhttps://zoom.us/j/85550100123?pwd=TestOnly\r\n\r\n"
+     "Meeting ID: 855 5010 0123\r\nPasscode: 123456"),
+    ("ev-meet-roadmap", "Globex roadmap chat", 2.5, "kim", "meet", "https://meet.google.com/tst-wxyz-abc",
+     "Globex roadmap chat\r\nJoin with Google Meet\r\nmeet.google.com/tst-wxyz-abc\r\n\r\nOr dial: (US) +1 555-0100 PIN: 123 456#"),
+]
+
+
+def other_app_invites(d, at):
+    """Today's Zoom and Google Meet invites (OTHER_APP_INVITES) through `echoctl agenda sync` (calendar::convert), with a
+    calendar command that prints them for that one sync: the agenda meetings Echo makes of them. A sync that drops one, or
+    takes another link, stops the build."""
+    utc = lambda t: {"dateTime": t.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.0000000"), "timeZone": "UTC"}
+    graph = [{"id": i, "subject": s, "isOnlineMeeting": False, "start": utc(at(h)), "end": utc(at(h + 0.5)), "isAllDay": False, "isCancelled": False,
+              "organizer": {"emailAddress": {"name": P[who]["name"], "address": P[who]["email"]}}, "responseStatus": {"response": "accepted"},
+              "attendees": [{"type": "required", "status": {"response": "accepted"}, "emailAddress": {"name": P[who]["name"], "address": P[who]["email"]}}],
+              "location": {"displayName": ""}, "bodyPreview": body} for i, s, h, who, _, _, body in OTHER_APP_INVITES]
+    src, cfg_file = f"{d.base}/graph-events.json", d.state("config.json")
+    d.write_json(src, graph)
+    cfg = json.load(open(cfg_file))
+    cfg["calendar_command"] = [sys.executable, "-c", "import sys; sys.stdout.write(open(sys.argv[1], encoding='utf-8').read())", src]
+    d.write_json(cfg_file, cfg)
+    d.q("agenda", "sync")
+    cfg["calendar_command"] = []
+    d.write_json(cfg_file, cfg)
+    os.remove(src)
+    got = {m["id"]: m for m in json.load(open(d.state("agenda.json")))}
+    for i, s, _, _, app, link, _ in OTHER_APP_INVITES:
+        if got.get(i, {}).get("join_url") != link:
+            raise SystemExit(f"the calendar sync didn't keep the {app} invite {s!r} with its link {link} (got {got.get(i)})")
+        d.axis(f"meeting.flags={app} link only in the body", f"agenda {i}")
+    return [got[i] for i, *_ in OTHER_APP_INVITES]
 
 
 def build_preps(d, H, rows, events):
