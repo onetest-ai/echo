@@ -73,7 +73,7 @@
   },
   {
    "id": "F-LIVE-08",
-   "feature": "While a call records, the window draws only what changed: new transcript turns are added (the others stay as they are), the clock counts by itself, the recording dot pulses on the compositor (opacity); a window nobody sees fetches and draws nothing until shown",
+   "feature": "While a call records, the window draws only what changed: new transcript turns are added (the others stay as they are), the clock counts by itself, the recording dot pulses on the compositor (opacity)",
    "priority": "high",
    "check": "agent",
    "axes": [

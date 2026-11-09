@@ -16,7 +16,8 @@ tags: [window, performance, live-transcript, file-fed]
 
 ## Preconditions
 - The same setup as `recording/TC-015`: test data from `tests/fixtures/make_data.py <dir> --ai fake`, calls fed from files, the debug build, the speech model linked, a second app instance on the test data. The prelude: `. <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; C=tests/fixtures/call.py; W=tests/fixtures/wait.py; export D`
-- Live notes on (`target/debug/echoctl ai live on`), languages `en`, `--unscheduled manual --scheduled manual --auto-minutes false`
+- Live notes on (`target/debug/echoctl ai live on`) on any AI profile (nothing here needs a summary), languages `en`, `--unscheduled manual --scheduled manual --auto-minutes false`
+- The browser tab is visible (`document.visibilityState` is "visible"): a hidden page doesn't refresh
 
 ## Test Data
 

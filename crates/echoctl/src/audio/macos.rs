@@ -191,10 +191,16 @@ fn query_app_processes(app: TargetApp) -> Result<Vec<AudioProcess>> {
     Ok(ids
         .into_iter()
         .filter_map(|id| {
-            let (pid, bundle_id) = known
-                .entry(id)
-                .or_insert_with(|| unsafe { (get::<i32>(id, kAudioProcessPropertyPID).unwrap_or(-1), get_string(id, kAudioProcessPropertyBundleID).unwrap_or_default()) })
-                .clone();
+            let (pid, bundle_id) = match known.get(&id) {
+                Some(k) => k.clone(),
+                None => {
+                    let read = unsafe { (get::<i32>(id, kAudioProcessPropertyPID).ok(), get_string(id, kAudioProcessPropertyBundleID).ok()) };
+                    let k = (read.0.unwrap_or(-1), read.1.clone().unwrap_or_default());
+                    // Only what was read: an object asked while it is being created is asked again next time.
+                    if let (Some(_), Some(b)) = &read { if !b.is_empty() { known.insert(id, k.clone()); } }
+                    k
+                }
+            };
             prefixes.iter().any(|pre| bundle_id.starts_with(pre)).then(|| AudioProcess {
                 object_id: id,
                 pid,
