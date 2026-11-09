@@ -88,7 +88,8 @@ pub struct Config {
     #[serde(default)]
     pub scheduled: Option<String>,
     /// Command printing calendar events as JSON (msgraph shape) for `agenda sync`; default: the
-    /// msgraph skill's CLI when installed. Empty = use the default.
+    /// msgraph skill's CLI when installed. Empty = no skill calendar (test data: never the user's real one); Echo's
+    /// own Microsoft 365 sign-in, when this config folder has one, still syncs.
     #[serde(default)]
     pub calendar_command: Option<Vec<String>>,
     /// Run whisper.cpp on the GPU: true / false; unset = the GPU unless it failed its check

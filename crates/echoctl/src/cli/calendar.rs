@@ -43,7 +43,7 @@ pub enum CalendarCmd {
 
 #[derive(Subcommand)]
 pub enum AgendaCmd {
-    /// Refresh today's agenda from the calendar (msgraph skill if installed); quiet no-op without
+    /// Refresh today's agenda from the calendar (Echo's Microsoft 365 sign-in, else `calendar_command`, else the msgraph skill if installed); quiet no-op without
     Sync {
         #[arg(long)]
         quiet: bool,

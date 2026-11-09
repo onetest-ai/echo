@@ -26,9 +26,17 @@ const MATCH_EARLY_MIN: i64 = 10;
 /// …or until this long after its start (later only for meetings under 2 h).
 const MATCH_LATE_MIN: i64 = 30;
 
-fn default_command() -> Option<Vec<String>> {
-    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
-    let script = PathBuf::from(home).join(".claude/skills/msgraph/scripts/msgraph.js");
+/// The command that prints the calendar: the configured one, else the msgraph skill's CLI under `home` when installed.
+/// Configured empty: no calendar (test data sets it, so a test run never reads the user's real meetings, #242).
+fn calendar_command(configured: Option<Vec<String>>, home: Option<PathBuf>) -> Option<Vec<String>> {
+    match configured {
+        Some(c) => (!c.is_empty()).then_some(c),
+        None => default_command(home?),
+    }
+}
+
+fn default_command(home: PathBuf) -> Option<Vec<String>> {
+    let script = home.join(".claude/skills/msgraph/scripts/msgraph.js");
     script.exists().then(|| {
         vec![crate::app::find_program("node"), script.display().to_string(), "calendar".into(), "--limit".into(), "30".into(), "--json".into()]
     })
@@ -185,12 +193,13 @@ pub fn sync(quiet: bool) -> Result<()> {
         };
     }
     let cfg = Config::load().unwrap_or_default();
-    let cmd = cfg.calendar_command.clone().filter(|c| !c.is_empty()).or_else(default_command);
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from);
+    let cmd = calendar_command(cfg.calendar_command.clone(), home);
     let Some(cmd) = cmd else {
         // No calendar any more (signed out, the skill removed): nothing can be "unread today".
         let _ = std::fs::remove_file(failed_file());
         if !quiet {
-            println!("{}", json!({ "synced": false, "reason": "no calendar command (msgraph skill not installed)" }));
+            println!("{}", json!({ "synced": false, "reason": "no calendar command (msgraph skill not installed, or the calendar is off)" }));
         }
         return Ok(());
     };
@@ -280,6 +289,21 @@ pub fn meeting_now(now: DateTime<Utc>) -> Option<MeetingContext> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #242: test data sets `calendar_command: []`, and its calendar stays off even where the user has the msgraph
+    /// skill installed — the sync never reads their real meetings into it.
+    #[test]
+    fn an_empty_calendar_command_turns_the_calendar_off_whatever_is_installed() {
+        let home = std::env::temp_dir().join(format!("echo-test-calendar-off-{}", std::process::id()));
+        let script = home.join(".claude/skills/msgraph/scripts/msgraph.js");
+        std::fs::create_dir_all(script.parent().unwrap()).unwrap();
+        std::fs::write(&script, "console.log('[]')").unwrap();
+        assert_eq!(calendar_command(Some(vec![]), Some(home.clone())), None, "off: never the installed skill");
+        assert!(calendar_command(None, Some(home.clone())).is_some_and(|c| c.contains(&script.display().to_string())), "unset: the skill");
+        assert_eq!(calendar_command(Some(vec!["cal".into()]), Some(home.clone())), Some(vec!["cal".into()]));
+        assert_eq!(calendar_command(None, None), None);
+        let _ = std::fs::remove_dir_all(&home);
+    }
 
     fn ev(subject: &str, start: DateTime<Utc>, online: bool) -> Value {
         json!({ "id": "e1", "subject": subject, "isOnlineMeeting": online,

@@ -42,6 +42,10 @@ a microphone or reads a real Teams, and `call.py` makes its calls.
 | `standard` | Every value of every state axis of `tests/feature-map/axes/` that test data can hold (the rest are skipped, with the reason, below), and the axis groups of `combinations.json` covered pairwise | 96 calls (56 main ones, 40 all-hands of last spring so the list pages past 60) · 10 threads · ~133 items · 19 people · 37 meetings |
 | `hostile` | `standard`, plus others' text in every place of `hostile.json`: HTML and script (`<img onerror>`, `<script>`, `javascript:` links), a 10 000-character word, right-to-left and combining characters, emoji and Cyrillic, Markdown that looks like links or headings. Each piece carries a marker `HOSTILE-NN` | standard + 5 calls, 1 thread, 3 items, 2 meetings; ~120 marked pieces |
 
+Every set's config has `calendar_command: []`, so the calendar is off: a sync never runs the msgraph skill from your
+real `~/.claude` and never replaces the set's agenda with your real meetings (#242). Microsoft 365 sign-ins live in the
+run's own config folder, so a test config never sees yours.
+
 The pairwise groups need more items than a person would keep: 7 states × 5 dues alone need 35 tasks, 6 responses
 × 3 timings 18 meetings today. The extra items are spread over five open threads; the extra meetings make today
 a busy day.
