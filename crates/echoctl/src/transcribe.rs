@@ -1280,11 +1280,8 @@ pub(crate) fn final_transcriber(cfg: &Config, model_override: Option<&str>, prom
     }
     let set = call.and_then(meta_language);
     let fixed = fixed_language(set, &allowed);
-    let code = |l: i32| whisper_rs::get_lang_str(l).unwrap_or("?");
-    match set {
-        Some(l) if fixed == Some(l) => eprintln!("  language: {} (set for this call)", code(l)),
-        Some(l) => eprintln!("  language: {} was set for this call but isn't among the allowed ones: decided again", code(l)),
-        None => {}
+    if let Some(note) = set_language_note(set, fixed) {
+        eprintln!("  language: {note}");
     }
     let call = language_kept_in(call, model_override);
     let language = Mutex::new(CallLanguage::new(fixed, &allowed));
@@ -1318,6 +1315,17 @@ pub(crate) fn final_transcriber(cfg: &Config, model_override: Option<&str>, prom
     eprintln!("  model: {model_name}");
     let engine = Engine::load(&model_path, threads, fixed.is_none())?;
     Ok((transcriber(Backend::Local(engine)), model_name))
+}
+
+/// What the log says of the language set in a call's `meta.json` (`set`), given the call's language at the start.
+fn set_language_note(set: Option<i32>, fixed: Option<i32>) -> Option<String> {
+    let code = |l: i32| whisper_rs::get_lang_str(l).unwrap_or("?");
+    let set = set?;
+    Some(match fixed {
+        Some(l) if l == set => format!("{} (set for this call)", code(set)),
+        Some(l) => format!("{} was set for this call but only {} is allowed: transcribed in {}", code(set), code(l), code(l)),
+        None => format!("{} was set for this call but isn't among the allowed ones: decided again", code(set)),
+    })
 }
 
 /// Where the decided language is written: the call's folder, never by a comparison run (`--model`).
@@ -1457,6 +1465,16 @@ mod tests {
         assert_eq!(runs.get(), 1);
         detect_language(&[], &pick, detect).unwrap();
         assert_eq!(runs.get(), 2, "any language: detected");
+    }
+
+    #[test]
+    fn the_log_says_what_became_of_a_language_set_for_the_call() {
+        let id = |c| whisper_rs::get_lang_id(c).unwrap();
+        let (en, uk, ru) = (id("en"), id("uk"), id("ru"));
+        assert_eq!(set_language_note(None, Some(en)), None);
+        assert_eq!(set_language_note(Some(uk), Some(uk)).unwrap(), "uk (set for this call)");
+        assert_eq!(set_language_note(Some(ru), None).unwrap(), "ru was set for this call but isn't among the allowed ones: decided again");
+        assert_eq!(set_language_note(Some(ru), Some(en)).unwrap(), "ru was set for this call but only en is allowed: transcribed in en");
     }
 
     #[test]

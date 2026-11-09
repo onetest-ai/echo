@@ -19,7 +19,8 @@ const DECIDE_VOTES: usize = 3;
 const DECIDE_SPEECH_S: f64 = 10.0;
 /// …or after this many votes, however short (a call of short replies).
 const MAX_VOTES: usize = 6;
-/// A call whose detections never vote (no allowed language heard, nothing written) stops detecting after this many.
+/// A call whose speech never votes (a server or Nemotron hearing no allowed language) stops detecting after this
+/// many such utterances. Noise (nothing written) doesn't count: the words after it still decide.
 const MAX_DETECTIONS: usize = 12;
 
 /// An utterance's detection: allowed languages with their probabilities, best first.
@@ -42,9 +43,11 @@ pub(crate) struct CallLanguage {
     pub(crate) speech_s: f64,
     /// A short utterance's pick before any vote: what to decode with until a vote comes.
     short: Option<i32>,
-    /// Detections so far, voting or not (`MAX_DETECTIONS`).
-    detections: usize,
-    /// The allowed list's first: the call's language when its detections never vote.
+    /// Utterances with sentences whose detection gave no vote (`MAX_DETECTIONS`).
+    unvoted: usize,
+    /// Detection stopped at `MAX_DETECTIONS` with no vote: decode in the leader or `fallback`, nothing fixed.
+    capped: bool,
+    /// The allowed list's first: what a capped call with no vote is decoded in (never saved as its language).
     fallback: Option<i32>,
 }
 
@@ -61,9 +64,12 @@ impl CallLanguage {
     }
 
     fn plan(&self, dur: f64) -> Plan {
-        match (self.fixed, self.leader()) {
-            (Some(l), _) => Plan::Use(l),
-            (None, Some(l)) if dur < SHORT_UTTERANCE_S => Plan::Use(l),
+        if let Some(l) = self.fixed {
+            return Plan::Use(l);
+        }
+        // Capped (`MAX_DETECTIONS`): the leader, else the list's first, never detected again.
+        match self.leader().or(self.fallback.filter(|_| self.capped)) {
+            Some(l) if self.capped || dur < SHORT_UTTERANCE_S => Plan::Use(l),
             _ => Plan::Detect,
         }
     }
@@ -96,26 +102,26 @@ impl CallLanguage {
     }
 
     /// Count an utterance's detection; `spoken`: its decode wrote something (hold music, a keyboard or a
-    /// hallucination dropped as such doesn't vote). Returns the language when this detection decided it: on the
-    /// votes (`DECIDE_VOTES`, `MAX_VOTES`), or after `MAX_DETECTIONS` on what there is, else the allowed list's first.
+    /// hallucination dropped as such doesn't vote). Returns the language when this detection decided it, on the votes
+    /// (`DECIDE_VOTES`, `MAX_VOTES`). After `MAX_DETECTIONS` utterances with sentences but no vote, it decides on the
+    /// votes there are; with none, detection stops and the call is decoded in its first allowed language, unfixed.
     pub(crate) fn vote(&mut self, ranked: &[(i32, f32)], dur: f64, spoken: bool) -> Option<i32> {
-        if self.fixed.is_some() {
+        if self.fixed.is_some() || !spoken {
             return None;
         }
-        self.detections += 1;
-        if spoken && !ranked.is_empty() {
-            if dur < SHORT_UTTERANCE_S {
-                self.short = self.short.or(Some(ranked[0].0));
-            } else {
-                self.add(ranked, dur);
-                if (self.votes >= DECIDE_VOTES && self.speech_s >= DECIDE_SPEECH_S) || self.votes >= MAX_VOTES {
-                    return self.settle();
-                }
+        if ranked.is_empty() {
+            self.unvoted += 1;
+            if self.unvoted >= MAX_DETECTIONS {
+                self.capped = true;
+                return self.settle();
             }
-        }
-        if self.detections >= MAX_DETECTIONS {
-            self.fixed = self.leader().or(self.fallback);
-            return self.fixed;
+        } else if dur < SHORT_UTTERANCE_S {
+            self.short = self.short.or(Some(ranked[0].0));
+        } else {
+            self.add(ranked, dur);
+            if (self.votes >= DECIDE_VOTES && self.speech_s >= DECIDE_SPEECH_S) || self.votes >= MAX_VOTES {
+                return self.settle();
+            }
         }
         None
     }
@@ -254,25 +260,34 @@ mod tests {
     }
 
     #[test]
-    fn detection_stops_after_max_detections_even_when_nothing_votes() {
+    fn detection_stops_after_max_detections_of_speech_that_never_votes() {
         let (en, uk, ru) = ids();
-        // Nemotron hearing no allowed language (an empty vote) on every utterance.
+        // Nemotron or a server hearing no allowed language (an empty vote) on every utterance, sentences written.
         let call: Vec<(f64, Ranked)> = (0..30).map(|_| (4.0, vec![])).collect();
         let (decodes, lang) = run_call(None, &[uk, en, ru], &call, false);
         assert_eq!(detections(&decodes), MAX_DETECTIONS, "{decodes:?}");
-        assert_eq!(lang.lock().unwrap().fixed, Some(uk), "the allowed list's first");
-        assert!(decodes[MAX_DETECTIONS..].iter().all(|(a, l)| a == &[uk] && l == "uk"));
-        // Noise only, every detection without sentences: also capped, on the list's first.
-        let noise: Vec<(f64, Ranked, bool)> = (0..30).map(|_| (4.0, vec![(ru, 0.9)], false)).collect();
-        let (decodes, lang) = run_spoken(None, &[en, uk, ru], &noise, false);
-        assert_eq!(detections(&decodes), MAX_DETECTIONS);
-        assert_eq!(lang.lock().unwrap().fixed, Some(en));
-        // Votes before the cap: their leader.
+        assert!(decodes[MAX_DETECTIONS..].iter().all(|(a, l)| a == &[uk] && l == "uk"), "decoded in the list's first");
+        let mut c = lang.into_inner().unwrap();
+        assert_eq!(c.fixed, None, "no vote: nothing fixed");
+        assert_eq!(c.settle(), None, "nor saved when the call ends");
+        // Votes before the cap: their leader is fixed.
         let mut some: Vec<(f64, Ranked)> = vec![(4.0, vec![(uk, 0.9), (en, 0.1)])];
         some.extend((0..30).map(|_| (4.0, vec![])));
         let (decodes, lang) = run_call(None, &[en, uk, ru], &some, false);
-        assert_eq!(detections(&decodes), MAX_DETECTIONS);
+        assert_eq!(detections(&decodes), MAX_DETECTIONS + 1);
         assert_eq!(lang.lock().unwrap().fixed, Some(uk));
+    }
+
+    #[test]
+    fn noise_before_the_first_words_neither_uses_up_the_cap_nor_fixes_a_language() {
+        let (en, uk, ru) = ids();
+        let es = whisper_rs::get_lang_id("es").unwrap();
+        // A Ukrainian call opening with keyboard clicks and hold-music bursts (short, nothing written).
+        let mut call: Vec<(f64, Ranked, bool)> = (0..MAX_DETECTIONS + 3).map(|_| (0.6, vec![(en, 0.5), (es, 0.3)], false)).collect();
+        call.extend((0..3).map(|_| (4.5, vec![(uk, 0.8), (ru, 0.15), (en, 0.05)], true)));
+        let (decodes, lang) = run_spoken(None, &[en, uk, ru, es], &call, false);
+        assert_eq!(lang.lock().unwrap().fixed, Some(uk), "{decodes:?}");
+        assert!(decodes[MAX_DETECTIONS + 3..].iter().all(|(_, l)| l == "uk"));
     }
 
     #[test]
