@@ -384,9 +384,9 @@ impl CallWindow {
 
 // ── per-call UI timeline (for speaker names) ───────────────────────────────────────────────
 
-/// One line per text-bearing node: "depth|role|subrole|title|description|value". Diffing these
-/// between polls shows what changes when someone speaks (a tile's label, a "speaking" state).
-/// The same walk returns a light copy of the tree (with class lists) for the participant reader.
+/// The elements one tile may be read with between full reads (a tile and its subtree; a roster row is a few).
+const TILE_NODES: usize = 200;
+
 /// A participant's element found by a full read, with its nearest ancestors (classes the speaking ring may draw on):
 /// re-read alone between full reads (`quick_tiles`).
 struct Tile {
@@ -406,15 +406,16 @@ fn tile_key(node: &super::UiNode) -> Option<String> {
 }
 
 /// Read a node and its subtree as a full read does, keeping each tile with its three nearest ancestors in `tiles`.
-fn ui_lines_with(e: &Element, depth: usize, out: &mut Vec<String>, budget: &mut usize, anc: &mut Vec<Element>, tiles: &mut Vec<Tile>) -> super::UiNode {
+fn ui_lines_with(e: &Element, depth: usize, out: &mut Vec<String>, budget: &mut usize, anc: &mut Vec<Element>, tiles: &mut Vec<Tile>, in_dialog: bool) -> super::UiNode {
     let Some(mut node) = ui_node(e, depth, out, budget) else { return Default::default() };
-    if let Some(key) = tile_key(&node) {
+    let in_dialog = in_dialog || node.dialog; // participants() skips what a dialog holds: so do the tiles
+    if let Some(key) = tile_key(&node).filter(|_| !in_dialog) {
         tiles.push(Tile { key, ancestors: anc.iter().rev().take(3).rev().cloned().collect(), el: e.clone() });
     }
     if depth < MAX_DEPTH {
         anc.push(e.clone());
         for c in e.children("AXChildren") {
-            node.kids.push(ui_lines_with(&c, depth + 1, out, budget, anc, tiles));
+            node.kids.push(ui_lines_with(&c, depth + 1, out, budget, anc, tiles, in_dialog));
         }
         anc.pop();
     }
@@ -432,12 +433,10 @@ fn quick_node(e: &Element, depth: usize, budget: &mut usize) -> Option<super::Ui
     if let Some(Attr::Json(Value::Array(c))) = e.attr("AXDOMClassList") {
         node.classes = c.into_iter().filter_map(|v| v.as_str().map(str::to_owned)).collect();
     }
-    if depth < 8 && *budget > 0 {
+    if depth < 8 {
         for c in e.children("AXChildren") {
-            *budget = budget.saturating_sub(1);
-            if let Some(k) = quick_node(&c, depth + 1, budget) {
-                node.kids.push(k);
-            }
+            *budget = budget.checked_sub(1)?; // spent: the tile is read whole by the next full read instead
+            node.kids.push(quick_node(&c, depth + 1, budget)?);
         }
     }
     Some(node)
@@ -447,17 +446,18 @@ fn quick_node(e: &Element, depth: usize, budget: &mut usize) -> Option<super::Ui
 /// count changed (then a full read follows).
 fn quick_tiles(tiles: &[Tile]) -> Option<Vec<super::Participant>> {
     let mut root = super::UiNode::default();
-    let mut budget = 2_000;
     for tile in tiles {
+        let mut budget = TILE_NODES; // each tile its own: a big roster never starves the later rows
         let mut node = quick_node(&tile.el, 0, &mut budget)?;
         for (i, a) in tile.ancestors.iter().enumerate().rev() {
+            a.string("AXRole")?; // an ancestor gone or redrawn: a full read, never classes missing for a poll
             let mut up = super::UiNode { kids: vec![node], ..Default::default() };
             if let Some(Attr::Json(Value::Array(c))) = a.attr("AXDOMClassList") {
                 up.classes = c.into_iter().filter_map(|v| v.as_str().map(str::to_owned)).collect();
             }
             if i + 1 == tile.ancestors.len() {
-                // A roster row without a label of its own is named by its parent's.
-                up.label = ["AXTitle", "AXDescription", "AXValue"].iter().find_map(|x| a.string(x)).unwrap_or_default();
+                // A roster row without a label of its own is named by its parent's, cut as a full read cuts it.
+                up.label = ["AXTitle", "AXDescription", "AXValue"].iter().find_map(|x| a.string(x)).unwrap_or_default().chars().take(300).collect();
             }
             node = up;
         }
@@ -467,6 +467,9 @@ fn quick_tiles(tiles: &[Tile]) -> Option<Vec<super::Participant>> {
     (people.len() == tiles.len()).then_some(people)
 }
 
+/// One line per text-bearing node: "depth|role|subrole|title|description|value". Diffing these
+/// between polls shows what changes when someone speaks (a tile's label, a "speaking" state).
+/// The same walk returns a light copy of the tree (with class lists) for the participant reader.
 fn ui_lines(e: &Element, depth: usize, out: &mut Vec<String>, budget: &mut usize) -> super::UiNode {
     let Some(mut node) = ui_node(e, depth, out, budget) else { return Default::default() };
     if depth < MAX_DEPTH {
@@ -562,7 +565,7 @@ impl UiRecorder {
         let mut budget = MAX_NODES;
         let (mut people, mut tiles) = (vec![], vec![]);
         for w in &windows {
-            people.extend(super::participants(&ui_lines_with(w, 0, &mut lines, &mut budget, &mut vec![], &mut tiles)));
+            people.extend(super::participants(&ui_lines_with(w, 0, &mut lines, &mut budget, &mut vec![], &mut tiles, false)));
         }
         // Only the tiles that are participants (not a menu item that looks like one), each once.
         let keys: std::collections::HashSet<&String> = people.iter().map(|p| &p.key).collect();
