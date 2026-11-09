@@ -79,6 +79,15 @@
    "axes": [
     "live.state"
    ]
+  },
+  {
+   "id": "F-LIVE-09",
+   "feature": "On Claude (an account or Claude Code as configured), a recording's live notes are kept by one Claude Code session that loops on its own with two tools bound to the call (wait for new lines, update the notes: checked like any notes, action items as proposals); it starts with the recording, ends after it, and its text is never read",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "live.state"
+   ]
   }
  ]
 }
