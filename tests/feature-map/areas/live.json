@@ -60,6 +60,16 @@
    "axes": [
     "live.content"
    ]
+  },
+  {
+   "id": "F-LIVE-07",
+   "feature": "While a call records, live notes don't run on a profile whose model is on this computer (it would take the GPU from the call); the box says why, and Settings names such a default profile. Claude and model servers on other computers still summarise",
+   "priority": "high",
+   "check": "agent",
+   "axes": [
+    "live.enabled",
+    "live.state"
+   ]
   }
  ]
 }

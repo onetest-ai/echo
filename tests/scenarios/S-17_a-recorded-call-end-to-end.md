@@ -19,6 +19,7 @@ cases:
   - tests/cases/claude/TC-010_notes-move-minutes.md
   - tests/cases/window/TC-012_minutes-open-in-browser.md
   - tests/cases/recording/TC-019_tray-icon-follows-the-recording.md
+  - tests/cases/claude/TC-019_live-notes-skip-a-model-on-this-computer-while-recording.md
 ---
 
 # S-17: A recorded call end to end: record, take notes, transcript, automatic minutes, the files
@@ -73,6 +74,7 @@ Record P1–P5's results under the stages whose case steps they are (window/TC-0
 | 9 | `claude/TC-010_notes-move-minutes.md` | 8 | The same app; its teardown quits it (the last stage that needs it) |
 | 10 | `window/TC-012_minutes-open-in-browser.md` | — | — (the server was started with `ECHOCTL_TEST_OPEN_LOG_ONLY=1`) |
 | 11 | `recording/TC-019_tray-icon-follows-the-recording.md` | — | **person** — skipped by an agent run (the tray can't be driven while the user's Echo runs) |
+| 12 | `claude/TC-019_live-notes-skip-a-model-on-this-computer-while-recording.md` | — | Its own app instance and AI profile, after stage 10 (its app quit first) |
 
 ## Notes
 - **One live call, one transcription, one app.** The main call is armed and started in the prelude and held (`--hold`) while the window takes notes on it; stage 1 hangs it up no earlier than 37 s in (the whole conversation recorded, however long the window steps took). Everything before (armed), during (the notes' time, both tracks written, the row Recording) and after it (the stop at the hang-up, the events, `stop_reason`, the transcript, two aligned closed tracks, no audio left, the window filling in) hangs off that call. Stages 6–9 copy prepared calls on the same app; nothing else records or transcribes. Transcription quality is scored once, in S-14.

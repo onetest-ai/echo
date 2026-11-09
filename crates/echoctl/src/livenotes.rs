@@ -1024,9 +1024,7 @@ pub fn test_call_needing(dir: &Path, id: &str) {
     let stamp = track(dir);
     with(|s| {
         let c = s.calls.entry(stamp).or_default();
-        c.recording = true;
-        c.state = "failed".into();
-        c.needs_sign_in = Some(id.into());
+        (c.recording, c.state, c.needs_sign_in) = (true, "failed".into(), Some(id.into()));
     });
 }
 
@@ -1329,6 +1327,7 @@ fn run_summary(stamp: &str, generation: u64) {
     if !summary_current(stamp, generation) || cancelled() || !still_on() {
         return; // paused, profile changed, turned off or quitting meanwhile: nothing was sent
     }
+    if p.on_this_computer() && with(|s| s.calls.get(stamp).is_some_and(|c| c.recording)) { return set_state_if(stamp, generation, "local", None) } // the GPU stays the call's
     // Its header from the call where it is now: it may have been retitled during the check.
     let dir = call_dir(stamp).unwrap_or(dir);
     set_state_if(stamp, generation, "updating", None);
@@ -1866,8 +1865,10 @@ mod tests {
         std::fs::write(d.join("meta.json"), r#"{"title":"Sync","ai_profile":"t"}"#).unwrap();
         let talk: String = (0..12).map(|i| format!("{{\"speaker\":\"remote\",\"start\":{},\"end\":{},\"text\":\"We agreed the pilot starts in Lisbon and the budget is fixed, item {i}.\"}}\n", i * 10, i * 10 + 5)).collect();
         std::fs::write(d.join(LIVE_FILE), &talk).unwrap();
+        // The test server listens on 127.0.0.1; reached by its IPv4-mapped address it is "another computer" (#237).
         let settings = |url: &str| {
-            ai::Settings { default: None, live_notes: true, profiles: vec![local(url)] }.save().unwrap();
+            let remote = url.replace("://127.0.0.1:", "://[::ffff:127.0.0.1]:");
+            ai::Settings { default: None, live_notes: true, profiles: vec![local(&remote)] }.save().unwrap();
         };
         let run = || {
             let stamp = track(&d);
@@ -1881,7 +1882,12 @@ mod tests {
             with(|s| s.running = None);
             with(|s| s.calls.get(&stamp).map(|c| (c.state.clone(), c.error.clone())).unwrap())
         };
-        settings(&serve(Some(http("200 OK", "", r#"{"content":[{"type":"text","text":"{\"now\":\"Pilot\",\"decisions\":[{\"text\":\"Lisbon first\",\"t\":\"00:10\"}]}"}]}"#))));
+        // A model on this computer, while recording: nothing is sent, the pane says why.
+        let reply = r#"{"content":[{"type":"text","text":"{\"now\":\"Pilot\",\"decisions\":[{\"text\":\"Lisbon first\",\"t\":\"00:10\"}]}"}]}"#;
+        ai::Settings { default: None, live_notes: true, profiles: vec![local(&serve(Some(http("200 OK", "", reply))))] }.save().unwrap();
+        assert_eq!(run().0, "local");
+        assert!(read_notes(&d).is_none(), "no summary on this computer during the call");
+        settings(&serve(Some(http("200 OK", "", reply))));
         assert_eq!(run().0, "updated");
         let n = read_notes(&d).unwrap();
         assert_eq!((n.cursor, n.decisions.len()), (12, 1));

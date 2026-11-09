@@ -237,6 +237,7 @@ const SETTINGS_BODY = {
   ai(st) {
     const a = ai()
     const kind = (p) => p.kind === 'claude' ? 'Claude account' : p.kind === 'local' ? `Model · ${esc(p.host || 'this computer')}` : 'Built in'
+    const localDefault = a.profiles.find((p) => p.id === a.default && p.kind === 'local' && !p.host)
     const rows = a.profiles.map((p) => {
       const s = p.signin || {}
       const out = p.kind === 'claude' && s.state === 'signed_out'
@@ -251,7 +252,7 @@ const SETTINGS_BODY = {
       setCard('Minutes', [
         setRow('Write minutes automatically', "15 min after a call ends (or after your last note), with the call's profile.", sw('auto_minutes', st.auto_minutes, 'Write minutes automatically')),
         setRow("Keep threads' work current", "After a thread's calls, Claude reads them into its stories, tasks, decisions, risks and questions — with the thread's AI profile.", sw('project_sync', st.project_sync, "Keep threads' work current")),
-        setRow('Live notes during calls', "A running summary and the Live tab's questions, with the call's profile.", sw('live_notes', a.live_notes, 'Live notes')),
+        setRow('Live notes during calls', "A running summary and the Live tab's questions, with the call's profile." + (localDefault ? ` Not while recording with ${esc(localDefault.name)}: its model runs on this computer and would slow the call down.` : ''), sw('live_notes', a.live_notes, 'Live notes')),
         setRow('Minutes model', 'The model that writes minutes for the default profile.', actBtn('notes_model', 'Change…')),
         setRow('Where Claude Code runs for minutes', st.notes_in ? `<code>${esc(st.notes_in)}</code> — its .claude/settings.json applies.` : 'The data folder.', actBtn('notes_choose', 'Choose…') + (st.notes_in ? actBtn('notes_anywhere', 'Use the data folder') : '')),
         setRow('Also write a minutes page file', "An HTML file in the call's folder, for sharing.", sw('minutes_page', st.minutes_page, 'Minutes page file')),
