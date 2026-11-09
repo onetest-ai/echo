@@ -14,7 +14,7 @@
   },
   {
    "id": "F-TODAY-02",
-   "feature": "Your day lists today's accepted meetings and calls in time order with the line \"now\"; each shows its threads and minutes state (New minutes with what they hold, Minutes, Writing, Minutes at HH:MM, Minutes failed + Try again), Show prep / Prepare, Record when it starts / Don't record, Import Teams transcript",
+   "feature": "Your day lists today's accepted meetings and calls in time order with the line \"now\"; each shows its threads and minutes state (New minutes with what they hold, Minutes, Writing, Minutes at HH:MM, Minutes failed + Try again), Show prep / Prepare, Record when it starts / Don't record, Import Teams transcript; a Zoom or Google Meet meeting is labelled with its app and says recording isn't available for it yet",
    "priority": "high",
    "check": "agent",
    "axes": []

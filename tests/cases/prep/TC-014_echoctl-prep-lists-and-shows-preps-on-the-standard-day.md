@@ -24,7 +24,7 @@ tags: [prep, cli]
 
 | Command | Result |
 |---|---|
-| `echoctl prep --upcoming` | `meetings`: 11 entries, `prep` null for ten and `{error: null, written_at}` for Globex sponsor update |
+| `echoctl prep --upcoming` | `meetings`: 13 entries, `prep` null for twelve and `{error: null, written_at}` for Globex sponsor update |
 | `echoctl prep --show <Globex sponsor update's id>` | keys include `summary`, `expected`, `last_time`, `open`, `new_since`, `people` (12) |
 | `echoctl prep --show <Analyst roundtable's id>` | `error` set, no `summary` |
 | `echoctl prep --show nope` | exit code 1, message `no prep "nope"` |
@@ -33,7 +33,7 @@ tags: [prep, cli]
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Run `echoctl prep --upcoming` | Exit code 0; JSON `{"meetings": [...]}` with 11 entries, each with `id`, `event`, `subject`, `start`, `end`, `names`, `threads`, `prep`, `writing` false |
+| 1 | Run `echoctl prep --upcoming` | Exit code 0; JSON `{"meetings": [...]}` with 13 entries (the Zoom and Google Meet meetings among them), each with `id`, `event`, `subject`, `start`, `end`, `names`, `threads`, `prep`, `writing` false |
 | 2 | Read `prep` of each entry | null except for the entry `Globex sponsor update`, whose `prep` has `error` null and `written_at` |
 | 3 | Run `echoctl prep --show` with the id of Globex sponsor update | Exit code 0; JSON with `summary` "Globex sponsor update: the SSO checklist is done…", 3 `expected`, 3 `open`, 2 `new_since`, 12 `people`, `model` "sonnet" |
 | 4 | Run `echoctl prep --show` with the id of Analyst roundtable (in `preps`, state error) | JSON with `error` "its threads run on different AI profiles: no summary, the facts only", `model` null, no `summary` |

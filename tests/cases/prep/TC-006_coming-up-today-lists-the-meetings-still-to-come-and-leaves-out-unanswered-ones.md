@@ -22,25 +22,25 @@ tags: [prep, calls, response]
 
 ## Test Data
 
-| In the list (11) | Left out |
+| In the list (13) | Left out |
 |---|---|
-| Globex office hours · Vendor demo (live, accepted/none) · Initech architecture board (live organizer, and to come accepted) · Vendor demo (live, none) · Initech team lunch (accepted) · Globex sponsor update (none) · Acme help desk sync (organizer) · Acme renewal follow-up · Globex weekly (the series one) · Steering prep | Acme budget check (tentative) · Partner planning (not answered) · Initech town hall (declined) · Acme training dry run (not answered) · the second Initech team lunch (tentative) · the second Globex weekly (declined) |
+| Globex office hours · Vendor demo (live, accepted/none) · Initech architecture board (live organizer, and to come accepted) · Vendor demo (live, none) · Initech team lunch (accepted) · Globex sponsor update (none) · Acme help desk sync (organizer) · Acme renewal follow-up · Globex weekly (the series one) · Steering prep · Umbrella pricing review (Zoom) · Globex roadmap chat (Google Meet) | Acme budget check (tentative) · Partner planning (not answered) · Initech town hall (declined) · Acme training dry run (not answered) · the second Initech team lunch (tentative) · the second Globex weekly (declined) |
 
 ## Steps
 
 | # | Action | Expected Result |
 |---|---|---|
-| 1 | Navigate to `{{base_url}}/#calls` and wait for "Acme weekly sync" | The first row of the list is "Coming up today" (`.up-fold`) with the number 11 (`.up-n`) |
+| 1 | Navigate to `{{base_url}}/#calls` and wait for "Acme weekly sync" | The first row of the list is "Coming up today" (`.up-fold`) with the number 13 (`.up-n`) |
 | 2 | Read that row's right side | "Now" and "Globex office hours" (the first meeting already started and not over) |
-| 3 | Click the row "Coming up today" | `aria-expanded` is true; 11 rows with `data-up` appear above the calls |
-| 4 | Count the rows by title | "Vendor demo" 2, "Initech architecture board" 2, "Globex office hours" 1, "Initech team lunch" 1, "Globex sponsor update" 1, "Acme help desk sync" 1, "Acme renewal follow-up" 1, "Globex weekly" 1, "Steering prep" 1 (total 11) |
+| 3 | Click the row "Coming up today" | `aria-expanded` is true; 13 rows with `data-up` appear above the calls |
+| 4 | Count the rows by title | "Vendor demo" 2, "Initech architecture board" 2, "Globex office hours" 1, "Initech team lunch" 1, "Globex sponsor update" 1, "Acme help desk sync" 1, "Acme renewal follow-up" 1, "Globex weekly" 1, "Steering prep" 1, "Umbrella pricing review" 1, "Globex roadmap chat" 1 (total 13) |
 | 5 | Look for "Acme budget check", "Partner planning", "Initech town hall" and "Acme training dry run" | None of them is listed |
 | 6 | Read the row "Initech architecture board" that starts latest (the one to come) | Its meta spans hold the time, "25 min" and "Alex Chen, Priya Nair +1"; no thread icon |
 | 7 | Read the row "Globex office hours" | Its meta holds the time, "30 min", "Kim Park", and a thread icon (Globex pilot) |
-| 8 | Read the `title` of every row | "Prep ready" for "Globex sponsor update" only; "No prep yet" for the other ten |
+| 8 | Read the `title` of every row | "Prep ready" for "Globex sponsor update" only; "No prep yet" for the other twelve |
 
 ## Expected Final State
-Coming up today is unfolded with 11 rows.
+Coming up today is unfolded with 13 rows.
 
 ## Teardown
 - Click "Coming up today" to fold it again

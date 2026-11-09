@@ -13,8 +13,8 @@
   },
   {
    "axis": "meeting.flags",
-   "values": "online (join link) or not; cancelled; declined; no_notetakers; all-day",
-   "where": "`calendar.rs` event fields"
+   "values": "online (join link) or not; the link's app: Teams / Zoom / Google Meet (a Zoom or Meet link only in the location or body); cancelled; declined; no_notetakers; all-day",
+   "where": "`calendar.rs` event fields, `calendar::join_link`, `apps::MeetingApp`"
   },
   {
    "axis": "meeting.recorded",
@@ -33,7 +33,7 @@
   },
   {
    "axis": "meeting.action",
-   "values": "open-notes / import / scheduled / join / record / none (derived)",
+   "values": "open-notes / other-app (Zoom, Google Meet: not recordable yet) / import / scheduled / join / record / none (derived)",
    "where": "app.js `EVENT_ACTIONS`"
   },
   {
