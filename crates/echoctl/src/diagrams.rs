@@ -35,7 +35,8 @@ static WRITING: Mutex<()> = Mutex::new(());
 /// The `index`-th diagram of `md`, numbered as the page draws them (`minutes::mermaid_blocks`): its source's byte
 /// range and text. None: no such diagram, or one that isn't one piece of the file (inside a quote).
 fn block(md: &str, index: usize) -> Option<(std::ops::Range<usize>, String)> {
-    let b = crate::minutes::mermaid_blocks(md).into_iter().nth(index).filter(|b| b.whole)?;
+    // Empty: nothing to repair, and no place inside it to write a repair to.
+    let b = crate::minutes::mermaid_blocks(md).into_iter().nth(index).filter(|b| b.whole && !b.range.is_empty())?;
     let src = md[b.range.clone()].to_string();
     Some((b.range, src))
 }
@@ -99,6 +100,10 @@ mod tests {
         let quoted = "> ```mermaid\n> flowchart TD\n>   A --> B\n> ```\n\n```mermaid\nD\n```\n";
         assert!(block(quoted, 0).is_none());
         assert_eq!(block(quoted, 1).unwrap().1, "D\n");
+        // An empty one is counted (the page draws and reports it) but never rewritten.
+        let empty = "```mermaid\n```\n\n```mermaid\nE\n```\n";
+        assert!(block(empty, 0).is_none());
+        assert_eq!(block(empty, 1).unwrap().1, "E\n");
     }
 
     #[test]
