@@ -24,7 +24,7 @@ external_id: TC-REC-008
 |---|--------|----------------|
 | 1 | Record a call on the laptop speakers, the other person talking a lot; a minute in, say a short "yes" while they talk, and once talk over them for a sentence | — |
 | 2 | Read the transcript | Their words are not repeated as Me lines; your "yes" and the sentence you said over them are there as Me |
-| 3 | `grep -E '^  echo' <data folder>/.echo/app.log` | "echo found N s into the call: D ms, gain G, r R …" (N about 30–90 s after they started talking) and "echo: D ms, gain G, r R; skipped S s of the mic", S above 0; no "echo cancellation: on" after them (the mic isn't decoded a second time) |
+| 3 | `grep -E '^  echo' <data folder>/.echo/app.log` | "echo found N s into the call: D ms, gain G, r R …" (N about 45–105 s after they started talking) and "echo: D ms, gain G, r R; skipped S s of the mic", S above 0; no "echo cancellation: on" after them (the mic isn't decoded a second time) unless an "echo changed during the call" line says the volume or device changed |
 
 ## Expected Final State
 The speakers' sound is kept out of your track: found during the call and not transcribed, while your own words are.

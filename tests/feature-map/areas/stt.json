@@ -59,7 +59,7 @@
   },
   {
    "id": "F-STT-07",
-   "feature": "On speakers the mic's echo of the others is found during the call (once they have talked about 30 s) and the stretches of the mic it explains along their whole length aren't transcribed; the user's own words, a short word inside the echo or talking over the others, are; the app's log says the delay, gain, correlation and seconds skipped; found and skipped, nothing is decoded again at the end, otherwise the call's echo cancellation decodes the mic again at the end as before",
+   "feature": "On speakers the mic's echo of the others is found during the call (once they have talked about 30 s, two looks 15 s apart agreeing) and the stretches of the mic it explains along their whole length aren't transcribed; the user's own words, a short word inside the echo or talking over the others, are; the app's log says the delay, gain, correlation and seconds skipped; found and skipped, and the same echo in the call's last minutes, nothing is decoded again at the end, otherwise the call's echo cancellation decodes the mic again at the end as before",
    "priority": "high",
    "check": "agent",
    "axes": [

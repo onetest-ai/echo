@@ -23,6 +23,9 @@ const MAX_LAG_FRAMES: usize = 14; // ~420 ms
 const ECHO_CORRELATION: f32 = 0.35;
 /// The remote side talks in a frame at least this loud against its loud frames (−20 dB of the 99th percentile).
 const TALK_FLOOR: f32 = 0.1;
+/// Least gain taken as an echo (−26 dB): fainter, cancelling it changes nothing worth a decode, and a chance
+/// correlation on headphones comes with a gain about this small.
+const MIN_GAIN: f32 = 0.05;
 /// Least remote talk (in frames) to decide on: 5 s.
 const MIN_TALK: usize = 5000 / 30;
 
@@ -79,6 +82,11 @@ impl Echo {
     pub fn delay_ms(&self) -> i32 {
         (self.lag * ENV * 1000 / RATE as usize) as i32
     }
+
+    /// The same echo as `other`: its delay within a frame, its gain within `TOLERANCE` (what `keep` allows).
+    pub fn same_as(&self, other: &Echo) -> bool {
+        self.lag.abs_diff(other.lag) <= 1 && (1.0 / TOLERANCE..=TOLERANCE).contains(&(self.gain / other.gain))
+    }
 }
 
 /// Does the mic carry the remote track's echo? From the two envelopes, with at least `min_talk` frames of the other
@@ -98,7 +106,7 @@ pub(crate) fn find(em: &[f32], er: &[f32], min_talk: usize) -> Option<Echo> {
         .filter(|&i| i + first.lag < em.len() && em[i + first.lag] <= MARGIN * first.gain * er[i.saturating_sub(3)..(i + 2).min(er.len())].iter().copied().fold(0.0, f32::max))
         .collect();
     let e = if quiet.len() >= MIN_TALK { best_lag(em, er, &quiet)? } else { first };
-    (e.r >= ECHO_CORRELATION).then_some(e)
+    (e.r >= ECHO_CORRELATION && e.gain >= MIN_GAIN).then_some(e)
 }
 
 /// The lag at which the mic's envelope follows the remote's best over the remote's `frames`, how closely, and the
@@ -128,6 +136,9 @@ const BRIDGE: usize = 27;
 const MIN_VOICED: usize = 10;
 const ECHO_STRETCH_R: f32 = 0.5;
 const TOLERANCE: f32 = 1.2;
+/// This many voiced frames in a row (90 ms) louder than the echo's band are the user's voice, even under `MARGIN`: a
+/// word said at the echo's level. Only isolated frames go to the `is_echo` allowance.
+const RUN: usize = 3;
 /// The speech floor is taken over the last 60 s of the mic, as `transcribe::utterances` takes it over its buffer.
 const FLOOR_WINDOW: usize = 2000;
 
@@ -154,8 +165,20 @@ impl Echo {
             let c = i as isize - self.lag as isize;
             (c - 3..=c + 1).filter(|&j| j >= 0 && (j as usize) < er.len()).map(|j| er[j as usize]).fold(0.0, f32::max)
         };
+        // Over the echo's band (`is_echo`'s) for `RUN` frames in a row: the user's voice too.
+        let over: Vec<bool> = (from..to).map(|i| em[i] > floor / 2.0 && em[i] > self.band(er, i).1).collect();
+        let in_run = |k: usize| {
+            let (mut a, mut b) = (k, k);
+            while a > 0 && over[a - 1] {
+                a -= 1;
+            }
+            while b + 1 < over.len() && over[b + 1] {
+                b += 1;
+            }
+            over[k] && b + 1 - a >= RUN
+        };
         let mut own: Vec<(usize, usize)> = vec![];
-        for i in (from..to).filter(|&i| em[i] > floor && em[i] > MARGIN * self.gain * heard(i)) {
+        for i in (from..to).filter(|&i| (em[i] > floor && em[i] > MARGIN * self.gain * heard(i)) || in_run(i - from)) {
             let (a, b) = (i.saturating_sub(PAD).max(from), (i + 1 + PAD).min(to));
             match own.last_mut() {
                 Some(last) if a <= last.1 + BRIDGE => last.1 = b,
@@ -185,19 +208,27 @@ impl Echo {
     /// user's own as quiet as the echo can follow the remote's envelope by chance over a short stretch, but not its
     /// loudness.
     fn is_echo(&self, em: &[f32], er: &[f32], a: usize, b: usize, floor: f32) -> bool {
-        let at = |i: usize| i.checked_sub(self.lag).map_or(0.0, |j| er[j]);
+        let at = |i: usize| self.at(er, i);
         let (m, r): (Vec<f32>, Vec<f32>) = (a..b).filter(|&i| em[i] > floor).map(|i| (em[i], at(i))).unzip();
         if m.len() < MIN_VOICED || correlation(&m, &r) < ECHO_STRETCH_R {
             return false;
         }
-        // The delay falls between two frames: the echo lies between the remote's frames around it (× gain).
-        let band = |i: usize| {
-            let r = [at(i.saturating_sub(1)), at(i), at(i + 1)];
-            (self.gain * r.iter().copied().fold(f32::MAX, f32::min) / TOLERANCE, self.gain * r.iter().copied().fold(0.0, f32::max) * TOLERANCE)
-        };
+        let band = |i: usize| self.band(er, i);
         let due: Vec<usize> = (a..b).filter(|&i| em[i] > floor || band(i).1 > floor * TOLERANCE).collect();
         let fit = due.iter().filter(|&&i| (band(i).0..=band(i).1).contains(&em[i])).count();
         fit * 10 >= due.len() * 9
+    }
+
+    /// The remote's loudness that mic frame `i` hears as echo (0 before the delay).
+    fn at(&self, er: &[f32], i: usize) -> f32 {
+        i.checked_sub(self.lag).and_then(|j| er.get(j)).copied().unwrap_or(0.0)
+    }
+
+    /// How loud the echo in mic frame `i` can be, (least, most): the delay falls between two frames, so between the
+    /// remote's frames around it × gain, `TOLERANCE` either way.
+    fn band(&self, er: &[f32], i: usize) -> (f32, f32) {
+        let r = [self.at(er, i.saturating_sub(1)), self.at(er, i), self.at(er, i + 1)];
+        (self.gain * r.iter().copied().fold(f32::MAX, f32::min) / TOLERANCE, self.gain * r.iter().copied().fold(0.0, f32::max) * TOLERANCE)
     }
 }
 
@@ -371,6 +402,8 @@ mod tests {
         assert!((30..=60).contains(&e.delay_ms()) && (0.3..0.45).contains(&e.gain) && e.r > 0.8, "{e:?}");
         let e = detect(&with_echo(&user, &remote, 0.2, 1920), &remote).expect("a 0.2× echo at 120 ms is found");
         assert!((90..=150).contains(&e.delay_ms()) && (0.15..0.3).contains(&e.gain), "{e:?}");
+        // Fainter than `MIN_GAIN` (an OS echo canceller's leftover): cancelling it would change nothing.
+        assert_eq!(detect(&with_echo(&user, &remote, 0.03, 640), &remote), None);
         // Too little of the other side to decide on: no decision.
         let short = RATE as usize * 4;
         assert_eq!(detect(&with_echo(&user[..short], &remote[..short], 0.35, 640), &remote[..short]), None);
@@ -464,6 +497,33 @@ mod tests {
         assert!(keep.iter().any(|&(a, b)| a <= yes_from && b >= yes_to), "the word is kept: {keep:?}");
         let kept: usize = keep.iter().map(|(a, b)| b - a).sum();
         assert!((kept as f32) < 1.5 * FPS, "only around the word: {kept} frames of {}", em.len());
+    }
+
+    #[test]
+    fn a_word_said_at_the_echos_level_inside_a_long_echo_is_transcribed() {
+        // A quiet "yes" no louder than the echo (#250 review): over the echo's band for its whole 300 ms, though
+        // under `MARGIN`, and too short to fail `is_echo`'s nine frames in ten on its own.
+        let (remote, mic) = echo_turn(10);
+        let echo: Vec<f32> = with_echo(&vec![0.0; remote.len()], &remote, 0.35, 640);
+        let er = envelope(&remote);
+        for level in [1.0f32, 1.5] {
+            for k in 0..30u32 {
+                let at = 2.0 + k as f32 * 0.25;
+                let (a, b) = ((at * RATE as f32) as usize, ((at + 0.3) * RATE as f32) as usize);
+                // The word: as loud as `level` × the echo there, not correlated with it.
+                let mut x = k + 1;
+                let mut said = mic.clone();
+                for i in a..b {
+                    x = x.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                    said[i] += level * echo[i] * if x >> 31 == 0 { 1.0 } else { -1.0 };
+                }
+                let keep = ECHO.keep(&envelope(&said), &er, 0, er.len());
+                let (wa, wb) = (a / ENV + 1, b / ENV - 1);
+                assert!(keep.iter().any(|&(p, q)| p <= wa && q >= wb), "{level}× at {at} s is kept: {keep:?}");
+                let kept: usize = keep.iter().map(|(p, q)| q - p).sum();
+                assert!((kept as f32) < 1.5 * FPS, "{level}× at {at} s: only around the word, {kept} frames");
+            }
+        }
     }
 
     #[test]
