@@ -27,7 +27,7 @@ tags: [calls, tabs]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Navigate to `{{base_url}}/#calls` and click "Acme weekly sync" | It opens on "Minutes" (`aria-selected="true"`); the tabs are "Minutes" and "Transcript" only (no Prep, Chat or Screens) |
+| 1 | Navigate to `{{base_url}}/#calls` and click "Acme weekly sync" | A call may already be open (a full load opens the newest; a hash change keeps the last one open: app_profile.md, Calls); after the click Acme weekly sync opens on "Minutes" (`aria-selected="true"`); the tabs are "Minutes" and "Transcript" only (no Prep, Chat or Screens) |
 | 2 | Click the tab "Transcript" | The URL ends `/transcript`; its five turns are shown |
 | 3 | Click "Initech planning" in the list | It opens on "Transcript" (the last tab stays); two turns are shown |
 | 4 | Click the tab "Minutes" | "No minutes yet" is shown |

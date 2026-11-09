@@ -35,7 +35,7 @@ tags: [people, map]
 | 1 | Navigate to `{{base_url}}/#project/people-lab/people` | The Map has four quadrants "Keep satisfied", "Manage closely", "Monitor", "Keep informed"; a tray "NOT PLACED YET" holds the chip "Dana Lee" |
 | 2 | Drag the chip "Dana Lee" (`[data-pp-drag="dana@acme.example"]`) onto the quadrant "Manage closely" (`[data-pp-drop="3/3"]`). Wait up to 3 s after an action for the window to redraw before reading. | The chip sits in "Manage closely"; the tray is gone |
 | 3 | Run `echoctl project people people-lab` | Dana Lee's `places` entry for `people-lab` has `"influence": 3` and `"interest": 3` |
-| 4 | Drag the chip onto the tray (`[data-pp-drop="tray"]`) — if no tray is shown, drag it onto "Monitor" (`[data-pp-drop="1/1"]`) | The chip is in "Monitor" (low influence, low interest) |
+| 4 | Drag the chip onto "Monitor" (`[data-pp-drop="1/1"]`); there is no tray to drag it back to (the tray shows only while someone in the thread is not placed) | The chip is in "Monitor" (low influence, low interest) |
 
 ## Expected Final State
 Dana Lee is placed in Monitor.

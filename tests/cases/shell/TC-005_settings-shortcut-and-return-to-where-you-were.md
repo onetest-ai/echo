@@ -26,7 +26,7 @@ tags: [shell, keyboard]
 | 1 | Navigate to `{{base_url}}/#calls`, click the row "Acme weekly sync" (`[data-call$="acme-weekly-sync"]`) | The URL hash is `#call/<folder>/minutes` with a folder ending `-acme-weekly-sync` |
 | 2 | Press `ControlOrMeta+1` | The hash is `#today` |
 | 3 | Press `ControlOrMeta+2` | The hash is again `#call/<folder>/minutes` (the call, not the bare list) |
-| 4 | Press `ControlOrMeta+,` | The hash is `#settings/general`; the heading "General" shows |
+| 4 | Press `ControlOrMeta+,` | The hash is `#settings/general`; the settings page shows the heading "General" (`h2`, as written, not upper-cased) with the line "Start at login and the command line are this computer’s, …" under it |
 | 5 | Click "Recording" in the left list, press `ControlOrMeta+1`, then `ControlOrMeta+,` | The hash is `#settings/recording` |
 
 ## Expected Final State

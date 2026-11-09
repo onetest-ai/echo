@@ -30,13 +30,13 @@ tags: [tasks, claude]
 | # | Action | Expected Result |
 |---|--------|----------------|
 | 1 | Navigate to `{{base_url}}/#tasks` and wait for the text "I owe" | "I owe" lists "Write the follow-up mail to Acme" |
-| 2 | Click that card, then "Send to Claude" (`[aria-label="Send to Claude"]`) in the Details | A dialog (`role=dialog`) with the heading "Claude", the thread "Acme rollout" and the task title; buttons "Work on it" and "Cancel"; no "Yolo" button (it is from Today only) |
+| 2 | Click that card, then the Details' button "Send to" with the Claude mark (its visible text is "Send to"; its accessible name is "Send to Claude": `getByRole('button', {name: 'Send to Claude'})` or `[aria-label="Send to Claude"]`) | A dialog (`role=dialog`) with the heading "Claude", the thread "Acme rollout" and the task title; buttons "Work on it" and "Cancel"; no "Yolo" button (it is from Today only) |
 | 3 | Read the skill field | A skill is already chosen: its description starts "Use when a task is to write a follow-up mail"; a cross with the label "No skill — just the task" |
 | 4 | Click the cross | The field is now an input with the placeholder "Just the task — or type to find a skill (1)" |
-| 5 | Click the input | A list opens with the skill and the mark "fits best" |
+| 5 | Read the list under the input (the cross's click opened it; click the input if it is closed) | The list shows the skill with the mark "fits best" |
 | 6 | Press Escape, read the dialog, click the skill field, press Escape, then press Escape again | After the first Escape: the dialog is still open, the list folded (no "fits best"); the click opens the list again; the next Escape folds it, and the last one closes the dialog: no dialog; nothing was sent (the panel "Claude" at the bottom is not opened) (#108) |
-| 7 | Click "Send to Claude" again and click "Cancel" | The dialog closes |
-| 8 | Click "Send to Claude" again, then navigate to `{{base_url}}/#today` | Today shows with no dialog (no `role=dialog`) over it (#108) |
+| 7 | Click the "Send to" button (`[aria-label="Send to Claude"]`) again and click "Cancel" | The dialog closes |
+| 8 | Click the "Send to" button (`[aria-label="Send to Claude"]`) again, then navigate to `{{base_url}}/#today` | Today shows with no dialog (no `role=dialog`) over it (#108) |
 
 ## Expected Final State
 The dialog was opened three times and closed by Escape, Cancel and leaving the view; no Claude session was started.

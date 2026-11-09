@@ -30,7 +30,7 @@ tags: [tasks, piles]
 |---|--------|----------------|
 | 1 | Navigate to `{{base_url}}/#tasks` and wait for the text "I owe" | "I owe 2" |
 | 2 | Read the pile headings | "Owed to me 1"; "Waiting for others 0"; "Nobody named 0" |
-| 3 | Read the card in "Owed to me" | "Answer the security questionnaire", the owner "Omar Haddad", the thread "Acme rollout", a date marked "Overdue" |
+| 3 | Read the card under the heading "Owed to me 1" (the column whose heading reads "Owed to me") | One card: "Answer the security questionnaire", the owner "Omar Haddad", the thread "Acme rollout", a date marked "Overdue" |
 | 4 | Look below the piles | No "Others" button (the task left that pile) |
 | 5 | Run `echoctl project tasks` | `piles.owed` holds "Answer the security questionnaire" with `late: true`; `piles.others` is empty |
 

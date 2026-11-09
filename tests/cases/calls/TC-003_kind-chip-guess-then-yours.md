@@ -30,10 +30,10 @@ tags: [calls, type]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Navigate to `{{base_url}}/#calls` and click "Acme weekly sync" | In the header the chip "Client ▾" (`select[aria-label="Kind of meeting"]`) has the class `guess` (dashed) and the tooltip "Guessed from who was invited — the minutes settle it" |
+| 1 | Navigate to `{{base_url}}/#calls` and click "Acme weekly sync" | In the header the chip "Client ▾" (`select[aria-label="Kind of meeting"]`, in the label `label.mt-chip`) is dashed: the label has the class `guess` and the tooltip "Guessed from who was invited — the minutes settle it" |
 | 2 | Read the select's options | "Client", "Partner", "1:1", "Internal", "Industry & Analyst", "Other" |
 | 3 | Select "Partner" (`browser_select_option`) | The chip reads "Partner ▾", is no longer dashed, and its tooltip is "You set this" |
-| 4 | Navigate to `{{base_url}}/` (a reload) and open "Acme weekly sync" again | The chip still reads "Partner ▾" with the tooltip "You set this" |
+| 4 | Navigate to `{{base_url}}/` (a full load: it lands on Today, the URL with no hash), then navigate to `{{base_url}}/#calls` and click the row "Acme weekly sync" (`[data-call$="acme-weekly-sync"]`) | The chip still reads "Partner ▾" with the tooltip "You set this" |
 | 5 | Open "Initech planning" | Its chip reads "1:1 ▾" and is dashed (still a guess) |
 
 ## Expected Final State

@@ -23,7 +23,7 @@ tags: [settings, search]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Navigate to `{{base_url}}/#settings/general` | The left list shows 12 sections |
+| 1 | Navigate to `{{base_url}}/#settings/general` | The left list (`.set-nav`) shows 12 sections (count them there: the top bar's account chip also carries `data-setsec`) |
 | 2 | Type `keep audio` in "Search settings" | The left list shows only "Transcription"; the page shows Transcription, its row "Keep audio files" picked out (`.set-row.hit`) and no other row picked out |
 | 3 | Clear "Search settings" | The left list shows all 12 sections again; the page shows General, no row picked out |
 | 4 | Type `calendar` in "Search settings" | The left list shows "Recording" and "Calendar & chat", in that order; the page shows Recording with "Calendar meetings" picked out |

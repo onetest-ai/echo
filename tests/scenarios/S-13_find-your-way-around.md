@@ -51,7 +51,7 @@ cases:
 | 4 | `shell/TC-004_number-shortcuts-open-the-activities.md` | — | On stage 3's view (`#today`): in step 1 skip the navigation, press `ControlOrMeta+2` |
 | 5 | `shell/TC-011_inbox-button-shows-and-hides-the-right-panel.md` | — | On stage 4's view (`#today` after its `ControlOrMeta+1`): skip step 1's navigation, look for "Close the panel" |
 | 6 | `shell/TC-012_right-panel-starts-closed-and-keeps-its-last-tab.md` | — | On stage 5's view (`#today`, the panel closed): in step 1 skip the navigation, click "Inbox", then the tab "Vocabulary". In its teardown only click "Close the panel": the layout is reset once, by stage 9 |
-| 7 | `shell/TC-013_a-panel-view-moves-to-the-bottom-panel.md` | — | On stage 6's view (`#today`, the panel closed): in step 1 skip the navigation, click "Inbox". In its teardown only click "Close the panel": the layout is reset once, by stage 9 |
+| 7 | `shell/TC-013_a-panel-view-moves-to-the-bottom-panel.md` | — | On stage 6's view (`#today`, the panel closed): in step 1 skip the navigation, click "Inbox". In its teardown only click the right panel's "Close the panel" (`[data-panel-toggle="right"]`; the bottom panel stays open on "Claude" and has its own): the layout is reset once, by stage 9 |
 | 8 | `settings/TC-023_layout-move-vocabulary-to-bottom.md` | — | Skip its teardown: keep Vocabulary in the bottom panel for stage 9 |
 | 9 | `settings/TC-024_layout-reset-puts-views-back.md` | 8 | On stage 8's view (`#settings/layout`, "Bottom" pressed in the row "Vocabulary"): skip step 1, check its expected result on one snapshot; go on with step 2 |
 | 10 | `shell/TC-010_palette-greys-out-what-cannot-run-and-says-why.md` | — | — |

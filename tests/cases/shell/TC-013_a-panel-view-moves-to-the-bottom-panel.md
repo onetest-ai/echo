@@ -35,4 +35,4 @@ tags: [shell, panels, layout]
 Inbox is back in the right panel.
 
 ## Teardown
-- Click "Close the panel"; Navigate to `{{base_url}}/#settings/layout` and click "Reset" in the card "Reset the layout".
+- Click the right panel's "Close the panel" (`[data-panel-toggle="right"]`: the bottom panel has its own "Close the panel" and stays open on its tab "Claude" after the move back); Navigate to `{{base_url}}/#settings/layout` and click "Reset" in the card "Reset the layout".
