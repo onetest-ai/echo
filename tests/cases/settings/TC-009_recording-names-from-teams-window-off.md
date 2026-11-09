@@ -1,6 +1,6 @@
 ---
 id: TC-009
-title: Recording: Names from the Teams window off is saved to config.json
+title: Recording: Read the Teams window off is saved to config.json, and the row says what it costs
 priority: medium
 type: functional
 requirements: [F-SET-08, F-SET-03]
@@ -10,7 +10,7 @@ platform: any
 tags: [settings, recording]
 ---
 
-# TC-009: Recording: Names from the Teams window off is saved to config.json
+# TC-009: Recording: Read the Teams window off is saved to config.json, and the row says what it costs
 
 **Module:** Settings | **Priority:** Medium | **Type:** Functional
 
@@ -25,15 +25,16 @@ tags: [settings, recording]
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Navigate to `{{base_url}}/#settings/recording`; read the switch "Names from the Teams window" | It is on |
+| 1 | Navigate to `{{base_url}}/#settings/recording`; read the row "Read the Teams window" | Its switch is on; its text names who is speaking, mute sync and the call's name, says Teams answers every read itself ("about 10–20% of its CPU") and that calls are still recorded and transcribed; the row "Shared screens" says it reads Teams' window too, apart from this switch |
 | 2 | Click it | It is off |
 | 3 | Wait 1 s, run `. <dir>/env && grep -n '"capture_ui"' "$ECHOCTL_HOME/.echo/config.json"` | Prints `"capture_ui": false,` |
 
 ## Expected Final State
-Names from the Teams window is off in the page and in `config.json`.
+Read the Teams window is off in the page and in `config.json`.
 
 ## Teardown
 - Click the switch so it is on again.
 
 ## Notes
 - "Shared screens" is not pressed on purpose: switching it on asks macOS for Screen Recording.
+- What the switch turns off during a call (names, mute sync, the same-call check by Teams' timer, the call's name) is in the Rust test `config::tests::the_call_window_is_read_only_when_allowed_and_never_for_a_call_fed_from_files`; a call fed from files never reads the real Teams window, whatever the switch says.

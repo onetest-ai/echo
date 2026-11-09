@@ -102,8 +102,9 @@ pub struct Config {
     /// The user (name/email) — splits attendees into colleagues vs external in notes.
     #[serde(default)]
     pub me: Option<crate::meeting::Person>,
-    /// Record the call app's window text during calls (`<call>/ui.jsonl`, macOS Accessibility),
-    /// used to name remote speakers. Default on (when Accessibility is granted).
+    /// Read the call app's window during calls (Accessibility): who speaks (`<call>/ui.jsonl`), mute sync, the call's
+    /// name and when it began. Off: Echo doesn't touch the call app's window at all (Teams answers every read itself,
+    /// on its own CPU); shared-screen snapshots keep their own switch. Default on (when Accessibility is granted).
     #[serde(default)]
     pub capture_ui: Option<bool>,
     /// Read the meeting's Teams chat during calls (`<call>/chat.json`, needs the Microsoft 365
@@ -232,9 +233,37 @@ impl Config {
     }
 }
 
+/// The user lets Echo read the call app's window (`Config::capture_ui`, default on): names, mute sync, the call's
+/// name. Off, the call watcher doesn't touch the call app's window at all.
+pub fn reads_call_window() -> bool {
+    !fed_from_files() && Config::load().map(|c| c.capture_ui.unwrap_or(true)).unwrap_or(true)
+}
+
+/// A call fed from files (debug builds' test feed, `ECHOCTL_TEST_CALL_FILE`) has no window: the real call app on this
+/// computer is never read or captured for it (test data must never hold the user's own screens and names).
+pub fn fed_from_files() -> bool {
+    cfg!(debug_assertions) && std::env::var_os("ECHOCTL_TEST_CALL_FILE").is_some()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_call_window_is_read_only_when_allowed_and_never_for_a_call_fed_from_files() {
+        let (_env, _root) = crate::paths::testenv::folders("config-call-window");
+        assert!(reads_call_window(), "on by default");
+        let mut c = Config::load().unwrap();
+        c.capture_ui = Some(false);
+        c.save().unwrap();
+        assert!(!reads_call_window(), "the user turned it off");
+        c.capture_ui = Some(true);
+        c.save().unwrap();
+        std::env::set_var("ECHOCTL_TEST_CALL_FILE", "/tmp/in-call");
+        let fed = (reads_call_window(), fed_from_files());
+        std::env::remove_var("ECHOCTL_TEST_CALL_FILE");
+        assert_eq!(fed, (false, true), "a test call never reads the real Teams window, nor captures its screens");
+    }
 
     #[test]
     fn automatic_minutes_count_from_when_they_were_turned_on() {

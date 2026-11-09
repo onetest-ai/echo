@@ -203,9 +203,9 @@ const SETTINGS_BODY = {
       ]) +
       setCard('During a call', [
         setRow("Follow Teams' mute", "Your track records silence while you're muted in Teams.", sw('follow_app_mute', st.follow_app_mute, "Follow Teams' mute")),
-        setRow('Names from the Teams window', 'Who is speaking, read from the call window (Accessibility).', sw('capture_ui', st.capture_ui, 'Names from the Teams window')),
+        setRow('Read the Teams window', "Who is speaking, mute sync and the call's name, read from Teams' call window (Accessibility). Teams answers every read itself: on a slower computer, turn it off to give Teams back about 10–20% of its CPU. Calls are still recorded and transcribed, as you and the others.", sw('capture_ui', st.capture_ui, 'Read the Teams window')),
         setRow('Meeting chat', "The meeting's Teams chat, with Microsoft 365 connected.", sw('capture_chat', st.capture_chat, 'Meeting chat')),
-        setRow('Shared screens', `Key frames while someone else shares (needs Screen Recording).${frames}`, sw('capture_frames', st.capture_frames, 'Shared screens')),
+        setRow('Shared screens', `Key frames while someone else shares (needs Screen Recording; it reads Teams' window too, apart from the switch above).${frames}`, sw('capture_frames', st.capture_frames, 'Shared screens')),
       ])
   },
   transcription(st) {
