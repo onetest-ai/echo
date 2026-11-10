@@ -38,7 +38,7 @@ tags: [prep, people]
 | 1 | Navigate to `{{base_url}}/#calls` and wait for "Acme weekly sync", click "Coming up today" and then the row "Globex weekly" | The header "Globex weekly"; the date line ends with "4 yes · 2 maybe · 2 no answer · 1 declined" |
 | 2 | Read the names under the date line | In this order: "Kim Park" (bold, Organiser), "Noor Aziz" (Tentative), "Mia Long" (Accepted), "Joel Brandt" (Accepted), "Ines Duarte" (Tentative), "Paul Weber" (No answer yet), "Sara Lind" (Accepted), then "+2 more". Each of the five guests has the tag "new"; Kim Park and Noor Aziz have none |
 | 3 | Hover "Kim Park" | A card: "Kim Park · Organiser", "sponsor", "Influence high · interest high · 3 calls together" |
-| 4 | Hover "+2 more" | A list headed "2 more": "Theo Grant" (No answer yet, "new", "first call"), a line, then "Lena Vogel" struck through (Declined) |
+| 4 | Hover "+2 more" | A list headed "2 more": "Theo Grant" (No answer yet, "new", "first call"), a line, then "Lena Vogel" struck through (Declined, "first call": anyone with no calls yet says so) |
 | 5 | Click "Globex sponsor update" in Coming up today | Its prep reads in one column: In short, Expected from you, Last time, Open with these people, New since then, then "Written HH:MM · sonnet" and "Write it again"; no heading "Who's coming" anywhere |
 
 ## Expected Final State

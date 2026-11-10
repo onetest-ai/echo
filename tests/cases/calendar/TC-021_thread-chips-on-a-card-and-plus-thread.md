@@ -36,7 +36,7 @@ tags: [calendar, card, threads]
 | 1 | Navigate to `{{base_url}}/#calendar/day` and wait for "Day", click the block `[data-ev="ev-pinned"]` (Steering prep) | The chip "Acme rollout" (title "added by hand") with a × (`aria-label="Take it out of Acme rollout"`) and the button "+ Thread" |
 | 2 | Click the block `[data-ev="ev-globex-weekly"]` (Globex weekly, to come 37 minutes after the build), then `[data-ev="ev-renewal-call"]` (Acme renewal follow-up) | Chips "Globex pilot" (title "the client's people") and "Acme renewal" (title "its subject"), neither with a × |
 | 3 | Click the block `[data-ev="ev-acme-sync"]` (Acme weekly sync) | The chip "Acme rollout" (title "its meeting series") with no × and no "+ Thread" button |
-| 4 | Click the block `[data-ev="ev-m01"]` (Acme design review), then "+ Thread" | A menu lists the open threads (Acme rollout, Acme renewal, Globex pilot…) and "New thread from this meeting…" (do not choose it) |
+| 4 | Click the block `[data-ev="ev-m01"]` (Acme design review), then "+ Thread" | A menu lists the open threads (Acme rollout, Acme renewal, Globex pilot…), the thread picker "Every occurrence →", and "New thread from this meeting…" (do not choose it) |
 | 5 | Choose "Globex pilot" | The chip "Globex pilot" appears with a × |
 | 6 | Click the × of the chip "Globex pilot" | The chip is gone; the button "+ Thread" remains |
 
