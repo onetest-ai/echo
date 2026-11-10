@@ -20,7 +20,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::{Datelike, Duration, Local, NaiveDate, Weekday};
@@ -28,6 +28,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::calls;
+use crate::evidence::{call_item, render_md};
 
 const STATUS: [&str; 9] = ["held", "done", "progress", "blocked", "cancelled", "reopen", "due", "delayed", "reassign"];
 const VERIFIED_OPS: [&str; 4] = ["ac_met", "link", "waiting", "answer"];
@@ -396,87 +397,6 @@ pub fn quote_in(project: &str, evid: &str, quote: &str) -> Result<Option<Value>>
     let turn = item["turns"].as_array().into_iter().flatten().find(|t| norm(t["text"].as_str().unwrap_or("")).contains(&head));
     Ok(Some(json!({"evidence": evid, "date": item["date"], "call": item["call"], "title": item["title"], "kind": item["kind"], "url": item["url"],
                    "ts": turn.map(|t| t["ts"].clone()), "speaker": turn.map(|t| t["speaker"].clone())})))
-}
-
-fn render_md(x: &Value) -> String {
-    let mut head = vec![format!("# {}", x["title"].as_str().unwrap_or("")), format!("evidence: {} · {} · {}", x["id"].as_str().unwrap_or(""), x["date"].as_str().unwrap_or(""), x["kind"].as_str().unwrap_or(""))];
-    if let Some(p) = x["people"].as_array().filter(|p| !p.is_empty()) {
-        head.push(format!("people: {}", p.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ")));
-    }
-    let mut body: Vec<String> = x["turns"].as_array().map(|a| a.iter().map(|t| format!("[{}] {}: {}", t["ts"].as_str().unwrap_or(""), t["speaker"].as_str().unwrap_or("?"), t["text"].as_str().unwrap_or(""))).collect()).unwrap_or_default();
-    if let Some(t) = x["text"].as_str().filter(|t| !t.is_empty()) {
-        body.push(t.to_string());
-    }
-    format!("{}\n\n{}\n", head.join("\n"), body.join("\n\n"))
-}
-
-fn clock(secs: f64) -> String {
-    let s = secs.max(0.0) as u64;
-    format!("{:02}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60)
-}
-
-/// A call as an evidence item: its transcript (turns), chat and the user's notes (text). A memo split by thread
-/// (`memo.rs`) gives `thread` only its part: what the user said about another thread never becomes this one's work.
-pub fn call_item(dir: &Path, thread: Option<&str>) -> Option<Value> {
-    let meta = calls::read_json(&dir.join("meta.json"));
-    let started = meta["started_at"].as_str()?.to_string();
-    let date = chrono::DateTime::parse_from_rfc3339(&started).ok()?.with_timezone(&Local).date_naive().to_string();
-    let segs = calls::read_json(&dir.join("segments.json"));
-    // A memo split by thread: this thread's parts only. A thread the split didn't name gets the whole memo only when
-    // the user put it there by hand; one it reaches through its rules gets nothing.
-    let spans = match thread.and_then(|t| crate::memo::parts_for(dir, t).map(|s| (t, s))) {
-        Some((t, s)) if s.is_empty() && !crate::memo::whole_for(dir, t) => return None,
-        Some((_, s)) if !s.is_empty() => Some(s),
-        _ => None,
-    };
-    let within = |s: &Value| {
-        let at = s["start"].as_f64().unwrap_or(0.0);
-        spans.as_ref().is_none_or(|sp| sp.iter().any(|&(a, b)| at >= a && at < b))
-    };
-    let turns: Vec<Value> = segs
-        .as_array()?
-        .iter()
-        .filter(|s| s["text"].as_str().is_some_and(|t| !t.trim().is_empty()) && within(s))
-        .map(|s| {
-            let who = match s["speaker"].as_str() {
-                Some("me") | Some("mic") => "Me".to_string(),
-                _ => s["name"].as_str().unwrap_or("Remote").to_string(),
-            };
-            json!({"ts": clock(s["start"].as_f64().unwrap_or(0.0)), "speaker": who, "text": s["text"].as_str().unwrap_or("").trim()})
-        })
-        .collect();
-    if turns.is_empty() {
-        return None;
-    }
-    let mut text = vec![];
-    if let Some(chat) = calls::read_json(&dir.join("chat.json")).as_array().filter(|c| !c.is_empty()) {
-        text.push("## Chat during the call".to_string());
-        for m in chat {
-            text.push(format!("{}: {}", m["from"].as_str().unwrap_or("?"), m["text"].as_str().unwrap_or("")));
-        }
-    }
-    if let Ok(n) = fs::read_to_string(dir.join(calls::USER_NOTES)) {
-        if !n.trim().is_empty() {
-            text.push(format!("## The user's own notes\n{}", n.trim()));
-        }
-    }
-    let mut people: Vec<String> = vec![];
-    for p in crate::meeting::MeetingContext::load(dir).ok().flatten().map(|m| m.organizer.into_iter().chain(m.attendees).collect::<Vec<_>>()).unwrap_or_default() {
-        let name = p.name.trim().trim_end_matches("(external)").trim().to_string();
-        if !name.is_empty() && !people.contains(&name) {
-            people.push(name);
-        }
-    }
-    let stamp = calls::stamp_of(dir);
-    if crate::memo::is_memo(dir) {
-        text.insert(0, format!("## A memo\nThe user alone, thinking aloud — not a meeting: what they say they will do is theirs (\"Me\") unless \
-                                they name someone.{}", if spans.is_some() { " Only its part about this thread is here." } else { "" }));
-    }
-    Some(json!({
-        "id": stamp, "kind": "meeting", "source": "call", "at": started, "date": date,
-        "title": meta["title"].as_str().unwrap_or(&stamp), "call": dir.file_name().map(|n| n.to_string_lossy().into_owned()),
-        "people": people, "turns": turns, "text": text.join("\n"),
-    }))
 }
 
 // ── the meeting chat between calls ───────────────────────────────────────────────────────────
@@ -1575,11 +1495,14 @@ fn apply_status(x: &mut Node, e: &Value) -> bool {
             }
             x.due_history.push(json!({"due": null, "date": e["date"], "ts": e["ts"], "evidence": e["evidence"], "text": e["due_text"].as_str().unwrap_or("delayed, no new date")}));
         }
+        // A hand-over is one change: if the user set an owner it names, none of it is applied (a Handed over by they set is kept).
         "reassign" => {
-            for k in ["internal_owner", "client_owner", "delegated_by"] {
-                if e[k].is_string() {
-                    set_field(x, k, &e[k], false);
-                }
+            let fields: Vec<_> = ["internal_owner", "client_owner", "delegated_by"].into_iter().filter(|k| e[*k].is_string()).collect();
+            if fields.iter().any(|k| *k != "delegated_by" && pinned(x, k)) {
+                return false;
+            }
+            for k in fields {
+                set_field(x, k, &e[k], false);
             }
         }
         _ => {}
@@ -2846,6 +2769,41 @@ mod tests {
         assert_eq!(t["S001"].depends_on, vec!["T002"]);
         assert_eq!(t["T002"].blocks, vec!["S001"]);
         assert!(verify_prep(&id, false).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_reassign_of_an_owner_the_user_set_is_kept_out_whole() {
+        let (_env, l, id) = setup("ledger-reassign-pinned");
+        let ev = "2026-10-28_110000";
+        apply(&id, ev, &[
+            json!({"op": "create", "ref": "s1", "kind": "story", "parent": "E01", "title": "SSO", "ac": ["a"], "quote": "Then SSO has to land first"}),
+            json!({"op": "create", "kind": "task", "parent": "s1", "title": "SAML config", "type": "action", "internal_owner": "Me", "quote": "I can have the SAML config ready by Friday"}),
+        ]).unwrap();
+        human_event(&id, &json!({"op": "edit", "node": "T001", "set": {"internal_owner": "Alex Chen"}})).unwrap();
+        // A call hands it to someone else: the user's owner stays, and nothing of the reassign is applied.
+        apply(&id, ev, &[json!({"op": "status", "node": "T001", "effect": "reassign", "internal_owner": "Priya Nair", "delegated_by": "Me", "quote": "can you send it this week?"})]).unwrap();
+        let p = verify_prep(&id, false).unwrap();
+        verify_apply(&id, &[json!({"mid": p[0]["mid"], "verdict": "supports"})]).unwrap();
+        let t = fold(&l).unwrap().nodes;
+        assert_eq!((t["T001"].internal_owner.as_deref(), t["T001"].delegated_by.as_deref()), (Some("Alex Chen"), None));
+        assert!(t["T001"].history.iter().any(|h| h["effect"] == "reassign" && h["applied"] == false), "{:?}", t["T001"].history);
+    }
+
+    #[test]
+    fn a_reassign_is_applied_when_the_user_set_no_owner_and_keeps_their_handed_over_by() {
+        let (_env, l, id) = setup("ledger-reassign-free");
+        let ev = "2026-10-28_110000";
+        apply(&id, ev, &[
+            json!({"op": "create", "ref": "s1", "kind": "story", "parent": "E01", "title": "SSO", "ac": ["a"], "quote": "Then SSO has to land first"}),
+            json!({"op": "create", "kind": "task", "parent": "s1", "title": "SAML config", "type": "action", "internal_owner": "Me", "quote": "I can have the SAML config ready by Friday"}),
+        ]).unwrap();
+        human_event(&id, &json!({"op": "edit", "node": "T001", "set": {"delegated_by": "Dana Kowal"}})).unwrap();
+        apply(&id, ev, &[json!({"op": "status", "node": "T001", "effect": "reassign", "internal_owner": "Ravi Mehta", "delegated_by": "Me", "quote": "can you send it this week?"})]).unwrap();
+        let p = verify_prep(&id, false).unwrap();
+        verify_apply(&id, &[json!({"mid": p[0]["mid"], "verdict": "supports"})]).unwrap();
+        let t = fold(&l).unwrap().nodes;
+        assert_eq!((t["T001"].internal_owner.as_deref(), t["T001"].delegated_by.as_deref()), (Some("Ravi Mehta"), Some("Dana Kowal")));
+        assert!(t["T001"].history.iter().any(|h| h["effect"] == "reassign" && h["applied"] == true));
     }
 
     #[test]

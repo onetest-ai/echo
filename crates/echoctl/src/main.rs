@@ -25,6 +25,7 @@ mod frames;
 mod gpu;
 mod graph;
 mod grants;
+mod evidence;
 mod guard;
 mod ledger;
 mod kept_minutes;
