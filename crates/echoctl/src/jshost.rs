@@ -952,21 +952,23 @@ fn widget_store(id: &str, widget: &str, data: Option<&Value>, error: Option<&str
     let f = widgets_file(id);
     let _lock = WIDGETS.lock().unwrap_or_else(|e| e.into_inner());
     let mut all: serde_json::Map<String, Value> = std::fs::read(&f).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-    let at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    // `at`: when its data was given (Today's "from HH:MM"); `asked`: when Echo last asked its provider (or found it
+    // had none), for the next ask; `error`: why the last ask failed, its data kept.
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let mut last = all.get(widget).cloned().unwrap_or_else(|| json!({"data": null}));
     match (data, error) {
+        (_, Some("")) => {
+            last["asked"] = json!(now);
+        }
         (_, Some(e)) => {
-            let mut last = all.get(widget).cloned().unwrap_or_else(|| json!({"data": null}));
             last["error"] = json!(e);
-            last["at"] = json!(at);
-            all.insert(widget.into(), last);
+            last["asked"] = json!(now);
         }
-        (Some(d), None) => {
-            all.insert(widget.into(), json!({"data": d, "at": at}));
-        }
-        (None, None) => {
-            all.insert(widget.into(), json!({"data": null, "at": at}));
+        (d, None) => {
+            last = json!({"data": d.cloned().unwrap_or(Value::Null), "at": now, "asked": now});
         }
     }
+    all.insert(widget.into(), last);
     std::fs::create_dir_all(plugins::data_dir(id))?;
     paths::write_atomic(&f, serde_json::to_string_pretty(&all)?.as_bytes())?;
     Ok(())
@@ -976,7 +978,8 @@ static WIDGETS: Mutex<()> = Mutex::new(());
 /// The widgets being asked now (`plugin:widget`), so a busy Today asks each once at a time.
 static ASKING: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
-/// A widget's last data, when, and its provider's last error: `{data, at, error?}`.
+/// A widget's last data, when it was given, when Echo last asked, and its provider's last error:
+/// `{data, at, asked, error?}`.
 pub fn widget_last(plugin: &str, widget: &str) -> Option<Value> {
     let all: serde_json::Map<String, Value> = std::fs::read(widgets_file(plugin)).ok().and_then(|b| serde_json::from_slice(&b).ok())?;
     all.get(widget).cloned()
@@ -995,18 +998,25 @@ pub fn widget_ask(plugin: &str, widget: &str) {
     }
     let (plugin, widget) = (plugin.to_string(), widget.to_string());
     std::thread::spawn(move || {
-        match call_within(&plugin, &format!("__widget:{widget}"), &json!({}), Duration::from_secs(5)) {
-            Ok(v) => drop(widget_store(&plugin, &widget, Some(&v), None)),
-            // Only `set`: nothing to ask; its data stays as the plugin last gave it (marked asked, so not asked again
-            // before its refresh).
-            Err(e) if e.to_string().contains("no command") => {
-                let last = widget_last(&plugin, &widget).map(|l| l["data"].clone()).unwrap_or(Value::Null);
-                let _ = widget_store(&plugin, &widget, Some(&last), None);
-            }
-            Err(e) => drop(widget_store(&plugin, &widget, None, Some(&format!("{e:#}")))),
-        }
+        widget_ask_now(&plugin, &widget);
         ASKING.lock().unwrap_or_else(|e| e.into_inner()).retain(|k| k != &key);
     });
+}
+
+/// Ask a widget's provider and wait (5 s at most) — `echoctl widget show`, where a plugin's author checks its answer.
+pub fn widget_ask_now(plugin: &str, widget: &str) {
+    match call_within(plugin, &format!("__widget:{widget}"), &json!({}), Duration::from_secs(5)) {
+        // Kept — or, refused (over 64 KB), why, its data before kept.
+        Ok(v) => {
+            if let Err(e) = widget_store(plugin, widget, Some(&v), None) {
+                let _ = widget_store(plugin, widget, None, Some(&format!("{e:#}")));
+            }
+        }
+        // Only `set`: nothing to ask; its data stays as the plugin last gave it, marked asked (not asked again before
+        // its refresh) — under the lock, so a `set` meanwhile isn't overwritten.
+        Err(e) if e.to_string().contains(&format!("no command “__widget:{widget}”")) => drop(widget_store(plugin, widget, None, Some(""))),
+        Err(e) => drop(widget_store(plugin, widget, None, Some(&format!("{e:#}")))),
+    }
 }
 
 // ── the plugins' Inbox items ──

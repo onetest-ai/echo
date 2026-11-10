@@ -22,12 +22,16 @@ pub struct Widget {
     pub sizes: Cow<'static, [&'static str]>,
     pub height: Cow<'static, str>,
     pub temporal: bool,
+    /// A plugin's widget: how often Echo asks its provider again, in seconds (Echo's own: 0, unused).
+    #[serde(skip)]
+    #[cfg_attr(not(feature = "js"), allow(dead_code))]
+    pub refresh: u64,
 }
 
 // One line a widget in the catalog below: its fields in the struct's order.
 #[allow(clippy::too_many_arguments)]
 const fn w(id: &'static str, part: &'static str, label: &'static str, about: &'static str, kind: &'static str, sizes: &'static [&'static str], height: &'static str, temporal: bool) -> Widget {
-    Widget { id: Cow::Borrowed(id), part: Cow::Borrowed(part), label: Cow::Borrowed(label), about: Cow::Borrowed(about), kind: Cow::Borrowed(kind), sizes: Cow::Borrowed(sizes), height: Cow::Borrowed(height), temporal }
+    Widget { id: Cow::Borrowed(id), part: Cow::Borrowed(part), label: Cow::Borrowed(label), about: Cow::Borrowed(about), kind: Cow::Borrowed(kind), sizes: Cow::Borrowed(sizes), height: Cow::Borrowed(height), temporal, refresh: 0 }
 }
 
 /// Echo's own widgets, for what Today shows now. The rest of the agreed set comes with their phases.
@@ -59,6 +63,7 @@ pub fn catalog() -> Vec<Widget> {
                 height: Cow::Owned(d.height),
                 // A plugin's widget is on Today while its plugin has given it something to show.
                 temporal: true,
+                refresh: d.refresh.unwrap_or(60).max(60),
             });
         }
     }
@@ -116,8 +121,8 @@ fn plugin_data(_plugin: &str, _widget: &str, w: &Widget) -> Value {
 #[cfg(feature = "js")]
 fn plugin_data(plugin: &str, widget: &str, w: &Widget) -> Value {
     let last = crate::jshost::widget_last(plugin, widget);
-    let every = crate::plugins::enabled_manifests().into_iter().find(|(p, _)| p == plugin).and_then(|(_, m)| m.widgets.into_iter().find(|d| d.id == widget)).and_then(|d| d.refresh).unwrap_or(60).max(60);
-    let stale = last.as_ref().and_then(|l| l["at"].as_str()).and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()).is_none_or(|t| (chrono::Utc::now() - t.with_timezone(&chrono::Utc)).num_seconds() >= every as i64);
+    let every = w.refresh.max(60);
+    let stale = last.as_ref().and_then(|l| l["asked"].as_str().or_else(|| l["at"].as_str())).and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()).is_none_or(|t| (chrono::Utc::now() - t.with_timezone(&chrono::Utc)).num_seconds() >= every as i64);
     if stale {
         crate::jshost::widget_ask(plugin, widget);
     }
