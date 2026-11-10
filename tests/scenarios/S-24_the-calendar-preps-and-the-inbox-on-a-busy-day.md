@@ -49,6 +49,7 @@ cases:
   - tests/cases/today/TC-021_today-lays-itself-out-by-its-width-and-the-widgets-sizes.md
   - tests/cases/today/TC-022_next-meeting-on-today-at-s-m-and-l.md
   - tests/cases/today/TC-023_your-day-says-where-youll-be-with-a-reason-on-each-line.md
+  - tests/cases/today/TC-024_your-day-as-a-calendar-and-as-a-strip.md
 auto: [tests/auto/specs/S-24.spec.mjs]
 ---
 
@@ -118,6 +119,7 @@ auto: [tests/auto/specs/S-24.spec.mjs]
 | 43 | `today/TC-021_today-lays-itself-out-by-its-width-and-the-widgets-sizes.md` | — | — |
 | 44 | `today/TC-022_next-meeting-on-today-at-s-m-and-l.md` | — | — |
 | 45 | `today/TC-023_your-day-says-where-youll-be-with-a-reason-on-each-line.md` | — | — |
+| 46 | `today/TC-024_your-day-as-a-calendar-and-as-a-strip.md` | — | — |
 
 ## Notes
 - A stage that continues an earlier stage's view ("On stage N's view") takes one snapshot first; if the state is not there (the earlier stage failed before it), it does the skipped steps after all.

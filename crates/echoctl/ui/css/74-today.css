@@ -136,3 +136,29 @@
 .td-meeting { display: block; height: auto; }
 /* Your day's meeting card in the right panel: Calendar's card, laid in the panel rather than floating beside a block. */
 .td-meeting .detail { position: static; inset: auto; width: auto; max-width: none; max-height: none; box-shadow: none; border: 0; border-radius: 0; margin: 0; }
+
+/* Today → Your day as a calendar: the hours down, a block a meeting in its lane (solid going, dashed not sure). */
+.dc-sec { display: flex; flex-direction: column; min-height: 0; }
+.dc-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.dc-grid { position: relative; height: 100%; margin-left: 30px; }
+.dc-h { position: absolute; left: -30px; right: 0; border-top: 1px solid var(--line); }
+.dc-h span { position: absolute; left: 0; top: -7px; font: 10px ui-monospace, 'SF Mono', Menlo, monospace; color: var(--text-3); background: var(--surface); padding-right: 4px; }
+.dc-ev { position: absolute; box-sizing: border-box; border-radius: 5px; padding: 1px 6px; overflow: hidden; font-size: 11.5px; line-height: 14px; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 0 6px; cursor: pointer; background: color-mix(in srgb, var(--accent) 20%, transparent); border-left: 3px solid var(--accent); }
+.dc-ev b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.dc-ev .mono { font-size: 10px; color: var(--text-3); }
+.dc-ev.noreply { background: transparent; border: 1px dashed var(--text-3); }
+.dc-ev.maybe { background: transparent; border: 1px dashed var(--accent); }
+.dc-ev.past { opacity: 0.5; }
+.dc-now { position: absolute; left: -6px; right: 0; border-top: 2px solid var(--recording); z-index: 1; }
+.dc-now::before { content: ''; position: absolute; left: -4px; top: -5px; width: 8px; height: 8px; border-radius: 4px; background: var(--recording); }
+
+/* Today → Your day as a strip: the day in one bar. */
+.ds-sec h2 .set-sub { font-weight: 400; text-transform: none; letter-spacing: 0; margin-left: 6px; }
+.ds-bar { position: relative; height: 28px; border-radius: 6px; background: color-mix(in srgb, var(--text) 5%, transparent); }
+.ds-ev { position: absolute; box-sizing: border-box; border: 1px solid var(--surface); border-radius: 4px; background: var(--accent); cursor: pointer; }
+.ds-ev.maybe { background: transparent; border: 1px dashed var(--accent); }
+.ds-ev.past { opacity: 0.35; }
+.ds-now { position: absolute; top: -3px; bottom: -3px; border-left: 2px solid var(--recording); }
+.ds-ticks { position: relative; height: 14px; font-size: 10px; color: var(--text-3); }
+.ds-ticks span { position: absolute; transform: translateX(-50%); }
+.ds-ticks span:first-child { transform: none; }
