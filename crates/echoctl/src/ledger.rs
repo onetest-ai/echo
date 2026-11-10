@@ -1495,10 +1495,10 @@ fn apply_status(x: &mut Node, e: &Value) -> bool {
             }
             x.due_history.push(json!({"due": null, "date": e["date"], "ts": e["ts"], "evidence": e["evidence"], "text": e["due_text"].as_str().unwrap_or("delayed, no new date")}));
         }
-        // A hand-over is one change: if the user set any of the fields it names, none of it is applied.
+        // A hand-over is one change: if the user set an owner it names, none of it is applied (a Handed over by they set is kept).
         "reassign" => {
             let fields: Vec<_> = ["internal_owner", "client_owner", "delegated_by"].into_iter().filter(|k| e[*k].is_string()).collect();
-            if fields.iter().any(|k| pinned(x, k)) {
+            if fields.iter().any(|k| *k != "delegated_by" && pinned(x, k)) {
                 return false;
             }
             for k in fields {
@@ -2787,6 +2787,23 @@ mod tests {
         let t = fold(&l).unwrap().nodes;
         assert_eq!((t["T001"].internal_owner.as_deref(), t["T001"].delegated_by.as_deref()), (Some("Alex Chen"), None));
         assert!(t["T001"].history.iter().any(|h| h["effect"] == "reassign" && h["applied"] == false), "{:?}", t["T001"].history);
+    }
+
+    #[test]
+    fn a_reassign_is_applied_when_the_user_set_no_owner_and_keeps_their_handed_over_by() {
+        let (_env, l, id) = setup("ledger-reassign-free");
+        let ev = "2026-10-28_110000";
+        apply(&id, ev, &[
+            json!({"op": "create", "ref": "s1", "kind": "story", "parent": "E01", "title": "SSO", "ac": ["a"], "quote": "Then SSO has to land first"}),
+            json!({"op": "create", "kind": "task", "parent": "s1", "title": "SAML config", "type": "action", "internal_owner": "Me", "quote": "I can have the SAML config ready by Friday"}),
+        ]).unwrap();
+        human_event(&id, &json!({"op": "edit", "node": "T001", "set": {"delegated_by": "Dana Kowal"}})).unwrap();
+        apply(&id, ev, &[json!({"op": "status", "node": "T001", "effect": "reassign", "internal_owner": "Ravi Mehta", "delegated_by": "Me", "quote": "can you send it this week?"})]).unwrap();
+        let p = verify_prep(&id, false).unwrap();
+        verify_apply(&id, &[json!({"mid": p[0]["mid"], "verdict": "supports"})]).unwrap();
+        let t = fold(&l).unwrap().nodes;
+        assert_eq!((t["T001"].internal_owner.as_deref(), t["T001"].delegated_by.as_deref()), (Some("Ravi Mehta"), Some("Dana Kowal")));
+        assert!(t["T001"].history.iter().any(|h| h["effect"] == "reassign" && h["applied"] == true));
     }
 
     #[test]

@@ -58,7 +58,6 @@ Acme security review is read into Acme rollout's work through the real Claude Co
 - None (the work keeps what the sync made; later stages must not expect Acme rollout's original tree)
 
 ## Notes
-- Known issue #292: steps 7 and 11 fail for T003 until it is fixed. A reassign whose owner the user set leaves the owner, but changes Handed over by and is recorded `applied: true` ("reassign · Me · verified" instead of "kept yours"). The case asserts the right behaviour.
 - The script skips the skill's dependency pass (a model may find no dependency); its proposals are fixed, so every run checks the same guard refusal, the same pinned fields and the same verdicts.
 - The real-model counterpart (2026-11-07): 4 min 36 s on the network test server, 45 min on this Mac's Ollama; the model skipped the Priya reassignment on its own, so "kept yours" was never exercised there. Outside the ledger only Echo's CLI changes files, as designed: the people pass's `people-apply` writes `projects/people.json` and `projects/acme-rollout/people-suggestions.json`; `ledger/mails.json` records "couldn't read your organisation's domains: mail waits" (no Microsoft 365 on test data).
 - The automatic timing (a thread syncs by itself 15 minutes after its call) is the app's scheduler: not covered here.
