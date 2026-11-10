@@ -18,16 +18,17 @@ tags: [today, widgets, your-day, agenda]
 ## Preconditions
 - Standard data set built right before the run: `tests/fixtures/serve.sh up <dir> <port> --set standard` (a busy day: many meetings at once, some not answered, some maybes); the window served at `{{base_url}}`, `{{base_url}}/` loaded first
 - The browser window 1440 × 1000
+- Step 6 needs a free 45 minutes before 18:00 (where the working day ends for Your day): run it before about 17:00
 
 ## Steps
 
 | # | Action | Expected Result |
 |---|--------|----------------|
-| 1 | Open `{{base_url}}/#today`; read Your day's list "Where you'll be" | A line a place in time order, each: its time, a bar (solid green: going; dashed grey: no reply; dashed violet: maybe), its subject and threads, a reason under it; the first you go to that isn't over says "next" and its time is violet; the line "now" between past and coming; past lines dimmed |
-| 2 | Find a line whose reason says "N others at once" | Its time amber: you accepted two or more meetings at that time (a choice still to make); the others aren't lines of their own |
-| 3 | Find a line whose reason starts "instead of" (if any on this day) | It names one meeting at the same time you haven't answered or marked maybe, and "· N skipped" |
-| 4 | Click "Show N skipped" at the end | The folded meetings appear, dimmed, each saying "skipped"; "Hide the skipped" folds them again |
-| 5 | Find a line "maybe" and one "no reply" | Their bars dashed (violet, grey); neither is ever the next |
+| 1 | Open `{{base_url}}/#today`; read Your day's list "Where you'll be" | A line a place in time order, each: its time, a bar (solid green: going; dashed grey: no reply; dashed violet: maybe), its subject and threads, a reason under it; the line holding the first meeting you go to that isn't over says "next" and its time is violet (the same meeting Next meeting shows, folded into that line or heading it); the line "now" between past and coming; past lines dimmed |
+| 2 | Find a coming line whose reason says "N others at once" and that isn't the next (on standard data a later one, e.g. "Initech architecture board") | Its time amber: you accepted two or more meetings at that time (a choice still to make; once past, or when it is the next — violet wins — it isn't amber); the others aren't lines of their own |
+| 3 | Find a line whose reason starts "instead of" — standard data may have none (the rule is the node test `today-agenda.test.mjs`): then this step is skipped | It names one meeting at the same time you haven't answered or marked maybe, and "· N skipped" |
+| 4 | Click "Show N skipped" at the end | The folded meetings appear in time order, dimmed, each saying "skipped"; "Hide the skipped" folds them again |
+| 5 | Find a meeting you marked maybe and one you haven't answered — on the busy standard day most are folded: open "Show N skipped" | Their bars dashed (violet, grey) — a line of its own says "maybe" / "no reply", a folded one "skipped"; neither is ever the next |
 | 6 | On the small set (`serve.sh up <dir2> <port2>`): read Your day | A line "Send Acme the SSO checklist" with "your work · 1 h" (or "· N min"), its bar dashed green, in the first free gap of 45 minutes or more after now; a click opens the task's Details on the right |
 | 7 | Over a coming meeting's line, click ⋯ | Calendar's menu for it (Record when it starts or Don't record, Prepare / Show prep, Add to a thread…, Copy the Teams link, Show details); Escape or a click elsewhere closes it; a right-click on the line opens the same |
 | 8 | Click the line itself (not a link on it) | The meeting's card on the right ("Meeting"): its time, chips, its one action strip, People — as in Calendar; × closes it |

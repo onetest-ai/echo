@@ -162,3 +162,7 @@
 .ds-ticks { position: relative; height: 14px; font-size: 10px; color: var(--text-3); }
 .ds-ticks span { position: absolute; transform: translateX(-50%); }
 .ds-ticks span:first-child { transform: none; }
+
+/* A list cut by its card: a fade at the bottom while there is more below (todayMoreCue). */
+.td-rows[data-more]::after, .td-tasks[data-more]::after { content: ''; position: sticky; bottom: 0; display: block; flex: none; height: 32px; margin-top: -32px; pointer-events: none; background: linear-gradient(to bottom, transparent, var(--surface)); }
+.td-stale .warn, .td .warn { color: var(--warn); }

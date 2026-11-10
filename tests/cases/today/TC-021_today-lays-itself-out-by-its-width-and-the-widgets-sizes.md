@@ -28,7 +28,8 @@ tags: [today, widgets, layout, responsive]
 | 3 | Close the right panel (its ×) | Back to step 1's widths, nothing moved |
 | 4 | `target/debug/echoctl today size core:tasks.mine M`; reload | My work 2, Your day 2 don't fit 3 columns: the widest first narrows — Your day `1fr`, My work `2fr`, side by side, Your day still first |
 | 5 | Resize the browser window to 700 × 1000 | Today one column: Needs you now, then Your day, then My work, each across, in that order |
-| 6 | Back to 1440 × 1000; `target/debug/echoctl today reset`; reload | As in step 1 |
+| 6 | Back to 1440 × 1000 at 900 px high; `target/debug/echoctl today move core:tasks.mine --before core:needs.now`, `today size core:tasks.mine M`; reload | My work beside Needs you now, its list cut by the card's height: a fade at its bottom shows there is more; scrolled to its end, the fade goes |
+| 7 | `target/debug/echoctl today reset`; reload | As in step 1 |
 
 ## Expected Final State
 Today as it comes.
