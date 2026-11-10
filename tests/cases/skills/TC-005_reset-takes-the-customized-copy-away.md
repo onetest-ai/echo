@@ -8,6 +8,7 @@ module: skills
 run: agent
 platform: any
 tags: [skills]
+auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
 # TC-005: Reset takes the customized copy away and keeps it in the trash

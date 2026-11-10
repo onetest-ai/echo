@@ -130,7 +130,7 @@ function renderNow() {
   patch($('#r-ann'), announcement())
   patch($('#r-dlg'), todayDialogs())
   todayDialogsKeep()
-  patch($('#r-over'), `<div class="toasts" role="status" aria-live="polite">${toasts()}</div>` + (S.lightbox ? `<div class="lightbox" data-close="1"><img src="${esc(S.lightbox)}" alt="Shared screen"></div>` : ''))
+  patch($('#r-over'), `<div class="toasts" role="status" aria-live="polite" aria-label="Notices">${toasts()}</div>` + (S.lightbox ? `<div class="lightbox" data-close="1"><img src="${esc(S.lightbox)}" alt="Shared screen"></div>` : ''))
   // The primary area in the activity's layout; switching layouts starts it afresh.
   const primary = $('#r-primary')
   const layout = (ACTIVITIES.find((a) => a.id === S.view) || ACTIVITIES[0]).layout

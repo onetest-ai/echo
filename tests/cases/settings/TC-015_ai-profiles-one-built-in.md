@@ -8,6 +8,7 @@ module: settings
 run: agent
 platform: any
 tags: [ai, profiles]
+auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
 # TC-015: AI & minutes with only the built-in profile: default, no profile picker anywhere

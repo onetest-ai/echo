@@ -72,6 +72,81 @@ export class SettingsPage extends AppPage {
     return this.select(select).getByRole('option', { name: text, exact: true, selected: true })
   }
 
+  // ── A setting's row (named by its title), AI & minutes' profiles, the account chip's picker ──
+
+  /** A row of a card, by its name ("Account", a speech model, an AI profile). */
+  settingRow(name) {
+    return this.main.getByRole('group', { name, exact: true })
+  }
+
+  /** A card, by its heading ("Profiles"). */
+  card(name) {
+    return this.main.getByRole('region', { name, exact: true })
+  }
+
+  /** A card's heading (level 3), and its rows (named groups). */
+  cardHeading(name) {
+    return this.main.getByRole('heading', { name, level: 3, exact: true })
+  }
+
+  cardRows(name) {
+    return this.card(name).getByRole('group')
+  }
+
+  /** A text of a row, as it reads; one it contains; a button of it, or all of them; a switch of it. */
+  rowSays(row, text) {
+    return row.getByText(text, { exact: true })
+  }
+
+  rowHas(row, text) {
+    return row.getByText(text)
+  }
+
+  rowButton(row, name) {
+    return row.getByRole('button', { name, exact: true })
+  }
+
+  rowButtons(row) {
+    return row.getByRole('button')
+  }
+
+  rowSwitch(row, name) {
+    return row.getByRole('switch', { name, exact: true })
+  }
+
+  /** A progress bar on the page (a download running). */
+  get progress() {
+    return this.main.getByRole('progressbar')
+  }
+
+  /** The top bar's selects; the account chip's picker (with two profiles or more), and what the chip reads. */
+  get topSelects() {
+    return this.topBar.getByRole('combobox')
+  }
+
+  topSelect(name) {
+    return this.topBar.getByRole('combobox', { name, exact: true })
+  }
+
+  /** A top bar select's options; one by its name (chosen or not). */
+  topOptions(select) {
+    return this.topSelect(select).getByRole('option')
+  }
+
+  topOption(select, name, selected) {
+    return this.topSelect(select).getByRole('option', { name, exact: true, ...(selected === undefined ? {} : { selected }) })
+  }
+
+  chipReads(name) {
+    // The chip's own label comes before its picker's options, which read the same.
+    return this.topBar.getByText(name, { exact: true }).first()
+  }
+
+  /** A text of the page that contains these words. */
+  saysPart(text) {
+    return this.main.getByText(text)
+  }
+
   // ── Templates ──
 
   tab(name) {

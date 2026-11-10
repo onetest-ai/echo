@@ -8,6 +8,7 @@ module: plugins
 run: agent
 platform: any
 tags: [plugins, settings]
+auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
 # TC-005: A plugin's own settings are saved when changed

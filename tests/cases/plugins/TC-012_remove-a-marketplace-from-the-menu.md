@@ -8,6 +8,7 @@ module: plugins
 run: agent
 platform: any
 tags: [plugins, marketplaces]
+auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
 # TC-012: ⋯ Remove takes an added marketplace away

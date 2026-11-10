@@ -929,5 +929,119 @@
       "done": "{\"op\":\"edit\",\"node\":\"T001\",\"set\":{\"state\":\"done\"}}",
       "undo": "{\"op\":\"undo\",\"target\":\"{mid}\"}"
     }
+  },
+  "s12": {
+    "skill": {
+      "id": "follow-up-mail",
+      "name": "Follow up mail",
+      "heading": "Follow-up mail",
+      "count": 1,
+      "description": "Use when a task is to write a follow-up mail after a meeting",
+      "badName": "Звіт"
+    },
+    "profiles": {
+      "system": {
+        "id": "system",
+        "name": "Claude Code (as configured)",
+        "minutes": "sonnet",
+        "live": "haiku"
+      },
+      "local": {
+        "id": "local-llama",
+        "name": "Local Llama",
+        "model": "llama3.2",
+        "url": "http://127.0.0.1:9",
+        "kind": "local"
+      }
+    },
+    "models": {
+      "turbo": [
+        "large-v3-turbo-q5_0",
+        574
+      ],
+      "others": [
+        [
+          "large-v3-turbo-q8_0",
+          874
+        ],
+        [
+          "large-v3-q5_0",
+          1081
+        ],
+        [
+          "small-q8_0",
+          264
+        ]
+      ],
+      "notInBuild": [
+        "nemotron-3.5-0.6b",
+        "parakeet-tdt-0.6b-v3"
+      ]
+    },
+    "market": {
+      "folder": "market",
+      "name": "acme-local",
+      "manifest": {
+        "name": "acme-local",
+        "featured": [
+          "acme-notes"
+        ],
+        "plugins": [
+          {
+            "id": "acme-notes",
+            "source": "./plugins/acme-notes",
+            "categories": [
+              "automation"
+            ]
+          }
+        ]
+      },
+      "builtIn": {
+        "name": "onetest",
+        "source": "onetest-ai/echo-plugins"
+      }
+    },
+    "plugin": {
+      "id": "acme-notes",
+      "name": "Acme notes",
+      "version": "0.1.0",
+      "category": "Automation",
+      "summary": "A made-up plugin for tests",
+      "folder": "plugins/acme-notes",
+      "manifest": {
+        "id": "acme-notes",
+        "name": "Acme notes",
+        "version": "0.1.0",
+        "summary": "A made-up plugin for tests",
+        "settings": [
+          {
+            "key": "greeting",
+            "label": "Greeting",
+            "type": "string",
+            "default": "hello"
+          },
+          {
+            "key": "loud",
+            "label": "Loud",
+            "type": "bool",
+            "default": false
+          }
+        ]
+      },
+      "greeting": {
+        "key": "greeting",
+        "label": "Greeting",
+        "before": "hello",
+        "after": "good morning"
+      },
+      "loud": {
+        "key": "loud",
+        "label": "Loud",
+        "before": false,
+        "after": true
+      },
+      "search": "acme",
+      "noMatch": "zzzz"
+    }
   }
 }

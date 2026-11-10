@@ -8,6 +8,7 @@ module: settings
 run: agent
 platform: any
 tags: [settings, live-notes]
+auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
 # TC-018: AI & minutes: Live notes during calls on shows "Live notes on" in the status bar

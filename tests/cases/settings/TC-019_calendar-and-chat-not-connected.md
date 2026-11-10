@@ -8,6 +8,7 @@ module: settings
 run: agent
 platform: any
 tags: [settings, microsoft-365]
+auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
 # TC-019: Calendar & chat says Not connected and offers Sign in…

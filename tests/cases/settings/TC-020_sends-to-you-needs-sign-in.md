@@ -8,6 +8,7 @@ module: settings
 run: agent
 platform: any
 tags: [settings, deliver]
+auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
 # TC-020: Sends to you shows Teams and Mail waiting for Microsoft 365

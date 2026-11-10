@@ -8,6 +8,7 @@ module: settings
 run: agent
 platform: any
 tags: [ai, profiles, top-bar]
+auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
 # TC-027: The account chip in the top bar shows the default AI profile; with two it picks the default, with one it opens AI & minutes

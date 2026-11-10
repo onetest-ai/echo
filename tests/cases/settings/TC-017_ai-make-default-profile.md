@@ -8,6 +8,7 @@ module: settings
 run: agent
 platform: any
 tags: [ai, profiles]
+auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
 # TC-017: Make default moves "Default for new calls" and the account chip follows

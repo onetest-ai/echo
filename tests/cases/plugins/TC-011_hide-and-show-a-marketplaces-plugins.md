@@ -8,6 +8,7 @@ module: plugins
 run: agent
 platform: any
 tags: [plugins, marketplaces]
+auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
 # TC-011: ⋯ hides a marketplace's plugins from Discover and shows them again

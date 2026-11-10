@@ -8,6 +8,7 @@ module: plugins
 run: agent
 platform: any
 tags: [plugins, marketplaces]
+auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
 # TC-009: Marketplaces lists the built-in marketplace, not removable, with Read again and the Add form

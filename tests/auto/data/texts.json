@@ -811,5 +811,168 @@
       "Record the next Teams call",
       "Record a memo"
     ]
+  },
+  "skills": {
+    "tab": "Skills",
+    "listLine": "What Claude does with a task you send it",
+    "builtIn": "Built in",
+    "customized": "Customized",
+    "yours": "Yours",
+    "problems": "⚠",
+    "switch": "{name} on",
+    "on": "On — Claude can use it",
+    "off": "Off — kept out of Claude",
+    "askClaude": "Ask Claude",
+    "newSkill": "New skill",
+    "skillLine": "SKILL.md · in Claude as /my-skills:{id}",
+    "text": "^---\\s+name: {id}\\s+description: .+\\s+---\\s+# {heading}",
+    "toFix": "To fix before Claude can use it",
+    "customize": "Customize",
+    "openCode": "Open in VS Code",
+    "showFinder": "Show in Finder",
+    "reset": "Reset",
+    "name": "Name",
+    "cancel": "Cancel",
+    "create": "Create and open",
+    "latin": "give the skill a name in latin letters (Claude Code's rule for skill names) — its text can be in any language",
+    "ok": "OK",
+    "choose": "Choose a skill to see what Claude does with it.",
+    "offFile": ".echo/skills-off.json",
+    "folder": ".echo/skills",
+    "trash": ".echo/trash/skills",
+    "skillFile": "SKILL.md",
+    "trashed": "^{id}-\\d+$",
+    "dimmed": "rgb(138, 138, 149)"
+  },
+  "ai": {
+    "route": "#settings/ai",
+    "heading": "AI & minutes",
+    "profiles": "Profiles",
+    "default": "Default for new calls",
+    "builtIn": "Built in",
+    "local": "Model · this computer",
+    "minutes": "minutes: {model}",
+    "live": "live notes: {model}",
+    "makeDefault": "Make default",
+    "chip": "AI profile",
+    "chipButton": "AI profile: {name}",
+    "chipTitle": [
+      "Claude Code (as configured)",
+      "as Claude Code is set up"
+    ],
+    "language": "Language of the call",
+    "file": "ai.json",
+    "added": "added {name} ({id})",
+    "defaultBack": "new calls use {name}",
+    "removed": "removed {id}",
+    "liveNotes": "Live notes",
+    "liveOn": "Live notes on",
+    "autoMinutes": "Write minutes automatically",
+    "skipRow": "Claude in the window: no permission prompts",
+    "skipFlag": "--dangerously-skip-permissions",
+    "skipSays": [
+      "runs any command and tool without asking",
+      "Takes effect the next time the session starts."
+    ],
+    "skipOn": "On."
+  },
+  "transcription": {
+    "route": "#settings/transcription",
+    "heading": "Transcription",
+    "models": "Speech models",
+    "download": "Download ({mb} MB)",
+    "size": "· {mb} MB",
+    "recommended": "Recommended for this computer",
+    "notInBuild": "Not in this build",
+    "whisper": "Whisper, deprecated",
+    "downloading": "Downloading",
+    "keepAudio": "Keep audio files",
+    "echoCancel": "Echo cancellation"
+  },
+  "calendar": {
+    "route": "#settings/calendar",
+    "heading": "Calendar & chat",
+    "card": "Microsoft 365",
+    "account": "Account",
+    "notConnected": "Not connected: the calendar shows only what your tray knows about today.",
+    "signIn": "Sign in…",
+    "notThere": [
+      "Sync now",
+      "Sign out"
+    ],
+    "registration": "App registration",
+    "registrationSays": "The default (CodeMie). Your IT can register another.",
+    "change": "Change…",
+    "chat": "Meeting chat"
+  },
+  "deliver": {
+    "route": "#settings/deliver",
+    "heading": "Sends to you",
+    "rows": [
+      [
+        "Teams",
+        "Your chat with yourself. Sign in to Microsoft 365 first (Settings → Calendar & chat)."
+      ],
+      [
+        "Mail",
+        "Your own mailbox — or the addresses a plugin was given. Sign in to Microsoft 365 first (Settings → Calendar & chat)."
+      ]
+    ],
+    "test": "Send a test"
+  },
+  "plugins": {
+    "route": "#settings/plugins",
+    "heading": "Plugins",
+    "installed": "Installed",
+    "discover": "Discover",
+    "markets": "Marketplaces",
+    "none": "No plugins yet — Discover lists what your marketplaces offer.",
+    "marketsLine": "Where plugins come from.",
+    "builtIn": "built in",
+    "readAgain": "Read again",
+    "more": "More",
+    "hide": "Hide its plugins from Discover",
+    "show": "Show its plugins in Discover",
+    "remove": "Remove — installed plugins stay, without updates",
+    "hidden": "hidden",
+    "add": "Add a marketplace",
+    "source": "Marketplace",
+    "sourceHint": "owner/repo, a git address, or a folder",
+    "name": "Name",
+    "nameHint": "Name (optional)",
+    "addButton": "Add",
+    "read": "{n} plugin · read today",
+    "search": "Search plugins",
+    "all": "All",
+    "nothing": "Nothing matches.",
+    "install": "Install",
+    "installedMark": "Installed ✓",
+    "sheet": "Install {name} {version}?",
+    "from": "from {market} · commit local-",
+    "warn": "Listed by {market} — Echo hasn’t reviewed it. Install it only if you trust who made it.",
+    "able": "It will be able to",
+    "usesNothing": "Uses nothing of Echo's.",
+    "cancel": "Cancel",
+    "detail": "{version} · from {market} · commit local-",
+    "ownSettings": "Its settings",
+    "canDo": "What it can do",
+    "removeAsk": "Remove…",
+    "removeLine": "Remove {name}? Its settings and data can stay for when you install it again.",
+    "keepData": "Remove, keep data",
+    "withData": "Remove with data",
+    "on": "{name} on",
+    "cliKeys": [
+      "busy",
+      "discover",
+      "errors",
+      "installed",
+      "markets"
+    ],
+    "added": "Added {name}: 1 plugins",
+    "dataFolder": ".echo/plugins",
+    "settingsFile": "settings.json"
+  },
+  "notices": {
+    "ok": "OK"
   }
 }

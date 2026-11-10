@@ -8,6 +8,7 @@ module: skills
 run: agent
 platform: any
 tags: [skills, toast]
+auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
 # TC-006: New skill refuses a name without latin letters and says why in a toast

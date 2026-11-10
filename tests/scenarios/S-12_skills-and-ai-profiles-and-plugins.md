@@ -35,6 +35,7 @@ cases:
   - tests/cases/plugins/TC-007_remove-asks-before-it-removes.md
   - tests/cases/plugins/TC-008_remove-keep-data-leaves-its-settings.md
   - tests/cases/plugins/TC-012_remove-a-marketplace-from-the-menu.md
+auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
 # S-12: Skills and AI: skills on and off, AI profiles and the default, plugins and marketplaces

@@ -8,6 +8,7 @@ module: settings
 run: agent
 platform: any
 tags: [ai, profiles]
+auto: [tests/auto/specs/S-12.spec.mjs]
 ---
 
 # TC-016: A local model profile added from the CLI shows in AI & minutes and turns the account chip into a picker
