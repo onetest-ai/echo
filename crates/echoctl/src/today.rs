@@ -177,8 +177,9 @@ pub(crate) fn day() -> Vec<Value> {
         }
         let Some(event) = m.id.clone().filter(|i| !i.is_empty()) else { continue };
         let hit = calls_today.iter().position(|(_, _, cm)| cm.as_ref().and_then(|c| c.id.as_deref()) == Some(event.as_str()));
-        // Only the meetings the user accepted (or organises) — unless they recorded it, or set it to record.
-        if !m.accepted() && hit.is_none() && !scheduled.contains(&event) {
+        // Every meeting but those the user declined (unless they recorded it, or set it to record): Your day says which
+        // they go to, which they haven't answered and which are a maybe (`response`).
+        if m.response.as_deref() == Some("declined") && hit.is_none() && !scheduled.contains(&event) {
             continue;
         }
         if let Some(i) = hit {
@@ -190,7 +191,7 @@ pub(crate) fn day() -> Vec<Value> {
         let ended = time(m.end.as_deref()).is_some_and(|e| e + chrono::Duration::minutes(10) <= Utc::now());
         let transcript = (hit.is_none() && ended && m.teams_join_url().is_some()).then(|| offers.get(&event).map(|o| o["transcript"].clone()).unwrap_or(Value::Null));
         out.push(json!({
-            "kind": "meeting", "subject": m.subject, "start": m.start, "end": m.end, "event": event, "minutes": minutes, "app": m.app().map(|a| a.key()),
+            "kind": "meeting", "subject": m.subject, "start": m.start, "end": m.end, "event": event, "minutes": minutes, "app": m.app().map(|a| a.key()), "response": m.response,
             "importable": transcript.is_some(), "transcript": transcript,
             "people": m.attendees.len() + m.organizer.iter().count(),
             "threads": crate::projects::for_event(&m),

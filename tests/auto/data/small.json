@@ -1186,6 +1186,7 @@
     "lastPast": "Initech planning",
     "coming": [
       "Globex design review",
+      "Industry webinar",
       "Acme demo"
     ],
     "agenda": [
@@ -1207,7 +1208,19 @@
       "subject": "Globex design review",
       "other": "Acme demo"
     },
-    "scroll": 120
+    "scroll": 120,
+    "dayList": [
+      "Acme weekly sync",
+      "Initech planning",
+      "Globex design review",
+      "Industry webinar",
+      "Acme demo"
+    ],
+    "comingGoing": [
+      "Globex design review",
+      "Acme demo"
+    ],
+    "noReplySays": "no reply"
   },
   "s04": {
     "mine": [
