@@ -17,6 +17,7 @@
 - R10. A plugin's session skills go only to Echo's sessions and `claudejob` runs, never to the user's own Claude Code. Evidence: `grants::set_session_skills`
 - R11. Never let a channel's env set a `CLAUDE*` or `ANTHROPIC*` key. Evidence: `jshost::service`
 - R12. Deliver only to the user and the addresses the user set on a routine, never to an address a model picked; anything a model wrote carries `ai_notice`. Evidence: `deliver::send`
+- R13. Add a kind of plugin widget in three places: `plugins::WIDGET_KINDS`, its drawing in `pluginWidgetHtml` (the window script: every text through `esc`, a link only to `echo://`, data it can't draw throws with what is wrong), and its cases in `today-plugin-widgets.test.mjs`; a plugin's widget data is read from its last answer, never by waiting on the plugin while Today draws. Evidence: `widgets::plugin_data`
 
 ### Constraints
 | Do not | Do instead | Evidence |
