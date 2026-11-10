@@ -57,7 +57,7 @@ function todayView() {
   // by side. Sizes take effect with the layout engine (#315).
   // Your day and My work always sit in the grid (it gives them their inner scroll), alone or together, as before.
   const sizeOf = Object.fromEntries((d.layout || []).map((i) => [i.widget, i.size]))
-  const parts = { 'core:needs.now': needsView(d.needs, d.asks) + wontView(d.asks), 'core:routines.cards': cards, 'core:calendar.agenda': day, 'core:tasks.mine': work, 'core:calendar.next': nextMeetingView(d.next, sizeOf['core:calendar.next'] || 'M', now), 'core:calendar.calendar': dayCalendarView(d, now), 'core:calendar.strip': dayStripView(d, now), 'core:calendar.choices': dayChoicesView(d, now), 'core:tasks.glance': glanceView(d.glance, sizeOf['core:tasks.glance'] || 'M'), 'core:tasks.done': doneView(d.glance, sizeOf['core:tasks.done'] || 'S') }
+  const parts = { 'core:needs.now': needsView(d.needs, d.asks) + wontView(d.asks), 'core:routines.cards': cards, 'core:calendar.agenda': day, 'core:tasks.mine': work, 'core:calendar.next': nextMeetingView(d.next, sizeOf['core:calendar.next'] || 'M', now), 'core:calendar.calendar': dayCalendarView(d, now), 'core:calendar.strip': dayStripView(d, now), 'core:calendar.choices': dayChoicesView(d, now), 'core:tasks.glance': glanceView(d.glance, sizeOf['core:tasks.glance'] || 'M'), 'core:tasks.done': doneView(d.glance, sizeOf['core:tasks.done'] || 'S'), 'core:calls.week': callsWeekView(d.calls_week, sizeOf['core:calls.week'] || 'S') }
   // Plugins' widgets on the layout, drawn by their kind (13-today-plugins.js).
   for (const [id, w] of Object.entries(d.plugins || {})) parts[id] = pluginWidgetView(id, w, sizeOf[id] || 'M')
   S.tdParts = parts // Add a widget's previews (13-today-edit.js)

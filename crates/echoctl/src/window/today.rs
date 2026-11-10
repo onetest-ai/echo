@@ -49,6 +49,10 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
             if !plugins.is_empty() {
                 v["plugins"] = json!(plugins);
             }
+            // Recorded this week, only when it is on Today.
+            if layout.iter().any(|i| i.widget == "core:calls.week") {
+                v["calls_week"] = crate::calls_week::today();
+            }
             v["layout"] = json!(layout);
             // A Teams transcript being imported, or why it wasn't (the calendar's own state, by event).
             let imports = IMPORTS.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_default();
