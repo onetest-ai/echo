@@ -53,6 +53,8 @@ node crates/echoctl/ui/own-title-bar.test.mjs
 node crates/echoctl/ui/layout-save.test.mjs
 # Today's widgets in rows, in its layout's order (todayRows, #323).
 node crates/echoctl/ui/today-rows.test.mjs
+# Today's columns from its width and its rows as lines (todayCols / todayLines, #328).
+node crates/echoctl/ui/today-layout.test.mjs
 # The virtual model for the functional cases (#275): scripts, answers, streaming, log.
 python3 tests/fixtures/model_server_test.py
 types="plugin/.claude-plugin/types/claude-code/index.d.ts"

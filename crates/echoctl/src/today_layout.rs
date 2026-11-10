@@ -50,9 +50,9 @@ fn item(widget: &str, size: &str, row: bool) -> Item {
     Item { widget: widget.into(), size: size.into(), row }
 }
 
-/// Today as it has been: Needs you now, the routines' cards, then Your day beside My work.
+/// Today as it has been: Needs you now and the routines' cards across, then Your day (2 columns) beside My work (1).
 pub fn default_items() -> Vec<Item> {
-    vec![item("core:needs.now", "M", true), item("core:routines.cards", "M", true), item("core:calendar.agenda", "S", true), item("core:tasks.mine", "M", false)]
+    vec![item("core:needs.now", "L", true), item("core:routines.cards", "L", true), item("core:calendar.agenda", "M", true), item("core:tasks.mine", "S", false)]
 }
 
 /// Today's widgets: the saved layout, else the default. A widget the catalog doesn't have now (a plugin off) is kept
