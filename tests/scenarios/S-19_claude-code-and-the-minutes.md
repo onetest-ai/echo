@@ -4,9 +4,9 @@ title: Claude Code and the minutes: write now, your notes in them, one writer, f
 run: agent
 platform: macos
 data: small
-ai: local
+ai: virtual
 clock: fast
-env: this Mac: Echo's debug build; Claude Code runs for real on the local model (`make_data.py <dir> --ai local --clock fast`); the calls are copies of the recordings prepared once for this build (`tests/fixtures/recordings.py`), so nothing is recorded or transcribed here (no TestCall, BlackHole or ffmpeg); stages 6–8 start a second app instance on the run's own data folder and config (never `~/echo`, never `app start`), with `--scheduled manual` so no "Record?" dialog opens
+env: this Mac: Echo's debug build; Claude Code runs for real on the virtual model (`make_data.py <dir> --ai virtual --clock fast`: only the model is scripted); the calls are copies of the recordings prepared once for this build (`tests/fixtures/recordings.py`), so nothing is recorded or transcribed here (no TestCall, BlackHole or ffmpeg); stages 6–8 start a second app instance on the run's own data folder and config (never `~/echo`, never `app start`), with `--scheduled manual` so no "Record?" dialog opens
 cases:
   - tests/cases/claude/TC-004_write-minutes-now.md
   - tests/cases/claude/TC-009_own-notes-in-minutes.md
@@ -21,26 +21,26 @@ cases:
   - tests/cases/claude/TC-011_signed-out.md
   - tests/cases/claude/TC-014_record-from-chat.md
   - tests/cases/privacy/TC-007_no-send-without-yes.md
-  - tests/cases/claude/TC-021_a-broken-diagram-in-the-minutes-is-repaired-on-the-calls-profile.md
+auto: [tests/auto/specs/S-19.spec.mjs]
 ---
 
 # S-19: Claude Code and the minutes
 
 **Environment:** this Mac: Echo's debug build; nothing is recorded or transcribed (no TestCall, BlackHole or ffmpeg): every call is a copy of a recording prepared once for this build. Stages 6–8 start a second app instance on the run's own data folder and config (never `~/echo`, never `app start`), with `--scheduled manual` so no "Record?" dialog opens.
 
-**Data:** `small` with the local model and the test clock: `tests/fixtures/make_data.py <dir> --ai local --clock fast` (on small data only minutes runs reach the model: the app's preps, meeting types, task modes and thread syncs are refused at once and `project_sync` is off, so nothing queues in front of the minutes; automatic minutes 90 s after a call or the last note instead of 15 minutes), the window served on it with `ECHOCTL_TEST_OPEN_LOG_ONLY=1 ECHOCTL_SERVE_IPC=1 target/debug/echoctl window --serve <port>` (after `. <dir>/env`, so it has the same clock; its output is "the server's output" stage 3 reads). Needs Claude Code on `PATH` and the data's model server answering.
+**Data:** `small` with the virtual model and the test clock: `tests/fixtures/make_data.py <dir> --ai virtual --clock fast` (`tests/fixtures/README.md`, "The virtual model") (on small data only minutes runs reach the model: the app's preps, meeting types, task modes and thread syncs are refused at once and `project_sync` is off, so nothing queues in front of the minutes; automatic minutes 90 s after a call or the last note instead of 15 minutes), the window served on it with `ECHOCTL_TEST_OPEN_LOG_ONLY=1 ECHOCTL_SERVE_IPC=1 target/debug/echoctl window --serve <port>` (after `. <dir>/env`, so it has the same clock; its output is "the server's output" stage 3 reads). Needs Claude Code on `PATH` and the data's model server answering.
 
 **Before the run (once, not per scenario):** `tests/fixtures/recordings.py prepare` (app_profile.md → "Recorded calls"): every call here is a copy of its `minutes-call` (213 s) or `very-short`.
 
 **Story:** Sam writes minutes now from the window — with his own notes in them, and also for a call too short for automatic ones — while a session tries to take the same call, and takes a call back from a session; he points Echo's runs at another folder and back, gives a profile a model that doesn't exist and is told what to do; with automatic minutes off nothing is written until asked; he checks `doctor` against Health; and a call that ended while Echo was quit is caught up when it starts again. A signed-in session (doctor, the live pane, signing out, recording from a chat, follow-ups) is a person's part.
 
-**Length:** about 30 minutes: four model runs (5–7 minutes each on the local model, 1–2 on the network server), one that fails at once (stage 5), and two checks that nothing happens (120 s in stage 6, 105 s in stage 8) on the test clock.
+**Length:** about 10 minutes: four model runs (a few seconds each on the virtual model), one that fails at once (stage 5), and two checks that nothing happens (120 s in stage 6, 105 s in stage 8) on the test clock.
 
 ## Assets
 
 | Asset | Made by | Used by stages |
 |---|---|---|
-| The `small` data build (`--ai local --clock fast`) and the served window | the lead (`serve.sh up`) | 1–8 |
+| The `small` data build (`--ai virtual --clock fast`) and the served window | the lead (`serve.sh up`) | 1–8 |
 | The run's settings: automatic minutes on, both record modes manual, live notes off, folder A, the speech model linked | Prelude | 1–8 (folder A: 1, 4; the speech model: 7) |
 | Long call "CLA-004 write now" (a copy of `minutes-call`) with the user's three notes in `my-notes.md`, its stamp in `$D/min-a.stamp` | stage 1 step 1, the notes right after it | 1, 2, 3, 4 |
 | Short call "CLA-004 short" (a copy of `very-short`) | stage 1 step 2 | 1, 3, 4, 5 |
@@ -82,7 +82,6 @@ Done once, before stage 1, timed as the stage `prelude`. Every Bash call starts 
 | 11 | `claude/TC-011_signed-out.md` | — | **person** |
 | 12 | `claude/TC-014_record-from-chat.md` | — | **person** |
 | 13 | `privacy/TC-007_no-send-without-yes.md` | — | **person** |
-| 14 | `claude/TC-021_a-broken-diagram-in-the-minutes-is-repaired-on-the-calls-profile.md` | — | Its own served window on fake-AI data (its preconditions) |
 
 ## Notes
 - **Four model runs, one per condition that truly differs:** Write now on a call due for automatic minutes (A), Write minutes on a call the gate skipped and a session held (B), Write minutes on a call that ended while automatic minutes were off (C), and the automatic catch-up after a quit (D). Every check that can read a run reads one of those: the user's notes (stage 2) are in run A's call, the session's claim (stage 3) is refused during run A and taken over by run B, the two folders (stage 4) are runs A and B, the model (stage 5) is run B's. Stage 5's wrong model fails before any model time. Before 2026-11-08 the scenario started six runs: stage 2 wrote its own call's minutes and stage 3 its own (Initech planning).

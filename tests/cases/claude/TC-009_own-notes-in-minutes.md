@@ -8,8 +8,9 @@ module: claude
 run: agent
 platform: macos
 tags: [notes, minutes, recordings]
-ai: local
+ai: virtual
 external_id: TC-CLA-008
+auto: [tests/auto/specs/S-19.spec.mjs]
 ---
 
 # TC-009: The user's notes, from during and after the call, shape its minutes
@@ -17,7 +18,7 @@ external_id: TC-CLA-008
 **Module:** Claude | **Priority:** High | **Type:** Functional
 
 ## Preconditions
-- Test data built by `tests/fixtures/make_data.py <dir> --ai local --clock fast` (`ai: local`): the small set, hermetic, with the AI profile "Qwen" (a local model server: Ollama here, or the faster one of `tests/fixtures/ai.local.json`) the default, so a minutes run is a real Claude Code run on it and every other run is refused (`tests/fixtures/README.md`, "Real Claude Code runs on a local model"); Claude Code on `PATH`
+- Test data built by `tests/fixtures/make_data.py <dir> --ai virtual --clock fast` (`ai: virtual`): the small set, hermetic, with the AI profile "Virtual model" (`tests/fixtures/model_server.py`, answering from its default script: `echoctl context`, the transcript read, `notes.md` and the action list written and applied) the default, so a minutes run is a real Claude Code run under Echo's guard with only the model scripted (`tests/fixtures/README.md`, "The virtual model"); Claude Code on `PATH`
 - The recordings of this build are prepared (`tests/fixtures/recordings.py prepare`); every command after `. <dir>/env`
 - The window served on the data with clicks reaching it (`ECHOCTL_TEST_OPEN_LOG_ONLY=1 ECHOCTL_SERVE_IPC=1 … window --serve <port>`, or the scenario's server), the page loaded from `{{base_url}}/` first
 - **The call and its run (shared in S-19):** a transcribed `minutes-call` copy with the three notes below in its `my-notes.md`, its stamp (the folder name's first 17 characters, kept when a run renames the folder) in `$(dirname "$ECHOCTL_HOME")/min-a.stamp`, and its minutes written after the notes. In S-19: stage 1's long call ("CLA-004 write now"): the scenario puts the notes in right after `claude/TC-004`'s step 1, and its step 4 (run A) writes the minutes, so steps 1 and 3 are skipped. On its own: step 1 makes the call and step 3 writes them
@@ -38,7 +39,7 @@ external_id: TC-CLA-008
 | 2 | In the window: `{{base_url}}/#calls`, click the row `[role=option][data-call^="<the stamp>"]`, open My notes | My notes lists the three notes, the first two with their times `00:09` and `00:14`, the third without |
 | 3 | Minutes tab → "Write now" (`[data-cmd="write-notes"]`; with `--clock fast` within 90 s of step 1: after that, with no app running, the tab says "Starting the minutes…" without it) | The run starts ("Writing minutes…") |
 | 4 | Wait until the call's `notes-run.json` says `"state": "done"` (`S=$(cat "$(dirname "$ECHOCTL_HOME")/min-a.stamp"); python3 tests/fixtures/wait.py 600 sh "grep -qs '\"state\": *\"done\"' $ECHOCTL_HOME/calls/$S*/notes-run.json"`; the run may retitle and rename the folder) | The minutes are written (`notes.md`, `actions.json`) |
-| 5 | `grep -n -i -e "legal" -e "ten seats" -e "pilot budget" "$ECHOCTL_HOME"/calls/$(cat "$(dirname "$ECHOCTL_HOME")/min-a.stamp")*/notes.md` | All three notes are in the minutes, in their structure (e.g. an action item "Me — Ask legal about the contract", "ten seats" with the training room, "Me — ask Kim for the pilot budget"), not pasted as a list of notes |
+| 5 | `python3 -c "import json,os; L=[json.loads(l) for l in open(os.environ['ECHOCTL_HOME']+'/../model/model-log.jsonl')]; r=[b for e in L if e.get('rule')==0 for m in e['messages'][-1:] if isinstance(m['content'],list) for b in m['content'] if b.get('type')=='tool_result']; print(json.loads(r[0]['content'] if isinstance(r[0]['content'],str) else r[0]['content'][0]['text'])['user_notes'])"`, then `cat` that file | The context Echo gave the model (`echoctl context`, the run's first tool result) names this call's `my-notes.md` as `user_notes`, and that file holds all three notes — process-call reads it and writes the minutes around them. (Whether a real model weaves them in is the release check of S-30.) |
 
 ## Expected Final State
 The user's own notes, taken during the call and after it, are part of the minutes.

@@ -631,7 +631,7 @@ def setup_env(d, stale_plugin=True, test_market=True):
         # Also the one model server named with --ai-url (a faster machine on the network), exactly that address.
         url = sh(AI_URL) if AI_URL else "http://localhost:*"
         local = (VIRTUAL_PASS if AI == "virtual" else LOCAL_PASS).format(real=sh(real), url=url).rstrip("\n")
-        if d.set == "small" and AI == "local":
+        if d.set == "small":
             local = MINUTES_ONLY.replace("PASS", local).rstrip("\n")
         fake = "\n".join(lines[:4] + [local] + lines[4:])
     d.write(f"{b}/bin/claude", fake)

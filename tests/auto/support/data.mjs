@@ -37,10 +37,15 @@ export function useData(test, { set = 'small', ai, args = [] } = {}) {
     }
     data.home = data.env.ECHOCTL_HOME
   })
+  // A failed test keeps the data (its runs' claude.log, the model's log) for finding why; the path is printed.
+  test.afterEach(async ({}, info) => {
+    if (info.status !== info.expectedStatus) data.failed = true
+  })
   test.afterAll(async () => {
     if (!data.dir) return
     spawnSync(SERVE, ['down', data.dir], { cwd: ROOT })
-    if (!process.env.ECHO_AUTO_KEEP) fs.rmSync(data.dir, { recursive: true, force: true })
+    if (data.failed) console.log(`test data kept for the failure: ${data.dir}`)
+    else if (!process.env.ECHO_AUTO_KEEP) fs.rmSync(data.dir, { recursive: true, force: true })
   })
 
   /** `echoctl …` (the debug build of this checkout) with exactly the data's environment: `<dir>/env` unsets Claude
@@ -49,6 +54,16 @@ export function useData(test, { set = 'small', ai, args = [] } = {}) {
     const r = spawnSync(BIN, args, { cwd: ROOT, env: data.env, encoding: 'utf8', timeout: 120_000 })
     return { code: r.status, out: r.stdout, err: r.stderr, json: () => JSON.parse(r.stdout) }
   }
+  /** Any command on the data (a fixture script: `recordings.py copy …`), with the data's environment; its output. A
+   *  last `{ timeout }` (ms) for a long one. */
+  data.run = (cmd, ...args) => {
+    const opts = typeof args.at(-1) === 'object' ? args.pop() : {}
+    const r = spawnSync(cmd, args, { cwd: ROOT, env: data.env, encoding: 'utf8', timeout: opts.timeout || 120_000 })
+    if (r.status !== 0) throw new Error(`${cmd} ${args.join(' ')}: ${(r.stderr || r.stdout).trim()}`)
+    return r.stdout.trim()
+  }
+  /** A call's folder now, by the stamp its name starts with (a run may retitle and rename it). */
+  data.callByStamp = (stamp) => path.join(data.home, 'calls', fs.readdirSync(path.join(data.home, 'calls')).find((n) => n.startsWith(stamp)))
   data.callName = (suffix) => fs.readdirSync(path.join(data.home, 'calls')).find((n) => n.endsWith(suffix))
   data.callDir = (suffix) => path.join(data.home, 'calls', data.callName(suffix))
   data.read = (...p) => fs.readFileSync(path.join(...p), 'utf8')
@@ -91,6 +106,13 @@ export function useData(test, { set = 'small', ai, args = [] } = {}) {
       fs.writeFileSync(path.join(data.dir, 'model/model-script.json'), s)
     },
     clear: () => fs.writeFileSync(path.join(data.dir, 'model/model-log.jsonl'), ''),
+    /** Every answer held back this long (seconds): a run that can be caught while it writes. */
+    delay: (seconds) => {
+      const f = path.join(data.dir, 'model/model-script.json')
+      const s = JSON.parse(fs.readFileSync(f, 'utf8'))
+      s.model = { ...(s.model || {}), delay: seconds }
+      fs.writeFileSync(f, JSON.stringify(s))
+    },
     requests: () => fs.readFileSync(path.join(data.dir, 'model/model-log.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)),
     /** The turns one rule of the script answered (a run's own, not Claude Code's side requests). */
     turns: (rule) => data.model.requests().filter((e) => e.rule === rule),

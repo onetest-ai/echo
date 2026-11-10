@@ -8,7 +8,7 @@ module: claude
 run: agent
 platform: macos
 tags: [minutes, auto, second-instance, recordings]
-ai: local
+ai: virtual
 external_id: TC-CLA-016
 ---
 
@@ -17,7 +17,7 @@ external_id: TC-CLA-016
 **Module:** Claude Code | **Priority:** Medium | **Type:** Functional
 
 ## Preconditions
-- Test data built by `tests/fixtures/make_data.py <dir> --ai local --clock fast` (`ai: local`; the test clock: automatic minutes 90 s after a call in this debug build, `claude/TC-003`): the small set, hermetic, with the AI profile "Qwen" (Ollama here, or the faster server of `tests/fixtures/ai.local.json`) the default, so a minutes run is a real Claude Code run on it and every other run is refused; Claude Code on `PATH`; `target/debug/echoctl` is the debug build from this checkout
+- Test data built by `tests/fixtures/make_data.py <dir> --ai virtual --clock fast` (`ai: virtual`; the test clock: automatic minutes 90 s after a call in this debug build, `claude/TC-003`): the small set, hermetic, with the AI profile "Virtual model" (`tests/fixtures/model_server.py`, answering from its default script: `echoctl context`, the transcript read, `notes.md` and the action list written and applied) the default, so a minutes run is a real Claude Code run under Echo's guard with only the model scripted; Claude Code on `PATH`; `target/debug/echoctl` is the debug build from this checkout
 - Every Bash call starts with the prelude: `. <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; W=tests/fixtures/wait.py; export D` (the env sets the file-fed call sources and the call app's id: nothing here records)
 - The recordings of this build are prepared (`tests/fixtures/recordings.py prepare`: `app_profile.md` → "Recorded calls"); `W=tests/fixtures/wait.py` in the prelude
 - The dev app is started as `nohup target/debug/echoctl app run --no-tray --background > "$D/app.out" 2>&1 & echo $! > "$D/app.pid"` (beside the user's own Echo, on the run's own config) after `config --unscheduled manual --scheduled manual` and `ai live off`; the window served on the data with clicks reaching it (`ECHOCTL_SERVE_IPC=1 … window --serve <port>`)

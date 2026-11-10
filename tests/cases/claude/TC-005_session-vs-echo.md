@@ -8,8 +8,9 @@ module: claude
 run: agent
 platform: macos
 tags: [minutes, claim]
-ai: local
+ai: virtual
 external_id: TC-CLA-004, TC-CLA-013
+auto: [tests/auto/specs/S-19.spec.mjs]
 ---
 
 # TC-005: A session can't take a call's minutes while Echo writes them; Write minutes takes them from a session
@@ -17,7 +18,7 @@ external_id: TC-CLA-004, TC-CLA-013
 **Module:** Claude Code | **Priority:** Medium | **Type:** Functional
 
 ## Preconditions
-- Test data built by `tests/fixtures/make_data.py <dir> --ai local` (`ai: local`): the small set, hermetic, with the AI profile "Qwen" (Ollama here, or the faster server of `tests/fixtures/ai.local.json`) the default, so a minutes run is a real Claude Code run on it and every other run is refused (`tests/fixtures/README.md`, "Real Claude Code runs on a local model"); Claude Code on `PATH`; `target/debug/echoctl` is the debug build from this checkout
+- Test data built by `tests/fixtures/make_data.py <dir> --ai virtual` (`ai: virtual`): the small set, hermetic, with the AI profile "Virtual model" (`tests/fixtures/model_server.py`, answering from its default script: `echoctl context`, the transcript read, `notes.md` and the action list written and applied) the default, so a minutes run is a real Claude Code run under Echo's guard with only the model scripted (`tests/fixtures/README.md`, "The virtual model"); Claude Code on `PATH`; `target/debug/echoctl` is the debug build from this checkout
 - Every Bash call starts with the prelude: `. <dir>/env; D="$(dirname "$ECHOCTL_HOME")"; W=tests/fixtures/wait.py; export D` (the env sets the file-fed call sources and the call app's id: nothing here records)
 - The window served on the data with clicks reaching it: `ECHOCTL_TEST_OPEN_LOG_ONLY=1 ECHOCTL_SERVE_IPC=1 target/debug/echoctl window --serve <port>` after the prelude (no Echo app needed: the served window starts the run itself); the page loaded from `{{base_url}}/` first
 - **A call whose minutes Echo is writing** (step 1). In S-19: stage 1's long call during its step 4 (run A, in folder A). On its own: click "Write minutes" on any transcribed call without minutes

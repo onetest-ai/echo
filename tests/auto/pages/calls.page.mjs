@@ -6,7 +6,9 @@ export class CallsPage extends AppPage {
   constructor(page, data) {
     super(page, data)
     this.list = page.getByRole('listbox', { name: 'Calls' })
-    this.writeMinutes = page.getByRole('button', { name: 'Write minutes' })
+    this.writeMinutes = page.getByRole('button', { name: 'Write minutes', exact: true })
+    this.writeNow = page.getByRole('button', { name: 'Write now', exact: true })
+    this.callActions = page.getByRole('button', { name: 'Call actions' })
     // The minutes page: the frame titled "Minutes" (an iframe has no role; the tab shares its title).
     this.minutes = page.locator('iframe[title="Minutes"]').contentFrame()
   }
@@ -24,6 +26,17 @@ export class CallsPage extends AppPage {
     await this.call(title).click()
     await this.list.getByRole('option', { name: new RegExp(literal(title)), selected: true }).waitFor()
     if (tab) await this.tab(tab).click()
+  }
+
+  /** A call's minutes as their own page (`/minutes/<call>`, what Open in browser shows), not in the window's frame. */
+  async openMinutesPage(folder) {
+    await this.page.goto(`${this.data.base}/minutes/${folder}`)
+  }
+
+  /** Call actions → an item of its menu ("Write minutes again", …). */
+  async callAction(item) {
+    await this.callActions.click()
+    await this.page.getByRole('menuitem', { name: item }).click()
   }
 
   tab(name) {

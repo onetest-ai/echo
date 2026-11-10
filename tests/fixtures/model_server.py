@@ -11,12 +11,16 @@ APIs:
   GET  /api/ps, POST /api/generate, GET /api/tags   enough of Ollama for `echoctl doctor`'s context check
 
 The script, <dir>/model-script.json (read on every request, so a case can change it between steps):
-  {"model": {"context_length": 32768},
+  {"model": {"context_length": 32768, "names": ["virtual"]},
    "rules": [{"when": ["phrase", ...], "steps": [ANSWER, ANSWER, ...]}, ...]}
 A request matches the first rule all of whose phrases are in its system prompt or messages; its step is the number
 of assistant turns already in the request (0 for the first call, 1 after the first tool result, ...), and the last
-step repeats. An ANSWER is {"text": "..."}, {"tool": "Read", "input": {...}} or {"blocks": [content blocks]}; a
-request no rule matches gets the text "virtual model: no script for this request". A rule's "vars" ({"dir":
+step repeats. An ANSWER is {"text": "..."}, {"tool": "Read", "input": {...}}, {"blocks": [content blocks]} or
+{"error": 529, "message": "..."} (the API's error answer, as a server that is overloaded or refuses gives it); an
+answer's "delay" (seconds), or the script's "model.delay" for every answer, holds it back as a slow model would (a run
+caught while it writes); a
+request no rule matches gets the text "virtual model: no script for this request". A request for a model not in
+"model.names" (default ["virtual"]) gets the 404 an Ollama gives for a model it hasn't. A rule's "vars" ({"dir":
 "<regex with one group>"}) are searched in the request, and "{dir}" in its answers becomes what they found.
 
 The log, <dir>/model-log.jsonl: one line per request — when, path, model, stream, system, messages, tool names,
@@ -176,11 +180,22 @@ class Handler(BaseHTTPRequestHandler):
         with self.server.lock:
             self.server.n += 1
             n = self.server.n
+        names = self.server.script().get("model", {}).get("names", ["virtual"])
+        if req.get("model") not in names:
+            self.server.log({"at": time.time(), "n": n, "path": path, "model": req.get("model"), "error": 404})
+            return self.send_json(404, {"type": "error", "error": {"type": "not_found_error", "message": f"model '{req.get('model')}' not found"}})
         try:
             rule, step, answer = answer_for(req, self.server.script())
         except ScriptError as e:
             self.server.log({"at": time.time(), "n": n, "path": path, "error": str(e)})
             return self.send_json(400, {"type": "error", "error": {"type": "invalid_request_error", "message": f"virtual model: {e}"}})
+        delay = answer.get("delay", self.server.script().get("model", {}).get("delay", 0))
+        if delay:
+            time.sleep(float(delay))
+        if "error" in answer:
+            self.server.log({"at": time.time(), "n": n, "path": path, "model": req.get("model"), "system": req.get("system"),
+                             "messages": req.get("messages"), "rule": rule, "step": step, "error": answer["error"]})
+            return self.send_json(int(answer["error"]), {"type": "error", "error": {"type": "api_error", "message": answer.get("message", "virtual model: an error")}})
         blocks = blocks_of(answer, n)
         stop = "tool_use" if any(b.get("type") == "tool_use" for b in blocks) else "end_turn"
         self.server.log({"at": time.time(), "n": n, "path": path, "model": req.get("model"), "stream": bool(req.get("stream")),
