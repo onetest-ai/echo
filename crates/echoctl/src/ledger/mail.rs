@@ -1,0 +1,310 @@
+//! The ledger: mail, the sync and its pending evidence (split out of `ledger.rs`, moved as it was).
+
+use super::*;
+
+// ── mail ────────────────────────────────────────────────────────────────────────────────────────
+
+/// A mail as one evidence item (`mail-<sha8 of its Internet message id>`: Graph's own id changes when
+/// the mail moves to another folder): the new part of its text as one turn at the local time it
+/// came, the sender as the speaker, and its link in Outlook (`url`).
+pub(super) fn mail_item(m: &Value) -> Option<Value> {
+    if m["invite"] == true {
+        return None; // a meeting's invite: the meeting is the call
+    }
+    let key = m["internet_id"].as_str().or(m["id"].as_str())?;
+    let at = m["at"].as_str().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())?.with_timezone(&Local);
+    let text = m["text"].as_str().map(str::trim).filter(|t| !t.is_empty())?;
+    let me = mail_me();
+    // The user is "Me", as in a call; names as people read them ("Morgan, Alex" → "Alex Morgan").
+    let name = |p: &Value| {
+        let email = p["email"].as_str().unwrap_or("").to_lowercase();
+        if !email.is_empty() && me(&email) {
+            return "Me".to_string();
+        }
+        let n = p["name"].as_str().map(crate::people::display).filter(|n| !n.trim().is_empty());
+        n.unwrap_or_else(|| p["email"].as_str().unwrap_or("?").trim().to_string())
+    };
+    let from = name(&m["from"]);
+    let mut people = vec![from.clone()];
+    for p in m["to"].as_array().into_iter().flatten().map(name) {
+        if !people.contains(&p) {
+            people.push(p);
+        }
+    }
+    let subject = m["subject"].as_str().map(str::trim).filter(|t| !t.is_empty()).unwrap_or("(no subject)");
+    Some(json!({
+        "id": format!("mail-{}", short(key)), "kind": "mail", "source": "mail", "message": m["id"], "conversation": m["conversation"],
+        "at": at.to_rfc3339(), "date": at.date_naive().to_string(), "title": subject, "from": m["from"], "to": m["to"], "auth": m["auth"],
+        "url": m["url"].as_str().filter(|u| u.starts_with("https://")),
+        "people": people, "turns": [{"ts": at.format("%H:%M:%S").to_string(), "speaker": from, "text": text}], "text": "",
+    }))
+}
+
+/// Whether an address is the user's: the one in Settings → About me, or (with the Brain) the signed-in
+/// account's local part at any of their domains.
+pub(super) fn mail_me() -> impl Fn(&str) -> bool {
+    let mine = crate::config::Config::load().ok().and_then(|c| c.me).and_then(|m| m.email).map(|e| e.to_lowercase());
+    #[cfg(feature = "brain")]
+    let local = crate::brain::sources::me_local();
+    #[cfg(not(feature = "brain"))]
+    let local: Option<String> = None;
+    move |e: &str| Some(e) == mine.as_deref() || local.as_deref().is_some_and(|l| e.split('@').next() == Some(l))
+}
+
+/// How far back a mail source's first read goes, and how far each later read looks again.
+#[cfg(feature = "brain")]
+pub(super) const MAIL_FIRST_DAYS: i64 = 30;
+#[cfg(feature = "brain")]
+pub(super) const MAIL_AGAIN_DAYS: i64 = 7;
+/// Mails taken at most a read (the newest).
+#[cfg(feature = "brain")]
+pub(super) const MAIL_MAX: usize = 200;
+
+pub(super) fn mails_file(project: &str) -> PathBuf {
+    crate::projects::dir().join(project).join("ledger").join("mails.json")
+}
+
+/// Each ✉ Mail source's read into the work: `{<rule>: {read_at, checked_at, found, error}}`.
+pub fn mail_state(project: &str) -> Value {
+    calls::read_json(&mails_file(project)).as_object().map(|o| Value::Object(o.clone())).unwrap_or_else(|| json!({}))
+}
+
+/// A mail source not checked for `CHAT_EVERY_MIN` (or never).
+pub fn mail_due(p: &crate::projects::Project) -> bool {
+    // Without the Brain built in mail isn't read: never due (it would be every tick).
+    if !cfg!(feature = "brain") {
+        return false;
+    }
+    let st = mail_state(&p.id);
+    p.sources.iter().filter(|s| s.kind == "mail").any(|s| {
+        st[&s.id]["checked_at"].as_str().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()).is_none_or(|t| Local::now().signed_duration_since(t) >= chrono::Duration::minutes(CHAT_EVERY_MIN))
+    })
+}
+
+/// Read the project's ✉ Mail sources (`domain:` / `person:` rules, as the Brain reads them) into its
+/// evidence: one item a mail, only from the user, colleagues and senders trusted for the thread's
+/// client — a trusted outside sender's only when Exchange says it is really theirs (DMARC); the
+/// others wait in the Brain's senders list (Needs you), never read meanwhile. The sync runs Claude
+/// Code with tools on what it reads, hence the same rules as the Brain's quarantine. Returns the ids
+/// written; a source that can't be read keeps its error in `mails.json`.
+#[cfg(feature = "brain")]
+pub fn mail_sync(project: &str) -> Result<Vec<String>> {
+    use crate::brain::senders::{self, Verdict};
+    use crate::brain::sources::{me_local, not_me, MailRule, MAX_PEOPLE};
+    let p = crate::projects::load(project)?;
+    let rules: Vec<crate::projects::Source> = p.sources.iter().filter(|s| s.kind == "mail").cloned().collect();
+    if rules.is_empty() {
+        return Ok(vec![]);
+    }
+    let l = Ledger::of(project)?;
+    let mut state = mail_state(project);
+    let now = chrono::Utc::now();
+    let mut snd = senders::load();
+    snd.refresh_org();
+    let mut items: Vec<Value> = vec![];
+    if snd.org_domains.is_empty() {
+        // Nobody can be told a colleague: nothing is judged, every source reads this window next time.
+        for s in &rules {
+            state[&s.id]["checked_at"] = json!(Local::now().to_rfc3339());
+            state[&s.id]["error"] = json!("couldn't read your organisation's domains: mail waits");
+        }
+    } else {
+        let me = me_local();
+        let client = p.client.clone().unwrap_or_else(|| "-".into());
+        for s in &rules {
+            state[&s.id]["checked_at"] = json!(Local::now().to_rfc3339());
+            let Some(rule) = MailRule::parse(&s.id) else {
+                state[&s.id]["error"] = json!(format!("not a mail rule: {}", s.id));
+                continue;
+            };
+            let first = state[&s.id]["read_at"].is_null();
+            let mut since = now - chrono::Duration::days(if first { MAIL_FIRST_DAYS } else { MAIL_AGAIN_DAYS });
+            if let Some(t) = p.since.as_deref().and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()).and_then(|d| d.and_hms_opt(0, 0, 0)).and_then(|d| d.and_local_timezone(Local).single()) {
+                since = since.max(t.with_timezone(&chrono::Utc));
+            }
+            let found = match crate::graph::mail(&rule.kql(), since, MAIL_MAX) {
+                Ok(f) => f,
+                Err(e) => {
+                    state[&s.id]["error"] = json!(format!("{e:#}"));
+                    continue;
+                }
+            };
+            let mut n = 0;
+            for m in &found {
+                let people = not_me(std::iter::once(&m["from"]).chain(m["to"].as_array().into_iter().flatten()), me.as_deref());
+                // Graph's search is fuzzy: only mail that really has these people; a broadcast isn't a thread's.
+                if m["invite"] == true || people.len() > MAX_PEOPLE || !rule.matches(&people) {
+                    continue;
+                }
+                let from = m["from"]["email"].as_str().unwrap_or("").to_lowercase();
+                let who = m["from"]["name"].as_str().unwrap_or(&from).to_string();
+                let (auth, id, at, subject) = (m["auth"].as_str().unwrap_or("none"), m["id"].as_str().unwrap_or(""), m["at"].as_str().unwrap_or(""), m["subject"].as_str().unwrap_or("(no subject)"));
+                match snd.mail(&client, &from, auth) {
+                    Verdict::Trusted => {
+                        if let Some(item) = mail_item(m) {
+                            n += 1;
+                            items.push(item);
+                        }
+                    }
+                    Verdict::Ignored => {}
+                    Verdict::Unverified => snd.note_unverified(&client, &from, &who, id, at, subject, auth),
+                    Verdict::Waiting => snd.wait(&client, &from, &who, "mail", id, at, subject, auth == "pass", None),
+                }
+            }
+            state[&s.id]["read_at"] = json!(Local::now().to_rfc3339());
+            state[&s.id]["found"] = json!(n);
+            if let Some(o) = state[&s.id].as_object_mut() {
+                o.remove("error");
+            }
+        }
+        let _ = senders::save_merged(&mut snd);
+    }
+    // Sources no longer watched forget their state (one added back reads its 30 days again).
+    if let Some(o) = state.as_object_mut() {
+        o.retain(|k, _| rules.iter().any(|s| &s.id == k));
+    }
+    let _lock = l.lock()?;
+    ensure_first_epic(&l)?;
+    let mut written = vec![];
+    for item in &items {
+        let id = item["id"].as_str().unwrap_or("").to_string();
+        let path = l.dir.join("evidence").join(format!("{id}.json"));
+        if path.exists() || written.contains(&id) {
+            continue; // a mail doesn't change; one the user added by hand is already there
+        }
+        fs::write(l.evidence_md(&id), render_md(item))?;
+        crate::paths::write_atomic(&path, &serde_json::to_vec_pretty(item)?)?;
+        written.push(id);
+    }
+    crate::paths::write_atomic(&mails_file(project), serde_json::to_string_pretty(&state)?.as_bytes())?;
+    Ok(written)
+}
+
+/// A sender the user trusted for `client` (or whose mail they read anyway): that client's open threads
+/// read their mail and meeting chats from the start again at the next sync (due at once) — what was
+/// held back comes in; items already there stay as they are.
+#[cfg(feature = "brain")]
+pub fn reread_sources(client: &str) -> Result<()> {
+    for p in crate::projects::list().into_iter().filter(|p| !p.stage.closed() && p.client.as_deref().unwrap_or("-") == client) {
+        for f in [mails_file(&p.id), chats_file(&p.id)] {
+            let mut st = calls::read_json(&f);
+            let Some(o) = st.as_object_mut() else { continue };
+            for v in o.values_mut().filter_map(Value::as_object_mut) {
+                v.remove("read_at");
+                v.remove("checked_at");
+            }
+            crate::paths::write_atomic(&f, serde_json::to_string_pretty(&st)?.as_bytes())?;
+        }
+    }
+    Ok(())
+}
+
+/// Without the Brain built in there is no senders list to trust anyone by: mail isn't read.
+#[cfg(not(feature = "brain"))]
+pub fn mail_sync(_project: &str) -> Result<Vec<String>> {
+    Ok(vec![])
+}
+
+/// Mails the user picked (Graph message ids; `conversation`: every message of their conversations
+/// too) as evidence of the project: one item a mail, written once — the next sync reads it as it
+/// reads a call. The user's own choice is the trust here (a thread's ✉ Mail sources, read by
+/// themselves, will take only trusted senders). Returns the items, new or already there.
+pub fn add_mail(project: &str, ids: &[String], conversation: bool) -> Result<Vec<Value>> {
+    let l = Ledger::of(project)?;
+    let mut mails: Vec<Value> = vec![];
+    for id in ids {
+        let m = crate::graph::message(id).with_context(|| format!("mail {id}"))?;
+        match m["conversation"].as_str().filter(|_| conversation) {
+            Some(c) => mails.extend(crate::graph::conversation(c)?),
+            None => mails.push(m),
+        }
+    }
+    let _lock = l.lock()?;
+    ensure_first_epic(&l)?;
+    let mut out = vec![];
+    for m in &mails {
+        let Some(item) = mail_item(m) else { continue };
+        let id = item["id"].as_str().unwrap_or("").to_string();
+        if out.iter().any(|x: &Value| x["id"] == id.as_str()) {
+            continue;
+        }
+        let path = l.dir.join("evidence").join(format!("{id}.json"));
+        let new = !path.exists();
+        if new {
+            fs::write(l.evidence_md(&id), render_md(&item))?;
+            crate::paths::write_atomic(&path, &serde_json::to_vec_pretty(&item)?)?;
+        }
+        out.push(json!({"id": id, "title": item["title"], "date": item["date"], "from": item["turns"][0]["speaker"], "new": new}));
+    }
+    Ok(out)
+}
+
+/// Bring the project's evidence up to date with its calls: new ones written, changed ones written
+/// again (and queued again when they were processed). `limit`: only the newest calls (the backfill).
+/// Returns the ids written.
+pub fn sync(project: &str, limit: Option<usize>) -> Result<Vec<String>> {
+    let l = Ledger::of(project)?;
+    let p = crate::projects::load(project)?;
+    // Strict routing: the sync runs on the thread's AI profile; a call pinned to another profile never
+    // becomes its evidence (nor reaches its people pass).
+    let profile = p.ai_profile.clone().unwrap_or_else(crate::ai::default_id);
+    let mut dirs: Vec<PathBuf> = crate::projects::calls_of(&p)?
+        .into_iter()
+        .map(|(d, _)| d)
+        .filter(|d| crate::ai::call_profile_id(d).ok().as_deref() == Some(profile.as_str()))
+        .collect();
+    if let Some(n) = limit {
+        dirs = dirs.split_off(dirs.len().saturating_sub(n));
+    }
+    let _lock = l.lock()?;
+    ensure_first_epic(&l)?;
+    let evs = l.events()?;
+    let done = processed(&evs);
+    let mut written = vec![];
+    let mut requeue = vec![];
+    for d in dirs {
+        let Some(item) = call_item(&d, Some(project)) else { continue };
+        let id = item["id"].as_str().unwrap_or("").to_string();
+        let path = l.dir.join("evidence").join(format!("{id}.json"));
+        let body = serde_json::to_vec_pretty(&item)?;
+        if fs::read(&path).ok().as_deref() == Some(body.as_slice()) {
+            continue;
+        }
+        fs::write(l.evidence_md(&id), render_md(&item))?;
+        crate::paths::write_atomic(&path, &body)?;
+        if done.contains(&id) {
+            requeue.push(json!({"type": "reprocess", "evidence": id, "why": "the call changed", "at": Local::now().to_rfc3339()}));
+        }
+        written.push(id);
+    }
+    l.append(&requeue)?;
+    Ok(written)
+}
+
+pub(crate) fn ensure_first_epic(l: &Ledger) -> Result<()> {
+    if l.events()?.iter().any(|e| e["type"] == "create" && e["kind"] == "epic") {
+        return Ok(());
+    }
+    l.append(&[json!({"type": "create", "mid": mid_of(&["plan", FIRST_EPIC]), "id": "E01", "kind": "epic", "by": "plan",
+        "evidence": null, "date": null, "fields": {"title": FIRST_EPIC, "plan": FIRST_EPIC}})])
+}
+
+/// Evidence not processed yet, oldest first, with the file the agent reads.
+pub fn pending(project: &str) -> Result<Vec<Value>> {
+    let l = Ledger::of(project)?;
+    let ev = l.evidence();
+    let done = processed(&l.events()?);
+    Ok(order(&ev)
+        .into_iter()
+        .filter(|i| !done.contains(i))
+        .map(|i| json!({"id": i, "date": ev[&i]["date"], "title": ev[&i]["title"], "file": l.evidence_md(&i).display().to_string()}))
+        .collect())
+}
+
+pub fn mark_processed(project: &str, evid: &str, note: &str) -> Result<()> {
+    let l = Ledger::of(project)?;
+    if !l.evidence().contains_key(evid) {
+        bail!("unknown evidence {evid:?}");
+    }
+    l.append(&[json!({"type": "processed", "evidence": evid, "by": "agent", "note": note, "at": Local::now().to_rfc3339()})])
+}
