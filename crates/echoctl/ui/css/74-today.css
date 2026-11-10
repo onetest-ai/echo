@@ -227,3 +227,11 @@
 .cw-day.on .cw-bar { border-bottom-color: var(--accent); }
 .cw-d { font-size: 11px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .cw-day.on .cw-d { color: var(--text); font-weight: 650; }
+
+/* Today → a widget holding the first column (Your day), the rest beside it (todayPlan). */
+.td-side { display: grid; gap: 16px; flex: 1 1 auto; min-height: 420px; }
+/* The held column is as tall as what's beside it (or the page's rest, at least): its widget fills it and scrolls
+   inside, so Your day opens on now. */
+.td-hold { position: relative; min-height: 420px; }
+.td-hold > .td-sec, .td-hold > .tw { position: absolute; inset: 0; display: flex; flex-direction: column; min-height: 0; }
+.td-rest { display: flex; flex-direction: column; gap: 16px; min-width: 0; min-height: 0; }

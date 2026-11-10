@@ -8,7 +8,7 @@ const src = appSource()
 const start = src.indexOf('// ── today layout:')
 const end = src.indexOf('// end of the today layout block', start)
 assert.ok(start >= 0 && end > start, 'the today layout block not found in app.js')
-const { todayCols, todayLines } = new Function(`${src.slice(start, end)}\nreturn { todayCols, todayLines }`)()
+const { todayCols, todayLines, todayPlan } = new Function(`${src.slice(start, end)}\nreturn { todayCols, todayLines, todayPlan }`)()
 
 const tests = []
 const test = (name, f) => tests.push([name, f])
@@ -61,6 +61,31 @@ test('a row that fits keeps its spans; nothing reorders', () => {
 test('an empty row takes no line; an empty widget leaves its row to the others', () => {
   assert.equal(show(todayLines([[W('a', 3, { empty: true })], [W('b', 1, { empty: true }), W('c', 1)]], 3)), 'c:1')
   assert.deepEqual(todayLines([], 3), [])
+})
+
+test('a fill alone on the first row at span 1 holds the first column; the rest beside it in the others (TodayResponsive)', () => {
+  const W = (id, span, fill = false, empty = false) => ({ id, span, fill, empty })
+  const rows = [[W('day', 1, true)], [W('next', 1), W('needs', 1)], [W('choices', 2)], [W('mine', 2, true)]]
+  const ids = (p) => p.lines.map((l) => l.items.map((i) => `${i.id}:${i.span}`).join(' ')).join(' | ')
+  // A: 3 columns — day holds column 1, the rest in 2 columns.
+  let p = todayPlan(rows, 3)
+  assert.equal(p.hold.id, 'day')
+  assert.equal(ids(p), 'next:1 needs:1 | choices:2 | mine:2')
+  // B: 2 columns — day keeps column 1, the rest in one, spans clamp.
+  p = todayPlan(rows, 2)
+  assert.equal(p.hold.id, 'day')
+  assert.equal(ids(p), 'next:1 | needs:1 | choices:1 | mine:1')
+  // C: 1 column — nothing held; day steps down (the strip) and comes first, as a hug line.
+  p = todayPlan(rows, 1)
+  assert.equal(p.hold, null)
+  assert.equal(p.down, 'day')
+  assert.equal(ids(p), 'day:1 | next:1 | needs:1 | choices:1 | mine:1')
+  assert.equal(p.lines[0].fill, false)
+  // Not a holder: span 2, or not alone, or not a fill, or nothing beside it — rows as before.
+  assert.equal(todayPlan([[W('day', 2, true)], [W('next', 1)]], 3).hold, null)
+  assert.equal(todayPlan([[W('day', 1, true), W('next', 1)]], 3).hold, null)
+  assert.equal(todayPlan([[W('needs', 1)], [W('next', 1)]], 3).hold, null)
+  assert.equal(todayPlan([[W('day', 1, true)]], 3).hold, null)
 })
 
 let failed = 0

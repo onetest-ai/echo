@@ -52,7 +52,16 @@ fn item(widget: &str, size: &str, row: bool) -> Item {
 
 /// Today as it has been: Needs you now and the routines' cards across, then Your day (2 columns) beside My work (1).
 pub fn default_items() -> Vec<Item> {
-    vec![item("core:needs.now", "L", true), item("core:routines.cards", "L", true), item("core:calendar.agenda", "M", true), item("core:tasks.mine", "S", false)]
+    // TodayResponsive A / TodayDense: Your day holding the first column; beside it Next meeting and Needs you now, the
+    // day's choices, routine cards, My work filling the rest (the temporal ones only while they hold something).
+    vec![
+        item("core:calendar.agenda", "S", true),
+        item("core:calendar.next", "S", true),
+        item("core:needs.now", "M", false),
+        item("core:calendar.choices", "M", true),
+        item("core:routines.cards", "M", true),
+        item("core:tasks.mine", "M", true),
+    ]
 }
 
 /// Today's widgets: the saved layout, else the default. A widget the catalog doesn't have now (a plugin off) is kept
@@ -243,12 +252,12 @@ mod tests {
     #[test]
     fn the_default_is_todays_page_and_a_missing_or_unreadable_file_gives_it() {
         let (_env, _) = paths::testenv::folders("today-layout-default");
-        assert_eq!(show(&load()), "| core:needs.now | core:routines.cards | core:calendar.agenda core:tasks.mine");
+        assert_eq!(show(&load()), "| core:calendar.agenda | core:calendar.next core:needs.now | core:calendar.choices | core:routines.cards | core:tasks.mine");
         std::fs::create_dir_all(paths::config_dir()).unwrap();
         std::fs::write(file(), "{ not json").unwrap();
         assert_eq!(load(), default_items());
         // A change starts from the default and keeps the unreadable file beside it.
-        assert_eq!(show(&remove("core:routines.cards").unwrap()), "| core:needs.now | core:calendar.agenda core:tasks.mine");
+        assert_eq!(show(&remove("core:routines.cards").unwrap()), "| core:calendar.agenda | core:calendar.next core:needs.now | core:calendar.choices | core:tasks.mine");
         assert_eq!(std::fs::read_to_string(file().with_extension("unreadable.json")).unwrap(), "{ not json");
         // A widget the catalog doesn't have now (a plugin off) keeps its place through a change.
         std::fs::write(file(), r#"{"items":[{"widget":"plugin:x:y","size":"M","row":true},{"widget":"core:tasks.mine","size":"M"}]}"#).unwrap();
@@ -264,12 +273,12 @@ mod tests {
         assert!(err(resize("core:tasks.mine", "L")).contains("takes S, M, not L"));
         assert!(err(move_to("core:tasks.mine", Some(("core:calendar.strip", Side::After)))).contains("isn't on Today"));
         let after = remove("core:routines.cards").unwrap();
-        assert_eq!(show(&after), "| core:needs.now | core:calendar.agenda core:tasks.mine");
+        assert_eq!(show(&after), "| core:calendar.agenda | core:calendar.next core:needs.now | core:calendar.choices | core:tasks.mine");
         let after = add("core:routines.cards", Some("l"), Some(("core:needs.now", Side::After))).unwrap();
-        assert_eq!(show(&after), "| core:needs.now core:routines.cards | core:calendar.agenda core:tasks.mine");
-        assert_eq!(after[1].size, "L");
-        assert_eq!(show(&move_to("core:tasks.mine", Some(("core:needs.now", Side::Above))).unwrap()), "| core:tasks.mine | core:needs.now core:routines.cards | core:calendar.agenda");
-        assert_eq!(load()[0].widget, "core:tasks.mine", "kept on disk");
+        assert_eq!(show(&after), "| core:calendar.agenda | core:calendar.next core:needs.now core:routines.cards | core:calendar.choices | core:tasks.mine");
+        assert_eq!(after[3].size, "L");
+        assert_eq!(show(&move_to("core:tasks.mine", Some(("core:needs.now", Side::Above))).unwrap()), "| core:calendar.agenda | core:calendar.next | core:tasks.mine | core:needs.now core:routines.cards | core:calendar.choices", "a row of its own just above Needs");
+        assert_eq!(load()[2].widget, "core:tasks.mine", "kept on disk");
         assert_eq!(reset().unwrap(), default_items());
     }
 }

@@ -144,6 +144,13 @@
    "priority": "medium",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-TODAY-21",
+   "feature": "Today as it comes (TodayResponsive A / TodayDense): Your day's list holding the first column the whole height (as tall as what's beside it, opened on now, scrolling inside); beside it Next meeting and Needs you now side by side, the day's choices, routine cards, My work; at 2 columns Your day keeps the first and the rest stack in the second; at 1 column Your day becomes the strip on top; a fill widget alone on the layout's first row at size S holds a column in any layout",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
   }
  ]
 }
