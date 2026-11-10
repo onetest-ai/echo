@@ -13,7 +13,7 @@ export class AppPage {
     this.foldSidebar = this.topBar.getByRole('button', { name: 'Fold the sidebar' })
     this.record = this.topBar.getByRole('button', { name: 'Record next call' })
     this.memo = this.topBar.getByRole('button', { name: 'Record a memo' })
-    this.account = this.topBar.getByRole('button', { name: /^AI profile:/ })
+    this.account = this.topBar.getByRole('button', { name: /^Claude \(/ })
     this.inbox = this.topBar.getByRole('button', { name: 'Inbox', exact: true })
     this.activities = page.getByRole('navigation', { name: 'Activities' })
     this.rightPanel = page.getByRole('complementary', { name: 'Right panel' })

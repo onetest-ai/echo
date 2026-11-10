@@ -7,7 +7,7 @@
  "features": [
   {
    "id": "F-PREP-01",
-   "feature": "Calls → \"Coming up today\" (folded) counts today's meetings still to come and names the next (\"Now\" for one going on); open, each row shows time, length, people, thread icons and opens its prep",
+   "feature": "Calls → \"Coming up today\" (folded) counts today's meetings still to come and names the next (\"Now\" for one going on); open, each row shows time, length, people, thread icons and opens its prep; a meeting already a call today (being recorded or recorded) leaves it — it is in the calls list",
    "priority": "high",
    "check": "agent",
    "axes": [
@@ -17,7 +17,7 @@
   },
   {
    "id": "F-PREP-02",
-   "feature": "A coming meeting opens like a call: date, length, how many answered yes, maybe, not yet or declined, its people (each with their answer to the invite; the most important in its threads first by influence, interest and calls together; who declined last, struck; a hover tells their role and weight, \"+N more\" lists the rest), thread chips (+ Thread), Copy link, a Prep tab; Transcript and Minutes are disabled until it is recorded",
+   "feature": "A coming meeting opens like a call: date, length, how many answered yes, maybe, not yet or declined, its people (each with their answer to the invite; the most important in its threads first by influence, interest and calls together; who declined last, struck; a hover tells their role and weight, \"+N more\" lists the rest), thread chips (+ Thread), Copy link, its one tab, Prep (Transcript and Minutes are the call's once it is recorded)",
    "priority": "medium",
    "check": "agent",
    "axes": [

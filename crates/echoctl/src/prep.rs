@@ -55,8 +55,16 @@ fn time(s: Option<&str>) -> Option<DateTime<Utc>> {
 pub fn upcoming() -> Value {
     let now = Utc::now();
     let scheduled = kept_anyway();
+    // A meeting already a call today (being recorded, or recorded) is in the calls list, not still to come.
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let recorded: Vec<String> = calls::all_calls()
+        .into_iter()
+        .filter(|d| calls::stamp_of(d).starts_with(&today))
+        .filter_map(|d| MeetingContext::load(&d).ok().flatten().and_then(|m| m.id))
+        .collect();
     let list: Vec<Value> = crate::watch::agenda()
         .into_iter()
+        .filter(|m| !m.id.as_ref().is_some_and(|i| recorded.contains(i)))
         // Only the meetings the user accepted (or organises), set to record or recorded: an invite left open or
         // tentative isn't their day yet.
         .filter(|m| (m.accepted() || m.id.as_ref().is_some_and(|i| scheduled.contains(i))) && time(m.end.as_deref()).is_none_or(|e| e > now))

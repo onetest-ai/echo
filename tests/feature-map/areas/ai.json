@@ -80,7 +80,7 @@
   },
   {
    "id": "F-AI-09",
-   "feature": "The account chip at the top bar's right end, left of the Inbox, shows the default profile by name (tooltip: its account and where it runs); with several profiles it picks the default as Make default does (kept, the status bar and Settings follow), with one it opens AI & minutes, with none it is gone",
+   "feature": "The account chip at the top bar's right end, left of the Inbox, shows the default profile by name (tooltip: its account and where it runs); with several profiles it picks the default as Make default does (kept, the status bar and Settings follow), with one it opens the Claude session (as the status bar's Claude), with none it is gone",
    "priority": "high",
    "check": "agent",
    "axes": [
