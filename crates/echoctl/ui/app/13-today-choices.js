@@ -1,0 +1,96 @@
+// ── The day's choices (`core:calendar.choices`, #315; design: Workbench `WidgetsCalendar`): meetings you accepted at
+// once — Echo suggests one and says why — and invites still to answer — accept when the time is free, decline when you
+// go elsewhere then. You decide: Accept, Maybe or Decline is sent to the organiser through Echo's Microsoft 365 sign-in
+// (`event_respond`, window/today.rs → m365::event_respond), only on your click; "Keep" one of an overlap declines the
+// others after a second click that names them.
+
+// ── day choices: what to decide today (no DOM: `today-choices.test.mjs`; built on agendaRows) ───────────────────────
+/** Today's choices still to make, in time order: `{kind: 'overlap', members, pick, why, at}` for two or more you accepted
+ *  at once (not over), `{kind: 'invite', item, suggest: 'accept'|'decline', why, at}` for an invite still to answer. */
+function dayChoices(day, now) {
+  const t = (s) => new Date(s)
+  const yes = (x) => !['notResponded', 'tentativelyAccepted', 'declined'].includes(x.response)
+  const len = (x) => t(x.end || x.start) - t(x.start)
+  const out = []
+  for (const r of agendaRows(day, now, []).rows) {
+    if (r.choice !== 'pending' || r.past) continue
+    const members = r.members.filter((x) => x.kind === 'meeting' && yes(x)).sort((a, b) => t(a.start) - t(b.start) || len(b) - len(a))
+    if (members.length < 2) continue
+    // Echo's suggestion: the one you organise, else one in a thread, else the longer, else the earlier.
+    const rules = [
+      [(x) => x.response === 'organizer', () => 'you organise it'],
+      [(x) => (x.threads || []).length > 0, (x) => `in ${x.threads[0].name}`],
+    ]
+    let pick = null, why = ''
+    for (const [has, say] of rules) {
+      const hits = members.filter(has)
+      if (hits.length === 1) { pick = hits[0]; why = say(pick); break }
+    }
+    if (!pick) {
+      const longest = Math.max(...members.map(len))
+      const longer = members.filter((x) => len(x) === longest)
+      pick = longer[0]; why = longer.length === 1 ? 'the longer' : t(longer[0].start) < t(longer[1].start) ? 'the earlier' : 'the first of them'
+    }
+    out.push({ kind: 'overlap', members, pick, why, at: t(members[0].start) })
+  }
+  const going = (day || []).filter((x) => x.start && (x.kind === 'call' || yes(x)) && t(x.end || x.start) > now)
+  for (const x of day || []) {
+    if (x.kind !== 'meeting' || x.response !== 'notResponded' || !x.start || t(x.end || x.start) <= now) continue
+    const at = going.filter((g) => t(g.start) < t(x.end || x.start) && t(x.start) < t(g.end || g.start)).sort((a, b) => t(a.start) - t(b.start))
+    // Where you go then: the one Echo suggests keeping, when it is among them, else the first.
+    const picks = out.filter((c) => c.kind === 'overlap').map((c) => c.pick)
+    const clash = at.find((g) => picks.includes(g)) || at[0]
+    out.push({ kind: 'invite', item: x, suggest: clash ? 'decline' : 'accept', why: clash ? `you go to ${clash.subject || 'another meeting'} then` : 'your day is free then', at: t(x.start) })
+  }
+  return out.sort((a, b) => a.at - b.at)
+}
+// end of the day choices block
+
+/** The widget: a line a choice; nothing to decide, nothing drawn (temporal). */
+function dayChoicesView(d, now) {
+  const cs = dayChoices(d.day, now)
+  if (!cs.length) return ''
+  const busy = S.tdResp || {}
+  const btn = (x, how, label, primary) => {
+    const sending = busy[x.event] === how
+    return `<button class="btn sm${primary ? ' primary' : ''}" data-td-respond="${esc(how)}" data-event="${esc(x.event)}" ${busy[x.event] ? 'disabled' : ''}>${sending ? 'Sending…' : esc(label)}</button>`
+  }
+  const lines = cs.map((c) => {
+    if (c.kind === 'invite') {
+      const x = c.item
+      return `<div class="ch-row" role="listitem" data-td-ev="${esc(x.event || '')}" aria-label="${esc(`Invite: ${x.subject || 'A meeting'}`)}"><span class="ag-t mono">${esc(hm(c.at))}</span><div class="ch-b"><div><b>${esc(x.subject || 'A meeting')}</b> <span class="set-sub">not answered</span></div><div class="set-sub">Echo suggests: <b>${c.suggest === 'accept' ? 'Accept' : 'Decline'}</b> — ${esc(c.why)}</div><div class="ch-acts">${btn(x, 'accept', 'Accept', c.suggest === 'accept')}${btn(x, 'tentative', 'Maybe')}${btn(x, 'decline', 'Decline', c.suggest === 'decline')}</div></div></div>`
+    }
+    const key = c.members.map((x) => x.event).join('|')
+    const confirm = S.tdKeep && S.tdKeep.key === key ? c.members.find((x) => x.event === S.tdKeep.event) : null
+    const others = (keep) => c.members.filter((x) => x !== keep)
+    const acts = confirm
+      ? `<span class="set-sub">Decline ${esc(others(confirm).map((x) => x.subject || 'a meeting').join(', '))}? The organiser${others(confirm).length === 1 ? ' is' : 's are'} told.</span><button class="btn sm primary" data-td-keep-yes="1" data-keep="${esc(confirm.event)}" data-decline="${esc(others(confirm).map((x) => x.event).join('|'))}">Decline ${others(confirm).length === 1 ? 'it' : 'them'}</button><button class="btn sm ghost" data-td-keep-no="1">Cancel</button>`
+      : c.members.map((x) => `<button class="btn sm${x === c.pick ? ' primary' : ''}" data-td-keep="${esc(x.event)}" data-key="${esc(key)}" ${c.members.some((m) => busy[m.event]) ? 'disabled' : ''}>Keep ${esc(x.subject || 'this one')}</button>`).join('')
+    return `<div class="ch-row" role="listitem" aria-label="${esc(`At once: ${c.members.map((x) => x.subject).join(' or ')}`)}"><span class="ag-t mono choice">${esc(hm(c.at))}</span><div class="ch-b"><div>${c.members.map((x) => `<b class="ch-m" data-td-ev="${esc(x.event || '')}">${esc(x.subject || 'A meeting')}</b>`).join(' <span class="set-sub">or</span> ')}</div><div class="set-sub">You accepted ${c.members.length} at once. Echo suggests <b>${esc(c.pick.subject || 'one')}</b> — ${esc(c.why)}</div><div class="ch-acts">${acts}</div></div></div>`
+  }).join('')
+  return `<section class="td-sec ch-sec" aria-label="The day's choices"><h2>The day's choices <span class="set-sub">${cs.length}</span></h2><div class="ch-list" role="list">${lines}</div></section>`
+}
+
+/** Sends one answer; the reply refreshes Today (the agenda says the new answer). */
+function todayRespond(event, how) {
+  S.tdResp = { ...(S.tdResp || {}), [event]: how }
+  render()
+  send({ cmd: 'event_respond', event, how })
+  // The answer is in the agenda once the reply's refresh comes; the buttons come back after a while either way.
+  setTimeout(() => { if (S.tdResp) { delete S.tdResp[event]; render() } }, 8000)
+}
+
+document.addEventListener('click', (e) => {
+  if (S.view !== 'today' || !e.target.closest) return
+  const r = e.target.closest('[data-td-respond]')
+  if (r) { e.stopPropagation(); return todayRespond(r.dataset.event, r.dataset.tdRespond) }
+  const k = e.target.closest('[data-td-keep]')
+  if (k) { e.stopPropagation(); S.tdKeep = { key: k.dataset.key, event: k.dataset.tdKeep }; return render() }
+  if (e.target.closest('[data-td-keep-no]')) { e.stopPropagation(); S.tdKeep = null; return render() }
+  const y = e.target.closest('[data-td-keep-yes]')
+  if (y) {
+    e.stopPropagation()
+    S.tdKeep = null
+    for (const ev of y.dataset.decline.split('|').filter(Boolean)) todayRespond(ev, 'decline')
+  }
+}, true)

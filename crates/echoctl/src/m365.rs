@@ -194,6 +194,35 @@ pub fn mail_reply_text(id: &str, all: bool, md: &str, ai: Option<&str>, yes: boo
     Ok(json!({"sent": true, "reply_to": m["subject"]}))
 }
 
+/// An answer to a meeting invite (`how`: accept, tentative, decline), sent to its organiser — the user's click on Today's
+/// choices is the yes. Today's agenda takes the answer at once (the next calendar sync confirms it).
+#[cfg_attr(not(feature = "tray"), allow(dead_code))]
+pub fn event_respond(event: &str, how: &str, yes: bool) -> Result<Value> {
+    let (verb, said) = match how {
+        "accept" => ("accept", "accepted"),
+        "tentative" => ("tentativelyAccept", "tentativelyAccepted"),
+        "decline" => ("decline", "declined"),
+        _ => bail!("no answer {how:?}: accept, tentative or decline"),
+    };
+    let mut agenda = crate::watch::agenda();
+    let Some(m) = agenda.iter_mut().find(|m| m.id.as_deref() == Some(event)) else { bail!("no meeting {event:?} in today's agenda") };
+    let would = json!({"meeting": m.subject, "answer": said});
+    if !yes {
+        return Ok(not_sent(would));
+    }
+    not_in_run()?;
+    graph::request("POST", &format!("/me/events/{}/{verb}", enc(event)), Body::Json(&json!({"sendResponse": true})), None, &[])
+        .map_err(|e| {
+            // Refused by Microsoft 365 (the sign-in may not be allowed to change the calendar): say where to answer.
+            let e = format!("{e:#}");
+            if e.contains("403") || e.contains("Forbidden") || e.contains("Authorization") { anyhow::anyhow!("{e} — answer it in Outlook instead") } else { anyhow::anyhow!(e) }
+        })?;
+    m.response = Some(said.into());
+    let subject = m.subject.clone();
+    crate::watch::write_agenda(&agenda)?;
+    Ok(json!({"sent": true, "meeting": subject, "answer": said}))
+}
+
 /// A draft in the user's Drafts (nothing is sent): its link, to open and send from Outlook.
 pub fn mail_draft(to: &[String], cc: &[String], subject: &str, file: &Path, ai: Option<&str>) -> Result<Value> {
     not_in_run()?;
@@ -446,6 +475,19 @@ pub fn get(path: &str) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_invite_answer_says_what_it_would_send_and_refuses_what_it_cannot() {
+        let (_env, _) = crate::paths::testenv::folders("m365-respond");
+        let m: crate::meeting::MeetingContext = serde_json::from_value(json!({"id": "ev-1", "subject": "Ops weekly", "response": "notResponded"})).unwrap();
+        crate::watch::write_agenda(&[m]).unwrap();
+        // Without the user's yes nothing is sent, and the agenda keeps its answer.
+        let v = event_respond("ev-1", "tentative", false).unwrap();
+        assert_eq!(v["would"], json!({"meeting": "Ops weekly", "answer": "tentativelyAccepted"}));
+        assert_eq!(crate::watch::agenda()[0].response.as_deref(), Some("notResponded"));
+        assert!(event_respond("ev-1", "maybe", false).unwrap_err().to_string().contains("accept, tentative or decline"));
+        assert!(event_respond("ev-9", "accept", false).unwrap_err().to_string().contains("no meeting"));
+    }
 
     #[test]
     fn hits_read_the_same_whatever_their_kind() {

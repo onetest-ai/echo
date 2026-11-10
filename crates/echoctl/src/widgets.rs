@@ -32,6 +32,7 @@ pub const CORE: &[Widget] = &[
     w("core:calendar.agenda", "Calendar", "Your day · agenda", "where you'll be, a reason on each line", "day", &["S", "M"], "fill", false),
     w("core:calendar.calendar", "Calendar", "Your day · calendar", "by the hour, overlaps side by side", "day", &["S", "M"], "fill", false),
     w("core:calendar.strip", "Calendar", "Your day · strip", "the whole day in one bar", "day", &["M", "L"], "hug", false),
+    w("core:calendar.choices", "Calendar", "The day's choices", "meetings at once and invites to answer, with what Echo suggests", "choices", &["M", "L"], "hug", true),
     w("core:calendar.next", "Calendar", "Next meeting", "what to walk in knowing, who's coming", "next", &["S", "M", "L"], "hug", true),
     w("core:tasks.mine", "Tasks", "My work · this week", "late first, then by date; whose each one is", "work", &["S", "M"], "fill", false),
     w("core:needs.now", "Needs you", "Needs you now", "the last 24 hours, where you watch", "needs", &["M", "L"], "hug", true),
@@ -57,7 +58,7 @@ pub struct Inputs<'a> {
 pub fn data(id: &str, i: &Inputs) -> Result<Value> {
     let w = find(id)?;
     let mut v = match w.kind {
-        "day" => day(),
+        "day" | "choices" => day(),
         "next" => next_meeting(&crate::today::day()),
         "work" => crate::today::work(i.tasks),
         "needs" => crate::needs::view(),
@@ -69,11 +70,26 @@ pub fn data(id: &str, i: &Inputs) -> Result<Value> {
             "next" => v["next"].is_null(),
             "needs" => v["items"].as_array().is_none_or(|a| a.is_empty()),
             "cards" => v["cards"].as_array().is_none_or(|a| a.is_empty()),
+            "choices" => !has_choices(v["day"].as_array().map(Vec::as_slice).unwrap_or(&[]), chrono::Utc::now()),
             _ => false,
         };
         v["empty"] = json!(empty);
     }
     Ok(v)
+}
+
+/// Whether the day still holds a choice (the window's `dayChoices` says which): an invite not answered and not over, or
+/// two meetings you accepted at once, not over.
+fn has_choices(day: &[Value], now: chrono::DateTime<chrono::Utc>) -> bool {
+    let at = |v: &Value, k: &str| v[k].as_str().and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok()).map(|t| t.with_timezone(&chrono::Utc));
+    let span = |x: &Value| Some((at(x, "start")?, at(x, "end").or_else(|| at(x, "start"))?));
+    let meeting = |x: &&Value| x["kind"] == "meeting";
+    let open: Vec<(&Value, _)> = day.iter().filter(meeting).filter_map(|x| span(x).filter(|(_, e)| *e > now).map(|s| (x, s))).collect();
+    if open.iter().any(|(x, _)| x["response"] == "notResponded") {
+        return true;
+    }
+    let yes: Vec<_> = open.iter().filter(|(x, _)| !matches!(x["response"].as_str(), Some("tentativelyAccepted" | "declined"))).map(|(_, s)| *s).collect();
+    yes.iter().enumerate().any(|(i, a)| yes[i + 1..].iter().any(|b| a.0 < b.1 && b.0 < a.1))
 }
 
 /// Your day (agenda, calendar and strip show the same day): its meetings and calls, and whether the calendar
@@ -166,6 +182,18 @@ mod tests {
         assert_eq!((b["expected"][0]["late"].as_bool(), b["expected"][1]["from"].as_str()), (Some(true), Some("Kim Park")));
         assert_eq!(b["ask"], json!(["Who signs off?", "Monday?"]), "questions only, two at most");
         assert_eq!(brief(&json!({}))["expected"], json!([]));
+    }
+
+    #[test]
+    fn the_days_choices_are_an_open_invite_or_two_accepted_at_once() {
+        let now = chrono::Utc::now();
+        let t = |h: i64| (now + chrono::Duration::hours(h)).to_rfc3339();
+        let m = |s: i64, e: i64, r: &str| json!({"kind": "meeting", "start": t(s), "end": t(e), "response": r});
+        assert!(!has_choices(&[m(1, 2, "accepted"), m(3, 4, "organizer")], now), "none at once");
+        assert!(has_choices(&[m(1, 3, "accepted"), m(2, 4, "organizer")], now), "two accepted at once");
+        assert!(!has_choices(&[m(1, 3, "accepted"), m(2, 4, "tentativelyAccepted")], now), "a maybe isn't a choice");
+        assert!(has_choices(&[m(5, 6, "notResponded")], now), "an invite to answer");
+        assert!(!has_choices(&[m(-3, -2, "notResponded"), m(-3, -1, "accepted"), m(-3, -1, "accepted")], now), "what is over");
     }
 
     #[test]

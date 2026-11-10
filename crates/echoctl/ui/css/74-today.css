@@ -166,3 +166,12 @@
 /* A list cut by its card: a fade at the bottom while there is more below (todayMoreCue). */
 .td-rows[data-more]::after, .td-tasks[data-more]::after { content: ''; position: sticky; bottom: 0; display: block; flex: none; height: 32px; margin-top: -32px; pointer-events: none; background: linear-gradient(to bottom, transparent, var(--surface)); }
 .td-stale .warn, .td .warn { color: var(--warn); }
+
+/* Today → The day's choices: a line a choice, what Echo suggests, the answers as buttons. */
+.ch-list { display: flex; flex-direction: column; }
+.ch-row { display: grid; grid-template-columns: 64px 1fr; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); }
+.ch-row:first-child { border-top: 0; }
+.ch-row[data-td-ev], .ch-m[data-td-ev] { cursor: pointer; }
+.ch-b { display: flex; flex-direction: column; gap: 3px; min-width: 0; font-size: 13px; }
+.ch-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; }
+.ch-row .ag-t.choice { color: var(--warn); }

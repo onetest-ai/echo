@@ -57,7 +57,7 @@ function todayView() {
   // by side. Sizes take effect with the layout engine (#315).
   // Your day and My work always sit in the grid (it gives them their inner scroll), alone or together, as before.
   const sizeOf = Object.fromEntries((d.layout || []).map((i) => [i.widget, i.size]))
-  const parts = { 'core:needs.now': needsView(d.needs, d.asks) + wontView(d.asks), 'core:routines.cards': cards, 'core:calendar.agenda': day, 'core:tasks.mine': work, 'core:calendar.next': nextMeetingView(d.next, sizeOf['core:calendar.next'] || 'M', now), 'core:calendar.calendar': dayCalendarView(d, now), 'core:calendar.strip': dayStripView(d, now) }
+  const parts = { 'core:needs.now': needsView(d.needs, d.asks) + wontView(d.asks), 'core:routines.cards': cards, 'core:calendar.agenda': day, 'core:tasks.mine': work, 'core:calendar.next': nextMeetingView(d.next, sizeOf['core:calendar.next'] || 'M', now), 'core:calendar.calendar': dayCalendarView(d, now), 'core:calendar.strip': dayStripView(d, now), 'core:calendar.choices': dayChoicesView(d, now) }
   S.tdParts = parts // Add a widget's previews (13-today-edit.js)
   const layoutRows = todayRows(d.layout, Object.keys(parts))
   // Won't-do drafts waiting for Send belong to Needs you now; with it off Today, they come under the head.
@@ -270,14 +270,14 @@ document.addEventListener('click', async (e) => {
   // An item of the menu: Show details, or Add to a thread (its picker lives in the card) → the card on the right.
   const it = e.target.closest('[data-ev-ctx]')
   if (it && (it.dataset.evCtx === 'open' || it.dataset.evCtx === 'thread')) return todayCard(it.dataset.id)
-  const row = e.target.closest('.ag-row[data-td-ev], .dc-ev[data-td-ev], .ds-ev[data-td-ev]')
+  const row = e.target.closest('.ag-row[data-td-ev], .dc-ev[data-td-ev], .ds-ev[data-td-ev], .ch-row[data-td-ev], .ch-m[data-td-ev]')
   if (row && row.dataset.tdEv && !e.target.closest('button, a, .pj-chip')) {
     const id = row.dataset.tdEv
     if (await todayMeeting(id)) todayCard(id)
   }
 })
 document.addEventListener('contextmenu', async (e) => {
-  const row = S.view === 'today' && e.target.closest && e.target.closest('.ag-row[data-td-ev], .dc-ev[data-td-ev], .ds-ev[data-td-ev]')
+  const row = S.view === 'today' && e.target.closest && e.target.closest('.ag-row[data-td-ev], .dc-ev[data-td-ev], .ds-ev[data-td-ev], .ch-row[data-td-ev], .ch-m[data-td-ev]')
   if (!row || !row.dataset.tdEv) return
   e.preventDefault()
   const id = row.dataset.tdEv, x = e.clientX, y = e.clientY
