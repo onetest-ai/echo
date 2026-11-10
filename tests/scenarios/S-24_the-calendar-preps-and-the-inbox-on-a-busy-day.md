@@ -47,6 +47,7 @@ cases:
   - tests/cases/today/TC-019_echoctl-widget-gives-todays-widgets-and-the-same-data-today-shows.md
   - tests/cases/today/TC-020_echoctl-today-arranges-todays-widgets-and-the-page-follows.md
   - tests/cases/today/TC-021_today-lays-itself-out-by-its-width-and-the-widgets-sizes.md
+  - tests/cases/today/TC-022_next-meeting-on-today-at-s-m-and-l.md
 auto: [tests/auto/specs/S-24.spec.mjs]
 ---
 
@@ -114,6 +115,7 @@ auto: [tests/auto/specs/S-24.spec.mjs]
 | 41 | `today/TC-019_echoctl-widget-gives-todays-widgets-and-the-same-data-today-shows.md` | — | — |
 | 42 | `today/TC-020_echoctl-today-arranges-todays-widgets-and-the-page-follows.md` | — | — |
 | 43 | `today/TC-021_today-lays-itself-out-by-its-width-and-the-widgets-sizes.md` | — | — |
+| 44 | `today/TC-022_next-meeting-on-today-at-s-m-and-l.md` | — | — |
 
 ## Notes
 - A stage that continues an earlier stage's view ("On stage N's view") takes one snapshot first; if the state is not there (the earlier stage failed before it), it does the skipped steps after all.

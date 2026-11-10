@@ -29,7 +29,12 @@ pub(super) fn route(path: &str, req: &Request<Vec<u8>>) -> Option<Response<Cow<'
         "/api/today" => {
             let mut v = crate::today::view(&tasks_view());
             // Which widgets Today shows, in what order and rows (this computer's `today-layout.json`).
-            v["layout"] = json!(crate::today_layout::load());
+            let layout = crate::today_layout::load();
+            // Next meeting only when it is on Today: its prep and the invite's answers are read for it.
+            if layout.iter().any(|i| i.widget == "core:calendar.next") {
+                v["next"] = crate::widgets::data("core:calendar.next", &crate::widgets::Inputs { tasks: &Value::Null }).map(|n| n["next"].clone()).unwrap_or(Value::Null);
+            }
+            v["layout"] = json!(layout);
             // A Teams transcript being imported, or why it wasn't (the calendar's own state, by event).
             let imports = IMPORTS.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_default();
             for x in v["day"].as_array_mut().into_iter().flatten() {

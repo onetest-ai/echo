@@ -88,6 +88,13 @@
    "priority": "high",
    "check": "agent",
    "axes": []
+  },
+  {
+   "id": "F-TODAY-13",
+   "feature": "Next meeting on Today (core:calendar.next, put on with echoctl today): S the time, subject and buttons (Show prep or Prepare, Join & record with its language); M also what is expected from you; L the prep brought to the front — walk in knowing (In short, up to 3 expected), who's coming (the invite's answers, a newcomer named), ask them (up to 2 open questions), records with the call, Open prep / Ask Claude about it; under way it says Now; none left today, no widget and no gap",
+   "priority": "high",
+   "check": "agent",
+   "axes": []
   }
  ]
 }

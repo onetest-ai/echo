@@ -58,7 +58,7 @@ pub fn data(id: &str, i: &Inputs) -> Result<Value> {
     let w = find(id)?;
     let mut v = match w.kind {
         "day" => day(),
-        "next" => next(&crate::today::day(), chrono::Utc::now()),
+        "next" => with_brief(next(&crate::today::day(), chrono::Utc::now())),
         "work" => crate::today::work(i.tasks),
         "needs" => crate::needs::view(),
         "cards" => json!({ "cards": crate::today::cards() }),
@@ -91,6 +91,26 @@ fn next(day: &[Value], now: chrono::DateTime<chrono::Utc>) -> Value {
     json!({ "next": n })
 }
 
+/// The next meeting with what its prep says, for Next meeting's M and L: what to walk in knowing (the prep's In short,
+/// what is expected from you), what to ask (its open questions), who is coming (the invite's answers, a minute old at
+/// most). No model call: a prep is written by its own job.
+fn with_brief(mut v: Value) -> Value {
+    let Some(pid) = v["next"]["prep"]["id"].as_str().map(str::to_owned) else { return v };
+    if let Some(p) = crate::prep::load(&pid) {
+        v["next"]["brief"] = brief(&p);
+    }
+    v["next"]["people"] = crate::prep::attendees(&pid).unwrap_or(Value::Null);
+    v
+}
+
+/// A prep's few lines for Next meeting: its In short, up to 3 things expected from you, up to 2 open questions.
+fn brief(p: &Value) -> Value {
+    let list = |k: &str| p[k].as_array().cloned().unwrap_or_default();
+    let expected: Vec<Value> = list("expected").iter().take(3).map(|x| json!({"title": x["title"], "kind": x["kind"], "late": x["late"], "from": x["from"]})).collect();
+    let ask: Vec<Value> = list("open").iter().filter(|x| x["kind"] == "question").take(2).map(|x| x["title"].clone()).collect();
+    json!({ "summary": p["summary"], "expected": expected, "ask": ask })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -119,6 +139,21 @@ mod tests {
         assert_eq!(next(&day, t(10, 30))["next"]["subject"], "Globex review");
         assert_eq!(next(&day, t(11, 30))["next"]["subject"], "Globex review", "one under way counts");
         assert!(next(&day, t(12, 30))["next"].is_null());
+    }
+
+    #[test]
+    fn next_meetings_brief_is_the_preps_in_short_three_things_expected_and_two_questions() {
+        let p = json!({
+            "summary": "Pricing first.",
+            "expected": [{"title": "A", "kind": "task", "late": true}, {"title": "B", "kind": "reply", "from": "Kim Park"}, {"title": "C"}, {"title": "D"}],
+            "open": [{"kind": "risk", "title": "SSO may slip"}, {"kind": "question", "title": "Who signs off?"}, {"kind": "question", "title": "Monday?"}, {"kind": "question", "title": "Third?"}],
+        });
+        let b = brief(&p);
+        assert_eq!(b["summary"], "Pricing first.");
+        assert_eq!(b["expected"].as_array().unwrap().iter().map(|x| x["title"].as_str().unwrap()).collect::<Vec<_>>(), ["A", "B", "C"]);
+        assert_eq!((b["expected"][0]["late"].as_bool(), b["expected"][1]["from"].as_str()), (Some(true), Some("Kim Park")));
+        assert_eq!(b["ask"], json!(["Who signs off?", "Monday?"]), "questions only, two at most");
+        assert_eq!(brief(&json!({}))["expected"], json!([]));
     }
 
     #[test]
