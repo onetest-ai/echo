@@ -8,6 +8,7 @@ module: shell
 run: agent
 platform: any
 tags: [shell, panels]
+auto: [tests/auto/specs/S-13.spec.mjs]
 ---
 
 # TC-011: The Inbox button opens the right panel on the Inbox tab and closes it

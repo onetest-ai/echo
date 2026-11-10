@@ -282,7 +282,7 @@ const SETTINGS_BODY = {
     const known = PANEL_VIEWS
     const rows = known.filter((v) => v.id !== 'shell').map((v) => {
       const area = Layout.area(v.id, known)
-      return setRow(`${v.icon || ''} ${esc(v.label)}`, '', `<div class="seg" role="group">${['right', 'bottom'].map((a) => `<button data-layout-move="${v.id}" data-to="${a}" aria-pressed="${area === a}">${a === 'right' ? 'Right' : 'Bottom'}</button>`).join('')}</div>`)
+      return setRow(`${v.icon || ''} ${esc(v.label)}`, '', `<div class="seg" role="group" aria-label="${esc(v.label)}">${['right', 'bottom'].map((a) => `<button data-layout-move="${v.id}" data-to="${a}" aria-pressed="${area === a}">${a === 'right' ? 'Right' : 'Bottom'}</button>`).join('')}</div>`)
     })
     const bar = ownTitleBarCard(st, S.state)
     return `<h2>Layout</h2><p class="set-lead">Where each view opens. Also from a panel's own move button; drag a panel's edge to resize it.</p>` + bar + setCard('Panel views', rows) +

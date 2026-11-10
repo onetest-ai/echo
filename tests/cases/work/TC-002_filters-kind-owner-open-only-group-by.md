@@ -8,6 +8,7 @@ module: work
 run: agent
 platform: any
 tags: [work, filters]
+auto: [tests/auto/specs/S-06.spec.mjs]
 ---
 
 # TC-002: The Work bar filters by kind, owner and Open only; the board groups by story or owner

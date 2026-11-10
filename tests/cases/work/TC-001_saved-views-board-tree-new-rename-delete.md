@@ -8,6 +8,7 @@ module: work
 run: agent
 platform: any
 tags: [work, views]
+auto: [tests/auto/specs/S-06.spec.mjs]
 ---
 
 # TC-001: Saved views: Board and Tree, + New view, rename, duplicate, delete; the choice is remembered per thread

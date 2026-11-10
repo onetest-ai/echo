@@ -8,6 +8,7 @@ module: shell
 run: agent
 platform: any
 tags: [shell, palette]
+auto: [tests/auto/specs/S-13.spec.mjs]
 ---
 
 # TC-010: A palette item that cannot run is greyed with the reason

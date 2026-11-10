@@ -8,6 +8,7 @@ module: work
 run: agent
 platform: any
 tags: [work, sync]
+auto: [tests/auto/specs/S-06.spec.mjs]
 ---
 
 # TC-003: The sync line says Not synced yet and how many calls wait and items wait for review

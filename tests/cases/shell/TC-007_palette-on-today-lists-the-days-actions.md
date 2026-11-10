@@ -8,6 +8,7 @@ module: shell
 run: agent
 platform: any
 tags: [shell, palette]
+auto: [tests/auto/specs/S-13.spec.mjs]
 ---
 
 # TC-007: ⌘K on Today lists Today's actions and the user's tasks

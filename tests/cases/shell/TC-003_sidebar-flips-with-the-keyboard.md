@@ -8,6 +8,7 @@ module: shell
 run: agent
 platform: any
 tags: [shell, activity-bar, keyboard]
+auto: [tests/auto/specs/S-13.spec.mjs]
 ---
 
 # TC-003: The sidebar flips with ⌘\ (Ctrl+\)

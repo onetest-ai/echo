@@ -158,9 +158,9 @@ function viewTabs() {
   const tab = (v) => {
     const on = v.id === cur
     const menu = on && S.pj.viewMenu ? `<div class="menu bd-menu wv-menu" role="menu"><div class="bd-menu-row"><input data-view-name value="${esc(v.name || 'View')}" aria-label="View name" autofocus></div><button class="menu-item" data-pj="view-dup">Duplicate view</button>${b.views.length > 1 ? '<button class="menu-item danger" data-pj="view-del">Delete view</button>' : ''}</div>` : ''
-    return `<span class="wv-tab${on ? ' on' : ''}"><button class="wv-b" data-pj="${on ? 'view-menu' : 'view-pick'}" data-v="${esc(v.id)}"${on ? ' title="Rename, duplicate or delete this view" aria-haspopup="menu"' : ''}>${icon(v)}${esc(v.name || 'View')}</button>${on ? `<span class="pj-add-wrap"><button class="icon-btn wv-more" data-pj="view-menu" aria-label="View options" aria-haspopup="menu" aria-expanded="${!!S.pj.viewMenu}">${ICON('<path d="M7 10l5 5 5-5"/>')}</button>${menu}</span>` : ''}</span>`
+    return `<span class="wv-tab${on ? ' on' : ''}"><button class="wv-b" data-pj="${on ? 'view-menu' : 'view-pick'}" data-v="${esc(v.id)}"${on ? ' aria-current="true"' : ''}${on ? ' title="Rename, duplicate or delete this view" aria-haspopup="menu"' : ''}>${icon(v)}${esc(v.name || 'View')}</button>${on ? `<span class="pj-add-wrap"><button class="icon-btn wv-more" data-pj="view-menu" aria-label="View options" aria-haspopup="menu" aria-expanded="${!!S.pj.viewMenu}">${ICON('<path d="M7 10l5 5 5-5"/>')}</button>${menu}</span>` : ''}</span>`
   }
-  return `<div class="wv-tabs">${b.views.map(tab).join('')}<button class="wv-add" data-pj="view-new">+ New view</button></div>`
+  return `<div class="wv-tabs" role="group" aria-label="Views">${b.views.map(tab).join('')}<button class="wv-add" data-pj="view-new">+ New view</button></div>`
 }
 
 function saveBoard(b) {
@@ -195,7 +195,7 @@ function workBoard(w, pass) {
       show.has('holds_up') && (n.blocks || []).length && n.state !== 'done' ? `<span class="bd-chip" title="Holds up: ${esc(n.blocks.map((x) => (N[x] || {}).title || x).join('; '))}">holds up ${n.blocks.length}</span>` : '',
       show.has('source') && item ? `<span class="bd-chip" title="${esc(item.title || '')}">▮ ${esc(relDay(item.date))}</span>` : '',
     ].filter(Boolean).join('')
-    return `<div class="bd-card${S.pj.node === n.id ? ' on' : ''}${n.state === 'done' ? ' done' : ''}" draggable="true" data-pj="node" data-node="${esc(n.id)}" data-drag="${esc(n.id)}" tabindex="0">
+    return `<div class="bd-card${S.pj.node === n.id ? ' on' : ''}${n.state === 'done' ? ' done' : ''}" role="listitem" draggable="true" data-pj="node" data-node="${esc(n.id)}" data-drag="${esc(n.id)}" tabindex="0">
       <div class="bd-top"><span class="bd-ctx"><span class="wk-id">${esc(n.id)}</span>${show.has('story') && story && b.group !== 'story' ? ` · ${esc(story.title)}` : ''}</span>${show.has('owner') && n.kind === 'task' ? avatar(owner, !!n.client_owner && !n.internal_owner) : ''}</div>
       <div class="bd-t">${esc(n.title)}</div>${chips ? `<div class="bd-f">${chips}</div>` : ''}
     </div>`
@@ -224,13 +224,13 @@ function workBoard(w, pass) {
         <button class="menu-item" data-pj="col-set" data-col="${esc(c.id)}" data-k="hidden" data-v="true">Hide</button>
         <button class="menu-item danger" data-pj="col-delete" data-col="${esc(c.id)}">Delete column</button>
       </div>` : ''
-    return `<div class="bd-col-h${n ? '' : ' empty'}" title="${esc(c.name)}"><span class="bd-dot" style="background:${esc(c.color)}"></span><b class="bd-hl">${esc(c.name)}</b><span class="bd-n${over ? ' over' : ''}">${n}${c.limit ? ` / ${c.limit}` : ''}</span><span class="grow"></span><span class="pj-add-wrap"><button class="icon-btn bd-more" data-pj="col-menu" data-col="${esc(c.id)}" aria-label="Column options" title="Column options">${ICON('<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>')}</button>${menu}</span></div>`
+    return `<div class="bd-col-h${n ? '' : ' empty'}" role="group" aria-label="${esc(c.name)}" title="${esc(c.name)}"><span class="bd-dot" style="background:${esc(c.color)}"></span><b class="bd-hl">${esc(c.name)}</b><span class="bd-n${over ? ' over' : ''}">${n}${c.limit ? ` / ${c.limit}` : ''}</span><span class="grow"></span><span class="pj-add-wrap"><button class="icon-btn bd-more" data-pj="col-menu" data-col="${esc(c.id)}" aria-label="Column options" title="Column options">${ICON('<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>')}</button>${menu}</span></div>`
   }
   const hiddenCols = b.columns.filter((c) => c.hidden || b.hide.includes(c.id))
   // Every column a card's width: the board scrolls sideways when there are many.
   const grid = `grid-template-columns: repeat(${cols.length}, var(--bd-w)) var(--bd-add)`
   const header = `<div class="bd-grid bd-heads" style="${grid}">${cols.map(head).join('')}<div class="bd-col-h add"><button class="tok add" data-pj="col-add">+ Column</button>${hiddenCols.length ? `<button class="link-btn" data-pj="col-unhide">${hiddenCols.length} hidden</button>` : ''}</div></div>`
-  const laneHtml = (l) => `${l.title ? `<div class="bd-lane-h">${l.title}<span class="bd-meta">${l.rows.length}</span></div>` : ''}<div class="bd-grid" style="${grid}">${cols.map((c) => `<div class="bd-col" data-drop="${c.state === 'waiting' ? '' : esc(c.id)}">${l.rows.filter(([, x]) => x.id === c.id).map(([n]) => card(n)).join('') || '<div class="bd-empty"></div>'}</div>`).join('')}<div></div></div>`
+  const laneHtml = (l) => `${l.title ? `<div class="bd-lane-h">${l.title}<span class="bd-meta">${l.rows.length}</span></div>` : ''}<div class="bd-grid" style="${grid}">${cols.map((c) => `<div class="bd-col" role="list" aria-label="${esc(c.name)}" data-drop="${c.state === 'waiting' ? '' : esc(c.id)}">${l.rows.filter(([, x]) => x.id === c.id).map(([n]) => card(n)).join('') || '<div class="bd-empty"></div>'}</div>`).join('')}<div></div></div>`
   if (!placed.length) return `<div class="wk-empty"><b>Nothing here</b><p>No tasks match the filters.</p></div>`
   // data-keep-scroll: a redraw (opening a column's menu) keeps where the board was scrolled sideways (#109).
   return `<div class="bd${b.group !== 'none' ? ' grouped' : ''}" data-keep-scroll>${header}${lanes.map(laneHtml).join('')}</div>`
@@ -292,7 +292,7 @@ function projectWork(p) {
   const layoutChip = `<label class="fchip">${V.layout === 'tree' ? 'Tree' : 'Board'} ▾<select data-view-layout aria-label="Layout"><option value="board"${V.layout === 'board' ? ' selected' : ''}>Board</option><option value="tree"${V.layout === 'tree' ? ' selected' : ''}>Tree</option></select></label>`
   const kindChip = `<label class="fchip${V.kind ? ' on' : ''}">${esc((KIND_FILTERS.find(([k]) => k === V.kind) || KIND_FILTERS[0])[1])} ▾<select data-pj-filter="kind" aria-label="Kind">${KIND_FILTERS.map(([k, l]) => `<option value="${k}"${V.kind === k ? ' selected' : ''}>${esc(l)} · ${counts[k]}</option>`).join('')}</select></label>`
   const ownerChip = `<label class="fchip${V.owner ? ' on' : ''}">${esc(V.owner === '-' ? 'Nobody named' : (owners.find(([, , on]) => on) || [])[1] || V.owner || 'Owner')} ▾<select data-pj-filter="owner" aria-label="Owner"><option value="">Anyone</option><option value="-"${V.owner === '-' ? ' selected' : ''}>Nobody named</option>${owners.map(([v, l, on]) => `<option value="${esc(v)}"${on ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`
-  const head = `${viewTabs()}<div class="wk-bar">${layoutChip}${kindChip}${ownerChip}<button class="fchip${V.open ? ' on' : ''}" data-pj="open-only">Open only</button>${V.layout === 'board' ? boardChips() : ''}<span class="grow"></span><span class="wk-sync">${syncText}</span><button class="link-btn" data-pj="sync"${sync.state === 'running' ? ' disabled' : ''}>Sync now</button></div>`
+  const head = `${viewTabs()}<div class="wk-bar">${layoutChip}${kindChip}${ownerChip}<button class="fchip${V.open ? ' on' : ''}" data-pj="open-only" aria-pressed="${!!V.open}">Open only</button>${V.layout === 'board' ? boardChips() : ''}<span class="grow"></span><span class="wk-sync">${syncText}</span><button class="link-btn" data-pj="sync"${sync.state === 'running' ? ' disabled' : ''}>Sync now</button></div>`
   const { pass, board } = workFilter(V, w.me || {})
   if (!all.length) {
     return `${head}<div class="wk-empty"><b>No work yet</b><p>${w.pending ? `Sync reads this thread's calls — ${w.pending} so far — into stories, tasks, decisions, risks and questions, each with the words it came from.` : 'Once this thread has calls, Sync reads them into stories, tasks, decisions, risks and questions.'} It uses the thread's AI profile.</p><button class="btn primary" data-pj="sync">Sync now</button></div>`
@@ -396,7 +396,7 @@ function workPanel() {
     const srcs = !item ? '' : item.kind === 'mail'
       ? (/^https:\/\//i.test(item.url || '') ? `<a class="wp-src" href="${esc(item.url)}" data-ext title="${esc(item.title || 'The mail')} — open in Outlook">✉ ${esc(relDay(item.date))}</a>` : `<span class="wp-src" title="${esc(item.title || '')}">✉ ${esc(relDay(item.date))}</span>`)
       : `<button class="wp-src" data-call="${esc(item.call || '')}" title="${esc(item.title || '')}">▮ ${esc(h.ts ? String(h.ts).replace(/^00:/, '').slice(0, 5) : relDay(item.date))}</button>`
-    return `<div class="wp-ev"><div class="wp-ev-top"><span class="set-sub">${esc(relDay(h.date))}</span><b>${esc(what)}</b>${h.speaker ? `<span class="set-sub">${esc(h.speaker)}</span>` : ''}<span class="grow"></span>${mark}</div>${h.quote ? `<div class="wp-q">“${esc(h.quote)}” ${srcs}</div>` : ''}</div>`
+    return `<div class="wp-ev" role="listitem"><div class="wp-ev-top"><span class="set-sub">${esc(relDay(h.date))}</span><b>${esc(what)}</b>${h.speaker ? `<span class="set-sub">${esc(h.speaker)}</span>` : ''}<span class="grow"></span>${mark}</div>${h.quote ? `<div class="wp-q">“${esc(h.quote)}” ${srcs}</div>` : ''}</div>`
   }).join('')
   return `<div class="wp">
     <div class="wp-top"><span class="wk-id">${esc(n.id)}</span><span class="wk-k ${esc(n.kind === 'task' ? n.type : n.kind)}">${esc(kind)}</span><span class="grow"></span>${['task', 'story', 'question'].includes(n.kind) ? `<button class="btn ghost" data-claude-task="${esc(n.id)}" data-project="${esc(S.pj.sel)}" data-title="${esc(n.title)}"${modeData({ mode: n.who_does })} title="Send to Claude — work on it in the Claude panel, with a skill" aria-label="Send to Claude">Send to <span class="md-ico claude">${ICON(CLAUDE_MARK)}</span></button>` : ''}<button class="btn" data-pj="edit-title">Edit</button></div>
@@ -408,7 +408,7 @@ function workPanel() {
     ${['task', 'story', 'question'].includes(n.kind) ? xLinkBlock(n) : ''}
     ${(() => { const b = slotItems('task.actions', { kind: n.kind, node: n, project: S.pj.sel }); return b ? `<div class="acts plug-acts">${b}</div>` : '' })()}
     ${mentionsBlock(n)}
-    <div class="wp-h">History</div>${hist}
+    <div class="wp-h">History</div><div class="wp-hist" role="list" aria-label="History">${hist}</div>
   </div>`
 }
 /** An item of another thread, as a link that opens it there (#20). */
@@ -421,7 +421,7 @@ const xUnlink = (n, thread, node) => `<button class="link-btn" data-pj="xunlink"
 function xLinkBlock(n) {
   const x = S.pj.xlink
   if (!x || x.node !== n.id) return `<button class="link-btn wp-xopen" data-pj="xlink-open" data-node="${esc(n.id)}">Link to an item in another thread…</button>`
-  const rows = (x.results || []).map((r) => `<div class="wp-xr"><div class="wp-xt"><b>${esc(r.thread_name)} · ${esc(r.id)}</b> ${esc(r.title)}${r.owner ? ` <span class="set-sub">· ${esc(r.owner)}</span>` : ''}</div>
+  const rows = (x.results || []).map((r) => `<div class="wp-xr" role="group" aria-label="${esc(r.thread_name)} · ${esc(r.id)} ${esc(r.title)}"><div class="wp-xt"><b>${esc(r.thread_name)} · ${esc(r.id)}</b> ${esc(r.title)}${r.owner ? ` <span class="set-sub">· ${esc(r.owner)}</span>` : ''}</div>
       <div class="wp-xa"><button class="btn" data-pj="xlink" data-thread="${esc(r.thread)}" data-target="${esc(r.id)}" data-kind="same" data-master="there" title="One piece of work; ${esc(r.thread_name)} does it — this one shows its status">Same work · done there</button><button class="btn" data-pj="xlink" data-thread="${esc(r.thread)}" data-target="${esc(r.id)}" data-kind="same" data-master="here" title="One piece of work; this thread does it">Done here</button><button class="btn" data-pj="xlink" data-thread="${esc(r.thread)}" data-target="${esc(r.id)}" data-kind="depends_on" title="This one waits until that one is done">Waits on it</button></div></div>`).join('')
   return `<div class="wp-xlink"><div class="wp-h">Link to an item in another thread</div>
     <input class="wp-in" id="wp-xq" value="${esc(x.q || '')}" placeholder="Words from its title, or its id" aria-label="Find an item in another thread" autofocus>

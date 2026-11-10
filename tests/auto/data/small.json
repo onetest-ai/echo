@@ -59,6 +59,228 @@
       "Dana Lee",
       "Omar Haddad"
     ],
-    "otherName": "Sam Rivera"
-  }
+    "otherName": "Sam Rivera",
+    "owner": "Dana Lee",
+    "initials": "DL",
+    "due": "2026-12-18",
+    "dueShown": "Fri, Dec 18",
+    "chip": "Dec 18",
+    "before": {
+      "owner": "Omar Haddad",
+      "handedOver": "not known · Set",
+      "due": "no date · Set"
+    },
+    "remove": "--remove"
+  },
+  "threads": [
+    "Acme rollout",
+    "Globex pilot"
+  ],
+  "kickoff": "Globex pilot kickoff",
+  "myTask": "Send Acme the SSO checklist",
+  "palette": {
+    "thread": "Globex pilot",
+    "typed": "globex pilot"
+  },
+  "sizes": {
+    "start": {
+      "width": 1201,
+      "height": 868
+    },
+    "topBar": [
+      {
+        "width": 1201,
+        "height": 868
+      },
+      {
+        "width": 900,
+        "height": 700
+      },
+      {
+        "width": 760,
+        "height": 480
+      }
+    ],
+    "narrow": {
+      "width": 800,
+      "height": 700
+    }
+  },
+  "board": {
+    "thread": "acme-rollout",
+    "threadName": "Acme rollout",
+    "story": {
+      "id": "S001",
+      "title": "SSO for the Berlin pilot",
+      "criterion": "SAML works for Berlin users"
+    },
+    "t1": {
+      "id": "T001",
+      "title": "Send Acme the SSO checklist",
+      "owner": "Sam Rivera",
+      "initials": "SR"
+    },
+    "t2": {
+      "id": "T002",
+      "title": "Answer the security questionnaire",
+      "owner": "Omar Haddad",
+      "initials": "OH",
+      "pastDue": "2026-01-05",
+      "pastDueShown": "Jan 5"
+    },
+    "columns": [
+      [
+        "To do",
+        2
+      ],
+      [
+        "In progress",
+        0
+      ],
+      [
+        "Waiting",
+        0
+      ],
+      [
+        "Blocked",
+        0
+      ],
+      [
+        "Done",
+        0
+      ]
+    ],
+    "fields": [
+      [
+        "Story",
+        true
+      ],
+      [
+        "Kind",
+        true
+      ],
+      [
+        "Owner",
+        true
+      ],
+      [
+        "Due date",
+        true
+      ],
+      [
+        "Waiting on",
+        true
+      ],
+      [
+        "Holds up",
+        true
+      ],
+      [
+        "Last call",
+        false
+      ]
+    ],
+    "newView": "Mine",
+    "description": "Checklist covers SAML and SCIM.",
+    "titleV2": "Send Acme the SSO checklist (v2)",
+    "path": "Acme rollout › SSO for the Berlin pilot",
+    "kinds": [
+      "All kinds · 4",
+      "Stories · 1",
+      "Tasks · 2",
+      "Decisions · 1",
+      "Risks · 0",
+      "Questions · 0"
+    ],
+    "owners": [
+      "Anyone",
+      "Nobody named",
+      "Me (Sam Rivera)",
+      "Omar Haddad"
+    ],
+    "decision": "Pilot starts in Berlin",
+    "risk": "SSO vendor delay",
+    "question": "Who signs off the pilot?",
+    "likelihood": "high",
+    "impact": "medium",
+    "link": "echo://task/acme-rollout/T002",
+    "counts": {
+      "both": "2",
+      "one": "1",
+      "none": "0"
+    },
+    "states": {
+      "open": "open",
+      "inProgress": "in_progress"
+    },
+    "modes": {
+      "byHand": "manual",
+      "cleared": {
+        "by": "you",
+        "mode": null
+      }
+    }
+  },
+  "globex": {
+    "thread": "globex-pilot",
+    "t1": {
+      "id": "T001",
+      "title": "Draft the Globex pilot plan"
+    },
+    "column": {
+      "name": "Review",
+      "limit": "1",
+      "state": "to do",
+      "shown": "0 / 1"
+    },
+    "search": "SSO",
+    "results": [
+      "Acme rollout · S001 SSO for the Berlin pilot",
+      "Acme rollout · T001 Send Acme the SSO checklist"
+    ],
+    "resultOwner": "Sam Rivera",
+    "linked": "Acme rollout · T001 Send Acme the SSO checklist",
+    "linkedHistory": "you linked it to Acme rollout · T001 (the same work, done there)",
+    "unlinkedHistory": "you unlinked Acme rollout · T001",
+    "proposal": [
+      {
+        "op": "create",
+        "kind": "task",
+        "parent": "S001",
+        "type": "action",
+        "title": "Share the Globex pilot plan next week",
+        "internal_owner": "Sam Rivera",
+        "quote": "I'll draft the pilot plan and share it next week."
+      }
+    ],
+    "path": "Globex pilot › Pilot plan",
+    "source": "▮ 00:13"
+  },
+  "review": {
+    "merge": [
+      {
+        "op": "create",
+        "kind": "task",
+        "parent": "S001",
+        "type": "action",
+        "title": "Send Acme the SSO checklist today",
+        "internal_owner": "Sam Rivera",
+        "quote": "I'll send the SSO checklist this afternoon."
+      }
+    ],
+    "mergeBanner": "Same work as Send Acme the SSO checklist? Send Acme the SSO checklist today — Same as T001 “Send Acme the SSO checklist”? Their titles share most words (Echo's check, no model).",
+    "reject": [
+      {
+        "op": "create",
+        "kind": "task",
+        "parent": "S001",
+        "type": "action",
+        "title": "Answer the security questionnaire by Friday",
+        "internal_owner": "Omar Haddad",
+        "quote": "Omar will answer the security questionnaire by Friday."
+      }
+    ],
+    "rejectBanner": "Same work as Answer the security questionnaire?"
+  },
+  "account": "Claude Code (as configured)"
 }

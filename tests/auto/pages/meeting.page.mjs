@@ -10,6 +10,9 @@ export class MeetingPage extends AppPage {
     this.more = this.invited.getByRole('button', { name: /^\+\d+ more$/ })
     this.moreList = this.invited.getByRole('list', { name: /^\d+ more$/ })
     this.prepFooter = page.getByText(/^Written /)
+    this.prepTab = page.getByRole('tab', { name: 'Prep', exact: true })
+    this.prep = page.getByRole('article')
+    this.writeAgain = page.getByRole('button', { name: 'Write it again' })
   }
 
   /** The meeting by its prep id (`manifest.json` → preps). */
@@ -52,6 +55,16 @@ export class MeetingPage extends AppPage {
     const names = []
     for (const item of await this.moreList.getByRole('listitem').all()) names.push(await item.getAttribute('aria-label'))
     return names
+  }
+
+  /** An item the prep lists (Expected from you, Open with these people), by its title. */
+  prepItem(title) {
+    return this.prep.getByRole('link', { name: title, exact: true })
+  }
+
+  /** An item's line in the prep (its link and what follows it, such as its date). */
+  prepRow(title) {
+    return this.prep.getByRole('listitem').filter({ has: this.page.getByRole('link', { name: title, exact: true }) })
   }
 
   section(name) {

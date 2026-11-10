@@ -8,6 +8,7 @@ module: work
 run: agent
 platform: any
 tags: [work, history]
+auto: [tests/auto/specs/S-06.spec.mjs]
 ---
 
 # TC-015: History of a synced item shows the quote, the mark, and the call's moment opens the call

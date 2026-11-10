@@ -8,6 +8,7 @@ module: shell
 run: agent
 platform: any
 tags: [shell, activity-bar]
+auto: [tests/auto/specs/S-13.spec.mjs]
 ---
 
 # TC-002: Expand the sidebar shows the names and the choice is remembered

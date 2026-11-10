@@ -5,7 +5,7 @@
   "steps": [
    {"tool": "Bash", "input": {"command": "{cli} read echo://task/globex-pilot/T005", "description": "Read the task"}},
    {"tool": "Bash", "input": {"command": "{cli} project ledger globex-pilot edit '{\"op\":\"edit\",\"node\":\"T005\",\"set\":{\"state\":\"in_progress\"}}'", "description": "Start the task"}},
-   {"tool": "Bash", "input": {"command": "{cli} project ledger globex-pilot tree", "description": "Read the thread's work"}},
+   {"tool": "Bash", "input": {"command": "{cli} project ledger acme-rollout tree", "description": "Read another thread's work"}},
    {"tool": "Bash", "input": {"command": "{cli} project ledger globex-pilot edit '{\"op\":\"edit\",\"node\":\"T005\",\"set\":{\"description\":\"Two holds proposed to Kim Park.\"}}'", "description": "Describe the task"}},
    {"tool": "Bash", "input": {"command": "printf '%s\\n' 'Hi Kim,' '' 'Could you confirm two training slots for the Globex pilot next week?' '' 'Sam' > training-slots-mail.md", "description": "Write the mail"}},
    {"tool": "Bash", "input": {"command": "{cli} m365 mail send --to kim@globex.example --subject 'Globex pilot training slots' --file training-slots-mail.md --yes", "description": "Send the mail"}},

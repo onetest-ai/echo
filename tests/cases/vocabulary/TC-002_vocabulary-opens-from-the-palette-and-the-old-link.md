@@ -8,6 +8,7 @@ module: vocabulary
 run: agent
 platform: any
 tags: [vocabulary, panel]
+auto: [tests/auto/specs/S-13.spec.mjs]
 ---
 
 # TC-002: The Vocabulary panel opens from the actions palette and from #settings/vocabulary

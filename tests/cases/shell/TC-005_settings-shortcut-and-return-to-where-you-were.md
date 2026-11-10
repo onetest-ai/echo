@@ -8,6 +8,7 @@ module: shell
 run: agent
 platform: any
 tags: [shell, keyboard]
+auto: [tests/auto/specs/S-13.spec.mjs]
 ---
 
 # TC-005: ⌘, opens Settings and an activity reopens where it was left

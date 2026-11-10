@@ -8,6 +8,7 @@ module: shell
 run: agent
 platform: any
 tags: [shell, palette, status-bar]
+auto: [tests/auto/specs/S-13.spec.mjs]
 ---
 
 # TC-009: The status bar's Actions button opens the palette and Escape closes it

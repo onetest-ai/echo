@@ -8,6 +8,7 @@ module: settings
 run: agent
 platform: any
 tags: [settings, layout]
+auto: [tests/auto/specs/S-13.spec.mjs]
 ---
 
 # TC-024: Layout: Reset puts every view back where it began

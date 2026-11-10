@@ -8,6 +8,7 @@ module: settings
 run: agent
 platform: any
 tags: [settings, layout]
+auto: [tests/auto/specs/S-13.spec.mjs]
 ---
 
 # TC-023: Layout: a panel view is moved to Bottom and the choice is saved

@@ -8,6 +8,7 @@ module: work
 run: agent
 platform: any
 tags: [work, board, state]
+auto: [tests/auto/specs/S-06.spec.mjs]
 ---
 
 # TC-005: Dragging a card to another column sets its state as the user's edit, undoable; Waiting takes no drop

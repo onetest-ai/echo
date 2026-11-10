@@ -1,6 +1,7 @@
 // A spec file's made-up data (tests/fixtures/serve.sh): built before its first test, stopped after its last; the CLI
 // on it and, with `--ai virtual`, the virtual model's script and log.
 import { execFileSync, spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import net from 'node:net'
 import os from 'node:os'
@@ -59,6 +60,26 @@ export function useData(test, { set = 'small', ai, args = [] } = {}) {
     if (!fs.existsSync(dir)) return []
     return fs.readdirSync(dir).sort().map((r) => path.join(dir, r, 'prompt.md')).filter((f) => fs.existsSync(f)).map((f) => fs.readFileSync(f, 'utf8'))
   }
+  /** Every file of the data folder (its servers' logs left out) with its content's hash: two of them, before and after
+   *  a step, show what it changed (`changed(before, after)`). */
+  data.files = () => {
+    const out = {}
+    const walk = (d) => {
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        const p = path.join(d, e.name)
+        if (e.isDirectory()) walk(p)
+        else if (e.isFile() && !['serve.log', 'server.log'].includes(e.name)) out[path.relative(data.dir, p)] = createHash('sha1').update(fs.readFileSync(p)).digest('hex')
+      }
+    }
+    walk(data.dir)
+    return out
+  }
+  /** `echoctl project ledger <thread> …`, its output read as JSON. */
+  data.ledger = (thread, ...args) => {
+    const r = data.cli('project', 'ledger', thread, ...args)
+    if (r.code !== 0) throw new Error(`project ledger ${thread} ${args.join(' ')}: ${r.err}`)
+    return r.json()
+  }
   /** The last event of a thread's work ledger. */
   data.lastEvent = (thread) => JSON.parse(data.read(data.home, 'projects', thread, 'ledger/events.jsonl').trim().split('\n').at(-1))
 
@@ -73,14 +94,24 @@ export function useData(test, { set = 'small', ai, args = [] } = {}) {
     requests: () => fs.readFileSync(path.join(data.dir, 'model/model-log.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)),
     /** The turns one rule of the script answered (a run's own, not Claude Code's side requests). */
     turns: (rule) => data.model.requests().filter((e) => e.rule === rule),
-    /** What the model was told back about each of its tool calls: true for a refusal, null for a success. */
-    toolResults: () => data.model.requests().flatMap((e) => {
+    /** What the model was told back about each of its tool calls: true for a refusal, null for a success (of one
+     *  rule's turns, or of every request). */
+    toolResults: (rule) => (rule === undefined ? data.model.requests() : data.model.turns(rule)).flatMap((e) => {
       const last = e.messages?.at(-1)?.content
       return Array.isArray(last) ? last.filter((b) => b.type === 'tool_result').map((b) => b.is_error ?? null) : []
     }),
   }
   return data
 }
+
+/** `git status --short` of this checkout: a run Echo started changes nothing in it. */
+export const gitStatus = () => execFileSync('git', ['status', '--short'], { cwd: ROOT, encoding: 'utf8' })
+
+/** The files added, changed or removed between two `data.files()`. */
+export const changed = (before, after) => [...new Set([...Object.keys(before), ...Object.keys(after)])].filter((f) => before[f] !== after[f]).sort()
+
+/** The app's wording with its blanks filled: `fill('Synced {time}', { time })`. */
+export const fill = (s, vars) => s.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? vars[k] : m))
 
 /** A string as a regular expression's literal part (a name with "(" or "." in it matches as written). */
 export const literal = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')

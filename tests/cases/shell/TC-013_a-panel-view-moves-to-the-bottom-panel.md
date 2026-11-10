@@ -8,6 +8,7 @@ module: shell
 run: agent
 platform: any
 tags: [shell, panels, layout]
+auto: [tests/auto/specs/S-13.spec.mjs]
 ---
 
 # TC-013: Move to the bottom panel puts the view in the bottom panel and Reset brings it back

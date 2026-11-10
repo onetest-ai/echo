@@ -10,6 +10,7 @@ platform: macos
 data: standard
 ai: virtual
 tags: [work, ledger, sync, virtual-model, claude-code, guard]
+auto: [tests/auto/specs/S-33.spec.mjs]
 ---
 
 # TC-028: Sync now on a thread of the virtual model reads its new call into the work, verifies it, and keeps the fields the user set
