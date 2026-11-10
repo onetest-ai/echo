@@ -1565,6 +1565,20 @@ mod tests {
     }
 
     #[test]
+    fn a_local_profiles_one_shot_jobs_run_on_the_model_they_record() {
+        // #294: a prep records text_model; that is the one asked — on a local profile its live model, already loaded.
+        let p = Profile { live_model: Some("small".into()), notes_model: Some("big".into()), ..local("") };
+        let ok = http("200 OK", "", r#"{"content":[{"type":"text","text":"ok"}]}"#);
+        let (url, seen) = serve_seen(ok.clone());
+        complete_text(&Profile { base_url: Some(url), ..p.clone() }, "sys", "hi", 10).unwrap();
+        assert_eq!(text_model(&p), "small");
+        assert!(seen.recv_timeout(Duration::from_secs(5)).unwrap().contains(r#""model":"small""#));
+        let (url, seen) = serve_seen(ok);
+        complete(&Profile { base_url: Some(url), ..p }, "sys", "hi", 10, true, &|| false).unwrap();
+        assert!(seen.recv_timeout(Duration::from_secs(5)).unwrap().contains(r#""model":"small""#));
+    }
+
+    #[test]
     fn a_local_model_answers_through_curl() {
         let url = serve(Some(http("200 OK", "", r#"{"content":[{"type":"thinking","thinking":"x"},{"type":"text","text":"hello"}]}"#)));
         assert_eq!(complete_local(&local(&url), "sys", "hi", 10, true, &|| false).unwrap(), "hello");

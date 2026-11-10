@@ -260,8 +260,16 @@ function closeOverlay() {
 
 function layoutChanged() {
   clearTimeout(layoutTimer)
-  layoutTimer = setTimeout(() => send({ cmd: 'save_layout', layout: Layout.toJSON() }), 500)
+  layoutTimer = setTimeout(() => { layoutTimer = null; send({ cmd: 'save_layout', layout: Layout.toJSON() }) }, 500)
   render()
+}
+
+/** A layout change still waiting for its save, saved now: before the window closes, Echo quits or updates (#300). */
+function flushLayout() {
+  if (!layoutTimer) return
+  clearTimeout(layoutTimer)
+  layoutTimer = null
+  send({ cmd: 'save_layout', layout: Layout.toJSON() })
 }
 
 function titleOf(dir) {

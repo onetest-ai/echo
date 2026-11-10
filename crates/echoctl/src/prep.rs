@@ -511,7 +511,7 @@ pub fn write(m: &MeetingContext) -> Result<Value> {
         // Who reads it: their own name in the facts is "you".
         let me = crate::config::Config::load().ok().and_then(|c| c.me).map(|m| format!("The reader is {}.\n\n", m.name)).unwrap_or_default();
         let facts = format!("{me}Meeting: {} at {}\n\n{}", p["subject"].as_str().unwrap_or(""), p["start"].as_str().unwrap_or(""), as_text(&p));
-        match crate::ai::ready(&profile).and_then(|r| crate::livenotes::complete_text(r.profile(), SYSTEM, &facts, 900).map(|t| (t, r.profile().notes_model()))) {
+        match crate::ai::ready(&profile).and_then(|r| crate::livenotes::complete_text(r.profile(), SYSTEM, &facts, 900).map(|t| (t, Some(crate::livenotes::text_model(r.profile()))))) {
             Ok((text, model)) => match parse_answer(&text) {
                 Some((rel, short)) => {
                     keep(&mut p, Some(&rel));
